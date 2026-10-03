@@ -21,6 +21,7 @@ import { fetchUpstreamImage, snapshotCacheGet, snapshotCacheSet, snapshotTtlSec,
 import { makeProviderFetch, scrubProviderError } from '../world-providers/provider-fetch.js'
 import { markFailure, markSuccess, readProviderHealth, runDueProviders, startRun } from '../world-providers/provider-runtime.js'
 import { boxesOverlap, memoryHealth, memoryInventory } from './camera-memory-store.js'
+import { takePassthroughSlot } from './camera-snapshot-limits.js'
 
 const MIN = 60_000
 // Individual points only for a metro-sized box; anything larger is coverage cells.
@@ -168,7 +169,7 @@ const cameraView = (d, p, r) => ({
   status: r.status,
   feed: r.feed_type,
   video: false,
-  media: p.image_policy === 'link_only' ? 'link' : 'still',
+  media: p.image_policy === 'link_only' || r.feed_type === 'PROVIDER_PAGE_ONLY' ? 'link' : 'still',
   freshness: cameraFreshness({ capturedAt: r.provider_updated_at, cadenceSec: r.snapshot_cadence_sec ?? p.snapshot_cadence_sec, status: r.status, now: d.now, staleAfterSec: p.stale_after_sec }).state,
   corridor: r.corridor_key,
   provider: p.name,
@@ -208,7 +209,9 @@ async function cameraRow(d, provider, cameraId, cols) {
 /* ── one camera ───────────────────────────────────────────────────────────── */
 
 // Adapters that build the still URL at fetch time (e.g. keyed) need no stored still_url.
-const hasSnapshotBuilder = (d, provider) => Boolean(d.adapters[provider.adapter_type]?.snapshotRequest)
+const hasSnapshotBuilder = (d, provider) => Boolean(d.adapters[provider.adapter_type]?.snapshotRequest || d.adapters[provider.adapter_type]?.snapshotFetch)
+/** Internal-use pass-through providers (TxDOT): fetched per open, never cached. */
+const isPassthrough = (d, provider) => Boolean(provider.adapter_config?.no_cache && d.adapters[provider.adapter_type]?.snapshotFetch)
 
 const DETAIL_COLS = 'camera_id, provider_id, external_camera_id, name, state, county, city, road, route, direction, mile_marker, latitude, longitude, status, feed_type, still_url, stream_url, provider_page_url, snapshot_cadence_sec, provider_updated_at, timezone, corridor_key, corridor_rank, duplicate_of, retired_at, leadcommand_refreshed_at'
 
@@ -240,8 +243,8 @@ export async function getCameraDetail(cameraId, deps = {}) {
   const freshness = cameraFreshness({ capturedAt: cam.provider_updated_at, cadenceSec: cadence, status: cam.status, now: d.now, staleAfterSec: provider.stale_after_sec })
   const video = (cam.feed_type === 'HLS' || cam.feed_type === 'VIDEO_STREAM') && cam.stream_url && validateUpstreamUrl(cam.stream_url, provider).ok
   const media = {
-    still: provider.image_policy === 'proxy' && (cam.still_url || hasSnapshotBuilder(d, provider))
-      ? { kind: 'proxy', path: `/api/cockpit/map/cameras/${encodeURIComponent(cam.camera_id)}/snapshot`, refresh_sec: cadence }
+    still: provider.image_policy === 'proxy' && (cam.still_url || hasSnapshotBuilder(d, provider)) && cam.feed_type !== 'PROVIDER_PAGE_ONLY'
+      ? { kind: 'proxy', path: `/api/cockpit/map/cameras/${encodeURIComponent(cam.camera_id)}/snapshot`, refresh_sec: cadence, ...(isPassthrough(d, provider) ? { passthrough: true } : {}) }
       : provider.image_policy === 'direct' && cam.still_url && validateUpstreamUrl(cam.still_url, provider).ok
         ? { kind: 'direct', url: cam.still_url, refresh_sec: cadence }
         : null,
@@ -271,7 +274,7 @@ export async function getCameraDetail(cameraId, deps = {}) {
       freshness,
     },
     media,
-    provider: { id: provider.provider_id, name: provider.name, attribution: provider.attribution, terms_url: provider.terms_url || null, image_policy: provider.image_policy },
+    provider: { id: provider.provider_id, name: provider.name, attribution: provider.attribution, terms_url: provider.terms_url || null, image_policy: provider.image_policy, internal_use: Boolean(provider.adapter_config?.internal_use) },
     corridor: await corridorOf(d.db, cam, d.store === 'memory' ? ((await inventoryOf(d, provider))?.byCorridor.get(cam.corridor_key) || []) : null),
   }
 }
@@ -485,6 +488,7 @@ export async function fetchCameraSnapshot(cameraId, deps = {}) {
   const provider = providerId ? providersOf(d).find((p) => p.provider_id === providerId) : null
   if (!provider || !provider.enabled) return { ok: false, status: 404, reason: 'camera_not_found' }
   if (provider.image_policy !== 'proxy') return { ok: false, status: 403, reason: 'snapshot_not_proxied_for_provider' }
+  if (isPassthrough(d, provider)) return passthroughSnapshot(d, provider, cameraId, deps.operatorKey)
   const cached = snapshotCacheGet(cameraId, d.now)
   if (cached) return { ok: true, ...cached, from_cache: true, attribution: provider.attribution }
   const { data: cam, error } = await cameraRow(d, provider, cameraId, 'camera_id, external_camera_id, still_url, status, snapshot_cadence_sec, provider_updated_at, retired_at, metadata')
@@ -505,4 +509,35 @@ export async function fetchCameraSnapshot(cameraId, deps = {}) {
     fetched_at: new Date(d.now).toISOString(),
   }, snapshotTtlSec(cadence), d.now)
   return { ok: true, ...entry, from_cache: false, attribution: provider.attribution, ttl_sec: snapshotTtlSec(cadence) }
+}
+
+/**
+ * INTERNAL-USE pass-through (TxDOT): the one still an operator opened, fetched
+ * now, decoded, handed to the route to stream — and forgotten. No cache of any
+ * kind, a short upstream timeout and size cap, JPEG-only, rate-limited per
+ * operator plus a global cap. The route answers Cache-Control: no-store.
+ */
+async function passthroughSnapshot(d, provider, cameraId, operatorKey) {
+  const slot = takePassthroughSlot(operatorKey || 'anonymous', d.now)
+  if (!slot.ok) return { ok: false, status: 429, reason: `rate_limited_${slot.scope}`, retry_after_sec: slot.retry_after_sec, no_store: true }
+  const { data: cam, error } = await cameraRow(d, provider, cameraId, 'camera_id, external_camera_id, still_url, status, feed_type, snapshot_cadence_sec, provider_updated_at, retired_at, metadata')
+  if (error) return { ok: false, status: 502, reason: 'camera_unavailable', no_store: true }
+  if (!cam || cam.retired_at) return { ok: false, status: 404, reason: 'camera_not_found', no_store: true }
+  if (cam.feed_type === 'PROVIDER_PAGE_ONLY') return { ok: false, status: 404, reason: 'no_still_for_camera', no_store: true }
+  const adapter = d.adapters[provider.adapter_type]
+  const fetch = makeProviderFetch({ ...provider, metadata_hosts: provider.image_hosts }, { fetchImpl: d.fetchImpl, timeoutMs: 8000, maxBytes: 3 * 1024 * 1024 })
+  let got
+  try { got = await adapter.snapshotFetch(cam, { provider, fetch }) } catch { got = { ok: false, status: 502, reason: 'upstream_unreachable' } }
+  if (!got?.ok) return { ok: false, status: got?.status || 502, reason: got?.reason || 'upstream_failed', no_store: true }
+  return {
+    ok: true,
+    bytes: got.bytes,
+    content_type: got.content_type,
+    captured_at: got.captured_at || null,
+    captured_basis: got.captured_at ? 'provider_timestamp' : 'unknown',
+    fetched_at: new Date(d.now).toISOString(),
+    from_cache: false,
+    no_store: true,
+    attribution: provider.attribution,
+  }
 }

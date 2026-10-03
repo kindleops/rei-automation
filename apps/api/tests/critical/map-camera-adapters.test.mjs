@@ -40,9 +40,12 @@ test('registry: MN + TX entries are valid, have adapters, and no secret or host 
     const pub = JSON.stringify(rest)
     for (const h of [...p.image_hosts, ...p.metadata_hosts]) assert.ok(!pub.includes(h), `${id} leaks ${h}`)
   }
-  // TxDOT imagery is not cleared for reuse: link-only, no image host at all.
-  assert.equal(prov('tx_txdot_its').image_policy, 'link_only')
-  assert.deepEqual(prov('tx_txdot_its').image_hosts, [])
+  // TxDOT imagery: internal-use pass-through only (no cache), labelled as such.
+  assert.equal(prov('tx_txdot_its').image_policy, 'proxy')
+  assert.equal(prov('tx_txdot_its').adapter_config.no_cache, true)
+  assert.equal(prov('tx_txdot_its').adapter_config.internal_use, true)
+  assert.match(prov('tx_txdot_its').attribution, /internal use, pending TxDOT data-sharing agreement/)
+  assert.deepEqual(prov('tx_txdot_its').adapter_config.districts, ['DAL', 'FTW', 'HOU', 'SAT', 'AUS'])
 })
 
 test('MnDOT: only publish:true cameras with coordinates; roads, directions and mile posts as MnDOT writes them', () => {
@@ -63,7 +66,7 @@ test('MnDOT: only publish:true cameras with coordinates; roads, directions and m
   assert.equal(mndotDirection(''), null)
 })
 
-test('TxDOT ITS: district lists flatten, composite ids, status as TxDOT reports it, link-out page — no image URL', () => {
+test('TxDOT ITS: district lists flatten, composite ids, status as TxDOT reports it, TxDOT page link — no image URL', () => {
   const rows = flattenTxdotDistrict(TX_DAL, 'DAL')
   assert.equal(rows.length, 6)
   const cams = normalizeAll('tx_txdot_its', rows)
@@ -73,8 +76,9 @@ test('TxDOT ITS: district lists flatten, composite ids, status as TxDOT reports 
   assert.equal(c.road, 'I-20')
   assert.equal(c.direction, 'E')
   assert.equal(c.status, 'LIVE')
-  assert.equal(c.feed_type, 'PROVIDER_PAGE_ONLY')
-  assert.equal(c.still_url, null)
+  assert.equal(c.feed_type, 'REFRESHING_STILL')
+  assert.equal(c.still_url, null, 'TxDOT publishes no image URL')
+  assert.equal(c.metadata.icd_id, 'IH20 @ Dallas-Tarrant CL')
   assert.equal(c.provider_page_url, 'https://its.txdot.gov/its/District/DAL/cameras')
   assert.equal(txdotStatus('Device Offline'), 'OFFLINE')
   assert.equal(txdotStatus('something else'), 'UNKNOWN')
@@ -128,19 +132,19 @@ test('memory view: a Twin Cities viewport pulls MnDOT only, draws points, and sa
   assert.equal(calls.length, n)
 })
 
-test('memory view: Dallas shows TxDOT positions as link-only; a viewport nobody covers says so', async () => {
+test('memory view: Dallas shows TxDOT cameras; a viewport nobody covers says so', async () => {
   const { deps } = harness()
   const v = await getCamerasInView({ bbox: DFW, zoom: 11 }, deps)
   assert.ok(v.cameras.length > 0)
-  assert.ok(v.cameras.every((c) => c.media === 'link'))
-  assert.ok(v.coverage.some((c) => c.provider === 'TxDOT ITS' && c.image_policy === 'link_only'))
+  assert.ok(v.cameras.every((c) => c.media === 'still'))
+  assert.ok(v.coverage.some((c) => c.provider === 'TxDOT ITS'))
   const none = await getCamerasInView({ bbox: '-84.6,33.5,-84.1,34.0', zoom: 11 }, deps) // Atlanta
   assert.equal(none.cameras.length, 0)
   assert.deepEqual(none.coverage, [])
   assert.equal(none.note, 'no_provider_in_view')
 })
 
-test('memory detail + snapshot: MnDOT still is proxied by canonical id; TxDOT detail has no media but its own page', async () => {
+test('memory detail + snapshot: MnDOT still is proxied by canonical id; TxDOT detail is an internal-use pass-through with its own page', async () => {
   const { deps } = harness()
   const d = await getCameraDetail('mn_mndot_iris:C001', deps)
   assert.equal(d.ok, true)
@@ -155,11 +159,10 @@ test('memory detail + snapshot: MnDOT still is proxied by canonical id; TxDOT de
   const tx = (await getCamerasInView({ bbox: DFW, zoom: 11 }, deps)).cameras[0]
   const td = await getCameraDetail(tx.id, deps)
   assert.equal(td.ok, true)
-  assert.equal(td.media.still, null)
+  assert.equal(td.media.still.kind, 'proxy')
+  assert.equal(td.media.still.passthrough, true)
+  assert.equal(td.provider.internal_use, true)
   assert.match(td.media.provider_page_url, /^https:\/\/its\.txdot\.gov\/its\/District\/DAL\/cameras$/)
-  const ts = await fetchCameraSnapshot(tx.id, deps)
-  assert.equal(ts.ok, false)
-  assert.equal(ts.status, 403)
 })
 
 test('memory: a failed pull keeps nothing invented — the viewport reports the provider unavailable', async () => {

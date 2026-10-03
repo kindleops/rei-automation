@@ -144,7 +144,7 @@ function useCameraDetail(id: string) {
 
 /** One still per open and per Refresh press — never a timer. */
 function useCameraStill(path: string | null, nonce: number) {
-  const [still, setStill] = useState<{ key: string; url: string | null; capturedAt: string | null; failed: boolean }>({ key: '', url: null, capturedAt: null, failed: false })
+  const [still, setStill] = useState<{ key: string; url: string | null; capturedAt: string | null; failed: boolean; limited?: boolean }>({ key: '', url: null, capturedAt: null, failed: false })
   const key = `${path}|${nonce}`
   useEffect(() => {
     if (!path) return undefined
@@ -152,7 +152,9 @@ function useCameraStill(path: string | null, nonce: number) {
     let objectUrl: string | null = null
     void (async () => {
       try {
-        const res = await fetch(`${getBackendBaseUrl()}${path}`, { headers: await getBackendAuthHeaders(), signal: ctl.signal, credentials: 'include' })
+        // cache: 'no-store' — internal-use pass-through stills (TxDOT) must not sit in the browser cache either.
+        const res = await fetch(`${getBackendBaseUrl()}${path}`, { headers: await getBackendAuthHeaders(), signal: ctl.signal, credentials: 'include', cache: 'no-store' })
+        if (res.status === 429) { if (!ctl.signal.aborted) setStill({ key, url: null, capturedAt: null, failed: true, limited: true }); return }
         if (!res.ok || !/^image\//.test(res.headers.get('content-type') || '')) throw new Error('no_still')
         objectUrl = URL.createObjectURL(await res.blob())
         if (!ctl.signal.aborted) setStill({ key, url: objectUrl, capturedAt: res.headers.get('x-camera-captured-at') || null, failed: false })
@@ -187,12 +189,13 @@ function CameraPreview({ id, name, onClose }: { id: string; name: string | null;
       </header>
       <div className={cls('mxd-ctx-still', media?.kind === 'link' && 'is-link')}>
         {still.url ? <img src={still.url} alt={`Latest still from ${cam?.name ?? 'the camera'}`} /> : null}
-        {!still.url && media?.kind === 'still' ? <span className="mxd-ctx-still__state">{still.failed ? 'The agency did not return a picture just now' : 'Reading the latest still…'}</span> : null}
+        {!still.url && media?.kind === 'still' ? <span className="mxd-ctx-still__state">{still.limited ? 'Too many stills opened in the last minute — try Refresh shortly' : still.failed ? 'The agency did not return a picture just now — location, direction and the agency’s page are below' : 'Reading the latest still…'}</span> : null}
         {media?.kind === 'link' ? <span className="mxd-ctx-still__state">{media.label}</span> : null}
         {!detail && !failed ? <span className="mxd-ctx-still__state">Reading camera…</span> : null}
         {failed ? <span className="mxd-ctx-still__state">Camera details unavailable right now</span> : null}
         {media?.kind === 'still' ? <em className="mxd-ctx-still__tag">Still</em> : media?.kind === 'link' ? <em className="mxd-ctx-still__tag is-link">Location only</em> : null}
       </div>
+      {detail?.provider?.internal_use ? <p className="mxd-ctx-internal" data-camera-use="internal">{detail.provider.attribution}</p> : null}
       {cam ? (
         <dl className="mxd-ctx-facts">
           <div><dt>Direction</dt><dd>{directionLabel(cam.direction)}</dd></div>
@@ -202,7 +205,7 @@ function CameraPreview({ id, name, onClose }: { id: string; name: string | null;
         </dl>
       ) : null}
       <footer className="mxd-ctx-card__foot">
-        <span className="mxd-ctx-credit" title={detail?.provider?.attribution}>{detail?.provider?.attribution ?? ''}</span>
+        <span className="mxd-ctx-credit" title={detail?.provider?.attribution}>{detail?.provider?.internal_use ? `Source: ${detail.provider.name.replace(/ ITS$/, '')}` : detail?.provider?.attribution ?? ''}</span>
         <span className="mxd-ctx-card__actions">
           {media?.kind === 'still' ? <button type="button" className="mxd-btn is-sm" onClick={() => { setNonce((n) => n + 1); setNow(Date.now()) }}>Refresh</button> : null}
           {detail?.media?.provider_page_url ? <a className="mxd-btn is-sm" href={detail.media.provider_page_url} target="_blank" rel="noopener noreferrer">Open on {detail.provider?.name ?? 'agency'}</a> : null}

@@ -78,8 +78,8 @@ export interface CameraDetailReply {
     timezone: string | null; provider_updated_at: string | null; refreshed_at: string | null; cadence_sec: number | null
     freshness: { state: string; age_sec: number | null }
   }
-  media?: { still: { kind: 'proxy' | 'direct'; path?: string; url?: string; refresh_sec: number | null } | null; stream: unknown; provider_page_url: string | null }
-  provider?: { id: string; name: string; attribution: string; terms_url: string | null; image_policy?: string }
+  media?: { still: { kind: 'proxy' | 'direct'; path?: string; url?: string; refresh_sec: number | null; passthrough?: boolean } | null; stream: unknown; provider_page_url: string | null }
+  provider?: { id: string; name: string; attribution: string; terms_url: string | null; image_policy?: string; internal_use?: boolean }
   corridor?: { road: string; state: string; index: number; total: number } | null
 }
 
