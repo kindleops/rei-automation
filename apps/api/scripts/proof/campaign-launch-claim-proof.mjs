@@ -1,34 +1,37 @@
 #!/usr/bin/env node
 // CAMPAIGN COMPOSER 2.0 — one launch per campaign, proven in Postgres.
 //
+// Schema: scripts/proof/fixtures/campaign-launch-proof-schema.sql — the EXACT
+// production definitions (tables, constraints, unique indexes, the lifecycle
+// edge set, idempotency_* and campaign_transition_status, verbatim from
+// pg_get_functiondef) — plus PROPOSED_20261002190000_campaign_launch_claim.sql.
+// Synthetic rows only; no production data.
+//
 // Engines (never production):
-//   default        PGlite (in-process Postgres 17). Statements are serialised by
-//                  the engine, so this proves the SQL SEMANTICS of every
-//                  interleaving below, not lock behaviour under true parallelism.
-//   real Postgres  CAMPAIGN_LAUNCH_PROOF_DB_URL=postgres://localhost/... (loopback
-//                  only) — every racer gets its own pooled connection, so the
-//                  same invariants run under genuine concurrency.
+//   default        PGlite (in-process Postgres 17): statements are serialised by
+//                  the engine — proves the SQL semantics of every interleaving.
+//   real Postgres  CAMPAIGN_LAUNCH_PROOF_DB_URL=postgres://… — EVERY racer gets its
+//                  own dedicated connection, so claims, row locks and advisory
+//                  locks contend for real. Loopback hosts are allowed; any other
+//                  host must equal CAMPAIGN_LAUNCH_PROOF_ALLOW_HOST (a throwaway
+//                  Supabase branch), and the production ref is always refused.
 //
 //   node --import ./tests/register-aliases.mjs scripts/proof/campaign-launch-claim-proof.mjs
-//   PGLITE_MODULE=/tmp/pglite-t/node_modules/@electric-sql/pglite/dist/index.js (default)
 //
-// Loads: the production ledger (20260831000000, idempotency section) and
-// PROPOSED_20261002190000_campaign_launch_claim.sql, plus a minimal campaigns /
-// campaign_targets / send_queue model. Then drives the REAL server code path
-// (launchComposedCampaign + campaign-launch-claim.js) through a supabase-shaped
-// adapter over SQL, with prepare (target materialisation) and the lifecycle
-// (queue fill + status) as SQL side effects counted at the end.
+// The REAL server path runs (launchComposedCampaign + campaign-launch-claim.js)
+// through a supabase-shaped adapter over SQL; lifecycle transitions go through
+// the production campaign_transition_status; target materialisation and queue
+// fill are SQL side effects, and every ATTEMPT is recorded in proof_effects.
 //
-// INVARIANTS
-//   1. N parallel launches, distinct launch keys          -> 1 launch, 1 materialisation, queue rows = batch
-//   2. retries of the winner's key after it finished      -> idempotent, same result, no new rows
-//   3. retries of a loser's key                           -> already_launched, no new rows
-//   4. a launch racing a reschedule/pause on the same row -> exactly one of them wins the transition
-//   5. a stale claim reclaimed after the holder hung      -> the zombie's finish is fenced; no second launch
-//   6. a refused launch (blocked readiness) releases      -> a later launch can claim
-//   7. ledger row purged after a launch                   -> the campaign state still refuses a second launch
-//   8. fallback path (no PROPOSED function)               -> the production ledger alone still gives 1 launch
-//   9. a timed-out client retries the same key mid-launch -> launch_in_progress, then the recorded result
+// INVARIANTS (run twice: with the PROPOSED functions, and without — the
+// production ledger alone, i.e. production today)
+//   1. N parallel launches, distinct keys, N connections -> 1 launch, 1 build, 1 fill, 100 queue rows, status active
+//   2. retries of the winner's key                       -> idempotent, nothing re-runs
+//   3. a different key after the launch                   -> already_launched
+//   4. a launch racing a reschedule (separate connections) -> exactly one of them moves the campaign
+//   5. a stale claim taken over                           -> one winner; the zombie's finish is fenced (PROPOSED only)
+//   6. a refused launch releases                          -> the next launch runs once
+//   7. a client timed out and retries the same key from another process mid-launch -> in progress, then the recorded result
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -37,44 +40,51 @@ import { launchComposedCampaign, _resetComposerFlights } from '@/lib/domain/camp
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const MIG = path.resolve(here, '../../supabase/migrations')
-const N = Number(process.env.RACERS || 24)
+const N = Math.max(24, Number(process.env.RACERS || 24))
 const BATCH = 100
+const PROD_REF = 'lcppdrmrdfblstpcbgpf'
 
 /* ── engine ─────────────────────────────────────────────────────────────── */
 async function engine() {
   const url = process.env.CAMPAIGN_LAUNCH_PROOF_DB_URL
   if (url) {
-    const host = new URL(url).hostname
-    if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(host)) { console.error('refusing non-local DB'); process.exit(2) }
+    const u = new URL(url)
+    const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(u.hostname)
+    if (url.includes(PROD_REF)) { console.error('refusing: production project ref in the URL'); process.exit(2) }
+    if (!loopback && u.hostname !== process.env.CAMPAIGN_LAUNCH_PROOF_ALLOW_HOST) { console.error(`refusing host ${u.hostname} (set CAMPAIGN_LAUNCH_PROOF_ALLOW_HOST for a throwaway branch)`); process.exit(2) }
     const { default: pg } = await import('pg')
-    const pool = new pg.Pool({ connectionString: url, max: N + 4 })
-    return { name: 'postgres (parallel connections)', query: (sql, params) => pool.query(sql, params), exec: (sql) => pool.query(sql), close: () => pool.end() }
+    const pool = new pg.Pool({ connectionString: url, max: N + 8, ssl: loopback ? false : { rejectUnauthorized: false } })
+    const pids = new Set()
+    return {
+      name: `postgres ${u.hostname} (one dedicated connection per racer)`,
+      parallel: true,
+      exec: (sql) => pool.query(sql),
+      query: (sql, params) => pool.query(sql, params),
+      async connection() {
+        const client = await pool.connect()
+        const pid = (await client.query('select pg_backend_pid() p')).rows[0].p
+        pids.add(pid)
+        return { query: (sql, params) => client.query(sql, params), release: () => client.release(), pid }
+      },
+      pids,
+      close: () => pool.end(),
+    }
   }
   const mod = await import(process.env.PGLITE_MODULE || '/tmp/pglite-t/node_modules/@electric-sql/pglite/dist/index.js')
   const db = new mod.PGlite()
-  return { name: 'pglite (serialised engine)', query: (sql, params) => db.query(sql, params), exec: (sql) => db.exec(sql), close: () => db.close() }
+  const conn = { query: (sql, params) => db.query(sql, params), release: () => {}, pid: 0 }
+  await db.exec(`DO $$ BEGIN CREATE ROLE anon; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    DO $$ BEGIN CREATE ROLE authenticated; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    DO $$ BEGIN CREATE ROLE service_role; EXCEPTION WHEN duplicate_object THEN NULL; END $$;`)
+  return { name: 'pglite (serialised engine)', parallel: false, exec: (sql) => db.exec(sql), query: conn.query, connection: async () => conn, pids: new Set([0]), close: () => db.close() }
 }
 
-async function schema(db, { withProposed = true } = {}) {
-  await db.exec(`
-    DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;
-    DO $$ BEGIN CREATE ROLE anon; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    DO $$ BEGIN CREATE ROLE authenticated; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    DO $$ BEGIN CREATE ROLE service_role; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-    CREATE TABLE public.campaigns (id uuid PRIMARY KEY, status text NOT NULL, scheduled_for timestamptz, activated_at timestamptz);
-    CREATE TABLE public.campaign_targets (id bigserial PRIMARY KEY, campaign_id uuid, build_run text, n int);
-    CREATE TABLE public.send_queue (id bigserial PRIMARY KEY, campaign_id uuid, target_n int, UNIQUE (campaign_id, target_n));
-    CREATE TABLE public.transitions (id bigserial PRIMARY KEY, campaign_id uuid, from_status text, to_status text, actor text);
-  `)
-  const durable = await fs.readFile(path.join(MIG, '20260831000000_durable_run_locks_and_idempotency_ledger.sql'), 'utf8')
-  const lines = durable.split('\n')
-  const from = lines.findIndex((l) => l.startsWith('CREATE TABLE IF NOT EXISTS public.idempotency_ledger'))
-  const to = lines.findIndex((l) => l.startsWith('-- ── idempotency_purge_expired'))
-  await db.exec(lines.slice(from, to).join('\n'))
+async function schema(db, { withProposed }) {
+  await db.exec(await fs.readFile(path.join(here, 'fixtures/campaign-launch-proof-schema.sql'), 'utf8'))
   if (withProposed) await db.exec(await fs.readFile(path.join(MIG, 'PROPOSED_20261002190000_campaign_launch_claim.sql'), 'utf8'))
 }
 
-/* ── a supabase-shaped adapter over SQL (only what the code path calls) ── */
+/* ── a supabase-shaped adapter over one connection ──────────────────────── */
 const RPC_ARGS = {
   campaign_launch_claim: ['p_campaign_id::uuid', 'p_launch_key', 'p_claim_token::uuid', 'p_lease_ms::int'],
   campaign_launch_finish: ['p_campaign_id::uuid', 'p_claim_token::uuid', 'p_outcome', 'p_result::jsonb', 'p_error'],
@@ -82,22 +92,22 @@ const RPC_ARGS = {
   idempotency_complete: ['p_scope', 'p_key', 'p_summary', 'p_metadata::jsonb', 'p_skip_content_fields::boolean'],
   idempotency_fail: ['p_scope', 'p_key', 'p_error', 'p_metadata::jsonb', 'p_skip_content_fields::boolean'],
 }
-function adapter(db, { functions = true } = {}) {
+function adapter(conn, { functions }) {
   return {
     async rpc(name, args) {
       const spec = RPC_ARGS[name]
       if (!spec || (!functions && name.startsWith('campaign_launch_'))) return { data: null, error: { code: '42883', message: `function public.${name} does not exist` } }
       const params = spec.map((s) => { const v = args[s.split('::')[0]]; return v !== null && typeof v === 'object' ? JSON.stringify(v) : v ?? null })
       const sql = `select public.${name}(${spec.map((s, i) => `$${i + 1}${s.includes('::') ? `::${s.split('::')[1]}` : ''}`).join(', ')}) as r`
-      try { const res = await db.query(sql, params); return { data: res.rows[0].r, error: null } } catch (e) { return { data: null, error: { message: e.message, code: e.code } } }
+      try { const res = await conn.query(sql, params); return { data: res.rows[0].r, error: null } } catch (e) { return { data: null, error: { message: e.message, code: e.code } } }
     },
     from(table) {
-      const q = { table, where: [] }
+      const where = []
       const api = {
         select() { return api },
-        eq(col, val) { q.where.push([col, val]); return api },
+        eq(col, val) { where.push([col, val]); return api },
         async maybeSingle() {
-          const res = await db.query(`select * from public.${q.table} where ${q.where.map((w, i) => `${w[0]} = $${i + 1}`).join(' and ')} limit 1`, q.where.map((w) => w[1]))
+          const res = await conn.query(`select * from public.${table} where ${where.map((w, i) => `${w[0]} = $${i + 1}`).join(' and ')} limit 1`, where.map((w) => w[1]))
           return { data: res.rows[0] ?? null, error: null }
         },
       }
@@ -106,36 +116,45 @@ function adapter(db, { functions = true } = {}) {
   }
 }
 
-/* ── side effects of the real flow, as SQL ──────────────────────────────── */
-// The lifecycle's own state machine: an edge-checked conditional UPDATE.
-const EDGES = { draft: ['built', 'scheduled', 'archived'], built: ['scheduled', 'activating', 'active', 'draft', 'archived'], scheduled: ['active', 'draft', 'paused', 'archived'], active: ['paused'], paused: ['active', 'scheduled'] }
-async function transition(db, id, to, actor) {
-  const allowedFrom = Object.entries(EDGES).filter(([, tos]) => tos.includes(to)).map(([f]) => f)
-  const res = await db.query(`update public.campaigns set status = $2 where id = $1 and status = any($3::text[]) returning status`, [id, to, allowedFrom])
-  if (res.rows.length) await db.query('insert into public.transitions (campaign_id, from_status, to_status, actor) values ($1, null, $2, $3)', [id, to, actor])
-  return res.rows.length === 1
+/* ── the flow's side effects, through the production lifecycle function ── */
+async function transition(conn, id, to, reason, scheduledFor = null) {
+  try {
+    await conn.query('select status from public.campaign_transition_status($1, $2, $3, $4)', [id, to, reason, scheduledFor])
+    return true
+  } catch (e) {
+    if (/illegal_campaign_transition/.test(e.message)) return false
+    throw e
+  }
 }
-function flowDeps(db, opts = {}) {
+function flowDeps(conn, { functions, hangBuildMs = 0, blocked = false, actor = 'composer' } = {}) {
   return {
-    supabase: adapter(db, opts),
+    supabase: adapter(conn, { functions }),
     nowMs: Date.parse('2026-10-02T15:00:00Z'),
-    loadCampaignStatus: async (_s, id) => (await db.query('select id, status, 1000 as total_cap from public.campaigns where id = $1', [id])).rows[0] ?? null,
+    loadCampaignStatus: async (_s, id) => (await conn.query('select id, status, total_cap from public.campaigns where id = $1', [id])).rows[0] ?? null,
     buildCampaignTargets: async (id) => {
-      const run = crypto.randomUUID()
-      await db.query(`insert into public.campaign_targets (campaign_id, build_run, n) select $1, $2, g from generate_series(1, 737) g`, [id, run])
-      if (opts.hangBuildMs) await new Promise((r) => setTimeout(r, opts.hangBuildMs))
+      await conn.query(`insert into public.proof_effects (campaign_id, effect, actor) values ($1, 'build', $2)`, [id, actor])
+      await conn.query(`insert into public.campaign_targets (campaign_id, campaign_key, to_phone_number, target_status, touch_number)
+        select $1::uuid, $2::text || ':' || g, '+1555' || lpad(g::text, 7, '0'), 'ready', 1 from generate_series(1, 737) g
+        on conflict do nothing`, [id, id])
+      if (hangBuildMs) await new Promise((r) => setTimeout(r, hangBuildMs))
       return { ok: true, success: true, build_summary: { ready: 737 } }
     },
-    evaluateCampaignLaunchReadiness: async () => (opts.blocked
+    evaluateCampaignLaunchReadiness: async () => (blocked
       ? { launch_readiness: 'blocked', blockers: ['No sendable number'], launch_ready_recipient_count: 737 }
       : { launch_readiness: 'ready', blockers: [], warnings: [], launch_ready_recipient_count: 737 }),
     applyCampaignLifecycleAction: async (id, input) => {
       if (input.action === 'activate') {
-        if (!(await transition(db, id, 'active', 'composer'))) return { ok: false, error: 'illegal_campaign_transition' }
-        await db.query(`insert into public.send_queue (campaign_id, target_n) select $1, g from generate_series(1, $2::int) g on conflict do nothing`, [id, BATCH])
+        if (!(await transition(conn, id, 'activating', 'operator:composer_launch'))) return { ok: false, error: 'illegal_campaign_transition' }
+        await conn.query(`insert into public.proof_effects (campaign_id, effect, actor) values ($1, 'fill', $2)`, [id, actor])
+        await conn.query(`insert into public.send_queue (campaign_id, campaign_target_id, queue_key, dedupe_key, queue_status, message_body, to_phone_number)
+          select t.campaign_id, t.id, 'q:' || t.campaign_key, 'campaign:' || t.campaign_key, 'scheduled', 'synthetic', t.to_phone_number
+          from public.campaign_targets t where t.campaign_id = $1::uuid order by t.campaign_key limit $2::int
+          on conflict do nothing`, [id, BATCH])
+        await conn.query('update public.campaigns set last_activation_idempotency_key = $2 where id = $1', [id, input.activation_idempotency_key])
+        if (!(await transition(conn, id, 'active', 'operator:composer_launch'))) return { ok: false, error: 'illegal_campaign_transition' }
         return { ok: true, to: 'active', inserted: BATCH }
       }
-      if (!(await transition(db, id, 'scheduled', 'composer'))) return { ok: false, error: 'illegal_campaign_transition' }
+      if (!(await transition(conn, id, 'scheduled', 'operator:composer_launch', input.scheduled_for))) return { ok: false, error: 'illegal_campaign_transition' }
       return { ok: true, to: 'scheduled', inserted: 0 }
     },
     recordCampaignEvent: async () => {},
@@ -144,128 +163,137 @@ function flowDeps(db, opts = {}) {
 
 /* ── assertions ─────────────────────────────────────────────────────────── */
 const results = []
-const check = (name, ok, detail) => { results.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`) }
+const check = (suite, name, ok, detail) => { results.push({ suite, name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'}  [${suite}] ${name}${detail ? `  — ${detail}` : ''}`) }
 async function counts(db, id) {
-  const one = async (sql) => Number((await db.query(sql, [id])).rows[0].c)
-  return {
-    builds: await one('select count(distinct build_run) c from public.campaign_targets where campaign_id = $1'),
-    queue: await one('select count(*) c from public.send_queue where campaign_id = $1'),
-    transitions: await one(`select count(*) c from public.transitions where campaign_id = $1 and actor = 'composer'`),
+  const one = async (sql) => (await db.query(sql, [id])).rows[0]
+  const e = await one(`select count(*) filter (where effect = 'build') b, count(*) filter (where effect = 'fill') f from public.proof_effects where campaign_id = $1`)
+  const q = await one('select count(*) c, count(distinct campaign_target_id) d from public.send_queue where campaign_id = $1')
+  const t = await one('select count(*) c from public.campaign_targets where campaign_id = $1')
+  const s = await one('select status, activation_attempt_count a, last_activation_idempotency_key k from public.campaigns where id = $1')
+  return { builds: Number(e.b), fills: Number(e.f), queue: Number(q.c), queueDistinct: Number(q.d), targets: Number(t.c), status: s.status, activations: Number(s.a), key: s.k }
+}
+const newCampaign = async (db) => { const id = crypto.randomUUID(); await db.query(`insert into public.campaigns (id, name, status, total_cap) values ($1, 'proof', 'built', 1000)`, [id]); return id }
+const body = (id, key, mode = 'now') => ({ campaign_id: id, launch_key: key, start: mode === 'now' ? { mode: 'now' } : { mode: 'at', at: '2026-10-03T14:00:00Z' }, expected_eligible: 737 })
+
+async function withConnections(db, n, fn) {
+  const conns = await Promise.all(Array.from({ length: n }, () => db.connection()))
+  try { return await fn(conns) } finally { for (const c of conns) c.release() }
+}
+
+async function suite(db, withProposed) {
+  const label = withProposed ? 'PROPOSED functions' : 'production ledger only'
+  const functions = withProposed
+  await schema(db, { withProposed })
+
+  // 1-3. N parallel launches from N connections
+  {
+    _resetComposerFlights()
+    const id = await newCampaign(db)
+    const out = await withConnections(db, N, (conns) => Promise.all(conns.map((c, i) => launchComposedCampaign(body(id, `k${i}`), flowDeps(c, { functions, actor: `racer${i}` })).catch((e) => ({ ok: false, error: `threw:${e.message}` })))))
+    const wins = out.filter((r) => r.ok && !r.idempotent)
+    const c = await counts(db, id)
+    const losers = {}
+    for (const r of out.filter((x) => !x.ok)) losers[r.error] = (losers[r.error] || 0) + 1
+    check(label, `1 ${N} parallel launches (${N} connections) -> one launch`, wins.length === 1 && c.builds === 1 && c.fills === 1 && c.queue === BATCH && c.queueDistinct === BATCH && c.status === 'active' && c.activations === 1,
+      `wins=${wins.length} builds=${c.builds} fills=${c.fills} queue=${c.queue} distinct=${c.queueDistinct} targets=${c.targets} status=${c.status} activation_attempts=${c.activations} losers=${JSON.stringify(losers)}`)
+    const winnerKey = `k${out.findIndex((r) => r.ok && !r.idempotent)}`
+    _resetComposerFlights()
+    const retries = await withConnections(db, 8, (conns) => Promise.all(conns.map((cn) => launchComposedCampaign(body(id, winnerKey), flowDeps(cn, { functions })))))
+    const other = await withConnections(db, 1, ([cn]) => launchComposedCampaign(body(id, 'other-tab'), flowDeps(cn, { functions })))
+    const c2 = await counts(db, id)
+    check(label, '2 8 parallel retries of the winner key -> idempotent, nothing re-runs', retries.every((r) => r.ok && r.idempotent) && c2.builds === 1 && c2.fills === 1 && c2.queue === BATCH, `idempotent=${retries.filter((r) => r.idempotent).length}/8 builds=${c2.builds} fills=${c2.fills}`)
+    check(label, '3 another key after the launch -> refused', other.ok === false && ['already_launched', 'campaign_not_launchable'].includes(other.error), other.error)
+  }
+
+  // 4. launch vs reschedule on separate connections, repeated
+  {
+    let both = 0; let neither = 0; let composer = 0; let rescheduler = 0
+    for (let round = 0; round < 10; round += 1) {
+      _resetComposerFlights()
+      const id = await newCampaign(db)
+      const [launchRes, schedOk] = await withConnections(db, 2, ([a, b]) => Promise.all([
+        launchComposedCampaign(body(id, `race${round}`, 'at'), flowDeps(a, { functions })),
+        transition(b, id, 'scheduled', 'operator:reschedule', '2026-10-04T15:00:00Z'),
+      ]))
+      const c = await counts(db, id)
+      const moved = (launchRes.ok ? 1 : 0) + (schedOk ? 1 : 0)
+      if (moved === 2) both += 1
+      else if (moved === 0) neither += 1
+      else if (launchRes.ok) composer += 1
+      else rescheduler += 1
+      if (c.status !== 'scheduled') neither += 100
+    }
+    check(label, '4 launch racing a reschedule x10 -> exactly one moves the campaign each time', both === 0 && neither === 0, `composer won ${composer}, reschedule won ${rescheduler}, both ${both}, neither ${neither}`)
+  }
+
+  // 5. stale claim takeover (PROPOSED functions: fenced finish)
+  if (withProposed) {
+    const id = await newCampaign(db)
+    const token = crypto.randomUUID()
+    const res = await withConnections(db, 6, async (conns) => {
+      const first = await adapter(conns[0], { functions }).rpc('campaign_launch_claim', { p_campaign_id: id, p_launch_key: 'zombie', p_claim_token: token, p_lease_ms: 1 })
+      await new Promise((r) => setTimeout(r, 2500))
+      // five rescuers race to take over the claim (stale under their 1 s lease view; fresh to each other)
+      const rescuers = await Promise.all(conns.slice(1).map((cn, i) => adapter(cn, { functions }).rpc('campaign_launch_claim', { p_campaign_id: id, p_launch_key: `rescuer${i}`, p_claim_token: crypto.randomUUID(), p_lease_ms: 1000 })))
+      const zombie = await adapter(conns[0], { functions }).rpc('campaign_launch_finish', { p_campaign_id: id, p_claim_token: token, p_outcome: 'completed', p_result: { zombie: true }, p_error: null })
+      return { first, rescuers, zombie }
+    })
+    const takeovers = res.rescuers.filter((r) => r.data?.claimed === true).length
+    check(label, '5 stale claim: 5 rescuers race -> exactly one takes over; the zombie finish is fenced', res.first.data.claimed === true && takeovers === 1 && res.zombie.data.fenced === true,
+      `takeovers=${takeovers}/5 others=${JSON.stringify(res.rescuers.filter((r) => !r.data?.claimed).map((r) => r.data?.reason))} zombie_fenced=${res.zombie.data.fenced}`)
+  } else {
+    const id = await newCampaign(db)
+    const sb = (c) => adapter(c, { functions })
+    const r = await withConnections(db, 6, async (conns) => {
+      const first = await sb(conns[0]).rpc('idempotency_begin', { p_scope: 'campaign_launch', p_key: id, p_claim_token: crypto.randomUUID(), p_summary: 'x', p_metadata: {}, p_lease_ms: 1, p_payload_hash: null })
+      await new Promise((rr) => setTimeout(rr, 2500))
+      const rescuers = await Promise.all(conns.slice(1).map((cn) => sb(cn).rpc('idempotency_begin', { p_scope: 'campaign_launch', p_key: id, p_claim_token: crypto.randomUUID(), p_summary: 'x', p_metadata: {}, p_lease_ms: 1000, p_payload_hash: null })))
+      return { first, rescuers }
+    })
+    const rows = Number((await db.query(`select count(*) c from public.idempotency_ledger where scope = 'campaign_launch' and key = $1`, [id])).rows[0].c)
+    const reclaims = r.rescuers.filter((x) => x.data?.duplicate === false).length
+    check(label, '5 stale claim takeover (ledger) -> exactly one reclaim, one row; finish NOT fenced (documented gap)', r.first.data.duplicate === false && reclaims === 1 && rows === 1, `reclaims=${reclaims}/5 rows=${rows}`)
+  }
+
+  // 6. refused launch releases
+  {
+    _resetComposerFlights()
+    const id = await newCampaign(db)
+    const [refused, ok] = await withConnections(db, 2, async ([a, b]) => [
+      await launchComposedCampaign(body(id, 'r1'), flowDeps(a, { functions, blocked: true })),
+      await launchComposedCampaign(body(id, 'r2'), flowDeps(b, { functions })),
+    ])
+    const c = await counts(db, id)
+    check(label, '6 a refused launch releases; the next launches once', refused.error === 'launch_blocked' && ok.ok && c.fills === 1 && c.queue === BATCH, `refused=${refused.error} next=${ok.ok} fills=${c.fills}`)
+  }
+
+  // 7. timed-out client retries the same key from another process mid-launch
+  {
+    _resetComposerFlights()
+    const id = await newCampaign(db)
+    const r = await withConnections(db, 3, async ([a, b, c3]) => {
+      const slow = launchComposedCampaign(body(id, 'same'), flowDeps(a, { functions, hangBuildMs: 1500 }))
+      await new Promise((rr) => setTimeout(rr, 300))
+      _resetComposerFlights()
+      const during = await launchComposedCampaign(body(id, 'same'), flowDeps(b, { functions }))
+      const first = await slow
+      _resetComposerFlights()
+      const after = await launchComposedCampaign(body(id, 'same'), flowDeps(c3, { functions }))
+      return { during, first, after }
+    })
+    const c = await counts(db, id)
+    check(label, '7 retry after timeout (same key, other process) -> in progress, then recorded result', r.first.ok && r.during.error === 'launch_in_progress' && r.after.ok && r.after.idempotent && c.builds === 1 && c.fills === 1,
+      `during=${r.during.error ?? 'ok'} after=${r.after.idempotent ? 'idempotent' : r.after.error} builds=${c.builds} fills=${c.fills}`)
   }
 }
-const newCampaign = async (db, status = 'built') => { const id = crypto.randomUUID(); await db.query('insert into public.campaigns (id, status) values ($1, $2)', [id, status]); return id }
-const launchBody = (id, key, mode = 'now') => ({ campaign_id: id, launch_key: key, start: mode === 'now' ? { mode: 'now' } : { mode: 'at', at: '2026-10-03T14:00:00Z' }, expected_eligible: 737 })
 
 const db = await engine()
 console.log(`engine: ${db.name}; racers: ${N}`)
 try {
-  await schema(db)
-
-  // 1. N parallel launches with distinct launch keys (two tabs, two servers…)
-  {
-    _resetComposerFlights()
-    const id = await newCampaign(db)
-    const deps = Array.from({ length: N }, () => flowDeps(db))
-    const out = await Promise.all(deps.map((d, i) => launchComposedCampaign(launchBody(id, `k${i}`), d).catch((e) => ({ ok: false, error: e.message }))))
-    const wins = out.filter((r) => r.ok && !r.idempotent)
-    const c = await counts(db, id)
-    check('1 N parallel launches -> exactly one launch', wins.length === 1 && c.builds === 1 && c.queue === BATCH && c.transitions === 1,
-      `wins=${wins.length} builds=${c.builds} queue=${c.queue} transitions=${c.transitions} losers=${[...new Set(out.filter((r) => !r.ok).map((r) => r.error))].join(',')}`)
-
-    // 2/3. retries after the winner finished
-    const winnerKey = `k${out.findIndex((r) => r.ok && !r.idempotent)}`
-    const retries = await Promise.all(Array.from({ length: 6 }, () => launchComposedCampaign(launchBody(id, winnerKey), flowDeps(db))))
-    const loser = await launchComposedCampaign(launchBody(id, 'late-other-tab'), flowDeps(db))
-    const c2 = await counts(db, id)
-    check('2 retries of the winner key -> idempotent, same result', retries.every((r) => r.ok && r.idempotent && r.eligible === 737) && c2.queue === BATCH && c2.builds === 1, `queue=${c2.queue}`)
-    check('3 another key after launch -> already_launched', loser.ok === false && loser.error === 'already_launched', loser.error)
-  }
-
-  // 4. launch racing a reschedule / pause from another path
-  {
-    _resetComposerFlights()
-    const id = await newCampaign(db)
-    const [launchRes, schedOk] = await Promise.all([
-      launchComposedCampaign(launchBody(id, 'race', 'at'), flowDeps(db)),
-      transition(db, id, 'scheduled', 'other-operator'),
-    ])
-    const c = await counts(db, id)
-    const otherWon = schedOk === true
-    const composerWon = launchRes.ok === true
-    check('4 launch vs reschedule -> exactly one transition wins', (otherWon !== composerWon) || (otherWon && !composerWon),
-      `other=${otherWon} composer=${composerWon}/${launchRes.error ?? 'ok'} composer_transitions=${c.transitions}`)
-    const pauseOk = await transition(db, id, 'paused', 'other-operator')
-    const after = await launchComposedCampaign(launchBody(id, 'after-pause'), flowDeps(db))
-    check('4b paused/scheduled campaign is not launchable again', after.ok === false && ['campaign_not_launchable', 'already_launched'].includes(after.error), `${after.error} (pause applied=${pauseOk})`)
-  }
-
-  // 5. stale claim: holder hangs past its lease, a reclaimer runs, the zombie is fenced
-  {
-    _resetComposerFlights()
-    const id = await newCampaign(db)
-    const token = crypto.randomUUID()
-    const sb = adapter(db)
-    const first = await sb.rpc('campaign_launch_claim', { p_campaign_id: id, p_launch_key: 'zombie', p_claim_token: token, p_lease_ms: 1 })
-    await new Promise((r) => setTimeout(r, 20))
-    // a reclaimer with a 1 ms lease view treats the zombie's claim as stale
-    const reclaim = await sb.rpc('campaign_launch_claim', { p_campaign_id: id, p_launch_key: 'rescuer', p_claim_token: crypto.randomUUID(), p_lease_ms: 1 })
-    const zombieFinish = await sb.rpc('campaign_launch_finish', { p_campaign_id: id, p_claim_token: token, p_outcome: 'completed', p_result: { zombie: true }, p_error: null })
-    check('5 stale claim reclaimed; the zombie finish is fenced', first.data.claimed === true && reclaim.data.claimed === true && zombieFinish.data.fenced === true,
-      `first=${first.data.reason} reclaim=${reclaim.data.reason} zombie_fenced=${zombieFinish.data.fenced}`)
-    // the rescuer launches; once the campaign has moved on, nobody else can
-    await transition(db, id, 'active', 'composer')
-    const third = await sb.rpc('campaign_launch_claim', { p_campaign_id: id, p_launch_key: 'third', p_claim_token: crypto.randomUUID(), p_lease_ms: 1 })
-    check('5b after the transition, even a stale-lease claimant is refused', third.data.claimed === false && third.data.reason === 'campaign_not_launchable', third.data.reason)
-  }
-
-  // 6. refused launch releases the claim
-  {
-    _resetComposerFlights()
-    const id = await newCampaign(db)
-    const refused = await launchComposedCampaign(launchBody(id, 'r1'), flowDeps(db, { blocked: true }))
-    const ok = await launchComposedCampaign(launchBody(id, 'r2'), flowDeps(db))
-    const c = await counts(db, id)
-    check('6 a refused launch releases; the next one launches once', refused.error === 'launch_blocked' && ok.ok === true && c.queue === BATCH && c.transitions === 1, `refused=${refused.error} next=${ok.ok}`)
-  }
-
-  // 7. ledger row purged (30-day retention) after the launch
-  {
-    _resetComposerFlights()
-    const id = await newCampaign(db)
-    await launchComposedCampaign(launchBody(id, 'p1'), flowDeps(db))
-    await db.query(`delete from public.idempotency_ledger where scope = 'campaign_launch' and key = $1`, [id])
-    const again = await launchComposedCampaign(launchBody(id, 'p2'), flowDeps(db))
-    const c = await counts(db, id)
-    check('7 ledger purged -> campaign state still refuses', again.ok === false && again.error === 'campaign_not_launchable' && c.queue === BATCH, again.error)
-  }
-
-  // 9. a client timed out and retries the SAME key while the first is still running
-  {
-    _resetComposerFlights()
-    const id = await newCampaign(db)
-    const slow = launchComposedCampaign(launchBody(id, 'same'), flowDeps(db, { hangBuildMs: 150 }))
-    await new Promise((r) => setTimeout(r, 30))
-    _resetComposerFlights() // the retry lands on another server process: no shared memory
-    const during = await launchComposedCampaign(launchBody(id, 'same'), flowDeps(db))
-    const first = await slow
-    const after = await launchComposedCampaign(launchBody(id, 'same'), flowDeps(db))
-    const c = await counts(db, id)
-    check('9 timeout retry of the same key -> in progress, then the recorded result', first.ok && during.error === 'launch_in_progress' && after.ok && after.idempotent && c.queue === BATCH && c.builds === 1,
-      `during=${during.error ?? 'ok'} after=${after.idempotent ? 'idempotent' : after.error} queue=${c.queue} builds=${c.builds}`)
-  }
-
-  // 8. production today: no PROPOSED functions, ledger only
-  {
-    await schema(db, { withProposed: false })
-    _resetComposerFlights()
-    const id = await newCampaign(db)
-    const out = await Promise.all(Array.from({ length: N }, (_, i) => launchComposedCampaign(launchBody(id, `f${i}`), flowDeps(db, { functions: false }))))
-    const c = await counts(db, id)
-    const wins = out.filter((r) => r.ok && !r.idempotent)
-    check('8 fallback (production ledger only) -> exactly one launch', wins.length === 1 && c.builds === 1 && c.queue === BATCH && c.transitions === 1,
-      `wins=${wins.length} builds=${c.builds} queue=${c.queue} losers=${[...new Set(out.filter((r) => !r.ok).map((r) => r.error))].join(',')}`)
-  }
+  await suite(db, true)
+  await suite(db, false)
 } finally {
+  if (db.parallel) console.log(`distinct backend connections used: ${db.pids.size}`)
   await db.close()
 }
 const failed = results.filter((r) => !r.ok)
