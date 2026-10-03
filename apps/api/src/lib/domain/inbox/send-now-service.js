@@ -14,6 +14,8 @@ import { dispatchManualOperatorSend } from "@/lib/domain/communications/dispatch
 import { resolveOperatorAction } from "@/lib/domain/communications/operator-action-store.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
+import { evaluateSenderDispatchEligibility, loadDispatchBlockedSenders } from "@/lib/domain/delivery/sender-dispatch-eligibility.js";
+import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
 import {
   insertSupabaseSendQueueRow,
@@ -970,21 +972,19 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     if (routed?.ok) resolved_from = routed.from_phone_number;
   }
 
-  // ── Step 1c: OPERATOR SENDER BLOCKLIST — unconditional, fail-closed ──
-  // A manual send never leaves from a number the operator blocked
-  // (system_control.sms_blocked_sender_numbers / SMS_BLOCKED_SENDER_NUMBERS),
-  // whichever priority resolved it: the thread's own number included. This
-  // path calls the provider directly, so the runner's health guard never saw
-  // it (2026-09-30..10-01: 11 manual sends from blocked Miami •••5670).
-  // Refused BEFORE any row exists, with a 423 refusal — never ok:true.
+  // ── Step 1c: THE CANONICAL SENDER DISPATCH ELIGIBILITY — unconditional ──
+  // A manual send never leaves from a number the canonical eligibility
+  // rejects: operator-blocked (system_control.sms_blocked_sender_numbers /
+  // SMS_BLOCKED_SENDER_NUMBERS), not in the fleet, paused, cooling,
+  // health-blocked or at its daily limit — whichever priority resolved it,
+  // the thread's own number included. This path calls the provider directly,
+  // so the runner never saw it (2026-09-30..10-01: 11 manual sends from
+  // blocked Miami •••5670). Refused BEFORE any row exists, with a 423
+  // refusal — never ok:true. Unreadable blocklist / fleet -> refused.
   if (resolved_from) {
-    const blocklist = await readManualSendBlockedSenders(deps);
-    const refusal = !blocklist.ok
-      ? "sender_blocklist_unreadable"
-      : isSenderDispatchBlocked(resolved_from, blocklist.sets)
-        ? "blocked_sender_number"
-        : null;
-    if (refusal) {
+    const verdict = await evaluateManualSendSender(resolved_from, { ...deps, supabase });
+    if (!verdict.ok) {
+      const refusal = verdict.reason === "outbound_number_blocked_by_operator" ? "blocked_sender_number" : verdict.reason;
       logger.warn("inbox_send_now.sender_refused", {
         thread_key: clean(input.thread_key) || null,
         from_mask: maskPhoneForLog(resolved_from),
@@ -997,7 +997,7 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
         reason: refusal,
         detail_reason: refusal === "blocked_sender_number"
           ? `Sending number ${maskPhoneForLog(resolved_from)} is blocked by the operator; nothing was sent`
-          : "The operator sender blocklist could not be read; nothing was sent",
+          : `Sending number ${maskPhoneForLog(resolved_from)} is not eligible to send (${refusal}); nothing was sent`,
         blocked_sender_number: refusal === "blocked_sender_number" ? resolved_from : null,
         queue_created: false,
         queue_inserted: false,
@@ -1576,38 +1576,31 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
 }
 
 /**
- * The dispatch blocklist for a manual send, read STRICTLY: { ok:false } when it
- * cannot be read (the caller refuses). getSystemValue swallows read errors into
- * null, so production reads system_control directly; an injected
- * deps.getSystemValue (tests, callers) is used as given and its throw is
- * "unreadable". Without any database configuration (local tooling) only the
- * env list applies, as everywhere else.
+ * The canonical sender verdict for a manual send: the fleet row (true sends
+ * today) + the strict blocklist -> evaluateSenderDispatchEligibility.
+ * Injected: deps.evaluateManualSendSender (whole verdict),
+ * deps.loadOutboundNumberByPhone, deps.getSystemValue / deps.loadDispatchBlockedSenders.
  */
-async function readManualSendBlockedSenders(deps = {}) {
+async function evaluateManualSendSender(phone, deps = {}) {
+  if (typeof deps.evaluateManualSendSender === "function") return deps.evaluateManualSendSender(phone);
+  const blocked = typeof deps.loadDispatchBlockedSenders === "function"
+    ? await deps.loadDispatchBlockedSenders()
+    : await loadDispatchBlockedSenders({ getSystemValue: deps.getSystemValue, env: deps.env });
+  if (!blocked) return { ok: false, reason: "sender_blocklist_unreadable" };
+  let row = null;
   try {
-    if (typeof deps.getSystemValue === "function") {
-      return { ok: true, sets: await loadDispatchBlockedSets({ getSystemValue: deps.getSystemValue, env: deps.env || process.env }) };
+    if (typeof deps.loadOutboundNumberByPhone === "function") {
+      row = await deps.loadOutboundNumberByPhone(phone);
+    } else {
+      const { data, error } = await deps.supabase.from("textgrid_numbers").select("*").eq("phone_number", phone).limit(1);
+      if (error) return { ok: false, reason: "outbound_number_eligibility_unavailable" };
+      row = Array.isArray(data) && data.length ? data[0] : null;
+      if (row) [row] = await withDerivedSentToday(deps.supabase, [row], {});
     }
-    if (!hasSupabaseConfig()) {
-      return { ok: true, sets: await loadDispatchBlockedSets({ getSystemValue: async () => null, env: deps.env || process.env }) };
-    }
-    const { data, error } = await defaultSupabase
-      .from("system_control")
-      .select("value")
-      .eq("key", "sms_blocked_sender_numbers")
-      .maybeSingle();
-    if (error) return { ok: false };
-    const value = data ? data.value : null;
-    return {
-      ok: true,
-      sets: await loadDispatchBlockedSets({
-        getSystemValue: async (key) => (key === "sms_blocked_sender_numbers" ? value : null),
-        env: deps.env || process.env,
-      }),
-    };
   } catch {
-    return { ok: false };
+    return { ok: false, reason: "outbound_number_eligibility_unavailable" };
   }
+  return evaluateSenderDispatchEligibility(row, { blocked, phone, now: deps.now ? new Date(deps.now) : new Date() });
 }
 
 function isManualSendHardBlockReason(reason = "") {
@@ -1622,6 +1615,11 @@ function isManualSendHardBlockReason(reason = "") {
     "outbound_sms_disabled",
     "blocked_sender_number",
     "sender_blocklist_unreadable",
+    "outbound_number_not_in_fleet",
+    "outbound_number_status_paused",
+    "outbound_number_health_cooling",
+    "outbound_number_cooling_until",
+    "outbound_number_daily_limit_reached",
   ]).has(clean(reason).toLowerCase());
 }
 

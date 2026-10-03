@@ -35,6 +35,12 @@ import {
 } from "../../src/lib/supabase/sms-engine.js";
 import { createInboxSendNowQueueRow, resolveFromPhoneNumber } from "../../src/lib/domain/inbox/send-now-service.js";
 
+
+
+// Canonical sender eligibility (2026-10-02): a manual send needs a fleet
+// sender the canonical function accepts. These tests are about other
+// authorities, so the sender is an ordinary active, unblocked fleet number.
+const ACTIVE_FLEET_SENDER = async (phone) => ({ id: "fleet-test-sender", phone_number: phone, status: "active", health_state: "unverified", daily_limit: 800, messages_sent_today: 0 });
 // ─── Shared fixtures ──────────────────────────────────────────────────────────
 
 const BASE_ROW = {
@@ -342,7 +348,7 @@ test("createInboxSendNowQueueRow: prior 21610 becomes warning-only for manual se
 
   const supabase = makeDuplicateGuardSupabase(0);
 
-  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
+  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     insertImpl: async (row) => {
       insert_called = true;
       return { ok: true, queue_id: row.queue_id || row.queue_key, queue_row_id: "row-21610" };
@@ -365,7 +371,7 @@ test("createInboxSendNowQueueRow: repeated delivery_failed becomes warning-only 
 
   const supabase = makeDuplicateGuardSupabase(0);
 
-  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
+  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     insertImpl: async (row) => {
       insert_called = true;
       return { ok: true, queue_id: row.queue_id || row.queue_key, queue_row_id: "row-delivery" };
@@ -393,7 +399,7 @@ test("createInboxSendNowQueueRow: clean number → row inserted normally", async
 
   const supabase = makeDuplicateGuardSupabase(0);
 
-  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
+  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     insertImpl: async (row) => {
       insert_called = true;
       return { ok: true, queue_id: row.queue_id || row.queue_key, queue_row_id: "row-clean" };
@@ -415,7 +421,7 @@ test("createInboxSendNowQueueRow: guard DB failure → row still inserted (non-f
 
   const supabase = makeDuplicateGuardSupabase(0);
 
-  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
+  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     insertImpl: async (row) => {
       insert_called = true;
       return { ok: true, queue_id: row.queue_key, queue_row_id: "row-guard-fail" };
@@ -438,7 +444,7 @@ test("createInboxSendNowQueueRow: missing from routing returns missing_routing a
       to_phone_number: VALID_PAYLOAD.to_phone_number,
       message_body: VALID_PAYLOAD.message_body,
     },
-    {
+    { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
       insertImpl: async () => ({ ok: true, queue_row_id: "audit-row-1", queue_id: "audit-row-1" }),
       resolveFromImpl: async () => null,
     }
@@ -454,7 +460,7 @@ test("createInboxSendNowQueueRow: missing from routing returns missing_routing a
 test("createInboxSendNowQueueRow: insert exception returns explicit queue_insert_failure", async () => {
   const supabase = makeDuplicateGuardSupabase(0);
 
-  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, {
+  const result = await createInboxSendNowQueueRow(VALID_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     insertImpl: async () => { throw new Error("insert exploded"); },
     resolveFromImpl: async () => null,
     hardComplianceCheckImpl: async () => ({ blocked: false, reason: null }),
@@ -472,6 +478,7 @@ test("createInboxSendNowQueueRow: insert exception returns explicit queue_insert
 test("createInboxSendNowQueueRow blocks if to and from numbers are the same", async () => {
   let auditRow = null;
   const deps = {
+    loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER,
     insertImpl: async (row) => {
       auditRow = row;
       return { queue_row_id: 999 };
@@ -504,7 +511,7 @@ test("createInboxSendNowQueueRow reroutes stale same-number payloads before vali
     ...VALID_PAYLOAD,
     to_phone_number: "+13235589881",
     from_phone_number: "+13235589881",
-  }, {
+  }, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     insertImpl: async (row) => {
       insertedRow = row;
       return { ok: true, queue_row_id: "rerouted-row", queue_id: "rerouted-row" };
@@ -533,7 +540,7 @@ test("createInboxSendNowQueueRow passes recipient phone into resolver repair", a
     ...VALID_PAYLOAD,
     to_phone_number: "+13235589881",
     from_phone_number: "+13235589881",
-  }, {
+  }, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     insertImpl: async (row) => ({ ok: true, queue_row_id: "resolver-args-row", queue_id: row.queue_key }),
     resolveFromImpl: async (args) => {
       resolverArgs = args;

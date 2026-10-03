@@ -13,6 +13,12 @@ import {
 } from "@/lib/domain/inbox/send-now-service.js";
 import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 
+
+
+// Canonical sender eligibility (2026-10-02): a manual send needs a fleet
+// sender the canonical function accepts. These tests are about other
+// authorities, so the sender is an ordinary active, unblocked fleet number.
+const ACTIVE_FLEET_SENDER = async (phone) => ({ id: "fleet-test-sender", phone_number: phone, status: "active", health_state: "unverified", daily_limit: 800, messages_sent_today: 0 });
 const INSERT_COLUMN_SET = new Set(SEND_QUEUE_INSERT_COLUMNS);
 
 function buildMockSupabase() {
@@ -227,7 +233,7 @@ test("manual inbox send bypasses paused review and runtime brakes but not suppre
       source: "manual_inbox",
       action: "send_now",
     },
-    {
+    { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
       supabase: paused_supabase,
       getSystemValue: async (key) => emergency_settings[key] ?? null,
       hardComplianceCheckImpl: async () => ({ blocked: false }),
@@ -253,7 +259,7 @@ test("manual inbox send remains blocked for suppressed recipient", async () => {
       source: "manual_inbox",
       action: "send_now",
     },
-    {
+    { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
       supabase: makeSuppressedSupabase(),
       insertImpl: async () => {
         insert_called = true;
@@ -279,7 +285,7 @@ test("executeManualInboxSendNow is DENIED by campaign/emergency runtime brakes",
       message_body: "Runtime brake enforcement proof",
       queue_key: "inbox:send_now:runtime-enforced",
     },
-    {
+    { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
       getSystemValue: async (key) => {
         if (key === "queue_emergency_stop_at") return "2026-05-31T12:00:00.000Z";
         if (key === "campaign_mode") return "paused";

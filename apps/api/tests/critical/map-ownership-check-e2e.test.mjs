@@ -13,6 +13,12 @@ import {
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { createMemoryS11Store, s11ManualSendDeps } from "../helpers/s11-memory-store.mjs";
 
+
+
+// Canonical sender eligibility (2026-10-02): a manual send needs a fleet
+// sender the canonical function accepts. These tests are about other
+// authorities, so the sender is an ordinary active, unblocked fleet number.
+const ACTIVE_FLEET_SENDER = async (phone) => ({ id: "fleet-test-sender", phone_number: phone, status: "active", health_state: "unverified", daily_limit: 800, messages_sent_today: 0 });
 // Canonical production phones.phone_id is ph_-prefixed TEXT. Guard: no ph_ text may
 // ever be assigned to a UUID column (phone_number_id).
 const CANONICAL_PHONE_ID = "ph_certfix_16124515970";
@@ -158,7 +164,7 @@ test("a genuine UUID phone_number_id is permitted through to the UUID column", (
 
 test("createInboxSendNowQueueRow insert payload retains map provenance", async () => {
   let captured = null;
-  const result = await createInboxSendNowQueueRow(MAP_PAYLOAD, {
+  const result = await createInboxSendNowQueueRow(MAP_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     resolveFromImpl: async () => "+16125559999",
     hardComplianceCheckImpl: async () => ({ blocked: false }),
     checkBlacklistPriorFailureImpl: async () => ({ blocked: false }),
@@ -230,7 +236,7 @@ test("executeManualInboxSendNow claim metadata preserves map_command and message
   const supabase = makeSupabaseForE2E();
   let outboundEvent = null;
 
-  const result = await executeManualInboxSendNow(MAP_PAYLOAD, {
+  const result = await executeManualInboxSendNow(MAP_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
       ...s11ManualSendDeps(),
     supabase,
     // Authorize the runtime layer: this test is about map_command provenance
