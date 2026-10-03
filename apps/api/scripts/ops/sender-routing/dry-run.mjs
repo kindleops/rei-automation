@@ -13,7 +13,7 @@
  * Each row is routed through selectSender() under the proposed graph:
  *   A  today's inventory (+ the evidence backfill the seed proposes)
  *   B  A + Indianapolis / Tampa onboarded (simulated: registered, inbound
- *      verified, warming) — what the graph does once the owner finishes onboarding
+ *      verified, active at the owner's fixed 25/day) — what the graph does once the owner finishes onboarding
  * and reported with market, current state, pool, number, tier, eligibility.
  * "legacy_at_send" shows what today's router does for the row.
  */
@@ -68,10 +68,10 @@ const fleetB = [
     status: "active",
     health_state: "unverified",
     registration_status: "registered",
-    daily_limit: per_sender_cap,
+    daily_limit: 25, // owner decision 2026-10-02: fixed 25/day, no warm-up algorithm
     messages_sent_today: 0,
     last_used_at: null,
-    metadata: { onboarding_stage: "warming", sms_webhook_status: "verified", inbound_verified_at: "SIMULATED" },
+    metadata: { onboarding_stage: "active", sms_webhook_status: "verified", inbound_verified_at: "SIMULATED" },
   })),
 ];
 const graphA = buildRoutingGraph(proposedGraphRows({ markets, fleet: fleetA }));
@@ -167,15 +167,15 @@ const graphTable = covA.markets
     const routes = PROPOSED_ROUTES[m.market_id];
     const cell = (tier) => routes.filter((x) => x.tier === tier).map((x) => `${poolName(graphA, x.pool_key)}${x.provenance === "owner" ? " (owner)" : x.provenance === "confirm" ? " (owner, confirm)" : ""}`).join(", ") || "—";
     const u = unlocked.get(m.market_id) || { held_now: 0, unlocked_A: 0, unlocked_B: 0, rows: 0 };
-    return { market_id: m.market_id, market: m.display_name, primary: cell("primary"), preferred: cell("preferred_fallback"), regional: cell("regional_fallback"), health_today: m.status, health_after_onboarding: statusB.get(m.market_id), held_now: u.held_now, unlocked_today: u.unlocked_A, unlocked_after_onboarding: u.unlocked_B };
+    return { market_id: m.market_id, market: m.display_name, primary: cell("primary"), preferred: cell("preferred_fallback"), regional: cell("regional_fallback"), last_resort: cell("last_resort"), health_today: m.status, health_after_onboarding: statusB.get(m.market_id), held_now: u.held_now, unlocked_today: u.unlocked_A, unlocked_after_onboarding: u.unlocked_B };
   });
 
 const md = [];
 md.push(`# Sender Routing 2.0 — dry run (${now.toISOString()})`, "", "READ-ONLY. Nothing was queued, released or sent.", "");
 md.push(`Inventory: ${rawFleet.length} local numbers; provider ${provider ? "TextGrid API (GET)" : "owner paste"}; blocklist ${blocked.size}; per-number cap ${per_sender_cap}.`, "");
 md.push(`Coverage A (today): ${JSON.stringify(covA.metrics)}`, `Coverage B (+Indianapolis/Tampa): ${JSON.stringify(covB.metrics)}`, "");
-md.push("## Proposed graph", "", "| TARGET MARKET | PRIMARY | PREFERRED | REGIONAL | HEALTH today | HEALTH +Indy/Tampa | HELD NOW | UNLOCKED today | UNLOCKED +Indy/Tampa |", "|---|---|---|---|---|---|---|---|---|");
-for (const t of graphTable) md.push(`| ${t.market} | ${t.primary} | ${t.preferred} | ${t.regional} | ${t.health_today} | ${t.health_after_onboarding} | ${t.held_now} | ${t.unlocked_today} | ${t.unlocked_after_onboarding} |`);
+md.push("## Proposed graph", "", "| TARGET MARKET | PRIMARY | PREFERRED | REGIONAL | LAST RESORT | HEALTH today | HEALTH +Indy/Tampa | HELD NOW | UNLOCKED today | UNLOCKED +Indy/Tampa |", "|---|---|---|---|---|---|---|---|---|---|");
+for (const t of graphTable) md.push(`| ${t.market} | ${t.primary} | ${t.preferred} | ${t.regional} | ${t.last_resort} | ${t.health_today} | ${t.health_after_onboarding} | ${t.held_now} | ${t.unlocked_today} | ${t.unlocked_after_onboarding} |`);
 md.push("", "## Rows", "", "| kind | ref | market | purpose | current | legacy at send | A: proposed graph today | B: + Indianapolis/Tampa |", "|---|---|---|---|---|---|---|---|");
 for (const r of results) md.push(`| ${r.kind} | ${r.ref} | ${r.market_id || r.market || "?"} | ${r.purpose} | ${r.current} | ${r.legacy_at_send} | ${r.A.cell} | ${r.B.cell} |`);
 md.push("", "## Hold detail (A)", "");

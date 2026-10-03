@@ -229,3 +229,37 @@ export async function runSenderWakeSweep({ trigger = "periodic", apply = false, 
   }
   return { ...result, outcomes: (result.outcomes || []).map(({ sender_routing, ...rest }) => rest) };
 }
+
+/**
+ * Campaign Composer: sender coverage for an audience (READ-ONLY).
+ *   markets [{ market_id?, market?, state?, targets }]
+ * The engine reported is the one that dispatches NOW: Sender Routing 2.0 only
+ * when its gate is on AND the live graph loads (otherwise the runtime falls
+ * back to the legacy router, so the preview does too). With the gate off the
+ * graph preview (live, else the labelled proposal) is returned as v2_preview.
+ */
+export async function readAudienceSenderCoverage({ markets = [] } = {}, deps = {}) {
+  const { previewAudienceSenderCoverage } = await import("./audience-coverage-preview.js");
+  const [gate, fleet, blocked, per_sender_cap] = await Promise.all([
+    isSenderRoutingFlagEnabled(SENDER_ROUTING_FLAGS.ROUTING, { env: deps.env || process.env, readSystemValue: deps.readSystemFlag || null }),
+    loadFleet(deps),
+    loadBlocked(deps),
+    loadPerSenderCap(deps).catch(() => null),
+  ]);
+  if (!blocked) return { ok: false, error: "sender_blocklist_unreadable" };
+  const { graph, status } = await resolveGraph(deps, fleet);
+  const live = status === "live";
+  const fleetForGraph = live ? fleet : applyBackfillToFleet(fleet, PROPOSED_SEED_BACKFILL);
+  const engineIsV2 = gate.enabled && live;
+  // The legacy pass uses the graph ONLY for canonical labels + state (what the
+  // planner's candidates carry); its routing is the legacy router's own.
+  const legacy = await previewAudienceSenderCoverage({ markets, gate_enabled: false, graph, fleet, blocked, per_sender_cap, now: deps.now || new Date() });
+  const v2 = await previewAudienceSenderCoverage({ markets, gate_enabled: true, graph, fleet: fleetForGraph, blocked, per_sender_cap, now: deps.now || new Date() });
+  if (engineIsV2) return { ok: true, gate: gate.reason, ...v2 };
+  return {
+    ok: true,
+    gate: gate.reason,
+    ...legacy,
+    v2_preview: { label: `Sender Routing 2.0 preview — NOT the engine that sends today (${gate.enabled ? "graph not live" : "gate off"})`, graph_status: status, seed_backfill_simulated: !live, graph_version: graph.version, markets: v2.markets, totals: v2.totals },
+  };
+}

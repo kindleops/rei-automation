@@ -16,11 +16,13 @@
  * normal outcome, not an error.
  *
  * One policy, two callers: campaign planning (purpose 'proactive') and seller
- * replies / conversation follow-ups (purpose 'reply'). Thread continuity:
- *   reply      keep the thread's number when it is eligible and inside any of
- *              the market's allowed routes.
- *   proactive  keep it only when it is eligible, allowed AND its route is no
- *              lower than the best route that can send now (geography wins).
+ * replies / conversation follow-ups (purpose 'reply'). Thread continuity
+ * (owner decision 2026-10-02, "sticky thread sender", Option A for
+ * e740c6d8): an ESTABLISHED thread keeps its number for both purposes while
+ * it is eligible and inside any of the market's allowed (non-blocked) routes —
+ * a better-placed pool (e.g. a newly onboarded local number) serves NEW
+ * conversations only. Geography decides only when there is no thread number
+ * or it can no longer send.
  * A reroute always records why (thread_reroute). Identity is never touched:
  * routing returns a sender, it never rewrites the seller or the thread.
  *
@@ -459,7 +461,6 @@ export function selectSender(input = {}, ctx = {}) {
     else if (thread_pool && neverPools.has(thread_pool)) reroute_reason = "thread_number_pool_blocked_for_market";
     else if (!evaluation) reroute_reason = thread_pool ? "thread_number_pool_not_routed_for_market" : "thread_number_not_in_any_pool";
     else if (!evaluation.route.enabled || evaluation.context.pool_reason === "route_disabled" || evaluation.context.pool_reason === "pool_disabled") reroute_reason = "thread_number_route_disabled";
-    else if (purpose === PURPOSES.PROACTIVE && best && evaluation.route.priority > best.route.priority) reroute_reason = "thread_number_lower_priority_than_available_route";
     if (!reroute_reason) {
       return picked(graph, { decision: "thread_continuity", row, evaluation, market_id, pools_checked });
     }

@@ -179,10 +179,12 @@ test("reply keeps the thread's number when eligible and routed, even below a hea
   assert.equal(r.thread_reroute, null);
 });
 
-test("proactive does not keep a lower-priority thread number (geography wins), and says why", () => {
-  const r = pick({ purpose: PURPOSES.PROACTIVE, thread_number: "+15550000021" });
-  assert.equal(r.pool_key, "pool_a");
-  assert.equal(r.thread_reroute.reason, "thread_number_lower_priority_than_available_route");
+test("proactive keeps an established thread's number too (Option A); geography serves new conversations", () => {
+  const kept = pick({ purpose: PURPOSES.PROACTIVE, thread_number: "+15550000021" });
+  assert.equal(kept.decision, "thread_continuity");
+  assert.equal(kept.number.id, "c1");
+  const fresh = pick({ purpose: PURPOSES.PROACTIVE });
+  assert.equal(fresh.pool_key, "pool_a", "a new conversation takes the highest-priority pool");
 });
 
 test("thread number fails -> fallback through the graph, reroute recorded", () => {
@@ -429,4 +431,46 @@ test("service blocklist: the guard's Set-valued blocklist is honoured; unreadabl
   const set = await loadBlocked({ env: {}, getSystemValue: async (k) => values[k] ?? null });
   assert.deepEqual([...set].sort(), ["+15550000002", "+15550000011"]);
   assert.equal(await loadBlocked({ env: {}, getSystemValue: async () => { throw new Error("down"); } }), null);
+});
+
+// ── Campaign Composer preview ──────────────────────────────────────────────
+import { previewAudienceSenderCoverage } from "@/lib/domain/routing/sender-routing/audience-coverage-preview.js";
+
+test("Composer preview: gate OFF reports the legacy router as the engine, plus a labelled v2 preview; shared numbers counted once", async () => {
+  const fleet = [
+    { ...num("m1", "+16125550001", "Minneapolis, MN"), messages_sent_today: 100 },
+    { ...num("m2", "+16125550002", "Minneapolis, MN"), messages_sent_today: 0 },
+    { ...num("d1", "+14695550001", "Dallas, TX"), messages_sent_today: 0 },
+    { ...num("l1", "+13235550001", "Los Angeles, CA") },
+  ];
+  const g = buildRoutingGraph({
+    markets: [{ id: "minneapolis-mn", display_name: "Minneapolis, MN", state: "MN" }, { id: "omaha-ne", display_name: "Omaha, NE", state: "NE" }, { id: "phoenix-az", display_name: "Phoenix, AZ", state: "AZ" }],
+    pools: [{ pool_key: "minneapolis", display_name: "Minneapolis", home_market_id: "minneapolis-mn" }, { pool_key: "los_angeles", display_name: "Los Angeles" }, { pool_key: "dallas", display_name: "Dallas" }],
+    pool_numbers: [{ pool_key: "minneapolis", textgrid_number_id: "m1" }, { pool_key: "minneapolis", textgrid_number_id: "m2" }, { pool_key: "los_angeles", textgrid_number_id: "l1" }, { pool_key: "dallas", textgrid_number_id: "d1" }],
+    routes: [
+      { market_id: "minneapolis-mn", pool_key: "minneapolis", priority: 10, affinity_tier: T.PRIMARY },
+      { market_id: "omaha-ne", pool_key: "minneapolis", priority: 10, affinity_tier: T.PREFERRED },
+      { market_id: "phoenix-az", pool_key: "los_angeles", priority: 10, affinity_tier: T.PREFERRED },
+      { market_id: "phoenix-az", pool_key: "dallas", priority: 20, affinity_tier: T.LAST_RESORT },
+    ],
+    version: 1,
+  });
+  const markets = [{ market_id: "minneapolis-mn", targets: 300 }, { market_id: "omaha-ne", targets: 50 }, { market_id: "phoenix-az", targets: 40 }];
+  const out = await previewAudienceSenderCoverage({ markets, gate_enabled: false, graph: g, fleet, blocked: new Set(["+13235550001"]), per_sender_cap: 800, now: NOW });
+  assert.equal(out.engine, "legacy_router");
+  const legacyMpls = out.markets.find((m) => m.market === "Minneapolis, MN");
+  assert.equal(legacyMpls.coverage, "LOCAL");
+  assert.equal(legacyMpls.healthy_numbers, 2);
+  assert.match(out.v2_preview.label, /NOT the engine/);
+  const v2 = Object.fromEntries(out.v2_preview.markets.map((m) => [m.market_id, m]));
+  assert.equal(v2["omaha-ne"].coverage, "REGIONAL");
+  assert.equal(v2["omaha-ne"].shared_numbers, 2, "Omaha and Minneapolis share the Minneapolis numbers");
+  assert.equal(v2["phoenix-az"].coverage, "DEGRADED");
+  assert.equal(v2["phoenix-az"].serving_tier, T.LAST_RESORT);
+  assert.equal(v2["phoenix-az"].unavailable[0].reasons[0].reason, "blocked_by_operator");
+  assert.equal(out.v2_preview.totals.distinct_healthy_numbers, 3, "m1, m2, d1 — counted once across markets");
+  assert.equal(out.v2_preview.totals.distinct_daily_capacity, 700 + 800 + 800);
+  const on = await previewAudienceSenderCoverage({ markets, gate_enabled: true, graph: g, fleet, blocked: new Set(["+13235550001"]), per_sender_cap: 800, now: NOW });
+  assert.equal(on.engine, "sender_routing_v2");
+  assert.equal(on.v2_preview, null);
 });
