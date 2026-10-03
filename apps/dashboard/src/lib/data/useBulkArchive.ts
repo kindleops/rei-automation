@@ -5,9 +5,7 @@
  * them, refresh its counts). The server decides everything else.
  */
 import { useCallback, useState } from 'react'
-import type { LCEffect } from '../../shared/lc'
-import { lcConfirm, lcToast } from '../../shared/lc'
-import type { LCBulkIssue } from '../../shared/lc/BulkBar'
+import { lcConfirm, lcToast, type LCBulkIssue, type LCEffect } from '../../shared/lc'
 import { runBulkArchive, type BulkAction, type BulkObjectType, type BulkRunReport, type BulkPoster, postBulkArchive } from './bulkArchiveData'
 
 export interface BulkNoun { one: string; many: string }

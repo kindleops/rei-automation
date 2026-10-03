@@ -1,10 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { Icon } from '../../../shared/icons'
 import { LCEmpty, LCError, LCSkeleton, cx } from '../../../shared/lc'
-import { useLcSelection } from '../../../shared/lc/selection'
-import { LCBulkBar, type LCBulkAction } from '../../../shared/lc/BulkBar'
+import { LCBulkBar, useLcSelection, type LCBulkAction } from '../../../shared/lc'
 import { useBulkArchive } from '../../../lib/data/useBulkArchive'
 import { GROUPS, nf, type GroupKey, type RailRow } from './war-room-model'
+import { pct, type BookInstrument } from './war-book'
 
 const CAMPAIGN_NOUN = { one: 'campaign', many: 'campaigns' }
 const CAMPAIGN_ARCHIVE_EFFECTS = [
@@ -22,6 +22,22 @@ const CAMPAIGN_ARCHIVE_EFFECTS = [
  */
 
 const COLLAPSED_BY_DEFAULT: GroupKey[] = ['archived']
+
+const n = (v: number | null) => (v === null ? '—' : nf(v))
+
+/** [R8.3] the book instrument — health, throughput, delivery, replies, opt-outs, held. Unknown is "—". */
+function BookInstrumentLine({ inst }: { inst: BookInstrument }) {
+  if ((inst.sent ?? 0) === 0 && (inst.held ?? 0) === 0) return null
+  return (
+    <span className="cc3-inst" data-health={inst.health} title={inst.healthWhy}>
+      <span className="cc3-inst__cell"><small>Sent</small><b className="lc-num">{n(inst.sent)}</b>{inst.sentToday ? <em className="lc-num">+{nf(inst.sentToday)} today</em> : null}</span>
+      <span className="cc3-inst__cell"><small>Deliv</small><b className="lc-num">{pct(inst.deliveryRate, 0)}</b></span>
+      <span className="cc3-inst__cell"><small>Reply</small><b className="lc-num">{pct(inst.replyRate)}</b></span>
+      <span className="cc3-inst__cell" data-warn={inst.optOutRate !== null && inst.optOutRate > 0.02 ? '' : undefined}><small>Opt-out</small><b className="lc-num">{n(inst.optOut)}</b></span>
+      <span className="cc3-inst__cell"><small>Held</small><b className="lc-num">{n(inst.held)}</b></span>
+    </span>
+  )
+}
 
 function Row({ row, selected, onSelect, picked, selecting, onPick }: {
   row: RailRow
@@ -74,6 +90,7 @@ function Row({ row, selected, onSelect, picked, selecting, onPick }: {
           <span className="cc3-row__count lc-num"><b>{nf(row.progress.sent)}</b> / {nf(row.progress.of)} sent</span>
         </span>
       ) : null}
+      <BookInstrumentLine inst={row.instrument} />
     </li>
   )
 }
