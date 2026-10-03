@@ -24,6 +24,10 @@ const LIVE_ROUTE_SRC = readFileSync(
   resolve(__dirname, "../../src/app/api/cockpit/inbox/live/route.js"),
   "utf8",
 );
+const THREAD_READ_POLICY_SRC = readFileSync(
+  resolve(__dirname, "../../../dashboard/src/modules/inbox/thread-read-policy.ts"),
+  "utf8",
+);
 const INBOX_PAGE_SRC = readFileSync(
   resolve(__dirname, "../../../dashboard/src/modules/inbox/InboxPage.tsx"),
   "utf8",
@@ -140,9 +144,11 @@ test("initial boot uses canonical row contract without skip flags", () => {
   assert.doesNotMatch(LIVE_ROUTE_SRC, /skip_counts\s*=\s*'true'/);
   assert.doesNotMatch(LIVE_ROUTE_SRC, /skip_delivery\s*=\s*'true'/);
   assert.doesNotMatch(LIVE_ROUTE_SRC, /initial_boot_safe/);
-  // Contract re-pin: the InboxPage thread-state write path now routes through
-  // resolveDealDeskWritableThreadKey (canonical-thread-reference write contract).
-  assert.match(INBOX_PAGE_SRC, /resolveDealDeskWritableThreadKey/);
+  // Contract re-pin: InboxPage's thread-read write goes through the read policy
+  // (2f26e59b), which keys the write via resolveDealDeskWritableThreadKey
+  // (canonical-thread-reference write contract).
+  assert.match(INBOX_PAGE_SRC, /applyThreadReadOnSelect/);
+  assert.match(THREAD_READ_POLICY_SRC, /resolveDealDeskWritableThreadKey\(/);
 });
 
 test("deal desk opens 25/50/25 by default", () => {
