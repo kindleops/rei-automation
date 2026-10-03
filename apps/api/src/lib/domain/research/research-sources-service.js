@@ -12,7 +12,7 @@
  * (x-ops-user-id); a body never names it.
  *
  * The tables are a PROPOSED migration
- * (supabase/migrations-draft/browser/20261002230000_research_sources.sql).
+ * (supabase/migrations/20261002230000_research_sources.sql (applied 2026-10-03)).
  * Until it is applied every call reports `research_store_unavailable` (503) and
  * the dashboard keeps sources on the device.
  */

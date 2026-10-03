@@ -5,7 +5,7 @@
  * property or company (`research.source_saved`). Removals, broken-destination
  * reports and navigation never appear — the Browser keeps no browsing history.
  *
- * The table is a PROPOSED migration (supabase/migrations-draft/browser/…). Until
+ * The table is migration supabase/migrations/20261002230000_research_sources.sql (applied 2026-10-03). Until
  * it is applied this adapter reads nothing and says so quietly (an empty
  * answer, not a degraded feed): a feature that is not switched on is not a
  * failure of the feed.
