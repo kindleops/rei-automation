@@ -50,7 +50,11 @@ export const subscribeToInboxRealtime = (onChange?: () => void): RealtimeSubscri
     return []
   }
   const supabase = getSupabaseClient()
-  const relevantTables = ['message_events', 'inbox_thread_state', 'send_queue', 'universal_lead_state_events', 'operator_entity_preferences']
+  // Published tables only (supabase_realtime: message_events,
+  // inbox_thread_state, send_queue). universal_lead_state_events and
+  // operator_entity_preferences are NOT published: their channels only errored
+  // and re-joined in a loop against the Realtime subscription manager.
+  const relevantTables = ['message_events', 'inbox_thread_state', 'send_queue']
   const subs: RealtimeSubscription[] = []
 
   for (const table of relevantTables) {

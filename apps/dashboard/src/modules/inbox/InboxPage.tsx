@@ -76,7 +76,6 @@ import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
-import { subscribeToInboxRealtime } from '../../lib/data/realtime'
 import {
   getQueueControlSettings,
   updateQueueControlSettings,
@@ -263,8 +262,15 @@ import {
   mergeOptimisticPatches,
 } from '../../domain/inbox/optimistic-thread-patch'
 import {
-  createSelectedThreadPollScheduler,
+  createIntervalScheduler,
+  POLL_INTERVAL_SELECTED_MS,
+  shouldRunSelectedThreadPoll,
 } from '../../domain/inbox/inbox-poll-scheduler'
+import {
+  createRealtimeResubscribeTrigger,
+  isDeadChannelStatus,
+  realtimeRetryDelayMs,
+} from '../../domain/inbox/inbox-realtime-sync'
 import {
   getInboxProof,
   markDossierParallelStarted,
@@ -313,6 +319,9 @@ import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
 import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
 import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings, updateSetting, type AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
+
+/** Healthy-state read of the open conversation (silent CDC outage net). */
+const SELECTED_THREAD_SAFETY_POLL_MS = 60_000
 
 const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligence/CompIntelligenceWorkspace').then((m) => ({ default: m.default })))
 // DEV: Comp Intelligence V4 rebuild is the DEFAULT in dev. Opt OUT (old workspace)
@@ -751,6 +760,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     sourceMode,
     setSourceMode
   } = useInboxData({ paused: messagesLoading })
+  // Read by the selected-thread realtime effect without re-subscribing on
+  // every connection-state flip.
+  const connectionStateRef = useRef(data.connectionState)
+  useEffect(() => {
+    connectionStateRef.current = data.connectionState
+  }, [data.connectionState])
   useEffect(() => {
     publishMobileInboxBadge(data.unreadCount ?? 0)
   }, [data.unreadCount])
@@ -2803,8 +2818,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const selectedOwnerId = selected.ownerId || ''
     const selectedPropertyId = selected.propertyId || ''
     const selectedProspectId = selected.prospectId || ''
-    const shouldPollSelectedThread = data.connectionState === 'offline'
-      || data.connectionState === 'degraded_polling'
+    /*
+     * The connection state is read through a ref. It used to be a dependency
+     * of this effect, so every realtime status flip (reconnecting -> live)
+     * tore this channel down and rebuilt it -- and an inbound that landed in
+     * that gap never reached the open conversation.
+     */
+    const isSelectedPollDegraded = () => shouldRunSelectedThreadPoll(connectionStateRef.current ?? 'live')
     const supabase = getSupabaseClient()
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
     let pollController: AbortController | null = null
@@ -2863,7 +2883,25 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return false
     }
 
-    const channel = supabase
+    /*
+     * The open conversation's channel re-joins like the list's: on
+     * CHANNEL_ERROR / TIMED_OUT / CLOSED (backoff), on page return, reconnect
+     * and token refresh -- and each re-join reads the thread once to pick up
+     * whatever arrived while it was down.
+     */
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let channelGeneration = 0
+    let retryAttempt = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    let resubscribeDebounce: ReturnType<typeof setTimeout> | null = null
+    let disposed = false
+    const subscribeSelectedChannel = (reason: string) => {
+    if (disposed) return
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+    if (channel) { const previous = channel; channel = null; void supabase.removeChannel(previous) }
+    const generation = ++channelGeneration
+    const isRejoin = generation > 1
+    channel = supabase
       .channel(uniqueChannelName(`nexus-inbox-thread-${selectedKey}`))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, (payload) => {
         console.log('[InboxPage realtime message_events]', { eventType: payload.eventType, threadKey: selectedKey })
@@ -2986,16 +3024,35 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
        *
        * Do not re-add a binding without confirming the table is published.
        */
-      .subscribe()
+      .subscribe((status) => {
+        // removeChannel() reports CLOSED for the channel we replaced: ignore it.
+        if (disposed || generation !== channelGeneration) return
+        if (status === 'SUBSCRIBED') {
+          retryAttempt = 0
+          if (isRejoin) pollSelectedMessages(true)
+        } else if (isDeadChannelStatus(status) && !retryTimer) {
+          const delay = realtimeRetryDelayMs(retryAttempt)
+          retryAttempt += 1
+          retryTimer = setTimeout(() => {
+            retryTimer = null
+            subscribeSelectedChannel('channel_retry')
+          }, delay)
+        }
+        if (DEV) console.log('[InboxPage selected thread realtime]', { status, reason, generation, threadKey: selectedKey })
+      })
+    }
 
-    // Inbox-wide realtime for list movement + counts (invalidates short TTL cache on message/state changes)
-    const inboxSubs = subscribeToInboxRealtime(() => {
-      // Trigger any local schedule if in scope, otherwise rely on cache-bust + next render/fetch cycle
-      try { if (typeof scheduleRefreshInbox === 'function') scheduleRefreshInbox() } catch {}
-    })
+    /*
+     * The list-level channel (message_events / inbox_thread_state / send_queue
+     * -> row patch + trailing reconcile) lives in useInboxData. A second,
+     * per-selection copy used to be opened here through subscribeToInboxRealtime:
+     * five more channels per selected thread, two on unpublished tables, and a
+     * list refetch 200ms after every event -- which read the read model before
+     * inbox_thread_state caught up and replaced the live row with the old one.
+     */
 
-    const pollSelectedMessages = () => {
-      if (!shouldPollSelectedThread || document.hidden || pollInFlight) return
+    const pollSelectedMessages = (force = false) => {
+      if ((!force && !isSelectedPollDegraded()) || document.hidden || pollInFlight) return
       markSelectedPollTick()
       pollInFlight = true
       pollController = new AbortController()
@@ -3003,7 +3060,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         if (!messages.length) return
         commitDashboardMessages(selectedKey, messages, {
           source: 'selected_thread_polling',
-          connectionState: data.connectionState ?? null,
+          connectionState: connectionStateRef.current ?? null,
         })
         messageCacheRef.current[selectedKey] = dedupeMessages([
           ...(messageCacheRef.current[selectedKey] ?? []),
@@ -3021,23 +3078,50 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         pollInFlight = false
       })
     }
-    const selectedPollScheduler = shouldPollSelectedThread
-      ? createSelectedThreadPollScheduler({
-        getConnectionState: () => data.connectionState ?? 'live',
-        isDocumentHidden: () => document.hidden,
-        isPollInFlight: () => pollInFlight,
-        onTick: pollSelectedMessages,
-      })
-      : null
+    subscribeSelectedChannel('select')
+
+    // Degraded: read the open thread every 30s. Healthy: every 60s anyway,
+    // because a joined channel can be silent during a server-side CDC outage.
+    const selectedPollScheduler = createIntervalScheduler({
+      intervalMs: POLL_INTERVAL_SELECTED_MS,
+      shouldRun: () => isSelectedPollDegraded() && !document.hidden && !pollInFlight,
+      onTick: () => pollSelectedMessages(),
+    })
+    const selectedSafetyScheduler = createIntervalScheduler({
+      intervalMs: SELECTED_THREAD_SAFETY_POLL_MS,
+      shouldRun: () => !isSelectedPollDegraded() && !document.hidden && !pollInFlight,
+      onTick: () => pollSelectedMessages(true),
+    })
+    const stopResubscribeTrigger = createRealtimeResubscribeTrigger({
+      doc: document,
+      win: window,
+      subscribeAuth: (listener) => {
+        const { data: authData } = supabase.auth.onAuthStateChange((event) => listener(event))
+        return () => authData.subscription.unsubscribe()
+      },
+      onResubscribe: (reason) => {
+        if (resubscribeDebounce) clearTimeout(resubscribeDebounce)
+        resubscribeDebounce = setTimeout(() => {
+          resubscribeDebounce = null
+          retryAttempt = 0
+          subscribeSelectedChannel(reason)
+        }, 500)
+      },
+    })
 
     return () => {
+      disposed = true
       if (refreshTimer) clearTimeout(refreshTimer)
-      selectedPollScheduler?.stop()
+      if (retryTimer) clearTimeout(retryTimer)
+      if (resubscribeDebounce) clearTimeout(resubscribeDebounce)
+      selectedPollScheduler.stop()
+      selectedSafetyScheduler.stop()
+      stopResubscribeTrigger()
       pollController?.abort()
-      void supabase.removeChannel(channel)
-      inboxSubs.forEach((s) => { try { s.unsubscribe() } catch {} })
+      if (channel) void supabase.removeChannel(channel)
+      channel = null
     }
-  }, [DEV, data.connectionState, data.dataMode, refreshInbox, selectedKeyForEffect, upsertDeskQueueRow])
+  }, [DEV, data.dataMode, refreshInbox, selectedKeyForEffect, upsertDeskQueueRow])
 
   const handleTranslateThread = useCallback(async () => {
     if (!threadHasInboundMessages) return

@@ -1,6 +1,6 @@
 import { uniqueChannelName } from '../../lib/data/realtime-channel'
 import { useState, useEffect, useCallback, useRef, useReducer } from 'react'
-import { inboxReducer, EMPTY_INBOX_STORE_STATE, type InboxStoreAction } from './inbox-store'
+import { inboxReducer, EMPTY_INBOX_STORE_STATE, reconcileFetchedRowsWithRealtime, type InboxStoreAction } from './inbox-store'
 import type { CommandCenterStore } from '../../domain/types'
 import { formatRelativeTime } from '../../shared/formatters'
 import { buildConversationThreadIdFromRecord, fetchInboxModel, type InboxFetchOptions, type InboxSourceMode } from '../../lib/data/inboxData'
@@ -22,8 +22,16 @@ import {
 } from '../../lib/data/dashboardDataLayer'
 import {
   createDegradedPollScheduler,
+  createIntervalScheduler,
   POLL_INTERVAL_DEGRADED_MS,
 } from '../../domain/inbox/inbox-poll-scheduler'
+import {
+  buildThreadStateListPatch,
+  createRealtimeOverlayStore,
+  createRealtimeResubscribeTrigger,
+  isDeadChannelStatus,
+  realtimeRetryDelayMs,
+} from '../../domain/inbox/inbox-realtime-sync'
 import {
   adjustFetchInFlight,
   markApiBootRequestStart,
@@ -1041,6 +1049,12 @@ const rowIdentityMatches = (row: Record<string, unknown>, threadKey: string): bo
   return needles.some((needle) => identities.has(needle))
 }
 
+/** Trailing list read after a burst of conversation changes. Longer than the
+ * ~2s message_events -> inbox_thread_state gap measured on prod. */
+const REALTIME_RECONCILE_DELAY_MS = 2_500
+/** Slow list read while realtime reports healthy (silent-outage net). */
+const REALTIME_SAFETY_RECONCILE_MS = 60_000
+
 export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; paused?: boolean } = {}) => {
   const { initialSourceMode = 'conversations', paused = false } = options
   const [sourceMode, setSourceMode] = useState<InboxSourceMode>(initialSourceMode)
@@ -1093,6 +1107,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const countsRefreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastRefreshAtRef = useRef<string | null>(null)
+  const realtimeOverlaysRef = useRef(createRealtimeOverlayStore())
   const realtimeBatchRef = useRef<{ tables: Set<string>; threadKeys: Set<string>; eventCount: number }>({
     tables: new Set(), threadKeys: new Set(), eventCount: 0,
   })
@@ -1276,7 +1291,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           type: 'BUCKET_FETCH_DONE',
           bucketKey,
           requestId,
-          rows: model.threads,
+          rows: reconcileFetchedRowsWithRealtime(model.threads, realtimeOverlaysRef.current.list(), bucketKey),
           cursor: model.pagination?.nextCursor ?? null,
           hasMore: Boolean(model.pagination?.hasMore),
         })
@@ -1604,6 +1619,42 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     }
 
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
+    let stopResubscribeTrigger: () => void = () => undefined
+    let stopRealtimeTimers: () => void = () => undefined
+
+    /*
+     * ONE TRAILING LIST READ PER BURST OF CONVERSATION CHANGES.
+     *
+     * An inbound writes message_events, then inbox_thread_state ~2s later. The
+     * row is patched live from both; this read reconciles bucket membership
+     * (New Replies is the server's call) once the read model has caught up. It
+     * is forced so an in-flight read cannot swallow it (that is how the second
+     * refresh used to be dropped as already_in_flight), and fetched rows can no
+     * longer undo a newer live row (reconcileFetchedRowsWithRealtime).
+     */
+    let reconcileTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRealtimeReconcile = () => {
+      if (cancelled) return
+      if (reconcileTimer) clearTimeout(reconcileTimer)
+      reconcileTimer = setTimeout(() => {
+        reconcileTimer = null
+        if (cancelled || (typeof document !== 'undefined' && document.hidden)) return
+        void refresh({ _force: true, _refreshReason: 'realtime_reconcile', _timeoutMode: 'auto_refresh' })
+      }, REALTIME_RECONCILE_DELAY_MS)
+    }
+
+    // "SUBSCRIBED" is not proof of delivery: during a server-side CDC outage the
+    // channel stays joined and silent. While realtime reports healthy, a slow
+    // list read still runs so the Inbox can never be stale for longer than this.
+    const safetyReconcileScheduler = createIntervalScheduler({
+      intervalMs: REALTIME_SAFETY_RECONCILE_MS,
+      shouldRun: () => !cancelled
+        && !(typeof document !== 'undefined' && document.hidden)
+        && stateRef.current.realtimeStatus === 'connected',
+      onTick: () => {
+        void refresh({ _automatic: true, _refreshReason: 'realtime_safety_reconcile' })
+      },
+    })
 
     const degradedPollScheduler = createDegradedPollScheduler({
       intervalMs: POLL_INTERVAL_DEGRADED_MS,
@@ -1731,6 +1782,10 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
               table,
               eventType: payload.eventType ?? null,
             })
+            if (table === 'message_events' && payload.eventType === 'INSERT') {
+              realtimeOverlaysRef.current.record({ threadKey, patch, upsert: true })
+              scheduleRealtimeReconcile()
+            }
             // An inbound can change New Replies membership; only the server view
             // decides it, so reconcile the chips from v_inbox_bucket_counts.
             if (table === 'message_events' && patch.latestDirection === 'inbound') {
@@ -1789,7 +1844,15 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
           if (table === 'inbox_thread_state' && payload.new) {
             const row = payload.new as Record<string, unknown>
-            const patch = buildRealtimeLeadStatePatch(row)
+            // inbox_thread_state is the canonical read model for the row: its
+            // latest message, preview and bucket move the row, not only labels.
+            const listPatch = buildThreadStateListPatch(row)
+            const patch = { ...buildRealtimeLeadStatePatch(row), ...listPatch }
+            const inboundLatest = listPatch.latestDirection === 'inbound'
+            if (Object.keys(listPatch).length > 0) {
+              realtimeOverlaysRef.current.record({ threadKey, patch: listPatch, upsert: inboundLatest, canonical: true })
+              scheduleRealtimeReconcile()
+            }
             if (Object.keys(patch).length > 0) {
               const before = findStoredThread(threadKey)
               const beforeBucket = rowBucket(before)
@@ -1810,7 +1873,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
                 threadKey,
                 patch,
                 targetBucketKey: afterBucket,
-                upsert: false,
+                upsert: inboundLatest,
                 countDeltas,
               })
               patchDashboardThread(threadKey, patch, {
@@ -1891,7 +1954,42 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         }
       }
 
-      try {
+      /*
+       * RE-SUBSCRIBE, DON'T TRUST "SUBSCRIBED".
+       *
+       * This channel used to be created once per mount. A socket that slept
+       * through a token expiry, a network change, or a Realtime CDC outage
+       * (prod realtime_logs 10-02/10-03: list_changes statement timeouts, the
+       * replication slot dropped, the CDC pool exhausted) kept the old channel
+       * -- and an error/closed status only switched on 60s polling, it never
+       * re-joined. The channel is now re-created on CHANNEL_ERROR / TIMED_OUT /
+       * CLOSED (with backoff), on page return, on reconnect and on token refresh,
+       * and every re-join is followed by a catch-up read of the list and counts.
+       */
+      let channelGeneration = 0
+      let retryAttempt = 0
+      let retryTimer: ReturnType<typeof setTimeout> | null = null
+      let resubscribeDebounce: ReturnType<typeof setTimeout> | null = null
+      const catchUp = (reason: string) => {
+        if (cancelled || (typeof document !== 'undefined' && document.hidden)) return
+        refreshAuthoritativeViewCounts(dispatch, (warning) => {
+          metaRef.current.countsFetchWarning = warning
+        })
+        void refresh({ _force: true, _refreshReason: reason, _timeoutMode: 'auto_refresh' })
+      }
+      const removeCurrentChannel = () => {
+        if (!channel) return
+        const previous = channel
+        channel = null
+        void getSupabaseClient().removeChannel(previous)
+      }
+      const subscribeChannel = (reason: string) => {
+        if (cancelled) return
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+        removeCurrentChannel()
+        const generation = ++channelGeneration
+        const isRejoin = generation > 1
+        try {
         const supabase = getSupabaseClient()
         channel = supabase
           .channel(uniqueChannelName('nexus-inbox-realtime'))
@@ -1925,7 +2023,20 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, triggerRefresh)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_thread_state' }, triggerRefresh)
           .subscribe((status) => {
-            if (cancelled) return
+            // A status from a channel we already replaced or removed is noise:
+            // removeChannel() itself reports CLOSED.
+            if (cancelled || generation !== channelGeneration) return
+            if (status === 'SUBSCRIBED') {
+              retryAttempt = 0
+              if (isRejoin) catchUp(`realtime_rejoin_${reason}`)
+            } else if (isDeadChannelStatus(status) && !retryTimer) {
+              const delay = realtimeRetryDelayMs(retryAttempt)
+              retryAttempt += 1
+              retryTimer = setTimeout(() => {
+                retryTimer = null
+                subscribeChannel('channel_retry')
+              }, delay)
+            }
             const normalizedStatus: InboxRealtimeStatus =
               status === 'SUBSCRIBED' ? 'connected'
               : status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' ? 'error'
@@ -1959,9 +2070,38 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
             }
           })
 
-        if (isDev) console.log('[useInboxData] realtime subscriptions active')
+        if (isDev) console.log('[useInboxData] realtime subscriptions active', { reason, generation })
       } catch (error) {
         enterPollingMode('realtime_setup_failed', error)
+      }
+      }
+      subscribeChannel('mount')
+
+      let authSubscription: { unsubscribe: () => void } | null = null
+      stopResubscribeTrigger = createRealtimeResubscribeTrigger({
+        doc: typeof document !== 'undefined' ? document : null,
+        win: typeof window !== 'undefined' ? window : null,
+        subscribeAuth: (listener) => {
+          try {
+            const { data } = getSupabaseClient().auth.onAuthStateChange((event) => listener(event))
+            authSubscription = data.subscription
+          } catch { /* no auth client: nothing to follow */ }
+          return () => { authSubscription?.unsubscribe() }
+        },
+        onResubscribe: (reason) => {
+          if (resubscribeDebounce) clearTimeout(resubscribeDebounce)
+          resubscribeDebounce = setTimeout(() => {
+            resubscribeDebounce = null
+            retryAttempt = 0
+            subscribeChannel(reason)
+          }, 500)
+        },
+      })
+      stopRealtimeTimers = () => {
+        if (retryTimer) clearTimeout(retryTimer)
+        if (resubscribeDebounce) clearTimeout(resubscribeDebounce)
+        retryTimer = null
+        resubscribeDebounce = null
       }
     } else {
       dispatch({ type: 'SET_REALTIME_STATUS', status: 'disabled' })
@@ -1981,7 +2121,12 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       degradedPollScheduler.stop()
       window.removeEventListener('offline', handleOffline)
       window.removeEventListener('online', handleOnline)
+      if (reconcileTimer) clearTimeout(reconcileTimer)
+      stopRealtimeTimers()
+      stopResubscribeTrigger()
+      safetyReconcileScheduler.stop()
       if (channel) void getSupabaseClient().removeChannel(channel)
+      channel = null
     }
   }, [refresh, realtimeEnabled])
 

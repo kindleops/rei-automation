@@ -235,6 +235,77 @@ const applyCountDeltas = (current: Record<string, number>, deltas: Record<string
   return next
 }
 
+// ── Realtime overlay reconciliation ───────────────────────────────────────────
+
+/**
+ * A realtime change the list has already shown, remembered briefly so a list
+ * fetch cannot take it back.
+ */
+export interface RealtimeRowOverlay {
+  threadKey: string
+  patch: Record<string, unknown>
+  /** True when the change may introduce a thread the list has not loaded yet. */
+  upsert: boolean
+}
+
+const OVERLAY_IDENTITY_KEYS = new Set(['conversationThreadId', 'conversation_thread_id', 'threadKey', 'thread_key', 'id'])
+const OVERLAY_BUCKET_KEYS = new Set(['inbox_bucket', 'inboxBucket', 'inbox_category', 'inboxCategory', 'priorityBucket', 'priority_bucket', 'bucket'])
+
+const overlayFieldsForExistingRow = (patch: Record<string, unknown>): Record<string, unknown> => {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(patch)) {
+    if (OVERLAY_IDENTITY_KEYS.has(key)) continue
+    if (OVERLAY_BUCKET_KEYS.has(key) && (value == null || String(value).trim() === '')) continue
+    out[key] = value
+  }
+  return out
+}
+
+/**
+ * LIVE ROWS MUST SURVIVE A LIST FETCH THAT IS OLDER THAN THEM.
+ *
+ * The webhook writes message_events first and inbox_thread_state about two
+ * seconds later (measured on prod: 02:37:53.795 -> 02:37:55.946). The realtime
+ * INSERT moved the thread to the top, then the list refetch it triggered read
+ * the read model before inbox_thread_state caught up, and BUCKET_FETCH_DONE
+ * replaced the rows -- the thread fell back to its old position and old
+ * preview. The follow-up refresh for the inbox_thread_state UPDATE was then
+ * dropped as `already_in_flight`, so it stayed wrong until a manual refresh.
+ *
+ * Here a fetched list keeps any realtime row whose latest message is strictly
+ * NEWER than what the server returned. Equal or older means the server has
+ * caught up and wins. A thread the fetch did not return is re-added only when
+ * the change can introduce one and the row belongs in this bucket.
+ */
+export function reconcileFetchedRowsWithRealtime(
+  rows: unknown[],
+  overlays: RealtimeRowOverlay[],
+  bucketKey: string,
+): unknown[] {
+  if (!overlays.length) return rows
+  let next = rows
+  let touched = false
+  for (const overlay of overlays) {
+    const overlayTs = rowTimestamp(overlay.patch)
+    if (overlayTs <= 0) continue
+    const index = next.findIndex((row) => rowMatchesThread(row as Record<string, unknown>, overlay.threadKey))
+    if (index >= 0) {
+      const current = next[index] as Record<string, unknown>
+      if (overlayTs <= rowTimestamp(current)) continue
+      if (!touched) next = [...next]
+      next[index] = { ...current, ...overlayFieldsForExistingRow(overlay.patch) }
+      touched = true
+      continue
+    }
+    if (!overlay.upsert) continue
+    const candidate = withThreadIdentity(overlay.threadKey, { ...overlay.patch })
+    if (!rowBelongsToBucket(candidate, bucketKey)) continue
+    next = [candidate, ...next]
+    touched = true
+  }
+  return touched ? sortRowsNewestFirst(next) : rows
+}
+
 // ── Initial state ─────────────────────────────────────────────────────────────
 
 export const EMPTY_INBOX_STORE_STATE: InboxStoreState = {
