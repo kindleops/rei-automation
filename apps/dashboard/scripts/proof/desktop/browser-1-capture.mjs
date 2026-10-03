@@ -128,6 +128,27 @@ for (const theme of THEMES) {
     await ctx.close()
   }
 
+  if (SCENES.has('di')) {
+    // DI | Browser on a Hennepin property with an APN: assessor + tax as parcel deep links
+    const { ctx, page } = await open(theme)
+    await go(page, `/deal-intelligence?property_id=${PID}`, '[data-ws-pane]')
+    await page.waitForTimeout(6000)
+    await deck(page, 'browser beside')
+    await page.waitForSelector('.lcb', { timeout: 60000 })
+    await page.evaluate((pid) => {
+      const loc = { propertyId: pid, threadKey: null, masterOwnerId: null, prospectId: null, opportunityId: null, address: '3635 Emerson Ave N', setAt: Date.now() }
+      sessionStorage.setItem('nexus:property-locator:v1', JSON.stringify(loc))
+      window.dispatchEvent(new CustomEvent('nexus:property-locator', { detail: loc }))
+    }, PID)
+    await page.waitForTimeout(800)
+    await deck(page, 'research current property')
+    await page.waitForSelector('.lcb-launch__group', { timeout: 60000 })
+    await page.waitForTimeout(1500)
+    log.notes.push({ rows: await page.evaluate(() => [...document.querySelectorAll('.lcb-launch__row')].slice(0, 3).map((r) => ({ text: r.textContent.trim().slice(0, 110), href: r.querySelector('button')?.getAttribute('title') }))) })
+    await shot(page, `${theme}-1440-09b-di-browser-apn`)
+    await ctx.close()
+  }
+
   if (SCENES.has('themes')) {
     const { ctx, page } = await open(theme)
     await go(page, intent({ do: 'research', kind: 'property', id: PID, label: LABEL }), '.lcb-launch__group')
