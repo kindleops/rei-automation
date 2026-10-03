@@ -793,7 +793,7 @@ async function buildReplyDeps(sb, COHORT, { dryRun = false, blocked = [] } = {})
     // unreadable blocklist means no sender, never an empty blocklist.
     selectSender: async ({ ctx, template_id }) =>
       senderMod.selectCleanupReplySender(
-        { market: ctx.market || null, state: ctx.property?.state || null, template_id },
+        { market: ctx.market || null, state: ctx.property?.state || null, template_id, market_id: ctx.market_id || null, thread_key: ctx.thread?.thread_key || null },
         { chooseTextgridNumber: feeder.chooseTextgridNumber, getSystemValue: strictSystemValue, supabase: db }
       ),
     // The dispatcher's identity anchor (operator_reply action, one per queue_key).

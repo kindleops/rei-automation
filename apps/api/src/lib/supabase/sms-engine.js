@@ -19,6 +19,7 @@ import { isManualInboxSend, isUnknownAutoReply, isImmediateInboundAutoReply } fr
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
+import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
 import { loadPropertyGeography, resolveRecipientTimezone, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
 import {
@@ -1551,6 +1552,24 @@ async function loadOutboundNumberByPhone(phone_number, deps = {}) {
 
 export async function selectAvailableTextgridNumber(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
+
+  // SENDER ROUTING 2.0 (double-gated). Thread continuity, the routing graph and
+  // a PARK (no retry burn) when nothing in the market's graph can send. null =
+  // not deciding (gate off / graph absent) -> both branches below, unchanged.
+  // With the env ceiling off this is one synchronous read: no import, no await.
+  if (senderRoutingCeiling(deps.env || process.env)) {
+    const { routeQueueRowViaPolicy } = await import("@/lib/domain/routing/sender-routing/sender-routing-runtime.js");
+    const routed = await routeQueueRowViaPolicy(normalized, {
+      ...deps,
+      loadFleet: async () => {
+        if (typeof deps.loadTextgridFleet === "function") return deps.loadTextgridFleet();
+        const { data, error } = await getSupabase(deps).from(TEXTGRID_NUMBERS_TABLE).select("*").limit(200);
+        if (error) throw error;
+        return deriveFleetSentToday(Array.isArray(data) ? data : [], deps);
+      },
+    });
+    if (routed) return routed;
+  }
 
   if (clean(normalized.from_phone_number)) {
     const intended = normalizePhone(normalized.from_phone_number);

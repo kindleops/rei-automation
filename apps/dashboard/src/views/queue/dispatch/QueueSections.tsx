@@ -476,13 +476,15 @@ export function QueueMarketsView({ shell, items, directory, fleet, loading, rang
 const STATE_TONE: Record<string, 'green' | 'amber' | 'red' | 'muted'> = { active: 'green', paused: 'muted', degraded: 'amber', blocked: 'red', unregistered: 'muted' }
 const STATE_LABEL: Record<string, string> = { active: 'Active', paused: 'Paused', degraded: 'Degraded', blocked: 'Blocked', unregistered: 'Unregistered' }
 
-export function QueueSendersView({ shell, items, fleet, loading, rangeLabel, onViewRows }: {
+export function QueueSendersView({ shell, items, fleet, loading, rangeLabel, onViewRows, coverage }: {
   shell: ShellProps
   items: QueueItem[]
   fleet: TextgridFleetNumber[]
   loading: boolean
   rangeLabel: string
   onViewRows: (phone: string) => void
+  /** Sender Routing 2.0 coverage panel — the caller passes it on desktop only (never on a phone). */
+  coverage?: ReactNode
 }) {
   const [market, setMarket] = useState<string>('all')
   const [open, setOpen] = useState<string | null>(null)
@@ -497,6 +499,7 @@ export function QueueSendersView({ shell, items, fleet, loading, rangeLabel, onV
   return (
     <QueueShell {...shell} view="senders" scrollKey={market} controls={options.length > 2 ? <Chips value={market} options={options} onChange={setMarket} label="Sender market" /> : undefined}>
       <div className="qx-list">
+        {coverage ?? null}
         {loading && items.length === 0 && fleet.length === 0 ? <Skeletons /> : (
           <>
             <KpiPanel

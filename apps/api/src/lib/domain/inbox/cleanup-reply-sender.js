@@ -26,7 +26,19 @@ import {
   loadSmsHealthGuardSystemControl,
 } from "@/lib/domain/delivery/sms-health-guard.js";
 
+import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
+
 const clean = (v) => String(v ?? "").trim();
+
+async function loadThreadOurNumber(thread_key, deps = {}) {
+  if (!clean(thread_key) || !deps.supabase) return null;
+  try {
+    const { data } = await deps.supabase.from("inbox_thread_state").select("our_number").eq("thread_key", clean(thread_key)).maybeSingle();
+    return clean(data?.our_number) || null;
+  } catch {
+    return null;
+  }
+}
 
 const noSender = (routing_block_reason, extra = {}) => ({
   routing_allowed: false,
@@ -42,7 +54,7 @@ const noSender = (routing_block_reason, extra = {}) => ({
  * @param {object} args  { market, state, template_id }
  * @param {object} deps  { chooseTextgridNumber(candidate, options, deps), getSystemValue(key), supabase, env }
  */
-export async function selectCleanupReplySender({ market = null, state = null, template_id = null } = {}, deps = {}) {
+export async function selectCleanupReplySender({ market = null, state = null, template_id = null, market_id = null, thread_key = null, thread_number = null } = {}, deps = {}) {
   const env = deps.env || process.env;
   let system_control;
   try {
@@ -55,11 +67,21 @@ export async function selectCleanupReplySender({ market = null, state = null, te
   }
   const blocked = getDispatchBlockedSets(env, system_control).sender_numbers;
 
+  // Sender Routing 2.0 (double-gated in the router): a late reply is a REPLY —
+  // the thread's own number first when it is still eligible and routed for
+  // the market. Gate off: none of this is read and the candidate is unchanged.
+  const v2 = senderRoutingCeiling(env);
+  const threadNumber = v2 ? clean(thread_number) || (await loadThreadOurNumber(thread_key, deps)) : null;
+
   let r;
   try {
     r = await deps.chooseTextgridNumber(
-      { market, state, touch_number: 2, is_first_touch: false },
-      { first_touch: false, blocked_sender_numbers: blocked },
+      v2
+        ? { market, state, touch_number: 2, is_first_touch: false, canonical_market_id: market_id, thread_number: threadNumber }
+        : { market, state, touch_number: 2, is_first_touch: false },
+      v2
+        ? { first_touch: false, blocked_sender_numbers: blocked, sender_purpose: "reply" }
+        : { first_touch: false, blocked_sender_numbers: blocked },
       { supabase: deps.supabase, ...(Array.isArray(deps.textgridNumberRows) ? { textgridNumberRows: deps.textgridNumberRows } : {}) }
     );
   } catch {

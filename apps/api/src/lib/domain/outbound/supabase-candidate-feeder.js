@@ -1,4 +1,6 @@
 import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
+import { byUsageThenRecency } from "@/lib/domain/routing/sender-routing/sender-allocator.js";
+import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
 import crypto from "node:crypto";
 
 import { child } from "@/lib/logging/logger.js";
@@ -3027,15 +3029,8 @@ function buildRoutingSelection({
   };
 }
 
-function byUsageThenRecency(left, right) {
-  const left_sent = asNumber(left.messages_sent_today, 0);
-  const right_sent = asNumber(right.messages_sent_today, 0);
-  if (left_sent !== right_sent) return left_sent - right_sent;
-
-  const left_ts = left.last_used_at ? new Date(left.last_used_at).getTime() : 0;
-  const right_ts = right.last_used_at ? new Date(right.last_used_at).getTime() : 0;
-  return left_ts - right_ts;
-}
+// byUsageThenRecency (the allocator) lives in routing/sender-routing/sender-allocator.js,
+// unchanged, so Sender Routing 2.0 ranks numbers within a pool with the same comparator.
 
 /**
  * The sender fleet (public.textgrid_numbers — a dozen rows). A caller that
@@ -3129,6 +3124,14 @@ export function countSendableSendersByMarket(rows = [], markets = [], options = 
 export async function chooseTextgridNumber(candidate = {}, options = {}, deps = {}) {
   if (typeof deps.chooseTextgridNumber === "function") {
     return deps.chooseTextgridNumber(candidate, options);
+  }
+
+  // SENDER ROUTING 2.0 (double-gated; null = not deciding -> the legacy router
+  // below, unchanged). With the env ceiling off this is one synchronous read.
+  if (senderRoutingCeiling(deps.env || process.env)) {
+    const { routeCandidateViaPolicy } = await import("@/lib/domain/routing/sender-routing/sender-routing-runtime.js");
+    const routed = await routeCandidateViaPolicy(candidate, options, { ...deps, loadFleet: () => loadTextgridNumberFleet(deps) });
+    if (routed) return routed;
   }
 
   const data = await loadTextgridNumberFleet(deps);

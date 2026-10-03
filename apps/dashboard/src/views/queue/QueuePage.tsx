@@ -48,6 +48,7 @@ import { QueueConfirmModal } from './components/QueueConfirmModal'
 import { QueueExceptionBadges } from './components/QueueExceptionBadges'
 import { QueueInlineFlow } from './components/QueueInlineFlow'
 import { SenderIntelligenceModule } from './components/senders/SenderIntelligenceModule'
+import { SenderCoveragePanel } from './components/sender-coverage/SenderCoveragePanel'
 import { buildSenderStats, type SenderStat } from './sender-fleet-stats'
 import { TemplateIntelligenceModule } from './components/templates/TemplateIntelligenceModule'
 import './components/templates/template-intelligence.css'
@@ -1133,7 +1134,7 @@ export const QueuePage = ({
   paneWidth: paneWidthProp,
 }: QueuePageProps = {}) => {
   const { rootRef, layoutMode: observedLayoutMode, paneWidth: observedPaneWidth } = useQueueLayout()
-  const { isMobile: isPhone } = useBreakpoint()
+  const { isMobile: isPhone, isModernDesktop } = useBreakpoint()
   const layoutMode = layoutModeProp ?? observedLayoutMode
   const paneWidth = paneWidthProp ?? observedPaneWidth
   const isMobileLayout = isPhone || layoutMode === 'compact'
@@ -1916,6 +1917,7 @@ export const QueuePage = ({
           loading={rangeLoading}
           rangeLabel={rangeLabel}
           onViewRows={(phone) => { setCauseFilter(null); setMarketFilter('all'); setSenderFilter(phone); changeSection('queue') }}
+          coverage={isModernDesktop ? <SenderCoveragePanel /> : undefined}
         />
       )
     } else {
@@ -2447,6 +2449,7 @@ export const QueuePage = ({
                   }}
                 />
               )}
+              {section === 'senders' && !isMobileLayout && <SenderCoveragePanel />}
               {section === 'senders' && (
                 <SenderIntelligenceModule
                   items={items}

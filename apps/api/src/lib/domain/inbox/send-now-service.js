@@ -13,6 +13,7 @@ import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
 import { dispatchManualOperatorSend } from "@/lib/domain/communications/dispatch-manual-operator-send.js";
 import { resolveOperatorAction } from "@/lib/domain/communications/operator-action-store.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
 import {
   insertSupabaseSendQueueRow,
@@ -926,6 +927,47 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
       market: clean(input.market) || null,
       supabase,
     });
+  }
+
+  // ── Step 1b: SENDER ROUTING 2.0 (double-gated) ─────────────────────
+  // A manual reply is a REPLY: the thread's number is kept while it is still
+  // eligible and routed for the market; otherwise the routing graph picks a
+  // sender (recorded) or the send is refused with the hold context — never a
+  // send from an operator-blocked / cooling / paused number. Gate off: skipped.
+  if (resolved_from && senderRoutingCeiling(deps.env || process.env)) {
+    const [{ routeQueueRowViaPolicy }, { loadFleet }, { describeHold }] = await Promise.all([
+      import("@/lib/domain/routing/sender-routing/sender-routing-runtime.js"),
+      import("@/lib/domain/routing/sender-routing/sender-routing-service.js"),
+      import("@/lib/domain/routing/sender-routing/sender-routing-policy.js"),
+    ]);
+    const routed = await routeQueueRowViaPolicy(
+      {
+        from_phone_number: resolved_from,
+        thread_key: clean(input.thread_key) || null,
+        property_id: clean(input.property_id || input_metadata.property_id) || null,
+        market: clean(input.market) || null,
+        campaign_id: null,
+      },
+      { supabase, loadFleet: () => loadFleet({ supabase }) }
+    );
+    if (routed && !routed.ok) {
+      const reason = clean(routed.reason) || "no_eligible_sender_for_route";
+      logger.warn("inbox_send_now.sender_route_hold", { thread_key: clean(input.thread_key) || null, reason });
+      return {
+        ok: false,
+        status: 409,
+        error: reason,
+        reason,
+        detail_reason: routed.sender_routing ? describeHold(routed.sender_routing) : reason,
+        queue_created: false,
+        queue_inserted: false,
+        queue_row_id: null,
+        queue_id: null,
+        queue_status: null,
+        sender_routing: routed.sender_routing || null,
+      };
+    }
+    if (routed?.ok) resolved_from = routed.from_phone_number;
   }
 
   const request_log = {
