@@ -13,7 +13,7 @@
  * row so the client can adopt it (no silent overwrite between sessions).
  *
  * The table is a PROPOSED migration
- * (supabase/migrations-draft/home/20261002200000_operator_home_layouts.sql).
+ * (supabase/migrations/20261002200000_operator_home_layouts.sql).
  * Until it is applied every call reports `home_store_unavailable` and the
  * dashboard keeps its layouts locally.
  */
