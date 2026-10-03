@@ -42,6 +42,7 @@ import {
   shouldPromoteThreadDelivery,
 } from "@/lib/domain/delivery/delivery-receipt-reconcile.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { evaluateSenderDispatchEligibility, loadDispatchBlockedSenders } from "@/lib/domain/delivery/sender-dispatch-eligibility.js";
 import {
   evaluateGlobalSendBrakeState,
   rowCampaignId,
@@ -1550,6 +1551,12 @@ async function loadOutboundNumberByPhone(phone_number, deps = {}) {
   return derived;
 }
 
+/** The canonical blocklist read (strict). Injected readers: deps.loadDispatchBlockedSenders, else deps.getSystemValue. */
+async function loadDispatchBlockedSendersFor(deps = {}) {
+  if (typeof deps.loadDispatchBlockedSenders === "function") return deps.loadDispatchBlockedSenders();
+  return loadDispatchBlockedSenders({ getSystemValue: deps.getSystemValue, env: deps.env });
+}
+
 export async function selectAvailableTextgridNumber(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
 
@@ -1595,7 +1602,24 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
       };
     }
 
-    const eligibility = evaluateOutboundNumberEligibility(fleet_row, deps.now ? new Date(deps.now) : new Date());
+    // THE CANONICAL SENDER DISPATCH ELIGIBILITY: operator blocklist + fleet +
+    // status/health/cooling/daily limit. Blocklist unreadable -> defer.
+    const blocked_senders = await loadDispatchBlockedSendersFor(deps);
+    if (!blocked_senders) {
+      return {
+        ok: false,
+        reason: "sender_blocklist_unreadable",
+        deferred: true,
+        ineligible_sender: true,
+        selected: null,
+        from_phone_number: intended,
+      };
+    }
+    const eligibility = evaluateSenderDispatchEligibility(fleet_row, {
+      blocked: blocked_senders,
+      phone: intended,
+      now: deps.now ? new Date(deps.now) : new Date(),
+    });
     if (!eligibility.ok) {
       // NO SILENT REPLACEMENT. Rotating to "some other working number" here
       // would send campaign traffic from a sender the campaign never chose and
@@ -1652,10 +1676,43 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
   // partial rules (status + daily cap, but not cooling), so a cooling number was
   // excluded from a revalidated send and eligible for a rotated one.
   const eligibility_now = deps.now ? new Date(deps.now) : new Date();
-  const active_rows = rows.filter((candidate) => {
+  // Eligible apart from the operator blocklist (so "every eligible number is
+  // blocked" can be told apart from "no number is eligible at all").
+  const NO_BLOCKS = new Set();
+  const eligible_rows = rows.filter((candidate) => {
     if (!normalizePhone(candidate?.phone_number)) return false;
-    return evaluateOutboundNumberEligibility(candidate, eligibility_now).ok;
+    return evaluateSenderDispatchEligibility(candidate, { blocked: NO_BLOCKS, now: eligibility_now }).ok;
   });
+
+  // THE CANONICAL SENDER DISPATCH ELIGIBILITY on the rotation branch (a row
+  // with no sender: deferred follow-ups). A blocked number never sends, so it
+  // stays least-used and the rotation kept choosing it, only for the health
+  // guard to refuse the row at send time. Unreadable blocklist -> defer (no
+  // send, no retry); every eligible number blocked -> park the row.
+  const blocked_senders = await loadDispatchBlockedSendersFor(deps);
+  if (!blocked_senders) {
+    return {
+      ok: false,
+      reason: "sender_blocklist_unreadable",
+      deferred: true,
+      ineligible_sender: true,
+      selected: null,
+      from_phone_number: null,
+    };
+  }
+  const active_rows = eligible_rows.filter((candidate) =>
+    evaluateSenderDispatchEligibility(candidate, { blocked: blocked_senders, now: eligibility_now }).ok
+  );
+  if (eligible_rows.length && !active_rows.length) {
+    return {
+      ok: false,
+      reason: "outbound_number_all_eligible_senders_blocked",
+      ineligible_sender: true,
+      terminal: false,
+      selected: null,
+      from_phone_number: null,
+    };
+  }
 
   const preferred = active_rows.find(
     (candidate) =>
