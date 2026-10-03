@@ -262,3 +262,50 @@ describe('search privacy', () => {
     expect(resolveTypedInput('')).toMatchObject({ kind: 'invalid', reason: 'empty' })
   })
 })
+
+describe('prod APN formats (read-only shape census 2026-10-02) — every stored shape builds', () => {
+  const P = (st: string, county: string, apn: string): ResearchProperty => ({ property_address_state: st, property_address_county_name: county, apn_parcel_id: apn })
+  // [record, state, county as stored in prod, real stored APN, expected URL tail]
+  const CASES: [string, string, string, string, string][] = [
+    ['mn-hennepin-pins', 'MN', 'Hennepin', '04-029-24-43-0175', 'pid=0402924430175'],
+    ['mn-hennepin-pins', 'MN', 'Hennepin', '01-027-24-34-0007', 'pid=0102724340007'],
+    ['mn-hennepin-tax', 'MN', 'Hennepin', '04-029-24-43-0175', 'pid=0402924430175'],
+    ['tx-dallas-dcad', 'TX', 'Dallas', '00-00011-057-800-0000', 'ID=00000110578000000'],
+    ['tx-dallas-dcad', 'TX', 'Dallas', '28-04363-00D-002-0000', 'ID=280436300D0020000'],
+    ['tx-dallas-dcad', 'TX', 'Dallas', '26-58750-000-51R-0000', 'ID=265875000051R0000'],
+    ['tx-dallas-dcad', 'TX', 'Dallas', '00-00013-945-300-00HS', 'ID=000001394530000HS'],
+    ['tx-dallas-dcad', 'TX', 'Dallas', '00000126433000000', 'ID=00000126433000000'],
+    ['fl-miamidade-pa', 'FL', 'Miami-Dade', '01-0103-040-1110', 'folio=0101030401110'],
+    ['fl-duval-pao', 'FL', 'Duval', '000147-0010', 'RE=0001470010'],
+    ['ca-losangeles-assessor', 'CA', 'Los Angeles', '2006-008-033', 'parceldetail/2006008033'],
+    ['nc-mecklenburg-polaris', 'NC', 'Mecklenburg', '027-011-06', 'pid/02701106'],
+    ['az-maricopa-assessor', 'AZ', 'Maricopa', '101-10-006', 'q=10110006&mod=pd'],
+    ['az-maricopa-assessor', 'AZ', 'Maricopa', '102-05-153-A', 'q=10205153A&mod=pd'],
+    ['az-maricopa-assessor', 'AZ', 'Maricopa', '102-21-251A', 'q=10221251A&mod=pd'],
+    ['il-cook-assessor', 'IL', 'Cook', '02-14-400-054-0000', 'pin/02144000540000'],
+  ]
+  it.each(CASES)('%s builds from stored %s/%s "%s"', (id, st, county, apn, tail) => {
+    const r = buildDestinationUrl(rec(id), { property: P(st, county, apn) })
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    if (r.ok) expect(r.url.endsWith(tail), r.url).toBe(true)
+  })
+
+  it('leading zeros are preserved, whitespace / NBSP / unicode dashes tolerated', () => {
+    for (const apn of ['  04-029-24-43-0175 ', '04–029–24–43–0175', '04 029 24 43 0175', '04 029-24-43-0175', '0402924430175']) {
+      expect(buildDestinationUrl(rec('mn-hennepin-pins'), { property: P('MN', 'Hennepin', apn) })).toMatchObject({ ok: true, url: 'https://www16.co.hennepin.mn.us/pins/pidresult.jsp?pid=0402924430175' })
+    }
+  })
+
+  it('accepts other layers’ field names for the same stored value (parcel_apn, apn)', () => {
+    const base = { property_address_state: 'MN', property_address_county_name: 'Hennepin' }
+    expect(buildDestinationUrl(rec('mn-hennepin-pins'), { property: { ...base, parcel_apn: '04-029-24-43-0175' } })).toMatchObject({ ok: true })
+    expect(buildDestinationUrl(rec('mn-hennepin-pins'), { property: { ...base, apn: '04-029-24-43-0175' } })).toMatchObject({ ok: true })
+  })
+
+  it('search-page counties copy the APN exactly as stored (incl. Fulton spacing)', () => {
+    const r = buildDestinationUrl(rec('ga-fulton-qpublic'), { property: P('GA', 'Fulton', '07 220100250470') })
+    expect(r).toMatchObject({ ok: true, copy: { label: 'Parcel ID', value: '07 220100250470' } })
+    const d = buildDestinationUrl(rec('ga-dekalb-assessor'), { property: P('GA', 'De Kalb', '11-232-01-007') })
+    expect(d).toMatchObject({ ok: true, copy: { value: '11-232-01-007' } })
+  })
+})

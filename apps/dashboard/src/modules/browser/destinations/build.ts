@@ -49,11 +49,24 @@ function zillowSlug(p: ResearchProperty): string | null {
   return words.length >= 3 ? words.join('-') : null
 }
 
+/**
+ * The stored parcel id. Canonical field is `apn_parcel_id` (county-formatted, e.g. Hennepin
+ * "04-029-24-43-0175"); `parcel_apn` (subject-contract name) and `apn` are accepted aliases so a
+ * caller using another layer's name is not told "Parcel ID required" for a parcel we have.
+ */
+export function readApn(p?: ResearchProperty): string | null {
+  const raw = p?.apn_parcel_id ?? p?.parcel_apn ?? p?.apn ?? null
+  const s = typeof raw === 'string' ? raw : typeof raw === 'number' && Number.isFinite(raw) ? String(raw) : ''
+  // NBSP / unicode dashes / runs of spaces (Fulton stores "13 0126  LL0441") → plain form
+  const t = s.replace(/[\u00A0\u2007\u202F]/g, ' ').replace(/[\u2010-\u2015\u2212]/g, '-').trim()
+  return t || null
+}
+
 function copyFor(rec: DestinationRecord, ctx: BuildContext): { label: string; value: string } | undefined {
   const p = ctx.property
   switch (rec.copy_hint) {
     case 'apn':
-      if (p?.apn_parcel_id?.trim()) return { label: 'Parcel ID', value: p.apn_parcel_id.trim() }
+      { const apn = readApn(p); if (apn) return { label: 'Parcel ID', value: apn } }
       return addressCopy(p)
     case 'address':
     case 'street':
@@ -99,7 +112,7 @@ export function buildDestinationUrl(rec: DestinationRecord, ctx: BuildContext = 
 
     case 'apn': {
       const fallback = { url: spec.search_href, label: `${rec.display_name} search` }
-      const raw = p?.apn_parcel_id?.trim()
+      const raw = readApn(p)
       if (!raw) return fail('parcel_id_required', 'Parcel ID required', fallback)
       const norm = spec.normalize === 'digits' ? raw.replace(/\D/g, '') : raw.replace(/[^0-9A-Za-z]/g, '').toUpperCase()
       if (!new RegExp(spec.pattern).test(norm)) return fail('parcel_id_invalid', `Parcel ID "${raw}" is not in this county's format`, fallback)

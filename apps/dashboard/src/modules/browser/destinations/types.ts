@@ -133,6 +133,9 @@ export interface ResearchProperty {
   property_address_county_name?: string | null
   /** Parcel / APN as stored canonically (properties.apn_parcel_id, county-formatted). */
   apn_parcel_id?: string | null
+  /** Accepted aliases (other layers' names for the same stored value). Prefer `apn_parcel_id`. */
+  parcel_apn?: string | null
+  apn?: string | null
   latitude?: number | string | null
   longitude?: number | string | null
   market?: string | null
