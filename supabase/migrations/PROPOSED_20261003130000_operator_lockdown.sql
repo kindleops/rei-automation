@@ -260,6 +260,7 @@ create or replace function public.ops_read_allowed()
 returns boolean
 language plpgsql
 stable
+parallel safe
 security definer
 set search_path = ''
 as $$
@@ -276,6 +277,20 @@ begin
   return v_role = 'authenticated' and public.is_ops_operator();
 end
 $$;
+-- PARALLEL SAFE is load-bearing. A parallel-UNSAFE function anywhere in a query
+-- disables parallel plans for the WHOLE query. The 2026-10-03 prod pretest REVIEW:
+-- v_operator_inbox_threads went from Gather + Parallel Index Scan on
+-- message_events_created_at_idx (4.5-7.3s) to a serial plan on
+-- idx_dashboard_message_events_created_at_desc (12.9s). With a parallel-safe gate
+-- the parallel plan and timing come back (4.5-5.2s, measured read-only on prod with
+-- a parallel-safe SECURITY DEFINER + SET search_path function as the gate).
+-- These helpers only read ops_operators and request.jwt.claims (GUCs are copied
+-- to workers), and the function-local SET is allowed in parallel mode.
+-- is_ops_operator() from 20261003120000 is relabelled too: its USING clause sits
+-- in every operator-gated table policy, so it was silently serialising those
+-- queries (e.g. the 169,802-row universe count).
+alter function public.is_ops_operator() parallel safe;
+
 comment on function public.ops_read_allowed() is
   'True for direct DB sessions, service_role, and allowlisted operators. Gate for owner-rights views and definer RPCs the dashboard reads.';
 revoke all on function public.ops_read_allowed() from public, anon;
@@ -285,6 +300,7 @@ create or replace function public.assert_ops_read_allowed()
 returns void
 language plpgsql
 stable
+parallel safe
 security definer
 set search_path = ''
 as $$
@@ -536,7 +552,9 @@ declare
   r record;
   def text;
   gated text;
-  marker constant text := '-- ops_operator_gate';
+  -- A block comment, and a trailing newline: a line comment would swallow any code that
+  -- follows BEGIN on the same line.
+  marker constant text := '/* ops_operator_gate */';
 begin
   for r in
     select p.oid, p.oid::regprocedure::text as sig from pg_proc p join pg_language l on l.oid = p.prolang
@@ -550,7 +568,7 @@ begin
       raise exception 'operator_lockdown: % already gated', r.sig;
     end if;
     gated := regexp_replace(def, '(\$function\$.*?\mBEGIN\M)',
-                            '\1' || chr(10) || '  PERFORM public.assert_ops_read_allowed(); ' || marker, 'i');
+                            '\1' || chr(10) || '  ' || marker || ' PERFORM public.assert_ops_read_allowed();' || chr(10), 'i');
     if gated = def or (length(gated) - length(replace(gated, marker, ''))) / length(marker) <> 1 then
       raise exception 'operator_lockdown: could not place the gate in %', r.sig;
     end if;

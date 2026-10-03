@@ -25,10 +25,12 @@
 --      relation in public (except INSERT on inquiries/onboarding_events), no
 --      EXECUTE on any definer function, and no TRUNCATE anywhere.
 --   D. EXPLAIN, operator after vs service before, on the heavy relations. The gate must
---      be a once-per-query InitPlan (no SubPlan), and there must be no new Seq Scan on
---      a large table. If an index used before is missing after, it prints REVIEW
+--      be a once-per-query InitPlan (no SubPlan), a parallel plan must stay parallel,
+--      and there must be no new Seq Scan on a large table. If an index used before is missing after, it prints REVIEW
 --      with both plans.
---   E. Map RPCs: the operator gets exactly the service result. Pin RPC timing
+--   E. Map RPCs: the operator gets exactly the service result (scalar results are
+--      hashed, so the call really runs). The non-operator is refused by the gate (-2)
+--      and anon is refused EXECUTE (-1). Pin RPC timing
 --      before and after is printed.
 --   F. The rollback restores ACLs, policies, view and function definitions, RLS
 --      flags and default ACLs exactly.
@@ -58,7 +60,9 @@ begin
   begin
     execute p_sql into n;
   exception when insufficient_privilege then
-    n := -1;   -- permission denied, or the 42501 raised by assert_ops_read_allowed()
+    -- -2 = refused by assert_ops_read_allowed() (the operator gate)
+    -- -1 = permission denied (no grant / no EXECUTE)
+    n := case when sqlerrm like 'operator access required%' then -2 else -1 end;
   end;
   perform set_config('role', 'none', true);
   perform set_config('request.jwt.claims', '', true);
@@ -93,7 +97,7 @@ returns table (k text, o text, v text) language sql as $$
          -- in materialized form (acldefault) to keep the comparison semantic.
          (select string_agg(x::text, ',' order by x::text) from unnest(coalesce(p.proacl, acldefault('f'::"char", p.proowner))) x) || '|' ||
          case when p.prokind = 'f' and p.prolang = (select oid from pg_language where lanname = 'plpgsql')
-              then md5(p.prosrc) else '' end
+              then md5(p.prosrc) else '' end || '|par=' || p.proparallel::text
   from pg_proc p where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace, 'comp_private'::regnamespace)
   union all
   select 'view', c.relname, md5(pg_get_viewdef(c.oid))
@@ -154,14 +158,20 @@ select name, pg_temp.lines('explain (costs off) ' || sql, null, null) as plan fr
 
 -- Map RPCs: service result and pin timing BEFORE.
 create temp table t_rpc (name text, sql text) on commit drop;
+-- Scalar/jsonb RPCs: the probe must CONSUME the returned value. In
+-- `select count(*) from (select f(...)) s` the planner drops the unused STABLE
+-- call: the function never runs, no EXECUTE check happens, and the count is
+-- always 1. That was the 2026-10-03 E false-fail. Hash the value instead:
+-- identical results give identical numbers (abs, so they are never negative), and
+-- refusals surface as -1/-2.
 insert into t_rpc values
-  ('map_search',              'select count(*) from (select public.map_search(''dallas'')) s'),
-  ('get_map_area_intel',      'select count(*) from (select public.get_map_area_intel(32.78, -96.80)) s'),
+  ('map_search',              'select abs(coalesce(hashtext(public.map_search(''dallas'')::text), 0)::bigint)'),
+  ('get_map_area_intel',      'select abs(coalesce(hashtext(public.get_map_area_intel(32.78, -96.80)::text), 0)::bigint)'),
+  ('get_map_area_summary',    'select abs(coalesce(hashtext(public.get_map_area_summary(''[[-96.81,32.77],[-96.79,32.77],[-96.79,32.79],[-96.81,32.79]]''::jsonb)::text), 0)::bigint)'),
   ('get_map_lens_areas',      'select count(*) from public.get_map_lens_areas(''equity'', 32.6, -97.0, 33.0, -96.6, 9)'),
   ('get_map_lens_points',     'select count(*) from public.get_map_lens_points(''equity'', 32.6, -97.0, 33.0, -96.6, 11)'),
   ('get_map_sold_comps',      'select count(*) from public.get_map_sold_comps(32.6, -97.0, 33.0, -96.6, 11, ''{}''::jsonb)'),
   ('get_map_sold_comps_list', 'select count(*) from public.get_map_sold_comps_list(32.6, -97.0, 33.0, -96.6, ''{}''::jsonb)'),
-  ('get_map_area_summary',    'select count(*) from (select public.get_map_area_summary(''{"type":"Polygon","coordinates":[[[-96.81,32.77],[-96.79,32.77],[-96.79,32.79],[-96.81,32.79],[-96.81,32.77]]]}''::jsonb)) s'),
   ('get_command_map_seller_pins', 'select count(*) from public.get_command_map_seller_pins(32.6, -97.0, 33.0, -96.6, 12, 500)'),
   ('get_comp_candidates_for_subject', format('select count(*) from public.get_comp_candidates_for_subject(%L, 2, 24, 50)', (select property_id from t_keys))),
   ('get_buyers_for_property', format('select count(*) from public.get_buyers_for_property(%L, 20)', (select property_id from t_keys)));
@@ -225,6 +235,11 @@ begin
     raise exception 'FAIL C: inbox_filter_field_options callable from a browser role';
   end if;
   -- Tenant RLS helpers still evaluable by authenticated.
+  if exists (select 1 from pg_proc where oid in ('public.is_ops_operator()'::regprocedure,
+                 'public.ops_read_allowed()'::regprocedure, 'public.assert_ops_read_allowed()'::regprocedure)
+             and proparallel <> 's') then
+    raise exception 'FAIL C: an operator gate helper is not PARALLEL SAFE (would serialise every gated query)';
+  end if;
   if not has_function_privilege('authenticated', 'private.is_org_member(uuid)', 'EXECUTE') then
     raise exception 'FAIL C: private.is_org_member lost authenticated EXECUTE (tenant policies would break)';
   end if;
@@ -272,6 +287,10 @@ begin
       fails := fails + 1;
       raise warning 'FAIL D %: new Seq Scan on a large table under the gate:%', q.name, E'\n' || post;
     end if;
+    if q.plan ~ 'Gather' and post !~ 'Gather' then
+      fails := fails + 1;
+      raise warning 'FAIL D %: parallel plan lost under the gate (a parallel-unsafe helper?):%', q.name, E'\n' || post;
+    end if;
     raise notice 'EXPLAIN % checked', q.name;
   end loop;
   if fails > 0 then raise exception 'FAIL D: % plan regressions', fails; end if;
@@ -286,12 +305,13 @@ begin
     op    := pg_temp.probe(r.sql, 'authenticated', 'a2ee0ffe-6f27-475b-a795-ee617c9472c6');
     nonop := pg_temp.probe(r.sql, 'authenticated', '00000000-0000-4000-8000-00000000beef');
     an    := pg_temp.probe(r.sql, 'anon', null);
-    raise notice 'rpc % service(before)=% operator=% non-operator=% anon=%', rpad(r.name, 32), r.svc, op, nonop, an;
-    if op <> r.svc then fails := fails + 1; raise warning 'FAIL E operator differs on %', r.name; end if;
-    if an <> -1 then fails := fails + 1; raise warning 'FAIL E anon not denied on %', r.name; end if;
+    raise notice 'rpc % service(before)=% operator=% non-operator=% anon=%  (-1 = no EXECUTE, -2 = operator gate)', rpad(r.name, 32), r.svc, op, nonop, an;
+    if r.svc < 0 then fails := fails + 1; raise warning 'FAIL E % errored for service BEFORE (probe or fixture problem)', r.name; end if;
+    if op <> r.svc then fails := fails + 1; raise warning 'FAIL E operator differs on % (service % vs operator %)', r.name, r.svc, op; end if;
+    if an <> -1 then fails := fails + 1; raise warning 'FAIL E anon not denied EXECUTE on % (got %)', r.name, an; end if;
     if r.name in ('map_search','get_map_area_intel','get_map_area_summary','get_map_lens_areas',
                   'get_map_lens_points','get_map_sold_comps','get_map_sold_comps_list') then
-      if nonop <> -1 then fails := fails + 1; raise warning 'FAIL E non-operator not refused by gated %', r.name; end if;
+      if nonop <> -2 then fails := fails + 1; raise warning 'FAIL E non-operator not refused by the gate on % (got %)', r.name, nonop; end if;
     elsif nonop > 0 then
       fails := fails + 1; raise warning 'FAIL E non-operator got rows from %', r.name;
     end if;

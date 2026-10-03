@@ -119,6 +119,9 @@ alter default privileges for role postgres in schema public grant all on tables 
 alter default privileges for role postgres in schema public grant all on sequences to anon;
 alter default privileges for role postgres in schema public grant truncate on tables to authenticated;
 
+-- 7b. is_ops_operator() back to its 20261003120000 label (parallel unsafe, the default).
+alter function public.is_ops_operator() parallel unsafe;
+
 -- 8. Helpers and snapshot. Nothing references the helpers once 1 and 2 have run.
 drop function if exists public.assert_ops_read_allowed();
 drop function if exists public.ops_read_allowed();
