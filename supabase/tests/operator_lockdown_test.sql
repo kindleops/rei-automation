@@ -81,7 +81,7 @@ end $$;
 create function pg_temp.catalog_state()
 returns table (k text, o text, v text) language sql as $$
   select 'rel', c.oid::regclass::text,
-         coalesce((select string_agg(x::text, ',' order by x::text) from unnest(c.relacl) x), '') || '|rls=' || c.relrowsecurity
+         (select string_agg(x::text, ',' order by x::text) from unnest(coalesce(c.relacl, acldefault((case when c.relkind = 'S' then 's' else 'r' end)::"char", c.relowner))) x) || '|rls=' || c.relrowsecurity
   from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind in ('r','p','v','m','S')
   union all
   select 'pol', tablename || '.' || policyname,
@@ -89,10 +89,12 @@ returns table (k text, o text, v text) language sql as $$
   from pg_policies where schemaname = 'public'
   union all
   select 'fn', p.oid::regprocedure::text,
-         coalesce((select string_agg(x::text, ',' order by x::text) from unnest(p.proacl) x), '') || '|' ||
+         -- NULL proacl means the default ACL; GRANT/REVOKE materialize it, so compare it
+         -- in materialized form (acldefault) to keep the comparison semantic.
+         (select string_agg(x::text, ',' order by x::text) from unnest(coalesce(p.proacl, acldefault('f'::"char", p.proowner))) x) || '|' ||
          case when p.prokind = 'f' and p.prolang = (select oid from pg_language where lanname = 'plpgsql')
               then md5(p.prosrc) else '' end
-  from pg_proc p where p.pronamespace = 'public'::regnamespace
+  from pg_proc p where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace, 'comp_private'::regnamespace)
   union all
   select 'view', c.relname, md5(pg_get_viewdef(c.oid))
   from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'v'
@@ -203,9 +205,28 @@ begin
                     or (has_table_privilege('anon', c.oid, 'INSERT') and c.relname not in ('inquiries','onboarding_events')))) then
     raise exception 'FAIL C: anon still holds a privilege on a public relation';
   end if;
-  if exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proowner = 'postgres'::regrole
+  if exists (select 1 from pg_proc p
+             where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace, 'comp_private'::regnamespace)
+               and p.proowner = 'postgres'::regrole
                and p.prosecdef and has_function_privilege('anon', p.oid, 'EXECUTE')) then
     raise exception 'FAIL C: anon can still execute a SECURITY DEFINER function';
+  end if;
+  -- inbox_filter_field_options (2026-06-19): service_role only. The dashboard reaches it
+  -- only through the API (7e0f2f7a), so a direct call is refused for every browser role.
+  if has_function_privilege('anon', 'public.inbox_filter_field_options(text,text,jsonb,text,text[])', 'EXECUTE')
+     or has_function_privilege('authenticated', 'public.inbox_filter_field_options(text,text,jsonb,text,text[])', 'EXECUTE')
+     or not has_function_privilege('service_role', 'public.inbox_filter_field_options(text,text,jsonb,text,text[])', 'EXECUTE') then
+    raise exception 'FAIL C: inbox_filter_field_options is not service_role-only';
+  end if;
+  if pg_temp.probe('select count(*) from (select public.inbox_filter_field_options(''text'', null, ''[]''::jsonb, null, null)) s',
+                   'authenticated', 'a2ee0ffe-6f27-475b-a795-ee617c9472c6') <> -1
+     or pg_temp.probe('select count(*) from (select public.inbox_filter_field_options(''text'', null, ''[]''::jsonb, null, null)) s',
+                      'anon', null) <> -1 then
+    raise exception 'FAIL C: inbox_filter_field_options callable from a browser role';
+  end if;
+  -- Tenant RLS helpers still evaluable by authenticated.
+  if not has_function_privilege('authenticated', 'private.is_org_member(uuid)', 'EXECUTE') then
+    raise exception 'FAIL C: private.is_org_member lost authenticated EXECUTE (tenant policies would break)';
   end if;
   if exists (select 1 from pg_class c where c.relnamespace = 'public'::regnamespace and c.relowner = 'postgres'::regrole
                and c.relkind in ('r','p')
@@ -222,7 +243,7 @@ begin
      or not exists (select 1 from pg_policies where schemaname='public' and tablename='buyer_match_candidates' and policyname='ops_operator_all') then
     raise exception 'FAIL: the two dashboard write paths lost their operator policy';
   end if;
-  raise notice 'PASS C catalog: anon sealed, no definer EXECUTE, no TRUNCATE, no write-through views; operator write policies present';
+  raise notice 'PASS C catalog: anon sealed, no definer EXECUTE (public/private/comp_private), inbox_filter_field_options service_role-only, no TRUNCATE, no write-through views; operator write policies present';
 end $$;
 
 -- ---------------------------------------------------------- D. EXPLAIN ----

@@ -7,7 +7,7 @@
 -- transaction.
 --
 -- It is exact. It replays ops_lockdown.snapshot, which the migration wrote before it
--- changed anything:
+-- changed anything (function ACLs cover public, private and comp_private):
 --   9 map RPC definitions, 13 view definitions, 72 policies, RLS flags, and every
 --   relation/function ACL entry for anon, authenticated, PUBLIC and service_role.
 -- Then it drops the helpers and the snapshot schema. Do NOT roll back
@@ -95,7 +95,7 @@ begin
     continue when (select p.proacl::text[] from pg_proc p where p.oid = to_regprocedure(r.object))
                   is not distinct from (case when jsonb_typeof(r.payload -> 'acl') = 'array' then
                     (select array_agg(x) from jsonb_array_elements_text(r.payload -> 'acl') x) end);
-    foreach g in array array['anon', 'authenticated', 'public', 'service_role'] loop
+    foreach g in array array['anon', 'authenticated', 'public', 'service_role', 'comp_ingest'] loop
       if jsonb_typeof(r.payload -> 'acl') is distinct from 'array' then
         -- NULL proacl = default = EXECUTE to PUBLIC (+ owner).
         had := (g = 'public');

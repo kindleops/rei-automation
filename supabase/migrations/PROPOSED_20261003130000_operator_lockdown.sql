@@ -25,7 +25,8 @@
 --         (public ALL USING true);
 --       - every RLS-off table;
 --       - and, through auto-updatable owner-rights views, the base tables behind them.
---   * anon can EXECUTE 20 SECURITY DEFINER functions, including
+--   * anon can EXECUTE 31 postgres-owned SECURITY DEFINER functions (22 in public, among them
+--     inbox_filter_field_options from 2026-06-19; 7 in private; 2 in comp_private), including
 --     rebuild_map_filter_property_prospect_links(), exchange_rebuild_market_geography(),
 --     reap_stale_campaign_target_graph_refresh_runs(), get_inbox_thread_dossier() and
 --     get_property_map_vector_tile().
@@ -69,8 +70,10 @@
 --      map_filter_property_prospect_links (read by the dashboard Ownership Check)
 --      gets an operator SELECT policy.
 --   4. anon loses every privilege on every postgres-owned relation and sequence in
---      public, and EXECUTE on every postgres-owned SECURITY DEFINER function in
---      public. Exception: inquiries and onboarding_events keep anon INSERT only.
+--      public, and EXECUTE on all 31 anon-executable postgres-owned SECURITY DEFINER
+--      functions in public/private/comp_private (reviewed list; drift fails the apply).
+--      private.is_org_* keep authenticated (tenant RLS); every other one becomes
+--      service_role only (+comp_ingest for comp_private builders). Exception: inquiries and onboarding_events keep anon INSERT only.
 --      Their WITH CHECK-scoped append policies serve a sign-up funnel that is not in
 --      this repo, so that consumer is left as it was.
 --   5. TRUNCATE is revoked from anon and authenticated on every postgres-owned table.
@@ -91,8 +94,7 @@
 --      the live definition, so recent edits are never reverted. The 3 that only the
 --      API calls (get_map_bounds_property_count, get_map_market_aggregates,
 --      get_map_spatial_clusters) instead lose authenticated EXECUTE and stay
---      service_role only. The 20 anon-executable definer functions lose EXECUTE for
---      PUBLIC, anon and authenticated; the dashboard calls none of them.
+--      service_role only. (The anon-executable definer functions are handled in 4.)
 --   8. Default privileges for role postgres in schema public: new tables and
 --      sequences are no longer granted to anon, and new tables no longer give
 --      authenticated TRUNCATE.
@@ -244,12 +246,12 @@ where c.relnamespace = 'public'::regnamespace
   and c.relowner = 'postgres'::regrole
   and c.relacl is not null;
 
--- Function ACLs (postgres-owned functions in public).
+-- Function ACLs (postgres-owned functions in public, private, comp_private).
 insert into ops_lockdown.snapshot (migration, kind, object, payload)
 select '20261003130000', 'func_acl', p.oid::regprocedure::text,
        jsonb_build_object('acl', to_jsonb(p.proacl::text[]))
 from pg_proc p
-where p.pronamespace = 'public'::regnamespace
+where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace, 'comp_private'::regnamespace)
   and p.proowner = 'postgres'::regrole
   and p.prokind = 'f';
 
@@ -362,7 +364,7 @@ on conflict do nothing;
 
 -- ---------------------------------------------------- 4. anon out ----
 do $$
-declare r record;
+declare r record; missing_fn text; extra_fn text;
 begin
   for r in
     select c.relname, c.relkind from pg_class c
@@ -378,21 +380,88 @@ begin
     end if;
   end loop;
 
-  for r in
-    select p.oid::regprocedure as sig from pg_proc p
-    where p.pronamespace = 'public'::regnamespace and p.proowner = 'postgres'::regrole
-      and p.prokind = 'f' and p.prosecdef
+  -- Every postgres-owned SECURITY DEFINER function that anon can EXECUTE, in public,
+  -- private and comp_private. Swept from the prod catalog on 2026-10-03; the expected
+  -- set is checked first, so anything new fails the apply instead of being missed.
+  -- anon gets EXECUTE through PUBLIC, so PUBLIC is revoked too.
+  with expected(sig) as (values
+    ('public.campaign_entity_contact_review_flags(text[])'),
+    ('public.campaign_global_inventory()'),
+    ('public.campaign_market_inventory(integer)'),
+    ('public.campaign_preview_sender_route_map()'),
+    ('public.entity_graph_browse_zips(integer,integer,boolean)'),
+    ('public.entity_graph_zip_distinct_count()'),
+    ('public.exchange_flood_polygons(double precision,double precision,double precision,double precision,double precision,integer)'),
+    ('public.exchange_rebuild_market_geography()'),
+    ('public.exchange_trend_hpi_series(text[],integer)'),
+    ('public.get_inbox_thread_dossier(text)'),
+    ('public.get_property_coordinates(text[])'),
+    ('public.get_property_map_dot_tile(integer,integer,integer)'),
+    ('public.get_property_map_tile_feature_count(integer,integer,integer)'),
+    ('public.get_property_map_vector_tile(integer,integer,integer)'),
+    ('public.get_thread_enrichment(text[])'),
+    ('public.inbox_filter_field_options(text,text,jsonb,text,text[])'),
+    ('public.inbox_filter_match_count(jsonb)'),
+    ('public.reap_stale_campaign_target_graph_refresh_runs(interval)'),
+    ('public.rebuild_map_filter_property_prospect_links()'),
+    ('public.refresh_campaign_target_graph_seller_batch(uuid,integer,integer)'),
+    ('public.sync_map_filter_property_prospect_links()'),
+    ('public.acquisition_score_snapshots_immutable()'),
+    ('private.is_org_member(uuid)'),
+    ('private.is_org_admin(uuid)'),
+    ('private.is_org_creator(uuid)'),
+    ('private.handle_new_user()'),
+    ('private.identity_is_verified(text,jsonb,uuid)'),
+    ('private.sync_member_identity()'),
+    ('private.forget_member_identity()'),
+    ('comp_private.build_market_capital_cells(date,text)'),
+    ('comp_private.build_market_ownership_cells(date,text)')
+  ), actual as (
+    select p.oid::regprocedure::text as sig from pg_proc p
+    where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace, 'comp_private'::regnamespace)
+      and p.proowner = 'postgres'::regrole and p.prokind = 'f' and p.prosecdef
       and has_function_privilege('anon', p.oid, 'EXECUTE')
-      -- The dashboard's map RPCs are handled in step 7 (gated, authenticated kept).
+      and p.proname not in ('get_map_area_facts','get_map_area_intel','get_map_area_summary',
+                            'get_map_lens_areas','get_map_lens_points','get_map_sold_comp',
+                            'get_map_sold_comps','get_map_sold_comps_list','map_search',
+                            'ops_read_allowed','assert_ops_read_allowed','is_ops_operator')
+  )
+  select string_agg(e.sig, ', ') filter (where a.sig is null), string_agg(a.sig, ', ') filter (where e.sig is null)
+    into missing_fn, extra_fn
+  from expected e full join actual a on a.sig = regexp_replace(e.sig, '^public\.', '');
+  if extra_fn is not null then
+    raise exception 'operator_lockdown: unreviewed anon-executable definer function(s): %', extra_fn;
+  end if;
+  if missing_fn is not null then
+    raise notice 'operator_lockdown: already not anon-executable (skipped): %', missing_fn;
+  end if;
+
+  for r in
+    select p.oid::regprocedure as sig, n.nspname, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname in ('public', 'private', 'comp_private')
+      and p.proowner = 'postgres'::regrole and p.prokind = 'f' and p.prosecdef
+      and has_function_privilege('anon', p.oid, 'EXECUTE')
       and p.proname not in ('get_map_area_facts','get_map_area_intel','get_map_area_summary',
                             'get_map_lens_areas','get_map_lens_points','get_map_sold_comp',
                             'get_map_sold_comps','get_map_sold_comps_list','map_search',
                             'ops_read_allowed','assert_ops_read_allowed','is_ops_operator')
   loop
-    -- PUBLIC too: otherwise anon keeps EXECUTE through PUBLIC. Every one of these is
-    -- service-side only (the dashboard calls none), so authenticated goes as well.
-    execute format('revoke all on function %s from public, anon, authenticated', r.sig);
-    execute format('grant execute on function %s to service_role', r.sig);
+    if r.nspname = 'private' and r.proname in ('is_org_member', 'is_org_admin', 'is_org_creator') then
+      -- Evaluated inside the tenant RLS policies as authenticated: keep authenticated.
+      execute format('revoke execute on function %s from public, anon', r.sig);
+      execute format('grant execute on function %s to authenticated, service_role', r.sig);
+    else
+      -- Service-side only. The dashboard calls none of these. The Advanced Filters
+      -- options (inbox_filter_field_options / inbox_filter_match_count) go through
+      -- apps/api inbox-hydrated-filter-service.js with the service_role client
+      -- (7e0f2f7a). Trigger functions still fire: EXECUTE is not checked at fire
+      -- time. pg_cron runs as the owner.
+      execute format('revoke execute on function %s from public, anon, authenticated', r.sig);
+      execute format('grant execute on function %s to service_role', r.sig);
+      if r.nspname = 'comp_private' then
+        execute format('grant execute on function %s to comp_ingest', r.sig);
+      end if;
+    end if;
   end loop;
 end
 $$;
@@ -553,6 +622,17 @@ begin
       and roles && array['anon','authenticated','public']::name[]
       and coalesce(qual, 'true') = 'true' and coalesce(with_check, 'true') = 'true') then
     raise exception 'operator_lockdown postflight: a USING-true policy for anon/authenticated/public remains';
+  end if;
+  if exists (select 1 from pg_proc p
+             where p.pronamespace in ('public'::regnamespace, 'private'::regnamespace, 'comp_private'::regnamespace)
+               and p.proowner = 'postgres'::regrole and p.prosecdef
+               and has_function_privilege('anon', p.oid, 'EXECUTE')) then
+    raise exception 'operator_lockdown postflight: anon can still execute a definer function';
+  end if;
+  if has_function_privilege('anon', 'public.inbox_filter_field_options(text,text,jsonb,text,text[])', 'EXECUTE')
+     or has_function_privilege('authenticated', 'public.inbox_filter_field_options(text,text,jsonb,text,text[])', 'EXECUTE')
+     or not has_function_privilege('service_role', 'public.inbox_filter_field_options(text,text,jsonb,text,text[])', 'EXECUTE') then
+    raise exception 'operator_lockdown postflight: inbox_filter_field_options must be service_role only';
   end if;
 end
 $$;
