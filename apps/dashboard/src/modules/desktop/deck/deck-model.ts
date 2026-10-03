@@ -80,6 +80,7 @@ export type WorkspaceCommand =
   | { kind: 'exit-mission' }
   | { kind: 'machine-feed' }
   | { kind: 'replay'; subject: FeedSubject }
+  | { kind: 'brief' }
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 const DESKTOP_APPS = NEXUS_APPS.filter((a) => a.desktop && !a.route.startsWith('__') && a.action !== 'notifications' && a.action !== 'settings')

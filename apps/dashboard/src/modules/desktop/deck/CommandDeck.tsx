@@ -22,6 +22,10 @@ import { composerCommands } from '../../../views/campaign-command/composer/compo
 import { homeDeckCommands } from '../../../views/home/desktop/board/home-commands'
 import { browserDeckCommands } from '../../browser/deck-commands'
 import { getBoard } from '../../../views/home/desktop/board/board-store'
+import { goalsDeckCommands } from '../../../views/analytics/goals/goals-commands'
+import { goalsNow } from '../../../views/analytics/goals/goals-store'
+import { briefDeckCommands } from '../../brief/brief-commands'
+import { openBrief } from '../../brief/brief-store'
 import './command-deck.css'
 
 /**
@@ -128,7 +132,7 @@ export function CommandDeck(p: CommandDeckProps) {
     const selection = hasSelection ? readPropertyLocator() : null
     const home = homeDeckCommands(q, { layouts: getBoard().layouts.map((l) => ({ id: l.id, name: l.name })), campaign: subject?.campaignId ? { id: subject.campaignId, label: subject.label } : null })
     const browser = browserDeckCommands(q, { selection: selection ? { propertyId: selection.propertyId, address: selection.address } : null, browserOpen: Boolean(L.instanceForApp(getWorkspace().layout, 'browser')) })
-    return [...home, ...browser, ...composerCommands(q, { selection: selection ? { propertyId: selection.propertyId, address: selection.address } : null }), ...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
+    return [...briefDeckCommands(q), ...goalsDeckCommands(q, goalsNow().catalogue), ...home, ...browser, ...composerCommands(q, { selection: selection ? { propertyId: selection.propertyId, address: selection.address } : null }), ...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
   }
 
   const runWorkspace = (cmd: WorkspaceCommand) => {
@@ -147,6 +151,7 @@ export function CommandDeck(p: CommandDeckProps) {
       case 'exit-mission': exitMission(); break
       case 'machine-feed': setMachineOpen(true); sound.panel.open(); break
       case 'replay': openReplay(cmd.subject); break
+      case 'brief': openBrief(); sound.panel.open(); break
     }
   }
 

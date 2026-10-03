@@ -1,0 +1,28 @@
+/* Home · Intelligence Brief widget + Goals widget (layout only; the
+   statement list and goal instruments are styled by brief.css / goals.css). */
+
+.hb-ibrief { justify-content: flex-start; gap: 8px; min-height: 0; overflow: hidden; }
+.hb-ibrief .hb-brief__greeting { font-size: clamp(20px, min(5.5cqi, 12cqh), 36px); }
+.hb-ibrief__lines { min-height: 0; overflow: hidden; }
+.hb-ibrief__lines.is-row .bf-lines { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); column-gap: 8px; }
+.hb-ibrief__foot { display: flex; align-items: center; gap: 10px; margin-top: auto; flex-wrap: wrap; }
+.hb-ibrief.is-small .hb-brief__line { font-size: 12.5px; }
+@container hbw (max-height: 260px) { .hb-ibrief .hb-brief__status { display: none; } }
+
+.hb-goals { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; }
+.hb-goals.is-empty { justify-content: center; align-items: flex-start; }
+.hb-goals__head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.hb-goals__head b { font: 300 26px/1 var(--lc-font-display, var(--lc-font-ui)); letter-spacing: -0.03em; color: var(--lc-ink-1); }
+.hb-goals__head > span { font: 560 12px/1 var(--lc-font-ui); color: var(--lc-ink-3); margin-right: 6px; }
+.hb-goals__head small { margin-left: auto; font: 520 10.5px/1 var(--lc-font-ui); color: var(--lc-ink-3); }
+.hb-goals__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; min-height: 0; overflow: hidden; }
+.hb-goals__list.is-cols { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.hb-goals__row, .hb-goals__one {
+  all: unset; box-sizing: border-box; display: grid; gap: 6px; width: 100%; padding: 8px 10px 10px; border-radius: 12px; cursor: pointer;
+  background: var(--lc-glass-card); box-shadow: inset 0 0 0 1px var(--lc-glass-line), var(--lc-glass-sheen);
+}
+.hb-goals__row:hover, .hb-goals__one:hover { box-shadow: inset 0 0 0 1px rgba(var(--lc-accent-rgb), 0.3), var(--lc-glass-sheen); }
+.hb-goals__row:focus-visible, .hb-goals__one:focus-visible { box-shadow: var(--lc-focus-ring); }
+.hb-goals__name { display: grid; gap: 2px; min-width: 0; font: 620 12.5px/1.2 var(--lc-font-ui); color: var(--lc-ink-1); }
+.hb-goals__name small { font: 500 10.5px/1.25 var(--lc-font-ui); color: var(--lc-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hb-goals__one span { font: 600 12px/1.2 var(--lc-font-ui); color: var(--lc-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

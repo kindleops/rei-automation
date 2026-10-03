@@ -18,7 +18,7 @@ import { PaneRouteContext, replaceRoutePath, useRouteLocation } from '../../../a
 import type { LabCompareMode, LabContext, LabFilter, LabGrain, LabRangePreset, LabSegmentStep } from '../../../domain/analytics/analytics-lab-api'
 import { decodeB64Url, encodeB64Url } from '../../../domain/analytics/analytics-lab-api'
 
-export type Lens = 'overview' | 'acquisition' | 'pipeline' | 'campaigns' | 'communications' | 'geography' | 'automation' | 'financial' | 'buyers' | 'growth'
+export type Lens = 'overview' | 'acquisition' | 'pipeline' | 'campaigns' | 'communications' | 'geography' | 'automation' | 'financial' | 'buyers' | 'growth' | 'goals'
 export type ChartView = 'line' | 'bars' | 'table'
 
 export const LENSES: ReadonlyArray<{ key: Lens; label: string; short: string; question: string }> = [
@@ -32,6 +32,7 @@ export const LENSES: ReadonlyArray<{ key: Lens; label: string; short: string; qu
   { key: 'financial', label: 'Financial', short: 'Money', question: 'What is producing money?' },
   { key: 'buyers', label: 'Buyers', short: 'Buyers', question: 'Where is buyer demand strongest?' },
   { key: 'growth', label: 'Growth', short: 'Growth', question: 'What do outside sources say?' },
+  { key: 'goals', label: 'Goals', short: 'Goals', question: 'Are we on pace for the targets we set?' },
 ]
 const LENS_KEYS = new Set<string>(LENSES.map((l) => l.key))
 const RANGE_KEYS = new Set<string>(['today', '7d', '30d', '90d', 'ytd', 'custom'])

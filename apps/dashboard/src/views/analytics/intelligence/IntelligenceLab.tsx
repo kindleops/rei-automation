@@ -41,6 +41,7 @@ import { IntelCampaigns } from './IntelCampaigns'
 import { IntelBuyers, IntelGrowth, IntelGrowthLine } from './IntelBuyers'
 import { IntelInspector } from './IntelInspector'
 import { IntelRecords } from './IntelRecords'
+import { GoalsLens } from '../goals/GoalsLens'
 import './intelligence.css'
 
 const LIVE_REFRESH_MS = 90_000
@@ -183,6 +184,8 @@ function Lens({ lens }: { lens: string }) {
       return <div className="ix-compose is-single"><IntelBuyers variant="lens" /></div>
     case 'growth':
       return <div className="ix-compose is-single"><IntelGrowth /></div>
+    case 'goals':
+      return <div className="ix-compose is-single"><GoalsLens /></div>
     default:
       return <Overview />
   }

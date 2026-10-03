@@ -1,0 +1,68 @@
+/* INTELLIGENCE BRIEF — the plane (inside the shared LCInspector glass) and the
+   statement list shared with the Home Brief widget. 8.3 glass tokens for the
+   inner surfaces; the theme accent marks citations and "new"; semantic colour
+   only for the line's own tone (gold attention, green verified, cyan the
+   machine working, red a real failure). */
+
+.bf-plane { z-index: 61; }
+.bf-eyebrow { display: inline-flex; align-items: center; gap: 6px; }
+.bf-body { display: flex; flex-direction: column; gap: 14px; min-height: 0; container-type: inline-size; container-name: bf; }
+.bf-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bf-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.bf-chip {
+  all: unset; cursor: pointer; height: 24px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center;
+  font: 600 10.5px/1 var(--lc-font-ui); color: var(--lc-ink-2);
+  background: var(--lc-glass-tint, rgba(255, 255, 255, 0.03)); box-shadow: inset 0 0 0 1px var(--lc-glass-line);
+}
+.bf-chip:hover { color: var(--lc-ink-1); }
+.bf-chip.is-on { color: var(--lc-accent-text, var(--lc-ink-1)); background: rgba(var(--lc-accent-rgb), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--lc-accent-rgb), 0.4); }
+.bf-chip:focus-visible { box-shadow: var(--lc-focus-ring); }
+
+/* the statements */
+.bf-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+@container bf (min-width: 820px) { .bf-plane.is-wide .bf-lines { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 10px; } }
+.bf-line { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; min-width: 0; }
+.bf-line__mark {
+  display: grid; place-items: center; width: 22px; height: 22px; margin-top: 8px; border-radius: 7px;
+  color: var(--lc-ink-2); background: var(--lc-glass-card); box-shadow: inset 0 0 0 1px var(--lc-glass-line);
+}
+.bf-line.is-attn .bf-line__mark { color: var(--lc-attn); box-shadow: inset 0 0 0 1px rgba(var(--lc-attn-rgb), 0.35); }
+.bf-line.is-crit .bf-line__mark { color: var(--lc-crit); box-shadow: inset 0 0 0 1px rgba(var(--lc-crit-rgb, 239, 68, 68), 0.4); }
+.bf-line.is-ok .bf-line__mark { color: var(--lc-ok); }
+.bf-line.is-exec .bf-line__mark { color: var(--lc-exec); }
+.bf-line__body {
+  all: unset; box-sizing: border-box; display: grid; gap: 4px; min-width: 0; padding: 8px 12px 9px; border-radius: 12px; cursor: pointer;
+  background: var(--lc-glass-card); box-shadow: inset 0 0 0 1px var(--lc-glass-line), var(--lc-glass-sheen);
+  transition: background 0.14s ease, box-shadow 0.14s ease;
+}
+.bf-line__body:hover { background: color-mix(in srgb, var(--lc-glass-card) 80%, rgb(var(--lc-accent-rgb)) 6%); box-shadow: inset 0 0 0 1px rgba(var(--lc-accent-rgb), 0.28), var(--lc-glass-sheen); }
+.bf-line__body:focus-visible { box-shadow: var(--lc-focus-ring); }
+.bf-line__body:disabled { cursor: default; }
+.bf-line__text { font: 560 13px/1.4 var(--lc-font-ui); color: var(--lc-ink-1); overflow-wrap: anywhere; }
+.bf-line__detail { font: 480 11.5px/1.4 var(--lc-font-ui); color: var(--lc-ink-2); font-variant-numeric: tabular-nums; }
+.bf-cite { display: flex; align-items: center; gap: 6px; min-width: 0; font: 560 10px/1.2 var(--lc-font-ui); color: var(--lc-ink-3); }
+.bf-cite b { font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; font-size: 9px; color: var(--lc-ink-3); }
+.bf-cite span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bf-cite svg { flex: none; color: rgb(var(--lc-accent-rgb)); opacity: 0; transition: opacity 0.14s ease; }
+.bf-line__body:hover .bf-cite svg, .bf-line__body:focus-visible .bf-cite svg { opacity: 1; }
+.bf-new {
+  display: inline-block; margin-left: 7px; padding: 1px 6px; border-radius: 999px; vertical-align: 1px;
+  font: 700 9px/1.4 var(--lc-font-ui); font-style: normal; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--lc-accent-text, var(--lc-ink-1)); background: rgba(var(--lc-accent-rgb), 0.16);
+}
+.bf-lines.is-dense { gap: 4px; }
+.bf-lines.is-dense .bf-line { grid-template-columns: 18px minmax(0, 1fr); gap: 8px; }
+.bf-lines.is-dense .bf-line__mark { width: 18px; height: 18px; margin-top: 6px; border-radius: 6px; }
+.bf-lines.is-dense .bf-line__body { padding: 6px 10px 7px; gap: 2px; border-radius: 10px; }
+.bf-lines.is-dense .bf-line__text { font-size: 12.5px; }
+
+.bf-empty { display: flex; align-items: center; gap: 8px; margin: 0; padding: 14px 4px; font: 520 12.5px/1.4 var(--lc-font-ui); color: var(--lc-ink-2); }
+.bf-empty svg { color: var(--lc-ok); }
+.bf-foot { display: grid; gap: 5px; padding-top: 10px; border-top: 1px solid var(--lc-hairline); }
+.bf-foot p { margin: 0; font: 480 11px/1.45 var(--lc-font-ui); color: var(--lc-ink-3); }
+.bf-foot b { font-weight: 650; color: var(--lc-ink-2); }
+.bf-foot p.is-gap b { color: var(--lc-attn); }
+.bf-foot__how { font-size: 10.5px !important; }
+
+html[data-lc-motion='off'] .bf-line__body, html[data-lc-motion='off'] .bf-cite svg { transition: none; }
+@media (prefers-reduced-motion: reduce) { .bf-line__body, .bf-cite svg { transition: none; } }

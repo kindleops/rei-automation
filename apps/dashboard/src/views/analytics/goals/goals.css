@@ -1,0 +1,92 @@
+/* ANALYTICS · GOALS — the lens plane, goal cards and the shared instruments
+   (bar, running-total line, readout) used by Home and the Brief too.
+   Materials are the 8.3 glass tokens; the running total draws in the theme
+   accent; verdicts use semantic colour only (green on pace / met, gold behind
+   or over). Red is never used for a missed target — it is not a failure. */
+
+.gl { display: flex; flex-direction: column; gap: 16px; min-width: 0; container-type: inline-size; container-name: gl; }
+.gl__head p { max-width: 72ch; }
+
+.gl-persist {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px;
+  font: 600 10.5px/1 var(--lc-font-ui); letter-spacing: 0.02em; color: var(--lc-ink-2);
+  background: var(--lc-glass-tint, rgba(255, 255, 255, 0.03)); box-shadow: inset 0 0 0 1px var(--lc-glass-line);
+}
+.gl-persist svg { color: var(--lc-ok); }
+.gl-persist.is-local svg { color: var(--lc-ink-3); }
+
+.gl-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@container gl (min-width: 720px) { .gl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container gl (min-width: 1180px) { .gl-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container gl (min-width: 1900px) { .gl-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+.gl-card {
+  position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px 14px 12px; border-radius: 16px;
+  background: var(--lc-glass-card); box-shadow: inset 0 0 0 1px var(--lc-glass-line), var(--lc-glass-sheen);
+  -webkit-backdrop-filter: var(--lc-glass-filter); backdrop-filter: var(--lc-glass-filter);
+}
+.gl-card::before {
+  content: ''; position: absolute; inset: 0 0 auto; height: 2px; border-radius: 16px 16px 0 0; opacity: 0.85; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(var(--lc-accent-rgb), 0.55), transparent);
+}
+.gl-card.is-attn::before { background: linear-gradient(90deg, transparent, rgba(var(--lc-attn-rgb), 0.7), transparent); }
+.gl-card.is-ok::before { background: linear-gradient(90deg, transparent, rgba(var(--lc-ok-rgb), 0.6), transparent); }
+.gl-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.gl-card__name { display: grid; gap: 3px; min-width: 0; }
+.gl-card__name strong { font: 640 13.5px/1.2 var(--lc-font-ui); color: var(--lc-ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gl-card__name small { font: 520 11px/1.3 var(--lc-font-ui); color: var(--lc-ink-3); }
+.gl-card__why { margin: 0; font: 500 11.5px/1.4 var(--lc-font-ui); color: var(--lc-ink-2); }
+.gl-card__caveat { display: flex; gap: 6px; align-items: flex-start; margin: 0; font: 480 10.5px/1.4 var(--lc-font-ui); color: var(--lc-ink-3); }
+.gl-card__caveat svg { flex: none; margin-top: 1px; }
+
+/* readout */
+.gl-read { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.gl-read__v { display: inline-flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.gl-read__v b { font: 300 30px/1 var(--lc-font-display, var(--lc-font-ui)); letter-spacing: -0.03em; color: var(--lc-ink-1); }
+.gl-read__v small { font: 560 12px/1 var(--lc-font-ui); color: var(--lc-ink-3); }
+.gl-read.is-compact .gl-read__v b { font-size: 22px; }
+
+/* bar: period-to-date fill + the linear pace tick */
+.gl-bar { position: relative; height: 6px; border-radius: 999px; background: rgba(var(--lc-edge-rgb), 0.08); overflow: visible; }
+.gl-bar__fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, rgba(var(--lc-accent-rgb), 0.55), rgb(var(--lc-accent-rgb))); box-shadow: 0 0 12px -3px var(--lc-accent-glow, rgba(var(--lc-accent-rgb), 0.5)); transition: width 0.5s var(--lc-ease-enter, ease); }
+.gl-bar.is-ok .gl-bar__fill { background: linear-gradient(90deg, rgba(var(--lc-ok-rgb), 0.5), var(--lc-ok)); box-shadow: 0 0 12px -4px rgba(var(--lc-ok-rgb), 0.6); }
+.gl-bar.is-attn .gl-bar__fill { background: linear-gradient(90deg, rgba(var(--lc-attn-rgb), 0.5), var(--lc-attn)); box-shadow: 0 0 12px -4px rgba(var(--lc-attn-rgb), 0.6); }
+.gl-bar__pace { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--lc-ink-1); opacity: 0.7; }
+html[data-lc-motion='off'] .gl-bar__fill { transition: none; }
+@media (prefers-reduced-motion: reduce) { .gl-bar__fill { transition: none; } }
+
+/* running total vs pace line */
+.gl-line { display: block; width: 100%; height: 46px; overflow: visible; }
+.gl-line__target { stroke: var(--lc-hairline, rgba(255, 255, 255, 0.12)); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.gl-line__pace { stroke: var(--lc-ink-3); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; vector-effect: non-scaling-stroke; }
+.gl-line__proj { stroke: rgb(var(--lc-accent-rgb)); stroke-width: 1.2; stroke-dasharray: 1 3; opacity: 0.8; vector-effect: non-scaling-stroke; }
+.gl-line__actual { fill: none; stroke: rgb(var(--lc-accent-rgb)); stroke-width: 1.8; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.gl-line__now { fill: rgb(var(--lc-accent-rgb)); stroke: var(--lc-mat-float-bg, rgba(10, 12, 18, 0.9)); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+
+/* facts */
+.gl-facts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; }
+.gl-facts div { display: grid; gap: 2px; }
+.gl-facts dt { font: 600 9.5px/1 var(--lc-font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--lc-ink-3); }
+.gl-facts dt em { font-style: normal; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--lc-flow, var(--lc-ink-3)); }
+.gl-facts dd { margin: 0; font: 600 12.5px/1.1 var(--lc-font-ui); font-variant-numeric: tabular-nums; color: var(--lc-ink-1); }
+
+/* composer */
+.gl-compose { display: grid; gap: 14px; }
+.gl-compose__row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.gl-field { display: grid; gap: 6px; min-width: 0; }
+.gl-field > span { font: 600 10px/1 var(--lc-font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--lc-ink-3); }
+.gl-field > span em { font-style: normal; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.gl-num { position: relative; display: flex; align-items: center; }
+.gl-num input, .gl-text {
+  width: 100%; height: 34px; padding: 0 12px; border: 0; border-radius: 10px; font: 560 14px/1 var(--lc-font-ui); font-variant-numeric: tabular-nums; color: var(--lc-ink-1);
+  background: var(--lc-glass-field, var(--lc-inner-bg, rgba(255, 255, 255, 0.05))); box-shadow: inset 0 0 0 1px var(--lc-glass-field-line, var(--lc-glass-line));
+}
+.gl-num input:focus-visible, .gl-text:focus-visible { outline: none; box-shadow: var(--lc-focus-ring); }
+.gl-num i { position: absolute; right: 12px; font: 600 12px/1 var(--lc-font-ui); font-style: normal; color: var(--lc-ink-3); pointer-events: none; }
+.gl-compose__def { margin: -6px 0 0; font: 480 11.5px/1.45 var(--lc-font-ui); color: var(--lc-ink-3); }
+.gl-compose__note, .gl-compose__who { display: flex; align-items: flex-start; gap: 7px; margin: 0; font: 500 11px/1.45 var(--lc-font-ui); color: var(--lc-ink-2); }
+.gl-compose__note svg, .gl-compose__who svg { flex: none; margin-top: 2px; color: var(--lc-ink-3); }
+.gl-compose__who { color: var(--lc-ink-3); }
+.gl-compose__err { display: flex; align-items: center; gap: 8px; margin: 0; font: 540 11.5px/1.4 var(--lc-font-ui); color: var(--lc-ink-1); }
+.gl-compose__foot { display: flex; justify-content: flex-end; gap: 8px; }
+@container (max-width: 420px) { .gl-compose__row { grid-template-columns: minmax(0, 1fr); } }

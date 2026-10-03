@@ -32,6 +32,7 @@ import { HOME_PIN_EVENT, queueHomePin, takeHomePins } from '../../../../modules/
 import { homeSourceStats, refreshAllSources, refreshForApps } from './home-sources'
 import { boundsOf, getHomeWidget, homeWidgetsVersion, listHomeWidgets, sizeModeFor, subscribeHomeWidgets, SIZE_CELLS, type ContextMode, type HomeWidgetDef, type PinnedSubject, type WidgetSize } from './widget-registry'
 import { registerFirstPartyWidgets, RAIL_DEFAULT_WIDGET } from './widgets/register'
+import { registerGoalsAndBriefWidgets } from './widgets/register-goals-brief'
 import { WidgetFrame, type FrameActions } from './WidgetFrame'
 import { WidgetLibrary } from './WidgetLibrary'
 import { cx } from './widget-runtime'
@@ -54,6 +55,8 @@ import './home-board.css'
  */
 
 registerFirstPartyWidgets()
+// after the first-party set: upgrades home.brief (same id) and adds analytics.goals
+registerGoalsAndBriefWidgets()
 
 const DEPS: BoardDeps = {
   api: httpHomeLayoutApi,
