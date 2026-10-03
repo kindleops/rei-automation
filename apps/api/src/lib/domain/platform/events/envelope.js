@@ -89,6 +89,8 @@ export const EVENT_TYPES = Object.freeze({
   'email.sent': 'Email sent',
   'email.failed': 'Email failed',
   'alert.triggered': 'Alert',
+  // Browser 1.0: an operator attached a research page to a record (observational)
+  'research.source_saved': 'Source saved',
 })
 
 const clean = (v) => String(v ?? '').trim()

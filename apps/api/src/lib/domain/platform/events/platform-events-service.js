@@ -19,8 +19,9 @@ import { leadStateAdapter } from './adapters/lead-state.js'
 import { pipelineAdapter } from './adapters/pipeline.js'
 import { campaignsAdapter } from './adapters/campaigns.js'
 import { closingAdapter, notificationsAdapter } from './adapters/closing-notifications.js'
+import { researchAdapter } from './adapters/research.js'
 
-export const ADAPTERS = Object.freeze([messagesAdapter, campaignSendsAdapter, workflowAdapter, leadStateAdapter, pipelineAdapter, campaignsAdapter, closingAdapter, notificationsAdapter])
+export const ADAPTERS = Object.freeze([messagesAdapter, campaignSendsAdapter, workflowAdapter, leadStateAdapter, pipelineAdapter, campaignsAdapter, closingAdapter, notificationsAdapter, researchAdapter])
 
 const DAY = 864e5
 const MAX_WINDOW_MS = 90 * DAY

@@ -156,7 +156,7 @@ const GLYPH: Array<[RegExp, IconName]> = [
 export const glyphOf = (type: string): IconName => GLYPH.find(([r]) => r.test(type))?.[1] ?? 'activity'
 
 export const SYSTEM_LABEL: Record<string, string> = { inbox: 'Inbox', queue: 'Queue', campaign: 'Campaigns', workflow: 'Workflows', pipeline: 'Pipeline', closing: 'Closing', email: 'Email', notification: 'Alerts', deal: 'Deals', buyer: 'Buyers', search: 'Search', call: 'Calls' }
-export const ADAPTER_LABEL: Record<string, string> = { messages: 'Messages', campaign_sends: 'Campaign sends', workflow: 'Automation runs', lead_state: 'Seller state', pipeline: 'Deal history', campaigns: 'Campaign lifecycle', closing: 'Closing activity', notifications: 'Alerts' }
+export const ADAPTER_LABEL: Record<string, string> = { messages: 'Messages', campaign_sends: 'Campaign sends', workflow: 'Automation runs', lead_state: 'Seller state', pipeline: 'Deal history', campaigns: 'Campaign lifecycle', closing: 'Closing activity', notifications: 'Alerts', research: 'Research sources' }
 
 export function clockOf(iso: string): string {
   const d = new Date(iso)
