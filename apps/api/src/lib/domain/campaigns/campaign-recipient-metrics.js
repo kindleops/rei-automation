@@ -196,9 +196,10 @@ export async function fetchCanonicalLanguages(rows = [], deps = {}) {
   const ownerIds = [...new Set(rows.map((r) => clean(r?.master_owner_id)).filter(Boolean))]
   const byPerson = new Map()
   const byOwner = new Map()
+  const namesByPerson = new Map()
   const CHUNK = 500
 
-  const page = async (table, column, select, ids, sink, valueKey) => {
+  const page = async (table, column, select, ids, sink, valueKey, onRow = null) => {
     for (let i = 0; i < ids.length; i += CHUNK) {
       const chunk = ids.slice(i, i + CHUNK)
       const { data, error } = await supabase.from(table).select(select).in(column, chunk)
@@ -209,12 +210,32 @@ export async function fetchCanonicalLanguages(rows = [], deps = {}) {
       for (const row of data || []) {
         const value = clean(row?.[valueKey])
         if (value) sink.set(clean(row[column]), value)
+        if (onRow) onRow(row)
       }
     }
   }
 
+  /**
+   * The PERSON's name, read in the same prospects pass (no extra query).
+   *
+   * The graph's seller_first_name / seller_full_name are NULL on every row —
+   * the seller_contact_bridge refresh never projects them — so the only name a
+   * target carried was `owner_name`, the DEED owner. On an entity-owned
+   * property that is the company ("Rci Holdings Inc"), while the phone belongs
+   * to the resolved representative (seller_person_key). The greeting then had
+   * no first name, the render lint refused it ("Hi , this is …") and the
+   * seller was held. Keyed only by the person key, so a name is never borrowed
+   * from a different human; unknown stays unknown.
+   */
+  const keepName = (row) => {
+    const key = clean(row?.individual_key)
+    const first = clean(row?.first_name)
+    const full = clean(row?.full_name)
+    if (key && (first || full) && !namesByPerson.has(key)) namesByPerson.set(key, { first_name: first || null, full_name: full || null })
+  }
+
   if (personKeys.length) {
-    await page('prospects', 'individual_key', 'individual_key,language_preference', personKeys, byPerson, 'language_preference')
+    await page('prospects', 'individual_key', 'individual_key,language_preference,first_name,full_name', personKeys, byPerson, 'language_preference', keepName)
   }
   if (ownerIds.length) {
     await page('master_owners', 'master_owner_id', 'master_owner_id,best_language', ownerIds, byOwner, 'best_language')
@@ -230,6 +251,11 @@ export async function fetchCanonicalLanguages(rows = [], deps = {}) {
       const fromOwner = owner ? byOwner.get(owner) : null
       if (fromOwner) return { language: fromOwner, source: 'master_owner' }
       return { language: null, source: 'unknown' }
+    },
+    /** The messaged person's own name, or null. Never the owning entity's. */
+    resolveName(row = {}) {
+      const person = clean(row?.seller_person_key)
+      return (person && namesByPerson.get(person)) || null
     },
     personCount: byPerson.size,
     ownerCount: byOwner.size,

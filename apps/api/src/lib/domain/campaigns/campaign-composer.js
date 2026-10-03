@@ -37,6 +37,7 @@ import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { getSystemValue } from '@/lib/system-control.js'
 import {
   applyCampaignLifecycleAction,
+  applyCanonicalSellerName,
   applyOwnerPersona,
   buildCampaignTargets,
   countCampaignAudienceCohort,
@@ -48,6 +49,7 @@ import {
   updateCampaign,
 } from '@/lib/domain/campaigns/campaign-automation-service.js'
 import { evaluateCampaignLaunchReadiness } from '@/lib/domain/campaigns/campaign-launch-readiness.js'
+import { fetchCanonicalLanguages } from '@/lib/domain/campaigns/campaign-recipient-metrics.js'
 import { governanceApplies, governanceExcludedTemplateIds, evaluateTemplateGovernance, indexGovernance, loadGovernance } from '@/lib/domain/campaigns/template-governance.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 import { isValidCampaignCapInput, parseCampaignCap } from '@/lib/domain/campaigns/campaign-caps.js'
@@ -410,8 +412,29 @@ export function composerAudienceFromPreview(preview = {}) {
 }
 
 /** Render a few ready targets with the planner's renderer — the launch-readiness sample path. */
+/**
+ * The preview's target rows are raw graph snapshots: no canonical language and
+ * no seller name (the graph carries neither). Build resolves both in
+ * planCampaignTargetRows; the samples must render what Build will write, so
+ * they get the same set-based enrichment (one prospects read for ≤3 rows).
+ */
+export async function enrichSampleRows(rows = [], deps = {}) {
+  if (!rows.length) return rows
+  const keyed = rows.map((row) => {
+    const snapshot = obj(obj(row.metadata).candidate_snapshot)
+    return { row, snapshot, probe: { seller_person_key: clean(snapshot.seller_person_key), master_owner_id: clean(row.master_owner_id) } }
+  })
+  const lookup = await (deps.fetchCanonicalLanguages || fetchCanonicalLanguages)(keyed.map((k) => k.probe), deps).catch(() => null)
+  if (!lookup) return rows
+  return keyed.map(({ row, snapshot, probe }) => {
+    const named = applyCanonicalSellerName({ ...snapshot, seller_person_key: probe.seller_person_key }, lookup)
+    const language = clean(row.language) || lookup.resolve(probe).language || null
+    return { ...row, language, metadata: { ...obj(row.metadata), candidate_snapshot: named } }
+  })
+}
+
 export async function renderComposerSamples(rows = [], { templateUseCase, stageCode, supabase } = {}, deps = {}) {
-  const ready = rows.filter((row) => clean(row.target_status) === 'ready').slice(0, 3)
+  const ready = await enrichSampleRows(rows.filter((row) => clean(row.target_status) === 'ready').slice(0, 3), { ...deps, supabase: deps.supabase || supabase })
   if (!ready.length) return []
   const [dispatchBlocked, governanceExcluded, personas] = await Promise.all([
     (deps.loadDispatchBlockedSets || loadDispatchBlockedSets)().catch(() => ({ template_ids: new Set() })),

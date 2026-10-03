@@ -4311,6 +4311,8 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
         owner_name: row.owner_name,
         seller_first_name: row.seller_first_name,
         seller_full_name: row.seller_full_name,
+        seller_name_source: row.seller_name_source || (clean(row.seller_first_name) ? 'graph' : null),
+        seller_person_key: clean(row.seller_person_key) || null,
         property_address_full: row.property_address_full,
         property_city: row.property_city,
         property_zip: row.property_zip,
@@ -6414,6 +6416,23 @@ export async function deleteCampaign(campaignId, deps = {}) {
  * build capped at the campaign limit (1,000), collapsed to 949 recipients and
  * held 410 for review/identity — 539 ready.
  */
+/**
+ * Fill the graph's empty seller name from the messaged person's canonical
+ * record (prospects keyed by seller_person_key). Only fills a blank — a name
+ * the graph already carries is never overwritten — and never uses the deed
+ * owner / entity name, which is what left entity-owned targets greeting-less.
+ */
+export function applyCanonicalSellerName(row = {}, lookup = null) {
+  if (!row || typeof lookup?.resolveName !== 'function') return row
+  if (clean(row.seller_first_name) && clean(row.seller_full_name)) return row
+  const name = lookup.resolveName(row)
+  if (!name) return row
+  if (!clean(row.seller_first_name) && name.first_name) row.seller_first_name = name.first_name
+  if (!clean(row.seller_full_name) && name.full_name) row.seller_full_name = name.full_name
+  row.seller_name_source = 'prospect'
+  return row
+}
+
 export async function planCampaignTargetRows({ campaign = null, options = {}, graph = {}, targetLimit, deps = {}, resolveLanguages = true } = {}) {
   const limit = Math.max(1, Number(targetLimit) || CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT)
   const touchNumber = asPositiveInteger(options.stage_touch ?? options.touch_number ?? campaign?.metadata?.stage_touch, 1) || 1
@@ -6445,6 +6464,7 @@ export async function planCampaignTargetRows({ campaign = null, options = {}, gr
       const resolvedLanguage = languages.resolve(row)
       row.resolved_language = resolvedLanguage.language
       row.resolved_language_source = resolvedLanguage.source
+      applyCanonicalSellerName(row, languages)
     }
   }
   const { collapseGraphRowsToRecipients } = await import('@/lib/domain/campaigns/campaign-recipient-dedup.js')
