@@ -24,7 +24,7 @@ import {
   type HomePipeline,
   type HomeQueue,
 } from '../../home-signals'
-import { fetchStudioActivity, type StudioActivity } from '../command/home-command-model'
+import { fetchMapActivity, fetchStudioActivity, type MapActivity, type MapActivityLens, type MapRange, type StudioActivity } from '../command/home-command-model'
 
 /**
  * THE HOME SOURCES — every read a first-party widget makes, by key.
@@ -96,6 +96,19 @@ export function performanceSource(range: RangeKey, market: string | null = null)
     key: `performance:${range}:${market ?? '*'}`,
     load: (s) => fetchAnalyticsPerformance({ range, market }, s),
     apps: [],
+    everyMs: range === 'today' ? 120_000 : 300_000,
+  }
+}
+
+/**
+ * The Map widget's lens for a period — its own narrow read, never the
+ * Analytics bundle (which timed out in production and blanked the map).
+ */
+export function mapActivitySource(lens: MapActivityLens, range: MapRange): SourceDef<MapActivity> {
+  return {
+    key: `map-activity:${lens}:${range}`,
+    load: (s) => fetchMapActivity({ lens, range }, s),
+    apps: lens === 'replies' ? ['/inbox'] : lens === 'delivered' || lens === 'failed' ? ['/queue'] : lens === 'moves' || lens === 'offers' ? ['/pipeline'] : [],
     everyMs: range === 'today' ? 120_000 : 300_000,
   }
 }

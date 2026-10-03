@@ -10,12 +10,13 @@ import {
   layerLeaders,
   layerPoints,
   nearestDot,
+  notYetRecorded,
   projectAlbersUsa,
   stateName,
   type HeatPoint,
   type MapLayerId,
 } from '../../command/home-command-model'
-import { performanceSource, SOURCES } from '../board-data'
+import { mapActivitySource, performanceSource, SOURCES } from '../board-data'
 import { ANALYTICS_METRICS, METRIC_CONTRACT, type MetricKey } from './analytics-metrics'
 import { cx, fmt, openPath, pct, useWidgetSource } from '../widget-runtime'
 import { WFigure, WState } from '../widget-ui'
@@ -134,14 +135,17 @@ export function MapWidget({ size, config, setConfig }: WidgetRenderProps<{ lens:
   const lens = (MAP_LAYERS.some((l) => l.id === config.lens) ? config.lens : 'replies') as MapLayerId
   const range = (['today', '7d', '30d'].includes(config.range) ? config.range : '7d') as RangeKey
   const meta = MAP_LAYERS.find((l) => l.id === lens)!
-  const perf = useWidgetSource(lens === 'deals' ? null : performanceSource(range))
+  const activity = useWidgetSource(lens === 'deals' ? null : mapActivitySource(lens, range === 'today' || range === '30d' ? range : '7d'))
   const deals = useWidgetSource(lens === 'deals' ? SOURCES.pipelinePoints : null)
-  const load = lens === 'deals' ? deals : perf
-  const perfD = perf.load.status === 'ready' ? perf.load.data : null
+  const load = lens === 'deals' ? deals : activity
+  const actD = activity.load.status === 'ready' ? activity.load.data : null
   const dealsD = deals.load.status === 'ready' ? deals.load.data : null
-  const points = useMemo(() => layerPoints(lens, { performance: perfD, deals: dealsD }), [lens, perfD, dealsD])
+  const points = useMemo(() => layerPoints(lens, { activity: actD, deals: dealsD }), [lens, actD, dealsD])
   const field = useMemo(() => heatField(points ?? []), [points])
-  const leaders = useMemo(() => (points ? layerLeaders(lens, { performance: perfD }, field, size === 'feature' ? 7 : 5) : []), [lens, perfD, field, points, size])
+  const leaders = useMemo(() => (points ? layerLeaders(lens, { activity: actD }, field, size === 'feature' ? 7 : 5) : []), [lens, actD, field, points, size])
+  const notReadable = lens !== 'deals' && actD && !actD.available ? actD : null
+  const recordedThrough = lens === 'buyers' ? notYetRecorded(actD) : null
+  const unplaced = field.unplaced + (lens !== 'deals' && actD ? actD.unplaced : 0)
   const leaderMax = leaders.reduce((m, l) => Math.max(m, l.value), 0)
   const showLeaders = size === 'large' || size === 'feature' || size === 'wide'
   const showLenses = size === 'large' || size === 'feature' || size === 'wide' || size === 'tall'
@@ -161,7 +165,7 @@ export function MapWidget({ size, config, setConfig }: WidgetRenderProps<{ lens:
     <div className={cx('hb-map', `is-${size}`)} style={{ ['--lens' as string]: meta.hue }}>
       <div className="hb-map__head">
         <span className="hb-map__lens"><i aria-hidden="true" />{meta.label}<small>{meta.ranged ? RANGE_LABEL[range] : 'now'}</small></span>
-        <b className="hb-map__total">{load.load.status === 'ready' ? fmt(Math.round(field.total)) : '—'} <small>{meta.unit}</small></b>
+        <b className="hb-map__total">{load.load.status === 'ready' && !notReadable ? fmt(Math.round(field.total)) : '—'} <small>{meta.unit}</small></b>
       </div>
       {showLenses ? (
         <div className="hb-map__lenses" role="radiogroup" aria-label="Map lens">
@@ -177,7 +181,9 @@ export function MapWidget({ size, config, setConfig }: WidgetRenderProps<{ lens:
           <PixelMap points={points} hue={meta.hue} unit={meta.unit} onState={focusState} dim={load.load.status !== 'ready'} />
           {load.load.status === 'loading' ? <p className="hb-map__state">Reading {meta.label.toLowerCase()}…</p> : null}
           {load.load.status === 'unavailable' ? <p className="hb-map__state is-bad">Couldn’t load {meta.label.toLowerCase()} · <button type="button" className="hb-link" onClick={load.reload}>Retry</button></p> : null}
-          {load.load.status === 'ready' && field.total === 0 ? <p className="hb-map__state">No {meta.unit} {meta.ranged ? RANGE_LABEL[range] : 'right now'}</p> : null}
+          {notReadable ? <p className="hb-map__state" title={notReadable.message}>{meta.label} isn’t readable on Home yet</p> : null}
+          {load.load.status === 'ready' && !notReadable && recordedThrough ? <p className="hb-map__state">Recorded purchases end {recordedThrough} · {RANGE_LABEL[range]} not yet recorded</p> : null}
+          {load.load.status === 'ready' && !notReadable && !recordedThrough && field.total === 0 ? <p className="hb-map__state">No {meta.unit} {meta.ranged ? RANGE_LABEL[range] : 'right now'}</p> : null}
         </div>
         {showLeaders ? (
           <aside className="hb-map__leaders" aria-label={`Leading · ${meta.label}`}>
@@ -192,8 +198,8 @@ export function MapWidget({ size, config, setConfig }: WidgetRenderProps<{ lens:
                   </li>
                 ))}
               </ol>
-            ) : <p className="hb-muted">{load.load.status === 'ready' ? 'Nothing to rank yet.' : '—'}</p>}
-            {field.unplaced ? <small className="hb-muted" title="Rows whose property has no usable coordinates">{fmt(field.unplaced)} without a location</small> : null}
+            ) : <p className="hb-muted">{load.load.status === 'ready' && !notReadable ? 'Nothing to rank yet.' : '—'}</p>}
+            {unplaced ? <small className="hb-muted" title="Rows whose property has no usable coordinates">{fmt(unplaced)} without a location</small> : null}
           </aside>
         ) : null}
       </div>

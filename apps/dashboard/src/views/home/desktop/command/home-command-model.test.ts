@@ -4,6 +4,9 @@ import {
   heatField,
   homeDots,
   laneOf,
+  layerLeaders,
+  layerPoints,
+  notYetRecorded,
   nearestDot,
   projectAlbersUsa,
   resolveHomeMode,
@@ -11,6 +14,7 @@ import {
   summarizeFocus,
   systemPulses,
   money,
+  type MapActivity,
   type StudioActivityItem,
 } from './home-command-model'
 import type { FocusItem } from '../../home-signals'
@@ -168,5 +172,51 @@ describe('money', () => {
     expect(money(950_000)).toBe('$950K')
     expect(money(0)).toBe('—')
     expect(money(null)).toBe('—')
+  })
+})
+
+describe('map lenses read the Map widget’s own activity source', () => {
+  const activity = (over: Partial<MapActivity> = {}): MapActivity => ({
+    lens: 'replies',
+    period: { range: '7d', start: '2026-09-26T12:00:00.000Z', end: '2026-10-03T12:00:00.000Z' },
+    available: true,
+    places: [
+      { key: '75201', zip: '75201', market: 'dallas', marketName: 'Dallas, TX', lat: 32.78, lng: -96.8, value: 4 },
+      { key: '75202', zip: '75202', market: 'dallas', marketName: 'Dallas, TX', lat: 32.77, lng: -96.79, value: 2 },
+      { key: '55401', zip: '55401', market: 'minneapolis', marketName: 'Minneapolis, MN', lat: 44.98, lng: -93.27, value: 3 },
+    ],
+    total: 9,
+    unplaced: 1,
+    truncated: false,
+    dataThrough: null,
+    ...over,
+  })
+
+  it('weights each ZIP by its count and ignores an activity for another lens', () => {
+    const pts = layerPoints('replies', { activity: activity(), deals: null })!
+    expect(pts.map((p) => p.w)).toEqual([4, 2, 3])
+    expect(layerPoints('delivered', { activity: activity(), deals: null })).toBeNull()
+    expect(layerPoints('replies', { activity: null, deals: null })).toBeNull()
+  })
+
+  it('an unavailable lens draws nothing (never a fabricated zero field)', () => {
+    expect(layerPoints('buyers', { activity: activity({ lens: 'buyers', available: false, places: [], total: 0 }), deals: null })).toEqual([])
+  })
+
+  it('leaders rank markets by summed ZIP counts', () => {
+    const a = activity()
+    const field = heatField(layerPoints('replies', { activity: a, deals: null })!)
+    expect(layerLeaders('replies', { activity: a }, field)).toEqual([{ label: 'Dallas, TX', value: 6 }, { label: 'Minneapolis, MN', value: 3 }])
+  })
+
+  it('deals stay on pipeline points', () => {
+    expect(layerPoints('deals', { activity: null, deals: [{ lat: 32.7, lng: -96.8 }, { lat: 0, lng: 0 }] })).toEqual([{ lat: 32.7, lng: -96.8, w: 1 }])
+  })
+
+  it('buyer periods after the recorded corpus are "not yet recorded", not zero', () => {
+    const empty = activity({ lens: 'buyers', places: [], total: 0, dataThrough: '2026-07-28' })
+    expect(notYetRecorded(empty)).toBe('2026-07-28')
+    expect(notYetRecorded({ ...empty, dataThrough: '2026-09-30' })).toBeNull()
+    expect(notYetRecorded({ ...empty, total: 2 })).toBeNull()
   })
 })

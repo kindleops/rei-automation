@@ -9,9 +9,10 @@
  * Sources (all existing, all read-only):
  *   useHomeSignals                inbox · queue · today's messaging · campaigns
  *                                 · pipeline counts · closings · markets
- *   /api/cockpit/analytics/performance   series, rates, funnel, automation,
- *                                 ZIP-level delivered/replied/failed/buyers,
- *                                 geolocated stage moves, offers, closings
+ *   /api/cockpit/analytics/performance   series, rates, funnel, automation
+ *   /api/cockpit/home/map-activity       one map lens for one period, by ZIP
+ *                                 (replies, deliveries, failures, stage moves,
+ *                                 offers, buyer purchases)
  *   /api/cockpit/pipeline/command        totals and value by stage
  *   /api/cockpit/pipeline/command/points active deals with coordinates
  *   /api/cockpit/workflow-studio/activity  the cross-runtime machine feed
@@ -384,42 +385,66 @@ export const MAP_LAYERS: MapLayer[] = [
 
 const placed = (lat: unknown, lng: unknown) => Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) && Number(lat) !== 0 && Number(lng) !== 0
 
-export function layerPoints(layer: MapLayerId, src: { performance: AnalyticsPerformance | null; deals: Array<{ lat: number; lng: number }> | null }): HeatPoint[] | null {
-  const perf = src.performance
+/** One lens, one period, by ZIP — /api/cockpit/home/map-activity (the Map widget's own read). */
+export type MapActivityLens = Exclude<MapLayerId, 'deals'>
+export type MapRange = 'today' | '7d' | '30d'
+
+export interface MapActivityPlace { key: string; zip: string | null; market: string | null; marketName: string | null; lat: number; lng: number; value: number }
+
+export interface MapActivity {
+  lens: MapActivityLens
+  period: { range: string; start: string; end: string }
+  /** false = this lens has no readable source here (said, never drawn as zero). */
+  available: boolean
+  reason?: string
+  message?: string
+  places: MapActivityPlace[]
+  total: number
+  /** Counted rows whose property has no coordinates. */
+  unplaced: number
+  truncated: boolean
+  /** Buyer purchases: the recorded corpus ends here; later periods are not yet recorded. */
+  dataThrough: string | null
+}
+
+export async function fetchMapActivity(params: { lens: MapActivityLens; range: MapRange }, signal?: AbortSignal): Promise<MapActivity> {
+  const qs = new URLSearchParams({ lens: params.lens, range: params.range })
+  if (params.range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); qs.set('start', d.toISOString()) }
+  const res = await callBackend<{ ok?: boolean; data?: MapActivity; message?: string }>(`/api/cockpit/home/map-activity?${qs.toString()}`, { signal, timeoutMs: 20_000 })
+  if (!res.ok) throw new Error(res.error || 'map_activity_unavailable')
+  const data = res.data?.data
+  if (!data || !Array.isArray(data.places)) throw new Error(res.data?.message || 'map_activity_unavailable')
+  return data
+}
+
+export function layerPoints(layer: MapLayerId, src: { activity: MapActivity | null; deals: Array<{ lat: number; lng: number }> | null }): HeatPoint[] | null {
   if (layer === 'deals') return src.deals ? src.deals.filter((p) => placed(p.lat, p.lng)).map((p) => ({ lat: p.lat, lng: p.lng, w: 1 })) : null
-  if (!perf) return null
-  const zips = perf.zips ?? []
-  const fromZips = (pick: (z: AnalyticsPerformance['zips'][number]) => number) =>
-    zips.filter((z) => placed(z.lat, z.lng)).map((z) => ({ lat: Number(z.lat), lng: Number(z.lng), w: pick(z) }))
-  switch (layer) {
-    case 'replies': return fromZips((z) => z.replied)
-    case 'delivered': return fromZips((z) => z.delivered)
-    case 'failed': return fromZips((z) => z.failed)
-    case 'buyers': return fromZips((z) => z.buyerPurchases)
-    case 'moves': return (perf.cohorts?.transitions ?? []).filter((t) => placed(t.lat, t.lng)).map((t) => ({ lat: Number(t.lat), lng: Number(t.lng), w: 1 }))
-    case 'offers': return (perf.deals?.offers ?? []).filter((o) => placed(o.lat, o.lng)).map((o) => ({ lat: Number(o.lat), lng: Number(o.lng), w: 1 }))
-    default: return null
-  }
+  const a = src.activity
+  if (!a || a.lens !== layer) return null
+  if (!a.available) return []
+  return a.places.filter((p) => placed(p.lat, p.lng) && p.value > 0).map((p) => ({ lat: Number(p.lat), lng: Number(p.lng), w: p.value }))
 }
 
 /** Top places for a layer: markets when the source names them, else states. */
-export function layerLeaders(layer: MapLayerId, src: { performance: AnalyticsPerformance | null }, field: HeatField, limit = 5): Array<{ label: string; value: number }> {
-  const perf = src.performance
-  if (perf && (layer === 'replies' || layer === 'delivered' || layer === 'failed' || layer === 'buyers')) {
-    const pick = { replies: 'replied', delivered: 'delivered', failed: 'failed', buyers: 'buyerPurchases' } as const
+export function layerLeaders(layer: MapLayerId, src: { activity: MapActivity | null }, field: HeatField, limit = 5): Array<{ label: string; value: number }> {
+  const a = src.activity
+  if (layer !== 'deals' && a && a.lens === layer && a.available) {
     const byMarket = new Map<string, number>()
-    for (const z of perf.zips ?? []) {
-      const market = z.market || null
-      const v = Number(z[pick[layer]]) || 0
-      if (!market || v <= 0) continue
-      byMarket.set(market, (byMarket.get(market) ?? 0) + v)
+    for (const p of a.places) {
+      const label = p.marketName || p.market
+      if (!label || p.value <= 0) continue
+      byMarket.set(label, (byMarket.get(label) ?? 0) + p.value)
     }
-    if (byMarket.size) {
-      const nameOf = new Map((perf.markets ?? []).map((m) => [m.id, m.name]))
-      return [...byMarket.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([id, value]) => ({ label: nameOf.get(id) || id, value }))
-    }
+    if (byMarket.size) return [...byMarket.entries()].sort((x, y) => y[1] - x[1]).slice(0, limit).map(([label, value]) => ({ label, value }))
   }
   return [...field.byState.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([i, value]) => ({ label: stateName(i) ?? 'Unknown', value }))
+}
+
+/** Buyer purchases are recorded with a lag: a period after the corpus ends is "not yet recorded", never zero. */
+export function notYetRecorded(a: MapActivity | null): string | null {
+  if (!a || !a.available || !a.dataThrough || a.total > 0) return null
+  const through = Date.parse(`${a.dataThrough.slice(0, 10)}T23:59:59Z`)
+  return Number.isFinite(through) && through < Date.parse(a.period.start) ? a.dataThrough.slice(0, 10) : null
 }
 
 // ── Money ───────────────────────────────────────────────────────────────────
