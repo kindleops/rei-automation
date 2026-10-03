@@ -13,15 +13,21 @@ const INBOX_PAGE_SRC = readFileSync(
 );
 // Contract re-pin: the canonical resolver moved to canonical-thread-reference.ts
 // (resolveCanonicalThreadStateKey.ts no longer exists).
+const THREAD_READ_POLICY_SRC = readFileSync(
+  resolve(__dirname, "../../../dashboard/src/modules/inbox/thread-read-policy.ts"),
+  "utf8",
+);
 const RESOLVER_SRC = readFileSync(
   resolve(__dirname, "../../../dashboard/src/domain/inbox/canonical-thread-reference.ts"),
   "utf8",
 );
 
 test("thread-state caller resolves E.164 before PATCH", () => {
-  // Contract re-pin: the InboxPage call-site now routes through
-  // resolveDealDeskWritableThreadKey (shared write contract, DD-003).
-  assert.match(INBOX_PAGE_SRC, /resolveDealDeskWritableThreadKey/);
+  // Contract re-pin (2f26e59b): InboxPage's thread-read write goes through the
+  // read policy, which keys the write via resolveDealDeskWritableThreadKey
+  // (shared write contract, DD-003) before any PATCH.
+  assert.match(INBOX_PAGE_SRC, /applyThreadReadOnSelect/);
+  assert.match(THREAD_READ_POLICY_SRC, /resolveDealDeskWritableThreadKey\(/);
   assert.match(INBOX_PAGE_SRC, /patch:\s*\{\s*is_read:\s*true\s*\}/);
   assert.doesNotMatch(INBOX_PAGE_SRC, /thread_key:\s*threadKey,\s*is_read:\s*true,\s*unread_count:\s*0/);
 });
