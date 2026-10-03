@@ -5,7 +5,7 @@ import { resolveAppDestination } from '../../../domain/app-registry/contextual-n
 import { PROPERTY_LOCATOR_EVENT, readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
 import * as L from './layout'
 import type { MissionKind, MissionPlan, MissionSubject } from './missions'
-import { copyInstanceState, instanceStateKeys, isolateShared, releaseInstanceState } from './instance-state'
+import { copyInstanceState, instanceStateKeys, isolateShared, releaseInstanceState, sweepInstanceState } from './instance-state'
 
 /**
  * THE WORKSPACE STORE — one per shell.
@@ -149,6 +149,7 @@ function get(): WorkspaceSnapshot {
     // per-instance state (Browser tabs) is owned by ONE workspace: split any saved layouts that share it
     const isolated = isolateShared(snap.layout, snap.saved)
     if (isolated) { snap = { ...snap, saved: isolated }; writeSaved(isolated) }
+    sweepInstanceState(snap.layout, keepers(snap.saved, snap.mission))
   }
   return snap
 }
@@ -510,6 +511,7 @@ export function saveWorkspace(name?: string): SavedWorkspace {
   const saved = [...s.saved.filter((w) => w.id !== id), entry].sort((a, b) => a.name.localeCompare(b.name))
   writeSaved(saved)
   if (previous) releaseInstanceState(previous.layout, ownedKeys(saved, s.layout))
+  sweepInstanceState(s.layout, keepers(saved, s.mission))
   set({ saved, savedId: id, name: entry.name, dirty: false })
   say(`Saved “${entry.name}”.`)
   return entry
@@ -524,6 +526,11 @@ export function renameWorkspace(id: string, name: string) {
   set({ saved, ...(s.savedId === id ? { name: clean } : {}) })
 }
 
+/** Layouts whose per-instance state must survive a sweep: saved workspaces and the one a mission will restore. */
+function keepers(saved: SavedWorkspace[], mission: ActiveMission | null): Array<{ layout: L.Layout }> {
+  return mission ? [...saved, mission.returnTo] : saved
+}
+
 /** Every per-instance state key still owned by a saved workspace or the live one. */
 function ownedKeys(saved: SavedWorkspace[], live: L.Layout): Set<string> {
   return new Set([...instanceStateKeys(live), ...saved.flatMap((w) => instanceStateKeys(w.layout))])
@@ -535,6 +542,7 @@ export function deleteWorkspace(id: string) {
   const saved = s.saved.filter((w) => w.id !== id)
   writeSaved(saved)
   if (gone) releaseInstanceState(gone.layout, ownedKeys(saved, s.layout))
+  sweepInstanceState(s.layout, keepers(saved, s.mission))
   set({ saved, ...(s.savedId === id ? { savedId: null, name: null, dirty: false } : {}) })
 }
 

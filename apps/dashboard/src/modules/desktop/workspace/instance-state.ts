@@ -1,5 +1,5 @@
 import * as L from './layout'
-import { browserSidOf, copyPath, releasePath } from '../../browser/session-snapshot'
+import { browserSidOf, copyPath, releasePath, sweepSessions } from '../../browser/session-snapshot'
 
 /**
  * PER-INSTANCE STATE THAT LIVES OUTSIDE THE LAYOUT — owned by the workspace
@@ -18,10 +18,12 @@ export interface InstanceStateHook {
   key: (path: string) => string | null
   copy: (path: string) => string
   release: (path: string) => void
+  /** bounded cleanup of stored state no layout references */
+  sweep?: (referenced: ReadonlySet<string>) => void
 }
 
 const HOOKS: Record<string, InstanceStateHook> = {
-  browser: { key: browserSidOf, copy: copyPath, release: releasePath },
+  browser: { key: browserSidOf, copy: copyPath, release: releasePath, sweep: sweepSessions },
 }
 
 function mapInstances(layout: L.Layout, fn: (inst: L.Instance, hook: InstanceStateHook) => string): L.Layout {
@@ -78,4 +80,14 @@ export function isolateShared<T extends { layout: L.Layout }>(live: L.Layout, sa
     return layout === w.layout ? w : { ...w, layout }
   })
   return changed ? out : null
+}
+
+/** Sweep orphaned per-instance state: anything the live layout or a saved workspace references is kept. */
+export function sweepInstanceState(live: L.Layout, saved: Array<{ layout: L.Layout }>) {
+  const keys = [...instanceStateKeys(live), ...saved.flatMap((w) => instanceStateKeys(w.layout))]
+  for (const [app, hook] of Object.entries(HOOKS)) {
+    if (!hook.sweep) continue
+    const prefix = `${app}:`
+    hook.sweep(new Set(keys.filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length))))
+  }
 }

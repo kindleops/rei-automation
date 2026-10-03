@@ -71,3 +71,53 @@ export function releasePath(path: string) {
   const sid = browserSidOf(path)
   if (sid) releaseSession(sid)
 }
+
+/* ── bounded cleanup of orphaned sessions ─────────────────────────────── */
+
+export const SWEEP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+export const SWEEP_CAP = 50
+/** A session touched this recently is never evicted by the cap (another OS tab may be using it). */
+export const SWEEP_GRACE_MS = 60 * 60 * 1000
+const PREFIX = 'lc.browser.session.v1:'
+
+/** When a stored session was last used: its most recent tab activity. */
+function lastUsed(raw: string | null): number {
+  try {
+    const doc = JSON.parse(raw || '{}') as { tabs?: Array<{ lastActive?: unknown; createdAt?: unknown }> }
+    return Math.max(0, ...(doc.tabs ?? []).map((t) => Number(t.lastActive) || Number(t.createdAt) || 0))
+  } catch { return 0 }
+}
+
+/**
+ * Remove ORPHANED sessions — ones no open pane, saved workspace or snapshot
+ * references. Orphans unused for 7 days go; then, while more than 50 sessions
+ * remain, the least recently used orphans go (never one used in the last
+ * hour). A referenced session is never touched. Returns the removed sids.
+ */
+export function sweepSessions(referenced: ReadonlySet<string>, now = Date.now(), opts: { maxAgeMs?: number; cap?: number; graceMs?: number } = {}): string[] {
+  const store = ls()
+  if (!store) return []
+  const maxAge = opts.maxAgeMs ?? SWEEP_MAX_AGE_MS
+  const cap = opts.cap ?? SWEEP_CAP
+  const grace = opts.graceMs ?? SWEEP_GRACE_MS
+  flusher?.()
+  const all: Array<{ sid: string; used: number }> = []
+  try {
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i)
+      if (k && k.startsWith(PREFIX)) all.push({ sid: k.slice(PREFIX.length), used: lastUsed(store.getItem(k)) })
+    }
+  } catch { return [] }
+  const removed: string[] = []
+  const drop = (sid: string) => { releaseSession(sid); removed.push(sid) }
+  const orphans = all.filter((x) => !referenced.has(x.sid))
+  for (const o of orphans) if (now - o.used > maxAge) drop(o.sid)
+  let count = all.length - removed.length
+  const lru = orphans.filter((o) => !removed.includes(o.sid) && now - o.used > grace).sort((a, b) => a.used - b.used)
+  for (const o of lru) {
+    if (count <= cap) break
+    drop(o.sid)
+    count -= 1
+  }
+  return removed
+}

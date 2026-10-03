@@ -175,4 +175,29 @@ describe('Browser state is owned by its workspace', () => {
     expect(again).toEqual([one, two])
     b.stop()
   })
+
+  it('sweeps orphans at boot and on save / delete — never a session a saved workspace or open pane references', async () => {
+    const old = Date.now() - 9 * 24 * 60 * 60 * 1000
+    const sessionDoc = (sid: string, used: number) => JSON.stringify({ v: 1, id: sid, activeId: 't1', link: 'linked', subject: null, handled: [], tabs: [{ id: 't1', url: HENNEPIN[0], title: 'PINS', createdAt: used, lastActive: used }] })
+    local.set('lc.browser.session.v1:orphan01', sessionDoc('orphan01', old))
+    local.set('lc.browser.session.v1:keptsav1', sessionDoc('keptsav1', old))
+    local.set('lc.browser.session.v1:livepane', sessionDoc('livepane', old))
+    const layout = { root: { kind: 'pane', id: 'p1', tabs: ['i1'], active: 'i1' }, instances: { i1: { id: 'i1', app: 'browser', path: '/browser?s=keptsav1', pinned: false } }, focus: 'p1', primary: 'i1', maximized: null }
+    local.set('lc.workspaces.v1', JSON.stringify({ saved: [{ id: 'w1', name: 'Old', layout, linked: true, savedAt: 1 }] }))
+    const b = await boot('/browser?s=livepane', local, session)
+    expect(local.has('lc.browser.session.v1:orphan01')).toBe(false) // boot sweep
+    expect(local.has('lc.browser.session.v1:keptsav1')).toBe(true) // a saved workspace references it
+    expect(local.has('lc.browser.session.v1:livepane')).toBe(true) // the open pane references it
+
+    // an orphan appearing later is swept on save, and on delete
+    local.set('lc.browser.session.v1:orphan02', sessionDoc('orphan02', old))
+    b.store.saveWorkspace('New')
+    expect(local.has('lc.browser.session.v1:orphan02')).toBe(false)
+    local.set('lc.browser.session.v1:orphan03', sessionDoc('orphan03', old))
+    b.store.deleteWorkspace(b.store.getWorkspace().saved.find((w) => w.name === 'New')!.id)
+    expect(local.has('lc.browser.session.v1:orphan03')).toBe(false)
+    expect(local.has('lc.browser.session.v1:keptsav1')).toBe(true)
+    expect(local.has('lc.browser.session.v1:livepane')).toBe(true)
+    b.stop()
+  })
 })
