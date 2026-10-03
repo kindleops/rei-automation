@@ -6,6 +6,12 @@ import { createInboxSendNowQueueRow } from "@/lib/domain/inbox/send-now-service.
 import { validateInboxSendNowPayload } from "@/lib/domain/inbox/send-now-service.js";
 import { buildAndSendNow } from "@/lib/domain/outbound/send-now-request.js";
 
+
+
+// Canonical sender eligibility (2026-10-02): a manual send needs a fleet
+// sender the canonical function accepts. These tests are about other
+// authorities, so the sender is an ordinary active, unblocked fleet number.
+const ACTIVE_FLEET_SENDER = async (phone) => ({ id: "fleet-test-sender", phone_number: phone, status: "active", health_state: "unverified", daily_limit: 800, messages_sent_today: 0 });
 // ─── canSend unit tests ───────────────────────────────────────────────────────
 
 function makeSuppressedSupabase() {
@@ -166,7 +172,7 @@ test("RISK-002: createInboxSendNowQueueRow blocked by gate (paused_review)", asy
       from_phone_number: "+15005550002",
       message_body: "Hi John, are you interested in selling?",
     },
-    {
+    { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
       canSendImpl: async () => ({ ok: false, reason: "thread_paused_review" }),
       supabase: makeCleanSupabase(),
     }
@@ -184,7 +190,7 @@ test("RISK-002: createInboxSendNowQueueRow blocked by gate (phone_suppressed)", 
       from_phone_number: "+15005550002",
       message_body: "Hi John, are you interested in selling?",
     },
-    {
+    { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
       canSendImpl: async () => ({ ok: false, reason: "phone_suppressed" }),
       supabase: makeCleanSupabase(),
     }
@@ -218,7 +224,7 @@ test("RISK-002: identical payload → same gate verdict across createInboxSendNo
 
   const inboxResult = await createInboxSendNowQueueRow(
     { thread_key: "+15005550001", to_phone_number: "+15005550001", from_phone_number: "+15005550002", message_body: "Test" },
-    { canSendImpl: mockGate, supabase: makeCleanSupabase() }
+    { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER,  canSendImpl: mockGate, supabase: makeCleanSupabase() }
   );
   const outboundResult = await buildAndSendNow(
     { phone: "+15005550001" },

@@ -13,6 +13,12 @@ import { extendSupabaseForHealthyCompliance } from "../helpers/compliance-test-h
 import { buildSupabaseQueueRow, makeQueueTestRpc } from "../helpers/queue-run-test-harness.js";
 import { createMemoryS11Store } from "../helpers/s11-memory-store.mjs";
 
+
+
+// Canonical sender eligibility (2026-10-02): a manual send needs a fleet
+// sender the canonical function accepts. These tests are about other
+// authorities, so the sender is an ordinary active, unblocked fleet number.
+const ACTIVE_FLEET_SENDER = async (phone) => ({ id: "fleet-test-sender", phone_number: phone, status: "active", health_state: "unverified", daily_limit: 800, messages_sent_today: 0 });
 function makeLegacyHealthySupabase() {
   return {
     from: () => ({
@@ -310,7 +316,7 @@ test("manual enqueue: suppressed manual inbox send blocked with no insert", asyn
       source: "manual_inbox",
       action: "send_now",
     },
-    {
+    { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
       supabase: makeLegacySuppressedSupabase(),
       insertImpl: async () => {
         insert_called = true;

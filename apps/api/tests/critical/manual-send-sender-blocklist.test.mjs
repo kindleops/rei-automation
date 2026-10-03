@@ -1,5 +1,6 @@
 /**
- * MANUAL SEND NOW — the operator sender blocklist is unconditional (2026-10-02).
+ * MANUAL SEND NOW — the canonical sender eligibility is unconditional (2026-10-02):
+ * operator blocklist + fleet + status/health/cooling/daily limit.
  *
  * Manual sends call the provider directly, so the runner's SMS health guard
  * never saw them: 11 manual sends left from operator-blocked Miami •••5670 on
@@ -32,6 +33,7 @@ function spyDeps(getSystemValue) {
     deps: {
       getSystemValue,
       env: {},
+      loadOutboundNumberByPhone: async (phone) => ({ id: "n1", phone_number: phone, status: "active", health_state: "unverified", daily_limit: 800, messages_sent_today: 3 }),
       insertImpl: async () => { calls.insert += 1; return { ok: true, queue_row_id: "row-1", queue_item_id: "row-1" }; },
       hardComplianceCheckImpl: async () => ({ blocked: false }),
       checkBlacklistPriorFailureImpl: async () => ({ blocked: false }),
@@ -105,6 +107,7 @@ test("executeManualInboxSendNow surfaces the refusal as ok:false (no 423 -> ok:t
       return null;
     },
     env: {},
+    loadOutboundNumberByPhone: async (phone) => ({ id: "n1", phone_number: phone, status: "active", daily_limit: 800, messages_sent_today: 0 }),
     sendTextgridImpl: async () => { provider += 1; return { ok: true }; },
     createQueueRowImpl: (i, d) => createInboxSendNowQueueRow(i, { ...d, insertImpl: async () => { throw new Error("must not insert"); } }),
   });
@@ -113,4 +116,36 @@ test("executeManualInboxSendNow surfaces the refusal as ok:false (no 423 -> ok:t
   assert.equal(out.reason, "blocked_sender_number", "past the runtime authority, refused by the blocklist");
   assert.equal(out.status, 423);
   assert.equal(out.hard_block, true);
+});
+
+for (const [label, row, reason] of [
+  ["a paused number", { status: "paused" }, "outbound_number_status_paused"],
+  ["a cooling number", { health_state: "cooling" }, "outbound_number_health_cooling"],
+  ["a number at its daily limit", { daily_limit: 3, messages_sent_today: 3 }, "outbound_number_daily_limit_reached"],
+]) {
+  test(`${label} is refused with 423 before any row`, async () => {
+    const { calls, deps } = spyDeps(blocklist(null));
+    deps.loadOutboundNumberByPhone = async (phone) => ({ id: "n1", phone_number: phone, status: "active", daily_limit: 800, messages_sent_today: 0, ...row });
+    const out = await createInboxSendNowQueueRow(input(CLEAN), deps);
+    assert.equal(out.status, 423);
+    assert.equal(out.reason, reason);
+    assert.equal(out.hard_block ?? true, true);
+    assert.equal(calls.insert, 0);
+  });
+}
+
+test("a number that is not in the fleet is refused", async () => {
+  const { calls, deps } = spyDeps(blocklist(null));
+  deps.loadOutboundNumberByPhone = async () => null;
+  const out = await createInboxSendNowQueueRow(input(CLEAN), deps);
+  assert.equal(out.reason, "outbound_number_not_in_fleet");
+  assert.equal(calls.insert, 0);
+});
+
+test("a fleet lookup failure refuses (fail closed)", async () => {
+  const { calls, deps } = spyDeps(blocklist(null));
+  deps.loadOutboundNumberByPhone = async () => { throw new Error("db down"); };
+  const out = await createInboxSendNowQueueRow(input(CLEAN), deps);
+  assert.equal(out.reason, "outbound_number_eligibility_unavailable");
+  assert.equal(calls.insert, 0);
 });

@@ -4,10 +4,16 @@ import { readFile } from "node:fs/promises";
 
 import { executeManualInboxSendNow } from "../../src/lib/domain/inbox/send-now-service.js";
 import {
+
   evaluateQueueCreationRuntimeBrakes,
   evaluateQueueSendRuntimeBrakes,
 } from "../../src/lib/domain/queue/queue-control-safety.js";
 
+
+// Canonical sender eligibility (2026-10-02): a manual send needs a fleet
+// sender the canonical function accepts. These tests are about other
+// authorities, so the sender is an ordinary active, unblocked fleet number.
+const ACTIVE_FLEET_SENDER = async (phone) => ({ id: "fleet-test-sender", phone_number: phone, status: "active", health_state: "unverified", daily_limit: 800, messages_sent_today: 0 });
 const EMERGENCY_AT = "2026-05-31T12:00:00.000Z";
 
 const VALID_MANUAL_PAYLOAD = {
@@ -71,7 +77,7 @@ test("emergency stop DENIES a manual inbox send before any row, claim, or provid
   let create_called = 0;
   let provider_called = false;
 
-  const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, {
+  const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     getSystemValue: emergencySystemValue,
     supabase,
     createQueueRowImpl: async () => {
@@ -96,7 +102,7 @@ test("emergency stop DENIES a manual inbox send before any row, claim, or provid
 test("scoped_canary_only DENIES an unrestricted manual send", async () => {
   const supabase = makeClaimConflictSupabase();
   let provider_called = false;
-  const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, {
+  const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     getSystemValue: (key) =>
       key === "queue_execution_mode" ? "scoped_canary_only"
       : key === "queue_processor_mode" ? "live"
@@ -121,7 +127,7 @@ test("an ABSENT or unreadable control plane DENIES (fail closed, never fail open
   ]) {
     const supabase = makeClaimConflictSupabase();
     let provider_called = false;
-    const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, {
+    const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
       getSystemValue,
       supabase,
       createQueueRowImpl: async () => ({ ok: true, queue_row_id: "must-not-be-created" }),
@@ -146,7 +152,7 @@ test("no request field can manufacture send authority", async () => {
     let provider_called = false;
     const result = await executeManualInboxSendNow(
       { ...VALID_MANUAL_PAYLOAD, ...extra },
-      {
+      { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
         getSystemValue: emergencySystemValue,
         supabase,
         createQueueRowImpl: async () => ({ ok: true, queue_row_id: "must-not-be-created" }),
@@ -181,7 +187,7 @@ test("queue and campaign runtime paths still block while emergency stop is activ
 test("compliance still blocks even when the runtime authority AUTHORIZES the send", async () => {
   let insert_called = false;
 
-  const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, {
+  const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, { loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER, 
     getSystemValue: healthySystemValue,
     supabase: {
       from() {
