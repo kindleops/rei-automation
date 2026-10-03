@@ -25,7 +25,8 @@
 import { supabase as defaultSupabase, hasSupabaseConfig } from '@/lib/supabase/client.js'
 import { listPlatformEvents } from '@/lib/domain/platform/events/platform-events-service.js'
 import { readEvents, readNotifications, isMissingTable, STATE_TABLE, WINDOW_MS } from './story-sources.js'
-import { toInputs, projectPartitions, diffProjection, storyFromRow, countRows, PROJECTION_COLS } from './story-projection.js'
+import { toInputs, projectPartitions, diffProjection, storyFromRow, countRows, partitionOfStory, PROJECTION_COLS } from './story-projection.js'
+import { archivedFor, isArchivedPartition } from './story-archive-filter.js'
 
 export const STORIES_TABLE = 'notification_stories'
 export const INPUTS_TABLE = 'notification_story_inputs'
@@ -295,22 +296,29 @@ export async function readProjection(p, deps = {}) {
   if (cur.status !== 'fulfilled' || !cur.value.available) return null
   if (narrow.status !== 'fulfilled' || rows.status !== 'fulfilled') return null
   const row = cur.value.row
+  // [8.3] stories whose subject is archived leave the lenses and the counts
+  const pageStories = rows.value.map((r) => ({ r, s: storyFromRow(r, now) }))
+  const { archived, degraded: archiveDegraded } = await archivedFor(db, [...narrow.value.map((r) => r.partition_key), ...pageStories.map((x) => partitionOfStory(x.s))], deps)
+  const liveNarrow = narrow.value.filter((r) => !isArchivedPartition(archived, r.partition_key))
+  const livePage = pageStories.filter((x) => !isArchivedPartition(archived, partitionOfStory(x.s)))
   // a read NEVER refreshes the projection (not inline, not in the background): passes come from the emit
   // points and the cron tick only, so no read shares its process with a full source read it caused
   const meta = {
     generated_at: new Date(now).toISOString(),
     horizon: windowStart,
     truncated: false,
-    degraded: Array.isArray(row.degraded) ? row.degraded : [],
+    degraded: [...(Array.isArray(row.degraded) ? row.degraded : []), ...(archiveDegraded ? [archiveDegraded] : [])],
     state_store: 'table',
-    counts: countRows(narrow.value),
+    counts: countRows(liveNarrow),
     source: 'projection',
     projected_at: row.projected_at,
   }
   if (p.summary) return { ok: true, ...meta }
-  if (p.since) return { ok: true, ...meta, stories: rows.value.map((r) => storyFromRow(r, now)), ids: narrow.value.map((r) => r.story_id), incremental: true }
-  const page = rows.value.slice(0, p.limit)
-  return { ok: true, ...meta, lens: p.lens, stories: page.map((r) => storyFromRow(r, now)), next_cursor: rows.value.length > p.limit ? encode(page[page.length - 1]) : null }
+  if (p.since) return { ok: true, ...meta, stories: livePage.map((x) => x.s), ids: liveNarrow.map((r) => r.story_id), incremental: true }
+  // the cursor follows the raw page so an archived row never stalls pagination
+  const raw = rows.value.slice(0, p.limit)
+  const shown = new Set(raw.map((r) => r.story_id))
+  return { ok: true, ...meta, lens: p.lens, stories: livePage.filter((x) => shown.has(x.r.story_id)).map((x) => x.s), next_cursor: rows.value.length > p.limit ? encode(raw[raw.length - 1]) : null }
 }
 
 /** Projection rows for specific story ids (the state endpoint). null when unavailable. */
@@ -326,5 +334,7 @@ export async function readProjectedStories(ids, deps = {}) {
 export async function readProjectionCounts(deps = {}) {
   const db = dbOf(deps)
   const windowStart = new Date(nowOf(deps) - WINDOW_MS).toISOString()
-  return countRows(await selectAll(db.from(STORIES_TABLE).select(PROJECTION_COLS).limit(COUNT_LIMIT)))
+  const rows = await selectAll(db.from(STORIES_TABLE).select(PROJECTION_COLS).limit(COUNT_LIMIT))
+  const { archived } = await archivedFor(db, rows.map((r) => r.partition_key), deps)
+  return countRows(rows.filter((r) => !isArchivedPartition(archived, r.partition_key)))
 }

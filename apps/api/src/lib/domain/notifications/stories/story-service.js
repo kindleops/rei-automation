@@ -26,6 +26,7 @@ import { buildStories, countStories } from './story-builder.js'
 import { readEvents, readNotifications, readState, isMissingTable, WINDOW_MS, MAX_PAGES, PAGE, NOTIFICATION_LIMIT, STATE_TABLE, NOTIFICATION_COLS } from './story-sources.js'
 import { readProjection, readProjectedStories, reprojectPartitions, readProjectionCounts } from './story-projector.js'
 import { partitionOfStory, storyFromRow } from './story-projection.js'
+import { archivedFor, isArchivedPartition } from './story-archive-filter.js'
 
 export { WINDOW_MS, MAX_PAGES, PAGE, NOTIFICATION_LIMIT, STATE_TABLE }
 export const SNAPSHOT_TTL_MS = 45e3
@@ -82,8 +83,12 @@ export async function loadSnapshot(deps = {}) {
       const have = new Set(ev.events.map((e) => e.event_id))
       for (const e of prev.raw.events) if (down.has(e.provenance?.adapter) && !have.has(e.event_id)) ev.events.push(e)
     }
-    const snap = { raw: { events: ev.events, notifications: nt.rows }, state: st.map, stateTable: st.available, degraded: [...ev.degraded, ...nt.degraded], horizon: ev.horizon, truncated: ev.truncated, built_at: new Date(now).toISOString(), now }
+    const snap = { raw: { events: ev.events, notifications: nt.rows }, state: st.map, stateTable: st.available, degraded: [...ev.degraded, ...nt.degraded], horizon: ev.horizon, truncated: ev.truncated, built_at: new Date(now).toISOString(), now, archived: new Set() }
     assemble(snap, now)
+    // [8.3] stories whose subject is archived leave every lens and count
+    const { archived, degraded: archiveDegraded } = await archivedFor(db, snap.stories.map(partitionOfStory), deps)
+    if (archiveDegraded) snap.degraded.push(archiveDegraded)
+    if (archived.size) { snap.archived = archived; assemble(snap, now) }
     cache = { at: now, snapshot: snap, inflight: null }
     return snap
   })()
@@ -92,7 +97,8 @@ export async function loadSnapshot(deps = {}) {
 }
 
 function assemble(snap, now) {
-  const { stories, stats } = buildStories({ ...snap.raw, state: snap.state, now })
+  const { stories: built, stats } = buildStories({ ...snap.raw, state: snap.state, now })
+  const stories = snap.archived?.size ? built.filter((s) => !isArchivedPartition(snap.archived, partitionOfStory(s))) : built
   snap.stories = stories
   snap.byId = new Map(stories.map((s) => [s.id, s]))
   snap.stats = stats

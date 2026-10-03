@@ -258,7 +258,7 @@ test('signals: severity maps explicitly; an event-rule firing joins the event th
 })
 
 /* ── service: paging, incremental, state persistence, degrade ─────────── */
-function fakeDb({ stateTable = true, notifications = [] } = {}) {
+function fakeDb({ stateTable = true, notifications = [], archivedRows = {} } = {}) {
   const writes = []
   const stateRows = []
   const db = {
@@ -267,6 +267,9 @@ function fakeDb({ stateTable = true, notifications = [] } = {}) {
       const q = { table, filters: [], op: 'select' }
       const chain = {
         select() { return chain }, gte() { return chain }, order() { return chain }, eq(c, v) { q.filters.push([c, v]); return chain },
+        // [8.3] the archive lookup (inbox_thread_state / campaigns): nothing archived unless the test says so
+        in(c, v) { q.filters.push([c, v]); return chain },
+        then(res, rej) { return Promise.resolve({ data: (archivedRows[table] || []), error: null }).then(res, rej) },
         limit() {
           if (table === 'notification_events') return Promise.resolve({ data: notifications, error: null })
           if (table === 'notification_story_state') return Promise.resolve(stateTable ? { data: stateRows, error: null } : { data: null, error: { code: 'PGRST205', message: 'Could not find the table public.notification_story_state in the schema cache' } })
@@ -370,4 +373,43 @@ test('a source that times out keeps the previous snapshot’s events (no silent 
   const second = await getNotificationStories({}, { supabase: db, listEvents, now: () => NOW + 60e3, fresh: true })
   assert.deepEqual(second.degraded, ['workflow'])
   assert.equal(second.stories[0].lens, 'needs_you', 'the held run is still known')
+})
+
+/* ── [8.3] archived subjects leave the stories ───────────────────────── */
+import { parsePartition, isArchivedPartition, loadArchivedPartitions } from '../../src/lib/domain/notifications/stories/story-archive-filter.js'
+
+test('[8.3] an archived conversation / campaign leaves every lens and count; a failed lookup hides nothing', async () => {
+  const CID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const events = [inbound('m1', { tk: '+16125550101' }), inbound('m2', { tk: '+16125550202', s: 5 }), campaignEv('ce:1', 'campaign.blocked', 8, CID)]
+  __resetStoryCache()
+  const open = await getNotificationStories({}, { supabase: fakeDb(), listEvents: listEvents(events), now: () => NOW, fresh: true, projection: false })
+  const keys = (r) => r.stories.map((s) => s.subject.type === 'seller' ? s.subject.thread_key : s.subject.id).sort()
+  assert.deepEqual(keys(open), ['+16125550101', '+16125550202', CID].sort())
+
+  __resetStoryCache()
+  const db = fakeDb({ archivedRows: { inbox_thread_state: [{ thread_key: '+16125550101' }], campaigns: [{ id: CID }] } })
+  const hidden = await getNotificationStories({}, { supabase: db, listEvents: listEvents(events), now: () => NOW, fresh: true, projection: false })
+  assert.deepEqual(keys(hidden), ['+16125550202'])
+  const total = (c) => c.needs_you + c.now + c.resolved + c.system
+  assert.equal(total(hidden.counts), 1)
+  assert.ok(total(open.counts) > total(hidden.counts))
+
+  __resetStoryCache()
+  const failing = await getNotificationStories({}, { supabase: fakeDb(), listEvents: listEvents(events), now: () => NOW, fresh: true, projection: false, loadArchivedPartitions: async () => { throw new Error('db down') } })
+  assert.equal(failing.stories.length, open.stories.length)
+  assert.ok(failing.degraded.some((d) => d.startsWith('archive_filter:')))
+})
+
+test('[8.3] partition parsing and lookup', async () => {
+  assert.deepEqual(parsePartition('seller:+16125550101|p1'), { type: 'seller', id: '+16125550101' })
+  assert.deepEqual(parsePartition('campaign:abc'), { type: 'campaign', id: 'abc' })
+  assert.equal(parsePartition('system:senders'), null)
+  const set = new Set(['seller:+16125550101'])
+  assert.equal(isArchivedPartition(set, 'seller:+16125550101|p9'), true)
+  assert.equal(isArchivedPartition(set, 'system:senders'), false)
+  const seen = []
+  const db = { from: (t) => { const c = { select: () => c, in: (col, v) => { seen.push([t, v.length]); return c }, eq: () => c, then: (res) => Promise.resolve({ data: t === 'campaigns' ? [] : [{ thread_key: '+16125550101' }], error: null }).then(res) }; return c } }
+  const out = await loadArchivedPartitions(db, ['seller:+16125550101', 'campaign:not-a-uuid', 'system:x'])
+  assert.deepEqual([...out], ['seller:+16125550101'])
+  assert.deepEqual(seen, [['inbox_thread_state', 1]])
 })
