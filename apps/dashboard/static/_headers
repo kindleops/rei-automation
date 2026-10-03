@@ -8,8 +8,22 @@
 # same header, so the general rule comes first and specific paths follow.
 #
 # Cache semantics carried over from the previous Vercel configuration. That
-# config contained ONLY Cache-Control rules -- no CSP/HSTS/nosniff -- so there
-# are no security headers to preserve here, and none are invented.
+# config contained ONLY Cache-Control rules -- no CSP/HSTS/nosniff. The only
+# security headers added since are the anti-framing pair below.
+
+# CLICKJACKING (2026-10-02 hotfix): LeadCommand is never framed -- not by
+# another site and not by itself. Audited before adding: no dashboard iframe
+# loads our own origin (Street View / aerial / comp map frame google.com; the
+# Closing Desk PDF preview frames a Supabase Storage signed URL), there are no
+# srcdoc/blob frames, no Tauri / Capacitor / iOS / Electron shell, and the
+# installed PWA is a top-level window. So frame-ancestors 'none' (CSP level 2)
+# plus X-Frame-Options DENY for older browsers. This CSP carries ONLY
+# frame-ancestors, so it restricts nothing else. /* matches every asset path,
+# including deep links answered by the SPA fallback; /api/* is Worker-served
+# and never reaches these rules.
+/*
+  Content-Security-Policy: frame-ancestors 'none'
+  X-Frame-Options: DENY
 
 # The HTML shell must revalidate or a new deploy is never picked up.
 /
