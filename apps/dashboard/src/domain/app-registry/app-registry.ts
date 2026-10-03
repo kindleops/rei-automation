@@ -35,6 +35,7 @@ export type AppId =
   | 'comp-intelligence'
   | 'buyer-match'
   | 'map'
+  | 'browser'
   | 'pipeline'
   | 'queue'
   | 'campaign-command'
@@ -105,6 +106,13 @@ export interface NexusApp {
   action?: 'deal_intelligence' | 'notifications' | 'settings'
   /** Present only while a surface is not yet usable on a phone — shown as an honest note. */
   mobileCaveat?: string
+  /**
+   * A desktop-only app that still belongs in the desktop Command Rail. The Rail
+   * lists the mobile set (mobile: false hides an app everywhere on a phone AND
+   * from the Rail); this opts a desktop-only instrument back into the Rail
+   * without putting it on a phone.
+   */
+  desktopRail?: boolean
 }
 
 /**
@@ -359,6 +367,29 @@ export const NEXUS_APPS: NexusApp[] = [
     shortcut: 'M',
     badge: null,
     context: { propertyId: 'locator' },
+  },
+  {
+    /**
+     * Browser 1.0 — the contextual research instrument (county records, GIS,
+     * market sources, web search) inside the cockpit. Desktop only: there is
+     * no phone Browser. It reads the linked selection itself (it OFFERS a new
+     * subject, never retargets its tabs), so it declares no context the
+     * workspace would rewrite its path with.
+     */
+    id: 'browser',
+    label: 'Browser',
+    shortLabel: 'Browser',
+    description: 'Research county records, market sources and the web in context',
+    icon: 'compass',
+    route: '/browser',
+    group: 'intelligence',
+    desktop: true,
+    mobile: false,
+    desktopRail: true,
+    dockable: false,
+    defaultDock: false,
+    badge: null,
+    context: {},
   },
 
   {

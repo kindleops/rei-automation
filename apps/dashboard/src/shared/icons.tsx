@@ -73,6 +73,8 @@ export type IconName =
   | 'database'
   | 'x'
   | 'check-double'
+  | 'compass'
+  | 'plus'
 
 
 
@@ -490,6 +492,20 @@ export const Icon = ({ name, size, ...rest }: IconProps) => {
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" {...commonProps} />
+        </svg>
+      )
+    case 'compass':
+      // Browser (research): a bearing, not a globe — research has a direction
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+          <circle cx="12" cy="12" r="9" {...commonProps} />
+          <path d="m15.5 8.5-2.1 4.9-4.9 2.1 2.1-4.9z" {...commonProps} />
+        </svg>
+      )
+    case 'plus':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+          <path d="M12 5v14M5 12h14" {...commonProps} />
         </svg>
       )
     case 'globe':

@@ -78,6 +78,7 @@ const EmailCommandCenter = lazy(() =>
   })),
 )
 const WorkflowStudioV2 = lazy(() => import('../views/workflow-studio/v2/WorkflowStudioV2'))
+const BrowserApp = lazy(() => import('../modules/browser/BrowserApp'))
 const SettingsView = lazy(() =>
   import('../views/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
 )
@@ -273,6 +274,14 @@ const workflowStudioRoute = defineRoute<null>({
   render: () => wrapFullscreen(<WorkflowStudioV2 />, 'workflow_studio'),
 })
 
+/** Browser 1.0 — contextual research (desktop only; the app says so on a phone). */
+const browserRoute = defineRoute<null>({
+  path: '/browser',
+  title: 'LeadCommand | Browser',
+  loader: async () => null,
+  render: () => <BrowserApp />,
+})
+
 /** The desktop's Settings page (the phone keeps its settings sheet). */
 const settingsRoute = defineRoute<null>({
   path: '/settings',
@@ -399,6 +408,7 @@ const routes = [
   campaignCommandRoute,
   emailCommandRoute,
   workflowStudioRoute,
+  browserRoute,
   settingsRoute,
   entityGraphRoute,
   entityGraphPropertyRoute,

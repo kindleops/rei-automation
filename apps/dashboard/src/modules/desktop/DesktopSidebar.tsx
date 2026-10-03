@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
 import { Icon } from '../../shared/icons'
 import { LCContextMenu, LCHoverCard, LCPopover, LCTooltip, cx, type LCMenuEntry } from '../../shared/lc'
-import { MOBILE_APPS_BY_GROUP, type NexusApp } from '../../domain/app-registry/app-registry'
+import { APPS_BY_GROUP, type NexusApp } from '../../domain/app-registry/app-registry'
 import { navigateToApp, resolveAppDestination } from '../../domain/app-registry/contextual-navigation'
 import { pushRoutePath } from '../../app/router'
 import { readPropertyLocator } from '../../domain/locator/property-locator'
@@ -31,8 +31,9 @@ import './rail/command-rail.css'
  * 60px rail; hover, focus or ⌘\ opens the full plane.
  */
 
-const SECTIONS = MOBILE_APPS_BY_GROUP
-  .map((g) => ({ ...g, apps: g.apps.filter((a) => a.action !== 'notifications' && a.action !== 'settings' && !a.route.startsWith('__')) }))
+// The Rail lists the mobile set plus desktop-only instruments that opt in (Browser).
+const SECTIONS = APPS_BY_GROUP
+  .map((g) => ({ ...g, apps: g.apps.filter((a) => (a.mobile || (a.desktop && a.desktopRail)) && a.action !== 'notifications' && a.action !== 'settings' && !a.route.startsWith('__')) }))
   .filter((g) => g.apps.length > 0)
 
 export interface DesktopSidebarProps {
