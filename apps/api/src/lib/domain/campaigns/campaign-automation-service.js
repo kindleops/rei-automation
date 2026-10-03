@@ -55,6 +55,7 @@ import { campaignMarketIdentityPatch, summarizeCampaignMarketIdentity } from '@/
 import { deriveTimezoneFromGeography } from '@/lib/domain/campaigns/contact-window-timezone.js'
 import { resolveRecipientTimezone } from '@/lib/domain/queue/recipient-timezone.js'
 import { loadCanonicalMarketDirectory, resolveMarketLabel } from '@/lib/domain/geography/canonical-market.js'
+import { isUniverseFilter, sendableAfterPersonalization, summarizePersonalization } from '@/lib/domain/campaigns/campaign-audience-funnel.js'
 import {
   ageBucketFromMob,
   ageFromMob,
@@ -6594,6 +6595,7 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
     increment(zones, zone.ok ? zone.iana : 'unresolved')
     increment(markets, clean(row.market) || 'unknown')
   }
+  const personalization = await summarizeCohortPersonalization(readyRows, rows, deps).catch(() => null)
   return {
     ok: true,
     queue_eligible_in_audience: total,
@@ -6604,10 +6606,69 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
     sendable_now: senders ? senders.sendable_now : null,
     no_sendable_number: senders ? senders.no_sendable_number : null,
     sender_markets: senders ? senders.markets : [],
+    // Greeting personalization of the ready set (render lint): first name on
+    // file, deed-name greeting, or none (refused). Null when names were unreadable.
+    personalization,
+    sendable_after_personalization: senders
+      ? sendableAfterPersonalization(senders.sendable_now, senders.markets, personalization)
+      : null,
     ready_by_zone: zones,
     ready_by_market: markets,
     timings_ms: { read: readMs, total: Date.now() - startedAt },
     warnings: uniqueClean(warnings),
+  }
+}
+
+/**
+ * Ready rows' greeting personalization. The cohort plans with
+ * resolveLanguages:false, so names are hydrated here the way Build hydrates
+ * them (canonical prospect by seller_person_key, applyCanonicalSellerName), for
+ * the rows still missing a first name only. Corporate ownership comes from the
+ * graph row (the snapshot does not carry it).
+ */
+async function summarizeCohortPersonalization(readyRows = [], graphRows = [], deps = {}) {
+  if (!readyRows.length) return summarizePersonalization([])
+  const corporateByProperty = new Map()
+  for (const row of graphRows) if (row?.property_id) corporateByProperty.set(clean(row.property_id), row.is_corporate_owner === true)
+  const probes = []
+  for (const row of readyRows) {
+    const snapshot = metadataObject(metadataObject(row.metadata).candidate_snapshot)
+    if (!clean(snapshot.seller_first_name) && clean(snapshot.seller_person_key)) probes.push({ seller_person_key: clean(snapshot.seller_person_key) })
+  }
+  const { fetchCanonicalLanguages } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
+  const lookup = probes.length ? await (deps.fetchCanonicalLanguages || fetchCanonicalLanguages)(probes, deps) : null
+  const classified = readyRows.map((row) => {
+    const snapshot = { ...metadataObject(metadataObject(row.metadata).candidate_snapshot) }
+    if (lookup) applyCanonicalSellerName(snapshot, lookup)
+    return {
+      market: row.market,
+      seller_first_name: snapshot.seller_first_name,
+      owner_name: snapshot.owner_name,
+      is_corporate_owner: corporateByProperty.get(clean(row.property_id || snapshot.property_id)) === true,
+    }
+  })
+  return summarizePersonalization(classified)
+}
+
+/**
+ * THE LOCATION UNIVERSE an audience's targeting filters narrow (the funnel's
+ * first stage): the same graph count as Reach with only the location filters
+ * (market, ZIP, county, drawn area, pinned ids) applied. One indexed count.
+ */
+export async function countCampaignAudienceUniverse(input = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const baseOptions = previewOptionsFromInput(input, null)
+  const population = await resolveGraphColumnPopulation(deps)
+  const resolved = resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters, { population })
+  const all = resolved.supported || []
+  const location = all.filter((filter) => isUniverseFilter(filter, getCampaignFieldDefinition(filter.field_key)))
+  const result = await countCampaignGraphRows({ supabase, options: { ...baseOptions, catalog_filters: { ...resolved, supported: location } } })
+  return {
+    ok: result.ok,
+    count: result.ok ? result.count : null,
+    location_filters: location.map((filter) => filter.field_key),
+    targeting_filters: all.filter((filter) => !location.includes(filter)).map((filter) => filter.field_key),
+    warnings: result.warnings,
   }
 }
 

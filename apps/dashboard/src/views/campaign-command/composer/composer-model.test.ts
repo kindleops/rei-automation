@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSegments, capacityPlan, checkSchedule, completionEstimate, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition,
   coverageMarkets, launchSentence, parseCap, withCohort, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
+  audienceFunnel, audienceFreshness,
 } from './composer-model'
 import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, CoverageMarket } from './composer-types'
 import { intakeFromLocation, resolveDrop, COMPOSER_OBJECTS_MIME } from './composer-intake'
@@ -215,5 +216,63 @@ describe('command deck + rollback', () => {
     expect(isLegacyBuilderForced('', { getItem: () => null })).toBe(false)
     expect(isLegacyBuilderForced('?composer=legacy', { getItem: () => null })).toBe(true)
     expect(isLegacyBuilderForced('', { getItem: () => 'legacy' })).toBe(true)
+  })
+})
+
+describe('audience funnel (Minneapolis, 2026-10-03 numbers)', () => {
+  const mpls = (): ComposerAudience => audience({
+    matched: 5411, addressable: 5412, reachable: 4581, sms_eligible: 3525, clean: 3400, eligible_in_audience: 3400,
+    exclusions: { suppressed: 212, dnc: 0, wrong_number: 1, no_phone: 830, sms_ineligible: 1056, no_sender_route: 0, pending_prior_touch: 0, active_queue: 0 },
+    build: { ok: true, requested_limit: 1000, simulated_limit: 1000, rows_read: 1000, recipients: 851, duplicates_collapsed: 149, built: 851, ready: 552, held: 299, held_by_reason: { entity_contact_requires_review: 258 }, sendable_now: 552, no_sendable_number: 0, sender_markets: [] },
+    universe: { count: 5411, location_filters: ['properties.market'], targeting_filters: [] },
+  })
+  const cohort = (): ComposerCohort => ({
+    ok: true, at: '', queue_eligible_in_audience: 3400, rows_read: 3400, capped_by_build_limit: false, build_limit: 100000, recipients: 3104,
+    duplicates_collapsed: 296, ready: 2552, held: 552, held_by_reason: { entity_contact_requires_review: 446, ambiguous_phone_ownership: 19, missing_identity_linkage: 87 },
+    sendable_now: 2552, no_sendable_number: 0, sender_markets: [], ready_by_zone: { 'America/Chicago': 2552 }, ready_by_market: { 'Minneapolis, MN': 2552 }, timings_ms: { read: 1905, total: 4371 },
+    personalization: { first_name: 600, deed_name: 1700, none: 252 }, sendable_after_personalization: 2300,
+  })
+
+  it('the sample build is labelled a sample capped by Campaign size — that is the ~640-class number', () => {
+    const stages = audienceFunnel(mpls())
+    expect(stages.map((s) => s.key)).toEqual(['universe', 'filters', 'reachable', 'sms', 'clean', 'built', 'personalization', 'routing'])
+    const built = stages.find((s) => s.key === 'built')!
+    expect(built.basis).toBe('sample')
+    expect(built.count).toBe(552)
+    expect(built.note).toMatch(/first 1,000 rows/)
+    expect(stages.find((s) => s.key === 'personalization')!.count).toBeNull()
+    expect(stages.find((s) => s.key === 'reachable')!.dropped).toBe(830)
+  })
+
+  it('the whole cohort carries the render lint: eligible = ready, routable, and the greeting renders', () => {
+    const a = withCohort(mpls(), cohort())!
+    expect(eligibleOf(a)).toBe(2300)
+    const stages = audienceFunnel(a)
+    const p = stages.find((s) => s.key === 'personalization')!
+    expect(p.count).toBe(2300)
+    expect(p.dropped).toBe(252)
+    expect(p.reasons[0].label).toMatch(/render lint/)
+    expect(p.note).toMatch(/1,700 have no first name/)
+    expect(stages.find((s) => s.key === 'built')!.reasons.map((r) => r.count)).toContain(446)
+    expect(stages.at(-1)!.count).toBe(2300)
+  })
+
+  it('a location-only universe shows what the targeting filters removed', () => {
+    const a = audience({ ...mpls(), matched: 1200, universe: { count: 5411, location_filters: ['properties.market'], targeting_filters: ['properties.tax_delinquent'] } })
+    const f = audienceFunnel(a, () => 'Tax Delinquent').find((s) => s.key === 'filters')!
+    expect(f.dropped).toBe(4211)
+    expect(f.reasons[0].label).toBe('Tax Delinquent')
+  })
+
+  it('freshness states the audience age; stale data and unmeasured coverage are said out loud', () => {
+    const now = Date.parse('2026-10-03T21:00:00Z')
+    const old = audienceFreshness(audience({ graph_freshness: { latest_generated_at: '2026-08-26T19:45:52Z' } }), now)!
+    expect(old.label).toMatch(/Aug 26, 38 days old/)
+    expect(old.stale).toBe(true)
+    expect(old.coverage).toBeNull()
+    const fresh = audienceFreshness(audience({ graph_freshness: { latest_generated_at: '2026-08-26T19:45:52Z' }, graph_coverage: { measured_at: '2026-10-03T09:00:00Z', sample_rows: 3400, latest_built_at: null, oldest_enriched_at: null, latest_enriched_at: '2026-10-03T08:58:00Z', coverage: { seller_first_name: 0.84, phone_type: 0.99 } } }), now)!
+    expect(fresh.label).toMatch(/12 hours old/)
+    expect(fresh.stale).toBe(false)
+    expect(fresh.coverage).toEqual([{ label: 'First name', count: 84 }, { label: 'Phone type', count: 99 }])
   })
 })

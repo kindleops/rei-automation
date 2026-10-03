@@ -41,6 +41,7 @@ import {
   applyOwnerPersona,
   buildCampaignTargets,
   countCampaignAudienceCohort,
+  countCampaignAudienceUniverse,
   createCampaign,
   launchCandidateFromTarget,
   loadOwnerPersonas,
@@ -411,6 +412,32 @@ export function composerAudienceFromPreview(preview = {}) {
   }
 }
 
+/**
+ * The audience projection's latest measured coverage (share of rows with a
+ * value per targeting column) and build/enrich times, from
+ * campaign_target_graph_coverage (PROPOSED_20261003220000). Null — never a
+ * guess — until that table exists and has a measurement.
+ */
+export async function readGraphCoverage(supabase, deps = {}) {
+  if (deps.readGraphCoverage) return deps.readGraphCoverage()
+  if (!supabase) return null
+  const { data, error } = await supabase
+    .from('campaign_target_graph_coverage')
+    .select('measured_at,sample_rows,latest_built_at,oldest_enriched_at,latest_enriched_at,coverage')
+    .order('measured_at', { ascending: false })
+    .limit(1)
+  if (error || !Array.isArray(data) || !data.length) return null
+  const row = data[0]
+  return {
+    measured_at: row.measured_at || null,
+    sample_rows: num(row.sample_rows),
+    latest_built_at: row.latest_built_at || null,
+    oldest_enriched_at: row.oldest_enriched_at || null,
+    latest_enriched_at: row.latest_enriched_at || null,
+    coverage: obj(row.coverage),
+  }
+}
+
 /** Render a few ready targets with the planner's renderer — the launch-readiness sample path. */
 /**
  * The preview's target rows are raw graph snapshots: no canonical language and
@@ -500,6 +527,14 @@ export async function readComposerAudience(spec = {}, deps = {}) {
     return { ok: false, error: clean(preview?.error) || 'audience_unavailable', message: clean(preview?.message) || null }
   }
   const audience = composerAudienceFromPreview(preview)
+  const [universe, coverage] = await Promise.all([
+    (deps.countCampaignAudienceUniverse || countCampaignAudienceUniverse)({ filters: obj(s.filters), template_use_case: strategy.use_case, stage_code: stageCode }, deps).catch(() => null),
+    readGraphCoverage(supabase, deps).catch(() => null),
+  ])
+  audience.universe = universe?.ok
+    ? { count: num(universe.count), location_filters: universe.location_filters || [], targeting_filters: universe.targeting_filters || [] }
+    : null
+  audience.graph_coverage = coverage
   const samples = s.render === false
     ? []
     : await renderComposerSamples(Array.isArray(preview.target_rows) ? preview.target_rows : [], { templateUseCase: strategy.use_case, stageCode, supabase }, deps).catch(() => [])
@@ -539,6 +574,10 @@ export async function readComposerCohort(spec = {}, deps = {}) {
     sendable_now: result.sendable_now,
     no_sendable_number: result.no_sendable_number,
     sender_markets: (result.sender_markets || []).map((m) => ({ market: m.market, sellers: m.sellers, sendable: m.sendable ?? null, route_tier: m.route_tier || null, block_reason: m.block_reason || null, summary: m.summary || null })),
+    personalization: result.personalization
+      ? { first_name: num(result.personalization.first_name), deed_name: num(result.personalization.deed_name), none: num(result.personalization.none) }
+      : null,
+    sendable_after_personalization: result.sendable_after_personalization ?? null,
     ready_by_zone: result.ready_by_zone,
     ready_by_market: result.ready_by_market,
     timings_ms: result.timings_ms,

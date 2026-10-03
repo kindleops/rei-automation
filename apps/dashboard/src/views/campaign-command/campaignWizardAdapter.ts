@@ -707,9 +707,9 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set<string>([
   'properties.seller_tags_text',
   // seller_tags_json has no campaign_target_graph column; seller_tags_text covers
   // tag filtering. Keeping it unsupported prevents a silently-skipped active filter.
-  'properties.structured_motivation_score',
-  'properties.deal_strength_score',
-  'properties.tag_distress_score',
+  // Legacy Podio scores (structured motivation, deal strength, tag distress,
+  // master-owner priority) are retired from targeting — the server catalog hides
+  // them too (RETIRED_FIELD_KEYS). Final acquisition score stays, labelled legacy.
   'properties.final_acquisition_score',
   'properties.owner_type',
   'properties.owner_type_guess',
@@ -734,7 +734,6 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set<string>([
   'master_owners.owner_type_guess',
   'master_owners.priority_tier',
   'master_owners.follow_up_cadence',
-  'master_owners.priority_score',
   'phones.phone_owner',
   'phones.activity_status',
   'phones.usage_12_months',

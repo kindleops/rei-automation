@@ -19,6 +19,7 @@ const CAMPAIGN_DOMAINS = [
       'Asset Type & Structure',
       'Value, Equity & Debt',
       'Distress & Motivation',
+      'Acquisition Scores',
       'Condition & Repair',
       'Land, Lot & Zoning',
       'Tax & Assessment',
@@ -409,10 +410,26 @@ const FIELD_GROUPS = [
       'seller_tags_text',
       'seller_tags_json',
       'property_flags_text',
+      // Legacy Podio-era scores (no writer in the repo). Declared so a saved
+      // filter on them is refused by name; RETIRED_FIELD_KEYS keeps them out of
+      // the builder (owner rule 2026-10-03).
       'structured_motivation_score',
       'deal_strength_score',
       'tag_distress_score',
       'final_acquisition_score',
+    ],
+  },
+  {
+    domain: 'properties',
+    // Canonical scores: property_acquisition_scores (Acquisition Decision Engine),
+    // projected into campaign_target_graph by campaign_target_graph_enrich_rows.
+    category: 'Acquisition Scores',
+    columns: [
+      'aos_score',
+      'decision_tier',
+      'acquisition_confidence',
+      'transaction_probability_365',
+      'best_strategy',
     ],
   },
   {
@@ -561,7 +578,7 @@ const FIELD_GROUPS = [
   {
     domain: 'phones',
     category: 'Quality',
-    columns: ['phone_owner', 'activity_status', 'usage_12_months', 'usage_2_months'],
+    columns: ['phone_type', 'phone_owner', 'activity_status', 'usage_12_months', 'usage_2_months'],
   },
   {
     domain: 'outreach',
@@ -620,6 +637,9 @@ const NUMERIC_COLUMNS = new Set([
   'deal_strength_score',
   'tag_distress_score',
   'final_acquisition_score',
+  'aos_score',
+  'acquisition_confidence',
+  'transaction_probability_365',
   'estimated_repair_cost',
   'estimated_repair_cost_per_sqft',
   'num_of_fireplaces',
@@ -787,10 +807,27 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set([
   // mirror of seller_tags_text with no campaign_target_graph column of its own, so
   // applying it would be silently skipped ("no graph column mapping found").
   // seller_tags_text -> graph.podio_tags already covers tag filtering in preview.
-  'properties.structured_motivation_score',
-  'properties.deal_strength_score',
-  'properties.tag_distress_score',
+  // Retired legacy scores (structured motivation, deal strength, tag distress,
+  // master-owner priority) are NOT preview-supported: the builder hides them and
+  // Build refuses a saved filter on them by name. Canonical scores replace them.
   'properties.final_acquisition_score',
+  'properties.aos_score',
+  'properties.decision_tier',
+  'properties.acquisition_confidence',
+  'properties.transaction_probability_365',
+  'properties.best_strategy',
+  // Property facts projected by PROPOSED_20261003220000 (applicable once the
+  // population probe sees them filled; see PROJECTION_PENDING_COLUMNS).
+  'properties.total_bedrooms',
+  'properties.total_baths',
+  'properties.building_square_feet',
+  'properties.year_built',
+  'properties.lot_square_feet',
+  'properties.total_loan_balance',
+  'properties.ownership_years',
+  'properties.tax_delinquent_year',
+  'properties.building_quality',
+  'properties.estimated_repair_cost',
   'properties.owner_type',
   'properties.owner_type_guess',
   'properties.is_corporate_owner',
@@ -814,7 +851,7 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set([
   'master_owners.owner_type_guess',
   'master_owners.priority_tier',
   'master_owners.follow_up_cadence',
-  'master_owners.priority_score',
+  'phones.phone_type',
   'phones.phone_owner',
   'phones.activity_status',
   'phones.usage_12_months',
@@ -842,6 +879,16 @@ const SPECIAL_LABELS = {
   email_eligible: 'Email Eligible',
   mob: 'Age',
   phone_owner: 'Carrier / Phone Owner',
+  phone_type: 'Phone Type (W = wireless, L = landline)',
+  final_acquisition_score: 'Final Acquisition Score (legacy Podio import)',
+  structured_motivation_score: 'Structured Motivation Score (retired)',
+  deal_strength_score: 'Deal Strength Score (retired)',
+  tag_distress_score: 'Tag Distress Score (retired)',
+  aos_score: 'Acquisition Opportunity Score (AOS)',
+  decision_tier: 'Decision Tier',
+  acquisition_confidence: 'Decision Confidence',
+  transaction_probability_365: 'Transaction Probability (365 days)',
+  best_strategy: 'Best Strategy',
   sqft_range: 'Sqft Range',
   avg_sqft_per_unit: 'Avg Sqft Per Unit',
   selected_textgrid_market: 'Selected TextGrid Market',
@@ -932,12 +979,24 @@ function buildFieldCatalog() {
         supports_options: supportsOptions,
         supports_counts: true,
         supported_in_preview: PREVIEW_SUPPORTED_FIELD_KEYS.has(`${domain}.${column}`),
+        ...(RETIRED_FIELD_KEYS.has(`${domain}.${column}`) ? { retired: true } : {}),
         description: descriptionForField(domain, category, humanizeColumn(column)),
         ...(derivedFrom ? { derived_from: derivedFrom } : {}),
       }
     })
   )
 }
+
+/**
+ * Legacy Podio-era scores retired from targeting (owner rule, 2026-10-03):
+ * hidden from the builder; a saved filter on one is refused by name at Build.
+ */
+export const RETIRED_FIELD_KEYS = Object.freeze(new Set([
+  'properties.structured_motivation_score',
+  'properties.deal_strength_score',
+  'properties.tag_distress_score',
+  'master_owners.priority_score',
+]))
 
 export const CAMPAIGN_FIELD_CATALOG = Object.freeze(buildFieldCatalog())
 export const CAMPAIGN_FIELD_BY_KEY = new Map(CAMPAIGN_FIELD_CATALOG.map((field) => [field.key, field]))

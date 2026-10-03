@@ -20,6 +20,12 @@
  *   • Nineteen mapped audience columns are entirely empty (language, gender,
  *     unit count, carrier, last outbound…), so any value selected returned 0
  *     and "is not any of" returned 0 as well.
+ *   • (2026-10-03) Their sources are 84-100% filled (seller.owner, owner_phone,
+ *     properties.units_count); the refresh never projected them, and recency
+ *     compared 10-digit graph phones with +1E.164 events. The projection is
+ *     PROPOSED_20261003220000_campaign_audience_completeness.sql. Columns that
+ *     migration adds are mapped here already; until it lands the population
+ *     probe reports them `missing` and they are refused as not_in_audience.
  *
  * This module is now the only place that maps a catalog field to an audience
  * column and compiles its predicate. A field it cannot apply is reported with
@@ -72,7 +78,28 @@ export const GRAPH_FILTER_COLUMNS = Object.freeze({
   'properties.equity_amount': 'equity_amount',
   'properties.equity_percent': 'equity_percent',
   'properties.cash_offer': 'cash_offer',
+  // Legacy Podio-era import (no writer in the repo). Kept so saved campaigns keep
+  // meaning what they meant; labelled legacy in the catalog. Owner decision pending.
   'properties.final_acquisition_score': 'acquisition_score',
+  // Canonical scores — property_acquisition_scores (the Acquisition Decision
+  // Engine), projected by campaign_target_graph_enrich_rows. The ONLY scores
+  // offered for new targeting.
+  'properties.aos_score': 'aos_score',
+  'properties.decision_tier': 'decision_tier',
+  'properties.acquisition_confidence': 'acquisition_confidence',
+  'properties.transaction_probability_365': 'transaction_probability_365',
+  'properties.best_strategy': 'best_strategy',
+  // Property facts projected from public.properties (PROPOSED_20261003220000).
+  'properties.total_bedrooms': 'beds',
+  'properties.total_baths': 'baths',
+  'properties.building_square_feet': 'building_sqft',
+  'properties.year_built': 'year_built',
+  'properties.lot_square_feet': 'lot_sqft',
+  'properties.total_loan_balance': 'total_loan_balance',
+  'properties.ownership_years': 'ownership_years',
+  'properties.tax_delinquent_year': 'tax_delinquent_year',
+  'properties.building_quality': 'building_quality',
+  'properties.estimated_repair_cost': 'estimated_repair_cost',
   'properties.seller_tags_text': 'podio_tags',
   'properties.podio_tags': 'podio_tags',
   'prospects.language_preference': 'language',
@@ -91,6 +118,7 @@ export const GRAPH_FILTER_COLUMNS = Object.freeze({
   'prospects.matching_flags': 'matching_flags_text',
   'prospects.person_flags_text': 'matching_flags_text',
   'prospects.seller_tags_text': 'podio_tags',
+  'phones.phone_type': 'phone_type',
   'master_owners.owner_type_guess': 'owner_type_guess',
   'master_owners.priority_tier': 'priority_tier',
   'master_owners.follow_up_cadence': 'follow_up_cadence',
@@ -128,6 +156,27 @@ export const INAPPLICABLE_REASONS = Object.freeze({
   unknown_field: 'This field isn’t in the approved campaign field list.',
 })
 
+/**
+ * Columns added by PROPOSED_20261003220000 (not yet applied). They apply ONLY
+ * when the population probe positively saw values in them — no probe, a failed
+ * probe or a missing column refuses them, so a filter can never reference a
+ * column the audience table does not have.
+ */
+export const PROJECTION_PENDING_COLUMNS = new Set([
+  'aos_score', 'decision_tier', 'acquisition_confidence', 'transaction_probability_365', 'best_strategy',
+  'beds', 'baths', 'building_sqft', 'year_built', 'lot_sqft', 'total_loan_balance', 'ownership_years',
+  'tax_delinquent_year', 'building_quality', 'estimated_repair_cost', 'phone_type',
+])
+
+/** Population probe verdict for a column the audience table does not have (yet). */
+export const COLUMN_MISSING = 'missing'
+
+function isMissingColumnError(error) {
+  const code = clean(error?.code)
+  const message = clean(error?.message).toLowerCase()
+  return code === '42703' || code === 'PGRST204' || (message.includes('column') && message.includes('does not exist'))
+}
+
 function normalizedFieldKey(filterOrKey) {
   if (typeof filterOrKey === 'string') return clean(filterOrKey)
   return clean(filterOrKey?.field_key || filterOrKey?.fieldKey || filterOrKey?.field)
@@ -157,6 +206,12 @@ export function graphFieldApplicability(fieldKey, { population = null } = {}) {
   if (field.type === 'geo_area') return { applicable: true, column: null, reason: null, message: null, source: 'drawn_area' }
   const column = graphColumnForField(field.key)
   if (!column) return { applicable: false, column: null, reason: 'not_in_audience', message: INAPPLICABLE_REASONS.not_in_audience }
+  if (PROJECTION_PENDING_COLUMNS.has(column) && !(population instanceof Map && population.has(column) && population.get(column) !== COLUMN_MISSING)) {
+    return { applicable: false, column, reason: 'not_in_audience', message: INAPPLICABLE_REASONS.not_in_audience }
+  }
+  if (population instanceof Map && population.get(column) === COLUMN_MISSING) {
+    return { applicable: false, column, reason: 'not_in_audience', message: INAPPLICABLE_REASONS.not_in_audience }
+  }
   if (population instanceof Map && population.get(column) === false) {
     return { applicable: false, column, reason: 'no_audience_data', message: INAPPLICABLE_REASONS.no_audience_data }
   }
@@ -319,7 +374,8 @@ let populationInFlight = null
  *
  * At most once an hour per process. A failed or missing estimate leaves the
  * column unknown, which is treated as populated: the probe can only DISABLE a
- * field on evidence.
+ * field on evidence. A column the table does not have (42703) is recorded as
+ * COLUMN_MISSING — filtering on it would fail the whole query.
  */
 export async function loadGraphColumnPopulation(supabase, { now = Date.now(), force = false } = {}) {
   if (!supabase) return null
@@ -336,7 +392,14 @@ export async function loadGraphColumnPopulation(supabase, { now = Date.now(), fo
             .select('graph_id', { count: 'planned', head: true })
             .not(column, 'is', null)
             .limit(0)
-          if (!error && Number.isFinite(Number(count))) byColumn.set(column, Number(count) > 1)
+          if (error) {
+            // A HEAD probe carries no error body, so ask once more with a body:
+            // LIMIT 0 reads no row and fails fast only when the column is absent.
+            const confirm = isMissingColumnError(error)
+              ? { error }
+              : await supabase.from(CAMPAIGN_AUDIENCE_TABLE).select(column).limit(0)
+            if (confirm?.error && isMissingColumnError(confirm.error)) byColumn.set(column, COLUMN_MISSING)
+          } else if (Number.isFinite(Number(count))) byColumn.set(column, Number(count) > 1)
         } catch {
           // unknown stays unknown
         }

@@ -655,7 +655,8 @@ test("Build refuses a filter it can't apply (it used to build without it); a bla
   const refused = await buildCampaignTargets("camp_b", {}, { supabase: store.supabase });
   assert.equal(refused.ok, false);
   assert.equal(refused.status, 422);
-  assert.match(refused.message, /Tag Distress Score \(This field isn’t part of the campaign audience data/);
+  // Retired legacy score (2026-10-03): still refused by name, never silently dropped.
+  assert.match(refused.message, /Tag Distress Score \(retired\)/);
   assert.doesNotMatch(refused.message, /properties\.market/);
   assert.equal(store.rows("campaign_targets").length, 0);
 

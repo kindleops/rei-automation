@@ -204,6 +204,8 @@ export function buildSegments(a: ComposerAudience | null): Segment[] {
 export function eligibleOf(a: ComposerAudience | null): number | null {
   const b = a?.build
   if (!b || !b.ok || b.ready === null || b.ready === undefined) return null
+  // whole cohort: ready, carried by a sender, and the greeting renders (render lint counted)
+  if (typeof b.sendable_after_personalization === 'number') return Math.max(0, b.sendable_after_personalization)
   // the planner's router answered per market: sendable_now is the ready set a sender can carry
   if (typeof b.sendable_now === 'number') return Math.max(0, b.sendable_now)
   return Math.max(0, n0(b.ready) - n0(b.no_sendable_number))
@@ -237,6 +239,8 @@ export function withCohort(a: ComposerAudience | null, cohort: ComposerCohort | 
       sendable_now: cohort.sendable_now,
       no_sendable_number: cohort.no_sendable_number,
       sender_markets: cohort.sender_markets,
+      personalization: cohort.personalization ?? null,
+      sendable_after_personalization: cohort.sendable_after_personalization ?? null,
     },
     distributions: {
       ...a.distributions,
@@ -623,4 +627,118 @@ export const LAUNCH_ERROR_WORDS: Record<string, string> = {
   launch_in_progress: 'A launch for this campaign is already running — wait for it',
   campaign_not_launchable: 'This campaign is no longer a draft',
   launch_claim_unavailable: 'The launch couldn’t be claimed safely — nothing was launched',
+}
+
+/* ── audience funnel (owner rule 2026-10-03: every count auditable) ───────── */
+
+export type FunnelReason = { label: string; count: number }
+export type FunnelStage = {
+  key: string
+  label: string
+  /** null = this stage was not measured (never a guess) */
+  count: number | null
+  /** removed at this stage relative to the previous measured stage */
+  dropped: number | null
+  /** graph = whole graph count · cohort = the build's whole-cohort pipeline · sample = the first N rows Build reads */
+  basis: 'graph' | 'cohort' | 'sample'
+  reasons: FunnelReason[]
+  note?: string
+}
+
+const reason = (label: string, count: number | null | undefined): FunnelReason | null => (count && count > 0 ? { label, count } : null)
+const present = (xs: Array<FunnelReason | null>): FunnelReason[] => xs.filter((x): x is FunnelReason => x !== null).sort((x, y) => y.count - x.count)
+
+/**
+ * market universe → filters matched → reachable phone → verified SMS-capable →
+ * not suppressed / not recently touched → built (deduped, holds) →
+ * personalization present → routing eligible. Units: graph rows (properties)
+ * through "queue-ready", recipients after. Every count is a server number;
+ * a stage the server did not measure says so.
+ */
+export function audienceFunnel(a: ComposerAudience | null, labelOf: (key: string) => string = (k) => k): FunnelStage[] {
+  if (!a || a.matched === null) return []
+  const ex = a.exclusions
+  const b = a.build
+  const stages: FunnelStage[] = []
+  const push = (s: Omit<FunnelStage, 'dropped'>) => {
+    const prev = [...stages].reverse().find((x) => x.count !== null)
+    stages.push({ ...s, dropped: s.count !== null && prev && prev.count !== null ? Math.max(0, prev.count - s.count) : null })
+  }
+  const universe = a.universe?.count ?? null
+  push({
+    key: 'universe', label: 'Market universe', basis: 'graph', count: universe ?? a.matched, reasons: [],
+    note: universe === null ? 'Location-only count unavailable — showing the matched audience' : undefined,
+  })
+  push({
+    key: 'filters', label: 'Filters matched', basis: 'graph', count: a.matched,
+    reasons: (a.universe?.targeting_filters ?? []).map((k) => ({ label: labelOf(k), count: 0 })),
+    note: a.universe?.targeting_filters?.length ? undefined : 'No targeting filters beyond location',
+  })
+  push({ key: 'reachable', label: 'Reachable phone', basis: 'graph', count: a.reachable, reasons: present([reason('No phone on file', ex.no_phone)]) })
+  push({
+    key: 'sms', label: 'Verified SMS-capable', basis: 'graph', count: a.sms_eligible,
+    reasons: present([reason('Landline or unknown phone type', ex.sms_ineligible), reason('Wrong number', ex.wrong_number)]),
+  })
+  push({
+    key: 'clean', label: 'Not suppressed or recently touched', basis: 'graph', count: a.eligible_in_audience,
+    reasons: present([
+      reason('Opted out / suppressed', ex.suppressed), reason('DNC', ex.dnc),
+      reason('Texted in the last 30 days', ex.pending_prior_touch), reason('Already queued', ex.active_queue),
+      reason('No sender route (graph)', ex.no_sender_route),
+    ]),
+  })
+  if (!b.ok) return stages
+  const basis: FunnelStage['basis'] = b.whole_cohort ? 'cohort' : 'sample'
+  const sampleNote = b.whole_cohort ? undefined : `Sample — the first ${fmt(b.rows_read)} rows Build reads (Campaign size caps it); counting the whole cohort…`
+  push({
+    key: 'built', label: 'Built (one per phone, holds applied)', basis, count: b.ready ?? null, note: sampleNote,
+    reasons: present([
+      reason('Duplicate phone — messaged once', b.duplicates_collapsed),
+      ...Object.entries(b.held_by_reason ?? {}).map(([k, v]) => reason(HELD_REASON_WORDS[k] ?? k.replace(/_/g, ' '), v)),
+    ]),
+  })
+  const p = b.personalization
+  if (p) {
+    push({
+      key: 'personalization', label: 'Greeting personalization present', basis,
+      count: b.ready !== null && b.ready !== undefined ? Math.max(0, b.ready - n0(p.none)) : null,
+      reasons: present([reason('No first name, company owner — render lint refuses', p.none)]),
+      note: p.deed_name ? `${fmt(p.deed_name)} have no first name on file and greet by the deed owner’s name` : undefined,
+    })
+  } else {
+    push({ key: 'personalization', label: 'Greeting personalization present', basis, count: null, reasons: [], note: 'Measured on the whole-cohort count only' })
+  }
+  push({
+    key: 'routing', label: 'Routing eligible (sender can carry)', basis, count: eligibleOf(a),
+    reasons: present([reason('No sendable number in their market', b.no_sendable_number)]),
+  })
+  return stages
+}
+
+export type Freshness = { asOf: string | null; ageHours: number | null; stale: boolean; label: string; coverage: FunnelReason[] | null; coverageAt: string | null }
+
+const COVERAGE_LABELS: Record<string, string> = {
+  seller_first_name: 'First name', language: 'Language', gender: 'Gender', age_bucket: 'Age', income: 'Income',
+  phone_type: 'Phone type', phone_owner: 'Carrier', phone_activity_status: 'Phone activity', last_outbound_at: 'Last outbound',
+  units_count: 'Units', beds: 'Beds', year_built: 'Year built', building_condition: 'Condition', property_flags_text: 'Property flags',
+  matching_flags_text: 'Seller flags', aos_score: 'Acquisition score (canonical)',
+}
+
+/** "Audience data as of …, N hours old" plus measured field coverage, from the server's timestamps. */
+export function audienceFreshness(a: ComposerAudience | null, nowMs: number = Date.now()): Freshness | null {
+  if (!a) return null
+  const times = [a.graph_coverage?.latest_enriched_at, a.graph_freshness?.latest_generated_at, a.graph_freshness?.refresh_finished_at]
+    .map((t) => (t ? Date.parse(t) : NaN)).filter((t) => Number.isFinite(t))
+  const asOfMs = times.length ? Math.max(...times) : null
+  const ageHours = asOfMs === null ? null : Math.max(0, Math.round((nowMs - asOfMs) / 3_600_000))
+  const ageText = ageHours === null ? 'age unknown' : ageHours < 48 ? `${ageHours} ${ageHours === 1 ? 'hour' : 'hours'} old` : `${Math.round(ageHours / 24)} days old`
+  const cov = a.graph_coverage?.coverage ?? null
+  return {
+    asOf: asOfMs === null ? null : new Date(asOfMs).toISOString(),
+    ageHours,
+    stale: ageHours === null || ageHours > 36,
+    label: asOfMs === null ? 'Audience data age unknown' : `Audience data as of ${new Date(asOfMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${ageText}`,
+    coverage: cov ? Object.entries(COVERAGE_LABELS).filter(([k]) => typeof cov[k] === 'number').map(([k, label]) => ({ label, count: Math.round(cov[k] * 100) })) : null,
+    coverageAt: a.graph_coverage?.measured_at ?? null,
+  }
 }

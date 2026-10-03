@@ -10,6 +10,7 @@ import {
 } from './composer-model'
 import { dragLooksAcceptable, resolveDrop, type DropResolution } from './composer-intake'
 import { RollingCount } from './ComposerParts'
+import { ComposerFunnel } from './ComposerFunnel'
 import { clauseValueText } from './composer-format'
 
 /* ── filter groups (catalog categories → the brief's groups; real fields only) ── */
@@ -251,6 +252,9 @@ export function AudiencePlane({
 }) {
   const reduced = useLcReducedMotion()
   const [drag, setDrag] = useState<'idle' | 'over' | 'absorb'>('idle')
+  // the freshness label's "N hours old" is relative to when this surface opened
+  const [openedAt] = useState(() => Date.now())
+  const labelOf = (key: string) => catalog?.fields.find((f) => f.key === key)?.label ?? key.split('.').pop()!.replace(/_/g, ' ')
   const eligible = eligibleOf(audience)
   const universe = universeSegments(audience)
   const build = buildSegments(audience)
@@ -340,6 +344,7 @@ export function AudiencePlane({
           {audience ? (
             <AnimatePresence initial={false}>
               <motion.div key="dist" className="ccz-aud__dist" initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={lcTransition(reduced, { duration: 0.26 })}>
+                <ComposerFunnel audience={audience} labelOf={labelOf} nowMs={openedAt} />
                 <div className="ccz-aud__block">
                   <div className="ccz-aud__label"><span className="ccz-kicker">Universe</span><span className="ccz-muted">{fmt(audience.matched)} matched properties</span></div>
                   <SegmentBar segments={universe} total={n0(audience.matched)} label="Matched universe" />

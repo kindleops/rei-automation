@@ -47,7 +47,15 @@ export type ComposerAudience = {
     sendable_now?: number | null
     no_sendable_number?: number | null
     sender_markets?: Array<{ market: string; sellers: number | null; sendable: boolean | null; route_tier: string | null; block_reason: string | null; summary: string | null }>
+    /** greeting personalization of the ready set (whole cohort only) */
+    personalization?: Personalization | null
+    /** ready sellers a sender can carry whose greeting renders (whole cohort only) */
+    sendable_after_personalization?: number | null
   }
+  /** the location-only universe the targeting filters narrowed (null when uncountable) */
+  universe?: { count: number | null; location_filters: string[]; targeting_filters: string[] } | null
+  /** the projection's last measured field coverage (null until measured) */
+  graph_coverage?: GraphCoverage | null
   distributions: { markets: Bucket[]; languages: Bucket[]; property_types: Bucket[]; zips: Bucket[]; zones: Bucket[] }
   zones: { scanned: number; unresolved: number }
   inapplicable_filters: Array<Record<string, unknown>>
@@ -57,6 +65,19 @@ export type ComposerAudience = {
   graph_unavailable: boolean
   warnings: string[]
   samples: ComposerSample[]
+}
+
+/** first_name: on file · deed_name: greets by the deed owner's name · none: the render lint refuses it */
+export type Personalization = { first_name: number | null; deed_name: number | null; none: number | null }
+
+export type GraphCoverage = {
+  measured_at: string | null
+  sample_rows: number | null
+  latest_built_at: string | null
+  oldest_enriched_at: string | null
+  latest_enriched_at: string | null
+  /** column → share of rows with a value, 0..1 */
+  coverage: Record<string, number>
 }
 
 export type ComposerSample = {
@@ -175,6 +196,8 @@ export type ComposerCohort = {
   sendable_now: number | null
   no_sendable_number: number | null
   sender_markets: NonNullable<ComposerAudience['build']['sender_markets']>
+  personalization?: Personalization | null
+  sendable_after_personalization?: number | null
   ready_by_zone: Record<string, number>
   ready_by_market: Record<string, number>
   timings_ms: { read: number; total: number }
