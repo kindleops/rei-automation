@@ -34,6 +34,7 @@ const CASE_ROUTES = {
   multizone: MARKET_URL('Dallas, TX|Minneapolis, MN|Los Angeles, CA|Miami, FL'),
   houston: MARKET_URL('Houston, TX'),
   map: MARKET_URL('Minneapolis, MN'),
+  phoenix: MARKET_URL('Dallas, TX|Phoenix, AZ'),
 }
 
 const browser = await chromium.launch()
@@ -102,6 +103,15 @@ for (const [W, H] of SIZES) for (const theme of THEMES) for (const kase of CASES
       const el = plane(layer)
       if (await el.count()) { await el.scrollIntoViewIfNeeded().catch(() => {}); await el.screenshot({ path: path.join(OUT, `${tag}-${layer}.png`) }).catch(() => {}) }
     }
+    if (kase === 'phoenix' || kase === 'multizone') {
+      // open the labelled Routing 2.0 preview (read-only disclosure)
+      await page.waitForSelector('.ccz-cov__row', { timeout: 120000 }).catch(() => {})
+      await page.locator('.ccz-v2__toggle').click().catch(() => {})
+      await page.waitForTimeout(600)
+      await plane('delivery').screenshot({ path: path.join(OUT, `${tag}-delivery-v2.png`) }).catch(() => {})
+      console.log(tag, 'coverage', JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('.ccz-cov__row')].map((r) => r.textContent.replace(/\s+/g, ' ').trim()))))
+      console.log(tag, 'duration', JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('.ccz-schedule .ccz-kv')].map((r) => r.textContent.replace(/\s+/g, ' ').trim()))))
+    }
     await page.locator('.ccz-dock').screenshot({ path: path.join(OUT, `${tag}-dock.png`) }).catch(() => {})
     if (kase === 'dallas' && arg('missed', '0') === '1') {
       await page.locator('.ccz-sched__ctl [role="radio"]', { hasText: 'Scheduled' }).click().catch(() => {})
@@ -109,7 +119,16 @@ for (const [W, H] of SIZES) for (const theme of THEMES) for (const kase of CASES
       await page.fill('.ccz-dt', '2026-10-01T09:00')
       await page.waitForTimeout(900)
       await plane('schedule').screenshot({ path: path.join(OUT, `${tag}-missed.png`) }).catch(() => {})
-      await page.locator('.ccz-dock').screenshot({ path: path.join(OUT, `${tag}-blocked-dock.png`) }).catch(() => {})
+      if (kase === 'phoenix' || kase === 'multizone') {
+      // open the labelled Routing 2.0 preview (read-only disclosure)
+      await page.waitForSelector('.ccz-cov__row', { timeout: 120000 }).catch(() => {})
+      await page.locator('.ccz-v2__toggle').click().catch(() => {})
+      await page.waitForTimeout(600)
+      await plane('delivery').screenshot({ path: path.join(OUT, `${tag}-delivery-v2.png`) }).catch(() => {})
+      console.log(tag, 'coverage', JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('.ccz-cov__row')].map((r) => r.textContent.replace(/\s+/g, ' ').trim()))))
+      console.log(tag, 'duration', JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('.ccz-schedule .ccz-kv')].map((r) => r.textContent.replace(/\s+/g, ' ').trim()))))
+    }
+    await page.locator('.ccz-dock').screenshot({ path: path.join(OUT, `${tag}-blocked-dock.png`) }).catch(() => {})
       await page.locator('.ccz-missed button', { hasText: 'Start now' }).click().catch(() => {})
       await page.waitForTimeout(600)
     }

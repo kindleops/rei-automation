@@ -7,7 +7,7 @@
  * those numbers to readiness lines. Anything the server has not answered is
  * `checking` or `unavailable` — never a zero, never a guess.
  */
-import type { ComposerAudience, ComposerCohort, ComposerFleet, ComposerTemplates, FleetNumber, ServerReadiness } from './composer-types'
+import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, CoverageMarket, ServerReadiness } from './composer-types'
 import { reasonWords } from './composer-format'
 
 /* ── composition ─────────────────────────────────────────────────────────── */
@@ -238,7 +238,14 @@ export function withCohort(a: ComposerAudience | null, cohort: ComposerCohort | 
       no_sendable_number: cohort.no_sendable_number,
       sender_markets: cohort.sender_markets,
     },
-    distributions: { ...a.distributions, zones: zones.filter((z) => z.value !== 'unresolved') },
+    distributions: {
+      ...a.distributions,
+      zones: zones.filter((z) => z.value !== 'unresolved'),
+      // every ready seller's market, so routing coverage is asked about the whole cohort
+      markets: Object.keys(cohort.ready_by_market).length
+        ? Object.entries(cohort.ready_by_market).map(([value, count]) => ({ value, label: value, count })).sort((x, y) => y.count - x.count)
+        : a.distributions.markets,
+    },
     zones: { scanned: cohort.ready, unresolved: cohort.ready_by_zone.unresolved ?? 0 },
   }
 }
@@ -267,41 +274,47 @@ const stateOfMarket = (market: string | null | undefined) => {
   return m ? m[1].toUpperCase() : null
 }
 
-/** The numbers that can serve this audience: its markets' states (exact market + approved state fallback). */
-export function relevantFleet(fleet: ComposerFleet | null, audience: ComposerAudience | null): FleetNumber[] {
-  if (!fleet) return []
-  const states = new Set((audience?.distributions.markets ?? []).map((m) => stateOfMarket(m.value)).filter(Boolean) as string[])
-  if (!states.size) return fleet.numbers
-  return fleet.numbers.filter((n) => n.state && states.has(n.state))
+/**
+ * The audience's markets with their seller counts — the input of the routing
+ * engine's coverage read. Whole-cohort ready sellers per market once counted,
+ * else the sample's market split.
+ */
+export function coverageMarkets(a: ComposerAudience | null): Array<{ market: string; state: string | null; targets: number }> {
+  return (a?.distributions.markets ?? [])
+    .filter((m) => m.value && m.value !== 'unknown')
+    .map((m) => ({ market: m.value, state: stateOfMarket(m.value), targets: m.count }))
 }
 
-export type FleetTally = Record<'active' | 'cooling' | 'paused' | 'blocked' | 'cap_reached' | 'other', number>
+const UNAVAILABLE_WORDS: Record<string, string> = {
+  health_cooling: 'cooling', cooling_until: 'cooling', blocked_by_operator: 'blocked', status_paused: 'paused', daily_limit_reached: 'at cap',
+}
+export const unavailableWord = (reason: string) => {
+  const r = reason.replace(/^outbound_number_/, '')
+  return UNAVAILABLE_WORDS[r] ?? (r.startsWith('health_') ? 'unhealthy' : r.replace(/_/g, ' '))
+}
 
-export function tallyFleet(numbers: FleetNumber[]): FleetTally {
-  const t: FleetTally = { active: 0, cooling: 0, paused: 0, blocked: 0, cap_reached: 0, other: 0 }
-  for (const n of numbers) {
-    if (n.eligible) t.active += 1
-    else if (n.sender_state === 'cooling') t.cooling += 1
-    else if (n.sender_state === 'paused') t.paused += 1
-    else if (n.sender_state === 'blocked') t.blocked += 1
-    else if (n.sender_state === 'cap_reached') t.cap_reached += 1
-    else t.other += 1
-  }
-  return t
+/** Numbers the engine cannot use for these markets, by reason (each number once). */
+export function unavailableSummary(markets: CoverageMarket[]): { count: number; text: string | null } {
+  const seen = new Map<string, string>()
+  for (const m of markets) for (const u of m.unavailable ?? []) for (const r of u.reasons ?? []) seen.set(`${u.pool}:${r.phone}`, unavailableWord(r.reason))
+  const by: Record<string, number> = {}
+  for (const w of seen.values()) by[w] = (by[w] ?? 0) + 1
+  const text = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([w, n]) => `${n} ${w}`).join(', ')
+  return { count: seen.size, text: text || null }
 }
 
 export type CapacityPlan = {
-  /** senders the router would use today, at their effective per-number limit */
+  /** what the dispatching engine's healthy numbers can still send today (each number counted once) */
   available_per_day: number
-  /** limits of numbers that exist but can't send (cooling, blocked, paused …) */
-  unavailable_per_day: number
+  unavailable_count: number
   unavailable_reason: string | null
-  remaining_today: number
-  unknown_limits: number
+  uncovered_markets: string[]
+  uncovered_targets: number
+  covered_targets: number
   /** what the contact window admits at the campaign's spacing (modeled) */
   window_per_day: number | null
   planned_per_day: number | null
-  /** the modeled sends/day: min(daily cap, senders, window) */
+  /** the modeled sends/day: min(daily cap, routed capacity, window) */
   effective_per_day: number | null
   binding: 'daily_cap' | 'sender_capacity' | 'contact_window' | 'cap_zero' | null
   over_capacity: boolean
@@ -318,24 +331,12 @@ export function windowMinutes(start: string, end: string): number | null {
   return b - a
 }
 
-export function capacityPlan(numbers: FleetNumber[], c: Pick<Composition, 'daily_cap' | 'send_interval_seconds' | 'contact_window_start' | 'contact_window_end'>): CapacityPlan {
-  let available = 0
-  let unavailable = 0
-  let remaining = 0
-  let unknown = 0
-  const why: Record<string, number> = {}
-  for (const n of numbers) {
-    if (n.limit === null) { unknown += 1; continue }
-    if (n.eligible || n.sender_state === 'cap_reached') available += n.limit
-    else {
-      unavailable += n.limit
-      why[n.sender_state] = (why[n.sender_state] ?? 0) + 1
-    }
-    remaining += n.remaining_today
-  }
-  const reason = Object.keys(why).length
-    ? Object.entries(why).sort((a, b) => b[1] - a[1]).map(([state, count]) => `${count} ${state === 'cap_reached' ? 'at cap' : state}`).join(', ')
-    : null
+/** Capacity from the canonical routing engine's coverage (never the raw fleet). */
+export function capacityPlan(coverage: ComposerCoverage | null, c: Pick<Composition, 'daily_cap' | 'send_interval_seconds' | 'contact_window_start' | 'contact_window_end'>): CapacityPlan {
+  const markets = coverage?.markets ?? []
+  const available = coverage ? n0(coverage.totals.distinct_daily_capacity) : 0
+  const uncovered = markets.filter((m) => m.coverage === 'UNCOVERED')
+  const unavailable = unavailableSummary(markets)
   const minutes = windowMinutes(c.contact_window_start, c.contact_window_end)
   const interval = Number(c.send_interval_seconds)
   const windowPerDay = minutes && interval > 0 ? Math.floor((minutes * 60) / interval) : null
@@ -343,21 +344,21 @@ export function capacityPlan(numbers: FleetNumber[], c: Pick<Composition, 'daily
   const planned = cap === null || Number.isNaN(cap) ? null : cap
   const candidates: Array<[CapacityPlan['binding'], number]> = []
   if (planned !== null) candidates.push(['daily_cap', planned])
-  candidates.push(['sender_capacity', available])
+  if (coverage) candidates.push(['sender_capacity', available])
   if (windowPerDay !== null) candidates.push(['contact_window', windowPerDay])
-  candidates.sort((a, b) => a[1] - b[1])
-  const binding = planned === 0 ? 'cap_zero' : candidates[0]?.[0] ?? null
+  candidates.sort((x, y) => x[1] - y[1])
   return {
     available_per_day: available,
-    unavailable_per_day: unavailable,
-    unavailable_reason: reason,
-    remaining_today: remaining,
-    unknown_limits: unknown,
+    unavailable_count: unavailable.count,
+    unavailable_reason: unavailable.text,
+    uncovered_markets: uncovered.map((m) => m.market),
+    uncovered_targets: uncovered.reduce((s, m) => s + n0(m.targets), 0),
+    covered_targets: markets.filter((m) => m.coverage !== 'UNCOVERED').reduce((s, m) => s + n0(m.targets), 0),
     window_per_day: windowPerDay,
     planned_per_day: planned,
     effective_per_day: candidates.length ? candidates[0][1] : null,
-    binding,
-    over_capacity: planned !== null && planned > available,
+    binding: planned === 0 ? 'cap_zero' : candidates[0]?.[0] ?? null,
+    over_capacity: Boolean(coverage) && planned !== null && planned > available,
   }
 }
 
@@ -368,7 +369,7 @@ export function snapVolume(requested: number, plan: CapacityPlan): { value: numb
   return {
     value: plan.available_per_day,
     snapped: true,
-    reason: `+${over.toLocaleString('en-US')}/day unavailable${plan.unavailable_reason ? `: ${plan.unavailable_reason}` : ': no further sender capacity'}`,
+    reason: `+${over.toLocaleString('en-US')}/day unavailable${plan.unavailable_reason ? `: ${plan.unavailable_reason}` : ': no further routed sender capacity'}`,
   }
 }
 
@@ -467,6 +468,8 @@ export type ReadinessInput = {
   audienceLoading: boolean
   templates: ComposerTemplates | null
   fleet: ComposerFleet | null
+  coverage: ComposerCoverage | null
+  coverageError?: string | null
   online: boolean
   now: number
   waves: ZoneWave[]
@@ -512,28 +515,30 @@ export function deriveReadiness(i: ReadinessInput): ReadinessView {
   }
 
   // delivery
-  if (!i.fleet) add('senders', 'Sender health', 'delivery', 'checking', 'Reading the sender fleet…')
-  else {
-    const nums = relevantFleet(i.fleet, a)
-    const t = tallyFleet(nums)
-    if (!t.active) add('senders', 'Sender health', 'delivery', 'block', nums.length ? `No sendable number — ${[t.cooling && `${t.cooling} cooling`, t.blocked && `${t.blocked} blocked`, t.paused && `${t.paused} paused`].filter(Boolean).join(', ')}` : 'No sender numbers in these markets')
-    else add('senders', 'Sender health', 'delivery', t.cooling + t.blocked + t.paused ? 'warn' : 'ok', `${t.active} sendable${t.cooling + t.blocked + t.paused ? ` · ${t.cooling + t.blocked + t.paused} unavailable` : ''}`)
-    const noRoute = n0(a?.build?.no_sendable_number)
-    if (a && noRoute) add('routing', 'Routing', 'delivery', eligibleOf(a) ? 'warn' : 'block', `${fmt(noRoute)} ready sellers have no sender route`)
-    else if (a) add('routing', 'Routing', 'delivery', 'ok', 'Every ready seller has a route')
-    const plan = capacityPlan(nums, c)
+  const markets = coverageMarkets(a)
+  if (i.coverageError && !i.coverage) add('senders', 'Sender routing', 'delivery', 'block', `Routing coverage couldn’t be read — ${i.coverageError}`)
+  else if (!i.coverage || (a && !markets.length && c.filters.length)) add('senders', 'Sender routing', 'delivery', 'checking', 'Asking the routing engine…')
+  {
+    const plan = capacityPlan(i.coverage, c)
+    if (i.coverage) {
+      const total = plan.covered_targets + plan.uncovered_targets
+      if (total > 0 && plan.covered_targets === 0) add('senders', 'Sender routing', 'delivery', 'block', `No route for ${plan.uncovered_markets.join(', ')}`)
+      else if (plan.uncovered_targets) add('senders', 'Sender routing', 'delivery', 'warn', `No route for ${plan.uncovered_markets.join(', ')} — ${fmt(plan.uncovered_targets)} sellers won’t send`)
+      else if (total > 0) add('senders', 'Sender routing', 'delivery', i.coverage.markets.some((m) => m.coverage === 'DEGRADED') ? 'warn' : 'ok', `Every market routed · ${fmt(i.coverage.totals.distinct_healthy_numbers)} healthy ${i.coverage.totals.distinct_healthy_numbers === 1 ? 'number' : 'numbers'}`)
+    }
     const cap = parseCap(c.daily_cap)
     if (Number.isNaN(cap)) add('capacity', 'Capacity', 'delivery', 'block', 'Daily cap must be a whole number')
     else if (cap === null) add('capacity', 'Capacity', 'delivery', 'block', 'Set a daily cap')
     else if (cap === 0) add('capacity', 'Capacity', 'delivery', 'block', 'Daily cap 0 — sends nothing')
-    else if (plan.over_capacity) add('capacity', 'Capacity', 'delivery', 'warn', `Planned ${fmt(cap)}/day exceeds ${fmt(plan.available_per_day)}/day available`)
+    else if (plan.over_capacity) add('capacity', 'Capacity', 'delivery', 'warn', `Planned ${fmt(cap)}/day exceeds ${fmt(plan.available_per_day)}/day routable today`)
     else add('capacity', 'Capacity', 'delivery', 'ok', `${fmt(plan.effective_per_day)}/day modeled`)
-    const total = parseCap(c.total_cap)
-    if (Number.isNaN(total)) add('size', 'Campaign size', 'delivery', 'block', 'Campaign size must be a whole number')
-    else if (total === 0) add('size', 'Campaign size', 'delivery', 'block', 'Campaign size 0 — sends nothing')
-    else if (total === null) add('size', 'Campaign size', 'delivery', 'warn', 'No total cap — the whole cohort is eligible')
-    const sys = i.fleet.system
-    if (sys.emergency_stop_at) add('brakes', 'System brakes', 'launch', 'warn', 'Emergency stop is active — rows hydrate, nothing transmits')
+    const size = parseCap(c.total_cap)
+    if (Number.isNaN(size)) add('size', 'Campaign size', 'delivery', 'block', 'Campaign size must be a whole number')
+    else if (size === 0) add('size', 'Campaign size', 'delivery', 'block', 'Campaign size 0 — sends nothing')
+    else if (size === null) add('size', 'Campaign size', 'delivery', 'warn', 'No total cap — the whole cohort is eligible')
+    const sys = i.fleet?.system
+    if (!sys) { /* brakes read with the system controls below */ }
+    else if (sys.emergency_stop_at) add('brakes', 'System brakes', 'launch', 'warn', 'Emergency stop is active — rows hydrate, nothing transmits')
     else if (sys.outbound_sms_enabled === false) add('brakes', 'System brakes', 'launch', 'block', 'Outbound SMS is disabled')
     else if ((sys.processor_mode ?? '').toLowerCase() === 'off') add('brakes', 'System brakes', 'launch', 'warn', 'Queue processor is off — rows wait')
   }

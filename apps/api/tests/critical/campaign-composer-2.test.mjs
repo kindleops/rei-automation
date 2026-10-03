@@ -337,3 +337,23 @@ test("the whole-cohort count is the build pipeline's answer, aggregates only, ca
   assert.equal(b.cached, true);
   assert.equal(calls, 1);
 });
+
+test("delivery coverage comes from the canonical routing engine with the audience's markets", async () => {
+  const { readComposerCoverage } = await import("@/lib/domain/campaigns/campaign-composer.js");
+  let asked = null;
+  const deps = {
+    readAudienceSenderCoverage: async ({ markets }) => {
+      asked = markets;
+      return { ok: true, engine: "legacy_router", markets: [{ market: "Phoenix, AZ", targets: 2844, coverage: "UNCOVERED" }], totals: { distinct_healthy_numbers: 0, distinct_daily_capacity: 0, targets: 2844 }, v2_preview: { label: "Sender Routing 2.0 preview — NOT the engine that sends today (gate off)", markets: [] } };
+    },
+  };
+  const r = await readComposerCoverage([{ market: "Phoenix, AZ", targets: 2844.7 }, { market: "", targets: 3 }], deps);
+  assert.deepEqual(asked, [{ market: "Phoenix, AZ", market_id: null, state: "AZ", targets: 2844 }]);
+  assert.equal(r.engine, "legacy_router");
+  assert.match(r.v2_preview.label, /NOT the engine that sends today/);
+  const empty = await readComposerCoverage([], deps);
+  assert.equal(empty.markets.length, 0);
+  const failed = await readComposerCoverage([{ market: "Dallas, TX", targets: 1 }], { readAudienceSenderCoverage: async () => ({ ok: false, error: "sender_blocklist_unreadable" }) });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.error, "sender_blocklist_unreadable");
+});

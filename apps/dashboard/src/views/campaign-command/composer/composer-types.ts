@@ -179,3 +179,31 @@ export type ComposerCohort = {
   ready_by_market: Record<string, number>
   timings_ms: { read: number; total: number }
 }
+
+export type CoverageStatus = 'LOCAL' | 'REGIONAL' | 'DEGRADED' | 'UNCOVERED'
+export type CoverageMarket = {
+  market_id: string | null
+  market: string
+  targets: number
+  coverage: CoverageStatus
+  serving_pool: string | null
+  serving_tier: string | null
+  label?: string | null
+  healthy_numbers: number
+  daily_capacity: number
+  unavailable: Array<{ pool: string; tier?: string; reasons: Array<{ phone: string; reason: string }> }>
+  shared_numbers?: number
+  note?: string
+}
+export type CoverageTotals = { distinct_healthy_numbers: number; distinct_daily_capacity: number; targets: number }
+/** /composer?part=coverage — the canonical routing engine's answer (sender-routing-service readAudienceSenderCoverage). */
+export type ComposerCoverage = {
+  ok: true
+  at: string
+  engine: 'legacy_router' | 'sender_routing_v2' | null
+  gate?: string
+  graph_version?: string
+  markets: CoverageMarket[]
+  totals: CoverageTotals
+  v2_preview: null | { label: string; graph_status?: string; graph_version?: string; seed_backfill_simulated?: boolean; markets: CoverageMarket[]; totals: CoverageTotals }
+}

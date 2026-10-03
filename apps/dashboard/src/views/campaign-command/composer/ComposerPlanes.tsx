@@ -2,9 +2,9 @@ import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type
 import { motion } from 'framer-motion'
 import { LCButton, LCSegmented, LCStatus, LCTooltip, cx, lcTransition, LC_SPRING, useLcReducedMotion } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
-import type { ComposerAudience, ComposerFleet, ComposerSample, ComposerStrategy, ComposerTemplates, FleetNumber, GovernedTemplate } from './composer-types'
+import type { ComposerAudience, ComposerCoverage, ComposerFleet, ComposerSample, ComposerStrategy, ComposerTemplates, CoverageMarket, GovernedTemplate } from './composer-types'
 import {
-  checkSchedule, completionEstimate, fmt, n0, parseCap, snapVolume, tallyFleet,
+  checkSchedule, completionEstimate, fmt, n0, parseCap, snapVolume, unavailableWord,
   type CapacityPlan, type Composition, type ScheduleCheck, type ZoneWave,
 } from './composer-model'
 import { Kv } from './ComposerParts'
@@ -137,7 +137,31 @@ export function StrategyBody({ templates, audience, composition, fleet, onStrate
 
 /* ══ DELIVERY ════════════════════════════════════════════════════════════ */
 
-const STATE_TONE: Record<string, 'exec' | 'attn' | 'crit' | 'neutral' | 'ok'> = { active: 'ok', unverified: 'exec', cooling: 'attn', paused: 'neutral', blocked: 'attn', cap_reached: 'neutral', ineligible: 'neutral' }
+const COVERAGE_TONE: Record<string, 'ok' | 'exec' | 'attn' | 'neutral'> = { LOCAL: 'ok', REGIONAL: 'exec', DEGRADED: 'attn', UNCOVERED: 'attn' }
+const COVERAGE_WORD: Record<string, string> = { LOCAL: 'Local', REGIONAL: 'Regional', DEGRADED: 'Degraded', UNCOVERED: 'No route' }
+const TIER_WORD: Record<string, string> = { exact_market_match: 'local', approved_state_fallback: 'regional (state)', approved_alias: 'approved alias', primary: 'local', preferred_fallback: 'regional', last_resort: 'fallback' }
+
+function CoverageRows({ markets }: { markets: CoverageMarket[] }) {
+  return (
+    <ul className="ccz-cov" aria-label="Coverage by market">
+      {markets.map((m) => {
+        const local = m.coverage === 'LOCAL'
+        const via = m.serving_pool && !local ? ` via ${m.serving_pool}` : ''
+        const reasons = (m.unavailable ?? []).flatMap((u) => u.reasons.map((r) => `${u.pool} ${r.phone} ${unavailableWord(r.reason)}`))
+        return (
+          <li key={`${m.market_id ?? ''}:${m.market}`} className={cx('ccz-cov__row', `is-${m.coverage.toLowerCase()}`)}>
+            <span className="ccz-cov__mkt"><b>{m.market}</b><em>{fmt(m.targets)} sellers</em></span>
+            <LCStatus label={`${COVERAGE_WORD[m.coverage] ?? m.coverage}${via}`} tone={COVERAGE_TONE[m.coverage] ?? 'neutral'} quiet={local} />
+            <span className="ccz-cov__cap">{m.coverage === 'UNCOVERED' ? '—' : <><b className="num">{fmt(m.daily_capacity)}</b><em>/day · {m.healthy_numbers} {m.healthy_numbers === 1 ? 'number' : 'numbers'}{m.serving_tier ? ` · ${TIER_WORD[m.serving_tier] ?? m.serving_tier}` : ''}</em></>}</span>
+            {reasons.length ? (
+              <LCTooltip content={reasons.join(' · ')}><span className="ccz-cov__why">{reasons.length} unavailable</span></LCTooltip>
+            ) : <span className="ccz-cov__why" />}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
 
 function CapacityInstrument({ plan, composition, onDailyCap }: { plan: CapacityPlan; composition: Composition; onDailyCap: (value: string, reason: string | null) => void }) {
   const reduced = useLcReducedMotion()
@@ -145,7 +169,7 @@ function CapacityInstrument({ plan, composition, onDailyCap }: { plan: CapacityP
   const [dragging, setDragging] = useState<number | null>(null)
   const cap = parseCap(composition.daily_cap)
   const planned = dragging ?? (cap === null || Number.isNaN(cap) ? null : cap)
-  const total = Math.max(plan.available_per_day + plan.unavailable_per_day, planned ?? 0, plan.window_per_day ?? 0, 1)
+  const total = Math.max(plan.available_per_day, planned ?? 0, plan.window_per_day ?? 0, 1)
   const scale = total * 1.08
   const pct = (v: number) => `${Math.min(100, (v / scale) * 100)}%`
   const fromPointer = (e: ReactPointerEvent) => {
@@ -158,7 +182,7 @@ function CapacityInstrument({ plan, composition, onDailyCap }: { plan: CapacityP
     <div className="ccz-cap">
       <div className="ccz-cap__nums">
         <div><span className="ccz-kicker">Planned</span><b className="ccz-num">{planned === null ? '—' : fmt(planned)}</b><em>/day</em></div>
-        <div><span className="ccz-kicker">Available</span><b className="ccz-num">{fmt(plan.available_per_day)}</b><em>/day</em></div>
+        <div><span className="ccz-kicker">Routable today</span><b className="ccz-num">{fmt(plan.available_per_day)}</b><em>/day</em></div>
         <div><span className="ccz-kicker">Modeled</span><b className="ccz-num">{fmt(plan.effective_per_day)}</b><em>/day · {plan.binding === 'daily_cap' ? 'daily cap binds' : plan.binding === 'sender_capacity' ? 'senders bind' : plan.binding === 'contact_window' ? 'window binds' : plan.binding === 'cap_zero' ? 'cap 0' : '—'}</em></div>
       </div>
       <div
@@ -187,7 +211,6 @@ function CapacityInstrument({ plan, composition, onDailyCap }: { plan: CapacityP
         }}
       >
         <span className="ccz-cap__avail" style={{ width: pct(plan.available_per_day) }} />
-        <span className="ccz-cap__unavail" style={{ left: pct(plan.available_per_day), width: pct(plan.unavailable_per_day) }} />
         {plan.window_per_day ? <span className="ccz-cap__win" style={{ left: pct(plan.window_per_day) }} title="Contact window ceiling at this spacing" /> : null}
         {planned !== null ? (
           <motion.span className="ccz-cap__mark" initial={false} animate={{ left: pct(planned) }} transition={dragging !== null ? { duration: 0 } : lcTransition(reduced, LC_SPRING.morph)}>
@@ -196,29 +219,27 @@ function CapacityInstrument({ plan, composition, onDailyCap }: { plan: CapacityP
         ) : null}
       </div>
       <div className="ccz-cap__legend">
-        <span><i className="ccz-dot is-exec" /> Sendable {fmt(plan.available_per_day)}/day</span>
-        {plan.unavailable_per_day ? <span><i className="ccz-dot is-hatch" /> Unavailable {fmt(plan.unavailable_per_day)}/day{plan.unavailable_reason ? ` (${plan.unavailable_reason})` : ''}</span> : null}
+        <span><i className="ccz-dot is-exec" /> Healthy routed numbers {fmt(plan.available_per_day)} left today</span>
+        {plan.unavailable_count ? <span><i className="ccz-dot is-hatch" /> Unavailable: {plan.unavailable_reason}</span> : null}
         {plan.window_per_day ? <span><i className="ccz-dot is-line" /> Window ceiling {fmt(plan.window_per_day)}/day at {composition.send_interval_seconds}s spacing</span> : null}
-        {plan.unknown_limits ? <span className="ccz-dim">{plan.unknown_limits} number(s) with no readable limit — not counted</span> : null}
       </div>
     </div>
   )
 }
 
-export function DeliveryBody({ fleet, numbers, plan, composition, eligibleInAudience, snapNote, onPatch, onDailyCap, onShowAll, showAll }: {
+export function DeliveryBody({ fleet, coverage, coverageError, coverageLoading, plan, composition, eligibleInAudience, snapNote, onPatch, onDailyCap }: {
   fleet: ComposerFleet | null
-  numbers: FleetNumber[]
+  coverage: ComposerCoverage | null
+  coverageError: string | null
+  coverageLoading: boolean
   plan: CapacityPlan
   composition: Composition
   eligibleInAudience: number | null
   snapNote: string | null
   onPatch: (patch: Partial<Composition>) => void
   onDailyCap: (value: string, reason: string | null) => void
-  onShowAll: () => void
-  showAll: boolean
 }) {
-  if (!fleet) return <div className="ccz-skel-rows" aria-busy="true"><span /><span /><span /></div>
-  const t = tallyFleet(numbers)
+  const [showV2, setShowV2] = useState(false)
   const field = (key: keyof Composition, label: string, hint: string, extra?: ReactNode) => (
     <label className="ccz-field">
       <span>{label}</span>
@@ -227,20 +248,26 @@ export function DeliveryBody({ fleet, numbers, plan, composition, eligibleInAudi
       {extra}
     </label>
   )
+  if (!coverage) {
+    return coverageError
+      ? <div className="ccz-err"><Icon name="alert" size={14} /> Routing coverage didn’t load — {coverageError}</div>
+      : <div className="ccz-skel-rows" aria-busy="true"><span /><span /><span /></div>
+  }
+  const v2 = coverage.v2_preview
   return (
-    <div className="ccz-delivery">
-      <div className="ccz-fleet">
-        {(['active', 'cooling', 'paused', 'blocked', 'cap_reached'] as const).map((k) => (
-          <div key={k} className={cx('ccz-fleet__cell', t[k] > 0 && k !== 'active' && 'is-attn', k === 'active' && t.active > 0 && 'is-ok')}>
-            <b className="ccz-num">{t[k]}</b><span>{k === 'cap_reached' ? 'at cap' : k === 'active' ? 'sendable' : k}</span>
-          </div>
-        ))}
-        <button type="button" className="ccz-linkbtn" onClick={onShowAll}>{showAll ? 'This audience’s states' : 'Whole fleet'}</button>
+    <div className={cx('ccz-delivery', coverageLoading && 'is-settling')}>
+      <div className="ccz-engine">
+        <span className="ccz-kicker">Dispatch engine</span>
+        <strong>{coverage.engine === 'sender_routing_v2' ? 'Sender Routing 2.0' : 'Campaign router'}</strong>
+        <span className="ccz-dim">{coverage.engine === 'sender_routing_v2' ? `graph ${coverage.graph_version ?? ''}` : 'what dispatches today · Routing 2.0 gated off'}</span>
+        <span className="ccz-engine__tot"><b className="num">{fmt(coverage.totals.distinct_healthy_numbers)}</b> healthy · <b className="num">{fmt(coverage.totals.distinct_daily_capacity)}</b>/day left today</span>
       </div>
+      {coverage.markets.length ? <CoverageRows markets={coverage.markets} /> : <p className="ccz-dim">Coverage appears once the audience has markets.</p>}
+      {plan.uncovered_targets ? <p className="ccz-note is-attn" role="status"><Icon name="alert" size={13} /> {plan.uncovered_markets.join(', ')}: no route — {fmt(plan.uncovered_targets)} sellers won’t send until a number can carry them.</p> : null}
 
       <CapacityInstrument plan={plan} composition={composition} onDailyCap={onDailyCap} />
       {snapNote ? <p className="ccz-note is-attn" role="status"><Icon name="alert" size={13} /> {snapNote}</p> : null}
-      {plan.over_capacity && !snapNote ? <p className="ccz-note is-attn">Planned volume exceeds what sendable numbers carry today — the router stops at capacity.</p> : null}
+      {plan.over_capacity && !snapNote ? <p className="ccz-note is-attn">Planned volume exceeds what routed numbers can carry today — the router stops at capacity.</p> : null}
 
       <div className="ccz-fields">
         {field('daily_cap', 'Daily cap', '0 sends nothing')}
@@ -248,22 +275,23 @@ export function DeliveryBody({ fleet, numbers, plan, composition, eligibleInAudi
           <button type="button" className="ccz-linkbtn" onClick={() => onPatch({ total_cap: String(eligibleInAudience) })}>All {fmt(eligibleInAudience)}</button>
         ) : null)}
         {field('send_interval_seconds', 'Spacing (s)', 'Between sends')}
-        {field('per_sender_cap', 'Per-number cap', fleet.system.per_number_cap ? `Blank = system ${fleet.system.per_number_cap}` : 'Blank = system cap')}
+        {field('per_sender_cap', 'Per-number cap', fleet?.system.per_number_cap ? `Blank = system ${fleet.system.per_number_cap}` : 'Blank = system cap')}
       </div>
 
-      <ul className="ccz-senders" aria-label="Sender numbers">
-        {numbers.slice(0, 12).map((n) => (
-          <li key={`${n.phone ?? n.label ?? 'n'}:${n.market ?? ''}`} className={cx(!n.eligible && 'is-off')}>
-            <span className="ccz-senders__name">{n.label ?? n.phone}</span>
-            <span className="ccz-dim">{n.market ?? '—'}</span>
-            <LCStatus label={n.sender_state === 'cap_reached' ? 'at cap' : n.sender_state} tone={STATE_TONE[n.sender_state] ?? 'neutral'} quiet />
-            <span className="num">{fmt(n.sent_today)}<span className="ccz-dim">/{n.limit ?? '—'}</span></span>
-          </li>
-        ))}
-        {numbers.length > 12 ? <li className="ccz-dim">+{numbers.length - 12} more</li> : null}
-        {!numbers.length ? <li className="ccz-dim">No sender numbers in this audience’s states.</li> : null}
-      </ul>
-      <p className="ccz-dim">Sent today counts actual sends since each number’s local midnight. {fleet.blocklist_readable ? 'Operator blocklist applied.' : 'Operator blocklist unreadable — blocked numbers may show as sendable.'}</p>
+      {v2 ? (
+        <div className="ccz-v2">
+          <button type="button" className="ccz-v2__toggle" onClick={() => setShowV2((x) => !x)} aria-expanded={showV2}>
+            <Icon name={showV2 ? 'chevron-down' : 'chevron-right'} size={12} /> Routing 2.0 (not enabled) — preview
+          </button>
+          {showV2 ? (
+            <div className="ccz-v2__body">
+              <p className="ccz-dim">{v2.label}{v2.seed_backfill_simulated ? ' · proposed graph, seed backfill simulated' : ''}. {fmt(v2.totals.distinct_healthy_numbers)} healthy · {fmt(v2.totals.distinct_daily_capacity)}/day.</p>
+              <CoverageRows markets={v2.markets} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <p className="ccz-dim">Coverage and capacity come from the routing engine that dispatches now: canonical sender eligibility, the operator blocklist and actual sends today. A number serving several markets is counted once.</p>
     </div>
   )
 }
@@ -408,6 +436,7 @@ export function ScheduleBody({ composition, waves, audience, plan, eligible, hel
           <Kv k="Est. completion" v={est ? (est.low === est.high ? `${est.low} ${est.low === 1 ? 'day' : 'days'}` : `${est.low}–${est.high} days`) : '—'} />
           <Kv k="Uncertainty" v={held ? `${fmt(held)} held may clear review; sender availability assumed to hold` : 'Sender availability assumed to hold'} />
           <Kv k="Zones" v={waves.length ? waves.map((w) => w.short).join(' → ') : '—'} />
+          <Kv k="Routed" v={plan.uncovered_targets ? `${fmt(plan.covered_targets)} sellers with a route · ${fmt(plan.uncovered_targets)} unrouted excluded from the estimate` : plan.covered_targets ? `${fmt(plan.covered_targets)} sellers, all routed` : '—'} />
         </dl>
         <p className="ccz-dim">Modeled from the daily cap, sendable capacity and the window at {composition.send_interval_seconds}s spacing. The feeder paces the real send.</p>
       </div>

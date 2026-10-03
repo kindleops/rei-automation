@@ -5,6 +5,7 @@ import {
   prepareComposerLaunch,
   readComposerAudience,
   readComposerCohort,
+  readComposerCoverage,
   readComposerFleet,
   readComposerTemplates,
   saveComposerDraft,
@@ -27,6 +28,7 @@ export async function OPTIONS(request) {
  *   ?part=fleet                     sender fleet: router state, sent today, capacity
  *   ?part=templates                 template coverage per strategy × language
  *   ?part=audience&spec=<json>      dry-run audience for a composition (sampled build)
+ *   ?part=coverage&markets=<json>   sender coverage from the canonical routing engine
  *   ?part=cohort&spec=<json>        the whole cohort counted by the build's pipeline (aggregates only)
  */
 export async function GET(request) {
@@ -51,6 +53,14 @@ export async function GET(request) {
         return withCors(request, { ok: false, error: 'invalid_spec' }, 400)
       }
       const result = await readComposerCohort(spec)
+      return withCors(request, result, result.ok === false ? 502 : 200)
+    }
+    if (part === 'coverage') {
+      let markets = []
+      try { markets = JSON.parse(params.get('markets') || '[]') } catch {
+        return withCors(request, { ok: false, error: 'invalid_markets' }, 400)
+      }
+      const result = await readComposerCoverage(markets)
       return withCors(request, result, result.ok === false ? 502 : 200)
     }
     return withCors(request, { ok: false, error: 'unknown_part' }, 400)

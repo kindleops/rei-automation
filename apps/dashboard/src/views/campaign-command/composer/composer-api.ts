@@ -1,5 +1,5 @@
 import { callBackend, cloneCampaignBackend, getCampaignBackend } from '../../../lib/api/backendClient'
-import type { ComposerAudience, ComposerCohort, ComposerFailure, ComposerFleet, ComposerTemplates, LaunchResult, PrepareResult } from './composer-types'
+import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFailure, ComposerFleet, ComposerTemplates, LaunchResult, PrepareResult } from './composer-types'
 
 /**
  * CAMPAIGN COMPOSER 2.0 — the Composer's reads and writes. Reads are GET
@@ -43,6 +43,9 @@ export const readAudience = (spec: Record<string, unknown>, signal?: AbortSignal
 
 export const readCohort = (spec: Record<string, unknown>, signal?: AbortSignal) =>
   read<ComposerCohort>(`${BASE}?part=cohort&spec=${encodeURIComponent(JSON.stringify(spec))}`, signal, 240_000)
+
+export const readCoverage = (markets: Array<{ market: string; state: string | null; targets: number }>, signal?: AbortSignal) =>
+  read<ComposerCoverage>(`${BASE}?part=coverage&markets=${encodeURIComponent(JSON.stringify(markets))}`, signal, 90_000)
 
 export const saveDraft = (input: { composer_key: string; campaign_id?: string | null; composition: Record<string, unknown> }) =>
   write<{ ok: true; campaign_id: string; created: boolean; changed_fields?: string[]; unchanged?: boolean }>({ action: 'save', ...input }, 60_000)

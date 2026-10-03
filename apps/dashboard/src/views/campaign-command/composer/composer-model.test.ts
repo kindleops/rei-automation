@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSegments, capacityPlan, checkSchedule, completionEstimate, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition,
-  launchSentence, parseCap, withCohort, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
+  coverageMarkets, launchSentence, parseCap, withCohort, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
 } from './composer-model'
-import type { ComposerAudience, ComposerCohort, ComposerFleet, ComposerTemplates, FleetNumber } from './composer-types'
+import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, CoverageMarket } from './composer-types'
 import { intakeFromLocation, resolveDrop, COMPOSER_OBJECTS_MIME } from './composer-intake'
 import { composerCommands } from './composer-commands'
 import { isLegacyBuilderForced } from './composer-flag'
@@ -23,8 +23,9 @@ function audience(over: Partial<ComposerAudience> = {}): ComposerAudience {
     ...over,
   }
 }
-const num = (over: Partial<FleetNumber> = {}): FleetNumber => ({ phone: '+1', label: 'DALLAS', market: 'Dallas, TX', state: 'TX', sender_state: 'active', reason: null, eligible: true, cooling_until: null, limit: 800, limit_basis: 'system', sent_today: 100, remaining_today: 700, ...over })
-const fleet = (numbers: FleetNumber[]): ComposerFleet => ({ ok: true, at: '', numbers, markets: [], blocklist_readable: true, system: { per_number_cap: 800, processor_mode: 'live', emergency_stop_at: null, outbound_sms_enabled: true, contact_window: { start: '08:00', end: '21:00' }, auto_reply_mode: 'assisted', followup_automation_mode: 'off' } })
+const mkt = (over: Partial<CoverageMarket> = {}): CoverageMarket => ({ market_id: null, market: 'Dallas, TX', targets: 3323, coverage: 'LOCAL', serving_pool: 'Dallas, TX', serving_tier: 'exact_market_match', healthy_numbers: 1, daily_capacity: 798, unavailable: [], ...over })
+const cov = (markets: CoverageMarket[], capacity = markets.reduce((s, m) => s + m.daily_capacity, 0)): ComposerCoverage => ({ ok: true, at: '', engine: 'legacy_router', markets, totals: { distinct_healthy_numbers: markets.reduce((s, m) => s + m.healthy_numbers, 0), distinct_daily_capacity: capacity, targets: markets.reduce((s, m) => s + m.targets, 0) }, v2_preview: null })
+const fleet = (): ComposerFleet => ({ ok: true, at: '', numbers: [], markets: [], blocklist_readable: true, system: { per_number_cap: 800, processor_mode: 'live', emergency_stop_at: null, outbound_sms_enabled: true, contact_window: { start: '08:00', end: '21:00' }, auto_reply_mode: 'assisted', followup_automation_mode: 'off' } })
 const templates = (sendable = 26): ComposerTemplates => ({ ok: true, at: '', governance_readable: true, strategies: [{ use_case: 'ownership_check', stage_code: 'S1', label: 'Ownership check', touch: 'First touch', languages: [], templates: 47, sendable, governed: [] }] })
 const dallas = (): Composition => ({ ...emptyComposition(), name: 'Dallas', filters: [{ id: 'f', domain: 'properties', category: 'Location & Market', fieldKey: 'properties.market', label: 'Market', operator: 'is_any_of', value: ['Dallas, TX'] }] })
 
@@ -67,7 +68,7 @@ describe('whole cohort', () => {
   })
   it('a sampled count alone never reads as ready', () => {
     const waves = zoneWaves([{ value: 'America/Chicago', count: 1 }], { start: '08:00', end: '21:00' }, NOW, 48)
-    const r = deriveReadiness({ composition: dallas(), audience: audience(), audienceError: null, audienceLoading: false, templates: templates(), fleet: fleet([num()]), online: true, now: NOW, waves })
+    const r = deriveReadiness({ composition: dallas(), audience: audience(), audienceError: null, audienceLoading: false, templates: templates(), fleet: fleet(), coverage: cov([mkt()]), online: true, now: NOW, waves })
     expect(r.checks.find((c) => c.key === 'audience')?.state).toBe('checking')
   })
 })
@@ -76,51 +77,76 @@ describe('readiness', () => {
   const base = { audienceError: null, audienceLoading: false, online: true, now: NOW, waves: zoneWaves([{ value: 'America/Chicago', count: 1000 }], { start: '08:00', end: '21:00' }, NOW, 48) }
   it('zero eligible disables launch', () => {
     const a = audience({ build: { ...audience().build, ready: 0, sendable_now: 0 } })
-    const r = deriveReadiness({ ...base, composition: dallas(), audience: a, templates: templates(), fleet: fleet([num()]) })
+    const r = deriveReadiness({ ...base, composition: dallas(), audience: a, templates: templates(), fleet: fleet(), coverage: cov([mkt()]) })
     expect(r.state).toBe('blocked')
     expect(r.checks.find((c) => c.key === 'audience')?.text).toBe('Zero eligible prospects')
   })
   it('a ready Dallas composition reads ready', () => {
     const whole = { ...audience(), build: { ...audience().build, whole_cohort: true } }
-    const r = deriveReadiness({ ...base, composition: dallas(), audience: whole, templates: templates(), fleet: fleet([num()]) })
+    const r = deriveReadiness({ ...base, composition: dallas(), audience: whole, templates: templates(), fleet: fleet(), coverage: cov([mkt()]) })
     expect(r.blockers).toBe(0)
     expect(['ready', 'warning']).toContain(r.state)
   })
   it('no sender, no template, a lost connection and cap 0 each block', () => {
-    expect(deriveReadiness({ ...base, composition: dallas(), audience: audience(), templates: templates(), fleet: fleet([num({ eligible: false, sender_state: 'cooling' })]) }).checks.find((c) => c.key === 'senders')?.state).toBe('block')
-    expect(deriveReadiness({ ...base, composition: dallas(), audience: audience(), templates: templates(0), fleet: fleet([num()]) }).checks.find((c) => c.key === 'templates')?.state).toBe('block')
-    expect(deriveReadiness({ ...base, online: false, composition: dallas(), audience: audience(), templates: templates(), fleet: fleet([num()]) }).state).toBe('blocked')
-    expect(deriveReadiness({ ...base, composition: { ...dallas(), daily_cap: '0' }, audience: audience(), templates: templates(), fleet: fleet([num()]) }).checks.find((c) => c.key === 'capacity')?.text).toMatch(/sends nothing/)
+    expect(deriveReadiness({ ...base, composition: dallas(), audience: audience(), templates: templates(), fleet: fleet(), coverage: cov([mkt({ coverage: 'UNCOVERED', serving_pool: null, serving_tier: null, healthy_numbers: 0, daily_capacity: 0, unavailable: [{ pool: 'Dallas, TX', reasons: [{ phone: '•••1600', reason: 'outbound_number_health_cooling' }] }] })]) }).checks.find((c) => c.key === 'senders')?.state).toBe('block')
+    expect(deriveReadiness({ ...base, composition: dallas(), audience: audience(), templates: templates(0), fleet: fleet(), coverage: cov([mkt()]) }).checks.find((c) => c.key === 'templates')?.state).toBe('block')
+    expect(deriveReadiness({ ...base, online: false, composition: dallas(), audience: audience(), templates: templates(), fleet: fleet(), coverage: cov([mkt()]) }).state).toBe('blocked')
+    expect(deriveReadiness({ ...base, composition: { ...dallas(), daily_cap: '0' }, audience: audience(), templates: templates(), fleet: fleet(), coverage: cov([mkt()]) }).checks.find((c) => c.key === 'capacity')?.text).toMatch(/sends nothing/)
   })
   it('nothing unanswered reads as ready (checking, never a zero)', () => {
-    const r = deriveReadiness({ ...base, composition: dallas(), audience: null, audienceLoading: true, templates: null, fleet: null })
+    const r = deriveReadiness({ ...base, composition: dallas(), audience: null, audienceLoading: true, templates: null, fleet: null, coverage: null })
     expect(r.state).toBe('checking')
   })
   it('an unresolved recipient zone is a warning (held), never placed on a zone', () => {
     const a = audience({ zones: { scanned: 1000, unresolved: 40 } })
-    const r = deriveReadiness({ ...base, composition: dallas(), audience: a, templates: templates(), fleet: fleet([num()]) })
+    const r = deriveReadiness({ ...base, composition: dallas(), audience: a, templates: templates(), fleet: fleet(), coverage: cov([mkt()]) })
     expect(r.checks.find((c) => c.key === 'windows')?.text).toMatch(/Timezone unavailable for 40/)
     const waves = zoneWaves([{ value: 'unresolved', count: 40 }, { value: 'America/Chicago', count: 960 }], { start: '08:00', end: '21:00' }, NOW, 48)
     expect(waves.map((w) => w.zone)).toEqual(['America/Chicago'])
   })
 })
 
-describe('capacity', () => {
-  const numbers = [num(), num({ label: 'HOUSTON', market: 'Houston, TX', eligible: false, sender_state: 'blocked', remaining_today: 0 }), num({ label: 'HOUSTON 2', market: 'Houston, TX', eligible: false, sender_state: 'cooling', remaining_today: 0 })]
-  it('splits available from unavailable and names the binding limit', () => {
-    const p = capacityPlan(numbers, { daily_cap: '750', send_interval_seconds: '45', contact_window_start: '08:00', contact_window_end: '21:00' })
+describe('capacity (routing engine coverage)', () => {
+  const coverage = cov([
+    mkt(),
+    mkt({ market: 'Phoenix, AZ', targets: 2844, coverage: 'REGIONAL', serving_pool: 'Los Angeles, CA', serving_tier: 'approved_state_fallback', healthy_numbers: 0, daily_capacity: 0 }),
+    mkt({ market: 'Miami, FL', targets: 9733, coverage: 'UNCOVERED', serving_pool: null, serving_tier: null, healthy_numbers: 0, daily_capacity: 0, unavailable: [{ pool: 'Miami, FL', reasons: [{ phone: '•••2999', reason: 'outbound_number_health_cooling' }, { phone: '•••5670', reason: 'outbound_number_blocked_by_operator' }] }] }),
+  ], 800)
+  const c = { daily_cap: '750', send_interval_seconds: '45', contact_window_start: '08:00', contact_window_end: '21:00' }
+  it('takes capacity and coverage from the engine, never the raw fleet', () => {
+    const p = capacityPlan(coverage, c)
     expect(p.available_per_day).toBe(800)
-    expect(p.unavailable_per_day).toBe(1600)
     expect(p.window_per_day).toBe(1040)
     expect(p.effective_per_day).toBe(750)
     expect(p.binding).toBe('daily_cap')
+    expect(p.uncovered_markets).toEqual(['Miami, FL'])
+    expect(p.uncovered_targets).toBe(9733)
+    expect(p.covered_targets).toBe(3323 + 2844)
+    expect(p.unavailable_reason).toBe('1 cooling, 1 blocked')
   })
-  it('a volume beyond capacity snaps back with the reason', () => {
-    const p = capacityPlan(numbers, { daily_cap: '750', send_interval_seconds: '45', contact_window_start: '08:00', contact_window_end: '21:00' })
-    const s = snapVolume(1060, p)
+  it('shared fallback numbers are counted once (nine markets on one Dallas number = one limit)', () => {
+    const west = cov(Array.from({ length: 9 }, (_, i) => mkt({ market: `West ${i}, CA`, coverage: 'DEGRADED', serving_pool: 'Dallas, TX', daily_capacity: 798, shared_numbers: 1 })), 798)
+    const p = capacityPlan(west, { ...c, daily_cap: '5000' })
+    expect(p.available_per_day).toBe(798)
+    expect(p.effective_per_day).toBe(798)
+    expect(p.binding).toBe('sender_capacity')
+  })
+  it('a volume beyond routed capacity snaps back with the reason', () => {
+    const s = snapVolume(1060, capacityPlan(coverage, c))
     expect(s.snapped).toBe(true)
     expect(s.value).toBe(800)
-    expect(s.reason).toBe('+260/day unavailable: 1 blocked, 1 cooling')
+    expect(s.reason).toBe('+260/day unavailable: 1 cooling, 1 blocked')
+  })
+  it('readiness names the unrouted markets before launch; all unrouted blocks', () => {
+    const base = { audience: audience(), audienceError: null, audienceLoading: false, templates: templates(), fleet: fleet(), online: true, now: NOW, waves: [] }
+    const partial = deriveReadiness({ ...base, composition: dallas(), coverage })
+    expect(partial.checks.find((x) => x.key === 'senders')?.text).toMatch(/No route for Miami, FL — 9,733 sellers won’t send/)
+    const none = deriveReadiness({ ...base, composition: dallas(), coverage: cov([coverage.markets[2]]) })
+    expect(none.checks.find((x) => x.key === 'senders')?.state).toBe('block')
+  })
+  it('the audience markets feed the engine (whole cohort when counted)', () => {
+    const merged = withCohort(audience(), { ok: true, at: '', queue_eligible_in_audience: 1, rows_read: 1, capped_by_build_limit: false, build_limit: 100000, recipients: 1, duplicates_collapsed: 0, ready: 5, held: 0, held_by_reason: {}, sendable_now: 2, no_sendable_number: 3, sender_markets: [], ready_by_zone: {}, ready_by_market: { 'Phoenix, AZ': 3, 'Dallas, TX': 2 }, timings_ms: { read: 1, total: 1 } })
+    expect(coverageMarkets(merged)).toEqual([{ market: 'Phoenix, AZ', state: 'AZ', targets: 3 }, { market: 'Dallas, TX', state: 'TX', targets: 2 }])
   })
   it('completion carries the held set as its uncertainty', () => {
     expect(completionEstimate(737, 144, 300)).toEqual({ low: 3, high: 3 })

@@ -525,6 +525,26 @@ export async function readComposerCohort(spec = {}, deps = {}) {
   return value
 }
 
+/**
+ * Sender coverage for an audience from the CANONICAL routing engine — the one
+ * that dispatches under the current gate state (sender-routing-service.js
+ * readAudienceSenderCoverage: the legacy router while Routing 2.0 is gated off,
+ * plus a labelled 2.0 preview; Routing 2.0 when it is on). Never the fleet
+ * model. markets: [{ market, state?, market_id?, targets }].
+ */
+export async function readComposerCoverage(markets = [], deps = {}) {
+  const list = (Array.isArray(markets) ? markets : [])
+    .map((m) => ({ market: clean(m?.market) || null, market_id: clean(m?.market_id) || null, state: clean(m?.state) || STATE_OF_MARKET(m?.market) || null, targets: Math.max(0, Math.trunc(Number(m?.targets) || 0)) }))
+    .filter((m) => m.market || m.market_id)
+    .slice(0, 60)
+  if (!list.length) return { ok: true, engine: null, markets: [], totals: { distinct_healthy_numbers: 0, distinct_daily_capacity: 0, targets: 0 }, v2_preview: null }
+  const read = deps.readAudienceSenderCoverage
+    || (await import('@/lib/domain/routing/sender-routing/sender-routing-service.js')).readAudienceSenderCoverage
+  const result = await read({ markets: list }, deps)
+  if (!result || result.ok === false) return { ok: false, error: clean(result?.error) || 'coverage_unavailable' }
+  return { ok: true, at: new Date().toISOString(), ...result }
+}
+
 /* ── draft save ─────────────────────────────────────────────────────────── */
 
 async function findDraftByComposerKey(supabase, key) {

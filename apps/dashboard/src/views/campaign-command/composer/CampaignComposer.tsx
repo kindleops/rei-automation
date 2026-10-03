@@ -10,11 +10,11 @@ import { isWorkspaceRunning, openApp } from '../../../modules/desktop/workspace/
 import { pushRoutePath } from '../../../app/router'
 import { getFieldCatalog, searchFieldOptions, type CampaignFieldCatalog } from '../campaignWizardAdapter'
 import { fetchCommandBook, type BookCampaign } from '../desktop/war-room-api'
-import { duplicateAsDraft, launch, loadCampaign, prepareLaunch, readAudience, readCohort, readFleet, readTemplates, saveDraft } from './composer-api'
-import type { ComposerAudience, ComposerCohort, ComposerFleet, ComposerTemplates, PrepareResult } from './composer-types'
+import { duplicateAsDraft, launch, loadCampaign, prepareLaunch, readAudience, readCohort, readCoverage, readFleet, readTemplates, saveDraft } from './composer-api'
+import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, PrepareResult } from './composer-types'
 import {
   audienceSpec, capacityPlan, clauseId, clausesFromTargetFilters, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition, fmt,
-  inferSource, launchSentence, LAUNCH_ERROR_WORDS, n0, relevantFleet, withCohort, zoneWaves,
+  coverageMarkets, inferSource, launchSentence, LAUNCH_ERROR_WORDS, n0, withCohort, zoneWaves,
   type Composition, type FilterClause, type Layer, type ReadinessCheck,
 } from './composer-model'
 import type { DropResolution, Intake } from './composer-intake'
@@ -125,7 +125,6 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
   const [editing, setEditing] = useState<string | null>(null)
   const [fieldRequest, setFieldRequest] = useState<string | null>(null)
   const [snapNote, setSnapNote] = useState<string | null>(null)
-  const [allFleet, setAllFleet] = useState(false)
   const [review, setReview] = useState<Review>({ open: false, phase: 'saving', prepared: null, error: null, code: null, launchKey: '' })
   const busy = useRef(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -232,13 +231,32 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
   const window_ = useMemo(() => ({ start: composition.contact_window_start, end: composition.contact_window_end }), [composition.contact_window_start, composition.contact_window_end])
   const hourStart = Math.floor(now / 3600_000) * 3600_000
   const waves = useMemo(() => zoneWaves(audience?.distributions.zones ?? [], window_, hourStart, 48), [audience, window_, hourStart])
-  const numbers = useMemo(() => (allFleet ? fleet.data?.numbers ?? [] : relevantFleet(fleet.data, audience)), [allFleet, fleet.data, audience])
-  const plan = useMemo(() => capacityPlan(numbers, composition), [numbers, composition])
+  // sender coverage from the routing engine that dispatches now — recomputed whenever the audience's markets change
+  const covMarkets = useMemo(() => coverageMarkets(audience), [audience])
+  const covKey = JSON.stringify(covMarkets)
+  const [coverage, setCoverage] = useState<{ key: string; data: ComposerCoverage | null; error: string | null } | null>(null)
+  useEffect(() => {
+    if (!covMarkets.length) return
+    const ctl = new AbortController()
+    const timer = window.setTimeout(() => {
+      readCoverage(covMarkets, ctl.signal).then((r) => {
+        if (ctl.signal.aborted) return
+        setCoverage(r.ok ? { key: covKey, data: r.data, error: null } : { key: covKey, data: null, error: r.message })
+      })
+    }, 250)
+    return () => { window.clearTimeout(timer); ctl.abort() }
+    // covMarkets is derived from covKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [covKey])
+  const coverageData = covMarkets.length ? coverage?.data ?? null : null
+  const coverageLoading = covMarkets.length > 0 && coverage?.key !== covKey
+  const coverageError = coverage?.key === covKey ? coverage.error : null
+  const plan = useMemo(() => capacityPlan(coverageData, composition), [coverageData, composition])
   const eligible = eligibleOf(audience)
   const server = review.prepared?.readiness ?? null
   const readiness = useMemo(() => deriveReadiness({
-    composition, audience, audienceError: audError, audienceLoading: audLoading, templates: templates.data, fleet: fleet.data, online, now, waves,
-  }), [composition, audience, audError, audLoading, templates.data, fleet.data, online, now, waves])
+    composition, audience, audienceError: audError, audienceLoading: audLoading, templates: templates.data, fleet: fleet.data, coverage: coverageLoading ? null : coverageData, coverageError, online, now, waves,
+  }), [composition, audience, audError, audLoading, templates.data, fleet.data, coverageData, coverageLoading, coverageError, online, now, waves])
   const diff = useMemo(() => compositionDiff(baseline, composition), [baseline, composition])
   const canReview = readiness.state === 'ready' || readiness.state === 'warning'
 
@@ -418,7 +436,7 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
   const spine: Array<{ layer: Layer; label: string; line: string }> = [
     { layer: 'audience', label: 'Audience', line: !hasAudience ? 'Raw universe' : eligible === null ? (audLoading ? 'Counting…' : '—') : `${fmt(audience?.matched)} → ${fmt(eligible)} eligible` },
     { layer: 'strategy', label: 'Strategy', line: strategy ? `${strategy.label} · ${fmt(strategy.sendable)} templates` : '—' },
-    { layer: 'delivery', label: 'Delivery', line: fleet.data ? `${fmt(plan.effective_per_day)}/day · ${numbers.filter((x) => x.eligible).length} senders` : '—' },
+    { layer: 'delivery', label: 'Delivery', line: coverageData ? `${fmt(plan.effective_per_day)}/day · ${plan.uncovered_markets.length ? `${plan.uncovered_markets.length} unrouted` : 'all routed'}` : '—' },
     { layer: 'schedule', label: 'Schedule', line: composition.start.mode === 'now' ? `On launch · ${waves.map((w) => w.short).join(' → ') || 'zones pending'}` : new Date(composition.start.at ?? '').toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) },
     { layer: 'launch', label: 'Launch', line: readiness.state === 'ready' ? 'Ready' : readiness.state === 'warning' ? `Ready · ${readiness.warnings} warnings` : readiness.state === 'blocked' ? `${readiness.blockers} blocking` : 'Checking' },
   ]
@@ -498,24 +516,24 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
                 onInspect={(sample) => sample.property_id && inspectObject(propertyObject({ propertyId: sample.property_id, label: sample.place, source: 'campaign-composer' }))}
               />
             </Plane>
-            <Plane {...plane('delivery')} title="Delivery" summary={fleet.data ? `${fmt(plan.effective_per_day)}/day modeled · ${fmt(plan.available_per_day)} available` : fleet.error ? 'Fleet unavailable' : 'Reading…'}>
-              {fleet.error && !fleet.data ? <div className="ccz-err"><Icon name="alert" size={14} /> Sender fleet didn’t load — {fleet.error}</div> : null}
+            <Plane {...plane('delivery')} title="Delivery" summary={coverageData ? `${fmt(plan.effective_per_day)}/day modeled · ${fmt(plan.available_per_day)} routable today` : coverageError ? 'Routing unavailable' : 'Reading…'}>
+              {fleet.error && !fleet.data ? <div className="ccz-err"><Icon name="alert" size={14} /> System controls didn’t load — {fleet.error}</div> : null}
               <DeliveryBody
                 fleet={fleet.data}
-                numbers={numbers}
+                coverage={coverageData}
+                coverageError={coverageError}
+                coverageLoading={coverageLoading}
                 plan={plan}
                 composition={composition}
                 eligibleInAudience={audience?.eligible_in_audience ?? null}
                 snapNote={snapNote}
                 onPatch={(p) => { setSnapNote(null); patch(p) }}
                 onDailyCap={(value, reason) => { setSnapNote(reason); patch({ daily_cap: value }) }}
-                onShowAll={() => setAllFleet((x) => !x)}
-                showAll={allFleet}
               />
             </Plane>
           </div>
           <Plane {...plane('schedule')} title="Schedule" className="ccz-col-c" summary={composition.start.mode === 'now' ? 'Starts on launch' : `Starts ${new Date(composition.start.at ?? '').toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}>
-            <ScheduleBody composition={composition} waves={waves} audience={audience} plan={plan} eligible={eligible} held={audience?.build.held ?? null} now={now} onStart={(start) => patch({ start })} />
+            <ScheduleBody composition={composition} waves={waves} audience={audience} plan={plan} eligible={coverageData ? plan.covered_targets : eligible} held={audience?.build.held ?? null} now={now} onStart={(start) => patch({ start })} />
           </Plane>
           <Plane {...plane('launch')} title="Readiness" className="ccz-col-d" summary={readiness.state === 'checking' ? 'Checking…' : `${readiness.blockers} blocking · ${readiness.warnings} warnings`}>
             <ReadinessList checks={readiness.checks} onFocus={focusLayer} />
