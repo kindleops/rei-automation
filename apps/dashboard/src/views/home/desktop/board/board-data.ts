@@ -1,3 +1,4 @@
+import { callBackend } from '../../../../lib/api/backendClient'
 import { fetchPipelineFeed, fetchPipelineOverview, fetchPipelinePoints, type PipelineCommandCard, type PipelineCommandOverview } from '../../../../domain/pipeline/pipeline-command-api'
 import { fetchCampaignsSurface } from '../../../campaign-command/campaigns.adapter'
 import type { CampaignSummary } from '../../../campaign-command/campaigns.types'
@@ -113,5 +114,52 @@ export function mapActivitySource(lens: MapActivityLens, range: MapRange): Sourc
     load: (s) => fetchMapActivity({ lens, range }, s),
     apps: lens === 'replies' ? ['/inbox'] : lens === 'delivered' || lens === 'failed' ? ['/queue'] : lens === 'moves' || lens === 'offers' ? ['/pipeline'] : [],
     everyMs: range === 'today' ? 120_000 : 300_000,
+  }
+}
+
+/* ── Home instruments (/api/cockpit/home/instruments) — one narrow cached read per app ── */
+
+export interface DealInstrument {
+  active: number; scored: number; unscored: number; review: number; lowConfidence: number; offersAwaiting: number
+  tiers: Record<string, number>
+  reviewItems: DealItem[]; lowItems: DealItem[]
+  offers: Array<{ id: string; propertyId: string | null; opportunityId: string | null; price: number | null; status: string; sentAt: string | null }>
+  rules: { lowConfidence: string; review: string }
+}
+export interface DealItem { opportunityId: string; propertyId: string | null; threadKey: string | null; masterOwnerId: string | null; address: string | null; market: string | null; stage: string | null; tier: string | null; confidence: number | null; valuationConfidence: number | null; recommendedOffer: number | null }
+export interface CompsInstrument {
+  newestSale: string | null; freshnessDays: number | null; sales30: number; sales90: number; source: string
+  recent: Array<{ id: string; propertyId: string | null; address: string | null; city: string | null; state: string | null; soldOn: string; price: number | null; ppsf: number | null; type: string | null; units: number | null; lat: number | null; lng: number | null }>
+  activeMarkets: Array<{ market: string; deals: number; comps90: number }>
+}
+export interface BuyersInstrument {
+  activeDeals: number; dealsWithMatches: number; candidates: number; contacted: number; privacy: string
+  strongest: Array<{ opportunityId: string | null; propertyId: string; threadKey: string | null; address: string | null; market: string | null; candidates: number; bestScore: number | null; bestGrade: string | null; bestBuyerType: string | null }>
+  demand: Array<{ market: string; deals: number; sales90: number; investorPurchases90: number }>
+}
+export interface EntityInstrument { owners: number | null; ownersEstimated: boolean; connected: Array<{ id: string; name: string; kind: string | null; properties: number; value: number | null; markets: string[] }>; changes: null }
+export interface QueueInstrument {
+  held: number; heldCapped: boolean; reasons: Array<{ code: string; count: number }>
+  senders: { total: number; active: number; cooling: number; flagged: number; remainingToday: number; dailyCapacity: number }
+  numbers: Array<{ phone: string; label: string | null; market: string | null; state: string; health: string | null; limit: number | null; sent: number; remaining: number }>
+  note: string
+}
+type InstrumentKind = 'deal' | 'comps' | 'buyers' | 'entity' | 'queue'
+interface InstrumentMap { deal: DealInstrument; comps: CompsInstrument; buyers: BuyersInstrument; entity: EntityInstrument; queue: QueueInstrument }
+
+const INSTRUMENT_APPS: Record<InstrumentKind, readonly string[]> = { deal: ['/pipeline'], comps: [], buyers: [], entity: [], queue: ['/queue'] }
+const INSTRUMENT_EVERY: Record<InstrumentKind, number> = { deal: 180_000, comps: 600_000, buyers: 600_000, entity: 900_000, queue: 60_000 }
+
+export function instrumentSource<K extends InstrumentKind>(kind: K): SourceDef<InstrumentMap[K]> {
+  return {
+    key: `instrument:${kind}`,
+    load: async (signal) => {
+      const res = await callBackend<{ ok: boolean; data?: InstrumentMap[K]; message?: string }>(`/api/cockpit/home/instruments?kind=${kind}`, { signal, timeoutMs: 30_000 })
+      if (!res.ok) throw new Error(res.message || 'unavailable')
+      if (!res.data?.ok || !res.data.data) throw new Error(res.data?.message || 'unavailable')
+      return res.data.data
+    },
+    apps: INSTRUMENT_APPS[kind],
+    everyMs: INSTRUMENT_EVERY[kind],
   }
 }

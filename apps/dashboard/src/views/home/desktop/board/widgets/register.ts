@@ -4,13 +4,15 @@ import { BriefWidget, FocusWidget, MachineFeedWidget, SignalsWidget } from './co
 import { EmailWidget, InboxWidget } from './comm-widgets'
 import { CalendarWidget, CampaignWidget, ClosingWidget, PipelineWidget, WorkflowWidget } from './ops-widgets'
 import { AnalyticsWidget, MapWidget } from './intel-widgets'
+import { BrowserWidget, BuyersWidget, CompsWidget, DealIntelWidget, EntityWidget, QueueWidget } from './app-widgets'
 import { ANALYTICS_METRICS } from './analytics-metrics'
 
 /**
  * The first-party Home widgets. Each reads an existing canonical endpoint of
- * its owning app (see ../board-data.ts) and recomposes per size. Widgets with
- * no real compact signal yet (Deal Intelligence, Comp Intelligence, Buyer
- * Match, Entity Graph) are deliberately not registered.
+ * its owning app (see ../board-data.ts) and recomposes per size. The Deal
+ * Intelligence, Comps, Buyer Match, Entity Graph and Queue instruments read
+ * the narrow cached /api/cockpit/home/instruments (the apps' own tables and
+ * rules); Browser reads its on-device recent research.
  */
 
 const n = (v: number | null | undefined) => (v === null || v === undefined ? null : v.toLocaleString('en-US'))
@@ -201,6 +203,74 @@ export function registerFirstPartyWidgets() {
     refresh: { everyMs: 120_000 },
     emptyState: 'No open signals.',
   })
+  registerHomeWidget({
+    id: 'deal.decisions', ownerApp: 'deal-intelligence', name: 'Deal Intelligence', icon: 'target', domain: 'Acquisitions',
+    description: 'Active deals whose decision needs review, scores below the confidence gates, and live offers awaiting a response.',
+    sizes: ['compact', 'small', 'medium', 'tall', 'large'], defaultSize: 'medium',
+    component: DealIntelWidget, defaultConfig: {},
+    data: 'Acquisition scores for active opportunities (Deal Intelligence gates) + live seller offers',
+    openAction: () => ({ label: 'Open Deal Intelligence', path: '/deal-intelligence' }),
+    openBesideAction: () => ({ label: 'Open beside', path: '/deal-intelligence' }),
+    refresh: { everyMs: 180_000, events: ['/pipeline'] },
+    emptyState: 'No scored deal needs a decision.',
+  })
+
+  registerHomeWidget({
+    id: 'comps.recent', ownerApp: 'comp-intelligence', name: 'Comps', icon: 'stats', domain: 'Intelligence',
+    description: 'How fresh the sold-comp pool is, priced sales in the markets you have deals in, and the latest recorded sales.',
+    sizes: ['compact', 'small', 'medium', 'tall', 'large', 'wide'], defaultSize: 'medium',
+    component: CompsWidget, defaultConfig: {},
+    data: 'Recorded priced sales (the Map / Comps sold-comp pool)',
+    openAction: () => ({ label: 'Open Comp Intelligence', path: '/comp-intelligence' }),
+    refresh: { everyMs: 600_000 },
+    emptyState: 'No priced sales on record.',
+  })
+
+  registerHomeWidget({
+    id: 'buyers.matches', ownerApp: 'buyer-match', name: 'Buyer Match', icon: 'users', domain: 'Acquisitions',
+    description: 'Strongest buyer matches for active deals and investor purchases in your markets. Buyer names are withheld.',
+    sizes: ['compact', 'small', 'medium', 'tall', 'large', 'wide'], defaultSize: 'medium',
+    component: BuyersWidget, defaultConfig: {},
+    data: 'Buyer match candidates for active deals (scores and buyer type only) + recorded investor purchases',
+    openAction: () => ({ label: 'Open Buyer Match', path: '/buyer-match' }),
+    refresh: { everyMs: 600_000 },
+    emptyState: 'No buyer matches for active deals.',
+  })
+
+  registerHomeWidget({
+    id: 'entity.network', ownerApp: 'entity-graph', name: 'Entity Graph', icon: 'link', domain: 'Intelligence',
+    description: 'Resolved owners and the most connected portfolios in the graph.',
+    sizes: ['compact', 'small', 'medium', 'tall', 'large'], defaultSize: 'medium',
+    component: EntityWidget, defaultConfig: {},
+    data: 'Master owners (Entity Graph networks)',
+    openAction: () => ({ label: 'Open Entity Graph', path: '/entity-graph' }),
+    refresh: { everyMs: 900_000 },
+    emptyState: 'No multi-property owners resolved yet.',
+  })
+
+  registerHomeWidget({
+    id: 'queue.desk', ownerApp: 'queue', name: 'Queue', icon: 'send', domain: 'Operations',
+    description: 'What is held and why, and how much sending capacity the fleet has left today.',
+    sizes: ['compact', 'small', 'medium', 'tall', 'large'], defaultSize: 'medium',
+    component: QueueWidget, defaultConfig: {},
+    data: 'Send queue holds by reason + TextGrid sender capacity',
+    openAction: () => ({ label: 'Open Queue', path: '/queue' }),
+    openBesideAction: () => ({ label: 'Open Queue beside', path: '/queue' }),
+    refresh: { everyMs: 60_000, events: ['/queue'] },
+    emptyState: 'Nothing is held.',
+    preview: (m) => (m?.queue ? `${n(m.queue.today_remaining)} remaining today` : null),
+  })
+
+  registerHomeWidget({
+    id: 'browser.recent', ownerApp: 'browser', name: 'Browser', icon: 'compass', domain: 'Intelligence',
+    description: 'The research you opened recently, one click to reopen it in the Browser.',
+    sizes: ['compact', 'small', 'medium', 'tall'], defaultSize: 'small',
+    component: BrowserWidget, defaultConfig: {},
+    data: 'Browser recent research (on this device)',
+    openAction: () => ({ label: 'Open Browser', path: '/browser' }),
+    refresh: { everyMs: 600_000 },
+    emptyState: 'No research opened on this device yet.',
+  })
 }
 
 /** The widget an app becomes when it is dragged from the Command Rail onto Home. */
@@ -209,7 +279,12 @@ export const RAIL_DEFAULT_WIDGET: Record<string, string> = {
   pipeline: 'pipeline.flow',
   map: 'map.pulse',
   'campaign-command': 'campaign.engine',
-  queue: 'campaign.engine',
+  queue: 'queue.desk',
+  'deal-intelligence': 'deal.decisions',
+  'comp-intelligence': 'comps.recent',
+  'buyer-match': 'buyers.matches',
+  'entity-graph': 'entity.network',
+  browser: 'browser.recent',
   analytics: 'analytics.metric',
   calendar: 'calendar.agenda',
   'closing-desk': 'closing.desk',
