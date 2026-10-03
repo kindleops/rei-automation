@@ -259,19 +259,22 @@ export async function hydrateEnrichments(
 
   const [ownersR, propsR, prospectsR] = await Promise.allSettled([
     ownerIds.length
-      ? supabase.from('master_owners').select('id, display_name, final_acquisition_score').in('id', ownerIds)
+      // master_owners is keyed by master_owner_id; it has no `id` column (and no
+      // final_acquisition_score), so the old select failed with 42703 on every call.
+      ? supabase.from('master_owners').select('master_owner_id, display_name').in('master_owner_id', ownerIds)
       : Promise.resolve({ data: [] }),
     propIds.length
       ? supabase.from('properties').select('property_id, property_address_full, property_address, market, property_type, estimated_value, equity_percent').in('property_id', propIds)
       : Promise.resolve({ data: [] }),
     prospIds.length
-      ? supabase.from('prospects').select('id, full_name, first_name').in('id', prospIds)
+      // prospects is keyed by prospect_id; it has no `id` column.
+      ? supabase.from('prospects').select('prospect_id, full_name, first_name').in('prospect_id', prospIds)
       : Promise.resolve({ data: [] }),
   ])
 
-  const owners   = new Map((ownersR.status    === 'fulfilled' ? ownersR.value.data    ?? [] : []).map((r: any) => [r.id,          r]))
+  const owners   = new Map((ownersR.status    === 'fulfilled' ? ownersR.value.data    ?? [] : []).map((r: any) => [r.master_owner_id, r]))
   const props    = new Map((propsR.status     === 'fulfilled' ? propsR.value.data     ?? [] : []).map((r: any) => [r.property_id, r]))
-  const suspects = new Map((prospectsR.status === 'fulfilled' ? prospectsR.value.data ?? [] : []).map((r: any) => [r.id,          r]))
+  const suspects = new Map((prospectsR.status === 'fulfilled' ? prospectsR.value.data ?? [] : []).map((r: any) => [r.prospect_id, r]))
 
   for (const r of resolved) {
     const o = r.master_owner_id ? owners.get(r.master_owner_id)   : null
@@ -285,7 +288,10 @@ export async function hydrateEnrichments(
       propertyAddressFull: p?.property_address_full ?? q?.property_address   ?? undefined,
       market:              p?.market               ?? q?.market              ?? undefined,
       sellerName:          s?.full_name            ?? s?.first_name          ?? undefined,
-      acquisitionScore:    o?.final_acquisition_score                        ?? undefined,
+      // Not sourced here: master_owners carries no acquisition score. Left
+      // undefined (as it always effectively was) rather than borrowing a
+      // legacy property column under the "Acquisition Score" label.
+      acquisitionScore:    undefined,
       propertyType:        p?.property_type                                  ?? undefined,
       queueStage:          q?.current_stage        ?? q?.pipeline_stage      ?? undefined,
     })

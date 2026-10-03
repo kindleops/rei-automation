@@ -1805,7 +1805,7 @@ const applyQuickFilterClient = (property: PropertyRecord, key: string): boolean 
   }
 }
 
-const fetchRelatedRowsForProperties = async (properties: PropertyRecord[]): Promise<RelatedRows> => {
+export const fetchRelatedRowsForProperties = async (properties: PropertyRecord[]): Promise<RelatedRows> => {
   if (!shouldUseSupabase()) return mockRelatedRows()
   const propertyIds = Array.from(new Set(properties.flatMap((property) => [property.propertyId, property.id]).filter(Boolean)))
   const ownerIds = Array.from(new Set(properties.flatMap((property) => [property.masterOwnerId, property.ownerId]).filter(Boolean)))
@@ -1844,8 +1844,10 @@ const fetchRelatedRowsForProperties = async (properties: PropertyRecord[]): Prom
   const [masterOwners, prospects, phones, emails, messages, queue, offers, contracts, acquisitionDecisions] = await Promise.all([
     fetchChunked(oIds, async chunk => await supabase.from('master_owners').select('*').in('master_owner_id', chunk).limit(1000)),
     fetchChunked(oIds, async chunk => await supabase.from('prospects').select('*').in('master_owner_id', chunk).limit(1500)),
-    fetchChunked(pIds, async chunk => await supabase.from('phones').select('*').in('property_id', chunk).limit(2000)),
-    fetchChunked(pIds, async chunk => await supabase.from('emails').select('*').in('property_id', chunk).limit(2000)),
+    // phones/emails have no property_id column (the old filter failed with 42703).
+    // They hang off the owner: linkedRows() matches them by master_owner_id.
+    fetchChunked(oIds, async chunk => await supabase.from('phones').select('*').in('master_owner_id', chunk).limit(2000)),
+    fetchChunked(oIds, async chunk => await supabase.from('emails').select('*').in('master_owner_id', chunk).limit(2000)),
     fetchChunked(pIds, async chunk => await supabase.from('message_events').select('*').in('property_id', chunk).order('created_at', { ascending: false }).limit(3000)),
     fetchChunked(pIds, async chunk => await supabase.from('send_queue').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(3000)),
     fetchChunked(pIds, async chunk => await supabase.from('property_cash_offer_snapshots').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(1000)),
