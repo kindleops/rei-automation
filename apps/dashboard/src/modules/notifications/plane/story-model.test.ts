@@ -5,7 +5,7 @@ vi.mock('../../desktop/objects', () => {
   return { sellerObject: mk('seller'), campaignObject: mk('campaign'), closingObject: mk('closing'), dealObject: mk('deal'), propertyObject: mk('property'), workflowObject: mk('workflow') }
 })
 
-import { applyLocal, CACHE_INCREMENTAL_MS, CACHE_MAX_STORIES, countLocal, defaultLens, degradedText, mergeStories, nextStoryIndex, parseCache, relTime, runObject, serializeCache, storyObject, storyTone, visibleOrder, type Story } from './story-model'
+import { applyLocal, CACHE_INCREMENTAL_MS, dampSwipe, inverseAction, settleSwipe, storySource, SWIPE_COMMIT, SWIPE_REVEAL_PX, SWIPE_TRAY_PX, timeGroup, CACHE_MAX_STORIES, countLocal, defaultLens, degradedText, mergeStories, nextStoryIndex, parseCache, relTime, runObject, serializeCache, storyObject, storyTone, visibleOrder, type Story } from './story-model'
 
 const story = (id: string, over: Partial<Story> = {}): Story => ({
   id, subject: { type: 'seller', id: '+1612', thread_key: '+1612', property_id: 'p1', label: 'Gale' }, subject_key: 'seller:+1612|p1', kind: 'message',
@@ -119,5 +119,52 @@ describe('notification plane model', () => {
     expect(nextStoryIndex(2, 'Home', 3)).toBe(0)
     expect(nextStoryIndex(1, 'Enter', 3)).toBeNull()
     expect(nextStoryIndex(-1, 'ArrowDown', 0)).toBeNull()
+  })
+
+  it('source identity: every story wears its app (Rail icon), never a colour guess', () => {
+    expect(storySource(story('a')).app).toBe('inbox')
+    expect(storySource(story('a')).icon).toBe('inbox')
+    expect(storySource(story('b', { primary_event: { id: 'ne:1', type: 'inbox_follow_up_due', at: '2026-10-02T15:00:00.000Z' } })).app).toBe('calendar')
+    expect(storySource(story('c', { primary_event: { id: 'lse:1', type: 'stage.advanced', at: '2026-10-02T15:00:00.000Z' } })).app).toBe('pipeline')
+    const sub = (type: string, id = 'x') => ({ subject: { type, id, label: null } }) as Partial<Story>
+    expect(storySource(story('d', sub('campaign'))).app).toBe('campaign')
+    expect(storySource(story('e', sub('workflow'))).app).toBe('workflow')
+    expect(storySource(story('f', sub('closing'))).app).toBe('closing')
+    expect(storySource(story('g', sub('system', 'senders'))).app).toBe('queue')
+    expect(storySource(story('h', sub('system', 'email'))).app).toBe('email')
+    expect(storySource(story('i', sub('system', 'platform'))).app).toBe('system')
+    expect(storySource(story('j', { ...sub('system', 'templates'), signal: { rule_keys: ['r'], signal_ids: [], severity: 'warning' } })).app).toBe('signal')
+    expect(storySource(story('k', sub('inbox', 'new_replies'))).app).toBe('inbox')
+  })
+
+  it('time sections: last hour, earlier today, yesterday, this week, older', () => {
+    const now = new Date('2026-10-03T15:00:00').getTime()
+    expect(timeGroup(new Date(now - 20 * 60e3).toISOString(), now)).toBe('hour')
+    expect(timeGroup(new Date('2026-10-03T08:00:00').toISOString(), now)).toBe('today')
+    expect(timeGroup(new Date('2026-10-02T23:00:00').toISOString(), now)).toBe('yesterday')
+    expect(timeGroup(new Date('2026-09-29T12:00:00').toISOString(), now)).toBe('week')
+    expect(timeGroup(new Date('2026-09-20T12:00:00').toISOString(), now)).toBe('older')
+    expect(timeGroup('nope', now)).toBe('older')
+  })
+
+  it('swipe: a short move springs back, past reveal it opens the tray, past the commit line it runs the primary', () => {
+    const w = 440
+    expect(settleSwipe(-20, w)).toEqual({ open: null, commit: null })
+    expect(settleSwipe(-(SWIPE_REVEAL_PX + 1), w)).toEqual({ open: 'end', commit: null })
+    expect(settleSwipe(SWIPE_REVEAL_PX + 1, w)).toEqual({ open: 'start', commit: null })
+    expect(settleSwipe(-w * SWIPE_COMMIT, w)).toEqual({ open: null, commit: 'end' })
+    expect(settleSwipe(w * SWIPE_COMMIT, w)).toEqual({ open: null, commit: 'start' })
+    expect(settleSwipe(-200, w, { canEnd: false })).toEqual({ open: null, commit: null })
+    // rubber band: free up to the tray, then damped and bounded
+    expect(dampSwipe(-100, w)).toBe(-100)
+    expect(Math.abs(dampSwipe(-1000, w))).toBeLessThanOrEqual(w * 0.7)
+    expect(Math.abs(dampSwipe(-(SWIPE_TRAY_PX + 100), w))).toBeLessThan(SWIPE_TRAY_PX + 100)
+  })
+
+  it('undo is the inverse state action (no deletes)', () => {
+    expect(inverseAction('resolve')).toBe('reopen')
+    expect(inverseAction('reopen')).toBe('resolve')
+    expect(inverseAction('read')).toBe('unread')
+    expect(inverseAction('unread')).toBe('read')
   })
 })

@@ -11,7 +11,8 @@
 import { useSyncExternalStore } from 'react'
 import { callBackend } from '../../../lib/api/backendClient'
 import { sound, type OperationalCue } from '../../../shared/sound'
-import { applyLocal, countLocal, mergeStories, parseCache, serializeCache, type LocalMarks, type StoriesResponse, type Story, type StoryCounts } from './story-model'
+import { lcToast } from '../../../shared/lc/toast-bus'
+import { applyLocal, countLocal, inverseAction, mergeStories, parseCache, serializeCache, type LocalMarks, type StoriesResponse, type Story, type StoryCounts } from './story-model'
 
 const PATH = '/api/cockpit/notifications/stories'
 const CLOSED_MS = 60_000
@@ -223,17 +224,37 @@ function optimistic(ids: string[], action: Action) {
     if (action === 'read') map.set(id, { ...s, read: true, read_at: now })
     if (action === 'unread') map.set(id, { ...s, read: false, read_at: null })
     if (action === 'resolve') map.set(id, applyLocal({ ...s, persistence: 'none' }, { [id]: { read_at: now, resolved_at: now } }))
+    // reopen: the server re-derives lens / priority; until it answers the story simply stops being "yours resolved"
+    if (action === 'reopen' && s.resolved_by === 'operator') map.set(id, { ...s, resolved: false, resolved_by: null, resolved_at: null, state: { code: 'open', label: null, tone: null } })
   }
   set({ stories: map })
 }
 
-export async function markStories(ids: string[], action: Action) {
+/** the state endpoint takes at most this many ids per call (it is bounded server-side) */
+const STATE_BATCH = 200
+
+async function postState(list: string[], action: Action): Promise<StateResponse | undefined> {
+  const out: StateResponse = { ok: true, stories: [], persisted: {} }
+  let any = false
+  for (let i = 0; i < list.length; i += STATE_BATCH) {
+    const part = list.slice(i, i + STATE_BATCH)
+    const res = await callBackend<StateResponse>(`${PATH}/state`, { method: 'POST', body: JSON.stringify({ story_ids: part, action }), headers: { 'Content-Type': 'application/json' } })
+    const data = res.ok ? (res.data as StateResponse | undefined) : undefined
+    if (!data?.ok) { out.ok = false; continue }
+    any = true
+    out.stories.push(...(data.stories || []))
+    Object.assign(out.persisted, data.persisted || {})
+  }
+  return any ? out : undefined
+}
+
+/** ok = every id was saved by the server (or kept locally where the server cannot keep it) */
+export async function markStories(ids: string[], action: Action): Promise<{ ok: boolean; ids: string[] }> {
   const list = ids.filter((id) => state.stories.has(id))
-  if (!list.length) return
+  if (!list.length) return { ok: true, ids: [] }
   optimistic(list, action)
-  const res = await callBackend<StateResponse>(`${PATH}/state`, { method: 'POST', body: JSON.stringify({ story_ids: list, action }), headers: { 'Content-Type': 'application/json' } })
+  const data = await postState(list, action)
   const now = new Date().toISOString()
-  const data = res.ok ? (res.data as StateResponse | undefined) : undefined
   const map = new Map(state.stories)
   for (const id of list) {
     const persisted = data?.persisted?.[id] ?? 'none'
@@ -251,6 +272,32 @@ export async function markStories(ids: string[], action: Action) {
   }
   writeMarks()
   set({ stories: map })
+  return { ok: Boolean(data?.ok), ids: list }
+}
+
+const VERB: Record<Action, string> = { read: 'Marked read', unread: 'Marked unread', resolve: 'Resolved', reopen: 'Reopened' }
+
+/**
+ * Act on stories and offer Undo (a toast). No hard deletes anywhere: "clear" is resolve, and Undo is
+ * the inverse state action (resolve ↔ reopen, read ↔ unread) through the same endpoint.
+ * Only the ids the action actually changes are sent (read skips read ones, resolve skips resolved).
+ */
+export async function actOnStories(ids: string[], action: Action, { undo = true, noun = 'story' }: { undo?: boolean; noun?: string } = {}) {
+  const need = ids.filter((id) => {
+    const s = state.stories.get(id)
+    if (!s) return false
+    if (action === 'read') return !s.read
+    if (action === 'unread') return s.read && !s.resolved
+    if (action === 'resolve') return !s.resolved
+    return s.resolved && s.resolved_by === 'operator'
+  })
+  if (!need.length) return { ok: true, ids: [] as string[] }
+  const r = await markStories(need, action)
+  const n = r.ids.length
+  const what = `${VERB[action]} ${n} ${n === 1 ? noun : `${noun === 'story' ? 'stories' : `${noun}s`}`}`
+  if (!r.ok) lcToast({ title: `${what} — not saved on the server`, detail: 'It will look right here; it may not on other devices.', severity: 'warning', source: 'notifications', silent: true })
+  else if (undo) lcToast({ title: what, severity: 'info', source: 'notifications', silent: true, action: { label: 'Undo', onClick: () => { void markStories(r.ids, inverseAction(action)) } } })
+  return r
 }
 
 /* ── hooks ─────────────────────────────────────────────────────────────── */
@@ -261,4 +308,4 @@ export const useStoryStore = () => useSyncExternalStore(subscribe, get, get)
 const badge = () => state.counts?.badge ?? 0
 export const useStoryBadge = () => useSyncExternalStore(subscribe, badge, badge)
 
-export const __storyStore = { get, hydrate: () => { state = hydrate(); emit() }, reset: () => { state = { ...EMPTY }; marks = {}; emit() } }
+export const __storyStore = { get, hydrate: () => { state = hydrate(); emit() }, seed: (list: Story[]) => { state = { ...EMPTY, status: 'ready', stories: new Map(list.map((x) => [x.id, x])) }; emit() }, reset: () => { state = { ...EMPTY }; marks = {}; emit() } }

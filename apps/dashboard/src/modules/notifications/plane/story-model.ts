@@ -15,6 +15,8 @@
  *                  sound when the rail has not already voiced the moment).
  *   Machine Feed   the broad, complete history of every event. Never interrupts.
  */
+import { getApp, type AppId } from '../../../domain/app-registry/app-registry'
+import type { IconName } from '../../../shared/icons'
 import { campaignObject, closingObject, dealObject, propertyObject, sellerObject, workflowObject, type ObjectRef } from '../../desktop/objects'
 
 export type StoryLens = 'needs_you' | 'now' | 'resolved' | 'system'
@@ -269,4 +271,92 @@ export const DEGRADED_LABEL: Record<string, string> = {
 export function degradedText(list: string[]): string | null {
   const names = [...new Set(list.map((d) => d.split(':')[0]).map((d) => DEGRADED_LABEL[d] || (d.startsWith('notification_events') ? 'alerts' : d.startsWith('platform_events') ? 'the event stream' : d)))]
   return names.length ? `Could not read ${names.join(', ')} just now — stories may be missing their latest step.` : null
+}
+
+/* ── source identity: which app a story is about (glyph + tint match the Command Rail) ── */
+
+export type StoryApp = 'inbox' | 'campaign' | 'pipeline' | 'queue' | 'workflow' | 'closing' | 'calendar' | 'signal' | 'email' | 'system'
+export interface StorySource { app: StoryApp; label: string; appId: AppId | null; icon: IconName }
+
+const APP_OF: Record<StoryApp, { appId: AppId | null; label: string; fallback: IconName }> = {
+  inbox: { appId: 'inbox', label: 'Inbox', fallback: 'inbox' },
+  campaign: { appId: 'campaign-command', label: 'Campaign Command', fallback: 'bolt' },
+  pipeline: { appId: 'pipeline', label: 'Pipeline', fallback: 'target' },
+  queue: { appId: 'queue', label: 'Queue', fallback: 'send' },
+  workflow: { appId: 'workflow-studio', label: 'Workflow Studio', fallback: 'layers' },
+  closing: { appId: 'closing-desk', label: 'Closing Desk', fallback: 'file-text' },
+  calendar: { appId: 'calendar', label: 'Calendar', fallback: 'calendar' },
+  signal: { appId: null, label: 'Signal Center', fallback: 'radar' },
+  email: { appId: 'email-command', label: 'Email Command', fallback: 'mail' },
+  system: { appId: null, label: 'System health', fallback: 'cpu' },
+}
+const PIPELINE_TYPES = /^(stage\.|deal\.|offer\.)/
+
+/** Pure: the app a story is about. Uses the app registry's own icon, so the plane matches the Rail. */
+export function storySource(s: Pick<Story, 'subject' | 'primary_event' | 'kind' | 'signal'>): StorySource {
+  const t = s.subject?.type
+  const first = s.primary_event?.type || ''
+  let app: StoryApp
+  if (t === 'seller') app = first === 'inbox_follow_up_due' ? 'calendar' : PIPELINE_TYPES.test(first) ? 'pipeline' : 'inbox'
+  else if (t === 'inbox') app = 'inbox'
+  else if (t === 'campaign') app = 'campaign'
+  else if (t === 'workflow') app = 'workflow'
+  else if (t === 'closing') app = 'closing'
+  else if (t === 'deal' || t === 'property') app = 'pipeline'
+  else if (t === 'system') app = s.subject.id === 'senders' || s.subject.id === 'queue' ? 'queue' : s.subject.id === 'email' ? 'email' : s.signal ? 'signal' : 'system'
+  else app = s.signal ? 'signal' : 'system'
+  const m = APP_OF[app]
+  const icon = (m.appId && getApp(m.appId)?.icon) || m.fallback
+  return { app, label: m.label, appId: m.appId, icon: icon as IconName }
+}
+
+/* ── time groups (the plane's sections) ─────────────────────────────────── */
+
+export type TimeGroup = 'hour' | 'today' | 'yesterday' | 'week' | 'older'
+export const TIME_GROUP_LABEL: Record<TimeGroup, string> = { hour: 'Last hour', today: 'Earlier today', yesterday: 'Yesterday', week: 'This week', older: 'Older' }
+
+/** Pure: which section a story's latest activity falls in (local calendar days). */
+export function timeGroup(iso: string, now = Date.now()): TimeGroup {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return 'older'
+  if (now - t < 3600e3) return 'hour'
+  const day = (x: number) => { const d = new Date(x); d.setHours(0, 0, 0, 0); return d.getTime() }
+  const d0 = day(now)
+  if (t >= d0) return 'today'
+  if (t >= d0 - 864e5) return 'yesterday'
+  if (t >= d0 - 6 * 864e5) return 'week'
+  return 'older'
+}
+
+/* ── swipe: reveal a tray, commit past a threshold, else spring back ─────── */
+
+/** px the row must travel to stay open on its tray; fraction of the row width that commits the primary */
+export const SWIPE_REVEAL_PX = 56
+export const SWIPE_TRAY_PX = 168
+export const SWIPE_COMMIT = 0.45
+export type SwipeSide = 'start' | 'end' // start: dragged right (left tray: Open) · end: dragged left (right tray: Read / Resolve)
+export interface SwipeSettle { open: SwipeSide | null; commit: SwipeSide | null }
+
+/** Pure: where a released swipe settles. */
+export function settleSwipe(dx: number, width: number, { canStart = true, canEnd = true } = {}): SwipeSettle {
+  const side: SwipeSide | null = dx > 0 ? 'start' : dx < 0 ? 'end' : null
+  if (!side || (side === 'start' && !canStart) || (side === 'end' && !canEnd)) return { open: null, commit: null }
+  const d = Math.abs(dx)
+  if (width > 0 && d >= width * SWIPE_COMMIT) return { open: null, commit: side }
+  if (d >= SWIPE_REVEAL_PX) return { open: side, commit: null }
+  return { open: null, commit: null }
+}
+
+/** Pure: rubber-band past the tray so the row never feels rigid (and never runs away). */
+export function dampSwipe(dx: number, width: number): number {
+  const lim = Math.max(SWIPE_TRAY_PX, width * 0.7)
+  const a = Math.abs(dx)
+  if (a <= SWIPE_TRAY_PX) return dx
+  const over = a - SWIPE_TRAY_PX
+  return Math.sign(dx) * Math.min(lim, SWIPE_TRAY_PX + over * 0.55)
+}
+
+/** Pure: the inverse of a story-state action (the toast's Undo). */
+export function inverseAction(a: 'read' | 'unread' | 'resolve' | 'reopen'): 'read' | 'unread' | 'resolve' | 'reopen' {
+  return a === 'read' ? 'unread' : a === 'unread' ? 'read' : a === 'resolve' ? 'reopen' : 'resolve'
 }
