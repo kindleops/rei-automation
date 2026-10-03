@@ -8,8 +8,6 @@ import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import type { Plugin, ProxyOptions } from 'vite'
 import { createClient } from '@supabase/supabase-js'
-import { fetchCensusZcta, fetchCensusCounty } from './src/lib/census/censusClient'
-import { transformCensusRow } from './src/lib/census/censusTransform'
 
 const requireFromDashboard = createRequire(import.meta.url)
 const tslibShim = fileURLToPath(new URL('./src/lib/tslib-shim.ts', import.meta.url))
@@ -264,138 +262,10 @@ const jsonRes = (res: import('node:http').ServerResponse, status: number, body: 
   res.end(JSON.stringify(body))
 }
 
-const censusSyncPlugin = (env: Record<string, string>): Plugin => ({
-  name: 'nexus-census-sync-api',
-  configureServer(server) {
-    server.middlewares.use('/api/internal/census/sync', async (req, res) => {
-      if (req.method !== 'POST') { jsonRes(res, 405, { error: 'Method not allowed' }); return }
-
-      const apiKey = env['CENSUS_API_KEY']
-      if (!apiKey) {
-        jsonRes(res, 500, { error: 'CENSUS_API_KEY not configured in .env.local — do not hardcode this key' })
-        return
-      }
-
-      const supabaseUrl = env['VITE_SUPABASE_URL']
-      const supabaseKey = env['VITE_SUPABASE_SERVICE_ROLE_KEY'] || env['VITE_SUPABASE_ANON_KEY']
-      if (!supabaseUrl || !supabaseKey) {
-        jsonRes(res, 500, { error: 'Supabase env vars missing' })
-        return
-      }
-      const supabase = createClient(supabaseUrl, supabaseKey)
-
-      let body: unknown
-      try { body = JSON.parse(await readBody(req) || '{}') } catch { jsonRes(res, 400, { error: 'Invalid JSON' }); return }
-
-      const b = body as Record<string, unknown>
-      const geoLevel = b['geo_level'] as string
-      if (geoLevel !== 'zcta' && geoLevel !== 'county') {
-        jsonRes(res, 400, { error: 'geo_level must be zcta or county' }); return
-      }
-      const sourceYear = typeof b['source_year'] === 'number' ? b['source_year'] : 2024
-
-      // Create run record
-      const runId = `run_${Date.now()}`
-      await supabase.from('census_sync_runs').insert({
-        run_id: runId,
-        geo_level: geoLevel,
-        source_year: sourceYear,
-        status: 'running',
-        started_at: new Date().toISOString(),
-      }).maybeSingle()
-
-      const errors: string[] = []
-      let insertedOrUpdated = 0
-      const examples: Array<{ geoid: string; acquisition_pressure_score: number }> = []
-
-      try {
-        if (geoLevel === 'zcta') {
-          const zctas: string[] = Array.isArray(b['zctas']) ? (b['zctas'] as string[]) : []
-          if (zctas.length === 0) { jsonRes(res, 400, { error: 'zctas array required' }); return }
-
-          for (const zcta of zctas) {
-            try {
-              const rawRow = await fetchCensusZcta(zcta, sourceYear, apiKey)
-              if (!rawRow) { errors.push(`ZCTA ${zcta}: no data returned`); continue }
-              const metricsRow = transformCensusRow(rawRow)
-              const { error: upsertError } = await supabase
-                .from('census_geo_metrics')
-                .upsert(metricsRow, { onConflict: 'geo_level,geoid,source_year' })
-              if (upsertError) { errors.push(`ZCTA ${zcta} upsert: ${upsertError.message}`); continue }
-              insertedOrUpdated++
-              if (examples.length < 3) examples.push({ geoid: metricsRow.geoid, acquisition_pressure_score: metricsRow.acquisition_pressure_score })
-            } catch (err) {
-              errors.push(`ZCTA ${zcta}: ${err instanceof Error ? err.message : String(err)}`)
-            }
-          }
-
-          const status = errors.length === 0 ? 'completed' : insertedOrUpdated > 0 ? 'partial' : 'failed'
-          await supabase.from('census_sync_runs').update({
-            status,
-            completed_at: new Date().toISOString(),
-            inserted_or_updated_count: insertedOrUpdated,
-            error_count: errors.length,
-          }).eq('run_id', runId)
-
-          jsonRes(res, 200, {
-            run_id: runId,
-            requested_count: zctas.length,
-            inserted_or_updated_count: insertedOrUpdated,
-            error_count: errors.length,
-            examples,
-            errors: errors.slice(0, 10),
-            status,
-          })
-        } else {
-          // county
-          const stateFips = String(b['state_fips'] ?? '')
-          const countyFips = String(b['county_fips'] ?? '')
-          if (!stateFips || !countyFips) { jsonRes(res, 400, { error: 'state_fips and county_fips required for county sync' }); return }
-
-          try {
-            const rawRow = await fetchCensusCounty(stateFips, countyFips, sourceYear, apiKey)
-            if (rawRow) {
-              const metricsRow = transformCensusRow(rawRow)
-              const { error: upsertError } = await supabase
-                .from('census_geo_metrics')
-                .upsert(metricsRow, { onConflict: 'geo_level,geoid,source_year' })
-              if (upsertError) errors.push(`County upsert: ${upsertError.message}`)
-              else {
-                insertedOrUpdated = 1
-                examples.push({ geoid: metricsRow.geoid, acquisition_pressure_score: metricsRow.acquisition_pressure_score })
-              }
-            } else {
-              errors.push(`County ${stateFips}/${countyFips}: no data returned`)
-            }
-          } catch (err) {
-            errors.push(err instanceof Error ? err.message : String(err))
-          }
-
-          const status = errors.length === 0 ? 'completed' : 'failed'
-          await supabase.from('census_sync_runs').update({
-            status,
-            completed_at: new Date().toISOString(),
-            inserted_or_updated_count: insertedOrUpdated,
-            error_count: errors.length,
-          }).eq('run_id', runId)
-
-          jsonRes(res, 200, {
-            run_id: runId,
-            requested_count: 1,
-            inserted_or_updated_count: insertedOrUpdated,
-            error_count: errors.length,
-            examples,
-            errors: errors.slice(0, 10),
-            status,
-          })
-        }
-      } catch (err) {
-        await supabase.from('census_sync_runs').update({ status: 'failed', completed_at: new Date().toISOString() }).eq('run_id', runId)
-        jsonRes(res, 500, { error: err instanceof Error ? err.message : 'Census sync failed' })
-      }
-    })
-  },
-})
+// [8.4] The dev-only census sync middleware (POST /api/internal/census/sync →
+// census_geo_metrics) is retired: it never ran in production and the table never
+// held a row. Census reads go through GET /api/cockpit/map/census
+// (exchange_market_fundamentals_cells, ACS 5-year).
 
 // ─── Buyer Activity Rollup Plugin ─────────────────────────────────────────────
 
@@ -769,7 +639,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_DASHBOARD_GIT_BRANCH': JSON.stringify(devIdentity.branch),
       'import.meta.env.VITE_DASHBOARD_WORKTREE_ID': JSON.stringify(devIdentity.worktreeId),
     },
-    plugins: [react(), swRecoveryBootPlugin(), pwaManifestPlugin(cacheVersion), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
+    plugins: [react(), swRecoveryBootPlugin(), pwaManifestPlugin(cacheVersion), translateApiPlugin(), underwriteApiPlugin(env), buyerActivityPlugin(env)],
     build: {
       // The single-bundle build shipped 4.3 MB of JS and 2.5 MB of CSS as exactly two
       // files, which is what made cold loads on a phone look like a crashed blank page.
