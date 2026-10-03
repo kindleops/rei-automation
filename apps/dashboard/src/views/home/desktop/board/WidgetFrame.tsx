@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, typ
 import { Icon } from '../../../../shared/icons'
 import { LCButton, LCIconButton, LCPopover, LCSegmented, LCSelect, LCSwitch } from '../../../../shared/lc'
 import { useHomeSource } from './home-sources'
-import { performanceSource, SOURCES } from './board-data'
+import { homeMetricsSource, SOURCES } from './board-data'
 import type { WidgetInstance } from './home-layout-model'
 import { cx, openPath, WidgetRuntimeContext } from './widget-runtime'
 import { resolveConfig, SIZE_LABEL, type ContextMode, type HomeWidgetDef, type PinnedSubject, type WidgetConfig, type WidgetSize } from './widget-registry'
@@ -102,10 +102,10 @@ function SubjectPicker({ subject, onPick }: { subject: PinnedSubject | null; onP
 }
 
 function MarketOptions({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const src = performanceSource('30d')
+  const src = homeMetricsSource('30d', null, true)
   const { load } = useHomeSource(src.key, src.load, { everyMs: src.everyMs, active: true })
-  const markets = load.status === 'ready' ? [...load.data.markets].sort((a, b) => a.name.localeCompare(b.name)) : []
-  const options = [{ value: '', label: 'All markets' }, ...markets.map((m) => ({ value: m.id, label: m.name, hint: m.state }))]
+  const markets = load.status === 'ready' ? [...(load.data.markets ?? [])].sort((a, b) => a.name.localeCompare(b.name)) : []
+  const options = [{ value: '', label: 'All markets' }, ...markets.map((m) => ({ value: m.id, label: m.name, hint: m.state ?? undefined }))]
   return <LCSelect label="Market" value={value} options={options} onChange={onChange} disabled={load.status !== 'ready'} placeholder={load.status === 'loading' ? 'Loading markets…' : 'All markets'} />
 }
 

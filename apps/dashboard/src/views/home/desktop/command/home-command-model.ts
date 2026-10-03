@@ -9,7 +9,8 @@
  * Sources (all existing, all read-only):
  *   useHomeSignals                inbox · queue · today's messaging · campaigns
  *                                 · pipeline counts · closings · markets
- *   /api/cockpit/analytics/performance   series, rates, funnel, automation
+ *   /api/cockpit/home/metrics            period totals, rates, deltas, series,
+ *                                 active markets (Analytics' exact rules, no bundle)
  *   /api/cockpit/home/map-activity       one map lens for one period, by ZIP
  *                                 (replies, deliveries, failures, stage moves,
  *                                 offers, buyer purchases)
@@ -417,6 +418,38 @@ export async function fetchMapActivity(params: { lens: MapActivityLens; range: M
   return data
 }
 
+/**
+ * Home's period figures — /api/cockpit/home/metrics. Same contracts, totals,
+ * rates, comparisons and series as the Analytics bundle (the server reuses its
+ * rules), without the bundle's statement that times out in production.
+ */
+export type HomeMetricsRange = 'today' | '7d' | '30d' | '90d'
+export interface HomeMetrics {
+  generatedAt: string
+  period: AnalyticsPerformance['period']
+  scope: AnalyticsPerformance['scope']
+  metrics: AnalyticsPerformance['metrics']
+  totals: AnalyticsPerformance['totals']
+  rates: AnalyticsPerformance['rates']
+  priorHasData: boolean
+  compare: AnalyticsPerformance['compare']
+  series: AnalyticsPerformance['series']
+  /** Only when requested: canonical markets with messaging in the period. */
+  markets: Array<{ id: string; name: string; state: string | null; cur: { delivered: number; delivered_conversations: number; failed: number } }> | null
+}
+
+export async function fetchHomeMetrics(params: { range: HomeMetricsRange; market?: string | null; markets?: boolean }, signal?: AbortSignal): Promise<HomeMetrics> {
+  const qs = new URLSearchParams({ range: params.range })
+  if (params.range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); qs.set('start', d.toISOString()) }
+  if (params.market) qs.set('market', params.market)
+  if (params.markets) qs.set('markets', '1')
+  const res = await callBackend<{ ok?: boolean; data?: HomeMetrics; message?: string }>(`/api/cockpit/home/metrics?${qs.toString()}`, { signal, timeoutMs: 25_000 })
+  if (!res.ok) throw new Error(res.error || 'home_metrics_unavailable')
+  const data = res.data?.data
+  if (!data || !data.totals || !Array.isArray(data.series)) throw new Error(res.data?.message || 'home_metrics_unavailable')
+  return data
+}
+
 export function layerPoints(layer: MapLayerId, src: { activity: MapActivity | null; deals: Array<{ lat: number; lng: number }> | null }): HeatPoint[] | null {
   if (layer === 'deals') return src.deals ? src.deals.filter((p) => placed(p.lat, p.lng)).map((p) => ({ lat: p.lat, lng: p.lng, w: 1 })) : null
   const a = src.activity
@@ -620,8 +653,8 @@ export function systemPulses(src: {
 }
 
 /** "LeadCommand is running across 5 markets" — markets with real sends in the period. */
-export function activeMarketCount(performance: AnalyticsPerformance | null): number | null {
-  if (!performance) return null
-  const n = (performance.markets ?? []).filter((m) => (Number(m.cur?.delivered) || 0) + (Number(m.cur?.sent) || 0) > 0).length
+export function activeMarketCount(src: { markets: Array<{ cur?: Record<string, number> }> | null } | null): number | null {
+  if (!src) return null
+  const n = (src.markets ?? []).filter((m) => (Number(m.cur?.delivered) || 0) + (Number(m.cur?.sent) || 0) > 0).length
   return n || null
 }

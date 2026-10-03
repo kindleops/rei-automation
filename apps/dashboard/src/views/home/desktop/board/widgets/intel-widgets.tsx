@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { LCSparkline } from '../../../../../shared/lc'
 import { writeMapFocusSet } from '../../../../../domain/map/map-focus-set'
-import type { AnalyticsPerformance, RangeKey } from '../../../../../domain/analytics/analytics-performance-api'
+import type { RangeKey } from '../../../../../domain/analytics/analytics-performance-api'
 import {
   HOME_MAP_VIEWBOX,
   MAP_LAYERS,
@@ -14,9 +14,11 @@ import {
   projectAlbersUsa,
   stateName,
   type HeatPoint,
+  type HomeMetrics,
+  type HomeMetricsRange,
   type MapLayerId,
 } from '../../command/home-command-model'
-import { mapActivitySource, performanceSource, SOURCES } from '../board-data'
+import { homeMetricsSource, mapActivitySource, SOURCES } from '../board-data'
 import { ANALYTICS_METRICS, METRIC_CONTRACT, type MetricKey } from './analytics-metrics'
 import { cx, fmt, openPath, pct, useWidgetSource } from '../widget-runtime'
 import { WFigure, WState } from '../widget-ui'
@@ -216,7 +218,7 @@ export function MapWidget({ size, config, setConfig }: WidgetRenderProps<{ lens:
 /* ── Analytics ──────────────────────────────────────────────────────── */
 
 
-function reading(perf: AnalyticsPerformance, metric: MetricKey): { value: string; delta: string | null; tone: 'ok' | 'crit' | null; series: number[] | null; basis: string } {
+function reading(perf: HomeMetrics, metric: MetricKey): { value: string; delta: string | null; tone: 'ok' | 'crit' | null; series: number[] | null; basis: string } {
   const spec = ANALYTICS_METRICS.find((m) => m.value === metric)!
   const { contract: key, series: seriesKey } = METRIC_CONTRACT[metric]
   if (spec.kind === 'rate') {
@@ -253,9 +255,9 @@ function Bars({ values, label }: { values: number[]; label: string }) {
 
 export function AnalyticsWidget({ size, config }: WidgetRenderProps<{ metric: string; period: string; market: string | null; display: string }>) {
   const metric = (ANALYTICS_METRICS.some((m) => m.value === config.metric) ? config.metric : 'replied') as MetricKey
-  const period = (['today', '7d', '30d', '90d'].includes(config.period) ? config.period : '7d') as RangeKey
+  const period = (['today', '7d', '30d', '90d'].includes(config.period) ? config.period : '7d') as HomeMetricsRange
   const market = config.market || null
-  const { load, reload } = useWidgetSource(performanceSource(period, market))
+  const { load, reload } = useWidgetSource(homeMetricsSource(period, market))
   const spec = ANALYTICS_METRICS.find((m) => m.value === metric)!
   return (
     <WState load={load} what="analytics" onRetry={reload} shape={size === 'compact' ? 'metric' : 'chart'}>

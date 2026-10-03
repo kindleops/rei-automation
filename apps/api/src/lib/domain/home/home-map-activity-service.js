@@ -21,44 +21,16 @@
  * instead of drawing zero.
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
-import { INTERNAL_TEST_PHONE_SET } from '@/lib/config/internal-phones.js'
 import { resolvePeriod } from '@/lib/domain/analytics/analytics-performance-service.js'
+import {
+  arr, attributeReplies, byIds, canaryPhoneSet, clean, isCountedTransition, isDelivered, isExcludedRow, isFailed,
+  marketTable, num, pagedRange, propertyIndex, zip5,
+} from './home-read-kit.js'
+
+export { canaryPhoneSet, isExcludedRow, isDelivered, isFailed, isCountedTransition }
 
 export const MAP_LENSES = Object.freeze(['replies', 'delivered', 'failed', 'moves', 'offers', 'buyers'])
-const PAGE = 1000
-const MAX_ROWS = 20_000
-const ID_BATCH = 150
 const PLACE_LIMIT = 400
-
-const clean = (v) => String(v ?? '').trim()
-const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
-const arr = (v) => (Array.isArray(v) ? v : [])
-const truthy = (v) => ['true', '1', 'yes'].includes(clean(v).toLowerCase())
-const zip5 = (v) => { const z = clean(v).slice(0, 5); return z || null }
-
-export function canaryPhoneSet() {
-  const out = new Set()
-  for (const p of INTERNAL_TEST_PHONE_SET) {
-    const d = String(p).replace(/\D/g, '')
-    out.add(String(p)); out.add(d); out.add(`+${d}`); if (d.length === 11) out.add(d.slice(1))
-  }
-  return out
-}
-
-/** The war-room / analytics canary rule, for one send or inbound row. */
-export function isExcludedRow(row, phones) {
-  if (!row) return true
-  if (phones.has(clean(row.thread_key)) || phones.has(clean(row.from_phone_number)) || phones.has(clean(row.to_phone_number))) return true
-  if (clean(row.source) === 'internal_canary') return true
-  if (truthy(row.md_canary) || truthy(row.md_kpi)) return true
-  return false
-}
-
-export const isDelivered = (s) => Boolean(s.delivered_at) || s.queue_status === 'delivered' || ['true', 'delivered', 'yes'].includes(clean(s.delivery_confirmed).toLowerCase())
-export const isFailed = (s) => ['failed', 'failed_transport', 'undelivered'].includes(s.queue_status)
-const TEST_ACTOR = /(cert|probe|fixture|qa_|test)/i
-const TEST_REASON = /(certification|probe|fixture|restore test|regression)/i
-export const isCountedTransition = (h) => !TEST_ACTOR.test(clean(h.actor)) && !TEST_REASON.test(clean(h.reason))
 
 const placed = (lat, lng) => lat !== null && lng !== null && lat !== 0 && lng !== 0
 
@@ -104,34 +76,6 @@ export function aggregatePlaces(items, { distinct = false, limit = PLACE_LIMIT }
 
 /* ── reads ──────────────────────────────────────────────────────────── */
 
-function unwrap(res, what) {
-  if (res?.error) { const e = new Error(`${what}: ${res.error.message || 'read failed'}`); e.code = res.error.code; throw e }
-  return arr(res?.data)
-}
-
-async function pagedRange(build, what) {
-  const out = []
-  for (let from = 0; from < MAX_ROWS; from += PAGE) {
-    const rows = unwrap(await build().range(from, from + PAGE - 1), what)
-    out.push(...rows)
-    if (rows.length < PAGE) return out
-  }
-  const e = new Error(`${what}: more than ${MAX_ROWS} rows in the period`); e.code = 'too_many_rows'; throw e
-}
-
-async function byIds(client, table, idCol, columns, ids, extra = (q) => q) {
-  const uniq = [...new Set(ids.map(clean).filter(Boolean))]
-  const batches = []
-  for (let i = 0; i < uniq.length; i += ID_BATCH) batches.push(uniq.slice(i, i + ID_BATCH))
-  const results = await Promise.all(batches.map(async (b) => unwrap(await extra(client.from(table).select(columns).in(idCol, b)), table)))
-  return results.flat()
-}
-
-async function propertyIndex(client, ids) {
-  const rows = await byIds(client, 'properties', 'property_id', 'property_id,property_address_zip,latitude,longitude,canonical_market_id', ids)
-  return new Map(rows.map((p) => [clean(p.property_id), { zip: zip5(p.property_address_zip), lat: num(p.latitude), lng: num(p.longitude), mkt: clean(p.canonical_market_id) || null }]))
-}
-
 const SEND_COLUMNS = 'id,thread_key,queue_status,delivered_at,delivery_confirmed,property_id,source,from_phone_number,to_phone_number,md_canary:metadata->>internal_canary,md_kpi:metadata->>exclude_from_kpis'
 
 // Server-side narrowing (a superset of the JS predicate, which stays the authority).
@@ -141,7 +85,7 @@ export const SEND_NARROW = {
 }
 
 async function sendItems(client, period, phones, keep, narrow) {
-  const rows = await pagedRange(() => narrow(client.from('send_queue').select(SEND_COLUMNS).gte('created_at', period.start).lt('created_at', period.end)).order('id', { ascending: true }), 'send_queue')
+  const rows = await pagedRange((first) => narrow(client.from('send_queue').select(SEND_COLUMNS, first ? { count: 'exact' } : undefined).gte('created_at', period.start).lt('created_at', period.end)), 'send_queue')
   const counted = rows.filter((s) => !isExcludedRow(s, phones) && keep(s))
   const props = await propertyIndex(client, counted.map((s) => s.property_id))
   return counted.map((s) => { const p = props.get(clean(s.property_id)) ?? {}; return { k: s.id, zip: p.zip ?? null, mkt: p.mkt ?? null, lat: p.lat ?? null, lng: p.lng ?? null } })
@@ -150,30 +94,14 @@ async function sendItems(client, period, phones, keep, narrow) {
 const INBOUND_COLUMNS = 'id,thread_key,created_at,property_id,from_phone_number,to_phone_number,md_canary:metadata->>internal_canary'
 
 async function replyItems(client, period, phones) {
-  const rows = await pagedRange(() => client.from('message_events').select(INBOUND_COLUMNS).eq('direction', 'inbound').gte('created_at', period.start).lt('created_at', period.end).order('id', { ascending: true }), 'message_events')
-  const inbound = rows.filter((m) => !isExcludedRow(m, phones))
-  // Attribution: the latest send on the thread at or before the reply.
-  const threads = [...new Set(inbound.map((m) => clean(m.thread_key)).filter(Boolean))]
-  const [sends, msgProps] = await Promise.all([
-    threads.length ? byIds(client, 'send_queue', 'thread_key', 'thread_key,property_id,created_at', threads, (q) => q.lt('created_at', period.end)) : [],
-    propertyIndex(client, inbound.map((m) => m.property_id)),
-  ])
-  const sendsByThread = new Map()
-  for (const s of sends) { const k = clean(s.thread_key); if (!sendsByThread.has(k)) sendsByThread.set(k, []); sendsByThread.get(k).push(s) }
-  for (const list of sendsByThread.values()) list.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
-  const attOf = (m) => (sendsByThread.get(clean(m.thread_key)) ?? []).find((s) => Date.parse(s.created_at) <= Date.parse(m.created_at)) ?? null
-  const withAtt = inbound.map((m) => ({ m, att: attOf(m) }))
-  const attProps = await propertyIndex(client, withAtt.map(({ att }) => att?.property_id).filter((id) => id && !msgProps.has(clean(id))))
-  const props = new Map([...msgProps, ...attProps])
-  return withAtt.map(({ m, att }) => {
-    const pm = props.get(clean(m.property_id)) ?? {}
-    const pa = props.get(clean(att?.property_id)) ?? {}
-    return { k: clean(m.thread_key) || `msg:${m.id}`, zip: pm.zip ?? pa.zip ?? null, mkt: pm.mkt ?? pa.mkt ?? null, lat: pm.lat ?? pa.lat ?? null, lng: pm.lng ?? pa.lng ?? null }
-  })
+  const rows = await pagedRange((first) => client.from('message_events').select(INBOUND_COLUMNS, first ? { count: 'exact' } : undefined).eq('direction', 'inbound').gte('created_at', period.start).lt('created_at', period.end), 'message_events')
+  const placedReplies = await attributeReplies(client, rows.filter((m) => !isExcludedRow(m, phones)), period.end)
+  // count(distinct thread_key) ignores replies without a thread, as the bundle does
+  return placedReplies.filter(({ m }) => m.thread_key != null).map(({ m, zip, mkt, lat, lng }) => ({ k: String(m.thread_key), zip, mkt, lat, lng }))
 }
 
 async function moveItems(client, period) {
-  const rows = await pagedRange(() => client.from('acquisition_opportunity_history').select('id,opportunity_id,actor,reason').eq('event_type', 'stage_transition').gte('created_at', period.start).lt('created_at', period.end).order('id', { ascending: true }), 'acquisition_opportunity_history')
+  const rows = await pagedRange((first) => client.from('acquisition_opportunity_history').select('id,opportunity_id,actor,reason', first ? { count: 'exact' } : undefined).eq('event_type', 'stage_transition').gte('created_at', period.start).lt('created_at', period.end), 'acquisition_opportunity_history')
   const counted = rows.filter(isCountedTransition)
   const opps = await byIds(client, 'acquisition_opportunities', 'id', 'id,primary_property_id', counted.map((h) => h.opportunity_id))
   const propOf = new Map(opps.map((o) => [clean(o.id), clean(o.primary_property_id)]))
@@ -183,7 +111,7 @@ async function moveItems(client, period) {
 }
 
 async function offerItems(client, period) {
-  const rows = await pagedRange(() => client.from('seller_offers').select('offer_id,property_id,direction').gte('created_at', period.start).lt('created_at', period.end).order('offer_id', { ascending: true }), 'seller_offers')
+  const rows = await pagedRange((first) => client.from('seller_offers').select('offer_id,property_id,direction', first ? { count: 'exact' } : undefined).gte('created_at', period.start).lt('created_at', period.end), 'seller_offers', { orderBy: 'offer_id' })
   // "Offers made" = offers_issued: seller counters (inbound) are not our offers.
   const made = rows.filter((o) => clean(o.direction) !== 'inbound')
   const props = await propertyIndex(client, made.map((o) => o.property_id))
@@ -201,12 +129,6 @@ async function buyerResult(client, period) {
   const rows = arr(data?.rows)
   const items = rows.flatMap((r) => Array.from({ length: Math.max(0, Math.trunc(num(r.n) ?? 0)) }, () => ({ zip: zip5(r.zip), mkt: clean(r.market) || null, lat: num(r.lat), lng: num(r.lng) })))
   return { available: true, items, dataThrough: data?.data_through ?? null }
-}
-
-/** canonical_markets is a small reference table (~60 rows): read whole, alongside the lens. */
-async function marketNames(client) {
-  const rows = unwrap(await client.from('canonical_markets').select('id,display_name').limit(PAGE), 'canonical_markets')
-  return new Map(rows.map((m) => [clean(m.id), clean(m.display_name) || clean(m.id)]))
 }
 
 export const LENS_SOURCE = Object.freeze({
@@ -228,7 +150,7 @@ export async function getHomeMapActivity({ lens = 'replies', range = '7d', start
 
   let items
   let dataThrough = null
-  const namesP = marketNames(client).catch(() => new Map()) // labels only; the counts never depend on it
+  const namesP = marketTable(client).catch(() => new Map()) // labels only; the counts never depend on it
   if (lens === 'buyers') {
     const b = await buyerResult(client, period)
     if (!b.available) return { ...base, available: false, reason: b.reason, message: b.message, places: [], total: 0, unplaced: 0, truncated: false, markets: [], queryMs: Date.now() - t0 }
@@ -245,7 +167,7 @@ export async function getHomeMapActivity({ lens = 'replies', range = '7d', start
   return {
     ...base,
     available: true,
-    places: agg.places.map((p) => ({ ...p, marketName: p.market ? names.get(p.market) ?? null : null })),
+    places: agg.places.map((p) => ({ ...p, marketName: p.market ? names.get(p.market)?.name ?? null : null })),
     total: agg.total,
     unplaced: agg.unplaced,
     truncated: agg.truncated,

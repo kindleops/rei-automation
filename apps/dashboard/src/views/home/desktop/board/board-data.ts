@@ -1,4 +1,3 @@
-import { fetchAnalyticsPerformance, type AnalyticsPerformance, type RangeKey } from '../../../../domain/analytics/analytics-performance-api'
 import { fetchPipelineFeed, fetchPipelineOverview, fetchPipelinePoints, type PipelineCommandCard, type PipelineCommandOverview } from '../../../../domain/pipeline/pipeline-command-api'
 import { fetchCampaignsSurface } from '../../../campaign-command/campaigns.adapter'
 import type { CampaignSummary } from '../../../campaign-command/campaigns.types'
@@ -24,7 +23,7 @@ import {
   type HomePipeline,
   type HomeQueue,
 } from '../../home-signals'
-import { fetchMapActivity, fetchStudioActivity, type MapActivity, type MapActivityLens, type MapRange, type StudioActivity } from '../command/home-command-model'
+import { fetchHomeMetrics, fetchMapActivity, fetchStudioActivity, type HomeMetrics, type HomeMetricsRange, type MapActivity, type MapActivityLens, type MapRange, type StudioActivity } from '../command/home-command-model'
 
 /**
  * THE HOME SOURCES — every read a first-party widget makes, by key.
@@ -90,12 +89,16 @@ export const SOURCES = {
   } satisfies SourceDef<SignalCenterModel>,
 } as const
 
-/** Performance for a period (and optional market) — one request per distinct (range, market). */
-export function performanceSource(range: RangeKey, market: string | null = null): SourceDef<AnalyticsPerformance> {
+/**
+ * Period figures (and optionally the active markets) — one request per
+ * distinct (range, market, markets). Never the Analytics bundle: its single
+ * statement exceeds PostgREST's 8s timeout in production.
+ */
+export function homeMetricsSource(range: HomeMetricsRange, market: string | null = null, markets = false): SourceDef<HomeMetrics> {
   return {
-    key: `performance:${range}:${market ?? '*'}`,
-    load: (s) => fetchAnalyticsPerformance({ range, market }, s),
-    apps: [],
+    key: `home-metrics:${range}:${market ?? '*'}${markets ? ':markets' : ''}`,
+    load: (s) => fetchHomeMetrics({ range, market, markets }, s),
+    apps: ['/queue', '/inbox', '/pipeline'],
     everyMs: range === 'today' ? 120_000 : 300_000,
   }
 }

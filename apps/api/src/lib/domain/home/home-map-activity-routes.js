@@ -1,36 +1,19 @@
 /**
  * Route handlers for /api/cockpit/home/map-activity, dependency-injected so the
- * contract is testable without a network. A short in-process cache collapses
- * concurrent Home boards asking for the same lens/period into one read.
+ * contract is testable without a network. A 30s cache with single-flight
+ * collapses concurrent Home boards asking for the same lens/period into one read.
  */
 import { NextResponse } from 'next/server.js'
 import { getHomeMapActivity, MAP_LENSES } from './home-map-activity-service.js'
+import { createReadCache } from './home-read-kit.js'
 
 const SAFE = /^[\w:.+-]{1,64}$/
 const RANGES = ['today', '7d', '30d']
-const TTL_MS = 30_000
 
 export function createHomeMapActivityRoutes({ authorize, cors, read = getHomeMapActivity, now = () => Date.now() } = {}) {
-  const cache = new Map()
-
-  async function cached(params) {
-    // `today` carries the operator's local midnight; bucket the key to the minute.
-    const key = `${params.lens}|${params.range}|${params.start ? params.start.slice(0, 16) : ''}`
-    const hit = cache.get(key)
-    if (hit && (hit.pending || now() - hit.at < TTL_MS)) return hit.promise
-    const promise = read(params)
-    const entry = { promise, pending: true, at: now() }
-    cache.set(key, entry)
-    try {
-      const data = await promise
-      entry.pending = false
-      entry.at = now()
-      return data
-    } catch (error) {
-      cache.delete(key)
-      throw error
-    }
-  }
+  const cache = createReadCache({ ttlMs: 30_000, now })
+  // `today` carries the operator's local midnight; bucket the key to the minute.
+  const cached = (params) => cache(`${params.lens}|${params.range}|${params.start ? params.start.slice(0, 16) : ''}`, () => read(params))
 
   return {
     async OPTIONS(request) {

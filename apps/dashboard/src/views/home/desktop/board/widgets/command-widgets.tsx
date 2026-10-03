@@ -12,7 +12,7 @@ import { HeroWave } from '../../command/HomeCharts'
 import { evaluatorState, SEVERITY_LABEL } from '../../../../../modules/notifications/signals/signals-model'
 import { retryStories, useStoryStore } from '../../../../../modules/notifications/plane/story-store'
 import { visibleOrder, type Story } from '../../../../../modules/notifications/plane/story-model'
-import { performanceSource, SOURCES } from '../board-data'
+import { homeMetricsSource, SOURCES } from '../board-data'
 import { cx, fmt, openPath, useNow, useWidgetSource } from '../widget-runtime'
 import { WEmpty, WFigure, WState } from '../widget-ui'
 import type { WidgetRenderProps } from '../widget-registry'
@@ -106,7 +106,7 @@ export function BriefWidget({ size }: WidgetRenderProps) {
   const focus = useFocusModel()
   const messaging = useWidgetSource(SOURCES.messaging)
   const big = size === 'wide' || size === 'feature' || size === 'large'
-  const perf = useWidgetSource(big || size === 'medium' ? performanceSource('7d') : null)
+  const perf = useWidgetSource(big || size === 'medium' ? homeMetricsSource('7d', null, true) : null)
   const overview = useWidgetSource(big ? SOURCES.pipelineOverview : null)
   const still = useSyncExternalStore(subscribeSettings, readStill, () => false)
   const now = new Date(focus.now)

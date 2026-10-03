@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  activeMarketCount,
   groupActivity,
   heatField,
   homeDots,
@@ -218,5 +219,13 @@ describe('map lenses read the Map widget’s own activity source', () => {
     expect(notYetRecorded(empty)).toBe('2026-07-28')
     expect(notYetRecorded({ ...empty, dataThrough: '2026-09-30' })).toBeNull()
     expect(notYetRecorded({ ...empty, total: 2 })).toBeNull()
+  })
+})
+
+describe('active markets come from Home metrics, not the Analytics bundle', () => {
+  it('counts markets with delivered messages in the period; null source stays unknown', () => {
+    expect(activeMarketCount(null)).toBeNull()
+    expect(activeMarketCount({ markets: null })).toBeNull()
+    expect(activeMarketCount({ markets: [{ cur: { delivered: 3 } }, { cur: { delivered: 0, failed: 2 } }, { cur: { delivered: 1 } }] })).toBe(2)
   })
 })
