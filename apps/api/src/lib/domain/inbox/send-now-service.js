@@ -928,6 +928,45 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     });
   }
 
+  // ── Step 1c: OPERATOR SENDER BLOCKLIST — unconditional, fail-closed ──
+  // A manual send never leaves from a number the operator blocked
+  // (system_control.sms_blocked_sender_numbers / SMS_BLOCKED_SENDER_NUMBERS),
+  // whichever priority resolved it: the thread's own number included. This
+  // path calls the provider directly, so the runner's health guard never saw
+  // it (2026-09-30..10-01: 11 manual sends from blocked Miami •••5670).
+  // Refused BEFORE any row exists, with a 423 refusal — never ok:true.
+  if (resolved_from) {
+    const blocklist = await readManualSendBlockedSenders(deps);
+    const refusal = !blocklist.ok
+      ? "sender_blocklist_unreadable"
+      : isSenderDispatchBlocked(resolved_from, blocklist.sets)
+        ? "blocked_sender_number"
+        : null;
+    if (refusal) {
+      logger.warn("inbox_send_now.sender_refused", {
+        thread_key: clean(input.thread_key) || null,
+        from_mask: maskPhoneForLog(resolved_from),
+        reason: refusal,
+      });
+      return {
+        ok: false,
+        status: 423,
+        error: refusal,
+        reason: refusal,
+        detail_reason: refusal === "blocked_sender_number"
+          ? `Sending number ${maskPhoneForLog(resolved_from)} is blocked by the operator; nothing was sent`
+          : "The operator sender blocklist could not be read; nothing was sent",
+        blocked_sender_number: refusal === "blocked_sender_number" ? resolved_from : null,
+        queue_created: false,
+        queue_inserted: false,
+        queue_row_id: null,
+        queue_id: null,
+        queue_status: null,
+        provider_attempted: false,
+      };
+    }
+  }
+
   const request_log = {
     thread_key: clean(input.thread_key) || null,
     to_phone_number: normalizePhone(clean(input.to_phone_number)) || null,
@@ -1494,6 +1533,41 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
   };
 }
 
+/**
+ * The dispatch blocklist for a manual send, read STRICTLY: { ok:false } when it
+ * cannot be read (the caller refuses). getSystemValue swallows read errors into
+ * null, so production reads system_control directly; an injected
+ * deps.getSystemValue (tests, callers) is used as given and its throw is
+ * "unreadable". Without any database configuration (local tooling) only the
+ * env list applies, as everywhere else.
+ */
+async function readManualSendBlockedSenders(deps = {}) {
+  try {
+    if (typeof deps.getSystemValue === "function") {
+      return { ok: true, sets: await loadDispatchBlockedSets({ getSystemValue: deps.getSystemValue, env: deps.env || process.env }) };
+    }
+    if (!hasSupabaseConfig()) {
+      return { ok: true, sets: await loadDispatchBlockedSets({ getSystemValue: async () => null, env: deps.env || process.env }) };
+    }
+    const { data, error } = await defaultSupabase
+      .from("system_control")
+      .select("value")
+      .eq("key", "sms_blocked_sender_numbers")
+      .maybeSingle();
+    if (error) return { ok: false };
+    const value = data ? data.value : null;
+    return {
+      ok: true,
+      sets: await loadDispatchBlockedSets({
+        getSystemValue: async (key) => (key === "sms_blocked_sender_numbers" ? value : null),
+        env: deps.env || process.env,
+      }),
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function isManualSendHardBlockReason(reason = "") {
   return new Set([
     "compliance_blocked",
@@ -1504,6 +1578,8 @@ function isManualSendHardBlockReason(reason = "") {
     "invalid_number",
     "provider_configuration_missing",
     "outbound_sms_disabled",
+    "blocked_sender_number",
+    "sender_blocklist_unreadable",
   ]).has(clean(reason).toLowerCase());
 }
 
