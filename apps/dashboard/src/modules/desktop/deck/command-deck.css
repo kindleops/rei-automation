@@ -28,16 +28,14 @@ html.is-desktop-modern .cd {
   gap: 14px;
   padding: 0 8px 0 8px;
   border-radius: 18px;
+  /* the canonical chrome glass: follows Material, Edge, Sheen and the accent tint */
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, calc(0.045 * var(--lg-sheen, 1))) 0%, transparent 60%),
-    rgb(var(--dsk-fill) / calc(0.58 * var(--lg-alpha, 1)));
-  -webkit-backdrop-filter: blur(var(--lg-blur, 24px)) saturate(calc(var(--lg-sat, 1.4) * 1.1));
-  backdrop-filter: blur(var(--lg-blur, 24px)) saturate(calc(var(--lg-sat, 1.4) * 1.1));
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.09),
-    inset 0 1px 0 rgba(255, 255, 255, calc(0.12 * var(--lg-sheen, 1))),
-    0 0 0 0.5px rgba(0, 0, 0, 0.5),
-    0 22px 54px -32px rgba(0, 0, 0, 0.95);
+    radial-gradient(130% 60% at 0% 0%, var(--lc-glass-tint), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, calc(0.045 * var(--lc-sheen))) 0%, transparent 60%),
+    var(--lc-glass-chrome);
+  -webkit-backdrop-filter: var(--lc-glass-filter-strong);
+  backdrop-filter: var(--lc-glass-filter-strong);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-sheen), var(--lc-glass-shadow-chrome);
 }
 
 /* ── context zone ─────────────────────────────────────────────────────── */
@@ -291,6 +289,62 @@ svg.cd-g { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: 
 .cdw-templates { display: grid; gap: 1px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.06); }
 .cdw-templates .lc-eyebrow { margin-bottom: 4px; }
 
+/* ── R8.3 · legibility in every theme ─────────────────────────────────────
+   The capsule is a field set INTO the chrome glass; the results open on the
+   canonical menu glass (floored — True Black is a near-solid black plate
+   lifted by its edge, never a dim see-through veil). Inks: query = ink-1,
+   placeholder ≥ 4.5:1, result subtitles ink-2 (not ink-3), selection =
+   accent soft plate with accent text for the hint. */
+html.is-desktop-modern .cd .dsk-cmd__field {
+  color: var(--lc-ink-2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.04 * var(--lc-sheen))), transparent), var(--lc-glass-field);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-field-line), inset 0 1px 0 rgba(255, 255, 255, calc(0.06 * var(--lc-sheen)));
+}
+html.is-desktop-modern .cd .dsk-cmd__field:hover { box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi), inset 0 1px 0 rgba(255, 255, 255, calc(0.08 * var(--lc-sheen))); }
+html.is-desktop-modern .cd .dsk-cmd.is-open .dsk-cmd__field {
+  color: rgb(var(--lc-select-rgb));
+  background: var(--lc-glass-field);
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.55), 0 0 0 4px rgba(var(--lc-select-rgb), 0.12), 0 12px 32px -18px var(--lc-accent-glow);
+}
+html.is-desktop-modern .cd .dsk-cmd__field input { color: var(--lc-ink-1); caret-color: rgb(var(--lc-select-rgb)); }
+html.is-desktop-modern .cd .dsk-cmd__field input::placeholder { color: color-mix(in srgb, var(--lc-ink-2) 62%, var(--lc-ink-3)); opacity: 1; }
+html.is-desktop-modern .cd .dsk-cmd__field kbd { color: var(--lc-ink-2); background: var(--lc-glass-field); box-shadow: inset 0 0 0 1px var(--lc-glass-field-line); }
+html.is-desktop-modern .cd .dsk-cmd__scope { color: var(--lc-ink-1); background: var(--lc-accent-soft); box-shadow: inset 0 0 0 1px var(--lc-accent-border); }
+html.is-desktop-modern .cd .dsk-cmd__panel {
+  /* centred on the capsule and bounded by the window: it never runs off the right edge */
+  --cd-panel-w: min(900px, calc(100vw - 48px));
+  left: 50%;
+  width: var(--cd-panel-w);
+  margin-left: calc(var(--cd-panel-w) / -2);
+  color: var(--lc-ink-1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.05 * var(--lc-sheen))) 0%, transparent 26%), var(--lc-glass-menu);
+  -webkit-backdrop-filter: var(--lc-glass-filter-strong);
+  backdrop-filter: var(--lc-glass-filter-strong);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-sheen), var(--lc-glass-shadow-menu);
+}
+html.is-desktop-modern .cd .dsk-cmd__group header { color: var(--lc-ink-2); background: linear-gradient(180deg, var(--lc-glass-menu) 70%, transparent); }
+html.is-desktop-modern .cd .dsk-cmd__copy strong { color: var(--lc-ink-1); }
+html.is-desktop-modern .cd .dsk-cmd__copy small { color: var(--lc-ink-2); }
+html.is-desktop-modern .cd .dsk-cmd__icon { color: var(--lc-ink-2); background: var(--lc-glass-field); box-shadow: inset 0 0 0 1px var(--lc-glass-field-line); }
+html.is-desktop-modern .cd .dsk-cmd__item:hover:not(.is-active) { background: var(--lc-inner-bg-hover); }
+html.is-desktop-modern .cd .dsk-cmd__item.is-active { background: rgba(var(--lc-select-rgb), 0.13); box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.3); }
+html.is-desktop-modern .cd .dsk-cmd__item.is-active .dsk-cmd__icon { color: var(--lc-accent-text); box-shadow: inset 0 0 0 1px var(--lc-accent-border); }
+html.is-desktop-modern .cd .dsk-cmd__hint { color: var(--lc-accent-text); }
+:root[data-lc-accent-reserved='crit'] .cd :is(.dsk-cmd__hint, .dsk-cmd__item.is-active .dsk-cmd__icon) { color: var(--lc-ink-1); }
+html.is-desktop-modern .cd .dsk-cmd__badge { color: var(--lc-ink-1); background: var(--lc-glass-field); }
+html.is-desktop-modern .cd .dsk-cmd__preview { box-shadow: inset 1px 0 0 var(--lc-glass-line); background: rgba(var(--lc-edge-rgb), 0.018); }
+html.is-desktop-modern .cd .dsk-cmd__eyebrow { color: var(--lc-ink-2); }
+html.is-desktop-modern .cd .dsk-cmd__preview h3 { color: var(--lc-ink-1); }
+html.is-desktop-modern .cd .dsk-cmd__summary,
+html.is-desktop-modern .cd .dsk-cmd__details dd { color: var(--lc-ink-1); }
+html.is-desktop-modern .cd .dsk-cmd__details dt,
+html.is-desktop-modern .cd .dsk-cmd__run,
+html.is-desktop-modern .cd .dsk-cmd__empty { color: var(--lc-ink-2); }
+html.is-desktop-modern .cd :is(.dsk-cmd__details > div, .dsk-cmd__run) { border-top-color: var(--lc-glass-line); }
+html.is-desktop-modern .cd .dsk-cmd__run b { color: var(--lc-ink-1); }
+:root[data-nexus-theme='light'] .cd .dsk-cmd__item:hover:not(.is-active) { background: rgba(15, 17, 22, 0.04); }
+:root[data-nexus-theme='light'] .cd .dsk-cmd__preview { background: rgba(15, 17, 22, 0.02); }
+
 /* ── responsive: secondary copy goes first ────────────────────────────── */
 
 @container deck (max-width: 1180px) { .cd-app__text small { display: none; } }
@@ -303,15 +357,9 @@ svg.cd-g { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: 
 
 /* ── themes ───────────────────────────────────────────────────────────── */
 
-:root[data-nexus-theme='light'] .cd__glass {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.35)), rgb(var(--dsk-fill) / calc(0.72 * var(--lg-alpha, 1)));
-  box-shadow: inset 0 0 0 1px rgba(13, 21, 36, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 22px 54px -36px rgba(24, 36, 60, 0.4);
-}
-:root[data-nexus-theme='light'] .cd .dsk-cmd__field { background: rgba(255, 255, 255, 0.75); box-shadow: inset 0 0 0 1px rgba(13, 21, 36, 0.1); }
 :root[data-nexus-theme='light'] .cd-app { border-left-color: rgba(13, 21, 36, 0.08); }
 :root[data-nexus-theme='light'] :is(.cd-ws, .cd-machine, .cd-btn, .cd-op):hover { background: rgba(13, 21, 36, 0.05); }
 :root[data-nexus-theme='light'] .cdw-mini rect { fill: rgba(13, 21, 36, 0.04); stroke: rgba(13, 21, 36, 0.3); }
-:root[data-nexus-theme='true_black'] .cd__glass { background: rgba(0, 0, 0, 0.82); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 22px 54px -32px rgba(0, 0, 0, 1); }
 
 html[data-lc-motion='off'] .cd-g--typing i, html[data-lc-motion='off'] .cd-g--orbit path, html[data-lc-motion='off'] .cd-btn__halo { animation: none; }
 @media (prefers-reduced-motion: reduce) {
