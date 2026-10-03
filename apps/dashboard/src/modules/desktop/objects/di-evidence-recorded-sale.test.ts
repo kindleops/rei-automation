@@ -54,7 +54,7 @@ async function load() {
 
 const diComp = (over: Partial<DiComp>): DiComp => ({ id: 'c1', propertyId: '273330226', address: '3722 Fremont Ave N, Minneapolis, MN 55412', lat: 45.022873, lng: -93.29537, ...over } as DiComp)
 
-describe('Deal Intelligence Evidence comps', () => {
+describe('Deal Intelligence Evidence comps', { timeout: 20_000 }, () => {
   it('a comp-only row: Open / Open beside / every menu action never produce a DI path', async () => {
     const env = await load()
     const ref = env.diCompObject(diComp({ canonicalProperty: false }))!

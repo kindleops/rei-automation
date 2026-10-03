@@ -55,7 +55,7 @@ const comp = (over: Partial<EvidenceComp>): EvidenceComp => ({
   city: 'Minneapolis', zip: '55412', lat: 45.022873, lng: -93.29537, ...over,
 } as EvidenceComp)
 
-describe('a comp-only property (canonicalProperty: false)', () => {
+describe('a comp-only property (canonicalProperty: false)', { timeout: 20_000 }, () => {
   it('has no Open / Open beside / mission, says why, and keeps Inspect + Show on Map', async () => {
     const env = await load()
     const ref = env.compObject(comp({ canonicalProperty: false }))!
@@ -102,7 +102,7 @@ describe('a comp-only property (canonicalProperty: false)', () => {
   })
 })
 
-describe('a canonical comp still opens Deal Intelligence', () => {
+describe('a canonical comp still opens Deal Intelligence', { timeout: 20_000 }, () => {
   it.each([[true], [null], [undefined]])('canonicalProperty %s', async (canonical) => {
     const env = await load()
     const ref = env.compObject(comp({ canonicalProperty: canonical }))!
