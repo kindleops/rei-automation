@@ -1551,6 +1551,54 @@ async function loadOutboundNumberByPhone(phone_number, deps = {}) {
   return derived;
 }
 
+/**
+ * STICKY THREAD SENDER at dispatch (delivery/thread-sender.js) for a row on a
+ * seller conversation that is NOT a campaign touch: keep the thread's sender
+ * while eligible; otherwise the highest-priority eligible routing fallback,
+ * persisted with a reason. Returns a selection, a park, or null (not a thread row).
+ */
+async function stickyThreadSelection(normalized, deps = {}, { thread_sender = null, raw_row = null } = {}) {
+  // Only a row that EXPLICITLY belongs to a conversation (thread_key on the
+  // stored row): normalization derives a key from to_phone_number for every
+  // row, which would make the rule apply to rows that never named a thread.
+  const thread_key = clean(raw_row?.thread_key || raw_row?.metadata?.thread_key);
+  if (!thread_key || clean(normalized.campaign_id)) return null;
+  const resolve = deps.resolveStickyThreadSender || (await import("@/lib/domain/delivery/thread-sender.js")).resolveStickyThreadSender;
+  const sticky = await resolve(
+    {
+      thread_key,
+      market: clean(normalized.market) || null,
+      state: clean(normalized.property_address_state) || null,
+      property_id: clean(normalized.property_id || normalized.metadata?.property_id) || null,
+      canonical_market_id: clean(normalized.market_id) || null,
+    },
+    {
+      ...deps,
+      ...(thread_sender ? { loadThreadSender: async () => thread_sender } : {}),
+      loadOutboundNumberByPhone: (phone) => loadOutboundNumberByPhone(phone, deps),
+    }
+  );
+  if (!sticky.ok) {
+    return {
+      ok: false,
+      reason: sticky.reason,
+      deferred: sticky.reason === "sender_blocklist_unreadable",
+      ineligible_sender: true,
+      terminal: false,
+      selected: null,
+      from_phone_number: thread_sender,
+    };
+  }
+  const row = await loadOutboundNumberByPhone(sticky.phone, deps).catch(() => null);
+  return {
+    ok: true,
+    selected: { id: row?.id || null, phone_number: sticky.phone, metadata: {} },
+    from_phone_number: sticky.phone,
+    reason: `sticky_thread_sender:${sticky.decision}`,
+    thread_sender_change: sticky.previous ? { from: sticky.previous, to: sticky.phone, reason: sticky.reason, via: sticky.via } : null,
+  };
+}
+
 /** The canonical blocklist read (strict). Injected readers: deps.loadDispatchBlockedSenders, else deps.getSystemValue. */
 async function loadDispatchBlockedSendersFor(deps = {}) {
   if (typeof deps.loadDispatchBlockedSenders === "function") return deps.loadDispatchBlockedSenders();
@@ -1620,8 +1668,16 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
       phone: intended,
       now: deps.now ? new Date(deps.now) : new Date(),
     });
+    if (!eligibility.ok && eligibility.reason !== "sender_blocklist_unreadable") {
+      // A REPLY on a seller conversation (not a campaign touch) whose pinned
+      // sender can no longer send: the sticky thread sender rule picks the
+      // highest-priority eligible fallback and persists it (never silent:
+      // inbox_thread_state.our_number + a sender_thread_rerouted event).
+      const sticky = await stickyThreadSelection(normalized, deps, { thread_sender: intended, raw_row: row });
+      if (sticky) return sticky;
+    }
     if (!eligibility.ok) {
-      // NO SILENT REPLACEMENT. Rotating to "some other working number" here
+      // NO SILENT REPLACEMENT (campaign touches): the campaign chose this sender. Rotating to "some other working number" here
       // would send campaign traffic from a sender the campaign never chose and
       // the operator cannot see. The row is reported ineligible and the caller
       // blocks it with this reason.
@@ -1649,6 +1705,13 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
 
   if (typeof deps.selectAvailableTextgridNumber === "function") {
     return deps.selectAvailableTextgridNumber(normalized);
+  }
+
+  // A row with no sender on a seller conversation (deferred follow-ups): the
+  // thread's own sender, never a fleet-wide least-used pick.
+  {
+    const sticky = await stickyThreadSelection(normalized, deps, { raw_row: row });
+    if (sticky) return sticky;
   }
 
   const supabase = getSupabase(deps);

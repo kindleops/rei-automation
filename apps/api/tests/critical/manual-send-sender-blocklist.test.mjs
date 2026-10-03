@@ -34,6 +34,8 @@ function spyDeps(getSystemValue) {
       getSystemValue,
       env: {},
       loadOutboundNumberByPhone: async (phone) => ({ id: "n1", phone_number: phone, status: "active", health_state: "unverified", daily_limit: 800, messages_sent_today: 3 }),
+      loadThreadSender: async () => null,
+      routeThreadFallback: async () => null,
       insertImpl: async () => { calls.insert += 1; return { ok: true, queue_row_id: "row-1", queue_item_id: "row-1" }; },
       hardComplianceCheckImpl: async () => ({ blocked: false }),
       checkBlacklistPriorFailureImpl: async () => ({ blocked: false }),
@@ -108,6 +110,8 @@ test("executeManualInboxSendNow surfaces the refusal as ok:false (no 423 -> ok:t
     },
     env: {},
     loadOutboundNumberByPhone: async (phone) => ({ id: "n1", phone_number: phone, status: "active", daily_limit: 800, messages_sent_today: 0 }),
+    loadThreadSender: async () => null,
+    routeThreadFallback: async () => null,
     sendTextgridImpl: async () => { provider += 1; return { ok: true }; },
     createQueueRowImpl: (i, d) => createInboxSendNowQueueRow(i, { ...d, insertImpl: async () => { throw new Error("must not insert"); } }),
   });
@@ -148,4 +152,25 @@ test("a fleet lookup failure refuses (fail closed)", async () => {
   const out = await createInboxSendNowQueueRow(input(CLEAN), deps);
   assert.equal(out.reason, "outbound_number_eligibility_unavailable");
   assert.equal(calls.insert, 0);
+});
+
+test("sticky sender: a rejected proposal with an eligible routing fallback re-routes instead of failing (never the blocked number)", async () => {
+  const { calls, deps } = spyDeps(blocklist(BLOCKED));
+  let inserted = null;
+  deps.routeThreadFallback = async () => ({ phone: CLEAN, via: "campaign_router" });
+  deps.insertImpl = async (row) => { inserted = row; calls.insert += 1; return { ok: true, queue_row_id: "row-2", queue_item_id: "row-2" }; };
+  deps.supabase = stubSupabase;
+  await createInboxSendNowQueueRow(input(BLOCKED), deps);
+  assert.equal(calls.insert, 1);
+  assert.equal(inserted.from_phone_number, CLEAN);
+});
+
+test("sticky sender: an established thread keeps its own eligible sender over a per-message proposal", async () => {
+  const { calls, deps } = spyDeps(blocklist(null));
+  let inserted = null;
+  deps.loadThreadSender = async () => "+16125092623";
+  deps.insertImpl = async (row) => { inserted = row; calls.insert += 1; return { ok: true, queue_row_id: "row-3", queue_item_id: "row-3" }; };
+  deps.supabase = stubSupabase;
+  await createInboxSendNowQueueRow(input(CLEAN), deps);
+  assert.equal(inserted.from_phone_number, "+16125092623", "the composer's per-message pick never rotates the thread");
 });

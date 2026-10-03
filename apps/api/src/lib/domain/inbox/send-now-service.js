@@ -13,8 +13,8 @@ import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
 import { dispatchManualOperatorSend } from "@/lib/domain/communications/dispatch-manual-operator-send.js";
 import { resolveOperatorAction } from "@/lib/domain/communications/operator-action-store.js";
 import { getSystemValue } from "@/lib/system-control.js";
-import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
 import { evaluateSenderDispatchEligibility, loadDispatchBlockedSenders } from "@/lib/domain/delivery/sender-dispatch-eligibility.js";
+import { resolveStickyThreadSender } from "@/lib/domain/delivery/thread-sender.js";
 import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
 import {
@@ -931,45 +931,53 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     });
   }
 
-  // ── Step 1b: SENDER ROUTING 2.0 (double-gated) ─────────────────────
-  // A manual reply is a REPLY: the thread's number is kept while it is still
-  // eligible and routed for the market; otherwise the routing graph picks a
-  // sender (recorded) or the send is refused with the hold context — never a
-  // send from an operator-blocked / cooling / paused number. Gate off: skipped.
-  if (resolved_from && senderRoutingCeiling(deps.env || process.env)) {
-    const [{ routeQueueRowViaPolicy }, { loadFleet }, { describeHold }] = await Promise.all([
-      import("@/lib/domain/routing/sender-routing/sender-routing-runtime.js"),
-      import("@/lib/domain/routing/sender-routing/sender-routing-service.js"),
-      import("@/lib/domain/routing/sender-routing/sender-routing-policy.js"),
-    ]);
-    const routed = await routeQueueRowViaPolicy(
+  // ── Step 1b: STICKY THREAD SENDER (owner decision 2026-10-02) ──────
+  // An established conversation keeps its own sender while it is eligible;
+  // a sender proposed per message (the composer's client-side pick) never
+  // rotates it. An ineligible thread sender is replaced by the highest-
+  // priority eligible routing fallback (Sender Routing 2.0 when its gate is
+  // on, else the campaign router) and the new relationship is persisted with
+  // a reason. Nothing eligible -> refused (423), never sent.
+  // (No sender resolved at all keeps today's missing_routing path below.)
+  if (clean(input.thread_key) && resolved_from) {
+    const resolveSticky = deps.resolveStickyThreadSenderImpl || resolveStickyThreadSender;
+    const sticky = await resolveSticky(
       {
-        from_phone_number: resolved_from,
-        thread_key: clean(input.thread_key) || null,
+        thread_key: clean(input.thread_key),
+        proposed_from: resolved_from || null,
+        market: clean(input.market || input_metadata.market) || null,
+        state: clean(input.property_address_state || input_metadata.property_address_state) || null,
         property_id: clean(input.property_id || input_metadata.property_id) || null,
-        market: clean(input.market) || null,
-        campaign_id: null,
+        canonical_market_id: clean(input.canonical_market_id || input_metadata.canonical_market_id) || null,
       },
-      { supabase, loadFleet: () => loadFleet({ supabase }) }
+      { ...deps, supabase }
     );
-    if (routed && !routed.ok) {
-      const reason = clean(routed.reason) || "no_eligible_sender_for_route";
-      logger.warn("inbox_send_now.sender_route_hold", { thread_key: clean(input.thread_key) || null, reason });
+    if (!sticky.ok) {
+      // The specific reason when one sender was rejected and nothing could
+      // stand in for it (blocked / paused / cooling / …), else the generic one.
+      const refusal = sticky.sender_reason === "outbound_number_blocked_by_operator"
+        ? "blocked_sender_number"
+        : sticky.sender_reason || sticky.reason;
+      logger.warn("inbox_send_now.sender_unresolved", { thread_key: clean(input.thread_key) || null, reason: refusal });
       return {
         ok: false,
-        status: 409,
-        error: reason,
-        reason,
-        detail_reason: routed.sender_routing ? describeHold(routed.sender_routing) : reason,
+        status: 423,
+        error: refusal,
+        reason: refusal,
+        detail_reason: sticky.detail || sticky.reason,
+        sender_reason: sticky.sender_reason || null,
         queue_created: false,
         queue_inserted: false,
         queue_row_id: null,
         queue_id: null,
         queue_status: null,
-        sender_routing: routed.sender_routing || null,
+        provider_attempted: false,
       };
     }
-    if (routed?.ok) resolved_from = routed.from_phone_number;
+    if (sticky.phone !== resolved_from) {
+      logger.info("inbox_send_now.sender_sticky", { thread_key: clean(input.thread_key) || null, decision: sticky.decision, proposed_mask: maskPhoneForLog(resolved_from), chosen_mask: maskPhoneForLog(sticky.phone) });
+    }
+    resolved_from = sticky.phone;
   }
 
   // ── Step 1c: THE CANONICAL SENDER DISPATCH ELIGIBILITY — unconditional ──
@@ -1620,6 +1628,7 @@ function isManualSendHardBlockReason(reason = "") {
     "outbound_number_health_cooling",
     "outbound_number_cooling_until",
     "outbound_number_daily_limit_reached",
+    "no_eligible_sender_for_thread",
   ]).has(clean(reason).toLowerCase());
 }
 

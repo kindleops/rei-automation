@@ -106,52 +106,89 @@ test("canonical function: blocked, unreadable list, not in fleet", async () => {
   assert.equal(await loadDispatchBlockedSenders({ getSystemValue: async () => { throw new Error("down"); }, env: {} }), null);
 });
 
-const pinnedRow = (from, extra = {}) => ({ id: "q1", queue_key: "k1", queue_status: "queued", to_phone_number: "+16125550142", from_phone_number: from, ...extra });
+const pinnedRow = (from, extra = {}) => ({ id: "q1", queue_key: "k1", queue_status: "queued", to_phone_number: "+16125550142", thread_key: "+16125550142", market: "Minneapolis, MN", from_phone_number: from, ...extra });
+const FALLBACK = "+16125092382";
+const runnerDeps = (over = {}) => {
+  const persisted = [];
+  return {
+    persisted,
+    deps: {
+      env: {},
+      getSystemValue: blocklistReader,
+      loadOutboundNumberByPhone: async (p) => fleetRow(p),
+      routeThreadFallback: async () => ({ phone: FALLBACK, via: "campaign_router" }),
+      persistThreadSenderChange: async (change) => { persisted.push(change); return { ok: true }; },
+      ...over,
+    },
+  };
+};
+
+test("runner, campaign row: a blocked pinned sender is refused (parked, no retry, never sent, never replaced)", async () => {
+  const { deps, persisted } = runnerDeps();
+  const r = await selectAvailableTextgridNumber(pinnedRow(BLOCKED, { campaign_id: "c1", touch_number: 1 }), deps);
+  assert.equal(r.ok, false);
+  assert.equal(r.ineligible_sender, true);
+  assert.equal(r.reason, SENDER_BLOCKED_REASON);
+  assert.equal(persisted.length, 0);
+  const ok = await selectAvailableTextgridNumber(pinnedRow(CLEAN, { campaign_id: "c1" }), deps);
+  assert.equal(ok.reason, "queue_row_from_phone_number_revalidated", "gate-off behaviour otherwise unchanged");
+});
 
 for (const [label, extra] of [
-  ["campaign row", { campaign_id: "c1", touch_number: 1 }],
   ["auto-reply (pinned to the number the seller texted)", { metadata: { source: "seller_inbound_orchestrator" } }],
   ["late reply (repair-queued)", { metadata: { source: "classifier_cleanup_20261001" } }],
   ["queued inbox reply", { metadata: { source: "inbox" } }],
 ]) {
-  test(`runner, ${label}: a blocked sender is refused at selection (parked, no retry, never sent)`, async () => {
-    const r = await selectAvailableTextgridNumber(pinnedRow(BLOCKED, extra), { env: {}, getSystemValue: blocklistReader, loadOutboundNumberByPhone: async (p) => fleetRow(p) });
-    assert.equal(r.ok, false);
-    assert.equal(r.ineligible_sender, true);
-    assert.equal(r.reason, SENDER_BLOCKED_REASON);
-    const ok = await selectAvailableTextgridNumber(pinnedRow(CLEAN, extra), { env: {}, getSystemValue: blocklistReader, loadOutboundNumberByPhone: async (p) => fleetRow(p) });
-    assert.equal(ok.ok, true, "gate-off behaviour otherwise unchanged");
-    assert.equal(ok.reason, "queue_row_from_phone_number_revalidated");
+  test(`runner, ${label}: never sends from the blocked number; sticky fallback is persisted with a reason`, async () => {
+    const { deps, persisted } = runnerDeps();
+    const r = await selectAvailableTextgridNumber(pinnedRow(BLOCKED, extra), deps);
+    assert.equal(r.ok, true);
+    assert.equal(r.from_phone_number, FALLBACK);
+    assert.notEqual(r.from_phone_number, BLOCKED);
+    assert.deepEqual(persisted.map((c) => [c.from, c.to, c.reason]), [[BLOCKED, FALLBACK, "thread_sender_blocked_by_operator"]]);
+    const none = runnerDeps({ routeThreadFallback: async () => null });
+    const parked = await selectAvailableTextgridNumber(pinnedRow(BLOCKED, extra), none.deps);
+    assert.equal(parked.ok, false);
+    assert.equal(parked.ineligible_sender, true);
+    assert.equal(parked.reason, "no_eligible_sender_for_thread");
+    const kept = await selectAvailableTextgridNumber(pinnedRow(CLEAN, extra), deps);
+    assert.equal(kept.reason, "queue_row_from_phone_number_revalidated");
   });
 }
 
 test("runner: an unreadable blocklist defers a pinned row (no send, no retry)", async () => {
-  const r = await selectAvailableTextgridNumber(pinnedRow(CLEAN), { env: {}, getSystemValue: async () => { throw new Error("down"); }, loadOutboundNumberByPhone: async (p) => fleetRow(p) });
+  const r = await selectAvailableTextgridNumber(pinnedRow(CLEAN), runnerDeps({ getSystemValue: async () => { throw new Error("down"); } }).deps);
   assert.equal(r.deferred, true);
   assert.equal(r.reason, "sender_blocklist_unreadable");
 });
 
 const numbersSupabase = (rows) => ({ from() { const q = { select: () => q, order: () => q, eq: () => q, in: () => q, gte: () => q, not: () => q, limit: () => Promise.resolve({ data: rows, error: null }) }; return q; } });
 
-test("runner, follow-up with no sender: the least-used blocked number is skipped", async () => {
-  const rows = [fleetRow(BLOCKED, { messages_sent_today: 0, last_used_at: null }), fleetRow(CLEAN, { messages_sent_today: 5, last_used_at: "2026-10-01T00:00:00Z" })];
-  const r = await selectAvailableTextgridNumber({ id: "q2", queue_key: "k2", to_phone_number: "+16125550142" }, { env: {}, getSystemValue: blocklistReader, supabase: numbersSupabase(rows), loadSenderSentToday: async () => new Map() });
-  assert.equal(r.ok, true);
+test("runner, follow-up with no sender on a thread: the thread's own sender, never a fleet-wide pick", async () => {
+  const { deps } = runnerDeps({ loadThreadSender: async () => CLEAN });
+  const r = await selectAvailableTextgridNumber(pinnedRow(null), deps);
   assert.equal(r.from_phone_number, CLEAN);
+  assert.equal(r.reason, "sticky_thread_sender:thread_continuity");
+  const blockedThread = runnerDeps({ loadThreadSender: async () => BLOCKED });
+  const moved = await selectAvailableTextgridNumber(pinnedRow(null), blockedThread.deps);
+  assert.equal(moved.from_phone_number, FALLBACK);
+  assert.equal(blockedThread.persisted.length, 1);
 });
 
-test("runner, follow-up with no sender: every eligible number blocked -> parked, never sent", async () => {
-  const r = await selectAvailableTextgridNumber({ id: "q3", queue_key: "k3", to_phone_number: "+16125550142" }, { env: {}, getSystemValue: blocklistReader, supabase: numbersSupabase([fleetRow(BLOCKED)]), loadSenderSentToday: async () => new Map() });
-  assert.equal(r.ok, false);
-  assert.equal(r.ineligible_sender, true);
-  assert.equal(r.reason, "outbound_number_all_eligible_senders_blocked");
+test("runner, unassigned row with no thread: the rotation skips the least-used blocked number", async () => {
+  const rows = [fleetRow(BLOCKED, { messages_sent_today: 0, last_used_at: null }), fleetRow(CLEAN, { messages_sent_today: 5, last_used_at: "2026-10-01T00:00:00Z" })];
+  const r = await selectAvailableTextgridNumber({ id: "q2", queue_key: "k2" }, { env: {}, getSystemValue: blocklistReader, supabase: numbersSupabase(rows), loadSenderSentToday: async () => new Map() });
+  assert.equal(r.ok, true);
+  assert.equal(r.from_phone_number, CLEAN);
+  const all = await selectAvailableTextgridNumber({ id: "q3", queue_key: "k3" }, { env: {}, getSystemValue: blocklistReader, supabase: numbersSupabase([fleetRow(BLOCKED)]), loadSenderSentToday: async () => new Map() });
+  assert.equal(all.reason, "outbound_number_all_eligible_senders_blocked");
 });
 
 test("manual Send Now: a blocked sender is refused 423 before any row", async () => {
   let inserted = 0;
   const out = await createInboxSendNowQueueRow(
     { thread_key: "+16125550142", to_phone_number: "+16125550142", from_phone_number: BLOCKED, message_body: "hi there", action: "send_now" },
-    { env: {}, getSystemValue: blocklistReader, loadOutboundNumberByPhone: async (p) => fleetRow(p), insertImpl: async () => { inserted += 1; return { ok: true }; } }
+    { env: {}, getSystemValue: blocklistReader, loadOutboundNumberByPhone: async (p) => fleetRow(p), loadThreadSender: async () => null, insertImpl: async () => { inserted += 1; return { ok: true }; } }
   );
   assert.equal(out.status, 423);
   assert.equal(out.reason, "blocked_sender_number");
