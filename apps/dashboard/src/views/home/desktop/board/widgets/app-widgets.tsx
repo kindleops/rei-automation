@@ -75,11 +75,11 @@ export function CompsWidget({ size, cells }: WidgetRenderProps) {
           <div className={cx('hb-comps', `is-${size}`)}>
             <div className="hb-row">
               <WFigure value={c.freshnessDays == null ? '—' : `${c.freshnessDays}d`} label="newest priced sale" tone={stale ? 'attn' : 'ok'} sub={c.newestSale ? new Date(`${c.newestSale}T12:00:00Z`).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : null} onClick={() => openPath('/comp-intelligence')} />
-              {size !== 'compact' ? <WFigure value={fmt(c.sales90)} label="sales · 90 days" /> : null}
+              {size !== 'compact' ? <WFigure value={fmt(c.sales90)} label="priced sales · 90 days" sub={`${fmt(c.activity90)} recorded sales incl. unpriced`} /> : null}
             </div>
-            {stale && size !== 'compact' ? <p className="hb-muted">The comp pool's newest recorded sale is {c.freshnessDays} days old — recent sales are not in yet.</p> : null}
+            {stale && size !== 'compact' ? <p className="hb-muted">The newest priced sale on record is {c.freshnessDays} days old — recorded sales arrive with a lag.</p> : null}
             {size !== 'compact' && size !== 'small' && c.activeMarkets.length ? (
-              <WFacts items={c.activeMarkets.map((m) => ({ label: m.market, value: `${fmt(m.comps90)} sales`, title: `${m.deals} active deals · priced sales in the last 90 days` }))} />
+              <WFacts items={c.activeMarkets.map((m) => ({ label: m.market, value: `${fmt(m.comps90)} sales`, title: `${m.deals} active deals · priced sales within ~25 mi of them, last 90 days` }))} />
             ) : null}
             {size === 'large' || size === 'tall' || size === 'wide' ? (
               c.recent.length ? (

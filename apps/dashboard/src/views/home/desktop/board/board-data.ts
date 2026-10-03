@@ -128,7 +128,7 @@ export interface DealInstrument {
 }
 export interface DealItem { opportunityId: string; propertyId: string | null; threadKey: string | null; masterOwnerId: string | null; address: string | null; market: string | null; stage: string | null; tier: string | null; confidence: number | null; valuationConfidence: number | null; recommendedOffer: number | null }
 export interface CompsInstrument {
-  newestSale: string | null; freshnessDays: number | null; sales30: number; sales90: number; source: string
+  newestSale: string | null; freshnessDays: number | null; sales30: number; sales90: number; /** all recorded sales in 90 days, priced or not (activity) */ activity90: number; source: string
   recent: Array<{ id: string; propertyId: string | null; address: string | null; city: string | null; state: string | null; soldOn: string; price: number | null; ppsf: number | null; type: string | null; units: number | null; lat: number | null; lng: number | null }>
   activeMarkets: Array<{ market: string; deals: number; comps90: number }>
 }

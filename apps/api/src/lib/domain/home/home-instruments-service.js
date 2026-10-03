@@ -9,11 +9,12 @@
  *            Intelligence's gates: confidence >= 85, valuation confidence
  *            >= 80; decision_tier REVIEW_REQUIRED) + live seller_offers
  *            (status sent/pending/presented/countered, not superseded)
- *   comps    mv_map_sold_comps (the Map/Comps sold-comp pool): freshness,
- *            30/90-day counts and recent priced sales in the active markets
+ *   comps    mv_map_market_sales (the canonical sales projection, via the
+ *            Buyer Match sales adapter's source + price rule): freshness,
+ *            30/90-day priced counts, active-market counts, latest sales
  *   buyers   buyer_match_candidates for active deals (scores, grades, buyer
- *            type — buyer NAMES ARE NEVER RETURNED) + investor purchases by
- *            market (mv_map_sold_comps.buyer_class, counts only)
+ *            type — buyer NAMES ARE NEVER RETURNED) + investor purchases
+ *            (is_investor, activity) around each active market
  *   entity   master_owners: most connected owners (Entity Graph networks),
  *            new owners in 7 days
  *   queue    send_queue holds by reason (the desk's hold codes) +
@@ -21,6 +22,7 @@
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { clean, num } from './home-read-kit.js'
+import { BUYER_MATCH_SALES_SOURCE, SALES_COLUMNS, isPricedSale, shapeSale } from '@/lib/domain/buyer-match/buyer-match-sales.js'
 
 export const INSTRUMENT_KINDS = Object.freeze(['deal', 'comps', 'buyers', 'entity', 'queue'])
 
@@ -34,7 +36,19 @@ export const HOLD_STATUSES = Object.freeze([
 const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10)
 const fail = (error, what) => { if (error) { const e = new Error(`${what}: ${error.message}`); e.cause = error; throw e } }
 
+let oppsMemo = null
+/** Active opportunities, shared by the deal / comps / buyers reads for 60s (one read, not three). */
 async function activeOpportunities(db) {
+  const t = Date.now()
+  if (oppsMemo && oppsMemo.db === db && t - oppsMemo.at < 60_000) return oppsMemo.promise
+  const promise = readActiveOpportunities(db)
+  oppsMemo = { db, at: t, promise }
+  promise.catch(() => { if (oppsMemo?.promise === promise) oppsMemo = null })
+  return promise
+}
+export const __resetInstrumentMemo = () => { oppsMemo = null }
+
+async function readActiveOpportunities(db) {
   const { data, error } = await db.from('acquisition_opportunities')
     .select('id, primary_property_id, primary_thread_key, master_owner_id, property_address_full, market, acquisition_stage, current_offer, recommended_offer, last_activity_at')
     .eq('opportunity_status', 'active')
@@ -92,77 +106,105 @@ export function summarizeDeals(opps, scores, offers) {
 }
 
 async function readDeal(db) {
+  // offers do not depend on the opportunity list: read them alongside it
+  const offersRead = db.from('seller_offers').select('id, property_id, opportunity_id, purchase_price, status, sent_at, created_at, superseded_at').in('status', LIVE_OFFER).is('superseded_at', null).order('created_at', { ascending: false }).limit(50)
   const opps = await activeOpportunities(db)
   const ids = [...new Set(opps.map((o) => clean(o.primary_property_id)).filter(Boolean))]
+  const chunks = []
+  for (let i = 0; i < ids.length; i += 300) chunks.push(ids.slice(i, i + 300))
+  const [offers, ...scoreReads] = await Promise.all([offersRead, ...chunks.map((c) => db.from('property_acquisition_scores').select('property_id, decision_tier, confidence, valuation_confidence, recommended_cash_offer, computed_at').in('property_id', c))])
+  fail(offers.error, 'seller offers')
   const scores = []
-  for (let i = 0; i < ids.length; i += 300) {
-    const { data, error } = await db.from('property_acquisition_scores').select('property_id, decision_tier, confidence, valuation_confidence, recommended_cash_offer, computed_at').in('property_id', ids.slice(i, i + 300))
-    fail(error, 'acquisition scores')
-    scores.push(...(data || []))
-  }
-  const { data: offers, error } = await db.from('seller_offers').select('id, property_id, opportunity_id, purchase_price, status, sent_at, created_at, superseded_at').in('status', LIVE_OFFER).is('superseded_at', null).order('created_at', { ascending: false }).limit(50)
-  fail(error, 'seller offers')
-  return summarizeDeals(opps, scores, offers || [])
+  for (const r of scoreReads) { fail(r.error, 'acquisition scores'); scores.push(...(r.data || [])) }
+  return summarizeDeals(opps, scores, offers.data || [])
 }
 
-/* ── comps ── */
+/* ── comps + buyers: the canonical sales projection ── */
+
+/*
+ * SOURCE: public.mv_map_market_sales (BUYER_MATCH_SALES_SOURCE) — refreshed
+ * daily; the legacy mv_map_sold_comps froze on 2026-05-08 and is never read.
+ * PRICE RULE (owner): price > 0 is priced comp evidence; zero / NULL price is
+ * transaction activity only — never a priced comp or a price stat.
+ * Index-friendly: every read is bounded by sold_on (index) and, per market,
+ * by a lat/lng box around the market's active deals (index on (lat, lng)).
+ */
+const SALES = BUYER_MATCH_SALES_SOURCE
+const BOX_LAT = 0.36 // ~25 mi
+const BOX_LNG = 0.45
+
+/** Each top market's centre: the median coordinate of its active deals' properties. */
+async function marketBoxes(db, opps, limit) {
+  const markets = topMarkets(opps, limit)
+  if (!markets.length) return []
+  const idsByMarket = new Map(markets.map((m) => [m.label, opps.filter((o) => splitMarket(o.market)?.label === m.label).map((o) => clean(o.primary_property_id)).filter(Boolean).slice(0, 40)]))
+  const all = [...new Set([...idsByMarket.values()].flat())]
+  const { data, error } = await db.from('properties').select('property_id, latitude, longitude').in('property_id', all)
+  fail(error, 'deal coordinates')
+  const at = new Map((data || []).map((p) => [clean(p.property_id), [num(p.latitude), num(p.longitude)]]))
+  const median = (xs) => { const v = xs.filter((x) => x !== null && x !== 0).sort((p, q) => p - q); return v.length ? v[Math.floor(v.length / 2)] : null }
+  return markets.map((m) => {
+    const pts = (idsByMarket.get(m.label) || []).map((id) => at.get(id)).filter(Boolean)
+    const lat = median(pts.map((p) => p[0])), lng = median(pts.map((p) => p[1]))
+    return { ...m, lat, lng }
+  }).filter((m) => m.lat !== null && m.lng !== null)
+}
+
+const inBox = (q, m) => q.gte('lat', m.lat - BOX_LAT).lte('lat', m.lat + BOX_LAT).gte('lng', m.lng - BOX_LNG).lte('lng', m.lng + BOX_LNG)
+const countOf = async (q, what) => { const { count, error } = await q; fail(error, what); return count ?? 0 }
 
 async function readComps(db, now) {
   const since90 = isoDay(now - 90 * DAY)
   const since30 = isoDay(now - 30 * DAY)
-  const [newest, c30, c90, recent] = await Promise.all([
-    db.from('mv_map_sold_comps').select('sold_on').not('price', 'is', null).order('sold_on', { ascending: false }).limit(1),
-    db.from('mv_map_sold_comps').select('comp_id', { count: 'exact', head: true }).gte('sold_on', since30).not('price', 'is', null),
-    db.from('mv_map_sold_comps').select('comp_id', { count: 'exact', head: true }).gte('sold_on', since90).not('price', 'is', null),
-    db.from('mv_map_sold_comps').select('comp_id, property_id, address, city, state, sold_on, price, ppsf, property_type, units, lat, lng').not('price', 'is', null).gt('price', 0).order('sold_on', { ascending: false }).limit(8),
+  const head = () => db.from(SALES).select('comp_id', { count: 'exact', head: true })
+  const [newest, priced30, priced90, activity90, recent, boxes] = await Promise.all([
+    db.from(SALES).select('sold_on').gt('price', 0).order('sold_on', { ascending: false }).limit(1),
+    countOf(head().gte('sold_on', since30).gt('price', 0), '30d priced sales'),
+    countOf(head().gte('sold_on', since90).gt('price', 0), '90d priced sales'),
+    countOf(head().gte('sold_on', since90), '90d sales activity'),
+    db.from(SALES).select(SALES_COLUMNS).gt('price', 0).order('sold_on', { ascending: false }).limit(8),
+    activeOpportunities(db).then((o) => marketBoxes(db, o, 4)),
   ])
-  for (const [r, w] of [[newest, 'newest comp'], [c30, '30d comps'], [c90, '90d comps'], [recent, 'recent comps']]) fail(r.error, w)
-  const markets = topMarkets(await activeOpportunities(db), 4)
-  const byMarket = await Promise.all(markets.map(async (m) => {
-    const { count, error } = await db.from('mv_map_sold_comps').select('comp_id', { count: 'exact', head: true }).eq('state', m.state).ilike('city', m.city).gte('sold_on', since90).not('price', 'is', null)
-    fail(error, 'market comps')
-    return { market: m.label, deals: m.deals, comps90: count ?? 0 }
-  }))
+  fail(newest.error, 'newest sale'); fail(recent.error, 'recent sales')
+  const byMarket = await Promise.all(boxes.map(async (m) => ({ market: m.label, deals: m.deals, comps90: await countOf(inBox(head().gte('sold_on', since90).gt('price', 0), m), 'market priced sales') })))
   const newestOn = newest.data?.[0]?.sold_on ?? null
   return {
     newestSale: newestOn,
-    freshnessDays: newestOn ? Math.max(0, Math.round((now - Date.parse(`${newestOn}T00:00:00Z`)) / DAY)) : null,
-    sales30: c30.count ?? 0,
-    sales90: c90.count ?? 0,
-    recent: (recent.data || []).map((r) => ({ id: String(r.comp_id), propertyId: clean(r.property_id) || null, address: clean(r.address) || null, city: clean(r.city) || null, state: clean(r.state) || null, soldOn: r.sold_on, price: num(r.price), ppsf: num(r.ppsf), type: clean(r.property_type) || null, units: num(r.units), lat: num(r.lat), lng: num(r.lng) })),
+    freshnessDays: newestOn ? Math.max(0, Math.floor((now - Date.parse(`${newestOn}T00:00:00Z`)) / DAY)) : null,
+    sales30: priced30,
+    sales90: priced90,
+    activity90,
+    recent: (recent.data || []).filter(isPricedSale).map((r) => { const x = shapeSale(r); return { id: String(r.comp_id), propertyId: clean(r.property_id) || null, address: clean(r.address) || null, city: clean(r.city) || null, state: clean(r.state) || null, soldOn: r.sold_on, price: x.price ?? num(r.price), ppsf: x.ppsf ?? null, type: clean(r.property_type) || null, units: num(r.units), lat: num(r.lat), lng: num(r.lng) } }),
     activeMarkets: byMarket,
-    source: 'mv_map_sold_comps (priced recorded sales)',
+    source: `${SALES} (priced sales: price > 0; ~25 mi around each market's active deals)`,
   }
 }
-
-/* ── buyers ── */
 
 async function readBuyers(db, now) {
   const opps = await activeOpportunities(db)
   const byProperty = new Map(opps.map((o) => [clean(o.primary_property_id), o]))
   const ids = [...byProperty.keys()].filter(Boolean)
+  const since = isoDay(now - 90 * DAY)
+  const head = () => db.from(SALES).select('comp_id', { count: 'exact', head: true })
+  const candReads = []
+  // buyer_display_name is deliberately NOT selected: names stay out of Home
+  for (let i = 0; i < ids.length; i += 300) candReads.push(db.from('buyer_match_candidates').select('property_id, buyer_type, match_score, match_grade, buyer_response_status').in('property_id', ids.slice(i, i + 300)).order('match_score', { ascending: false }).limit(1000))
+  const [boxes, ...candResults] = await Promise.all([marketBoxes(db, opps, 5), ...candReads])
   const cands = []
-  for (let i = 0; i < ids.length; i += 300) {
-    // buyer_display_name is deliberately NOT selected: names stay out of Home
-    const { data, error } = await db.from('buyer_match_candidates').select('property_id, buyer_type, match_score, match_grade, buyer_response_status, created_at').in('property_id', ids.slice(i, i + 300)).order('match_score', { ascending: false }).limit(2000)
-    fail(error, 'buyer match candidates')
-    cands.push(...(data || []))
-  }
+  for (const r of candResults) { fail(r.error, 'buyer match candidates'); cands.push(...(r.data || [])) }
   const perDeal = new Map()
   for (const c of cands) { const p = clean(c.property_id); const cur = perDeal.get(p) ?? { count: 0, best: null }; cur.count += 1; if (!cur.best || (num(c.match_score) ?? 0) > (num(cur.best.match_score) ?? 0)) cur.best = c; perDeal.set(p, cur) }
   const strongest = [...perDeal.entries()].sort((a, b) => (num(b[1].best.match_score) ?? 0) - (num(a[1].best.match_score) ?? 0)).slice(0, 6).map(([p, v]) => {
     const o = byProperty.get(p)
     return { opportunityId: o?.id ?? null, propertyId: p, threadKey: clean(o?.primary_thread_key) || null, address: clean(o?.property_address_full) || null, market: clean(o?.market) || null, candidates: v.count, bestScore: num(v.best.match_score), bestGrade: clean(v.best.match_grade) || null, bestBuyerType: clean(v.best.buyer_type) || null }
   })
-  const since = isoDay(now - 90 * DAY)
-  const markets = topMarkets(opps, 5)
-  const demand = await Promise.all(markets.map(async (m) => {
-    const [all, inv] = await Promise.all([
-      db.from('mv_map_sold_comps').select('comp_id', { count: 'exact', head: true }).eq('state', m.state).ilike('city', m.city).gte('sold_on', since),
-      db.from('mv_map_sold_comps').select('comp_id', { count: 'exact', head: true }).eq('state', m.state).ilike('city', m.city).gte('sold_on', since).not('buyer_class', 'is', null).neq('buyer_class', 'individual'),
+  // investor purchases are ACTIVITY: any recorded sale counts, priced or not
+  const demand = await Promise.all(boxes.map(async (m) => {
+    const [sales90, investorPurchases90] = await Promise.all([
+      countOf(inBox(head().gte('sold_on', since), m), 'market sales'),
+      countOf(inBox(head().gte('sold_on', since).eq('is_investor', true), m), 'investor purchases'),
     ])
-    fail(all.error, 'market sales'); fail(inv.error, 'investor sales')
-    return { market: m.label, deals: m.deals, sales90: all.count ?? 0, investorPurchases90: inv.count ?? 0 }
+    return { market: m.label, deals: m.deals, sales90, investorPurchases90 }
   }))
   return {
     activeDeals: opps.length,
