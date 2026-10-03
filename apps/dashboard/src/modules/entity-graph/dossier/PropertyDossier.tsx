@@ -14,6 +14,7 @@
  */
 import { useMemo, useState, type ReactNode } from 'react'
 import { propertyObject, showOnMap } from '../../desktop/objects'
+import { researchProperty } from '../../browser/research-launch'
 import { Icon, type IconName } from '../../../shared/icons'
 import { CountUp } from '../../../shared/motion/CountUp'
 import type {
@@ -479,7 +480,7 @@ export function PropertyDossier({
 
   return (
     <div className="egd">
-      <DossierHero address={address} locality={locality || null} lat={lat} lng={lng} chips={chips} onOpenMap={showMap} />
+      <DossierHero address={address} locality={locality || null} lat={lat} lng={lng} chips={chips} onOpenMap={showMap} onResearch={result.entityId ? () => { researchProperty({ kind: 'property', id: result.entityId!, label: address ?? null }) } : null} />
 
       {/* ── Owner ── */}
       <div className="egd-owner egd-rise" style={{ ['--i' as string]: 1 }}>

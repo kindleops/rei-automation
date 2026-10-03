@@ -55,10 +55,12 @@ type Props = {
   lng: number | null
   chips: string[]
   onOpenMap: () => void
+  /** Browser 1.0: research this property's records beside Entity Graph */
+  onResearch?: (() => void) | null
   children?: ReactNode
 }
 
-export function DossierHero({ address, locality, lat, lng, chips, onOpenMap, children }: Props) {
+export function DossierHero({ address, locality, lat, lng, chips, onOpenMap, onResearch, children }: Props) {
   const street = streetUrl(address, lat, lng)
   const satellite = satelliteUrl(address, lat, lng)
   const key = `${street ?? ''}|${satellite ?? ''}`
@@ -135,6 +137,12 @@ export function DossierHero({ address, locality, lat, lng, chips, onOpenMap, chi
           <Icon name="map" />
           Map
         </button>
+        {onResearch ? (
+          <button type="button" className="egd-glassbtn" onClick={onResearch}>
+            <Icon name="compass" />
+            Research
+          </button>
+        ) : null}
       </div>
       {children}
     </section>

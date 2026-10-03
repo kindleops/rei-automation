@@ -12,6 +12,7 @@
  * this: it keeps its bottom sheet.
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { researchProperty } from '../../../modules/browser/research-launch'
 import { createPortal } from 'react-dom'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import {
@@ -184,6 +185,8 @@ const MoreMenu = ({ model, canLookAround, onLookAround, onLaunch }: {
     { key: 'buyers', label: LAUNCH_META.buyers.label, icon: LAUNCH_META.buyers.icon, run: () => onLaunch('buyers') },
     { key: 'graph', label: LAUNCH_META.graph.label, icon: LAUNCH_META.graph.icon, run: () => onLaunch('graph') },
     ...(canLookAround ? [{ key: 'look', label: 'Look Around', icon: 'globe' as const, run: onLookAround }] : []),
+    // Browser 1.0: official records / market sources / web for this property, beside the Map
+    ...(model.links.propertyId ? [{ key: 'research', label: 'Research', icon: 'compass' as const, run: () => { researchProperty({ kind: 'property', id: model.links.propertyId, label: model.graph.property.label || null }) } }] : []),
   ]
   return (
     <div className="smcd-more" ref={ref}>
@@ -195,7 +198,7 @@ const MoreMenu = ({ model, canLookAround, onLookAround, onLaunch }: {
           {items.map((item) => (
             <button key={item.key} type="button" role="menuitem" className="smcd-menu__item" onClick={(e) => { e.stopPropagation(); setOpen(false); item.run() }}>
               <Icon name={item.icon} />{item.label}
-              {item.key !== 'look' ? <span aria-hidden="true">↗</span> : null}
+              {item.key !== 'look' && item.key !== 'research' ? <span aria-hidden="true">↗</span> : null}
             </button>
           ))}
         </div>
