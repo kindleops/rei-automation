@@ -117,10 +117,6 @@ html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] {
   html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-sms_thread,
   html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-deal_intelligence { background: rgb(255 255 255 / 0.1) !important; }
 }
-html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock { -webkit-backdrop-filter: blur(20px) saturate(1.7); backdrop-filter: blur(20px) saturate(1.7); }
-html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock {
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.95), inset 0 0 0 1px rgb(255 255 255 / 0.6), 0 0 0 1px rgb(15 17 22 / 0.06), 0 18px 40px -26px rgb(30 40 90 / 0.35) !important;
-}
 
 /* The Inbox fills its PANE, not the window: sized to the viewport it ran
    82px past the pane's bottom edge and the composer was never on screen. */
@@ -601,20 +597,28 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__menu { border-radius: 12px !important; background: var(--ixd-card) !important; box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow) !important; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__option { border-radius: 8px !important; min-height: 36px !important; }
 
+/* ── the composer (R8.3): one piece of the operator's liquid glass ─────────
+   Material = the canonical menu glass (floored: the draft always reads);
+   depth = a sheen edge + a soft contact shadow; the accent arrives only as
+   the focus ring, the typing glow and a ready Send. Desktop only. */
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer { padding: 4px 20px 20px !important; background: transparent !important; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock,
 html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock {
   align-items: flex-end !important;
-  gap: 4px !important;
-  padding: 6px !important;
-  border-radius: 14px !important;
-  background: var(--ixd-card) !important;
-  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 18px 40px -24px rgb(0 0 0 / 0.75), 0 2px 6px -3px rgb(0 0 0 / 0.35) !important;
-  transition: box-shadow 0.18s ease;
+  gap: 6px !important;
+  padding: 7px !important;
+  border-radius: 20px !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, calc(0.05 * var(--lc-sheen))) 0%, transparent 46%),
+    radial-gradient(120% 140% at 0% 100%, var(--lc-glass-tint), transparent 60%),
+    var(--lc-glass-menu) !important;
+  -webkit-backdrop-filter: var(--lc-glass-filter-strong);
+  backdrop-filter: var(--lc-glass-filter-strong);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-sheen), 0 1px 2px rgba(0, 0, 0, 0.18), var(--lc-glass-shadow-menu) !important;
+  transition: box-shadow 0.2s var(--lc-ease-standard, ease);
 }
-html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock { box-shadow: inset 0 0 0 1px rgba(15, 17, 22, 0.1), 0 18px 40px -26px rgba(20, 24, 34, 0.35), 0 1px 3px rgba(20, 24, 34, 0.06) !important; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock:focus-within {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent), 0 0 0 4px color-mix(in srgb, var(--dsk-accent) 10%, transparent), 0 18px 40px -24px rgb(0 0 0 / 0.75) !important;
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.55), 0 0 0 4px rgba(var(--lc-select-rgb), 0.12), var(--lc-glass-sheen), var(--lc-glass-shadow-menu) !important;
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__side { display: flex !important; align-self: flex-end !important; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap,
@@ -622,8 +626,8 @@ html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap:focus-within {
   display: flex !important;
   align-items: flex-end !important;
-  min-height: 36px !important;
-  border-radius: 10px !important;
+  min-height: 38px !important;
+  border-radius: 12px !important;
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -631,45 +635,68 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap textarea:focus,
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap textarea:focus-visible {
   flex: 1 1 auto !important;
-  min-height: 36px !important;
-  padding: 8px 8px !important;
+  min-height: 38px !important;
+  padding: 9px 8px !important;
   font-size: 14px !important;
   line-height: 1.45 !important;
   letter-spacing: -0.004em !important;
+  color: var(--lc-ink-1) !important;
+  caret-color: rgb(var(--lc-select-rgb)) !important;
 }
-html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__tools { display: flex !important; align-items: center !important; gap: 2px !important; padding: 3px 2px !important; flex: none !important; }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap textarea::placeholder { color: var(--lc-ink-3) !important; opacity: 1 !important; }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__tools { display: flex !important; align-items: center !important; gap: 2px !important; padding: 3px 4px 3px 6px !important; flex: none !important; box-shadow: inset 1px 0 0 var(--lc-glass-line) !important; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn,
 html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn {
-  width: 30px !important;
-  height: 30px !important;
-  min-width: 30px !important;
-  border-radius: 8px !important;
-  color: var(--dsk-ink-3) !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  border-radius: 10px !important;
+  color: var(--lc-ink-3) !important;
   background: transparent !important;
   box-shadow: none !important;
-  transition: background 0.14s ease, color 0.14s ease;
+  transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
-html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn:hover:not(:disabled) { color: var(--dsk-ink) !important; background: var(--dsk-hover) !important; }
-html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn:disabled { opacity: 0.4 !important; }
-html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn.is-active { color: var(--dsk-accent) !important; background: var(--dsk-tile) !important; box-shadow: none !important; }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn:hover:not(:disabled) { color: var(--lc-ink-1) !important; background: var(--lc-glass-field) !important; box-shadow: inset 0 0 0 1px var(--lc-glass-field-line) !important; }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn:focus-visible { box-shadow: var(--lc-focus-ring) !important; }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn:disabled { opacity: 0.38 !important; }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn.is-active { color: var(--lc-accent-text) !important; background: var(--lc-accent-soft) !important; box-shadow: inset 0 0 0 1px var(--lc-accent-border) !important; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn svg { width: 16px !important; height: 16px !important; }
+/* quick actions: a glass key set into the material, the menu's anchor */
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__side .nx-composer-tool-btn {
+  width: 38px !important;
+  height: 38px !important;
+  min-width: 38px !important;
+  border-radius: 13px !important;
+  color: var(--lc-ink-2) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.06 * var(--lc-sheen))), transparent), var(--lc-glass-field) !important;
+  box-shadow: inset 0 0 0 1px var(--lc-glass-field-line), var(--lc-glass-sheen) !important;
+}
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__side .nx-composer-tool-btn.is-active { color: var(--lc-accent-text) !important; background: var(--lc-accent-soft) !important; box-shadow: inset 0 0 0 1px var(--lc-accent-border), 0 0 14px -4px var(--lc-accent-glow) !important; }
+/* Send: a quiet glass key at rest; the accent fills it the moment there is something to send */
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button {
-  width: 36px !important;
-  height: 36px !important;
-  min-width: 36px !important;
+  width: 38px !important;
+  height: 38px !important;
+  min-width: 38px !important;
   margin: 0 !important;
-  border-radius: 10px !important;
-  color: var(--dsk-ink-3) !important;
-  background: var(--dsk-tile) !important;
-  box-shadow: none !important;
+  border-radius: 13px !important;
+  color: var(--lc-ink-3) !important;
+  background: var(--lc-glass-field) !important;
+  box-shadow: inset 0 0 0 1px var(--lc-glass-field-line) !important;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s var(--lc-ease-spring, ease);
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button:not(:disabled),
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button.is-ready {
   color: var(--lc-primary-on) !important;
   background: var(--lc-primary-fill) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 6px 16px -8px color-mix(in srgb, rgb(var(--lc-primary-rgb)) 80%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), inset 0 0 0 0.5px rgb(255 255 255 / 0.12), 0 8px 20px -8px rgba(var(--lc-primary-rgb), 0.85), 0 0 0 1px rgba(var(--lc-primary-rgb), 0.35) !important;
   animation: none;
 }
+@media (hover: hover) and (pointer: fine) {
+  html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button:not(:disabled):hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.34), 0 12px 26px -10px rgba(var(--lc-primary-rgb), 0.95), 0 0 0 1px rgba(var(--lc-primary-rgb), 0.45) !important; }
+}
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button:not(:disabled):active { transform: translateY(0) scale(0.96); }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button:focus-visible { outline: none !important; box-shadow: var(--lc-focus-ring) !important; }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button.is-sending { opacity: 0.85 !important; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button svg { width: 16px !important; height: 16px !important; }
 
 /* one divider between list and conversation (the foundation sheet adds its own) */
@@ -801,7 +828,10 @@ html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-scheduled .nx-msg__receipt { color: rgb(var(--lc-primary-rgb)) !important; font-weight: 600 !important; }
 
-/* ── the composer, alive: a slow breathing glow that brightens as you type ── */
+/* ── the composer, alive: a slow breathing glow that brightens as you type ──
+   --nx-type (0–1) is lifted by each keystroke (Composer.tsx) and decays. The
+   glow is the accent's own halo token; Motion = Still (or animations off)
+   keeps the brightness response and drops the orbit and breathing. */
 @property --nx-glow-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock { position: relative !important; isolation: isolate; --nx-type: 0; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock::before {
@@ -809,27 +839,31 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
   position: absolute;
   inset: -1px;
   z-index: -1;
-  border-radius: 15px;
+  border-radius: 21px;
   pointer-events: none;
-  box-shadow: 0 0 calc(16px + 30px * var(--nx-type)) calc(-6px + 5px * var(--nx-type)) color-mix(in srgb, rgb(var(--lc-primary-rgb)) calc(34% + 46% * var(--nx-type)), transparent);
-  animation: nx-composer-breathe 5.4s ease-in-out infinite;
+  box-shadow: 0 0 calc(18px + 34px * var(--nx-type)) calc(-8px + 6px * var(--nx-type)) rgba(var(--lc-select-rgb), calc(0.22 + 0.5 * var(--nx-type)));
+  animation: nx-composer-breathe calc(5.4s / var(--lc-env-tempo, 1)) ease-in-out infinite;
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock::after {
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 14px;
+  border-radius: 20px;
   padding: 1px;
   pointer-events: none;
-  background: conic-gradient(from var(--nx-glow-a), color-mix(in srgb, rgb(var(--lc-primary-rgb)) 85%, transparent), transparent 22%, color-mix(in srgb, rgb(var(--lc-primary-rgb)) 35%, transparent) 50%, transparent 78%, color-mix(in srgb, rgb(var(--lc-primary-rgb)) 85%, transparent));
+  background: conic-gradient(from var(--nx-glow-a), rgba(var(--lc-select-rgb), 0.9), transparent 22%, rgba(var(--lc-select-rgb), 0.35) 50%, transparent 78%, rgba(var(--lc-select-rgb), 0.9));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  opacity: calc(0.28 + 0.62 * var(--nx-type));
-  animation: nx-composer-orbit 10s linear infinite;
+  opacity: calc(0.22 + 0.68 * var(--nx-type));
+  animation: nx-composer-orbit calc(10s / var(--lc-env-tempo, 1)) linear infinite;
 }
 @keyframes nx-composer-orbit { to { --nx-glow-a: 360deg; } }
 @keyframes nx-composer-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+html[data-lc-env-motion='still'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock::before,
+html[data-lc-env-motion='still'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock::after,
+html[data-lc-motion='off'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock::before,
+html[data-lc-motion='off'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock::after { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock::before,
   html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock::after { animation: none; }
@@ -891,26 +925,31 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
 html.is-desktop-modern .nx-qap-backdrop { background: transparent !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 html.is-desktop-modern .nx-qap-anchor.nx-quick-actions-popover {
   position: fixed !important;
-  width: 320px !important;
+  width: 324px !important;
   max-width: calc(100vw - 24px) !important;
-  max-height: min(460px, 62vh) !important;
+  max-height: min(470px, 62vh) !important;
   overflow-y: auto !important;
   padding: 6px !important;
   border: 0 !important;
-  border-radius: 14px !important;
+  border-radius: 16px !important;
   font-family: var(--dsk-font) !important;
-  color: var(--dsk-ink) !important;
-  background: rgb(var(--dsk-fill) / 0.78) !important;
-  -webkit-backdrop-filter: blur(26px) saturate(1.7) !important;
-  backdrop-filter: blur(26px) saturate(1.7) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px var(--dsk-edge-hi), 0 24px 60px -24px rgb(0 0 0 / 0.75) !important;
+  color: var(--lc-ink-1) !important;
+  /* the canonical menu glass — follows Material, Edge, Sheen; floored for reading */
+  background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.05 * var(--lc-sheen))) 0%, transparent 30%), var(--lc-glass-menu) !important;
+  -webkit-backdrop-filter: var(--lc-glass-filter-strong) !important;
+  backdrop-filter: var(--lc-glass-filter-strong) !important;
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-sheen), var(--lc-glass-shadow-menu) !important;
   animation: dsk-menu-in 0.18s var(--dsk-ease, ease) both !important;
   scrollbar-width: thin;
 }
-html.is-desktop-modern[data-nexus-theme='light'] .nx-qap-anchor.nx-quick-actions-popover {
-  background: rgb(255 255 255 / 0.7) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.95), inset 0 0 0 1px rgb(15 17 22 / 0.08), 0 24px 60px -28px rgb(30 40 90 / 0.35) !important;
-}
+html.is-desktop-modern .nx-qap-action-btn:hover:not(:disabled) > svg,
+html.is-desktop-modern .nx-qap-template-btn:hover:not(:disabled) > svg { color: var(--lc-accent-text) !important; }
+html.is-desktop-modern :is(.nx-qap-action-btn, .nx-qap-template-btn, .nx-qap-close):focus-visible { outline: none !important; box-shadow: var(--lc-focus-ring) !important; }
+html.is-desktop-modern .nx-qap-template-btn.is-staged { box-shadow: inset 0 0 0 1px var(--lc-accent-border) !important; background: var(--lc-accent-soft) !important; }
+html.is-desktop-modern .nx-qap-section-label { color: var(--lc-ink-3) !important; }
+html.is-desktop-modern :is(.nx-qap-templates, .nx-qap-actions, .nx-qap-section) { background: none !important; box-shadow: none !important; }
+html.is-desktop-modern.is-mobile-layout .nx-qap-section > :not(.nx-qap-section-label) { background: none !important; }
+html.is-desktop-modern .nx-qap-divider { height: 1px !important; margin: 4px 8px !important; background: var(--lc-glass-line) !important; }
 @keyframes dsk-menu-in { from { opacity: 0; transform: translateY(6px) scale(0.985); } }
 html.is-desktop-modern .nx-quick-actions-popover::before { display: none !important; }
 html.is-desktop-modern .nx-qap-header {
@@ -965,16 +1004,12 @@ html.is-desktop-modern .nx-sp {
   width: 420px !important;
   max-width: calc(100vw - 48px) !important;
   border-radius: 16px !important;
-  background: rgb(var(--dsk-fill) / 0.8) !important;
-  -webkit-backdrop-filter: blur(28px) saturate(1.7) !important;
-  backdrop-filter: blur(28px) saturate(1.7) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px var(--dsk-edge-hi), 0 30px 80px -30px rgb(0 0 0 / 0.8) !important;
+  background: var(--lc-glass-menu) !important;
+  -webkit-backdrop-filter: var(--lc-glass-filter-strong) !important;
+  backdrop-filter: var(--lc-glass-filter-strong) !important;
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-sheen), var(--lc-glass-shadow-menu) !important;
   font-family: var(--dsk-font) !important;
   animation: dsk-menu-in 0.2s var(--dsk-ease, ease) both !important;
-}
-html.is-desktop-modern[data-nexus-theme='light'] .nx-sp {
-  background: rgb(255 255 255 / 0.74) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.95), inset 0 0 0 1px rgb(15 17 22 / 0.08), 0 30px 80px -34px rgb(30 40 90 / 0.4) !important;
 }
 html.is-desktop-modern .nx-sp * { font-family: var(--dsk-font) !important; }
 html.is-desktop-modern .nx-sp__head { padding: 14px 16px 10px !important; border-bottom: 1px solid var(--dsk-edge) !important; }
@@ -999,15 +1034,11 @@ html.is-desktop-modern .nx-sp__item-desc { font-size: 12px !important; color: va
 html.is-desktop-modern .nx-mobile-header-actions-portal {
   padding: 5px !important;
   border-radius: 12px !important;
-  background: rgb(var(--dsk-fill) / 0.8) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(1.7) !important;
-  backdrop-filter: blur(24px) saturate(1.7) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px var(--dsk-edge-hi), 0 20px 50px -22px rgb(0 0 0 / 0.75) !important;
+  background: var(--lc-glass-menu) !important;
+  -webkit-backdrop-filter: var(--lc-glass-filter-strong) !important;
+  backdrop-filter: var(--lc-glass-filter-strong) !important;
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-sheen), var(--lc-glass-shadow-menu) !important;
   min-width: 180px !important;
-}
-html.is-desktop-modern[data-nexus-theme='light'] .nx-mobile-header-actions-portal {
-  background: rgb(255 255 255 / 0.74) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.95), inset 0 0 0 1px rgb(15 17 22 / 0.08), 0 20px 50px -26px rgb(30 40 90 / 0.35) !important;
 }
 html.is-desktop-modern .nx-mobile-header-actions-portal button {
   min-height: 32px !important;
