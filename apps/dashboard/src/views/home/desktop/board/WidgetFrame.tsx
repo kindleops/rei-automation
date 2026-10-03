@@ -67,14 +67,42 @@ class WidgetBoundary extends Component<{ name: string; children: ReactNode }, { 
   }
 }
 
+/**
+ * Is this widget on screen (with a 240px lead)? Geometry decides, not only an
+ * IntersectionObserver: the first answer is measured on the next frame after
+ * mount, then re-measured on scroll / resize of the board and on any observer
+ * notification. A widget therefore mounts and fetches on first paint even
+ * when an observer never delivers an intersecting entry (RC 8.3 regression:
+ * the body stayed an empty placeholder and nothing fetched).
+ */
 function useInView(ref: React.RefObject<HTMLElement | null>, root: HTMLElement | null) {
   const [inView, setInView] = useState(false)
   useEffect(() => {
     const el = ref.current
-    if (!el || typeof IntersectionObserver === 'undefined') { setInView(true); return }
-    const io = new IntersectionObserver((entries) => { for (const e of entries) setInView(e.isIntersecting) }, { root, rootMargin: '240px 0px' })
-    io.observe(el)
-    return () => io.disconnect()
+    if (!el) return
+    const LEAD = 240
+    const check = () => {
+      const r = el.getBoundingClientRect()
+      const b = root ? root.getBoundingClientRect() : { top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth }
+      setInView(r.width > 0 && r.height > 0 && r.bottom >= b.top - LEAD && r.top <= b.bottom + LEAD && r.right >= b.left && r.left <= b.right)
+    }
+    let raf = 0
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; check() }) }
+    schedule()
+    const scroller: HTMLElement | Window = root ?? window
+    scroller.addEventListener('scroll', schedule, { passive: true })
+    window.addEventListener('resize', schedule)
+    const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver(schedule, { root, rootMargin: `${LEAD}px 0px` }) : null
+    io?.observe(el)
+    const ro = typeof ResizeObserver !== 'undefined' && root ? new ResizeObserver(schedule) : null
+    ro?.observe(root!)
+    return () => {
+      cancelAnimationFrame(raf)
+      scroller.removeEventListener('scroll', schedule)
+      window.removeEventListener('resize', schedule)
+      io?.disconnect()
+      ro?.disconnect()
+    }
   }, [ref, root])
   return inView
 }
