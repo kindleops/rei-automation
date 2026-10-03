@@ -55,13 +55,14 @@ export function PageState({ problem, url, host, title, insecure, contextLabel, o
         </div>
         <h2 className="lcb-state__title">{copy.title}</h2>
         <p className="lcb-state__body">{copy.body}</p>
+        {problem.kind === 'external' ? <p className="lcb-state__why">Google and Zillow don't allow other apps to display them. Opens in your browser.</p> : null}
         <dl className="lcb-state__facts">
           {title ? <><dt>Page</dt><dd>{title}</dd></> : null}
           <dt>Link</dt><dd className="lcb-state__url">{url}</dd>
           {contextLabel ? <><dt>Researching</dt><dd>{contextLabel}</dd></> : null}
         </dl>
         <div className="lcb-state__actions">
-          <LCButton variant="primary" size="sm" icon="external-link" onClick={onOpenExternal}>Open externally</LCButton>
+          <LCButton variant="primary" size="md" icon="external-link" onClick={onOpenExternal} autoFocus={problem.kind === 'external'} className="lcb-state__open">Open {host ?? 'site'} in your browser</LCButton>
           <LCButton variant="secondary" size="sm" icon="link" onClick={onCopy}>Copy link</LCButton>
           {problem.kind !== 'external' ? <LCButton variant="secondary" size="sm" icon="refresh-cw" onClick={onRetry}>Try again</LCButton> : null}
           {onKeep ? <LCButton variant="ghost" size="sm" icon="bookmark" onClick={onKeep}>Keep research tab</LCButton> : null}

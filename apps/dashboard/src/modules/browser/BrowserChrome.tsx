@@ -34,7 +34,8 @@ export interface ChromeProps {
   onBack: () => void
   onForward: () => void
   onReload: () => void
-  onSubmit: (input: string) => void
+  /** true when the input navigated; false keeps the field focused for a correction */
+  onSubmit: (input: string) => boolean
   onExternal: () => void
   onToggleLink: () => void
 }
@@ -59,11 +60,20 @@ export function BrowserChrome({ addressRef, ...p }: ChromeProps) {
   const editing = draft && draft.tab === p.active.id && draft.url === p.active.url
   const value = editing ? draft!.text : (p.active.url ?? '')
 
+  /*
+   * Enter navigates and LEAVES the field (as every browser does). Before, the
+   * field kept focus with its draft cleared, so the next keystrokes were
+   * appended to the URL just shown ("https://google.com/zillow 3635…") and the
+   * next Enter went nowhere useful. A rejected input keeps focus and the text,
+   * so it can be corrected.
+   */
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (value.trim()) p.onSubmit(value)
-    setDraft(null)
+    if (!value.trim()) return
+    if (p.onSubmit(value)) { setDraft(null); addressRef.current?.blur() }
   }
+  // click into the field selects the whole address (the mouseup that follows focus must not collapse it)
+  const [selectOnUp, setSelectOnUp] = useState(false)
 
   const onDragStart = (e: DragEvent, id: string) => { setDragId(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/x-lc-browser-tab', id) }
   const onDrop = (e: DragEvent, index: number) => {
@@ -126,8 +136,9 @@ export function BrowserChrome({ addressRef, ...p }: ChromeProps) {
             className="lcb-addr__input"
             value={value}
             onChange={(e) => setDraft({ tab: p.active.id, url: p.active.url, text: e.target.value })}
-            onFocus={(e) => e.currentTarget.select()}
-            onBlur={() => setDraft(null)}
+            onFocus={(e) => { e.currentTarget.select(); setSelectOnUp(true) }}
+            onMouseUp={(e) => { if (selectOnUp) { e.preventDefault(); setSelectOnUp(false) } }}
+            onBlur={() => { setDraft(null); setSelectOnUp(false) }}
             onKeyDown={(e) => { if (e.key === 'Escape') { setDraft(null); e.currentTarget.blur() } }}
             placeholder="Search or enter address"
             aria-label="Address — search or enter a web address"

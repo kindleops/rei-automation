@@ -188,8 +188,18 @@ export const companySearchQuery = (c: ResearchCompany) => R.companySearchQuery(c
  * Anything unknown is EXTERNAL REQUIRED.
  */
 export function classify(url: string): { embed: EmbedMode; sandbox: string[]; destinationId: string | null } {
-  const c = R.classifyUrl(url)
+  let c = R.classifyUrl(url)
   if (!c.ok) return { embed: 'UNKNOWN', sandbox: [], destinationId: null }
+  // a bare host the operator typed ("google.com", "zillow.com") is the same site as its www. form:
+  // borrow that form's known REFUSAL so the card says why — never its permission to frame
+  if (c.embed === 'UNKNOWN' && c.host && !c.host.startsWith('www.')) {
+    try {
+      const u = new URL(c.url ?? url)
+      u.hostname = `www.${u.hostname}`
+      const alt = R.classifyUrl(u.toString())
+      if (alt.ok && alt.embed !== 'EMBEDS' && alt.embed !== 'UNKNOWN') c = { ...c, embed: alt.embed, destination_id: alt.destination_id }
+    } catch { /* keep UNKNOWN */ }
+  }
   const embed: EmbedMode = c.embed ?? 'UNKNOWN'
   return { embed, sandbox: embed === 'EMBEDS' ? [...(c.sandbox ?? [])] : [], destinationId: c.destination_id ?? null }
 }

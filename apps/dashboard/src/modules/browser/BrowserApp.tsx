@@ -136,13 +136,14 @@ function BrowserDesktop() {
     remember(g.url, extra.title ?? null, extra.context ?? s.subject)
   }
 
-  const navigateActive = (input: string) => {
+  const navigateActive = (input: string): boolean => {
     const r = interpretInput(input, PROVIDER)
-    if (r.kind === 'invalid') { setAddressError(GUARD_MESSAGE[r.reason]); return }
+    if (r.kind === 'invalid') { setAddressError(GUARD_MESSAGE[r.reason]); return false }
     setAddressError(null)
     const init = describe(r.url, { title: r.kind === 'search' ? `Search · ${r.query}` : null })
     mutate(({ s: cs, h: ch }) => M.navigate(cs, ch, cs.activeId, init, now()))
     remember(r.url, init.title ?? null, active.context)
+    return true
   }
 
   const openItem = (item: LaunchItem, ctx: M.ResearchSubject | null, newTab = false) => {
@@ -335,7 +336,7 @@ function BrowserDesktop() {
           subject={active.context ?? s.subject}
           provider={PROVIDER}
           notice={notices[active.id] ?? null}
-          onSearch={(q) => navigateActive(q)}
+          onSearch={(q) => { navigateActive(q) }}
           onOpenItem={(item, ctx) => openItem(item, ctx)}
           onOpenRecent={(r: RecentItem) => openUrl(r.url, { title: r.title })}
         />

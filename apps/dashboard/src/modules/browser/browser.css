@@ -317,6 +317,8 @@
 .lcb-state__glyph { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--lc-r-md); background: var(--lc-accent-soft); color: var(--lc-accent-text); }
 .lcb-state__title { margin: 14px 0 6px; font-size: 18px; font-weight: 600; letter-spacing: var(--lc-track-tight, -0.01em); color: var(--lc-ink-1); }
 .lcb-state__body { margin: 0 0 14px; font-size: 13px; line-height: 1.55; color: var(--lc-ink-2); }
+.lcb-state__why { margin: -6px 0 14px; padding: 8px 10px; border-radius: var(--lc-r-md); background: var(--lc-inner-bg-hover); font-size: 12.5px; line-height: 1.5; color: var(--lc-ink-1); }
+.lcb-state__open { min-width: 200px; }
 .lcb-state__facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; margin: 0 0 16px; font-size: 12px; }
 .lcb-state__facts dt { color: var(--lc-ink-3); }
 .lcb-state__facts dd { margin: 0; color: var(--lc-ink-1); overflow-wrap: anywhere; }
