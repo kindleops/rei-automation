@@ -38,10 +38,83 @@
  * @property {string|null} [terms_note]     what the terms allow, in one line (internal)
  * @property {number} priority              dedupe: lower wins (official owner first)
  * @property {object} [adapter_config]      adapter-specific, non-secret
+ * @property {{west:number,south:number,east:number,north:number}} [bounds]  where its cameras can be (a viewport outside never pulls it)
  */
 
-/** @type {CameraProvider[]} — entries land with their adapter + contract test. */
-export const CAMERA_PROVIDERS = []
+/** @type {CameraProvider[]} — every entry has its adapter + a contract test on a real response fixture. */
+export const CAMERA_PROVIDERS = [
+  {
+    domain: 'cameras',
+    provider_id: 'mn_mndot_iris',
+    name: 'MnDOT',
+    state: 'MN',
+    region: null,
+    provider_type: 'state_dot',
+    adapter_type: 'mndot_iris',
+    coverage_status: 'FULL',
+    enabled_by_default: true,
+    requires_api_key: false,
+    api_key_env: null,
+    image_policy: 'proxy',
+    image_hosts: ['video.dot.state.mn.us'],
+    metadata_hosts: ['data.dot.state.mn.us'],
+    refresh_interval_sec: 6 * 3600,
+    snapshot_cadence_sec: 60,
+    attribution: 'Minnesota Department of Transportation (MnDOT) · 511MN',
+    terms_url: 'https://www.dot.state.mn.us/information/disclaimer.html',
+    terms_note: 'Public government data (Minn. Stat. §13.03); no camera licence published. Proxy a still briefly in memory, never persist, credit MnDOT, no framing.',
+    priority: 10,
+    bounds: { west: -97.3, south: 43.4, east: -89.4, north: 49.1 },
+  },
+  {
+    domain: 'cameras',
+    provider_id: 'tx_txdot_its',
+    name: 'TxDOT ITS',
+    state: 'TX',
+    region: 'Dallas · Fort Worth · Houston · San Antonio · Austin',
+    provider_type: 'state_dot',
+    adapter_type: 'txdot_its',
+    coverage_status: 'METADATA_ONLY',
+    enabled_by_default: true,
+    requires_api_key: false,
+    api_key_env: null,
+    // Imagery is not cleared for reuse: positions + status + a link to TxDOT's own page.
+    image_policy: 'link_only',
+    image_hosts: [],
+    metadata_hosts: ['its.txdot.gov'],
+    refresh_interval_sec: 3600,
+    snapshot_cadence_sec: null,
+    attribution: 'Texas Department of Transportation (TxDOT) ITS',
+    terms_url: 'https://www.txdot.gov/about/disclaimer.html',
+    terms_note: 'Internal (undocumented) public JSON; terms silent on image reuse. Link-only until TxDOT grants a data-sharing agreement.',
+    priority: 20,
+    adapter_config: { districts: ['DAL', 'FTW', 'HOU', 'SAT', 'AUS'] },
+    bounds: { west: -100.2, south: 28.6, east: -94.3, north: 33.6 },
+  },
+  {
+    domain: 'cameras',
+    provider_id: 'tx_austin_mobility',
+    name: 'City of Austin',
+    state: 'TX',
+    region: 'Austin',
+    provider_type: 'municipal',
+    adapter_type: 'austin_mobility',
+    coverage_status: 'METRO_ONLY',
+    enabled_by_default: true,
+    requires_api_key: false,
+    api_key_env: null,
+    image_policy: 'proxy',
+    image_hosts: ['cctv.austinmobility.io'],
+    metadata_hosts: ['data.austintexas.gov'],
+    refresh_interval_sec: 6 * 3600,
+    snapshot_cadence_sec: 300,
+    attribution: 'City of Austin Transportation & Public Works · data.austintexas.gov',
+    terms_url: 'https://data.austintexas.gov/stories/s/City-of-Austin-Open-Data-Terms-of-Use/ranj-cccq/',
+    terms_note: 'Public domain ("free and without restriction"); credit the City and the department.',
+    priority: 30,
+    bounds: { west: -98.2, south: 29.9, east: -97.4, north: 30.7 },
+  },
+]
 
 export const US_STATES = Object.freeze({
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware',

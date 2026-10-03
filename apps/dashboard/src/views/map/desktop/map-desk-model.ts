@@ -137,7 +137,7 @@ export function resolveDeskPinClick({ sameProperty, cardState }: { sameProperty:
 
 // ── The sensor array (Layers) ───────────────────────────────────────────────
 
-export type SensorGroupId = 'properties' | 'market' | 'boundaries' | 'world' | 'operations'
+export type SensorGroupId = 'properties' | 'market' | 'boundaries' | 'context' | 'world' | 'operations'
 export type SensorStatus = 'live' | 'on' | 'waiting' | 'off' | 'unavailable'
 
 export interface SensorRow {
@@ -186,6 +186,8 @@ export interface SensorInput {
   /** Boundary overlay levels: on, and the server's answer for the current view. */
   boundaryState?: BoundaryRowInput
   boundaryZip?: BoundaryRowInput
+  /** [8.4] Context overlays (cameras, crime, investor presence) — context/context-model. */
+  context?: SensorGroup
 }
 
 /** What the boundary hook knows about one level (useMapBoundaries). */
@@ -250,6 +252,7 @@ export function buildSensorArray(s: SensorInput): SensorGroup[] {
         // source exists; the database has none today (8.2 audit), so no row.
       ],
     },
+    ...(s.context ? [s.context] : []),
     {
       id: 'world',
       label: 'Live world',
@@ -280,9 +283,8 @@ export function buildSensorArray(s: SensorInput): SensorGroup[] {
           id: 'relief', label: 'Terrain relief', sub: 'Shaded hills from real elevation; lifted into 3D while tilted', status: s.relief ? 'on' : 'off', on: s.relief,
           available: true, supports: S(true),
         },
-        // Traffic cameras join this group when a camera source is connected
-        // (CAM-D). Until then there is no row at all: the Map does not
-        // advertise a sensor it cannot read (owner, 2026-09-30).
+        // [8.4] Traffic cameras are connected (MnDOT, TxDOT ITS, City of
+        // Austin) and live with the other context overlays, not here.
       ],
     },
     {

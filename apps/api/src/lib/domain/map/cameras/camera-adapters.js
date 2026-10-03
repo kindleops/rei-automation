@@ -17,5 +17,13 @@
  *       Otherwise the stored still_url is used.
  */
 
+import { mndotIrisAdapter } from './adapters/mndot-iris.js'
+import { txdotItsAdapter } from './adapters/txdot-its.js'
+import { austinMobilityAdapter } from './adapters/austin-mobility.js'
+
 /** @type {Record<string, { listRaw: Function, normalize: Function, snapshotRequest?: Function }>} */
-export const CAMERA_ADAPTERS = {}
+export const CAMERA_ADAPTERS = {
+  mndot_iris: mndotIrisAdapter,
+  txdot_its: txdotItsAdapter,
+  austin_mobility: austinMobilityAdapter,
+}

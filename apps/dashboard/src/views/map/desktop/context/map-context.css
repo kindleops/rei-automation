@@ -1,0 +1,96 @@
+/*
+ * [8.4] Map context overlays — Layers plates, legend entries and the glass
+ * preview (camera · reported incident · investor presence). Desktop only:
+ * everything is scoped to html.is-desktop-modern .mx.is-desk and reads the
+ * desk's own glass and accent tokens (--mxg-*), so every theme (dark, light,
+ * true black, red ops) follows without a rule of its own. No colour here is
+ * red: nothing on these overlays is a failure.
+ */
+
+/* ── preview card (sits in the bottom-left instrument column, above the legend) ── */
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card {
+  position: relative;
+  width: min(340px, calc(100cqw - var(--mxd-col-x) - 80px));
+  border-radius: 14px;
+  overflow: hidden;
+  color: var(--mxg-ink);
+  font-family: var(--mxd-font);
+  background:
+    radial-gradient(120% 50% at 0% 0%, color-mix(in srgb, var(--mxg-accent) 6%, transparent), transparent 62%),
+    linear-gradient(180deg, var(--mxg-sheen), transparent 30%),
+    var(--mxg-l3);
+  -webkit-backdrop-filter: var(--mxg-blur-3);
+  backdrop-filter: var(--mxg-blur-3);
+  box-shadow: inset 0 1px 0 var(--mxg-spec), inset 0 0 0 1px var(--mxg-edge), var(--mxg-shadow-3);
+  pointer-events: auto;
+  animation: mxd-ctx-in 0.26s var(--mxg-ease) both;
+}
+@keyframes mxd-ctx-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+html[data-lc-motion='off'] .mx.is-desk .mxd-ctx-card { animation: none; }
+@media (prefers-reduced-motion: reduce) { html.is-desktop-modern .mx.is-desk .mxd-ctx-card { animation: none; } }
+
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card__head { display: flex; align-items: center; gap: 10px; padding: 11px 10px 9px 12px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card__glyph {
+  flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px;
+  background: var(--mxg-well); box-shadow: var(--mxg-recess); color: var(--mxg-accent);
+}
+html.is-desktop-modern .mx.is-desk .mxd-ctx-dot { display: block; width: 9px; height: 9px; border-radius: 50%; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card__title { min-width: 0; flex: 1; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card__title h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -0.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card__title p { margin: 1px 0 0; font-size: 11.5px; color: var(--mxg-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+html.is-desktop-modern .mx.is-desk .mxd-ctx-still {
+  position: relative; margin: 0 10px; aspect-ratio: 3 / 2; border-radius: 10px; overflow: hidden;
+  display: grid; place-items: center; background: var(--mxg-well); box-shadow: var(--mxg-recess);
+}
+html.is-desktop-modern .mx.is-desk .mxd-ctx-still.is-link { aspect-ratio: auto; min-height: 64px; padding: 12px 14px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-still img { width: 100%; height: 100%; object-fit: cover; display: block; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-still__state { font-size: 11.5px; color: var(--mxg-ink-3); text-align: center; padding: 0 16px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-still__tag {
+  position: absolute; top: 8px; right: 8px; padding: 2px 7px; border-radius: 6px; font-style: normal;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--mxg-ink-2); background: color-mix(in srgb, var(--mxg-l4) 82%, transparent); box-shadow: inset 0 0 0 1px var(--mxg-edge);
+}
+html.is-desktop-modern .mx.is-desk .mxd-ctx-still.is-link .mxd-ctx-still__tag { position: static; justify-self: start; margin-top: 8px; }
+
+html.is-desktop-modern .mx.is-desk .mxd-ctx-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin: 10px 12px 2px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-facts > div { min-width: 0; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-facts dt { font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-facts dd { margin: 2px 0 0; font-size: 12px; color: var(--mxg-ink-2); font-variant-numeric: tabular-nums; }
+
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card__foot { display: flex; align-items: center; gap: 10px; padding: 10px 12px 11px; margin-top: 8px; border-top: 1px solid var(--mxg-rule); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card__actions { display: inline-flex; gap: 6px; margin-left: auto; flex: none; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card__actions a.mxd-btn { text-decoration: none; display: inline-flex; align-items: center; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-credit { min-width: 0; font-size: 10.5px; color: var(--mxg-ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .mx.is-desk .mxd-ctl__note.mxd-ctx-credit { white-space: normal; }
+
+/* ── the two-component breakdown (presence) ── */
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 2px 0 0; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split.is-card { margin: 0 12px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split > div { min-width: 0; padding: 9px 10px; border-radius: 10px; background: var(--mxg-well); box-shadow: inset 0 0 0 1px var(--mxg-edge-lo); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split dt { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split dt > i { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split dt > i.is-ring { background: transparent; border: 1.6px solid; width: 9px; height: 9px; box-sizing: border-box; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split dd { margin: 4px 0 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; color: var(--mxg-ink); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split dd > span { display: block; font-size: 11px; font-weight: 400; letter-spacing: 0; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split p { margin: 6px 0 0; font-size: 10.5px; line-height: 1.35; color: var(--mxg-ink-4); }
+
+/* ── crime categories inside the Layers plate ── */
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cats { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cats li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--mxg-ink-2); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cats li > i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cats li > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cats li > em { font-style: normal; color: var(--mxg-ink-3); font-variant-numeric: tabular-nums; }
+
+/* ── legend swatches (inside .mxd-legend__bounds) ── */
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch { width: 8px; height: 8px; border: 0; border-radius: 50%; opacity: 1; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch.is-cam { background: #5cc8ff; box-shadow: 0 0 0 1.5px color-mix(in srgb, #5cc8ff 45%, transparent); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch.is-dot { background: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch.is-ring { background: transparent; border: 1.6px solid; width: 9px; height: 9px; box-sizing: border-box; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound.is-quiet { opacity: 0.7; }
+
+/* compact pane: the preview spans the instrument column */
+@container mxd (max-width: 900px) {
+  html.is-desktop-modern .mx.is-desk .mxd-ctx-card { width: min(320px, calc(100cqw - var(--mxd-col-x) - 24px)); }
+  html.is-desktop-modern .mx.is-desk .mxd-ctx-facts { grid-template-columns: 1fr; }
+}

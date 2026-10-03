@@ -1,0 +1,148 @@
+{
+ "cctvStatusRoadways": [
+  {
+   "name": "IH20",
+   "direction": 3,
+   "directionDescription": "East",
+   "ctts": []
+  },
+  {
+   "name": "IH30",
+   "direction": 3,
+   "directionDescription": "East",
+   "ctts": []
+  }
+ ],
+ "roadwayCctvStatuses": {
+  "IH20": [
+   {
+    "dirDescription": "East",
+    "displayOrder": 0,
+    "distance": 0.0,
+    "equipLoc": {
+     "direction": "East",
+     "locationDescription": null,
+     "roadway": "IH20",
+     "roadwayWithoutHyphensOrSpaces": "IH20"
+    },
+    "hasSnapshot": true,
+    "icd_Id": "IH20 @ Dallas-Tarrant CL",
+    "latitude": 32.676316,
+    "latString": "32.676316",
+    "longitude": -97.03583599999999,
+    "lonString": "-97.03583599999999",
+    "name": "IH20 @ Dallas-Tarrant CL",
+    "netId": "DAL1",
+    "roadwayOrder": 2,
+    "statusDescription": "Device Online"
+   },
+   {
+    "dirDescription": "East",
+    "displayOrder": 1,
+    "distance": 0.0,
+    "equipLoc": {
+     "direction": "East",
+     "locationDescription": null,
+     "roadway": "IH20",
+     "roadwayWithoutHyphensOrSpaces": "IH20"
+    },
+    "hasSnapshot": true,
+    "icd_Id": "IH20 @ PGBT (SH161)",
+    "latitude": 32.676351,
+    "latString": "32.676351",
+    "longitude": -97.024915,
+    "lonString": "-97.024915",
+    "name": "IH20 @ PGBT (SH161)",
+    "netId": "DAL1",
+    "roadwayOrder": 4,
+    "statusDescription": "Device Online"
+   },
+   {
+    "dirDescription": "East",
+    "displayOrder": 2,
+    "distance": 0.0,
+    "equipLoc": {
+     "direction": "East",
+     "locationDescription": null,
+     "roadway": "IH20",
+     "roadwayWithoutHyphensOrSpaces": "IH20"
+    },
+    "hasSnapshot": true,
+    "icd_Id": "IH20 @ Robinson Rd",
+    "latitude": 32.675986,
+    "latString": "32.675986",
+    "longitude": -97.014343,
+    "lonString": "-97.014343",
+    "name": "IH20 @ Robinson Rd",
+    "netId": "DAL1",
+    "roadwayOrder": 6,
+    "statusDescription": "Device Online"
+   }
+  ],
+  "IH30": [
+   {
+    "dirDescription": "East",
+    "displayOrder": 0,
+    "distance": 0.0,
+    "equipLoc": {
+     "direction": "East",
+     "locationDescription": null,
+     "roadway": "IH30",
+     "roadwayWithoutHyphensOrSpaces": "IH30"
+    },
+    "hasSnapshot": true,
+    "icd_Id": "IH30 @ Loop 12 EB TRDMS Sta 1251+20",
+    "latitude": 32.758443,
+    "latString": "32.758443",
+    "longitude": -96.926321,
+    "lonString": "-96.926321",
+    "name": "IH30 @ Loop 12 EB TRDMS Sta 1251+20",
+    "netId": "DAL1",
+    "roadwayOrder": 133,
+    "statusDescription": "Device Online"
+   },
+   {
+    "dirDescription": "East",
+    "displayOrder": 1,
+    "distance": 0.0,
+    "equipLoc": {
+     "direction": "East",
+     "locationDescription": null,
+     "roadway": "IH30",
+     "roadwayWithoutHyphensOrSpaces": "IH30"
+    },
+    "hasSnapshot": true,
+    "icd_Id": "IH30 @ Loop 12 WB TRDMS Sta 1251-37",
+    "latitude": 32.767022,
+    "latString": "32.767022",
+    "longitude": -96.91407699999999,
+    "lonString": "-96.91407699999999",
+    "name": "IH30 @ Loop 12 WB TRDMS Sta 1251-37",
+    "netId": "DAL1",
+    "roadwayOrder": 134,
+    "statusDescription": "Device Online"
+   },
+   {
+    "dirDescription": "East",
+    "displayOrder": 2,
+    "distance": 0.0,
+    "equipLoc": {
+     "direction": "East",
+     "locationDescription": null,
+     "roadway": "IH30",
+     "roadwayWithoutHyphensOrSpaces": "IH30"
+    },
+    "hasSnapshot": true,
+    "icd_Id": "IH30 @ Belt Line EBFR TRDMS Sta 1033+00",
+    "latitude": 32.759287,
+    "latString": "32.759287",
+    "longitude": -96.993701,
+    "lonString": "-96.993701",
+    "name": "IH30 @ Belt Line EBFR TRDMS Sta 1033+00",
+    "netId": "DAL1",
+    "roadwayOrder": 135,
+    "statusDescription": "Device Online"
+   }
+  ]
+ }
+}

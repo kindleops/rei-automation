@@ -1,11 +1,18 @@
-import { getSupabaseClient } from '../supabaseClient'
+/**
+ * Census point layer — one point per ACS ZIP (ZCTA) cell, carrying the real
+ * published value for the chosen metric.
+ *
+ * Reads the census read model (GET /api/cockpit/map/census, backed by
+ * exchange_market_fundamentals_cells — US Census ACS 5-year). It used to
+ * read public.census_geo_metrics "heat scores" (income_heat_score,
+ * acquisition_pressure_score …) that were never computed: that table has
+ * never held a row. There are no scores here — `value` is the ACS value as
+ * published (shares 0..1, dollars, years), and `acquisition_pressure` is gone
+ * because nothing real ever fed it.
+ */
+import { fetchCensusCells, type CensusCell } from './censusData'
 
-export type CensusMetric =
-  | 'income_heat'
-  | 'vacancy_heat'
-  | 'renter_density'
-  | 'housing_age'
-  | 'acquisition_pressure'
+export type CensusMetric = 'income_heat' | 'vacancy_heat' | 'renter_density' | 'housing_age'
 
 export interface CensusLayerPoint {
   id: string
@@ -13,17 +20,13 @@ export interface CensusLayerPoint {
   label: string
   lat: number
   lng: number
+  /** The ACS value for `metric`, as published. */
   value: number
-  score: number
   metric: CensusMetric
   geo_level: string
   geo_key: string
+  source: string
   metadata: {
-    income_heat_score: number
-    vacancy_heat_score: number
-    renter_density_score: number
-    housing_age_score: number
-    acquisition_pressure_score: number
     median_household_income: number | null
     vacancy_rate: number | null
     renter_rate: number | null
@@ -31,77 +34,40 @@ export interface CensusLayerPoint {
   }
 }
 
-const METRIC_SCORE_FIELD: Record<CensusMetric, string> = {
-  income_heat: 'income_heat_score',
-  vacancy_heat: 'vacancy_heat_score',
-  renter_density: 'renter_density_score',
-  housing_age: 'housing_age_score',
-  acquisition_pressure: 'acquisition_pressure_score',
+const VALUE: Record<CensusMetric, (c: CensusCell) => number | null> = {
+  income_heat: (c) => c.median_household_income,
+  vacancy_heat: (c) => c.vacancy_rate,
+  renter_density: (c) => c.renter_share,
+  housing_age: (c) => c.median_year_built,
 }
 
-const METRIC_VALUE_FIELD: Record<CensusMetric, string> = {
-  income_heat: 'median_household_income',
-  vacancy_heat: 'vacancy_rate',
-  renter_density: 'renter_rate',
-  housing_age: 'housing_age',
-  acquisition_pressure: 'acquisition_pressure_score',
-}
+const US = '-125,24,-66,49.5'
 
-export const loadCensusLayerPoints = async (
-  metric: CensusMetric,
-  limit = 750,
-): Promise<CensusLayerPoint[]> => {
-  const supabase = getSupabaseClient()
-  const scoreField = METRIC_SCORE_FIELD[metric]
-  const valueField = METRIC_VALUE_FIELD[metric]
-
-  const { data, error } = await supabase
-    .from('census_geo_metrics')
-    .select([
-      'geo_level', 'geoid', 'name',
-      'centroid_lat', 'centroid_lng',
-      'income_heat_score', 'vacancy_heat_score', 'renter_density_score',
-      'housing_age_score', 'acquisition_pressure_score',
-      'median_household_income', 'vacancy_rate', 'renter_rate', 'housing_age',
-    ].join(','))
-    .gt(scoreField, 0)
-    .order(scoreField, { ascending: false })
-    .limit(limit)
-
-  if (error || !data) return []
-
-  return (data as unknown as Record<string, unknown>[])
-    .filter((row) => {
-      const lat = Number(row['centroid_lat'])
-      const lng = Number(row['centroid_lng'])
-      return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0
+export const loadCensusLayerPoints = async (metric: CensusMetric, limit = 750, bbox: string = US): Promise<CensusLayerPoint[]> => {
+  const cells = await fetchCensusCells({ bbox, level: 'zip' })
+  const out: CensusLayerPoint[] = []
+  for (const c of cells) {
+    const v = VALUE[metric](c)
+    if (v === null || !Number.isFinite(v) || c.lat === null || c.lng === null) continue
+    out.push({
+      id: `census-${c.census_geoid}-${metric}`,
+      layer: 'census',
+      label: c.name,
+      lat: c.lat,
+      lng: c.lng,
+      value: v,
+      metric,
+      geo_level: c.level,
+      geo_key: c.census_geoid,
+      source: `${c.source.attribution} ${c.source.vintage ?? ''}`.trim(),
+      metadata: {
+        median_household_income: c.median_household_income,
+        vacancy_rate: c.vacancy_rate,
+        renter_rate: c.renter_share,
+        housing_age: c.median_year_built,
+      },
     })
-    .map((row): CensusLayerPoint => {
-      const score = Number(row[scoreField] ?? 0)
-      const value = Number(row[valueField] ?? 0)
-      const geoid = String(row['geoid'] ?? '')
-      return {
-        id: `census-${geoid}-${metric}`,
-        layer: 'census',
-        label: String(row['name'] ?? geoid),
-        lat: Number(row['centroid_lat']),
-        lng: Number(row['centroid_lng']),
-        value,
-        score,
-        metric,
-        geo_level: String(row['geo_level'] ?? ''),
-        geo_key: geoid,
-        metadata: {
-          income_heat_score: Number(row['income_heat_score'] ?? 0),
-          vacancy_heat_score: Number(row['vacancy_heat_score'] ?? 0),
-          renter_density_score: Number(row['renter_density_score'] ?? 0),
-          housing_age_score: Number(row['housing_age_score'] ?? 0),
-          acquisition_pressure_score: Number(row['acquisition_pressure_score'] ?? 0),
-          median_household_income: row['median_household_income'] != null ? Number(row['median_household_income']) : null,
-          vacancy_rate: row['vacancy_rate'] != null ? Number(row['vacancy_rate']) : null,
-          renter_rate: row['renter_rate'] != null ? Number(row['renter_rate']) : null,
-          housing_age: row['housing_age'] != null ? Number(row['housing_age']) : null,
-        },
-      }
-    })
+    if (out.length >= limit) break
+  }
+  return out
 }

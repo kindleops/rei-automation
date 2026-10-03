@@ -1,6 +1,6 @@
 import type { Feature, FeatureCollection, GeoJsonProperties, Polygon } from 'geojson'
 import { calculateInvestorOpportunityScore, type CensusData, type CensusMetricExtended } from '../data/censusData'
-import { getSupabaseClient } from '../supabaseClient'
+import { fetchCensusCells, type CensusCell } from '../data/censusData'
 
 export type CensusOverlayMetric = CensusMetricExtended | 'population_density'
 export type CensusOverlayGeographyType = 'state' | 'county' | 'zip' | 'tract'
@@ -74,19 +74,12 @@ type CensusGeoMetricsRow = {
   owner_occupancy_rate?: number | null
   housing_age?: number | null
   acquisition_pressure_score?: number | null
+  /** Two-letter state from the cell itself (a ZCTA's digits are not a state FIPS). */
+  state_code?: string | null
 }
 
 const USA_BOUNDS: CensusOverlayQueryBounds = { west: -125, south: 24, east: -66, north: 49.5 }
 const overlayCache = new Map<string, CensusOverlayFeature[]>()
-const DETAIL_SELECT = [
-  'geo_level', 'geoid', 'name',
-  'centroid_lat', 'centroid_lng',
-  'total_population', 'total_households', 'total_housing_units',
-  'vacant_housing_units', 'owner_occupied_units', 'renter_occupied_units',
-  'median_year_built', 'median_household_income',
-  'vacancy_rate', 'renter_rate', 'owner_occupancy_rate', 'housing_age',
-  'acquisition_pressure_score',
-].join(',')
 
 const STATE_FIPS: Record<string, { abbr: string; name: string }> = {
   '01': { abbr: 'AL', name: 'Alabama' },
@@ -204,7 +197,11 @@ const polygonForCentroid = (lng: number, lat: number, type: CensusOverlayGeograp
   return polygonForBounds(lng - size.lng, lat - size.lat, lng + size.lng, lat + size.lat)
 }
 
-const getStateInfo = (geoid?: string | null) => {
+const getStateInfo = (geoid?: string | null, stateCode?: string | null) => {
+  if (stateCode) {
+    const hit = Object.values(STATE_FIPS).find((item) => item.abbr === stateCode)
+    if (hit) return hit
+  }
   const key = String(geoid ?? '').slice(0, 2)
   return STATE_FIPS[key] ?? null
 }
@@ -340,7 +337,7 @@ const toFeatureFromRow = (row: CensusGeoMetricsRow, geographyType: CensusOverlay
   const lat = Number(row.centroid_lat ?? NaN)
   const lng = Number(row.centroid_lng ?? NaN)
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
-  const info = getStateInfo(row.geoid)
+  const info = getStateInfo(row.geoid, row.state_code)
   const census = rowToCensusData(row)
   const opportunity = calculateInvestorOpportunityScore(census)
   const polygon = polygonForCentroid(lng, lat, geographyType)
@@ -392,7 +389,7 @@ const weighted = (pairs: Array<[number | undefined, number | undefined]>) => {
 const aggregateStates = (rows: CensusGeoMetricsRow[]): CensusOverlayFeature[] => {
   const grouped = new Map<string, CensusGeoMetricsRow[]>()
   rows.forEach((row) => {
-    const state = getStateInfo(row.geoid)
+    const state = getStateInfo(row.geoid, row.state_code)
     const key = state?.abbr ?? 'NA'
     const current = grouped.get(key) ?? []
     current.push(row)
@@ -460,21 +457,50 @@ const aggregateStates = (rows: CensusGeoMetricsRow[]): CensusOverlayFeature[] =>
   })
 }
 
-const queryRows = async (bounds: CensusOverlayQueryBounds, geoLevels: string[]) => {
-  const supabase = getSupabaseClient()
-  const query = supabase
-    .from('census_geo_metrics')
-    .select(DETAIL_SELECT)
-    .in('geo_level', geoLevels)
-    .gte('centroid_lat', bounds.south)
-    .lte('centroid_lat', bounds.north)
-    .gte('centroid_lng', bounds.west)
-    .lte('centroid_lng', bounds.east)
-    .limit(2400)
+/**
+ * ACS cells → the row shape this module has always aggregated. Source: the
+ * census read model (GET /api/cockpit/map/census → exchange_market_fundamentals_cells,
+ * US Census ACS 5-year). It used to query public.census_geo_metrics, which has
+ * never held a row. Shares become percents (the overlay's unit); counts the
+ * cells do not publish stay null. There are no tract cells, so 'tract' asks
+ * for nothing and the caller's ZIP fallback applies.
+ */
+const LEVEL_FOR: Record<string, 'zip' | 'county' | 'city' | 'state' | null> = { zcta: 'zip', zip: 'zip', county: 'county', city: 'city', state: 'state', tract: null }
+const share = (v: number | null) => (v === null || !Number.isFinite(v) ? null : v * 100)
 
-  const { data, error } = await query
-  if (error || !data) return []
-  return data as CensusGeoMetricsRow[]
+export const cellToCensusRow = (c: CensusCell, geoLevel: string): CensusGeoMetricsRow => ({
+  geo_level: geoLevel,
+  geoid: c.census_geoid,
+  name: c.name,
+  centroid_lat: c.lat,
+  centroid_lng: c.lng,
+  total_population: c.population,
+  total_households: c.households,
+  total_housing_units: c.housing_units,
+  vacant_housing_units: c.housing_units !== null && c.vacancy_rate !== null ? Math.round(c.housing_units * c.vacancy_rate) : null,
+  owner_occupied_units: c.households !== null && c.owner_share !== null ? Math.round(c.households * c.owner_share) : null,
+  renter_occupied_units: c.households !== null && c.renter_share !== null ? Math.round(c.households * c.renter_share) : null,
+  median_year_built: c.median_year_built,
+  median_household_income: c.median_household_income,
+  vacancy_rate: share(c.vacancy_rate),
+  renter_rate: share(c.renter_share),
+  owner_occupancy_rate: share(c.owner_share),
+  housing_age: null,
+  acquisition_pressure_score: null,
+  state_code: c.state,
+})
+
+const queryRows = async (bounds: CensusOverlayQueryBounds, geoLevels: string[]) => {
+  const rows: CensusGeoMetricsRow[] = []
+  for (const geoLevel of geoLevels) {
+    const level = LEVEL_FOR[geoLevel]
+    if (!level) continue
+    try {
+      const cells = await fetchCensusCells({ bbox: [bounds.west, bounds.south, bounds.east, bounds.north].map((v) => v.toFixed(4)).join(','), level })
+      for (const c of cells) rows.push(cellToCensusRow(c, geoLevel))
+    } catch { /* no rows is the honest answer */ }
+  }
+  return rows
 }
 
 export const loadStateCensusSummary = async (state: string, metric: CensusOverlayMetric): Promise<CensusOverlayFeature | null> => {

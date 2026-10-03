@@ -67,7 +67,7 @@ function OpacitySlider({ value, onChange, label }: { value: number; onChange: (v
   )
 }
 
-function Plate({ row, onToggle, children }: { row: SensorRow; onToggle?: (v: boolean) => void; children?: ReactNode }) {
+export function Plate({ row, onToggle, children }: { row: SensorRow; onToggle?: (v: boolean) => void; children?: ReactNode }) {
   return (
     <div className={cls('mxd-plate', `is-${row.status}`, !row.available && 'is-disabled', row.on && row.available && 'is-on')} data-layer={row.id}>
       <div className="mxd-plate__row">
@@ -132,6 +132,8 @@ export interface MapDeskLayersProps {
   onActivityScope: (s: ActivityScope) => void
   scopeCounts: Record<ActivityScope, number>
   onOrbs: (v: boolean) => void
+  /** [8.4] Context overlay plates (cameras, crime, investor presence) — context/MapContextUI. */
+  renderContext?: (row: SensorRow) => ReactNode
 }
 
 export function MapDeskLayers(p: MapDeskLayersProps) {
@@ -230,7 +232,7 @@ export function MapDeskLayers(p: MapDeskLayersProps) {
           </Plate>
         )
       default:
-        return null
+        return p.renderContext?.(row) ?? null
     }
   }
 
