@@ -87,15 +87,22 @@ const hint = (h: Record<string, Opt>): Record<string, string> => {
 }
 
 /** property: propertyId + optional seller (thread) / deal / source. */
-export function propertyObject(a: { propertyId: string; threadKey?: Opt; opportunityId?: Opt; masterOwnerId?: Opt; prospectId?: Opt; label?: Opt; source?: ObjectSource | null; lat?: number | null; lng?: number | null }): ObjectRef {
+export function propertyObject(a: { propertyId: string; threadKey?: Opt; opportunityId?: Opt; masterOwnerId?: Opt; prospectId?: Opt; label?: Opt; source?: ObjectSource | null; lat?: number | null; lng?: number | null; canonical?: boolean | null }): ObjectRef {
   const coords = Number.isFinite(a.lat) && Number.isFinite(a.lng) ? { lat: String(a.lat), lng: String(a.lng) } : {}
   return {
     type: 'property',
     id: String(a.propertyId),
     label: s(a.label),
-    hint: hint({ property_id: a.propertyId, thread_key: a.threadKey, opportunity_id: a.opportunityId, master_owner_id: a.masterOwnerId, prospect_id: a.prospectId, source: a.source ?? null, ...coords }),
+    // canonical: false only when the caller KNOWS the id is not a tracked property (a comp-only sale)
+    hint: hint({ property_id: a.propertyId, thread_key: a.threadKey, opportunity_id: a.opportunityId, master_owner_id: a.masterOwnerId, prospect_id: a.prospectId, source: a.source ?? null, canonical: a.canonical === false ? 'false' : null, ...coords }),
   }
 }
+
+/** The reason a recorded-sale-only property has no property surface to open. */
+export const NOT_TRACKED_REASON = 'Recorded sale · not a tracked property'
+
+/** A property object the caller knows is NOT a canonical property (sold, never entered the property universe). */
+export const isRecordedSaleOnly = (ref: EntityRef): boolean => ref.type === 'property' && hintOf(ref, 'canonical') === 'false'
 
 /**
  * seller: the canonical conversation identity (thread_key) + the prospect it
@@ -271,22 +278,28 @@ export interface ObjectCapabilities {
   map: { propertyId: string | null; reason: string | null }
   missions: MissionDef[]
   missionSubject: MissionSubject | null
+  /** why Open / Open beside / missions are absent (a recorded-sale-only property), else null */
+  notOpenable: string | null
 }
 
 export function objectCapabilities(ref: ObjectRef): ObjectCapabilities {
   const spec = SPECS[ref.type]
-  const subject = spec.missionSubject(ref)
+  // A recorded sale with no property record: every property surface would 404,
+  // so it has no Open / Open beside / mission. Inspect (the sale) and the Map remain.
+  const saleOnly = isRecordedSaleOnly(ref)
+  const subject = saleOnly ? null : spec.missionSubject(ref)
   const pid = spec.mapBehaviour === 'none' ? null : propertyIdOf(ref)
   const reason = spec.mapBehaviour === 'none'
     ? `A ${spec.noun.toLowerCase()} has no single place on the map`
     : pid ? null : `No property is linked to this ${spec.noun.toLowerCase()}`
   return {
     spec,
-    open: spec.deepLink(ref),
-    beside: spec.besideLink(ref),
+    open: saleOnly ? null : spec.deepLink(ref),
+    beside: saleOnly ? null : spec.besideLink(ref),
     inspectable: Boolean(inspectorFor(ref.type)),
     map: { propertyId: pid, reason },
     missions: subject ? missionsFor(subject) : [],
     missionSubject: subject,
+    notOpenable: saleOnly ? NOT_TRACKED_REASON : null,
   }
 }

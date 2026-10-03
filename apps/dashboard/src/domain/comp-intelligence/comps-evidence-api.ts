@@ -74,6 +74,8 @@ export type EvidenceComp = {
   compId: string | null
   txnId?: number | null
   propertyId: string | null
+  /** the comp's property is a tracked (canonical) property; false = a recorded sale only; null/absent = unknown */
+  canonicalProperty?: boolean | null
   address: string | null
   city: string | null
   zip: string | null

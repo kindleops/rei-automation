@@ -8,5 +8,7 @@ import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evide
  */
 export function compObject(c: EvidenceComp): ObjectRef | null {
   if (!c.propertyId) return null
-  return propertyObject({ propertyId: c.propertyId, label: c.address ?? null, source: 'comp-intelligence', lat: c.lat ?? null, lng: c.lng ?? null })
+  // canonicalProperty === false: a parcel that was sold but never entered the property
+  // universe — Inspect shows its recorded sale; no property surface can open it.
+  return propertyObject({ propertyId: c.propertyId, label: c.address ?? null, source: 'comp-intelligence', lat: c.lat ?? null, lng: c.lng ?? null, canonical: c.canonicalProperty === false ? false : null })
 }

@@ -54,7 +54,7 @@ function yieldInspector() {
 
 export function openObject(ref: ObjectRef): ObjectActionResult {
   const cap = objectCapabilities(ref)
-  if (!cap.open) return { ok: false, outcome: 'unavailable', reason: `This ${cap.spec.noun.toLowerCase()} has no canonical id to open` }
+  if (!cap.open) return { ok: false, outcome: 'unavailable', reason: cap.notOpenable ?? `This ${cap.spec.noun.toLowerCase()} has no canonical id to open` }
   publishLinked(ref)
   yieldInspector()
   pushRoutePath(cap.open)
@@ -63,7 +63,7 @@ export function openObject(ref: ObjectRef): ObjectActionResult {
 
 export function openObjectBeside(ref: ObjectRef): ObjectActionResult {
   const cap = objectCapabilities(ref)
-  if (!cap.beside) return { ok: false, outcome: 'unavailable', reason: `This ${cap.spec.noun.toLowerCase()} has no canonical id to open` }
+  if (!cap.beside) return { ok: false, outcome: 'unavailable', reason: cap.notOpenable ?? `This ${cap.spec.noun.toLowerCase()} has no canonical id to open` }
   publishLinked(ref)
   yieldInspector()
   if (!isWorkspaceRunning()) { pushRoutePath(cap.beside); return { ok: true, outcome: 'navigated' } }
@@ -220,13 +220,16 @@ export function objectActions(ref: ObjectRef, opts: ObjectActionsOptions = {}): 
   const omit = new Set(opts.omit ?? [])
   const out: ObjectAction[] = []
   if (cap.open) out.push({ id: 'open', label: `Open in ${appLabel(cap.spec.primaryApp)}`, icon: 'arrow-up-right', shortcut: 'Click', run: () => openObject(ref) })
+  // a recorded sale only: say why there is nothing to open (Open / Open beside / missions are absent)
+  // (carried on the 'beside' row, so surfaces that omit 'open' because their click is local still say why)
+  else if (cap.notOpenable) out.push({ id: 'beside', label: 'Open', icon: 'arrow-up-right', disabled: true, reason: cap.notOpenable, run: () => openObject(ref) })
   if (cap.beside) out.push({ id: 'beside', label: 'Open beside', icon: 'layout-split', shortcut: `${MOD_KEY}-click`, run: () => openObjectBeside(ref) })
   out.push({ id: 'inspect', label: 'Inspect', icon: 'eye', shortcut: '⇧-click', disabled: !cap.inspectable, reason: cap.inspectable ? undefined : 'No quick view for this yet', run: () => inspectObject(ref) })
   if (cap.spec.mapBehaviour !== 'none') {
     out.push({ id: 'map', label: 'Show on Map', icon: 'map', disabled: !cap.map.propertyId, reason: cap.map.reason ?? undefined, run: () => showOnMap(ref, opts.showOnMap) })
   }
   // Pin to Home (Home 2.0): only for objects that have a Home instrument
-  if (homePinFor(ref)) out.push({ id: 'pin', label: 'Pin to Home', icon: 'pin', run: () => { const r = pinToHome(ref); return r.ok ? { ok: true, outcome: 'home-pinned' } : { ok: false, outcome: 'unavailable', reason: r.reason } } })
+  if (!cap.notOpenable && homePinFor(ref)) out.push({ id: 'pin', label: 'Pin to Home', icon: 'pin', run: () => { const r = pinToHome(ref); return r.ok ? { ok: true, outcome: 'home-pinned' } : { ok: false, outcome: 'unavailable', reason: r.reason } } })
   for (const m of cap.missions) out.push({ id: `mission:${m.kind}`, label: m.verb, icon: 'target', run: () => startObjectMission(ref, m.kind) })
   return out.filter((a) => !omit.has(a.id))
 }
@@ -273,6 +276,8 @@ export function handleObjectClick(e: ModifierEvent | null | undefined, ref: Obje
     return 'beside'
   }
   if (onActivate) { yieldInspector(); onActivate() }
+  // nothing to open (a recorded sale only): the plain click shows what IS on record
+  else if (ref && !objectCapabilities(ref).open && objectCapabilities(ref).notOpenable && inspectorFor(ref.type)) { inspectObject(ref); return 'inspect' }
   else if (ref) openObject(ref)
   return 'activate'
 }

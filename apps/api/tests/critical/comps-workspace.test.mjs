@@ -7,7 +7,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { compareToSubject, dimensionsFor, enginePoolInput, engineRunFrom, evidenceSufficiency, getCompsWorkspace, REASON_LABELS, setStats } from '../../src/lib/domain/comp-intelligence/comps-workspace-service.js'
+import { canonicalPropertyIds, compareToSubject, dimensionsFor, enginePoolInput, engineRunFrom, evidenceSufficiency, getCompsWorkspace, REASON_LABELS, setStats } from '../../src/lib/domain/comp-intelligence/comps-workspace-service.js'
 import { normalizePropertyFeatures, scoreComparable } from '../../src/lib/acquisition/acquisitionDecisionEngine.js'
 
 const DAY = 86_400_000
@@ -198,4 +198,35 @@ test('the engine pool input is the RPC row overlaid with the engine’s columns 
   assert.equal(row.similarity_score, 80)
   assert.ok(!('purchase_info' in row))
   assert.ok(!('not_an_engine_column' in row))
+})
+
+test('each comp says whether its property is canonical, from ONE batched properties read', async () => {
+  const { client } = workspaceFixture()
+  // P-sys-1 is a tracked property; P-cand-1 is a comp-only parcel (sold, never entered `properties`)
+  const tracked = fakeClient({ properties: [SUBJECT_ROW, { property_id: 'P-sys-1' }] }, {})
+  const batched = []
+  const from = (t) => {
+    if (t !== 'properties') return client.from(t)
+    const q = tracked.from(t)
+    const inFn = q.in
+    q.in = (k, v) => { batched.push(v); return inFn(k, v) }
+    return q
+  }
+  const w = await getCompsWorkspace({ propertyId: 'S1' }, { supabase: { from, rpc: client.rpc }, now: WS_NOW })
+  assert.equal(w.comps.find((c) => c.compId === 'sys-1').canonicalProperty, true)
+  assert.equal(w.comps.find((c) => c.compId === 'cand-1').canonicalProperty, false)
+  assert.equal(batched.length, 1)
+  assert.deepEqual([...batched[0]].sort(), ['P-cand-1', 'P-sys-1'])
+})
+
+test('canonicalPropertyIds: chunked, de-duplicated, and unknown (null) when the read fails', async () => {
+  const seen = []
+  const client = { from: () => ({ select: () => ({ in: (_k, v) => { seen.push(v.length); return Promise.resolve({ data: v.filter((x) => Number(x) % 2 === 0).map((property_id) => ({ property_id })), error: null }) } }) }) }
+  const ids = Array.from({ length: 450 }, (_, i) => String(i)).concat(['2', '2', ''])
+  const found = await canonicalPropertyIds(client, ids)
+  assert.deepEqual(seen, [200, 200, 50])
+  assert.equal(found.has('2'), true)
+  assert.equal(found.has('3'), false)
+  const failing = { from: () => ({ select: () => ({ in: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }) }
+  assert.equal(await canonicalPropertyIds(failing, ['1']), null)
 })

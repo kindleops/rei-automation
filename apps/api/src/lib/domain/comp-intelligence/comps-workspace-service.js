@@ -404,6 +404,26 @@ export function setStats(comps) {
   }
 }
 
+const CANONICAL_CHUNK = 200
+
+/** One batched `properties` existence read for a page of comp property ids (null = check failed). */
+export async function canonicalPropertyIds(client, ids) {
+  const wanted = [...new Set(arr(ids).map(clean).filter(Boolean))]
+  const found = new Set()
+  if (!wanted.length) return found
+  try {
+    for (let i = 0; i < wanted.length; i += CANONICAL_CHUNK) {
+      const chunk = wanted.slice(i, i + CANONICAL_CHUNK)
+      const { data, error } = await client.from('properties').select('property_id').in('property_id', chunk)
+      if (error) return null
+      for (const r of arr(data)) if (clean(r.property_id)) found.add(clean(r.property_id))
+    }
+  } catch {
+    return null
+  }
+  return found
+}
+
 export async function getCompsWorkspace({ propertyId, radius = null, months = null } = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
   const now = new Date(deps.now ?? Date.now())
@@ -524,6 +544,14 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
 
   // Judge every candidate with the engine's own scoring, from the engine's own row.
   const all = [...poolComps, ...corpusComps]
+
+  // Is each comp's property a CANONICAL property? Comps carry the sale corpus's
+  // property_id and many of those parcels never entered `properties`; a property
+  // surface (Deal Intelligence, Comps, Buyer Match) would 404 on them. One batched
+  // existence read per workspace (never per row): true / false, or null when the
+  // check itself could not run (unknown is never reported as "not tracked").
+  const canonical = await canonicalPropertyIds(client, all.map((c) => c.propertyId))
+  for (const c of all) c.canonicalProperty = c.propertyId ? (canonical ? canonical.has(c.propertyId) : null) : false
   const inputFor = (c) => engineInputs.get(c.key) ?? engineRow(c, { source: 'transaction_corpus' })
   const packaged = detectPackageClusters(all.map(inputFor))
   for (const c of all) {
