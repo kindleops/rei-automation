@@ -34,7 +34,7 @@
  * Import-pure apart from the shared eligibility evaluator (no I/O).
  */
 
-import { evaluateOutboundNumberEligibility } from "@/lib/supabase/sms-engine.js";
+import { evaluateSenderDispatchEligibility } from "@/lib/domain/delivery/sender-dispatch-eligibility.js";
 import { byUsageThenRecency } from "./sender-allocator.js";
 
 export const SENDER_ROUTING_POLICY_VERSION = "sender_routing_v2@1";
@@ -256,9 +256,10 @@ export function evaluateSenderEligibility(row, { blocked = null, now = new Date(
   if (lower(meta.lifecycle_state) === "retired") return { ok: false, reason: "retired", remaining: 0 };
   if (blocked && blocked.has(phone)) return { ok: false, reason: "blocked_by_operator", remaining: 0 };
   if (member_status && lower(member_status) !== "active") return { ok: false, reason: "pool_member_inactive", remaining: 0 };
-  // status / health / cooling: the shared evaluator (dispatch enforces the same).
+  // THE CANONICAL SENDER DISPATCH ELIGIBILITY (blocklist + fleet + status /
+  // health / cooling); the routing policy is a superset, never a subset.
   // daily_limit undefined: the cap is applied below with the configured cap and warm-up limit.
-  const base = evaluateOutboundNumberEligibility({ ...row, daily_limit: undefined }, now);
+  const base = evaluateSenderDispatchEligibility({ ...row, daily_limit: undefined }, { blocked: blocked || new Set(), now });
   if (!base.ok) return { ok: false, reason: String(base.reason || "unavailable").replace(/^outbound_number_/, ""), remaining: 0 };
   if (lower(row.registration_status) !== "registered") return { ok: false, reason: "unregistered", remaining: 0 };
   if (webhookStateOf(row) !== "verified") return { ok: false, reason: "webhook_unverified", remaining: 0 };
