@@ -7,8 +7,10 @@ import { parseAdvancedFiltersParam, hasActiveAdvancedFilters } from "./inbox-adv
 import {
   buildInboxFilterConditions,
   collectPreserveValues,
+  resolveInboxCategoryList,
   resolveOptionsFieldSpec,
 } from "./inbox-filter-conditions.js";
+import { cachedFilterRead } from "./filter-read-cache.js";
 
 const clean = (v) => String(v ?? "").trim();
 const isActive = (v) => {
@@ -161,6 +163,10 @@ export function applyHydratedInboxFilters(query, rawFilters = {}) {
   const view = clean(filters.view);
   const category = VIEW_TO_CATEGORY[bucket] || VIEW_TO_CATEGORY[view] || (bucket && bucket !== "all" && bucket !== "all_messages" ? bucket : null);
   if (category) q = applyEq(q, "inbox_category", category);
+  const categoryList = resolveInboxCategoryList(filters.categories);
+  if (categoryList) {
+    q = categoryList.length > 1 && typeof q.in === "function" ? q.in("inbox_category", categoryList) : applyEq(q, "inbox_category", categoryList[0]);
+  }
 
   if (isActive(filters.q) && typeof q.or === "function") {
     const term = `%${clean(filters.q)}%`;
@@ -288,6 +294,13 @@ export function applyHydratedInboxFilters(query, rawFilters = {}) {
 export async function countHydratedInboxFilters(filters = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const conditions = buildInboxFilterConditions(filters);
+  if (!deps.supabase) {
+    return cachedFilterRead(`count:${JSON.stringify(conditions)}`, () => runHydratedCount(supabase, filters, conditions));
+  }
+  return runHydratedCount(supabase, filters, conditions);
+}
+
+async function runHydratedCount(supabase, filters, conditions) {
   const { data, error } = await supabase.rpc("inbox_filter_match_count", { p_conditions: conditions });
   if (!error) return Number(data ?? 0);
 
@@ -373,8 +386,13 @@ export async function queryInboxFilterOptions({ field, filters = {}, search = ""
     p_preserve_values: preserveValues,
   };
 
-  const { data, error } = await supabase.rpc("inbox_filter_field_options", rpcArgs);
-  if (error) throw error;
+  const read = async () => {
+    const { data, error } = await supabase.rpc("inbox_filter_field_options", rpcArgs);
+    if (error) throw error;
+    return data;
+  };
+  // the injected client (tests) is never cached; the shared one is
+  const data = deps.supabase ? await read() : await cachedFilterRead(`options:${JSON.stringify(rpcArgs)}`, read, { ttlMs: 120_000, staleMs: 30 * 60_000 });
 
   const options = (data || []).map((row) => ({
     value: String(row.value ?? ""),

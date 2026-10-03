@@ -9571,3 +9571,10 @@
   color: #475569 !important;
 }
 
+
+/* Advanced Filters: a failed count or option read offers a retry, never a fake "0" */
+.nx-ifm-retry {
+  appearance: none; border: 0; background: none; padding: 0 2px; margin-left: 4px;
+  font: inherit; font-weight: 600; color: var(--lc-cyan, #38bdf8); cursor: pointer; text-decoration: underline;
+}
+.nx-ifm-field.is-failed select { opacity: 0.6; }

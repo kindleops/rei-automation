@@ -238,12 +238,11 @@ import {
 } from './inbox-ui-helpers'
 import { buildConversationDecision } from '../../domain/inbox/inbox-decisioning'
 import {
-  buildAdvancedFilterChips,
   clearAllAdvancedFilters,
   countActiveAdvancedFilters,
   hasActiveAdvancedFilters,
 } from '../../domain/inbox/inbox-advanced-filter-engine'
-import { serializeInboxFiltersForServer } from '../../domain/inbox/inbox-filter-catalog-runtime'
+import { buildInboxFilterChips, serializeInboxFiltersForServer } from '../../domain/inbox/inbox-filter-catalog-runtime'
 import {
   getViewLayoutMode,
   resolveLayoutModeForPane,
@@ -1227,7 +1226,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   )
 
   const activeAdvancedFilterChips = useMemo(
-    () => buildAdvancedFilterChips(advancedFilters, { stage: stageFilter, view: viewFilter }).map((chip) => ({
+    () => buildInboxFilterChips(advancedFilters, { stage: stageFilter, view: viewFilter }).map((chip) => ({
       key: chip.key,
       label: chip.label,
     })),
@@ -1942,7 +1941,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [refreshInbox, searchQuery])
 
   const handleRemoveAdvancedFilterChip = useCallback((chipKey: string) => {
-    const chip = buildAdvancedFilterChips(advancedFilters, { stage: stageFilter, view: viewFilter })
+    const chip = buildInboxFilterChips(advancedFilters, { stage: stageFilter, view: viewFilter })
       .find((entry) => entry.key === chipKey)
     if (!chip) return
     const nextAdvanced = chip.clear(advancedFilters)

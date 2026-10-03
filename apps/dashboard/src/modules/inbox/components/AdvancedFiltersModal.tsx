@@ -69,6 +69,8 @@ export const AdvancedFiltersModal = ({
   const [search, setSearch] = useState('')
   const [previewCount, setPreviewCount] = useState<number | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewFailed, setPreviewFailed] = useState(false)
+  const [previewAttempt, setPreviewAttempt] = useState(0)
   const [optionsCache, setOptionsCache] = useState<Record<string, FilterOption[]>>({})
   const [savedViews, setSavedViews] = useState<SavedInboxView[]>([])
   const [saveOpen, setSaveOpen] = useState(false)
@@ -103,13 +105,15 @@ export const AdvancedFiltersModal = ({
     if (previewTimer.current) clearTimeout(previewTimer.current)
     previewTimer.current = setTimeout(() => {
       setPreviewLoading(true)
+      setPreviewFailed(false)
       void fetchInboxFilterPreview({ ...serialized, filter: inboxBucket })
         .then(setPreviewCount)
-        .catch(() => setPreviewCount(null))
+        // a failed count is "unavailable", never "0 matching threads"
+        .catch(() => { setPreviewCount(null); setPreviewFailed(true) })
         .finally(() => setPreviewLoading(false))
     }, 300)
     return () => { if (previewTimer.current) clearTimeout(previewTimer.current) }
-  }, [open, serialized, inboxBucket])
+  }, [open, serialized, inboxBucket, previewAttempt])
 
   const patch = useCallback((p: Partial<InboxAdvancedFilters>) => {
     setLocal((c) => ({ ...c, ...p }))
@@ -136,13 +140,24 @@ export const AdvancedFiltersModal = ({
     return fields.filter((f) => f.group === activeGroup && (!q || f.label.toLowerCase().includes(q)))
   }, [fields, activeGroup, search])
 
-  const loadOptions = useCallback(async (field: FilterCatalogField) => {
+  /*
+   * ONE REQUEST PER FIELD PER OPEN. Fields used to refetch whenever this
+   * callback changed identity — every option that arrived (optionsCache) and
+   * every render (the inline arrows below) restarted every unresolved field,
+   * so one open fired each field two or more times and, on prod, the pile-up
+   * ran every scan past the statement timeout. In-flight reads are shared.
+   */
+  const optionsInflight = useRef(new Map<string, Promise<FilterOption[]>>())
+  const loadOptions = useCallback((field: FilterCatalogField): Promise<FilterOption[]> => {
     const key = field.optionsKey || field.key
-    if (optionsCache[key]) return optionsCache[key]
-    const opts = await fetchInboxFilterOptions(key, { advanced: serialized, filter: inboxBucket })
-    setOptionsCache((c) => ({ ...c, [key]: opts }))
-    return opts
-  }, [optionsCache, serialized, inboxBucket])
+    const running = optionsInflight.current.get(key)
+    if (running) return running
+    const request = fetchInboxFilterOptions(key, { advanced: serialized, filter: inboxBucket })
+      .then((opts) => { setOptionsCache((c) => ({ ...c, [key]: opts })); return opts })
+      .finally(() => { optionsInflight.current.delete(key) })
+    optionsInflight.current.set(key, request)
+    return request
+  }, [serialized, inboxBucket])
 
   const handleClearAll = useCallback(() => {
     const fresh = clearAllAdvancedFilters()
@@ -221,7 +236,7 @@ export const AdvancedFiltersModal = ({
               </button>
             ))}
           </div>
-          <FlagPicker fieldKey={field.key} mode={mode} selected={selected ?? []} onChange={(flags) => {
+          <FlagPicker key={field.key} fieldKey={field.key} mode={mode} cached={optionsCache[field.optionsKey || field.key]} selected={selected ?? []} onChange={(flags) => {
             if (mode === 'exclude') patch({ [`${isProperty ? 'property' : 'person'}FlagsExclude`]: flags } as Partial<InboxAdvancedFilters>)
             else patch({ [selectedKey]: flags } as Partial<InboxAdvancedFilters>)
           }} loadOptions={() => loadOptions(field)} />
@@ -276,7 +291,7 @@ export const AdvancedFiltersModal = ({
 
     if (field.type === 'select') {
       return (
-        <SelectField key={field.key} label={field.label} value={(local[key] as string) ?? ''} onChange={(v) => patch({ [key]: v || undefined } as Partial<InboxAdvancedFilters>)} loadOptions={() => loadOptions(field)} cached={optionsCache[field.optionsKey || field.key]} />
+        <SelectField key={field.key} label={field.label} value={(local[key] as string) ?? ''} onChange={(v) => patch({ [key]: v || undefined } as Partial<InboxAdvancedFilters>)} loadOptions={() => loadOptions(field)} optionsKey={field.optionsKey || field.key} cached={optionsCache[field.optionsKey || field.key]} />
       )
     }
 
@@ -302,7 +317,13 @@ export const AdvancedFiltersModal = ({
         <header className="nx-ifm-header">
           <div>
             <strong>Advanced Filters</strong>
-            <span>{previewLoading ? 'Counting…' : `${(previewCount ?? 0).toLocaleString()} matching threads`}</span>
+            <span>
+              {previewLoading
+                ? 'Counting…'
+                : previewFailed || previewCount === null
+                  ? <>Count unavailable <button type="button" className="nx-ifm-retry" onClick={() => setPreviewAttempt((a) => a + 1)}>Retry</button></>
+                  : `${previewCount.toLocaleString()} matching threads`}
+            </span>
           </div>
           <div className="nx-ifm-header-actions">
             {activeCount > 0 && <span className="nx-ifm-badge">{activeCount}</span>}
@@ -467,11 +488,19 @@ export const AdvancedFiltersModal = ({
   )
 }
 
-function SelectField({ label, value, onChange, loadOptions, cached }: {
+/** The API says this field is not backed by the read model: hide it (§6). Anything else is a failure to show. */
+const isUnbackedField = (error: unknown) => /invalid_field|unbacked/i.test(String((error as Error)?.message ?? error))
+
+function SelectField({ label, value, onChange, loadOptions, optionsKey, cached }: {
   label: string; value: string; onChange: (v: string) => void
-  loadOptions: () => Promise<FilterOption[]>; cached?: FilterOption[]
+  loadOptions: () => Promise<FilterOption[]>; optionsKey: string; cached?: FilterOption[]
 }) {
   const [opts, setOpts] = useState<FilterOption[]>(cached ?? [])
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  // the latest loader, read inside the effect — its identity must not restart the read
+  const loadRef = useRef(loadOptions)
+  useEffect(() => { loadRef.current = loadOptions })
   /*
    * §6 — A FILTER WITH NOTHING TO CHOOSE IS A DEAD CONTROL, SO IT DOES NOT RENDER.
    *
@@ -494,13 +523,26 @@ function SelectField({ label, value, onChange, loadOptions, cached }: {
   useEffect(() => {
     if (cached?.length) { setOpts(cached); setResolved(true); return }
     let alive = true
-    void loadOptions()
-      .then((next) => { if (alive) { setOpts(next ?? []); setResolved(true) } })
-      .catch(() => { if (alive) { setOpts([]); setResolved(true) } })
+    void loadRef.current()
+      .then((next) => { if (alive) { setOpts(next ?? []); setResolved(true); setFailed(false) } })
+      .catch((error: unknown) => {
+        if (!alive) return
+        if (isUnbackedField(error)) { setOpts([]); setResolved(true) } else setFailed(true)
+      })
     return () => { alive = false }
-  }, [cached, loadOptions])
+  }, [cached, optionsKey, attempt])
 
   if (resolved && opts.length === 0) return null
+
+  // a slow or failed read is not "no values": say so and offer the retry
+  if (failed && !resolved) {
+    return (
+      <label className="nx-ifm-field is-failed">
+        <span>{label} · <button type="button" className="nx-ifm-retry" onClick={(e) => { e.preventDefault(); setFailed(false); setAttempt((a) => a + 1) }}>Retry</button></span>
+        <select value="" disabled aria-invalid="true"><option value="">Options unavailable</option></select>
+      </label>
+    )
+  }
 
   /*
    * §12 — A SLOW FIELD MUST SAY IT IS LOADING, NOT LOOK EMPTY.
@@ -529,13 +571,17 @@ function SelectField({ label, value, onChange, loadOptions, cached }: {
   )
 }
 
-function FlagPicker({ fieldKey: _fieldKey, mode: _mode, selected, onChange, loadOptions }: {
+function FlagPicker({ fieldKey, mode: _mode, selected, onChange, loadOptions, cached }: {
   fieldKey: string; mode: FlagMode; selected: string[]
-  onChange: (flags: string[]) => void; loadOptions: () => Promise<FilterOption[]>
+  onChange: (flags: string[]) => void; loadOptions: () => Promise<FilterOption[]>; cached?: FilterOption[]
 }) {
-  const [opts, setOpts] = useState<FilterOption[]>([])
+  const [fetched, setFetched] = useState<FilterOption[]>([])
+  const opts = cached?.length ? cached : fetched
   const [q, setQ] = useState('')
-  useEffect(() => { void loadOptions().then(setOpts).catch(() => {}) }, [loadOptions])
+  const loadRef = useRef(loadOptions)
+  useEffect(() => { loadRef.current = loadOptions })
+  // once per field — not once per render of the sheet
+  useEffect(() => { void loadRef.current().then(setFetched).catch(() => {}) }, [fieldKey])
   const filtered = opts.filter((o) => !q || o.label.toLowerCase().includes(q.toLowerCase()))
   const toggle = (flag: string) => {
     onChange(selected.includes(flag) ? selected.filter((f) => f !== flag) : [...selected, flag])

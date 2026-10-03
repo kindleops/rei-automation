@@ -35,4 +35,9 @@ describe('serializeInboxFiltersForServer', () => {
     const filters = { market: 'Dallas', outOfStateOwner: 'yes', sellerStage: 'S3' } as unknown as InboxAdvancedFilters
     expect(serializeInboxFiltersForServer(filters)).toMatchObject({ market: 'Dallas', absenteeOwner: true, stage: 'S3' })
   })
+
+  it('carries the Inbox categories multi-select', () => {
+    const filters = { categories: ['new_replies', 'priority'] } as unknown as InboxAdvancedFilters
+    expect(serializeInboxFiltersForServer(filters)).toEqual({ categories: ['new_replies', 'priority'] })
+  })
 })

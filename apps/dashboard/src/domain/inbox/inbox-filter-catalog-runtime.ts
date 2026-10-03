@@ -1,7 +1,7 @@
 import type { FilterCatalogField } from './inbox-filter-api'
 import { INBOX_FILTER_FIELDS } from './inbox-filter-catalog-client'
 import type { InboxAdvancedFilters } from '../../modules/inbox/inbox-ui-helpers'
-import { serializeAdvancedFiltersForServer } from './inbox-advanced-filter-engine'
+import { buildAdvancedFilterChips, serializeAdvancedFiltersForServer } from './inbox-advanced-filter-engine'
 import {
   formatCatalogSelectSummary,
   isCatalogSelectValueActive,
@@ -103,10 +103,14 @@ export function serializeInboxFiltersForServer(
   filters: InboxAdvancedFilters,
   extras?: Parameters<typeof serializeAdvancedFiltersForServer>[1],
 ): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     ...pickActiveCatalogFilterValues(filters),
     ...serializeAdvancedFiltersForServer(filters, extras),
   }
+  // the sheet's "Inbox categories" multi-select (OR'd); the server maps each
+  // to its canonical inbox_category and leaves unmapped selections to the client
+  if (Array.isArray(filters.categories) && filters.categories.length > 0) payload.categories = [...filters.categories]
+  return payload
 }
 
 export function serializeInboxFiltersForMap(filters: InboxAdvancedFilters): Record<string, unknown> {
@@ -234,4 +238,31 @@ export function buildCatalogFilterChips(filters: InboxAdvancedFilters): CatalogF
   }
 
   return chips
+}
+/**
+ * THE INBOX'S ACTIVE-FILTER CHIPS. The header used the legacy chip builder
+ * only, so a choice made in the catalog sheet (Stage, Status, Intent, Read,
+ * County…) filtered the list with no chip saying so and no way to remove it
+ * from the header. Legacy chips first (they carry the header stage), then
+ * every catalog chip they do not already cover, then the category selection.
+ */
+export function buildInboxFilterChips(
+  filters: InboxAdvancedFilters,
+  context?: Parameters<typeof buildAdvancedFilterChips>[1],
+): CatalogFilterChip[] {
+  const out: CatalogFilterChip[] = [...buildAdvancedFilterChips(filters, context)]
+  const seen = new Set(out.map((chip) => chip.key))
+  for (const chip of buildCatalogFilterChips(filters)) {
+    if (seen.has(chip.key)) continue
+    seen.add(chip.key)
+    out.push(chip)
+  }
+  if (Array.isArray(filters.categories) && filters.categories.length > 0 && !seen.has('categories')) {
+    out.push({
+      key: 'categories',
+      label: `Categories: ${filters.categories.map((c) => String(c).replace(/_/g, ' ')).join(', ')}`,
+      clear: (current) => { const { categories: _drop, ...rest } = current; void _drop; return rest },
+    })
+  }
+  return out
 }

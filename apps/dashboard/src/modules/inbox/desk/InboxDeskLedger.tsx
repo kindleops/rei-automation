@@ -442,6 +442,18 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
     return parts.join(' · ')
   }, [counts])
 
+  /*
+   * ROWS BELONG TO THE QUESTION THAT FETCHED THEM. Changing the lens or the
+   * filters kept painting the previous list under the new header ("Filtered ·
+   * 0 conversations" over a page of unrelated threads) until the response
+   * landed. The rows are stamped with the view they answered; while a
+   * different view is loading, the list shows its loading state instead.
+   */
+  const viewKey = `${lens}|${filterChips.map((chip) => `${chip.key}=${chip.label}`).join('&')}`
+  const [rowsViewKey, setRowsViewKey] = useState(viewKey)
+  if (!loading && rowsViewKey !== viewKey) setRowsViewKey(viewKey)
+  const rowsStale = loading && rowsViewKey !== viewKey
+
   const currentDef = lens === 'filtered' ? null : lensDef(lens as DeskLens)
   const lensTotal = currentDef ? lensCount(counts, currentDef) : filteredTotal
   const showLoadMore = rows.length > 0 && (canLoadMore || (typeof lensTotal === 'number' && lensTotal > rows.length))
@@ -449,7 +461,7 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
   let body: ReactNode
   if (lens === 'scheduled' && scheduledPanel) {
     body = <div className="ixl-scheduled">{scheduledPanel}</div>
-  } else if (rows.length === 0 && loading) {
+  } else if ((rows.length === 0 && loading) || rowsStale) {
     body = <SkeletonRows count={9} rowHeight={rowHeight} />
   } else if (rows.length === 0 && error) {
     body = <div className="ixl-state"><LCError what="Conversations didn't load" detail={error} onRetry={onRetry} /></div>

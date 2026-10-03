@@ -116,6 +116,12 @@ function normalizeFilters(raw = {}) {
 
 function pushEq(conditions, column, value, excludeColumns) {
   if (!column || !isActive(value) || excludeColumns?.has(column)) return;
+  // a multi-value select is OR'd, exactly as the list applies it (.in) — it
+  // used to count only the first value, so preview and list disagreed
+  if (Array.isArray(value) && value.length > 1) {
+    conditions.push({ op: "in", column, value: value.map((v) => String(v)) });
+    return;
+  }
   conditions.push({ op: "eq", column, value: Array.isArray(value) ? value[0] : value });
 }
 
@@ -177,6 +183,27 @@ function pushFlagFilter(conditions, spec, flagSpec, excludeColumns) {
   }
 }
 
+const CANONICAL_INBOX_CATEGORIES = new Set(Object.values(VIEW_TO_CATEGORY));
+
+/**
+ * The Advanced Filters "Inbox categories" multi-select (view values, OR'd).
+ * Each maps to the canonical inbox_category the bucket rail already uses.
+ * Returns null — no server constraint — when any selection has no canonical
+ * category (e.g. "spanish_language"): the client still narrows by it, and a
+ * partial server constraint would quietly drop the rest.
+ */
+export function resolveInboxCategoryList(categories) {
+  if (!Array.isArray(categories) || categories.length === 0) return null;
+  const out = new Set();
+  for (const raw of categories) {
+    const value = clean(raw);
+    const mapped = VIEW_TO_CATEGORY[value] || (CANONICAL_INBOX_CATEGORIES.has(value) ? value : null);
+    if (!mapped) return null;
+    out.add(mapped);
+  }
+  return [...out];
+}
+
 export function buildInboxFilterConditions(rawFilters = {}, { excludeFieldKeys = [], excludeColumns = [] } = {}) {
   const filters = normalizeFilters(rawFilters);
   const excludedCols = new Set(excludeColumns);
@@ -191,6 +218,10 @@ export function buildInboxFilterConditions(rawFilters = {}, { excludeFieldKeys =
     || (bucket && bucket !== "all" && bucket !== "all_messages" ? bucket : null);
   if (category && !excludedCols.has("inbox_category")) {
     conditions.push({ op: "inbox_category_eq", value: category });
+  }
+  const categoryList = resolveInboxCategoryList(filters.categories);
+  if (categoryList && !excludedCols.has("inbox_category")) {
+    conditions.push({ op: "in", column: "inbox_category", value: categoryList });
   }
 
   if (isActive(filters.q)) {
