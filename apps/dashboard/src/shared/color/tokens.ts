@@ -138,6 +138,7 @@ export function appearanceCss(c: AppearanceComputed, accentPalette: AccentId, ap
     decl('--lc-accent-source', toHex(c.accentSource)),
     decl('--lc-select-rgb', toTriplet(a.select)),
     decl('--lc-focus-rgb', toTriplet(a.focus)),
+    ...accentSurfaceDecls(c),
     '  /* charts — harmonised, never monochrome; semantic series stay semantic */',
     decl('--lc-chart-primary', toHex(chart.primary)),
     decl('--lc-chart-primary-rgb', toTriplet(chart.primary)),
@@ -177,6 +178,40 @@ export function appearanceCss(c: AppearanceComputed, accentPalette: AccentId, ap
     '}',
   ].join('\n')
   return `/* LeadCommand Environment Studio — generated Experience Tokens (${f.id}) */\n${custom}\n${desktop}\n`
+}
+
+/**
+ * ACCENT SURFACES — the accent as something you can fill, glow and write on.
+ *
+ *   --lc-accent-hover-rgb · --lc-accent-pressed-rgb   gradient stops
+ *   --lc-accent-glow       a halo (typing glow, active rails), scaled by energy
+ *   --lc-primary-*         primary actions, outbound bubbles, active segments:
+ *                          the accent — or the theme's neutral when the accent
+ *                          is reserved (a red accent never fills a "go" control)
+ *   --lc-primary-fill      top-lit gradient between two stops that BOTH keep
+ *                          ≥4.5:1 with --lc-primary-on (hover → base; the
+ *                          pressed stop loses contrast and is never a fill)
+ *   --lc-bubble-out-*      the operator's own messages
+ */
+export function accentSurfaceDecls(c: AppearanceComputed): string[] {
+  const { foundation: f, accent: a } = c
+  const reserved = Boolean(a.reserved)
+  const primary = reserved ? f.neutralSelect : a.base
+  const lift = reserved ? f.neutralSelect : a.hover
+  const glowAlpha = Math.min(0.5, Math.max(0.16, 0.3 * a.energy))
+  const fill = `linear-gradient(180deg, ${toHex(lift)} 0%, ${toHex(primary)} 100%)`
+  return [
+    decl('--lc-accent-hover-rgb', toTriplet(a.hover)),
+    decl('--lc-accent-pressed-rgb', toTriplet(a.pressed)),
+    decl('--lc-accent-glow', toRgba(a.base, glowAlpha)),
+    decl('--lc-primary-rgb', toTriplet(primary)),
+    decl('--lc-primary', toHex(primary)),
+    decl('--lc-primary-on', toHex(a.on)),
+    decl('--lc-primary-fill', fill),
+    decl('--lc-bubble-out-rgb', toTriplet(primary)),
+    decl('--lc-bubble-out-fill', fill),
+    decl('--lc-bubble-out-ink', toHex(a.on)),
+  ]
 }
 
 /** Attributes CSS can key on (environment type, motion, reserved accent, material family). */

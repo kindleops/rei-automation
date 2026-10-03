@@ -392,3 +392,94 @@
   --lc-crit-rgb: 255, 59, 59;
   --lc-ok-rgb: 74, 222, 128;
 }
+
+/* ══ R8.3 · ACCENT SURFACES + LIQUID GLASS — the canonical sets ═══════════
+   One vocabulary every app consumes; nothing below runs its own recipe.
+
+   ACCENT (identity, never semantics). On the desktop the Environment Studio
+   publishes the contrast-solved values (shared/color/tokens.ts →
+   accentSurfaceDecls); these are the first-frame / phone fallbacks.
+     --lc-primary-rgb · --lc-primary · --lc-primary-on · --lc-primary-fill
+       primary actions, outbound bubbles, active segments/switches. The
+       accent, or the theme's neutral when the accent is red-family.
+     --lc-accent-glow · --lc-accent-hover-rgb · --lc-accent-pressed-rgb
+     --lc-bubble-out-{rgb,fill,ink} · --lc-bubble-in-{bg,ink,edge}
+
+   GLASS (the operator's Material: --lg-blur / -alpha / -sat / -sheen / -fill
+   via --lc-blur / -alpha / -sat / -sheen / -fill, Edge via --lc-glass-edge).
+     --lc-glass-pane     a workspace pane body (thin; the room shows through)
+     --lc-glass-chrome   bars that float over content (Command Deck, rail, heads)
+     --lc-glass-card     widgets, cards, map chrome
+     --lc-glass-menu     menus, popovers, sheets, dialogs, composer, toasts —
+                         floored so text over them always reads
+     --lc-glass-filter · --lc-glass-filter-strong
+     --lc-glass-line · --lc-glass-line-hi   hairline edges (Edge-scaled)
+     --lc-glass-sheen    top specular (Sheen-scaled)
+     --lc-glass-tint     a breath of the accent (energy-scaled)
+     --lc-glass-shadow-menu · --lc-glass-shadow-chrome
+     --lc-glass-field · --lc-glass-field-line   inputs set INTO glass
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --lc-accent-hover-rgb: var(--lc-accent-rgb);
+  --lc-accent-pressed-rgb: var(--lc-accent-rgb);
+  --lc-accent-glow: rgba(var(--lc-accent-rgb), 0.3);
+  --lc-primary-rgb: var(--lc-select-rgb);
+  --lc-primary: rgb(var(--lc-primary-rgb));
+  --lc-primary-on: var(--lc-accent-on);
+  --lc-primary-fill: linear-gradient(180deg, color-mix(in srgb, var(--lc-primary) 90%, #fff), var(--lc-primary));
+  --lc-bubble-out-rgb: var(--lc-primary-rgb);
+  --lc-bubble-out-fill: var(--lc-primary-fill);
+  --lc-bubble-out-ink: var(--lc-primary-on);
+  --lc-bubble-in-bg: rgba(255, 255, 255, 0.075);
+  --lc-bubble-in-ink: var(--lc-ink-1);
+  --lc-bubble-in-edge: rgba(255, 255, 255, 0.06);
+
+  --lc-glass-fill: var(--lc-fill);
+  --lc-glass-pane: rgb(var(--lc-fill) / calc(0.28 * var(--lc-alpha)));
+  --lc-glass-chrome: rgb(var(--lc-fill) / clamp(0.42, calc(0.62 * var(--lc-alpha)), 0.94));
+  --lc-glass-card: rgb(var(--lc-fill) / calc(0.46 * var(--lc-alpha)));
+  --lc-glass-menu: rgb(var(--lc-fill) / clamp(0.8, calc(0.86 * var(--lc-alpha)), 0.97));
+  --lc-glass-filter: blur(var(--lc-blur)) saturate(var(--lc-sat));
+  --lc-glass-filter-strong: blur(calc(var(--lc-blur) * 1.2 + 4px)) saturate(calc(var(--lc-sat) * 1.1));
+  --lc-glass-line: rgba(255, 255, 255, calc(0.09 * var(--lc-glass-edge)));
+  --lc-glass-line-hi: rgba(255, 255, 255, calc(0.15 * var(--lc-glass-edge)));
+  --lc-glass-sheen: inset 0 1px 0 rgba(255, 255, 255, calc(0.1 * var(--lc-sheen)));
+  --lc-glass-tint: rgba(var(--lc-accent-rgb), calc(0.035 * var(--lc-accent-energy)));
+  --lc-glass-shadow-chrome: 0 0 0 0.5px rgba(0, 0, 0, 0.5), 0 22px 54px -32px rgba(0, 0, 0, 0.95);
+  --lc-glass-shadow-menu: 0 30px 70px -28px rgba(0, 0, 0, 0.9), 0 10px 24px -14px rgba(0, 0, 0, 0.6);
+  --lc-glass-field: rgba(255, 255, 255, 0.055);
+  --lc-glass-field-line: rgba(255, 255, 255, 0.1);
+}
+:root[data-nexus-theme='light'] {
+  --lc-bubble-in-bg: rgba(255, 255, 255, 0.86);
+  --lc-bubble-in-edge: rgba(15, 17, 22, 0.08);
+  --lc-glass-pane: rgb(var(--lc-fill) / calc(0.36 * var(--lc-alpha)));
+  --lc-glass-chrome: rgb(var(--lc-fill) / clamp(0.55, calc(0.72 * var(--lc-alpha)), 0.96));
+  --lc-glass-card: rgb(var(--lc-fill) / calc(0.58 * var(--lc-alpha)));
+  --lc-glass-menu: rgb(var(--lc-fill) / clamp(0.84, calc(0.9 * var(--lc-alpha)), 0.98));
+  --lc-glass-line: rgba(15, 17, 22, calc(0.08 * var(--lc-glass-edge)));
+  --lc-glass-line-hi: rgba(15, 17, 22, calc(0.13 * var(--lc-glass-edge)));
+  --lc-glass-sheen: inset 0 1px 0 rgba(255, 255, 255, calc(0.9 * var(--lc-sheen)));
+  --lc-glass-tint: rgba(var(--lc-accent-rgb), calc(0.025 * var(--lc-accent-energy)));
+  --lc-glass-shadow-chrome: 0 0 0 0.5px rgba(24, 36, 60, 0.06), 0 22px 54px -36px rgba(24, 36, 60, 0.4);
+  --lc-glass-shadow-menu: 0 30px 70px -30px rgba(24, 36, 60, 0.42), 0 10px 24px -16px rgba(24, 36, 60, 0.22);
+  --lc-glass-field: rgba(255, 255, 255, 0.78);
+  --lc-glass-field-line: rgba(15, 17, 22, 0.1);
+}
+/* True Black: OLED surfaces never go grey — the menu is lifted by its EDGE
+   and a near-black body, not by a translucent grey wash */
+:root[data-nexus-theme='true_black'] {
+  --lc-bubble-in-bg: rgba(255, 255, 255, 0.09);
+  --lc-bubble-in-edge: rgba(255, 255, 255, 0.08);
+  --lc-glass-chrome: rgb(var(--lc-fill) / clamp(0.7, calc(0.82 * var(--lc-alpha)), 0.96));
+  --lc-glass-menu: rgb(8 8 10 / clamp(0.9, calc(0.94 * var(--lc-alpha)), 0.985));
+  --lc-glass-line: rgba(255, 255, 255, calc(0.12 * var(--lc-glass-edge)));
+  --lc-glass-line-hi: rgba(255, 255, 255, calc(0.2 * var(--lc-glass-edge)));
+  --lc-glass-sheen: inset 0 1px 0 rgba(255, 255, 255, calc(0.13 * var(--lc-sheen)));
+  --lc-glass-field: rgba(255, 255, 255, 0.07);
+  --lc-glass-field-line: rgba(255, 255, 255, 0.14);
+}
+:root[data-nexus-theme='red_ops'] {
+  --lc-glass-line: rgba(255, 150, 150, calc(0.085 * var(--lc-glass-edge)));
+  --lc-glass-line-hi: rgba(255, 160, 160, calc(0.14 * var(--lc-glass-edge)));
+}

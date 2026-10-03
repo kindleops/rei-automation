@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeAppearance, appearanceAttributes } from './tokens'
 import { defaultAppearance, normalizeMaterial } from './appearance'
+import { contrast, parseColor } from './oklch'
 
 const ap = defaultAppearance()
 
@@ -44,5 +45,23 @@ describe('the generated Experience Token sheet', () => {
   it('exposes the attributes CSS keys on', () => {
     const c = computeAppearance({ nexusTheme: 'red_ops', accentPalette: 'custom', appearance: { ...ap, accent: { custom: '#FF1212', intensity: 50 } } })
     expect(appearanceAttributes(c, ap, undefined)).toEqual({ 'data-lc-env': 'liquid', 'data-lc-env-motion': 'calm', 'data-lc-accent-reserved': 'crit', 'data-lc-material': 'crystal' })
+  })
+
+  it('publishes accent surfaces whose ink reads on every fill stop, in every foundation', () => {
+    for (const theme of ['dark', 'light', 'true_black', 'red_ops']) {
+      for (const accent of ['cyan', 'violet', 'gold', 'blue', 'lime', 'pink'] as const) {
+        const c = computeAppearance({ nexusTheme: theme, accentPalette: accent, appearance: ap })
+        for (const name of ['--lc-primary-rgb', '--lc-primary-on', '--lc-primary-fill', '--lc-bubble-out-fill', '--lc-bubble-out-ink', '--lc-accent-glow']) expect(c.css).toContain(`${name}:`)
+        const ink = parseColor(/--lc-primary-on: (#[0-9a-f]{6})/i.exec(c.css)![1])!
+        const stops = /--lc-primary-fill: linear-gradient\(180deg, (#[0-9a-f]{6}) 0%, (#[0-9a-f]{6}) 100%\)/i.exec(c.css)!
+        for (const hex of [stops[1], stops[2]]) expect(contrast(ink, parseColor(hex)!)).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
+
+  it('never fills a primary action or an outbound bubble with a failure-red accent', () => {
+    const c = computeAppearance({ nexusTheme: 'red_ops', accentPalette: 'custom', appearance: { ...ap, accent: { custom: '#FF1212', intensity: 50 } } })
+    expect(c.css).toContain('--lc-primary-rgb: 226, 232, 240;')
+    expect(c.css).toContain('--lc-bubble-out-rgb: 226, 232, 240;')
   })
 })
