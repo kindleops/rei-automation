@@ -113,24 +113,48 @@ test("a double-click save creates ONE campaign", async () => {
   assert.equal(created, 1);
 });
 
+/** An in-memory model of campaign_launch_claim / _finish (the SQL is proven in scripts/proof/campaign-launch-claim-proof.mjs). */
+function claimStore(status = "draft") {
+  const state = { status, claim: null }
+  return {
+    state,
+    claimCampaignLaunch: async (_s, { launchKey }) => {
+      if (state.claim?.outcome === "completed") return { claimed: false, reason: "already_launched", launch_key: state.claim.launchKey, result: state.claim.result }
+      if (!["draft", "built"].includes(state.status)) return { claimed: false, reason: "campaign_not_launchable", status: state.status }
+      if (state.claim && !state.claim.outcome) return { claimed: false, reason: "launch_in_progress", launch_key: state.claim.launchKey }
+      state.claim = { launchKey, token: `t-${launchKey}` }
+      return { claimed: true, reason: "event_claimed", token: state.claim.token, mode: "function" }
+    },
+    finishCampaignLaunch: async (_s, { token, outcome, result }) => {
+      if (state.claim?.token !== token) return { ok: false, fenced: true }
+      if (outcome === "failed") state.claim = null
+      else Object.assign(state.claim, { outcome, result })
+      return { ok: true, fenced: false }
+    },
+  }
+}
+
 function launchDeps(overrides = {}) {
-  const calls = { lifecycle: [], events: [], builds: 0 };
-  const events = [];
+  const calls = { lifecycle: [], events: [], builds: 0 }
+  const store = claimStore()
   return {
     calls,
+    store,
     deps: {
       supabase: {},
       nowMs: Date.parse("2026-10-02T15:00:00Z"),
-      loadCampaignStatus: async () => ({ id: ID, status: "draft", total_cap: 1000 }),
+      claimCampaignLaunch: store.claimCampaignLaunch,
+      finishCampaignLaunch: store.finishCampaignLaunch,
+      loadCampaignStatus: async () => ({ id: ID, status: store.state.status, total_cap: 1000 }),
       buildCampaignTargets: async () => { calls.builds += 1; return { ok: true, success: true, build_summary: { ready: 1482 } } },
       evaluateCampaignLaunchReadiness: async () => ({ launch_readiness: "ready", blockers: [], warnings: [], launch_ready_recipient_count: 1482 }),
       applyCampaignLifecycleAction: async (id, input) => {
         calls.lifecycle.push(input);
         await new Promise((r) => setTimeout(r, 15));
-        return { ok: true, to: input.action === "activate" ? "active" : "scheduled", inserted: 100 };
+        store.state.status = input.action === "activate" ? "active" : "scheduled"
+        return { ok: true, to: store.state.status, inserted: 100 };
       },
-      findLaunchEvent: async (_s, _id, key) => events.find((e) => e.metadata.launch_key === key) || null,
-      recordCampaignEvent: async (event) => { events.push(event); calls.events.push(event) },
+      recordCampaignEvent: async (event) => { calls.events.push(event) },
       ...overrides,
     },
   };
@@ -150,6 +174,46 @@ test("a launch double-click launches ONCE (single-flight), and a retry is idempo
   const again = await launchComposedCampaign(input, deps);
   assert.equal(again.idempotent, true);
   assert.equal(calls.lifecycle.length, 1, "the recorded launch answers; nothing re-runs");
+  assert.equal(calls.builds, 1, "one target materialisation");
+});
+
+test("two launch keys (two tabs / two servers) -> one launch; the other is told it already launched", async () => {
+  _resetComposerFlights();
+  const { calls, deps } = launchDeps();
+  const a = { campaign_id: ID, launch_key: "tab-a", start: { mode: "now" }, expected_eligible: 1482 };
+  const b = { ...a, launch_key: "tab-b" };
+  const [ra, rb] = await Promise.all([launchComposedCampaign(a, deps), launchComposedCampaign(b, deps)]);
+  assert.equal([ra, rb].filter((r) => r.ok).length, 1);
+  assert.equal([ra, rb].find((r) => !r.ok).error, "launch_in_progress");
+  assert.equal(calls.lifecycle.length, 1);
+  assert.equal(calls.builds, 1);
+  const late = await launchComposedCampaign({ ...a, launch_key: "tab-c" }, deps);
+  assert.equal(late.error, "already_launched");
+});
+
+test("a database that can't decide the claim refuses the launch (fail closed)", async () => {
+  _resetComposerFlights();
+  const { calls, deps } = launchDeps({ claimCampaignLaunch: async () => ({ claimed: false, reason: "launch_claim_unavailable", error: "connection refused" }) });
+  const r = await launchComposedCampaign({ campaign_id: ID, launch_key: "x", start: { mode: "now" } }, deps);
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 503);
+  assert.equal(calls.builds + calls.lifecycle.length, 0);
+});
+
+test("a refused launch releases its claim so a corrected launch can run", async () => {
+  _resetComposerFlights();
+  let blocked = true;
+  const { calls, deps } = launchDeps({
+    evaluateCampaignLaunchReadiness: async () => (blocked
+      ? { launch_readiness: "blocked", blockers: ["No sender"], launch_ready_recipient_count: 10 }
+      : { launch_readiness: "ready", blockers: [], warnings: [], launch_ready_recipient_count: 1482 }),
+  });
+  const first = await launchComposedCampaign({ campaign_id: ID, launch_key: "r1", start: { mode: "now" } }, deps);
+  assert.equal(first.error, "launch_blocked");
+  blocked = false;
+  const second = await launchComposedCampaign({ campaign_id: ID, launch_key: "r2", start: { mode: "now" } }, deps);
+  assert.equal(second.ok, true);
+  assert.equal(calls.lifecycle.length, 1);
 });
 
 test("start now activates with an activation idempotency key", async () => {

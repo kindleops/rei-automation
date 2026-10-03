@@ -24,10 +24,9 @@
  *              key). One audit event (campaign.composer_launched).
  *
  * IDEMPOTENCY. A composer session carries a composer_key (draft identity) and
- * a launch_key (one per confirmation). Saves and launches are single-flight
- * per key inside the process, and a key already recorded (the draft's
- * metadata.composer_key, the launch audit event) answers with the earlier
- * result instead of acting again: a double-click is one campaign, one launch.
+ * a launch_key (one per confirmation). A LAUNCH is claimed in the database
+ * (campaign-launch-claim.js — one per campaign across every process); saves
+ * are single-flight per key and find the draft by metadata.composer_key.
  *
  * FAIL CLOSED. A read that fails is named; a launch whose readiness cannot be
  * read, whose start has passed (D4: Start now / Reschedule) or whose eligible
@@ -55,6 +54,7 @@ import { SCHEDULE_ACTIVATION_TOLERANCE_MS } from '@/lib/domain/campaigns/campaig
 import { loadTextgridNumberFleet, renderOutboundTemplate } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
 import { loadDispatchBlockedSets } from '@/lib/domain/delivery/sms-health-guard.js'
 import { senderStateOf } from '@/lib/domain/campaigns/campaign-command-intel.js'
+import { claimCampaignLaunch, finishCampaignLaunch } from '@/lib/domain/campaigns/campaign-launch-claim.js'
 
 const clean = (value) => String(value ?? '').trim()
 const lower = (value) => clean(value).toLowerCase()
@@ -588,20 +588,12 @@ export function resolveLaunchStart(start = {}, nowMs = Date.now()) {
   return { ok: true, mode: 'at', at: new Date(at).toISOString() }
 }
 
-async function findLaunchEvent(supabase, campaignId, launchKey) {
-  const { data, error } = await supabase.from('campaign_events')
-    .select('id,created_at,metadata')
-    .eq('campaign_id', campaignId)
-    .eq('event_type', 'campaign.composer_launched')
-    .order('created_at', { ascending: false })
-    .limit(20)
-  if (error) throw error
-  return (data || []).find((e) => clean(obj(e.metadata).launch_key) === launchKey) || null
-}
-
 /**
- * Launch a prepared draft. Single-flight per launch_key; a key already
- * launched answers with its recorded result. Fails closed at every step.
+ * Launch a prepared draft. ONE launch per campaign is decided by the database
+ * (campaign-launch-claim.js): concurrent requests from any process get exactly
+ * one claim; the others answer already_launched / launch_in_progress /
+ * campaign_not_launchable. A retry with the winner's launch key gets the
+ * recorded result. Nothing is built, scheduled or activated without the claim.
  */
 export async function launchComposedCampaign(input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
@@ -612,59 +604,77 @@ export async function launchComposedCampaign(input = {}, deps = {}) {
   const start = resolveLaunchStart(obj(input.start), deps.nowMs ?? Date.now())
   if (!start.ok) return { ok: false, status: 409, ...start }
   const expected = num(input.expected_eligible)
+  const claimFn = deps.claimCampaignLaunch || claimCampaignLaunch
+  const finishFn = deps.finishCampaignLaunch || finishCampaignLaunch
 
-  return singleFlight(`launch:${launchKey}`, async () => {
-    const prior = await (deps.findLaunchEvent || findLaunchEvent)(supabase, id, launchKey)
-    if (prior) return { ok: true, idempotent: true, campaign_id: id, ...obj(obj(prior.metadata).result) }
-
-    const prepared = await prepareComposerLaunch({ campaign_id: id }, deps)
-    if (!prepared.ok) return prepared
-    const r = prepared.readiness
-    if (r.state === 'blocked' || r.blockers.length) return { ok: false, status: 409, error: 'launch_blocked', readiness: r }
-    if (!(r.launch_ready > 0)) return { ok: false, status: 409, error: 'zero_eligible', readiness: r }
-    if (expected !== null && expected !== r.launch_ready) {
-      return { ok: false, status: 409, error: 'eligible_changed', message: `Eligible changed from ${expected} to ${r.launch_ready}. Review again.`, readiness: r }
+  // in-process single-flight only saves a round trip; the claim is the guarantee
+  return singleFlight(`launch:${id}:${launchKey}`, async () => {
+    const claim = await claimFn(supabase, { campaignId: id, launchKey })
+    if (!claim.claimed) {
+      if (claim.reason === 'already_launched' && clean(claim.launch_key) === launchKey) {
+        return { ok: true, idempotent: true, campaign_id: id, ...obj(claim.result) }
+      }
+      const status = claim.reason === 'launch_claim_unavailable' ? 503 : claim.reason === 'campaign_not_found' ? 404 : 409
+      return { ok: false, status, error: claim.reason || 'not_claimed', campaign_state: claim.status ?? null, message: claim.error || null }
     }
+    const release = (error, extra = {}) => finishFn(supabase, { campaignId: id, token: claim.token, mode: claim.mode, outcome: 'failed', error, result: extra })
+      .catch((e) => console.warn('campaign_composer.release_failed', e?.message || e))
 
-    const lifecycle = deps.applyCampaignLifecycleAction || applyCampaignLifecycleAction
-    const result = start.mode === 'now'
-      ? await lifecycle(id, {
-        action: 'activate',
-        activation_idempotency_key: `composer:${launchKey}`,
-        confirm_live: true,
-        explicit_operator_action: true,
-        batch_max: Math.min(r.launch_ready, 100),
-        reason: 'operator:composer_launch',
-      }, deps)
-      : await lifecycle(id, { action: 'schedule', scheduled_for: start.at, reason: 'operator:composer_launch' }, deps)
-    if (!result?.ok) {
-      return { ok: false, status: 409, error: clean(result?.error) || 'lifecycle_refused', message: clean(result?.message) || null, blockers: result?.blockers || [], readiness: r }
-    }
+    try {
+      const prepared = await prepareComposerLaunch({ campaign_id: id }, deps)
+      if (!prepared.ok) { await release(prepared.error); return prepared }
+      const r = prepared.readiness
+      const refuse = async (body) => { await release(body.error); return body }
+      if (r.state === 'blocked' || r.blockers.length) return refuse({ ok: false, status: 409, error: 'launch_blocked', readiness: r })
+      if (!(r.launch_ready > 0)) return refuse({ ok: false, status: 409, error: 'zero_eligible', readiness: r })
+      if (expected !== null && expected !== r.launch_ready) {
+        return refuse({ ok: false, status: 409, error: 'eligible_changed', message: `Eligible changed from ${expected} to ${r.launch_ready}. Review again.`, readiness: r })
+      }
 
-    const summary = {
-      mode: start.mode,
-      scheduled_for: start.at,
-      state: clean(result.to) || null,
-      eligible: r.launch_ready,
-      inserted: num(result.inserted),
+      const lifecycle = deps.applyCampaignLifecycleAction || applyCampaignLifecycleAction
+      const result = start.mode === 'now'
+        ? await lifecycle(id, {
+          action: 'activate',
+          activation_idempotency_key: `composer:${launchKey}`,
+          confirm_live: true,
+          explicit_operator_action: true,
+          batch_max: Math.min(r.launch_ready, 100),
+          reason: 'operator:composer_launch',
+        }, deps)
+        : await lifecycle(id, { action: 'schedule', scheduled_for: start.at, reason: 'operator:composer_launch' }, deps)
+      if (!result?.ok) {
+        return refuse({ ok: false, status: 409, error: clean(result?.error) || 'lifecycle_refused', message: clean(result?.message) || null, blockers: result?.blockers || [], readiness: r })
+      }
+
+      const summary = {
+        mode: start.mode,
+        scheduled_for: start.at,
+        state: clean(result.to) || null,
+        eligible: r.launch_ready,
+        inserted: num(result.inserted),
+      }
+      const finished = await finishFn(supabase, { campaignId: id, token: claim.token, mode: claim.mode, outcome: 'completed', result: summary })
+      if (finished?.fenced) console.warn('campaign_composer.finish_fenced', id)
+      await (deps.recordCampaignEvent || recordCampaignEvent)({
+        campaign_id: id,
+        event_type: 'campaign.composer_launched',
+        severity: 'success',
+        title: start.mode === 'now' ? 'Launched from Composer' : 'Scheduled from Composer',
+        description: `${r.launch_ready.toLocaleString('en-US')} eligible ${start.mode === 'now' ? 'starting now' : `from ${start.at}`} through recipient-local contact windows`,
+        metadata: {
+          launch_key: launchKey,
+          claim_mode: claim.mode,
+          operator: clean(input.operator) || null,
+          source: obj(input.audit).source || null,
+          audit: obj(input.audit),
+          readiness: { state: r.state, launch_ready: r.launch_ready, warnings: r.warnings.slice(0, 6) },
+          result: summary,
+        },
+      }, deps).catch((error) => console.warn('campaign_composer.audit_failed', error?.message || error))
+      return { ok: true, campaign_id: id, idempotent: Boolean(result.idempotent), ...summary, readiness: r }
+    } catch (error) {
+      await release(error?.message || 'launch_exception')
+      throw error
     }
-    // The audit is best-effort AFTER the canonical transition succeeded: the
-    // lifecycle already recorded its own event; this one carries the composition.
-    await (deps.recordCampaignEvent || recordCampaignEvent)({
-      campaign_id: id,
-      event_type: 'campaign.composer_launched',
-      severity: 'success',
-      title: start.mode === 'now' ? 'Launched from Composer' : 'Scheduled from Composer',
-      description: `${r.launch_ready.toLocaleString('en-US')} eligible ${start.mode === 'now' ? 'starting now' : `from ${start.at}`} through recipient-local contact windows`,
-      metadata: {
-        launch_key: launchKey,
-        operator: clean(input.operator) || null,
-        source: obj(input.audit).source || null,
-        audit: obj(input.audit),
-        readiness: { state: r.state, launch_ready: r.launch_ready, warnings: r.warnings.slice(0, 6) },
-        result: summary,
-      },
-    }, deps).catch((error) => console.warn('campaign_composer.audit_failed', error?.message || error))
-    return { ok: true, campaign_id: id, idempotent: Boolean(result.idempotent), ...summary, readiness: r }
   })
 }

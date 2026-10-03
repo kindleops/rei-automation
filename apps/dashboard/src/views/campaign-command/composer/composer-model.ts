@@ -578,4 +578,8 @@ export const LAUNCH_ERROR_WORDS: Record<string, string> = {
   build_failed: 'Targets couldn’t be built',
   composer_write_failed: 'The server refused the request',
   network: 'Connection lost — nothing was launched',
+  already_launched: 'This campaign was already launched (another tab or operator)',
+  launch_in_progress: 'A launch for this campaign is already running — wait for it',
+  campaign_not_launchable: 'This campaign is no longer a draft',
+  launch_claim_unavailable: 'The launch couldn’t be claimed safely — nothing was launched',
 }
