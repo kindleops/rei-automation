@@ -26,3 +26,24 @@ export function legacyNotificationsPanel(): boolean {
 
 /** True when a "notifications" request should open the plane (not the legacy panel). */
 export const planeOwnsNotifications = () => planeHostPresent() && !legacyNotificationsPanel()
+
+/**
+ * Layers the plane opens that portal OUTSIDE its DOM (confirm / prompt dialogs and their scrim,
+ * sheets, menus / popovers, toasts, the inspector). A press inside one of them is not an "outside"
+ * press: dismissing the plane there would unmount the confirm before its action runs.
+ */
+export const PLANE_LAYERS = '.lc-dialog, .lc-scrim, .lc-sheet, [role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper], .lc-toast, .lc-inspector'
+const BELL = 'button.cd-btn[aria-label^="Notifications"]'
+
+type Closest = { closest?: (sel: string) => unknown } | null | undefined
+
+/** Pure: should a press on `target` dismiss the plane? (`inside` = the target is within the plane itself) */
+export function pressDismissesPlane(target: Closest, inside: boolean): boolean {
+  if (!target || inside) return false
+  if (typeof target.closest !== 'function') return true
+  if (target.closest(BELL)) return false // the bell toggles the plane itself
+  return !target.closest(PLANE_LAYERS)
+}
+
+/** Pure: an Escape is owned by an open dialog layer (it closes that layer, never the plane under it). */
+export const dialogLayerOpen = (doc: { querySelector: (s: string) => unknown } | null | undefined) => Boolean(doc?.querySelector('.lc-dialog, .lc-sheet'))

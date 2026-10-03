@@ -33,7 +33,7 @@ import {
   clockTime, defaultLens, degradedText, EMPTY_COPY, LENS_LABEL, LENS_ORDER, nextStoryIndex, relTime, runObject, storyObject, storyTone, visibleOrder,
   type Story, type StoryLens,
 } from './story-model'
-import { legacyNotificationsPanel, registerPlaneHost } from './plane-host'
+import { dialogLayerOpen, legacyNotificationsPanel, pressDismissesPlane, registerPlaneHost } from './plane-host'
 import { PlaneSettings } from './PlaneSettings'
 import { useSettingsFace } from './settings-face'
 import './notification-plane.css'
@@ -64,22 +64,30 @@ function Plane({ onClose, anchorTop }: { onClose: () => void; anchorTop: number 
   const settings = useSettingsFace()
   const planeRef = useRef<HTMLElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  /** this Escape was pressed while a dialog layer was open (read in window capture, before the layer unmounts) */
+  const escOwned = useRef(false)
 
   useEffect(() => { setPlaneOpen(true); return () => setPlaneOpen(false) }, [])
   // the plane takes focus so ↑/↓ work at once (Esc returns the operator to the workspace)
   useEffect(() => { planeRef.current?.focus({ preventScroll: true }) }, [])
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(t) }, [])
 
-  // outside press closes — except the deck's own bell (it toggles) and portaled LC layers
+  // outside press closes — except the deck's own bell (it toggles) and every portaled LC layer the plane
+  // opens (a confirm's buttons live outside the plane's DOM: closing here unmounted the confirm before
+  // its action ran — Arm rule closed everything and sent nothing)
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       const t = e.target as Element | null
-      if (!t || planeRef.current?.contains(t)) return
-      if (t.closest('button.cd-btn[aria-label^="Notifications"], [data-radix-popper-content-wrapper], .lc-toast, .lc-inspector')) return
-      onClose()
+      if (pressDismissesPlane(t, Boolean(t && planeRef.current?.contains(t)))) onClose()
     }
+    // Escape inside a dialog closes the dialog only. Whether a dialog owned it is read FIRST (window capture,
+    // before the dialog's own handler can unmount it); the bubble then stops short of the shell's window Esc.
+    const onKeyFirst = (e: globalThis.KeyboardEvent) => { escOwned.current = e.key === 'Escape' && dialogLayerOpen(document) }
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape' && escOwned.current) { escOwned.current = false; e.stopPropagation() } }
     document.addEventListener('pointerdown', onDown, true)
-    return () => document.removeEventListener('pointerdown', onDown, true)
+    window.addEventListener('keydown', onKeyFirst, true)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKeyFirst, true); document.removeEventListener('keydown', onKey) }
   }, [onClose])
 
   const all = useMemo(() => [...st.stories.values()], [st.stories])
@@ -118,7 +126,7 @@ function Plane({ onClose, anchorTop }: { onClose: () => void; anchorTop: number 
 
   // keyboard, scoped to the plane: ↑/↓ Home/End through the visible stories; Esc steps back
   const onPlaneKey = (e: KeyboardEvent<HTMLElement>) => {
-    if (document.querySelector('.lc-dialog')) return // an LC dialog (arming a rule) owns its keys
+    if (escOwned.current || dialogLayerOpen(document)) return // an LC dialog (arming a rule) owns its keys
     if (e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation()
       if (view === 'settings') { setView('stories'); requestAnimationFrame(() => planeRef.current?.focus({ preventScroll: true })) }
