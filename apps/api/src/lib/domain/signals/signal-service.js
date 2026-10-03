@@ -20,7 +20,7 @@
 import { listPlatformEvents } from '@/lib/domain/platform/events/platform-events-service.js'
 import { upsertNotificationEvent, resolveNotificationByDeduplicationKey } from '@/lib/domain/notifications/notification-intelligence-service.js'
 import { threadMatchesBucketFilter } from '@/lib/domain/inbox/inbox-bucket-predicates.js'
-import { BUILT_IN_RULES, LEGACY_SCAN_RETIREMENT, RULES_BY_KEY, effectiveRule } from './signal-rules.js'
+import { BUILT_IN_RULES, LEGACY_SCAN_RETIREMENT, RULES_BY_KEY, effectiveRule, legacyRetiredWhileLive } from './signal-rules.js'
 import { toNotificationSeverity } from './signal-vocabulary.js'
 import {
   conditionCandidate, decideTransition, eventAllowed, eventCandidate, evaluateQueueStall, evaluateRate, evaluateRepliesBacklog,
@@ -339,7 +339,8 @@ export async function runSignalEvaluation(deps = {}) {
 
 /**
  * The legacy notification-scanner event types to SKIP right now: those whose
- * replacing rule is armed while the gate is live and the schema exists. Any
+ * replacing rule is armed while the gate is live and the schema exists, plus the
+ * owner-retired null-replacement checks (retire_when_live) while live. Any
  * failure returns an empty set — the legacy scan keeps running (never a gap).
  */
 export async function legacyScanSuppression(deps = {}) {
@@ -349,7 +350,7 @@ export async function legacyScanSuppression(deps = {}) {
     if (!gate.live) return new Set()
     const rows = await d.store.listRules()
     const armed = new Set(rows.filter((r) => r.is_enabled).map((r) => r.rule_key))
-    return new Set(LEGACY_SCAN_RETIREMENT.filter((x) => x.replacement && armed.has(x.replacement)).map((x) => x.legacy))
+    return new Set(LEGACY_SCAN_RETIREMENT.filter((x) => legacyRetiredWhileLive(x, armed)).map((x) => x.legacy))
   } catch {
     return new Set()
   }
@@ -427,7 +428,7 @@ export async function getSignalCenter(deps = {}) {
     },
     checkpoints: Object.fromEntries(checkpoints.map((c) => [c.source, { evaluated_through: c.evaluated_through, last_run_at: c.last_run_at, partial: Boolean(c.cursor), summary: c.last_summary || {} }])),
     watches: { items: watches, count: watches.length, supported_types: supportedWatchTypes(schema), error: watchError },
-    legacy: LEGACY_SCAN_RETIREMENT.map((x) => ({ ...x, suppressed_now: Boolean(gate.live && schema.tables_ready && x.replacement && armed.has(x.replacement)) })),
+    legacy: LEGACY_SCAN_RETIREMENT.map((x) => ({ ...x, suppressed_now: Boolean(gate.live && schema.tables_ready && legacyRetiredWhileLive(x, armed)) })),
   }
 }
 

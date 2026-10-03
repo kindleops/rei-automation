@@ -125,7 +125,10 @@ export const RULES_BY_KEY = Object.freeze(Object.fromEntries(BUILT_IN_RULES.map(
  * Legacy notification-scanner checks and what retires them. Counter-based
  * campaign checks read denormalised campaigns.*_count columns (historically wrong:
  * reply/opt-out counts were always 0). `replacement: null` = retire without a
- * signal replacement (owner decision), listed so nothing is silently dropped.
+ * signal replacement, listed so nothing is silently dropped. A null-replacement
+ * check stops only when it carries `retire_when_live: true` (owner decision
+ * 2026-10-02), and only while the Signal Center gate is live — gate off, every
+ * legacy check runs exactly as before.
  */
 export const LEGACY_SCAN_RETIREMENT = Object.freeze([
   { legacy: 'campaign_delivery_rate_falling', scanner: 'scanCampaignNotifications', basis: 'campaigns.delivered_count / sent_count (lifetime counters)', replacement: 'campaign.delivery_rate_drop' },
@@ -133,14 +136,21 @@ export const LEGACY_SCAN_RETIREMENT = Object.freeze([
   { legacy: 'campaign_stale_heartbeat', scanner: 'scanCampaignNotifications', basis: 'campaigns.execution_heartbeat_at age', replacement: 'campaign.execution_exception' },
   { legacy: 'campaign_no_sends_despite_active', scanner: 'scanCampaignNotifications', basis: 'campaigns.sent_count = 0 (counter)', replacement: 'campaign.execution_exception' },
   { legacy: 'campaign_pacing_behind', scanner: 'scanCampaignNotifications', basis: 'campaigns.queued_count vs sent_count (counters)', replacement: 'queue.stalled' },
-  { legacy: 'campaign_daily_cap_hit', scanner: 'scanCampaignNotifications', basis: 'lifetime sent_count compared with a DAILY cap (wrong unit)', replacement: null },
-  { legacy: 'campaign_reply_rate_strong', scanner: 'scanCampaignNotifications', basis: 'campaigns.replied_count (counter, historically 0)', replacement: null },
+  { legacy: 'campaign_daily_cap_hit', scanner: 'scanCampaignNotifications', basis: 'lifetime sent_count compared with a DAILY cap (wrong unit)', replacement: null, retire_when_live: false }, // owner 2026-10-02: KEEP
+  { legacy: 'campaign_reply_rate_strong', scanner: 'scanCampaignNotifications', basis: 'campaigns.replied_count (counter, historically 0)', replacement: null, retire_when_live: true }, // owner 2026-10-02: DROP
   { legacy: 'sender_delivery_spike_failure', scanner: 'scanSenderHealthNotifications', basis: 'message_events 48h, own failure-rate math', replacement: 'sender.delivery_degraded' },
   { legacy: 'sender_content_filter_spike', scanner: 'scanSenderHealthNotifications', basis: 'v1 content-block regex (Lab: missed every carrier spam filter)', replacement: 'sender.content_filter_spike' },
   { legacy: 'platform_queue_processor_degraded', scanner: 'scanPlatformHealthNotifications', basis: 'queue processor health = degraded', replacement: 'queue.stalled' },
 ])
 
 /** Effective rule = code definition + the row's arming and condition overrides. */
+/** Is this legacy check retired right now? Only ever while the gate is live (caller checks). */
+export function legacyRetiredWhileLive(entry, armedRuleKeys) {
+  if (!entry) return false
+  if (entry.replacement) return armedRuleKeys.has(entry.replacement)
+  return entry.retire_when_live === true
+}
+
 export function effectiveRule(def, row = null) {
   const overrides = row?.condition && typeof row.condition === 'object' ? row.condition : {}
   return {

@@ -318,9 +318,21 @@ test('metric rules are throttled to their interval; state rules run every tick',
 
 /* ── legacy hand-off ─────────────────────────────────────────────────── */
 
+test('owner decision 2026-10-02: "reply rate strong" is dropped while live; "daily cap hit" is kept; gate off retires nothing', async () => {
+  const byLegacy = Object.fromEntries(LEGACY_SCAN_RETIREMENT.map((x) => [x.legacy, x]))
+  assert.equal(byLegacy.campaign_reply_rate_strong.retire_when_live, true)
+  assert.equal(byLegacy.campaign_daily_cap_hit.retire_when_live, false)
+  const live = harness({ rules: [] })
+  const set = await legacyScanSuppression(live.deps)
+  assert.ok(set.has('campaign_reply_rate_strong'))
+  assert.ok(!set.has('campaign_daily_cap_hit'), 'daily cap hit keeps running')
+  const off = harness({ env: {}, rules: [] })
+  assert.equal((await legacyScanSuppression(off.deps)).size, 0, 'gate off: byte-identical legacy scanning')
+})
+
 test('legacy scans are retired only while the gate is live AND the replacing rule is armed', async () => {
   const live = harness({ rules: [ruleRow('campaign.delivery_rate_drop'), ruleRow('queue.stalled', { is_enabled: false })] })
-  assert.deepEqual([...await legacyScanSuppression(live.deps)], ['campaign_delivery_rate_falling'])
+  assert.deepEqual([...await legacyScanSuppression(live.deps)], ['campaign_delivery_rate_falling', 'campaign_reply_rate_strong'])
   const off = harness({ env: {}, rules: [ruleRow('campaign.delivery_rate_drop')] })
   assert.equal((await legacyScanSuppression(off.deps)).size, 0)
   const broken = harness({ rules: [] })
