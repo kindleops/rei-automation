@@ -1,8 +1,8 @@
 -- =============================================================================
 -- Rollback-only pretest for
---   supabase/migrations/PROPOSED_20261003130000_operator_lockdown.sql
+--   supabase/migrations/20261003130000_operator_lockdown.sql
 -- and its rollback,
---   supabase/rollbacks/PROPOSED_20261003130000_operator_lockdown.rollback.sql
+--   supabase/rollbacks/20261003130000_operator_lockdown.rollback.sql
 --
 -- Run with psql as postgres, from the repo root:
 --   psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/operator_lockdown_test.sql
@@ -214,7 +214,7 @@ select pg_temp.probe('select count(*) from public.get_command_map_seller_pins(32
 select round(extract(epoch from clock_timestamp() - :'t0'::timestamptz) * 1000) as pins_ms_before \gset
 
 -- ---------------------------------------------------------- APPLY ----
-\ir ../migrations/PROPOSED_20261003130000_operator_lockdown.sql
+\ir ../migrations/20261003130000_operator_lockdown.sql
 
 -- ------------------------------------------------------ A / B / C ----
 do $$
@@ -357,7 +357,7 @@ select round(extract(epoch from clock_timestamp() - :'t1'::timestamptz) * 1000) 
 \echo 'INFO pins RPC (operator): before' :pins_before 'rows in' :pins_ms_before 'ms | after' :pins_after 'rows in' :pins_ms_after 'ms'
 
 -- --------------------------------------------------------- F. ROLLBACK ----
-\ir ../rollbacks/PROPOSED_20261003130000_operator_lockdown.rollback.sql
+\ir ../rollbacks/20261003130000_operator_lockdown.rollback.sql
 
 do $$
 declare n int; cosmetic text;
