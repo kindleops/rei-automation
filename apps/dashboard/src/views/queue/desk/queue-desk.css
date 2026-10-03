@@ -250,6 +250,7 @@
   .qdk[data-dock]:not([data-section='queue']) .qdk-body { grid-template-columns: minmax(0, 1fr) 420px; }
   .qdk-node__value { font-size: var(--lc-t-metric-xl, 34px); }
   .qdk-lane { min-height: 34px; }
+  .qdk-flow__main { max-width: 2200px; }
 }
 @container qdk (max-width: 1039px) {
   /* one column; the dossier floats over the right edge of the desk */

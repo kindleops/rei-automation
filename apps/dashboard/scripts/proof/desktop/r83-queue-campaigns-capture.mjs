@@ -27,6 +27,7 @@ const FIXTURE = process.argv.includes('--fixture')
   : null
 const DEMO = process.argv.includes('--demo')
 const OPEN = process.argv.includes('--open')
+const PHONE = process.argv.includes('--phone')
 const ROUTES = {
   queue: { path: '/queue', root: '.qdk, .occ-root, .qx-root' },
   campaigns: { path: '/campaign-command', root: '.cc3, .ccc, .clc' },
@@ -36,7 +37,7 @@ const browser = await chromium.launch()
 const watchdog = setTimeout(() => { console.log('WATCHDOG: capture exceeded 900 s'); process.exit(2) }, 900_000)
 for (const theme of THEMES) {
   for (const [W, H] of SIZES) {
-    const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: W > 3000 ? 0.75 : 1 })
+    const ctx = await browser.newContext(PHONE ? { viewport: { width: W, height: H }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' } : { viewport: { width: W, height: H }, deviceScaleFactor: W > 3000 ? 0.75 : 1 })
     await ctx.addInitScript((t) => {
       try {
         localStorage.removeItem('nexus.desktop.split')
@@ -59,7 +60,7 @@ for (const theme of THEMES) {
     })
     for (const app of APPS) {
       const route = ROUTES[app]
-      const tag = `${app}-${theme}-${W}x${H}${TAG ? `-${TAG}` : ''}${FIXTURE && app === 'queue' ? '-fixture' : ''}${DEMO && app === 'campaigns' ? '-demo' : ''}${OPEN && app === 'queue' ? '-open' : ''}`
+      const tag = `${app}-${theme}-${W}x${H}${TAG ? `-${TAG}` : ''}${FIXTURE && app === 'queue' ? '-fixture' : ''}${DEMO && app === 'campaigns' ? '-demo' : ''}${OPEN && app === 'queue' ? '-open' : ''}${PHONE ? '-phone' : ''}`
       await page.goto(`${BASE}${route.path}${DEMO && app === 'campaigns' ? '?demo=1' : ''}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
       await page.waitForSelector(route.root, { timeout: 120000 }).catch(() => console.log(tag, 'note: root missing'))
       await page.waitForTimeout(SETTLE)
