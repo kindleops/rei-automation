@@ -127,6 +127,12 @@
     // NOTIFICATION CENTER 2.0 PROJECTOR COMMISSIONED (RC 8.2 post-deploy E1).
     // Every 30 s; writes only the notification_stor* projection tables.
     "CRON_NOTIFICATION_STORIES_PROJECT_ENABLED": "true",
+    // SIGNAL CENTER COMMISSIONED (RC 8.2 post-deploy E2). The job flag lets the
+    // */5 lane call the evaluator; the ceiling lets it run. Both are inert until
+    // system_control.signal_center_enabled='true' (the operator kill switch,
+    // flipped LAST), and then only ARMED rules evaluate. Send-incapable.
+    "CRON_SIGNAL_EVALUATE_ENABLED": "true",
+    "SIGNAL_CENTER_ENABLED": "true",
     "DEPLOYMENT_ENV": "production",
     "DEPLOYMENT_PROVIDER": "cloudflare",
     "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",

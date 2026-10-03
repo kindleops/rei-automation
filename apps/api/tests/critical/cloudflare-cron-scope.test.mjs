@@ -270,6 +270,8 @@ test("production declares the reconciliation and send schedules, and only approv
       "CRON_QUEUE_RECONCILE_ENABLED",
       "CRON_QUEUE_RUN_ENABLED",
       "CRON_SELLER_STATE_RECONCILE_ENABLED",
+      // Signal Center evaluator, RC 8.2 post-deploy E2.
+      "CRON_SIGNAL_EVALUATE_ENABLED",
       // Workflow orchestrator, operator-commissioned 2026-09-29.
       "CRON_WORKFLOW_ORCHESTRATOR_ENABLED",
       "CRON_WORKFLOW_RUNTIME_ENABLED",
@@ -421,7 +423,7 @@ test("the workflow orchestrator rides the reconciliation cadence, never the send
   assert.notEqual(staging.WORKFLOW_ORCHESTRATOR_ENABLED, "true", "staging shares the production DB: no orchestrator");
 });
 
-test("the Signal Center evaluator is registered on the reconciliation cadence but switched OFF everywhere (flag + env ceiling default-deny)", async () => {
+test("the Signal Center evaluator rides the reconciliation cadence; commissioned in production only (RC 8.2 E2), ceiling default-deny", async () => {
   const code = await workerCode();
   const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
   const fiveMin = table[1].match(/"\*\/5 \* \* \* \*":\s*\[([^\]]*)\]/);
@@ -432,11 +434,12 @@ test("the Signal Center evaluator is registered on the reconciliation cadence bu
   assert.ok(block && block[1].includes('"CRON_SIGNAL_EVALUATE_ENABLED"') && block[1].includes('"/api/internal/signals/evaluate"'));
   assert.ok(!/body\s*:/.test(block[1]), "the evaluator takes no body");
   assert.match(code, /SIGNAL_CENTER_ENABLED:\s*\n?\s*env\.SIGNAL_CENTER_ENABLED === "true" \? "true" : "false"/);
-  for (const cfg of [PRODUCTION, STAGING]) {
-    const vars = await configVars(cfg);
-    assert.notEqual(vars.CRON_SIGNAL_EVALUATE_ENABLED, "true", "not commissioned: the owner flips this");
-    assert.notEqual(vars.SIGNAL_CENTER_ENABLED, "true", "not commissioned: the owner flips this");
-  }
+  const prod = await configVars(PRODUCTION);
+  assert.equal(prod.CRON_SIGNAL_EVALUATE_ENABLED, "true");
+  assert.equal(prod.SIGNAL_CENTER_ENABLED, "true");
+  const staging = await configVars(STAGING);
+  assert.notEqual(staging.CRON_SIGNAL_EVALUATE_ENABLED, "true", "staging shares the production DB: no evaluator");
+  assert.notEqual(staging.SIGNAL_CENTER_ENABLED, "true", "staging shares the production DB: no evaluator");
 });
 
 test("the Notification Center projector rides its own lane at 30 s: commissioned in production only (RC 8.2 E1)", async () => {
