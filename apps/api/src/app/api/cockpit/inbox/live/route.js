@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, corsHeaders } from '../../_shared.js'
 import { degradedLiveResponse } from '@/lib/domain/inbox/degraded-read-responses.js'
-import { getLiveInbox, loadInboxBootSnapshot } from '@/lib/domain/inbox/live-inbox-service.js'
+import { getLiveInbox, inboxSnapshotScope, loadInboxBootSnapshot } from '@/lib/domain/inbox/live-inbox-service.js'
 import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
 
 export const runtime = 'nodejs'
@@ -69,7 +69,8 @@ export async function GET(request) {
       ])
     } catch (innerErr) {
       if (innerErr.isTimeout) {
-        const snapshot = loadInboxBootSnapshot()
+        // only a snapshot of THIS list — never another bucket's rows under this filter
+        const snapshot = loadInboxBootSnapshot(undefined, inboxSnapshotScope(params))
         if (snapshot?.threads?.length > 0) {
           return NextResponse.json(
             {

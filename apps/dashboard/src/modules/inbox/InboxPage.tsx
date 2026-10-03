@@ -242,8 +242,8 @@ import {
   clearAllAdvancedFilters,
   countActiveAdvancedFilters,
   hasActiveAdvancedFilters,
-  serializeAdvancedFiltersForServer,
 } from '../../domain/inbox/inbox-advanced-filter-engine'
+import { serializeInboxFiltersForServer } from '../../domain/inbox/inbox-filter-catalog-runtime'
 import {
   getViewLayoutMode,
   resolveLayoutModeForPane,
@@ -1123,7 +1123,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [data.allInboxCount, data.counts, decisions, threads])
 
   const serverAdvancedPayload = useMemo(
-    () => serializeAdvancedFiltersForServer(advancedFilters, { stage: stageFilter, view: viewFilter }),
+    () => serializeInboxFiltersForServer(advancedFilters, { stage: stageFilter, view: viewFilter }),
     [advancedFilters, stageFilter, viewFilter],
   )
 
@@ -1864,7 +1864,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         view: nextView,
         stage: nextStage,
         query: nextSearch,
-        advanced: serializeAdvancedFiltersForServer(nextAdvanced, { stage: nextStage, view: nextView }),
+        advanced: serializeInboxFiltersForServer(nextAdvanced, { stage: nextStage, view: nextView }),
       },
       cursor: null,
       limit: 30,
@@ -1910,7 +1910,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         view: 'all_conversations',
         stage: 'all_stages',
         query: '',
-        advanced: serializeAdvancedFiltersForServer(cleared),
+        advanced: serializeInboxFiltersForServer(cleared),
       },
       cursor: null,
       limit: 100,
@@ -1932,7 +1932,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         view: payload.view,
         stage: payload.stage,
         query: searchQuery,
-        advanced: serializeAdvancedFiltersForServer(payload.advanced, { stage: payload.stage, view: payload.view }),
+        advanced: serializeInboxFiltersForServer(payload.advanced, { stage: payload.stage, view: payload.view }),
       },
       cursor: null,
       limit: 100,
@@ -1952,7 +1952,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         view: viewFilter,
         stage: stageFilter,
         query: searchQuery,
-        advanced: serializeAdvancedFiltersForServer(nextAdvanced, { stage: stageFilter, view: viewFilter }),
+        advanced: serializeInboxFiltersForServer(nextAdvanced, { stage: stageFilter, view: viewFilter }),
       },
       cursor: null,
       limit: 100,
@@ -5007,7 +5007,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (lens === 'scheduled') return
     requestBucket(String(view))
     void refreshInbox({
-      filters: { view, stage: 'all_stages', query: '', advanced: serializeAdvancedFiltersForServer(cleared, { stage: 'all_stages', view }) },
+      filters: { view, stage: 'all_stages', query: '', advanced: serializeInboxFiltersForServer(cleared, { stage: 'all_stages', view }) },
       cursor: null,
       limit: 30,
       _force: true,

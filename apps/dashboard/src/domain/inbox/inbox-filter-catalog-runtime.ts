@@ -89,6 +89,26 @@ export function pickActiveCatalogFilterValues(filters: InboxAdvancedFilters): Re
   return payload
 }
 
+/**
+ * THE INBOX'S SERVER PAYLOAD. The Advanced Filters sheet is catalog-driven: it
+ * stores every choice under its catalog key (`stage`, `status`, `intent`,
+ * `isRead`, `county`, `automationStatus`, …). `serializeAdvancedFiltersForServer`
+ * only knows the older hand-written key set (`sellerStage`, `inboxStatus`, …),
+ * so on its own it silently dropped most catalog choices — Apply sent no
+ * `advanced` param at all and the "Filtered" list was the unfiltered list.
+ * Catalog values first, then the legacy keys and view-level extras on top
+ * (an explicit header stage still wins), exactly as the Map already sends.
+ */
+export function serializeInboxFiltersForServer(
+  filters: InboxAdvancedFilters,
+  extras?: Parameters<typeof serializeAdvancedFiltersForServer>[1],
+): Record<string, unknown> {
+  return {
+    ...pickActiveCatalogFilterValues(filters),
+    ...serializeAdvancedFiltersForServer(filters, extras),
+  }
+}
+
 export function serializeInboxFiltersForMap(filters: InboxAdvancedFilters): Record<string, unknown> {
   return {
     ...pickActiveCatalogFilterValues(filters),

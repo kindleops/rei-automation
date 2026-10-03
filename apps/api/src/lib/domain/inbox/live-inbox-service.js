@@ -2211,26 +2211,53 @@ async function queryAuthoritativeInboxThreads(params = {}, {
 const BOOT_FAST_QUERY_TIMEOUT_MS = 4_000;
 const BOOT_UNORDERED_QUERY_TIMEOUT_MS = 2_000;
 const INBOX_BOOT_SNAPSHOT_TTL_MS = 45 * 60 * 1000;
-let inboxBootSnapshot = { capturedAt: 0, threads: [], source: BOOT_FAST_THREAD_SOURCE };
+let inboxBootSnapshot = { capturedAt: 0, threads: [], source: BOOT_FAST_THREAD_SOURCE, scope: null };
 
-export function rememberInboxBootSnapshot(threads = []) {
+/**
+ * WHICH LIST A SNAPSHOT IS. The timeout fallback used to serve the last
+ * non-empty list of ANY filter — so when the live query was slow, choosing
+ * Needs Review, Waiting or an advanced filter returned the Priority rows
+ * remembered a moment earlier, and the filter looked broken. A snapshot now
+ * answers only the request that produced it: same bucket, direction, search,
+ * stage and advanced filters. Paging, limits and transport hints do not
+ * change which list it is.
+ */
+const SNAPSHOT_VOLATILE_PARAMS = new Set([
+  "limit", "timeout_mode", "timeoutMode", "refresh_reason", "skip_counts", "skip_delivery",
+  "map", "_t", "t", "ts", "cache_bust", "request_id",
+]);
+export function inboxSnapshotScope(params = {}) {
+  if (!params || typeof params !== "object") return "all";
+  if (params.cursor || params.offset || params.before) return null; // later pages are never snapshots
+  const entries = Object.entries(params)
+    .filter(([key, value]) => !SNAPSHOT_VOLATILE_PARAMS.has(key) && value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => [key === "bucket" || key === "inbox_bucket" ? "filter" : key, String(value)])
+    .filter(([key, value]) => !(key === "filter" && value === "all") && !(key === "direction" && value === "all"))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return entries.length ? JSON.stringify(entries) : "all";
+}
+
+export function rememberInboxBootSnapshot(threads = [], scope = "all") {
   if (!Array.isArray(threads) || threads.length === 0) return;
+  if (scope === null) return;
   inboxBootSnapshot = {
     capturedAt: Date.now(),
     threads: threads.slice(0, 100),
     source: BOOT_FAST_THREAD_SOURCE,
+    scope,
   };
 }
 
 /** Test-only hook: clears the module-level boot snapshot so initial-boot tests
  * cannot be contaminated by threads remembered from earlier tests. */
 export function __resetInboxBootSnapshotForTests() {
-  inboxBootSnapshot = { capturedAt: 0, threads: [], source: BOOT_FAST_THREAD_SOURCE };
+  inboxBootSnapshot = { capturedAt: 0, threads: [], source: BOOT_FAST_THREAD_SOURCE, scope: null };
 }
 
-export function loadInboxBootSnapshot(maxAgeMs = INBOX_BOOT_SNAPSHOT_TTL_MS) {
+export function loadInboxBootSnapshot(maxAgeMs = INBOX_BOOT_SNAPSHOT_TTL_MS, scope = "all") {
   if (Date.now() - inboxBootSnapshot.capturedAt > maxAgeMs) return null;
   if (!inboxBootSnapshot.threads.length) return null;
+  if (scope === null || inboxBootSnapshot.scope !== scope) return null;
   return {
     threads: inboxBootSnapshot.threads,
     source: inboxBootSnapshot.source,
@@ -2340,7 +2367,7 @@ async function queryFastInboxThreadRows(params = {}, {
     if (unordered?.data?.length > 0) result = unordered;
   }
   if (!result || result.data?.length === 0) {
-    const snapshot = loadInboxBootSnapshot();
+    const snapshot = loadInboxBootSnapshot(undefined, inboxSnapshotScope(params));
     if (snapshot?.threads?.length > 0) {
       console.warn("[INBOX_BOOT_SNAPSHOT_SERVED]", {
         threadCount: snapshot.threads.length,
@@ -3212,7 +3239,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
       }))
     : [];
 
-  if (finalRows.length > 0) rememberInboxBootSnapshot(finalRows);
+  if (finalRows.length > 0) rememberInboxBootSnapshot(finalRows, inboxSnapshotScope(params));
 
   return {
     threads: finalRows,

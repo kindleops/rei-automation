@@ -3,10 +3,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import type { InboxAdvancedFilters, InboxViewSelectValue, InboxStageSelectValue } from '../inbox-ui-helpers'
 import { viewOptions } from '../inbox-ui-helpers'
-import {
-  clearAllAdvancedFilters,
-  serializeAdvancedFiltersForServer,
-} from '../../../domain/inbox/inbox-advanced-filter-engine'
+import { clearAllAdvancedFilters } from '../../../domain/inbox/inbox-advanced-filter-engine'
 import {
   fetchInboxFilterCatalog,
   fetchInboxFilterOptions,
@@ -23,6 +20,7 @@ import {
   buildCatalogFilterChips,
   countActiveCatalogFilters,
   resolveCatalogRangeKeys,
+  serializeInboxFiltersForServer,
 } from '../../../domain/inbox/inbox-filter-catalog-runtime'
 
 interface AdvancedFiltersModalProps {
@@ -96,7 +94,7 @@ export const AdvancedFiltersModal = ({
   }, [open, advancedFilters, stageFilter])
 
   const serialized = useMemo(
-    () => serializeAdvancedFiltersForServer(local, { stage: localStage, view: viewFilter }),
+    () => serializeInboxFiltersForServer(local, { stage: localStage, view: viewFilter }),
     [local, localStage, viewFilter],
   )
 
