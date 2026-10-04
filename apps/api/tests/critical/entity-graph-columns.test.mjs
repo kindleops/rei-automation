@@ -103,3 +103,22 @@ test('properties browse orders by the chosen column, then property_id (stable pa
   // No record-summary row: flagged uncaptured so the table renders "—", not "0 loans".
   assert.equal(out.results[0].details.records.captured, false)
 })
+
+test('only index-backed property sorts run; any other order falls back and says so', async () => {
+  const { resolvePropertySort } = await import('../../src/lib/domain/entity-graph/entity-graph-service.js')
+  for (const [col, asc] of [['estimated_value', false], ['equity_percent', true], ['market', true], ['property_address_full', true]]) {
+    assert.equal(resolvePropertySort(col, asc).sortApplied, true, `${col} ${asc ? 'asc' : 'desc'}`)
+  }
+  // RC 8.3.2 visual pass: Value ↑ (full Sort over the joined view) timed the browse out.
+  for (const [col, asc] of [['estimated_value', true], ['equity_percent', false], ['market', false], ['property_address_full', false], ['rec_mortgage_balance', false], ['rec_last_sale_date', true], ['raw_payload_json', true]]) {
+    const s = resolvePropertySort(col, asc)
+    assert.equal(s.sortApplied, false, `${col} ${asc ? 'asc' : 'desc'}`)
+    assert.deepEqual(s.applied, { column: 'property_address_full', ascending: true })
+  }
+
+  const client = browseClient([{ property_id: 'P1', property_address_full: '1 Main St' }])
+  const out = await browseEntityGraph({ tab: 'properties', sort_by: 'estimated_value', ascending: '1' }, { supabase: client })
+  assert.deepEqual(client.orders, [['property_address_full', true], ['property_id', true]])
+  assert.equal(out.pagination.sort.sortApplied, false)
+  assert.deepEqual(out.pagination.sort.requested, { column: 'estimated_value', ascending: true })
+})

@@ -1191,8 +1191,40 @@ async function searchBuyers(supabase, query, limit) {
   return (data || []).map((row) => buyerToResult(row, 420))
 }
 
+/**
+ * The property sorts an index can drive with NULLS LAST, measured 10-04 on
+ * v_entity_graph_properties (171K rows, 60-row page, + property_id tie-break):
+ *   estimated_value DESC  85 ms   (idx_properties_estimated_value_desc, DESC NULLS LAST)
+ *   equity_percent  ASC  103 ms   (idx_properties_equity_percent_desc, backward)
+ *   market          ASC   36 ms   (idx_properties_market / _market_state)
+ *   address         ASC   14 ms   (idx_properties_property_address_full)
+ * Every other (column, direction) — value ASC, equity DESC, market DESC,
+ * address DESC, and both rec_* columns (aggregated through the view's joins)
+ * — is a full Sort over the joined view (est. cost 133K) and timed the browse
+ * request out (RC 8.3.2 visual pass). Those are NOT run: the page comes back
+ * in the default order with `sort.applied = false`, and the client sorts the
+ * loaded rows and says so. PROPOSED_20261004120000 has the indexes that
+ * would make value ASC / equity DESC / market DESC / address DESC fast.
+ */
+export const PROPERTY_FAST_SORTS = Object.freeze({
+  estimated_value: 'desc',
+  equity_percent: 'asc',
+  market: 'asc',
+  property_address_full: 'asc',
+})
+const PROPERTY_FALLBACK_SORT = { column: 'property_address_full', ascending: true }
+
+export function resolvePropertySort(sortBy, ascending) {
+  const requested = { column: sortBy, ascending: Boolean(ascending) }
+  const fastDir = PROPERTY_FAST_SORTS[sortBy]
+  if (fastDir && (fastDir === 'asc') === Boolean(ascending)) return { requested, applied: requested, sortApplied: true }
+  return { requested, applied: PROPERTY_FALLBACK_SORT, sortApplied: false }
+}
+
 async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {
-  const orderCol = BROWSE_SORT_COLUMNS.properties.columns.includes(sortBy) ? sortBy : 'property_address_full'
+  const sort = resolvePropertySort(sortBy, ascending)
+  const orderCol = sort.applied.column
+  ascending = sort.applied.ascending
   const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
     table: PROPERTY_BROWSE_SOURCE,
     select: PROPERTY_BROWSE_SELECT,
@@ -1203,7 +1235,9 @@ async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending,
     pageSize,
     tieCol: 'property_id',
   })
-  return paginatedResponse(rows.map((row) => propertyToResult(row)), total, cursor, pageSize, { pageWasFull })
+  const response = paginatedResponse(rows.map((row) => propertyToResult(row)), total, cursor, pageSize, { pageWasFull })
+  response.pagination.sort = sort
+  return response
 }
 
 async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {

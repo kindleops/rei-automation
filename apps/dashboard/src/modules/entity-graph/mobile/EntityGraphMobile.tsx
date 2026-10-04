@@ -116,6 +116,8 @@ type ListState = {
   total: number | null
   hasMore: boolean
   notes: string[]
+  /** false when the server could not apply the requested sort (fallback order). */
+  sortApplied: boolean | null
   error: string | null
 }
 
@@ -126,6 +128,7 @@ const EMPTY_LIST_STATE: ListState = {
   total: null,
   hasMore: false,
   notes: EMPTY_NOTES,
+  sortApplied: null,
   error: null,
 }
 
@@ -181,6 +184,7 @@ export function EntityGraphMobile({
   const [columnsOpen, setColumnsOpen] = useState(false)
   /** Visible columns + header sort, per scope, persisted per operator. */
   const { layout: tableLayout, setColumns: setScopeColumns, setSort: setHeaderSort } = useEntityGraphTableLayout()
+  const [sortNotice, setSortNotice] = useState<{ scope: EntityScope; text: string } | null>(null)
 
   // Composition: signature-tagged like the list, so a late response for an
   // abandoned cohort is never shown and `loading` is derived.
@@ -294,18 +298,28 @@ export function EntityGraphMobile({
    * ranked, not ordered — sorts the loaded rows and says so.
    */
   const headerSort = viewMode === 'table' ? tableLayout.sort[scope] ?? null : null
-  const headerColumn: TableColumn | null = !headerSort
-    ? null
-    : headerSort.key === IDENTITY_COLUMN_KEY
-      ? { key: IDENTITY_COLUMN_KEY, label: 'Name', group: 'overview', width: 0, render: (r) => resolveIdentity(scope, r).primary || null }
-      : SCOPE_TABLE_COLUMNS[scope].find((c) => c.key === headerSort.key) ?? null
+  /** The pinned identity column, as a sortable column (sorted by its primary label). */
+  const identityColumn = useMemo<TableColumn>(
+    () => ({ key: IDENTITY_COLUMN_KEY, label: 'Name', group: 'overview', width: 0, render: (r) => resolveIdentity(scope, r).primary || null }),
+    [scope],
+  )
+  const headerSortKey = headerSort?.key ?? null
+  const headerColumn = useMemo<TableColumn | null>(() => {
+    if (!headerSortKey) return null
+    if (headerSortKey === IDENTITY_COLUMN_KEY) return identityColumn
+    return SCOPE_TABLE_COLUMNS[scope].find((c) => c.key === headerSortKey) ?? null
+  }, [headerSortKey, identityColumn, scope])
   const headerServerColumn = headerSort
     ? (headerSort.key === IDENTITY_COLUMN_KEY ? IDENTITY_SORT_COLUMN[scope] : headerColumn?.sortBy ?? null)
     : null
   const serverHeaderSort = headerSort && headerServerColumn && !debouncedQuery
     ? { sortBy: headerServerColumn, ascending: headerSort.dir === 'asc' }
     : null
-  const localHeaderSort = headerSort && !serverHeaderSort && headerColumn ? { column: headerColumn, dir: headerSort.dir } : null
+  const localHeaderDir = headerSort && !serverHeaderSort && headerColumn ? headerSort.dir : null
+  const localHeaderSort = useMemo(
+    () => (localHeaderDir && headerColumn ? { column: headerColumn, dir: localHeaderDir } : null),
+    [localHeaderDir, headerColumn],
+  )
   const sortSignature = serverHeaderSort ? `h:${serverHeaderSort.sortBy}:${serverHeaderSort.ascending ? 1 : 0}` : sortKey
 
   const querySignature = `${scope}|${sortSignature}|${debouncedQuery}|${contactSubtype}|${crossTypeSearch}|${JSON.stringify(filters)}|${JSON.stringify(fieldFilters)}`
@@ -435,6 +449,7 @@ export function EntityGraphMobile({
             total: response.pagination.total,
             hasMore: response.pagination.hasMore,
             notes: response.pagination.notes ?? EMPTY_NOTES,
+            sortApplied: response.pagination.sort ? response.pagination.sort.sortApplied : null,
             error: null,
           }
         })
@@ -443,6 +458,14 @@ export function EntityGraphMobile({
         if (generation !== listGenerationRef.current) return
         if (controller.signal.aborted) return
         const message = error instanceof Error ? error.message : 'load_failed'
+        // A first page that fails under a non-default order (a persisted header
+        // sort, a heavy Sort-menu choice) falls back to the default order with a
+        // notice, instead of leaving the operator an empty table on every reload.
+        if (requestCursor === 0 && !debouncedQuery && (serverHeaderSort || sortKey !== SCOPE_DEFAULT_SORT_KEY[scope])) {
+          setSortNotice({ scope, text: 'That sort did not finish in time — showing the default order.' })
+          if (serverHeaderSort) setHeaderSort(scope, null)
+          else setSortKey(SCOPE_DEFAULT_SORT_KEY[scope])
+        }
         // Tag the failure with the signature so `loading` resolves and the
         // operator sees the error instead of an endless skeleton. A failed
         // "load more" keeps the rows already on screen.
@@ -768,14 +791,30 @@ export function EntityGraphMobile({
   const scopeColumns = tableLayout.columns[scope] ?? defaultVisibleColumns(scope)
   const tableFields = useMemo(() => visibleEnrichmentFields(scope, scopeColumns), [scope, scopeColumns])
   const columnEnrichment = useEntityGraphColumns(results, tableFields, viewMode === 'table')
-  const tableRows = useMemo(
-    () => (localHeaderSort ? sortLoadedRows(scope, columnEnrichment.rows, localHeaderSort.column, localHeaderSort.dir) : columnEnrichment.rows),
-    [columnEnrichment.rows, localHeaderSort?.column, localHeaderSort?.dir, scope], // eslint-disable-line react-hooks/exhaustive-deps -- column + dir identify the sort
+  /**
+   * The server said it could not apply the requested order (no index drives
+   * it): the page is in the fallback order, so sort what is loaded by the
+   * requested column and say so.
+   */
+  const serverSortRefused = isCurrent && list.sortApplied === false
+  const refusedLocalSort = useMemo(() => {
+    if (!serverSortRefused || localHeaderSort) return null
+    if (headerSort && headerColumn) return { column: headerColumn, dir: headerSort.dir }
+    const column = SCOPE_TABLE_COLUMNS[scope].find((c) => c.sortBy === activeSort.sortBy)
+      ?? (IDENTITY_SORT_COLUMN[scope] === activeSort.sortBy ? identityColumn : null)
+    return column ? { column, dir: activeSort.ascending ? 'asc' as const : 'desc' as const } : null
+  }, [serverSortRefused, localHeaderSort, headerSort, headerColumn, identityColumn, scope, activeSort.sortBy, activeSort.ascending])
+  const effectiveLocalSort = localHeaderSort ?? refusedLocalSort
+  const displayRows = useMemo(
+    () => (effectiveLocalSort ? sortLoadedRows(scope, columnEnrichment.rows, effectiveLocalSort.column, effectiveLocalSort.dir) : columnEnrichment.rows),
+    [columnEnrichment.rows, effectiveLocalSort, scope],
   )
-  const tableStatus = [
-    localHeaderSort ? `Sorted within ${tableRows.length.toLocaleString()} loaded rows` : null,
-    columnEnrichment.loading ? 'Loading columns…' : null,
-    columnEnrichment.error ? 'Some columns could not load — shown as —' : null,
+  const tableRows = displayRows
+  const listStatus = [
+    sortNotice && sortNotice.scope === scope ? sortNotice.text : null,
+    effectiveLocalSort ? `Sorted within ${displayRows.length.toLocaleString()} loaded rows` : null,
+    viewMode === 'table' && columnEnrichment.loading ? 'Loading columns…' : null,
+    viewMode === 'table' && columnEnrichment.error ? 'Some columns could not load — shown as —' : null,
   ].filter(Boolean).join(' · ') || null
   // The Lens counts the filter set, the list counts filter + search. When a
   // search is active they are different cohorts, so the Lens says so instead of
@@ -1086,7 +1125,7 @@ export function EntityGraphMobile({
                 prefix="Sort"
                 align="end"
                 value={activeSort.key}
-                onChange={(key) => { setSortKey(key); setHeaderSort(scope, null) }}
+                onChange={(key) => { setSortKey(key); setHeaderSort(scope, null); setSortNotice(null) }}
                 options={sortOptions.map((option) => ({ value: option.key, label: option.label }))}
               />
             ) : null}
@@ -1195,7 +1234,9 @@ export function EntityGraphMobile({
           </div>
         ) : null}
 
-        {viewMode === 'cards' ? results.map((result) => (
+        {listStatus && displayRows.length > 0 && viewMode !== 'graph' ? <div className="egt-status" role="status">{listStatus}</div> : null}
+
+        {viewMode === 'cards' ? displayRows.map((result) => (
           <EntityGraphMobileRow
             key={resultKey(result)}
             scope={scope}
@@ -1217,11 +1258,10 @@ export function EntityGraphMobile({
             headerSort={headerSort}
             fallbackSortBy={headerSort ? null : activeSort.sortBy}
             fallbackAscending={activeSort.ascending}
-            status={tableStatus}
             selectionMode={selectionMode}
             selectedKeys={selectedKeys}
             activeId={openResult?.entityId ?? null}
-            onSort={(key) => setHeaderSort(scope, nextHeaderSort(headerSort, key))}
+            onSort={(key) => { setHeaderSort(scope, nextHeaderSort(headerSort, key)); setSortNotice(null) }}
             onOpen={openRecord}
             onToggleSelect={toggleSelect}
           />
