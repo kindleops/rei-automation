@@ -1,0 +1,195 @@
+LEADCOMMAND MARKET INTELLIGENCE V1: SOURCE-OF-TRUTH AUDIT (brief §4)
+Measured read-only on prod (lcppdrmrdfblstpcbgpf), 2026-10-04.
+Session settings: statement_timeout 30s, default_transaction_read_only on, concurrency 1.
+pg_stat_activity was checked before every heavier query, with a back-off wait.
+
+Load note:
+- An Inbox count storm (v_inbox_thread_counts_live_v2 / v_inbox_bucket_counts, 8+ active) was observed during the audit.
+- A 1-scan profile with count(distinct) hit the 30s timeout while it was running. I backed off and split it.
+
+======================================================================
+A. SALES (activity + price evidence)
+======================================================================
+A1 public.mv_map_market_sales  <<< MARKET INTELLIGENCE SALES SOURCE OF TRUTH >>>
+  Meaning:
+    - One row per deduplicated economic sale (ic8_txn_dedupe@1 parity) over the last 5 years, geocoded.
+    - Built from comp_private.comp_canonical_transactions plus the engine pool's MLS closes.
+  Freshness:
+    - Data through 2026-09-10 (max sold_on). MV refreshed daily by pg_cron refresh_map_market_sales at 10:07 UTC, VACUUM ANALYZE at 10:37.
+  Size: 665,288 rows; heap 180 MB, 283 MB total. Service_role only.
+  Counts:
+    - priced (price > 0): 549,879
+    - valid 5-digit ZIP: 655,702 | city 657,831 | state 665,288 (33 states)
+    - sqft 536,401 | ppsf 453,687 (ppsf already excludes portfolio sales)
+    - units > 0: 347,109
+    - portfolio (≥2 parcels, same buyer/date/price): 947
+    - source mls: 11,820
+    - doc_type present: 631,044
+  Indexes:
+    - comp_id (unique); (lat,lng) INCLUDE (sold_on, price, per_door, ppsf, source, buyer_class, is_investor, portfolio_size); sold_on; buyer; portfolio; property_id.
+    - There is NO zip / state / city index. Any per-geography filter is a full parallel seq scan:
+      - one ZIP, cold: 1.02 s (23,064 buffers read)
+      - warm: 0.47–0.72 s
+  !! COVERAGE WINDOW (critical):
+    - Monthly sales are about 150–400 a month through 2025-08 (a sparse legacy channel).
+    - Then 36,378 (2025-09), 55,043, 46,474 ... 68,906 (2026-06), 63,821 (2026-07), 41,340 (2026-08), 2,284 (2026-09, partial to 09-10).
+    - 609,603 of 665,288 rows (91.6%) fall in the last 365 days.
+    - So the corpus is a ~12-month import window. Any YoY growth or 3Y/All trend before 2025-09 would compare an import boundary, not the market.
+    - DECISION: trends/growth are computed only inside the measured coverage window. It is derived from the data: the first month whose count reaches ≥25% of the trailing-12 median. Earlier months render as "pre-coverage". No growth % without a baseline inside the window.
+  Property types (raw; 7 values):
+    - Single Family 528,715
+    - Vacant Land 83,257
+    - Other 25,417 (1,773 with units > 1)
+    - Multi-Family 19,962 (12,127 with units > 1)
+    - Apartment 7,933 (5,477 units > 1)
+    - Townhouse 3
+    - Mobile Home 1
+    - NO commercial label exists in the corpus, so the Commercial filter = unavailable.
+  Doc types:
+    - Warranty 239,772 · Deed 116,510 · Special Warranty 108,814 · Grant 76,302 · null 34,244
+    - Quit Claim 19,631 (median $140K, is_arms_length false)
+    - Public Action 1,624 (median $8,100)
+    - Gift / TOD / Correction / Re-recorded: small, nominal prices.
+  DECISION (mi_qualified_price@1): price statistics (median price, PPSF, price/unit) use priced sales that satisfy all of:
+    - price > 0
+    - portfolio_size < 2 (a bulk price is not a per-property price)
+    - is_arms_length IS DISTINCT FROM false
+    - doc_type NOT ~* quit claim | gift | transfer on death | correction | re-recorded | public action
+    Unpriced and non-qualified rows still count as SALES ACTIVITY (owner price rule §47).
+
+A2 investor purchases = mv_map_market_sales.is_investor (IC8 isInvestorPurchase parity)
+  Total: 13,183. buyer_class: unknown 612,522 · individual 33,115 · llc_investor 16,918 · institutional 1,573 · portfolio 678 · bank 349 · government 103 · builder 19 · trust 11.
+  !! BUYER EVIDENCE IS THIN:
+    - buyer_kind (a recorded buyer) exists on ~41K of 665K sales (6.2%).
+    - 37,353 of those are in 2026-05/06, about 260–750 a month 2025-09..2026-04, and 0 in 2026-08/09.
+    - Investor purchases by month: 158 … 497 … 3,715 (2026-05), 3,379 (2026-06), 67, 0, 0.
+  DECISION:
+    - investor_purchase_share = investor purchases ÷ sales WITH a recorded buyer. Never ÷ all sales, which would understate the share 16×.
+    - Buyer-evidence coverage (buyer-known ÷ sales) is always shown beside it.
+    - Insufficient sample below 20 buyer-known sales.
+    - The investor trend is labelled with buyer coverage per month. A month with no buyer evidence is a gap, never 0%.
+A3 cash purchases = mv_map_market_sales.is_cash_purchase (deed-level evidence)
+  is_cash_purchase known on 46,516 (7.0%); true 9,428. Concentrated in 2026-05/06 (18,622 / 17,827).
+  DECISION: cash_purchase_share = cash ÷ cash-evidence-known. Coverage shown. Insufficient below 20 known.
+A4 entity ownership = mv_map_market_sales.investor_inferred_current_owner
+  145,393 rows. This is a CURRENT STATE: the parcel's current owner is corporate and this is its latest sale, with no buyer name. It is not windowed.
+  Owner rule 2026-10-02: it is never merged with investor purchases. Shown as "Entity-owned now".
+A5 legacy sources (NOT used)
+  - public.recently_sold_properties: frozen at 2026-02-06, 55,893 rows. A guard test fails on new reads.
+  - public.mv_map_sold_comps: 94,268 rows, through 2026-05-08. Deal Intelligence only.
+  - public.v_recent_sold_comps: the valuation engine pool, ~48K. It is a VALUATION COMP pool, not market sales (§47).
+  - comp_private.mv_comp_market_evidence: 756K est. Comp Intelligence deed evidence. Not a Market Intelligence source; MI reads the published MV.
+A6 Buyer Match sales adapter apps/api/src/lib/domain/buyer-match/buyer-match-sales.js
+  Reads the same MV (radius reads, READ_CAP 500).
+  Market Intelligence reuses its price rule (isPricedSale) and its privacy helpers:
+    - displayableCompanyName (entity-graph/buyer-name-privacy.js)
+    - lenderClass (buyer-identity-rules.js)
+  It never lists individuals.
+
+======================================================================
+B. GEOGRAPHY
+======================================================================
+B1 public.mv_map_search_areas: 2,951 rows; kinds state 33 · market 58 · county 104 · city 790 · zip 1,966.
+  Derived from public.properties (169,801 geocoded properties).
+  Outline = property-footprint hull, NOT administrative geometry. bbox + center available.
+  Keys:
+    - zip '55411'
+    - city 'MN:minneapolis'
+    - county 'MN:hennepin'
+    - market 'Minneapolis, MN' (display name)
+    - state 'MN'
+  No pg_cron refresh exists for this MV: freshness = last manual refresh.
+B2 canonical market authority:
+  - canonical_markets: 58, all active
+  - market_zip_membership: 1,961, all 'resolved'
+  - market_county_membership: 98
+  - market_aliases: 803
+  Sales coverage: 458,832 of 665,288 sales (69%) fall in a canonical-market ZIP (1,811 ZIPs); 8 rows with a state mismatch.
+  DECISION: a sale belongs to a market via its ZIP's market_zip_membership row, never by hull containment. The existing Map area card uses ST_Contains on hulls; Market Intelligence does not.
+B3 risk_private.geography_authoritative: US Census TIGERweb 2020 polygons; state 33 · zip5 1,325. No county, city or market polygons.
+  Exposed to the API only via:
+    - map_boundaries_in_bbox (state | zip; ≤4° box for ZIP; ≤400 rows)
+    - analytics_zip_boundaries (≤400 ZIPs)
+  Sales ZIPs with a TIGER outline: 1,326 of 3,203 ZIPs carry 320,865 sales (48%).
+  DECISION: the heat layer draws only geometry we own (state, ZIP). County/city/market heat is unavailable as polygons and is shown as ranked lists. Never invented.
+B4 ZIP→county:
+  - exchange_market_fundamentals_cells zip5 rows carry county_geo_id for 1,325 ZIPs.
+  - comp_private.comp_properties has county_name + fips per parcel (unique property_id index).
+  - A per-sale county join costs 46K index probes for MN alone (4.9 s), so it is too slow for interactive or national use.
+  DECISION: county membership = ZIP-majority county, from:
+    1. census ZIP cells (authoritative), then
+    2. the parcel-majority county of the ZIP in comp_private.comp_properties: one grouped seq scan per daily index build, 2,091 ZIP-county pairs, 2.99 s, 45,775 buffers.
+  The share of sales whose ZIP resolved a county is reported with every county result.
+
+======================================================================
+C. DEMOGRAPHICS
+======================================================================
+C1 public.exchange_market_fundamentals_cells: ACS 5-year (acs/acs5), vintage 2024.
+  Rows: zip5 1,325 · city 403 · county 76 · state 33.
+  Fields (each with MOE + precision):
+    - population, households, housing_units
+    - vacancy_rate, renter_share, owner_share
+    - median_household_income, median_gross_rent, median_year_built
+    - rent_burden, units_2_4_share, units_5plus_share
+  NOT present: age, education, employment, density.
+  Shown as unavailable; density could be derived from TIGER area_land_m2 for ZIP/state only, and is labelled as derived.
+  There is no market row. Market demographics = sums of additive fields over member ZIP cells, with "n of m ZIPs" coverage. ZIP medians are never averaged into a fake market median.
+
+======================================================================
+D. UNIVERSE (properties / sellers)
+======================================================================
+D1 public.properties: 171,059 est. rows; 961 MB heap. Never scanned by Market Intelligence.
+D2 public.mv_map_property_area_stats: 2,104 rows (zip / county / state).
+  Fields: n (geocoded properties) plus AVERAGES of equity %, estimated value, year built, motivation, distress, plus tax-delinquent share and free-and-clear share.
+  Example 55411: n 381 · equity 81.3% · value $259K · year built 1923 · tax delinquent 0 · free & clear 49.6%.
+  Labelled "average" (they are means, not medians). No refresh cron.
+D3 public.campaign_target_graph (the authoritative audience projection Composer reads): 169,797 rows; heap 527 MB.
+  Freshness: campaign_target_graph_coverage measured 2026-10-04 06:49 (reconcile, 2% sample, 3,570 rows).
+  Field coverage: beds 99.5% · baths 92.7% · units_count 87.8% · ownership_years 72.0% · phone_type 83.2% · lot / sqft / equity / loan 100%.
+  Indexed on state (plus market, sms_eligible, …). No ZIP index.
+  Per-state compact read: MN 0.47 s cold (5.4K rows); FL 4.4 s cold (34K rows, 19K buffers).
+  National count(*) 3.3 s.
+  DECISION:
+    - The seller universe is summarised per state on demand and cached 6 h.
+    - National seller rankings load states sequentially only when asked.
+    - Only the graph's own flags are counted: sms_eligible, queue_eligible, email_eligible, canonical_e164 present, suppression (true_post_contact_suppression | wrong_number), pending_prior_touch (recent-contact hold), active_queue_item.
+    - Composer remains the audience authority. Market Intelligence never decides eligibility.
+D4 public.campaign_target_graph_facets: 5,286 rows, last updated 2026-09-24. STALE versus the graph. Not used.
+
+======================================================================
+E. BUYERS / DEMAND
+======================================================================
+E1 eg_buyer_index (40,487) / buyer_match_evidence RPC (service_role, spatial). The Buyer Match workspace authority for one subject.
+E2 buyer_purchase_events_v2 (55K, 6 states, legacy) and buyer_geo_rollups_v2. Legacy. Not used.
+  DECISION: geography-level demand = the company buyers observed in mv_map_market_sales in the window:
+    - distinct displayable company buyers
+    - repeat acquirers (≥2 purchases)
+    - median investor acquisition price (qualified)
+    - lenders, GSEs and agencies excluded (lenderClass)
+    - individuals counted, never named
+
+======================================================================
+F. EXISTING AGGREGATIONS / RPCs
+======================================================================
+- get_map_lens_areas / get_map_lens_points: the Map lens engine.
+  - Called by the dashboard directly over supabase rpc.
+  - Comp lenses read mv_map_market_sales; census lenses read the exchange cells; property lenses read mv_map_property_area_stats.
+- get_map_area_facts(kind, key): the Map area card. Its sales are a 365-day window; county/market use hull ST_Contains.
+- /api/cockpit/map/investor-presence: grid cells, two separate signals; reference pattern for direct-PG reads of the MV.
+- /api/cockpit/map/boundaries, /api/cockpit/map/census: reused for geometry and demographics.
+
+======================================================================
+G. PERFORMANCE FINDINGS → ARCHITECTURE DECISION
+======================================================================
+Measured:
+- National one-level exact medians (state × asset, 12M, work_mem 64MB): 6.6 s.
+- MN grouping-sets snapshot with county join: 4.9 s; without county join: 3.0 s (disk-spilled sort).
+- National 6-level × asset grouping sets: projected about 40 s, which exceeds the 30 s timeout. REJECTED.
+- Ordered keyset chunk by comp_id: 2.3 s per 50K rows (random heap). REJECTED.
+- Full compact sequential extract (\copy, 19 cols): 4.4 s wall, 69 MB text.
+DECISION (V1, no migrations):
+  The API holds ONE in-memory columnar MARKET SALES INDEX of mv_map_market_sales.
+  - Loading: a single REPEATABLE READ READ ONLY transaction (consistent snapshot) with a server-side cursor over a sequential scan, fetched in chunks. The qualification flag and asset code are precomputed in SQL; no property ids or person names are loaded.
+  - Reloaded only when the MV changes: max(sold_on) / reltuples probe, a few ms; at most once a day after the 10:07 UTC refresh. Single-flight.
+  - Every overview, ranking, screen, compare, trend and heat request is exact and computed in-process, with 0 DB queries per interaction.
+  PROPOSED for later: a nightly rollup MV (PROPOSED_ migration) so cold start no longer streams 665K rows.
