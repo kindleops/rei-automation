@@ -125,6 +125,11 @@ interface ChatThreadProps {
   masterOwnerHouseholdLabel?: string | null
   onBack?: () => void
   /**
+   * S0: on desktop the control that leaves the conversation is a Close (×, Esc),
+   * not a phone-style Back chevron. Defaults to 'back' (phone unchanged).
+   */
+  closeAffordance?: 'back' | 'close'
+  /**
    * Inbox Desktop 4.0 (desktop workspace only): the composer owns the
    * automation state, so the conversation draws no typing lane of its own,
    * never holds back a reply bubble, and leaves Retry to the composer.
@@ -493,6 +498,7 @@ export const ChatThread = ({
   selectedParticipant = null,
   masterOwnerHouseholdLabel = null,
   onBack,
+  closeAffordance = 'back',
   deskMode = false,
 }: ChatThreadProps) => {
   // Remount counter for the N.1 performance guardrails (silent, dev/harness only).
@@ -1244,12 +1250,14 @@ export const ChatThread = ({
             <div className="nx-conv-mobile-controls">
               <button
                 type="button"
-                className="nx-conv-back nx-conv-back--tl"
-                aria-label="Back to inbox"
+                className={cls('nx-conv-back nx-conv-back--tl', closeAffordance === 'close' && 'is-close')}
+                aria-label={closeAffordance === 'close' ? 'Close conversation' : 'Back to inbox'}
+                title={closeAffordance === 'close' ? 'Close conversation · Esc' : undefined}
+                aria-keyshortcuts={closeAffordance === 'close' ? 'Escape' : undefined}
                 onClick={onBack}
               >
                 <span className="nx-conv-back__glyph" aria-hidden="true">
-                  <Icon name="chevron-left" />
+                  <Icon name={closeAffordance === 'close' ? 'x' : 'chevron-left'} />
                 </span>
               </button>
               <MobileHeaderActionsMenu>

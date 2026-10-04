@@ -8,6 +8,7 @@ import { PaneRouteContext, pushRoutePath } from '../../app/router'
 import { useInboxData, toWorkflowThread, isInboxDebugEnabled } from './inbox.adapter'
 import { useDealDeskSelection } from './useDealDeskSelection'
 import { applyThreadReadOnSelect, type ThreadSelectIntent } from './thread-read-policy'
+import { contextIdentity, nextDismissal, shouldReanchorFromContext } from './conversation-dismissal'
 import {
   describeThreadReference,
   resolveThreadRouteKey,
@@ -1492,9 +1493,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   // gone. It existed only to keep two writable representations agreeing with each other;
   // with one canonical source there is nothing to sync (DD-018).
 
+  // S0: the context a Close dismissed — the re-anchor below must not re-open it.
+  const dismissedContextRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!effectiveActiveContext.threadKey && !effectiveActiveContext.propertyId && !effectiveActiveContext.sellerId && !effectiveActiveContext.masterOwnerId) return
-    if (selected && activeContextMatchesThread(effectiveActiveContext, selected)) return
+    dismissedContextRef.current = nextDismissal(effectiveActiveContext, dismissedContextRef.current)
+    if (!shouldReanchorFromContext(effectiveActiveContext, {
+      selectedMatches: Boolean(selected && activeContextMatchesThread(effectiveActiveContext, selected)),
+      dismissed: dismissedContextRef.current,
+    })) return
 
     const match = findThreadForActiveContext(threads, effectiveActiveContext)
     // No match: routing context stays pointed at the entity, but we do NOT invent a
@@ -4208,11 +4214,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [selectThread, setActiveContext, threads])
 
   const handleMobileBack = useCallback(() => {
+    // S0 (desktop): closing must not be undone by the context that opened it. Phone unchanged.
+    if (isModernDesktop) dismissedContextRef.current = contextIdentity(effectiveActiveContextRef.current)
     setMobileThreadOpen(false)
     clearThreadSelection('mobile_back')
     setMobileIntelOpen(false)
     setMobileSidebarOpen(false)
-  }, [clearThreadSelection])
+  }, [clearThreadSelection, isModernDesktop])
 
   /*
    * DESK: closing the conversation is spatial — the ledger widens back over the
@@ -4287,6 +4295,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [DEV, refreshInboxCounts])
 
   const selectThreadWithIntent = useCallback((id: string, intent: ThreadSelectIntent) => {
+    dismissedContextRef.current = null
     setPreviewContext(null)
     const thread = findThreadByRef(threads, id)
     const threadKey = thread?.threadKey || thread?.id || id
@@ -4384,6 +4393,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         lcToast({ title: 'Conversation not found', detail: `No thread for ${pending.threadKey}.`, severity: 'warning' })
         return
       }
+      dismissedContextRef.current = null
       setActiveContext(buildContextFromThread(hit, 'inbox'), { preserveCurrentViews: true })
       selectThread(hit)
       // An explicit open (Open conversation, Notification Open) -- a read, exactly like
@@ -4438,6 +4448,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         selectThreadWithIntent(id, 'navigate')
       }),
       selectFetched: (hit) => ctx.apply(() => {
+        dismissedContextRef.current = null
         setLinkedMiss(null)
         setActiveContext(buildContextFromThread(hit, 'inbox'), { preserveCurrentViews: true })
         selectThread(hit)
@@ -5860,6 +5871,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     })
   }
 
+  /** S0 — Esc closes the conversation on the desktop hosts (Map / Pipeline / Calendar panes), fields first. */
+  const handleHostConversationKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || !selected) return
+    if (layoutState.activeOverlay != null || schedulePanelOpen || commandOpen || debugModalOpen) return
+    const target = event.target as HTMLElement | null
+    if (target?.closest('[aria-expanded="true"]')) return
+    event.preventDefault()
+    const tag = target?.tagName
+    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' || target?.isContentEditable) { target?.blur(); return }
+    handleMobileBack()
+  }
+
   const renderSmsThreadPane = (
     paneWidth: ViewWidthPercent = '100',
     layoutMode: ReturnType<typeof getViewLayoutMode> = getViewLayoutMode(paneWidth),
@@ -5871,10 +5894,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         `is-width-${paneWidth}`,
         `is-layout-${layoutMode}`,
       )}
+      onKeyDown={!isDeskInbox && isModernDesktop ? handleHostConversationKeyDown : undefined}
     >
       <ChatThread
         thread={selected}
         onBack={isDeskInbox ? closeDeskRoom : isMobile ? handleMobileBack : undefined}
+        closeAffordance={isModernDesktop ? 'close' : 'back'}
         messages={isDeskInbox ? deskMessages : displayedMessagesWithTranslation}
         deskMode={isDeskInbox}
         loading={messagesLoading}
