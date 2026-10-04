@@ -84,7 +84,9 @@ for (const theme of THEMES) {
     await page.waitForTimeout(6000)
     const name = `${theme}-${W}x${H}-${count}pane`
     await page.screenshot({ path: path.join(OUT, `${name}.png`) })
-    report.push({ name, liveReadsFirst6s: liveReads, abortedWrites: aborted, panes: await page.locator('.ixm-pane').count(), errors })
+    // dev-only counters (domain/inbox/inbox-debug-counters.ts): channels open, counts refreshes, pane reads
+    const debug = await page.evaluate(() => window.__lcInboxDebug?.snapshot?.() ?? null)
+    report.push({ name, liveReadsFirst6s: liveReads, abortedWrites: aborted, panes: await page.locator('.ixm-pane').count(), debug, errors })
     if (count >= 2 && W === 1920 && theme === THEMES[0]) {
       // two different searches + one conversation open (guarded: its read write is aborted)
       await page.locator('[data-ixm-pane="1"] input[type="search"], [data-ixm-pane="1"] input').first().fill('st').catch(() => {})

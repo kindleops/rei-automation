@@ -1,3 +1,4 @@
+import { bumpInboxCounter } from '../../domain/inbox/inbox-debug-counters'
 import { uniqueChannelName } from '../../lib/data/realtime-channel'
 import { useState, useEffect, useCallback, useRef, useReducer } from 'react'
 import { inboxReducer, EMPTY_INBOX_STORE_STATE, reconcileFetchedRowsWithRealtime, type InboxStoreAction } from './inbox-store'
@@ -113,6 +114,7 @@ export const refreshAuthoritativeViewCounts = (
   dispatch: React.Dispatch<InboxStoreAction>,
   onWarning?: (warning: string | null) => void,
 ) => {
+  bumpInboxCounter('countsRefreshes')
   /*
    * §3 — A COUNTS REFRESH TRIGGERED BY A STATE CHANGE MUST ACTUALLY FETCH.
    *
@@ -1982,6 +1984,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         if (!channel) return
         const previous = channel
         channel = null
+        bumpInboxCounter('realtimeChannelsOpen', -1)
         void getSupabaseClient().removeChannel(previous)
       }
       const subscribeChannel = (reason: string) => {
@@ -1992,6 +1995,8 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         const isRejoin = generation > 1
         try {
         const supabase = getSupabaseClient()
+        bumpInboxCounter('realtimeChannelsOpen')
+        bumpInboxCounter('realtimeSubscribes')
         channel = supabase
           .channel(uniqueChannelName('nexus-inbox-realtime'))
           /*
@@ -2125,7 +2130,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       stopRealtimeTimers()
       stopResubscribeTrigger()
       safetyReconcileScheduler.stop()
-      if (channel) void getSupabaseClient().removeChannel(channel)
+      if (channel) { bumpInboxCounter('realtimeChannelsOpen', -1); void getSupabaseClient().removeChannel(channel) }
       channel = null
     }
   }, [refresh, realtimeEnabled])

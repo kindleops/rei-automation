@@ -20,6 +20,7 @@
  * Rendering a row never writes anything (read state included).
  */
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
+import { bumpInboxCounter } from '../../../domain/inbox/inbox-debug-counters'
 
 export interface PaneFetchKey {
   /** the live-route filter (bucket) */
@@ -147,7 +148,7 @@ export function createPaneQueryCache({
     const key = paneKeyOf(fk)
     const flightKey = `${key}\u0002${mode}`
     const existing = inFlight.get(flightKey)
-    if (existing) { stats.joined += 1; return existing }
+    if (existing) { stats.joined += 1; bumpInboxCounter('paneJoined'); return existing }
     fetchKeys.set(key, fk)
     const before = entries.get(key) ?? { key, ...EMPTY }
     if (mode === 'append' && !before.nextCursor) return Promise.resolve()
@@ -156,6 +157,7 @@ export function createPaneQueryCache({
     const controller = new AbortController()
     const promise = slot(async () => {
       stats.requests += 1
+      bumpInboxCounter('paneReads')
       const page = await fetchPage(fk, mode === 'append' ? before.nextCursor : null, controller.signal)
       const current = entries.get(key) ?? before
       let rows = page.threads
@@ -208,7 +210,7 @@ export function createPaneQueryCache({
       const entry = entries.get(key)
       const pending = inFlight.get(`${key}\u0002replace`)
       if (pending) { stats.joined += 1; return pending }
-      if (entry && entry.status === 'ready' && now() - entry.loadedAt < ttlMs) { stats.cacheHits += 1; return null }
+      if (entry && entry.status === 'ready' && now() - entry.loadedAt < ttlMs) { stats.cacheHits += 1; bumpInboxCounter('paneCacheHits'); return null }
       return load(fk, 'replace')
     },
     loadMore: (fk) => {
