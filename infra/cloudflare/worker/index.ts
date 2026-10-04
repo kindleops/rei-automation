@@ -69,6 +69,11 @@ export class ApiContainer extends Container<Env> {
       // "true" AND system_control.signal_center_enabled='true'. Default OFF.
       SIGNAL_CENTER_ENABLED:
         env.SIGNAL_CENTER_ENABLED === "true" ? "true" : "false",
+      // Canonical scoring backfill (acquisition engine over every property).
+      // Scores nothing unless this is "true" AND system_control
+      // acquisition_scoring_backfill.status='running'. Default OFF.
+      ACQUISITION_SCORING_BACKFILL_ENABLED:
+        env.ACQUISITION_SCORING_BACKFILL_ENABLED === "true" ? "true" : "false",
 
       ...(env.DEPLOYMENT_ID ? { DEPLOYMENT_ID: env.DEPLOYMENT_ID } : {}),
       ...(env.DEPLOY_GIT_SHA ? { DEPLOY_GIT_SHA: env.DEPLOY_GIT_SHA } : {}),
@@ -246,6 +251,8 @@ interface Env {
   INTELLIGENCE_LOGGING_ENABLED?: string;
   /** Signal Center ceiling (container env). Absent => "false". */
   SIGNAL_CENTER_ENABLED?: string;
+  /** Scoring backfill ceiling (container env). Absent => "false". */
+  ACQUISITION_SCORING_BACKFILL_ENABLED?: string;
   // Email (Brevo transport + inbound verification).
   EMAIL_SEND_ENABLED?: string;
   BREVO_API_KEY?: string;
@@ -799,6 +806,25 @@ const SIGNAL_EVALUATE: CronJob = {
 };
 
 /**
+ * Canonical scoring backfill (NOT commissioned). Runs the Acquisition Decision
+ * Engine over every property, a few chunks per tick, writing compact,
+ * version-stamped, NON-monetary rows to property_acquisition_scores and its
+ * cursor to system_control.acquisition_scoring_backfill. Send-incapable: it
+ * queues, sends and mutates no seller state, and never writes the legacy
+ * properties.final_acquisition_score. Self-throttling: pauses inside the
+ * operator contact window and when the DB load probe is hot. Triple gate:
+ * CRON_SCORING_BACKFILL_ENABLED (this registration) +
+ * ACQUISITION_SCORING_BACKFILL_ENABLED (container ceiling) + state.status
+ * 'running' (operator start/pause). Body is the fixed action "tick".
+ */
+const SCORING_BACKFILL: CronJob = {
+  id: "scoring_backfill",
+  enabledBy: "CRON_SCORING_BACKFILL_ENABLED",
+  path: "/api/internal/acquisition/scoring-backfill",
+  body: { action: "tick" },
+};
+
+/**
  * THE ONE GOVERNED PRODUCTION SCHEDULE.
  *
  * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
@@ -834,6 +860,7 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
     CLOSING_AUTOMATION,
     WORKFLOW_ORCHESTRATOR,
     SIGNAL_EVALUATE,
+    SCORING_BACKFILL,
   ],
   // Separate expression: the send lane's cadence must be tunable without
   // touching reconciliation, and a reader must see at a glance which schedule

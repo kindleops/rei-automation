@@ -93,7 +93,15 @@ const SIGNAL_EVALUATE_JOB_PATHS = ["/api/internal/signals/evaluate"];
  */
 const NOTIFICATION_PROJECTION_JOB_PATHS = ["/api/internal/notifications/stories/project"];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS];
+/**
+ * Canonical scoring backfill — registered on the reconciliation cadence, NOT
+ * commissioned: CRON_SCORING_BACKFILL_ENABLED and the container ceiling
+ * ACQUISITION_SCORING_BACKFILL_ENABLED are absent from every wrangler config.
+ * Send-incapable (writes only property_acquisition_scores + its state key).
+ */
+const SCORING_BACKFILL_JOB_PATHS = ["/api/internal/acquisition/scoring-backfill"];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS, ...SCORING_BACKFILL_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -460,4 +468,22 @@ test("the Worker source still parses as TypeScript (a cron string inside a /** *
   const { transform } = await import("esbuild");
   const code = await workerCode();
   await assert.doesNotReject(transform(code, { loader: "ts", format: "esm" }), "infra/cloudflare/worker/index.ts must compile");
+});
+
+test("the scoring backfill is registered on the reconciliation cadence but switched OFF everywhere (flag + env ceiling default-deny)", async () => {
+  const code = await workerCode();
+  const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  const fiveMin = table[1].match(/"\*\/5 \* \* \* \*":\s*\[([^\]]*)\]/);
+  const oneMin = table[1].match(/"\* \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(fiveMin[1].includes("SCORING_BACKFILL"));
+  assert.ok(!oneMin[1].includes("SCORING_BACKFILL"), "never on the send lane");
+  const block = code.match(/const SCORING_BACKFILL: CronJob = \{([\s\S]*?)\};/);
+  assert.ok(block && block[1].includes('"CRON_SCORING_BACKFILL_ENABLED"') && block[1].includes('"/api/internal/acquisition/scoring-backfill"'));
+  assert.match(block[1], /body:\s*\{\s*action:\s*"tick"\s*\}/, "the cron can only tick, never start");
+  assert.match(code, /ACQUISITION_SCORING_BACKFILL_ENABLED:\s*\n?\s*env\.ACQUISITION_SCORING_BACKFILL_ENABLED === "true" \? "true" : "false"/);
+  for (const cfg of [PRODUCTION, STAGING]) {
+    const vars = await configVars(cfg);
+    assert.notEqual(vars.CRON_SCORING_BACKFILL_ENABLED, "true", "not commissioned: the owner flips this");
+    assert.notEqual(vars.ACQUISITION_SCORING_BACKFILL_ENABLED, "true", "not commissioned: the owner flips this");
+  }
 });
