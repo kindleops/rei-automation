@@ -357,3 +357,21 @@ html[data-lc-motion='off'] .ws-pane.is-closing > .ws-pane__frame { animation: ws
   .ws.is-max .ws-pane.is-maximized > .ws-pane__frame { animation: none; }
 }
 @keyframes ws-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── linked context: the quiet "nothing of this kind for that property" line ── */
+.ws-linked-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--lc-mat-clear-edge);
+  background: color-mix(in srgb, var(--lc-ink-1, #fff) 3%, transparent);
+  font: 520 12px/1.35 var(--lc-font-ui);
+  color: var(--lc-ink-3);
+}
+.ws-linked-note__dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--lc-ink-4, currentColor); opacity: 0.7; }
+.ws-linked-note__text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-linked-note__subject { color: var(--lc-ink-4, var(--lc-ink-3)); }
+.ws-linked-note-inset { flex: none; padding: 8px 10px 0; }

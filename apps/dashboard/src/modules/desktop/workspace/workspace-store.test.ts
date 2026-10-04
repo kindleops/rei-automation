@@ -33,10 +33,13 @@ async function load(path: string) {
   const store = await import('./workspace-store')
   const router = await import('../../../app/router')
   const locator = await import('../../../domain/locator/property-locator')
+  const bus = await import('../../../domain/locator/linked-property-bus')
   const L = await import('./layout')
   store.__workspaceTest.reset()
   const stop = store.startWorkspace()
-  return { w, store, router, locator, L, stop }
+  // linked follow is debounced (latest click wins); tests settle it explicitly
+  const select = (loc: Parameters<typeof locator.setPropertyLocator>[0]) => { locator.setPropertyLocator(loc); bus.__linkedTest.flush() }
+  return { w, store, router, locator, bus, select, L, stop }
 }
 
 describe('workspace store', () => {
@@ -95,30 +98,64 @@ describe('workspace store', () => {
   })
 
   it('linked panes follow a selection; a pinned pane keeps its subject', async () => {
-    const { store, locator, L, stop } = await load('/inbox')
+    const { store, select, L, stop } = await load('/inbox')
     store.openApp('/buyer-match', 'beside')
     let ws = store.getWorkspace().layout
     const inboxPane = L.panes(ws.root).find((p) => ws.instances[p.active].app === 'inbox')!
     store.markPaneInteraction(inboxPane.id)
-    locator.setPropertyLocator({ propertyId: 'P1', address: '1 Main St' })
+    select({ propertyId: 'P1', address: '1 Main St' })
     ws = store.getWorkspace().layout
     const bm = Object.values(ws.instances).find((i) => i.app === 'buyer-match')!
     expect(bm.path).toContain('property_id=P1')
     store.setPinned(bm.id, true)
     store.markPaneInteraction(inboxPane.id)
-    locator.setPropertyLocator({ propertyId: 'P2', address: '2 Main St' })
+    select({ propertyId: 'P2', address: '2 Main St' })
     ws = store.getWorkspace().layout
     expect(ws.instances[bm.id].path).toContain('property_id=P1')
     stop()
   })
 
   it('an independent workspace does not follow at all', async () => {
-    const { store, locator, stop } = await load('/inbox')
+    const { store, select, stop } = await load('/inbox')
     store.openApp('/buyer-match', 'beside')
     store.setLinked(false)
-    locator.setPropertyLocator({ propertyId: 'P9', address: '9 Main St' })
+    select({ propertyId: 'P9', address: '9 Main St' })
     const ws = store.getWorkspace().layout
     expect(Object.values(ws.instances).find((i) => i.app === 'buyer-match')!.path).toBe('/buyer-match')
+    stop()
+  })
+
+  it('linked follow: rapid clicks resolve only the latest, once', async () => {
+    const { store, locator, bus, L, stop } = await load('/inbox')
+    store.openApp('/buyer-match', 'beside')
+    const ws0 = store.getWorkspace().layout
+    const inboxPane = L.panes(ws0.root).find((p) => ws0.instances[p.active].app === 'inbox')!
+    store.markPaneInteraction(inboxPane.id)
+    const bmPath = () => Object.values(store.getWorkspace().layout.instances).find((i) => i.app === 'buyer-match')!.path
+    locator.setPropertyLocator({ propertyId: 'A' })
+    locator.setPropertyLocator({ propertyId: 'B' })
+    locator.setPropertyLocator({ propertyId: 'C' })
+    expect(bmPath()).toBe('/buyer-match') // nothing fanned out mid-burst
+    bus.__linkedTest.flush()
+    expect(bmPath()).toContain('property_id=C')
+    expect(bus.__linkedTest.last()?.locator.propertyId).toBe('C')
+    stop()
+  })
+
+  it('linked follow never launches a closed app and never retargets the pane the selection came from', async () => {
+    const { store, select, L, stop } = await load('/inbox')
+    select({ propertyId: 'P1' })
+    expect(Object.keys(store.getWorkspace().layout.instances)).toHaveLength(1)
+    store.openApp('/buyer-match', 'beside')
+    const ws = store.getWorkspace().layout
+    const bmPane = L.panes(ws.root).find((p) => ws.instances[p.active].app === 'buyer-match')!
+    const focusBefore = ws.focus
+    store.markPaneInteraction(bmPane.id) // the operator is acting IN Buyer Match
+    select({ propertyId: 'P2' })
+    const after = store.getWorkspace().layout
+    expect(after.instances[bmPane.active].path).toBe('/buyer-match')
+    expect(after.focus).toBe(focusBefore)
+    expect(Object.keys(after.instances)).toHaveLength(2)
     stop()
   })
 

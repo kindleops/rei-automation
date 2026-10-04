@@ -18,7 +18,11 @@ import { LCChip, LCIconButton, LCLive, LCPopover, LCSearch, LCSegmented, LCSelec
 import { PaneRouteContext, pushRoutePath } from '../../../app/router'
 import { gestureOf, inspectObject, openObjectBeside, showOnMap } from '../../../modules/desktop/objects'
 import { deskDealObject, deskPropertyObject } from './desk-objects'
-import { setPropertyLocator } from '../../../domain/locator/property-locator'
+import { setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
+import type { LinkedApplyContext } from '../../../domain/locator/linked-property-bus'
+import { useLinkedProperty } from '../../../modules/desktop/workspace/linked-property'
+import { LinkedNotice } from '../../../modules/desktop/workspace/LinkedNotice'
+import { fetchOpportunityRefs, resolvePipelineItem } from './pipeline-linked'
 import { sound } from '../../../shared/sound'
 import type { PipelineCommandParams } from '../../../domain/pipeline/pipeline-command-api'
 import type { DeskCard, DeskMove } from './pipeline-desk-api'
@@ -103,6 +107,8 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
     } catch { return null }
   })
   const scrollRef = useRef<HTMLDivElement>(null)
+  /** linked context found no deal for the property (a quiet line, nothing created) */
+  const [linkedMiss, setLinkedMiss] = useState<{ subject: string | null } | null>(null)
 
   // Server-side search, debounced (the timeout callback sets state, not the effect).
   useEffect(() => {
@@ -159,6 +165,7 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
     if (isOpen) sound.ui.select()
     else sound.panel.open()
     setOpen({ id: card.id, seed })
+    setLinkedMiss(null)
     if (ownsUrl) writeUrlParam('opp', card.id)
     // Linked panes follow the deal the operator is looking at.
     if (seed) setPropertyLocator({ propertyId: seed.propertyId, threadKey: seed.threadKey, masterOwnerId: seed.masterOwnerId, opportunityId: seed.id, address: seed.address })
@@ -169,6 +176,27 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
     setOpen(null)
     if (ownsUrl) writeUrlParam('opp', null)
   }, [ownsUrl])
+
+  // LINKED CONTEXT — a property selected in another open app opens ITS deal
+  // here (read-only; silent; never publishes back). No deal: a quiet line.
+  const rowsRef = useRef(rows.data)
+  useEffect(() => { rowsRef.current = rows.data }, [rows.data])
+  const followLinked = useCallback((loc: PropertyLocator, ctx: LinkedApplyContext) => {
+    void resolvePipelineItem(loc, { rows: rowsRef.current ?? null, fetchOpportunities: fetchOpportunityRefs }, ctx.signal).then((r) => {
+      ctx.apply(() => {
+        if (r.kind === 'open') {
+          setLinkedMiss(null)
+          setOpen({ id: r.id, seed: r.seed })
+          if (ownsUrl) writeUrlParam('opp', r.id)
+        } else if (r.kind === 'none') {
+          setOpen(null)
+          if (ownsUrl) writeUrlParam('opp', null)
+          setLinkedMiss({ subject: loc.address })
+        }
+      })
+    }, () => { /* a failed or cancelled lookup changes nothing */ })
+  }, [ownsUrl])
+  useLinkedProperty(followLinked)
   const openById = useCallback((id: string, e?: LCRowActivationEvent) => openDeal({ id }, e), [openDeal])
 
   // Choosing an owner anywhere on the Overview opens those deals in the Table.
@@ -254,6 +282,7 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
           </div>
         </div>
         <DeskRail overview={overview.data} flow={flow.data} offers={offers.data} periodLabel={periodMeta.label} onOwner={(o) => { setOwner(o); pickMode('table') }} onOffers={() => pickMode('offers')} />
+        {linkedMiss ? <LinkedNotice text="No pipeline item for this property" subject={linkedMiss.subject} onDismiss={() => setLinkedMiss(null)} /> : null}
         {showChips.length ? (
           <div className="pd2-chips" aria-label="Active filters">
             {showChips.map((c) => <LCChip key={c.id} field={c.field} value={c.value} onRemove={c.onRemove} />)}

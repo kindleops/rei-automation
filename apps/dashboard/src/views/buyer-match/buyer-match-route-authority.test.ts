@@ -147,9 +147,12 @@ describe('the production Buyer Match route', () => {
 
   it('follows the property the global context chip shows', () => {
     const page = read('views/buyer-match/BuyerMatchSubjectPage.tsx')
-    expect(page).toMatch(/readSelectedContext\(\)/)
-    expect(page).toMatch(/resolveBuyerMatchSubject\(\)[\s\S]*readSelectedContext\(\)/)
+    // the chip fallback reads THIS instance's location (a desktop pane passes its own)
+    expect(page).toMatch(/readSelectedContext\(search, pathname\)/)
+    expect(page).toMatch(/resolveBuyerMatchSubject\(search\)[\s\S]*readSelectedContext\(search, pathname\)/)
+    // phones / classic desktop: the locator event; the desk: the linked bus (pane-aware, pin-aware)
     expect(page).toMatch(/PROPERTY_LOCATOR_EVENT, onLocator/)
+    expect(page).toMatch(/useLinkedProperty\(followLinked, \{ enabled: isModernDesktop \}\)/)
   })
 
   it('never tiers, scores or explains a buyer in the browser', () => {

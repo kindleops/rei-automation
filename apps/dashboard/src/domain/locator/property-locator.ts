@@ -28,6 +28,8 @@
  * destination re-resolve an identity it was not given.
  */
 
+import { announceLinkedProperty, isApplyingLinked, mergeSameSubject, resetLinkedProperty, sameSubject } from './linked-property-bus'
+
 export interface PropertyLocator {
   propertyId: string | null
   threadKey: string | null
@@ -78,7 +80,7 @@ const hasStorage = () => {
  * row cannot silently erase a working one.
  */
 export function setPropertyLocator(input: Partial<PropertyLocator>): PropertyLocator | null {
-  const next: PropertyLocator = {
+  let next: PropertyLocator = {
     propertyId: str(input.propertyId),
     threadKey: str(input.threadKey),
     masterOwnerId: str(input.masterOwnerId),
@@ -93,19 +95,37 @@ export function setPropertyLocator(input: Partial<PropertyLocator>): PropertyLoc
   )
   if (!hasAnyIdentity) return null
 
-  if (hasStorage()) {
-    try {
-      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-    } catch {
-      /* a full or blocked sessionStorage must never break selection */
-    }
+  // LINKED CONTEXT (./linked-property-bus). A publish naming the subject that is
+  // already held enriches it instead of erasing what it does not carry. While a
+  // follower app is applying a linked selection its re-selection is not a new
+  // selection: it may enrich the same subject, never re-aim the locator, and it
+  // broadcasts nothing (no ping-pong).
+  const prev = readPropertyLocator()
+  const same = sameSubject(prev, next)
+  if (prev && same) next = mergeSameSubject(prev, next)
+  if (isApplyingLinked()) {
+    if (!same) return prev
+    writeLocator(next)
+    return next
   }
+
+  writeLocator(next)
   try {
     window.dispatchEvent(new CustomEvent(PROPERTY_LOCATOR_EVENT, { detail: next }))
   } catch {
     /* non-DOM environments */
   }
+  announceLinkedProperty(next)
   return next
+}
+
+function writeLocator(next: PropertyLocator) {
+  if (!hasStorage()) return
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+  } catch {
+    /* a full or blocked sessionStorage must never break selection */
+  }
 }
 
 export function readPropertyLocator(): PropertyLocator | null {
@@ -125,6 +145,7 @@ export function readPropertyLocator(): PropertyLocator | null {
 }
 
 export function clearPropertyLocator(): void {
+  resetLinkedProperty()
   if (hasStorage()) {
     try {
       window.sessionStorage.removeItem(STORAGE_KEY)

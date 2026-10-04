@@ -3,6 +3,7 @@ import { normalizeRoutePath, setRouteNavigationInterceptor } from '../../../app/
 import { NEXUS_APPS, getApp, resolveAppForRoute, type AppId } from '../../../domain/app-registry/app-registry'
 import { resolveAppDestination } from '../../../domain/app-registry/contextual-navigation'
 import { PROPERTY_LOCATOR_EVENT, readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
+import { setLinkedSourceResolver, subscribeLinkedProperty } from '../../../domain/locator/linked-property-bus'
 import * as L from './layout'
 import type { MissionKind, MissionPlan, MissionSubject } from './missions'
 import { copyInstanceState, instanceStateKeys, isolateShared, releaseInstanceState, sweepInstanceState } from './instance-state'
@@ -278,11 +279,22 @@ function intercept(path: string, mode: 'push' | 'replace'): boolean {
 
 /* ── linked context ───────────────────────────────────────────────────── */
 
-function followSelection(locator: PropertyLocator | null) {
+/** The instance the operator is acting in — the source of a selection made now. */
+function actingInstance(): string | null {
+  const s = get()
+  return L.findPane(s.layout.root, actingPane())?.active ?? null
+}
+
+/**
+ * Point every OPEN, unpinned instance (except the one the selection came
+ * from) at the locator, for apps whose subject lives in their path. Apps that
+ * follow from the locator themselves keep their path. Nothing is launched and
+ * focus never moves.
+ */
+function followSelection(locator: PropertyLocator | null, source?: string | null) {
   const s = get()
   if (!s.linked || !locator) return
-  const source = actingPane()
-  const sourceInst = L.findPane(s.layout.root, source)?.active ?? null
+  const sourceInst = source !== undefined ? source : actingInstance()
   let layout = s.layout
   let primaryPath: string | null = null
   for (const inst of Object.values(s.layout.instances)) {
@@ -327,11 +339,16 @@ export function startWorkspace(): () => void {
   const onLocator = (e: Event) => {
     const detail = (e as CustomEvent<PropertyLocator | null>).detail ?? null
     selectionAt = detail ? Date.now() : 0
-    followSelection(detail)
   }
   window.addEventListener('popstate', onPop)
   window.addEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
+  // the linked context: attribute each selection to the pane it was made in,
+  // and follow it once (debounced, latest wins — see linked-property-bus)
+  setLinkedSourceResolver(actingInstance)
+  const stopLinked = subscribeLinkedProperty((signal) => followSelection(signal.locator, signal.source))
   return () => {
+    setLinkedSourceResolver(null)
+    stopLinked()
     started = false
     // the arrangement is saved now, not by a timer that outlives this shell
     window.clearTimeout(persistTimer)

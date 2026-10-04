@@ -1,9 +1,9 @@
 import { clearActiveContext } from '../../domain/locator/active-context'
-import { PROPERTY_LOCATOR_EVENT, type PropertyLocator } from '../../domain/locator/property-locator'
+import { setPropertyLocator, type PropertyLocator } from '../../domain/locator/property-locator'
+import { withLinkedApply } from '../../domain/locator/linked-property-bus'
 import { MAP_PROPERTY_FOCUS_EVENT, ackMapPropertyFocus, readPendingMapPropertyFocus, type MapPropertyFocus } from '../../domain/map/map-property-focus'
 import { useAppInstance } from '../../modules/desktop/workspace/instance-context'
-import { focusedInstance } from '../../modules/desktop/workspace/layout'
-import { getWorkspace } from '../../modules/desktop/workspace/workspace-store'
+import { useLinkedProperty } from '../../modules/desktop/workspace/linked-property'
 import { handleObjectClick, gestureOf, openObjectBeside, propertyObject } from '../../modules/desktop/objects'
 import { createAutoFramer, planPointFocus, type AutoFramer } from './focus/focus-camera'
 import { ensureFocusTreatment, fetchCanonicalCoordinates, pulseFocusTreatment, resolveFocusRequest, setFlyingMark } from './focus/map-focus-runtime'
@@ -7650,6 +7650,12 @@ export function InboxCommandMap({
         setSelectedCensusFeature(null)
         setSelectedBuyerPurchase(null)
         setSelectedPinId(id)
+        // [linked context] a pin the operator clicked is the workspace selection —
+        // conversation or not — so every open app can follow it (desk only).
+        if (isModernDesktopRef.current && propertyId) {
+          const addr = (feature.properties as Record<string, unknown> | null)?.property_address_full
+          setPropertyLocator({ propertyId, address: typeof addr === 'string' ? addr : null })
+        }
         // Thread-scoped selection only fires for genuinely conversation-backed pins so
         // downstream thread consumers never receive a synthetic property identity.
         if (conversationId) onSelectThreadIdRef.current?.(conversationId)
@@ -10082,9 +10088,11 @@ export function InboxCommandMap({
     const ctl = new AbortController()
     focusRunRef.current = { seq: req.seq, ctl }
     if (!quiet) setFocusNotice(null)
+    // a linked arrival is a re-selection: whatever it surfaces never re-broadcasts
+    const guard = <T,>(fn: () => T): T => (req.source === 'linked' ? withLinkedApply(fn) : fn())
     void resolveFocusRequest(req, {
-      selectFromPins: (id) => selectPropertyOnMapRef.current(id),
-      selectAt: (id, at, label) => { selectPropertyOnMapRef.current(id, { coordinates: at, label }) },
+      selectFromPins: (id) => guard(() => selectPropertyOnMapRef.current(id)),
+      selectAt: (id, at, label) => { guard(() => selectPropertyOnMapRef.current(id, { coordinates: at, label })) },
       fetchCanonical: fetchCanonicalCoordinates,
       wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
     }, ctl.signal).then((outcome) => {
@@ -10107,21 +10115,16 @@ export function InboxCommandMap({
     return () => { window.clearTimeout(t); window.removeEventListener(MAP_PROPERTY_FOCUS_EVENT, onFocus) }
   }, [mapInstanceEpoch, applyFocusRequest])
 
-  useEffect(() => {
-    if (!paneInstanceId || !paneFollows || !isModernDesktop) return
-    const onLocator = (e: Event) => {
-      const loc = (e as CustomEvent<PropertyLocator | null>).detail
-      const pid = loc?.propertyId ?? null
-      if (!pid || pid === lastFocusedPropertyRef.current) return
-      // a selection made IN the Map (its pane is the one being acted in) is not a new focus
-      const ws = getWorkspace().layout
-      if (focusedInstance(ws)?.id === paneInstanceId) return
-      const now = Date.now()
-      applyFocusRequest({ seq: now, propertyId: pid, label: loc?.address ?? null, threadKey: loc?.threadKey ?? null, lat: null, lng: null, source: 'linked', at: now }, true)
-    }
-    window.addEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
-    return () => window.removeEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
-  }, [paneInstanceId, paneFollows, isModernDesktop, applyFocusRequest])
+  // Linked focus: the workspace bus (debounced, latest wins, never the Map's
+  // own selection). The arrival re-selects the pin under the linked guard, so
+  // the thread it surfaces never re-broadcasts.
+  const followLinkedOnMap = useCallback((loc: PropertyLocator) => {
+    const pid = loc.propertyId ?? null
+    if (!pid || pid === lastFocusedPropertyRef.current) return
+    const now = Date.now()
+    applyFocusRequest({ seq: now, propertyId: pid, label: loc.address ?? null, threadKey: loc.threadKey ?? null, lat: null, lng: null, source: 'linked', at: now }, true)
+  }, [applyFocusRequest])
+  useLinkedProperty(followLinkedOnMap, { enabled: Boolean(paneInstanceId) && paneFollows && isModernDesktop })
 
   /** F — fly back to the selected property. */
   const focusSelected = useCallback(() => {

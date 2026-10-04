@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { replaceRoutePath, useRouteLocation } from '../../../app/router'
-import { PROPERTY_LOCATOR_EVENT, readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
+import { readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
 import { useWorkspaceLink } from '../../../modules/desktop/workspace/instance-context'
+import { useLinkedProperty } from '../../../modules/desktop/workspace/linked-property'
 
 export type SubjectSource = 'url' | 'locator' | 'host' | 'none'
 
@@ -63,19 +64,16 @@ export function useCompsSubject(hostPropertyId: string | null) {
     }
   }
 
-  useEffect(() => {
-    if (!follows) return
-    const onLocator = (e: Event) => {
-      const detail = (e as CustomEvent<PropertyLocator | null>).detail
-      const pid = detail?.propertyId ?? null
-      if (!pid) return
-      const mine = selfEmit.current
-      if (mine && mine.pid === pid && Date.now() - mine.at < 4000) return
-      setActive((cur) => (cur.pid === pid ? cur : { pid, source: 'locator' }))
-    }
-    window.addEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
-    return () => window.removeEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
-  }, [follows])
+  // Live linked context (the bus: debounced, latest wins, never this pane's
+  // own selection; gated on `follows`). Comps is heavy — one read per settled click.
+  const followLinked = useCallback((loc: PropertyLocator) => {
+    const pid = loc.propertyId ?? null
+    if (!pid) return
+    const mine = selfEmit.current
+    if (mine && mine.pid === pid && Date.now() - mine.at < 4000) return
+    setActive((cur) => (cur.pid === pid ? cur : { pid, source: 'locator' }))
+  }, [])
+  useLinkedProperty(followLinked)
 
   const pid = active.pid ?? hostPropertyId ?? null
   const source: SubjectSource = active.pid ? active.source : hostPropertyId ? 'host' : 'none'

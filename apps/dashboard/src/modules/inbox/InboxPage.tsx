@@ -144,6 +144,10 @@ import {
 } from '../mobile/mobile-inbox-bridge'
 import { useDeckSubject } from '../desktop/workspace/deck-subject'
 import { openApp } from '../desktop/workspace/workspace-store'
+import { useLinkedProperty } from '../desktop/workspace/linked-property'
+import { LinkedNotice } from '../desktop/workspace/LinkedNotice'
+import type { LinkedApplyContext } from '../../domain/locator/linked-property-bus'
+import { lookupThreadKeyForProperty, openLinkedThread } from './inbox-linked-open'
 import { LCPaneLoading, lcConfirm, lcToast, useLcReducedMotion } from '../../shared/lc'
 import { InboxDeskLedger, type BesideApp } from './desk/InboxDeskLedger'
 import { DeskComposer } from './desk/DeskComposer'
@@ -181,7 +185,7 @@ import {
   type InboxLayoutState,
   type MapSourceMode,
 } from '../../domain/inbox/inbox-layout-state'
-import { readPropertyLocator, setPropertyLocator } from '../../domain/locator/property-locator'
+import { readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../domain/locator/property-locator'
 import {
   buildContextFromActivityEvent,
   buildContextFromCalendarEvent,
@@ -4402,6 +4406,51 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [openPendingThread])
 
   /**
+   * LINKED CONTEXT (desk Inbox only) — a property selected in another open app
+   * opens THAT seller's conversation here. It is navigation: the loaded row is
+   * selected with the 'navigate' intent and a fetched thread is selected
+   * directly, so it NEVER marks the conversation read (thread-read-policy.ts).
+   * Its re-selection does not re-broadcast (linked-property-bus). No
+   * conversation for the property: a quiet line, nothing else changes.
+   */
+  const [linkedMiss, setLinkedMiss] = useState<{ subject: string | null } | null>(null)
+  const linkedThreadsRef = useRef(threads)
+  useEffect(() => { linkedThreadsRef.current = threads }, [threads])
+  const followLinkedProperty = useCallback((loc: PropertyLocator, ctx: LinkedApplyContext) => {
+    const norm = (v: unknown) => String(v ?? '').trim().toLowerCase()
+    void openLinkedThread(loc, {
+      findInList: ({ threadKey, propertyId }) => {
+        const list = linkedThreadsRef.current
+        const wanted = norm(threadKey)
+        const hit = wanted
+          ? list.find((t) => norm(t.threadKey) === wanted || norm(t.id) === wanted)
+          : propertyId ? list.find((t) => String(t.propertyId ?? '') === propertyId) : undefined
+        return hit?.id ?? null
+      },
+      lookupThreadKey: lookupThreadKeyForProperty,
+      fetchThread: async (threadKey, signal) => {
+        const res = await fetchLiveInbox({ filter: 'all', q: threadKey, limit: 10, map: false, skipCounts: true, signal })
+        const wanted = norm(threadKey)
+        return (res.threads ?? []).map(toWorkflowThread).find((t) => norm(t.threadKey) === wanted || norm(t.id) === wanted) ?? null
+      },
+      selectInList: (id) => ctx.apply(() => {
+        setLinkedMiss(null)
+        selectThreadWithIntent(id, 'navigate')
+      }),
+      selectFetched: (hit) => ctx.apply(() => {
+        setLinkedMiss(null)
+        setActiveContext(buildContextFromThread(hit, 'inbox'), { preserveCurrentViews: true })
+        selectThread(hit)
+        setMobileThreadOpen(true)
+        setMobileIntelOpen(false)
+      }),
+    }, ctx.signal).then((outcome) => {
+      if (outcome === 'missing') ctx.apply(() => setLinkedMiss({ subject: loc.address }))
+    }, () => { /* a failed or cancelled lookup changes nothing */ })
+  }, [selectThreadWithIntent, setActiveContext, selectThread])
+  useLinkedProperty(followLinkedProperty, { enabled: isDeskInbox })
+
+  /**
    * The linked-phone resolution below is async, so it must not read the
    * `threads` array captured when the row was pressed -- realtime and paging
    * both move it while the request is in flight.
@@ -5952,6 +6001,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   /** INBOX DESKTOP 4.0 — the triage ledger (desk only; the rail above stays for everything else). */
   const renderDeskLedgerPane = () => (
     <section className="nx-workspace-pane-surface nx-workspace-pane-surface--desk-ledger">
+      {linkedMiss ? (
+        <div className="ws-linked-note-inset">
+          <LinkedNotice text="No conversation for this property" subject={linkedMiss.subject} onDismiss={() => setLinkedMiss(null)} />
+        </div>
+      ) : null}
       <InboxDeskLedger
         threads={threads}
         hiddenIds={recentlyUpdatedThreadIds}

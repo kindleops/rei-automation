@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { replaceRoutePath, useRouteLocation } from '../../../app/router'
-import { PROPERTY_LOCATOR_EVENT, readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
+import { readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
 import { useWorkspaceLink } from '../../../modules/desktop/workspace/instance-context'
+import { useLinkedProperty } from '../../../modules/desktop/workspace/linked-property'
 import {
   buildDiPath, EMPTY_SUBJECT, fetchKey, hasSubject, isDiLocation, modeFromSearch, sameSubject, searchOf, subjectFromLocator, subjectFromSearch, type DiSubject,
 } from './di-subject'
@@ -59,18 +60,14 @@ export function useDecisionSubject(explicit?: DiSubject | null) {
     if (hasSubject(urlSubject) && fetchKey(urlSubject) !== fetchKey(active.subject)) setActive({ subject: urlSubject, source: 'url' })
   }
 
-  // Live linked context — a selection elsewhere in the workspace.
-  useEffect(() => {
-    if (!follows) return
-    const onLocator = (e: Event) => {
-      const detail = (e as CustomEvent<PropertyLocator | null>).detail
-      const next = subjectFromLocator(detail ?? null)
-      if (!hasSubject(next)) return
-      setActive((cur) => (sameSubject(cur.subject, next) ? cur : { subject: next, source: 'locator' }))
-    }
-    window.addEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
-    return () => window.removeEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
-  }, [follows])
+  // Live linked context — a selection elsewhere in the workspace (the bus:
+  // debounced, latest wins, never DI's own selection; gated on `follows`).
+  const followLinked = useCallback((loc: PropertyLocator) => {
+    const next = subjectFromLocator(loc)
+    if (!hasSubject(next)) return
+    setActive((cur) => (sameSubject(cur.subject, next) ? cur : { subject: next, source: 'locator' }))
+  }, [])
+  useLinkedProperty(followLinked)
 
   // Re-linking a pane is a meaningful selection: catch up with the workspace.
   const [seenFollows, setSeenFollows] = useState(follows)

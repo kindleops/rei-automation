@@ -38,12 +38,13 @@ async function load(path: string, start = true) {
   const focusSet = await import('../../../domain/map/map-focus-set')
   const locator = await import('../../../domain/locator/property-locator')
   const inspector = await import('../inspector/inspector-store')
+  const bus = await import('../../../domain/locator/linked-property-bus')
   store.__workspaceTest.reset()
   inspector.__inspectorTest.reset()
   const stop = start ? store.startWorkspace() : () => {}
   const seen: unknown[] = []
   w.addEventListener(focus.MAP_PROPERTY_FOCUS_EVENT, (e) => seen.push((e as CustomEvent).detail))
-  return { w, store, L, actions, reg, focus, focusSet, locator, inspector, stop, seen }
+  return { w, store, L, actions, reg, focus, focusSet, locator, inspector, bus, stop, seen }
 }
 
 type Env = Awaited<ReturnType<typeof load>>
@@ -200,6 +201,7 @@ describe('Open / Open beside / linked context', () => {
     const campaignBefore = inst(env, 'campaign-command').path
     const ref = env.reg.dealObject({ opportunityId: 'o10', propertyId: 'p10', threadKey: 'tk10' })
     env.actions.openObject(ref)
+    env.bus.__linkedTest.flush() // linked follow is debounced (latest click wins)
     const ws = env.store.getWorkspace().layout
     // the deal opened in the pane that already holds Pipeline — and that pane took focus
     expect(inst(env, 'pipeline').path).toBe('/pipeline?opp=o10')
