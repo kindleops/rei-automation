@@ -1,3 +1,6 @@
+-- SUPERSEDED by PROPOSED_20261004180000_entity_graph_keyset_sort_indexes.sql (do not apply this file;
+-- its four indexes are replaced there by (column, property_id) indexes that serve both directions).
+--
 -- PROPOSED — NOT APPLIED. Owner approval required.
 --
 -- Entity Graph table: make the remaining property header sorts index-backed
@@ -33,11 +36,11 @@
 --   EXPLAIN SELECT property_id FROM public.v_entity_graph_properties ORDER BY market DESC NULLS LAST, property_id LIMIT 60;
 --   EXPLAIN SELECT property_id FROM public.v_entity_graph_properties ORDER BY property_address_full DESC NULLS LAST, property_id LIMIT 60;
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_properties_estimated_value_asc_nl
-  ON public.properties (estimated_value ASC NULLS LAST);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_properties_equity_percent_desc_nl
-  ON public.properties (equity_percent DESC NULLS LAST);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_properties_market_desc_nl
-  ON public.properties (market DESC NULLS LAST);
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_properties_address_full_desc_nl
-  ON public.properties (property_address_full DESC NULLS LAST);
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_properties_estimated_value_asc_nl
+--   ON public.properties (estimated_value ASC NULLS LAST);
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_properties_equity_percent_desc_nl
+--   ON public.properties (equity_percent DESC NULLS LAST);
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_properties_market_desc_nl
+--   ON public.properties (market DESC NULLS LAST);
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_properties_address_full_desc_nl
+--   ON public.properties (property_address_full DESC NULLS LAST);

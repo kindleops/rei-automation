@@ -36,6 +36,14 @@ describe('Entity Graph table columns', () => {
     expect(visibleEnrichmentFields('buyers', ['year_built'])).toEqual([])
   })
 
+  it('index-backed picker fields ask the server for a whole-cohort sort', () => {
+    for (const key of ['year_built', 'zoning', 'total_bedrooms', 'sale_date', 'estimated_repair_cost']) expect(col(key).sortBy).toBe(key)
+    expect(col('units').sortBy).toBe('units_count')
+    expect(col('loans').sortBy).toBe('rec_mortgage_count')
+    // No index planned: stays a loaded-rows sort.
+    expect(col('flood_zone').sortBy).toBeUndefined()
+  })
+
   it('enriched values render; missing values are null ("—"), never 0', () => {
     storeColumnValues(['P1'], ['year_built', 'total_bedrooms'], { P1: { year_built: 1958 } })
     const [row] = withColumnValues([prop('P1')])

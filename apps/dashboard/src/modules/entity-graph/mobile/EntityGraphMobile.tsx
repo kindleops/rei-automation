@@ -118,6 +118,8 @@ type ListState = {
   notes: string[]
   /** false when the server could not apply the requested sort (fallback order). */
   sortApplied: boolean | null
+  /** Keyset continuation token for the next page (whole-cohort sorts). */
+  nextAfter: string | null
   error: string | null
 }
 
@@ -129,6 +131,7 @@ const EMPTY_LIST_STATE: ListState = {
   hasMore: false,
   notes: EMPTY_NOTES,
   sortApplied: null,
+  nextAfter: null,
   error: null,
 }
 
@@ -416,6 +419,9 @@ export function EntityGraphMobile({
         q: debouncedQuery || undefined,
         cursor,
         page_size: PAGE_SIZE,
+        // Keyset sorts continue from the last row, never by offset: page 2 is
+        // exactly what follows page 1 in the whole-cohort order.
+        ...(requestCursor > 0 && list.signature === requestSignature && list.nextAfter ? { after: list.nextAfter } : {}),
         subtype: scope === 'contact_methods' ? contactSubtype : undefined,
         sort_by: sort.sortBy,
         ascending: sort.ascending ? '1' : '0',
@@ -446,8 +452,10 @@ export function EntityGraphMobile({
             signature: requestSignature,
             cursor: requestCursor,
             results: merged,
-            total: response.pagination.total,
+            // Keyset continuation pages do not re-count; keep page 1's count.
+            total: appending && response.pagination.total === null ? current.total : response.pagination.total,
             hasMore: response.pagination.hasMore,
+            nextAfter: response.pagination.nextAfter ?? null,
             notes: response.pagination.notes ?? EMPTY_NOTES,
             sortApplied: response.pagination.sort ? response.pagination.sort.sortApplied : null,
             error: null,

@@ -98,7 +98,7 @@ function browseClient(rows) {
 
 test('properties browse orders by the chosen column, then property_id (stable pages)', async () => {
   const client = browseClient([{ property_id: 'P1', property_address_full: '1 Main St', rec_mortgage_count: null }])
-  const out = await browseEntityGraph({ tab: 'properties', sort_by: 'estimated_value', ascending: '0' }, { supabase: client })
+  const out = await browseEntityGraph({ tab: 'properties', sort_by: 'estimated_value', ascending: '0' }, { supabase: client, propertySortIndexes: async () => new Set() })
   assert.deepEqual(client.orders, [['estimated_value', false], ['property_id', true]])
   // No record-summary row: flagged uncaptured so the table renders "—", not "0 loans".
   assert.equal(out.results[0].details.records.captured, false)
@@ -117,7 +117,7 @@ test('only index-backed property sorts run; any other order falls back and says 
   }
 
   const client = browseClient([{ property_id: 'P1', property_address_full: '1 Main St' }])
-  const out = await browseEntityGraph({ tab: 'properties', sort_by: 'estimated_value', ascending: '1' }, { supabase: client })
+  const out = await browseEntityGraph({ tab: 'properties', sort_by: 'estimated_value', ascending: '1' }, { supabase: client, propertySortIndexes: async () => new Set() })
   assert.deepEqual(client.orders, [['property_address_full', true], ['property_id', true]])
   assert.equal(out.pagination.sort.sortApplied, false)
   assert.deepEqual(out.pagination.sort.requested, { column: 'estimated_value', ascending: true })

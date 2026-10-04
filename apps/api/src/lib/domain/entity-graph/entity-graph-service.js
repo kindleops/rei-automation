@@ -24,6 +24,12 @@ import {
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
 import { shapeRecords } from './entity-network-service.js'
+import {
+  decodeAfter,
+  detectPropertySortIndexes,
+  fetchKeysetPage,
+  keysetSupported,
+} from './entity-graph-property-sort.js'
 
 const DEFAULT_PAGE_SIZE = 25
 const MAX_PAGE_SIZE = 100
@@ -1221,14 +1227,52 @@ export function resolvePropertySort(sortBy, ascending) {
   return { requested, applied: PROPERTY_FALLBACK_SORT, sortApplied: false }
 }
 
-async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {
+async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [], after = null, sortIndexes = detectPropertySortIndexes }) {
+  const buildQuery = (query) => applyEntityGraphFieldFilters(applyPropertyFilters(query, filters), fieldFilters)
+
+  /**
+   * Whole-cohort keyset sort when a (column, property_id) index exists — see
+   * entity-graph-property-sort.js. Page 1 (no token) also counts the cohort;
+   * later pages carry the first page's count on the client.
+   */
+  const indexSet = await sortIndexes()
+  if (keysetSupported(sortBy, indexSet)) {
+    const column = sortBy
+    const asc = Boolean(ascending)
+    const token = decodeAfter(after, { column, ascending: asc })
+    // A cursor > 0 without a valid token cannot be continued by keyset; it
+    // is served from the start rather than guessed.
+    const select = PROPERTY_BROWSE_SELECT.split(',').includes(column) ? PROPERTY_BROWSE_SELECT : `${PROPERTY_BROWSE_SELECT},${column}`
+    const base = () => buildQuery(supabase.from(PROPERTY_BROWSE_SOURCE).select(select))
+    const [page, counted] = await Promise.all([
+      fetchKeysetPage({ base, column, ascending: asc, after: token, pageSize }),
+      token ? Promise.resolve(null) : buildQuery(supabase.from(PROPERTY_BROWSE_SOURCE).select(select, { count: 'exact', head: true })),
+    ])
+    const offset = token ? cursor : 0
+    const total = counted && !counted.error ? (counted.count ?? null) : null
+    const requested = { column, ascending: asc }
+    return {
+      results: page.rows.map((row) => propertyToResult(row)),
+      pagination: {
+        cursor: offset,
+        pageSize,
+        total,
+        hasMore: page.hasMore,
+        nextCursor: page.hasMore ? offset + page.rows.length : null,
+        previousCursor: null,
+        nextAfter: page.nextAfter,
+        sort: { requested, applied: requested, sortApplied: true, mode: 'keyset' },
+      },
+    }
+  }
+
   const sort = resolvePropertySort(sortBy, ascending)
   const orderCol = sort.applied.column
   ascending = sort.applied.ascending
   const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
     table: PROPERTY_BROWSE_SOURCE,
     select: PROPERTY_BROWSE_SELECT,
-    buildQuery: (query) => applyEntityGraphFieldFilters(applyPropertyFilters(query, filters), fieldFilters),
+    buildQuery,
     orderCol,
     ascending,
     cursor,
@@ -1517,7 +1561,11 @@ export async function browseEntityGraph(params = {}, deps = {}) {
    * cohort -- it is the entire table wearing a cohort's label.
    */
   const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow(tab, params)
-  const browseArgs = { cursor, pageSize, sortBy, ascending, subtype: params.subtype, filters, fieldFilters }
+  const browseArgs = {
+    cursor, pageSize, sortBy, ascending, subtype: params.subtype, filters, fieldFilters,
+    after: clean(params.after) || null,
+    ...(deps.propertySortIndexes ? { sortIndexes: deps.propertySortIndexes } : {}),
+  }
 
   switch (tab) {
     case 'properties':

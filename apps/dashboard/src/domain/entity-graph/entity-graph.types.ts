@@ -180,7 +180,11 @@ export type EntityGraphPagination = {
     requested: { column: string; ascending: boolean }
     applied: { column: string; ascending: boolean }
     sortApplied: boolean
+    /** 'keyset' = whole-cohort order continued page to page via `nextAfter`. */
+    mode?: 'keyset'
   }
+  /** Opaque continuation token; send as `after` for the next page. */
+  nextAfter?: string | null
 }
 
 export type EntityGraphListResponse = {

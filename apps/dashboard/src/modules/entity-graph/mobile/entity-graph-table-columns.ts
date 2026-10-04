@@ -64,9 +64,11 @@ export type TableColumn = {
  * horizontally scrolled under a pinned identity column — an auto-width table
  * reflows every time a page appends and the sticky column drifts.
  *
- * `sortBy` is only set where the browse adapter genuinely orders by that
- * column (BROWSE_SORT_COLUMNS in entity-graph-service.js). A header that looks
- * sortable but silently does nothing is worse than a plain header.
+ * `sortBy` asks the browse adapter for a whole-cohort order on that column
+ * (an index-backed offset sort, or keyset when a (column, property_id) index
+ * exists — entity-graph-property-sort.js). The server answers
+ * sort.sortApplied=false when it cannot, and the table then sorts the loaded
+ * rows and says so; a header never silently does nothing.
  */
 export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
   properties: [
@@ -105,15 +107,15 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
         return b ? `${b.acquisitions ?? '—'} · ${b.status ?? ''}`.trim() : null
       },
     },
-    { key: 'loans', group: 'signals', label: 'Loans', align: 'right', width: 62, render: (r) => (recordsCaptured(r) ? String(r.details!.records!.mortgageCount) : null) },
+    { key: 'loans', group: 'signals', label: 'Loans', sortBy: 'rec_mortgage_count', align: 'right', width: 62, render: (r) => (recordsCaptured(r) ? String(r.details!.records!.mortgageCount) : null) },
     { key: 'balance', group: 'scores', label: 'Balance', sortBy: 'rec_mortgage_balance', align: 'right', width: 88, render: (r) => compactCurrency(r.details?.records?.mortgageBalance) },
     { key: 'rate', group: 'signals', label: 'Rate', align: 'right', width: 64, render: (r) => (typeof r.details?.records?.firstRate === 'number' ? `${Number(r.details.records.firstRate).toFixed(2)}%` : null) },
     { key: 'lender', group: 'signals', label: 'Lender', width: 170, render: (r) => text(r.details?.records?.firstLender) },
-    { key: 'liens', group: 'signals', label: 'Liens', align: 'right', width: 60, render: (r) => (recordsCaptured(r) ? String(r.details!.records!.lienCount) : null) },
+    { key: 'liens', group: 'signals', label: 'Liens', sortBy: 'rec_lien_count', align: 'right', width: 60, render: (r) => (recordsCaptured(r) ? String(r.details!.records!.lienCount) : null) },
     { key: 'lastSale', group: 'signals', label: 'Last sale', sortBy: 'rec_last_sale_date', width: 96, render: (r) => text(r.details?.records?.lastSaleDate)?.slice(0, 7) ?? null },
     { key: 'lastPrice', group: 'scores', label: 'Sale price', align: 'right', width: 90, render: (r) => compactCurrency(r.details?.records?.lastSalePrice) },
     { key: 'records', group: 'signals', label: 'Recorded signals', width: 220, render: (r) => (r.details?.records?.signals ?? []).map((s) => s.label).join(' · ') || null },
-    { key: 'units', group: 'property', label: 'Units', align: 'right', width: 60, render: (r) => compactCount(r.details?.units) },
+    { key: 'units', group: 'property', label: 'Units', sortBy: 'units_count', align: 'right', width: 60, render: (r) => compactCount(r.details?.units) },
     { key: 'zip', group: 'geography', label: 'ZIP', width: 72, render: (r) => text(r.details?.zip) },
     { key: 'flags', group: 'signals', label: 'Signals', width: 200, render: (r) => text(r.details?.flags) },
   ],
@@ -334,6 +336,12 @@ function renderRawField(key: string, numeric: boolean | undefined, result: Entit
   return Math.abs(num) >= 1000 ? num.toLocaleString() : String(Math.round(num * 100) / 100)
 }
 
+/** Mirrors KEYSET_SORT_COLUMNS (entity-graph-property-sort.js): picker fields the server may sort. */
+const SERVER_SORTABLE_FIELDS = new Set([
+  'year_built', 'effective_year_built', 'total_bedrooms', 'total_baths', 'building_square_feet', 'lot_square_feet',
+  'equity_amount', 'estimated_repair_cost', 'sale_date', 'sale_price', 'zoning', 'total_loan_balance', 'ownership_years',
+])
+
 function rawSortValue(key: string, numeric: boolean | undefined, result: EntitySearchResult): string | number | null {
   const raw = (result.details?.row ?? {})[key]
   if (raw === null || raw === undefined || raw === '') return null
@@ -357,6 +365,10 @@ function rawSortValue(key: string, numeric: boolean | undefined, result: EntityS
       width: extra.width ?? 120,
       align: extra.numeric ? 'right' : undefined,
       field: extra.key,
+      // Asks the server for a whole-cohort sort; the server answers with
+      // sort.sortApplied=false when no (column, property_id) index exists and
+      // the table falls back to "sorted within loaded rows".
+      sortBy: SERVER_SORTABLE_FIELDS.has(extra.key) ? extra.key : undefined,
       render: (r) => renderRawField(extra.key, extra.numeric, r),
       sortValue: (r) => rawSortValue(extra.key, extra.numeric, r),
     })
