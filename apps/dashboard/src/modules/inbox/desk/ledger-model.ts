@@ -548,3 +548,31 @@ export function filteredCountLabel(total: number | null | undefined, loaded: num
   if (typeof total === 'number' && Number.isFinite(total)) return `${total.toLocaleString('en-US')} ${total === 1 ? 'conversation' : 'conversations'}`
   return `${loaded.toLocaleString('en-US')}${hasMore ? '+' : ''} ${loaded === 1 && !hasMore ? 'conversation' : 'conversations'}`
 }
+
+/* ── Load more must terminate (RC 8.3.2 hotfix, 2026-10-04) ─────────────────
+ * The footer showed Load more whenever the chip count exceeded the loaded rows.
+ * The count (v_inbox_bucket_counts) can exceed what the list returns — Priority
+ * counted 20 against 9 rows — and the cursor-less "grow the page" path returns
+ * the same rows, so the button never went away and every click re-read the
+ * same page. A load that settles without adding a row exhausts the lens until
+ * the question (lens + filters) changes or more rows arrive by other means.
+ */
+export interface LoadMoreProbe {
+  /** the lens + filter signature the probe was taken under */
+  key: string
+  /** rows on screen when Load more was pressed */
+  before: number
+  /** the load has resolved */
+  settled: boolean
+}
+
+export function isLoadMoreExhausted(probe: LoadMoreProbe | null, key: string, rowCount: number): boolean {
+  return Boolean(probe && probe.settled && probe.key === key && rowCount <= probe.before)
+}
+
+export function shouldShowLoadMore({
+  rowCount, canLoadMore, lensTotal, exhausted,
+}: { rowCount: number; canLoadMore: boolean; lensTotal: number | null | undefined; exhausted: boolean }): boolean {
+  if (rowCount === 0 || exhausted) return false
+  return canLoadMore || (typeof lensTotal === 'number' && lensTotal > rowCount)
+}
