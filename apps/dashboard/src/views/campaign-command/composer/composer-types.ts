@@ -49,6 +49,10 @@ export type ComposerAudience = {
     sender_markets?: Array<{ market: string; sellers: number | null; sendable: boolean | null; route_tier: string | null; block_reason: string | null; summary: string | null }>
     /** greeting personalization of the ready set (whole cohort only) */
     personalization?: Personalization | null
+    /** ready sellers whose language has no supported template (refused at send) */
+    language_holds?: LanguageHolds | null
+    /** sample build: sendable_now minus language holds in sendable markets */
+    sendable_after_language?: number | null
     /** ready sellers a sender can carry whose greeting renders (whole cohort only) */
     sendable_after_personalization?: number | null
   }
@@ -69,6 +73,8 @@ export type ComposerAudience = {
 
 /** first_name: on file · deed_name: greets by the deed owner's name · none: the render lint refuses it */
 export type Personalization = { first_name: number | null; deed_name: number | null; none: number | null }
+/** Ready sellers the renderer refuses for language (no supported template) — the renderer's own predicate. */
+export type LanguageHolds = { held: number; by_language: Record<string, number>; held_and_refused: number }
 
 export type GraphCoverage = {
   measured_at: string | null
@@ -197,6 +203,7 @@ export type ComposerCohort = {
   no_sendable_number: number | null
   sender_markets: NonNullable<ComposerAudience['build']['sender_markets']>
   personalization?: Personalization | null
+  language_holds?: LanguageHolds | null
   sendable_after_personalization?: number | null
   ready_by_zone: Record<string, number>
   ready_by_market: Record<string, number>

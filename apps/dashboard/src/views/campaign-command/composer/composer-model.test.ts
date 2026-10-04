@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSegments, capacityPlan, checkSchedule, completionEstimate, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition,
   coverageMarkets, launchSentence, parseCap, withCohort, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
-  audienceFunnel, audienceFreshness, campaignSizeCheck,
+  audienceFunnel, audienceFreshness, campaignSizeCheck, languageBreakdown,
 } from './composer-model'
 import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, CoverageMarket } from './composer-types'
 import { intakeFromLocation, resolveDrop, COMPOSER_OBJECTS_MIME } from './composer-intake'
@@ -235,7 +235,8 @@ describe('audience funnel (Minneapolis, 2026-10-03 numbers)', () => {
 
   it('the sample build is labelled a sample capped by Campaign size — that is the ~640-class number', () => {
     const stages = audienceFunnel(mpls())
-    expect(stages.map((s) => s.key)).toEqual(['universe', 'filters', 'reachable', 'sms', 'clean', 'built', 'personalization', 'routing'])
+    expect(stages.map((s) => s.key)).toEqual(['universe', 'filters', 'reachable', 'sms', 'clean', 'built', 'language', 'personalization', 'routing'])
+    expect(stages.find((s) => s.key === 'language')!.count).toBeNull()
     const built = stages.find((s) => s.key === 'built')!
     expect(built.basis).toBe('sample')
     expect(built.count).toBe(552)
@@ -255,6 +256,29 @@ describe('audience funnel (Minneapolis, 2026-10-03 numbers)', () => {
     expect(p.note).toMatch(/1,700 have no first name/)
     expect(stages.find((s) => s.key === 'built')!.reasons.map((r) => r.count)).toContain(446)
     expect(stages.at(-1)!.count).toBe(2300)
+  })
+
+  it('language holds are a funnel stage with a per-language breakdown, and eligible never includes them', () => {
+    const c = { ...cohort(), language_holds: { held: 10, by_language: { Thai: 3, Farsi: 6, Pashto: 1 }, held_and_refused: 2 }, sendable_after_personalization: 2292 }
+    const a = withCohort(mpls(), c)!
+    const stages = audienceFunnel(a)
+    const lang = stages.find((s) => s.key === 'language')!
+    expect(lang.count).toBe(2542)
+    expect(lang.dropped).toBe(10)
+    expect(lang.reasons[0].label).toMatch(/Farsi 6 · Thai 3 · Pashto 1/)
+    const p = stages.find((s) => s.key === 'personalization')!
+    // 252 lint refusals, 2 of them already held for language
+    expect(p.count).toBe(2552 - 10 - 250)
+    expect(p.dropped).toBe(250)
+    expect(eligibleOf(a)).toBe(2292)
+    expect(languageBreakdown({ Thai: 3, Farsi: 6 })).toBe('Farsi 6 · Thai 3')
+  })
+
+  it('the sample build subtracts language holds from its eligible count', () => {
+    const a = mpls()
+    a.build = { ...a.build!, language_holds: { held: 9, by_language: { Farsi: 6, Thai: 3 }, held_and_refused: 0 }, sendable_after_language: 543 }
+    expect(eligibleOf(a)).toBe(543)
+    expect(audienceFunnel(a).find((s) => s.key === 'language')!.count).toBe(543)
   })
 
   it('a location-only universe shows what the targeting filters removed', () => {

@@ -363,6 +363,14 @@ export async function readComposerTemplates(deps = {}) {
 
 const firstName = (value) => clean(value).split(/\s+/)[0] || null
 
+/** Language holds for the funnel: totals + per-language counts (markets stay server-side). Null when not measured. */
+function languageHoldsDigest(value) {
+  if (!value || typeof value !== 'object') return null
+  const byLanguage = {}
+  for (const [language, count] of Object.entries(obj(value.by_language))) byLanguage[language] = num(count)
+  return { held: num(value.held), by_language: byLanguage, held_and_refused: num(value.held_and_refused) }
+}
+
 /**
  * Shape a dry-run preview for the Composer. Units stay apart: graph counts
  * (the whole matched audience), the simulated build (the rows Build will
@@ -406,6 +414,8 @@ export function composerAudienceFromPreview(preview = {}) {
       ready: num(sim.ready),
       held: num(sim.held),
       held_by_reason: obj(sim.held_by_reason),
+      language_holds: languageHoldsDigest(sim.language_holds),
+      sendable_after_language: sim.sendable_after_language ?? null,
       sendable_now: num(sim.sendable_now),
       no_sendable_number: num(sim.no_sendable_number),
       sender_markets: (Array.isArray(sim.sender_markets) ? sim.sender_markets : []).map((m) => ({
@@ -611,6 +621,7 @@ async function runComposerCohort(s, strategy, key, deps) {
     personalization: result.personalization
       ? { first_name: num(result.personalization.first_name), deed_name: num(result.personalization.deed_name), none: num(result.personalization.none) }
       : null,
+    language_holds: languageHoldsDigest(result.language_holds),
     sendable_after_personalization: result.sendable_after_personalization ?? null,
     ready_by_zone: result.ready_by_zone,
     ready_by_market: result.ready_by_market,
@@ -675,7 +686,8 @@ export async function readPropertyCoordinates(ids = [], deps = {}) {
 /**
  * Which ready members are in "Eligible" — the same rule the whole-cohort count
  * applies (sendableAfterPersonalization): a sender carries the market
- * (sendable === true) and the greeting renders (personalization ≠ none). The
+ * (sendable === true), the greeting renders (personalization ≠ none) and the
+ * seller's language has a supported template (language_hold null). The
  * Map never decides this; it draws what this returns.
  */
 export function eligibleMembers(members = [], senderMarkets = []) {
@@ -684,8 +696,9 @@ export function eligibleMembers(members = [], senderMarkets = []) {
   const excludedByMarket = new Map()
   let notRoutable = 0
   let noGreeting = 0
+  let languageHeld = 0
   const tally = (market, reason) => {
-    const row = excludedByMarket.get(market) || { not_routable: 0, no_greeting: 0 }
+    const row = excludedByMarket.get(market) || { not_routable: 0, no_greeting: 0, language_held: 0 }
     row[reason] += 1
     excludedByMarket.set(market, row)
   }
@@ -694,9 +707,10 @@ export function eligibleMembers(members = [], senderMarkets = []) {
     const routeKey = clean(m.market) || 'Unknown market'
     if (sendable.get(routeKey) !== true) { notRoutable += 1; tally(routeKey, 'not_routable'); continue }
     if (m.greeting === 'none') { noGreeting += 1; tally(routeKey, 'no_greeting'); continue }
+    if (m.language_hold) { languageHeld += 1; tally(routeKey, 'language_held'); continue }
     eligible.push(m)
   }
-  return { eligible, not_routable: notRoutable, no_greeting: noGreeting, excluded_by_market: excludedByMarket }
+  return { eligible, not_routable: notRoutable, no_greeting: noGreeting, language_held: languageHeld, excluded_by_market: excludedByMarket }
 }
 
 /**
@@ -732,7 +746,7 @@ async function runComposerGeography(s, key, deps) {
   const members = entry?.members
   if (!Array.isArray(members)) return { ok: false, error: 'cohort_members_unavailable', message: 'The cohort did not return its ready set' }
   const cohortMs = Date.now() - startedAt
-  const { eligible, not_routable: notRoutable, no_greeting: noGreeting, excluded_by_market: excludedByMarket } = eligibleMembers(members, cohort.sender_markets)
+  const { eligible, not_routable: notRoutable, no_greeting: noGreeting, language_held: languageHeld, excluded_by_market: excludedByMarket } = eligibleMembers(members, cohort.sender_markets)
   let coords
   try {
     coords = await readPropertyCoordinates(eligible.map((m) => m.property_id), deps)
@@ -750,8 +764,8 @@ async function runComposerGeography(s, key, deps) {
     if (idx === undefined) {
       idx = markets.length
       marketIndex.set(label, idx)
-      const ex = excludedByMarket.get(label) || { not_routable: 0, no_greeting: 0 }
-      markets.push({ market: label, eligible: 0, mapped: 0, unmapped: 0, not_routable: ex.not_routable, no_greeting: ex.no_greeting, bbox: null })
+      const ex = excludedByMarket.get(label) || { not_routable: 0, no_greeting: 0, language_held: 0 }
+      markets.push({ market: label, eligible: 0, mapped: 0, unmapped: 0, not_routable: ex.not_routable, no_greeting: ex.no_greeting, language_held: ex.language_held, bbox: null })
     }
     return idx
   }
@@ -791,7 +805,7 @@ async function runComposerGeography(s, key, deps) {
       delta: serverEligible === null ? null : eligible.length - serverEligible,
     },
     // why ready sellers are not in the preview — server-counted, never inferred client-side
-    excluded: { held_by_build: num(cohort.held), not_routable: notRoutable, no_greeting: noGreeting },
+    excluded: { held_by_build: num(cohort.held), not_routable: notRoutable, no_greeting: noGreeting, language_held: languageHeld },
     ready: num(cohort.ready),
     capped_by_build_limit: cohort.capped_by_build_limit === true,
     build_limit: num(cohort.build_limit),

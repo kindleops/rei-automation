@@ -216,6 +216,8 @@ export function eligibleOf(a: ComposerAudience | null): number | null {
   if (!b || !b.ok || b.ready === null || b.ready === undefined) return null
   // whole cohort: ready, carried by a sender, and the greeting renders (render lint counted)
   if (typeof b.sendable_after_personalization === 'number') return Math.max(0, b.sendable_after_personalization)
+  // sample: carried by a sender and the language has a template (render's language hold counted)
+  if (typeof b.sendable_after_language === 'number') return Math.max(0, b.sendable_after_language)
   // the planner's router answered per market: sendable_now is the ready set a sender can carry
   if (typeof b.sendable_now === 'number') return Math.max(0, b.sendable_now)
   return Math.max(0, n0(b.ready) - n0(b.no_sendable_number))
@@ -250,6 +252,7 @@ export function withCohort(a: ComposerAudience | null, cohort: ComposerCohort | 
       no_sendable_number: cohort.no_sendable_number,
       sender_markets: cohort.sender_markets,
       personalization: cohort.personalization ?? null,
+      language_holds: cohort.language_holds ?? null,
       sendable_after_personalization: cohort.sendable_after_personalization ?? null,
     },
     distributions: {
@@ -656,10 +659,15 @@ export type FunnelStage = {
 const reason = (label: string, count: number | null | undefined): FunnelReason | null => (count && count > 0 ? { label, count } : null)
 const present = (xs: Array<FunnelReason | null>): FunnelReason[] => xs.filter((x): x is FunnelReason => x !== null).sort((x, y) => y.count - x.count)
 
+/** "Farsi 6 · Thai 3 · Pashto 1", largest first. */
+export function languageBreakdown(byLanguage: Record<string, number> = {}): string {
+  return Object.entries(byLanguage).filter(([, n]) => n > 0).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).map(([l, n]) => `${l} ${fmt(n)}`).join(' · ')
+}
+
 /**
  * market universe → filters matched → reachable phone → verified SMS-capable →
  * not suppressed / not recently touched → built (deduped, holds) →
- * personalization present → routing eligible. Units: graph rows (properties)
+ * message language supported → personalization present → routing eligible. Units: graph rows (properties)
  * through "queue-ready", recipients after. Every count is a server number;
  * a stage the server did not measure says so.
  */
@@ -705,12 +713,27 @@ export function audienceFunnel(a: ComposerAudience | null, labelOf: (key: string
       ...Object.entries(b.held_by_reason ?? {}).map(([k, v]) => reason(HELD_REASON_WORDS[k] ?? k.replace(/_/g, ' '), v)),
     ]),
   })
+  // The renderer refuses a seller whose language has no supported template
+  // (unsupported_language). Counted server-side with the renderer's predicate.
+  const lh = b.language_holds
+  const ready = b.ready ?? null
+  if (lh) {
+    push({
+      key: 'language', label: 'Message language supported', basis,
+      count: ready !== null ? Math.max(0, ready - n0(lh.held)) : null,
+      reasons: lh.held > 0 ? [{ label: `No approved template in their language — ${languageBreakdown(lh.by_language)}`, count: lh.held }] : [],
+    })
+  } else {
+    push({ key: 'language', label: 'Message language supported', basis, count: null, reasons: [], note: 'Language holds not measured by this server' })
+  }
   const p = b.personalization
   if (p) {
+    // lint refusals among the language-supported (held ones are already out)
+    const refused = Math.max(0, n0(p.none) - n0(lh?.held_and_refused))
     push({
       key: 'personalization', label: 'Greeting personalization present', basis,
-      count: b.ready !== null && b.ready !== undefined ? Math.max(0, b.ready - n0(p.none)) : null,
-      reasons: present([reason('No first name, company owner — render lint refuses', p.none)]),
+      count: ready !== null ? Math.max(0, ready - n0(lh?.held) - refused) : null,
+      reasons: present([reason('No first name, company owner — render lint refuses', refused)]),
       note: p.deed_name ? `${fmt(p.deed_name)} have no first name on file and greet by the deed owner’s name` : undefined,
     })
   } else {

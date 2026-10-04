@@ -204,6 +204,30 @@ export function resolveLanguage(value) {
   return { canonical: null, unsupported: false };
 }
 
+/**
+ * THE SEND-TIME LANGUAGE HOLD — the one predicate the renderer applies
+ * (renderOutboundTemplate refuses with reason `unsupported_language`) and the
+ * Composer funnel counts with, so the two cannot disagree. Returns the
+ * canonical unsupported language ("Farsi" | "Thai" | "Pashto") or null.
+ * Empty and policy tokens are "no stated language" -> English, never held.
+ */
+export function templateLanguageHold(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw || isLanguagePolicyToken(raw)) return null;
+  const resolved = resolveLanguage(raw);
+  return resolved.unsupported ? resolved.canonical : null;
+}
+
+/**
+ * The hold for a campaign target row, reading its language the way
+ * launchCandidateFromTarget does (target.language, then the snapshot's).
+ */
+export function targetLanguageHold(target = {}) {
+  const snapshot = target?.metadata?.candidate_snapshot || {};
+  const stated = [target?.language, snapshot.language].map((v) => String(v ?? "").trim()).find(Boolean) || null;
+  return templateLanguageHold(stated);
+}
+
 export const CANONICAL_LANGUAGE_SET = Object.freeze(new Set(CANONICAL_LANGUAGES));
 
 export default {
@@ -213,6 +237,8 @@ export default {
   unsupportedTemplateLanguage,
   templateCatalogLanguageName,
   sameTemplateLanguage,
+  templateLanguageHold,
+  targetLanguageHold,
   resolveLanguage,
   CANONICAL_LANGUAGES,
   CANONICAL_LANGUAGE_SET,

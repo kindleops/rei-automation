@@ -11,8 +11,14 @@
  *    representative first name renders blank and is refused (property 273588014,
  *    "Rci Holdings Inc", TEMPLATE_RENDER_LINT_FAILURE).
  *
+ * 3. Language holds: a ready seller whose language has no supported template
+ *    is refused at send time (`unsupported_language`). Counted with the
+ *    renderer's own predicate (targetLanguageHold), never a second rule.
+ *
  * Pure functions; the callers own every read.
  */
+
+import { targetLanguageHold } from '@/lib/sms/language_aliases.js'
 
 const clean = (value) => String(value ?? '').trim()
 
@@ -64,13 +70,56 @@ export function summarizePersonalization(readyRows = []) {
  * Ready sellers a sender can carry AND whose greeting renders: sendable_now
  * minus lint refusals in sendable markets. Null when routing is unknown.
  */
-export function sendableAfterPersonalization(sendableNow, senderMarkets = [], personalization = null) {
+export function sendableAfterPersonalization(sendableNow, senderMarkets = [], personalization = null, languageHolds = null) {
   if (sendableNow === null || sendableNow === undefined || !Number.isFinite(Number(sendableNow))) return null
-  if (!personalization) return Number(sendableNow)
+  if (!personalization && !languageHolds) return Number(sendableNow)
   const sendable = new Set((senderMarkets || []).filter((m) => m && m.sendable !== false).map((m) => clean(m.market)))
   let refused = 0
-  for (const [market, count] of Object.entries(personalization.none_by_market || {})) {
+  for (const [market, count] of Object.entries(personalization?.none_by_market || {})) {
+    if (sendable.has(clean(market))) refused += Number(count) || 0
+  }
+  // language-held sellers whose greeting would render (the rest are already counted above)
+  for (const [market, count] of Object.entries(languageHolds?.by_market_unrefused || {})) {
     if (sendable.has(clean(market))) refused += Number(count) || 0
   }
   return Math.max(0, Number(sendableNow) - refused)
+}
+
+/**
+ * Ready rows the renderer will refuse for language (no supported template).
+ *   held                 every language-held ready row
+ *   by_language          { Farsi: 6, Thai: 3, Pashto: 1 }
+ *   held_and_refused     held rows the greeting lint refuses anyway
+ *   by_market            every held row, per market
+ *   by_market_unrefused  the rest, per market — what sendableAfterPersonalization subtracts
+ * `kinds` (optional, aligned with readyRows) is each row's greeting kind after
+ * name hydration; without it the row's own greetingPersonalization is used.
+ */
+export function summarizeLanguageHolds(readyRows = [], kinds = null) {
+  const out = { held: 0, by_language: {}, held_and_refused: 0, by_market: {}, by_market_unrefused: {} }
+  const rows = readyRows || []
+  for (let i = 0; i < rows.length; i += 1) {
+    const language = targetLanguageHold(rows[i])
+    if (!language) continue
+    out.held += 1
+    out.by_language[language] = (out.by_language[language] || 0) + 1
+    const rowMarket = clean(rows[i].market) || 'unknown'
+    out.by_market[rowMarket] = (out.by_market[rowMarket] || 0) + 1
+    const kind = Array.isArray(kinds) && kinds.length === rows.length ? kinds[i] : greetingPersonalization(rows[i])
+    if (kind === 'none') out.held_and_refused += 1
+    else {
+      const market = clean(rows[i].market) || 'unknown'
+      out.by_market_unrefused[market] = (out.by_market_unrefused[market] || 0) + 1
+    }
+  }
+  return out
+}
+
+/**
+ * The sample build's sendable count after language holds (no personalization
+ * is measured on the sample): sendable_now minus held rows in sendable markets.
+ */
+export function sendableAfterLanguageHolds(sendableNow, senderMarkets = [], languageHolds = null) {
+  if (!languageHolds) return sendableNow === null || sendableNow === undefined ? null : Number(sendableNow)
+  return sendableAfterPersonalization(sendableNow, senderMarkets, null, { by_market_unrefused: languageHolds.by_market || {} })
 }

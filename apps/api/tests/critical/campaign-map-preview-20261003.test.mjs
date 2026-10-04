@@ -94,7 +94,7 @@ test("geography: eligible / mapped / without coordinates, per market, never fabr
   assert.equal(g.mapped, 4); // m1 m2 d1 d2
   assert.equal(g.unmapped, 2); // m4 (0,0 placeholder) + d3 (no record)
   assert.deepEqual(g.reconciliation, { composer_eligible: 6, matches: true, delta: 0 });
-  assert.deepEqual(g.excluded, { held_by_build: 1, not_routable: 2, no_greeting: 1 });
+  assert.deepEqual(g.excluded, { held_by_build: 1, not_routable: 2, no_greeting: 1, language_held: 0 });
   assert.deepEqual([...g.points.ids].sort(), ["d1", "d2", "m1", "m2"]);
   assert.equal(g.points.ids.includes("p1"), false, "a non-eligible property with coordinates is not drawn");
   assert.equal(g.points.lng.length, g.points.ids.length);

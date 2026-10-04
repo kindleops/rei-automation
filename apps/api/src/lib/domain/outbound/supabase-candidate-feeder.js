@@ -30,7 +30,7 @@ import {
   BLOCK_REASONS,
 } from "@/lib/domain/outbound/presend-eligibility-engine.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
-import { isLanguagePolicyToken, resolveLanguage, templateCatalogLanguageName } from "@/lib/sms/language_aliases.js";
+import { isLanguagePolicyToken, resolveLanguage, templateCatalogLanguageName, templateLanguageHold } from "@/lib/sms/language_aliases.js";
 import { normalizeCampaignStageCode } from "@/lib/domain/campaigns/campaign-stage-code.js";
 import { canonicalPropertyGroupOf, filterTemplatesForProperty } from "@/lib/domain/templates/template-asset-compatibility.js";
 
@@ -3402,7 +3402,8 @@ async function renderOutboundTemplateCore(candidate = {}, options = {}, deps = {
       : "template_routing_not_applicable",
   };
 
-  if (languageResolved.unsupported) {
+  // The shared hold predicate — the Composer funnel counts with the same one.
+  if (templateLanguageHold(rawLanguage)) {
     return {
       ok: false,
       reason_code: REASON_CODES.NO_TEMPLATE,

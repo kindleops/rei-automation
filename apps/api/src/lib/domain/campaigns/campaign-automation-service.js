@@ -55,7 +55,8 @@ import { campaignMarketIdentityPatch, summarizeCampaignMarketIdentity } from '@/
 import { deriveTimezoneFromGeography } from '@/lib/domain/campaigns/contact-window-timezone.js'
 import { resolveRecipientTimezone } from '@/lib/domain/queue/recipient-timezone.js'
 import { loadCanonicalMarketDirectory, resolveMarketLabel } from '@/lib/domain/geography/canonical-market.js'
-import { greetingPersonalization, isUniverseFilter, sendableAfterPersonalization, summarizePersonalization } from '@/lib/domain/campaigns/campaign-audience-funnel.js'
+import { targetLanguageHold } from '@/lib/sms/language_aliases.js'
+import { greetingPersonalization, isUniverseFilter, sendableAfterLanguageHolds, sendableAfterPersonalization, summarizeLanguageHolds, summarizePersonalization } from '@/lib/domain/campaigns/campaign-audience-funnel.js'
 import {
   ageBucketFromMob,
   ageFromMob,
@@ -4476,6 +4477,7 @@ async function simulateCampaignBuild({ campaign, options, graph, buildLimit, dep
     const readyRows = planned.rows.filter((row) => row.target_status === 'ready')
     const { evaluateAudienceSenderCoverage } = await import('@/lib/domain/campaigns/campaign-launch-readiness.js')
     const senders = await evaluateAudienceSenderCoverage(readyRows, deps).catch(() => null)
+    const languageHolds = summarizeLanguageHolds(readyRows)
     return {
       ok: true,
       source: 'build_simulation',
@@ -4487,6 +4489,9 @@ async function simulateCampaignBuild({ campaign, options, graph, buildLimit, dep
       sendable_now: senders ? senders.sendable_now : null,
       no_sendable_number: senders ? senders.no_sendable_number : null,
       sender_markets: senders ? senders.markets : [],
+      // ready sellers the renderer refuses for language (same predicate)
+      language_holds: languageHolds,
+      sendable_after_language: senders ? sendableAfterLanguageHolds(senders.sendable_now, senders.markets, languageHolds) : null,
     }
   } catch (error) {
     return { ok: false, source: 'build_simulation', error: errorMessage(error) }
@@ -6598,14 +6603,18 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
     increment(markets, clean(row.market) || 'unknown')
   }
   // [campaign map preview] per-ready-row greeting kinds, in readyRows order (only when members are asked for)
-  const greetingKinds = input.include_members === true ? [] : null
+  const greetingKinds = []
   const personalization = await summarizeCohortPersonalization(readyRows, rows, deps, greetingKinds).catch(() => null)
+  // the renderer's language hold over the ready set; greeting kinds (post-hydration) avoid double-counting lint refusals
+  const languageHolds = summarizeLanguageHolds(readyRows, personalization ? greetingKinds : null)
   const members = input.include_members === true
     ? readyRows.map((row, i) => ({
       property_id: clean(row.property_id) || null,
       market: clean(row.market) || null,
       // null when names were unreadable — the caller must not guess a kind
-      greeting: personalization && greetingKinds && greetingKinds.length === readyRows.length ? greetingKinds[i] : null,
+      greeting: personalization && greetingKinds.length === readyRows.length ? greetingKinds[i] : null,
+      // the renderer's language hold (Farsi/Thai/Pashto…), null when a template language exists
+      language_hold: targetLanguageHold(row),
     }))
     : undefined
   return {
@@ -6621,8 +6630,9 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
     // Greeting personalization of the ready set (render lint): first name on
     // file, deed-name greeting, or none (refused). Null when names were unreadable.
     personalization,
+    language_holds: languageHolds,
     sendable_after_personalization: senders
-      ? sendableAfterPersonalization(senders.sendable_now, senders.markets, personalization)
+      ? sendableAfterPersonalization(senders.sendable_now, senders.markets, personalization, languageHolds)
       : null,
     ready_by_zone: zones,
     ready_by_market: markets,
