@@ -43,6 +43,7 @@ export type AppId =
   | 'workflow-studio'
   | 'closing-desk'
   | 'analytics'
+  | 'search-intelligence'
   | 'calendar'
   | 'notifications'
   | 'settings'
@@ -513,6 +514,27 @@ export const NEXUS_APPS: NexusApp[] = [
     dockable: true,
     defaultDock: false,
     shortcut: 'A',
+    badge: null,
+    context: {},
+  },
+  {
+    /**
+     * Search Intelligence OS — a cross-brand search workspace (Prominent, Offerr,
+     * Reivesti, LeadCommand's public site). Desktop instrument; it owns its state in
+     * its own path and couples to no LeadCommand runtime table.
+     */
+    id: 'search-intelligence',
+    label: 'Search Intelligence',
+    shortLabel: 'Search',
+    description: 'Plan and operate organic search across every brand',
+    icon: 'globe',
+    route: '/search-intelligence',
+    group: 'system',
+    desktop: true,
+    mobile: false,
+    desktopRail: true,
+    dockable: false,
+    defaultDock: false,
     badge: null,
     context: {},
   },

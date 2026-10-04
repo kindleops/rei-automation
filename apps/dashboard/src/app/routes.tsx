@@ -79,6 +79,7 @@ const EmailCommandCenter = lazy(() =>
 )
 const WorkflowStudioV2 = lazy(() => import('../views/workflow-studio/v2/WorkflowStudioV2'))
 const BrowserApp = lazy(() => import('../modules/browser/BrowserApp'))
+const SearchIntelligenceApp = lazy(() => import('../modules/search-intelligence/SearchIntelligenceApp'))
 const SettingsView = lazy(() =>
   import('../views/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
 )
@@ -274,6 +275,14 @@ const workflowStudioRoute = defineRoute<null>({
   render: () => wrapFullscreen(<WorkflowStudioV2 />, 'workflow_studio'),
 })
 
+/** Search Intelligence OS — cross-brand search workspace (desktop only; the app says so on a phone). */
+const searchIntelligenceRoute = defineRoute<null>({
+  path: '/search-intelligence',
+  title: 'LeadCommand | Search Intelligence',
+  loader: async () => null,
+  render: () => <SearchIntelligenceApp />,
+})
+
 /** Browser 1.0 — contextual research (desktop only; the app says so on a phone). */
 const browserRoute = defineRoute<null>({
   path: '/browser',
@@ -409,6 +418,7 @@ const routes = [
   emailCommandRoute,
   workflowStudioRoute,
   browserRoute,
+  searchIntelligenceRoute,
   settingsRoute,
   entityGraphRoute,
   entityGraphPropertyRoute,
