@@ -10,7 +10,7 @@ import type { PanelMode } from '../../../domain/inbox/inbox-layout-state'
 import {
   normalizePropertySnapshot,
   buildPropertyExternalLinks,
-  buildAerialViewUrl,
+  resolveMapsImage,
   resolveStreetViewImage,
 } from '../../../domain/inbox/inbox-normalization'
 import type { NormalizedPropertySnapshot } from '../../../domain/inbox/inbox-normalization'
@@ -2472,7 +2472,8 @@ export const PropertyHeroCard = ({
     () => buildInteractiveStreetViewUrl({ address, lat: propertyLat, lng: propertyLng }),
     [address, propertyLat, propertyLng],
   )
-  const aerialUrl = snapshot.aerialViewUrl || thread.satellite_image || buildAerialViewUrl(address)
+  // the stored-imagery rule: own key (coordinates → address) first, stored satellite last
+  const aerialUrl = resolveMapsImage({ kind: 'satellite', stored: thread.satellite_image || snapshot.aerialViewUrl, address, lat: propertyLat, lng: propertyLng })
   const interactiveAerialViewUrl = useMemo(
     () => buildInteractiveAerialViewUrl({ address, lat: propertyLat, lng: propertyLng }),
     [address, propertyLat, propertyLng],
@@ -2568,7 +2569,7 @@ export const PropertyHeroCard = ({
           referrerPolicy="no-referrer-when-downgrade"
         />
       ) : aerialUrl ? (
-        <img src={aerialUrl as string | undefined} alt="Aerial view" />
+        <img src={aerialUrl as string | undefined} alt="Aerial view" loading="lazy" decoding="async" />
       ) : (
         <div className="nx-panel-fallback"><Icon name="map" /><span>Unavailable</span></div>
       )}

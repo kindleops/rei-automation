@@ -23,7 +23,7 @@ import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { MapSourceMode } from '../../domain/inbox/inbox-layout-state'
 import { findPinForThread, isMappableCoord } from '../../domain/inbox/map-selection-sync'
 import { buildConversationDecision } from '../../domain/inbox/inbox-decisioning'
-import { buildStreetViewUrl } from '../../domain/inbox/inbox-normalization'
+import { resolveStreetViewImage } from '../../domain/inbox/inbox-normalization'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import { SellerMapCard } from './seller-card/SellerMapCard'
@@ -2462,10 +2462,10 @@ const buildSoldCompPresentation = (
   }
   const { buyerName, buyerType, buyerTone, entityLabel } = classifySoldCompBuyer(comp, variant)
   const buyerInitials = initialsFromName(buyerName)
-  // own-key Street View first; stored images (vendor-signed, referrer-restricted) last
-  const builtStreet = buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude)
-  const imageUrl = builtStreet || text(anyComp.streetview_image) || text(anyComp.map_image) || text(comp.satellite_image) || ''
-  const imageLabel = builtStreet || text(anyComp.streetview_image) ? 'Street View' : 'Property Preview'
+  // the stored-imagery rule: own-key Street View first; stored images (vendor-signed,
+  // referrer-restricted) only when no own-key URL can be built
+  const imageUrl = resolveStreetViewImage({ stored: text(anyComp.streetview_image) || text(anyComp.map_image) || text(comp.satellite_image) || null, address: comp.property_address_full, lat: comp.latitude, lng: comp.longitude }) || ''
+  const imageLabel = imageUrl && (imageUrl.includes('/maps/api/streetview') || text(anyComp.streetview_image)) ? 'Street View' : 'Property Preview'
   const propertyLabel = text(comp.property_type) || (variant === 'multifamily' ? 'Apartment' : 'Residential')
   const subtypeLabel = text(comp.normalized_asset_class || comp.property_class) || null
   const distance =
@@ -2674,7 +2674,7 @@ const SoldCompMapCard = ({
 
   const intelligence = buildSoldCompPresentation(comp, subject, 14)
   const price = comp.mls_sold_price ?? comp.sale_price ?? 0
-  const imageUrl = buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude) || comp.streetview_image || comp.satellite_image || ''
+  const imageUrl = resolveStreetViewImage({ stored: comp.streetview_image || comp.satellite_image || null, address: comp.property_address_full, lat: comp.latitude, lng: comp.longitude }) || ''
   const ppsf = comp.computed_ppsf ?? comp.arv_ppsf ?? (price && comp.building_square_feet ? Math.round(price / comp.building_square_feet) : null)
   const distance = (subject?.latitude && subject?.longitude)
     ? haversineMiles(subject.latitude, subject.longitude, comp.latitude, comp.longitude)

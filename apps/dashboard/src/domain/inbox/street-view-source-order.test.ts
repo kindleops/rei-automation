@@ -46,3 +46,29 @@ describe('seller map card hero', () => {
     expect(vm.property.imageUrl).not.toMatch(/signature=/)
   })
 })
+
+describe('resolveMapsImage — satellite and roadmap follow the same rule', () => {
+  const VENDOR_MAP = 'https://maps.googleapis.com/maps/api/staticmap?center=36.22%2C-95.98&zoom=19&size=400x400&maptype=roadmap&key=VENDOR&signature=abc'
+
+  it('builds satellite and roadmap from our key at the coordinates, then the address, stored last', async () => {
+    const { resolveMapsImage } = await load('OWNKEY')
+    const sat = resolveMapsImage({ kind: 'satellite', stored: VENDOR_MAP, address: '1 Main St', lat: 36.22, lng: -95.98 })
+    expect(sat).toMatch(/staticmap\?.*maptype=satellite.*center=36\.22,-95\.98.*key=OWNKEY/)
+    expect(sat).not.toMatch(/signature=/)
+    const road = resolveMapsImage({ kind: 'roadmap', stored: VENDOR_MAP, address: '1 Main St', lat: null, lng: null })
+    expect(road).toMatch(/maptype=roadmap.*center=1%20Main%20St.*key=OWNKEY/)
+    expect(resolveMapsImage({ kind: 'roadmap', stored: VENDOR_MAP })).toBe(VENDOR_MAP)
+    const noKey = await load('')
+    expect(noKey.resolveMapsImage({ kind: 'satellite', stored: VENDOR_MAP, lat: 36.22, lng: -95.98 })).toBe(VENDOR_MAP)
+  })
+
+  it('the seller card resolves all three kinds through the rule', async () => {
+    vi.stubEnv('VITE_GOOGLE_MAPS_API_KEY', 'OWNKEY')
+    vi.resetModules()
+    const { getNormalizedPropertyImages } = await import('../../views/map/components/SellerIntelligenceCard')
+    const imgs = getNormalizedPropertyImages({ property_address_full: '1 Main St', latitude: 36.22, longitude: -95.98, streetview_image: VENDOR, map_image: VENDOR_MAP, satellite_image: VENDOR_MAP } as never)
+    expect(imgs.streetViewImage).toMatch(/streetview\?.*key=OWNKEY/)
+    expect(imgs.mapImage).toMatch(/maptype=roadmap.*key=OWNKEY/)
+    expect(imgs.satelliteImage).toMatch(/maptype=satellite.*key=OWNKEY/)
+  })
+})

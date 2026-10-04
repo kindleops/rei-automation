@@ -134,31 +134,6 @@ export const buildStreetViewUrl = (
   return `https://maps.googleapis.com/maps/api/streetview?size=640x400&location=${location}&fov=80&heading=210&pitch=2&scale=2&key=${apiKey}`
 }
 
-/**
- * THE property/subject Street View source order (2026-10-04): our own key at
- * the coordinates, else at the address (buildStreetViewUrl), and a record's
- * stored `streetview_image` only when neither can be built. Stored links are a
- * data vendor's signed URLs whose key is referrer-restricted — from
- * ops.leadcommand.ai they error — so they can never come first. The referrer
- * is never stripped to get round another party's key restriction.
- */
-export const resolveStreetViewImage = ({
-  stored = null,
-  address = null,
-  lat = null,
-  lng = null,
-}: {
-  stored?: string | null
-  address?: string | null
-  lat?: number | null
-  lng?: number | null
-}): string | null => {
-  const built = buildStreetViewUrl(address && address.trim() ? address : null, lat, lng)
-  if (built) return built
-  const s = typeof stored === 'string' ? stored.trim() : ''
-  return /^https:\/\//.test(s) ? s : null
-}
-
 export const buildAerialViewUrl = (
   address: string | null,
   lat?: number | null,
@@ -174,6 +149,61 @@ export const buildAerialViewUrl = (
   console.debug('[GOOGLE_MAP_SOURCE]', { source: hasCoords ? 'coords' : 'address', lat, lng, address })
   return `https://maps.googleapis.com/maps/api/staticmap?size=600x300&maptype=satellite&scale=2&zoom=19&center=${center}&key=${apiKey}`
 }
+
+export const buildRoadmapViewUrl = (
+  address: string | null,
+  lat?: number | null,
+  lng?: number | null,
+): string | null => {
+  const apiKey = GOOGLE_MAPS_API_KEY
+  if (!apiKey) return null
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.001 && Math.abs(Number(lng)) > 0.001
+  const center = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
+  if (!center) return null
+  return `https://maps.googleapis.com/maps/api/staticmap?size=600x300&maptype=roadmap&scale=2&zoom=18&center=${center}&markers=size:mid%7C${center}&key=${apiKey}`
+}
+
+export type MapsImageKind = 'street' | 'satellite' | 'roadmap'
+
+const MAPS_IMAGE_BUILDERS: Record<MapsImageKind, (address: string | null, lat?: number | null, lng?: number | null) => string | null> = {
+  street: buildStreetViewUrl,
+  satellite: buildAerialViewUrl,
+  roadmap: buildRoadmapViewUrl,
+}
+
+/**
+ * THE stored-imagery rule (2026-10-04) for every property / subject / comp
+ * Google image — Street View, satellite and roadmap alike: our own key built
+ * from the coordinates, else from the address, and a record's stored URL
+ * (`streetview_image`, `satellite_image`, `map_image`, …) only when neither
+ * can be built. Stored URLs are a data vendor's signed Google links whose key
+ * is referrer-restricted (one key across Street View + Static Maps; sampled
+ * in properties.streetview_image and properties.map_image): from
+ * ops.leadcommand.ai they error, so they can never come first. The referrer
+ * is never stripped to get round another party's key restriction.
+ */
+export const resolveMapsImage = ({
+  kind,
+  stored = null,
+  address = null,
+  lat = null,
+  lng = null,
+}: {
+  kind: MapsImageKind
+  stored?: string | null
+  address?: string | null
+  lat?: number | null
+  lng?: number | null
+}): string | null => {
+  const built = MAPS_IMAGE_BUILDERS[kind](address && address.trim() ? address : null, lat, lng)
+  if (built) return built
+  const s = typeof stored === 'string' ? stored.trim() : ''
+  return /^https:\/\//.test(s) ? s : null
+}
+
+/** Street View through the stored-imagery rule (see resolveMapsImage). */
+export const resolveStreetViewImage = (args: { stored?: string | null; address?: string | null; lat?: number | null; lng?: number | null }): string | null =>
+  resolveMapsImage({ kind: 'street', ...args })
 
 /**
  * Normalize raw intelligence data into a structured property snapshot.

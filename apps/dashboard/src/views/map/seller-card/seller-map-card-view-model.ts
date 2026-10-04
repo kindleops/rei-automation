@@ -1,4 +1,4 @@
-import { buildAerialViewUrl, buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
+import { resolveMapsImage } from '../../../domain/inbox/inbox-normalization'
 import { safeHumanName } from '../../../lib/identity/entityDetection'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import {
@@ -79,18 +79,10 @@ const resolvePropertyImage = (record: Record<string, unknown>, address: string):
     'streetViewImage',
     'street_view_image',
   ]))
-  // Own key first (coordinates, then address); the stored link last — stored
-  // links are vendor-signed with a referrer-restricted key (2026-10-04).
+  // The stored-imagery rule (resolveMapsImage): own key from the coordinates,
+  // then the address; the stored (vendor-signed, referrer-restricted) link last.
   const { lat, lng } = recordCoords(record)
-  if (lat !== null && lng !== null) {
-    const built = buildStreetViewUrl(null, lat, lng)
-    if (built) return built
-  }
-  if (address && address !== 'Property Unknown') {
-    const built = buildStreetViewUrl(address)
-    if (built) return built
-  }
-  return storedStreetView ? httpsOnly(storedStreetView) : null
+  return resolveMapsImage({ kind: 'street', stored: storedStreetView ? httpsOnly(storedStreetView) : null, address: address && address !== 'Property Unknown' ? address : null, lat, lng })
 }
 
 /** Aerial/roadmap imagery, used only when Street View reports no panorama. */
@@ -105,12 +97,10 @@ const resolvePropertyFallbackImage = (
     'mapImage',
   ]))
   const { lat, lng } = recordCoords(record)
-  // A stored static map is only trustworthy when we cannot derive one ourselves —
-  // see the Rocky Mount case above.
-  if (lat !== null && lng !== null) return buildAerialViewUrl(null, lat, lng)
-  if (stored) return httpsOnly(stored)
-  if (address && address !== 'Property Unknown') return buildAerialViewUrl(address) || null
-  return null
+  // A stored static map is only trusted when we cannot derive one ourselves (the
+  // Rocky Mount case above, and stored URLs are vendor-signed with a
+  // referrer-restricted key): the stored-imagery rule, satellite.
+  return resolveMapsImage({ kind: 'satellite', stored: stored ? httpsOnly(stored) : null, address: address && address !== 'Property Unknown' ? address : null, lat, lng })
 }
 
 const buildHeaderBadges = (

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { getThreadMessages, type ThreadMessage } from '../../../lib/data/inboxData'
-import { buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
+import { resolveMapsImage } from '../../../domain/inbox/inbox-normalization'
 import '../seller-intelligence-card.css'
 import '../map-intelligence-cards.css'
 
@@ -257,35 +257,29 @@ export const getTopPropertyTags = (record: SellerRecord): string[] => {
 export const getNormalizedPropertyImages = (record: SellerRecord) => {
   const payload = record.raw_payload_json as Record<string, any> | undefined
 
-  // Own key first (coordinates, then address); the stored link last — stored
-  // links are vendor-signed with a referrer-restricted key (2026-10-04).
-  const stored: string | null = normalize(firstDefined(record, ['streetViewImage', 'streetview_image', 'street_view_image'])) || normalize(payload?.streetview_image) || null
+  // The stored-imagery rule (resolveMapsImage): own key from the coordinates,
+  // then the address; stored (vendor-signed, referrer-restricted) URLs last.
   const latN = Number(firstDefined(record, ['latitude', 'lat', 'property_latitude']))
   const lngN = Number(firstDefined(record, ['longitude', 'lng', 'property_longitude']))
-  let streetViewImage: string | null = Number.isFinite(latN) && Number.isFinite(lngN) ? buildStreetViewUrl(null, latN, lngN) : null
-
-  if (!streetViewImage) {
-    const address = normalize(firstDefined(record, [
-      'property_address_full',
-      'propertyAddressFull',
-      'property_address',
-      'propertyAddress',
-      'address',
-      'situs_address',
-    ]))
-    if (address && address !== 'Property Unknown') {
-      streetViewImage = buildStreetViewUrl(address) || null
-    }
+  const rawAddress = normalize(firstDefined(record, [
+    'property_address_full',
+    'propertyAddressFull',
+    'property_address',
+    'propertyAddress',
+    'address',
+    'situs_address',
+  ]))
+  const where = {
+    address: rawAddress && rawAddress !== 'Property Unknown' ? rawAddress : null,
+    lat: Number.isFinite(latN) ? latN : null,
+    lng: Number.isFinite(lngN) ? lngN : null,
   }
-  if (!streetViewImage && stored && /^https:\/\//.test(stored)) streetViewImage = stored
-
-  const mapImage = normalize(firstDefined(record, ['mapImage', 'map_image'])) || null
-  const satelliteImage = normalize(firstDefined(record, ['satelliteImage', 'satellite_image'])) || null
+  const storedStreet = normalize(firstDefined(record, ['streetViewImage', 'streetview_image', 'street_view_image'])) || normalize(payload?.streetview_image) || null
 
   return {
-    streetViewImage: streetViewImage || null,
-    mapImage,
-    satelliteImage,
+    streetViewImage: resolveMapsImage({ kind: 'street', stored: storedStreet, ...where }),
+    mapImage: resolveMapsImage({ kind: 'roadmap', stored: normalize(firstDefined(record, ['mapImage', 'map_image'])) || null, ...where }),
+    satelliteImage: resolveMapsImage({ kind: 'satellite', stored: normalize(firstDefined(record, ['satelliteImage', 'satellite_image'])) || null, ...where }),
   }
 }
 
