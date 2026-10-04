@@ -14,7 +14,7 @@ import { fetchCommandBook, type BookCampaign } from '../desktop/war-room-api'
 import { duplicateAsDraft, launch, loadCampaign, prepareLaunch, readAudience, readCohort, readCoverage, readFleet, readTemplates, saveDraft } from './composer-api'
 import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, PrepareResult } from './composer-types'
 import {
-  audienceSpec, capacityPlan, clauseId, clausesFromTargetFilters, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition, fmt,
+  audienceSpec, capacityPlan, clauseId, clausesFromTargetFilters, compositionDiff, compositionPayload, campaignSizeAllChoice, deriveReadiness, eligibleOf, emptyComposition, fmt,
   coverageMarkets, inferSource, launchSentence, LAUNCH_ERROR_WORDS, n0, withCohort, zoneWaves,
   type Composition, type FilterClause, type Layer, type ReadinessCheck,
 } from './composer-model'
@@ -559,7 +559,7 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
                 coverageLoading={coverageLoading}
                 plan={plan}
                 composition={composition}
-                eligibleInAudience={audience?.eligible_in_audience ?? null}
+                sizeAll={campaignSizeAllChoice(audience)}
                 snapNote={snapNote}
                 onPatch={(p) => { setSnapNote(null); patch(p) }}
                 onDailyCap={(value, reason) => { setSnapNote(reason); patch({ daily_cap: value }) }}

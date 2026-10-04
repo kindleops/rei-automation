@@ -775,6 +775,24 @@ export function audienceFreshness(a: ComposerAudience | null, nowMs: number = Da
 }
 
 /**
+ * The numbers on the "All eligible" size choice. The choice builds the SENDABLE
+ * cohort (eligibleOf: one per phone, sender-carried, personalization holds
+ * applied) — the same number the headline and campaignSizeCheck use — never the
+ * graph's queue-ready property count (`eligible_in_audience`, before the
+ * one-per-phone dedupe). The property count is shown beside it, labelled, when
+ * the two differ. Until the whole cohort is counted the chip carries no number
+ * (a first-N-rows sample is not the size of "all").
+ */
+export function campaignSizeAllChoice(a: ComposerAudience | null): { count: number | null; detail: string | null } {
+  const properties = typeof a?.eligible_in_audience === 'number' ? a.eligible_in_audience : null
+  const whole = Boolean(a?.build?.ok && a.build.whole_cohort)
+  const count = whole ? eligibleOf(a) : null
+  if (count === null) return { count: null, detail: properties === null ? null : `${fmt(properties)} eligible properties · counting sendable phones…` }
+  const phones = `${fmt(count)} unique sendable ${count === 1 ? 'phone' : 'phones'}`
+  return { count, detail: properties !== null && properties !== count ? `${fmt(properties)} eligible properties · ${phones}` : phones }
+}
+
+/**
  * Campaign size, stated: launch is blocked until the operator picks "All
  * eligible" or a number. A number is never silently applied, and neither is All.
  */

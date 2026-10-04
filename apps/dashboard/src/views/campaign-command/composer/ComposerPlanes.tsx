@@ -228,14 +228,15 @@ function CapacityInstrument({ plan, composition, onDailyCap }: { plan: CapacityP
   )
 }
 
-export function DeliveryBody({ fleet, coverage, coverageError, coverageLoading, plan, composition, eligibleInAudience, snapNote, onPatch, onDailyCap }: {
+export function DeliveryBody({ fleet, coverage, coverageError, coverageLoading, plan, composition, sizeAll, snapNote, onPatch, onDailyCap }: {
   fleet: ComposerFleet | null
   coverage: ComposerCoverage | null
   coverageError: string | null
   coverageLoading: boolean
   plan: CapacityPlan
   composition: Composition
-  eligibleInAudience: number | null
+  /** campaignSizeAllChoice: the sendable cohort "All eligible" builds, plus its labelled property count */
+  sizeAll: { count: number | null; detail: string | null }
   snapNote: string | null
   onPatch: (patch: Partial<Composition>) => void
   onDailyCap: (value: string, reason: string | null) => void
@@ -276,7 +277,7 @@ export function DeliveryBody({ fleet, coverage, coverageError, coverageLoading, 
           <span id="campaign-size-label">Campaign size</span>
           <div className="ccz-size__choices">
             <button type="button" className={cx('ccz-size__choice', composition.campaign_size === 'all' && 'is-on')} aria-pressed={composition.campaign_size === 'all'} onClick={() => onPatch({ campaign_size: 'all', total_cap: '' })}>
-              All eligible{eligibleInAudience !== null ? <b className="num">{fmt(eligibleInAudience)}</b> : null}
+              All eligible{sizeAll.count !== null ? <b className="num">{fmt(sizeAll.count)}</b> : null}
             </button>
             <button type="button" className={cx('ccz-size__choice', composition.campaign_size === 'custom' && 'is-on')} aria-pressed={composition.campaign_size === 'custom'} onClick={() => onPatch({ campaign_size: 'custom' })}>
               Set a number
@@ -285,7 +286,7 @@ export function DeliveryBody({ fleet, coverage, coverageError, coverageLoading, 
           {composition.campaign_size === 'custom' ? (
             <input inputMode="numeric" aria-label="Campaign size (sellers)" value={composition.total_cap} onChange={(e) => onPatch({ total_cap: e.target.value.replace(/[^\d]/g, '') })} aria-describedby="total_cap-hint" />
           ) : null}
-          <em id="total_cap-hint">{composition.campaign_size === null ? 'Required — choose before launch' : composition.campaign_size === 'all' ? 'Every eligible seller is built' : 'Targets built, at most'}</em>
+          <em id="total_cap-hint">{composition.campaign_size === null ? 'Required — choose before launch' : composition.campaign_size === 'all' ? 'Every sendable seller is built, one per phone' : 'Targets built, at most'}{sizeAll.detail ? <> · {sizeAll.detail}</> : null}</em>
         </div>
         {field('send_interval_seconds', 'Spacing (s)', 'Between sends')}
         {field('per_sender_cap', 'Per-number cap', fleet?.system.per_number_cap ? `Blank = system ${fleet.system.per_number_cap}` : 'Blank = system cap')}

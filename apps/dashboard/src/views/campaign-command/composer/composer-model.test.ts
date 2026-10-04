@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSegments, capacityPlan, checkSchedule, completionEstimate, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition,
   coverageMarkets, launchSentence, parseCap, withCohort, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
-  audienceFunnel, audienceFreshness, campaignSizeCheck, languageBreakdown,
+  audienceFunnel, audienceFreshness, campaignSizeAllChoice, campaignSizeCheck, languageBreakdown,
 } from './composer-model'
 import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, CoverageMarket } from './composer-types'
 import { intakeFromLocation, resolveDrop, COMPOSER_OBJECTS_MIME } from './composer-intake'
@@ -256,6 +256,21 @@ describe('audience funnel (Minneapolis, 2026-10-03 numbers)', () => {
     expect(p.note).toMatch(/1,700 have no first name/)
     expect(stages.find((s) => s.key === 'built')!.reasons.map((r) => r.count)).toContain(446)
     expect(stages.at(-1)!.count).toBe(2300)
+  })
+
+  it('"All eligible" carries the sendable cohort (one per phone, holds applied), not the graph property count', () => {
+    // RC 8.4 QA: the chip read eligible_in_audience (queue-ready properties) while the
+    // headline and the size check read the deduped, held cohort.
+    const sample = campaignSizeAllChoice(mpls())
+    expect(sample.count).toBeNull()
+    expect(sample.detail).toBe('3,400 eligible properties · counting sendable phones…')
+    const a = withCohort(mpls(), cohort())!
+    const all = campaignSizeAllChoice(a)
+    expect(all.count).toBe(eligibleOf(a))
+    expect(all.count).toBe(2300)
+    expect(all.count).toBe(campaignSizeCheck({ campaign_size: 'all', total_cap: '' }, eligibleOf(a)).builds)
+    expect(all.detail).toBe('3,400 eligible properties · 2,300 unique sendable phones')
+    expect(campaignSizeAllChoice(null)).toEqual({ count: null, detail: null })
   })
 
   it('language holds are a funnel stage with a per-language breakdown, and eligible never includes them', () => {
