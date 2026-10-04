@@ -298,6 +298,18 @@
 .ciw-legend__ramp { display: block; height: 8px; border-radius: 4px; }
 .ciw-legend__ends { display: flex; justify-content: space-between; margin-top: 4px; color: var(--lc-ink-2); }
 .ciw-legend__foot { display: block; margin-top: 4px; font-size: 10.5px; color: var(--lc-ink-3); }
+/* recent market sales — its own switch, apart from the evidence keys (display only) */
+.ciw-legend__recent {
+  display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 8px; padding: 5px 6px 4px;
+  border: 0; border-top: 1px solid var(--lc-hairline); border-radius: 0 0 6px 6px; background: none;
+  font: inherit; color: var(--lc-ink-3); text-align: left; cursor: pointer; white-space: nowrap;
+}
+.ciw-legend__recent:hover { color: var(--lc-ink-2); background: var(--lc-inner-bg-hover); }
+.ciw-legend__recent:focus-visible { outline: none; box-shadow: var(--lc-focus-ring); }
+.ciw-legend__recent.is-on { color: var(--lc-ink-1); }
+.ciw-legend__recent b { margin-left: auto; font-weight: 600; color: var(--lc-ink-3); }
+.ciw-legend__recent .k-recent { width: 9px; height: 9px; margin: 1.5px; flex: none; border-radius: 1.5px; box-shadow: inset 0 0 0 1.4px currentColor; }
+.ciw-legend__recent.is-on .k-recent { background: currentColor; }
 
 .ciw-map__note {
   position: absolute;

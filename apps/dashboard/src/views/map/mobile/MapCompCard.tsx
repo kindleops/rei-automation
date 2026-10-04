@@ -39,16 +39,24 @@ const titleCase = (s?: string | null) => (s ? s.toLowerCase().replace(/\b\w/g, (
 const PORTFOLIO_SRC = 'nx-comps-portfolio'
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 
-/** The stored image when the record has one, else Street View at the sale's own coordinates. */
+/**
+ * Street View for a comp sale: our own configured key at the sale's
+ * coordinates, then at its address; the record's stored image only when no
+ * own-key URL can be built. Stored comp images are a data vendor's signed
+ * links with a referrer-restricted key — from ops.leadcommand.ai they error,
+ * so they can never come first (2026-10-04). The referrer is never stripped.
+ */
 export function compStreetViewUrl(comp: Pick<CompDetail, 'streetview_image' | 'lat' | 'lng' | 'address'> | null): string | null {
   if (!comp) return null
-  if (comp.streetview_image) return comp.streetview_image
-  if (!MAPS_KEY) return null
-  const hasCoords = Number.isFinite(comp.lat) && Number.isFinite(comp.lng) && Math.abs(comp.lat) > 0.0001
-  const location = hasCoords ? `${comp.lat},${comp.lng}` : (comp.address ?? '').trim()
-  if (!location) return null
-  const params = new URLSearchParams({ size: '640x400', location, fov: '80', pitch: '4', source: 'outdoor', key: MAPS_KEY })
-  return `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`
+  if (MAPS_KEY) {
+    const hasCoords = Number.isFinite(comp.lat) && Number.isFinite(comp.lng) && Math.abs(comp.lat) > 0.0001
+    const location = hasCoords ? `${comp.lat},${comp.lng}` : (comp.address ?? '').trim()
+    if (location) {
+      const params = new URLSearchParams({ size: '640x400', location, fov: '80', pitch: '4', source: 'outdoor', key: MAPS_KEY })
+      return `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`
+    }
+  }
+  return comp.streetview_image || null
 }
 
 const pctText = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? `${Math.round(v)}%` : null)

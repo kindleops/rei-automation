@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { LCButton, LCIconButton, LCSegmented, LCSelect, LCStatus, cx } from '../../../shared/lc'
 import { fmtAge, fmtMoney, fmtUnitValue } from '../../../domain/comp-intelligence/comps-workstation-model'
 import type { Workstation } from './derive-workstation'
 import { EvidenceMap, type CameraAction, type MapPoint } from './EvidenceMap'
 import type { FocusStore } from './focus-store'
 import { rampFor, type MapMode } from './map-style'
+import { RECENT_LAYER_LABEL, recentPoints } from './recent-sales-layer'
 
 interface Props {
   m: Workstation
@@ -36,6 +37,13 @@ export function MapStage(p: Props) {
   const radiusOptions = [...new Set([...m.w.query.radiusOptions, ...(engineWindow ? [engineWindow.radiusMiles] : [])])].sort((a, b) => a - b)
   const monthOptions = [...new Set([...m.w.query.monthOptions, ...(engineWindow ? [engineWindow.months] : [])])].sort((a, b) => a - b)
   const hasSubjectPin = m.w.subject.lat !== null && m.w.subject.lng !== null
+  // Recent market sales: own layer, own toggle (display only — never valuation evidence).
+  const recentRows = m.w.recentSales?.available ? m.w.recentSales.rows : null
+  const recent = useMemo(() => recentPoints(recentRows, (n) => fmtMoney(n) ?? ''), [recentRows])
+  const [showRecent, setShowRecent] = useState(true)
+  const recentToggle = recent.length
+    ? <RecentToggle on={showRecent} count={recent.length} onToggle={() => setShowRecent((v) => !v)} />
+    : null
 
   return (
     <div className="ciw-map" data-map={p.mapReady ? 'ready' : 'loading'}>
@@ -52,6 +60,8 @@ export function MapStage(p: Props) {
         camera={p.camera}
         reduced={p.reduced}
         onReady={p.onMapReady}
+        recent={recent}
+        showRecent={showRecent}
       />
 
       <div className="ciw-maptop">
@@ -106,7 +116,7 @@ export function MapStage(p: Props) {
         </span>
       </div>
 
-      <MapLegend m={m} mode={mode} domain={p.domain} theme={p.imagery ? 'dark' : p.theme} clustered={p.clustered} />
+      <MapLegend m={m} mode={mode} domain={p.domain} theme={p.imagery ? 'dark' : p.theme} clustered={p.clustered} recentToggle={recentToggle} />
 
       {!hasSubjectPin ? <div className="ciw-map__note" role="note">The subject has no recorded coordinates — distances come from the comp records.</div> : null}
       {p.children}
@@ -114,7 +124,19 @@ export function MapStage(p: Props) {
   )
 }
 
-function MapLegend({ m, mode, domain, theme, clustered }: { m: Workstation; mode: MapMode; domain: [number, number] | null; theme: string; clustered: boolean }) {
+/** The recent-sales layer's own switch — it lives in the legend, apart from the evidence keys. */
+function RecentToggle({ on, count, onToggle }: { on: boolean; count: number; onToggle: () => void }) {
+  return (
+    <button type="button" className={cx('ciw-legend__recent', on && 'is-on')} aria-pressed={on} data-layer="recent-market-sales" onClick={onToggle}
+      title={on ? 'Hide recent market sales' : 'Show recent market sales'}>
+      <i className="k-recent" aria-hidden="true" />
+      <span>{RECENT_LAYER_LABEL}</span>
+      <b className="lc-num">{count}</b>
+    </button>
+  )
+}
+
+function MapLegend({ m, mode, domain, theme, clustered, recentToggle }: { m: Workstation; mode: MapMode; domain: [number, number] | null; theme: string; clustered: boolean; recentToggle: ReactNode }) {
   if (mode !== 'evidence' && domain) {
     const ramp = rampFor(theme === 'light' ? 'light' : 'dark')
     const colors = mode === 'recency' ? [...ramp].reverse() : ramp
@@ -126,6 +148,7 @@ function MapLegend({ m, mode, domain, theme, clustered }: { m: Workstation; mode
         <span className="ciw-legend__ramp" style={{ background: `linear-gradient(90deg, ${colors.join(', ')})` }} aria-hidden="true" />
         <span className="ciw-legend__ends lc-num"><span>≤ {fmt(domain[0])}</span><span>≥ {fmt(domain[1])}</span></span>
         <span className="ciw-legend__foot">5th–95th percentile of the sales shown · ringed hollow = excluded (no value)</span>
+        {recentToggle}
       </div>
     )
   }
@@ -143,6 +166,7 @@ function MapLegend({ m, mode, domain, theme, clustered }: { m: Workstation; mode
         {clustered ? <li><i className="k-cluster" aria-hidden="true" />Cluster — click to open</li> : null}
         <li><i className={cx('k-ring')} aria-hidden="true" />Search radius</li>
       </ul>
+      {recentToggle}
     </div>
   )
 }

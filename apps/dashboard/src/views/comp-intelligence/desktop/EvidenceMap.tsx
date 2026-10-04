@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import type { Tier } from './derive-workstation'
 import type { FocusStore } from './focus-store'
 import { colorExpression, rampFor, readPalette, ringFeatures, ringLabelFeatures, styleFor, type MapMode, type MapPalette } from './map-style'
+import { squareImage, recentCollection, RECENT_ICON_ACTIVITY, RECENT_ICON_PRICED, RECENT_SOURCE, type RecentPoint } from './recent-sales-layer'
 
 export interface MapPoint {
   key: string
@@ -36,6 +37,9 @@ interface Props {
   camera: CameraAction | null
   reduced: boolean
   onReady: () => void
+  /** recent market sales — their own layer, never valuation evidence */
+  recent?: RecentPoint[]
+  showRecent?: boolean
 }
 
 const INTERACTIVE = ['ci-set', 'ci-set-removed', 'ci-bg-candidate', 'ci-bg-excluded'] as const
@@ -63,17 +67,19 @@ function collection(points: MapPoint[], tiers: Tier[]) {
  * changes paint, never the map; changing theme or imagery swaps the style
  * on the same map and reinstalls the layers.
  */
-export function EvidenceMap({ subject, points, mode, domain, radiusMiles, imagery, theme, store, onOpen, camera, reduced, onReady }: Props) {
+const NO_RECENT: RecentPoint[] = []
+
+export function EvidenceMap({ subject, points, mode, domain, radiusMiles, imagery, theme, store, onOpen, camera, reduced, onReady, recent = NO_RECENT, showRecent = true }: Props) {
   const host = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const marker = useRef<maplibregl.Marker | null>(null)
-  const latest = useRef({ subject, points, mode, domain, radiusMiles, imagery, theme, onOpen, reduced, onReady })
+  const latest = useRef({ subject, points, mode, domain, radiusMiles, imagery, theme, onOpen, reduced, onReady, recent, showRecent })
   const clustered = useRef<boolean | null>(null)
   const fitted = useRef<string | null>(null)
   const [ready, setReady] = useState(0)
   const { lat: sLat, lng: sLng, address: sAddress } = subject
 
-  useEffect(() => { latest.current = { subject, points, mode, domain, radiusMiles, imagery, theme, onOpen, reduced, onReady } })
+  useEffect(() => { latest.current = { subject, points, mode, domain, radiusMiles, imagery, theme, onOpen, reduced, onReady, recent, showRecent } })
 
   // Create the map once; it lives as long as the workstation does (§151).
   useEffect(() => {
@@ -158,6 +164,13 @@ export function EvidenceMap({ subject, points, mode, domain, radiusMiles, imager
     ;(map.getSource('ci-links') as GeoJSONSource | undefined)?.setData(links)
   }, [points, ready, sLat, sLng, theme, imagery])
 
+  // Recent market sales: their own source, toggled by data (never by evidence tiers).
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    ;(map.getSource(RECENT_SOURCE) as GeoJSONSource | undefined)?.setData(recentCollection(recent, showRecent))
+  }, [recent, showRecent, ready])
+
   // Mode → paint only.
   useEffect(() => {
     const map = mapRef.current
@@ -238,7 +251,28 @@ export function EvidenceMap({ subject, points, mode, domain, radiusMiles, imager
   return <div ref={host} className="ciw-map__canvas" aria-label={`Map of comparable sales around ${subject.address ?? 'the subject'}`} role="region" />
 }
 
-type Latest = { subject: Props['subject']; points: MapPoint[]; mode: MapMode; domain: [number, number] | null; radiusMiles: number; imagery: boolean; theme: string; reduced: boolean }
+type Latest = { subject: Props['subject']; points: MapPoint[]; mode: MapMode; domain: [number, number] | null; radiusMiles: number; imagery: boolean; theme: string; reduced: boolean; recent?: RecentPoint[]; showRecent?: boolean }
+
+/**
+ * The recent-sales layer sits beneath every evidence layer: a square in
+ * neutral ink, constant under every analysis mode, so it can never read as
+ * part of the valuation set.
+ */
+function installRecent(map: maplibregl.Map, el: HTMLElement | null, s: Latest, pal: MapPalette) {
+  const ink = (el ? getComputedStyle(el).getPropertyValue('--ciw-recent').trim() : '') || pal.ink
+  for (const [id, hollow] of [[RECENT_ICON_PRICED, false], [RECENT_ICON_ACTIVITY, true]] as const) {
+    if (map.hasImage(id)) map.removeImage(id)
+    map.addImage(id, squareImage(28, ink, pal.halo, hollow), { pixelRatio: 2 })
+  }
+  if (map.getSource(RECENT_SOURCE)) return
+  map.addSource(RECENT_SOURCE, { type: 'geojson', data: recentCollection(s.recent ?? [], s.showRecent !== false) })
+  map.addLayer({ id: 'ci-recent', type: 'symbol', source: RECENT_SOURCE, layout: {
+    'icon-image': ['case', ['==', ['get', 'priced'], 1], RECENT_ICON_PRICED, RECENT_ICON_ACTIVITY],
+    'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.72, 16, 1.05],
+    'icon-allow-overlap': true,
+    'icon-ignore-placement': true,
+  }, paint: { 'icon-opacity': 0.82 } })
+}
 
 function fitTo(map: maplibregl.Map, kind: 'subject' | 'set' | 'search', s: Latest, initial: boolean) {
   const { lat, lng } = s.subject
@@ -292,6 +326,7 @@ function install(map: maplibregl.Map, el: HTMLElement | null, s: Latest): boolea
     map.addSource('ci-links', { type: 'geojson', data: empty })
     map.addLayer({ id: 'ci-links', type: 'line', source: 'ci-links', layout: { 'line-cap': 'round' }, paint: { 'line-color': pal.set, 'line-opacity': 0.32, 'line-width': 1 } })
   }
+  installRecent(map, el, s, pal)
   const cluster = s.points.filter((p) => p.tier === 'candidate' || p.tier === 'excluded').length > CLUSTER_ABOVE
   installBackground(map, s, cluster, pal)
   if (!map.getSource('ci-set')) {

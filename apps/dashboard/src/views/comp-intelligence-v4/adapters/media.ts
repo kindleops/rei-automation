@@ -1,11 +1,13 @@
 /**
  * Comp Intelligence V4 — property media resolution.
  *
- * Priority (per spec):
- *   1. Approved server-provided media (candidate `raw.streetview_image`)
- *   2. Env-keyed Google Street View (same format as the approved
- *      `buildStreetViewUrl` helper) — key comes from VITE_GOOGLE_MAPS_API_KEY,
- *      never hardcoded.
+ * Priority (revised 2026-10-04):
+ *   1. Env-keyed Google Street View at the coordinates, else the address
+ *      (same format as the approved `buildStreetViewUrl` helper) — key comes
+ *      from VITE_GOOGLE_MAPS_API_KEY, never hardcoded.
+ *   2. Server-provided media (candidate `raw.streetview_image`) — last: these
+ *      are a data vendor's signed links whose key is referrer-restricted and
+ *      errors from our origin. The referrer is never stripped to get round it.
  *   3. Designed fallback (handled by the <PropertyMedia> component)
  *
  * Implemented self-contained (safe `import.meta.env` access) so the pure adapter
@@ -53,9 +55,7 @@ export function resolveCompMediaUrl(
   lat: number | null,
   lng: number | null,
 ): string | null {
-  const server = str(raw?.streetview_image)
-  if (server) return server
-  return buildStreetView(address, lat, lng)
+  return buildStreetView(address, lat, lng) ?? str(raw?.streetview_image)
 }
 
 /** Resolve the best media URL for the subject property. */

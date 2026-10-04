@@ -9,6 +9,7 @@ import { Icon } from '../../../shared/icons'
 import type { CompsWorkspace, EvidenceComp, SetStats } from '../../../domain/comp-intelligence/comps-evidence-api'
 import { ageLabel, money } from '../../../domain/comp-intelligence/comps-evidence-api'
 import { staticStreetViewUrl } from '../../../modules/entity-graph/mobile/EntityGraphPropertyVisual'
+import { compStreetViewUrl } from '../desktop/comp-street-view-queue'
 
 export const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -211,10 +212,11 @@ export function EvidenceStrip({ title, dots, markers, fmt, focusKey, onFocus, no
 const pct = (n: number | null, unit = '%') => (n === null ? null : `${n > 0 ? '+' : ''}${n}${unit}`)
 
 export function CompCard({ c, inSet, focus, near, onToggle, onOpen, multi }: { c: EvidenceComp; inSet: boolean; focus: boolean; near: boolean; onToggle: () => void; onOpen: () => void; multi: boolean }) {
-  // Stored imagery first; otherwise Street View, requested only for cards near
-  // the focused one (no fan-out across the whole gallery).
+  // Street View from our own key (coordinates, then address; the stored vendor
+  // URL last — it is referrer-restricted and fails from our origin), requested
+  // only for cards near the focused one (no fan-out across the whole gallery).
   const [photoFailed, setPhotoFailed] = useState(false)
-  const photo = c.photo ?? (near ? staticStreetViewUrl(c.address, c.lat, c.lng) : null)
+  const photo = near ? compStreetViewUrl({ photo: c.photo, lat: c.lat, lng: c.lng, address: c.address }) : null
   const specCells: Array<[string, string]> = (multi
     ? [['Units', c.units ? String(c.units) : '—'], ['Sq ft', c.sqft ? Math.round(c.sqft).toLocaleString('en-US') : '—'], ['Built', c.yearBuilt ? String(c.yearBuilt) : '—'], ['Beds', c.beds !== null ? String(c.beds) : '—']]
     : [['Beds', c.beds !== null ? String(c.beds) : '—'], ['Baths', c.baths !== null ? String(c.baths) : '—'], ['Sq ft', c.sqft ? Math.round(c.sqft).toLocaleString('en-US') : '—'], ['Built', c.yearBuilt ? String(c.yearBuilt) : '—']]) as Array<[string, string]>
