@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  closePane, closePaneConversation, defaultMultiInbox, focusPane, fromPersisted, layoutFor, openBeside, openPaneConversation,
+  closePane, closePaneConversation, defaultMultiInbox, deskSplitRoomState, paneFlex, MIN_PANE_PX, focusPane, fromPersisted, layoutFor, openBeside, openPaneConversation,
   paneIndexForKey, sameViewAs, setCount, setPaneFilters, setPaneLens, setPaneSearch, setPaneSort, toPersisted,
 } from './multi-inbox-model'
 
@@ -111,5 +111,41 @@ describe('multi-inbox model', () => {
     const s = setCount(defaultMultiInbox(), 2)
     expect(sameViewAs(setPaneLens(s, 1, 'priority'), 1, { lens: 'priority', q: '' })).toBe(0)
     expect(sameViewAs(s, 1, { lens: 'priority', q: '' })).toBeNull()
+  })
+})
+
+import { deskSplitRoomState, paneFlex } from './multi-inbox-model'
+
+describe('multi-inbox layout fixes (visual QA 10-04)', () => {
+  it('3840 × 2 panes: opening Inbox 1 keeps the desk split closed (no 1/3 contraction)', () => {
+    expect(deskSplitRoomState({ isDeskInbox: true, multiActive: true, deskRoomOpen: true, deskRoomClosing: false })).toBe('closed')
+    expect(deskSplitRoomState({ isDeskInbox: true, multiActive: false, deskRoomOpen: true, deskRoomClosing: false })).toBe('open')
+    expect(deskSplitRoomState({ isDeskInbox: true, multiActive: false, deskRoomOpen: true, deskRoomClosing: true })).toBe('closed')
+    expect(deskSplitRoomState({ isDeskInbox: false, multiActive: false, deskRoomOpen: true, deskRoomClosing: false })).toBeUndefined()
+  })
+
+  it('panes grow from a zero basis so seams never push the last pane past the edge', () => {
+    // simulate flex distribution: free = container − seams; each pane = free × grow / Σgrow
+    const distribute = (width: number, count: 2 | 3 | 4, seam = 9) => {
+      const layout = layoutFor(count, width)
+      if (layout.kind !== 'columns') return null
+      const grows = layout.sizes.map((_, i) => Number(paneFlex(layout.sizes, i).split(' ')[0]))
+      const free = width - seam * (count - 1)
+      const sum = grows.reduce((a, b) => a + b, 0)
+      return grows.map((g) => (free * g) / sum)
+    }
+    for (const [width, count] of [[1440, 2], [1920, 2], [1920, 3], [3840, 2], [3840, 3], [3840, 4], [5120, 4]] as const) {
+      const widths = distribute(width, count)!
+      const total = widths.reduce((a, b) => a + b, 0) + 9 * (count - 1)
+      expect(Math.abs(total - width)).toBeLessThan(0.01)
+      expect(Math.min(...widths)).toBeGreaterThan(MIN_PANE_PX - 1 - 30)
+    }
+    expect(paneFlex([0.5, 0.25, 0.25], 1)).toBe('0.25 1 0px')
+  })
+
+  it('every breakpoint has a layout that keeps panes ≥ 400 px or stacks', () => {
+    for (const [width, count, kind] of [[1440, 4, 'grid2x2'], [1920, 4, 'columns'], [1920, 3, 'columns'], [5120, 4, 'columns']] as const) {
+      expect(layoutFor(count, width).kind).toBe(kind)
+    }
   })
 })

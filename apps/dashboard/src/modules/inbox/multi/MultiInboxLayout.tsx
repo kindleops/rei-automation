@@ -11,7 +11,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, typ
 import { ErrorBoundary } from '../../../shared/ErrorBoundary'
 import { LCSegmented, cx } from '../../../shared/lc'
 import './multi-inbox.css'
-import { MIN_PANE_PX, PANE_COUNTS, layoutFor, paneIndexForKey, setSizes, focusPane, type MultiInboxState, type PaneCount } from './multi-inbox-model'
+import { MIN_PANE_PX, PANE_COUNTS, layoutFor, paneFlex, paneIndexForKey, setSizes, focusPane, type MultiInboxState, type PaneCount } from './multi-inbox-model'
 
 export function MultiInboxCountControl({ count, onChange }: { count: PaneCount; onChange: (n: PaneCount) => void }) {
   return (
@@ -138,13 +138,13 @@ function MultiInboxColumns({
   }
 
   const slots: ReactNode[] = paneNodes.slice(0, state.count).flatMap((node, i) => {
-    const basis = layout.kind === 'columns' ? `${(layout.sizes[i] * 100).toFixed(3)}%` : undefined
+    const flex = layout.kind === 'columns' ? paneFlex(layout.sizes, i) : undefined
     const pane = (
       <div
         key={`pane-${i}`}
         className={cx('ixm-pane', state.focused === i && 'is-focused')}
         data-ixm-pane={i}
-        style={basis ? { flexBasis: basis } : undefined}
+        style={flex ? { flex } : undefined}
         onFocusCapture={() => { if (state.focused !== i) update((s) => focusPane(s, i)) }}
         onPointerDownCapture={() => { if (state.focused !== i) update((s) => focusPane(s, i)) }}
       >

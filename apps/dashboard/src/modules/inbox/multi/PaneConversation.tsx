@@ -17,6 +17,8 @@ import { callBackend } from '../../../lib/api/backendClient'
 import { applyThreadReadOnSelect } from '../thread-read-policy'
 import { LCButton, LCError } from '../../../shared/lc'
 import { PaneComposer } from './PaneComposer'
+import { PaneConversationHeader } from './PaneConversationHeader'
+import { resolveThreadAddressLine, resolveThreadPrimaryName } from '../inbox-ui-helpers'
 
 export function PaneConversation({
   thread, paneLabel, onClose, onReadWritten, onSent,
@@ -71,6 +73,7 @@ export function PaneConversation({
 
   return (
     <section className="ixm-conversation" aria-label={`${paneLabel} · conversation`} onKeyDown={onKeyDown}>
+      <PaneConversationHeader paneLabel={paneLabel} title={resolveThreadPrimaryName(thread) || 'Conversation'} subtitle={resolveThreadAddressLine(thread) || null} onClose={onClose} />
       {state.error ? (
         <div className="ixm-conversation__error">
           <LCError what="This conversation didn't load" detail={state.error} onRetry={() => { setState({ key: threadKey, messages: [], loading: true, error: null }); setAttempt((n) => n + 1) }} />

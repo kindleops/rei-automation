@@ -563,3 +563,9 @@ html[data-lc-motion='off'] #nx-inbox-root.is-desk-inbox .ixl-row__marks { transi
 .lc-dialog .ixl-choice__opt.is-on { box-shadow: inset 0 0 0 1.5px rgba(var(--lc-exec-rgb), 0.85); background: rgba(var(--lc-exec-rgb), 0.1); }
 .lc-dialog .ixl-choice__date { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; font: var(--lc-t-meta); color: var(--lc-ink-3); }
 .lc-dialog .ixl-choice__date input { font: 520 13px/1 var(--lc-font-ui); color: var(--lc-ink-1); background: var(--lc-glass-field, rgba(255, 255, 255, 0.055)); border: 0; border-radius: 8px; padding: 8px 10px; box-shadow: inset 0 0 0 1px var(--lc-glass-field-line, rgba(255, 255, 255, 0.1)); color-scheme: dark light; }
+
+/* a mid-width ledger cannot hold the automation detail beside the state chip:
+   below 900px it drops (the chip stays; the row's title carries the reason) */
+@container ixl (max-width: 899px) {
+  html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixl-row__detail { display: none; }
+}

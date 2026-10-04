@@ -269,3 +269,31 @@ export function sameViewAs(state: MultiInboxState, index: number, primary: Pick<
   }
   return null
 }
+
+/**
+ * The desk's two-plane split (ledger 40-47% | room) is Inbox 1's single-pane
+ * layout. In Multi-Inbox, Inbox 1's room lives INSIDE its pane, so the split
+ * must stay closed — otherwise opening a conversation in Inbox 1 contracted the
+ * whole multi-pane plane to the ledger width (3840 × 2 panes → ~1/3 used).
+ */
+export function deskSplitRoomState({ isDeskInbox, multiActive, deskRoomOpen, deskRoomClosing }: {
+  isDeskInbox: boolean
+  multiActive: boolean
+  deskRoomOpen: boolean
+  deskRoomClosing: boolean
+}): 'open' | 'closed' | undefined {
+  if (!isDeskInbox) return undefined
+  if (multiActive) return 'closed'
+  return deskRoomOpen && !deskRoomClosing ? 'open' : 'closed'
+}
+
+/**
+ * Column flex for a pane: grow by its proportion from a zero basis, so the
+ * fixed seams come out of the shared width instead of pushing the last pane
+ * past the edge (percent bases + 9 px seams overflowed and clipped the last
+ * pane's right-hand column).
+ */
+export function paneFlex(sizes: readonly number[], index: number): string {
+  const grow = Math.max(0.0001, Number(sizes[index]) || 0)
+  return `${Number(grow.toFixed(6))} 1 0px`
+}

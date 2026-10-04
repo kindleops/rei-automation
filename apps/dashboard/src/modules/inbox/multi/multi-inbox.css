@@ -33,9 +33,11 @@ html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane {
   position: relative;
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;
+  /* the inline style sets the proportion (paneFlex: grow from a zero basis) */
+  flex: 1 1 0px;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: var(--lc-glass-pane);
   -webkit-backdrop-filter: var(--lc-glass-filter);
   backdrop-filter: var(--lc-glass-filter);
@@ -186,3 +188,18 @@ html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation__composer 
   border-top: 1px solid var(--lc-glass-line);
   background: var(--lc-glass-chrome);
 }
+
+/* a pane conversation's own header with a real Close */
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conv-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 10px 10px 10px 16px;
+  border-bottom: 1px solid var(--lc-glass-line);
+  background: var(--lc-glass-chrome);
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conv-head__id { display: grid; gap: 2px; min-width: 0; }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conv-head__title { font: 600 14px/1.2 var(--lc-font-ui); color: var(--lc-ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conv-head__sub { font: var(--lc-t-meta); color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

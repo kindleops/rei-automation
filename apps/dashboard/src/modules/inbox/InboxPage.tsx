@@ -13,11 +13,12 @@ import { useAppInstance } from '../desktop/workspace/instance-context'
 import { useMultiInboxState } from './multi/multi-inbox-store'
 import { MultiInboxCountControl, MultiInboxLayout } from './multi/MultiInboxLayout'
 import { InboxSecondaryPane } from './multi/InboxSecondaryPane'
+import { PaneConversationHeader } from './multi/PaneConversationHeader'
 import { getPaneQueryCache } from './multi/pane-data'
 import { VisibilityPendingNotice } from './VisibilityPendingNotice'
 import { openRealDealIntelligence } from './open-real-app'
 import { queueComposerTemplate, scheduleComposerMessage, sendComposerMessage } from './composer-send'
-import { closePane as closeMultiPane, focusPane as focusMultiPane, openBeside as openMultiBeside, sameViewAs, setCount as setMultiCount, setPaneLens as setMultiPaneLens, clampCount, type PaneCount } from './multi/multi-inbox-model'
+import { closePane as closeMultiPane, focusPane as focusMultiPane, openBeside as openMultiBeside, sameViewAs, deskSplitRoomState, setCount as setMultiCount, setPaneLens as setMultiPaneLens, clampCount, type PaneCount } from './multi/multi-inbox-model'
 import {
   describeThreadReference,
   resolveThreadRouteKey,
@@ -6065,7 +6066,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           ariaLabel={multiActive ? 'Inbox 1' : undefined}
         />
             </div>
-            {multiActive && deskRoomOpen ? <div className="ixm-conversation ixm-conversation--primary">{renderSmsThreadPane()}</div> : null}
+            {multiActive && deskRoomOpen ? (
+              <div className="ixm-conversation ixm-conversation--primary">
+                <PaneConversationHeader paneLabel="Inbox 1" title={selected ? resolveThreadPrimaryName(selected) || 'Conversation' : 'Conversation'} subtitle={selected ? resolveThreadAddressLine(selected) || null : null} onClose={closeDeskRoom} />
+                {renderSmsThreadPane()}
+              </div>
+            ) : null}
           </div>
         )}
         secondaries={[1, 2, 3].filter((n) => multiActive && n < multiInbox.count).map((index) => (
@@ -6736,7 +6742,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           {isMultiView || isDeskInbox ? (
             <section
               className={cls('nx-workspace-split-grid', isDeskInbox && 'ixd-split')}
-              data-room={isDeskInbox ? (deskRoomOpen && !deskRoomClosing ? 'open' : 'closed') : undefined}
+              data-room={deskSplitRoomState({ isDeskInbox, multiActive, deskRoomOpen, deskRoomClosing })}
             >
               {viewsToRender.map((view) => {
                 const paneWidth = workspaceWidths[view] ?? '25'
