@@ -27,6 +27,7 @@ import { buildStreetViewUrl } from '../../domain/inbox/inbox-normalization'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import { SellerMapCard } from './seller-card/SellerMapCard'
+import { withCardCoordinates } from './seller-card/seller-card-coordinates'
 import {
   type BuyerCommandData,
   type BuyerMapFilters,
@@ -2886,7 +2887,8 @@ const MapEntityCard = ({
   }
 
   if (card.kind === 'seller') {
-    const pin = card.feature
+    // Imagery must not wait on hydration: tile features carry no lat/lng columns.
+    const pin = withCardCoordinates(card.feature, card.coordinates)
     // 'peek' presentation keeps a selected property at peek height — see
     // MapCardState.presentation. Intent still says 'selected', so everything that
     // reads the canonical selection is unaffected.

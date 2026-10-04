@@ -17,9 +17,16 @@ import {
   mapFilterHttpError,
   resolveMapFilterContext,
 } from "@/lib/domain/map-filters/map-filter-runtime.js";
+import {
+  countPropertiesInBounds,
+  createMarketAggregatesReader,
+  sumMarketPropertyCount,
+} from "@/lib/domain/map/map-bounds-counts.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const readMarketAggregates = createMarketAggregatesReader();
 
 function asNumber(value, fallback = null) {
   const parsed = Number(value);
@@ -334,19 +341,11 @@ export async function GET(request) {
             p_lng_max: lng_max,
             p_grid_degrees: gridDegrees,
           }),
-          supabase.rpc("get_map_bounds_property_count", {
-            p_lat_min: lat_min,
-            p_lat_max: lat_max,
-            p_lng_min: lng_min,
-            p_lng_max: lng_max,
-            p_markets: markets,
-            p_states: states,
-          }),
+          countPropertiesInBounds(supabase, { lat_min, lat_max, lng_min, lng_max, markets, states }),
         ]);
         if (clusterResult.error) throw clusterResult.error;
-        if (countResult.error) throw countResult.error;
         clusters = clusterResult.data;
-        exactCount = countResult.data;
+        exactCount = countResult;
       }
 
       const features = (clusters ?? []).map(spatialClusterToFeature);
@@ -406,26 +405,19 @@ export async function GET(request) {
           getFilteredMarketAggregates(filterCompiled, { markets, states }),
         ]);
       } else {
+        // The bbox count is the request; the canonical total is viewport-independent
+        // context, shared across requests and never allowed to fail the count.
         const [countResult, marketResult] = await Promise.all([
-          supabase.rpc("get_map_bounds_property_count", {
-            p_lat_min: lat_min,
-            p_lat_max: lat_max,
-            p_lng_min: lng_min,
-            p_lng_max: lng_max,
-            p_markets: markets,
-            p_states: states,
-          }),
-          supabase.rpc("get_map_market_aggregates", {
-            p_markets: markets,
-            p_states: states,
-          }),
+          countPropertiesInBounds(supabase, { lat_min, lat_max, lng_min, lng_max, markets, states }),
+          readMarketAggregates(supabase, { markets, states }),
         ]);
-        if (countResult.error) throw countResult.error;
-        if (marketResult.error) throw marketResult.error;
-        exactCount = countResult.data;
-        marketRows = marketResult.data;
+        exactCount = countResult;
+        marketRows = marketResult.rows;
+        if (marketResult.error) {
+          console.warn("[ops/map] market aggregates unavailable", marketResult.error?.code ?? marketResult.error?.message);
+        }
       }
-      const totalCanonical = (marketRows ?? []).reduce((sum, row) => sum + Number(row.property_count || 0), 0);
+      const totalCanonical = sumMarketPropertyCount(marketRows);
 
       return NextResponse.json({
         ok: true,
@@ -487,14 +479,7 @@ export async function GET(request) {
       ]);
     } else {
       const [countResult, queryResult] = await Promise.all([
-        supabase.rpc("get_map_bounds_property_count", {
-          p_lat_min: lat_min,
-          p_lat_max: lat_max,
-          p_lng_min: lng_min,
-          p_lng_max: lng_max,
-          p_markets: markets,
-          p_states: states,
-        }),
+        countPropertiesInBounds(supabase, { lat_min, lat_max, lng_min, lng_max, markets, states }),
         (() => {
           let query = supabase
             .from("properties")
@@ -512,10 +497,9 @@ export async function GET(request) {
           return query;
         })(),
       ]);
-      if (countResult.error) throw countResult.error;
       const { data, error } = queryResult;
       if (error) throw error;
-      exactCount = countResult.data;
+      exactCount = countResult;
       rows = data;
     }
 
