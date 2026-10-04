@@ -114,6 +114,14 @@ function ensure(map: maplibregl.Map) {
   })
 }
 
+const HOVER_SPEC_KEYS = ['ppsf', 'beds', 'baths', 'sqft', 'units'] as const
+/** Positive spec values from a bbox row, if any (never a 0 standing in for missing). */
+function hoverSpecs(r: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const k of HOVER_SPEC_KEYS) { const n = Number(r[k]); if (r[k] != null && Number.isFinite(n) && n > 0) out[k] = n }
+  return out
+}
+
 function setVis(map: maplibregl.Map, on: boolean) {
   for (const id of Object.values(COMP_LAYERS)) {
     try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none') } catch { /* ignore */ }
@@ -174,6 +182,8 @@ export function useSoldComps(map: maplibregl.Map | null, epoch: number, on: bool
           properties: {
             comp_id: r.comp_id ?? null, n, price: Number(r.price) || 0, sold_on: r.sold_on ?? null, source: r.source ?? 'mls',
             buyer_class: r.buyer_class ?? 'unknown', portfolio_size: Number(r.portfolio_size) || 1, institutional: Number(r.institutional) || 0,
+            // [desktop hover] specs ride the feature only when the bbox RPC returns them (it does not yet)
+            ...hoverSpecs(r),
           },
         }
       })
@@ -223,8 +233,10 @@ export interface CompDetail {
   details: Record<string, string | number | boolean | null> | null
 }
 
-export async function loadCompDetail(compId: string): Promise<CompDetail | null> {
-  const { data, error } = await getSupabaseClient().rpc('get_map_sold_comp', { p_comp_id: compId })
+/** One sale's full record. `signal` aborts a stale read (the desktop card's keyed hydration). */
+export async function loadCompDetail(compId: string, signal?: AbortSignal): Promise<CompDetail | null> {
+  const query = getSupabaseClient().rpc('get_map_sold_comp', { p_comp_id: compId })
+  const { data, error } = await (signal ? query.abortSignal(signal) : query)
   if (error || !data) return null
   return data as CompDetail
 }

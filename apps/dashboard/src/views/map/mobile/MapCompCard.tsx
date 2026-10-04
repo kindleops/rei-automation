@@ -26,6 +26,7 @@ import {
   type CompSource,
 } from './useSoldComps'
 import { mapOverlayTarget } from '../map-overlay-host'
+import { showPortfolio } from './comp-portfolio-layer'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const usd = (v?: number | null) => (v == null || !Number.isFinite(v) || v <= 0 ? '—' : v >= 1e6 ? `$${(v / 1e6).toFixed(v >= 1e7 ? 1 : 2)}M` : `$${Math.round(v / 1000)}K`)
@@ -36,7 +37,6 @@ const dateLabel = (d?: string | null) => {
 }
 const titleCase = (s?: string | null) => (s ? s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : '')
 
-const PORTFOLIO_SRC = 'nx-comps-portfolio'
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 
 /**
@@ -66,22 +66,6 @@ const text = (v: unknown) => (v == null || v === '' ? null : String(v))
 /** Label/value rows for a section, only the ones the record actually has. */
 function rows(pairs: Array<[string, string | null]>): Array<[string, string]> {
   return pairs.filter((p): p is [string, string] => Boolean(p[1]))
-}
-
-function showPortfolio(map: maplibregl.Map, comp: CompDetail | null) {
-  try {
-    if (!map.getSource(PORTFOLIO_SRC)) {
-      map.addSource(PORTFOLIO_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-      map.addLayer({ id: `${PORTFOLIO_SRC}-glow`, type: 'circle', source: PORTFOLIO_SRC, paint: { 'circle-radius': 16, 'circle-color': '#f5c542', 'circle-blur': 1, 'circle-opacity': 0.4 } })
-      map.addLayer({ id: `${PORTFOLIO_SRC}-dot`, type: 'circle', source: PORTFOLIO_SRC, paint: { 'circle-radius': 5.5, 'circle-color': '#f5c542', 'circle-stroke-color': '#2a1400', 'circle-stroke-width': 1.5 } })
-    }
-    const src = map.getSource(PORTFOLIO_SRC) as maplibregl.GeoJSONSource
-    const pts = comp?.portfolio ?? []
-    src.setData({
-      type: 'FeatureCollection',
-      features: pts.map((p) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] }, properties: {} })),
-    })
-  } catch { /* style mid-swap */ }
 }
 
 export function MapCompCard({ map, compId, onClose, reducedMotion }: { map: maplibregl.Map | null; compId: string; onClose: () => void; reducedMotion: boolean }) {

@@ -1,0 +1,312 @@
+/*
+ * SOLD COMP — desktop hover preview (.mcc-hover) and docked card (.mcc-card).
+ *
+ * Same material as the seller card and the desk instruments: near-opaque glass
+ * (in-pane backdrop blur does not run — shared/lc/DECISIONS.md), a refraction
+ * hairline, a lighter hero strip, recessed fact wells. Colour is spent only on
+ * meaning: execution cyan = engine pool / live action, green = cash (a
+ * verified fact), gold only as a hairline for an institutional buyer, red
+ * never (a sale is not a failure). Tokens come from .mx.is-desk (--mxg-*), so
+ * Dark / Light / True Black / Red Ops and both map looks follow automatically.
+ *
+ * Scoped to html.is-desktop-modern: the phone's red comp sheet is untouched.
+ */
+
+html.is-desktop-modern .mx-overlay-host > :is(.mcc-hover, .mcc-card) {
+  --mcc-ink: var(--mxg-ink, #eef1f6);
+  --mcc-ink-2: var(--mxg-ink-2, rgba(238, 241, 246, 0.76));
+  --mcc-ink-3: var(--mxg-ink-3, rgba(238, 241, 246, 0.52));
+  --mcc-ink-4: var(--mxg-ink-4, rgba(238, 241, 246, 0.28));
+  --mcc-exec: var(--mxg-accent, #38bdf8);
+  --mcc-ok: var(--mxg-good, #3ddc97);
+  --mcc-attn: var(--mxg-warn, #f0b35a);
+  --mcc-well: var(--mxg-well, rgb(255 255 255 / 0.045));
+  --mcc-rule: var(--mxg-rule, rgb(255 255 255 / 0.07));
+  --mcc-ease: var(--mxg-ease, cubic-bezier(0.2, 0.8, 0.2, 1));
+  font-family: var(--mxd-font, var(--dsk-font, 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif));
+  color: var(--mcc-ink);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.003em;
+  text-align: left;
+}
+
+/* the refraction edge shared by both */
+html.is-desktop-modern .mx-overlay-host > :is(.mcc-hover, .mcc-card)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(155deg, var(--mxg-edge-hi, rgb(255 255 255 / 0.16)), var(--mxg-edge-lo, rgb(255 255 255 / 0.05)) 40%, var(--mxg-edge-lo, rgb(255 255 255 / 0.05)) 72%, color-mix(in srgb, var(--mxg-edge-hi, #fff) 40%, transparent));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+html.is-desktop-modern .mx-overlay-host > .mcc-card.is-institutional::before {
+  background: linear-gradient(155deg, color-mix(in srgb, #e9c46a 46%, transparent), var(--mxg-edge-lo, rgb(255 255 255 / 0.05)) 36%, var(--mxg-edge-lo, rgb(255 255 255 / 0.05)) 74%, color-mix(in srgb, #e9c46a 20%, transparent));
+}
+
+/* ── HOVER ──────────────────────────────────────────────────────────────── */
+html.is-desktop-modern .mx-overlay-host > .mcc-hover {
+  position: absolute;
+  z-index: 9;
+  box-sizing: border-box;
+  padding: 11px 13px 10px;
+  border-radius: 14px;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, var(--mxg-sheen, rgb(255 255 255 / 0.04)), transparent 46%),
+    var(--mxg-l4, rgb(16 19 26 / 0.96));
+  box-shadow: var(--mxg-shadow-4, 0 26px 60px -24px rgb(0 0 0 / 0.9), 0 4px 12px -6px rgb(0 0 0 / 0.55));
+  animation: mcc-hover-in 0.16s var(--mcc-ease) both;
+}
+@keyframes mcc-hover-in { from { opacity: 0; transform: translateY(3px) scale(0.985); } }
+html.is-desktop-modern .mcc-hover__kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mcc-ink-3);
+}
+html.is-desktop-modern .mcc-hover__kicker > span:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .mx-overlay-host :is(.mcc-hover, .mcc-card) .mcc-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mcc-ink-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mcc-ink-2) 16%, transparent);
+}
+html.is-desktop-modern .mx-overlay-host :is(.mcc-hover, .mcc-card) .mcc-tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--mcc-ink-2);
+  background: var(--mcc-well);
+  box-shadow: inset 0 0 0 1px var(--mcc-rule);
+}
+html.is-desktop-modern .mx-overlay-host :is(.mcc-hover, .mcc-card) .mcc-tag.is-exec { color: var(--mcc-exec); background: color-mix(in srgb, var(--mcc-exec) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mcc-exec) 26%, transparent); }
+html.is-desktop-modern .mcc-hover__price { display: flex; align-items: baseline; gap: 7px; margin-top: 5px; }
+html.is-desktop-modern .mcc-hover__price strong { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; }
+html.is-desktop-modern .mcc-hover__price span { font-size: 12px; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-hover__meta { display: flex; flex-wrap: wrap; gap: 0 10px; margin-top: 3px; font-size: 12px; color: var(--mcc-ink-2); }
+html.is-desktop-modern .mcc-hover__meta > span + span::before { content: '·'; margin-right: 10px; color: var(--mcc-ink-4); }
+html.is-desktop-modern .mcc-hover__specs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 9px 0 0;
+}
+html.is-desktop-modern .mcc-hover__specs > div { padding: 5px 7px; border-radius: 8px; background: var(--mcc-well); }
+html.is-desktop-modern .mcc-hover__specs dt { font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-hover__specs dd { margin: 1px 0 0; font-size: 12.5px; font-weight: 600; }
+html.is-desktop-modern .mcc-hover__specs > .is-missing dd { color: var(--mcc-ink-4); font-weight: 500; }
+html.is-desktop-modern .mcc-hover__foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--mcc-rule); font-size: 11.5px; color: var(--mcc-ink-2); }
+html.is-desktop-modern .mcc-hover__hint { margin-left: auto; color: var(--mcc-ink-4); white-space: nowrap; }
+html.is-desktop-modern .mx-overlay-host > .mcc-hover.is-institutional { box-shadow: var(--mxg-shadow-4), inset 0 0 0 1px color-mix(in srgb, #e9c46a 26%, transparent); }
+
+/* ── CARD ───────────────────────────────────────────────────────────────── */
+/* .mx-comp keeps the desk's dock placement (map-desktop.css) and the capsules'
+   step-aside rules (map-desk.css); everything visual is re-declared here. */
+html.is-desktop-modern .mx-overlay-host > .mx-comp.mcc-card {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+  isolation: isolate;
+  container: mcc / inline-size;
+  border-radius: 18px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--mcc-ink);
+  background:
+    radial-gradient(120% 60% at 0% 0%, color-mix(in srgb, var(--mcc-exec) 7%, transparent), transparent 62%),
+    linear-gradient(180deg, var(--mxg-sheen, rgb(255 255 255 / 0.04)), transparent 30%),
+    var(--mxg-l3, rgb(12 15 21 / 0.96));
+  -webkit-backdrop-filter: var(--mxg-blur-3, blur(34px) saturate(1.85));
+  backdrop-filter: var(--mxg-blur-3, blur(34px) saturate(1.85));
+  box-shadow: var(--mxg-shadow-3, 0 36px 84px -36px rgb(0 0 0 / 0.95), 0 12px 28px -18px rgb(0 0 0 / 0.62));
+  scrollbar-width: none;
+  max-height: calc(100% - var(--mxd-gap, 12px) * 2);
+}
+html.is-desktop-modern .mx-overlay-host > .mx-comp.mcc-card button { min-height: 0; min-width: 0; font-family: inherit; }
+
+/* hero */
+html.is-desktop-modern .mcc-card .mcc-hero {
+  position: relative;
+  flex: none;
+  height: 168px;
+  margin: 6px 6px 0;
+  border-radius: 13px;
+  overflow: hidden;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mcc-exec) 10%, var(--mxg-l2, #0d1017)), var(--mxg-l2, #0d1017));
+}
+html.is-desktop-modern .mcc-card .mcc-hero img { display: block; width: 100%; height: 100%; object-fit: cover; transition: opacity 0.3s var(--mcc-ease); }
+html.is-desktop-modern .mcc-card .mcc-hero.is-loading img { opacity: 0; }
+html.is-desktop-modern .mcc-card .mcc-hero__none { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 6px; font-size: 12px; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-card .mcc-hero__scrim { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgb(0 0 0 / 0.38), transparent 34%, transparent 62%, rgb(0 0 0 / 0.42)); }
+html.is-desktop-modern .mcc-card .mcc-hero__chips { position: absolute; top: 10px; left: 10px; right: 48px; display: flex; flex-wrap: wrap; gap: 5px; }
+html.is-desktop-modern .mcc-card .mcc-chip {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgb(10 12 18 / 0.58);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+html.is-desktop-modern .mcc-card .mcc-chip.is-quiet { color: rgb(255 255 255 / 0.78); }
+html.is-desktop-modern .mcc-card .mcc-hero__look {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #fff;
+  background: rgb(10 12 18 / 0.6);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: background 0.15s var(--mcc-ease);
+}
+html.is-desktop-modern .mcc-card .mcc-hero__look:hover { background: rgb(10 12 18 / 0.78); }
+html.is-desktop-modern .mcc-card .mcc-close { position: absolute; top: 12px; right: 12px; z-index: 5; color: #fff; background: rgb(10 12 18 / 0.55); border-radius: 999px; }
+
+/* head */
+html.is-desktop-modern .mcc-card .mcc-head { flex: none; padding: 12px 16px 2px; }
+html.is-desktop-modern .mcc-card .mcc-head__corpus { min-height: 16px; }
+html.is-desktop-modern .mcc-card .mcc-corpus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--mcc-ink-3);
+  cursor: default;
+}
+html.is-desktop-modern .mcc-card .mcc-corpus::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+html.is-desktop-modern .mcc-card .mcc-corpus.is-pool { color: var(--mcc-exec); }
+html.is-desktop-modern .mcc-card .mcc-head__addr { margin: 4px 0 0; font-size: 16px; font-weight: 650; letter-spacing: -0.012em; line-height: 1.25; }
+html.is-desktop-modern .mcc-card .mcc-head__loc { margin: 1px 0 0; font-size: 12.5px; color: var(--mcc-ink-3); }
+
+/* body: the one scroll root of the card */
+html.is-desktop-modern .mcc-card .mcc-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mcc-ink-4) transparent;
+}
+html.is-desktop-modern .mcc-card .mcc-empty { margin: 4px 0; font-size: 12.5px; color: var(--mcc-ink-2); }
+
+/* ledger — the sale itself */
+html.is-desktop-modern .mcc-card .mcc-ledger { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+html.is-desktop-modern .mcc-card .mcc-ledger__price { display: flex; flex-direction: column; min-width: 0; }
+html.is-desktop-modern .mcc-card .mcc-ledger__price strong { font-size: 28px; font-weight: 650; letter-spacing: -0.025em; line-height: 1.05; }
+html.is-desktop-modern .mcc-card .mcc-ledger__price span,
+html.is-desktop-modern .mcc-card .mcc-ledger__when span { margin-top: 3px; font-size: 12px; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-card .mcc-ledger__when { display: flex; flex-direction: column; align-items: flex-end; flex: none; text-align: right; }
+html.is-desktop-modern .mcc-card .mcc-ledger__when strong { font-size: 14px; font-weight: 600; }
+
+html.is-desktop-modern .mcc-card .mcc-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+html.is-desktop-modern .mcc-card .mcc-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--mcc-well);
+  box-shadow: inset 0 0 0 1px var(--mcc-rule);
+}
+html.is-desktop-modern .mcc-card .mcc-kpi span { font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-card .mcc-kpi strong { font-size: 15px; font-weight: 650; }
+html.is-desktop-modern .mcc-card .mcc-kpi.is-missing strong { color: var(--mcc-ink-4); font-weight: 500; }
+
+/* sections */
+html.is-desktop-modern .mcc-card .mcc-sec h4 { margin: 0 0 6px; font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-card .mcc-sec h4 em { font-style: normal; text-transform: none; letter-spacing: 0; color: var(--mcc-ink-2); }
+html.is-desktop-modern .mcc-card .mcc-facts { display: grid; gap: 1px; margin: 0; border-radius: 10px; overflow: hidden; background: var(--mcc-rule); box-shadow: inset 0 0 0 1px var(--mcc-rule); }
+html.is-desktop-modern .mcc-card .mcc-facts.is-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+html.is-desktop-modern .mcc-card .mcc-facts.is-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+html.is-desktop-modern .mcc-card .mcc-fact { min-width: 0; padding: 7px 9px; background: var(--mxg-l3, rgb(12 15 21 / 0.96)); }
+html.is-desktop-modern .mcc-card .mcc-fact dt { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-card .mcc-fact dd { margin: 2px 0 0; font-size: 12.5px; font-weight: 550; overflow-wrap: anywhere; }
+html.is-desktop-modern .mcc-card .mcc-fact.is-missing dd { color: var(--mcc-ink-4); font-weight: 500; }
+html.is-desktop-modern .mcc-card .mcc-fact.is-ok dd { color: var(--mcc-ok); }
+html.is-desktop-modern .mcc-card .mcc-fact.is-attn dd { color: var(--mcc-attn); }
+html.is-desktop-modern .mcc-card .mcc-fact.is-exec dd { color: var(--mcc-exec); }
+
+/* vs the subject */
+html.is-desktop-modern .mcc-card .mcc-vs__row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+html.is-desktop-modern .mcc-card .mcc-vs__cell { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--mcc-exec) 6%, var(--mcc-well)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mcc-exec) 16%, transparent); cursor: default; }
+html.is-desktop-modern .mcc-card .mcc-vs__cell span { font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-card .mcc-vs__cell strong { font-size: 12.5px; font-weight: 600; }
+html.is-desktop-modern .mcc-card .mcc-vs__cell.is-up strong::before { content: '▲ '; font-size: 9px; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-card .mcc-vs__cell.is-down strong::before { content: '▼ '; font-size: 9px; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-card .mcc-vs__cell.is-missing strong { color: var(--mcc-ink-4); font-weight: 500; }
+
+/* buyer */
+html.is-desktop-modern .mcc-card .mcc-buyer__row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px; border-radius: 10px; background: var(--mcc-well); box-shadow: inset 0 0 0 1px var(--mcc-rule); }
+html.is-desktop-modern .mcc-card .mcc-buyer__mark { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: var(--mcc-ink-2); background: var(--mxg-well-2, rgb(255 255 255 / 0.075)); }
+html.is-desktop-modern .mcc-card .mcc-buyer__copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+html.is-desktop-modern .mcc-card .mcc-buyer__copy strong { font-size: 13.5px; font-weight: 620; overflow-wrap: anywhere; }
+html.is-desktop-modern .mcc-card .mcc-buyer__copy span { font-size: 12px; color: var(--mcc-ink-3); }
+html.is-desktop-modern .mcc-card .mcc-note { margin: 6px 0 0; font-size: 12px; color: var(--mcc-ink-3); }
+
+/* portfolio */
+html.is-desktop-modern .mcc-card .mcc-portfolio ul { margin: 0 0 6px; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12.5px; color: var(--mcc-ink-2); }
+html.is-desktop-modern .mcc-card .mcc-portfolio__acts { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* actions */
+html.is-desktop-modern .mcc-card .mcc-actions { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--mcc-rule); background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--mxg-l3, #0c0f15) 70%, transparent)); }
+html.is-desktop-modern .mcc-card .mcc-actions__row { display: flex; align-items: center; gap: 6px; }
+html.is-desktop-modern .mcc-card .mcc-actions__row > .lc-btn:first-child { flex: 1 1 auto; }
+html.is-desktop-modern .mcc-card .mcc-actions__row > :last-child { margin-left: auto; }
+html.is-desktop-modern .mcc-card .mcc-actions__note { margin: 0 0 8px; font-size: 12px; color: var(--mcc-ink-2); }
+
+/* narrow card (a split pane): fewer columns */
+@container mcc (max-width: 360px) {
+  html.is-desktop-modern .mcc-card .mcc-facts.is-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html.is-desktop-modern .mcc-card .mcc-kpis,
+  html.is-desktop-modern .mcc-card .mcc-vs__row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html.is-desktop-modern .mcc-card .mcc-actions__row { flex-wrap: wrap; }
+}
+
+/* motion off */
+html[data-lc-motion='off'].is-desktop-modern .mx-overlay-host > :is(.mcc-hover, .mcc-card) { animation: none !important; }
+html[data-lc-motion='off'].is-desktop-modern .mcc-card .mcc-hero img { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern .mx-overlay-host > :is(.mcc-hover, .mcc-card) { animation: none !important; }
+}
+
+/* Light: the hero chips stay dark glass (they sit on a photo); the rest follows --mxg-* */
+html.is-desktop-modern[data-nexus-theme='light'] .mx-overlay-host > .mcc-card .mcc-fact { background: var(--mxg-l4, rgb(253 253 255 / 0.98)); }

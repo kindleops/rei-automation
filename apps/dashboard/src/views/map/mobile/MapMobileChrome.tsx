@@ -50,6 +50,11 @@ import { dotsInView, usePropertyDots } from './usePropertyDots'
 import { LiquidGlassControls } from '../../../shared/LiquidGlassControls'
 import { BUYER_CLASS_LABEL, COMP_LAYERS, COMP_SOURCE_LABEL, DEFAULT_COMP_FILTERS, activeCompFilterCount, loadCompsInBox, useSoldComps, type CompFilters, type CompRow } from './useSoldComps'
 import { CompFiltersPanel, MapCompCard } from './MapCompCard'
+import { CompDeskCard } from '../desktop/comp-card/CompDeskCard'
+import { CompHoverPreview } from '../desktop/comp-card/CompHoverPreview'
+import { useCompHover } from '../desktop/comp-card/comp-hover'
+import { compDetailStore } from '../desktop/comp-card/comp-detail-source'
+import type { CompSubject } from '../desktop/comp-card/comp-card-model'
 import { MapFocusSet } from './MapFocusSet'
 import { MapSearch } from './MapSearch'
 import { MapEventCard } from './MapEventCard'
@@ -99,6 +104,8 @@ export interface MapMobileChromeProps {
   onCloseFilters?: () => void
   /** [desktop] Properties matching the applied filter (null = unknown). */
   filterMatching?: number | null
+  /** [desktop] The selected property, for the comp card's distance / Δ price / Δ PPSF (null = none). */
+  compSubject?: CompSubject | null
 }
 
 const ACTIVITY_STORE = 'nexus.map.mobileActivity'
@@ -200,7 +207,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     map, mapEpoch, mode, onMode, themes, styleMode, onStyle, dimension, onDimension,
     filterCount, onOpenFilters, activityEvents, onSelectEvent,
     performance, onPerformance, cardOpen, selectedLngLat, reducedMotion, loading, homeBounds,
-    filtersOpen = false, onCloseFilters, filterMatching = null,
+    filtersOpen = false, onCloseFilters, filterMatching = null, compSubject = null,
   } = props
 
   const [sheet, setSheet] = useState<SheetKey>(null)
@@ -297,6 +304,10 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const compsOn = prefs.comps
   const comps = useSoldComps(map, mapEpoch, compsOn, { ...DEFAULT_COMP_FILTERS, ...prefs.compFilters })
   const [compId, setCompId] = useState<string | null>(null)
+  /** [desktop] where the comp was clicked — its imagery starts before hydration lands */
+  const [compAt, setCompAt] = useState<[number, number] | null>(null)
+  // [desktop] hover preview: from the feature alone, no request
+  const compHover = useCompHover(map, mapEpoch, isModernDesktop && compsOn)
   const [compList, setCompList] = useState<{ rows: CompRow[]; loading: boolean; n: number } | null>(null)
   const compFiltersRef = useRef(prefs.compFilters)
   compFiltersRef.current = prefs.compFilters
@@ -304,8 +315,10 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     if (!map) return
     const onPoint = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
       ;(e as { _clickHandled?: boolean })._clickHandled = true
-      const id = e.features?.[0]?.properties?.comp_id
-      if (id) { setCompId(String(id)); setOpenEvent(null) }
+      const f = e.features?.[0]
+      const id = f?.properties?.comp_id
+      const at = (f?.geometry as { coordinates?: [number, number] } | undefined)?.coordinates
+      if (id) { setCompId(String(id)); setCompAt(at ? [Number(at[0]), Number(at[1])] : null); setOpenEvent(null) }
     }
     const onCluster = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
       ;(e as { _clickHandled?: boolean })._clickHandled = true
@@ -969,7 +982,18 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
         </div>
       )}
 
-      {compId && <MapCompCard map={map} compId={compId} onClose={() => setCompId(null)} reducedMotion={reducedMotion} />}
+      {compId && (isModernDesktop
+        ? <CompDeskCard key={compId} map={map} compId={compId} clickLngLat={compAt} subject={compSubject} store={compDetailStore} onClose={() => setCompId(null)} reducedMotion={reducedMotion} now={clock} />
+        : <MapCompCard map={map} compId={compId} onClose={() => setCompId(null)} reducedMotion={reducedMotion} />)}
+      {compHover && compHover.key !== compId && map && (
+        <CompHoverPreview
+          hover={compHover}
+          subject={compSubject}
+          hydrated={compDetailStore.peek(compHover.props.comp_id)}
+          now={clock}
+          bounds={{ width: map.getContainer().clientWidth, height: map.getContainer().clientHeight }}
+        />
+      )}
 
       {!isModernDesktop && !cardOpen && !compId && !searchActive && (prefs.market || prefs.mapKey) && (
         <div className={cls('mx-cards', activityOn && 'has-peek')}>

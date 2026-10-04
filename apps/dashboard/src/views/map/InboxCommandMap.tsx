@@ -187,6 +187,7 @@ import {
 import { fetchMapProperties } from '../../lib/api/backendClient'
 
 import { MapAdvancedFiltersModal } from './components/MapAdvancedFiltersModal'
+import { compSubjectFrom } from './desktop/comp-card/comp-card-model'
 import type { MapAppliedFilterDraft } from '../../domain/map/map-filter-draft'
 import type { LocationResult } from '../../domain/command-center/command.types'
 import {
@@ -11119,6 +11120,7 @@ export function InboxCommandMap({
           reducedMotion={prefersReducedMotion || performanceSettings.animation === 'off'}
           loading={baseStyleLoading || sellerPinsLoading}
           homeBounds={mobileHomeBounds}
+          compSubject={activeSellerMapCard && propertySheetVisible ? compSubjectFrom(activeSellerMapCard.feature, activeSellerMapCard.coordinates) : null}
         />
       )}
 
