@@ -164,7 +164,7 @@ const SUGGESTED_FIELD_KEYS: Record<string, string[]> = {
     'properties.estimated_value', 'properties.equity_percent', 'properties.total_loan_balance', 'properties.ownership_years',
   ],
   'properties.Distress & Motivation': [
-    'properties.tax_delinquent', 'properties.active_lien', 'properties.seller_tags_text', 'properties.final_acquisition_score',
+    'properties.tax_delinquent', 'properties.active_lien', 'properties.property_flags_text', 'properties.final_acquisition_score',
   ],
   'properties.Condition / Repair': [
     'properties.building_condition', 'properties.rehab_level', 'properties.estimated_repair_cost', 'properties.building_quality',
@@ -182,7 +182,7 @@ const SUGGESTED_FIELD_KEYS: Record<string, string[]> = {
     'prospects.age_bucket', 'prospects.language_preference', 'prospects.timezone', 'prospects.contact_window',
   ],
   'prospects.Matching & Eligibility': [
-    'prospects.matching_flags', 'prospects.person_flags_text', 'prospects.sms_eligible', 'prospects.seller_tags_text',
+    'prospects.matching_flags', 'prospects.person_flags_text', 'prospects.sms_eligible',
   ],
   'master_owners.Profile': [
     'master_owners.priority_tier', 'master_owners.owner_type_guess', 'master_owners.follow_up_cadence',

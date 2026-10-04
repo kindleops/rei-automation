@@ -145,7 +145,7 @@ function launchDeps(overrides = {}) {
       nowMs: Date.parse("2026-10-02T15:00:00Z"),
       claimCampaignLaunch: store.claimCampaignLaunch,
       finishCampaignLaunch: store.finishCampaignLaunch,
-      loadCampaignStatus: async () => ({ id: ID, status: store.state.status, total_cap: 1000 }),
+      loadCampaignStatus: async () => ({ id: ID, status: store.state.status, total_cap: 1000, metadata: { composer_campaign_size: "custom" } }),
       buildCampaignTargets: async () => { calls.builds += 1; return { ok: true, success: true, build_summary: { ready: 1482 } } },
       evaluateCampaignLaunchReadiness: async () => ({ launch_readiness: "ready", blockers: [], warnings: [], launch_ready_recipient_count: 1482 }),
       applyCampaignLifecycleAction: async (id, input) => {

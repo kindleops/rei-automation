@@ -459,10 +459,10 @@ function jsRegex(pattern) {
   return new RegExp(pattern.replace(/\[\[:space:\]\]/g, "\\s"), "i");
 }
 
-test("seller tags match whole tokens of the ';'-joined list (was: whole-string equality, 0 rows)", () => {
+test("property flags match whole tokens of the ';'-joined list (was: whole-string equality, 0 rows); old seller-tag keys alias to them", () => {
   const { query, calls } = recorder();
   applyGraphFilter(query, { field_key: "properties.seller_tags_text", operator: "is_any_of", value: ["Tired Landlord", "High Equity"] });
-  assert.deepEqual(calls[0].slice(0, 3), ["filter", "podio_tags", "imatch"]);
+  assert.deepEqual(calls[0].slice(0, 3), ["filter", "property_flags_text", "imatch"]);
   const re = jsRegex(calls[0][3]);
   assert.equal(re.test("Cash Buyer;High Equity;Absentee Owner"), true);
   assert.equal(re.test("Adjustable Loan;tired landlord;Vacant Home"), true);
@@ -471,11 +471,11 @@ test("seller tags match whole tokens of the ';'-joined list (was: whole-string e
   assert.equal(re.test("Cash Buyer;Free And Clear"), false);
 });
 
-test("seller tags 'is not any of' keeps sellers with no tags and excludes the token", () => {
+test("property flags 'is not any of' keeps sellers with no flags and excludes the token", () => {
   const { query, calls } = recorder();
   applyGraphFilter(query, { field_key: "prospects.seller_tags_text", operator: "is_not_any_of", value: ["Tired Landlord"] });
   assert.equal(calls[0][0], "or");
-  assert.match(calls[0][1], /^podio_tags\.is\.null,podio_tags\.not\.imatch\."\(\^\|;\)/);
+  assert.match(calls[0][1], /^property_flags_text\.is\.null,property_flags_text\.not\.imatch\."\(\^\|;\)/);
 });
 
 test("list-token patterns neutralise regex metacharacters", () => {
@@ -519,7 +519,7 @@ test("fields are applied, or refused with their reason — never substituted, ne
   assert.equal(graphFieldApplicability("properties.final_acquisition_score").column, "acquisition_score");
   assert.equal(graphFieldApplicability("properties.year_built").reason, "not_in_audience");
 
-  const population = new Map([["units_count", false], ["language", false], ["podio_tags", true]]);
+  const population = new Map([["units_count", false], ["language", false], ["property_flags_text", true]]);
   assert.equal(graphFieldApplicability("properties.units_count", { population }).reason, "no_audience_data");
   assert.equal(graphFieldApplicability("properties.seller_tags_text", { population }).applicable, true);
 
@@ -528,7 +528,7 @@ test("fields are applied, or refused with their reason — never substituted, ne
     { field_key: "properties.tag_distress_score", operator: "gte", value: 50, label: "Tag Distress Score" },
     { field_key: "properties.units_count", operator: "gte", value: 2, label: "Units Count" },
   ], { population });
-  assert.deepEqual(plan.applicable.map((f) => f.graph_column), ["podio_tags"]);
+  assert.deepEqual(plan.applicable.map((f) => f.graph_column), ["property_flags_text"]);
   assert.deepEqual(plan.inapplicable.map((f) => [f.field_key, f.reason]), [
     ["properties.tag_distress_score", "not_in_audience"],
     ["properties.units_count", "no_audience_data"],
@@ -539,7 +539,7 @@ test("the field catalog tells the builder which fields can narrow a campaign, an
   const catalog = getCampaignFieldCatalogWithApplicability({ population: new Map([["language", false]]) });
   const fields = catalog.domains.flatMap((d) => d.categories.flatMap((c) => c.fields));
   const byKey = new Map(fields.map((f) => [f.key, f]));
-  assert.equal(byKey.get("properties.seller_tags_text").campaign_applicable, true);
+  assert.equal(byKey.get("properties.property_flags_text").campaign_applicable, true);
   assert.equal(byKey.get("prospects.language_preference").campaign_applicable, false);
   assert.match(byKey.get("prospects.language_preference").campaign_inapplicable_message, /No seller in the campaign audience/);
   assert.equal(byKey.get("properties.deal_strength_score").campaign_inapplicable_reason, "not_in_audience");

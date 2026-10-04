@@ -69,6 +69,13 @@ const SOURCE_BY_DOMAIN = {
 
 const FIELD_KEY_ALIASES = Object.freeze({
   'properties.units': 'properties.units_count',
+  // "Seller tags" was the same ';'-joined property flag tokens under a second
+  // name (identical token sets on a 1% sample, 2026-10-03). Property flags is
+  // the one canonical concept; saved filters on the old keys keep their meaning.
+  'properties.seller_tags_text': 'properties.property_flags_text',
+  'properties.seller_tags_json': 'properties.property_flags_text',
+  'properties.podio_tags': 'properties.property_flags_text',
+  'prospects.seller_tags_text': 'properties.property_flags_text',
   // Canonical geography. The bare property_* mirrors are sparse partial columns
   // (property_state/property_zip ~6.5% populated, property_county_name 0%), while
   // property_address_* is ~100% populated and is the source of truth. Legacy keys
@@ -407,8 +414,6 @@ const FIELD_GROUPS = [
       'recording_date',
       'default_date',
       'past_due_amount',
-      'seller_tags_text',
-      'seller_tags_json',
       'property_flags_text',
       // Legacy Podio-era scores (no writer in the repo). Declared so a saved
       // filter on them is refused by name; RETIRED_FIELD_KEYS keeps them out of
@@ -532,7 +537,6 @@ const FIELD_GROUPS = [
     columns: [
       'matching_flags',
       'person_flags_text',
-      'seller_tags_text',
       'sms_eligible',
       'email_eligible',
     ],
@@ -802,7 +806,6 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set([
   'properties.estimated_value',
   'properties.equity_amount',
   'properties.equity_percent',
-  'properties.seller_tags_text',
   // properties.seller_tags_json intentionally NOT preview-supported: it is a JSON
   // mirror of seller_tags_text with no campaign_target_graph column of its own, so
   // applying it would be silently skipped ("no graph column mapping found").
@@ -845,7 +848,6 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set([
   'prospects.contact_window',
   'prospects.matching_flags',
   'prospects.person_flags_text',
-  'prospects.seller_tags_text',
   'prospects.sms_eligible',
   'prospects.email_eligible',
   'master_owners.owner_type_guess',

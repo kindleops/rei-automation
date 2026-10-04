@@ -115,6 +115,12 @@ const CAP_FIELDS = ['daily_cap', 'total_cap', 'market_cap', 'per_sender_cap']
  * A cap of 0 stays 0 (D9b: send nothing); a blank cap is omitted, not invented.
  * No zone is written: recipient zones come from the built targets (D10).
  */
+/** 'all' | 'custom' | null — the operator's explicit Campaign size choice. */
+export function composerCampaignSize(value) {
+  const v = clean(value).toLowerCase()
+  return v === 'all' || v === 'custom' ? v : null
+}
+
 export function composerCampaignPayload(composition = {}, { isUpdate = false } = {}) {
   const c = obj(composition)
   const out = {}
@@ -125,7 +131,13 @@ export function composerCampaignPayload(composition = {}, { isUpdate = false } =
     out.template_use_case = strategy.use_case
     out.stage_code = clean(c.stage_code) ? normalizeCampaignStageCode(c.stage_code, strategy.stage_code) : strategy.stage_code
   }
+  // Campaign size is an explicit operator choice (owner rule 2026-10-03): "all"
+  // = every eligible seller (no total cap, cleared on update), "custom" = the
+  // stated number. Unchosen leaves the size unset and launch refuses.
+  const size = composerCampaignSize(c.campaign_size)
+  if (size === 'all') out.total_cap = null
   for (const field of CAP_FIELDS) {
+    if (size === 'all' && field === 'total_cap') continue
     if (!(field in c)) continue
     const raw = c[field]
     if (raw === '' || raw === null || raw === undefined) continue
@@ -144,6 +156,11 @@ export function composerCampaignPayload(composition = {}, { isUpdate = false } =
     }
   }
   const metadata = {}
+  if (size) {
+    if (size === 'custom' && out.total_cap === undefined) throw Object.assign(new Error('campaign_size_number_required'), { code: 'campaign_size_number_required', field: 'total_cap' })
+    metadata.composer_campaign_size = size
+    out.campaign_size = size
+  }
   if (c.planned_start_at !== undefined) metadata.planned_first_scheduled_at = clean(c.planned_start_at) || null
   if (c.source && typeof c.source === 'object') metadata.composer_source = c.source
   if (!isUpdate && clean(c.composer_key)) metadata.composer_key = clean(c.composer_key)
@@ -893,7 +910,11 @@ export async function prepareComposerLaunch(input = {}, deps = {}) {
   const row = await (deps.loadCampaignStatus || loadCampaignStatus)(supabase, id)
   if (!row) return { ok: false, status: 404, error: 'campaign_not_found' }
   if (!COMPOSER_EDITABLE_STATUSES.includes(lower(row.status))) return { ok: false, status: 409, error: 'campaign_not_editable' }
-  const limit = parseCampaignCap(row.total_cap) ?? undefined
+  // No silent size: neither a default 1,000 cap nor a silent "all".
+  const size = composerCampaignSize(obj(row.metadata).composer_campaign_size)
+  if (!size) return { ok: false, status: 409, error: 'campaign_size_required', message: 'Choose a campaign size — All eligible, or a number — before launch.' }
+  if (size === 'custom' && !(parseCampaignCap(row.total_cap) > 0)) return { ok: false, status: 409, error: 'campaign_size_required', message: 'The chosen campaign size has no number. Set it, or choose All eligible.' }
+  const limit = size === 'all' ? undefined : parseCampaignCap(row.total_cap) ?? undefined
   const build = await (deps.buildCampaignTargets || buildCampaignTargets)(id, limit ? { limit, target_limit: limit, max_targets: limit } : {}, deps)
   if (!build || build.ok === false || build.success === false) {
     return { ok: false, status: 409, error: clean(build?.error) || 'build_failed', message: clean(build?.message) || null }

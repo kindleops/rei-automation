@@ -26,6 +26,8 @@ export type ComposerSourceKind = 'market' | 'zip' | 'county' | 'filters' | 'map_
 export type ComposerSource = { kind: ComposerSourceKind; label: string; detail?: string | null; campaign_id?: string | null }
 
 export type StartPlan = { mode: 'now' | 'at'; at: string | null }
+/** 'all' = every eligible seller (no total cap) · 'custom' = the stated number · null = not chosen */
+export type CampaignSize = 'all' | 'custom' | null
 
 export type Composition = {
   name: string
@@ -35,6 +37,8 @@ export type Composition = {
   filters: FilterClause[]
   source: ComposerSource | null
   daily_cap: string
+  /** the operator's explicit Campaign size choice; null = not chosen yet (launch blocked) */
+  campaign_size: CampaignSize
   total_cap: string
   per_sender_cap: string
   send_interval_seconds: string
@@ -43,8 +47,12 @@ export type Composition = {
   start: StartPlan
 }
 
-/** The legacy builder's defaults (CreateCampaignModal): 1,000 targets, 750/day, 45 s, 08:00–21:00. Stated, editable, never hidden. */
-export const COMPOSER_DEFAULTS = Object.freeze({ total_cap: '1000', daily_cap: '750', send_interval_seconds: '45', window_start: '08:00', window_end: '21:00' })
+/**
+ * Defaults: 750/day, 45 s, 08:00–21:00. Stated, editable, never hidden.
+ * Campaign size has NO default (owner rule 2026-10-03): the old silent 1,000
+ * cap built 552 of Minneapolis' 2,552 ready sellers without anyone choosing it.
+ */
+export const COMPOSER_DEFAULTS = Object.freeze({ total_cap: '', daily_cap: '750', send_interval_seconds: '45', window_start: '08:00', window_end: '21:00' })
 
 export function emptyComposition(): Composition {
   return {
@@ -55,6 +63,7 @@ export function emptyComposition(): Composition {
     filters: [],
     source: null,
     daily_cap: COMPOSER_DEFAULTS.daily_cap,
+    campaign_size: null,
     total_cap: COMPOSER_DEFAULTS.total_cap,
     per_sender_cap: '',
     send_interval_seconds: COMPOSER_DEFAULTS.send_interval_seconds,
@@ -133,7 +142,8 @@ export function compositionPayload(c: Composition) {
     stage_code: c.stage_code,
     target_filters: serializeClauses(c.filters),
     daily_cap: c.daily_cap,
-    total_cap: c.total_cap,
+    campaign_size: c.campaign_size,
+    total_cap: c.campaign_size === 'custom' ? c.total_cap : '',
     per_sender_cap: c.per_sender_cap,
     send_interval_seconds: c.send_interval_seconds,
     contact_window_start: c.contact_window_start,
@@ -149,7 +159,7 @@ export function audienceSpec(c: Composition) {
     filters: serializeClauses(c.filters),
     template_use_case: c.template_use_case,
     stage_code: c.stage_code,
-    total_cap: c.total_cap,
+    total_cap: c.campaign_size === 'custom' ? c.total_cap : '',
     daily_cap: c.daily_cap,
   }
 }
@@ -536,10 +546,8 @@ export function deriveReadiness(i: ReadinessInput): ReadinessView {
     else if (cap === 0) add('capacity', 'Capacity', 'delivery', 'block', 'Daily cap 0 — sends nothing')
     else if (plan.over_capacity) add('capacity', 'Capacity', 'delivery', 'warn', `Planned ${fmt(cap)}/day exceeds ${fmt(plan.available_per_day)}/day routable today`)
     else add('capacity', 'Capacity', 'delivery', 'ok', `${fmt(plan.effective_per_day)}/day modeled`)
-    const size = parseCap(c.total_cap)
-    if (Number.isNaN(size)) add('size', 'Campaign size', 'delivery', 'block', 'Campaign size must be a whole number')
-    else if (size === 0) add('size', 'Campaign size', 'delivery', 'block', 'Campaign size 0 — sends nothing')
-    else if (size === null) add('size', 'Campaign size', 'delivery', 'warn', 'No total cap — the whole cohort is eligible')
+    const sizeCheck = campaignSizeCheck(c, eligibleOf(a))
+    add('size', 'Campaign size', 'delivery', sizeCheck.state, sizeCheck.text)
     const sys = i.fleet?.system
     if (!sys) { /* brakes read with the system controls below */ }
     else if (sys.emergency_stop_at) add('brakes', 'System brakes', 'launch', 'warn', 'Emergency stop is active — rows hydrate, nothing transmits')
@@ -582,7 +590,7 @@ const rank = (s: CheckState) => (s === 'block' ? 0 : s === 'warn' ? 1 : s === 'c
 /* ── diff + copy ─────────────────────────────────────────────────────────── */
 
 const DIFF_FIELDS: Array<[keyof Composition, string]> = [
-  ['name', 'Name'], ['template_use_case', 'Strategy'], ['daily_cap', 'Daily cap'], ['total_cap', 'Campaign size'],
+  ['name', 'Name'], ['template_use_case', 'Strategy'], ['daily_cap', 'Daily cap'], ['campaign_size', 'Campaign size choice'], ['total_cap', 'Campaign size'],
   ['per_sender_cap', 'Per-number cap'], ['send_interval_seconds', 'Spacing'], ['contact_window_start', 'Window opens'], ['contact_window_end', 'Window closes'],
 ]
 
@@ -741,4 +749,19 @@ export function audienceFreshness(a: ComposerAudience | null, nowMs: number = Da
     coverage: cov ? Object.entries(COVERAGE_LABELS).filter(([k]) => typeof cov[k] === 'number').map(([k, label]) => ({ label, count: Math.round(cov[k] * 100) })) : null,
     coverageAt: a.graph_coverage?.measured_at ?? null,
   }
+}
+
+/**
+ * Campaign size, stated: launch is blocked until the operator picks "All
+ * eligible" or a number. A number is never silently applied, and neither is All.
+ */
+export function campaignSizeCheck(c: Pick<Composition, 'campaign_size' | 'total_cap'>, eligible: number | null): { state: 'ok' | 'warn' | 'block'; text: string; builds: number | null } {
+  if (c.campaign_size === null) return { state: 'block', text: 'Choose a campaign size — All eligible, or a number', builds: null }
+  if (c.campaign_size === 'all') return { state: 'ok', text: eligible === null ? 'All eligible' : `All eligible — ${fmt(eligible)}`, builds: eligible }
+  const size = parseCap(c.total_cap)
+  if (Number.isNaN(size)) return { state: 'block', text: 'Campaign size must be a whole number', builds: null }
+  if (size === null) return { state: 'block', text: 'Enter a campaign size, or choose All eligible', builds: null }
+  if (size === 0) return { state: 'block', text: 'Campaign size 0 — sends nothing', builds: 0 }
+  if (eligible !== null && size < eligible) return { state: 'warn', text: `Builds ${fmt(size)} of ${fmt(eligible)} eligible — ${fmt(eligible - size)} left out by the size you set`, builds: size }
+  return { state: 'ok', text: eligible === null ? `${fmt(size)} sellers` : `${fmt(Math.min(size, eligible))} sellers (size ${fmt(size)})`, builds: eligible === null ? size : Math.min(size, eligible) }
 }

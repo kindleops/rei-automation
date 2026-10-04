@@ -73,7 +73,10 @@ function compositionFromCampaign(row: Record<string, unknown>, labelOf: (k: stri
     : legacySource === 'entity_graph' ? { kind: 'graph_selection', label: 'Entity Graph selection', detail: str(md.handoff_mode) || null }
     : inferSource(c.filters)
   c.daily_cap = str(row.daily_cap, c.daily_cap)
-  c.total_cap = str(row.total_cap, c.total_cap)
+  // the explicit size choice is stored with the draft; an older draft without one must choose again
+  const size = str(md.composer_campaign_size)
+  c.campaign_size = size === 'all' || size === 'custom' ? size : null
+  c.total_cap = c.campaign_size === 'custom' ? str(row.total_cap) : ''
   c.per_sender_cap = str(row.per_sender_cap)
   c.send_interval_seconds = str(row.send_interval_seconds, c.send_interval_seconds)
   c.contact_window_start = str(row.contact_window_start, c.contact_window_start).slice(0, 5)
@@ -656,7 +659,7 @@ function ReviewBody({ review, composition, eligible, strategyLabel, plan, waves 
           <dl className="ccz-review__grid">
             <div><dt>Audience</dt><dd><b className="ccz-num">{fmt(r.launch_ready)}</b> launch-ready <span className="ccz-dim">({fmt(eligible)} previewed · {composition.source?.label ?? 'filters'})</span></dd></div>
             <div><dt>Strategy</dt><dd>{strategyLabel} · {composition.stage_code} · {r.template_readiness ?? '—'}</dd></div>
-            <div><dt>Delivery</dt><dd>{fmt(plan.effective_per_day)}/day modeled · cap {composition.daily_cap}/day · size {composition.total_cap || 'no cap'}</dd></div>
+            <div><dt>Delivery</dt><dd>{fmt(plan.effective_per_day)}/day modeled · cap {composition.daily_cap}/day · size {composition.campaign_size === 'all' ? 'all eligible' : composition.campaign_size === 'custom' ? composition.total_cap : 'not chosen'}</dd></div>
             <div><dt>Schedule</dt><dd>{composition.start.mode === 'now' ? 'On launch' : new Date(composition.start.at ?? '').toLocaleString()} · {waves.join(' → ') || '—'} local windows {composition.contact_window_start}–{composition.contact_window_end}</dd></div>
             <div><dt>Completion</dt><dd>{plan.effective_per_day ? (() => { const d = Math.max(1, Math.ceil(n0(r.launch_ready) / plan.effective_per_day)); return `~${d} ${d === 1 ? 'day' : 'days'} (modeled)` })() : '—'}</dd></div>
             <div><dt>Guardrails</dt><dd>Suppression, DNC, quiet hours per recipient, sender health and paused templates enforced at send. Auto send / auto reply unchanged.</dd></div>

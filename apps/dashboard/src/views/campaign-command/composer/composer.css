@@ -412,6 +412,18 @@ html.is-desktop-modern .ccz-cap__legend span { display: inline-flex; align-items
 html.is-desktop-modern .ccz-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 html.is-desktop-modern .ccz-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 html.is-desktop-modern .ccz-field > span { font: var(--lc-t-label); color: var(--lc-ink-3); }
+/* Campaign size: an explicit choice, never a silent default */
+html.is-desktop-modern .ccz-size { grid-column: span 2; }
+html.is-desktop-modern .ccz-size__choices { display: flex; gap: 6px; flex-wrap: wrap; }
+html.is-desktop-modern .ccz-size__choice {
+  appearance: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 9px;
+  font: var(--lc-t-label); color: var(--lc-ink-2); background: var(--lc-inner-bg); box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+}
+html.is-desktop-modern .ccz-size__choice b { font-weight: 640; color: var(--lc-ink-1); }
+html.is-desktop-modern .ccz-size__choice:hover { box-shadow: inset 0 0 0 1px rgba(var(--lc-exec-rgb), 0.32); }
+html.is-desktop-modern .ccz-size__choice:focus-visible { box-shadow: var(--lc-focus-ring); outline: none; }
+html.is-desktop-modern .ccz-size__choice.is-on { color: var(--lc-exec); background: rgba(var(--lc-exec-rgb), 0.12); box-shadow: inset 0 0 0 1px rgba(var(--lc-exec-rgb), 0.5); }
+html.is-desktop-modern .ccz-size.is-unset > em { color: rgb(var(--lc-attn-rgb)); font-style: normal; font-weight: 600; }
 html.is-desktop-modern .ccz-field input, html.is-desktop-modern .ccz-dt {
   height: 32px; padding: 0 10px; border-radius: 10px; border: 0; min-width: 0; width: 100%;
   font: var(--lc-t-metric-sm); font-size: 15px; color: var(--lc-ink-1); font-variant-numeric: tabular-nums;

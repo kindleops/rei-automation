@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSegments, capacityPlan, checkSchedule, completionEstimate, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition,
   coverageMarkets, launchSentence, parseCap, withCohort, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
-  audienceFunnel, audienceFreshness,
+  audienceFunnel, audienceFreshness, campaignSizeCheck,
 } from './composer-model'
 import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, CoverageMarket } from './composer-types'
 import { intakeFromLocation, resolveDrop, COMPOSER_OBJECTS_MIME } from './composer-intake'
@@ -28,7 +28,7 @@ const mkt = (over: Partial<CoverageMarket> = {}): CoverageMarket => ({ market_id
 const cov = (markets: CoverageMarket[], capacity = markets.reduce((s, m) => s + m.daily_capacity, 0)): ComposerCoverage => ({ ok: true, at: '', engine: 'legacy_router', markets, totals: { distinct_healthy_numbers: markets.reduce((s, m) => s + m.healthy_numbers, 0), distinct_daily_capacity: capacity, targets: markets.reduce((s, m) => s + m.targets, 0) }, v2_preview: null })
 const fleet = (): ComposerFleet => ({ ok: true, at: '', numbers: [], markets: [], blocklist_readable: true, system: { per_number_cap: 800, processor_mode: 'live', emergency_stop_at: null, outbound_sms_enabled: true, contact_window: { start: '08:00', end: '21:00' }, auto_reply_mode: 'assisted', followup_automation_mode: 'off' } })
 const templates = (sendable = 26): ComposerTemplates => ({ ok: true, at: '', governance_readable: true, strategies: [{ use_case: 'ownership_check', stage_code: 'S1', label: 'Ownership check', touch: 'First touch', languages: [], templates: 47, sendable, governed: [] }] })
-const dallas = (): Composition => ({ ...emptyComposition(), name: 'Dallas', filters: [{ id: 'f', domain: 'properties', category: 'Location & Market', fieldKey: 'properties.market', label: 'Market', operator: 'is_any_of', value: ['Dallas, TX'] }] })
+const dallas = (): Composition => ({ ...emptyComposition(), name: 'Dallas', campaign_size: 'custom', total_cap: '1000', filters: [{ id: 'f', domain: 'properties', category: 'Location & Market', fieldKey: 'properties.market', label: 'Market', operator: 'is_any_of', value: ['Dallas, TX'] }] })
 
 describe('composition payload', () => {
   it('never carries status or automation; a cap of 0 is stated as 0', () => {
@@ -274,5 +274,27 @@ describe('audience funnel (Minneapolis, 2026-10-03 numbers)', () => {
     expect(fresh.label).toMatch(/12 hours old/)
     expect(fresh.stale).toBe(false)
     expect(fresh.coverage).toEqual([{ label: 'First name', count: 84 }, { label: 'Phone type', count: 99 }])
+  })
+})
+
+describe('campaign size is an explicit choice (no silent 1,000, no silent All)', () => {
+  it('a new composition has no size; launch readiness blocks until one is chosen', () => {
+    const c = emptyComposition()
+    expect(c.campaign_size).toBeNull()
+    expect(c.total_cap).toBe('')
+    expect(campaignSizeCheck(c, 2552)).toMatchObject({ state: 'block', text: expect.stringMatching(/Choose a campaign size/) })
+    const waves = zoneWaves([{ value: 'America/Chicago', count: 1 }], { start: '08:00', end: '21:00' }, NOW, 48)
+    const r = deriveReadiness({ composition: { ...dallas(), campaign_size: null, total_cap: '' }, audience: audience(), audienceError: null, audienceLoading: false, templates: templates(), fleet: fleet(), coverage: cov([mkt()]), online: true, now: NOW, waves })
+    expect(r.checks.find((x) => x.key === 'size')?.state).toBe('block')
+    expect(r.state).toBe('blocked')
+  })
+  it('All eligible sends no cap; a number is stated and its shortfall said out loud', () => {
+    expect(compositionPayload({ ...dallas(), campaign_size: 'all', total_cap: '1000' }).total_cap).toBe('')
+    expect(compositionPayload({ ...dallas(), campaign_size: 'all' }).campaign_size).toBe('all')
+    expect(campaignSizeCheck({ campaign_size: 'all', total_cap: '' }, 2552)).toMatchObject({ state: 'ok', builds: 2552 })
+    expect(campaignSizeCheck({ campaign_size: 'custom', total_cap: '' }, 2552).state).toBe('block')
+    expect(campaignSizeCheck({ campaign_size: 'custom', total_cap: '1000' }, 2552)).toMatchObject({ state: 'warn', builds: 1000, text: expect.stringMatching(/1,552 left out/) })
+    expect(campaignSizeCheck({ campaign_size: 'custom', total_cap: '5000' }, 2552)).toMatchObject({ state: 'ok', builds: 2552 })
+    expect(compositionPayload({ ...dallas(), campaign_size: 'custom', total_cap: '400' }).total_cap).toBe('400')
   })
 })

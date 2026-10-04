@@ -260,7 +260,9 @@ export function normalizeCampaignInput(payload = {}, existing = {}) {
     language_policy: clean(payload.language_policy || filters.language || existing.language_policy || 'auto') || 'auto',
     agent_persona: clean(payload.agent_persona || filters.agent_persona || existing.agent_persona) || null,
     daily_cap: parseCampaignCap(payload.daily_cap ?? filters.daily_cap ?? existing.daily_cap),
-    total_cap: parseCampaignCap(payload.total_cap ?? filters.total_cap ?? existing.total_cap),
+    // campaign_size 'all' (Composer's explicit "All eligible") clears the cap;
+    // otherwise an absent/null total_cap keeps the existing one, as before.
+    total_cap: payload.campaign_size === 'all' ? null : parseCampaignCap(payload.total_cap ?? filters.total_cap ?? existing.total_cap),
     batch_max: optionalInt(payload.batch_max ?? filters.batch_max ?? filters.max_batch_size ?? existing.batch_max),
     market_cap: parseCampaignCap(payload.market_cap ?? filters.market_cap ?? existing.market_cap),
     per_sender_cap: parseCampaignCap(payload.per_sender_cap ?? filters.per_sender_cap ?? filters.per_number_cap ?? existing.per_sender_cap),

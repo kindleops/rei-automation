@@ -163,3 +163,50 @@ test("the composer cohort passes personalization through; target rows still neve
   assert.equal(c.sendable_after_personalization, 2200);
   assert.equal("rows" in c, false);
 });
+
+test("'Seller tags' is gone: property flags is the one concept; old keys alias to it", () => {
+  for (const key of ["properties.seller_tags_text", "properties.seller_tags_json", "prospects.seller_tags_text"]) {
+    assert.equal(CAMPAIGN_FIELD_CATALOG.some((f) => f.key === key), false, `${key} must not be in the catalog`);
+    assert.equal(getCampaignFieldDefinition(key)?.key, "properties.property_flags_text", key);
+    assert.equal(graphFieldApplicability(key).column, "property_flags_text", key);
+  }
+  assert.equal(CAMPAIGN_FIELD_CATALOG.some((f) => /seller tags/i.test(f.label)), false);
+});
+
+test("campaign size is an explicit choice: All eligible clears the cap, a number must be stated, unchosen refuses launch", async () => {
+  const { composerCampaignPayload, prepareComposerLaunch } = await import("@/lib/domain/campaigns/campaign-composer.js");
+  const { normalizeCampaignInput } = await import("@/lib/domain/campaigns/campaign-automation-service.js");
+  const all = composerCampaignPayload({ name: "Mpls", campaign_size: "all", total_cap: "1000" }, { isUpdate: true });
+  assert.equal(all.total_cap, null);
+  assert.equal(all.campaign_size, "all");
+  assert.equal(all.metadata.composer_campaign_size, "all");
+  // the cleared cap survives normalisation over an existing 1,000 cap
+  assert.equal(normalizeCampaignInput(all, { total_cap: 1000 }).total_cap, null);
+  assert.equal(normalizeCampaignInput({ total_cap: null }, { total_cap: 1000 }).total_cap, 1000, "other callers unchanged");
+
+  const custom = composerCampaignPayload({ name: "Mpls", campaign_size: "custom", total_cap: "750" });
+  assert.equal(custom.total_cap, 750);
+  assert.equal(custom.metadata.composer_campaign_size, "custom");
+  assert.throws(() => composerCampaignPayload({ name: "Mpls", campaign_size: "custom", total_cap: "" }), /campaign_size_number_required/);
+  const unchosen = composerCampaignPayload({ name: "Mpls", total_cap: "" });
+  assert.equal("total_cap" in unchosen, false);
+  assert.equal(unchosen.metadata?.composer_campaign_size, undefined);
+
+  let built = null;
+  const deps = (metadata, total_cap = null) => ({
+    supabase: {},
+    loadCampaignStatus: async () => ({ id: "c1", status: "draft", total_cap, metadata }),
+    buildCampaignTargets: async (_id, opts) => { built = opts; return { ok: true, build_summary: {} }; },
+    evaluateCampaignLaunchReadiness: async () => ({ launch_readiness: "ready", blockers: [], warnings: [], launch_ready_recipient_count: 5 }),
+  });
+  const refused = await prepareComposerLaunch({ campaign_id: "c1" }, deps({}, 1000));
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, "campaign_size_required");
+  const noNumber = await prepareComposerLaunch({ campaign_id: "c1" }, deps({ composer_campaign_size: "custom" }, null));
+  assert.equal(noNumber.error, "campaign_size_required");
+  const ok = await prepareComposerLaunch({ campaign_id: "c1" }, deps({ composer_campaign_size: "all" }, 1000));
+  assert.equal(ok.ok, true);
+  assert.deepEqual(built, {}, "All eligible builds without a limit, even if a stale cap is stored");
+  await prepareComposerLaunch({ campaign_id: "c1" }, deps({ composer_campaign_size: "custom" }, 400));
+  assert.equal(built.limit, 400);
+});

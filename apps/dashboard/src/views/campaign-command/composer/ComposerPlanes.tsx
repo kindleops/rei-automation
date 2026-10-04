@@ -271,9 +271,21 @@ export function DeliveryBody({ fleet, coverage, coverageError, coverageLoading, 
 
       <div className="ccz-fields">
         {field('daily_cap', 'Daily cap', '0 sends nothing')}
-        {field('total_cap', 'Campaign size', 'Targets built', eligibleInAudience ? (
-          <button type="button" className="ccz-linkbtn" onClick={() => onPatch({ total_cap: String(eligibleInAudience) })}>All {fmt(eligibleInAudience)}</button>
-        ) : null)}
+        <div className={cx('ccz-field ccz-size', composition.campaign_size === null && 'is-unset')} role="group" aria-labelledby="campaign-size-label">
+          <span id="campaign-size-label">Campaign size</span>
+          <div className="ccz-size__choices">
+            <button type="button" className={cx('ccz-size__choice', composition.campaign_size === 'all' && 'is-on')} aria-pressed={composition.campaign_size === 'all'} onClick={() => onPatch({ campaign_size: 'all', total_cap: '' })}>
+              All eligible{eligibleInAudience !== null ? <b className="num">{fmt(eligibleInAudience)}</b> : null}
+            </button>
+            <button type="button" className={cx('ccz-size__choice', composition.campaign_size === 'custom' && 'is-on')} aria-pressed={composition.campaign_size === 'custom'} onClick={() => onPatch({ campaign_size: 'custom' })}>
+              Set a number
+            </button>
+          </div>
+          {composition.campaign_size === 'custom' ? (
+            <input inputMode="numeric" aria-label="Campaign size (sellers)" value={composition.total_cap} onChange={(e) => onPatch({ total_cap: e.target.value.replace(/[^\d]/g, '') })} aria-describedby="total_cap-hint" />
+          ) : null}
+          <em id="total_cap-hint">{composition.campaign_size === null ? 'Required — choose before launch' : composition.campaign_size === 'all' ? 'Every eligible seller is built' : 'Targets built, at most'}</em>
+        </div>
         {field('send_interval_seconds', 'Spacing (s)', 'Between sends')}
         {field('per_sender_cap', 'Per-number cap', fleet?.system.per_number_cap ? `Blank = system ${fleet.system.per_number_cap}` : 'Blank = system cap')}
       </div>

@@ -704,9 +704,8 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set<string>([
   'properties.estimated_value',
   'properties.equity_amount',
   'properties.equity_percent',
-  'properties.seller_tags_text',
-  // seller_tags_json has no campaign_target_graph column; seller_tags_text covers
-  // tag filtering. Keeping it unsupported prevents a silently-skipped active filter.
+  // "Seller tags" was the property flag tokens under a second name; property
+  // flags is the single canonical concept (server aliases the old keys).
   // Legacy Podio scores (structured motivation, deal strength, tag distress,
   // master-owner priority) are retired from targeting — the server catalog hides
   // them too (RETIRED_FIELD_KEYS). Final acquisition score stays, labelled legacy.
@@ -728,7 +727,6 @@ const PREVIEW_SUPPORTED_FIELD_KEYS = new Set<string>([
   'prospects.contact_window',
   'prospects.matching_flags',
   'prospects.person_flags_text',
-  'prospects.seller_tags_text',
   'prospects.sms_eligible',
   'prospects.email_eligible',
   'master_owners.owner_type_guess',
@@ -837,8 +835,6 @@ const FIELD_GROUPS: Array<{
       'recording_date',
       'default_date',
       'past_due_amount',
-      'seller_tags_text',
-      'seller_tags_json',
       'property_flags_text',
       'structured_motivation_score',
       'deal_strength_score',
@@ -946,7 +942,6 @@ const FIELD_GROUPS: Array<{
     columns: [
       'matching_flags',
       'person_flags_text',
-      'seller_tags_text',
       'sms_eligible',
       'email_eligible',
     ],
