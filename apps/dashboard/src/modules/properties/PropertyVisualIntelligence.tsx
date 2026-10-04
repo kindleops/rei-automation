@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../shared/icons'
 import type { PropertyActionHandlers, PropertyRecord } from './property.types'
+import { resolveStreetViewImage } from '../../domain/inbox/inbox-normalization'
 
 interface PropertyVisualIntelligenceProps {
   property: PropertyRecord
@@ -28,8 +29,9 @@ export const PropertyVisualIntelligence = ({ property, handlers }: PropertyVisua
   const activeImage = useMemo(() => {
     if (activeTab === 'map') return property.media.mapImage
     if (activeTab === 'satellite') return property.media.satelliteImage
-    return property.media.streetviewImage
-  }, [activeTab, property.media.mapImage, property.media.satelliteImage, property.media.streetviewImage])
+    // own key (coordinates → address) first; the stored vendor link last
+    return resolveStreetViewImage({ stored: property.media.streetviewImage, address: property.address, lat: property.lat, lng: property.lng })
+  }, [activeTab, property.media.mapImage, property.media.satelliteImage, property.media.streetviewImage, property.address, property.lat, property.lng])
 
   useEffect(() => {
     setImageLoaded(false)

@@ -285,9 +285,12 @@ export const DealIntelligenceMedia = ({
     if (streetMode === 'static' && (streetStoredUrl || staticStreetUrl) && !streetStaticFailed) {
       return (
         <img
-          src={streetStoredUrl || staticStreetUrl || ''}
+          // own-key static first; the stored (vendor-signed, referrer-restricted) link last
+          src={staticStreetUrl || streetStoredUrl || ''}
           alt="Street View"
           className="nx-di25-media__img"
+          loading="lazy"
+          decoding="async"
           onError={() => setStreetStaticFailed(true)}
         />
       )

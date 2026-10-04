@@ -11,7 +11,7 @@ import {
   normalizePropertySnapshot,
   buildPropertyExternalLinks,
   buildAerialViewUrl,
-  buildStreetViewUrl,
+  resolveStreetViewImage,
 } from '../../../domain/inbox/inbox-normalization'
 import type { NormalizedPropertySnapshot } from '../../../domain/inbox/inbox-normalization'
 import { Icon, type IconName } from '../../../shared/icons'
@@ -2466,7 +2466,8 @@ export const PropertyHeroCard = ({
     ? rawMarket
     : (snapshot.city && snapshot.state ? `${snapshot.city}, ${snapshot.state}` : (rawMarket || 'Unknown market'))
 
-  const streetViewUrl = snapshot.streetViewUrl || snapshot.streetviewImage || thread.streetview_image || buildStreetViewUrl(address)
+  // own key at the coordinates → address → stored vendor link last (resolveStreetViewImage)
+  const streetViewUrl = resolveStreetViewImage({ stored: snapshot.streetviewImage || thread.streetview_image || snapshot.streetViewUrl, address, lat: propertyLat, lng: propertyLng })
   const interactiveStreetViewUrl = useMemo(
     () => buildInteractiveStreetViewUrl({ address, lat: propertyLat, lng: propertyLng }),
     [address, propertyLat, propertyLng],
@@ -2611,7 +2612,7 @@ export const PropertyHeroCard = ({
           referrerPolicy="no-referrer-when-downgrade"
         />
       ) : streetViewUrl ? (
-        <img src={streetViewUrl as string | undefined} alt="Street View" />
+        <img src={streetViewUrl as string | undefined} alt="Street View" loading="lazy" decoding="async" />
       ) : (
         <div className="nx-panel-fallback"><Icon name="map" /><span>Unavailable</span></div>
       )}

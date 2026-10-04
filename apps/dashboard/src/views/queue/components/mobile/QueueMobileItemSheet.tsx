@@ -3,7 +3,7 @@ import { describeBuyerQueueRow } from '../../queue-outreach-domain'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../../shared/icons'
 import { MobileBottomSheet } from '../../../../modules/mobile/MobileBottomSheet'
-import { buildStreetViewUrl } from '../../../../domain/inbox/inbox-normalization'
+import { resolveStreetViewImage } from '../../../../domain/inbox/inbox-normalization'
 import type { QueueItem } from '../../../../domain/queue/queue.types'
 import { resolveTouchStageDisplay } from '../../../../domain/queue/queue-status-truth'
 import {
@@ -116,7 +116,8 @@ export function QueueMobileItemSheet({
   const cachedStreet = item.metadata?.streetview_image ?? item.metadata?.streetviewImage ?? null
   // Derived rather than effect-synced so navigating to the next item cannot
   // render one frame carrying the previous property's street view.
-  const imageUrl = cachedStreet ?? buildStreetViewUrl(item.propertyAddress, lat, lng)
+  // own key (coordinates → address) first; the stored vendor link last
+  const imageUrl = resolveStreetViewImage({ stored: cachedStreet, address: item.propertyAddress, lat, lng })
   const [imageFailedFor, setImageFailedFor] = useState<string | null>(null)
   const showImage = Boolean(imageUrl && imageFailedFor !== item.id)
   const mapsQuery = lat && lng ? `${lat},${lng}` : item.propertyAddress

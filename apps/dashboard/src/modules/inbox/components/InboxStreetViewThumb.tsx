@@ -54,8 +54,10 @@ const InboxStreetViewThumbComponent = ({
 }: Props) => {
   const builtUrl = useMemo(() => buildStreetViewUrl(address, lat, lng), [address, lat, lng])
   const imageUrl = useMemo(() => {
-    if (cachedImageUrl) return cachedImageUrl
-    if (!builtUrl) return null
+    // Own key first (coordinates, then address); the cached/stored link only when
+    // no own-key URL can be built — stored links are vendor-signed with a
+    // referrer-restricted key and error from our origin (2026-10-04).
+    if (!builtUrl) return cachedImageUrl && /^https:\/\//.test(cachedImageUrl) ? cachedImageUrl : null
     // buildStreetViewUrl emits `size=640x400`; this replaced the literal
     // '600x300', which has not been in that URL for some time, so every
     // caller silently fetched the full 640x400 at scale=2 no matter which

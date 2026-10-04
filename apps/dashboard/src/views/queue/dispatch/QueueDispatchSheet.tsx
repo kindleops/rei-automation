@@ -11,7 +11,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import type { QueueItem } from '../../../domain/queue/queue.types'
 import { resolveSellerIdentity } from '../queue-ui-helpers'
-import { buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
+import { resolveStreetViewImage } from '../../../domain/inbox/inbox-normalization'
 import { resolveTouchStageDisplay } from '../../../domain/queue/queue-status-truth'
 import { resolveQueueCapability, resolveQueueStateMap } from '../queue-mobile-semantics'
 import {
@@ -115,7 +115,8 @@ export function QueueDispatchSheet({
   const lat = md.property_lat ?? md.latitude ?? null
   const lng = md.property_lng ?? md.longitude ?? null
   const streetQuery = [item.propertyAddress, item.propertyCity, item.propertyState].filter(Boolean).join(', ')
-  const imageUrl = (md.streetview_image ?? md.streetviewImage ?? null) || (item.propertyAddress ? buildStreetViewUrl(streetQuery, lat, lng) : null)
+  // own key (coordinates → address) first; the stored vendor link last (resolveStreetViewImage)
+  const imageUrl = resolveStreetViewImage({ stored: md.streetview_image ?? md.streetviewImage ?? null, address: item.propertyAddress ? streetQuery : null, lat, lng })
   const [imageFailedFor, setImageFailedFor] = useState<string | null>(null)
   const [imageLoadedFor, setImageLoadedFor] = useState<string | null>(null)
   const showImage = Boolean(imageUrl && imageFailedFor !== item.id)

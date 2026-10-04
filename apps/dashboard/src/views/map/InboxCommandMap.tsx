@@ -2462,8 +2462,10 @@ const buildSoldCompPresentation = (
   }
   const { buyerName, buyerType, buyerTone, entityLabel } = classifySoldCompBuyer(comp, variant)
   const buyerInitials = initialsFromName(buyerName)
-  const imageUrl = text(anyComp.streetview_image) || text(anyComp.map_image) || text(comp.satellite_image) || buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude) || ''
-  const imageLabel = text(anyComp.streetview_image) ? 'Street View' : 'Property Preview'
+  // own-key Street View first; stored images (vendor-signed, referrer-restricted) last
+  const builtStreet = buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude)
+  const imageUrl = builtStreet || text(anyComp.streetview_image) || text(anyComp.map_image) || text(comp.satellite_image) || ''
+  const imageLabel = builtStreet || text(anyComp.streetview_image) ? 'Street View' : 'Property Preview'
   const propertyLabel = text(comp.property_type) || (variant === 'multifamily' ? 'Apartment' : 'Residential')
   const subtypeLabel = text(comp.normalized_asset_class || comp.property_class) || null
   const distance =
@@ -2672,7 +2674,7 @@ const SoldCompMapCard = ({
 
   const intelligence = buildSoldCompPresentation(comp, subject, 14)
   const price = comp.mls_sold_price ?? comp.sale_price ?? 0
-  const imageUrl = comp.streetview_image || comp.satellite_image || buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude) || ''
+  const imageUrl = buildStreetViewUrl(comp.property_address_full, comp.latitude, comp.longitude) || comp.streetview_image || comp.satellite_image || ''
   const ppsf = comp.computed_ppsf ?? comp.arv_ppsf ?? (price && comp.building_square_feet ? Math.round(price / comp.building_square_feet) : null)
   const distance = (subject?.latitude && subject?.longitude)
     ? haversineMiles(subject.latitude, subject.longitude, comp.latitude, comp.longitude)

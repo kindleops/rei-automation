@@ -79,12 +79,18 @@ const resolvePropertyImage = (record: Record<string, unknown>, address: string):
     'streetViewImage',
     'street_view_image',
   ]))
-  if (storedStreetView) return httpsOnly(storedStreetView)
-
+  // Own key first (coordinates, then address); the stored link last — stored
+  // links are vendor-signed with a referrer-restricted key (2026-10-04).
   const { lat, lng } = recordCoords(record)
-  if (lat !== null && lng !== null) return buildStreetViewUrl(null, lat, lng)
-  if (address && address !== 'Property Unknown') return buildStreetViewUrl(address) || null
-  return null
+  if (lat !== null && lng !== null) {
+    const built = buildStreetViewUrl(null, lat, lng)
+    if (built) return built
+  }
+  if (address && address !== 'Property Unknown') {
+    const built = buildStreetViewUrl(address)
+    if (built) return built
+  }
+  return storedStreetView ? httpsOnly(storedStreetView) : null
 }
 
 /** Aerial/roadmap imagery, used only when Street View reports no panorama. */

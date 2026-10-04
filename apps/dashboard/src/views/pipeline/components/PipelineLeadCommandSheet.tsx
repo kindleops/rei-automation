@@ -3,6 +3,7 @@ import { Icon } from '../../../shared/icons'
 import { useDealIntelligenceDossier } from '../../../domain/deal-intelligence/useDealIntelligenceDossier'
 import { MobileWorkflowControls } from '../../../modules/deal-intelligence/mobile/MobileWorkflowControls'
 import { useStreetViewAvailability } from '../../map/seller-card/use-street-view-availability'
+import { resolveStreetViewImage } from '../../../domain/inbox/inbox-normalization'
 import { useLeadThreadMessages } from './use-lead-thread-messages'
 import type { PipelineOpportunity } from '../../../domain/pipeline/pipeline-opportunity.types'
 import { CallActionLink } from '../../../domain/compliance/CallActionLink'
@@ -132,7 +133,13 @@ export function PipelineLeadCommandSheet({
   const address = text(opp.property_address_full) ?? text(property?.full_address as string)
   const title = seller ?? address ?? 'Unidentified lead'
 
-  const heroUrl = text(property?.street_view_url as string) ?? text((opp as unknown as Rec)?.streetview_image as string)
+  // own key (coordinates → address) first; the stored vendor link last
+  const heroUrl = resolveStreetViewImage({
+    stored: text(property?.street_view_url as string) ?? text((opp as unknown as Rec)?.streetview_image as string),
+    address,
+    lat: Number(property?.latitude ?? property?.lat) || null,
+    lng: Number(property?.longitude ?? property?.lng) || null,
+  })
   const heroState = useStreetViewAvailability(heroUrl)
 
   const suppressed = Boolean(compliance?.is_suppressed) || Boolean(convo?.suppressed)

@@ -257,10 +257,12 @@ export const getTopPropertyTags = (record: SellerRecord): string[] => {
 export const getNormalizedPropertyImages = (record: SellerRecord) => {
   const payload = record.raw_payload_json as Record<string, any> | undefined
 
-  let streetViewImage: string | null = normalize(firstDefined(record, ['streetViewImage', 'streetview_image', 'street_view_image'])) || null
-  if (!streetViewImage && payload?.streetview_image) {
-    streetViewImage = normalize(payload.streetview_image)
-  }
+  // Own key first (coordinates, then address); the stored link last — stored
+  // links are vendor-signed with a referrer-restricted key (2026-10-04).
+  const stored: string | null = normalize(firstDefined(record, ['streetViewImage', 'streetview_image', 'street_view_image'])) || normalize(payload?.streetview_image) || null
+  const latN = Number(firstDefined(record, ['latitude', 'lat', 'property_latitude']))
+  const lngN = Number(firstDefined(record, ['longitude', 'lng', 'property_longitude']))
+  let streetViewImage: string | null = Number.isFinite(latN) && Number.isFinite(lngN) ? buildStreetViewUrl(null, latN, lngN) : null
 
   if (!streetViewImage) {
     const address = normalize(firstDefined(record, [
@@ -275,6 +277,7 @@ export const getNormalizedPropertyImages = (record: SellerRecord) => {
       streetViewImage = buildStreetViewUrl(address) || null
     }
   }
+  if (!streetViewImage && stored && /^https:\/\//.test(stored)) streetViewImage = stored
 
   const mapImage = normalize(firstDefined(record, ['mapImage', 'map_image'])) || null
   const satelliteImage = normalize(firstDefined(record, ['satelliteImage', 'satellite_image'])) || null

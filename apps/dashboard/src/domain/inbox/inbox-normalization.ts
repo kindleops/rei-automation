@@ -134,6 +134,31 @@ export const buildStreetViewUrl = (
   return `https://maps.googleapis.com/maps/api/streetview?size=640x400&location=${location}&fov=80&heading=210&pitch=2&scale=2&key=${apiKey}`
 }
 
+/**
+ * THE property/subject Street View source order (2026-10-04): our own key at
+ * the coordinates, else at the address (buildStreetViewUrl), and a record's
+ * stored `streetview_image` only when neither can be built. Stored links are a
+ * data vendor's signed URLs whose key is referrer-restricted — from
+ * ops.leadcommand.ai they error — so they can never come first. The referrer
+ * is never stripped to get round another party's key restriction.
+ */
+export const resolveStreetViewImage = ({
+  stored = null,
+  address = null,
+  lat = null,
+  lng = null,
+}: {
+  stored?: string | null
+  address?: string | null
+  lat?: number | null
+  lng?: number | null
+}): string | null => {
+  const built = buildStreetViewUrl(address && address.trim() ? address : null, lat, lng)
+  if (built) return built
+  const s = typeof stored === 'string' ? stored.trim() : ''
+  return /^https:\/\//.test(s) ? s : null
+}
+
 export const buildAerialViewUrl = (
   address: string | null,
   lat?: number | null,

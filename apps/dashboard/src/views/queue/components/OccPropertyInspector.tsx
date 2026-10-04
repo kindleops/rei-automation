@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Icon } from '../../../shared/icons'
 import type { IconName } from '../../../shared/icons'
 import { resolveAssetTypeIcon } from '../../../shared/asset-type-icons'
-import { buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
+import { resolveStreetViewImage } from '../../../domain/inbox/inbox-normalization'
 import type { QueueItem } from '../../../domain/queue/queue.types'
 import { STAGE_LABELS } from '../../../domain/queue/queue.types'
 import {
@@ -138,12 +138,8 @@ export function OccPropertyInspector({ item, mode, onClose, onOpenQueueRow, onNa
   useEffect(() => {
     setImageFailed(false)
     setImageLoaded(false)
-    if (cachedStreet) {
-      setImageUrl(cachedStreet)
-      return
-    }
-    const built = buildStreetViewUrl(item.propertyAddress, lat, lng)
-    setImageUrl(built)
+    // own key (coordinates → address) first; the stored vendor link last
+    setImageUrl(resolveStreetViewImage({ stored: cachedStreet, address: item.propertyAddress, lat, lng }))
   }, [item.id, cachedStreet, item.propertyAddress, lat, lng])
 
   const mapsQuery = useMemo(() => {
