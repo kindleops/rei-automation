@@ -19,6 +19,7 @@ import {
   type Composition, type FilterClause, type Layer, type ReadinessCheck,
 } from './composer-model'
 import type { DropResolution, Intake } from './composer-intake'
+import { GEO_INTAKE_FIELD } from './composer-intake'
 import { AudiencePlane, type QuickSource } from './ComposerAudience'
 import { DeliveryBody, ScheduleBody, StrategyBody } from './ComposerPlanes'
 import { reasonWords } from './composer-format'
@@ -49,6 +50,14 @@ function initialComposition(intake: Intake | null): Composition {
   if (intake?.kind === 'market') {
     c.filters = [{ id: clauseId(), domain: 'properties', category: 'Location & Market', fieldKey: 'properties.market', label: 'Market', operator: 'is_any_of', value: intake.markets }]
     c.source = { kind: 'market', label: intake.markets.length > 2 ? `${intake.markets.length} markets` : intake.market }
+  }
+  if (intake?.kind === 'geography') {
+    // Market Intelligence hand-off: the geography becomes the canonical location filter, nothing else.
+    // The Composer computes the audience from the graph as for any filter.
+    const f = GEO_INTAKE_FIELD[intake.level]
+    c.filters = [{ id: clauseId(), domain: 'properties', category: 'Location & Market', fieldKey: f.fieldKey, label: f.label, operator: 'is_any_of', value: intake.values }]
+    if (intake.state && intake.level !== 'state') c.filters.push({ id: clauseId(), domain: 'properties', category: 'Location & Market', fieldKey: GEO_INTAKE_FIELD.state.fieldKey, label: GEO_INTAKE_FIELD.state.label, operator: 'is_any_of', value: [intake.state] })
+    c.source = { kind: 'filters', label: intake.label }
   }
   if (intake?.kind === 'properties') {
     c.filters = [{ id: clauseId(), domain: 'properties', category: 'Identity', fieldKey: 'properties.property_id', label: 'Selected properties', operator: 'in', value: intake.propertyIds }]

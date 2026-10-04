@@ -9,6 +9,9 @@
  *            ?campaign=<id>&builder=edit        the legacy deep link, same
  *            ?compose=1&property_ids=a,b,c      an explicit selection
  *            ?compose=1&market=Dallas, TX       a market (several: Dallas, TX|Minneapolis, MN)
+ *            ?compose=1&geo_level=zip&geo=55411[&geo_state=MN]&label=…
+ *                                               a geography from Market Intelligence: zip | city |
+ *                                               county | state → the canonical location filter only
  *   Drop     application/x-leadcommand-objects  ObjectRef[] (8.2 registry refs)
  *            text/uri-list | text/plain         canonical deep links from the registry:
  *                                               /deal-intelligence?property_id=…  (property)
@@ -22,6 +25,17 @@ export type Intake =
   | { kind: 'draft'; campaignId: string }
   | { kind: 'properties'; propertyIds: string[]; label: string }
   | { kind: 'market'; market: string; markets: string[] }
+  | { kind: 'geography'; level: GeoIntakeLevel; values: string[]; state: string | null; label: string }
+
+export type GeoIntakeLevel = 'zip' | 'city' | 'county' | 'state'
+const GEO_LEVELS: readonly GeoIntakeLevel[] = ['zip', 'city', 'county', 'state']
+/** The canonical property field each geography level filters (the catalog's Location & Market fields). */
+export const GEO_INTAKE_FIELD: Record<GeoIntakeLevel, { fieldKey: string; label: string }> = {
+  zip: { fieldKey: 'properties.property_address_zip', label: 'ZIP' },
+  city: { fieldKey: 'properties.property_address_city', label: 'City' },
+  county: { fieldKey: 'properties.property_address_county_name', label: 'County' },
+  state: { fieldKey: 'properties.property_address_state', label: 'State' },
+}
 
 const ids = (raw: string | null) => (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 
@@ -37,6 +51,15 @@ export function intakeFromLocation(location: string): Intake | null {
   if (props.length) return { kind: 'properties', propertyIds: props, label: q.get('label') || `${props.length} selected ${props.length === 1 ? 'property' : 'properties'}` }
   const markets = (q.get('market') ?? '').split('|').map((m) => m.trim()).filter(Boolean)
   if (markets.length) return { kind: 'market', market: markets.join(' + '), markets }
+  const level = q.get('geo_level') as GeoIntakeLevel | null
+  const values = (q.get('geo') ?? '').split('|').map((v) => v.trim()).filter(Boolean)
+  if (level && GEO_LEVELS.includes(level) && values.length) {
+    const ok = level === 'zip' ? values.every((v) => /^\d{5}$/.test(v)) : level === 'state' ? values.every((v) => /^[A-Z]{2}$/.test(v)) : true
+    const state = (q.get('geo_state') ?? '').trim().toUpperCase() || null
+    if (ok && (level === 'zip' || level === 'state' || (state && /^[A-Z]{2}$/.test(state)))) {
+      return { kind: 'geography', level, values, state, label: q.get('label') || `${GEO_INTAKE_FIELD[level].label} ${values.join(' + ')}` }
+    }
+  }
   return { kind: 'blank' }
 }
 
