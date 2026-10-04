@@ -15,6 +15,7 @@ import type maplibregl from 'maplibre-gl'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
 import { normalize, rampExpression, type LensStyle, type MapLens } from './map-lenses'
+import { bindIntelAreaInteractions, fetchIntelAreas } from '../../../modules/market-intelligence/map/mi-map-lenses'
 
 const SRC = 'nx-lens'
 const L_FIELD = 'nx-lens-field'
@@ -205,9 +206,18 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
   const [state, setState] = useState<LensState>({ loading: false, error: null, count: 0, inView: null })
   const seq = useRef(0)
   const timer = useRef<number | null>(null)
-  const lookRef = useRef(look)
-  lookRef.current = look
-  const areasMode = look.style === 'areas' && !lens.ambient
+  // [desktop] Market Intelligence lenses are area lenses only (values per ZIP / state).
+  const intel = lens.family === 'intel'
+  const effLook: LensLook = intel ? { ...look, style: 'areas' } : look
+  const lookRef = useRef(effLook)
+  lookRef.current = effLook
+  const areasMode = effLook.style === 'areas' && !lens.ambient
+
+  // [desktop] MI areas: hover reads the honest one-line summary, click opens the Inspector in MI.
+  useEffect(() => {
+    if (!map || !intel) return undefined
+    return bindIntelAreaInteractions(map, L_AREA_FILL)
+  }, [map, epoch, intel])
 
   // Layers exist for the lifetime of the style; re-added after a style swap.
   // A look change (dots ↔ surface) restyles in place — no refetch.
@@ -217,7 +227,7 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
     ensure()
     map.on('styledata', ensure)
     return () => { map.off('styledata', ensure) }
-  }, [map, epoch, lens, look.style, look.blend, look.opacity])
+  }, [map, epoch, lens, effLook.style, look.blend, look.opacity])
 
   useEffect(() => {
     if (!map) return
@@ -230,7 +240,7 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
       setState({ loading: false, error: null, count: 0, inView: null, lensId: lens.id })
       return
     }
-    if (!shouldUseSupabase()) {
+    if (!intel && !shouldUseSupabase()) {
       setState({ loading: false, error: 'Data unavailable', count: 0, inView: null, lensId: lens.id })
       return
     }
@@ -249,6 +259,23 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
       const padLat = (b.getNorth() - b.getSouth()) * 0.15
       const padLng = (b.getEast() - b.getWest()) * 0.15
       setState((s) => ({ ...s, loading: true, error: null }))
+      if (areasMode && intel) {
+        const res = await fetchIntelAreas(lens, { west: b.getWest() - padLng, south: b.getSouth() - padLat, east: b.getEast() + padLng, north: b.getNorth() + padLat }, zoom)
+        if (id !== seq.current) return
+        if (!res.ok) { setState({ loading: false, error: res.error || 'Layer unavailable', count: 0, inView: null, lensId: lens.id }); return }
+        const features = res.rows.map((r) => ({ type: 'Feature' as const, geometry: r.outline, properties: { v: r.v, t: r.t, n: r.n, key: r.key, id: r.id, tip: r.tip } }))
+        const fc: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features }
+        try {
+          ensureLayers(map)
+          styleFor(map, lens, zoom, lookRef.current)
+          LAST_AREAS.set(map, fc)
+          ;(map.getSource(AREA_SRC) as maplibregl.GeoJSONSource | undefined)?.setData(fc)
+        } catch { /* style mid-swap */ }
+        const values = res.rows.map((r) => r.v).sort((x, y) => x - y)
+        const qa = (p: number) => values[Math.min(values.length - 1, Math.max(0, Math.round(p * (values.length - 1))))]
+        setState({ loading: false, error: res.rows.length ? null : res.note, count: features.length, inView: values.length ? [qa(0.05), qa(0.95)] : null, lensId: lens.id })
+        return
+      }
       if (areasMode) {
         const { data, error } = await getSupabaseClient().rpc('get_map_lens_areas', {
           p_lens: lens.source,
@@ -330,7 +357,7 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
       map.off('moveend', schedule)
       if (timer.current) window.clearTimeout(timer.current)
     }
-  }, [map, epoch, lens, areasMode])
+  }, [map, epoch, lens, areasMode, intel])
 
   return state
 }

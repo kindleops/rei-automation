@@ -40,6 +40,7 @@ import {
   type ActivityWindow,
 } from './map-mobile-model'
 import { LENS_FAMILIES, MAP_LENSES, formatLensValue, lensById, type LensStyle, type MapLens } from './map-lenses'
+import { consumePending, MAP_LENS_PENDING_KEY, MAP_SET_LENS_EVENT } from '../../../modules/market-intelligence/mi-handoffs'
 import { lensValueAt, useMapLens } from './useMapLens'
 import { HYBRID_THEMES, useMapImagery } from './useMapImagery'
 import { LensLegend, MarketPanel, rampGradient } from './MapIntelCards'
@@ -376,6 +377,19 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     if (picked.legacyMode !== mode) onMode(picked.legacyMode)
     setScanKey((k) => k + 1)
   }
+  // [desktop] Market Intelligence asks the Map for one of its lenses ("Open on Map" in MI mode):
+  // a staged request for a Map that was still mounting, or a live event for an open one.
+  const pickDeskLensRef = useRef(pickDeskLens)
+  useEffect(() => { pickDeskLensRef.current = pickDeskLens })
+  useEffect(() => {
+    if (!isModernDesktop) return undefined
+    const apply = (id?: string) => { if (!id) return; const l = lensById(id); if (l.id === id) pickDeskLensRef.current(l) }
+    const pending = consumePending<{ lens: string }>(MAP_LENS_PENDING_KEY)
+    if (pending) apply(pending.lens)
+    const on = (e: Event) => apply((e as CustomEvent<{ lens?: string }>).detail?.lens)
+    window.addEventListener(MAP_SET_LENS_EVENT, on)
+    return () => window.removeEventListener(MAP_SET_LENS_EVENT, on)
+  }, [isModernDesktop])
   const setDeskLensVisible = (on: boolean) => {
     const target = on ? lensById(prefs.lastLens && prefs.lastLens !== 'none' ? prefs.lastLens : 'radar') : lensById('none')
     if (target.id === lens.id) return

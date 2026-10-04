@@ -15,6 +15,7 @@ import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
 import { Icon } from '../../../shared/icons'
 import { mapOverlayTarget } from '../map-overlay-host'
+import { consumePending, MAP_AREA_PENDING_KEY } from '../../../modules/market-intelligence/mi-handoffs'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -204,6 +205,13 @@ export function MapSearch({ map, epoch, reducedMotion, onProperty, onActiveChang
     window.addEventListener(MAP_OPEN_AREA_EVENT, on)
     return () => window.removeEventListener(MAP_OPEN_AREA_EVENT, on)
   }, [])
+  // [desktop] A request staged by another app (Market Intelligence "Show on Map") for a Map
+  // that was still mounting: applied once the map exists, then cleared (30 s lifetime).
+  useEffect(() => {
+    if (!map) return
+    const p = consumePending<{ kind?: SearchKind; key?: string; label?: string }>(MAP_AREA_PENDING_KEY)
+    if (p?.kind && p.key) openAreaRef.current({ kind: p.kind, key: p.key, label: p.label || p.key })
+  }, [map])
   useEffect(() => {
     if (!factsMissing) return undefined
     const t = window.setTimeout(() => setFactsMissing(null), 5000)

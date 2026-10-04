@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '../../../shared/icons'
 import { UNIVERSAL_STAGE_RING_COLORS } from '../universal-stage-colors'
-import { LENS_FAMILIES, MAP_LENSES, formatLensValue, type LensStyle, type MapLens } from '../mobile/map-lenses'
+import { DESK_LENS_FAMILIES as LENS_FAMILIES, DESK_LENSES as MAP_LENSES, formatLensValue, type LensStyle, type MapLens } from '../mobile/map-lenses'
 import { rampGradient } from '../mobile/MapIntelCards'
 import type { LensLook, LensState } from '../mobile/useMapLens'
 import type { BoundaryStatus } from './useMapBoundaries'

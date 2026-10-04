@@ -8,9 +8,11 @@
  * the same number, and the legend prints it.
  */
 
-export type LensFamily = 'pipeline' | 'property' | 'market' | 'comps'
+import { MI_MAP_LENSES } from '../../../modules/market-intelligence/map/mi-lens-defs'
+
+export type LensFamily = 'pipeline' | 'property' | 'market' | 'comps' | 'intel'
 export type LensStyle = 'dots' | 'surface' | 'areas'
-export type LensRamp = 'heat' | 'money' | 'water' | 'age' | 'signal' | 'spectrum'
+export type LensRamp = 'heat' | 'money' | 'water' | 'age' | 'signal' | 'spectrum' | 'intel'
 
 export interface MapLens {
   id: string
@@ -84,8 +86,16 @@ export const LENS_FAMILIES: ReadonlyArray<{ key: LensFamily; label: string }> = 
   { key: 'comps', label: 'Comps & dispositions' },
 ]
 
+/**
+ * [desktop] Market Intelligence mode: its lenses join the desktop picker only
+ * (the phone sheet keeps MAP_LENSES / LENS_FAMILIES exactly as before). They are
+ * drawn by the same area layers; their values come from the MI heat endpoint.
+ */
+export const DESK_LENSES: ReadonlyArray<MapLens> = [...MAP_LENSES, ...MI_MAP_LENSES]
+export const DESK_LENS_FAMILIES: ReadonlyArray<{ key: LensFamily; label: string }> = [...LENS_FAMILIES, { key: 'intel', label: 'Market Intelligence' }]
+
 export const lensById = (id: string | null | undefined): MapLens =>
-  MAP_LENSES.find((l) => l.id === id) ?? MAP_LENSES.find((l) => l.id === 'radar') ?? MAP_LENSES[0]
+  DESK_LENSES.find((l) => l.id === id) ?? MAP_LENSES.find((l) => l.id === 'radar') ?? MAP_LENSES[0]
 
 /*
  * Comps lenses drive marker styling as 'acquisition', not the legacy 'comps'
@@ -103,6 +113,8 @@ export const LENS_RAMPS: Record<LensRamp, string[]> = {
   age: ['#475569', '#64748b', '#b45309', '#ea580c', '#f97316', '#fde68a'],
   signal: ['#1e3a5f', '#0e7490', '#06b6d4', '#22d3ee', '#a5f3fc', '#ffffff'],
   spectrum: ['#312e81', '#4f46e5', '#8b5cf6', '#ec4899', '#f97316', '#fde047'],
+  // Market Intelligence: ONE hue (blue), luminance rises with rank. Not a rainbow.
+  intel: ['#104281', '#1c5cab', '#2a78d6', '#5598e7', '#9ec5f4', '#e6f0fd'],
 }
 
 export function normalize(lens: MapLens, v: number): number {
