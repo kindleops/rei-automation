@@ -67,14 +67,25 @@ export interface MiGeoSummary {
 
 export interface MiWarming {
   ok: true
-  status: 'loading' | 'deferred' | 'error' | 'cold'
+  /** summary_missing: the market summary has no ready build (or is not installed). Nothing streams. */
+  status: 'loading' | 'deferred' | 'error' | 'cold' | 'summary_missing'
   progress: { rows: number; est: number | null; phase: string } | null
   error: string | null
+  message?: string
+  detail?: string
+}
+
+export interface MiSummaryBuild {
+  build_id: number; built_at: string | null; started_at: string | null; source_as_of: string; source_rows: number
+  db_ms: number; ticks: number; rows_written: number; unmapped_types: string[]
 }
 
 export interface MiStatusPayload {
   ok: true
   status: 'ready'
+  /** summary = the nightly market summary (production); raw_dev = the dev-only full stream */
+  mode: 'summary' | 'raw_dev'
+  summary: MiSummaryBuild | null
   as_of: string
   first_sale: string
   rows: number

@@ -12,7 +12,7 @@ import { MI_MAP_LENSES } from '../../../modules/market-intelligence/map/mi-lens-
 
 export type LensFamily = 'pipeline' | 'property' | 'market' | 'comps' | 'intel'
 export type LensStyle = 'dots' | 'surface' | 'areas'
-export type LensRamp = 'heat' | 'money' | 'water' | 'age' | 'signal' | 'spectrum' | 'intel'
+export type LensRamp = 'heat' | 'money' | 'water' | 'age' | 'signal' | 'spectrum' | 'intel' | 'intel_light'
 
 export interface MapLens {
   id: string
@@ -115,6 +115,16 @@ export const LENS_RAMPS: Record<LensRamp, string[]> = {
   spectrum: ['#312e81', '#4f46e5', '#8b5cf6', '#ec4899', '#f97316', '#fde047'],
   // Market Intelligence: ONE hue (blue), luminance rises with rank. Not a rainbow.
   intel: ['#104281', '#1c5cab', '#2a78d6', '#5598e7', '#9ec5f4', '#e6f0fd'],
+  // Light basemap: the same hue run the other way, so a high value is the DARK, salient end and a
+  // low value recedes into the pale map (the dark-theme ramp put the top values at near-white).
+  intel_light: ['#cde2fb', '#9ec5f4', '#5598e7', '#2a78d6', '#1c5cab', '#0d366b'],
+}
+
+/** [desktop] The ramp a lens draws with on the current theme (MI lenses invert on Light). */
+export function rampFor(lens: Pick<MapLens, 'ramp'>): LensRamp {
+  const r = lens.ramp ?? 'heat'
+  if (r !== 'intel' || typeof document === 'undefined') return r
+  return document.documentElement.getAttribute('data-nexus-theme') === 'light' ? 'intel_light' : 'intel'
 }
 
 export function normalize(lens: MapLens, v: number): number {

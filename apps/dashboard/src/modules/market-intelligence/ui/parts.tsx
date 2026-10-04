@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { LCButton, LCCombobox, LCIconButton, LCMenu, LCMetric, LCPopover, LCProgress, LCError, type LCComboOption } from '../../../shared/lc'
 import { miFetch, type MiQueryState } from '../mi-api'
 import { useMi } from '../mi-context'
-import { fmtCount, fmtDate, fmtSample, fmtValue } from '../mi-format'
+import { fmtCount, fmtDate, fmtDateTime, fmtSample, fmtValue } from '../mi-format'
 import { openComposerFor, showGeoOnMap } from '../mi-handoffs'
 import type { MiGeoSummary, MiValue, MiWarming } from '../mi-types'
 import { toggleWatch, useWatchlist } from '../mi-watchlist'
@@ -84,7 +84,8 @@ export function Provenance({ extra }: { extra?: ReactNode }) {
   return (
     <p className="mi-prov">
       <span>Sales through <b>{fmtDate(status.as_of)}</b></span>
-      <span>{fmtCount(status.rows)} canonical market sales (mv_map_market_sales, refreshed daily)</span>
+      <span>{fmtCount(status.rows)} canonical market sales</span>
+      {status.summary ? <span>Market summary built <b>{fmtDateTime(status.summary.built_at)}</b> (build {status.summary.build_id})</span> : status.mode === 'raw_dev' ? <span>Development stream (no summary)</span> : null}
       <span>Coverage {status.coverage.coverage_start ?? '—'} → complete through {status.coverage.complete_through ?? '—'}</span>
       {extra}
     </p>
@@ -95,15 +96,23 @@ export function Provenance({ extra }: { extra?: ReactNode }) {
 export function Warming({ w }: { w: MiWarming }) {
   const p = w.progress
   const pct = p?.est ? Math.min(1, p.rows / p.est) : null
+  if (w.status === 'summary_missing') {
+    return (
+      <div className="mi-warming" role="status">
+        <strong>{w.message ?? 'Market summary not built yet'}</strong>
+        <span>{w.detail ?? 'The nightly market summary has not completed a build.'} Market Intelligence reads that summary, not raw sales; nothing is estimated meanwhile.</span>
+      </div>
+    )
+  }
   return (
     <div className="mi-warming" role="status">
-      <strong>{w.status === 'deferred' ? 'Waiting for a quiet database' : w.status === 'error' ? 'The market index could not be built' : 'Building the market index'}</strong>
+      <strong>{w.status === 'deferred' ? 'Waiting for a quiet database' : w.status === 'error' ? 'Market data could not be read' : 'Loading market data'}</strong>
       <span>
-        {w.status === 'deferred' ? `${w.error ?? 'Production is busy'}. The read is retried automatically; nothing is sampled meanwhile.`
+        {w.status === 'deferred' ? `${w.error ?? 'Production is busy'}. Retried automatically; nothing is sampled meanwhile.`
           : w.status === 'error' ? (w.error ?? 'Read failed')
-            : p ? `${p.phase === 'sales' ? 'Reading canonical sales' : 'Reading geography and census references'} · ${fmtCount(p.rows)}${p.est ? ` of ~${fmtCount(p.est)}` : ''} rows` : 'Starting the read'}
+            : p ? `Reading canonical sales (development stream) · ${fmtCount(p.rows)}${p.est ? ` of ~${fmtCount(p.est)}` : ''} rows` : 'Reading the market summary'}
       </span>
-      {w.status === 'loading' ? <LCProgress value={pct === null ? undefined : pct * 100} label="Market index" /> : null}
+      {w.status === 'loading' && p ? <LCProgress value={pct === null ? undefined : pct * 100} label="Market data" /> : null}
     </div>
   )
 }

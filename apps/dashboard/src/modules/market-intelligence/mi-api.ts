@@ -46,7 +46,7 @@ const emit = (e: Entry) => { for (const s of e.subs) s() }
 
 const isWarming = (d: unknown): d is MiWarming => {
   const s = (d as { status?: unknown } | null)?.status
-  return typeof s === 'string' && s !== 'ready' && (s === 'loading' || s === 'deferred' || s === 'error' || s === 'cold')
+  return typeof s === 'string' && s !== 'ready' && (s === 'loading' || s === 'deferred' || s === 'error' || s === 'cold' || s === 'summary_missing')
 }
 
 async function run(key: string) {
@@ -61,7 +61,9 @@ async function run(key: string) {
     e.state = { kind: 'error', message: failMessage(res), status: res.status, previous }
   } else if (isWarming(res.data)) {
     e.state = { kind: 'warming', warming: res.data }
-    if (e.timer === null && e.subs.size) e.timer = window.setTimeout(() => { e.timer = null; void run(key) }, POLL_MS)
+    // A missing summary is re-checked once a minute (the server caches it as long); a loading one every 1.5 s.
+    const wait = res.data.status === 'summary_missing' ? 60_000 : POLL_MS
+    if (e.timer === null && e.subs.size) e.timer = window.setTimeout(() => { e.timer = null; void run(key) }, wait)
   } else if ((res.data as { ok?: boolean })?.ok === false) {
     const f = res.data as MiFail
     e.state = { kind: 'error', message: f.message || f.error, status: f.status ?? 400, previous }
@@ -104,7 +106,7 @@ export function refreshAllMiQueries() {
 export async function miFetch<T>(op: string, params: Record<string, string | number | null | undefined> = {}, signal?: AbortSignal): Promise<{ ok: true; data: T } | { ok: false; message: string; warming?: MiWarming }> {
   const res = await callBackend<unknown>(miUrl(op, params), { timeoutMs: 30_000, signal })
   if (!res.ok) return { ok: false, message: failMessage(res) }
-  if (isWarming(res.data)) return { ok: false, message: 'Building the market index', warming: res.data }
+  if (isWarming(res.data)) return { ok: false, message: res.data.status === 'summary_missing' ? (res.data.message ?? 'Market summary not built yet') : 'Market data is loading', warming: res.data }
   if ((res.data as { ok?: boolean })?.ok === false) return { ok: false, message: (res.data as MiFail).message || (res.data as MiFail).error }
   return { ok: true, data: res.data as T }
 }

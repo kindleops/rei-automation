@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import type maplibregl from 'maplibre-gl'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
-import { normalize, rampExpression, type LensStyle, type MapLens } from './map-lenses'
+import { normalize, rampExpression, rampFor, type LensStyle, type MapLens } from './map-lenses'
 import { bindIntelAreaInteractions, fetchIntelAreas } from '../../../modules/market-intelligence/map/mi-map-lenses'
 
 const SRC = 'nx-lens'
@@ -100,7 +100,7 @@ export interface LensLook { style: LensStyle; blend: number; opacity?: number }
 export const DEFAULT_LOOK: LensLook = { style: 'surface', blend: 0.7 }
 
 function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: LensLook = DEFAULT_LOOK) {
-  const ramp = lens.ramp ?? 'heat'
+  const ramp = rampFor(lens)
   const density = isDensity(lens) || Boolean(lens.ambient)
   const areas = look.style === 'areas' && !lens.ambient
   // 0 = crisp individual dots, 1 = one melted surface.

@@ -15,13 +15,13 @@ import type maplibregl from 'maplibre-gl'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
 import { UNIVERSAL_STAGE_RING_COLORS } from '../universal-stage-colors'
-import { formatLensValue, LENS_RAMPS, type LensStyle, type MapLens } from './map-lenses'
+import { formatLensValue, LENS_RAMPS, rampFor, type LensStyle, type MapLens } from './map-lenses'
 import type { LensLook, LensState } from './useMapLens'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
 export const rampGradient = (lens: MapLens, dir = '90deg') =>
-  `linear-gradient(${dir}, ${LENS_RAMPS[lens.ramp ?? 'heat'].join(', ')})`
+  `linear-gradient(${dir}, ${LENS_RAMPS[rampFor(lens)].join(', ')})`
 
 const STAGE_KEY: Array<[string, string]> = [
   ['Uncontacted', UNIVERSAL_STAGE_RING_COLORS.uncontacted],

@@ -10,7 +10,7 @@ import { composerPathFor, consumePending, mapAreaFor, openBeside, showGeoOnMap, 
 import { marketIntelDeckCommands, metricOfPhrase, parseComparison } from './deck-commands'
 import { intakeFromLocation } from '../../views/campaign-command/composer/composer-intake'
 import { MI_MAP_LENSES } from './map/mi-lens-defs'
-import { DESK_LENSES, DESK_LENS_FAMILIES, LENS_FAMILIES, MAP_LENSES, lensById, LENS_RAMPS } from '../../views/map/mobile/map-lenses'
+import { DESK_LENSES, DESK_LENS_FAMILIES, LENS_FAMILIES, MAP_LENSES, lensById, LENS_RAMPS, rampFor } from '../../views/map/mobile/map-lenses'
 import type { MiGeoSummary, MiValue } from './mi-types'
 
 const geo = (over: Partial<MiGeoSummary>): MiGeoSummary => ({ id: 'zip:55411', level: 'zip', level_label: 'ZIP', name: '55411', label: '55411 · Minneapolis, MN', state: 'MN', parent_id: null, parents: {}, centroid: null, bbox: null, geometry: 'census_zcta', ...over })
@@ -140,5 +140,22 @@ describe('Map: MI is a lens family on the existing Map, desktop only (brief §11
   it('every MI lens is an area lens on one single-hue ramp', () => {
     for (const l of MI_MAP_LENSES) { expect(l.ramp).toBe('intel'); expect(l.areal).toBe(true); expect(l.source).toBe(`mi:${l.id.slice(3)}`) }
     expect(LENS_RAMPS.intel).toHaveLength(6)
+  })
+  it('light theme: the MI ramp runs dark-for-high on the pale basemap; other lenses are untouched', () => {
+    const doc = globalThis as unknown as { document?: { documentElement: { getAttribute: (k: string) => string | null } } }
+    const had = doc.document
+    let theme = 'light'
+    doc.document = { documentElement: { getAttribute: (k: string) => (k === 'data-nexus-theme' ? theme : null) } }
+    try {
+      expect(rampFor({ ramp: 'intel' })).toBe('intel_light')
+      expect(rampFor({ ramp: 'money' })).toBe('money')
+      theme = 'dark'
+      expect(rampFor({ ramp: 'intel' })).toBe('intel')
+      const lum = (hex: string) => parseInt(hex.slice(1, 3), 16) * 0.299 + parseInt(hex.slice(3, 5), 16) * 0.587 + parseInt(hex.slice(5, 7), 16) * 0.114
+      const light = LENS_RAMPS.intel_light
+      expect(lum(light[light.length - 1])).toBeLessThan(lum(light[0])) // high value = darker on Light
+      const dark = LENS_RAMPS.intel
+      expect(lum(dark[dark.length - 1])).toBeGreaterThan(lum(dark[0])) // high value = brighter on Dark
+    } finally { doc.document = had }
   })
 })

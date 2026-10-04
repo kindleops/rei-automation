@@ -38,7 +38,10 @@ export async function fetchIntelAreas(l: MapLens, bounds: { west: number; south:
   const res = await callBackend<{ ok: boolean; rows?: IntelAreaRow[]; note?: string | null; level?: string; status?: string; error?: string }>(miUrl('heat', { metric, bbox, zoom: zoom.toFixed(2), period: ctx.period, asset: ctx.asset }), { timeoutMs: 30_000 })
   if (!res.ok) return { ok: false, rows: [], note: null, level: null, error: 'Layer unavailable' }
   const d = res.data
-  if (d.status && d.status !== 'ready' && !d.rows) return { ok: false, rows: [], note: 'Market index is still building', level: null, error: 'Market index is still building' }
+  if (d.status && d.status !== 'ready' && !d.rows) {
+    const msg = d.status === 'summary_missing' ? 'Market summary not built yet' : 'Market data is loading'
+    return { ok: false, rows: [], note: msg, level: null, error: msg }
+  }
   return { ok: true, rows: d.rows || [], note: d.note ?? null, level: d.level ?? null }
 }
 

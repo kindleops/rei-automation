@@ -65,3 +65,9 @@ export const fmtMonth = (label: string): string => {
   const [y, m] = label.split('-').map(Number)
   return new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' })
 }
+
+export const fmtDateTime = (iso: string | null | undefined): string => {
+  if (!iso) return '—'
+  const d = new Date(iso.includes('T') || iso.includes(' ') ? iso.replace(' ', 'T') : `${iso}T12:00:00Z`)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
