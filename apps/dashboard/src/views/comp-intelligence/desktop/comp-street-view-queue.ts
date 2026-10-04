@@ -48,9 +48,29 @@ export function streetViewQueueDepth() { return { inFlight, waiting: waiting.len
 const hasCoords = (lat?: number | null, lng?: number | null) =>
   Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
 
-/** The one URL a comp's imagery comes from — null means there is honestly nothing to look at. */
-export function compStreetViewUrl(c: { photo?: string | null; lat?: number | null; lng?: number | null }): string | null {
+/**
+ * The one URL a comp's imagery comes from — null means there is honestly
+ * nothing to look at.
+ *
+ * ORDER (fixed 2026-10-04): LeadCommand's own configured Street View key at
+ * the comp's coordinates, else at its address; the record's stored
+ * `streetview_image` only when no own-key URL can be built. The stored URLs
+ * (buyer_comp_raw_v2, every engine-pool comp) are a data vendor's signed
+ * links whose key is referrer-restricted: from ops.leadcommand.ai the browser
+ * gets an error for every one of them, so preferring them blanked every comp
+ * frame in production. They load from curl / no-referrer only — we do not
+ * strip the referrer to get around another party's key restriction.
+ */
+export function compStreetViewUrl(c: { photo?: string | null; lat?: number | null; lng?: number | null; address?: string | null }): string | null {
+  if (hasCoords(c.lat, c.lng)) {
+    const built = staticStreetViewUrl(null, c.lat, c.lng)
+    if (built) return built
+  }
+  const address = (c.address ?? '').trim()
+  if (address) {
+    const built = staticStreetViewUrl(address, null, null)
+    if (built) return built
+  }
   if (c.photo && /^https:\/\//.test(c.photo)) return c.photo
-  if (!hasCoords(c.lat, c.lng)) return null
-  return staticStreetViewUrl(null, c.lat, c.lng)
+  return null
 }

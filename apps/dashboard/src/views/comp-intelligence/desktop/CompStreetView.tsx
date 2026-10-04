@@ -6,9 +6,9 @@ import { acquireSlot, compStreetViewUrl } from './comp-street-view-queue'
 import './comp-evidence-media.css'
 
 /**
- * COMP STREET VIEW — the existing Street View path (the record's stored
- * `streetview_image`, else the configured static builder at the comp's
- * coordinates), loaded under the fan-out rule:
+ * COMP STREET VIEW — the configured static Street View builder at the comp's
+ * coordinates (else its address; the record's stored vendor URL only when
+ * neither can be built — see compStreetViewUrl), loaded under the fan-out rule:
  *
  *  - `visible`  loads only once the frame scrolls into view (comp lists)
  *  - `intent`   loads only while the comp is hovered or selected (long lists)
@@ -42,7 +42,7 @@ interface Props {
 }
 
 export function CompStreetView({ photo, lat, lng, address, load, active = false, size, className, badge }: Props) {
-  const url = compStreetViewUrl({ photo, lat, lng })
+  const url = compStreetViewUrl({ photo, lat, lng, address })
   const host = useRef<HTMLDivElement | null>(null)
   const release = useRef<(() => void) | null>(null)
   const [status, setStatus] = useState<Status>(() => cachedStatus(url))
@@ -85,7 +85,7 @@ export function CompStreetView({ photo, lat, lng, address, load, active = false,
   }
 
   const none = !url || status === 'failed'
-  const reason = !url ? 'No coordinates — no street imagery' : 'No street imagery at this location'
+  const reason = !url ? 'No location recorded — no street imagery' : 'No street imagery at this location'
   return (
     <div
       ref={host}
