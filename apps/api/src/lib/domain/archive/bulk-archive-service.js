@@ -36,6 +36,8 @@ export const BULK_OBJECT_TYPES = Object.freeze(['inbox_thread', 'opportunity', '
 export const BULK_ACTIONS = Object.freeze(['archive', 'unarchive'])
 export const BULK_MAX_IDS = 100
 const CONCURRENCY = 4
+/** [8.3.2] per-item answer deadline, under the client's 30 s per-request deadline */
+export const ITEM_TIMEOUT_MS = 20_000
 
 /** send_queue statuses that can still transmit (mirror of campaign-live-execution). */
 export const ACTIVE_SEND_STATUSES = Object.freeze(['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending'])
@@ -215,6 +217,7 @@ export function summarize(results) {
     if (r.outcome === 'archived' || r.outcome === 'unarchived') s.changed += 1
     else if (r.outcome === 'unchanged') s.unchanged += 1
     else if (r.outcome === 'blocked') s.blocked += 1
+    else if (r.outcome === 'unconfirmed') s.unconfirmed = (s.unconfirmed || 0) + 1
     else s.failed += 1
   }
   return s
@@ -226,15 +229,29 @@ export function createBulkArchiveService(ports) {
       if (!operatorId) throw new BulkArchiveError('operator_unknown', 401, 'The signed-in operator could not be identified.')
       const handler = HANDLERS[objectType]
       const ctx = { operatorId, reason }
+      const itemTimeoutMs = ports.itemTimeoutMs ?? ITEM_TIMEOUT_MS
       const results = await mapBounded(ids, CONCURRENCY, async (id) => {
+        let timer = null
         try {
-          return await handler(ports, id, action, ctx)
+          // [8.3.2] an item that is still writing answers `unconfirmed` instead of
+          // holding the whole response past the client's deadline.
+          return await Promise.race([
+            handler(ports, id, action, ctx),
+            new Promise((resolve) => {
+              timer = setTimeout(() => resolve({
+                id, ok: false, outcome: 'unconfirmed', reason: 'item_timeout',
+                message: `Still writing after ${Math.round(itemTimeoutMs / 1000)} s — it may complete; check again shortly.`,
+              }), itemTimeoutMs)
+            }),
+          ])
         } catch (error) {
           return failed(id, 'item_failed', clean(error?.message) || 'Unexpected error.')
+        } finally {
+          if (timer) clearTimeout(timer)
         }
       })
       const summary = summarize(results)
-      return { object_type: objectType, action, operator_id: operatorId, summary, partial: summary.blocked + summary.failed > 0, results }
+      return { object_type: objectType, action, operator_id: operatorId, summary, partial: summary.blocked + summary.failed + (summary.unconfirmed || 0) > 0, results }
     },
   }
 }
