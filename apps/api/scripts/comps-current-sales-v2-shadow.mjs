@@ -67,6 +67,7 @@ const FREEZE = args.freeze ?? '2026-05-08'
 const LIMIT = Math.max(1, Math.min(400, Number(args.limit ?? 260)))
 const BACKOFF_MS = Math.max(10000, Number(args['backoff-ms'] ?? 60000))
 const CHECK_EVERY = Math.max(1, Number(args['check-every'] ?? 3))
+const SUBJECT_TIMEOUT_MS = Math.max(30000, Number(args['subject-timeout-ms'] ?? 180000))
 if (!OUT_DIR) { console.error('--out-dir required'); process.exit(2) }
 mkdirSync(resolve(OUT_DIR, 'subjects'), { recursive: true })
 
@@ -290,7 +291,11 @@ for (const frame of frames) {
     if (pauses > 60) { console.error('[load] stopping'); break }
   }
   let r
+  // A dropped socket can hang a read forever (fetch/pg have no deadline). Exit
+  // non-zero instead; the caller re-runs with --resume and finished subjects are kept.
+  const watchdog = setTimeout(() => { console.error(`\n[watchdog] subject ${frame.property_id} exceeded ${SUBJECT_TIMEOUT_MS}ms; exiting for resume`); process.exit(3) }, SUBJECT_TIMEOUT_MS)
   try { r = MODE === 'compare' ? await compareSubject(frame) : await backtestSubject(frame) } catch (e) { r = { property_id: String(frame.property_id), frame, error: String(e?.message || e).slice(0, 300) } }
+  clearTimeout(watchdog)
   writeFileSync(file, JSON.stringify(r))
   done += 1
   process.stdout.write(r.error ? 'E' : '.')
