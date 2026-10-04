@@ -4,7 +4,9 @@ import { resolveIdentity, type EntityScope } from './entity-graph-mobile-format'
 import {
   IDENTITY_SORT_COLUMN,
   SCOPE_TABLE_COLUMNS,
+  type HeaderSort,
 } from './entity-graph-table-columns'
+import { IDENTITY_COLUMN_KEY } from './entity-graph-table-layout'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -12,12 +14,18 @@ type Props = {
   scope: EntityScope
   results: EntitySearchResult[]
   visibleColumns: string[]
-  sortBy: string
-  ascending: boolean
+  /** The operator's header sort (column key), or null. */
+  headerSort: HeaderSort | null
+  /** With no header sort: the Sort-menu column, shown on its header when visible. */
+  fallbackSortBy: string | null
+  fallbackAscending: boolean
+  /** One honest line above the grid ("Sorted within 60 loaded rows", load errors). */
+  status?: string | null
   selectionMode: boolean
   selectedKeys: Set<string>
   activeId?: string | null
-  onSort: (sortBy: string) => void
+  /** Header click: cycles asc → desc → none for that column key. */
+  onSort: (columnKey: string) => void
   onOpen: (result: EntitySearchResult) => void
   onToggleSelect: (result: EntitySearchResult) => void
 }
@@ -33,8 +41,10 @@ export function EntityGraphMobileTable({
   scope,
   results,
   visibleColumns,
-  sortBy,
-  ascending,
+  headerSort,
+  fallbackSortBy,
+  fallbackAscending,
+  status,
   selectionMode,
   selectedKeys,
   activeId,
@@ -45,37 +55,48 @@ export function EntityGraphMobileTable({
   const columns = SCOPE_TABLE_COLUMNS[scope].filter((c) => visibleColumns.includes(c.key))
   const identitySort = IDENTITY_SORT_COLUMN[scope]
   const bodyWidth = columns.reduce((acc, c) => acc + c.width, 0)
+  /** Direction shown on a header: the header sort, else the Sort menu's server column. */
+  const dirFor = (key: string, serverSortBy: string | null | undefined): 'asc' | 'desc' | null => {
+    if (headerSort) return headerSort.key === key ? headerSort.dir : null
+    return serverSortBy && serverSortBy === fallbackSortBy ? (fallbackAscending ? 'asc' : 'desc') : null
+  }
+  const ariaSort = (dir: 'asc' | 'desc' | null) => (dir === 'asc' ? 'ascending' as const : dir === 'desc' ? 'descending' as const : undefined)
+  const identityDir = dirFor(IDENTITY_COLUMN_KEY, identitySort)
 
   return (
     <div className="egt">
+      {status ? <div className="egt-status" role="status">{status}</div> : null}
       <div className="egt-scroll">
         <div className="egt-grid" style={{ ['--egt-body-width' as string]: `${bodyWidth}px` }}>
           <div className="egt-row is-head">
             <button
               type="button"
-              className={cls('egt-cell', 'is-identity', 'is-head', identitySort && 'is-sortable')}
-              onClick={identitySort ? () => onSort(identitySort) : undefined}
-              aria-sort={identitySort === sortBy ? (ascending ? 'ascending' : 'descending') : undefined}
+              className={cls('egt-cell', 'is-identity', 'is-head', 'is-sortable')}
+              onClick={() => onSort(IDENTITY_COLUMN_KEY)}
+              aria-sort={ariaSort(identityDir)}
+              title={identitySort ? undefined : 'Sorts the loaded rows'}
             >
               {selectionMode ? <span className="egt-cell__check" aria-hidden /> : null}
               <span>{scope === 'properties' ? 'Address' : scope === 'contact_methods' ? 'Contact' : 'Name'}</span>
-              {identitySort === sortBy ? <Icon name={ascending ? 'chevron-up' : 'chevron-down'} /> : null}
+              {identityDir ? <Icon name={identityDir === 'asc' ? 'chevron-up' : 'chevron-down'} /> : null}
             </button>
-            {columns.map((column) => (
-              <button
-                key={column.key}
-                type="button"
-                className={cls('egt-cell', 'is-head', column.align === 'right' && 'is-right', column.sortBy && 'is-sortable')}
-                style={{ width: column.width }}
-                onClick={column.sortBy ? () => onSort(column.sortBy as string) : undefined}
-                aria-sort={column.sortBy === sortBy ? (ascending ? 'ascending' : 'descending') : undefined}
-              >
-                <span>{column.label}</span>
-                {column.sortBy === sortBy ? (
-                  <Icon name={ascending ? 'chevron-up' : 'chevron-down'} />
-                ) : null}
-              </button>
-            ))}
+            {columns.map((column) => {
+              const dir = dirFor(column.key, column.sortBy)
+              return (
+                <button
+                  key={column.key}
+                  type="button"
+                  className={cls('egt-cell', 'is-head', 'is-sortable', column.align === 'right' && 'is-right')}
+                  style={{ width: column.width }}
+                  onClick={() => onSort(column.key)}
+                  aria-sort={ariaSort(dir)}
+                  title={column.sortBy ? undefined : 'Sorts the loaded rows'}
+                >
+                  <span>{column.label}</span>
+                  {dir ? <Icon name={dir === 'asc' ? 'chevron-up' : 'chevron-down'} /> : null}
+                </button>
+              )
+            })}
           </div>
 
           {results.map((result) => {

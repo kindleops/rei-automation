@@ -13,6 +13,12 @@ const text = (v: unknown): string | null => {
   return s && s !== 'null' ? s : null
 }
 
+/**
+ * A property with no record-summary row has unknown loan / lien counts. The
+ * API sends `captured: false` and a placeholder 0; the table says "—".
+ */
+const recordsCaptured = (r: EntitySearchResult): boolean => Boolean(r.details?.records) && r.details?.records?.captured !== false
+
 export type ColumnGroup =
   | 'overview' | 'geography' | 'property' | 'ownership'
   | 'people' | 'contacts' | 'signals' | 'scores' | 'provenance'
@@ -43,6 +49,14 @@ export type TableColumn = {
   align?: 'right'
   width: number
   render: (result: EntitySearchResult) => string | null
+  /**
+   * Property column the browse row does not carry: loaded only while visible,
+   * for the rows on screen, through /api/cockpit/entity-graph/columns, and
+   * read back from `details.row`. Absent value renders "—".
+   */
+  field?: string
+  /** Raw comparable value for sorting the loaded rows (null sorts last). */
+  sortValue?: (result: EntitySearchResult) => string | number | null
 }
 
 /**
@@ -63,6 +77,7 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
       key: 'equity',
       group: 'scores',
       label: 'Equity',
+      sortBy: 'equity_percent',
       align: 'right',
       width: 68,
       render: (r) => (typeof r.details?.equity === 'number' ? `${Math.round(r.details.equity)}%` : null),
@@ -90,11 +105,11 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
         return b ? `${b.acquisitions ?? '—'} · ${b.status ?? ''}`.trim() : null
       },
     },
-    { key: 'loans', group: 'signals', label: 'Loans', align: 'right', width: 62, render: (r) => (r.details?.records ? String(r.details.records.mortgageCount) : null) },
+    { key: 'loans', group: 'signals', label: 'Loans', align: 'right', width: 62, render: (r) => (recordsCaptured(r) ? String(r.details!.records!.mortgageCount) : null) },
     { key: 'balance', group: 'scores', label: 'Balance', sortBy: 'rec_mortgage_balance', align: 'right', width: 88, render: (r) => compactCurrency(r.details?.records?.mortgageBalance) },
     { key: 'rate', group: 'signals', label: 'Rate', align: 'right', width: 64, render: (r) => (typeof r.details?.records?.firstRate === 'number' ? `${Number(r.details.records.firstRate).toFixed(2)}%` : null) },
     { key: 'lender', group: 'signals', label: 'Lender', width: 170, render: (r) => text(r.details?.records?.firstLender) },
-    { key: 'liens', group: 'signals', label: 'Liens', align: 'right', width: 60, render: (r) => (r.details?.records ? String(r.details.records.lienCount) : null) },
+    { key: 'liens', group: 'signals', label: 'Liens', align: 'right', width: 60, render: (r) => (recordsCaptured(r) ? String(r.details!.records!.lienCount) : null) },
     { key: 'lastSale', group: 'signals', label: 'Last sale', sortBy: 'rec_last_sale_date', width: 96, render: (r) => text(r.details?.records?.lastSaleDate)?.slice(0, 7) ?? null },
     { key: 'lastPrice', group: 'scores', label: 'Sale price', align: 'right', width: 90, render: (r) => compactCurrency(r.details?.records?.lastSalePrice) },
     { key: 'records', group: 'signals', label: 'Recorded signals', width: 220, render: (r) => (r.details?.records?.signals ?? []).map((s) => s.label).join(' · ') || null },
@@ -296,7 +311,6 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
      tag_distress_score / ai_score removed — see the note on the Score column
      above and domain/acquisition/legacy-acquisition-fields. */
 
-  { key: 'property_id', label: 'Property ID', group: 'provenance', width: 130 },
   { key: 'master_owner_id', label: 'Master owner ID', group: 'provenance', width: 190 },
   { key: 'source_system', label: 'Source system', group: 'provenance', width: 130 },
   { key: 'created_at', label: 'Created', group: 'provenance', width: 118 },
@@ -320,6 +334,17 @@ function renderRawField(key: string, numeric: boolean | undefined, result: Entit
   return Math.abs(num) >= 1000 ? num.toLocaleString() : String(Math.round(num * 100) / 100)
 }
 
+function rawSortValue(key: string, numeric: boolean | undefined, result: EntitySearchResult): string | number | null {
+  const raw = (result.details?.row ?? {})[key]
+  if (raw === null || raw === undefined || raw === '') return null
+  if (typeof raw === 'boolean') return raw ? 1 : 0
+  if (numeric) {
+    const num = Number(raw)
+    return Number.isFinite(num) ? num : null
+  }
+  return String(raw).toLowerCase()
+}
+
 // Append the generated columns, skipping any key a hand-tuned column already owns.
 {
   const existing = new Set(SCOPE_TABLE_COLUMNS.properties.map((c) => c.key))
@@ -331,7 +356,118 @@ function renderRawField(key: string, numeric: boolean | undefined, result: Entit
       group: extra.group,
       width: extra.width ?? 120,
       align: extra.numeric ? 'right' : undefined,
+      field: extra.key,
       render: (r) => renderRawField(extra.key, extra.numeric, r),
+      sortValue: (r) => rawSortValue(extra.key, extra.numeric, r),
     })
   }
+  SCOPE_TABLE_COLUMNS.properties.push({
+    key: 'property_id',
+    label: 'Property ID',
+    group: 'provenance',
+    width: 130,
+    render: (r) => text(r.entityId),
+  })
+}
+
+/* ── Sorting the loaded rows ─────────────────────────────────────────── */
+
+const num = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Comparable values for the hand-tuned columns whose rendered text does not
+ * sort ("$1.2M", "12K", "2 · active"). Anything not listed sorts by its
+ * rendered text.
+ */
+const HAND_SORT_VALUES: Partial<Record<EntityScope, Record<string, (r: EntitySearchResult) => string | number | null>>> = {
+  properties: {
+    value: (r) => num(r.details?.value),
+    equity: (r) => num(r.details?.equity),
+    ownerBuyer: (r) => num(r.details?.records?.ownerBuyer?.acquisitions),
+    loans: (r) => (recordsCaptured(r) ? num(r.details?.records?.mortgageCount) : null),
+    balance: (r) => num(r.details?.records?.mortgageBalance),
+    rate: (r) => num(r.details?.records?.firstRate),
+    liens: (r) => (recordsCaptured(r) ? num(r.details?.records?.lienCount) : null),
+    lastSale: (r) => text(r.details?.records?.lastSaleDate),
+    lastPrice: (r) => num(r.details?.records?.lastSalePrice),
+    units: (r) => num(r.details?.units),
+  },
+  master_owners: {
+    portfolio: (r) => num(r.linkedCounts.properties),
+    portfolioValue: (r) => num(r.details?.portfolioValue),
+    coverage: (r) => num(r.linkedCounts.contactCoverage),
+    people: (r) => num(r.linkedCounts.prospects),
+    contacts: (r) => num(r.linkedCounts.contacts),
+    priority: (r) => num(r.score),
+  },
+  people: {
+    properties: (r) => num(r.linkedCounts.properties),
+    contacts: (r) => num(r.linkedCounts.contacts),
+    contactScore: (r) => num(r.score),
+  },
+  buyers: {
+    purchases: (r) => num(r.details?.acquisitions),
+    last: (r) => text(r.details?.lastAcquisition),
+    year: (r) => num(r.details?.trailing365),
+    median: (r) => num(r.details?.priceP50),
+    cash: (r) => num(r.details?.cashShare),
+    owns: (r) => num(r.details?.ownedCount),
+    sold: (r) => num(r.details?.soldCount),
+  },
+  contact_methods: {
+    score: (r) => num(r.score),
+  },
+}
+
+export function columnSortValue(scope: EntityScope, column: TableColumn, result: EntitySearchResult): string | number | null {
+  if (column.sortValue) return column.sortValue(result)
+  const hand = HAND_SORT_VALUES[scope]?.[column.key]
+  if (hand) return hand(result)
+  const rendered = column.render(result)
+  return rendered ? rendered.toLowerCase() : null
+}
+
+export type HeaderSort = { key: string; dir: 'asc' | 'desc' }
+
+/** Header click cycle: none → asc → desc → none. */
+export function nextHeaderSort(current: HeaderSort | null, key: string): HeaderSort | null {
+  if (!current || current.key !== key) return { key, dir: 'asc' }
+  if (current.dir === 'asc') return { key, dir: 'desc' }
+  return null
+}
+
+/**
+ * Sort the loaded rows by one column. Nulls (no value) always last, whatever
+ * the direction; equal values keep their server order (stable tie-break).
+ */
+export function sortLoadedRows(
+  scope: EntityScope,
+  rows: readonly EntitySearchResult[],
+  column: TableColumn,
+  dir: 'asc' | 'desc',
+): EntitySearchResult[] {
+  const sign = dir === 'asc' ? 1 : -1
+  return rows
+    .map((row, index) => ({ row, index, value: columnSortValue(scope, column, row) }))
+    .sort((a, b) => {
+      if (a.value === null && b.value === null) return a.index - b.index
+      if (a.value === null) return 1
+      if (b.value === null) return -1
+      let cmp = 0
+      if (typeof a.value === 'number' && typeof b.value === 'number') cmp = a.value - b.value
+      else cmp = String(a.value).localeCompare(String(b.value), undefined, { numeric: true })
+      return cmp !== 0 ? cmp * sign : a.index - b.index
+    })
+    .map((entry) => entry.row)
+}
+
+/** The enrichment fields the visible columns need (property scope only). */
+export function visibleEnrichmentFields(scope: EntityScope, visible: readonly string[]): string[] {
+  if (scope !== 'properties') return []
+  const set = new Set(visible)
+  return SCOPE_TABLE_COLUMNS.properties.filter((c) => c.field && set.has(c.key)).map((c) => c.field as string)
 }

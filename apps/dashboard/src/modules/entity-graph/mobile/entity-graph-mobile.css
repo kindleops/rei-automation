@@ -1567,6 +1567,14 @@
 
 .egt { width: 100%; }
 
+/* One honest line above the grid: "Sorted within 60 loaded rows", column load state. */
+.egt-status {
+  padding: 4px 12px 6px;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  color: var(--lc-text-muted, rgba(255, 255, 255, 0.56));
+}
+
 .egt-scroll {
   overflow-x: auto;
   overflow-y: visible;
