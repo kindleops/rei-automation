@@ -166,3 +166,16 @@ html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane-stale {
   html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation { animation: none; }
 }
 html[data-lc-motion='off'] #nx-inbox-root.is-desk-inbox .ixm-conversation { animation: none; }
+
+/* lead visibility: a reply on archived deals whose property is unclear */
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixv-pending,
+html.is-desktop-modern #nx-inbox-root .ixv-pending {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--lc-glass-line);
+  background: rgba(var(--lc-attn-rgb), 0.06);
+  font: var(--lc-t-meta);
+  color: var(--lc-ink-2);
+}

@@ -14,6 +14,7 @@ import { useMultiInboxState } from './multi/multi-inbox-store'
 import { MultiInboxCountControl, MultiInboxLayout } from './multi/MultiInboxLayout'
 import { InboxSecondaryPane } from './multi/InboxSecondaryPane'
 import { getPaneQueryCache } from './multi/pane-data'
+import { VisibilityPendingNotice } from './VisibilityPendingNotice'
 import { closePane as closeMultiPane, focusPane as focusMultiPane, openBeside as openMultiBeside, sameViewAs, setCount as setMultiCount, setPaneLens as setMultiPaneLens, clampCount, type PaneCount } from './multi/multi-inbox-model'
 import {
   describeThreadReference,
@@ -5910,6 +5911,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       )}
       onKeyDown={!isDeskInbox && isModernDesktop ? handleHostConversationKeyDown : undefined}
     >
+      {isModernDesktop ? <VisibilityPendingNotice threadKey={selected?.threadKey ?? null} /> : null}
       <ChatThread
         thread={selected}
         onBack={isDeskInbox ? closeDeskRoom : isMobile ? handleMobileBack : undefined}

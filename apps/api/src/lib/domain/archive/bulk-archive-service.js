@@ -223,10 +223,58 @@ export function summarize(results) {
   return s
 }
 
+const VISIBILITY_OBJECT_TYPES = new Set(['inbox_thread', 'opportunity'])
+
+/** One bulk request through the lead-visibility authority; one result per requested id. */
+async function runThroughVisibility(visibility, { objectType, action, ids, reason }, operatorId) {
+  const isThread = objectType === 'inbox_thread'
+  const valid = ids.filter((id) => (isThread ? CANONICAL_E164.test(id) : UUID.test(id)))
+  const out = await visibility.apply({
+    action,
+    threadKeys: isThread ? valid : [],
+    opportunityIds: isThread ? [] : valid,
+    scopeChoice: null,
+    reason,
+    actionId: null,
+    undoOf: null,
+    source: 'bulk',
+  }, operatorId)
+  const kind = isThread ? 'thread' : 'opportunity'
+  const results = ids.map((id) => {
+    if (!valid.includes(id)) return failed(id, isThread ? 'invalid_thread_key' : 'invalid_opportunity_id', isThread ? 'Not a canonical thread key (+1XXXXXXXXXX).' : 'Not an opportunity id.')
+    const own = (out.results || []).find((r) => r.kind === kind && r.id === id && !r.cascaded_from)
+    if (!own) return failed(id, 'no_result', 'The archive returned no result for this item.')
+    const cascaded = (out.results || []).filter((r) => r.cascaded_from === id && (r.outcome === 'archived' || r.outcome === 'unarchived')).map((r) => ({ kind: r.kind, id: r.id }))
+    const extra = {
+      visibility_action_id: out.action_id,
+      ...(cascaded.length ? { cascaded } : {}),
+      ...(own.thread_kept ? { thread_kept: own.thread_kept, message: 'Archived · the conversation stays: another live deal uses it' } : {}),
+      ...(own.note ? { note: own.note, queue_link: own.queue_link, scheduled_sends: own.scheduled_sends, message: `${action === 'archive' ? 'Archived' : 'Restored'} · ${own.note}` } : {}),
+    }
+    if (own.outcome === 'archived' || own.outcome === 'unarchived') return done(id, own.outcome, { state: own.outcome === 'archived' ? 'archived' : 'active', ...extra })
+    if (own.outcome === 'unchanged') return done(id, 'unchanged', extra)
+    if (own.outcome === 'needs_scope') return blocked(id, 'needs_scope', own.message || 'Choose which deal this conversation is about.', { candidates: own.candidates || [], ...extra })
+    if (own.outcome === 'blocked') return blocked(id, own.reason || 'blocked', own.message || 'Not archived.', extra)
+    return failed(id, own.reason || 'item_failed', own.message || 'Not written.')
+  })
+  const summary = summarize(results)
+  return { object_type: objectType, action, operator_id: operatorId, summary, partial: summary.blocked + summary.failed + (summary.unconfirmed || 0) > 0, results, visibility: { action_id: out.action_id, undo: out.undo || null } }
+}
+
 export function createBulkArchiveService(ports) {
   return {
     async run({ objectType, action, ids, reason }, operatorId) {
       if (!operatorId) throw new BulkArchiveError('operator_unknown', 401, 'The signed-in operator could not be identified.')
+      // LEAD VISIBILITY (flag lead_visibility_sync_enabled + schema): threads and deals
+      // archive through its one authority — a visibility overlay; stage, status,
+      // automation, nurture and queued follow-ups untouched (queued sends are a
+      // note, never a block). Flag off / schema missing → the per-object handlers
+      // below exactly as before, INCLUDING their queued-sends guard: the legacy
+      // deal archive is status-based and cancels automation.
+      if (VISIBILITY_OBJECT_TYPES.has(objectType) && typeof ports.visibility === 'function') {
+        const visibility = await ports.visibility()
+        if (visibility) return runThroughVisibility(visibility, { objectType, action, ids, reason }, operatorId)
+      }
       const handler = HANDLERS[objectType]
       const ctx = { operatorId, reason }
       const itemTimeoutMs = ports.itemTimeoutMs ?? ITEM_TIMEOUT_MS
@@ -257,6 +305,8 @@ export function createBulkArchiveService(ports) {
 }
 
 /* ── production ports (supabase + the canonical writers) ─────────────── */
+
+let visibilityService = null
 
 export async function createDefaultBulkArchivePorts() {
   const [{ supabase }, { patchUniversalLeadState }, { updateOpportunity }, campaigns] = await Promise.all([
@@ -313,5 +363,16 @@ export async function createDefaultBulkArchivePorts() {
     countActiveSendsForCampaign: (id) => countRows((q) => q.eq('campaign_id', id)),
     campaignLifecycle: (id, input) => campaigns.applyCampaignLifecycleAction(id, input),
     recordCampaignEvent: (fields) => campaigns.recordCampaignEvent(fields),
+    // null unless lead_visibility_sync_enabled is on AND its schema exists
+    async visibility() {
+      const { getLeadVisibilityGate } = await import('@/lib/domain/lead-visibility/lead-visibility-gate.js')
+      const gate = await getLeadVisibilityGate()
+      if (!gate.enabled) return null
+      if (!visibilityService) {
+        const mod = await import('@/lib/domain/lead-visibility/lead-visibility-service.js')
+        visibilityService = mod.createLeadVisibilityService(await mod.createDefaultLeadVisibilityPorts())
+      }
+      return visibilityService
+    },
   }
 }

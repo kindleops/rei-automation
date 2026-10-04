@@ -1781,6 +1781,28 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       });
     }
 
+    // LEAD VISIBILITY (flagged, owner rule 3): the conversation is already back;
+    // a linked ARCHIVED deal is restored only when the reply is deterministically
+    // its own, otherwise a "property unclear" marker is recorded. Flag off or
+    // schema missing → nothing here runs a query against the overlay columns.
+    try {
+      if (inbound_from) {
+        const { getLeadVisibilityGate } = await import("@/lib/domain/lead-visibility/lead-visibility-gate.js");
+        const gate = await getLeadVisibilityGate();
+        if (gate.enabled) {
+          const visibility = await import("@/lib/domain/lead-visibility/lead-visibility-service.js");
+          const service = visibility.createLeadVisibilityService(await visibility.createDefaultLeadVisibilityPorts());
+          await service.recordInboundReply({ threadKey: inbound_from, inboundEventId: extracted.message_id || null });
+        }
+      }
+    } catch (visibility_error) {
+      safeWarn("textgrid.inbound_deal_visibility_failed", {
+        message_id: extracted.message_id,
+        inbound_from,
+        error: visibility_error?.message || "deal_visibility_failed",
+      });
+    }
+
     // ── SEGMENT: phone_resolution ────────────────────────────────────────
     // Phone identity is resolved from context — gate here confirms phone_item_id
     // is available before downstream steps that depend on it.

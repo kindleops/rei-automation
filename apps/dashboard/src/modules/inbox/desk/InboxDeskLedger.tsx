@@ -170,7 +170,7 @@ function BulkMark({ state }: { state: BulkItemState }) {
   const { result } = state
   if (result.outcome === 'archived' || result.outcome === 'unarchived' || result.outcome === 'unchanged' || result.outcome === 'changed') {
     const label = result.outcome === 'unchanged' ? '✓ Already done' : result.outcome === 'archived' ? '✓ Archived' : result.outcome === 'unarchived' ? '✓ Restored' : '✓ Done'
-    return <LCStatus label={label} tone="ok" title={result.reason === 'confirmed_on_recheck' ? 'Confirmed on a second check' : 'Written'} />
+    return <LCStatus label={label} tone="ok" title={result.message || (result.reason === 'confirmed_on_recheck' ? 'Confirmed on a second check' : 'Written')} />
   }
   if (result.outcome === 'unconfirmed') {
     return <LCStatus label="? Unconfirmed" tone="attn" title={result.message || 'No answer in time — it may still have completed.'} />

@@ -1,3 +1,4 @@
+import { applyLeadVisibility, isLeadVisibilityEnabled } from './leadVisibilityData'
 import type { InboxThread } from '../../domain/inbox/inbox-model-types'
 import { getSupabaseClient } from '../supabaseClient'
 import { getInboxThreads, getThreadMessagesForThread, normalizeMessageDirection } from './inboxData'
@@ -834,7 +835,31 @@ export const updateThreadPriority = async (thread: InboxThread, priority: InboxP
   return result
 }
 
+/**
+ * LEAD VISIBILITY (flag lead_visibility_sync_enabled, server-decided): while
+ * the shared overlay is live, archive / restore go through its one authority
+ * (the conversation and its deal together; stage, status, nurture and queued
+ * follow-ups untouched). While it is off this returns null and the existing
+ * path below runs exactly as before.
+ */
+const viaLeadVisibility = async (thread: InboxThread, action: 'archive' | 'unarchive'): Promise<WorkflowMutationResult | null> => {
+  const threadKey = toThreadKey(thread)
+  if (!/^\+1\d{10}$/.test(threadKey) || !(await isLeadVisibilityEnabled())) return null
+  const res = await applyLeadVisibility({ action, thread_keys: [threadKey], source: 'inbox' })
+  const own = res.results?.find((r) => r.kind === 'thread' && r.id === threadKey)
+  const ok = Boolean(res.ok && own && own.ok)
+  return {
+    ok,
+    writeTarget: ok ? 'inbox_thread_state' : 'none',
+    errorMessage: ok ? null : own?.message || res.message || res.error || 'Not changed',
+    threadKey,
+    mutationPayload: { action, visibility_action_id: res.action_id ?? null },
+  }
+}
+
 export const archiveThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
+  const shared = await viaLeadVisibility(thread, 'archive')
+  if (shared) return shared
   const result = toWorkflowResult(await archiveConversation(toThreadKey(thread), { source_view: 'inbox' }))
   if (result.ok) {
     void logInboxActivity({
@@ -851,6 +876,8 @@ export const archiveThread = async (thread: InboxThread): Promise<WorkflowMutati
 }
 
 export const unarchiveThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
+  const shared = await viaLeadVisibility(thread, 'unarchive')
+  if (shared) return shared
   const lastIn = thread.lastInboundAt ? new Date(thread.lastInboundAt).getTime() : 0
   const lastOut = thread.lastOutboundAt ? new Date(thread.lastOutboundAt).getTime() : 0
   const needsResponse = lastIn > lastOut
