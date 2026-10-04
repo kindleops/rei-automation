@@ -80,6 +80,7 @@ const EmailCommandCenter = lazy(() =>
 const WorkflowStudioV2 = lazy(() => import('../views/workflow-studio/v2/WorkflowStudioV2'))
 const BrowserApp = lazy(() => import('../modules/browser/BrowserApp'))
 const SearchIntelligenceApp = lazy(() => import('../modules/search-intelligence/SearchIntelligenceApp'))
+const MarketIntelligenceApp = lazy(() => import('../modules/market-intelligence/MarketIntelligenceApp'))
 const SettingsView = lazy(() =>
   import('../views/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
 )
@@ -291,6 +292,14 @@ const browserRoute = defineRoute<null>({
   render: () => <BrowserApp />,
 })
 
+/** Market Intelligence V1 — geographic intelligence, rankings, screener (desktop only; the app says so on a phone). */
+const marketIntelligenceRoute = defineRoute<null>({
+  path: '/market-intelligence',
+  title: 'LeadCommand | Market Intelligence',
+  loader: async () => null,
+  render: () => <MarketIntelligenceApp />,
+})
+
 /** The desktop's Settings page (the phone keeps its settings sheet). */
 const settingsRoute = defineRoute<null>({
   path: '/settings',
@@ -418,6 +427,7 @@ const routes = [
   emailCommandRoute,
   workflowStudioRoute,
   browserRoute,
+  marketIntelligenceRoute,
   searchIntelligenceRoute,
   settingsRoute,
   entityGraphRoute,

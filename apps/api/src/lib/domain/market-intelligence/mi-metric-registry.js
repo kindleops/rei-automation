@@ -69,7 +69,7 @@ export const METRICS = Object.freeze([
   m({ id: 'entity_owned_count', group: 'ownership', label: 'Entity-owned now', unit: 'count', windowed: false, heatable: true, sample: 'entity_owned_count',
     description: 'Properties whose CURRENT owner is a company and whose latest recorded sale names no buyer. A current state, not purchases; never added to investor purchases.',
     formula: 'count(latest sale ∧ no buyer name ∧ current owner corporate)', source: SALES_SRC, freshness: 'sales' }),
-  m({ id: 'company_buyer_count', group: 'demand', label: 'Active company buyers', unit: 'count', sample: 'company_buyer_count',
+  m({ id: 'company_buyer_count', group: 'demand', label: 'Active company buyers', unit: 'count', sample: 'company_buyer_count', heatable: true,
     description: 'Distinct named company buyers with a purchase in the period. Lenders, servicers, GSEs and agencies excluded; individuals never counted as companies.',
     formula: 'count(distinct displayable company buyer, not lender)', source: SALES_SRC, freshness: 'sales' }),
   m({ id: 'repeat_buyer_count', group: 'demand', label: 'Repeat acquirers', unit: 'count', sample: 'company_buyer_count',

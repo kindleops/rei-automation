@@ -36,6 +36,7 @@ export type AppId =
   | 'buyer-match'
   | 'map'
   | 'browser'
+  | 'market-intelligence'
   | 'pipeline'
   | 'queue'
   | 'campaign-command'
@@ -383,6 +384,27 @@ export const NEXUS_APPS: NexusApp[] = [
     description: 'Research county records, market sources and the web in context',
     icon: 'compass',
     route: '/browser',
+    group: 'intelligence',
+    desktop: true,
+    mobile: false,
+    desktopRail: true,
+    dockable: false,
+    defaultDock: false,
+    badge: null,
+    context: {},
+  },
+  {
+    /**
+     * Market Intelligence V1 — the geographic intelligence layer: a geography
+     * (ZIP → nation) is the primary object; rankings, heat (a lens on the Map),
+     * compare, screener. Desktop only; read-only; hand-offs open other apps.
+     */
+    id: 'market-intelligence',
+    label: 'Market Intelligence',
+    shortLabel: 'Markets',
+    description: 'Where to hunt: rank, compare and screen markets, ZIPs and states',
+    icon: 'grid',
+    route: '/market-intelligence',
     group: 'intelligence',
     desktop: true,
     mobile: false,
