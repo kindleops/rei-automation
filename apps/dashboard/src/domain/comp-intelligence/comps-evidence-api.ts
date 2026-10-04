@@ -152,6 +152,50 @@ export type CompsWorkspace = {
   engineRules?: EngineRules | null
   market: { zip: string; family: string; windowDays: number | null; asOf: string; sales: number | null; medianPrice: number | null; p25: number | null; p75: number | null; medianPpsf: number | null; medianPpu: number | null; cashShare: number | null; armsLengthShare: number | null; corporateBuyerShare: number | null; repeatBuyerShare: number | null; recencyDaysMedian: number | null; admissible: boolean } | null
   comps: EvidenceComp[]
+  /** display only — canonical recorded sales near the subject; never scored or priced (2026-10-04) */
+  recentSales?: RecentSalesBlock
+  freshness?: WorkspaceFreshness
+}
+
+/** One canonical recorded sale (mv_map_market_sales). price/ppsf are null unless priced (price > 0). */
+export type RecentSale = {
+  key: string
+  propertyId: string | null
+  address: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  lat: number | null
+  lng: number | null
+  soldOn: string | null
+  price: number | null
+  priced: boolean
+  ppsf: number | null
+  saleSource: 'mls' | 'public_record'
+  docType: string | null
+  armsLength: boolean | null
+  cash: boolean | null
+  buyerCompany: string | null
+  buyerClass: string | null
+  investor: boolean
+  portfolioSize: number | null
+  propertyType: string | null
+  beds: number | null
+  baths: number | null
+  sqft: number | null
+  yearBuilt: number | null
+  units: number | null
+  distanceMiles: number | null
+}
+
+export type RecentSalesBlock =
+  | { available: true; source: string; radiusMiles: number | null; months: number | null; latestSale: string | null; read: number; priced: number; activityOnly: number; rows: RecentSale[] }
+  | { available: false; source: string; reason: 'no_subject_coordinates' | 'read_failed'; rows: RecentSale[] }
+
+export type WorkspaceFreshness = {
+  valuationPool: { source: string; latestSale: string | null; engineRunAt: string | null }
+  transactions: { source: string; latestSale: string | null }
+  recentSales: { source: string; latestSale: string | null }
 }
 
 export async function fetchCompsWorkspace(params: { propertyId: string; radius?: number; months?: number }, signal?: AbortSignal): Promise<CompsWorkspace> {

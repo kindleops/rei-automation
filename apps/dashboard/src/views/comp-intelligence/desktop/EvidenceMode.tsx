@@ -3,10 +3,11 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { LCButton, LCChip, LCLink, LCPopover, LCSegmented, LCTooltip, LC_DUR, cx, lcEase, useLcReducedMotion } from '../../../shared/lc'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
 import {
-  describeFilters, filterCount, fmtMoney, fmtPct, matchesPreset, PRESETS, type CompFilters, type ExplainContext, type PresetId,
+  describeFilters, filterCount, fmtDate, fmtMoney, fmtPct, matchesPreset, PRESETS, type CompFilters, type ExplainContext, type PresetId,
 } from '../../../domain/comp-intelligence/comps-workstation-model'
 import { countSaleTypes, SALE_TYPE_LABEL, SALE_TYPES, saleTypeOfComp } from '../../../domain/comp-intelligence/comp-sale-type'
 import { CompRow } from './CompRow'
+import { RecentSaleRow } from './RecentSaleRow'
 import type { Lens, Tier, Workstation } from './derive-workstation'
 import type { FocusStore } from './focus-store'
 
@@ -34,7 +35,7 @@ export function EvidenceMode({ m, ctx, store, filters, onFilters, filtersOpen, o
   const reduced = useLcReducedMotion()
   const list = useRef<HTMLDivElement | null>(null)
   const [activeKey, setActiveKey] = useState<string | null>(null)
-  const [open, setOpen] = useState<Record<string, boolean>>({ set: true, removed: true, candidates: true, excluded: false })
+  const [open, setOpen] = useState<Record<string, boolean>>({ set: true, recent: true, removed: true, candidates: true, excluded: false })
   const [page, setPage] = useState(CANDIDATE_PAGE)
   const [confirmReset, setConfirmReset] = useState(false)
   const preset = matchesPreset(filters)
@@ -174,8 +175,9 @@ export function EvidenceMode({ m, ctx, store, filters, onFilters, filtersOpen, o
       ) : null}
 
       <div role="list" aria-label="Comparable evidence" className="ciw-sections">
-        <Section id="set" title={m.lens === 'operator' ? 'Your set' : 'System set'} count={m.lensComps.length} open={open.set} onToggle={() => setOpen((o) => ({ ...o, set: !o.set }))}
+        <Section id="set" title={m.lens === 'operator' ? 'Valuation comps · your set' : 'Valuation comps · system set'} count={m.lensComps.length} open={open.set} onToggle={() => setOpen((o) => ({ ...o, set: !o.set }))}
           aside={lensReplay ? <span className="lc-num">central {fmtMoney(lensReplay.mid)} · {fmtMoney(lensReplay.low)}–{fmtMoney(lensReplay.high)}</span> : null}>
+          <PoolAsOf m={m} />
           {m.lensComps.length ? (
             <AnimatePresence initial={false}>
               {m.lensComps.map((c, i) => (
@@ -192,6 +194,8 @@ export function EvidenceMode({ m, ctx, store, filters, onFilters, filtersOpen, o
             </div>
           )}
         </Section>
+
+        <RecentSales m={m} open={open.recent} onToggle={() => setOpen((o) => ({ ...o, recent: !o.recent }))} />
 
         {m.removed.length ? (
           <Section id="removed" title="Removed from the system set" count={m.removed.length} open={open.removed} onToggle={() => setOpen((o) => ({ ...o, removed: !o.removed }))} tone="quiet">
@@ -218,6 +222,47 @@ export function EvidenceMode({ m, ctx, store, filters, onFilters, filtersOpen, o
         </Section>
       </div>
     </div>
+  )
+}
+
+/**
+ * The valuation comps' honest age: the engine pool is a frozen import, so the
+ * newest sale it can price from is said out loud — never implied to be current.
+ */
+function PoolAsOf({ m }: { m: Workstation }) {
+  const f = m.w.freshness
+  const latest = f?.valuationPool.latestSale ?? null
+  if (!latest) return null
+  const newer = f?.recentSales.latestSale && f.recentSales.latestSale > latest ? f.recentSales.latestSale : null
+  return (
+    <div className="ciw-sec__note lc-num" data-freshness="valuation-pool">
+      Engine pool, as of {fmtDate(latest, 'long')}{f?.valuationPool.engineRunAt ? ` · priced ${fmtDate(f.valuationPool.engineRunAt, 'long')}` : ''}.
+      {newer ? <> Recorded sales through {fmtDate(newer, 'long')} are under Recent market sales — they are not in this valuation.</> : null}
+    </div>
+  )
+}
+
+/**
+ * RECENT MARKET SALES — canonical recorded sales near the subject, newest
+ * first (display only). Never scored, never priced, never includable.
+ */
+function RecentSales({ m, open, onToggle }: { m: Workstation; open: boolean; onToggle: () => void }) {
+  const r = m.w.recentSales
+  if (!r) return null
+  const aside = r.available
+    ? <span className="lc-num">canonical recorded sales{r.latestSale ? ` · newest ${fmtDate(r.latestSale, 'long')}` : ''}{r.radiusMiles ? ` · ${r.radiusMiles} mi` : ''} · not in the valuation</span>
+    : <span>not available</span>
+  return (
+    <Section id="recent" title="Recent market sales" count={r.rows.length} open={open} onToggle={onToggle} aside={aside}>
+      {!r.available ? (
+        <div className="ciw-empty-inline">{r.reason === 'no_subject_coordinates' ? 'The subject has no coordinates, so nearby recorded sales cannot be read.' : 'Recorded sales could not be read just now.'}</div>
+      ) : r.rows.length ? (
+        <>
+          {r.activityOnly ? <div className="ciw-sec__note lc-num">{r.priced} priced · {r.activityOnly} activity only (no usable price — never a priced comp)</div> : null}
+          {r.rows.map((s) => <RecentSaleRow key={s.key} s={s} now={m.now} />)}
+        </>
+      ) : <div className="ciw-empty-inline">No recorded sales in this search.</div>}
+    </Section>
   )
 }
 

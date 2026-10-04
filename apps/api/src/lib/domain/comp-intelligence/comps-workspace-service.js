@@ -44,6 +44,7 @@ import { canonicalFlag, canonicalPropertyIds } from './canonical-property-ids.js
 import { REASON_LABELS } from './comps-reason-labels.js'
 import { displayableCompanyName } from '../entity-graph/buyer-name-privacy.js'
 import { ENGINE_COMP_DETAIL_COLUMNS, engineRulesFor, engineSearchWindow } from './comps-engine-rules.js'
+import { BUYER_MATCH_SALES_SOURCE, loadBuyerMatchSales } from '../buyer-match/buyer-match-sales.js'
 
 const DAY = 86_400_000
 const clean = (v) => String(v ?? '').trim()
@@ -407,6 +408,88 @@ export function setStats(comps) {
 
 export { canonicalPropertyIds }
 
+/*
+ * RECENT MARKET SALES (display only, 2026-10-04). The engine pool
+ * (get_comp_candidates_for_subject -> v_recent_sold_comps) is a frozen import
+ * whose newest sale is 2026-05-08; it stays the VALUATION source until an
+ * owner-approved shadow comparison says otherwise. What the operator browses
+ * as "recent sales near this property" reads the canonical sales projection
+ * instead (public.mv_map_market_sales, refreshed daily) through the Buyer
+ * Match sales adapter, with its price rule: price > 0 is a priced sale;
+ * zero / NULL is transaction activity only (no price, no $/sf). Never scored,
+ * never priced, never folded into the comp set.
+ */
+export const RECENT_SALES_LIMIT = 40
+const RECENT_SALES_READ = 120
+
+const latestDate = (dates) => dates.filter(Boolean).map(String).sort().pop() ?? null
+
+/** Pure: one adapter sale -> the workspace's recent-sale row. */
+export function shapeRecentSale(s) {
+  return {
+    key: `m:${clean(s.comp_id)}`,
+    propertyId: clean(s.property_id) || null,
+    address: clean(s.address) || null,
+    city: clean(s.city) || null,
+    state: clean(s.state) || null,
+    zip: clean(s.zip) || null,
+    lat: num(s.lat),
+    lng: num(s.lng),
+    soldOn: clean(s.sold_on) || null,
+    price: s.is_priced ? pos(s.price) : null,
+    priced: s.is_priced === true && pos(s.price) !== null,
+    ppsf: s.is_priced ? pos(s.ppsf) : null,
+    saleSource: s.sale_source === 'mls' ? 'mls' : 'public_record',
+    docType: clean(s.doc_type) || null,
+    armsLength: s.is_arms_length === true ? true : s.is_arms_length === false ? false : null,
+    cash: s.is_cash_purchase === true ? true : s.is_cash_purchase === false ? false : null,
+    buyerCompany: s.buyer || null,
+    buyerClass: clean(s.buyer_class) || null,
+    investor: s.is_investor === true,
+    portfolioSize: num(s.portfolio_size),
+    propertyType: clean(s.property_type) || null,
+    beds: num(s.beds),
+    baths: num(s.baths),
+    sqft: pos(s.sqft),
+    yearBuilt: pos(s.year_built),
+    units: pos(s.units),
+    distanceMiles: num(s.distance_miles),
+  }
+}
+
+/** Pure: adapter result -> the workspace's recentSales block, newest first. */
+export function recentSalesBlock(result, { radiusMiles, months, limit = RECENT_SALES_LIMIT } = {}) {
+  if (!result) return { available: false, source: BUYER_MATCH_SALES_SOURCE, reason: 'no_subject_coordinates', rows: [] }
+  if (result.error) return { available: false, source: BUYER_MATCH_SALES_SOURCE, reason: 'read_failed', rows: [] }
+  const all = arr(result.sales).map(shapeRecentSale)
+  all.sort((a, b) => String(b.soldOn ?? '').localeCompare(String(a.soldOn ?? '')) || (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
+  const rows = all.slice(0, limit)
+  return {
+    available: true,
+    source: BUYER_MATCH_SALES_SOURCE,
+    radiusMiles: num(result.meta?.radius_miles) ?? radiusMiles ?? null,
+    months: months ?? null,
+    latestSale: latestDate(all.map((r) => r.soldOn)),
+    read: all.length,
+    priced: rows.filter((r) => r.priced).length,
+    activityOnly: rows.filter((r) => !r.priced).length,
+    rows,
+  }
+}
+
+/**
+ * Pure: how fresh each corpus on this surface is — the newest sale each one
+ * actually carried into this payload, so the UI can say "engine pool, as of".
+ */
+export function freshnessOf(comps, recent, engineRun) {
+  const of = (corpus) => latestDate(arr(comps).filter((c) => c.corpus === corpus).map((c) => c.saleDate))
+  return {
+    valuationPool: { source: 'v_recent_sold_comps', latestSale: of('engine_pool'), engineRunAt: engineRun?.computedAt ?? null },
+    transactions: { source: 'comp_private.mv_comp_market_evidence', latestSale: of('transaction_corpus') },
+    recentSales: { source: BUYER_MATCH_SALES_SOURCE, latestSale: recent?.available ? recent.latestSale : null },
+  }
+}
+
 export async function getCompsWorkspace({ propertyId, radius = null, months = null } = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
   const now = new Date(deps.now ?? Date.now())
@@ -457,7 +540,7 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
   }
 
   const hasGeo = subjectView.lat !== null && subjectView.lng !== null
-  const [scoreRes, poolRes, corpusRes, cellRes, oppRes] = await Promise.all([
+  const [scoreRes, poolRes, corpusRes, cellRes, oppRes, salesRes] = await Promise.all([
     client.from('property_acquisition_scores')
       .select([
         'valuation_low, valuation_mid, valuation_high, valuation_confidence, recommended_cash_offer, minimum_acceptable_offer, decision_tier, computed_at',
@@ -473,6 +556,12 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
       : Promise.resolve({ data: null }),
     subjectView.zip ? client.rpc('comps_market_cell', { p_zip: subjectView.zip, p_asset_family: cellFamily(subject), p_window_days: 365 }) : Promise.resolve({ data: null }),
     client.from('acquisition_opportunities').select('id, acquisition_stage, asking_price, metadata').eq('primary_property_id', pid).order('updated_at', { ascending: false }).limit(1),
+    // display only — a failed read never fails the workspace
+    hasGeo
+      ? Promise.resolve()
+        .then(() => (deps.loadSales || loadBuyerMatchSales)({ lat: subjectView.lat, lng: subjectView.lng, radius_miles: radiusMiles, months: monthsBack, priced: 'all', limit: RECENT_SALES_READ }, { db: client, now }))
+        .catch((error) => ({ error }))
+      : Promise.resolve(null),
   ])
   if (poolRes.error) throw poolRes.error
 
@@ -592,6 +681,8 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
   const opp = arr(oppRes.data)[0] || null
   const ns = obj(obj(opp?.metadata).negotiation_state)
 
+  const recentSales = recentSalesBlock(salesRes, { radiusMiles, months: monthsBack })
+
   return {
     generatedAt: now.toISOString(),
     query: {
@@ -649,5 +740,7 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
       admissible: cell.admissible === true,
     } : null,
     comps: all,
+    recentSales,
+    freshness: freshnessOf(all, recentSales, engineRun),
   }
 }

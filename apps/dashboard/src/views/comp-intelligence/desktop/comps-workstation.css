@@ -435,6 +435,11 @@
 .ciw-sec__chev { width: 7px; height: 7px; flex: none; margin: 0 4px 3px 2px; border-right: 1.5px solid var(--lc-ink-3); border-bottom: 1.5px solid var(--lc-ink-3); transform: rotate(-45deg); transition: transform var(--lc-dur-select) var(--lc-ease-standard); }
 .ciw-sec.is-open .ciw-sec__chev { transform: rotate(45deg); }
 .ciw-sec__body { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
+/* valuation-pool freshness + recent market sales (display only) */
+.ciw-sec__note { padding: 4px 10px 6px; font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.ciw-row.is-static { cursor: default; }
+.ciw-row.is-recent { grid-template-areas: 'glyph main figures' 'glyph main figures'; }
+.ciw-row.is-activity .ciw-row__photo img { filter: saturate(0.6); }
 .ciw-empty-inline, .ciw-empty-block { padding: 12px 10px; font: var(--lc-t-meta); color: var(--lc-ink-3); }
 .ciw-empty-block { padding: 28px 16px; text-align: center; }
 .ciw-more { display: flex; justify-content: center; padding: 6px 0 2px; }

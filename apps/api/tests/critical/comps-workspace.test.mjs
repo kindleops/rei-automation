@@ -7,7 +7,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canonicalPropertyIds, compareToSubject, dimensionsFor, enginePoolInput, engineRunFrom, evidenceSufficiency, getCompsWorkspace, REASON_LABELS, setStats } from '../../src/lib/domain/comp-intelligence/comps-workspace-service.js'
+import { canonicalPropertyIds, compareToSubject, dimensionsFor, enginePoolInput, engineRunFrom, evidenceSufficiency, freshnessOf, getCompsWorkspace, REASON_LABELS, recentSalesBlock, setStats } from '../../src/lib/domain/comp-intelligence/comps-workspace-service.js'
 import { normalizePropertyFeatures, scoreComparable } from '../../src/lib/acquisition/acquisitionDecisionEngine.js'
 
 const DAY = 86_400_000
@@ -229,4 +229,63 @@ test('canonicalPropertyIds: chunked, de-duplicated, and unknown (null) when the 
   assert.equal(found.has('3'), false)
   const failing = { from: () => ({ select: () => ({ in: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }) }) }
   assert.equal(await canonicalPropertyIds(failing, ['1']), null)
+})
+
+/* ── recent market sales (display only, 2026-10-04) ─────────────────────
+ * The browse surface reads the canonical sales projection through the Buyer
+ * Match adapter; the engine pool (valuation) is untouched. */
+
+const SALE = (over) => ({ comp_id: 't:1', property_id: 'P-9', sold_on: '2026-08-17', price: 250000, is_priced: true, ppsf: 210, sale_source: 'public_record', address: '9 Recent St', lat: 45.05, lng: -93.31, distance_miles: 0.4, ...over })
+
+test('recent sales are newest first and follow the price rule (zero / null = activity only)', () => {
+  const block = recentSalesBlock({ sales: [
+    SALE({ comp_id: 't:old', sold_on: '2026-03-01' }),
+    SALE({ comp_id: 't:new', sold_on: '2026-09-02' }),
+    SALE({ comp_id: 't:zero', sold_on: '2026-08-30', price: null, is_priced: false, ppsf: null }),
+  ], meta: { radius_miles: 1 } }, { radiusMiles: 4, months: 30 })
+  assert.equal(block.available, true)
+  assert.equal(block.source, 'mv_map_market_sales')
+  assert.equal(block.radiusMiles, 1)
+  assert.deepEqual(block.rows.map((r) => r.key), ['m:t:new', 'm:t:zero', 'm:t:old'])
+  assert.equal(block.latestSale, '2026-09-02')
+  const zero = block.rows[1]
+  assert.equal(zero.priced, false)
+  assert.equal(zero.price, null)
+  assert.equal(zero.ppsf, null)
+  assert.equal(block.priced, 2)
+  assert.equal(block.activityOnly, 1)
+  // a stray price on an unpriced row never leaks through
+  assert.equal(recentSalesBlock({ sales: [SALE({ price: 5, is_priced: false })] }).rows[0].price, null)
+})
+
+test('recent sales degrade honestly: no coordinates, or a failed read', () => {
+  assert.deepEqual(recentSalesBlock(null), { available: false, source: 'mv_map_market_sales', reason: 'no_subject_coordinates', rows: [] })
+  assert.equal(recentSalesBlock({ error: new Error('x') }).reason, 'read_failed')
+})
+
+test('freshness names each corpus and the newest sale it carried', () => {
+  const f = freshnessOf([
+    { corpus: 'engine_pool', saleDate: '2026-04-28' }, { corpus: 'engine_pool', saleDate: '2026-01-02' },
+    { corpus: 'transaction_corpus', saleDate: '2026-08-17' },
+  ], { available: true, latestSale: '2026-09-02' }, { computedAt: '2026-10-01T12:58:05Z' })
+  assert.deepEqual(f.valuationPool, { source: 'v_recent_sold_comps', latestSale: '2026-04-28', engineRunAt: '2026-10-01T12:58:05Z' })
+  assert.equal(f.transactions.latestSale, '2026-08-17')
+  assert.equal(f.recentSales.latestSale, '2026-09-02')
+})
+
+test('workspace carries recent sales without touching the valuation set', async () => {
+  const { client } = workspaceFixture()
+  const asked = []
+  const loadSales = async (q, deps) => { asked.push({ q, db: deps.db === client }); return { sales: [SALE({})], meta: { radius_miles: 1 } } }
+  const w = await getCompsWorkspace({ propertyId: 'S1' }, { supabase: client, now: WS_NOW, loadSales })
+  assert.equal(asked.length, 1)
+  assert.equal(asked[0].db, true)
+  assert.equal(asked[0].q.priced, 'all')
+  assert.equal(asked[0].q.radius_miles, 4)
+  assert.equal(w.recentSales.rows.length, 1)
+  assert.equal(w.freshness.valuationPool.latestSale, '2026-04-22')
+  assert.equal(w.comps.some((c) => c.key.startsWith('m:')), false)
+  const base = await getCompsWorkspace({ propertyId: 'S1' }, { supabase: workspaceFixture().client, now: WS_NOW, loadSales: async () => { throw new Error('mv down') } })
+  assert.equal(base.recentSales.available, false)
+  assert.deepEqual(base.comps.map((c) => [c.key, c.state, c.engine?.weight]), w.comps.map((c) => [c.key, c.state, c.engine?.weight]))
 })
