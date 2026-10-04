@@ -408,13 +408,32 @@ export const PIPELINE_SCOPE_COLUMNS = [
   'creative_ineligible_reason', 'novation_ineligible_reason', 'last_presented_terms_id', 'favorable_spread',
 ].join(',')
 
-async function loadScope(client, params) {
+export const VISIBILITY_OVERLAY_COLUMNS = 'archived_at,archived_by,archive_reason'
+
+/**
+ * Is the lead-visibility overlay live? (flag lead_visibility_sync_enabled +
+ * schema probe). Injected deps decide in tests; an injected client without a
+ * gate means "off" so tests never reach the real system_control.
+ */
+async function visibilityOverlay(deps = {}) {
+  try {
+    if (typeof deps.visibilityGate === 'function') return (await deps.visibilityGate()).enabled === true
+    if (deps.supabase) return false
+    const { getLeadVisibilityGate } = await import('@/lib/domain/lead-visibility/lead-visibility-gate.js')
+    return (await getLeadVisibilityGate()).enabled === true
+  } catch {
+    return false
+  }
+}
+
+async function loadScope(client, params, { overlay = false } = {}) {
   const run = (columns) => {
     let query = client.from('acquisition_opportunities').select(columns)
     query = applyFilters(query, { ...params, scope: clean(params.scope) || 'active' })
     return query.order('last_activity_at', { ascending: false, nullsFirst: false }).limit(SCOPE_CAP)
   }
-  let { data, error } = await run(PIPELINE_SCOPE_COLUMNS)
+  // the lead-visibility overlay columns are named ONLY when its gate confirmed they exist
+  let { data, error } = await run(overlay ? `${PIPELINE_SCOPE_COLUMNS},${VISIBILITY_OVERLAY_COLUMNS}` : PIPELINE_SCOPE_COLUMNS)
   // One unknown column fails the whole PostgREST query; a renamed or dropped
   // column must cost this page its speed, never the page.
   if (error && (error.code === '42703' || /column/i.test(String(error.message || '')))) {
@@ -457,7 +476,7 @@ async function loadEvidence(client, rows) {
   const liveStatuses = [...SEND_IN_FLIGHT, ...SEND_HELD]
   const [threads, executions, closings, recentQueue, liveQueue, triggers] = await Promise.all([
     inChunks(threadKeys, async (keys) => (await client.from('inbox_thread_state')
-      .select('thread_key, inbox_bucket, is_suppressed, suppressed_at, operational_status, latest_direction, last_inbound_at, last_outbound_at, latest_message_body, latest_message_at, pending_queue_count, is_hot_lead, automation_lane, is_read, snoozed_until, follow_up_at, next_scheduled_for, message_count, inbound_count, latest_delivery_status')
+      .select('thread_key, inbox_bucket, is_suppressed, suppressed_at, operational_status, latest_direction, last_inbound_at, last_outbound_at, latest_message_body, latest_message_at, pending_queue_count, is_hot_lead, automation_lane, is_read, snoozed_until, follow_up_at, next_scheduled_for, message_count, inbound_count, latest_delivery_status, is_archived, archived_at, archive_scope')
       .in('thread_key', keys)).data),
     inChunks(threadKeys, async (keys) => (await client.from('seller_automation_executions')
       .select('thread_id, status, lifecycle_stage, metadata, created_at')
@@ -585,6 +604,16 @@ function shapeCard(opp, ev, now) {
       emd: num(closing.earnest_money),
     } : null,
     createdAt: opp.created_at || null,
+    // S1: the conversation's own visibility facts, read beside the deal (never written here)
+    conversation: thread ? {
+      archived: thread.is_archived === true,
+      archivedAt: thread.archived_at || null,
+      archiveScope: clean(thread.archive_scope) || null,
+      snoozedUntil: thread.snoozed_until && Date.parse(thread.snoozed_until) > now ? thread.snoozed_until : null,
+      unread: thread.is_read === false,
+    } : null,
+    // the lead-visibility overlay (present only once its schema exists and the gate is on)
+    archived: opp.archived_at ? { at: opp.archived_at, by: clean(opp.archived_by) || null, reason: clean(opp.archive_reason) || null } : null,
     ext: extendedCardFields(opp, thread),
   }
 }
@@ -771,18 +800,21 @@ export function stageAging(cards, stage) {
 
 /** Short-lived memo so the overview and the first feed page share one scope load. */
 const memo = new Map()
-async function scopeCards(client, params) {
-  const key = JSON.stringify({ s: params.scope || 'active', q: params.q || '', m: params.market || '', p: params.property_type || '', t: params.temperature || '' })
+async function scopeCards(client, params, { overlay = false } = {}) {
+  const key = JSON.stringify({ s: params.scope || 'active', q: params.q || '', m: params.market || '', p: params.property_type || '', t: params.temperature || '', v: overlay ? 1 : 0 })
   const hit = memo.get(key)
   if (hit && Date.now() - hit.at < 45_000) return hit.value
   const now = Date.now()
-  const loaded = await loadScope(client, params)
+  const loaded = await loadScope(client, params, { overlay })
   // Hydrate first: a fixture's address can live only on the property row.
   const [rows, synthetic] = withoutSyntheticOpportunities(await batchHydrateOpportunityProperties(client, loaded))
   const ev = await loadEvidence(client, rows)
   let cards = rows.map((r) => shapeCard(r, ev, now))
   if (clean(params.temperature)) cards = cards.filter((c) => c.temperature === clean(params.temperature))
-  const value = { cards, capped: loaded.length >= SCOPE_CAP, excluded: { synthetic } }
+  // lead visibility: an archived deal leaves every working view and count (it keeps its stage/status)
+  const archivedCards = overlay ? cards.filter((c) => c.archived) : []
+  if (overlay) cards = cards.filter((c) => !c.archived)
+  const value = { cards, archivedCards, capped: loaded.length >= SCOPE_CAP, excluded: { synthetic } }
   memo.set(key, { at: Date.now(), value })
   if (memo.size > 40) memo.delete(memo.keys().next().value)
   return value
@@ -790,7 +822,8 @@ async function scopeCards(client, params) {
 
 export async function getPipelineCommandOverview(params = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
-  const { cards, capped, excluded } = await scopeCards(client, params)
+  const overlay = await visibilityOverlay(deps)
+  const { cards, archivedCards, capped, excluded } = await scopeCards(client, params, { overlay })
   const movement = await loadMovement(client, cards, { days: 7, limit: 40 })
   const dayAgo = Date.now() - DAY
   const movedToday = new Set(movement.filter((m) => Date.parse(m.at) > dayAgo).map((m) => m.opportunityId))
@@ -852,6 +885,8 @@ export async function getPipelineCommandOverview(params = {}, deps = {}) {
       machine: OWNER_ORDER.filter((k) => !['needs_you', 'blocked'].includes(k)).reduce((n, k) => n + (ownership[k] || 0), 0),
       needsYou: ownership.needs_you || 0,
       blocked: ownership.blocked || 0,
+      // lead visibility: deals hidden by archive (null while the overlay is off — not a zero)
+      archived: overlay ? archivedCards.length : null,
     },
     stages,
     groups: STAGE_GROUPS.map((g) => ({ ...g, count: stages.filter((s) => g.stages.includes(s.code)).reduce((n, s) => n + s.count, 0) })),
@@ -865,8 +900,11 @@ export async function getPipelineCommandOverview(params = {}, deps = {}) {
 
 export async function getPipelineCommandFeed(params = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
-  const { cards, capped } = await scopeCards(client, params)
+  const scoped = await scopeCards(client, params, { overlay: await visibilityOverlay(deps) })
+  const { capped } = scoped
   const view = clean(params.view) || 'all'
+  // lead visibility: the Archived view reads the overlay-archived deals (empty while the flag is off)
+  const cards = view === 'archived' ? scoped.archivedCards : scoped.cards
   let movedIds = new Set()
   if (view === 'moving') {
     const movement = await loadMovement(client, cards, { days: 7, limit: 400 })
@@ -874,7 +912,7 @@ export async function getPipelineCommandFeed(params = {}, deps = {}) {
   }
   const sortKey = SORTS[clean(params.sort)] ? clean(params.sort) : (VIEW_DEFAULT_SORT[view.split(':')[0]] || (view.startsWith('stage:') || view.startsWith('group:') ? 'urgent' : 'progression'))
   const filtered = cards
-    .filter((c) => matchesView(c, view, movedIds))
+    .filter((c) => (view === 'archived' ? true : matchesView(c, view, movedIds)))
     .filter((c) => (params.lane ? c.lane.key === clean(params.lane) : true))
     .filter((c) => (params.stalled === '1' ? Boolean(c.stall) : true))
     .sort(SORTS[sortKey])
@@ -894,7 +932,7 @@ export async function getPipelineCommandFeed(params = {}, deps = {}) {
 export async function getPipelineCommandPoints(params = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
   const feed = await getPipelineCommandFeed({ ...params, limit: 100, cursor: 0 }, deps)
-  const { cards } = await scopeCards(client, params)
+  const { cards } = await scopeCards(client, params, { overlay: await visibilityOverlay(deps) })
   const view = clean(params.view) || 'all'
   const ids = (params.view ? cards.filter((c) => matchesView(c, view, new Set())) : cards).map((c) => c.propertyId).filter(Boolean).slice(0, 2000)
   const props = await inChunks(ids, async (part) => (await client.from('properties').select('property_id, latitude, longitude, property_address_full').in('property_id', part)).data)
@@ -971,7 +1009,7 @@ export async function getPipelineCommandFlow(params = {}, deps = {}) {
   const period = FLOW_PERIODS[clean(params.period)] ? clean(params.period) : '7d'
   const days = FLOW_PERIODS[period]
   const since = new Date(now - days * DAY).toISOString()
-  const { cards, capped, excluded } = await scopeCards(client, params)
+  const { cards, capped, excluded } = await scopeCards(client, params, { overlay: await visibilityOverlay(deps) })
   const byId = new Map(cards.map((c) => [c.id, c]))
   const threadKeys = [...new Set(cards.map((c) => c.threadKey).filter(Boolean))]
   const HISTORY_COLS = 'id, opportunity_id, event_type, previous_value, new_value, reason, actor, source, created_at'
@@ -1285,7 +1323,7 @@ export function deriveOfferReadiness({ score = null, negotiation = null } = {}) 
 
 export async function getPipelineCommandOffers(params = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
-  const { cards, capped, excluded } = await scopeCards(client, params)
+  const { cards, capped, excluded } = await scopeCards(client, params, { overlay: await visibilityOverlay(deps) })
   const propertyIds = [...new Set(cards.map((c) => c.propertyId).filter(Boolean))]
   const oppIds = cards.map((c) => c.id)
   const [scores, offers] = await Promise.all([
