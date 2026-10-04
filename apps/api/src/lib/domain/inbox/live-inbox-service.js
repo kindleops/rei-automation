@@ -2777,7 +2777,77 @@ async function readLegacyCountRow(supabase) {
   }
 }
 
+/**
+ * ONE COUNTS READ PER PROCESS PER WINDOW (RC 8.3.2 hotfix, 2026-10-04).
+ *
+ * Every /inbox/live and /inbox/counts call ran v_inbox_bucket_counts AND
+ * v_inbox_thread_counts_live_v2 (two full aggregates) with no cache. Measured
+ * 07:45-08:09Z: ~55 calls/min of each from the prod container; 381 + 482 ended
+ * in statement timeouts (57014) after 18-21 s, and every other query queued
+ * behind them (inbox_thread_state reads avg 3.9 s, max 115 s). That is what made
+ * each bulk-archive item take 20-40 s and an 11-item request outlive the
+ * client's 120 s deadline -- although all 11 were in fact archived.
+ *
+ * Concurrent callers now share one in-flight computation; a good result serves
+ * the next COUNTS_SHARED_TTL_MS; when the views fail, the last good counts
+ * (<= COUNTS_STALE_MAX_MS old) are served marked approximate+stale instead of
+ * falling through to the expensive fallbacks. Keyed by client and by the
+ * options that change the computation, so test doubles never share a slot.
+ */
+export const COUNTS_SHARED_TTL_MS = 10_000;
+export const COUNTS_STALE_MAX_MS = 5 * 60_000;
+const liveCountsShared = new WeakMap();
+const DEFAULT_COUNTS_OWNER = {};
+
+function liveCountsSlot(supabase, deps) {
+  const owner = supabase && typeof supabase === "object" ? supabase : DEFAULT_COUNTS_OWNER;
+  let byKey = liveCountsShared.get(owner);
+  if (!byKey) {
+    byKey = new Map();
+    liveCountsShared.set(owner, byKey);
+  }
+  const key = `${deps.preferredThreadSource || ""}|${deps.disableCountFullScan === true ? 1 : 0}`;
+  let slot = byKey.get(key);
+  if (!slot) {
+    slot = { at: 0, value: null, inFlight: null };
+    byKey.set(key, slot);
+  }
+  return slot;
+}
+
+const isGoodCounts = (value) => Boolean(value && value.counts && value.degraded !== true);
+const copyCounts = (value) => ({ ...value, counts: { ...(value?.counts || {}) } });
+
 async function getLiveCountsWithMeta(params = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase;
+  if (deps.disableCountsCache === true) return computeLiveCountsWithMeta(params, deps);
+  const slot = liveCountsSlot(supabase, deps);
+  if (slot.value && Date.now() - slot.at < COUNTS_SHARED_TTL_MS) return copyCounts(slot.value);
+  if (!slot.inFlight) {
+    const lastGood = slot.value;
+    const lastGoodAt = slot.at;
+    const canServeStale = () => isGoodCounts(lastGood) && Date.now() - lastGoodAt < COUNTS_STALE_MAX_MS;
+    const stale = () => ({ ...lastGood, approximate: true, stale: true, staleAgeMs: Date.now() - lastGoodAt });
+    slot.inFlight = computeLiveCountsWithMeta(params, deps)
+      .then((value) => {
+        if (isGoodCounts(value)) {
+          slot.value = value;
+          slot.at = Date.now();
+          return value;
+        }
+        return canServeStale() ? stale() : value;
+      }, (error) => {
+        if (canServeStale()) return stale();
+        throw error;
+      })
+      .finally(() => {
+        slot.inFlight = null;
+      });
+  }
+  return copyCounts(await slot.inFlight);
+}
+
+async function computeLiveCountsWithMeta(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const disableCountFullScan = deps.disableCountFullScan === true;
   const nowMs = Date.now();
