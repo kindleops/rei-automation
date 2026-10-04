@@ -175,6 +175,18 @@ export function openInboxThread(target: PendingInboxThread) {
   window.setTimeout(() => window.dispatchEvent(new CustomEvent(OPEN_INBOX_THREAD_EVENT)), 60)
 }
 
+/**
+ * Stage a conversation for the Inbox WITHOUT navigating — for a caller that
+ * places the Inbox itself (the desktop workspace's Open Beside). The Inbox
+ * instance that mounts or is focused consumes it exactly like openInboxThread.
+ */
+export function stageInboxThread(target: PendingInboxThread) {
+  if (typeof window === 'undefined' || !target.threadKey) return
+  try { sessionStorage.setItem(PENDING_THREAD_KEY, JSON.stringify(target)) } catch { /* the pane path still carries it */ }
+  window.dispatchEvent(new CustomEvent(OPEN_INBOX_THREAD_EVENT))
+  window.setTimeout(() => window.dispatchEvent(new CustomEvent(OPEN_INBOX_THREAD_EVENT)), 60)
+}
+
 export function peekPendingInboxThread(): PendingInboxThread | null {
   if (typeof window === 'undefined') return null
   try {

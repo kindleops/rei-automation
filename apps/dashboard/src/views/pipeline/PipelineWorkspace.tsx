@@ -68,10 +68,9 @@ export function PipelineWorkspace(props: PipelineWorkspaceProps) {
   const { isMobile, isModernDesktop } = useBreakpoint()
   if (isModernDesktop) {
     return (
-      <PipelineDesk
-        onOpenCommandView={props.onOpenCommandView}
-        onOpenDealIntelligence={props.onOpenDealIntelligence}
-      />
+      // Cross-app opens go beside Pipeline (desk/pipeline-open), never through
+      // the hosting Inbox's own view switches.
+      <PipelineDesk />
     )
   }
   if (isMobile) {

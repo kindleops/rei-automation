@@ -29,6 +29,7 @@ export type InspectorActions = {
   onMap?: (card: DeskCard) => void
   onEntityGraph?: (card: DeskCard) => void
   onBuyerMatch?: (card: DeskCard) => void
+  onComps?: (card: DeskCard) => void
   onClosingDesk?: (card: DeskCard) => void
 }
 
@@ -156,13 +157,15 @@ function Quote({ who, at, now, out, children }: { who: string; at: string | null
 function InspectorFooter({ card, actions }: { card: DeskCard; actions: InspectorActions }) {
   return (
     <div className="pd2-insp__foot">
-      {card.threadKey && actions.onConversation ? <LCButton variant="primary" size="sm" icon="message" onClick={() => actions.onConversation?.(card)}>Open conversation</LCButton> : null}
-      {(card.threadKey || card.propertyId) && actions.onDealIntelligence ? <LCButton variant="secondary" size="sm" icon="brain" onClick={() => actions.onDealIntelligence?.(card)}>Deal Intelligence</LCButton> : null}
+      {/* Every hand-off opens BESIDE Pipeline (desk/pipeline-open); Pipeline stays as it is. */}
+      {card.threadKey && actions.onConversation ? <LCButton variant="primary" size="sm" icon="message" trailingIcon="arrow-up-right" title="Opens the conversation in the Inbox, beside Pipeline" onClick={() => actions.onConversation?.(card)}>Open conversation</LCButton> : null}
+      {(card.threadKey || card.propertyId) && actions.onDealIntelligence ? <LCButton variant="secondary" size="sm" icon="brain" trailingIcon="arrow-up-right" title="Opens the Deal Intelligence app on this property, beside Pipeline" onClick={() => actions.onDealIntelligence?.(card)}>Deal Intelligence</LCButton> : null}
       <span className="pd2-insp__icons">
         {card.propertyId && actions.onMap ? <LCIconButton icon="map" label="Show on Map" size="sm" onClick={() => actions.onMap?.(card)} /> : null}
-        {card.propertyId && actions.onEntityGraph ? <LCIconButton icon="layers" label="Open in Entity Graph" size="sm" onClick={() => actions.onEntityGraph?.(card)} /> : null}
-        {card.propertyId && actions.onBuyerMatch && (card.stageIndex ?? 0) >= 5 ? <LCIconButton icon="users" label="Buyer Match" size="sm" onClick={() => actions.onBuyerMatch?.(card)} /> : null}
-        {card.closing && actions.onClosingDesk ? <LCIconButton icon="briefcase" label="Closing Desk" size="sm" onClick={() => actions.onClosingDesk?.(card)} /> : null}
+        {card.propertyId && actions.onEntityGraph ? <LCIconButton icon="layers" label="Open Entity Graph beside" size="sm" onClick={() => actions.onEntityGraph?.(card)} /> : null}
+        {card.propertyId && actions.onComps ? <LCIconButton icon="stats" label="Open Comp Intelligence beside" size="sm" onClick={() => actions.onComps?.(card)} /> : null}
+        {card.propertyId && actions.onBuyerMatch && (card.stageIndex ?? 0) >= 5 ? <LCIconButton icon="users" label="Open Buyer Match beside" size="sm" onClick={() => actions.onBuyerMatch?.(card)} /> : null}
+        {card.closing && actions.onClosingDesk ? <LCIconButton icon="briefcase" label="Open Closing Desk beside" size="sm" onClick={() => actions.onClosingDesk?.(card)} /> : null}
         {/* [8.2] the deal's full object actions: Open beside, Inspect, Show property, missions */}
         <ObjectMenuButton object={deskDealObject(card)} omit={['open']} showOnMap={{ source: 'pipeline' }} />
       </span>

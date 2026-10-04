@@ -4,16 +4,24 @@
  * row opens the deal inspector. No inline edits, no stage moves.
  * [8.3] Multi-select (checkbox · ⇧ range · ⌘ toggle · ⌘A · Esc) → bulk Archive
  * through the canonical opportunity status, with Undo.
+ * Columns come from the catalog (./pipeline-columns): the operator picks,
+ * orders and sizes them (DeskColumnPicker); the layout persists per operator.
+ * Property / owner / engine columns load only while shown, for the deals in
+ * view (./use-pipeline-enrichment).
  */
-import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
+import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { LCButton, LCDataGrid, LCSegmented, LCStatus, type LCColumn, type LCRowActivationEvent, type LCSort } from '../../../shared/lc'
 import { compactMoney } from '../../../domain/pipeline/pipeline-command-api'
 import { sound } from '../../../shared/sound'
-import type { DeskCard } from './pipeline-desk-api'
+import { useAuth } from '../../../components/auth/AuthProvider'
+import type { DeskCard, DeskOfferRow, DeskOffers } from './pipeline-desk-api'
+import { COLUMN_BY_ID, formatValue, normalizeLayout, sortKey, DEFAULT_COLUMNS, type ColumnLayout, type DeskColumnDef, type RowContext } from './pipeline-columns'
+import { usePipelineEnrichment } from './use-pipeline-enrichment'
+import { DeskColumnPicker } from './DeskColumnPicker'
 import { LCBulkBar, useLcSelection } from '../../../shared/lc'
 import { useBulkArchive } from '../../../lib/data/useBulkArchive'
 import type { BulkRunReport } from '../../../lib/data/bulkArchiveData'
-import { HOLD_META, OWNER_META, STAGE_CODES, STAGE_SHORT_LABEL, fmtInt, relShort, stageTag, type LiveOwner } from './pipeline-desk-model'
+import { HOLD_META, OWNER_META, STAGE_CODES, STAGE_SHORT_LABEL, fmtInt, intentWords, stageTag, stampCT, type LiveOwner } from './pipeline-desk-model'
 
 type GroupBy = 'none' | 'stage' | 'owner'
 const GROUPS: ReadonlyArray<{ value: GroupBy; label: string }> = [
@@ -29,21 +37,41 @@ const DEAL_ARCHIVE_EFFECTS = [
 ]
 const EMPTY_IDS: ReadonlySet<string> = new Set()
 
-const OWNER_RANK: Record<string, number> = { blocked: 0, needs_you: 1, autopilot: 2, scheduled: 3, external: 4, seller: 5, dormant: 6, closed_out: 7, complete: 8 }
+const LAYOUT_KEY = 'nexus.pipeline.desk.columns.v1'
+type Stored = ColumnLayout & { sort?: LCSort; group?: GroupBy }
 
-const SORTERS: Record<string, (c: DeskCard) => number | string> = {
-  deal: (c) => (c.address || c.seller || '').toLowerCase(),
-  stage: (c) => c.stageIndex ?? 0,
-  owner: (c) => OWNER_RANK[c.owner] ?? 9,
-  age: (c) => c.daysInStage ?? -1,
-  value: (c) => c.money.value ?? -1,
-  ask: (c) => c.money.asking ?? -1,
-  activity: (c) => (c.lastActivityAt ? Date.parse(c.lastActivityAt) : 0),
-  market: (c) => (c.market || '').toLowerCase(),
+function readLayout(key: string): Stored {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(key) || 'null') as Stored | null
+    const layout = normalizeLayout(raw)
+    const sort = raw?.sort && typeof raw.sort.id === 'string' && COLUMN_BY_ID.get(raw.sort.id)?.sortable ? raw.sort : { id: 'owner', dir: 'asc' as const }
+    const group = raw?.group === 'stage' || raw?.group === 'owner' ? raw.group : 'none'
+    return { ...layout, sort, group }
+  } catch { return { visible: [...DEFAULT_COLUMNS], sort: { id: 'owner', dir: 'asc' }, group: 'none' } }
 }
 
-export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDormant, onShowDormant, selectedId, onOpen, now, total, onBulkChanged }: {
+/** The operator's own table layout (columns, order, sort, grouping), per signed-in operator. */
+function useTableLayout() {
+  const uid = useAuth().user?.id || 'local'
+  const key = `${LAYOUT_KEY}:${uid}`
+  const [state, setState] = useState<{ key: string; v: Stored }>(() => ({ key, v: readLayout(key) }))
+  const v = state.key === key ? state.v : readLayout(key)
+  const save = useCallback((patch: Partial<Stored>) => {
+    setState((cur) => {
+      const next = { ...(cur.key === key ? cur.v : readLayout(key)), ...patch }
+      try { window.localStorage.setItem(key, JSON.stringify(next)) } catch { /* private mode */ }
+      return { key, v: next }
+    })
+  }, [key])
+  return { layout: v, save, uid }
+}
+
+const none = (text = '—') => <span className="pd2-none">{text}</span>
+
+export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDormant, onShowDormant, selectedId, onOpen, now, total, onBulkChanged, offers }: {
   rows: DeskCard[] | null
+  /** the Offers read the rail already holds — offer-on-record columns join it, no extra read */
+  offers?: DeskOffers | null
   loading: boolean
   error: string | null
   onRetry: () => void
@@ -58,23 +86,36 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
   /** [8.3] a bulk archive / undo changed deals — re-read the pipeline */
   onBulkChanged?: () => void
 }) {
-  const [sort, setSort] = useState<LCSort>({ id: 'owner', dir: 'asc' })
-  const [group, setGroup] = useState<GroupBy>('none')
+  const { layout, save, uid } = useTableLayout()
+  const sort = layout.sort ?? null
+  const group = layout.group ?? 'none'
+  const setSort = useCallback((next: LCSort) => save({ sort: next }), [save])
+  const setGroup = useCallback((next: GroupBy) => save({ group: next }), [save])
+  const offerById = useMemo(() => new Map<string, DeskOfferRow>((offers?.rows ?? []).map((r) => [r.card.id, r])), [offers])
   // [8.3] deals archived here leave the table at once; Undo brings them back
   const [archivedHere, setArchivedHere] = useState<{ rows: DeskCard[] | null; ids: ReadonlySet<string> }>({ rows, ids: EMPTY_IDS })
   const goneIds = archivedHere.rows === rows ? archivedHere.ids : EMPTY_IDS
+  const filtered = useMemo(
+    () => (rows ?? []).filter((c) => !goneIds.has(c.id) && c.owner !== 'closed_out' && (showDormant || c.owner !== 'dormant') && (!owner || c.owner === owner) && (!stage || c.stage === stage)),
+    [rows, goneIds, owner, stage, showDormant],
+  )
+  // property / owner / engine fields, only for the visible columns and the deals in view
+  const enrichment = usePipelineEnrichment(filtered, layout.visible)
+  const lookup = enrichment.lookup
+  const ctxOf = useCallback((c: DeskCard): RowContext => ({ card: c, x: lookup(c), offer: offerById.get(c.id) ?? null, now }), [lookup, offerById, now])
   const view = useMemo(() => {
-    const list = (rows ?? []).filter((c) => !goneIds.has(c.id) && c.owner !== 'closed_out' && (showDormant || c.owner !== 'dormant') && (!owner || c.owner === owner) && (!stage || c.stage === stage))
-    if (!sort) return list
-    const get = SORTERS[sort.id] ?? SORTERS.owner
+    const def = sort ? COLUMN_BY_ID.get(sort.id) : null
+    if (!sort || !def) return filtered
     const dir = sort.dir === 'asc' ? 1 : -1
-    return [...list].sort((a, b) => {
-      const x = get(a)
-      const y = get(b)
-      const d = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))
-      return d * dir || (b.daysInStage ?? 0) - (a.daysInStage ?? 0)
+    const keyed = filtered.map((c) => ({ c, k: sortKey(def.kind === 'custom' ? kindForSort(def) : def.kind, def.value(ctxOf(c))) }))
+    keyed.sort((a, b) => {
+      // empty always sorts last, whichever direction
+      if (a.k === null || b.k === null) return a.k === b.k ? (b.c.daysInStage ?? 0) - (a.c.daysInStage ?? 0) : a.k === null ? 1 : -1
+      const d = typeof a.k === 'number' && typeof b.k === 'number' ? a.k - b.k : String(a.k).localeCompare(String(b.k))
+      return d * dir || (b.c.daysInStage ?? 0) - (a.c.daysInStage ?? 0)
     })
-  }, [rows, goneIds, owner, stage, showDormant, sort])
+    return keyed.map((x) => x.c)
+  }, [filtered, sort, ctxOf])
 
   const order = useMemo(() => view.map((c) => c.id), [view])
   const selection = useLcSelection(order)
@@ -101,36 +142,22 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
   const onGridKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => { selectionKeyDown(e) }, [selectionKeyDown])
 
   const dormant = useMemo(() => (rows ?? []).filter((c) => c.owner === 'dormant').length, [rows])
-  const columns = useMemo<LCColumn<DeskCard>[]>(() => [
-    {
-      id: 'deal', header: 'Deal', minWidth: 210, sortable: true,
-      render: (c) => (
-        <span className="pd2-cell-deal">
-          <b>{c.address || c.seller || 'Unaddressed deal'}</b>
-          <small>{[c.address ? c.seller : null, c.market].filter(Boolean).join(' · ') || '—'}</small>
-        </span>
-      ),
-    },
-    { id: 'stage', header: 'Stage', width: 124, sortable: true, render: (c) => <span className="pd2-cell-stage"><i style={{ ['--c' as string]: `var(--pd2-stage-${c.stageIndex ?? 0})` }} />{stageTag(c.stageIndex, c.stage)}</span> },
-    { id: 'owner', header: 'Whose move', width: 150, sortable: true, render: (c) => <LCStatus label={OWNER_META[c.owner].label} tone={OWNER_META[c.owner].tone} quiet={!OWNER_META[c.owner].human} /> },
-    {
-      id: 'why', header: 'Why', minWidth: 210, hint: 'The evidence behind whose move it is',
-      render: (c) => (
-        <span className="pd2-cell-why" title={[c.lane.label, c.lane.detail, c.lane.evidence].filter(Boolean).join(' — ')}>
-          <span>{c.hold ? HOLD_META[c.hold].label : c.lane.label}</span>
-          <small>{c.lane.evidence || c.lane.detail || '—'}</small>
-        </span>
-      ),
-    },
-    {
-      id: 'age', header: 'In stage', width: 108, align: 'right', sortable: true, hint: 'Days in stage, against the stage’s own clock',
-      render: (c) => c.daysInStage === null ? <span className="pd2-none">—</span> : <span className={c.stall ? 'pd2-late' : undefined}>{c.daysInStage}d</span>,
-    },
-    { id: 'value', header: 'Est. value', width: 120, align: 'right', sortable: true, hint: 'Estimated value — the property record or the engine, never a price', render: (c) => compactMoney(c.money.value) ?? <span className="pd2-none">—</span> },
-    { id: 'ask', header: 'Seller ask', width: 124, align: 'right', sortable: true, hint: 'Stated by the seller', render: (c) => c.money.askImplausible ? <span className="pd2-flag" title={`Recorded as ${compactMoney(c.money.asking) ?? '—'} — looks mis-captured`}>Mis-captured</span> : compactMoney(c.money.asking) ?? <span className="pd2-none">—</span> },
-    { id: 'activity', header: 'Last activity', width: 112, align: 'right', sortable: true, hideable: true, hiddenByDefault: true, render: (c) => relShort(c.lastActivityAt, now) ?? <span className="pd2-none">—</span> },
-    { id: 'market', header: 'Market', width: 150, sortable: true, hideable: true, hiddenByDefault: true, render: (c) => c.market || <span className="pd2-none">—</span> },
-  ], [now])
+  const columns = useMemo<LCColumn<DeskCard>[]>(() => layout.visible.flatMap((id) => {
+    const def = COLUMN_BY_ID.get(id)
+    if (!def) return []
+    const numeric = ['money', 'int', 'num', 'pct', 'score', 'rel'].includes(def.kind) || ['age', 'ask', 'offer_record', 'p_year'].includes(def.id)
+    const pendingEnrich = Boolean(def.needs) && enrichment.loading
+    return [{
+      id: def.id,
+      header: def.header,
+      width: def.width,
+      minWidth: def.minWidth,
+      align: numeric ? 'right' as const : undefined,
+      sortable: def.sortable,
+      hint: [def.hint, `Source: ${def.source}`].filter(Boolean).join(' · '),
+      render: (c: DeskCard) => renderCell(def, ctxOf(c), pendingEnrich),
+    }]
+  }), [layout.visible, ctxOf, enrichment.loading])
 
   const groupBy = group === 'stage' ? (c: DeskCard) => c.stage : group === 'owner' ? (c: DeskCard) => c.owner : undefined
   const groupLabel = group === 'stage'
@@ -140,7 +167,7 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
   return (
     <section className="pd2-table" aria-label="Pipeline deals">
       <div className="pd2-table__bar">
-        <span className="pd2-table__count"><b className="lc-num">{fmtInt(view.length)}</b> deals{rows && total > rows.length ? <small> · first {fmtInt(rows.length)} of {fmtInt(total)} loaded</small> : null}</span>
+        <span className="pd2-table__count"><b className="lc-num">{fmtInt(view.length)}</b> deals{rows && total > rows.length ? <small> · first {fmtInt(rows.length)} of {fmtInt(total)} loaded · sorting covers these</small> : null}{enrichment.error ? <small className="pd2-table__warn"> · some property fields didn’t load</small> : null}</span>
         <span className="pd2-table__tools">
           {!owner ? (
             <LCButton variant={showDormant ? 'secondary' : 'quiet'} size="sm" icon="moon" onClick={() => onShowDormant(!showDormant)} aria-pressed={showDormant}>
@@ -148,11 +175,12 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
             </LCButton>
           ) : null}
           <LCSegmented options={GROUPS} value={group} onChange={(g) => { sound.ui.select(); setGroup(g) }} label="Group deals" size="sm" />
+          <DeskColumnPicker layout={layout} onChange={(next) => save({ visible: next.visible })} onReset={() => save({ visible: [...DEFAULT_COLUMNS] })} partial={Boolean(rows && total > rows.length)} />
         </span>
       </div>
       <div className="pd2-table__grid" onKeyDown={onGridKeyDown}>
         <LCDataGrid
-          id="pipeline-desk-deals"
+          id={`pipeline-desk-deals.${uid}`}
           label="Pipeline deals"
           rows={view}
           rowKey={(c) => c.id}
@@ -189,4 +217,74 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
       />
     </section>
   )
+}
+
+/** A custom column's sort semantics. */
+function kindForSort(def: DeskColumnDef): DeskColumnDef['kind'] {
+  if (['next_send', 'next_action'].includes(def.id)) return 'date'
+  if (['stage', 'owner', 'age', 'ask', 'offer_record', 'p_year'].includes(def.id)) return 'num'
+  return 'text'
+}
+
+function renderCell(def: DeskColumnDef, r: RowContext, pendingEnrich: boolean): ReactNode {
+  const c = r.card
+  switch (def.id) {
+    case 'deal':
+      return (
+        <span className="pd2-cell-deal">
+          <b>{c.address || c.seller || 'Unaddressed deal'}</b>
+          <small>{[c.address ? c.seller : null, c.market].filter(Boolean).join(' · ') || '—'}</small>
+        </span>
+      )
+    case 'stage':
+      return <span className="pd2-cell-stage"><i style={{ ['--c' as string]: `var(--pd2-stage-${c.stageIndex ?? 0})` }} />{stageTag(c.stageIndex, c.stage)}</span>
+    case 'owner':
+      return <LCStatus label={OWNER_META[c.owner].label} tone={OWNER_META[c.owner].tone} quiet={!OWNER_META[c.owner].human} />
+    case 'why':
+      return (
+        <span className="pd2-cell-why" title={[c.lane.label, c.lane.detail, c.lane.evidence].filter(Boolean).join(' — ')}>
+          <span>{c.hold ? HOLD_META[c.hold].label : c.lane.label}</span>
+          <small>{c.lane.evidence || c.lane.detail || '—'}</small>
+        </span>
+      )
+    case 'age':
+      return c.daysInStage === null ? none() : <span className={c.stall ? 'pd2-late' : undefined}>{c.daysInStage}d</span>
+    case 'ask':
+      return c.money.askImplausible ? <span className="pd2-flag" title={`Recorded as ${compactMoney(c.money.asking) ?? '—'} — looks mis-captured`}>Mis-captured</span> : compactMoney(c.money.asking) ?? none()
+    case 'offer_record': {
+      const o = r.offer?.offer
+      if (!o?.price || !o.status) return none()
+      return <span className="pd2-cell-two"><b>{compactMoney(o.price) ?? '—'}</b><small>{o.status.toLowerCase().replace(/_/g, ' ')}</small></span>
+    }
+    case 'last_msg':
+      return c.lastMessage
+        ? <span className="pd2-cell-msg" title={c.lastMessage}><i className={c.lastDirection?.startsWith('in') ? 'is-in' : 'is-out'} aria-hidden="true" />{c.lastMessage}</span>
+        : none()
+    case 'direction':
+      return c.lastDirection ? (c.lastDirection.startsWith('in') ? 'Seller' : 'Us') : none()
+    case 'intent':
+      return c.intentLabel || (c.intent ? c.intent.replace(/_/g, ' ') : null) || none()
+    case 'next_send': {
+      const n = c.queue?.next
+      if (n) return <span className="pd2-cell-two"><b>{n.kind === 'follow_up' ? 'Follow-up' : 'Reply'}</b><small>{n.future ? stampCT(n.at) ?? 'scheduled' : 'sending'}</small></span>
+      const at = c.ext?.nextScheduledFor
+      return at ? <span className="pd2-cell-two"><b>Scheduled</b><small>{stampCT(at)}</small></span> : none()
+    }
+    case 'next_action': {
+      const n = c.intent_next
+      if (!n) return none()
+      return <span className="pd2-cell-two"><b>{intentWords(n.action) ?? n.action}</b>{n.due ? <small>{stampCT(n.due)}</small> : null}</span>
+    }
+    case 'p_year': {
+      const v = def.value(r)
+      return typeof v === 'number' || typeof v === 'string' ? String(Math.round(Number(v))) : pendingEnrich ? <span className="pd2-cell-wait" aria-label="Loading" /> : none()
+    }
+    default: {
+      const v = def.value(r)
+      if (def.id === 'p_phone_type' || def.kind === 'custom') return typeof v === 'string' && v ? v : pendingEnrich && v === null ? <span className="pd2-cell-wait" aria-label="Loading" /> : none(def.emptyText)
+      const text = formatValue(def.kind, v, r.now)
+      if (text !== null) return text
+      return pendingEnrich ? <span className="pd2-cell-wait" aria-label="Loading" /> : none(def.emptyText)
+    }
+  }
 }

@@ -15,7 +15,7 @@
  */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { LCChip, LCIconButton, LCLive, LCPopover, LCSearch, LCSegmented, LCSelect, LCTabs, cx, type LCRowActivationEvent, type LCTabItem } from '../../../shared/lc'
-import { PaneRouteContext, pushRoutePath } from '../../../app/router'
+import { PaneRouteContext } from '../../../app/router'
 import { gestureOf, inspectObject, openObjectBeside, showOnMap } from '../../../modules/desktop/objects'
 import { deskDealObject, deskPropertyObject } from './desk-objects'
 import { setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
@@ -33,8 +33,10 @@ import { DeskRail } from './DeskRail'
 import { MovingNowPlane, OffersStrip, OwnershipPlane } from './DeskPlanes'
 import { DeskFlowMatrix } from './DeskFlow'
 import { DeskTable } from './DeskTable'
-import { DeskOffersView } from './DeskOffers'
+import { DeskOffersView, type OfferActions } from './DeskOffers'
 import { DeskInspector, type InspectorActions } from './DeskInspector'
+import { openFromPipeline, type PipelineTarget } from './pipeline-open'
+import { clearReturnState, peekReturnState, saveReturnState, type PipelineReturnState } from './pipeline-return'
 import './pipeline-desk.css'
 
 type Mode = 'overview' | 'flow' | 'table' | 'offers'
@@ -83,23 +85,27 @@ const HEAT: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'cold', label: 'Cold' },
 ]
 
-type Props = {
-  onOpenCommandView: (threadId?: string | null) => void
-  onOpenDealIntelligence: (threadId?: string | null) => void
-}
-
-export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Props) {
+/**
+ * Cross-app opens no longer go through the hosting InboxPage's callbacks —
+ * those switched the host's own views (the trap; see ./pipeline-open).
+ */
+export function PipelineDesk() {
   const pane = useContext(PaneRouteContext)
   const ownsUrl = !pane
-  const [mode, setMode] = useState<Mode>(() => readMode(pane ? pane.location : undefined))
+  // The exact Pipeline the operator left, when a cross-app open had to take
+  // this pane (./pipeline-return). Read once; cleared after mount.
+  const [back] = useState<PipelineReturnState | null>(() => peekReturnState())
+  useEffect(() => { if (back) clearReturnState() }, [back])
+  const [mode, setMode] = useState<Mode>(() => back?.mode ?? readMode(pane ? pane.location : undefined))
   const [period, setPeriod] = usePersistedChoice('nexus.pipeline.desk.period', ['24h', '7d', '30d'] as const, '7d')
   const [lens, setLens] = usePersistedChoice<RiverLens>('nexus.pipeline.desk.lens', ['stage', 'owner', 'age'] as const, 'owner')
-  const [params, setParams] = useState<PipelineCommandParams>({ scope: 'active' })
-  const [query, setQuery] = useState('')
-  const [owner, setOwner] = useState<LiveOwner | null>(null)
-  const [stage, setStage] = useState<string | null>(null)
-  const [showDormant, setShowDormant] = useState(false)
+  const [params, setParams] = useState<PipelineCommandParams>(() => back?.params ?? { scope: 'active' })
+  const [query, setQuery] = useState(() => back?.query ?? '')
+  const [owner, setOwner] = useState<LiveOwner | null>(() => back?.owner ?? null)
+  const [stage, setStage] = useState<string | null>(() => back?.stage ?? null)
+  const [showDormant, setShowDormant] = useState(() => back?.showDormant ?? false)
   const [open, setOpen] = useState<{ id: string; seed: DeskCard | null } | null>(() => {
+    if (back?.openId) return { id: back.openId, seed: null }
     if (pane) return null
     try {
       const id = new URLSearchParams(window.location.search).get('opp')
@@ -209,25 +215,37 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
     pickMode('flow')
   }, [pickMode])
 
-  const toDealIntelligence = useCallback((card: DeskCard) => {
-    if (card.threadKey) onOpenDealIntelligence(card.threadKey)
-    else if (card.propertyId) pushRoutePath(`/deal-intelligence?property_id=${encodeURIComponent(card.propertyId)}`)
-  }, [onOpenDealIntelligence])
+  // Everything a Back must bring back, read at the moment Pipeline leaves.
+  const stateRef = useRef({ mode, params, query, owner, stage, showDormant, openId: open?.id ?? null })
+  useEffect(() => { stateRef.current = { mode, params, query, owner, stage, showDormant, openId: open?.id ?? null } })
+  const saveReturn = useCallback(() => {
+    const root = scrollRef.current
+    const grid = root?.querySelector<HTMLElement>('.lc-grid__scroller') ?? null
+    saveReturnState({ ...stateRef.current, scrollTop: root?.scrollTop ?? 0, gridScrollTop: grid?.scrollTop ?? 0 })
+  }, [])
+
+  /** Open Beside: the target app beside Pipeline, aimed at the deal; Pipeline stays put. */
+  const openIn = useCallback((target: PipelineTarget, card: DeskCard) => {
+    openFromPipeline(target, card, { saveReturn })
+  }, [saveReturn])
+  const toDealIntelligence = useCallback((card: DeskCard) => openIn('deal_intelligence', card), [openIn])
 
   const actions = useMemo<InspectorActions>(() => ({
-    onConversation: (card) => { if (card.threadKey) onOpenCommandView(card.threadKey) },
+    onConversation: (card) => openIn('conversation', card),
     onDealIntelligence: toDealIntelligence,
     // [8.2] Show on Map without leaving Pipeline (an open Map focuses in place; a closed one opens beside)
     onMap: (card) => { if (card.propertyId) showOnMap(deskPropertyObject(card), { source: 'pipeline' }) },
-    onEntityGraph: (card) => { if (card.propertyId) pushRoutePath(`/entity-graph/property/${encodeURIComponent(card.propertyId)}`) },
-    onBuyerMatch: (card) => { if (card.propertyId) pushRoutePath(`/buyer-match?property_id=${encodeURIComponent(card.propertyId)}`) },
-    onClosingDesk: (card) => {
-      const q = new URLSearchParams()
-      if (card.propertyId) q.set('property_id', card.propertyId)
-      if (card.masterOwnerId) q.set('master_owner_id', card.masterOwnerId)
-      pushRoutePath(`/closing-desk${q.toString() ? `?${q}` : ''}`)
-    },
-  }), [onOpenCommandView, toDealIntelligence])
+    onEntityGraph: (card) => openIn('entity_graph', card),
+    onBuyerMatch: (card) => openIn('buyer_match', card),
+    onComps: (card) => openIn('comps', card),
+    onClosingDesk: (card) => openIn('closing', card),
+  }), [openIn, toDealIntelligence])
+  const offerActions = useMemo<OfferActions>(() => ({
+    onOpen: openDeal,
+    onDealIntelligence: toDealIntelligence,
+    onConversation: actions.onConversation,
+    onMap: actions.onMap,
+  }), [openDeal, toDealIntelligence, actions])
 
   const markets = useMemo(() => [...new Set((rows.data ?? []).map((c) => c.market).filter((m): m is string => Boolean(m)))].sort(), [rows.data])
   const types = useMemo(() => [...new Set((rows.data ?? []).map((c) => c.propertyType).filter((m): m is string => Boolean(m)))].sort(), [rows.data])
@@ -237,6 +255,22 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
     && (mode !== 'overview' || Boolean(flow.data))
     && (mode !== 'offers' || Boolean(offers.data))
     && (!(mode === 'flow' || mode === 'table') || Boolean(rows.data))
+
+  // Restore the scroll position the operator left, once the view has rows.
+  const [restoredScroll, setRestoredScroll] = useState(!back || (!back.scrollTop && !back.gridScrollTop))
+  useEffect(() => {
+    if (restoredScroll || !ready) return
+    const id = window.requestAnimationFrame(() => {
+      const root = scrollRef.current
+      if (root && back) {
+        root.scrollTop = back.scrollTop
+        const grid = root.querySelector<HTMLElement>('.lc-grid__scroller')
+        if (grid) grid.scrollTop = back.gridScrollTop
+      }
+      setRestoredScroll(true)
+    })
+    return () => window.cancelAnimationFrame(id)
+  })
 
   const chips = [
     owner ? { id: 'owner', field: 'Whose move', value: OWNER_META[owner].label, onRemove: () => setOwner(null) } : null,
@@ -338,11 +372,11 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
         ) : null}
 
         {mode === 'table' ? (
-          <DeskTable rows={rows.data} loading={rows.loading} error={rows.error} onRetry={rows.retry} owner={owner} stage={stage} showDormant={showDormant || Boolean(owner)} onShowDormant={setShowDormant} selectedId={open?.id ?? null} onOpen={openDeal} now={now} total={rows.total} onBulkChanged={rows.retry} />
+          <DeskTable rows={rows.data} loading={rows.loading} error={rows.error} onRetry={rows.retry} owner={owner} stage={stage} showDormant={showDormant || Boolean(owner)} onShowDormant={setShowDormant} selectedId={open?.id ?? null} onOpen={openDeal} now={now} total={rows.total} onBulkChanged={rows.retry} offers={offers.data} />
         ) : null}
 
         {mode === 'offers' ? (
-          <DeskOffersView offers={offers.data} loading={offers.loading} error={offers.error} onRetry={offers.retry} onOpen={openDeal} onDealIntelligence={toDealIntelligence} now={now} />
+          <DeskOffersView offers={offers.data} loading={offers.loading} error={offers.error} onRetry={offers.retry} actions={offerActions} now={now} onBulkChanged={() => { offers.retry(); rows.retry() }} />
         ) : null}
       </div>
 

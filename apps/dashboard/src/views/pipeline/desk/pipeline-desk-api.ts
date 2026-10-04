@@ -30,6 +30,22 @@ export type DeskQueueStep = {
   future: boolean
 }
 
+/** Columns the feed's own reads already loaded (pipeline-command-service extendedCardFields). Null = not recorded. */
+export type DeskCardExt = {
+  updatedAt: string | null; lastContactAt: string | null; stageEnteredAt: string | null
+  priority: string | null; strategy: string | null; strategyStatus: string | null
+  aos: number | null; confidence: number | null; motivation: number | null; cooperation: number | null
+  arv: number | null; recommendedOffer: number | null; offerToAskGap: number | null; favorableSpread: number | null
+  assignedOperator: string | null; automationState: string | null; approvalState: string | null; blocker: string | null
+  conversationState: string | null; universalStatus: string | null; assetClass: string | null; sourceChannel: string | null
+  portfolioCount: number | null
+  inboxBucket: string | null; automationLane: string | null; operationalStatus: string | null
+  suppressed: boolean | null; unread: boolean | null
+  snoozedUntil: string | null; followUpAt: string | null; nextScheduledFor: string | null
+  pendingQueue: number | null; messageCount: number | null; inboundCount: number | null
+  lastOutboundAt: string | null; deliveryStatus: string | null
+}
+
 export type DeskCard = Omit<PipelineCommandCard, 'lane' | 'money'> & {
   lane: DeskLane
   money: PipelineCommandCard['money'] & { askImplausible?: boolean; counterImplausible?: boolean }
@@ -37,6 +53,8 @@ export type DeskCard = Omit<PipelineCommandCard, 'lane' | 'money'> & {
   hold: HoldClass | null
   intent_next: { action: string; due: string | null; source: string | null } | null
   queue: { next: DeskQueueStep | null; held: { at: string | null; useCase: string | null; by: 'system' | 'human' } | null } | null
+  /** absent on an older API build — every extended column then reads "—" */
+  ext?: DeskCardExt
 }
 
 export type StageOwners = Record<'autopilot' | 'scheduled' | 'seller' | 'external' | 'needs_you' | 'blocked' | 'dormant' | 'complete', number>
@@ -152,3 +170,14 @@ export const fetchDeskFlow = (params: PipelineCommandParams & { period: FlowPeri
 
 export const fetchDeskOffers = (params: PipelineCommandParams, signal?: AbortSignal) =>
   get<DeskOffers>(`/api/cockpit/pipeline/command/offers?${qs(params)}`, signal)
+
+export type DeskEnrichment = {
+  property: Record<string, Record<string, unknown>>
+  owner: Record<string, Record<string, unknown>>
+  scores: Record<string, Record<string, unknown>>
+  generatedAt: string
+}
+
+/** Keyed enrichment for the visible property / owner / engine columns (see pipeline-columns). */
+export const fetchDeskEnrichment = (q: { fields: string; property_ids: string; owner_ids: string }, signal?: AbortSignal) =>
+  get<DeskEnrichment>(`/api/cockpit/pipeline/command/columns?${qs(q)}`, signal)

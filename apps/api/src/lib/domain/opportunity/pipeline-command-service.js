@@ -457,7 +457,7 @@ async function loadEvidence(client, rows) {
   const liveStatuses = [...SEND_IN_FLIGHT, ...SEND_HELD]
   const [threads, executions, closings, recentQueue, liveQueue, triggers] = await Promise.all([
     inChunks(threadKeys, async (keys) => (await client.from('inbox_thread_state')
-      .select('thread_key, inbox_bucket, is_suppressed, suppressed_at, operational_status, latest_direction, last_inbound_at, last_outbound_at, latest_message_body, latest_message_at, pending_queue_count, is_hot_lead, automation_lane')
+      .select('thread_key, inbox_bucket, is_suppressed, suppressed_at, operational_status, latest_direction, last_inbound_at, last_outbound_at, latest_message_body, latest_message_at, pending_queue_count, is_hot_lead, automation_lane, is_read, snoozed_until, follow_up_at, next_scheduled_for, message_count, inbound_count, latest_delivery_status')
       .in('thread_key', keys)).data),
     inChunks(threadKeys, async (keys) => (await client.from('seller_automation_executions')
       .select('thread_id, status, lifecycle_stage, metadata, created_at')
@@ -585,6 +585,55 @@ function shapeCard(opp, ev, now) {
       emd: num(closing.earnest_money),
     } : null,
     createdAt: opp.created_at || null,
+    ext: extendedCardFields(opp, thread),
+  }
+}
+
+/**
+ * The Pipeline table's extended columns — ONLY values this read already
+ * loaded (the scope columns and the thread state row), so a column costs no
+ * query. Absent stays null; the UI shows "—", never a 0.
+ */
+export function extendedCardFields(opp, thread) {
+  const n = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
+  const t = (v) => clean(v) || null
+  return {
+    updatedAt: opp.updated_at || null,
+    lastContactAt: opp.last_contact_at || null,
+    stageEnteredAt: opp.stage_entered_at || null,
+    priority: t(opp.priority),
+    strategy: t(opp.strategy),
+    strategyStatus: t(opp.strategy_status),
+    aos: n(opp.aos),
+    confidence: n(opp.confidence),
+    motivation: n(opp.motivation_score),
+    cooperation: n(opp.cooperation_score),
+    arv: n(opp.arv),
+    recommendedOffer: n(opp.recommended_offer),
+    offerToAskGap: n(opp.offer_to_ask_gap),
+    favorableSpread: n(opp.favorable_spread),
+    assignedOperator: t(opp.assigned_operator),
+    automationState: t(opp.automation_state),
+    approvalState: t(opp.approval_state),
+    blocker: t(opp.blocker),
+    conversationState: t(opp.conversation_state),
+    universalStatus: t(opp.universal_status),
+    assetClass: t(opp.asset_class),
+    sourceChannel: t(opp.source_channel),
+    portfolioCount: n(opp.portfolio_property_count),
+    inboxBucket: thread ? t(thread.inbox_bucket) : null,
+    automationLane: thread ? t(thread.automation_lane) : null,
+    operationalStatus: thread ? t(thread.operational_status) : null,
+    suppressed: thread ? (thread.is_suppressed === true ? true : thread.is_suppressed === false ? false : null) : null,
+    unread: thread ? (thread.is_read === true ? false : thread.is_read === false ? true : null) : null,
+    snoozedUntil: thread?.snoozed_until || null,
+    followUpAt: thread?.follow_up_at || null,
+    nextScheduledFor: thread?.next_scheduled_for || null,
+    pendingQueue: thread ? n(thread.pending_queue_count) : null,
+    messageCount: thread ? n(thread.message_count) : null,
+    inboundCount: thread ? n(thread.inbound_count) : null,
+    lastOutboundAt: thread?.last_outbound_at || null,
+    deliveryStatus: thread ? t(thread.latest_delivery_status) : null,
   }
 }
 

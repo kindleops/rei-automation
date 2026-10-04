@@ -18,16 +18,19 @@
 }
 
 /* ── Tone color tokens ───────────────────────────────────────────────────── */
+/* Scoped to the classic board's own plv-* elements: these used to be bare
+   `.is-neutral { … !important }` rules that leaked into every app once
+   Pipeline had loaded (Notifications, Inbox chips…). */
 
-.is-blue    { color: rgba(72,  138, 236, 0.95) !important; }
-.is-cyan    { color: rgba(34,  211, 238, 0.95) !important; }
-.is-green   { color: rgba(52,  211, 153, 0.95) !important; }
-.is-amber   { color: rgba(251, 191,  36, 0.95) !important; }
-.is-red     { color: rgba(248, 113, 113, 0.95) !important; }
-.is-gold    { color: rgba(255, 199,  80, 0.95) !important; }
-.is-orange  { color: rgba(251, 146,  60, 0.95) !important; }
-.is-neutral { color: rgba(160, 176, 210, 0.75) !important; }
-.is-muted   { color: rgba(130, 155, 200, 0.45) !important; }
+[class*='plv-'].is-blue    { color: rgba(72,  138, 236, 0.95) !important; }
+[class*='plv-'].is-cyan    { color: rgba(34,  211, 238, 0.95) !important; }
+[class*='plv-'].is-green   { color: rgba(52,  211, 153, 0.95) !important; }
+[class*='plv-'].is-amber   { color: rgba(251, 191,  36, 0.95) !important; }
+[class*='plv-'].is-red     { color: rgba(248, 113, 113, 0.95) !important; }
+[class*='plv-'].is-gold    { color: rgba(255, 199,  80, 0.95) !important; }
+[class*='plv-'].is-orange  { color: rgba(251, 146,  60, 0.95) !important; }
+[class*='plv-'].is-neutral { color: rgba(160, 176, 210, 0.75) !important; }
+[class*='plv-'].is-muted   { color: rgba(130, 155, 200, 0.45) !important; }
 
 /* ── KPI strip (75/100%) ─────────────────────────────────────────────────── */
 
