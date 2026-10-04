@@ -49,6 +49,12 @@ export async function POST(request) {
     });
     if (!auth.authorized) return auth.response;
 
+    // This tool calls Brevo directly (outside the email dispatcher), so it
+    // obeys the same deployment switch: no direct send while email is off.
+    if (String(process.env.EMAIL_SEND_ENABLED || "").toLowerCase() !== "true") {
+      return NextResponse.json({ ok: false, error: "email_send_disabled", message: "EMAIL_SEND_ENABLED is not true" }, { status: 423 });
+    }
+
     const body = await request.json().catch(() => ({}));
     const email_address = lower(body?.email_address || body?.to);
     const template_key = clean(body?.template_key);
