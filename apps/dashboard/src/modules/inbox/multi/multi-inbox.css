@@ -179,3 +179,10 @@ html.is-desktop-modern #nx-inbox-root .ixv-pending {
   font: var(--lc-t-meta);
   color: var(--lc-ink-2);
 }
+
+/* a pane's own composer, under its conversation */
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation__composer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--lc-glass-line);
+  background: var(--lc-glass-chrome);
+}

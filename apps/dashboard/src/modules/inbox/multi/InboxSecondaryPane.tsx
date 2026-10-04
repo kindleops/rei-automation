@@ -41,7 +41,6 @@ export interface SecondaryPaneProps {
   update: (fn: (s: MultiInboxState) => MultiInboxState) => void
   onClosePane: () => void
   onOpenBeside: (() => void) | null
-  onReplyInPrimary: (thread: InboxWorkflowThread) => void
   onOpenAppBeside: (thread: InboxWorkflowThread, app: BesideApp) => void
   /** a write here changed the Inbox (counts and other panes re-read) */
   onChanged: () => void
@@ -59,7 +58,7 @@ function sortRows(rows: InboxWorkflowThread[], sort: PaneSort): InboxWorkflowThr
 }
 
 export function InboxSecondaryPane({
-  index, pane, counts, focused, visible, sameAsPane, update, onClosePane, onOpenBeside, onReplyInPrimary, onOpenAppBeside, onChanged,
+  index, pane, counts, focused, visible, sameAsPane, update, onClosePane, onOpenBeside, onOpenAppBeside, onChanged,
 }: SecondaryPaneProps) {
   const { query } = pane
   const { entry, loadMore, retry } = usePaneQuery(query, visible)
@@ -190,7 +189,7 @@ export function InboxSecondaryPane({
           onOpenBeside={onOpenAppBeside}
           scheduledPanel={query.lens === 'scheduled' ? <ScheduledFollowupsPanel onOpenThread={(threadKey) => {
             const thread = rowsRef.current.find((t) => threadKeyOf(t) === threadKey)
-            if (thread) onReplyInPrimary(thread)
+            if (thread) update((s) => openPaneConversation(s, index, { threadId: thread.id, threadKey: threadKeyOf(thread) || null }, 0))
           }} /> : undefined}
           density="dense"
           onBulkChanged={() => { getPaneQueryCache().invalidateSoon(); onChanged() }}
@@ -204,8 +203,8 @@ export function InboxSecondaryPane({
           thread={openThread}
           paneLabel={`Inbox ${number}`}
           onClose={() => update((s) => closePaneConversation(s, index))}
-          onReplyInPrimary={onReplyInPrimary}
           onReadWritten={onChanged}
+          onSent={() => { getPaneQueryCache().invalidateSoon(); onChanged() }}
         />
       ) : null}
       {filtersOpen ? (

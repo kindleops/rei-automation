@@ -100,14 +100,29 @@ function Seam({ index, sizes, containerRef, onSizes }: { index: number; sizes: n
   )
 }
 
-export function MultiInboxLayout({
-  state, update, panes: paneNodes,
+export function MultiInboxLayout(props: {
+  state: MultiInboxState
+  /** false → exactly Inbox 1, no layout chrome (count 1) */
+  active: boolean
+  update: (fn: (s: MultiInboxState) => MultiInboxState) => void
+  /** Inbox 1 (the desk) */
+  primary: ReactNode
+  /** Inboxes 2..count */
+  secondaries: ReactNode[]
+}) {
+  if (!props.active) return <>{props.primary}</>
+  return <MultiInboxColumns {...props} />
+}
+
+function MultiInboxColumns({
+  state, update, primary, secondaries,
 }: {
   state: MultiInboxState
   update: (fn: (s: MultiInboxState) => MultiInboxState) => void
-  /** one element per visible pane: [Inbox 1 (the desk), Inbox 2, ...] */
-  panes: ReactNode[]
+  primary: ReactNode
+  secondaries: ReactNode[]
 }) {
+  const paneNodes = [primary, ...secondaries]
   const [ref, width] = useWidth<HTMLDivElement>()
   const layout = layoutFor(state.count, width || 1920, state.sizes[state.count])
 

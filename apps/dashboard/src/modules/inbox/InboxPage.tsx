@@ -16,6 +16,7 @@ import { InboxSecondaryPane } from './multi/InboxSecondaryPane'
 import { getPaneQueryCache } from './multi/pane-data'
 import { VisibilityPendingNotice } from './VisibilityPendingNotice'
 import { openRealDealIntelligence } from './open-real-app'
+import { queueComposerTemplate, scheduleComposerMessage, sendComposerMessage } from './composer-send'
 import { closePane as closeMultiPane, focusPane as focusMultiPane, openBeside as openMultiBeside, sameViewAs, setCount as setMultiCount, setPaneLens as setMultiPaneLens, clampCount, type PaneCount } from './multi/multi-inbox-model'
 import {
   describeThreadReference,
@@ -68,9 +69,6 @@ import {
   getConversationThreadIdForThread,
   buildThreadContextFromDealContext,
   buildThreadContextFromThread,
-  queueReplyFromInbox,
-  scheduleReplyFromInbox,
-  sendInboxMessageNow,
   fetchLiveInbox,
   type QueueProcessorHealth,
   type ThreadIntelligenceRecord,
@@ -1502,12 +1500,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   // with one canonical source there is nothing to sync (DD-018).
 
   // S0: the context a Close dismissed — the re-anchor below must not re-open it.
-  const dismissedContextRef = useRef<string | null>(null)
+  // State, not a ref: the selection callbacks below are passed to children during render.
+  const [dismissedContext, setDismissedContext] = useState<string | null>(null)
+  // A dismissal only holds while the context still names the dismissed entity (derived, pure).
+  const activeDismissal = nextDismissal(effectiveActiveContext, dismissedContext)
   useEffect(() => {
-    dismissedContextRef.current = nextDismissal(effectiveActiveContext, dismissedContextRef.current)
     if (!shouldReanchorFromContext(effectiveActiveContext, {
       selectedMatches: Boolean(selected && activeContextMatchesThread(effectiveActiveContext, selected)),
-      dismissed: dismissedContextRef.current,
+      dismissed: activeDismissal,
     })) return
 
     const match = findThreadForActiveContext(threads, effectiveActiveContext)
@@ -1515,7 +1515,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     // selection out of a bare threadKey — that was one of the eight representations.
     if (!match) return
     selectFromExternalContext(match)
-  }, [effectiveActiveContext, selectFromExternalContext, selected, threads])
+  }, [activeDismissal, effectiveActiveContext, selectFromExternalContext, selected, threads])
 
   /**
    * Reconcile the canonical selection against every resolved list.
@@ -4243,7 +4243,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   const handleMobileBack = useCallback(() => {
     // S0 (desktop): closing must not be undone by the context that opened it. Phone unchanged.
-    if (isModernDesktop) dismissedContextRef.current = contextIdentity(effectiveActiveContextRef.current)
+    if (isModernDesktop) setDismissedContext(contextIdentity(effectiveActiveContextRef.current))
     setMobileThreadOpen(false)
     clearThreadSelection('mobile_back')
     setMobileIntelOpen(false)
@@ -4323,7 +4323,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [DEV, refreshInboxCounts])
 
   const selectThreadWithIntent = useCallback((id: string, intent: ThreadSelectIntent) => {
-    dismissedContextRef.current = null
+    setDismissedContext(null)
     setPreviewContext(null)
     const thread = findThreadByRef(threads, id)
     const threadKey = thread?.threadKey || thread?.id || id
@@ -4421,7 +4421,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         lcToast({ title: 'Conversation not found', detail: `No thread for ${pending.threadKey}.`, severity: 'warning' })
         return
       }
-      dismissedContextRef.current = null
+      setDismissedContext(null)
       setActiveContext(buildContextFromThread(hit, 'inbox'), { preserveCurrentViews: true })
       selectThread(hit)
       // An explicit open (Open conversation, Notification Open) -- a read, exactly like
@@ -4476,7 +4476,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         selectThreadWithIntent(id, 'navigate')
       }),
       selectFetched: (hit) => ctx.apply(() => {
-        dismissedContextRef.current = null
+        setDismissedContext(null)
         setLinkedMiss(null)
         setActiveContext(buildContextFromThread(hit, 'inbox'), { preserveCurrentViews: true })
         selectThread(hit)
@@ -5341,63 +5341,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     setIsSending(true)
     try {
-      let result = await sendInboxMessageNow(selected, text, {
-        selectedTemplate: template ?? null,
-        threadContext,
-        clientSendId,
-        // The send-now response was lost: say so, and that we are checking --
-        // the message may already be out, so this is not the moment to resend.
-        onConfirmingSend: () => lcToast({
-          title: 'Confirming Send…',
-          detail: 'The connection dropped before the server answered. Checking whether the message went out — do not resend.',
-          severity: 'info',
-        }),
-      })
-      const overrideAllowed = !result.ok && result.operatorOverrideAllowed === true
-      if (overrideAllowed) {
-        // Same text and the same single explicit decision as the browser
-        // confirm this replaces: the issue, then the question. Dismissing is
-        // "no"; nothing is re-sent without the button.
-        const [issue, question, confirmLabel] =
-          result.backendReason === 'recent_delivery_failures'
-            ? ['Recent delivery issue detected.', 'Retry anyway?', 'Retry anyway']
-            : result.backendReason === 'content_blocked'
-              ? ['Potential content issue detected.', 'Send anyway?', 'Send anyway']
-              : ['This send was blocked, but operator override is allowed.', 'Retry anyway?', 'Retry anyway']
-        const retry = await lcConfirm({
-          title: question,
-          effects: [{ text: issue, kind: 'stops' }],
-          confirmLabel,
-          nativeText: `${issue} ${question}`,
-        })
-        if (retry) {
-          result = await sendInboxMessageNow(selected, text, {
-            selectedTemplate: template ?? null,
-            threadContext,
-            clientSendId,
-            operatorOverride: true,
-          })
-        }
-      }
-      lcToast({
-        title: result.ok
-          ? 'Message Sent'
-          : result.outcomeUnknown
-            ? 'Send Not Confirmed'
-            : 'Send Failed',
-        detail: result.ok
-          ? (result.confirmedAfterTransportError
-            ? 'Confirmed on the server after the connection dropped.'
-            : result.deliveryStatus === 'delivered'
-              ? 'Message delivered.'
-              : 'Provider accepted the message.')
-          : (result.errorMessage ?? 'Could not queue message for send'),
-        severity: result.ok
-          ? 'success'
-          : result.outcomeUnknown
-            ? 'warning'
-            : 'critical',
-      })
+      // The one composer send path (composer-send.ts) — the same function every Inbox pane uses.
+      const result = await sendComposerMessage({ thread: selected, text, template: template ?? null, threadContext, clientSendId })
 
       if (!result.ok) {
         // An unknown outcome is not a failure: no error text (which would paint
@@ -5488,18 +5433,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   const handleQueueTemplate = useCallback(async (payload: TemplateActionPayload) => {
     if (!selected || !payload.text.trim()) return
-    const result = await queueReplyFromInbox(selected, payload.text, {
-      selectedTemplate: payload.template,
-      threadContext,
-    })
-    lcToast({
-      title: result.ok ? 'Reply Queued For Approval' : 'Queue Failed',
-      detail: result.ok
-        ? `Queue row ${result.queueId ?? 'created'} is waiting for approval`
-        : (result.errorMessage ?? 'Could not queue reply'),
-      severity: result.ok ? 'success' : 'critical',
-    })
-    if (result.ok) {
+    const queued = await queueComposerTemplate({ thread: selected, text: payload.text, template: payload.template, threadContext })
+    if (queued) {
       setDraftText('')
     }
   }, [selected, setDraftText, threadContext])
@@ -6061,17 +5996,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   )
 
   /** INBOX DESKTOP 4.0 — the triage ledger (desk only; the rail above stays for everything else). */
-  /** Multi-Inbox: a pane's "Reply in Inbox 1" / Scheduled row → open it in Inbox 1's room (an explicit open). */
-  const openInPrimaryPane = useCallback((thread: InboxWorkflowThread) => {
-    dismissedContextRef.current = null
-    setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
-    selectThread(thread)
-    readOnSelect('open_conversation', thread)
-    setMobileThreadOpen(true)
-    setMobileIntelOpen(false)
-    updateMultiInbox((s) => focusMultiPane(s, 0))
-  }, [readOnSelect, selectThread, setActiveContext, updateMultiInbox])
-
   // Command palette (existing command system): Open / Close / Focus / Set view of Inbox N.
   useEffect(() => {
     if (!isDeskInbox) return
@@ -6093,86 +6017,75 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [isDeskInbox, updateMultiInbox])
 
   const deskCounts = (data.counts ?? {}) as Record<string, unknown>
-  const renderDeskLedgerPane = () => {
-    if (!multiActive) {
-      return (
-        <section className="nx-workspace-pane-surface nx-workspace-pane-surface--desk-ledger">
-          {renderPrimaryLedger()}
-        </section>
-      )
-    }
-    // Elements, built here in render — the layout only places them.
-    const paneNodes: ReactNode[] = [
-      <div key="pane-1" className={cls('ixm-pane-body', deskRoomOpen && 'has-conversation')}>
-        <div className="ixm-pane-list" aria-hidden={deskRoomOpen ? true : undefined}>{renderPrimaryLedger()}</div>
-        {deskRoomOpen ? <div className="ixm-conversation ixm-conversation--primary">{renderSmsThreadPane()}</div> : null}
-      </div>,
-    ]
-    for (const index of [1, 2, 3].filter((n) => n < multiInbox.count)) {
-      paneNodes.push(
-        <InboxSecondaryPane
-          key={multiInbox.panes[index].id}
-          index={index}
-          pane={multiInbox.panes[index]}
-          counts={deskCounts}
-          focused={multiInbox.focused === index}
-          visible
-          sameAsPane={sameViewAs(multiInbox, index, { lens: deskLens, q: searchQuery })}
-          update={updateMultiInbox}
-          onClosePane={() => updateMultiInbox((st) => closeMultiPane(st, index))}
-          onOpenBeside={multiInbox.count < 4 ? () => updateMultiInbox(openMultiBeside) : null}
-          onReplyInPrimary={openInPrimaryPane}
-          onOpenAppBeside={handleDeskOpenBeside}
-          onChanged={() => { void refreshInboxCounts() }}
-        />,
-      )
-    }
-    return (
-      <section className="nx-workspace-pane-surface nx-workspace-pane-surface--desk-ledger is-multi">
-        <MultiInboxLayout state={multiInbox} update={updateMultiInbox} panes={paneNodes} />
-      </section>
-    )
-  }
-
-  const renderPrimaryLedger = () => (
-    <>
-      {linkedMiss ? (
-        <div className="ws-linked-note-inset">
-          <LinkedNotice text="No conversation for this property" subject={linkedMiss.subject} onDismiss={() => setLinkedMiss(null)} />
-        </div>
-      ) : null}
-      <InboxDeskLedger
-        threads={threads}
-        hiddenIds={recentlyUpdatedThreadIds}
-        lens={deskLens}
-        counts={(data.counts ?? {}) as Record<string, unknown>}
-        loading={_dataLoading}
-        error={data.liveFetchError ? String(data.liveFetchError) : null}
-        canLoadMore={Boolean(data.pagination?.hasMore)}
-        filteredTotal={typeof (data.pagination as { total?: unknown } | undefined)?.total === 'number' ? (data.pagination as { total: number }).total : null}
-        filterChips={activeAdvancedFilterChips}
-        selectedId={deskRoomOpen ? (selected?.id ?? null) : null}
-        onLens={handleDeskLens}
-        onOpenFilters={() => setActiveOverlay('filters')}
-        onRemoveFilterChip={handleRemoveAdvancedFilterChip}
-        onClearFilters={() => handleDeskLens('priority')}
-        onOpen={handleDeskOpen}
-        onLoadMore={handleLoadMore}
-        onRetry={handleRetryInboxLoad}
-        onSnooze={handleDeskSnooze}
-        onMarkRead={handleDeskMarkRead}
-        onOpenBeside={handleDeskOpenBeside}
-        onBulkChanged={handleDeskBulkChanged}
-        scheduledPanel={deskLens === 'scheduled'
-          ? <ScheduledFollowupsPanel onOpenThread={(threadKey) => openInboxThread({ threadKey })} />
-          : undefined}
-        headerExtra={isDeskInbox ? (
-          <MultiInboxCountControl count={multiInbox.count} onChange={(n) => updateMultiInbox((st) => setMultiCount(st, n))} />
-        ) : undefined}
-        idPrefix="ixm-1-opt"
-        ariaLabel={multiActive ? 'Inbox 1' : undefined}
+  // One tree for 1..4 panes: Inbox 1's ledger is written once; the layout only
+  // adds Inboxes 2-4 (and moves Inbox 1's room into its pane) when count > 1.
+  const renderDeskLedgerPane = () => (
+    <section className={cls('nx-workspace-pane-surface', 'nx-workspace-pane-surface--desk-ledger', multiActive && 'is-multi')}>
+      <MultiInboxLayout
+        state={multiInbox}
+        active={multiActive}
+        update={updateMultiInbox}
+        primary={(
+          <div className={cls('ixm-pane-body', multiActive && deskRoomOpen && 'has-conversation')}>
+            <div className="ixm-pane-list" aria-hidden={multiActive && deskRoomOpen ? true : undefined}>
+        {linkedMiss ? (
+          <div className="ws-linked-note-inset">
+            <LinkedNotice text="No conversation for this property" subject={linkedMiss.subject} onDismiss={() => setLinkedMiss(null)} />
+          </div>
+        ) : null}
+        <InboxDeskLedger
+          threads={threads}
+          hiddenIds={recentlyUpdatedThreadIds}
+          lens={deskLens}
+          counts={(data.counts ?? {}) as Record<string, unknown>}
+          loading={_dataLoading}
+          error={data.liveFetchError ? String(data.liveFetchError) : null}
+          canLoadMore={Boolean(data.pagination?.hasMore)}
+          filteredTotal={typeof (data.pagination as { total?: unknown } | undefined)?.total === 'number' ? (data.pagination as { total: number }).total : null}
+          filterChips={activeAdvancedFilterChips}
+          selectedId={deskRoomOpen ? (selected?.id ?? null) : null}
+          onLens={handleDeskLens}
+          onOpenFilters={() => setActiveOverlay('filters')}
+          onRemoveFilterChip={handleRemoveAdvancedFilterChip}
+          onClearFilters={() => handleDeskLens('priority')}
+          onOpen={handleDeskOpen}
+          onLoadMore={handleLoadMore}
+          onRetry={handleRetryInboxLoad}
+          onSnooze={handleDeskSnooze}
+          onMarkRead={handleDeskMarkRead}
+          onOpenBeside={handleDeskOpenBeside}
+          onBulkChanged={handleDeskBulkChanged}
+          scheduledPanel={deskLens === 'scheduled'
+            ? <ScheduledFollowupsPanel onOpenThread={(threadKey) => openInboxThread({ threadKey })} />
+            : undefined}
+          headerExtra={isDeskInbox ? (
+            <MultiInboxCountControl count={multiInbox.count} onChange={(n) => updateMultiInbox((st) => setMultiCount(st, n))} />
+          ) : undefined}
+          idPrefix="ixm-1-opt"
+          ariaLabel={multiActive ? 'Inbox 1' : undefined}
+        />
+            </div>
+            {multiActive && deskRoomOpen ? <div className="ixm-conversation ixm-conversation--primary">{renderSmsThreadPane()}</div> : null}
+          </div>
+        )}
+        secondaries={[1, 2, 3].filter((n) => multiActive && n < multiInbox.count).map((index) => (
+          <InboxSecondaryPane
+            key={multiInbox.panes[index].id}
+            index={index}
+            pane={multiInbox.panes[index]}
+            counts={deskCounts}
+            focused={multiInbox.focused === index}
+            visible
+            sameAsPane={sameViewAs(multiInbox, index, { lens: deskLens, q: searchQuery })}
+            update={updateMultiInbox}
+            onClosePane={() => updateMultiInbox((st) => closeMultiPane(st, index))}
+            onOpenBeside={multiInbox.count < 4 ? () => updateMultiInbox(openMultiBeside) : null}
+            onOpenAppBeside={handleDeskOpenBeside}
+            onChanged={() => { void refreshInboxCounts() }}
+          />
+        ))}
       />
-    </>
+    </section>
   )
 
   const wrapWorkspaceSurface = (
@@ -6989,16 +6902,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             return
           }
           void (async () => {
-            const result = await scheduleReplyFromInbox(selected, payload.text, time.iso, {
-              selectedTemplate: payload.template,
-              threadContext,
-            })
-            lcToast({
-              title: result.ok ? 'Scheduled' : 'Schedule Failed',
-              detail: result.ok ? `Sent set for ${time.label}` : (result.errorMessage ?? 'Could not schedule message'),
-              severity: result.ok ? 'success' : 'critical',
-            })
-            if (result.ok) {
+            const scheduled = await scheduleComposerMessage({ thread: selected, text: payload.text, template: payload.template, threadContext, at: time.iso, label: time.label })
+            if (scheduled) {
               setDraftText('')
               setScheduledTemplatePayload(null)
               /*

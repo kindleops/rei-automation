@@ -6,9 +6,8 @@
  * once (thread-read-policy 'open_conversation'); rendering, the list, filters
  * and layout never write read state.
  *
- * Replying stays in Inbox 1, whose composer owns the send path (queue, sender
- * routing, automation ownership): "Reply in Inbox 1" hands the thread over.
- * A second composer was not added on purpose — the send path is out of scope.
+ * Replies are written HERE, in this pane's own composer (PaneComposer): the
+ * same Composer and the same send path as Inbox 1, bound to this thread.
  */
 import { useEffect, useRef, useState } from 'react'
 import { ChatThread } from '../components/ChatThread'
@@ -17,15 +16,17 @@ import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { callBackend } from '../../../lib/api/backendClient'
 import { applyThreadReadOnSelect } from '../thread-read-policy'
 import { LCButton, LCError } from '../../../shared/lc'
+import { PaneComposer } from './PaneComposer'
 
 export function PaneConversation({
-  thread, paneLabel, onClose, onReplyInPrimary, onReadWritten,
+  thread, paneLabel, onClose, onReadWritten, onSent,
 }: {
   thread: InboxWorkflowThread
   paneLabel: string
   onClose: () => void
-  onReplyInPrimary: (thread: InboxWorkflowThread) => void
   onReadWritten?: () => void
+  /** this pane sent / queued / scheduled — counts and lists re-read */
+  onSent?: () => void
 }) {
   const threadKey = String(thread.threadKey ?? thread.id)
   const [state, setState] = useState<{ key: string; messages: ThreadMessage[]; loading: boolean; error: string | null }>({ key: threadKey, messages: [], loading: true, error: null })
@@ -86,10 +87,9 @@ export function PaneConversation({
           closeAffordance="close"
         />
       )}
-      <footer className="ixm-conversation__foot">
-        <span className="ixm-conversation__note">Replies are written in Inbox 1, where the send path lives.</span>
-        <LCButton variant="primary" size="sm" icon="message" onClick={() => onReplyInPrimary(thread)}>Reply in Inbox 1</LCButton>
-      </footer>
+      <div className="ixm-conversation__composer">
+        <PaneComposer thread={thread} onSent={() => { setAttempt((n) => n + 1); onSent?.() }} />
+      </div>
     </section>
   )
 }
