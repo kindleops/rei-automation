@@ -193,3 +193,29 @@ DECISION (V1, no migrations):
   - Reloaded only when the MV changes: max(sold_on) / reltuples probe, a few ms; at most once a day after the 10:07 UTC refresh. Single-flight.
   - Every overview, ranking, screen, compare, trend and heat request is exact and computed in-process, with 0 DB queries per interaction.
   PROPOSED for later: a nightly rollup MV (PROPOSED_ migration) so cold start no longer streams 665K rows.
+
+======================================================================
+H. PERFORMANCE: measured on prod with the real service (read-only harness
+   apps/api/scripts/market-intel-perf.mjs, one connection, 2026-10-04)
+======================================================================
+Index build, once per MV refresh, from this Mac:
+  - total 22.6 s: sales cursor 16.7 s (665,288 rows) + reference tables 4.8 s
+  - heap +67 MB, rss 227 MB
+  - 1-2 active DB sessions before and after the build
+Search, in memory:
+  - "55411" 2.5 ms · "Dallas" 34 ms (ambiguous: market, city TX, city GA, county) · "Harris County" 1.3 ms
+Dossiers, cold (warm ≈ 2–3 ms):
+  - ZIP 55411 154 ms · city Minneapolis 142 ms · county Hennepin 170 ms
+  - market Minneapolis 730 ms · market Dallas 406 ms
+  - state TX 1.28 s · nation 1.62 s
+Rankings:
+  - states nationally 1.2 ms · markets nationally 0.7 ms (prewarmed)
+  - top-100 ZIPs nationally 1.33 s cold / 21 ms warm
+  - Texas ZIPs 245 ms · Minneapolis-market ZIPs 1.2 ms
+Other in-memory ops:
+  - compare 6 markets 485 ms
+  - screener TX ZIPs (sales ≥ 100 ∧ investor share ≥ 15%) 3 ms → 141 ZIPs
+  - screener ALL ZIPs (MF, price/unit ≤ $150K ∧ sales ≥ 10) 371 ms → 107 ZIPs
+  - trends 0.4 ms
+DB reads per interaction: 0, except recent sales (ZIP 1.35 s, Minneapolis MF 363 ms) and a per-state seller universe (MN 1.09 s, 5,411 rows).
+Proposal: PROPOSED_20261004150000_market_intel_geo_rollup.sql (not applied).
