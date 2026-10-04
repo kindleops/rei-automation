@@ -359,8 +359,50 @@ export function describeFilterExpansions(filters = []) {
 
 const POPULATION_TTL_MS = 60 * 60 * 1000
 const POPULATION_CONCURRENCY = 6
-let populationCache = null
-let populationInFlight = null
+/** Per-column probe results: column → { at, verdict } (verdict: true | false | COLUMN_MISSING | UNKNOWN). */
+const UNKNOWN = Symbol('unknown')
+const columnCache = new Map()
+const columnInFlight = new Map()
+
+/** One column's planner-estimate probe (see loadGraphColumnPopulation). */
+async function probeGraphColumn(supabase, column) {
+  try {
+    const { count, error } = await supabase
+      .from(CAMPAIGN_AUDIENCE_TABLE)
+      .select('graph_id', { count: 'planned', head: true })
+      .not(column, 'is', null)
+      .limit(0)
+    if (error) {
+      // A HEAD probe carries no error body, so ask once more with a body:
+      // LIMIT 0 reads no row and fails fast only when the column is absent.
+      const confirm = isMissingColumnError(error)
+        ? { error }
+        : await supabase.from(CAMPAIGN_AUDIENCE_TABLE).select(column).limit(0)
+      if (confirm?.error && isMissingColumnError(confirm.error)) return COLUMN_MISSING
+      return UNKNOWN
+    }
+    if (Number.isFinite(Number(count))) return Number(count) > 1
+  } catch {
+    // unknown stays unknown
+  }
+  return UNKNOWN
+}
+
+/**
+ * The audience columns a set of catalog filters can consult — derived exactly
+ * the way graphFieldApplicability derives a filter's column, so a probe of
+ * just these columns yields the same verdicts as a probe of every column.
+ */
+export function graphPlanColumns(filters = []) {
+  const columns = new Set()
+  for (const filter of filters || []) {
+    const field = getCampaignFieldDefinition(filter?.field_key)
+    if (!field || field.type === 'geo_area') continue
+    const column = graphColumnForField(field.key)
+    if (column) columns.add(column)
+  }
+  return [...columns]
+}
 
 /**
  * Which mapped audience columns carry any value at all — from the planner's
@@ -369,53 +411,50 @@ let populationInFlight = null
  * row; an all-NULL column estimates 1. (A literal `limit(1)` existence check
  * full-scans the 170k-row graph for every empty column — ~3 s each.)
  *
- * At most once an hour per process. A failed or missing estimate leaves the
- * column unknown, which is treated as populated: the probe can only DISABLE a
- * field on evidence. A column the table does not have (42703) is recorded as
- * COLUMN_MISSING — filtering on it would fail the whole query.
+ * At most once an hour per process and column. `columns` narrows the probe to
+ * the columns a request actually filters on (graphPlanColumns): a market-only
+ * audience consults one column, and probing all ~70 cold cost ~9 s (12 waves of
+ * HEAD requests) before the audience read could start. The verdict for a
+ * column depends only on that column's own probe, so the answer for every
+ * consulted column is identical either way.
+ *
+ * A failed or missing estimate leaves the column unknown, which is treated as
+ * populated: the probe can only DISABLE a field on evidence. A column the
+ * table does not have (42703) is recorded as COLUMN_MISSING — filtering on it
+ * would fail the whole query.
  */
-export async function loadGraphColumnPopulation(supabase, { now = Date.now(), force = false } = {}) {
+export async function loadGraphColumnPopulation(supabase, { now = Date.now(), force = false, columns = null } = {}) {
   if (!supabase) return null
-  if (!force && populationCache && now - populationCache.at < POPULATION_TTL_MS) return populationCache.byColumn
-  if (populationInFlight) return populationInFlight
-  populationInFlight = (async () => {
-    const byColumn = new Map()
-    const columns = mappedAudienceColumns()
-    for (let index = 0; index < columns.length; index += POPULATION_CONCURRENCY) {
-      await Promise.all(columns.slice(index, index + POPULATION_CONCURRENCY).map(async (column) => {
-        try {
-          const { count, error } = await supabase
-            .from(CAMPAIGN_AUDIENCE_TABLE)
-            .select('graph_id', { count: 'planned', head: true })
-            .not(column, 'is', null)
-            .limit(0)
-          if (error) {
-            // A HEAD probe carries no error body, so ask once more with a body:
-            // LIMIT 0 reads no row and fails fast only when the column is absent.
-            const confirm = isMissingColumnError(error)
-              ? { error }
-              : await supabase.from(CAMPAIGN_AUDIENCE_TABLE).select(column).limit(0)
-            if (confirm?.error && isMissingColumnError(confirm.error)) byColumn.set(column, COLUMN_MISSING)
-          } else if (Number.isFinite(Number(count))) byColumn.set(column, Number(count) > 1)
-        } catch {
-          // unknown stays unknown
-        }
-      }))
-    }
-    populationCache = { at: now, byColumn }
-    return byColumn
-  })()
-  try {
-    return await populationInFlight
-  } finally {
-    populationInFlight = null
+  const wanted = [...new Set(Array.isArray(columns) ? columns.map(clean).filter(Boolean) : mappedAudienceColumns())]
+  const fresh = (column) => {
+    const hit = columnCache.get(column)
+    return !force && hit && now - hit.at < POPULATION_TTL_MS
   }
+  const stale = wanted.filter((column) => !fresh(column))
+  for (let index = 0; index < stale.length; index += POPULATION_CONCURRENCY) {
+    await Promise.all(stale.slice(index, index + POPULATION_CONCURRENCY).map((column) => {
+      let flight = columnInFlight.get(column)
+      if (!flight) {
+        flight = probeGraphColumn(supabase, column)
+          .then((verdict) => { columnCache.set(column, { at: now, verdict }) })
+          .finally(() => columnInFlight.delete(column))
+        columnInFlight.set(column, flight)
+      }
+      return flight
+    }))
+  }
+  const byColumn = new Map()
+  for (const column of wanted) {
+    const verdict = columnCache.get(column)?.verdict
+    if (verdict !== undefined && verdict !== UNKNOWN) byColumn.set(column, verdict)
+  }
+  return byColumn
 }
 
 /** Test seam: forget the cached probe. */
 export function resetGraphColumnPopulationCache() {
-  populationCache = null
-  populationInFlight = null
+  columnCache.clear()
+  columnInFlight.clear()
 }
 
 /**

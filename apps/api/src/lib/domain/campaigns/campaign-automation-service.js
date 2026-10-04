@@ -32,12 +32,14 @@ import {
   recentTemplateIdsFromHistory,
   renderOutboundTemplate,
 } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
+import { readGraphFunnelCounts } from '@/lib/domain/campaigns/campaign-graph-funnel.js'
 import {
   applyGraphFilter,
   describeFilterExpansions,
   graphColumnForField,
   INAPPLICABLE_REASONS,
   loadGraphColumnPopulation,
+  graphPlanColumns,
   resolveGraphFilterPlan,
 } from '@/lib/domain/campaigns/campaign-graph-filter-plan.js'
 import {
@@ -3699,10 +3701,12 @@ function resolveCatalogFiltersForTargetGraph(catalogFilters = {}, { population =
  * production client: a caller that injects its own client (tests, scripts)
  * passes `graphColumnPopulation` itself or gets mapping-only answers.
  */
-async function resolveGraphColumnPopulation(deps = {}) {
+async function resolveGraphColumnPopulation(deps = {}, catalogFilters = null) {
   if (deps.graphColumnPopulation instanceof Map) return deps.graphColumnPopulation
   if (deps.supabase) return null
-  return loadGraphColumnPopulation(defaultSupabase).catch(() => null)
+  // Only the columns this request's filters consult (the plan reads nothing else).
+  const columns = catalogFilters ? graphPlanColumns(catalogFilters.supported || []) : null
+  return loadGraphColumnPopulation(defaultSupabase, columns ? { columns } : {}).catch(() => null)
 }
 
 function applyInFilter(query, column, values, normalizer = clean) {
@@ -3938,8 +3942,75 @@ async function countAddressableProperties({ supabase, options }) {
   return { ok: true, count: Number(count || 0), approximate, warnings: [] }
 }
 
+/**
+ * Reach's funnel buckets: each is the audience predicate AND its own extra.
+ * Counted in one statement when the funnel rpc is available (campaign-graph-
+ * funnel.js records these exact builder calls), else one count per bucket.
+ */
+const NOT_SUPPRESSED_SMS = (query) => query.eq('sms_eligible', true).eq('true_post_contact_suppression', false).eq('wrong_number', false)
+const GRAPH_FUNNEL_BUCKETS = Object.freeze([
+  { key: 'total' },
+  { key: 'linkedMasterOwners', extra: (query) => query.not('master_owner_id', 'is', null) },
+  { key: 'linkedProspects', extra: (query) => query.not('prospect_id', 'is', null) },
+  { key: 'reachableContacts', extra: (query) => query.not('canonical_e164', 'is', null) },
+  { key: 'smsEligible', extra: (query) => query.eq('sms_eligible', true) },
+  { key: 'cleanTargets', extra: NOT_SUPPRESSED_SMS },
+  { key: 'senderCovered', extra: (query) => NOT_SUPPRESSED_SMS(query).eq('sender_covered', true) },
+  { key: 'readyToQueue', requireQueueEligible: true },
+  { key: 'smsBlocked', extra: (query) => query.eq('sms_eligible', false).not('canonical_e164', 'is', null) },
+  { key: 'missingPhone', extra: (query) => query.is('canonical_e164', null) },
+  { key: 'suppressed', extra: (query) => query.eq('true_post_contact_suppression', true) },
+  { key: 'wrongNumber', extra: (query) => query.eq('wrong_number', true) },
+  { key: 'pendingPriorTouch', extra: (query) => query.eq('pending_prior_touch', true) },
+  { key: 'activeQueue', extra: (query) => query.eq('active_queue_item', true) },
+  { key: 'noSenderCoverage', extra: (query) => NOT_SUPPRESSED_SMS(query).eq('sender_covered', false) },
+])
+
+async function countCampaignGraphFunnel({ supabase, options }) {
+  // A drawn area resolves its rows through its own rpc: per-bucket counts.
+  const area = drawnAreaFromFilters(options.catalog_filters?.supported)
+  const fast = area ? null : await readGraphFunnelCounts({
+    supabase,
+    base: (query) => applyCampaignGraphFilters(query, options, []),
+    buckets: GRAPH_FUNNEL_BUCKETS.map((bucket) => ({
+      key: bucket.key,
+      apply: (query) => {
+        let q = typeof bucket.extra === 'function' ? bucket.extra(query) : query
+        if (bucket.requireQueueEligible) q = q.eq('queue_eligible', true)
+        return q
+      },
+    })),
+  }).catch(() => null)
+  if (fast) {
+    return Object.fromEntries(GRAPH_FUNNEL_BUCKETS.map((bucket) => [bucket.key, { ok: true, count: fast[bucket.key], warnings: [] }]))
+  }
+  const results = await Promise.all(GRAPH_FUNNEL_BUCKETS.map((bucket) => countCampaignGraphRows({
+    supabase,
+    options,
+    ...(bucket.extra ? { extra: bucket.extra } : {}),
+    ...(bucket.requireQueueEligible ? { requireQueueEligible: true } : {}),
+  })))
+  return Object.fromEntries(GRAPH_FUNNEL_BUCKETS.map((bucket, index) => [bucket.key, results[index]]))
+}
+
 async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueueEligibleRows = false }) {
-  const [
+  // Independent reads started together. The refresh status (an exact count of
+  // the WHOLE graph — ~1 s, and it times out at 8 s when it competes with the
+  // funnel counts during a reconcile) starts once the funnel is done, beside
+  // the page read, instead of after everything.
+  const funnelRead = countCampaignGraphFunnel({ supabase, options })
+  const [funnel, rows, addressable, graphRefreshStatus] = await Promise.all([
+    funnelRead,
+    fetchCampaignGraphRows({
+      supabase,
+      options,
+      limit: rowLimit,
+      requireQueueEligible: requireQueueEligibleRows,
+    }),
+    countAddressableProperties({ supabase, options }),
+    funnelRead.then(() => readCampaignGraphRefreshStatus(supabase), () => readCampaignGraphRefreshStatus(supabase)),
+  ])
+  const {
     total,
     linkedMasterOwners,
     linkedProspects,
@@ -3955,44 +4026,7 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
     pendingPriorTouch,
     activeQueue,
     noSenderCoverage,
-    rows,
-    addressable,
-  ] = await Promise.all([
-    countCampaignGraphRows({ supabase, options }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.not('master_owner_id', 'is', null) }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.not('prospect_id', 'is', null) }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.not('canonical_e164', 'is', null) }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('sms_eligible', true) }),
-    countCampaignGraphRows({
-      supabase,
-      options,
-      extra: (query) => query.eq('sms_eligible', true).eq('true_post_contact_suppression', false).eq('wrong_number', false),
-    }),
-    countCampaignGraphRows({
-      supabase,
-      options,
-      extra: (query) => query.eq('sms_eligible', true).eq('true_post_contact_suppression', false).eq('wrong_number', false).eq('sender_covered', true),
-    }),
-    countCampaignGraphRows({ supabase, options, requireQueueEligible: true }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('sms_eligible', false).not('canonical_e164', 'is', null) }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.is('canonical_e164', null) }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('true_post_contact_suppression', true) }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('wrong_number', true) }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('pending_prior_touch', true) }),
-    countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('active_queue_item', true) }),
-    countCampaignGraphRows({
-      supabase,
-      options,
-      extra: (query) => query.eq('sms_eligible', true).eq('true_post_contact_suppression', false).eq('wrong_number', false).eq('sender_covered', false),
-    }),
-    fetchCampaignGraphRows({
-      supabase,
-      options,
-      limit: rowLimit,
-      requireQueueEligible: requireQueueEligibleRows,
-    }),
-    countAddressableProperties({ supabase, options }),
-  ])
+  } = funnel
 
   const allResults = [
     total,
@@ -4012,7 +4046,6 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
     noSenderCoverage,
     rows,
   ]
-  const graphRefreshStatus = await readCampaignGraphRefreshStatus(supabase)
 
   // --- Addressable-universe invariant ----------------------------------------
   // "Addressable" is the property universe BEFORE contact / SMS / sender-coverage
@@ -4503,7 +4536,7 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const campaign = input.campaign || null
   const baseOptions = previewOptionsFromInput(input, campaign)
-  const population = await resolveGraphColumnPopulation(deps)
+  const population = await resolveGraphColumnPopulation(deps, baseOptions.catalog_filters)
   const options = {
     ...baseOptions,
     catalog_filters: resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters, { population }),
@@ -6546,12 +6579,13 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
   const startedAt = Date.now()
   const supabase = deps.supabase || defaultSupabase
   const baseOptions = previewOptionsFromInput(input, null)
-  const population = await resolveGraphColumnPopulation(deps)
+  const population = await resolveGraphColumnPopulation(deps, baseOptions.catalog_filters)
   const options = { ...baseOptions, catalog_filters: resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters, { population }) }
-  const eligibleCount = await countCampaignGraphRows({ supabase, options, requireQueueEligible: true })
-  if (!eligibleCount.ok) return { ok: false, error: 'cohort_count_unavailable', warnings: eligibleCount.warnings }
-  const total = eligibleCount.count
-  const readable = Math.min(total, CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT)
+  // The eligible count and the row reads are independent: both start now.
+  // Reads stop at the build limit (the most Build could read); the count then
+  // slices to min(count, limit), exactly as when the count came first.
+  const eligibleCountRead = countCampaignGraphRows({ supabase, options, requireQueueEligible: true })
+  const readable = CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT
   const area = drawnAreaFromFilters(options.catalog_filters?.supported)
   // Keyset pages over 16 disjoint graph_id partitions (graph_id is the primary
   // key, a hex digest): no deep OFFSET sort, so a 100K cohort reads in bounded
@@ -6586,9 +6620,14 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(Number(deps.cohortConcurrency) || 6, partitions.length) }, worker))
+  const [eligibleCount] = await Promise.all([
+    eligibleCountRead,
+    ...Array.from({ length: Math.min(Number(deps.cohortConcurrency) || 6, partitions.length) }, worker),
+  ])
+  if (!eligibleCount.ok) return { ok: false, error: 'cohort_count_unavailable', warnings: eligibleCount.warnings }
+  const total = eligibleCount.count
   if (failure) return { ok: false, error: 'cohort_rows_unavailable', message: failure }
-  const rows = pages.flat().slice(0, readable)
+  const rows = pages.flat().slice(0, Math.min(total, readable))
   const readMs = Date.now() - startedAt
   const planned = await planCampaignTargetRows({ campaign: null, options, graph: { rows }, targetLimit: CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT, deps, resolveLanguages: false })
   const readyRows = planned.rows.filter((row) => row.target_status === 'ready')
@@ -6683,7 +6722,7 @@ async function summarizeCohortPersonalization(readyRows = [], graphRows = [], de
 export async function countCampaignAudienceUniverse(input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const baseOptions = previewOptionsFromInput(input, null)
-  const population = await resolveGraphColumnPopulation(deps)
+  const population = await resolveGraphColumnPopulation(deps, baseOptions.catalog_filters)
   const resolved = resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters, { population })
   const all = resolved.supported || []
   const location = all.filter((filter) => isUniverseFilter(filter, getCampaignFieldDefinition(filter.field_key)))
@@ -6748,7 +6787,7 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
     }, campaign)
     options.target_limit = targetLimit
     options.catalog_filters = resolveCatalogFiltersForTargetGraph(options.catalog_filters, {
-      population: await resolveGraphColumnPopulation(deps),
+      population: await resolveGraphColumnPopulation(deps, options.catalog_filters),
     })
 
     /**

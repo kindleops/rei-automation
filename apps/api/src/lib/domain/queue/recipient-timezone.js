@@ -31,14 +31,23 @@ const LABEL_TO_IANA = {
   alaska: "America/Anchorage", hawaii: "Pacific/Honolulu",
 };
 
+// Whether a zone name is valid never changes within a process, and building an
+// Intl.DateTimeFormat costs ~0.15 ms: a 9K-seller cohort spent ~1.3 s here.
+const IANA_VALIDITY = new Map();
+
 function isValidIana(zone) {
   if (!zone || !zone.includes("/")) return false;
+  const known = IANA_VALIDITY.get(zone);
+  if (known !== undefined) return known;
+  let valid;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: zone });
-    return true;
+    valid = true;
   } catch {
-    return false;
+    valid = false;
   }
+  if (IANA_VALIDITY.size < 1000) IANA_VALIDITY.set(zone, valid);
+  return valid;
 }
 
 /** A stored zone as IANA, or null. Never a default. */

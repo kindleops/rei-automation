@@ -199,14 +199,31 @@ export async function fetchCanonicalLanguages(rows = [], deps = {}) {
   const namesByPerson = new Map()
   const CHUNK = 500
 
+  // Chunks are read a few at a time (a 9K-seller cohort's 16 sequential
+  // prospects reads measured 3.6 s) and APPLIED in chunk order, stopping at the
+  // first failed chunk — exactly what the sequential loop produced.
+  const CONCURRENCY = 4
   const page = async (table, column, select, ids, sink, valueKey, onRow = null) => {
-    for (let i = 0; i < ids.length; i += CHUNK) {
-      const chunk = ids.slice(i, i + CHUNK)
-      const { data, error } = await supabase.from(table).select(select).in(column, chunk)
+    const chunks = []
+    for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK))
+    const results = new Array(chunks.length)
+    let next = 0
+    let failedAt = chunks.length
+    const worker = async () => {
+      while (next < chunks.length) {
+        const index = next++
+        if (index > failedAt) return
+        results[index] = await supabase.from(table).select(select).in(column, chunks[index])
+        if (results[index]?.error) failedAt = Math.min(failedAt, index)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, chunks.length) }, worker))
+    for (let index = 0; index < chunks.length; index += 1) {
+      const { data, error } = results[index] || {}
       // Language is an enrichment, never a gate: if it cannot be read the
       // target simply has no stated language and the documented fallback
       // applies. It must not block an otherwise-ready target.
-      if (error) return
+      if (error || !results[index]) return
       for (const row of data || []) {
         const value = clean(row?.[valueKey])
         if (value) sink.set(clean(row[column]), value)

@@ -542,22 +542,24 @@ export async function readComposerAudience(spec = {}, deps = {}) {
   const strategy = COMPOSER_STRATEGIES.find((x) => x.use_case === clean(s.template_use_case)) || COMPOSER_STRATEGIES[0]
   const stageCode = clean(s.stage_code) ? normalizeCampaignStageCode(s.stage_code, strategy.stage_code) : strategy.stage_code
   const totalCap = parseCampaignCap(s.total_cap)
-  const preview = await (deps.previewCampaignTargets || previewCampaignTargets)({
-    filters: obj(s.filters),
-    template_use_case: strategy.use_case,
-    stage_code: stageCode,
-    limitPreview: 25,
-    ...(totalCap ? { build_limit: totalCap } : {}),
-    ...(parseCampaignCap(s.daily_cap) !== null ? { daily_cap: parseCampaignCap(s.daily_cap) } : {}),
-  }, deps)
+  // The preview, the location universe and the coverage measurement are
+  // independent reads: started together, not one after another.
+  const [preview, universe, coverage] = await Promise.all([
+    (deps.previewCampaignTargets || previewCampaignTargets)({
+      filters: obj(s.filters),
+      template_use_case: strategy.use_case,
+      stage_code: stageCode,
+      limitPreview: 25,
+      ...(totalCap ? { build_limit: totalCap } : {}),
+      ...(parseCampaignCap(s.daily_cap) !== null ? { daily_cap: parseCampaignCap(s.daily_cap) } : {}),
+    }, deps),
+    (deps.countCampaignAudienceUniverse || countCampaignAudienceUniverse)({ filters: obj(s.filters), template_use_case: strategy.use_case, stage_code: stageCode }, deps).catch(() => null),
+    readGraphCoverage(supabase, deps).catch(() => null),
+  ])
   if (!preview || preview.ok === false) {
     return { ok: false, error: clean(preview?.error) || 'audience_unavailable', message: clean(preview?.message) || null }
   }
   const audience = composerAudienceFromPreview(preview)
-  const [universe, coverage] = await Promise.all([
-    (deps.countCampaignAudienceUniverse || countCampaignAudienceUniverse)({ filters: obj(s.filters), template_use_case: strategy.use_case, stage_code: stageCode }, deps).catch(() => null),
-    readGraphCoverage(supabase, deps).catch(() => null),
-  ])
   audience.universe = universe?.ok
     ? { count: num(universe.count), location_filters: universe.location_filters || [], targeting_filters: universe.targeting_filters || [] }
     : null
