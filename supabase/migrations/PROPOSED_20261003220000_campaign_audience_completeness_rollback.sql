@@ -6,17 +6,19 @@
 -- recency, eligibility) stay until the next full refresh rebuilds the graph with the
 -- old bridge (refresh_campaign_target_graph_staged). Nothing authoritative was written.
 
-SELECT cron.unschedule(jobid) FROM cron.job
- WHERE jobname IN ('campaign_audience_reconcile', 'campaign_audience_incremental');
+--
+-- If the schedule was enabled, FIRST run
+--   PROPOSED_20261003221000_campaign_audience_schedule_rollback.sql
+-- (unschedules the jobs, drops the concurrent index; cannot run in a transaction).
+-- This file has no BEGIN/COMMIT: apply it with  psql -X -1 -v ON_ERROR_STOP=1 -f …
+-- Locks: DROP COLUMN takes ACCESS EXCLUSIVE on the graph and stage (metadata only).
 
-DROP INDEX CONCURRENTLY IF EXISTS public.idx_ctg_pending_prior_touch_last_outbound;
-
-BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 DROP FUNCTION IF EXISTS public.campaign_target_graph_incremental_tick(integer);
 DROP FUNCTION IF EXISTS public.campaign_target_graph_reconcile_tick(integer, integer);
 DROP FUNCTION IF EXISTS public.campaign_target_graph_enrich_batch(text, integer);
+DROP FUNCTION IF EXISTS public.campaign_target_graph_enrich_market(text, text, integer);
 DROP FUNCTION IF EXISTS public.campaign_target_graph_enrich_rows(text[]);
 DROP FUNCTION IF EXISTS public.campaign_target_graph_measure_coverage(text, numeric);
 DROP FUNCTION IF EXISTS public.campaign_target_graph_load_ok(integer);
@@ -570,5 +572,3 @@ ALTER TABLE public.campaign_target_graph_stage
   DROP COLUMN IF EXISTS estimated_repair_cost, DROP COLUMN IF EXISTS aos_score, DROP COLUMN IF EXISTS decision_tier,
   DROP COLUMN IF EXISTS acquisition_confidence, DROP COLUMN IF EXISTS transaction_probability_365,
   DROP COLUMN IF EXISTS best_strategy, DROP COLUMN IF EXISTS scores_computed_at;
-
-COMMIT;

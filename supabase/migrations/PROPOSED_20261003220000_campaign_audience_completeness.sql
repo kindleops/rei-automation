@@ -31,8 +31,17 @@
 -- 19.2K / 348 rows) and are filtered to the batch's phones first.
 -- Schedules live in PROPOSED_20261003221000_campaign_audience_schedule.sql and are
 -- applied only after the canary in the run plan.
-
-BEGIN;
+--
+-- No BEGIN/COMMIT in this file: apply it as ONE transaction with
+--   psql "$SUPABASE_DB_URL" -X -1 -v ON_ERROR_STOP=1 -f <this file>
+-- so the rollback-only pretest (supabase/tests/campaign_audience_completeness_test.sql)
+-- can \ir it inside its own transaction.
+--
+-- Locks: ALTER TABLE … ADD COLUMN (no default, metadata only) takes ACCESS EXCLUSIVE on
+-- campaign_target_graph and campaign_target_graph_stage until COMMIT — readers of the
+-- graph (Composer, Reach, Build) wait for the few hundred ms the transaction takes.
+-- lock_timeout 5s: if a long reader holds the graph, the apply fails cleanly instead of
+-- queueing every reader behind it. Everything else is new objects or pg_proc rows.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -934,6 +943,36 @@ BEGIN
 END;
 $function$;
 
+-- One market, keyset (the Minneapolis trial and any per-market repair).
+CREATE OR REPLACE FUNCTION public.campaign_target_graph_enrich_market(p_market text, p_after_graph_id text DEFAULT NULL, p_limit integer DEFAULT 400)
+ RETURNS TABLE(rows_updated integer, next_after_graph_id text, has_more boolean, elapsed_ms integer)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_started timestamptz := clock_timestamp();
+  v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 400), 1), 1000);
+  v_ids text[];
+BEGIN
+  IF NULLIF(btrim(p_market), '') IS NULL THEN
+    RAISE EXCEPTION 'campaign_target_graph_enrich_market: market required';
+  END IF;
+  SELECT array_agg(x.graph_id ORDER BY x.graph_id) INTO v_ids
+  FROM (
+    SELECT g.graph_id FROM public.campaign_target_graph g
+    WHERE g.market = p_market AND (p_after_graph_id IS NULL OR g.graph_id > p_after_graph_id)
+    ORDER BY g.graph_id
+    LIMIT v_limit
+  ) x;
+  rows_updated := public.campaign_target_graph_enrich_rows(v_ids);
+  next_after_graph_id := v_ids[cardinality(v_ids)];
+  has_more := COALESCE(cardinality(v_ids), 0) = v_limit;
+  elapsed_ms := floor(EXTRACT(epoch FROM clock_timestamp() - v_started) * 1000)::integer;
+  RETURN NEXT;
+END;
+$function$;
+
 -- Load shedding shared by both jobs: skip when the database is busy or the other job holds the lock.
 CREATE OR REPLACE FUNCTION public.campaign_target_graph_load_ok(p_max_active integer DEFAULT 12)
  RETURNS boolean
@@ -1122,9 +1161,8 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.campaign_target_graph_enrich_rows(text[]) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.campaign_target_graph_enrich_batch(text, integer) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.campaign_target_graph_enrich_market(text, text, integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.campaign_target_graph_reconcile_tick(integer, integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.campaign_target_graph_incremental_tick(integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.campaign_target_graph_measure_coverage(text, numeric) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.campaign_target_graph_load_ok(integer) FROM PUBLIC, anon, authenticated;
-
-COMMIT;
