@@ -6,7 +6,13 @@
  */
 import { useCallback, useState } from 'react'
 import { lcConfirm, lcToast, type LCBulkIssue, type LCEffect } from '../../shared/lc'
-import { runBulkArchive, type BulkAction, type BulkObjectType, type BulkRunReport, type BulkPoster, postBulkArchive } from './bulkArchiveData'
+import { runBulkPerItem, type BulkAction, type BulkItemResult, type BulkObjectType, type BulkRunReport, type BulkPoster, postBulkArchive } from './bulkArchiveData'
+
+/** [8.3.2] per-row state while a bulk run is going: the row draws ✓ / ✗ / unconfirmed from this. */
+export type BulkItemState =
+  | { phase: 'pending' }
+  | { phase: 'recheck' }
+  | { phase: 'done'; result: BulkItemResult }
 
 export interface BulkNoun { one: string; many: string }
 
@@ -30,25 +36,44 @@ export function outcomeLine(report: BulkRunReport, noun: BulkNoun): string {
   if (summary.unchanged) parts.push(`${summary.unchanged.toLocaleString('en-US')} already ${action === 'archive' ? 'archived' : 'active'}`)
   if (summary.blocked) parts.push(`${summary.blocked.toLocaleString('en-US')} blocked`)
   if (summary.failed) parts.push(`${summary.failed.toLocaleString('en-US')} failed`)
+  if (summary.unconfirmed) parts.push(`${summary.unconfirmed.toLocaleString('en-US')} unconfirmed`)
   return parts.join(' · ')
 }
 
 export function issuesOf(report: BulkRunReport, labelOf: (id: string) => string): LCBulkIssue[] {
   return report.results
-    .filter((r) => r.outcome === 'blocked' || r.outcome === 'failed')
-    .map((r) => ({ id: r.id, label: labelOf(r.id), outcome: r.outcome as 'blocked' | 'failed', message: r.message || r.reason || 'Not changed.' }))
+    .filter((r) => r.outcome === 'blocked' || r.outcome === 'failed' || r.outcome === 'unconfirmed')
+    .map((r) => ({
+      id: r.id,
+      label: labelOf(r.id),
+      // the shared issue list knows blocked | failed; an unconfirmed item says so in its message
+      outcome: (r.outcome === 'blocked' ? 'blocked' : 'failed') as 'blocked' | 'failed',
+      message: r.outcome === 'unconfirmed'
+        ? `Unconfirmed — ${r.message || 'no answer in time; it may still have completed.'}`
+        : r.message || r.reason || 'Not changed.',
+    }))
 }
 
 export function useBulkArchive({ objectType, noun, consequences, labelOf, onChanged, source, post = postBulkArchive }: UseBulkArchiveOptions) {
   const [progress, setProgress] = useState<{ verb: string; done: number; total: number } | null>(null)
   const [outcome, setOutcome] = useState<{ text: string; issues: LCBulkIssue[] } | null>(null)
+  const [items, setItems] = useState<ReadonlyMap<string, BulkItemState>>(() => new Map())
 
   const execute = useCallback(async (ids: string[], action: BulkAction): Promise<BulkRunReport> => {
     const verb = action === 'archive' ? 'Archiving' : 'Restoring'
     setOutcome(null)
     setProgress({ verb, done: 0, total: ids.length })
     try {
-      const report = await runBulkArchive({ objectType, action, ids, post, onProgress: (done, total) => setProgress({ verb, done, total }) })
+      setItems(new Map())
+      const report = await runBulkPerItem({
+        objectType, action, ids, post,
+        onProgress: (done, total) => setProgress({ verb, done, total }),
+        onItem: (id, result, phase) => setItems((prev) => {
+          const next = new Map(prev)
+          next.set(id, phase === 'done' && result ? { phase: 'done', result } : phase === 'recheck' ? { phase: 'recheck' } : { phase: 'pending' })
+          return next
+        }),
+      })
       const issues = issuesOf(report, labelOf)
       setOutcome(issues.length ? { text: outcomeLine(report, noun), issues } : null)
       if (report.changedIds.length) onChanged(report)
@@ -60,7 +85,7 @@ export function useBulkArchive({ objectType, noun, consequences, labelOf, onChan
 
   const undo = useCallback(async (ids: string[]) => {
     const report = await execute(ids, 'unarchive')
-    const partial = report.summary.blocked + report.summary.failed > 0
+    const partial = report.summary.blocked + report.summary.failed + (report.summary.unconfirmed ?? 0) > 0
     lcToast({
       severity: partial ? 'warning' : 'success',
       title: `Restored ${n(report.summary.changed, noun)}`,
@@ -85,7 +110,7 @@ export function useBulkArchive({ objectType, noun, consequences, labelOf, onChan
     if (!ok) return null
     const report = await execute(ids, 'archive')
     const { summary } = report
-    const partial = summary.blocked + summary.failed > 0
+    const partial = summary.blocked + summary.failed + (summary.unconfirmed ?? 0) > 0
     if (summary.changed > 0) {
       const changed = report.changedIds
       lcToast({
@@ -102,5 +127,5 @@ export function useBulkArchive({ objectType, noun, consequences, labelOf, onChan
     return report
   }, [consequences, execute, noun, source, undo])
 
-  return { archive, undo, progress, outcome, dismissOutcome: () => setOutcome(null), busy: progress !== null }
+  return { archive, undo, progress, outcome, items, clearItems: () => setItems(new Map()), dismissOutcome: () => setOutcome(null), busy: progress !== null }
 }
