@@ -7,9 +7,13 @@ import {
   resolveLanguage,
   isUnsupportedTemplateLanguage,
   CANONICAL_LANGUAGE_SET,
+  templateCatalogLanguageName,
+  sameTemplateLanguage,
 } from '@/lib/sms/language_aliases.js'
 
 export {
+  templateCatalogLanguageName,
+  sameTemplateLanguage,
   normalizeLanguage,
   resolveLanguage,
   isUnsupportedTemplateLanguage,
@@ -20,10 +24,7 @@ export function templateCatalogLanguage(value) {
   const resolved = resolveLanguage(value)
   if (resolved.unsupported) return { language: String(value ?? '').trim(), unsupported: true }
   const canonical = resolved.canonical || String(value ?? '').trim()
-  if (canonical === 'Asian Indian (Hindi or Other)') {
-    return { language: 'Indian (Hindi or Other)', unsupported: false }
-  }
-  return { language: canonical, unsupported: false }
+  return { language: templateCatalogLanguageName(canonical) || canonical, unsupported: false }
 }
 
 export function canonicalLanguageLabel(value) {

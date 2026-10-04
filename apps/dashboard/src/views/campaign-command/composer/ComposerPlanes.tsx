@@ -9,6 +9,7 @@ import {
 } from './composer-model'
 import { Kv } from './ComposerParts'
 import { reasonWords, toLocalInput } from './composer-format'
+import { templateLanguageKey } from './composer-language'
 
 /* ══ STRATEGY ════════════════════════════════════════════════════════════ */
 
@@ -41,7 +42,7 @@ export function StrategyBody({ templates, audience, composition, fleet, onStrate
   const [sampleIdx, setSampleIdx] = useState(0)
   const [picked, setPicked] = useState<string | null>(null)
   const selected = templates?.strategies.find((s) => s.use_case === composition.template_use_case) ?? null
-  const cohortLanguages = useMemo(() => (audience?.distributions.languages ?? []).map((l) => (l.value === 'unknown' ? 'English' : l.value)).filter((v, i, a) => a.indexOf(v) === i), [audience])
+  const cohortLanguages = useMemo(() => (audience?.distributions.languages ?? []).map((l) => templateLanguageKey(l.value)).filter((v, i, a) => a.indexOf(v) === i), [audience])
   const samples = audience?.samples ?? []
   const sample = samples.length ? samples[sampleIdx % samples.length] : null
   const governed = selected?.governed ?? []
@@ -63,7 +64,7 @@ export function StrategyBody({ templates, audience, composition, fleet, onStrate
             <thead><tr><th>Language</th><th>Sendable</th><th>Paused</th><th>Blocked</th><th>Cohort</th></tr></thead>
             <tbody>
               {selected.languages.slice(0, 4).map((l) => {
-                const cohort = (audience?.distributions.languages ?? []).find((x) => (x.value === 'unknown' ? 'English' : x.value) === l.language)?.count ?? 0
+                const cohort = (audience?.distributions.languages ?? []).filter((x) => templateLanguageKey(x.value) === l.language).reduce((sum, x) => sum + x.count, 0)
                 return (
                   <tr key={l.language} className={cx(l.sendable === 0 && 'is-gap')}>
                     <td>{l.language}</td>

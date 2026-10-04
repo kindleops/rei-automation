@@ -30,7 +30,7 @@ import {
   BLOCK_REASONS,
 } from "@/lib/domain/outbound/presend-eligibility-engine.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
-import { isLanguagePolicyToken, resolveLanguage } from "@/lib/sms/language_aliases.js";
+import { isLanguagePolicyToken, resolveLanguage, templateCatalogLanguageName } from "@/lib/sms/language_aliases.js";
 import { normalizeCampaignStageCode } from "@/lib/domain/campaigns/campaign-stage-code.js";
 import { canonicalPropertyGroupOf, filterTemplatesForProperty } from "@/lib/domain/templates/template-asset-compatibility.js";
 
@@ -3386,7 +3386,10 @@ async function renderOutboundTemplateCore(candidate = {}, options = {}, deps = {
     stage_label: clean(candidate.stage_label) || "Ownership Confirmation",
     touch_number: asPositiveInteger(candidate.touch_number, 1),
     is_first_touch: Number(candidate.touch_number || 1) === 1,
-    preferred_language: languageResolved.canonical || rawLanguage,
+    // The catalog's own label, not the runtime canonical: Hindi-family sellers
+    // are "Asian Indian (Hindi or Other)" in seller data and "Indian (Hindi or
+    // Other)" in sms_templates, and this value is the .ilike() fetch filter.
+    preferred_language: templateCatalogLanguageName(languageResolved.canonical || rawLanguage) || rawLanguage,
     preferred_agent_persona: clean(candidate.agent_persona) || "",
     property_type_scope: clean(candidate.raw?.property_type_scope) || null,
     deal_strategy: clean(candidate.raw?.deal_strategy) || null,

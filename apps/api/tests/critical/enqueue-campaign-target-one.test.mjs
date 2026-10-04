@@ -802,3 +802,13 @@ test("rotation fail-closed: a language pool of ONE refuses the row (insufficient
   assert.match(String(result.detail || ""), /1<2$/);
   assert.equal(inserted.length, 0, "fail-closed means NO row, not a row with one template");
 });
+
+test("a Hindi-family target is not a language mismatch with the catalog's Hindi label (2026-10-04 seam)", async () => {
+  const { deps } = runDeps(okFixtures({
+    campaign_targets: baseTarget({ language: "Asian Indian (Hindi or Other)" }),
+    sms_templates: baseTemplate({ language: "Indian (Hindi or Other)" }),
+    ownership_template_rotation_control: [baseGov({ language: "Indian (Hindi or Other)" })],
+  }));
+  const result = await enqueueCampaignTargetOne(TARGET_ID, deps);
+  assert.notEqual(result.reason, ENQUEUE_REASON.LANGUAGE_MISMATCH);
+});

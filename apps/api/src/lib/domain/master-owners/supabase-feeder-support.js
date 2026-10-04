@@ -4,6 +4,7 @@ import {
   normalizeSelectorText,
 } from "@/lib/domain/templates/template-selector.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
+import { sameTemplateLanguage } from "@/lib/sms/language_aliases.js";
 import {
   hasSupabaseConfig,
   supabase as defaultSupabase,
@@ -350,7 +351,7 @@ function scoreSupabaseSmsTemplate(row = {}, selector = {}) {
   if (template_use_case && requested_use_cases.has(template_use_case)) score += 300;
   if (is_first_touch) score += 60;
   if (is_follow_up) score += 40;
-  if (template_language === requested_language) {
+  if (template_language === requested_language || sameTemplateLanguage(row?.language || "English", selector?.language || "English")) {
     score += 80;
   } else {
     return Number.NEGATIVE_INFINITY;

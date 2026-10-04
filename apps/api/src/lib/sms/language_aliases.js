@@ -28,6 +28,45 @@ const UNSUPPORTED_TEMPLATE_LANGUAGES = Object.freeze(new Set([
   "Pashto",
 ]));
 
+/**
+ * Raw spellings of the unsupported languages, as they arrive from the seller
+ * graph (seller.owner.language_preference) and the classifier. Measured
+ * 2026-10-04 on a 30% sample of seller.owner: the source writes "Pashtu/Pashto",
+ * which matched neither "Pashto" nor any template, so the seller fell into a
+ * generic no-template miss instead of the explicit unsupported-language hold.
+ */
+const UNSUPPORTED_LANGUAGE_ALIASES = new Map([
+  ["thai", "Thai"],
+  ["th", "Thai"],
+  ["farsi", "Farsi"],
+  ["persian", "Farsi"],
+  ["fa", "Farsi"],
+  ["pashto", "Pashto"],
+  ["pashtu", "Pashto"],
+  ["pashtu/pashto", "Pashto"],
+  ["pashto/pashtu", "Pashto"],
+  ["ps", "Pashto"],
+]);
+
+/**
+ * CANONICAL RUNTIME LANGUAGE -> sms_templates.language.
+ *
+ * The runtime canonical for the Hindi family is the seller-data label
+ * "Asian Indian (Hindi or Other)", but every one of the 479 Hindi rows in
+ * sms_templates is labelled "Indian (Hindi or Other)". The send-time renderer
+ * filtered the catalog with `.ilike("language", <canonical>)`, so a seller with
+ * a stated Hindi-family language matched zero templates and was held at launch
+ * (11 eligible Minneapolis sellers on 2026-10-04). Every other canonical
+ * language is spelled identically in both places (audited 2026-10-04: 16
+ * catalog languages vs 18 seller-graph values).
+ *
+ * Source data is not rewritten; this map is applied wherever a language is
+ * used to look up or compare against template rows.
+ */
+const TEMPLATE_CATALOG_LANGUAGE_ALIASES = Object.freeze(new Map([
+  ["Asian Indian (Hindi or Other)", "Indian (Hindi or Other)"],
+]));
+
 // Key = lowercased alias, Value = canonical language string
 const ALIAS_MAP = new Map();
 
@@ -108,9 +147,35 @@ export function normalizeLanguage(value) {
  * Thai, Farsi, Pashto are recognized by classify.js but have no templates.
  */
 export function isUnsupportedTemplateLanguage(value) {
+  return unsupportedTemplateLanguage(value) !== null;
+}
+
+/** The canonical unsupported language ("Thai" | "Farsi" | "Pashto") a raw value names, else null. */
+export function unsupportedTemplateLanguage(value) {
   const trimmed = String(value ?? "").trim();
-  if (!trimmed) return false;
-  return UNSUPPORTED_TEMPLATE_LANGUAGES.has(trimmed);
+  if (!trimmed) return null;
+  if (UNSUPPORTED_TEMPLATE_LANGUAGES.has(trimmed)) return trimmed;
+  return UNSUPPORTED_LANGUAGE_ALIASES.get(trimmed.toLowerCase()) || null;
+}
+
+/**
+ * The value to match against `sms_templates.language` for any raw or
+ * canonical language. Unrecognised values pass through trimmed (the catalog
+ * may carry a language this map does not know yet); empty returns null.
+ */
+export function templateCatalogLanguageName(value) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return null;
+  const canonical = normalizeLanguage(trimmed);
+  if (canonical) return TEMPLATE_CATALOG_LANGUAGE_ALIASES.get(canonical) || canonical;
+  return unsupportedTemplateLanguage(trimmed) || trimmed;
+}
+
+/** Do two language labels name the same template-catalog language? */
+export function sameTemplateLanguage(left, right) {
+  const a = templateCatalogLanguageName(left);
+  const b = templateCatalogLanguageName(right);
+  return Boolean(a && b) && a.toLowerCase() === b.toLowerCase();
 }
 
 /**
@@ -131,8 +196,9 @@ export function resolveLanguage(value) {
   const canonical = normalizeLanguage(raw);
   if (canonical) return { canonical, unsupported: false };
 
-  if (isUnsupportedTemplateLanguage(raw)) {
-    return { canonical: raw, unsupported: true };
+  const unsupported = unsupportedTemplateLanguage(raw);
+  if (unsupported) {
+    return { canonical: unsupported, unsupported: true };
   }
 
   return { canonical: null, unsupported: false };
@@ -144,8 +210,12 @@ export default {
   isLanguagePolicyToken,
   normalizeLanguage,
   isUnsupportedTemplateLanguage,
+  unsupportedTemplateLanguage,
+  templateCatalogLanguageName,
+  sameTemplateLanguage,
   resolveLanguage,
   CANONICAL_LANGUAGES,
   CANONICAL_LANGUAGE_SET,
   UNSUPPORTED_TEMPLATE_LANGUAGES,
+  TEMPLATE_CATALOG_LANGUAGE_ALIASES,
 };

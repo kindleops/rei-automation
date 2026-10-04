@@ -76,6 +76,7 @@ import { getSystemValueFresh } from '@/lib/system-control.js'
 import { child } from '@/lib/logging/logger.js'
 import { isAmbiguousSendRow } from '@/lib/domain/messaging/ambiguous-send-evidence.js'
 import { computeNextValidSendInstant } from '@/lib/domain/campaigns/campaign-convert-to-live.js'
+import { sameTemplateLanguage } from '@/lib/sms/language_aliases.js'
 import { loadOwnershipTemplates, renderableRotationPool, MIN_ROTATION_VARIANTS, INSUFFICIENT_ROTATION_REASON } from '@/lib/domain/campaigns/campaign-target-template-assignment.js'
 import { governanceApplies as rotationGovernanceApplies } from '@/lib/domain/campaigns/template-governance.js'
 import { loadDispatchBlockedSets, isTemplateDispatchBlocked, isSenderDispatchBlocked } from '@/lib/domain/delivery/sms-health-guard.js'
@@ -592,7 +593,9 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
     return fail(ENQUEUE_REASON.TEMPLATE_UNGOVERNED, rejected[0]?.reason || 'not_eligible')
   }
 
-  if (clean(template.language).toLowerCase() !== clean(target.language).toLowerCase()) {
+  // Through the catalog alias: the target carries the seller-data label
+  // ("Asian Indian (Hindi or Other)"), the template the catalog's ("Indian …").
+  if (clean(template.language).toLowerCase() !== clean(target.language).toLowerCase() && !sameTemplateLanguage(template.language, target.language)) {
     return fail(ENQUEUE_REASON.LANGUAGE_MISMATCH, `${template.language} vs ${target.language}`)
   }
   // Dispatch parity: never create a row dispatch will deterministically refuse.
