@@ -29,7 +29,7 @@
 -- (measured read side: 1.6-2.2 s per 500 rows). No call scans a whole source table
 -- except message_events / send_queue / sms_suppression_list, which are small (14.5K /
 -- 19.2K / 348 rows) and are filtered to the batch's phones first.
--- Schedules live in PROPOSED_20261003221000_campaign_audience_schedule.sql and are
+-- Schedules live in 20261003221000_campaign_audience_schedule.sql and are
 -- applied only after the canary in the run plan.
 --
 -- No BEGIN/COMMIT in this file: apply it as ONE transaction with
@@ -857,18 +857,20 @@ BEGIN
     never_contacted     = (c.last_outbound IS NULL),
     pending_prior_touch = (c.last_outbound IS NOT NULL AND c.last_outbound >= now() - interval '30 days'),
     active_queue_item   = COALESCE(c.active, false),
-    true_post_contact_suppression = c.suppressed,
-    wrong_number        = c.wrong,
-    sms_eligible        = (c.canonical_e164 IS NOT NULL AND c.ptype = 'W' AND NOT c.wrong),
-    queue_eligible      = (
+    true_post_contact_suppression = COALESCE(c.suppressed, false),
+    wrong_number        = COALESCE(c.wrong, false),
+    -- Null-safe (unknown => false): an unknown phone type / flag is never eligible,
+    -- and both columns are NOT NULL.
+    sms_eligible        = COALESCE(c.canonical_e164 IS NOT NULL AND c.ptype = 'W' AND NOT COALESCE(c.wrong, false), false),
+    queue_eligible      = COALESCE(
       c.canonical_e164 IS NOT NULL
-      AND NOT c.wrong
+      AND NOT COALESCE(c.wrong, false)
       AND c.ptype = 'W'
-      AND NOT c.suppressed
+      AND NOT COALESCE(c.suppressed, false)
       AND NOT (c.last_outbound IS NOT NULL AND c.last_outbound >= now() - interval '30 days')
       AND NOT COALESCE(c.active, false)
       AND COALESCE(c.sender_covered, false)
-    ),
+    , false),
     -- Exclusive precedence, operator-locked order (unchanged). Unknown phone type
     -- lands in non_sms_capable with blocker_flags.phone_type_unknown = true.
     queue_block_reason  = CASE

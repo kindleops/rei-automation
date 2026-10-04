@@ -1,5 +1,5 @@
--- ROLLBACK for PROPOSED_20261003220000_campaign_audience_completeness.sql and
--- PROPOSED_20261003221000_campaign_audience_schedule.sql.
+-- ROLLBACK for 20261003220000_campaign_audience_completeness.sql and
+-- 20261003221000_campaign_audience_schedule.sql.
 --
 -- Data note: the graph is a disposable projection. Rolling back the code restores the
 -- old functions; values already projected into existing columns (names, demographics,
@@ -8,7 +8,7 @@
 
 --
 -- If the schedule was enabled, FIRST run
---   PROPOSED_20261003221000_campaign_audience_schedule_rollback.sql
+--   20261003221000_campaign_audience_schedule_rollback.sql
 -- (unschedules the jobs, drops the concurrent index; cannot run in a transaction).
 -- This file has no BEGIN/COMMIT: apply it with  psql -X -1 -v ON_ERROR_STOP=1 -f …
 -- Locks: DROP COLUMN takes ACCESS EXCLUSIVE on the graph and stage (metadata only).

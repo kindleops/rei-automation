@@ -1,5 +1,5 @@
 -- PROPOSED — NOT APPLIED. Schedules for the campaign audience projection.
--- Apply ONLY after PROPOSED_20261003220000_campaign_audience_completeness.sql and the
+-- Apply ONLY after 20261003220000_campaign_audience_completeness.sql and the
 -- canary in the run plan (one market enriched by hand, counts checked).
 --
 -- Windows (UTC). US send windows are 08:00-21:00 recipient-local, i.e. 12:00 UTC

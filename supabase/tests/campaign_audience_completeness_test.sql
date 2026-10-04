@@ -1,8 +1,8 @@
 -- =============================================================================
 -- Rollback-only pretest for
---   supabase/migrations/PROPOSED_20261003220000_campaign_audience_completeness.sql
+--   supabase/migrations/20261003220000_campaign_audience_completeness.sql
 -- and its rollback,
---   supabase/migrations/PROPOSED_20261003220000_campaign_audience_completeness_rollback.sql
+--   supabase/rollbacks/20261003220000_campaign_audience_completeness.rollback.sql
 --
 -- Run with psql as postgres, from the repo root:
 --   psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/campaign_audience_completeness_test.sql
@@ -56,7 +56,7 @@ do $$ begin
 end $$;
 
 -- ------------------------------------------------------------ migrate ----
-\ir ../migrations/PROPOSED_20261003220000_campaign_audience_completeness.sql
+\ir ../migrations/20261003220000_campaign_audience_completeness.sql
 set local statement_timeout = '180s';
 
 -- ---------------------------------------------------------- A. catalog ----
@@ -242,7 +242,7 @@ do $$ begin
 end $$;
 
 -- ---------------------------------------------------------- E. ROLLBACK ----
-\ir ../migrations/PROPOSED_20261003220000_campaign_audience_completeness_rollback.sql
+\ir ../rollbacks/20261003220000_campaign_audience_completeness.rollback.sql
 set local statement_timeout = '180s';
 
 do $$
