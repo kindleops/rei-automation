@@ -15,6 +15,9 @@
  */
 import { createAssetClassifier, ASSET_CODE, isPricePerUnitEvidence, MF_BUCKETS } from './mi-asset-classes.js'
 import { monthOfDay } from './mi-periods.js'
+import { addBuyer, medianOf, sqftBucket, unitBucket } from './mi-agg.js'
+
+export { medianOf }
 import { displayableCompanyName } from '@/lib/domain/entity-graph/buyer-name-privacy.js'
 import { lenderClass } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
 
@@ -153,17 +156,6 @@ export function newAcc() {
   }
 }
 
-/** Multifamily unit-count buckets (recorded units) and building-size buckets (sq ft). */
-export const UNIT_BUCKETS = Object.freeze([[2, 2, '2'], [3, 3, '3'], [4, 4, '4'], [5, 9, '5–9'], [10, 19, '10–19'], [20, 49, '20–49'], [50, Infinity, '50+']])
-export const SQFT_BUCKETS = Object.freeze([[0, 1999, '< 2K'], [2000, 3999, '2–4K'], [4000, 7999, '4–8K'], [8000, 19999, '8–20K'], [20000, Infinity, '20K+']])
-const bucketOf = (buckets, v) => { for (const [a, b, label] of buckets) if (v >= a && v <= b) return label; return null }
-
-/**
- * Add one row to an accumulator. `win` = { from, to, codes } (codes: Set of
- * asset codes or null). Entity ownership is a current state: counted for the
- * asset filter regardless of the window. Monthly counts are kept for every
- * month (growth and velocity windows are month-aligned and may differ from the period).
- */
 export function addRow(acc, index, i, win) {
   const c = index.cols
   const a = c.asset[i]
@@ -180,11 +172,9 @@ export function addRow(acc, index, i, win) {
   if (f & F.MLS) acc.mls += 1
   if (MF_CODES.has(a)) {
     acc.mfSales += 1
-    const u = c.units[i]
-    const ub = Number.isFinite(u) && u > 1 ? bucketOf(UNIT_BUCKETS, Math.round(u)) : 'not recorded'
+    const ub = unitBucket(c.units[i])
     acc.unitDist.set(ub, (acc.unitDist.get(ub) || 0) + 1)
-    const sq = c.sqft[i]
-    const sb = Number.isFinite(sq) && sq > 0 ? bucketOf(SQFT_BUCKETS, sq) : 'not recorded'
+    const sb = sqftBucket(c.sqft[i])
     acc.sqftDist.set(sb, (acc.sqftDist.get(sb) || 0) + 1)
   }
   const p = c.price[i]
@@ -207,20 +197,9 @@ export function addRow(acc, index, i, win) {
     if (index.buyerLender[b]) acc.lenderPurchases += 1
     else if (index.buyerListable[b]) {
       acc.namedPurchases += 1
-      const e = acc.buyers.get(b)
-      if (e) { e.n += 1; if (p > 0 && (f & F.QUALIFIED)) { e.vol += p; e.pn += 1 } if (d > e.last) e.last = d; e.assets[a] = (e.assets[a] || 0) + 1 }
-      else acc.buyers.set(b, { n: 1, vol: p > 0 && (f & F.QUALIFIED) ? p : 0, pn: p > 0 && (f & F.QUALIFIED) ? 1 : 0, last: d, assets: { [a]: 1 } })
+      addBuyer(acc.buyers, b, { day: d, price: p, qualified: Boolean(f & F.QUALIFIED), assetCode: a })
     }
   }
-}
-
-/** Exact median, percentile_cont(0.5) semantics. Sorts in place. */
-export function medianOf(values) {
-  const n = values.length
-  if (!n) return null
-  values.sort((x, y) => x - y)
-  const h = n >> 1
-  return n % 2 ? values[h] : (values[h - 1] + values[h]) / 2
 }
 
 export function aggregate(index, src, win) {

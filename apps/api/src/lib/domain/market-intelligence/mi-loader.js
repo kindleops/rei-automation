@@ -76,6 +76,54 @@ export const UNIVERSE_SQL = `select property_id, property_zip, lower(btrim(prope
   equity_percent::float8, estimated_value::float8, phone_type
   from public.campaign_target_graph where state = $1`
 
+// ── Market summary (the production read path) ────────────────────────────────
+/**
+ * Every summary column the API reads. The schema check lists the catalog's
+ * columns WITHOUT naming any of them in a select, so a missing table or a phantom
+ * column can never fail the guard itself ("phantom column kills a guard", 09-03).
+ */
+export const SUMMARY_COLUMNS = Object.freeze({
+  mi_rollup_builds: ['build_id', 'status', 'source_as_of', 'source_first', 'source_rows', 'ready_at', 'started_at', 'finished_at', 'db_ms', 'ticks', 'rows_written', 'notes', 'cursor', 'units', 'attempts', 'last_error'],
+  mi_zip_geo: ['build_id', 'zip', 'state', 'city_key', 'county_key', 'county_name', 'county_via', 'market_key', 'sales_n', 'min_lat', 'max_lat', 'min_lng', 'max_lng'],
+  mi_geo_period_rollup: ['build_id', 'geo_level', 'geo_key', 'period', 'asset', 'sale_count', 'priced_sale_count', 'qualified_sale_count', 'mls_count', 'mf_sale_count',
+    'investor_count', 'buyer_known_count', 'cash_known_count', 'cash_count', 'entity_owned_count', 'latest_sale', 'median_price', 'median_ppsf', 'ppsf_n', 'median_ppu', 'ppu_n',
+    'median_inv_price', 'inv_price_n', 'price_deciles', 'n_sfr', 'n_mf_2_4', 'n_mf_5_plus', 'n_mf_unknown', 'n_land', 'n_commercial', 'n_other_res', 'n_unknown',
+    'u_2', 'u_3', 'u_4', 'u_5_9', 'u_10_19', 'u_20_49', 'u_50p', 'u_unrec', 's_lt2k', 's_2_4k', 's_4_8k', 's_8_20k', 's_20kp', 's_unrec'],
+  mi_geo_month_rollup: ['build_id', 'geo_level', 'geo_key', 'asset', 'month', 'sales', 'investor', 'buyer_known', 'cash', 'cash_known', 'price_n', 'median_price', 'ppsf_n', 'median_ppsf'],
+  mi_buyer_activity: ['build_id', 'comp_id', 'sold_on', 'zip', 'state', 'city_key', 'property_type', 'units', 'price', 'qualified', 'is_investor', 'buyer'],
+})
+export const SCHEMA_SQL = `select c.relname as t, a.attname as c from pg_catalog.pg_attribute a
+  join pg_catalog.pg_class c on c.oid = a.attrelid join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'public' and c.relname = any($1::text[]) and a.attnum > 0 and not a.attisdropped`
+
+/** Pure: which required summary columns are missing from the catalog rows. */
+export function missingSummaryColumns(rows) {
+  const have = new Set((rows || []).map((r) => `${r.t}.${r.c}`))
+  const missing = []
+  for (const [t, cols] of Object.entries(SUMMARY_COLUMNS)) for (const c of cols) if (!have.has(`${t}.${c}`)) missing.push(`${t}.${c}`)
+  return missing
+}
+
+const PERIOD_COLS = SUMMARY_COLUMNS.mi_geo_period_rollup.filter((c) => c !== 'build_id').map((c) => (c === 'latest_sale' ? 'latest_sale::text as latest_sale' : c)).join(', ')
+export const SUMMARY_SQL = Object.freeze({
+  ready: `select build_id, source_as_of::text as source_as_of, source_first::text as source_first, source_rows, ready_at::text as ready_at, started_at::text as started_at,
+            finished_at::text as finished_at, db_ms, ticks, rows_written, notes from public.mi_rollup_builds where status = 'ready' order by build_id desc limit 1`,
+  building: `select build_id, cursor, cardinality(units) as units, units[cursor + 1] as next_unit, attempts, last_error, started_at::text as started_at
+               from public.mi_rollup_builds where status = 'building' order by build_id desc limit 1`,
+  zipGeo: `select zip, state, city_key, county_key, county_name, county_via, market_key, sales_n, min_lat, max_lat, min_lng, max_lng from public.mi_zip_geo where build_id = $1`,
+  slice: `select ${PERIOD_COLS} from public.mi_geo_period_rollup where build_id = $1 and geo_level = $2 and period = $3 and asset = $4`,
+  assets: `select asset, sale_count from public.mi_geo_period_rollup where build_id = $1 and geo_level = 'nation' and period = 'all'`,
+  monthSums: `select geo_key,
+      coalesce(sum(sales) filter (where month between $4::date and $5::date), 0)::int as rate_sum,
+      coalesce(sum(sales) filter (where month between $6::date and $7::date), 0)::int as cur_sum,
+      coalesce(sum(sales) filter (where month between $8::date and $9::date), 0)::int as prior_sum
+    from public.mi_geo_month_rollup where build_id = $1 and geo_level = $2 and asset = $3 group by geo_key`,
+  geoMonths: `select month::text as month, sales, investor, buyer_known, cash, cash_known, price_n, median_price, ppsf_n, median_ppsf
+    from public.mi_geo_month_rollup where build_id = $1 and geo_level = $2 and geo_key = $3 and asset = $4 order by month`,
+  buyers: `select comp_id, (sold_on - date '2000-01-01')::int as d, zip, state, city_key, property_type, units, price, qualified, is_investor, buyer
+    from public.mi_buyer_activity where build_id = $1`,
+})
+
 /** Decide whether a load may run now. Pure. */
 export function loadAllowed(row) {
   const active = Number(row?.active) || 0
@@ -138,5 +186,14 @@ export function createMarketIntelLoader(deps = {}) {
     return (res?.rows || []).map((r) => UNIVERSE_SQL_COLUMNS.map((k) => r[k]))
   }
 
-  return { guard, freshness, streamSales, aux, universeForState }
+  async function summarySchema() {
+    const res = await query(SCHEMA_SQL, [Object.keys(SUMMARY_COLUMNS)], 5_000)
+    return missingSummaryColumns(res?.rows)
+  }
+  async function summary(name, params = [], timeoutMs = 15_000) {
+    const res = await query(SUMMARY_SQL[name], params, timeoutMs)
+    return res?.rows || []
+  }
+
+  return { guard, freshness, streamSales, aux, universeForState, summarySchema, summary }
 }

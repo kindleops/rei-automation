@@ -10,7 +10,7 @@
  * A withheld value is null. The UI never shows a number for anything but 'ok'.
  */
 import { METRIC_BY_ID } from './mi-metric-registry.js'
-import { medianOf } from './mi-sales-index.js'
+import { monthSum } from './mi-agg.js'
 import { completeMonthsIn, growthWindows, monthOfDay } from './mi-periods.js'
 
 const ok = (value, n, extra = {}) => ({ value, n, status: 'ok', ...extra })
@@ -24,57 +24,74 @@ function gated(id, value, n, extra = {}) {
   return ok(value, n, extra)
 }
 
-const monthsSum = (acc, from, to) => {
-  let t = 0
-  for (const [m, n] of acc.months) if (m >= from && m <= to) t += n
-  return t
+/**
+ * The month windows a period needs, decided once per (period, coverage): the complete
+ * months inside the period (velocity) and the two equal growth windows. Pure.
+ */
+export function periodWindows(ctx) {
+  const rateMonths = completeMonthsIn(ctx.window.from, ctx.window.to, ctx.coverage)
+  const g = growthWindows(ctx.periodId, ctx.coverage)
+  return {
+    rate: rateMonths.length ? { from: rateMonths[0], to: rateMonths[rateMonths.length - 1], months: rateMonths.length } : null,
+    growth: g,
+    cur: g.valid ? { from: monthOfDay(g.current.from), to: monthOfDay(g.current.to) } : null,
+    prior: g.valid ? { from: monthOfDay(g.prior.from), to: monthOfDay(g.prior.to) } : null,
+  }
 }
 
-/** Sales-derived metrics for one accumulator. ctx = { window, periodId, coverage }. Medians sort the acc arrays. */
-export function salesValues(acc, ctx) {
+/** Window sums from a month → sales map (raw path, or one geography's month rows). */
+export function windowSumsFromMonths(months, pw) {
+  const sum = (w) => (w ? monthSum(months, w.from, w.to) : 0)
+  return { rateSum: sum(pw.rate), curSum: sum(pw.cur), priorSum: sum(pw.prior) }
+}
+
+/**
+ * Sales-derived metrics for one finalized aggregate (mi-agg.js). ctx = { window, periodId, coverage }.
+ * The aggregate carries rateSum / curSum / priorSum for the windows of periodWindows(ctx),
+ * or a `months` map they are computed from.
+ */
+export function salesValues(agg, ctx) {
+  const pw = ctx.windows || periodWindows(ctx)
+  const sums = agg.months ? windowSumsFromMonths(agg.months, pw) : { rateSum: agg.rateSum ?? 0, curSum: agg.curSum ?? 0, priorSum: agg.priorSum ?? 0 }
   const v = {}
-  v.sales_count = ok(acc.sales, acc.sales)
-  v.priced_sale_count = ok(acc.priced, acc.sales)
-  v.qualified_sale_count = ok(acc.qualified, acc.sales)
-  v.median_sale_price = gated('median_sale_price', medianOf(acc.prices), acc.prices.length)
-  v.median_ppsf = gated('median_ppsf', medianOf(acc.ppsf), acc.ppsf.length)
-  v.median_price_per_unit = gated('median_price_per_unit', medianOf(acc.ppu), acc.ppu.length)
-  v.mf_sale_count = ok(acc.mfSales, acc.sales)
+  v.sales_count = ok(agg.sales, agg.sales)
+  v.priced_sale_count = ok(agg.priced, agg.sales)
+  v.qualified_sale_count = ok(agg.qualified, agg.sales)
+  v.median_sale_price = gated('median_sale_price', agg.med.price.v, agg.med.price.n)
+  v.median_ppsf = gated('median_ppsf', agg.med.ppsf.v, agg.med.ppsf.n)
+  v.median_price_per_unit = gated('median_price_per_unit', agg.med.ppu.v, agg.med.ppu.n)
+  v.mf_sale_count = ok(agg.mfSales, agg.sales)
 
-  const months = completeMonthsIn(ctx.window.from, ctx.window.to, ctx.coverage)
-  if (!months.length) v.monthly_sales_rate = unavailable('No complete, covered month in the period')
-  else {
-    const total = months.reduce((t, m) => t + (acc.months.get(m) || 0), 0)
-    v.monthly_sales_rate = ok(total / months.length, months.length, { basis: `${months.length} complete month${months.length === 1 ? '' : 's'}` })
-  }
+  if (!pw.rate) v.monthly_sales_rate = unavailable('No complete, covered month in the period')
+  else v.monthly_sales_rate = ok(sums.rateSum / pw.rate.months, pw.rate.months, { basis: `${pw.rate.months} complete month${pw.rate.months === 1 ? '' : 's'}` })
 
-  const g = growthWindows(ctx.periodId, ctx.coverage)
+  const g = pw.growth
   if (!g.valid) v.sales_growth = unavailable(`No valid baseline: ${g.reason}`)
   else {
-    const cur = monthsSum(acc, monthOfDay(g.current.from), monthOfDay(g.current.to))
-    const prior = monthsSum(acc, monthOfDay(g.prior.from), monthOfDay(g.prior.to))
+    const cur = sums.curSum
+    const prior = sums.priorSum
     const basis = `${g.current.label} vs ${g.prior.label} (complete months)`
     const min = METRIC_BY_ID.sales_growth.min_sample
     if (prior < min || cur < min) v.sales_growth = insufficient(Math.min(prior, cur), min, { basis })
     else v.sales_growth = ok(cur / prior - 1, prior, { basis, current: cur, prior })
   }
 
-  v.investor_purchase_count = ok(acc.investor, acc.sales)
-  v.investor_purchase_share = gated('investor_purchase_share', acc.buyerKnown ? acc.investor / acc.buyerKnown : null, acc.buyerKnown,
-    { coverage: acc.sales ? acc.buyerKnown / acc.sales : 0, basis: `${acc.investor} of ${acc.buyerKnown} sales with a recorded buyer` })
-  v.buyer_evidence_coverage = acc.sales ? ok(acc.buyerKnown / acc.sales, acc.sales) : unavailable('No sales in the period')
-  v.cash_purchase_count = ok(acc.cash, acc.sales)
-  v.cash_purchase_share = gated('cash_purchase_share', acc.cashKnown ? acc.cash / acc.cashKnown : null, acc.cashKnown,
-    { coverage: acc.sales ? acc.cashKnown / acc.sales : 0, basis: `${acc.cash} of ${acc.cashKnown} sales with cash evidence` })
-  v.cash_evidence_coverage = acc.sales ? ok(acc.cashKnown / acc.sales, acc.sales) : unavailable('No sales in the period')
-  v.entity_owned_count = ok(acc.entity, acc.entity, { basis: 'Current state, not windowed' })
+  v.investor_purchase_count = ok(agg.investor, agg.sales)
+  v.investor_purchase_share = gated('investor_purchase_share', agg.buyerKnown ? agg.investor / agg.buyerKnown : null, agg.buyerKnown,
+    { coverage: agg.sales ? agg.buyerKnown / agg.sales : 0, basis: `${agg.investor} of ${agg.buyerKnown} sales with a recorded buyer` })
+  v.buyer_evidence_coverage = agg.sales ? ok(agg.buyerKnown / agg.sales, agg.sales) : unavailable('No sales in the period')
+  v.cash_purchase_count = ok(agg.cash, agg.sales)
+  v.cash_purchase_share = gated('cash_purchase_share', agg.cashKnown ? agg.cash / agg.cashKnown : null, agg.cashKnown,
+    { coverage: agg.sales ? agg.cashKnown / agg.sales : 0, basis: `${agg.cash} of ${agg.cashKnown} sales with cash evidence` })
+  v.cash_evidence_coverage = agg.sales ? ok(agg.cashKnown / agg.sales, agg.sales) : unavailable('No sales in the period')
+  v.entity_owned_count = ok(agg.entity, agg.entity, { basis: 'Current state, not windowed' })
 
-  const counts = [...acc.buyers.values()].map((b) => b.n).sort((a, b) => b - a)
-  v.company_buyer_count = ok(counts.length, acc.namedPurchases)
-  v.repeat_buyer_count = ok(counts.filter((n) => n >= 2).length, acc.namedPurchases)
+  const counts = [...agg.buyers.values()].map((b) => b.n).sort((a, b) => b - a)
+  v.company_buyer_count = ok(counts.length, agg.namedPurchases)
+  v.repeat_buyer_count = ok(counts.filter((n) => n >= 2).length, agg.namedPurchases)
   const top5 = counts.slice(0, 5).reduce((t, n) => t + n, 0)
-  v.top5_buyer_share = gated('top5_buyer_share', acc.namedPurchases ? top5 / acc.namedPurchases : null, acc.namedPurchases, { basis: `${top5} of ${acc.namedPurchases} named-company purchases` })
-  v.median_investor_price = gated('median_investor_price', medianOf(acc.invPrices), acc.invPrices.length)
+  v.top5_buyer_share = gated('top5_buyer_share', agg.namedPurchases ? top5 / agg.namedPurchases : null, agg.namedPurchases, { basis: `${top5} of ${agg.namedPurchases} named-company purchases` })
+  v.median_investor_price = gated('median_investor_price', agg.med.inv.v, agg.med.inv.n)
   return v
 }
 
@@ -130,9 +147,9 @@ export function censusValues(cell, members = null) {
 }
 
 /** Top company buyers (listable names only), most active first. */
-export function topBuyers(acc, index, assetLabel, limit = 10) {
+export function topBuyers(acc, nameOf, assetLabel, limit = 10) {
   const out = []
-  for (const [b, e] of acc.buyers) out.push({ name: index.dicts.buyers[b], purchases: e.n, priced_volume: e.vol, priced_n: e.pn, last_purchase_day: e.last, assets: Object.entries(e.assets).map(([code, n]) => ({ asset: assetLabel(Number(code)), n })).sort((x, y) => y.n - x.n) })
+  for (const [b, e] of acc.buyers) out.push({ name: nameOf(b), purchases: e.n, priced_volume: e.vol, priced_n: e.pn, last_purchase_day: e.last, assets: Object.entries(e.assets).map(([code, n]) => ({ asset: assetLabel(Number(code)), n })).sort((x, y) => y.n - x.n) })
   out.sort((x, y) => (y.purchases - x.purchases) || (y.priced_volume - x.priced_volume) || x.name.localeCompare(y.name))
   return out.slice(0, limit)
 }

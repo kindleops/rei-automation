@@ -2,134 +2,146 @@
  * MARKET INTELLIGENCE SERVICE: "Where should we be hunting, what is happening
  * there, and why?" (brief §1). Read-only. Never throws to the route.
  *
- * Lifecycle: the first request starts ONE index build (mi-loader → sales index
- * + geography catalog). Until it is ready every op answers
- * { status: 'warming', progress } honestly. A cheap freshness probe (max
- * sold_on + reltuples) runs at most every 15 min; a changed MV is rebuilt in the
- * background while the old index keeps serving.
+ * READ PATH (owner decision 2026-10-04): raw sales are the source of truth; the
+ * MARKET SUMMARY (mi_geo_period_rollup & co., built off-hours by mi_rollup_tick)
+ * is the analytical projection Market Intelligence reads. See mi-sources.js.
  *
- * Ops:
- *   status · registry · search · geography · dossier · rank · screen · compare
- *   trends · heat · recent_sales · universe_load
- * Every op except recent_sales and universe_load runs in memory (0 DB queries).
+ *   summary ready            → every op reads small, indexed, cached summary slices.
+ *   summary missing/not built → { status: 'summary_missing', message: 'Market summary not built yet' }.
+ *                              Nothing streams. Re-checked at most once a minute.
+ *   dev only                 → the old full in-memory stream of mv_map_market_sales, ONLY when
+ *                              MI_DEV_RAW_FALLBACK=1 and NODE_ENV !== 'production'
+ *                              (devRawAllowed). Never in production, whatever the env says.
+ * The schema guard lists catalog columns and never selects a possibly-missing column, so a
+ * phantom column cannot break it.
+ *
+ * Ops: status · registry · search · geography · dossier · rank · screen · compare · trends ·
+ * heat · recent_sales · universe_load
  */
 import { createMarketIntelLoader } from './mi-loader.js'
-import { createSalesIndexBuilder, aggregate, aggregateBy, rowsOf, monthlySeries, nationalMonthCounts, medianOf, UNIT_BUCKETS, SQFT_BUCKETS } from './mi-sales-index.js'
-import { buildGeographyCatalog, parseGeoId, searchGeographies, summaryOf, LEVEL_ORDER, LEVEL_LABEL, titleCase } from './mi-geography.js'
+import { createSalesIndexBuilder } from './mi-sales-index.js'
+import { createRawSource, createSummarySource } from './mi-sources.js'
+import { searchGeographies, summaryOf, LEVEL_ORDER, LEVEL_LABEL, titleCase } from './mi-geography.js'
 import { METRICS, METRIC_BY_ID, registryPayload, metricSupports } from './mi-metric-registry.js'
-import { DEFAULT_PERIOD, PERIODS, dateOfDay, dayOfDate, deriveCoverage, periodWindow, monthLabel } from './mi-periods.js'
+import { DEFAULT_PERIOD, PERIODS, dateOfDay, periodWindow, monthLabel } from './mi-periods.js'
 import { ASSET_FILTERS, ASSET_LABEL, MI_ASSETS, assetFilterCodes, createAssetClassifier } from './mi-asset-classes.js'
-import { salesValues, universeValues, stockValues, censusValues, topBuyers, rankRows, passesFilters, unavailable } from './mi-metric-values.js'
+import { NOT_RECORDED, SQFT_LABELS, UNIT_LABELS } from './mi-agg.js'
+import { salesValues, periodWindows, universeValues, stockValues, censusValues, topBuyers, rankRows, passesFilters, unavailable } from './mi-metric-values.js'
 import { createUniverseStore, summarizeUniverse, universeMatches } from './mi-universe.js'
 import { readMapBoundaries } from '@/lib/domain/map/map-boundaries-service.js'
 import { displayableCompanyName } from '@/lib/domain/entity-graph/buyer-name-privacy.js'
 import { lenderClass } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
 import { queryWithTimeout } from '@/lib/postgres/client.js'
 
-const PROBE_EVERY_MS = 15 * 60_000
-const MAX_AGE_MS = 26 * 3600_000
+const SUMMARY_PROBE_MS = 5 * 60_000
+const MISSING_RETRY_MS = 60_000
 const BUSY_RETRY_MS = 60_000
 const CACHE_MAX = 240
 const RECENT_TTL_MS = 30 * 60_000
 const assetLabelOf = (code) => ASSET_LABEL[MI_ASSETS[code]] || 'Unknown'
+export const SUMMARY_MISSING_MESSAGE = 'Market summary not built yet'
+
+/** The dev-only raw stream is allowed only by an explicit flag, and never in production. */
+export function devRawAllowed(env = process.env) {
+  return env.MI_DEV_RAW_FALLBACK === '1' && env.NODE_ENV !== 'production'
+}
 
 export function createMarketIntelService(deps = {}) {
   const loader = deps.loader || createMarketIntelLoader(deps)
   const clock = deps.clock || (() => Date.now())
   const boundaries = deps.readBoundaries || readMapBoundaries
+  const env = deps.env || process.env
   const classify = createAssetClassifier()
   const universe = createUniverseStore({ loader, clock, classify })
-  let state = { status: 'cold', progress: null, error: null, retryAt: 0 }
-  let current = null // { version, index, catalog, aux, coverage, loadedAt, freshness, … }
+  let state = { status: 'cold', progress: null, error: null, retryAt: 0, summary: null }
+  let current = null
   let building = null
   let lastProbe = 0
   const cache = new Map()
   const recentCache = new Map()
 
   // ── lifecycle ──────────────────────────────────────────────────────────
-  async function build() {
+  async function loadReference(withParcels) {
+    const ref = {}
+    for (const name of ['searchAreas', 'markets', 'aliases', 'census', 'outlined', 'areaStats', 'graphCoverage', 'zipMarket']) ref[name] = await loader.aux(name)
+    if (withParcels) ref.parcelZipCounty = await loader.aux('parcelZipCounty')
+    return ref
+  }
+
+  function install(source, ref) {
+    const census = new Map(ref.census.map((c) => [c.geo_id, c]))
+    current = {
+      source, ref, census, catalog: source.meta.catalog,
+      areaStats: new Map(ref.areaStats.map((r) => [`${r.kind}|${r.key}`, r])),
+      propertyN: new Map(ref.searchAreas.map((a) => [`${a.kind}|${a.key}`, Number(a.n) || 0])),
+      marketName: new Map(ref.markets.map((m) => [m.id, m.display_name])),
+      marketSlugByName: new Map(ref.markets.map((m) => [m.display_name, m.id])),
+      graphCoverage: ref.graphCoverage[0] || null, loadedAt: clock(),
+    }
+    cache.clear()
+    recentCache.clear()
+    lastProbe = clock()
+    state = { status: 'ready', progress: null, error: null, retryAt: 0, summary: null }
+    if (deps.prewarm !== false) setTimeout(() => { for (const lv of ['state', 'market']) void childTable(lv, 'nation:US', DEFAULT_PERIOD, 'all').catch(() => null) }, 0)
+  }
+
+  async function initSummary() {
+    const missing = await loader.summarySchema()
+    if (missing.length) return { ok: false, reason: 'not_installed', missing }
+    const [build] = await loader.summary('ready')
+    if (!build) {
+      const [prog] = await loader.summary('building')
+      return { ok: false, reason: prog ? 'building' : 'never_built', building: prog || null }
+    }
+    const ref = await loadReference(false)
+    const source = await createSummarySource({ loader, build, ref, classify })
+    install(source, ref)
+    return { ok: true }
+  }
+
+  async function initRawDev() {
     const t0 = clock()
     const g = await loader.guard()
-    if (!g.ok) { state = { ...state, status: current ? 'ready' : 'deferred', error: g.reason, retryAt: clock() + BUSY_RETRY_MS }; return }
+    if (!g.ok) { state = { ...state, status: 'deferred', error: g.reason, retryAt: clock() + BUSY_RETRY_MS }; return }
     const fresh = await loader.freshness()
-    state = { ...state, status: current ? 'ready' : 'loading', progress: { rows: 0, est: fresh.est_rows, phase: 'sales' }, error: null }
+    state = { ...state, status: 'loading', progress: { rows: 0, est: fresh.est_rows, phase: 'sales' }, error: null }
     const b = createSalesIndexBuilder({ classify })
     const tSales = clock()
     await loader.streamSales((rows) => b.ingest(rows), (rows) => { state = { ...state, progress: { rows, est: fresh.est_rows, phase: 'sales' } } })
     const index = b.finish()
     const salesMs = clock() - tSales
-    state = { ...state, progress: { rows: index.n, est: fresh.est_rows, phase: 'reference' } }
-    const tAux = clock()
-    const aux = {}
-    for (const name of ['searchAreas', 'markets', 'zipMarket', 'aliases', 'census', 'outlined', 'areaStats', 'graphCoverage', 'parcelZipCounty']) aux[name] = await loader.aux(name)
-    const auxMs = clock() - tAux
-    const census = new Map(aux.census.map((c) => [c.geo_id, c]))
-    const censusZipCounty = aux.census.filter((c) => c.geo_level === 'zip5' && c.county_geo_id).map((c) => ({ zip: c.geo_id.slice(5), state: c.state_code, county_key: c.county_geo_id.replace(/^county:/, ''), county_name: c.county_name }))
-    const outlined = { zip: new Set(aux.outlined.filter((r) => r.geo_level === 'zip5').map((r) => r.k)), state: new Set(aux.outlined.filter((r) => r.geo_level === 'state').map((r) => r.k)) }
-    const catalog = buildGeographyCatalog(index, { searchAreas: aux.searchAreas, markets: aux.markets, zipMarket: aux.zipMarket, aliases: aux.aliases, censusZipCounty, parcelZipCounty: aux.parcelZipCounty, outlined })
-    const coverage = deriveCoverage(nationalMonthCounts(index), index.maxDay)
-    const areaStats = new Map(aux.areaStats.map((r) => [`${r.kind}|${r.key}`, r]))
-    const propertyN = new Map(aux.searchAreas.map((a) => [`${a.kind}|${a.key}`, Number(a.n) || 0]))
-    const marketName = new Map(aux.markets.map((m) => [m.id, m.display_name]))
-    const marketSlugByName = new Map(aux.markets.map((m) => [m.display_name, m.id]))
-    const zipsByMarket = new Map()
-    for (const r of aux.zipMarket) { const l = zipsByMarket.get(r.canonical_market_id) || []; l.push(String(r.zip5)); zipsByMarket.set(r.canonical_market_id, l) }
-    const assetPresent = new Set(index.cols.asset)
-    const levelNodes = Object.fromEntries(LEVEL_ORDER.map((lv) => [lv, [...catalog.nodes.values()].filter((n) => n.level === lv)]))
-    current = {
-      version: `${fresh.max_sold_on}|${index.n}|${clock()}`, index, catalog, assetPresent, coverage, census, areaStats, propertyN, marketName, marketSlugByName, zipsByMarket, levelNodes,
-      graphCoverage: aux.graphCoverage[0] || null, loadedAt: clock(), freshness: fresh,
-      timings: { sales_ms: salesMs, reference_ms: auxMs, total_ms: clock() - t0 }, rawTypes: index.rawTypes,
-    }
-    cache.clear()
-    lastProbe = clock()
-    state = { status: 'ready', progress: null, error: null, retryAt: 0 }
-    // Prewarm the national tables the first screens read (CPU only, no DB), off the request path.
-    if (deps.prewarm !== false) setTimeout(() => { try { for (const lv of ['state', 'market', 'zip']) childTable(lv, 'nation:US', DEFAULT_PERIOD, 'all') } catch { /* best effort */ } }, 0)
+    const ref = await loadReference(true)
+    const source = createRawSource({ index, ref, parcelZipCounty: ref.parcelZipCounty, zipMarket: ref.zipMarket, timings: { sales_ms: salesMs, total_ms: clock() - t0 } })
+    install(source, ref)
+  }
+
+  async function init() {
+    const s = await initSummary()
+    if (s.ok) return
+    if (devRawAllowed(env)) { await initRawDev(); return }
+    state = { status: 'summary_missing', progress: null, error: null, retryAt: clock() + MISSING_RETRY_MS,
+      summary: { reason: s.reason, missing_columns: s.missing?.length ?? 0, building: s.building ?? null } }
   }
 
   function kick() {
     if (building) return building
-    if (state.status === 'deferred' && clock() < state.retryAt) return null
-    building = build().catch((error) => { state = { ...state, status: current ? 'ready' : 'error', error: String(error?.message || error), retryAt: clock() + BUSY_RETRY_MS } })
+    if ((state.status === 'deferred' || state.status === 'summary_missing' || state.status === 'error') && clock() < state.retryAt) return null
+    building = init().catch((error) => { state = { ...state, status: current ? 'ready' : 'error', error: String(error?.message || error), retryAt: clock() + BUSY_RETRY_MS } })
       .finally(() => { building = null })
     return building
   }
 
+  /** In summary mode, pick up a newer ready build (cheap: one indexed row). */
   async function probe() {
-    if (!current || building || clock() - lastProbe < PROBE_EVERY_MS) return
+    if (!current || building || clock() - lastProbe < SUMMARY_PROBE_MS) return
     lastProbe = clock()
     try {
-      const f = await loader.freshness()
-      if (f.max_sold_on !== current.freshness.max_sold_on || (f.est_rows && current.freshness.est_rows && f.est_rows !== current.freshness.est_rows) || clock() - current.loadedAt > MAX_AGE_MS) kick()
+      if (current.source.meta.mode !== 'summary') { if ((await loader.summarySchema()).length === 0 && (await loader.summary('ready')).length) kick(); return }
+      const [b] = await loader.summary('ready')
+      if (b && b.build_id !== current.source.meta.build.build_id) {
+        building = initSummary().catch(() => null).finally(() => { building = null })
+      }
     } catch { /* keep serving */ }
-  }
-
-  function statusPayload() {
-    const base = { status: current ? 'ready' : state.status, progress: state.progress, error: state.error }
-    if (!current) return base
-    const c = current
-    return {
-      ...base,
-      as_of: dateOfDay(c.index.maxDay), first_sale: dateOfDay(c.index.minDay), rows: c.index.n, loaded_at: new Date(c.loadedAt).toISOString(), timings: c.timings,
-      coverage: { coverage_start: c.coverage.coverage_start_month === null ? null : monthLabel(c.coverage.coverage_start_month), complete_through: c.coverage.complete_through_month === null ? null : monthLabel(c.coverage.complete_through_month), months: c.coverage.months.map(({ label, n, status }) => ({ label, n, status })) },
-      membership: c.catalog.membershipCoverage,
-      sources: {
-        sales: { source: 'mv_map_market_sales', refresh: 'daily 10:07 UTC (pg_cron refresh_map_market_sales)', as_of: dateOfDay(c.index.maxDay) },
-        census: { source: 'US Census ACS 5-year', vintage: [...c.census.values()][0]?.vintage ?? null },
-        graph: { source: 'campaign_target_graph', measured_at: c.graphCoverage?.measured_at ?? null, phone_type_coverage: c.graphCoverage?.coverage?.phone_type ?? null, loaded_states: universe.loaded() },
-        areas: { source: 'mv_map_search_areas / mv_map_property_area_stats', refresh: 'no scheduled refresh (as last built)' },
-      },
-      asset_filters: ASSET_FILTERS.map((f) => ({ id: f.id, label: f.label, available: f.id === 'all' || assetAvailable(f.id) })),
-      periods: PERIODS.map((p) => ({ id: p.id, label: p.label })),
-      raw_types: c.rawTypes,
-    }
-  }
-
-  function assetAvailable(id) {
-    const f = assetFilterCodes(id)
-    if (!f.ok || !f.codes) return true
-    return [...f.codes].some((code) => current.assetPresent.has(code))
   }
 
   async function ready() {
@@ -139,30 +151,64 @@ export function createMarketIntelService(deps = {}) {
     } else void probe()
     return Boolean(current)
   }
-  const warming = () => ({ ok: true, ...statusPayload(), status: current ? 'ready' : (state.status === 'cold' ? 'loading' : state.status) })
+
+  const warming = () => {
+    if (state.status === 'summary_missing') {
+      const b = state.summary?.building
+      return { ok: true, status: 'summary_missing', message: SUMMARY_MISSING_MESSAGE,
+        detail: state.summary?.reason === 'not_installed' ? 'The market summary tables are not installed (proposed migration not applied).'
+          : b ? `A build is in progress: unit ${b.cursor} of ${b.units}${b.next_unit ? ` (next: ${b.next_unit})` : ''}.` : 'No build has completed yet.',
+        summary: state.summary, progress: null, error: null }
+    }
+    return { ok: true, status: state.status === 'cold' ? 'loading' : state.status, progress: state.progress, error: state.error }
+  }
+
+  function statusPayload() {
+    const c = current
+    const m = c.source.meta
+    const b = m.build
+    return {
+      status: 'ready', mode: m.mode, progress: null, error: null,
+      as_of: dateOfDay(m.asOfDay), first_sale: m.firstDay === null ? null : dateOfDay(m.firstDay), rows: m.rows, loaded_at: new Date(c.loadedAt).toISOString(),
+      summary: b ? { build_id: b.build_id, built_at: b.ready_at, started_at: b.started_at, source_as_of: b.source_as_of, source_rows: Number(b.source_rows), db_ms: Number(b.db_ms), ticks: b.ticks, rows_written: Number(b.rows_written), unmapped_types: b.notes?.unmapped_types ?? [] } : null,
+      timings: m.timings ?? null,
+      coverage: { coverage_start: m.coverage.coverage_start_month === null ? null : monthLabel(m.coverage.coverage_start_month), complete_through: m.coverage.complete_through_month === null ? null : monthLabel(m.coverage.complete_through_month), months: m.coverage.months.map(({ label, n, status }) => ({ label, n, status })) },
+      membership: c.catalog.membershipCoverage,
+      sources: {
+        sales: { source: m.mode === 'summary' ? 'mi_geo_period_rollup (market summary of mv_map_market_sales)' : 'mv_map_market_sales (DEV raw stream)', refresh: m.mode === 'summary' ? 'nightly build after refresh_map_market_sales' : 'in memory', as_of: dateOfDay(m.asOfDay), built_at: b?.ready_at ?? null },
+        census: { source: 'US Census ACS 5-year', vintage: [...c.census.values()][0]?.vintage ?? null },
+        graph: { source: 'campaign_target_graph', measured_at: c.graphCoverage?.measured_at ?? null, phone_type_coverage: c.graphCoverage?.coverage?.phone_type ?? null, loaded_states: universe.loaded() },
+        areas: { source: 'mv_map_search_areas / mv_map_property_area_stats', refresh: 'no scheduled refresh (as last built)' },
+      },
+      asset_filters: ASSET_FILTERS.map((f) => ({ id: f.id, label: f.label, available: m.assetsWithSales.has(f.id) })),
+      periods: PERIODS.map((p) => ({ id: p.id, label: p.label })),
+    }
+  }
 
   // ── shared computations ────────────────────────────────────────────────
+  const universeVersion = () => universe.loaded().map((s) => `${s}:${universe.get(s)?.loadedAt}`).join(',')
   function memo(key, fn) {
-    const k = `${current.version}|${universeVersion()}|${key}`
+    const k = `${current.source.meta.version}|${universeVersion()}|${key}`
     if (cache.has(k)) { const v = cache.get(k); cache.delete(k); cache.set(k, v); return v }
     const v = fn()
     cache.set(k, v)
+    if (v && typeof v.catch === 'function') v.catch(() => cache.delete(k))
     while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value)
     return v
   }
-  const universeVersion = () => universe.loaded().map((s) => `${s}:${universe.get(s)?.loadedAt}`).join(',')
 
   function ctxFor(periodId, assetId) {
+    const m = current.source.meta
     const p = PERIODS.some((x) => x.id === periodId) ? periodId : DEFAULT_PERIOD
     const asset = assetFilterCodes(assetId || 'all')
-    const window = periodWindow(p, current.index.maxDay, current.index.minDay)
-    return { periodId: p, window, coverage: current.coverage, asset: asset.ok ? asset : assetFilterCodes('all'), win: { from: window.from, to: window.to, codes: asset.ok ? asset.codes : null } }
+    const a = asset.ok ? asset : assetFilterCodes('all')
+    const window = periodWindow(p, m.asOfDay, m.firstDay ?? m.asOfDay - 5 * 366)
+    const ctx = { periodId: p, window, coverage: m.coverage, asset: a }
+    ctx.windows = periodWindows(ctx)
+    return ctx
   }
 
-  const statesOf = (geo) => {
-    if (geo.level === 'nation') return current.levelNodes.state.map((n) => n.key)
-    return geo.state ? [geo.state] : []
-  }
+  const statesOf = (geo) => (geo.level === 'nation' ? current.catalog.levelNodes.state.map((n) => n.key) : geo.state ? [geo.state] : [])
 
   function universeFor(geo, codes) {
     const sts = statesOf(geo)
@@ -181,10 +227,9 @@ export function createMarketIntelService(deps = {}) {
   function stockFor(geo) {
     const kind = geo.level === 'zip' ? 'zip' : geo.level === 'county' ? 'county' : geo.level === 'state' ? 'state' : null
     const pnKey = geo.level === 'market' ? `market|${current.marketName.get(geo.key)}` : `${geo.level}|${geo.key}`
-    let pn = geo.level === 'nation' ? current.levelNodes.state.reduce((t, n) => t + (current.propertyN.get(`state|${n.key}`) || 0), 0) : current.propertyN.get(pnKey)
+    let pn = geo.level === 'nation' ? current.catalog.levelNodes.state.reduce((t, n) => t + (current.propertyN.get(`state|${n.key}`) || 0), 0) : current.propertyN.get(pnKey)
     if (pn === undefined) pn = null
     if (geo.level === 'nation') {
-      // Mean of means weighted by n is the true national mean.
       const rows = [...current.areaStats.values()].filter((r) => r.kind === 'state')
       const n = rows.reduce((t, r) => t + (Number(r.n) || 0), 0)
       const w = (col) => (n ? rows.reduce((t, r) => t + (Number(r[col]) || 0) * (Number(r.n) || 0), 0) / n : null)
@@ -198,40 +243,35 @@ export function createMarketIntelService(deps = {}) {
     if (geo.level === 'county' || geo.level === 'city') return censusValues(current.census.get(`${geo.level}:${geo.key}`) || null)
     if (geo.level === 'state') return censusValues(current.census.get(`state:${geo.key}`) || null)
     if (geo.level === 'market') {
-      const zips = current.zipsByMarket.get(geo.key) || []
+      const zips = current.catalog.marketZips.get(geo.key) || []
       return censusValues(null, { cells: zips.map((z) => current.census.get(`zip5:${z}`)).filter(Boolean), expected: zips.length })
     }
     const states = [...current.census.values()].filter((c) => c.geo_level === 'state')
-    return censusValues(null, { cells: states, expected: current.levelNodes.state.length })
+    return censusValues(null, { cells: states, expected: current.catalog.levelNodes.state.length })
   }
 
-  /** All metric values for one geography (memoised). */
+  /** All metric values for one geography (memoised promise). */
   function valuesFor(geoId, periodId, assetId) {
-    return memo(`v|${geoId}|${periodId}|${assetId}`, () => {
+    return memo(`v|${geoId}|${periodId}|${assetId}`, async () => {
       const geo = current.catalog.get(geoId)
       const ctx = ctxFor(periodId, assetId)
-      const acc = aggregate(current.index, rowsOf(current.index, current.catalog.selectorFor(geoId)), ctx.win)
+      const agg = await current.source.geoAgg(geoId, ctx)
       const u = universeFor(geo, ctx.asset.codes)
-      return { acc, ctx, values: { ...salesValues(acc, ctx), ...u.values, ...stockFor(geo), ...censusFor(geo) }, universe: u }
+      return { agg, ctx, values: { ...salesValues(agg, ctx), ...u.values, ...stockFor(geo), ...censusFor(geo) }, universe: u }
     })
   }
 
   /**
-   * Every child of `parentId` at `level` with every metric: the one table that
-   * rankings, the screener and heat all read (memoised per index version).
+   * Every child of `parentId` at `level` with every metric: the one table rankings,
+   * the screener and heat read. Children are members (a ZIP belongs to its majority
+   * city / its county / its market); a child's values are the whole child's.
    */
   function childTable(level, parentId, periodId, assetId) {
-    return memo(`t|${level}|${parentId}|${periodId}|${assetId}`, () => {
+    return memo(`t|${level}|${parentId}|${periodId}|${assetId}`, async () => {
       const parent = current.catalog.get(parentId)
       const ctx = ctxFor(periodId, assetId)
-      const child = current.catalog.child[level]
-      const accs = aggregateBy(current.index, rowsOf(current.index, current.catalog.selectorFor(parentId)), ctx.win, child.of)
-      const byId = new Map([...accs.entries()].map(([k, acc]) => [child.id(k), acc]))
-      const parentKey = parent.level === 'nation' ? null : parent.level
-      // Children = members by parent attribute ∪ every child with sales inside the parent
-      // (a ZIP's sales inside a city are counted for that city, even if the ZIP's majority city differs).
-      const nodes = current.levelNodes[level].filter((n) => !parentKey || byId.has(n.id) || n.parents?.[parentKey] === parentId || (parentKey === 'state' && n.state === parent.key))
-      // Seller universe grouped once per child when the parent's states are loaded.
+      const aggs = await current.source.levelAggs(level, ctx)
+      const nodes = current.catalog.childrenOf(level, parentId)
       const sts = statesOf(parent)
       const uLoaded = sts.length && sts.every((s) => universe.get(s))
       const uGroups = new Map()
@@ -247,15 +287,20 @@ export function createMarketIntelService(deps = {}) {
           }
         }
       }
-      const empty = aggregate(current.index, { all: false, lists: [] }, ctx.win)
-      const rows = nodes.map((n) => {
-        const acc = byId.get(n.id) || empty
+      const rows = []
+      for (const n of nodes) {
+        const agg = aggs.get(n.id)
         const uValues = uLoaded ? universeValues(summarizeUniverse(uGroups.get(n.id) || [], { assetCodes: ctx.asset.codes })) : universeValues(null, 'not_loaded', `Seller universe not loaded for ${sts.length === 1 ? sts[0] : `${sts.filter((s) => !universe.get(s)).length} states`}`)
-        return { id: n.id, level: n.level, label: n.label, name: n.name, state: n.state, parents: n.parents, centroid: n.centroid, geometry: n.geometry, values: { ...salesValues(acc, ctx), ...uValues, ...stockFor(n), ...censusFor(n) } }
-      }).filter((r) => r.values.sales_count.value > 0 || (r.values.seller_record_count?.value ?? 0) > 0 || (r.values.property_count?.value ?? 0) > 0)
+        const values = { ...(agg ? salesValues(agg, ctx) : salesValues(emptyAggFor(), ctx)), ...uValues, ...stockFor(n), ...censusFor(n) }
+        if (!(values.sales_count.value > 0 || (values.seller_record_count?.value ?? 0) > 0 || (values.property_count?.value ?? 0) > 0)) continue
+        rows.push({ id: n.id, level: n.level, label: n.label, name: n.name, state: n.state, parents: n.parents, centroid: n.centroid, geometry: n.geometry, values })
+      }
       return { rows, ctx, parent, universe: { states: sts, loaded: sts.filter((s) => universe.get(s)) } }
     })
   }
+  const emptyAggFor = () => ({ sales: 0, priced: 0, qualified: 0, mls: 0, mfSales: 0, investor: 0, buyerKnown: 0, cashKnown: 0, cash: 0, entity: 0, latestDay: null,
+    med: { price: { v: null, n: 0 }, ppsf: { v: null, n: 0 }, ppu: { v: null, n: 0 }, inv: { v: null, n: 0 } }, deciles: null,
+    assetMix: new Map(), unitDist: new Map(), sqftDist: new Map(), buyers: new Map(), namedPurchases: 0, lenderPurchases: 0, rateSum: 0, curSum: 0, priorSum: 0 })
 
   function universeChildId(level, r, st) {
     switch (level) {
@@ -269,17 +314,14 @@ export function createMarketIntelService(deps = {}) {
   }
 
   const windowPayload = (ctx) => ({ period: ctx.periodId, from: ctx.window.from_date, to: ctx.window.to_date, asset: ctx.asset.id, asset_label: ctx.asset.label })
+  const lineage = (geo) => ['nation', 'state', 'market', 'county', 'city'].map((lv) => geo.parents?.[lv]).filter(Boolean).map((id) => current.catalog.get(id)).filter(Boolean).map((n) => ({ id: n.id, level: n.level, label: n.label }))
 
-  function lineage(geo) {
-    return ['nation', 'state', 'market', 'county', 'city'].map((lv) => geo.parents?.[lv]).filter(Boolean).map((id) => current.catalog.get(id)).filter(Boolean).map((n) => ({ id: n.id, level: n.level, label: n.label }))
-  }
-
-  /** Where this geography ranks inside each of its parents, for a few headline metrics. */
-  function rankContext(geo, periodId, assetId) {
+  async function rankContext(geo, periodId, assetId) {
     const out = []
     const parentIds = ['market', 'county', 'state', 'nation'].map((lv) => geo.parents?.[lv]).filter(Boolean)
-    for (const pid of parentIds.filter((id) => (current.levelNodes[geo.level] || []).filter((n) => id === 'nation:US' || n.parents?.[current.catalog.get(id)?.level] === id).length >= 3).slice(0, 2)) {
-      const t = childTable(geo.level, pid, periodId, assetId)
+      .filter((pid) => current.catalog.childrenOf(geo.level, pid).length >= 3).slice(0, 2)
+    for (const pid of parentIds) {
+      const t = await childTable(geo.level, pid, periodId, assetId)
       const parent = current.catalog.get(pid)
       for (const metric of ['sales_count', 'investor_purchase_count', 'median_sale_price']) {
         const { ranked } = rankRows(t.rows.map((r) => ({ ...r })), metric)
@@ -296,7 +338,7 @@ export function createMarketIntelService(deps = {}) {
     const pct = (x) => `${Math.round(x * 100)}%`
     const s = []
     const v = values
-    s.push({ text: `${geo.label} had ${fmtN(v.sales_count.value)} recorded sales from ${ctx.window.from_date} to ${ctx.window.to_date} (sales data through ${dateOfDay(current.index.maxDay)}).`, metrics: ['sales_count'] })
+    s.push({ text: `${geo.label} had ${fmtN(v.sales_count.value)} recorded sales from ${ctx.window.from_date} to ${ctx.window.to_date} (sales data through ${dateOfDay(current.source.meta.asOfDay)}).`, metrics: ['sales_count'] })
     if (v.median_sale_price.status === 'ok') s.push({ text: `Median qualified price ${usd(v.median_sale_price.value)} on ${fmtN(v.median_sale_price.n)} sales${v.median_ppsf.status === 'ok' ? `; $${Math.round(v.median_ppsf.value)} per sq ft` : ''}.`, metrics: ['median_sale_price', 'median_ppsf'] })
     if (v.investor_purchase_share.status === 'ok') s.push({ text: `Investor purchases ${fmtN(v.investor_purchase_count.value)}: ${pct(v.investor_purchase_share.value)} of the ${fmtN(v.investor_purchase_share.n)} sales with a recorded buyer (a buyer is recorded on ${pct(v.buyer_evidence_coverage.value ?? 0)} of sales).`, metrics: ['investor_purchase_count', 'investor_purchase_share', 'buyer_evidence_coverage'] })
     else s.push({ text: `Investor purchases ${fmtN(v.investor_purchase_count.value)}. Only ${fmtN(v.investor_purchase_share.n)} sales record a buyer, too few for an investor share.`, metrics: ['investor_purchase_count', 'investor_purchase_share'] })
@@ -310,7 +352,7 @@ export function createMarketIntelService(deps = {}) {
 
   // ── ops ────────────────────────────────────────────────────────────────
   const fail = (status, error, extra = {}) => ({ ok: false, status, error, ...extra })
-  const geoOr404 = (id) => { const g = current.catalog.get(String(id || '')); return g || null }
+  const geoOr404 = (id) => current.catalog.get(String(id || '')) || null
 
   async function run(op, p = {}) {
     try {
@@ -325,13 +367,13 @@ export function createMarketIntelService(deps = {}) {
           const childLevels = LEVEL_ORDER.slice(LEVEL_ORDER.indexOf(g.level) + 1).filter((lv) => !(g.level === 'county' && lv === 'market') && !(g.level === 'city' && (lv === 'market' || lv === 'county')))
           return { ok: true, geography: { ...summaryOf(g), aliases: g.aliases, county_via: g.county_via || null, lineage: lineage(g) }, child_levels: childLevels }
         }
-        case 'dossier': return dossier(p)
-        case 'rank': return rank(p)
-        case 'screen': return screen(p)
-        case 'compare': return compare(p)
-        case 'trends': return trends(p)
-        case 'heat': return heat(p)
-        case 'recent_sales': return recentSales(p)
+        case 'dossier': return await dossier(p)
+        case 'rank': return await rank(p)
+        case 'screen': return await screen(p)
+        case 'compare': return await compare(p)
+        case 'trends': return await trends(p)
+        case 'heat': return await heat(p)
+        case 'recent_sales': return await recentSales(p)
         case 'universe_load': return universeLoad(p)
         default: return fail(400, 'unknown_op')
       }
@@ -343,72 +385,65 @@ export function createMarketIntelService(deps = {}) {
   async function dossier(p) {
     const g = geoOr404(p.id)
     if (!g) return fail(404, 'unknown_geography')
-    // A single geography may trigger its state's universe load (one indexed query, cached 6 h).
     if (g.level !== 'nation' && g.state && !universe.get(g.state) && p.load_universe !== '0') {
       await Promise.race([universe.load(g.state).catch(() => null), new Promise((r) => setTimeout(r, deps.universeWaitMs ?? 8000))])
     }
     const period = p.period || DEFAULT_PERIOD
     const asset = p.asset || 'all'
-    const { acc, ctx, values, universe: u } = valuesFor(g.id, period, asset)
+    const { agg, ctx, values, universe: u } = await valuesFor(g.id, period, asset)
     const childLevel = { nation: 'state', state: 'market', market: 'zip', county: 'zip', city: 'zip', zip: null }[g.level]
     let children = null
     let topChild = null
     if (childLevel) {
-      const t = childTable(childLevel, g.id, period, asset)
+      const t = await childTable(childLevel, g.id, period, asset)
       const { ranked } = rankRows(t.rows.map((r) => ({ ...r })), 'investor_purchase_count')
       if (ranked[0] && ranked[0].values.investor_purchase_count.value > 0) topChild = { label: ranked[0].label, level: childLevel, value: ranked[0].values.investor_purchase_count.value, of: ranked.length }
       children = { level: childLevel, count: t.rows.length }
     }
-    const series = trendSeries(g.id, asset)
-    const buyerKinds = { company_named: acc.namedPurchases, lender_or_agency: acc.lenderPurchases }
-    const months = current.coverage.months
+    const series = await trendSeries(g.id, asset)
     return {
       ok: true,
       geography: { ...summaryOf(g), lineage: lineage(g), county_via: g.county_via || null },
       window: windowPayload(ctx),
       values,
-      rank_context: rankContext(g, period, asset),
+      rank_context: await rankContext(g, period, asset),
       children,
       sales: {
-        asset_mix: [...acc.assetMix.entries()].map(([code, n]) => ({ asset: MI_ASSETS[code], label: assetLabelOf(code), n })).sort((a, b) => b.n - a.n),
-        source_mix: { mls: acc.mls, public_record: acc.sales - acc.mls },
-        price_deciles: deciles(acc.prices),
-        latest_sale: acc.latestDay === null ? null : dateOfDay(acc.latestDay),
+        asset_mix: [...agg.assetMix.entries()].map(([code, n]) => ({ asset: MI_ASSETS[code], label: assetLabelOf(code), n })).sort((a, b) => (b.n - a.n) || a.asset.localeCompare(b.asset)),
+        source_mix: { mls: agg.mls, public_record: agg.sales - agg.mls },
+        price_deciles: agg.deciles,
+        latest_sale: agg.latestDay === null ? null : dateOfDay(agg.latestDay),
       },
-      investors: { top_buyers: topBuyers(acc, current.index, assetLabelOf, 12).map((b) => ({ ...b, last_purchase: dateOfDay(b.last_purchase_day) })), buyer_kinds: buyerKinds, individuals_named: false },
+      investors: { top_buyers: topBuyers(agg, current.source.buyerName, assetLabelOf, 12).map((b) => ({ ...b, last_purchase: dateOfDay(b.last_purchase_day) })), buyer_kinds: { company_named: agg.namedPurchases, lender_or_agency: agg.lenderPurchases }, individuals_named: false },
       multifamily: {
-        unit_distribution: UNIT_BUCKETS.map(([, , label]) => ({ label, n: acc.unitDist.get(label) || 0 })).concat([{ label: 'not recorded', n: acc.unitDist.get('not recorded') || 0 }]),
-        size_distribution: SQFT_BUCKETS.map(([, , label]) => ({ label, n: acc.sqftDist.get(label) || 0 })).concat([{ label: 'not recorded', n: acc.sqftDist.get('not recorded') || 0 }]),
+        unit_distribution: [...UNIT_LABELS, NOT_RECORDED].map((label) => ({ label, n: agg.unitDist.get(label) || 0 })),
+        size_distribution: [...SQFT_LABELS, NOT_RECORDED].map((label) => ({ label, n: agg.sqftDist.get(label) || 0 })),
       },
       universe: { loaded_states: u.loaded, missing_states: u.missing, stock: u.summary?.stock ?? null, types: u.summary ? u.summary.types.map((t) => ({ asset: MI_ASSETS[t.code], label: assetLabelOf(t.code), n: t.n })) : null, corporate_owner_count: u.summary?.corporate_owner_count ?? null, never_contacted_count: u.summary?.never_contacted_count ?? null, property_count: u.summary?.property_count ?? null, phone_type_coverage: u.summary?.phone_type_coverage ?? null, authority: 'Campaign Composer computes the authoritative audience; these are graph flags summarised.' },
       trends: series,
-      data_quality: dataQuality(g, acc, u),
+      data_quality: dataQuality(g, agg, u),
       brief: deterministicBrief(g, values, ctx, topChild),
-      coverage_months: months.map(({ label, status }) => ({ label, status })),
+      coverage_months: current.source.meta.coverage.months.map(({ label, status }) => ({ label, status })),
     }
   }
 
-  function deciles(prices) {
-    if (prices.length < 10) return null
-    const s = [...prices].sort((a, b) => a - b)
-    return [0.1, 0.25, 0.5, 0.75, 0.9].map((q) => ({ q, value: s[Math.min(s.length - 1, Math.floor(q * (s.length - 1)))] }))
-  }
-
-  function dataQuality(g, acc, u) {
+  function dataQuality(g, agg, u) {
     const share = (a, b) => (b ? a / b : null)
-    const typed = acc.sales - (acc.assetMix.get(0) || 0)
+    const m = current.source.meta
+    const typed = agg.sales - (agg.assetMix.get(0) || 0)
     return {
-      sales_as_of: dateOfDay(current.index.maxDay),
-      sales_refresh: 'mv_map_market_sales refreshes daily at 10:07 UTC',
+      sales_as_of: dateOfDay(m.asOfDay),
+      sales_refresh: m.mode === 'summary' ? `Market summary build ${m.build.build_id}, built ${m.build.ready_at}` : 'DEV raw stream of mv_map_market_sales',
+      summary_built_at: m.build?.ready_at ?? null,
       index_loaded_at: new Date(current.loadedAt).toISOString(),
-      coverage_start: current.coverage.coverage_start_month === null ? null : monthLabel(current.coverage.coverage_start_month),
-      complete_through: current.coverage.complete_through_month === null ? null : monthLabel(current.coverage.complete_through_month),
+      coverage_start: m.coverage.coverage_start_month === null ? null : monthLabel(m.coverage.coverage_start_month),
+      complete_through: m.coverage.complete_through_month === null ? null : monthLabel(m.coverage.complete_through_month),
       coordinates: 'Every sale in the source is geocoded (rows without coordinates are excluded upstream)',
-      property_type_coverage: share(typed, acc.sales),
-      unit_count_coverage_mf: acc.mfSales ? share(acc.mfSales - (acc.unitDist.get('not recorded') || 0), acc.mfSales) : null,
-      sqft_coverage_priced: share(acc.ppsf.length, acc.qualified),
-      buyer_coverage: share(acc.buyerKnown, acc.sales),
-      cash_coverage: share(acc.cashKnown, acc.sales),
+      property_type_coverage: share(typed, agg.sales),
+      unit_count_coverage_mf: agg.mfSales ? share(agg.mfSales - (agg.unitDist.get(NOT_RECORDED) || 0), agg.mfSales) : null,
+      sqft_coverage_priced: share(agg.med.ppsf.n, agg.qualified),
+      buyer_coverage: share(agg.buyerKnown, agg.sales),
+      cash_coverage: share(agg.cashKnown, agg.sales),
       county_membership: g.level === 'county' || g.county_via ? (g.county_via === 'parcel_majority' ? 'ZIP parcel-majority county (no census cell)' : 'Census ZIP→county') : null,
       census_vintage: [...current.census.values()][0]?.vintage ?? null,
       graph_measured_at: current.graphCoverage?.measured_at ?? null,
@@ -418,29 +453,31 @@ export function createMarketIntelService(deps = {}) {
   }
 
   function trendSeries(id, assetId) {
-    return memo(`s|${id}|${assetId}`, () => {
+    return memo(`s|${id}|${assetId}`, async () => {
       const codes = assetFilterCodes(assetId || 'all').codes
-      const m = monthlySeries(current.index, rowsOf(current.index, current.catalog.selectorFor(id)), codes)
-      return current.coverage.months.map(({ month, label, status }) => {
+      const m = await current.source.geoMonths(id, assetFilterCodes(assetId || 'all').id || 'all', codes)
+      return current.source.meta.coverage.months.map(({ month, label, status }) => {
         const s = m.get(month)
-        if (!s) return { month: label, status, sales: 0, median_price: null, median_ppsf: null, investor_purchases: 0, investor_share: null, buyer_known: 0, cash_share: null, cash_known: 0, company_acquisitions: 0 }
+        if (!s) return { month: label, status, sales: 0, median_price: null, price_n: 0, median_ppsf: null, investor_purchases: 0, investor_share: null, buyer_known: 0, cash_share: null, cash_known: 0, company_acquisitions: 0 }
         return {
           month: label, status, sales: s.sales,
-          median_price: s.prices.length >= 5 ? medianOf(s.prices) : null, price_n: s.prices.length,
-          median_ppsf: s.ppsf.length >= 5 ? medianOf(s.ppsf) : null,
+          median_price: s.priceN >= 5 ? s.priceMed : null, price_n: s.priceN,
+          median_ppsf: s.ppsfN >= 5 ? s.ppsfMed : null,
           investor_purchases: s.investor, buyer_known: s.buyerKnown, investor_share: s.buyerKnown >= 10 ? s.investor / s.buyerKnown : null,
           cash_known: s.cashKnown, cash_share: s.cashKnown >= 10 ? s.cash / s.cashKnown : null,
-          company_acquisitions: s.entityAcq,
+          company_acquisitions: s.companyAcq,
         }
       })
     })
   }
 
-  function trends(p) {
+  async function trends(p) {
     const ids = String(p.ids || p.id || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 6)
     const geos = ids.map(geoOr404)
     if (!geos.length || geos.some((g) => !g)) return fail(404, 'unknown_geography')
-    return { ok: true, asset: p.asset || 'all', series: geos.map((g) => ({ id: g.id, label: g.label, months: trendSeries(g.id, p.asset || 'all') })), coverage: current.coverage.months.map(({ label, status }) => ({ label, status })) }
+    const series = []
+    for (const g of geos) series.push({ id: g.id, label: g.label, months: await trendSeries(g.id, p.asset || 'all') })
+    return { ok: true, asset: p.asset || 'all', series, coverage: current.source.meta.coverage.months.map(({ label, status }) => ({ label, status })) }
   }
 
   function resolveWithin(p, level) {
@@ -450,13 +487,10 @@ export function createMarketIntelService(deps = {}) {
     return { within }
   }
 
-  function rowOut(r, metricIds) {
-    return { id: r.id, level: r.level, label: r.label, state: r.state, rank: r.rank ?? null, centroid: r.centroid, values: Object.fromEntries(metricIds.map((m) => [m, r.values[m]])) }
-  }
-
+  const rowOut = (r, metricIds) => ({ id: r.id, level: r.level, label: r.label, state: r.state, rank: r.rank ?? null, centroid: r.centroid, values: Object.fromEntries(metricIds.map((m) => [m, r.values[m]])) })
   const DEFAULT_COLUMNS = ['sales_count', 'median_sale_price', 'median_ppsf', 'investor_purchase_count', 'investor_purchase_share', 'cash_purchase_share', 'entity_owned_count', 'sales_growth', 'median_price_per_unit', 'company_buyer_count', 'sms_eligible_count', 'property_count']
 
-  function rank(p) {
+  async function rank(p) {
     const level = LEVEL_ORDER.includes(p.level) ? p.level : 'zip'
     const metric = METRIC_BY_ID[p.metric] ? p.metric : 'sales_count'
     const def = METRIC_BY_ID[metric]
@@ -465,7 +499,7 @@ export function createMarketIntelService(deps = {}) {
     if (!def.rankable) return fail(400, 'metric_not_rankable', { message: `${def.label} describes evidence coverage and is not ranked` })
     const r = resolveWithin(p, level)
     if (r.error) return r.error
-    const t = childTable(level, r.within.id, p.period || DEFAULT_PERIOD, p.asset || 'all')
+    const t = await childTable(level, r.within.id, p.period || DEFAULT_PERIOD, p.asset || 'all')
     const minSales = Math.max(0, Number(p.min_sales) || 0)
     const rows = t.rows.filter((x) => (x.values.sales_count.value ?? 0) >= minSales).map((x) => ({ ...x }))
     const { ranked, unranked } = rankRows(rows, metric, p.dir === 'asc' ? 'asc' : 'desc')
@@ -482,7 +516,7 @@ export function createMarketIntelService(deps = {}) {
   function parseFilters(raw) {
     let list = raw
     if (typeof raw === 'string') { try { list = JSON.parse(raw) } catch { return { error: 'bad_filters' } } }
-    if (!Array.isArray(list)) return { filters: [] }
+    if (!Array.isArray(list)) return { filters: [], rejected: [] }
     const out = []
     const rejected = []
     for (const f of list.slice(0, 12)) {
@@ -495,7 +529,7 @@ export function createMarketIntelService(deps = {}) {
     return { filters: out, rejected }
   }
 
-  function screen(p) {
+  async function screen(p) {
     const level = LEVEL_ORDER.includes(p.level) ? p.level : 'zip'
     const r = resolveWithin(p, level)
     if (r.error) return r.error
@@ -503,7 +537,7 @@ export function createMarketIntelService(deps = {}) {
     if (pf.error) return fail(400, pf.error)
     const unsupported = pf.filters.map((f) => ({ f, s: metricSupports(METRIC_BY_ID[f.metric], { level, asset: p.asset || 'all' }) })).filter((x) => !x.s.ok)
     if (unsupported.length) return fail(400, 'metric_unsupported', { message: unsupported.map((x) => x.s.reason).join('; '), filters: unsupported.map((x) => x.f.metric) })
-    const t = childTable(level, r.within.id, p.period || DEFAULT_PERIOD, p.asset || 'all')
+    const t = await childTable(level, r.within.id, p.period || DEFAULT_PERIOD, p.asset || 'all')
     const match = p.match === 'any' ? 'any' : 'all'
     const hits = t.rows.filter((row) => passesFilters(row, pf.filters, match)).map((x) => ({ ...x }))
     const sortBy = METRIC_BY_ID[p.sort] ? p.sort : pf.filters[0]?.metric || 'sales_count'
@@ -517,7 +551,7 @@ export function createMarketIntelService(deps = {}) {
     }
   }
 
-  function compare(p) {
+  async function compare(p) {
     const ids = [...new Set(String(p.ids || '').split(',').map((s) => s.trim()).filter(Boolean))].slice(0, 6)
     if (ids.length < 2) return fail(400, 'compare_needs_two')
     const geos = ids.map(geoOr404)
@@ -525,12 +559,14 @@ export function createMarketIntelService(deps = {}) {
     const period = p.period || DEFAULT_PERIOD
     const asset = p.asset || 'all'
     const cols = METRICS.filter((m) => m.group !== 'stock' || ['property_count', 'tax_delinquent_share', 'avg_equity_pct'].includes(m.id)).map((m) => m.id)
-    const items = geos.map((g) => {
-      const v = valuesFor(g.id, period, asset)
-      return { id: g.id, level: g.level, label: g.label, state: g.state, values: Object.fromEntries(cols.map((c) => [c, v.values[c]])), window: windowPayload(v.ctx) }
-    })
-    // Same window, asset, definitions and sample rules for every column (brief §50).
-    return { ok: true, window: items[0].window, items, metrics: cols, series: geos.map((g) => ({ id: g.id, label: g.label, months: trendSeries(g.id, asset) })), coverage: current.coverage.months.map(({ label, status }) => ({ label, status })) }
+    const items = []
+    const series = []
+    for (const g of geos) {
+      const v = await valuesFor(g.id, period, asset)
+      items.push({ id: g.id, level: g.level, label: g.label, state: g.state, values: Object.fromEntries(cols.map((c) => [c, v.values[c]])), window: windowPayload(v.ctx) })
+      series.push({ id: g.id, label: g.label, months: await trendSeries(g.id, asset) })
+    }
+    return { ok: true, window: items[0].window, items, metrics: cols, series, coverage: current.source.meta.coverage.months.map(({ label, status }) => ({ label, status })) }
   }
 
   async function heat(p) {
@@ -539,19 +575,17 @@ export function createMarketIntelService(deps = {}) {
     const zoom = Number(p.zoom)
     const bbox = String(p.bbox || '').split(',').map(Number)
     if (bbox.length !== 4 || bbox.some((v) => !Number.isFinite(v)) || !Number.isFinite(zoom)) return fail(400, 'bad_viewport')
-    // Zoom-adaptive aggregation over geometry we own (brief §11): states, then ZIPs from z9.
     const level = zoom >= 9 ? 'zip' : 'state'
     const note = level === 'state' && zoom >= 5.5 ? 'County, city and market outlines are not in the database. ZIP outlines appear from zoom 9.' : null
     const sup = metricSupports(metric, { level, asset: p.asset || 'all' })
     if (!sup.ok) return { ok: true, level, metric: metric.id, rows: [], note: sup.reason }
     const outlines = await boundaries({ level, bbox: bbox.join(','), zoom })
     if (!outlines?.available) return { ok: true, level, metric: metric.id, rows: [], note: outlines?.reason === 'too_large' ? 'Zoom in to draw ZIP outlines' : `Outlines unavailable (${outlines?.reason ?? 'unknown'})` }
-    const t = childTable(level, 'nation:US', p.period || DEFAULT_PERIOD, p.asset || 'all')
+    const t = await childTable(level, 'nation:US', p.period || DEFAULT_PERIOD, p.asset || 'all')
     const byId = new Map(t.rows.map((r) => [r.id, r]))
-    const feats = outlines.data?.features || []
     const rows = []
     let missing = 0
-    for (const f of feats) {
+    for (const f of outlines.data?.features || []) {
       const id = `${level}:${f.properties?.key}`
       const r = byId.get(id)
       const v = r?.values?.[metric.id]
@@ -576,27 +610,36 @@ export function createMarketIntelService(deps = {}) {
     return parts.join(' · ')
   }
 
+  /**
+   * Row-level evidence can't be summarised. A bounded read of raw sales: the area's
+   * bounding box hits the (lat, lng) covering index; a state reads newest-first by sold_on.
+   */
   async function recentSales(p) {
     const g = geoOr404(p.id)
     if (!g) return fail(404, 'unknown_geography')
     const asset = assetFilterCodes(p.asset || 'all')
-    const key = `${current.version}|${g.id}|${asset.id}`
+    const key = `${current.source.meta.version}|${g.id}|${asset.id}`
     const hit = recentCache.get(key)
     if (hit && hit.expires > clock()) return hit.value
-    let where = ''
-    let params = []
-    if (g.level === 'zip') { where = 'where m.zip = $1'; params = [g.key] }
-    else if (g.level === 'city') { where = 'where m.state = $1 and lower(btrim(m.city)) = $2'; params = [g.state, g.key.slice(3)] }
-    else if (g.level === 'state') { where = 'where m.state = $1'; params = [g.key] }
-    else if (g.level === 'county' || g.level === 'market') {
-      const zips = (g.level === 'market' ? current.zipsByMarket.get(g.key) : [...current.catalog.nodes.values()].filter((n) => n.level === 'zip' && n.parents?.county === g.id).map((n) => n.key)) || []
-      if (!zips.length) return { ok: true, geography: summaryOf(g), rows: [], note: 'No member ZIPs' }
-      where = 'where m.zip = any($1)'; params = [zips]
+    const conds = []
+    const params = []
+    const add = (sql, v) => { params.push(v); conds.push(sql.replace('?', `$${params.length}`)) }
+    const box = g.bbox
+    if (box && g.level !== 'state' && g.level !== 'nation' && box[2] - box[0] <= 3 && box[3] - box[1] <= 3) {
+      add('m.lat >= ?', box[1]); add('m.lat <= ?', box[3]); add('m.lng >= ?', box[0]); add('m.lng <= ?', box[2])
     }
+    if (g.level === 'zip') add('m.zip = ?', g.key)
+    else if (g.level === 'city') { add('upper(btrim(m.state)) = ?', g.state); add('lower(btrim(m.city)) = ?', g.key.slice(3)) }
+    else if (g.level === 'state') add('upper(btrim(m.state)) = ?', g.key)
+    else if (g.level === 'county' || g.level === 'market') {
+      const zips = g.level === 'market' ? current.catalog.marketZips.get(g.key) || [] : [...current.catalog.zipCounty].filter(([, k]) => `county:${k}` === g.id).map(([z]) => z)
+      if (!zips.length) return { ok: true, geography: summaryOf(g), rows: [], note: 'No member ZIPs' }
+      add('m.zip = any(?)', zips)
+    } else return { ok: true, geography: summaryOf(g), rows: [], note: 'Pick a state or smaller area for recent sales' }
     const res = await (deps.query || queryWithTimeout)(
       `select m.comp_id, m.sold_on::text, m.price::float8, m.ppsf::float8, m.address, m.city, m.state, m.zip, m.property_type, m.units::float8, m.sqft::float8,
               m.buyer, m.property_id, m.source, m.is_investor, m.is_cash_purchase
-         from public.mv_map_market_sales m ${where} order by m.sold_on desc limit 400`, params, 10_000)
+         from public.mv_map_market_sales m where ${conds.join(' and ')} order by m.sold_on desc limit 400`, params, 10_000)
     const rows = []
     for (const r of res?.rows || []) {
       const code = classify(r.property_type, r.units)
@@ -612,8 +655,8 @@ export function createMarketIntelService(deps = {}) {
     return value
   }
 
-  async function universeLoad(p) {
-    const all = current.levelNodes.state.map((n) => n.key)
+  function universeLoad(p) {
+    const all = current.catalog.levelNodes.state.map((n) => n.key)
     const want = String(p.states || '') === 'all' ? all : String(p.states || '').split(',').map((s) => s.trim().toUpperCase()).filter((s) => all.includes(s))
     if (!want.length) return fail(400, 'no_states')
     for (const st of want) void universe.load(st).catch(() => null)
@@ -628,4 +671,4 @@ export function marketIntelService() {
   if (!shared) shared = createMarketIntelService()
   return shared
 }
-export { parseGeoId, dayOfDate, unavailable }
+export { unavailable }

@@ -57,33 +57,11 @@ const unionBox = (boxes) => {
 }
 const majority = (counts) => { let best = null; let bn = -1; for (const [k, n] of counts) if (n > bn) { best = k; bn = n } return best }
 
-/**
- * Build the catalog. Pure given its inputs (tests pass fixtures).
- *   index        the sales index (dicts, cols, byZip)
- *   aux.searchAreas      mv_map_search_areas rows (no outline)
- *   aux.markets          canonical_markets rows {id, display_name, state}
- *   aux.zipMarket        market_zip_membership rows {zip5, state, canonical_market_id}
- *   aux.aliases          market_aliases rows {alias, state, canonical_market_id}
- *   aux.censusZipCounty  [{zip, state, county_key, county_name}] from census ZIP cells
- *   aux.parcelZipCounty  [{zip, state, county, n}] from comp_properties
- *   aux.outlined         { zip: Set<zip>, state: Set<ST> } polygons we own
- */
-export function buildGeographyCatalog(index, aux = {}) {
-  const nodes = new Map()
-  const areas = new Map((aux.searchAreas || []).map((a) => [`${a.kind}|${a.key}`, a]))
-  const outlinedZip = aux.outlined?.zip || new Set()
-  const outlinedState = aux.outlined?.state || new Set()
-  const put = (n) => { nodes.set(n.id, n); return n }
-  const nZips = index.dicts.zips.length
-
-  // ── per-ZIP facts from sales ──
-  const zipState = new Array(nZips).fill(null)
-  const zipCity = new Int32Array(nZips).fill(-1)
-  const zipSales = new Int32Array(nZips)
-  const zipBox = new Array(nZips).fill(null)
-  for (let z = 0; z < nZips; z += 1) {
+/** Raw-index facts (dev fallback): per-ZIP majority state/city, sales, bounds; city and state sales. */
+export function factsFromIndex(index) {
+  const zips = []
+  for (let z = 0; z < index.dicts.zips.length; z += 1) {
     const a = index.byZip.offsets[z]; const b = index.byZip.offsets[z + 1]
-    zipSales[z] = b - a
     const st = new Map(); const ct = new Map()
     let w = Infinity; let s = Infinity; let e = -Infinity; let nn = -Infinity
     for (let j = a; j < b; j += 1) {
@@ -93,61 +71,88 @@ export function buildGeographyCatalog(index, aux = {}) {
       const la = index.cols.lat[i]; const lo = index.cols.lng[i]
       if (Number.isFinite(la) && Number.isFinite(lo)) { if (lo < w) w = lo; if (lo > e) e = lo; if (la < s) s = la; if (la > nn) nn = la }
     }
-    const sk = majority(st)
-    zipState[z] = sk === null ? null : index.dicts.states[sk]
-    const ck = majority(ct)
-    zipCity[z] = ck === null ? -1 : ck
-    zipBox[z] = Number.isFinite(w) ? [w, s, e, nn] : null
+    const sk = majority(st); const ck = majority(ct)
+    zips.push({ zip: index.dicts.zips[z], state: sk === null ? null : index.dicts.states[sk], cityKey: ck === null ? null : index.dicts.cities[ck], sales: b - a, bbox: Number.isFinite(w) ? [w, s, e, nn] : null })
   }
+  const count = (csr, k) => csr.offsets[k + 1] - csr.offsets[k]
+  return {
+    zips,
+    cities: new Map(index.dicts.cities.map((key, k) => [key, count(index.byCity, k)])),
+    states: new Map(index.dicts.states.map((st, k) => [st, count(index.byState, k)])),
+    total: index.n,
+  }
+}
 
-  // ── counties: census ZIP cell first, else the parcel majority ──
-  const zipCountyKey = new Map()
-  for (const r of aux.censusZipCounty || []) if (r.zip && r.county_key) zipCountyKey.set(r.zip, { key: r.county_key, name: r.county_name, via: 'census' })
-  const parcel = new Map()
-  for (const r of aux.parcelZipCounty || []) {
-    if (!r.zip || !r.county) continue
-    const cur = parcel.get(r.zip)
-    if (!cur || r.n > cur.n) parcel.set(r.zip, { key: `${clean(r.state).toUpperCase()}:${normCounty(r.county)}`, name: titleCase(r.county), n: r.n })
+/** Summary facts: mi_zip_geo rows + the city / state 'all'-period rows of the summary. */
+export function factsFromSummary(zipGeo, cityRows, stateRows, total) {
+  const box = (r) => ([r.min_lng, r.min_lat, r.max_lng, r.max_lat].every((v) => v !== null && v !== undefined && Number.isFinite(Number(v))) ? [Number(r.min_lng), Number(r.min_lat), Number(r.max_lng), Number(r.max_lat)] : null)
+  return {
+    zips: zipGeo.filter((r) => Number(r.sales_n) > 0).map((r) => ({ zip: r.zip, state: r.state, cityKey: r.city_key, sales: Number(r.sales_n), bbox: box(r) })),
+    cities: new Map(cityRows.map((r) => [r.geo_key, Number(r.sale_count) || 0])),
+    states: new Map(stateRows.map((r) => [r.geo_key, Number(r.sale_count) || 0])),
+    total: Number(total) || 0,
   }
-  for (const [zip, v] of parcel) if (!zipCountyKey.has(zip)) zipCountyKey.set(zip, { key: v.key, name: v.name, via: 'parcel_majority' })
+}
+
+/**
+ * Build the catalog. Pure given its inputs (tests pass fixtures).
+ *   facts                factsFromIndex() or factsFromSummary()
+ *   aux.searchAreas      mv_map_search_areas rows (no outline)
+ *   aux.markets          canonical_markets rows {id, display_name, state}
+ *   aux.zipMarket        [{zip5, canonical_market_id}] (summary: from mi_zip_geo)
+ *   aux.aliases          market_aliases rows {alias, state, canonical_market_id}
+ *   aux.zipCounty        [{zip, key, name, via}] resolved counties (summary: mi_zip_geo), else
+ *   aux.censusZipCounty  [{zip, state, county_key, county_name}] and
+ *   aux.parcelZipCounty  [{zip, state, county, n}] (raw dev path)
+ *   aux.outlined         { zip: Set<zip>, state: Set<ST> } polygons we own
+ */
+export function buildGeographyCatalog(facts, aux = {}) {
+  const nodes = new Map()
+  const areas = new Map((aux.searchAreas || []).map((a) => [`${a.kind}|${a.key}`, a]))
+  const outlinedZip = aux.outlined?.zip || new Set()
+  const outlinedState = aux.outlined?.state || new Set()
+  const put = (n) => { nodes.set(n.id, n); return n }
+  const zipFacts = new Map(facts.zips.map((z) => [z.zip, z]))
+
+  // ── counties ──
+  const zipCountyKey = new Map()
+  if (aux.zipCounty) {
+    for (const r of aux.zipCounty) if (r.zip && r.key) zipCountyKey.set(r.zip, { key: r.key, name: r.name || titleCase(r.key.slice(3)), via: r.via || null })
+  } else {
+    for (const r of aux.censusZipCounty || []) if (r.zip && r.county_key) zipCountyKey.set(r.zip, { key: r.county_key, name: r.county_name, via: 'census' })
+    const parcel = new Map()
+    for (const r of aux.parcelZipCounty || []) {
+      if (!r.zip || !r.county) continue
+      const cur = parcel.get(r.zip)
+      if (!cur || r.n > cur.n) parcel.set(r.zip, { key: `${clean(r.state).toUpperCase()}:${normCounty(r.county)}`, name: titleCase(normCounty(r.county)), n: r.n })
+    }
+    for (const [zip, v] of parcel) if (!zipCountyKey.has(zip)) zipCountyKey.set(zip, { key: v.key, name: v.name, via: 'parcel_majority' })
+  }
 
   // ── markets ──
-  const marketIdBySlug = new Map()
   const markets = (aux.markets || []).map((m) => ({ id: m.id, name: m.display_name, state: clean(m.state).toUpperCase() }))
-  markets.forEach((m, i) => marketIdBySlug.set(m.id, i))
-  const zipMarketSlug = new Map((aux.zipMarket || []).map((r) => [clean(r.zip5), r.canonical_market_id]))
+  const marketById = new Map(markets.map((m) => [m.id, m]))
+  const zipMarketSlug = new Map()
+  for (const r of aux.zipMarket || []) { const z = clean(r.zip5); if (z && marketById.has(r.canonical_market_id)) zipMarketSlug.set(z, r.canonical_market_id) }
 
-  // Membership arrays over sales ZIP indexes.
-  const countyKeys = []
-  const countyOrd = new Map()
-  const zipCounty = new Int32Array(nZips).fill(-1)
-  const zipMarket = new Int32Array(nZips).fill(-1)
-  index.dicts.zips.forEach((zip, z) => {
-    const c = zipCountyKey.get(zip)
-    if (c) {
-      let o = countyOrd.get(c.key)
-      if (o === undefined) { o = countyKeys.length; countyOrd.set(c.key, o); countyKeys.push(c.key) }
-      zipCounty[z] = o
-    }
-    const slug = zipMarketSlug.get(zip)
-    if (slug && marketIdBySlug.has(slug)) zipMarket[z] = marketIdBySlug.get(slug)
-  })
+  const zipCounty = new Map([...zipCountyKey].map(([z, v]) => [z, v.key]))
+  const salesOf = (zips) => zips.reduce((t, z) => t + (zipFacts.get(z)?.sales || 0), 0)
+  const boxOf = (zips) => unionBox(zips.map((z) => zipFacts.get(z)?.bbox))
 
-  // ── nodes ──
-  const nation = put({ id: 'nation:US', level: 'nation', key: 'US', name: 'United States', label: 'Nationwide', state: null, parent_id: null, parents: {}, centroid: [-96.5, 38.5], bbox: [-125, 24, -66.5, 49.5], geometry: 'none', aliases: ['usa', 'us', 'national', 'nationwide', 'united states'], sources: ['sales'] })
-  nation.coverage = { sales: index.n }
-
-  const stateCodes = new Set([...index.dicts.states, ...(aux.searchAreas || []).filter((a) => a.kind === 'state').map((a) => a.key)])
+  // ── nation / states ──
+  put({ id: 'nation:US', level: 'nation', key: 'US', name: 'United States', label: 'Nationwide', state: null, parent_id: null, parents: {}, centroid: [-96.5, 38.5], bbox: [-125, 24, -66.5, 49.5], geometry: 'none', aliases: ['usa', 'us', 'national', 'nationwide', 'united states'], sources: ['sales'], coverage: { sales: facts.total } })
+  const stateCodes = new Set([...facts.states.keys(), ...(aux.searchAreas || []).filter((a) => a.kind === 'state').map((a) => a.key)])
   for (const st of stateCodes) {
     const a = areas.get(`state|${st}`)
-    const si = index.lookup.state.get(st)
+    const sales = facts.states.get(st) || 0
     put({ id: `state:${st}`, level: 'state', key: st, name: STATE_NAMES[st] || st, label: STATE_NAMES[st] ? `${STATE_NAMES[st]} (${st})` : st, state: st, parent_id: 'nation:US', parents: { nation: 'nation:US' },
-      centroid: centerOf(a), bbox: bboxOf(a), geometry: outlinedState.has(st) ? 'census_state' : 'none', aliases: [st.toLowerCase(), normName(STATE_NAMES[st] || st)], sources: [si !== undefined ? 'sales' : null, a ? 'properties' : null].filter(Boolean),
-      coverage: { sales: si === undefined ? 0 : index.byState.offsets[si + 1] - index.byState.offsets[si], properties: a ? Number(a.n) || 0 : 0 } })
+      centroid: centerOf(a), bbox: bboxOf(a), geometry: outlinedState.has(st) ? 'census_state' : 'none', aliases: [st.toLowerCase(), normName(STATE_NAMES[st] || st)], sources: [sales ? 'sales' : null, a ? 'properties' : null].filter(Boolean),
+      coverage: { sales, properties: a ? Number(a.n) || 0 : 0 } })
   }
 
-  const marketZips = markets.map(() => [])
-  for (let z = 0; z < nZips; z += 1) if (zipMarket[z] >= 0) marketZips[zipMarket[z]].push(z)
+  // ── markets ──
+  const marketZips = new Map(markets.map((m) => [m.id, []]))
+  for (const [z, slug] of zipMarketSlug) if (zipFacts.has(z)) marketZips.get(slug).push(z)
   const aliasByMarket = new Map()
   for (const al of aux.aliases || []) {
     if (!al.canonical_market_id) continue
@@ -155,75 +160,104 @@ export function buildGeographyCatalog(index, aux = {}) {
     list.push(normName(al.alias))
     aliasByMarket.set(al.canonical_market_id, list)
   }
-  markets.forEach((m, i) => {
+  for (const m of markets) {
     const a = areas.get(`market|${m.name}`)
-    const zs = marketZips[i]
+    const zs = marketZips.get(m.id)
     put({ id: `market:${m.id}`, level: 'market', key: m.id, name: m.name, label: m.name, state: m.state, parent_id: `state:${m.state}`, parents: { nation: 'nation:US', state: `state:${m.state}` },
-      centroid: centerOf(a), bbox: bboxOf(a) || unionBox(zs.map((z) => zipBox[z])), geometry: 'none',
+      centroid: centerOf(a), bbox: bboxOf(a) || boxOf(zs), geometry: 'none',
       aliases: [...new Set([normName(m.name), normName(m.name.split(',')[0]), ...(aliasByMarket.get(m.id) || [])])], sources: ['canonical_markets', zs.length ? 'sales' : null].filter(Boolean),
-      coverage: { sales: zs.reduce((t, z) => t + zipSales[z], 0), properties: a ? Number(a.n) || 0 : 0, zips: zs.length } })
-  })
-
-  const countyZips = countyKeys.map(() => [])
-  for (let z = 0; z < nZips; z += 1) if (zipCounty[z] >= 0) countyZips[zipCounty[z]].push(z)
-  const countyName = new Map()
-  for (const v of zipCountyKey.values()) if (!countyName.has(v.key)) countyName.set(v.key, v.name)
-  const countyAll = new Set([...countyKeys, ...(aux.searchAreas || []).filter((a) => a.kind === 'county').map((a) => a.key)])
-  for (const ck of countyAll) {
-    const [st, nm] = ck.split(':')
-    const a = areas.get(`county|${ck}`)
-    const o = countyOrd.get(ck)
-    const zs = o === undefined ? [] : countyZips[o]
-    const name = titleCase(countyName.get(ck) || nm)
-    const mkVotes = new Map()
-    for (const z of zs) if (zipMarket[z] >= 0) mkVotes.set(zipMarket[z], (mkVotes.get(zipMarket[z]) || 0) + zipSales[z])
-    const mk = majority(mkVotes)
-    put({ id: `county:${ck}`, level: 'county', key: ck, name: `${name} County`, label: `${name} County, ${st}`, state: st, parent_id: `state:${st}`,
-      parents: { nation: 'nation:US', state: `state:${st}`, ...(mk !== null ? { market: `market:${markets[mk].id}` } : {}) },
-      centroid: centerOf(a), bbox: bboxOf(a) || unionBox(zs.map((z) => zipBox[z])), geometry: 'none', aliases: [normName(`${name} county`), normName(name)],
-      sources: [zs.length ? 'sales' : null, a ? 'properties' : null].filter(Boolean), coverage: { sales: zs.reduce((t, z) => t + zipSales[z], 0), properties: a ? Number(a.n) || 0 : 0, zips: zs.length } })
+      coverage: { sales: salesOf(zs), properties: a ? Number(a.n) || 0 : 0, zips: zs.length } })
   }
 
-  // Cities: from sales (recorded city) and the property universe.
+  // ── counties ──
+  const countyZips = new Map()
+  for (const z of zipFacts.keys()) { const k = zipCounty.get(z); if (k) { const l = countyZips.get(k) || []; l.push(z); countyZips.set(k, l) } }
+  const countyName = new Map()
+  for (const v of zipCountyKey.values()) if (!countyName.has(v.key)) countyName.set(v.key, v.name)
+  const majorityBy = (zs, keyOf) => { const votes = new Map(); for (const z of zs) { const k = keyOf(z); if (k) votes.set(k, (votes.get(k) || 0) + (zipFacts.get(z)?.sales || 0)) } return majority(votes) }
+  const countyAll = new Set([...countyZips.keys(), ...(aux.searchAreas || []).filter((a) => a.kind === 'county').map((a) => a.key)])
+  for (const ck of countyAll) {
+    const st = ck.slice(0, 2); const nm = ck.slice(3)
+    const a = areas.get(`county|${ck}`)
+    const zs = countyZips.get(ck) || []
+    const name = titleCase(countyName.get(ck) || nm)
+    const mk = majorityBy(zs, (z) => zipMarketSlug.get(z))
+    put({ id: `county:${ck}`, level: 'county', key: ck, name: `${name} County`, label: `${name} County, ${st}`, state: st, parent_id: `state:${st}`,
+      parents: { nation: 'nation:US', state: `state:${st}`, ...(mk ? { market: `market:${mk}` } : {}) },
+      centroid: centerOf(a), bbox: bboxOf(a) || boxOf(zs), geometry: 'none', aliases: [normName(`${name} county`), normName(name)],
+      sources: [zs.length ? 'sales' : null, a ? 'properties' : null].filter(Boolean), coverage: { sales: salesOf(zs), properties: a ? Number(a.n) || 0 : 0, zips: zs.length } })
+  }
+
+  // ── cities ──
   const cityZips = new Map()
-  for (let z = 0; z < nZips; z += 1) if (zipCity[z] >= 0) { const l = cityZips.get(zipCity[z]) || []; l.push(z); cityZips.set(zipCity[z], l) }
-  const cityAll = new Set([...index.dicts.cities, ...(aux.searchAreas || []).filter((a) => a.kind === 'city').map((a) => a.key)])
+  for (const z of facts.zips) if (z.cityKey) { const l = cityZips.get(z.cityKey) || []; l.push(z.zip); cityZips.set(z.cityKey, l) }
+  const cityAll = new Set([...facts.cities.keys(), ...(aux.searchAreas || []).filter((a) => a.kind === 'city').map((a) => a.key)])
   for (const key of cityAll) {
-    const [st, raw] = [key.slice(0, 2), key.slice(3)]
+    const st = key.slice(0, 2); const raw = key.slice(3)
     const a = areas.get(`city|${key}`)
-    const ci = index.lookup.city.get(key)
-    const zs = ci === undefined ? [] : cityZips.get(ci) || []
+    const zs = cityZips.get(key) || []
     const name = titleCase(raw)
-    const ctyVotes = new Map(); const mkVotes = new Map()
-    for (const z of zs) { if (zipCounty[z] >= 0) ctyVotes.set(zipCounty[z], (ctyVotes.get(zipCounty[z]) || 0) + zipSales[z]); if (zipMarket[z] >= 0) mkVotes.set(zipMarket[z], (mkVotes.get(zipMarket[z]) || 0) + zipSales[z]) }
-    const cty = majority(ctyVotes); const mk = majority(mkVotes)
-    const sales = ci === undefined ? 0 : index.byCity.offsets[ci + 1] - index.byCity.offsets[ci]
-    put({ id: `city:${key}`, level: 'city', key, name, label: `${name}, ${st}`, state: st, parent_id: cty !== null ? `county:${countyKeys[cty]}` : `state:${st}`,
-      parents: { nation: 'nation:US', state: `state:${st}`, ...(cty !== null ? { county: `county:${countyKeys[cty]}` } : {}), ...(mk !== null ? { market: `market:${markets[mk].id}` } : {}) },
-      centroid: centerOf(a), bbox: bboxOf(a) || unionBox(zs.map((z) => zipBox[z])), geometry: 'none', aliases: [normName(name)],
+    const cty = majorityBy(zs, (z) => zipCounty.get(z)); const mk = majorityBy(zs, (z) => zipMarketSlug.get(z))
+    const sales = facts.cities.get(key) || 0
+    put({ id: `city:${key}`, level: 'city', key, name, label: `${name}, ${st}`, state: st, parent_id: cty ? `county:${cty}` : `state:${st}`,
+      parents: { nation: 'nation:US', state: `state:${st}`, ...(cty ? { county: `county:${cty}` } : {}), ...(mk ? { market: `market:${mk}` } : {}) },
+      centroid: centerOf(a), bbox: bboxOf(a) || boxOf(zs), geometry: 'none', aliases: [normName(name)],
       sources: [sales ? 'sales' : null, a ? 'properties' : null].filter(Boolean), coverage: { sales, properties: a ? Number(a.n) || 0 : 0 } })
   }
 
-  const zipAll = new Set([...index.dicts.zips, ...(aux.searchAreas || []).filter((a) => a.kind === 'zip').map((a) => a.key)])
+  // ── ZIPs ──
+  const zipAll = new Set([...zipFacts.keys(), ...(aux.searchAreas || []).filter((a) => a.kind === 'zip').map((a) => a.key)])
   for (const zip of zipAll) {
-    const z = index.lookup.zip.get(zip)
+    const f = zipFacts.get(zip)
     const a = areas.get(`zip|${zip}`)
-    const st = (z !== undefined ? zipState[z] : null) || clean(a?.state).toUpperCase() || null
-    const cityKey = z !== undefined && zipCity[z] >= 0 ? index.dicts.cities[zipCity[z]] : null
-    const ck = z !== undefined && zipCounty[z] >= 0 ? countyKeys[zipCounty[z]] : zipCountyKey.get(zip)?.key || null
-    const mi = z !== undefined ? zipMarket[z] : (zipMarketSlug.has(zip) ? marketIdBySlug.get(zipMarketSlug.get(zip)) ?? -1 : -1)
+    const st = f?.state || clean(a?.state).toUpperCase() || null
+    const cityKey = f?.cityKey || null
+    const ck = zipCounty.get(zip) || null
+    const mk = zipMarketSlug.get(zip) || null
     put({ id: `zip:${zip}`, level: 'zip', key: zip, name: zip, label: cityKey ? `${zip} · ${titleCase(cityKey.slice(3))}, ${st}` : `${zip}${st ? `, ${st}` : ''}`, state: st,
       parent_id: cityKey ? `city:${cityKey}` : ck ? `county:${ck}` : st ? `state:${st}` : 'nation:US',
-      parents: { nation: 'nation:US', ...(st ? { state: `state:${st}` } : {}), ...(ck ? { county: `county:${ck}` } : {}), ...(cityKey ? { city: `city:${cityKey}` } : {}), ...(mi >= 0 ? { market: `market:${markets[mi].id}` } : {}) },
-      centroid: centerOf(a) || (z !== undefined && zipBox[z] ? [(zipBox[z][0] + zipBox[z][2]) / 2, (zipBox[z][1] + zipBox[z][3]) / 2] : null),
-      bbox: bboxOf(a) || (z !== undefined ? zipBox[z] : null), geometry: outlinedZip.has(zip) ? 'census_zcta' : 'none', aliases: [zip],
+      parents: { nation: 'nation:US', ...(st ? { state: `state:${st}` } : {}), ...(ck ? { county: `county:${ck}` } : {}), ...(cityKey ? { city: `city:${cityKey}` } : {}), ...(mk ? { market: `market:${mk}` } : {}) },
+      centroid: centerOf(a) || (f?.bbox ? [(f.bbox[0] + f.bbox[2]) / 2, (f.bbox[1] + f.bbox[3]) / 2] : null),
+      bbox: bboxOf(a) || f?.bbox || null, geometry: outlinedZip.has(zip) ? 'census_zcta' : 'none', aliases: [zip],
       county_via: zipCountyKey.get(zip)?.via || null,
-      sources: [z !== undefined ? 'sales' : null, a ? 'properties' : null].filter(Boolean), coverage: { sales: z === undefined ? 0 : zipSales[z], properties: a ? Number(a.n) || 0 : 0 } })
+      sources: [f ? 'sales' : null, a ? 'properties' : null].filter(Boolean), coverage: { sales: f?.sales || 0, properties: a ? Number(a.n) || 0 : 0 } })
   }
 
-  // Selectors: how to find a geography's sale rows.
-  const countyZipList = new Map(countyKeys.map((k, o) => [k, countyZips[o]]))
-  const marketZipList = new Map(markets.map((m, i) => [m.id, marketZips[i]]))
+  const levelNodes = Object.fromEntries(LEVEL_ORDER.map((lv) => [lv, []]))
+  for (const n of nodes.values()) levelNodes[n.level].push(n)
+  const membershipCoverage = {
+    sales_with_zip: salesOf([...zipFacts.keys()]),
+    sales_with_county: salesOf([...zipFacts.keys()].filter((z) => zipCounty.has(z))),
+    sales_with_market: salesOf([...zipFacts.keys()].filter((z) => zipMarketSlug.has(z))),
+    sales_total: facts.total,
+  }
+  return {
+    nodes, levelNodes, membershipCoverage, zipCounty, zipMarket: zipMarketSlug,
+    marketZips: new Map([...marketZips].map(([k, v]) => [k, v])),
+    get: (id) => nodes.get(id) || null,
+    /** Children of a parent at a level, by membership (ZIP → its majority city / county / market). */
+    childrenOf(level, parentId) {
+      const parent = nodes.get(parentId)
+      if (!parent) return []
+      const list = levelNodes[level] || []
+      if (parent.level === 'nation') return list
+      return list.filter((n) => n.parents?.[parent.level] === parentId || (parent.level === 'state' && n.state === parent.key))
+    },
+  }
+}
+
+/** Raw-index accessors (dev fallback only): row selectors and per-row child keys. */
+export function rawAccessors(index, catalog) {
+  const nZ = index.dicts.zips.length
+  const countyKeys = []; const countyOrd = new Map(); const marketKeys = []; const marketOrd = new Map()
+  const zipCountyIdx = new Int32Array(nZ).fill(-1); const zipMarketIdx = new Int32Array(nZ).fill(-1)
+  index.dicts.zips.forEach((zip, z) => {
+    const ck = catalog.zipCounty.get(zip)
+    if (ck) { let o = countyOrd.get(ck); if (o === undefined) { o = countyKeys.length; countyOrd.set(ck, o); countyKeys.push(ck) } zipCountyIdx[z] = o }
+    const mk = catalog.zipMarket.get(zip)
+    if (mk) { let o = marketOrd.get(mk); if (o === undefined) { o = marketKeys.length; marketOrd.set(mk, o); marketKeys.push(mk) } zipMarketIdx[z] = o }
+  })
+  const zipsWhere = (pred) => index.dicts.zips.map((zip, z) => [zip, z]).filter(([zip]) => pred(zip)).map(([, z]) => ['byZip', z])
   function selectorFor(id) {
     const g = parseGeoId(id)
     if (!g) return null
@@ -231,25 +265,19 @@ export function buildGeographyCatalog(index, aux = {}) {
     if (g.level === 'state') return { buckets: [['byState', index.lookup.state.get(g.key) ?? -1]] }
     if (g.level === 'zip') return { buckets: [['byZip', index.lookup.zip.get(g.key) ?? -1]] }
     if (g.level === 'city') return { buckets: [['byCity', index.lookup.city.get(g.key) ?? -1]] }
-    if (g.level === 'county') return { buckets: (countyZipList.get(g.key) || []).map((z) => ['byZip', z]) }
-    if (g.level === 'market') return { buckets: (marketZipList.get(g.key) || []).map((z) => ['byZip', z]) }
+    if (g.level === 'county') return { buckets: zipsWhere((zip) => catalog.zipCounty.get(zip) === g.key) }
+    if (g.level === 'market') return { buckets: zipsWhere((zip) => catalog.zipMarket.get(zip) === g.key) }
     return null
   }
-  /** Child key for a row at a level, and the id for a child key. */
   const child = {
+    nation: { of: () => 0, id: () => 'nation:US' },
     state: { of: (i) => index.cols.state[i], id: (k) => `state:${index.dicts.states[k]}` },
-    market: { of: (i) => (index.cols.zip[i] >= 0 ? zipMarket[index.cols.zip[i]] : -1), id: (k) => `market:${markets[k].id}` },
-    county: { of: (i) => (index.cols.zip[i] >= 0 ? zipCounty[index.cols.zip[i]] : -1), id: (k) => `county:${countyKeys[k]}` },
+    market: { of: (i) => (index.cols.zip[i] >= 0 ? zipMarketIdx[index.cols.zip[i]] : -1), id: (k) => `market:${marketKeys[k]}` },
+    county: { of: (i) => (index.cols.zip[i] >= 0 ? zipCountyIdx[index.cols.zip[i]] : -1), id: (k) => `county:${countyKeys[k]}` },
     city: { of: (i) => index.cols.city[i], id: (k) => `city:${index.dicts.cities[k]}` },
     zip: { of: (i) => index.cols.zip[i], id: (k) => `zip:${index.dicts.zips[k]}` },
   }
-  const membershipCoverage = {
-    sales_with_zip: zipSales.reduce((t, v) => t + v, 0),
-    sales_with_county: [...countyZipList.values()].flat().reduce((t, z) => t + zipSales[z], 0),
-    sales_with_market: [...marketZipList.values()].flat().reduce((t, z) => t + zipSales[z], 0),
-    sales_total: index.n,
-  }
-  return { nodes, selectorFor, child, membershipCoverage, get: (id) => nodes.get(id) || null }
+  return { selectorFor, child }
 }
 
 function normCounty(v) {
