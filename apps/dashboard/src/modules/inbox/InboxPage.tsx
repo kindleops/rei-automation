@@ -9,6 +9,12 @@ import { useInboxData, toWorkflowThread, isInboxDebugEnabled } from './inbox.ada
 import { useDealDeskSelection } from './useDealDeskSelection'
 import { applyThreadReadOnSelect, type ThreadSelectIntent } from './thread-read-policy'
 import { contextIdentity, nextDismissal, shouldReanchorFromContext } from './conversation-dismissal'
+import { useAppInstance } from '../desktop/workspace/instance-context'
+import { useMultiInboxState } from './multi/multi-inbox-store'
+import { MultiInboxCountControl, MultiInboxLayout } from './multi/MultiInboxLayout'
+import { InboxSecondaryPane } from './multi/InboxSecondaryPane'
+import { getPaneQueryCache } from './multi/pane-data'
+import { closePane as closeMultiPane, focusPane as focusMultiPane, openBeside as openMultiBeside, sameViewAs, setCount as setMultiCount, setPaneLens as setMultiPaneLens, clampCount, type PaneCount } from './multi/multi-inbox-model'
 import {
   describeThreadReference,
   resolveThreadRouteKey,
@@ -5098,6 +5104,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   /** The conversation room is open (desk only): a thread was explicitly opened. */
   const deskRoomOpen = isDeskInbox && mobileThreadOpen && Boolean(selected)
+  /* MULTI-INBOX (desk only): 1 pane by default; Inbox 1 is this desk, Inboxes 2-4 are pane instances. */
+  const { instanceId: inboxInstanceId } = useAppInstance()
+  const [multiInbox, updateMultiInbox] = useMultiInboxState(inboxInstanceId)
+  const multiActive = isDeskInbox && multiInbox.count > 1
   const deskLens = resolveDeskLens(viewFilter, hasActiveAdvancedFilters(advancedFilters) || stageFilter !== 'all_stages')
 
   /** Open a row with the same side effects as a click: locator, read mark, the room. */
@@ -5114,7 +5124,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const handleDeskBulkChanged = useCallback(() => {
     void refreshInboxCounts()
     handleRetryInboxLoad()
-  }, [handleRetryInboxLoad, refreshInboxCounts])
+    // Multi-Inbox: an archive in Inbox 1 leaves every pane whose query excludes it
+    if (multiActive) getPaneQueryCache().invalidateSoon('primary_bulk')
+  }, [handleRetryInboxLoad, multiActive, refreshInboxCounts])
 
   /** Context menu / hover: open another app on THIS seller's property, beside the Inbox. */
   const handleDeskOpenBeside = useCallback((thread: InboxWorkflowThread, app: BesideApp) => {
@@ -5755,6 +5767,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     // INBOX DESKTOP 4.0: triage is the whole pane; an opened conversation splits it.
     if (isDeskInbox) {
       if (mobileIntelOpen) return ['thread', 'deal_intelligence']
+      // Multi-Inbox: every pane (Inbox 1's room included) lives inside the triage plane
+      if (multiActive) return ['thread']
       return deskRoomOpen ? ['thread', 'sms_thread'] : ['thread']
     }
     // A desk keeps the list beside the conversation (a mail client, not a phone
@@ -5764,7 +5778,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (mobileIntelOpen) return ['deal_intelligence']
     if (mobileThreadOpen) return ['sms_thread']
     return ['thread']
-  }, [useMobileInboxFlow, isDeskInbox, deskRoomOpen, isModernDesktop, mobileIntelOpen, mobileThreadOpen])
+  }, [useMobileInboxFlow, isDeskInbox, deskRoomOpen, isModernDesktop, mobileIntelOpen, mobileThreadOpen, multiActive])
 
   const viewsToRender = mobilePaneViews ?? renderViews
   const isDealDeskLayout = selectedWorkspacePreset.key === 'deal_desk'
@@ -6024,8 +6038,81 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   )
 
   /** INBOX DESKTOP 4.0 — the triage ledger (desk only; the rail above stays for everything else). */
-  const renderDeskLedgerPane = () => (
-    <section className="nx-workspace-pane-surface nx-workspace-pane-surface--desk-ledger">
+  /** Multi-Inbox: a pane's "Reply in Inbox 1" / Scheduled row → open it in Inbox 1's room (an explicit open). */
+  const openInPrimaryPane = useCallback((thread: InboxWorkflowThread) => {
+    dismissedContextRef.current = null
+    setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
+    selectThread(thread)
+    readOnSelect('open_conversation', thread)
+    setMobileThreadOpen(true)
+    setMobileIntelOpen(false)
+    updateMultiInbox((s) => focusMultiPane(s, 0))
+  }, [readOnSelect, selectThread, setActiveContext, updateMultiInbox])
+
+  // Command palette (existing command system): Open / Close / Focus / Set view of Inbox N.
+  useEffect(() => {
+    if (!isDeskInbox) return
+    const onCommand = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail ?? {}
+      if (detail.kind !== 'inbox_multi') return
+      const op = String(detail.op ?? '')
+      const pane = Math.round(Number(detail.pane ?? 0)) - 1
+      if (op === 'set_count') updateMultiInbox((st) => setMultiCount(st, clampCount(detail.count)))
+      else if (op === 'open_beside') updateMultiInbox(openMultiBeside)
+      else if (op === 'close' && pane >= 1) updateMultiInbox((st) => closeMultiPane(st, pane))
+      else if (op === 'focus' && pane >= 0) updateMultiInbox((st) => focusMultiPane(st, pane))
+      else if (op === 'set_view' && pane >= 1 && typeof detail.view === 'string') {
+        updateMultiInbox((st) => setMultiPaneLens(st.count > pane ? st : setMultiCount(st, (pane + 1) as PaneCount), pane, detail.view as never))
+      }
+    }
+    window.addEventListener(GLOBAL_COMMAND_ACTION_EVENT, onCommand as EventListener)
+    return () => window.removeEventListener(GLOBAL_COMMAND_ACTION_EVENT, onCommand as EventListener)
+  }, [isDeskInbox, updateMultiInbox])
+
+  const deskCounts = (data.counts ?? {}) as Record<string, unknown>
+  const renderDeskLedgerPane = () => {
+    if (!multiActive) {
+      return (
+        <section className="nx-workspace-pane-surface nx-workspace-pane-surface--desk-ledger">
+          {renderPrimaryLedger()}
+        </section>
+      )
+    }
+    // Elements, built here in render — the layout only places them.
+    const paneNodes: ReactNode[] = [
+      <div key="pane-1" className={cls('ixm-pane-body', deskRoomOpen && 'has-conversation')}>
+        <div className="ixm-pane-list" aria-hidden={deskRoomOpen ? true : undefined}>{renderPrimaryLedger()}</div>
+        {deskRoomOpen ? <div className="ixm-conversation ixm-conversation--primary">{renderSmsThreadPane()}</div> : null}
+      </div>,
+    ]
+    for (const index of [1, 2, 3].filter((n) => n < multiInbox.count)) {
+      paneNodes.push(
+        <InboxSecondaryPane
+          key={multiInbox.panes[index].id}
+          index={index}
+          pane={multiInbox.panes[index]}
+          counts={deskCounts}
+          focused={multiInbox.focused === index}
+          visible
+          sameAsPane={sameViewAs(multiInbox, index, { lens: deskLens, q: searchQuery })}
+          update={updateMultiInbox}
+          onClosePane={() => updateMultiInbox((st) => closeMultiPane(st, index))}
+          onOpenBeside={multiInbox.count < 4 ? () => updateMultiInbox(openMultiBeside) : null}
+          onReplyInPrimary={openInPrimaryPane}
+          onOpenAppBeside={handleDeskOpenBeside}
+          onChanged={() => { void refreshInboxCounts() }}
+        />,
+      )
+    }
+    return (
+      <section className="nx-workspace-pane-surface nx-workspace-pane-surface--desk-ledger is-multi">
+        <MultiInboxLayout state={multiInbox} update={updateMultiInbox} panes={paneNodes} />
+      </section>
+    )
+  }
+
+  const renderPrimaryLedger = () => (
+    <>
       {linkedMiss ? (
         <div className="ws-linked-note-inset">
           <LinkedNotice text="No conversation for this property" subject={linkedMiss.subject} onDismiss={() => setLinkedMiss(null)} />
@@ -6056,8 +6143,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         scheduledPanel={deskLens === 'scheduled'
           ? <ScheduledFollowupsPanel onOpenThread={(threadKey) => openInboxThread({ threadKey })} />
           : undefined}
+        headerExtra={isDeskInbox ? (
+          <MultiInboxCountControl count={multiInbox.count} onChange={(n) => updateMultiInbox((st) => setMultiCount(st, n))} />
+        ) : undefined}
+        idPrefix="ixm-1-opt"
+        ariaLabel={multiActive ? 'Inbox 1' : undefined}
       />
-    </section>
+    </>
   )
 
   const wrapWorkspaceSurface = (

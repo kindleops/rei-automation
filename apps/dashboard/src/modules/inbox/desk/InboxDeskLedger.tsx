@@ -90,6 +90,14 @@ export interface InboxDeskLedgerProps {
   density?: 'standard' | 'dense'
   /** [8.3] after a bulk archive / undo changed threads — refresh counts and the list */
   onBulkChanged?: () => void
+  /** Multi-Inbox: replaces the desk header (lens tabs) with the pane's own header */
+  headerOverride?: ReactNode
+  /** Multi-Inbox: extra controls in the desk header (the 1|2|3|4 control) */
+  headerExtra?: ReactNode
+  /** unique per mounted ledger (aria ids) */
+  idPrefix?: string
+  /** a short accessible name for this list ("Inbox 2 · New Replies") */
+  ariaLabel?: string
 }
 
 const ROW_HEIGHT = { standard: 64, dense: 48 } as const
@@ -384,14 +392,14 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
   const {
     threads, hiddenIds, lens, counts, loading, error, canLoadMore, filteredTotal, filterChips, selectedId,
     onLens, onOpenFilters, onRemoveFilterChip, onClearFilters, onOpen, onLoadMore, onRetry, onSnooze, onMarkRead,
-    onOpenBeside, scheduledPanel, density = 'standard', onBulkChanged,
+    onOpenBeside, scheduledPanel, density = 'standard', onBulkChanged, headerOverride, headerExtra,
+    idPrefix = 'ixl-opt', ariaLabel,
   } = props
   const rowHeight = ROW_HEIGHT[density]
   const now = useLedgerClock()
   const listRef = useRef<ListImperativeAPI | null>(null)
   const [cursorId, setCursorId] = useState<string | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
-  const idPrefix = 'ixl-opt'
 
   // The live-row store reads the Inbox channel's events only while a ledger is mounted.
   useEffect(() => enableRowSignals(), [])
@@ -478,7 +486,7 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
   const picked = selection.selected
   const rowProps = useMemo<SlotProps>(() => ({
     rows, lens, selectedId, cursorId, picked, bulkItems, now, factsVersion, idPrefix, handlers,
-  }), [bulkItems, cursorId, factsVersion, handlers, lens, now, picked, rows, selectedId])
+  }), [bulkItems, cursorId, factsVersion, handlers, idPrefix, lens, now, picked, rows, selectedId])
 
   /* scroll anchoring: a reply landing above the fold never moves what you are reading */
   const anchorRef = useRef<{ id: string; index: number } | null>(null)
@@ -636,18 +644,22 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
   }
 
   return (
-    <section className={cx('ixl', `is-density-${density}`)} data-lens={lens} aria-label="Inbox triage">
+    <section className={cx('ixl', `is-density-${density}`, headerOverride != null && 'is-pane')} data-lens={lens} aria-label={ariaLabel ?? 'Inbox triage'}>
+      {headerOverride != null ? headerOverride : (
       <header className="ixl-head">
         <div className="ixl-head__top">
           <div className="ixl-head__title">
             <h1>Inbox</h1>
             {summary ? <p className="ixl-head__summary">{summary}</p> : null}
           </div>
-          {lens !== 'filtered' ? (
-            <LCButton variant="quiet" size="sm" icon="filter" onClick={onOpenFilters} className="ixl-head__filters">
-              Filters
-            </LCButton>
-          ) : null}
+          <div className="ixl-head__tools">
+            {headerExtra}
+            {lens !== 'filtered' ? (
+              <LCButton variant="quiet" size="sm" icon="filter" onClick={onOpenFilters} className="ixl-head__filters">
+                Filters
+              </LCButton>
+            ) : null}
+          </div>
         </div>
         <div className="ixl-head__lens">
           <LCSegmented
@@ -687,6 +699,7 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
           />
         ) : null}
       </header>
+      )}
 
       <div className="ixl-plane">
         {rows.length > 0 && lens !== 'scheduled' ? (

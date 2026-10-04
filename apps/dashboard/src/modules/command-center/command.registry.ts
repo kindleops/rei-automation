@@ -87,12 +87,44 @@ const applicationDestinations = (context: GlobalCommandSearchContext): CommandRe
     }))]
 }
 
+/**
+ * MULTI-INBOX (desktop): open / focus / close / set the view of Inbox 1-4.
+ * Handled by the Inbox itself (kind 'inbox_multi'); nothing here decides state.
+ */
+const MULTI_INBOX_VIEWS: Array<{ view: string; label: string }> = [
+  { view: 'priority', label: 'Priority' },
+  { view: 'new_replies', label: 'New Replies' },
+  { view: 'needs_review', label: 'Needs Review' },
+  { view: 'follow_up', label: 'Follow-ups' },
+  { view: 'archived', label: 'Archived' },
+]
+const multiInboxCommands = (context: GlobalCommandSearchContext): CommandResult[] => {
+  if (!context.isModernDesktop) return []
+  const onInbox = context.routePath === '/inbox'
+  const out: CommandResult[] = []
+  const add = (id: string, title: string, subtitle: string, payload: Record<string, unknown>, keywords: string[], score = onInbox ? 74 : 58) => out.push(buildStatic({
+    id, type: 'system_action', title, subtitle, badge: 'Inbox', icon: 'inbox', route: '/inbox',
+    actionId: 'inbox_multi', eventPayload: { kind: 'inbox_multi', ...payload }, score,
+    meta: { provider: 'system_action', groupLabel: 'Inbox panes', keywords },
+  }))
+  const ordinal = ['', 'second', 'third', 'fourth']
+  for (const n of [2, 3, 4]) add(`inbox-multi-count-${n}`, `Open ${ordinal[n - 1]} Inbox`, `${n} Inboxes side by side, each with its own view`, { op: 'set_count', count: n }, ['multi inbox', 'split inbox', `${n} inboxes`, 'side by side'])
+  add('inbox-multi-count-1', 'One Inbox', 'Back to a single Inbox (other panes keep their state)', { op: 'set_count', count: 1 }, ['single inbox', 'close panes'])
+  for (const n of [1, 2, 3, 4]) add(`inbox-multi-focus-${n}`, `Focus Inbox ${n}`, `⌥${n}`, { op: 'focus', pane: n }, ['focus inbox', `inbox ${n}`], onInbox ? 66 : 40)
+  for (const n of [2, 3, 4]) add(`inbox-multi-close-${n}`, `Close Inbox ${n}`, 'Its view is kept for this session', { op: 'close', pane: n }, ['close inbox', `inbox ${n}`], onInbox ? 62 : 36)
+  for (const n of [2, 3, 4]) {
+    for (const v of MULTI_INBOX_VIEWS) add(`inbox-multi-view-${n}-${v.view}`, `Set Inbox ${n} to ${v.label}`, `Inbox ${n} shows ${v.label}`, { op: 'set_view', pane: n, view: v.view }, ['set inbox', `inbox ${n}`, v.label.toLowerCase()], onInbox ? 60 : 34)
+  }
+  return out
+}
+
 export const getStaticCommandRegistry = (context: GlobalCommandSearchContext): CommandResult[] => {
   const onInboxSurface = context.routePath === '/inbox'
   const onQueueSurface = context.routePath === '/inbox' && context.currentView === 'queue'
 
   return [
     ...applicationDestinations(context),
+    ...multiInboxCommands(context),
     buildStatic({
       id: 'filter-clear',
       type: 'filter',

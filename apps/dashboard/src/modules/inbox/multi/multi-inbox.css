@@ -1,0 +1,168 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   MULTI-INBOX — 1 / 2 / 3 / 4 Inbox panes in one Inbox (desk only).
+   Anchored like the desk: html.is-desktop-modern #nx-inbox-root.is-desk-inbox.
+   Panes are planes of ONE surface — hairline seams, one glass, no cards in
+   cards, no repeated app chrome. Layout by the Inbox's own width.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .nx-workspace-pane-surface--desk-ledger.is-multi {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+}
+
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm {
+  --ws-seam: 9px;
+  container: ixm / inline-size;
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm.is-grid2x2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--lc-glass-line);
+}
+
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--lc-glass-pane);
+  -webkit-backdrop-filter: var(--lc-glass-filter);
+  backdrop-filter: var(--lc-glass-filter);
+  box-shadow: var(--lc-glass-sheen);
+  transition: box-shadow var(--lc-dur-surface, 220ms) var(--lc-ease, ease);
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm.is-grid2x2 .ixm-pane { flex: 1 1 auto; }
+/* the focused pane: a hairline of execution colour on top, nothing louder */
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane.is-focused::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(var(--lc-exec-rgb), 0.7) 18%, rgba(var(--lc-exec-rgb), 0.7) 82%, transparent);
+  z-index: 2;
+  pointer-events: none;
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-seam { align-self: stretch; }
+
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane-list { display: flex; flex: 1 1 auto; min-height: 0; }
+/* under an open conversation the list keeps its scroll, out of sight and out of the tab order */
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane-body.has-conversation > .ixm-pane-list {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  animation: ixm-resolve var(--lc-dur-surface, 220ms) var(--lc-ease-enter, ease-out) both;
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation > :first-child { flex: 1 1 auto; min-height: 0; }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--lc-glass-line);
+  background: var(--lc-glass-chrome);
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation__note { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation__error { display: grid; gap: 12px; place-items: center; padding: 32px; }
+@keyframes ixm-resolve { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* pane header: identity · search · filters · menu — restrained, one line */
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--lc-glass-line);
+  min-width: 0;
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head__id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head__num {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  font: 600 11px/1 var(--lc-font-ui);
+  color: var(--lc-ink-2);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi);
+  font-variant-numeric: tabular-nums;
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head.is-focused .ixm-head__num { color: rgb(var(--lc-exec-rgb)); box-shadow: inset 0 0 0 1px rgba(var(--lc-exec-rgb), 0.55); }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head__view {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--lc-ink-1);
+  cursor: pointer;
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head__view:hover { background: var(--lc-inner-bg-hover); }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head__view:focus-visible { outline: none; box-shadow: var(--lc-focus); }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head__title {
+  font: 600 11.5px/1.2 var(--lc-font-ui);
+  letter-spacing: var(--lc-track-eyebrow, 0.08em);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head__count { font: 600 13px/1 var(--lc-font-ui); color: var(--lc-ink-3); font-variant-numeric: tabular-nums; }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head__tools { display: flex; align-items: center; gap: 6px; min-width: 0; }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-head__search { width: clamp(120px, 22cqi, 240px); }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixl-head__tools { display: flex; align-items: center; gap: 8px; }
+
+/* inside a pane the ledger drops its desk title and widens to the pane */
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane .ixl-head { max-width: none; padding: 14px 16px 10px; }
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane .ixl-head__title h1 { font-size: 17px; }
+
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-pane-stale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font: var(--lc-t-meta);
+  color: rgb(var(--lc-attn-rgb));
+  border-top: 1px solid var(--lc-glass-line);
+}
+
+/* narrow pane: search collapses before identity does */
+@container ixm (max-width: 1500px) {
+  html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm.is-count-4 .ixm-head__search,
+  html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm.is-count-3 .ixm-head__search { width: clamp(96px, 14cqi, 180px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation { animation: none; }
+}
+html[data-lc-motion='off'] #nx-inbox-root.is-desk-inbox .ixm-conversation { animation: none; }
