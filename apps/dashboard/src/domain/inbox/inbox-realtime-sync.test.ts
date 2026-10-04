@@ -3,6 +3,7 @@ import {
   INBOX_REALTIME_PUBLISHED_TABLES,
   buildThreadStateListPatch,
   createRealtimeOverlayStore,
+  createRealtimeRejoinPolicy,
   createRealtimeResubscribeTrigger,
   isDeadChannelStatus,
   realtimeRetryDelayMs,
@@ -124,5 +125,52 @@ describe('channel retry policy', () => {
 
   it('binds only tables in the supabase_realtime publication', () => {
     expect([...INBOX_REALTIME_PUBLISHED_TABLES].sort()).toEqual(['inbox_thread_state', 'message_events', 'send_queue'])
+  })
+})
+
+
+describe('createRealtimeRejoinPolicy (RC 8.3.2 — a flapping channel is not a poll loop)', () => {
+  it('reproduces the 10-04 loop shape and bounds it: join→error cycles back off and catch up at most every 30 s', () => {
+    const policy = createRealtimeRejoinPolicy()
+    let now = 0
+    let catchUps = 0
+    const delays: number[] = []
+    // mount join (not a rejoin), then 20 cycles of: error immediately → wait delay → rejoin
+    policy.onSubscribed(now, false)
+    for (let i = 0; i < 20; i += 1) {
+      now += 200 // dies 200 ms after joining (CDC unavailable)
+      policy.onDead(now)
+      const delay = policy.nextRetryDelay(now)
+      delays.push(delay)
+      now += delay
+      if (policy.onSubscribed(now, true)) catchUps += 1
+    }
+    // the old code: delay 2 s every time, catch-up every cycle (20 list + 20 counts reads in ~44 s)
+    expect(delays.slice(0, 5)).toEqual([2_000, 4_000, 8_000, 16_000, 30_000])
+    expect(Math.max(...delays)).toBe(30_000)
+    expect(catchUps).toBeLessThanOrEqual(Math.ceil(now / 30_000) + 1)
+    expect(catchUps).toBeGreaterThan(0)
+  })
+
+  it('a channel that held for 30 s earns a fresh backoff', () => {
+    const policy = createRealtimeRejoinPolicy()
+    policy.onDead(0)
+    expect(policy.nextRetryDelay(0)).toBe(2_000)
+    expect(policy.nextRetryDelay(0)).toBe(4_000)
+    policy.onSubscribed(10_000, true)
+    policy.onDead(45_000)
+    expect(policy.nextRetryDelay(45_000)).toBe(2_000)
+  })
+
+  it('the first join never catches up; an explicit resubscribe resets the backoff', () => {
+    const policy = createRealtimeRejoinPolicy()
+    expect(policy.onSubscribed(0, false)).toBe(false)
+    policy.onDead(100)
+    policy.nextRetryDelay(100)
+    policy.nextRetryDelay(100)
+    policy.reset()
+    expect(policy.nextRetryDelay(200)).toBe(2_000)
+    expect(policy.onSubscribed(40_000, true)).toBe(true)
+    expect(policy.onSubscribed(41_000, true)).toBe(false)
   })
 })
