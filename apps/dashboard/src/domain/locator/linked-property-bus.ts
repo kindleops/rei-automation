@@ -101,7 +101,36 @@ function flushPending() {
   if (p) dispatch(p)
 }
 
-export type AnnounceOutcome = 'scheduled' | 'coalesced' | 'deduped' | 'suppressed'
+export type AnnounceOutcome = 'scheduled' | 'coalesced' | 'deduped' | 'suppressed' | 'held'
+
+/* ── explicit opens ───────────────────────────────────────────────────── */
+
+/**
+ * AN EXPLICIT OPEN OUTRANKS AMBIENT SELECTION.
+ *
+ * "Open Deal Intelligence / Entity Graph / Buyer Match / Comps" for a deal
+ * names its subject. It used to go through the same debounced, latest-wins
+ * publish as any selection — so a different subject published in the same
+ * moment (a host re-publishing its own active thread, a follower's late
+ * write) could win the debounce, and the pane the operator just opened was
+ * re-aimed at the OTHER property (QA: DI for 2939 Lyndale showed 3226 Aldrich,
+ * the Inbox thread's property).
+ *
+ * An explicit publish is broadcast at once with a fresh sequence (never
+ * debounced, coalesced or deduped) and holds its subject for EXPLICIT_HOLD_MS:
+ * a publish naming a DIFFERENT subject inside the hold is not broadcast and
+ * does not re-aim the locator. The hold is shorter than any deliberate second
+ * click in another pane while the new pane materializes.
+ */
+export const EXPLICIT_HOLD_MS = 900
+let hold: { locator: PropertyLocator; until: number } | null = null
+
+/** True while an explicit open holds a different subject than `locator`. */
+export function isHeldAgainst(locator: Ids, now = Date.now()): boolean {
+  if (!hold) return false
+  if (now > hold.until) { hold = null; return false }
+  return !sameSubject(hold.locator, locator)
+}
 
 /**
  * Called by setPropertyLocator for every real publish. Schedules (or
@@ -109,6 +138,7 @@ export type AnnounceOutcome = 'scheduled' | 'coalesced' | 'deduped' | 'suppresse
  */
 export function announceLinkedProperty(locator: PropertyLocator): AnnounceOutcome {
   if (isApplyingLinked()) return 'suppressed'
+  if (isHeldAgainst(locator)) return 'held'
   const source = resolveSource()
   if (pending) {
     if (sameSubject(pending.locator, locator)) {
@@ -126,11 +156,23 @@ export function announceLinkedProperty(locator: PropertyLocator): AnnounceOutcom
   return 'scheduled'
 }
 
+/** Broadcast an explicit open now (fresh seq, no debounce / dedupe) and hold its subject. */
+export function announceExplicitProperty(locator: PropertyLocator): LinkedPropertySignal {
+  if (timer !== null) { clearTimeout(timer); timer = null }
+  pending = null
+  seq += 1
+  const signal: LinkedPropertySignal = { locator, seq, source: resolveSource(), at: Date.now() }
+  hold = { locator, until: signal.at + EXPLICIT_HOLD_MS }
+  dispatch(signal)
+  return signal
+}
+
 /** The selection was cleared: nothing is pending and the next publish is new. */
 export function resetLinkedProperty() {
   if (timer !== null) { clearTimeout(timer); timer = null }
   pending = null
   last = null
+  hold = null
 }
 
 /** The last selection broadcast (a re-linked pane catches up with it). */
@@ -187,6 +229,6 @@ export function createLinkedFollower(instanceId: string | null, handler: LinkedH
 /** Test seam. */
 export const __linkedTest = {
   flush: flushPending,
-  reset: () => { resetLinkedProperty(); seq = 0; applying = 0; sourceResolver = null },
+  reset: () => { resetLinkedProperty(); seq = 0; applying = 0; sourceResolver = null; hold = null },
   last: () => last,
 }

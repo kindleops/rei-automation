@@ -28,7 +28,7 @@
  * destination re-resolve an identity it was not given.
  */
 
-import { announceLinkedProperty, isApplyingLinked, mergeSameSubject, resetLinkedProperty, sameSubject } from './linked-property-bus'
+import { announceExplicitProperty, announceLinkedProperty, isApplyingLinked, isHeldAgainst, mergeSameSubject, resetLinkedProperty, sameSubject } from './linked-property-bus'
 
 export interface PropertyLocator {
   propertyId: string | null
@@ -79,7 +79,7 @@ const hasStorage = () => {
  * identifier at all is ignored rather than clearing a good locator, so a partial
  * row cannot silently erase a working one.
  */
-export function setPropertyLocator(input: Partial<PropertyLocator>): PropertyLocator | null {
+export function setPropertyLocator(input: Partial<PropertyLocator>, opts: { explicit?: boolean } = {}): PropertyLocator | null {
   let next: PropertyLocator = {
     propertyId: str(input.propertyId),
     threadKey: str(input.threadKey),
@@ -103,6 +103,16 @@ export function setPropertyLocator(input: Partial<PropertyLocator>): PropertyLoc
   const prev = readPropertyLocator()
   const same = sameSubject(prev, next)
   if (prev && same) next = mergeSameSubject(prev, next)
+  // An explicit open (Open DI / Graph / Buyers / Comps for THIS deal): it wins,
+  // now, with a fresh sequence — see announceExplicitProperty.
+  if (opts.explicit && !isApplyingLinked()) {
+    writeLocator(next)
+    try { window.dispatchEvent(new CustomEvent(PROPERTY_LOCATOR_EVENT, { detail: next })) } catch { /* non-DOM */ }
+    announceExplicitProperty(next)
+    return next
+  }
+  // ...and for a moment nothing else re-aims the locator at another subject.
+  if (!same && isHeldAgainst(next)) return prev
   if (isApplyingLinked()) {
     if (!same) return prev
     writeLocator(next)

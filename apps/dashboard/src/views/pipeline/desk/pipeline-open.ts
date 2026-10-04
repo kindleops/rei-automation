@@ -93,7 +93,10 @@ const DEFAULT_DEPS: Omit<OpenDeps, 'saveReturn'> = {
   running: isWorkspaceRunning,
   openBeside: (path) => openApp(path, 'beside'),
   navigate: pushRoutePath,
-  publish: (c) => { setPropertyLocator({ propertyId: c.propertyId ?? undefined, threadKey: c.threadKey ?? undefined, masterOwnerId: c.masterOwnerId ?? undefined, opportunityId: c.id, address: c.address ?? undefined }) },
+  // EXPLICIT: the deal's own subject, broadcast now with a fresh sequence and
+  // held briefly, so no ambient selection (the Inbox's thread) re-aims the pane
+  // being opened (linked-property-bus announceExplicitProperty).
+  publish: (c) => { setPropertyLocator({ propertyId: c.propertyId ?? undefined, threadKey: c.threadKey ?? undefined, masterOwnerId: c.masterOwnerId ?? undefined, opportunityId: c.id, address: c.address ?? undefined }, { explicit: true }) },
   stageThread: (threadKey, propertyId) => stageInboxThread({ threadKey, propertyId }),
   announce: announceWorkspace,
 }
