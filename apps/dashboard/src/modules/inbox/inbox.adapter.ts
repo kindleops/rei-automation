@@ -29,8 +29,8 @@ import {
   buildThreadStateListPatch,
   createRealtimeOverlayStore,
   createRealtimeResubscribeTrigger,
+  createRealtimeRejoinPolicy,
   isDeadChannelStatus,
-  realtimeRetryDelayMs,
 } from '../../domain/inbox/inbox-realtime-sync'
 import {
   adjustFetchInFlight,
@@ -1967,7 +1967,8 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
        * and every re-join is followed by a catch-up read of the list and counts.
        */
       let channelGeneration = 0
-      let retryAttempt = 0
+      // RC 8.3.2: the backoff survives a flapping channel; catch-ups are throttled.
+      const rejoinPolicy = createRealtimeRejoinPolicy()
       let retryTimer: ReturnType<typeof setTimeout> | null = null
       let resubscribeDebounce: ReturnType<typeof setTimeout> | null = null
       const catchUp = (reason: string) => {
@@ -2027,11 +2028,10 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
             // removeChannel() itself reports CLOSED.
             if (cancelled || generation !== channelGeneration) return
             if (status === 'SUBSCRIBED') {
-              retryAttempt = 0
-              if (isRejoin) catchUp(`realtime_rejoin_${reason}`)
+              if (rejoinPolicy.onSubscribed(Date.now(), isRejoin)) catchUp(`realtime_rejoin_${reason}`)
             } else if (isDeadChannelStatus(status) && !retryTimer) {
-              const delay = realtimeRetryDelayMs(retryAttempt)
-              retryAttempt += 1
+              rejoinPolicy.onDead(Date.now())
+              const delay = rejoinPolicy.nextRetryDelay(Date.now())
               retryTimer = setTimeout(() => {
                 retryTimer = null
                 subscribeChannel('channel_retry')
@@ -2092,7 +2092,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           if (resubscribeDebounce) clearTimeout(resubscribeDebounce)
           resubscribeDebounce = setTimeout(() => {
             resubscribeDebounce = null
-            retryAttempt = 0
+            rejoinPolicy.reset()
             subscribeChannel(reason)
           }, 500)
         },

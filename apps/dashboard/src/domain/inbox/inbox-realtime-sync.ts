@@ -195,3 +195,55 @@ export function realtimeRetryDelayMs(attempt: number): number {
 export function isDeadChannelStatus(status: string): boolean {
   return status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'
 }
+
+/**
+ * A FLAPPING CHANNEL MUST NOT BECOME A POLL LOOP (RC 8.3.2 hotfix, 2026-10-04).
+ *
+ * The rejoin loop reset its backoff on every SUBSCRIBED and ran a full catch-up
+ * (list + counts) on every rejoin. During a Realtime CDC failure (prod
+ * realtime_logs 07:30-07:35Z: "connection not available", replication slot not
+ * alive) a channel joins and then errors straight away, so each Inbox instance
+ * cycled SUBSCRIBED → catch-up → CHANNEL_ERROR → 2 s → rejoin: one list read
+ * and one counts read every ~2-3 s per pane, sustained for the whole outage.
+ *
+ * Policy: the backoff resets only after the channel has STAYED subscribed for
+ * `stableMs`; a catch-up runs at most once per `catchUpMinMs`.
+ */
+export interface RealtimeRejoinPolicy {
+  /** delay before the next re-subscribe after a dead status */
+  nextRetryDelay(now: number): number
+  /** SUBSCRIBED arrived; true when a catch-up read should run now */
+  onSubscribed(now: number, isRejoin: boolean): boolean
+  /** a dead status arrived */
+  onDead(now: number): void
+  /** an explicit resubscribe (visible / online / token refresh) */
+  reset(): void
+}
+
+export function createRealtimeRejoinPolicy({ stableMs = 30_000, catchUpMinMs = 30_000 } = {}): RealtimeRejoinPolicy {
+  let attempt = 0
+  let subscribedAt: number | null = null
+  let lastCatchUpAt = Number.NEGATIVE_INFINITY
+  return {
+    nextRetryDelay() {
+      const delay = realtimeRetryDelayMs(attempt)
+      attempt += 1
+      return delay
+    },
+    onSubscribed(now, isRejoin) {
+      subscribedAt = now
+      if (!isRejoin) return false
+      if (now - lastCatchUpAt < catchUpMinMs) return false
+      lastCatchUpAt = now
+      return true
+    },
+    onDead(now) {
+      // Only a channel that held for stableMs earns a fresh backoff.
+      if (subscribedAt !== null && now - subscribedAt >= stableMs) attempt = 0
+      subscribedAt = null
+    },
+    reset() {
+      attempt = 0
+    },
+  }
+}
