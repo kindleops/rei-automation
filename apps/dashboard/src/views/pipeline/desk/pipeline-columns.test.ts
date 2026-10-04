@@ -88,3 +88,27 @@ describe('enrichment plan', () => {
     expect(plan(rows, { ...need, property: ['year_built', 'total_baths'] }, 2000).property.ids).toEqual(['P1', 'P3'])
   })
 })
+
+import { LENS_DEFAULTS, archivedNote, conversationWords, nextFollowUp } from './pipeline-columns'
+
+describe('nurture + visibility cells', () => {
+  it('next follow-up: the queued row first, else the stated date', () => {
+    expect(nextFollowUp(card({ queue: { next: { kind: 'follow_up', at: '2026-10-30T15:00:00Z', future: true }, held: null } } as never))).toEqual({ at: '2026-10-30T15:00:00Z', queued: true })
+    expect(nextFollowUp(card({ nurture: { followUpDue: '2026-10-11T15:12:00Z' } } as never))).toEqual({ at: '2026-10-11T15:12:00Z', queued: false })
+    expect(nextFollowUp(card())).toBeNull()
+  })
+  it('conversation words say only what the row says', () => {
+    expect(conversationWords(card())).toBeNull()
+    expect(conversationWords(card({ conversation: { archived: false, archivedAt: null, archiveScope: null, snoozedUntil: null, unread: false } }))).toBe('Open')
+    expect(conversationWords(card({ conversation: { archived: true, archivedAt: null, archiveScope: null, snoozedUntil: null, unread: true } }))).toBe('Archived · Unread')
+  })
+  it('an archived deal with a queued follow-up says the follow-up is still scheduled', () => {
+    expect(archivedNote(card())).toBeNull()
+    expect(archivedNote(card({ archived: { at: '2026-10-03T00:00:00Z', by: null, reason: null } }))).toBe('Archived')
+    expect(archivedNote(card({ archived: { at: '2026-10-03T00:00:00Z', by: null, reason: null }, queue: { next: { kind: 'follow_up', at: '2026-10-30T15:00:00Z', future: true }, held: null } } as never))).toMatch(/^Archived · follow-up still scheduled \(/)
+  })
+  it('each lens has its own default columns, all in the catalog', () => {
+    for (const ids of Object.values(LENS_DEFAULTS)) for (const id of ids) expect(COLUMN_BY_ID.has(id)).toBe(true)
+    expect(normalizeLayout(null, LENS_DEFAULTS.nurture).visible).toEqual([...LENS_DEFAULTS.nurture])
+  })
+})

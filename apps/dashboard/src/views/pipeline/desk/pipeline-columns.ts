@@ -170,6 +170,8 @@ export const DESK_COLUMNS: ReadonlyArray<DeskColumnDef> = [
   col({ id: 'portfolio', header: 'Portfolio size', group: 'deal', kind: 'int', source: FEED, width: 108, hint: 'Properties in this deal’s portfolio', value: (r) => ext(r, 'portfolioCount') }),
   col({ id: 'created', header: 'Created', group: 'deal', kind: 'rel', source: FEED, width: 96, value: (r) => r.card.createdAt }),
   col({ id: 'updated', header: 'Updated', group: 'deal', kind: 'rel', source: FEED, width: 96, value: (r) => ext(r, 'updatedAt') }),
+  col({ id: 'n_days', header: 'Days in nurture', group: 'deal', kind: 'int', source: FEED, width: 120, hint: 'Since the seller’s “not interested” turn / the deal went to nurture', value: (r) => r.card.nurture?.days ?? null }),
+  col({ id: 'archived', header: 'Archived', group: 'deal', kind: 'custom', source: 'Lead visibility', width: 210, hint: 'Archived by the shared archive (lead visibility). A scheduled follow-up keeps running.', value: (r) => r.card.archived?.at ?? null }),
   col({ id: 'entered', header: 'Entered stage', group: 'deal', kind: 'date', source: FEED, width: 128, value: (r) => ext(r, 'stageEnteredAt') }),
 
   /* Conversation */
@@ -179,9 +181,10 @@ export const DESK_COLUMNS: ReadonlyArray<DeskColumnDef> = [
   col({ id: 'intent', header: 'Last seller intent', group: 'conversation', kind: 'custom', source: FEED, width: 160, hint: 'The classified intent of the seller’s latest turn', value: (r) => r.card.intentLabel || r.card.intent }),
   col({ id: 'last_reply', header: 'Seller replied', group: 'conversation', kind: 'rel', source: THREAD, width: 112, value: (r) => r.card.lastInboundAt }),
   col({ id: 'last_out', header: 'We last sent', group: 'conversation', kind: 'rel', source: THREAD, width: 112, value: (r) => ext(r, 'lastOutboundAt') }),
-  col({ id: 'unread', header: 'Unread', group: 'conversation', kind: 'bool', source: THREAD, width: 84, value: (r) => ext(r, 'unread') }),
+  col({ id: 'unread', header: 'Unread', group: 'conversation', kind: 'bool', source: THREAD, width: 84, value: (r) => (r.card.conversation ? r.card.conversation.unread : ext(r, 'unread')) }),
+  col({ id: 'conv_state', header: 'Conversation', group: 'conversation', kind: 'custom', source: THREAD, width: 168, sortable: false, hint: 'The conversation’s own state: archived, snoozed, unread (inbox_thread_state)', value: (r) => conversationWords(r.card) }),
   col({ id: 'bucket', header: 'Inbox bucket', group: 'conversation', kind: 'enum', source: THREAD, width: 132, value: (r) => ext(r, 'inboxBucket') }),
-  col({ id: 'snooze', header: 'Snoozed until', group: 'conversation', kind: 'date', source: THREAD, width: 132, value: (r) => ext(r, 'snoozedUntil') }),
+  col({ id: 'snooze', header: 'Snoozed until', group: 'conversation', kind: 'date', source: THREAD, width: 132, value: (r) => (r.card.conversation ? r.card.conversation.snoozedUntil : ext(r, 'snoozedUntil')) }),
   col({ id: 'messages', header: 'Messages', group: 'conversation', kind: 'int', source: THREAD, width: 92, value: (r) => ext(r, 'messageCount') }),
   col({ id: 'replies', header: 'Seller replies', group: 'conversation', kind: 'int', source: THREAD, width: 108, value: (r) => ext(r, 'inboundCount') }),
   col({ id: 'delivery', header: 'Last delivery', group: 'conversation', kind: 'enum', source: THREAD, width: 112, value: (r) => ext(r, 'deliveryStatus') }),
@@ -190,6 +193,7 @@ export const DESK_COLUMNS: ReadonlyArray<DeskColumnDef> = [
 
   /* Automation */
   col({ id: 'next_send', header: 'Next scheduled', group: 'automation', kind: 'custom', source: 'Send queue', width: 168, hint: 'The next queued reply or follow-up for this thread (what the queue holds, not what was intended)', value: (r) => r.card.queue?.next?.at ?? ext(r, 'nextScheduledFor') }),
+  col({ id: 'n_next', header: 'Next follow-up', group: 'automation', kind: 'custom', source: 'Send queue · deal', width: 168, hint: 'The queued follow-up when the queue holds one, else the deal’s stated follow-up date', value: (r) => nextFollowUp(r.card)?.at ?? null }),
   col({ id: 'follow_up', header: 'Follow-up date', group: 'automation', kind: 'date', source: THREAD, width: 132, value: (r) => ext(r, 'followUpAt') }),
   col({ id: 'next_action', header: 'Next action (stated)', group: 'automation', kind: 'custom', source: FEED, width: 180, hint: 'What the last turn said should happen next — the queue shows what actually happened', value: (r) => r.card.intent_next?.due ?? r.card.intent_next?.action ?? null }),
   col({ id: 'lane', header: 'Automation lane', group: 'automation', kind: 'enum', source: THREAD, width: 136, value: (r) => ext(r, 'automationLane') }),
@@ -286,19 +290,51 @@ export const DESK_COLUMNS: ReadonlyArray<DeskColumnDef> = [
   prop('strength', 'Deal strength (record)', 'score', 'deal_strength_score', { group: 'scores', width: 156 }),
 ]
 
+/** The next follow-up: the queue's own row first (what will actually send), else the deal's stated due date. */
+export function nextFollowUp(c: DeskCard): { at: string; queued: boolean } | null {
+  const q = c.queue?.next
+  if (q && q.kind === 'follow_up' && q.at) return { at: q.at, queued: true }
+  const due = c.nurture?.followUpDue ?? c.intent_next?.due ?? null
+  return due ? { at: due, queued: false } : null
+}
+
+/** "Archived · Snoozed until … · Unread" — only what the conversation row says. */
+export function conversationWords(c: DeskCard): string | null {
+  const v = c.conversation
+  if (!v) return null
+  const parts = [v.archived ? 'Archived' : null, v.snoozedUntil ? `Snoozed until ${stampCT(v.snoozedUntil) ?? v.snoozedUntil}` : null, v.unread ? 'Unread' : null].filter(Boolean)
+  return parts.length ? parts.join(' · ') : 'Open'
+}
+
+/** An archived deal whose follow-up is still queued says so (the archive does not cancel it while lead visibility is on). */
+export function archivedNote(c: DeskCard): string | null {
+  if (!c.archived) return null
+  const q = c.queue?.next
+  const still = q && q.kind === 'follow_up' && q.future ? ` · follow-up still scheduled (${stampCT(q.at) ?? 'queued'})` : ''
+  return `Archived${still}`
+}
+
 export const OWNER_RANK: Record<string, number> = { blocked: 0, needs_you: 1, autopilot: 2, scheduled: 3, external: 4, seller: 5, dormant: 6, closed_out: 7, complete: 8 }
 
 export const COLUMN_BY_ID: ReadonlyMap<string, DeskColumnDef> = new Map(DESK_COLUMNS.map((c) => [c.id, c]))
 export const DEFAULT_COLUMNS: readonly string[] = DESK_COLUMNS.filter((c) => c.defaultOn).map((c) => c.id)
+
+/** The table's lenses: Working (the main view), Nurture, Archived (lead visibility on). Each has its own layout. */
+export type TableLens = 'working' | 'nurture' | 'archived'
+export const LENS_DEFAULTS: Record<TableLens, readonly string[]> = {
+  working: DEFAULT_COLUMNS,
+  nurture: ['deal', 'stage', 'n_next', 'last_reply', 'n_days', 'intent', 'heat', 'conv_state'],
+  archived: ['deal', 'stage', 'archived', 'n_next', 'last_reply', 'conv_state', 'value'],
+}
 
 /* ── layout (visible columns, in order) ────────────────────────────────── */
 
 export interface ColumnLayout { visible: string[] }
 
 /** A stored layout made safe: known ids only, no duplicates, the locked Deal column first. */
-export function normalizeLayout(raw: unknown): ColumnLayout {
+export function normalizeLayout(raw: unknown, defaults: readonly string[] = DEFAULT_COLUMNS): ColumnLayout {
   const ids = raw && typeof raw === 'object' && Array.isArray((raw as ColumnLayout).visible) ? (raw as ColumnLayout).visible : null
-  if (!ids) return { visible: [...DEFAULT_COLUMNS] }
+  if (!ids) return { visible: [...defaults] }
   const seen = new Set<string>()
   const out: string[] = []
   for (const id of ids) if (typeof id === 'string' && COLUMN_BY_ID.has(id) && !seen.has(id)) { seen.add(id); out.push(id) }

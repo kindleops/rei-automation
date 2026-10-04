@@ -681,3 +681,11 @@ html[data-nexus-theme='light'] .pd2-ledger__lanehead { background: rgba(255, 255
   .pd2-odetail { grid-template-columns: minmax(0, 1fr); padding-left: 16px; }
   .pd2-ledger__lanehead span { display: none; }
 }
+.pd2-cell-chips { display: inline-flex; gap: 4px; min-width: 0; overflow: hidden; }
+.pd2-cell-chips i { font-style: normal; font: var(--lc-t-stamp); padding: 1px 7px; border-radius: 999px; background: var(--lc-inner-bg); color: var(--lc-ink-2); white-space: nowrap; }
+.pd2-insp__vis { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 0; font: var(--lc-t-stamp); color: var(--lc-ink-3); }
+.pd2-insp__vis i { font-style: normal; padding: 1px 7px; border-radius: 999px; background: var(--lc-inner-bg); color: var(--lc-ink-2); }
+.pd2-lenschip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 0; border-radius: 999px; background: var(--lc-inner-bg); color: var(--lc-ink-2); font: var(--lc-t-meta); cursor: pointer; }
+.pd2-lenschip b { color: var(--lc-ink-1); font-weight: 600; }
+.pd2-lenschip:hover { color: var(--lc-ink-1); }
+.pd2-lenschip:focus-visible { outline: none; box-shadow: var(--lc-focus-ring); }

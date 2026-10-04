@@ -55,18 +55,24 @@ export type DeskCard = Omit<PipelineCommandCard, 'lane' | 'money'> & {
   queue: { next: DeskQueueStep | null; held: { at: string | null; useCase: string | null; by: 'system' | 'human' } | null } | null
   /** absent on an older API build — every extended column then reads "—" */
   ext?: DeskCardExt
+  /** the Nurture predicate's facts (null when the deal's status is not nurture) — pipeline-command-service nurtureFacts */
+  nurture?: { inLens: boolean; repliedAfter: boolean; anchor: string | null; since: string | null; days: number | null; lastReplyAt: string | null; followUpDue: string | null } | null
+  /** the conversation's own visibility facts (S1, read beside the deal) */
+  conversation?: { archived: boolean; archivedAt: string | null; archiveScope: string | null; snoozedUntil: string | null; unread: boolean } | null
+  /** the lead-visibility archive overlay (null while the flag is off) */
+  archived?: { at: string; by: string | null; reason: string | null } | null
 }
 
 export type StageOwners = Record<'autopilot' | 'scheduled' | 'seller' | 'external' | 'needs_you' | 'blocked' | 'dormant' | 'complete', number>
 export type StageAging = { median: number | null; max: number | null; overClock: number; clockDays: number | null; buckets: { fresh: number; aging: number; over: number } }
 export type DeskStage = PipelineStageSummary & { owners?: StageOwners; aging?: StageAging; asking?: number | null; valued?: number }
 
-export type DeskOverview = Omit<PipelineCommandOverview, 'stages' | 'attentionTop'> & {
+export type DeskOverview = Omit<PipelineCommandOverview, 'stages' | 'attentionTop' | 'totals'> & {
   stages: DeskStage[]
   attentionTop: DeskCard[]
   ownership?: StageOwners
   excluded?: { synthetic: number }
-  totals: PipelineCommandOverview['totals'] & { machine?: number; needsYou?: number; blocked?: number }
+  totals: PipelineCommandOverview['totals'] & { machine?: number; needsYou?: number; blocked?: number; nurture?: number | null; archived?: number | null }
 }
 
 export type FlowPeriod = '24h' | '7d' | '30d'

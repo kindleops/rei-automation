@@ -24,6 +24,8 @@ export interface PipelineReturnState {
   stage: string | null
   showDormant: boolean
   openId: string | null
+  /** the Table lens (working / nurture / archived) */
+  lens?: 'working' | 'nurture' | 'archived'
   /** the Pipeline scroll root and, in Table, the grid's own scroller */
   scrollTop: number
   gridScrollTop: number
@@ -62,6 +64,7 @@ export function peekReturnState(s: Store | null = store(), now = Date.now()): Pi
       stage: typeof v.stage === 'string' ? v.stage : null,
       showDormant: Boolean(v.showDormant),
       openId: typeof v.openId === 'string' ? v.openId : null,
+      lens: v.lens === 'nurture' || v.lens === 'archived' ? v.lens : 'working',
       scrollTop: Number(v.scrollTop) || 0,
       gridScrollTop: Number(v.gridScrollTop) || 0,
       savedAt: v.savedAt,

@@ -15,7 +15,7 @@ import { compactMoney } from '../../../domain/pipeline/pipeline-command-api'
 import { sound } from '../../../shared/sound'
 import { useAuth } from '../../../components/auth/AuthProvider'
 import type { DeskCard, DeskOfferRow, DeskOffers } from './pipeline-desk-api'
-import { COLUMN_BY_ID, formatValue, normalizeLayout, sortKey, DEFAULT_COLUMNS, type ColumnLayout, type DeskColumnDef, type RowContext } from './pipeline-columns'
+import { COLUMN_BY_ID, LENS_DEFAULTS, archivedNote, formatValue, nextFollowUp, normalizeLayout, sortKey, DEFAULT_COLUMNS, type ColumnLayout, type DeskColumnDef, type RowContext, type TableLens } from './pipeline-columns'
 import { usePipelineEnrichment } from './use-pipeline-enrichment'
 import { DeskColumnPicker } from './DeskColumnPicker'
 import { LCBulkBar, useLcSelection } from '../../../shared/lc'
@@ -30,46 +30,61 @@ const GROUPS: ReadonlyArray<{ value: GroupBy; label: string }> = [
   { value: 'owner', label: 'By whose move' },
 ]
 const DEAL_NOUN = { one: 'deal', many: 'deals' }
+/** Today's archive (lead visibility off): the status moves to archived and automation is reconciled. */
 const DEAL_ARCHIVE_EFFECTS = [
   { kind: 'stops' as const, text: 'They leave the Pipeline views, stage counts and the pipeline metrics.' },
   { kind: 'stops' as const, text: 'Automation on an archived deal is reconciled to cancelled. Won deals are refused.' },
   { kind: 'keeps' as const, text: 'Unarchive restores the status each deal had before.' },
+]
+/** The shared archive (lead_visibility_sync_enabled on): a visibility overlay — stage, status and scheduled follow-ups stay. */
+const DEAL_ARCHIVE_EFFECTS_OVERLAY = [
+  { kind: 'stops' as const, text: 'They leave the Pipeline views and counts, and appear under Archived.' },
+  { kind: 'keeps' as const, text: 'Stage and status are kept. A scheduled follow-up keeps running — each result says what is still scheduled.' },
+  { kind: 'keeps' as const, text: 'Unarchive brings them back exactly as they were. A seller reply brings a deal back on its own.' },
 ]
 const EMPTY_IDS: ReadonlySet<string> = new Set()
 
 const LAYOUT_KEY = 'nexus.pipeline.desk.columns.v1'
 type Stored = ColumnLayout & { sort?: LCSort; group?: GroupBy }
 
-function readLayout(key: string): Stored {
+function readLayout(key: string, defaults: readonly string[] = DEFAULT_COLUMNS): Stored {
   try {
     const raw = JSON.parse(window.localStorage.getItem(key) || 'null') as Stored | null
-    const layout = normalizeLayout(raw)
+    const layout = normalizeLayout(raw, defaults)
     const sort = raw?.sort && typeof raw.sort.id === 'string' && COLUMN_BY_ID.get(raw.sort.id)?.sortable ? raw.sort : { id: 'owner', dir: 'asc' as const }
     const group = raw?.group === 'stage' || raw?.group === 'owner' ? raw.group : 'none'
     return { ...layout, sort, group }
-  } catch { return { visible: [...DEFAULT_COLUMNS], sort: { id: 'owner', dir: 'asc' }, group: 'none' } }
+  } catch { return { visible: [...defaults], sort: { id: 'owner', dir: 'asc' }, group: 'none' } }
 }
 
 /** The operator's own table layout (columns, order, sort, grouping), per signed-in operator. */
-function useTableLayout() {
+function useTableLayout(lens: TableLens) {
   const uid = useAuth().user?.id || 'local'
-  const key = `${LAYOUT_KEY}:${uid}`
-  const [state, setState] = useState<{ key: string; v: Stored }>(() => ({ key, v: readLayout(key) }))
-  const v = state.key === key ? state.v : readLayout(key)
+  // each lens keeps its own columns (Working keeps the original key)
+  const key = `${LAYOUT_KEY}:${uid}${lens === 'working' ? '' : `:${lens}`}`
+  const defaults = LENS_DEFAULTS[lens]
+  const [state, setState] = useState<{ key: string; v: Stored }>(() => ({ key, v: readLayout(key, defaults) }))
+  const v = state.key === key ? state.v : readLayout(key, defaults)
   const save = useCallback((patch: Partial<Stored>) => {
     setState((cur) => {
-      const next = { ...(cur.key === key ? cur.v : readLayout(key)), ...patch }
+      const next = { ...(cur.key === key ? cur.v : readLayout(key, defaults)), ...patch }
       try { window.localStorage.setItem(key, JSON.stringify(next)) } catch { /* private mode */ }
       return { key, v: next }
     })
-  }, [key])
-  return { layout: v, save, uid }
+  }, [key, defaults])
+  return { layout: v, save, uid, defaults }
 }
 
 const none = (text = '—') => <span className="pd2-none">{text}</span>
 
-export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDormant, onShowDormant, selectedId, onOpen, now, total, onBulkChanged, offers }: {
+export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDormant, onShowDormant, selectedId, onOpen, now, total, onBulkChanged, offers, lens = 'working', onLens, lensCounts, visibilityOn = false }: {
   rows: DeskCard[] | null
+  /** Working (the main view, nurture excluded) · Nurture · Archived — counts from the same server predicate */
+  lens?: TableLens
+  onLens?: (lens: TableLens) => void
+  lensCounts?: { working: number | null; nurture: number | null; archived: number | null }
+  /** lead_visibility_sync_enabled — picks the archive copy; Archived lens only then */
+  visibilityOn?: boolean
   /** the Offers read the rail already holds — offer-on-record columns join it, no extra read */
   offers?: DeskOffers | null
   loading: boolean
@@ -86,7 +101,7 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
   /** [8.3] a bulk archive / undo changed deals — re-read the pipeline */
   onBulkChanged?: () => void
 }) {
-  const { layout, save, uid } = useTableLayout()
+  const { layout, save, uid, defaults } = useTableLayout(lens)
   const sort = layout.sort ?? null
   const group = layout.group ?? 'none'
   const setSort = useCallback((next: LCSort) => save({ sort: next }), [save])
@@ -96,8 +111,9 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
   const [archivedHere, setArchivedHere] = useState<{ rows: DeskCard[] | null; ids: ReadonlySet<string> }>({ rows, ids: EMPTY_IDS })
   const goneIds = archivedHere.rows === rows ? archivedHere.ids : EMPTY_IDS
   const filtered = useMemo(
-    () => (rows ?? []).filter((c) => !goneIds.has(c.id) && c.owner !== 'closed_out' && (showDormant || c.owner !== 'dormant') && (!owner || c.owner === owner) && (!stage || c.stage === stage)),
-    [rows, goneIds, owner, stage, showDormant],
+    // a lens is the server's list as it is: no dormant / closed-out pruning (that is the working view's)
+    () => (rows ?? []).filter((c) => !goneIds.has(c.id) && (lens !== 'working' || (c.owner !== 'closed_out' && (showDormant || c.owner !== 'dormant'))) && (!owner || c.owner === owner) && (!stage || c.stage === stage)),
+    [rows, goneIds, owner, stage, showDormant, lens],
   )
   // property / owner / engine fields, only for the visible columns and the deals in view
   const enrichment = usePipelineEnrichment(filtered, layout.visible)
@@ -132,7 +148,7 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
     })
     onBulkChanged?.()
   }, [onBulkChanged, rows])
-  const bulk = useBulkArchive({ objectType: 'opportunity', noun: DEAL_NOUN, consequences: DEAL_ARCHIVE_EFFECTS, labelOf, onChanged: onBulkReport, source: 'pipeline' })
+  const bulk = useBulkArchive({ objectType: 'opportunity', noun: DEAL_NOUN, consequences: visibilityOn ? DEAL_ARCHIVE_EFFECTS_OVERLAY : DEAL_ARCHIVE_EFFECTS, labelOf, onChanged: onBulkReport, source: 'pipeline' })
   const { archive: bulkArchive } = bulk
   const { ids: selectedIds, clear: clearSelection, onKeyDown: selectionKeyDown } = selection
   const archiveSelected = useCallback(async () => {
@@ -169,13 +185,26 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
       <div className="pd2-table__bar">
         <span className="pd2-table__count"><b className="lc-num">{fmtInt(view.length)}</b> deals{rows && total > rows.length ? <small> · first {fmtInt(rows.length)} of {fmtInt(total)} loaded · sorting covers these</small> : null}{enrichment.error ? <small className="pd2-table__warn"> · some property fields didn’t load</small> : null}</span>
         <span className="pd2-table__tools">
-          {!owner ? (
+          {onLens ? (
+            <LCSegmented
+              options={[
+                { value: 'working' as const, label: `Working${lensCounts?.working != null ? ` · ${fmtInt(lensCounts.working)}` : ''}`, title: 'The main view — nurture deals are in their own lens' },
+                { value: 'nurture' as const, label: `Nurture${lensCounts?.nurture != null ? ` · ${fmtInt(lensCounts.nurture)}` : ''}`, title: 'Status nurture with no seller reply since — their follow-ups keep running; a reply brings a deal back' },
+                ...(visibilityOn ? [{ value: 'archived' as const, label: `Archived${lensCounts?.archived != null ? ` · ${fmtInt(lensCounts.archived)}` : ''}`, title: 'Archived by the shared archive — stage and status kept' }] : []),
+              ]}
+              value={lens}
+              onChange={(l) => { sound.ui.select(); onLens(l) }}
+              label="Table lens"
+              size="sm"
+            />
+          ) : null}
+          {!owner && lens === 'working' ? (
             <LCButton variant={showDormant ? 'secondary' : 'quiet'} size="sm" icon="moon" onClick={() => onShowDormant(!showDormant)} aria-pressed={showDormant}>
               {showDormant ? 'Hide dormant' : `Show dormant · ${fmtInt(dormant)}`}
             </LCButton>
           ) : null}
           <LCSegmented options={GROUPS} value={group} onChange={(g) => { sound.ui.select(); setGroup(g) }} label="Group deals" size="sm" />
-          <DeskColumnPicker layout={layout} onChange={(next) => save({ visible: next.visible })} onReset={() => save({ visible: [...DEFAULT_COLUMNS] })} partial={Boolean(rows && total > rows.length)} />
+          <DeskColumnPicker layout={layout} onChange={(next) => save({ visible: next.visible })} onReset={() => save({ visible: [...defaults] })} partial={Boolean(rows && total > rows.length)} />
         </span>
       </div>
       <div className="pd2-table__grid" onKeyDown={onGridKeyDown}>
@@ -197,7 +226,7 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
           rowTone={(c) => (c.owner === 'blocked' ? 'crit' : c.owner === 'needs_you' ? 'attn' : null)}
           loading={loading && !rows}
           error={error && !rows ? { what: 'The deals didn’t load', onRetry } : null}
-          empty={{ title: 'No deals in this view', body: 'Clear the search or the filters, or include dormant deals.' }}
+          empty={lens === 'nurture' ? { title: 'No deal in nurture', body: 'A seller reply brings a nurture deal back to Working on its own.' } : lens === 'archived' ? { title: 'Nothing archived', body: 'Deals archived from the Inbox or here appear in this lens.' } : { title: 'No deals in this view', body: 'Clear the search or the filters, or include dormant deals.' }}
           total={view.length}
           height="100%"
         />
@@ -221,7 +250,7 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
 
 /** A custom column's sort semantics. */
 function kindForSort(def: DeskColumnDef): DeskColumnDef['kind'] {
-  if (['next_send', 'next_action'].includes(def.id)) return 'date'
+  if (['next_send', 'next_action', 'n_next', 'archived'].includes(def.id)) return 'date'
   if (['stage', 'owner', 'age', 'ask', 'offer_record', 'p_year'].includes(def.id)) return 'num'
   return 'text'
 }
@@ -274,6 +303,20 @@ function renderCell(def: DeskColumnDef, r: RowContext, pendingEnrich: boolean): 
       const n = c.intent_next
       if (!n) return none()
       return <span className="pd2-cell-two"><b>{intentWords(n.action) ?? n.action}</b>{n.due ? <small>{stampCT(n.due)}</small> : null}</span>
+    }
+    case 'n_next': {
+      const f = nextFollowUp(c)
+      return f ? <span className="pd2-cell-two"><b>{stampCT(f.at) ?? '—'}</b><small>{f.queued ? 'queued' : 'stated · the queue has no row yet'}</small></span> : none()
+    }
+    case 'conv_state': {
+      const v = c.conversation
+      if (!v) return none()
+      const chips = [v.archived ? 'Archived' : null, v.snoozedUntil ? `Snoozed · ${stampCT(v.snoozedUntil) ?? ''}` : null, v.unread ? 'Unread' : null].filter((x): x is string => Boolean(x))
+      return chips.length ? <span className="pd2-cell-chips">{chips.map((t) => <i key={t}>{t}</i>)}</span> : <span className="pd2-none">Open</span>
+    }
+    case 'archived': {
+      const note = archivedNote(c)
+      return note ? <span className="pd2-cell-two"><b>{note.split(' · ')[0]}</b><small>{[c.archived?.at ? stampCT(c.archived.at) : null, note.includes('follow-up') ? note.slice(note.indexOf('follow-up')) : null].filter(Boolean).join(' · ')}</small></span> : none()
     }
     case 'p_year': {
       const v = def.value(r)

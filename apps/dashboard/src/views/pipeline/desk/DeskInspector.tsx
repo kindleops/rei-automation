@@ -13,6 +13,7 @@ import { compactMoney, type PipelineDealStory } from '../../../domain/pipeline/p
 import type { DeskCard } from './pipeline-desk-api'
 import { HOLD_META, OWNER_META, intentWords, relShort, stageTag, stampCT } from './pipeline-desk-model'
 import { useDealStory } from './use-pipeline-desk'
+import { archivedNote, conversationWords, nextFollowUp } from './pipeline-columns'
 
 const BEAT_ICON: Record<string, IconName> = {
   contact: 'send', reply: 'message', advance: 'arrow-up-right', regress: 'arrow-down-left', price: 'dollar-sign', offer: 'send',
@@ -73,6 +74,12 @@ export function DeskInspector({ id, seed, onClose, actions, now }: { id: string 
               { label: 'Last turn said', value: card.intent_next ? `${intentWords(card.intent_next.action)}${card.intent_next.due ? ` · ${stampCT(card.intent_next.due)}` : ''}` : null, hint: 'The stated intent of the last inbound turn — the queue shows what actually happened' },
               ...(card.queue?.next ? [{ label: 'In the queue', value: `${card.queue.next.kind === 'follow_up' ? 'Follow-up' : 'Reply'} · ${card.queue.next.future ? `scheduled ${stampCT(card.queue.next.at)}` : 'sending'}` }] : []),
               ...(card.stall ? [{ label: 'Stalled', value: card.stall.label }] : []),
+              ...(card.nurture?.inLens ? [
+                { label: 'Nurture', value: card.nurture.days !== null ? `${card.nurture.days} day${card.nurture.days === 1 ? '' : 's'} · no reply since`  : 'No reply since', hint: 'Status nurture — out of the main view; a seller reply brings it back' },
+                { label: 'Next follow-up', value: (() => { const f = nextFollowUp(card); return f ? `${stampCT(f.at) ?? '—'}${f.queued ? ' · queued' : ' · stated'}` : null })() },
+              ] : []),
+              ...(card.archived ? [{ label: 'Archived', value: archivedNote(card) }] : []),
+              ...(card.conversation ? [{ label: 'Conversation', value: conversationWords(card) }] : []),
             ]} />
           </LCInspectorSection>
 

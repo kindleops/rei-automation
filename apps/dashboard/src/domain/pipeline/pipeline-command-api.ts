@@ -144,6 +144,8 @@ export type PipelineCommandParams = {
   market?: string
   property_type?: string
   temperature?: string
+  /** 'lens' (desktop Pipeline): nurture deals leave the main view into feed view=nurture; overview totals.nurture counts them */
+  nurture?: 'lens'
 }
 
 const BASE = '/api/cockpit/pipeline/command'

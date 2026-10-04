@@ -139,12 +139,13 @@ const PAGE = 100
 const MAX_PAGES = 8
 
 /** Every deal in scope (dormant included — the views decide what to show). */
-export function useDeskRows(params: PipelineCommandParams, tick: number): RemoteView<DeskCard[]> & { total: number; complete: boolean } {
-  const key = JSON.stringify(params)
+export function useDeskRows(params: PipelineCommandParams, tick: number, view: 'all' | 'nurture' | 'archived' = 'all', enabled = true): RemoteView<DeskCard[]> & { total: number; complete: boolean } {
+  const key = JSON.stringify({ ...params, view })
   const [state, setState] = useState<(Remote<DeskCard[]> & { total: number; complete: boolean }) | null>(null)
   const [attempt, setAttempt] = useState(0)
   const autoRetry = useAutoRetry()
   useEffect(() => {
+    if (!enabled) return
     const c = new AbortController()
     void (async () => {
       try {
@@ -153,7 +154,7 @@ export function useDeskRows(params: PipelineCommandParams, tick: number): Remote
         let total = 0
         let complete = false
         for (let page = 0; page < MAX_PAGES; page += 1) {
-          const f = await fetchPipelineFeed({ ...params, view: 'all', limit: PAGE, cursor: cursor || undefined }, c.signal)
+          const f = await fetchPipelineFeed({ ...params, view, limit: PAGE, cursor: cursor || undefined }, c.signal)
           rows = page === 0 ? (f.rows as unknown as DeskCard[]) : [...rows, ...(f.rows as unknown as DeskCard[])]
           total = f.total
           if (f.nextCursor === null) { complete = true; break }
@@ -168,7 +169,7 @@ export function useDeskRows(params: PipelineCommandParams, tick: number): Remote
       }
     })()
     return () => c.abort()
-  }, [key, tick, attempt]) // eslint-disable-line react-hooks/exhaustive-deps -- `key` encodes params
+  }, [key, tick, attempt, enabled]) // eslint-disable-line react-hooks/exhaustive-deps -- `key` encodes params + view
   const current = state && state.key === key ? state : null
   return {
     data: state?.data ?? null,

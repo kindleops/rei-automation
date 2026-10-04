@@ -474,7 +474,9 @@ async function loadEvidence(client, rows) {
   const since = new Date(Date.now() - 120 * DAY).toISOString()
   const queueSince = new Date(Date.now() - QUEUE_LOOKBACK_DAYS * DAY).toISOString()
   const liveStatuses = [...SEND_IN_FLIGHT, ...SEND_HELD]
-  const [threads, executions, closings, recentQueue, liveQueue, triggers] = await Promise.all([
+  // NURTURE anchors: when each nurture deal last went to nurture (keyed, nurture deals only)
+  const nurtureIds = rows.filter((r) => clean(r.opportunity_status) === NURTURE_STATUS).map((r) => r.id)
+  const [threads, executions, closings, recentQueue, liveQueue, triggers, nurtureEvents] = await Promise.all([
     inChunks(threadKeys, async (keys) => (await client.from('inbox_thread_state')
       .select('thread_key, inbox_bucket, is_suppressed, suppressed_at, operational_status, latest_direction, last_inbound_at, last_outbound_at, latest_message_body, latest_message_at, pending_queue_count, is_hot_lead, automation_lane, is_read, snoozed_until, follow_up_at, next_scheduled_for, message_count, inbound_count, latest_delivery_status, is_archived, archived_at, archive_scope')
       .in('thread_key', keys)).data),
@@ -502,7 +504,18 @@ async function loadEvidence(client, rows) {
         .in('thread_key', keys).ilike('direction', 'in%').gte('created_at', new Date(earliestDue - 3 * DAY).toISOString())
         .order('created_at', { ascending: false }).limit(2000)).data)
       : Promise.resolve([]),
+    nurtureIds.length
+      ? inChunks(nurtureIds, async (ids) => (await client.from('acquisition_opportunity_history')
+        .select('opportunity_id, created_at')
+        .in('opportunity_id', ids).eq('event_type', 'status_change').ilike('new_value', '%nurture%')
+        .order('created_at', { ascending: false }).limit(2000)).data)
+      : Promise.resolve([]),
   ])
+  const nurtureAt = new Map()
+  for (const h of nurtureEvents || []) {
+    const id = clean(h.opportunity_id)
+    if (!nurtureAt.has(id)) nurtureAt.set(id, h.created_at)
+  }
   const threadBy = new Map(threads.map((t) => [clean(t.thread_key), t]))
   const execBy = new Map()
   for (const e of executions) {
@@ -532,7 +545,7 @@ async function loadEvidence(client, rows) {
     const times = (inboundBy.get(clean(r.primary_thread_key)) || []).filter((t) => Number.isFinite(t) && t <= due + 60_000)
     if (times.length) triggerBy.set(clean(r.id), new Date(Math.max(...times)).toISOString())
   }
-  return { threadBy, execBy, closingBy, queueBy, triggerBy }
+  return { threadBy, execBy, closingBy, queueBy, triggerBy, nurtureAt }
 }
 
 function shapeCard(opp, ev, now) {
@@ -615,8 +628,53 @@ function shapeCard(opp, ev, now) {
     // the lead-visibility overlay (present only once its schema exists and the gate is on)
     archived: opp.archived_at ? { at: opp.archived_at, by: clean(opp.archived_by) || null, reason: clean(opp.archive_reason) || null } : null,
     ext: extendedCardFields(opp, thread),
+    nurture: nurtureFacts(opp, thread, ev.nurtureAt ? ev.nurtureAt.get(clean(opp.id)) || null : null, now),
   }
 }
+
+export const NURTURE_STATUS = 'nurture'
+
+/**
+ * THE NURTURE PREDICATE — one rule for the lens list AND its count.
+ *
+ * A deal is in the Nurture lens when, on its CURRENT row:
+ *   acquisition_opportunities.opportunity_status = 'nurture'
+ *     (the canonical status the pipeline sync writes for "not interested" —
+ *     owner rule 2026-09-30, "a not interested is a 30 day follow up" — and
+ *     for universal status follow_up; universal-pipeline-registry.js)
+ *   AND the seller has NOT replied since the deal went to nurture:
+ *     NOT (inbox_thread_state.last_inbound_at of the deal's primary thread >
+ *          the anchor)
+ *     anchor = the latest acquisition_opportunity_history status_change into
+ *              nurture, else the deal's last_contact_at, else stage_entered_at.
+ * A reply after the anchor puts the deal back in the main view at once, even
+ * before the sync re-derives its status. Nothing is written; the follow-ups
+ * keep running (the queue and the cadence are untouched).
+ *
+ * `since` (days in nurture) is the earlier of the anchor and last_contact_at —
+ * a backfilled status change is later than the "not interested" turn itself.
+ */
+export function nurtureFacts(opp, thread, statusChangedAt, now = Date.now()) {
+  if (clean(opp?.opportunity_status) !== NURTURE_STATUS) return null
+  const anchor = statusChangedAt || opp.last_contact_at || opp.stage_entered_at || null
+  const anchorMs = anchor ? Date.parse(anchor) : NaN
+  const replyMs = thread?.last_inbound_at ? Date.parse(thread.last_inbound_at) : NaN
+  const repliedAfter = Number.isFinite(replyMs) && Number.isFinite(anchorMs) && replyMs > anchorMs
+  const contactMs = opp.last_contact_at ? Date.parse(opp.last_contact_at) : NaN
+  const sinceMs = [anchorMs, contactMs].filter(Number.isFinite).reduce((m, v) => Math.min(m, v), Infinity)
+  return {
+    inLens: !repliedAfter,
+    repliedAfter,
+    anchor,
+    since: Number.isFinite(sinceMs) ? new Date(sinceMs).toISOString() : null,
+    days: Number.isFinite(sinceMs) ? Math.max(0, Math.floor((now - sinceMs) / DAY)) : null,
+    lastReplyAt: thread?.last_inbound_at || null,
+    followUpDue: opp.next_action_due || null,
+  }
+}
+
+/** The predicate itself, for every caller (list, count, tests). */
+export const inNurtureLens = (card) => Boolean(card?.nurture?.inLens)
 
 /**
  * The Pipeline table's extended columns — ONLY values this read already
@@ -801,7 +859,9 @@ export function stageAging(cards, stage) {
 /** Short-lived memo so the overview and the first feed page share one scope load. */
 const memo = new Map()
 async function scopeCards(client, params, { overlay = false } = {}) {
-  const key = JSON.stringify({ s: params.scope || 'active', q: params.q || '', m: params.market || '', p: params.property_type || '', t: params.temperature || '', v: overlay ? 1 : 0 })
+  // nurture=lens (the desktop Pipeline): nurture deals leave the main view into their own lens
+  const nurtureLens = clean(params.nurture) === 'lens'
+  const key = JSON.stringify({ s: params.scope || 'active', q: params.q || '', m: params.market || '', p: params.property_type || '', t: params.temperature || '', v: overlay ? 1 : 0, n: nurtureLens ? 1 : 0 })
   const hit = memo.get(key)
   if (hit && Date.now() - hit.at < 45_000) return hit.value
   const now = Date.now()
@@ -814,7 +874,10 @@ async function scopeCards(client, params, { overlay = false } = {}) {
   // lead visibility: an archived deal leaves every working view and count (it keeps its stage/status)
   const archivedCards = overlay ? cards.filter((c) => c.archived) : []
   if (overlay) cards = cards.filter((c) => !c.archived)
-  const value = { cards, archivedCards, capped: loaded.length >= SCOPE_CAP, excluded: { synthetic } }
+  // the Nurture lens: the same pass, the same predicate for the list and its count
+  const nurtureCards = nurtureLens ? cards.filter(inNurtureLens) : []
+  if (nurtureLens) cards = cards.filter((c) => !inNurtureLens(c))
+  const value = { cards, archivedCards, nurtureCards, nurtureLens, capped: loaded.length >= SCOPE_CAP, excluded: { synthetic } }
   memo.set(key, { at: Date.now(), value })
   if (memo.size > 40) memo.delete(memo.keys().next().value)
   return value
@@ -823,7 +886,7 @@ async function scopeCards(client, params, { overlay = false } = {}) {
 export async function getPipelineCommandOverview(params = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
   const overlay = await visibilityOverlay(deps)
-  const { cards, archivedCards, capped, excluded } = await scopeCards(client, params, { overlay })
+  const { cards, archivedCards, nurtureCards, nurtureLens, capped, excluded } = await scopeCards(client, params, { overlay })
   const movement = await loadMovement(client, cards, { days: 7, limit: 40 })
   const dayAgo = Date.now() - DAY
   const movedToday = new Set(movement.filter((m) => Date.parse(m.at) > dayAgo).map((m) => m.opportunityId))
@@ -887,6 +950,8 @@ export async function getPipelineCommandOverview(params = {}, deps = {}) {
       blocked: ownership.blocked || 0,
       // lead visibility: deals hidden by archive (null while the overlay is off — not a zero)
       archived: overlay ? archivedCards.length : null,
+      // the Nurture lens (null when the caller did not ask for it — not a zero)
+      nurture: nurtureLens ? nurtureCards.length : null,
     },
     stages,
     groups: STAGE_GROUPS.map((g) => ({ ...g, count: stages.filter((s) => g.stages.includes(s.code)).reduce((n, s) => n + s.count, 0) })),
@@ -904,7 +969,7 @@ export async function getPipelineCommandFeed(params = {}, deps = {}) {
   const { capped } = scoped
   const view = clean(params.view) || 'all'
   // lead visibility: the Archived view reads the overlay-archived deals (empty while the flag is off)
-  const cards = view === 'archived' ? scoped.archivedCards : scoped.cards
+  const cards = view === 'archived' ? scoped.archivedCards : view === 'nurture' ? scoped.nurtureCards : scoped.cards
   let movedIds = new Set()
   if (view === 'moving') {
     const movement = await loadMovement(client, cards, { days: 7, limit: 400 })
@@ -912,7 +977,7 @@ export async function getPipelineCommandFeed(params = {}, deps = {}) {
   }
   const sortKey = SORTS[clean(params.sort)] ? clean(params.sort) : (VIEW_DEFAULT_SORT[view.split(':')[0]] || (view.startsWith('stage:') || view.startsWith('group:') ? 'urgent' : 'progression'))
   const filtered = cards
-    .filter((c) => (view === 'archived' ? true : matchesView(c, view, movedIds)))
+    .filter((c) => (view === 'archived' || view === 'nurture' ? true : matchesView(c, view, movedIds)))
     .filter((c) => (params.lane ? c.lane.key === clean(params.lane) : true))
     .filter((c) => (params.stalled === '1' ? Boolean(c.stall) : true))
     .sort(SORTS[sortKey])

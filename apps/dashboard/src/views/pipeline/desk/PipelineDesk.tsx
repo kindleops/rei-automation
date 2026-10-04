@@ -36,6 +36,8 @@ import { DeskTable } from './DeskTable'
 import { DeskOffersView, type OfferActions } from './DeskOffers'
 import { DeskInspector, type InspectorActions } from './DeskInspector'
 import { openFromPipeline, type PipelineTarget } from './pipeline-open'
+import type { TableLens } from './pipeline-columns'
+import { useLeadVisibilityOn } from './use-lead-visibility'
 import { clearReturnState, peekReturnState, saveReturnState, type PipelineReturnState } from './pipeline-return'
 import './pipeline-desk.css'
 
@@ -124,11 +126,21 @@ export function PipelineDesk() {
 
   const tick = useLiveTick(true)
   const now = useNowTick(30_000)
-  const overview = useDeskOverview(params, tick)
-  const flow = useDeskFlow(params, period, tick)
-  const rows = useDeskRows(params, tick)
+  // NURTURE LENS: every desk read asks the server to move nurture deals (status
+  // nurture, no seller reply since — pipeline-command-service nurtureFacts) out
+  // of the main view into their own lens, in the same scope pass, so the river,
+  // the rail, the table and the lens count all read one predicate.
+  const deskParams = useMemo<PipelineCommandParams>(() => ({ ...params, nurture: 'lens' }), [params])
+  const overview = useDeskOverview(deskParams, tick)
+  const flow = useDeskFlow(deskParams, period, tick)
+  const rows = useDeskRows(deskParams, tick)
   // The rail reads the offer picture in every mode, so it stays one truth.
-  const offers = useDeskOffers(params, true, tick)
+  const offers = useDeskOffers(deskParams, true, tick)
+  const [tableLens, setTableLens] = useState<TableLens>(() => back?.lens ?? 'working')
+  const lensRows = useDeskRows(deskParams, tick, tableLens === 'working' ? 'all' : tableLens, mode === 'table' && tableLens !== 'working')
+  const visibilityOn = useLeadVisibilityOn()
+  const tableRows = tableLens === 'working' ? rows : lensRows
+  const nurtureCount = overview.data?.totals.nurture ?? null
   const movedToday = useMovedToday(flow.data, now)
 
   // DEV-only QA seam: replay SAMPLE movement through the river so the one-shot
@@ -216,8 +228,8 @@ export function PipelineDesk() {
   }, [pickMode])
 
   // Everything a Back must bring back, read at the moment Pipeline leaves.
-  const stateRef = useRef({ mode, params, query, owner, stage, showDormant, openId: open?.id ?? null })
-  useEffect(() => { stateRef.current = { mode, params, query, owner, stage, showDormant, openId: open?.id ?? null } })
+  const stateRef = useRef({ mode, params, query, owner, stage, showDormant, openId: open?.id ?? null, lens: tableLens })
+  useEffect(() => { stateRef.current = { mode, params, query, owner, stage, showDormant, openId: open?.id ?? null, lens: tableLens } })
   const saveReturn = useCallback(() => {
     const root = scrollRef.current
     const grid = root?.querySelector<HTMLElement>('.lc-grid__scroller') ?? null
@@ -254,7 +266,7 @@ export function PipelineDesk() {
   const ready = Boolean(overview.data)
     && (mode !== 'overview' || Boolean(flow.data))
     && (mode !== 'offers' || Boolean(offers.data))
-    && (!(mode === 'flow' || mode === 'table') || Boolean(rows.data))
+    && (!(mode === 'flow' || mode === 'table') || Boolean(mode === 'table' ? tableRows.data : rows.data))
 
   // Restore the scroll position the operator left, once the view has rows.
   const [restoredScroll, setRestoredScroll] = useState(!back || (!back.scrollTop && !back.gridScrollTop))
@@ -291,6 +303,11 @@ export function PipelineDesk() {
           <div className="pd2-head__id">
             <h1 className="pd2-head__title">Pipeline</h1>
             <LCLive live={!overview.error} stale={Boolean(overview.error && overview.data)} updatedAt={overview.at} />
+            {nurtureCount ? (
+              <button type="button" className="pd2-lenschip" onClick={() => { setTableLens('nurture'); pickMode('table') }} title="Not-interested / follow-up deals, out of the main view. Their follow-ups keep running; a seller reply brings a deal back.">
+                Nurture <b className="lc-num">{nurtureCount.toLocaleString('en-US')}</b>
+              </button>
+            ) : null}
           </div>
           <LCTabs items={MODES} value={mode} onChange={pickMode} label="Pipeline mode" className="pd2-head__modes" />
           <div className="pd2-head__tools">
@@ -372,7 +389,26 @@ export function PipelineDesk() {
         ) : null}
 
         {mode === 'table' ? (
-          <DeskTable rows={rows.data} loading={rows.loading} error={rows.error} onRetry={rows.retry} owner={owner} stage={stage} showDormant={showDormant || Boolean(owner)} onShowDormant={setShowDormant} selectedId={open?.id ?? null} onOpen={openDeal} now={now} total={rows.total} onBulkChanged={rows.retry} offers={offers.data} />
+          <DeskTable
+            rows={tableRows.stale ? null : tableRows.data}
+            loading={tableRows.loading}
+            error={tableRows.error}
+            onRetry={tableRows.retry}
+            owner={owner}
+            stage={stage}
+            showDormant={showDormant || Boolean(owner)}
+            onShowDormant={setShowDormant}
+            selectedId={open?.id ?? null}
+            onOpen={openDeal}
+            now={now}
+            total={tableRows.total}
+            onBulkChanged={() => { rows.retry(); if (tableLens !== 'working') lensRows.retry() }}
+            offers={offers.data}
+            lens={tableLens}
+            onLens={setTableLens}
+            lensCounts={{ working: rows.data ? rows.total : null, nurture: nurtureCount, archived: overview.data?.totals.archived ?? null }}
+            visibilityOn={visibilityOn}
+          />
         ) : null}
 
         {mode === 'offers' ? (

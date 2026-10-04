@@ -307,13 +307,16 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
       if (!result.ok) throw new Error(result.message || result.error || 'stage_transition_failed')
       if (result.opportunity) {
         patchOpportunity(id, result.opportunity)
+        // The stage transition already syncs the conversation's lifecycle server-side
+        // (Inbox⇄Pipeline sync); a second thread write is only for the explicit
+        // "and run the next action" path, which the transition does not do.
         const threadKey = String(result.opportunity.primary_thread_key ?? '').trim()
-        if (threadKey) {
+        if (threadKey && options?.executeNextAction === true) {
           await patchLeadStateFromView('pipeline', threadKey, {
             lifecycle_stage: normalizeLifecycleStage(toStage),
           }, {
             reason: reason ?? 'pipeline_stage_drag',
-            execute_next_action: options?.executeNextAction === true,
+            execute_next_action: true,
           })
         }
       }
