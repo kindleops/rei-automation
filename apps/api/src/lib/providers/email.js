@@ -556,7 +556,28 @@ export async function sendEmail({
   bcc = [],
   attachments = [],
   dry_run = false,
+  purpose = null,
 }) {
+  /*
+   * LEGACY SMTP FENCE. Email to sellers, buyers and title companies goes
+   * through email_queue and the one email dispatcher (Brevo, suppression,
+   * unsubscribe, threading, telemetry) — never this direct SMTP path. Only
+   * internal operator alerts (purpose 'internal_alert') may still use it,
+   * unless EMAIL_LEGACY_SMTP_ENABLED=true is set deliberately.
+   *   title intro  → closing.request_email / closing_email_requests bridge
+   *   buyer blast  → needs a buyer email lane on email_queue (not built)
+   */
+  if (!dry_run && purpose !== "internal_alert" && String(process.env.EMAIL_LEGACY_SMTP_ENABLED || "").toLowerCase() !== "true") {
+    logger.warn("email.legacy_smtp_fenced", { purpose: purpose || null, subject_present: Boolean(subject) });
+    return {
+      ok: false,
+      dry_run: false,
+      provider_message_id: null,
+      raw: null,
+      error_message: "legacy_smtp_fenced_use_email_queue",
+      reason: "legacy_smtp_fenced_use_email_queue",
+    };
+  }
   const normalized_to = normalizeRecipients(to);
   const normalized_cc = normalizeRecipients(cc);
   const normalized_bcc = normalizeRecipients(bcc);

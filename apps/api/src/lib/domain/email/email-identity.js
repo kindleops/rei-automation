@@ -114,7 +114,19 @@ export function parseReplyToken(addresses = []) {
  * brand's Brevo key (BREVO_<BRAND>_API_KEY), metadata.inbound_domain enables
  * reply routing. Falls back to the default active sender.
  */
-export async function resolveBrandSender(db, brandKey, env = process.env) {
+/**
+ * messages_sent_today is a per-UTC-day counter. Nothing resets the column, so
+ * it is only meaningful when last_sent_at is today: a stale counter from an
+ * earlier day reads as 0 (and the dispatcher's next increment restarts it).
+ * Without this the sender would stall permanently at daily_limit total sends.
+ */
+export function sentTodayOf(sender = {}, now = Date.now()) {
+  const last = Date.parse(sender.last_sent_at)
+  if (!Number.isFinite(last)) return 0
+  return new Date(last).toISOString().slice(0, 10) === new Date(now).toISOString().slice(0, 10) ? Number(sender.messages_sent_today) || 0 : 0
+}
+
+export async function resolveBrandSender(db, brandKey, env = process.env, now = Date.now()) {
   const { data: senders, error } = await db.from('email_senders').select('*').eq('is_active', true)
   if (error) return { ok: false, code: 'sender_lookup_failed' }
   const rows = senders || []
@@ -139,9 +151,14 @@ export async function resolveBrandSender(db, brandKey, env = process.env) {
       // e.g. https://track.reivesti.com — a host that routes to LeadCommand's
       // public tracking endpoints. Absent → provider telemetry only.
       tracking_base_url: clean(s.metadata?.tracking_base_url) || null,
+      // Compliance (lane-scoped automated mail): the sender's postal address and
+      // the public base for /u/<token> one-click unsubscribe.
+      postal_address: clean(s.metadata?.postal_address) || null,
+      unsubscribe_base_url: clean(s.metadata?.unsubscribe_base_url) || clean(s.metadata?.tracking_base_url) || null,
+      unsubscribe_footer_text: clean(s.metadata?.unsubscribe_footer_text) || null,
       api_key: apiKey,
       daily_limit: s.daily_limit ?? null,
-      messages_sent_today: s.messages_sent_today ?? 0,
+      messages_sent_today: sentTodayOf(s, now),
     },
   }
 }

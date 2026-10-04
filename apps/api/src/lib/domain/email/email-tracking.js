@@ -23,6 +23,7 @@ const clean = (v) => String(v ?? '').trim()
 export const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
 
 const newToken = () => crypto.randomBytes(18).toString('base64url')
+export const mintTrackingToken = newToken
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,40}$/
 
 const SCANNER_UA = /(bot|crawler|spider|scanner|barracuda|mimecast|proofpoint|symantec|messagelabs|trend ?micro|forcepoint|sophos|fireeye|cisco|ironport|safelinks|urldefense|python|curl|wget|go-http|java\/|okhttp|headless|phantom|libwww|http-client|axios|node-fetch)/i

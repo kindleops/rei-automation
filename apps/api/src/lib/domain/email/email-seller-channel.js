@@ -21,8 +21,8 @@
  *   - Suppressed / bounced address → no email; the operator sees it.
  */
 import { processSellerInboundMessage } from '@/lib/domain/seller-flow/process-seller-inbound-message.js'
-import { renderTemplate, textToHtml } from './email-templates.js'
-import { registerEmailRevalidator } from './email-dispatch.js'
+import { renderTemplate, renderStoredTemplate, textToHtml } from './email-templates.js'
+import './email-revalidators.js'
 
 const clean = (v) => String(v ?? '').trim()
 const lower = (v) => clean(v).toLowerCase()
@@ -32,7 +32,6 @@ const EMAIL_PREFERENCE = /\b(e-?mail me|email (is|works) (better|best)|prefer(re
 const EMAIL_OPT_OUT = /\b(unsubscribe|stop e-?mailing|don'?t e-?mail|do not e-?mail|remove me from (your|this) (e-?mail|mailing)|no more e-?mails?)\b/i
 const OPT_OUT_INTENTS = new Set(['opt_out', 'stop', 'do_not_contact', 'hostile_or_legal', 'wrong_person', 'wrong_number'])
 const BLOCKING_CONTACTABILITY = new Set(['opted_out', 'dnc', 'do_not_text', 'do_not_contact', 'suppressed', 'litigator'])
-const TERMINAL_STAGES = new Set(['closed', 'dead', 'suppressed', 'lost'])
 
 async function senderDisplayName(db, brandKey) {
   const { data } = await db.from('email_senders').select('sender_key, sender_name, is_default, is_active').eq('is_active', true)
@@ -43,6 +42,13 @@ async function senderDisplayName(db, brandKey) {
 
 async function upsertEmailSuppression(db, email, reason, source, meta = {}) {
   await db.from('email_suppression').upsert({ email_address: lower(email), reason, suppression_status: reason, source, is_active: true, metadata: meta, last_event_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'email_address' })
+}
+
+/** Nurture intents (owner rule: "a not interested is a 30 day follow up") use the nurture copy. */
+const NURTURE_INTENTS = new Set(['not_interested', 'need_time', 'not_now', 'not_ready'])
+export function sellerFollowUpTemplateKey(intentOrUseCase) {
+  const v = lower(intentOrUseCase).replace(/^nurture_/, '')
+  return NURTURE_INTENTS.has(v) || lower(intentOrUseCase).startsWith('nurture_') ? 'seller.nurture' : 'seller.followup'
 }
 
 function firstName(name) {
@@ -112,12 +118,16 @@ export async function handleSellerEmail({ inbound, thread, resolution }, deps = 
   const emailFollowUpImpl = async ({ intent, follow_up_at, is_suppressed }) => {
     if (is_suppressed) return { ok: true, skipped: true, reason: 'suppressed' }
     const at = Date.parse(follow_up_at) || now + 48 * H
-    const r = renderTemplate('seller.followup', { sender_name: senderName, property_address: propertyAddress, first_name: sellerFirst })
+    // Owner-approved copy only (email_templates row); a "not interested" /
+    // "not now" is a 30-day nurture, never a suppression.
+    const templateKey = sellerFollowUpTemplateKey(intent)
+    const r = await renderStoredTemplate(db, templateKey, { sender_name: senderName, property_address: propertyAddress, first_name: sellerFirst })
     if (!r.ok) return { ok: false, skipped: true, reason: r.code }
     const day = new Date(at).toISOString().slice(0, 10)
     const ins = await db.from('email_queue').insert({
       queue_key: `seller_followup:email:${thread.id}:${intent || 'nudge'}:${day}`, queue_status: 'scheduled', scheduled_for: new Date(at).toISOString(),
       to_email: lower(inbound.from_email), subject: r.subject, email_body: r.html, html_body: r.html, text_body: r.text,
+      template_id: r.templateId, template_version: r.version, origin: 'automation', lane: 'seller_conversation',
       master_owner_id: thread.master_owner_id, prospect_id: thread.prospect_id, property_id: thread.property_id,
       thread_id: thread.id, source: 'seller', source_ref: `followup:${thread.id}:${intent || 'nudge'}`, action_key: 'seller.followup', sequence: 2,
       brand_key: thread.brand_key || null, requested_by: 'seller_brain',
@@ -167,29 +177,8 @@ export async function handleSellerEmail({ inbound, thread, resolution }, deps = 
   }
 }
 
-/**
- * Dispatch-time revalidation for source='seller'. The seller may have answered
- * on SMS after this email was planned; the conversation may have been closed
- * or opted out; the deal may have moved past automation's stages.
- */
-export async function revalidateSellerEmail(db, row, { thread } = {}) {
-  const smsKey = clean(thread?.sms_thread_key) || clean(row.reason?.sms_thread_key) || clean(row.metadata?.sms_thread_key)
-  if (smsKey) {
-    const { data: conv } = await db.from('inbox_thread_state').select('last_inbound_at, contactability_status, is_suppressed, lifecycle_stage').eq('thread_key', smsKey).maybeSingle()
-    if (conv) {
-      // inbox_thread_state.last_inbound_at is stamped by SMS ingestion only
-      // (email inbound never writes it), so a value newer than this email's
-      // creation is a seller TEXT that arrived after we planned the email.
-      const planned = Date.parse(row.created_at)
-      const smsReply = Date.parse(conv.last_inbound_at)
-      if (Number.isFinite(smsReply) && Number.isFinite(planned) && smsReply > planned) return { state: 'satisfied', reason: 'seller_replied_sms' }
-      if ((BLOCKING_CONTACTABILITY.has(lower(conv.contactability_status)) || conv.is_suppressed === true) && thread?.contact_preference !== 'email') return { state: 'cancelled', reason: 'seller_opted_out' }
-      if (TERMINAL_STAGES.has(lower(conv.lifecycle_stage))) return { state: 'cancelled', reason: 'conversation_closed' }
-    }
-  }
-  return { state: 'still_needed' }
-}
-
-registerEmailRevalidator('seller', revalidateSellerEmail)
+// Dispatch-time revalidators live in email-revalidators.js (dependency-light,
+// so producers can register them without importing the seller brain).
+export { revalidateSellerEmail } from './email-revalidators.js'
 
 export const _internal = { EMAIL_PREFERENCE, EMAIL_OPT_OUT, textToHtml }

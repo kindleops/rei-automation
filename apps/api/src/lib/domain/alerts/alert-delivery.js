@@ -427,6 +427,7 @@ async function deliverToEmail({
     subject: `${clean(destination.subject_prefix)} ${clean(alert_meta?.severity).toUpperCase()} ${clean(alert_meta?.subsystem)}:${clean(alert_meta?.code)}`,
     text: buildAlertText(alert_meta),
     dry_run: false,
+    purpose: "internal_alert",
   });
 
   return {

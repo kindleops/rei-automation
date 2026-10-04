@@ -346,6 +346,42 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
       ? clean(context.followup_use_case) || "stage_no_reply"
       : `nurture_${intent}`;
 
+  // EMAIL LANE: a seller who asked to be emailed gets this follow-up by email
+  // (email_queue → the one email dispatcher) instead of SMS. Gated by
+  // system_control.email_lane_seller_followup (default OFF); any failure or
+  // refusal falls through to the unchanged SMS follow-up below.
+  if (context.skip_email_lane !== true) {
+    try {
+      const { routeSellerFollowUpToEmail } = await import("@/lib/domain/email/email-seller-followup-lane.js");
+      const lane = await routeSellerFollowUpToEmail(
+        {
+          thread_key: to_phone_number,
+          intent,
+          use_case_template,
+          scheduled_for,
+          master_owner_id: clean(context.master_owner_id) || null,
+          property_id: clean(context.property_id) || null,
+        },
+        { supabase }
+      );
+      if (lane?.handled) {
+        return {
+          ok: true,
+          followup_created: !lane.duplicate,
+          channel: "email",
+          scheduled_for: lane.scheduled_for || scheduled_for,
+          reason: lane.duplicate ? "duplicate_followup_exists" : plan.reason,
+          thread_key: normalized_thread_key,
+          queue_row_id: null,
+          email_queue_row_id: lane.queue_row_id || null,
+          idempotent_replay: Boolean(lane.duplicate),
+        };
+      }
+    } catch {
+      // Email lane unavailable → SMS follow-up exactly as before.
+    }
+  }
+
   const enqueueWithKey = (dedupe_key) => {
     const queue_key = buildFollowupQueueKey(dedupe_key);
     return enqueueSendQueueItem(

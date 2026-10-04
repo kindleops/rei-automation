@@ -10,7 +10,8 @@ import { NextResponse } from "next/server.js";
 import { requireScheduledMutationAuth } from "@/lib/security/cron-auth.js";
 import { supabase } from "@/lib/supabase/client.js";
 import { runEmailDispatch } from "@/lib/domain/email/email-dispatch.js";
-import "@/lib/domain/email/email-seller-channel.js"; // registers the seller revalidator
+import "@/lib/domain/email/email-seller-channel.js"; // seller brain wiring
+import "@/lib/domain/email/email-revalidators.js"; // registers the seller + workflow revalidators
 import { fetchPendingBrevoAttachments } from "@/lib/domain/email/email-attachments.js";
 import { gatherEmailHealthFacts, evaluateEmailHealth } from "@/lib/domain/email/email-health.js";
 import { emitNotificationFromBusinessEvent } from "@/lib/domain/notifications/notification-emitter.js";

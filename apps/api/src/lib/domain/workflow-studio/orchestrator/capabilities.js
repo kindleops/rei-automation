@@ -239,9 +239,38 @@ export const CAPABILITIES = Object.freeze({
     policy: POLICY.APPROVAL, retry: RETRY_TRANSIENT, skippable: false,
     idempotencyKey: (i, ctx) => `wf:${ctx.runId}:${ctx.nodeId}:email`,
     availability: (env = {}) => (env.emailPlane ? { state: 'AVAILABLE' } : { state: 'CONFIG_REQUIRED', reason: 'Email Command migrations and sender are not configured yet' }),
+    // An automated email (source 'workflow', origin automation) on the email
+    // outbox — not an operator "manual" send. The run's idempotency key IS the
+    // queue key, so a retried step is a duplicate, never a second email.
+    // Lane gate system_control.email_lane_workflow (default OFF) → BLOCKED.
     async invoke(i, ctx) {
-      const { sendManualEmail } = await import('@/lib/domain/email/email-service.js')
-      return mapResult(await sendManualEmail({ to: i.recipient?.email, subject: i.subject, text_body: i.body, html_body: `<p>${clean(i.body).replace(/</g, '&lt;')}</p>`, thread_id: i.thread?.id, idempotency_key: this.idempotencyKey(i, ctx) }, { actor: `workflow:${ctx.workflowKey}` }), { blockedCodes: ['suppressed', 'sender_identity_missing'] })
+      const db = ctx.deps?.supabase
+      const { enqueueAutomatedEmail, readEmailLaneGate } = await import('@/lib/domain/email/email-enqueue.js')
+      const gate = await readEmailLaneGate(db, 'workflow')
+      if (!gate.enabled) return { status: STATUS.BLOCKED, reason: `email_lane_disabled:${gate.reason}` }
+      const { textToHtml } = await import('@/lib/domain/email/email-templates.js')
+      const r = i.recipient || {}
+      const to = clean(r.email).toLowerCase()
+      const ownerId = clean(r.master_owner_id || r.owner_id)
+      const propertyId = clean(r.property_id)
+      const out = await enqueueAutomatedEmail(db, {
+        source: 'workflow',
+        queue_key: this.idempotencyKey(i, ctx),
+        to_email: to,
+        subject: i.subject,
+        text_body: clean(i.body),
+        html_body: textToHtml(i.body),
+        action_key: `workflow.${ctx.workflowKey}`,
+        thread: i.thread?.thread_key
+          ? { thread_key: i.thread.thread_key }
+          : ownerId
+            ? { thread_key: `seller:${ownerId}:${propertyId || 'any'}`, category: 'seller', master_owner_id: ownerId, property_id: propertyId || null, sms_thread_key: clean(r.thread_key || r.sms_thread_key) || null }
+            : { thread_key: `contact:${to}`, category: 'other' },
+        requested_by: `workflow:${ctx.workflowKey}@${ctx.version}`,
+        reason: { why: 'Workflow email step', workflow_key: ctx.workflowKey, version: ctx.version, run_id: ctx.runId, node: ctx.nodeId },
+        metadata: { workflow_key: ctx.workflowKey, workflow_version: ctx.version, run_id: ctx.runId, node: ctx.nodeId },
+      })
+      return mapResult(out, { blockedCodes: ['suppressed', 'operator_took_over', 'automation_paused', 'recipient_invalid'] })
     },
     simulate: (i) => ({ status: STATUS.SUCCESS, outputs: { message_id: 'simulated' }, preview: `Email queued: “${i.subject}”` }),
   },

@@ -30,11 +30,26 @@ export const TEMPLATES = Object.freeze({
     subject: '{{subject}}',
     body: '{{#if first_name}}Hi {{first_name}},\n\n{{/if}}{{message}}' + '\n\n{{sender_name}}',
   },
+  // Seller follow-up / nurture copy is OWNER-APPROVED COPY ONLY
+  // (requiresApprovedCopy): it renders from an active public.email_templates
+  // row with the same template_id, never from the code text below — the code
+  // body is the shape contract and the draft the owner reviews. Without an
+  // approved row the render refuses (template_copy_not_approved) and nothing
+  // is queued.
   'seller.followup': {
     version: 'v1', family: 'seller', role: 'seller', stage: 'S1-S6', purpose: 'Gentle email follow-up when a seller goes quiet',
+    requiresApprovedCopy: true,
     required: ['sender_name', 'property_address'],
     subject: 'Re: {{property_address}}',
     body: '{{#if first_name}}Hi {{first_name}},\n\n{{/if}}Just checking back on {{property_address}}. Whenever you have a moment, I would be glad to pick up where we left off.' + '\n\n{{sender_name}}',
+  },
+
+  'seller.nurture': {
+    version: 'v1', family: 'seller', role: 'seller', stage: 'nurture', purpose: '30-day nurture email after "not interested" / "not now" (owner rule: a no is a 30-day follow-up)',
+    requiresApprovedCopy: true,
+    required: ['sender_name', 'property_address'],
+    subject: null,
+    body: null, // COPY NOT APPROVED — no code copy exists; the owner writes it as an email_templates row.
   },
 
   // ── closing / title ──────────────────────────────────────────────────────
@@ -117,13 +132,26 @@ export function textToHtml(text) {
  * Render a template. `override` is an active public.email_templates row
  * ({ subject, template_body, version }) for the same key, if any.
  */
+/** Placeholder marker the PROPOSED seed rows carry until the owner writes the copy. */
+export const COPY_NOT_APPROVED = 'COPY NOT APPROVED'
+
+function overrideUsable(override) {
+  if (!override || override.is_active === false) return false
+  const body = clean(override.template_body)
+  if (!body || body.includes(COPY_NOT_APPROVED) || clean(override.subject).includes(COPY_NOT_APPROVED)) return false
+  return true
+}
+
 export function renderTemplate(templateKey, vars = {}, override = null) {
   const spec = TEMPLATES[templateKey]
   if (!spec) return { ok: false, code: 'template_unknown', templateKey }
+  const usable = overrideUsable(override) ? override : null
+  if (spec.requiresApprovedCopy && !usable) return { ok: false, code: 'template_copy_not_approved', templateKey }
   const missingRequired = spec.required.filter((k) => !clean(vars[k]))
   if (missingRequired.length) return { ok: false, code: 'template_variables_incomplete', missing: missingRequired, templateKey }
-  const subjectSrc = clean(override?.subject) || spec.subject
-  const bodySrc = clean(override?.template_body) || spec.body
+  const subjectSrc = clean(usable?.subject) || clean(spec.subject)
+  const bodySrc = clean(usable?.template_body) || clean(spec.body)
+  if (!subjectSrc || !bodySrc) return { ok: false, code: 'template_copy_not_approved', templateKey }
   const subject = renderString(subjectSrc, vars)
   const body = renderString(bodySrc, vars)
   const missing = [...new Set([...subject.missing, ...body.missing])]
@@ -131,7 +159,9 @@ export function renderTemplate(templateKey, vars = {}, override = null) {
   return {
     ok: true,
     templateKey,
-    version: override?.version ? `db:${override.version}` : spec.version,
+    templateId: templateKey,
+    version: usable?.version ? `db:${usable.version}` : spec.version,
+    source: usable ? 'email_templates' : 'code_registry',
     subject: subject.text.replace(/\s+/g, ' ').trim(),
     text: body.text.trim(),
     html: textToHtml(body.text),
@@ -149,4 +179,14 @@ export async function loadTemplateOverrides(db, keys = []) {
   const out = {}
   for (const r of data || []) out[r.template_id] = r
   return out
+}
+
+/**
+ * Render with the active DB row for this key (one read). The row's
+ * template_id equals the registry key, so every queued email carries a
+ * template_id that joins public.email_templates for KPIs.
+ */
+export async function renderStoredTemplate(db, templateKey, vars = {}) {
+  const overrides = db ? await loadTemplateOverrides(db, [templateKey]) : {}
+  return renderTemplate(templateKey, vars, overrides[templateKey] || null)
 }

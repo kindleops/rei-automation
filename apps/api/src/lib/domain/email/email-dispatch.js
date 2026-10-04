@@ -28,7 +28,8 @@ import { resolveBrandSender, mintMessageId, threadingHeaders, replyAddressFor } 
 import { bridgeClosingEmailRequests, revalidateClosingEmail, writeBackClosingRequest } from './email-closing-bridge.js'
 import { emitNotificationFromBusinessEvent } from '@/lib/domain/notifications/notification-emitter.js'
 import { recordEmailEvent, laneFor } from './email-telemetry.js'
-import { applyTracking } from './email-tracking.js'
+import { applyTracking, mintTrackingToken } from './email-tracking.js'
+import { checkCompliance, buildComplianceParts, appendFooter } from './email-compliance.js'
 
 const clean = (v) => String(v ?? '').trim()
 const lower = (v) => clean(v).toLowerCase()
@@ -41,6 +42,7 @@ const REVALIDATORS = {
 
 /** Register a source revalidator (seller automation registers its own). */
 export function registerEmailRevalidator(source, fn) { REVALIDATORS[source] = fn }
+export function hasEmailRevalidator(source) { return typeof REVALIDATORS[source] === 'function' }
 
 async function readControls(db) {
   const { data } = await db.from('system_control').select('key, value').in('key', ['email_enabled', 'email_automation_enabled', 'email_stale_after_hours'])
@@ -174,7 +176,7 @@ async function processRow(db, row, { now, send, notify, env, controls, summary }
   const { data: thread } = row.thread_id ? await db.from('email_threads').select('*').eq('id', row.thread_id).maybeSingle() : { data: null }
   const [suppression, sender] = await Promise.all([
     checkSuppression(db, row.to_email),
-    resolveBrandSender(db, row.brand_key || thread?.brand_key, env),
+    resolveBrandSender(db, row.brand_key || thread?.brand_key, env, now),
   ])
   let revalidation = null
   const revalidate = REVALIDATORS[row.source]
@@ -189,7 +191,8 @@ async function processRow(db, row, { now, send, notify, env, controls, summary }
     alreadySent = (twins || []).some((t) => t.id !== row.id)
   }
 
-  const verdict = evaluateSendSafety({ row, thread, suppression, sender, revalidation, alreadySent, now, staleAfterMs: controls.staleAfterMs })
+  const compliance = checkCompliance(row, sender)
+  const verdict = evaluateSendSafety({ row, thread, suppression, sender, revalidation, alreadySent, compliance, now, staleAfterMs: controls.staleAfterMs })
   const release = { is_locked: false, lock_token: null, revalidated_at: nowIso, updated_at: nowIso }
 
   if (verdict.decision === 'supersede' || verdict.decision === 'cancel') {
@@ -230,15 +233,27 @@ async function processRow(db, row, { now, send, notify, env, controls, summary }
   // Own tracking (signed-by-unguessability tokens, destinations pre-recorded)
   // when this sender has a tracking host; otherwise provider telemetry only.
   const tracked = await applyTracking(db, row, s.tracking_base_url)
+  // Compliance parts go on AFTER tracking so the unsubscribe link is never
+  // rewritten into a click redirect.
+  let html = tracked.html || row.html_body || row.email_body
+  let text = row.text_body || undefined
+  let token = tracked.token || row.tracking_token || null
+  if (compliance.required) {
+    token = token || mintTrackingToken()
+    const parts = buildComplianceParts(s, token)
+    Object.assign(headers, parts.headers)
+    html = appendFooter(html, parts.footerHtml)
+    if (text) text = `${text}${parts.footerText}`
+  }
   const lineage = { lane: laneFor(row), sending_domain: s.domain, provider: 'brevo', origin: row.source === 'manual' ? 'manual' : 'automation', template_version: row.template_version || row.metadata?.template_version || row.reason?.template_version || null }
-  await db.from('email_queue').update({ message_id_header: messageId, in_reply_to: inReplyTo, references_header: references, from_email: s.email, from_name: s.name, reply_to_email: replyTo, sender_key: s.sender_key, ...lineage, ...(tracked.token ? { tracking_token: tracked.token } : {}) }).eq('id', row.id)
+  await db.from('email_queue').update({ message_id_header: messageId, in_reply_to: inReplyTo, references_header: references, from_email: s.email, from_name: s.name, reply_to_email: replyTo, sender_key: s.sender_key, ...lineage, ...(token ? { tracking_token: token } : {}) }).eq('id', row.id)
   Object.assign(row, lineage, { sender_key: s.sender_key, from_email: s.email })
 
   const result = await send({
     to: row.to_email,
     subject,
-    htmlContent: tracked.html || row.html_body || row.email_body,
-    textContent: row.text_body || undefined,
+    htmlContent: html,
+    textContent: text,
     sender: { name: s.name, email: s.email },
     replyTo: replyTo ? { email: replyTo } : null,
     headers,

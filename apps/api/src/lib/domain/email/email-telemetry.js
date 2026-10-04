@@ -31,7 +31,7 @@ export const EVENT_TYPES = Object.freeze(new Set([
 
 export const EVENT_SOURCES = Object.freeze(new Set([
   'dispatcher', 'provider_api', 'brevo_webhook', 'leadcommand_tracking_pixel', 'leadcommand_click_redirect',
-  'cloudflare_inbound_email', 'brevo_inbound', 'manual_operator', 'import', 'system',
+  'cloudflare_inbound_email', 'brevo_inbound', 'manual_operator', 'import', 'system', 'leadcommand_unsubscribe',
 ]))
 
 /** Which lane a message belongs to — acquisition never hides transactional health. */

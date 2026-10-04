@@ -29,7 +29,7 @@ export function isChaseAction(row = {}) {
   return Number(row.sequence) > 1 || /followup|follow_up|reminder|nudge/.test(a)
 }
 
-export function evaluateSendSafety({ row = {}, thread = null, suppression = null, sender = null, revalidation = null, alreadySent = false, now = Date.now(), staleAfterMs = DEFAULT_STALE_AFTER_MS } = {}) {
+export function evaluateSendSafety({ row = {}, thread = null, suppression = null, sender = null, revalidation = null, alreadySent = false, compliance = null, now = Date.now(), staleAfterMs = DEFAULT_STALE_AFTER_MS } = {}) {
   const automated = clean(row.source) !== 'manual'
   const out = (decision, code, extra = {}) => ({ decision, code, ...extra })
 
@@ -68,6 +68,8 @@ export function evaluateSendSafety({ row = {}, thread = null, suppression = null
 
   if (!sender?.ok) return out('defer', sender?.code || 'sender_unavailable')
   if (sender.sender?.daily_limit && sender.sender.messages_sent_today >= sender.sender.daily_limit) return out('defer', 'sender_daily_limit')
+  // Lane-scoped automated mail never leaves without its unsubscribe + postal address.
+  if (compliance?.required && !compliance.ok) return out('defer', compliance.code || 'sender_compliance_incomplete', { missing: compliance.missing || null })
 
   return out('send', 'ok')
 }
