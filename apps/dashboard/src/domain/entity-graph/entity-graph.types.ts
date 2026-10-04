@@ -171,6 +171,16 @@ export type EntityGraphPagination = {
   previousCursor?: number | null
   /** Adapter caveats that change what `total` counts, e.g. `score_order_excludes_unscored`. */
   notes?: string[]
+  /**
+   * Properties browse only: the order actually used. `sortApplied: false`
+   * means the requested sort has no index that can drive it and the page is
+   * in the fallback order — the client sorts the loaded rows and says so.
+   */
+  sort?: {
+    requested: { column: string; ascending: boolean }
+    applied: { column: string; ascending: boolean }
+    sortApplied: boolean
+  }
 }
 
 export type EntityGraphListResponse = {
