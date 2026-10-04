@@ -219,3 +219,14 @@ Other in-memory ops:
   - trends 0.4 ms
 DB reads per interaction: 0, except recent sales (ZIP 1.35 s, Minneapolis MF 363 ms) and a per-state seller universe (MN 1.09 s, 5,411 rows).
 Proposal: PROPOSED_20261004150000_market_intel_geo_rollup.sql (not applied).
+
+======================================================================
+I. DECISION REVISED 2026-10-04 (owner): Market Intelligence reads the MARKET SUMMARY
+======================================================================
+The in-memory full-stream index is now a dev-only fallback (MI_DEV_RAW_FALLBACK=1, never in
+production). Production reads mi_geo_period_rollup / mi_geo_month_rollup / mi_zip_geo /
+mi_buyer_activity: the latest ready build, built off-hours by mi_rollup_tick.
+Plan, runtimes and evidence: docs/market-intelligence/SUMMARY_APPLY_PLAN.txt.
+Evidence the summary SQL equals the API's numbers: a read-only dry run on prod gave
+ZIP 55411 / 1y / all = 383 sales · median $235,000 · $163/sq ft · 14 investor of 40 buyer-known · 12 cash of 37 · 97 entity-owned.
+That is identical to the in-memory computation, and the ZIP/county/market membership totals are identical too.

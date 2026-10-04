@@ -1,0 +1,106 @@
+MARKET INTELLIGENCE: MARKET SUMMARY APPLY PLAN (owner-approved design, 2026-10-04)
+"raw sales = source of truth; summary table = fast analytical projection; build it
+off-hours, refresh incrementally/nightly, and make Market Intelligence read that instead."
+
+NOTHING HERE IS APPLIED. Files:
+  supabase/migrations/PROPOSED_20261004150000_market_intel_geo_rollup.sql            the summary
+  supabase/migrations/PROPOSED_20261004150000_market_intel_geo_rollup_pretest.sql    rollback-only pretest (generated)
+  supabase/migrations/PROPOSED_20261004150000_market_intel_geo_rollup_rollback.sql   rollback
+  supabase/migrations/PROPOSED_20261004151000_market_intel_rollup_schedule.sql       nightly pg_cron (apply last)
+  apps/api/scripts/market-intel-rollup-dryrun.py     read-only dry run of any unit's SQL against prod
+  apps/api/scripts/market-intel-make-pretest.py      regenerates the pretest from the migration
+
+WHAT THE API DOES NOW (code shipped; inert until the tables exist)
+  - Reads only the latest mi_rollup_builds row with status 'ready'.
+  - Per interaction it reads small indexed summary slices, cached per build:
+      ≤ ~10K rows for one (level, period, asset) slice, one month-sum query,
+      ≤ 60 month rows per geography, and the ~12.7K named-buyer rows once per build.
+  - Until a build is ready: "Market summary not built yet", with build progress if one is running.
+  - Production NEVER streams the 665K sales. The old in-memory stream exists only behind
+    MI_DEV_RAW_FALLBACK=1 with NODE_ENV != production.
+  - The schema guard lists catalog columns rather than selecting them (phantom-column rule).
+  - Recent sales (row-level evidence) stay a bounded read of the MV: bbox via the (lat, lng)
+    index, or newest-first via sold_on.
+
+EXACTNESS
+  Medians are percentile_cont(0.5) over exactly the qualified rows of each
+  (geography, period, asset) group, recomputed from raw sales every build; deciles use
+  percentile_disc. Nothing is averaged across groups and there is no approximation.
+  Proof, two ways:
+    1. Read-only dry run of the migration's own SQL on prod for ZIP 55411 / 1y / all:
+         383 sales, median $235,000, $163/sq ft, 14 investor of 40 with a recorded buyer,
+         12 cash of 37, entity-owned 97
+       This is identical to the in-memory API on the same data. The prepare unit reproduced
+       the API's membership exactly: 655,702 sales with a ZIP, 645,104 with a county,
+       458,010 with a market.
+    2. Unit test: the summary read path and the raw computation give identical dossiers,
+       rankings and screens on the fixture corpus (12 geographies × 5 periods × 5 asset filters).
+       A second unit test pins the SQL asset map to the JS asset model.
+
+UNITS AND MEASURED COST (read side; EXPLAIN ANALYZE of the final SQL on prod, warm, 2026-10-04)
+  prepare      (mi_zip_geo: ZIP → state/city/county/market, bounds)   10.6 s  (24 s before restructuring; one grouped pass now)
+  buyers       (~12.7K named-buyer sales via the partial buyer index)   < 0.1 s read
+  p:<level>:<period>   36 units
+      zip × 1y 10.4 s · zip × all 9.7 s · city × 1y 10.1 s · nation × all 9.2 s
+      state 5.2 s · market 4.5 s · county 3.8 s (prototype of the same shape)
+  m:<level>    6 units; zip × month 7.5 s (98,017 rows), city 45,144 rows
+  finalize     fingerprint re-check 0.6 s; status flip
+  c:period, c:month, c:aux   delete builds older than the previous one
+  Worst unit ≈ 10.6 s read + insert (≤ ~10K period rows, ≤ ~100K month rows) + cold cache
+  ≈ 13–15 s, under the 30 s cap. A unit over the cap is caught, rolled back alone and retried
+  next tick; after 3 failures the build is marked failed and the previous ready build keeps serving.
+
+EXPECTED RUNTIMES
+  First build (manual, owner present, quiet window, back-to-back ticks):
+    49 units; ~6 min of DB time (36 × ~7.5 s + 6 × ~6 s + prepare 11 s + finalize 1 s),
+    ~7–8 min wall.
+  Nightly when the source changed:
+    the same 49 units at one tick a minute in 10:45–11:59 UTC ≈ 49 min wall,
+    ~6 min DB time, spread out.
+  Nightly when the source is unchanged:
+    one fingerprint scan (0.6 s); every later tick that night is a no-op.
+  Writes per build: ~120K period rows + ~250K month rows + ~16K ZIP rows + ~12.7K buyer rows (~90 MB
+  with indexes). Two builds are kept; older ones are deleted by the cleanup units.
+  "Incremental": batched, resumable ticks with skip-if-unchanged. When the source as-of advances,
+  every windowed figure moves, so every unit is recomputed. That is the honest cost, measured above.
+
+APPLY PLAN (owner present; prod writes need the owner out of auto mode)
+  0. Quiet window: no other heavy job. Avoid 05:00–08:59 UTC (campaign reconcile) and 09:15–10:40 UTC
+     (entity graph, comp evidence, map sales refresh + vacuum). For example 13:00–15:00 UTC on a quiet day.
+     Check pg_stat_activity: ≤ 12 active sessions and nothing running > 10 s.
+  1. PRETEST (rollback-only, RC 7.1 practice: one DO block, no explicit BEGIN):
+       SET statement_timeout = '120s';  \i PROPOSED_20261004150000_market_intel_geo_rollup_pretest.sql
+     Expect: ERROR 'pretest ok: build N, 55411/1y/all sales 383 median 235000 …' and no schema change.
+     Verify: select to_regclass('public.mi_geo_period_rollup');  → NULL.
+  2. APPLY the migration (DDL + functions only; instant; no existing object touched).
+     Then: supabase migration repair --status applied 20261004150000 (the out-of-band ledger rule).
+  3. FIRST BUILD, split per period (the unit order is prepare, buyers, then all six levels for 1y,
+     then 90d, 30d, 6m, 3y, all, then months), one tick at a time:
+       SET statement_timeout = '30s'; SET lock_timeout = '2s'; SELECT public.mi_rollup_tick(true);   -- once
+       then repeat  SELECT public.mi_rollup_tick();  until it returns {"ready": true} and the cleanup units finish
+       (~49 calls; watch  SELECT public.mi_rollup_status();)
+     Stop at any time: the cursor persists and readers never see a partial build.
+  4. VERIFY against the API dry run:
+       select sale_count, median_price, investor_count, buyer_known_count, entity_owned_count
+         from public.mi_geo_period_rollup g join public.mi_rollup_builds b using (build_id)
+        where b.status = 'ready' and geo_level = 'zip' and geo_key = '55411' and period = '1y' and asset = 'all';
+       expect 383 · 235000 · 14 · 40 · 97 while the source as-of is still 2026-09-10.
+     Open Market Intelligence: the footer shows "Market summary built <time> (build N)".
+  5. SCHEDULE (separate file) only after step 4 passes:  \i PROPOSED_20261004151000_market_intel_rollup_schedule.sql
+  6. DEPLOY the API (it needs no flag). Until steps 2–4 are done, deployed code shows
+     "Market summary not built yet" and does not stream.
+
+ROLLBACK
+  pause:     update cron.job set active = false where jobname like 'mi_rollup_%';
+  previous:  mark the bad build 'superseded' and the previous build 'ready' (kept for this purpose)
+  remove:    PROPOSED_20261004150000_market_intel_geo_rollup_rollback.sql
+             (the API then shows "Market summary not built yet")
+
+LIMITS
+  - plpgsql tick logic could not be executed here: there is no local Postgres server and prod is
+    read-only for this work. The pretest (step 1) is the first execution of the tick, prepare,
+    period and month paths, under rollback.
+  - Children are members: a ZIP ranks inside its majority city, and its figures are the whole ZIP's.
+    Previously ZIP∩city sales were counted.
+  - New raw property_type values map to 'unknown' until added to mi_asset_type_map and the JS model;
+    every build lists them (notes.unmapped_types → status.summary.unmapped_types).
