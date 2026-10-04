@@ -34,7 +34,17 @@ import {
 } from '../../../domain/entity-graph/selected-entity'
 import { EntityGraphMobileRow } from './EntityGraphMobileRow'
 import { EntityGraphMobileTable } from './EntityGraphMobileTable'
-import { defaultVisibleColumns } from './entity-graph-table-columns'
+import {
+  IDENTITY_SORT_COLUMN,
+  SCOPE_TABLE_COLUMNS,
+  defaultVisibleColumns,
+  nextHeaderSort,
+  sortLoadedRows,
+  visibleEnrichmentFields,
+  type TableColumn,
+} from './entity-graph-table-columns'
+import { IDENTITY_COLUMN_KEY, useEntityGraphTableLayout } from './entity-graph-table-layout'
+import { useEntityGraphColumns } from './use-entity-graph-columns'
 import { EntityGraphColumnSheet } from './EntityGraphColumnSheet'
 import { EntityGraphMobileGraph } from './EntityGraphMobileGraph'
 import { EntityGraphComposition } from './EntityGraphComposition'
@@ -169,7 +179,8 @@ export function EntityGraphMobile({
    */
   const [searchScopeLocked, setSearchScopeLocked] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
-  const [visibleColumns, setVisibleColumns] = useState<Record<string, string[]>>({})
+  /** Visible columns + header sort, per scope, persisted per operator. */
+  const { layout: tableLayout, setColumns: setScopeColumns, setSort: setHeaderSort } = useEntityGraphTableLayout()
 
   // Composition: signature-tagged like the list, so a late response for an
   // abandoned cohort is never shown and `loading` is derived.
@@ -275,7 +286,29 @@ export function EntityGraphMobile({
   // tapping a scope chip. No query means browsing this tab, which is never
   // cross-type.
   const crossTypeSearch = Boolean(debouncedQuery) && !searchScopeLocked
-  const querySignature = `${scope}|${sortKey}|${debouncedQuery}|${contactSubtype}|${crossTypeSearch}|${JSON.stringify(filters)}|${JSON.stringify(fieldFilters)}`
+
+  /**
+   * Header sort. A column the browse adapter can order by (`sortBy`, or the
+   * identity column) sorts server-side across the whole cohort; anything else
+   * — and every column while a search is active, since search results are
+   * ranked, not ordered — sorts the loaded rows and says so.
+   */
+  const headerSort = viewMode === 'table' ? tableLayout.sort[scope] ?? null : null
+  const headerColumn: TableColumn | null = !headerSort
+    ? null
+    : headerSort.key === IDENTITY_COLUMN_KEY
+      ? { key: IDENTITY_COLUMN_KEY, label: 'Name', group: 'overview', width: 0, render: (r) => resolveIdentity(scope, r).primary || null }
+      : SCOPE_TABLE_COLUMNS[scope].find((c) => c.key === headerSort.key) ?? null
+  const headerServerColumn = headerSort
+    ? (headerSort.key === IDENTITY_COLUMN_KEY ? IDENTITY_SORT_COLUMN[scope] : headerColumn?.sortBy ?? null)
+    : null
+  const serverHeaderSort = headerSort && headerServerColumn && !debouncedQuery
+    ? { sortBy: headerServerColumn, ascending: headerSort.dir === 'asc' }
+    : null
+  const localHeaderSort = headerSort && !serverHeaderSort && headerColumn ? { column: headerColumn, dir: headerSort.dir } : null
+  const sortSignature = serverHeaderSort ? `h:${serverHeaderSort.sortBy}:${serverHeaderSort.ascending ? 1 : 0}` : sortKey
+
+  const querySignature = `${scope}|${sortSignature}|${debouncedQuery}|${contactSubtype}|${crossTypeSearch}|${JSON.stringify(filters)}|${JSON.stringify(fieldFilters)}`
 
   // Adjusting state during render rather than in an effect: this is the
   // documented way to reset state when an input changes, and it avoids both the
@@ -362,7 +395,7 @@ export function EntityGraphMobile({
     const requestCursor = cursor
 
     const sortOptions = SCOPE_SORTS[scope]
-    const sort = sortOptions.find((s) => s.key === sortKey) ?? sortOptions[0]
+    const sort = serverHeaderSort ?? sortOptions.find((s) => s.key === sortKey) ?? sortOptions[0]
     void fetchEntityGraphList(
       {
         tab: crossTypeSearch ? 'all' : tabForScope(scope),
@@ -732,7 +765,18 @@ export function EntityGraphMobile({
   const searching = Boolean(debouncedQuery)
   const sortOptions = SCOPE_SORTS[scope]
   const activeSort = sortOptions.find((s) => s.key === sortKey) ?? sortOptions[0]
-  const scopeColumns = visibleColumns[scope] ?? defaultVisibleColumns(scope)
+  const scopeColumns = tableLayout.columns[scope] ?? defaultVisibleColumns(scope)
+  const tableFields = useMemo(() => visibleEnrichmentFields(scope, scopeColumns), [scope, scopeColumns])
+  const columnEnrichment = useEntityGraphColumns(results, tableFields, viewMode === 'table')
+  const tableRows = useMemo(
+    () => (localHeaderSort ? sortLoadedRows(scope, columnEnrichment.rows, localHeaderSort.column, localHeaderSort.dir) : columnEnrichment.rows),
+    [columnEnrichment.rows, localHeaderSort?.column, localHeaderSort?.dir, scope], // eslint-disable-line react-hooks/exhaustive-deps -- column + dir identify the sort
+  )
+  const tableStatus = [
+    localHeaderSort ? `Sorted within ${tableRows.length.toLocaleString()} loaded rows` : null,
+    columnEnrichment.loading ? 'Loading columns…' : null,
+    columnEnrichment.error ? 'Some columns could not load — shown as —' : null,
+  ].filter(Boolean).join(' · ') || null
   // The Lens counts the filter set, the list counts filter + search. When a
   // search is active they are different cohorts, so the Lens says so instead of
   // implying its composition describes the search results.
@@ -1042,7 +1086,7 @@ export function EntityGraphMobile({
                 prefix="Sort"
                 align="end"
                 value={activeSort.key}
-                onChange={(key) => setSortKey(key)}
+                onChange={(key) => { setSortKey(key); setHeaderSort(scope, null) }}
                 options={sortOptions.map((option) => ({ value: option.key, label: option.label }))}
               />
             ) : null}
@@ -1077,6 +1121,7 @@ export function EntityGraphMobile({
             onClick={() => {
               const index = sortOptions.findIndex((s) => s.key === activeSort.key)
               setSortKey(sortOptions[(index + 1) % sortOptions.length].key)
+              setHeaderSort(scope, null)
             }}
             aria-label={`Sort: ${activeSort.label}. Tap to change.`}
           >
@@ -1167,17 +1212,16 @@ export function EntityGraphMobile({
         {viewMode === 'table' && results.length > 0 ? (
           <EntityGraphMobileTable
             scope={scope}
-            results={results}
+            results={tableRows}
             visibleColumns={scopeColumns}
-            sortBy={activeSort.sortBy}
-            ascending={activeSort.ascending}
+            headerSort={headerSort}
+            fallbackSortBy={headerSort ? null : activeSort.sortBy}
+            fallbackAscending={activeSort.ascending}
+            status={tableStatus}
             selectionMode={selectionMode}
             selectedKeys={selectedKeys}
             activeId={openResult?.entityId ?? null}
-            onSort={(column) => {
-              const match = sortOptions.find((option) => option.sortBy === column)
-              if (match) setSortKey(match.key)
-            }}
+            onSort={(key) => setHeaderSort(scope, nextHeaderSort(headerSort, key))}
             onOpen={openRecord}
             onToggleSelect={toggleSelect}
           />
@@ -1268,7 +1312,7 @@ export function EntityGraphMobile({
         scope={scope}
         visible={scopeColumns}
         onClose={() => setColumnsOpen(false)}
-        onChange={(next) => setVisibleColumns((current) => ({ ...current, [scope]: next }))}
+        onChange={(next) => setScopeColumns(scope, next)}
       />
 
       {/* On a desk with the list showing, the inspector docks inside the body. */}

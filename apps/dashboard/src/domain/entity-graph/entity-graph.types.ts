@@ -145,6 +145,8 @@ export type EntitySearchResult = {
 export type RecordSignal = { key: string; label: string; tone: 'alert' | 'warn' | 'info' }
 
 export type PropertyRecordFacts = {
+  /** false when the property has no record-summary row: counts are unknown, not 0. */
+  captured?: boolean
   mortgageCount: number
   mortgageBalance?: number
   firstRate?: number

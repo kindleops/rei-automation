@@ -227,3 +227,20 @@ export async function fetchEntityGraphDossier(
 export function clearEntityGraphDossierCache(): void {
   dossierCache.clear()
 }
+export type EntityGraphColumnValues = Record<string, Record<string, unknown>>
+
+/**
+ * Keyed enrichment for the visible property columns the browse row does not
+ * carry (year built, zoning, beds, …). Whitelisted server-side; ≤ 300 ids.
+ */
+export async function fetchEntityGraphColumns(
+  params: { fields: string; property_ids: string },
+  signal?: AbortSignal,
+): Promise<EntityGraphColumnValues> {
+  const res = await backendClient.callBackend<{ ok: boolean; values?: EntityGraphColumnValues }>(
+    `/api/cockpit/entity-graph/columns?${buildQueryString(params)}`,
+    { signal },
+  )
+  if (!res.ok) throw new Error(res.message || res.error || 'entity_graph_columns_failed')
+  return res.data?.values ?? {}
+}
