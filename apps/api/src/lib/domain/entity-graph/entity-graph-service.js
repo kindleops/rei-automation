@@ -544,6 +544,9 @@ function propertyRecordSummary(row) {
   if (row.rec_has_private_lender) signals.push({ key: 'private_lender', label: 'Private lender', tone: 'info' })
   if (row.rec_last_sale_distress) signals.push({ key: 'distress_sale', label: 'Bought at trustee sale', tone: 'info' })
   return {
+    // No property_record_summary row (LEFT JOIN miss) is "not captured", not
+    // "zero loans": the table renders "—" for it instead of a fabricated 0.
+    captured: row.rec_mortgage_count !== null && row.rec_mortgage_count !== undefined,
     mortgageCount: row.rec_mortgage_count ?? 0,
     mortgageBalance: row.rec_mortgage_balance ?? undefined,
     firstRate: row.rec_first_rate ?? undefined,
@@ -824,10 +827,15 @@ async function fetchPageWithCount(supabase, {
   ascending,
   cursor,
   pageSize,
+  tieCol = null,
 }) {
-  const pageQuery = buildQuery(supabase.from(table).select(select))
+  let pageQuery = buildQuery(supabase.from(table).select(select))
     .order(orderCol, { ascending, nullsFirst: false })
-    .range(cursor, cursor + pageSize - 1)
+  // Offset paging over a non-unique sort key needs a unique tie-break, or rows
+  // with equal values swap between pages (duplicates / gaps on "load more").
+  // Measured on v_entity_graph_properties 10-04: incremental sort, < 1 ms.
+  if (tieCol && tieCol !== orderCol) pageQuery = pageQuery.order(tieCol, { ascending: true })
+  pageQuery = pageQuery.range(cursor, cursor + pageSize - 1)
   const countQuery = buildQuery(supabase.from(table).select(select, { count: 'exact', head: true }))
 
   const [page, counted] = await Promise.all([pageQuery, countQuery])
@@ -1193,6 +1201,7 @@ async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending,
     ascending,
     cursor,
     pageSize,
+    tieCol: 'property_id',
   })
   return paginatedResponse(rows.map((row) => propertyToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
