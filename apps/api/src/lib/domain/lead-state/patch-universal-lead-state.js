@@ -821,11 +821,58 @@ export async function patchUniversalLeadState({
     }
   }
 
+  /**
+   * S5 — TEMPERATURE FOLLOWS THE SAME WAY AS STAGE. A manual temperature set on
+   * the conversation reached only inbox_thread_state; the Pipeline reads the
+   * opportunity, so the deal kept its old temperature. Routed through the
+   * canonical writer (transitionOpportunityTemperature: history + its own
+   * rules). The opportunity→thread sync comes back as source_view
+   * 'opportunity_sync' (and a system source), which is skipped here, so the two
+   * cannot ping-pong. Non-fatal and reported, like the stage sync.
+   */
+  let opportunity_temperature_sync = null;
+  const OPPORTUNITY_TEMPERATURE_OF = { hot: 'hot', warm: 'warming', warming: 'warming', engaged: 'engaged', cold: 'cold' };
+  const manualTemperature = typeof rowPatch.lead_temperature === 'string'
+    && changeSource === STATE_SOURCE_CODES.MANUAL
+    && meta.source_view !== 'opportunity_sync'
+    && rowPatch.lead_temperature !== previous?.lead_temperature
+    ? OPPORTUNITY_TEMPERATURE_OF[String(rowPatch.lead_temperature).toLowerCase()] || null
+    : null;
+  if (manualTemperature) {
+    try {
+      const bare = String(key || '').replace(/^\+1/, '');
+      const { data: oppRows } = await supabase
+        .from('acquisition_opportunities')
+        .select('id, temperature')
+        .in('primary_thread_key', [...new Set([key, bare].filter(Boolean))])
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      const opp = Array.isArray(oppRows) ? oppRows[0] : oppRows;
+      if (!opp?.id) {
+        opportunity_temperature_sync = { ok: false, reason: 'no_linked_opportunity' };
+      } else if (String(opp.temperature || '').toLowerCase() === manualTemperature) {
+        opportunity_temperature_sync = { ok: true, reason: 'already_aligned', opportunity_id: opp.id };
+      } else {
+        const { transitionOpportunityTemperature } = await import('@/lib/domain/opportunity/opportunity-service.js');
+        const result = await transitionOpportunityTemperature(opp.id, {
+          to_temperature: manualTemperature,
+          reason: clean(meta.reason) || '',
+          actor: meta.operator_id || meta.updated_by || 'operator',
+          source: 'inbox_sync',
+        }, { supabase });
+        opportunity_temperature_sync = { ok: result?.ok === true, opportunity_id: opp.id, to: manualTemperature, ...(result?.ok ? {} : { reason: result?.error || 'transition_refused' }) };
+      }
+    } catch (syncError) {
+      opportunity_temperature_sync = { ok: false, reason: syncError?.message || 'opportunity_temperature_sync_failed' };
+    }
+  }
+
   return {
     ok: true,
     thread_key: key,
     row: data,
     opportunity_stage_sync,
+    opportunity_temperature_sync,
     ...(closingBlocked ? { closing_blocked: closingBlocked } : {}),
     stage_guards: stageGuards,
     suppression_guards: suppressionGuards,
