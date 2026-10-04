@@ -729,6 +729,12 @@ async function resolveSenderIdentity(payload = {}) {
     }
   }
 
+  // No identity requested → the default active brand sender (the dispatcher
+  // resolves the same row at send time). Without this, a manual send with no
+  // explicit sender fell through to BREVO_SENDER_EMAIL, which is not used by
+  // the brand-sender model, and failed sender_identity_missing.
+  if (!sender && !requested) sender = await lookupSenderByColumn(db, "is_default", true);
+
   if (sender?.__lookup_failed) {
     return { ok: false, reason: "sender_lookup_failed", error: sender.error };
   }

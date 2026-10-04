@@ -359,3 +359,21 @@ test('I1 email timeline for an SMS thread key: outbound + inbound, time-ordered,
   assert.equal(none.email_present, false)
   assert.equal((await getSellerEmailTimeline({}, { supabase: db })).status, 400)
 })
+
+// ── J. manual send resolves the default brand sender ───────────────────────
+test('J1 manual send with no explicit sender uses the default active email_senders row (not BREVO_SENDER_EMAIL)', async () => {
+  const { sendManualEmail, __setEmailServiceDeps, __resetEmailServiceDeps } = await import('@/lib/domain/email/email-service.js')
+  const db = makeEmailDb({ email_senders: [{ ...COMPLIANT_SENDER }] })
+  const prev = process.env.BREVO_SENDER_EMAIL
+  delete process.env.BREVO_SENDER_EMAIL
+  __setEmailServiceDeps({ supabase_override: db })
+  try {
+    const r = await sendManualEmail({ to: 'owner@example.com', subject: 'Seed test', text_body: 'hello' }, { actor: 'test' })
+    assert.equal(r.ok, true, r.error)
+    assert.equal(r.queued, true)
+    assert.equal(db.state.email_queue[0].from_email, 'offers@mail.example-brand.test')
+  } finally {
+    __resetEmailServiceDeps()
+    if (prev !== undefined) process.env.BREVO_SENDER_EMAIL = prev
+  }
+})
