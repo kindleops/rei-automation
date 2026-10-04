@@ -33,5 +33,6 @@
 .snd-switch.is-on i { transform: translateX(14px); background: #fff; }
 .snd-switch:focus-visible { box-shadow: var(--lc-focus-ring); }
 :root[data-nexus-theme='light'] .snd-switch { background: rgba(13, 21, 36, 0.12); }
+:root[data-nexus-theme='light'] .snd-switch.is-on { background: rgba(var(--lc-select-rgb), 0.85); }
 html[data-lc-motion='off'] .snd-switch i { transition: none; }
 .snd-typing { display: grid; gap: 6px; padding-left: 12px; border-left: 1px solid var(--lc-hairline, rgba(255, 255, 255, 0.08)); }

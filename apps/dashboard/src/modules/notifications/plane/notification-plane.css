@@ -230,6 +230,8 @@ html[data-lc-motion='off'] .ncs__slide { transition: none; }
   background: rgba(var(--lc-edge-rgb), 0.055); box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.06);
 }
 .ncs__reason { animation: ncs-morph 0.42s var(--lc-ease-enter) both; }
+/* pipeline-view.css ships an unscoped `.is-neutral { color: … !important }` that leaks once Pipeline has loaded */
+.ncs__reason.is-neutral { color: var(--lc-ink-2) !important; }
 .ncs__reason.is-green { color: var(--lc-ok); background: rgba(var(--lc-ok-rgb), 0.09); box-shadow: inset 0 0 0 1px rgba(var(--lc-ok-rgb), 0.14); }
 .ncs__reason.is-red { color: var(--lc-crit); background: rgba(var(--lc-crit-rgb), 0.1); box-shadow: inset 0 0 0 1px rgba(var(--lc-crit-rgb), 0.18); }
 .ncs__signal { color: var(--lc-ink-3); }
@@ -345,6 +347,9 @@ html[data-lc-motion='off'] .ncs__more { animation: none; }
 }
 :root[data-nexus-theme='light'] .ncs:hover, :root[data-nexus-theme='light'] .ncs.is-open { background: rgba(11, 18, 32, 0.035); }
 :root[data-nexus-theme='light'] .ncs { --ncs-slide-bg: rgba(252, 250, 246, 0.97); --ncs-ring: #fbf9f4; }
+/* the global light `input { background: … !important }` would paint a checked box white (white tick, invisible) */
+:root[data-nexus-theme='light'] .ncs__check { background: rgba(var(--lc-shade-rgb), 0.04) !important; box-shadow: inset 0 0 0 1.5px rgba(var(--lc-shade-rgb), 0.3); }
+:root[data-nexus-theme='light'] .ncs__check:checked { background: rgb(var(--lc-select-rgb)) !important; box-shadow: none; }
 :root[data-nexus-theme='light'] .ncs__glyph { color: color-mix(in srgb, rgb(var(--app)) 58%, #0b1220); background: linear-gradient(180deg, rgb(var(--app) / 0.2), rgb(var(--app) / 0.1)); box-shadow: inset 0 0 0 1px rgb(var(--app) / 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.7); }
 :root[data-nexus-theme='light'] .ncs.is-dragging .ncs__slide, :root[data-nexus-theme='light'] .ncs[class*='is-swiped'] .ncs__slide { box-shadow: 0 0 0 1px rgba(11, 18, 32, 0.07), 0 10px 24px -18px rgba(30, 36, 52, 0.45); }
 
