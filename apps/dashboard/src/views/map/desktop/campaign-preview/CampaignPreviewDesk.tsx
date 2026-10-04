@@ -65,13 +65,27 @@ function useThemeEpoch() {
 }
 
 function readTokens() {
+  if (typeof document === 'undefined') return { accent: '', exec: '' }
   try {
     const cs = getComputedStyle(document.documentElement)
     return { accent: cs.getPropertyValue('--lc-accent-rgb').trim() || cs.getPropertyValue('--nexus-accent-rgb').trim(), exec: cs.getPropertyValue('--lc-exec-rgb').trim() }
   } catch { return { accent: '', exec: '' } }
 }
 
-export function CampaignPreviewDesk({ map, mapEpoch, reducedMotion, styleMode }: { map: maplibregl.Map | null; mapEpoch: number; reducedMotion: boolean; styleMode: string }) {
+type PreviewDeskProps = { map: maplibregl.Map | null; mapEpoch: number; reducedMotion: boolean; styleMode: string }
+
+/**
+ * Desktop, client-only. On a server render (no window) or outside the modern
+ * desktop shell nothing mounts — the runtime below reads the route location,
+ * the workspace and the map, all of which are browser-only.
+ */
+export function CampaignPreviewDesk(props: PreviewDeskProps) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null
+  if (!document.documentElement.classList.contains('is-desktop-modern')) return null
+  return <CampaignPreviewRuntime {...props} />
+}
+
+function CampaignPreviewRuntime({ map, mapEpoch, reducedMotion, styleMode }: PreviewDeskProps) {
   const { instanceId, pinned, follows, visible } = useAppInstance()
   const location = useRouteLocation()
   const pathKey = useMemo(() => new URLSearchParams(location.split('?')[1] ?? '').get(CAMPAIGN_PREVIEW_PARAM), [location])
