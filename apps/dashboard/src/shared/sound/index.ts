@@ -3,6 +3,7 @@ import { readSoundPrefs, subscribeSoundPrefs, type ExperienceSoundPrefs } from '
 import { claimSoundSurface, desktopSoundOwnsSurface } from './surface'
 import { loadSettings } from '../settings'
 import { isWithinQuietHours } from '../quiet-hours'
+import { createTypingEngine, installTypingSounds, PREVIEW_PHRASE, resolveTypingMaterial, type TypingMaterial } from './typing'
 
 /**
  * THE LEADCOMMAND SOUND SYSTEM.
@@ -193,6 +194,29 @@ export const sound = {
       cuePlay(cue, { emphasis: opts.emphasis ?? 'normal', theme: opts.material ?? prefs.material, volume: GAIN[cue] })
     } catch { /* silent */ } finally { apply() }
   },
+}
+
+/* ── typing sounds ────────────────────────────────────────────────────── */
+
+/** Interface-tier sound: Off silences it; "Pause all alerts" and quiet hours
+ *  hold operational alerts only, so they do not touch typing (as for taps). */
+const typingEngine = createTypingEngine()
+installTypingSounds({
+  getPrefs: () => prefs,
+  isDesktop: desktopSoundOwnsSurface,
+  engine: typingEngine,
+  note: (key, why) => note(`typing ${key}`, 'type', why),
+})
+
+let previewTimers: number[] = []
+/** Settings audition: a short typed phrase in `material` at the typing level. */
+export function previewTyping(opts: { material?: TypingMaterial; volume?: number } = {}) {
+  if (typeof window === 'undefined') return
+  for (const t of previewTimers) window.clearTimeout(t)
+  const material = opts.material ?? resolveTypingMaterial(prefs)
+  const level = prefs.volume * (opts.volume ?? prefs.typingVolume)
+  typingEngine.prewarm(material)
+  previewTimers = PREVIEW_PHRASE.map(([key, at]) => window.setTimeout(() => typingEngine.play(material, key, level), at))
 }
 
 /** DEV inspector: the last decisions the arbiter made and why. */

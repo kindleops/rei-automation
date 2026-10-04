@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react'
-import { LCButton, LCSegmented, cx } from '../lc'
-import { sound, type AlertCategory } from './index'
-import { readSoundPrefs, subscribeSoundPrefs, writeSoundPrefs, type ExperienceSoundPrefs } from './prefs'
+import { LCButton, LCSegmented, LCSelect, cx } from '../lc'
+import { previewTyping, sound, type AlertCategory } from './index'
+import { readSoundPrefs, subscribeSoundPrefs, writeSoundPrefs, type ExperienceSoundPrefs, type TypingMaterialPref } from './prefs'
 import './sound-settings.css'
 
 /**
@@ -21,6 +21,14 @@ const ALERTS: Array<{ key: AlertCategory; label: string; hint: string; cue: 'rea
   { key: 'systemDegradation', label: 'System degradation', hint: 'A runtime falls behind', cue: 'warning' },
 ]
 
+const MATERIAL_LABEL: Record<ExperienceSoundPrefs['material'], string> = { mech: 'Mechanical', default: 'Glass', press: 'Press' }
+const TYPING_HINT: Record<Exclude<TypingMaterialPref, 'follow'>, string> = {
+  mech: 'Bright click, felt plate, key-return snap',
+  default: 'A soft tick that rings like glass',
+  press: 'One crisp premium switch',
+  bubble: 'Soft pitched blips',
+}
+
 const usePrefs = () => useSyncExternalStore(subscribeSoundPrefs, readSoundPrefs, readSoundPrefs)
 
 function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
@@ -37,6 +45,16 @@ export function SoundSettings() {
   const [draftVolume, setDraftVolume] = useState<number | null>(null)
   const volume = draftVolume ?? prefs.volume
   const set = (patch: Partial<ExperienceSoundPrefs>) => writeSoundPrefs(patch)
+  const [draftTyping, setDraftTyping] = useState<number | null>(null)
+  const typingVolume = draftTyping ?? prefs.typingVolume
+  const commitTyping = () => { if (draftTyping !== null) { set({ typingVolume: draftTyping }); previewTyping({ volume: draftTyping }); setDraftTyping(null) } }
+  const typingOptions: Array<{ value: TypingMaterialPref; label: string; hint: string }> = [
+    { value: 'follow', label: `Match sound material (${MATERIAL_LABEL[prefs.material]})`, hint: 'Follows the material above' },
+    { value: 'mech', label: 'Mechanical', hint: TYPING_HINT.mech },
+    { value: 'default', label: 'Glass', hint: TYPING_HINT.default },
+    { value: 'press', label: 'Press', hint: TYPING_HINT.press },
+    { value: 'bubble', label: 'Bubble', hint: TYPING_HINT.bubble },
+  ]
 
   return (
     <div className="snd">
@@ -73,10 +91,43 @@ export function SoundSettings() {
             options={[{ value: 'mech', label: 'Mechanical' }, { value: 'default', label: 'Glass' }, { value: 'press', label: 'Press' }]}
           />
         </div>
-        {prefs.interface === 'full' ? (
+        {prefs.interface !== 'off' ? (
           <div className="snd-row">
-            <span>Typing sounds<small>Very quiet keystrokes in text fields</small></span>
-            <Toggle on={prefs.typing} onChange={(typing) => set({ typing })} label="Typing sounds" />
+            <span>Typing sounds<small>Very quiet keystrokes in text fields. Never in password fields.</small></span>
+            <Toggle on={prefs.typing} onChange={(typing) => { set({ typing }); if (typing) previewTyping() }} label="Typing sounds" />
+          </div>
+        ) : null}
+        {prefs.interface !== 'off' && prefs.typing ? (
+          <div className="snd-typing">
+            <div className="snd-row">
+              <span>Typing material</span>
+              <LCSelect
+                label="Typing material"
+                size="sm"
+                value={prefs.typingMaterial}
+                options={typingOptions}
+                onChange={(v) => { set({ typingMaterial: v }); previewTyping({ material: v === 'follow' ? prefs.material : v }) }}
+              />
+            </div>
+            <div className="snd-row">
+              <span>Typing volume</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.round(typingVolume * 100)}
+                aria-label="Typing volume"
+                onChange={(e) => setDraftTyping(Number(e.target.value) / 100)}
+                onPointerUp={commitTyping}
+                onKeyUp={commitTyping}
+              />
+              <b className="snd-num">{Math.round(typingVolume * 100)}%</b>
+            </div>
+            <div className="snd-row">
+              <span><small>Plays under the main volume. Shortcuts, arrows and held keys stay silent.</small></span>
+              <LCButton variant="ghost" size="sm" onClick={() => previewTyping()} aria-label="Preview typing sounds">Preview</LCButton>
+            </div>
           </div>
         ) : null}
       </section>

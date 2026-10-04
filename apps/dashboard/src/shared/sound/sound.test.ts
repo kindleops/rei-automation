@@ -125,4 +125,14 @@ describe('sound prefs snapshot', () => {
     expect(b.volume).toBe(0.2)
     expect(prefs.readSoundPrefs()).toBe(b)
   })
+
+  it('typing prefs default safely and clamp what is stored', async () => {
+    await fresh()
+    const prefs = await import('./prefs')
+    expect(prefs.readSoundPrefs()).toMatchObject({ typing: false, typingMaterial: 'follow', typingVolume: 0.5 })
+    prefs.writeSoundPrefs({ typingMaterial: 'bubble', typingVolume: 3 as number })
+    const { loadSettings, saveSettings } = await import('../settings')
+    saveSettings({ ...loadSettings(), experienceSound: { typingMaterial: 'nope', typingVolume: 3 } } as never)
+    expect(prefs.readSoundPrefs()).toMatchObject({ typingMaterial: 'follow', typingVolume: 1 })
+  })
 })
