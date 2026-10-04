@@ -2,7 +2,9 @@ import { chromium } from 'playwright'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 /**
- * R8.3/8.4 MAP DYNAMIC DAY/NIGHT capture (READ ONLY) — 8.4 adds city lights
+ * R8.3/8.4/8.5 MAP DYNAMIC DAY/NIGHT capture (READ ONLY) — 8.5: --style=auto (default)
+ * keeps Dynamic's satellite look; adds the z8/z9 Black Marble → graded-satellite handoff.
+ * — 8.4 adds city lights
  * (NASA Black Marble via GIBS; plain GETs to gibs.earthdata.nasa.gov).
  *
  * The sun is pinned to a fixed instant with the DEV-only `?sun_at=` override
@@ -22,13 +24,14 @@ const arg = (n, f) => { const h = process.argv.find((a) => a.startsWith(`--${n}=
 const BASE = arg('base', 'http://localhost:5173')
 const OUT = path.resolve(arg('out', 'artifacts/r83-map-daynight'))
 const THEME = arg('theme', 'dark')
-const STYLE = arg('style', THEME === 'light' ? 'light_street' : 'dark_ops')
+// --style=auto: leave the basemap to Dynamic's own look (8.5: satellite day + Black Marble night)
+const STYLE = arg('style', 'auto')
 const SUN_AT = arg('at', '2026-10-03T23:30:00Z')
 const [W, H] = arg('size', '1440x900').split('x').map(Number)
 await fs.mkdir(OUT, { recursive: true })
 const browser = await chromium.launch()
 const ctx = await browser.newContext({ viewport: { width: W, height: H } })
-await ctx.addInitScript((t) => {
+await ctx.addInitScript(([t, style]) => {
   try {
     localStorage.removeItem('nexus.desktop.split')
     localStorage.setItem('nexus.desktop.ultrawide.seeded', '1')
@@ -37,9 +40,9 @@ await ctx.addInitScript((t) => {
     const lp = JSON.parse(localStorage.getItem('nexus.map.mobileLens') || '{}')
     localStorage.setItem('nexus.map.mobileLens', JSON.stringify({ ...lp, lens: 'radar', legendCollapsed: false }))
     const lv = JSON.parse(localStorage.getItem('nexus.map.living') || '{}')
-    localStorage.setItem('nexus.map.living', JSON.stringify({ ...lv, enabled: true, daylight: true, sun: 'dynamic' }))
+    localStorage.setItem('nexus.map.living', JSON.stringify({ ...lv, enabled: true, daylight: true, sun: 'dynamic', cityLights: true, ...(style === 'auto' ? { sunLook: 'satellite' } : {}) }))
   } catch { /* ignore */ }
-}, THEME)
+}, [THEME, STYLE])
 const page = await ctx.newPage()
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e.message).slice(0, 200)))
@@ -63,7 +66,7 @@ await wait(4000)
 // map style for this theme (Appearance tile — a local view choice)
 await page.click('.mxd-rail [data-map-control="appearance"]').catch((e) => console.log('note: no appearance', e.message.slice(0, 80)))
 await wait(900)
-await page.click(`.mxd-appearance [data-theme-id="${STYLE}"]`).catch((e) => console.log('note: no style tile', e.message.slice(0, 80)))
+if (STYLE !== 'auto') await page.click(`.mxd-appearance [data-theme-id="${STYLE}"]`).catch((e) => console.log('note: no style tile', e.message.slice(0, 80)))
 await wait(4000)
 await jump([-96, 38.5], 3.7, 9000)
 await shot('appearance-popover')
@@ -82,6 +85,8 @@ await jump([-118.3, 34.05], 10.2); await shot('metro-west-losangeles')
 await jump([-87.65, 41.88], 9.4); await shot('metro-terminator-chicago')
 await jump([-76, 40.2], 6.6, 9000); await shot('region-east-lights')
 // street
+await jump([-74.0, 40.72], 8.6, 9000); await shot('handoff-z8-newyork')
+await jump([-74.0, 40.72], 9.4, 9000); await shot('handoff-z9-newyork')
 await jump([-73.985, 40.748], 15.2); await shot('street-east-newyork')
 await jump([-96.80, 32.78], 15.2); await shot('street-west-dallas')
 

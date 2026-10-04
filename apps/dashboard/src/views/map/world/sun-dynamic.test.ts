@@ -103,3 +103,15 @@ describe('hint', () => {
     expect(sunEventHint(null, now)).toBeNull()
   })
 })
+
+describe('[8.5] satellite look grade', () => {
+  it('past Black Marble the night photo is graded ~90% toward blue-black, with no day lift', async () => {
+    const { dynamicPalette } = await import('./sun-dynamic')
+    const p = dynamicPalette('satellite')
+    expect(p.night).toBeGreaterThanOrEqual(0.88)
+    expect(p.day).toBe(0)
+    const fc = buildDynamicSun(AT, 'satellite')
+    const night = fc.features.filter((f) => f.properties?.role === 'night')
+    expect(compositeOf(night.filter((f) => containsPoint(f.geometry as GeoJSON.Polygon, 10, 0)).map((f) => Number(f.properties?.o)))).toBeCloseTo(p.night, 2)
+  })
+})

@@ -24,9 +24,16 @@ export interface LivingSettings {
   sun: SunMode
   /** Real night lights (NASA Black Marble) on the night side, in Dynamic mode. */
   cityLights: boolean
+  /**
+   * [8.5] Dynamic's look: 'satellite' (default) = satellite daylight + Black
+   * Marble night; 'current' = the operator's chosen basemap, tinted.
+   */
+  sunLook: 'satellite' | 'current'
+  /** The basemap in use before Dynamic switched to satellite (restored on leaving). */
+  sunPrevStyle: string | null
 }
 
-export const LIVING_DEFAULTS: LivingSettings = { enabled: true, daylight: true, localTime: true, buildings: true, zones: true, sun: 'ambient', cityLights: true }
+export const LIVING_DEFAULTS: LivingSettings = { enabled: true, daylight: true, localTime: true, buildings: true, zones: true, sun: 'ambient', cityLights: true, sunLook: 'satellite', sunPrevStyle: null }
 const KEY = 'nexus.map.living'
 const EVT = 'nexus:living-map'
 

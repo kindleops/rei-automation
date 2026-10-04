@@ -66,3 +66,33 @@ describe('lights extraction', () => {
     expect(LIGHTS_BUCKET_MS).toBe(120_000)
   })
 })
+
+describe('[8.5] night base (Black Marble as the night imagery)', () => {
+  it('uses its own twilight band: none above −1°, full below −11°', async () => {
+    const { BASE_FULL_ALT, BASE_ON_ALT } = await import('./city-lights')
+    const f = nightFactorTile(3, 2, 3, AT, 32, BASE_ON_ALT, BASE_FULL_ALT)
+    for (let py = 0; py < 32; py += 4) {
+      for (let px = 0; px < 32; px += 4) {
+        const [lng, lat] = pixelLngLat(3, 2, 3, px, py, 32)
+        const alt = solarPosition(AT, lat, lng).altitude
+        if (alt > BASE_ON_ALT + 0.05) expect(f[py * 32 + px]).toBe(0)
+        if (alt < BASE_FULL_ALT - 0.05) expect(f[py * 32 + px]).toBe(1)
+      }
+    }
+  })
+  it('tile URLs carry the kind', async () => {
+    const { lightsTileUrl } = await import('./city-lights')
+    expect(lightsTileUrl(120000, 'base')).toBe('nxlights://{z}/{x}/{y}?t=120000&k=base')
+    expect(lightsTileUrl(120000)).toBe('nxlights://{z}/{x}/{y}?t=120000&k=lights')
+  })
+})
+
+describe('[8.5] world layers sit under roads and places over imagery', () => {
+  it('worldUnderlay stops at the first hybrid road/label layer', async () => {
+    const { worldUnderlay } = await import('./useWorldLight')
+    const fake = (ids: Array<[string, string]>) => ({ getStyle: () => ({ layers: ids.map(([id, type]) => ({ id, type })) }) }) as never
+    expect(worldUnderlay(fake([['background', 'background'], ['satellite', 'raster'], ['nx-icm-hybrid-roads', 'line'], ['nx-icm-hybrid-labels', 'symbol']]))).toBe('nx-icm-hybrid-roads')
+    expect(worldUnderlay(fake([['satellite', 'raster'], ['nx-world-light', 'fill'], ['nx-hybrid-roads', 'raster'], ['place', 'symbol']]))).toBe('nx-hybrid-roads')
+    expect(worldUnderlay(fake([['land', 'fill'], ['road', 'line'], ['place', 'symbol']]))).toBe('place')
+  })
+})
