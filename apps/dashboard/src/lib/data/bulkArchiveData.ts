@@ -11,7 +11,7 @@ import { callBackend } from '../api/backendClient'
 export type BulkObjectType = 'inbox_thread' | 'opportunity' | 'campaign'
 export type BulkAction = 'archive' | 'unarchive'
 /** `unconfirmed`: the request got no answer in time — the write may still have landed (RC 8.3.2). */
-export type BulkOutcome = 'archived' | 'unarchived' | 'unchanged' | 'blocked' | 'failed' | 'unconfirmed'
+export type BulkOutcome = 'archived' | 'unarchived' | 'changed' | 'unchanged' | 'blocked' | 'failed' | 'unconfirmed'
 
 export interface BulkItemResult {
   id: string
@@ -122,7 +122,7 @@ export type BulkItemPhase = 'pending' | 'done' | 'recheck'
 export function summarizeItems(results: readonly BulkItemResult[]): BulkSummary {
   const s: BulkSummary = { requested: results.length, changed: 0, unchanged: 0, blocked: 0, failed: 0, unconfirmed: 0 }
   for (const r of results) {
-    if (r.outcome === 'archived' || r.outcome === 'unarchived') s.changed += 1
+    if (r.outcome === 'archived' || r.outcome === 'unarchived' || r.outcome === 'changed') s.changed += 1
     else if (r.outcome === 'unchanged') s.unchanged += 1
     else if (r.outcome === 'blocked') s.blocked += 1
     else if (r.outcome === 'unconfirmed') s.unconfirmed = (s.unconfirmed ?? 0) + 1
@@ -131,13 +131,12 @@ export function summarizeItems(results: readonly BulkItemResult[]): BulkSummary 
   return s
 }
 
-const changedOutcome = (action: BulkAction): BulkOutcome => (action === 'archive' ? 'archived' : 'unarchived')
+/** One id's answer from a per-item poster. */
+export type PerItemPost = (id: string, timeoutMs: number) => Promise<{ ok: true; results: BulkItemResult[] } | { ok: false; status: number; message: string; timedOut?: boolean }>
 
-async function postOne(
-  post: BulkPoster, objectType: BulkObjectType, action: BulkAction, id: string, timeoutMs: number,
-): Promise<{ result: BulkItemResult; halt: string | null }> {
+async function sendOne(post: PerItemPost, id: string, timeoutMs: number): Promise<{ result: BulkItemResult; halt: string | null }> {
   try {
-    const res = await post(objectType, action, [id], { timeoutMs })
+    const res = await post(id, timeoutMs)
     if (res.ok) {
       return { result: res.results.find((r) => r.id === id) ?? { id, ok: false, outcome: 'failed', reason: 'no_result', message: 'The server returned no result for this item.' }, halt: null }
     }
@@ -148,6 +147,62 @@ async function postOne(
   } catch (error) {
     return { result: { id, ok: false, outcome: 'failed', reason: 'transport', message: error instanceof Error ? error.message : 'Request failed' }, halt: null }
   }
+}
+
+/**
+ * The per-item engine every bulk action shares: 3 in flight, per-request deadline,
+ * progress + per-row state as each item settles, timeouts → unconfirmed, one
+ * recheck of unconfirmed ids (an idempotent `unchanged` confirms them as
+ * `confirmedOutcome`), an auth refusal stops the rest.
+ */
+export async function runPerItem({
+  ids, post, confirmedOutcome, onItem, onProgress,
+  concurrency = BULK_ITEM_CONCURRENCY, timeoutMs = BULK_ITEM_TIMEOUT_MS, recheck = true,
+}: {
+  ids: readonly string[]
+  post: PerItemPost
+  confirmedOutcome: BulkOutcome
+  onItem?: (id: string, result: BulkItemResult | null, phase: BulkItemPhase) => void
+  onProgress?: (done: number, total: number) => void
+  concurrency?: number
+  timeoutMs?: number
+  recheck?: boolean
+}): Promise<{ results: BulkItemResult[]; summary: BulkSummary; changedIds: string[] }> {
+  const unique = [...new Set(ids)]
+  const results = new Map<string, BulkItemResult>()
+  let halted: string | null = null
+  let done = 0
+  onProgress?.(0, unique.length)
+  for (const id of unique) onItem?.(id, null, 'pending')
+  let next = 0
+  const worker = async () => {
+    while (next < unique.length) {
+      const id = unique[next++]
+      if (halted) {
+        results.set(id, { id, ok: false, outcome: 'failed', reason: 'not_attempted', message: halted })
+      } else {
+        const { result, halt } = await sendOne(post, id, timeoutMs)
+        if (halt) halted = halt
+        results.set(id, result)
+      }
+      done += 1
+      onItem?.(id, results.get(id) ?? null, 'done')
+      onProgress?.(done, unique.length)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, unique.length)) }, worker))
+  if (recheck && !halted) {
+    for (const id of unique.filter((x) => results.get(x)?.outcome === 'unconfirmed')) {
+      onItem?.(id, results.get(id) ?? null, 'recheck')
+      const { result } = await sendOne(post, id, timeoutMs)
+      const settled = result.outcome === 'unchanged' ? { ...result, ok: true, outcome: confirmedOutcome, reason: 'confirmed_on_recheck' } : result
+      results.set(id, settled)
+      onItem?.(id, settled, 'done')
+    }
+  }
+  const ordered = unique.map((id) => results.get(id) ?? { id, ok: false, outcome: 'failed' as const, reason: 'no_result' })
+  const changedIds = ordered.filter((r) => r.outcome === 'archived' || r.outcome === 'unarchived' || r.outcome === 'changed').map((r) => r.id)
+  return { results: ordered, summary: summarizeItems(ordered), changedIds }
 }
 
 export async function runBulkPerItem({
@@ -164,46 +219,11 @@ export async function runBulkPerItem({
   timeoutMs?: number
   recheck?: boolean
 }): Promise<BulkRunReport> {
-  const unique = [...new Set(ids)]
-  const results = new Map<string, BulkItemResult>()
-  let halted: string | null = null
-  let done = 0
-  onProgress?.(0, unique.length)
-  for (const id of unique) onItem?.(id, null, 'pending')
-
-  let next = 0
-  const worker = async () => {
-    while (next < unique.length) {
-      const id = unique[next++]
-      if (halted) {
-        results.set(id, { id, ok: false, outcome: 'failed', reason: 'not_attempted', message: halted })
-      } else {
-        const { result, halt } = await postOne(post, objectType, action, id, timeoutMs)
-        if (halt) halted = halt
-        results.set(id, result)
-      }
-      done += 1
-      onItem?.(id, results.get(id) ?? null, 'done')
-      onProgress?.(done, unique.length)
-    }
-  }
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, unique.length)) }, worker))
-
-  if (recheck && !halted) {
-    const unconfirmed = unique.filter((id) => results.get(id)?.outcome === 'unconfirmed')
-    for (const id of unconfirmed) {
-      onItem?.(id, results.get(id) ?? null, 'recheck')
-      const { result } = await postOne(post, objectType, action, id, timeoutMs)
-      // the item had landed: the idempotent server now reports it already in place
-      const settled = result.outcome === 'unchanged'
-        ? { ...result, ok: true, outcome: changedOutcome(action), reason: 'confirmed_on_recheck' }
-        : result
-      results.set(id, settled)
-      onItem?.(id, settled, 'done')
-    }
-  }
-
-  const ordered = unique.map((id) => results.get(id) ?? { id, ok: false, outcome: 'failed' as const, reason: 'no_result' })
-  const changedIds = ordered.filter((r) => r.outcome === 'archived' || r.outcome === 'unarchived').map((r) => r.id)
-  return { objectType, action, results: ordered, summary: summarizeItems(ordered), changedIds }
+  const run = await runPerItem({
+    ids,
+    post: (id, ms) => post(objectType, action, [id], { timeoutMs: ms }),
+    confirmedOutcome: action === 'archive' ? 'archived' : 'unarchived',
+    onItem, onProgress, concurrency, timeoutMs, recheck,
+  })
+  return { objectType, action, ...run }
 }

@@ -41,6 +41,8 @@ import { enableRowSignals, useRowArrival, useRowSignal, type RowSignal } from '.
 import { useLedgerClock } from './use-ledger-clock'
 import { LCBulkBar, useLcSelection } from '../../../shared/lc'
 import { useBulkArchive, type BulkItemState } from '../../../lib/data/useBulkArchive'
+import { useBulkLeadState, type BulkLeadStateAction } from '../../../lib/data/bulkLeadStateData'
+import { BulkChoiceDialog, type BulkChoiceKind } from './BulkChoiceDialog'
 import type { BulkRunReport } from '../../../lib/data/bulkArchiveData'
 import './inbox-desk.css'
 
@@ -166,8 +168,8 @@ function BulkMark({ state }: { state: BulkItemState }) {
     return <LCStatus label={state.phase === 'recheck' ? 'Rechecking…' : 'Working…'} tone="exec" quiet title="This item is being written" />
   }
   const { result } = state
-  if (result.outcome === 'archived' || result.outcome === 'unarchived' || result.outcome === 'unchanged') {
-    const label = result.outcome === 'unchanged' ? '✓ Already done' : result.outcome === 'archived' ? '✓ Archived' : '✓ Restored'
+  if (result.outcome === 'archived' || result.outcome === 'unarchived' || result.outcome === 'unchanged' || result.outcome === 'changed') {
+    const label = result.outcome === 'unchanged' ? '✓ Already done' : result.outcome === 'archived' ? '✓ Archived' : result.outcome === 'unarchived' ? '✓ Restored' : '✓ Done'
     return <LCStatus label={label} tone="ok" title={result.reason === 'confirmed_on_recheck' ? 'Confirmed on a second check' : 'Written'} />
   }
   if (result.outcome === 'unconfirmed') {
@@ -452,7 +454,34 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
     source: 'inbox',
   })
   const { clear: clearSelection, ids: selectedIds, onRowClick: selectionRowClick } = selection
-  const { archive: bulkArchive, undo: bulkRestore, items: bulkItems } = bulk
+  const { archive: bulkArchive, undo: bulkRestore, items: archiveItems, clearItems: clearArchiveItems } = bulk
+  // [bulk bar] stage / status / follow-up / snooze / read — one server authority, per-item progress
+  const onLeadChanged = useCallback((changedIds: string[], action: BulkLeadStateAction) => {
+    // a snooze leaves every operational lens (Snoozed shows it); the others re-read
+    if (action === 'snooze' && lens !== 'snoozed') {
+      setGoneHere((prev) => {
+        const next = new Set(prev.lens === lens ? prev.keys : [])
+        for (const key of changedIds) next.add(key)
+        return { lens, keys: next }
+      })
+    }
+    onBulkChanged?.()
+  }, [lens, onBulkChanged])
+  const leadActionRef = useRef<BulkLeadStateAction>('read')
+  const leadBulk = useBulkLeadState({ noun: THREAD_NOUN, labelOf, onChanged: (ids) => onLeadChanged(ids, leadActionRef.current) })
+  const [choice, setChoiceState] = useState<{ kind: BulkChoiceKind; at: number } | null>(null)
+  const setChoice = useCallback((kind: BulkChoiceKind | null) => setChoiceState(kind ? { kind, at: Date.now() } : null), [])
+  const runLead = useCallback(async (action: BulkLeadStateAction, value: string | null = null) => {
+    const keys = selectedIds.map((id) => rowById.get(id)).map((row) => (row ? factsKeyOf(row) : '')).filter(Boolean)
+    if (!keys.length) return
+    leadActionRef.current = action
+    clearArchiveItems()
+    const report = await leadBulk.run(action, keys, value)
+    if (report && report.summary.changed > 0) clearSelection()
+  }, [clearArchiveItems, clearSelection, leadBulk, rowById, selectedIds])
+  // the most recent run's per-row marks
+  const bulkItems = leadBulk.items.size ? leadBulk.items : archiveItems
+  const anyBulkBusy = bulk.busy || leadBulk.busy
   const archiveSelected = useCallback(async () => {
     const keys = selectedIds.map((id) => rowById.get(id)).map((row) => (row ? factsKeyOf(row) : '')).filter(Boolean)
     if (archivedLens) {
@@ -722,14 +751,32 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
             noun={THREAD_NOUN}
             onSelectAll={selection.selectAll}
             onClear={selection.clear}
-            actions={[archivedLens
-              ? { id: 'unarchive', label: 'Unarchive', icon: 'refresh-cw', onRun: () => { void archiveSelected() }, disabled: bulk.busy }
-              : { id: 'archive', label: 'Archive', icon: 'archive', onRun: () => { void archiveSelected() }, disabled: bulk.busy }]}
-            progress={bulk.progress}
-            outcome={bulk.outcome}
-            onDismissOutcome={bulk.dismissOutcome}
+            actions={[
+              archivedLens
+                ? { id: 'unarchive', label: 'Unarchive', icon: 'refresh-cw', onRun: () => { leadBulk.clearItems(); void archiveSelected() }, disabled: anyBulkBusy }
+                : { id: 'archive', label: 'Archive', icon: 'archive', onRun: () => { leadBulk.clearItems(); void archiveSelected() }, disabled: anyBulkBusy },
+              { id: 'stage', label: 'Stage…', icon: 'layers', onRun: () => setChoice('stage'), disabled: anyBulkBusy },
+              { id: 'follow_up', label: 'Follow-up…', icon: 'calendar', onRun: () => setChoice('follow_up'), disabled: anyBulkBusy },
+              lens === 'snoozed'
+                ? { id: 'unsnooze', label: 'Unsnooze', icon: 'clock', onRun: () => { void runLead('unsnooze') }, disabled: anyBulkBusy }
+                : { id: 'snooze', label: 'Snooze…', icon: 'clock', onRun: () => setChoice('snooze'), disabled: anyBulkBusy },
+              { id: 'read', label: 'Mark read', icon: 'check', onRun: () => { void runLead('read') }, disabled: anyBulkBusy },
+              { id: 'unread', label: 'Mark unread', icon: 'message', onRun: () => { void runLead('unread') }, disabled: anyBulkBusy },
+              { id: 'status', label: 'Status…', icon: 'activity', onRun: () => setChoice('status'), disabled: anyBulkBusy },
+            ]}
+            progress={bulk.progress ?? leadBulk.progress}
+            outcome={bulk.outcome ?? leadBulk.outcome}
+            onDismissOutcome={() => { bulk.dismissOutcome(); leadBulk.dismissOutcome() }}
           />
         ) : null}
+        <BulkChoiceDialog
+          kind={choice?.kind ?? null}
+          openedAt={choice?.at ?? 0}
+          count={selection.count}
+          noun={THREAD_NOUN}
+          onCancel={() => setChoice(null)}
+          onConfirm={(value) => { const kind = choice?.kind; setChoice(null); if (kind) void runLead(kind, value) }}
+        />
         {showLoadMore && lens !== 'scheduled' ? (
           <footer className="ixl-foot">
             <span className="ixl-foot__count">
