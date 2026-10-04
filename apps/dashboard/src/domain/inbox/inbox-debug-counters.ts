@@ -10,12 +10,14 @@ export interface InboxDebugCounters {
   realtimeChannelsOpen: number
   realtimeSubscribes: number
   countsRefreshes: number
+  /** counts requests actually sent (refreshes from several Inbox instances join one) */
+  countsReads: number
   paneReads: number
   paneJoined: number
   paneCacheHits: number
 }
 
-const counters: InboxDebugCounters = { realtimeChannelsOpen: 0, realtimeSubscribes: 0, countsRefreshes: 0, paneReads: 0, paneJoined: 0, paneCacheHits: 0 }
+const counters: InboxDebugCounters = { realtimeChannelsOpen: 0, realtimeSubscribes: 0, countsRefreshes: 0, countsReads: 0, paneReads: 0, paneJoined: 0, paneCacheHits: 0 }
 const enabled = Boolean(import.meta.env?.DEV)
 
 export function bumpInboxCounter(key: keyof InboxDebugCounters, by = 1) {

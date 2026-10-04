@@ -1,3 +1,4 @@
+import { createSharedFetch } from '../../domain/inbox/shared-counts-fetch'
 import { bumpInboxCounter } from '../../domain/inbox/inbox-debug-counters'
 import { uniqueChannelName } from '../../lib/data/realtime-channel'
 import { useState, useEffect, useCallback, useRef, useReducer } from 'react'
@@ -110,6 +111,9 @@ const withParkedCounts = (counts: Record<string, number>, payload: unknown): Rec
   return next
 }
 
+// a forced (signalled) read, so the 60 s GET cache never answers for a change we were told about
+const sharedInboxCountsRead = createSharedFetch((signal) => { bumpInboxCounter('countsReads'); return backendClient.fetchInboxCounts(signal) })
+
 export const refreshAuthoritativeViewCounts = (
   dispatch: React.Dispatch<InboxStoreAction>,
   onWarning?: (warning: string | null) => void,
@@ -131,8 +135,8 @@ export const refreshAuthoritativeViewCounts = (
    * still protects render-driven calls; it just no longer outranks a change we
    * were told about.
    */
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-  void backendClient.fetchInboxCounts(controller?.signal).then((res) => {
+  // every Inbox instance on the page (Inbox / Map / Pipeline hosts) joins one read
+  void sharedInboxCountsRead().then((res) => {
     const applied = applyInboxCountsFetchResult({
       ok: res.ok,
       status: res.status,
