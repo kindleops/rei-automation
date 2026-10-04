@@ -15,6 +15,7 @@ import { MultiInboxCountControl, MultiInboxLayout } from './multi/MultiInboxLayo
 import { InboxSecondaryPane } from './multi/InboxSecondaryPane'
 import { getPaneQueryCache } from './multi/pane-data'
 import { VisibilityPendingNotice } from './VisibilityPendingNotice'
+import { openRealDealIntelligence } from './open-real-app'
 import { closePane as closeMultiPane, focusPane as focusMultiPane, openBeside as openMultiBeside, sameViewAs, setCount as setMultiCount, setPaneLens as setMultiPaneLens, clampCount, type PaneCount } from './multi/multi-inbox-model'
 import {
   describeThreadReference,
@@ -2420,6 +2421,26 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const handleOpenDealIntelligence = useCallback((threadId?: string | null) => {
     const resolvedThreadId = threadId || resolveDealIntelThreadId()
     const pendingIdentity = peekPendingInboxDealIntelligenceIdentity()
+    /*
+     * DESKTOP: the real app, beside — never the embedded panel swap that trapped
+     * the operator on the Map / classic Calendar hosts (no URL, no history).
+     * The phone keeps its in-shell flow below unchanged.
+     */
+    if (isModernDesktop) {
+      const thread = resolvedThreadId ? findThreadByRef(threads, resolvedThreadId) : null
+      const row = (thread ?? {}) as unknown as Record<string, unknown>
+      const outcome = openRealDealIntelligence({
+        propertyId: String(thread?.propertyId ?? row.property_id ?? pendingIdentity?.propertyId ?? '').trim() || null,
+        threadKey: String(thread?.threadKey ?? pendingIdentity?.threadKey ?? '').trim() || null,
+        masterOwnerId: String(thread?.ownerId ?? pendingIdentity?.masterOwnerId ?? '').trim() || null,
+        address: thread ? resolveThreadAddressLine(thread) || null : null,
+      })
+      if (outcome !== 'unavailable') {
+        clearPendingInboxDealIntelligence()
+        clearPendingInboxDealIntelligenceIdentity()
+        return
+      }
+    }
     /**
      * A PROPERTY WITH NO CONVERSATION STILL HAS A DEAL.
      *
@@ -2469,7 +2490,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setWorkspaceWidthOverrides({})
     setSelectedWorkspaceViews(['deal_intelligence'])
     clearPendingInboxDealIntelligence()
-  }, [isMobile, isRouteFullscreen, resolveDealIntelThreadId, selectThreadForDealIntel])
+  }, [isMobile, isModernDesktop, isRouteFullscreen, resolveDealIntelThreadId, selectThreadForDealIntel, threads])
 
   // Close Deal Intelligence and return to the thread list. Counterpart to the
   // open event: the dock fires this when Inbox is tapped while the panel is
