@@ -25,19 +25,22 @@ import {
   buildLedgerRow,
   filteredCountLabel,
   formatCount,
+  isLoadMoreExhausted,
   isPrimaryLens,
   lensCount,
   lensDef,
   moveCursor,
+  shouldShowLoadMore,
   type DeskLens,
   type DeskLensKey,
   type LedgerRowModel,
+  type LoadMoreProbe,
 } from './ledger-model'
 import { readLedgerFacts, useLedgerFacts } from './ledger-facts'
 import { enableRowSignals, useRowArrival, useRowSignal, type RowSignal } from './live-row-signals'
 import { useLedgerClock } from './use-ledger-clock'
 import { LCBulkBar, useLcSelection } from '../../../shared/lc'
-import { useBulkArchive } from '../../../lib/data/useBulkArchive'
+import { useBulkArchive, type BulkItemState } from '../../../lib/data/useBulkArchive'
 import type { BulkRunReport } from '../../../lib/data/bulkArchiveData'
 import './inbox-desk.css'
 
@@ -76,7 +79,8 @@ export interface InboxDeskLedgerProps {
   onRemoveFilterChip: (key: string) => void
   onClearFilters: () => void
   onOpen: (threadId: string) => void
-  onLoadMore: () => void
+  /** may return the load's promise; the footer uses it to learn that a load added nothing */
+  onLoadMore: () => void | Promise<unknown>
   onRetry: () => void
   onSnooze: (threadId: string) => void
   onMarkRead: (threadId: string) => void
@@ -148,8 +152,24 @@ function TransientChip({ signal }: { signal: RowSignal }) {
   }
 }
 
+/** [8.3.2] one row's part of a bulk run: working → ✓ / ✗ reason / unconfirmed. */
+function BulkMark({ state }: { state: BulkItemState }) {
+  if (state.phase !== 'done') {
+    return <LCStatus label={state.phase === 'recheck' ? 'Rechecking…' : 'Working…'} tone="exec" quiet title="This item is being written" />
+  }
+  const { result } = state
+  if (result.outcome === 'archived' || result.outcome === 'unarchived' || result.outcome === 'unchanged') {
+    const label = result.outcome === 'unchanged' ? '✓ Already done' : result.outcome === 'archived' ? '✓ Archived' : '✓ Restored'
+    return <LCStatus label={label} tone="ok" title={result.reason === 'confirmed_on_recheck' ? 'Confirmed on a second check' : 'Written'} />
+  }
+  if (result.outcome === 'unconfirmed') {
+    return <LCStatus label="? Unconfirmed" tone="attn" title={result.message || 'No answer in time — it may still have completed.'} />
+  }
+  return <LCStatus label={result.outcome === 'blocked' ? '✗ Blocked' : '✗ Not written'} tone={result.outcome === 'blocked' ? 'attn' : 'crit'} title={result.message || result.reason || 'Not changed'} />
+}
+
 const LedgerRow = memo(function LedgerRow({
-  thread, model, selected, cursor, picked, selecting, optionId, handlers,
+  thread, model, selected, cursor, picked, selecting, optionId, handlers, bulkState,
 }: {
   thread: InboxWorkflowThread
   model: LedgerRowModel
@@ -161,6 +181,8 @@ const LedgerRow = memo(function LedgerRow({
   selecting: boolean
   optionId: string
   handlers: RowHandlers
+  /** [8.3.2] this row's state in a running / just-finished bulk action */
+  bulkState?: BulkItemState | null
 }) {
   const signal = useRowSignal(model.threadKey)
   const stateTransient = signal && signal.kind !== 'arrival' && signal.kind !== 'stage' ? signal : null
@@ -270,7 +292,7 @@ const LedgerRow = memo(function LedgerRow({
         </span>
 
         <span className="ixl-row__state">
-          {stateTransient ? <TransientChip signal={stateTransient} /> : model.lane ? (
+          {bulkState ? <BulkMark state={bulkState} /> : stateTransient ? <TransientChip signal={stateTransient} /> : model.lane ? (
             <LCStatus label={model.lane.label} tone={model.lane.tone} quiet={model.lane.quiet} title={model.needsYouWhy ?? model.lane.title} />
           ) : null}
           {model.laneDetail && !stateTransient ? <span className="ixl-row__detail">{model.laneDetail}</span> : null}
@@ -305,13 +327,14 @@ interface SlotProps {
   selectedId: string | null
   cursorId: string | null
   picked: ReadonlySet<string>
+  bulkItems: ReadonlyMap<string, BulkItemState>
   now: number
   factsVersion: number
   idPrefix: string
   handlers: RowHandlers
 }
 
-function LedgerSlot({ index, style, rows, lens, selectedId, cursorId, picked, now, idPrefix, handlers }: RowComponentProps<SlotProps>) {
+function LedgerSlot({ index, style, rows, lens, selectedId, cursorId, picked, bulkItems, now, idPrefix, handlers }: RowComponentProps<SlotProps>) {
   const thread = rows[index]
   const factsKey = thread ? factsKeyOf(thread) : ''
   const arrivedAt = useRowArrival(factsKey || null)
@@ -328,6 +351,7 @@ function LedgerSlot({ index, style, rows, lens, selectedId, cursorId, picked, no
         selecting={picked.size > 0}
         optionId={`${idPrefix}-${index}`}
         handlers={handlers}
+        bulkState={factsKey ? bulkItems.get(factsKey) ?? null : null}
       />
     </div>
   )
@@ -420,7 +444,7 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
     source: 'inbox',
   })
   const { clear: clearSelection, ids: selectedIds, onRowClick: selectionRowClick } = selection
-  const { archive: bulkArchive, undo: bulkRestore } = bulk
+  const { archive: bulkArchive, undo: bulkRestore, items: bulkItems } = bulk
   const archiveSelected = useCallback(async () => {
     const keys = selectedIds.map((id) => rowById.get(id)).map((row) => (row ? factsKeyOf(row) : '')).filter(Boolean)
     if (archivedLens) {
@@ -453,8 +477,8 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
 
   const picked = selection.selected
   const rowProps = useMemo<SlotProps>(() => ({
-    rows, lens, selectedId, cursorId, picked, now, factsVersion, idPrefix, handlers,
-  }), [cursorId, factsVersion, handlers, lens, now, picked, rows, selectedId])
+    rows, lens, selectedId, cursorId, picked, bulkItems, now, factsVersion, idPrefix, handlers,
+  }), [bulkItems, cursorId, factsVersion, handlers, lens, now, picked, rows, selectedId])
 
   /* scroll anchoring: a reply landing above the fold never moves what you are reading */
   const anchorRef = useRef<{ id: string; index: number } | null>(null)
@@ -561,7 +585,17 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
 
   const currentDef = lens === 'filtered' ? null : lensDef(lens as DeskLens)
   const lensTotal = currentDef ? lensCount(counts, currentDef) : filteredTotal
-  const showLoadMore = rows.length > 0 && (canLoadMore || (typeof lensTotal === 'number' && lensTotal > rows.length))
+  // [8.3.2] a Load more that settles without adding a row ends the paging for this question
+  const [loadProbe, setLoadProbe] = useState<LoadMoreProbe | null>(null)
+  const loadExhausted = isLoadMoreExhausted(loadProbe, viewKey, rows.length)
+  const showLoadMore = shouldShowLoadMore({ rowCount: rows.length, canLoadMore, lensTotal, exhausted: loadExhausted })
+  const handleLoadMore = useCallback(() => {
+    const probe = { key: viewKey, before: rows.length, settled: false }
+    setLoadProbe(probe)
+    Promise.resolve(onLoadMore()).catch(() => undefined).finally(() => {
+      setLoadProbe((current) => (current === probe ? { ...probe, settled: true } : current))
+    })
+  }, [onLoadMore, rows.length, viewKey])
 
   let body: ReactNode
   if (lens === 'scheduled' && scheduledPanel) {
@@ -690,9 +724,15 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
                 ? filteredCountLabel(filteredTotal, rows.length, canLoadMore)
                 : `Showing ${rows.length.toLocaleString('en-US')}${typeof lensTotal === 'number' ? ` of ${lensTotal.toLocaleString('en-US')}` : ''}`}
             </span>
-            <LCButton variant="quiet" size="sm" onClick={onLoadMore} loading={loading}>
+            <LCButton variant="quiet" size="sm" onClick={handleLoadMore} loading={loading || Boolean(loadProbe && !loadProbe.settled)}>
               Load more
             </LCButton>
+          </footer>
+        ) : loadExhausted && lens !== 'scheduled' ? (
+          <footer className="ixl-foot">
+            <span className="ixl-foot__count">
+              {`Showing ${rows.length.toLocaleString('en-US')}${typeof lensTotal === 'number' && lensTotal > rows.length ? ` of ${lensTotal.toLocaleString('en-US')} counted` : ''} · nothing more loads for this list`}
+            </span>
           </footer>
         ) : null}
       </div>
