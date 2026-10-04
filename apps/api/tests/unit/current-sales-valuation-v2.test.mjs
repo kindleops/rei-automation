@@ -16,6 +16,7 @@ import { calculateAcquisitionDecision, normalizePropertyFeatures } from '../../s
 import {
   CURRENT_SALES_V2, V2_REASONS, valueWithCurrentSalesV2, dedupeEconomicSales, qualificationReasons,
   bulkConsiderationIndex, rankLikeEngineRpc, rpcSimilarity, toEngineComp, withMinCompGuard, selectCurrentSalesCandidates,
+  realUnits, rpcAssetRank,
 } from '../../src/lib/acquisition/shadow/currentSalesValuationV2.js'
 
 const NOW = new Date('2026-10-01T00:00:00Z')
@@ -146,4 +147,48 @@ test('5+ unit guard: fewer than 3 selected comps falls back to the engine no-com
   assert.equal(g.decision.valuation.calculation.method, 'subject_value_fallback')
   const sfr = prodRun()
   assert.equal(withMinCompGuard({ subject: normalizePropertyFeatures(rawSubject, { source: 'properties', now: NOW }), now: NOW, decision: sfr }).guard.applied, false)
+})
+
+// ── v2.1: "real positive unit count or no price-per-unit calculation. No inferred 1. No invented values." ──
+
+test('v2.1 a unit count is a fact only when it is a real positive number; nothing defaults to 1', () => {
+  for (const v of [null, undefined, '', 0, '0', -2, 'abc']) assert.equal(realUnits(v), null)
+  assert.equal(realUnits(3), 3)
+  assert.equal(realUnits('12'), 12)
+  assert.equal(toEngineComp({ comp_id: 't:1', price: 1, sold_on: '2026-01-01', units: 0 }, {}).units_count, null)
+  assert.equal(toEngineComp({ comp_id: 't:1', price: 1, sold_on: '2026-01-01', units: null }, {}).units_count, null)
+  assert.equal(toEngineComp({ comp_id: 't:1', price: 1, sold_on: '2026-01-01', units: 6 }, {}).units_count, 6)
+})
+
+test('v2.1 ranking never treats an unknown count as a 1-unit match', () => {
+  const mf12 = { cls: 'apartment', units: 12 }
+  assert.equal(rpcAssetRank(mf12, { cls: 'apartment', units: 10 }), 0)
+  assert.equal(rpcAssetRank(mf12, { cls: 'multifamily', units: null }), 1)
+  assert.equal(rpcAssetRank(mf12, { cls: 'multifamily', units: 0 }), 1)
+  assert.equal(rpcAssetRank({ cls: 'multifamily', units: null }, { cls: 'multifamily', units: 4 }), 1) // subject count unknown: no band
+  assert.equal(rpcAssetRank({ cls: 'single_family', units: null }, { cls: 'single_family', units: null }), 0) // by recorded type
+  assert.equal(rpcAssetRank({ cls: 'single_family', units: 1 }, { cls: 'single_family', units: 3 }), 1)
+})
+
+test('v2.1 5+ unit subject: unknown-unit comps are excluded entirely; 2-4 subjects keep them (no per-unit math)', () => {
+  assert.deepEqual(qualificationReasons({ price: 600000, units: null }, null, 65), [V2_REASONS.unitsUnknownMf5])
+  assert.deepEqual(qualificationReasons({ price: 600000, units: 0 }, null, 5), [V2_REASONS.unitsUnknownMf5])
+  assert.deepEqual(qualificationReasons({ price: 600000, units: 20 }, null, 65), [])
+  assert.deepEqual(qualificationReasons({ price: 300000, units: null }, null, 3), [])
+  assert.deepEqual(qualificationReasons({ price: 300000, units: null }, null, null), []) // unknown subject count is not 5+
+})
+
+test('v2.1 Phoenix pattern: a 65-unit subject is never priced from small sales with no unit count', () => {
+  const raw = { ...rawSubject, property_id: 'PHX', property_type: 'Apartment', units_count: 65, building_square_feet: null, estimated_value: 9778000, estimated_repair_cost: null }
+  const sale = (i, units) => ({ comp_id: `t:${i}`, source: 'public_record', property_id: `Q${i}`, sold_on: '2026-04-01', price: 650000 + i * 1000, lat: 45.0, lng: -93.3, zip: '55412', city: 'X', state: 'MN', property_type: 'Multi-Family', units, sqft: null, beds: null, baths: null, year_built: 1970, estimated_value: 640000, portfolio_size: 1 })
+  const unknown = Array.from({ length: 12 }, (_, i) => sale(i, null))
+  const v = valueWithCurrentSalesV2({ rawSubject: raw, rows: unknown, radiusMiles: 7, now: NOW })
+  assert.equal(v.decision.selected_comps.length, 0)
+  assert.ok(v.ledger.filter((l) => l.reasons.includes(V2_REASONS.unitsUnknownMf5)).length === 12)
+  assert.notEqual(v.decision.valuation.calculation.method, 'weighted_adjusted_comp_value')
+  // with real counts the engine prices per unit from them
+  const real = Array.from({ length: 6 }, (_, i) => ({ ...sale(100 + i, 60), price: 9000000 + i * 50000, estimated_value: 9000000 }))
+  const w = valueWithCurrentSalesV2({ rawSubject: raw, rows: real, radiusMiles: 7, now: NOW })
+  assert.ok(w.decision.selected_comps.length >= 3)
+  assert.ok(w.decision.selected_comps.every((c) => c.price_adjustments.some((a) => a.basis === 'price_per_unit')))
 })

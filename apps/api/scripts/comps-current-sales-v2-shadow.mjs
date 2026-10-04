@@ -25,6 +25,7 @@
  * USAGE (from apps/api):
  *   nice -n 15 node scripts/comps-current-sales-v2-shadow.mjs --mode=compare --subjects-file=frame-final.json --out-dir=/tmp/v2
  *   nice -n 15 node scripts/comps-current-sales-v2-shadow.mjs --mode=backtest --limit=260 --out-dir=/tmp/v2bt
+ *   (re-run an identical deed sample: --frame-file=<out-dir>/backtest-frame.json; back-off: --backoff-ms, --check-every)
  */
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
@@ -64,6 +65,8 @@ const MAX_ACTIVE = Number(args['max-active'] ?? 12)
 const OUT_DIR = args['out-dir']
 const FREEZE = args.freeze ?? '2026-05-08'
 const LIMIT = Math.max(1, Math.min(400, Number(args.limit ?? 260)))
+const BACKOFF_MS = Math.max(10000, Number(args['backoff-ms'] ?? 60000))
+const CHECK_EVERY = Math.max(1, Number(args['check-every'] ?? 3))
 if (!OUT_DIR) { console.error('--out-dir required'); process.exit(2) }
 mkdirSync(resolve(OUT_DIR, 'subjects'), { recursive: true })
 
@@ -263,6 +266,8 @@ let frames
 if (MODE === 'compare') {
   const f = JSON.parse(readFileSync(args['subjects-file'], 'utf8'))
   frames = (Array.isArray(f) ? f : f.subjects)
+} else if (MODE === 'backtest' && args['frame-file']) {
+  frames = JSON.parse(readFileSync(args['frame-file'], 'utf8')).subjects // re-run the identical deed sample
 } else if (MODE === 'backtest') {
   frames = (await sql(BACKTEST_FRAME_SQL, [FREEZE])).slice(0, LIMIT)
   writeFileSync(resolve(OUT_DIR, 'backtest-frame.json'), JSON.stringify({ generated: new Date().toISOString(), definition: 'first arms-length priced recorded deed (t:) after the freeze per properties-backed parcel; <=10 SFR and <=6 each of MF2-4 / MF5+ per market, md5 seed bt1004', subjects: frames }, null, 1))
@@ -273,16 +278,16 @@ let pauses = 0
 for (const frame of frames) {
   const file = resolve(OUT_DIR, 'subjects', `${frame.property_id}.json`)
   if (args.resume && existsSync(file)) { done += 1; continue }
-  if (done % 5 === 0) {
+  if (done % CHECK_EVERY === 0) {
     let load = await dbLoad()
     while (load.active > MAX_ACTIVE || load.long_q > 0) {
       pauses += 1
       console.error(`[load] active=${load.active} long=${load.long_q} pause ${pauses}`)
-      if (pauses > 40) break
-      await sleep(30000)
+      if (pauses > 60) break
+      await sleep(BACKOFF_MS)
       load = await dbLoad()
     }
-    if (pauses > 40) { console.error('[load] stopping'); break }
+    if (pauses > 60) { console.error('[load] stopping'); break }
   }
   let r
   try { r = MODE === 'compare' ? await compareSubject(frame) : await backtestSubject(frame) } catch (e) { r = { property_id: String(frame.property_id), frame, error: String(e?.message || e).slice(0, 300) } }

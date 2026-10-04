@@ -23,6 +23,13 @@
  *   5. Minimum-comp guard for 5+ units: fewer than 3 selected comps is not a
  *      comp-backed value (the engine's own no-comps path is used instead).
  *   6. Every candidate keeps its exact inclusion / exclusion reason.
+ *   7. (v2.1, owner 2026-10-04: "real positive unit count or no price-per-unit
+ *      calculation. No inferred 1. No invented values.") A unit count is a
+ *      fact only when it is a real positive number on the record; null, 0 and
+ *      negatives are UNKNOWN and are never turned into 1. Per-unit pricing needs
+ *      a real count on BOTH sides (the engine's own guard, now fed only real
+ *      counts); for a 5+ unit subject a comp with an unknown count is excluded
+ *      outright, because without it nothing ties the sale's price to a door count.
  */
 import {
   calculateAcquisitionDecision,
@@ -30,7 +37,7 @@ import {
 } from '../acquisitionDecisionEngine.js';
 
 export const CURRENT_SALES_V2 = Object.freeze({
-  version: 'current-sales-valuation-v2.0-shadow',
+  version: 'current-sales-valuation-v2.1-shadow',
   source: 'mv_map_market_sales',
   candidateLimit: 100, // the RPC's p_limit
   bulkCheckDepth: 600, // ranked rows whose consideration is checked for multi-parcel deeds
@@ -54,6 +61,7 @@ export const V2_REASONS = Object.freeze({
   bulk: 'v2_bulk_multi_parcel_consideration',
   ratio: 'v2_price_to_value_implausible',
   outsideRadius: 'v2_outside_radius',
+  unitsUnknownMf5: 'v2_unit_count_unknown_for_5plus_subject',
   outsideLimit: 'v2_outside_candidate_limit',
   guard: 'v2_min_comp_guard_mf5',
 });
@@ -100,11 +108,23 @@ export function rpcAssetRank(subject, comp) {
   const subjectFamily = multi(subject.cls) ? 'multi' : 'single';
   const compFamily = multi(comp.cls) ? 'multi' : 'single';
   if (compFamily !== subjectFamily) return 2;
-  const compUnits = Math.max(num(comp.units) || 1, 1);
-  if (subjectFamily === 'single' && compUnits <= 1) return 0;
-  const subjectUnits = Math.max(num(subject.units) || 1, 1);
-  if (subjectFamily === 'multi' && compUnits / subjectUnits >= 0.35 && compUnits / subjectUnits <= 2.75) return 0;
-  return 1;
+  // v2.1: the RPC's coalesce(nullif(units, 0), 1) is NOT reproduced. An unknown
+  // count is unknown: it never ranks as a 1-unit match.
+  const compUnits = realUnits(comp.units);
+  const subjectUnits = realUnits(subject.units);
+  if (subjectFamily === 'single') {
+    if (compUnits === null) return 0; // single-family by its recorded type, count not asserted
+    return compUnits <= 1 ? 0 : 1;
+  }
+  if (compUnits === null || subjectUnits === null) return 1; // no unit band can be judged
+  const ratio = compUnits / subjectUnits;
+  return ratio >= 0.35 && ratio <= 2.75 ? 0 : 1;
+}
+
+/** A unit count is a fact only when it is a real positive number. Never defaults. */
+export function realUnits(value) {
+  const n = num(value);
+  return n !== null && n > 0 ? n : null;
 }
 
 /** RPC order: asset rank asc, similarity desc, sale date desc, distance asc. */
@@ -126,7 +146,7 @@ export function subjectRankKey(rawSubject = {}, subject = {}) {
   return {
     cls: rpcAssetClass(rawSubject.property_type, rawSubject.units_count),
     sqft: subject.sqft, beds: subject.beds, baths: subject.baths, year_built: subject.year_built,
-    units: num(rawSubject.units_count),
+    units: realUnits(rawSubject.units_count),
   };
 }
 
@@ -178,8 +198,10 @@ export function bulkConsiderationIndex(bulkRows = []) {
 }
 
 /** Evidence qualification (deed-level). Returns the exclusion reasons, [] when usable. */
-export function qualificationReasons(row, bulkOf = null) {
+export function qualificationReasons(row, bulkOf = null, subjectUnits = null) {
   const reasons = [];
+  const sUnits = realUnits(subjectUnits);
+  if (sUnits !== null && sUnits >= CURRENT_SALES_V2.mf5Units && realUnits(row.units) === null) reasons.push(V2_REASONS.unitsUnknownMf5);
   if (row.is_arms_length === false) reasons.push(V2_REASONS.nonArms);
   if ((num(row.portfolio_size) ?? 1) >= 2) reasons.push(V2_REASONS.portfolio);
   const ev = num(row.estimated_value);
@@ -207,7 +229,7 @@ export function toEngineComp(row, subject) {
     mls_sold_price: mls ? num(row.price) : null,
     mls_sold_date: mls ? day(row.sold_on) : null,
     property_type: row.property_type,
-    units_count: num(row.units),
+    units_count: realUnits(row.units), // never 0, never an inferred 1
     total_bedrooms: num(row.beds),
     total_baths: num(row.baths),
     building_square_feet: num(row.sqft),
@@ -263,7 +285,7 @@ export function selectCurrentSalesCandidates({ rows, subject, rawSubject, radius
   for (const r of ranked) {
     rank += 1;
     const row = { ...r, v2_rank: rank };
-    const reasons = qualificationReasons(row, bulkOf);
+    const reasons = qualificationReasons(row, bulkOf, rawSubject?.units_count ?? subject?.units);
     if (reasons.length) { ledger.push({ row, status: 'excluded', reasons }); continue; }
     if (candidates.length >= CURRENT_SALES_V2.candidateLimit) { ledger.push({ row, status: 'excluded', reasons: [V2_REASONS.outsideLimit] }); continue; }
     candidates.push(row);
@@ -399,5 +421,5 @@ export function oldPoolRowToEngineComp(row) {
 
 export default {
   CURRENT_SALES_V2, V2_REASONS, valueWithCurrentSalesV2, selectCurrentSalesCandidates, dedupeEconomicSales,
-  qualificationReasons, bulkConsiderationIndex, rankLikeEngineRpc, toEngineComp, withMinCompGuard, minCompGuardApplies,
+  qualificationReasons, bulkConsiderationIndex, rankLikeEngineRpc, toEngineComp, withMinCompGuard, minCompGuardApplies, realUnits,
 };
