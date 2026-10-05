@@ -6,6 +6,7 @@ import { useAppInstance } from '../../modules/desktop/workspace/instance-context
 import { useLinkedProperty } from '../../modules/desktop/workspace/linked-property'
 import { handleObjectClick, gestureOf, openObjectBeside, propertyObject } from '../../modules/desktop/objects'
 import { createAutoFramer, planPointFocus, type AutoFramer } from './focus/focus-camera'
+import { decideArrival, decideAutoNav, pinLoadPlan, type AutoNavMark } from './focus/camera-claims'
 import { ensureFocusTreatment, fetchCanonicalCoordinates, pulseFocusTreatment, resolveFocusRequest, setFlyingMark } from './focus/map-focus-runtime'
 import { MapFocusKeys, MapFocusNotice } from './focus/MapFocusControls'
 import { mapOverlayTarget } from './map-overlay-host'
@@ -3886,6 +3887,9 @@ export function InboxCommandMap({
   const controlsRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const lastAutoNavSelectionRef = useRef<string | null>(null)
+  const autoNavMarkRef = useRef<AutoNavMark | null>(null)
+  /** increments on every focus request (linked selection, Show on Map) — camera-claims */
+  const cameraClaimRef = useRef(0)
   const mapContextLostRef = useRef(false)
   const mapContextLossOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mapContainerKeyRef = useRef(0)
@@ -5074,6 +5078,7 @@ export function InboxCommandMap({
       setSelectedClusterSummary(null)
     } else {
       lastAutoNavSelectionRef.current = null
+      autoNavMarkRef.current = null
     }
   }, [selectedThread?.id])
 
@@ -9651,10 +9656,16 @@ export function InboxCommandMap({
       }
     }
 
-    void loadPins('stage_1')
-    const stage2Timer = setTimeout(() => {
+    // [camera-claims] a resume (paused lifted) keeps the field it shows and
+    // refreshes it in one full pass; only a first load is staged
+    const plan = pinLoadPlan(sellerPinsByPropertyIdRef.current.size > 0)
+    let stage2Timer: ReturnType<typeof setTimeout> | undefined
+    if (plan[0] === 'stage_1') {
+      void loadPins('stage_1')
+      stage2Timer = setTimeout(() => { void loadPins('stage_2') }, 180)
+    } else {
       void loadPins('stage_2')
-    }, 180)
+    }
 
     const map = mapRef.current
     const onMoveEnd = () => {
@@ -9668,7 +9679,7 @@ export function InboxCommandMap({
         sellerPinsFetchTimerRef.current = null
       }
       sellerPinsAbortRef.current?.abort()
-      clearTimeout(stage2Timer)
+      if (stage2Timer !== undefined) clearTimeout(stage2Timer)
       map?.off('moveend', onMoveEnd)
     }
   }, [performanceSettings.markerDensity, performanceSettings.performanceMode, sellerPinLayers.sellerPins, paused])
@@ -9859,6 +9870,12 @@ export function InboxCommandMap({
     ].join(':')
     if (lastAutoNavSelectionRef.current === selectionKey) return
     lastAutoNavSelectionRef.current = selectionKey
+    // [camera-claims] the same thread with refined coordinates never drags the
+    // camera back after a linked / Show on Map focus took it elsewhere
+    const navMark = autoNavMarkRef.current
+    const navDecision = decideAutoNav(navMark, { threadId: selectedThread.id, key: selectionKey }, cameraClaimRef.current)
+    autoNavMarkRef.current = { threadId: selectedThread.id, key: selectionKey, claim: cameraClaimRef.current }
+    if (navDecision !== 'fly') return
     if (isModernDesktopRef.current) {
       // [8.2 §3] the same cinematic focus as arrival — keyed by the target, so an
       // arrival that already flew here is not flown twice
@@ -10031,13 +10048,21 @@ export function InboxCommandMap({
    * stays selected through pan and zoom until something explicitly selects another.
    */
   const arrivedPropertyRef = useRef<string | null>(null)
+  const activePropertyIdRef = useRef<string | null>(null)
+  useEffect(() => { activePropertyIdRef.current = text(activePropertyId) || null }, [activePropertyId])
   useEffect(() => {
     const propertyId = text(activePropertyId)
-    if (!propertyId) {
+    // [camera-claims] arrival acts on a CHANGED active property only — a pin
+    // reload re-running this effect never flies back to a property a newer
+    // focus request superseded (the Pipeline snap-back)
+    const decision = decideArrival({ active: propertyId || null, handled: arrivedPropertyRef.current, lastFocused: lastFocusedPropertyRef.current })
+    if (decision === 'idle') {
       arrivedPropertyRef.current = null
       return
     }
-    if (arrivedPropertyRef.current === propertyId) return
+    if (decision === 'skip') return
+    if (decision === 'settle') { arrivedPropertyRef.current = propertyId; return }
+    const claimAtStart = cameraClaimRef.current
     if (selectPropertyOnMap(propertyId)) {
       arrivedPropertyRef.current = propertyId
       return
@@ -10048,7 +10073,8 @@ export function InboxCommandMap({
     let attempts = 0
     const timer = window.setInterval(() => {
       attempts += 1
-      if (cancelled || attempts > 40) {
+      // a newer focus request owns the camera now: this arrival is superseded
+      if (cancelled || attempts > 40 || cameraClaimRef.current !== claimAtStart) {
         window.clearInterval(timer)
         return
       }
@@ -10090,6 +10116,10 @@ export function InboxCommandMap({
     focusRunRef.current?.ctl.abort()
     const ctl = new AbortController()
     focusRunRef.current = { seq: req.seq, ctl }
+    // [camera-claims] this request owns the camera: the host's current active
+    // property is superseded (arrival never resurrects it), auto-nav refinements yield
+    cameraClaimRef.current += 1
+    arrivedPropertyRef.current = activePropertyIdRef.current
     if (!quiet) setFocusNotice(null)
     // a linked arrival is a re-selection: whatever it surfaces never re-broadcasts
     const guard = <T,>(fn: () => T): T => (req.source === 'linked' ? withLinkedApply(fn) : fn())
@@ -10100,7 +10130,6 @@ export function InboxCommandMap({
       wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
     }, ctl.signal).then((outcome) => {
       if (ctl.signal.aborted) return
-      if (outcome.status === 'focused') arrivedPropertyRef.current = outcome.propertyId
       if (quiet) return
       if (outcome.status === 'unavailable') setFocusNotice({ label: req.label, reason: outcome.reason })
       ackMapPropertyFocus(outcome)
