@@ -9,6 +9,17 @@ import {
 const QUERY_TIMEOUT_MS = MAP_FILTER_LIMITS.countQueryTimeoutMs;
 const MVT_TILE_COORD_PARAM_COUNT = 3;
 
+/**
+ * Per-property touch flag from the canonical touch truth
+ * (campaign_target_graph.never_contacted; see contact-status-semantics.js).
+ * NULL (no graph row) counts as uncontacted. Index: campaign_target_graph(property_id).
+ */
+const TOUCH_LATERAL_SQL = `LEFT JOIN LATERAL (
+      SELECT bool_or(tg.never_contacted IS FALSE) AS contacted
+      FROM public.campaign_target_graph tg
+      WHERE tg.property_id = p.property_id
+    ) touch ON TRUE`;
+
 /** Renumber $1..$N placeholders after leading tile coordinate params ($1-$3). */
 function offsetSqlParamPlaceholders(sql, offset) {
   if (!offset) return sql;
@@ -64,12 +75,13 @@ export async function getFilteredMarketAggregates(compiled, { markets = null, st
       COUNT(*)::bigint AS property_count,
       AVG(p.latitude::double precision) AS centroid_lat,
       AVG(p.longitude::double precision) AS centroid_lng,
-      COUNT(*) FILTER (WHERE COALESCE(p.contact_status, 'uncontacted') IN ('uncontacted', 'not_contacted', ''))::bigint AS uncontacted_count,
-      COUNT(*) FILTER (WHERE COALESCE(p.contact_status, '') NOT IN ('uncontacted', 'not_contacted', ''))::bigint AS contacted_count,
+      COUNT(*) FILTER (WHERE touch.contacted IS NOT TRUE)::bigint AS uncontacted_count,
+      COUNT(*) FILTER (WHERE touch.contacted IS TRUE)::bigint AS contacted_count,
       COUNT(*) FILTER (WHERE COALESCE(p.activity_status, '') ILIKE '%hot%')::bigint AS hot_count,
       COUNT(*) FILTER (WHERE COALESCE(p.activity_status, '') ILIKE '%reply%')::bigint AS new_reply_count
     FROM public.properties p
     INNER JOIN matching_properties mp ON mp.property_id = p.property_id
+    ${TOUCH_LATERAL_SQL}
     WHERE p.latitude IS NOT NULL
       AND p.longitude IS NOT NULL
       ${marketState.clause}
@@ -96,10 +108,12 @@ export async function getFilteredSpatialClusters(
     grid AS (
       SELECT
         p.*,
+        touch.contacted AS touch_contacted,
         FLOOR(p.latitude::numeric / $${cte.allParams.length + 1}) AS grid_lat,
         FLOOR(p.longitude::numeric / $${cte.allParams.length + 1}) AS grid_lng
       FROM public.properties p
       INNER JOIN matching_properties mp ON mp.property_id = p.property_id
+      ${TOUCH_LATERAL_SQL}
       WHERE p.latitude IS NOT NULL
         AND p.longitude IS NOT NULL
     )
@@ -109,7 +123,7 @@ export async function getFilteredSpatialClusters(
       AVG(latitude::double precision) AS centroid_lat,
       AVG(longitude::double precision) AS centroid_lng,
       MODE() WITHIN GROUP (ORDER BY market) AS market,
-      COUNT(*) FILTER (WHERE COALESCE(contact_status, 'uncontacted') IN ('uncontacted', 'not_contacted', ''))::bigint AS uncontacted_count,
+      COUNT(*) FILTER (WHERE touch_contacted IS NOT TRUE)::bigint AS uncontacted_count,
       COUNT(*) FILTER (WHERE COALESCE(activity_status, '') ILIKE '%hot%')::bigint AS hot_count,
       COUNT(*) FILTER (WHERE COALESCE(activity_status, '') ILIKE '%reply%')::bigint AS new_reply_count
     FROM grid

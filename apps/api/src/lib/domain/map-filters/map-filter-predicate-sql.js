@@ -1,5 +1,6 @@
 import { getRegistryField } from "./active-field-registry.js";
 import { buildInboxScopeExistsSql } from "./inbox-filter-scope-sql.js";
+import { buildTouchStateSql } from "./contact-status-semantics.js";
 import {
   MAP_FILTER_PROSPECT_LINKS_ALIAS,
   MAP_FILTER_PROSPECT_LINKS_TABLE,
@@ -79,6 +80,10 @@ function compileAstNode(node, ctx, { mode, outerProspectAlias = null } = {}) {
 
   if (node.type === "phone_rule") {
     return compilePhoneRelationship(node, ctx);
+  }
+
+  if (node.type === "touch_rule") {
+    return buildTouchStateSql(node.operator, PROPERTY_ALIAS);
   }
 
   if (node.type === "inbox_scope_rule") {
@@ -363,28 +368,52 @@ export function buildProspectCountFromMatchingSql() {
   `;
 }
 
+/**
+ * Phones = distinct canonical E.164 numbers the campaign target graph carries for
+ * the matching properties — the same phone the Composer audience would text.
+ *
+ * NOT map_filter_property_phone_links: that bridge has never been populated
+ * (0 rows in prod), which is why every preview reported 0 phones.
+ * Index: campaign_target_graph(property_id).
+ */
 export function buildPhoneCountFromMatchingSql() {
   return `
-    SELECT COUNT(DISTINCT ${PHONE_LINK_ALIAS}.phone_id)::bigint AS count
-    FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${PHONE_LINK_ALIAS}
-    INNER JOIN matching_properties mp ON mp.property_id = ${PHONE_LINK_ALIAS}.property_id
+    SELECT COUNT(DISTINCT tg.canonical_e164)::bigint AS count
+    FROM public.campaign_target_graph tg
+    INNER JOIN matching_properties mp ON mp.property_id = tg.property_id
+    WHERE tg.canonical_e164 IS NOT NULL
   `;
 }
 
+/**
+ * Owners = distinct master owners linked to the matching properties through
+ * EITHER properties.master_owner_id (set on only ~41.5K of ~170K properties) OR
+ * the property→prospect→owner bridge (map_filter_property_prospect_links,
+ * ~113K properties). Counting only properties.master_owner_id under-reported
+ * owners by ~65K across the universe.
+ * Indexes: map_filter_property_prospect_links pkey (property_id, prospect_id).
+ */
 export function buildOwnerCountFromMatchingSql(ownerPredicateSql = null) {
+  const linkedOwners = `
+      SELECT mp.master_owner_id
+      FROM matching_properties mp
+      WHERE mp.master_owner_id IS NOT NULL
+      UNION
+      SELECT ${LINK_ALIAS}.master_owner_id
+      FROM ${MAP_FILTER_PROSPECT_LINKS_TABLE} ${LINK_ALIAS}
+      INNER JOIN matching_properties mp ON mp.property_id = ${LINK_ALIAS}.property_id
+  `;
   if (ownerPredicateSql) {
     return `
-      SELECT COUNT(DISTINCT mp.master_owner_id)::bigint AS count
-      FROM matching_properties mp
-      INNER JOIN master_owners ${OWNER_ALIAS} ON ${OWNER_ALIAS}.master_owner_id = mp.master_owner_id
-      WHERE mp.master_owner_id IS NOT NULL
-        AND (${ownerPredicateSql})
+      SELECT COUNT(DISTINCT lo.master_owner_id)::bigint AS count
+      FROM (${linkedOwners}) lo
+      INNER JOIN master_owners ${OWNER_ALIAS} ON ${OWNER_ALIAS}.master_owner_id = lo.master_owner_id
+      WHERE (${ownerPredicateSql})
     `;
   }
   return `
-    SELECT COUNT(DISTINCT mp.master_owner_id)::bigint AS count
-    FROM matching_properties mp
-    WHERE mp.master_owner_id IS NOT NULL
+    SELECT COUNT(*)::bigint AS count
+    FROM (${linkedOwners}) lo
   `;
 }
 

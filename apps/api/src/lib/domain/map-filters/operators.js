@@ -74,6 +74,9 @@ export const DERIVED_PRESENCE_OPERATORS = [
 
 export const INBOX_SCOPE_OPERATORS = ["matches_conditions"];
 
+/** Property universe touch buckets (campaign_target_graph.never_contacted). */
+export const TOUCH_STATE_OPERATORS = ["is_contacted", "is_uncontacted"];
+
 export const OPERATORS_BY_DATA_TYPE = {
   text: TEXT_OPERATORS,
   number: NUMERIC_OPERATORS,
@@ -85,6 +88,7 @@ export const OPERATORS_BY_DATA_TYPE = {
   geo: GEO_OPERATORS,
   derived_presence: DERIVED_PRESENCE_OPERATORS,
   inbox_scope: INBOX_SCOPE_OPERATORS,
+  touch_state: TOUCH_STATE_OPERATORS,
 };
 
 export function operatorsForDataType(dataType) {

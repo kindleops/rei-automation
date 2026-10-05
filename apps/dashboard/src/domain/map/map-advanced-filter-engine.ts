@@ -205,23 +205,10 @@ function withRelationship(rule: ReturnType<typeof createRule>, relationshipMatch
   return { ...rule, relationshipMatch }
 }
 
+/** Canonical touch truth (property.touch_state), not legacy properties.contact_status. */
 function buildContactStatusExpression(status: MapStatusValue): AdvancedMapFilterGroup | null {
-  if (status === 'uncontacted') {
-    return createGroup('OR', [
-      createRule('property.contact_status', 'is_any_of', ['uncontacted', 'not_contacted', '']),
-      createRule('property.contact_status', 'is_blank', true),
-    ])
-  }
-  if (status === 'contacted') {
-    const excludeUncontacted = createGroup('OR', [
-      createRule('property.contact_status', 'is_any_of', ['uncontacted', 'not_contacted', '']),
-    ])
-    excludeUncontacted.negated = true
-    return createGroup('AND', [
-      createRule('property.contact_status', 'is_not_blank', true),
-      excludeUncontacted,
-    ])
-  }
+  if (status === 'uncontacted') return createGroup('AND', [createRule('property.touch_state', 'is_uncontacted', true)])
+  if (status === 'contacted') return createGroup('AND', [createRule('property.touch_state', 'is_contacted', true)])
   return null
 }
 

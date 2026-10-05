@@ -44,6 +44,13 @@
  */
 
 /**
+ * @typedef {object} CompiledTouchRuleNode
+ * @property {'touch_rule'} type
+ * @property {string} fieldKey  always property.touch_state
+ * @property {'is_contacted' | 'is_uncontacted'} operator  campaign_target_graph.never_contacted
+ */
+
+/**
  * @typedef {object} CompiledProspectRuleNode
  * @property {'prospect_rule'} type
  * @property {string} fieldKey

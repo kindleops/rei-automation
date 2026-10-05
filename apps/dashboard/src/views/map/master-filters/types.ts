@@ -148,8 +148,10 @@ export interface MapFilterBounds {
 export interface MapFilterPreviewCounts {
   matchingProperties: number
   matchingProspects: number
-  matchingMasterOwners: number
-  matchingPhones: number
+  /** null = the server could not compute it (render "—", never 0). */
+  matchingMasterOwners: number | null
+  /** null = the server could not compute it (render "—", never 0). */
+  matchingPhones: number | null
   propertiesInBounds: number | null
   representedProperties?: number | null
 }

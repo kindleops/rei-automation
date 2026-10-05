@@ -1,5 +1,6 @@
 import { buildInboxFilterConditions } from "../inbox/inbox-filter-conditions.js";
 import { createEmptyExpressionRoot } from "./map-filter-expression.js";
+import { TOUCH_STATE_FIELD_KEY, touchOperatorForMapStatus } from "./contact-status-semantics.js";
 
 /** Inbox filter keys compiled via direct map registry rules (not inbox_hydrated_scope). */
 const DIRECT_HANDLED_KEYS = new Set([
@@ -81,26 +82,15 @@ function triToRule(fieldKey, operator, value, relationshipMatch) {
   return null;
 }
 
+/**
+ * "Property universe" (All / Uncontacted / Contacted) reads the canonical touch
+ * truth — campaign_target_graph.never_contacted — never the legacy Podio
+ * properties.contact_status column (see contact-status-semantics.js).
+ */
 function buildContactStatusRules(mapStatus) {
-  if (!mapStatus || mapStatus === "all") return [];
-  if (mapStatus === "uncontacted") {
-    return [
-      group("OR", [
-        rule("property.contact_status", "is_any_of", ["uncontacted", "not_contacted", ""]),
-        rule("property.contact_status", "is_blank", true),
-      ]),
-    ];
-  }
-  const exclude = group("OR", [
-    rule("property.contact_status", "is_any_of", ["uncontacted", "not_contacted", ""]),
-  ]);
-  exclude.negated = true;
-  return [
-    group("AND", [
-      rule("property.contact_status", "is_not_blank", true),
-      exclude,
-    ]),
-  ];
+  const operator = touchOperatorForMapStatus(mapStatus);
+  if (!operator) return [];
+  return [rule(TOUCH_STATE_FIELD_KEY, operator, true)];
 }
 
 function normalizeInboxPayload(raw = {}) {

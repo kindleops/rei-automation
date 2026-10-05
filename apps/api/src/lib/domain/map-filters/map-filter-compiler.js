@@ -42,6 +42,9 @@ export function compileExpressionTree(node, state = { params: [], nextIndex: 0 }
     if (field.entity === "geo") {
       return { type: "geo_rule", ...base };
     }
+    if (field.dataType === "touch_state") {
+      return { type: "touch_rule", fieldKey: field.key, operator: node.operator };
+    }
     if (field.dataType === "inbox_scope" && node.operator === "matches_conditions") {
       return {
         type: "inbox_scope_rule",
@@ -78,6 +81,7 @@ function pushParams(state, operator, value) {
   const noParamOps = new Set([
     "is_blank", "is_not_blank", "is_empty", "is_not_empty",
     "is_true", "is_false", "is_unknown", "has_data", "has_no_data",
+    "is_contacted", "is_uncontacted",
   ]);
   if (noParamOps.has(operator)) return [];
 

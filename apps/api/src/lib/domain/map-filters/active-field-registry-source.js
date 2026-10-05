@@ -80,8 +80,8 @@ export const EXCLUDED_SENSITIVE_FIELDS = [
 export const FIELD_ALIASES = {
   "property.saleprice": "property.sale_price",
   "property.total_loan_amt": "property.total_loan_balance",
-  "property.uncontacted": "property.contact_status",
-  "property.contacted": "property.contact_status",
+  "property.uncontacted": "property.touch_state",
+  "property.contacted": "property.touch_state",
   "property.no_contact": "property.contact_status",
   "property.new_lead": "property.contact_status",
   "prospects.person_flags_text": "prospect.person_flags_json",
@@ -199,7 +199,8 @@ export const RAW_MAP_FILTER_FIELD_DEFINITIONS = [
   field({ key: "property.final_acquisition_score", entity: "property", table: "properties", column: "final_acquisition_score", label: "Final Acquisition Score", description: "Final acquisition score.", category: "Signals", dataType: "number", populatedRows: 104217, valueSource: "range", synonyms: ["acquisition score", "acq score"] }),
 
   // ── 10F Enriched contact (partial) ──────────────────────────────────────────
-  field({ key: "property.contact_status", entity: "property", table: "properties", column: "contact_status", label: "Contact Status", description: "Property-level contact status. Canonical source for contacted vs uncontacted map filters.", category: "Enriched Contact", dataType: "text", populatedRows: 121182, valueSource: "distinct", synonyms: ["uncontacted", "contacted", "no contact", "new lead", "not contacted", "message history", "active thread"] }),
+  field({ key: "property.touch_state", entity: "property", table: "campaign_target_graph", column: "never_contacted", label: "Outreach Touch", description: "Contacted = at least one SMS sent (campaign target graph, from the send ledger); Uncontacted = none. The canonical Property universe buckets.", category: "Enriched Contact", dataType: "touch_state", totalRows: P, populatedRows: P, valueSource: "derived", synonyms: ["uncontacted", "contacted", "never contacted", "texted", "touched", "message history"] }),
+  field({ key: "property.contact_status", entity: "property", table: "properties", column: "contact_status", label: "Legacy Contact Status (import)", description: "Podio-era import column: only 'No Contact' or empty. It does not record outreach — use Outreach Touch for contacted / uncontacted.", category: "Enriched Contact", dataType: "text", populatedRows: 121182, valueSource: "distinct", synonyms: ["legacy contact status", "no contact", "new lead"] }),
   field({ key: "property.inbox_hydrated_scope", entity: "property", table: "properties", column: null, label: "Inbox Thread Scope", description: "Property has a hydrated inbox thread matching conversation-level filters.", category: "Enriched Contact", dataType: "inbox_scope", populatedRows: P, valueSource: "json", synonyms: ["inbox", "conversation", "thread"] }),
   field({ key: "property.activity_status", entity: "property", table: "properties", column: "activity_status", label: "Activity Status", description: "Property activity status.", category: "Enriched Contact", dataType: "text", populatedRows: 8021, valueSource: "distinct" }),
   field({ key: "property.sms_eligible", entity: "property", table: "properties", column: "sms_eligible", label: "Property SMS Eligible", description: "Property-level SMS eligibility (partial coverage).", category: "Enriched Contact", dataType: "boolean", populatedRows: 8075, valueSource: "boolean" }),

@@ -36,23 +36,14 @@ function withRel(rule: ReturnType<typeof createRule>, rel?: 'any_linked') {
   return { ...rule, relationshipMatch: rel }
 }
 
+/**
+ * Property universe buckets read the canonical touch truth (server field
+ * property.touch_state → campaign_target_graph.never_contacted), never the
+ * legacy Podio properties.contact_status column ('No Contact'/NULL only).
+ */
 function contactStatusGroup(status: MapStatusValue): AdvancedMapFilterGroup | null {
-  if (status === 'uncontacted') {
-    return createGroup('OR', [
-      createRule('property.contact_status', 'is_any_of', ['uncontacted', 'not_contacted', '']),
-      createRule('property.contact_status', 'is_blank', true),
-    ])
-  }
-  if (status === 'contacted') {
-    const exclude = createGroup('OR', [
-      createRule('property.contact_status', 'is_any_of', ['uncontacted', 'not_contacted', '']),
-    ])
-    exclude.negated = true
-    return createGroup('AND', [
-      createRule('property.contact_status', 'is_not_blank', true),
-      exclude,
-    ])
-  }
+  if (status === 'uncontacted') return createGroup('AND', [createRule('property.touch_state', 'is_uncontacted', true)])
+  if (status === 'contacted') return createGroup('AND', [createRule('property.touch_state', 'is_contacted', true)])
   return null
 }
 

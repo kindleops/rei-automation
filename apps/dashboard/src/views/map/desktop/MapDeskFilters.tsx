@@ -63,7 +63,8 @@ const FLAG_KEYS: Record<'property' | 'person', Record<FlagMode, keyof InboxAdvan
 const mapGroups = (g: FilterCatalogGroup[]) => g.filter((x) => !isMapExcludedFilterGroup(x.id))
 const mapFields = (f: FilterCatalogField[]) => f.filter((x) => !isMapExcludedFilterKey(x.key))
 
-type Counts = { properties: number; owners: number; phones: number }
+/** owners / phones are null when the server could not compute them — shown as "—", never 0. */
+type Counts = { properties: number; owners: number | null; phones: number | null }
 type CountState = { status: 'idle' | 'loading' | 'ready' | 'error'; counts: Counts | null; error: string | null }
 type MarketState = { status: 'idle' | 'loading' | 'ready' | 'error'; rows: MarketShare[]; total: number; markets: number; key: string | null }
 
@@ -203,7 +204,7 @@ export function MapDeskFilters({ open, initialDraft, appliedToken, appliedRules,
           if (ac.signal.aborted) return
           if (!res.ok) { setCount({ status: 'error', counts: null, error: countError(res.error || res.message) }); return }
           const c = res.data.counts
-          setCount({ status: 'ready', counts: { properties: c.matchingProperties, owners: c.matchingMasterOwners, phones: c.matchingPhones }, error: null })
+          setCount({ status: 'ready', counts: { properties: c.matchingProperties, owners: c.matchingMasterOwners ?? null, phones: c.matchingPhones ?? null }, error: null })
         })
         .catch(() => { if (!ac.signal.aborted) setCount({ status: 'error', counts: null, error: countError(null) }) })
     }, 420)
@@ -397,8 +398,8 @@ export function MapDeskFilters({ open, initialDraft, appliedToken, appliedRules,
           : count.counts ? (
             <p className="mxd-spec">
               {share ? <span>{share} of {universeLabel}</span> : <span>Universe count unavailable</span>}
-              <span>{fmtCount(count.counts.owners)} owners</span>
-              <span>{fmtCount(count.counts.phones)} phones</span>
+              <span>{fmtCount(count.counts.owners) ?? '—'} owners</span>
+              <span>{fmtCount(count.counts.phones) ?? '—'} phones</span>
             </p>
           ) : <p className="mxd-spec"><span>Counting the matching properties…</span></p>
       ) : (

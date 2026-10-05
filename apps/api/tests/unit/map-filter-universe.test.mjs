@@ -5,10 +5,9 @@ import { TABLE_ROW_BASELINES } from "../../src/lib/domain/map-filters/active-fie
 import { compileMapFilter } from "../../src/lib/domain/map-filters/map-filter-compiler.js";
 import {
   buildContactedContactExpression,
-  buildContactedStatusSql,
+  buildContactedTouchSql,
   buildUncontactedContactExpression,
-  buildUncontactedStatusSql,
-  isUncontactedContactStatus,
+  buildUncontactedTouchSql,
 } from "../../src/lib/domain/map-filters/contact-status-semantics.js";
 import { getMapFilterPreset } from "../../src/lib/domain/map-filters/map-filter-presets.js";
 import { MAP_FILTER_PHONE_LINKS_TABLE } from "../../src/lib/domain/map-filters/map-filter-phone-links.js";
@@ -52,20 +51,21 @@ test("2. empty predicate does not reference prospect or phone bridges", () => {
   assert.doesNotMatch(sql, /seller_work_items/i);
 });
 
-test("3. uncontacted preset matches NULL and canonical uncontacted values", () => {
-  const expression = buildUncontactedContactExpression();
-  const { sql, params } = compileSql(expression);
-  assert.match(sql, /IS NULL/i);
-  assert.match(sql, /IN \(/i);
-  assert.ok(params.includes("uncontacted"));
-  assert.ok(params.includes("not_contacted"));
+test("3. uncontacted preset reads the campaign graph touch truth, not contact_status", () => {
+  const { sql, params } = compileSql(buildUncontactedContactExpression());
+  assert.match(sql, /^NOT EXISTS/);
+  assert.match(sql, /campaign_target_graph/);
+  assert.match(sql, /never_contacted IS FALSE/);
+  assert.doesNotMatch(sql, /contact_status/);
+  assert.deepEqual(params, []);
 });
 
-test("4. contacted preset excludes uncontacted bucket", () => {
-  const expression = buildContactedContactExpression();
-  const { sql } = compileSql(expression);
-  assert.match(sql, /IS NOT NULL/i);
-  assert.match(sql, /NOT/i);
+test("4. contacted preset = a graph row with never_contacted false", () => {
+  const { sql } = compileSql(buildContactedContactExpression());
+  assert.match(sql, /^EXISTS/);
+  assert.match(sql, /tg\.property_id = p\.property_id/);
+  assert.match(sql, /never_contacted IS FALSE/);
+  assert.doesNotMatch(sql, /contact_status/);
 });
 
 test("5. prospect SMS eligible only applies with explicit prospect rule", () => {
@@ -87,15 +87,9 @@ test("6. has phone preset uses phone bridge not prospect has_phone", () => {
   assert.doesNotMatch(sql, /prospect\.has_phone/i);
 });
 
-test("7. canonical contact status SQL helpers classify buckets", () => {
-  assert.equal(isUncontactedContactStatus(null), true);
-  assert.equal(isUncontactedContactStatus("not_contacted"), true);
-  assert.equal(isUncontactedContactStatus("uncontacted"), true);
-  assert.equal(isUncontactedContactStatus("contacted"), false);
-  assert.equal(isUncontactedContactStatus("sent"), false);
-
-  assert.match(buildUncontactedStatusSql("p"), /p\.contact_status IS NULL/i);
-  assert.match(buildContactedStatusSql("p"), /NOT/i);
+test("7. uncontacted is the exact complement of contacted, so the buckets partition the universe", () => {
+  assert.equal(buildUncontactedTouchSql("p"), `NOT ${buildContactedTouchSql("p")}`);
+  assert.match(buildContactedTouchSql("x"), /tg\.property_id = x\.property_id/);
 });
 
 test("8. uncontacted and contacted presets exist as system presets", () => {

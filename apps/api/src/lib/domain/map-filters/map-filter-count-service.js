@@ -34,11 +34,51 @@ function mapQueryError(error, phase) {
   return MAP_FILTER_ERRORS.count_query_failed;
 }
 
-export async function countMapFilterEntities(
+/**
+ * Short-lived result cache. The universe buckets (All / Uncontacted / Contacted)
+ * are re-clicked constantly, while their inputs (the campaign target graph) are
+ * re-enriched once a day — so the same cohort is not recounted on every click.
+ */
+const COUNT_CACHE_TTL_MS = 120_000;
+const COUNT_CACHE_MAX = 200;
+const countCache = new Map();
+
+export function mapFilterCountCacheKey(compiled, options = {}) {
+  return JSON.stringify([
+    compiled?.compiledPredicateAst ?? null,
+    compiled?.params ?? [],
+    parseBounds(options.bounds),
+    options.includeProspects !== false,
+    options.includeOwners !== false,
+    options.includePhones !== false,
+  ]);
+}
+
+export function clearMapFilterCountCache() {
+  countCache.clear();
+}
+
+export async function countMapFilterEntities(compiled, options = {}, { now = Date.now, run = countMapFilterEntitiesUncached } = {}) {
+  const key = mapFilterCountCacheKey(compiled, options);
+  const hit = countCache.get(key);
+  if (hit && now() - hit.at < COUNT_CACHE_TTL_MS) {
+    return { ...hit.result, timing: { ...hit.result.timing, cacheHit: true, cacheAgeMs: now() - hit.at } };
+  }
+  const result = await run(compiled, options);
+  const hasPhaseErrors = Object.keys(result?.meta?.phaseErrors || {}).length > 0;
+  if (!hasPhaseErrors) {
+    if (countCache.size >= COUNT_CACHE_MAX) countCache.delete(countCache.keys().next().value);
+    countCache.set(key, { at: now(), result });
+  }
+  return { ...result, timing: { ...result.timing, cacheHit: false } };
+}
+
+export async function countMapFilterEntitiesUncached(
   compiled,
   { bounds = null, includeProspects = true, includeOwners = true, includePhones = true } = {},
+  { getPool = getPgPool, hasDb = hasDatabaseUrl } = {},
 ) {
-  if (!hasDatabaseUrl()) {
+  if (!hasDb()) {
     throw new Error("database_url_missing");
   }
 
@@ -56,7 +96,7 @@ export async function countMapFilterEntities(
   const allParams = [...params, ...matchingCte.extraParams];
   const timeoutMs = MAP_FILTER_LIMITS.countQueryTimeoutMs;
 
-  const pool = getPgPool();
+  const pool = getPool();
   const connStart = Date.now();
   const client = await pool.connect();
   const connectionMs = Date.now() - connStart;
@@ -80,6 +120,7 @@ export async function countMapFilterEntities(
       allParams,
     );
 
+    const phaseErrors = {};
     let matchingProperties = 0;
     let matchingProspects = 0;
     let matchingMasterOwners = 0;
@@ -118,38 +159,37 @@ export async function countMapFilterEntities(
       }
     }
 
-    if (includeOwners) {
+    // Owners and phones are secondary: if one cannot be computed it is reported
+    // as null ("—" in the UI), never as a fabricated 0, and the property count
+    // still answers. Each runs inside a savepoint so a failure does not abort
+    // the transaction.
+    const secondaryCount = async (phase, sql) => {
+      await client.query(`SAVEPOINT map_filter_${phase}`);
       try {
-        const ownStart = Date.now();
-        const ownerSql = buildOwnerCountFromMatchingSql()
-          .replace(/matching_properties/g, "_map_filter_matching_properties");
-        const ownerRes = await client.query(ownerSql);
-        timing.ownerCountMs = Date.now() - ownStart;
-        matchingMasterOwners = Number(ownerRes.rows[0]?.count || 0);
+        const res = await client.query(sql.replace(/matching_properties/g, "_map_filter_matching_properties"));
+        await client.query(`RELEASE SAVEPOINT map_filter_${phase}`);
+        return Number(res.rows[0]?.count || 0);
       } catch (error) {
-        const code = mapQueryError(error, "owner");
-        const err = new Error(code);
-        err.code = code;
-        err.phase = "owner";
-        throw err;
+        await client.query(`ROLLBACK TO SAVEPOINT map_filter_${phase}`);
+        phaseErrors[phase] = mapQueryError(error, phase);
+        return null;
       }
+    };
+
+    if (includeOwners) {
+      const ownStart = Date.now();
+      matchingMasterOwners = await secondaryCount("owner", buildOwnerCountFromMatchingSql());
+      timing.ownerCountMs = Date.now() - ownStart;
+    } else {
+      matchingMasterOwners = null;
     }
 
     if (includePhones) {
-      try {
-        const phStart = Date.now();
-        const phoneSql = buildPhoneCountFromMatchingSql()
-          .replace(/matching_properties/g, "_map_filter_matching_properties");
-        const phoneRes = await client.query(phoneSql);
-        timing.phoneCountMs = Date.now() - phStart;
-        matchingPhones = Number(phoneRes.rows[0]?.count || 0);
-      } catch (error) {
-        const code = mapQueryError(error, "phone");
-        const err = new Error(code);
-        err.code = code;
-        err.phase = "phone";
-        throw err;
-      }
+      const phStart = Date.now();
+      matchingPhones = await secondaryCount("phone", buildPhoneCountFromMatchingSql());
+      timing.phoneCountMs = Date.now() - phStart;
+    } else {
+      matchingPhones = null;
     }
 
     await client.query("COMMIT");
@@ -175,7 +215,10 @@ export async function countMapFilterEntities(
         hasPhoneRules: hasEntityRules(compiled.compiledPredicateAst, "phone"),
         boundsApplied: Boolean(parsedBounds),
         usesProspectLinkBridge: true,
-        usesPhoneLinkBridge: true,
+        usesPhoneLinkBridge: false,
+        phoneSource: "campaign_target_graph.canonical_e164",
+        touchSource: "campaign_target_graph.never_contacted",
+        phaseErrors,
       },
     };
   } catch (error) {

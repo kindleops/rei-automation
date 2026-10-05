@@ -19,15 +19,16 @@ export const MAP_FILTER_COUNT_SEMANTICS = {
     id: "matchingMasterOwners",
     label: "Matching Master Owners",
     definition:
-      "Distinct master_owners.master_owner_id linked to matching properties and satisfying all applicable owner predicates. " +
-      "When no owner-specific predicates exist, count all owners linked to matching properties.",
+      "Distinct master_owner_id linked to matching properties via properties.master_owner_id OR the " +
+      "property→prospect→owner bridge (map_filter_property_prospect_links), satisfying all applicable owner predicates. " +
+      "Null when it could not be computed — never a fabricated 0.",
   },
   matchingPhones: {
     id: "matchingPhones",
     label: "Matching phones",
     definition:
-      "Distinct phones.phone_id linked to matching properties via map_filter_property_phone_links and satisfying all applicable phone predicates. " +
-      "When no phone-specific predicates exist, count all phones linked to matching properties.",
+      "Distinct campaign_target_graph.canonical_e164 for matching properties — the phone the campaign audience would text. " +
+      "Null when it could not be computed — never a fabricated 0.",
   },
   propertiesInBounds: {
     id: "propertiesInBounds",

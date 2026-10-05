@@ -113,6 +113,9 @@ function validateRuleValue(field, operator, value) {
   if (["is_true", "is_false", "is_unknown"].includes(operator)) {
     return [];
   }
+  if (field.dataType === "touch_state") {
+    return [];
+  }
   if (operator === "between" || operator === "outside_range") {
     if (!Array.isArray(value) || value.length !== 2) return ["invalid_between_value"];
     return [];

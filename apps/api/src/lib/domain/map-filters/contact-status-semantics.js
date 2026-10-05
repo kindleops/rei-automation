@@ -1,55 +1,58 @@
 /**
- * Canonical property contact-state model for map filters.
+ * Canonical property TOUCH state for map filters ("Property universe":
+ * All / Uncontacted / Contacted).
  *
- * Source of truth: public.properties.contact_status
- * (not prospect presence, phone presence, inbox threads, or seller_work_items).
+ * Source of truth: public.campaign_target_graph.never_contacted — the same
+ * column the Campaign Composer, funnel and Build read (one audience truth).
+ * The graph derives it daily from the send ledger: last_outbound_at =
+ * GREATEST(message_events outbound, send_queue sent) for the row's phone.
+ *
+ *   contacted   = the property has a graph row with never_contacted = false
+ *   uncontacted = NOT contacted (no graph touch known — includes the handful of
+ *                 properties without a graph row), so the two buckets always
+ *                 partition the universe exactly.
+ *
+ * NOT public.properties.contact_status: that is a Podio-era import column whose
+ * only values are 'No Contact' and NULL. Treating any non-null value as
+ * "contacted" labelled 121,182 never-texted properties as Contacted.
  */
 
-export const CONTACT_STATUS_FIELD_KEY = "property.contact_status";
+export const TOUCH_STATE_FIELD_KEY = "property.touch_state";
+export const TOUCH_STATE_DATA_TYPE = "touch_state";
+export const TOUCH_STATE_OPERATORS = Object.freeze(["is_contacted", "is_uncontacted"]);
+export const TOUCH_STATE_SOURCE = Object.freeze({
+  table: "public.campaign_target_graph",
+  column: "never_contacted",
+  joinKey: "property_id",
+});
 
-/** Values treated as uncontacted when stored on the property row. */
-export const UNCONTACTED_STATUS_VALUES = Object.freeze([
-  "uncontacted",
-  "not_contacted",
-  "",
-]);
+/** Kept for callers that still import the old name; it is the touch field now. */
+export const CONTACT_STATUS_FIELD_KEY = TOUCH_STATE_FIELD_KEY;
 
-/**
- * Expression group: property is uncontacted per canonical model.
- * Matches NULL, empty string, uncontacted, and not_contacted.
- */
+function touchRule(id, operator) {
+  return {
+    id,
+    type: "rule",
+    fieldKey: TOUCH_STATE_FIELD_KEY,
+    operator,
+    value: true,
+    enabled: true,
+  };
+}
+
+/** Expression: the property has never been sent an SMS (per the campaign graph). */
 export function buildUncontactedContactExpression() {
   return {
     id: "preset-uncontacted-root",
     type: "group",
-    combinator: "OR",
+    combinator: "AND",
     negated: false,
     enabled: true,
-    children: [
-      {
-        id: "preset-uncontacted-values",
-        type: "rule",
-        fieldKey: CONTACT_STATUS_FIELD_KEY,
-        operator: "is_any_of",
-        value: ["uncontacted", "not_contacted", ""],
-        enabled: true,
-      },
-      {
-        id: "preset-uncontacted-null",
-        type: "rule",
-        fieldKey: CONTACT_STATUS_FIELD_KEY,
-        operator: "is_blank",
-        value: true,
-        enabled: true,
-      },
-    ],
+    children: [touchRule("preset-uncontacted-touch", "is_uncontacted")],
   };
 }
 
-/**
- * Expression group: property is contacted per canonical model.
- * Any non-blank status outside the uncontacted bucket.
- */
+/** Expression: the property has been sent at least one SMS (per the campaign graph). */
 export function buildContactedContactExpression() {
   return {
     id: "preset-contacted-root",
@@ -57,51 +60,35 @@ export function buildContactedContactExpression() {
     combinator: "AND",
     negated: false,
     enabled: true,
-    children: [
-      {
-        id: "preset-contacted-has-status",
-        type: "rule",
-        fieldKey: CONTACT_STATUS_FIELD_KEY,
-        operator: "is_not_blank",
-        value: true,
-        enabled: true,
-      },
-      {
-        id: "preset-contacted-not-uncontacted",
-        type: "group",
-        combinator: "OR",
-        negated: true,
-        enabled: true,
-        children: [
-          {
-            id: "preset-contacted-exclude-values",
-            type: "rule",
-            fieldKey: CONTACT_STATUS_FIELD_KEY,
-            operator: "is_any_of",
-            value: ["uncontacted", "not_contacted", ""],
-            enabled: true,
-          },
-        ],
-      },
-    ],
+    children: [touchRule("preset-contacted-touch", "is_contacted")],
   };
 }
 
-/** SQL fragment helpers for direct accounting comparisons (alias `p`). */
-export function buildUncontactedStatusSql(alias = "p") {
-  const col = `${alias}.contact_status`;
-  return `(
-    ${col} IS NULL
-    OR TRIM(COALESCE(${col}, '')) = ''
-    OR LOWER(TRIM(${col})) IN ('uncontacted', 'not_contacted')
+/**
+ * Bucket predicates for a property alias. Index-backed: the graph has a btree
+ * on property_id, and never_contacted is NOT NULL.
+ */
+export function buildContactedTouchSql(alias = "p") {
+  return `EXISTS (
+    SELECT 1 FROM public.campaign_target_graph tg
+    WHERE tg.property_id = ${alias}.property_id
+      AND tg.never_contacted IS FALSE
   )`;
 }
 
-export function buildContactedStatusSql(alias = "p") {
-  return `NOT (${buildUncontactedStatusSql(alias)})`;
+export function buildUncontactedTouchSql(alias = "p") {
+  return `NOT ${buildContactedTouchSql(alias)}`;
 }
 
-export function isUncontactedContactStatus(value) {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  return !normalized || UNCONTACTED_STATUS_VALUES.includes(normalized);
+export function buildTouchStateSql(operator, alias = "p") {
+  if (operator === "is_contacted") return buildContactedTouchSql(alias);
+  if (operator === "is_uncontacted") return buildUncontactedTouchSql(alias);
+  throw new Error(`invalid_touch_state_operator:${operator}`);
+}
+
+/** Map a UI universe value onto the touch operator ("all" → null = no rule). */
+export function touchOperatorForMapStatus(mapStatus) {
+  if (mapStatus === "contacted") return "is_contacted";
+  if (mapStatus === "uncontacted") return "is_uncontacted";
+  return null;
 }
