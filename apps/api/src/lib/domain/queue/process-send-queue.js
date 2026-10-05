@@ -48,6 +48,7 @@ import {
 import { getSystemValue } from "@/lib/system-control.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
+import { isMissedCallAutotextSend } from "@/lib/domain/calls/missed-call-send-kind.js";
 import {
   claimSendQueueRow,
   evaluateContactWindow,
@@ -1996,8 +1997,11 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
      * effect of getting past a name check.
      */
     const buyer_disposition_send = isBuyerDispositionSend(queue_row);
+    // Missed-call auto-text addresses nobody by name (often an unknown
+    // caller). Exempt from the NAME guard only; see missed-call-send-kind.js.
+    const missed_call_autotext_send = isMissedCallAutotextSend(queue_row);
 
-    if (!manual_inbox_send && !buyer_disposition_send && !seller_first_name) {
+    if (!manual_inbox_send && !buyer_disposition_send && !missed_call_autotext_send && !seller_first_name) {
       // Mark row as blocked — do not send.
       const supabase_client = getSupabase(deps);
       await supabase_client

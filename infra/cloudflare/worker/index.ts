@@ -74,6 +74,21 @@ export class ApiContainer extends Container<Env> {
       // acquisition_scoring_backfill.status='running'. Default OFF.
       ACQUISITION_SCORING_BACKFILL_ENABLED:
         env.ACQUISITION_SCORING_BACKFILL_ENABLED === "true" ? "true" : "false",
+      // Missed-call auto-text (voice webhook). Default-deny ceiling: without an
+      // explicit "true" the voice route answers busy and writes nothing. The
+      // text itself also needs system_control.missed_call_autotext_enabled and
+      // goes only through the canonical queue writer + dispatch gates.
+      MISSED_CALL_AUTOTEXT_ENABLED:
+        env.MISSED_CALL_AUTOTEXT_ENABLED === "true" ? "true" : "false",
+      // Owner's phone for call forwarding, plus tuning. NOT credentials; a
+      // phone number cannot originate anything. Conditional like the rest.
+      ...(env.OWNER_FORWARD_NUMBER ? { OWNER_FORWARD_NUMBER: env.OWNER_FORWARD_NUMBER } : {}),
+      ...(env.MISSED_CALL_FORWARD_TIMEOUT_SECONDS
+        ? { MISSED_CALL_FORWARD_TIMEOUT_SECONDS: env.MISSED_CALL_FORWARD_TIMEOUT_SECONDS }
+        : {}),
+      ...(env.MISSED_CALL_RECENT_OUTBOUND_MINUTES
+        ? { MISSED_CALL_RECENT_OUTBOUND_MINUTES: env.MISSED_CALL_RECENT_OUTBOUND_MINUTES }
+        : {}),
 
       ...(env.DEPLOYMENT_ID ? { DEPLOYMENT_ID: env.DEPLOYMENT_ID } : {}),
       ...(env.DEPLOY_GIT_SHA ? { DEPLOY_GIT_SHA: env.DEPLOY_GIT_SHA } : {}),
@@ -253,6 +268,11 @@ interface Env {
   SIGNAL_CENTER_ENABLED?: string;
   /** Scoring backfill ceiling (container env). Absent => "false". */
   ACQUISITION_SCORING_BACKFILL_ENABLED?: string;
+  /** Missed-call auto-text ceiling (container env). Absent => "false". */
+  MISSED_CALL_AUTOTEXT_ENABLED?: string;
+  OWNER_FORWARD_NUMBER?: string;
+  MISSED_CALL_FORWARD_TIMEOUT_SECONDS?: string;
+  MISSED_CALL_RECENT_OUTBOUND_MINUTES?: string;
   // Email (Brevo transport + inbound verification).
   EMAIL_SEND_ENABLED?: string;
   BREVO_API_KEY?: string;
