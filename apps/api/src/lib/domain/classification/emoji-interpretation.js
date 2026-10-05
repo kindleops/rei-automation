@@ -165,8 +165,18 @@ export function parsePlatformReaction(message) {
     const emoji = extractEmojis(emojiMatch[1])[0] || emojiMatch[1];
     return { verb: null, emoji, family: emojiFamily(emoji), target_text: emojiMatch[2].replace(/"\s*$/, "").trim() };
   }
-  // `Reacted 👍 to "…"`
-  const reacted = /^reacted\s+(\S{1,16})\s+to\s+"\s*([\s\S]*?)\s*"?\s*$/iu.exec(raw);
+  // Retractions, BEFORE the add forms: `Removed 👍 from "…"` (Android /
+  // Google Messages, zero-width joiners already stripped), `Removed a like
+  // from "…"`, `Removed a question mark from "…"` (iOS). Live on
+  // +18177347618 2026-10-05; the old pattern required "a"/"an" and missed the
+  // emoji form, so each retraction was read as new, unclear seller text.
+  const removedEmoji = /^removed\s+((?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|️|‍)+)\s+from\s+"\s*([\s\S]*?)\s*"?\s*$/iu.exec(raw);
+  if (removedEmoji) {
+    const emoji = extractEmojis(removedEmoji[1])[0] || removedEmoji[1];
+    return { verb: "removed", emoji, family: "removed", removed_family: emojiFamily(emoji), target_text: removedEmoji[2].replace(/"\s*$/, "").trim() };
+  }
+  // `Reacted 👍 to "…"` / `Reacted with 👍 to "…"`
+  const reacted = /^reacted\s+(?:with\s+)?(\S{1,16})\s+to\s+"\s*([\s\S]*?)\s*"?\s*$/iu.exec(raw);
   if (reacted) {
     const emoji = extractEmojis(reacted[1])[0] || reacted[1];
     return { verb: "reacted", emoji, family: emojiFamily(emoji), target_text: reacted[2].replace(/"\s*$/, "").trim() };
@@ -180,7 +190,7 @@ export function parsePlatformReaction(message) {
       return { verb, emoji: null, family, target_text: target };
     }
   }
-  if (/^removed\s+an?\s+\S+\s+from\s+"/.test(folded)) {
+  if (/^(?:removed\s+(?:an?\s+)?[^"]{1,24}?\s+from|(?:elimino|quito)\s+(?:un|el|una)?\s*[^"]{0,24}?\s*de)\s+"/.test(folded)) {
     return { verb: "removed", emoji: null, family: "removed", target_text: raw.slice(raw.indexOf('"') + 1).replace(/"\s*$/, "").trim() };
   }
   return null;

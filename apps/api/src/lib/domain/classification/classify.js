@@ -21,6 +21,7 @@ import {
   FACTUAL_COMMITMENT,
 } from "@/lib/domain/classification/emoji-interpretation.js";
 import { detectReplyDispositionSignals, foldReplyLines } from "@/lib/domain/classification/reply-disposition-signals.js";
+import { resolveSellerReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import {
   resolveCanonicalAskingPrice,
   isCommittedAskingPrice,
@@ -391,6 +392,16 @@ function detectLanguageHeuristic(message, brain_item = null) {
   }
 
   return brain_language || "English";
+}
+
+/** True when a language pattern (script or keyword) actually matched. */
+function hasExplicitLanguageEvidence(message) {
+  const text = lower(message);
+  return LANGUAGE_PATTERNS.some(
+    (pattern) =>
+      pattern.script?.test(message) ||
+      (pattern.keywords.length > 0 && includesAny(text, pattern.keywords))
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -6407,6 +6418,28 @@ function classifyHeuristic(message, brain_item = null, options = {}) {
         conversation_context.last_outbound_question_type === "ownership")
   );
   const emoji_interpretation = interpretEmojiReply(message, signal_context);
+  // OWNER RULE (2026-10-05): reply in the language the SELLER replied in --
+  // this message if it identifies one ("Yes" English, "Sí" Spanish), else the
+  // seller's most recent identifiable reply, else our thread / opener
+  // language. A tapback never counts (it quotes OUR words). An explicit switch
+  // request ("en español por favor") was already decided above.
+  let reply_language_source = "detected";
+  if (!matchesSpanishTargetSwitch(message)) {
+    const raw_context = conversation_context && typeof conversation_context === "object" ? conversation_context : null;
+    const resolved_language = resolveSellerReplyLanguage({
+      message,
+      detected_language: language,
+      explicit: hasExplicitLanguageEvidence(message),
+      seller_history_language: raw_context?.seller_reply_language || null,
+      thread_language: names_context?.last_outbound_language || null,
+    });
+    if (resolved_language.language) {
+      language = resolved_language.language;
+      reply_language_source = resolved_language.source;
+    }
+  } else {
+    reply_language_source = "language_switch_request";
+  }
   const reply_signals    = detectReplyDispositionSignals(
     message,
     names_context || ownership_question ? { ...(names_context || {}), ownership_question } : null
@@ -6506,6 +6539,10 @@ function classifyHeuristic(message, brain_item = null, options = {}) {
       emoji_interpretation,
     }),
     language_preference: deriveLanguagePreference({ message, language, reply_signals }),
+    // Where `language` came from: seller_reply | seller_history | thread |
+    // detected | language_switch_request. The auto-reply template selector
+    // honours a seller-derived language over the stored thread language.
+    reply_language_source,
     call_request: reply_signals.call_request?.matched
       ? {
           state: reply_signals.call_request.state,
@@ -6773,6 +6810,25 @@ function deriveAutomationDecision({
       suppression_action: "opt_out",
       human_review_required: false,
       risk_level: "high",
+    };
+  }
+
+  // A RETRACTED tapback ("Removed 👍 from “…”") says nothing new: no reply,
+  // no review card, nothing suppressed. It must not surface as an unclear
+  // seller turn (+18177347618, 2026-10-05). Compliance ran above.
+  if (
+    !compliance_flag &&
+    intent === "acknowledgement" &&
+    emoji_interpretation?.reaction_type === "platform_reaction" &&
+    emoji_interpretation?.rule_id === "reaction_removed"
+  ) {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "low",
+      reply_kind: "reaction_removed",
     };
   }
 
