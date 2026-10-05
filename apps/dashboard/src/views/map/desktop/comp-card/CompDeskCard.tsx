@@ -33,6 +33,8 @@ import { showPortfolio } from '../../mobile/comp-portfolio-layer'
 import { openCompsBeside } from './comp-card-actions'
 import { DASH, buildCompCardModel, type CompCardModel, type CompRecord, type CompSubject, type Fact } from './comp-card-model'
 import { useCompDetail, type CompDetailStore } from './comp-detail-store'
+import { BuyerOfRecord } from '../../../../modules/market-intelligence/sale-owner/BuyerOfRecord'
+import { useSaleOwners } from '../../../../modules/market-intelligence/sale-owner/sale-owner-client'
 import './comp-card.css'
 
 function Facts({ items, className }: { items: Fact[]; className?: string }) {
@@ -91,7 +93,10 @@ export function CompDeskCard({ map, compId, clickLngLat, subject, store, onClose
 }) {
   const entry = useCompDetail(store, compId)
   const rec: CompRecord | null = entry.status === 'ready' ? entry.data : null
-  const m = useMemo(() => (rec ? buildCompCardModel(rec, subject, now) : null), [rec, subject, now])
+  // One keyed, cached sale_owner request per card (shared batcher), not per field.
+  const ownerOf = useSaleOwners(compId ? [compId] : [])
+  const owner = ownerOf(compId)
+  const m = useMemo(() => (rec ? buildCompCardModel(rec, subject, now, owner) : null), [rec, subject, now, owner])
   const [look, setLook] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(false)
@@ -202,7 +207,7 @@ export function CompDeskCard({ map, compId, clickLngLat, subject, store, onClose
             <div className="mcc-buyer__row">
               <span className={cx('mcc-buyer__mark', m.buyer.withheld && 'is-person')} aria-hidden="true"><Icon name={m.buyer.withheld ? 'user' : 'briefcase'} size={14} /></span>
               <div className="mcc-buyer__copy">
-                <strong>{m.buyer.name}</strong>
+                <strong>{m.buyer.owner ? <BuyerOfRecord row={m.buyer.owner} /> : m.buyer.name}</strong>
                 <span>{[m.buyer.kind, m.buyer.withheld ? 'name withheld' : null, m.buyer.investor ? 'investor purchase' : null].filter(Boolean).join(' · ')}</span>
                 {m.buyer.record ? <span className="lc-num">{m.buyer.record}</span> : null}
               </div>

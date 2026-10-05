@@ -188,3 +188,24 @@ describe('cash and financing evidence', () => {
     expect(buildCompCardModel(deed(), null, NOW).money.find((f) => f.label === 'Payment')?.value).toBe('Cash')
   })
 })
+
+describe('buyer of record (shared resolver, owner rule 2026-10-05)', () => {
+  const owner = {
+    buyer_of_record: { label: 'Company (name not on record) · current owner of record', short: 'Company (name not on record)', basis: 'current_owner_of_record' as const, kind: 'company', name: null, linked: true, reason: 'linked' },
+    owner_link: { linked: true, reason: 'linked', explanation: 'Most recent sale, no later transfer.', owner_observed_on: '2026-09-20', later_transfer_on: null },
+    inferred: { tier: 'strong', label: 'Strong inferred investor', investor: true, evidence: ['entity_owner', 'out_of_state_mailing'], mailing_stack: 1 },
+  }
+  it('no recorded buyer + a linked owner: the label verbatim, basis current owner of record', () => {
+    const m = buildCompCardModel(deed({ buyer: null, buyer_kind: null, buyer_class: 'unknown', investor_inferred_current_owner: true }), null, NOW, owner)
+    expect(m.buyer.name).toBe('Company (name not on record) · current owner of record')
+    expect(m.buyer.basis).toBe('current_owner_of_record')
+    expect(m.buyer.owner).toBe(owner)
+    expect(m.buyer.entityNote).toBeNull() // replaced by the tiered resolver
+  })
+  it('a recorded buyer is never replaced; no owner keeps "Buyer not on record"', () => {
+    expect(buildCompCardModel(deed({ buyer: 'ACME HOMES LLC', buyer_kind: 'company', buyer_class: 'llc_investor' }), null, NOW, owner).buyer.owner).toBeNull()
+    const none = buildCompCardModel(deed({ buyer: null, buyer_kind: null, buyer_class: 'unknown' }), null, NOW, null)
+    expect(none.buyer.name).toBe('Buyer not on record')
+    expect(none.buyer.basis).toBeNull()
+  })
+})

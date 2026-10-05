@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom'
 import { cx } from '../../../../shared/lc'
 import { mapOverlayTarget } from '../../map-overlay-host'
 import { hoverPreviewFromFeature, type CompRecord, type CompSubject } from './comp-card-model'
+import { saleOwnerClient } from '../../../../modules/market-intelligence/sale-owner/sale-owner-client'
 import type { CompHoverState } from './comp-hover'
 import './comp-card.css'
 
@@ -21,6 +22,9 @@ export function CompHoverPreview({ hover, subject, hydrated, now, bounds }: {
   bounds: { width: number; height: number }
 }) {
   const m = hoverPreviewFromFeature(hover.props, hover.lngLat, subject, now, hydrated)
+  // Hover never fetches: only an already-cached buyer of record (e.g. the open card) is shown.
+  const cachedOwner = !m.buyer && typeof hover.props?.comp_id === 'string' ? saleOwnerClient.peek(hover.props.comp_id) : null
+  const buyerLabel = m.buyer ?? (cachedOwner?.buyer_of_record && cachedOwner.buyer_of_record.basis !== 'not_on_record' ? cachedOwner.buyer_of_record.label : null)
   const { x, y } = hover.point
   const flipX = x + 18 + W > bounds.width - 12
   const flipY = y - 150 < 12
@@ -55,7 +59,7 @@ export function CompHoverPreview({ hover, subject, hydrated, now, bounds }: {
         </dl>
       ) : null}
       <div className="mcc-hover__foot">
-        {m.buyer ? <span>{m.buyer}</span> : null}
+        {buyerLabel ? <span>{buyerLabel}</span> : null}
         <span className="mcc-hover__hint">{m.cluster ? 'Click to list or zoom' : 'Click for the full sale'}</span>
       </div>
     </div>,

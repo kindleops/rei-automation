@@ -333,6 +333,8 @@ export interface Fact { label: string; value: string; hint?: string; tone?: 'ok'
 
 export interface CompDelta { label: string; value: string; direction: 'up' | 'down' | 'flat' | null; basis: string }
 
+import type { SaleOwnerRow } from '../../../../modules/market-intelligence/sale-owner/sale-owner-client'
+
 export interface CompCardModel {
   compId: string
   address: string
@@ -355,7 +357,9 @@ export interface CompCardModel {
   ppu: string
   ppuHint: string | null
   specs: Fact[]
-  buyer: { name: string; kind: string; withheld: boolean; investor: boolean; record: string | null; entityNote: string | null }
+  buyer: { name: string; kind: string; withheld: boolean; investor: boolean; record: string | null; entityNote: string | null
+    /** The shared buyer-of-record resolver (MI op=sale_owner), when this sale has no recorded buyer. */
+    owner: SaleOwnerRow | null; basis: 'recorded_buyer' | 'current_owner_of_record' | 'not_on_record' | null }
   money: Fact[]
   provenance: Fact[]
   subject: { label: string; deltas: CompDelta[] } | null
@@ -376,7 +380,7 @@ function delta(label: string, comp: number | null, subj: number | null, basis: s
 
 const yesNo = (v: unknown, yes: string, no: string): string | null => (v === true ? yes : v === false ? no : null)
 
-export function buildCompCardModel(c: CompRecord, subject: CompSubject | null | undefined, now: number): CompCardModel {
+export function buildCompCardModel(c: CompRecord, subject: CompSubject | null | undefined, now: number, owner: SaleOwnerRow | null = null): CompCardModel {
   const d = c.details ?? {}
   const portfolioSize = Math.max(1, Math.round(Number(c.portfolio_size) || 1))
   const isPortfolio = portfolioSize >= 2
@@ -398,13 +402,19 @@ export function buildCompCardModel(c: CompRecord, subject: CompSubject | null | 
   const isPerson = c.buyer_kind === 'person' || buyerClass === 'individual'
   const company = !isPerson ? str(c.buyer) : null
   const stats = c.buyer_stats && c.buyer_stats.purchases > 1 ? c.buyer_stats : null
+  // No recorded buyer: the shared resolver may name today's owner of record (latest sale, no
+  // later transfer). Its label is used verbatim; "not on record" stays "Buyer not on record".
+  const resolved = !company && !isPerson && owner?.buyer_of_record ? owner : null
   const buyer = {
-    name: company ? titleCase(company) : isPerson ? 'Individual buyer' : 'Buyer not on record',
+    name: company ? titleCase(company) : isPerson ? 'Individual buyer' : resolved ? resolved.buyer_of_record!.label : 'Buyer not on record',
     kind: BUYER_CLASS_LABEL[buyerClass] ?? 'Buyer',
     withheld: isPerson,
     investor: c.is_investor === true,
     record: stats ? [`${stats.purchases} purchases`, stats.markets > 1 ? `${stats.markets} states` : null, pos(stats.median_price) !== null ? `median ${fmtUsd(stats.median_price)}` : null, stats.last ? `last ${fmtDate(stats.last)}` : null].filter(Boolean).join(' · ') : null,
-    entityNote: c.investor_inferred_current_owner === true ? 'The parcel is owned by an entity today — inferred, not an investor purchase' : null,
+    // The resolver's tiered inference replaces the untiered entity note once it is known.
+    entityNote: !owner && c.investor_inferred_current_owner === true ? 'The parcel is owned by an entity today — inferred, not an investor purchase' : null,
+    owner: resolved,
+    basis: company || isPerson ? 'recorded_buyer' as const : resolved ? resolved.buyer_of_record!.basis : null,
   }
 
   // cash / financing — only what the record says
