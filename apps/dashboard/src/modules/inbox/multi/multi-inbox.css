@@ -80,7 +80,10 @@ html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation {
   min-height: 0;
   animation: ixm-resolve var(--lc-dur-surface, 220ms) var(--lc-ease-enter, ease-out) both;
 }
-html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation > :first-child { flex: 1 1 auto; min-height: 0; }
+/* The body after the pane's own header fills the pane. (It was `> :first-child`, which since the
+   pane header (PaneConversationHeader) became the first child made the HEADER grow to half the pane
+   and squeezed the thread — RC 8.4 v2 visual pass.) */
+html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation > .ixm-conv-head + * { flex: 1 1 auto; min-height: 0; }
 html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixm-conversation__foot {
   display: flex;
   align-items: center;
