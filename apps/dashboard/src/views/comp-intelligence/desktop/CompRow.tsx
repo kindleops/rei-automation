@@ -1,3 +1,5 @@
+import type { SaleOwnerRow } from '../../../modules/market-intelligence/sale-owner/sale-owner-client'
+import { BuyerOfRecord } from '../../../modules/market-intelligence/sale-owner/BuyerOfRecord'
 import { memo, useState, type KeyboardEvent } from 'react'
 import { LCButton, LCTooltip, cx } from '../../../shared/lc'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
@@ -15,6 +17,8 @@ import { handleObjectClick, objectAttrs, ObjectMenu } from '../../../modules/des
 import { compObject } from './comp-object'
 
 export interface CompRowProps {
+  /** Buyer of record from the shared resolver (fetched once per view by the list); null = none. */
+  owner?: SaleOwnerRow | null
   c: EvidenceComp
   tier: Tier
   rank: number | null
@@ -56,7 +60,7 @@ function specLine(c: EvidenceComp, kind: AssetKind): string {
  * where, when, for how much, how similar, why it is or is not evidence —
  * and how much of the valuation's weight it carries.
  */
-export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxShare, kind, metric, ctx, store, onOpen, onInclude, onExclude, tabStop, onKeyNav }: CompRowProps) {
+export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxShare, kind, metric, ctx, store, onOpen, onInclude, onExclude, tabStop, onKeyNav, owner = null }: CompRowProps) {
   const { hot, selected } = useFocusOf(store, c.key)
   const [why, setWhy] = useState(false)
   const inSet = tier === 'set' || tier === 'added'
@@ -110,6 +114,7 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
         </div>
         <div className="ciw-row__meta lc-num">
           <SaleTypeBadge v={sale} withBuyer />
+          {!c.buyerKind && owner?.buyer_of_record?.basis === 'current_owner_of_record' ? <BuyerOfRecord row={owner} compact /> : null}
           <span>{[fmtMiles(c.distanceMiles), c.saleDate ? `${fmtDate(c.saleDate)}${days !== null ? ` · ${fmtAge(days)}` : ''}` : 'Undated sale'].filter(Boolean).join(' · ')}</span>
         </div>
         <div className="ciw-row__spec lc-num">{specLine(c, kind)}</div>

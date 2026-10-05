@@ -6,6 +6,7 @@ import {
   describeFilters, filterCount, fmtDate, fmtMoney, fmtPct, matchesPreset, PRESETS, type CompFilters, type ExplainContext, type PresetId,
 } from '../../../domain/comp-intelligence/comps-workstation-model'
 import { countSaleTypes, SALE_TYPE_LABEL, SALE_TYPES, saleTypeOfComp } from '../../../domain/comp-intelligence/comp-sale-type'
+import { propSaleKey, useSaleOwners } from '../../../modules/market-intelligence/sale-owner/sale-owner-client'
 import { CompRow } from './CompRow'
 import { RecentSaleRow } from './RecentSaleRow'
 import type { Lens, Tier, Workstation } from './derive-workstation'
@@ -66,8 +67,12 @@ export function EvidenceMode({ m, ctx, store, filters, onFilters, filtersOpen, o
     }
   }, [onExclude, onInclude, onOpen])
 
+  // Buyer of record for sales without a recorded buyer: ONE batched, cached sale_owner request
+  // for the whole view (the shared client), never one per row.
+  const ownerKeyOf = (c: EvidenceComp) => (c.buyerKind ? null : propSaleKey(c.propertyId, c.saleDate))
+  const ownerOf = useSaleOwners([...m.lensComps, ...m.candidates].map(ownerKeyOf))
   const row = (c: EvidenceComp, tier: Tier, rank: number | null) => (
-    <CompRow key={c.key} c={c} tier={tier} rank={rank} weightShare={shares.get(c.key) ?? null} maxShare={maxShare} kind={m.kind} metric={m.metric}
+    <CompRow key={c.key} c={c} tier={tier} rank={rank} weightShare={shares.get(c.key) ?? null} maxShare={maxShare} kind={m.kind} metric={m.metric} owner={ownerOf(ownerKeyOf(c))}
       ctx={ctx} store={store} onOpen={onOpen} onInclude={onInclude} onExclude={onExclude} tabStop={tabKey === c.key} onKeyNav={onKeyNav} />
   )
 
