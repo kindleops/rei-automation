@@ -3,7 +3,7 @@ import { normalizeRoutePath, setRouteNavigationInterceptor } from '../../../app/
 import { NEXUS_APPS, getApp, resolveAppForRoute, type AppId } from '../../../domain/app-registry/app-registry'
 import { resolveAppDestination } from '../../../domain/app-registry/contextual-navigation'
 import { PROPERTY_LOCATOR_EVENT, readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
-import { setLinkedSourceResolver, subscribeLinkedProperty } from '../../../domain/locator/linked-property-bus'
+import { installLinkedIntentTracking, setLinkedSourceResolver, subscribeLinkedProperty } from '../../../domain/locator/linked-property-bus'
 import * as L from './layout'
 import type { MissionKind, MissionPlan, MissionSubject } from './missions'
 import { copyInstanceState, instanceStateKeys, isolateShared, releaseInstanceState, sweepInstanceState } from './instance-state'
@@ -346,9 +346,13 @@ export function startWorkspace(): () => void {
   // and follow it once (debounced, latest wins — see linked-property-bus)
   setLinkedSourceResolver(actingInstance)
   const stopLinked = subscribeLinkedProperty((signal) => followSelection(signal.locator, signal.source))
+  // a click / key is the operator's selection; a host re-asserting its own
+  // state is not, and never overrides it (linked-property-bus, user intent)
+  const stopIntent = installLinkedIntentTracking()
   return () => {
     setLinkedSourceResolver(null)
     stopLinked()
+    stopIntent()
     started = false
     // the arrangement is saved now, not by a timer that outlives this shell
     window.clearTimeout(persistTimer)

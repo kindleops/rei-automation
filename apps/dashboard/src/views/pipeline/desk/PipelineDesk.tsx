@@ -22,7 +22,7 @@ import { setPropertyLocator, type PropertyLocator } from '../../../domain/locato
 import type { LinkedApplyContext } from '../../../domain/locator/linked-property-bus'
 import { useLinkedProperty } from '../../../modules/desktop/workspace/linked-property'
 import { LinkedNotice } from '../../../modules/desktop/workspace/LinkedNotice'
-import { fetchOpportunityRefs, resolvePipelineItem } from './pipeline-linked'
+import { dealLocator, fetchOpportunityRefs, resolvePipelineItem } from './pipeline-linked'
 import { sound } from '../../../shared/sound'
 import type { PipelineCommandParams } from '../../../domain/pipeline/pipeline-command-api'
 import type { DeskCard, DeskMove } from './pipeline-desk-api'
@@ -186,8 +186,7 @@ export function PipelineDesk() {
     setLinkedMiss(null)
     if (ownsUrl) writeUrlParam('opp', card.id)
     // Linked panes follow the deal the operator is looking at.
-    if (seed) setPropertyLocator({ propertyId: seed.propertyId, threadKey: seed.threadKey, masterOwnerId: seed.masterOwnerId, opportunityId: seed.id, address: seed.address })
-    else setPropertyLocator({ opportunityId: card.id })
+    setPropertyLocator(dealLocator(seed, card.id))
   }, [isOpen, ownsUrl, rows.data])
   const closeDeal = useCallback(() => {
     sound.panel.close()

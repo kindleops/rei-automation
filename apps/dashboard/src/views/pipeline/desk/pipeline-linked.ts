@@ -56,3 +56,14 @@ export async function fetchOpportunityRefs(filter: { property_id?: string; threa
     .map((r) => ({ id: String(r.id ?? '').trim(), status: r.opportunity_status == null ? null : String(r.opportunity_status) }))
     .filter((r) => r.id)
 }
+
+/**
+ * The locator a deal click publishes (board beads, table rows, overview
+ * planes — every deal surface funnels through PipelineDesk.openDeal). It
+ * carries the property AND the thread, so the Map can fly and the Inbox can
+ * open that deal's conversation (navigation: never a read).
+ */
+export function dealLocator(seed: Pick<DeskCard, 'id' | 'propertyId' | 'threadKey' | 'masterOwnerId' | 'address'> | null, id: string): Partial<PropertyLocator> {
+  if (!seed) return { opportunityId: id }
+  return { propertyId: seed.propertyId, threadKey: seed.threadKey, masterOwnerId: seed.masterOwnerId, opportunityId: seed.id, address: seed.address }
+}

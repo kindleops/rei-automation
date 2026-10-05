@@ -28,7 +28,7 @@
  * destination re-resolve an identity it was not given.
  */
 
-import { announceExplicitProperty, announceLinkedProperty, isApplyingLinked, isHeldAgainst, mergeSameSubject, resetLinkedProperty, sameSubject } from './linked-property-bus'
+import { announceExplicitProperty, announceLinkedProperty, isApplyingLinked, isHeldAgainst, isStaleAgainstIntent, isUserIntentNow, mergeSameSubject, recordIntent, resetLinkedProperty, sameSubject } from './linked-property-bus'
 
 export interface PropertyLocator {
   propertyId: string | null
@@ -108,6 +108,7 @@ export function setPropertyLocator(input: Partial<PropertyLocator>, opts: { expl
   if (opts.explicit && !isApplyingLinked()) {
     writeLocator(next)
     try { window.dispatchEvent(new CustomEvent(PROPERTY_LOCATOR_EVENT, { detail: next })) } catch { /* non-DOM */ }
+    recordIntent(next)
     announceExplicitProperty(next)
     return next
   }
@@ -118,6 +119,11 @@ export function setPropertyLocator(input: Partial<PropertyLocator>, opts: { expl
     writeLocator(next)
     return next
   }
+  // ORIGIN-AWARE LATEST WINS (linked-property-bus, user intent): a host
+  // re-asserting its own state outside any input never re-aims the locator
+  // over the operator's newer selection of another subject.
+  if (!same && isStaleAgainstIntent(next)) return prev
+  if (isUserIntentNow()) recordIntent(next)
 
   writeLocator(next)
   try {

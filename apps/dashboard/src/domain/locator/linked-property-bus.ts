@@ -132,13 +132,92 @@ export function isHeldAgainst(locator: Ids, now = Date.now()): boolean {
   return !sameSubject(hold.locator, locator)
 }
 
+/* ── user intent: origin-aware latest wins ─────────────────────────────── */
+
+/**
+ * A SELECTION THE OPERATOR MADE OUTRANKS A HOST RE-ASSERTING ITS OWN STATE.
+ *
+ * Every publish is one of two kinds:
+ *
+ *   intent   made inside the task of a trusted input event (a click, a key)
+ *            — the operator chose this subject
+ *   ambient  anything else: an effect re-running, a poll, an arrival retry,
+ *            an async catch-up. It can only echo what a host already shows.
+ *
+ * QA (owner, RC 8.3.2): a Pipeline table click moved the Map, which then
+ * snapped BACK to the previous property — a host re-publishing its own
+ * selection 0–2s later won the latest-wins race because the bus could not
+ * tell it from a click. Now an ambient publish naming a DIFFERENT subject is
+ * held (not broadcast, the locator not re-aimed) while the newest intent is
+ * still the operator's last gesture and younger than INTENT_HOLD_MS. A new
+ * gesture anywhere (pointerdown / keydown) releases the hold, so a slow read
+ * the operator asked for after that gesture still lands.
+ *
+ * Tracking is installed by the desktop workspace only; without it every
+ * publish counts as intent (phones, single-app shells: unchanged).
+ */
+export const INTENT_HOLD_MS = 3000
+let tracking = false
+let inInputTask = false
+let gestureSeq = 0
+let intent: { locator: PropertyLocator; at: number; gesture: number } | null = null
+let inputClear: ReturnType<typeof setTimeout> | null = null
+
+/** A trusted input event is being dispatched: publishes in this task are intent. */
+export function markUserInput(startsGesture: boolean) {
+  if (startsGesture) gestureSeq += 1
+  inInputTask = true
+  if (inputClear === null) inputClear = setTimeout(() => { inInputTask = false; inputClear = null }, 0)
+}
+
+const GESTURE_EVENTS = ['pointerdown', 'keydown'] as const
+const CONTINUE_EVENTS = ['pointerup', 'click', 'dblclick', 'contextmenu'] as const
+
+/** Installed once by the desktop workspace. Returns teardown. */
+export function installLinkedIntentTracking(): () => void {
+  if (tracking || typeof window === 'undefined') return () => {}
+  tracking = true
+  const start = (e: Event) => { if (e.isTrusted) markUserInput(true) }
+  const cont = (e: Event) => { if (e.isTrusted) markUserInput(false) }
+  const opts = { capture: true, passive: true } as const
+  for (const t of GESTURE_EVENTS) window.addEventListener(t, start, opts)
+  for (const t of CONTINUE_EVENTS) window.addEventListener(t, cont, opts)
+  return () => {
+    for (const t of GESTURE_EVENTS) window.removeEventListener(t, start, opts)
+    for (const t of CONTINUE_EVENTS) window.removeEventListener(t, cont, opts)
+    if (inputClear !== null) { clearTimeout(inputClear); inputClear = null }
+    tracking = false
+    inInputTask = false
+    intent = null
+  }
+}
+
+/** Is a publish made now the operator's own choice? */
+export const isUserIntentNow = () => !tracking || inInputTask
+
+/** Remember the operator's choice (the locator publish path calls it). */
+export function recordIntent(locator: PropertyLocator, now = Date.now()) {
+  if (!tracking) return
+  intent = { locator, at: now, gesture: gestureSeq }
+}
+
+/**
+ * True when `locator` is an ambient publish that would override the newer
+ * user selection with a different subject.
+ */
+export function isStaleAgainstIntent(locator: Ids, now = Date.now()): boolean {
+  if (!tracking || inInputTask || !intent) return false
+  if (intent.gesture !== gestureSeq || now - intent.at > INTENT_HOLD_MS) { intent = null; return false }
+  return !sameSubject(intent.locator, locator)
+}
+
 /**
  * Called by setPropertyLocator for every real publish. Schedules (or
  * coalesces into) one trailing signal; returns what it did, for tests.
  */
 export function announceLinkedProperty(locator: PropertyLocator): AnnounceOutcome {
   if (isApplyingLinked()) return 'suppressed'
-  if (isHeldAgainst(locator)) return 'held'
+  if (isHeldAgainst(locator) || isStaleAgainstIntent(locator)) return 'held'
   const source = resolveSource()
   if (pending) {
     if (sameSubject(pending.locator, locator)) {
@@ -173,6 +252,7 @@ export function resetLinkedProperty() {
   pending = null
   last = null
   hold = null
+  intent = null
 }
 
 /** The last selection broadcast (a re-linked pane catches up with it). */
@@ -205,7 +285,9 @@ export function createLinkedFollower(instanceId: string | null, handler: LinkedH
   let shown: PropertyLocator | null = null
   let run: AbortController | null = null
   const onSignal = (s: LinkedPropertySignal) => {
-    if (instanceId && s.source === instanceId) { shown = s.locator; return }
+    // this pane's own selection: it is what the pane shows now, and a linked
+    // run still in flight for an older selection must not land over it
+    if (instanceId && s.source === instanceId) { shown = s.locator; run?.abort(); run = null; return }
     if (sameSubject(shown, s.locator)) return
     run?.abort()
     const ctl = new AbortController()
@@ -214,7 +296,9 @@ export function createLinkedFollower(instanceId: string | null, handler: LinkedH
     const ctx: LinkedApplyContext = {
       seq: s.seq,
       signal: ctl.signal,
-      apply: (fn) => (ctl.signal.aborted ? undefined : withLinkedApply(fn)),
+      // latest wins across the whole workspace: a newer selection made anywhere
+      // (even one still inside the debounce) makes this run stale
+      apply: (fn) => (ctl.signal.aborted || seq > s.seq ? undefined : withLinkedApply(fn)),
     }
     withLinkedApply(() => handler(s.locator, ctx))
   }
@@ -229,6 +313,14 @@ export function createLinkedFollower(instanceId: string | null, handler: LinkedH
 /** Test seam. */
 export const __linkedTest = {
   flush: flushPending,
-  reset: () => { resetLinkedProperty(); seq = 0; applying = 0; sourceResolver = null; hold = null },
+  reset: () => {
+    resetLinkedProperty(); seq = 0; applying = 0; sourceResolver = null; hold = null
+    tracking = false; inInputTask = false; gestureSeq = 0; intent = null
+    if (inputClear !== null) { clearTimeout(inputClear); inputClear = null }
+  },
+  /** turn intent tracking on without DOM listeners (tests drive markUserInput / endInput) */
+  track: () => { tracking = true },
+  /** the input task ended (what the 0ms timer does in a browser) */
+  endInput: () => { if (inputClear !== null) { clearTimeout(inputClear); inputClear = null } inInputTask = false },
   last: () => last,
 }
