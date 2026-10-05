@@ -22,6 +22,8 @@ import {
 } from "./conversation-context.js";
 import { extractAddresseeName, extractSenderName, detectMessageLanguage } from "./reply-disposition-signals.js";
 import { describeLastQuestion } from "./last-question.js";
+import { parsePlatformReaction } from "./emoji-interpretation.js";
+import { latestIdentifiableSellerLanguage } from "./seller-reply-language.js";
 
 /**
  * Maps a persisted send_queue.message_type onto an approved outbound use case.
@@ -47,6 +49,19 @@ export function mapMessageTypeToUseCase(message_type) {
     condition: "condition_check",
     motivation: "motivation_check",
     timeline: "timeline_check",
+    // sms_templates.use_case names (the template we actually sent), so a
+    // campaign / auto-reply row whose message_type is NULL still names its
+    // question through its template_id.
+    consider_selling: "proposal_interest",
+    consider_selling_follow_up: "proposal_interest",
+    seller_asking_price: "asking_price",
+    asking_price_follow_up: "asking_price",
+    ownership_check_follow_up: "ownership_check",
+    late_reply_confirm_ownership: "ownership_check",
+    ask_timeline: "timeline_check",
+    ask_condition_clarifier: "condition_check",
+    mf_rents: "rent_check",
+    mf_occupancy: "occupancy_check",
   };
   const mapped = aliases[direct] || null;
   return mapped && APPROVED_OUTBOUND_USE_CASES.includes(mapped) ? mapped : null;
@@ -83,14 +98,19 @@ const BODY_QUESTION_PATTERNS = [
   [/\b(?:condition|repairs?|needs?\s+work|shape\s+is\s+it|roof|hvac)\b/i, "condition_check"],
   [/\bhow\s+soon|timeline|when\s+(?:would|do)\s+you\s+want\s+to\s+close|closing\s+timeline/i, "timeline_check"],
   [/\b(?:still\s+the\s+owner|are\s+you\s+the\s+owner|do\s+you\s+(?:still\s+)?own|is\s+.{0,60}\s+yours)\b/i, "ownership_check"],
-  [/\bopen\s+to\s+(?:a\s+)?(?:proposal|offer)|consider\s+(?:a\s+)?(?:proposal|offer)|would\s+you\s+consider\s+selling|interested\s+in\s+selling/i, "proposal_interest"],
+  // 2026-10-05 (+18177347618): the operator typed "Thanks. Just curious, would
+  // you be open to a sale?" -- not a "proposal" or an "offer", so no pattern
+  // matched, the context was null and the seller's "Yes" fell to the
+  // context-free default (ownership_confirmed) instead of answering the
+  // sale-interest question.
+  [/\bopen\s+to\s+(?:a\s+|an\s+)?(?:proposal|offer|sale|selling|sell)\b|consider\s+(?:a\s+|an\s+)?(?:proposal|offer|sale|selling)\b|would\s+you\s+(?:ever\s+)?(?:consider\s+|be\s+(?:willing|open)\s+to\s+|like\s+to\s+|want\s+to\s+)?sell(?:ing)?\b|interested\s+in\s+(?:selling|a\s+sale|an?\s+(?:offer|proposal))\b|(?:thinking|thought)\s+(?:about|of)\s+selling\b/i, "proposal_interest"],
   // Our multilingual first touches (2026-10-01 corpus). Without these a reply
   // to a Spanish / Portuguese / Vietnamese / French / Arabic-transliterated
   // question had no context at all, so "No" or "Không phải" could not be read
   // against the question that produced it.
   [/precio\s+en\s+mente|prix\s+(?:demand[eé]|en\s+t[eê]te)/i, "asking_price"],
   [/(?:eres|es\s+usted|sigues\s+siendo|todav[ií]a\s+eres|todav[ií]a\s+es)\s+(?:el\s+|la\s+)?due[ñn][oa]|\bes\s+(?:tu|su)\s+propiedad|voc[eê]\s+ainda\s+[eé]\s+(?:o|a)\s+(?:propriet[aá]ri[oa]|don[oa])|\b[eé]\s+sua\s+propriedade|c[oó]\s+ph[aả]i\s+l[aà]\s+c[uủ]a\s+b[aạ]n|\bhal\s+.{1,80}\s+lak\b/i, "ownership_check"],
-  [/abiert[oa]\s+a\s+(?:una\s+)?(?:propuesta|oferta)|considerar[ií]a\s+(?:una\s+)?(?:propuesta|oferta)|discutir\s+n[uú]meros|abert[oa]\s+(?:a|para)\s+(?:uma\s+)?(?:proposta|discutir)/i, "proposal_interest"],
+  [/abiert[oa]\s+a\s+(?:una\s+)?(?:propuesta|oferta|venta|vender)|considerar[ií]a\s+(?:una\s+)?(?:propuesta|oferta|venta|vender)|(?:le|te)\s+interesar[ií]a\s+vender|(?:quiere|quieres|quisiera|quisieras)\s+vender|discutir\s+n[uú]meros|abert[oa]\s+(?:a|para)\s+(?:uma\s+)?(?:proposta|discutir)/i, "proposal_interest"],
 ];
 
 /**
@@ -117,6 +137,66 @@ export function deriveUseCaseFromBody(body) {
  * @param {string} [args.canonical_stage]     lifecycle stage, when known
  * @param {string} [args.language]
  */
+// Reaction families that are consistent with (or neutral to) a yes. A tapback
+// in one of these families does not ANSWER the question it points at: it is an
+// emoji, never a fact (emoji-interpretation.js), and "Removed 👍" retracts one.
+// Negative / hostile / laughter / confusion reactions still count as answers,
+// so a later bare "Yes" after a 👎 stays unbound and goes to review.
+const NON_ANSWER_REACTION_FAMILIES = new Set(["affirmative", "emphasis", "heart", "removed"]);
+
+// A one-word fragment the classifier could not read ("Vues", "Hm") said nothing
+// about the question, so it cannot have settled it. Bounded tightly: one token,
+// letters only, short, and the stored classification must be exactly
+// `unclear`. A fragment with any recognised intent (opt-out, wrong number,
+// who-is-this, not interested ...) or with no stored classification yet still
+// counts as an answer (fail closed).
+const UNREADABLE_FRAGMENT_RE = /^\p{L}{1,8}[.!?]*$/u;
+
+/**
+ * Does this intervening inbound answer our open question?
+ *
+ * 2026-10-05 Fort Worth (+18177347618): "Sigues siendo el dueno de 2832 Milam
+ * St?" got five iOS/Android tapbacks ("👍 to “…”", "Removed 👍 from “…”") and a
+ * stray "Vues", then a plain "Yes". Every one of those rows counted as an
+ * answer, so the question was "already answered", the context went stale, the
+ * "Yes" was capped at 0.72 (short_reply_without_validated_context) and the
+ * seller got no reply.
+ */
+export function isInterveningAnswer(row) {
+  const body = String(row?.message_body ?? "").trim();
+  // No body to read: we cannot prove it said nothing. Count it.
+  if (!body) return true;
+  const reaction = parsePlatformReaction(body);
+  if (reaction) {
+    const family = reaction.family || null;
+    return !NON_ANSWER_REACTION_FAMILIES.has(family);
+  }
+  const intent = String(row?.detected_intent ?? "").trim().toLowerCase();
+  if (intent === "unclear" && UNREADABLE_FRAGMENT_RE.test(body)) return false;
+  return true;
+}
+
+/**
+ * sms_templates.use_case of the template a send_queue row was rendered from,
+ * mapped onto an approved outbound use case. Best effort: any failure returns
+ * null and the body decides.
+ */
+async function loadTemplateUseCase(supabase, template_id) {
+  const id = String(template_id ?? "").trim();
+  if (!id) return null;
+  try {
+    const { data, error } = await supabase
+      .from("sms_templates")
+      .select("use_case")
+      .eq("template_id", id)
+      .limit(1);
+    if (error || !Array.isArray(data) || !data[0]) return null;
+    return mapMessageTypeToUseCase(data[0].use_case);
+  } catch {
+    return null;
+  }
+}
+
 function phoneVariants(e164) {
   const digits = String(e164 ?? "").replace(/\D/g, "");
   const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
@@ -138,7 +218,7 @@ export async function buildConversationContext({
   try {
     const { data, error } = await supabase
       .from("send_queue")
-      .select("id,message_type,message_body,provider_message_id,sent_at,delivered_at,queue_status")
+      .select("id,message_type,message_body,template_id,provider_message_id,sent_at,delivered_at,queue_status")
       // Campaign rows were written with a bare 10-digit number ("6125589879")
       // while the thread is E.164, so an exact match found no outbound, the
       // context was "unavailable" and a plain "Yes" to "do you still own…?"
@@ -158,11 +238,24 @@ export async function buildConversationContext({
   const last_outbound = Array.isArray(rows) ? rows[0] : null;
   if (!last_outbound) return null;
 
-  // message_type first (it is explicit), then the body we sent (it is truth).
+  // message_type first (it is explicit), then the template we sent (campaign
+  // and auto-reply rows carry template_id with a NULL message_type), then the
+  // body we sent (it is truth -- and the only source for an operator's typed
+  // message). Campaign, auto-reply and operator sends are all questions.
+  const message_type_use_case = mapMessageTypeToUseCase(last_outbound.message_type);
+  const template_use_case = message_type_use_case
+    ? null
+    : await loadTemplateUseCase(supabase, last_outbound.template_id);
   const use_case =
-    mapMessageTypeToUseCase(last_outbound.message_type) ||
+    message_type_use_case ||
+    template_use_case ||
     deriveUseCaseFromBody(last_outbound.message_body);
   if (!use_case) return null;
+  const use_case_source = message_type_use_case
+    ? "message_type"
+    : template_use_case
+      ? "template_use_case"
+      : "derived_from_body";
 
   const delivered_at = last_outbound.delivered_at || last_outbound.sent_at;
   if (!delivered_at) return null;
@@ -186,20 +279,47 @@ export async function buildConversationContext({
   try {
     const { data, error } = await supabase
       .from("message_events")
-      .select("id,created_at,direction")
+      .select("id,created_at,direction,message_body,detected_intent:metadata->>detected_intent")
       .eq("thread_key", thread_key)
       .eq("direction", "inbound")
       .gt("created_at", new Date(delivered_at).toISOString())
       .lt("created_at", new Date(inbound_received_at).toISOString())
       .limit(50);
     if (error) return null;
-    const prior_answers = (data || []).filter((row) => !excluded.has(String(row.id)));
+    // Reactions and unreadable one-word fragments are seller activity, not an
+    // answer to the question (see isInterveningAnswer).
+    const prior_answers = (data || [])
+      .filter((row) => !excluded.has(String(row.id)))
+      .filter((row) => isInterveningAnswer(row));
     intervening_inbound_count = prior_answers.length;
     if (prior_answers.length > 0) question_status = "answered";
   } catch {
     // Evidence could not be read. Fail closed rather than assert the question
     // is still open.
     return null;
+  }
+
+  // The seller's most recent IDENTIFIABLE reply language (owner rule
+  // 2026-10-05: reply in the seller's language; a too-short reply such as "ok"
+  // or "👍" falls back to this). Best effort: unreadable history is null, never
+  // a reason to drop the context.
+  let seller_reply_language = null;
+  try {
+    const { data, error } = await supabase
+      .from("message_events")
+      .select("id,created_at,message_body,language:metadata->>language")
+      .eq("thread_key", thread_key)
+      .eq("direction", "inbound")
+      .lt("created_at", new Date(inbound_received_at).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(15);
+    if (!error && Array.isArray(data)) {
+      seller_reply_language = latestIdentifiableSellerLanguage(
+        data.filter((row) => !excluded.has(String(row?.id)))
+      );
+    }
+  } catch {
+    seller_reply_language = null;
   }
 
   return {
@@ -211,9 +331,7 @@ export async function buildConversationContext({
       last_outbound.provider_message_id || last_outbound.id
     ),
     last_outbound_use_case: use_case,
-    last_outbound_use_case_source: mapMessageTypeToUseCase(last_outbound.message_type)
-      ? "message_type"
-      : "derived_from_body",
+    last_outbound_use_case_source: use_case_source,
     last_outbound_question_type: USE_CASE_QUESTION_TYPE[use_case] || "other",
     last_outbound_delivered_at: new Date(delivered_at).toISOString(),
     current_inbound_received_at: new Date(inbound_received_at).toISOString(),
@@ -230,6 +348,7 @@ export async function buildConversationContext({
     // answers a message written in another language.
     last_outbound_addressee: extractAddresseeName(last_outbound.message_body),
     last_outbound_language: detectMessageLanguage(last_outbound.message_body),
+    seller_reply_language,
     last_outbound_agent: extractSenderName(last_outbound.message_body),
     // What a bare number in the reply can mean (the ONE money path reads it):
     // "$240k?" sets the thousands scale, "how many square feet?" un-prices it.

@@ -1354,8 +1354,20 @@ export async function selectSafeAutoReplyTemplate({
   // Spanish conversation can never flip the reply to English. Unknown (fresh
   // thread, no signal anywhere) keeps today's English default for template
   // search but is recorded on the result so review surfaces can see it.
+  // OWNER RULE (2026-10-05): the reply is written in the language the SELLER
+  // replied in. When the classifier derived the language from the seller's own
+  // text (this reply, or their most recent identifiable one -- never a tapback),
+  // it outranks the stored thread language; otherwise ("ok", "👍", no seller
+  // text yet) the continuity chain below decides exactly as before.
+  const seller_language_sources = new Set(["seller_reply", "seller_history", "language_switch_request"]);
+  const seller_language =
+    seller_language_sources.has(clean(classification?.reply_language_source)) &&
+    clean(classification?.language)
+      ? clean(classification.language)
+      : null;
   const language_resolution = resolveThreadLanguage({
     threadLanguage:
+      seller_language ||
       context?.automation_decision?.classification?.language ||
       context?.summary?.language ||
       null,
