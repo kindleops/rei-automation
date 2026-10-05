@@ -11,6 +11,10 @@ import path from 'node:path'
  *     node scripts/proof/desktop/market-intel-capture.mjs --themes=dark,light \
  *     --sizes=1440x900,1920x1080,3840x1600,5120x1440 --out=/Users/ryankindle/.claude/jobs/c39b0175/tmp/market-intel/shots
  *
+ * Every scene also PROVES SCROLL with a real wheel over the surface's scroll root (the owner's
+ * "it doesn't let me scroll"): .mi-main on document surfaces, the grid on Rankings / Screener, a
+ * wall column on the ultrawide wall. It logs SCROLL ok|FAIL with the scrollTop before and after.
+ *
  * Scenes (real prod data through the local API):
  *   1 Minneapolis overview · 2 Minneapolis ZIP rankings · 3 Dallas investor heat (Map tab)
  *   4 Dallas + Houston compare · 5 Texas screener · 6 MF price/unit · 7 Census dossier
@@ -34,6 +38,8 @@ const SCENES = [
   ['08-investor-surface', `${MI}?geo=market:dallas-tx&tab=investors`],
   ['09-zip-inspector', `${MI}?geo=market:minneapolis-mn&tab=rankings&rl=zip`, 'inspect'],
   ['10-ultrawide-wall', `${MI}?geo=market:minneapolis-mn`],
+  ['11-nation-investor-evidence', `${MI}?tab=investors`],
+  ['12-nation-overview', `${MI}`],
 ].filter(([n]) => !ONLY || ONLY.split(',').some((o) => n.startsWith(o)))
 
 await fs.mkdir(OUT, { recursive: true })
@@ -68,6 +74,22 @@ for (const theme of THEMES) {
       }
       await page.screenshot({ path: path.join(OUT, `${theme}-${W}x${H}-${name}.png`) })
       console.log('shot', theme, `${W}x${H}`, name)
+      // scroll proof: wheel over the scroll root and read its scrollTop
+      const root = await page.evaluate(() => {
+        const pick = document.querySelector('.mi-main.is-fill .lc-grid__scroller') || document.querySelector('.mi-main.is-wall .mi-wall__mid') || document.querySelector('.mi-main')
+        if (!pick) return null
+        pick.setAttribute('data-qa-scroll', '1')
+        const r = pick.getBoundingClientRect()
+        return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 300), can: pick.scrollHeight > pick.clientHeight + 4, before: pick.scrollTop, cls: pick.className }
+      })
+      if (root) {
+        await page.mouse.move(root.x, root.y)
+        await page.mouse.wheel(0, 900)
+        await page.waitForTimeout(600)
+        const after = await page.evaluate(() => document.querySelector('[data-qa-scroll]')?.scrollTop ?? 0)
+        console.log(`SCROLL ${!root.can ? 'n/a (fits)' : after > root.before ? 'ok' : 'FAIL'} ${name} ${theme} ${W}x${H} root=${String(root.cls).split(' ')[0]} ${root.before}→${after}`)
+        if (root.can && after > root.before) await page.screenshot({ path: path.join(OUT, `${theme}-${W}x${H}-${name}-scrolled.png`) })
+      }
     }
     if (errors.length) console.log('page errors:', errors)
     await ctx.close()

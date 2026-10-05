@@ -84,6 +84,8 @@ function MarketIntelligenceDesk() {
   const d = dataOf(dossierQ)
   const [rootRef, width] = useRootWidth()
   const wall = width >= WALL_MIN
+  const wallMode = wall && state.tab === 'overview'
+  const fill = state.tab === 'rankings' || state.tab === 'screener'
   const ctx: MiCtx = { state, set, registry, metric, status, inspect, setInspect, openGeo, addToCompare }
   const assets = status?.asset_filters ?? [{ id: 'all', label: 'All', available: true }]
 
@@ -99,12 +101,21 @@ function MarketIntelligenceDesk() {
         </div>
         <LCTabs label="Market Intelligence sections" value={state.tab} onChange={(t) => set({ tab: t as MiTab })} items={MI_TABS.map((t) => ({ id: t, label: TAB_LABEL[t], count: t === 'compare' && state.cmp.length ? state.cmp.length : undefined }))} />
         <div className="mi-body">
-          <main className="mi-main" aria-label={TAB_LABEL[state.tab]}>
+          {/* ONE scroll root per surface. Grid surfaces (Rankings, Screener) and the ultrawide wall
+              do not scroll the page: the grid / each wall column is the scroll root, so a wheel over a
+              grid is never trapped inside a page that also scrolls. */}
+          <main className={`mi-main${fill ? ' is-fill' : ''}${wallMode ? ' is-wall' : ''}`} aria-label={TAB_LABEL[state.tab]} key={`${state.tab}|${state.geo}`}>
             {statusQ.kind === 'warming' ? <Warming w={statusQ.warming} /> : (
               <QueryState q={dossierQ}>{(dd) => (
                 <>
-                  {state.tab !== 'compare' ? <Hero d={dd} /> : null}
-                  {state.tab === 'overview' ? (wall ? <div className="mi-wall"><div className="mi-wall__rank"><RankingsSurface geo={dd.geography} /></div><div className="mi-wall__mid"><OverviewSurface d={dd} wall /><TrendsSurface d={dd} /></div><div className="mi-wall__side"><InvestorsSurface d={dd} /><DemographicsSurface d={dd} /></div></div> : <OverviewSurface d={dd} />) : null}
+                  {state.tab !== 'compare' ? <Hero d={dd} compact={fill || wallMode} /> : null}
+                  {state.tab === 'overview' ? (wallMode ? (
+                    <div className="mi-wall">
+                      <div className="mi-wall__col mi-wall__rank"><RankingsSurface geo={dd.geography} /></div>
+                      <div className="mi-wall__col mi-wall__mid"><OverviewSurface d={dd} wall /><TrendsSurface d={dd} /></div>
+                      <div className="mi-wall__col mi-wall__side"><InvestorsSurface d={dd} /><DemographicsSurface d={dd} /></div>
+                    </div>
+                  ) : <OverviewSurface d={dd} />) : null}
                   {state.tab === 'rankings' ? <RankingsSurface geo={dd.geography} /> : null}
                   {state.tab === 'map' ? <MapModeSurface geo={dd.geography} /> : null}
                   {state.tab === 'trends' ? <TrendsSurface d={dd} /> : null}
