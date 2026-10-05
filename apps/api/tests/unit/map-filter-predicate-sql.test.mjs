@@ -168,7 +168,7 @@ test("phone primary_only uses the graph phone bridge (one phone per property = t
   );
   assert.doesNotMatch(sql, /is_primary_link/i);
   assert.match(sql, new RegExp(MAP_FILTER_PHONE_LINKS_TABLE));
-  assert.match(sql, /ph\.canonical_e164 = plink\.canonical_e164/);
+  assert.match(sql, /plink\.canonical_e164 IS NOT NULL/);
 });
 
 test("unified count SQL includes matching_phones", () => {

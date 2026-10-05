@@ -8,6 +8,7 @@ import {
 import {
   MAP_FILTER_PHONE_LINKS_ALIAS,
   buildLinkedPhonesFromSql,
+  GRAPH_NATIVE_PHONE_COLUMNS,
 } from "./map-filter-phone-links.js";
 
 const PROPERTY_ALIAS = "p";
@@ -100,10 +101,13 @@ function compileAstNode(node, ctx, { mode, outerProspectAlias = null } = {}) {
 
 function compilePhoneRelationship(node, ctx) {
   const rel = node.relationshipMatch || "any_linked";
-  const predicate = compileFieldPredicate(node, ctx, PHONE_ALIAS);
+  const field = getRegistryField(node.fieldKey);
+  const graphNative = GRAPH_NATIVE_PHONE_COLUMNS.has(field?.column);
+  const predicate = compileFieldPredicate(node, ctx, graphNative ? PHONE_LINK_ALIAS : PHONE_ALIAS);
   const linkedFrom = buildLinkedPhonesFromSql(`${PROPERTY_ALIAS}.property_id`, {
     linkAlias: PHONE_LINK_ALIAS,
     phoneAlias: PHONE_ALIAS,
+    withPhones: !graphNative,
   });
 
   const linkedPhoneExists = () => `EXISTS (

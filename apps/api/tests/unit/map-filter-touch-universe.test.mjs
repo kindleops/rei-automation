@@ -254,14 +254,21 @@ function presetSql(key) {
   return { compiled: compiled.compiled, ...buildPropertyEligibilitySql(compiled.compiled.compiledPredicateAst, compiled.compiled.params) };
 }
 
-test("has_phone preset joins the graph phone to phones on canonical_e164 — never the empty link table", () => {
+test("has_phone preset = the graph carries a phone for the property — never the empty link table", () => {
+  // Prod 2026-10-05: 136,127 properties (= graph rows with canonical_e164). Joining
+  // public.phones would cut that to 44,849 (phones knows only a third of them).
   const { sql } = presetSql("has_phone");
   assert.doesNotMatch(sql, /map_filter_property_phone_links/);
   assert.match(sql, /FROM public\.campaign_target_graph plink/);
-  assert.match(sql, /INNER JOIN public\.phones ph\s+ON ph\.canonical_e164 = plink\.canonical_e164/);
+  assert.doesNotMatch(sql, /public\.phones/);
   assert.match(sql, /plink\.property_id = p\.property_id/);
   assert.match(sql, /plink\.canonical_e164 IS NOT NULL/);
-  assert.doesNotMatch(sql, /phone_id = plink/);
+});
+
+test("phone attribute rules LEFT JOIN phones with the graph's 10-digit number normalised to +1 E.164", () => {
+  const { sql } = bucketSql("all", { phoneCarrier: ["T-Mobile"] });
+  assert.match(sql, /LEFT JOIN public\.phones ph\s+ON ph\.canonical_e164 = \(CASE WHEN plink\.canonical_e164 LIKE '\+%' THEN plink\.canonical_e164 ELSE '\+1' \|\| plink\.canonical_e164 END\)/);
+  assert.match(sql, /ph\.phone_owner/);
 });
 
 test("phone rules from the Map sheet (carrier, contact window) use the same bridge; primary_only ≡ any_linked", () => {
@@ -285,14 +292,12 @@ test("phone rules from the Map sheet (carrier, contact window) use the same brid
   assert.match(buildPropertyEligibilitySql(all.compiledPredicateAst, all.params).sql, /AND NOT EXISTS/);
 });
 
-test("has_phone over the fixture matches exactly the properties whose graph phone is a known phone", () => {
-  // Reference semantics of the SQL above, evaluated over the fixture: graph row with a
-  // canonical_e164 that public.phones knows. Property 4 (no graph phone) and 6 (no graph row) are excluded.
-  const phones = new Set(["+12145550001", "+12145550002", "+12145550003"]);
+test("has_phone over the fixture matches exactly the properties whose graph row carries a phone", () => {
+  // Reference semantics of the has_phone SQL over the fixture: property 4 (graph phone NULL)
+  // and 6 (no graph row) are excluded; prod equivalent = 136,127 of 169,802.
   const matched = FIXTURE.properties.filter((p) =>
-    FIXTURE.graph.some((g) => g.property_id === p.property_id && g.canonical_e164 && phones.has(g.canonical_e164)));
+    FIXTURE.graph.some((g) => g.property_id === p.property_id && g.canonical_e164));
   assert.deepEqual(matched.map((p) => p.property_id), ["1", "2", "3", "5"]);
-  assert.ok(matched.length > 0);
 });
 
 test("filtered map tiles carry the touch truth, not properties.contact_status", async () => {

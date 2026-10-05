@@ -1,3 +1,4 @@
+import { graphPhoneAsE164Sql } from "./map-filter-phone-links.js";
 import { hasDatabaseUrl, queryWithTimeout } from "@/lib/postgres/client.js";
 import { INBOX_FILTER_FIELDS } from "../inbox/inbox-filter-catalog.js";
 
@@ -181,7 +182,7 @@ async function queryPhoneLinkedDistinct({ column, search = "", limit = OPTIONS_L
     FROM (
       SELECT TRIM(ph.${phoneColumn}::text) AS value, COUNT(DISTINCT link.property_id)::bigint AS count
       FROM public.campaign_target_graph link
-      INNER JOIN public.phones ph ON ph.canonical_e164 = link.canonical_e164
+      INNER JOIN public.phones ph ON ph.canonical_e164 = ${graphPhoneAsE164Sql("link.canonical_e164")}
       WHERE link.canonical_e164 IS NOT NULL
         AND ph.${phoneColumn} IS NOT NULL
         AND TRIM(ph.${phoneColumn}::text) <> ''

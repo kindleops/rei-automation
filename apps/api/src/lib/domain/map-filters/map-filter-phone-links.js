@@ -17,11 +17,33 @@ export const MAP_FILTER_PHONE_LINKS_TABLE = "public.campaign_target_graph";
 export const MAP_FILTER_PHONE_LINKS_ALIAS = "plink";
 export const MAP_FILTER_PHONE_LINK_JOIN_COLUMN = "canonical_e164";
 
+/** Phone fields evaluated on the graph row itself (present even without a phones row). */
+export const GRAPH_NATIVE_PHONE_COLUMNS = Object.freeze(new Set(["canonical_e164"]));
+
+/**
+ * The graph stores canonical_e164 as 10 national digits ("2012101887");
+ * public.phones stores full E.164 ("+12012101887"). Normalise the graph side so
+ * the phones(canonical_e164) btree stays usable. (A plain equality join matched
+ * 0 rows in prod — measured 2026-10-05.)
+ */
+export function graphPhoneAsE164Sql(column) {
+  return `(CASE WHEN ${column} LIKE '+%' THEN ${column} ELSE '+1' || ${column} END)`;
+}
+
 /** `FROM … JOIN phones` for the phones linked to `propertyRef` (e.g. "p.property_id"). */
-export function buildLinkedPhonesFromSql(propertyRef, { linkAlias = MAP_FILTER_PHONE_LINKS_ALIAS, phoneAlias = "ph" } = {}) {
+export function buildLinkedPhonesFromSql(propertyRef, { linkAlias = MAP_FILTER_PHONE_LINKS_ALIAS, phoneAlias = "ph", withPhones = true } = {}) {
+  if (!withPhones) {
+    // Graph-native predicate (e.g. has_phone): no phones join needed.
+    return `FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${linkAlias}
+    WHERE ${linkAlias}.property_id = ${propertyRef}
+      AND ${linkAlias}.canonical_e164 IS NOT NULL`;
+  }
+  // LEFT JOIN: public.phones knows only 44,849 of the graph's 136,127 property
+  // phones (2026-10-05); the rest come from seller.owner_phone etc. A property
+  // HAS a phone when the graph carries one; phone attributes come from phones.
   return `FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${linkAlias}
-    INNER JOIN public.phones ${phoneAlias}
-      ON ${phoneAlias}.canonical_e164 = ${linkAlias}.canonical_e164
+    LEFT JOIN public.phones ${phoneAlias}
+      ON ${phoneAlias}.canonical_e164 = ${graphPhoneAsE164Sql(`${linkAlias}.canonical_e164`)}
     WHERE ${linkAlias}.property_id = ${propertyRef}
       AND ${linkAlias}.canonical_e164 IS NOT NULL`;
 }
