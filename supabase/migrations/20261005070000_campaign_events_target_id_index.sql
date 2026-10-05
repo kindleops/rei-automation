@@ -1,4 +1,4 @@
--- APPLIED to prod 2026-10-05 ~07:05 UTC (owner "go", out of auto mode).
+-- APPLIED to prod 2026-10-05 ~06:35 UTC (owner "go", out of auto mode).
 -- campaign_events.target_id had no index, so deleting a campaign's targets (Build/Launch
 -- re-materialize) ran one seq scan of campaign_events per row for the ON DELETE SET NULL FK:
 -- 2,689 targets hit the 8s statement timeout, the ignored delete error then produced
