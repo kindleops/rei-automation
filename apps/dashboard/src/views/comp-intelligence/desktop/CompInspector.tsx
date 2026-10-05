@@ -1,3 +1,5 @@
+import { BuyerOfRecord } from '../../../modules/market-intelligence/sale-owner/BuyerOfRecord'
+import { propSaleKey, saleOwnerClient, useSaleOwners } from '../../../modules/market-intelligence/sale-owner/sale-owner-client'
 import { LCButton, LCFacts, LCIconButton, LCInspector, LCInspectorSection, LCStatus, cx } from '../../../shared/lc'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
 import {
@@ -30,6 +32,9 @@ interface Props {
 
 /** The refined evidence inspector (§65–70): one sale, every question about it answerable here. */
 export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, onGraph, onFocusLinked, onShowOnMap }: Props) {
+  // No recorded buyer: the shared resolver (already batched by the evidence list; cached).
+  const ownerKey = !c || c.buyerKind ? null : propSaleKey(c.propertyId, c.saleDate)
+  const ownerOf = useSaleOwners([ownerKey])
   if (!c || !tier) return <LCInspector open={false} onClose={onClose} id="comps-evidence" title="">{null}</LCInspector>
 
   const inSet = tier === 'set' || tier === 'added'
@@ -168,7 +173,8 @@ export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, 
           { label: 'Arm’s-length', value: c.armsLength === true ? 'Yes' : c.armsLength === false ? 'No' : null },
           { label: 'Financing', value: c.cash === true ? 'Cash' : c.cash === false ? 'Financed' : null },
           { label: 'Deed', value: c.docType },
-          { label: 'Buyer', value: c.buyerKind === 'company' ? c.buyerCompany ?? 'Company' : c.buyerKind === 'person' ? 'Individual' : null },
+          { label: 'Buyer', value: c.buyerKind === 'company' ? c.buyerCompany ?? 'Company' : c.buyerKind === 'person' ? 'Individual'
+            : ownerKey ? <BuyerOfRecord row={ownerOf(ownerKey)} pending={saleOwnerClient.statusOf(ownerKey) === 'pending'} /> : null },
           { label: 'Seller', value: c.sellerKind === 'company' ? 'Company' : c.sellerKind === 'person' ? 'Individual' : null },
         ]} />
       </LCInspectorSection>
