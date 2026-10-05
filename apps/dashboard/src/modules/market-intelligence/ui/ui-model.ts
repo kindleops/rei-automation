@@ -32,7 +32,7 @@ export function geoMenu(g: MiGeoSummary, ctx: { openGeo: (id: string) => void; a
     { id: 'open', label: 'Open geography', icon: 'arrow-up-right', onSelect: () => ctx.openGeo(g.id) },
     { id: 'inspect', label: 'Inspect', icon: 'eye', onSelect: () => ctx.setInspect(g.id) },
     { id: 'map', label: 'Show on Map', icon: 'map', hint: 'Beside · frames the area', onSelect: () => { showGeoOnMap(g) } },
-    { id: 'heat', label: 'Show on Map with heat', icon: 'grid', hint: 'Market Intelligence lens', onSelect: () => { showGeoOnMap(g, { lensMetric: ctx.heatMetric ?? 'investor_purchase_count' }) } },
+    { id: 'heat', label: 'Show on Map with heat', icon: 'grid', hint: 'Market Intelligence lens', onSelect: () => { showGeoOnMap(g, { lensMetric: ctx.heatMetric ?? 'investor_purchase_share' }) } },
     { id: 'compare', label: 'Add to compare', icon: 'layout-split', onSelect: () => ctx.addToCompare(g.id) },
     { kind: 'separator', id: 's1' },
     { id: 'sales', label: 'View recent sales', icon: 'list', hint: 'Inspector · market sales, not valuation comps', onSelect: () => ctx.setInspect(g.id) },

@@ -12,7 +12,8 @@ import { RowsGrid } from './surfaces-core'
 // ── Compare (brief §23, §50) ───────────────────────────────────────────────
 const CMP_GROUPS: Array<{ label: string; ids: string[] }> = [
   { label: 'Sales', ids: ['sales_count', 'monthly_sales_rate', 'sales_growth', 'median_sale_price', 'median_ppsf', 'median_price_per_unit'] },
-  { label: 'Investors & ownership', ids: ['investor_purchase_count', 'investor_purchase_share', 'buyer_evidence_coverage', 'cash_purchase_share', 'entity_owned_count'] },
+  { label: 'Buyer evidence (shares of the sales that record it)', ids: ['investor_purchase_share', 'buyer_evidence_coverage', 'cash_purchase_share', 'cash_evidence_coverage', 'investor_purchase_count'] },
+  { label: 'Ownership', ids: ['entity_owned_count'] },
   { label: 'Buyer depth', ids: ['company_buyer_count', 'repeat_buyer_count', 'top5_buyer_share'] },
   { label: 'Seller universe', ids: ['property_count', 'seller_record_count', 'sms_eligible_count'] },
   { label: 'Demographics', ids: ['population', 'median_household_income', 'renter_share', 'vacancy_rate'] },
@@ -120,7 +121,7 @@ export function ScreenerSurface({ geo }: { geo: MiGeoSummary }) {
   const setFilter = (i: number, patch: Partial<MiScreenFilter>) => set({ sf: state.sf.map((f, k) => (k === i ? { ...f, ...patch } : f)) })
   const sortBy = state.sf[0]?.metric ?? 'sales_count'
   return (
-    <div className="mi-screener">
+    <div className="mi-screener mi-fill">
       <div className="mi-toolbar" role="toolbar" aria-label="Screen scope">
         <LCSegmented label="Screen" size="sm" value={level} onChange={(v) => set({ sl: v })} options={SCREEN_LEVELS.map((l) => ({ value: l, label: SCREEN_LEVEL_LABEL[l] ?? l }))} />
         <span className="mi-toolbar__in">inside {within === geo.id ? geo.label : within}</span>

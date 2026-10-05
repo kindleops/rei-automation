@@ -33,8 +33,8 @@ export interface MiRouteState {
 }
 
 export const DEFAULT_STATE: MiRouteState = {
-  geo: 'nation:US', tab: 'overview', period: '1y', asset: 'all', rl: null, rm: 'investor_purchase_count', rd: 'desc', rmin: 0,
-  cmp: [], cq: [], sl: 'zip', sw: null, sm: 'all', sf: [], hm: 'investor_purchase_count', q: null,
+  geo: 'nation:US', tab: 'overview', period: '1y', asset: 'all', rl: null, rm: 'investor_purchase_share', rd: 'desc', rmin: 0,
+  cmp: [], cq: [], sl: 'zip', sw: null, sm: 'all', sf: [], hm: 'investor_purchase_share', q: null,
 }
 
 const GEO_ID = /^(nation:US|state:[A-Z]{2}|zip:\d{5}|market:[a-z0-9-]+|(county|city):[A-Z]{2}:.+)$/

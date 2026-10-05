@@ -6,6 +6,7 @@ import { fmtCount, fmtDate, fmtPct, fmtUsd, fmtValue } from '../mi-format'
 import type { MiDossier, MiRecentSale } from '../mi-types'
 import { DistBars, TrendChart } from './charts'
 import { GeoActions, MetricTile, QueryState } from './parts'
+import { EvidenceShare, InferredInvestorSlot } from './evidence'
 import { RecentSales } from './surfaces-detail'
 import { UniverseLoad } from './surfaces-core'
 
@@ -56,7 +57,8 @@ function InspectorBody({ d }: { d: MiDossier }) {
     <div className="mi-insp">
       <nav className="mi-insp__nav" aria-label="Sections">{SECTIONS.map((s) => <button key={s} type="button" onClick={() => jump(s)}>{s}</button>)}</nav>
       {sec('Overview', <>
-        <div className="mi-rail is-tight">{['sales_count', 'median_sale_price', 'investor_purchase_count', 'investor_purchase_share'].map((id) => <MetricTile key={id} id={id} value={v[id]} size="sm" />)}</div>
+        <div className="mi-rail is-tight">{['sales_count', 'median_sale_price', 'median_ppsf'].map((id) => <MetricTile key={id} id={id} value={v[id]} size="sm" />)}</div>
+        <div className="mi-ev-stack"><EvidenceShare kind="investor" values={v} /><EvidenceShare kind="cash" values={v} /></div>
         <ol className="mi-brief is-compact">{d.brief.map((s, i) => <li key={i}>{s.text}</li>)}</ol>
       </>)}
       {sec('Sales', <>
@@ -67,7 +69,8 @@ function InspectorBody({ d }: { d: MiDossier }) {
         {showSales ? <QueryState q={sq}>{(r) => <RecentSales rows={r.rows} />}</QueryState> : <LCButton size="sm" variant="quiet" icon="list" onClick={() => setShowSales(true)}>Recent market sales</LCButton>}
       </>)}
       {sec('Investors', <>
-        <LCFacts rows={facts(['investor_purchase_count', 'investor_purchase_share', 'buyer_evidence_coverage', 'cash_purchase_count', 'cash_purchase_share', 'cash_evidence_coverage'])} />
+        <LCFacts rows={facts(['investor_purchase_share', 'buyer_evidence_coverage', 'investor_purchase_count', 'cash_purchase_share', 'cash_evidence_coverage', 'cash_purchase_count'])} />
+        {d.inferred_investors !== undefined ? <InferredInvestorSlot data={d.inferred_investors} compact /> : null}
         {d.investors.top_buyers.length ? <ul className="mi-buyers">{d.investors.top_buyers.slice(0, 6).map((b) => <li key={b.name}><span>{b.name}</span><b>{fmtCount(b.purchases)}</b></li>)}</ul> : <p className="mi-quiet">No named company buyer in the period.</p>}
       </>)}
       {sec('Ownership', <LCFacts rows={[...facts(['entity_owned_count']), { label: 'Corporate owner (seller universe)', value: d.universe.corporate_owner_count === null ? <span className="is-withheld">Not loaded</span> : fmtCount(d.universe.corporate_owner_count), hint: 'campaign graph is_corporate_owner' }]} />)}

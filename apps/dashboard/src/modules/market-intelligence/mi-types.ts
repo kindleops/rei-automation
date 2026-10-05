@@ -138,6 +138,8 @@ export interface MiDossier {
   trends: MiTrendPoint[]
   data_quality: Record<string, string | number | null>
   brief: Array<{ text: string; metrics: string[] }>
+  /** Present only when the owner-based inference API ships it. */
+  inferred_investors?: MiInferredInvestors | null
 }
 
 export interface MiRow { id: string; level: MiLevel; label: string; state: string | null; rank: number | null; centroid: [number, number] | null; values: MiValues; reason?: string }
@@ -165,3 +167,22 @@ export interface MiRecentSale {
 }
 
 export interface MiFail { ok: false; status: number; error: string; message?: string }
+
+/**
+ * SLOT: inferred investors from CURRENT OWNER data (LLC/builder owner, absentee mailing,
+ * portfolio stacking). Owned by the inferred-investor API work; this UI renders only what
+ * the API returns and says "unavailable" otherwise. Every field optional on purpose.
+ */
+export interface MiInferredInvestors {
+  status?: 'ok' | 'insufficient' | 'unavailable'
+  label?: string
+  share?: number | null
+  count?: number | null
+  base_n?: number | null
+  base_label?: string
+  tiers?: Array<{ id: string; label: string; n?: number | null; share?: number | null; definition?: string }>
+  validation?: string | null
+  source?: string | null
+  as_of?: string | null
+  reason?: string | null
+}

@@ -9,6 +9,7 @@ import type { MiCompareResult, MiDossier, MiGeoSummary, MiRankResult, MiRecentSa
 import { DistBars, TrendChart, type TrendSeries } from './charts'
 import { Leaderboard } from './surfaces-core'
 import { MetricTile, QueryState } from './parts'
+import { EvidenceShare, InferredInvestorSlot } from './evidence'
 
 const RANGE_MONTHS: Record<string, number | null> = { '30d': 2, '90d': 3, '6m': 6, '1y': 12, '3y': 36, all: null }
 const LEVEL_PLURAL: Record<string, string> = { state: 'states', market: 'markets', county: 'counties', city: 'cities', zip: 'ZIPs' }
@@ -64,16 +65,18 @@ export function InvestorsSurface({ d }: { d: MiDossier }) {
   const { state, setInspect } = useMi()
   const v = d.values
   const child = childLevelOf(d.geography.level)
-  const rq = useMiQuery<MiRankResult>(child ? miUrl('rank', { level: child, within: d.geography.id, metric: 'investor_purchase_count', period: state.period, asset: state.asset, limit: 15 }) : null)
-  const inv = d.trends.map((p) => ({ month: p.month, y: p.investor_purchases, status: p.status }))
+  const rq = useMiQuery<MiRankResult>(child ? miUrl('rank', { level: child, within: d.geography.id, metric: 'investor_purchase_share', period: state.period, asset: state.asset, limit: 15 }) : null)
   const cov = d.trends.map((p) => ({ month: p.month, y: p.sales ? p.buyer_known / p.sales : null, status: p.status }))
   return (
     <div className="mi-investors">
-      <section className="mi-trio" aria-label="Three distinct signals">
+      <section className="mi-trio" aria-label="Distinct investor signals, never merged">
         <div className="mi-card">
-          <h2>Investor purchases <small>transactions in the period</small></h2>
-          <div className="mi-rail is-tight"><MetricTile id="investor_purchase_count" value={v.investor_purchase_count} size="lg" /><MetricTile id="investor_purchase_share" value={v.investor_purchase_share} /><MetricTile id="buyer_evidence_coverage" value={v.buyer_evidence_coverage} /></div>
-          <p className="mi-quiet">An identifiable company or investor-archetype buyer on the recorded sale. A share is taken only over sales where a buyer is recorded.</p>
+          <h2>Investor purchases <small>deed evidence · transactions in the period</small></h2>
+          <EvidenceShare kind="investor" values={v} size="lg" />
+        </div>
+        <div className="mi-card">
+          <h2>Cash purchases <small>deed evidence · transactions in the period</small></h2>
+          <EvidenceShare kind="cash" values={v} size="lg" />
         </div>
         <div className="mi-card">
           <h2>Entity-owned now <small>current ownership state</small></h2>
@@ -81,8 +84,8 @@ export function InvestorsSurface({ d }: { d: MiDossier }) {
           <p className="mi-quiet">Properties whose current owner is a company and whose latest sale names no buyer. Never added to investor purchases: an LLC owner does not make a purchase an investor purchase.</p>
         </div>
         <div className="mi-card">
-          <h2>Cash purchases <small>deed-level cash evidence</small></h2>
-          <div className="mi-rail is-tight"><MetricTile id="cash_purchase_count" value={v.cash_purchase_count} size="lg" /><MetricTile id="cash_purchase_share" value={v.cash_purchase_share} /><MetricTile id="cash_evidence_coverage" value={v.cash_evidence_coverage} /></div>
+          <h2>Inferred investors <small>owner-based · not deed evidence</small></h2>
+          <InferredInvestorSlot data={d.inferred_investors} />
         </div>
       </section>
       <div className="mi-overview__grid">
@@ -94,9 +97,9 @@ export function InvestorsSurface({ d }: { d: MiDossier }) {
           <p className="mi-quiet">{fmtCount(d.investors.buyer_kinds.lender_or_agency)} title transfers to lenders, servicers, GSEs or agencies are excluded from buyer lists. Individuals are counted, never named.</p>
         </section>
         <section className="mi-card">
-          <h2>Investor purchases by month</h2>
-          <TrendChart series={[{ id: 'inv', label: 'Investor purchases', points: inv }]} format={fmtCount} label="Investor purchases by month" height={150} />
-          <h3 className="mi-sub">Buyer recorded on sales, by month</h3>
+          <h2>Investor share by month <small>of sales with a recorded buyer; months with ≥ 10</small></h2>
+          <TrendChart series={[{ id: 'inv', label: 'Investor share', points: d.trends.map((p) => ({ month: p.month, y: p.investor_share, status: p.status, n: p.buyer_known })) }]} format={(x) => fmtPct(x)} label="Investor share by month" height={150} />
+          <h3 className="mi-sub">Buyer recorded on sales, by month <small>the evidence behind the share</small></h3>
           <TrendChart series={[{ id: 'cov', label: 'Buyer recorded', points: cov }]} format={(x) => fmtPct(x)} label="Buyer evidence coverage by month" height={110} />
         </section>
       </div>
@@ -113,8 +116,8 @@ export function InvestorsSurface({ d }: { d: MiDossier }) {
       </section>
       {child ? (
         <section className="mi-card">
-          <h2>Where investor purchases cluster: {LEVEL_PLURAL[child]}</h2>
-          <QueryState q={rq}>{(r) => <Leaderboard rows={r.rows} metric="investor_purchase_count" onPick={(id) => setInspect(id)} />}</QueryState>
+          <h2>Highest investor share: {LEVEL_PLURAL[child]} <small>of sales with a recorded buyer, n ≥ 20</small></h2>
+          <QueryState q={rq}>{(r) => <Leaderboard rows={r.rows} metric="investor_purchase_share" onPick={(id) => setInspect(id)} />}</QueryState>
         </section>
       ) : null}
     </div>
@@ -140,7 +143,11 @@ export function MultifamilySurface({ geo }: { geo: MiGeoSummary }) {
       <QueryState q={dq}>{(d) => (
         <>
           <section className="mi-rail">
-            {['sales_count', 'median_sale_price', 'median_price_per_unit', 'median_ppsf', 'investor_purchase_count', 'investor_purchase_share', 'repeat_buyer_count', 'cash_purchase_share'].map((id) => <MetricTile key={id} id={id} value={d.values[id]} />)}
+            {['sales_count', 'median_sale_price', 'median_price_per_unit', 'median_ppsf', 'repeat_buyer_count'].map((id) => <MetricTile key={id} id={id} value={d.values[id]} />)}
+          </section>
+          <section className="mi-rail2__cells is-ev mi-ev-row" aria-label="Buyer evidence">
+            <EvidenceShare kind="investor" values={d.values} />
+            <EvidenceShare kind="cash" values={d.values} />
           </section>
           <div className="mi-overview__grid">
             <section className="mi-card"><h2>Units per building <small>recorded unit count</small></h2><DistBars label="Units per building" rows={d.multifamily.unit_distribution.map((r) => ({ ...r, muted: r.label === 'not recorded' }))} /></section>

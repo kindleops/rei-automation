@@ -109,8 +109,8 @@ describe('Command Deck grammar (brief §35)', () => {
     expect(marketIntelDeckCommands('market Dallas')[0].route).toBe('/market-intelligence?q=Dallas')
   })
   it('rank zip by investor purchases', () => {
-    expect(marketIntelDeckCommands('rank zip by investor purchases')[0].route).toBe('/market-intelligence?tab=rankings&rl=zip')
-    expect(marketIntelDeckCommands('rank zips by investor share in Texas')[0].route).toContain('rm=investor_purchase_share')
+    expect(parseMiLocation(marketIntelDeckCommands('rank zip by investor purchases')[0].route as string)).toMatchObject({ tab: 'rankings', rl: 'zip', rm: 'investor_purchase_count' })
+    expect(parseMiLocation(marketIntelDeckCommands('rank zips by investor share in Texas')[0].route as string)).toMatchObject({ rm: 'investor_purchase_share', q: 'Texas' })
   })
   it('compare Dallas Houston', () => {
     expect(marketIntelDeckCommands('compare Dallas Houston')[0].route).toBe('/market-intelligence?tab=compare&cq=Dallas%7CHouston')

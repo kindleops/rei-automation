@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { LCButton, LCDataGrid, LCEmpty, LCSegmented, LCSelect, type LCRowActivationEvent } from '../../../shared/lc'
 import { dataOf, miFetch, miUrl, refreshAllMiQueries, useMiQuery } from '../mi-api'
 import { useMi } from '../mi-context'
-import { fmtCount, fmtValue } from '../mi-format'
+import { fmtCount, fmtDate, fmtDateTime, fmtValue } from '../mi-format'
 import { showGeoOnMap } from '../mi-handoffs'
 import { childLevelOf } from '../mi-route-state'
 import type { MiDossier, MiGeoSummary, MiLevel, MiRankResult, MiRow, MiStatusPayload, MiTrendPoint } from '../mi-types'
@@ -11,6 +11,8 @@ import { TrendChart } from './charts'
 import { GeoActions, MetricTile, QueryState } from './parts'
 import { geoMenu, sparkOf } from './ui-model'
 import { useRowColumns } from './use-row-columns'
+import { EvidenceShare, InferredInvestorSlot } from './evidence'
+import { GeoHeatFigure } from './geo-figure'
 
 const LEVEL_PLURAL: Record<string, string> = { state: 'states', market: 'markets', county: 'counties', city: 'cities', zip: 'ZIPs' }
 const ORDER: MiLevel[] = ['nation', 'state', 'market', 'county', 'city', 'zip']
@@ -20,55 +22,88 @@ function rankLabel(d: MiDossier, metric: string): string | null {
   return r ? `#${r.rank} of ${fmtCount(r.of)} ${LEVEL_PLURAL[r.level] ?? ''} · ${r.parent_label}` : null
 }
 
-// ── Overview (brief §7, §32) ───────────────────────────────────────────────
-const HEADLINE = ['sales_count', 'median_sale_price', 'median_ppsf', 'monthly_sales_rate', 'sales_growth', 'investor_purchase_count', 'investor_purchase_share', 'cash_purchase_share', 'entity_owned_count', 'median_price_per_unit', 'property_count', 'seller_record_count', 'sms_eligible_count']
-const SPARK: Record<string, keyof MiTrendPoint> = { sales_count: 'sales', median_sale_price: 'median_price', median_ppsf: 'median_ppsf', investor_purchase_count: 'investor_purchases', investor_purchase_share: 'investor_share', cash_purchase_share: 'cash_share' }
+// ── Overview (brief §7, §32): map-first, a real metric rail, evidence that can't be misread ──
+const SPARK: Record<string, keyof MiTrendPoint> = { sales_count: 'sales', median_sale_price: 'median_price', median_ppsf: 'median_ppsf' }
 
-export function Hero({ d }: { d: MiDossier }) {
-  const { openGeo, state } = useMi()
+export function Hero({ d, compact }: { d: MiDossier; compact?: boolean }) {
+  const { openGeo, state, status } = useMi()
   const g = d.geography
+  const v = d.values
+  const spec = [
+    v.sales_count?.status === 'ok' ? `${fmtCount(v.sales_count.value ?? 0)} sales` : null,
+    `${fmtDate(d.window.from)} – ${fmtDate(d.window.to)}`,
+    d.window.asset === 'all' ? null : d.window.asset_label,
+    d.children ? `${fmtCount(d.children.count)} ${LEVEL_PLURAL[d.children.level] ?? ''}` : null,
+    status?.summary?.built_at ? `summary built ${fmtDateTime(status.summary.built_at)}` : null,
+  ].filter(Boolean)
   return (
-    <header className="mi-hero">
+    <header className={`mi-hero${compact ? ' is-compact' : ''}`}>
       <nav className="mi-crumbs" aria-label="Geography lineage">
-        {(g.lineage ?? []).map((l) => <button key={l.id} type="button" onClick={() => openGeo(l.id)}>{l.label}</button>)}
         <span className="mi-crumbs__level">{g.level_label}</span>
+        {(g.lineage ?? []).map((l) => <button key={l.id} type="button" onClick={() => openGeo(l.id)}>{l.label}</button>)}
       </nav>
       <div className="mi-hero__row">
-        <h1>{g.label}</h1>
+        <div className="mi-hero__id">
+          <h1>{g.label}</h1>
+          <p className="mi-hero__spec">{spec.map((x, i) => <span key={i}>{x}</span>)}</p>
+        </div>
         <GeoActions g={g} heatMetric={state.hm} />
       </div>
-      <p className="mi-hero__sub">{d.brief[0]?.text}</p>
     </header>
+  )
+}
+
+/** The metric rail: one plate, four labelled groups, evidence shares in their own group. */
+export function MetricRail({ d }: { d: MiDossier }) {
+  const cell = (id: string) => <MetricTile key={id} id={id} value={d.values[id]} spark={SPARK[id] ? sparkOf(d.trends, SPARK[id]) : undefined} rank={rankLabel(d, id)} size="sm" />
+  return (
+    <section className="mi-rail2" aria-label="Headline metrics">
+      <div className="mi-rail2__group"><h3>Activity</h3><div className="mi-rail2__cells">{['sales_count', 'monthly_sales_rate', 'sales_growth'].map(cell)}</div></div>
+      <div className="mi-rail2__group"><h3>Price</h3><div className="mi-rail2__cells">{['median_sale_price', 'median_ppsf', 'median_price_per_unit'].map(cell)}</div></div>
+      <div className="mi-rail2__group is-evidence">
+        <h3>Buyer evidence <small>shares of the sales that record it</small></h3>
+        <div className="mi-rail2__cells is-ev">
+          <EvidenceShare kind="investor" values={d.values} />
+          <EvidenceShare kind="cash" values={d.values} />
+          {d.inferred_investors !== undefined ? <InferredInvestorSlot data={d.inferred_investors} compact /> : null}
+        </div>
+      </div>
+      <div className="mi-rail2__group"><h3>Ownership &amp; universe</h3><div className="mi-rail2__cells">{['entity_owned_count', 'property_count', 'sms_eligible_count'].map(cell)}</div></div>
+    </section>
   )
 }
 
 export function OverviewSurface({ d, wall }: { d: MiDossier; wall?: boolean }) {
   const { state, setInspect } = useMi()
   const child = childLevelOf(d.geography.level)
-  const rankKey = child ? miUrl('rank', { level: child, within: d.geography.id, metric: 'investor_purchase_count', period: state.period, asset: state.asset, limit: 12 }) : null
-  const rq = useMiQuery<MiRankResult>(rankKey)
+  const bySales = useMiQuery<MiRankResult>(child ? miUrl('rank', { level: child, within: d.geography.id, metric: 'sales_count', period: state.period, asset: state.asset, limit: 8 }) : null)
+  const byShare = useMiQuery<MiRankResult>(child ? miUrl('rank', { level: child, within: d.geography.id, metric: 'investor_purchase_share', period: state.period, asset: state.asset, limit: 8 }) : null)
   const sales = d.trends.map((p) => ({ month: p.month, y: p.sales, status: p.status }))
   return (
     <div className={`mi-overview${wall ? ' is-wall' : ''}`}>
-      <section className="mi-rail" aria-label="Headline metrics">
-        {HEADLINE.map((id) => <MetricTile key={id} id={id} value={d.values[id]} spark={SPARK[id] ? sparkOf(d.trends, SPARK[id]) : undefined} rank={rankLabel(d, id)} />)}
-      </section>
-      <div className="mi-overview__grid">
-        <section className="mi-card mi-brief" aria-label="Market brief">
-          <h2>Brief <small>every line is a metric</small></h2>
-          <ol>{d.brief.map((s, i) => <li key={i}>{s.text}</li>)}</ol>
-        </section>
-        <section className="mi-card" aria-label="Sales by month">
-          <h2>Sales by month <small>{d.window.asset_label}</small></h2>
-          <TrendChart series={[{ id: 'sales', label: 'Sales', points: sales }]} format={(v) => fmtCount(v)} label="Sales by month" height={170} />
-        </section>
-        {child ? (
-          <section className="mi-card mi-leaders" aria-label={`Top ${LEVEL_PLURAL[child]}`}>
-            <h2>Top {LEVEL_PLURAL[child]} by investor purchases</h2>
-            <QueryState q={rq}>{(r) => <Leaderboard rows={r.rows.slice(0, 10)} metric="investor_purchase_count" onPick={(id) => setInspect(id)} />}</QueryState>
+      <MetricRail d={d} />
+      <div className="mi-stage">
+        <GeoHeatFigure geo={d.geography} height={wall ? 520 : 380} />
+        <aside className="mi-stage__side">
+          <section className="mi-card mi-brief" aria-label="Market brief">
+            <h2>Brief <small>each line is a registry metric</small></h2>
+            <ol>{d.brief.map((x, i) => <li key={i}>{x.text}</li>)}</ol>
           </section>
-        ) : null}
+          {child ? (
+            <section className="mi-card mi-leaders" aria-label={`Leading ${LEVEL_PLURAL[child]}`}>
+              <h2>Leading {LEVEL_PLURAL[child]}</h2>
+              <h3 className="mi-sub">By sales</h3>
+              <QueryState q={bySales}>{(r) => <Leaderboard rows={r.rows} metric="sales_count" onPick={(id) => setInspect(id)} />}</QueryState>
+              <h3 className="mi-sub">By investor share <small>of sales with a recorded buyer, n ≥ 20</small></h3>
+              <QueryState q={byShare}>{(r) => <Leaderboard rows={r.rows} metric="investor_purchase_share" onPick={(id) => setInspect(id)} />}</QueryState>
+            </section>
+          ) : null}
+        </aside>
       </div>
+      <section className="mi-card" aria-label="Sales by month">
+        <h2>Sales by month <small>{d.window.asset_label} · hatched months are before sales coverage, dashed may be incomplete</small></h2>
+        <TrendChart series={[{ id: 'sales', label: 'Sales', points: sales }]} format={(v) => fmtCount(v)} label="Sales by month" height={180} />
+      </section>
     </div>
   )
 }
@@ -98,7 +133,7 @@ export function Leaderboard({ rows, metric, onPick }: { rows: MiRow[]; metric: s
 
 export function RowsGrid({ id, label, rows, primary, sort, onSort, total, empty }: { id: string; label: string; rows: MiRow[]; primary: string; sort?: { id: string; dir: 'asc' | 'desc' } | null; onSort?: (s: { id: string; dir: 'asc' | 'desc' } | null) => void; total?: number; empty?: { title: string; body?: string } }) {
   const { inspect, setInspect, openGeo, addToCompare, set, state } = useMi()
-  const columns = useRowColumns(primary)
+  const columns = useRowColumns(primary, rows)
   const asGeo = (r: MiRow): MiGeoSummary => ({ id: r.id, level: r.level, level_label: r.level, name: r.label, label: r.label, state: r.state, parent_id: null, parents: {}, centroid: r.centroid, bbox: null, geometry: 'none' })
   return (
     <LCDataGrid<MiRow>
@@ -134,7 +169,7 @@ export function RankingsSurface({ geo }: { geo: MiGeoSummary }) {
   const r = dataOf(q)
   if (!level) return <LCEmpty title="A ZIP has no smaller geographies" body="Open its city, county or market to rank its neighbours." />
   return (
-    <div className="mi-rankings">
+    <div className="mi-rankings mi-fill">
       <div className="mi-toolbar" role="toolbar" aria-label="Ranking controls">
         <LCSegmented label="Rank" size="sm" value={level} onChange={(v) => set({ rl: v })} options={levels.map((l) => ({ value: l, label: LEVEL_PLURAL[l] ?? l }))} />
         <span className="mi-toolbar__in">in {geo.label}</span>
