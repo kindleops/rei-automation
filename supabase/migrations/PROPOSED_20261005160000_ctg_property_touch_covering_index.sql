@@ -1,0 +1,57 @@
+-- PROPOSED — NOT APPLIED. Needs owner approval.
+--
+-- Covering index so the Map "Property universe" touch buckets, the map phone
+-- filters (has_phone etc.), the phone count and the tile touch flag read
+-- campaign_target_graph by property_id WITHOUT touching the 527 MB heap.
+--
+-- Why: every one of those reads is keyed on campaign_target_graph.property_id and
+-- needs only (never_contacted, canonical_e164). Today the planner seq-scans the
+-- heap (527 MB, 849 MB total) per count:
+--
+--   BASELINE (prod, 2026-10-05, read-only EXPLAIN ANALYZE):
+--   select count(*) from properties p where exists (select 1 from campaign_target_graph tg
+--     where tg.property_id = p.property_id and tg.never_contacted is false);
+--     Hash Semi Join
+--       -> Index Only Scan on properties p (169,802 rows)          33 ms
+--       -> Seq Scan on campaign_target_graph tg                   2,416 ms
+--            Filter: (never_contacted IS FALSE)  Rows Removed: 164,023
+--            Buffers: shared hit=85 read=67,371
+--     Execution Time: 2,488 ms
+--   Full bucket preview (properties + owners + phones), generated SQL:
+--     contacted 4.8–7.1 s · uncontacted 14–16 s · all 10.5 s (two graph seq scans each)
+--
+-- Size estimate: 169,797 entries × (8 B tuple header + ~11 B property_id
+--   + ~11 B canonical_e164 + 1 B bool, MAXALIGN → 40 B + 4 B line pointer)
+--   / 0.90 fillfactor ≈ 8.3 MB fresh; ~10–14 MB after churn. For reference the
+--   existing single-column idx_campaign_target_graph_property_id is 9.8 MB.
+--   Once this exists, idx_campaign_target_graph_property_id (9.8 MB) is
+--   redundant (same leading key) and can be dropped in a follow-up.
+--
+-- Caveat: index-only scans need visibility-map bits; the daily graph enrich
+--   (05:00–06:53 UTC) UPDATEs every row, so until autovacuum runs the scans fall
+--   back to heap fetches (still index-driven, still far cheaper than a seq scan).
+--   Consider `VACUUM (ANALYZE) public.campaign_target_graph` at the end of enrich.
+--
+-- CONCURRENTLY cannot run inside a transaction: apply as a single statement via
+-- execute_sql (NOT apply_migration, which wraps a transaction). Takes no write lock.
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ctg_property_touch_phone
+  ON public.campaign_target_graph (property_id)
+  INCLUDE (canonical_e164, never_contacted);
+
+-- PRETEST (run after create; expect Index Only Scan, no Seq Scan on campaign_target_graph):
+--   SET statement_timeout = '30s';
+--   EXPLAIN (ANALYZE, BUFFERS)
+--   SELECT count(*) FROM public.properties p
+--   WHERE EXISTS (SELECT 1 FROM public.campaign_target_graph tg
+--                 WHERE tg.property_id = p.property_id AND tg.never_contacted IS FALSE);
+--   -- expected: Merge/Hash Semi Join over "Index Only Scan using idx_ctg_property_touch_phone
+--   --           on campaign_target_graph tg  Filter: (never_contacted IS FALSE)"
+--   --           Buffers ≈ 1.1K pages (≈ 9 MB) instead of 67K (527 MB).
+--   EXPLAIN (ANALYZE, BUFFERS)
+--   SELECT count(DISTINCT tg.canonical_e164) FROM public.campaign_target_graph tg
+--   WHERE tg.property_id = ANY (ARRAY(SELECT property_id FROM public.properties WHERE market = 'Dallas, TX'))
+--     AND tg.canonical_e164 IS NOT NULL;
+--   -- expected: Index Only Scan using idx_ctg_property_touch_phone, Heap Fetches ~0 after vacuum.
+--
+-- ROLLBACK: DROP INDEX CONCURRENTLY IF EXISTS public.idx_ctg_property_touch_phone;

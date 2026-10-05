@@ -21,7 +21,8 @@ import { buildFilterTokenDigest, exposeFilterTokenDigest } from "../../src/lib/d
 
 test("phone entity fields are registered", () => {
   const phoneFields = getActiveMapFilterFields().filter((f) => f.entity === "phone");
-  assert.ok(phoneFields.length >= 20, `expected phone fields, got ${phoneFields.length}`);
+  // 4 phantom fields (do_not_call, phone_slot, raw_phone_score, phone_score_final — no such phones columns) were removed 2026-10-05.
+  assert.ok(phoneFields.length >= 15, `expected phone fields, got ${phoneFields.length}`);
   assert.ok(phoneFields.some((f) => f.key === "phone.phone_type"));
   assert.ok(phoneFields.some((f) => f.key === "phone.activity_status"));
   assert.ok(!phoneFields.some((f) => f.key === "phone.sms_eligible"));

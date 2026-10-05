@@ -220,7 +220,9 @@ export async function getFilteredMapVectorTile(compiled, { z, x, y }) {
           p.multifamily_units
         ) AS marker_key,
         COALESCE(NULLIF(TRIM(p.market), ''), 'Unknown') AS market,
-        COALESCE(p.contact_status, 'uncontacted') AS contact_status,
+        -- Touch truth (campaign_target_graph.never_contacted), not the legacy
+        -- 'No Contact'/NULL import column. Attribute name kept for the tile style.
+        CASE WHEN touch.contacted IS TRUE THEN 'contacted' ELSE 'uncontacted' END AS contact_status,
         COALESCE(p.activity_status, '') AS activity_status,
         COALESCE(p.final_acquisition_score, 0)::integer AS acquisition_score,
         ST_AsMVTGeom(
@@ -236,6 +238,7 @@ export async function getFilteredMapVectorTile(compiled, { z, x, y }) {
       FROM public.properties p
       CROSS JOIN tile_bounds tb
       INNER JOIN matching_properties mp ON mp.property_id = p.property_id
+      ${TOUCH_LATERAL_SQL}
       WHERE p.latitude IS NOT NULL
         AND p.longitude IS NOT NULL
         AND ST_Intersects(

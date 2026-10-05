@@ -7,7 +7,7 @@ import {
 } from "./map-filter-prospect-links.js";
 import {
   MAP_FILTER_PHONE_LINKS_ALIAS,
-  MAP_FILTER_PHONE_LINKS_TABLE,
+  buildLinkedPhonesFromSql,
 } from "./map-filter-phone-links.js";
 
 const PROPERTY_ALIAS = "p";
@@ -101,23 +101,20 @@ function compileAstNode(node, ctx, { mode, outerProspectAlias = null } = {}) {
 function compilePhoneRelationship(node, ctx) {
   const rel = node.relationshipMatch || "any_linked";
   const predicate = compileFieldPredicate(node, ctx, PHONE_ALIAS);
+  const linkedFrom = buildLinkedPhonesFromSql(`${PROPERTY_ALIAS}.property_id`, {
+    linkAlias: PHONE_LINK_ALIAS,
+    phoneAlias: PHONE_ALIAS,
+  });
 
-  const linkedPhoneExists = (extra = "") => `EXISTS (
+  const linkedPhoneExists = () => `EXISTS (
     SELECT 1
-    FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${PHONE_LINK_ALIAS}
-    INNER JOIN phones ${PHONE_ALIAS}
-      ON ${PHONE_ALIAS}.phone_id = ${PHONE_LINK_ALIAS}.phone_id
-    WHERE ${PHONE_LINK_ALIAS}.property_id = ${PROPERTY_ALIAS}.property_id
-      ${extra}
+    ${linkedFrom}
       AND (${predicate})
   )`;
 
-  if (rel === "any_linked") {
+  // The graph carries one phone per property, so it is also the primary link.
+  if (rel === "any_linked" || rel === "primary_only") {
     return linkedPhoneExists();
-  }
-
-  if (rel === "primary_only") {
-    return linkedPhoneExists(`AND ${PHONE_LINK_ALIAS}.is_primary_link IS TRUE`);
   }
 
   if (rel === "none_linked") {
@@ -128,15 +125,11 @@ function compilePhoneRelationship(node, ctx) {
     return `(
       EXISTS (
         SELECT 1
-        FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${PHONE_LINK_ALIAS}
-        WHERE ${PHONE_LINK_ALIAS}.property_id = ${PROPERTY_ALIAS}.property_id
+        ${linkedFrom}
       )
       AND NOT EXISTS (
         SELECT 1
-        FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${PHONE_LINK_ALIAS}
-        INNER JOIN phones ${PHONE_ALIAS}
-          ON ${PHONE_ALIAS}.phone_id = ${PHONE_LINK_ALIAS}.phone_id
-        WHERE ${PHONE_LINK_ALIAS}.property_id = ${PROPERTY_ALIAS}.property_id
+        ${linkedFrom}
           AND NOT (${predicate})
       )
     )`;

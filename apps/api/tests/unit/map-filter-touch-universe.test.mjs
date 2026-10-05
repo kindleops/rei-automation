@@ -18,7 +18,6 @@ import {
   buildPhoneCountFromMatchingSql,
   buildPropertyEligibilitySql,
 } from "../../src/lib/domain/map-filters/map-filter-predicate-sql.js";
-import { MAP_FILTER_PHONE_LINKS_TABLE } from "../../src/lib/domain/map-filters/map-filter-phone-links.js";
 import { MAP_FILTER_PROSPECT_LINKS_TABLE } from "../../src/lib/domain/map-filters/map-filter-prospect-links.js";
 import { getMapFilterPreset } from "../../src/lib/domain/map-filters/map-filter-presets.js";
 import { resolveRegistryFieldKey, getRegistryField } from "../../src/lib/domain/map-filters/active-field-registry.js";
@@ -87,7 +86,7 @@ test("phones are counted from the graph's canonical_e164, not the empty phone-li
   const sql = buildPhoneCountFromMatchingSql();
   assert.match(sql, /COUNT\(DISTINCT tg\.canonical_e164\)/);
   assert.match(sql, /campaign_target_graph tg/);
-  assert.doesNotMatch(sql, new RegExp(MAP_FILTER_PHONE_LINKS_TABLE));
+  assert.doesNotMatch(sql, /map_filter_property_phone_links/);
 });
 
 test("owners union properties.master_owner_id with the prospect→owner bridge", () => {
@@ -245,4 +244,70 @@ test("results with a failed phase are not cached", async () => {
   await countMapFilterEntities(compiled, {}, { now: () => 1, run });
   assert.equal(runs, 2);
   clearMapFilterCountCache();
+});
+
+// ── Phone filters (has_phone et al.) read the graph phone, not the empty bridge ──
+
+function presetSql(key) {
+  const compiled = compileMapFilter(getMapFilterPreset(key).expression);
+  assert.equal(compiled.ok, true, JSON.stringify(compiled.errors));
+  return { compiled: compiled.compiled, ...buildPropertyEligibilitySql(compiled.compiled.compiledPredicateAst, compiled.compiled.params) };
+}
+
+test("has_phone preset joins the graph phone to phones on canonical_e164 — never the empty link table", () => {
+  const { sql } = presetSql("has_phone");
+  assert.doesNotMatch(sql, /map_filter_property_phone_links/);
+  assert.match(sql, /FROM public\.campaign_target_graph plink/);
+  assert.match(sql, /INNER JOIN public\.phones ph\s+ON ph\.canonical_e164 = plink\.canonical_e164/);
+  assert.match(sql, /plink\.property_id = p\.property_id/);
+  assert.match(sql, /plink\.canonical_e164 IS NOT NULL/);
+  assert.doesNotMatch(sql, /phone_id = plink/);
+});
+
+test("phone rules from the Map sheet (carrier, contact window) use the same bridge; primary_only ≡ any_linked", () => {
+  const { sql } = bucketSql("all", { phoneCarrier: ["T-Mobile"], contactWindow: "Morning" });
+  assert.doesNotMatch(sql, /map_filter_property_phone_links/);
+  assert.equal((sql.match(/FROM public\.campaign_target_graph plink/g) || []).length, 2);
+
+  const rule = (relationshipMatch) => compileMapFilter({
+    id: "root", type: "group", combinator: "AND", negated: false, enabled: true,
+    children: [{ id: "r", type: "rule", fieldKey: "phone.phone_owner", operator: "equals", value: "T-Mobile", enabled: true, relationshipMatch }],
+  }).compiled;
+  const any = rule("any_linked");
+  const primary = rule("primary_only");
+  assert.equal(
+    buildPropertyEligibilitySql(primary.compiledPredicateAst, primary.params).sql,
+    buildPropertyEligibilitySql(any.compiledPredicateAst, any.params).sql,
+  );
+  const none = rule("none_linked");
+  assert.match(buildPropertyEligibilitySql(none.compiledPredicateAst, none.params).sql, /^NOT \(EXISTS/);
+  const all = rule("all_linked");
+  assert.match(buildPropertyEligibilitySql(all.compiledPredicateAst, all.params).sql, /AND NOT EXISTS/);
+});
+
+test("has_phone over the fixture matches exactly the properties whose graph phone is a known phone", () => {
+  // Reference semantics of the SQL above, evaluated over the fixture: graph row with a
+  // canonical_e164 that public.phones knows. Property 4 (no graph phone) and 6 (no graph row) are excluded.
+  const phones = new Set(["+12145550001", "+12145550002", "+12145550003"]);
+  const matched = FIXTURE.properties.filter((p) =>
+    FIXTURE.graph.some((g) => g.property_id === p.property_id && g.canonical_e164 && phones.has(g.canonical_e164)));
+  assert.deepEqual(matched.map((p) => p.property_id), ["1", "2", "3", "5"]);
+  assert.ok(matched.length > 0);
+});
+
+test("filtered map tiles carry the touch truth, not properties.contact_status", async () => {
+  const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("../../src/lib/domain/map-filters/map-filter-map-queries.js", import.meta.url), "utf8"));
+  assert.doesNotMatch(src, /p\.contact_status|COALESCE\(contact_status/);
+  assert.match(src, /CASE WHEN touch\.contacted IS TRUE THEN 'contacted' ELSE 'uncontacted' END AS contact_status/);
+  assert.equal((src.match(/\$\{TOUCH_LATERAL_SQL\}/g) || []).length, 3);
+});
+
+test("every phone registry field maps to a real public.phones column (no phantom column kills the query)", async () => {
+  // Snapshot of information_schema.columns for public.phones, prod 2026-10-05.
+  const PHONES_COLUMNS = new Set("phone_id,master_owner_id,master_key,canonical_e164,phone_raw,phone,sort_rank,best_phone_score,phone_type,phone_owner,activity_status,usage_12_months,usage_2_months,primary_prospect_id,canonical_prospect_id,best_slot,contact_rank_position,contact_score_final,linked_source_slots_text,linked_source_slots_json,linked_prospect_ids_text,linked_prospect_ids_json,linked_individual_keys_text,linked_individual_keys_json,linked_languages_text,linked_languages_json,is_best_phone_for_slot,is_best_phone_for_owner,owner_display_name,primary_market,timezone,contact_window,sending_priority_tier,upsert_key,source_system,export_version,exported_at_utc,row_hash,created_at,updated_at,phone_first_name,phone_full_name,primary_display_name,phone_contact_status,wrong_number_at,wrong_number_source_thread_key".split(","));
+  const { RAW_MAP_FILTER_FIELD_DEFINITIONS } = await import("../../src/lib/domain/map-filters/active-field-registry-source.js");
+  const phantom = RAW_MAP_FILTER_FIELD_DEFINITIONS
+    .filter((f) => f.entity === "phone" && f.column && !PHONES_COLUMNS.has(f.column))
+    .map((f) => `${f.key}→${f.column}`);
+  assert.deepEqual(phantom, []);
 });

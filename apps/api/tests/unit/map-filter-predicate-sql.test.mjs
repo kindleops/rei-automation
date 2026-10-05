@@ -160,14 +160,15 @@ test("phone any_linked uses bridge EXISTS", () => {
   assert.doesNotMatch(sql, /linked_prospect_ids_json/i);
 });
 
-test("phone primary_only requires primary link via bridge", () => {
+test("phone primary_only uses the graph phone bridge (one phone per property = the primary)", () => {
   const { sql } = compileSql(
     group("root", "AND", [
       rule("ph", "phone.has_canonical_phone", "has_data", true, { relationshipMatch: "primary_only" }),
     ]),
   );
-  assert.match(sql, /is_primary_link IS TRUE/i);
+  assert.doesNotMatch(sql, /is_primary_link/i);
   assert.match(sql, new RegExp(MAP_FILTER_PHONE_LINKS_TABLE));
+  assert.match(sql, /ph\.canonical_e164 = plink\.canonical_e164/);
 });
 
 test("unified count SQL includes matching_phones", () => {

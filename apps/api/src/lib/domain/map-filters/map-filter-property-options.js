@@ -180,9 +180,10 @@ async function queryPhoneLinkedDistinct({ column, search = "", limit = OPTIONS_L
     SELECT grouped.value, grouped.value AS label, grouped.count
     FROM (
       SELECT TRIM(ph.${phoneColumn}::text) AS value, COUNT(DISTINCT link.property_id)::bigint AS count
-      FROM public.map_filter_property_phone_links link
-      INNER JOIN public.phones ph ON ph.phone_id = link.phone_id
-      WHERE ph.${phoneColumn} IS NOT NULL
+      FROM public.campaign_target_graph link
+      INNER JOIN public.phones ph ON ph.canonical_e164 = link.canonical_e164
+      WHERE link.canonical_e164 IS NOT NULL
+        AND ph.${phoneColumn} IS NOT NULL
         AND TRIM(ph.${phoneColumn}::text) <> ''
       GROUP BY TRIM(ph.${phoneColumn}::text)
     ) grouped
