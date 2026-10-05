@@ -25,7 +25,7 @@ describe('comp image source order', () => {
     const url = compStreetViewUrl({ streetview_image: VENDOR, lat: 45.02, lng: -93.29, address: '1 Main St' } as never)
     expect(url).toMatch(/key=OWNKEY/)
     expect(url).not.toMatch(/signature=/)
-    expect(compStreetViewUrl({ streetview_image: VENDOR, lat: null, lng: null, address: '1 Main St' } as never)).toMatch(/location=1\+Main\+St.*key=OWNKEY/)
+    expect(compStreetViewUrl({ streetview_image: VENDOR, lat: null, lng: null, address: '1 Main St' } as never)).toMatch(/location=1%20Main%20St.*key=OWNKEY/)
     vi.stubEnv('VITE_GOOGLE_MAPS_API_KEY', '')
     vi.resetModules()
     const again = await import('../../map/mobile/MapCompCard')

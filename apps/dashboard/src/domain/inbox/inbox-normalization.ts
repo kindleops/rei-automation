@@ -131,7 +131,9 @@ export const buildStreetViewUrl = (
   const location = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
   if (!location) return null
   console.debug('[GOOGLE_MAP_SOURCE]', { source: hasCoords ? 'coords' : 'address', lat, lng, address })
-  return `https://maps.googleapis.com/maps/api/streetview?size=640x400&location=${location}&fov=80&heading=210&pitch=2&scale=2&key=${apiKey}`
+  // return_error_code: a location with no panorama answers 404 (an <img> error →
+  // an honest "no street imagery"), never Google's grey stand-in tile.
+  return `https://maps.googleapis.com/maps/api/streetview?size=640x400&location=${location}&fov=80&heading=210&pitch=2&scale=2&return_error_code=true&key=${apiKey}`
 }
 
 export const buildAerialViewUrl = (

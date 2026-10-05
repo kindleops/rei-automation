@@ -1,4 +1,4 @@
-import { staticStreetViewUrl } from '../../../modules/entity-graph/mobile/EntityGraphPropertyVisual'
+import { resolveMapsImage } from '../../../domain/inbox/inbox-normalization'
 
 /**
  * The comp Street View load queue + source rule (see CompStreetView): every
@@ -45,32 +45,21 @@ export function acquireSlot(onGranted: () => void): () => void {
 /** Test seam: how many loads are queued / running. */
 export function streetViewQueueDepth() { return { inFlight, waiting: waiting.length } }
 
-const hasCoords = (lat?: number | null, lng?: number | null) =>
-  Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
-
 /**
  * The one URL a comp's imagery comes from — null means there is honestly
- * nothing to look at.
+ * nothing to look at. Every comp source (engine-pool MLS / public-record /
+ * investor sales, transaction-corpus deeds, canonical recent sales) passes
+ * the same fields — its own coordinates, address and stored image — through
+ * THE shared stored-imagery rule (resolveMapsImage): our key at the
+ * coordinates, then at the address, the stored image last.
  *
- * ORDER (fixed 2026-10-04): LeadCommand's own configured Street View key at
- * the comp's coordinates, else at its address; the record's stored
- * `streetview_image` only when no own-key URL can be built. The stored URLs
- * (buyer_comp_raw_v2, every engine-pool comp) are a data vendor's signed
- * links whose key is referrer-restricted: from ops.leadcommand.ai the browser
- * gets an error for every one of them, so preferring them blanked every comp
- * frame in production. They load from curl / no-referrer only — we do not
- * strip the referrer to get around another party's key restriction.
+ * Why it matters (prod RC 8.3.2, 2026-10-04): every engine-pool comp carries a
+ * stored vendor-signed Street View URL (buyer_comp_raw_v2.streetview_image)
+ * whose key is referrer-restricted and errors from ops.leadcommand.ai. MLS
+ * comps exist only in the engine pool, so with the stored URL first every MLS
+ * comp — and every pool-sourced investor comp — showed no image, while
+ * corpus deeds (no stored URL) built from our key and showed one.
  */
 export function compStreetViewUrl(c: { photo?: string | null; lat?: number | null; lng?: number | null; address?: string | null }): string | null {
-  if (hasCoords(c.lat, c.lng)) {
-    const built = staticStreetViewUrl(null, c.lat, c.lng)
-    if (built) return built
-  }
-  const address = (c.address ?? '').trim()
-  if (address) {
-    const built = staticStreetViewUrl(address, null, null)
-    if (built) return built
-  }
-  if (c.photo && /^https:\/\//.test(c.photo)) return c.photo
-  return null
+  return resolveMapsImage({ kind: 'street', stored: c.photo ?? null, address: c.address ?? null, lat: c.lat ?? null, lng: c.lng ?? null })
 }

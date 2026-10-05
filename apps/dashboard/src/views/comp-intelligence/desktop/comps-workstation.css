@@ -502,8 +502,11 @@
 .ciw-row__title { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ciw-row__addr { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--lc-t-row); color: var(--lc-ink-1); }
 .ciw-row.is-excluded .ciw-row__addr, .ciw-row.is-removed .ciw-row__addr { color: var(--lc-ink-2); }
-.ciw-row__meta { display: flex; align-items: center; gap: 7px; min-width: 0; font: 500 11.5px/1.35 var(--lc-font-ui); color: var(--lc-ink-3); white-space: nowrap; }
-.ciw-row__meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ciw-row__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 7px; min-width: 0; font: 500 11.5px/1.35 var(--lc-font-ui); color: var(--lc-ink-3); white-space: nowrap; }
+/* The sale-type badge (with an investor / institutional buyer) never shrinks, so the
+   distance · date line used to be squeezed to "0.4 mi · Se". It now wraps whole onto
+   its own line; only a line narrower than itself (a very narrow pane) ellipsizes. */
+.ciw-row__meta > span { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .ciw-row__meta .cst { height: 17px; }
 .ciw-row__spec { font: 500 11.5px/1.35 var(--lc-font-ui); color: var(--lc-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ciw-row__headline { margin-top: 2px; font: 550 11.5px/1.35 var(--lc-font-ui); }

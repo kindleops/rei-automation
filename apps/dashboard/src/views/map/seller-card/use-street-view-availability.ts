@@ -31,7 +31,7 @@ export const toStreetViewMetadataUrl = (imageUrl: string): string | null => {
   // and would silently alter the request we send.
   return imageUrl
     .replace('/maps/api/streetview?', '/maps/api/streetview/metadata?')
-    .replace(/([?&])(signature|secret)=[^&]*/g, '$1')
+    .replace(/([?&])(signature|secret|return_error_code)=[^&]*/g, '$1')
     .replace(/&{2,}/g, '&')
     .replace(/\?&/, '?')
     .replace(/[?&]$/, '')

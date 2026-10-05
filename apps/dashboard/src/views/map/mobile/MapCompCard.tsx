@@ -26,6 +26,7 @@ import {
   type CompSource,
 } from './useSoldComps'
 import { mapOverlayTarget } from '../map-overlay-host'
+import { resolveMapsImage } from '../../../domain/inbox/inbox-normalization'
 import { showPortfolio } from './comp-portfolio-layer'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
@@ -37,26 +38,11 @@ const dateLabel = (d?: string | null) => {
 }
 const titleCase = (s?: string | null) => (s ? s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : '')
 
-const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
 
-/**
- * Street View for a comp sale: our own configured key at the sale's
- * coordinates, then at its address; the record's stored image only when no
- * own-key URL can be built. Stored comp images are a data vendor's signed
- * links with a referrer-restricted key — from ops.leadcommand.ai they error,
- * so they can never come first (2026-10-04). The referrer is never stripped.
- */
+/** Street View for a comp sale through THE shared stored-imagery rule (resolveMapsImage). */
 export function compStreetViewUrl(comp: Pick<CompDetail, 'streetview_image' | 'lat' | 'lng' | 'address'> | null): string | null {
   if (!comp) return null
-  if (MAPS_KEY) {
-    const hasCoords = Number.isFinite(comp.lat) && Number.isFinite(comp.lng) && Math.abs(comp.lat) > 0.0001
-    const location = hasCoords ? `${comp.lat},${comp.lng}` : (comp.address ?? '').trim()
-    if (location) {
-      const params = new URLSearchParams({ size: '640x400', location, fov: '80', pitch: '4', source: 'outdoor', key: MAPS_KEY })
-      return `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`
-    }
-  }
-  return comp.streetview_image || null
+  return resolveMapsImage({ kind: 'street', stored: comp.streetview_image ?? null, address: comp.address ?? null, lat: comp.lat, lng: comp.lng })
 }
 
 const pctText = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? `${Math.round(v)}%` : null)

@@ -91,6 +91,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  max-width: 100%;
   height: 18px;
   padding: 0 7px 0 6px;
   border-radius: 6px;
@@ -109,7 +110,7 @@
 .cst[data-type='off_market']::before, .cst[data-type='public_record']::before { background: transparent; box-shadow: inset 0 0 0 1.4px rgb(var(--cst-rgb)); }
 .cst[data-type='unknown'] { color: var(--lc-ink-3); background: transparent; box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.12); }
 .cst[data-type='unknown']::before { background: transparent; box-shadow: inset 0 0 0 1px var(--lc-ink-4); }
-.cst__buyer { margin-left: 2px; padding-left: 6px; border-left: 1px solid rgba(var(--cst-rgb), 0.3); font-weight: 560; color: var(--lc-ink-2); }
+.cst__buyer { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 2px; padding-left: 6px; border-left: 1px solid rgba(var(--cst-rgb), 0.3); font-weight: 560; color: var(--lc-ink-2); }
 
 /* the sale-type evidence block in inspectors */
 .cst-evidence { display: flex; flex-direction: column; gap: 8px; }
