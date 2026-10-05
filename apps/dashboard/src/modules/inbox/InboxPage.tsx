@@ -4724,20 +4724,37 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (options?.pushHistory) syncUniversalContextToUrl(next, 'push')
   }, [setActiveContext])
 
+  /**
+   * DESK WORKSPACE: ANOTHER PANE'S SELECTION ARRIVES THROUGH THE LINKED BUS ONLY.
+   *
+   * The universal entity context is one process-wide store, and every InboxPage
+   * host (Inbox, Map, Pipeline, Calendar panes) used to adopt every other
+   * host's publish here — selecting that thread in itself, unguarded: no
+   * pinning, no debounce, no latest-wins, no echo suppression. That second
+   * channel made the Map host re-select the Inbox's thread (its messages load
+   * paused the pin field: the blink) and keep a stale property that it later
+   * re-asserted over a Pipeline click (the snap-back). In the desk workspace a
+   * pane follows through useLinkedProperty; it still hears its own publishes.
+   * Phones and single-app shells (no instance) are unchanged.
+   */
+  const { instanceId: universalHostInstance } = useAppInstance()
+  const universalLinkedByBus = isModernDesktop && Boolean(universalHostInstance)
   useEffect(() => {
     return subscribeUniversalEntityContext((next) => {
-      setUniversalEntityContext(next)
       if (publishingUniversalRef.current) {
         publishingUniversalRef.current = false
+        setUniversalEntityContext(next)
         return
       }
+      if (universalLinkedByBus) return
+      setUniversalEntityContext(next)
       if (!hasEntityAnchor(syncPayloadFromUniversal(next, 'inbox'))) return
       const active = syncPayloadFromUniversal(next, activeContext.sourceView ?? 'inbox')
       setActiveContextState((current) => ({ ...current, ...active }))
       const match = findThreadForActiveContext(threads, active)
       if (match) selectFromExternalContext(match)
     })
-  }, [activeContext.sourceView, selectFromExternalContext, threads])
+  }, [activeContext.sourceView, selectFromExternalContext, threads, universalLinkedByBus])
 
   useEffect(() => {
     const active = effectiveActiveContext
