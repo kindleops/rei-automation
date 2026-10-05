@@ -1019,7 +1019,8 @@ export const LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES = new Set([
   "closing_scheduled_update",
 ]);
 
-async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy = null } = {}) {
+async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy = null, excludePlaceholders = [] } = {}) {
+  const excluded = new Set(asArray(excludePlaceholders).map((v) => clean(v)).filter(Boolean));
   try {
     const { LOCAL_TEMPLATE_CANDIDATES, verifyLocalAutoReplyApproval, isLocalTemplateFallbackKilled } =
       await import("@/lib/domain/templates/local-template-registry.js");
@@ -1029,6 +1030,7 @@ async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy =
       if (!LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES.has(lower(row.use_case))) continue;
       if (!allowed_matches.includes(lower(row.use_case))) continue;
       if (lower(row.active) !== "yes") continue;
+      if (excluded.size > 0 && templatePlaceholders(row.text).some((name) => excluded.has(name))) continue;
       // A local template is auto-sendable only with a verified approval record:
       // pinned content hash, approved environment, allowed strategy, no kill.
       const verification = verifyLocalAutoReplyApproval(row, { strategy });
@@ -1343,10 +1345,16 @@ export async function selectSafeAutoReplyTemplate({
   context = null,
   threadKey = null,
   inboundEventId = null,
+  // Placeholders that cannot be filled for this thread: templates using them
+  // are skipped so a variant without them (or none) is chosen instead.
+  excludePlaceholders = [],
 } = {}) {
   if (!canUseSupabase(supabaseClient)) {
     return { ok: false, reason: "missing_supabase", template: null };
   }
+  const excluded_placeholders = new Set(asArray(excludePlaceholders).map((v) => clean(v)).filter(Boolean));
+  const usesExcludedPlaceholder = (body) =>
+    excluded_placeholders.size > 0 && templatePlaceholders(body).some((name) => excluded_placeholders.has(name));
 
   const supabase = supabaseClient || getDefaultSupabaseClient();
   // Language continuity (activation spec): an established thread/prospect
@@ -1497,6 +1505,7 @@ export async function selectSafeAutoReplyTemplate({
         return !reply_mode || reply_mode === "auto" || reply_mode === "auto_reply";
       })
       .filter((row) => isTemplatePropertyCompatible(row, property_type_scope))
+      .filter((row) => !usesExcludedPlaceholder(row.template_body))
       .sort(compareTemplateRank);
 
     const requested_language = lower(language);
@@ -1530,6 +1539,7 @@ export async function selectSafeAutoReplyTemplate({
     if (!selected) {
       selected = await selectLocalNegotiationTemplate(allowed_matches, {
         strategy: decision?.negotiation_strategy || null,
+        excludePlaceholders: [...excluded_placeholders],
       });
       if (selected) {
         try {
@@ -1650,6 +1660,126 @@ function buildPersonalizationContext({
     // template/renderer never composes its own comp claim (spec §10).
     comp_anchor_statement: clean(dealAuthority?.comp_anchor_statement) || null,
   };
+}
+
+// ── Reply-address hydration (2026-10-05 hotfix) ────────────────────────────
+// Campaign threads created by campaign_launch_execution carry the property
+// address ONLY in send_queue.metadata (target_snapshot / candidate_snapshot /
+// campaign_target_metadata); send_queue.property_address is NULL, so the
+// context summary had no address and every reply template with
+// {{property_address}} failed to render. Yanli Mu ("199k sale", 15:36) and
+// Frank L Hutchinson III ("1 million for the property", 16:44) gave a price
+// and got no reply (template_render_failed on local-template:condition_probe).
+//
+// Canonical order: the thread's property_id -> properties.property_address
+// (street form -- the same text the opener used), else the opener queue row
+// (column, then metadata snapshots), else campaign_targets. A full
+// "street, city, state zip" value is cut to its street line so the reply reads
+// like the opener did.
+function streetLine(value) {
+  const text = clean(value);
+  if (!text) return null;
+  const head = clean(text.split(",")[0]);
+  return head || null;
+}
+
+function phoneVariantsForThread(e164) {
+  const digits = String(e164 ?? "").replace(/\D/g, "");
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (!ten) return [];
+  return [...new Set([String(e164), `+1${ten}`, `1${ten}`, ten].filter(Boolean))];
+}
+
+function addressFromQueueRow(row = {}) {
+  const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return (
+    streetLine(row?.property_address) ||
+    streetLine(meta.property_address) ||
+    streetLine(meta.target_snapshot?.property_address) ||
+    streetLine(meta.candidate_snapshot?.property_address) ||
+    streetLine(meta.candidate_snapshot?.property_address_full) ||
+    streetLine(meta.campaign_target_metadata?.property_address) ||
+    streetLine(meta.campaign_target_metadata?.property_address_full) ||
+    null
+  );
+}
+
+/**
+ * Returns `context` with summary.property_address filled from the canonical
+ * sources when it is empty. Never throws; never invents an address.
+ */
+export async function hydrateReplyAddressContext({
+  supabase = null,
+  context = null,
+  propertyId = null,
+  threadKey = null,
+} = {}) {
+  const base = context && typeof context === "object" ? context : {};
+  if (clean(base?.summary?.property_address)) return base;
+  if (!supabase || typeof supabase.from !== "function") return base;
+
+  const property_id = clean(propertyId) || clean(base?.ids?.property_id) || null;
+  const withAddress = (address, source) => ({
+    ...base,
+    summary: { ...(base.summary || {}), property_address: address, property_address_source: source },
+  });
+
+  // 1. properties (canonical)
+  if (property_id) {
+    try {
+      const { data } = await supabase
+        .from("properties")
+        .select("property_id,property_address,property_address_full")
+        .eq("property_id", property_id)
+        .limit(1);
+      const row = Array.isArray(data) ? data[0] : data;
+      const address = streetLine(row?.property_address) || streetLine(row?.property_address_full);
+      if (address) return withAddress(address, "properties");
+    } catch {
+      // fall through to the next source
+    }
+  }
+
+  // 2. the opener queue row(s) on this thread
+  let campaign_target_id = null;
+  const phones = phoneVariantsForThread(threadKey);
+  if (phones.length) {
+    try {
+      let query = supabase
+        .from("send_queue")
+        .select("id,property_id,property_address,metadata,created_at")
+        .in("to_phone_number", phones);
+      if (property_id) query = query.eq("property_id", property_id);
+      const { data } = await query.order("created_at", { ascending: false }).limit(10);
+      for (const row of Array.isArray(data) ? data : []) {
+        const address = addressFromQueueRow(row);
+        if (address) return withAddress(address, "send_queue");
+        campaign_target_id = campaign_target_id || clean(row?.metadata?.campaign_target_id) || null;
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // 3. campaign_targets
+  if (campaign_target_id || property_id) {
+    try {
+      let query = supabase.from("campaign_targets").select("id,property_id,property_address");
+      query = campaign_target_id ? query.eq("id", campaign_target_id) : query.eq("property_id", property_id);
+      const { data } = await query.limit(1);
+      const row = Array.isArray(data) ? data[0] : data;
+      const address = streetLine(row?.property_address);
+      if (address) return withAddress(address, "campaign_targets");
+    } catch {
+      // nothing else to try
+    }
+  }
+  return base;
+}
+
+/** Placeholder names a template body uses ({{ name }}). */
+function templatePlaceholders(body = "") {
+  return [...String(body || "").matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)].map((m) => m[1]);
 }
 
 function renderSafeTemplate({
@@ -2383,6 +2513,7 @@ export async function executeInboundAutomationDecision({
   supabaseClient = null,
   getSystemValue: getSystemValueImpl = null,
   naturalReplyModelCall = null,
+  renderFailureNotifyImpl = null,
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
   const effective_auto_reply_mode = normalizeAutoReplyMode(
@@ -2989,11 +3120,19 @@ export async function executeInboundAutomationDecision({
     };
   }
 
-  const template_result = await selectSafeAutoReplyTemplate({
+  // Fill the property address from the canonical sources before any template
+  // is chosen or rendered (see hydrateReplyAddressContext).
+  const reply_context = await hydrateReplyAddressContext({
+    supabase,
+    context: context || latestThreadContext,
+    propertyId,
+    threadKey,
+  });
+  let template_result = await selectSafeAutoReplyTemplate({
     supabaseClient: supabase,
     classification,
     decision: base_decision,
-    context: context || latestThreadContext,
+    context: reply_context,
     threadKey,
     inboundEventId,
   });
@@ -3044,17 +3183,87 @@ export async function executeInboundAutomationDecision({
     };
   }
 
-  const render_result = renderSafeTemplate({
+  let render_result = renderSafeTemplate({
     template: template_result.template,
     message,
     inboundFrom,
     inboundTo,
     classification,
-    context: context || latestThreadContext,
+    context: reply_context,
     dealAuthority,
   });
 
+  // A required variable is still empty: choose an approved variant that does
+  // not use it (DB catalog, then the approved local registry). Never send an
+  // unrendered {{...}} -- personalizeTemplate fails closed and the queue
+  // preparation rejects leftover braces.
+  if (!render_result.ok && asArray(render_result.missing).length > 0) {
+    const retry = await selectSafeAutoReplyTemplate({
+      supabaseClient: supabase,
+      classification,
+      decision: base_decision,
+      context: reply_context,
+      threadKey,
+      inboundEventId,
+      excludePlaceholders: render_result.missing,
+    });
+    if (retry.ok && retry.template) {
+      const retry_render = renderSafeTemplate({
+        template: retry.template,
+        message,
+        inboundFrom,
+        inboundTo,
+        classification,
+        context: reply_context,
+        dealAuthority,
+      });
+      if (retry_render.ok) {
+        template_result = retry;
+        render_result = retry_render;
+      }
+    }
+  }
+
+  if (render_result.ok && /\{\{|\}\}/.test(String(render_result.rendered_message_text || ""))) {
+    render_result = { ok: false, reason: "unrendered_placeholder", missing: [], rendered_message_text: null };
+  }
+
   if (!render_result.ok) {
+    // Never silently dropped: the operator is alerted (inbox_auto_reply_blocked)
+    // and the decision stays human-review. Observability only -- a failed
+    // alert never changes the decision. Skipped on dry runs.
+    if (!dryRun) {
+      try {
+        const notify =
+          renderFailureNotifyImpl ||
+          (await import("@/lib/domain/notifications/notification-emitter.js")).emitNotificationFromBusinessEvent;
+        await notify({
+          eventType: "inbox_auto_reply_blocked",
+          severity: "warning",
+          title: `Auto-reply not sent (template could not render) — ${clean(threadKey) || "thread"}`,
+          description: `Seller replied (${clean(classification?.primary_intent) || "unknown intent"}) but template ${
+            clean(template_result.template?.template_id) || "?"
+          } could not render: ${render_result.reason || "template_render_failed"}${
+            asArray(render_result.missing).length ? ` (missing ${asArray(render_result.missing).join(", ")})` : ""
+          }. Reply manually.`,
+          titleVars: { thread_key: clean(threadKey) || "" },
+          sourceEntityType: "thread",
+          sourceEntityId: clean(threadKey) || clean(inboundEventId) || "thread",
+          propertyId: clean(propertyId) || null,
+          templateId: clean(template_result.template?.template_id) || null,
+          deduplicationKey: `auto_reply_render_failed:${clean(inboundEventId) || clean(threadKey) || ""}`,
+          metrics: {
+            reason: render_result.reason || "template_render_failed",
+            missing: asArray(render_result.missing),
+            primary_intent: clean(classification?.primary_intent) || null,
+          },
+          group: false,
+        });
+      } catch {
+        // alerting must never block the decision
+      }
+    }
+
     const render_failed_decision = {
       ...base_decision,
       should_queue_reply: false,
@@ -3111,7 +3320,7 @@ export async function executeInboundAutomationDecision({
   const natural_reply = await maybeGenerateNaturalReply({
     decision: base_decision,
     classification,
-    context: context || latestThreadContext,
+    context: reply_context,
     deterministicText: render_result.rendered_message_text,
     useCase: selected_use_case,
     templateId: selected_template.template_id || selected_template.id || null,
