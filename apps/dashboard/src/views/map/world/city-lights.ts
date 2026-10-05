@@ -36,17 +36,7 @@ const RAD = Math.PI / 180
 export const LIGHTS_ON_ALT = -4
 export const LIGHTS_FULL_ALT = -14
 
-/**
- * [8.5] The NIGHT BASE: Black Marble itself (land, sea and lights) as the
- * night side's imagery under the satellite look — fades in from just after
- * sunset and is full by nautical dusk, so twilight blends day photo → night
- * photo instead of tinting the day photo.
- */
-export const BASE_ON_ALT = -1
-export const BASE_FULL_ALT = -11
-
-export type LightsKind = 'lights' | 'base'
-export const lightsTileUrl = (bucketMs: number, kind: LightsKind = 'lights') => `${LIGHTS_PROTOCOL}://{z}/{x}/{y}?t=${bucketMs}&k=${kind}`
+export const lightsTileUrl = (bucketMs: number) => `${LIGHTS_PROTOCOL}://{z}/{x}/{y}?t=${bucketMs}`
 export const lightsBucket = (ms: number) => Math.floor(ms / LIGHTS_BUCKET_MS) * LIGHTS_BUCKET_MS
 
 /**
@@ -54,7 +44,7 @@ export const lightsBucket = (ms: number) => Math.floor(ms / LIGHTS_BUCKET_MS) * 
  * instant. sin(alt) = sinφ·sinδ + cosφ·cosδ·cosH separates into a row term
  * and a column term, so a tile is one multiply-add per pixel.
  */
-export function nightFactorTile(z: number, x: number, y: number, at: Date, size = SIZE, onAlt = LIGHTS_ON_ALT, fullAlt = LIGHTS_FULL_ALT): Float32Array {
+export function nightFactorTile(z: number, x: number, y: number, at: Date, size = SIZE): Float32Array {
   const { declination, eqTimeMin } = solarEphemeris(at)
   const dec = declination * RAD
   const sd = Math.sin(dec), cd = Math.cos(dec)
@@ -65,7 +55,7 @@ export function nightFactorTile(z: number, x: number, y: number, at: Date, size 
     const lng = ((x + (px + 0.5) / size) / n) * 360 - 180
     cosH[px] = Math.cos(((utcMin + eqTimeMin + 4 * lng) / 4 - 180) * RAD)
   }
-  const lo = Math.sin(onAlt * RAD), hi = Math.sin(fullAlt * RAD)
+  const lo = Math.sin(LIGHTS_ON_ALT * RAD), hi = Math.sin(LIGHTS_FULL_ALT * RAD)
   const out = new Float32Array(size * size)
   for (let py = 0; py < size; py++) {
     const lat = Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + (py + 0.5) / size)) / n)))
@@ -106,9 +96,8 @@ export function extractLights(rgba: Uint8ClampedArray): { data: Uint8ClampedArra
 
 // ── the tile protocol ───────────────────────────────────────────────────────
 
-/** Raw Black Marble RGBA (the night base) and, lazily, its lights-only form. */
-type Decoded = { raw: Uint8ClampedArray; lights?: Uint8ClampedArray | null }
-const LRU_MAX = 64
+type Decoded = { lights: Uint8ClampedArray | null }
+const LRU_MAX = 96
 const cache = new Map<string, Promise<Decoded>>()
 
 function decode(z: number, x: number, y: number, signal: AbortSignal): Promise<Decoded> {
@@ -123,7 +112,8 @@ function decode(z: number, x: number, y: number, signal: AbortSignal): Promise<D
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!
     ctx.drawImage(bmp, 0, 0, SIZE, SIZE)
     bmp.close?.()
-    return { raw: ctx.getImageData(0, 0, SIZE, SIZE).data }
+    const { data, lit } = extractLights(ctx.getImageData(0, 0, SIZE, SIZE).data)
+    return { lights: lit ? data : null }
   })()
   p.catch(() => cache.delete(key))
   cache.set(key, p)
@@ -143,25 +133,18 @@ export function registerCityLightsProtocol() {
   if (registered) return
   registered = true
   maplibregl.addProtocol(LIGHTS_PROTOCOL, async (params, abort) => {
-    const m = /^nxlights:\/\/(\d+)\/(\d+)\/(\d+)\?t=(\d+)(?:&k=(lights|base))?/.exec(params.url)
+    const m = /^nxlights:\/\/(\d+)\/(\d+)\/(\d+)\?t=(\d+)/.exec(params.url)
     if (!m) throw new Error(`bad lights url ${params.url}`)
     const [z, x, y, t] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
-    const kind: LightsKind = m[5] === 'base' ? 'base' : 'lights'
     const decoded = await decode(z, x, y, abort.signal)
-    if (kind === 'lights' && decoded.lights === undefined) {
-      const { data, lit } = extractLights(decoded.raw)
-      decoded.lights = lit ? data : null
-    }
-    const src = kind === 'base' ? decoded.raw : decoded.lights
-    if (!src) return { data: await emptyTile() }
+    if (!decoded.lights) return { data: await emptyTile() }
     const t0 = performance.now()
-    const night = kind === 'base'
-      ? nightFactorTile(z, x, y, new Date(t), SIZE, BASE_ON_ALT, BASE_FULL_ALT)
-      : nightFactorTile(z, x, y, new Date(t))
+    const night = nightFactorTile(z, x, y, new Date(t))
+    const src = decoded.lights
     const px = new Uint8ClampedArray(src.length)
     let any = false
     for (let i = 0, j = 0; j < night.length; i += 4, j++) {
-      const a = (kind === 'base' ? 255 : src[i + 3]) * night[j]
+      const a = src[i + 3] * night[j]
       if (a < 1) continue
       px[i] = src[i]; px[i + 1] = src[i + 1]; px[i + 2] = src[i + 2]; px[i + 3] = a
       any = true

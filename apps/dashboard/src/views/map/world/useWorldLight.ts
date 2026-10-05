@@ -31,12 +31,6 @@ const LAYER = 'nx-world-light'
 const TICK_MS = 60_000
 const LINE = 'nx-world-terminator'
 const LIGHTS = 'nx-world-lights'
-/** [8.5] Black Marble as the night side's imagery (satellite look, z0–8). */
-const NIGHT_BASE = 'nx-world-nightbase'
-/** Full night photo to z8 (the source's top), handed to the graded satellite by z9.5. */
-const NIGHT_BASE_OPACITY = ['interpolate', ['linear'], ['zoom'], 0, 1, 8, 1, 9.5, 0]
-/** Over the night photo the lights layer would double the lights: it takes over only past the handoff. */
-const LIGHTS_OPACITY_SAT = ['interpolate', ['linear'], ['zoom'], 7.5, 0, 9, 0.8, 10.5, 0.4, 12, 0]
 /**
  * City lights are country/region context: the source tops out at z8 (~500 m
  * pixels), so past it they would only smear over the streets — they recede
@@ -49,9 +43,7 @@ export function worldUnderlay(map: maplibregl.Map): string | undefined {
   const layers = map.getStyle()?.layers ?? []
   const ours = /^(command-|census-|buyer-demand-|sold-comps-|prop-|map-agg-|map-market|seller-pins-|nx-lens|nx-live|nx-area|nx-comp|nx-dots|nx-focus|nx-world-markets|nx-world-sel)/
   for (const l of layers) {
-    // Roads and places over imagery stay above the night (legible on the dark side).
-    if (l.id.startsWith('nx-hybrid') || l.id.startsWith('nx-icm-hybrid-')) return l.id
-    if (l.id === LAYER || l.id === LINE || l.id === LIGHTS || l.id === NIGHT_BASE || l.id.startsWith('nx-world-bld') || l.id.startsWith('nx-relief')) continue
+    if (l.id === LAYER || l.id === LINE || l.id === LIGHTS || l.id.startsWith('nx-world-bld') || l.id.startsWith('nx-relief') || l.id.startsWith('nx-hybrid')) continue
     if (l.type === 'symbol' || ours.test(l.id)) return l.id
   }
   return undefined
@@ -129,25 +121,18 @@ export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: {
   const mode: SunMode = opts.mode ?? 'ambient'
   /** Real night lights (NASA Black Marble), Dynamic mode only. */
   const lightsOn = mode === 'dynamic' && Boolean(opts.cityLights)
-  /** [8.5] Satellite look: the night side IS night imagery (Black Marble), not a tinted day photo. */
-  const nightBase = mode === 'dynamic' && getMapVisualPreset(theme).basemap.family === 'satellite'
   const [center, setCenter] = useState<LightState | null>(null)
   const last = useRef<string>('')
 
   useEffect(() => {
     if (!map) return
     let cancelled = false
-    const removeNightBase = () => {
-      try { if (map.getLayer(NIGHT_BASE)) map.removeLayer(NIGHT_BASE) } catch { /* ignore */ }
-      try { if (map.getSource(NIGHT_BASE)) map.removeSource(NIGHT_BASE) } catch { /* ignore */ }
-    }
     const removeLights = () => {
       try { if (map.getLayer(LIGHTS)) map.removeLayer(LIGHTS) } catch { /* ignore */ }
       try { if (map.getSource(LIGHTS)) map.removeSource(LIGHTS) } catch { /* ignore */ }
     }
     const remove = () => {
       removeLights()
-      removeNightBase()
       try { if (map.getLayer(LINE)) map.removeLayer(LINE) } catch { /* ignore */ }
       try { if (map.getLayer(LAYER)) map.removeLayer(LAYER) } catch { /* ignore */ }
       try { if (map.getSource(SRC)) map.removeSource(SRC) } catch { /* ignore */ }
@@ -205,21 +190,6 @@ export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: {
         // City lights: above the night tint, below labels and every LeadCommand layer.
         // The tile URL carries the (2-minute) sun instant; a new instant re-masks
         // the decoded tiles in place (setTiles reloads without dropping them).
-        // Night base (satellite look): Black Marble masked per pixel by the sun —
-        // above the tint, under roads/places and every LeadCommand layer.
-        if (nightBase) {
-          registerCityLightsProtocol()
-          const url = lightsTileUrl(lightsBucket(now.valueOf()), 'base')
-          const nb = map.getSource(NIGHT_BASE) as maplibregl.RasterTileSource | undefined
-          if (!nb) map.addSource(NIGHT_BASE, { type: 'raster', tiles: [url], tileSize: 256, maxzoom: LIGHTS_MAXZOOM, attribution: LIGHTS_ATTRIBUTION })
-          else if (nb.tiles[0] !== url) nb.setTiles([url])
-          if (!map.getLayer(NIGHT_BASE)) {
-            map.addLayer({
-              id: NIGHT_BASE, type: 'raster', source: NIGHT_BASE,
-              paint: { 'raster-opacity': NIGHT_BASE_OPACITY, 'raster-fade-duration': reducedMotion ? 0 : 400, 'raster-resampling': 'linear' },
-            } as never, worldUnderlay(map))
-          }
-        } else removeNightBase()
         if (lightsOn) {
           registerCityLightsProtocol()
           const url = lightsTileUrl(lightsBucket(now.valueOf()))
@@ -229,7 +199,7 @@ export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: {
           if (!map.getLayer(LIGHTS)) {
             map.addLayer({
               id: LIGHTS, type: 'raster', source: LIGHTS,
-              paint: { 'raster-opacity': nightBase ? LIGHTS_OPACITY_SAT : LIGHTS_OPACITY, 'raster-fade-duration': reducedMotion ? 0 : 400, 'raster-resampling': 'linear' },
+              paint: { 'raster-opacity': LIGHTS_OPACITY, 'raster-fade-duration': reducedMotion ? 0 : 400, 'raster-resampling': 'linear' },
             } as never, worldUnderlay(map))
           }
         } else removeLights()
@@ -281,15 +251,13 @@ export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: {
       map.off('moveend', onMove)
       document.removeEventListener('visibilitychange', onVis)
     }
-  }, [map, epoch, enabled, theme, tilted, reducedMotion, mode, lightsOn, nightBase])
+  }, [map, epoch, enabled, theme, tilted, reducedMotion, mode, lightsOn])
 
   // Leaving (or turning the world off) restores the untouched map.
   useEffect(() => () => {
     if (!map) return
-    for (const id of [LIGHTS, NIGHT_BASE]) {
-      try { if (map.getLayer(id)) map.removeLayer(id) } catch { /* ignore */ }
-      try { if (map.getSource(id)) map.removeSource(id) } catch { /* ignore */ }
-    }
+    try { if (map.getLayer(LIGHTS)) map.removeLayer(LIGHTS) } catch { /* ignore */ }
+    try { if (map.getSource(LIGHTS)) map.removeSource(LIGHTS) } catch { /* ignore */ }
     try { if (map.getLayer(LINE)) map.removeLayer(LINE) } catch { /* ignore */ }
     try { if (map.getLayer(LAYER)) map.removeLayer(LAYER) } catch { /* ignore */ }
     try { if (map.getSource(SRC)) map.removeSource(SRC) } catch { /* ignore */ }

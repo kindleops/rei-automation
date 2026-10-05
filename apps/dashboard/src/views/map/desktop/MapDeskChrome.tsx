@@ -47,7 +47,7 @@ import { MapSearch, MAP_OPEN_AREA_EVENT } from '../mobile/MapSearch'
 import { HYBRID_THEMES } from '../mobile/useMapImagery'
 import { lightState, nextSunEvent } from '../world/solar'
 import { sunAt } from '../world/sun-clock'
-import { SUN_LOOK_OPTIONS, SUN_LOOK_STYLE, SUN_MODE_OPTIONS, sunEventHint, type SunMode } from '../world/sun-dynamic'
+import { SUN_MODE_OPTIONS, sunEventHint } from '../world/sun-dynamic'
 import type { LivingSettings } from '../world/living-settings'
 import { DESK_TOOLS, filterCapsuleLabel, fmtCount, lensPillSub, liveSignal, clampOpacity, type DeskTool } from './map-desk-model'
 import { DeskSeg, DeskSwitch, MapDeskLayers } from './MapDeskLayers'
@@ -247,7 +247,7 @@ function LiveInspector(p: MapDeskChromeProps & { onClose: () => void }) {
 }
 
 // ── the Appearance popover ──────────────────────────────────────────────────
-function AppearancePopover(p: MapDeskChromeProps & { top: number; onClose: () => void; vectorBuildings: boolean; onSunMode: (m: SunMode) => void; onSunLook: (l: 'satellite' | 'current') => void; onPickStyle: (id: string) => void }) {
+function AppearancePopover(p: MapDeskChromeProps & { top: number; onClose: () => void; vectorBuildings: boolean }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const light = useCentreLight(p.map, p.mapEpoch, p.clock)
   const closeRef = useRef(p.onClose)
@@ -285,12 +285,7 @@ function AppearancePopover(p: MapDeskChromeProps & { top: number; onClose: () =>
             </div>
             {livingOn && p.living.daylight ? (
               <div className="mxd-row is-sub">
-                <DeskSeg size="sm" label="Daylight style" value={p.living.sun} onChange={p.onSunMode} options={SUN_MODE_OPTIONS} />
-              </div>
-            ) : null}
-            {livingOn && p.living.daylight && p.living.sun === 'dynamic' ? (
-              <div className="mxd-row is-sub">
-                <DeskSeg size="sm" label="Night look" value={p.living.sunLook} onChange={p.onSunLook} options={SUN_LOOK_OPTIONS} />
+                <DeskSeg size="sm" label="Daylight style" value={p.living.sun} onChange={(v) => p.onLiving({ sun: v })} options={SUN_MODE_OPTIONS} />
               </div>
             ) : null}
             {livingOn && p.living.daylight && p.living.sun === 'dynamic' ? (
@@ -329,7 +324,7 @@ function AppearancePopover(p: MapDeskChromeProps & { top: number; onClose: () =>
               <div className="mxd-block__head"><h3>{g.label}</h3></div>
               <div className="mxd-tiles">
                 {items.map((t) => (
-                  <button key={t.id} type="button" className={cls('mxd-tile', t.id === p.styleMode && 'is-on')} aria-pressed={t.id === p.styleMode} onClick={() => p.onPickStyle(t.id)} data-theme-id={t.id}>
+                  <button key={t.id} type="button" className={cls('mxd-tile', t.id === p.styleMode && 'is-on')} aria-pressed={t.id === p.styleMode} onClick={() => p.onStyle(t.id)} data-theme-id={t.id}>
                     <i style={{ background: t.accentColor }} aria-hidden="true" />{t.label}
                   </button>
                 ))}
@@ -355,49 +350,6 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
   const railRef = useRef<HTMLElement | null>(null)
   // The basemap's own labels read as context on the desk (never on a phone: this chrome is desk-only).
   useDeskLabelTone(map, mapEpoch, p.styleMode)
-
-  // ── [8.5] Dynamic (sun) look: satellite daylight + Black Marble night by default ──
-  const sunDynamic = p.living.enabled && p.living.daylight && p.living.sun === 'dynamic'
-  const onSunMode = (m: SunMode) => {
-    if (m === 'dynamic') {
-      const toSat = p.living.sunLook === 'satellite' && p.styleMode !== SUN_LOOK_STYLE
-      p.onLiving(toSat ? { sun: m, sunPrevStyle: p.styleMode } : { sun: m })
-      if (toSat) p.onStyle(SUN_LOOK_STYLE)
-      return
-    }
-    const back = p.living.sunLook === 'satellite' && p.styleMode === SUN_LOOK_STYLE ? p.living.sunPrevStyle : null
-    p.onLiving({ sun: m, sunPrevStyle: null })
-    if (back) p.onStyle(back)
-  }
-  const onSunLook = (look: 'satellite' | 'current') => {
-    if (look === 'satellite') {
-      p.onLiving({ sunLook: look, sunPrevStyle: p.styleMode !== SUN_LOOK_STYLE ? p.styleMode : p.living.sunPrevStyle })
-      if (p.styleMode !== SUN_LOOK_STYLE) p.onStyle(SUN_LOOK_STYLE)
-      return
-    }
-    const back = p.styleMode === SUN_LOOK_STYLE ? p.living.sunPrevStyle : null
-    p.onLiving({ sunLook: look, sunPrevStyle: null })
-    if (back) p.onStyle(back)
-  }
-  // Choosing a basemap while Dynamic is on IS choosing Dynamic's look (persisted).
-  const onPickStyle = (id: string) => {
-    if (sunDynamic) {
-      const look = id === SUN_LOOK_STYLE ? 'satellite' : 'current'
-      if (look !== p.living.sunLook) p.onLiving({ sunLook: look, sunPrevStyle: null })
-    }
-    p.onStyle(id)
-  }
-  // A persisted Dynamic + satellite look puts satellite up once per mount (the
-  // basemap itself is chosen elsewhere and may load as something else). Once:
-  // a style that falls back must not loop.
-  const sunLookApplied = useRef(false)
-  const { onStyle, styleMode } = p
-  const sunLook = p.living.sunLook
-  useEffect(() => {
-    if (sunLookApplied.current || !sunDynamic || sunLook !== 'satellite') return
-    sunLookApplied.current = true
-    if (styleMode !== SUN_LOOK_STYLE) onStyle(SUN_LOOK_STYLE)
-  }, [sunDynamic, sunLook, styleMode, onStyle])
 
   // One left surface at a time: Filters (owned by the Command Map) closes ours.
   useEffect(() => { if (filtersOpen) setTool((t) => (t === 'appearance' ? t : null)) }, [filtersOpen, setTool])
@@ -740,7 +692,7 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
               onBoundaryZip={(v) => p.setPref('boundaryZip', v)}
               onDaylight={(v) => p.onLiving({ daylight: v })}
               sunMode={p.living.sun}
-              onSunMode={onSunMode}
+              onSunMode={(m) => p.onLiving({ sun: m })}
               onLocalTime={(v) => p.onLiving({ localTime: v })}
               onZones={(v) => p.onLiving({ zones: v })}
               onBuildings={(v) => p.onLiving({ buildings: v })}
@@ -764,7 +716,7 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
       {picker === 'side' && tool === 'layers' ? <LensPicker active={lens} placement="side" onPick={onPick} onClose={() => setPicker(null)} /> : null}
 
       {/* L4 — Appearance, beside its rail button */}
-      {tool === 'appearance' ? <AppearancePopover {...p} top={appearanceTop} vectorBuildings={vectorBuildings} onClose={() => setTool(null)} onSunMode={onSunMode} onSunLook={onSunLook} onPickStyle={onPickStyle} /> : null}
+      {tool === 'appearance' ? <AppearancePopover {...p} top={appearanceTop} vectorBuildings={vectorBuildings} onClose={() => setTool(null)} /> : null}
 
       {/* L5 — live events as they land */}
       {toasts.length ? (

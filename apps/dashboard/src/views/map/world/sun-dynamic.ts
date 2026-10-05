@@ -24,11 +24,6 @@ import { getMapVisualPreset } from '../map-visual-presets'
 export type SunMode = 'ambient' | 'dynamic'
 
 /** Daylight style choices (Layers plate + Appearance popover share them). */
-/** Dynamic's look (Appearance). */
-export const SUN_LOOK_OPTIONS: ReadonlyArray<{ key: 'satellite' | 'current'; label: string }> = [{ key: 'satellite', label: 'Satellite night' }, { key: 'current', label: 'This basemap' }]
-/** The basemap Dynamic's default look uses. */
-export const SUN_LOOK_STYLE = 'satellite'
-
 export const SUN_MODE_OPTIONS: ReadonlyArray<{ key: SunMode; label: string }> = [{ key: 'ambient', label: 'Ambient' }, { key: 'dynamic', label: 'Dynamic (sun)' }]
 
 /** Night stops, degrees of solar altitude, bright → deep. −6/−12/−18 = civil/nautical/astronomical. */
@@ -61,9 +56,7 @@ export function dynamicPalette(theme: string): DynamicPalette {
   const p = getMapVisualPreset(theme)
   // [8.4] owner: night must read as night — deep tint; labels keep their halos above it.
   if (p.basemap.isLight) return { night: 0.76, nightColor: '#08112b', day: 0, dayColor: '#ffffff', golden: 0.07 }
-  // [8.5] satellite look: past z8 (beyond Black Marble) the day photo itself is graded to night —
-  // ~90% toward blue-black, which also takes ~90% of its colour (a desaturated night photo).
-  if (p.basemap.family === 'satellite') return { night: 0.9, nightColor: '#02050d', day: 0, dayColor: '#fff6e8', golden: 0.05 }
+  if (p.basemap.family === 'satellite') return { night: 0.8, nightColor: '#01030a', day: 0.06, dayColor: '#fff6e8', golden: 0.06 }
   if (p.basemap.family === 'terrain') return { night: 0.76, nightColor: '#050b1c', day: 0.06, dayColor: '#dfe9f7', golden: 0.06 }
   return { night: 0.82, nightColor: '#000208', day: 0.13, dayColor: '#b8cbe6', golden: 0.05 }
 }
