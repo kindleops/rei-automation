@@ -6,6 +6,7 @@ import { LCButton } from '../../../shared/lc'
 import { getApp, type AppId } from '../../../domain/app-registry/app-registry'
 import { AppInstanceContext, type AppInstanceInfo } from './instance-context'
 import type { Instance } from './layout'
+import { instanceBodyKey } from './instance-key'
 
 /**
  * ONE APPLICATION INSTANCE in one pane: its own route, its own loader, its
@@ -105,6 +106,7 @@ class PaneBoundary extends Component<{ app: string; resetKey: string; onRetry: (
 
 /* ── the host ─────────────────────────────────────────────────────────── */
 
+
 export interface AppInstanceHostProps {
   inst: Instance
   primary: boolean
@@ -135,7 +137,7 @@ export const AppInstanceHost = memo(function AppInstanceHost({ inst, primary, vi
   else {
     body = (
       <PaneBoundary app={inst.app} resetKey={`${pathname}#${attempt}`} onRetry={retry} onClose={onClose}>
-        <Suspense fallback={<PaneSkeleton app={inst.app} />}>{route.render(data.data)}</Suspense>
+        <Suspense key={instanceBodyKey(inst)} fallback={<PaneSkeleton app={inst.app} />}>{route.render(data.data)}</Suspense>
       </PaneBoundary>
     )
   }
