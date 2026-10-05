@@ -2,178 +2,216 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import {
-  HOLD_REASONS, RULES, TIERS, IDENTITY_HOLD_SHADOW_FLAG,
-  isIdentityHoldShadowEnabled, identityHoldReasons, evaluateIdentityHoldShadow,
-  evaluateCoOwnerPhoneLink, evaluateSamePersonPhone, evaluateEntityPrincipalMailing,
-  evaluateEntityAlternatePrincipal, entityIsOwnerOfRecord, summarizeIdentityHoldShadow,
-} from '../../src/lib/domain/campaigns/identity-hold-shadow.js'
+  HOLD_REASONS, RULES, TIERS, TAGS, IDENTITY_RELEASE_FLAG,
+  isIdentityReleaseEnabled, identityHoldReasons, parseContactMatchingTags,
+  evaluateCoOwnerPhoneLink, evaluateSamePersonPhone, evaluateEntityTaggedPrincipal,
+  evaluateIdentityRelease, applyIdentityRelease, entityIsOwnerOfRecord, summarizeIdentityRelease,
+} from '../../src/lib/domain/campaigns/identity-release.js'
+import { evaluateIdentityHoldShadow, evaluateEntityAlternatePrincipal, R4_RULE } from '../../src/lib/domain/campaigns/identity-hold-shadow.js'
 
-const linkageRow = (over = {}) => ({
+const linkage = (over = {}) => ({
   queue_eligible: true,
-  phone: '6125550101',
+  canonical_e164: '6125550101',
   seller_person_key: null,
-  resolution: {
-    status: 'ambiguous', co_owner_individual_key: 'p2',
-    deed_owner_name: 'Saul Cordova', operational_owner_name: 'Saul & Guillermina Cordova',
-  },
-  phone_holders: [{ individual_key: 'p2', given_name: 'Guillermina', surname: 'Cordova', full_name: 'Guillermina Cordova', likely_owner: false, likely_renting: false, phone_dnc: false }],
+  entity_contact_requires_review: false,
+  ambiguous_phone_ownership: false,
+  resolution: { status: 'ambiguous', co_owner_individual_key: 'p2', deed_owner_name: 'Saul Cordova', operational_owner_name: 'Saul & Guillermina Cordova' },
+  phone_holders: [{ individual_key: 'p2', given_name: 'Guillermina', surname: 'Cordova', full_name: 'Guillermina Cordova', likely_renting: false, tags_on_property: 'Likely Owner, Family' }],
   ...over,
 })
 
-const entityRow = (over = {}, person = {}, entity = {}) => ({
+const entity = (over = {}, person = {}, ent = {}) => ({
   queue_eligible: true,
-  phone: '6125550102',
+  canonical_e164: '6125550102',
   seller_person_key: 'p9',
-  owner_name: 'Key Prop Rental & Sales LLC',
-  entity: {
-    requires_review: true, exclusion_reasons: ['ENT_ROLE_UNCORROBORATED'], evidence_codes: ['ENT_VENDOR_OWNER_BIT'],
-    entity_status: 'active', owning_entity_name: 'Key Prop Rental & Sales LLC', selected_person_key: 'p9', ...entity,
-  },
+  owner_name: 'ABC Holdings LLC',
+  entity_contact_requires_review: true,
+  ambiguous_phone_ownership: false,
+  entity: { requires_review: true, exclusion_reasons: ['ENT_ROLE_UNCORROBORATED'], evidence_codes: [], entity_status: 'active', owning_entity_name: 'ABC Holdings, LLC', selected_person_key: 'p9', ...ent },
   person: {
-    matching_type: 'mailing_address', matches_property_owner: true, likely_owner: false, likely_renting: false,
-    in_portfolio: true, phone_is_own: true, phone_dnc: false, entity_fanout: 1, given_name: 'Kevin', surname: 'Lockwood',
-    full_name: 'Kevin C Lockwood', registry_officer_roles: [], ...person,
+    full_name: 'Jane Smith', given_name: 'Jane', surname: 'Smith', matching_type: 'mailing_address', matches_property_owner: true,
+    likely_owner: false, likely_renting: false, in_portfolio: true, phone_is_own: true, entity_fanout: 2, tags_on_property: 'Linked To Company, Family', ...person,
   },
   ...over,
 })
 
-const altPrincipal = (over = {}) => ({
-  individual_key: 'p7', full_name: 'Laura M Aparicio', given_name: 'Laura', surname: 'Aparicio',
-  matching_type: 'mailing_address', matches_property_owner: true, likely_renting: false,
-  phone: '2145550199', phone_type: 'W', slot: 1, phone_dnc: false, phone_suppressed: false, ...over,
+test('the live release flag defaults OFF; only explicit values or an explicit option turn it on', () => {
+  assert.equal(isIdentityReleaseEnabled({}, {}), false)
+  assert.equal(isIdentityReleaseEnabled({}, { [IDENTITY_RELEASE_FLAG]: 'maybe' }), false)
+  assert.equal(isIdentityReleaseEnabled({}, { [IDENTITY_RELEASE_FLAG]: 'on' }), true)
+  assert.equal(isIdentityReleaseEnabled({ identity_release_enabled: false }, { [IDENTITY_RELEASE_FLAG]: 'on' }), false)
 })
 
-test('the shadow flag defaults OFF and only explicit values turn it on', () => {
-  assert.equal(isIdentityHoldShadowEnabled({}, {}), false)
-  assert.equal(isIdentityHoldShadowEnabled({}, { [IDENTITY_HOLD_SHADOW_FLAG]: 'yes please' }), false)
-  assert.equal(isIdentityHoldShadowEnabled({}, { [IDENTITY_HOLD_SHADOW_FLAG]: 'on' }), true)
-  assert.equal(isIdentityHoldShadowEnabled({ identity_hold_shadow: true }, {}), true)
-})
-
-test('the evaluator is pure: no imports, no I/O, nothing that can write', () => {
-  const src = fs.readFileSync(new URL('../../src/lib/domain/campaigns/identity-hold-shadow.js', import.meta.url), 'utf8')
+test('the predicate is pure: no imports, no I/O', () => {
+  const src = fs.readFileSync(new URL('../../src/lib/domain/campaigns/identity-release.js', import.meta.url), 'utf8')
   assert.equal(/^\s*import\s/m.test(src), false)
-  assert.equal(/supabase|fetch\(|\.from\(|insert|update\(|upsert/i.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), false)
+  assert.equal(/supabase|fetch\(|\.from\(|\.rpc\(/i.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), false)
 })
 
-test('every identity hold on a row is reported, primary in live precedence order', () => {
-  const r = identityHoldReasons({ seller_person_key: null, phone: '1', entity: { requires_review: null }, phone_group: { distinct_master_owners: 2 } })
+test('contact matching tags parse with exact spellings only', () => {
+  assert.deepEqual(parseContactMatchingTags('Linked To Company, Family,Likely Owner'), ['Linked To Company', 'Family', 'Likely Owner'])
+  assert.deepEqual(parseContactMatchingTags('linked to company, Owner-ish'), [])
+  assert.deepEqual(parseContactMatchingTags(null), [])
+})
+
+test('every identity hold is reported, primary in live precedence order', () => {
+  const r = identityHoldReasons({ seller_person_key: null, canonical_e164: '1', entity_contact_requires_review: true, ambiguous_phone_ownership: true })
   assert.deepEqual(r.reasons, [HOLD_REASONS.MISSING_IDENTITY_LINKAGE, HOLD_REASONS.ENTITY_CONTACT_REQUIRES_REVIEW, HOLD_REASONS.AMBIGUOUS_PHONE_OWNERSHIP])
-  assert.equal(r.primary, HOLD_REASONS.MISSING_IDENTITY_LINKAGE)
-  assert.deepEqual(identityHoldReasons({ seller_person_key: 'p', phone: '1', entity: { requires_review: false } }).reasons, [])
+  assert.equal(identityHoldReasons({ seller_person_key: 'p', canonical_e164: '1' }).reasons.length, 0)
 })
 
-test('R1 releases a co-owner on title whose phone it is (ambiguous → A, conflicting → B)', () => {
-  const a = evaluateCoOwnerPhoneLink(linkageRow())
-  assert.equal(a.outcome, 'release')
-  assert.equal(a.tier, TIERS.A)
-  assert.equal(a.evidence.resolved_person_key, 'p2')
-  const b = evaluateCoOwnerPhoneLink(linkageRow({ resolution: { ...linkageRow().resolution, status: 'conflicting_existing_assignment' } }))
-  assert.equal(b.tier, TIERS.B)
+// ---- Owner's examples -------------------------------------------------------
+test('owner example: ABC Holdings LLC + Jane Smith (Linked To Company, own phone, portfolio) → automatic release', () => {
+  const ev = evaluateIdentityRelease(entity(), entity())
+  assert.equal(ev.released, true)
+  assert.equal(ev.tier, TIERS.AUTOMATIC)
+  assert.equal(ev.release_rule, RULES.ENTITY_TAGGED_PRINCIPAL)
+  assert.deepEqual(ev.evidence[RULES.ENTITY_TAGGED_PRINCIPAL].contact_matching_tags, ['Linked To Company', 'Family'])
 })
 
-test('R1 holds: not the co-owner, not on title, shared phone, renter, DNC, no holder', () => {
-  assert.equal(evaluateCoOwnerPhoneLink(linkageRow({ resolution: { ...linkageRow().resolution, co_owner_individual_key: 'p3' } })).hold, 'holder_is_not_resolver_co_owner')
-  assert.equal(evaluateCoOwnerPhoneLink(linkageRow({ resolution: { ...linkageRow().resolution, deed_owner_name: 'Saul Cordova', operational_owner_name: 'Saul Cordova' } })).hold, 'holder_name_not_on_title')
-  assert.equal(evaluateCoOwnerPhoneLink(linkageRow({ phone_holders: [linkageRow().phone_holders[0], { individual_key: 'p5' }] })).hold, 'phone_shared_by_multiple_linked_people')
-  assert.equal(evaluateCoOwnerPhoneLink(linkageRow({ phone_holders: [{ ...linkageRow().phone_holders[0], likely_renting: true }] })).hold, 'renter_not_owner')
-  assert.equal(evaluateCoOwnerPhoneLink(linkageRow({ phone_holders: [{ ...linkageRow().phone_holders[0], phone_dnc: true }] })).hold, 'vendor_dnc_on_phone')
-  assert.equal(evaluateCoOwnerPhoneLink(linkageRow({ phone_holders: [] })).hold, 'no_property_linked_holder_of_phone')
+test('owner example: ABC Holdings LLC + Joe Smith (Resident / Likely Renting) → hold', () => {
+  for (const tags of ['Resident', 'Likely Renting', 'Likely Owner, Resident', 'Linked To Company, Likely Renting']) {
+    const row = entity({}, { full_name: 'Joe Smith', given_name: 'Joe', tags_on_property: tags })
+    const ev = evaluateIdentityRelease(row, row)
+    assert.equal(ev.released, false, tags)
+    assert.deepEqual(ev.remaining_holds, ['entity_contact_requires_review:resident_or_renter_tag'], tags)
+  }
 })
 
-test('R2 releases a phone whose rows are one canonical person split across legacy owner ids', () => {
-  const ok = evaluateSamePersonPhone({ phone_group: { distinct_master_owners: 2, distinct_person_keys: 1, null_person_rows: 0, person_key: 'p1', rows: 3 } })
-  assert.equal(ok.outcome, 'release')
+test('an occupant is never released, whatever the tag', () => {
+  const row = entity({}, { matching_type: 'property_address', matches_property_owner: false, tags_on_property: 'Linked To Company' })
+  assert.equal(evaluateEntityTaggedPrincipal(row, row).hold, 'occupant_not_owner')
+  assert.equal(evaluateIdentityRelease(row, row).released, false)
+  const renter = entity({}, { likely_renting: true, tags_on_property: 'Likely Owner' })
+  assert.equal(evaluateEntityTaggedPrincipal(renter, renter).hold, 'renter_not_owner')
+})
+
+test('tiers: strong tag + corroboration = automatic; weak tag or no corroboration = review (not released)', () => {
+  const likelyOwner = entity({}, { tags_on_property: 'Likely Owner' })
+  assert.equal(evaluateIdentityRelease(likelyOwner, likelyOwner).tier, TIERS.AUTOMATIC)
+  for (const tags of ['Potentially Linked To Company', 'Potential Owner', 'Family', 'Potentially Linked To Company, Family']) {
+    const row = entity({}, { tags_on_property: tags })
+    const ev = evaluateIdentityRelease(row, row)
+    assert.equal(ev.tier, TIERS.REVIEW, tags)
+    assert.equal(ev.released, false, tags)
+  }
+  const bare = entity({}, { matching_type: 'pi_auto_match', in_portfolio: false, matches_property_owner: null, tags_on_property: 'Linked To Company' })
+  assert.equal(evaluateIdentityRelease(bare, bare).tier, TIERS.REVIEW)
+  const none = entity({}, { tags_on_property: null })
+  assert.equal(evaluateEntityTaggedPrincipal(none, none).hold, 'no_contact_matching_tag')
+})
+
+test('unknown never counts: the phone must be the person’s own record', () => {
+  for (const v of [null, undefined, false]) {
+    const row = entity({}, { phone_is_own: v })
+    assert.equal(evaluateEntityTaggedPrincipal(row, row).hold, 'phone_not_persons_own_record')
+  }
+})
+
+test('institutions, banks, dissolved, agents, placeholders, mis-linked entities and many-entity fronts stay held', () => {
+  const cases = [
+    [entity({ owner_name: 'First Baptist Church' }, {}, { owning_entity_name: 'First Baptist Church' }), 'institutional_entity'],
+    [entity({}, {}, { evidence_codes: ['ENT_BANK_REO'] }), 'bank_reo'],
+    [entity({}, {}, { exclusion_reasons: ['ENT_DISSOLVED'] }), 'entity_dissolved'],
+    [entity({ owner_name: 'Acme Registered Agent LLC' }, {}, { owning_entity_name: 'Acme Registered Agent LLC' }), 'registered_agent_or_law_firm'],
+    [entity({ owner_name: 'Current Owner' }, {}, { owning_entity_name: 'Current Owner' }), 'owner_name_placeholder'],
+    [entity({ owner_name: 'Keverry Montrose LLC' }, {}, { owning_entity_name: 'American Youth Hostels, Inc.' }), 'entity_not_owner_of_record'],
+    [entity({}, { entity_fanout: 40 }), 'person_fronts_many_entities'],
+  ]
+  for (const [row, hold] of cases) assert.equal(evaluateEntityTaggedPrincipal(row, row).hold, hold, hold)
+})
+
+test('vendor do-not-call does not hold (owner decision) — no DNC input exists in the predicate', () => {
+  const row = entity({}, { phone_dnc: true, do_not_call: true })
+  assert.equal(evaluateIdentityRelease(row, row).released, true)
+  const r1 = linkage({ phone_holders: [{ ...linkage().phone_holders[0], phone_dnc: true }] })
+  assert.equal(evaluateIdentityRelease(r1, r1).released, true)
+})
+
+test('own suppression, opt-outs, wrong numbers and prior touches always hold (row not queue_eligible)', () => {
+  for (const reason of ['suppressed', 'wrong_number', 'pending_prior_touch', 'active_queue_item']) {
+    const row = entity({ queue_eligible: false, queue_block_reason: reason })
+    const ev = evaluateIdentityRelease(row, row)
+    assert.equal(ev.released, false, reason)
+    assert.equal(ev.hold, 'not_queue_eligible', reason)
+    assert.equal(applyIdentityRelease(row, ev), row, reason)
+    assert.equal(evaluateIdentityHoldShadow(row).released, false, reason)
+  }
+})
+
+test('R1 releases the co-owner on title (ambiguous = automatic, conflicting = review)', () => {
+  const ev = evaluateIdentityRelease(linkage(), linkage())
+  assert.equal(ev.released, true)
+  assert.equal(ev.person_key, 'p2')
+  assert.equal(ev.identity_alignment, 'probable')
+  const conflicting = linkage({ resolution: { ...linkage().resolution, status: 'conflicting_existing_assignment' } })
+  assert.equal(evaluateIdentityRelease(conflicting, conflicting).tier, TIERS.REVIEW)
+  assert.equal(evaluateIdentityRelease(conflicting, conflicting).released, false)
+})
+
+test('R1 holds: not the co-owner, not on title, shared phone, renting holder, no holder', () => {
+  assert.equal(evaluateCoOwnerPhoneLink(linkage({ resolution: { ...linkage().resolution, co_owner_individual_key: 'p3' } })).hold, 'holder_is_not_resolver_co_owner')
+  assert.equal(evaluateCoOwnerPhoneLink(linkage({ resolution: { ...linkage().resolution, operational_owner_name: 'Saul Cordova' } })).hold, 'holder_name_not_on_title')
+  assert.equal(evaluateCoOwnerPhoneLink(linkage({ phone_holders: [linkage().phone_holders[0], { individual_key: 'p5' }] })).hold, 'phone_shared_by_multiple_linked_people')
+  assert.equal(evaluateCoOwnerPhoneLink(linkage({ phone_holders: [{ ...linkage().phone_holders[0], tags_on_property: 'Likely Renting' }] })).hold, 'renter_not_owner')
+  assert.equal(evaluateCoOwnerPhoneLink(linkage({ phone_holders: [] })).hold, 'no_property_linked_holder_of_phone')
+})
+
+test('R2 releases one canonical person split across legacy owner ids; shared phones hold', () => {
+  assert.equal(evaluateSamePersonPhone({ phone_group: { distinct_master_owners: 2, distinct_person_keys: 1, null_person_rows: 0, person_key: 'p1' } }).outcome, 'release')
   assert.equal(evaluateSamePersonPhone({ phone_group: { distinct_master_owners: 2, distinct_person_keys: 2, null_person_rows: 0 } }).hold, 'phone_held_by_multiple_people')
   assert.equal(evaluateSamePersonPhone({ phone_group: { distinct_master_owners: 2, distinct_person_keys: 1, null_person_rows: 1 } }).hold, 'a_row_on_phone_has_no_person')
 })
 
-test('R3 releases the vendor-matched principal at the entity mailing address', () => {
-  const r = evaluateEntityPrincipalMailing(entityRow())
-  assert.equal(r.outcome, 'release')
-  assert.equal(r.tier, TIERS.A)
-  assert.equal(r.evidence.owner_of_record_basis, 'entity_name_match')
+test('a row is released only when EVERY hold on it is released at the automatic tier', () => {
+  const both = entity({ ambiguous_phone_ownership: true, phone_group: { distinct_master_owners: 2, distinct_person_keys: 2, null_person_rows: 0 } })
+  const ev = evaluateIdentityRelease(both, both)
+  assert.equal(ev.released, false)
+  assert.deepEqual(ev.remaining_holds, ['ambiguous_phone_ownership:phone_held_by_multiple_people'])
+  const ok = entity({ ambiguous_phone_ownership: true, phone_group: { distinct_master_owners: 2, distinct_person_keys: 1, null_person_rows: 0, person_key: 'p9' } })
+  assert.equal(evaluateIdentityRelease(ok, ok).release_rule, `${RULES.ENTITY_TAGGED_PRINCIPAL}+${RULES.SAME_PERSON_PHONE}`)
 })
 
-test('R3 never releases the occupant of an entity-owned house (tenant)', () => {
-  const r = evaluateEntityPrincipalMailing(entityRow({}, { matching_type: 'property_address', matches_property_owner: false }))
-  assert.equal(r.hold, 'occupant_not_owner')
+test('applyIdentityRelease clears only the released holds and records rule + evidence; non-release is identity', () => {
+  const row = entity()
+  const released = applyIdentityRelease(row, evaluateIdentityRelease(row, row))
+  assert.equal(released.entity_contact_requires_review, false)
+  assert.equal(released.identity_alignment, 'entity_company_linked')
+  assert.equal(released.identity_release.release_rule, RULES.ENTITY_TAGGED_PRINCIPAL)
+  assert.equal(released.queue_eligible, true)
+  assert.equal(row.entity_contact_requires_review, true, 'input row not mutated')
+  const held = entity({}, { tags_on_property: 'Resident' })
+  assert.equal(applyIdentityRelease(held, evaluateIdentityRelease(held, held)), held)
+  const linked = applyIdentityRelease(linkage(), evaluateIdentityRelease(linkage(), linkage()))
+  assert.equal(linked.seller_person_key, 'p2')
 })
 
-test('R3: unknown never counts as a match', () => {
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, { matches_property_owner: null })).hold, 'vendor_owner_match_not_true')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, { in_portfolio: null })).hold, 'property_not_in_person_portfolio')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, { phone_is_own: null })).hold, 'phone_not_persons_own_record')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({ person: null })).hold, 'person_record_missing')
+test('R4 (substitute principal) never releases — report only', () => {
+  const row = entity({ alt_principals: [{ individual_key: 'p7', full_name: 'Amy Smith', given_name: 'Amy', surname: 'Smith', matching_type: 'mailing_address', matches_property_owner: true, likely_renting: false, phone: '2145550199', phone_type: 'W', phone_suppressed: false }] },
+    { matching_type: 'property_address', matches_property_owner: false, tags_on_property: 'Resident' })
+  const shadow = evaluateIdentityHoldShadow(row)
+  assert.equal(shadow.released, false)
+  assert.equal(shadow.r4.rule, R4_RULE)
+  assert.equal(shadow.r4.outcome, 'would_substitute')
+  assert.equal(shadow.r4.not_approved, true)
+  const noChannel = evaluateIdentityHoldShadow({ ...row, queue_eligible: false, queue_block_reason: 'non_sms_capable' })
+  assert.equal(noChannel.released, false)
+  assert.equal(evaluateEntityAlternatePrincipal({ ...row, alt_principals: [] }).outcome, 'hold')
+  const src = fs.readFileSync(new URL('../../src/lib/domain/campaigns/identity-release.js', import.meta.url), 'utf8')
+  assert.equal(/alt_principals|R4_/.test(src), false, 'the live predicate has no substitute rule')
 })
 
-test('R3 holds DNC, renters, institutions, bank REO, dissolved, agents and mis-linked entities', () => {
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, { phone_dnc: true })).hold, 'vendor_dnc_on_phone')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, { likely_renting: true })).hold, 'renter_not_owner')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({ owner_name: 'First Baptist Church' }, {}, { owning_entity_name: 'First Baptist Church' })).hold, 'institutional_entity')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, {}, { evidence_codes: ['ENT_BANK_REO'] })).hold, 'bank_reo')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, {}, { exclusion_reasons: ['ENT_DISSOLVED'] })).hold, 'entity_dissolved')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({ owner_name: 'Acme Registered Agent LLC' }, {}, { owning_entity_name: 'Acme Registered Agent LLC' })).hold, 'registered_agent_or_law_firm')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, { registry_officer_roles: ['agent'] })).hold, 'registered_agent_only')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({ owner_name: 'Keverry Montrose LLC' }, {}, { owning_entity_name: 'American Youth Hostels, Inc.' })).hold, 'entity_not_owner_of_record')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({ owner_name: 'Current Owner' }, {}, { owning_entity_name: 'Current Owner' })).hold, 'owner_name_placeholder')
-})
-
-test('R3 tiers by how many entities the person fronts; a registry officer role is tier A', () => {
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, { entity_fanout: 6 })).tier, TIERS.B)
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, { entity_fanout: 40 })).hold, 'person_fronts_many_entities')
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({}, { entity_fanout: 40, registry_officer_roles: ['manager'] })).tier, TIERS.A)
-  assert.equal(evaluateEntityPrincipalMailing(entityRow({ owner_name: 'Linda S Wing Trust' }, {}, { owning_entity_name: 'Linda S Wing Trust' })).tier, TIERS.B)
-})
-
-test('owner-of-record: a person on title, a shared distinctive token, or a shared street number', () => {
+test('owner-of-record bases', () => {
   assert.equal(entityIsOwnerOfRecord('Banken Holdings LLC', 'German Gonzalez', { given_name: 'German', surname: 'Gonzalez' }).basis, 'person_on_title')
   assert.equal(entityIsOwnerOfRecord('1505 W Juniper LLC', '1505 W Juniper LLC', {}).basis, 'entity_name_match')
   assert.equal(entityIsOwnerOfRecord('Square Nakia', 'Square Nakia', { given_name: 'Tracy', surname: 'Graves' }).hold, 'owner_is_a_different_person')
-  assert.equal(entityIsOwnerOfRecord('Properties LLC', 'Holdings LLC', {}).hold, 'entity_not_owner_of_record')
 })
 
-test('R4 substitutes a different clean owner-side principal; surname on the name is tier A', () => {
-  const row = entityRow({ owner_name: 'Aparicio Revocable Trust', alt_principals: [altPrincipal()] },
-    { matching_type: 'property_address', matches_property_owner: false }, { owning_entity_name: 'Aparicio Revocable Trust' })
-  const r = evaluateEntityAlternatePrincipal(row)
-  assert.equal(r.outcome, 'release')
-  assert.equal(r.tier, TIERS.A)
-  assert.equal(r.evidence.substitute_phone_last4, '0199')
-  const other = evaluateEntityAlternatePrincipal({ ...row, alt_principals: [altPrincipal({ surname: 'Matheis', full_name: 'Erik Matheis', given_name: 'Erik' })] })
-  assert.equal(other.tier, TIERS.B)
-})
-
-test('R4 rejects DNC, suppressed, unknown-type, renting, occupant and unknown-owner-match candidates', () => {
-  const base = entityRow({ owner_name: 'Aparicio Revocable Trust' }, {}, { owning_entity_name: 'Aparicio Revocable Trust' })
-  for (const bad of [{ phone_dnc: true }, { phone_dnc: null }, { phone_suppressed: true }, { phone_type: null }, { likely_renting: true },
-    { matching_type: 'property_address' }, { matches_property_owner: null }, { individual_key: 'p9' }]) {
-    assert.equal(evaluateEntityAlternatePrincipal({ ...base, alt_principals: [altPrincipal(bad)] }).hold, 'no_clean_alternate_principal', JSON.stringify(bad))
-  }
-})
-
-test('a review-held occupant row is answered by R4; an entity row with no SMS channel too', () => {
-  const held = evaluateIdentityHoldShadow(entityRow({ owner_name: 'Aparicio Revocable Trust', alt_principals: [altPrincipal()] },
-    { matching_type: 'property_address', matches_property_owner: false }, { owning_entity_name: 'Aparicio Revocable Trust' }))
-  assert.equal(held.would_release, true)
-  assert.deepEqual(held.rules, [RULES.ENTITY_ALTERNATE_PRINCIPAL])
-  const noChannel = evaluateIdentityHoldShadow(entityRow({ queue_eligible: false, queue_block_reason: 'non_sms_capable', owner_name: 'Aparicio Revocable Trust', alt_principals: [altPrincipal()] },
-    {}, { owning_entity_name: 'Aparicio Revocable Trust' }))
-  assert.equal(noChannel.primary, HOLD_REASONS.ENTITY_NO_SMS_CHANNEL)
-  assert.equal(noChannel.would_release, true)
-  const suppressed = evaluateIdentityHoldShadow(entityRow({ queue_eligible: false, queue_block_reason: 'suppressed' }))
-  assert.equal(suppressed.would_release, false)
-  assert.equal(suppressed.hold, 'not_queue_eligible')
-})
-
-test('a row is released only when every hold on it is released; summary counts overlap', () => {
-  const both = { ...entityRow(), phone_group: { distinct_master_owners: 2, distinct_person_keys: 2, null_person_rows: 0 } }
-  const ev = evaluateIdentityHoldShadow(both)
-  assert.equal(ev.would_release, false)
-  assert.deepEqual(ev.remaining_holds, ['ambiguous_phone_ownership:phone_held_by_multiple_people'])
-  const s = summarizeIdentityHoldShadow([ev, evaluateIdentityHoldShadow(entityRow()), evaluateIdentityHoldShadow(linkageRow())])
-  assert.equal(s.held, 3)
-  assert.equal(s.would_release, 2)
-  assert.equal(s.by_overlap['entity_contact_requires_review+ambiguous_phone_ownership'], 1)
-  assert.equal(s.released_by_rule[`${RULES.ENTITY_PRINCIPAL_MAILING}:A`], 2)
+test('summary counts held, released, tiers and overlap', () => {
+  const rows = [entity(), entity({}, { tags_on_property: 'Family' }), linkage(), entity({}, { tags_on_property: 'Resident' })]
+  const s = summarizeIdentityRelease(rows.map((r) => evaluateIdentityRelease(r, r)))
+  assert.equal(s.held, 4)
+  assert.equal(s.released, 2)
+  assert.equal(s.by_tier.review, 1)
+  assert.equal(TAGS.LINKED_TO_COMPANY, 'Linked To Company')
 })
