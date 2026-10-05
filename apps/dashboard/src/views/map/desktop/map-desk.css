@@ -334,6 +334,9 @@ html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search__results .mx-ro
 
 /* the pills row: the lens, the local time, the applied filter, sold comps */
 html.is-desktop-modern .mx.is-desk .mxd-stack__row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 100%; }
+/* [hit area] a wrapped row spans the stack's max-width: its empty tail is map, not chrome */
+html.is-desktop-modern .mx.is-desk .mxd-stack > .mxd-stack__row { pointer-events: none; }
+html.is-desktop-modern .mx.is-desk .mxd-stack__row > * { pointer-events: auto; }
 
 /* the lens pill: ACQUISITION RADAR · LIVE */
 html.is-desktop-modern .mx.is-desk .mxd-stack__lens { position: relative; z-index: 4; max-width: 100%; animation: mxd-drop 0.45s var(--mxg-ease) 40ms both; }
@@ -468,6 +471,14 @@ html.is-desktop-modern .mx.is-desk .mxd-cards {
   transition: opacity 0.22s var(--mxg-ease), transform 0.3s var(--mxg-ease);
 }
 html.is-desktop-modern .mx.is-desk .mxd-cards > * { pointer-events: auto; }
+/* [hit area] only the visible glass takes the pointer. The legend <section> is
+   sized by .mxd-cards' max-content, which its wrapping key inflates to the
+   column's whole max-width (measured: a 768px panel inside a 1312px section at
+   1440) — so the strip of map from the legend's right edge to the zoom stack
+   swallowed drag, wheel and click. The section is a transparent wrapper; the
+   panel and the compact chip are what the operator can see and press. */
+html.is-desktop-modern .mx.is-desk .mxd-cards > .mxd-legend { pointer-events: none; }
+html.is-desktop-modern .mx.is-desk .mxd-legend > :is(.mxd-legend__panel, .mxd-legend__chip) { pointer-events: auto; }
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .mx-areacard) .mxd-cards,
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .mx-area-sheet) .mxd-cards,
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .smcd.is-full) .mxd-cards {
