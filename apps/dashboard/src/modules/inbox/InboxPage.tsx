@@ -29,6 +29,7 @@ import {
   resolveDealDeskThreadReference,
 } from '../../domain/inbox/deal-desk-thread-reference'
 import { createComposerDraftStore } from '../../domain/inbox/composer-draft-store'
+import { registerUnsavedInputProbe } from '../../shared/build-freshness/build-freshness'
 import { DEAL_DESK_RESOURCES } from '../../domain/inbox/selection-request-guard'
 import {
   markDealDeskGuardStats,
@@ -856,6 +857,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setDraftTextState(next)
     draftStoreRef.current.write(draftThreadKeyRef.current, next)
   }, [])
+  // Unsent drafts (in any thread, not only the visible one) block a stale-deploy auto-reload.
+  useEffect(() => registerUnsavedInputProbe(() => draftStoreRef.current.size() > 0), [])
   const [selectedMessages, setSelectedMessages] = useState<ThreadMessage[]>([])
   const [hasOlderMessages, setHasOlderMessages] = useState(false)
   const [olderMessagesLoading, setOlderMessagesLoading] = useState(false)

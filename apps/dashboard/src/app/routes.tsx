@@ -1,6 +1,7 @@
-import { lazy, Suspense, type ReactNode } from 'react'
+import { Suspense, type ReactNode } from 'react'
 
 import { FullscreenAppShell } from '../shared/FullscreenAppShell'
+import { lazyWithRecovery } from '../shared/build-freshness/lazy-with-recovery'
 import { canonicalizeRoutePath } from '../domain/app-registry/app-registry'
 
 import type { AcquisitionWorkspaceModel } from '../domain/acquisition/acquisition.types'
@@ -24,26 +25,26 @@ import type { QueueModel } from '../domain/queue/queue.types'
  * These MUST stay lazy: adding a static import of any view back into this file
  * silently re-merges it into the entry chunk.
  */
-const HomeView = lazy(() =>
+const HomeView = lazyWithRecovery(() =>
   import('../views/home/HomeView').then((m) => ({ default: m.HomeView })),
 )
-const InboxView = lazy(() =>
+const InboxView = lazyWithRecovery(() =>
   import('../views/inbox/InboxView').then((m) => ({ default: m.InboxView })),
 )
-const EntityGraphView = lazy(() =>
+const EntityGraphView = lazyWithRecovery(() =>
   import('../views/entity-graph/EntityGraphView').then((m) => ({ default: m.EntityGraphView })),
 )
-const PropertyIntelligenceApp = lazy(() =>
+const PropertyIntelligenceApp = lazyWithRecovery(() =>
   import('../views/deal-intelligence/PropertyIntelligenceApp').then((m) => ({
     default: m.PropertyIntelligenceApp,
   })),
 )
-const DealIntelligenceInboxRoute = lazy(() =>
+const DealIntelligenceInboxRoute = lazyWithRecovery(() =>
   import('../views/deal-intelligence/DealIntelligenceInboxRoute').then((m) => ({
     default: m.DealIntelligenceInboxRoute,
   })),
 )
-const ConversationView = lazy(() =>
+const ConversationView = lazyWithRecovery(() =>
   import('../views/conversation/ConversationView').then((m) => ({ default: m.ConversationView })),
 )
 /**
@@ -60,28 +61,28 @@ const ConversationView = lazy(() =>
  * the tree because other reference surfaces import the dataset — they are just
  * no longer the Buyer Match product.
  */
-const BuyerMatchSubjectPage = lazy(() =>
+const BuyerMatchSubjectPage = lazyWithRecovery(() =>
   import('../views/buyer-match/BuyerMatchSubjectPage').then((m) => ({ default: m.BuyerMatchSubjectPage })),
 )
-const QueueView = lazy(() =>
+const QueueView = lazyWithRecovery(() =>
   import('../views/queue/QueueView').then((m) => ({ default: m.QueueView })),
 )
-const ClosingDeskView = lazy(() =>
+const ClosingDeskView = lazyWithRecovery(() =>
   import('../views/closing-desk/ClosingDeskView').then((m) => ({ default: m.ClosingDeskView })),
 )
-const CampaignsPage = lazy(() =>
+const CampaignsPage = lazyWithRecovery(() =>
   import('../views/campaign-command/CampaignsPage').then((m) => ({ default: m.CampaignsPage })),
 )
-const EmailCommandCenter = lazy(() =>
+const EmailCommandCenter = lazyWithRecovery(() =>
   import('../views/email-command/EmailCommandCenter').then((m) => ({
     default: m.EmailCommandCenter,
   })),
 )
-const WorkflowStudioV2 = lazy(() => import('../views/workflow-studio/v2/WorkflowStudioV2'))
-const BrowserApp = lazy(() => import('../modules/browser/BrowserApp'))
-const SearchIntelligenceApp = lazy(() => import('../modules/search-intelligence/SearchIntelligenceApp'))
-const MarketIntelligenceApp = lazy(() => import('../modules/market-intelligence/MarketIntelligenceApp'))
-const SettingsView = lazy(() =>
+const WorkflowStudioV2 = lazyWithRecovery(() => import('../views/workflow-studio/v2/WorkflowStudioV2'))
+const BrowserApp = lazyWithRecovery(() => import('../modules/browser/BrowserApp'))
+const SearchIntelligenceApp = lazyWithRecovery(() => import('../modules/search-intelligence/SearchIntelligenceApp'))
+const MarketIntelligenceApp = lazyWithRecovery(() => import('../modules/market-intelligence/MarketIntelligenceApp'))
+const SettingsView = lazyWithRecovery(() =>
   import('../views/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
 )
 
@@ -310,7 +311,7 @@ const settingsRoute = defineRoute<null>({
 
 // DEV-ONLY: standalone Comp Intelligence V4 harness for deterministic, real-data
 // review of any property by id/theme/pane. Never registered in production builds.
-const CompIntelligenceV4Harness = lazy(
+const CompIntelligenceV4Harness = lazyWithRecovery(
   () => import('../views/comp-intelligence-v4/CompIntelligenceV4Harness'),
 )
 const devCompIntelligenceV4Route = defineRoute<null>({
@@ -324,7 +325,7 @@ const devCompIntelligenceV4Route = defineRoute<null>({
   ),
 })
 
-const BuyerMatchV4Harness = lazy(
+const BuyerMatchV4Harness = lazyWithRecovery(
   () => import('../modules/inbox/buyer-match-v4/BuyerMatchV4Harness'),
 )
 const devBuyerMatchV4Route = defineRoute<null>({
@@ -340,7 +341,7 @@ const devBuyerMatchV4Route = defineRoute<null>({
 
 // DEV-ONLY: the Experience System reference surface — every shared primitive
 // and state on sample data. Never registered in production builds.
-const ExperienceShowcase = lazy(() => import('../views/dev/ExperienceShowcase'))
+const ExperienceShowcase = lazyWithRecovery(() => import('../views/dev/ExperienceShowcase'))
 const devExperienceRoute = defineRoute<null>({
   path: '/dev/experience',
   title: 'LeadCommand | Experience System (dev)',
