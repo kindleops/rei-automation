@@ -1,6 +1,7 @@
 import { queryWithTimeout } from "@/lib/postgres/client.js";
 
 import { MAP_FILTER_LIMITS } from "./map-filter-limits.js";
+import { touchedGraphRowSql } from "./contact-status-semantics.js";
 import {
   buildMatchingPropertiesCte,
   buildPropertyEligibilitySql,
@@ -14,11 +15,13 @@ const MVT_TILE_COORD_PARAM_COUNT = 3;
  * (campaign_target_graph.never_contacted; see contact-status-semantics.js).
  * NULL (no graph row) counts as uncontacted. Index: campaign_target_graph(property_id).
  */
-const TOUCH_LATERAL_SQL = `LEFT JOIN LATERAL (
-      SELECT bool_or(tg.never_contacted IS FALSE) AS contacted
+function touchLateralSql() {
+  return `LEFT JOIN LATERAL (
+      SELECT bool_or(${touchedGraphRowSql("tg")}) AS contacted
       FROM public.campaign_target_graph tg
       WHERE tg.property_id = p.property_id
     ) touch ON TRUE`;
+}
 
 /** Renumber $1..$N placeholders after leading tile coordinate params ($1-$3). */
 function offsetSqlParamPlaceholders(sql, offset) {
@@ -81,7 +84,7 @@ export async function getFilteredMarketAggregates(compiled, { markets = null, st
       COUNT(*) FILTER (WHERE COALESCE(p.activity_status, '') ILIKE '%reply%')::bigint AS new_reply_count
     FROM public.properties p
     INNER JOIN matching_properties mp ON mp.property_id = p.property_id
-    ${TOUCH_LATERAL_SQL}
+    ${touchLateralSql()}
     WHERE p.latitude IS NOT NULL
       AND p.longitude IS NOT NULL
       ${marketState.clause}
@@ -113,7 +116,7 @@ export async function getFilteredSpatialClusters(
         FLOOR(p.longitude::numeric / $${cte.allParams.length + 1}) AS grid_lng
       FROM public.properties p
       INNER JOIN matching_properties mp ON mp.property_id = p.property_id
-      ${TOUCH_LATERAL_SQL}
+      ${touchLateralSql()}
       WHERE p.latitude IS NOT NULL
         AND p.longitude IS NOT NULL
     )
@@ -238,7 +241,7 @@ export async function getFilteredMapVectorTile(compiled, { z, x, y }) {
       FROM public.properties p
       CROSS JOIN tile_bounds tb
       INNER JOIN matching_properties mp ON mp.property_id = p.property_id
-      ${TOUCH_LATERAL_SQL}
+      ${touchLateralSql()}
       WHERE p.latitude IS NOT NULL
         AND p.longitude IS NOT NULL
         AND ST_Intersects(

@@ -26,6 +26,24 @@ export const TOUCH_STATE_SOURCE = Object.freeze({
   joinKey: "property_id",
 });
 
+/**
+ * Property history (owner option B, 2026-10-05). When the property-level projection
+ * campaign_target_graph.property_ever_contacted exists (migration 20261005161000),
+ * set MAP_TOUCH_PROPERTY_LEVEL=1: Contacted then also counts sends logged against
+ * the property on a phone that is no longer its best phone. Default off, because
+ * the column does not exist until that migration is applied and backfilled.
+ */
+export function isPropertyLevelTouchEnabled(env = process.env) {
+  return String(env?.MAP_TOUCH_PROPERTY_LEVEL ?? "").trim() === "1";
+}
+
+/** Row-level "this graph row is touched" condition for alias `tg`. */
+export function touchedGraphRowSql(alias = "tg", { propertyLevel = isPropertyLevelTouchEnabled() } = {}) {
+  return propertyLevel
+    ? `(${alias}.never_contacted IS FALSE OR ${alias}.property_ever_contacted)`
+    : `${alias}.never_contacted IS FALSE`;
+}
+
 /** Kept for callers that still import the old name; it is the touch field now. */
 export const CONTACT_STATUS_FIELD_KEY = TOUCH_STATE_FIELD_KEY;
 
@@ -68,21 +86,21 @@ export function buildContactedContactExpression() {
  * Bucket predicates for a property alias. Index-backed: the graph has a btree
  * on property_id, and never_contacted is NOT NULL.
  */
-export function buildContactedTouchSql(alias = "p") {
+export function buildContactedTouchSql(alias = "p", options = {}) {
   return `EXISTS (
     SELECT 1 FROM public.campaign_target_graph tg
     WHERE tg.property_id = ${alias}.property_id
-      AND tg.never_contacted IS FALSE
+      AND ${touchedGraphRowSql("tg", options)}
   )`;
 }
 
-export function buildUncontactedTouchSql(alias = "p") {
-  return `NOT ${buildContactedTouchSql(alias)}`;
+export function buildUncontactedTouchSql(alias = "p", options = {}) {
+  return `NOT ${buildContactedTouchSql(alias, options)}`;
 }
 
-export function buildTouchStateSql(operator, alias = "p") {
-  if (operator === "is_contacted") return buildContactedTouchSql(alias);
-  if (operator === "is_uncontacted") return buildUncontactedTouchSql(alias);
+export function buildTouchStateSql(operator, alias = "p", options = {}) {
+  if (operator === "is_contacted") return buildContactedTouchSql(alias, options);
+  if (operator === "is_uncontacted") return buildUncontactedTouchSql(alias, options);
   throw new Error(`invalid_touch_state_operator:${operator}`);
 }
 

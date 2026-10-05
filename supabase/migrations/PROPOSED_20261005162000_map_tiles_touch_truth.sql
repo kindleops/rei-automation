@@ -1,25 +1,31 @@
--- PROPOSED — NOT APPLIED. Needs owner approval.
+-- =============================================================================
+-- Map tiles carry the canonical touch truth, not the legacy properties.contact_status.
+-- STATUS: PROPOSED · OWNER-APPROVED 2026-10-05 for apply at/after 12:00 UTC (7 AM CT) · NOT APPLIED.
+-- Pretest:  PROPOSED_20261005162000_map_tiles_touch_truth_pretest.sql (rollback-only)
+-- Rollback: PROPOSED_20261005162000_map_tiles_touch_truth_rollback.sql (2026-10-05 bodies, byte for byte)
 --
--- Map tiles stop carrying the inverted legacy properties.contact_status.
+-- APPLY ORDER: AFTER 20261005160000 (covering index) and 20261005161000
+-- (property_ever_contacted, backfilled). These bodies reference
+-- tg.property_ever_contacted, so applying them before the column exists fails
+-- at the first tile request.
+-- APPLY METHOD: MCP apply_migration (one transaction; CREATE OR REPLACE FUNCTION
+-- does not block tile readers).
 --
--- properties.contact_status holds only 'No Contact' (121,182) or NULL (48,620);
--- it never records outreach.
---   * get_property_map_vector_tile emits COALESCE(contact_status,'uncontacted').
---     The dashboard tile style (map-property-tile-integration.ts) rings anything
---     not in ('uncontacted','not_contacted','') as CONTACTED — so every
---     'No Contact' property (71%) draws with the contacted ring.
---   * get_property_map_dot_tile counts contacted excluding 'No Contact' → always 0.
---
--- Both now read the canonical touch truth, campaign_target_graph.never_contacted
--- (same column as Composer and the Map filter buckets). The MVT attribute keeps
--- its name and the values 'contacted' / 'uncontacted', so no client change.
--- The filtered tile path (map-filter-map-queries.js) already does this in code.
---
--- Cost: one property_id lookup per feature; pair with
--- PROPOSED_20261005160000_ctg_property_touch_covering_index.sql so it is
--- index-only. Pretest a dense tile (e.g. z=14 Dallas) with EXPLAIN ANALYZE
--- before/after; budget ≤ the current tile time + 20%.
--- Signatures, volatility, SECURITY DEFINER, search_path and grants unchanged.
+-- WHY: properties.contact_status is only 'No Contact' (121,182) or NULL (48,620).
+--   * get_property_map_vector_tile emitted COALESCE(contact_status,'uncontacted').
+--     The tile style (map-property-tile-integration.ts) rings anything not in
+--     ('uncontacted','not_contacted','') as CONTACTED, so 71% of pins drew as contacted.
+--   * get_property_map_dot_tile excluded 'No Contact' too, so contacted was always 0.
+-- NOW: contacted = a graph row with (never_contacted IS FALSE) OR property_ever_contacted,
+--   i.e. phone history OR property history (owner option B: a property already
+--   touched stays touched when its best phone changes). It is the same predicate
+--   as the Map filter buckets with MAP_TOUCH_PROPERTY_LEVEL=1. The attribute name
+--   and the 'contacted'/'uncontacted' values are unchanged, so no client change.
+-- COST: one property_id probe per feature, served by idx_ctg_property_touch_phone and
+--   idx_ctg_property_ever_contacted. The pretest reports the before/after tile time.
+--   Budget: ≤ the old time + 20 %.
+-- Signatures, volatility, SECURITY DEFINER, search_path and grants are unchanged.
+-- =============================================================================
 
 CREATE OR REPLACE FUNCTION public.get_property_map_vector_tile(z integer, x integer, y integer)
  RETURNS bytea
@@ -51,7 +57,7 @@ BEGIN
       ) AS geom
     FROM public.properties p
     LEFT JOIN LATERAL (
-      SELECT bool_or(tg.never_contacted IS FALSE) AS contacted
+      SELECT bool_or(tg.never_contacted IS FALSE OR tg.property_ever_contacted) AS contacted
       FROM public.campaign_target_graph tg
       WHERE tg.property_id = p.property_id
     ) touch ON TRUE
@@ -95,7 +101,8 @@ BEGIN
     FROM (
       SELECT p.property_id, p.activity_status, p.final_acquisition_score,
              EXISTS (SELECT 1 FROM public.campaign_target_graph tg
-                     WHERE tg.property_id = p.property_id AND tg.never_contacted IS FALSE) AS touched,
+                     WHERE tg.property_id = p.property_id
+                       AND (tg.never_contacted IS FALSE OR tg.property_ever_contacted)) AS touched,
              ST_AsMVTGeom(ST_Transform(ST_SetSRID(ST_MakePoint(p.longitude::double precision, p.latitude::double precision), 4326), 3857), env, ext, 8, true) AS g
       FROM public.properties p
       WHERE p.latitude BETWEEN lat0 AND lat1
@@ -107,8 +114,3 @@ BEGIN
   RETURN result;
 END;
 $function$;
-
--- ROLLBACK: re-create both functions from pg_get_functiondef captured 2026-10-05
--- (bodies identical except: vector tile `COALESCE(p.contact_status, 'uncontacted') AS contact_status`
---  without the LATERAL; dot tile `count(*) FILTER (WHERE COALESCE(contact_status,'uncontacted')
---  NOT IN ('uncontacted','not_contacted','','No Contact'))` and `p.contact_status` in the inner select).

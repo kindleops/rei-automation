@@ -304,7 +304,7 @@ test("filtered map tiles carry the touch truth, not properties.contact_status", 
   const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("../../src/lib/domain/map-filters/map-filter-map-queries.js", import.meta.url), "utf8"));
   assert.doesNotMatch(src, /p\.contact_status|COALESCE\(contact_status/);
   assert.match(src, /CASE WHEN touch\.contacted IS TRUE THEN 'contacted' ELSE 'uncontacted' END AS contact_status/);
-  assert.equal((src.match(/\$\{TOUCH_LATERAL_SQL\}/g) || []).length, 3);
+  assert.equal((src.match(/\$\{touchLateralSql\(\)\}/g) || []).length, 3);
 });
 
 test("every phone registry field maps to a real public.phones column (no phantom column kills the query)", async () => {
@@ -315,4 +315,15 @@ test("every phone registry field maps to a real public.phones column (no phantom
     .filter((f) => f.entity === "phone" && f.column && !PHONES_COLUMNS.has(f.column))
     .map((f) => `${f.key}→${f.column}`);
   assert.deepEqual(phantom, []);
+});
+
+test("MAP_TOUCH_PROPERTY_LEVEL=1 adds property history (option B) and keeps the exact complement", async () => {
+  const sem = await import("../../src/lib/domain/map-filters/contact-status-semantics.js");
+  assert.equal(sem.isPropertyLevelTouchEnabled({}), false);
+  assert.equal(sem.isPropertyLevelTouchEnabled({ MAP_TOUCH_PROPERTY_LEVEL: "1" }), true);
+  const off = sem.buildContactedTouchSql("p", { propertyLevel: false });
+  const on = sem.buildContactedTouchSql("p", { propertyLevel: true });
+  assert.doesNotMatch(off, /property_ever_contacted/);
+  assert.match(on, /\(tg\.never_contacted IS FALSE OR tg\.property_ever_contacted\)/);
+  assert.equal(sem.buildUncontactedTouchSql("p", { propertyLevel: true }), `NOT ${on}`);
 });
