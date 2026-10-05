@@ -27,6 +27,12 @@ const DEPRIORITIZED_QUEUE_STATUSES = new Set([
 
 const DEPRIORITIZED_SOURCES = new Set(["inbox", "leadcommand_inbox"]);
 
+function firstAddressLine(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  return String(text.split(",")[0] || "").trim() || null;
+}
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -323,12 +329,20 @@ function buildSendQueueMatchContext(row = {}, match = {}) {
           identity.seller_display_name,
           identity_meta.seller_display_name
         ) || null,
+      // campaign_launch_execution rows leave the property_address column NULL
+      // and keep the address in metadata.target_snapshot (2026-10-05: every
+      // campaign thread's reply failed {{property_address}}). Street line only,
+      // the same text the opener used.
       property_address:
         pickFirst(
           row.property_address,
           row_meta.property_address,
           identity.property_address,
-          identity_meta.property_address
+          identity_meta.property_address,
+          firstAddressLine(row_meta.target_snapshot?.property_address),
+          firstAddressLine(row_meta.candidate_snapshot?.property_address_full),
+          firstAddressLine(identity_meta.target_snapshot?.property_address),
+          firstAddressLine(identity_meta.candidate_snapshot?.property_address_full)
         ) || null,
       market:
         pickFirst(row.market, row_meta.market, identity.market, identity_meta.market) || null,
