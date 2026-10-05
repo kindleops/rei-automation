@@ -11,16 +11,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type maplibregl from 'maplibre-gl'
 import { callBackend } from '../../../../lib/api/backendClient'
 import {
-  CONTEXT_DEFAULTS, OVERLAY_OFF, cameraStatus, camerasRequestFor, contextGroup, crimeRequestFor, crimeStatus, presenceRequestFor, presenceStatus,
+  CONTEXT_DEFAULTS, OVERLAY_OFF, normalizeCrimeCats, normalizeCrimeDays, cameraStatus, camerasRequestFor, contextGroup, crimeRequestFor, crimeStatus, presenceRequestFor, presenceStatus,
   type CamerasReply, type ContextPrefs, type CrimeIncident, type CrimeReply, type OverlayStatus, type PresenceCell, type PresenceReply, type ViewBox,
 } from './context-model'
-import { CTX_IDS, cameraFeatures, crimeFeatures, ensureCameras, ensureCrime, ensurePresence, presenceData, removeCameras, removeCrime, removePresence } from './context-layers'
+import { CTX_IDS, cameraFeatures, crimeFeatures, ensureCameras, ensureCrime, ensurePresence, expansionZoom, presenceData, removeCameras, removeCrime, removePresence } from './context-layers'
+import { bindOverlayPointer } from './context-pointer'
 
 const STORE = 'nexus.map.deskContext'
 const LIGHT_BASEMAPS = new Set(['light_street', 'terrain'])
 
 function readPrefs(): ContextPrefs {
-  try { return { ...CONTEXT_DEFAULTS, ...JSON.parse(localStorage.getItem(STORE) || '{}') } } catch { return CONTEXT_DEFAULTS }
+  try {
+    const p = { ...CONTEXT_DEFAULTS, ...JSON.parse(localStorage.getItem(STORE) || '{}') }
+    // Older builds stored numeric windows (7 | 30 | 90) and no categories.
+    return { ...p, crimeDays: normalizeCrimeDays(p.crimeDays), crimeCats: normalizeCrimeCats(p.crimeCats) }
+  } catch { return CONTEXT_DEFAULTS }
 }
 
 export function useContextPrefs(): [ContextPrefs, (patch: Partial<ContextPrefs>) => void] {
@@ -115,14 +120,26 @@ export function useMapContextOverlays(map: maplibregl.Map | null, mapEpoch: numb
   const light = LIGHT_BASEMAPS.has(styleMode)
 
   const cam = useViewportRead<CamerasReply>(map, mapEpoch, prefs.cameras, camerasRequestFor, 'cam')
-  const crime = useViewportRead<CrimeReply>(map, mapEpoch, prefs.crime, (b, z) => crimeRequestFor(b, z, prefs.crimeDays), `crime:${prefs.crimeDays}`)
+  const catsKey = [...prefs.crimeCats].sort().join(',')
+  const crime = useViewportRead<CrimeReply>(map, mapEpoch, prefs.crime, (b, z) => crimeRequestFor(b, z, prefs.crimeDays, prefs.crimeCats), `crime:${prefs.crimeDays}:${catsKey}`)
   const pres = useViewportRead<PresenceReply>(map, mapEpoch, prefs.presence, (b, z) => presenceRequestFor(b, z, prefs.presenceMonths), `pres:${prefs.presenceMonths}`)
 
   const camFc = useMemo(() => cameraFeatures(cam.reply), [cam.reply])
   const crimeFc = useMemo(() => crimeFeatures(crime.reply), [crime.reply])
   const presFc = useMemo(() => presenceData(pres.reply), [pres.reply])
-  useOverlayDraw(map, mapEpoch, prefs.cameras, camFc, CTX_IDS.camDots, (m, fc) => ensureCameras(m, fc, light), removeCameras)
-  useOverlayDraw(map, mapEpoch, prefs.crime, crimeFc, CTX_IDS.crimeDots, (m, fc) => ensureCrime(m, fc, light), removeCrime)
+  useOverlayDraw(map, mapEpoch, prefs.cameras, camFc, CTX_IDS.camIcons, (m, fc) => ensureCameras(m, fc, light), removeCameras)
+  useOverlayDraw(map, mapEpoch, prefs.crime, crimeFc, CTX_IDS.crimeIcons, (m, fc) => ensureCrime(m, fc, light), removeCrime)
+  // A map-look change (dark ↔ light ground) without new data: re-point the tiles.
+  const lastFc = useRef({ camFc, crimeFc, cameras: prefs.cameras, crime: prefs.crime })
+  useEffect(() => { lastFc.current = { camFc, crimeFc, cameras: prefs.cameras, crime: prefs.crime } })
+  useEffect(() => {
+    if (!map) return
+    const l = lastFc.current
+    try {
+      if (l.cameras && map.getLayer(CTX_IDS.camIcons)) ensureCameras(map, l.camFc, light)
+      if (l.crime && map.getLayer(CTX_IDS.crimeIcons)) ensureCrime(map, l.crimeFc, light)
+    } catch { /* style mid-swap */ }
+  }, [map, light])
   useOverlayDraw(map, mapEpoch, prefs.presence, presFc, CTX_IDS.presBuys, (m, fc) => ensurePresence(m, fc, prefs.presenceView), removePresence)
   // view switch without new data
   useEffect(() => {
@@ -134,22 +151,20 @@ export function useMapContextOverlays(map: maplibregl.Map | null, mapEpoch: numb
   const replies = useRef({ crime: crime.reply, pres: pres.reply })
   useEffect(() => { replies.current = { crime: crime.reply, pres: pres.reply } })
 
-  // Presses on the overlays (each only while its overlay is on).
+  // Presses on the overlays (each only while its overlay is on). Hover only changes the cursor:
+  // nothing is fetched on hover — a camera's detail is read when it is PRESSED (context-pointer).
   useEffect(() => {
     if (!map) return undefined
     const offs: Array<() => void> = []
-    const bind = (layer: string, on: boolean, handle: (f: maplibregl.MapGeoJSONFeature) => void) => {
-      if (!on) return
-      const click = (e: maplibregl.MapLayerMouseEvent) => { const f = e.features?.[0]; if (f) handle(f) }
-      const enter = () => { map.getCanvas().style.cursor = 'pointer' }
-      const leave = () => { map.getCanvas().style.cursor = '' }
-      map.on('click', layer, click)
-      map.on('mouseenter', layer, enter)
-      map.on('mouseleave', layer, leave)
-      offs.push(() => { map.off('click', layer, click); map.off('mouseenter', layer, enter); map.off('mouseleave', layer, leave) })
+    const bind = (layer: string, on: boolean, handle: (f: maplibregl.MapGeoJSONFeature) => void) => { if (on) offs.push(bindOverlayPointer(map, layer, handle)) }
+    const openGroup = (src: string) => (f: maplibregl.MapGeoJSONFeature) => {
+      const at = (f.geometry as GeoJSON.Point).coordinates as [number, number]
+      void expansionZoom(map, src, f).then((zoom) => map.easeTo({ center: at, zoom, duration: 420 }))
     }
-    bind(CTX_IDS.camHit, prefs.cameras, (f) => { const id = String(f.properties?.id || ''); if (id) setPick({ kind: 'camera', id, name: String(f.properties?.name || '') || null }) })
-    bind(CTX_IDS.crimeDots, prefs.crime, (f) => { const i = Number(f.properties?.i); const inc = replies.current.crime?.incidents[i]; if (inc) setPick({ kind: 'crime', incident: inc }) })
+    bind(CTX_IDS.camIcons, prefs.cameras, (f) => { const id = String(f.properties?.id || ''); if (id) setPick({ kind: 'camera', id, name: String(f.properties?.name || '') || null }) })
+    bind(CTX_IDS.camGroup, prefs.cameras, openGroup(CTX_IDS.camSrc))
+    bind(CTX_IDS.crimeIcons, prefs.crime, (f) => { const i = Number(f.properties?.i); const inc = replies.current.crime?.incidents[i]; if (inc) setPick({ kind: 'crime', incident: inc }) })
+    bind(CTX_IDS.crimeGroup, prefs.crime, openGroup(CTX_IDS.crimeSrc))
     bind(CTX_IDS.presBuys, prefs.presence, (f) => { const c = replies.current.pres?.cells[Number(f.properties?.i)]; if (c) setPick({ kind: 'presence', cell: c }) })
     bind(CTX_IDS.presEntity, prefs.presence, (f) => { const c = replies.current.pres?.cells[Number(f.properties?.i)]; if (c) setPick({ kind: 'presence', cell: c }) })
     return () => { for (const off of offs) off() }

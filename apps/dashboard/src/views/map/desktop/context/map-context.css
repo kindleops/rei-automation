@@ -34,7 +34,7 @@ html.is-desktop-modern .mx.is-desk .mxd-ctx-card__glyph {
   flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px;
   background: var(--mxg-well); box-shadow: var(--mxg-recess); color: var(--mxg-accent);
 }
-html.is-desktop-modern .mx.is-desk .mxd-ctx-dot { display: block; width: 9px; height: 9px; border-radius: 50%; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-dot { display: block; width: 9px; height: 9px; border-radius: 2px; }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-card__title { min-width: 0; flex: 1; }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-card__title h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -0.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-card__title p { margin: 1px 0 0; font-size: 11.5px; color: var(--mxg-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -69,22 +69,72 @@ html.is-desktop-modern .mx.is-desk .mxd-ctx-split { display: grid; grid-template
 html.is-desktop-modern .mx.is-desk .mxd-ctx-split.is-card { margin: 0 12px; }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-split > div { min-width: 0; padding: 9px 10px; border-radius: 10px; background: var(--mxg-well); box-shadow: inset 0 0 0 1px var(--mxg-edge-lo); }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-split dt { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--mxg-ink-3); }
-html.is-desktop-modern .mx.is-desk .mxd-ctx-split dt > i { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-split dt > i { flex: none; width: 8px; height: 8px; border-radius: 2px; }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-split dt > i.is-ring { background: transparent; border: 1.6px solid; width: 9px; height: 9px; box-sizing: border-box; }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-split dd { margin: 4px 0 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; color: var(--mxg-ink); }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-split dd > span { display: block; font-size: 11px; font-weight: 400; letter-spacing: 0; color: var(--mxg-ink-3); }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-split p { margin: 6px 0 0; font-size: 10.5px; line-height: 1.35; color: var(--mxg-ink-4); }
 
-/* ── crime categories inside the Layers plate ── */
-html.is-desktop-modern .mx.is-desk .mxd-ctx-cats { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
-html.is-desktop-modern .mx.is-desk .mxd-ctx-cats li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--mxg-ink-2); }
-html.is-desktop-modern .mx.is-desk .mxd-ctx-cats li > i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
-html.is-desktop-modern .mx.is-desk .mxd-ctx-cats li > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-html.is-desktop-modern .mx.is-desk .mxd-ctx-cats li > em { font-style: normal; color: var(--mxg-ink-3); font-variant-numeric: tabular-nums; }
+/* ── context glyph tiles (panels + legend; the map draws the same tiles) ──
+ * Category colours mirror context-icons.ts CRIME_CAT_STYLE (dark / light). None is red. */
+html.is-desktop-modern .mx.is-desk {
+  --mxc-violent: #f2b45c; --mxc-property: #9aaeff; --mxc-drugs: #5fd4c4; --mxc-other: #b7bfcc;
+  --mxc-cam: #9fb0c8; --mxc-cam-ink: #eef3fb; --mxc-live: #3ddc97; --mxc-tile: rgba(12, 17, 27, 0.94);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .mx.is-desk {
+  --mxc-violent: #a35f00; --mxc-property: #3b4fc4; --mxc-drugs: #0b7a6c; --mxc-other: #4a5566;
+  --mxc-cam: #5d6b80; --mxc-cam-ink: #1d2533; --mxc-live: #0e8a5a; --mxc-tile: rgba(255, 255, 255, 0.97);
+}
+html.is-desktop-modern .mx.is-desk .mxd-ctx-glyph {
+  --g: var(--mxc-cam);
+  flex: none; display: inline-grid; place-items: center; box-sizing: border-box;
+  border-radius: 28%; background: var(--mxc-tile); color: var(--g);
+  box-shadow: inset 0 0 0 1.25px var(--g), 0 1px 2px rgb(0 0 0 / 0.25);
+}
+html.is-desktop-modern .mx.is-desk .mxd-ctx-glyph > svg { display: block; fill: currentColor; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-glyph.is-cam { color: var(--mxc-cam-ink); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-glyph.is-live { --g: var(--mxc-live); color: var(--mxc-cam-ink); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-glyph.is-link { --g: var(--mxc-cam); color: var(--mxc-cam); box-shadow: none; outline: 1.25px dashed var(--mxc-cam); outline-offset: -1.25px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-glyph.is-violent { --g: var(--mxc-violent); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-glyph.is-property { --g: var(--mxc-property); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-glyph.is-drugs { --g: var(--mxc-drugs); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-glyph.is-other { --g: var(--mxc-other); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-card__tile { border-radius: 9px; }
+
+html.is-desktop-modern .mx.is-desk .mxd-ctx-keyrow { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-keyrow li { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--mxg-ink-2); }
+
+/* ── crime filter panel: category toggles + per-type counts ── */
+html.is-desktop-modern .mx.is-desk .mxd-ctx-inview { font-style: normal; color: var(--mxg-ink-4); text-transform: none; letter-spacing: 0; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat {
+  display: flex; align-items: center; gap: 7px; min-width: 0; height: 30px; padding: 0 9px; border: 0; border-radius: 9px; cursor: pointer;
+  font: 500 12px/1 var(--mxd-font); color: var(--mxg-ink-3); background: var(--mxg-well); box-shadow: inset 0 0 0 1px var(--mxg-edge-lo);
+}
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat > i { flex: none; width: 9px; height: 9px; border-radius: 3px; box-shadow: inset 0 0 0 1.5px var(--c); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat > span { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat > em { font-style: normal; font-variant-numeric: tabular-nums; color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat.is-on { color: var(--mxg-ink); background: color-mix(in srgb, var(--c) 12%, var(--mxg-well)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 42%, transparent); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat.is-on > i { background: var(--c); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat.is-on > em { color: var(--mxg-ink-2); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat:hover:not(:disabled) { color: var(--mxg-ink); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat:disabled { cursor: default; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat:focus-visible { outline: 2px solid var(--mxg-accent); outline-offset: 1px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat.is-violent { --c: var(--mxc-violent); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat.is-property { --c: var(--mxc-property); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat.is-drugs { --c: var(--mxc-drugs); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-cat.is-other { --c: var(--mxc-other); }
+
+html.is-desktop-modern .mx.is-desk .mxd-ctx-types { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-types li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--mxg-ink-2); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-types li > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-types li > em { font-style: normal; color: var(--mxg-ink-3); font-variant-numeric: tabular-nums; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-types li.is-off { opacity: 0.45; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-facts > div.is-wide { grid-column: 1 / -1; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound > .mxd-ctx-glyph { margin-right: 1px; }
 
 /* ── legend swatches (inside .mxd-legend__bounds) ── */
-html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch { width: 8px; height: 8px; border: 0; border-radius: 50%; opacity: 1; }
-html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch.is-cam { background: #5cc8ff; box-shadow: 0 0 0 1.5px color-mix(in srgb, #5cc8ff 45%, transparent); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch { width: 8px; height: 8px; border: 0; border-radius: 2px; opacity: 1; }
 html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch.is-dot { background: var(--mxg-ink-3); }
 html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch.is-ring { background: transparent; border: 1.6px solid; width: 9px; height: 9px; box-sizing: border-box; }
 html.is-desktop-modern .mx.is-desk .mxd-legend__bound.is-quiet { opacity: 0.7; }
@@ -117,4 +167,4 @@ html.is-desktop-modern .mx.is-desk .mxd-ctx-play > svg { color: var(--mxg-good);
 html.is-desktop-modern .mx.is-desk .mxd-ctx-play:hover { background: var(--mxg-l4); }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-play:focus-visible { outline: 2px solid var(--mxg-accent); outline-offset: 2px; }
 html.is-desktop-modern .mx.is-desk .mxd-ctx-internal.is-note { background: var(--mxg-well); box-shadow: inset 0 0 0 1px var(--mxg-edge); }
-html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch.is-live { background: #5cc8ff; box-shadow: 0 0 0 2px #0000, 0 0 0 3.2px #3ddc97; }
+

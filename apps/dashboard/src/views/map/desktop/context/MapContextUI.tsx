@@ -18,14 +18,27 @@ import { callBackend, getBackendAuthHeaders, getBackendBaseUrl } from '../../../
 import { DeskSeg, Plate } from '../MapDeskLayers'
 import type { SensorRow } from '../map-desk-model'
 import {
-  CRIME_FAMILY, PRESENCE_COLORS, agoFrom, cameraDetailPath, cameraMediaLabel, directionLabel, fmtDay,
-  type CameraDetailReply, type CrimeDays, type CrimeFamily, type PresenceMonths, type PresenceView,
+  CRIME_WINDOWS, PRESENCE_COLORS, agoFrom, cameraDetailPath, cameraMediaLabel, crimeWindowWords, daysAgo, directionLabel, fmtDay, fmtLocalTime,
+  type CameraDetailReply, type CrimeDays, type PresenceMonths, type PresenceView,
 } from './context-model'
+import { CRIME_CATS, CRIME_CAT_STYLE, CRIME_TYPES, CRIME_TYPE_LABEL, GLYPH_PATHS, TYPE_CAT, crimeGlyph, type CrimeCat, type CrimeType, type GlyphId } from './context-icons'
 import type { ContextPick, MapContextOverlays } from './useMapContextOverlays'
 import { startLiveVideo, type LiveSession } from './hls-player'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const fmt = (n: number) => n.toLocaleString('en-US')
+
+/* ── glyph tiles (the same drawings the map uses) ─────────────────────────── */
+
+/** A context glyph tile for panels and the legend — the map's own drawing, in CSS. */
+export function CtxGlyph({ id, size = 16, className }: { id: GlyphId; size?: number; className?: string }) {
+  const crime = id.startsWith('crime-') ? TYPE_CAT[id.slice(6) as CrimeType] : null
+  return (
+    <span className={cls('mxd-ctx-glyph', crime ? `is-${crime}` : id === 'cam-video' ? 'is-live' : id === 'cam-link' ? 'is-link' : 'is-cam', className)} style={{ width: size, height: size }} aria-hidden="true">
+      <svg viewBox="0 0 24 24" width={Math.round(size * 0.66)} height={Math.round(size * 0.66)}><path d={GLYPH_PATHS[id]} fillRule="evenodd" /></svg>
+    </span>
+  )
+}
 
 /* ── Layers plates ────────────────────────────────────────────────────────── */
 
@@ -41,30 +54,22 @@ export function ContextPlate({ row, ctx }: { row: SensorRow; ctx: MapContextOver
     case 'ctxCameras':
       return (
         <Plate key={row.id} row={row} onToggle={(v) => setPrefs({ cameras: v })}>
-          <p className="mxd-ctl__note">Press a camera for its latest still. Solid dot = still image · green halo = live video (plays only when you press Play) · hollow ring = location only.</p>
+          <ul className="mxd-ctx-keyrow" aria-label="Camera marks">
+            <li><CtxGlyph id="cam-still" />Still image</li>
+            <li><CtxGlyph id="cam-video" />Live video · MN, CA</li>
+            <li><CtxGlyph id="cam-link" />Location only</li>
+          </ul>
+          <p className="mxd-ctl__note">Press a camera for its latest still; live video plays only when you press Play. Groups open on press. Cameras sit under your pins and comps.</p>
           <Credits items={ctx.cameras.status.attributions} />
         </Plate>
       )
-    case 'ctxCrime': {
-      const cats = ctx.crime.reply?.categories.slice(0, 6) ?? []
+    case 'ctxCrime':
       return (
         <Plate key={row.id} row={row} onToggle={(v) => setPrefs({ crime: v })}>
-          <div className="mxd-ctl is-stack">
-            <span className="mxd-ctl__label">Time</span>
-            <DeskSeg<`${CrimeDays}`> size="sm" label="Reported within" value={`${prefs.crimeDays}`} onChange={(v) => setPrefs({ crimeDays: Number(v) as CrimeDays })} options={[{ key: '7', label: '7 days' }, { key: '30', label: '30 days' }, { key: '90', label: '90 days' }]} />
-          </div>
-          {cats.length ? (
-            <ul className="mxd-ctx-cats" aria-label="Reported categories in view">
-              {cats.map((c) => (
-                <li key={`${c.family}|${c.category}`}><i style={{ background: CRIME_FAMILY[c.family].color }} aria-hidden="true" /><span>{c.category}</span><em>{fmt(c.count)}</em></li>
-              ))}
-            </ul>
-          ) : null}
-          <p className="mxd-ctl__note">As the city reports them — not a safety rating. {ctx.crime.reply?.sources.map((s) => s.location_note).filter(Boolean)[0] ?? ''}</p>
+          <CrimeFilters ctx={ctx} />
           <Credits items={ctx.crime.status.attributions} />
         </Plate>
       )
-    }
     case 'ctxPresence': {
       const t = ctx.presence.reply?.totals
       return (
@@ -97,31 +102,31 @@ export function ContextPlate({ row, ctx }: { row: SensorRow; ctx: MapContextOver
 export function ContextKey({ ctx }: { ctx: MapContextOverlays }) {
   const { prefs } = ctx
   if (!prefs.cameras && !prefs.crime && !prefs.presence) return null
-  const fams = new Map<CrimeFamily, number>()
-  for (const c of ctx.crime.reply?.categories ?? []) fams.set(c.family, (fams.get(c.family) ?? 0) + c.count)
+  const types = ctx.crime.reply?.counts?.types
+  const shownTypes = types ? CRIME_TYPES.filter((t) => types[t] > 0 && prefs.crimeCats.includes(TYPE_CAT[t])).sort((x, y) => types[y] - types[x]).slice(0, 6) : []
   const quiet = (s: { state: string }) => s.state !== 'on'
   return (
     <div className="mxd-legend__bounds mxd-ctx-key" data-legend="context">
       {prefs.cameras ? (
         <span className={cls('mxd-legend__bound', quiet(ctx.cameras.status) && 'is-quiet')} title={ctx.cameras.status.reason ?? ctx.cameras.status.attributions.join(' · ')}>
-          <i className="mxd-ctx-swatch is-cam" aria-hidden="true" />Cameras
+          <CtxGlyph id="cam-still" size={14} />Cameras
           <em>{ctx.cameras.status.state === 'on' ? fmt(ctx.cameras.status.count) : ctx.cameras.status.reason ?? 'reading…'}</em>
         </span>
       ) : null}
       {prefs.cameras && ctx.cameras.reply?.cameras.some((c) => c.video) ? (
         <span className="mxd-legend__bound" title="Official agency live video — plays only when you press Play">
-          <i className="mxd-ctx-swatch is-live" aria-hidden="true" />Live video<em>{fmt(ctx.cameras.reply.cameras.filter((c) => c.video).length)}</em>
+          <CtxGlyph id="cam-video" size={14} />Live video<em>{fmt(ctx.cameras.reply.cameras.filter((c) => c.video).length)}</em>
         </span>
       ) : null}
       {prefs.crime ? (
-        ctx.crime.status.state === 'on' && fams.size ? (
-          [...fams.entries()].map(([f, n]) => (
-            <span key={f} className="mxd-legend__bound" title={`${CRIME_FAMILY[f].label} · reported, last ${prefs.crimeDays} days`}>
-              <i className="mxd-ctx-swatch is-dot" style={{ background: CRIME_FAMILY[f].color }} aria-hidden="true" />{CRIME_FAMILY[f].label.split(' (')[0]}<em>{fmt(n)}</em>
+        ctx.crime.status.state === 'on' && shownTypes.length ? (
+          shownTypes.map((t) => (
+            <span key={t} className="mxd-legend__bound" title={`${CRIME_TYPE_LABEL[t]} · reported, ${crimeWindowWords(prefs.crimeDays)}`}>
+              <CtxGlyph id={crimeGlyph(t)} size={14} />{CRIME_TYPE_LABEL[t].split(' /')[0]}<em>{fmt(types?.[t] ?? 0)}</em>
             </span>
           ))
         ) : (
-          <span className="mxd-legend__bound is-quiet" title={ctx.crime.status.reason ?? undefined}><i className="mxd-ctx-swatch is-dot" aria-hidden="true" />Crime<em>{ctx.crime.status.reason ?? 'reading…'}</em></span>
+          <span className="mxd-legend__bound is-quiet" title={ctx.crime.status.reason ?? undefined}><CtxGlyph id="crime-other" size={14} />Crime<em>{ctx.crime.status.reason ?? (ctx.crime.status.state === 'on' ? 'none reported in view' : 'reading…')}</em></span>
         )
       ) : null}
       {prefs.presence ? (
@@ -130,7 +135,7 @@ export function ContextKey({ ctx }: { ctx: MapContextOverlays }) {
           {prefs.presenceView !== 'purchases' ? <span className={cls('mxd-legend__bound', quiet(ctx.presence.status) && 'is-quiet')}><i className="mxd-ctx-swatch is-ring" style={{ borderColor: PRESENCE_COLORS.entity }} aria-hidden="true" />Entity-owned now<em>{ctx.presence.reply?.totals ? fmt(ctx.presence.reply.totals.entity_owned) : ''}</em></span> : null}
         </>
       ) : null}
-      <span className="mxd-legend__bound-src">{[prefs.cameras ? 'DOT feeds' : null, prefs.crime ? `city open data · ${prefs.crimeDays} d · no scores` : null, prefs.presence ? `recorded sales · ${prefs.presenceMonths} mo` : null].filter(Boolean).join(' · ')}</span>
+      <span className="mxd-legend__bound-src">{[prefs.cameras ? 'DOT feeds' : null, prefs.crime ? `city open data · ${prefs.crimeDays === 'all' ? 'all published' : `${prefs.crimeDays} d`} · no scores` : null, prefs.presence ? `recorded sales · ${prefs.presenceMonths} mo` : null].filter(Boolean).join(' · ')}</span>
     </div>
   )
 }
@@ -278,25 +283,80 @@ function CameraPreview({ id, name, onClose }: { id: string; name: string | null;
 function CrimePreview({ ctx, pick, onClose }: { ctx: MapContextOverlays; pick: Extract<ContextPick, { kind: 'crime' }>; onClose: () => void }) {
   const i = pick.incident
   const src = ctx.crime.reply?.sources.find((s) => s.source_id === i.source_id)
-  const fam = CRIME_FAMILY[i.family]
+  const fresh = ctx.crime.reply?.per_source?.find((p) => p.source_id === i.source_id)
+  // The clock "N days ago" reads against: when the card opened.
+  const [now] = useState(() => Date.now())
+  const behind = daysAgo(fresh?.latest_on, now)
+  const time = fmtLocalTime(i.occurred_at)
+  const cat = CRIME_CAT_STYLE[i.cat] ?? CRIME_CAT_STYLE.other
   return (
     <section className="mxd-ctx-card mxd-l3" role="dialog" aria-label={`Reported incident: ${i.category}`} data-map-card="crime">
       <header className="mxd-ctx-card__head">
-        <span className="mxd-ctx-card__glyph" style={{ color: fam.color }} aria-hidden="true"><i className="mxd-ctx-dot" style={{ background: fam.color }} /></span>
-        <div className="mxd-ctx-card__title"><h3>{i.category}</h3><p>{i.offense && i.offense !== i.category ? i.offense : fam.label}</p></div>
+        <CtxGlyph id={crimeGlyph(i.type)} size={28} className="mxd-ctx-card__tile" />
+        <div className="mxd-ctx-card__title"><h3>{i.category}</h3><p>{CRIME_TYPE_LABEL[i.type] ?? 'Other'} · {cat.label}{i.offense && i.offense !== i.category ? ` · ${i.offense}` : ''}</p></div>
         <button type="button" className="mxd-icon-btn" aria-label="Close incident" onClick={onClose}><Icon name="close" size={13} /></button>
       </header>
       <dl className="mxd-ctx-facts">
-        <div><dt>Occurred</dt><dd>{fmtDay(i.occurred_on)}</dd></div>
-        <div><dt>Family</dt><dd>{fam.label}</dd></div>
-        <div><dt>Source</dt><dd>{src ? `${src.publisher} · ${src.city}` : '—'}</dd></div>
+        <div><dt>Occurred</dt><dd>{fmtDay(i.occurred_on)}{time ? ` · ${time}` : ''}</dd></div>
+        <div><dt>Time</dt><dd>{time ? 'City’s own clock' : 'Not published by the city'}</dd></div>
         <div><dt>Location</dt><dd>{src?.location_note ?? 'As published'}</dd></div>
+        <div><dt>Source</dt><dd>{src ? `${src.publisher} · ${src.city}` : '—'}</dd></div>
+        <div className="is-wide"><dt>Freshness</dt><dd>{fresh?.latest_on ? `City data in this view runs to ${fmtDay(fresh.latest_on)}${behind !== null ? ` (${behind === 0 ? 'today' : `${behind} d ago`})` : ''}` : 'Not reported'}{src?.lag_note ? ` · ${src.lag_note}` : ''}</dd></div>
       </dl>
       <footer className="mxd-ctx-card__foot">
         <span className="mxd-ctx-credit" title={src?.licence}>{src ? `${src.attribution} · ${src.licence}` : ''}</span>
         {src ? <span className="mxd-ctx-card__actions"><a className="mxd-btn is-sm" href={src.dataset_url} target="_blank" rel="noopener noreferrer">Dataset</a></span> : null}
       </footer>
     </section>
+  )
+}
+
+/**
+ * The crime filter panel: time window chips, category toggles with the count
+ * IN VIEW for each (counted before the toggle, so a switched-off category
+ * still says what it holds), and the glyph per type. Filtering is done by the
+ * server on its cached read — a toggle never re-reads a city.
+ */
+function CrimeFilters({ ctx }: { ctx: MapContextOverlays }) {
+  const { prefs, setPrefs } = ctx
+  const counts = ctx.crime.reply?.mode === 'incidents' ? ctx.crime.reply.counts : undefined
+  const toggle = (c: CrimeCat) => {
+    const on = prefs.crimeCats.includes(c)
+    if (on && prefs.crimeCats.length === 1) return // at least one category stays on
+    setPrefs({ crimeCats: on ? prefs.crimeCats.filter((x) => x !== c) : [...prefs.crimeCats, c] })
+  }
+  return (
+    <>
+      <div className="mxd-ctl is-stack">
+        <span className="mxd-ctl__label">Time</span>
+        <DeskSeg<CrimeDays> size="sm" label="Reported within" value={prefs.crimeDays} onChange={(v) => setPrefs({ crimeDays: v })} options={CRIME_WINDOWS} />
+      </div>
+      <div className="mxd-ctl is-stack">
+        <span className="mxd-ctl__label">Categories{counts ? <em className="mxd-ctx-inview"> · in view</em> : null}</span>
+        <div className="mxd-ctx-cats" role="group" aria-label="Crime categories">
+          {CRIME_CATS.map((c) => {
+            const on = prefs.crimeCats.includes(c)
+            const n = counts?.cats[c]
+            return (
+              <button key={c} type="button" className={cls('mxd-ctx-cat', `is-${c}`, on && 'is-on')} aria-pressed={on} disabled={on && prefs.crimeCats.length === 1} onClick={() => toggle(c)}>
+                <i aria-hidden="true" /><span>{CRIME_CAT_STYLE[c].label}</span><em>{typeof n === 'number' ? fmt(n) : '—'}</em>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      {counts ? (
+        <ul className="mxd-ctx-types" aria-label="Reported types in view">
+          {CRIME_TYPES.filter((t) => counts.types[t] > 0).sort((a, b) => counts.types[b] - counts.types[a]).map((t) => (
+            <li key={t} className={cls(!prefs.crimeCats.includes(TYPE_CAT[t]) && 'is-off')}><CtxGlyph id={crimeGlyph(t)} size={16} /><span>{CRIME_TYPE_LABEL[t]}</span><em>{fmt(counts.types[t])}</em></li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="mxd-ctl__note">As the city reports them — not a safety rating. {ctx.crime.reply?.sources.map((s) => s.location_note).filter(Boolean)[0] ?? ''}</p>
+      {ctx.crime.reply?.not_covered?.length && ctx.crime.reply.mode !== 'incidents' ? (
+        <p className="mxd-ctl__note mxd-ctx-credit">Not covered: {ctx.crime.reply.not_covered.slice(0, 4).map((c) => `${c.city} (${c.reason})`).join(' · ')}</p>
+      ) : null}
+    </>
   )
 }
 

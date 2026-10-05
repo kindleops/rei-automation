@@ -14,7 +14,7 @@ import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { deriveTimezoneFromGeography } from '@/lib/domain/campaigns/contact-window-timezone.js'
 import { loadMapAreas, resolvePlace } from '@/lib/domain/map/map-world-service.js'
 import { cameraFreshness, distanceKm, finalizeCamera, orderCorridor, providerOfCameraId } from './camera-model.js'
-import { CAMERA_PROVIDERS, coverageByState, effectiveProvider, providerById, publicProvider } from './camera-provider-registry.js'
+import { CAMERA_ACCESS_PENDING, CAMERA_PROVIDERS, coverageByState, effectiveProvider, providerById, publicProvider, videoAllowed } from './camera-provider-registry.js'
 import { CAMERA_ADAPTERS } from './camera-adapters.js'
 import { resolveDuplicates } from './camera-dedupe.js'
 import { fetchUpstreamImage, snapshotCacheGet, snapshotCacheSet, snapshotTtlSec, validateUpstreamUrl } from './camera-media.js'
@@ -86,7 +86,8 @@ export async function getCamerasInView({ bbox, zoom, coverage = false } = {}, de
   let plan = coverage && viewportMode(zoom).mode === 'none' ? { mode: 'coverage', cell_deg: 2 } : viewportMode(zoom)
   // A box too large to draw honestly as points (an ultrawide at low zoom) is coverage.
   if (plan.mode === 'points' && (box.east - box.west > POINTS_MAX_SPAN_LNG || box.north - box.south > POINTS_MAX_SPAN_LAT)) plan = { mode: 'coverage', cell_deg: 0.5 }
-  const base = { ok: true, generated_at: new Date(d.now).toISOString(), zoom: Number(zoom), mode: plan.mode, providers_connected: enabled.length }
+  const pending = pendingInView(providers, box)
+  const base = { ok: true, generated_at: new Date(d.now).toISOString(), zoom: Number(zoom), mode: plan.mode, providers_connected: enabled.length, ...(pending.length ? { pending } : {}) }
   if (!enabled.length) return { ...base, mode: 'none', cameras: [], cells: [], attributions: [], note: 'no_provider_connected' }
   if (plan.mode === 'none') return { ...base, cameras: [], cells: [], attributions: [], coverage: coverageInView(enabled, box) }
   if (d.store === 'memory') return memoryView(d, enabled, box, plan, base)
@@ -124,12 +125,30 @@ export async function getCamerasInView({ bbox, zoom, coverage = false } = {}, de
       lng: Number(r.longitude),
       status: r.status,
       feed: r.feed_type,
-      video: r.feed_type === 'HLS' || r.feed_type === 'VIDEO_STREAM',
+      video: videoAllowed(p) && (r.feed_type === 'HLS' || r.feed_type === 'VIDEO_STREAM'),
       freshness: f.state,
       corridor: r.corridor_key,
     })
   }
   return { ...base, cameras, cells: [], attributions: [...used.values()].map((p) => ({ provider: p.name, text: p.attribution })) }
+}
+
+/**
+ * Registered systems in view that are NOT drawing, and why: a keyed provider
+ * whose key is not installed ("needs_key"), one built but held for the
+ * agency's confirmation, or a state whose agency must grant permission first.
+ * Only for state-sized views (a continent would list every state). No env
+ * names, hosts or keys — the provider's public name and the reason only.
+ */
+export function pendingInView(providers, box, extra = CAMERA_ACCESS_PENDING) {
+  if (box.east - box.west > 25 || box.north - box.south > 15) return []
+  const out = []
+  for (const p of providers) {
+    if (p.enabled || !boxesOverlap(p.bounds, box) || p.disabled_reason === 'disabled_by_operator') continue
+    out.push({ provider: p.name, state: p.state || null, access: p.disabled_reason === 'api_key_not_configured' ? 'needs_key' : p.access === 'needs_permission' ? 'needs_permission' : 'off' })
+  }
+  for (const x of extra) if (boxesOverlap(x.bounds, box)) out.push({ provider: x.provider, state: x.state, access: x.access })
+  return out
 }
 
 /** The connected providers whose territory meets this box — the honest coverage line. */
@@ -168,7 +187,7 @@ const cameraView = (d, p, r) => ({
   lng: Number(r.longitude),
   status: r.status,
   feed: r.feed_type,
-  video: r.feed_type === 'HLS' && Boolean(r.stream_url),
+  video: videoAllowed(p) && r.feed_type === 'HLS' && Boolean(r.stream_url),
   media: p.image_policy === 'link_only' || r.feed_type === 'PROVIDER_PAGE_ONLY' ? 'link' : 'still',
   freshness: cameraFreshness({ capturedAt: r.provider_updated_at, cadenceSec: r.snapshot_cadence_sec ?? p.snapshot_cadence_sec, status: r.status, now: d.now, staleAfterSec: p.stale_after_sec }).state,
   corridor: r.corridor_key,
@@ -241,7 +260,7 @@ export async function getCameraDetail(cameraId, deps = {}) {
   if (!provider.enabled) return { ok: false, status: 409, error: 'provider_disabled', provider: publicProvider(provider) }
   const cadence = cam.snapshot_cadence_sec ?? provider.snapshot_cadence_sec ?? null
   const freshness = cameraFreshness({ capturedAt: cam.provider_updated_at, cadenceSec: cadence, status: cam.status, now: d.now, staleAfterSec: provider.stale_after_sec })
-  const video = (cam.feed_type === 'HLS' || cam.feed_type === 'VIDEO_STREAM') && cam.stream_url && validateUpstreamUrl(cam.stream_url, provider).ok
+  const video = videoAllowed(provider) && (cam.feed_type === 'HLS' || cam.feed_type === 'VIDEO_STREAM') && cam.stream_url && validateUpstreamUrl(cam.stream_url, provider).ok
   const media = {
     still: provider.image_policy === 'proxy' && (cam.still_url || hasSnapshotBuilder(d, provider)) && cam.feed_type !== 'PROVIDER_PAGE_ONLY'
       ? { kind: 'proxy', path: `/api/cockpit/map/cameras/${encodeURIComponent(cam.camera_id)}/snapshot`, refresh_sec: cadence, ...(isPassthrough(d, provider) ? { passthrough: true } : {}) }

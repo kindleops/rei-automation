@@ -19,6 +19,9 @@ export const isOwnedMapLayer = (id?: string): boolean => !id ? false : (
   id.startsWith('prop-tiles-') ||
   id.startsWith('map-agg-') ||
   id.startsWith('seller-pins-') ||
+  // Desk context overlays (cameras, crime, investor presence): glyph tiles the
+  // painter must not recolour and the label tone must not fade.
+  id.startsWith('mxd-ctx-') ||
   id.startsWith('nx-icm-hybrid-') ||
   (id.startsWith('nx-') && !id.startsWith('nx-hybrid-') && !id.startsWith('nx-relief-'))
 )

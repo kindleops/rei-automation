@@ -1,7 +1,7 @@
 /**
- * GET /api/cockpit/map/crime?bbox=w,s,e,n&zoom=z&days=7|30|90
- * Reported incidents from city open-data portals (Minneapolis, Dallas,
- * Chicago) — categories, days, source, coverage. Never a safety score.
+ * GET /api/cockpit/map/crime?bbox=w,s,e,n&zoom=z&days=7|14|30|all&cats=violent,property,drugs,other
+ * Reported incidents from city open-data portals (crime-sources.js) —
+ * glyph type, category, day/time, source, coverage. Never a safety score.
  * Operator-gated; see crime-service.
  */
 import { NextResponse } from 'next/server.js'
@@ -22,7 +22,7 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url)
     if (searchParams.get('coverage') === '1') return NextResponse.json({ ok: true, ...crimeCoverage() }, { headers: { ...cors, 'Cache-Control': 'private, max-age=600' } })
-    const result = await getCrimeInView({ bbox: searchParams.get('bbox'), zoom: searchParams.get('zoom'), days: searchParams.get('days') })
+    const result = await getCrimeInView({ bbox: searchParams.get('bbox'), zoom: searchParams.get('zoom'), days: searchParams.get('days'), cats: searchParams.get('cats') })
     return NextResponse.json(result, { status: result.ok ? 200 : result.status || 400, headers: { ...cors, 'Cache-Control': 'private, max-age=120' } })
   } catch (error) {
     return NextResponse.json({ ok: false, error: 'crime_failed', message: error?.message || String(error) }, { status: 500, headers: cors })

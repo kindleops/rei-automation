@@ -29,8 +29,48 @@ export function cityDay(v, timeZone) {
   if (!DAY_FMT.has(timeZone)) DAY_FMT.set(timeZone, new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }))
   return DAY_FMT.get(timeZone).format(new Date(t))
 }
+/**
+ * The local time an incident occurred, 'YYYY-MM-DDTHH:MM' in the city's own
+ * clock, or null when the city publishes no time. An exact midnight is how
+ * date-only fields arrive, so it reads as "time not published", never 12:00 AM.
+ */
+const TIME_FMT = new Map()
+export function cityTime(v, timeZone) {
+  if (v === null || v === undefined || v === '') return null
+  let out = null
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(v) && !/(Z|[+-]\d{2}:?\d{2})$/.test(v)) out = `${v.slice(0, 10)}T${v.slice(11, 16)}`
+  else {
+    const t = typeof v === 'number' ? v : Date.parse(String(v))
+    if (!Number.isFinite(t)) return null
+    if (!TIME_FMT.has(timeZone)) TIME_FMT.set(timeZone, new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }))
+    const parts = Object.fromEntries(TIME_FMT.get(timeZone).formatToParts(new Date(t)).map((p) => [p.type, p.value]))
+    out = `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`
+  }
+  return out && !out.endsWith('T00:00') ? out : null
+}
+/** Day + a separate 'HH:MM' field (Dallas time1) → local time, or null. */
+export function joinDayTime(day, hhmm) {
+  const t = clean(hhmm)
+  if (!day || !/^\d{1,2}:\d{2}$/.test(t)) return null
+  const v = `${day}T${t.padStart(5, '0')}`
+  return v.endsWith('T00:00') ? null : v
+}
+
 /** Socrata floating timestamps carry no zone: compare in the city's own day. */
 const socrataDay = (ms) => new Date(ms).toISOString().slice(0, 10) + 'T00:00:00'
+/** A Socrata date bound, or none for the 'all' window (sinceMs null). */
+export const socrataSince = (field, sinceMs) => (sinceMs === null || sinceMs === undefined ? '' : `${field} >= '${socrataDay(sinceMs)}' AND `)
+/** An ArcGIS date bound, or 1=1 for the 'all' window. */
+export const arcgisSince = (field, sinceMs) => (sinceMs === null || sinceMs === undefined ? '1=1' : `${field} >= TIMESTAMP '${new Date(sinceMs).toISOString().slice(0, 19).replace('T', ' ')}'`)
+/** ArcGIS envelope query params for a box (WGS84 in, WGS84 out). */
+export const arcgisBox = (box) => ({
+  geometry: [box.west, box.south, box.east, box.north].map((v) => v.toFixed(5)).join(','),
+  geometryType: 'esriGeometryEnvelope', inSR: '4326', spatialRel: 'esriSpatialRelIntersects', returnGeometry: 'true', outSR: '4326', f: 'json',
+})
+const arcgisRows = (body) => {
+  if (body?.error) throw new Error('source_query_error')
+  return Array.isArray(body?.features) ? body.features : []
+}
 
 /** NIBRS "crime against" → the family used for colour. A label, not a score. */
 export function familyFromCrimeAgainst(v) {
@@ -70,7 +110,7 @@ const round = (v, dp) => (v === null ? null : Number(v.toFixed(dp)))
  * @property {string} dataset_url
  * @property {string} lag_note       how far behind "today" the city publishes
  * @property {string} location_note  how the city generalises locations
- * @property {(q:{box:object, sinceMs:number, limit:number}) => string} url
+ * @property {(q:{box:object, sinceMs:number|null, limit:number}) => string} url   sinceMs null = no lower date bound ('all')
  * @property {(body:unknown) => unknown[]} rows
  * @property {(raw:any) => object|null} normalize
  */
@@ -91,27 +131,22 @@ export const CRIME_SOURCES = [
     lag_note: 'Refreshed daily by the city',
     location_note: 'Addresses generalised to the block by the city',
     url: ({ box, sinceMs, limit }) => {
-      const since = new Date(sinceMs).toISOString().slice(0, 19).replace('T', ' ')
       const q = new URLSearchParams({
-        where: `Occurred_Date >= TIMESTAMP '${since}'`,
-        geometry: [box.west, box.south, box.east, box.north].map((v) => v.toFixed(5)).join(','),
-        geometryType: 'esriGeometryEnvelope', inSR: '4326', spatialRel: 'esriSpatialRelIntersects',
+        where: arcgisSince('Occurred_Date', sinceMs),
+        ...arcgisBox(box),
         outFields: 'OBJECTID,Offense_Category,Offense,Occurred_Date,NIBRS_Crime_Against',
-        returnGeometry: 'true', outSR: '4326', orderByFields: 'Occurred_Date DESC', resultRecordCount: String(limit), f: 'json',
+        orderByFields: 'Occurred_Date DESC', resultRecordCount: String(limit),
       })
       return `https://services.arcgis.com/afSMGVsC7QlRK1kZ/arcgis/rest/services/Crime_Data/FeatureServer/0/query?${q}`
     },
-    rows: (body) => {
-      if (body?.error) throw new Error('source_query_error')
-      return Array.isArray(body?.features) ? body.features : []
-    },
+    rows: arcgisRows,
     normalize: (f) => {
       const a = f?.attributes || {}
       const lat = num(f?.geometry?.y)
       const lng = num(f?.geometry?.x)
       const category = clean(a.Offense_Category)
       if (lat === null || lng === null || !category) return null
-      return { key: `mpls:${a.OBJECTID}`, category, offense: clean(a.Offense) || null, family: familyFromCrimeAgainst(a.NIBRS_Crime_Against), occurred_on: cityDay(a.Occurred_Date, 'America/Chicago'), lat: round(lat, 5), lng: round(lng, 5) }
+      return { key: `mpls:${a.OBJECTID}`, category, offense: clean(a.Offense) || null, family: familyFromCrimeAgainst(a.NIBRS_Crime_Against), occurred_on: cityDay(a.Occurred_Date, 'America/Chicago'), occurred_at: cityTime(a.Occurred_Date, 'America/Chicago'), lat: round(lat, 5), lng: round(lng, 5) }
     },
   },
   {
@@ -129,8 +164,8 @@ export const CRIME_SOURCES = [
     location_note: 'The city geocodes to the address; LeadCommand rounds to about 100 m',
     url: ({ box, sinceMs, limit }) => {
       const q = new URLSearchParams({
-        $select: 'incidentnum,date1,nibrs_crime_category,nibrs_crime,nibrs_crimeagainst,geocoded_column',
-        $where: `date1 >= '${socrataDay(sinceMs)}' AND within_box(geocoded_column, ${box.north.toFixed(5)}, ${box.west.toFixed(5)}, ${box.south.toFixed(5)}, ${box.east.toFixed(5)})`,
+        $select: 'incidentnum,date1,time1,nibrs_crime_category,nibrs_crime,nibrs_crimeagainst,geocoded_column',
+        $where: `${socrataSince('date1', sinceMs)}within_box(geocoded_column, ${box.north.toFixed(5)}, ${box.west.toFixed(5)}, ${box.south.toFixed(5)}, ${box.east.toFixed(5)})`,
         $order: 'date1 DESC',
         $limit: String(limit),
       })
@@ -143,7 +178,7 @@ export const CRIME_SOURCES = [
       const category = titleCase(r?.nibrs_crime_category)
       if (lat === null || lng === null || !category || !clean(r?.incidentnum)) return null
       // One row per offense × victim: an incident + offense is one mark.
-      return { key: `dal:${clean(r.incidentnum)}:${clean(r.nibrs_crime)}`, category, offense: titleCase(r.nibrs_crime) || null, family: familyFromCrimeAgainst(r.nibrs_crimeagainst), occurred_on: cityDay(r.date1, 'America/Chicago'), lat: round(lat, 3), lng: round(lng, 3) }
+      return { key: `dal:${clean(r.incidentnum)}:${clean(r.nibrs_crime)}`, category, offense: titleCase(r.nibrs_crime) || null, family: familyFromCrimeAgainst(r.nibrs_crimeagainst), occurred_on: cityDay(r.date1, 'America/Chicago'), occurred_at: joinDayTime(cityDay(r.date1, 'America/Chicago'), r.time1), lat: round(lat, 3), lng: round(lng, 3) }
     },
   },
   {
@@ -162,7 +197,7 @@ export const CRIME_SOURCES = [
     url: ({ box, sinceMs, limit }) => {
       const q = new URLSearchParams({
         $select: 'id,date,primary_type,description,latitude,longitude',
-        $where: `date >= '${socrataDay(sinceMs)}' AND latitude between ${box.south.toFixed(5)} and ${box.north.toFixed(5)} AND longitude between ${box.west.toFixed(5)} and ${box.east.toFixed(5)}`,
+        $where: `${socrataSince('date', sinceMs)}latitude between ${box.south.toFixed(5)} and ${box.north.toFixed(5)} AND longitude between ${box.west.toFixed(5)} and ${box.east.toFixed(5)}`,
         $order: 'date DESC',
         $limit: String(limit),
       })
@@ -174,7 +209,7 @@ export const CRIME_SOURCES = [
       const lng = num(r?.longitude)
       const category = titleCase(r?.primary_type)
       if (lat === null || lng === null || !category || !clean(r?.id)) return null
-      return { key: `chi:${clean(r.id)}`, category, offense: titleCase(r.description) || null, family: chicagoFamily(r.primary_type), occurred_on: cityDay(r.date, 'America/Chicago'), lat: round(lat, 5), lng: round(lng, 5) }
+      return { key: `chi:${clean(r.id)}`, category, offense: titleCase(r.description) || null, family: chicagoFamily(r.primary_type), occurred_on: cityDay(r.date, 'America/Chicago'), occurred_at: cityTime(r.date, 'America/Chicago'), lat: round(lat, 5), lng: round(lng, 5) }
     },
   },
 ]

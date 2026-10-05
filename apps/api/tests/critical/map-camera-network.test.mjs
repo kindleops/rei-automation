@@ -188,7 +188,8 @@ test('coverage never reads "0 cameras" for a state we have not connected', () =>
   assert.equal(cov.MN.camera_count, 3)
   assert.equal(cov.WI.connected, false)
   assert.equal(cov.WI.camera_count, null)
-  assert.equal(cov.WI.label, 'No public camera source connected')
+  assert.equal(cov.WI.label, '511WI needs agency permission', 'a state awaiting agency permission says so')
+  assert.equal(cov.WY.label, 'No public camera source connected')
 })
 
 /* ── security ─────────────────────────────────────────────────────────────── */

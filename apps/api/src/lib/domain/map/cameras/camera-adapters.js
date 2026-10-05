@@ -21,6 +21,8 @@ import { mndotIrisAdapter } from './adapters/mndot-iris.js'
 import { txdotItsAdapter } from './adapters/txdot-its.js'
 import { austinMobilityAdapter } from './adapters/austin-mobility.js'
 import { caltransCwwp2Adapter } from './adapters/caltrans-cwwp2.js'
+import { idotGatewayAdapter, iowaDotAdapter, mdotChartAdapter, modotTravelerAdapter, wsdotKmlAdapter } from './adapters/state-public-feeds.js'
+import { ibi511Adapter, ohgoAdapter } from './adapters/keyed-511.js'
 
 /** @type {Record<string, { listRaw: Function, normalize: Function, snapshotRequest?: Function }>} */
 export const CAMERA_ADAPTERS = {
@@ -28,4 +30,11 @@ export const CAMERA_ADAPTERS = {
   txdot_its: txdotItsAdapter,
   austin_mobility: austinMobilityAdapter,
   caltrans_cwwp2: caltransCwwp2Adapter,
+  idot_gateway: idotGatewayAdapter,
+  wsdot_kml: wsdotKmlAdapter,
+  mdot_chart: mdotChartAdapter,
+  modot_traveler: modotTravelerAdapter,
+  iowa_dot: iowaDotAdapter,
+  ibi_511: ibi511Adapter,
+  ohgo: ohgoAdapter,
 }

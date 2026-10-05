@@ -4,7 +4,7 @@ import { isOwnedMapLayer } from './map-layer-ownership'
 
 describe('map layer ownership', () => {
   it('owns every LeadCommand layer family, including Living Map', () => {
-    for (const id of ['nx-world-light', 'nx-world-terminator', 'nx-world-bld', 'nx-world-sel-bld', 'nx-lens-area-fill', 'nx-lens-area-line', 'nx-dots', 'nx-orbs-core', 'nx-mx-activity', 'nx-icm-hybrid-road', 'command-pin-glow-raw', 'prop-tiles-hit', 'seller-pins-core', 'map-agg-cluster-count']) {
+    for (const id of ['nx-world-light', 'nx-world-terminator', 'nx-world-bld', 'nx-world-sel-bld', 'nx-lens-area-fill', 'nx-lens-area-line', 'nx-dots', 'nx-orbs-core', 'nx-mx-activity', 'nx-icm-hybrid-road', 'command-pin-glow-raw', 'prop-tiles-hit', 'seller-pins-core', 'map-agg-cluster-count', 'mxd-ctx-cam-icons', 'mxd-ctx-crime-group']) {
       expect(isOwnedMapLayer(id), id).toBe(true)
     }
   })

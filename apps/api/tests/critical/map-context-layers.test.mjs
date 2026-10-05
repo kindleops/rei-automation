@@ -6,8 +6,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { CRIME_SOURCES, chicagoFamily, cityDay, familyFromCrimeAgainst } from '@/lib/domain/map/crime/crime-sources.js'
-import { _resetCrimeCache, getCrimeInView, parseCrimeRequest, snapBox } from '@/lib/domain/map/crime/crime-service.js'
+import { chicagoFamily, cityDay, familyFromCrimeAgainst } from '@/lib/domain/map/crime/crime-sources.js'
+import { CRIME_SOURCES, _resetCrimeCache, getCrimeInView, parseCrimeRequest, snapBox } from '@/lib/domain/map/crime/crime-service.js'
 import { _resetPresenceCache, getInvestorPresence, presenceGrid, shapeCells } from '@/lib/domain/map/investor-presence-service.js'
 import { _resetCensusCache, getCensusCells, shapeCensusCell } from '@/lib/domain/map/census-cells-service.js'
 
@@ -22,7 +22,8 @@ test('Minneapolis ArcGIS feature â†’ category, offense, NIBRS family, city day; 
     attributes: { OBJECTID: 381427, Offense_Category: 'Shots Fired Calls', Offense: 'Sound of Shots Fired (P)', Occurred_Date: 1790983348000, NIBRS_Crime_Against: 'Non NIBRS Data', Address: '0005XX CHICAGO AVE', Case_Number: 'MP-2026-1' },
     geometry: { x: -93.26030178380324, y: 44.97356388804399 },
   })
-  assert.deepEqual(Object.keys(n).sort(), ['category', 'family', 'key', 'lat', 'lng', 'occurred_on', 'offense'])
+  assert.deepEqual(Object.keys(n).sort(), ['category', 'family', 'key', 'lat', 'lng', 'occurred_at', 'occurred_on', 'offense'])
+  assert.equal(n.occurred_at, '2026-10-02T18:22', 'the city clock (CDT), not UTC 23:22')
   assert.equal(n.category, 'Shots Fired Calls')
   assert.equal(n.family, 'other')
   assert.equal(n.occurred_on, '2026-10-02')
@@ -56,11 +57,20 @@ test('Chicago Socrata row â†’ IUCR primary type with its family; families are la
 
 test('every crime query targets only its own host and carries the window + box', () => {
   const box = { west: -93.3, south: 44.94, east: -93.24, north: 44.99 }
+  assert.ok(CRIME_SOURCES.length >= 27, 'the 2026-10-05 expansion is connected')
   for (const s of CRIME_SOURCES) {
-    const u = new URL(s.url({ box, sinceMs: NOW - 30 * 86_400_000, limit: 2000 }))
-    assert.ok(s.metadata_hosts.includes(u.hostname), s.source_id)
-    assert.equal(u.protocol, 'https:', s.source_id)
-    assert.ok(/2026-09-03/.test(decodeURIComponent(u.search)), `${s.source_id} window`)
+    const q = { box, sinceMs: NOW - 30 * 86_400_000, limit: 2000 }
+    const urls = typeof s.urls === 'function' ? s.urls(q).map((x) => x.url) : [s.url(q)]
+    for (const raw of urls) {
+      const u = new URL(raw)
+      assert.ok(s.metadata_hosts.includes(u.hostname), s.source_id)
+      assert.equal(u.protocol, 'https:', s.source_id)
+      assert.ok(/2026-09-03/.test(decodeURIComponent(u.search)), `${s.source_id} window`)
+      // 'all' drops only the date bound â€” the box and the row cap stay
+      const all = decodeURIComponent(new URL(typeof s.urls === 'function' ? s.urls({ ...q, sinceMs: null })[0].url : s.url({ ...q, sinceMs: null })).search)
+      assert.ok(!/2026-09-03/.test(all), `${s.source_id} all-window has no date bound`)
+      assert.ok(/-93\.3|93\.30000|-93\.30000/.test(all), `${s.source_id} all-window keeps the box`)
+    }
   }
 })
 
@@ -83,7 +93,11 @@ test('crime in a covered city: incidents, category counts, source + newest day â
   assert.equal(r.mode, 'incidents')
   assert.equal(r.covered, true)
   assert.equal(r.incidents.length, 3, 'duplicate records collapse')
-  assert.deepEqual(r.categories[0], { family: 'property', category: 'Theft', count: 2 })
+  assert.equal(r.categories.reduce((a, c) => a + c.count, 0), 3)
+  assert.deepEqual(r.counts.cats, { violent: 1, property: 2, drugs: 0, other: 0 })
+  assert.equal(r.counts.types.vehicle, 1, '"Theft From Motor Vehicle" is a vehicle break-in')
+  assert.equal(r.counts.types.theft, 1)
+  assert.equal(r.counts.types.assault, 1)
   assert.equal(r.per_source[0].city, 'Minneapolis')
   assert.equal(r.per_source[0].latest_on, '2026-10-02')
   assert.equal(r.scoring, 'none')
@@ -97,10 +111,14 @@ test('crime in a covered city: incidents, category counts, source + newest day â
 test('crime outside every connected city is "not covered" (never zero); zoomed out asks to zoom in', async () => {
   _resetCrimeCache()
   const fetchImpl = async () => { throw new Error('should not fetch') }
-  const atl = await getCrimeInView({ bbox: '-84.45,33.70,-84.35,33.80', zoom: 13 }, { now: NOW, fetchImpl })
-  assert.equal(atl.covered, false)
-  assert.equal(atl.mode, 'not_covered')
-  assert.ok(atl.not_covered.some((c) => c.city === 'Houston'))
+  const sat = await getCrimeInView({ bbox: '-98.55,29.38,-98.45,29.48', zoom: 13 }, { now: NOW, fetchImpl })
+  assert.equal(sat.covered, false)
+  assert.equal(sat.mode, 'not_covered')
+  assert.deepEqual(sat.not_covered.map((c) => c.city), ['San Antonio'], 'the city in view, with why')
+  assert.match(sat.not_covered[0].reason, /no coordinates/)
+  const nowhere = await getCrimeInView({ bbox: '-100.5,40.5,-100.4,40.6', zoom: 13 }, { now: NOW, fetchImpl })
+  assert.equal(nowhere.mode, 'not_covered')
+  assert.ok(nowhere.not_covered.some((c) => c.city === 'Houston'), 'nothing in view: the full checked list')
   const wide = await getCrimeInView({ bbox: '-93.6,44.7,-92.9,45.2', zoom: 9 }, { now: NOW, fetchImpl })
   assert.equal(wide.mode, 'zoom_in')
   assert.equal(wide.covered, true)

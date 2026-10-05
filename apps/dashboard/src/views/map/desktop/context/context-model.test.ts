@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CONTEXT_DEFAULTS, cameraMediaLabel, cameraStatus, camerasRequestFor, contextGroup, crimeRequestFor, crimeStatus, directionLabel, fmtDay,
+  CONTEXT_DEFAULTS, cameraMediaLabel, normalizeCrimeCats, normalizeCrimeDays, pendingWords, cameraStatus, camerasRequestFor, contextGroup, crimeRequestFor, crimeStatus, directionLabel, fmtDay,
   presenceFeatures, presenceRequestFor, presenceStatus, type CamerasReply, type CrimeReply, type PresenceReply,
 } from './context-model'
 
@@ -12,8 +12,12 @@ describe('context overlay requests mirror the server refusals', () => {
     expect(camerasRequestFor(MSP, 4)).toBeNull()
   })
   it('crime always asks (the server answers coverage); presence refuses a continent before any call', () => {
-    expect(crimeRequestFor(MSP, 9, 30)).toContain('/api/cockpit/map/crime?bbox=')
-    expect(crimeRequestFor(MSP, 9, 30)).toContain('&days=30')
+    expect(crimeRequestFor(MSP, 9, '30')).toContain('/api/cockpit/map/crime?bbox=')
+    expect(crimeRequestFor(MSP, 9, '30')).toContain('&days=30')
+    expect(crimeRequestFor(MSP, 12, 'all')).toContain('&days=all')
+    // every category = no filter param; a subset is sent sorted (one cache key per set)
+    expect(crimeRequestFor(MSP, 12, '7', ['violent', 'property', 'drugs', 'other'])).not.toContain('cats=')
+    expect(crimeRequestFor(MSP, 12, '7', ['drugs', 'violent'])).toContain('&cats=drugs,violent')
     expect(presenceRequestFor(MSP, 12, 24)).toBe('/api/cockpit/map/investor-presence?bbox=-93.4200,44.9000,-93.1000,45.0800&zoom=12.0&months=24')
     expect(presenceRequestFor(MSP, 8, 24)).toBeNull()
     expect(presenceRequestFor({ west: -100, south: 30, east: -90, north: 40 }, 10, 24)).toBeNull()
@@ -42,11 +46,25 @@ describe('honest statuses', () => {
     expect(s.state).toBe('unavailable')
     expect(s.reason).toMatch(/MnDOT not answering/)
   })
+  it('old stored windows and categories normalise', () => {
+    expect(normalizeCrimeDays(30)).toBe('30')
+    expect(normalizeCrimeDays(90)).toBe('all')
+    expect(normalizeCrimeDays('14')).toBe('14')
+    expect(normalizeCrimeDays(undefined)).toBe('30')
+    expect(normalizeCrimeCats(undefined)).toEqual(['violent', 'property', 'drugs', 'other'])
+    expect(normalizeCrimeCats([])).toEqual(['violent', 'property', 'drugs', 'other'])
+    expect(normalizeCrimeCats(['drugs', 'bogus', 'drugs'])).toEqual(['drugs'])
+    expect(CONTEXT_DEFAULTS.crimeDays).toBe('30')
+  })
+  it('cameras: a view with registered-but-unconnected systems says what would connect it', () => {
+    expect(pendingWords([{ provider: 'FL511', state: 'FL', access: 'needs_key' }])).toBe('No camera feed connected here · FL511 needs an API key')
+    expect(cameraStatus(camReply({ pending: [{ provider: 'TDOT SmartWay', state: 'TN', access: 'needs_permission' }] }), 11).reason).toMatch(/TDOT SmartWay needs agency permission/)
+  })
   it('crime: not covered, zoom in, capped', () => {
     const base: CrimeReply = { ok: true, mode: 'incidents', covered: true, window_days: 30, incidents: [], categories: [], sources: [] }
     expect(crimeStatus({ ...base, covered: false, mode: 'not_covered' }).state).toBe('not_covered')
     expect(crimeStatus({ ...base, mode: 'zoom_in', min_zoom: 11 }).reason).toMatch(/Zoom in/)
-    expect(crimeStatus({ ...base, per_source: [{ source_id: 'x', city: 'Chicago', count: 2000, latest_on: '2026-09-26', truncated: true }] }).reason).toMatch(/Newest 2,000 shown for Chicago/)
+    expect(crimeStatus({ ...base, per_source: [{ source_id: 'x', city: 'Chicago', count: 2000, latest_on: '2026-09-26', truncated: true }] }).reason).toMatch(/Row cap reached for Chicago/)
     expect(crimeStatus(null).state).toBe('unavailable')
   })
   it('presence: zoomed out waits; data reports the latest sale', () => {
