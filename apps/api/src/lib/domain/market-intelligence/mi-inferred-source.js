@@ -40,6 +40,8 @@ export function missingInferredColumns(rows) {
   return missing
 }
 
+/** Public bodies (down-payment / housing agencies, governments) appear as recorded co-buyers; never a portfolio owner. */
+const PUBLIC_BODY = /\b(agency|authority|housing finance|department|county of|city of|state of|commission|idaho housing|tribe|tribal|nation)\b/i
 const int = (v) => (v === null || v === undefined ? 0 : Number(v) || 0)
 
 /** Pure: the build's published inferred meta (from notes.inferred_investor), or null. */
@@ -86,7 +88,7 @@ export function stackIdentity(s) {
   const labelN = int(s?.label_n)
   const namedN = int(s?.named_n)
   const raw = s?.label ? String(s.label) : null
-  const ok = raw && labelN >= 2 && namedN > 0 && labelN / namedN >= 0.5 && !lenderClass(raw)
+  const ok = raw && labelN >= 2 && namedN > 0 && labelN / namedN >= 0.5 && !lenderClass(raw) && !PUBLIC_BODY.test(raw)
   const name = ok ? displayableCompanyName(raw) : null
   return { name, label: name || 'Unnamed owner portfolio', named: Boolean(name), evidence: name ? `${labelN} of ${namedN} recorded purchases in this stack name it` : null }
 }

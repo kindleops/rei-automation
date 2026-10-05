@@ -136,6 +136,7 @@ test('inferred source: schema guard, build meta, stack naming (companies only), 
   assert.equal(stackIdentity({ label: 'ACME HOLDINGS LLC', label_n: 1, named_n: 1 }).name, null) // one purchase is not enough
   assert.equal(stackIdentity({ label: 'WILLIAMS,MICHAEL', label_n: 5, named_n: 5 }).name, null) // a person is never named
   assert.equal(stackIdentity({ label: 'FANNIE MAE', label_n: 5, named_n: 5 }).name, null) // lenders are not portfolios
+  assert.equal(stackIdentity({ label: 'Tule River Homebuyer Earned Equity Agency', label_n: 6, named_n: 7 }).name, null) // public bodies are co-buyers, not owners
   // loadInferred: not installed → unavailable; a build without notes → not_built
   const loader = (missing, rows = {}) => ({ inferredSchema: async () => missing, inferred: async (name) => rows[name] || [] })
   assert.equal((await loadInferred({ loader: loader(['x.y']), build: {} })).reason, 'not_installed')
@@ -175,6 +176,7 @@ test('generated migration: patches the applied objects by insertion; rollback re
   assert.ok(mig.includes("if v_kind = 'i' then return public.mi_infer_run_unit(p_build, p_unit, p_as_of); end if;"))
   assert.ok(mig.includes('m.property_id\n  from public.mv_map_market_sales m'))
   assert.match(mig, /'i:validate', 'finalize', 'i:cleanup'/)
+  assert.match(mig, /'i:link:7', 'i:stacks'/)
   assert.ok(!/cron\.schedule/.test(mig), 'no schedule change')
   assert.ok(pre.includes(mig) && /RAISE EXCEPTION 'pretest ok/.test(pre), 'pretest embeds the migration and rolls back')
   // investor_count (recorded) is never touched by the extension
