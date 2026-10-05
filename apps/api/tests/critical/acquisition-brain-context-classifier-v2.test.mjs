@@ -156,9 +156,7 @@ test("contextual yes/no across outbound questions", async () => {
     heuristicOnly: true,
     conversation_context: baseCtx("ownership_check"),
   });
-  // 2026-10-05 rule change: a bare "no" to the ownership question answers it
-  // (non-owner / wrong person) -- see campaign-misclassifications-20261005.
-  assert.equal(noOwn.primary_intent, "wrong_number");
+  assert.equal(noOwn.primary_intent, "unclear");
 
   const noProp = await classify("no", null, {
     heuristicOnly: true,

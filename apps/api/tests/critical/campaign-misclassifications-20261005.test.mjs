@@ -121,27 +121,58 @@ test("Pedro G Gonzalez: a bare App Store URL is unclear/review, never asking_pri
 
 // ── 4. bare "No" bound to the question ──────────────────────────────────────
 
-test("Donald N Coward / William C Judice: bare 'No' to the ownership question is non-owner (wrong person)", async () => {
-  const openers = [
-    "Hello Donald, this is Helen. I have been investing in Pasadena. Is 2114 Mulberry Ln yours?",
-    "Hello William, this is Alex. I have been investing in Spring. Just checking, do you own 23227 Briarcreek Blvd?",
-  ];
-  for (const opener of openers) {
-    const ctx = await contextAfter(opener, { template_use_case: "ownership_check" });
-    for (const message of ["No", "No.", "Nope", "No I don't"]) {
-      const r = await run(message, ctx);
-      assert.equal(r.primary_intent, "wrong_number", `${message} after ${opener}`);
-      assert.equal(r.context_status, "valid");
-      assert.equal(r.automation_decision.auto_reply_allowed, false);
-    }
+// HELD behind LC_BARE_NO_OWNERSHIP_MODE (default "clarify" = previous behaviour)
+// until the owner decides: archiving a number is a strong action.
+async function withBareNoMode(mode, fn) {
+  const prev = process.env.LC_BARE_NO_OWNERSHIP_MODE;
+  if (mode == null) delete process.env.LC_BARE_NO_OWNERSHIP_MODE;
+  else process.env.LC_BARE_NO_OWNERSHIP_MODE = mode;
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env.LC_BARE_NO_OWNERSHIP_MODE;
+    else process.env.LC_BARE_NO_OWNERSHIP_MODE = prev;
   }
+}
+
+const NO_OPENERS = [
+  "Hello Donald, this is Helen. I have been investing in Pasadena. Is 2114 Mulberry Ln yours?",
+  "Hello William, this is Alex. I have been investing in Spring. Just checking, do you own 23227 Briarcreek Blvd?",
+];
+
+test("DEFAULT: bare 'No' to the ownership question keeps the previous clarification behaviour (no archive)", async () => {
+  await withBareNoMode(null, async () => {
+    for (const opener of NO_OPENERS) {
+      const ctx = await contextAfter(opener, { template_use_case: "ownership_check" });
+      for (const message of ["No", "No.", "Nope", "No I don't", "Not anymore"]) {
+        const r = await run(message, ctx);
+        assert.equal(r.primary_intent, "unclear", `${message} after ${opener}`);
+        assert.ok(r.secondary_intents.includes("ownership_denial_needs_clarification"), message);
+        assert.notEqual(r.automation_decision.suppression_action, "archive_wrong_number", message);
+      }
+    }
+  });
 });
 
-test("'Not anymore' to 'do you still own…?' is sold, not a wrong person", async () => {
-  const ctx = await contextAfter("Do you still own 1 Main St?", { template_use_case: "ownership_check" });
-  const r = await run("Not anymore", ctx);
-  assert.equal(r.primary_intent, "sold_property");
-  assert.equal(r.automation_decision.suppression_action, "none");
+test("FLAG non_owner: Donald N Coward / William C Judice bare 'No' is non-owner; 'Not anymore' is sold", async () => {
+  await withBareNoMode("non_owner", async () => {
+    for (const opener of NO_OPENERS) {
+      const ctx = await contextAfter(opener, { template_use_case: "ownership_check" });
+      for (const message of ["No", "No.", "Nope", "No I don't"]) {
+        const r = await run(message, ctx);
+        assert.equal(r.primary_intent, "wrong_number", `${message} after ${opener}`);
+        assert.equal(r.context_status, "valid");
+        assert.equal(r.automation_decision.auto_reply_allowed, false);
+      }
+    }
+    const ctx = await contextAfter("Do you still own 1 Main St?", { template_use_case: "ownership_check" });
+    const sold = await run("Not anymore", ctx);
+    assert.equal(sold.primary_intent, "sold_property");
+    assert.equal(sold.automation_decision.suppression_action, "none");
+    // Hedges still ask, and a contextless "No" is never a wrong number.
+    assert.equal((await run("Not really", ctx)).primary_intent, "unclear");
+    assert.notEqual((await run("No", null)).primary_intent, "wrong_number");
+  });
 });
 
 test("bare 'No' to 'open to a sale?' is not_interested", async () => {
