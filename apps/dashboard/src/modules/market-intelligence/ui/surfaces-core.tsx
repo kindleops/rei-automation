@@ -9,7 +9,7 @@ import type { MiDossier, MiGeoSummary, MiLevel, MiRankResult, MiRow, MiStatusPay
 import { writeMiMapContext } from '../map/mi-map-lenses'
 import { TrendChart } from './charts'
 import { GeoActions, MetricTile, QueryState } from './parts'
-import { geoMenu, sparkOf } from './ui-model'
+import { geoMenu, metricAvailable, sparkOf } from './ui-model'
 import { useRowColumns } from './use-row-columns'
 import { EvidenceShare, InferredInvestorSlot } from './evidence'
 import { GeoHeatFigure } from './geo-figure'
@@ -159,10 +159,10 @@ export function RowsGrid({ id, label, rows, primary, sort, onSort, total, empty 
 }
 
 export function RankingsSurface({ geo }: { geo: MiGeoSummary }) {
-  const { state, set, registry } = useMi()
+  const { state, set, registry, status } = useMi()
   const levels = ORDER.slice(ORDER.indexOf(geo.level) + 1).filter((l) => !(geo.level === 'county' && l === 'market') && !(geo.level === 'city' && (l === 'market' || l === 'county')))
   const level = state.rl && levels.includes(state.rl as MiLevel) ? state.rl : childLevelOf(geo.level) && levels.includes(childLevelOf(geo.level) as MiLevel) ? (childLevelOf(geo.level) as string) : levels[0]
-  const rankable = (registry?.metrics ?? []).filter((m) => m.rankable && m.levels.includes(level as MiLevel) && (state.asset === 'all' || m.assets.includes(state.asset)))
+  const rankable = (registry?.metrics ?? []).filter((m) => m.rankable && metricAvailable(m, status) && m.levels.includes(level as MiLevel) && (state.asset === 'all' || m.assets.includes(state.asset)))
   const metric = rankable.some((m) => m.id === state.rm) ? state.rm : 'sales_count'
   const key = level ? miUrl('rank', { level, within: geo.id, metric, dir: state.rd, min_sales: state.rmin || null, period: state.period, asset: state.asset, limit: 500 }) : null
   const q = useMiQuery<MiRankResult>(key)
@@ -221,8 +221,8 @@ export function UniverseLoad({ states }: { states: string }) {
 
 // ── Map mode (brief §11, §27, §40) ─────────────────────────────────────────
 export function MapModeSurface({ geo }: { geo: MiGeoSummary }) {
-  const { state, set, registry, setInspect } = useMi()
-  const heatable = (registry?.metrics ?? []).filter((m) => m.heatable)
+  const { state, set, registry, setInspect, status } = useMi()
+  const heatable = (registry?.metrics ?? []).filter((m) => m.heatable && metricAvailable(m, status))
   const metric = heatable.find((m) => m.id === state.hm) ?? heatable[0]
   const child = childLevelOf(geo.level)
   const key = child && metric ? miUrl('rank', { level: child, within: geo.id, metric: metric.id, period: state.period, asset: state.asset, limit: 20 }) : null

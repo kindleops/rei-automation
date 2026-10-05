@@ -5,7 +5,7 @@ import { useMi } from '../mi-context'
 import { fmtValue } from '../mi-format'
 import type { MiCompareResult, MiGeoSummary, MiLevel, MiScreenFilter, MiScreenResult, MiUnit } from '../mi-types'
 import { TrendChart } from './charts'
-import { seriesColor } from './ui-model'
+import { metricAvailable, seriesColor } from './ui-model'
 import { ExploreBar, QueryState } from './parts'
 import { RowsGrid } from './surfaces-core'
 
@@ -112,10 +112,10 @@ const fromDisplay = (unit: MiUnit, v: number) => (unit === 'pct' ? v / 100 : v)
 const unitHint = (unit: MiUnit) => (unit === 'pct' ? '%' : unit === 'usd' ? '$' : unit === 'year' ? 'year' : '')
 
 export function ScreenerSurface({ geo }: { geo: MiGeoSummary }) {
-  const { state, set, registry, metric } = useMi()
+  const { state, set, registry, metric, status } = useMi()
   const within = state.sw ?? geo.id
   const level = SCREEN_LEVELS.includes(state.sl as MiLevel) ? (state.sl as MiLevel) : 'zip'
-  const screenable = (registry?.metrics ?? []).filter((m) => m.screenable && m.levels.includes(level) && (state.asset === 'all' || m.assets.includes(state.asset)))
+  const screenable = (registry?.metrics ?? []).filter((m) => m.screenable && metricAvailable(m, status) && m.levels.includes(level) && (state.asset === 'all' || m.assets.includes(state.asset)))
   const key = miUrl('screen', { level, within, filters: JSON.stringify(state.sf), match: state.sm, period: state.period, asset: state.asset })
   const q = useMiQuery<MiScreenResult>(key)
   const setFilter = (i: number, patch: Partial<MiScreenFilter>) => set({ sf: state.sf.map((f, k) => (k === i ? { ...f, ...patch } : f)) })

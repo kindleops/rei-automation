@@ -1,3 +1,4 @@
+import type { SaleOwnerRow } from './sale-owner/sale-owner-client'
 /**
  * Market Intelligence wire types. The API (apps/api …/market-intelligence) is
  * the only authority for values, samples and statuses; the dashboard renders.
@@ -31,6 +32,8 @@ export interface MiMetric {
   min_sample: number
   sample: string
   freshness: 'sales' | 'graph' | 'areas' | 'census'
+  /** 'inferred_investor': available only when status.inferred_investor.available */
+  requires?: string
   aggregation: string
   windowed: boolean
   rankable: boolean
@@ -95,6 +98,7 @@ export interface MiStatusPayload {
   sources: Record<string, Record<string, unknown>>
   asset_filters: Array<{ id: string; label: string; available: boolean }>
   periods: Array<{ id: string; label: string }>
+  inferred_investor?: { available: boolean; reason: string | null; message: string | null; national?: { sales: number; linked: number; coverage: number | null; validation?: MiInferredValidation | null } | null }
 }
 
 export type MiMonthStatus = 'covered' | 'pre_coverage' | 'incomplete' | 'partial'
@@ -164,25 +168,32 @@ export interface MiCompareResult {
 export interface MiRecentSale {
   comp_id: string; sold_on: string; price: number | null; ppsf: number | null; address: string | null; city: string | null; state: string | null; zip: string | null
   asset: string; asset_label: string; units: number | null; sqft: number | null; buyer: string | null; property_id: string | null; source: string; investor: boolean; cash: boolean | null
+  /** The shared buyer-of-record resolver (op=recent_sales carries it). */
+  buyer_of_record?: SaleOwnerRow['buyer_of_record']; owner_link?: SaleOwnerRow['owner_link']; inferred?: SaleOwnerRow['inferred']
 }
 
 export interface MiFail { ok: false; status: number; error: string; message?: string }
 
-/**
- * SLOT: inferred investors from CURRENT OWNER data (LLC/builder owner, absentee mailing,
- * portfolio stacking). Owned by the inferred-investor API work; this UI renders only what
- * the API returns and says "unavailable" otherwise. Every field optional on purpose.
- */
+/** Inferred investors (owner-based): the API's dossier.inferred_investors (INFERRED_INVESTOR_UI.txt §2). */
+export interface MiInferredValidation {
+  precision?: number | null; recall?: number | null; accuracy?: number | null; base_rate?: number | null; n?: number | null
+  tiers?: Record<string, { n?: number; recorded_investor?: number; precision?: number | null }>
+  matrix?: Record<string, { recorded_investor: number; recorded_other: number }>
+  truth?: string | null
+}
+export interface MiInferredStack { stack: string; label: string; named: boolean; name_evidence?: string | null; linked_purchases: number; last_purchase?: string | null; properties_at_mailing_address: number; entity_share?: number | null; out_of_state_share?: number | null }
 export interface MiInferredInvestors {
-  status?: 'ok' | 'insufficient' | 'unavailable'
-  label?: string
-  share?: number | null
-  count?: number | null
-  base_n?: number | null
-  base_label?: string
-  tiers?: Array<{ id: string; label: string; n?: number | null; share?: number | null; definition?: string }>
-  validation?: string | null
-  source?: string | null
-  as_of?: string | null
+  available: boolean
   reason?: string | null
+  message?: string | null
+  label?: string
+  recorded_label?: string
+  sales?: number
+  linked?: number
+  coverage?: number | null
+  tiers?: Array<{ id: string; label: string; n: number; counted: boolean }>
+  validation?: { national: MiInferredValidation | null; local: MiInferredValidation | null; local_n: number }
+  top_stacks?: MiInferredStack[]
+  caveats?: string[]
+  individuals_named?: false
 }

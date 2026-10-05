@@ -1,0 +1,13 @@
+/* Buyer of record: shared by Market Intelligence, the Map comp card and Comp Intelligence. */
+.lcbo-wrap { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.lcbo { min-width: 0; outline: none; border-radius: 4px; }
+.lcbo:focus-visible { box-shadow: 0 0 0 1px rgba(var(--lc-focus-rgb), 0.6); }
+.lcbo__suffix { color: var(--lc-ink-3); font-weight: 400; }
+.lcbo.is-current_owner_of_record .lcbo__lead { color: var(--lc-ink-1); }
+.lcbo.is-not_on_record, .lcbo.is-pending { color: var(--lc-ink-3); }
+.lcbo.is-compact .lcbo__suffix { font-size: 0.92em; }
+/* modeled, not verified: a violet-adjacent dashed mark, never green, never red */
+.lcbo-inferred { display: inline-flex; align-items: center; padding: 0 7px; height: 18px; border-radius: 999px; font-size: 10.5px; font-weight: 500; white-space: nowrap; outline: none;
+  color: rgb(var(--lc-flow-rgb)); background: rgba(var(--lc-flow-rgb), 0.08); box-shadow: inset 0 0 0 1px rgba(var(--lc-flow-rgb), 0.38); border: 0; }
+:root[data-nexus-theme='red_ops'] .lcbo-inferred { color: var(--lc-ink-2); }
+.lcbo-inferred:focus-visible { box-shadow: inset 0 0 0 1px rgba(var(--lc-flow-rgb), 0.8), 0 0 0 1px rgba(var(--lc-focus-rgb), 0.6); }

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { EvidenceShare, InferredInvestorSlot } from './ui/evidence'
+import { EvidenceShare, InferredInvestorSlot, InferredInvestorsPanel } from './ui/evidence'
 import { figureRequest, projectOutlines } from './ui/figure-model'
 import type { MiValues } from './mi-types'
 
@@ -47,19 +47,38 @@ describe('investor clarity: a count is never read against total sales', () => {
   })
 })
 
-describe('inferred investor slot (owner-based; data owned by the inference API)', () => {
-  it('says unavailable when the API provides nothing', () => {
-    expect(text(<InferredInvestorSlot data={undefined} />)).toContain('Unavailable')
-    expect(text(<InferredInvestorSlot data={{ status: 'unavailable', reason: 'Not built' }} />)).toContain('Not built')
+describe('inferred investor (owner-based), rendered only from the API', () => {
+  it('unavailable: the API message verbatim, no number', () => {
+    const t = text(<InferredInvestorSlot data={{ available: false, reason: 'not_built', message: 'Owner-based inference is not built yet (the summary extension is not applied).' }} />)
+    expect(t).toContain('Unavailable')
+    expect(t).toContain('Owner-based inference is not built yet')
+    expect(t).not.toMatch(/\d+%/)
   })
-  it('renders the API tiers and validation note verbatim', () => {
-    const t = text(<InferredInvestorSlot data={{ status: 'ok', share: 0.21, base_n: 5411, base_label: 'properties', tiers: [{ id: 'llc', label: 'LLC / company owner', share: 0.12 }, { id: 'absentee', label: 'Absentee mailing', n: 640 }], validation: 'Validated against 1,204 deed-recorded investor purchases.' }} />)
-    expect(t).toContain('21%')
-    expect(t).toContain('of 5,411 properties')
-    expect(t).toContain('LLC / company owner')
-    expect(t).toContain('640')
-    expect(t).toContain('Validated against 1,204')
-    expect(t).toContain('inference, not a deed')
+  const DATA = {
+    available: true, label: 'Inferred investor (owner-based) · 41% of 210K linked sales · validated 87% precision vs recorded buyers',
+    recorded_label: 'Recorded investor (deed buyer) · 33% of 40,213 sales with a recorded buyer', sales: 665288, linked: 210000, coverage: 210000 / 665288,
+    tiers: [{ id: 'strong', label: 'Strong inferred investor', n: 30000, counted: true }, { id: 'likely', label: 'Likely inferred investor', n: 56000, counted: true }, { id: 'no_signal', label: 'Individual owner, no investor signal', n: 124000, counted: false }],
+    validation: { national: { precision: 0.87, recall: 0.62, n: 31000, matrix: { strong: { recorded_investor: 900, recorded_other: 100 } }, truth: 'Truth = recorded investor buyers.' }, local: null, local_n: 40 },
+    top_stacks: [{ stack: 's1', label: 'Unnamed owner portfolio', named: false, linked_purchases: 12, properties_at_mailing_address: 31, entity_share: 0.9 }],
+    caveats: ['Inferred from the current owner of record, not the deed; never added to recorded investor purchases.'],
+  }
+  it('compact plate: label line verbatim, owner-link coverage, confidence', () => {
+    const t = text(<InferredInvestorSlot data={DATA} compact />)
+    expect(t).toContain(DATA.label)
+    expect(t).toContain('Owner-linked on 32% of sales')
+    expect(t).toContain('87% precision vs recorded buyers nationally')
+  })
+  it('panel: recorded and inferred side by side, tiers, evidence, stacks, caveats, exact copy', () => {
+    const html = renderToStaticMarkup(<InferredInvestorsPanel data={DATA} values={NATION} />)
+    const t = html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ')
+    expect(t).toContain('Recorded investor (deed buyer) · 33% of 40,213 sales with a recorded buyer')
+    expect(t).toContain(DATA.label)
+    expect(t).toContain('Strong inferred investor')
+    expect(t).toContain('Too few recorded buyers here to validate locally (40)')
+    expect(t).toContain('Unnamed owner portfolio')
+    expect(t).toContain('Stack = properties whose tax bill goes to the same mailing address. Not proof of one legal owner.')
+    expect(t).toContain("Inferred from each property's current owner of record, only for a property's most recent sale with no later transfer.")
+    expect(t).toContain('Inferred from the current owner of record, not the deed')
   })
 })
 

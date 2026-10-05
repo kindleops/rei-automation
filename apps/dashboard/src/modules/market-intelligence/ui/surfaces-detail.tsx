@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { LCButton, LCEmpty, LCSegmented } from '../../../shared/lc'
 import { miUrl, useMiQuery } from '../mi-api'
 import { useMi } from '../mi-context'
@@ -9,7 +9,9 @@ import type { MiCompareResult, MiDossier, MiGeoSummary, MiRankResult, MiRecentSa
 import { DistBars, TrendChart, type TrendSeries } from './charts'
 import { Leaderboard } from './surfaces-core'
 import { MetricTile, QueryState } from './parts'
-import { EvidenceShare, InferredInvestorSlot } from './evidence'
+import { BuyerOfRecord } from '../sale-owner/BuyerOfRecord'
+import { saleOwnerClient } from '../sale-owner/sale-owner-client'
+import { EvidenceShare, InferredInvestorsPanel } from './evidence'
 
 const RANGE_MONTHS: Record<string, number | null> = { '30d': 2, '90d': 3, '6m': 6, '1y': 12, '3y': 36, all: null }
 const LEVEL_PLURAL: Record<string, string> = { state: 'states', market: 'markets', county: 'counties', city: 'cities', zip: 'ZIPs' }
@@ -83,11 +85,8 @@ export function InvestorsSurface({ d }: { d: MiDossier }) {
           <div className="mi-rail is-tight"><MetricTile id="entity_owned_count" value={v.entity_owned_count} size="lg" /></div>
           <p className="mi-quiet">Properties whose current owner is a company and whose latest sale names no buyer. Never added to investor purchases: an LLC owner does not make a purchase an investor purchase.</p>
         </div>
-        <div className="mi-card">
-          <h2>Inferred investors <small>owner-based · not deed evidence</small></h2>
-          <InferredInvestorSlot data={d.inferred_investors} />
-        </div>
       </section>
+      <InferredInvestorsPanel data={d.inferred_investors} values={v} />
       <div className="mi-overview__grid">
         <section className="mi-card">
           <h2>Buyer depth</h2>
@@ -166,10 +165,13 @@ export function MultifamilySurface({ geo }: { geo: MiGeoSummary }) {
 }
 
 export function RecentSales({ rows }: { rows: MiRecentSale[] }) {
+  // The rows already carry the resolver's answer: seed the shared cache (the Map card and
+  // Comp Intelligence then reuse it) and make no extra request.
+  useEffect(() => { saleOwnerClient.prime(rows.filter((r) => r.buyer_of_record).map((r) => [r.comp_id, { buyer_of_record: r.buyer_of_record ?? null, owner_link: r.owner_link ?? null, inferred: r.inferred ?? null }])) }, [rows])
   if (!rows.length) return <p className="mi-quiet">No sale of this class here in the recent record.</p>
   return (
     <table className="mi-table">
-      <thead><tr><th>Sold</th><th>Address</th><th>Class</th><th className="r">Units</th><th className="r">Price</th><th className="r">$/unit</th><th>Buyer</th><th aria-label="Open" /></tr></thead>
+      <thead><tr><th>Sold</th><th>Address</th><th>Class</th><th className="r">Units</th><th className="r">Price</th><th className="r">$/unit</th><th>Buyer of record</th><th aria-label="Open" /></tr></thead>
       <tbody>{rows.map((s) => (
         <tr key={s.comp_id}>
           <td>{fmtDate(s.sold_on)}</td>
@@ -178,7 +180,8 @@ export function RecentSales({ rows }: { rows: MiRecentSale[] }) {
           <td className="r">{s.units && s.units > 0 ? s.units : '—'}</td>
           <td className="r">{s.price ? fmtUsd(s.price) : <span className="mi-quiet">unpriced</span>}</td>
           <td className="r">{s.price && s.units && s.units > 1 ? fmtUsd(s.price / s.units) : '—'}</td>
-          <td>{s.buyer ?? (s.investor ? <span className="mi-quiet">investor (unnamed)</span> : '—')}</td>
+          <td>{s.buyer_of_record ? <BuyerOfRecord row={{ buyer_of_record: s.buyer_of_record, owner_link: s.owner_link ?? null, inferred: s.inferred ?? null }} compact />
+            : s.buyer ?? (s.investor ? <span className="mi-quiet">investor (name not on record)</span> : <span className="mi-quiet">Buyer not on record</span>)}</td>
           <td>{s.property_id ? <LCButton size="sm" variant="ghost" trailingIcon="arrow-up-right" title="Open in Deal Intelligence, beside" onClick={() => openBeside(`/deal-intelligence?property_id=${encodeURIComponent(s.property_id as string)}`)}>Open</LCButton> : null}</td>
         </tr>
       ))}</tbody>

@@ -44,3 +44,9 @@ export function geoMenu(g: MiGeoSummary, ctx: { openGeo: (id: string) => void; a
   ]
 }
 
+
+/** Inferred-investor metrics exist only when the owner-based summary is built (status.inferred_investor). */
+export function metricAvailable(m: { requires?: string }, status: { inferred_investor?: { available: boolean } } | null | undefined): boolean {
+  if (m.requires === 'inferred_investor') return Boolean(status?.inferred_investor?.available)
+  return true
+}
