@@ -1,0 +1,106 @@
+/* Stale-deploy notice: one quiet glass capsule, body-level (outside any pane).
+   Cyan dot = the machine acting; never red — an update is not a failure. */
+.lc-build-fresh {
+  position: fixed;
+  z-index: 2147483000;
+  right: 18px;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 8px 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--lc-edge-rgb, 255, 255, 255), 0.12);
+  background: rgba(var(--lc-fill, 9 13 21) / 0.78);
+  backdrop-filter: blur(var(--lc-blur, 26px)) saturate(var(--lc-sat, 1.6));
+  -webkit-backdrop-filter: blur(var(--lc-blur, 26px)) saturate(var(--lc-sat, 1.6));
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: var(--lc-ink-1, #eef2f8);
+  font: 560 12.5px/1.2 var(--lc-font-ui, -apple-system, system-ui, sans-serif);
+  letter-spacing: 0.01em;
+  animation: lc-build-fresh-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.lc-build-fresh--toast {
+  padding-right: 16px;
+}
+
+.lc-build-fresh__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--lc-exec, rgb(76, 201, 240));
+  box-shadow: 0 0 10px rgba(var(--lc-exec-rgb, 76, 201, 240), 0.6);
+  flex: none;
+}
+
+.lc-build-fresh__action {
+  appearance: none;
+  border: 1px solid rgba(var(--lc-exec-rgb, 76, 201, 240), 0.42);
+  background: rgba(var(--lc-exec-rgb, 76, 201, 240), 0.14);
+  color: var(--lc-ink-1, #eef2f8);
+  font: inherit;
+  font-weight: 620;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.lc-build-fresh__action:hover {
+  background: rgba(var(--lc-exec-rgb, 76, 201, 240), 0.24);
+}
+
+.lc-build-fresh__close {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--lc-ink-3, rgba(226, 232, 244, 0.5));
+  font: 500 16px/1 var(--lc-font-ui, system-ui, sans-serif);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.lc-build-fresh__close:hover {
+  color: var(--lc-ink-1, #eef2f8);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lc-build-fresh__action:focus-visible,
+.lc-build-fresh__close:focus-visible {
+  outline: 2px solid var(--lc-accent-focus, rgb(94, 234, 212));
+  outline-offset: 2px;
+}
+
+/* phones: centred, above the pinned app dock */
+@media (max-width: 760px) {
+  .lc-build-fresh {
+    right: 50%;
+    transform: translateX(50%);
+    bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-build-fresh {
+    animation: none;
+  }
+}
+
+html[data-lc-motion='off'] .lc-build-fresh {
+  animation: none;
+}
+
+@keyframes lc-build-fresh-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

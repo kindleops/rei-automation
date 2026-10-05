@@ -16,9 +16,15 @@ import './shared/lc/lc-base.css'
 import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
 import { LcMotionRoot } from './shared/lc/MotionRoot'
+import { installBuildFreshness } from './shared/build-freshness/install'
+import { BuildFreshnessNotice } from './shared/build-freshness/BuildFreshnessNotice'
 
 // Apply persisted theme+accent to <html> before React renders (prevents FOUC)
 applyThemeToDOM()
+
+// Stale-deploy recovery: a tab running a replaced build reloads once toward the
+// new one when an app chunk is gone, and a 5-min/focus poll offers a Reload pill.
+installBuildFreshness()
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   let reloadScheduled = false
@@ -65,5 +71,6 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 createRoot(document.getElementById('root')!).render(
   <LcMotionRoot>
     <App />
+    <BuildFreshnessNotice />
   </LcMotionRoot>
 )
