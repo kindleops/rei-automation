@@ -143,6 +143,11 @@ const LANGUAGE_PATTERNS = [
       "para de escribirme", "no quiero mensajes",
       "no me llames", "para de contactarme", "párate",
       "detente", "basta", "ya no me llames",
+      // "Stop bothering" family (2026-10-05): "Si. Dejé de molestar" was
+      // detected as English, so the reply that should never have been queued
+      // was queued in English too.
+      "molestar", "molestarme", "molesten", "me moleste", "me molestes",
+      "no me escriba", "no me escriban", "ya no me escriba",
       // Misc affirmations
       "gracias", "por favor", "sí señor", "sí señora",
       "entendido", "de acuerdo", "está bien", "claro",
@@ -547,6 +552,20 @@ const COMPLIANCE_PHRASES = [
   "no me hables", "ni me hables", "ya no me hables", "ya ni me hables",
   "no me ables", "ni me ables", "ya no me ables", "ya ni me ables",
   "no me vuelvas a escribir", "no me vuelva a escribir", "no me vuelvas a hablar",
+  // "Stop bothering [me]" family. 2026-10-05 Dallas (+18174434754): "Si. Dejé
+  // de molestar" ("Yes. Stop bothering") was read as ownership_confirmed and an
+  // ENGLISH S2 auto-reply was queued (it failed transport). Sellers type the
+  // usted imperative "deje" with a stray accent ("dejé"), so both spellings are
+  // listed. "no molesta" ("it doesn't bother") is deliberately NOT here.
+  "deje de molestar", "dejé de molestar", "dejen de molestar", "deja de molestar",
+  "dejes de molestar", "dejar de molestar", "dejan de molestar",
+  "deje de molestarme", "dejé de molestarme", "dejen de molestarme", "deja de molestarme",
+  "deje de molestarnos", "dejen de molestarnos",
+  "no molesten", "no me molesten", "no nos molesten", "no molestar",
+  "ya no molesten", "ya no me molesten", "ya no moleste", "ya no me moleste",
+  "ya no me escriba", "ya no me escriban", "ya no me escribas", "no me escriban",
+  "dejen de escribirme", "dejen de escribir", "dejen de mandarme mensajes",
+  "deje de mandarme mensajes", "deja de mandarme mensajes",
 
   // ── Portuguese ────────────────────────────────────────────────────────────
   "pare de me mandar mensagem", "pare de me mandar mensagens",
@@ -4638,6 +4657,13 @@ function finalizeIntentResult({
  * Returns { primary_intent, secondary_intent }
  * Aggressively clusters previously "unclear" patterns into meaningful intents.
  */
+const URL_RE = /(?:\bhttps?:\/\/|\bwww\.)\S+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|app|ly|co|us|gov|edu|me|info|biz)(?:\/\S*)?/gi;
+
+/** The message with every link removed (whitespace-collapsed). */
+export function stripUrls(message) {
+  return String(message ?? "").replace(URL_RE, " ").replace(/\s+/g, " ").trim();
+}
+
 function resolveIntents(
   message,
   {
@@ -4983,7 +5009,13 @@ function resolveIntents(
       // Spanish
 
       "no me interesa", "no quiero vender", "no está en venta", "no esta en venta",
-    ]);
+    ]) ||
+    // Non-native English: "No i am not  sell the house of 3521 south adams st"
+    // (2026-10-05, +18178417079) matched none of the fixed phrases and sat as
+    // unclear. A negator directly before "sell" + an object is a decline;
+    // price floors ("won't sell for less than 300k") are still decided by the
+    // structured price parse below.
+    /\b(?:not|never|won'?t|will\s+not|no\s+(?:voy|vamos)\s+a)\s+(?:going\s+to\s+|gonna\s+)?(?:sell(?:ing)?|vender(?:la|lo)?)\s+(?:the|my|this|that|it|our|la|el|mi|esta|esa)\b/i.test(text);
   const not_for_sale_signal = !legacy_not_interested_match && reply_signals?.not_for_sale?.matched === true;
   if (not_for_sale_signal) reply_rule_ids.push(reply_signals.not_for_sale.rule_id);
   // "Tengo otra propiedad de venta": a DIFFERENT property is for sale. Never
@@ -5143,9 +5175,15 @@ function resolveIntents(
   // allowed while the orchestrator's canonical parser called it ambiguous.
   // The canonical resolver (monetary understanding + factual commitment, with
   // the question we asked when the context is valid) is the only verdict.
+  // A URL is never a price. 2026-10-05 (+18322033367) the seller pasted
+  // "https://apps.apple.com/app/id336698281" and the app id became
+  // asking_price_provided with an auto-reply allowed. Links are removed before
+  // the money path reads the message; a bare link is left with no intent
+  // (unclear -> review).
+  const price_text = stripUrls(rawMessage);
   price_parse = toCanonicalPriceParse(
-    parseSellerAskingPrice(rawMessage),
-    resolveCanonicalAskingPrice(rawMessage, {
+    parseSellerAskingPrice(price_text),
+    resolveCanonicalAskingPrice(price_text, {
       lastQuestion:
         ctxValidation.context_status === "valid"
           ? ctxValidation.context?.last_outbound_question || null
@@ -5919,6 +5957,12 @@ function resolveIntents(
     "who are you", "do i know you", "conozco", "quien es", "quien habla",
     "how did you get my number", "where did you get my number",
     "identification", "identify",
+    // "Why are you asking?" (2026-10-05, +12148080732, right after "Yes, I do")
+    // is the same purpose / identity challenge and sat as unclear.
+    "why are you asking", "why are you asking me", "why do you ask", "why you asking",
+    "why u asking", "why do you want to know", "why you want to know",
+    "por que pregunta", "por qué pregunta", "porque pregunta",
+    "por que preguntas", "por qué preguntas", "porque preguntas",
   ]) || matchesPurposeOrIdentityQuestion(rawMessage) || reply_signals?.engagement?.identity_question === true) {
     // matchesPurposeOrIdentityQuestion: whole-message purpose questions
     // ("What can I do for you?", "Which company r u with") -- see its

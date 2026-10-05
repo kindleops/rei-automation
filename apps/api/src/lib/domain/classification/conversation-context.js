@@ -315,6 +315,11 @@ function normalizeShortReply(text) {
     .trim();
 }
 
+// Bare denials of "do you own / are you the owner / is it yours?". Hedges
+// ("not really") stay in the clarification rule below.
+const BARE_NO_RE = /^(?:no|nope|nah|nel|no i do not|no i dont|i do not|no i am not|no no|não|nao|không|khong)$/u;
+const NO_LONGER_OWNER_RE = /^(?:not anymore|no longer|not any more|ya no|no ya no)$/u;
+
 export function isShortContextualReply(text) {
   const t = normalizeShortReply(text);
   if (!t || t.length > 48) return false;
@@ -414,6 +419,36 @@ export function applyContextualShortReply(messageText, validated) {
       // built the context (2026-10-01: they sat in New Replies). Unbound, the
       // classifier's own wrong-number / sold detectors decide.
       return { applied: false };
+    }
+    if ((useCase === 'ownership_check' || qType === 'ownership') && NO_LONGER_OWNER_RE.test(t)) {
+      // "Not anymore" / "No longer" / "Ya no" answer "do you STILL own it?":
+      // they owned it and do not now. Sold, not a wrong person.
+      return {
+        applied: true,
+        primary_intent: 'sold_property',
+        labels: ['ownership_denied', 'no_longer_owner'],
+        rule_id: 'ctx_no_longer_after_ownership_check',
+        confidence: 0.86,
+        rationale: 'not_anymore_bound_to_validated_ownership_question',
+        evidence_span: String(messageText).trim(),
+        ...base,
+      };
+    }
+    if ((useCase === 'ownership_check' || qType === 'ownership') && BARE_NO_RE.test(t)) {
+      // 2026-10-05 (+18328600523 "Is 2114 Mulberry Ln yours?" -> "No";
+      // +12818516193 "do you own 23227 Briarcreek Blvd?" -> "No"): a bare no to
+      // the ownership question answers it -- this person is not the owner.
+      // Routed as the non-owner / wrong-person lane, exactly like "Not mine".
+      return {
+        applied: true,
+        primary_intent: 'wrong_number',
+        labels: ['ownership_denied', 'non_owner'],
+        rule_id: 'ctx_no_after_ownership_check_non_owner',
+        confidence: 0.86,
+        rationale: 'bare_no_bound_to_validated_ownership_question',
+        evidence_span: String(messageText).trim(),
+        ...base,
+      };
     }
     if (useCase === 'ownership_check' || qType === 'ownership') {
       return {
