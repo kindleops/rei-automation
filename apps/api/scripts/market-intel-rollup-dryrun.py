@@ -7,7 +7,7 @@ city/zip levels), and the plpgsql format()/USING placeholders are substituted.
 Usage: market-intel-rollup-dryrun.py <level> <period|month> <as_of> [geo_key] [--explain]
 """
 import re, sys, pathlib
-mig = pathlib.Path(__file__).resolve().parents[3] / 'supabase/migrations/PROPOSED_20261004150000_market_intel_geo_rollup.sql'
+mig = pathlib.Path(__file__).resolve().parents[3] / 'supabase/migrations/20261004150000_market_intel_geo_rollup.sql'
 s = mig.read_text()
 level, period, as_of = sys.argv[1], sys.argv[2], sys.argv[3]
 key = sys.argv[4] if len(sys.argv) > 4 and not sys.argv[4].startswith('--') else None

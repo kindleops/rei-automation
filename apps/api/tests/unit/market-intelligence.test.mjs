@@ -452,7 +452,10 @@ test('heat: values join owned outlines, ZIP below z9 refused, quantile t, honest
   assert.deepEqual(h.rows.map((r) => r.key).sort(), ['55411', '75217'])
   assert.equal(h.without_value, 1) // 99999 has an outline but no sales
   assert.ok(h.rows.every((r) => r.t >= 0 && r.t <= 1))
-  assert.match(h.rows.find((r) => r.key === '75217').tip, /^75217 · \d+ sales · 0 investor purchases/)
+  const tip = h.rows.find((r) => r.key === '75217').tip
+  assert.match(tip, /^75217 · \d+ sales/)
+  assert.doesNotMatch(tip, /investor purchases/) // a count is never set against total sales
+  assert.match(tip, /buyer known on \d+%|investor share \d+% of \d+ with a known buyer/)
   const st = await svc.run('heat', { metric: 'sales_count', bbox: '-125,24,-66,50', zoom: '4' })
   assert.equal(st.level, 'state')
   assert.equal((await svc.run('heat', { metric: 'priced_sale_count', bbox: '-97,32,-93,46', zoom: '9.5' })).error, 'metric_not_heatable')
@@ -591,7 +594,7 @@ test('summary and raw computation are IDENTICAL on the same rows', async () => {
 })
 
 test('SQL asset map = the JS asset model for every raw type in the corpus', () => {
-  const sql = readFileSync(join(process.cwd(), '../../supabase/migrations/PROPOSED_20261004150000_market_intel_geo_rollup.sql'), 'utf8')
+  const sql = readFileSync(join(process.cwd(), '../../supabase/migrations/20261004150000_market_intel_geo_rollup.sql'), 'utf8')
   const values = sql.slice(sql.indexOf('insert into public.mi_asset_type_map'), sql.indexOf('on conflict (raw_type)'))
   const map = Object.fromEntries([...values.matchAll(/\('([^']+)', '([a-z_0-9]+)'\)/g)].map((m) => [m[1], m[2]]))
   assert.equal(Object.keys(map).length, 7)
@@ -607,14 +610,14 @@ test('SQL asset map = the JS asset model for every raw type in the corpus', () =
 
 test('the rollback-only pretest embeds the migration verbatim and rolls back', () => {
   const dir = join(process.cwd(), '../../supabase/migrations')
-  const mig = readFileSync(join(dir, 'PROPOSED_20261004150000_market_intel_geo_rollup.sql'), 'utf8')
+  const mig = readFileSync(join(dir, '20261004150000_market_intel_geo_rollup.sql'), 'utf8')
   const pre = readFileSync(join(dir, 'PROPOSED_20261004150000_market_intel_geo_rollup_pretest.sql'), 'utf8')
   assert.ok(pre.includes(`EXECUTE $mig$${mig}$mig$;`), 'regenerate with apps/api/scripts/market-intel-make-pretest.py')
   assert.match(pre, /RAISE EXCEPTION 'pretest ok:/)
   assert.doesNotMatch(pre, /^\s*(BEGIN|COMMIT)\s*;/m)
   const rb = readFileSync(join(dir, 'PROPOSED_20261004150000_market_intel_geo_rollup_rollback.sql'), 'utf8')
   for (const obj of ['mi_geo_period_rollup', 'mi_geo_month_rollup', 'mi_zip_geo', 'mi_buyer_activity', 'mi_rollup_builds', 'mi_rollup_tick', 'mi_rollup_sales_v']) assert.match(rb, new RegExp(obj))
-  const sched = readFileSync(join(dir, 'PROPOSED_20261004151000_market_intel_rollup_schedule.sql'), 'utf8')
+  const sched = readFileSync(join(dir, '20261004151000_market_intel_rollup_schedule.sql'), 'utf8')
   assert.match(sched, /statement_timeout = '30s'/)
   assert.match(sched, /'45-59 10 \* \* \*'/)
 })

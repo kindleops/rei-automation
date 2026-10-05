@@ -340,10 +340,12 @@ export function createMarketIntelService(deps = {}) {
     const v = values
     s.push({ text: `${geo.label} had ${fmtN(v.sales_count.value)} recorded sales from ${ctx.window.from_date} to ${ctx.window.to_date} (sales data through ${dateOfDay(current.source.meta.asOfDay)}).`, metrics: ['sales_count'] })
     if (v.median_sale_price.status === 'ok') s.push({ text: `Median qualified price ${usd(v.median_sale_price.value)} on ${fmtN(v.median_sale_price.n)} sales${v.median_ppsf.status === 'ok' ? `; $${Math.round(v.median_ppsf.value)} per sq ft` : ''}.`, metrics: ['median_sale_price', 'median_ppsf'] })
-    if (v.investor_purchase_share.status === 'ok') s.push({ text: `Investor purchases ${fmtN(v.investor_purchase_count.value)}: ${pct(v.investor_purchase_share.value)} of the ${fmtN(v.investor_purchase_share.n)} sales with a recorded buyer (a buyer is recorded on ${pct(v.buyer_evidence_coverage.value ?? 0)} of sales).`, metrics: ['investor_purchase_count', 'investor_purchase_share', 'buyer_evidence_coverage'] })
-    else s.push({ text: `Investor purchases ${fmtN(v.investor_purchase_count.value)}. Only ${fmtN(v.investor_purchase_share.n)} sales record a buyer, too few for an investor share.`, metrics: ['investor_purchase_count', 'investor_purchase_share'] })
+    // Shares lead, with their evidence base; counts are never set against total sales.
+    const bcov = v.buyer_evidence_coverage.value ?? 0
+    if (v.investor_purchase_share.status === 'ok') s.push({ text: `Investor share ${pct(v.investor_purchase_share.value)} of the ${fmtN(v.investor_purchase_share.n)} sales with a recorded buyer (${fmtN(v.investor_purchase_count.value)} investor purchases). Buyer identity is recorded on ${pct(bcov)} of deeds here.`, metrics: ['investor_purchase_share', 'buyer_evidence_coverage', 'investor_purchase_count'] })
+    else s.push({ text: `No investor share: only ${fmtN(v.investor_purchase_share.n)} sales here record a buyer (${pct(bcov)} of deeds).`, metrics: ['investor_purchase_share', 'buyer_evidence_coverage'] })
     if (topChild) s.push({ text: `${topChild.label} is #1 of ${fmtN(topChild.of)} ${LEVEL_LABEL[topChild.level]}s by investor purchases (${fmtN(topChild.value)}).`, metrics: ['investor_purchase_count'] })
-    if (v.cash_purchase_share.status === 'ok') s.push({ text: `Cash share ${pct(v.cash_purchase_share.value)} of ${fmtN(v.cash_purchase_share.n)} sales with cash evidence.`, metrics: ['cash_purchase_share'] })
+    if (v.cash_purchase_share.status === 'ok') s.push({ text: `Cash share ${pct(v.cash_purchase_share.value)} of the ${fmtN(v.cash_purchase_share.n)} sales with cash evidence (recorded on ${pct(v.cash_evidence_coverage.value ?? 0)} of deeds).`, metrics: ['cash_purchase_share', 'cash_evidence_coverage'] })
     s.push({ text: `${fmtN(v.entity_owned_count.value)} properties are entity-owned now. That is a current state, not a count of purchases.`, metrics: ['entity_owned_count'] })
     if (v.sales_growth.status === 'ok') s.push({ text: `Sales ${v.sales_growth.value >= 0 ? 'up' : 'down'} ${Math.abs(Math.round(v.sales_growth.value * 100))}%: ${v.sales_growth.basis}.`, metrics: ['sales_growth'] })
     else s.push({ text: `No sales-change figure: ${v.sales_growth.reason.replace(/^No valid baseline: /, '')}.`, metrics: ['sales_growth'] })
@@ -488,7 +490,7 @@ export function createMarketIntelService(deps = {}) {
   }
 
   const rowOut = (r, metricIds) => ({ id: r.id, level: r.level, label: r.label, state: r.state, rank: r.rank ?? null, centroid: r.centroid, values: Object.fromEntries(metricIds.map((m) => [m, r.values[m]])) })
-  const DEFAULT_COLUMNS = ['sales_count', 'median_sale_price', 'median_ppsf', 'investor_purchase_count', 'investor_purchase_share', 'cash_purchase_share', 'entity_owned_count', 'sales_growth', 'median_price_per_unit', 'company_buyer_count', 'sms_eligible_count', 'property_count']
+  const DEFAULT_COLUMNS = ['sales_count', 'median_sale_price', 'median_ppsf', 'investor_purchase_share', 'buyer_evidence_coverage', 'investor_purchase_count', 'cash_purchase_share', 'cash_evidence_coverage', 'entity_owned_count', 'sales_growth', 'median_price_per_unit', 'company_buyer_count', 'sms_eligible_count', 'property_count']
 
   async function rank(p) {
     const level = LEVEL_ORDER.includes(p.level) ? p.level : 'zip'
@@ -598,14 +600,16 @@ export function createMarketIntelService(deps = {}) {
     return { ok: true, level, metric: metric.id, label: metric.label, unit: metric.unit, window: windowPayload(t.ctx), rows, without_value: missing, note, source: outlines.source }
   }
 
+  /** One honest line: shares carry their evidence base; investor counts are never set against total sales. */
   function tipFor(r) {
     const v = r.values
     const parts = [r.level === 'zip' ? r.label.split(' · ')[0] : r.label]
     parts.push(`${v.sales_count.value.toLocaleString('en-US')} sales`)
-    parts.push(`${v.investor_purchase_count.value.toLocaleString('en-US')} investor purchases`)
-    if (v.cash_purchase_share.status === 'ok') parts.push(`${Math.round(v.cash_purchase_share.value * 100)}% cash`)
     if (v.median_sale_price.status === 'ok') parts.push(`$${Math.round(v.median_sale_price.value / 1000)}K median`)
     if (v.median_ppsf.status === 'ok') parts.push(`$${Math.round(v.median_ppsf.value)} PPSF`)
+    if (v.investor_purchase_share.status === 'ok') parts.push(`investor share ${Math.round(v.investor_purchase_share.value * 100)}% of ${v.investor_purchase_share.n.toLocaleString('en-US')} with a known buyer`)
+    else parts.push(`buyer known on ${v.buyer_evidence_coverage.value === null ? 0 : Math.round(v.buyer_evidence_coverage.value * 100)}% (too few for a share)`)
+    if (v.cash_purchase_share.status === 'ok') parts.push(`cash ${Math.round(v.cash_purchase_share.value * 100)}% of ${v.cash_purchase_share.n.toLocaleString('en-US')} with cash evidence`)
     if (v.sales_growth.status === 'ok') parts.push(`${v.sales_growth.value >= 0 ? '+' : '−'}${Math.abs(Math.round(v.sales_growth.value * 100))}% sales`)
     return parts.join(' · ')
   }
