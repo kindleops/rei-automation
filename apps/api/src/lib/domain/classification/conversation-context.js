@@ -320,6 +320,16 @@ function normalizeShortReply(text) {
 const BARE_NO_RE = /^(?:no|nope|nah|nel|no i do not|no i dont|i do not|no i am not|no no|não|nao|không|khong)$/u;
 const NO_LONGER_OWNER_RE = /^(?:not anymore|no longer|not any more|ya no|no ya no)$/u;
 
+// HELD pending owner decision (2026-10-05): binding a bare "No" to the
+// ownership question as non-owner archives the number, which is a strong
+// action. Default 'clarify' keeps the previous behaviour (one clarifying
+// question / review). Set LC_BARE_NO_OWNERSHIP_MODE=non_owner to enable.
+export const BARE_NO_OWNERSHIP_MODES = Object.freeze(['clarify', 'non_owner']);
+export function bareNoOwnershipMode() {
+  const raw = String(process.env.LC_BARE_NO_OWNERSHIP_MODE ?? '').trim().toLowerCase();
+  return raw === 'non_owner' ? 'non_owner' : 'clarify';
+}
+
 export function isShortContextualReply(text) {
   const t = normalizeShortReply(text);
   if (!t || t.length > 48) return false;
@@ -420,7 +430,7 @@ export function applyContextualShortReply(messageText, validated) {
       // classifier's own wrong-number / sold detectors decide.
       return { applied: false };
     }
-    if ((useCase === 'ownership_check' || qType === 'ownership') && NO_LONGER_OWNER_RE.test(t)) {
+    if ((useCase === 'ownership_check' || qType === 'ownership') && bareNoOwnershipMode() === 'non_owner' && NO_LONGER_OWNER_RE.test(t)) {
       // "Not anymore" / "No longer" / "Ya no" answer "do you STILL own it?":
       // they owned it and do not now. Sold, not a wrong person.
       return {
@@ -434,7 +444,7 @@ export function applyContextualShortReply(messageText, validated) {
         ...base,
       };
     }
-    if ((useCase === 'ownership_check' || qType === 'ownership') && BARE_NO_RE.test(t)) {
+    if ((useCase === 'ownership_check' || qType === 'ownership') && bareNoOwnershipMode() === 'non_owner' && BARE_NO_RE.test(t)) {
       // 2026-10-05 (+18328600523 "Is 2114 Mulberry Ln yours?" -> "No";
       // +12818516193 "do you own 23227 Briarcreek Blvd?" -> "No"): a bare no to
       // the ownership question answers it -- this person is not the owner.
