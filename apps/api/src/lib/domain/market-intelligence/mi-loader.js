@@ -13,6 +13,7 @@
  * Every statement runs with a 30 s statement_timeout (20 s for the universe).
  */
 import { getPgPool, queryWithTimeout } from '@/lib/postgres/client.js'
+import { INFERRED_COLUMNS, INFERRED_SQL, missingInferredColumns } from './mi-inferred-source.js'
 
 export const MAX_ACTIVE_SESSIONS = 12
 export const MAX_RUNNING_SECONDS = 10
@@ -195,5 +196,15 @@ export function createMarketIntelLoader(deps = {}) {
     return res?.rows || []
   }
 
-  return { guard, freshness, streamSales, aux, universeForState, summarySchema, summary }
+  /** The inferred-investor extension (optional; mi-inferred-source.js). Same catalog guard. */
+  async function inferredSchema() {
+    const res = await query(SCHEMA_SQL, [Object.keys(INFERRED_COLUMNS)], 5_000)
+    return missingInferredColumns(res?.rows)
+  }
+  async function inferred(name, params = [], timeoutMs = 15_000) {
+    const res = await query(INFERRED_SQL[name], params, timeoutMs)
+    return res?.rows || []
+  }
+
+  return { guard, freshness, streamSales, aux, universeForState, summarySchema, summary, inferredSchema, inferred }
 }

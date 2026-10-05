@@ -18,6 +18,8 @@ const SALES_SRC = 'mv_map_market_sales (canonical deduplicated sales)'
 const GRAPH_SRC = 'campaign_target_graph (Composer audience projection), summary only'
 const AREA_SRC = 'mv_map_property_area_stats (geocoded property universe)'
 const ACS_SRC = 'US Census ACS 5-year (exchange_market_fundamentals_cells)'
+const INF_SRC = 'mi_geo_period_inferred (owner of record linked to each sale: mv_map_market_sales × comp_properties × comp_canonical_transactions)'
+const INF = 'Inferred from the CURRENT owner of record, not from the deed; shown only with its validation against sales that record a buyer. Never added to investor purchases.'
 const SALES_ASSETS = Object.freeze(['all', 'sfr', 'mf_2_4', 'mf_5_plus', 'mf', 'land', 'commercial'])
 const MF_ASSETS = Object.freeze(['all', 'mf_2_4', 'mf_5_plus', 'mf'])
 
@@ -69,6 +71,26 @@ export const METRICS = Object.freeze([
   m({ id: 'entity_owned_count', group: 'ownership', label: 'Entity-owned now', unit: 'count', windowed: false, heatable: true, sample: 'entity_owned_count',
     description: 'Properties whose CURRENT owner is a company and whose latest recorded sale names no buyer. A current state, not purchases; never added to investor purchases.',
     formula: 'count(latest sale ∧ no buyer name ∧ current owner corporate)', source: SALES_SRC, freshness: 'sales' }),
+  // ── Inferred investors (owner-based) — SEPARATE from recorded investor purchases (brief §48) ──
+  // requires: 'inferred_investor' → available only when the summary build carries the inferred
+  // extension (status.inferred_investor.available); otherwise every value is 'unavailable'.
+  m({ id: 'inferred_investor_count', group: 'investors_inferred', requires: 'inferred_investor', label: 'Inferred investor (owner-based)', unit: 'count', heatable: true, sample: 'linked_sale_count',
+    description: `Owner-linked sales whose current owner of record is a strong or likely inferred investor (entity owner, out-of-state mailing, or a portfolio stack at one tax-mailing address). ${INF}`,
+    formula: 'count(owner-linked ∧ tier ∈ {strong, likely})  [mi_owner_link@1, mi_owner_tier@1]', source: INF_SRC, freshness: 'sales' }),
+  m({ id: 'inferred_investor_share', group: 'investors_inferred', requires: 'inferred_investor', label: 'Inferred investor share (owner-based)', unit: 'pct', aggregation: 'ratio', min_sample: 30, sample: 'linked_sale_count', heatable: true,
+    description: `Inferred investor purchases as a share of OWNER-LINKED sales (not of all sales). Coverage and validation precision are shown beside it. ${INF}`,
+    formula: 'inferred investor purchases ÷ owner-linked sales', source: INF_SRC, freshness: 'sales' }),
+  m({ id: 'inferred_strong_share', group: 'investors_inferred', requires: 'inferred_investor', label: 'Strong inferred share', unit: 'pct', aggregation: 'ratio', min_sample: 30, sample: 'linked_sale_count',
+    description: `Strong tier only (entity owner with out-of-state mailing or a stack, or a stack of 3+ properties) as a share of owner-linked sales. ${INF}`,
+    formula: 'strong-tier sales ÷ owner-linked sales', source: INF_SRC, freshness: 'sales' }),
+  m({ id: 'stacked_owner_purchase_count', group: 'investors_inferred', requires: 'inferred_investor', label: 'Portfolio-stack purchases', unit: 'count', sample: 'linked_sale_count',
+    description: `Owner-linked sales whose owner receives tax mail at an address shared by 3+ properties. A shared mailing address is not proof of one legal owner (registered agents and management offices group owners). ${INF}`,
+    formula: 'count(owner-linked ∧ mailing stack ≥ 3)', source: INF_SRC, freshness: 'sales' }),
+  m({ id: 'linked_sale_count', group: 'investors_inferred', requires: 'inferred_investor', label: 'Owner-linked sales', unit: 'count', sample: 'linked_sale_count', rankable: false,
+    description: 'Sales whose buyer is today\'s owner of record: the property\'s most recent sale, no later transfer, and an owner snapshot taken 30+ days after the sale. Older sales of properties that resold are never linked.',
+    formula: 'count(latest sale ∧ no transfer > 45 days later ∧ owner observed ≥ 30 days after sale)', source: INF_SRC, freshness: 'sales' }),
+  m({ id: 'owner_link_coverage', group: 'investors_inferred', requires: 'inferred_investor', label: 'Owner-linked', unit: 'pct', aggregation: 'ratio', min_sample: 1, sample: 'sales_count', rankable: false,
+    description: 'Share of sales that are owner-linked: the evidence base behind the inferred share.', formula: 'owner-linked sales ÷ sales', source: INF_SRC, freshness: 'sales' }),
   m({ id: 'company_buyer_count', group: 'demand', label: 'Active company buyers', unit: 'count', sample: 'company_buyer_count', heatable: true,
     description: 'Distinct named company buyers with a purchase in the period. Lenders, servicers, GSEs and agencies excluded; individuals never counted as companies.',
     formula: 'count(distinct displayable company buyer, not lender)', source: SALES_SRC, freshness: 'sales' }),

@@ -16,7 +16,11 @@
  * phantom column cannot break it.
  *
  * Ops: status · registry · search · geography · dossier · rank · screen · compare · trends ·
- * heat · recent_sales · universe_load
+ * heat · recent_sales · universe_load · sale_owner
+ *
+ * INFERRED INVESTOR (owner-based; mi-inferred-investor.js): a SEPARATE metric family, present only
+ * when the ready build carries the inferred extension (status.inferred_investor.available).
+ * sale_owner (the shared sale-buyer resolver, mi-sale-owner.js) needs no summary at all.
  */
 import { createMarketIntelLoader } from './mi-loader.js'
 import { createSalesIndexBuilder } from './mi-sales-index.js'
@@ -32,6 +36,8 @@ import { readMapBoundaries } from '@/lib/domain/map/map-boundaries-service.js'
 import { displayableCompanyName } from '@/lib/domain/entity-graph/buyer-name-privacy.js'
 import { lenderClass } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
 import { queryWithTimeout } from '@/lib/postgres/client.js'
+import { createSaleOwnerReader, saleOwnerIds, salePropertyKeys, SALE_OWNER_MAX_IDS } from './mi-sale-owner.js'
+import { LINK_RULE, TIER_RULE, TIER_LABEL, TIERS } from './mi-inferred-investor.js'
 
 const SUMMARY_PROBE_MS = 5 * 60_000
 const MISSING_RETRY_MS = 60_000
@@ -40,6 +46,7 @@ const CACHE_MAX = 240
 const RECENT_TTL_MS = 30 * 60_000
 const assetLabelOf = (code) => ASSET_LABEL[MI_ASSETS[code]] || 'Unknown'
 export const SUMMARY_MISSING_MESSAGE = 'Market summary not built yet'
+export const INFERRED_UNAVAILABLE_REASON = 'Inferred investor (owner-based) is not available for this market summary build'
 
 /** The dev-only raw stream is allowed only by an explicit flag, and never in production. */
 export function devRawAllowed(env = process.env) {
@@ -53,6 +60,7 @@ export function createMarketIntelService(deps = {}) {
   const env = deps.env || process.env
   const classify = createAssetClassifier()
   const universe = createUniverseStore({ loader, clock, classify })
+  const readSaleOwners = deps.readSaleOwners || createSaleOwnerReader(deps)
   let state = { status: 'cold', progress: null, error: null, retryAt: 0, summary: null }
   let current = null
   let building = null
@@ -182,6 +190,30 @@ export function createMarketIntelService(deps = {}) {
       },
       asset_filters: ASSET_FILTERS.map((f) => ({ id: f.id, label: f.label, available: m.assetsWithSales.has(f.id) })),
       periods: PERIODS.map((p) => ({ id: p.id, label: p.label })),
+      inferred_investor: inferredStatus(),
+    }
+  }
+
+  // ── inferred investor (owner-based) ─────────────────────────────────────
+  function inferredReasonText(inf) {
+    if (inf?.available) return null
+    switch (inf?.reason) {
+      case 'not_installed': return 'Inferred investor (owner-based) is not installed: the proposed summary extension is not applied'
+      case 'not_built': return 'This market summary build predates the inferred-investor extension; the next nightly build adds it'
+      case 'build_failed': return 'The inferred-investor units failed in this build; recorded investor metrics are unaffected'
+      case 'dev_raw': return 'Inferred investor is computed only in the market summary (not in the dev raw stream)'
+      default: return 'Inferred investor (owner-based) is unavailable'
+    }
+  }
+  function inferredStatus() {
+    const inf = current.source.meta.inferred
+    const meta = inf?.meta
+    return {
+      available: Boolean(inf?.available), reason: inf?.available ? null : inf?.reason ?? 'not_supported', message: inf?.available ? null : inferredReasonText(inf),
+      errors: inf?.errors ?? null,
+      rules: { link: LINK_RULE, tier: TIER_RULE, tiers: TIERS.map((t) => ({ id: t, label: TIER_LABEL[t], counted: t === 'strong' || t === 'likely' })) },
+      national: meta ? { sales: meta.sales, linked: meta.linked, coverage: meta.sales ? meta.linked / meta.sales : null, tiers: meta.tiers, stacks: meta.stacks,
+        validation: { ...meta.validation, matrix: meta.matrix, truth: 'recorded investor buyer (is_investor) on owner-linked sales that also record a buyer' } } : null,
     }
   }
 
@@ -203,7 +235,8 @@ export function createMarketIntelService(deps = {}) {
     const asset = assetFilterCodes(assetId || 'all')
     const a = asset.ok ? asset : assetFilterCodes('all')
     const window = periodWindow(p, m.asOfDay, m.firstDay ?? m.asOfDay - 5 * 366)
-    const ctx = { periodId: p, window, coverage: m.coverage, asset: a }
+    // one value-level reason in every mode (the status payload carries the specific cause)
+    const ctx = { periodId: p, window, coverage: m.coverage, asset: a, inferredReason: m.inferred?.available ? 'No owner-linked sales in this geography and period' : INFERRED_UNAVAILABLE_REASON }
     ctx.windows = periodWindows(ctx)
     return ctx
   }
@@ -347,6 +380,7 @@ export function createMarketIntelService(deps = {}) {
     if (topChild) s.push({ text: `${topChild.label} is #1 of ${fmtN(topChild.of)} ${LEVEL_LABEL[topChild.level]}s by investor purchases (${fmtN(topChild.value)}).`, metrics: ['investor_purchase_count'] })
     if (v.cash_purchase_share.status === 'ok') s.push({ text: `Cash share ${pct(v.cash_purchase_share.value)} of the ${fmtN(v.cash_purchase_share.n)} sales with cash evidence (recorded on ${pct(v.cash_evidence_coverage.value ?? 0)} of deeds).`, metrics: ['cash_purchase_share', 'cash_evidence_coverage'] })
     s.push({ text: `${fmtN(v.entity_owned_count.value)} properties are entity-owned now. That is a current state, not a count of purchases.`, metrics: ['entity_owned_count'] })
+    if (v.inferred_investor_share?.status === 'ok') s.push({ text: `${v.inferred_investor_share.label}. Owner-linked on ${pct(v.owner_link_coverage.value ?? 0)} of sales; separate from recorded investor purchases.`, metrics: ['inferred_investor_share', 'owner_link_coverage', 'linked_sale_count'] })
     if (v.sales_growth.status === 'ok') s.push({ text: `Sales ${v.sales_growth.value >= 0 ? 'up' : 'down'} ${Math.abs(Math.round(v.sales_growth.value * 100))}%: ${v.sales_growth.basis}.`, metrics: ['sales_growth'] })
     else s.push({ text: `No sales-change figure: ${v.sales_growth.reason.replace(/^No valid baseline: /, '')}.`, metrics: ['sales_growth'] })
     return s
@@ -359,6 +393,7 @@ export function createMarketIntelService(deps = {}) {
   async function run(op, p = {}) {
     try {
       if (op === 'registry') return { ok: true, ...registryPayload(), asset_filters: ASSET_FILTERS, periods: PERIODS }
+      if (op === 'sale_owner') return await saleOwner(p)
       if (!(await ready())) return warming()
       switch (op) {
         case 'status': return { ok: true, ...statusPayload() }
@@ -417,6 +452,7 @@ export function createMarketIntelService(deps = {}) {
         latest_sale: agg.latestDay === null ? null : dateOfDay(agg.latestDay),
       },
       investors: { top_buyers: topBuyers(agg, current.source.buyerName, assetLabelOf, 12).map((b) => ({ ...b, last_purchase: dateOfDay(b.last_purchase_day) })), buyer_kinds: { company_named: agg.namedPurchases, lender_or_agency: agg.lenderPurchases }, individuals_named: false },
+      inferred_investors: inferredSection(g, agg, ctx, values),
       multifamily: {
         unit_distribution: [...UNIT_LABELS, NOT_RECORDED].map((label) => ({ label, n: agg.unitDist.get(label) || 0 })),
         size_distribution: [...SQFT_LABELS, NOT_RECORDED].map((label) => ({ label, n: agg.sqftDist.get(label) || 0 })),
@@ -427,6 +463,43 @@ export function createMarketIntelService(deps = {}) {
       brief: deterministicBrief(g, values, ctx, topChild),
       coverage_months: current.source.meta.coverage.months.map(({ label, status }) => ({ label, status })),
     }
+  }
+
+  /** The dossier's inferred-investor block: label, tiers, local + national validation, top stacks. */
+  function inferredSection(g, agg, ctx, values) {
+    const st = inferredStatus()
+    if (!st.available || !agg.inferred) return { available: false, reason: st.reason ?? 'no_rows', message: st.message ?? ctx.inferredReason }
+    const inf = agg.inferred
+    const stacks = current.source.inferredStacks?.(g.id, ctx, 10) || []
+    return {
+      available: true,
+      label: values.inferred_investor_share.label ?? values.inferred_investor_count.label,
+      recorded_label: values.investor_purchase_share.status === 'ok' ? `Recorded investor (deed buyer) · ${Math.round(values.investor_purchase_share.value * 100)}% of ${values.investor_purchase_share.n.toLocaleString('en-US')} sales with a recorded buyer` : `Recorded investor (deed buyer) · ${values.investor_purchase_count.value.toLocaleString('en-US')} purchases; too few recorded buyers for a share`,
+      sales: inf.sales, linked: inf.linked, coverage: inf.sales ? inf.linked / inf.sales : null,
+      tiers: TIERS.map((t) => ({ id: t, label: TIER_LABEL[t], n: inf.tiers[t], counted: t === 'strong' || t === 'likely' })),
+      validation: { national: st.national?.validation ?? null, local: inf.local.n >= 100 ? inf.local : null, local_n: inf.local.n },
+      top_stacks: stacks.map((s) => ({ ...s, last_purchase: dateOfDay(s.last_purchase_day) })),
+      caveats: [
+        'Inferred from the current owner of record, not the deed; never added to recorded investor purchases.',
+        'Only the most recent sale of a property, with no later transfer, inherits today\'s owner.',
+        'In-state absentee owners cannot be detected (the mailing address is held as a keyed hash); absentee here means an out-of-state tax-mailing address.',
+        'A tax-mailing-address stack is not proof of one legal owner: registered agents and management offices group unrelated owners.',
+        'Owner names are not on record for most properties; a stack is named only when its own recorded purchases name the same company.',
+      ],
+      individuals_named: false,
+    }
+  }
+
+  /** op=sale_owner&ids=t:1,p:2 — the shared sale-buyer resolver (≤ 100 sales). Needs no summary. */
+  async function saleOwner(p) {
+    const ids = saleOwnerIds(p.ids || p.id)
+    const props = salePropertyKeys(p.props).keys
+    if (!ids.length && !props.length) return fail(400, 'no_ids', { message: `Pass ids=<comp_id>,… or props=<property_id>@<YYYY-MM-DD>,… (≤ ${SALE_OWNER_MAX_IDS})` })
+    const missing = (id) => ({ comp_id: id, buyer_of_record: null, owner_link: null, inferred: null, missing: true })
+    const rows = []
+    if (ids.length) { const map = await readSaleOwners(ids); for (const id of ids) rows.push(map.get(id) || missing(id)) }
+    if (props.length && readSaleOwners.byProperty) { const map = await readSaleOwners.byProperty(props); for (const k of props) rows.push(map.get(k) || missing(k)) }
+    return { ok: true, rule: { link: LINK_RULE.id, tier: TIER_RULE.id }, rows }
   }
 
   function dataQuality(g, agg, u) {
@@ -490,7 +563,7 @@ export function createMarketIntelService(deps = {}) {
   }
 
   const rowOut = (r, metricIds) => ({ id: r.id, level: r.level, label: r.label, state: r.state, rank: r.rank ?? null, centroid: r.centroid, values: Object.fromEntries(metricIds.map((m) => [m, r.values[m]])) })
-  const DEFAULT_COLUMNS = ['sales_count', 'median_sale_price', 'median_ppsf', 'investor_purchase_share', 'buyer_evidence_coverage', 'investor_purchase_count', 'cash_purchase_share', 'cash_evidence_coverage', 'entity_owned_count', 'sales_growth', 'median_price_per_unit', 'company_buyer_count', 'sms_eligible_count', 'property_count']
+  const DEFAULT_COLUMNS = ['sales_count', 'median_sale_price', 'median_ppsf', 'investor_purchase_share', 'buyer_evidence_coverage', 'investor_purchase_count', 'cash_purchase_share', 'cash_evidence_coverage', 'entity_owned_count', 'sales_growth', 'median_price_per_unit', 'company_buyer_count', 'sms_eligible_count', 'property_count', 'inferred_investor_share', 'owner_link_coverage']
 
   async function rank(p) {
     const level = LEVEL_ORDER.includes(p.level) ? p.level : 'zip'
@@ -653,7 +726,16 @@ export function createMarketIntelService(deps = {}) {
         asset: MI_ASSETS[code], asset_label: assetLabelOf(code), units: r.units, sqft: r.sqft, buyer, property_id: r.property_id, source: r.source, investor: r.is_investor === true, cash: r.is_cash_purchase })
       if (rows.length >= Math.min(50, Number(p.limit) || 25)) break
     }
-    const value = { ok: true, geography: summaryOf(g), asset: asset.id, rows, kind: 'market_sales', note: 'Recorded market sales, not valuation comps' }
+    // The shared resolver: each sale's buyer of record (recorded buyer, else today's owner when linked).
+    let owners = null
+    try { owners = await readSaleOwners(rows.map((r) => r.comp_id)) } catch { owners = null }
+    for (const r of rows) {
+      const o = owners?.get(r.comp_id)
+      r.buyer_of_record = o?.buyer_of_record ?? null
+      r.owner_link = o?.owner_link ?? null
+      r.inferred = o?.inferred ?? null
+    }
+    const value = { ok: true, geography: summaryOf(g), asset: asset.id, rows, kind: 'market_sales', note: 'Recorded market sales, not valuation comps', buyer_resolver: owners ? 'ok' : 'unavailable' }
     recentCache.set(key, { value, expires: clock() + RECENT_TTL_MS })
     while (recentCache.size > 60) recentCache.delete(recentCache.keys().next().value)
     return value

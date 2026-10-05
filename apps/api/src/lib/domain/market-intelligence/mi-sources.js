@@ -25,6 +25,7 @@ import { aggregate, aggregateBy, monthlySeries, nationalMonthCounts, rowsOf, F }
 import { windowSumsFromMonths } from './mi-metric-values.js'
 import { displayableCompanyName } from '@/lib/domain/entity-graph/buyer-name-privacy.js'
 import { lenderClass } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
+import { loadInferred, inferredAggFromRow, topStacks } from './mi-inferred-source.js'
 
 const SLICE_CACHE_MAX = 160
 const isoMonth = (m) => dateOfDay(firstDayOfMonth(m))
@@ -61,6 +62,8 @@ export async function createSummarySource({ loader, build, ref, classify = creat
     await loader.summary('assets', [id]),
     await loader.summary('buyers', [id], 20_000),
   ]
+  // The inferred-investor extension is optional: any failure leaves it unavailable, never the core.
+  const inferred = await loadInferred({ loader, build }).catch((e) => ({ available: false, reason: 'error', error: String(e?.message || e), meta: null }))
   const facts = factsFromSummary(zipGeo, cityRows, stateRows, build.source_rows)
   const catalog = buildGeographyCatalog(facts, {
     ...auxFromReference(ref),
@@ -118,13 +121,16 @@ export async function createSummarySource({ loader, build, ref, classify = creat
   const keyOf = (geoId) => geoId.slice(geoId.indexOf(':') + 1)
 
   async function levelAggs(level, ctx) {
-    const [rows, ms] = await Promise.all([sliceRows(level, ctx.periodId, ctx.asset.id), monthSums(level, ctx.asset.id, ctx.windows)])
+    const inf = inferred?.available ? inferred : null
+    const [rows, ms, irows] = await Promise.all([sliceRows(level, ctx.periodId, ctx.asset.id), monthSums(level, ctx.asset.id, ctx.windows),
+      inf ? inf.slice(level, ctx.periodId, ctx.asset.id).catch(() => null) : null])
     const bs = buyerStatsBy(level, ctx)
     const out = new Map()
     for (const [key, r] of rows) {
       const gid = level === 'nation' ? 'nation:US' : `${level}:${key}`
       const m = ms.get(key)
-      out.set(gid, { ...aggFromSummaryRow(r, bs.get(gid)), rateSum: m?.rate_sum ?? 0, curSum: m?.cur_sum ?? 0, priorSum: m?.prior_sum ?? 0 })
+      out.set(gid, { ...aggFromSummaryRow(r, bs.get(gid)), rateSum: m?.rate_sum ?? 0, curSum: m?.cur_sum ?? 0, priorSum: m?.prior_sum ?? 0,
+        inferred: irows ? inferredAggFromRow(irows.get(key), inf.meta) : null })
     }
     return out
   }
@@ -132,7 +138,8 @@ export async function createSummarySource({ loader, build, ref, classify = creat
     const level = parseGeoId(geoId)?.level
     if (!level) return emptyAgg()
     const all = await levelAggs(level, ctx)
-    return all.get(geoId) || { ...emptyAgg(buyerStatsBy(level, ctx, geoId).get(geoId)), rateSum: 0, curSum: 0, priorSum: 0 }
+    return all.get(geoId) || { ...emptyAgg(buyerStatsBy(level, ctx, geoId).get(geoId)), rateSum: 0, curSum: 0, priorSum: 0,
+      inferred: inferred?.available ? inferredAggFromRow(undefined, inferred.meta) : null }
   }
   async function geoMonths(geoId, assetId, codes) {
     const g = parseGeoId(geoId)
@@ -154,9 +161,15 @@ export async function createSummarySource({ loader, build, ref, classify = creat
     meta: {
       mode: 'summary', version: `summary:${id}`, build, asOfDay, firstDay, rows: Number(build.source_rows) || 0, coverage, catalog,
       assetsWithSales: new Set(assetRows.filter((r) => Number(r.sale_count) > 0).map((r) => r.asset)),
-      reads: { zip_geo: zipGeo.length, buyers: buyers.length },
+      reads: { zip_geo: zipGeo.length, buyers: buyers.length, stack_activity: inferred?.activity?.length ?? 0 },
+      inferred: inferred ? { available: inferred.available, reason: inferred.available ? null : inferred.reason, errors: inferred.errors ?? null, meta: inferred.meta } : { available: false, reason: 'not_supported', meta: null },
     },
     levelAggs, geoAgg, geoMonths, buyerName: (k) => k,
+    /** Top owner-portfolio stacks for a geography and window (companies named only), or null. */
+    inferredStacks(geoId, ctx, limit) {
+      const level = parseGeoId(geoId)?.level
+      return level ? topStacks(inferred, geoId, ctx, geoOfBuyer[level], limit) : null
+    },
   }
 }
 
@@ -196,7 +209,9 @@ export function createRawSource({ index, ref, parcelZipCounty, zipMarket, timing
     return !members || members.some((m) => present.has(ASSET_CODE[m]))
   }))
   return {
-    meta: { mode: 'raw_dev', version: `raw:${index.maxDay}|${index.n}`, build: null, asOfDay: index.maxDay, firstDay: index.minDay, rows: index.n, coverage, catalog, assetsWithSales, timings, rawTypes: index.rawTypes },
+    meta: { mode: 'raw_dev', version: `raw:${index.maxDay}|${index.n}`, build: null, asOfDay: index.maxDay, firstDay: index.minDay, rows: index.n, coverage, catalog, assetsWithSales, timings, rawTypes: index.rawTypes,
+      inferred: { available: false, reason: 'dev_raw', meta: null } },
+    inferredStacks: () => null,
     levelAggs, geoAgg, geoMonths, buyerName: (b) => index.dicts.buyers[b],
     _index: index, F, windowSums: windowSumsFromMonths,
   }

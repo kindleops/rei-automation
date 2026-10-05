@@ -621,3 +621,67 @@ test('the rollback-only pretest embeds the migration verbatim and rolls back', (
   assert.match(sched, /statement_timeout = '30s'/)
   assert.match(sched, /'45-59 10 \* \* \*'/)
 })
+
+// ── Inferred investor (owner-based): exposed only when the build carries the extension ──
+function withInferred(loader, { notes = true, schemaMissing = [] } = {}) {
+  const summary = referenceSummary(corpus())
+  if (notes) summary.build.notes = { ...summary.build.notes, inferred_investor: { sales: 400, linked: 210, matrix: { strong: { recorded_investor: 87, recorded_other: 13 } } } }
+  const base = fakeSummaryLoader({ summary })
+  const rows = summary.period.map((r) => ({ geo_level: r.geo_level, geo_key: r.geo_key, period: r.period, asset: r.asset, sale_count: r.sale_count, linked_count: Math.floor(r.sale_count / 2), strong_n: Math.floor(r.sale_count / 5), likely_n: Math.floor(r.sale_count / 10), trust_n: 0, absentee_n: 0, no_signal_n: 0, stack3_n: 0 }))
+  return {
+    ...base,
+    inferredSchema: async () => schemaMissing,
+    inferred: async (name, params = []) => {
+      if (name === 'slice') return rows.filter((r) => r.geo_level === params[1] && r.period === params[2] && r.asset === params[3])
+      if (name === 'stacks') return [{ stack_id: 1, props_n: 25, corp_n: 25, oos_n: 20, trust_n: 0, linked_n: 3, named_n: 2, label: 'ACME HOMES LLC', label_n: 2 }]
+      if (name === 'activity') return [{ stack_id: 1, d: dayOfDate('2026-06-10'), zip: '77002', state: 'TX', city_key: 'TX:houston', asset: 'sfr' }]
+      throw new Error(`unexpected inferred read ${name}`)
+    },
+  }
+}
+
+test('inferred investor: separate metric with label, coverage, validation and named company stacks; recorded investor unchanged', async () => {
+  const { svc, st } = await readyService({ loader: withInferred() })
+  assert.equal(st.inferred_investor.available, true)
+  assert.equal(st.inferred_investor.national.validation.precision, 0.87)
+  const h = await svc.run('dossier', { id: 'market:houston-tx', period: '1y' })
+  assert.equal(h.values.investor_purchase_count.value, 13) // recorded: unchanged
+  assert.equal(h.values.inferred_investor_count.value, Math.floor(31 / 5) + Math.floor(31 / 10))
+  assert.equal(h.values.linked_sale_count.value, 15)
+  assert.match(h.values.inferred_investor_share.label, /^Inferred investor \(owner-based\) · \d+% of 15 linked sales · validated 87% precision vs recorded buyers$/)
+  assert.equal(h.inferred_investors.available, true)
+  assert.deepEqual(h.inferred_investors.top_stacks.map((s) => s.label), ['ACME HOMES LLC'])
+  assert.equal(h.inferred_investors.individuals_named, false)
+  // 15 linked sales < 30: the share is withheld, and the brief says nothing about it
+  assert.equal(h.values.inferred_investor_share.status, 'insufficient')
+  assert.ok(!h.brief.some((s) => s.metrics.includes('inferred_investor_share')))
+  const n = await svc.run('dossier', { id: 'nation:US', period: 'all' })
+  assert.equal(n.values.inferred_investor_share.status, 'ok')
+  assert.ok(n.brief.some((s) => s.metrics.includes('inferred_investor_share') && /^Inferred investor \(owner-based\)/.test(s.text)))
+})
+
+test('inferred investor: not installed, or a build without it → every inferred metric unavailable, core untouched', async () => {
+  for (const opts of [{ schemaMissing: ['mi_geo_period_inferred.build_id'] }, { notes: false }]) {
+    const { svc, st } = await readyService({ loader: withInferred(fakeSummaryLoader(), opts) })
+    assert.equal(st.status, 'ready')
+    assert.equal(st.inferred_investor.available, false)
+    assert.equal(st.inferred_investor.reason, opts.notes === false ? 'not_built' : 'not_installed')
+    const h = await svc.run('dossier', { id: 'market:houston-tx', period: '1y' })
+    assert.equal(h.values.investor_purchase_count.value, 13)
+    assert.equal(h.values.inferred_investor_share.status, 'unavailable')
+    assert.equal(h.inferred_investors.available, false)
+  }
+})
+
+test('sale_owner op: the shared buyer resolver needs no summary and never names a person', async () => {
+  const loader = fakeSummaryLoader({ ready: false })
+  const rows = [{ comp_id: 't:5', property_id: 'p5', sold_on: '2025-02-01', buyer: null, buyer_kind: null, is_latest_sale: true, later_transfer_on: null, owner_observed_on: '2026-08-20',
+    is_corporate_owner: false, is_trust: false, out_of_state_owner: true, mail_stack: 1, resident_owner: false, owner_name: 'JOHN SMITH' }]
+  const svc = createMarketIntelService({ loader, warmWaitMs: 50, env: {}, prewarm: false, readBoundaries: BOUNDARIES, query: async () => ({ rows }) })
+  const r = await svc.run('sale_owner', { ids: 't:5,t:6' })
+  assert.equal(r.ok, true)
+  assert.equal(r.rows[0].buyer_of_record.label, 'Individual (absentee · out-of-state mailing) · current owner of record')
+  assert.equal(r.rows[0].inferred.tier, 'absentee_only')
+  assert.equal(r.rows[1].missing, true)
+  assert.equal((await svc.run('sale_owner', {})).ok, false)
+})

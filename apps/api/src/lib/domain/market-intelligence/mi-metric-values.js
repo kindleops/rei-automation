@@ -12,6 +12,7 @@
 import { METRIC_BY_ID } from './mi-metric-registry.js'
 import { monthSum } from './mi-agg.js'
 import { completeMonthsIn, growthWindows, monthOfDay } from './mi-periods.js'
+import { inferredInvestorLabel } from './mi-inferred-investor.js'
 
 const ok = (value, n, extra = {}) => ({ value, n, status: 'ok', ...extra })
 const insufficient = (n, min, extra = {}) => ({ value: null, n, status: 'insufficient', reason: `Insufficient sample: ${n} of ${min} needed`, ...extra })
@@ -92,6 +93,38 @@ export function salesValues(agg, ctx) {
   const top5 = counts.slice(0, 5).reduce((t, n) => t + n, 0)
   v.top5_buyer_share = gated('top5_buyer_share', agg.namedPurchases ? top5 / agg.namedPurchases : null, agg.namedPurchases, { basis: `${top5} of ${agg.namedPurchases} named-company purchases` })
   v.median_investor_price = gated('median_investor_price', agg.med.inv.v, agg.med.inv.n)
+  Object.assign(v, inferredValues(agg.inferred, ctx.inferredReason))
+  return v
+}
+
+export const INFERRED_IDS = Object.freeze(['inferred_investor_count', 'inferred_investor_share', 'inferred_strong_share', 'stacked_owner_purchase_count', 'linked_sale_count', 'owner_link_coverage'])
+const INFERRED_UNAVAILABLE = 'Inferred investor (owner-based) is not built for this market summary build'
+
+/**
+ * Inferred-investor values (mi-inferred-source.js inferredAggFromRow), or 'unavailable' for
+ * every id when the build has no inferred extension. Each share carries its evidence: the
+ * linked base, coverage of all sales, the build's validation (precision / recall vs recorded
+ * buyers) and the one label line every surface prints.
+ */
+export function inferredValues(inf, reason = INFERRED_UNAVAILABLE) {
+  const v = {}
+  if (!inf) {
+    for (const id of INFERRED_IDS) v[id] = unavailable(reason || INFERRED_UNAVAILABLE)
+    return v
+  }
+  const val = inf.validation
+  const validation = val ? { precision: val.precision, recall: val.recall, n: val.n, basis: 'national, all periods: owner-linked sales that also record a buyer' } : null
+  const count = inf.tiers.strong + inf.tiers.likely
+  const share = inf.linked ? count / inf.linked : null
+  const label = inferredInvestorLabel({ share, linked: inf.linked, precision: val?.precision, validationN: val?.n || 0 })
+  const coverage = inf.sales ? inf.linked / inf.sales : 0
+  const tiers = { ...inf.tiers }
+  v.inferred_investor_count = ok(count, inf.linked, { basis: `${count} of ${inf.linked} owner-linked sales`, label, validation, tiers })
+  v.inferred_investor_share = gated('inferred_investor_share', share, inf.linked, { coverage, basis: `${count} of ${inf.linked} owner-linked sales`, label, validation, tiers })
+  v.inferred_strong_share = gated('inferred_strong_share', inf.linked ? inf.tiers.strong / inf.linked : null, inf.linked, { coverage, basis: `${inf.tiers.strong} strong of ${inf.linked} owner-linked sales`, validation })
+  v.stacked_owner_purchase_count = ok(inf.stack3, inf.linked, { basis: `${inf.stack3} of ${inf.linked} owner-linked sales` })
+  v.linked_sale_count = ok(inf.linked, inf.sales, { basis: `${inf.linked} of ${inf.sales} sales` })
+  v.owner_link_coverage = inf.sales ? ok(coverage, inf.sales) : unavailable('No sales in the period')
   return v
 }
 
