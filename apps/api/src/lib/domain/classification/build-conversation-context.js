@@ -97,7 +97,7 @@ const BODY_QUESTION_PATTERNS = [
   [/asking\s+price|price\s+in\s+mind|number\s+in\s+mind|ballpark|what\s+(?:would|do)\s+you\s+want\s+for|how\s+much\s+are\s+you\s+(?:asking|looking)/i, "asking_price"],
   [/\b(?:condition|repairs?|needs?\s+work|shape\s+is\s+it|roof|hvac)\b/i, "condition_check"],
   [/\bhow\s+soon|timeline|when\s+(?:would|do)\s+you\s+want\s+to\s+close|closing\s+timeline/i, "timeline_check"],
-  [/\b(?:still\s+the\s+owner|are\s+you\s+the\s+owner|do\s+you\s+(?:still\s+)?own|is\s+.{0,60}\s+yours)\b/i, "ownership_check"],
+  [/\b(?:still\s+the\s+owner|are\s+you\s+the\s+owner|do\s+you\s+(?:still\s+)?own|is\s+.{0,60}\s+yours|(?:correct|right)\s+number\s+for\s+the\s+owner)\b/i, "ownership_check"],
   // 2026-10-05 (+18177347618): the operator typed "Thanks. Just curious, would
   // you be open to a sale?" -- not a "proposal" or an "offer", so no pattern
   // matched, the context was null and the seller's "Yes" fell to the
