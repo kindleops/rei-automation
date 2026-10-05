@@ -1,4 +1,4 @@
--- PROPOSED — NOT APPLIED. Owner approval required. Targets RC 8.4.
+-- APPLIED to prod 2026-10-05 00:16–00:22 UTC (owner approved all 22; built one at a time, CONCURRENTLY; all indisvalid; ~140 MB total).
 -- Supersedes PROPOSED_20261004120000_entity_graph_property_sort_indexes.sql.
 --
 -- WHY: the Entity Graph table sorts the WHOLE property cohort (page 2
