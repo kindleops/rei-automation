@@ -20,11 +20,14 @@
  *     sale (an earlier snapshot still shows the SELLER).
  *   Older sales whose property later resold never inherit today's owner.
  *
- * STEP 2 · TIER (mi_owner_tier@1), from owner-of-record signals only:
+ * STEP 2 · TIER (mi_owner_tier@2), from owner-of-record signals only:
  *   strong        entity owner AND (out-of-state mailing OR ≥ 2 properties at the same
- *                 mailing address), OR ≥ 3 properties at the same mailing address
+ *                 mailing address), OR a non-entity owner with out-of-state mailing AND
+ *                 ≥ 3 properties at the same mailing address
  *   likely        entity owner (alone), OR out-of-state mailing with 2 properties at the
- *                 same mailing address
+ *                 same mailing address, OR a non-entity owner whose ONLY signal is a stack
+ *                 of ≥ 3 (owner decision 2026-10-05: validated at ~15% vs recorded buyers,
+ *                 so kept but not Strong)
  *   trust_estate  a trust / estate owner without a ≥ 3 stack: its own class, NOT investor
  *   absentee_only an individual with out-of-state mailing, no stack: NOT counted
  *   no_signal     an individual with in-state mailing and no stack: NOT investor
@@ -40,7 +43,7 @@
  */
 
 export const LINK_RULE = Object.freeze({ id: 'mi_owner_link@1', same_transaction_days: 45, recording_lag_days: 30 })
-export const TIER_RULE = Object.freeze({ id: 'mi_owner_tier@1', strong_stack: 3, likely_stack: 2 })
+export const TIER_RULE = Object.freeze({ id: 'mi_owner_tier@2', strong_stack: 3, likely_stack: 2 })
 
 export const TIERS = Object.freeze(['strong', 'likely', 'trust_estate', 'absentee_only', 'no_signal'])
 export const INVESTOR_TIERS = Object.freeze(['strong', 'likely'])
@@ -105,7 +108,7 @@ export function classifyOwner(sig = {}) {
 
   if (!corporate && sig.residentOwner === true) return out('no_signal')
   if (corporate && (oos || stack >= TIER_RULE.likely_stack)) return out('strong')
-  if (stack >= TIER_RULE.strong_stack) return out('strong')
+  if (stack >= TIER_RULE.strong_stack) return out(oos ? 'strong' : 'likely')
   if (trust && !corporate) return out('trust_estate')
   if (corporate) return out('likely')
   if (oos && stack === TIER_RULE.likely_stack) return out('likely')

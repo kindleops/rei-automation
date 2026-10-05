@@ -60,7 +60,8 @@ run_new = patch(run_orig, "  perform set_config('work_mem', '128MB', true);\n",
 TIER_CASE = """case
     when not p_corp and p_resident then 'no_signal'
     when p_corp and (p_oos or p_stack >= 2) then 'strong'
-    when p_stack >= 3 then 'strong'
+    when p_stack >= 3 and p_oos then 'strong'
+    when p_stack >= 3 then 'likely'
     when p_trust and not p_corp then 'trust_estate'
     when p_corp then 'likely'
     when p_oos and p_stack = 2 then 'likely'
@@ -83,7 +84,9 @@ mig = f"""-- ===================================================================
 -- do not edit by hand. Pretest: PROPOSED_{STAMP}_pretest.sql · Rollback: PROPOSED_{STAMP}_rollback.sql
 -- Evidence (2026-10-05, read-only, prod): ~/.claude/jobs/c39b0175/tmp/market-intel/INFERRED_INVESTOR_EVIDENCE.txt
 --   linked 598,841 of 665,288 sales (90.0%); validation on 36,343 linked sales that record a buyer:
---   precision 87.1%, recall 80.7% (strong 86.9%, likely 87.3%, trust 23.1%, absentee-only 3.3%, no signal 2.7%).
+--   precision 87.1%, recall 80.7% for strong+likely (unchanged by tier@2, which only moves 9,537 stack-only
+--   individual/trust sales from strong to likely); trust 23.1%, absentee-only 3.3%, no signal 2.7%.
+--   tier@2 counts: strong 95,776 · likely 60,997 · trust 1,881 · absentee-only 12,643 · no signal 427,544.
 --   Measured read side: i:clusters 5.2 s; one quarter of i:link 20.6 s (+5 s inline clusters) → link split in 8.
 -- APPLY PLAN (owner approval required; nothing here is applied):
 --   1. Outside 05:00-08:59 / 09:15-11:59 UTC: run the _pretest (SET statement_timeout = '300s'); expect
@@ -106,7 +109,7 @@ mig = f"""-- ===================================================================
 --     sale, no canonical transfer exists > 45 days after it (closer events are the same
 --     transaction's other recordings), and the owner snapshot was observed ≥ 30 days after it
 --     (an earlier snapshot can still show the seller).
---   TIER mi_owner_tier@1 (public.mi_owner_tier): strong · likely · trust_estate · absentee_only ·
+--   TIER mi_owner_tier@2 (public.mi_owner_tier): strong · likely · trust_estate · absentee_only ·
 --     no_signal. Inferred investor = strong + likely.
 --   STACK: properties whose owner receives the tax bill at the same normalised mailing address
 --     (comp_properties.owner_mailing_identity_key_v1, a keyed hash). NOT proof of one legal owner.
@@ -222,7 +225,7 @@ $grants$;
 {view_new}revoke all on public.mi_rollup_sales_v from public, anon, authenticated;
 grant select on public.mi_rollup_sales_v to service_role;
 
--- The tier rule (mi_owner_tier@1). Inputs are non-null: callers coalesce unknown to false / 1.
+-- The tier rule (mi_owner_tier@2). Inputs are non-null: callers coalesce unknown to false / 1.
 create or replace function public.mi_owner_tier(p_corp boolean, p_trust boolean, p_oos boolean, p_stack integer, p_resident boolean)
 returns text language sql immutable as $$
   select {TIER_CASE}
@@ -347,7 +350,7 @@ begin
     elsif v_kind = 'validate' then
       -- the build's published validation: the national, all-time, all-asset matrix
       update public.mi_rollup_builds b set notes = b.notes || jsonb_build_object('inferred_investor', jsonb_build_object(
-        'link_rule', 'mi_owner_link@1', 'tier_rule', 'mi_owner_tier@1',
+        'link_rule', 'mi_owner_link@1', 'tier_rule', 'mi_owner_tier@2',
         'sales', r.sale_count, 'linked', r.linked_count,
         'tiers', jsonb_build_object('strong', r.strong_n, 'likely', r.likely_n, 'trust_estate', r.trust_n, 'absentee_only', r.absentee_n, 'no_signal', r.no_signal_n),
         'matrix', jsonb_build_object(
@@ -403,7 +406,7 @@ end
 $fn_grants$;
 
 comment on table public.mi_geo_period_inferred is
-  'Market Intelligence INFERRED investor (owner-based, mi_owner_link@1 + mi_owner_tier@1): geography x period x asset. Separate from recorded investor purchases (mi_geo_period_rollup.investor_count); never add them.';
+  'Market Intelligence INFERRED investor (owner-based, mi_owner_link@1 + mi_owner_tier@2): geography x period x asset. Separate from recorded investor purchases (mi_geo_period_rollup.investor_count); never add them.';
 """
 
 assert '$mig$' not in mig

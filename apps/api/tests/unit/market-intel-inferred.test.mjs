@@ -33,12 +33,13 @@ test('tiers: strong / likely / trust / absentee-only / no signal, each with its 
   const t = (sig) => classifyOwner(sig).tier
   assert.equal(t({ corporate: true, outOfState: true }), 'strong')
   assert.equal(t({ corporate: true, mailStack: 2 }), 'strong')
-  assert.equal(t({ mailStack: 3 }), 'strong') // an individual-named portfolio of 3+
+  assert.equal(t({ mailStack: 3 }), 'likely') // a stack is an individual's ONLY signal → Likely (owner decision)
+  assert.equal(t({ mailStack: 12, outOfState: true }), 'strong')
   assert.equal(t({ corporate: true }), 'likely') // an LLC alone is only LIKELY (brief §48)
   assert.equal(t({ outOfState: true, mailStack: 2 }), 'likely')
   assert.equal(t({ trust: true }), 'trust_estate') // trusts are their own class, not investor by default
   assert.equal(t({ trust: true, outOfState: true, mailStack: 2 }), 'trust_estate')
-  assert.equal(t({ trust: true, mailStack: 5 }), 'strong') // …unless they stack
+  assert.equal(t({ trust: true, mailStack: 5 }), 'likely') // …unless they stack
   assert.equal(t({ outOfState: true }), 'absentee_only')
   assert.equal(t({ mailStack: 2 }), 'no_signal') // an in-state pair (a household) is not investor evidence
   assert.equal(t({}), 'no_signal')

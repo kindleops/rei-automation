@@ -76,7 +76,7 @@ export const METRICS = Object.freeze([
   // extension (status.inferred_investor.available); otherwise every value is 'unavailable'.
   m({ id: 'inferred_investor_count', group: 'investors_inferred', requires: 'inferred_investor', label: 'Inferred investor (owner-based)', unit: 'count', heatable: true, sample: 'linked_sale_count',
     description: `Owner-linked sales whose current owner of record is a strong or likely inferred investor (entity owner, out-of-state mailing, or a portfolio stack at one tax-mailing address). ${INF}`,
-    formula: 'count(owner-linked ∧ tier ∈ {strong, likely})  [mi_owner_link@1, mi_owner_tier@1]', source: INF_SRC, freshness: 'sales' }),
+    formula: 'count(owner-linked ∧ tier ∈ {strong, likely})  [mi_owner_link@1, mi_owner_tier@2]', source: INF_SRC, freshness: 'sales' }),
   m({ id: 'inferred_investor_share', group: 'investors_inferred', requires: 'inferred_investor', label: 'Inferred investor share (owner-based)', unit: 'pct', aggregation: 'ratio', min_sample: 30, sample: 'linked_sale_count', heatable: true,
     description: `Inferred investor purchases as a share of OWNER-LINKED sales (not of all sales). Coverage and validation precision are shown beside it. ${INF}`,
     formula: 'inferred investor purchases ÷ owner-linked sales', source: INF_SRC, freshness: 'sales' }),
