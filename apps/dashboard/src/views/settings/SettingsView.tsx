@@ -28,6 +28,7 @@ import { clearSplit, useSplitWorkspace } from '../../modules/desktop/split-works
 import { operatorInitials } from '../../modules/desktop/operator-initials'
 import { setClassicDesktop } from '../../modules/mobile/product-platform'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
+import { DisplaysSection } from '../../modules/command-wall/manage/DisplaysSection'
 import './settings.css'
 
 /**
@@ -41,12 +42,13 @@ import './settings.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
-type SectionId = 'appearance' | 'alerts' | 'workspace' | 'keyboard' | 'account' | 'about'
+type SectionId = 'appearance' | 'alerts' | 'workspace' | 'displays' | 'keyboard' | 'account' | 'about'
 
 const SECTIONS: Array<{ id: SectionId; label: string; icon: IconName; blurb: string }> = [
   { id: 'appearance', label: 'Appearance', icon: 'palette', blurb: 'Theme, environment, colour, glass and motion — previewed live and applied across every app.' },
   { id: 'alerts', label: 'Notifications & sound', icon: 'bell', blurb: 'What interrupts you, how it sounds, and when it stays quiet.' },
   { id: 'workspace', label: 'Workspace', icon: 'layout-split', blurb: 'Sidebar, display, split screen and the Home board.' },
+  { id: 'displays', label: 'Displays', icon: 'radar', blurb: 'Command Wall TVs: pair, configure, send a view, revoke. Read-only displays — they can never act.' },
   { id: 'keyboard', label: 'Keyboard', icon: 'command', blurb: 'The shortcuts that work on this desktop.' },
   { id: 'account', label: 'Account', icon: 'user', blurb: 'Who is signed in on this device.' },
   { id: 'about', label: 'About', icon: 'cpu', blurb: 'The build this browser is running.' },
@@ -379,7 +381,7 @@ export function SettingsView() {
     return (SECTIONS.some((s) => s.id === want) ? want : 'appearance') as SectionId
   })
   const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]
-  const visible = isPhone ? SECTIONS.filter((s) => s.id !== 'workspace' && s.id !== 'keyboard') : SECTIONS
+  const visible = isPhone ? SECTIONS.filter((s) => s.id !== 'workspace' && s.id !== 'keyboard' && s.id !== 'displays') : SECTIONS
 
   return (
     <div className="st" data-section={section}>
@@ -401,6 +403,7 @@ export function SettingsView() {
           {section === 'appearance' ? <AppearanceSection phone={isPhone} /> : null}
           {section === 'alerts' ? <AlertsSection /> : null}
           {section === 'workspace' ? <WorkspaceSection /> : null}
+          {section === 'displays' && !isPhone ? <DisplaysSection /> : null}
           {section === 'keyboard' ? <KeyboardSection /> : null}
           {section === 'account' ? <AccountSection /> : null}
           {section === 'about' ? <AboutSection /> : null}

@@ -1,0 +1,29 @@
+/* Settings → Displays (desktop). Uses the Settings card language + LC tokens. */
+.cwm { display: flex; flex-direction: column; gap: 14px; }
+.cwm__intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.cwm__intro strong { display: block; font-size: 15px; font-weight: 600; color: var(--lc-ink-1); }
+.cwm__intro small { display: block; margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: var(--lc-ink-3); max-width: 62ch; }
+.cwm__intro code { font-family: var(--lc-font-mono); font-size: 12px; color: var(--lc-ink-2); }
+.cwm__loading, .cwm__revoked { font-size: 12.5px; color: var(--lc-ink-3); padding: 4px 2px; }
+.cwm-card { border-radius: 14px; padding: 16px 18px; background: var(--lc-mat-crystal-bg, rgba(255, 255, 255, 0.03)); border: 1px solid var(--lc-mat-crystal-edge, rgba(255, 255, 255, 0.07)); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 8px 24px rgba(0, 0, 0, 0.12); display: flex; flex-direction: column; gap: 14px; }
+.cwm-card--form { border-color: rgba(var(--lc-accent-rgb), 0.32); }
+.cwm-card__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.cwm-card__title { font-size: 15px; font-weight: 600; color: var(--lc-ink-1); }
+.cwm-card__spec { margin-top: 3px; font-size: 12.5px; color: var(--lc-ink-2); }
+.cwm-card__facts { margin-top: 2px; font-size: 12px; color: var(--lc-ink-3); font-variant-numeric: tabular-nums; }
+.cwm-card[data-connection='offline'] .cwm-card__title, .cwm-card[data-connection='pairing_required'] .cwm-card__title { color: var(--lc-ink-2); }
+.cwm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 16px; align-items: start; }
+.cwm-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cwm-field > span:first-child { font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--lc-ink-3); }
+.cwm-field .st-input { width: 100%; box-sizing: border-box; }
+.cwm-field--wide { grid-column: 1 / -1; }
+.cwm-field--switches { grid-column: span 2; gap: 8px; }
+.cwm-inline { display: flex; gap: 8px; align-items: center; }
+.cwm-inline .st-input { flex: 1; }
+.cwm-code { font-family: var(--lc-font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.cwm-send { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-top: 12px; border-top: 1px solid var(--lc-mat-crystal-edge, rgba(255, 255, 255, 0.06)); }
+.cwm-send__k { font-size: 12.5px; color: var(--lc-ink-2); margin-right: 4px; }
+.cwm-send__market { width: 160px; }
+.cwm-send__now { font-size: 12px; color: var(--lc-ink-3); }
+.cwm-error { font-size: 12.5px; color: rgb(var(--lc-crit-rgb)); }
+.cwm-actions { display: flex; justify-content: flex-end; gap: 8px; }
