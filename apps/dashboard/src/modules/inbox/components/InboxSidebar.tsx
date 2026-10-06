@@ -1506,8 +1506,7 @@ export const InboxSidebar = ({
     })
   }, [])
 
-  // Stores scroll position before a Load More so it can be restored after new rows paint.
-  const scrollPreserveRef = useRef<{ top: number; height: number } | null>(null)
+  // Load More spinner state (scroll is never touched by Load More).
   const loadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [loadMoreLoading, setLoadMoreLoading] = useState(false)
   const prevThreadsLengthRef = useRef(threads.length)
@@ -1705,54 +1704,27 @@ export const InboxSidebar = ({
     }
   }, [threads.length])
 
-  // Captures scroll before Load More fires, so it can be restored after new rows append.
-  const handleLoadMorePreservingScroll = useCallback(() => {
-    const el = groupsRef.current
-    const previousScrollTop = el?.scrollTop ?? 0
-    const previousScrollHeight = el?.scrollHeight ?? 0
-    console.log('[InboxUX] load more start', { activeFilter: activeViewFilter, cursor: null, previousScrollTop, previousScrollHeight })
-    scrollPreserveRef.current = { top: previousScrollTop, height: previousScrollHeight }
+  // Load More never touches scroll: rows append below what the operator is reading.
+  const handleListLoadMore = useCallback(() => {
     setLoadMoreLoading(true)
     if (loadMoreTimeoutRef.current) clearTimeout(loadMoreTimeoutRef.current)
     loadMoreTimeoutRef.current = setTimeout(() => setLoadMoreLoading(false), 8000)
     onLoadMore()
-  }, [onLoadMore, activeViewFilter])
+  }, [onLoadMore])
 
-  // Only scroll to the selected thread when it is outside the visible area.
-  // Unconditional scrollIntoView was the primary cause of the list jumping on every click.
-  useEffect(() => {
-    if (!selectedId) return
-    const root = groupsRef.current
-    if (!root) return
-    const selectedNode = root.querySelector<HTMLElement>(`[data-thread-id="${selectedId}"]`)
-    if (!selectedNode) return
-    const rootRect = root.getBoundingClientRect()
-    const nodeRect = selectedNode.getBoundingClientRect()
-    const isAlreadyVisible = nodeRect.top >= rootRect.top && nodeRect.bottom <= rootRect.bottom
-    if (!isAlreadyVisible) {
-      selectedNode.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    }
-  }, [selectedId, activeBucketConfig, visibleThreadCount])
-
-  // After new rows are appended by Load More, restore the scroll position that was
-  // captured in scrollPreserveRef so the viewport doesn't jump to the top.
-  useEffect(() => {
-    if (scrollPreserveRef.current === null) return
-    const saved = scrollPreserveRef.current
-    scrollPreserveRef.current = null
-    requestAnimationFrame(() => {
-      const el = groupsRef.current
-      if (!el) return
-      // Load More APPENDS below the viewport, so the content above the scroll
-      // position is unchanged and the position must simply be held. The old
-      // `saved.top + (newScrollHeight - saved.height)` added the height of every
-      // newly loaded row to scrollTop -- the compensation you need when
-      // PREPENDING -- which is why the list jumped to the bottom on every tap.
-      // Holding the position leaves the last row you were reading exactly where
-      // it was, with the new rows waiting below.
-      el.scrollTop = saved.top
-    })
-  }, [displayedActiveThreads.length])
+  // THE LIST NEVER MOVES ITSELF (see ../list-scroll-hold.ts).
+  //
+  // Two effects used to move it without the operator asking:
+  //  - selection: `scrollIntoView` on the highlighted thread, re-run whenever
+  //    the highlight id, the bucket object or visibleThreadCount changed. On
+  //    the phone the last opened thread stays highlighted after Back, so every
+  //    Load More (and every realtime re-resolve of the highlight) yanked the
+  //    list back up to that row the moment the operator had scrolled past it.
+  //  - Load More: restored the scrollTop captured at the tap once rows landed,
+  //    so scrolling while the page loaded was undone.
+  // Load More APPENDS below the viewport, which never changes scrollTop; the
+  // load-more slot opts out of scroll anchoring (overflow-anchor: none) so
+  // the browser can never pick the button as the anchor and ride it down.
 
   // Declared before the bucket-switch effect below, which resets this latch.
   const scrollRestoredRef = useRef(false)
@@ -2200,8 +2172,8 @@ export const InboxSidebar = ({
             never be reached in Priority / New Replies / Needs Review.
             Hidden for Scheduled, which is not a paginated thread list. */}
         {showLoadMore && activeViewFilter !== 'scheduled' && (
-          <div className="nx-sidebar-rebuilt__load-more">
-            <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>
+          <div className="nx-sidebar-rebuilt__load-more" style={{ overflowAnchor: 'none' }}>
+            <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleListLoadMore() }}>
               {loadMoreLoading ? <><span className="nx-load-more-spinner" aria-hidden="true" /><span>Loading…</span></> : 'Load More'}
             </button>
           </div>

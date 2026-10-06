@@ -3,6 +3,7 @@ import { List, type ListImperativeAPI, type RowComponentProps } from 'react-wind
 
 const WindowedList = List as ComponentType<Record<string, unknown>>
 import { markFirstRowsPainted, markListScrollOffset } from '../../../domain/inbox/inbox-proof-bridge'
+import { shouldApplyInitialOffset } from '../list-scroll-hold'
 
 interface VirtualizedInboxListProps<T> {
   items: T[]
@@ -73,9 +74,18 @@ function VirtualizedInboxListInner<T>({
     return () => observer.disconnect()
   }, [containerNode])
 
+  // The initial offset is applied ONCE, when rows first exist. It used to
+  // re-run on every offset the list itself reported (onRowsRendered -> parent
+  // state -> initialScrollOffset) and on every items.length change, snapping
+  // the viewport back to a row boundary while the operator scrolled and on
+  // every realtime insert / Load More.
+  const initialAppliedRef = useRef(false)
   useEffect(() => {
+    // An emptied list (bucket switch, reload) gets a fresh initial pass.
+    if (items.length === 0) { initialAppliedRef.current = false; return }
     const api = listRef.current as ListImperativeAPI | null
-    if (!api || items.length === 0) return
+    if (!api || !shouldApplyInitialOffset(initialAppliedRef.current, items.length)) return
+    initialAppliedRef.current = true
 
     const maxIndex = Math.max(0, items.length - 1)
     const requestedIndex = Math.floor(initialScrollOffset / rowHeight)
