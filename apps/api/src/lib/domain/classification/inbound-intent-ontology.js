@@ -428,6 +428,15 @@ const RAW = {
     classifier_aliases: ["asking_price_provided", "asking_price_value", "asking_price", "price_given", "seller_asking_price"],
     compliance: NO_COMPLIANCE,
   },
+  gives_implausible_price: {
+    category: "negotiation",
+    description: "Seller names a price far above any realistic value ('1 million' on a $182K house). Not an asking price: no stage advance, no ownership inference; one light reality-check question keeps the door open.",
+    terminal_hint: "reply_sent",
+    reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: false, objective: "One friendly reality check; never record the number as the ask." },
+    state_hints: { lifecycle_stage: null, operational_status: "active_communication", lead_temperature: "unscored", disposition: "none", automation: "continue" },
+    classifier_aliases: ["asking_price_implausible"],
+    compliance: NO_COMPLIANCE,
+  },
   price_negotiation: {
     category: "negotiation",
     description: "Active price back-and-forth: counteroffers, 'need more money', retail-price expectations, competing-buyer leverage.",

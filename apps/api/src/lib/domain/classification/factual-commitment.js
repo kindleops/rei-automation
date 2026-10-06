@@ -80,6 +80,16 @@ export function applyFactualCommitmentToPriceSignal(price_signal, { message = ""
     return demote(price_signal, { commitment: FACTUAL_COMMITMENT.NON_LITERAL, reason: "non_literal_price", candidate: ask });
   }
 
+  // 1b. A price far above any realistic value ("1 million" on a $182K house,
+  // price-plausibility.js) is not an asking price either: it never persists
+  // and never moves the stage (2026-10-06, +17276319579).
+  const implausible =
+    classification?.primary_intent === "asking_price_implausible" ||
+    classification?.price_parse?.implausibility?.implausible === true;
+  if (ask && implausible) {
+    return demote(price_signal, { commitment: FACTUAL_COMMITMENT.NON_LITERAL, reason: "implausible_price", candidate: ask });
+  }
+
   // 2. A bare number answering a size / count / year question is not a price.
   const question = resolveLastQuestion({ lastOutboundBody, lastQuestion });
   if (question.kind === LAST_QUESTION_KIND.NON_PRICE_QUANTITY && BARE_NUMBER_REPLY_RE.test(text)) {

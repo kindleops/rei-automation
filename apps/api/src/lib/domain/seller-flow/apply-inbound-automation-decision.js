@@ -74,6 +74,14 @@ export const ROUTE_PROFILES = Object.freeze({
     template_use_case_candidates: ["seller_asking_price", "asking_price"],
     next_action: "queue_auto_reply",
   },
+  // "1 million dollars" on a $182K house (2026-10-06): one light reality
+  // check, same stage. No safe price_reality_check template -> review.
+  asking_price_implausible: {
+    route_hint: "price_reality_check",
+    allowed_template_stages: ["price_reality_check"],
+    template_use_case_candidates: ["price_reality_check"],
+    next_action: "queue_auto_reply",
+  },
   latent_interest: {
     route_hint: "seller_asking_price",
     allowed_template_stages: ["seller_asking_price", "stage_3_seller_asking_price"],
@@ -712,6 +720,8 @@ function computeInboundAutomationDecisionRaw({
       "latent_interest",
       "asks_offer",
       "asking_price_provided",
+      // One light reality-check question (ROUTE_PROFILES.asking_price_implausible).
+      "asking_price_implausible",
       "tenant_occupied",
       "condition_disclosed",
       "callback_requested",
@@ -1020,8 +1030,9 @@ export const LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES = new Set([
   "closing_scheduled_update",
 ]);
 
-async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy = null, excludePlaceholders = [] } = {}) {
+async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy = null, excludePlaceholders = [], excludeTemplateIds = [] } = {}) {
   const excluded = new Set(asArray(excludePlaceholders).map((v) => clean(v)).filter(Boolean));
+  const excluded_ids = new Set(asArray(excludeTemplateIds).map((v) => clean(v)).filter(Boolean));
   try {
     const { LOCAL_TEMPLATE_CANDIDATES, verifyLocalAutoReplyApproval, isLocalTemplateFallbackKilled } =
       await import("@/lib/domain/templates/local-template-registry.js");
@@ -1032,6 +1043,7 @@ async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy =
       if (!allowed_matches.includes(lower(row.use_case))) continue;
       if (lower(row.active) !== "yes") continue;
       if (excluded.size > 0 && templatePlaceholders(row.text).some((name) => excluded.has(name))) continue;
+      if (excluded_ids.has(clean(row.item_id))) continue;
       // A local template is auto-sendable only with a verified approval record:
       // pinned content hash, approved environment, allowed strategy, no kill.
       const verification = verifyLocalAutoReplyApproval(row, { strategy });
@@ -1104,6 +1116,7 @@ export const CLARIFIER_INTENTS = new Set([
   "latent_interest",
   "asks_offer",
   "asking_price_provided",
+  "asking_price_implausible",
   // ANTI-SILENCE: every routed intent must ALSO have clarifier backup, so
   // losing its route can never strand it. coverage-graph-audit enforces this
   // and caught both of these arriving with a route and no backup.
@@ -1349,10 +1362,14 @@ export async function selectSafeAutoReplyTemplate({
   // Placeholders that cannot be filled for this thread: templates using them
   // are skipped so a variant without them (or none) is chosen instead.
   excludePlaceholders = [],
+  // Templates already sent on this thread: a repeat would be duplicate_blocked
+  // (or, worse, the identical text twice), so they are skipped.
+  excludeTemplateIds = [],
 } = {}) {
   if (!canUseSupabase(supabaseClient)) {
     return { ok: false, reason: "missing_supabase", template: null };
   }
+  const excluded_template_ids = new Set(asArray(excludeTemplateIds).map((v) => clean(v)).filter(Boolean));
   const excluded_placeholders = new Set(asArray(excludePlaceholders).map((v) => clean(v)).filter(Boolean));
   const usesExcludedPlaceholder = (body) =>
     excluded_placeholders.size > 0 && templatePlaceholders(body).some((name) => excluded_placeholders.has(name));
@@ -1508,6 +1525,7 @@ export async function selectSafeAutoReplyTemplate({
       })
       .filter((row) => isTemplatePropertyCompatible(row, property_type_scope))
       .filter((row) => !usesExcludedPlaceholder(row.template_body))
+      .filter((row) => !excluded_template_ids.has(clean(row.template_id)) && !excluded_template_ids.has(clean(row.id)))
       .sort(compareTemplateRank);
 
     const requested_language = lower(language);
@@ -1558,6 +1576,7 @@ export async function selectSafeAutoReplyTemplate({
       selected = await selectLocalNegotiationTemplate(allowed_matches, {
         strategy: decision?.negotiation_strategy || null,
         excludePlaceholders: [...excluded_placeholders],
+        excludeTemplateIds: [...excluded_template_ids],
       });
       if (selected) {
         try {
@@ -1793,6 +1812,55 @@ export async function hydrateReplyAddressContext({
     }
   }
   return base;
+}
+
+// ── Repeat-intent guard (2026-10-06 hotfix) ────────────────────────────────
+// +17276319579: "1 million dollars" -> condition probe (delivered); "Great. 1
+// million dollars" -> the SAME condition probe -> duplicate_blocked -> silence.
+// The thread's recent outbound tells us what we already said.
+const REPEAT_LOOKBACK_STATUSES = ["queued", "scheduled", "pending", "processing", "sending", "sent", "delivered"];
+
+export async function loadRecentThreadOutbound({ supabase = null, threadKey = null, limit = 20 } = {}) {
+  const phones = phoneVariantsForThread(threadKey);
+  if (!phones.length || !supabase || typeof supabase.from !== "function") return [];
+  try {
+    const { data, error } = await supabase
+      .from("send_queue")
+      .select("id,template_id,message_body,message_type,source,queue_status,created_at")
+      .in("to_phone_number", phones)
+      .in("queue_status", REPEAT_LOOKBACK_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error || !Array.isArray(data)) return [];
+    // Only the CURRENT conversation cycle: everything since the latest
+    // campaign first touch (message_type NULL / ownership). A fresh S1 opener
+    // starts a new cycle in which re-asking the S2 question is correct.
+    const rows = [...data].sort((a, b) => String(b?.created_at || "").localeCompare(String(a?.created_at || "")));
+    const cycle = [];
+    for (const row of rows) {
+      cycle.push(row);
+      const type = lower(row?.message_type);
+      if (!type || type.includes("ownership") || lower(row?.source) === "campaign") break;
+    }
+    return cycle;
+  } catch {
+    return [];
+  }
+}
+
+function normalizeBodyForRepeat(text) {
+  return String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/** Would sending this template / text repeat something already sent on the thread? */
+export function isRepeatOfRecentOutbound({ template = null, renderedText = "", recent = [] } = {}) {
+  const template_id = clean(template?.template_id) || clean(template?.id) || null;
+  const body = normalizeBodyForRepeat(renderedText);
+  return asArray(recent).some(
+    (row) =>
+      (template_id && clean(row?.template_id) === template_id) ||
+      (body && normalizeBodyForRepeat(row?.message_body) === body)
+  );
 }
 
 /** Placeholder names a template body uses ({{ name }}). */
@@ -3248,7 +3316,75 @@ export async function executeInboundAutomationDecision({
     render_result = { ok: false, reason: "unrendered_placeholder", missing: [], rendered_message_text: null };
   }
 
+  // REPEAT INTENT: never send the same template / identical text twice on a
+  // thread, and never fall silent because of it. Next-best: an approved
+  // variant of the same question; else review (repeat_intent_no_alternative)
+  // with an operator alert.
+  let repeat_guard = null;
+  if (render_result.ok && template_result.template) {
+    const recent_outbound = await loadRecentThreadOutbound({ supabase, threadKey });
+    if (
+      isRepeatOfRecentOutbound({
+        template: template_result.template,
+        renderedText: render_result.rendered_message_text,
+        recent: recent_outbound,
+      })
+    ) {
+      const already_sent_ids = recent_outbound.map((row) => clean(row?.template_id)).filter(Boolean);
+      const variant = await selectSafeAutoReplyTemplate({
+        supabaseClient: supabase,
+        classification,
+        decision: base_decision,
+        context: reply_context,
+        threadKey,
+        inboundEventId,
+        excludeTemplateIds: [
+          ...already_sent_ids,
+          clean(template_result.template.template_id) || clean(template_result.template.id),
+        ].filter(Boolean),
+      });
+      let variant_render = null;
+      if (variant.ok && variant.template) {
+        variant_render = renderSafeTemplate({
+          template: variant.template,
+          message,
+          inboundFrom,
+          inboundTo,
+          classification,
+          context: reply_context,
+          dealAuthority,
+        });
+      }
+      if (
+        variant_render?.ok &&
+        !/\{\{|\}\}/.test(String(variant_render.rendered_message_text || "")) &&
+        !isRepeatOfRecentOutbound({ template: variant.template, renderedText: variant_render.rendered_message_text, recent: recent_outbound })
+      ) {
+        repeat_guard = {
+          outcome: "variant",
+          repeated_template_id: clean(template_result.template.template_id) || null,
+          variant_template_id: clean(variant.template.template_id) || clean(variant.template.id) || null,
+        };
+        template_result = variant;
+        render_result = variant_render;
+      } else {
+        repeat_guard = {
+          outcome: "no_alternative",
+          repeated_template_id: clean(template_result.template.template_id) || null,
+        };
+        render_result = {
+          ok: false,
+          reason: "repeat_intent_no_alternative",
+          missing: [],
+          rendered_message_text: null,
+        };
+      }
+    }
+  }
+
   if (!render_result.ok) {
+    const failure_reason =
+      render_result.reason === "repeat_intent_no_alternative" ? "repeat_intent_no_alternative" : "template_render_failed";
     // Never silently dropped: the operator is alerted (inbox_auto_reply_blocked)
     // and the decision stays human-review. Observability only -- a failed
     // alert never changes the decision. Skipped on dry runs.
@@ -3260,7 +3396,10 @@ export async function executeInboundAutomationDecision({
         await notify({
           eventType: "inbox_auto_reply_blocked",
           severity: "warning",
-          title: `Auto-reply not sent (template could not render) — ${clean(threadKey) || "thread"}`,
+          title:
+            failure_reason === "repeat_intent_no_alternative"
+              ? `Auto-reply not sent (would repeat what we already sent, no alternative) — ${clean(threadKey) || "thread"}`
+              : `Auto-reply not sent (template could not render) — ${clean(threadKey) || "thread"}`,
           description: `Seller replied (${clean(classification?.primary_intent) || "unknown intent"}) but template ${
             clean(template_result.template?.template_id) || "?"
           } could not render: ${render_result.reason || "template_render_failed"}${
@@ -3289,8 +3428,9 @@ export async function executeInboundAutomationDecision({
       should_queue_reply: false,
       should_mark_human_review: true,
       reply_mode: "manual_review",
-      human_review_reason: "template_render_failed",
-      audit_reason: "template_render_failed",
+      human_review_reason: failure_reason,
+      audit_reason: failure_reason,
+      ...(repeat_guard ? { repeat_guard } : {}),
     };
 
     warn("[AUTO_REPLY_BLOCKED]", {
@@ -3314,12 +3454,12 @@ export async function executeInboundAutomationDecision({
       dry_run: Boolean(dryRun),
       auto_reply_mode: effective_auto_reply_mode,
       queue_permission,
-      audit_reason: "template_render_failed",
+      audit_reason: failure_reason,
       seller_stage_reply: {
         ok: true,
         queued: false,
         handled: true,
-        reason: "template_render_failed",
+        reason: failure_reason,
         plan: automationDecisionToLegacyPlan({
           decision: render_failed_decision,
           classification,
@@ -3749,15 +3889,43 @@ export async function executeInboundAutomationDecision({
   }
 
   if (!queue_result?.ok) {
+    // duplicate_blocked used to end the turn silently (reply_mode "none", no
+    // review): the seller's message went unanswered. It is now a review with
+    // repeat_intent_no_alternative and an operator alert.
+    const duplicate = queue_result?.reason === "duplicate_blocked";
     const blocked_decision = {
       ...base_decision,
       should_queue_reply: false,
-      should_mark_human_review: queue_result?.reason !== "duplicate_blocked",
-      reply_mode: queue_result?.reason === "duplicate_blocked" ? "none" : "manual_review",
-      human_review_reason:
-        queue_result?.reason === "duplicate_blocked" ? null : "queue_insert_failed",
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason: duplicate ? "repeat_intent_no_alternative" : "queue_insert_failed",
       audit_reason: queue_result?.reason || "queue_insert_failed",
     };
+    if (duplicate) {
+      try {
+        const notify =
+          renderFailureNotifyImpl ||
+          (await import("@/lib/domain/notifications/notification-emitter.js")).emitNotificationFromBusinessEvent;
+        await notify({
+          eventType: "inbox_auto_reply_blocked",
+          severity: "warning",
+          title: `Auto-reply not sent (duplicate of what we already sent) — ${clean(threadKey) || "thread"}`,
+          description: `Seller replied (${clean(classification?.primary_intent) || "unknown intent"}); the chosen reply ${
+            clean(selected_template?.template_id) || "?"
+          } was already sent on this thread. Reply manually.`,
+          titleVars: { thread_key: clean(threadKey) || "" },
+          sourceEntityType: "thread",
+          sourceEntityId: clean(threadKey) || clean(inboundEventId) || "thread",
+          propertyId: clean(propertyId) || null,
+          templateId: clean(selected_template?.template_id) || null,
+          deduplicationKey: `auto_reply_duplicate_blocked:${clean(inboundEventId) || clean(threadKey) || ""}`,
+          metrics: { reason: "duplicate_blocked", primary_intent: clean(classification?.primary_intent) || null },
+          group: false,
+        });
+      } catch {
+        // alerting must never block the decision
+      }
+    }
 
     warn("[AUTO_REPLY_BLOCKED]", {
       thread_key: threadKey || null,
