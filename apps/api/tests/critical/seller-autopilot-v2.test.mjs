@@ -432,3 +432,14 @@ test("Composer Offer Ready preflight reads a campaign's queue-eligible targets w
   assert.deepEqual(r.by_reason, { offer_ready: 1, tier_not_offer_authoritative: 1, not_scored: 1 });
   assert.ok(calls.some((c) => c[0] === "campaign_targets" && c[1] === "in" && c[2] === "target_status"), "queue-eligible targets only");
 });
+
+test("campaign scoring run: owner auto-pause thresholds and the 12:00Z start rule", async () => {
+  const { evaluateBatchHealth, windowVerdict } = await import("../../scripts/ops/campaign-offer-scoring-run.mjs");
+  assert.equal(windowVerdict(new Date("2026-10-06T08:37:00Z")).ok, false);
+  assert.equal(windowVerdict(new Date("2026-10-06T12:00:00Z")).ok, true);
+  const ok = evaluateBatchHealth({ load: { active_sessions: 8, max_query_seconds: 2 }, attempted: 25, scored: 25, deltaBytes: 25 * 200 * 1024, totalBytes: 5e6 });
+  assert.equal(ok.healthy, true);
+  const bad = evaluateBatchHealth({ load: { active_sessions: 13, max_query_seconds: 11 }, timeouts: 3, errors: 1, attempted: 25, scored: 24, deltaBytes: 24 * 400 * 1024, totalBytes: 0.9 * 1024 ** 3 });
+  assert.equal(bad.healthy, false);
+  assert.equal(bad.reasons.length, 6);
+});
