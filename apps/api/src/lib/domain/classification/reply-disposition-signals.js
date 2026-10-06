@@ -509,6 +509,29 @@ const DONT_UNDERSTAND_RE =
 export function detectMessageLanguage(message) {
   const folded = foldReplyText(message);
   if (!folded) return null;
+  // Native scripts first (kana / Hangul before Han: Japanese uses kanji).
+  const raw = String(message ?? "");
+  if (/[\u3040-\u30FF]/u.test(raw)) return "Japanese";
+  if (/[\uAC00-\uD7AF\u1100-\u11FF]/u.test(raw)) return "Korean";
+  if (/[\u3400-\u9FFF\uF900-\uFAFF]/u.test(raw)) return "Mandarin";
+  if (/[\u0590-\u05FF]/u.test(raw)) return "Hebrew";
+  if (/[\u0600-\u06FF]/u.test(raw)) return "Arabic";
+  if (/[\u0900-\u097F]/u.test(raw)) return "Hindi";
+  if (/[\u0370-\u03FF\u1F00-\u1FFF]/u.test(raw)) return "Greek";
+  if (/[\u0400-\u04FF]/u.test(raw)) return "Russian";
+  // Our own romanised templates (2026-10-06 audit of sms_templates): the
+  // multilingual reply layer only trusts romanised answers ("hai", "da",
+  // "haan") when OUR last outbound was in that language, so it must be known.
+  if (/\b(?:ni hao|zai zheli|xie xie|wo shi|nin hai|nin dui|ruguo heshi)\b/.test(folded)) return "Mandarin";
+  if (/\b(?:konnichiwa|desu|arigatou|gozaimasu|watashi wa)\b/.test(folded)) return "Japanese";
+  if (/\b(?:annyeong|yeoyo|gamsadeurimnida|gamsahamnida|hago gyeseyo|isseoyo)\b/.test(folded)) return "Korean";
+  if (/\b(?:privet|spasibo|ponial|vy vse eshche|ya ischu)\b/.test(folded)) return "Russian";
+  if (/\b(?:shalom|hevanti|ani mekhapes|ata adayin)\b/.test(folded)) return "Hebrew";
+  if (/\b(?:namaste|yahan|dhanyavaad|dhanyavad|kya aap|karne ke liye)\b/.test(folded)) return "Hindi";
+  if (/\b(?:yia sou|geia sou|efharisto|eimai topikos|to katalava)\b/.test(folded)) return "Greek";
+  if (/\b(?:czesc|dziekuje|doceniam|szukam|czy nadal)\b/.test(folded)) return "Polish";
+  if (/\b(?:ciao|grazie|investo a|possiedi|domanda veloce)\b/.test(folded)) return "Italian";
+  if (/\b(?:hallo|ich bin|danke|verstanden|immobilieninvestor)\b/.test(folded)) return "German";
   if (/\b(?:xin chao|toi la|cua ban|co phai|khong|nha dau tu)\b/.test(folded)) return "Vietnamese";
   if (/\b(?:marhaba|huna|astathmir|ahlan|hal\s+\S+\s+lak)\b/.test(folded)) return "Arabic";
   if (/\b(?:bonjour|aviez|avez|vous|prix demande|propriete)\b/.test(folded)) return "French";
