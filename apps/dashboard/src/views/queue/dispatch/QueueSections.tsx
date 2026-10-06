@@ -462,7 +462,7 @@ export function QueueMarketsView({ shell, items, directory, fleet, loading, rang
               <Fact k="Held" v={n(selected.blocked)} tone={selected.blocked > 0 ? 'amber' : undefined} />
               {selected.optOuts > 0 && <Fact k="Opt-outs" v={n(selected.optOuts)} tone="red" />}
               {selected.violations21610 > 0 && <Fact k="21610" v={n(selected.violations21610)} tone="red" />}
-              <Fact k="Sent today" v={n(selected.messagesSentToday)} />
+              <Fact k="Cold sent today" v={n(selected.messagesSentToday)} />
             </div>
           </section>
         </QueueDispatchPicker>
@@ -494,7 +494,9 @@ export function QueueSendersView({ shell, items, fleet, loading, rangeLabel, onV
   const options = [{ key: 'all', label: 'All', count: stats.length }, ...summary.markets.map((m) => ({ key: m, label: shortMarket(m) ?? m, count: stats.filter((s) => s.market === m).length }))]
   const selected = stats.find((s) => s.phone === open) ?? null
 
-  const usage = (s: SenderStat) => (s.dailyCap ? `${n(s.messagesSentToday)} / ${n(s.dailyCap)} today` : `${n(s.messagesSentToday)} today`)
+  // Cold sends count against the daily cap; replies do not (shown beside it).
+  const replies = (s: SenderStat) => (s.repliesSentToday != null ? ` · ${n(s.repliesSentToday)} replies` : '')
+  const usage = (s: SenderStat) => (s.dailyCap ? `Cold ${n(s.messagesSentToday)} / ${n(s.dailyCap)} today${replies(s)}` : `Cold ${n(s.messagesSentToday)} today${replies(s)}`)
 
   return (
     <QueueShell {...shell} view="senders" scrollKey={market} controls={options.length > 2 ? <Chips value={market} options={options} onChange={setMarket} label="Sender market" /> : undefined}>

@@ -60,7 +60,13 @@ export function mapTextgridFleetRow(row: AnyRecord): TextgridFleetNumber | null 
     status: asString(getFirst(row, ['status']), 'active'),
     isActive: !isTextgridNumberInactive(row),
     dailyCap: dailyLimit > 0 ? dailyLimit : null,
+    // The API derives these from the send ledger: messages_sent_today = COLD
+    // sends (the daily cap's count), conversational = replies (uncapped by it).
     messagesSentToday: Math.max(asNumber(getFirst(row, ['messages_sent_today']), 0), 0),
+    repliesSentToday: (() => {
+      const v = getFirst(row, ['messages_sent_today_conversational'])
+      return v == null ? null : Math.max(asNumber(v, 0), 0)
+    })(),
     lastUsedAt: asString(getFirst(row, ['last_used_at']), '') || null,
     healthScore: (() => {
       const score = getFirst(row, ['health_score'])

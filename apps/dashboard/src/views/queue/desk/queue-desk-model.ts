@@ -203,7 +203,10 @@ export interface SenderLine {
   active: boolean
   status: string
   cap: number | null
+  /** COLD sends today (the daily cap's count) */
   sentToday: number
+  /** conversational sends today (not capped by the daily cap); null = not reported */
+  repliesToday: number | null
   /** share of the daily cap used, when a cap is recorded */
   used: number | null
   /** page rows still to go out from this number */
@@ -216,7 +219,10 @@ export interface SenderCapacity {
   inactive: number
   /** sum of recorded caps over active numbers (null when none is recorded) */
   cap: number | null
+  /** COLD sends today across active numbers */
   sentToday: number
+  /** conversational sends today across active numbers (null = not reported) */
+  repliesToday: number | null
   /** active numbers with no cap recorded — their headroom is unknown */
   uncapped: number
 }
@@ -235,6 +241,7 @@ export function senderCapacity(fleet: ReadonlyArray<TextgridFleetNumber>, items:
     status: n.status,
     cap: n.dailyCap,
     sentToday: n.messagesSentToday,
+    repliesToday: n.repliesSentToday ?? null,
     used: n.dailyCap && n.dailyCap > 0 ? Math.min(1, n.messagesSentToday / n.dailyCap) : null,
     pending: pending.get(n.phone) ?? 0,
   }))
@@ -247,6 +254,7 @@ export function senderCapacity(fleet: ReadonlyArray<TextgridFleetNumber>, items:
     inactive: lines.length - active.length,
     cap: capped.length ? capped.reduce((n, l) => n + (l.cap ?? 0), 0) : null,
     sentToday: active.reduce((n, l) => n + l.sentToday, 0),
+    repliesToday: active.some((l) => l.repliesToday !== null) ? active.reduce((n, l) => n + (l.repliesToday ?? 0), 0) : null,
     uncapped: active.length - capped.length,
   }
 }
@@ -260,7 +268,9 @@ const HOLD_LABEL: Record<string, string> = {
   outbound_number_health_cooling: 'Sender cooling (health)',
   outbound_number_cooling_until: 'Sender cooling',
   outbound_number_status_paused: 'Sender paused',
-  outbound_number_daily_limit_reached: 'Sender at its daily cap',
+  outbound_number_daily_limit_reached: 'Sender at its daily cold cap',
+  outbound_number_total_ceiling_reached: 'Sender at its total safety ceiling',
+  conversational_reply_stale_needs_review: 'Reply held for review (too late to auto-send)',
   outbound_number_not_in_fleet: 'Sender not in the fleet',
   paused_sender_eligibility_unavailable: 'Fleet unreadable — deferred',
   paused_global_lock: 'Global send lock',

@@ -950,7 +950,8 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
         property_id: clean(input.property_id || input_metadata.property_id) || null,
         canonical_market_id: clean(input.canonical_market_id || input_metadata.canonical_market_id) || null,
       },
-      { ...deps, supabase }
+      // Operator send = CONVERSATIONAL: the thread sender at its cold cap still sends.
+      { ...deps, supabase, send_class: "conversational" }
     );
     if (!sticky.ok) {
       // The specific reason when one sender was rejected and nothing could
@@ -1608,7 +1609,10 @@ async function evaluateManualSendSender(phone, deps = {}) {
   } catch {
     return { ok: false, reason: "outbound_number_eligibility_unavailable" };
   }
-  return evaluateSenderDispatchEligibility(row, { blocked, phone, now: deps.now ? new Date(deps.now) : new Date() });
+  // An operator Inbox send is CONVERSATIONAL (delivery/send-class.js): never
+  // blocked by the 800/day cold-outbound limit, only by the number's total
+  // safety ceiling and every other gate.
+  return evaluateSenderDispatchEligibility(row, { blocked, phone, now: deps.now ? new Date(deps.now) : new Date(), send_class: "conversational" });
 }
 
 function isManualSendHardBlockReason(reason = "") {
@@ -1628,6 +1632,7 @@ function isManualSendHardBlockReason(reason = "") {
     "outbound_number_health_cooling",
     "outbound_number_cooling_until",
     "outbound_number_daily_limit_reached",
+    "outbound_number_total_ceiling_reached",
     "no_eligible_sender_for_thread",
   ]).has(clean(reason).toLowerCase());
 }

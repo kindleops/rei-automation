@@ -109,7 +109,10 @@ export function SenderFleetCards({
 
               <div className="occ-sender-card__telemetry">
                 <div className="occ-sender-card__telemetry-track" role="list">
-                  <MetricChip label="Today" value={s.messagesSentToday} tone={s.messagesSentToday > 0 ? 'cyan' : 'muted'} title="messages_sent_today (registry)" />
+                  <MetricChip label="Cold" value={s.dailyCap != null ? `${s.messagesSentToday}/${s.dailyCap}` : s.messagesSentToday} tone={s.messagesSentToday > 0 ? 'cyan' : 'muted'} title="Cold sends today (campaign / never-replied) — counted against the daily cap" />
+                  {s.repliesSentToday != null && (
+                    <MetricChip label="Replies" value={s.repliesSentToday} tone={s.repliesSentToday > 0 ? 'green' : 'muted'} title="Replies to engaged sellers today — not counted against the daily cap" />
+                  )}
                   <MetricChip label="Sent" value={s.sent} />
                   <MetricChip label="Del" value={s.delivered} tone={s.delivered > 0 ? 'green' : 'muted'} />
                   <MetricChip label="Fail" value={s.failed} tone={s.failed > 0 ? 'red' : undefined} />

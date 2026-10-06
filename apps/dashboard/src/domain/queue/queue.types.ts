@@ -276,7 +276,10 @@ export interface TextgridFleetNumber {
   status: string
   isActive: boolean
   dailyCap: number | null
+  /** COLD sends today (campaign / never-replied): what the daily cap counts. */
   messagesSentToday: number
+  /** CONVERSATIONAL sends today (replies, operator sends): not capped by dailyCap. null = not reported. */
+  repliesSentToday?: number | null
   lastUsedAt: string | null
   healthScore: number | null
 }

@@ -285,9 +285,11 @@ async function loadActiveSenderNumbers(supabase) {
     for (const row of fleet) {
       const num = clean(row.phone_number);
       if (!num) continue;
-      // Respect the registry's own operational ceiling.
-      const sent = Number(row.messages_sent_today);
-      const cap = Number(row.daily_limit);
+      // Inbox bulk follow-ups are operator Inbox sends = CONVERSATIONAL
+      // (delivery/send-class.js): the cold daily limit does not apply; the
+      // number's total-sends safety ceiling does.
+      const sent = Number(row.messages_sent_today_total ?? row.messages_sent_today);
+      const cap = Number(row.conversational_ceiling);
       if (Number.isFinite(sent) && Number.isFinite(cap) && cap > 0 && sent >= cap) continue;
       set.add(num);
     }

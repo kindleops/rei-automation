@@ -22,6 +22,7 @@
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { clean, num } from './home-read-kit.js'
+import { withDerivedSentToday } from '@/lib/domain/delivery/sender-sent-today.js'
 import { BUYER_MATCH_SALES_SOURCE, SALES_COLUMNS, isPricedSale, shapeSale } from '@/lib/domain/buyer-match/buyer-match-sales.js'
 
 export const INSTRUMENT_KINDS = Object.freeze(['deal', 'comps', 'buyers', 'entity', 'queue'])
@@ -241,8 +242,11 @@ async function readEntity(db) {
 export function holdCodeOf(r) { return clean(r.guard_reason) || clean(r.blocked_reason) || clean(r.paused_reason) || clean(r.queue_status) || 'unknown' }
 
 async function readQueue(db, now) {
-  const fleet = await db.from('textgrid_numbers').select('phone_number, friendly_name, market, status, daily_limit, messages_sent_today, health_state, cooling_until, spam_flagged_at, last_used_at')
-  fail(fleet.error, 'sender fleet')
+  const fleetRead = await db.from('textgrid_numbers').select('phone_number, friendly_name, market, status, daily_limit, messages_sent_today, health_state, cooling_until, spam_flagged_at, last_used_at, metadata')
+  fail(fleetRead.error, 'sender fleet')
+  // TRUE sends in each sender's day, split COLD (the daily cap's count) and
+  // CONVERSATIONAL (replies; never capped by it) — sender-sent-today.js.
+  const fleet = { data: await withDerivedSentToday(db, fleetRead.data || [], { now: new Date(now) }) }
   // PostgREST caps a read at 1000 rows: page through the holds (bounded)
   const heldRows = []
   for (let from = 0; from < 10_000; from += 1000) {
@@ -260,15 +264,16 @@ async function readQueue(db, now) {
     const active = clean(n.status).toLowerCase() === 'active' && !cooling && !flagged
     const limit = num(n.daily_limit)
     const sent = num(n.messages_sent_today) ?? 0
-    return { phone: clean(n.phone_number), label: clean(n.friendly_name) || null, market: clean(n.market) || null, state: active ? 'active' : cooling ? 'cooling' : flagged ? 'flagged' : clean(n.status) || 'unknown', health: clean(n.health_state) || null, limit, sent, remaining: active && limit != null ? Math.max(0, limit - sent) : 0 }
+    const replies = n.sent_today_basis === 'send_queue' ? num(n.messages_sent_today_conversational) ?? 0 : null
+    return { phone: clean(n.phone_number), label: clean(n.friendly_name) || null, market: clean(n.market) || null, state: active ? 'active' : cooling ? 'cooling' : flagged ? 'flagged' : clean(n.status) || 'unknown', health: clean(n.health_state) || null, limit, sent, replies, remaining: active && limit != null ? Math.max(0, limit - sent) : 0 }
   })
   return {
     held: (held.data || []).length,
     heldCapped: heldRows.length >= 10_000,
     reasons: [...reasons.entries()].sort((a, b) => b[1] - a[1]).map(([code, count]) => ({ code, count })),
-    senders: { total: numbers.length, active: numbers.filter((n) => n.state === 'active').length, cooling: numbers.filter((n) => n.state === 'cooling').length, flagged: numbers.filter((n) => n.state === 'flagged').length, remainingToday: numbers.reduce((s, n) => s + n.remaining, 0), dailyCapacity: numbers.filter((n) => n.state === 'active').reduce((s, n) => s + (n.limit ?? 0), 0) },
+    senders: { total: numbers.length, active: numbers.filter((n) => n.state === 'active').length, cooling: numbers.filter((n) => n.state === 'cooling').length, flagged: numbers.filter((n) => n.state === 'flagged').length, remainingToday: numbers.reduce((s, n) => s + n.remaining, 0), dailyCapacity: numbers.filter((n) => n.state === 'active').reduce((s, n) => s + (n.limit ?? 0), 0), coldSentToday: numbers.reduce((s, n) => s + n.sent, 0), repliesToday: numbers.some((n) => n.replies !== null) ? numbers.reduce((s, n) => s + (n.replies ?? 0), 0) : null },
     numbers: numbers.sort((a, b) => b.remaining - a.remaining).slice(0, 8),
-    note: 'messages_sent_today as each number reports it',
+    note: numbers.length && (fleet.data || []).every((n) => n.sent_today_basis === 'send_queue') ? 'cold sends in each sender\'s day (replies are not capped)' : 'messages_sent_today as each number reports it',
   }
 }
 

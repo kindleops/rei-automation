@@ -18,7 +18,8 @@ import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply, isImmediateInboundAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
-import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
+import { resolveConversationalCeiling, withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
+import { SEND_CLASS, isConversationalSendClass, resolveSendClass, sourceSendClass } from "@/lib/domain/delivery/send-class.js";
 import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
 import { loadPropertyGeography, resolveRecipientTimezone, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
@@ -1485,7 +1486,22 @@ const BLOCKING_HEALTH_STATE = new Set([
   "suspended",
 ]);
 
-export function evaluateOutboundNumberEligibility(number_row = null, now = new Date()) {
+/**
+ * COLD vs CONVERSATIONAL caps (owner rule 2026-10-05, delivery/send-class.js):
+ *   daily_limit (fleet 800)   caps COLD sends only, against the COLD count
+ *                             (messages_sent_today, derived). A conversational
+ *                             send is never blocked by it.
+ *   conversational_ceiling    a TRUE carrier-safety ceiling on ALL sends from
+ *                             the number today (messages_sent_today_total;
+ *                             metadata.conversational_ceiling, else
+ *                             system_control sender_conversational_ceiling,
+ *                             else 2000). Blocks every class: a runaway loop.
+ * send_class omitted = COLD (the conservative default for any caller that does
+ * not know). Status / health / cooling block every class, unchanged.
+ */
+export const OUTBOUND_TOTAL_CEILING_REACHED = "outbound_number_total_ceiling_reached";
+
+export function evaluateOutboundNumberEligibility(number_row = null, now = new Date(), { send_class = null } = {}) {
   if (!number_row) {
     return { ok: false, reason: "outbound_number_not_in_fleet", terminal: true };
   }
@@ -1509,10 +1525,18 @@ export function evaluateOutboundNumberEligibility(number_row = null, now = new D
     }
   }
 
-  const daily_limit = asNullableNumber(number_row.daily_limit, null);
-  const sent_today = asNumber(number_row.messages_sent_today, 0);
-  if (daily_limit !== null && sent_today >= daily_limit) {
-    return { ok: false, reason: "outbound_number_daily_limit_reached", terminal: false };
+  const total_today = asNumber(number_row.messages_sent_today_total ?? number_row.messages_sent_today, 0);
+  const ceiling = resolveConversationalCeiling(number_row);
+  if (total_today >= ceiling) {
+    return { ok: false, reason: OUTBOUND_TOTAL_CEILING_REACHED, terminal: false };
+  }
+
+  if (!isConversationalSendClass(send_class)) {
+    const daily_limit = asNullableNumber(number_row.daily_limit, null);
+    const sent_today = asNumber(number_row.messages_sent_today, 0);
+    if (daily_limit !== null && sent_today >= daily_limit) {
+      return { ok: false, reason: "outbound_number_daily_limit_reached", terminal: false };
+    }
   }
 
   return { ok: true, reason: null, terminal: false };
@@ -1605,8 +1629,34 @@ async function loadDispatchBlockedSendersFor(deps = {}) {
   return loadDispatchBlockedSenders({ getSystemValue: deps.getSystemValue, env: deps.env });
 }
 
+/**
+ * The row's send class at dispatch (delivery/send-class.js). The raw row keeps
+ * the provenance fields (source/type/queue_key) normalization may not carry.
+ * With an injected fleet and no injected thread reader / client, a unit test
+ * never reaches a real database: provenance only (else COLD).
+ */
+async function resolveRowSendClass(row, normalized, deps = {}) {
+  const subject = { ...(normalized || {}), ...(row && typeof row === "object" ? row : {}) };
+  try {
+    if (typeof deps.resolveSendClass === "function") return await deps.resolveSendClass(subject);
+    const injected =
+      typeof deps.loadOutboundNumberByPhone === "function" ||
+      typeof deps.loadTextgridFleet === "function" ||
+      typeof deps.selectAvailableTextgridNumber === "function";
+    const has_reader = typeof deps.loadThreadLastInbound === "function";
+    const client = deps.supabase || deps.supabaseClient || (!injected && hasSupabaseConfig() ? defaultSupabase : null);
+    if (!has_reader && !client) return sourceSendClass(subject) || { send_class: SEND_CLASS.COLD, basis: "thread_check_unavailable" };
+    return await resolveSendClass(subject, { ...deps, supabase: client });
+  } catch {
+    return { send_class: SEND_CLASS.COLD, basis: "send_class_unresolved" };
+  }
+}
+
 export async function selectAvailableTextgridNumber(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
+  // COLD sends are capped by daily_limit; CONVERSATIONAL sends (replies to
+  // engaged sellers, operator sends) only by the total safety ceiling.
+  const { send_class, basis: send_class_basis } = await resolveRowSendClass(row, normalized, deps);
 
   // SENDER ROUTING 2.0 (double-gated). Thread continuity, the routing graph and
   // a PARK (no retry burn) when nothing in the market's graph can send. null =
@@ -1616,6 +1666,7 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
     const { routeQueueRowViaPolicy } = await import("@/lib/domain/routing/sender-routing/sender-routing-runtime.js");
     const routed = await routeQueueRowViaPolicy(normalized, {
       ...deps,
+      send_class,
       loadFleet: async () => {
         if (typeof deps.loadTextgridFleet === "function") return deps.loadTextgridFleet();
         const { data, error } = await getSupabase(deps).from(TEXTGRID_NUMBERS_TABLE).select("*").limit(200);
@@ -1667,13 +1718,14 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
       blocked: blocked_senders,
       phone: intended,
       now: deps.now ? new Date(deps.now) : new Date(),
+      send_class,
     });
     if (!eligibility.ok && eligibility.reason !== "sender_blocklist_unreadable") {
       // A REPLY on a seller conversation (not a campaign touch) whose pinned
       // sender can no longer send: the sticky thread sender rule picks the
       // highest-priority eligible fallback and persists it (never silent:
       // inbox_thread_state.our_number + a sender_thread_rerouted event).
-      const sticky = await stickyThreadSelection(normalized, deps, { thread_sender: intended, raw_row: row });
+      const sticky = await stickyThreadSelection(normalized, { ...deps, send_class }, { thread_sender: intended, raw_row: row });
       if (sticky) return sticky;
     }
     if (!eligibility.ok) {
@@ -1688,6 +1740,8 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
         terminal: eligibility.terminal,
         selected: null,
         from_phone_number: intended,
+        send_class,
+        send_class_basis,
       };
     }
 
@@ -1700,6 +1754,8 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
       },
       from_phone_number: intended,
       reason: "queue_row_from_phone_number_revalidated",
+      send_class,
+      send_class_basis,
     };
   }
 
@@ -1710,7 +1766,7 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
   // A row with no sender on a seller conversation (deferred follow-ups): the
   // thread's own sender, never a fleet-wide least-used pick.
   {
-    const sticky = await stickyThreadSelection(normalized, deps, { raw_row: row });
+    const sticky = await stickyThreadSelection(normalized, { ...deps, send_class }, { raw_row: row });
     if (sticky) return sticky;
   }
 
@@ -1726,9 +1782,15 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
   // Least used first by TRUE sends today (derived), then least recently used.
   // The DB used to order by the never-reset counter; the policy is unchanged,
   // the number it ranks by is now the real one.
+  const conversational = isConversationalSendClass(send_class);
   const rows = (await deriveFleetSentToday(Array.isArray(data) ? data : [], deps)).sort(
     (left, right) => {
-      const usage = asNumber(left?.messages_sent_today, 0) - asNumber(right?.messages_sent_today, 0);
+      // Cold sends rank by COLD usage (the cap they spend); conversational
+      // sends by total usage (the ceiling they spend).
+      const usage_of = (r) => conversational
+        ? asNumber(r?.messages_sent_today_total ?? r?.messages_sent_today, 0)
+        : asNumber(r?.messages_sent_today, 0);
+      const usage = usage_of(left) - usage_of(right);
       if (usage !== 0) return usage;
       const left_ts = left?.last_used_at ? new Date(left.last_used_at).getTime() : 0;
       const right_ts = right?.last_used_at ? new Date(right.last_used_at).getTime() : 0;
@@ -1744,7 +1806,7 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
   const NO_BLOCKS = new Set();
   const eligible_rows = rows.filter((candidate) => {
     if (!normalizePhone(candidate?.phone_number)) return false;
-    return evaluateSenderDispatchEligibility(candidate, { blocked: NO_BLOCKS, now: eligibility_now }).ok;
+    return evaluateSenderDispatchEligibility(candidate, { blocked: NO_BLOCKS, now: eligibility_now, send_class }).ok;
   });
 
   // THE CANONICAL SENDER DISPATCH ELIGIBILITY on the rotation branch (a row
@@ -1764,7 +1826,7 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
     };
   }
   const active_rows = eligible_rows.filter((candidate) =>
-    evaluateSenderDispatchEligibility(candidate, { blocked: blocked_senders, now: eligibility_now }).ok
+    evaluateSenderDispatchEligibility(candidate, { blocked: blocked_senders, now: eligibility_now, send_class }).ok
   );
   if (eligible_rows.length && !active_rows.length) {
     return {

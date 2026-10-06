@@ -13,7 +13,10 @@ export interface SenderStat {
   registered: boolean
   configuredActive: boolean
   dailyCap: number | null
+  /** COLD sends today (the daily cap's count). */
   messagesSentToday: number
+  /** Conversational sends today (replies; not capped by dailyCap). null = not reported. */
+  repliesSentToday?: number | null
   registryLastUsedAt: string | null
   healthScore: number | null
   sent: number
@@ -167,6 +170,7 @@ export function buildSenderStats(
       configuredActive: n.isActive,
       dailyCap: n.dailyCap,
       messagesSentToday: n.messagesSentToday,
+      repliesSentToday: n.repliesSentToday ?? null,
       registryLastUsedAt: n.lastUsedAt,
       healthScore: n.healthScore,
       state: n.isActive ? 'paused' : 'paused',
@@ -190,6 +194,7 @@ export function buildSenderStats(
       stateCode: fleetRow?.state ?? null,
       dailyCap: fleetRow?.dailyCap ?? null,
       messagesSentToday: fleetRow?.messagesSentToday ?? 0,
+      repliesSentToday: fleetRow?.repliesSentToday ?? null,
       registryLastUsedAt: fleetRow?.lastUsedAt ?? null,
       healthScore: fleetRow?.healthScore ?? null,
       id: fleetRow?.id ?? null,
@@ -213,6 +218,7 @@ export function buildSenderStats(
       s.configuredActive = fleetRow.isActive
       s.dailyCap = fleetRow.dailyCap
       s.messagesSentToday = fleetRow.messagesSentToday
+      s.repliesSentToday = fleetRow.repliesSentToday ?? null
       s.registryLastUsedAt = fleetRow.lastUsedAt
       s.healthScore = fleetRow.healthScore
     } else if ((!s.market || s.market === '—') && i.market) {

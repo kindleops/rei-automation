@@ -291,6 +291,30 @@ export async function runSendQueue(
     }
   }
 
+  // 0b. Conversational rows parked by the COLD daily cap (send-class.js): a
+  // reply is never capped by daily_limit. Fresh, un-overtaken replies go back
+  // to 'queued' (every gate re-applies when claimed); stale ones are held for
+  // operator review. Never throws into the run. Runs against the production
+  // client (no injected supabaseClient) or an injected releaser.
+  if (!dry_run && (deps.releaseConversationalCapHolds || (!deps.supabaseClient && hasSupabaseConfig()))) {
+    try {
+      const release = deps.releaseConversationalCapHolds
+        || (await import("@/lib/domain/queue/release-conversational-cap-holds.js")).releaseConversationalCapHolds;
+      const released = await release({ dry_run: false }, { supabase, now });
+      if (released?.examined) {
+        log_info("queue.conversational_cap_release", {
+          examined: released.examined,
+          released: released.released,
+          review: released.review,
+          skipped: released.skipped,
+          reason: released.reason || null,
+        });
+      }
+    } catch (release_error) {
+      log_warn("queue.conversational_cap_release_failed", { error: release_error?.message || "unknown_error" });
+    }
+  }
+
   // 1. Stale-lock recovery for stuck "processing" rows.
   //
   // LEASE EXPIRY DOES NOT PROVE THE PROVIDER REQUEST NEVER STARTED.

@@ -140,8 +140,9 @@ export interface BuyersInstrument {
 export interface EntityInstrument { owners: number | null; ownersEstimated: boolean; connected: Array<{ id: string; name: string; kind: string | null; properties: number; value: number | null; markets: string[] }>; changes: null }
 export interface QueueInstrument {
   held: number; heldCapped: boolean; reasons: Array<{ code: string; count: number }>
-  senders: { total: number; active: number; cooling: number; flagged: number; remainingToday: number; dailyCapacity: number }
-  numbers: Array<{ phone: string; label: string | null; market: string | null; state: string; health: string | null; limit: number | null; sent: number; remaining: number }>
+  /** remainingToday / dailyCapacity are COLD (the daily cap counts cold sends only); repliesToday is uncapped by it (null = not derived). */
+  senders: { total: number; active: number; cooling: number; flagged: number; remainingToday: number; dailyCapacity: number; coldSentToday?: number; repliesToday?: number | null }
+  numbers: Array<{ phone: string; label: string | null; market: string | null; state: string; health: string | null; limit: number | null; sent: number; replies?: number | null; remaining: number }>
   note: string
 }
 type InstrumentKind = 'deal' | 'comps' | 'buyers' | 'entity' | 'queue'

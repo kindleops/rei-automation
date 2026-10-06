@@ -7,8 +7,11 @@
  *   1. operator blocklist   system_control.sms_blocked_sender_numbers + env
  *                           SMS_BLOCKED_SENDER_NUMBERS (the health guard's list)
  *   2. fleet record         the number must be in textgrid_numbers
- *   3. status / health / cooling / daily limit
- *                           evaluateOutboundNumberEligibility (unchanged)
+ *   3. status / health / cooling / total ceiling / daily limit
+ *                           evaluateOutboundNumberEligibility; the daily
+ *                           (cold) limit is skipped for send_class
+ *                           'conversational' (send-class.js), the total
+ *                           ceiling never is
  *
  * Enforced before the canonical dispatch seam on both production entries
  * (pinned by tests/critical/sender-dispatch-eligibility-invariant.test.mjs):
@@ -43,11 +46,11 @@ export const SENDER_BLOCKLIST_UNREADABLE = "sender_blocklist_unreadable";
  * null. blocked = Set<E.164> from loadDispatchBlockedSenders (required).
  * Returns { ok, reason, terminal }.
  */
-export function evaluateSenderDispatchEligibility(fleet_row, { blocked, now = new Date(), phone = null } = {}) {
+export function evaluateSenderDispatchEligibility(fleet_row, { blocked, now = new Date(), phone = null, send_class = null } = {}) {
   if (!(blocked instanceof Set)) return { ok: false, reason: SENDER_BLOCKLIST_UNREADABLE, terminal: false };
   const number = normalizePhone(phone || fleet_row?.phone_number);
   if (number && blocked.has(number)) return { ok: false, reason: SENDER_BLOCKED_REASON, terminal: false };
-  return evaluateOutboundNumberEligibility(fleet_row, now);
+  return evaluateOutboundNumberEligibility(fleet_row, now, { send_class });
 }
 
 /**

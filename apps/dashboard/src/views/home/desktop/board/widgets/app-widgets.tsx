@@ -192,7 +192,7 @@ export function QueueWidget({ size, cells }: WidgetRenderProps) {
           <div className={cx('hb-queue', `is-${size}`)}>
             <div className="hb-row">
               <WFigure value={fmt(q.held)} label="held" tone={q.held ? 'attn' : null} onClick={() => openPath('/queue')} />
-              <WFigure value={fmt(q.senders.remainingToday)} label="sends left today" tone="exec" sub={`of ${fmt(q.senders.dailyCapacity)} daily`} />
+              <WFigure value={fmt(q.senders.remainingToday)} label="cold sends left today" tone="exec" sub={`of ${fmt(q.senders.dailyCapacity)} daily${q.senders.repliesToday != null ? ` · ${fmt(q.senders.repliesToday)} replies (not capped)` : ''}`} />
               {size !== 'compact' ? <WFigure value={`${q.senders.active}/${q.senders.total}`} label="senders active" tone={q.senders.flagged ? 'crit' : null} /> : null}
             </div>
             {size !== 'compact' && (q.senders.cooling || q.senders.flagged) ? <WFacts items={[{ label: 'Cooling', value: fmt(q.senders.cooling), tone: q.senders.cooling ? 'attn' : null }, { label: 'Spam-flagged', value: fmt(q.senders.flagged), tone: q.senders.flagged ? 'crit' : null }]} /> : null}
