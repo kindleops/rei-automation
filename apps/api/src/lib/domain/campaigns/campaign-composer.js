@@ -50,6 +50,7 @@ import {
   updateCampaign,
 } from '@/lib/domain/campaigns/campaign-automation-service.js'
 import { evaluateCampaignLaunchReadiness } from '@/lib/domain/campaigns/campaign-launch-readiness.js'
+import { summarizeOfferReadiness } from '@/lib/acquisition/offerReadiness.js'
 import { fetchCanonicalLanguages } from '@/lib/domain/campaigns/campaign-recipient-metrics.js'
 import { governanceApplies, governanceExcludedTemplateIds, evaluateTemplateGovernance, indexGovernance, loadGovernance } from '@/lib/domain/campaigns/template-governance.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
@@ -638,6 +639,85 @@ async function runComposerCohort(s, strategy, key, deps) {
   const entries = [...cohortCache.values()]
   for (const entry of entries.slice(0, Math.max(0, entries.length - MEMBER_CACHE_ENTRIES))) entry.members = null
   return value
+}
+
+/* ── Offer Ready preflight ─────────────────────────────────────────────── */
+
+const OFFER_READY_ID_CHUNK = 200
+const OFFER_READY_SELECT = 'property_id,computed_at,decision_tier,recommended_cash_offer,mao:evidence->offer_calculation->>effective_authorized_ceiling,evidence_mode:evidence->backfill->>evidence_mode'
+
+/** The decision fields of property_acquisition_scores for a set of ids (projected; never full evidence). */
+export async function readOfferReadinessScores(ids = [], deps = {}) {
+  const db = deps.supabase || defaultSupabase
+  const out = new Map()
+  const unique = [...new Set(ids.map(clean).filter(Boolean))]
+  for (let i = 0; i < unique.length; i += OFFER_READY_ID_CHUNK) {
+    const { data, error } = await db.from('property_acquisition_scores').select(OFFER_READY_SELECT).in('property_id', unique.slice(i, i + OFFER_READY_ID_CHUNK))
+    if (error) throw error
+    for (const r of data || []) {
+      out.set(clean(r.property_id), {
+        ...r,
+        evidence: {
+          offer_calculation: { effective_authorized_ceiling: r.mao ?? null },
+          ...(r.evidence_mode ? { backfill: { evidence_mode: r.evidence_mode, monetary_authority: false } } : {}),
+        },
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * "2,348 sendable · 2,311 offer-ready · 37 review-only" — computed with the
+ * SAME predicate Seller Autopilot v2 uses before it may quote money
+ * (lib/acquisition/offerReadiness.js). Review-only properties are still
+ * contacted; Autopilot converses with them but never sends a number.
+ *   readComposerOfferReadiness({ campaign_id })  an existing campaign's queue-eligible targets
+ *   readComposerOfferReadiness({ spec })         a composition's eligible cohort (shares the cohort cache)
+ */
+export async function readComposerOfferReadiness({ campaign_id = null, spec = null } = {}, deps = {}) {
+  const db = deps.supabase || defaultSupabase
+  let ids = []
+  let source
+  if (clean(campaign_id)) {
+    source = 'campaign_targets'
+    let from = 0
+    for (;;) {
+      const { data, error } = await db
+        .from('campaign_targets')
+        .select('property_id')
+        .eq('campaign_id', clean(campaign_id))
+        .in('target_status', ['ready', 'planned'])
+        .not('property_id', 'is', null)
+        .order('property_id', { ascending: true })
+        .range(from, from + 999)
+      if (error) return { ok: false, error: 'campaign_targets_unavailable', message: error.message }
+      ids.push(...(data || []).map((r) => clean(r.property_id)))
+      if (!data || data.length < 1000) break
+      from += 1000
+    }
+  } else {
+    source = 'composer_cohort'
+    const s = obj(spec)
+    const strategy = strategyOf(s)
+    const key = cohortKeyOf(s, strategy)
+    let entry = cohortCache.get(key)
+    let cohort = entry && Date.now() - entry.at < COHORT_TTL_MS && entry.members ? entry.value : null
+    if (!cohort) {
+      cohort = await readComposerCohort(s, { ...deps, fresh: true })
+      if (!cohort?.ok) return { ok: false, error: clean(cohort?.error) || 'cohort_unavailable', message: clean(cohort?.message) || null }
+      entry = cohortCache.get(key)
+    }
+    if (!Array.isArray(entry?.members)) return { ok: false, error: 'cohort_members_unavailable' }
+    ids = eligibleMembers(entry.members, cohort.sender_markets).eligible.map((m) => clean(m.property_id))
+  }
+  let scores
+  try {
+    scores = await (deps.readOfferReadinessScores || readOfferReadinessScores)(ids, deps)
+  } catch (error) {
+    return { ok: false, error: 'scores_unavailable', message: error?.message || String(error) }
+  }
+  return { ok: true, source, at: new Date().toISOString(), ...summarizeOfferReadiness(ids, scores, { now: deps.now || Date.now() }) }
 }
 
 /* ── campaign map preview: the eligible cohort's geography ─────────────── */

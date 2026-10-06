@@ -345,6 +345,18 @@ export function OfferIntelligence({ d }: { d: DealDecision }) {
       ) : (
         <p className="ddx-note">No binding offer is out. The engine range is a recommendation; offers are made by the seller workflow, never from this screen.</p>
       )}
+      {o.quotes?.status === 'captured' && o.quotes.anchors.length ? (
+        // Negotiation anchors quoted to the seller — kept apart from formal offers.
+        <ul className="ddx-offers ddx-quotes" aria-label="Anchors quoted">
+          {o.quotes.anchors.map((q) => (
+            <li key={`${q.quotedAt}:${q.templateId ?? ''}`}>
+              <b>{money(q.amount)}</b>
+              <span>{q.label}</span>
+              <em>{q.maxOffer ? `max ${money(q.maxOffer)}` : 'max not recorded'}{q.compIds.length ? ` · ${q.compIds.length} comp${q.compIds.length === 1 ? '' : 's'}` : ''}</em>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </DdCard>
   )
 }

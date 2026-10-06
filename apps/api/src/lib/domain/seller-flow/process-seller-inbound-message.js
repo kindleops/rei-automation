@@ -66,6 +66,7 @@ import {
   buildV2ExecutionDirectives,
   V2_STAGES,
 } from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
+import { authoritativeMaxOffer } from "@/lib/acquisition/offerReadiness.js";
 import {
   autoReplyModeAllowsQueue,
   normalizeAutoReplyMode,
@@ -1047,10 +1048,17 @@ export async function processSellerInboundMessage({
       underwritingSignals?.ade_result?.recommended_offer ??
       deal_state?.ade_result?.recommended_offer ??
       null,
-    max_allowable_offer:
-      underwritingSignals?.ade_result?.investor_ceiling_mid ??
-      deal_state?.ade_result?.investor_ceiling_mid ??
-      null,
+    // SELLER_AUTOPILOT_V2 (defect fix 2026-10-06): the authoritative max is
+    // evidence.offer_calculation.effective_authorized_ceiling. investor_ceiling_mid
+    // is the engine's non-authoritative buyer-behaviour leg (Ronald 278477219:
+    // 113,800 vs the real ceiling 79,100). Flag off: unchanged.
+    max_allowable_offer: isSellerAutopilotV2Enabled()
+      ? underwritingSignals?.ade_result?.effective_authorized_ceiling ??
+        authoritativeMaxOffer(persisted_ade) ??
+        null
+      : underwritingSignals?.ade_result?.investor_ceiling_mid ??
+        deal_state?.ade_result?.investor_ceiling_mid ??
+        null,
     minimum_acceptable_offer:
       underwritingSignals?.ade_result?.minimum_acceptable_offer ??
       deal_state?.ade_result?.minimum_acceptable_offer ??

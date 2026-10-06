@@ -44,6 +44,21 @@ export const readAudience = (spec: Record<string, unknown>, signal?: AbortSignal
 export const readCohort = (spec: Record<string, unknown>, signal?: AbortSignal) =>
   read<ComposerCohort>(`${BASE}?part=cohort&spec=${encodeURIComponent(JSON.stringify(spec))}`, signal, 240_000)
 
+/** Offer Ready preflight (same predicate Seller Autopilot uses before it may quote money). */
+export type ComposerOfferReady = {
+  ok: true
+  source: 'composer_cohort' | 'campaign_targets'
+  at: string
+  sendable: number
+  offer_ready: number
+  review_only: number
+  by_reason: Record<string, number>
+  predicate: { epoch: string; max_age_days: number; tiers: string[] }
+  label: string
+}
+export const readOfferReady = (spec: Record<string, unknown>, signal?: AbortSignal) =>
+  read<ComposerOfferReady>(`${BASE}?part=offer_ready&spec=${encodeURIComponent(JSON.stringify(spec))}`, signal, 240_000)
+
 export const readCoverage = (markets: Array<{ market: string; state: string | null; targets: number }>, signal?: AbortSignal) =>
   read<ComposerCoverage>(`${BASE}?part=coverage&markets=${encodeURIComponent(JSON.stringify(markets))}`, signal, 90_000)
 

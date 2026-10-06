@@ -6,6 +6,13 @@ import {
 } from "@/lib/supabase/sms-engine.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
 import {
+  isSellerAutopilotV2Enabled,
+  isReplyLanguageEnabled,
+  parseEnabledLanguages,
+  V2_LANGUAGES_KEY,
+} from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
+import { QUOTE_TYPES, buildNegotiationQuote, quoteTypeFor, recordNegotiationQuote } from "@/lib/domain/seller-flow/negotiation-quotes.js";
+import {
   persistActiveOffer as persistActiveOfferDefault,
   bindOfferToQueueRow as bindOfferToQueueRowDefault,
   MONETARY_OFFER_USE_CASES,
@@ -41,6 +48,8 @@ import {
 } from "@/lib/domain/queue/cancel-supabase-pending-outbound.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
+/** Upper bound on active+safe template rows read per language pair (see selectSafeAutoReplyTemplate). */
+export const TEMPLATE_CANDIDATE_BOUND = 10000;
 const ACTIVE_AUTO_REPLY_STATUSES = new Set([
   "queued",
   "pending",
@@ -1534,12 +1543,18 @@ export async function selectSafeAutoReplyTemplate({
       .eq("is_active", true)
       .eq("safe_for_auto_reply", true)
       .in("language", languages)
-      // 100 rows covers today's catalog (85 active+safe rows across EN+ES); a
-      // v2 turn reads the full pool so approving more rows can never silently
-      // truncate the candidates.
-      .limit(v2_preference.length ? 2000 : 100);
+      // DEFECT FIX (2026-10-06): this was .limit(100). Today's pool is 85
+      // active+safe rows across EN+ES, so approving one more language's rows
+      // would have SILENTLY truncated the candidates (row order, not rank,
+      // deciding which templates exist). The bound is now far above the whole
+      // active catalog (~9K rows, all languages) and hitting it is an alarm,
+      // never a silent cut.
+      .limit(TEMPLATE_CANDIDATE_BOUND);
 
     if (error) throw error;
+    if (Array.isArray(data) && data.length >= TEMPLATE_CANDIDATE_BOUND) {
+      warn("[AUTO_REPLY_TEMPLATE_POOL_AT_BOUND]", { bound: TEMPLATE_CANDIDATE_BOUND, languages });
+    }
 
     const candidates = (Array.isArray(data) ? data : [])
       .filter((row) => {
@@ -2607,6 +2622,8 @@ export function resolveAuthorizedOfferAmount(dealAuthority = null) {
 }
 export async function executeInboundAutomationDecision({
   opportunityId = null,
+  // Seller Autopilot v2 quote log writer (injectable for tests); see negotiation-quotes.js.
+  negotiationQuoteImpl = null,
   persistActiveOfferImpl = persistActiveOfferDefault,
   bindOfferToQueueRowImpl = bindOfferToQueueRowDefault,
   message,
@@ -3342,6 +3359,49 @@ export async function executeInboundAutomationDecision({
     };
   }
 
+  // ── PER-LANGUAGE ENABLEMENT (flag SELLER_AUTOPILOT_V2) ────────────────────
+  // A language whose copy has not been natively reviewed and switched on in
+  // system_control[seller_autopilot_v2_languages] (default English,Spanish)
+  // goes to a human, whatever its templates say.
+  if (isSellerAutopilotV2Enabled()) {
+    const read_value = getSystemValueImpl || (hasSupabaseConfig() ? getSystemValue : async () => null);
+    let raw_languages = null;
+    try {
+      raw_languages = await read_value(V2_LANGUAGES_KEY);
+    } catch {
+      raw_languages = null;
+    }
+    const enabled_languages = parseEnabledLanguages(raw_languages);
+    const reply_language = clean(template_result.template.language) || clean(classification?.language) || "English";
+    if (!isReplyLanguageEnabled(reply_language, enabled_languages)) {
+      const language_decision = {
+        ...base_decision,
+        should_queue_reply: false,
+        should_mark_human_review: true,
+        reply_mode: "manual_review",
+        human_review_reason: `v2_language_not_enabled:${reply_language}`,
+        audit_reason: "v2_language_not_enabled",
+        enabled_languages,
+      };
+      return {
+        ok: true,
+        automation_decision: language_decision,
+        selected_template: template_result.template,
+        rendered_message_text: null,
+        queued: false,
+        queue_item_id: null,
+        queue_row_id: null,
+        queue_result: null,
+        suppression_applied: false,
+        duplicate_suppressed: false,
+        dry_run: Boolean(dryRun),
+        auto_reply_mode: effective_auto_reply_mode,
+        queue_permission,
+        audit_reason: "v2_language_not_enabled",
+      };
+    }
+  }
+
   let render_result = renderSafeTemplate({
     template: template_result.template,
     message,
@@ -3811,6 +3871,87 @@ export async function executeInboundAutomationDecision({
       };
     }
     persisted_offer = offer_result;
+  }
+
+  // ── NEGOTIATION QUOTE LOG (flag SELLER_AUTOPILOT_V2) ──────────────────────
+  // Every number we are about to put to a seller is persisted with its
+  // evidence BEFORE the send, as an ANCHOR or a FORMAL OFFER (never an anchor
+  // as the active offer). A monetary quote that cannot be logged is not sent;
+  // this also closes the legacy comp_anchor path, which rendered {{offer_price}}
+  // with no record at all. "Confirm basics" records the ask, carries no number,
+  // and is never blocked by the log.
+  let negotiation_quote = null;
+  if (isSellerAutopilotV2Enabled()) {
+    const quote_type = quoteTypeFor({ use_case: selected_use_case, template_body: selected_template.template_body });
+    if (quote_type) {
+      const v2_plan = base_decision.seller_autopilot_v2 || null;
+      const mon = v2_plan?.monetary || null;
+      const auth = v2_plan?.authority || null;
+      const confirm = quote_type === QUOTE_TYPES.CONFIRM_BASICS;
+      let quote_error = null;
+      let row = null;
+      try {
+        row = buildNegotiationQuote({
+          quote_key: `${clean(inboundEventId) || clean(threadKey) || "thread"}:${clean(selected_template.template_id || selected_template.id) || selected_use_case}`,
+          quote_type,
+          amount: confirm ? null : resolveAuthorizedOfferAmount(dealAuthority),
+          max_offer: confirm ? auth?.mao ?? null : mon?.ceiling ?? dealAuthority?.authorized_offer_ceiling ?? null,
+          recommended_offer: mon?.offer_version?.recommended_offer ?? auth?.offer ?? dealAuthority?.recommended_offer ?? null,
+          engine_version: mon?.offer_version?.engine_version ?? auth?.engine_version ?? null,
+          score_snapshot_id: mon?.offer_version?.snapshot_id ?? auth?.snapshot_id ?? dealAuthority?.ade_snapshot_id ?? null,
+          score_computed_at: mon?.offer_version?.computed_at ?? auth?.computed_at ?? null,
+          decision_tier: mon?.offer_version?.decision_tier ?? auth?.decision_tier ?? null,
+          rule_branch: mon?.rule || v2_plan?.price_branch || (lower(selected_use_case) === "comp_anchor" ? "legacy_comp_anchor" : lower(selected_use_case)),
+          comp_ids: mon?.comp_ids || [],
+          comp_prices: mon?.comp_prices || [],
+          asking_price: v2_plan?.asking_price ?? null,
+          language: clean(selected_template.language) || clean(classification?.language) || null,
+          template_id: clean(selected_template.template_id || selected_template.id) || null,
+          use_case: selected_use_case,
+          send_queue_key: queue_key,
+          inbound_message_event_id: clean(inboundEventId) || null,
+          thread_key: clean(threadKey) || clean(inboundFrom),
+          property_id: clean(propertyId) || null,
+          master_owner_id: clean(ownerId) || null,
+          opportunity_id: clean(opportunityId) || null,
+          seller_offer_id: clean(persisted_offer?.offer?.offer_id || persisted_offer?.offer_id || persisted_offer?.offer?.id) || null,
+          evidence: { plan: v2_plan ? { reasoning_code: v2_plan.reasoning_code, price_branch: v2_plan.price_branch, v2_stage: v2_plan.v2_stage } : null, monetary: mon, comp_anchor_statement: clean(dealAuthority?.comp_anchor_statement) || null },
+          quoted_at: now,
+        });
+      } catch (error) {
+        quote_error = error?.message || "negotiation_quote_invalid";
+      }
+      const written = row ? await (negotiationQuoteImpl || recordNegotiationQuote)(supabase, row) : { ok: false, reason: quote_error };
+      negotiation_quote = { ...(row || {}), write: written };
+      if (!written?.ok && !confirm) {
+        warn("[NEGOTIATION_QUOTE_BLOCKED_SEND]", { thread_key: threadKey || inboundFrom, use_case: selected_use_case, reason: written?.reason || quote_error });
+        const blocked_decision = {
+          ...base_decision,
+          should_queue_reply: false,
+          should_mark_human_review: true,
+          reply_mode: "none",
+          human_review_reason: "negotiation_quote_log_failed",
+          audit_reason: "negotiation_quote_log_failed",
+        };
+        return {
+          ok: true,
+          automation_decision: blocked_decision,
+          selected_template,
+          rendered_message_text,
+          queued: false,
+          queue_item_id: null,
+          queue_row_id: null,
+          queue_result: { ok: false, status: 409, reason: written?.reason || quote_error || "negotiation_quote_log_failed" },
+          negotiation_quote,
+          suppression_applied: false,
+          duplicate_suppressed: false,
+          dry_run: Boolean(dryRun),
+          auto_reply_mode: effective_auto_reply_mode,
+          queue_permission,
+          audit_reason: "negotiation_quote_log_failed",
+        };
+      }
+    }
   }
 
   const email_channel = channel === "email" && typeof emailReplyImpl === "function";

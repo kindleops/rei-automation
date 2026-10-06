@@ -18,6 +18,8 @@ import { NextResponse } from 'next/server.js';
 
 import {
   BACKFILL_STATE_KEY,
+  CAMPAIGN_SCOPE_STATE_KEY,
+  SCOPE_KINDS,
   SCORING_VERSION,
   applyPause,
   applyStart,
@@ -41,13 +43,21 @@ function enabled() {
   return String(process.env.ACQUISITION_SCORING_BACKFILL_ENABLED || '').trim().toLowerCase() === 'true';
 }
 
+/** { scope: 'campaign' } or { scope: { kind: 'campaign', campaign_ids: [...] } } selects the offer-ready layer. */
+export function isCampaignScope(body = {}) {
+  const scope = body?.scope;
+  return scope === SCOPE_KINDS.CAMPAIGN || scope?.kind === SCOPE_KINDS.CAMPAIGN;
+}
+
 export async function handleScoringBackfill(action, body = {}, deps = {}) {
-  const store = deps.store ?? createScoringBackfillStore();
+  const campaign = isCampaignScope(body);
+  const stateKey = campaign ? CAMPAIGN_SCOPE_STATE_KEY : BACKFILL_STATE_KEY;
+  const store = deps.store ?? createScoringBackfillStore({ stateKey });
   const now = deps.now ?? new Date();
 
   if (action === 'status') {
     const state = parseState(await store.readState(), now);
-    return { status: 200, body: { ok: true, key: BACKFILL_STATE_KEY, scoring_version: SCORING_VERSION, enabled: enabled(), state } };
+    return { status: 200, body: { ok: true, key: stateKey, scoring_version: SCORING_VERSION, enabled: enabled(), state } };
   }
   if (!enabled() && !deps.forceEnabled) {
     return { status: 200, body: { ok: true, skipped: true, reason: 'ACQUISITION_SCORING_BACKFILL_ENABLED_not_true' } };
@@ -59,7 +69,12 @@ export async function handleScoringBackfill(action, body = {}, deps = {}) {
     const next = applyStart(parseState(await store.readState(), now), {
       now,
       runId: crypto.randomUUID(),
-      config: body?.config && typeof body.config === 'object' ? body.config : {},
+      config: {
+        ...(body?.config && typeof body.config === 'object' ? body.config : {}),
+        ...(campaign
+          ? { scope: { kind: SCOPE_KINDS.CAMPAIGN, campaign_ids: Array.isArray(body?.scope?.campaign_ids) ? body.scope.campaign_ids : Array.isArray(body?.campaign_ids) ? body.campaign_ids : [], include_blocked: body?.scope?.include_blocked === true } }
+          : {}),
+      },
       resume: body?.resume !== false,
     });
     await store.writeState(next);
@@ -73,7 +88,7 @@ export async function handleScoringBackfill(action, body = {}, deps = {}) {
   if (action === 'tick') {
     const lock = deps.withRunLock ?? withRunLock;
     const result = await lock({
-      scope: 'acquisition_scoring_backfill',
+      scope: campaign ? 'acquisition_scoring_backfill_campaign' : 'acquisition_scoring_backfill',
       lease_ms: 6 * 60_000,
       owner: ROUTE_NAME,
       onLocked: () => ({ ok: true, skipped: true, reason: 'run_lock_held' }),

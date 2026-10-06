@@ -2,6 +2,8 @@
  * Canonical Deal Intelligence dossier builder.
  * Primary enrichment: inbox_threads_hydrated → properties → entity tables.
  */
+import { authoritativeMaxOffer } from '@/lib/acquisition/offerReadiness.js'
+import { isSellerAutopilotV2Enabled } from '@/lib/domain/seller-flow/seller-autopilot-v2.js'
 import { supabase } from '../supabase/client.js'
 import {
   CURRENT_ENGINE_VERSION,
@@ -1241,7 +1243,10 @@ function buildNegotiationIntelligence(opportunityRow) {
       ade_confidence: num(ade?.confidence ?? ade?.valuation_confidence),
       recommended_offer: num(state?.recommended_offer ?? ade?.recommended_cash_offer),
       floor: num(state?.authorized_offer_floor ?? ade?.minimum_acceptable_offer),
-      ceiling: num(state?.authorized_offer_ceiling ?? ade?.investor_ceiling_mid),
+      // The authorized ceiling is the engine's effective_authorized_ceiling; the
+      // investor_ceiling_mid fallback (buyer-behaviour leg) stays only with the
+      // v2 flag off.
+      ceiling: num(state?.authorized_offer_ceiling ?? (isSellerAutopilotV2Enabled() ? authoritativeMaxOffer(ade) : ade?.investor_ceiling_mid)),
       direct_purchase_maximum: num(state?.direct_purchase_maximum ?? ade?.investor_ceiling_high),
       alternative_strategy_eligibility: state?.alternate_strategy_eligibility || null,
       repair_estimate: num(state?.repair_estimate ?? ade?.estimated_repairs),

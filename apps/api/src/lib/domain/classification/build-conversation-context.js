@@ -194,7 +194,7 @@ export function isInterveningAnswer(row) {
  * mapped onto an approved outbound use case. Best effort: any failure returns
  * null and the body decides.
  */
-async function loadTemplateUseCase(supabase, template_id) {
+async function loadTemplateUseCaseRaw(supabase, template_id) {
   const id = String(template_id ?? "").trim();
   if (!id) return null;
   try {
@@ -204,7 +204,7 @@ async function loadTemplateUseCase(supabase, template_id) {
       .eq("template_id", id)
       .limit(1);
     if (error || !Array.isArray(data) || !data[0]) return null;
-    return mapMessageTypeToUseCase(data[0].use_case);
+    return String(data[0].use_case ?? "").trim() || null;
   } catch {
     return null;
   }
@@ -267,9 +267,16 @@ export async function buildConversationContext({
     raw_message_type_use_case && !GENERIC_USE_CASES.has(raw_message_type_use_case)
       ? raw_message_type_use_case
       : null;
+  const v2_enabled = isSellerAutopilotV2Enabled();
+  // v2 needs the EXACT template we sent (e.g. the one-time ownership
+  // clarifier), which the approved vocabulary deliberately folds away.
+  const raw_template_use_case =
+    v2_enabled || !message_type_use_case ? await loadTemplateUseCaseRaw(supabase, last_outbound.template_id) : null;
   const template_use_case = message_type_use_case
     ? null
-    : await loadTemplateUseCase(supabase, last_outbound.template_id);
+    : raw_template_use_case
+      ? mapMessageTypeToUseCase(raw_template_use_case)
+      : null;
   const body_use_case =
     message_type_use_case || template_use_case ? null : deriveUseCaseFromBody(last_outbound.message_body);
   const use_case =
@@ -427,6 +434,7 @@ export async function buildConversationContext({
     // What a bare number in the reply can mean (the ONE money path reads it):
     // "$240k?" sets the thousands scale, "how many square feet?" un-prices it.
     last_outbound_question: describeLastQuestion(last_outbound.message_body),
+    ...(v2_enabled ? { last_outbound_template_use_case: raw_template_use_case || null } : {}),
   };
 }
 

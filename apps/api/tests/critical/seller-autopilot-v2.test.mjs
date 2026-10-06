@@ -249,7 +249,10 @@ test("directives: the anchor amount renders and persists only through the bounde
   assert.equal(resolveAuthorizedOfferAmount(deal), 150_000);
   assert.equal(resolveAuthorizedOfferAmount({ ...deal, authorized_offer_amount: 999_999 }), null, "above ceiling fails closed");
   assert.equal(resolveAuthorizedOfferAmount({ ...deal, offer_authoritative: false }), null);
-  assert.ok(MONETARY_OFFER_USE_CASES.has("as_is_comp_anchor") && MONETARY_OFFER_USE_CASES.has("as_is_offer_anchor"));
+  // LOGGING MODEL: anchors are NOT formal offers (negotiation_quotes, not seller_offers).
+  assert.equal(MONETARY_OFFER_USE_CASES.has("as_is_comp_anchor"), false);
+  assert.equal(MONETARY_OFFER_USE_CASES.has("price_anchor_above_max"), false);
+  assert.equal(MONETARY_OFFER_USE_CASES.has("comp_anchor"), false);
   const r = buildV2ExecutionDirectives(plan("condition_disclosed", "condition_check", { authority: null }));
   assert.equal(r.strategyDirective.review_required, true);
   assert.equal(r.dealAuthorityPatch, null);
@@ -295,4 +298,137 @@ test("re-delivery never double-sends: unknown outcome, delivered, newer inbound,
   assert.equal(resolveAutoReplyRedelivery({ ...base, row: failedRow(), alternate_templates: [] }).reason, "no_alternate_approved_body");
   assert.match(resolveAutoReplyRedelivery({ ...base, row: failedRow({ metadata: { source: "auto_reply", failure_class: "invalid_number" } }) }).reason, /^never_redeliver/);
   assert.equal(resolveAutoReplyRedelivery({ ...base, row: failedRow({ type: "campaign", metadata: { source: "campaign", failure_class: "content_filter_blocked" } }) }).reason, "not_an_auto_reply");
+});
+
+
+// ── Owner decisions 2026-10-06 ───────────────────────────────────────────────
+import { evaluateOfferReadiness, summarizeOfferReadiness, authoritativeMaxOffer } from "@/lib/acquisition/offerReadiness.js";
+import { shouldSkipExisting, resolveConfig, runBackfillTick, resolveScope } from "@/lib/acquisition/scoringBackfill.js";
+import { buildNegotiationQuote, quoteTypeFor, describeQuote, QUOTE_TYPES } from "@/lib/domain/seller-flow/negotiation-quotes.js";
+import { parseEnabledLanguages, isReplyLanguageEnabled, summarizeAutopilotLanguageStatus, detectIdentityStatement, isBareNo } from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
+
+test("offer-ready predicate: authoritative tier + fresh (≥09-12, ≤30 d) + offer + ceiling; backfill rows never price", () => {
+  const fresh = adeSnapshot();
+  assert.equal(evaluateOfferReadiness(fresh).ready, true);
+  assert.equal(evaluateOfferReadiness(null).reason, "not_scored");
+  assert.equal(evaluateOfferReadiness(adeSnapshot({ computed_at: "2026-09-01T00:00:00Z" })).reason, "score_predates_current_policy");
+  const LATER = Date.parse("2026-11-15T00:00:00Z");
+  assert.equal(evaluateOfferReadiness(adeSnapshot({ computed_at: "2026-09-20T00:00:00Z" }), { now: LATER }).reason, "score_stale");
+  assert.equal(evaluateOfferReadiness(adeSnapshot({ tier: "CREATIVE_TERMS" })).reason, "tier_not_offer_authoritative");
+  const backfill = adeSnapshot();
+  backfill.evidence.backfill = { evidence_mode: "compact", monetary_authority: false };
+  assert.equal(evaluateOfferReadiness(backfill).reason, "backfill_row_not_monetary_authority");
+  assert.equal(authoritativeMaxOffer(adeSnapshot({ mao: 79_100 })), 79_100);
+  const s = summarizeOfferReadiness(["a", "b", "c", "c"], new Map([["a", fresh], ["b", adeSnapshot({ tier: "NURTURE" })]]));
+  assert.deepEqual([s.sendable, s.offer_ready, s.review_only], [3, 1, 2]);
+  assert.equal(s.label, "3 sendable · 1 offer-ready · 2 review-only");
+  // v2 uses the SAME predicate
+  assert.equal(resolveV2OfferAuthority({ ade_snapshot: adeSnapshot({ computed_at: "2026-09-20T00:00:00Z" }), spendability: SPENDABLE, now: LATER }).reason, V2_HOLD_REASONS.STALE);
+});
+
+test("campaign-scoped scoring: only campaign targets, full monetary scorer, offer-ready rows skipped, compact rows rescored", async () => {
+  const cfg = resolveConfig({ scope: { kind: "campaign", campaign_ids: ["c1"] } });
+  assert.deepEqual(resolveScope(null), { kind: "all_properties" });
+  assert.equal(cfg.scope.kind, "campaign");
+  assert.equal(shouldSkipExisting(adeSnapshot(), cfg), true, "already offer-ready");
+  assert.equal(shouldSkipExisting({ ...adeSnapshot({ tier: "CREATIVE_TERMS" }) }, cfg), true, "fresh engine verdict, not a gap");
+  const compact = adeSnapshot();
+  compact.evidence.backfill = { evidence_mode: "compact", monetary_authority: false };
+  assert.equal(shouldSkipExisting(compact, cfg), false, "backfill row rescored at full authority");
+  assert.equal(shouldSkipExisting(adeSnapshot({ computed_at: "2026-09-01T00:00:00Z" }), cfg), false, "pre-policy row rescored");
+
+  const pages = [["p1", "p2", "p3"], []];
+  const calls = { page: [], monetary: [], compact: 0 };
+  const store = {
+    readState: async () => ({ status: "running", config: { scope: { kind: "campaign", campaign_ids: ["c1"] } } }),
+    writeState: async () => {},
+    readContactWindow: async () => ({ start: "08:00", end: "21:00" }),
+    probeLoad: async () => ({ ok: true, latency_ms: 5, active_backends: 1, long_running: 0, lock_waits: 0 }),
+    loadPropertyPage: async (p) => { calls.page.push(p.scope); return pages.shift() || []; },
+    loadExistingScores: async () => [adeSnapshot({ property_id: "p2" })],
+    scoreOne: async () => { calls.compact += 1; return { ok: true }; },
+    scoreOneMonetary: async (id) => { calls.monetary.push(id); return { ok: true }; },
+  };
+  const summary = await runBackfillTick({ store, ignoreWindow: true, sleep: async () => {} });
+  assert.equal(calls.page[0].kind, "campaign");
+  assert.deepEqual(calls.monetary, ["p1", "p3"], "p2 already offer-ready → skipped");
+  assert.equal(calls.compact, 0, "campaign scope never writes compact backfill rows");
+  assert.equal(summary.scored, 2);
+  assert.equal(summary.skipped_existing, 1);
+});
+
+test("negotiation quote contract: anchor ≤ max with evidence; confirm-basics carries no number; formal offers typed", () => {
+  assert.equal(quoteTypeFor({ use_case: "as_is_comp_anchor" }), QUOTE_TYPES.ANCHOR);
+  assert.equal(quoteTypeFor({ use_case: "price_anchor_above_max" }), QUOTE_TYPES.ANCHOR);
+  assert.equal(quoteTypeFor({ use_case: "offer_reveal_cash" }), QUOTE_TYPES.FORMAL_OFFER);
+  assert.equal(quoteTypeFor({ use_case: "price_works_confirm_basics" }), QUOTE_TYPES.CONFIRM_BASICS);
+  assert.equal(quoteTypeFor({ use_case: "mystery", template_body: "around {{offer_price}}" }), QUOTE_TYPES.ANCHOR);
+  assert.equal(quoteTypeFor({ use_case: "consider_selling", template_body: "Would you consider a proposal?" }), null);
+  const base = { quote_key: "k", thread_key: "+16125550123", rule_branch: "above_max" };
+  assert.throws(() => buildNegotiationQuote({ ...base, quote_type: "anchor", amount: 180_000, max_offer: 170_000 }), /above_max_offer/);
+  assert.throws(() => buildNegotiationQuote({ ...base, quote_type: "anchor", amount: 150_000 }), /max_offer_required/);
+  assert.throws(() => buildNegotiationQuote({ ...base, quote_type: "confirm_basics_no_number", amount: 1 }), /carries_no_number/);
+  const row = buildNegotiationQuote({ ...base, quote_type: "anchor", amount: 185_000, max_offer: 190_000, quoted_at: "2026-10-06T15:00:00Z" });
+  assert.equal(describeQuote(row), "Anchor $185K quoted 10-06 (rule: above_max)");
+});
+
+test("above max: X = the engine's opening offer, floored, never above MAO, and no comp claim", () => {
+  const a = plan("condition_disclosed", "condition_check", { authority: authority({ comp_prices: [200_000, 210_000, 220_000], mao: 171_999, offer: 152_300 }) });
+  assert.equal(a.template_use_case, "price_anchor_above_max");
+  assert.equal(a.monetary.rule, "above_max");
+  assert.equal(a.monetary.amount, 150_000);
+  assert.ok(a.monetary.amount <= a.monetary.ceiling);
+});
+
+test("bare No at S1 → one clarifier; identity statements and a second No route to review", () => {
+  const review = cls("unclear", { confidence: 0.6, automation_decision: { auto_reply_allowed: false, human_review_required: true } });
+  const o = applySellerAutopilotV2Overlay(review, { message: "No", conversation_context: ctx("ownership_check") });
+  assert.equal(o.overlay.v2_intent, "bare_no_to_ownership");
+  const p1 = planSellerAutopilotV2({ classification: o.classification, message: "No", conversation_context: ctx("ownership_check"), now: NOW });
+  assert.deepEqual(p1.template_preference, ["ownership_connection_clarifier"]);
+  const after = ctx("ownership_check", { last_outbound_template_use_case: "ownership_connection_clarifier" });
+  const p2 = planSellerAutopilotV2({ classification: review, message: "No", conversation_context: after, now: NOW });
+  assert.equal(p2.action, "review");
+  assert.equal(p2.review_reason, "v2_bare_no_after_ownership_clarifier");
+  const p3 = planSellerAutopilotV2({ classification: cls("property_specific_non_owner"), message: "my LLC owns it", conversation_context: after, now: NOW });
+  assert.equal(p3.review_reason, "v2_identity_resolution:entity_owner");
+  const p4 = planSellerAutopilotV2({ classification: cls("wrong_number"), message: "wrong number", conversation_context: after, now: NOW });
+  assert.equal(p4.action, "defer", "wrong number keeps the suppression lane");
+  assert.equal(detectIdentityStatement("I just manage it"), "property_manager");
+  assert.equal(detectIdentityStatement("my mom owns it"), "family_owner");
+  assert.equal(detectIdentityStatement("I rent here"), "occupant");
+  assert.equal(isBareNo("Nope."), true);
+  assert.equal(isBareNo("No I don't own it"), false);
+});
+
+test("per-language enablement: default EN+ES; unknown names never enable; status shows the split", () => {
+  assert.deepEqual(parseEnabledLanguages(null), ["English", "Spanish"]);
+  assert.deepEqual(parseEnabledLanguages("english, pt, klingon, hindi"), ["English", "Portuguese", "Indian (Hindi or Other)"]);
+  assert.equal(isReplyLanguageEnabled("Portuguese"), false);
+  assert.equal(isReplyLanguageEnabled("Spanish"), true);
+  const st = summarizeAutopilotLanguageStatus({ flag: true, raw: null });
+  assert.deepEqual(st.languages_enabled, ["English", "Spanish"]);
+  assert.equal(st.languages_review_only.length, 14);
+  assert.equal(st.source, "default");
+});
+
+test("Composer Offer Ready preflight reads a campaign's queue-eligible targets with the same predicate", async () => {
+  const { readComposerOfferReadiness } = await import("@/lib/domain/campaigns/campaign-composer.js");
+  const targets = [{ property_id: "a" }, { property_id: "b" }, { property_id: "c" }];
+  const calls = [];
+  const supabase = {
+    from(table) {
+      const b = {
+        select: () => b, eq: (...a) => (calls.push([table, "eq", ...a]), b), in: (...a) => (calls.push([table, "in", a[0]]), b), not: () => b, order: () => b,
+        range: () => Promise.resolve({ data: targets, error: null }),
+      };
+      return b;
+    },
+  };
+  const scores = new Map([["a", adeSnapshot()], ["b", adeSnapshot({ tier: "CREATIVE_TERMS" })]]);
+  const r = await readComposerOfferReadiness({ campaign_id: "cbc2a5d3" }, { supabase, readOfferReadinessScores: async () => scores });
+  assert.equal(r.ok, true);
+  assert.equal(r.label, "3 sendable · 1 offer-ready · 2 review-only");
+  assert.deepEqual(r.by_reason, { offer_ready: 1, tier_not_offer_authoritative: 1, not_scored: 1 });
+  assert.ok(calls.some((c) => c[0] === "campaign_targets" && c[1] === "in" && c[2] === "target_status"), "queue-eligible targets only");
 });
