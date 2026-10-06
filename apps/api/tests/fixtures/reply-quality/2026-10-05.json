@@ -1,0 +1,2318 @@
+{
+  "generated_by": "scripts/ops/reply-quality-report.mjs",
+  "window": "2026-10-05 (so far, to 19:04 local)",
+  "timezone": "America/Chicago",
+  "redacted": true,
+  "candidates": [
+    {
+      "fixture_id": "rq-2026-10-05-001",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_no_to_ownership_held"
+      ],
+      "received_local": "08:45",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hello Pat, this is Pat. I have been investing in Pasadena. Is 2114 Main St yours?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "No",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "needs_clarification"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "held by policy flag LC_BARE_NO_OWNERSHIP_MODE (owner decision)"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-002",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "09:01",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Sigues siendo el dueno de 2832 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 2,
+      "intervening_inbound": [
+        {
+          "text": "Removed ‌👍‌ from “ Hola Pat, Alex aqui. Sigues siendo el dueno de 2832 Main St? ”",
+          "intent": "unclear"
+        },
+        {
+          "text": "​👍​ to “ Hola Pat, Alex aqui. Sigues siendo el dueno de 2832 Main St? ”",
+          "intent": "unclear"
+        }
+      ],
+      "seller_message": "Vues",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "unchanged; review by design unless a human labels otherwise"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-003",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_affirmative_to_review"
+      ],
+      "received_local": "09:08",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Sigues siendo el dueno de 2832 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 6,
+      "intervening_inbound": [
+        {
+          "text": "Removed ‌👍‌ from “ Hola Pat, Alex aqui. Sigues siendo el dueno de 2832 Main St? ”",
+          "intent": "unclear"
+        },
+        {
+          "text": "​👍​ to “ Hola Pat, Alex aqui. Sigues siendo el dueno de 2832 Main St? ”",
+          "intent": "unclear"
+        },
+        {
+          "text": "Vues",
+          "intent": "unclear"
+        },
+        {
+          "text": "Removed ‌👍‌ from “ Hola Pat, Alex aqui. Sigues siendo el dueno de 2832 Main St? ”",
+          "intent": "unclear"
+        },
+        {
+          "text": "​👍​ to “ Hola Pat, Alex aqui. Sigues siendo el dueno de 2832 Main St? ”",
+          "intent": "unclear"
+        },
+        {
+          "text": "​👍​ to “ Hola Pat, Alex aqui. Sigues siendo el dueno de 2832 Main St? ”",
+          "intent": "unclear"
+        }
+      ],
+      "seller_message": "Yes",
+      "current_classification": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.72,
+        "language": "English",
+        "ambiguity_flags": [
+          "short_reply_without_validated_context"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "automation_review_required",
+        "review_reason": "automation_review_required",
+        "reason": "automation_review_required"
+      },
+      "replay_at_head": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.88,
+        "language": "English",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-004",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_affirmative_to_review",
+        "operator_question_affirmative_as_ownership"
+      ],
+      "received_local": "09:18",
+      "prior_question": {
+        "kind": "operator",
+        "use_case": "proposal_interest",
+        "text": "Thanks. Just curious, would you be open to a sale?",
+        "message_type": "manual_reply"
+      },
+      "intervening_inbound_count": 1,
+      "intervening_inbound": [
+        {
+          "text": "​👍​ to “ Yes ”",
+          "intent": "acknowledgement"
+        }
+      ],
+      "seller_message": "Yes",
+      "current_classification": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.72,
+        "language": "English",
+        "ambiguity_flags": [
+          "short_reply_without_validated_context"
+        ],
+        "context_use_case": null,
+        "context_status": "unavailable",
+        "audit_reason": "automation_review_required",
+        "review_reason": "automation_review_required",
+        "reason": "automation_review_required"
+      },
+      "replay_at_head": {
+        "intent": "seller_interested",
+        "confidence": 0.86,
+        "language": "English",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "proposal_interest",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-005",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "AUTO_FAILED",
+      "suspect_flags": [
+        "optout_words_not_optout"
+      ],
+      "received_local": "09:34",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Compro propiedad en 76106. Sigues siendo el dueno de 1621 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Si. Dejé de molestar",
+      "current_classification": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.94,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "ownership_confirmed",
+        "review_reason": null,
+        "reason": "consider_selling failed_transport: delivery_failed"
+      },
+      "replay_at_head": {
+        "intent": "opt_out",
+        "confidence": 0.99,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-006",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "purpose_question_unclear"
+      ],
+      "received_local": "10:10",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, this is Alex. 🙂 Do you still own 3404 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 1,
+      "intervening_inbound": [
+        {
+          "text": "Yes, I do",
+          "intent": "ownership_confirmed"
+        }
+      ],
+      "seller_message": "Why are you asking?",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "who_is_this",
+        "confidence": 0.85,
+        "language": "English",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-007",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "10:17",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hello Pat, this is Pat. I have been investing in Minneapolis. Is 5924 Main St yours?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "",
+      "current_classification": {
+        "intent": null,
+        "confidence": 0,
+        "language": null,
+        "ambiguity_flags": [],
+        "context_use_case": null,
+        "context_status": null,
+        "audit_reason": null,
+        "review_reason": null,
+        "reason": "empty / media-only inbound"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.5,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "changed at HEAD (null → unclear); needs label"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-008",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "10:22",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, this is Alex. 🙂 Do you still own 4414 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Call 555 010 0199 and talk to Pat.",
+      "current_classification": {
+        "intent": "non_owner_referral",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "non_owner_referral_property_scoped",
+        "review_reason": "S1_HOLD_NON_OWNER_REFERRAL_REVIEW",
+        "reason": "S1_HOLD_NON_OWNER_REFERRAL_REVIEW"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "layered intent: referral detection runs after the classifier (not modeled in replay); no action"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-009",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "10:31",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, this is Alex. 🙂 Do you still own 7614 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "I do not own any property 7614 Oak Ave",
+      "current_classification": {
+        "intent": "property_specific_non_owner",
+        "confidence": 0.97,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "property_specific_non_owner",
+        "review_reason": "property_relationship_review_required",
+        "reason": "property_relationship_review_required"
+      },
+      "replay_at_head": {
+        "intent": "wrong_number",
+        "confidence": 0.97,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "layered intent: classifier says wrong_number, the live decision layer refined it to property_specific_non_owner (property-relationship/referral layers are not modeled in replay); no action"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-010",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "offer_request_unclear"
+      ],
+      "received_local": "10:39",
+      "prior_question": {
+        "kind": "auto_reply",
+        "use_case": "general_followup",
+        "text": "Thanks for confirming. Would you consider a proposal for the property?",
+        "message_type": "Follow-Up"
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Send a bid",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "general_followup",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "general_followup",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-011",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_affirmative_to_review"
+      ],
+      "received_local": "10:40",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, hope all is well. This is Pat out about 5909 Main St. Is this the correct number for the owner?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Yes",
+      "current_classification": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.72,
+        "language": "English",
+        "ambiguity_flags": [
+          "short_reply_without_validated_context"
+        ],
+        "context_use_case": null,
+        "context_status": "unavailable",
+        "audit_reason": "automation_review_required",
+        "review_reason": "automation_review_required",
+        "reason": "automation_review_required"
+      },
+      "replay_at_head": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.88,
+        "language": "English",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-012",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "10:42",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hi Pat, my name is Alex. Came across 6820 Main St, are you still the owner?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Eat dog shit and die",
+      "current_classification": {
+        "intent": "hostile_or_legal",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "hostile_or_legal",
+        "review_reason": "HOLD_HOSTILE_LEGAL_REVIEW",
+        "reason": "HOLD_HOSTILE_LEGAL_REVIEW"
+      },
+      "replay_at_head": {
+        "intent": "hostile_or_legal",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "unchanged; review by design unless a human labels otherwise"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-013",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_no_to_ownership_held"
+      ],
+      "received_local": "10:45",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hello Pat, this is Alex. I have been investing in Spring. Just checking, do you own 23227 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "No",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "needs_clarification"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "held by policy flag LC_BARE_NO_OWNERSHIP_MODE (owner decision)"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-014",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "10:54",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hi Pat, this is Alex. Are you still the owner of 5302 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "It's owned by a trust. I am Pat it's not for sale",
+      "current_classification": {
+        "intent": "executor_heir_respondent",
+        "confidence": 0.92,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "property_specific_non_owner",
+        "review_reason": "property_relationship_review_required",
+        "reason": "property_relationship_review_required"
+      },
+      "replay_at_head": {
+        "intent": "not_interested",
+        "confidence": 0.92,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "layered intent: classifier says not_interested, the live decision layer refined it to executor_heir_respondent (property-relationship/referral layers are not modeled in replay); no action"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-015",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "AUTO_FAILED",
+      "suspect_flags": [
+        "url_read_as_price"
+      ],
+      "received_local": "10:58",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alejandro aqui. Soy Pat en Houston. 6702 Main St es tu propiedad?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "https://example.com/listing/100000000",
+      "current_classification": {
+        "intent": "asking_price_provided",
+        "confidence": 0.88,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "asking_price_provided",
+        "review_reason": "template_render_failed",
+        "reason": "template_render_failed (condition_probe)"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2 (a45d41a0: opener snapshot carries the street address that is now hydrated)"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-016",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "10:58",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alejandro aqui. Soy Pat en Houston. 6702 Main St es tu propiedad?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 1,
+      "intervening_inbound": [
+        {
+          "text": "https://example.com/listing/100000000",
+          "intent": "asking_price_provided"
+        }
+      ],
+      "seller_message": "Busca allí güey allí ay Deamadre",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "unchanged; review by design unless a human labels otherwise"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-017",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "11:18",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, hope all is well. This is Pat out about 1229 Main St E. Is this the correct number for the owner?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Hey, Pat. The house has been sold and I don't have any info for the new owners.",
+      "current_classification": {
+        "intent": "former_owner_respondent",
+        "confidence": 0.98,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": null,
+        "context_status": "unavailable",
+        "audit_reason": "property_sold",
+        "review_reason": "HOLD_FORMER_OWNER_PROPERTY_SOLD_REVIEW",
+        "reason": "HOLD_FORMER_OWNER_PROPERTY_SOLD_REVIEW"
+      },
+      "replay_at_head": {
+        "intent": "sold_property",
+        "confidence": 0.98,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "layered intent: classifier says sold_property, the live decision layer refined it to former_owner_respondent (property-relationship/referral layers are not modeled in replay); no action"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-018",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "11:27",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Pregunta rapida. Todavia eres el dueno de 3521 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "No i am not  sell the house of 3521 Oak Ave",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "not_interested",
+        "confidence": 0.92,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "changed at HEAD (unclear → not_interested); needs label"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-019",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_no_to_ownership_held"
+      ],
+      "received_local": "12:35",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. He estado invirtiendo en Dallas. 9435 Main St es tu propiedad?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "No",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "needs_clarification"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "held by policy flag LC_BARE_NO_OWNERSHIP_MODE (owner decision)"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-020",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "offer_request_unclear"
+      ],
+      "received_local": "12:35",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, this is Pat. 🙂 Is 3701 Main St yours?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "You like to buy it",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-021",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "offer_request_unclear"
+      ],
+      "received_local": "12:35",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, this is Pat. 🙂 Is 3701 Main St yours?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 1,
+      "intervening_inbound": [
+        {
+          "text": "You like to buy it",
+          "intent": "unclear"
+        }
+      ],
+      "seller_message": "What your price",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-022",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "12:38",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, hope all is well. This is Pat out about 447 Main St E. Is this the correct number for the owner?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "I have no idea",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "unavailable",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "unchanged; review by design unless a human labels otherwise"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-023",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "AUTO_OK",
+      "suspect_flags": [
+        "reply_language_mismatch"
+      ],
+      "received_local": "12:56",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Invierto en Fort Worth. Sigues siendo el dueno de 2322 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Si",
+      "current_classification": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.88,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "ownership_confirmed",
+        "review_reason": null,
+        "reason": "consider_selling delivered"
+      },
+      "replay_at_head": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.88,
+        "language": "Spanish",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-024",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "13:00",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hi Pat, my name is Pat. Came across 5126 Main St, are you still the owner?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Not the owner",
+      "current_classification": {
+        "intent": "property_specific_non_owner",
+        "confidence": 0.97,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "property_specific_non_owner",
+        "review_reason": "property_relationship_review_required",
+        "reason": "property_relationship_review_required"
+      },
+      "replay_at_head": {
+        "intent": "wrong_number",
+        "confidence": 0.97,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "layered intent: classifier says wrong_number, the live decision layer refined it to property_specific_non_owner (property-relationship/referral layers are not modeled in replay); no action"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-025",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "conditional_interest_unclear",
+        "spanish_text_detected_english"
+      ],
+      "received_local": "13:00",
+      "prior_question": {
+        "kind": "auto_reply",
+        "use_case": "general_followup",
+        "text": "Thanks for confirming. Would you consider a proposal for the property?",
+        "message_type": "Follow-Up"
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Tal vez si es una buena propuesta, la podría considerar",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.64,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "general_followup",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.64,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "general_followup",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-026",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "spanish_not_for_sale_unclear",
+        "spanish_text_detected_english"
+      ],
+      "received_local": "13:11",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Invierto en Fort Worth. Todavia eres el dueno de 3615 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Y wuien te dijo que esta en venta",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "partly fixed in 8.4.2; still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-027",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "13:16",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Compro propiedad en 75227. Solo confirmando, eres dueno de 2216 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Vete a realtors.con",
+      "current_classification": {
+        "intent": "hostile_or_legal",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "property_specific_non_owner",
+        "review_reason": "property_relationship_review_required",
+        "reason": "property_relationship_review_required"
+      },
+      "replay_at_head": {
+        "intent": "hostile_or_legal",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "unchanged; review by design unless a human labels otherwise"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-028",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "AUTO_FAILED",
+      "suspect_flags": [
+        "not_selling_read_as_price"
+      ],
+      "received_local": "15:03",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Compro propiedad en 75232. Todavia eres el dueno de 9411 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Not selling 9411, but I am selling two parcels as a package, they are next to each other.  Asking price for both 9407 Main St and 9334 Oak Ave is $275k",
+      "current_classification": {
+        "intent": "asking_price_provided",
+        "confidence": 0.92,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "asking_price_provided",
+        "review_reason": "template_render_failed",
+        "reason": "template_render_failed (condition_probe)"
+      },
+      "replay_at_head": {
+        "intent": "asking_price_provided",
+        "confidence": 0.92,
+        "language": "English",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-029",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_affirmative_to_review"
+      ],
+      "received_local": "15:10",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, hope all is well. This is Alex reaching out about 9539 Main St. Is this the correct number for the owner?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Yes",
+      "current_classification": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.72,
+        "language": "English",
+        "ambiguity_flags": [
+          "short_reply_without_validated_context"
+        ],
+        "context_use_case": null,
+        "context_status": "unavailable",
+        "audit_reason": "automation_review_required",
+        "review_reason": "automation_review_required",
+        "reason": "automation_review_required"
+      },
+      "replay_at_head": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.88,
+        "language": "English",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-030",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "15:27",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Pregunta rapida. Todavia eres el dueno de 3513 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "?",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "needs_review"
+        ],
+        "context_use_case": null,
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "unchanged; review by design unless a human labels otherwise"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-031",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "AUTO_OK",
+      "suspect_flags": [
+        "reply_language_mismatch"
+      ],
+      "received_local": "15:37",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Soy Pat en Grand Prairie. Sigues siendo el dueno de 533 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Por que?",
+      "current_classification": {
+        "intent": "who_is_this",
+        "confidence": 0.85,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "who_is_this",
+        "review_reason": null,
+        "reason": "who_is_this delivered"
+      },
+      "replay_at_head": {
+        "intent": "who_is_this",
+        "confidence": 0.85,
+        "language": "Spanish",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-032",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_affirmative_to_review"
+      ],
+      "received_local": "15:39",
+      "prior_question": {
+        "kind": "auto_reply",
+        "use_case": "general_followup",
+        "text": "I'm a local investor here in the area. I reached out about your property. Would you be open to a proposal on it?",
+        "message_type": "Follow-Up"
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Sure",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.64,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "general_followup",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.64,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "general_followup",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-033",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_no_to_ownership_held"
+      ],
+      "received_local": "15:40",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Pat. Invierto en Katy. Sigues siendo el dueno de 22107 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "No",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "needs_clarification"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "held by policy flag LC_BARE_NO_OWNERSHIP_MODE (owner decision)"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-034",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "non_owner_unclear"
+      ],
+      "received_local": "15:40",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Pat. Invierto en Katy. Sigues siendo el dueno de 22107 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 1,
+      "intervening_inbound": [
+        {
+          "text": "No",
+          "intent": "unclear"
+        }
+      ],
+      "seller_message": "Nunca tuve esa propiedad",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-035",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "thanks_only_to_review"
+      ],
+      "received_local": "15:40",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Pat. Invierto en Katy. Sigues siendo el dueno de 22107 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 2,
+      "intervening_inbound": [
+        {
+          "text": "No",
+          "intent": "unclear"
+        },
+        {
+          "text": "Nunca tuve esa propiedad",
+          "intent": "unclear"
+        }
+      ],
+      "seller_message": "Gracias",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-036",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "hostile_unclear",
+        "spanish_text_detected_english"
+      ],
+      "received_local": "15:57",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. He estado invirtiendo en Dallas. Todavia eres el dueno de 2119 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Chinga tu madre qlex",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-037",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "bare_no_to_ownership_held"
+      ],
+      "received_local": "16:02",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Invierto en Fort Worth. Todavia eres el dueno de 3545 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "No",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "needs_clarification"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "held by policy flag LC_BARE_NO_OWNERSHIP_MODE (owner decision)"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-038",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "transferred_to_family_unclear"
+      ],
+      "received_local": "16:04",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Todavia eres el dueno de 1010 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "I have the house to my son and that's the only house I own. Have a good day sir",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-039",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "16:18",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Pregunta rapida. 4034 Main St es tu propiedad?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Ñ",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "unchanged; review by design unless a human labels otherwise"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-040",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "purpose_question_unclear",
+        "spanish_text_detected_english"
+      ],
+      "received_local": "16:25",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Sigues siendo el dueno de 920 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 1,
+      "intervening_inbound": [
+        {
+          "text": "Si claro",
+          "intent": "ownership_confirmed"
+        }
+      ],
+      "seller_message": "En Que te puedo alludes",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-041",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "purpose_question_unclear"
+      ],
+      "received_local": "16:26",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Sigues siendo el dueno de 920 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 2,
+      "intervening_inbound": [
+        {
+          "text": "Si claro",
+          "intent": "ownership_confirmed"
+        },
+        {
+          "text": "En Que te puedo alludes",
+          "intent": "unclear"
+        }
+      ],
+      "seller_message": "Alludar",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-042",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "spanish_text_detected_english"
+      ],
+      "received_local": "16:39",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Soy Pat en Dallas. 1147 Main St es tu propiedad?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Ya la vendi",
+      "current_classification": {
+        "intent": "former_owner_respondent",
+        "confidence": 0.98,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "property_sold",
+        "review_reason": "HOLD_FORMER_OWNER_PROPERTY_SOLD_REVIEW",
+        "reason": "HOLD_FORMER_OWNER_PROPERTY_SOLD_REVIEW"
+      },
+      "replay_at_head": {
+        "intent": "sold_property",
+        "confidence": 0.98,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-043",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "thanks_only_to_review"
+      ],
+      "received_local": "16:39",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Soy Pat en Dallas. 1147 Main St es tu propiedad?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 1,
+      "intervening_inbound": [
+        {
+          "text": "Ya la vendi",
+          "intent": "former_owner_respondent"
+        }
+      ],
+      "seller_message": "Gracias",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": null,
+        "context_status": "stale",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-044",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "AUTO_OK",
+      "suspect_flags": [
+        "spanish_text_detected_english"
+      ],
+      "received_local": "16:43",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. Soy Pat de bienes raices en Mesquite. Solo confirmando, eres dueno de 4315 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Si senor. Alex unique te puedo ayudar",
+      "current_classification": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.94,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "ownership_confirmed",
+        "review_reason": null,
+        "reason": "consider_selling delivered"
+      },
+      "replay_at_head": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.94,
+        "language": "English",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-045",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "offer_request_unclear"
+      ],
+      "received_local": "16:50",
+      "prior_question": {
+        "kind": "auto_reply",
+        "use_case": "general_followup",
+        "text": "Thanks for confirming. Would you consider a proposal for the property?",
+        "message_type": "Follow-Up"
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Go ahead take look and offer me",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.64,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "general_followup",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.64,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "general_followup",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-046",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "AUTO_OK",
+      "suspect_flags": [
+        "reply_language_mismatch"
+      ],
+      "received_local": "17:22",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Alex. He estado invirtiendo en Dallas. Solo confirmando, eres dueno de 7123 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Si",
+      "current_classification": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.88,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "ownership_confirmed",
+        "review_reason": null,
+        "reason": "consider_selling delivered"
+      },
+      "replay_at_head": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.88,
+        "language": "Spanish",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-047",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "spanish_not_for_sale_unclear",
+        "spanish_text_detected_english"
+      ],
+      "received_local": "17:24",
+      "prior_question": {
+        "kind": "auto_reply",
+        "use_case": "general_followup",
+        "text": "Thanks for confirming. Would you consider a proposal for the property?",
+        "message_type": "Follow-Up"
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "No esta en banta",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "general_followup",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "general_followup",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-048",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "optout_words_not_optout",
+        "spanish_text_detected_english"
+      ],
+      "received_local": "17:25",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Pregunta rapida. Solo confirmando, eres dueno de 9655 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Mejor te blokeo...",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-049",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "REVIEW",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [],
+      "received_local": "17:34",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hey Pat, hope all is well. This is Alex reaching out about 3506 Main St. Is this the correct number for the owner?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Not the owner",
+      "current_classification": {
+        "intent": "property_specific_non_owner",
+        "confidence": 0.97,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": null,
+        "context_status": "unavailable",
+        "audit_reason": "property_specific_non_owner",
+        "review_reason": "property_relationship_review_required",
+        "reason": "property_relationship_review_required"
+      },
+      "replay_at_head": {
+        "intent": "wrong_number",
+        "confidence": 0.97,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "layered intent: classifier says wrong_number, the live decision layer refined it to property_specific_non_owner (property-relationship/referral layers are not modeled in replay); no action"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-050",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "AUTO_OK",
+      "suspect_flags": [
+        "reply_language_mismatch"
+      ],
+      "received_local": "17:37",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, soy Pat. Solo confirmando, eres dueno de 7739 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Si",
+      "current_classification": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.88,
+        "language": "English",
+        "ambiguity_flags": [],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "ownership_confirmed",
+        "review_reason": null,
+        "reason": "consider_selling delivered"
+      },
+      "replay_at_head": {
+        "intent": "ownership_confirmed",
+        "confidence": 0.88,
+        "language": "Spanish",
+        "auto_reply_allowed": true,
+        "human_review": false,
+        "context_use_case": "ownership_check",
+        "verdict": "fixed in 8.4.2"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-051",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "purpose_question_unclear"
+      ],
+      "received_local": "17:52",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hello Pat, this is Pat. I have been investing in Saint Paul. Just checking, do you own 986 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Howd you get my number?",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-052",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "non_owner_unclear"
+      ],
+      "received_local": "18:08",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Invierto en Dallas. Todavia eres el dueno de 1100 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Yo no tengo ninguna propiedad en esa dirección",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.6,
+        "language": "Spanish",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    },
+    {
+      "fixture_id": "rq-2026-10-05-053",
+      "status": "candidate",
+      "expected": null,
+      "expected_note": "Unlabeled. A human or agent sets the expected intent/decision before this becomes a test.",
+      "bucket": "SUSPECT",
+      "base_bucket": "REVIEW",
+      "suspect_flags": [
+        "optout_words_not_optout",
+        "spanish_text_detected_english"
+      ],
+      "received_local": "18:20",
+      "prior_question": {
+        "kind": "campaign",
+        "use_case": "ownership_check",
+        "text": "Hola Pat, Alex aqui. Sigues siendo el dueno de 9311 Main St?",
+        "message_type": null
+      },
+      "intervening_inbound_count": 0,
+      "intervening_inbound": [],
+      "seller_message": "Ya quita mi número de tus contactos",
+      "current_classification": {
+        "intent": "unclear",
+        "confidence": 0.64,
+        "language": "English",
+        "ambiguity_flags": [
+          "no_confident_intent"
+        ],
+        "context_use_case": "ownership_check",
+        "context_status": "valid",
+        "audit_reason": "unclear_low_confidence",
+        "review_reason": "unclear_low_confidence",
+        "reason": "unclear_low_confidence"
+      },
+      "replay_at_head": {
+        "intent": "unclear",
+        "confidence": 0.64,
+        "language": "English",
+        "auto_reply_allowed": false,
+        "human_review": true,
+        "context_use_case": "ownership_check",
+        "verdict": "still open"
+      }
+    }
+  ]
+}
