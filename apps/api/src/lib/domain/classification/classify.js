@@ -148,6 +148,13 @@ const LANGUAGE_PATTERNS = [
       // was queued in English too.
       "molestar", "molestarme", "molesten", "me moleste", "me molestes",
       "no me escriba", "no me escriban", "ya no me escriba",
+      // 2026-10-05 reply-quality: short Spanish detected as English.
+      "bloqueo", "blokeo", "bloquear", "mi número", "mi numero", "tus contactos",
+      "tal vez", "propuesta", "podría", "podria", "considerar", "nunca tuve",
+      "ninguna propiedad", "dirección", "chinga", "tu madre", "te puedo", "ayudar",
+      "alludar", "alludes", "ya la vendí", "ya la vendi", "la vendí", "la vendi",
+      "en venta", "en banta", "señor", "senor", "por qué", "por que", "porque",
+      "no vendo", "quien te dijo", "wuien",
       // Misc affirmations
       "gracias", "por favor", "sí señor", "sí señora",
       "entendido", "de acuerdo", "está bien", "claro",
@@ -566,6 +573,19 @@ const COMPLIANCE_PHRASES = [
   "ya no me escriba", "ya no me escriban", "ya no me escribas", "no me escriban",
   "dejen de escribirme", "dejen de escribir", "dejen de mandarme mensajes",
   "deje de mandarme mensajes", "deja de mandarme mensajes",
+  // Remove / delete my number, and blocking (2026-10-05 reply-quality: "Ya
+  // quita mi número de tus contactos", "Mejor te blokeo..." were held for
+  // review, not suppressed). "blokeo" is how "bloqueo" is actually typed.
+  "quita mi número", "quita mi numero", "quitar mi número", "quitar mi numero",
+  "quiten mi número", "quiten mi numero", "quite mi número", "quite mi numero",
+  "borra mi número", "borra mi numero", "borrar mi número", "borrar mi numero",
+  "borren mi número", "borren mi numero", "borre mi número", "borre mi numero",
+  "elimina mi número", "elimina mi numero", "eliminen mi número", "eliminen mi numero",
+  "te voy a bloquear", "te voy a blokear", "voy a bloquearte", "voy a blokearte",
+  "te bloqueo", "te blokeo", "te bloqueé", "te bloquee", "los bloqueo", "los voy a bloquear",
+  "te bloquearé", "te bloqueare", "bloquearte", "blokearte",
+  "no me vuelvan a escribir", "no me vuelvas a mandar", "no me vuelva a mandar",
+  "no me vuelvan a mandar", "no me vuelvas a contactar", "no me vuelva a contactar",
 
   // ── Portuguese ────────────────────────────────────────────────────────────
   "pare de me mandar mensagem", "pare de me mandar mensagens",
@@ -855,6 +875,10 @@ const OBJECTION_MAP = [
       "no soy el propietario", "no soy la propietaria",
       "ya lo vendí", "ya lo vendi", "no tengo esa propiedad",
       "no es mía", "no es mia", "no es mi propiedad",
+      // 2026-10-05 reply-quality (Spanish non-owner sat as unclear).
+      "nunca tuve esa propiedad", "nunca tuve esa casa", "nunca he tenido esa propiedad",
+      "no tengo ninguna propiedad", "yo no tengo ninguna propiedad", "no tengo ninguna casa",
+      "no tengo ninguna propiedad en esa dirección", "no tengo ninguna propiedad en esa direccion",
       "no tengo propiedades", "yo no tengo esa propiedad",
       // Portuguese
       "número errado", "numero errado", "não sou o proprietário",
@@ -4155,6 +4179,11 @@ function matchesOwnershipDisconnect(text = "") {
       "no es mia",
       "no es de mi",
       "no tengo esa propiedad",
+      "nunca tuve esa propiedad",
+      "nunca tuve esa casa",
+      "nunca he tenido esa propiedad",
+      "no tengo ninguna propiedad",
+      "no tengo ninguna casa",
       "nunca fui el dueño",
       "nunca fui el dueno",
       "nunca he sido el dueño",
@@ -4664,6 +4693,10 @@ export function stripUrls(message) {
   return String(message ?? "").replace(URL_RE, " ").replace(/\s+/g, " ").trim();
 }
 
+// Whole-message polite closes (folded: lower case, accents stripped).
+const THANKS_ONLY_RE =
+  /^(?:ok(?:ay)?[\s,]+)?(?:thanks?|thank\s*you|thx|ty|tysm|thank\s*u|muchas\s+gracias|gracias|grasias|gracia|mil\s+gracias|obrigad[oa]|merci|cam\s+on)(?:[\s,]+(?:so\s+much|a\s+lot|you|u|sir|maam|senor|senora|amigo|bye|anyway|anyways))*[\s.!🙏👍😊]*$/u;
+
 function resolveIntents(
   message,
   {
@@ -4730,6 +4763,30 @@ function resolveIntents(
       calibrated_rule_family_id: emoji_interpretation.rule_id || null,
       confidence_rationale: emoji_interpretation.rule_id || null,
       contextual_confidence: emoji_interpretation.confidence,
+    });
+  }
+
+  // THANKS-ONLY (2026-10-05 reply-quality: "Gracias" after the seller had
+  // already answered went to review). A polite close needs no reply and no
+  // review -- unless OUR question is still open (validated, unanswered
+  // context), in which case a person decides what the thanks means.
+  if (
+    !compliance_flag &&
+    ctxValidation.context_status !== "valid" &&
+    THANKS_ONLY_RE.test(foldReplyLines(rawMessage).join(" ").trim())
+  ) {
+    return finalizeIntentResult({
+      primary_intent: "acknowledgement",
+      secondary_intents: [],
+      matched_intents: ["acknowledgement"],
+      matched_rule_ids: ["thanks_only_close"],
+      context_status: ctxValidation.context_status,
+      evidence_spans: [rawMessage],
+      precedence_result: "thanks_only_close",
+      ambiguity_flags: [],
+      calibrated_rule_family_id: "thanks_only_close",
+      confidence_rationale: "thanks_only_close",
+      contextual_confidence: 0.9,
     });
   }
 
@@ -4977,6 +5034,10 @@ function resolveIntents(
   const hostile_profanity = includesAny(text, [
     "fuck", "shit", "bitch", "asshole", "f***",
     "damn business", "drop dead", "vete a", "chingaos", "mames",
+    // Spanish profanity (2026-10-05: "Chinga tu madre" sat as unclear).
+    "chinga tu madre", "chingas tu madre", "chinga a tu madre", "chingate", "chíngate",
+    "tu puta madre", "hijo de puta", "hija de puta", "pendejo", "pendeja", "cabrón",
+    "vete a la verga", "a la verga", "pinche",
   ]);
   const hostile_insult = reply_signals?.hostile?.matched === true;
   const hostile_emoji = emoji_interpretation?.semantic_signal === "hostile";
@@ -5015,7 +5076,11 @@ function resolveIntents(
     // unclear. A negator directly before "sell" + an object is a decline;
     // price floors ("won't sell for less than 300k") are still decided by the
     // structured price parse below.
-    /\b(?:not|never|won'?t|will\s+not|no\s+(?:voy|vamos)\s+a)\s+(?:going\s+to\s+|gonna\s+)?(?:sell(?:ing)?|vender(?:la|lo)?)\s+(?:the|my|this|that|it|our|la|el|mi|esta|esa)\b/i.test(text);
+    /\b(?:not|never|won'?t|will\s+not|no\s+(?:voy|vamos)\s+a)\s+(?:going\s+to\s+|gonna\s+)?(?:sell(?:ing)?|vender(?:la|lo)?)\s+(?:the|my|this|that|it|our|la|el|mi|esta|esa)\b/i.test(text) ||
+    // Spanish not-for-sale as typed (2026-10-05): "No esta en banta" (venta),
+    // "Y wuien te dijo que esta en venta" ("who told you it's for sale").
+    /\bno\s+(?:est[aá]|ta|esta)\s+(?:en|de)\s+[bv]+[ea]n?ta\b/i.test(text) ||
+    /\b(?:qui[eé]n|wuien|kien|quien)\s+te\s+dijo\s+que\s+(?:(?:est[aá]|esta)\s+(?:en|de)\s+[bv]+[ea]n?ta|la\s+vendo|lo\s+vendo|vendo)\b/i.test(text);
   const not_for_sale_signal = !legacy_not_interested_match && reply_signals?.not_for_sale?.matched === true;
   if (not_for_sale_signal) reply_rule_ids.push(reply_signals.not_for_sale.rule_id);
   // "Tengo otra propiedad de venta": a DIFFERENT property is for sale. Never
@@ -5030,7 +5095,10 @@ function resolveIntents(
     // A price FLOOR ("I won't sell for less than 300k", "no menos de 200 mil")
     // is a number, not a decline: the structured parse decides.
     if (includesAny(text, ["unless", "but", "except", "if you", "pero", "less than", "at least", "no less", "minimum", "below", "por menos de", "menos de", "no menos de"])) {
-       if (isCommittedAskingPrice(resolveCanonicalAskingPrice(text))) {
+       if (reply_signals?.other_property?.matched === true) {
+         // The number belongs to the OTHER property on offer, not this one.
+         intents.push("not_interested");
+       } else if (isCommittedAskingPrice(resolveCanonicalAskingPrice(text))) {
          intents.push("asking_price_provided");
        } else {
          intents.push("not_interested");
@@ -5199,7 +5267,10 @@ function resolveIntents(
     price_parse = { ...price_parse, qualifies_as_seller_asking_price: false, non_literal: true };
     suppressed_rule_ids.push("price_non_literal_laughter");
     reply_rule_ids.push("non_literal_laughter");
-  } else if (price_parse.qualifies_as_seller_asking_price) {
+  } else if (
+    price_parse.qualifies_as_seller_asking_price &&
+    !(reply_signals?.other_property?.matched === true && intents.includes("not_interested"))
+  ) {
     intents.push("asking_price_provided");
     matched_rule_ids.push(price_parse.price_rule_id || "canonical_asking_price");
   } else if (price_parse.scale_ambiguous_statement) {
@@ -5249,7 +5320,16 @@ function resolveIntents(
     /\b(your|the)\s+best\s+(cash\s+)?(offer|price)\b/i.test(text) ||
     /\b(can|could|will|would)\s+you\s+offer\b/i.test(text) ||
     /\b(how much|the most|what)\b[^.?!]{0,20}\byou\b[^.?!]{0,10}\b(pay|offer|give)\b/i.test(text) ||
-    /\byou\b[^.?!]{0,4}willing\s+to\s+(pay|offer)\b/i.test(text);
+    /\byou\b[^.?!]{0,4}willing\s+to\s+(pay|offer)\b/i.test(text) ||
+    // 2026-10-05 reply-quality: "Send a bid", "What your price", "You like to
+    // buy it", "Go ahead take look and offer me" all sat as unclear. Each is
+    // the seller asking US for a number / whether we want to buy.
+    /\bsend\s+(?:me\s+|us\s+)?(?:a\s+|an\s+|your\s+|the\s+)?(?:bid|offer|number|price)\b/i.test(text) ||
+    /\bwhat(?:'?s|\s+is|\s+are)?\s+(?:your|ur|you)\s+(?:price|offer|bid|number)\b/i.test(text) ||
+    /^(?:do\s+|would\s+|did\s+)?(?:you|u)\s+(?:like|want|wanna|wanting|looking)\s+(?:to\s+)?buy\b/i.test(String(text).trim()) ||
+    /\b(?:take\s+(?:a\s+)?look|look\s+at\s+it)\b[^.?!]{0,30}\boffer\b/i.test(text) ||
+    /(?:^|\b(?:and|then|just|please|pls|go\s+ahead)\s+)offer\s+me\b/i.test(String(text).trim()) ||
+    /\bmake\s+(?:me\s+)?(?:a\s+|an\s+|your\s+)?(?:bid|offer)\b/i.test(text);
   if (
     !agent_handles_proposal &&
     !proposal_rejected &&
@@ -5963,7 +6043,14 @@ function resolveIntents(
     "why u asking", "why do you want to know", "why you want to know",
     "por que pregunta", "por qué pregunta", "porque pregunta",
     "por que preguntas", "por qué preguntas", "porque preguntas",
-  ]) || matchesPurposeOrIdentityQuestion(rawMessage) || reply_signals?.engagement?.identity_question === true) {
+    "howd you get my number", "how'd you get my number", "how d you get my number",
+    "how you get my number", "how u get my number", "how did u get my number",
+    "howd u get my number", "how'd u get my number",
+  ]) ||
+    // "En qué te puedo ayudar" ("what can I do for you?"), typed "alludes" /
+    // "alludar"; a lone "Ayudar?" in the same thread is the same question.
+    /\ben\s+qu[eé]\s+(?:te|le|les)\s+(?:puedo|podemos)\s+a[yl]{1,2}u?d(?:ar|o|es|e)?\b/i.test(text) ||
+    /^\s*¿?\s*a[yl]{1,2}u?dar\s*[?.!]*\s*$/i.test(text) || matchesPurposeOrIdentityQuestion(rawMessage) || reply_signals?.engagement?.identity_question === true) {
     // matchesPurposeOrIdentityQuestion: whole-message purpose questions
     // ("What can I do for you?", "Which company r u with") -- see its
     // definition for the 2026-09-30 production cases.
@@ -6854,6 +6941,25 @@ function deriveAutomationDecision({
       suppression_action: "opt_out",
       human_review_required: false,
       risk_level: "high",
+    };
+  }
+
+  // A polite close ("Gracias", "Thanks") when nothing of ours is open: no
+  // reply, no review, nothing suppressed (resolveIntents only emits this rule
+  // when the context is not a valid, unanswered question).
+  if (
+    !compliance_flag &&
+    intent === "acknowledgement" &&
+    Array.isArray(matched_rule_ids) &&
+    matched_rule_ids.includes("thanks_only_close")
+  ) {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "low",
+      reply_kind: "polite_close",
     };
   }
 
