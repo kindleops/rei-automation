@@ -13,7 +13,7 @@
  * shown (with its age) whatever happens.
  */
 import { applyEventsReply, emptyEvents, type WallEventsState } from './wall-feed-model'
-import { createRecoveryLadder, type RecoveryAction, type RecoveryLadder } from './wall-recovery'
+import { BACKOFF_MS, backoffFor, createRecoveryLadder, type RecoveryAction, type RecoveryLadder } from './wall-recovery'
 import { WallHttpError, type WallApi } from './wall-api'
 import type { WallConnection, WallEvent, WallSession, WallState } from './wall-types'
 
@@ -52,7 +52,8 @@ export interface WallChannelOptions {
   /** does the active view need the Market Intelligence section? which markets? */
   miQuery?: (ctx: WallViewContext) => { mi: boolean; markets: string[] }
   onSoftReload?: () => void
-  onFullReload?: () => void
+  /** Return true when the reload happened; false (e.g. origin unreachable) keeps the channel retrying. */
+  onFullReload?: () => boolean | Promise<boolean>
 }
 
 type Job = 'events' | 'state' | 'heartbeat'
@@ -97,10 +98,19 @@ export function createWallChannel(opts: WallChannelOptions) {
     set({ connection: 'live', lastOkAt: now() })
   }
 
+  const sideAttempts: Partial<Record<Job, number>> = {}
   function handleFailure(job: Job, error: unknown) {
     const e = error instanceof WallHttpError ? error : new WallHttpError(0, 'unknown')
     if (e.unpaired) { stop(); set({ unpaired: true, connection: 'offline' }); return }
     if (e.status === 429) { schedule(job, Math.max(cadence[job], e.retryAfterMs ?? 30_000)); return }
+    // Only the events job drives the ladder: three jobs failing together are ONE outage,
+    // not three times the failures (the soak caught a 4-min 503 escalating to a reload).
+    if (job !== 'events') {
+      sideAttempts[job] = (sideAttempts[job] || 0) + 1
+      set({ errors: snap.errors + 1, connection: online() ? 'reconnecting' : 'offline' })
+      schedule(job, Math.max(cadence[job], backoffFor(sideAttempts[job] as number)))
+      return
+    }
     const action: RecoveryAction = ladder.failure({ online: online() })
     set({ errors: snap.errors + 1, connection: online() ? 'reconnecting' : 'offline' })
     switch (action.type) {
@@ -124,8 +134,9 @@ export function createWallChannel(opts: WallChannelOptions) {
         schedule(job, action.delayMs)
         break
       case 'full_reload':
-        ladder.noteFullReload()
-        opts.onFullReload?.()
+        // the app decides (probing the origin first); either way keep retrying until the page goes
+        void Promise.resolve(opts.onFullReload?.() ?? false).then((reloaded) => { if (reloaded) ladder.noteFullReload() })
+        schedule(job, BACKOFF_MS[BACKOFF_MS.length - 1])
         break
     }
   }
@@ -149,6 +160,7 @@ export function createWallChannel(opts: WallChannelOptions) {
         const out = await api.heartbeat({ ...(opts.heartbeatInfo?.(context) ?? {}), connection: snap.connection, uptime_s: Math.round((now() - startedAt) / 1000), errors: snap.errors, reconnects: snap.reconnects, config_version: snap.session?.config_version ?? null })
         set({ session: out.display })
       }
+      sideAttempts[job] = 0
       ok()
       schedule(job, cadence[job])
     } catch (error) {

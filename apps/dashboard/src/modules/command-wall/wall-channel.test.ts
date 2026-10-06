@@ -145,4 +145,26 @@ describe('wall channel — one channel, bounded request rate', () => {
     limited = false
     ch.stop()
   })
+
+  it('WAN down with navigator.onLine still true: one ladder for the outage, reload only if the origin answers', async () => {
+    const ft = fakeTimers()
+    let down = false
+    const { api } = fakeApi({ fail: () => (down ? new WallHttpError(0, 'network') : false) })
+    let asked = 0
+    const ch = createWallChannel({ api, now: ft.now, timers: ft.timers, online: () => true, ladder: createRecoveryLadder({ now: ft.now }), onFullReload: () => { asked += 1; return false } })
+    await ch.start()
+    await ft.advance(20_000)
+    down = true
+    await ft.advance(4 * 60_000)
+    expect(asked).toBe(0) // a 4-minute outage never asks for a reload
+    await ft.advance(60 * 60_000)
+    expect(asked).toBeGreaterThan(0) // a long one asks…
+    expect(asked).toBeLessThanOrEqual(130) // …at most once per 30 s retry, and the probe refused every time
+    expect(ch._debug().timers).toBeGreaterThan(0) // still retrying, never wedged
+    down = false
+    await ft.advance(60_000)
+    expect(ch.getSnapshot().connection).toBe('live')
+    ch.stop()
+  })
 })
+
