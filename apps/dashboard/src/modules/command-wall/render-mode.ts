@@ -80,8 +80,9 @@ export function chooseRenderMode(caps: WallCapabilities, forced?: string | null)
   if (caps.cores !== null && caps.cores < 4) { lite = true; reasons.push(`${caps.cores} CPU cores`) }
   if (!caps.backdropFilter) { lite = true; reasons.push('no backdrop-filter') }
   if (caps.reducedMotion) { lite = true; reasons.push('reduced motion') }
-  // a 4K canvas at DPR > 1 is 33 MP per frame: LITE caps the pixel ratio
-  if (caps.screenWidth * caps.dpr >= 5000) { lite = true; reasons.push('very large framebuffer') }
+  // 4K (≥ 3000 device px wide): measured 2026-10-06 on an Intel UHD 630, FULL ran 19.8 fps median at
+  // 3840×2160 (blur glass + drift compositing); LITE drops the blur. 2560×1440 stays FULL.
+  if (caps.screenWidth * caps.dpr >= 3000) { lite = true; reasons.push('4K-class framebuffer') }
   if (!lite) reasons.push('capable desktop-class browser')
   return { mode: lite ? 'lite' : 'full', reasons, family }
 }
