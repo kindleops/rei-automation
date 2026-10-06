@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { hasDisplayCredential, isWallPath } from './src/lib/domain/command-wall/wall-credential.js'
 
 // Explicit allowlist — never a wildcard in production.
 // * + credentials:true is invalid per CORS spec and blocked by all browsers.
@@ -34,7 +35,34 @@ function setCorsHeaders(headers, allowedOrigin) {
   // does not require credentials mode and wildcard+credentials is spec-invalid.
 }
 
+// Paths that carried CORS before the Command Wall check widened the matcher.
+const CORS_PREFIXES = ['/api/cockpit/', '/api/internal/']
+
+/**
+ * COMMAND WALL READ-ONLY ENFORCEMENT (defense in depth; tightening only).
+ * A display credential is accepted by /api/wall/* and NOTHING else: every
+ * other API route — every mutation endpoint included — refuses a request that
+ * carries one, before the route runs. Structurally the credential already
+ * fails there (it is neither a Supabase session at the Worker nor the
+ * dashboard secret in the container); this makes the refusal explicit and
+ * independent of either secret being configured.
+ */
+function refuseDisplayCredential(request) {
+  const { pathname } = new URL(request.url)
+  if (isWallPath(pathname) || !hasDisplayCredential(request)) return null
+  return NextResponse.json(
+    { ok: false, error: 'display_credential_forbidden', message: 'A Command Wall display credential cannot call this API.' },
+    { status: 403, headers: { 'Cache-Control': 'no-store' } }
+  )
+}
+
 export function middleware(request) {
+  const refused = refuseDisplayCredential(request)
+  if (refused) return refused
+
+  const { pathname } = new URL(request.url)
+  if (!CORS_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return NextResponse.next()
+
   const origin = request.headers.get('origin') || ''
   const allowedOrigin = resolveOrigin(origin)
 
@@ -52,5 +80,7 @@ export function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/api/cockpit/:path*', '/api/internal/:path*'],
+  // Every API path, so the display-credential refusal covers all of them; CORS
+  // behaviour is unchanged (still only /api/cockpit/* and /api/internal/*).
+  matcher: ['/api/:path*'],
 }
