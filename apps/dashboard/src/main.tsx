@@ -18,6 +18,8 @@ import App from './App.tsx'
 import { LcMotionRoot } from './shared/lc/MotionRoot'
 import { installBuildFreshness } from './shared/build-freshness/install'
 import { BuildFreshnessNotice } from './shared/build-freshness/BuildFreshnessNotice'
+import { CommandWallBoot } from './modules/command-wall/CommandWallBoot'
+import { isCommandWallPath } from './modules/command-wall/wall-path'
 
 // Apply persisted theme+accent to <html> before React renders (prevents FOUC)
 applyThemeToDOM()
@@ -68,9 +70,19 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
 // StrictMode intentionally double-mounts in dev, which aborts inbox fetches on
 // the first mount and causes remount churn. Disabled during inbox stabilization.
+//
+// COMMAND WALL (/wall, /wall/diagnostics) is a separate TV-native client: it
+// authenticates as a paired DISPLAY, never as an operator, so it must mount
+// before App's AuthProvider/RequireAuth and outside every operator shell.
 createRoot(document.getElementById('root')!).render(
-  <LcMotionRoot>
-    <App />
-    <BuildFreshnessNotice />
-  </LcMotionRoot>
+  isCommandWallPath(window.location.pathname) ? (
+    <LcMotionRoot>
+      <CommandWallBoot />
+    </LcMotionRoot>
+  ) : (
+    <LcMotionRoot>
+      <App />
+      <BuildFreshnessNotice />
+    </LcMotionRoot>
+  )
 )

@@ -681,6 +681,10 @@ export default defineConfig(({ mode }) => {
         '/api/ops': createDevApiProxy(backendProxyTarget, env),
         '/api/internal': createDevApiProxy(backendProxyTarget, env),
         '/api/workflows': createDevApiProxy(backendProxyTarget, env),
+        // Command Wall: display-credential routes. Deliberately NOT the dev API
+        // proxy — it injects the operator secret, and a display must never
+        // ride an operator credential, not even in development.
+        '/api/wall': { target: backendProxyTarget, changeOrigin: true, secure: false },
       }
     },
     preview: {
@@ -690,6 +694,7 @@ export default defineConfig(({ mode }) => {
         '/api/ops': createDevApiProxy(backendProxyTarget, env),
         '/api/internal': createDevApiProxy(backendProxyTarget, env),
         '/api/workflows': createDevApiProxy(backendProxyTarget, env),
+        '/api/wall': { target: backendProxyTarget, changeOrigin: true, secure: false },
       },
     },
     // Pre-bundle the Experience System's overlay engine at server start, so the
