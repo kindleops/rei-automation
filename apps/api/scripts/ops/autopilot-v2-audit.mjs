@@ -102,7 +102,7 @@ export function categorizeReplay(rep, { catalog, row }) {
     const exists = catalog.some((t) => t.is_active && lc(t.language) === lc(lang) && lc(t.use_case) === lc(wanted));
     return { cat: exists ? C.NOT_SAFE : C.NO_TEMPLATE, why: `${rep.detail || audit}${wanted ? "" : ` (${lang})`}` };
   }
-  if (/^v2_hold_/.test(audit)) return { cat: C.POLICY, why: audit };
+  if (/^v2_hold_|^v2_language_not_enabled|negotiation_quote_log_failed/.test(audit)) return { cat: C.POLICY, why: rep.review_reason || audit };
   if (/classifier_human_review_required|classifier_auto_reply_not_allowed|unclear_low_confidence|ambiguous/.test(audit)) {
     if (BARE_SHORT.test(row.body) && rep.context_status !== "valid") return { cat: C.CONTEXT_MISS, why: `${audit} (context ${rep.context_status})` };
     return { cat: C.CLASSIFIER_MISS, why: `${audit} (${intent})` };

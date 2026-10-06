@@ -1,3 +1,4 @@
+import { parseEnabledLanguages, summarizeAutopilotLanguageStatus } from '@/lib/domain/seller-flow/seller-autopilot-v2.js'
 import crypto from 'node:crypto'
 
 import { NextResponse } from 'next/server.js'
@@ -72,6 +73,8 @@ const CONTROL_KEYS = [
   'queue_last_run_diagnostics',
   'queue_emergency_stop_at',
   'queue_execution_mode',
+  // Seller Autopilot v2 per-language switch (comma list; absent = English,Spanish)
+  'seller_autopilot_v2_languages',
 ]
 
 const DEFAULTS = {
@@ -373,6 +376,10 @@ function parseBody(body = {}) {
   if (patch.auto_reply_mode) {
     patch.auto_reply_mode = clean(patch.auto_reply_mode).toLowerCase()
   }
+  if (patch.seller_autopilot_v2_languages !== undefined) {
+    // only known template languages survive; never widen by a typo
+    patch.seller_autopilot_v2_languages = parseEnabledLanguages(patch.seller_autopilot_v2_languages).join(',')
+  }
   if (patch.queue_execution_mode) {
     patch.queue_execution_mode = normalizeQueueExecutionMode(patch.queue_execution_mode)
   }
@@ -618,6 +625,8 @@ function responseWithDiagnostics(request, payload, values, status = 200) {
           settings: values,
           campaign,
         },
+        // Autopilot status: flag + which reply languages are enabled (others → human review)
+        seller_autopilot: summarizeAutopilotLanguageStatus({ raw: values.seller_autopilot_v2_languages ?? null }),
         queryMs: timing.totalMs,
         sourceUsed: 'queue-control:cached-diagnostics',
         timing,

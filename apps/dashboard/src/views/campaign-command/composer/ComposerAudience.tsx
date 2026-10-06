@@ -10,6 +10,7 @@ import {
 } from './composer-model'
 import { dragLooksAcceptable, resolveDrop, type DropResolution } from './composer-intake'
 import { RollingCount } from './ComposerParts'
+import type { ComposerOfferReady } from './composer-api'
 import { ComposerFunnel } from './ComposerFunnel'
 import { clauseValueText } from './composer-format'
 
@@ -231,9 +232,10 @@ function Footprint({ audience }: { audience: Audience }) {
 export type QuickSource = { key: string; label: string; detail: string; icon: 'globe' | 'target' | 'refresh-cw' | 'map' | 'users' | 'file-text'; run: () => void; disabled?: string | null }
 
 export function AudiencePlane({
-  audience, loading, error, filters, source, catalog, quick, markets, onMarket, onFilters, onDrop, onRetry, editing, setEditing, fieldRequest, onFieldRequestDone,
+  audience, offerReady = null, loading, error, filters, source, catalog, quick, markets, onMarket, onFilters, onDrop, onRetry, editing, setEditing, fieldRequest, onFieldRequestDone,
 }: {
   audience: Audience | null
+  offerReady?: { data: ComposerOfferReady | null; error: string | null } | null
   loading: boolean
   error: string | null
   filters: FilterClause[]
@@ -345,6 +347,7 @@ export function AudiencePlane({
             <AnimatePresence initial={false}>
               <motion.div key="dist" className="ccz-aud__dist" initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={lcTransition(reduced, { duration: 0.26 })}>
                 <ComposerFunnel audience={audience} labelOf={labelOf} nowMs={openedAt} />
+                <OfferReadyLine state={offerReady} />
                 <div className="ccz-aud__block">
                   <div className="ccz-aud__label"><span className="ccz-kicker">Universe</span><span className="ccz-muted">{fmt(audience.matched)} matched properties</span></div>
                   <SegmentBar segments={universe} total={n0(audience.matched)} label="Matched universe" />
@@ -385,6 +388,38 @@ export function AudiencePlane({
         </>
       )}
       <div className="ccz-drophalo" aria-hidden="true" />
+    </div>
+  )
+}
+
+const OFFER_REASON_WORDS: Record<string, string> = {
+  not_scored: 'not scored by the offer engine',
+  score_predates_current_policy: 'score predates the 09-12 offer policy',
+  score_stale: 'score older than 30 days',
+  tier_not_offer_authoritative: 'engine tier is not an automatic offer',
+  no_recommended_offer: 'no recommended offer',
+  no_authorized_ceiling: 'no authorized max',
+  backfill_row_not_monetary_authority: 'backfill score (ranking only)',
+}
+
+/** "2,348 sendable · 2,311 offer-ready · 37 review-only" — review-only sellers are still contacted; Autopilot never quotes them money. */
+function OfferReadyLine({ state }: { state: { data: ComposerOfferReady | null; error: string | null } | null | undefined }) {
+  if (!state) return <p className="ccz-dim ccz-offer-ready">Offer Ready — counting after the whole cohort…</p>
+  if (state.error || !state.data) return <p className="ccz-dim ccz-offer-ready">Offer Ready not measured — {state.error || 'unavailable'}</p>
+  const d = state.data
+  const reasons = Object.entries(d.by_reason).filter(([k]) => k !== 'offer_ready').sort((a, b) => b[1] - a[1])
+  return (
+    <div className="ccz-aud__block ccz-offer-ready" aria-label="Offer Ready preflight">
+      <div className="ccz-aud__label">
+        <span className="ccz-kicker">Offer Ready</span>
+        <span className="ccz-muted">{fmt(d.sendable)} sendable · {fmt(d.offer_ready)} offer-ready · {fmt(d.review_only)} review-only</span>
+      </div>
+      {reasons.length ? (
+        <ul className="ccz-why">
+          {reasons.map(([k, n]) => <li key={k}><span>{OFFER_REASON_WORDS[k] || k}</span><b>{fmt(n)}</b></li>)}
+        </ul>
+      ) : null}
+      <p className="ccz-dim">Review-only sellers are still messaged; Autopilot converses but never quotes a number without a fresh authoritative engine offer.</p>
     </div>
   )
 }

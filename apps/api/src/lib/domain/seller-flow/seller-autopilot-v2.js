@@ -29,6 +29,7 @@
 
 import { validateConversationContext } from "@/lib/domain/classification/conversation-context.js";
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
+import { evaluateOfferReadiness, OFFER_READY_REASONS, OFFER_POLICY_EPOCH } from "@/lib/acquisition/offerReadiness.js";
 
 export const SELLER_AUTOPILOT_V2_VERSION = "seller_autopilot_s1_s4_v2_2026_10_06";
 export const SELLER_AUTOPILOT_V2_FLAG = "SELLER_AUTOPILOT_V2";
@@ -104,6 +105,7 @@ export const V2_CONTEXT_ALIASES = Object.freeze({
   who_is_this: "proposal_interest",
   who_is_this_resume_price: "asking_price",
   who_is_this_resume_condition: "condition_check",
+  ownership_connection_clarifier: "ownership_check",
 });
 
 export function resolveV2Stage({ conversation_context = null, stage_before = null } = {}) {
@@ -146,6 +148,9 @@ export const V2_INTENTS = Object.freeze({
   CALLBACK: "callback",
   LISTED: "listed",
   REACTION: "reaction",
+  BARE_NO_OWNERSHIP: "bare_no_to_ownership",
+  BARE_NO_AFTER_CLARIFIER: "bare_no_after_ownership_clarifier",
+  IDENTITY_STATEMENT: "identity_statement",
   UNCLEAR: "unclear",
 });
 
@@ -293,15 +298,63 @@ export function detectV2TextIntent(message = "", { thread_language = null } = {}
   return null;
 }
 
+// ── Bare "No" to the ownership question (owner 2026-10-06) ─────────────────
+// Replaces the LC_BARE_NO_OWNERSHIP_MODE review default for v2: ask ONCE
+// "Are you connected to the property, or do I have the wrong number?"; the
+// next inbound decides (wrong number → suppression, "I manage it / my wife
+// owns it / my LLC owns it" → identity review with a tag, silence → stop).
+// Never a second clarification.
+const BARE_NO_RE = /^\s*(?:no+|nope|nah|negative|no\s+(?:sir|ma'?am)|n)[\s.!]*$/i;
+
+export const V2_IDENTITY_KINDS = Object.freeze({
+  MANAGER: "property_manager",
+  FAMILY: "family_owner",
+  ENTITY: "entity_owner",
+  OCCUPANT: "occupant",
+});
+
+const IDENTITY_RULES = [
+  [V2_IDENTITY_KINDS.ENTITY, /\bmy\s+(?:llc|company|business|corporation|corp|trust|partnership)\b|\b(?:an?\s+|the\s+|our\s+)?(?:llc|trust|corporation|company)\s+owns\b|\bowned\s+by\s+(?:an?\s+|my\s+|our\s+|the\s+)?(?:llc|company|trust|corporation)|\b(?:es|est[aá])\s+a\s+nombre\s+de\s+(?:mi|la|una)\s+(?:compa[nñ][ií]a|empresa|llc)/i],
+  [V2_IDENTITY_KINDS.MANAGER, /\bi\s+(?:just\s+|only\s+)?manage\b|\bproperty\s+manager\b|\bi'?m\s+the\s+manager\b|\bmanag(?:e|ing)\s+(?:it|the\s+(?:property|house))\b|\b(?:yo\s+)?la\s+administro\b|\bsoy\s+(?:el|la)\s+administrador/i],
+  [V2_IDENTITY_KINDS.FAMILY, /\bmy\s+(?:wife|husband|spouse|mom|mother|dad|father|son|daughter|brother|sister|grand(?:ma|pa|mother|father|son|daughter)|aunt|uncle|family|partner|parents)\b[^.?!]{0,40}\b(?:owns?|is\s+the\s+owner|has\s+it|it'?s\s+(?:hers|his|theirs))\b|\b(?:it'?s|it\s+is|belongs\s+to|in)\s+my\s+(?:wife|husband|mom|mother|dad|father|son|daughter|family|parents)(?:'s)?\b|\bes\s+de\s+mi\s+(?:esposa|esposo|mam[aá]|madre|pap[aá]|padre|hij[oa]|herman[oa]|familia)/i],
+  [V2_IDENTITY_KINDS.OCCUPANT, /\bi\s+(?:rent|lease)\b|\b(?:i'?m\s+(?:a|the)\s+)?(?:tenant|renter)\b|\bi'?m\s+renting\b|\bi\s+(?:just\s+)?live\s+(?:there|here)\b|\b(?:yo\s+)?(?:rento|alquilo)\b/i],
+];
+
+/** "I manage it" / "my wife owns it" / "my LLC owns it" / "I rent" → the identity kind, else null. */
+export function detectIdentityStatement(message = "") {
+  const text = clean(message);
+  if (!text) return null;
+  for (const [kind, re] of IDENTITY_RULES) if (re.test(text)) return kind;
+  return null;
+}
+
+export function isBareNo(message = "", { thread_language = null } = {}) {
+  const text = clean(message);
+  if (BARE_NO_RE.test(text)) return true;
+  const ml = canonicalizeMultilingualReply(text, { thread_language });
+  return ml?.category === "negative" && ml.canonical_text === "no";
+}
+
 /**
  * The v2 intent for this turn: classifier verdict first (it is the canonical
  * rules engine), then the v2 text rules fill the gaps the classifier leaves as
  * unclear / review. Compliance intents from the classifier are never replaced.
  */
-export function resolveV2Intent({ classification = null, message = "", stage = V2_STAGES.UNKNOWN, thread_language = null } = {}) {
+export function resolveV2Intent({ classification = null, message = "", stage = V2_STAGES.UNKNOWN, thread_language = null, prior_template_use_case = null } = {}) {
   const primary = lower(classification?.primary_intent) || "unclear";
   const from_classifier = CLASSIFIER_INTENT_MAP[primary] || I.UNCLEAR;
   const compliance = clean(classification?.compliance_flag);
+  // The reply to our ONE-TIME ownership clarifier decides; wrong number /
+  // opt-out / hostile keep their existing lanes (suppression wins).
+  const after_clarifier = lower(prior_template_use_case) === "ownership_connection_clarifier";
+  if (after_clarifier && !compliance && ![I.OPT_OUT, I.WRONG_NUMBER, I.HOSTILE_LEGAL].includes(from_classifier)) {
+    const kind = detectIdentityStatement(message);
+    if (kind) return { intent: I.IDENTITY_STATEMENT, source: `v2_identity_${kind}`, identity_kind: kind, classifier_intent: primary };
+    if (isBareNo(message, { thread_language })) return { intent: I.BARE_NO_AFTER_CLARIFIER, source: "v2_bare_no_after_clarifier", classifier_intent: primary };
+  }
+  if (!after_clarifier && stage === V2_STAGES.S1 && !compliance && [I.UNCLEAR, I.NON_OWNER].includes(from_classifier) && isBareNo(message, { thread_language })) {
+    return { intent: I.BARE_NO_OWNERSHIP, source: "v2_bare_no_to_ownership", classifier_intent: primary };
+  }
   if (compliance || V2_DEFERRED_INTENTS.has(from_classifier)) {
     // Capital gains is the one owner-sanctioned override of a soft decline
     // ("no — the taxes would kill me"); compliance / relationship intents are
@@ -358,6 +411,9 @@ const OVERLAY_PRIMARY_INTENT = Object.freeze({
   [I.CAPITAL_GAINS]: "unclear",
   // Hands the turn to the EXISTING need_time lane (unchanged handling).
   [I.NOT_NOW]: "need_time",
+  // A bare "No" to "do you own …?" stays unclear (no stage moves) but may be
+  // answered once with the connection clarifier.
+  [I.BARE_NO_OWNERSHIP]: "unclear",
 });
 
 /**
@@ -431,8 +487,17 @@ export function applySellerAutopilotV2Overlay(classification = null, {
     : { classification, overlay: null };
   const stage_info = resolveV2Stage({ conversation_context, stage_before });
   const thread_language = conversation_context?.last_outbound_language || null;
-  const resolved = resolveV2Intent({ classification, message, stage: stage_info.stage, thread_language });
+  const resolved = resolveV2Intent({
+    classification,
+    message,
+    stage: stage_info.stage,
+    thread_language,
+    prior_template_use_case: conversation_context?.last_outbound_template_use_case || null,
+  });
   if (resolved.source === "classifier") return language_only;
+  // Identity / second-"No" turns are decided by the planner (review); the
+  // classifier verdict is left as it is.
+  if ([I.IDENTITY_STATEMENT, I.BARE_NO_AFTER_CLARIFIER].includes(resolved.intent)) return language_only;
 
   const context_free = [I.WHO_WHY, I.OFFER_REQUEST, I.CAPITAL_GAINS, I.NOT_NOW].includes(resolved.intent);
   if (!context_free && stage_info.context_status !== "valid") return language_only;
@@ -482,7 +547,7 @@ export function applySellerAutopilotV2Overlay(classification = null, {
 // ══════════════════════════════════════════════════════════════════════════
 
 /** Snapshots computed before this date do not replay under today's offer policy (Deal Intelligence 09-27). */
-export const V2_OFFER_POLICY_EPOCH = "2026-09-12T00:00:00.000Z";
+export const V2_OFFER_POLICY_EPOCH = OFFER_POLICY_EPOCH;
 
 export const V2_HOLD_REASONS = Object.freeze({
   NO_OFFER: "v2_hold_no_offer_engine_result",
@@ -524,6 +589,7 @@ export function resolveV2OfferAuthority({
   ade_snapshot = null,
   spendability = null,
   property_metadata = {},
+  now = Date.now(),
 } = {}) {
   if (!ade_snapshot) return { ok: false, reason: V2_HOLD_REASONS.NO_OFFER };
   const asset = resolveV2AssetGate({ ade_snapshot, property_metadata });
@@ -542,6 +608,23 @@ export function resolveV2OfferAuthority({
   const computed = Date.parse(base.computed_at || "");
   if (Number.isFinite(computed) && computed < Date.parse(V2_OFFER_POLICY_EPOCH)) {
     return { ok: false, reason: V2_HOLD_REASONS.STALE, ...base };
+  }
+  // The SAME offer-ready predicate the Composer preflight counts (freshness +
+  // authoritative tier + positive offer and ceiling).
+  const readiness = evaluateOfferReadiness(ade_snapshot, { now });
+  if (!readiness.ready) {
+    const map = {
+      [OFFER_READY_REASONS.PREDATES_POLICY]: V2_HOLD_REASONS.STALE,
+      [OFFER_READY_REASONS.STALE]: V2_HOLD_REASONS.STALE,
+      [OFFER_READY_REASONS.NO_OFFER]: V2_HOLD_REASONS.NO_OFFER,
+      [OFFER_READY_REASONS.NO_CEILING]: V2_HOLD_REASONS.MAO_MISSING,
+    };
+    return {
+      ok: false,
+      reason: map[readiness.reason] || `${V2_HOLD_REASONS.NOT_AUTHORITATIVE}:${readiness.reason}`,
+      offer_ready: readiness,
+      ...base,
+    };
   }
   if (spendability?.spendable !== true) {
     return { ok: false, reason: `${V2_HOLD_REASONS.NOT_AUTHORITATIVE}:${clean(spendability?.reason) || "unknown"}`, ...base };
@@ -709,7 +792,9 @@ export const V2_USE_CASES = Object.freeze({
   NO_PRICE_CONDITION: "no_price_condition_probe", // PROPOSED (inactive)
   CONDITION_CLARIFIER: "ask_condition_clarifier",
   ANCHOR_COMPS: "as_is_comp_anchor", // PROPOSED (inactive)
-  ANCHOR_CAPPED: "as_is_offer_anchor", // PROPOSED (inactive)
+  // Comps sit ABOVE our max: no comp language at all (owner 2026-10-06).
+  ANCHOR_ABOVE_MAX: "price_anchor_above_max", // PROPOSED (inactive)
+  OWNERSHIP_CLARIFIER: "ownership_connection_clarifier", // PROPOSED (inactive) — one-time, after a bare "No" at S1
   WHO_S1: "who_is_this_resume_ownership", // PROPOSED (inactive)
   WHO_S2: "who_is_this",
   WHO_S3: "who_is_this_resume_price", // PROPOSED (inactive)
@@ -720,7 +805,7 @@ export const V2_USE_CASES = Object.freeze({
 const U = V2_USE_CASES;
 
 /** Anchor use cases send a number → they go through the Offer Term Authority (persist before send). */
-export const V2_MONETARY_USE_CASES = Object.freeze([U.ANCHOR_COMPS, U.ANCHOR_CAPPED]);
+export const V2_MONETARY_USE_CASES = Object.freeze([U.ANCHOR_COMPS, U.ANCHOR_ABOVE_MAX]);
 
 /** Who/why: answer, then re-ask the question of the CURRENT stage. Existing who_is_this is the approved fallback. */
 const WHO_BY_STAGE = Object.freeze({
@@ -744,6 +829,7 @@ export const V2_MATRIX = Object.freeze({
   [I.CONDITION_ANSWER]: { S1: "defer", S2: "defer", S3: "defer", S4: "anchor" },
   [I.WHO_WHY]: { S1: WHO_BY_STAGE[V2_STAGES.S1], S2: WHO_BY_STAGE[V2_STAGES.S2], S3: WHO_BY_STAGE[V2_STAGES.S3], S4: WHO_BY_STAGE[V2_STAGES.S4] },
   [I.CAPITAL_GAINS]: { S1: [U.CAPITAL_GAINS], S2: [U.CAPITAL_GAINS], S3: [U.CAPITAL_GAINS], S4: [U.CAPITAL_GAINS] },
+  [I.BARE_NO_OWNERSHIP]: { S1: [U.OWNERSHIP_CLARIFIER], S2: "defer", S3: "defer", S4: "defer" },
 });
 
 const STAGE_KEY = Object.freeze({
@@ -800,9 +886,13 @@ export function planSellerAutopilotV2({
 } = {}) {
   const stage_info = resolveV2Stage({ conversation_context, stage_before });
   const thread_language = conversation_context?.last_outbound_language || null;
-  const intent_info = classification?.seller_autopilot_v2?.v2_intent
-    ? { intent: classification.seller_autopilot_v2.v2_intent, source: classification.seller_autopilot_v2.rule_id }
-    : resolveV2Intent({ classification, message, stage: stage_info.stage, thread_language });
+  const prior_template_use_case = conversation_context?.last_outbound_template_use_case || null;
+  const fresh_intent = resolveV2Intent({ classification, message, stage: stage_info.stage, thread_language, prior_template_use_case });
+  const intent_info = [I.IDENTITY_STATEMENT, I.BARE_NO_AFTER_CLARIFIER].includes(fresh_intent.intent)
+    ? fresh_intent
+    : classification?.seller_autopilot_v2?.v2_intent
+      ? { intent: classification.seller_autopilot_v2.v2_intent, source: classification.seller_autopilot_v2.rule_id }
+      : fresh_intent;
   const base = {
     version: SELLER_AUTOPILOT_V2_VERSION,
     v2_stage: stage_info.stage,
@@ -815,6 +905,12 @@ export function planSellerAutopilotV2({
 
   // Compliance / relationship / nurture lanes: untouched.
   if (clean(classification?.compliance_flag)) return defer(base, "v2_defer_compliance_flag");
+  // Answers to the one-time ownership clarifier: a human resolves identity;
+  // a second "No" gets no second clarification.
+  if (intent_info.intent === I.IDENTITY_STATEMENT) {
+    return review(base, `v2_identity_resolution:${intent_info.identity_kind}`, { identity_kind: intent_info.identity_kind });
+  }
+  if (intent_info.intent === I.BARE_NO_AFTER_CLARIFIER) return review(base, "v2_bare_no_after_ownership_clarifier");
   if (V2_DEFERRED_INTENTS.has(intent_info.intent)) return defer(base, `v2_defer_${intent_info.intent}`);
   if (intent_info.intent === I.UNCLEAR || intent_info.intent === I.ACKNOWLEDGEMENT) return defer(base, `v2_defer_${intent_info.intent}`);
   // The classifier's own human-review verdict binds (hard invariant): v2 only
@@ -908,33 +1004,57 @@ export function planSellerAutopilotV2({
   if (!anchor.ok) {
     return review(base, anchor.reason, { price_branch: "anchor_hold", asking_price: ask, authority: authority_evidence, anchor });
   }
-  const use_case = anchor.capped_at_mao ? U.ANCHOR_CAPPED : U.ANCHOR_COMPS;
-  const anchor_reason = anchor.capped_at_mao
-    ? "v2_anchor_capped_at_mao"
-    : anchor.lowest_was_outlier
-      ? "v2_anchor_avg3_non_outlier_comps"
-      : "v2_anchor_lowest_as_is_comp";
-  return reply(base, [use_case], anchor_reason, {
+  const offer_version = {
+    snapshot_id: offer_authority.snapshot_id,
+    computed_at: offer_authority.computed_at,
+    engine_version: offer_authority.engine_version,
+    decision_tier: offer_authority.decision_tier,
+    recommended_offer: offer_authority.offer,
+  };
+  if (anchor.capped_at_mao) {
+    // ABOVE MAX: the nearby as-is comps are above what we can pay, so the
+    // message makes NO comp claim. X is the production engine's own opening
+    // number per the negotiation rule (recommended_cash_offer — the ladder
+    // opens there and concedes toward the margin-protected ceiling), never
+    // above MAO, floored to $5K/$1K.
+    const amount = roundAnchorDown(Math.min(offer_authority.offer, offer_authority.mao));
+    if (amount == null || amount <= 0 || amount > offer_authority.mao) {
+      return review(base, V2_HOLD_REASONS.ANCHOR_NON_POSITIVE, { price_branch: "anchor_hold", asking_price: ask, authority: authority_evidence });
+    }
+    return reply(base, [U.ANCHOR_ABOVE_MAX], "v2_anchor_above_max_engine_offer", {
+      price_branch: ask == null ? "no_price_anchor" : "ask_above_range_anchor",
+      asking_price: ask,
+      authority: authority_evidence,
+      monetary: {
+        kind: "negotiation_anchor",
+        amount,
+        ceiling: offer_authority.mao,
+        rule: "above_max",
+        capped_at_mao: true,
+        raw_comp_value: anchor.raw_comp_value,
+        comp_ids: anchor.comp_ids,
+        comp_prices: anchor.comp_prices,
+        median: anchor.median,
+        offer_version,
+      },
+    });
+  }
+  const anchor_reason = anchor.lowest_was_outlier ? "v2_anchor_avg3_non_outlier_comps" : "v2_anchor_lowest_as_is_comp";
+  return reply(base, [U.ANCHOR_COMPS], anchor_reason, {
     price_branch: ask == null ? "no_price_anchor" : "ask_above_range_anchor",
     asking_price: ask,
     authority: authority_evidence,
     monetary: {
-      kind: "as_is_anchor",
+      kind: "negotiation_anchor",
       amount: anchor.amount,
       ceiling: offer_authority.mao,
       rule: anchor.rule,
-      capped_at_mao: anchor.capped_at_mao,
+      capped_at_mao: false,
       raw_comp_value: anchor.raw_comp_value,
       comp_ids: anchor.comp_ids,
       comp_prices: anchor.comp_prices,
       median: anchor.median,
-      offer_version: {
-        snapshot_id: offer_authority.snapshot_id,
-        computed_at: offer_authority.computed_at,
-        engine_version: offer_authority.engine_version,
-        decision_tier: offer_authority.decision_tier,
-        recommended_offer: offer_authority.offer,
-      },
+      offer_version,
     },
   });
 }
@@ -988,3 +1108,55 @@ export function buildV2ExecutionDirectives(plan = null) {
 }
 
 export default planSellerAutopilotV2;
+
+// ══════════════════════════════════════════════════════════════════════════
+// PER-LANGUAGE ENABLEMENT (owner 2026-10-06)
+// ══════════════════════════════════════════════════════════════════════════
+// system_control[seller_autopilot_v2_languages] = "English,Spanish" (the
+// default when the key is absent). An auto-reply in any other language goes
+// to human review WHATEVER its templates say — a language is enabled only
+// after its copy was natively reviewed. Editable through the queue-control
+// route; shown in its GET as `seller_autopilot`.
+
+export const V2_LANGUAGES_KEY = "seller_autopilot_v2_languages";
+export const V2_DEFAULT_ENABLED_LANGUAGES = Object.freeze(["English", "Spanish"]);
+export const V2_TEMPLATE_LANGUAGES = Object.freeze([
+  "English", "Spanish", "Portuguese", "French", "German", "Italian", "Polish", "Vietnamese",
+  "Mandarin", "Korean", "Japanese", "Hebrew", "Arabic", "Russian", "Greek", "Indian (Hindi or Other)",
+]);
+const LANGUAGE_ALIASES = Object.freeze({
+  hindi: "Indian (Hindi or Other)", indian: "Indian (Hindi or Other)", chinese: "Mandarin", zh: "Mandarin",
+  en: "English", es: "Spanish", pt: "Portuguese", fr: "French", de: "German", it: "Italian", pl: "Polish",
+  vi: "Vietnamese", ko: "Korean", ja: "Japanese", he: "Hebrew", ar: "Arabic", ru: "Russian", el: "Greek", hi: "Indian (Hindi or Other)",
+});
+
+export function canonicalTemplateLanguage(value) {
+  const raw = clean(value);
+  if (!raw) return null;
+  const hit = V2_TEMPLATE_LANGUAGES.find((l) => l.toLowerCase() === raw.toLowerCase());
+  return hit || LANGUAGE_ALIASES[raw.toLowerCase()] || null;
+}
+
+/** Parse the switch. Absent / blank ⇒ the EN+ES default; unknown names are ignored, never enabled. */
+export function parseEnabledLanguages(raw = null) {
+  if (raw == null || !clean(Array.isArray(raw) ? raw.join(",") : raw)) return [...V2_DEFAULT_ENABLED_LANGUAGES];
+  const list = (Array.isArray(raw) ? raw : String(raw).split(/[,;|]/)).map(canonicalTemplateLanguage).filter(Boolean);
+  return [...new Set(list)];
+}
+
+export function isReplyLanguageEnabled(language, enabled = V2_DEFAULT_ENABLED_LANGUAGES) {
+  const lang = canonicalTemplateLanguage(language) || "English";
+  return enabled.includes(lang);
+}
+
+export function summarizeAutopilotLanguageStatus({ flag = isSellerAutopilotV2Enabled(), raw = null } = {}) {
+  const enabled = parseEnabledLanguages(raw);
+  return {
+    flag: SELLER_AUTOPILOT_V2_FLAG,
+    flag_enabled: flag,
+    languages_key: V2_LANGUAGES_KEY,
+    languages_enabled: enabled,
+    languages_review_only: V2_TEMPLATE_LANGUAGES.filter((l) => !enabled.includes(l)),
+    source: raw == null || !clean(raw) ? "default" : "system_control",
+  };
+}

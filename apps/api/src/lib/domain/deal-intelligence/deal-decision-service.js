@@ -23,6 +23,7 @@
  * Legacy Podio-era fields (properties.cash_offer, final_acquisition_score,
  * ai_score, structured_motivation_score, deal_strength_score) are not read.
  */
+import { describeQuote } from '@/lib/domain/seller-flow/negotiation-quotes.js'
 import { latestRunCandidates } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { UNIVERSAL_STAGE_LABELS } from '@/lib/domain/opportunity/universal-pipeline-registry.js'
@@ -770,7 +771,7 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   const ownerId = clean(props?.master_owner_id) || null
   // Side reads never sink the decision: a failure here renders as "unavailable".
   const soft = (p) => Promise.resolve(p).catch((error) => { console.warn('deal_decision.side_read_failed', error?.message); return null })
-  const [compRes, ownerRes, prospectRes, conversation, market, execRes] = await Promise.all([
+  const [compRes, ownerRes, prospectRes, conversation, market, execRes, quotesRes] = await Promise.all([
     compIds.length ? client.from('v_recent_sold_comps').select(COMP_DETAIL_COLUMNS).in('id', compIds) : Promise.resolve({ data: [] }),
     ownerId ? client.from('master_owners').select('*').eq('master_owner_id', ownerId).maybeSingle() : Promise.resolve({ data: null }),
     ownerId ? client.from('prospects').select('prospect_id, full_name, first_name, gender, marital_status, education_model, occupation_group, est_household_income, net_asset_value, buying_power, language_preference, likely_owner, likely_renting, best_phone, best_email, contact_window, timezone, sms_eligible, email_eligible, contact_score_final, person_flags_text, is_primary_prospect, rank_position').eq('master_owner_id', ownerId).order('rank_position', { ascending: true }).limit(8) : Promise.resolve({ data: [] }),
@@ -779,7 +780,11 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
     // The latest seller-automation execution — the same evidence the Pipeline
     // lane reads (status + block_reason), indexed on (thread_id, started_at).
     thread ? soft(client.from('seller_automation_executions').select('status, lifecycle_stage, metadata, created_at, started_at').eq('thread_id', thread).order('started_at', { ascending: false }).limit(1)) : Promise.resolve(null),
+    // Every number quoted to the seller (negotiation_quotes — PROPOSED table):
+    // anchors shown APART from formal offers. A missing table reads as "not captured".
+    soft(client.from('negotiation_quotes').select('quote_type, amount, max_offer_at_quote, rule_branch, language, template_id, quoted_at, comp_ids, score_snapshot_id, seller_offer_id').eq('property_id', propertyId).order('quoted_at', { ascending: false }).limit(20)),
   ])
+  const quotes = quotesRes && !quotesRes.error ? arr(quotesRes.data) : null
   const execRow = arr(execRes?.data)[0] || null
   const execution = execRow ? { status: clean(execRow.status), reason: clean(execRow.metadata?.block_reason) || null, created_at: execRow.created_at || execRow.started_at, stage: execRow.lifecycle_stage || null, mode: clean(execRow.metadata?.execution_mode) || null } : null
   const compDetails = new Map(arr(compRes.data).map((r) => [clean(r.id), r]))
@@ -1035,6 +1040,15 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
         concessions: num(ns?.cumulative_concession_amount),
       },
       offers: offers.map((o) => ({ id: o.offer_id, version: o.offer_version, direction: o.direction, price: pos(o.purchase_price), status: o.status, strategy: humanize(o.strategy), snapshotId: o.ade_snapshot_id || null, sentAt: o.sent_at, acceptedAt: o.accepted_at, supersededAt: o.superseded_at })),
+      // Anchors are NOT offers: "Anchor $185K quoted 10-06 (rule: above_max)".
+      quotes: quotes == null
+        ? { status: 'not_captured', anchors: [], formalOffers: [] }
+        : {
+            status: 'captured',
+            anchors: quotes.filter((q) => q.quote_type === 'anchor').map((q) => ({ amount: pos(q.amount), maxOffer: pos(q.max_offer_at_quote), rule: clean(q.rule_branch) || null, language: q.language || null, templateId: q.template_id || null, quotedAt: q.quoted_at, compIds: arr(q.comp_ids), snapshotId: q.score_snapshot_id || null, label: describeQuote(q) })),
+            formalOffers: quotes.filter((q) => q.quote_type === 'formal_offer').map((q) => ({ amount: pos(q.amount), offerId: q.seller_offer_id || null, quotedAt: q.quoted_at, label: describeQuote(q) })),
+            confirmations: quotes.filter((q) => q.quote_type === 'confirm_basics_no_number').map((q) => ({ quotedAt: q.quoted_at, label: describeQuote(q) })),
+          },
       binding: Boolean(binding),
       lineage: {
         snapshotId: clean(score.evidence.immutable_snapshot_id) || latestSnap?.snapshot_id || null,

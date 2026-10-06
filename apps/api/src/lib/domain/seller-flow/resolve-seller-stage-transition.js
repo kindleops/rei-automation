@@ -32,6 +32,8 @@ import {
   resolveCreativeAllowed,
 } from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
 import { hasRevealedOffer } from "@/lib/domain/seller-flow/negotiation-state.js";
+import { isSellerAutopilotV2Enabled } from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
+import { authoritativeMaxOffer } from "@/lib/acquisition/offerReadiness.js";
 
 export const TRANSITION_RESOLVER_VERSION = "seller_stage_transition_v2_authority_gated";
 
@@ -405,8 +407,12 @@ function economicStageGate(facts = {}, ade = null, unresolvedIdx = 0, signals = 
 
   const underwriting = {
     recommended_cash_offer: recommended,
-    max_allowable_offer:
-      numberOrNull(ade?.max_allowable_offer) || numberOrNull(ade?.investor_ceiling_mid) || null,
+    // SELLER_AUTOPILOT_V2: the authoritative max is the engine's effective
+    // authorized ceiling, never the non-authoritative buyer-behaviour leg
+    // (investor_ceiling_mid). Flag off: unchanged.
+    max_allowable_offer: isSellerAutopilotV2Enabled()
+      ? numberOrNull(ade?.max_allowable_offer) || authoritativeMaxOffer(ade) || null
+      : numberOrNull(ade?.max_allowable_offer) || numberOrNull(ade?.investor_ceiling_mid) || null,
   };
 
   // Creative eligibility changes which route the band yields, so it must be

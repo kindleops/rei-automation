@@ -116,7 +116,7 @@ export function adeSnapshot({
   comp_prices = [150_000, 160_000, 175_000, 180_000, 190_000],
   comp_distance = 0.6,
   comp_sale_date = "2026-07-15",
-  computed_at = "2026-10-01T00:00:00.000Z",
+  computed_at = new Date(Date.now() - 5 * 86_400_000).toISOString(),
   asset_type = "single_family",
 } = {}) {
   return {
@@ -171,7 +171,9 @@ export async function runSellerTurn({
   ade = null,
   propertySummary = {},
   autoReplyMode = "live_limited",
+  systemControl = {},
 }) {
+  const control = { ...PROD_LIKE_SYSTEM_CONTROL, ...systemControl };
   const followups = [];
   const events = [];
   __setSellerInboundOrchestratorDeps({
@@ -239,7 +241,7 @@ export async function runSellerTurn({
       proofRun: false,
       skipNotifications: true,
       supabaseClient: db.client,
-      getSystemValue: async (key) => PROD_LIKE_SYSTEM_CONTROL[key] ?? null,
+      getSystemValue: async (key) => control[key] ?? null,
     });
     const inserts = db.writes
       .slice(before)

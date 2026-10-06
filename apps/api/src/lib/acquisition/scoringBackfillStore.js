@@ -12,7 +12,15 @@
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import { readFeatureFlag } from './modelConstants.js';
 import { scoreProperty } from './acquisitionDecisionEngine.js';
-import { BACKFILL_STATE_KEY, SCORING_VERSION, buildBackfillRow } from './scoringBackfill.js';
+import {
+  BACKFILL_STATE_KEY,
+  SCORING_VERSION,
+  SCOPE_KINDS,
+  CAMPAIGN_SCOPE_STATUSES,
+  CAMPAIGN_BUILT_STATUSES,
+  QUEUE_ELIGIBLE_TARGET_STATUSES,
+  buildBackfillRow,
+} from './scoringBackfill.js';
 
 const SCORE_TABLE = 'property_acquisition_scores';
 
@@ -25,7 +33,7 @@ function isMissingColumn(error) {
   return error?.code === '42703' || error?.code === 'PGRST204' || (m.includes('column') && m.includes('does not exist'));
 }
 
-export function createScoringBackfillStore({ supabase = null, engineDeps = {}, v3Enabled = null } = {}) {
+export function createScoringBackfillStore({ supabase = null, engineDeps = {}, v3Enabled = null, stateKey = BACKFILL_STATE_KEY, ensureDecision = null } = {}) {
   const db = supabase ?? getDefaultSupabaseClient();
   const v3 = v3Enabled ?? readFeatureFlag('ACQUISITION_ENGINE_V3_ENABLED');
   let versionColumns = null; // tri-state cache: null unknown, true present, false absent
@@ -42,7 +50,7 @@ export function createScoringBackfillStore({ supabase = null, engineDeps = {}, v
     hasVersionColumns,
 
     async readState() {
-      const { data, error } = await db.from('system_control').select('value').eq('key', BACKFILL_STATE_KEY).maybeSingle();
+      const { data, error } = await db.from('system_control').select('value').eq('key', stateKey).maybeSingle();
       if (error) throw error;
       return data?.value ?? null;
     },
@@ -50,7 +58,7 @@ export function createScoringBackfillStore({ supabase = null, engineDeps = {}, v
     async writeState(state) {
       const { error } = await db
         .from('system_control')
-        .upsert({ key: BACKFILL_STATE_KEY, value: JSON.stringify(state), updated_at: new Date().toISOString() }, { onConflict: 'key' });
+        .upsert({ key: stateKey, value: JSON.stringify(state), updated_at: new Date().toISOString() }, { onConflict: 'key' });
       if (error) throw error;
     },
 
@@ -74,8 +82,40 @@ export function createScoringBackfillStore({ supabase = null, engineDeps = {}, v
       return { ok: true, latency_ms, ...(row || {}) };
     },
 
-    /** Keyset page over properties.property_id (uq_properties_property_id). */
-    async loadPropertyPage({ afterPropertyId = null, limit = 200 } = {}) {
+    /**
+     * Campaign scope: the campaign ids whose targets are scored. Explicit ids
+     * win; otherwise every active/scheduled campaign (all queue-eligible
+     * targets) plus built campaigns (queue-eligible targets only).
+     */
+    async resolveCampaignIds(scope = {}) {
+      if (Array.isArray(scope?.campaign_ids) && scope.campaign_ids.length) return scope.campaign_ids;
+      const { data, error } = await db
+        .from('campaigns')
+        .select('id,status')
+        .in('status', [...CAMPAIGN_SCOPE_STATUSES, ...CAMPAIGN_BUILT_STATUSES]);
+      if (error) throw error;
+      return (data || []).map((r) => clean(r.id)).filter(Boolean);
+    },
+
+    /** Keyset page over properties.property_id (uq_properties_property_id); campaign scope pages campaign_targets.property_id. */
+    async loadPropertyPage({ afterPropertyId = null, limit = 200, scope = null } = {}) {
+      if (scope?.kind === SCOPE_KINDS.CAMPAIGN) {
+        const ids = await this.resolveCampaignIds(scope);
+        if (!ids.length) return [];
+        let q = db
+          .from('campaign_targets')
+          .select('property_id')
+          .in('campaign_id', ids)
+          .not('property_id', 'is', null)
+          .order('property_id', { ascending: true })
+          .limit(limit);
+        if (!scope.include_blocked) q = q.in('target_status', QUEUE_ELIGIBLE_TARGET_STATUSES);
+        if (clean(afterPropertyId)) q = q.gt('property_id', clean(afterPropertyId));
+        const { data, error } = await q;
+        if (error) throw error;
+        // The same property can be a target of two campaigns: one score each.
+        return [...new Set((data || []).map((r) => clean(r.property_id)).filter(Boolean))];
+      }
       let q = db.from('properties').select('property_id').order('property_id', { ascending: true }).limit(limit);
       if (clean(afterPropertyId)) q = q.gt('property_id', clean(afterPropertyId));
       const { data, error } = await q;
@@ -86,12 +126,17 @@ export function createScoringBackfillStore({ supabase = null, engineDeps = {}, v
     async loadExistingScores(propertyIds = []) {
       if (!propertyIds.length) return [];
       const withVersion = await hasVersionColumns();
-      const select = withVersion
-        ? 'property_id,scoring_version,computed_at,engine_version:evidence->engine->>version'
-        : 'property_id,computed_at,engine_version:evidence->engine->>version';
+      // decision_tier / offer / ceiling / evidence_mode let the campaign scope
+      // apply the offer-ready predicate without reading full evidence.
+      const base = 'property_id,computed_at,decision_tier,recommended_cash_offer,engine_version:evidence->engine->>version,evidence_mode:evidence->backfill->>evidence_mode,mao:evidence->offer_calculation->>effective_authorized_ceiling';
+      const select = withVersion ? `${base},scoring_version` : base;
       const { data, error } = await db.from(SCORE_TABLE).select(select).in('property_id', propertyIds);
       if (error) throw error;
-      return data || [];
+      // Re-shape the projected ceiling so evaluateOfferReadiness reads it.
+      return (data || []).map((r) => ({
+        ...r,
+        evidence: { offer_calculation: { effective_authorized_ceiling: r.mao ?? null }, ...(r.evidence_mode ? { backfill: { evidence_mode: r.evidence_mode, monetary_authority: false } } : {}) },
+      }));
     },
 
     /**
@@ -121,6 +166,27 @@ export function createScoringBackfillStore({ supabase = null, engineDeps = {}, v
         },
       });
       return { ok: Boolean(result?.ok), error: result?.error ?? null, row_bytes: rowBytes, aos_score: result?.score?.aos_score ?? null };
+    },
+
+    /**
+     * Campaign scope: the canonical monetary path (snapshot + decision-input
+     * stamp). Dry run never calls it — it scores read-only through scoreOne's
+     * engine path with the persister returning the row unwritten.
+     */
+    async scoreOneMonetary(propertyId, { dryRun = false, runId = null, now = new Date() } = {}) {
+      if (dryRun) return this.scoreOne(propertyId, { dryRun: true, runId, now });
+      const ensure = ensureDecision
+        ?? (await import('./decisionAuthority.js')).ensurePropertyAcquisitionDecision;
+      const ensured = await ensure(propertyId, { now, reason: 'campaign_offer_ready_scoring', deps: { supabase: db } });
+      const failed = ensured?.status === 'decision_engine_failed' || Boolean(ensured?.error);
+      return {
+        ok: !failed,
+        error: failed ? clean(ensured?.error) || 'engine_failed' : null,
+        decision_status: ensured?.status ?? null,
+        reused: ensured?.ran === false,
+        tier: ensured?.decision?.decision_tier ?? null,
+        row_bytes: ensured?.decision ? Buffer.byteLength(JSON.stringify(ensured.decision)) : null,
+      };
     },
   };
 }

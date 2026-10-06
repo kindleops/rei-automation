@@ -180,6 +180,13 @@ export type DealDecision = {
     method: string | null
     negotiation: { ask: number | null; initialAsk: number | null; currentOffer: number | null; counter: number | null; lowestIndication: number | null; sellerNet: number | null; concessions: number | null }
     offers: Array<{ id: string; version: number | null; direction: string | null; price: number | null; status: string | null; strategy: string | null; snapshotId: string | null; sentAt: string | null; acceptedAt: string | null; supersededAt: string | null }>
+    /** Every number quoted to the seller (negotiation_quotes). Anchors are NOT offers. Absent on older APIs. */
+    quotes?: {
+      status: 'captured' | 'not_captured'
+      anchors: Array<{ amount: number | null; maxOffer: number | null; rule: string | null; language: string | null; templateId: string | null; quotedAt: string; compIds: string[]; snapshotId: string | null; label: string }>
+      formalOffers: Array<{ amount: number | null; offerId: string | null; quotedAt: string; label: string }>
+      confirmations?: Array<{ quotedAt: string; label: string }>
+    }
     binding: boolean
     lineage: { snapshotId: string | null; negotiationSnapshotId: string | null; negotiationUsesLatest: boolean | null }
   } | null

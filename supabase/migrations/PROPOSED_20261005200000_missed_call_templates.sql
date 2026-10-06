@@ -24,6 +24,9 @@
 --   * safe_for_auto_reply = false keeps these rows out of every OTHER auto-reply
 --     pool; the missed-call module selects by use_case explicitly.
 --
+-- FIX 2026-10-06: sms_templates.variant_group_key is a GENERATED column; the
+-- earlier draft inserted into it and would have failed on apply.
+--
 -- Idempotent: inserts only template_ids that do not exist yet (sms_templates
 -- has no unique constraint on template_id, so ON CONFLICT cannot be used).
 
@@ -34,12 +37,12 @@ insert into public.sms_templates (
   use_case, template_id, template_name, language, agent_persona, template_body,
   english_translation, variables, is_active, safe_for_auto_reply, reply_mode,
   identity_contact_mode, property_type_scope, stage_code, stage_label,
-  is_first_touch, is_follow_up, fallback_rank, variant_group_key, quarantine_state, metadata
+  is_first_touch, is_follow_up, fallback_rank, quarantine_state, metadata
 )
 select v.use_case, v.template_id, v.template_name, v.language, 'Alex', v.template_body,
        v.english_translation, '{"agent_name": "persona"}'::jsonb, false, false, 'auto',
        'neutral', 'Any Residential', null, 'Missed Call',
-       false, false, v.fallback_rank, 'missed_call|' || v.language, 'active',
+       false, false, v.fallback_rank, 'active',
        jsonb_build_object(
          'authored_by', 'missed_call_autotext_2026_10_05',
          'approval_status', 'proposed_pending_owner_approval',

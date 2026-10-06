@@ -65,12 +65,9 @@ export const MONETARY_OFFER_USE_CASES = new Set([
   "counter_offer",
   "final_offer",
   "offer_reveal_cash",
-  // Seller Autopilot v2 as-is anchors ("…around $X — would you consider that
-  // ballpark?") are a number put to the seller, so they get the same
-  // persist-before-send authority. Only the v2 layer (flag SELLER_AUTOPILOT_V2)
-  // can select these use cases; their sms_templates rows are proposed inactive.
-  "as_is_comp_anchor",
-  "as_is_offer_anchor",
+  // Negotiation ANCHORS (as_is_comp_anchor, price_anchor_above_max, comp_anchor)
+  // are deliberately NOT here: an anchor is never the active formal offer. They
+  // are persisted to negotiation_quotes before the send (negotiation-quotes.js).
 ]);
 
 export function buildOfferId(opportunity_id, version) {

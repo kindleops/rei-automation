@@ -11,7 +11,7 @@ import { pushRoutePath } from '../../../app/router'
 import { campaignPreviewMapPath, clearCampaignPreview, marketsOfSpec, previewSpecKey, publishCampaignPreview } from '../../../domain/campaign-preview/campaign-preview-context'
 import { getFieldCatalog, searchFieldOptions, type CampaignFieldCatalog } from '../campaignWizardAdapter'
 import { fetchCommandBook, type BookCampaign } from '../desktop/war-room-api'
-import { duplicateAsDraft, launch, loadCampaign, prepareLaunch, readAudience, readCohort, readCoverage, readFleet, readTemplates, saveDraft } from './composer-api'
+import { duplicateAsDraft, launch, loadCampaign, prepareLaunch, readAudience, readCohort, readCoverage, readFleet, readOfferReady, readTemplates, saveDraft, type ComposerOfferReady } from './composer-api'
 import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, PrepareResult } from './composer-types'
 import {
   audienceSpec, capacityPlan, clauseId, clausesFromTargetFilters, compositionDiff, compositionPayload, campaignSizeAllChoice, deriveReadiness, eligibleOf, emptyComposition, fmt,
@@ -214,6 +214,21 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cohortKey, hasAudience])
   const cohortNow = cohort?.key === cohortKey ? cohort : null
+  // Offer Ready preflight: once the whole cohort is counted (shares its server cache)
+  const [offerReady, setOfferReady] = useState<{ key: string; data: ComposerOfferReady | null; error: string | null } | null>(null)
+  const cohortReady = Boolean(cohortNow?.data)
+  useEffect(() => {
+    if (!hasAudience || !cohortReady) return
+    const ctl = new AbortController()
+    readOfferReady({ filters: spec.filters, template_use_case: spec.template_use_case }, ctl.signal).then((r) => {
+      if (ctl.signal.aborted) return
+      setOfferReady(r.ok ? { key: cohortKey, data: r.data, error: null } : { key: cohortKey, data: null, error: r.message })
+    })
+    return () => ctl.abort()
+    // spec is derived from cohortKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cohortKey, hasAudience, cohortReady])
+  const offerReadyNow = offerReady?.key === cohortKey ? offerReady : null
   const audLoading = hasAudience && aud?.key !== specKey
   // keep showing the last answer while the next one settles (counts move, never blank)
   const audience = hasAudience ? withCohort(aud?.data ?? null, cohortNow?.data ?? null) : null
@@ -521,6 +536,7 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
           <Plane {...plane('audience')} title="Audience" className="ccz-col-a" summary={hasAudience ? (eligible === null ? 'Counting…' : `${fmt(eligible)} eligible`) : 'Choose a source'}>
             <AudiencePlane
               audience={audience}
+              offerReady={offerReadyNow}
               loading={audLoading}
               error={audError}
               filters={composition.filters}

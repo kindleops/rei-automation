@@ -40,8 +40,35 @@
 // unit-tested with no network (tests/critical/acquisition-scoring-backfill.test.mjs).
 
 import { CURRENT_ENGINE_VERSION } from './decisionAuthority.js';
+import { evaluateOfferReadiness } from './offerReadiness.js';
 
 export const BACKFILL_STATE_KEY = 'acquisition_scoring_backfill';
+/**
+ * OFFER-READY LAYER (owner 2026-10-06): a campaign-scoped run scores ONLY the
+ * properties of live campaigns, with the PRODUCTION offer engine at full
+ * monetary authority (ensurePropertyAcquisitionDecision — the same entry point
+ * as the Deal Intelligence button and the seller flow: immutable snapshot +
+ * decision-input stamp), never the compact non-monetary backfill row. Its own
+ * state key, so it never moves the global backfill cursor.
+ */
+export const CAMPAIGN_SCOPE_STATE_KEY = 'acquisition_scoring_backfill:campaign_offer_ready';
+export const SCOPE_KINDS = Object.freeze({ ALL: 'all_properties', CAMPAIGN: 'campaign' });
+export const CAMPAIGN_SCOPE_STATUSES = Object.freeze(['active', 'scheduled']);
+export const CAMPAIGN_BUILT_STATUSES = Object.freeze(['built']);
+export const QUEUE_ELIGIBLE_TARGET_STATUSES = Object.freeze(['ready', 'planned']);
+
+/** Normalize a scope spec. Anything not explicitly a campaign scope is the global backfill. */
+export function resolveScope(scope = null) {
+  const s = scope && typeof scope === 'object' ? scope : null;
+  if (!s || s.kind !== SCOPE_KINDS.CAMPAIGN) return { kind: SCOPE_KINDS.ALL };
+  const ids = Array.isArray(s.campaign_ids) ? [...new Set(s.campaign_ids.map(clean).filter(Boolean))] : [];
+  return {
+    kind: SCOPE_KINDS.CAMPAIGN,
+    // explicit ids, else every active/scheduled campaign + built campaigns' queue-eligible targets
+    campaign_ids: ids,
+    include_blocked: s.include_blocked === true,
+  };
+}
 export const SCORING_VERSION = `ade@${CURRENT_ENGINE_VERSION}+backfill.1`;
 
 export const BACKFILL_STATUS = Object.freeze({
@@ -104,6 +131,7 @@ export function resolveConfig(overrides = {}) {
     max_per_minute: toInt(o.max_per_minute, d.max_per_minute, 1, 600),
     tick_budget_ms: toInt(o.tick_budget_ms, d.tick_budget_ms, 1_000, 280_000),
     rescore_existing: o.rescore_existing === true,
+    scope: resolveScope(o.scope),
     respect_contact_window: o.respect_contact_window !== false,
     window_timezones: Array.isArray(o.window_timezones) && o.window_timezones.length
       ? o.window_timezones.map(clean).filter(Boolean)
@@ -260,11 +288,28 @@ export function isTransientError(message) {
  * version, or (unless rescore_existing) when the engine already produced it at
  * the current engine version through the operator / seller flow.
  */
-export function shouldSkipExisting(existing, config = DEFAULT_CONFIG) {
+export function shouldSkipExisting(existing, config = DEFAULT_CONFIG, { now = new Date() } = {}) {
   if (!existing) return false;
+  // Campaign scope: skip only rows that are ALREADY offer-ready (fresh,
+  // monetary-grade, authoritative). A compact backfill row, a stale row or a
+  // pre-09-12 row is rescored at full authority.
+  if (config?.scope?.kind === SCOPE_KINDS.CAMPAIGN) {
+    return evaluateOfferReadiness(existing, { now }).ready || isFreshMonetaryNonAuthoritative(existing, now);
+  }
   if (clean(existing.scoring_version) === SCORING_VERSION) return true;
   if (!config.rescore_existing && clean(existing.engine_version) === CURRENT_ENGINE_VERSION) return true;
   return false;
+}
+
+/**
+ * A fresh, full-authority row whose tier is simply not offer-authoritative
+ * (CREATIVE_TERMS / NURTURE / REVIEW_REQUIRED) is the engine's verdict, not a
+ * gap: rescoring it unchanged would only spend engine time. Freshness and
+ * input changes are decisionAuthority's job when the seller flow needs it.
+ */
+function isFreshMonetaryNonAuthoritative(existing, now) {
+  const verdict = evaluateOfferReadiness(existing, { now });
+  return verdict.reason === 'tier_not_offer_authoritative' && existing?.evidence_mode !== 'compact';
 }
 
 /* ── Evidence compaction ────────────────────────────────────────────────── */
@@ -431,7 +476,7 @@ export async function runBackfillTick({
   const cap = maxProperties ?? Number.POSITIVE_INFINITY;
 
   outer: while (true) {
-    const page = await store.loadPropertyPage({ afterPropertyId: cursor, limit: config.batch_size });
+    const page = await store.loadPropertyPage({ afterPropertyId: cursor, limit: config.batch_size, scope: config.scope });
     if (!page.length) {
       if (!dryRun) {
         await saveState({ ...state, status: BACKFILL_STATUS.COMPLETED, completed_at: clock().toISOString() });
@@ -465,12 +510,18 @@ export async function runBackfillTick({
       const existingById = new Map(existing.map((r) => [clean(r.property_id), r]));
 
       const results = await mapWithConcurrency(chunkIds, config.concurrency, async (propertyId) => {
-        if (shouldSkipExisting(existingById.get(clean(propertyId)), config)) {
+        if (shouldSkipExisting(existingById.get(clean(propertyId)), config, { now: clock() })) {
           return { property_id: propertyId, skipped: true };
         }
         const t0 = Date.now();
         try {
-          const r = await store.scoreOne(propertyId, { dryRun, runId: state.run_id, now: clock() });
+          const campaign = config.scope?.kind === SCOPE_KINDS.CAMPAIGN;
+          if (campaign && typeof store.scoreOneMonetary !== 'function') {
+            return { property_id: propertyId, ok: false, error: 'campaign_scope_requires_monetary_scorer', ms: Date.now() - t0 };
+          }
+          const r = campaign
+            ? await store.scoreOneMonetary(propertyId, { dryRun, runId: state.run_id, now: clock() })
+            : await store.scoreOne(propertyId, { dryRun, runId: state.run_id, now: clock() });
           return { property_id: propertyId, ok: Boolean(r?.ok), error: r?.error ?? null, ms: Date.now() - t0, bytes: r?.row_bytes ?? null };
         } catch (error) {
           return { property_id: propertyId, ok: false, error: clean(error?.message) || 'score_threw', ms: Date.now() - t0 };
@@ -579,6 +630,8 @@ export function estimateRuntime({ perPropertyMs = [], universe = 0, config = DEF
 
 export default {
   BACKFILL_STATE_KEY,
+  CAMPAIGN_SCOPE_STATE_KEY,
+  resolveScope,
   BACKFILL_STATUS,
   DEFAULT_CONFIG,
   SCORING_VERSION,

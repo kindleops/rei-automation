@@ -47,7 +47,9 @@ afterEach(() => {
   delete process.env.SELLER_AUTOPILOT_V2;
 });
 
-async function runFlow({ language = "English", turns, ade = adeSnapshot(), summary = {}, flag = true }) {
+const ALL_LANGUAGES = "English,Spanish,Portuguese,Mandarin,French";
+
+async function runFlow({ language = "English", turns, ade = adeSnapshot(), summary = {}, flag = true, systemControl = {} }) {
   if (flag) process.env.SELLER_AUTOPILOT_V2 = "true";
   else delete process.env.SELLER_AUTOPILOT_V2;
   const thread = "+16125550123";
@@ -61,7 +63,7 @@ async function runFlow({ language = "English", turns, ade = adeSnapshot(), summa
   for (const [message, stageBefore] of turns) {
     t += 5 * 60_000;
     results.push(
-      await runSellerTurn({ db, thread, message, receivedAt: new Date(t).toISOString(), stageBefore, ade, propertySummary: summary })
+      await runSellerTurn({ db, thread, message, receivedAt: new Date(t).toISOString(), stageBefore, ade, propertySummary: summary, systemControl })
     );
   }
   return { db, results };
@@ -72,7 +74,7 @@ const body = (r) => r.inserts[0]?.message_body || "";
 const plan = (r) => r.out?.seller_autopilot_v2?.plan || null;
 
 test("EN: S1 yes → S2 yes → S3 $240k (> MAO) → condition probe → ANCHOR at the lowest nearby as-is comp", async () => {
-  const { results: [s1, s2, s3, s4] } = await runFlow({
+  const { db, results: [s1, s2, s3, s4] } = await runFlow({
     turns: [["Yes", "ownership_check"], ["Yes", "offer_interest"], ["$240,000", "asking_price"], ["It needs a new roof", "property_condition"]],
   });
   assert.deepEqual(sent(s1), ["consider_selling"]);
@@ -91,29 +93,48 @@ test("EN: S1 yes → S2 yes → S3 $240k (> MAO) → condition probe → ANCHOR 
   assert.equal(ev.payload.evidence.offer_version.snapshot_id, "snap-prop-v2-1");
   assert.equal(s4.inserts[0].metadata.automation_decision_snapshot.seller_autopilot_v2.monetary.amount, 150_000);
   assert.equal(s4.inserts[0].template_id, "lc-ap2-acanc-en-1");
+  // LOGGING MODEL: an ANCHOR row in negotiation_quotes — never the active formal offer.
+  const quotes = db.tables.negotiation_quotes || [];
+  assert.equal(quotes.length, 1);
+  assert.equal(quotes[0].quote_type, "anchor");
+  assert.equal(quotes[0].amount, 150_000);
+  assert.equal(quotes[0].max_offer_at_quote, 170_000);
+  assert.equal(quotes[0].rule_branch, "lowest_nearby_as_is_comp");
+  assert.deepEqual(quotes[0].comp_ids, ["comp-1"]);
+  assert.equal(quotes[0].language, "English");
+  assert.equal(quotes[0].template_id, "lc-ap2-acanc-en-1");
+  assert.equal(quotes[0].send_queue_key, s4.inserts[0].queue_key);
+  assert.equal((db.tables.seller_offers || []).length, 0, "an anchor is not a formal offer");
 });
 
 test("EN: S3 price ≤ our offer → accept / confirm basics (no number sent)", async () => {
-  const { results } = await runFlow({ turns: [["Yes", "ownership_check"], ["Sure", "offer_interest"], ["$145k", "asking_price"]] });
+  const { db, results } = await runFlow({ turns: [["Yes", "ownership_check"], ["Sure", "offer_interest"], ["$145k", "asking_price"]] });
   const s3 = results[2];
   assert.deepEqual(sent(s3), ["price_works_confirm_basics"]);
   assert.equal(plan(s3).price_branch, "ask_at_or_below_offer");
   assert.doesNotMatch(body(s3), /\$/);
+  const q = (db.tables.negotiation_quotes || []).find((r) => r.quote_type === "confirm_basics_no_number");
+  assert.ok(q, "confirm-basics recorded");
+  assert.equal(q.amount, null);
+  assert.equal(q.asking_price, 145_000);
 });
 
-test("EN: no price → 'no worries, I'll run my numbers; condition?' → anchor (MAO-capped wording when comps exceed MAO)", async () => {
-  const { results } = await runFlow({
-    ade: adeSnapshot({ comp_prices: [200_000, 210_000, 220_000, 230_000, 240_000], mao: 172_500 }),
+test("EN: no price → 'no worries, I'll run my numbers; condition?' → comps ABOVE max → engine-offer anchor with NO comp language", async () => {
+  const { db, results } = await runFlow({
+    ade: adeSnapshot({ comp_prices: [200_000, 210_000, 220_000, 230_000, 240_000], mao: 172_500, offer: 152_300 }),
     turns: [["Yes", "ownership_check"], ["Yes", "offer_interest"], ["I have no idea", "asking_price"], ["Its in good shape", "property_condition"]],
   });
   assert.deepEqual(sent(results[2]), ["no_price_condition_probe"]);
   assert.match(body(results[2]), /^No worries, I can run the numbers/);
   const s4 = results[3];
-  assert.deepEqual(sent(s4), ["as_is_offer_anchor"]);
-  assert.equal(plan(s4).monetary.capped_at_mao, true);
-  assert.equal(plan(s4).monetary.amount, 170_000, "capped at MAO 172,500 and floored to $5K");
-  assert.match(body(s4), /I'd be around \$170,000/);
-  assert.doesNotMatch(body(s4), /sales nearby/, "a capped number never claims comps it is not");
+  assert.deepEqual(sent(s4), ["price_anchor_above_max"]);
+  assert.equal(plan(s4).monetary.rule, "above_max");
+  assert.equal(plan(s4).monetary.amount, 150_000, "the engine's offer 152,300, floored to $5K, never above MAO 172,500");
+  assert.equal(body(s4), "Based on the property and the numbers, we'd need to be around $150,000 to make it work. Would you consider something in that range?");
+  assert.doesNotMatch(body(s4), /sales|comps?|nearby/i);
+  const quote = (db.tables.negotiation_quotes || [])[0];
+  assert.equal(quote.rule_branch, "above_max");
+  assert.equal(quote.quote_type, "anchor");
 });
 
 test("EN: 'send a bid' → condition → anchor uses the average of 3 when the lowest comp is an outlier", async () => {
@@ -156,20 +177,20 @@ test("ES: the full flow answers in Spanish, including a condition reply the clas
 });
 
 test("PT: sim → sim → price within range → confirm basics in Portuguese", async () => {
-  const { results } = await runFlow({ language: "Portuguese", turns: [["Sim", "ownership_check"], ["Sim", "offer_interest"], ["$160,000", "asking_price"]] });
+  const { results } = await runFlow({ language: "Portuguese", systemControl: { seller_autopilot_v2_languages: ALL_LANGUAGES }, turns: [["Sim", "ownership_check"], ["Sim", "offer_interest"], ["$160,000", "asking_price"]] });
   assert.deepEqual(results.map(sent), [["consider_selling"], ["seller_asking_price"], ["price_works_confirm_basics"]]);
   assert.equal(body(results[2]), "Parece estar em faixa. Está vazio ou ocupado?");
 });
 
 test("ZH: 是 → 是 → 24万 (local units) → condition → anchor in Mandarin", async () => {
-  const { results } = await runFlow({ language: "Mandarin", turns: [["是", "ownership_check"], ["是", "offer_interest"], ["24万", "asking_price"], ["需要维修", "property_condition"]] });
+  const { results } = await runFlow({ language: "Mandarin", systemControl: { seller_autopilot_v2_languages: ALL_LANGUAGES }, turns: [["是", "ownership_check"], ["是", "offer_interest"], ["24万", "asking_price"], ["需要维修", "property_condition"]] });
   assert.deepEqual(results.map(sent), [["consider_selling"], ["seller_asking_price"], ["price_high_condition_probe"], ["as_is_comp_anchor"]]);
   assert.equal(plan(results[2]).asking_price, 240_000);
   assert.match(body(results[3]), /^谢谢确认。.*\$150,000/);
 });
 
 test("FR: oui → oui → 'faites-moi une offre' → condition → anchor in French", async () => {
-  const { results } = await runFlow({ language: "French", turns: [["Oui", "ownership_check"], ["Oui", "offer_interest"], ["Faites-moi une offre", "asking_price"], ["Bon état", "property_condition"]] });
+  const { results } = await runFlow({ language: "French", systemControl: { seller_autopilot_v2_languages: ALL_LANGUAGES }, turns: [["Oui", "ownership_check"], ["Oui", "offer_interest"], ["Faites-moi une offre", "asking_price"], ["Bon état", "property_condition"]] });
   assert.deepEqual(results.map(sent), [["consider_selling"], ["seller_asking_price"], ["no_price_condition_probe"], ["as_is_comp_anchor"]]);
   assert.match(body(results[3]), /^Merci de confirmer\./);
 });
@@ -210,4 +231,67 @@ test("FLAG OFF: identical to today — no v2 output, no v2 templates, no anchor"
     assert.equal(r.out.seller_autopilot_v2, undefined);
     for (const i of r.inserts) assert.doesNotMatch(String(i.template_id), /^lc-ap2-/);
   }
+});
+
+test("PER-LANGUAGE: Portuguese is not enabled by default → human review even with approved templates", async () => {
+  const { results } = await runFlow({ language: "Portuguese", turns: [["Sim", "ownership_check"]] });
+  assert.equal(results[0].inserts.length, 0);
+  assert.equal(results[0].out.execution.audit_reason, "v2_language_not_enabled");
+  assert.equal(results[0].out.execution.automation_decision.human_review_reason, "v2_language_not_enabled:Portuguese");
+  const es = await runFlow({ language: "Spanish", turns: [["Sí", "ownership_check"]] });
+  assert.deepEqual(sent(es.results[0]), ["consider_selling"], "EN/ES are on by default");
+});
+
+test("BARE NO to the ownership question → ONE clarifier; next reply decides; never a second clarification", async () => {
+  const wrong = await runFlow({ turns: [["No", "ownership_check"], ["Wrong number", "ownership_check"]] });
+  assert.deepEqual(sent(wrong.results[0]), ["ownership_connection_clarifier"]);
+  assert.equal(body(wrong.results[0]), "Got it. Are you connected to the property, or do I have the wrong number?");
+  assert.equal(wrong.results[1].inserts.length, 0);
+  assert.equal(wrong.results[1].out.execution.automation_decision.should_suppress_contact, true);
+  assert.equal(wrong.results[1].out.execution.automation_decision.suppression_reason, "wrong_number");
+
+  for (const [msg, kind] of [["I manage it for the owner", "property_manager"], ["My wife owns it", "family_owner"], ["My LLC owns it", "entity_owner"]]) {
+    const id = await runFlow({ turns: [["No", "ownership_check"], [msg, "ownership_check"]] });
+    assert.equal(id.results[1].inserts.length, 0, msg);
+    assert.equal(id.results[1].out.execution.automation_decision.human_review_reason, `v2_identity_resolution:${kind}`, msg);
+  }
+
+  const again = await runFlow({ turns: [["No", "ownership_check"], ["No", "ownership_check"]] });
+  assert.equal(again.results[1].inserts.length, 0, "no second clarification");
+  assert.equal(again.results[1].out.execution.automation_decision.human_review_reason, "v2_bare_no_after_ownership_clarifier");
+
+  const es = await runFlow({ language: "Spanish", turns: [["No", "ownership_check"]] });
+  assert.equal(body(es.results[0]), "Entendido. ¿Tiene alguna relación con la propiedad, o tengo el número equivocado?");
+});
+
+test("DEFECT 4a: the legacy comp_anchor cannot send an unlogged number (flag on: logged as an anchor, blocked if the log fails)", async () => {
+  process.env.SELLER_AUTOPILOT_V2 = "true";
+  const { executeInboundAutomationDecision } = await import("@/lib/domain/seller-flow/apply-inbound-automation-decision.js");
+  const db = memoryDb({ sms_templates: [tpl("lc-comp-anchor-en-1", "comp_anchor", "English", "Recent as-is sales nearby have come in under retail, so I'd be around {{offer_price}}. Worth a conversation?")] });
+  const args = {
+    message: "What would you pay?",
+    threadKey: "+16125550199",
+    inboundFrom: "+16125550199",
+    inboundTo: "+16125550100",
+    inboundEventId: "evt-comp-anchor",
+    inboundReceivedAt: "2026-10-05T15:00:00.000Z",
+    propertyId: "prop-v2-1",
+    classification: { primary_intent: "asks_offer", confidence: 0.9, language: "English", automation_decision: { auto_reply_allowed: true, human_review_required: false } },
+    strategyDirective: { strategy: "comp_anchor", reason_code: "x", template_use_case: "comp_anchor", allowed_template_use_cases: ["comp_anchor"], next_action: "send_message_now" },
+    dealAuthority: { offer_authoritative: true, authorized_offer_amount: 140_000, authorized_offer_ceiling: 170_000, recommended_offer: 140_000 },
+    enableQueueInsert: true,
+    dryRun: false,
+    autoReplyMode: "live_limited",
+    supabaseClient: db.client,
+    getSystemValue: async (k) => ({ auto_reply_mode: "live_limited", auto_reply_eligibility_cutoff_at: "2026-09-09T00:00:00.000Z", campaign_mode: "live_limited" })[k] ?? null,
+  };
+  const failed = await executeInboundAutomationDecision({ ...args, negotiationQuoteImpl: async () => ({ ok: false, reason: "negotiation_quote_write_failed:42P01" }) });
+  assert.equal(failed.queued, false);
+  assert.equal(failed.audit_reason, "negotiation_quote_log_failed");
+  const ok = await executeInboundAutomationDecision(args);
+  assert.equal(ok.queued, true);
+  const q = db.tables.negotiation_quotes[0];
+  assert.equal(q.quote_type, "anchor");
+  assert.equal(q.rule_branch, "legacy_comp_anchor");
+  assert.equal(q.amount, 140_000);
 });

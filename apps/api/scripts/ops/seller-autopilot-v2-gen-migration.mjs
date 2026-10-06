@@ -9,8 +9,9 @@ const values = rows.map((r) => `  (${[q(r.use_case), q(r.template_id), q(`${r.us
 const header = `-- PROPOSED — NOT APPLIED. REQUIRES OWNER APPROVAL OF THE WORDING BEFORE APPLY.
 --
 -- Seller Autopilot S1–S4 v2 (owner brief 2026-10-06): ${rows.length} sms_templates rows.
---   * 7 NEW use cases × 16 languages: no_price_condition_probe, as_is_comp_anchor,
---     as_is_offer_anchor (MAO-capped, makes no comp claim), capital_gains_creative_probe,
+--   * 8 NEW use cases × 16 languages: no_price_condition_probe, as_is_comp_anchor,
+--     price_anchor_above_max (comps above our max: NO comp language), ownership_connection_clarifier
+--     (one-time, after a bare "No" to the ownership question), capital_gains_creative_probe,
 --     who_is_this_resume_ownership / _price / _condition.
 --   * existing use cases with NO usable row in a language: price_works_confirm_basics (7),
 --     price_high_condition_probe (7), who_is_this (14 — the 7 existing non-EN/ES rows are
@@ -29,8 +30,8 @@ const header = `-- PROPOSED — NOT APPLIED. REQUIRES OWNER APPROVAL OF THE WORD
 --
 -- {{offer_price}} is the only placeholder. It renders ONLY from the
 -- authoritative, MAO-capped v2 amount (resolveAuthorizedOfferAmount re-checks
--- the ceiling) and the anchor rows are persisted as the active offer version
--- before the send (MONETARY_OFFER_USE_CASES).
+-- the ceiling). Anchor rows are NOT formal offers: each send is first written
+-- to negotiation_quotes (PROPOSED_20261006120000) and fails closed without it.
 --
 -- Idempotent: inserts only template_ids that do not exist yet (sms_templates
 -- has no unique constraint on template_id, so ON CONFLICT cannot be used).
