@@ -112,9 +112,11 @@ test("an emoji never confirms ownership, a price, an acceptance or a contract (S
     ...contextFor({ id: "stage", context: use_case, previous_outbound: "Hi Pat, this is Sam." }),
     canonical_stage,
   });
+  // S1 changed 2026-10-06 (owner rule): a typed 👍 to the ownership question
+  // answers it like "Yes" (asserted in new-replies-emoji-live-path-72). The
+  // price / offer / contract stages below keep the 7.2 rules.
   const s1 = await classify("👍", null, { heuristicOnly: true, conversation_context: at("ownership_confirmation", "ownership_check") });
-  assert.equal(s1.primary_intent, "unclear");
-  assert.equal(s1.emoji_interpretation.clarification.template_use_case, "emoji_confirm_ownership");
+  assert.equal(s1.primary_intent, "ownership_confirmed");
   const s3 = await classify("👍", null, { heuristicOnly: true, conversation_context: at("asking_price", "asking_price") });
   assert.notEqual(s3.primary_intent, "asking_price_provided");
   assert.equal(s3.automation_decision.reply_kind, undefined, "S3: a thumbs-up gives no price and is not auto-clarified");
@@ -122,7 +124,7 @@ test("an emoji never confirms ownership, a price, an acceptance or a contract (S
   assert.equal(s5.emoji_interpretation.rule_id, "emoji_affirmative_is_not_offer_acceptance");
   const s6 = await classify("👍", null, { heuristicOnly: true, conversation_context: at("formal_contract", "general_followup") });
   assert.equal(s6.emoji_interpretation.rule_id, "emoji_never_contract_authority");
-  for (const c of [s1, s3, s5, s6]) {
+  for (const c of [s3, s5, s6]) {
     assert.notEqual(c.primary_intent, "ownership_confirmed");
     assert.notEqual(c.factual_commitment, "CONFIRMED");
   }

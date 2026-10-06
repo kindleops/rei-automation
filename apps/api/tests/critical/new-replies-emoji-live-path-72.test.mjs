@@ -200,31 +200,32 @@ async function runInbound({ message, thread = "+16125550123", priorBody, deliver
 
 const OWNERSHIP_Q = "Hi Pat, this is Sam. Are you still the owner of 123 Main St?";
 
-test("ownership question + 👍: one confirmation question from sms_templates, its template_id stamped, ownership NOT confirmed", async () => {
+// OWNER RULE 2026-10-06 (round 6) replaces the 7.2 confirmation question for
+// a TYPED 👍 / ✅ to our ownership or sale question: it answers THAT question
+// and gets exactly the reply the affirmative gets. Tapbacks, 👎, laughter and
+// every price / offer / contract stage keep the 7.2 rules below.
+test("ownership question + 👍: answered like 'Yes' -- ownership_confirmed and the S2 reply (owner rule 2026-10-06)", async () => {
   const { out, inserts, classification } = await runInbound({ message: "👍", priorBody: OWNERSHIP_Q });
-  assert.equal(classification.primary_intent, "unclear");
-  assert.notEqual(classification.primary_intent, "ownership_confirmed");
-  assert.equal(classification.emoji_interpretation.semantic_signal, "likely_affirmative");
-  assert.equal(classification.factual_commitment, "LIKELY");
-  assert.equal(out.execution.queued, true, `blocked: ${out.execution.execution_blocked_reason || out.execution.audit_reason}`);
-  assert.equal(inserts.length, 1);
-  assert.equal(inserts[0].use_case_template, "emoji_confirm_ownership");
-  assert.equal(inserts[0].message_body, CONFIRM_OWNER_EN.template_body);
-  const stamped = inserts[0].template_id ?? inserts[0].metadata?.template_id ?? inserts[0].metadata?.selected_template_id;
-  assert.equal(stamped, CONFIRM_OWNER_EN.template_id, "the send carries the sms_templates template_id");
+  const yes = await runInbound({ message: "Yes", priorBody: OWNERSHIP_Q });
+  assert.equal(classification.primary_intent, "ownership_confirmed");
+  assert.equal(classification.primary_intent, yes.classification.primary_intent);
+  assert.notEqual(classification.automation_decision.reply_kind, "clarification");
+  assert.equal(out.execution.queued, yes.out.execution.queued, `blocked: ${out.execution.execution_blocked_reason || out.execution.audit_reason}`);
+  assert.equal(inserts.some((r) => String(r.use_case_template).startsWith("emoji_confirm")), false);
+  assert.deepEqual(inserts.map((r) => r.use_case_template), yes.inserts.map((r) => r.use_case_template));
 });
 
 test("✅ behaves like 👍 after an ownership question", async () => {
   const { inserts, classification } = await runInbound({ message: "✅", priorBody: OWNERSHIP_Q });
-  assert.equal(classification.emoji_interpretation.clarification.template_use_case, "emoji_confirm_ownership");
-  assert.equal(inserts[0]?.use_case_template, "emoji_confirm_ownership");
+  assert.equal(classification.primary_intent, "ownership_confirmed");
+  assert.equal(inserts.some((r) => String(r.use_case_template).startsWith("emoji_confirm")), false);
 });
 
-test("the stage does not move on an emoji: a clarification is not an advance", async () => {
-  const { out } = await runInbound({ message: "👍", priorBody: OWNERSHIP_Q });
-  const after = out.decision?.stage_after ?? out.transition?.stage_after ?? out.intelligence_snapshot?.universal_stage ?? null;
-  assert.ok(!after || /ownership/.test(String(after)), `stage moved to ${after}`);
-  assert.notEqual(out.fact_extraction?.facts?.ownership_confirmed?.value, true);
+test("the stage moves on a 👍 exactly as it does on 'Yes'", async () => {
+  const stageOf = (out) => out.decision?.stage_after ?? out.transition?.stage_after ?? out.intelligence_snapshot?.universal_stage ?? null;
+  const thumbs = await runInbound({ message: "👍", priorBody: OWNERSHIP_Q });
+  const yes = await runInbound({ message: "Yes", priorBody: OWNERSHIP_Q });
+  assert.equal(stageOf(thumbs.out), stageOf(yes.out));
 });
 
 test("'Yes 👍' is explicit: no confirmation question is asked", async () => {
@@ -245,10 +246,12 @@ test("a language with no confirmation row fails closed to review: never free tex
   assert.equal(out.execution.queued, false);
 });
 
-test("inactive rows (as shipped) are never selected: the clarification waits for activation", async () => {
+test("inactive emoji-confirmation rows do not matter for a typed 👍 to the ownership question", async () => {
   const inactive = CATALOG.map((r) => (String(r.use_case).startsWith("emoji_confirm") ? { ...r, is_active: false } : r));
-  const { inserts } = await runInbound({ message: "👍", priorBody: OWNERSHIP_Q, catalog: inactive });
-  assert.equal(inserts.length, 0);
+  const { inserts, classification } = await runInbound({ message: "👍", priorBody: OWNERSHIP_Q, catalog: inactive });
+  const yes = await runInbound({ message: "Yes", priorBody: OWNERSHIP_Q, catalog: inactive });
+  assert.equal(classification.primary_intent, "ownership_confirmed");
+  assert.deepEqual(inserts.map((r) => r.use_case_template), yes.inserts.map((r) => r.use_case_template));
 });
 
 test("🖕 is hostile: no reply and no DNC write", async () => {

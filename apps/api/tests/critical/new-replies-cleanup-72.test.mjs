@@ -230,7 +230,9 @@ test("the planner reclassifies with context from OUR outbound and summarizes hon
     CLEANUP_CATEGORY.WRONG_PERSON,
     CLEANUP_CATEGORY.SOLD,
     CLEANUP_CATEGORY.KEEP,
-    CLEANUP_CATEGORY.EMOJI_CLARIFY,
+    // Owner rule 2026-10-06: a typed 👍 to the ownership question answers it
+    // (ownership_confirmed), so it is a genuine reply, not an emoji to clarify.
+    CLEANUP_CATEGORY.KEEP,
   ]);
   const summary = summarizeCleanup(plans);
   assert.equal(summary.remain_in_new_replies, 2);

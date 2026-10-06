@@ -149,6 +149,8 @@ test("DEFAULT: bare 'No' to the ownership question keeps the previous clarificat
         assert.equal(r.primary_intent, "unclear", `${message} after ${opener}`);
         assert.ok(r.secondary_intents.includes("ownership_denial_needs_clarification"), message);
         assert.notEqual(r.automation_decision.suppression_action, "archive_wrong_number", message);
+        // Owner decision 2026-10-06: the ONE connection clarifier.
+        assert.equal(r.automation_decision.clarification_use_case, "ownership_connection_clarifier", message);
       }
     }
   });

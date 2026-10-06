@@ -290,7 +290,16 @@ export async function buildConversationContext({
         ? "derived_from_body"
         : "message_type";
 
-  const delivered_at = last_outbound.delivered_at || last_outbound.sent_at;
+  // The question is asked when we SEND it. A delivery receipt can arrive after
+  // the seller has already answered (2026-10-06: delivered 15:33:38, "Yes" at
+  // 15:33:2x), which made the context "inbound_before_outbound" -> invalid and
+  // left a bare "Yes" unbound. Use the receipt only when it precedes the reply.
+  const inbound_ms = new Date(inbound_received_at).getTime();
+  const delivered_ms = last_outbound.delivered_at ? new Date(last_outbound.delivered_at).getTime() : NaN;
+  const delivered_at =
+    Number.isFinite(delivered_ms) && delivered_ms <= inbound_ms
+      ? last_outbound.delivered_at
+      : last_outbound.sent_at || last_outbound.delivered_at;
   if (!delivered_at) return null;
 
   // Has this question already been answered? Any inbound that arrived after the
@@ -411,6 +420,9 @@ export async function buildConversationContext({
     last_outbound_language: detectMessageLanguage(last_outbound.message_body),
     seller_reply_language,
     property_valuation,
+    // OUR text, so a tapback quoting the SELLER's own words can be told apart
+    // from a tapback on our question.
+    last_outbound_body: String(last_outbound.message_body || "") || null,
     last_outbound_agent: extractSenderName(last_outbound.message_body),
     // What a bare number in the reply can mean (the ONE money path reads it):
     // "$240k?" sets the thousands scale, "how many square feet?" un-prices it.

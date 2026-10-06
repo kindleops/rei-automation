@@ -1884,6 +1884,16 @@ export async function loadRecentThreadOutbound({ supabase = null, threadKey = nu
   }
 }
 
+// When the chosen reply was already sent and the same use case has no unsent
+// variant, these approved use cases say the same thing another way
+// (2026-10-06 round 6: a second "who are you?" after our who_is_this reply).
+const REPEAT_REPHRASE_USE_CASES = Object.freeze({
+  who_is_this: ["info_source_explanation"],
+  how_got_number: ["info_source_explanation"],
+  seller_asking_price: ["asking_price_follow_up"],
+  consider_selling: ["consider_selling_follow_up"],
+});
+
 function normalizeBodyForRepeat(text) {
   return String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -3437,10 +3447,28 @@ export async function executeInboundAutomationDecision({
           clean(template_result.template.template_id) || clean(template_result.template.id),
         ].filter(Boolean),
       });
+      let variant_choice = variant;
+      if (!(variant.ok && variant.template)) {
+        for (const alt of REPEAT_REPHRASE_USE_CASES[lower(template_result.template.use_case)] || []) {
+          const rephrase = await selectSafeAutoReplyTemplate({
+            supabaseClient: supabase,
+            classification,
+            decision: { ...base_decision, required_template_use_case: alt },
+            context: reply_context,
+            threadKey,
+            inboundEventId,
+            excludeTemplateIds: already_sent_ids,
+          });
+          if (rephrase.ok && rephrase.template) {
+            variant_choice = rephrase;
+            break;
+          }
+        }
+      }
       let variant_render = null;
-      if (variant.ok && variant.template) {
+      if (variant_choice.ok && variant_choice.template) {
         variant_render = renderSafeTemplate({
-          template: variant.template,
+          template: variant_choice.template,
           message,
           inboundFrom,
           inboundTo,
@@ -3452,14 +3480,14 @@ export async function executeInboundAutomationDecision({
       if (
         variant_render?.ok &&
         !/\{\{|\}\}/.test(String(variant_render.rendered_message_text || "")) &&
-        !isRepeatOfRecentOutbound({ template: variant.template, renderedText: variant_render.rendered_message_text, recent: recent_outbound })
+        !isRepeatOfRecentOutbound({ template: variant_choice.template, renderedText: variant_render.rendered_message_text, recent: recent_outbound })
       ) {
         repeat_guard = {
           outcome: "variant",
           repeated_template_id: clean(template_result.template.template_id) || null,
-          variant_template_id: clean(variant.template.template_id) || clean(variant.template.id) || null,
+          variant_template_id: clean(variant_choice.template.template_id) || clean(variant_choice.template.id) || null,
         };
-        template_result = variant;
+        template_result = variant_choice;
         render_result = variant_render;
       } else {
         repeat_guard = {

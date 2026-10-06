@@ -588,6 +588,11 @@ const COMPLIANCE_PHRASES = [
   "te voy a bloquear", "te voy a blokear", "voy a bloquearte", "voy a blokearte",
   "te bloqueo", "te blokeo", "te bloqueé", "te bloquee", "los bloqueo", "los voy a bloquear",
   "te bloquearé", "te bloqueare", "bloquearte", "blokearte",
+  // 2026-10-06 round 6: "Error number no more texting", "No please remove from
+  // outreach list".
+  "no more texting", "no more texts", "no more text messages", "no more messages",
+  "remove from outreach", "remove from your list", "remove from the list", "remove from list",
+  "remove me from", "remove my number", "please remove me", "please remove from",
   "no me vuelvan a escribir", "no me vuelvas a mandar", "no me vuelva a mandar",
   "no me vuelvan a mandar", "no me vuelvas a contactar", "no me vuelva a contactar",
 
@@ -4077,6 +4082,11 @@ function matchesTrueWrongNumber(text = "") {
     "número equivocado",
     "numero equivocado",
     "equivocado",
+    // 2026-10-06 round 6
+    "numero incorrecto",
+    "número incorrecto",
+    "error number",
+    "wrong nbr",
   ]) || (/\bthis is not\b/.test(normalized) && !/\bthis is not a\b/.test(normalized));
 }
 
@@ -4286,6 +4296,9 @@ const SOLD_NEGATION_RE =
 
 function matchesSoldTransfer(text = "") {
   const normalized = lower(text);
+  // "No ya tiene Nuevo dueño" / "It has a new owner" (2026-10-06): a transfer
+  // with no "sold" word.
+  if (/(?:tiene|hay)\s+(?:un\s+)?nuevo\s+due[ñn]o|\bnuevos?\s+due[ñn]os?\b|\b(?:has|have|got)\s+(?:a\s+)?new\s+owners?\b|\bnew\s+owners?\s+now\b/i.test(normalized)) return true;
   if (!/\bsold\b|vend(?:[íi]|imos)/i.test(normalized)) return false;
   if (SOLD_NEGATION_RE.test(normalized)) return false;
   if (includesAny(normalized, SOLD_TRANSFER_PHRASES)) return true;
@@ -4702,7 +4715,7 @@ export function stripUrls(message) {
 
 // Whole-message polite closes (folded: lower case, accents stripped).
 const THANKS_ONLY_RE =
-  /^(?:ok(?:ay)?[\s,]+)?(?:thanks?|thank\s*you|thx|ty|tysm|thank\s*u|muchas\s+gracias|gracias|grasias|gracia|mil\s+gracias|obrigad[oa]|merci|cam\s+on)(?:[\s,]+(?:so\s+much|a\s+lot|you|u|sir|maam|senor|senora|amigo|bye|anyway|anyways))*[\s.!🙏👍😊]*$/u;
+  /^(?:ok(?:ay)?[\s,]+)?(?:thanks?|thank\s*you|thx|ty|tysm|thank\s*u|muchas\s+gracias|gracias|grasias|gracia|mil\s+gracias|obrigad[oa]|merci|cam\s+on)(?:[\s,]+(?:so\s+much|very\s+much|a\s+lot|you|u|sir|maam|senor|senora|amigo|bye|anyway|anyways|for\s+the\s+(?:update|info|information|message|text|heads\s+up)|for\s+reaching\s+out|for\s+letting\s+me\s+know|por\s+la\s+informacion|por\s+avisar))*[\s.!🙏👍😊]*$/u;
 
 function resolveIntents(
   message,
@@ -4777,9 +4790,10 @@ function resolveIntents(
   // already answered went to review). A polite close needs no reply and no
   // review -- unless OUR question is still open (validated, unanswered
   // context), in which case a person decides what the thanks means.
+  // Owner rule 2026-10-06 (round 6): a thanks-only reply is a polite close
+  // even right after our question ("OK, thank you very much for the update.").
   if (
     !compliance_flag &&
-    ctxValidation.context_status !== "valid" &&
     THANKS_ONLY_RE.test(foldReplyLines(rawMessage).join(" ").trim())
   ) {
     return finalizeIntentResult({
@@ -4794,6 +4808,29 @@ function resolveIntents(
       calibrated_rule_family_id: "thanks_only_close",
       confidence_rationale: "thanks_only_close",
       contextual_confidence: 0.9,
+    });
+  }
+
+  // "Si.por que" / "Yes why?" (2026-10-06): the seller is asking who we are
+  // and why we ask -- the who_is_this reply answers both. Bare "What" / "Huh?"
+  // to our first touch is the same question.
+  if (
+    !compliance_flag &&
+    (/^(?:yes|yeah|yep|si|sí|yea)[\s.,!¿?]*(?:why|por\s*qu[eé]|porque|pq)\s*[?!.]*$/i.test(rawMessage.trim()) ||
+      /^¿?\s*(?:what|wut|wat|huh|que|qué|eh|como|cómo)\s*[?!.]*$/i.test(rawMessage.trim()))
+  ) {
+    return finalizeIntentResult({
+      primary_intent: "who_is_this",
+      secondary_intents: [],
+      matched_intents: ["who_is_this"],
+      matched_rule_ids: ["identity_purpose_short_question"],
+      context_status: ctxValidation.context_status,
+      evidence_spans: [rawMessage],
+      precedence_result: "identity_purpose_short_question",
+      ambiguity_flags: [],
+      calibrated_rule_family_id: "identity_purpose_short_question",
+      confidence_rationale: "identity_purpose_short_question",
+      contextual_confidence: 0.85,
     });
   }
 
@@ -5077,6 +5114,10 @@ function resolveIntents(
       // Spanish
 
       "no me interesa", "no quiero vender", "no está en venta", "no esta en venta",
+      // 2026-10-06 round 6
+      "i don't care", "i dont care", "i do not care", "not if it involves",
+      "para venderla no", "venderla no", "no para vender", "no para venderla",
+      "no for now", "no por ahora", "por ahora no",
     ]) ||
     // Non-native English: "No i am not  sell the house of 3521 south adams st"
     // (2026-10-05, +18178417079) matched none of the fixed phrases and sat as
@@ -5336,7 +5377,11 @@ function resolveIntents(
     /^(?:do\s+|would\s+|did\s+)?(?:you|u)\s+(?:like|want|wanna|wanting|looking)\s+(?:to\s+)?buy\b/i.test(String(text).trim()) ||
     /\b(?:take\s+(?:a\s+)?look|look\s+at\s+it)\b[^.?!]{0,30}\boffer\b/i.test(text) ||
     /(?:^|\b(?:and|then|just|please|pls|go\s+ahead)\s+)offer\s+me\b/i.test(String(text).trim()) ||
-    /\bmake\s+(?:me\s+)?(?:a\s+|an\s+|your\s+)?(?:bid|offer)\b/i.test(text);
+    /\bmake\s+(?:me\s+)?(?:a\s+|an\s+|your\s+)?(?:bid|offer)\b/i.test(text) ||
+    // 2026-10-06 round 6: "What are u offering", "De cuanto estamos hablando $"
+    /\bwhat\s+(?:are|r|would)\s+(?:you|u|ya)\s+(?:be\s+)?offer(?:ing)?\b/i.test(text) ||
+    /\bde\s+cu[aá]nto\s+(?:estamos\s+hablando|hablamos|seria|sería)\b/i.test(text) ||
+    /\bcu[aá]nto\s+(?:me\s+)?(?:ofrece|ofreces|ofrecen|darian|darían|pagarian|pagarían|me\s+das|me\s+da)\b/i.test(text);
   if (
     !agent_handles_proposal &&
     !proposal_rejected &&
@@ -6051,6 +6096,14 @@ function resolveIntents(
     "por que pregunta", "por qué pregunta", "porque pregunta",
     "por que preguntas", "por qué preguntas", "porque preguntas",
     "howd you get my number", "how'd you get my number", "how d you get my number",
+    // 2026-10-06 round 6
+    "how did you get my nbr", "how'd you get my nbr", "howd you get my nbr", "how you get my nbr",
+    "how did you get this number", "where did you get this number",
+    "are you from", "are you local", "where are you from", "where are you located", "where are you based",
+    "changed your number", "you changed your number", "new number?",
+    "may i ask why", "can i ask why", "mind if i ask why",
+    "do you know the property", "just looking for buys", "just looking for buyers", "are you just looking",
+    "queen es", "qien es", "qien eres", "quien eres", "quién eres", "quien es usted", "quién es usted",
     "how you get my number", "how u get my number", "how did u get my number",
     "howd u get my number", "how'd u get my number",
   ]) ||
@@ -6152,6 +6205,44 @@ function resolveIntents(
   }
 
   // Final dedupe and resolve with explicit priority (wrong_number beats property_correction)
+  // CONDITIONAL / OPEN INTEREST (2026-10-06 round 6). "Only for absurdly high
+  // amount of money!", "No pero si es buena?", "It's up to you not accepting
+  // low ball offer": a door left open on price -> latent_interest (the price
+  // question). "Soy todo oídos", "the property is available for inspection":
+  // engagement -> seller_interested. A leading "Sure, ..." to OUR proposal
+  // question with no negation is a yes. Compliance and any explicit decline
+  // or disposition already matched win (only fires when nothing stronger did).
+  if (!compliance_flag && !intents.some((i) => ["opt_out", "wrong_number", "sold_property", "hostile_or_legal"].includes(i))) {
+    const conditional_interest =
+      /\bonly\s+(?:for|if|at)\b[^.?!]{0,40}\b(?:money|price|amount|offer|number|dollars?)\b/i.test(text) ||
+      /\b(?:for|at)\s+the\s+right\s+(?:price|number|offer)\b|\bif\s+the\s+(?:price|offer|number)\s+(?:is|was)\s+right\b|\bif\s+(?:the\s+offer\s+is|it'?s)\s+(?:good|right|fair)\b/i.test(text) ||
+      /\bnot\s+accepting\s+(?:a\s+)?low\s*-?\s*ball|\bno\s+low\s*-?\s*ball|\bwould\s+only\s+consider\b/i.test(text) ||
+      /\bsi\s+(?:es|está|esta)\s+buen[ao]\b|\bsi\s+la\s+oferta\s+es\s+buena\b|\bdepende\s+(?:del|de\s+la)\s+(?:precio|oferta)\b|\bsi\s+el\s+precio\s+es\s+(?:bueno|justo)\b/i.test(text);
+    if (conditional_interest && !intents.includes("latent_interest") && !intents.includes("asking_price_provided")) {
+      intents.push("latent_interest");
+      reply_rule_ids.push("conditional_interest_open_on_price");
+    }
+    const engaged =
+      /\bsoy\s+todo\s+o[ií]dos\b|\b(?:i'?m|i\s+am|im)\s+all\s+ears\b|\btodo\s+o[ií]dos\b/i.test(text) ||
+      /\bavailable\s+(?:for|to)\s+(?:an?\s+)?(?:inspection|inspect|showing|walk\s*-?\s*through|viewing)\b|\bcan\s+come\s+(?:see|look\s+at)\s+it\b/i.test(text);
+    if (engaged && !intents.includes("seller_interested")) {
+      intents.push("seller_interested");
+      reply_rule_ids.push("engagement_open_to_talk");
+    }
+    const proposal_question =
+      ctxValidation.context_status === "valid" &&
+      ["proposal_interest", "proposal_request"].includes(ctxValidation.context?.last_outbound_use_case);
+    if (
+      intents.length === 0 &&
+      proposal_question &&
+      /^(?:sure|yes|yeah|yep|yup|absolutely|definitely|of\s+course|claro|si|sí|ok(?:ay)?)\b[\s,.!]/i.test(rawMessage.trim() + " ") &&
+      !/\b(?:not|no|never|don'?t|doesn'?t|won'?t|isn'?t|nunca|nada)\b|n'?t\b/i.test(text)
+    ) {
+      intents.push("seller_interested");
+      reply_rule_ids.push("affirmative_with_tail_to_proposal_question");
+    }
+  }
+
   // IMPLAUSIBLE ASK (2026-10-06, +17276319579): "1 million dollars" on a
   // $182K house is not an asking price. It does not advance the stage, does not
   // imply ownership, and earns one light reality-check question instead.
@@ -6555,7 +6646,7 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
     thread_language:
       early_context && typeof early_context === "object" ? early_context.last_outbound_language || null : null,
   });
-  const message = multilingual ? multilingual.canonical_text : original_message;
+  let message = multilingual ? multilingual.canonical_text : original_message;
   const compliance_flag  = detectComplianceFlag(message);
   let language           = detectLanguageHeuristic(original_message, brain_item);
   // An explicit Spanish-switch request ("no hablo inglés", "en español por
@@ -6592,7 +6683,33 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
       (conversation_context.last_outbound_use_case === "ownership_check" ||
         conversation_context.last_outbound_question_type === "ownership")
   );
-  const emoji_interpretation = interpretEmojiReply(original_message, signal_context);
+  let emoji_interpretation = interpretEmojiReply(original_message, signal_context);
+  // OWNER RULE 2026-10-06 (round 6): a typed "👍" alone after OUR ownership or
+  // sale question answers THAT question: it is read as "yes" and gets the
+  // same reply the affirmative gets (no confirmation question, no review).
+  // Platform tapbacks keep their own handling.
+  if (
+    emoji_interpretation?.emoji_only === true &&
+    emoji_interpretation.reaction_type !== "platform_reaction" &&
+    emoji_interpretation.family === "affirmative" &&
+    signal_context &&
+    ["ownership_check", "proposal_interest", "proposal_request"].includes(signal_context.last_outbound_use_case)
+  ) {
+    message = "yes";
+    emoji_interpretation = null;
+  }
+  // An iMessage "Questioned/Emphasized “…”" whose quoted text is NOT our last
+  // outbound quotes the SELLER's own words ("Questioned “What's Your
+  // Proposal”", "Questioned “No estoy interesada”"): read those words.
+  if (emoji_interpretation?.reaction_type === "platform_reaction" && emoji_interpretation.reaction?.target_text) {
+    const raw_ctx = conversation_context && typeof conversation_context === "object" ? conversation_context : null;
+    const ours = lower(raw_ctx?.last_outbound_body || "").replace(/\s+/g, " ").trim();
+    const target = lower(emoji_interpretation.reaction.target_text).replace(/\s+/g, " ").trim();
+    if (ours && target && !ours.includes(target) && !target.includes(ours.slice(0, 40))) {
+      message = emoji_interpretation.reaction.target_text;
+      emoji_interpretation = interpretEmojiReply(message, signal_context);
+    }
+  }
   // OWNER RULE (2026-10-05): reply in the language the SELLER replied in --
   // this message if it identifies one ("Yes" English, "Sí" Spanish), else the
   // seller's most recent identifiable reply, else our thread / opener
@@ -6989,6 +7106,28 @@ function deriveAutomationDecision({
       suppression_action: "opt_out",
       human_review_required: false,
       risk_level: "high",
+    };
+  }
+
+  // OWNER DECISION 2026-10-06: a bare "No" to the ownership question earns ONE
+  // clarifier ("Got it. Are you connected to the property, or do I have the
+  // wrong number?"). Same mechanism as the emoji confirmation: the executor
+  // sends the named sms_templates use case, or holds for review when the
+  // seller's language has no safe row. The repeat-intent guard makes it ONE.
+  if (
+    !compliance_flag &&
+    intent === "unclear" &&
+    Array.isArray(matched_rule_ids) &&
+    matched_rule_ids.includes("ctx_no_after_ownership_check")
+  ) {
+    return {
+      auto_reply_allowed: true,
+      queue_action: "queue_clarification",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "low",
+      reply_kind: "clarification",
+      clarification_use_case: "ownership_connection_clarifier",
     };
   }
 
