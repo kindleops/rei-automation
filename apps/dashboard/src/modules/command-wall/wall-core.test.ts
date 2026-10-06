@@ -37,6 +37,8 @@ describe('render-mode detection', () => {
     expect(chooseRenderMode({ ...CAPS, backdropFilter: false }).mode).toBe('lite')
     expect(chooseRenderMode({ ...CAPS, reducedMotion: true }).mode).toBe('lite')
     expect(chooseRenderMode({ ...CAPS, screenWidth: 3840, dpr: 2 }).mode).toBe('lite')
+    expect(chooseRenderMode({ ...CAPS, screenWidth: 3840, dpr: 1 }).mode).toBe('lite')
+    expect(chooseRenderMode({ ...CAPS, screenWidth: 2560, dpr: 1 }).mode).toBe('full')
   })
   it('a forced mode is honoured, except a WebGL mode without WebGL', () => {
     expect(chooseRenderMode(CAPS, 'safe').mode).toBe('safe')
