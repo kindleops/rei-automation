@@ -24,12 +24,16 @@ export async function GET(request) {
     const asked = String(url.searchParams.get('markets') || '').split(',').map((s) => s.trim()).filter((s) => MARKET.test(s)).slice(0, 4)
     const snapshot = wallSnapshot({ mi: marketIntelService })
     const feed = wallFeed()
-    const snap = await snapshot.read({ includeMi, miMarkets: asked.length ? asked : config.watched_markets })
+    const core = await snapshot.read()
     // market geography for every live campaign market (cached 6 h in the feed's geo kit)
     const campaigns = []
-    for (const c of snap.campaigns?.items || []) {
+    for (const c of core.campaigns?.items || []) {
       campaigns.push({ ...c, market_id: await feed.geo.marketIdForName(c.market_name).catch(() => null) })
     }
+    // MI focus: what the wall asked for, else its watched markets, else where campaigns are live
+    const liveMarkets = [...new Set(campaigns.filter((c) => c.status === 'active' && c.market_id).map((c) => c.market_id))]
+    const miMarkets = asked.length ? asked : config.watched_markets.length ? config.watched_markets : liveMarkets
+    const snap = includeMi ? await snapshot.read({ includeMi, miMarkets }) : core
     const ids = [...campaigns.map((c) => c.market_id).filter(Boolean), ...config.watched_markets]
     const markets = await feed.geo.marketsWithCentroids(ids).catch(() => [])
     const system = deriveSystem({ queue: snap.queue, fleet: snap.fleet, signals: snap.signals, feed: feed.statusNow() })
