@@ -23,6 +23,7 @@ import {
 import { detectReplyDispositionSignals, foldReplyLines } from "@/lib/domain/classification/reply-disposition-signals.js";
 import { resolveSellerReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
+import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
 import {
   resolveCanonicalAskingPrice,
   isCommittedAskingPrice,
@@ -4023,6 +4024,9 @@ export const INTENT_PRIORITY = Object.freeze([
   "llc_corporation",
   "seller_interested",
   "asking_price_provided",
+  // A price far above any realistic value (price-plausibility.js): ranked
+  // where the real price would have been.
+  "asking_price_implausible",
   // Absent value, seller still active. Ranked with the pricing tier because it
   // IS a price answer, just an empty one.
   "asking_price_absent",
@@ -6148,6 +6152,30 @@ function resolveIntents(
   }
 
   // Final dedupe and resolve with explicit priority (wrong_number beats property_correction)
+  // IMPLAUSIBLE ASK (2026-10-06, +17276319579): "1 million dollars" on a
+  // $182K house is not an asking price. It does not advance the stage, does not
+  // imply ownership, and earns one light reality-check question instead.
+  let implausible_price_confidence = null;
+  if (intents.includes("asking_price_provided")) {
+    const raw_context = conversation_context && typeof conversation_context === "object" ? conversation_context : null;
+    const plausibility = assessAskingPricePlausibility({
+      amount: price_parse?.value ?? price_parse?.classifier_parse_value ?? null,
+      valuation: raw_context?.property_valuation || null,
+      message: rawMessage,
+    });
+    if (plausibility.implausible) {
+      for (let i = 0; i < intents.length; i += 1) {
+        if (intents[i] === "asking_price_provided") intents[i] = "asking_price_implausible";
+      }
+      price_parse = {
+        ...(price_parse || {}),
+        qualifies_as_seller_asking_price: false,
+        implausibility: plausibility,
+      };
+      reply_rule_ids.push(`asking_price_implausible_${plausibility.rule}`);
+      implausible_price_confidence = 0.85;
+    }
+  }
   const unique_intents = [...new Set(intents)];
   let primary = pickPrimaryIntent(unique_intents);
   // Explicit ownership + proposal request (no price): identity stage wins; offer is secondary.
@@ -6241,6 +6269,9 @@ function resolveIntents(
           ? `matched_rules:${[...matched_rule_ids, ...reply_rule_ids].join(",")}`
           : "intent_priority_without_named_rule",
     price_parse,
+    ...(implausible_price_confidence != null && primary === "asking_price_implausible"
+      ? { contextual_confidence: implausible_price_confidence }
+      : {}),
   });
 }
 
@@ -6958,6 +6989,20 @@ function deriveAutomationDecision({
       suppression_action: "opt_out",
       human_review_required: false,
       risk_level: "high",
+    };
+  }
+
+  // An implausible ask ("1 million" on a $182K house) earns ONE light
+  // reality-check question in the same stage; it never advances the deal.
+  // Compliance ran above.
+  if (!compliance_flag && intent === "asking_price_implausible") {
+    return {
+      auto_reply_allowed: true,
+      queue_action: "queue_auto_reply",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "low",
+      reply_kind: "price_reality_check",
     };
   }
 

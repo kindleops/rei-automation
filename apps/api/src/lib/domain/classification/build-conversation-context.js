@@ -231,7 +231,7 @@ export async function buildConversationContext({
   try {
     const { data, error } = await supabase
       .from("send_queue")
-      .select("id,message_type,message_body,template_id,provider_message_id,sent_at,delivered_at,queue_status")
+      .select("id,message_type,message_body,template_id,property_id,provider_message_id,sent_at,delivered_at,queue_status")
       // Campaign rows were written with a bare 10-digit number ("6125589879")
       // while the thread is E.164, so an exact match found no outbound, the
       // context was "unavailable" and a plain "Yes" to "do you still own…?"
@@ -355,6 +355,34 @@ export async function buildConversationContext({
     seller_reply_language = null;
   }
 
+  // The property's own valuation, so an ask far above it ("1 million" on a
+  // $182K house) is read as implausible, not as a price (price-plausibility.js).
+  // Best effort: unreadable -> null -> no plausibility judgement at all.
+  let property_valuation = null;
+  const valuation_property_id = String(last_outbound.property_id ?? "").trim();
+  if (valuation_property_id) {
+    try {
+      const { data, error } = await supabase
+        .from("properties")
+        .select("property_id,estimated_value,arv_estimate")
+        .eq("property_id", valuation_property_id)
+        .limit(1);
+      const row = !error && Array.isArray(data) ? data[0] : null;
+      const estimated_value = Number(row?.estimated_value);
+      const arv_estimate = Number(row?.arv_estimate);
+      if (row && (estimated_value > 0 || arv_estimate > 0)) {
+        property_valuation = {
+          property_id: valuation_property_id,
+          estimated_value: estimated_value > 0 ? estimated_value : null,
+          arv_estimate: arv_estimate > 0 ? arv_estimate : null,
+          source: "properties",
+        };
+      }
+    } catch {
+      property_valuation = null;
+    }
+  }
+
   return {
     context_version: CONTEXT_VERSION,
     canonical_thread: thread_key,
@@ -382,6 +410,7 @@ export async function buildConversationContext({
     last_outbound_addressee: extractAddresseeName(last_outbound.message_body),
     last_outbound_language: detectMessageLanguage(last_outbound.message_body),
     seller_reply_language,
+    property_valuation,
     last_outbound_agent: extractSenderName(last_outbound.message_body),
     // What a bare number in the reply can mean (the ONE money path reads it):
     // "$240k?" sets the thousands scale, "how many square feet?" un-prices it.

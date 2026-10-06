@@ -35,6 +35,10 @@ export const CANONICAL_INTENTS = Object.freeze([
   "need_time",
   "seller_interested",
   "asking_price_provided",
+  // A price far above any realistic value (classification/price-plausibility.js).
+  // Canonical so it reaches the decision layer as itself (one reality-check
+  // question, no stage advance) instead of folding to "unclear".
+  "asking_price_implausible",
   "asks_offer",
   // A seller asking for the paperwork. Canonical because the lead-state
   // registry (contract_requested -> FORMAL_CONTRACT) and the intent ontology
