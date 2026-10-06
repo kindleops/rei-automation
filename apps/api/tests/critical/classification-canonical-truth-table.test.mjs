@@ -36,7 +36,9 @@ const TRUTH_TABLE = [
 
   // ambiguous — insufficient evidence
   { label: "unclear", text: "Maybe", lang: "English" },
-  { label: "unclear", text: "Huh?", lang: "English" },
+  // Owner rule 2026-10-06 (round 6): a bare "Huh?" / "What" to our first touch
+  // is the who-are-you question and gets the who_is_this reply.
+  { label: "who_is_this", text: "Huh?", lang: "English" },
 
   // property_correction — type/address correction only
   { label: "property_correction", text: "This is not a duplex, it is a house", lang: "English" },

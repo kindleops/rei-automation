@@ -157,7 +157,8 @@ const CANONICAL_CORPUS = [
 
   // ambiguous — must resolve to unclear/latent_interest, never a guess
   { label: "ambiguous_maybe", text: "maybe", primary_intent: "unclear" },
-  { label: "ambiguous_what", text: "what", primary_intent: "unclear" },
+  // Owner rule 2026-10-06 (round 6): bare "what" -> the who_is_this reply.
+  { label: "ambiguous_what", text: "what", primary_intent: "who_is_this" },
 
   // monetary preservation
   { label: "price_bottom_line", text: "285k is my bottom line", primary_intent: "asking_price_provided" },

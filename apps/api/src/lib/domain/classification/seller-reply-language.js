@@ -30,7 +30,7 @@ const SHORT_REPLY_LEXICON = new Map(
       "yes maam", "absolutely", "definitely", "of course", "thanks", "thank you",
       "who is this", "who", "wrong number", "not interested", "sold", "sold it",
       "maybe", "possibly", "how much", "what", "why", "not anymore", "no thanks",
-      "no thank you", "yes please", "sounds good", "call me",
+      "no thank you", "yes please", "sounds good", "call me", "huh", "hmm", "what?", "huh?", "whats up",
     ],
     Spanish: [
       "si", "claro", "claro que si", "correcto", "asi es", "gracias", "bueno",

@@ -131,12 +131,12 @@ const LABELS = {
   "030": { intent: "unclear", review: true },
   "039": { intent: "unclear", review: true },
   "012": { intent: "hostile_or_legal", auto: false },
-  // ── bare "No" to the ownership question: held (LC_BARE_NO_OWNERSHIP_MODE default) ──
-  "001": { intent: "unclear", review: true },
-  "013": { intent: "unclear", review: true },
-  "019": { intent: "unclear", review: true },
-  "033": { intent: "unclear", review: true },
-  "037": { intent: "unclear", review: true },
+  // ── bare "No" to the ownership question: ONE clarifier (owner decision 2026-10-06) ──
+  "001": { intent: "unclear", auto: true, review: false },
+  "013": { intent: "unclear", auto: true, review: false },
+  "019": { intent: "unclear", auto: true, review: false },
+  "033": { intent: "unclear", auto: true, review: false },
+  "037": { intent: "unclear", auto: true, review: false },
   // ── classifier-level intent (live layers refine these) ──
   "009": { intent: "wrong_number" },
   "024": { intent: "wrong_number" },
@@ -187,7 +187,7 @@ test("offer requests route to asks_offer; statements about someone else's offer 
   }
 });
 
-test("thanks-only: a polite close when nothing is open; review when our question is still open", async () => {
+test("thanks-only: a polite close, whether or not our question is still open (owner rule 2026-10-06)", async () => {
   for (const m of ["Gracias", "Thanks", "Thank you!", "Muchas gracias", "ok thanks", "Thanks 🙏"]) {
     const r = await plain(m);
     assert.equal(r.primary_intent, "acknowledgement", m);
@@ -200,8 +200,10 @@ test("thanks-only: a polite close when nothing is open; review when our question
     supabase: supabaseFor({ fixture_id: "open", prior_question: { kind: "campaign", text: "Hola Pat, sigues siendo el dueno de 1 Main St?", message_type: null }, intervening_inbound: [] }),
   });
   assert.equal(open.question_status, "unanswered");
+  // Owner rule 2026-10-06 (round 6): a thanks-only reply is a polite close even
+  // while our question is open.
   const r = await plain("Gracias", open);
-  assert.notEqual(r.automation_decision.reply_kind, "polite_close");
+  assert.equal(r.automation_decision.reply_kind, "polite_close");
   // Compliance still wins.
   assert.equal((await plain("Gracias, ya no me escriba")).primary_intent, "opt_out");
 });

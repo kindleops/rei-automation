@@ -264,7 +264,7 @@ function inferQuestionType(useCase) {
 // got no reply. An owner answers "I am" as often as "I do"; a yes followed by
 // a curious or selling tail is still a yes.
 const AFFIRMATIVE_HEAD =
-  "(?:yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|i am|yes i am|yeah i am|yep i am|i am the owner|yes i am the owner|i'm the owner|yes it is|yeah it is|it is|it is mine|yes it is mine|its mine|that is me|yes that is me|thats me|sim|vâng|vang|dạ|đúng|đúng rồi|dung roi|phải rồi|phai roi)";
+  "(?:yes this is she|yes this is he|yes this is me|yes this is her|yes this is him|this is she|this is he|this is me|yes speaking|yes it is me|it is me|yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|i am|yes i am|yeah i am|yep i am|i am the owner|yes i am the owner|i'm the owner|yes it is|yeah it is|it is|it is mine|yes it is mine|its mine|that is me|yes that is me|thats me|sim|vâng|vang|dạ|đúng|đúng rồi|dung roi|phải rồi|phai roi)";
 const AFFIRMATIVE_TAIL =
   "(?:\\s+(?:is\\s+)?(?:what'?s up|whats up|why|what about it|what do you want|who is this|who'?s this|who are you)|\\s+and\\s+(?:i am|i'm|im)\\s+(?:selling it now|selling it|selling|looking to sell|trying to sell))?";
 const AFFIRMATIVE_TOKENS = `(?:${AFFIRMATIVE_HEAD}${AFFIRMATIVE_TAIL})`;
@@ -307,6 +307,10 @@ function normalizeShortReply(text) {
     .replace(/\bdidn't\b/g, 'did not')
     .replace(/\bit's\b/g, 'it is')
     .replace(/\bthat's\b/g, 'that is')
+    .replace(/\bi'm\b/g, 'i am')
+    .replace(/\bim\b/g, 'i am')
+    // "Hello, yes this is she." (2026-10-06): a greeting in front of the answer.
+    .replace(/^(?:hello|hi|hey|hola|ola|good\s+(?:morning|afternoon|evening))[\s,.!]+(?=\S)/, '')
     // Internal punctuation, not just trailing: "No, I don't" normalized to
     // "no, i do not" and matched no token, so a comma was enough to make a
     // seller's answer unreadable. No token contains punctuation.
@@ -318,22 +322,32 @@ function normalizeShortReply(text) {
 // Bare denials of "do you own / are you the owner / is it yours?". Hedges
 // ("not really") stay in the clarification rule below.
 const BARE_NO_RE = /^(?:no|nope|nah|nel|no i do not|no i dont|i do not|no i am not|no no|não|nao|không|khong)$/u;
+export { BARE_NO_RE };
 const NO_LONGER_OWNER_RE = /^(?:not anymore|no longer|not any more|ya no|no ya no)$/u;
 
-// HELD pending owner decision (2026-10-05): binding a bare "No" to the
-// ownership question as non-owner archives the number, which is a strong
-// action. Default 'clarify' keeps the previous behaviour (one clarifying
-// question / review). Set LC_BARE_NO_OWNERSHIP_MODE=non_owner to enable.
+// OWNER DECISION 2026-10-06: a bare "No" to the ownership question gets ONE
+// clarifier ("Got it. Are you connected to the property, or do I have the
+// wrong number?", sms_templates use_case ownership_connection_clarifier). That
+// is the default 'clarify' mode: the classifier keeps the answer `unclear`
+// (rule ctx_no_after_ownership_check) and its automation_decision names the
+// clarifier use case. LC_BARE_NO_OWNERSHIP_MODE=non_owner remains available
+// to bind it straight to wrong_number instead.
 export const BARE_NO_OWNERSHIP_MODES = Object.freeze(['clarify', 'non_owner']);
 export function bareNoOwnershipMode() {
   const raw = String(process.env.LC_BARE_NO_OWNERSHIP_MODE ?? '').trim().toLowerCase();
   return raw === 'non_owner' ? 'non_owner' : 'clarify';
 }
 
+// "Possibly" / "Maybe" (2026-10-06): to OUR proposal question it is an open
+// door on price (latent_interest -> the price question); to anything else it
+// binds nothing.
+const MAYBE_TOKENS = '(?:possibly|maybe|perhaps|potentially|could be|might be|maybe so|tal vez|talvez|quizas|quizás|puede ser|a lo mejor)';
+
 export function isShortContextualReply(text) {
   const t = normalizeShortReply(text);
   if (!t || t.length > 48) return false;
   return (
+    new RegExp(`^${MAYBE_TOKENS}$`, 'u').test(t) ||
     new RegExp(`^${AFFIRMATIVE_TOKENS}$`, 'u').test(t) ||
     new RegExp(`^${NEGATIVE_TOKENS}$`, 'u').test(t) ||
     new RegExp(`^${NO_VALUE_TOKENS}$`, 'u').test(t)
@@ -356,7 +370,26 @@ export function applyContextualShortReply(messageText, validated) {
   const isYes = new RegExp(`^${AFFIRMATIVE_TOKENS}$`, 'u').test(t);
   const isNo = new RegExp(`^${NEGATIVE_TOKENS}$`, 'u').test(t);
   const isNoValue = new RegExp(`^${NO_VALUE_TOKENS}$`, 'u').test(t);
-  if (!isYes && !isNo && !isNoValue) return { applied: false };
+  const isMaybe = new RegExp(`^${MAYBE_TOKENS}$`, 'u').test(t);
+  if (!isYes && !isNo && !isNoValue && !isMaybe) return { applied: false };
+  if (isMaybe) {
+    const uc = validated.context.last_outbound_use_case;
+    if (uc === 'proposal_interest' || uc === 'proposal_request') {
+      return {
+        applied: true,
+        primary_intent: 'latent_interest',
+        labels: ['latent_interest', 'proposal_interest_maybe'],
+        rule_id: 'ctx_maybe_after_proposal_interest',
+        confidence: 0.85,
+        rationale: 'maybe_bound_to_validated_proposal_question',
+        evidence_span: String(messageText).trim(),
+        context_message_id: validated.context.last_outbound_message_id,
+        context_use_case: uc,
+        context_age_ms: validated.context.context_age_ms,
+      };
+    }
+    return { applied: false };
+  }
 
   const useCase = validated.context.last_outbound_use_case;
   const qType = validated.context.last_outbound_question_type;

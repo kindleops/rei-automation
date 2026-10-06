@@ -177,7 +177,13 @@ const FAMILY_MEMBER_PHRASES = [
   "la casa es de mi madre",
   "la casa es de mi padre",
 ];
-const AGENT_PHRASES = ["realtor", "real estate agent", "listing agent", "my agent"];
+const AGENT_PHRASES = [
+  "realtor", "real estate agent", "listing agent", "my agent",
+  // 2026-10-06: "Sorry that I wouldn't know. I'm just with the investor and we
+  // just find buyers." -- a representative, not the owner.
+  "with the investor", "work for an investor", "work for the investor", "i work for investors",
+  "we just find buyers", "i'm a wholesaler", "im a wholesaler", "we are wholesalers",
+];
 const SPOUSE_PHRASES = ["my wife owns", "my husband owns", "spouse owns", "co-owner", "co owner"];
 const EXECUTOR_PHRASES = ["executor", "heir", "estate", "probate", "trustee", "administrator of the estate", "estate administrator", "albacea"];
 const LLC_PHRASES = ["llc", "representative for", "on behalf of the company", "authorized signer", "authorized to sign", "signing authority", "autorizado para firmar", "autorizada para firmar"];

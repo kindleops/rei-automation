@@ -50,7 +50,9 @@ test("phrase-anchored / slang conditional interest advances autonomously (latent
 });
 
 test("bare hedges stay below the autonomy gate (ambiguity gate NOT weakened)", async () => {
-  for (const text of ["maybe", "depends", "possibly", "what"]) {
+  // "what" left this list 2026-10-06 (owner rule: bare "what" is the
+  // who_is_this question, answered automatically).
+  for (const text of ["maybe", "depends", "possibly"]) {
     const r = await c(text);
     assert.ok(
       r.confidence < 0.82,
