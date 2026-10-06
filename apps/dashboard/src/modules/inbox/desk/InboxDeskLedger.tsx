@@ -44,6 +44,7 @@ import { useBulkArchive, type BulkItemState } from '../../../lib/data/useBulkArc
 import { useBulkLeadState, type BulkLeadStateAction } from '../../../lib/data/bulkLeadStateData'
 import { BulkChoiceDialog, type BulkChoiceKind } from './BulkChoiceDialog'
 import type { BulkRunReport } from '../../../lib/data/bulkArchiveData'
+import { anchoredRowShift, heldScrollTop, snapshotVisibleRows, type VisibleRowsSnapshot } from '../list-scroll-hold'
 import './inbox-desk.css'
 
 /**
@@ -517,30 +518,38 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
     rows, lens, selectedId, cursorId, picked, bulkItems, now, factsVersion, idPrefix, handlers,
   }), [bulkItems, cursorId, factsVersion, handlers, idPrefix, lens, now, picked, rows, selectedId])
 
-  /* scroll anchoring: a reply landing above the fold never moves what you are reading */
-  const anchorRef = useRef<{ id: string; index: number } | null>(null)
+  /*
+   * Scroll hold: data never moves the list (see list-scroll-hold.ts). A reply
+   * landing above the fold is compensated so the rows you are reading stay
+   * put; a visible row re-sorting to the top does NOT drag the viewport with
+   * it; Load More appends below and leaves scrollTop alone.
+   */
+  const anchorRef = useRef<VisibleRowsSnapshot | null>(null)
   const onRowsRendered = useCallback((visible: { startIndex: number; stopIndex: number }) => {
-    const id = rowIds[visible.startIndex]
-    anchorRef.current = id ? { id, index: visible.startIndex } : null
+    anchorRef.current = snapshotVisibleRows(rowIds, visible.startIndex, visible.stopIndex)
   }, [rowIds])
   useLayoutEffect(() => {
-    const anchor = anchorRef.current
     const element = listRef.current?.element
-    if (!anchor || !element || element.scrollTop <= 0) return
-    const next = rowIds.indexOf(anchor.id)
-    if (next >= 0 && next !== anchor.index) {
-      element.scrollTop += (next - anchor.index) * rowHeight
-      anchorRef.current = { id: anchor.id, index: next }
-    }
+    const before = anchorRef.current
+    if (!element || !before) return
+    const next = heldScrollTop(element.scrollTop, before, rowIds, rowHeight)
+    if (next !== element.scrollTop) element.scrollTop = next
+    const shift = anchoredRowShift(before, rowIds)
+    anchorRef.current = { startIndex: Math.max(0, before.startIndex + shift), ids: before.ids }
   }, [rowHeight, rowIds])
 
-  const scrollCursorIntoView = useCallback((id: string | null) => {
+  // Only an explicit keyboard move scrolls the list to the cursor. This used to
+  // be an effect keyed on the row ids, so every realtime event, poll and Load
+  // More snapped the list back to the last opened conversation.
+  const scrollCursorIntoView = (id: string | null) => {
     if (!id) return
     const index = rowIds.indexOf(id)
     if (index >= 0) listRef.current?.scrollToRow({ index, align: 'smart', behavior: 'instant' })
-  }, [rowIds])
-
-  useEffect(() => { scrollCursorIntoView(cursorId) }, [cursorId, scrollCursorIntoView])
+  }
+  const moveCursorTo = (id: string | null) => {
+    setCursorId(id)
+    scrollCursorIntoView(id)
+  }
 
   const onListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     // [8.3] Esc clears the bulk selection first; Space toggles the cursor row into it
@@ -555,12 +564,12 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
       : event.key === 'PageDown' ? 10 : event.key === 'PageUp' ? -10 : 0
     if (step) {
       event.preventDefault()
-      setCursorId((current) => moveCursor(rowIds, current ?? selectedId, step))
+      moveCursorTo(moveCursor(rowIds, cursorId ?? selectedId, step))
       return
     }
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
-      setCursorId(rowIds.length ? (event.key === 'Home' ? rowIds[0] : rowIds[rowIds.length - 1]) : null)
+      moveCursorTo(rowIds.length ? (event.key === 'Home' ? rowIds[0] : rowIds[rowIds.length - 1]) : null)
       return
     }
     if (event.key === 'Enter' && cursorId) {
