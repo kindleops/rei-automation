@@ -35,6 +35,7 @@ import { establishesThousandsShorthand } from "@/lib/domain/seller-flow/monetary
 import {
   resolveCanonicalAskingPrice,
   resolveCanonicalBurstAskingPrice,
+  isCommittedAskingPrice,
 } from "@/lib/domain/seller-flow/canonical-asking-price.js";
 import {
   extractSellerFacts,
@@ -55,6 +56,16 @@ import {
 import { applyNegotiationTurn, hasRevealedOffer } from "@/lib/domain/seller-flow/negotiation-state.js";
 import { routeNegotiationStrategy } from "@/lib/domain/seller-flow/negotiation-strategy-router.js";
 import { selectCredibleCompAnchor } from "@/lib/domain/seller-flow/comp-anchor-policy.js";
+import {
+  isSellerAutopilotV2Enabled,
+  applySellerAutopilotV2Overlay,
+  resolveV2Stage,
+  resolveV2OfferAuthority,
+  resolveV2AskingPriceThisTurn,
+  planSellerAutopilotV2,
+  buildV2ExecutionDirectives,
+  V2_STAGES,
+} from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
 import {
   autoReplyModeAllowsQueue,
   normalizeAutoReplyMode,
@@ -950,6 +961,45 @@ export async function processSellerInboundMessage({
     });
   }
 
+  // ── SELLER AUTOPILOT S1–S4 v2 (flag SELLER_AUTOPILOT_V2, default OFF) ────
+  // Rules-only extension of the classifier verdict, bound to the question we
+  // asked (see seller-autopilot-v2.js). With the flag off nothing below runs
+  // and `classification` is untouched.
+  const autopilot_v2_enabled = isSellerAutopilotV2Enabled();
+  let autopilot_v2_context = null;
+  let autopilot_v2_overlay = null;
+  if (autopilot_v2_enabled) {
+    try {
+      autopilot_v2_context =
+        (await runtimeDeps.buildConversationContext({
+          thread_key: threadKey || inboundFrom,
+          inbound_received_at: inboundReceivedAt || new Date().toISOString(),
+          supabase,
+          canonical_stage: stageBefore,
+          current_inbound_event_id: inboundEventId || providerMessageId || null,
+          burst_event_ids: Array.isArray(burstContext?.constituent_event_ids)
+            ? burstContext.constituent_event_ids
+            : [],
+        })) ?? null;
+    } catch {
+      autopilot_v2_context = null;
+    }
+    try {
+      const applied = applySellerAutopilotV2Overlay(classification, {
+        message,
+        conversation_context: autopilot_v2_context,
+        stage_before: stageBefore,
+      });
+      classification = applied.classification;
+      autopilot_v2_overlay = applied.overlay;
+    } catch (overlay_error) {
+      runtimeDeps.warn("[SELLER_AUTOPILOT_V2_OVERLAY_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        error: overlay_error?.message || "overlay_failed",
+      });
+    }
+  }
+
   const contractResult = normalizeClassificationContract({
     classification,
     message,
@@ -1509,7 +1559,24 @@ export async function processSellerInboundMessage({
   const ade_requested = transition && transition.ade_action && transition.ade_action !== "none";
   const authority_missing =
     underwriting.recommended_cash_offer == null || transition?.ade_action === "rerun_material_facts";
-  if (ade_requested && authority_missing && !writes_suppressed && clean(propertyId)) {
+  // v2 (flag-only): the price branches need the authoritative offer whenever
+  // a price arrives or the condition question is being answered.
+  const autopilot_v2_needs_authority =
+    autopilot_v2_enabled &&
+    (resolveV2AskingPriceThisTurn({
+      committed_value: isCommittedAskingPrice(price_signal) ? price_signal.asking_price.value : null,
+      classification,
+      message,
+      thread_language: autopilot_v2_context?.last_outbound_language || null,
+    }).amount != null ||
+      resolveV2Stage({ conversation_context: autopilot_v2_context, stage_before: effective_stage_before }).stage ===
+        V2_STAGES.S4);
+  if (
+    (ade_requested || autopilot_v2_needs_authority) &&
+    (authority_missing || (autopilot_v2_needs_authority && !persisted_ade)) &&
+    !writes_suppressed &&
+    clean(propertyId)
+  ) {
     try {
       const runner =
         runtimeDeps.scoreProperty ||
@@ -1766,6 +1833,60 @@ export async function processSellerInboundMessage({
     }
   }
 
+  // ── SELLER AUTOPILOT S1–S4 v2 plan (flag-only). Names ONE template use
+  // case (+ approved fallbacks) or a review with a reason; the executor's
+  // suppression / classifier-verdict / language / render / Offer Term
+  // Authority / mode gates all still run. Never applied over the seller
+  // authority or listing gates.
+  let autopilot_v2_plan = null;
+  let autopilot_v2_directives = null;
+  if (autopilot_v2_enabled) {
+    try {
+      const known_ask_raw =
+        deal_state?.known_facts?.asking_price ??
+        prior_negotiation_state?.current_asking_price ??
+        prior_negotiation_state?.current_ask ??
+        null;
+      const known_ask = Number(
+        known_ask_raw && typeof known_ask_raw === "object" ? known_ask_raw.value : known_ask_raw
+      );
+      autopilot_v2_plan = planSellerAutopilotV2({
+        classification,
+        message,
+        conversation_context: autopilot_v2_context,
+        stage_before: effective_stage_before,
+        asking_price_this_turn: resolveV2AskingPriceThisTurn({
+          committed_value: isCommittedAskingPrice(price_signal) ? price_signal.asking_price.value : null,
+          classification,
+          message,
+          thread_language: autopilot_v2_context?.last_outbound_language || null,
+        }).amount,
+        known_asking_price: Number.isFinite(known_ask) && known_ask > 0 ? known_ask : null,
+        offer_authority: resolveV2OfferAuthority({
+          ade_snapshot: effective_ade_snapshot,
+          spendability: valuation_spendability,
+          property_metadata: negotiation_context_summary,
+        }),
+      });
+      if (autopilot_v2_plan?.handled && (authority_gate_applied || transition?.listing_gate?.applied)) {
+        autopilot_v2_plan = {
+          ...autopilot_v2_plan,
+          handled: false,
+          action: "defer",
+          reasoning_code: authority_gate_applied ? "v2_defer_authority_gate" : "v2_defer_listing_gate",
+        };
+      }
+      autopilot_v2_directives = buildV2ExecutionDirectives(autopilot_v2_plan);
+    } catch (plan_error) {
+      runtimeDeps.warn("[SELLER_AUTOPILOT_V2_PLAN_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        error: plan_error?.message || "plan_failed",
+      });
+      autopilot_v2_plan = null;
+      autopilot_v2_directives = null;
+    }
+  }
+
   const execution = await runtimeDeps.executeInboundAutomationDecision({
     contextResolution: context_resolution,
     opportunityId: offer_opportunity_id,
@@ -1796,12 +1917,15 @@ export async function processSellerInboundMessage({
     scheduleDelaySeconds: inboundAutopilotDelaySeconds,
     timezoneOverride,
     contactWindowOverride,
-    dealAuthority: deal_authority,
+    dealAuthority: autopilot_v2_directives?.dealAuthorityPatch
+      ? { ...deal_authority, ...autopilot_v2_directives.dealAuthorityPatch }
+      : deal_authority,
     channel,
     emailReplyImpl,
     channelSuppressionCheck,
-    strategyDirective:
-      negotiation?.strategy_decision && !authority_gate_applied
+    strategyDirective: autopilot_v2_directives
+      ? autopilot_v2_directives.strategyDirective
+      : negotiation?.strategy_decision && !authority_gate_applied
         ? {
             strategy: negotiation.strategy_decision.strategy,
             reason_code: negotiation.strategy_decision.reason_code,
@@ -1845,7 +1969,7 @@ export async function processSellerInboundMessage({
     // unsafe to answer. Falling back would let the withheld turn name an
     // offer-bearing template downstream — the exact widening this layer is
     // forbidden to do.
-    transitionDirective: resolveTransitionDirective({
+    transitionDirective: autopilot_v2_directives ? null : resolveTransitionDirective({
       transition,
       v2_withholds_reply,
       response_strategy,
@@ -1859,6 +1983,39 @@ export async function processSellerInboundMessage({
     supabaseClient: supabase,
     getSystemValue,
   });
+
+  // v2 evidence log: every number put to a seller is recorded with the comps,
+  // the offer version and the rule that produced it (also stamped on the
+  // send_queue row via automation_decision_snapshot.seller_autopilot_v2).
+  if (autopilot_v2_plan?.monetary && execution?.queued) {
+    try {
+      await runtimeDeps.emitAutomationEvent(
+        {
+          event_type: "SELLER_AUTOPILOT_V2_NUMBER_SENT",
+          source: "seller_autopilot_v2",
+          dedupe_key: `seller-autopilot-v2-number:${inboundEventId || providerMessageId || threadKey || inboundFrom}`,
+          conversation_thread_id: clean(threadKey || inboundFrom) || null,
+          payload: {
+            property_id: propertyId || null,
+            queue_row_id: execution.queue_row_id || execution.queue_item_id || null,
+            template_id: clean(execution.selected_template?.template_id) || null,
+            use_case: clean(execution.selected_template?.use_case) || null,
+            amount: autopilot_v2_plan.monetary.amount,
+            evidence: autopilot_v2_plan.monetary,
+            asking_price: autopilot_v2_plan.asking_price ?? null,
+            plan_version: autopilot_v2_plan.version,
+            reasoning_code: autopilot_v2_plan.reasoning_code,
+          },
+        },
+        supabase ? { supabaseClient: supabase } : {}
+      );
+    } catch (emit_error) {
+      runtimeDeps.warn("[SELLER_AUTOPILOT_V2_NUMBER_LOG_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        error: emit_error?.message || "number_log_failed",
+      });
+    }
+  }
 
   let follow_up_result = {
     ok: true,
@@ -2583,6 +2740,9 @@ export async function processSellerInboundMessage({
     classification,
     contract,
     fact_extraction,
+    ...(autopilot_v2_enabled
+      ? { seller_autopilot_v2: { overlay: autopilot_v2_overlay, plan: autopilot_v2_plan } }
+      : {}),
     intelligence,
     intelligence_snapshot: aligned_intelligence_snapshot,
     execution: execution_view.execution,
