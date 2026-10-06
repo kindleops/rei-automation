@@ -695,6 +695,10 @@ const OTHER_PROPERTY_PATTERNS = [
   /\btenho\s+outr[ao]s?\s+(?:propriedades?|casas?|imove(?:l|is))\s+(?:a|para|de)\s+venda\b/,
   // "Not for sale. I have a property at 6650 S Seeley Ave that I'll be putting
   // on the market" -- a different property about to be sold.
+  // "Not selling 9411, but I am selling two parcels as a package ... Asking
+  // price for both ... is $275k" (2026-10-05): the price is for OTHER land.
+  /\bnot\s+selling\b.{0,60}?\bbut\s+(?:i|we)(?:'m|'re|\s+am|\s+are)\s+selling\b/,
+  /\b(?:i|we)(?:'m|'re|\s+am|\s+are)\s+selling\s+(?:two|2|three|3|four|4|some|other|another|a\s+few|several|the\s+other)\s+(?:parcels?|lots?|propert(?:y|ies)|houses?|homes?|units?|acres?)\b/,
   /\b(?:i|we)\s+(?:have|got|own)\s+(?:a|another|one\s+more)\s+(?:property|house|home|building|duplex|lot)\b.{0,80}?\b(?:(?:i'?ll|i\s+will|i'?m|we'?ll|we\s+will|we'?re)\s+(?:be\s+)?(?:putting|put|selling|sell|listing|list)|for\s+sale|to\s+sell)\b/,
 ];
 

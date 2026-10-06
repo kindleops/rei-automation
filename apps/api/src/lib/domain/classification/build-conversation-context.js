@@ -67,6 +67,9 @@ export function mapMessageTypeToUseCase(message_type) {
   return mapped && APPROVED_OUTBOUND_USE_CASES.includes(mapped) ? mapped : null;
 }
 
+// Use cases that do not name a question.
+const GENERIC_USE_CASES = new Set(["general_followup"]);
+
 const USE_CASE_QUESTION_TYPE = {
   ownership_check: "ownership",
   proposal_interest: "proposal_interest",
@@ -242,20 +245,33 @@ export async function buildConversationContext({
   // and auto-reply rows carry template_id with a NULL message_type), then the
   // body we sent (it is truth -- and the only source for an operator's typed
   // message). Campaign, auto-reply and operator sends are all questions.
-  const message_type_use_case = mapMessageTypeToUseCase(last_outbound.message_type);
+  //
+  // A GENERIC message_type names no question. Auto-replies are stored with
+  // message_type "Follow-Up" -> general_followup, which used to win over the
+  // template we actually sent (consider_selling -> proposal_interest), so a
+  // "Sure" to "Would you be open to a proposal?" lost its question and went to
+  // review (2026-10-05 reply-quality, 5 rows). A specific message_type still
+  // wins; general_followup is only the last resort.
+  const raw_message_type_use_case = mapMessageTypeToUseCase(last_outbound.message_type);
+  const message_type_use_case =
+    raw_message_type_use_case && !GENERIC_USE_CASES.has(raw_message_type_use_case)
+      ? raw_message_type_use_case
+      : null;
   const template_use_case = message_type_use_case
     ? null
     : await loadTemplateUseCase(supabase, last_outbound.template_id);
+  const body_use_case =
+    message_type_use_case || template_use_case ? null : deriveUseCaseFromBody(last_outbound.message_body);
   const use_case =
-    message_type_use_case ||
-    template_use_case ||
-    deriveUseCaseFromBody(last_outbound.message_body);
+    message_type_use_case || template_use_case || body_use_case || raw_message_type_use_case;
   if (!use_case) return null;
   const use_case_source = message_type_use_case
     ? "message_type"
     : template_use_case
       ? "template_use_case"
-      : "derived_from_body";
+      : body_use_case
+        ? "derived_from_body"
+        : "message_type";
 
   const delivered_at = last_outbound.delivered_at || last_outbound.sent_at;
   if (!delivered_at) return null;
