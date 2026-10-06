@@ -82,7 +82,9 @@ async function loadFleetRow(phone, deps) {
 async function verdictFor(phone, blocked, deps) {
   try {
     const row = await loadFleetRow(phone, deps);
-    return evaluateSenderDispatchEligibility(row, { blocked, phone, now: deps.now ? new Date(deps.now) : new Date() });
+    // send_class (send-class.js): a conversational send is not capped by the
+    // cold daily limit, only by the total ceiling. Omitted = cold.
+    return evaluateSenderDispatchEligibility(row, { blocked, phone, now: deps.now ? new Date(deps.now) : new Date(), send_class: deps.send_class || null });
   } catch {
     return { ok: false, reason: "outbound_number_eligibility_unavailable" };
   }

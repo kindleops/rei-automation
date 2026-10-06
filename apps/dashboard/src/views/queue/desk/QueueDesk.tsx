@@ -270,7 +270,7 @@ function CapacityPlane({ model, items, sender, onSender }: { model: QueueModel |
         <>
           <div className="qdk-cap__total">
             <span className="qdk-cap__big">{nf(cap.sentToday)}</span>
-            <span className="qdk-cap__of">{cap.cap !== null ? `of ${nf(cap.cap)} daily cap` : 'sent today · no caps recorded'}</span>
+            <span className="qdk-cap__of">{cap.cap !== null ? `cold of ${nf(cap.cap)} daily cap` : 'cold sent today · no caps recorded'}{cap.repliesToday !== null ? ` · ${nf(cap.repliesToday)} replies (not capped)` : ''}</span>
             {cap.cap !== null ? <LCProgress value={cap.sentToday} max={cap.cap} tone="exec" label="Fleet daily cap used" valueText={`${nf(cap.sentToday)} of ${nf(cap.cap)}`} /> : null}
             {cap.uncapped ? <small className="qdk-cap__note">{nf(cap.uncapped)} active number{cap.uncapped === 1 ? '' : 's'} without a recorded cap</small> : null}
           </div>
@@ -280,7 +280,7 @@ function CapacityPlane({ model, items, sender, onSender }: { model: QueueModel |
                 <button type="button" className="qdk-cap__line" data-off={l.active ? undefined : ''} data-active={sender === l.phone ? '' : undefined} onClick={() => onSender(sender === l.phone ? 'all' : l.phone)} aria-pressed={sender === l.phone} title={`${l.phone} · ${l.status}`}>
                   <span className="qdk-cap__name"><b>{l.name}</b><small>{l.active ? l.market : l.status}</small></span>
                   <span className="qdk-cap__meter" aria-hidden="true"><i data-hot={l.used !== null && l.used >= 0.9 ? '' : undefined} style={{ inlineSize: `${(l.used ?? 0) * 100}%` }} /></span>
-                  <span className="qdk-cap__num">{nf(l.sentToday)}{l.cap ? <small>/{nf(l.cap)}</small> : null}</span>
+                  <span className="qdk-cap__num" title={l.repliesToday !== null ? `${nf(l.sentToday)} cold (capped) · ${nf(l.repliesToday)} replies (not capped)` : undefined}>{nf(l.sentToday)}{l.cap ? <small>/{nf(l.cap)}</small> : null}{l.repliesToday ? <small> +{nf(l.repliesToday)} replies</small> : null}</span>
                   {l.pending ? <span className="qdk-cap__pending" title="Rows on this page still to go out from this number">{nf(l.pending)} due</span> : <span />}
                 </button>
               </li>

@@ -199,9 +199,12 @@ export async function routeQueueRowViaPolicy(row = {}, deps = {}) {
     loadPerSenderCap(deps),
   ]);
   const override = row.metadata?.sender_override && row.metadata.sender_override.actor ? row.metadata.sender_override : null;
+  // A CONVERSATIONAL send (send-class.js) is not capped by the cold daily
+  // limit; the base eligibility still applies the total-sends ceiling.
+  const conversational = String(deps.send_class || "").toLowerCase() === "conversational";
   const result = selectSender(
     { ...market, purpose: queueRowPurpose(row), thread_number, override },
-    { graph, fleet, blocked, now: deps.now || new Date(), per_sender_cap }
+    { graph, fleet, blocked, now: deps.now || new Date(), per_sender_cap, ignore_daily_limit: conversational }
   );
   const pinned = normalizeE164(row.from_phone_number) || null;
   if (!result.ok) {

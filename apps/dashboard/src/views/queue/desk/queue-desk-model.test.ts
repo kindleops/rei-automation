@@ -54,6 +54,18 @@ describe('queue desk model', () => {
     expect(c.inactive).toBe(1)
     expect(c.lines[0].pending).toBe(1)
     expect(c.lines[0].used).toBeCloseTo(0.25)
+    expect(c.repliesToday).toBeNull()
+  })
+
+  it('capacity: the cap reads COLD sends; replies are reported beside it, never against it', () => {
+    const fleet: TextgridFleetNumber[] = [
+      { id: '1', phone: '+14693131600', friendlyName: 'DALLAS', market: 'Dallas, TX', state: 'TX', status: 'active', isActive: true, dailyCap: 800, messagesSentToday: 784, repliesSentToday: 16, lastUsedAt: null, healthScore: 1 },
+    ]
+    const c = senderCapacity(fleet, [])
+    expect(c.sentToday).toBe(784)
+    expect(c.repliesToday).toBe(16)
+    expect(c.lines[0].used).toBeCloseTo(784 / 800)
+    expect(c.lines[0].repliesToday).toBe(16)
   })
 
   it('reason book separates holds (by guard reason) from failures (by cause)', () => {

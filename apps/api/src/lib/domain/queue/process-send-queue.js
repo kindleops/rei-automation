@@ -640,6 +640,7 @@ async function blockQueueRowByIneligibleSender(queue_row = {}, selection = {}, d
         deferred: Boolean(selection.deferred),
         terminal: Boolean(selection.terminal),
         evaluated_at: now,
+        ...(selection.send_class ? { send_class: selection.send_class, send_class_basis: selection.send_class_basis || null } : {}),
       },
       // Sender Routing 2.0 hold context (market, pools checked, why each
       // failed). Only present when the gated policy parked the row.

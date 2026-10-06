@@ -78,8 +78,9 @@ test("counts only sends since each sender's own midnight", async () => {
     ],
   });
   const counts = await loadSenderSentToday(supabase, [MSP_BUSY_COUNTER, la], { now: NOW });
-  assert.equal(counts.get(MSP_BUSY_COUNTER.phone_number), 4);
-  assert.equal(counts.get(la.phone_number), 1);
+  // Split COLD / CONVERSATIONAL (rows with no provenance and no replied thread are cold).
+  assert.deepEqual(counts.get(MSP_BUSY_COUNTER.phone_number), { cold: 4, conversational: 0, total: 4 });
+  assert.deepEqual(counts.get(la.phone_number), { cold: 1, conversational: 0, total: 1 });
   // One scan from the earliest day start.
   assert.deepEqual(supabase.calls[0].gte, ["sent_at", "2026-10-01T05:00:00.000Z"]);
 });

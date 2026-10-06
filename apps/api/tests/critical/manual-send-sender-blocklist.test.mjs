@@ -125,7 +125,9 @@ test("executeManualInboxSendNow surfaces the refusal as ok:false (no 423 -> ok:t
 for (const [label, row, reason] of [
   ["a paused number", { status: "paused" }, "outbound_number_status_paused"],
   ["a cooling number", { health_state: "cooling" }, "outbound_number_health_cooling"],
-  ["a number at its daily limit", { daily_limit: 3, messages_sent_today: 3 }, "outbound_number_daily_limit_reached"],
+  // An operator send is CONVERSATIONAL (send-class.js): the cold daily limit
+  // never refuses it; the per-number total safety ceiling does.
+  ["a number at its total safety ceiling", { messages_sent_today_total: 2000 }, "outbound_number_total_ceiling_reached"],
 ]) {
   test(`${label} is refused with 423 before any row`, async () => {
     const { calls, deps } = spyDeps(blocklist(null));
@@ -173,4 +175,16 @@ test("sticky sender: an established thread keeps its own eligible sender over a 
   deps.supabase = stubSupabase;
   await createInboxSendNowQueueRow(input(CLEAN), deps);
   assert.equal(inserted.from_phone_number, "+16125092623", "the composer's per-message pick never rotates the thread");
+});
+
+test("an operator send from a number at its COLD daily limit (800/800) still proceeds (replies are not capped by it)", async () => {
+  const { calls, deps } = spyDeps(blocklist(null));
+  deps.supabase = stubSupabase;
+  deps.loadOutboundNumberByPhone = async (phone) => ({
+    id: "n1", phone_number: phone, status: "active", daily_limit: 800,
+    messages_sent_today: 800, messages_sent_today_conversational: 16, messages_sent_today_total: 816,
+  });
+  const out = await createInboxSendNowQueueRow(input(CLEAN), deps);
+  assert.notEqual(out.reason, "outbound_number_daily_limit_reached");
+  assert.equal(calls.insert, 1, "proceeds to the normal queue-row creation");
 });
