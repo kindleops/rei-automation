@@ -195,9 +195,12 @@ export function createWallSnapshot({ db = defaultSupabase, now = () => Date.now(
   }
 }
 
-let shared = null
+// Next.js compiles each route handler into its own bundle, so module-level
+// state is NOT shared between /api/wall/* routes. Process-wide singletons live
+// on globalThis instead (one registry, one authenticator cache, one tick).
+const G = (globalThis.__lcCommandWall ||= {})
 export function wallSnapshot(options) {
-  if (!shared) shared = createWallSnapshot(options)
-  return shared
+  if (!G.snapshot) G.snapshot = createWallSnapshot(options)
+  return G.snapshot
 }
-export function _setWallSnapshotForTests(s) { shared = s }
+export function _setWallSnapshotForTests(s) { G.snapshot = s }

@@ -132,18 +132,21 @@ export function createMemoryWallStore() {
   }
 }
 
-let shared = null
+// Next.js compiles each route handler into its own bundle, so module-level
+// state is NOT shared between /api/wall/* routes. Process-wide singletons live
+// on globalThis instead (one registry, one authenticator cache, one tick).
+const G = (globalThis.__lcCommandWall ||= {})
 /**
  * The process store. Memory is a development convenience only: production
  * always uses the database registry (and therefore fails closed until the
  * proposed migration is applied).
  */
 export function wallStore(env = process.env) {
-  if (shared) return shared
+  if (G.store) return G.store
   const wantsMemory = String(env.COMMAND_WALL_STORE || '').toLowerCase() === 'memory'
   const production = env.NODE_ENV === 'production' || env.VERCEL_ENV === 'production'
-  shared = wantsMemory && !production ? createMemoryWallStore() : createSupabaseWallStore()
-  return shared
+  G.store = wantsMemory && !production ? createMemoryWallStore() : createSupabaseWallStore()
+  return G.store
 }
 
-export function _setWallStoreForTests(store) { shared = store }
+export function _setWallStoreForTests(store) { G.store = store }

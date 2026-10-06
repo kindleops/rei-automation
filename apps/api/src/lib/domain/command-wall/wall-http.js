@@ -50,12 +50,15 @@ export function clearDisplayCookie(res) {
   return res
 }
 
-let authenticator = null
+// Next.js compiles each route handler into its own bundle, so module-level
+// state is NOT shared between /api/wall/* routes. Process-wide singletons live
+// on globalThis instead (one registry, one authenticator cache, one tick).
+const G = (globalThis.__lcCommandWall ||= {})
 export function wallAuthenticator() {
-  if (!authenticator) authenticator = createDisplayAuthenticator(wallStore())
-  return authenticator
+  if (!G.authenticator) G.authenticator = createDisplayAuthenticator(wallStore())
+  return G.authenticator
 }
-export function _resetWallAuthenticatorForTests() { authenticator = null }
+export function _resetWallAuthenticatorForTests() { G.authenticator = null }
 
 /** Authenticates a display read; throws WallAuthError. */
 export async function requireDisplay(request, { rule = WALL_LIMITS.read_per_display, bucket = 'read' } = {}) {
