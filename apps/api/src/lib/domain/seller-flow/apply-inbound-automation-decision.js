@@ -1480,7 +1480,12 @@ export async function selectSafeAutoReplyTemplate({
   // required use case restricts matching to EXACTLY that use case so the
   // intent profile's candidates cannot leak a stage-earlier question back in.
   const required_use_case = lower(clean(decision?.required_template_use_case));
-  const route_matches = required_use_case
+  // SELLER AUTOPILOT V2 (flag-only): an exact, ordered preference list. Set
+  // only by the v2 directive; absent ⇒ this function is unchanged.
+  const v2_preference = asArray(decision?.v2_template_preference).map((v) => lower(clean(v))).filter(Boolean);
+  const route_matches = v2_preference.length
+    ? v2_preference
+    : required_use_case
     ? [required_use_case]
     : uniq([
         ...asArray(decision?.allowed_template_stages).map(lower),
@@ -1529,7 +1534,10 @@ export async function selectSafeAutoReplyTemplate({
       .eq("is_active", true)
       .eq("safe_for_auto_reply", true)
       .in("language", languages)
-      .limit(100);
+      // 100 rows covers today's catalog (85 active+safe rows across EN+ES); a
+      // v2 turn reads the full pool so approving more rows can never silently
+      // truncate the candidates.
+      .limit(v2_preference.length ? 2000 : 100);
 
     if (error) throw error;
 
@@ -1557,8 +1565,18 @@ export async function selectSafeAutoReplyTemplate({
       .sort(compareTemplateRank);
 
     const requested_language = lower(language);
-    const exact_language_match =
-      candidates.find((row) => lower(row.language) === requested_language) || null;
+    // v2: the first preferred use case that has a row in the seller's language
+    // wins (an approved fallback only when the preferred copy does not exist).
+    const v2_preferred_match = v2_preference.length
+      ? v2_preference
+          .map((use_case) =>
+            candidates.find((row) => lower(row.language) === requested_language && lower(row.use_case) === use_case)
+          )
+          .find(Boolean) || null
+      : null;
+    const exact_language_match = v2_preference.length
+      ? v2_preferred_match
+      : candidates.find((row) => lower(row.language) === requested_language) || null;
 
     // Language continuity: a non-English thread must never be answered with
     // an English template. Missing language template ⇒ fail closed to review.
@@ -1575,11 +1593,14 @@ export async function selectSafeAutoReplyTemplate({
       };
     }
 
-    let selected =
-      exact_language_match ||
-      candidates.find((row) => lower(row.language) === "english") ||
-      candidates[0] ||
-      null;
+    // v2 never falls back to an off-preference row or to the code-only local
+    // registry (owner rule: every sent copy is an sms_templates row).
+    let selected = v2_preference.length
+      ? exact_language_match
+      : exact_language_match ||
+        candidates.find((row) => lower(row.language) === "english") ||
+        candidates[0] ||
+        null;
 
     // Negotiation strategies fall back to the canonical local registry so a
     // deterministic strategy is never silently downgraded to review just
@@ -1600,7 +1621,7 @@ export async function selectSafeAutoReplyTemplate({
         template: null,
       };
     }
-    if (!selected) {
+    if (!selected && !v2_preference.length) {
       selected = await selectLocalNegotiationTemplate(allowed_matches, {
         strategy: decision?.negotiation_strategy || null,
         excludePlaceholders: [...excluded_placeholders],
@@ -2720,6 +2741,7 @@ export async function executeInboundAutomationDecision({
         reply_mode: "manual_review",
         human_review_reason: strategyDirective.review_reason || "negotiation_strategy_review",
         audit_reason: strategyDirective.reason_code || "negotiation_strategy_review",
+        ...(strategyDirective.v2_plan ? { seller_autopilot_v2: strategyDirective.v2_plan } : {}),
       };
     } else if (clean(strategyDirective.template_use_case)) {
       // A non-review strategy directive selected a concrete outbound template
@@ -2748,6 +2770,18 @@ export async function executeInboundAutomationDecision({
         ]).filter(Boolean),
         negotiation_strategy: strategyDirective.strategy || null,
         audit_reason: strategyDirective.reason_code || base_decision.audit_reason,
+        // SELLER AUTOPILOT V2 (flag SELLER_AUTOPILOT_V2; only that layer sets
+        // template_preference): an EXACT ordered template preference, so the
+        // intent profile's candidates cannot leak a different question in, and
+        // the plan (incl. any number + its evidence) rides on the decision
+        // snapshot stamped onto the send_queue row.
+        ...(asArray(strategyDirective.template_preference).length
+          ? {
+              v2_template_preference: asArray(strategyDirective.template_preference).map(clean).filter(Boolean),
+              template_authority: "seller_autopilot_v2",
+              seller_autopilot_v2: strategyDirective.v2_plan || null,
+            }
+          : {}),
         ...(strategy_is_immediate_send
           ? {
               should_queue_reply: true,
