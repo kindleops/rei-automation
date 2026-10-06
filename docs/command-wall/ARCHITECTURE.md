@@ -145,7 +145,7 @@ The device needs:
 The software behaves the same whether it runs on the TV's browser or on this device.
 
 ## PROPOSED database (not applied)
-`supabase/migrations/PROPOSED_20261006150000_command_wall_displays.sql` (with a rollback file) creates:
+`supabase/migrations/PROPOSED_20261006150300_command_wall_displays.sql` (with a rollback file) creates:
 - `command_wall_displays`, holding the hash only, with check constraints on hash shape and "revoked ⇒ no hash";
 - `command_wall_pairings`;
 - `command_wall_audit`.

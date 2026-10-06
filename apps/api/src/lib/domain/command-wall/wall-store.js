@@ -4,7 +4,7 @@
  * Two implementations behind one interface:
  *   - createSupabaseWallStore(db): the PROPOSED tables
  *       command_wall_displays / command_wall_pairings / command_wall_audit
- *     (supabase/migrations/PROPOSED_20261006150000_command_wall_displays.sql —
+ *     (supabase/migrations/PROPOSED_20261006150300_command_wall_displays.sql —
  *     NOT applied). Until they exist every call reports `unprovisioned`, and
  *     the routes answer 503 — the wall fails closed, never open.
  *   - createMemoryWallStore(): tests, and local development when

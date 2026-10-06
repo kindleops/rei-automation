@@ -20,7 +20,7 @@
 --   * Pairings: 10-minute expiry, CAS transitions pending→claimed→consumed.
 --
 -- Load: heartbeat writes at most once/min/display; reads are cached ≥ 30 s.
--- Apply only with owner approval, then `supabase migration repair --status applied 20261006150000`.
+-- Apply only with owner approval, then `supabase migration repair --status applied 20261006150300`.
 -- ════════════════════════════════════════════════════════════════════════════
 
 create table if not exists public.command_wall_displays (
