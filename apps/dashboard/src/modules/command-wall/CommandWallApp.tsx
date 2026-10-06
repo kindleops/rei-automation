@@ -46,6 +46,17 @@ function runningBuild(): string {
   return import.meta.env.DEV ? 'dev' : 'unknown'
 }
 
+/** A full reload only helps when the app origin answers (stale build / wedged page). With the WAN
+ *  down it would replace the last good view with the browser's error page, so probe first. */
+async function reloadIfOriginAnswers(): Promise<boolean> {
+  try {
+    const r = await fetch(`/?lc-wall-probe=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' })
+    if (!r.ok) return false
+  } catch { return false }
+  window.location.reload()
+  return true
+}
+
 export default function CommandWallApp() {
   const path = typeof window === 'undefined' ? '/wall' : window.location.pathname
   if (path.startsWith('/wall/diagnostics')) return <div className="cw-root" data-cw-theme="dark"><WallDiagnostics /></div>
@@ -76,7 +87,7 @@ function WallRuntime() {
     heartbeatInfo: (ctx) => ({ build: runningBuild(), render_mode: ctx.renderMode, preset: ctx.preset, route: '/wall', client: { browser: browserFamily(navigator.userAgent), width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1, render_mode: ctx.renderMode } }),
     miQuery: (ctx) => ({ mi: presetFor(ctx.preset).needsMi, markets: ctx.market ? [ctx.market] : [] }),
     onSoftReload: () => setGeneration((g) => g + 1),
-    onFullReload: () => window.location.reload(),
+    onFullReload: reloadIfOriginAnswers,
   // a soft reload (generation bump) rebuilds the channel and remounts the stage
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [api, ladder, generation])
@@ -170,7 +181,10 @@ function WallRuntime() {
 
   const onMapFail = useCallback(() => setMapFailedAt(Date.now()), [])
   const fetchLayer = useCallback((kind: 'cameras' | 'crime' | 'presence', bbox: string, zoom: number) => api.layers({ kind, bbox, zoom }), [api])
-  const onPaired = useCallback(() => { setPaired('yes'); setGeneration((g) => g + 1) }, [])
+  const [pairedAt, setPairedAt] = useState<number | null>(null)
+  const onPaired = useCallback(() => { setPairedAt(Date.now()); setPaired('yes'); setGeneration((g) => g + 1) }, [])
+  // a credential refused right after pairing (revoked again, clock skew, registry reset) must not loop
+  const pairCooldownMs = pairedAt !== null && now - pairedAt < 120_000 ? 30_000 : 0
   const client = useMemo(() => ({ browser: browserFamily(navigator.userAgent), width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1, render_mode: decision.mode }), [decision.mode])
 
   // soak / diagnostics introspection: counts only, never a token
@@ -182,7 +196,7 @@ function WallRuntime() {
 
   return (
     <div className="cw-root" data-cw-theme={theme} data-cw-motion={caps.reducedMotion ? 'reduced' : 'full'}>
-      {pairedState === 'no' ? <WallPairing api={api} client={client} onPaired={onPaired} /> : null}
+      {pairedState === 'no' ? <WallPairing api={api} client={client} onPaired={onPaired} cooldownMs={pairCooldownMs} /> : null}
       {pairedState !== 'no' && (!session || !config) ? (
         <div className="cw-boot"><img src="/favicon.svg" alt="" /><span>{snap.connection === 'offline' ? 'Offline · Reconnecting…' : 'Connecting…'}</span></div>
       ) : null}

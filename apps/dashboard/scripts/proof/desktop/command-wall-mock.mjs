@@ -91,7 +91,8 @@ export async function installWallMock(context, opts) {
     if (ep === 'pair') {
       const body = JSON.parse(req.postData() || '{}')
       if (body.action === 'start') return json(route, 200, { ok: true, pairing_id: 'cwp_mock', code: 'KXRM-4827', poll_secret: 'mock', expires_at: new Date(Date.now() + 9.5 * 60_000).toISOString(), poll_interval_ms: 4000 })
-      if (state.paired) return json(route, 200, { ok: true, paired: true, display: SESSION(state.config) })
+      // like the server: a revoked display needs a NEW claim; an old pairing never re-delivers
+      if (state.paired && !state.revoked) return json(route, 200, { ok: true, paired: true, display: SESSION(state.config) })
       return json(route, 200, { ok: true, paired: false, expires_at: new Date(Date.now() + 9 * 60_000).toISOString(), poll_interval_ms: 4000 })
     }
     if (!state.paired || state.revoked) return json(route, 401, { ok: false, error: state.revoked ? 'display_revoked' : 'display_unpaired' })

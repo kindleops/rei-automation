@@ -21,7 +21,7 @@ function savePending(p: Pending | null) {
   try { if (p) window.sessionStorage.setItem(PAIRING_KEY, JSON.stringify(p)); else window.sessionStorage.removeItem(PAIRING_KEY) } catch { /* private mode */ }
 }
 
-export function WallPairing({ api, client, onPaired }: { api: WallApi; client: Record<string, unknown>; onPaired: (s: WallSession) => void }) {
+export function WallPairing({ api, client, onPaired, cooldownMs = 0 }: { api: WallApi; client: Record<string, unknown>; onPaired: (s: WallSession) => void; cooldownMs?: number }) {
   const [pending, setPending] = useState<Pending | null>(() => (typeof window === 'undefined' ? null : loadPending()))
   const [problem, setProblem] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -73,9 +73,9 @@ export function WallPairing({ api, client, onPaired }: { api: WallApi; client: R
       }
       if (live) timer = setTimeout(tick, pending.poll_interval_ms || 4_000)
     }
-    timer = setTimeout(tick, 1_500)
+    timer = setTimeout(tick, Math.max(1_500, cooldownMs))
     return () => { live = false; if (timer) clearTimeout(timer) }
-  }, [api, pending, onPaired])
+  }, [api, pending, onPaired, cooldownMs])
 
   const minutes = pending ? Math.max(0, Math.ceil((Date.parse(pending.expires_at) - now) / 60_000)) : null
   return (
