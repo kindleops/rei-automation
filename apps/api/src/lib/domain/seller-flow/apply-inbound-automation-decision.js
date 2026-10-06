@@ -32,6 +32,7 @@ import { normalizeCanonicalIntent } from "@/lib/domain/seller-flow/coverage-net/
 import { resolveContactIdentityClass } from "@/lib/domain/inbox/contact-identity.js";
 import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
 import { resolveThreadLanguage } from "@/lib/domain/seller-flow/resolve-thread-language.js";
+import { templateCatalogLanguageName } from "@/lib/sms/language_aliases.js";
 import { buildOutboundTemplateAttribution } from "@/lib/domain/templates/outbound-attribution.js";
 import { resolveOwnershipProbeDisinterestTransition } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import {
@@ -1388,9 +1389,10 @@ export async function selectSafeAutoReplyTemplate({
     messageText:
       context?.automation_decision?.inbound_detection?.latest_inbound_text || "",
   });
+  // sms_templates labels (Hindi is stored as "Indian (Hindi or Other)").
   const language = language_resolution.is_unknown
     ? "English"
-    : language_resolution.language;
+    : templateCatalogLanguageName(language_resolution.language) || language_resolution.language;
   const languages = language === "English" ? ["English"] : [language, "English"];
 
   // Safe-fallback clarifier dispatch: the decision carries the coverage-net's
@@ -1515,9 +1517,11 @@ export async function selectSafeAutoReplyTemplate({
     // Language continuity: a non-English thread must never be answered with
     // an English template. Missing language template ⇒ fail closed to review.
     if (!exact_language_match && requested_language !== "english") {
+      const wanted_use_case = required_use_case || lower(decision?.route_hint) || allowed_matches[0] || "reply";
       return {
         ok: false,
         reason: "language_template_missing",
+        detail: `no active ${language} template for ${wanted_use_case}`,
         human_review_required: true,
         language,
         language_resolution,
@@ -1536,6 +1540,20 @@ export async function selectSafeAutoReplyTemplate({
     // because the DB catalog lags the strategy vocabulary. DB-approved
     // templates always take precedence; the fallback requires a verified
     // approval record and is audited below.
+    // The local registry is English-only: never answer a non-English seller
+    // with it (owner rule: never send English to a non-English replier).
+    if (!selected && requested_language !== "english") {
+      const wanted_use_case = required_use_case || lower(decision?.route_hint) || allowed_matches[0] || "reply";
+      return {
+        ok: false,
+        reason: "language_template_missing",
+        detail: `no active ${language} template for ${wanted_use_case}`,
+        human_review_required: true,
+        language,
+        language_resolution,
+        template: null,
+      };
+    }
     if (!selected) {
       selected = await selectLocalNegotiationTemplate(allowed_matches, {
         strategy: decision?.negotiation_strategy || null,
@@ -3143,8 +3161,10 @@ export async function executeInboundAutomationDecision({
       should_queue_reply: false,
       should_mark_human_review: true,
       reply_mode: "manual_review",
-      human_review_reason: "no_safe_template",
+      human_review_reason:
+        template_result.reason === "language_template_missing" ? "language_template_missing" : "no_safe_template",
       audit_reason: "no_safe_template",
+      ...(template_result.detail ? { human_review_detail: template_result.detail } : {}),
     };
 
     warn("[AUTO_REPLY_NO_SAFE_TEMPLATE]", {

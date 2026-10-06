@@ -22,6 +22,7 @@ import {
 } from "@/lib/domain/classification/emoji-interpretation.js";
 import { detectReplyDispositionSignals, foldReplyLines } from "@/lib/domain/classification/reply-disposition-signals.js";
 import { resolveSellerReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
+import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
 import {
   resolveCanonicalAskingPrice,
   isCommittedAskingPrice,
@@ -98,9 +99,11 @@ function sanitizeForPrompt(message) {
 const LANGUAGE_PATTERNS = [
   // ── Script-detected (non-Latin) ─────────────────────────────────────────
   { language: "Hebrew",    script: /[\u0590-\u05FF]/, keywords: [] },
-  { language: "Mandarin",  script: /[\u4E00-\u9FFF]/, keywords: [] },
-  { language: "Korean",    script: /[\uAC00-\uD7AF]/, keywords: [] },
+  // Kana and Hangul are checked BEFORE Han: Japanese is written with kanji, so
+  // "売りません" matched Mandarin first.
   { language: "Japanese",  script: /[\u3040-\u30FF]/, keywords: [] },
+  { language: "Korean",    script: /[\uAC00-\uD7AF\u1100-\u11FF]/, keywords: [] },
+  { language: "Mandarin",  script: /[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF]/, keywords: [] },
   { language: "Arabic",    script: /[\u0600-\u06FF]/, keywords: [] },
   { language: "Russian",   script: /[\u0400-\u04FF]/, keywords: [] },
   { language: "Thai",      script: /[\u0E00-\u0E7F]/, keywords: [] },
@@ -6511,13 +6514,23 @@ function estimateMotivationScore({ objection, emotion, positive_signals = [] }) 
 // HEURISTIC CLASSIFICATION
 // ══════════════════════════════════════════════════════════════════════════
 
-function classifyHeuristic(message, brain_item = null, options = {}) {
+function classifyHeuristic(original_message, brain_item = null, options = {}) {
+  // MULTILINGUAL (2026-10-06): a reply in one of the other templated languages
+  // ("是", "Tak", "Стоп", "50万") is mapped onto the canonical English phrase
+  // the rules below already understand. Language is always read from what the
+  // seller actually wrote; everything else reads the canonical phrase.
+  const early_context = options.conversation_context ?? options.context ?? null;
+  const multilingual = canonicalizeMultilingualReply(original_message, {
+    thread_language:
+      early_context && typeof early_context === "object" ? early_context.last_outbound_language || null : null,
+  });
+  const message = multilingual ? multilingual.canonical_text : original_message;
   const compliance_flag  = detectComplianceFlag(message);
-  let language           = detectLanguageHeuristic(message, brain_item);
+  let language           = detectLanguageHeuristic(original_message, brain_item);
   // An explicit Spanish-switch request ("no hablo inglés", "en español por
   // favor") is deterministic evidence of language preference even when the
   // message is too short for script/pattern detection to flag Spanish.
-  if (language === "English" && matchesSpanishTargetSwitch(message)) {
+  if (language === "English" && matchesSpanishTargetSwitch(original_message)) {
     language = "Spanish";
   }
   // 7.2 layers 2-4: computed once against the VALIDATED context only (a stale
@@ -6548,19 +6561,19 @@ function classifyHeuristic(message, brain_item = null, options = {}) {
       (conversation_context.last_outbound_use_case === "ownership_check" ||
         conversation_context.last_outbound_question_type === "ownership")
   );
-  const emoji_interpretation = interpretEmojiReply(message, signal_context);
+  const emoji_interpretation = interpretEmojiReply(original_message, signal_context);
   // OWNER RULE (2026-10-05): reply in the language the SELLER replied in --
   // this message if it identifies one ("Yes" English, "Sí" Spanish), else the
   // seller's most recent identifiable reply, else our thread / opener
   // language. A tapback never counts (it quotes OUR words). An explicit switch
   // request ("en español por favor") was already decided above.
   let reply_language_source = "detected";
-  if (!matchesSpanishTargetSwitch(message)) {
+  if (!matchesSpanishTargetSwitch(original_message)) {
     const raw_context = conversation_context && typeof conversation_context === "object" ? conversation_context : null;
     const resolved_language = resolveSellerReplyLanguage({
-      message,
-      detected_language: language,
-      explicit: hasExplicitLanguageEvidence(message),
+      message: original_message,
+      detected_language: multilingual?.language || language,
+      explicit: Boolean(multilingual?.language) || hasExplicitLanguageEvidence(original_message),
       seller_history_language: raw_context?.seller_reply_language || null,
       thread_language: names_context?.last_outbound_language || null,
     });
@@ -6669,7 +6682,11 @@ function classifyHeuristic(message, brain_item = null, options = {}) {
       price_parse: intents.price_parse || null,
       emoji_interpretation,
     }),
-    language_preference: deriveLanguagePreference({ message, language, reply_signals }),
+    language_preference: deriveLanguagePreference({ message: original_message, language, reply_signals }),
+    // Audit: the canonical phrase a non-English/Spanish reply was read as.
+    multilingual_canonicalization: multilingual
+      ? { category: multilingual.category, language: multilingual.language, canonical_text: multilingual.canonical_text, amount: multilingual.amount, version: multilingual.version }
+      : null,
     // Where `language` came from: seller_reply | seller_history | thread |
     // detected | language_switch_request. The auto-reply template selector
     // honours a seller-derived language over the stored thread language.

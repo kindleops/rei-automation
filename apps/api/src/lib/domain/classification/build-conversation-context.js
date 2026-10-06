@@ -113,6 +113,10 @@ const BODY_QUESTION_PATTERNS = [
   // against the question that produced it.
   [/precio\s+en\s+mente|prix\s+(?:demand[eé]|en\s+t[eê]te)/i, "asking_price"],
   [/(?:eres|es\s+usted|sigues\s+siendo|todav[ií]a\s+eres|todav[ií]a\s+es)\s+(?:el\s+|la\s+)?due[ñn][oa]|\bes\s+(?:tu|su)\s+propiedad|voc[eê]\s+ainda\s+[eé]\s+(?:o|a)\s+(?:propriet[aá]ri[oa]|don[oa])|\b[eé]\s+sua\s+propriedade|c[oó]\s+ph[aả]i\s+l[aà]\s+c[uủ]a\s+b[aạ]n|\bhal\s+.{1,80}\s+lak\b/i, "ownership_check"],
+  // Our romanised ownership openers in the other templated languages
+  // (2026-10-06 sms_templates audit). Campaign rows normally name the question
+  // through template_id; this is the body fallback.
+  [/\bnin hai (?:yongyou|shi)\b|\bvy vse eshche vlad|\bata adayin baal|\bkya aap abhi bhi\b|\bajik soyu\b|\bczy nadal jeste[sś]\s+w[lł]a[sś]ciciel|\bpossiedi\b|\bsind sie (?:noch )?(?:der )?eigent|\best a vous\b|\bexeis akoma\b|\bvoce ainda e\b|\bban van la chu\b/i, "ownership_check"],
   [/abiert[oa]\s+a\s+(?:una\s+)?(?:propuesta|oferta|venta|vender)|considerar[ií]a\s+(?:una\s+)?(?:propuesta|oferta|venta|vender)|(?:le|te)\s+interesar[ií]a\s+vender|(?:quiere|quieres|quisiera|quisieras)\s+vender|discutir\s+n[uú]meros|abert[oa]\s+(?:a|para)\s+(?:uma\s+)?(?:proposta|discutir)/i, "proposal_interest"],
 ];
 

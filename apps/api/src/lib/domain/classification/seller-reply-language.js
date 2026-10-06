@@ -15,6 +15,7 @@
 
 import { parsePlatformReaction } from "./emoji-interpretation.js";
 import { detectMessageLanguage, foldReplyText } from "./reply-disposition-signals.js";
+import { canonicalizeMultilingualReply } from "./multilingual-short-replies.js";
 
 export const SELLER_REPLY_LANGUAGE_VERSION = "seller_reply_language_v1";
 
@@ -75,6 +76,10 @@ export function identifyReplyLanguage(message, { detected_language = null, expli
 
   const detected = String(detected_language ?? "").trim() || null;
   if (explicit && detected) return detected;
+
+  // The other templated languages ("是", "Tak", "Merci") name themselves.
+  const multilingual = canonicalizeMultilingualReply(raw);
+  if (multilingual?.language) return multilingual.language;
 
   const folded = foldShort(raw);
   for (const [language, set] of SHORT_REPLY_LEXICON) {
