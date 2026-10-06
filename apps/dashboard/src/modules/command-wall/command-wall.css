@@ -79,7 +79,9 @@ html.cw-html body { cursor: none; }
 .cw-stage { position: absolute; inset: 0; }
 .cw-stage::after { content: ''; position: absolute; inset: 0; background: #000; opacity: calc(1 - var(--cw-dim, 1)); transition: opacity 40s linear; pointer-events: none; z-index: 30; }
 .cw-stage__map { position: absolute; inset: -16px; transition: transform 20s linear; will-change: transform; }
-.cw-map { position: absolute; inset: 0; }
+/* more specific than maplibre's own .maplibregl-map { position: relative }, which
+   otherwise wins whenever its stylesheet loads later and collapses the map to 0 px */
+.cw-stage__map > .cw-map, .cw-stage__map > .cw-map.maplibregl-map { position: absolute; inset: 0; width: 100%; height: 100%; }
 .cw-map .maplibregl-canvas { outline: none; }
 .cw-stage__vignette { position: absolute; inset: 0; pointer-events: none; background:
   linear-gradient(180deg, rgba(var(--cw-glass-rgb), 0.82) 0%, rgba(var(--cw-glass-rgb), 0.5) 9%, transparent 19%, transparent 74%, rgba(var(--cw-glass-rgb), 0.72) 100%),

@@ -174,9 +174,12 @@ export function createWallFeed({ db = defaultSupabase, now = () => Date.now(), g
   }
 }
 
-let shared = null
+// Next.js compiles each route handler into its own bundle, so module-level
+// state is NOT shared between /api/wall/* routes. Process-wide singletons live
+// on globalThis instead (one registry, one authenticator cache, one tick).
+const G = (globalThis.__lcCommandWall ||= {})
 export function wallFeed() {
-  if (!shared) shared = createWallFeed()
-  return shared
+  if (!G.feed) G.feed = createWallFeed()
+  return G.feed
 }
-export function _setWallFeedForTests(feed) { shared = feed }
+export function _setWallFeedForTests(feed) { G.feed = feed }

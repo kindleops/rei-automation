@@ -38,8 +38,11 @@ export const WALL_LIMITS = Object.freeze({
   heartbeat_per_display: { limit: 6, windowMs: 60_000 },
 })
 
-let shared = null
+// Next.js compiles each route handler into its own bundle, so module-level
+// state is NOT shared between /api/wall/* routes. Process-wide singletons live
+// on globalThis instead (one registry, one authenticator cache, one tick).
+const G = (globalThis.__lcCommandWall ||= {})
 export function wallRateLimiter() {
-  if (!shared) shared = createRateLimiter()
-  return shared
+  if (!G.limiter) G.limiter = createRateLimiter()
+  return G.limiter
 }
