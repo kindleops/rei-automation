@@ -64,7 +64,7 @@ describe("Inbox linked context hydration", () => {
     assert.equal(merged.conversation_stage, "stage_2");
   });
 
-  it("hides unknown condition and uses formatted phone when names are missing", () => {
+  it("hides unknown condition and never stamps the phone into name fields when names are missing", () => {
     const maps = {
       propertyById: new Map([[
         "prop-2",
@@ -85,7 +85,10 @@ describe("Inbox linked context hydration", () => {
       seller_phone: "+15559876543",
     }, maps);
 
-    assert.equal(merged.owner_name, "(555) 987-6543");
+    // The phone is not a name: owner_name stays null and the UI renders the
+    // phone from seller_phone / display_phone itself.
+    assert.equal(merged.owner_name, null);
+    assert.equal(merged.seller_display_name, null);
     assert.equal(merged.building_condition, null);
   });
 

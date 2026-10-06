@@ -18,6 +18,7 @@ import {
 import {
   bulkHydrateInboxThreadLinkedContext,
   hydrateThreadIdentityFromMessageEvents,
+  isRealPersonName,
 } from "@/lib/domain/inbox/hydrate-inbox-thread-linked-context.js";
 import {
   parseAdvancedFiltersParam,
@@ -197,9 +198,9 @@ function compactBootThreadRow(row = {}) {
     is_archived: row.is_archived === true,
     snoozed_until: row.snoozed_until || null,
     snooze_reason: row.snooze_reason || null,
-    owner_name: row.owner_name || row.owner_display_name || row.seller_display_name || null,
-    owner_display_name: row.owner_display_name || row.owner_name || null,
-    seller_display_name: row.seller_display_name || row.owner_name || null,
+    owner_name: firstPersonName(row.owner_name, row.owner_display_name, row.seller_display_name),
+    owner_display_name: firstPersonName(row.owner_display_name, row.owner_name),
+    seller_display_name: firstPersonName(row.seller_display_name, row.owner_name),
     property_address_full: row.property_address_full || row.property_address || null,
     property_address: row.property_address || row.property_address_full || null,
     property_address_city: row.property_address_city || row.city || null,
@@ -476,18 +477,30 @@ function msgId(row = {}) {
   return row.id || row.thread_key || row.canonical_thread_key || null;
 }
 
+// First value that is a real person name. Phone-shaped strings are skipped:
+// message_events.seller_display_name can hold the formatted phone (see
+// isPhoneLikeName), and a phone must never outrank a real name.
+function firstPersonName(...values) {
+  for (const value of values) {
+    if (isRealPersonName(value)) return clean(value);
+  }
+  return null;
+}
+
+// Canonical order: the thread's own name (inbox_thread_state.seller_display_name
+// on the primary source) and owner names first; names inherited from
+// message_events (event_seller_display_name, metadata) last.
 function displayName(row = {}) {
   const metadata = object(row.metadata);
-  return (
-    row.seller_display_name ||
-    row.owner_name ||
-    row.owner_display_name ||
-    row.display_name ||
-    row.event_seller_display_name ||
-    row.seller_first_name ||
-    metadata.seller_display_name ||
-    metadata.owner_name ||
-    null
+  return firstPersonName(
+    row.seller_display_name,
+    row.owner_name,
+    row.owner_display_name,
+    row.display_name,
+    row.event_seller_display_name,
+    row.seller_first_name,
+    metadata.seller_display_name,
+    metadata.owner_name,
   );
 }
 
@@ -1031,11 +1044,7 @@ function normalizeThreadRow(row = {}, query = {}) {
     row.message_event_id,
     object(row.latest_message_event_data).message_event_id,
   ) || null;
-  const ownerName =
-    row.owner_name ||
-    row.owner_display_name ||
-    row.event_seller_display_name ||
-    displayName(row);
+  const ownerName = firstPersonName(row.owner_name, row.owner_display_name) || displayName(row);
   const propertyAddress =
     row.property_address ||
     row.property_address_full ||
@@ -1084,9 +1093,9 @@ function normalizeThreadRow(row = {}, query = {}) {
     phone: row.phone || normalizedPhone || row.canonical_e164 || row.best_phone || row.seller_phone || row.display_phone || null,
     seller_phone: row.seller_phone || normalizedPhone || row.canonical_e164 || row.best_phone || row.display_phone || null,
     display_phone: row.display_phone || normalizedPhone || row.canonical_e164 || row.seller_phone || row.best_phone || null,
-    seller_display_name: row.seller_display_name || row.owner_display_name || row.event_seller_display_name || displayName(row),
+    seller_display_name: displayName(row),
     owner_name: ownerName,
-    owner_display_name: row.owner_display_name || ownerName,
+    owner_display_name: firstPersonName(row.owner_display_name) || ownerName,
     property_address: propertyAddress,
     property_address_full: row.property_address_full || propertyAddress || row.display_address || row.event_property_address || null,
     property_address_city: row.property_address_city || row.city || row.filter_city || null,

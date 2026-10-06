@@ -1,7 +1,14 @@
 import { normalizePhone } from "@/lib/providers/textgrid.js";
+import { isRealPersonName } from "@/lib/domain/inbox/hydrate-inbox-thread-linked-context.js";
 
 function clean(value) { return String(value ?? "").trim(); }
 function pickFirst(...values) { for (const v of values) { if (v !== null && v !== undefined && clean(v) !== "") return v; } return null; }
+// Name fields only take real names. An operator manual send from the Inbox
+// used to carry the formatted phone as seller_full_name when the thread was
+// shown by phone; the next inbound reply inherited it via send_queue.phone_pair
+// and message_events.seller_display_name became "(817) 734-7618" instead of
+// "Jose G Deleon" (+18177347618, 2026-10-05).
+function pickName(...values) { for (const v of values) { if (isRealPersonName(v)) return clean(v); } return null; }
 function object(value) { return value && typeof value === "object" && !Array.isArray(value) ? value : {}; }
 function nowIso() { return new Date().toISOString(); }
 function threadKeyFor(direction, from, to) {
@@ -36,9 +43,9 @@ function fromQueue(row = {}) {
     prospect_id: pickFirst(row.prospect_id, snapshot.prospect_id, qctx.prospect_id),
     textgrid_number_id: pickFirst(row.textgrid_number_id, qctx.textgrid_number_id),
     template_id: pickFirst(row.template_id, metadata.selected_template_id, metadata.template_id),
-    seller_first_name: pickFirst(row.seller_first_name, metadata.seller_first_name, snapshot.seller_first_name, seller.first_name),
-    seller_display_name: pickFirst(row.seller_display_name, metadata.seller_display_name, snapshot.seller_full_name, snapshot.display_name, seller.display_name),
-    owner_display_name: pickFirst(snapshot.owner_display_name, snapshot.owner_name, row.seller_display_name),
+    seller_first_name: pickName(row.seller_first_name, metadata.seller_first_name, snapshot.seller_first_name, seller.first_name),
+    seller_display_name: pickName(row.seller_display_name, metadata.seller_display_name, snapshot.seller_full_name, snapshot.display_name, seller.display_name),
+    owner_display_name: pickName(snapshot.owner_display_name, snapshot.owner_name, row.seller_display_name),
     owner_type: pickFirst(row.owner_type, snapshot.owner_type),
     property_address: pickFirst(row.property_address, snapshot.property_address, qctx.property_address),
     property_city: pickFirst(row.property_city, snapshot.property_city),
@@ -59,8 +66,8 @@ function fromEvent(row = {}) {
     prospect_id: pickFirst(row.prospect_id, metadata.prospect_id),
     textgrid_number_id: pickFirst(row.textgrid_number_id, metadata.textgrid_number_id),
     template_id: pickFirst(row.template_id, metadata.template_id),
-    seller_display_name: pickFirst(row.seller_display_name, enrichment.seller_name),
-    owner_display_name: pickFirst(row.owner_display_name, enrichment.seller_name),
+    seller_display_name: pickName(row.seller_display_name, enrichment.seller_name),
+    owner_display_name: pickName(row.owner_display_name, enrichment.seller_name),
     owner_type: pickFirst(row.owner_type),
     property_address: pickFirst(row.property_address, enrichment.property_address),
     market: pickFirst(row.market, enrichment.market),
@@ -86,6 +93,16 @@ export async function enrichMessageEventContext(eventOrPayload = {}, supabase) {
   const sources = [];
   let source = "event";
 
+  // The canonical thread name outranks anything inherited from the latest
+  // send_queue / message_events row of the phone pair (those can be an
+  // operator manual send that carries no seller name at all).
+  const threadKeyGuess = threadKeyFor(event.direction, from, to);
+  const threadState = threadKeyGuess
+    ? await latestFrom("inbox_thread_state", supabase, (q) => q.eq("thread_key", threadKeyGuess).limit(1))
+    : null;
+  const stateName = pickName(threadState?.seller_display_name);
+  if (stateName) sources.push({ seller_display_name: stateName });
+
   if (queueId) {
     const row = await latestFrom("send_queue", supabase, (q) => q.eq("id", queueId).order("created_at", { ascending: false }).limit(1));
     if (row) { sources.push(fromQueue(row)); source = "send_queue.queue_id"; }
@@ -103,13 +120,41 @@ export async function enrichMessageEventContext(eventOrPayload = {}, supabase) {
   }
 
   let enriched = merge(base, ...sources);
+
+  // A manual send's queue row often lacks master_owner_id (21 of 102 inbox
+  // sends, 14d to 10-06), so replies after it lost the owner link. Fill the
+  // owner/prospect from the thread itself, only for the same property.
+  if (threadState) {
+    const sameProperty = !clean(enriched.property_id) || clean(enriched.property_id) === clean(threadState.property_id);
+    if (sameProperty) {
+      enriched = merge(enriched, {
+        property_id: threadState.property_id ?? null,
+        master_owner_id: threadState.master_owner_id ?? null,
+        prospect_id: threadState.prospect_id ?? null,
+      });
+    }
+  }
+
+  // Still no name (first inbound on a thread whose latest queue row is a
+  // nameless manual send): inherit it from the latest named send_queue row of
+  // the pair — the campaign target the thread was opened with.
+  if (!pickName(enriched.seller_display_name) && from && to) {
+    const a = normalizePhone(from); const b = normalizePhone(to);
+    const named = await latestFrom("send_queue", supabase, (q) => q
+      .or(`and(from_phone_number.eq.${a},to_phone_number.eq.${b}),and(from_phone_number.eq.${b},to_phone_number.eq.${a})`)
+      .not("seller_display_name", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1));
+    const namedName = pickName(named?.seller_display_name);
+    if (namedName) enriched = { ...enriched, seller_display_name: namedName };
+  }
   if (enriched.property_id) {
     const property = await latestFrom("properties", supabase, (q) => q.eq("id", enriched.property_id).limit(1));
     if (property) enriched = merge(enriched, { property_address: property.address || property.property_address, property_city: property.city, property_state: property.state, property_zip: property.zip, market: property.market, timezone: property.timezone, latitude: property.latitude, longitude: property.longitude });
   }
   if (enriched.master_owner_id) {
     const owner = await latestFrom("master_owners", supabase, (q) => q.eq("id", enriched.master_owner_id).limit(1));
-    if (owner) enriched = merge(enriched, { seller_display_name: owner.seller_display_name || owner.owner_display_name || owner.name, owner_display_name: owner.owner_display_name || owner.name, owner_type: owner.owner_type });
+    if (owner) enriched = merge(enriched, { seller_display_name: pickName(owner.seller_display_name, owner.owner_display_name, owner.display_name, owner.name), owner_display_name: pickName(owner.owner_display_name, owner.display_name, owner.name), owner_type: owner.owner_type });
   }
 
   // Force canonical thread_key: outbound = normalizePhone(to), inbound = normalizePhone(from).
@@ -127,7 +172,7 @@ export async function enrichMessageEventContext(eventOrPayload = {}, supabase) {
       thread_key: canonical_thread_key || null,
       property_id: enriched.property_id || null,
       master_owner_id: enriched.master_owner_id || null,
-      seller_name: pickFirst(enriched.seller_display_name, enriched.owner_display_name, enriched.seller_first_name),
+      seller_name: pickName(enriched.seller_display_name, enriched.owner_display_name, enriched.seller_first_name),
       property_address: enriched.property_address || null,
       market: enriched.market || null,
       timezone: enriched.timezone || null,
@@ -144,7 +189,7 @@ export function buildMessageEventEnrichmentUpdate(enrichment = {}) {
     prospect_id: enrichment.prospect_id || null,
     textgrid_number_id: enrichment.textgrid_number_id || null,
     template_id: enrichment.template_id || null,
-    seller_display_name: enrichment.seller_display_name || enrichment.owner_display_name || null,
+    seller_display_name: pickName(enrichment.seller_display_name, enrichment.owner_display_name),
     property_address: enrichment.property_address || null,
     market: enrichment.market || null,
     metadata: enrichment.metadata || { enrichment },
