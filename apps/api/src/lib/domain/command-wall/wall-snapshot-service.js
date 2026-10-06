@@ -42,7 +42,11 @@ function startOfToday(t) {
 export function deriveQueueStatus(counts = {}) {
   const active = ACTIVE_QUEUE.reduce((s, k) => s + n(counts[k]), 0)
   if (active <= 0) return 'idle'
-  if (n(counts.lag_active) > 0 || n(counts.stale_active) > 0) return 'delayed'
+  // lag_active = queued/pending/processing rows created > 15 min ago: work that is
+  // due and waiting. stale_active is NOT used: the RPC counts future-'scheduled'
+  // rows untouched for 15 min (≈ every scheduled row), which would pin the wall at
+  // "delayed" all day (finding 2026-10-06: 516 stale vs 3 lagging).
+  if (n(counts.lag_active) > 0) return 'delayed'
   if (n(counts.failed_today) > 0 || n(counts.processing_lock_conflicts) > 0) return 'attention'
   return 'healthy'
 }
