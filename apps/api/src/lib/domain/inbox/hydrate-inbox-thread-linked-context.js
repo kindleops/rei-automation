@@ -27,6 +27,32 @@ export function isRealDisplayValue(value) {
   return !PLACEHOLDER_VALUES.has(lower(text));
 }
 
+/**
+ * A display "name" made only of phone characters ("(817) 734-7618",
+ * "+18177347618", "(817)") is a phone number, not a name. Name fields must
+ * never carry one: the dashboard resolvers then rank it above the canonical
+ * inbox_thread_state.seller_display_name, and the manual composer copies it
+ * into send_queue, where the inbound enrichment inherits it onto
+ * message_events.seller_display_name.
+ */
+export function isPhoneLikeName(value) {
+  const text = clean(value);
+  if (!text) return false;
+  if (/\p{L}/u.test(text)) return false;
+  return /\d/.test(text);
+}
+
+export function isRealPersonName(value) {
+  return isRealDisplayValue(value) && !isPhoneLikeName(value);
+}
+
+function firstRealName(...values) {
+  for (const value of values) {
+    if (isRealPersonName(value)) return clean(value);
+  }
+  return null;
+}
+
 function firstReal(...values) {
   for (const value of values) {
     if (isRealDisplayValue(value)) return clean(value);
@@ -49,42 +75,20 @@ function normalizePhone(value) {
   return raw.startsWith("+") ? raw : digits ? `+${digits}` : raw;
 }
 
-function formatDisplayPhone(value) {
-  const normalized = normalizePhone(value);
-  if (!normalized) return null;
-  const digits = normalized.replace(/\D/g, "");
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
-  }
-  if (digits.length === 10) {
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  }
-  return normalized;
-}
-
-function resolveOwnerName({ row = {}, masterOwner = null, prospect = null } = {}) {
+// No phone fallback here: a name field that holds the formatted phone is
+// indistinguishable from a real name downstream. When no name is known the row
+// keeps owner_name null and the UI renders display_phone itself.
+function resolveOwnerName({ row = {}, masterOwner = null, prospect = null, threadStateName = null } = {}) {
   const owner = masterOwner || {};
   const contact = prospect || {};
-  const prospectName = firstReal(
+  return firstRealName(
+    owner.display_name,
     contact.full_name,
     contact.first_name,
     contact.owner_display_name,
-  );
-
-  return (
-    firstReal(
-      owner.display_name,
-      prospectName,
-      row.seller_display_name,
-      row.owner_display_name,
-      formatDisplayPhone(
-        row.seller_phone ||
-        row.canonical_e164 ||
-        row.best_phone ||
-        row.display_phone ||
-        row.phone,
-      ),
-    ) || null
+    threadStateName,
+    row.seller_display_name,
+    row.owner_display_name,
   );
 }
 
@@ -125,7 +129,7 @@ function resolvePriorityScore({ property = null, masterOwner = null } = {}) {
     ?? null;
 }
 
-function buildLinkedContextMaps({ properties = [], masterOwners = [], prospects = [], dealContexts = [] } = {}) {
+function buildLinkedContextMaps({ properties = [], masterOwners = [], prospects = [], dealContexts = [], threadStates = [] } = {}) {
   const propertyById = new Map();
   for (const row of properties) {
     const key = clean(row.property_id);
@@ -150,7 +154,16 @@ function buildLinkedContextMaps({ properties = [], masterOwners = [], prospects 
     if (key) contextByThreadKey.set(key, row);
   }
 
-  return { propertyById, ownerById, prospectById, contextByThreadKey };
+  // inbox_thread_state.seller_display_name is the canonical thread name (it is
+  // populated for every thread with inbound activity). It outranks any name a
+  // row inherited from message_events.
+  const threadStateNameByKey = new Map();
+  for (const row of threadStates) {
+    const key = clean(row.thread_key);
+    if (key && isRealPersonName(row.seller_display_name)) threadStateNameByKey.set(key, clean(row.seller_display_name));
+  }
+
+  return { propertyById, ownerById, prospectById, contextByThreadKey, threadStateNameByKey };
 }
 
 export function mergeLinkedContextIntoThreadRow(row = {}, maps = {}) {
@@ -169,10 +182,12 @@ export function mergeLinkedContextIntoThreadRow(row = {}, maps = {}) {
   const masterOwner = masterOwnerId ? maps.ownerById?.get(masterOwnerId) : null;
   const prospect = prospectId ? maps.prospectById?.get(prospectId) : null;
 
-  if (!property && !masterOwner && !prospect && !dealContext) return row;
+  const threadStateName = threadKey ? maps.threadStateNameByKey?.get(threadKey) || null : null;
 
-  const ownerName = resolveOwnerName({ row, masterOwner, prospect })
-    || (dealContext ? firstReal(dealContext.owner_name) : null);
+  if (!property && !masterOwner && !prospect && !dealContext && !threadStateName) return row;
+
+  const ownerName = resolveOwnerName({ row, masterOwner, prospect, threadStateName })
+    || (dealContext ? firstRealName(dealContext.owner_name) : null);
   const propertyAddress = property
     ? resolvePropertyAddress(property)
     : (dealContext ? firstReal(dealContext.property_address_full) : null);
@@ -197,11 +212,11 @@ export function mergeLinkedContextIntoThreadRow(row = {}, maps = {}) {
     property_id: propertyId || row.property_id || null,
     master_owner_id: masterOwnerId || row.master_owner_id || null,
     prospect_id: prospectId || row.prospect_id || null,
-    owner_name: firstReal(row.owner_name, ownerName),
-    owner_display_name: firstReal(row.owner_display_name, ownerName),
-    seller_display_name: firstReal(row.seller_display_name, ownerName),
-    prospect_full_name: firstReal(row.prospect_full_name, prospect?.full_name),
-    prospect_name: firstReal(row.prospect_name, prospect?.full_name),
+    owner_name: firstRealName(row.owner_name, ownerName),
+    owner_display_name: firstRealName(row.owner_display_name, ownerName),
+    seller_display_name: firstRealName(threadStateName, row.seller_display_name, ownerName),
+    prospect_full_name: firstRealName(row.prospect_full_name, prospect?.full_name),
+    prospect_name: firstRealName(row.prospect_name, prospect?.full_name),
     property_address_full: firstReal(row.property_address_full, propertyAddress),
     property_address: firstReal(row.property_address, propertyAddress),
     property_address_city: firstReal(row.property_address_city, property?.property_address_city, property?.property_city),
@@ -502,13 +517,21 @@ export async function bulkHydrateInboxThreadLinkedContext(rows = [], supabase) {
     if (prospectId) prospectIds.push(prospectId);
   }
 
-  const [properties, masterOwners, prospects] = await Promise.all([
+  // Only rows that arrived without a real seller name need the canonical
+  // thread-state name (the primary list source already carries it).
+  const namelessThreadKeys = rows
+    .filter((row) => !isRealPersonName(row.seller_display_name))
+    .map((row) => clean(row.thread_key || row.canonical_thread_key))
+    .filter(Boolean);
+
+  const [properties, masterOwners, prospects, threadStates] = await Promise.all([
     safeInQuery(supabase, "properties", PROPERTY_SELECT, "property_id", propertyIds),
     safeInQuery(supabase, "master_owners", MASTER_OWNER_SELECT, "master_owner_id", masterOwnerIds),
     safeInQuery(supabase, "prospects", PROSPECT_SELECT, "prospect_id", prospectIds),
+    safeInQuery(supabase, "inbox_thread_state", "thread_key,seller_display_name", "thread_key", namelessThreadKeys),
   ]);
 
-  const maps = buildLinkedContextMaps({ properties, masterOwners, prospects, dealContexts });
+  const maps = buildLinkedContextMaps({ properties, masterOwners, prospects, dealContexts, threadStates });
 
   return rows.map((row) => mergeLinkedContextIntoThreadRow(row, maps));
 }

@@ -487,10 +487,28 @@ export const formatDisplayPhone = (raw: string): string => {
 }
 
 /**
- * Checks if a string looks like a raw E.164 phone number (e.g. +16127433952).
- * These are treated as poor display names if any real name field exists.
+ * A "name" made only of phone characters is a phone number, not a name.
+ *
+ * This used to match raw E.164 only (+16127433952), so a FORMATTED phone
+ * ("(817) 734-7618") passed as a real name. That formatted string is exactly
+ * what the resolvers' own phone fallback produces, and it is written back onto
+ * the thread as ownerName / prospectName / sellerName — so once a thread had
+ * been normalized without a name, the phone outranked the canonical
+ * inbox_thread_state.seller_display_name forever after, the manual composer
+ * copied it into send_queue as seller_full_name, and the inbound enrichment
+ * then stamped it onto message_events.seller_display_name (+18177347618,
+ * "Jose G Deleon", 2026-10-05). Anything with no letter and at least one digit
+ * is a phone (or a phone fragment such as "(817)").
  */
-const isRawE164 = (val: string): boolean => /^\+1\d{10}$/.test(val) || /^\+\d{10,15}$/.test(val)
+export const isPhoneLikeName = (val: unknown): boolean => {
+  const text = String(val ?? '').trim()
+  if (!text) return false
+  if (/\p{L}/u.test(text)) return false
+  return /\d/.test(text)
+}
+
+const isRealPersonName = (text: string, placeholders: string[]): boolean =>
+  Boolean(text) && !isPhoneLikeName(text) && !placeholders.includes(text.toLowerCase())
 
 export const resolveInboxSellerNameWithSource = (row: Record<string, unknown>): { value: string; source: string } => {
   const firstName = asString(row.first_name || row.firstName || row.seller_first_name || row.sellerFirstName || row.prospect_first_name || row.prospectFirstName)
@@ -522,7 +540,7 @@ export const resolveInboxSellerNameWithSource = (row: Record<string, unknown>): 
 
   for (const candidate of candidates) {
     const text = asString(candidate.val, '').trim()
-    if (text && !isRawE164(text) && text.toLowerCase() !== 'unknown' && text.toLowerCase() !== 'unknown seller') {
+    if (isRealPersonName(text, ['unknown', 'unknown seller'])) {
       return { value: text, source: candidate.source }
     }
   }
@@ -562,7 +580,7 @@ export const resolveInboxProspectNameWithSource = (row: Record<string, unknown>)
 
   for (const candidate of candidates) {
     const text = asString(candidate.val, '').trim()
-    if (text && !isRawE164(text) && text.toLowerCase() !== 'unknown' && text.toLowerCase() !== 'unknown seller') {
+    if (isRealPersonName(text, ['unknown', 'unknown seller'])) {
       return { value: text, source: candidate.source }
     }
   }
@@ -599,7 +617,7 @@ export const resolveInboxOwnerNameWithSource = (row: Record<string, unknown>): {
 
   for (const candidate of candidates) {
     const text = asString(candidate.val, '').trim()
-    if (text && !isRawE164(text) && text.toLowerCase() !== 'unknown' && text.toLowerCase() !== 'unknown owner') {
+    if (isRealPersonName(text, ['unknown', 'unknown owner'])) {
       return { value: text, source: candidate.source }
     }
   }
@@ -610,7 +628,7 @@ export const resolveInboxOwnerNameWithSource = (row: Record<string, unknown>): {
   }
 
   const sellerName = asString(row.seller_display_name || row.sellerDisplayName || row.seller_name || row.sellerName, '').trim()
-  if (sellerName && !isRawE164(sellerName) && sellerName.toLowerCase() !== 'unknown' && sellerName.toLowerCase() !== 'unknown seller') {
+  if (isRealPersonName(sellerName, ['unknown', 'unknown seller'])) {
     return { value: sellerName, source: 'seller_display_name_fallback' }
   }
 
@@ -1078,9 +1096,17 @@ const applyRenderGuard = (renderedMessage: string): RenderGuardResult => {
 
 const buildPersonalizationCandidate = (thread: InboxThread): PersonalizationCandidate => {
   const threadRecord = thread as unknown as AnyRecord
-  const owner = asString(thread.ownerName || thread.ownerDisplayName, '')
-  const prospectFirstName = asString(threadRecord.prospect_first_name, '')
-  const prospectFullName = asString(threadRecord.prospect_full_name || thread.prospect_name, '')
+  // The resolved ownerName falls back to the formatted phone when no name is
+  // known. A phone is not a name: never carry it into the queue row's
+  // seller_full_name / owner_display_name (the inbound enrichment inherits
+  // those onto message_events.seller_display_name).
+  const realName = (value: unknown): string => {
+    const text = asString(value, '').trim()
+    return text && !isPhoneLikeName(text) ? text : ''
+  }
+  const owner = realName(thread.ownerName) || realName(thread.ownerDisplayName)
+  const prospectFirstName = realName(threadRecord.prospect_first_name)
+  const prospectFullName = realName(threadRecord.prospect_full_name) || realName(thread.prospect_name)
   return {
     seller_first_name: null,
     // seller_full_name/owner_display_name carry the Master Owner as ownership *context*
@@ -1101,7 +1127,7 @@ const buildPersonalizationCandidate = (thread: InboxThread): PersonalizationCand
   }
 }
 
-const buildQueuePersonalization = (thread: InboxThread, messageText: string) => {
+export const buildQueuePersonalization = (thread: InboxThread, messageText: string) => {
   const candidate = buildPersonalizationCandidate(thread)
   const resolved = resolveSellerFirstName(candidate)
   const renderGuard = applyRenderGuard(messageText)
