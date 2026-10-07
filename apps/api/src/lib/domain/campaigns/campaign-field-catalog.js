@@ -1359,6 +1359,86 @@ function graphOptionResponseBase({
   }
 }
 
+const EXACT_VALUES_RPC = 'campaign_audience_field_values'
+const EXACT_VALUES_MISSING_TTL_MS = 10 * 60 * 1000
+let exactValuesMissingAt = 0
+// A list-token count costs ~3 s on the 176k-row audience; reopening a picker
+// within a minute reuses the same exact answer.
+const EXACT_VALUES_TTL_MS = 60 * 1000
+const exactValuesCache = new Map()
+
+function isMissingRpcError(error) {
+  const code = clean(error?.code)
+  const message = clean(error?.message).toLowerCase()
+  return code === 'PGRST202' || code === '42883' || message.includes('could not find the function')
+}
+
+/** Test seam. */
+export function resetExactGraphFieldValuesProbe() {
+  exactValuesMissingAt = 0
+  exactValuesCache.clear()
+}
+
+/**
+ * The exact value list for one audience field: a GROUP BY over the live
+ * campaign_target_graph column (PROPOSED_20261007120000_campaign_audience_field_values.sql).
+ * `ok: false` when the RPC is not deployed or fails, so the caller falls back to
+ * the facet snapshot and says so; a failure is never turned into "no values".
+ */
+async function queryExactGraphFieldValues({ supabase, facetKey, search = '', limit = 50 }) {
+  if (!supabase?.rpc || !facetKey) return { ok: false, rows: [] }
+  if (exactValuesMissingAt && Date.now() - exactValuesMissingAt < EXACT_VALUES_MISSING_TTL_MS) return { ok: false, rows: [] }
+  const cacheKey = `${facetKey}\u0000${search}\u0000${limit}`
+  const hit = exactValuesCache.get(cacheKey)
+  if (hit && Date.now() - hit.at < EXACT_VALUES_TTL_MS) return { ok: true, rows: hit.rows }
+  try {
+    const { data, error } = await supabase.rpc(EXACT_VALUES_RPC, {
+      p_field_key: facetKey,
+      p_search: search || null,
+      p_limit: limit,
+    })
+    if (error) {
+      if (isMissingRpcError(error)) exactValuesMissingAt = Date.now()
+      return { ok: false, rows: [], error }
+    }
+    // NULL = the RPC does not know this field: use the snapshot.
+    if (data === null) return { ok: false, rows: [] }
+    const rows = Array.isArray(data) ? data : []
+    if (exactValuesCache.size > 500) exactValuesCache.clear()
+    exactValuesCache.set(cacheKey, { at: Date.now(), rows })
+    return { ok: true, rows }
+  } catch (error) {
+    return { ok: false, rows: [], error }
+  }
+}
+
+/**
+ * Why a value list is what it is. `not_counted`: the snapshot holds no row for
+ * this field at all (it was never counted, or counted before the column was
+ * filled) — not the same thing as "no seller has a value".
+ */
+async function graphValuesState({ supabase, facetKey, rows = [], search = '', valuesSource }) {
+  if (rows.length) return { values_state: 'ok' }
+  if (search) {
+    if (valuesSource === 'exact_group_count') return { values_state: 'no_match', values_message: `No value contains “${search}”.` }
+    const { count, error } = await supabase
+      .from(CAMPAIGN_TARGET_GRAPH_FACET_TABLE)
+      .select('field_key', { count: 'exact', head: true })
+      .eq('field_key', facetKey)
+    if (!error && Number(count) > 0) return { values_state: 'no_match', values_message: `No value contains “${search}”.` }
+  }
+  if (valuesSource === 'exact_group_count') {
+    return {
+      values_state: 'empty',
+      values_message: 'No property in the campaign audience has a value for this field yet.',
+    }
+  }
+  return {
+    values_state: 'not_counted',
+    values_message: 'Values for this field haven’t been counted for the campaign audience yet. You can still type a value.',
+  }
+}
+
 async function queryGraphFacetOptions({
   supabase,
   field,
@@ -1417,23 +1497,39 @@ async function queryGraphFacetOptions({
     }
   }
 
-  let query = supabase
-    .from(CAMPAIGN_TARGET_GRAPH_FACET_TABLE)
-    .select('field_key,value,label,target_count,clean_count,queueable_count,sender_covered_count,sms_eligible_count,updated_at')
-    .eq('field_key', facetKey)
-    .order('target_count', { ascending: false })
-    .order('label', { ascending: true })
-    .limit(isMarketField && marketDirectory ? 250 : requestedLimit)
+  const rowLimit = isMarketField && marketDirectory ? 250 : requestedLimit
+  const rowSearch = normalizedSearch && !(isMarketField && marketDirectory) ? normalizedSearch : ''
 
-  if (normalizedSearch && !(isMarketField && marketDirectory)) query = query.ilike('label', `%${normalizedSearch}%`)
-
-  const { data, error } = await query
+  // 1) One exact grouped count over the live audience (PROPOSED RPC
+  //    campaign_audience_field_values). 2) Until it exists, the precomputed
+  //    facet snapshot. Never a sample, and an empty list always says why.
+  const exact = await queryExactGraphFieldValues({ supabase, facetKey, search: rowSearch, limit: rowLimit })
+  let data = exact.rows
+  let error = null
+  let valuesSource = 'exact_group_count'
+  if (!exact.ok) {
+    valuesSource = 'facet_snapshot'
+    let query = supabase
+      .from(CAMPAIGN_TARGET_GRAPH_FACET_TABLE)
+      .select('field_key,value,label,target_count,clean_count,queueable_count,sender_covered_count,sms_eligible_count,updated_at')
+      .eq('field_key', facetKey)
+      .order('target_count', { ascending: false })
+      .order('label', { ascending: true })
+      .limit(rowLimit)
+    if (rowSearch) query = query.ilike('label', `%${rowSearch}%`)
+    const facet = await query
+    data = facet.data
+    error = facet.error
+  }
   if (error) {
     const message = error?.message || String(error)
     return {
       ok: true,
       ...base,
       options: [],
+      values_state: 'unavailable',
+      values_source: valuesSource,
+      values_message: `Values couldn't load: ${message}`,
       warning: 'campaign_target_graph_facets_unavailable',
       message,
       warnings: uniqueClean([...(base.warnings || []), `campaign_target_graph_facets_unavailable:${message}`]),
@@ -1442,6 +1538,7 @@ async function queryGraphFacetOptions({
   }
 
   let rows = Array.isArray(data) ? data : []
+  const valuesState = await graphValuesState({ supabase, facetKey, rows, search: rowSearch, valuesSource })
   if (isMarketField && marketDirectory && normalizedSearch) {
     const matchingIds = new Set(searchCanonicalMarketIds(marketDirectory, normalizedSearch))
     rows = rows.filter((row) => matchingIds.has(resolveMarketLabel(marketDirectory, row.value)?.market_id))
@@ -1472,6 +1569,13 @@ async function queryGraphFacetOptions({
     ok: true,
     ...base,
     ...(marketWarning ? { warnings: uniqueClean([...(base.warnings || []), marketWarning]) } : {}),
+    ...valuesState,
+    values_source: valuesSource,
+    // What the numbers on each option mean — one audience row is one property.
+    count_basis: {
+      count: 'properties in the campaign audience',
+      queueable_count: 'of those, eligible to queue a text now',
+    },
     // One option per property-type family ("Multi-Family (incl. Apartment)"),
     // exactly the set the audience filter applies for it.
     options: facetKey === 'properties.property_type' ? collapsePropertyTypeOptions(options) : options,
