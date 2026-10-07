@@ -187,7 +187,7 @@ SELECT left(g.property_zip, 5) AS zip,
        count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'A') AS tier_a,
        count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'B') AS tier_b,
        count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'C') AS tier_c,
-       count(*) FILTER (WHERE g.queue_eligible AND g.forced_sale_pressure >= 60) AS high_pressure,
+       count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'A') AS high_pressure,  -- acute tier A; FSP not calibrated (§10)
        percentile_cont(0.5) WITHIN GROUP (ORDER BY g.equity_percent) FILTER (WHERE g.queue_eligible) AS median_equity_percent,
        max(g.market_quality) AS market_quality,
        round((count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'A')

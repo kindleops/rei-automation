@@ -449,7 +449,8 @@ test("§16 discovery ranks ZIPs by (tier A + ½ tier B) × market quality, reach
   assert.equal(out.zips[0].zip, "75217");
   assert.equal(out.zips[0].reachable, 18);
   assert.equal(out.zips[1].market_quality_assumed, true);
-  assert.match(out.zips[0].headline, /^Dallas, TX 75217 · \d+ high-pressure sellers · \d+ tier A · \d+ tier B of 18 reachable · median equity \d+% · strong buyer depth · investor activity high$/);
+  assert.match(out.zips[0].headline, /^Dallas, TX 75217 · \d+ high-pressure sellers \(tier A\) · \d+ stacked \(tier B\) of 18 reachable · median equity \d+% · strong buyer depth · investor activity high$/);
+  assert.equal(out.zips[0].high_pressure, out.zips[0].tiers.A);
 });
 
 // ── catalog / filter plan (additive) ─────────────────────────────────────────

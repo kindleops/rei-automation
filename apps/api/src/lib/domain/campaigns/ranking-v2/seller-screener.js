@@ -213,7 +213,7 @@ function median(values) {
  * Pure aggregation over already-loaded rows + contexts. Used by the screener
  * runner, the Campaign Quality Report and the offline tests.
  */
-export function screenRows(rows, contexts, expr, { now = Date.now(), sellerLimit = 50, highPressureThreshold = 60 } = {}) {
+export function screenRows(rows, contexts, expr, { now = Date.now(), sellerLimit = 50 } = {}) {
   const matched = []
   const unknownExcluded = {}
   let unknownRows = 0
@@ -243,7 +243,8 @@ export function screenRows(rows, contexts, expr, { now = Date.now(), sellerLimit
     zr.count += 1
     zr.equity.push(row.equity_percent === null || row.equity_percent === undefined ? null : Number(row.equity_percent))
     const fsp = ctx.situation?.opportunity_tier !== 'UNKNOWN' ? ctx.situation?.components?.forced_sale_pressure ?? null : null
-    if (fsp !== null && fsp >= highPressureThreshold) zr.high_pressure += 1
+    // high-pressure = acute tier A (A1); the raw forced-sale scale is not calibrated (§10)
+    if (tier === 'A') zr.high_pressure += 1
     if (tier === 'A') zr.tier_a += 1
     rankScores.push(ctx.rank?.rank_source === 'v2' ? ctx.rank.score : null)
     forced.push(fsp)

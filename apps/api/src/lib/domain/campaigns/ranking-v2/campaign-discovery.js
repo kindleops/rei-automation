@@ -20,7 +20,7 @@
 import { marketAssetLane } from '@/lib/domain/campaigns/ranking-v2/market-quality.js'
 
 export const DISCOVERY_VERSION = 'zip_discovery_v1'
-export const DISCOVERY_CONSTANTS = Object.freeze({ MIN_REACHABLE: 10, HIGH_PRESSURE: 60, TIER_B_WEIGHT: 0.5, UNKNOWN_MARKET_FACTOR: 0.5 })
+export const DISCOVERY_CONSTANTS = Object.freeze({ MIN_REACHABLE: 10, TIER_B_WEIGHT: 0.5, UNKNOWN_MARKET_FACTOR: 0.5 })
 
 function median(values) {
   const v = values.filter((x) => x !== null && Number.isFinite(x)).sort((a, b) => a - b)
@@ -53,8 +53,9 @@ export function rankDiscoveryZips(rows = [], contexts = [], { limit = 25 } = {})
     z.reachable += 1
     const tier = ctx.situation?.opportunity_tier
     z.tier[tier === 'A' || tier === 'B' || tier === 'C' ? tier : 'UNKNOWN'] += 1
-    const fsp = tier && tier !== 'UNKNOWN' ? ctx.situation?.components?.forced_sale_pressure : null
-    if (fsp !== null && fsp !== undefined && fsp >= C.HIGH_PRESSURE) z.high_pressure += 1
+    // "High-pressure" = acute tier A (≥2 hard distress families, A1). The raw
+    // forced-sale component is not calibrated yet (§10), so no FSP cut-off.
+    if (tier === 'A') z.high_pressure += 1
     const eq = row.equity_percent === null || row.equity_percent === undefined ? null : Number(row.equity_percent)
     z.equity.push(Number.isFinite(eq) ? eq : null)
     if (!z.market && ctx.market) z.market = ctx.market
@@ -71,8 +72,8 @@ export function rankDiscoveryZips(rows = [], contexts = [], { limit = 25 } = {})
     const investor = z.market?.terms?.investor_activity ?? null
     const headlineParts = [
       `${z.market_name || z.state || ''} ${z.zip}`.trim(),
-      `${z.high_pressure} high-pressure sellers`,
-      `${z.tier.A} tier A · ${z.tier.B} tier B of ${z.reachable} reachable`,
+      `${z.high_pressure} high-pressure sellers (tier A)`,
+      `${z.tier.B} stacked (tier B) of ${z.reachable} reachable`,
       medianEquity === null ? null : `median equity ${Math.round(medianEquity)}%`,
       buyerDepth === null ? 'buyer depth not measured' : `${level(buyerDepth) === 'high' ? 'strong' : level(buyerDepth)} buyer depth`,
       investor === null ? null : `investor activity ${level(investor)}`,
