@@ -93,7 +93,7 @@ test('run: scores active markets before nationwide, every property exactly once,
   assert.equal(new Set(order).size, order.length, 'no property scored twice');
   const row = store.scores.get('Dal-0');
   assert.equal(row.score_version, 'seller_situation_v2');
-  assert.equal(row.input_model_version, 'raw_facts_v1');
+  assert.equal(row.input_model_version, 'raw_facts_v1.1');
   assert.equal(row.weights_version, WEIGHTS_VERSION);
   assert.equal(row.features_as_of, '2026-08-07');
 });
@@ -138,7 +138,7 @@ test('idempotent: rerunning skips rows already at this exact version + feature s
   const again = await runTick({ store, clock: () => NIGHT, sleep: async () => {} });
   assert.equal(again.scored, 0);
   assert.equal(again.skipped_existing, 14);
-  const ex = { score_version: 'seller_situation_v2', input_model_version: 'raw_facts_v1', weights_version: WEIGHTS_VERSION, features_as_of: '2026-08-07' };
+  const ex = { score_version: 'seller_situation_v2', input_model_version: 'raw_facts_v1.1', weights_version: WEIGHTS_VERSION, features_as_of: '2026-08-07' };
   assert.equal(shouldSkipExisting(ex, '2026-08-07'), true);
   assert.equal(shouldSkipExisting(ex, '2026-11-01'), false, 'features rebuilt => rescore');
   assert.equal(shouldSkipExisting({ ...ex, weights_version: 'old' }, '2026-08-07'), false);

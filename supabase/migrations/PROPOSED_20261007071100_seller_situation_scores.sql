@@ -20,7 +20,8 @@
 --   component_index → 0 forced_sale_pressure, 1 landlord_fatigue, 2 equity_unlock, 3 property_burden,
 --   4 tax_pain, 5 debt_pressure; source_index → seller_situation_evidence_sources.idx. value is omitted
 --   when it is boolean true. Decoder: codec.js decodeEvidence().
--- Size (measured on 10,856 real properties): payload mean 1,117 B; with tuple header + index ≈ 1.8–2.2 KB
+-- Input model raw_facts_v1.1 (owner rule 10-07): 0/blank loan => equity unknown unless a DealMachine flag gives a class.
+-- Size (measured on 10,856 real properties): payload mean 1,079 B (v1.1); with tuple header + index ≈ 1.8–2.2 KB
 --   on disk; 176,610 properties ≈ 0.35–0.45 GB total (vs 25–35 GB if full engine evidence were stored).
 --
 -- Rollback: PROPOSED_20261007071100_seller_situation_scores_rollback.sql
@@ -203,7 +204,9 @@ INSERT INTO public.seller_situation_evidence_codes (code, label, kind) VALUES
   ('EQUITY_60P', 'Equity ≥ 60%', 'support'),
   ('EQUITY_40P', 'Equity ≥ 40%', 'support'),
   ('EQUITY_20P', 'Equity ≥ 20%', 'context'),
-  ('FREE_AND_CLEAR', 'Free and clear', 'support'),
+  ('FREE_AND_CLEAR', 'Free and clear (raw_facts_v1 rows only; retired in v1.1)', 'context'),
+  ('VF_FREE_AND_CLEAR', 'Free and clear (DealMachine flag)', 'support'),
+  ('VF_HIGH_EQUITY', 'High equity (DealMachine flag, no %)', 'support'),
   ('HIGH_EQUITY_CORROBORATED', 'High equity (corroborated)', 'context'),
   ('LONG_HOLD_EQUITY', 'Long hold (15+ yrs) equity', 'context'),
   ('MID_HOLD_EQUITY', 'Hold 10+ yrs equity', 'context'),

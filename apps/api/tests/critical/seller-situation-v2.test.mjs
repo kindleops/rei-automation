@@ -56,14 +56,14 @@ const codes = (r) => r.evidence.map((e) => e.code);
 test('versioning: every result carries score_version, input_model_version, weights_version, scored_at', () => {
   const r = score();
   assert.equal(r.score_version, 'seller_situation_v2');
-  assert.equal(r.input_model_version, 'raw_facts_v1');
+  assert.equal(r.input_model_version, 'raw_facts_v1.1');
   assert.equal(SCORE_VERSION, 'seller_situation_v2');
-  assert.equal(INPUT_MODEL_VERSION, 'raw_facts_v1');
+  assert.equal(INPUT_MODEL_VERSION, 'raw_facts_v1.1');
   assert.match(r.weights_version, /^ssv2_weights_/);
   assert.equal(r.scored_at, NOW);
   const row = encodeSellerSituationRow(r);
   assert.equal(row.score_version, 'seller_situation_v2');
-  assert.equal(row.input_model_version, 'raw_facts_v1');
+  assert.equal(row.input_model_version, 'raw_facts_v1.1');
 });
 
 // ── no Podio contamination (§3) ───────────────────────────────────────────
@@ -195,11 +195,55 @@ test('absentee + tenure + portfolio: landlord fatigue only for non-owner-occupie
   for (const c of ['ABSENTEE', 'OUT_OF_STATE', 'TENURE_20Y', 'PORTFOLIO_5P', 'TIRED_LANDLORD_CORROBORATED']) assert.ok(codes(ll).includes(c), c);
 });
 
-test('equity: banded equity_unlock; equity carries NO sell-probability weight (calibration §10)', () => {
-  const lo = score({ eqt_equity_percent: 10 });
-  const hi = score({ eqt_equity_percent: 90, eqt_free_and_clear: true, eqt_ltv: 0, dbt_total_balance: 0 });
+test('equity: banded equity_unlock when the loan is known; equity carries NO sell-probability weight (calibration §10)', () => {
+  const lo = score({ eqt_equity_percent: 10, dbt_total_balance: 270_000, eqt_ltv: 0.9 });
+  const hi = score({ eqt_equity_percent: 90, dbt_total_balance: 30_000, eqt_ltv: 0.1 });
   assert.ok(hi.components.equity_unlock > lo.components.equity_unlock);
-  assert.equal(hi.sell_probability.d365, score({ eqt_ltv: 0, dbt_total_balance: 0, eqt_equity_percent: 10 }).sell_probability.d365);
+  assert.ok(codes(hi).includes('EQUITY_80P'));
+  assert.equal(hi.sell_probability.d365, score({ eqt_equity_percent: 50, dbt_total_balance: 30_000, eqt_ltv: 0.1 }).sell_probability.d365);
+});
+
+test('equity rule (owner 10-07): a 0 or blank loan balance means equity UNKNOWN, never 100%', () => {
+  for (const loan of [0, null]) {
+    const r = score({ dbt_total_balance: loan, eqt_equity_percent: 100, eqt_free_and_clear: true, eqt_ltv: 0, eqt_high_equity_corroborated: true, dbt_payment_to_value: null });
+    assert.equal(r.components.equity_unlock, null, `loan=${loan}`);
+    assert.equal(r.components.debt_pressure, null, 'LTV 0 from a missing loan is not "no debt"');
+    for (const c of ['EQUITY_80P', 'EQUITY_60P', 'EQUITY_40P', 'FREE_AND_CLEAR', 'VF_FREE_AND_CLEAR', 'HIGH_EQUITY_CORROBORATED', 'LONG_HOLD_EQUITY', 'NON_PRIMARY_EQUITY']) {
+      assert.ok(!codes(r).includes(c), `${c} fired on loan=${loan}`);
+    }
+    assert.ok(r.coverage.missing.includes('equity_known') && r.coverage.missing.includes('ltv'));
+    assert.ok(r.coverage.ratio < 1);
+  }
+  // value unknown also => unknown
+  assert.equal(score({ val_estimated_value: null, dbt_total_balance: 90_000 }, { estimated_value: null }).components.equity_unlock, null);
+  // properties fallback: equity_percent 100 with total_loan_balance 0 is not evidence either
+  const fb = scoreSellerSituation(buildRawFactsFromRows({ features: null, property: property({ equity_percent: 100, total_loan_balance: 0, estimated_value: 250_000 }) }), { now: NOW });
+  assert.equal(fb.components.equity_unlock, null);
+});
+
+test('equity rule: vendor flags give a CLASS (no %) with vendor_flag provenance', () => {
+  const zero = { dbt_total_balance: 0, eqt_equity_percent: 100, eqt_ltv: 0, own_owner_occupied: false, own_absentee: true };
+  const fc = score(zero, { property_flags_text: 'Free And Clear; Absentee Owner' });
+  const e = fc.evidence.find((x) => x.code === 'VF_FREE_AND_CLEAR');
+  assert.ok(e, codes(fc).join(','));
+  assert.equal(e.provenance, 'vendor_flag');
+  assert.equal(e.source_field, 'property_flags_text');
+  assert.ok(!codes(fc).includes('EQUITY_80P'), 'no % is invented from a flag');
+  const he = score(zero, { property_flags_text: 'High Equity' });
+  assert.ok(codes(he).includes('VF_HIGH_EQUITY'));
+  assert.ok(he.components.equity_unlock < fc.components.equity_unlock);
+  const le = score(zero, { property_flags_text: 'Low Equity' });
+  assert.equal(le.components.equity_unlock, 0, 'low class is known, scores 0');
+  // with a known loan the % governs, flags never override it
+  const known = score({ eqt_equity_percent: 15, dbt_total_balance: 255_000, eqt_ltv: 0.85 }, { property_flags_text: 'Free And Clear' });
+  assert.ok(!codes(known).includes('VF_FREE_AND_CLEAR'));
+});
+
+test('tier rule "1 acute hard + equity ≥ 40" fires only on KNOWN equity', () => {
+  const zeroLoan = { fcl_any: true, dbt_total_balance: 0, eqt_equity_percent: 100, eqt_ltv: 0 };
+  assert.notEqual(score(zeroLoan).opportunity_tier, 'A', 'zero loan must not count as high equity');
+  assert.equal(score(zeroLoan, { property_flags_text: 'Free And Clear' }).opportunity_tier, 'A');
+  assert.equal(score({ fcl_any: true, eqt_equity_percent: 55, dbt_total_balance: 135_000, eqt_ltv: 0.45 }).opportunity_tier, 'A');
 });
 
 test('repair: the $/sqft repair tier is a formula estimate — low weight, flagged formula_estimate, lowers confidence', () => {
@@ -368,7 +412,7 @@ test('engine ON: motivation/distress come from raw facts; changing Podio scores 
   const on = (row) => normalizePropertyFeatures(row, { source: 'properties', now: new Date(NOW), sellerScoringRawFacts: true });
   const a = on(SUBJECT);
   const b = on({ ...SUBJECT, structured_motivation_score: 1, tag_distress_score: 1, final_acquisition_score: 1, deal_strength_score: 1 });
-  assert.equal(a.motivation_input_model, 'raw_facts_v1');
+  assert.equal(a.motivation_input_model, 'raw_facts_v1.1');
   assert.equal(a.seller_situation_v2.score_version, 'seller_situation_v2');
   assert.equal(a.motivation_score, b.motivation_score);
   assert.equal(a.distress_score, b.distress_score);

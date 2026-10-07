@@ -53,7 +53,7 @@
 /**
  * @typedef {Object} SellerSituationResult
  * @property {'seller_situation_v2'} score_version
- * @property {'raw_facts_v1'} input_model_version
+ * @property {'raw_facts_v1.1'} input_model_version   (v1.1 2026-10-07: 0/blank loan ⇒ equity unknown)
  * @property {string} scored_at                         ISO timestamp (ctx.now)
  * @property {string} property_id
  * @property {Record<ComponentKey, number|null>} components   0–100; null = no evidence coverage for that component

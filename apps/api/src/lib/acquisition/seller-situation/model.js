@@ -18,8 +18,13 @@
 // silently (§78).
 
 export const SCORE_VERSION = 'seller_situation_v2';
-export const INPUT_MODEL_VERSION = 'raw_facts_v1';
-export const WEIGHTS_VERSION = 'ssv2_weights_2026_10_07';
+export const INPUT_MODEL_VERSION = 'raw_facts_v1.1';
+// raw_facts_v1.1 (owner rule 2026-10-07): a blank or 0 loan balance means
+// equity UNKNOWN, never 100%. Equity % / LTV are known only when loan > 0 AND
+// value > 0; otherwise only an explicit DealMachine flag gives a CLASS
+// ("Free And Clear" / "High Equity" = high, "Low Equity" = low) with
+// provenance vendor_flag. No flag ⇒ equity_unlock is null and coverage drops.
+export const WEIGHTS_VERSION = 'ssv2_weights_2026_10_07b';
 
 export const COMPONENTS = Object.freeze([
   'forced_sale_pressure',
@@ -156,17 +161,17 @@ export const FACT_FIELDS = Object.freeze([
 /** Fields that decide coverage (a component is unknown when all of its fields are). */
 export const CORE_FIELDS = Object.freeze([
   'tax_delinquent', 'lien_active', 'foreclosure_any', 'probate', 'vacant', 'absentee',
-  'tenure_years', 'equity_percent', 'ltv', 'annual_tax', 'condition_class', 'year_built',
+  'tenure_years', 'equity_known', 'ltv', 'annual_tax', 'condition_class', 'year_built',
   'portfolio_count', 'estimated_value',
 ]);
 
 const COMPONENT_FIELDS = Object.freeze({
   forced_sale_pressure: ['tax_delinquent', 'lien_active', 'foreclosure_any', 'probate', 'vacant'],
   landlord_fatigue: ['absentee', 'owner_occupied', 'out_of_state', 'tenure_years', 'portfolio_count'],
-  equity_unlock: ['equity_percent', 'free_and_clear', 'ltv'],
+  equity_unlock: ['equity_percent', 'equity_class'],
   property_burden: ['condition_class', 'condition_text', 'year_built', 'vacant'],
   tax_pain: ['tax_delinquent', 'annual_tax', 'eff_tax_rate'],
-  debt_pressure: ['ltv', 'loan_balance', 'equity_percent'],
+  debt_pressure: ['ltv'],
 });
 
 const CONDITION_TEXT_CLASS = Object.freeze({ unsound: 1, poor: 2, fair: 3, average: 4, good: 5, 'very good': 6, excellent: 7 });
@@ -193,6 +198,41 @@ function scalar(v) {
   if (typeof v === 'number') return Math.round(v * 10000) / 10000;
   if (typeof v === 'boolean') return v;
   return clean(v).slice(0, 40);
+}
+
+/**
+ * Owner rule 2026-10-07 (raw_facts_v1.1). Mutates facts/sources:
+ *   loan > 0 AND value > 0 ⇒ equity_percent (vendor % if present, else computed) and ltv are KNOWN;
+ *   otherwise equity_percent / ltv / free_and_clear / high_equity_corroborated are UNKNOWN (null) —
+ *   a 0 or blank loan balance is not evidence of 100% equity, and LTV 0 is not evidence of no debt;
+ *   equity_class comes ONLY from an explicit DealMachine flag (free_and_clear | high | low), provenance vendor_flag.
+ */
+export function applyEquityKnownRule(facts, sources, flags) {
+  const loan = num(facts.loan_balance);
+  const value = num(facts.estimated_value);
+  const loanKnown = loan !== null && loan > 0 && value !== null && value > 0;
+  if (loanKnown) {
+    if (num(facts.equity_percent) === null) {
+      facts.equity_percent = Math.round(((value - loan) / value) * 1000) / 10;
+      sources.equity_percent = { ...(sources.loan_balance || {}), field: sources.loan_balance?.field ?? 'loan_balance', provenance: 'derived_ratio' };
+    }
+    if (num(facts.ltv) === null || num(facts.ltv) === 0) {
+      facts.ltv = loan / value;
+      sources.ltv = { ...(sources.loan_balance || {}), field: sources.loan_balance?.field ?? 'loan_balance', provenance: 'derived_ratio' };
+    }
+  } else {
+    for (const k of ['equity_percent', 'ltv', 'free_and_clear', 'high_equity_corroborated', 'payment_to_value']) {
+      facts[k] = null;
+      delete sources[k];
+    }
+  }
+  facts.free_and_clear = null; // a computed 0-loan "free & clear" is never evidence; only the vendor flag is
+  delete sources.free_and_clear;
+  const f = flags instanceof Set ? flags : new Set();
+  facts.equity_class = f.has('free and clear') ? 'free_and_clear' : f.has('high equity') ? 'high' : f.has('low equity') ? 'low' : null;
+  if (facts.equity_class) sources.equity_class = { table: 'properties', field: 'property_flags_text', provenance: 'vendor_flag' };
+  facts.equity_known = loanKnown || facts.equity_class !== null ? true : null;
+  if (facts.equity_known) sources.equity_known = loanKnown ? sources.equity_percent : sources.equity_class;
 }
 
 export function isoDay(v) {
@@ -252,6 +292,7 @@ export function buildRawFactsFromRows({ property = null, features = null } = {})
     facts[key] = value;
     if (src) sources[key] = src;
   }
+  applyEquityKnownRule(facts, sources, parseVendorFlags(p.property_flags_text ?? p.property_flags_json));
   // pg returns `date` columns as a local-midnight Date: keep the calendar day, never String(Date).
   for (const k of ['as_of_date']) if (facts[k] !== null) facts[k] = isoDay(facts[k]);
   // Foreclosure fallback on properties spans several boolean columns.
@@ -314,7 +355,7 @@ export const HARD_FAMILIES = Object.freeze({
 const ACUTE_CODES = new Set(['FORECLOSURE_ACTIVE', 'LIS_PENDENS', 'TAX_DELINQUENT_MULTI_YEAR', 'AUCTION_WITHIN_90D', 'VF_PREFORECLOSURE']);
 export const SUPPORTING_CODES = Object.freeze([
   'ABSENTEE', 'OUT_OF_STATE', 'TENURE_20Y', 'TENURE_15Y', 'PORTFOLIO_5P', 'PORTFOLIO_3P',
-  'EQUITY_80P', 'EQUITY_60P', 'EQUITY_40P', 'FREE_AND_CLEAR', 'CONDITION_FAIR', 'VF_HEAVILY_DATED',
+  'EQUITY_80P', 'EQUITY_60P', 'EQUITY_40P', 'VF_FREE_AND_CLEAR', 'VF_HIGH_EQUITY', 'CONDITION_FAIR', 'VF_HEAVILY_DATED',
   'BUILT_PRE_1960', 'LTV_95P', 'LTV_80P', 'ARM_LOAN', 'LOAN_MATURES_24M', 'TIRED_LANDLORD_CORROBORATED', 'ENTITY_DISSOLVED',
 ]);
 const SUPPORTING = new Set(SUPPORTING_CODES);
@@ -371,11 +412,14 @@ export function scoreSellerSituation(rawFacts, ctx = {}) {
   const tenure = num(F.tenure_years);
   const portfolio = num(F.portfolio_count);
   const equity = num(F.equity_percent);
-  const freeClear = bool(F.free_and_clear) ?? (equity !== null && equity >= 100 ? true : null);
+  const equityClass = F.equity_class ?? null; // vendor flag class, used only when the % is unknown
+  const freeClear = equityClass === 'free_and_clear' ? true : null;
+  // Lower bound used by tier / situation gates. Vendor classes are conservative floors, never a %.
+  const equityFloor = equity !== null ? equity : equityClass === 'free_and_clear' ? 80 : equityClass === 'high' ? 50 : null;
+  const equityKnown = equity !== null || equityClass !== null;
   const value = num(F.estimated_value);
   const loan = num(F.loan_balance);
-  let ltv = num(F.ltv);
-  if (ltv === null && value && value > 0 && loan !== null) ltv = loan / value;
+  const ltv = num(F.ltv); // already gated by applyEquityKnownRule (loan > 0 and value > 0)
   const ptv = num(F.payment_to_value) ?? (value && num(F.monthly_payment) !== null ? (num(F.monthly_payment) * 12) / value : null);
   const annualTax = num(F.annual_tax);
   const taxRate = num(F.eff_tax_rate) ?? (value && annualTax !== null ? annualTax / value : null);
@@ -448,14 +492,17 @@ export function scoreSellerSituation(rawFacts, ctx = {}) {
     else if (equity >= 40) add('equity_unlock', 'EQUITY_40P', 25, 'equity_percent', equity);
     else if (equity >= 20) add('equity_unlock', 'EQUITY_20P', 10, 'equity_percent', equity);
   }
-  if (freeClear === true) add('equity_unlock', 'FREE_AND_CLEAR', 10, sources(rf, 'free_and_clear') ? 'free_and_clear' : 'equity_percent', true);
-  if (tenure !== null && tenure >= 15) add('equity_unlock', 'LONG_HOLD_EQUITY', 12, 'tenure_years', tenure);
-  else if (tenure !== null && tenure >= 10) add('equity_unlock', 'MID_HOLD_EQUITY', 7, 'tenure_years', tenure);
+  else if (equityClass === 'free_and_clear') add('equity_unlock', 'VF_FREE_AND_CLEAR', 40, '__flag', 'Free And Clear');
+  else if (equityClass === 'high') add('equity_unlock', 'VF_HIGH_EQUITY', 28, '__flag', 'High Equity');
+  // Everything below needs KNOWN equity (a % or a vendor class) — never a zero/blank loan.
+  const eqHold = equityKnown && equityFloor !== null && equityFloor >= 20;
+  if (eqHold && tenure !== null && tenure >= 15) add('equity_unlock', 'LONG_HOLD_EQUITY', 12, 'tenure_years', tenure);
+  else if (eqHold && tenure !== null && tenure >= 10) add('equity_unlock', 'MID_HOLD_EQUITY', 7, 'tenure_years', tenure);
   const appr = num(F.appreciation_ratio);
   const apprReliable = bool(F.price_reliable) === true;
-  if (apprReliable && appr !== null && appr >= 2) add('equity_unlock', 'VALUE_2X_PURCHASE', 12, 'appreciation_ratio', appr);
-  if (absentee === true && equity !== null && equity >= 40) add('equity_unlock', 'NON_PRIMARY_EQUITY', 8, 'absentee', true);
-  if (bool(F.high_equity_corroborated) === true) add('equity_unlock', 'HIGH_EQUITY_CORROBORATED', 6, 'high_equity_corroborated', true);
+  if (eqHold && apprReliable && appr !== null && appr >= 2) add('equity_unlock', 'VALUE_2X_PURCHASE', 12, 'appreciation_ratio', appr);
+  if (absentee === true && equityFloor !== null && equityFloor >= 40) add('equity_unlock', 'NON_PRIMARY_EQUITY', 8, 'absentee', true);
+  if (equity !== null && bool(F.high_equity_corroborated) === true) add('equity_unlock', 'HIGH_EQUITY_CORROBORATED', 6, 'high_equity_corroborated', true);
 
   // ── PROPERTY BURDEN ──
   if (condClass !== null) {
@@ -491,10 +538,10 @@ export function scoreSellerSituation(rawFacts, ctx = {}) {
 
   // ── DEBT PRESSURE ──
   if (ltv !== null) {
-    if (ltv >= 0.95) add('debt_pressure', 'LTV_95P', 45, num(F.ltv) !== null ? 'ltv' : 'loan_balance', ltv);
-    else if (ltv >= 0.8) add('debt_pressure', 'LTV_80P', 35, num(F.ltv) !== null ? 'ltv' : 'loan_balance', ltv);
-    else if (ltv >= 0.65) add('debt_pressure', 'LTV_65P', 22, num(F.ltv) !== null ? 'ltv' : 'loan_balance', ltv);
-    else if (ltv >= 0.45) add('debt_pressure', 'LTV_45P', 10, num(F.ltv) !== null ? 'ltv' : 'loan_balance', ltv);
+    if (ltv >= 0.95) add('debt_pressure', 'LTV_95P', 45, 'ltv', ltv);
+    else if (ltv >= 0.8) add('debt_pressure', 'LTV_80P', 35, 'ltv', ltv);
+    else if (ltv >= 0.65) add('debt_pressure', 'LTV_65P', 22, 'ltv', ltv);
+    else if (ltv >= 0.45) add('debt_pressure', 'LTV_45P', 10, 'ltv', ltv);
   }
   if (equity !== null && equity < 0) add('debt_pressure', 'NEGATIVE_EQUITY', 10, 'equity_percent', equity);
   if (ptv !== null && ptv >= 0.06) add('debt_pressure', 'PAYMENT_GE_6PCT_VALUE', 15, num(F.payment_to_value) !== null ? 'payment_to_value' : 'monthly_payment', ptv);
@@ -505,7 +552,9 @@ export function scoreSellerSituation(rawFacts, ctx = {}) {
   if (jr !== null && jr >= 1) add('debt_pressure', 'JUNIOR_LIEN', 8, 'junior_liens', jr);
 
   // ── components + coverage ──
-  const componentKnown = (c) => COMPONENT_FIELDS[c].some((k) => known(F[k])) || (c === 'landlord_fatigue' && rental);
+  // A component is known when one of its fields is known OR evidence fired in it (e.g. foreclosure → debt).
+  const componentKnown = (c) => COMPONENT_FIELDS[c].some((k) => known(F[k])) || (c === 'landlord_fatigue' && rental)
+    || evidence.some((e) => e.component === c);
   const components = {};
   for (const c of COMPONENTS) components[c] = componentKnown(c) ? Math.round(clamp(totals[c])) : null;
   const missing = CORE_FIELDS.filter((k) => !known(F[k]));
@@ -547,7 +596,8 @@ export function scoreSellerSituation(rawFacts, ctx = {}) {
   } else if (hardFamilies.length >= 2) {
     tier = 'A';
     tier_reasons = hardCodes;
-  } else if (hardFamilies.length === 1 && acute.length && equity !== null && equity >= 40) {
+  } else if (hardFamilies.length === 1 && acute.length && equityFloor !== null && equityFloor >= 40) {
+    // equityFloor is non-null only for KNOWN equity (loan > 0 and value > 0, or an explicit vendor class).
     tier = 'A';
     tier_reasons = [...hardCodes, ...acute.filter((c) => !hardCodes.includes(c)), 'EQUITY_GE_40'];
   } else if (hardFamilies.length === 1 && supporting.length >= 2) {
@@ -563,7 +613,7 @@ export function scoreSellerSituation(rawFacts, ctx = {}) {
   }
 
   // ── situation + angle (angle only with supporting evidence) ──
-  const { situation, angle } = resolveSituation({ components, fired, absentee, outOfState, equity, tenure, vacant, freeClear, apprReliable, appr, unknownTier });
+  const { situation, angle } = resolveSituation({ components, fired, absentee, outOfState, equity: equityFloor, tenure, vacant, freeClear, apprReliable, appr, unknownTier });
 
   // Confidence: coverage × provenance quality × freshness.
   const formulaShare = evidence.length ? evidence.filter((e) => e.provenance === 'formula_estimate').length / evidence.length : 0;
@@ -597,8 +647,6 @@ export function scoreSellerSituation(rawFacts, ctx = {}) {
     },
   };
 }
-
-function sources(rf, key) { return Boolean(rf.sources?.[key]); }
 
 export function resolveSituation({ components, fired, absentee, outOfState, equity, tenure, vacant, freeClear, apprReliable, appr, unknownTier }) {
   if (unknownTier) return { situation: 'NO_CLEAR_SITUATION', angle: null };

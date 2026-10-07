@@ -759,7 +759,7 @@ function normalizeBooleanCategory(value) {
  * only for the subject (source 'properties'; comps never): seller_situation_v2
  * / raw_facts_v1 replaces every Podio-era score, and the legacy master-owner
  * pressure/urgency scores are nulled. The subject is stamped
- * motivation_input_model = 'raw_facts_v1' so legacy-hybrid and raw-facts
+ * motivation_input_model = input_model_version (raw_facts_v1.x) so legacy-hybrid and raw-facts
  * outputs are never indistinguishable (§6).
  */
 function motivationDistressInputs(row = {}, options = {}) {
