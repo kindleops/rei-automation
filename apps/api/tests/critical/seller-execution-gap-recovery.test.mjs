@@ -18,6 +18,7 @@ function makeFakeSupabase(seed = {}) {
     // empty array), so without this the S6 accepted-offer check would read
     // empty for every fixture and no repair could ever be proven.
     seller_offers: seed.seller_offers || [],
+    closing_cases: seed.closing_cases || [],
     other: [],
   };
 
@@ -121,7 +122,7 @@ test("stale active lead without next action gets one restored from its deal reco
   assert.equal(supabase._state.inbox_thread_state[0].next_action, "send_message_now");
 });
 
-test("accepted terms without contract advances the deal and flags review", async () => {
+test("accepted terms with a live closing case advances the deal to S6 and flags review", async () => {
   const supabase = makeFakeSupabase({
     acquisition_opportunities: [
       {
@@ -150,6 +151,9 @@ test("accepted terms without contract advances the deal and flags review", async
         accepted_at: "2026-07-01T00:00:00.000Z",
       },
     ],
+    // Owner 2026-10-07: Formal Contract follows an explicit contract event —
+    // a live closing case created through the canonical path.
+    closing_cases: [{ closing_case_id: "cc-2", opportunity_id: "opp-2", closing_status: "not_scheduled", contract_status: "draft" }],
     inbox_thread_state: [
       { thread_key: "+13125550111", lifecycle_stage: "offer", operational_status: "active_communication", updated_at: OLD, is_archived: false },
     ],
@@ -161,6 +165,27 @@ test("accepted terms without contract advances the deal and flags review", async
   assert.equal(supabase._state.acquisition_opportunities[0].acquisition_stage, "formal_contract");
   assert.equal(supabase._state.inbox_thread_state[0].lifecycle_stage, "formal_contract");
   assert.equal(supabase._state.inbox_thread_state[0].next_action, "generate_contract");
+});
+
+test("accepted terms WITHOUT a contract event never moves the deal to S6 (stage gate)", async () => {
+  const supabase = makeFakeSupabase({
+    acquisition_opportunities: [
+      { id: "opp-2", primary_thread_key: "+13125550111", acquisition_stage: "offer", opportunity_status: "active", version: 1,
+        metadata: { negotiation_state: { terms_accepted: true, accepted_price: 87500 } } },
+    ],
+    seller_offers: [
+      { offer_id: "offer:opp-2:v1", opportunity_id: "opp-2", offer_version: 1, status: "accepted", purchase_price: 87500, terms_hash: "hash-1", sent_at: "2026-06-30T00:00:00.000Z", accepted_at: "2026-07-01T00:00:00.000Z" },
+    ],
+    inbox_thread_state: [
+      { thread_key: "+13125550111", lifecycle_stage: "offer", operational_status: "active_communication", updated_at: OLD, is_archived: false },
+    ],
+  });
+  const result = await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW });
+  const sweep = result.sweeps.find((s) => s.gap === "accepted_terms_without_contract");
+  assert.equal(sweep.repaired, 0);
+  assert.equal(sweep.results[0].reason, "CONTRACT_EVENT_REQUIRED");
+  assert.equal(supabase._state.acquisition_opportunities[0].acquisition_stage, "offer");
+  assert.equal(supabase._state.inbox_thread_state[0].lifecycle_stage, "offer");
 });
 
 test("S6: terms_accepted with NO durable accepted offer is not repaired to S6", async () => {

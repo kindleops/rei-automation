@@ -26,6 +26,7 @@
 // This module performs NO send. It only records the contract that an autonomous
 // acceptance produced; envelope creation is a separate, gated step.
 
+import { assessDealAmount } from "@/lib/domain/opportunity/stage-advance-guard.js";
 import crypto from "node:crypto";
 
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
@@ -115,6 +116,12 @@ export function resolveCanonicalTerms({
   const seller_contract_price = toNumber(accepted_offer.accepted_price ?? accepted_offer.purchase_price);
   if (!seller_contract_price) {
     return { ok: false, reason: "accepted_offer_missing_price" };
+  }
+  // A contract price must be a plausible property price (2026-10-07: a "$4,100"
+  // misparse reached formal_contract). A bare year / sub-$10K amount refuses.
+  const price_check = assessDealAmount(seller_contract_price, { estimated_value: opportunity.estimated_value, arv: opportunity.arv });
+  if (!price_check.plausible) {
+    return { ok: false, reason: "contract_price_implausible", price_rule: price_check.rule };
   }
 
   const property_address =

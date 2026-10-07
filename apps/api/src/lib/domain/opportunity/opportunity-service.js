@@ -23,6 +23,7 @@ import {
   validateTemperatureTransition,
 } from '@/lib/domain/opportunity/opportunity-stage-registry.js';
 import { emitOpportunityWorkflowEvent } from '@/lib/domain/opportunity/opportunity-workflow-bridge.js';
+import { evaluateStageAdvance, DEAD_CLOSING_STATUSES } from '@/lib/domain/opportunity/stage-advance-guard.js';
 import { buildOpportunityActivityTimeline } from '@/lib/domain/opportunity/opportunity-activity-timeline.js';
 import { batchHydrateOpportunityProperties } from '@/lib/domain/opportunity/opportunity-property-hydration.js';
 import { applyRegistryFilters, applyRegistrySorts } from '@/lib/domain/opportunity/pipeline-query-builder.js';
@@ -601,6 +602,26 @@ export async function transitionOpportunityStage(id, input = {}, deps = {}) {
     const { data: after, error: afterError } = await client.from(TABLE).select('*').eq('id', id).single();
     if (afterError) throw afterError;
     return { ok: true, opportunity: normalizeOpportunityRow(after), closed_via: 'closing_authority', closing };
+  }
+
+  // FAIL-CLOSED money / contract gate (2026-10-07): an automated move to Offer
+  // needs a real, plausible offer and a plausible ask; Formal Contract and later
+  // need a live closing case (or the closing authority itself). A parsed reply
+  // can never promote a deal on its own.
+  if (['formal_contract', 'disposition', 'under_contract', 'prepared_to_close', 'offer'].includes(requestedStage)) {
+    let live_closing_case = false;
+    if (requestedStage !== 'offer' && String(input.source || '').toLowerCase() !== 'closing_authority') {
+      try {
+        const { data: cases } = await client.from('closing_cases').select('closing_status, contract_status').eq('opportunity_id', id).limit(20);
+        live_closing_case = (cases || []).some((c) =>
+          !DEAD_CLOSING_STATUSES.has(String(c?.closing_status || '').toLowerCase()) &&
+          !DEAD_CLOSING_STATUSES.has(String(c?.contract_status || '').toLowerCase()));
+      } catch {
+        live_closing_case = false; // fail closed
+      }
+    }
+    const guard = evaluateStageAdvance({ current, to_stage: requestedStage, source: input.source, live_closing_case });
+    if (!guard.ok) return guard;
   }
 
   const validation = validateStageTransition({
