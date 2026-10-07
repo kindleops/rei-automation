@@ -33,6 +33,7 @@ import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isLanguagePolicyToken, resolveLanguage, templateCatalogLanguageName, templateLanguageHold } from "@/lib/sms/language_aliases.js";
 import { normalizeCampaignStageCode } from "@/lib/domain/campaigns/campaign-stage-code.js";
 import { canonicalPropertyGroupOf, filterTemplatesForProperty } from "@/lib/domain/templates/template-asset-compatibility.js";
+import { evaluateRotationEligibility, rotationTrafficWeight, UNGOVERNED_POLICY } from "@/lib/domain/campaigns/template-governance.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
@@ -91,6 +92,9 @@ const REASON_CODES = Object.freeze({
   // rc-7.1 D8: every template that could serve this seller is excluded by
   // template governance (rotation control says pause); held, not dropped.
   TEMPLATE_GOVERNANCE_PAUSED: "TEMPLATE_GOVERNANCE_PAUSED",
+  // Every fitting template reached today's governance daily cap. NOT a hold:
+  // the seller stays ready and the pool reopens at the next UTC day.
+  TEMPLATE_DAILY_CAP_EXHAUSTED: "TEMPLATE_DAILY_CAP_EXHAUSTED",
   TEMPLATE_RENDER_FAILED: "TEMPLATE_RENDER_FAILED",
   NO_VALID_TEXTGRID_NUMBER: "NO_VALID_TEXTGRID_NUMBER",
   ROUTING_BLOCKED: "ROUTING_BLOCKED",
@@ -1475,7 +1479,27 @@ function stableSeedModulo(seed = "", modulo = 1) {
   return Number.isFinite(numeric) ? numeric % safe_modulo : 0;
 }
 
-function chooseRotatingTemplate(candidates = [], seed = "") {
+/**
+ * Deterministic weighted pick: the seed's hash is a point on [0, total
+ * weight) and the template whose cumulative band contains it is chosen. With
+ * every weight 1 (or no weight function) this is exactly the uniform
+ * hash-modulo pick it replaces.
+ */
+function weightedSeedIndex(seed = "", weights = []) {
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  if (!(total > 0)) return 0;
+  const digest = crypto.createHash("sha1").update(clean(seed)).digest("hex");
+  const fraction = Number.parseInt(digest.slice(0, 8), 16) / 0x100000000;
+  const point = fraction * total;
+  let cumulative = 0;
+  for (let i = 0; i < weights.length; i += 1) {
+    cumulative += weights[i];
+    if (point < cumulative) return i;
+  }
+  return weights.length - 1;
+}
+
+function chooseRotatingTemplate(candidates = [], seed = "", weightOf = null) {
   if (!Array.isArray(candidates) || candidates.length === 0) {
     return {
       selected: null,
@@ -1485,7 +1509,15 @@ function chooseRotatingTemplate(candidates = [], seed = "") {
     };
   }
 
-  const index = stableSeedModulo(seed, candidates.length);
+  const weights = typeof weightOf === "function"
+    ? candidates.map((template) => {
+        const w = Number(weightOf(template));
+        return Number.isFinite(w) && w > 0 ? w : 1;
+      })
+    : null;
+  const index = weights && weights.some((w) => w !== 1)
+    ? weightedSeedIndex(seed, weights)
+    : stableSeedModulo(seed, candidates.length);
   const selected = candidates[index] || candidates[0] || null;
   return {
     selected,
@@ -3343,16 +3375,34 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     return deps.renderOutboundTemplate(candidate, options);
   }
   const excluded = templateIdSet(options.governance_excluded_template_ids);
-  if (!excluded.size) return renderOutboundTemplateCore(candidate, options, deps);
+  const hasRotationGovernance = options.rotation_governance instanceof Map;
+  if (!excluded.size && !hasRotationGovernance) return renderOutboundTemplateCore(candidate, options, deps);
 
   const gated = await renderOutboundTemplateCore(candidate, options, deps);
   if (gated?.ok || gated?.reason_code !== REASON_CODES.NO_TEMPLATE) return gated;
   const ungated = await renderOutboundTemplateCore(
     candidate,
-    { ...options, governance_excluded_template_ids: null },
+    { ...options, governance_excluded_template_ids: null, rotation_governance: null },
     deps
   );
   if (ungated?.reason_code === REASON_CODES.NO_TEMPLATE) return gated;
+  const ungatedId = clean(ungated?.template_id || getTemplateReferenceId(ungated?.template) || "");
+  // What emptied the pool decides the outcome: a reviewed-and-refused
+  // template holds the seller; a pool emptied only by today's daily caps (or a
+  // fail-closed unreviewed template) does not — the seller stays ready.
+  if (hasRotationGovernance && !excluded.has(ungatedId)) {
+    const row = options.rotation_governance.get(ungatedId);
+    if (row) {
+      return {
+        ...gated,
+        reason_code: REASON_CODES.TEMPLATE_DAILY_CAP_EXHAUSTED,
+        reason: "template_daily_caps_exhausted",
+        render_error_message: "Every template that fits this seller has reached today's governance daily cap",
+        daily_cap_exhausted_template_id: ungatedId || null,
+      };
+    }
+    return gated;
+  }
   return {
     ...gated,
     reason_code: REASON_CODES.TEMPLATE_GOVERNANCE_PAUSED,
@@ -3503,6 +3553,32 @@ async function renderOutboundTemplateCore(candidate = {}, options = {}, deps = {
     const before = templates.length;
     templates = templates.filter((t) => !governance_excluded.has(String(getTemplateReferenceId(t) ?? "")));
     fetch_diagnostics.governance_excluded_template_count = before - templates.length;
+  }
+
+  // The SAME per-template verdict target-one enqueue applies
+  // (evaluateRotationEligibility): paused / zero-cap / today's daily cap
+  // reached leave the pool, so rotation spreads over what may still go out
+  // today. Supplied by the campaign planner (rotation_governance = the
+  // rotation-control rows by template_id, template_used_today = sends placed
+  // today by template_id, ungoverned_policy = how a never-reviewed template is
+  // treated). The operator blocklist stays after the cascade, below.
+  const rotation_governance = options.rotation_governance instanceof Map ? options.rotation_governance : null;
+  if (rotation_governance) {
+    const used_today = options.template_used_today instanceof Map ? options.template_used_today : null;
+    const before = templates.length;
+    const rejected = {};
+    templates = templates.filter((t) => {
+      const id = String(getTemplateReferenceId(t) ?? "");
+      const verdict = evaluateRotationEligibility(t, rotation_governance.get(id), {
+        applies: lower(t?.use_case || selector.use_case) === "ownership_check",
+        ungoverned: options.ungoverned_policy || UNGOVERNED_POLICY.DENY,
+        usedToday: used_today ? Number(used_today.get(id) || 0) : undefined,
+      });
+      if (!verdict.ok) rejected[verdict.reason] = (rejected[verdict.reason] || 0) + 1;
+      return verdict.ok;
+    });
+    fetch_diagnostics.rotation_eligibility_rejected_count = before - templates.length;
+    fetch_diagnostics.rotation_eligibility_rejected_by_reason = rejected;
   }
 
   // Save all fetched templates before language filter for English universal fallback
@@ -3732,8 +3808,12 @@ async function renderOutboundTemplateCore(candidate = {}, options = {}, deps = {
     campaign_key: clean(options.campaign_key || options.campaign_session_id || candidate.campaign_session_id),
     day_bucket: clean(options.day_bucket) || clean(options.now).slice(0, 10),
   });
+  // traffic_weight shapes the share once governance rows are supplied.
+  const rotation_weight_of = rotation_governance
+    ? (template) => rotationTrafficWeight(rotation_governance.get(String(getTemplateReferenceId(template) ?? "")))
+    : null;
   const rotation_choice = rotation_enabled
-    ? chooseRotatingTemplate(pool_result.pool, rotation_seed)
+    ? chooseRotatingTemplate(pool_result.pool, rotation_seed, rotation_weight_of)
     : {
         selected: selected_template,
         selected_index: selected_template ? 0 : -1,
