@@ -405,39 +405,10 @@ async function recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }) 
         return;
       }
       try {
-        const advanced = await transitionOpportunityStage(
-          opp.id,
-          {
-            to_stage: "formal_contract",
-            reason: "gap_recovery_accepted_terms_without_contract",
-            source: "seller_execution_gap_recovery",
-            next_action: NEXT_ACTIONS.GENERATE_CONTRACT,
-          },
-          { supabase }
-        );
-        if (!advanced?.ok) {
-          outcome.results.push({ opportunity_id: opp.id, ok: false, reason: advanced?.error || "stage_advance_blocked" });
-          return;
-        }
-        let state_patch_ok = null;
-        if (opp.primary_thread_key) {
-          state_patch_ok = await patchUniversalLeadState({
-            threadKey: opp.primary_thread_key,
-            patch: {
-              lifecycle_stage: "formal_contract",
-              next_action: NEXT_ACTIONS.GENERATE_CONTRACT,
-              operational_status: "needs_review",
-            },
-            supabase,
-            meta: {
-              change_source: STATE_SOURCE_CODES.SYSTEM,
-              source_view: "seller_execution_gap_recovery",
-              reason: "accepted_terms_without_contract",
-            },
-          })
-            .then((patched) => patched?.ok === true)
-            .catch(() => false);
-        }
+        // CONTRACT FIRST (2026-10-07): Formal Contract follows an explicit
+        // contract event, never the other way round. Converge the acceptance
+        // into a closing case through the canonical path; only then may the
+        // stage move (the stage gate requires a live closing case).
         // Self-heal the acceptance -> closing seam: bind the accepted offer and
         // create the closing case if a prior live turn advanced the stage but
         // crashed before convergence. Idempotent and fail-closed: no active
@@ -460,6 +431,39 @@ async function recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }) 
           };
         } catch {
           converged = { reason: "finalize_exception" };
+        }
+        const advanced = await transitionOpportunityStage(
+          opp.id,
+          {
+            to_stage: "formal_contract",
+            reason: "gap_recovery_accepted_terms_without_contract",
+            source: "seller_execution_gap_recovery",
+            next_action: NEXT_ACTIONS.GENERATE_CONTRACT,
+          },
+          { supabase }
+        );
+        if (!advanced?.ok) {
+          outcome.results.push({ opportunity_id: opp.id, ok: false, reason: advanced?.code || advanced?.error || "stage_advance_blocked", converged });
+          return;
+        }
+        let state_patch_ok = null;
+        if (opp.primary_thread_key) {
+          state_patch_ok = await patchUniversalLeadState({
+            threadKey: opp.primary_thread_key,
+            patch: {
+              lifecycle_stage: "formal_contract",
+              next_action: NEXT_ACTIONS.GENERATE_CONTRACT,
+              operational_status: "needs_review",
+            },
+            supabase,
+            meta: {
+              change_source: STATE_SOURCE_CODES.SYSTEM,
+              source_view: "seller_execution_gap_recovery",
+              reason: "accepted_terms_without_contract",
+            },
+          })
+            .then((patched) => patched?.ok === true)
+            .catch(() => false);
         }
         await emitRecoveryEvent(supabase, {
           type: "RECOVERY_CONTRACT_ACTION_RESTORED",

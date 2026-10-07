@@ -323,6 +323,9 @@ async function emitSuppressionAlert(payload) {
   }
 }
 
+/** Stages an automated thread write may not set directly (they follow the opportunity). */
+const AUTOMATION_GATED_STAGES = new Set(['offer', 'formal_contract', 'disposition', 'under_contract', 'prepared_to_close']);
+
 export async function patchUniversalLeadState({
   threadKey,
   patch = {},
@@ -338,6 +341,25 @@ export async function patchUniversalLeadState({
   const canonicalPatch = normalizePatchToCanonical(patch);
   if (!Object.keys(canonicalPatch).length) {
     return { ok: false, blocked: true, reason: 'no_allowed_patch_fields', thread_key: key };
+  }
+
+  // ── lifecycle money / contract gate (2026-10-07) ───────────────────────────
+  // An AUTOMATED write never moves the thread projection to Offer or beyond on
+  // its own: those stages follow the canonical opportunity (whose transition is
+  // money/contract-gated) through the opportunity sync. A parsed reply cannot
+  // promote a lead. Operator (manual) writes are unchanged.
+  let lifecycle_stage_withheld = null;
+  if (
+    typeof canonicalPatch.lifecycle_stage === 'string' &&
+    AUTOMATION_GATED_STAGES.has(canonicalPatch.lifecycle_stage) &&
+    clean(meta.change_source || STATE_SOURCE_CODES.MANUAL).toLowerCase() !== STATE_SOURCE_CODES.MANUAL &&
+    clean(meta.source_view) !== 'opportunity_sync'
+  ) {
+    lifecycle_stage_withheld = canonicalPatch.lifecycle_stage;
+    delete canonicalPatch.lifecycle_stage;
+    if (!Object.keys(canonicalPatch).length) {
+      return { ok: false, blocked: true, reason: 'lifecycle_stage_requires_canonical_opportunity', lifecycle_stage_withheld, thread_key: key };
+    }
   }
 
   // ── suppression evidence gate ──────────────────────────────────────────────
