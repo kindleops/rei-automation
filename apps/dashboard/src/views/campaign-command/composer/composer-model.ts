@@ -223,6 +223,63 @@ export function eligibleOf(a: ComposerAudience | null): number | null {
   return Math.max(0, n0(b.ready) - n0(b.no_sendable_number))
 }
 
+export type SendableBlocker = {
+  /** "0 sendable · 2,249 eligible · no sending number in St. Louis, MO — add a number or enable a regional pool" */
+  text: string
+  /** true when nothing in the audience can be sent (the headline reads 0 because of routing) */
+  zero: boolean
+  markets: Array<{ market: string; sellers: number; why: string }>
+}
+
+const listMarkets = (names: string[]) =>
+  names.length <= 2 ? names.join(' and ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more ${names.length - 2 === 1 ? 'market' : 'markets'}`
+
+/**
+ * Why the eligible count is lower than the audience because of SENDER ROUTING —
+ * never a bare 0. Read from the server's own answers only: the whole-cohort
+ * router (build.sender_markets, the planner's chooseTextgridNumber per market)
+ * and the graph's no_sender_coverage exclusion. Null when routing removes no one.
+ * The UI states it; it decides nothing (no number is bought, no pool enabled).
+ */
+export function sendableBlocker(a: ComposerAudience | null): SendableBlocker | null {
+  const b = a?.build
+  if (!a || !b || !b.ok) return null
+  const eligible = eligibleOf(a)
+  if (eligible === null) return null
+  const routed = (b.sender_markets ?? []).filter((m) => m.sendable === false && n0(m.sellers) > 0)
+  const graphNoRoute = n0(a.exclusions?.no_sender_route)
+  const noRoute = routed.length ? routed.reduce((s, m) => s + n0(m.sellers), 0) : n0(b.no_sendable_number)
+  if (noRoute <= 0 && graphNoRoute <= 0) return null
+  const markets = routed.map((m) => ({
+    market: m.market,
+    sellers: n0(m.sellers),
+    why: m.block_reason === 'NO_VALID_LOCAL_TEXTGRID_NUMBER' || !m.block_reason
+      ? `no sending number in ${m.market}`
+      : `no eligible sender in ${m.market} (${reasonWords(m.block_reason)})`,
+  }))
+  const noNumber = markets.filter((m) => m.why.startsWith('no sending number')).map((m) => m.market)
+  const other = markets.filter((m) => !m.why.startsWith('no sending number')).map((m) => m.market)
+  const whyText = markets.length
+    ? [
+        noNumber.length ? `no sending number in ${listMarkets(noNumber)}` : null,
+        other.length ? `no eligible sender in ${listMarkets(other)} (blocked, paused or cooling)` : null,
+      ].filter(Boolean).join('; ')
+    : 'no sending number in their market'
+  const action = noNumber.length || !markets.length ? 'add a number or enable a regional pool' : 'restore a healthy sender or enable a regional pool'
+  const zero = eligible === 0
+  const eligibleCount = typeof a.eligible_in_audience === 'number' && a.eligible_in_audience > 0 ? a.eligible_in_audience : null
+  const text = zero
+    ? [
+        '0 sendable',
+        eligibleCount !== null ? `${fmt(eligibleCount)} eligible` : graphNoRoute > 0 ? `${fmt(graphNoRoute)} without a sender route` : null,
+        `${whyText} — ${action}`,
+      ].filter(Boolean).join(' · ')
+    : noRoute > 0
+      ? `${fmt(noRoute)} ready ${noRoute === 1 ? 'seller is' : 'sellers are'} not sendable · ${whyText} — ${action}`
+      : `${fmt(graphNoRoute)} ${graphNoRoute === 1 ? 'property has' : 'properties have'} no sender route · ${whyText} — ${action}`
+  return { text, zero, markets }
+}
+
 /**
  * Fold the whole-cohort count (the build's pipeline over every readable row)
  * into the audience: eligible, holds, routes and recipient zones become
@@ -510,7 +567,10 @@ export function deriveReadiness(i: ReadinessInput): ReadinessView {
     if (a.graph_unavailable) add('audience', 'Audience', 'audience', 'block', 'The target graph is unavailable')
     else if (!a.build.whole_cohort && eligible !== null && eligible > 0) add('audience', 'Audience', 'audience', 'checking', `Counting the whole cohort — ${fmt(eligible)} eligible in the first ${fmt(a.build.rows_read)} read`)
     else if (eligible === null) add('audience', 'Audience', 'audience', 'block', `Build simulation failed${a.build.error ? ` — ${a.build.error}` : ''}`)
-    else if (eligible === 0) add('audience', 'Audience', 'audience', 'block', 'Zero eligible prospects')
+    else if (eligible === 0) {
+      const blocker = sendableBlocker(a)
+      add('audience', 'Audience', 'audience', 'block', blocker?.zero ? blocker.text : 'Zero eligible prospects')
+    }
     else add('audience', 'Audience', 'audience', 'ok', `${fmt(eligible)} eligible`)
     const dropped = a.dropped_filter_count + a.inapplicable_filters.length
     if (dropped) add('filters', 'Filters', 'audience', 'warn', `${dropped} ${dropped === 1 ? 'filter' : 'filters'} can’t narrow this audience`)

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSegments, capacityPlan, checkSchedule, completionEstimate, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition,
   coverageMarkets, launchSentence, parseCap, withCohort, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
-  audienceFunnel, audienceFreshness, campaignSizeAllChoice, campaignSizeCheck, languageBreakdown,
+  audienceFunnel, audienceFreshness, campaignSizeAllChoice, campaignSizeCheck, languageBreakdown, sendableBlocker,
 } from './composer-model'
 import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, CoverageMarket } from './composer-types'
 import { intakeFromLocation, resolveDrop, COMPOSER_OBJECTS_MIME } from './composer-intake'
@@ -335,5 +335,68 @@ describe('campaign size is an explicit choice (no silent 1,000, no silent All)',
     expect(campaignSizeCheck({ campaign_size: 'custom', total_cap: '1000' }, 2552)).toMatchObject({ state: 'warn', builds: 1000, text: expect.stringMatching(/1,552 left out/) })
     expect(campaignSizeCheck({ campaign_size: 'custom', total_cap: '5000' }, 2552)).toMatchObject({ state: 'ok', builds: 2552 })
     expect(compositionPayload({ ...dallas(), campaign_size: 'custom', total_cap: '400' }).total_cap).toBe('400')
+  })
+})
+
+// Measured 2026-10-06 (prod, read-only): St. Louis has 2,249 queue-ready graph
+// rows and 1,945 ready recipients, but no TextGrid number in the market and
+// Routing 2.0 pools are gated off, so the planner's router refuses every one
+// (NO_VALID_LOCAL_TEXTGRID_NUMBER). The Composer must say so, never a bare 0.
+describe('sendable blocker — the true reason behind 0', () => {
+  const stlCohort = (over: Partial<ComposerCohort> = {}): ComposerCohort => ({
+    ok: true, at: '', queue_eligible_in_audience: 2249, rows_read: 2249, capped_by_build_limit: false, build_limit: 100000,
+    recipients: 2026, duplicates_collapsed: 223, ready: 1945, held: 81, held_by_reason: { entity_contact_requires_review: 65, missing_identity_linkage: 16 },
+    sendable_now: 0, no_sendable_number: 1945,
+    sender_markets: [{ market: 'St. Louis, MO', sellers: 1945, sendable: false, route_tier: null, block_reason: 'NO_VALID_LOCAL_TEXTGRID_NUMBER', summary: 'St. Louis, MO (1,945 sellers): there is no sender number in this market' }],
+    personalization: { first_name: 1945, deed_name: 0, none: 0 }, sendable_after_personalization: 0,
+    ready_by_zone: { 'America/Chicago': 1945 }, ready_by_market: { 'St. Louis, MO': 1945 }, timings_ms: { read: 1, total: 1 },
+    ...over,
+  })
+  const stl = (cohort = stlCohort()) => withCohort(audience({ matched: 4309, eligible_in_audience: 2249 }), cohort)
+
+  it('St. Louis: 0 sendable · 2,249 eligible · no sending number — add a number or enable a regional pool', () => {
+    const a = stl()
+    expect(eligibleOf(a)).toBe(0)
+    const b = sendableBlocker(a)
+    expect(b?.zero).toBe(true)
+    expect(b?.text).toBe('0 sendable · 2,249 eligible · no sending number in St. Louis, MO — add a number or enable a regional pool')
+    expect(b?.markets).toEqual([{ market: 'St. Louis, MO', sellers: 1945, why: 'no sending number in St. Louis, MO' }])
+  })
+
+  it('readiness carries the reason instead of "Zero eligible prospects"', () => {
+    const r = deriveReadiness({
+      composition: dallas(),
+      audience: stl(), audienceError: null, audienceLoading: false, templates: templates(), fleet: fleet(), coverage: cov([mkt({ market: 'St. Louis, MO' })]), online: true, now: NOW,
+      waves: zoneWaves([{ value: 'America/Chicago', count: 1 }], { start: '08:00', end: '21:00' }, NOW, 48),
+    })
+    const check = r.checks.find((c) => c.key === 'audience')
+    expect(check?.state).toBe('block')
+    expect(check?.text).toMatch(/^0 sendable · 2,249 eligible · no sending number in St\. Louis, MO/)
+  })
+
+  it('two unrouted markets are both named; a blocked sender reads differently from a missing one', () => {
+    const a = stl(stlCohort({
+      no_sendable_number: 2951,
+      sender_markets: [
+        { market: 'St. Louis, MO', sellers: 1945, sendable: false, route_tier: null, block_reason: 'NO_VALID_LOCAL_TEXTGRID_NUMBER', summary: null },
+        { market: 'Detroit, MI', sellers: 1006, sendable: false, route_tier: null, block_reason: 'NO_VALID_LOCAL_TEXTGRID_NUMBER', summary: null },
+      ],
+    }))
+    expect(sendableBlocker(a)?.text).toMatch(/no sending number in St\. Louis, MO and Detroit, MI — add a number or enable a regional pool$/)
+    const blocked = stl(stlCohort({ sender_markets: [{ market: 'Miami, FL', sellers: 1945, sendable: false, route_tier: null, block_reason: 'all_local_senders_blocked', summary: null }] }))
+    expect(sendableBlocker(blocked)?.text).toMatch(/no eligible sender in Miami, FL \(blocked, paused or cooling\) — restore a healthy sender or enable a regional pool$/)
+  })
+
+  it('a partly routed audience says how many are left out; a fully routed one says nothing', () => {
+    const partial = stl(stlCohort({ sendable_now: 1000, no_sendable_number: 945, sendable_after_personalization: 1000, sender_markets: [{ market: 'St. Louis, MO', sellers: 945, sendable: false, route_tier: null, block_reason: 'NO_VALID_LOCAL_TEXTGRID_NUMBER', summary: null }, { market: 'Minneapolis, MN', sellers: 1000, sendable: true, route_tier: 'exact_market_match', block_reason: null, summary: null }] }))
+    const b = sendableBlocker(partial)
+    expect(b?.zero).toBe(false)
+    expect(b?.text).toBe('945 ready sellers are not sendable · no sending number in St. Louis, MO — add a number or enable a regional pool')
+    expect(sendableBlocker(audience())).toBeNull()
+  })
+
+  it('after the graph carries routing truth (no_sender_coverage), the graph exclusion explains the 0', () => {
+    const a = audience({ eligible_in_audience: 0, exclusions: { ...audience().exclusions, no_sender_route: 2249 }, build: { ...audience().build, ready: 0, sendable_now: 0, no_sendable_number: 0, sender_markets: [] } })
+    expect(sendableBlocker(a)?.text).toBe('0 sendable · 2,249 without a sender route · no sending number in their market — add a number or enable a regional pool')
   })
 })

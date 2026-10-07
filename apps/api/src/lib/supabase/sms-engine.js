@@ -1469,7 +1469,7 @@ export function evaluateContactWindow(row, deps = {}) {
  * allowed through to the layers that already govern it (health guard, contact
  * window, queue brakes, campaign caps).
  */
-const BLOCKING_NUMBER_STATUS = new Set([
+export const BLOCKING_NUMBER_STATUS = new Set([
   "paused",
   "inactive",
   "disabled",
@@ -1478,7 +1478,7 @@ const BLOCKING_NUMBER_STATUS = new Set([
   "retired",
 ]);
 
-const BLOCKING_HEALTH_STATE = new Set([
+export const BLOCKING_HEALTH_STATE = new Set([
   "cooling",
   "blocked",
   "quarantined",
