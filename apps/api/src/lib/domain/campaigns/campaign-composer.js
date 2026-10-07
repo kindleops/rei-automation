@@ -721,6 +721,55 @@ export async function readComposerOfferReadiness({ campaign_id = null, spec = nu
   return { ok: true, source, at: new Date().toISOString(), ...summarizeOfferReadiness(ids, scores, { now: deps.now || Date.now() }) }
 }
 
+/**
+ * CAMPAIGN QUALITY REPORT (Acquisition OS §19/§70) — behind SELLER_SCREENER
+ * (default OFF). The SAME id sets as the Offer Ready preflight: a campaign's
+ * queue-eligible targets, or a composition's eligible cohort (shares the
+ * cohort cache). Read-only; the report itself is
+ * ranking-v2/campaign-quality-report.js.
+ */
+export async function readComposerQualityReport({ campaign_id = null, spec = null } = {}, deps = {}) {
+  const { isSellerScreenerEnabled } = await import('@/lib/domain/campaigns/ranking-v2/flags.js')
+  const { readQualityReportForIds, screenerDisabledResponse } = await import('@/lib/domain/campaigns/ranking-v2/screener-service.js')
+  if (!isSellerScreenerEnabled(deps.env || process.env)) return screenerDisabledResponse()
+  const db = deps.supabase || defaultSupabase
+  let ids = []
+  let source
+  if (clean(campaign_id)) {
+    source = 'campaign_targets'
+    let from = 0
+    for (;;) {
+      const { data, error } = await db
+        .from('campaign_targets')
+        .select('property_id')
+        .eq('campaign_id', clean(campaign_id))
+        .not('property_id', 'is', null)
+        .order('property_id', { ascending: true })
+        .range(from, from + 999)
+      if (error) return { ok: false, error: 'campaign_targets_unavailable', message: error.message }
+      ids.push(...(data || []).map((r) => clean(r.property_id)))
+      if (!data || data.length < 1000) break
+      from += 1000
+    }
+  } else {
+    source = 'composer_cohort'
+    const s = obj(spec)
+    const strategy = strategyOf(s)
+    const key = cohortKeyOf(s, strategy)
+    let entry = cohortCache.get(key)
+    let cohort = entry && Date.now() - entry.at < COHORT_TTL_MS && entry.members ? entry.value : null
+    if (!cohort) {
+      cohort = await readComposerCohort(s, { ...deps, fresh: true })
+      if (!cohort?.ok) return { ok: false, error: clean(cohort?.error) || 'cohort_unavailable', message: clean(cohort?.message) || null }
+      entry = cohortCache.get(key)
+    }
+    if (!Array.isArray(entry?.members)) return { ok: false, error: 'cohort_members_unavailable' }
+    ids = eligibleMembers(entry.members, cohort.sender_markets).eligible.map((m) => clean(m.property_id))
+  }
+  const report = await (deps.readQualityReportForIds || readQualityReportForIds)(ids, deps)
+  return report?.ok === false ? report : { ...report, source, at: new Date().toISOString() }
+}
+
 /* ── campaign map preview: the eligible cohort's geography ─────────────── */
 
 /** Ids per coordinate statement (one indexed ANY() read; 15K ids measured at ~0.7 s). */

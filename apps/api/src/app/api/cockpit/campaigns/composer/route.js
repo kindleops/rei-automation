@@ -10,6 +10,7 @@ import {
   readComposerFleet,
   readComposerGeography,
   readComposerOfferReadiness,
+  readComposerQualityReport,
   readComposerTemplates,
   saveComposerDraft,
 } from '@/lib/domain/campaigns/campaign-composer.js'
@@ -28,6 +29,7 @@ export async function OPTIONS(request) {
 
 /**
  * GET — Campaign Composer reads. READ-ONLY (selects and the dry-run preview).
+ *   ?part=quality&spec=<json>|&campaign_id=  Campaign Quality Report (§19/§70; SELLER_SCREENER flag, default off)
  *   ?part=fleet                     sender fleet: router state, sent today, capacity
  *   ?part=templates                 template coverage per strategy × language
  *   ?part=audience&spec=<json>      dry-run audience for a composition (sampled build)
@@ -83,6 +85,18 @@ export async function GET(request) {
       }
       const result = await readComposerOfferReadiness({ campaign_id, spec })
       return withCors(request, result, result.ok === false ? 502 : 200)
+    }
+    if (part === 'quality') {
+      // Campaign Quality Report (§19/§70), behind SELLER_SCREENER (default OFF → 404, nothing read).
+      const campaign_id = params.get('campaign_id')
+      let spec = null
+      if (!campaign_id) {
+        try { spec = JSON.parse(params.get('spec') || '{}') } catch {
+          return withCors(request, { ok: false, error: 'invalid_spec' }, 400)
+        }
+      }
+      const result = await readComposerQualityReport({ campaign_id, spec })
+      return withCors(request, result, result.ok === false ? Number(result.status || 502) : 200)
     }
     if (part === 'coverage') {
       let markets = []

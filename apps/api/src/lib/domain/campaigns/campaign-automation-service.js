@@ -109,6 +109,9 @@ import {
   mergeLaunchWriteModeIntoInput,
   reconcileCampaignLiveState,
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
+import { isCampaignRankingV2Enabled } from '@/lib/domain/campaigns/ranking-v2/flags.js'
+import { rankingMetadata } from '@/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js'
+import { applyCampaignRankingV2, rankingV2FetchLimit } from '@/lib/domain/campaigns/ranking-v2/ranking-context.js'
 
 const DEFAULT_CANDIDATE_SOURCE = 'v_feeder_candidates_fast'
 const DEFAULT_SCAN_LIMIT = 1000
@@ -4305,7 +4308,9 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
     property_address: clean(row.property_address_full) || null,
     state: normalizeState(row.state) || null,
     timezone: clean(row.timezone) || null,
-    priority_score: numberOrNull(row.acquisition_score),
+    // CAMPAIGN_RANKING_V2 (default OFF): a ranked row carries `_rank_v2` and its
+    // band-encoded priority; an unranked row (flag OFF) keeps the legacy value.
+    priority_score: row._rank_v2 ? numberOrNull(row._rank_v2.priority_score) : numberOrNull(row.acquisition_score),
     identity_status: clean(row.identity_alignment) || 'unknown',
     routing_status: row.sender_covered ? 'ready' : 'blocked',
     suppression_status: row.true_post_contact_suppression ? 'blocked' : 'clear',
@@ -4321,6 +4326,7 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
        */
       language_source: clean(row.resolved_language_source) || (clean(row.language) ? 'graph' : 'unknown'),
       language_known: Boolean(clean(row.resolved_language || row.language)),
+      ...(row._rank_v2 ? { ranking: rankingMetadata(row._rank_v2) } : {}),
       graph_id: row.graph_id || null,
       graph_source: row.graph_source || CAMPAIGN_TARGET_GRAPH_TABLE,
       property_export_id: row.property_export_id || null,
@@ -4557,7 +4563,7 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
   const graph = await summarizeCampaignGraph({
     supabase,
     options,
-    rowLimit: buildLimit.simulated,
+    rowLimit: isCampaignRankingV2Enabled(deps.env || process.env) ? rankingV2FetchLimit(buildLimit.simulated) : buildLimit.simulated,
     requireQueueEligibleRows: true,
   })
   const warnings = uniqueClean([
@@ -6509,7 +6515,22 @@ export async function planCampaignTargetRows({ campaign = null, options = {}, gr
     }
   }
   const { collapseGraphRowsToRecipients } = await import('@/lib/domain/campaigns/campaign-recipient-dedup.js')
-  const { recipients, stats: dedupStats } = collapseGraphRowsToRecipients(eligibleRows, { touch_number: touchNumber })
+  /**
+   * CAMPAIGN_RANKING_V2 (default OFF; OFF = the line below is skipped and the
+   * build is byte-identical). ON: every eligible row is ranked by the ONE v2
+   * function (seller_situation_v2 tier band, then score; legacy only as a
+   * marked fallback), set-based context loads, then the same row order drives
+   * the dedupe primary, the slice to the campaign limit and priority_score.
+   */
+  const rankingV2 = isCampaignRankingV2Enabled(deps.env || process.env)
+    ? await applyCampaignRankingV2(eligibleRows, deps)
+    : null
+  const rankedRows = rankingV2 ? rankingV2.rows : eligibleRows
+  const { recipients, stats: dedupStats } = collapseGraphRowsToRecipients(rankedRows, {
+    touch_number: touchNumber,
+    ...(rankingV2 ? { comparePriority: rankingV2.compare } : {}),
+  })
+  if (rankingV2) recipients.sort(rankingV2.compare)
   const rows = recipients
     .slice(0, limit)
     .map((row, index) => {
@@ -6558,6 +6579,7 @@ export async function planCampaignTargetRows({ campaign = null, options = {}, gr
       limit,
       limited: recipients.length > rows.length,
       entity_review_held: Number(heldByReason.entity_contact_requires_review || 0),
+      ...(rankingV2 ? { ranking_v2: rankingV2.summary } : {}),
     },
   }
 }
@@ -6911,7 +6933,7 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
       : await summarizeCampaignGraph({
           supabase,
           options,
-          rowLimit: targetLimit,
+          rowLimit: isCampaignRankingV2Enabled(deps.env || process.env) ? rankingV2FetchLimit(targetLimit) : targetLimit,
           requireQueueEligibleRows: true,
         })
     if (graph.ok === false) {
@@ -7446,8 +7468,10 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     property_type: firstNonEmpty(snapshot.property_type, target.asset_type),
     property_class: firstNonEmpty(snapshot.property_class),
     canonical_property_group: firstNonEmpty(snapshot.canonical_property_group, target.asset_type),
-    final_acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,
-    acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,
+    // A v2-ranked target's priority_score is the campaign_rank_v2 priority, NOT
+    // the legacy Final Acquisition Score — never relabel one as the other.
+    final_acquisition_score: (metadata.ranking?.ranking_version ? null : target.priority_score) ?? snapshot.acquisition_score ?? null,
+    acquisition_score: (metadata.ranking?.ranking_version ? null : target.priority_score) ?? snapshot.acquisition_score ?? null,
     identity_alignment: { status: target.identity_status || metadata.identity_alignment || 'unknown' },
     // Raw ownership signals, when the upstream graph/candidate snapshot
     // carries them — same fields evaluatePreSendEligibility's renter-not-

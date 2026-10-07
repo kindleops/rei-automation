@@ -1027,6 +1027,43 @@ const DRAWN_AREA_FIELD = Object.freeze({
 })
 CAMPAIGN_FIELD_BY_KEY.set(DRAWN_AREA_FIELD_KEY, DRAWN_AREA_FIELD)
 
+/**
+ * SELLER SITUATION v2 fields (Acquisition OS §13/§17; A1 raw-facts model,
+ * projected onto the graph by PROPOSED_20261007080000_campaign_ranking_v2.sql).
+ * Recognised by key (so a saved filter is applied — or refused by name — the
+ * same way by Reach and Build) but deliberately NOT in CAMPAIGN_FIELD_CATALOG,
+ * the builder's list: they are offered only through the Seller Screener
+ * (SELLER_SCREENER flag) until their production coverage is measured, and the
+ * graph refuses them as not_in_audience until the projection lands.
+ */
+export const SELLER_SITUATION_FIELDS = Object.freeze([
+  ['opportunity_tier', 'Opportunity tier (A/B/C)', 'text'],
+  ['seller_situation', 'Seller situation', 'text'],
+  ['forced_sale_pressure', 'Forced-sale pressure (0–100)', 'number'],
+  ['sell_p365', 'Sell chance 365d (heuristic %)', 'number'],
+  ['market_quality', 'ZIP market quality (0–100)', 'number'],
+  ['campaign_rank_v2_priority', 'Campaign rank v2 priority', 'number'],
+  ['situation_score_version', 'Seller situation score version', 'text'],
+].map(([column, label, type]) => Object.freeze({
+  key: `seller_situation.${column}`,
+  domain: 'seller_situation',
+  category: 'Seller Situation (v2)',
+  label,
+  source_table_or_view: 'seller_situation_scores',
+  source_column: column,
+  type,
+  operators: type === 'number' ? NUMBER_OPERATORS : TEXT_OPERATORS,
+  filterable: true,
+  searchable: type === 'text',
+  supports_options: type === 'text',
+  supports_counts: true,
+  supported_in_preview: false,
+  screener_only: true,
+  requires_flag: 'SELLER_SCREENER',
+  description: `${label} — seller_situation_v2 / raw_facts_v1; exposed only once its production coverage is measured.`,
+})))
+for (const field of SELLER_SITUATION_FIELDS) CAMPAIGN_FIELD_BY_KEY.set(field.key, field)
+
 export function normalizeCampaignFieldKey(value) {
   const normalized = clean(value)
   return FIELD_KEY_ALIASES[normalized] || normalized

@@ -134,6 +134,16 @@ export const GRAPH_FILTER_COLUMNS = Object.freeze({
   'sender_coverage.routing_allowed': 'sender_covered',
   'sender_coverage.routing_tier': 'routing_tier',
   'sender_coverage.selected_textgrid_market': 'sender_market',
+  // Seller Situation v2 (A1) + campaign ranking v2 — projected by
+  // PROPOSED_20261007080000_campaign_ranking_v2.sql; PROJECTION_PENDING below,
+  // so they are refused as not_in_audience until the population probe sees them.
+  'seller_situation.opportunity_tier': 'opportunity_tier',
+  'seller_situation.seller_situation': 'seller_situation',
+  'seller_situation.forced_sale_pressure': 'forced_sale_pressure',
+  'seller_situation.sell_p365': 'sell_p365',
+  'seller_situation.market_quality': 'market_quality',
+  'seller_situation.campaign_rank_v2_priority': 'campaign_rank_v2_priority',
+  'seller_situation.situation_score_version': 'situation_score_version',
 })
 
 /** Status fields whose values are labels over a boolean column. */
@@ -163,6 +173,9 @@ export const PROJECTION_PENDING_COLUMNS = new Set([
   'aos_score', 'decision_tier', 'acquisition_confidence', 'transaction_probability_365', 'best_strategy',
   'beds', 'baths', 'building_sqft', 'year_built', 'lot_sqft', 'total_loan_balance', 'ownership_years',
   'tax_delinquent_year', 'building_quality', 'estimated_repair_cost', 'phone_type',
+  // PROPOSED_20261007080000_campaign_ranking_v2.sql
+  'opportunity_tier', 'seller_situation', 'forced_sale_pressure', 'sell_p365', 'market_quality',
+  'campaign_rank_v2_priority', 'situation_score_version',
 ])
 
 /** Population probe verdict for a column the audience table does not have (yet). */

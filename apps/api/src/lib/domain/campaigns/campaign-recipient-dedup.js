@@ -51,6 +51,8 @@ export function comparePropertyPriority(a, b) {
  */
 export function collapseGraphRowsToRecipients(rows = [], options = {}) {
   const touchDefault = Number(options.touch_number || options.stage_touch || 1) || 1
+  // CAMPAIGN_RANKING_V2 passes its comparator; absent = the legacy order (unchanged).
+  const comparePriority = typeof options.comparePriority === 'function' ? options.comparePriority : comparePropertyPriority
   const byPhoneTouch = new Map()
   const stats = {
     input_property_rows: rows.length,
@@ -84,7 +86,7 @@ export function collapseGraphRowsToRecipients(rows = [], options = {}) {
       }
       bucket.owners.add(ownerId)
     }
-    if (comparePropertyPriority(row, bucket.primary) < 0) {
+    if (comparePriority(row, bucket.primary) < 0) {
       bucket.primary = row
     }
   }
