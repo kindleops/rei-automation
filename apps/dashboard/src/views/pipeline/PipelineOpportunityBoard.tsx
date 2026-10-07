@@ -300,6 +300,8 @@ export function PipelineOpportunityBoard({
     if (stage) setActiveStageId(stage)
   }, [incomingPropertyMatch])
   const [transitionError, setTransitionError] = useState<string | null>(null)
+  // The unblocking action a refused stage move names (e.g. "Record contract to continue").
+  const [transitionAction, setTransitionAction] = useState<{ label: string; href: string } | null>(null)
   const [stageConfirm, setStageConfirm] = useState<{
     cardId: string
     stageId: string
@@ -574,6 +576,7 @@ export function PipelineOpportunityBoard({
 
     try {
       setTransitionError(null)
+      setTransitionAction(null)
       if (groupBy === 'stage') {
         await onMoveStage(cardId, stageId, 'pipeline_drag', options)
       } else if (groupBy === 'status') {
@@ -590,6 +593,10 @@ export function PipelineOpportunityBoard({
     } catch (err) {
       setGroupOverrides(previousOverrides)
       const message = err instanceof Error ? err.message : 'Update failed'
+      const action = err && typeof err === 'object' && 'open' in err && typeof (err as { open?: unknown }).open === 'string'
+        ? { label: String((err as { actionLabel?: string }).actionLabel || 'Open Closing Desk'), href: String((err as { open: string }).open) }
+        : null
+      setTransitionAction(action)
       setTransitionError(message.includes('vendor-chunks') || message.includes('Cannot find module')
         ? 'Could not save move. Pipeline service may be restarting — retry.'
         : message)
@@ -1035,7 +1042,12 @@ export function PipelineOpportunityBoard({
       <div className="plv plv--rail">
         <ScopeBar scope={scope} onScopeChange={onScopeChange} metrics={kpi} scopedTotal={scopedTotal} globalTotal={globalTotal} compact />
         <KpiStrip metrics={kpi} compact />
-        {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
+        {transitionError && (
+          <div className="plv-transition-error" role="alert">
+            {transitionError}
+            {transitionAction ? <a className="plv-transition-error__action" href={transitionAction.href}>{transitionAction.label}</a> : null}
+          </div>
+        )}
         <div className="plv-filters">
           <PipelineViewSelector value={groupBy} onChange={onGroupByChange} compact />
         </div>
@@ -1072,7 +1084,12 @@ export function PipelineOpportunityBoard({
     return (
       <div className="plv plv--focused">
         <KpiStrip metrics={kpi} compact />
-        {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
+        {transitionError && (
+          <div className="plv-transition-error" role="alert">
+            {transitionError}
+            {transitionAction ? <a className="plv-transition-error__action" href={transitionAction.href}>{transitionAction.label}</a> : null}
+          </div>
+        )}
         <div className="plv-filters">
           <PipelineViewSelector value={groupBy} onChange={onGroupByChange} />
         </div>
@@ -1110,7 +1127,12 @@ export function PipelineOpportunityBoard({
   return (
     <div className={cls('plv', isOps ? 'plv--ops' : isFull ? 'plv--full' : 'plv--focused')}>
       <KpiStrip metrics={kpi} compact={isOps} />
-      {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
+      {transitionError && (
+          <div className="plv-transition-error" role="alert">
+            {transitionError}
+            {transitionAction ? <a className="plv-transition-error__action" href={transitionAction.href}>{transitionAction.label}</a> : null}
+          </div>
+        )}
       <ScopeBar scope={scope} onScopeChange={onScopeChange} metrics={kpi} scopedTotal={scopedTotal} globalTotal={globalTotal} />
       {loading && opportunities.length === 0 && <div className="plv-loading" aria-live="polite">Loading opportunities…</div>}
       <div className="plv-topbar">

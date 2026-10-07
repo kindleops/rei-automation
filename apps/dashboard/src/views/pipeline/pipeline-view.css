@@ -2647,3 +2647,12 @@
     animation: none;
   }
 }
+
+/* A refused stage move names the action that unblocks it (Acquisition OS 2026-10-07). */
+.plv-transition-error__action {
+  margin-left: 10px;
+  font-weight: 600;
+  color: var(--lc-cyan, #64d2ff);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
