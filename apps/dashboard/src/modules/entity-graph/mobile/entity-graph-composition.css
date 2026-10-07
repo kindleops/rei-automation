@@ -188,3 +188,22 @@ html[data-nexus-theme='light'] .egq__liquid { opacity: 0.35; }
 @media (prefers-reduced-motion: reduce) {
   .egq *, .egq *::after { animation: none !important; transition: none !important; }
 }
+
+/* Searchable complete facet (desk asks for every value; phones never render it). */
+.egq__find {
+  display: flex; align-items: center; gap: 8px;
+  margin: 6px 12px 8px; padding: 0 10px; height: 30px;
+  border-radius: 8px;
+  background: var(--egq-track, rgb(255 255 255 / 0.05));
+  box-shadow: inset 0 0 0 1px var(--egq-edge, rgb(255 255 255 / 0.08));
+  color: var(--egq-text-3, rgb(255 255 255 / 0.55));
+}
+.egq__find svg { width: 13px; height: 13px; flex: none; }
+.egq__find input {
+  flex: 1; min-width: 0; height: 100%;
+  border: 0; outline: 0; background: transparent;
+  font: inherit; font-size: 12.5px; color: var(--egq-text, inherit);
+}
+.egq__find:focus-within { box-shadow: inset 0 0 0 1px var(--dsk-accent, #6aa8ff), 0 0 0 3px color-mix(in srgb, var(--dsk-accent, #6aa8ff) 14%, transparent); }
+.egq__chart.is-findable { max-height: 360px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.egq__chart.is-findable .egq__bars li { animation: none; }

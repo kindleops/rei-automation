@@ -183,7 +183,15 @@ export function EntityGraphMobile({
    * its own type. Tapping a scope chip narrows back to that one type, which is
    * the in-tab search that used to be the only behaviour.
    */
-  const [searchScopeLocked, setSearchScopeLocked] = useState(false)
+  /**
+   * DESKTOP SEARCHES THE SCOPE ON SCREEN. The desk table is one entity type,
+   * and a cross-type search merges seven per-type lists capped at 25 each:
+   * "Atlanta" read "84 properties" (the merged length) with blank columns.
+   * On a desk the query stays in the active scope (an exact count, full
+   * rows); the All chip still asks every type. Phones keep cross-type first.
+   */
+  const { isModernDesktop } = useBreakpoint()
+  const [searchScopeLocked, setSearchScopeLocked] = useState(isModernDesktop)
   const [columnsOpen, setColumnsOpen] = useState(false)
   /** Visible columns + header sort, per scope, persisted per operator. */
   const { layout: tableLayout, setColumns: setScopeColumns, setSort: setHeaderSort } = useEntityGraphTableLayout()
@@ -226,7 +234,6 @@ export function EntityGraphMobile({
    * Phones never take this path (isModernDesktop is false on every phone), so
    * their DOM is exactly what it was.
    */
-  const { isModernDesktop } = useBreakpoint()
   const rootRef = useRef<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
@@ -381,6 +388,8 @@ export function EntityGraphMobile({
     void fetchComposition({
       tab: compositionTab,
       dimension: dimensionKey,
+      // Desk: every value of a categorical facet (searchable list), not the top nine.
+      ...(isModernDesktop ? { all: '1' } : {}),
       ...filtersToApiParams(filters),
       ...fieldFiltersToApiParams(fieldFilters),
     }, controller.signal)
@@ -911,7 +920,8 @@ export function EntityGraphMobile({
 
   const lens = compositionTab && !selectionMode ? (
     <EntityGraphComposition
-      scopeNoun={scopeTotalNoun}
+      // A cross-type result count is matches of every type, never "properties".
+      scopeNoun={isModernDesktop && crossTypeSearch ? 'matches · every type' : scopeTotalNoun}
       total={searching ? total : (composition?.total ?? total)}
       dimensions={scopeDimensions}
       dimensionKey={dimensionKey}
@@ -978,9 +988,10 @@ export function EntityGraphMobile({
             value={query}
             onChange={(e) => {
               setQuery(e.target.value)
-              // A fresh query searches everything again. Without this, one tap
-              // on a type chip would silently narrow every later search too.
-              setSearchScopeLocked(false)
+              // A fresh query searches everything again (phone) or the scope on
+              // screen (desk). Without this, one tap on a type chip would
+              // silently narrow every later search too.
+              setSearchScopeLocked(isModernDesktop)
             }}
             placeholder={SEARCH_PLACEHOLDER}
             aria-label="Search the entity universe"
@@ -990,7 +1001,7 @@ export function EntityGraphMobile({
             spellCheck={false}
           />
           {query ? (
-            <button type="button" className="egm-search__clear egm-hit" onClick={() => { setQuery(''); setSearchScopeLocked(false) }} aria-label="Clear search">×</button>
+            <button type="button" className="egm-search__clear egm-hit" onClick={() => { setQuery(''); setSearchScopeLocked(isModernDesktop) }} aria-label="Clear search">×</button>
           ) : null}
         </div>
 
