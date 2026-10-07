@@ -9,12 +9,12 @@ import fs from "node:fs";
 import { SCORE_VERSION, INPUT_MODEL_VERSION, buildRawFactsFromRows, scoreSellerSituation } from "@/lib/acquisition/seller-situation/index.js";
 import { isCampaignRankingV2Enabled, isSellerScreenerEnabled } from "@/lib/domain/campaigns/ranking-v2/flags.js";
 import {
-  CAMPAIGN_RANKING_VERSION, LAYER_WEIGHTS, MARKET_PRIOR, PRESSURE_GATE_FLOOR, PRESSURE_TERMS, TIER_POINTS,
+  CAMPAIGN_RANKING_VERSION, CONTACT_DOMINANCE_DELTA, LAYER_WEIGHTS, MARKET_PRIOR, PRESSURE_GATE_FLOOR, PRESSURE_TERMS, TIER_POINTS,
   compareCampaignRankV2, computeCampaignRankV2, hasCurrentSituation, rankCampaignRowsV2, rankingMetadata,
 } from "@/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js";
-import { CONTACT_POINTS, contactConfidence, equityEvidence, matchingTagClass } from "@/lib/domain/campaigns/ranking-v2/contact-evidence.js";
+import { CONTACT_POINTS, contactConfidence, equityEvidence, identityTier, matchingTagClass } from "@/lib/domain/campaigns/ranking-v2/contact-evidence.js";
 import { RESPONSE_CONTEXT, fitMarketResponse } from "@/lib/domain/campaigns/ranking-v2/market-response.js";
-import { funnelBySignal, funnelLabels, wilson } from "@/lib/domain/campaigns/ranking-v2/funnel-analytics.js";
+import { armComparison, diffCI, funnelBySignal, funnelLabels, wilson } from "@/lib/domain/campaigns/ranking-v2/funnel-analytics.js";
 import { computeMarketQuality, marketAssetLane, marketQualityForRow } from "@/lib/domain/campaigns/ranking-v2/market-quality.js";
 import { buildWhyTargeted, labelForEvidenceCode } from "@/lib/domain/campaigns/ranking-v2/why-targeted.js";
 import {
@@ -134,7 +134,7 @@ test("layers are explainable: weights sum to 1, every layer carries its score, t
   const expected = Math.round((0.4 * L.contact.score + 0.3 * L.pressure.effective + 0.15 * L.deal.score + 0.15 * L.market.score) * 100) / 100;
   assert.ok(Math.abs(r.priority_score - expected) < 0.02, `${r.priority_score} vs ${expected}`);
   assert.equal(L.market.score, 100);
-  assert.ok(L.contact.evidence.length >= 4);
+  assert.ok(L.contact.evidence.length >= 3 && L.contact.evidence.some((e) => e.code.startsWith("IDENTITY_TIER_")));
   assert.ok(L.pressure.terms.every((t) => "used_prior" in t));
 });
 
@@ -245,19 +245,83 @@ test("rankingMetadata is compact, layered and labelled (never the legacy name)",
 test("SQL twin pins the v2.1 layer weights, gate, contact points and the equity rule (PROPOSED_20261007080000)", () => {
   const sql = fs.readFileSync(new URL("../../../../supabase/migrations/PROPOSED_20261007080000_campaign_ranking_v2.sql", import.meta.url), "utf8");
   assert.ok(sql.includes(`${LAYER_WEIGHTS.contact} * p_contact`));
-  assert.ok(sql.includes(`${LAYER_WEIGHTS.pressure} * p_pressure * (${PRESSURE_GATE_FLOOR} + ${1 - PRESSURE_GATE_FLOOR} * p_contact / 100)`));
+  assert.equal(PRESSURE_GATE_FLOOR, 0);
+  assert.ok(sql.includes(`${LAYER_WEIGHTS.pressure} * p_pressure * (p_contact / 100)`));
   assert.ok(sql.includes(`${LAYER_WEIGHTS.deal} * p_deal`));
   assert.ok(sql.includes(`${LAYER_WEIGHTS.market} * coalesce(least(greatest(p_market,0),100), ${MARKET_PRIOR})`));
   for (const [k, v] of Object.entries(CONTACT_POINTS.line)) if (k !== "unknown") assert.ok(sql.includes(`WHEN '${k}' THEN ${v}`), `line ${k}`);
   assert.ok(sql.includes(`ELSE ${CONTACT_POINTS.line.unknown} END`));
-  for (const k of ["verified", "probable", "entity_company_linked", "unknown", "mismatch"]) assert.ok(sql.includes(`'${k}' THEN ${CONTACT_POINTS.identity[k]}`), `identity ${k}`);
-  for (const k of ["likely_owner", "linked_to_company", "potential_owner", "potentially_linked_to_company", "family_only", "renter_no_owner"]) assert.ok(sql.includes(`'${k}' THEN ${CONTACT_POINTS.tag[k]}`), `tag ${k}`);
+  for (const k of ["strongest", "strong", "moderate", "weak", "contradictory"]) assert.ok(sql.includes(`'${k}' THEN ${CONTACT_POINTS.identity_tier[k]}`), `identity tier ${k}`);
+  assert.ok(sql.includes(`ELSE ${CONTACT_POINTS.identity_tier.none} END`));
   assert.ok(sql.includes(`${CONTACT_POINTS.shared_phone_penalty} ELSE 0 END`));
   for (const [t, pts] of Object.entries(TIER_POINTS)) assert.ok(t === "C" ? sql.includes(`ELSE ${pts} END`) : sql.includes(`'${t}' THEN ${pts}`));
   assert.ok(sql.includes("WHEN p_value > 0 AND p_loan > 0 THEN"));
   assert.ok(sql.includes("free and clear"));
   assert.ok(!/campaign_rank_v2_score\(/.test(sql.split("-- ── 2.")[0]), "no v2.0 band score function");
   assert.ok(fs.existsSync(new URL("../../../../supabase/migrations/PROPOSED_20261007080000_campaign_ranking_v2_rollback.sql", import.meta.url)));
+  assert.match(sql, /MIGRATION \(b\): ORDERING-AFFECTING/);
+});
+
+test("migration (a) is schema-support only: new tables/views, CONCURRENTLY indexes, no existing table altered, pretest rolls back", () => {
+  const dir = new URL("../../../../supabase/migrations/", import.meta.url);
+  const a = fs.readFileSync(new URL("PROPOSED_20261007090000_ranking_shadow_support.sql", dir), "utf8");
+  const code = a.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  assert.ok(!/ALTER TABLE public\.(?!campaign_rank_shadow|campaign_test_)/.test(code), "no ALTER of an existing table");
+  assert.ok(!/campaign_target_graph/.test(code), "never touches the graph");
+  assert.ok(!/^\s*(UPDATE|DELETE|TRUNCATE|INSERT)\s/im.test(code), "no data rewrites");
+  for (const m of code.matchAll(/CREATE INDEX (\w+)/g)) assert.equal(m[1], "CONCURRENTLY");
+  const pre = fs.readFileSync(new URL("PROPOSED_20261007090000_ranking_shadow_support_pretest.sql", dir), "utf8");
+  assert.match(pre.trim(), /ROLLBACK;$/);
+  assert.ok(fs.existsSync(new URL("PROPOSED_20261007090000_ranking_shadow_support_rollback.sql", dir)));
+});
+
+test("identity tiers: missing vendor tag is absence of evidence; contradictions are lower", () => {
+  const tiers = [
+    ["verified", "likely_owner", "strongest"], ["verified", "linked_to_company", "strongest"], ["verified", "missing", "strong"],
+    ["probable", "likely_owner", "strong"], ["entity_company_linked", "linked_to_company", "strong"], ["probable", "missing", "moderate"],
+    ["entity_company_linked", "missing", "moderate"], ["verified", "potential_owner", "moderate"], ["missing", "likely_owner", "moderate"],
+    ["unknown", "missing", "weak"], ["unknown", "likely_owner", "moderate"], ["missing", "missing", "none"],
+    ["mismatch", "likely_owner", "contradictory"], ["verified", "renter_no_owner", "contradictory"], ["probable", "renter_no_owner", "contradictory"],
+  ];
+  for (const [id, tag, want] of tiers) assert.equal(identityTier(id, tag), want, `${id} × ${tag}`);
+  const P = CONTACT_POINTS.identity_tier;
+  assert.ok(P.strongest > P.strong && P.strong > P.moderate && P.moderate > P.none && P.none > P.weak && P.weak > P.contradictory);
+  const s = (o) => contactConfidence({ phone_type: "W", usage_2_months: "Moderate Usage", phone_owner_count: 1, ...o }).score;
+  assert.ok(s({ identity_alignment: "verified", matching_flags: "Likely Owner" }) > s({ identity_alignment: "verified", matching_flags: null }));
+  assert.ok(s({ identity_alignment: "verified", matching_flags: null }) > s({ identity_alignment: "probable", matching_flags: null }), "verified + no tag beats likely + no tag");
+  assert.ok(s({ identity_alignment: "probable", matching_flags: null }) > s({ identity_alignment: "unknown", matching_flags: null }));
+  assert.ok(s({ identity_alignment: "verified", matching_flags: "Resident, Likely Renting" }) < s({ identity_alignment: "unknown", matching_flags: null }) + 15, "contradiction drops below unknown-level");
+});
+
+test(`gate guarantee: tier A with MAXIMUM distress never outranks a contact ≥ ${CONTACT_DOMINANCE_DELTA} points stronger (tier C, MINIMUM distress), deal & market equal — exhaustive over contact profiles`, () => {
+  const lines = ["W", "L", null];
+  const ids = ["verified", "probable", "entity_company_linked", "unknown", "mismatch", null];
+  const tags = ["Likely Owner", "Linked To Company", "Potential Owner", "Potentially Linked To Company", "Family", "Resident, Likely Renting", null];
+  const usages = ["Heavy Usage", "Moderate Usage", "Light Usage", "Minimal Usage", null];
+  const byScore = new Map();
+  for (const phone_type of lines) for (const identity_alignment of ids) for (const matching_flags of tags) for (const usage_2_months of usages) for (const phone_owner_count of [1, 3]) {
+    const prof = { phone_type, identity_alignment, matching_flags, usage_2_months, phone_owner_count, is_corporate_owner: true };
+    const sc = contactConfidence(prof).score;
+    if (!byScore.has(sc)) byScore.set(sc, prof);
+  }
+  const base = { estimated_value: 250000, total_loan_balance: 100000, property_zip: "75217", property_type: "Single Family", queue_eligible: true };
+  const maxA = sit("A", { fsp: 100, sell365: 95, equity: 100, fatigue: 100, tax: 100, codes: Array.from({ length: 10 }, (_, k) => `CODE_${k}`) });
+  const minC = sit("C", { fsp: 0, sell365: 0, equity: 0, fatigue: 0, tax: 0, codes: [] });
+  minC.components.debt_pressure = 0; minC.components.property_burden = 0;
+  const scores = [...byScore.keys()].sort((a, b) => a - b);
+  let checked = 0;
+  for (const lo of scores) for (const hi of scores) {
+    if (hi - lo < CONTACT_DOMINANCE_DELTA) continue;
+    const a = computeCampaignRankV2({ ...base, ...byScore.get(lo), property_id: "a" }, { situation: maxA });
+    const c = computeCampaignRankV2({ ...base, ...byScore.get(hi), property_id: "c" }, { situation: minC });
+    assert.equal(a.layers.deal.score, c.layers.deal.score);
+    assert.ok(c.priority_score > a.priority_score, `contact ${hi} (C) must beat contact ${lo} (A): ${c.priority_score} vs ${a.priority_score}`);
+    checked += 1;
+  }
+  assert.ok(checked > 50, `checked ${checked} pairs`);
+  // and distress is at most 30% of priority
+  const top = computeCampaignRankV2({ ...base, ...byScore.get(scores[scores.length - 1]) }, { situation: maxA });
+  assert.ok(top.layers.pressure.effective * LAYER_WEIGHTS.pressure <= 30 + 1e-9);
 });
 
 // ── build integration (byte-identical OFF, ranked ON) ────────────────────────
@@ -356,6 +420,42 @@ test("funnel: stages imply their predecessors, who-is-this/SP is not interest, t
   assert.equal(given.overall.n, 2);
   assert.deepEqual(given.by_signal.tier.map((g) => [g.value, g.n]), [["A", 2]]);
   assert.deepEqual(wilson(0, 0), [null, null]);
+});
+
+test("deal attribution: a contract needs a non-voided closing record; lifecycle-only formal_contract is unverified; profitable = funded", () => {
+  const base = { delivered: true, inbound: 3, intents: ["asking_price_provided"], stages: ["S4B"], ask: 200000, value: 250000 };
+  const voided = funnelLabels({ ...base, lifecycle: ["offer", "formal_contract"], closing: { contract_status: "cancelled", voided: true } });
+  assert.equal(voided.negotiation, true);
+  assert.equal(voided.contract, false);
+  assert.equal(voided.contract_voided, true);
+  const lifecycleOnly = funnelLabels({ ...base, lifecycle: ["formal_contract"] });
+  assert.equal(lifecycleOnly.contract, false);
+  assert.equal(lifecycleOnly.contract_unverified, true);
+  const real = funnelLabels({ ...base, lifecycle: ["offer"], closing: { contract_status: "signed", funding_status: "pending" } });
+  assert.deepEqual([real.contract, real.deal], [true, false]);
+  const funded = funnelLabels({ ...base, closing: { contract_status: "signed", funding_status: "funded" } });
+  assert.deepEqual([funded.contract, funded.deal], [true, true]);
+  const f = funnelBySignal([{ labels: funded, signals: { p: "x" } }, { labels: voided, signals: { p: "x" } }, ...Array.from({ length: 998 }, () => ({ labels: funnelLabels({ delivered: true, inbound: 0 }), signals: { p: "x" } }))], { signals: ["p"] });
+  assert.equal(f.overall.north_star.contracts_per_1000, 1);
+  assert.equal(f.overall.north_star.profitable_deals_per_1000, 1);
+  assert.equal(f.overall.north_star.voided_contracts, 1);
+  assert.equal(f.by_signal.p[0].north_star.delivered, 1000);
+});
+
+test("two-arm checkpoint: Newcombe difference CIs and pre-registered verdicts", () => {
+  const d = diffCI(30, 300, 10, 300);
+  assert.equal(d.diff, 0.0667);
+  assert.ok(d.ci95[0] > 0 && d.ci95[1] > d.diff);
+  assert.deepEqual(diffCI(0, 0, 1, 10), { diff: null, ci95: [null, null] });
+  const mk = (arm, owner) => ({ labels: funnelLabels({ delivered: true, inbound: owner ? 1 : 0, intents: owner ? ["ownership_confirmed"] : [] }), signals: { arm } });
+  const items = [...Array.from({ length: 300 }, (_, i) => mk("test", i < 30)), ...Array.from({ length: 300 }, (_, i) => mk("control", i < 10))];
+  const cmp = armComparison(items, { checkpoint: "21d" });
+  assert.equal(cmp.arms.test.delivered, 300);
+  assert.equal(cmp.arms.test.owner.k, 30);
+  assert.match(cmp.verdict.P1_owner, /test better/);
+  assert.equal(cmp.verdict.decision_checkpoint, "FINAL");
+  assert.equal(cmp.verdict.min_n_met, true);
+  assert.match(armComparison(items, { checkpoint: "72h" }).verdict.decision_checkpoint, /informational/);
 });
 
 test("funnel API is dark by default and needs a scope", async () => {

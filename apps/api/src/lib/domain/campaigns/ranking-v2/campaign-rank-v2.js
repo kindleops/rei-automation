@@ -14,7 +14,7 @@
 //                    shared-phone ambiguity. THE FIRST DIMENSION.
 //   L2 pressure      seller_situation_v2 (A1): tier + sell365 + forced-sale +
 //                    stacked evidence + other pressure — then made CONDITIONAL
-//                    on contact:  L2_eff = L2 · (GATE_FLOOR + (1−GATE_FLOOR)·L1/100)
+//                    on contact:  L2_eff = L2 · L1/100
 //                    (distress at a wrong/unreachable person is worth little).
 //                    No current situation → legacy final_acquisition_score as a
 //                    MARKED fallback, halved and capped at 50 (§12).
@@ -24,7 +24,8 @@
 //                    share) + response-rate CONTEXT (market-response.js:
 //                    shrunk, decayed, min-n, capped ±4 points).
 //
-//   priority = 0.40·L1 + 0.30·L2_eff + 0.15·L3 + 0.15·L4        (0–100)
+//   priority = 0.40·L1 + 0.30·L2·L1/100 + 0.15·L3 + 0.15·L4     (0–100)
+//   (distress is at most 30% of priority and only as reachable as the contact)
 //
 // No band overrides contact confidence. §67 still holds by construction: a
 // legacy Podio number is never read when current evidence exists, so a
@@ -39,7 +40,14 @@ import { contactConfidence, equityEvidence } from '@/lib/domain/campaigns/rankin
 export const CAMPAIGN_RANKING_VERSION = 'campaign_rank_v2.1'
 
 export const LAYER_WEIGHTS = Object.freeze({ contact: 0.4, pressure: 0.3, deal: 0.15, market: 0.15 })
-export const PRESSURE_GATE_FLOOR = 0.4
+// Gate = L1/100 (no floor). Guarantee (tested): with equal deal and market
+// layers, a contact that is CONTACT_DOMINANCE_DELTA points stronger always
+// outranks any tier-A seller — the distress layer (max 0.3 × 100 × gate) can
+// never close a 0.4 × 40 = 16-point contact gap, because the most a tier-A
+// seller at contact c can gain over a tier-C seller at c+40 is
+// 0.3·(100·c/100 − 7.5·(c+40)/100) = 0.2775·c − 0.9 ≤ 15.75 < 16 (c ≤ 60).
+export const PRESSURE_GATE_FLOOR = 0
+export const CONTACT_DOMINANCE_DELTA = 40
 export const TIER_POINTS = Object.freeze({ A: 100, B: 65, C: 25 })
 
 /** L2 sub-terms (weights sum to 1; unknown → prior, reported). */
@@ -172,7 +180,7 @@ export function computeCampaignRankV2(row = {}, { situation = null, market = nul
     priority_score: isEligible ? priority : null,
     contact_score: contact.score,
     layers: {
-      contact: { score: contact.score, weight: W.contact, line: contact.line, identity: contact.identity, tag: contact.tag, known_signals: contact.known_signals, evidence: contact.evidence },
+      contact: { score: contact.score, weight: W.contact, line: contact.line, identity: contact.identity, tag: contact.tag, identity_tier: contact.identity_tier, known_signals: contact.known_signals, evidence: contact.evidence },
       pressure: { score: pressure.score, gate: r2(gate), effective: pressureEff, weight: W.pressure, source: pressure.source, terms: pressure.terms },
       deal: { score: deal.score, weight: W.deal, equity: deal.equity, value_known: deal.value_known },
       market: { ...mkt, weight: W.market },

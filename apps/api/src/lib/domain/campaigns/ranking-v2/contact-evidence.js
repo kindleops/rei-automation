@@ -49,17 +49,28 @@ export function equityEvidence(row = {}) {
 
 // ── CONTACT CONFIDENCE (Layer 1) ─────────────────────────────────────────────
 //
-// 0–100 from five independent pieces of contact evidence. A missing piece takes
-// its documented NEUTRAL value (it is unknown, not bad); explicit negative
-// evidence (landline, identity mismatch/unknown, renter-without-ownership,
-// shared phone) costs points. best_phone_score is 100% NULL in the graph and
-// is never read (an empty score is unknown, never 0).
+// IDENTITY TIERS (owner decision 2026-10-07). A missing vendor matching tag is
+// ABSENCE of evidence, not negative evidence:
+//   strongest      verified identity + positive tag (Likely Owner / Linked To Company)
+//   strong         verified + no tag · probable + positive tag ·
+//                  entity_company_linked + Linked To Company (entity-owned)
+//   moderate       probable + no tag · entity_company_linked + no tag ·
+//                  unknown/missing identity + positive tag · verified + weak tag
+//                  (Potential Owner / Potentially Linked / Family)
+//   weak           unknown identity, no positive tag
+//   none           no identity value and no tag at all (nothing recorded)
+//   contradictory  identity mismatch, OR an owner-like identity contradicted by
+//                  a renter-only tag (Resident / Likely Renting) — always lower
+// Then line type (mobile / landline / unknown), 2-month usage, and a shared-
+// phone penalty. best_phone_score is 100% NULL in the graph and is never read
+// (an empty score is unknown, never 0).
+export const IDENTITY_TIER_POINTS = Object.freeze({ strongest: 52, strong: 44, moderate: 34, weak: 14, none: 20, contradictory: 4 })
 export const CONTACT_POINTS = Object.freeze({
   line: Object.freeze({ W: 30, L: 4, unknown: 14 }),
-  identity: Object.freeze({ verified: 32, probable: 26, entity_company_linked: 20, unknown: 6, mismatch: 0, missing: 12 }),
-  tag: Object.freeze({ likely_owner: 20, linked_to_company: 18, potential_owner: 10, potentially_linked_to_company: 8, family_only: 4, renter_no_owner: -14, missing: 7 }),
+  identity_tier: IDENTITY_TIER_POINTS,
   usage: Object.freeze({ 'very heavy usage': 10, 'heavy usage': 10, 'moderate usage': 8, 'light usage': 5, 'minimal usage': 0, missing: 5 }),
   shared_phone_penalty: -15,
+  max_raw: 92,
 })
 
 /** The contact-matching tag class from prospects.matching_flags (text, ', '-joined). */
@@ -75,6 +86,26 @@ export function matchingTagClass(matchingFlags, { entityOwned = false } = {}) {
   return 'missing'
 }
 
+const POSITIVE_TAGS = new Set(['likely_owner', 'linked_to_company'])
+const WEAK_TAGS = new Set(['potential_owner', 'potentially_linked_to_company', 'family_only'])
+
+/** identity alignment × matching tag → tier (see table above). */
+export function identityTier(identity, tag) {
+  const id = String(identity ?? '').trim().toLowerCase()
+  const known = ['verified', 'probable', 'entity_company_linked', 'unknown', 'mismatch'].includes(id) ? id : 'missing'
+  if (known === 'mismatch') return 'contradictory'
+  if (tag === 'renter_no_owner' && (known === 'verified' || known === 'probable' || known === 'entity_company_linked')) return 'contradictory'
+  if (known === 'verified') return POSITIVE_TAGS.has(tag) ? 'strongest' : tag === 'missing' ? 'strong' : 'moderate'
+  if (known === 'probable') return POSITIVE_TAGS.has(tag) ? 'strong' : 'moderate'
+  if (known === 'entity_company_linked') return tag === 'linked_to_company' ? 'strong' : 'moderate'
+  if (known === 'unknown') return POSITIVE_TAGS.has(tag) ? 'moderate' : 'weak'
+  // identity not recorded
+  if (POSITIVE_TAGS.has(tag)) return 'moderate'
+  if (tag === 'renter_no_owner') return 'weak'
+  if (WEAK_TAGS.has(tag)) return 'weak'
+  return 'none'
+}
+
 function entityOwned(row) {
   const ot = String(row.owner_type ?? '').toLowerCase()
   return row.is_corporate_owner === true || row.is_corporate_owner === 't' || /corporate|trust|estate|llc/.test(ot)
@@ -82,7 +113,7 @@ function entityOwned(row) {
 
 /**
  * @param {object} row graph row (+ optional `matching_flags` from prospects and
- *   `phone_owner_count` = distinct owners sharing this phone in the cohort)
+ *   `phone_owner_count` = distinct owners sharing this phone)
  */
 export function contactConfidence(row = {}) {
   const P = CONTACT_POINTS
@@ -94,13 +125,12 @@ export function contactConfidence(row = {}) {
   evidence.push({ code: line === 'W' ? 'MOBILE_LINE' : line === 'L' ? 'LANDLINE' : 'LINE_TYPE_UNKNOWN', points: P.line[line], source: 'campaign_target_graph.phone_type' })
 
   const ia = String(row.identity_alignment ?? '').trim().toLowerCase()
-  const identity = ia in P.identity && ia !== 'missing' ? ia : 'missing'
-  if (identity !== 'missing') known += 1
-  evidence.push({ code: `IDENTITY_${identity.toUpperCase()}`, points: P.identity[identity], source: 'campaign_target_graph.identity_alignment' })
-
+  const identity = ['verified', 'probable', 'entity_company_linked', 'unknown', 'mismatch'].includes(ia) ? ia : 'missing'
   const tag = matchingTagClass(row.matching_flags, { entityOwned: entityOwned(row) })
+  if (identity !== 'missing') known += 1
   if (tag !== 'missing') known += 1
-  evidence.push({ code: `TAG_${tag.toUpperCase()}`, points: P.tag[tag], source: 'prospects.matching_flags' })
+  const tier = identityTier(identity, tag)
+  evidence.push({ code: `IDENTITY_TIER_${tier.toUpperCase()}`, points: P.identity_tier[tier], source: `campaign_target_graph.identity_alignment=${identity} × prospects.matching_flags=${tag}` })
 
   const usage = String(row.usage_2_months ?? '').trim().toLowerCase()
   const u = usage in P.usage && usage !== 'missing' ? usage : 'missing'
@@ -109,11 +139,11 @@ export function contactConfidence(row = {}) {
 
   const shared = num(row.phone_owner_count)
   if (shared !== null) known += 1
-  if (shared !== null && shared > 1) evidence.push({ code: 'SHARED_PHONE_AMBIGUOUS', points: P.shared_phone_penalty, source: 'cohort:canonical_e164→master_owner_id' })
+  if (shared !== null && shared > 1) evidence.push({ code: 'SHARED_PHONE_AMBIGUOUS', points: P.shared_phone_penalty, source: 'canonical_e164→distinct master_owner_id' })
 
-  const raw = evidence.reduce((s, e) => s + e.points, 0)
-  const score = Math.max(0, Math.min(100, Math.round((raw / 92) * 100)))
-  return { score, known_signals: known, total_signals: 5, line, identity, tag, evidence }
+  const raw = evidence.reduce((acc, e) => acc + e.points, 0)
+  const score = Math.max(0, Math.min(100, Math.round((raw / P.max_raw) * 100)))
+  return { score, known_signals: known, total_signals: 5, line, identity, tag, identity_tier: tier, evidence }
 }
 
 /** Bucket for funnel/quality splits. */

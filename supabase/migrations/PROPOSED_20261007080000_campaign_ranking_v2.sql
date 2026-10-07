@@ -1,11 +1,13 @@
--- PROPOSED — NOT APPLIED. Acquisition OS ranking v2.1 (owner rebuild 2026-10-07, agent A2).
+-- PROPOSED — NOT APPLIED. MIGRATION (b): ORDERING-AFFECTING — stays SEPARATE and UNAPPLIED.
+-- (Schema-only support is migration (a): PROPOSED_20261007090000_ranking_shadow_support.sql.)
+-- Acquisition OS ranking v2.1 (owner rebuild 2026-10-07, agent A2).
 -- Owner approval required (§86/§87). Rollback: PROPOSED_20261007080000_campaign_ranking_v2_rollback.sql
 --
 -- CAMPAIGN RANKING v2.1 — the SQL twin of
 --   apps/api/src/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js  (+ contact-evidence.js)
 -- (formula-identical; tests pin both). Layers: L1 contact confidence → L2 seller
 -- pressure CONDITIONAL on contact → L3 deal (equity KNOWN only) → L4 market.
---   priority = 0.4·L1 + 0.3·L2·(0.4 + 0.6·L1/100) + 0.15·L3 + 0.15·L4
+--   priority = 0.4·L1 + 0.3·L2·L1/100 + 0.15·L3 + 0.15·L4
 -- No tier bands. Legacy acquisition_score is read only as a marked L2 fallback.
 -- Market response-rate context is NOT persisted (refit + capped ±4 in the app).
 --
@@ -42,6 +44,22 @@ RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
   END
 $$;
 
+-- Identity tier (contact-evidence.js identityTier): a missing tag is absence of evidence.
+CREATE OR REPLACE FUNCTION public.campaign_identity_tier(p_identity text, p_tag text)
+RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT CASE
+    WHEN lower(coalesce(p_identity,'')) = 'mismatch' THEN 'contradictory'
+    WHEN p_tag = 'renter_no_owner' AND lower(coalesce(p_identity,'')) IN ('verified','probable','entity_company_linked') THEN 'contradictory'
+    WHEN lower(coalesce(p_identity,'')) = 'verified' THEN CASE WHEN p_tag IN ('likely_owner','linked_to_company') THEN 'strongest' WHEN p_tag IS NULL THEN 'strong' ELSE 'moderate' END
+    WHEN lower(coalesce(p_identity,'')) = 'probable' THEN CASE WHEN p_tag IN ('likely_owner','linked_to_company') THEN 'strong' ELSE 'moderate' END
+    WHEN lower(coalesce(p_identity,'')) = 'entity_company_linked' THEN CASE WHEN p_tag = 'linked_to_company' THEN 'strong' ELSE 'moderate' END
+    WHEN lower(coalesce(p_identity,'')) = 'unknown' THEN CASE WHEN p_tag IN ('likely_owner','linked_to_company') THEN 'moderate' ELSE 'weak' END
+    WHEN p_tag IN ('likely_owner','linked_to_company') THEN 'moderate'
+    WHEN p_tag IN ('renter_no_owner','potential_owner','potentially_linked_to_company','family_only') THEN 'weak'
+    ELSE 'none'
+  END
+$$;
+
 -- L1 contact confidence 0–100 (contact-evidence.js CONTACT_POINTS; max raw 92).
 -- p_tag: likely_owner | linked_to_company | potential_owner | potentially_linked_to_company
 --        | family_only | renter_no_owner | NULL (missing)
@@ -49,10 +67,8 @@ CREATE OR REPLACE FUNCTION public.campaign_rank_v2_contact(p_identity text, p_ph
 RETURNS smallint LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
   SELECT greatest(0, least(100, round((
       CASE upper(coalesce(p_phone_type,'')) WHEN 'W' THEN 30 WHEN 'L' THEN 4 ELSE 14 END
-    + CASE lower(coalesce(p_identity,'')) WHEN 'verified' THEN 32 WHEN 'probable' THEN 26 WHEN 'entity_company_linked' THEN 20
-        WHEN 'unknown' THEN 6 WHEN 'mismatch' THEN 0 ELSE 12 END
-    + CASE p_tag WHEN 'likely_owner' THEN 20 WHEN 'linked_to_company' THEN 18 WHEN 'potential_owner' THEN 10
-        WHEN 'potentially_linked_to_company' THEN 8 WHEN 'family_only' THEN 4 WHEN 'renter_no_owner' THEN -14 ELSE 7 END
+    + CASE public.campaign_identity_tier(p_identity, p_tag) WHEN 'strongest' THEN 52 WHEN 'strong' THEN 44 WHEN 'moderate' THEN 34
+        WHEN 'weak' THEN 14 WHEN 'contradictory' THEN 4 ELSE 20 END
     + CASE lower(coalesce(p_usage,'')) WHEN 'very heavy usage' THEN 10 WHEN 'heavy usage' THEN 10 WHEN 'moderate usage' THEN 8
         WHEN 'light usage' THEN 5 WHEN 'minimal usage' THEN 0 ELSE 5 END
     + CASE WHEN p_phone_owner_count > 1 THEN -15 ELSE 0 END
@@ -105,7 +121,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.campaign_rank_v2_priority(p_contact numeric, p_pressure numeric, p_deal numeric, p_market numeric)
 RETURNS numeric LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
   SELECT round((0.4 * p_contact
-              + 0.3 * p_pressure * (0.4 + 0.6 * p_contact / 100)
+              + 0.3 * p_pressure * (p_contact / 100)   -- pure gate: distress is only as reachable as the contact
               + 0.15 * p_deal
               + 0.15 * coalesce(least(greatest(p_market,0),100), 50))::numeric, 2)
 $$;

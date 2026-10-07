@@ -190,11 +190,13 @@ export async function runFunnel(input = {}, deps = {}) {
   const { FUNNEL_OUTCOME_SQL, FUNNEL_STAGES, funnelBySignal, funnelLabels, funnelSignals } = await import('@/lib/domain/campaigns/ranking-v2/funnel-analytics.js')
   const campaignIds = [].concat(input.campaign_ids || []).map((v) => String(v).trim()).filter((v) => /^[0-9a-f-]{36}$/i.test(v))
   const since = input.since && Number.isFinite(Date.parse(input.since)) ? new Date(input.since).toISOString() : null
-  if (!campaignIds.length && !since) return { ok: false, status: 400, error: 'scope_required', message: 'Pass campaign_ids and/or since.' }
+  const propertyIds = [].concat(input.property_ids || []).map((v) => String(v).trim()).filter(Boolean).slice(0, 50000)
+  if (!campaignIds.length && !since && !propertyIds.length) return { ok: false, status: 400, error: 'scope_required', message: 'Pass campaign_ids, property_ids and/or since.' }
   const conditionalOn = FUNNEL_STAGES.includes(input.conditional_on) ? input.conditional_on : null
   const db = deps.db || await defaultDb()
   const t0 = Date.now()
-  const { rows: outcomes } = await db.query(FUNNEL_OUTCOME_SQL, [campaignIds.length ? campaignIds : null, since])
+  const until = input.until && Number.isFinite(Date.parse(input.until)) ? new Date(input.until).toISOString() : null
+  const { rows: outcomes } = await db.query(FUNNEL_OUTCOME_SQL, [campaignIds.length ? campaignIds : null, since, propertyIds.length ? propertyIds : null, until])
   const capped = outcomes.slice(0, 50000)
   const graph = await graphRowsByIds(capped.map((o) => o.property_id), db)
   const contexts = await buildRowContexts(graph, contextDeps(db, deps))
@@ -203,9 +205,57 @@ export async function runFunnel(input = {}, deps = {}) {
   for (const o of capped) {
     const hit = byId.get(String(o.property_id))
     if (!hit) continue
-    const labels = funnelLabels({ delivered: true, inbound: o.inbound, intents: o.intents, stages: o.stages, opt_out: o.opt_out, ask: o.ask, value: hit.row.estimated_value, opportunity_stage: o.opportunity_stage })
-    items.push({ labels, signals: funnelSignals(hit.row, hit.ctx) })
+    const labels = funnelLabels({ delivered: true, inbound: o.inbound, intents: o.intents, stages: o.stages, opt_out: o.opt_out, ask: o.ask, value: hit.row.estimated_value, opportunity_stage: o.opportunity_stage, lifecycle: o.lifecycle, closing: o.jsonb_closing })
+    const signals = funnelSignals(hit.row, hit.ctx)
+    signals.first_touch = o.first_touch_campaign_id ? `campaign:${o.first_touch_campaign_id}` : `source:${o.first_touch_source}`
+    if (input.arms && input.arms[o.property_id]) signals.arm = input.arms[o.property_id]
+    items.push({ property_id: o.property_id, labels, signals })
   }
   const report = funnelBySignal(items, { conditionalOn })
-  return { ok: true, version: 'targeting_funnel_v1', scope: { campaign_ids: campaignIds, since }, delivered_properties: outcomes.length, truncated: outcomes.length > capped.length, matched_to_graph: items.length, ...report, ms: Date.now() - t0 }
+  if (input.return_items) report.items = items
+  return { ok: true, version: 'targeting_funnel_v2', scope: { campaign_ids: campaignIds, since, until, property_ids: propertyIds.length }, delivered_properties: outcomes.length, truncated: outcomes.length > capped.length, matched_to_graph: items.length, ...report, ms: Date.now() - t0 }
+}
+
+export const CHECKPOINTS = Object.freeze({ '24h': 24, '72h': 72, '7d': 168, '14d': 336, '21d': 504 })
+
+/**
+ * TEST CAMPAIGN CHECKPOINT (owner decision 10-07): per-stage funnel for both
+ * arms at 24h / 72h / 7d / 14d / 21d after launch, with Newcombe CIs, the
+ * pre-registered verdicts and contamination checks (send hour / sender /
+ * template balance by arm). Read-only; re-runnable at any time — outcomes are
+ * capped at launched_at + checkpoint so a re-run reproduces the same read.
+ * cohort: { arms: {test: [ids], control: [ids]}, preregistration }
+ */
+export async function runTestCampaignCheckpoint(cohort = {}, { checkpoint = '24h', launched_at = null } = {}, deps = {}) {
+  if (!isSellerScreenerEnabled(deps.env || process.env)) return screenerDisabledResponse()
+  const hours = CHECKPOINTS[checkpoint]
+  if (!hours) return { ok: false, status: 400, error: 'unknown_checkpoint', allowed: Object.keys(CHECKPOINTS) }
+  if (!launched_at || !Number.isFinite(Date.parse(launched_at))) return { ok: false, status: 400, error: 'launched_at_required' }
+  const armOf = {}
+  for (const [arm, ids] of Object.entries(cohort.arms || {})) for (const id of ids) armOf[String(id)] = arm
+  const ids = Object.keys(armOf)
+  if (!ids.length) return { ok: false, status: 400, error: 'cohort_empty' }
+  const since = new Date(launched_at).toISOString()
+  const until = new Date(Date.parse(launched_at) + hours * 3600_000).toISOString()
+  const db = deps.db || await defaultDb()
+  const funnel = await runFunnel({ property_ids: ids, since, until, arms: armOf, return_items: true }, { ...deps, db })
+  if (!funnel.ok) return funnel
+  const { armComparison } = await import('@/lib/domain/campaigns/ranking-v2/funnel-analytics.js')
+  const comparison = armComparison(funnel.items, { arms: ['test', 'control'], checkpoint, preregistration: cohort.preregistration || null })
+  const { rows: sends } = await db.query(
+    `select property_id, extract(hour from coalesce(sent_at, created_at) at time zone 'America/Chicago')::int hour_ct,
+            coalesce(textgrid_number_id::text, from_phone_number, 'unknown') sender, coalesce(template_id::text, 'unknown') template, queue_status
+       from public.send_queue where property_id = any($1::text[]) and created_at >= $2::timestamptz and created_at <= $3::timestamptz`,
+    [ids, since, until],
+  )
+  const balance = {}
+  for (const dim of ['hour_ct', 'sender', 'template', 'queue_status']) {
+    const t = {}
+    for (const r of sends) { const a = armOf[String(r.property_id)]; const k = String(r[dim]); t[k] ||= { test: 0, control: 0 }; t[k][a] += 1 }
+    balance[dim] = t
+  }
+  const contacted = { test: 0, control: 0 }
+  for (const id of new Set(sends.map((r) => String(r.property_id)))) contacted[armOf[id]] += 1
+  delete funnel.items
+  return { ok: true, version: 'test_campaign_checkpoint_v1', checkpoint, window: { since, until }, cohort_size: { test: (cohort.arms.test || []).length, control: (cohort.arms.control || []).length }, contacted, ...comparison, contamination: balance, funnel_by_signal_overall: funnel.overall }
 }

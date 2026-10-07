@@ -30,6 +30,7 @@ DROP FUNCTION IF EXISTS public.campaign_rank_v2_deal(numeric, text, numeric);
 DROP FUNCTION IF EXISTS public.campaign_rank_v2_pressure(text, numeric, numeric, integer, numeric, numeric);
 DROP FUNCTION IF EXISTS public.campaign_matching_tag_class(text, boolean);
 DROP FUNCTION IF EXISTS public.campaign_rank_v2_contact(text, text, text, text, integer);
+DROP FUNCTION IF EXISTS public.campaign_identity_tier(text, text);
 DROP FUNCTION IF EXISTS public.campaign_equity_class(numeric, numeric, text);
 DROP FUNCTION IF EXISTS public.campaign_equity_known_pct(numeric, numeric, text);
 -- v2.0 signatures (if a v2.0 draft was ever applied)
