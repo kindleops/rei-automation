@@ -25,6 +25,7 @@ import { PropertyPlane } from './planes/PropertyPlane'
 import { ProspectPlane } from './planes/ProspectPlane'
 import { SystemPlane } from './planes/SystemPlane'
 import { MoneyPlane } from './planes/ThesisMoney'
+import { NegotiationPlane } from './planes/NegotiationPlane'
 import { useClock } from './useClock'
 import { useDecisionRoom, useDealStory } from './useDecisionRoom'
 import { useDecisionSubject } from './useDecisionSubject'
@@ -209,7 +210,7 @@ export function DealIntelligenceDesktop({ subject: explicit }: DealIntelligenceD
                   <DecisionPlane d={d} state={m.state} figures={m.figures} spectrum={m.spectrum} track={m.track} conf={m.conf} thesis={m.thesis} selection={selection} onSelect={pick} now={now} engine={{ canRun: Boolean(threadKey), running: engine.engineRunning, onRun: runEngine }} />
                 </div>
                 <div className="dr-area-prop"><PropertyPlane d={d} onOpenMedia={() => pick({ type: 'media' })} /></div>
-                <div className="dr-area-money"><MoneyPlane d={d} bridge={m.bridge} f={m.figures} selection={selection} onSelect={pick} /></div>
+                <div className="dr-area-money"><MoneyPlane d={d} bridge={m.bridge} f={m.figures} selection={selection} onSelect={pick} />{d.offer?.negotiationV3 ? <NegotiationPlane n={d.offer.negotiationV3} /> : null}</div>
                 <div className="dr-area-conf"><ConfidencePlane model={m.conf} selection={selection} onSelect={pick} /></div>
                 <div className="dr-area-gates"><GatePlane gates={m.gates} tierLabel={dec?.tierLabel ?? null} selection={selection} onSelect={pick} /></div>
                 <div className="dr-area-system"><SystemPlane d={d} links={m.links} now={now} /></div>

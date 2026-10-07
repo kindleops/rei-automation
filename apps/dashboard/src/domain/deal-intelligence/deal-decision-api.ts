@@ -187,6 +187,8 @@ export type DealDecision = {
       formalOffers: Array<{ amount: number | null; offerId: string | null; quotedAt: string; label: string }>
       confirmations?: Array<{ quotedAt: string; label: string }>
     }
+    /** §82 Negotiation v3 desk — present only when NEGOTIATION_ENGINE_V3 is on server-side. Operator-only. */
+    negotiationV3?: NegotiationV3Desk | null
     binding: boolean
     lineage: { snapshotId: string | null; negotiationSnapshotId: string | null; negotiationUsesLatest: boolean | null }
   } | null
@@ -290,4 +292,27 @@ export function ago(iso: string | null | undefined, now = Date.now()): string | 
   if (d < 30) return `${d}d ago`
   if (d < 365) return `${Math.floor(d / 30)}mo ago`
   return `${(d / 365).toFixed(1)}y ago`
+}
+
+/** Negotiation Engine v3 operator view (apps/api negotiation-v3/view.js). Never seller-facing. */
+export interface NegotiationV3Desk {
+  status: 'authorized' | 'no_autonomous_money'
+  asset: 'sfr' | 'multifamily' | 'unknown'
+  ask: number | null
+  anchor: number | null
+  currentPosition: { amount: number | null; type: string; quoted_at: string } | null
+  quotesCaptured: boolean
+  target: number | null
+  autonomousLimit: number | null
+  ceiling: number | null
+  fairFloor: number | null
+  perUnit: { units: number; unit_source: string | null; ceiling: number | null; target: number | null; anchor: number | null; autonomous_limit: number | null; fair_floor: number | null } | null
+  ladder: Array<{ step: number; kind: 'anchor' | 'concession' | 'final_autonomous'; amount: number }>
+  authority: { source: string | null; engine_version: string | null; computed_at: string | null; decision_tier: string | null; fresh: boolean; ok: boolean; reasons: string[] }
+  engineReference: { recommended: number | null; ceiling: number | null; valuation_mid: number | null } | null
+  strategy: { situation: string | null; angle: string | null; creativeProbe: boolean }
+  nextMove: { action: 'QUOTE' | 'HOLD' | 'HUMAN' | 'CLOSE_UNREALISTIC' | 'NO_NUMBER'; amount: number | null; proposal: number | null; quoteType: string | null; rule: string }
+  why: string[]
+  version: string
+  configVersion: string
 }

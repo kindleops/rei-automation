@@ -1,0 +1,500 @@
+{
+ "_source": "property_acquisition_scores read-only extract 2026-10-07 (compact projection: tier, offer, value, repairs, MAO, subject, selected_comps)",
+ "rows": {
+  "25943678": {
+   "property_id": "25943678",
+   "decision_tier": "REVIEW_REQUIRED",
+   "recommended_cash_offer": 20100,
+   "valuation_mid": 307100,
+   "estimated_repairs": 183700,
+   "minimum_acceptable_offer": 10900,
+   "computed_at": "2026-06-14T00:40:25.669+00:00",
+   "comp_count": 0,
+   "confidence": 45,
+   "valuation_confidence": 25,
+   "evidence": {
+    "offer_calculation": {
+     "effective_authorized_ceiling": null
+    },
+    "engine": {
+     "name": "acquisition_decision_engine",
+     "version": "2.0.0",
+     "computed_at": "2026-06-14T00:40:25.669Z",
+     "deterministic": true,
+     "target_assignment_fee": 15000
+    },
+    "subject": {
+     "asset_family": "multifamily",
+     "asset_type": "multifamily",
+     "asset_identity_conflict": null,
+     "normalized_features": {
+      "units": 18,
+      "estimated_value": 307142
+     }
+    },
+    "decision_inputs": {
+     "inputs": {
+      "property": {
+       "estimated_value": null
+      }
+     }
+    },
+    "immutable_snapshot_id": null,
+    "selected_comps": null
+   }
+  },
+  "2131325199": {
+   "property_id": "2131325199",
+   "decision_tier": "AUTO_HARD_OFFER",
+   "recommended_cash_offer": 53400,
+   "valuation_mid": 146200,
+   "estimated_repairs": 32900,
+   "minimum_acceptable_offer": 48400,
+   "computed_at": "2026-10-05T17:57:36.511+00:00",
+   "comp_count": 12,
+   "confidence": 88,
+   "valuation_confidence": 81,
+   "evidence": {
+    "offer_calculation": {
+     "effective_authorized_ceiling": 69400
+    },
+    "engine": {
+     "name": "acquisition_decision_engine",
+     "version": "2.0.0",
+     "computed_at": "2026-10-05T17:57:36.511Z",
+     "deterministic": true,
+     "target_assignment_fee": 15000
+    },
+    "subject": {
+     "asset_family": "residential",
+     "asset_type": "single_family",
+     "asset_identity_conflict": false,
+     "normalized_features": {
+      "units": 1,
+      "estimated_value": 162000
+     }
+    },
+    "decision_inputs": {
+     "inputs": {
+      "property": {
+       "estimated_value": null
+      }
+     }
+    },
+    "immutable_snapshot_id": "8cc6dfed-6ab4-4f6c-bfe3-b2d6c6b43c3e",
+    "selected_comps": [
+     {
+      "comp_id": "e158a809-504e-41d2-bd48-8f06e9555a68",
+      "property_id": "2130391781",
+      "sale_price": 158270,
+      "distance_miles": 1.19,
+      "sale_date": "2026-04-13",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "24ac46d3-f6e1-4484-a2d4-cad6f24077f5",
+      "property_id": "2130453876",
+      "sale_price": 125000,
+      "distance_miles": 0.77,
+      "sale_date": "2026-04-10",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "bcb27194-41bf-46f8-911b-8bc6211b610c",
+      "property_id": "2130433584",
+      "sale_price": 179683,
+      "distance_miles": 0.53,
+      "sale_date": "2026-04-16",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "476bc3b4-af6b-4792-8a82-d231ddf98f12",
+      "property_id": "2130452606",
+      "sale_price": 224770,
+      "distance_miles": 0.93,
+      "sale_date": "2026-04-22",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "27e8584f-997d-44aa-ab5b-df72b3e219e4",
+      "property_id": "2131503121",
+      "sale_price": 68039,
+      "distance_miles": 1.56,
+      "sale_date": "2026-03-05",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "c164b4c8-9408-473e-934a-522fe57ee075",
+      "property_id": "2131491840",
+      "sale_price": 138320,
+      "distance_miles": 1.74,
+      "sale_date": "2026-02-27",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "9b69a269-c5f3-4fe5-a5dc-7cd4975e584a",
+      "property_id": "2130452516",
+      "sale_price": 126350,
+      "distance_miles": 0.95,
+      "sale_date": "2026-02-20",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "bd47a108-528e-4e10-a6d3-d880e27b3565",
+      "property_id": "2130435363",
+      "sale_price": 195000,
+      "distance_miles": 2.56,
+      "sale_date": "2026-03-24",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "fe5e965a-3d84-4ae7-9030-9011547b8ceb",
+      "property_id": "2131549917",
+      "sale_price": 186200,
+      "distance_miles": 1.87,
+      "sale_date": "2026-04-21",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "2e5691ac-930c-4c89-83f6-d6ae75d12f6c",
+      "property_id": "2130391793",
+      "sale_price": 101850,
+      "distance_miles": 1.21,
+      "sale_date": "2026-01-16",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "006ddce8-b23f-4cf5-a430-d3f3eb566574",
+      "property_id": "2130435408",
+      "sale_price": 208810,
+      "distance_miles": 2.56,
+      "sale_date": "2026-04-20",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "890931cc-0e9a-4652-8a81-35e826145a04",
+      "property_id": "2131490441",
+      "sale_price": 138320,
+      "distance_miles": 1.71,
+      "sale_date": "2026-03-11",
+      "source": "public_record_sold",
+      "units": null
+     }
+    ]
+   }
+  },
+  "273586189": {
+   "property_id": "273586189",
+   "decision_tier": "CREATIVE_TERMS",
+   "recommended_cash_offer": 11800,
+   "valuation_mid": 230000,
+   "estimated_repairs": 138300,
+   "minimum_acceptable_offer": 4900,
+   "computed_at": "2026-10-06T23:20:19.301+00:00",
+   "comp_count": 12,
+   "confidence": 85,
+   "valuation_confidence": 78,
+   "evidence": {
+    "offer_calculation": {
+     "effective_authorized_ceiling": 27300
+    },
+    "engine": {
+     "name": "acquisition_decision_engine",
+     "version": "2.0.0",
+     "computed_at": "2026-10-06T23:20:19.301Z",
+     "deterministic": true,
+     "target_assignment_fee": 15000
+    },
+    "subject": {
+     "asset_family": "multifamily",
+     "asset_type": "multifamily",
+     "asset_identity_conflict": true,
+     "normalized_features": {
+      "units": 1,
+      "estimated_value": 746000
+     }
+    },
+    "decision_inputs": {
+     "inputs": {
+      "property": {
+       "estimated_value": 746000
+      }
+     }
+    },
+    "immutable_snapshot_id": "034aa6e8-3586-4cfb-afbf-1de979a44e5c",
+    "selected_comps": [
+     {
+      "comp_id": "7f6933b6-0036-4eed-a870-847e23470fcd",
+      "property_id": "273625542",
+      "sale_price": 380000,
+      "distance_miles": 1.77,
+      "sale_date": "2026-03-09",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "b1657e64-ac46-4112-bfff-6e2bf268075a",
+      "property_id": "273640421",
+      "sale_price": 465000,
+      "distance_miles": 1.55,
+      "sale_date": "2025-12-17",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "6253b6b8-f39c-4405-b824-a8f955b30a62",
+      "property_id": "273366312",
+      "sale_price": 335000,
+      "distance_miles": 4.87,
+      "sale_date": "2026-03-18",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "c3435e66-b1d8-4bd7-a668-da9604fe0b6d",
+      "property_id": "273676983",
+      "sale_price": 296000,
+      "distance_miles": 3.4,
+      "sale_date": "2026-03-20",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "cfbfc6d6-b214-47c1-ae4e-1a4e72faf7eb",
+      "property_id": "273501726",
+      "sale_price": 322500,
+      "distance_miles": 4.07,
+      "sale_date": "2026-04-08",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "60976009-450e-4e81-9a7e-eae22705ae90",
+      "property_id": "273305111",
+      "sale_price": 327500,
+      "distance_miles": 2.58,
+      "sale_date": "2026-03-30",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "dc089953-59ca-4dee-b2e8-5e7fde7da597",
+      "property_id": "273569354",
+      "sale_price": 385000,
+      "distance_miles": 1.61,
+      "sale_date": "2026-02-17",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "77a4b534-9c85-458e-9a4e-bf6376044947",
+      "property_id": "273709227",
+      "sale_price": 437500,
+      "distance_miles": 2.84,
+      "sale_date": "2026-02-24",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "e0ae520c-f74f-4541-9562-6142c59156f5",
+      "property_id": "273563590",
+      "sale_price": 335000,
+      "distance_miles": 4.22,
+      "sale_date": "2026-03-20",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "e1f19a71-a8a2-4c6c-8768-819d2d01d4e5",
+      "property_id": "273710154",
+      "sale_price": 430000,
+      "distance_miles": 2.73,
+      "sale_date": "2025-12-23",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "7fd95ab6-d8d9-47d5-be8d-a89bc866bd14",
+      "property_id": "273521236",
+      "sale_price": 332500,
+      "distance_miles": 4.18,
+      "sale_date": "2026-03-26",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "0a2c92e2-2f46-4a6c-a5ac-81a8f6a4fc9d",
+      "property_id": "273464252",
+      "sale_price": 449900,
+      "distance_miles": 4.06,
+      "sale_date": "2025-11-04",
+      "source": "mls_sold",
+      "units": null
+     }
+    ]
+   }
+  },
+  "274574569": {
+   "property_id": "274574569",
+   "decision_tier": "CREATIVE_TERMS",
+   "recommended_cash_offer": 192500,
+   "valuation_mid": 803500,
+   "estimated_repairs": 366700,
+   "minimum_acceptable_offer": 168400,
+   "computed_at": "2026-10-07T01:37:57.442+00:00",
+   "comp_count": 12,
+   "confidence": 81,
+   "valuation_confidence": 70,
+   "evidence": {
+    "offer_calculation": {
+     "effective_authorized_ceiling": 211800
+    },
+    "engine": {
+     "name": "acquisition_decision_engine",
+     "version": "2.0.0",
+     "computed_at": "2026-10-07T01:37:57.442Z",
+     "deterministic": true,
+     "target_assignment_fee": 15000
+    },
+    "subject": {
+     "asset_family": "multifamily",
+     "asset_type": "multifamily",
+     "asset_identity_conflict": false,
+     "normalized_features": {
+      "units": 11,
+      "estimated_value": 1310085
+     }
+    },
+    "decision_inputs": {
+     "inputs": {
+      "property": {
+       "estimated_value": null
+      }
+     }
+    },
+    "immutable_snapshot_id": "31a39b1d-97ea-42b0-b13e-ab59e6865433",
+    "selected_comps": [
+     {
+      "comp_id": "468fed59-858f-4edd-ae3f-49e60f7d7445",
+      "property_id": "274513643",
+      "sale_price": 650000,
+      "distance_miles": 1.98,
+      "sale_date": "2026-04-27",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "904fe513-70ca-40cc-83d6-9571981037a1",
+      "property_id": "274511135",
+      "sale_price": 1050000,
+      "distance_miles": 3.84,
+      "sale_date": "2025-11-03",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "89b49a2a-7edf-485e-a2dc-77134d346090",
+      "property_id": "274548854",
+      "sale_price": 1550000,
+      "distance_miles": 1.47,
+      "sale_date": "2025-12-15",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "e2ca88c7-0027-4a43-8bf2-46fc57b57714",
+      "property_id": "274455640",
+      "sale_price": 279000,
+      "distance_miles": 2.53,
+      "sale_date": "2026-04-06",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "a7ecb216-683b-4363-a60e-171e04b7f789",
+      "property_id": "274437060",
+      "sale_price": 325000,
+      "distance_miles": 6.01,
+      "sale_date": "2026-01-20",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "d4a6726f-febc-4f92-a9a3-dc87af4f718e",
+      "property_id": "274493123",
+      "sale_price": 412000,
+      "distance_miles": 1.6,
+      "sale_date": "2026-01-02",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "685b3ff6-d1da-4f8f-beb4-186e2087061c",
+      "property_id": "274426385",
+      "sale_price": 1330000,
+      "distance_miles": 4.79,
+      "sale_date": "2026-03-12",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "3dc07f46-794c-44ad-b313-55c9a0b105fd",
+      "property_id": "274575336",
+      "sale_price": 650000,
+      "distance_miles": 6.95,
+      "sale_date": "2026-03-13",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "c2a72791-fb9b-4513-ad2e-84821c43b366",
+      "property_id": "274444995",
+      "sale_price": 650000,
+      "distance_miles": 2.89,
+      "sale_date": "2026-02-02",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "1ccb8485-a927-47b0-8fdb-62bda2d0f697",
+      "property_id": "274427967",
+      "sale_price": 650000,
+      "distance_miles": 4.07,
+      "sale_date": "2026-04-28",
+      "source": "public_record_sold",
+      "units": null
+     },
+     {
+      "comp_id": "9475d8c2-a4f2-42fb-8d47-826b9b49afc6",
+      "property_id": "274467840",
+      "sale_price": 538900,
+      "distance_miles": 3.91,
+      "sale_date": "2026-04-14",
+      "source": "mls_sold",
+      "units": null
+     },
+     {
+      "comp_id": "0a9cc525-bb54-4a45-a49a-ec76b8a0ae2c",
+      "property_id": "274530547",
+      "sale_price": 650000,
+      "distance_miles": 3.49,
+      "sale_date": "2026-01-14",
+      "source": "public_record_sold",
+      "units": null
+     }
+    ]
+   }
+  }
+ }
+}

@@ -24,6 +24,8 @@
  * ai_score, structured_motivation_score, deal_strength_score) are not read.
  */
 import { describeQuote } from '@/lib/domain/seller-flow/negotiation-quotes.js'
+import { isNegotiationEngineV3Enabled } from '@/lib/domain/negotiation-v3/flags.js'
+import { buildNegotiationDeskView } from '@/lib/domain/negotiation-v3/view.js'
 import { latestRunCandidates } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { UNIVERSAL_STAGE_LABELS } from '@/lib/domain/opportunity/universal-pipeline-registry.js'
@@ -794,6 +796,24 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   const ns = meta.negotiation_state && typeof meta.negotiation_state === 'object' ? meta.negotiation_state : null
   const ask = pos(ns?.current_asking_price ?? ns?.current_ask) ?? pos(opp?.asking_price)
   const avm = pos(props?.estimated_value) ?? pos(parcel.estimated_value)
+  // §82 Negotiation v3 desk (operator-only, NEGOTIATION_ENGINE_V3 default OFF): ask, anchor,
+  // current position, target, autonomous limit, ceiling + why. Never seller text.
+  const negotiationV3 = isNegotiationEngineV3Enabled() && score
+    ? (() => {
+        try {
+          return buildNegotiationDeskView({
+            ade_snapshot: score,
+            property: { property_id: propertyId, property_type: clean(parcel.property_type || props?.property_type), units_count: num(parcel.units_count ?? props?.units_count) },
+            seller: { asking_price: ask, condition: clean(obj(meta.seller_facts).property_condition?.value ?? obj(meta.seller_facts).property_condition) || null, occupancy: clean(obj(meta.seller_facts).occupancy_status?.value ?? obj(meta.seller_facts).occupancy_status) || null },
+            quotes,
+            now,
+          })
+        } catch (error) {
+          console.warn('deal_decision.negotiation_v3_failed', error?.message)
+          return null
+        }
+      })()
+    : null
   const oc = obj(score?.evidence?.offer_calculation)
   const quality = score ? compEvidenceQuality(score.evidence) : null
   const replay = score ? replayStoredOffer(score) : null
@@ -1049,6 +1069,7 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
             formalOffers: quotes.filter((q) => q.quote_type === 'formal_offer').map((q) => ({ amount: pos(q.amount), offerId: q.seller_offer_id || null, quotedAt: q.quoted_at, label: describeQuote(q) })),
             confirmations: quotes.filter((q) => q.quote_type === 'confirm_basics_no_number').map((q) => ({ quotedAt: q.quoted_at, label: describeQuote(q) })),
           },
+      negotiationV3,
       binding: Boolean(binding),
       lineage: {
         snapshotId: clean(score.evidence.immutable_snapshot_id) || latestSnap?.snapshot_id || null,

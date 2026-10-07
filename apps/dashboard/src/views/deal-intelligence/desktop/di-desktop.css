@@ -1292,3 +1292,8 @@ p.dr-none { margin: 4px 0 0; font: var(--lc-t-body); color: var(--lc-ink-3); }
   .dr *, .dr *::before, .dr *::after { transition-duration: 1ms !important; animation-duration: 1ms !important; }
 }
 :root[data-lc-motion='off'] .dr *, :root[data-lc-motion='off'] .dr *::before { transition-duration: 1ms !important; animation-duration: 1ms !important; }
+
+/* ══ NEGOTIATION v3 DESK (§82, server flag NEGOTIATION_ENGINE_V3) ══════════ */
+.dr-area-money > [data-plane='negotiation'] { margin-top: var(--dr-gap); flex: 0 0 auto; }
+[data-plane='negotiation'] .dr-money__marks { display: flex; flex-wrap: wrap; gap: 4px 0; }
+[data-plane='negotiation'] ul.dr-quiet { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 2px; }
