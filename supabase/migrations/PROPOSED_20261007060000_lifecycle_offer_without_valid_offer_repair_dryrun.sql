@@ -1,4 +1,4 @@
--- PROPOSED — NOT APPLIED. Lifecycle repair (deal-attribution audit 2026-10-07).
+-- DRY RUN — every write is rolled back. Lifecycle repair (deal-attribution audit 2026-10-07).
 -- 13 deals at S5 'offer' with no offer event (current_offer = 0, no seller_offers,
 -- no offer-bearing message). Each returns to the HIGHEST stage its conversation
 -- supports; the fake $331 / 2024 asks are cleared (kept as rejected evidence);
@@ -95,4 +95,4 @@ select b.property_id, b.acquisition_stage || ' -> ' || o.acquisition_stage as op
   left join public.inbox_thread_state t on t.thread_key = b.primary_thread_key
  order by 1;
 
-commit;
+rollback;
