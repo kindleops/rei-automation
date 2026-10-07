@@ -32,7 +32,6 @@
   --ciw-subject: rgb(var(--ciw-subject-rgb));
   --ciw-ring: rgba(255, 255, 255, 0.92);
   --ciw-surface: rgb(8 11 17);
-  --ciw-plane-w: clamp(424px, 36cqi, 484px);
   --ciw-insights-w: clamp(360px, 25cqi, 440px);
   --ciw-r: 16px;
   --ciw-panel-bg: var(--lc-sheen-wash), var(--lc-mat-smoke-bg);
@@ -185,27 +184,79 @@
 /* ── body grid ──────────────────────────────────────────────────────────── */
 
 .ciw-body {
+  /* map | splitter | plane [| insights]. The plane's width is the operator's
+     (--ciw-plane-user, set by the splitter) or the layout's default for this
+     width + mode; min() keeps the map at least --ciw-map-min wide whatever the
+     window does after a drag, so nothing is ever pushed out of the root. */
+  --ciw-map-min: 300px;
+  --ciw-plane-default: clamp(424px, 36cqi, 484px);
+  --ciw-ins-reserve: 0px;
+  --ciw-plane-track: min(var(--ciw-plane-user, var(--ciw-plane-default)), calc(100cqi - var(--ciw-map-min) - 10px - var(--ciw-ins-reserve)));
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--ciw-plane-w);
-  gap: 10px;
+  grid-template-columns: minmax(var(--ciw-map-min), 1fr) 10px var(--ciw-plane-track);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 10px 0;
 }
+.ciw-body > .ciw-map { grid-column: 1; grid-row: 1; }
+.ciw-body > .ciw-split { grid-column: 2; grid-row: 1; }
+.ciw-body > .ciw-plane { grid-column: 3; grid-row: 1; }
+.ciw-body > .ciw-insights { grid-column: 4; grid-row: 1; margin-left: 10px; }
+/* without a splitter (resolving / error states) the plane still sits in its own track */
 @container ciw (max-width: 1100px) {
-  .ciw-body { grid-template-columns: minmax(0, 55fr) minmax(0, 45fr); }
+  .ciw-body { --ciw-map-min: 280px; --ciw-plane-default: 45cqi; }
 }
 @container ciw (min-width: 1560px) {
-  .ciw-body { grid-template-columns: minmax(0, 1fr) var(--ciw-plane-w) var(--ciw-insights-w); }
+  .ciw-body[data-insights] {
+    --ciw-ins-reserve: calc(var(--ciw-insights-w) + 10px);
+    grid-template-columns: minmax(var(--ciw-map-min), 1fr) 10px var(--ciw-plane-track) calc(var(--ciw-insights-w) + 10px);
+  }
 }
 @container ciw (min-width: 2600px) {
-  .ciw-body { grid-template-columns: minmax(0, 1fr) 520px minmax(760px, 0.62fr); }
+  .ciw-body { --ciw-plane-default: 520px; }
+  .ciw-body[data-insights] {
+    --ciw-ins-reserve: 770px;
+    grid-template-columns: minmax(var(--ciw-map-min), 1fr) 10px var(--ciw-plane-track) minmax(770px, 0.62fr);
+  }
 }
+/* Compare is a matrix: by default it takes most of the body (the map stays as context) */
+.ciw[data-plane='compare'] .ciw-body { --ciw-plane-default: clamp(460px, 60cqi, 1600px); }
 @container ciw (max-width: 759px) {
   .ciw-body { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
   .ciw-body > .ciw-map { flex: none; height: 360px; }
   .ciw-body > .ciw-plane { flex: none; overflow: visible; }
   .ciw-body > .ciw-plane .ciw-plane__body { overflow: visible; }
+  .ciw-body > .ciw-insights { margin-left: 0; }
 }
+
+/* ── map ↔ plane splitter ───────────────────────────────────────────────── */
+
+.ciw-split {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+  border-radius: 6px;
+}
+.ciw-split__grip {
+  width: 3px;
+  height: 44px;
+  border-radius: 2px;
+  background: rgba(var(--lc-edge-rgb), 0.16);
+  transition: background-color var(--lc-dur-fast, 140ms) ease, height var(--lc-dur-fast, 140ms) ease;
+}
+.ciw-split:hover .ciw-split__grip,
+.ciw-split[data-dragging] .ciw-split__grip { height: 72px; background: rgba(var(--ciw-set-rgb), 0.75); }
+.ciw-split:focus-visible { box-shadow: var(--lc-focus-ring); }
+.ciw-split:focus-visible .ciw-split__grip { background: rgba(var(--ciw-set-rgb), 0.9); }
+.ciw-split[data-dragging] { cursor: col-resize; }
+.ciw:has(.ciw-split[data-dragging]) { user-select: none; cursor: col-resize; }
+@media (prefers-reduced-motion: reduce) { .ciw-split__grip { transition: none; } }
+html[data-lc-motion='off'] .ciw-split__grip { transition: none; }
 
 /* ── map stage ──────────────────────────────────────────────────────────── */
 
@@ -689,26 +740,64 @@
 .ciw-devrow__value { padding-left: 8px; text-align: right; font: 600 11.5px/1.3 var(--lc-font-ui); color: var(--lc-ink-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ciw-devrow__value em { font-style: normal; font-weight: 500; color: var(--lc-ink-3); }
 
-/* compare matrix */
-.ciw-matrix { overflow: auto; max-height: 560px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--lc-inner-edge); outline: none; }
+/* compare matrix — the matrix is its own scroll root in BOTH axes, so the
+   header row sticks to its top and the Feature + Subject columns stick to its
+   left. In Compare the plane body is a flex column and the matrix fills what
+   the size chart leaves (never less than ~320 px; below that the plane body
+   scrolls and the matrix keeps its own bounded box). Sticky cells paint an
+   opaque fill — hover is an overlay image, never a translucent replacement,
+   so scrolled cells can't show through the header or the pinned columns. */
+.ciw-plane__body.is-fill { display: flex; flex-direction: column; }
+.ciw-plane__body.is-fill > .ciw-compare { flex: 1 1 auto; min-height: 0; }
+/* the size chart gives way first: it keeps ~4 rows and scrolls its own list */
+.ciw-compare > .ciw-block--size { flex: 0 1 auto; min-height: 136px; max-height: 36%; }
+.ciw-block--size > .ciw-devrows { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ciw-compare > .ciw-block--matrix { flex: 1 1 0; min-height: 300px; }
+.ciw-block--matrix > .ciw-matrix { flex: 1 1 0; min-height: 0; max-height: none; }
+@container ciw (max-width: 759px) {
+  .ciw-compare > .ciw-block--size, .ciw-block--size > .ciw-devrows,
+  .ciw-compare > .ciw-block--matrix, .ciw-block--matrix > .ciw-matrix { flex: none; min-height: 0; }
+  .ciw-block--size > .ciw-devrows { overflow: visible; }
+  .ciw-block--matrix > .ciw-matrix { max-height: 560px; }
+}
+.ciw-matrix {
+  --ciw-mx-feat: 150px;
+  --ciw-mx-fill: rgb(var(--lc-fill));
+  --ciw-mx-hot: linear-gradient(rgba(var(--lc-select-rgb), 0.1), rgba(var(--lc-select-rgb), 0.1));
+  position: relative;
+  overflow: auto;
+  overscroll-behavior: contain;
+  max-height: 560px;
+  border-radius: 12px;
+  background: var(--ciw-mx-fill);
+  box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+  outline: none;
+}
 .ciw-matrix:focus-visible { box-shadow: var(--lc-focus-ring); }
 .ciw-matrix table { border-collapse: separate; border-spacing: 0; font: 500 11.5px/1.3 var(--lc-font-ui); color: var(--lc-ink-2); }
 .ciw-matrix th, .ciw-matrix td { padding: 6px 10px; white-space: nowrap; text-align: right; border-bottom: 1px solid var(--lc-hairline); }
 .ciw-matrix td em { margin-left: 5px; font-style: normal; font-size: 10.5px; color: var(--lc-ink-3); }
-.ciw-matrix tbody th { position: sticky; left: 0; z-index: 1; text-align: left; font-weight: 600; color: var(--lc-ink-2); background: var(--lc-mat-float-bg); }
-.ciw-matrix .ciw-matrix__subject { position: sticky; left: 116px; z-index: 1; color: var(--lc-ink-1); font-weight: 650; background: var(--lc-mat-float-bg); box-shadow: inset -1px 0 0 var(--lc-hairline); }
-.ciw-matrix thead th { position: sticky; top: 0; z-index: 2; background: var(--lc-mat-float-bg); }
-.ciw-matrix thead .ciw-matrix__corner { left: 0; z-index: 3; text-align: left; font: var(--lc-t-eyebrow); letter-spacing: 0.1em; text-transform: uppercase; color: var(--lc-ink-3); min-width: 96px; }
-.ciw-matrix thead .ciw-matrix__subject { z-index: 3; top: 0; font: var(--lc-t-eyebrow); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ciw-subject); }
-.ciw-matrix__comp button { display: inline-flex; align-items: center; gap: 6px; max-width: 150px; border: 0; padding: 0; background: none; color: var(--lc-ink-1); font: 600 11.5px/1.3 var(--lc-font-ui); cursor: pointer; }
+/* Feature column: a fixed width, so the sticky Subject column starts exactly where it ends */
+.ciw-matrix tbody th, .ciw-matrix thead .ciw-matrix__corner {
+  position: sticky; left: 0; box-sizing: border-box;
+  width: var(--ciw-mx-feat); min-width: var(--ciw-mx-feat); max-width: var(--ciw-mx-feat);
+  overflow: hidden; text-overflow: ellipsis;
+}
+.ciw-matrix tbody th { z-index: 1; text-align: left; font-weight: 600; color: var(--lc-ink-2); background-color: var(--ciw-mx-fill); }
+.ciw-matrix .ciw-matrix__subject { position: sticky; left: var(--ciw-mx-feat); z-index: 1; min-width: 92px; color: var(--lc-ink-1); font-weight: 650; background-color: var(--ciw-mx-fill); box-shadow: inset -1px 0 0 var(--lc-hairline), 8px 0 12px -10px rgba(0, 0, 0, 0.55); }
+.ciw-matrix thead th { position: sticky; top: 0; z-index: 2; background-color: var(--ciw-mx-fill); box-shadow: inset 0 -1px 0 var(--lc-hairline); }
+.ciw-matrix thead .ciw-matrix__corner { z-index: 3; text-align: left; font: var(--lc-t-eyebrow); letter-spacing: 0.1em; text-transform: uppercase; color: var(--lc-ink-3); }
+.ciw-matrix thead .ciw-matrix__subject { z-index: 3; top: 0; font: var(--lc-t-eyebrow); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ciw-subject); box-shadow: inset -1px 0 0 var(--lc-hairline), inset 0 -1px 0 var(--lc-hairline), 8px 0 12px -10px rgba(0, 0, 0, 0.55); }
+:root[data-nexus-theme='light'] .ciw-matrix .ciw-matrix__subject { box-shadow: inset -1px 0 0 var(--lc-hairline), 8px 0 12px -10px rgba(11, 18, 32, 0.22); }
+:root[data-nexus-theme='light'] .ciw-matrix thead .ciw-matrix__subject { box-shadow: inset -1px 0 0 var(--lc-hairline), inset 0 -1px 0 var(--lc-hairline), 8px 0 12px -10px rgba(11, 18, 32, 0.22); }
+.ciw-matrix__comp button { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 150px; max-width: 150px; border: 0; padding: 0; background: none; color: var(--lc-ink-1); font: 600 11.5px/1.3 var(--lc-font-ui); text-align: left; cursor: pointer; }
 .ciw-matrix__comp button b { display: grid; place-items: center; flex: none; width: 17px; height: 17px; border-radius: 50%; font-size: 10px; color: var(--lc-ink-inverse); background: var(--ciw-set); }
-.ciw-matrix__comp button span { overflow: hidden; text-overflow: ellipsis; }
-.ciw-matrix__comp button { flex-wrap: wrap; width: 150px; text-align: left; }
+.ciw-matrix__comp button span { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ciw-matrix__comp button .csv--header { flex-basis: 100%; height: 72px; margin-bottom: 4px; }
-.ciw-matrix__comp button span { flex: 1 1 0; min-width: 0; white-space: nowrap; }
+.ciw-matrix__comp button:focus-visible { outline: none; border-radius: 8px; box-shadow: var(--lc-focus-ring); }
 .ciw-matrix td.is-attn { color: var(--ciw-attn); }
 .ciw-matrix td.is-ok { color: rgb(var(--lc-ok-rgb)); }
-.ciw-matrix .is-hot { background: rgba(var(--lc-select-rgb), 0.08); }
+.ciw-matrix .is-hot { background-image: var(--ciw-mx-hot); }
 
 /* market */
 .ciw-facts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px; }

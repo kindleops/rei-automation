@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FocusEvent, type KeyboardEvent } from 'react'
 import { LCEmpty, LCError, LCFilterInspector, LCSkeleton, LCTabs, cx, useLcReducedMotion } from '../../../shared/lc'
 import { useClaimedKeys } from '../../../shared/lc/keys'
 import { pushRoutePath } from '../../../app/router'
@@ -22,6 +22,8 @@ import { MapStage } from './MapStage'
 import { robustDomain, type MapMode } from './map-style'
 import { MarketMode } from './MarketMode'
 import { ModelMode } from './ModelMode'
+import { PlaneSplitter } from './PlaneSplitter'
+import { planeKindOf, readPlaneWidths, writePlaneWidths, type PlaneWidths } from './plane-split'
 import { SubjectStrip } from './SubjectStrip'
 import { useCompsSubject } from './use-comps-subject'
 import { useCompsWorkspace } from './use-comps-workspace'
@@ -71,6 +73,8 @@ export function CompsWorkstation({ hostPropertyId }: { hostPropertyId: string | 
   const [mapReady, setMapReady] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [focusWithin, setFocusWithin] = useState(false)
+  // the operator's map ↔ plane split, remembered per plane kind (Compare is wide)
+  const [planeWidths, setPlaneWidths] = useState<PlaneWidths>(readPlaneWidths)
 
   // A new subject is a fresh analysis: no inspector, no filters carried over.
   const [seenPid, setSeenPid] = useState(subject.propertyId)
@@ -218,6 +222,11 @@ export function CompsWorkstation({ hostPropertyId }: { hostPropertyId: string | 
   }
 
   const wideCharts = tier === 'wide' || tier === 'ultra'
+  // Compare is a wide matrix: it takes the insights column's room (its charts live in Valuation)
+  const showInsights = wideCharts && plane !== 'compare'
+  const planeKind = planeKindOf(plane)
+  const userPlaneW = planeWidths[planeKind]
+  const commitPlaneW = (w: number | null) => setPlaneWidths((prev) => { const next = { ...prev, [planeKind]: w }; writePlaneWidths(next); return next })
   const inspected = inspect ? m.byKey.get(inspect) ?? null : null
   const inspectedTier = inspected ? m.tiers.get(inspected.key) ?? (inspected.state === 'excluded' ? 'excluded' : 'candidate') : null
   const changes = operator.state ? operator.state.versions.length : 0
@@ -251,9 +260,10 @@ export function CompsWorkstation({ hostPropertyId }: { hostPropertyId: string | 
   )
 
   return (
-    <div {...rootProps} data-state="ready" data-lens={m.lens} data-subject={m.w.subject.propertyId}>
+    <div {...rootProps} data-state="ready" data-lens={m.lens} data-subject={m.w.subject.propertyId} data-plane={plane}
+      style={userPlaneW ? ({ '--ciw-plane-user': `${userPlaneW}px` } as CSSProperties) : undefined}>
       <SubjectStrip m={m} pinned={subject.pinned} pinLabel={subject.pinLabel} onOpenDeal={openDeal} onOpenGraph={() => openGraph()} onOpenMap={openMap} onStreetView={null} refreshing={ws.loading} />
-      <div className="ciw-body">
+      <div className="ciw-body" data-insights={showInsights ? '' : undefined}>
         <MapStage
           m={m} points={points} mode={mapMode} onMode={setMapMode} domain={domain} imagery={imagery} onImagery={() => setImagery((v) => !v)}
           theme={theme} store={store} onOpen={openComp} camera={camera} onCamera={(kind) => setCamera((c) => ({ kind, n: (c?.n ?? 0) + 1 }))}
@@ -267,6 +277,8 @@ export function CompsWorkstation({ hostPropertyId }: { hostPropertyId: string | 
             onShowOnMap={(c) => { const r = compObject(c); if (r) showOnMap(r, { source: 'comp-intelligence' }) }}
           />
         </MapStage>
+
+        {tier !== 'stack' ? <PlaneSplitter key={planeKind} width={userPlaneW} onCommit={commitPlaneW} /> : null}
 
         <aside className="ciw-plane" aria-label="Evidence and valuation">
           <div className="ciw-plane__head">
@@ -283,10 +295,10 @@ export function CompsWorkstation({ hostPropertyId }: { hostPropertyId: string | 
               ]}
             />
           </div>
-          <div className="ciw-plane__body lc-scroll" key={plane}>{planeBody}</div>
+          <div className={cx('ciw-plane__body lc-scroll', plane === 'compare' && 'is-fill')} key={plane}>{planeBody}</div>
         </aside>
 
-        {wideCharts ? (
+        {showInsights ? (
           <aside className="ciw-insights lc-scroll" aria-label="Evidence charts">
             <AnalyticsCharts m={m} store={store} layout={tier === 'ultra' ? 'grid' : 'column'} />
           </aside>
