@@ -68,6 +68,8 @@ export const fmtMonth = (label: string): string => {
 
 export const fmtDateTime = (iso: string | null | undefined): string => {
   if (!iso) return '—'
-  const d = new Date(iso.includes('T') || iso.includes(' ') ? iso.replace(' ', 'T') : `${iso}T12:00:00Z`)
+  // Postgres text timestamps end in '+00' (no minutes), which Date cannot parse: normalise to '+00:00'.
+  const norm = iso.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00')
+  const d = new Date(iso.includes('T') || iso.includes(' ') ? norm : `${iso}T12:00:00Z`)
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }

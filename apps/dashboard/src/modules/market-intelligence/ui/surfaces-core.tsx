@@ -5,25 +5,18 @@ import { useMi } from '../mi-context'
 import { fmtCount, fmtDate, fmtDateTime, fmtValue } from '../mi-format'
 import { showGeoOnMap } from '../mi-handoffs'
 import { childLevelOf } from '../mi-route-state'
-import type { MiDossier, MiGeoSummary, MiLevel, MiRankResult, MiRow, MiStatusPayload, MiTrendPoint } from '../mi-types'
+import type { MiDossier, MiGeoSummary, MiLevel, MiRankResult, MiRow, MiStatusPayload } from '../mi-types'
 import { writeMiMapContext } from '../map/mi-map-lenses'
 import { TrendChart } from './charts'
-import { GeoActions, MetricTile, QueryState } from './parts'
-import { geoMenu, metricAvailable, sparkOf } from './ui-model'
+import { GeoActions, QueryState } from './parts'
+import { geoMenu, metricAvailable } from './ui-model'
 import { useRowColumns } from './use-row-columns'
-import { EvidenceShare, InferredInvestorSlot } from './evidence'
-import { GeoHeatFigure } from './geo-figure'
+import { Headline } from './headline'
+import { MiAtlas } from './atlas'
+import { Leaders } from './leaders'
 
 const LEVEL_PLURAL: Record<string, string> = { state: 'states', market: 'markets', county: 'counties', city: 'cities', zip: 'ZIPs' }
 const ORDER: MiLevel[] = ['nation', 'state', 'market', 'county', 'city', 'zip']
-
-function rankLabel(d: MiDossier, metric: string): string | null {
-  const r = d.rank_context.find((x) => x.metric === metric)
-  return r ? `#${r.rank} of ${fmtCount(r.of)} ${LEVEL_PLURAL[r.level] ?? ''} · ${r.parent_label}` : null
-}
-
-// ── Overview (brief §7, §32): map-first, a real metric rail, evidence that can't be misread ──
-const SPARK: Record<string, keyof MiTrendPoint> = { sales_count: 'sales', median_sale_price: 'median_price', median_ppsf: 'median_ppsf' }
 
 export function Hero({ d, compact }: { d: MiDossier; compact?: boolean }) {
   const { openGeo, state, status } = useMi()
@@ -53,57 +46,32 @@ export function Hero({ d, compact }: { d: MiDossier; compact?: boolean }) {
   )
 }
 
-/** The metric rail: one plate, four labelled groups, evidence shares in their own group. */
-export function MetricRail({ d }: { d: MiDossier }) {
-  const cell = (id: string) => <MetricTile key={id} id={id} value={d.values[id]} spark={SPARK[id] ? sparkOf(d.trends, SPARK[id]) : undefined} rank={rankLabel(d, id)} size="sm" />
-  return (
-    <section className="mi-rail2" aria-label="Headline metrics">
-      <div className="mi-rail2__group"><h3>Activity</h3><div className="mi-rail2__cells">{['sales_count', 'monthly_sales_rate', 'sales_growth'].map(cell)}</div></div>
-      <div className="mi-rail2__group"><h3>Price</h3><div className="mi-rail2__cells">{['median_sale_price', 'median_ppsf', 'median_price_per_unit'].map(cell)}</div></div>
-      <div className="mi-rail2__group is-evidence">
-        <h3>Buyer evidence <small>shares of the sales that record it</small></h3>
-        <div className="mi-rail2__cells is-ev">
-          <EvidenceShare kind="investor" values={d.values} />
-          <EvidenceShare kind="cash" values={d.values} />
-          {d.inferred_investors !== undefined ? <InferredInvestorSlot data={d.inferred_investors} compact /> : null}
-        </div>
-      </div>
-      <div className="mi-rail2__group"><h3>Ownership &amp; universe</h3><div className="mi-rail2__cells">{['entity_owned_count', 'property_count', 'sms_eligible_count'].map(cell)}</div></div>
-    </section>
-  )
-}
-
+/**
+ * OVERVIEW (owner, 2026-10-07: "I don't even know what I'm looking at… no map, no heat map"):
+ *   1 the headline strip (recorded vs inferred spelled out, one status line for what is missing)
+ *   2 the hero atlas (real basemap + heat) beside the ZIP leaderboard
+ *   3 sales by month + the deterministic brief.
+ */
 export function OverviewSurface({ d, wall }: { d: MiDossier; wall?: boolean }) {
-  const { state, setInspect } = useMi()
-  const child = childLevelOf(d.geography.level)
-  const bySales = useMiQuery<MiRankResult>(child ? miUrl('rank', { level: child, within: d.geography.id, metric: 'sales_count', period: state.period, asset: state.asset, limit: 8 }) : null)
-  const byShare = useMiQuery<MiRankResult>(child ? miUrl('rank', { level: child, within: d.geography.id, metric: 'investor_purchase_share', period: state.period, asset: state.asset, limit: 8 }) : null)
   const sales = d.trends.map((p) => ({ month: p.month, y: p.sales, status: p.status }))
+  const stageH = wall ? 620 : 520
   return (
-    <div className={`mi-overview${wall ? ' is-wall' : ''}`}>
-      <MetricRail d={d} />
-      <div className="mi-stage">
-        <GeoHeatFigure geo={d.geography} height={wall ? 520 : 380} />
-        <aside className="mi-stage__side">
-          <section className="mi-card mi-brief" aria-label="Market brief">
-            <h2>Brief <small>each line is a registry metric</small></h2>
-            <ol>{d.brief.map((x, i) => <li key={i}>{x.text}</li>)}</ol>
-          </section>
-          {child ? (
-            <section className="mi-card mi-leaders" aria-label={`Leading ${LEVEL_PLURAL[child]}`}>
-              <h2>Leading {LEVEL_PLURAL[child]}</h2>
-              <h3 className="mi-sub">By sales</h3>
-              <QueryState q={bySales}>{(r) => <Leaderboard rows={r.rows} metric="sales_count" onPick={(id) => setInspect(id)} />}</QueryState>
-              <h3 className="mi-sub">By investor share <small>of sales with a recorded buyer, n ≥ 20</small></h3>
-              <QueryState q={byShare}>{(r) => <Leaderboard rows={r.rows} metric="investor_purchase_share" onPick={(id) => setInspect(id)} />}</QueryState>
-            </section>
-          ) : null}
-        </aside>
+    <div className={`mi-ov${wall ? ' is-wall' : ''}`}>
+      <Headline d={d} />
+      <div className="mi-ov__stage">
+        <MiAtlas geo={d.geography} height={stageH} />
+        <Leaders geo={d.geography} height={stageH} />
       </div>
-      <section className="mi-card" aria-label="Sales by month">
-        <h2>Sales by month <small>{d.window.asset_label} · hatched months are before sales coverage, dashed may be incomplete</small></h2>
-        <TrendChart series={[{ id: 'sales', label: 'Sales', points: sales }]} format={(v) => fmtCount(v)} label="Sales by month" height={180} />
-      </section>
+      <div className="mi-ov__lower">
+        <section className="mi-card mi-ov__trend" aria-label="Sales by month">
+          <h2>Sales by month <small>{d.window.asset_label} · hatched months are before sales coverage, dashed may be incomplete</small></h2>
+          <TrendChart series={[{ id: 'sales', label: 'Sales', points: sales }]} format={(v) => fmtCount(v)} label="Sales by month" height={170} />
+        </section>
+        <section className="mi-card mi-brief" aria-label="Market brief">
+          <h2>Brief <small>each line is a registry metric</small></h2>
+          <ol>{d.brief.map((x, i) => <li key={i}>{x.text}</li>)}</ol>
+        </section>
+      </div>
     </div>
   )
 }

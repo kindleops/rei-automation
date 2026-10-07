@@ -6,7 +6,8 @@
  *     &rl=zip&rm=investor_purchase_count&rd=desc&rmin=0     rankings
  *     &cmp=market:dallas-tx,market:houston-tx  &cq=Dallas|Houston   compare (ids, or names to resolve)
  *     &sl=zip&sw=state:TX&sm=all&sf=<json filters>          screener
- *     &hm=investor_purchase_count                           map heat metric
+ *     &hm=investor_purchase_count                           map heat metric (Overview atlas + Map tab)
+ *     &lb=investor_purchase_share                           Overview ZIP leaderboard order
  *     &q=<text>                                             a search to run on open (deck)
  */
 export const MI_ROUTE = '/market-intelligence'
@@ -29,12 +30,13 @@ export interface MiRouteState {
   sm: 'all' | 'any'
   sf: Array<{ metric: string; op: 'gte' | 'lte' | 'gt' | 'lt'; value: number }>
   hm: string
+  lb: string
   q: string | null
 }
 
 export const DEFAULT_STATE: MiRouteState = {
   geo: 'nation:US', tab: 'overview', period: '1y', asset: 'all', rl: null, rm: 'investor_purchase_share', rd: 'desc', rmin: 0,
-  cmp: [], cq: [], sl: 'zip', sw: null, sm: 'all', sf: [], hm: 'investor_purchase_share', q: null,
+  cmp: [], cq: [], sl: 'zip', sw: null, sm: 'all', sf: [], hm: 'sales_count', lb: 'investor_purchase_count', q: null,
 }
 
 const GEO_ID = /^(nation:US|state:[A-Z]{2}|zip:\d{5}|market:[a-z0-9-]+|(county|city):[A-Z]{2}:.+)$/
@@ -66,6 +68,7 @@ export function parseMiLocation(location: string): MiRouteState {
     sm: q.get('sm') === 'any' ? 'any' : 'all',
     sf,
     hm: q.get('hm') || DEFAULT_STATE.hm,
+    lb: q.get('lb') || DEFAULT_STATE.lb,
     q: q.get('q'),
   }
 }
@@ -90,6 +93,7 @@ export function miPath(s: Partial<MiRouteState>): string {
   put('sm', full.sm, 'all')
   put('sf', full.sf.length ? JSON.stringify(full.sf) : null)
   put('hm', full.hm, DEFAULT_STATE.hm)
+  put('lb', full.lb, DEFAULT_STATE.lb)
   put('q', full.q)
   const t = q.toString()
   return t ? `${MI_ROUTE}?${t}` : MI_ROUTE

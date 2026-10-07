@@ -134,7 +134,7 @@ export function GeoActions({ g, heatMetric }: { g: MiGeoSummary; heatMetric?: st
     <div className="mi-actions">
       <LCIconButton icon="star" label={watched ? 'Remove from watchlist' : 'Add to watchlist (this device)'} size="sm" selected={watched} onClick={() => toggleWatch({ id: g.id, label: g.label, level: g.level })} />
       <LCButton size="sm" variant="secondary" icon="map" onClick={() => { showGeoOnMap(g, { lensMetric: heatMetric }) }} title="Opens the Map beside, framed on this area">Show on Map</LCButton>
-      <LCButton size="sm" variant="primary" icon="send" disabled={g.level === 'nation'} title={g.level === 'nation' ? 'Pick a state or smaller area' : 'Opens Campaign Composer with this geography as its filter. Composer computes the audience; nothing launches.'} onClick={() => { openComposerFor(g) }}>Create campaign audience</LCButton>
+      <LCButton size="sm" variant="primary" icon="send" disabled={g.level === 'nation'} title={g.level === 'nation' ? 'Pick a state or smaller area' : `Opens Campaign Composer with ${g.label} as its location filter (its Seller Screener lives there when enabled). Composer computes the audience; nothing launches.`} onClick={() => { openComposerFor(g) }}>Find sellers here</LCButton>
       <LCMenu label={`${g.label} actions`} items={geoMenu(g, { openGeo, addToCompare, setInspect, setTab: (t) => set({ tab: t as never }), heatMetric })} trigger={<LCIconButton icon="more" label="More actions" size="sm" />} />
     </div>
   )

@@ -197,3 +197,18 @@ export interface MiInferredInvestors {
   caveats?: string[]
   individuals_named?: false
 }
+
+/** op=points: ZIP centroids with one metric (hero map density / bubbles). `t` = rank 0..1 among ok values. */
+export interface MiPoint { id: string; label: string; c: [number, number]; v: number | null; n: number; s: MiStatus; sales: number; t: number | null }
+export interface MiPointsResult { ok: true; level: 'zip'; within: MiGeoSummary; parent?: string; metric: string; label: string; unit: MiUnit; window?: MiWindow; rows: MiPoint[]; without_value: number; max?: number | null; note: string | null }
+
+/** op=heat: outlined areas (states, or ZIP outlines in a metro) with one metric. */
+export interface MiHeatArea { key: string; id: string; label: string; v: number; n: number; t: number; tip: string; outline: GeoJSON.Geometry }
+export interface MiHeatResult { ok: true; level: string; metric: string; label: string; unit: MiUnit; rows: MiHeatArea[]; without_value: number; note: string | null }
+
+/** op=leaders: top areas by ONE registry metric, with a monthly sales series per row. */
+export interface MiLeaderRow extends MiRow { spark: number[]; spark_investor: number[] }
+export interface MiLeadersResult {
+  ok: true; level: MiLevel; within: MiGeoSummary; parent: MiGeoSummary; sort: string; dir: 'asc' | 'desc'; min_sales: number; window: MiWindow
+  total: number; unranked_count: number; months: Array<{ label: string; status: MiMonthStatus }>; rows: MiLeaderRow[]
+}

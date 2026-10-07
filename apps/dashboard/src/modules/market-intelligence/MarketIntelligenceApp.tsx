@@ -108,7 +108,7 @@ function MarketIntelligenceDesk() {
             {statusQ.kind === 'warming' ? <Warming w={statusQ.warming} /> : (
               <QueryState q={dossierQ}>{(dd) => (
                 <>
-                  {state.tab !== 'compare' ? <Hero d={dd} compact={fill || wallMode} /> : null}
+                  {state.tab !== 'compare' ? <Hero d={dd} compact={fill || wallMode || state.tab === 'overview'} /> : null}
                   {state.tab === 'overview' ? (wallMode ? (
                     <div className="mi-wall">
                       <div className="mi-wall__col mi-wall__rank"><RankingsSurface geo={dd.geography} /></div>
