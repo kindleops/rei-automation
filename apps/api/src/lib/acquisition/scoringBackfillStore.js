@@ -12,6 +12,7 @@
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import { readFeatureFlag } from './modelConstants.js';
 import { scoreProperty } from './acquisitionDecisionEngine.js';
+import { OFFER_READY_PROJECTION } from './offerReadiness.js';
 import {
   BACKFILL_STATE_KEY,
   SCORING_VERSION,
@@ -128,7 +129,8 @@ export function createScoringBackfillStore({ supabase = null, engineDeps = {}, v
       const withVersion = await hasVersionColumns();
       // decision_tier / offer / ceiling / evidence_mode let the campaign scope
       // apply the offer-ready predicate without reading full evidence.
-      const base = 'property_id,computed_at,decision_tier,recommended_cash_offer,engine_version:evidence->engine->>version,evidence_mode:evidence->backfill->>evidence_mode,mao:evidence->offer_calculation->>effective_authorized_ceiling';
+      // OFFER_READY_PROJECTION also carries the sanity-guard inputs.
+      const base = OFFER_READY_PROJECTION;
       const select = withVersion ? `${base},scoring_version` : base;
       const { data, error } = await db.from(SCORE_TABLE).select(select).in('property_id', propertyIds);
       if (error) throw error;

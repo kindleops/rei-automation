@@ -613,6 +613,13 @@ export function resolveV2OfferAuthority({
   // authoritative tier + positive offer and ceiling).
   const readiness = evaluateOfferReadiness(ade_snapshot, { now });
   if (!readiness.ready) {
+    // The sanity guard also catches MAO > value; keep that case's specific hold.
+    if (
+      readiness.reason === OFFER_READY_REASONS.SANITY &&
+      readiness.mao != null && base.valuation_mid != null && readiness.mao > base.valuation_mid
+    ) {
+      return { ok: false, reason: V2_HOLD_REASONS.MAO_ABOVE_VALUE, offer: readiness.offer, mao: readiness.mao, offer_ready: readiness, ...base };
+    }
     const map = {
       [OFFER_READY_REASONS.PREDATES_POLICY]: V2_HOLD_REASONS.STALE,
       [OFFER_READY_REASONS.STALE]: V2_HOLD_REASONS.STALE,

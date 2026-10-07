@@ -50,7 +50,7 @@ import {
   updateCampaign,
 } from '@/lib/domain/campaigns/campaign-automation-service.js'
 import { evaluateCampaignLaunchReadiness } from '@/lib/domain/campaigns/campaign-launch-readiness.js'
-import { summarizeOfferReadiness } from '@/lib/acquisition/offerReadiness.js'
+import { summarizeOfferReadiness, OFFER_READY_PROJECTION } from '@/lib/acquisition/offerReadiness.js'
 import { fetchCanonicalLanguages } from '@/lib/domain/campaigns/campaign-recipient-metrics.js'
 import { governanceApplies, governanceExcludedTemplateIds, evaluateTemplateGovernance, indexGovernance, loadGovernance } from '@/lib/domain/campaigns/template-governance.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
@@ -644,7 +644,8 @@ async function runComposerCohort(s, strategy, key, deps) {
 /* ── Offer Ready preflight ─────────────────────────────────────────────── */
 
 const OFFER_READY_ID_CHUNK = 200
-const OFFER_READY_SELECT = 'property_id,computed_at,decision_tier,recommended_cash_offer,mao:evidence->offer_calculation->>effective_authorized_ceiling,evidence_mode:evidence->backfill->>evidence_mode'
+// The predicate's own projection, so the sanity guard sees value/repairs/AVM/identity.
+const OFFER_READY_SELECT = OFFER_READY_PROJECTION
 
 /** The decision fields of property_acquisition_scores for a set of ids (projected; never full evidence). */
 export async function readOfferReadinessScores(ids = [], deps = {}) {
