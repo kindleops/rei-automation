@@ -45,6 +45,15 @@ import { REASON_LABELS } from './comps-reason-labels.js'
 import { displayableCompanyName } from '../entity-graph/buyer-name-privacy.js'
 import { ENGINE_COMP_DETAIL_COLUMNS, engineRulesFor, engineSearchWindow } from './comps-engine-rules.js'
 import { BUYER_MATCH_SALES_SOURCE, loadBuyerMatchSales } from '../buyer-match/buyer-match-sales.js'
+import {
+  BUYER_TYPE_LABELS,
+  CANONICAL_CORPUS_SOURCE,
+  LEGACY_POOL_SOURCE,
+  canonicalRowToEngineInput,
+  corpusLaneOf,
+  fetchCanonicalCorpusComps,
+  freshnessLabel,
+} from './canonical-corpus-reads.js'
 
 const DAY = 86_400_000
 const clean = (v) => String(v ?? '').trim()
@@ -481,13 +490,46 @@ export function recentSalesBlock(result, { radiusMiles, months, limit = RECENT_S
  * Pure: how fresh each corpus on this surface is — the newest sale each one
  * actually carried into this payload, so the UI can say "engine pool, as of".
  */
-export function freshnessOf(comps, recent, engineRun) {
+export function freshnessOf(comps, recent, engineRun, candidates = null) {
   const of = (corpus) => latestDate(arr(comps).filter((c) => c.corpus === corpus).map((c) => c.saleDate))
-  return {
+  const out = {
     valuationPool: { source: 'v_recent_sold_comps', latestSale: of('engine_pool'), engineRunAt: engineRun?.computedAt ?? null },
     transactions: { source: 'comp_private.mv_comp_market_evidence', latestSale: of('transaction_corpus') },
     recentSales: { source: BUYER_MATCH_SALES_SOURCE, latestSale: recent?.available ? recent.latestSale : null },
   }
+  // Additive (2026-10-07): which corpus the CANDIDATE comps come from, and its data date.
+  if (candidates) {
+    const latest = candidates.active === CANONICAL_CORPUS_SOURCE ? of('canonical_corpus') ?? candidates.latestSale : out.valuationPool.latestSale
+    out.candidates = { source: candidates.active, latestSale: latest, label: freshnessLabel(latest), fallbackReason: candidates.fallbackReason ?? null }
+    out.label = out.candidates.label
+  }
+  return out
+}
+
+/** Canonical corpus row -> the workspace comp shape (same fields as an engine-pool row). */
+export function shapeCanonicalRow(r, subjectView) {
+  const c = shapePoolRow({
+    comp_id: r.comp_id, distance_miles: r.distance_miles, sale_price: r.price, sale_date: r.sold_on, address: r.address,
+    property_id: r.property_id, latitude: r.lat, longitude: r.lng, city: r.city, zip: r.zip, property_type: r.property_type,
+    units_count: r.units, beds: r.beds, baths: r.baths, sqft: r.sqft, lot_square_feet: r.lot_sqft, year_built: r.year_built,
+    subdivision_name: r.subdivision_name, mls_sold_price: r.source === 'mls' ? r.price : null,
+  }, null, subjectView)
+  const buyerType = r.buyer_type ?? 'unknown'
+  return Object.assign(c, {
+    key: `c:${clean(r.comp_id)}`,
+    corpus: 'canonical_corpus',
+    source: r.source === 'mls' ? 'MLS sold' : 'Public record sold',
+    saleSourceRaw: clean(r.source) || null,
+    mls: r.source === 'mls',
+    buyerKind: clean(r.buyer_kind) || (buyerType === 'investor_llc' || buyerType === 'institutional' ? 'company' : buyerType === 'retail_individual' ? 'person' : null),
+    buyerCompany: r.buyer ? displayableCompanyName(r.buyer) : null,
+    buyerType,
+    buyerTypeLabel: BUYER_TYPE_LABELS[buyerType] ?? buyerType,
+    armsLength: r.is_arms_length === true ? true : r.is_arms_length === false ? false : null,
+    cash: r.is_cash_purchase === true ? true : r.is_cash_purchase === false ? false : null,
+    docType: clean(r.doc_type) || null,
+    junkReasons: arr(r.junk_reasons),
+  })
 }
 
 export async function getCompsWorkspace({ propertyId, radius = null, months = null } = {}, deps = {}) {
@@ -540,7 +582,7 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
   }
 
   const hasGeo = subjectView.lat !== null && subjectView.lng !== null
-  const [scoreRes, poolRes, corpusRes, cellRes, oppRes, salesRes] = await Promise.all([
+  const [scoreRes, poolRes, corpusRes, cellRes, oppRes, salesRes, canonicalRes] = await Promise.all([
     client.from('property_acquisition_scores')
       .select([
         'valuation_low, valuation_mid, valuation_high, valuation_confidence, recommended_cash_offer, minimum_acceptable_offer, decision_tier, computed_at',
@@ -562,8 +604,14 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
         .then(() => (deps.loadSales || loadBuyerMatchSales)({ lat: subjectView.lat, lng: subjectView.lng, radius_miles: radiusMiles, months: monthsBack, priced: 'all', limit: RECENT_SALES_READ }, { db: client, now }))
         .catch((error) => ({ error }))
       : Promise.resolve(null),
+    // CANDIDATES from the canonical corpus (flag COMPS_CANONICAL_CORPUS_READS, default on).
+    hasGeo
+      ? (deps.fetchCanonical || fetchCanonicalCorpusComps)(client, { lat: subjectView.lat, lng: subjectView.lng, radiusMiles, months: monthsBack, lane: corpusLaneOf(subject), limit: 300, now }, { env: deps.env ?? process.env })
+      : Promise.resolve({ available: false, reason: 'no_subject_coordinates', rows: [] }),
   ])
-  if (poolRes.error) throw poolRes.error
+  const useCanonical = canonicalRes?.available === true
+  if (poolRes.error && !useCanonical) throw poolRes.error
+  const candidateCorpus = { active: useCanonical ? CANONICAL_CORPUS_SOURCE : LEGACY_POOL_SOURCE, latestSale: canonicalRes?.latestSale ?? null, fallbackReason: useCanonical ? null : canonicalRes?.reason ?? null }
 
   const score = arr(scoreRes.data)[0] || null
   const engineRun = engineRunFrom(score)
@@ -572,7 +620,8 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
   const rejectedStored = new Map(arr(score?.rej).map((r) => [clean(r.comp_id || r.id), arr(r.reasons)]))
   const systemIds = new Set(systemStored.map((c) => clean(c.comp_id || c.id)).filter(Boolean))
   const storedById = new Map(systemStored.map((c) => [clean(c.comp_id || c.id), c]))
-  const pool = arr(poolRes.data)
+  // Canonical corpus active -> the frozen pool is not shown as candidates (system comps stay).
+  const pool = useCanonical ? [] : arr(poolRes.data)
   const detailIds = [...new Set([...pool.map((r) => clean(r.comp_id)), ...systemIds])].filter(Boolean)
   const detailRes = detailIds.length ? await client.from('v_recent_sold_comps').select('*').in('id', detailIds) : { data: [] }
   const details = new Map(arr(detailRes.data).map((d) => [clean(d.id), d]))
@@ -586,6 +635,14 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
     engineInputs.set(c.key, enginePoolInput(r, d))
     return c
   })
+  if (useCanonical) {
+    for (const r of arr(canonicalRes.rows)) {
+      if (clean(r.property_id) && clean(r.property_id) === pid) continue
+      const c = shapeCanonicalRow(r, subjectView)
+      engineInputs.set(c.key, canonicalRowToEngineInput(r, subject))
+      poolComps.push(c)
+    }
+  }
   const inPool = new Set(poolComps.map((c) => c.compId))
   for (const s of systemStored) {
     const id = clean(s.comp_id || s.id)
@@ -661,6 +718,7 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
       c.nominal ? 'nominal_price' : null,
       c.armsLength === false ? 'non_arms_length' : null,
       c.distressDeed ? 'distress_or_transfer_deed' : null,
+      ...arr(c.junkReasons),
     ].filter(Boolean)
     const storedReasons = c.compId ? rejectedStored.get(c.compId) : null
     if (c.compId && systemIds.has(c.compId)) c.state = 'system'
@@ -671,6 +729,7 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
     c.compare = compareToSubject(subjectView, c)
     delete c.nominal
     delete c.distressDeed
+    delete c.junkReasons
   }
 
   const order = { system: 0, candidate: 1, excluded: 2 }
@@ -697,7 +756,8 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
       system: system.length,
       candidates: all.filter((c) => c.state === 'candidate').length,
       excluded: all.filter((c) => c.state === 'excluded').length,
-      enginePool: poolComps.length,
+      enginePool: poolComps.filter((c) => c.corpus === 'engine_pool').length,
+      canonicalCorpus: poolComps.filter((c) => c.corpus === 'canonical_corpus').length,
       transactions: corpusComps.length,
       transactionsInRadius: num(corpus.total_in_radius),
       transactionsSameFamily: num(corpus.total_same_family),
@@ -741,6 +801,7 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
     } : null,
     comps: all,
     recentSales,
-    freshness: freshnessOf(all, recentSales, engineRun),
+    candidateCorpus,
+    freshness: freshnessOf(all, recentSales, engineRun, candidateCorpus),
   }
 }

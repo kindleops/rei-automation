@@ -559,6 +559,15 @@ export async function getBuyerMatchWorkspace({ propertyId, radius = 5, months = 
     buyers: matched.slice(0, 60),
     excluded: excluded.slice(0, 24),
     ...(withTransactions ? { transactions } : {}),
+    // Data date of the evidence on this page (canonical transactions, mv_comp_market_evidence).
+    freshness: (() => {
+      const dates = [
+        ...matched.flatMap((b) => [b.nearby?.last, ...arr(b.recent).map((r) => r.date)]),
+        ...(withTransactions && transactions?.rows ? transactions.rows.map((r) => r.date) : []),
+      ].map((d) => clean(d).slice(0, 10)).filter(Boolean).sort()
+      const latest = dates.pop() ?? null
+      return { source: 'comp_private.mv_comp_market_evidence', latestSale: latest, label: latest ? `Comps current through ${latest}` : 'Comps date not available' }
+    })(),
     lineage: {
       identity: 'W8C canonical buyer entities (shared with Entity Graph)',
       evidence: 'Recorded transactions resolved to buyers (comp_private)',
