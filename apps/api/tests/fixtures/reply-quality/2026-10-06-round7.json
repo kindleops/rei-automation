@@ -1,0 +1,40 @@
+{
+ "note": "Round 7 live cases (2026-10-06), redacted: names in our outbound replaced; no phone numbers.",
+ "cases": [
+  {
+   "fixture_id": "rq-2026-10-06-r7-001",
+   "seller_message": "Yes, and nothing's for sale.",
+   "received_at": "2026-10-06T22:02:42.038Z",
+   "prior_question": { "message_type": null, "template_id": "211409", "template_use_case": "ownership_check", "text": "Hey Pat, this is Alex. 🙂 Are you still the owner of 8403 N Jones Ave?", "sent_at": "2026-10-06T22:01:21.674Z", "delivered_at": "2026-10-06T22:02:47.865Z" },
+   "intervening_inbound": [],
+   "valuation": { "estimated_value": 275000, "arv_estimate": null }
+  },
+  {
+   "fixture_id": "rq-2026-10-06-r7-002",
+   "seller_message": "Did you read my text?",
+   "received_at": "2026-10-06T22:05:57.940Z",
+   "prior_question": { "message_type": "Follow-Up", "template_id": "400065", "template_use_case": "consider_selling", "text": "Thanks for confirming. Would you consider a proposal for the property?", "sent_at": "2026-10-06T22:04:41.162Z", "delivered_at": "2026-10-06T22:05:24.950Z" },
+   "intervening_inbound": [],
+   "r7_history": [ { "text": "Yes, and nothing's for sale.", "language": "English" } ],
+   "valuation": { "estimated_value": 275000, "arv_estimate": null }
+  },
+  {
+   "fixture_id": "rq-2026-10-06-r7-003",
+   "seller_message": "Yes. $5 million",
+   "received_at": "2026-10-06T23:34:03.738Z",
+   "prior_question": { "message_type": "manual_reply", "template_id": null, "template_use_case": null, "text": "Thanks, are you open to a proposal for the property?", "sent_at": "2026-10-06T22:05:08.424Z", "delivered_at": "2026-10-06T22:05:24.951Z" },
+   "intervening_inbound": [],
+   "r7_history": [ { "text": "Yes", "language": "English" } ],
+   "valuation": { "estimated_value": 262000, "arv_estimate": null }
+  },
+  {
+   "fixture_id": "rq-2026-10-06-r7-004",
+   "seller_message": "There are shitstains all over the walls and dead rats scattered throughout the rooms",
+   "received_at": "2026-10-06T23:36:46.251Z",
+   "prior_question": { "message_type": "Follow-Up", "template_id": "local-template:condition_probe:v1", "template_use_case": null, "text": "Thanks for the details on 401 N Yale Dr. How would you describe the overall condition - move-in ready, needs some updating, or bigger repairs?", "sent_at": "2026-10-06T23:35:22.451Z", "delivered_at": "2026-10-06T23:35:32.826Z" },
+   "intervening_inbound": [],
+   "r7_history": [ { "text": "Yes. $5 million", "language": "English" }, { "text": "Yes", "language": "English" } ],
+   "valuation": { "estimated_value": 262000, "arv_estimate": null }
+  }
+ ]
+}

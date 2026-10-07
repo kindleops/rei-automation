@@ -507,6 +507,15 @@ const RAW = {
     classifier_aliases: ["hostile_or_legal", "hostile", "legal", "attorney", "harassment", "legal_threat", "hostile_legal", "frustrated"],
     compliance: { legally_binding_opt_out: false, blocks_all_future_contact: true },
   },
+  troll_or_profanity: {
+    category: "compliance",
+    description: "Profanity or trolling (gross / absurd claims right after an implausible ask). Not a condition disclosure. Never an automated reply; a person decides.",
+    terminal_hint: "human_review_required",
+    reply_policy: { reply_required: false, reply_permitted: false, escalate_to_human: true, objective: "No automated reply; human review of the trolling / profanity." },
+    state_hints: { lifecycle_stage: null, operational_status: "needs_review", lead_temperature: "cold", disposition: "none", automation: "pause" },
+    classifier_aliases: ["hostile_or_troll"],
+    compliance: NO_COMPLIANCE,
+  },
   seller_initiated_after_stop: {
     category: "compliance",
     description: "A seller who previously sent STOP now texts in on their own. Supersedes stale not-interested state, but MUST NOT clear a legally binding opt-out — the prior STOP still blocks automated outbound until a human records fresh written re-consent.",

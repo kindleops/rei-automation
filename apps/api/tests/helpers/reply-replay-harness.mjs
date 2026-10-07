@@ -22,7 +22,11 @@ function makeSupabase(tables) {
       select: () => chain,
       eq: (c, v) => (filters.push((r) => !(c in r) || String(r[c]) === String(v)), chain),
       in: (c, vs) => (filters.push((r) => !(c in r) || (vs || []).map(String).includes(String(r[c]))), chain),
-      is: () => chain, gte: () => chain, lte: () => chain, lt: () => chain, gt: () => chain,
+      is: () => chain,
+      gte: (c, v) => (filters.push((r) => !(c in r) || String(r[c]) >= String(v)), chain),
+      lte: (c, v) => (filters.push((r) => !(c in r) || String(r[c]) <= String(v)), chain),
+      lt: (c, v) => (filters.push((r) => !(c in r) || String(r[c]) < String(v)), chain),
+      gt: (c, v) => (filters.push((r) => !(c in r) || String(r[c]) > String(v)), chain),
       or: () => chain, not: () => chain, neq: () => chain, order: () => chain, ilike: () => chain,
       update: () => chain, insert: () => chain, upsert: () => chain,
       limit: async () => ({ data: (tables[table] || []).filter((r) => filters.every((f) => f(r))), error: null }),
@@ -45,9 +49,15 @@ export async function replayReply(fixture, { catalog = [] } = {}) {
         created_at: prior.sent_at,
       }]
     : [];
+  const iso = (v) => (v ? new Date(v).toISOString() : v);
   const events = (fixture.intervening_inbound || []).map((row, i) => ({
-    id: `in-${i}`, created_at: row.created_at, direction: "inbound", message_body: row.text, detected_intent: row.intent,
+    id: `in-${i}`, created_at: iso(row.created_at), direction: "inbound", message_body: row.text, detected_intent: row.intent,
   }));
+  // Older seller messages (before our last outbound), newest first.
+  const before = prior?.sent_at ? new Date(prior.sent_at).getTime() : new Date(fixture.received_at).getTime();
+  for (const [i, row] of (fixture.r7_history || []).entries()) {
+    events.push({ id: `h-${i}`, created_at: new Date(before - (i + 1) * 60000).toISOString(), direction: "inbound", message_body: row.text, language: row.language || null });
+  }
   const ctxSupabase = makeSupabase({
     send_queue: outbound,
     message_events: events,
