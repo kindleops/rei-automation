@@ -2,7 +2,7 @@
 //   prodSafe       — the prod active + safe EN/ES snapshot (round-8 fixture)
 //   draftRows()    — every PROPOSED draft row, tagged by source:
 //                    v2 autopilot (PROPOSED_20261006090000), price reality check
-//                    (…150200), frustration apology (…230000), native-script core
+//                    (…150000), frustration apology (…230000), native-script core
 //                    (…235900), v3 new (PROPOSED_20261007030000 source)
 //   catalogFor(scenario) — "en_es": prod safe + EN/ES drafts; "all": + every language
 import { readFileSync } from "node:fs";
@@ -29,11 +29,11 @@ const row = (use_case, template_id, language, template_body, source) => ({
 });
 
 function parseRealityCheck() {
-  const sql = read("PROPOSED_20261006150200_price_reality_check_templates.sql");
+  const sql = read("PROPOSED_20261006150000_price_reality_check_templates.sql");
   const re = /\('(lc-price-reality-check-[a-z]+-\d)',\s*'(?:[^']|'')*',\s*'([^']+)',\s*\d+,\s*'((?:[^']|'')*)'/g;
   const out = [];
   let m;
-  while ((m = re.exec(sql)) !== null) out.push(row("price_reality_check", m[1], m[2], unq(m[3]), "PROPOSED_20261006150200"));
+  while ((m = re.exec(sql)) !== null) out.push(row("price_reality_check", m[1], m[2], unq(m[3]), "PROPOSED_20261006150000"));
   return out;
 }
 function parseApology() {
