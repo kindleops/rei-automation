@@ -188,10 +188,23 @@ test('generated migration: patches the applied objects by insertion; rollback re
   const pix = readFileSync(join(MIG, 'PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql'), 'utf8')
   assert.match(pix, /create index concurrently if not exists comp_properties_mi_owner_cover\s+on comp_private\.comp_properties \(property_id\)\s+include \(last_observed_at, is_corporate_owner, is_trust, out_of_state_owner, owner_mailing_identity_key_v1\)/)
   assert.ok(pre.includes("comp_properties_mi_owner_cover') AND i.indisvalid"), 'pretest refuses without the index')
-  assert.ok(pre.includes('IF u_ms >= 15000 THEN') && pre.includes("'pretest FAILED: unit(s) over the 15000 ms limit"))
+  // gates: every unit HARD FAIL at >= 15 s; linking units PASS only < 8 s, 8-15 s is SOFT FAIL (do not apply)
+  assert.ok(pre.includes('IF u_ms >= 15000 THEN') && pre.includes("'pretest FAILED (HARD, unit >= 15000 ms)"))
+  assert.ok(pre.includes("ELSIF (u IN ('i:clusters', 'i:bounds') OR u LIKE 'i:link:%') AND u_ms >= 8000 THEN"))
+  assert.ok(pre.includes("'pretest SOFT FAIL — do not apply"))
   assert.ok(pre.includes("'i:g:city', 'i:g:zip', 'i:validate', 'i:cleanup'"), 'pretest times every inferred unit')
+  assert.match(mig, /'i:clusters', 'i:bounds', 'i:link:0'/)
+  // geography units read only the compact per-sale mapping, never a base table
+  const g = /elsif v_kind = 'g' then([\s\S]*?)elsif v_kind = 'validate'/.exec(mig)[1]
+  assert.ok(g.includes('from public.mi_sale_owner_link s') && !/comp_private\.comp_|mv_map_market_sales|mi_rollup_sales_v/.test(g))
+  // post-apply verification: read-only, asserts recorded counts equal build 2's
+  const ver = readFileSync(join(MIG, 'PROPOSED_20261005140000_market_intel_inferred_investor_verify.sql'), 'utf8')
+  assert.ok(!/\b(insert|update|delete|create|alter|drop|truncate)\b/i.test(ver.replace(/^--.*$/gm, '')), 'verify is read-only')
+  assert.ok(ver.includes("RAISE EXCEPTION 'verify FAILED: recorded counts differ from build 2") && ver.includes("('strong', 95776)") && ver.includes("('likely', 60997)"))
+  const proof = readFileSync(join(MIG, 'PROPOSED_20261005140000_market_intel_inferred_investor_plan_proof.sql'), 'utf8')
+  assert.ok(proof.includes('explain (analyze, buffers'))
   assert.ok(!/cron\.schedule/.test(mig), 'no schedule change')
-  assert.ok(pre.includes(mig) && /RAISE EXCEPTION 'pretest ok/.test(pre), 'pretest embeds the migration and rolls back')
+  assert.ok(pre.includes(mig) && pre.includes("ELSE 'pretest ok' END") && /RAISE EXCEPTION '%: build/.test(pre), 'pretest embeds the migration and rolls back')
   // investor_count (recorded) is never touched by the extension
   assert.ok(!/update public\.mi_geo_period_rollup/i.test(mig))
   for (const t of TIERS) assert.ok(mig.includes(`v_${t}_known`))

@@ -6,7 +6,8 @@
 -- It runs the full inferred chain against the live ready build's id space in a scratch build:
 -- clusters, the 8 link slices, stacks, all six geography units, validate and cleanup (~40-60 s).
 -- What it proves: the DDL and the patches apply over the live objects; every inferred unit runs;
--- each unit's time is reported and asserted (< 15000 ms, else 'pretest FAILED'); the national
+-- each unit's time is reported and gated (linking units PASS < 8000 ms, SOFT FAIL below 15000 ms;
+-- every unit HARD FAIL at >= 15000 ms). Only a message starting 'pretest ok' permits the apply. The national
 -- validation matrix is produced.
 DO $pretest$
 DECLARE
@@ -14,7 +15,9 @@ DECLARE
   n bigint;
   t0 timestamptz;
   ms text := '';
-  slow text := '';
+  hard text := '';
+  soft text := '';
+  verdict text;
   u_ms bigint;
   u text;
   r record;
@@ -37,17 +40,30 @@ BEGIN
 --   ordered range scan per source + merge/hash joins, owner columns from a covering index (pre-step).
 --   Measured 2026-10-07 on a 108,831-sale range with the existing indexes: 2.6 s cold; per-row rule
 --   vs set-based rule on 5,948 sales: 0 differences (link reason and resident flag).
+--   SOURCE DRIFT 10-05 -> 10-07 (build 1 665,288 -> build 2 665,245 sales, -43; legitimate): mv_map_market_sales
+--   keeps a rolling 5-year window (event_date >= CURRENT_DATE - 5 years at refresh). Its 10-06 refresh moved
+--   the first sale 2021-10-04 -> 2021-10-06: -37 sales (exactly the 37 canonical deeds dated 2021-10-04/05,
+--   still present in comp_canonical_transactions). The other -6 are single sales gone from the corpus between
+--   refreshes (2022-09 55404, 2023-01 33426, 2026-05 55108 + 73117, 2026-06 85032 + 91335; e.g. canonical
+--   transaction 1509452, 91335, $2.2M, no longer exists). No additions. Recorded investors 13,183 -> 13,180
+--   (2 aged out + txn 1509452). The 10-05 tier counts are unaffected (the pretest reproduced them exactly).
+--   Note: the nightly ticks run with statement_timeout = '30s' (cron mi_rollup_tick_a/b), so the v1 17-56 s
+--   link slices would have been cancelled in production; v2 targets < 8 s per linking unit.
 -- APPLY PLAN (owner approval required; nothing here is applied):
 --   0. PRE-STEP: PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql (CREATE INDEX CONCURRENTLY; execute_sql, NOT apply_migration,
 --      CONCURRENTLY cannot run inside a transaction). The pretest refuses to run without it.
 --   1. Outside 05:00-08:59 / 09:15-11:59 UTC: run the _pretest (SET statement_timeout = '300s'); expect
---      'pretest ok' with per-unit ms; it RAISEs 'pretest FAILED' if any unit takes >= 15000 ms.
+--      'pretest ok' with per-unit ms and a PASS / SOFT FAIL / HARD FAIL per unit. Any unit >= 15000 ms:
+--      'pretest FAILED (HARD ...)'. A linking unit (i:clusters, i:bounds, i:link:*) at 8000-15000 ms:
+--      'pretest SOFT FAIL — do not apply'. Only 'pretest ok' permits the apply.
 --      National matrix ≈ the numbers above.
 --   2. Apply this file (MCP apply_migration) outside the windows; no cron change (same 75 ticks).
---   3. The fingerprint now includes owner snapshots, so the next nightly tick starts build 2 with 66 units
+--   3. The fingerprint now includes owner snapshots, so the next nightly tick starts build 2 with 67 units
 --      (~ +3 min DB time). Until it is ready, MI keeps serving build 1; inferred metrics read 'unavailable'.
---   4. Verify: select notes->'inferred_investor' from mi_rollup_builds where status = 'ready';
+--   4. Verify (read-only) once the new build is ready: PROPOSED_20261005140000_market_intel_inferred_investor_verify.sql — asserts recorded
+--      counts equal build 2's and reports nation + top markets against the 10-05 snapshot;
 --      GET op=status → inferred_investor.available = true.
+--      Index evidence: PROPOSED_20261005140000_market_intel_inferred_investor_plan_proof.sql (EXPLAIN ANALYZE BUFFERS, before and after step 0).
 --   5. Rollback: the _rollback file (restores the applied functions and view byte for byte).
 -- =============================================================================
 --
@@ -56,6 +72,12 @@ BEGIN
 -- does not make an investor purchase. So this is a SEPARATE metric, tiered, with its evidence,
 -- and validated against the sales that DO name a buyer. It never changes investor_count.
 --
+-- ONE MAPPING PER BUILD: the base tables (comp_properties, comp_canonical_transactions,
+--   comp_property_contacts, mv_map_market_sales) are read ONLY by i:clusters (mailing stacks), i:bounds
+--   (slice bounds) and the bulk-joined i:link slices, which write the compact per-sale mapping
+--   public.mi_sale_owner_link (property -> latest sale -> current-owner eligibility -> tier). i:stacks,
+--   every i:g:<level> unit and i:validate read only that mapping (+ mi_zip_geo / the cluster table);
+--   no geography unit re-traverses a base table.
 -- RULES (mirrored in apps/api/src/lib/domain/market-intelligence/mi-inferred-investor.js):
 --   LINK mi_owner_link@1: a sale inherits today's owner only if it is the property's most recent
 --     sale, no canonical transfer exists > 45 days after it (closer events are the same
@@ -76,7 +98,7 @@ BEGIN
 --   public.mi_infer_run_unit(...)       the 'i:' units
 -- PATCHED (exact insertions into the applied text; the rollback restores the originals):
 --   mi_rollup_sales_v      + property_id (last column)
---   mi_rollup_units()      + 18 'i:' units (66 units; the nightly window has 75 ticks)
+--   mi_rollup_units()      + 19 'i:' units (67 units; the nightly window has 75 ticks)
 --   mi_rollup_fingerprint()+ owner snapshot (count, max observed) so an owner refresh rebuilds
 --   mi_rollup_run_unit()   + one dispatch line for 'i:' units
 -- ISOLATION: an 'i:' unit that fails on its RETRY is recorded in notes.inferred_errors and skipped;
@@ -258,16 +280,20 @@ begin
                group by 1 having count(*) >= 2) c;
       get diagnostics v_rows = row_count;
       analyze comp_private.mi_owner_mail_cluster;
+
+    elsif v_kind = 'bounds' then
       -- the link slices: 8 contiguous property_id ranges of equal sale count, fixed for this build
-      -- (the ranges partition all text values, so every sale lands in exactly one slice)
+      -- (the ranges partition all text values, so every sale lands in exactly one slice). One index-only
+      -- pass over mv_map_market_sales_property_id (~0.9 s measured).
       update public.mi_rollup_builds b set notes = b.notes || jsonb_build_object('inferred_link_bounds', (
         select to_jsonb(percentile_disc(array[0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875]::float8[]) within group (order by m.property_id))
           from public.mv_map_market_sales m where m.property_id is not null))
        where b.build_id = p_build;
+      get diagnostics v_rows = row_count;
 
     elsif v_kind = 'link' then
       -- One slice of the properties as a CONTIGUOUS property_id range (bounds fixed per build by
-      -- i:clusters in notes.inferred_link_bounds). All sales of a property land in the same slice, so
+      -- i:bounds in notes.inferred_link_bounds). All sales of a property land in the same slice, so
       -- "most recent sale" is decided over the property's whole history. Set-based: each source is
       -- read once, as an ordered range scan of its property_id index (owner columns from the covering
       -- index comp_properties_mi_owner_cover, the pre-step), then merge/hash joined. Identical to the
@@ -275,7 +301,7 @@ begin
       -- is > 45 days after the sale"; resident is "some contact is a resident likely owner".
       select b.notes -> 'inferred_link_bounds' into v_bounds from public.mi_rollup_builds b where b.build_id = p_build;
       if v_bounds is null or jsonb_array_length(v_bounds) <> 7 then
-        raise exception 'mi_infer: no link bounds for build % (i:clusters sets them)', p_build;
+        raise exception 'mi_infer: no link bounds for build % (i:bounds sets them)', p_build;
       end if;
       v_lo := case when v_arg::int > 0 then v_bounds ->> (v_arg::int - 1) else '' end;  -- '' sorts before every text
       v_hi := case when v_arg::int < 7 then v_bounds ->> v_arg::int end;
@@ -437,7 +463,7 @@ $$;
 
 create or replace function public.mi_rollup_units()
 returns text[] language sql immutable as $$
-  select array['prepare', 'buyers', 'i:clusters', 'i:link:0', 'i:link:1', 'i:link:2', 'i:link:3', 'i:link:4', 'i:link:5', 'i:link:6', 'i:link:7', 'i:stacks']
+  select array['prepare', 'buyers', 'i:clusters', 'i:bounds', 'i:link:0', 'i:link:1', 'i:link:2', 'i:link:3', 'i:link:4', 'i:link:5', 'i:link:6', 'i:link:7', 'i:stacks']
     || (select array_agg(format('p:%s:%s', l, p) order by pi, li)
           from unnest(array['1y', '90d', '30d', '6m', '3y', 'all']) with ordinality as pp(p, pi),
                unnest(array['nation', 'state', 'market', 'county', 'city', 'zip']) with ordinality as ll(l, li))
@@ -641,18 +667,27 @@ $mig$;
   INSERT INTO public.mi_zip_geo SELECT b, zip, state, city_key, county_key, county_name, county_via, market_key, sales_n, min_lat, max_lat, min_lng, max_lng
     FROM public.mi_zip_geo WHERE build_id = (SELECT max(build_id) FROM public.mi_rollup_builds WHERE status = 'ready');
 
-  FOREACH u IN ARRAY array['i:clusters', 'i:link:0', 'i:link:1', 'i:link:2', 'i:link:3', 'i:link:4', 'i:link:5', 'i:link:6', 'i:link:7', 'i:stacks', 'i:g:nation', 'i:g:state', 'i:g:market', 'i:g:county', 'i:g:city', 'i:g:zip', 'i:validate', 'i:cleanup'] LOOP
+  FOREACH u IN ARRAY array['i:clusters', 'i:bounds', 'i:link:0', 'i:link:1', 'i:link:2', 'i:link:3', 'i:link:4', 'i:link:5', 'i:link:6', 'i:link:7', 'i:stacks', 'i:g:nation', 'i:g:state', 'i:g:market', 'i:g:county', 'i:g:city', 'i:g:zip', 'i:validate', 'i:cleanup'] LOOP
     t0 := clock_timestamp();
     n := public.mi_rollup_run_unit(b, u, (SELECT source_as_of FROM public.mi_rollup_builds WHERE build_id = b));
     u_ms := floor(extract(epoch from clock_timestamp() - t0) * 1000)::bigint;
-    ms := ms || format('%s=%s rows/%s ms; ', u, n, u_ms);
-    IF u_ms >= 15000 THEN slow := slow || format('%s %s ms; ', u, u_ms); END IF;
+    -- gates: every unit HARD FAIL at >= 15000 ms; ownership-linking units (i:clusters, i:bounds, i:link:*)
+    -- PASS only below 8000 ms, 8000-15000 ms is a SOFT FAIL (do not apply).
+    IF u_ms >= 15000 THEN
+      hard := hard || format('%s %s ms; ', u, u_ms);
+      ms := ms || format('%s=%s rows/%s ms HARD FAIL; ', u, n, u_ms);
+    ELSIF (u IN ('i:clusters', 'i:bounds') OR u LIKE 'i:link:%') AND u_ms >= 8000 THEN
+      soft := soft || format('%s %s ms; ', u, u_ms);
+      ms := ms || format('%s=%s rows/%s ms SOFT FAIL; ', u, n, u_ms);
+    ELSE
+      ms := ms || format('%s=%s rows/%s ms PASS; ', u, n, u_ms);
+    END IF;
   END LOOP;
   IF (SELECT notes ? 'inferred_errors' FROM public.mi_rollup_builds WHERE build_id = b) THEN
     RAISE EXCEPTION 'pretest FAILED: inferred unit error % · %', (SELECT notes -> 'inferred_errors' FROM public.mi_rollup_builds WHERE build_id = b), ms;
   END IF;
-  IF slow <> '' THEN
-    RAISE EXCEPTION 'pretest FAILED: unit(s) over the 15000 ms limit: % · all: %', slow, ms;
+  IF hard <> '' THEN
+    RAISE EXCEPTION 'pretest FAILED (HARD, unit >= 15000 ms): % · all: %', hard, ms;
   END IF;
 
   SELECT count(*) INTO n FROM public.mi_sale_owner_link WHERE build_id = b;
@@ -661,8 +696,10 @@ $mig$;
   END IF;
   SELECT linked_count, strong_n, likely_n, trust_n, sale_count INTO r FROM public.mi_geo_period_inferred
    WHERE build_id = b AND geo_level = 'nation' AND period = 'all' AND asset = 'all';
-  RAISE EXCEPTION 'pretest ok: build % · sales % · linked % · strong % · likely % · trust % · % · validation %',
-    b, r.sale_count, r.linked_count, r.strong_n, r.likely_n, r.trust_n, ms,
+  -- a SOFT FAIL still reports the numbers, but its first words say do not apply
+  verdict := CASE WHEN soft <> '' THEN format('pretest SOFT FAIL — do not apply (linking unit(s) 8000-15000 ms: %s)', soft) ELSE 'pretest ok' END;
+  RAISE EXCEPTION '%: build % · sales % · linked % · strong % · likely % · trust % · % · validation %',
+    verdict, b, r.sale_count, r.linked_count, r.strong_n, r.likely_n, r.trust_n, ms,
     (SELECT notes -> 'inferred_investor' -> 'matrix' FROM public.mi_rollup_builds WHERE build_id = b);
 END
 $pretest$;
