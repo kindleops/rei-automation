@@ -214,8 +214,24 @@ export function resolveFollowUpPlan(intent, opts = {}) {
   }
 
   if (intent === STAGE_NO_REPLY_FOLLOWUP_INTENT) {
-    const days = Number(opts.stage_no_reply_days);
     const stage = clean(opts.stage);
+    // Hour-granular cadence anchored on the delivered touch (no-response
+    // follow-ups: FU1 +24h after OUR question, not after the webhook).
+    const hours = Number(opts.stage_no_reply_hours);
+    if (stage && Number.isFinite(hours) && hours > 0) {
+      const anchor_ms = Date.parse(clean(opts.anchor_at));
+      const base_ms = Number.isFinite(anchor_ms) ? anchor_ms : Date.now();
+      return {
+        suppressed: false,
+        followup_created: true,
+        scheduled_for: new Date(base_ms + hours * 3_600_000).toISOString(),
+        days: hours / 24,
+        hours,
+        reason: `stage_no_reply_followup:${stage}`,
+        thread_key: thread_key || null,
+      };
+    }
+    const days = Number(opts.stage_no_reply_days);
     if (!Number.isFinite(days) || days <= 0 || !stage) {
       // No stage-policy authority ⇒ fail closed; never borrow a nurture rule.
       return { suppressed: false, followup_created: false, reason: "stage_no_reply_policy_missing" };
@@ -322,6 +338,8 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     thread_key,
     is_suppressed: context.is_suppressed,
     stage_no_reply_days: context.stage_no_reply_days,
+    stage_no_reply_hours: context.stage_no_reply_hours,
+    anchor_at: context.followup_anchor_at,
     stage: context.stage,
   });
 
@@ -339,7 +357,13 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     return { ok: false, skipped: true, reason: "invalid_thread_key_phone" };
   }
 
-  const base_dedupe_key = buildFollowupDedupeKey(normalized_thread_key, intent);
+  // A caller-declared scope (e.g. no-response chain root + step) makes each
+  // touch of a chain its own idempotency key: a webhook replay of the same
+  // delivery collapses onto the same row, a new step never collides.
+  const dedupe_scope = clean(context.followup_dedupe_scope);
+  const base_dedupe_key = dedupe_scope
+    ? `${buildFollowupDedupeKey(normalized_thread_key, intent)}:${dedupe_scope}`
+    : buildFollowupDedupeKey(normalized_thread_key, intent);
   const scheduled_for = plan.scheduled_for;
   const use_case_template =
     intent === STAGE_NO_REPLY_FOLLOWUP_INTENT
@@ -406,6 +430,13 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
       // Agent identity so deferred resolution can render agent-identifying
       // templates (e.g. the S1 ownership check) at send time.
       agent_name: clean(context.agent_name) || null,
+      // Personalization / placement carried by callers that know them (the
+      // no-response follow-ups). Absent ⇒ null, exactly as before. (The reply
+      // language travels in metadata: normalizeSendQueueRow drops `language`.)
+      ...(clean(context.seller_first_name) ? { seller_first_name: clean(context.seller_first_name) } : {}),
+      ...(clean(context.property_address) ? { property_address: clean(context.property_address) } : {}),
+      ...(clean(context.timezone) ? { timezone: clean(context.timezone) } : {}),
+      ...(clean(context.market) ? { market: clean(context.market) } : {}),
       metadata: {
         deferred_message_resolution: true,
         source: clean(context.source) || "seller_followup_scheduler",
@@ -429,7 +460,7 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
   // and was reported as duplicate_followup_exists: no thread in production
   // ever got a second nurture follow-up. A finished cycle is not a duplicate;
   // only a LIVE follow-up of the same kind is.
-  if (result?.idempotent_replay && !isLiveFollowUpRow(result.raw)) {
+  if (result?.idempotent_replay && !dedupe_scope && !isLiveFollowUpRow(result.raw)) {
     const live = await findLiveFollowUpRow(supabase, to_phone_number, use_case_template);
     if (live.error) {
       return {

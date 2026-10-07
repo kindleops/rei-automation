@@ -21,6 +21,18 @@ import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { BLOCKING_CONTACTABILITY } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { resolveFollowUpPolicyForStage } from "@/lib/domain/seller-flow/followup-policy-registry.js";
 import { warn } from "@/lib/logging/logger.js";
+import {
+  NO_RESPONSE_CONFIG_KEY,
+  NO_RESPONSE_MODE_KEY,
+  buildNoResponseScheduleContext,
+  buildObservedOfferQuote,
+  classifyNoResponseAnchor,
+  evaluateNoResponseCandidate,
+  loadAnchorQueueRow,
+  loadNoResponseThreadFacts,
+  normalizeNoResponseMode,
+  resolveNoResponseConfig,
+} from "@/lib/domain/seller-flow/no-response-followup.js";
 
 const DELIVERED_STATUSES = new Set(["delivered", "delivery_confirmed", "confirmed"]);
 // Registry blocking codes (opted_out/dnc/provider_blacklisted/invalid_number/
@@ -335,6 +347,125 @@ async function resolveEffectiveFollowUpMode({
 }
 
 /**
+ * NO-RESPONSE FOLLOW-UPS (S2 interest question / offer — no-response-followup.js).
+ * Runs only when system_control.followup_no_response_mode is dry_run|live;
+ * disabled/missing/unreadable ⇒ { handled:false } and the generic path below
+ * behaves exactly as before. Returns { handled, result }.
+ */
+export async function maybeScheduleNoResponseFollowUp({
+  supabase,
+  outbound,
+  sid,
+  mode,
+  sent_at,
+  inbound_after = false,
+  outbound_after = false,
+  pending_rows = [],
+  lead_state = {},
+  getSystemValueImpl = getSystemValue,
+  scheduleFollowUpImpl = scheduleFollowUp,
+  isInternalTestPhoneImpl = isInternalTestPhone,
+  now = new Date(),
+} = {}) {
+  const can_read_system = getSystemValueImpl !== getSystemValue || hasSupabaseConfig();
+  let nr_mode = "disabled";
+  let config_raw = null;
+  try {
+    nr_mode = can_read_system ? normalizeNoResponseMode(await getSystemValueImpl(NO_RESPONSE_MODE_KEY)) : "disabled";
+    config_raw = nr_mode === "disabled" ? null : await getSystemValueImpl(NO_RESPONSE_CONFIG_KEY);
+  } catch {
+    nr_mode = "disabled";
+  }
+  if (nr_mode === "disabled") return { handled: false };
+
+  const anchor = await loadAnchorQueueRow(supabase, outbound.queue_id);
+  if (!anchor) return { handled: false };
+  const config = resolveNoResponseConfig(config_raw);
+  if (!classifyNoResponseAnchor(anchor, config).kind) return { handled: false };
+
+  const thread_key = outbound.thread_key;
+  const facts = await loadNoResponseThreadFacts(supabase, {
+    thread_key,
+    anchor_sent_at: sent_at,
+    anchor_message_event_id: outbound.id,
+  });
+  const evaluation = evaluateNoResponseCandidate(
+    {
+      ...facts,
+      anchor,
+      anchor_sent_at: sent_at,
+      anchor_message_event_id: outbound.id,
+      thread_key,
+      has_inbound_after_anchor: Boolean(inbound_after || facts.has_inbound_after_anchor),
+      has_newer_outbound: Boolean(outbound_after),
+      thread_state: {
+        ...facts.thread_state,
+        contactability_status: facts.thread_state?.contactability_status ?? lead_state.contactability_status ?? null,
+        lifecycle_stage: facts.thread_state?.lifecycle_stage ?? lead_state.lifecycle_stage ?? null,
+      },
+    },
+    { config, now }
+  );
+  const base = { ok: true, scheduled: false, mode, no_response_mode: nr_mode, thread_key };
+  if (!evaluation.eligible) return { handled: true, result: { ...base, reason: evaluation.reason } };
+  if ((pending_rows || []).length > 0) {
+    return { handled: true, result: { ...base, reason: "duplicate_pending_followup" } };
+  }
+  const plan = evaluation.plan;
+  if (nr_mode === "dry_run" || mode === "dry_run") {
+    return { handled: true, result: { ...base, reason: "no_response_followup_dry_run", would_schedule: true, plan } };
+  }
+  if (mode === "internal_only" && !isInternalTestPhoneImpl(thread_key)) {
+    return { handled: true, result: { ...base, reason: "followup_internal_only_blocked" } };
+  }
+  if (!FOLLOW_UP_SCHEDULING_MODES.has(mode)) {
+    return { handled: true, result: { ...base, reason: "followup_automation_disabled" } };
+  }
+  const context = buildNoResponseScheduleContext(plan, {
+    thread_key,
+    anchor,
+    anchor_message_event_id: outbound.id,
+    delivered_provider_message_sid: sid,
+  });
+  const result = await scheduleFollowUpImpl(STAGE_NO_REPLY_FOLLOWUP_INTENT, thread_key, context, supabase);
+  // Track the offer we follow up on like an automated quote (best-effort:
+  // the PROPOSED table may not exist yet; the follow-up never depends on it).
+  let observed_offer = null;
+  if (plan.kind === "offer" && plan.step === 0) {
+    const quote = buildObservedOfferQuote({
+      thread_key,
+      message_event_id: outbound.id,
+      offer: plan.offer,
+      anchor,
+      language: plan.language,
+      quoted_at: sent_at,
+    });
+    if (quote) {
+      try {
+        const { recordNegotiationQuote } = await import("@/lib/domain/seller-flow/negotiation-quotes.js");
+        observed_offer = await recordNegotiationQuote(supabase, quote);
+      } catch (error) {
+        observed_offer = { ok: false, reason: error?.message || "observed_offer_write_failed" };
+      }
+    }
+  }
+  return {
+    handled: true,
+    result: {
+      ...base,
+      scheduled: Boolean(result?.followup_created),
+      reason: result?.reason || evaluation.reason,
+      scheduled_for: result?.scheduled_for || null,
+      queue_row_id: result?.queue_row_id || null,
+      no_response_kind: plan.kind,
+      no_response_step: plan.step_label,
+      use_case: plan.use_case,
+      observed_offer_recorded: observed_offer ? Boolean(observed_offer.ok) : null,
+    },
+  };
+}
+
+/**
  * Trigger the existing follow-up scheduler after a provider-confirmed
  * delivery. Never throws into the webhook path.
  *
@@ -407,6 +538,24 @@ export async function maybeScheduleFollowUpAfterDelivery({
       loadPendingFollowups(supabase, outbound.thread_key),
       loadLeadStateGuards(supabase, outbound.thread_key),
     ]);
+
+    // No-response follow-ups (S2 question / offer) own their anchors when
+    // their gate is on; otherwise this is a no-op and the generic path runs.
+    const no_response = await maybeScheduleNoResponseFollowUp({
+      supabase,
+      outbound,
+      sid,
+      mode,
+      sent_at,
+      inbound_after,
+      outbound_after,
+      pending_rows,
+      lead_state,
+      getSystemValueImpl,
+      scheduleFollowUpImpl,
+      isInternalTestPhoneImpl,
+    });
+    if (no_response.handled) return no_response.result;
 
     // Stage follow-up policy (one registry, no scattered timers): the
     // thread's CURRENT lifecycle stage must allow automated follow-ups, and
