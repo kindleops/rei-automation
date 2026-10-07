@@ -44,7 +44,13 @@ type Props = {
   onOpenBuyer?: (buyerId: string) => void
 }
 
-const pct = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) ? `${Math.round(v)}%` : null)
+/** equity_known_v1: free & clear, a known %, a vendor class, or Unknown — never a vendor 100%. */
+const equityText = (p: Pick<NetworkProperty, 'equityPct' | 'equityRule'>) => (
+  p.equityRule === 'free_and_clear' ? 'Free & clear'
+    : p.equityRule === 'loan_and_value' && p.equityPct !== null ? `${Math.round(p.equityPct)}%`
+      : p.equityRule === 'vendor_high_equity_flag' ? 'High (flag)'
+        : p.equityRule === 'vendor_low_equity_flag' ? 'Low (flag)' : 'Unknown'
+)
 const yr = (s: string | null | undefined) => (s ? String(s).slice(0, 4) : null)
 const day = (s: string | null | undefined) => {
   if (!s) return null
@@ -150,7 +156,7 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
       {anchorProperty ? (
         <div className="egdk-figures">
           <Figure label="Est. value" value={fmtMoney(anchorProperty.value)} />
-          <Figure label="Equity" value={pct(anchorProperty.equityPct) ?? '—'} hint={anchorProperty.equity !== null ? fmtMoney(anchorProperty.equity) : undefined} />
+          <Figure label="Equity" value={equityText(anchorProperty)} hint={anchorProperty.equity !== null ? fmtMoney(anchorProperty.equity) : anchorProperty.equityRule?.startsWith('vendor') ? 'vendor class · no loan data' : 'no loan on file'} />
           <Figure label="Open loans" value={rec ? String(rec.totals.openMortgages) : '—'} hint={rec ? (rec.totals.balance !== null ? `${fmtMoney(rec.totals.balance)} balance` : 'no balance on file') : 'not captured'} />
           <Figure label="Last sale" value={anchorProperty.lastSale?.price ? fmtMoney(anchorProperty.lastSale.price) : '—'} hint={yr(anchorProperty.lastSale?.date) ?? undefined} />
         </div>
@@ -158,7 +164,7 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
         <div className="egdk-figures">
           <Figure label="Properties" value={fmtCount(o.propertyCount)} hint={o.units ? `${fmtCount(o.units)} units` : undefined} />
           <Figure label="Portfolio value" value={fmtMoney(o.portfolio?.value ?? network.debt.totalValue)} />
-          <Figure label="Equity" value={fmtMoney(o.portfolio?.equity ?? network.debt.totalEquity)} />
+          <Figure label="Known equity" value={fmtMoney(network.debt.totalEquity)} hint={network.properties.length ? `known on ${network.debt.equityKnown ?? 0} of ${network.properties.length}` : undefined} />
           <Figure label="Loan balance" value={network.debt.withDebt ? fmtMoney(network.debt.totalLoanBalance) : '—'} hint={network.debt.withDebt ? `${network.debt.withDebt} with a balance` : 'no balance on file'} />
         </div>
       )}
@@ -195,7 +201,7 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
             <li key={p.id}>
               <button type="button" className={cx('egdk-row', p.id === anchorProperty?.id && 'is-current')} onClick={() => onOpen({ type: 'property', id: p.id })} disabled={p.id === anchorProperty?.id}>
                 <span className="egdk-row__main"><strong>{p.address}</strong><small>{spec([[p.city, p.state].filter(Boolean).join(', '), p.type, p.units && p.units > 1 ? `${p.units} units` : null])}</small></span>
-                <span className="egdk-row__num"><b>{fmtMoney(p.value)}</b><small>{pct(p.equityPct) ? `${pct(p.equityPct)} equity` : ''}</small></span>
+                <span className="egdk-row__num"><b>{fmtMoney(p.value)}</b><small>{equityText(p) === 'Unknown' ? 'equity unknown' : `${equityText(p)}${p.equityRule === 'loan_and_value' ? ' equity' : ''}`}</small></span>
               </button>
             </li>
           ))}

@@ -37,8 +37,11 @@ export interface NetworkProperty {
   yearBuilt: number | null
   lotAcres: number | null
   value: number | null
+  /** Known equity only (equity_known_v1): null = unknown, never a vendor 100%. */
   equityPct: number | null
   equity: number | null
+  equityClass?: 'high' | 'low' | 'unknown'
+  equityRule?: 'loan_and_value' | 'free_and_clear' | 'vendor_high_equity_flag' | 'vendor_low_equity_flag' | 'unknown'
   loanBalance: number | null
   loanAmount: number | null
   loanPayment: number | null
@@ -91,7 +94,7 @@ export interface EntityNetwork {
   mailing: { address: string; city: string; state: string; zip: string; outOfState: boolean } | null
   properties: NetworkProperty[]
   propertiesTruncated: number
-  debt: { properties: number; totalValue: number | null; totalEquity: number | null; totalLoanBalance: number; monthlyPayment: number | null; withDebt: number; freeAndClear: number; activeLiens: number; taxDelinquent: number; blendedLtv: number | null }
+  debt: { properties: number; totalValue: number | null; totalEquity: number | null; equityKnown?: number; totalLoanBalance: number; monthlyPayment: number | null; withDebt: number; freeAndClear: number; activeLiens: number; taxDelinquent: number; blendedLtv: number | null }
   entities: Array<{ id: string; name: string; kind: HolderKind; kindLabel: string; mailing: string | null }>
   people: Array<{ id: string; name: string; role: string; primary: boolean; language: string | null; occupation: string | null; householdIncome: string | null; netAssets: string | null; smsEligible: boolean; bestPhone: string | null; bestEmail: string | null; /** Vendor contact-matching tags (prospects.matching_flags), verbatim. Absent on older APIs. */ matchingTags?: string[] }>
   phones: Array<{ id: string; e164: string; display: string; type: string; personId: string | null; score: number | null; active: string | null; wrongNumber: boolean }>

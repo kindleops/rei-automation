@@ -17,6 +17,16 @@ const text = (v: unknown): string | null => {
  * A property with no record-summary row has unknown loan / lien counts. The
  * API sends `captured: false` and a placeholder 0; the table says "—".
  */
+/** The equity cell under equity_known_v1 (see the Equity column). */
+export function equityLabel(r: EntitySearchResult): string {
+  const d = r.details
+  if (d?.equityRule === 'free_and_clear') return 'Free & clear'
+  if (typeof d?.equity === 'number' && d.equityRule === 'loan_and_value') return `${Math.round(d.equity)}%`
+  if (d?.equityRule === 'vendor_high_equity_flag') return 'High (flag)'
+  if (d?.equityRule === 'vendor_low_equity_flag') return 'Low (flag)'
+  return 'Unknown'
+}
+
 const recordsCaptured = (r: EntitySearchResult): boolean => Boolean(r.details?.records) && r.details?.records?.captured !== false
 
 export type ColumnGroup =
@@ -76,13 +86,21 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
     { key: 'assetType', group: 'property', label: 'Type', width: 84, render: (r) => text(r.details?.assetType) },
     { key: 'value', group: 'scores', label: 'Value', sortBy: 'estimated_value', align: 'right', width: 84, render: (r) => compactCurrency(r.details?.value) },
     {
+      /**
+       * equity_known_v1 (owner, 2026-10-07): the vendor equity_percent reads
+       * 100% whenever no loan is on file. The server sends the evidence-based
+       * value (details.equity is null unless known) and the rule; the column
+       * says "Free & clear", a vendor class, or "Unknown" — never a
+       * fabricated 100%. No server sort: equity_percent orders the unknowns
+       * first, so the loaded rows are sorted (known % first, unknown last).
+       */
       key: 'equity',
       group: 'scores',
       label: 'Equity',
-      sortBy: 'equity_percent',
       align: 'right',
-      width: 68,
-      render: (r) => (typeof r.details?.equity === 'number' ? `${Math.round(r.details.equity)}%` : null),
+      width: 82,
+      render: (r) => equityLabel(r),
+      sortValue: (r) => (typeof r.details?.equity === 'number' ? r.details.equity : null),
     },
     /**
      * §9 — the "Score" column is gone.
@@ -298,7 +316,6 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
   { key: 'seller_tags_text', label: 'Seller tags', group: 'signals', width: 210 },
   { key: 'acquisition_bucket', label: 'Acquisition bucket', group: 'signals', width: 140 },
 
-  { key: 'equity_amount', label: 'Equity $', group: 'scores', width: 100, numeric: true },
   { key: 'total_loan_balance', label: 'Loan balance', group: 'scores', width: 112, numeric: true },
   { key: 'assd_total_value', label: 'Assessed value', group: 'scores', width: 120, numeric: true },
   { key: 'sale_price', label: 'Last sale price', group: 'scores', width: 118, numeric: true },

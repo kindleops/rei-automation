@@ -155,7 +155,7 @@ async function interactionProof(page, prefix) {
   await page.waitForTimeout(300)
   out.resize = { header: await th.innerText().catch(() => ''), before: Math.round(w0), after: Math.round(await th.evaluate((el) => el.getBoundingClientRect().width)) }
   // sort: click the Value header (server keyset/index sort), read aria-sort and the request it made
-  const sortBtn = page.locator('.egdk .lc-grid__th .lc-grid__sort', { hasText: 'Equity' }).first()
+  const sortBtn = page.locator('.egdk .lc-grid__th .lc-grid__sort', { hasText: 'Value' }).first()
   const reqs = []
   const onReq = (r) => { if (r.url().includes('/entity-graph/browse')) reqs.push(new URL(r.url()).searchParams.toString()) }
   page.on('request', onReq)

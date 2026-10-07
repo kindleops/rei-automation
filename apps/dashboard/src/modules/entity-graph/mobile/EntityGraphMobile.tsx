@@ -921,7 +921,7 @@ export function EntityGraphMobile({
   const lens = compositionTab && !selectionMode ? (
     <EntityGraphComposition
       // A cross-type result count is matches of every type, never "properties".
-      scopeNoun={isModernDesktop && crossTypeSearch ? 'matches · every type' : scopeTotalNoun}
+      scopeNoun={crossTypeSearch ? 'matches · every type' : scopeTotalNoun}
       total={searching ? total : (composition?.total ?? total)}
       dimensions={scopeDimensions}
       dimensionKey={dimensionKey}
