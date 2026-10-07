@@ -146,6 +146,7 @@ export function createSqlRecorder() {
       if (op === 'is') clauses.push(isClause(column, value, true))
       else if (op === 'in') clauses.push(inClause(column, value, true))
       else if (op === 'eq') clauses.push(compare(column, 'neq', value))
+      else if (op === 'like' || op === 'ilike') clauses.push(`not (${likeClause(column, value, op === 'ilike')})`)
       else throw new FacetUntranslatable(`not ${op}`)
       return builder
     },

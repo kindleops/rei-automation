@@ -88,6 +88,7 @@ function browseClient(rows) {
       _head: false,
       select(_cols, opts) { q._head = Boolean(opts?.head); return q },
       order(col, opts) { orders.push([col, opts?.ascending]); return q },
+      not() { return q }, // the shared test-record exclusion (entity-graph-truth.js)
       range() { return Promise.resolve({ data: rows, error: null }) },
       then(resolve) { return Promise.resolve({ count: rows.length, error: null }).then(resolve) },
     }

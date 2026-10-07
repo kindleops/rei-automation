@@ -23,6 +23,7 @@
  * Read-only. Every query is indexed; the network is capped at 60 properties.
  */
 import { displayableCompanyName } from './buyer-name-privacy.js'
+import { equityTruth } from './entity-graph-truth.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { clean, formatReadablePhone, parseJsonArray } from './entity-graph-normalize.js'
 
@@ -38,7 +39,7 @@ const PROPERTY_SELECT = [
   'tax_delinquent_year', 'sale_date', 'sale_price', 'last_sale_doc_type', 'ownership_years', 'streetview_image',
   'owner_display_name', 'owner_name', 'owner_type_guess', 'is_corporate_owner', 'out_of_state_owner',
   'owner_address_full', 'owner_address_city', 'owner_address_state', 'owner_address_zip', 'owner_name_addr_key',
-  'seller_tags_text', 'estimated_repair_cost',
+  'seller_tags_text', 'estimated_repair_cost', 'property_flags_text',
 ].join(',')
 
 const OWNER_SELECT = [
@@ -109,13 +110,16 @@ function mapProperty(p) {
     yearBuilt: num(p.year_built),
     lotAcres: num(p.lot_acreage),
     value,
-    equityPct: num(p.equity_percent),
-    equity: num(p.equity_amount),
+    // equity_known_v1 (entity-graph-truth.js): no loan on file is UNKNOWN, not 100%.
+    equityPct: equityOf(p).known ? equityOf(p).percent : null,
+    equity: equityOf(p).known ? equityOf(p).amount : null,
+    equityClass: equityOf(p).class,
+    equityRule: equityOf(p).rule,
     loanBalance: balance,
     loanAmount: num(p.total_loan_amt),
     loanPayment: num(p.total_loan_payment),
     ltv: value && balance != null ? Math.round((balance / value) * 1000) / 10 : null,
-    freeAndClear: value != null && (balance === null || balance === 0),
+    freeAndClear: equityOf(p).rule === 'free_and_clear',
     activeLien: bool(p.active_lien),
     taxAmount: num(p.tax_amt),
     taxDelinquent: bool(p.tax_delinquent),
@@ -133,10 +137,10 @@ function mapProperty(p) {
 }
 
 function debtSummary(properties) {
-  let value = 0, equity = 0, balance = 0, payment = 0, withDebt = 0, freeClear = 0, liens = 0, delinquent = 0, valued = 0
+  let value = 0, equity = 0, balance = 0, payment = 0, withDebt = 0, freeClear = 0, liens = 0, delinquent = 0, valued = 0, equityKnown = 0
   for (const p of properties) {
     if (p.value) { value += p.value; valued += 1 }
-    if (p.equity) equity += p.equity
+    if (p.equity !== null && p.equity !== undefined) { equity += p.equity; equityKnown += 1 }
     if (p.loanBalance) { balance += p.loanBalance; withDebt += 1 }
     if (p.loanPayment) payment += p.loanPayment
     if (p.freeAndClear) freeClear += 1
@@ -146,7 +150,9 @@ function debtSummary(properties) {
   return {
     properties: properties.length,
     totalValue: value || null,
-    totalEquity: equity || (value ? value - balance : null),
+    // Known equity only, and how many properties it covers — never value − 0.
+    totalEquity: equityKnown ? equity : null,
+    equityKnown,
     totalLoanBalance: balance,
     monthlyPayment: payment || null,
     withDebt,
@@ -482,6 +488,13 @@ function buildGraph({ anchor, owner, ownerNode, properties, entities, people, ph
   return { anchorId: anchor, nodes, edges }
 }
 
+const equityMemo = new WeakMap()
+function equityOf(row) {
+  let e = equityMemo.get(row)
+  if (!e) { e = equityTruth(row); equityMemo.set(row, e) }
+  return e
+}
+
 const KIND_LABEL = { llc: 'LLC', company: 'Company', trust: 'Trust', estate: 'Estate', institution: 'Institution', individual: 'Name on title' }
 
 /**
@@ -669,7 +682,10 @@ export async function getEntityNetwork(type, id, deps = {}) {
       portfolio: ownerRow
         ? {
           value: num(ownerRow.portfolio_total_value),
-          equity: num(ownerRow.portfolio_total_equity),
+          // portfolio_total_equity sums the vendor equity, which reads full
+          // value for every property with no loan on file. Known equity
+          // only, and only when every loaded property's equity is known.
+          equity: (() => { const d = debtSummary(properties); return d.equityKnown && d.equityKnown === properties.length ? d.totalEquity : null })(),
           loanBalance: num(ownerRow.portfolio_total_loan_balance),
           monthlyPayment: num(ownerRow.portfolio_total_loan_payment),
           annualTax: num(ownerRow.portfolio_total_tax_amount),

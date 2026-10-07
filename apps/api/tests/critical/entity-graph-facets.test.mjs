@@ -24,6 +24,7 @@ import {
   marketForSearchTerm,
   parseBrowseFilters,
   searchEntityGraph,
+  browseEntityGraph,
 } from '../../src/lib/domain/entity-graph/entity-graph-service.js'
 import {
   applyEntityGraphFieldFilters,
@@ -39,13 +40,14 @@ test('the facet WHERE is recorded from the list appliers and fully parameterised
   ])
   const { where, params } = compileFacetWhere((b) => applyEntityGraphFieldFilters(applyPropertyFilters(b, filters), resolved))
   assert.match(where, /^where /)
-  assert.match(where, /\("market" ilike \$1 or "market_region" ilike \$2\)/)
-  assert.match(where, /"property_address_state"::text = \$3/)
-  assert.match(where, /"units_count" >= \$4::numeric/)
+  assert.match(where, /^where not \("property_id" like \$1\) and /)
+  assert.match(where, /\("market" ilike \$2 or "market_region" ilike \$3\)/)
+  assert.match(where, /"property_address_state"::text = \$4/)
+  assert.match(where, /"units_count" >= \$5::numeric/)
   assert.match(where, /"rec_has_probate" is true/)
   assert.match(where, /"equity_percent" >= \$\d+::numeric and "equity_percent" <= \$\d+::numeric/)
   assert.match(where, /"property_address_county_name"::text = any\(\$\d+::text\[\]\)/)
-  assert.deepEqual(params.slice(0, 4), ['%Atlanta%', '%Atlanta%', 'GA', 2])
+  assert.deepEqual(params.slice(0, 5), ['canaryprop%', '%Atlanta%', '%Atlanta%', 'GA', 2])
   assert.ok(params.some((p) => Array.isArray(p) && p.join() === 'Fulton,DeKalb'))
   // no value is ever spliced into the SQL text
   assert.ok(!where.includes('Atlanta') && !where.includes('Fulton'))
@@ -54,7 +56,7 @@ test('the facet WHERE is recorded from the list appliers and fully parameterised
 test('an unknown builder call or an unsafe identifier is untranslatable, not guessed', () => {
   assert.throws(() => compileFacetWhere((b) => b.textSearch('x', 'y')), FacetUntranslatable)
   assert.throws(() => compileFacetWhere((b) => b.eq('market; drop table x', 'a')), FacetUntranslatable)
-  assert.throws(() => compileFacetWhere((b) => b.not('market', 'like', 'a')), FacetUntranslatable)
+  assert.throws(() => compileFacetWhere((b) => b.not('market', 'cs', 'a')), FacetUntranslatable)
 })
 
 test('grouped counts fold blanks into one "not recorded" value and cache per WHERE', async () => {
@@ -143,7 +145,7 @@ function recordingClient(rows, count) {
   const client = {
     from(table) {
       const q = {}
-      for (const op of ['select', 'or', 'ilike', 'eq', 'order', 'range', 'limit']) q[op] = (...args) => { calls.push([table, op, ...args]); return q }
+      for (const op of ['select', 'or', 'ilike', 'eq', 'not', 'order', 'range', 'limit']) q[op] = (...args) => { calls.push([table, op, ...args]); return q }
       q.then = (res, rej) => Promise.resolve({ data: rows, count, error: null }).then(res, rej)
       return q
     },
@@ -188,23 +190,24 @@ test('header KPIs are exact head counts; a failed count is null, never 0', async
       const filters = []
       const q = {
         select(col, opts) { assert.deepEqual(opts, { count: 'exact', head: true }); return q },
-        not(c, op, v) { filters.push(`${c} not ${op} ${v}`); return q },
+        not(c, op, v) { if (op !== 'like') filters.push(`${c} not ${op} ${v}`); else filters.push('notest'); return q },
         gte(c, v) { filters.push(`${c}>=${v}`); return q },
         then(res, rej) {
           seen.push(`${table}${filters.length ? `|${filters.join('&')}` : ''}`)
           if (table === 'sub_owners') return Promise.resolve({ count: null, error: { message: 'timeout' } }).then(res, rej)
-          return Promise.resolve({ count: table === 'properties' ? (filters.length ? 41533 : 176610) : 102252, error: null }).then(res, rej)
+          return Promise.resolve({ count: table === 'properties' ? (filters.length > 1 ? 41533 : 176603) : 102252, error: null }).then(res, rej)
         },
       }
       return q
     },
   }
   const k = await getEntityGraphKpis({ supabase: client })
-  assert.equal(k.properties, 176610)
+  assert.equal(k.properties, 176603)
   assert.equal(k.linkedProperties, 41533)
   assert.equal(k.entities, null)
-  assert.ok(seen.includes('master_owners|property_count>=2'))
-  assert.ok(seen.includes('master_owners|best_phone_1 not is null'))
+  assert.ok(seen.includes('master_owners|notest&property_count>=2'))
+  assert.ok(seen.includes('master_owners|notest&best_phone_1 not is null'))
+  assert.ok(seen.includes('properties|notest'), 'the universe excludes internal canary fixtures')
   assert.match(k.definitions.ownersWithPhone, /eligibility is decided at send/i)
 })
 
@@ -255,4 +258,34 @@ test('network people carry their vendor contact-matching tags verbatim', async (
   }
   const n = await getEntityNetwork('owner', 'mo1', { supabase: { from, rpc: async () => ({ data: null }) } })
   assert.deepEqual(n.people.map((p) => p.matchingTags), [['Likely Owner', 'Family'], []])
+})
+
+test('equity is known only with evidence: no loan on file is UNKNOWN, never 100%', async () => {
+  const { equityTruth, isTestPropertyId } = await import('../../src/lib/domain/entity-graph/entity-graph-truth.js')
+  assert.deepEqual(equityTruth({ estimated_value: 200000, total_loan_balance: 50000 }), { known: true, percent: 75, amount: 150000, class: 'high', rule: 'loan_and_value' })
+  // Rocky Mount: vendor equity_percent 100, loan 0, no flag → unknown
+  assert.equal(equityTruth({ estimated_value: 135000, total_loan_balance: 0, equity_percent: 100 }).known, false)
+  assert.equal(equityTruth({ estimated_value: 135000, total_loan_balance: null }).rule, 'unknown')
+  assert.equal(equityTruth({ estimated_value: 135000, total_loan_balance: 0, property_flags_text: 'Cash Buyer; Free And Clear; High Equity' }).rule, 'free_and_clear')
+  const he = equityTruth({ estimated_value: 135000, total_loan_balance: 0, property_flags_text: 'High Equity; Absentee Owner' })
+  assert.deepEqual([he.known, he.percent, he.class], [false, null, 'high'])
+  assert.equal(isTestPropertyId('canaryprop_offerauth_75060_01'), true)
+  assert.equal(isTestPropertyId('24507162'), false)
+})
+
+test('browsed property rows carry the equity truth, and test fixtures are excluded from the cohort', async () => {
+  const calls = []
+  const make = () => {
+    const q = {
+      select() { return q }, order() { return q },
+      not(c, op, v) { calls.push([c, op, v]); return q },
+      range() { return Promise.resolve({ data: [{ property_id: 'P1', property_address_full: '1 Main St', estimated_value: 135000, total_loan_balance: 0, equity_percent: 100 }], error: null }) },
+      then(resolve) { return Promise.resolve({ count: 1, error: null }).then(resolve) },
+    }
+    return q
+  }
+  const out = await browseEntityGraph({ tab: 'properties' }, { supabase: { from: () => make() }, propertySortIndexes: async () => new Set() })
+  assert.equal(out.results[0].details.equity, null)
+  assert.equal(out.results[0].details.equityRule, 'unknown')
+  assert.ok(calls.some(([c, op, v]) => c === 'property_id' && op === 'like' && v === 'canaryprop%'))
 })
