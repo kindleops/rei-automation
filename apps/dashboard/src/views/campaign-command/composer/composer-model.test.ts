@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSegments, capacityPlan, checkSchedule, completionEstimate, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition,
   coverageMarkets, launchSentence, parseCap, withCohort, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
-  audienceFunnel, audienceFreshness, campaignSizeAllChoice, campaignSizeCheck, languageBreakdown, sendableBlocker,
+  audienceFunnel, audienceFreshness, campaignSizeAllChoice, campaignSizeCheck, languageBreakdown, sendableBlocker, sendableSecondary,
 } from './composer-model'
 import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, CoverageMarket } from './composer-types'
 import { intakeFromLocation, resolveDrop, COMPOSER_OBJECTS_MIME } from './composer-intake'
@@ -398,5 +398,26 @@ describe('sendable blocker — the true reason behind 0', () => {
   it('after the graph carries routing truth (no_sender_coverage), the graph exclusion explains the 0', () => {
     const a = audience({ eligible_in_audience: 0, exclusions: { ...audience().exclusions, no_sender_route: 2249 }, build: { ...audience().build, ready: 0, sendable_now: 0, no_sendable_number: 0, sender_markets: [] } })
     expect(sendableBlocker(a)?.text).toBe('0 sendable · 2,249 without a sender route · no sending number in their market — add a number or enable a regional pool')
+  })
+})
+
+describe('sendable today is the headline; no-route sellers never take send-limit slots (2026-10-07)', () => {
+  it('reads the router-before-limit count from the server and states it under the headline', () => {
+    const a = audience({ build: { ...audience().build, ready: 783, sendable_now: 783, no_sendable_number: 0, no_sender_route_recipients: 622 } })
+    expect(eligibleOf(a)).toBe(783)
+    expect(sendableSecondary(a)).toBe('783 ready · 622 held: no sender route')
+    expect(buildSegments(a).find((s) => s.key === 'no_route')?.count).toBe(622)
+  })
+  it('falls back to the in-build no-route count for an older server, and says nothing extra when everyone routes', () => {
+    const old = audience({ build: { ...audience().build, ready: 783, sendable_now: 159, no_sendable_number: 624 } })
+    expect(sendableSecondary(old)).toBe('783 ready · 624 held: no sender route')
+    expect(sendableSecondary(audience())).toBe('737 ready')
+    expect(sendableSecondary(null)).toBeNull()
+  })
+  it('the whole-cohort count carries the same field through withCohort', () => {
+    const cohort = { ok: true, at: '', queue_eligible_in_audience: 4345, rows_read: 4345, capped_by_build_limit: false, build_limit: 25000, recipients: 4000, duplicates_collapsed: 345, ready: 3800, held: 200, held_by_reason: {}, sendable_now: 3178, no_sendable_number: 622, no_sender_route_recipients: 622, sender_markets: [], ready_by_zone: {}, ready_by_market: {}, timings_ms: { read: 1, total: 2 } } as ComposerCohort
+    const merged = withCohort(audience(), cohort)
+    expect(merged?.build.no_sender_route_recipients).toBe(622)
+    expect(sendableSecondary(merged)).toBe('3,800 ready · 622 held: no sender route')
   })
 })

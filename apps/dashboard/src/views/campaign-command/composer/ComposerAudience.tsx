@@ -7,7 +7,7 @@ import { loadFieldOptionValues, type FieldOptionValues } from '../field-option-v
 import { FilterEffectsPanel } from '../FilterEffectsPanel'
 import type { ComposerAudience as Audience } from './composer-types'
 import {
-  buildIsPartial, buildSegments, clauseId, eligibleOf, fmt, hasValue, heldWords, n0, sendableBlocker, serializeClauses, universeSegments,
+  buildIsPartial, buildSegments, clauseId, eligibleOf, fmt, hasValue, heldWords, n0, sendableBlocker, sendableSecondary, serializeClauses, universeSegments,
   type ComposerSource, type FilterClause, type Segment,
 } from './composer-model'
 import { dragLooksAcceptable, resolveDrop, type DropResolution } from './composer-intake'
@@ -277,6 +277,7 @@ export function AudiencePlane({
   const filterSpec = useMemo(() => serializeClauses(filters), [filters])
   const eligible = eligibleOf(audience)
   const blocker = sendableBlocker(audience)
+  const secondary = sendableSecondary(audience)
   const universe = universeSegments(audience)
   const build = buildSegments(audience)
   const partial = buildIsPartial(audience)
@@ -330,10 +331,11 @@ export function AudiencePlane({
         <>
           <div className="ccz-aud__hero">
             <div className="ccz-aud__count">
-              <span className="ccz-kicker">Eligible</span>
+              <span className="ccz-kicker">Sendable today</span>
               <div className={cx('ccz-big', loading && 'is-settling')} aria-live="polite">
                 {eligible === null ? (loading ? <LCSkeleton shape="lines" count={1} /> : '—') : <RollingCount value={eligible} />}
               </div>
+              {secondary ? <span className="ccz-muted">{secondary}</span> : null}
               <span className="ccz-muted">
                 {audience ? <>of <b>{fmt(audience.matched)}</b> matched · <b>{fmt(audience.eligible_in_audience)}</b> queue-ready in the graph</> : loading ? 'Counting…' : ''}
               </span>

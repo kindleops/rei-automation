@@ -201,7 +201,8 @@ export function buildSegments(a: ComposerAudience | null): Segment[] {
   const b = a?.build
   if (!b || !b.ok) return []
   const held = n0(b.held)
-  const noRoute = n0(b.no_sendable_number)
+  // the router's answer before the send limit when the server gives it (no-route sellers no longer take limit slots)
+  const noRoute = typeof b.no_sender_route_recipients === 'number' ? b.no_sender_route_recipients : n0(b.no_sendable_number)
   return [
     { key: 'ready', label: 'Ready', count: eligibleOf(a) ?? 0, tone: 'ok' as const, explain: 'Will be scheduled' },
     { key: 'no_route', label: 'No sender route', count: noRoute, tone: 'attn' as const, explain: 'No sendable number in their market today' },
@@ -221,6 +222,20 @@ export function eligibleOf(a: ComposerAudience | null): number | null {
   // the planner's router answered per market: sendable_now is the ready set a sender can carry
   if (typeof b.sendable_now === 'number') return Math.max(0, b.sendable_now)
   return Math.max(0, n0(b.ready) - n0(b.no_sendable_number))
+}
+
+/**
+ * The line under the "Sendable today" headline: the build's ready count and the
+ * sellers held because their market has no sender route (counted before the
+ * send limit, so they never take its slots). Null until the server answers.
+ */
+export function sendableSecondary(a: ComposerAudience | null): string | null {
+  const b = a?.build
+  if (!b || !b.ok || b.ready === null || b.ready === undefined) return null
+  const noRoute = typeof b.no_sender_route_recipients === 'number' ? b.no_sender_route_recipients : n0(b.no_sendable_number)
+  const parts = [`${fmt(n0(b.ready))} ready`]
+  if (noRoute > 0) parts.push(`${fmt(noRoute)} held: no sender route`)
+  return parts.join(' · ')
 }
 
 export type SendableBlocker = {
@@ -307,6 +322,8 @@ export function withCohort(a: ComposerAudience | null, cohort: ComposerCohort | 
       held_by_reason: cohort.held_by_reason,
       sendable_now: cohort.sendable_now,
       no_sendable_number: cohort.no_sendable_number,
+      no_sender_route_recipients: cohort.no_sender_route_recipients ?? null,
+      no_sender_route_by_market: cohort.no_sender_route_by_market ?? {},
       sender_markets: cohort.sender_markets,
       personalization: cohort.personalization ?? null,
       language_holds: cohort.language_holds ?? null,

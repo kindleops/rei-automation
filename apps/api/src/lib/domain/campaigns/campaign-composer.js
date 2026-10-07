@@ -420,6 +420,9 @@ export function composerAudienceFromPreview(preview = {}) {
       sendable_after_language: sim.sendable_after_language ?? null,
       sendable_now: num(sim.sendable_now),
       no_sendable_number: num(sim.no_sendable_number),
+      // the router's answer BEFORE the send limit (planCampaignTargetRows): no-route sellers never take limit slots
+      no_sender_route_recipients: num(sim.no_sender_route_recipients),
+      no_sender_route_by_market: obj(sim.no_sender_route_by_market),
       sender_markets: (Array.isArray(sim.sender_markets) ? sim.sender_markets : []).map((m) => ({
         market: m.market, sellers: num(m.sellers), sendable: m.sendable ?? null, route_tier: m.route_tier || null, block_reason: m.block_reason || null, summary: m.summary || null,
       })),
@@ -640,6 +643,8 @@ async function runComposerCohort(s, strategy, key, deps) {
     held_by_reason: result.held_by_reason,
     sendable_now: result.sendable_now,
     no_sendable_number: result.no_sendable_number,
+    no_sender_route_recipients: result.no_sender_route_recipients ?? null,
+    no_sender_route_by_market: result.no_sender_route_by_market || {},
     sender_markets: (result.sender_markets || []).map((m) => ({ market: m.market, sellers: m.sellers, sendable: m.sendable ?? null, route_tier: m.route_tier || null, block_reason: m.block_reason || null, summary: m.summary || null })),
     personalization: result.personalization
       ? { first_name: num(result.personalization.first_name), deed_name: num(result.personalization.deed_name), none: num(result.personalization.none) }

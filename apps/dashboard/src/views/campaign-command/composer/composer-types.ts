@@ -46,6 +46,9 @@ export type ComposerAudience = {
     held_by_reason?: Record<string, number>
     sendable_now?: number | null
     no_sendable_number?: number | null
+    /** recipients the planner's router has no sender route for, counted before the send limit (they never take limit slots) */
+    no_sender_route_recipients?: number | null
+    no_sender_route_by_market?: Record<string, number>
     sender_markets?: Array<{ market: string; sellers: number | null; sendable: boolean | null; route_tier: string | null; block_reason: string | null; summary: string | null }>
     /** greeting personalization of the ready set (whole cohort only) */
     personalization?: Personalization | null
@@ -201,6 +204,8 @@ export type ComposerCohort = {
   held_by_reason: Record<string, number>
   sendable_now: number | null
   no_sendable_number: number | null
+  no_sender_route_recipients?: number | null
+  no_sender_route_by_market?: Record<string, number>
   sender_markets: NonNullable<ComposerAudience['build']['sender_markets']>
   personalization?: Personalization | null
   language_holds?: LanguageHolds | null
