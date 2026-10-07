@@ -289,3 +289,29 @@ test('browsed property rows carry the equity truth, and test fixtures are exclud
   assert.equal(out.results[0].details.equityRule, 'unknown')
   assert.ok(calls.some(([c, op, v]) => c === 'property_id' && op === 'like' && v === 'canaryprop%'))
 })
+
+test('distress flags match WHOLE tokens (Foreclosure is not Preforeclosure), ORed within the field, ANDed with condition', async () => {
+  const { flagTokenPatterns } = await import('../../src/lib/domain/entity-graph/entity-graph-field-filters.js')
+  assert.deepEqual(flagTokenPatterns('Foreclosure'), ['Foreclosure', 'Foreclosure;%', '%; Foreclosure', '%; Foreclosure;%'])
+  const { resolved, unsupported } = resolveEntityGraphFieldFilters('properties', [
+    { field_key: 'properties.flags', operator: 'is_any_of', value: ['Vacant Home'] },
+    { field_key: 'properties.building_condition', operator: 'is_any_of', value: ['Poor', 'Unsound'] },
+  ])
+  assert.deepEqual(unsupported, [])
+  const { where, params } = compileFacetWhere((b) => applyEntityGraphFieldFilters(applyPropertyFilters(b, parseBrowseFilters({})), resolved))
+  assert.match(where, /"building_condition"::text = any\(\$2::text\[\]\) and \("property_flags_text" ilike \$3 or "property_flags_text" ilike \$4 or "property_flags_text" ilike \$5 or "property_flags_text" ilike \$6\)/)
+  assert.deepEqual(params.slice(2, 6), ['Vacant Home', 'Vacant Home;%', '%; Vacant Home', '%; Vacant Home;%'])
+})
+
+test('composition: property flags are counted per token (exact, non-additive) and a bar filters that flag', async () => {
+  const deps = {
+    facetsAvailable: () => true,
+    groupedTokenCounts: async ({ column }) => { assert.equal(column, 'property_flags_json'); return { total: 8427, tokens: [{ value: 'Vacant Home', count: 1076 }, { value: 'Tax Delinquent', count: 900 }] } },
+  }
+  const c = await buildEntityGraphComposition({ tab: 'properties', dimension: 'flags', all: '1' }, deps)
+  assert.equal(c.additive, false)
+  assert.equal(c.dimension.kind, 'signals')
+  assert.equal(c.total, 8427)
+  assert.deepEqual(c.buckets[0], { key: 'Vacant Home', label: 'Vacant Home', value: 1076, share: 1076 / 8427, filter: { field_key: 'properties.flags', operator: 'is_any_of', value: ['Vacant Home'] } })
+  assert.ok(!c.buckets.some((b) => b.key.startsWith('__')))
+})

@@ -156,7 +156,9 @@ const TEXT_OPS = Object.freeze([
 ])
 const ARRAY_OPS = Object.freeze([{ key: 'is_any_of', label: 'Includes any of' }])
 
-const OPS_BY_TYPE = { boolean: BOOL_OPS, number: NUM_OPS, date: DATE_OPS, text: TEXT_OPS, enum: TEXT_OPS, array: ARRAY_OPS }
+const FLAG_OPS = Object.freeze([{ key: 'is_any_of', label: 'Has any of' }])
+
+const OPS_BY_TYPE = { boolean: BOOL_OPS, number: NUM_OPS, date: DATE_OPS, text: TEXT_OPS, enum: TEXT_OPS, array: ARRAY_OPS, flags: FLAG_OPS }
 
 function syntheticField(domain, source, category, column, label, type, extra = {}) {
   return Object.freeze({
@@ -230,6 +232,28 @@ export const ENTITY_GRAPH_RECORD_FIELDS = Object.freeze([
   R('Buyer Crossover', 'rec_owner_buyer_basis', 'Owner↔buyer match basis', 'enum'),
 ])
 
+/**
+ * DISTRESS & CONDITION — the vendor property flags as WHOLE TOKENS.
+ *
+ * properties.property_flags_text is "Vacant Home; Tax Delinquent; …". A
+ * substring match is wrong ("Foreclosure" is inside "Preforeclosure"), so a
+ * flag matches only as a whole "; "-separated token, and several flags are
+ * ORed (any of). Owner reference 2026-10-07 (read-only, canaries excluded):
+ * Vacant Home 7,814 · Poor/Unsound 8,427 · Vacant AND Poor/Unsound 1,076.
+ */
+export const ENTITY_GRAPH_FLAG_FIELD = syntheticField('properties', 'properties', 'Distress & Condition', 'property_flags_text', 'Property flags', 'flags', {
+  key: 'properties.flags',
+  supports_options: true,
+  description: 'Vendor property flags (Vacant Home, Tax Delinquent, Tired Landlord, Preforeclosure, Probate, …) matched as whole tokens; several are ORed.',
+})
+
+/** Whole-token ilike patterns for one flag in a "; "-separated list. */
+export function flagTokenPatterns(token) {
+  const t = String(token ?? '').replace(/[^A-Za-z0-9 +\-/&']/g, '').trim()
+  if (!t) return []
+  return [t, `${t};%`, `%; ${t}`, `%; ${t};%`]
+}
+
 /** Buyer entities (public.eg_buyer_index — service-role read model over comp_private). */
 const B = (category, column, label, type, extra) => syntheticField('buyers', 'eg_buyer_index', category, column, label, type, extra)
 export const ENTITY_GRAPH_BUYER_FIELDS = Object.freeze([
@@ -263,7 +287,7 @@ export const ENTITY_GRAPH_BUYER_FIELDS = Object.freeze([
   B('Identity', 'confidence', 'Identity confidence', 'number', { format: 'share' }),
 ])
 
-const SYNTHETIC_BY_KEY = new Map([...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_BUYER_FIELDS].map((field) => [field.key, field]))
+const SYNTHETIC_BY_KEY = new Map([...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_BUYER_FIELDS, ENTITY_GRAPH_FLAG_FIELD].map((field) => [field.key, field]))
 
 export const ENTITY_GRAPH_FILTERABLE_TABS = Object.freeze(Object.keys(ENTITY_GRAPH_FILTER_SOURCE_BY_TAB))
 
@@ -284,7 +308,7 @@ export function getEntityGraphFilterFields(tab) {
   const catalog = CAMPAIGN_FIELD_CATALOG
     .filter((field) => field.source_table_or_view === source && field.filterable && !ENTITY_GRAPH_WITHHELD_FIELDS.has(field.key))
     .map(decorate)
-  return source === 'properties' ? [...catalog, ...ENTITY_GRAPH_RECORD_FIELDS] : catalog
+  return source === 'properties' ? [ENTITY_GRAPH_FLAG_FIELD, ...catalog, ...ENTITY_GRAPH_RECORD_FIELDS] : catalog
 }
 
 function lookupField(fieldKey) {
@@ -435,8 +459,14 @@ export function applyEntityGraphFieldFilters(query, resolved = []) {
   // Array columns (buyer geography, lien categories) are an OVERLAP test; the
   // shared compiler has no array type, so they are applied here directly.
   const arrays = resolved.filter((entry) => entry.fieldDefinition?.type === 'array')
-  const scalar = resolved.filter((entry) => entry.fieldDefinition?.type !== 'array')
+  const flags = resolved.filter((entry) => entry.fieldDefinition?.type === 'flags')
+  const scalar = resolved.filter((entry) => entry.fieldDefinition?.type !== 'array' && entry.fieldDefinition?.type !== 'flags')
   let next = scalar.length ? applySupabaseFilters(query, scalar) : query
+  for (const entry of flags) {
+    const values = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(Boolean)
+    const parts = values.flatMap((v) => flagTokenPatterns(v)).map((pattern) => `${entry.source_column}.ilike.${pattern}`)
+    if (parts.length) next = next.or(parts.join(','))
+  }
   for (const entry of arrays) {
     const values = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(Boolean)
     if (values.length) next = next.overlaps(entry.source_column, values)

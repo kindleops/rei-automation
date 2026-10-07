@@ -35,7 +35,7 @@ import { fetchComposition, type Composition } from '../../../domain/entity-graph
 import { fieldFiltersToApiParams } from '../../../domain/entity-graph/entity-graph-workspace-state'
 import { PRESETS, presetActive, togglePreset } from '../mobile/entity-graph-presets'
 import { tabForScope, type EntityScope } from '../mobile/entity-graph-mobile-format'
-import { DESK_FACETS, facetValues, filtersExcept, fmtCount, toggleFacetValue, type DeskFacet as Facet } from './desk-model'
+import { DESK_DISTRESS_FACETS, DESK_DISTRESS_TOGGLES, DESK_FACETS, facetValues, filtersExcept, fmtCount, toggleFacetValue, type DeskFacet as Facet } from './desk-model'
 
 type Props = {
   scope: EntityScope
@@ -57,11 +57,14 @@ export function DeskFilterRail({ scope, filters, onChange }: Props) {
   }, [tab])
 
   const facets = useMemo(() => DESK_FACETS[scope] ?? [], [scope])
-  const facetKeys = useMemo(() => new Set(facets.map((f) => f.fieldKey)), [facets])
+  const distress = scope === 'properties'
+  const facetKeys = useMemo(() => new Set([...facets, ...(distress ? DESK_DISTRESS_FACETS : [])].map((f) => f.fieldKey)), [facets, distress])
+  const sameFilter = (a: EntityGraphFieldFilter, b: EntityGraphFieldFilter) => a.field_key === b.field_key && a.operator === b.operator && JSON.stringify(a.value ?? null) === JSON.stringify(b.value ?? null)
+  const isToggle = (f: EntityGraphFieldFilter) => distress && DESK_DISTRESS_TOGGLES.some((t) => sameFilter(t.filter, f))
   const presets = PRESETS[scope] ?? []
   const isPreset = (f: EntityGraphFieldFilter) => presets.some((g) => g.presets.some((p) => p.filter.field_key === f.field_key && p.filter.operator === f.operator && JSON.stringify(p.filter.value ?? null) === JSON.stringify(f.value ?? null)))
   const isFacet = (f: EntityGraphFieldFilter) => facetKeys.has(f.field_key) && f.operator === 'is_any_of'
-  const custom = filters.filter((f) => !isPreset(f) && !isFacet(f))
+  const custom = filters.filter((f) => !isPreset(f) && !isFacet(f) && !isToggle(f))
 
   // Field drafts: edited locally, applied together.
   const [draft, setDraft] = useState<{ base: string; rows: EntityGraphFieldFilter[] } | null>(null)
@@ -70,7 +73,7 @@ export function DeskFilterRail({ scope, filters, onChange }: Props) {
   const dirty = Boolean(draft && draft.base === customSig && JSON.stringify(completeFieldFilters(draft.rows)) !== customSig)
   const setRows = (next: EntityGraphFieldFilter[]) => setDraft({ base: customSig, rows: next })
   const apply = () => {
-    onChange([...filters.filter((f) => isPreset(f) || isFacet(f)), ...completeFieldFilters(rows)])
+    onChange([...filters.filter((f) => isPreset(f) || isFacet(f) || isToggle(f)), ...completeFieldFilters(rows)])
     setDraft(null)
   }
 
@@ -85,7 +88,7 @@ export function DeskFilterRail({ scope, filters, onChange }: Props) {
   const label = (f: EntityGraphFieldFilter) => {
     const field = findCatalogField(catalog, f.field_key)
     if (isFacet(f)) {
-      const facet = facets.find((x) => x.fieldKey === f.field_key)
+      const facet = [...facets, ...DESK_DISTRESS_FACETS].find((x) => x.fieldKey === f.field_key)
       const vals = Array.isArray(f.value) ? f.value.map(String) : []
       return `${facet?.label ?? field?.label ?? f.field_key}: ${vals.length > 2 ? `${vals.slice(0, 2).join(', ')} +${vals.length - 2}` : vals.join(', ')}`
     }
@@ -105,6 +108,26 @@ export function DeskFilterRail({ scope, filters, onChange }: Props) {
             <LCChip key={`${f.field_key}:${i}`} value={label(f)} onRemove={() => onChange(filters.filter((_, j) => j !== i))} />
           ))}
         </div>
+      ) : null}
+
+      {distress ? (
+        <section className="egdk-rail__sec" aria-label="Distress and condition">
+          <span className="egdk-rail__label">Distress & condition</span>
+          {DESK_DISTRESS_FACETS.map((facet) => (
+            <FacetSection key={`distress:${facet.dimension}`} tab={tab} facet={facet} filters={filters} onChange={onChange} />
+          ))}
+          <div className="egdk-presets__chips egdk-distress__toggles">
+            {DESK_DISTRESS_TOGGLES.map((t) => {
+              const on = filters.some((f) => sameFilter(f, t.filter))
+              return (
+                <button key={t.key} type="button" aria-pressed={on} className={cx('egdk-preset', on && 'is-on')} onClick={() => onChange(on ? filters.filter((f) => !sameFilter(f, t.filter)) : [...filters.filter((f) => f.field_key !== t.filter.field_key), t.filter])}>
+                  {on ? <Icon name="check" size={11} /> : null}{t.label}
+                </button>
+              )
+            })}
+          </div>
+          <p className="egdk-facet__foot">Any of within a list · all lists together</p>
+        </section>
       ) : null}
 
       {facets.length ? (

@@ -213,4 +213,29 @@ export async function groupedFacetCounts({ source, column, applyFilters = (b) =>
   return rows
 }
 
+/**
+ * Exact count of every TOKEN of a jsonb array column (property flags) in the
+ * cohort, plus the cohort size. Tokens are not exclusive — a property carries
+ * several — so the counts do not add up to the total (callers say so).
+ */
+export async function groupedTokenCounts({ source, column, applyFilters = (b) => b, query = queryWithTimeout, timeoutMs = 25_000, now = Date.now() }) {
+  const { where, params } = compileFacetWhere(applyFilters)
+  const col = ident(column)
+  const sql = `select u.v as value, count(*)::bigint as n from public.${ident(source)} cross join lateral jsonb_array_elements_text(case when jsonb_typeof(${col}) = 'array' then ${col} else '[]'::jsonb end) as u(v) ${where} group by 1`
+  const totalSql = `select count(*)::bigint as n from public.${ident(source)} ${where}`
+  const key = `${sql}|${JSON.stringify(params)}`
+  const hit = cache.get(key)
+  if (hit && now - hit.at < CACHE_TTL_MS) return hit.rows
+  const [grouped, counted] = await Promise.all([query(sql, params, timeoutMs), query(totalSql, params, timeoutMs)])
+  const folded = new Map()
+  for (const row of grouped?.rows || []) {
+    const value = String(row.value ?? '').trim()
+    if (value) folded.set(value, (folded.get(value) || 0) + Number(row.n || 0))
+  }
+  const rows = { tokens: [...folded.entries()].map(([value, count]) => ({ value, count })), total: Number(counted?.rows?.[0]?.n ?? 0) }
+  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value)
+  cache.set(key, { at: now, rows })
+  return rows
+}
+
 export const __facetCacheTest = { reset: () => cache.clear() }
