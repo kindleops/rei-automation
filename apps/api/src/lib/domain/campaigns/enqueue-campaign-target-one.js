@@ -47,6 +47,7 @@
  */
 
 import { BLOCKING_CONTACTABILITY } from '@/lib/domain/lead-state/universal-lead-state-registry.js'
+import { evaluatePropertyTouchHold, propertyTouchHoldMode, PROPERTY_TOUCH_HOLD_REASON } from '@/lib/domain/campaigns/contact-history-truths.js'
 import { withDerivedSentToday } from '@/lib/domain/delivery/sender-sent-today.js'
 import { evaluateOutboundNumberEligibility } from '@/lib/supabase/sms-engine.js'
 import {
@@ -183,6 +184,7 @@ export const ENQUEUE_REASON = {
   AUTOMATION_SUPPRESSED: 'automation_suppression_active',
   THREAD_SUPPRESSED: 'recipient_thread_suppressed',
   PRIOR_CONTACT: 'prior_contact_exists',
+  PROPERTY_PRIOR_TOUCH: PROPERTY_TOUCH_HOLD_REASON,
   ALREADY_QUEUED: 'already_queued',
   INVALID_RECIPIENT: 'invalid_recipient_number',
   NO_SENDER: 'no_eligible_sender',
@@ -583,6 +585,39 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
     return fail(ENQUEUE_REASON.PRIOR_CONTACT, `${contactRows.length} prior row(s)`)
   }
 
+  // ── 6b. Property-level touch (§61–62, flag CAMPAIGN_PROPERTY_TOUCH_HOLD) ──
+  // The phone check above is per NUMBER: a property already opened on phone A
+  // passed it on phone B. An opener is held unless the new phone is proven to
+  // be a genuinely different person. Follow-ups are never held here.
+  // Default OFF; "shadow" evaluates and stamps the verdict on the row only.
+  let propertyTouchShadow = null
+  const touchMode = propertyTouchHoldMode(deps.env || process.env)
+  const isOpener = (Number(target.touch_number) || 1) <= 1
+  if (touchMode !== 'off' && isOpener && clean(target.property_id)) {
+    const { data: propertyRows, error: propertyErr } = await supabase
+      .from('send_queue')
+      .select('id, queue_status, sent_at, to_phone_number, prospect_id, property_id, metadata')
+      .eq('property_id', target.property_id)
+      .in('queue_status', [...LIVE_QUEUE_STATUSES, ...CONSUMED_QUEUE_STATUSES, ...AMBIGUOUS_CANDIDATE_STATUSES])
+      .range(0, 199)
+    if (propertyErr) throw propertyErr
+    const touchRows = (propertyRows || []).filter(
+      (r) => !AMBIGUOUS_CANDIDATE_STATUSES.includes(clean(r.queue_status)) || isAmbiguousSendRow(r)
+    )
+    const verdict = evaluatePropertyTouchHold({
+      prior_rows: touchRows.map((r) => ({ ...r, queue_status: AMBIGUOUS_CANDIDATE_STATUSES.includes(clean(r.queue_status)) ? 'sent' : r.queue_status })),
+      property_id: target.property_id,
+      person_key: target.prospect_id || null,
+      phone: recipient,
+      is_opener: true,
+      phone_owned_by_person: target.metadata?.phone_owned_by_person === true,
+    })
+    if (verdict.hold && touchMode === 'on') {
+      return fail(ENQUEUE_REASON.PROPERTY_PRIOR_TOUCH, `${verdict.why}; ${verdict.truths.counts.property} prior send(s) about the property`)
+    }
+    propertyTouchShadow = { mode: touchMode, hold: verdict.hold, why: verdict.why, release: verdict.release, counts: verdict.truths.counts }
+  }
+
 
   // ── 7. Template + governance (reuses #91) ───────────────────────────────
   const metadata = target.metadata && typeof target.metadata === 'object' && !Array.isArray(target.metadata)
@@ -822,6 +857,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
         campaign_target_id: requestedId,
       },
       no_direct_provider_send: true,
+      ...(propertyTouchShadow ? { property_touch_hold: propertyTouchShadow } : {}),
       // Provenance for the pinned window exemption. Present ONLY on the one
       // exempted row. The raw authorization token is never recorded.
       ...(windowExemption?.allowed
