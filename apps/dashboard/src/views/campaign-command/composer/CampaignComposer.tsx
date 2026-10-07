@@ -24,6 +24,7 @@ import { AudiencePlane, type QuickSource } from './ComposerAudience'
 import { DeliveryBody, ScheduleBody, StrategyBody } from './ComposerPlanes'
 import { reasonWords } from './composer-format'
 import { Plane } from './ComposerParts'
+import { ComposerIntelligence } from '../intelligence/ComposerIntelligence'
 import './composer.css'
 
 /**
@@ -589,6 +590,8 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
             <ReadinessList checks={readiness.checks} onFocus={focusLayer} />
           </Plane>
         </div>
+        {/* Seller intelligence (Acquisition OS §19/§69/§79) — read-only; renders nothing while SELLER_SCREENER is off */}
+        <ComposerIntelligence spec={{ filters: spec.filters, template_use_case: spec.template_use_case }} specKey={cohortKey} active={hasAudience && cohortReady} />
       </div>
 
       <footer className={cx('ccz-dock', `is-${readiness.state}`)}>
