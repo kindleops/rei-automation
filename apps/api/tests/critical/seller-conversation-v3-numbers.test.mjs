@@ -119,6 +119,9 @@ test("cues still decide what a number IS: rent, tax, payoff, refusal, phone, add
   assert.equal(v3("For 327 Pennsylvania alone 130,000").asking_price?.value, 130_000);
   assert.equal(v3("built in 1985").asking_price, null);
   assert.equal(v3("65").asking_price, null, "two digits stay ambiguous");
+  // A non-round bare 5-digit number is a ZIP: "Fort Worth 76015 … $167" is $167,000 (live 2026-10-07).
+  assert.equal(v3("I have another as well 2 Oak St north Fort Worth 76015 \n3/1 $167 let me know").asking_price?.value, 167_000);
+  assert.equal(v3("95000").asking_price?.value, 95_000);
 });
 
 test("the canonical money path (classifier + orchestrator) commits a v3 3-digit price", () => {
