@@ -11,12 +11,13 @@
  * eligibility: suppression, windows and identity are decided at send time.
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
+import { excludeTestOwners, excludeTestProperties } from './entity-graph-truth.js'
 
 const TTL_MS = 10 * 60_000
 let cached = null
 
 export const ENTITY_GRAPH_KPI_DEFINITIONS = Object.freeze({
-  properties: 'Every property record in the universe.',
+  properties: 'Every property record in the universe (internal canary fixtures excluded).',
   linkedProperties: 'Properties linked to a resolved master owner (properties.master_owner_id).',
   owners: 'Resolved master owners.',
   portfolioOwners: 'Owners holding two or more properties (master_owners.property_count ≥ 2).',
@@ -39,12 +40,13 @@ export async function getEntityGraphKpis(deps = {}) {
   const now = deps.now ?? Date.now()
   if (!deps.supabase && cached && now - cached.at < TTL_MS) return cached.data
   const [properties, linkedProperties, owners, portfolioOwners, entities, ownersWithPhone] = await Promise.all([
-    exactCount(supabase, 'properties', 'property_id'),
-    exactCount(supabase, 'properties', 'property_id', (q) => q.not('master_owner_id', 'is', null)),
-    exactCount(supabase, 'master_owners', 'master_owner_id'),
-    exactCount(supabase, 'master_owners', 'master_owner_id', (q) => q.gte('property_count', 2)),
+    // Internal canary fixtures are not the universe (entity-graph-truth.js).
+    exactCount(supabase, 'properties', 'property_id', (q) => excludeTestProperties(q)),
+    exactCount(supabase, 'properties', 'property_id', (q) => excludeTestProperties(q).not('master_owner_id', 'is', null)),
+    exactCount(supabase, 'master_owners', 'master_owner_id', (q) => excludeTestOwners(q)),
+    exactCount(supabase, 'master_owners', 'master_owner_id', (q) => excludeTestOwners(q).gte('property_count', 2)),
     exactCount(supabase, 'sub_owners', 'sub_owner_id'),
-    exactCount(supabase, 'master_owners', 'master_owner_id', (q) => q.not('best_phone_1', 'is', null)),
+    exactCount(supabase, 'master_owners', 'master_owner_id', (q) => excludeTestOwners(q).not('best_phone_1', 'is', null)),
   ])
   const data = {
     properties,

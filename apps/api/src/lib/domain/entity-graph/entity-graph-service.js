@@ -31,6 +31,7 @@ import {
   keysetSupported,
 } from './entity-graph-property-sort.js'
 import { facetsAvailable, groupedFacetCounts } from './entity-graph-facet-sql.js'
+import { equityTruth, excludeTestOwners, excludeTestProperties } from './entity-graph-truth.js'
 
 const DEFAULT_PAGE_SIZE = 25
 const MAX_PAGE_SIZE = 100
@@ -184,7 +185,7 @@ async function searchProperties(supabase, query, limit) {
     // the fields show").
     const predicate = await propertySearchPredicateWithMarket(q)
     const { data } = await predicate
-      .apply(supabase.from(PROPERTY_BROWSE_SOURCE).select(PROPERTY_BROWSE_SELECT))
+      .apply(excludeTestProperties(supabase.from(PROPERTY_BROWSE_SOURCE).select(PROPERTY_BROWSE_SELECT)))
       .limit(limit)
     for (const row of data || []) {
       const exact = lower(row.property_id) === lower(q)
@@ -194,9 +195,9 @@ async function searchProperties(supabase, query, limit) {
 
   if (results.length < limit && addressQ.length > 4) {
     const like = `%${addressQ}%`
-    const { data } = await supabase
+    const { data } = await excludeTestProperties(supabase
       .from(PROPERTY_BROWSE_SOURCE)
-      .select(PROPERTY_BROWSE_SELECT)
+      .select(PROPERTY_BROWSE_SELECT))
       .ilike('property_address_full', like)
       .limit(limit)
     for (const row of data || []) results.push(propertyToResult(row, 700))
@@ -488,6 +489,9 @@ const TAB_ENTITY_TYPES = {
 
 function propertyToResult(row, score = 100) {
   const summary = formatPropertySummary(row)
+  // equity_known_v1: the vendor equity_percent reads 100% whenever no loan is
+  // on file. Only evidence makes equity known (entity-graph-truth.js).
+  const equity = equityTruth(row)
   return buildSearchResult({
     entityType: 'property',
     entityId: row.property_id,
@@ -508,7 +512,9 @@ function propertyToResult(row, score = 100) {
       assetType: summary.assetType,
       units: summary.units,
       value: summary.value,
-      equity: summary.equity,
+      equity: equity.known ? equity.percent : null,
+      equityClass: equity.class,
+      equityRule: equity.rule,
       flagCount: summary.flagCount,
       flags: summary.flags,
       ownerName: clean(row.owner_name) || undefined,
@@ -896,10 +902,13 @@ export function parseBrowseFilters(params = {}) {
     language: clean(params.language || params.eg_language),
     county: clean(params.county || params.eg_county),
     entityType: clean(params.entity_type || params.entityType || params.eg_entity_type),
+    // Internal canary fixtures are excluded unless QA asks for them.
+    includeTest: ['1', 'true', 'yes'].includes(lower(params.include_test)),
   }
 }
 
 export function applyPropertyFilters(query, filters) {
+  query = excludeTestProperties(query, { includeTest: Boolean(filters?.includeTest) })
   if (filters.market) {
     const like = `%${filters.market}%`
     query = query.or(`market.ilike.${like},market_region.ilike.${like}`)
@@ -928,6 +937,7 @@ export function applyBuyerFilters(query, filters) {
 }
 
 function applyOwnerFilters(query, filters) {
+  query = excludeTestOwners(query, { includeTest: Boolean(filters?.includeTest) })
   if (filters.ownerType) query = query.ilike('owner_type_guess', `%${filters.ownerType}%`)
   if (filters.priorityTier) query = query.ilike('priority_tier', `%${filters.priorityTier}%`)
   /**
@@ -1591,8 +1601,8 @@ export async function getEntityGraphCounts(deps = {}) {
     zips,
     buyers,
   ] = await Promise.all([
-    supabase.from('properties').select('property_id', { count: 'exact', head: true }),
-    supabase.from('master_owners').select('master_owner_id', { count: 'exact', head: true }),
+    excludeTestProperties(supabase.from('properties').select('property_id', { count: 'exact', head: true })),
+    excludeTestOwners(supabase.from('master_owners').select('master_owner_id', { count: 'exact', head: true })),
     supabase.from('prospects').select('prospect_id', { count: 'exact', head: true }),
     supabase.from('sub_owners').select('sub_owner_id', { count: 'exact', head: true }),
     supabase.from('phones').select('phone_id', { count: 'exact', head: true }),
@@ -1779,7 +1789,7 @@ export async function searchEntityGraph(params = {}, deps = {}) {
      * same class of lie as a chip that disagrees with its list.)
      */
     let dbQuery = predicate.apply(
-      supabase.from(PROPERTY_BROWSE_SOURCE).select(PROPERTY_BROWSE_SELECT, { count: 'exact' }),
+      excludeTestProperties(supabase.from(PROPERTY_BROWSE_SOURCE).select(PROPERTY_BROWSE_SELECT, { count: 'exact' }), { includeTest: ['1', 'true'].includes(lower(params.include_test)) }),
     )
       .order('estimated_value', { ascending: false, nullsFirst: false })
       .range(cursor, cursor + pageSize - 1)
@@ -1794,9 +1804,9 @@ export async function searchEntityGraph(params = {}, deps = {}) {
 
   if (tab === 'master_owners') {
     const like = `%${query}%`
-    let ownerQuery = supabase
+    let ownerQuery = excludeTestOwners(supabase
       .from('master_owners')
-      .select(OWNER_SUMMARY_SELECT, { count: 'exact' })
+      .select(OWNER_SUMMARY_SELECT, { count: 'exact' }), { includeTest: ['1', 'true'].includes(lower(params.include_test)) })
     ownerQuery = looksLikeEntityId(query)
       ? ownerQuery.eq('master_owner_id', query)
       : ownerQuery.ilike('display_name', like)
