@@ -6,16 +6,13 @@
  * properties → people/phones/emails → entities → seller.* records); a value
  * the record does not carry says "not recorded", never a default.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { LCButton, LCError, LCInspector, LCInspectorSection, LCSkeleton, cx } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
 import type { EntityGraphAction, UniversalEntityContext } from '../../../domain/entity-graph/entity-graph.types'
 import { EMPTY_UNIVERSAL_ENTITY_CONTEXT } from '../../../domain/entity-graph/universal-entity-context'
 import { buildEntityGraphActions } from '../../../domain/entity-graph/entity-graph-actions'
 import { openInboxThread } from '../../mobile/mobile-inbox-bridge'
-import { readWhyTargeted } from '../../../views/campaign-command/intelligence/intelligence-api'
-import { SellerIntelligenceBody } from '../../../views/campaign-command/intelligence/SellerIntelligencePanel'
-import type { WhyTargetedProperty } from '../../../views/campaign-command/intelligence/intelligence-types'
 import { REASON_LABEL, type EntityNetwork, type NetworkProperty } from '../console/entity-network-api'
 import { DeskGraph } from './DeskGraph'
 import { fmtCount, fmtMoney, matchingTagTone, type NetworkAnchor } from './desk-model'
@@ -351,7 +348,6 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
         )}
       </LCInspectorSection>
 
-      {anchorProperty ? <SellerSituation propertyId={anchorProperty.id} /> : null}
     </div>
   )
 }
@@ -373,36 +369,5 @@ function ContactLine({ icon, value, meta, warn }: { icon: 'phone' | 'mail'; valu
       <span className="egdk-contact__value">{value}</span>
       <small>{meta}</small>
     </div>
-  )
-}
-
-/**
- * Seller-situation evidence (Acquisition OS, SELLER_SCREENER). While the
- * server flag is off the read answers `seller_screener_disabled` and this
- * section renders nothing at all — the inspector does not advertise it.
- */
-function SellerSituation({ propertyId }: { propertyId: string }) {
-  const [state, setState] = useState<{ id: string; kind: 'off' | 'ok' | 'missing' | 'error'; data?: WhyTargetedProperty; fixture?: boolean; message?: string } | null>(null)
-  const [nonce, setNonce] = useState(0)
-  useEffect(() => {
-    const ctl = new AbortController()
-    void readWhyTargeted([propertyId], ctl.signal).then((r) => {
-      if (ctl.signal.aborted) return
-      if (r.ok) {
-        const p = r.data.properties.find((x) => x.property_id === propertyId)
-        setState(p ? { id: propertyId, kind: 'ok', data: p, fixture: r.data.fixture === true } : { id: propertyId, kind: 'missing' })
-      } else if (r.off) setState({ id: propertyId, kind: 'off' })
-      else setState({ id: propertyId, kind: 'error', message: r.message })
-    })
-    return () => ctl.abort()
-  }, [propertyId, nonce])
-  const current = state?.id === propertyId ? state : null
-  if (!current || current.kind === 'off') return null
-  return (
-    <LCInspectorSection title="Seller situation">
-      {current.kind === 'ok' && current.data ? <SellerIntelligenceBody p={current.data} fixture={current.fixture} />
-        : current.kind === 'missing' ? <None>Not in a campaign audience, so there is no seller-situation read for it.</None>
-          : <LCError what="Seller intelligence didn’t load" detail={current.message} onRetry={() => setNonce((n) => n + 1)} compact />}
-    </LCInspectorSection>
   )
 }
