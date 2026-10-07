@@ -420,7 +420,25 @@ function normalizeRowForTable(
       row.property_id = String(row.id);
     }
 
-    if (!row.master_owner_id) row.master_owner_id = null;
+    // Do NOT coerce a missing master_owner_id to null.
+    //
+    // This upsert runs with { onConflict: "upsert_key", ignoreDuplicates: false }
+    // — update-on-conflict — so writing null does not merely leave the link
+    // unset, it ERASES an existing one. Production evidence 2026-08-17: of the
+    // April cohort's 116,217 properties, master_owners still claims 116,054 but
+    // only 33,701 retained a reverse pointer.
+    //
+    // master_owners.joined_property_ids_json is the authoritative side;
+    // properties.master_owner_id is a denormalised reverse pointer and must
+    // never contradict it through an omission.
+    //
+    // Deleting the key keeps the column out of this row's payload. This alone is
+    // NOT sufficient — PostgREST upserts a batch using the union of keys across
+    // rows, so one row carrying the column reintroduces null for rows omitting
+    // it. The durable guarantee is the BEFORE UPDATE trigger in
+    // supabase/migrations/20260818000000_preserve_property_master_owner_reverse_pointer.sql;
+    // this removes the foot-gun, the trigger holds the invariant.
+    if (!row.master_owner_id) delete row.master_owner_id;
     if (!row.master_key) row.master_key = null;
   }
 
