@@ -17,16 +17,18 @@
  *                         --max-proof-age-days (the owner's proof text) — for a new number
  *                         also metadata.onboarding_stage = 'inbound_verified'
  *   not_operator_blocked  not on sms_blocked_sender_numbers (routing never overrides a block)
- * Applies to Indianapolis/Tampa (new) and to Atlanta 2/3 (existing, paused; their campaign
- * assignment was disputed: API CHM4NL2 vs the owner's paste / local hold "not linked").
- * Daily limit on activation: 25, fixed (owner decision). No warm-up algorithm.
+ * Applies to Chicago +18722547122 (new, r3), Indianapolis/Tampa (done 2026-10-03) and to
+ * Atlanta 2/3 (their campaign assignment was disputed: API CHM4NL2 vs the owner's paste /
+ * local hold "not linked").
+ * Daily limit on activation: 800, the fleet standard (= system_control queue_per_number_cap).
+ * The owner REJECTED 25/day on 2026-10-03 ("far too low"); never activate lower.
  */
 import { readOnlyClient, readTextgridInventory, arg, writeOut } from "./_readonly.mjs";
 import { normalizeE164 } from "../../../src/lib/domain/routing/sender-routing/sender-routing-policy.js";
 import { EXPECTED_CAMPAIGN_ID, EXPECTED_INBOUND_WEBHOOK } from "../../../src/lib/domain/routing/sender-routing/sender-inventory-reconciliation.js";
 
-const ACTIVATION_DAILY_LIMIT = 25;
-const POOL_OF = { "+13173494612": "indianapolis", "+18138947553": "tampa", "+14702936385": "atlanta", "+14702936402": "atlanta" };
+const ACTIVATION_DAILY_LIMIT = 800;
+const POOL_OF = { "+18722547122": "chicago", "+13149268488": "st_louis", "+13173494612": "indianapolis", "+18138947553": "tampa", "+14702936385": "atlanta", "+14702936402": "atlanta" };
 
 const number = normalizeE164(arg("number"));
 const maxAgeDays = Number(arg("max-proof-age-days", 7));
