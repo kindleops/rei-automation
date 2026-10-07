@@ -35,9 +35,11 @@ import {
 import { readGraphFunnelCounts } from '@/lib/domain/campaigns/campaign-graph-funnel.js'
 import {
   applyGraphFilter,
+  describeFilterCoverage,
   describeFilterExpansions,
   graphColumnForField,
   INAPPLICABLE_REASONS,
+  loadGraphColumnCoverage,
   loadGraphColumnPopulation,
   graphPlanColumns,
   resolveGraphFilterPlan,
@@ -3712,6 +3714,19 @@ async function resolveGraphColumnPopulation(deps = {}, catalogFilters = null) {
   return loadGraphColumnPopulation(defaultSupabase, columns ? { columns } : {}).catch(() => null)
 }
 
+/**
+ * Share of the audience with a value, per column the request filters on (same
+ * cached planner estimates as the population probe). Same injection rule:
+ * an injected client gets no probe unless `graphColumnCoverage` is passed.
+ */
+async function resolveGraphColumnCoverage(deps = {}, catalogFilters = null) {
+  if (deps.graphColumnCoverage instanceof Map) return deps.graphColumnCoverage
+  if (deps.supabase) return null
+  const columns = catalogFilters ? graphPlanColumns(catalogFilters.supported || []) : null
+  if (columns && !columns.length) return null
+  return loadGraphColumnCoverage(defaultSupabase, columns ? { columns } : {}).catch(() => null)
+}
+
 function applyInFilter(query, column, values, normalizer = clean) {
   const safeValues = asArray(values).map(normalizer).filter(Boolean)
   if (!safeValues.length) return query
@@ -4547,6 +4562,7 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     ...baseOptions,
     catalog_filters: resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters, { population }),
   }
+  const filterCoverage = await resolveGraphColumnCoverage(deps, options.catalog_filters)
   options.target_limit = Math.max(1, Math.min(options.target_limit || CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT, CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT))
   const buildLimit = resolvePreviewBuildLimit(input, campaign)
 
@@ -4833,7 +4849,12 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
      * collapse and the review/identity holds).
      */
     build_simulation: buildSimulation,
-    filter_notes: describeFilterExpansions(options.catalog_filters.supported || []),
+    filter_notes: [
+      ...describeFilterExpansions(options.catalog_filters.supported || []),
+      // "Gender is known for 1.1% of the campaign audience …" — a sparse column
+      // is still applied (owner policy), but its reach is said out loud.
+      ...describeFilterCoverage(options.catalog_filters.supported || [], filterCoverage),
+    ],
     inapplicable_filters: (options.catalog_filters.inapplicable || []).map((filter) => ({
       field_key: filter.field_key,
       label: filter.label,

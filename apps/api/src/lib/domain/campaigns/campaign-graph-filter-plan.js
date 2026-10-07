@@ -377,7 +377,10 @@ const UNKNOWN = Symbol('unknown')
 const columnCache = new Map()
 const columnInFlight = new Map()
 
-/** One column's planner-estimate probe (see loadGraphColumnPopulation). */
+/**
+ * One column's planner-estimate probe (see loadGraphColumnPopulation):
+ * { verdict, known } — known is the planner's estimate of rows with a value.
+ */
 async function probeGraphColumn(supabase, column) {
   try {
     const { count, error } = await supabase
@@ -391,14 +394,14 @@ async function probeGraphColumn(supabase, column) {
       const confirm = isMissingColumnError(error)
         ? { error }
         : await supabase.from(CAMPAIGN_AUDIENCE_TABLE).select(column).limit(0)
-      if (confirm?.error && isMissingColumnError(confirm.error)) return COLUMN_MISSING
-      return UNKNOWN
+      if (confirm?.error && isMissingColumnError(confirm.error)) return { verdict: COLUMN_MISSING, known: null }
+      return { verdict: UNKNOWN, known: null }
     }
-    if (Number.isFinite(Number(count))) return Number(count) > 1
+    if (Number.isFinite(Number(count))) return { verdict: Number(count) > 1, known: Math.max(0, Number(count)) }
   } catch {
     // unknown stays unknown
   }
-  return UNKNOWN
+  return { verdict: UNKNOWN, known: null }
 }
 
 /**
@@ -449,7 +452,7 @@ export async function loadGraphColumnPopulation(supabase, { now = Date.now(), fo
       let flight = columnInFlight.get(column)
       if (!flight) {
         flight = probeGraphColumn(supabase, column)
-          .then((verdict) => { columnCache.set(column, { at: now, verdict }) })
+          .then(({ verdict, known }) => { columnCache.set(column, { at: now, verdict, known }) })
           .finally(() => columnInFlight.delete(column))
         columnInFlight.set(column, flight)
       }
@@ -468,21 +471,127 @@ export async function loadGraphColumnPopulation(supabase, { now = Date.now(), fo
 export function resetGraphColumnPopulationCache() {
   columnCache.clear()
   columnInFlight.clear()
+  totalCache.at = 0
+  totalCache.total = null
+}
+
+// ── audience column COVERAGE (share of the audience with a value) ──────────
+// A column that is populated on 1% of sellers is "populated" to the probe above,
+// so a filter on it applies — and quietly returns ~1% of what the operator
+// expected. Coverage says it out loud instead (owner 2026-10-07: every prospect
+// field stays a live targeting input; its reach is reported, never hidden).
+
+const totalCache = { at: 0, total: null }
+
+async function loadGraphAudienceTotal(supabase, { now = Date.now(), force = false } = {}) {
+  if (!force && totalCache.total !== null && now - totalCache.at < POPULATION_TTL_MS) return totalCache.total
+  try {
+    const { count, error } = await supabase
+      .from(CAMPAIGN_AUDIENCE_TABLE)
+      .select('graph_id', { count: 'planned', head: true })
+      .limit(0)
+    if (!error && Number.isFinite(Number(count)) && Number(count) > 0) {
+      totalCache.at = now
+      totalCache.total = Number(count)
+      return totalCache.total
+    }
+  } catch {
+    // unknown stays unknown
+  }
+  return null
+}
+
+/**
+ * column -> { known, total, share } from the same planner estimates (statistics,
+ * not a scan; refreshed by ANALYZE, so it can trail a running backfill by minutes).
+ * Columns without a usable estimate are absent — unknown coverage is never 0%.
+ */
+export async function loadGraphColumnCoverage(supabase, { now = Date.now(), force = false, columns = null } = {}) {
+  if (!supabase) return null
+  const population = await loadGraphColumnPopulation(supabase, { now, force, columns })
+  if (!(population instanceof Map)) return null
+  const total = await loadGraphAudienceTotal(supabase, { now, force })
+  const coverage = new Map()
+  if (!total) return coverage
+  for (const column of population.keys()) {
+    const known = columnCache.get(column)?.known
+    if (!Number.isFinite(known)) continue
+    const bounded = Math.min(known, total)
+    coverage.set(column, { known: bounded, total, share: bounded / total })
+  }
+  return coverage
+}
+
+/** Fields whose reach is always stated (the prospect/demographic family). */
+function alwaysStatesCoverage(fieldKey) {
+  return clean(fieldKey).startsWith('prospects.')
+}
+
+/** Below this share any filtered column gets a coverage note. */
+export const LOW_COVERAGE_SHARE = 0.5
+
+export function formatCoverageShare(share) {
+  const pct = share * 100
+  if (pct > 0 && pct < 0.1) return '<0.1%'
+  if (pct < 10) return `${pct.toFixed(1)}%`
+  return `${Math.round(pct)}%`
+}
+
+/**
+ * One note per applied filter whose column is not known for (nearly) every seller:
+ * "Gender is known for 1.1% of the campaign audience (about 1,912 of 176,605
+ * sellers) — only those sellers can match this filter."
+ */
+export function describeFilterCoverage(filters = [], coverage = null) {
+  if (!(coverage instanceof Map) || !coverage.size) return []
+  const notes = []
+  const seen = new Set()
+  for (const filter of filters || []) {
+    const key = normalizedFieldKey(filter)
+    const column = filter.graph_column || graphColumnForField(filter)
+    if (!column || seen.has(key)) continue
+    const entry = coverage.get(column)
+    if (!entry || !Number.isFinite(entry.share)) continue
+    const always = alwaysStatesCoverage(key)
+    if (!(entry.share < LOW_COVERAGE_SHARE || (always && entry.share < 0.995))) continue
+    seen.add(key)
+    const label = filter.label || getCampaignFieldDefinition(key)?.label || key
+    const known = Math.round(entry.known).toLocaleString('en-US')
+    const total = Math.round(entry.total).toLocaleString('en-US')
+    notes.push({
+      field_key: key,
+      kind: 'coverage',
+      column,
+      known: Math.round(entry.known),
+      total: Math.round(entry.total),
+      share: Number(entry.share.toFixed(4)),
+      low: entry.share < LOW_COVERAGE_SHARE,
+      message: `${label} is known for ${formatCoverageShare(entry.share)} of the campaign audience (about ${known} of ${total} sellers) — only those sellers can match this filter.`,
+    })
+  }
+  return notes
 }
 
 /**
  * The catalog, annotated with whether each field can narrow a campaign and
  * why not. The builder disables (and explains) the fields that can't.
  */
-export function annotateCatalogFieldApplicability(fields = [], { population = null } = {}) {
+export function annotateCatalogFieldApplicability(fields = [], { population = null, coverage = null } = {}) {
   return fields.map((field) => {
     const verdict = graphFieldApplicability(field.key, { population })
+    const entry = coverage instanceof Map && verdict.column ? coverage.get(verdict.column) : null
     return {
       ...field,
       campaign_applicable: verdict.applicable,
       campaign_column: verdict.column,
       campaign_inapplicable_reason: verdict.reason,
       campaign_inapplicable_message: verdict.message,
+      ...(entry && verdict.applicable
+        ? {
+            campaign_coverage: { known: Math.round(entry.known), total: Math.round(entry.total), share: Number(entry.share.toFixed(4)) },
+            campaign_coverage_message: `Known for ${formatCoverageShare(entry.share)} of the campaign audience`,
+          }
+        : {}),
     }
   })
 }
@@ -492,14 +601,14 @@ export function annotateCatalogFieldApplicability(fields = [], { population = nu
  * the builder. `population` is the cached audience-column probe; without it
  * only the mapping decides.
  */
-export function getCampaignFieldCatalogWithApplicability({ population = null, generated_at } = {}) {
+export function getCampaignFieldCatalogWithApplicability({ population = null, coverage = null, generated_at } = {}) {
   const response = getCampaignFieldCatalogResponse(generated_at ? { generated_at } : {})
   let inapplicable = 0
   const domains = response.domains.map((domain) => ({
     ...domain,
     categories: domain.categories.map((category) => ({
       ...category,
-      fields: annotateCatalogFieldApplicability(category.fields, { population }).map((field) => {
+      fields: annotateCatalogFieldApplicability(category.fields, { population, coverage }).map((field) => {
         if (!field.campaign_applicable) inapplicable += 1
         return field
       }),
@@ -511,6 +620,7 @@ export function getCampaignFieldCatalogWithApplicability({ population = null, ge
     applicability: {
       source: CAMPAIGN_AUDIENCE_TABLE,
       population_probed: population instanceof Map,
+      coverage_probed: coverage instanceof Map && coverage.size > 0,
       inapplicable_fields: inapplicable,
     },
   }

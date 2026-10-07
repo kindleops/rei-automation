@@ -3,6 +3,7 @@ import { corsHeaders, ensureMutationAuth } from '../../_shared.js'
 import { supabase } from '@/lib/supabase/client.js'
 import {
   getCampaignFieldCatalogWithApplicability,
+  loadGraphColumnCoverage,
   loadGraphColumnPopulation,
 } from '@/lib/domain/campaigns/campaign-graph-filter-plan.js'
 
@@ -26,5 +27,8 @@ export async function GET(request) {
   // The audience-column probe is cached per process; a failure only means
   // "mapping-only" answers, never a broken catalog.
   const population = await loadGraphColumnPopulation(supabase).catch(() => null)
-  return withCors(request, getCampaignFieldCatalogWithApplicability({ population }), 200)
+  // Share of the audience with a value, per column (same cached planner
+  // estimates): a field known for 1% of sellers says so instead of looking normal.
+  const coverage = population ? await loadGraphColumnCoverage(supabase).catch(() => null) : null
+  return withCors(request, getCampaignFieldCatalogWithApplicability({ population, coverage }), 200)
 }
