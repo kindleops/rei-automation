@@ -24,6 +24,7 @@ import { detectReplyDispositionSignals, foldReplyLines } from "@/lib/domain/clas
 import { resolveSellerReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
 import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
+import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
 import {
   resolveCanonicalAskingPrice,
   isCommittedAskingPrice,
@@ -6829,7 +6830,10 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   let message = multilingual ? multilingual.canonical_text : correctKeyMisspellings(original_message);
   // A bare "?" / "???" to our message is the who-are-you question (round 8).
   if (/^\s*[?¿]{1,6}\s*$/.test(message)) message = "huh?";
-  const compliance_flag  = detectComplianceFlag(message);
+  // COMPLIANCE in every registry language (owner 2026-10-07): a confident
+  // contact-revocation phrase or whole-message STOP keyword in the ORIGINAL
+  // words is an opt-out — independent of any conversation flag.
+  const compliance_flag  = detectComplianceFlag(message) || (matchMultilingualOptOut(original_message) ? "stop_texting" : null);
   let language           = detectLanguageHeuristic(original_message, brain_item);
   // An explicit Spanish-switch request ("no hablo inglés", "en español por
   // favor") is deterministic evidence of language preference even when the
