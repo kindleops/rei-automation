@@ -30,6 +30,7 @@ const SCENES = [
   ['02-property-inspector', '/entity-graph/property/237814852'],
   ['03-owner-graph', '/entity-graph/owner/mo_c5b0124c58cd26d14eafe503?egv=graph'],
   ['04-search-atlanta', '/entity-graph?q=Atlanta'],
+  ['06-distress-by-market', `/entity-graph?ff=${encodeURIComponent(JSON.stringify([{ field_key: 'properties.flags', operator: 'is_any_of', value: ['Vacant Home'] }, { field_key: 'properties.building_condition', operator: 'is_any_of', value: ['Poor', 'Unsound'] }]))}`, 'open-market'],
   ['05-market-facet', `/entity-graph?ff=${encodeURIComponent(JSON.stringify([{ field_key: 'properties.market', operator: 'is_any_of', value: ['Atlanta, GA'] }]))}`],
 ].filter(([n]) => !ONLY || ONLY.split(',').some((o) => n.startsWith(o)))
 
@@ -110,11 +111,16 @@ for (const c of contexts) {
   await guard(page)
   const label = c.phone ? `phone-${c.theme}-390x844` : `${c.theme}-${c.W}x${c.H}`
   const scenes = c.phone ? SCENES.slice(0, 1) : SCENES
-  for (const [name, route] of scenes) {
+  for (const [name, route, mode] of scenes) {
     const row = { label, name }
     try {
       await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await settle(page)
+      if (mode === 'open-market') {
+        await page.locator('.egdk-facet__head', { hasText: /^Market/ }).first().click().catch(() => { row.mode = 'no market facet' })
+        await page.waitForTimeout(1800)
+        row.counts = await page.evaluate(() => ({ summary: document.querySelector('.egdk-head__summary')?.textContent, buckets: [...document.querySelectorAll('.egdk-facet.is-open .egdk-bucket')].slice(0, 40).map((b) => b.textContent) }))
+      }
       await page.screenshot({ path: path.join(OUT, `${TAG}-${label}-${name}.png`) })
       if (PROOF && !c.phone && name === '01-properties' && c.theme === THEMES[0] && c.W === SIZES[0][0]) row.proof = await interactionProof(page, path.join(OUT, `${TAG}-${label}`))
     } catch (e) {

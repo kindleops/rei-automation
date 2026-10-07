@@ -222,3 +222,23 @@ export const DESK_FACETS: Partial<Record<EntityScope, DeskFacet[]>> = {
     { dimension: 'kind', label: 'Company vs individual', fieldKey: 'buyers.entity_type' },
   ],
 }
+
+/**
+ * DISTRESS & CONDITION (owner 2026-10-07: "vacant AND poor/unsound, by
+ * market"). Three exact facets — property flags as whole tokens, building
+ * condition, rehab level (source values only) — and the boolean distress
+ * columns that hold data. OR within a facet, AND across facets and toggles.
+ */
+export const DESK_DISTRESS_FACETS: DeskFacet[] = [
+  { dimension: 'flags', label: 'Property flags', fieldKey: 'properties.flags' },
+  { dimension: 'condition', label: 'Building condition', fieldKey: 'properties.building_condition' },
+  { dimension: 'rehab', label: 'Rehab level', fieldKey: 'properties.rehab_level' },
+]
+
+export type DeskToggle = { key: string; label: string; filter: EntityGraphFieldFilter }
+export const DESK_DISTRESS_TOGGLES: DeskToggle[] = [
+  { key: 'taxdel', label: 'Tax delinquent', filter: { field_key: 'properties.tax_delinquent', operator: 'is_true' } },
+  { key: 'lien', label: 'Active lien', filter: { field_key: 'properties.active_lien', operator: 'is_true' } },
+  { key: 'fc', label: 'Foreclosure filing', filter: { field_key: 'records.foreclosure_count', operator: 'gte', value: 1 } },
+  { key: 'probate', label: 'Probate filing', filter: { field_key: 'records.has_probate', operator: 'is_true' } },
+]

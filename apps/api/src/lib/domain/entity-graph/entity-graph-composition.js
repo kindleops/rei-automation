@@ -25,7 +25,7 @@ import {
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
 import { applyBuyerFilters, applyPropertyFilters, parseBrowseFilters } from './entity-graph-service.js'
-import { FacetUntranslatable, facetsAvailable, groupedFacetCounts } from './entity-graph-facet-sql.js'
+import { FacetUntranslatable, facetsAvailable, groupedFacetCounts, groupedTokenCounts } from './entity-graph-facet-sql.js'
 
 const clean = (value) => String(value ?? '').trim()
 const SAMPLE_ROWS = 1500
@@ -45,6 +45,10 @@ const bands = (edges, fmt = (n) => String(n), { under = true, over = true } = {}
 
 const PROPERTY_DIMENSIONS = [
   { key: 'property_type', label: 'Property type', group: 'Asset', kind: 'top', column: 'property_type', filterKey: 'properties.property_type' },
+  // Distress & condition (owner 2026-10-07: "vacant AND poor/unsound, by market").
+  { key: 'flags', label: 'Property flags', group: 'Distress & condition', kind: 'tokens', column: 'property_flags_json', filterKey: 'properties.flags' },
+  { key: 'condition', label: 'Building condition', group: 'Distress & condition', kind: 'top', column: 'building_condition', filterKey: 'properties.building_condition' },
+  { key: 'rehab', label: 'Rehab level', group: 'Distress & condition', kind: 'top', column: 'rehab_level', filterKey: 'properties.rehab_level' },
   { key: 'state', label: 'State', group: 'Geography', kind: 'top', column: 'property_address_state', filterKey: 'properties.property_address_state' },
   { key: 'market', label: 'Market', group: 'Geography', kind: 'top', column: 'market', filterKey: 'properties.market' },
   { key: 'county', label: 'County', group: 'Geography', kind: 'top', column: 'property_address_county_name', filterKey: 'properties.property_address_county_name' },
@@ -132,7 +136,7 @@ export function getCompositionCatalog(tab = 'properties') {
   if (!config) return { tab, dimensions: [] }
   return {
     tab,
-    dimensions: config.dimensions.map(({ key, label, group, kind, format }) => ({ key, label, group, kind, format: format || null })),
+    dimensions: config.dimensions.map(({ key, label, group, kind, format }) => ({ key, label, group, kind: kind === 'tokens' ? 'signals' : kind, format: format || null })),
   }
 }
 
@@ -182,6 +186,10 @@ export async function buildEntityGraphComposition(params = {}, deps = {}) {
 
   // Categorical facets: one exact GROUP BY over the same WHERE as the list —
   // every value, no sample, no cap (see entity-graph-facet-sql.js).
+  if (dimension.kind === 'tokens') {
+    const tokens = await tokenComposition({ deps, config, dimension, filters, fieldFilters, all: isTruthy(params.all) })
+    return tokens ? { tab, ...tokens } : { tab, supported: false, dimension: { key: dimension.key, label: dimension.label, group: dimension.group, kind: 'signals', format: null }, total: null, additive: false, exhaustive: false, note: 'Flag counts need the direct database connection.', buckets: [] }
+  }
   if (dimension.kind === 'top') {
     const exhaustive = await exhaustiveTopComposition({ deps, config, dimension, filters, fieldFilters, all: isTruthy(params.all) })
     if (exhaustive) return { tab, ...exhaustive }
@@ -248,6 +256,44 @@ export async function buildEntityGraphComposition(params = {}, deps = {}) {
     exhaustive: dimension.kind !== 'top',
     note: dimension.kind === 'signals' ? 'A record can carry several signals, so these shares do not add up to 100%.' : null,
     buckets,
+  }
+}
+
+/** Every flag token with its exact count (non-exclusive: shares do not add up). */
+async function tokenComposition({ deps, config, dimension, filters, fieldFilters, all }) {
+  const grouped = deps.groupedTokenCounts || groupedTokenCounts
+  const available = deps.facetsAvailable || facetsAvailable
+  if (!available()) return null
+  let result
+  try {
+    result = await grouped({
+      source: config.table,
+      column: dimension.column,
+      applyFilters: (builder) => applyEntityGraphFieldFilters(config.applyBase(builder, filters), fieldFilters),
+    })
+  } catch (error) {
+    if (!(error instanceof FacetUntranslatable)) console.warn('[entity-graph] token facet failed:', error?.message || error)
+    return null
+  }
+  const total = result.total
+  const sorted = [...result.tokens].sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+  const shown = all ? sorted : sorted.slice(0, TOP_BUCKETS)
+  return {
+    supported: true,
+    // reported as 'signals' so every client renders it as non-additive bars
+    dimension: { key: dimension.key, label: dimension.label, group: dimension.group, kind: 'signals', format: null },
+    total,
+    additive: false,
+    exhaustive: true,
+    distinct: sorted.length,
+    note: 'A property can carry several flags, so these shares do not add up to 100%.',
+    buckets: shown.map((row) => ({
+      key: row.value,
+      label: row.value,
+      value: row.count,
+      share: total ? row.count / total : null,
+      filter: { field_key: dimension.filterKey, operator: 'is_any_of', value: [row.value] },
+    })),
   }
 }
 
