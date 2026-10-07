@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { isTemplateHoldReason } from '@/lib/domain/campaigns/campaign-template-hold.js'
-import { governanceApplies, governanceExcludedTemplateIds, loadGovernance } from '@/lib/domain/campaigns/template-governance.js'
+import { cappedSendableTemplateIds, governanceApplies, governanceExcludedTemplateIds, loadGovernance, loadTemplateUsedToday, UNGOVERNED_POLICY } from '@/lib/domain/campaigns/template-governance.js'
 import { effectivePerSenderCap, loadConfiguredPerSenderCap } from '@/lib/domain/campaigns/sender-capacity.js'
 import { isSenderDispatchBlocked, isTemplateDispatchBlocked, loadDispatchBlockedSets } from '@/lib/domain/delivery/sms-health-guard.js'
 import { evaluateRecontactOverride } from '@/lib/domain/campaigns/recontact-override-authority.js'
@@ -8169,6 +8169,7 @@ const PLAN_SKIP_LABELS = Object.freeze({
   TEMPLATE_RENDER_LINT_FAILURE: 'message failed the template check',
   NO_TEMPLATE: 'no approved message',
   TEMPLATE_GOVERNANCE_PAUSED: 'every fitting message is paused by template governance',
+  TEMPLATE_DAILY_CAP_EXHAUSTED: 'every fitting message reached today\'s cap',
   template_blocked_by_operator: 'message blocked by operator',
   active_queue_row_exists: 'already queued',
   prior_contacted_suppression: 'already contacted',
@@ -8595,10 +8596,37 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
    */
   let governanceExcluded = new Set()
   let governanceApplied = false
+  // Template sends placed today, by template_id, for every template whose
+  // daily cap binds. Seeded from send_queue and advanced as this pass places
+  // rows, so a cap is honoured within one plan as well as across runs.
+  let templateUsedToday = null
+  let ungovernedPolicy = UNGOVERNED_POLICY.ALLOW
   if (governanceApplies(launchOptions.template_use_case)) {
     try {
       const governanceById = await (deps.loadGovernance || loadGovernance)(supabase)
       governanceExcluded = governanceExcludedTemplateIds(governanceById)
+      /**
+       * ONE eligibility verdict (evaluateRotationEligibility) for this path
+       * and target-one enqueue. The render pool now also drops templates
+       * whose DAILY cap is reached (211393, cap 30, was placed 152 times on
+       * 2026-10-07 because no path counted today's sends) and rotation is
+       * weighted by traffic_weight. Never-reviewed templates stay usable here
+       * (UNGOVERNED_POLICY.ALLOW) until system_control
+       * template_governance_fail_closed = 'true' — flip it once the
+       * ungoverned catalogue has rotation rows, or fail-closed would shrink
+       * the English first-touch pool to the handful already governed.
+       */
+      const failClosed = String(await (deps.getSystemValue || getSystemValue)('template_governance_fail_closed', deps).catch(() => '') ?? '').trim().toLowerCase() === 'true'
+      ungovernedPolicy = failClosed ? UNGOVERNED_POLICY.DENY : UNGOVERNED_POLICY.ALLOW
+      try {
+        templateUsedToday = await (deps.loadTemplateUsedToday || loadTemplateUsedToday)(supabase, cappedSendableTemplateIds(governanceById), now.toISOString())
+      } catch (usageError) {
+        blockers.push('template_daily_usage_unreadable')
+        console.warn('campaign_plan.template_daily_usage_unreadable', { campaign_id: campaignId, error: usageError?.message || String(usageError) })
+      }
+      launchOptions.rotation_governance = governanceById
+      launchOptions.template_used_today = templateUsedToday || new Map()
+      launchOptions.ungoverned_policy = ungovernedPolicy
       governanceApplied = true
     } catch (governanceError) {
       blockers.push('template_governance_unreadable')
@@ -8796,6 +8824,9 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     increment(senderCounts, senderNumber)
     increment(senderMarketCounts, routing.selected_textgrid_market || routing.selected?.market || 'unknown')
     increment(templateCounts, templateId)
+    if (launchOptions.template_used_today instanceof Map && launchOptions.template_used_today.has(String(templateId))) {
+      launchOptions.template_used_today.set(String(templateId), Number(launchOptions.template_used_today.get(String(templateId)) || 0) + 1)
+    }
     increment(routingCounts, routing.routing_tier || 'unknown')
     increment(marketCounts, marketKey)
     plannedItems.push({ target, candidate, routing, rendered })
@@ -9278,7 +9309,9 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     template_governance: {
       applied: governanceApplied,
       excluded_template_ids: [...governanceExcluded],
-      ungoverned_templates_allowed: true,
+      ungoverned_templates_allowed: ungovernedPolicy === UNGOVERNED_POLICY.ALLOW,
+      ungoverned_policy: ungovernedPolicy,
+      daily_cap_used_today: templateUsedToday ? Object.fromEntries(templateUsedToday) : null,
     },
     template_holds: templateHolds.map((hold) => ({
       campaign_target_id: hold.target.id || null,

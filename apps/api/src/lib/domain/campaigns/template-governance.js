@@ -42,7 +42,10 @@ const lower = (value) => clean(value).toLowerCase();
  * Rotation states that permit outbound send. Anything not listed here blocks,
  * including unknown/new states — an unrecognised status is not a licence.
  */
-const SENDABLE_ROTATION_STATUSES = new Set(["active", "testing", "promote"]);
+// 'scale' is the table's own CHECK vocabulary (scale | testing | pause |
+// disabled); it was missing here, so promoting a template to 'scale' would
+// have silently blocked it.
+const SENDABLE_ROTATION_STATUSES = new Set(["active", "testing", "promote", "scale"]);
 
 /** Reason codes. Stable strings — they land in target metadata and logs. */
 export const GOVERNANCE_REASONS = {
@@ -54,6 +57,8 @@ export const GOVERNANCE_REASONS = {
   CAP_EXHAUSTED: "governance_daily_cap_exhausted",
   NO_BODY: "template_body_empty",
   UNMEASURABLE: "governance_unmeasurable",
+  OPERATOR_BLOCKED: "template_operator_blocked",
+  UNREVIEWED_ALLOWED: "governance_absent_allowed_unreviewed",
 };
 
 /**
@@ -85,7 +90,45 @@ export function indexGovernance(rows = []) {
  * @returns {{ok: boolean, reason: string, detail?: string}}
  */
 export function evaluateTemplateGovernance(template, governanceRow, options = {}) {
+  return evaluateRotationEligibility(template, governanceRow, options);
+}
+
+/**
+ * Policy for a template with NO rotation-control row (never reviewed).
+ *
+ *   DENY  — fail closed (the documented policy; target assignment and
+ *           target-one enqueue have always used it).
+ *   ALLOW — "unreviewed but usable". The bulk campaign planner used this
+ *           implicitly — it only ever subtracted governed-and-paused ids — so
+ *           8 of the 2026-10-07 English first-touch templates were ungoverned
+ *           while target-one enqueue would have refused every one of them.
+ *
+ * Both paths now go through evaluateRotationEligibility; the planner passes
+ * its policy explicitly (system_control.template_governance_fail_closed flips
+ * it to DENY once the ungoverned catalogue has rotation rows).
+ */
+export const UNGOVERNED_POLICY = Object.freeze({ DENY: "deny", ALLOW: "allow_unreviewed" });
+
+/**
+ * THE eligibility verdict for one template on the rotation surface. Every
+ * path that selects or admits a first-touch template asks this function:
+ * target assignment and target-one enqueue (applyGovernance), the bulk
+ * planner's render pool (supabase-candidate-feeder renderOutboundTemplateCore)
+ * and the reviewed-but-refused set (governanceExcludedTemplateIds).
+ *
+ * options:
+ *   applies          — governance scope (governanceApplies(useCase)); default true
+ *   ungoverned       — UNGOVERNED_POLICY; default DENY (fail closed)
+ *   usedToday        — sends already placed today for this template. When given
+ *                      it is what the DAILY cap is compared with (the rolling
+ *                      40-day counter it replaces is not a daily figure).
+ *   blockedTemplateIds — operator blocklist (system_control.sms_blocked_template_ids)
+ *
+ * @returns {{ok: boolean, reason: string, detail?: string, weight: number}}
+ */
+export function evaluateRotationEligibility(template, governanceRow, options = {}) {
   const applies = options.applies !== false;
+  const ungoverned = options.ungoverned === UNGOVERNED_POLICY.ALLOW ? UNGOVERNED_POLICY.ALLOW : UNGOVERNED_POLICY.DENY;
   const templateId = clean(template?.template_id || template?.id);
 
   // Properties of the template itself are checked regardless of governance
@@ -98,9 +141,17 @@ export function evaluateTemplateGovernance(template, governanceRow, options = {}
     return { ok: false, reason: GOVERNANCE_REASONS.NO_BODY, detail: templateId };
   }
 
-  if (!applies) return { ok: true, reason: GOVERNANCE_REASONS.OK };
+  const blocked = options.blockedTemplateIds;
+  if (blocked && typeof blocked.has === "function" && blocked.has(templateId)) {
+    return { ok: false, reason: GOVERNANCE_REASONS.OPERATOR_BLOCKED, detail: templateId, weight: 0 };
+  }
+
+  if (!applies) return { ok: true, reason: GOVERNANCE_REASONS.OK, weight: 1 };
 
   if (!governanceRow) {
+    if (ungoverned === UNGOVERNED_POLICY.ALLOW) {
+      return { ok: true, reason: GOVERNANCE_REASONS.UNREVIEWED_ALLOWED, detail: templateId, weight: 1 };
+    }
     return { ok: false, reason: GOVERNANCE_REASONS.ABSENT, detail: templateId };
   }
 
@@ -132,7 +183,8 @@ export function evaluateTemplateGovernance(template, governanceRow, options = {}
   // Usage against the cap, when the control row reports it. Absent usage is
   // treated as zero used — the cap itself is the binding rail, and this field
   // is a rolling counter rather than a guarantee.
-  const used = Number(governanceRow.last_40d_total_sent ?? 0);
+  const hasUsedToday = options.usedToday !== undefined && options.usedToday !== null;
+  const used = Number(hasUsedToday ? options.usedToday : (governanceRow.last_40d_total_sent ?? 0));
   if (Number.isFinite(used) && used >= cap) {
     return {
       ok: false,
@@ -141,7 +193,18 @@ export function evaluateTemplateGovernance(template, governanceRow, options = {}
     };
   }
 
-  return { ok: true, reason: GOVERNANCE_REASONS.OK };
+  return { ok: true, reason: GOVERNANCE_REASONS.OK, weight: rotationTrafficWeight(governanceRow) };
+}
+
+/**
+ * Rotation share for an eligible template. traffic_weight is the governance
+ * row's relative share (1.5 = half again as often as a weight-1 sibling); an
+ * absent or non-positive weight on a SENDABLE row means "unweighted" (1), not
+ * "never" — never-send is expressed by status/cap, which were checked first.
+ */
+export function rotationTrafficWeight(governanceRow) {
+  const weight = Number(governanceRow?.traffic_weight);
+  return Number.isFinite(weight) && weight > 0 ? weight : 1;
 }
 
 /**
@@ -157,7 +220,7 @@ export function evaluateTemplateGovernance(template, governanceRow, options = {}
  * tiebreak. template_id alone would be sufficient for stability; the leading
  * keys make the ordering semantically meaningful rather than arbitrary.
  */
-const ROTATION_RANK = { promote: 0, active: 1, testing: 2 };
+const ROTATION_RANK = { promote: 0, scale: 0, active: 1, testing: 2 };
 
 export function canonicalTemplateOrder(templates = [], governanceById = new Map()) {
   const rank = (row) => {
@@ -189,14 +252,14 @@ export function canonicalTemplateOrder(templates = [], governanceById = new Map(
  *
  * @returns {{eligible: Array, rejected: Array<{template_id: string, reason: string}>}}
  */
-export function applyGovernance(templates = [], governanceById = new Map(), useCase = "") {
+export function applyGovernance(templates = [], governanceById = new Map(), useCase = "", options = {}) {
   const applies = governanceApplies(useCase);
   const eligible = [];
   const rejected = [];
 
   for (const template of canonicalTemplateOrder(templates, governanceById)) {
     const id = clean(template?.template_id || template?.id);
-    const verdict = evaluateTemplateGovernance(template, governanceById.get(id), { applies });
+    const verdict = evaluateRotationEligibility(template, governanceById.get(id), { ...options, applies });
     if (verdict.ok) eligible.push(template);
     else rejected.push({ template_id: id, reason: verdict.reason, detail: verdict.detail });
   }
@@ -239,7 +302,7 @@ export async function loadGovernance(supabase) {
 export function governanceExcludedTemplateIds(governanceById = new Map()) {
   const excluded = new Set();
   for (const [templateId, row] of governanceById) {
-    const verdict = evaluateTemplateGovernance(
+    const verdict = evaluateRotationEligibility(
       { template_id: templateId, is_active: true, template_body: "governance-only check" },
       row,
       { applies: true }
@@ -247,4 +310,62 @@ export function governanceExcludedTemplateIds(governanceById = new Map()) {
     if (!verdict.ok) excluded.add(String(templateId));
   }
   return excluded;
+}
+
+/**
+ * Queue states that did NOT place a message (never left, or were refused
+ * before the carrier). Every other state counts against the daily cap.
+ */
+export const DAILY_CAP_UNCOUNTED_STATUSES = Object.freeze([
+  "cancelled",
+  "expired",
+  "duplicate_blocked",
+  "blocked",
+  "blocked_by_health_guard",
+  "blocked_sender_ineligible",
+  "paused_name_missing",
+]);
+
+/** Start of the UTC day containing `nowIso` (the planner's day bucket). */
+export function utcDayStartIso(nowIso = new Date().toISOString()) {
+  const d = new Date(nowIso);
+  const t = Number.isFinite(d.getTime()) ? d : new Date();
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate())).toISOString();
+}
+
+/**
+ * Template ids whose daily cap is binding: governed, sendable status, a
+ * positive finite cap. Only these need today's usage counted.
+ */
+export function cappedSendableTemplateIds(governanceById = new Map()) {
+  const ids = [];
+  for (const [templateId, row] of governanceById) {
+    if (!SENDABLE_ROTATION_STATUSES.has(lower(row?.rotation_status))) continue;
+    const cap = Number(row?.daily_cap);
+    if (row?.daily_cap === null || row?.daily_cap === undefined || row?.daily_cap === "") continue;
+    if (Number.isFinite(cap) && cap > 0) ids.push(String(templateId));
+  }
+  return ids.sort();
+}
+
+/**
+ * Sends placed today (UTC day) per capped template: one head-count per id
+ * (the capped set is tens of rows), so PostgREST's max-rows never truncates
+ * the figure. Throws on a read failure — an unmeasured cap is not "zero used".
+ */
+export async function loadTemplateUsedToday(supabase, templateIds = [], nowIso = new Date().toISOString()) {
+  const since = utcDayStartIso(nowIso);
+  const excluded = `(${DAILY_CAP_UNCOUNTED_STATUSES.join(",")})`;
+  const used = new Map();
+  await Promise.all(templateIds.map(async (templateId) => {
+    const { count, error } = await supabase
+      .from("send_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("template_id", String(templateId))
+      .gte("created_at", since)
+      .not("queue_status", "in", excluded);
+    if (error) throw error;
+    used.set(String(templateId), Number(count || 0));
+  }));
+  return used;
 }
