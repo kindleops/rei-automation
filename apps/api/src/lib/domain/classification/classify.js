@@ -4011,6 +4011,8 @@ export const INTENT_PRIORITY = Object.freeze([
   "sold_property",
   "who_is_this",
   "hostile_or_legal",
+  // Trolling / profanity (round 7): review, never an auto-reply.
+  "hostile_or_troll",
   "not_interested",
   // A seller who has decided to sell but not listed yet outranks a bare wait:
   // "going on the market next month" is a timeline, not a brush-off.
@@ -4811,6 +4813,29 @@ function resolveIntents(
     });
   }
 
+  // FRUSTRATION AFTER A MISREAD (2026-10-06 round 7, +18137277602): "Did you
+  // read my text?" after we asked an interest question the seller had already
+  // declined. Never re-ask: ONE apology + nurture (sms_templates use_case
+  // seller_frustration_apology) or review until that template is active.
+  if (
+    !compliance_flag &&
+    /\b(?:did|do|can)\s+(?:you|u)\s+(?:even\s+)?read\s+(?:my|the)\s+(?:text|message|msg|reply|response)s?\b|\bread\s+my\s+(?:text|message|reply)\b|\bi\s+(?:already\s+)?(?:told|said\s+(?:to\s+)?)\s*(?:you|u)\b|\bi\s+(?:already\s+)?said\s+no\b|\bi\s+already\s+(?:said|answered|replied)\b|\bya\s+(?:te|le|les)\s+dije\b|\bya\s+(?:te|le)\s+(?:conteste|contesté|respondi|respondí)\b|\bno\s+(?:lee|leyó|leyo|leíste|leiste)\b/i.test(rawMessage)
+  ) {
+    return finalizeIntentResult({
+      primary_intent: "unclear",
+      secondary_intents: ["seller_frustration"],
+      matched_intents: ["unclear"],
+      matched_rule_ids: ["seller_frustration_after_misread"],
+      context_status: ctxValidation.context_status,
+      evidence_spans: [rawMessage],
+      precedence_result: "seller_frustration_after_misread",
+      ambiguity_flags: ["seller_frustration"],
+      calibrated_rule_family_id: "seller_frustration_after_misread",
+      confidence_rationale: "seller_frustration_after_misread",
+      contextual_confidence: 0.8,
+    });
+  }
+
   // "Si.por que" / "Yes why?" (2026-10-06): the seller is asking who we are
   // and why we ask -- the who_is_this reply answers both. Bare "What" / "Huh?"
   // to our first touch is the same question.
@@ -5085,6 +5110,34 @@ function resolveIntents(
   ]);
   const hostile_insult = reply_signals?.hostile?.matched === true;
   const hostile_emoji = emoji_interpretation?.semantic_signal === "hostile";
+  // TROLL (2026-10-06 round 7, +14692307043): "There are shitstains all over
+  // the walls and dead rats scattered throughout the rooms" after "Yes. $5
+  // million". Profanity inside a word ("shitstains") or gross / absurd
+  // claims right after an implausible ask in the same cycle is trolling, not a
+  // condition disclosure: review, never an auto-reply. Gross claims with no
+  // profanity and no prior implausible ask stay a condition disclosure.
+  const profanity_stem = /\b(?:shit\w*|\w*fuck\w*|bullshit|crap\w*|piss\w*|motherf\w*|asshole\w*|dumbass)\b/i.test(text);
+  const gross_claim = /\b(?:dead\s+(?:rats?|bodies|body|animals?|mice|cats?|dogs?)|rats?|roach(?:es)?|cockroach(?:es)?|maggots?|feces|poop|vomit|corpses?|bodies\s+(?:in|buried)|haunted|ghosts?|meth\s+lab)\b/i.test(text);
+  let prior_implausible_ask = false;
+  if (gross_claim || profanity_stem) {
+    const raw_context = conversation_context && typeof conversation_context === "object" ? conversation_context : null;
+    const valuation = raw_context?.property_valuation || null;
+    for (const body of Array.isArray(raw_context?.recent_seller_messages) ? raw_context.recent_seller_messages.slice(0, 5) : []) {
+      const ask = resolveCanonicalAskingPrice(stripUrls(body), {})?.asking_price?.value ?? null;
+      if (ask && assessAskingPricePlausibility({ amount: ask, valuation, message: body }).implausible) {
+        prior_implausible_ask = true;
+        break;
+      }
+    }
+  }
+  const troll = !hostile_legal_threat && (profanity_stem || (gross_claim && prior_implausible_ask));
+  if (troll) {
+    intents.push("hostile_or_troll");
+    reply_rule_ids.push(prior_implausible_ask ? "troll_after_implausible_ask" : "profanity_in_reply");
+  } else if (gross_claim && !intents.includes("condition_disclosed")) {
+    intents.push("condition_disclosed");
+    reply_rule_ids.push("condition_gross_disclosure");
+  }
   if (hostile_legal_threat || hostile_profanity || hostile_insult || hostile_emoji) {
     intents.push("hostile_or_legal");
     if (hostile_legal_threat) rule_tags.push("hostile_legal_threat");
@@ -5114,6 +5167,9 @@ function resolveIntents(
       // Spanish
 
       "no me interesa", "no quiero vender", "no está en venta", "no esta en venta",
+      // 2026-10-06 round 7: "Yes, and nothing's for sale." got the interest probe.
+      "nothing's for sale", "nothings for sale", "nothing is for sale", "nothing for sale",
+      "nothing's for sell", "nothing is for sell", "not for sell",
       // 2026-10-06 round 6
       "i don't care", "i dont care", "i do not care", "not if it involves",
       "para venderla no", "venderla no", "no para vender", "no para venderla",
@@ -7106,6 +7162,37 @@ function deriveAutomationDecision({
       suppression_action: "opt_out",
       human_review_required: false,
       risk_level: "high",
+    };
+  }
+
+  // Trolling / profanity: a person decides. No reply, nothing suppressed.
+  if (intent === "hostile_or_troll") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: true,
+      risk_level: "high",
+    };
+  }
+
+  // Frustration after a misread ("Did you read my text?"): ONE apology +
+  // nurture from sms_templates (seller_frustration_apology), never a re-ask;
+  // review while no safe row exists.
+  if (
+    !compliance_flag &&
+    intent === "unclear" &&
+    Array.isArray(matched_rule_ids) &&
+    matched_rule_ids.includes("seller_frustration_after_misread")
+  ) {
+    return {
+      auto_reply_allowed: true,
+      queue_action: "queue_clarification",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "medium",
+      reply_kind: "clarification",
+      clarification_use_case: "seller_frustration_apology",
     };
   }
 

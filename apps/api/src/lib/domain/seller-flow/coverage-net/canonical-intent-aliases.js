@@ -31,6 +31,8 @@ export const CANONICAL_INTENTS = Object.freeze([
   "wrong_number",
   "who_is_this",
   "hostile_or_legal",
+  // Profanity / trolling (round 7): review only, never an auto-reply.
+  "hostile_or_troll",
   "not_interested",
   "need_time",
   "seller_interested",

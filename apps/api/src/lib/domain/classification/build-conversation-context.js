@@ -333,6 +333,9 @@ export async function buildConversationContext({
   // or "👍" falls back to this). Best effort: unreadable history is null, never
   // a reason to drop the context.
   let seller_reply_language = null;
+  // The seller's recent messages (newest first, this inbound excluded): lets
+  // the classifier see an implausible ask earlier in the cycle (round 7).
+  let recent_seller_messages = [];
   try {
     const { data, error } = await supabase
       .from("message_events")
@@ -343,9 +346,12 @@ export async function buildConversationContext({
       .order("created_at", { ascending: false })
       .limit(15);
     if (!error && Array.isArray(data)) {
-      seller_reply_language = latestIdentifiableSellerLanguage(
-        data.filter((row) => !excluded.has(String(row?.id)))
-      );
+      const prior_rows = data.filter((row) => !excluded.has(String(row?.id)));
+      seller_reply_language = latestIdentifiableSellerLanguage(prior_rows);
+      recent_seller_messages = prior_rows
+        .map((row) => String(row?.message_body || "").trim())
+        .filter(Boolean)
+        .slice(0, 10);
     }
   } catch {
     seller_reply_language = null;
@@ -406,6 +412,7 @@ export async function buildConversationContext({
     last_outbound_addressee: extractAddresseeName(last_outbound.message_body),
     last_outbound_language: detectMessageLanguage(last_outbound.message_body),
     seller_reply_language,
+    recent_seller_messages,
     property_valuation,
     // OUR text, so a tapback quoting the SELLER's own words can be told apart
     // from a tapback on our question.
