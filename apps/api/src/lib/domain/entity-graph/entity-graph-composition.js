@@ -25,6 +25,7 @@ import {
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
 import { applyBuyerFilters, applyPropertyFilters, parseBrowseFilters } from './entity-graph-service.js'
+import { FacetUntranslatable, facetsAvailable, groupedFacetCounts } from './entity-graph-facet-sql.js'
 
 const clean = (value) => String(value ?? '').trim()
 const SAMPLE_ROWS = 1500
@@ -179,6 +180,13 @@ export async function buildEntityGraphComposition(params = {}, deps = {}) {
     return error ? null : (n ?? null)
   }
 
+  // Categorical facets: one exact GROUP BY over the same WHERE as the list —
+  // every value, no sample, no cap (see entity-graph-facet-sql.js).
+  if (dimension.kind === 'top') {
+    const exhaustive = await exhaustiveTopComposition({ deps, config, dimension, filters, fieldFilters, all: isTruthy(params.all) })
+    if (exhaustive) return { tab, ...exhaustive }
+  }
+
   const total = await count(null)
 
   let bucketDefs = dimension.buckets || []
@@ -235,7 +243,64 @@ export async function buildEntityGraphComposition(params = {}, deps = {}) {
     dimension: { key: dimension.key, label: dimension.label, group: dimension.group, kind: dimension.kind, format: dimension.format || null },
     total,
     additive: dimension.kind !== 'signals',
+    // 'top' only reaches here when the grouped count was unavailable: the
+    // values shown were discovered from a sample, so the list is not complete.
+    exhaustive: dimension.kind !== 'top',
     note: dimension.kind === 'signals' ? 'A record can carry several signals, so these shares do not add up to 100%.' : null,
+    buckets,
+  }
+}
+
+const isTruthy = (value) => ['1', 'true', 'yes'].includes(clean(value).toLowerCase())
+
+/**
+ * Every value of a categorical dimension with its exact count, from one
+ * GROUP BY. `all` returns every value (the desktop facet list is searchable);
+ * otherwise the nine largest plus an EXACT "Everything else" remainder —
+ * exact because every value was counted, not sampled. Returns null when the
+ * grouped path is unavailable (no direct database url, a filter the SQL
+ * recorder cannot translate, or the query failed) so the caller can fall back.
+ */
+async function exhaustiveTopComposition({ deps, config, dimension, filters, fieldFilters, all }) {
+  const grouped = deps.groupedFacetCounts || groupedFacetCounts
+  const available = deps.facetsAvailable || facetsAvailable
+  if (!available()) return null
+  let rows
+  try {
+    rows = await grouped({
+      source: config.table,
+      column: dimension.column,
+      applyFilters: (builder) => applyEntityGraphFieldFilters(config.applyBase(builder, filters), fieldFilters),
+    })
+  } catch (error) {
+    if (!(error instanceof FacetUntranslatable)) {
+      console.warn('[entity-graph] grouped facet failed, falling back to sampled discovery:', error?.message || error)
+    }
+    return null
+  }
+  const total = rows.reduce((sum, row) => sum + row.count, 0)
+  const blank = rows.filter((row) => row.value === null).reduce((sum, row) => sum + row.count, 0)
+  const valued = rows.filter((row) => row.value !== null)
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+  const shown = all ? valued : valued.slice(0, TOP_BUCKETS)
+  const buckets = shown.map((row) => ({
+    key: row.value,
+    label: row.value,
+    value: row.count,
+    share: total ? row.count / total : null,
+    filter: bucketFilter(dimension, { key: row.value, label: row.value, value: row.value }),
+  }))
+  const other = valued.slice(shown.length).reduce((sum, row) => sum + row.count, 0)
+  if (other > 0) buckets.push({ key: '__other', label: 'Everything else', value: other, share: total ? other / total : null, filter: null })
+  if (blank > 0) buckets.push({ key: '__blank', label: 'Not recorded', value: blank, share: total ? blank / total : null, filter: null })
+  return {
+    supported: true,
+    dimension: { key: dimension.key, label: dimension.label, group: dimension.group, kind: dimension.kind, format: dimension.format || null },
+    total,
+    additive: true,
+    exhaustive: true,
+    distinct: valued.length,
+    note: null,
     buckets,
   }
 }

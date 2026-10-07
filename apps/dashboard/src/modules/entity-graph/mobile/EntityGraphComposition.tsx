@@ -92,6 +92,7 @@ export function EntityGraphComposition({
   onRetry,
 }: Props) {
   const [pressed, setPressed] = useState<string | null>(null)
+  const [find, setFind] = useState({ key: '', text: '' })
   const pickerRef = useRef<HTMLDivElement | null>(null)
   const dimension = composition?.dimension ?? null
   const hue = GROUP_HUE[dimension?.group ?? dimensions.find((d) => d.key === dimensionKey)?.group ?? 'Asset'] ?? '#5ee7ff'
@@ -102,9 +103,19 @@ export function EntityGraphComposition({
     el?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' })
   }, [dimensionKey])
 
-  const buckets = composition?.buckets ?? []
-  const max = useMemo(() => Math.max(1, ...buckets.map((b) => b.value ?? 0)), [buckets])
+  const allBuckets = composition?.buckets ?? []
+  const max = useMemo(() => Math.max(1, ...allBuckets.map((b) => b.value ?? 0)), [allBuckets])
   const histogram = dimension?.kind === 'banded'
+  /**
+   * A complete categorical list (the desk asks for every value: 58 markets,
+   * 101 counties) is searchable. Phones receive the nine largest and never
+   * see this control. The text resets when the dimension changes.
+   */
+  const findable = !histogram && allBuckets.length > 12
+  const findText = find.key === (dimension?.key ?? '') ? find.text.trim().toLowerCase() : ''
+  const buckets = findable && findText
+    ? allBuckets.filter((b) => !b.key.startsWith('__') && bucketLabel(dimension, b).toLowerCase().includes(findText))
+    : allBuckets
 
   const grouped = useMemo(() => {
     const out: Array<{ group: string; items: CompositionDimension[] }> = []
@@ -159,7 +170,22 @@ export function EntityGraphComposition({
             ))}
           </div>
 
-          <div className={cls('egq__chart', histogram ? 'is-histogram' : 'is-ranked', loading && 'is-loading')} key={`${dimension?.key ?? dimensionKey}`}>
+          {findable ? (
+            <label className="egq__find">
+              <Icon name="search" />
+              <input
+                type="search"
+                value={findText ? find.text : ''}
+                onChange={(e) => setFind({ key: dimension?.key ?? '', text: e.target.value })}
+                placeholder={`Find ${dimension?.label.toLowerCase() ?? 'a value'} · ${allBuckets.filter((b) => !b.key.startsWith('__')).length} values`}
+                aria-label={`Find a ${dimension?.label.toLowerCase() ?? 'value'}`}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+          ) : null}
+
+          <div className={cls('egq__chart', histogram ? 'is-histogram' : 'is-ranked', loading && 'is-loading', findable && 'is-findable')} key={`${dimension?.key ?? dimensionKey}`}>
             {loading && buckets.length === 0 ? (
               Array.from({ length: 6 }).map((_, i) => <div key={i} className="egq__ghost" style={{ ['--i' as string]: i }} />)
             ) : error ? (
@@ -168,7 +194,7 @@ export function EntityGraphComposition({
                 <button type="button" onClick={onRetry}>Retry</button>
               </div>
             ) : buckets.length === 0 ? (
-              <div className="egq__error"><span>Nothing recorded for this cohort.</span></div>
+              <div className="egq__error"><span>{findText ? `No ${dimension?.label.toLowerCase() ?? 'value'} matches “${find.text.trim()}”.` : 'Nothing recorded for this cohort.'}</span></div>
             ) : histogram ? (
               <div className="egq__hist">
                 {buckets.map((bucket, i) => {

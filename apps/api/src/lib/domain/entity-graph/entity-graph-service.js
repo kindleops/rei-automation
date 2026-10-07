@@ -30,6 +30,7 @@ import {
   fetchKeysetPage,
   keysetSupported,
 } from './entity-graph-property-sort.js'
+import { facetsAvailable, groupedFacetCounts } from './entity-graph-facet-sql.js'
 
 const DEFAULT_PAGE_SIZE = 25
 const MAX_PAGE_SIZE = 100
@@ -176,41 +177,29 @@ async function searchProperties(supabase, query, limit) {
     // not trigram-indexable, so ORing them with the address probe returned the
     // whole query to a sequential scan over 169,802 rows -- the cross-type
     // search spent 5-8s here while the tab-scoped one answered in 0.4s.
-    const { data } = await propertySearchPredicate(q)
-      .apply(supabase.from('properties').select(PROPERTY_SUMMARY_SELECT))
+    // The browse view + browse select, mapped by propertyToResult: a search
+    // row carries the same details (value, equity, owner, loans, liens, last
+    // sale…) as a browsed row. It used to carry none, so every table column
+    // of a searched property read "—" (owner, 2026-10-07: "Atlanta … none of
+    // the fields show").
+    const predicate = await propertySearchPredicateWithMarket(q)
+    const { data } = await predicate
+      .apply(supabase.from(PROPERTY_BROWSE_SOURCE).select(PROPERTY_BROWSE_SELECT))
       .limit(limit)
     for (const row of data || []) {
       const exact = lower(row.property_id) === lower(q)
-      results.push(buildSearchResult({
-        entityType: 'property',
-        entityId: row.property_id,
-        title: row.property_address_full || row.property_id,
-        subtitle: [row.market, row.property_address_zip].filter(Boolean).join(' · '),
-        badges: [row.normalized_asset_class || row.property_type].filter(Boolean),
-        score: exact ? 950 : 500,
-        contextIds: { propertyId: row.property_id, masterOwnerId: row.master_owner_id || undefined },
-      }))
+      results.push(propertyToResult(row, exact ? 950 : 500))
     }
   }
 
   if (results.length < limit && addressQ.length > 4) {
     const like = `%${addressQ}%`
     const { data } = await supabase
-      .from('properties')
-      .select(PROPERTY_SUMMARY_SELECT)
+      .from(PROPERTY_BROWSE_SOURCE)
+      .select(PROPERTY_BROWSE_SELECT)
       .ilike('property_address_full', like)
       .limit(limit)
-    for (const row of data || []) {
-      results.push(buildSearchResult({
-        entityType: 'property',
-        entityId: row.property_id,
-        title: row.property_address_full || row.property_id,
-        subtitle: row.market || undefined,
-        badges: ['Address match'],
-        score: 700,
-        contextIds: { propertyId: row.property_id, masterOwnerId: row.master_owner_id || undefined },
-      }))
-    }
+    for (const row of data || []) results.push(propertyToResult(row, 700))
   }
 
   return results
@@ -1699,6 +1688,57 @@ function propertySearchPredicate(query) {
 }
 
 /**
+ * A MARKET NAME IS A MARKET, NOT ONLY ADDRESS TEXT.
+ *
+ * "Atlanta" probed property_address_full only, so it found the 3,241 rows
+ * whose address text says Atlanta (3,167 in the city plus streets named
+ * Atlanta) and missed the rest of the Atlanta, GA market — 6,397 properties
+ * whose properties.market is the canonical label (Marietta, Decatur, …).
+ * Measured 2026-10-07. A term that names a canonical market (its full label,
+ * or the city part before the comma) now ORs in an exact market match:
+ * address-text matches plus the whole market (6,471 for "Atlanta").
+ *
+ * The canonical labels come from the grouped market facet (direct Postgres,
+ * cached); without it the search stays address-only rather than guessing.
+ */
+export function marketForSearchTerm(term, labels = []) {
+  const t = clean(term).toLowerCase()
+  if (t.length < 3) return null
+  for (const label of labels) {
+    const l = clean(label)
+    if (!l) continue
+    if (l.toLowerCase() === t || clean(l.split(',')[0]).toLowerCase() === t) return l
+  }
+  return null
+}
+
+const postgrestQuote = (value) => `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+
+async function canonicalMarketLabels(deps = {}) {
+  if (deps.marketLabels) return deps.marketLabels()
+  if (!facetsAvailable()) return []
+  try {
+    const rows = await groupedFacetCounts({ source: 'properties', column: 'market' })
+    return rows.map((row) => row.value).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+async function propertySearchPredicateWithMarket(query, deps = {}) {
+  const predicate = propertySearchPredicate(query)
+  if (predicate.kind !== 'address') return predicate
+  const market = marketForSearchTerm(normalizeSearchQuery(query), await canonicalMarketLabels(deps))
+  if (!market) return predicate
+  const like = `%${normalizeAddressSearch(normalizeSearchQuery(query))}%`
+  return {
+    kind: 'address_or_market',
+    market,
+    apply: (qb) => qb.or(`property_address_full.ilike.${postgrestQuote(like)},market.eq.${postgrestQuote(market)}`),
+  }
+}
+
+/**
  * Same routing idea as propertySearchPredicate, for the name-keyed universes.
  *
  * `display_name.ilike.%q%,master_owner_id.ilike.%q%` looks harmless but the
@@ -1728,7 +1768,7 @@ export async function searchEntityGraph(params = {}, deps = {}) {
 
   if (tab === 'properties') {
     const q = query
-    const predicate = propertySearchPredicate(q)
+    const predicate = await propertySearchPredicateWithMarket(q, deps)
     /**
      * count: 'exact', kept.
      *
@@ -1739,7 +1779,7 @@ export async function searchEntityGraph(params = {}, deps = {}) {
      * same class of lie as a chip that disagrees with its list.)
      */
     let dbQuery = predicate.apply(
-      supabase.from('properties').select(PROPERTY_SUMMARY_SELECT, { count: 'exact' }),
+      supabase.from(PROPERTY_BROWSE_SOURCE).select(PROPERTY_BROWSE_SELECT, { count: 'exact' }),
     )
       .order('estimated_value', { ascending: false, nullsFirst: false })
       .range(cursor, cursor + pageSize - 1)
