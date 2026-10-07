@@ -104,7 +104,7 @@ export function createUniverseStore({ loader, clock = () => Date.now(), ttl = UN
     if (e?.promise) return e.promise
     const entry = { ...(e || {}), promise: null, error: null }
     entry.promise = (chain = chain.then(async () => {
-      const g = await loader.guard()
+      const g = await (loader.guardLight ? loader.guardLight() : loader.guard())
       if (!g.ok) throw Object.assign(new Error(g.reason), { code: 'db_busy' })
       const rows = await loader.universeForState(st)
       return shapeUniverse(st, rows, { classify, loadedAt: clock() })

@@ -121,16 +121,26 @@ export const SUMMARY_SQL = Object.freeze({
     from public.mi_geo_month_rollup where build_id = $1 and geo_level = $2 and asset = $3 group by geo_key`,
   geoMonths: `select month::text as month, sales, investor, buyer_known, cash, cash_known, price_n, median_price, ppsf_n, median_ppsf
     from public.mi_geo_month_rollup where build_id = $1 and geo_level = $2 and geo_key = $3 and asset = $4 order by month`,
+  /** Monthly sales for MANY geographies of one level in ONE read (PK prefix: build, level, asset, key). */
+  geoMonthsMany: `select geo_key, month::text as month, sales, investor
+    from public.mi_geo_month_rollup where build_id = $1 and geo_level = $2 and asset = $3 and geo_key = any($4::text[]) order by geo_key, month`,
   buyers: `select comp_id, (sold_on - date '2000-01-01')::int as d, zip, state, city_key, property_type, units, price, qualified, is_investor, buyer
     from public.mi_buyer_activity where build_id = $1`,
 })
 
-/** Decide whether a load may run now. Pure. */
-export function loadAllowed(row) {
+/**
+ * Decide whether a load may run now. Pure.
+ * `light` = a small indexed read (the per-state seller universe: ~5–35K rows, ~0.3 s on
+ * idx_campaign_target_graph_state). It is gated on concurrent load only: a single long
+ * background statement (the campaign-graph seller-batch refresh routinely runs 2–3 minutes)
+ * is not load, and gating on it kept the universe "Not loaded" all day (2026-10-07).
+ * The full raw stream (dev only) keeps the strict rule.
+ */
+export function loadAllowed(row, { light = false } = {}) {
   const active = Number(row?.active) || 0
   const longest = Number(row?.longest) || 0
   if (active > MAX_ACTIVE_SESSIONS) return { ok: false, reason: `database busy (${active} active sessions)` }
-  if (longest > MAX_RUNNING_SECONDS) return { ok: false, reason: `database busy (a query has run ${longest}s)` }
+  if (!light && longest > MAX_RUNNING_SECONDS) return { ok: false, reason: `database busy (a query has run ${longest}s)` }
   return { ok: true }
 }
 
@@ -141,6 +151,11 @@ export function createMarketIntelLoader(deps = {}) {
   async function guard() {
     const res = await query(LOAD_GUARD_SQL, [], 5_000)
     return loadAllowed(res?.rows?.[0])
+  }
+  /** The guard for small indexed reads (see loadAllowed). */
+  async function guardLight() {
+    const res = await query(LOAD_GUARD_SQL, [], 5_000)
+    return loadAllowed(res?.rows?.[0], { light: true })
   }
 
   async function freshness() {
@@ -206,5 +221,5 @@ export function createMarketIntelLoader(deps = {}) {
     return res?.rows || []
   }
 
-  return { guard, freshness, streamSales, aux, universeForState, summarySchema, summary, inferredSchema, inferred }
+  return { guard, guardLight, freshness, streamSales, aux, universeForState, summarySchema, summary, inferredSchema, inferred }
 }

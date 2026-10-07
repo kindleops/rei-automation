@@ -12,7 +12,7 @@ import { dateOfDay, firstDayOfMonth } from '../../src/lib/domain/market-intellig
 import { buildGeographyCatalog, factsFromIndex, searchGeographies, parseGeoId } from '../../src/lib/domain/market-intelligence/mi-geography.js'
 import { METRICS, METRIC_BY_ID, UNSUPPORTED } from '../../src/lib/domain/market-intelligence/mi-metric-registry.js'
 import { rankRows, passesFilters } from '../../src/lib/domain/market-intelligence/mi-metric-values.js'
-import { loadAllowed, missingSummaryColumns, SUMMARY_COLUMNS } from '../../src/lib/domain/market-intelligence/mi-loader.js'
+import { createMarketIntelLoader, loadAllowed, missingSummaryColumns, SUMMARY_COLUMNS } from '../../src/lib/domain/market-intelligence/mi-loader.js'
 import { shapeUniverse, summarizeUniverse } from '../../src/lib/domain/market-intelligence/mi-universe.js'
 import { createMarketIntelService, devRawAllowed, SUMMARY_MISSING_MESSAGE } from '../../src/lib/domain/market-intelligence/mi-service.js'
 
@@ -187,6 +187,7 @@ function fakeSummaryLoader({ summary = referenceSummary(corpus()), schemaMissing
         case 'slice': return summary.period.filter((r) => r.geo_level === a && r.period === b && r.asset === c)
         case 'assets': return summary.period.filter((r) => r.geo_level === 'nation' && r.period === 'all')
         case 'geoMonths': return summary.month.filter((r) => r.geo_level === a && r.geo_key === b && r.asset === c).sort((x, y) => (x.month < y.month ? -1 : 1))
+        case 'geoMonthsMany': { const keys = new Set(params[3]); return summary.month.filter((r) => r.geo_level === a && r.asset === b && keys.has(r.geo_key)).sort((x, y) => (x.geo_key + x.month < y.geo_key + y.month ? -1 : 1)) }
         case 'buyers': return summary.buyers
         case 'monthSums': {
           const [, level, asset, rf, rt, cf, ct, pf, pt] = params
@@ -466,6 +467,60 @@ test('load guard defers on a busy database', () => {
   assert.equal(loadAllowed({ active: 13, longest: 0 }).ok, false)
   assert.equal(loadAllowed({ active: 4, longest: 11 }).ok, false)
   assert.equal(loadAllowed({ active: 4, longest: 2 }).ok, true)
+})
+
+test('light guard (seller universe): one long background statement is not load; session count still is', async () => {
+  // 2026-10-07: the campaign-graph seller-batch refresh runs 2–3 min statements, which kept the strict guard closed all day
+  assert.equal(loadAllowed({ active: 3, longest: 179 }, { light: true }).ok, true)
+  assert.equal(loadAllowed({ active: 13, longest: 0 }, { light: true }).ok, false)
+  assert.equal(loadAllowed({ active: 3, longest: 179 }).ok, false)
+  const loader = createMarketIntelLoader({ query: async () => ({ rows: [{ active: 3, longest: 179 }] }) })
+  assert.equal((await loader.guardLight()).ok, true)
+  assert.equal((await loader.guard()).ok, false)
+})
+
+test('points: every ZIP of the geography with a centroid, rank t over supported values only, thin values kept quiet', async () => {
+  const { svc } = await readyService()
+  const res = await svc.run('points', { within: 'nation:US', metric: 'sales_count' })
+  assert.equal(res.ok, true)
+  assert.ok(res.rows.length > 0)
+  for (const r of res.rows) {
+    assert.equal(r.c.length, 2)
+    if (r.v === null) assert.equal(r.t, null)
+    else assert.ok(r.t >= 0 && r.t <= 1)
+  }
+  const share = await svc.run('points', { within: 'nation:US', metric: 'investor_purchase_share' })
+  assert.ok(share.rows.some((r) => r.v === null && r.s === 'insufficient'), 'a thin share is positioned but not valued')
+  assert.equal(share.without_value, share.rows.filter((r) => r.v === null).length)
+  const inside = await svc.run('points', { within: 'state:TX', metric: 'sales_count' })
+  assert.ok(inside.rows.every((r) => r.id.startsWith('zip:7')))
+  const zip = await svc.run('points', { within: 'zip:55411', metric: 'sales_count' })
+  assert.ok(zip.rows.some((r) => r.id === 'zip:55411'), "a ZIP's map shows its neighbourhood, itself included")
+  assert.equal((await svc.run('points', { within: 'nation:US', metric: 'buyer_evidence_coverage' })).error, 'metric_not_heatable')
+  const inf = await svc.run('points', { within: 'nation:US', metric: 'inferred_investor_count' })
+  assert.equal(inf.rows.length, 0)
+  assert.ok(inf.note)
+})
+
+test('leaders: one registry metric orders the board (no composite score); monthly series from ONE month read', async () => {
+  const { svc, loader } = await readyService()
+  const before = loader.calls.byName.geoMonthsMany || 0
+  const res = await svc.run('leaders', { within: 'state:TX', sort: 'investor_purchase_count', limit: 5 })
+  assert.equal(res.ok, true)
+  assert.equal(res.rows[0].id, 'zip:77002')
+  const vals = res.rows.map((r) => r.values.investor_purchase_count.value)
+  assert.deepEqual(vals, [...vals].sort((a, b) => b - a))
+  assert.equal((loader.calls.byName.geoMonthsMany || 0) - before, 1)
+  assert.ok(res.rows.every((r) => r.spark.length === res.months.length && r.spark_investor.length === res.months.length))
+  assert.ok(res.months.every((m) => m.status !== 'pre_coverage'))
+  const sales = res.rows[0].spark.reduce((t, n) => t + n, 0)
+  assert.ok(sales > 0)
+  await svc.run('leaders', { within: 'state:TX', sort: 'investor_purchase_count', limit: 5 })
+  assert.equal((loader.calls.byName.geoMonthsMany || 0) - before, 1, 'cached')
+  const zip = await svc.run('leaders', { within: 'zip:55411', sort: 'sales_count' })
+  assert.equal(zip.ok, true)
+  assert.notEqual(zip.parent.id, 'zip:55411')
+  assert.equal((await svc.run('leaders', { within: 'nation:US', sort: 'not_a_metric' })).sort, 'investor_purchase_count')
 })
 
 test('dev raw fallback: a busy database defers the stream, honest status', async () => {

@@ -18,7 +18,7 @@
  * agg is the shape in mi-agg.js; ctx = { periodId, window, coverage, windows, asset: { id, codes } }.
  */
 import { aggFromSummaryRow, addBuyer, emptyAgg, finalizeAcc, medianOf } from './mi-agg.js'
-import { createAssetClassifier, ASSET_CODE } from './mi-asset-classes.js'
+import { createAssetClassifier, ASSET_CODE, assetFilterCodes } from './mi-asset-classes.js'
 import { buildGeographyCatalog, factsFromIndex, factsFromSummary, parseGeoId, rawAccessors } from './mi-geography.js'
 import { dateOfDay, dayOfDate, deriveCoverage, firstDayOfMonth, monthOfDay } from './mi-periods.js'
 import { aggregate, aggregateBy, monthlySeries, nationalMonthCounts, rowsOf, F } from './mi-sales-index.js'
@@ -157,6 +157,18 @@ export async function createSummarySource({ loader, build, ref, classify = creat
     }
     return out
   }
+  /** Monthly sales + recorded investor purchases for many geographies of ONE level: one indexed read. */
+  async function geoMonthsMany(level, geoIds, assetId) {
+    const keys = geoIds.map(keyOf)
+    const out = new Map(geoIds.map((g) => [g, new Map()]))
+    if (!keys.length) return out
+    const rows = await loader.summary('geoMonthsMany', [id, level, assetId, keys])
+    for (const r of rows) {
+      const gid = level === 'nation' ? 'nation:US' : `${level}:${r.geo_key}`
+      out.get(gid)?.set(monthOfDay(dayOfDate(r.month)), { sales: Number(r.sales) || 0, investor: Number(r.investor) || 0 })
+    }
+    return out
+  }
   return {
     meta: {
       mode: 'summary', version: `summary:${id}`, build, asOfDay, firstDay, rows: Number(build.source_rows) || 0, coverage, catalog,
@@ -164,7 +176,7 @@ export async function createSummarySource({ loader, build, ref, classify = creat
       reads: { zip_geo: zipGeo.length, buyers: buyers.length, stack_activity: inferred?.activity?.length ?? 0 },
       inferred: inferred ? { available: inferred.available, reason: inferred.available ? null : inferred.reason, errors: inferred.errors ?? null, meta: inferred.meta } : { available: false, reason: 'not_supported', meta: null },
     },
-    levelAggs, geoAgg, geoMonths, buyerName: (k) => k,
+    levelAggs, geoAgg, geoMonths, geoMonthsMany, buyerName: (k) => k,
     /** Top owner-portfolio stacks for a geography and window (companies named only), or null. */
     inferredStacks(geoId, ctx, limit) {
       const level = parseGeoId(geoId)?.level
@@ -213,6 +225,10 @@ export function createRawSource({ index, ref, parcelZipCounty, zipMarket, timing
       inferred: { available: false, reason: 'dev_raw', meta: null } },
     inferredStacks: () => null,
     levelAggs, geoAgg, geoMonths, buyerName: (b) => index.dicts.buyers[b],
+    async geoMonthsMany(level, geoIds, assetId) {
+      const a = assetFilterCodes(assetId || 'all'); const codes = a.ok ? a.codes : null
+      return new Map(await Promise.all(geoIds.map(async (g) => [g, await geoMonths(g, assetId, codes)])))
+    },
     _index: index, F, windowSums: windowSumsFromMonths,
   }
 }

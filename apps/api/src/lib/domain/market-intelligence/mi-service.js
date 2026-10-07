@@ -410,6 +410,8 @@ export function createMarketIntelService(deps = {}) {
         case 'compare': return await compare(p)
         case 'trends': return await trends(p)
         case 'heat': return await heat(p)
+        case 'points': return await points(p)
+        case 'leaders': return await leaders(p)
         case 'recent_sales': return await recentSales(p)
         case 'universe_load': return universeLoad(p)
         default: return fail(400, 'unknown_op')
@@ -671,6 +673,94 @@ export function createMarketIntelService(deps = {}) {
     const quant = (x) => { let lo = 0; let hi = sorted.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] < x) lo = mid + 1; else hi = mid } return sorted.length > 1 ? lo / (sorted.length - 1) : 0.5 }
     for (const r of rows) r.t = Math.max(0, Math.min(1, quant(r.v)))
     return { ok: true, level, metric: metric.id, label: metric.label, unit: metric.unit, window: windowPayload(t.ctx), rows, without_value: missing, note, source: outlines.source }
+  }
+
+  /** The ZIP set a hero map / leaderboard reads for a geography: its own ZIPs, or (for a ZIP) its market's. */
+  function areaParentOf(g) {
+    if (g.level !== 'zip') return g.id
+    return g.parents?.market || g.parents?.county || g.parents?.city || g.parents?.state || 'nation:US'
+  }
+
+  /**
+   * ZIP centroids with one registry metric, for the hero map's density / bubble layer. Every ZIP of
+   * the geography (nationwide: every ZIP with a sale or a property); values are the summary's own, the
+   * position is the catalog centroid. `t` = rank among the ZIPs with a supported value (0..1).
+   * Rows whose value is thin or unavailable keep their position with v = null (drawn quiet, never coloured).
+   */
+  async function points(p) {
+    const metric = METRIC_BY_ID[p.metric]
+    if (!metric || !metric.heatable) return fail(400, 'metric_not_heatable')
+    const within = geoOr404(p.within || 'nation:US')
+    if (!within) return fail(404, 'unknown_geography')
+    const asset = p.asset || 'all'
+    const period = p.period || DEFAULT_PERIOD
+    const base = { ok: true, level: 'zip', within: summaryOf(within), metric: metric.id, label: metric.label, unit: metric.unit }
+    const sup = metricSupports(metric, { level: 'zip', asset })
+    if (!sup.ok) return { ...base, rows: [], without_value: 0, note: sup.reason }
+    if (metric.requires === 'inferred_investor' && !current.source.meta.inferred?.available) return { ...base, rows: [], without_value: 0, note: inferredReasonText(current.source.meta.inferred) }
+    const parentId = areaParentOf(within)
+    return memo(`P|${parentId}|${metric.id}|${period}|${asset}`, async () => {
+      const t = await childTable('zip', parentId, period, asset)
+      const rows = []
+      let without = 0
+      for (const r of t.rows) {
+        const c = r.centroid
+        if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) continue
+        const v = r.values[metric.id]
+        const ok = v?.status === 'ok' && v.value !== null && v.value !== undefined
+        if (!ok) without += 1
+        rows.push({ id: r.id, label: r.label, c: [Math.round(c[0] * 1e4) / 1e4, Math.round(c[1] * 1e4) / 1e4], v: ok ? v.value : null, n: v?.n ?? 0, s: v?.status ?? 'unavailable', sales: r.values.sales_count.value ?? 0 })
+      }
+      const sorted = rows.filter((r) => r.v !== null).map((r) => r.v).sort((a, b) => a - b)
+      const quant = (x) => { let lo = 0; let hi = sorted.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] < x) lo = mid + 1; else hi = mid } return sorted.length > 1 ? lo / (sorted.length - 1) : 0.5 }
+      for (const r of rows) r.t = r.v === null ? null : Math.round(Math.max(0, Math.min(1, quant(r.v))) * 1000) / 1000
+      const vmax = sorted.length ? sorted[sorted.length - 1] : null
+      return { ...base, parent: parentId, window: windowPayload(t.ctx), rows, without_value: without, max: vmax, note: null }
+    })
+  }
+
+  const LEADER_COLUMNS = ['sales_count', 'monthly_sales_rate', 'investor_purchase_count', 'investor_purchase_share', 'buyer_evidence_coverage', 'company_buyer_count', 'repeat_buyer_count',
+    'median_sale_price', 'median_ppsf', 'cash_purchase_share', 'sales_growth', 'inferred_investor_count', 'inferred_investor_share']
+
+  /**
+   * The leaderboard: the top areas of a level inside a geography by ONE registry metric (no composite
+   * score), with the columns an operator reads at a glance and a monthly sales series per row from ONE
+   * indexed read of the month rollup (no per-row queries).
+   */
+  async function leaders(p) {
+    const within = geoOr404(p.within || 'nation:US')
+    if (!within) return fail(404, 'unknown_geography')
+    const parentId = areaParentOf(within)
+    const parent = current.catalog.get(parentId)
+    const level = LEVEL_ORDER.includes(p.level) ? p.level : 'zip'
+    if (LEVEL_ORDER.indexOf(level) <= LEVEL_ORDER.indexOf(parent.level)) return fail(400, 'level_not_below_parent', { message: `${LEVEL_LABEL[level]} is not inside a ${LEVEL_LABEL[parent.level].toLowerCase()}` })
+    const sort = METRIC_BY_ID[p.sort]?.rankable ? p.sort : 'investor_purchase_count'
+    const def = METRIC_BY_ID[sort]
+    const asset = p.asset || 'all'
+    const period = p.period || DEFAULT_PERIOD
+    const sup = metricSupports(def, { level, asset })
+    if (!sup.ok) return fail(400, 'metric_unsupported', { message: sup.reason })
+    const dir = p.dir === 'asc' ? 'asc' : 'desc'
+    const minSales = Math.max(0, Number(p.min_sales) || 0)
+    const limit = Math.min(50, Math.max(1, Number(p.limit) || 15))
+    return memo(`L|${level}|${parentId}|${sort}|${dir}|${minSales}|${limit}|${period}|${asset}`, async () => {
+      const t = await childTable(level, parentId, period, asset)
+      const rows = t.rows.filter((x) => (x.values.sales_count.value ?? 0) >= minSales).map((x) => ({ ...x }))
+      const { ranked, unranked } = rankRows(rows, sort, dir)
+      const top = ranked.slice(0, limit)
+      const months = current.source.meta.coverage.months.filter((m) => m.status !== 'pre_coverage').slice(-12)
+      const assetId = assetFilterCodes(asset).id || 'all'
+      const series = top.length && current.source.geoMonthsMany ? await current.source.geoMonthsMany(level, top.map((r) => r.id), assetId) : new Map()
+      const cols = [...new Set([sort, ...LEADER_COLUMNS])]
+      return {
+        ok: true, level, within: summaryOf(within), parent: summaryOf(parent), sort, dir, min_sales: minSales, window: windowPayload(t.ctx),
+        total: ranked.length, unranked_count: unranked.length, months: months.map(({ label, status }) => ({ label, status })),
+        rows: top.map((r) => {
+          const m = series.get(r.id)
+          return { ...rowOut(r, cols), spark: months.map((x) => m?.get(x.month)?.sales ?? 0), spark_investor: months.map((x) => m?.get(x.month)?.investor ?? 0) }
+        }),
+      }
+    })
   }
 
   /** One honest line: shares carry their evidence base; investor counts are never set against total sales. */
