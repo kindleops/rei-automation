@@ -311,17 +311,20 @@ begin
       if v_bounds is null or jsonb_array_length(v_bounds) <> 11 then
         raise exception 'mi_infer: no link bounds for build % (i:bounds sets them)', p_build;
       end if;
-      v_lo := case when v_arg::int > 0 then v_bounds ->> (v_arg::int - 1) else '' end;  -- '' sorts before every text
+      v_lo := case when v_arg::int > 0 then v_bounds ->> (v_arg::int - 1) end;
       v_hi := case when v_arg::int < 11 then v_bounds ->> v_arg::int end;
-      v_rng := '@ >= ' || quote_literal(v_lo) || coalesce(' and @ < ' || quote_literal(v_hi), '');
+      -- plain range conditions only (index conditions); never OR them with IS NULL, which turns the
+      -- range into a Filter over a FULL index scan (the 12:17Z i:link:0 fixed ~6 s)
+      v_rng := concat_ws(' and ', '@ >= ' || quote_literal(v_lo), '@ < ' || quote_literal(v_hi));
       execute format($q$
         insert into public.mi_sale_owner_link (build_id, comp_id, sold_on, state, zip, city_key, asset, is_mf, buyer_known, is_investor, buyer,
                                                link, tier, corp, trust, oos, resident, stack_n, stack_id)
         with s as materialized (
           select v.comp_id, v.sold_on, v.state, v.zip, v.city_key, v.asset, v.is_mf, v.buyer_known, v.is_investor, v.buyer, v.property_id,
                  v.sold_on = max(v.sold_on) over (partition by v.property_id) as latest
-            from public.mi_rollup_sales_v v
-           where %1$s
+            from (select v.comp_id, v.sold_on, v.state, v.zip, v.city_key, v.asset, v.is_mf, v.buyer_known, v.is_investor, v.buyer, v.property_id
+                    from public.mi_rollup_sales_v v where %1$s
+                  %5$s) v
         ), tx as (
           select t.primary_property_id as property_id, max(t.event_date) as last_event
             from comp_private.comp_canonical_transactions t where %2$s group by 1
@@ -352,9 +355,12 @@ begin
                j.is_corporate_owner, j.is_trust, j.out_of_state_owner, case when j.link = 'linked' then j.resident_any end,
                case when j.mail_key is not null then coalesce(j.props_n, 1) end, j.stack_id
           from j
-      $q$, case when v_arg::int = 0 then format('(v.property_id is null or %s)', replace(v_rng, '@', 'v.property_id'))
-                else replace(v_rng, '@', 'v.property_id') end,
-           replace(v_rng, '@', 't.primary_property_id'), replace(v_rng, '@', 'c.property_id'), replace(v_rng, '@', 'cp.property_id'))
+      $q$, replace(v_rng, '@', 'v.property_id'),
+           replace(v_rng, '@', 't.primary_property_id'), replace(v_rng, '@', 'c.property_id'), replace(v_rng, '@', 'cp.property_id'),
+           -- slice 0 also owns the sales without a property (link = no_property), as its own index condition
+           case when v_arg::int = 0 then 'union all select v.comp_id, v.sold_on, v.state, v.zip, v.city_key, v.asset, v.is_mf, v.buyer_known, '
+                                         || 'v.is_investor, v.buyer, v.property_id from public.mi_rollup_sales_v v where v.property_id is null'
+                else '' end)
       using p_build;
       get diagnostics v_rows = row_count;
 

@@ -181,6 +181,7 @@ test('generated migration: patches the applied objects by insertion; rollback re
   // link v2: contiguous property_id range slices (bounds per build), set-based, no per-row probes
   assert.ok(!/hashtext/.test(mig), 'link slices are property_id ranges, not hash buckets')
   assert.ok(mig.includes("'inferred_link_bounds'") && mig.includes('with s as materialized'))
+  assert.ok(!/property_id is null or/.test(mig) && mig.includes("where v.property_id is null'"), 'slice 0: null property ids as their own index condition, never OR')
   assert.ok(!/exists \(select 1 from comp_private\.comp_canonical_transactions/.test(mig), 'no correlated transfer probe')
   assert.ok(mig.includes('when tx.last_event > s.sold_on + 45 then \'later_transfer\''))
   assert.ok(mig.includes('when cp.last_observed_at::date - s.sold_on < 30 then \'owner_snapshot_before_sale\''))
