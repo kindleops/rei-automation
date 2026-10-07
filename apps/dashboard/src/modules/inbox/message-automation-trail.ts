@@ -112,6 +112,12 @@ export function buildAutomationTrail(metadata: unknown): TrailStep[] {
     steps.push({ key: 'stage', label: 'Stage', value: humanize(after), tone: 'muted' })
   }
 
+  // 4b · Conversation Machine v3 (present only when the server flag is on):
+  // the stage objective, the checklist, what it is waiting for, the seller
+  // situation / negotiation state it used, and the rule that decided — read
+  // from the audit the engine recorded, never inferred here.
+  steps.push(...buildConversationV3Steps(rec(decision.seller_conversation_v3_audit)))
+
   // 5 · a price the parser actually extracted
   const pp = rec(cls.price_parse)
   const facts = rec(rec(rec(rec(cls.shadow_stage_engine).layers).semantic).orchestrator)
@@ -167,6 +173,70 @@ export function buildAutomationTrail(metadata: unknown): TrailStep[] {
     else if (POSITIVE_INTENT.test(intent)) first.tone = 'good'
   }
   return steps
+}
+
+const STAGE_SHORT: Record<string, string> = {
+  S1_ownership: 'S1',
+  S2_interest: 'S2',
+  S3_asking_price: 'S3',
+  S4_condition: 'S4',
+  S4_confirm_basics: 'S4',
+  S5_plus: 'S5+',
+}
+const CHECKLIST_ORDER = ['ownership', 'interest', 'asking_price', 'condition', 'major_repairs', 'update_years', 'occupancy']
+
+/** The v3 audit (automation_decision.seller_conversation_v3_audit) as trail steps. */
+export function buildConversationV3Steps(audit: Rec): TrailStep[] {
+  if (!str(audit.version)) return []
+  const out: TrailStep[] = []
+  const stage = str(audit.stage)
+  const objective = str(audit.objective)
+  if (stage || objective) {
+    out.push({ key: 'v3-objective', label: 'Objective', value: [STAGE_SHORT[stage] || (stage ? humanize(stage) : ''), objective].filter(Boolean).join(' · '), tone: 'accent' })
+  }
+  const checklist = rec(audit.checklist)
+  const fields = CHECKLIST_ORDER.filter((f) => str(checklist[f]))
+  if (fields.length) {
+    const known = fields.filter((f) => checklist[f] === 'known').length
+    const na = fields.filter((f) => checklist[f] === 'not_applicable').length
+    const open = fields.filter((f) => checklist[f] === 'unknown').map((f) => humanize(f).toLowerCase())
+    const head = `${known}/${fields.length - na} known`
+    out.push({
+      key: 'v3-checklist',
+      label: 'Checklist',
+      value: open.length ? `${head} · open: ${open.slice(0, 3).join(', ')}${open.length > 3 ? '…' : ''}` : head,
+      tone: open.length ? 'muted' : 'good',
+    })
+  }
+  const next = str(audit.next_expected)
+  if (next) out.push({ key: 'v3-next', label: 'Waiting for', value: humanize(next), tone: 'muted' })
+  const situation = rec(audit.seller_situation)
+  if (str(situation.situation)) {
+    const angle = str(situation.angle)
+    out.push({ key: 'v3-situation', label: 'Seller situation', value: [humanize(str(situation.situation)), angle ? `angle ${humanize(angle).toLowerCase()}` : ''].filter(Boolean).join(' · '), tone: 'muted' })
+  }
+  const neg = rec(audit.negotiation_state)
+  const quoted = rec(audit.quoted)
+  if (str(neg.position) || num(quoted.amount) !== null) {
+    const amount = num(quoted.amount)
+    out.push({
+      key: 'v3-negotiation',
+      label: 'Negotiation',
+      value: [str(neg.position) ? humanize(str(neg.position)) : '', amount !== null ? `${humanize(str(quoted.kind) || 'quote')} ${money(amount)}` : ''].filter(Boolean).join(' · '),
+      tone: 'accent',
+    })
+  }
+  const rule = str(audit.rule)
+  if (rule) {
+    const terminal = str(audit.terminal_action)
+    out.push({
+      key: 'v3-why',
+      label: 'Why',
+      value: humanize(rule.replace(/^v3_/, '').replace(/:.*$/, '')) + (terminal ? ` · then ${humanize(terminal).toLowerCase()}` : ''),
+      tone: 'muted',
+    })
+  }
+  return out
 }
 
 /** One quiet line for a collapsed trail: intent · confidence · sentiment. */
