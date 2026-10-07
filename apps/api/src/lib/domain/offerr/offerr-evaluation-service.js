@@ -25,6 +25,7 @@ import {
   normalizePropertyFeatures,
 } from '@/lib/acquisition/acquisitionDecisionEngine.js';
 import { loadV3CompCandidates } from '@/lib/acquisition/compCandidateLoader.js';
+import { resolveV3Authority } from '@/lib/acquisition/v3Authority.js';
 import { classifyAssetLane } from '@/lib/acquisition/assetClassification.js';
 import { LANE_FAMILY, readFeatureFlag } from '@/lib/acquisition/modelConstants.js';
 import { child } from '@/lib/logging/logger.js';
@@ -451,8 +452,16 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
         now,
         targetAssignmentFee: num(deps.targetAssignmentFee) ?? undefined,
         v3Enabled,
+        // V3 authority (2026-10-07): when V3 comes from the flag (every
+        // production caller), it is shadow unless the owner cut this market +
+        // lane over (v3Authority.js); shadow output lands in evidence.v3_shadow
+        // only. An explicit deps.v3Enabled (tests) keeps the pre-merge contract.
+        ...(v3Enabled
+          ? { v3Mode: deps.v3Mode ?? (deps.v3Enabled !== undefined ? 'live' : resolveV3Authority({ v3Enabled: true, subject }).mode) }
+          : {}),
         v3CompCandidates: v3Loaded?.candidates ?? null,
         v3LoaderDiagnostics: loaderDiagnostics,
+        v3InvestorEvidence: v3Loaded?.investor_evidence ?? null,
       });
     } catch (error) {
       timings.engine_ms = Date.now() - stageStart;

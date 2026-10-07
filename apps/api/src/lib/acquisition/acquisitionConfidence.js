@@ -117,7 +117,12 @@ export function buildConfidenceAndExecution({
   const retailEss = universeDepth(universes[U.RETAIL_MLS_VALUE]);
   // Wholesale-cash depth = investor-compatible universes ONLY (retail/new-construction/
   // ARV/distressed/government routed elsewhere cannot lend wholesale depth).
-  const wholesaleEss = investorEss + institutionalEss + publicEss;
+  // MERGED (2026-10-07): the merged investor universe already contains every
+  // investor-compatible buyer (recorded investor / institutional / cash /
+  // inferred owner entity), so the V3 institutional and public universes would
+  // re-count the same deeds. Depth is the merged universe alone.
+  const mergedInvestor = universes[U.LOCAL_INVESTOR_VALUE]?.model === 'merged_investor_rules';
+  const wholesaleEss = mergedInvestor ? investorEss : investorEss + institutionalEss + publicEss;
   const dominantU = dom;
   const dominantEss = num(dominantU?.accepted_independent_transaction_count, 0);
 

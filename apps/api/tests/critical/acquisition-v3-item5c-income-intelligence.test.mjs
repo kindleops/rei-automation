@@ -282,7 +282,9 @@ test('global SHADOW identifies the exact supporting strategy (Item 5B duplex reg
   const comp = (id, p, d, s) => normalizeCandidate(cand(id, p, d, s), raw(id, p), null);
   const DUP = { property_id: 'd', property_type: 'Duplex', property_address_zip: Z, building_square_feet: 2400, units_count: 2, estimated_value: 300000, monthly_rent: 2600, tax_amt: 4200, year_built: 1986, building_condition: 'Average' };
   const comps = [comp('a', 295000, '2025-03-01', 2350), comp('b', 305000, '2025-06-01', 2450), comp('c', 300000, '2025-09-01', 2400)];
-  const v3 = buildV3Decision({ subjectRow: DUP, qualification: qualifyComps(DUP, comps), buyerPurchases: [], now: NOW }).v3;
+  // Pre-merge contract (legacy_bridge). The merged engine routes 2-4 units to REVIEW
+  // (owner rule 2026-10-07; covered in acquisition-v3-merged.test.mjs).
+  const v3 = buildV3Decision({ subjectRow: DUP, qualification: qualifyComps(DUP, comps), buyerPurchases: [], now: NOW, offerModel: 'legacy_bridge' }).v3;
   assert.equal(v3.execution_state, 'SHADOW_MODE_READY');
   const b = v3.execution_state_basis;
   assert.ok(b.execution_state_basis_strategy, 'a supporting strategy must be named');

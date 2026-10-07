@@ -21,6 +21,8 @@ import {
 import { qualifyComps } from './transactionQualification.js';
 import { buildV3Decision } from './v3DecisionPipeline.js';
 import { loadV3CompCandidates } from './compCandidateLoader.js';
+import { resolveV3Authority, V3_AUTHORITY_MODES } from './v3Authority.js';
+import { canonicalRowToEngineComp, loadV3MergedCandidates } from './v3CanonicalCandidates.js';
 import { MAD_MIN_OBSERVATIONS, readFeatureFlag } from './modelConstants.js';
 
 /** market_status values that mean a live listing exists (so an MLS listing
@@ -3322,9 +3324,16 @@ export function calculateAcquisitionDecision({
   buyerPurchases = [],
   now = new Date(),
   targetAssignmentFee = DEFAULT_TARGET_ASSIGNMENT_FEE,
-  v3Enabled = readFeatureFlag('ACQUISITION_ENGINE_V3_ENABLED'),
+  v3Enabled: v3EnabledArg = undefined,
+  // V3 authority (2026-10-07). 'shadow' | 'live'. When omitted: a caller that
+  // passed v3Enabled explicitly keeps the pre-merge (live) contract; otherwise
+  // it is resolved from the flags + owner cutover (v3Authority.js). Production
+  // persisting callers (scoreProperty, Offerr) always pass the resolved mode.
+  v3Mode = null,
   v3CompCandidates = null,
   v3LoaderDiagnostics = null,
+  // MERGED engine: canonical corpus rows for the investor rules (loader output).
+  v3InvestorEvidence = null,
   // Read-only shadow analysis only. Defaults to ON; production never passes it.
   compIntegrityEnabled = true,
 } = {}) {
@@ -3332,6 +3341,15 @@ export function calculateAcquisitionDecision({
     rawSubject?.asset_family
       ? { ...rawSubject }
       : normalizePropertyFeatures(rawSubject, { source: 'properties', now });
+  const v3Enabled = v3EnabledArg !== undefined ? v3EnabledArg : readFeatureFlag('ACQUISITION_ENGINE_V3_ENABLED');
+  const v3Authority = v3Enabled
+    ? v3Mode
+      ? { mode: v3Mode === V3_AUTHORITY_MODES.LIVE ? V3_AUTHORITY_MODES.LIVE : V3_AUTHORITY_MODES.SHADOW, reasons: ['caller_supplied_mode'] }
+      : v3EnabledArg !== undefined
+        ? { mode: V3_AUTHORITY_MODES.LIVE, reasons: ['explicit_v3_enabled_caller'] }
+        : resolveV3Authority({ v3Enabled, subject })
+    : null;
+  const v3Live = v3Authority?.mode === V3_AUTHORITY_MODES.LIVE;
 
   // V3 transaction-qualification layer (mission §2–§4). Default OFF behind a
   // feature flag — when disabled the V2 path below is byte-for-byte unchanged.
@@ -3346,9 +3364,13 @@ export function calculateAcquisitionDecision({
   if (v3Enabled) {
     const v3Source = Array.isArray(v3CompCandidates) ? v3CompCandidates : rawComps;
     const classification = classifyAssetLane(subjectRow);
-    subject.canonical_asset_lane = classification.lane;
     const qualification = qualifyComps(subjectRow, v3Source);
-    compsForScoring = qualification.accepted.map((entry) => entry.raw).filter(Boolean);
+    // SHADOW: V2 keeps its own comps and its subject untouched (no lane write);
+    // V3 only runs beside it. LIVE: the pre-merge contract below.
+    if (v3Live) {
+      subject.canonical_asset_lane = classification.lane;
+      compsForScoring = qualification.accepted.map((entry) => entry.raw).filter(Boolean);
+    }
     v3 = { classification, qualification, loaderDiagnostics: v3LoaderDiagnostics };
   }
 
@@ -3529,15 +3551,38 @@ export function calculateAcquisitionDecision({
         ? 'no_eligible_comps_found'
         : 'comps_selected';
   let v3Block = null;
-  if (v3Enabled && v3) {
+  let v3ShadowBlock = null;
+  if (v3Enabled && v3 && !v3Live) {
     const v3Decision = buildV3Decision({
       subjectRow,
       qualification: v3.qualification,
       buyerPurchases,
       now,
       loaderDiagnostics: v3.loaderDiagnostics,
+      investorEvidence: v3InvestorEvidence
+        ? { ...v3InvestorEvidence, gate: v3InvestorEvidence.gate ?? canonicalEngineGate(subject, now) }
+        : null,
+      assetIdentityConflict: hasAssetIdentityConflict(subject),
+      authorityMode: v3Authority.mode,
     });
-    v3Block = v3Decision.v3;
+    // SHADOW: V3 goes to evidence.v3_shadow ONLY. Nothing below touches the
+    // V2 valuation / offer objects, so every live column stays V2.
+    v3ShadowBlock = { ...v3Decision.v3, authority: v3Authority, surfaced_preview: v3Decision.surfaced };
+  }
+  if (v3Live && v3) {
+    const v3Decision = buildV3Decision({
+      subjectRow,
+      qualification: v3.qualification,
+      buyerPurchases,
+      now,
+      loaderDiagnostics: v3.loaderDiagnostics,
+      investorEvidence: v3InvestorEvidence
+        ? { ...v3InvestorEvidence, gate: v3InvestorEvidence.gate ?? canonicalEngineGate(subject, now) }
+        : null,
+      assetIdentityConflict: hasAssetIdentityConflict(subject),
+      authorityMode: v3Authority.mode,
+    });
+    v3Block = { ...v3Decision.v3, authority: v3Authority };
     const surfaced = v3Decision.surfaced;
     // Surface V3 reconciled valuation + (executable-only) offer onto the
     // V2-facing objects. Non-executable states yield null authorized offers;
@@ -3702,6 +3747,7 @@ export function calculateAcquisitionDecision({
       ...ownerSituation.evidence.safety_gates,
     },
     v3: v3Block,
+    ...(v3ShadowBlock ? { v3_shadow: v3ShadowBlock } : {}),
   };
 
   return {
@@ -3719,7 +3765,22 @@ export function calculateAcquisitionDecision({
     decision,
     best_strategy: bestStrategy,
     v3: v3Block,
+    ...(v3ShadowBlock ? { v3_shadow: v3ShadowBlock } : {}),
     evidence,
+  };
+}
+
+// The production engine's comp gates on a canonical corpus row (radius and age
+// belong to the merged lane rules, so those reasons are not taken from here).
+const CANONICAL_GATE_IGNORED = new Set(['outside_radius', 'sale_too_old', 'outside_zip_without_coordinates']);
+function canonicalEngineGate(subject, now) {
+  return (row) => {
+    const comp = normalizePropertyFeatures(canonicalRowToEngineComp(row, subject), {
+      source: 'mv_map_market_sales',
+      distance_miles: row.distance_miles,
+      now,
+    });
+    return evaluateCompEligibility(subject, comp, now).reasons.filter((r) => !CANONICAL_GATE_IGNORED.has(r));
   };
 }
 
@@ -4189,7 +4250,15 @@ export async function scoreProperty(propertyId, deps = {}) {
     now,
   });
   const v3Enabled = deps.v3Enabled ?? readFeatureFlag('ACQUISITION_ENGINE_V3_ENABLED');
-  const v3Loader = deps.loadV3CompCandidates ?? loadV3CompCandidates;
+  // The persisting path ALWAYS resolves the V3 authority from the flags and the
+  // owner cutover (even when v3Enabled is passed explicitly, e.g. by the
+  // backfill): V3 may only write live columns in an owner-cutover market+lane.
+  const v3Authority = v3Enabled
+    ? deps.v3Mode
+      ? { mode: deps.v3Mode }
+      : resolveV3Authority({ v3Enabled: true, subject })
+    : null;
+  const v3Loader = deps.loadV3CompCandidates ?? loadV3MergedCandidates;
   const [comps, buyerPurchases, v3Loaded] = await Promise.all([
     compLoader(subject, deps),
     buyerLoader(subject, deps),
@@ -4210,8 +4279,10 @@ export async function scoreProperty(propertyId, deps = {}) {
     now,
     targetAssignmentFee,
     v3Enabled,
+    ...(v3Authority ? { v3Mode: v3Authority.mode } : {}),
     v3CompCandidates: v3Loaded?.candidates ?? null,
     v3LoaderDiagnostics: v3Loaded?.diagnostics ?? null,
+    v3InvestorEvidence: v3Loaded?.investor_evidence ?? null,
   });
   const row = scoreRowFromDecision(normalizedId, decision, now);
   // Mint the immutable lineage id BEFORE either write so it travels inside the

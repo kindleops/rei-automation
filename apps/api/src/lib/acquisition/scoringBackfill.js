@@ -343,6 +343,20 @@ export function compactBackfillEvidence(evidence, { runId = null, now = new Date
       return rest;
     });
   }
+  // V3 SHADOW (only present when ACQUISITION_ENGINE_V3_ENABLED): keep the
+  // decision summary, drop the per-comp ledgers (re-derivable on a full run).
+  const v3ShadowCompacted = Boolean(ev.v3_shadow && typeof ev.v3_shadow === 'object');
+  if (v3ShadowCompacted) {
+    const { rejected_comps: _r, clusters: _c, universes = {}, ...shadowRest } = ev.v3_shadow;
+    ev.v3_shadow = {
+      ...shadowRest,
+      universes: Object.fromEntries(Object.entries(universes).map(([k, u]) => {
+        if (!u || typeof u !== 'object') return [k, u];
+        const { comps: _uc, ledger: _ul, peer_excluded: _pe, peer_review_only: _pr, ...uRest } = u;
+        return [k, uRest];
+      })),
+    };
+  }
   // No snapshot is written for a backfill row, so it must not carry an id
   // that looks like monetary lineage.
   delete ev.immutable_snapshot_id;
@@ -354,7 +368,10 @@ export function compactBackfillEvidence(evidence, { runId = null, now = new Date
     monetary_authority: false,
     rejected_comp_count: rejected.length,
     rejected_reason_census: reasonCensus,
-    dropped: ['rejected_comps', 'selected_comps[].match_breakdown', 'selected_comps[].feature_match_breakdown'],
+    dropped: [
+      'rejected_comps', 'selected_comps[].match_breakdown', 'selected_comps[].feature_match_breakdown',
+      ...(v3ShadowCompacted ? ['v3_shadow.rejected_comps', 'v3_shadow.clusters', 'v3_shadow.universes[].comps|ledger|peer_*'] : []),
+    ],
     v3_enabled: v3Enabled,
     scored_at: now.toISOString(),
   };

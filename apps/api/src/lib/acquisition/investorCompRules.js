@@ -1,86 +1,35 @@
 /**
- * RETIRED AS AN ENGINE (2026-10-07). This module is now a FROZEN TEST ORACLE
- * only: its comp rules and offer math were merged into Acquisition Engine V3
- * (investorCompRules.js, offerEconomics.buildCashOfferMerged, the merged
- * LOCAL_INVESTOR_VALUE in valuationUniverses.js). Do not import it from
- * production code and do not edit its rules: tests/unit/acquisition-v3-merged.test.mjs
- * and the merged shadow backtest assert parity against it. Delete it once the
- * merged engine has been cut over and parity has held for a release.
+ * ACQUISITION ENGINE V3 (MERGED) — investor-universe comp rules.
  *
- * INVESTOR VALUATION v3 — SHADOW ONLY (owner brief 2026-10-06).
+ * Ported from the v3.1 shadow engine (shadow/investorValuationV3.js, commit
+ * a4d2f613), which is now RETIRED as an engine and kept only as a frozen test
+ * oracle (tests/unit/acquisition-v3-merged.test.mjs asserts value parity).
+ * This module owns LOCAL_INVESTOR_VALUE inside V3 (valuationUniverses.js) when
+ * the candidate set carries canonical corpus rows
+ * (comp_private.comp_canonical_transactions via the PROPOSED
+ * get_v3_sales_candidates RPC, or the shadow adapter in v3CanonicalCandidates.js).
  *
- * "Offers are way too low. Off-market in the area is 140-160K and our engine
- *  says offer 80-90K. It must be MASSIVELY recorrected."
- *
- * v3 values an SFR subject at what OFF-MARKET INVESTORS actually pay for it
- * as-is, from recorded sales (public.mv_map_market_sales + the owner-of-record
- * snapshot in comp_private.comp_properties). Nothing here is wired into
- * scoring, offers, crons or routes, and nothing here writes. The production
- * engine is not imported or modified.
- *
- * THE DOUBLE COUNT IT FIXES (evidence in tmp/valuation-v3/REPORT.txt):
- *   production value  = weighted comp price + (comp_repairs - subject_repairs)
- *   production MAO    = 0.70 x value - subject_repairs
- *   Both repair figures are the same formula ($35/sqft for ~88% of SFR
- *   records, regardless of condition), so the comp adjustment nets to ~0 and
- *   the value is an AS-IS value (comps priced as sold). The 0.70 rule is an
- *   ARV rule: it already reserves rehab, holding and profit. Applying it to an
- *   as-is value AND subtracting repairs counts the rehab twice and the
- *   investor discount once more on top -> offer ~0.45 x value.
- *   v3 prices the as-is investor purchase directly, so its buyer ceiling is
- *   the investor value itself; the offer is that ceiling less our assignment
- *   fee. Repairs enter ONLY as a condition DIFFERENCE between subject and comp
- *   (and only when the records actually differ in condition tier).
- *
- * SOURCE: public.mv_map_market_sales, whose 't:' rows ARE the canonical
- * recorded transactions (comp_private.comp_canonical_transactions, current to
- * the import), joined to comp_private.comp_properties for features, tract,
- * subdivision, lot, condition and the owner-of-record snapshot. Not the frozen
- * v_recent_sold_comps pool (max sale 2026-05-08). The production engine's comp
- * gates (normalizePropertyFeatures + evaluateCompEligibility) are injected by
- * the caller as `gate` and recorded as engine_gate:<reason>.
- *
- * MODEL v3.1 (every comp keeps its include/exclude reason and each weight factor):
+ * Rules (each comp keeps its include/exclude reason and every weight factor):
  *   weight = distance x barrier x subdivision x recency x similarity x condition x buyer
- *   distance     SFR 0.5 ^ (miles / 0.5); >= 2.5 mi is not comparable (excluded).
- *                MF: radius 5 mi (2-4 units) / 10 mi (5+), adaptive half-life =
- *                distance of the 6th-nearest qualified sale, bounded.
- *   barrier      same census tract 1.0, other tract same county 0.55, other
- *                county 0.30, tract unknown 0.80. A tract boundary is the proxy
- *                for a major road / highway / river / rail line until TIGER road
- *                geometry is loaded (see report).
- *   subdivision  same recorded plat x2.0, same subdivision base name x1.6; a
- *                same-subdivision comp within 20% sqft / 10 years keeps
- *                similarity >= 0.9 (owner: small differences = strong comp)
- *   recency      0.5 ^ (months / 9) SFR, 24 months max (MF 12-18 / 24-36)
- *   similarity   sqft (gate +-35%), beds (gate +-2), baths, year built (gate:
- *                > 30 years or a modern-vs-older era), lot (gate: > 3x and
- *                > 0.5 acre bigger); MF: unit count band, sqft per door
- *   condition    repair-rate tier equal 1.0, different 0.7
- *   buyer        recorded investor / cash, off-market 1.0; inferred investor
- *                (owner model) strong 0.9, likely 0.75; off-market individual /
- *                unknown 0.30. MLS comps are MLS comps: investor via MLS 0.5,
- *                retail MLS 0.15, and never the investor basis.
- *   price adj.   SFR size elasticity (subject/comp sqft)^0.6 (clamped +-25%),
- *                condition tier delta x subject sqft x 0.5 (clamped +-15%);
- *                MF price per door x (sqft per door)^0.3 (clamped +-15%)
- *   outliers     absolute junk (< $25K, < $15/sqft, < $10K/door, distressed /
- *                non-arm's-length deeds, portfolio and multi-parcel
- *                considerations, builder / bank / government buyers, new
- *                construction, a flip resale), then within the set:
- *                |ln(p / weighted median)| > max(3 x 1.4826 x MAD, 0.35) is out;
- *                no comp may carry > 35% of the weight, and a dominant comp
- *                > 25% away from the rest is removed (no outlier drives an offer).
- *   estimate     weighted geometric mean of the top 12 investor comps (MF: per
- *                door x real unit count, with a per-door q25-q75 range). When
- *                fewer than 3 investor comps survive, the whole arm's-length
- *                set is valued and scaled by the local investor/all-sales ratio
- *                (method market_ratio_fallback).
+ *   distance  SFR 0.5^(mi/0.5), >= 2.5 mi excluded (owner rule); MF 2-4 radius 5 mi,
+ *             5+ radius 10 mi, adaptive half-life (6th-nearest qualified sale, bounded)
+ *   barrier   same tract 1.0 / other tract same county 0.55 / other county 0.30 /
+ *             unknown 0.80 (proxy for highway/river/rail until TIGER lines exist)
+ *   subdivision same plat x2.0, same base name x1.6 (+ similarity floor 0.9)
+ *   recency   0.5^(months/9) SFR, 24 mo max (MF 12/24, 5+ 18/36)
+ *   not comparable: era (>30 y, modern vs pre-1990), lot (>3x and >0.5 ac bigger),
+ *             sqft +-35%, beds +-2, new construction, flip resale, junk/distressed
+ *             deeds, portfolio and multi-parcel considerations, builder/bank/gov
+ *   outliers  weighted log-MAD fence, 35% weight cap, dominant-comp removal
+ *   estimate  weighted geometric mean of the top 12 investor comps (MF: per door
+ *             x the REAL unit count, never an inferred 1); < 3 investor comps ->
+ *             market_ratio_fallback (all arm's-length x local investor ratio).
+ * Pure and deterministic; no I/O.
  */
-import { classifyOwner } from '../../domain/market-intelligence/mi-inferred-investor.js';
+import { classifyOwner } from '../domain/market-intelligence/mi-inferred-investor.js';
 
-export const V3 = Object.freeze({
-  version: 'investor-valuation-v3.1-shadow',
+export const INVESTOR_RULES_SFR = Object.freeze({
+  version: 'acq-v3m-investor-rules-sfr (from investor-valuation-v3.1)',
   lane: 'sfr',
   // SFR radius: comps at >= 2.5 mi are NOT comparable (owner rule); inside it
   // the distance half-life of 0.5 mi does the rest (1.5 mi -> 0.125 weight).
@@ -139,9 +88,9 @@ export const V3 = Object.freeze({
  *   2-4 units: 2-4 unit comps, radius 5 mi (half-life 1.0 mi), 24 months.
  *   5+ units:  0.5x-2x the door count, radius 10 mi (half-life 2.5 mi), 36 months.
  */
-export const V3_MF24 = Object.freeze({
-  ...V3,
-  version: 'investor-valuation-v3.1-mf24-shadow',
+export const INVESTOR_RULES_MF24 = Object.freeze({
+  ...INVESTOR_RULES_SFR,
+  version: 'acq-v3m-investor-rules-mf24 (from investor-valuation-v3.1)',
   lane: 'mf24',
   radiusMiles: 5,
   distanceHalfLifeMiles: 1,
@@ -157,9 +106,9 @@ export const V3_MF24 = Object.freeze({
   minHalfLifeMiles: 0.5,
   perDoorBandMinLog: 0.15,
 });
-export const V3_MF5 = Object.freeze({
-  ...V3_MF24,
-  version: 'investor-valuation-v3.1-mf5-shadow',
+export const INVESTOR_RULES_MF5 = Object.freeze({
+  ...INVESTOR_RULES_MF24,
+  version: 'acq-v3m-investor-rules-mf5 (from investor-valuation-v3.1)',
   lane: 'mf5',
   radiusMiles: 10,
   distanceHalfLifeMiles: 2.5,
@@ -173,12 +122,12 @@ export const V3_MF5 = Object.freeze({
 /** The lane for a subject: real unit count first, then the recorded type. */
 export function laneFor(subject = {}) {
   const u = num(subject.units) !== null && num(subject.units) > 0 ? num(subject.units) : null;
-  if (u !== null && u >= 5) return V3_MF5;
-  if (u !== null && u >= 2) return V3_MF24;
-  return V3;
+  if (u !== null && u >= 5) return INVESTOR_RULES_MF5;
+  if (u !== null && u >= 2) return INVESTOR_RULES_MF24;
+  return INVESTOR_RULES_SFR;
 }
 
-export const V3_REASONS = Object.freeze({
+export const INVESTOR_RULE_REASONS = Object.freeze({
   unpriced: 'v3_unpriced',
   self: 'v3_subject_own_sale',
   leak: 'v3_on_or_after_as_of',
@@ -269,7 +218,7 @@ export function normalizeSubdivision(name) {
  * when the sale is linked to today's owner of record.
  * Returns { type, investor, weight, evidence[] }.
  */
-export function classifyCompBuyer(row = {}, params = V3) {
+export function classifyCompBuyer(row = {}, params = INVESTOR_RULES_SFR) {
   const mls = row.source === 'mls';
   const cls = text(row.buyer_class);
   const evidence = [];
@@ -305,51 +254,51 @@ export function repairRate(repairs, sqft) {
 
 // ── qualification ─────────────────────────────────────────────────────────────
 /** Deed / record level junk rules. Returns the exclusion reasons ([] = usable). */
-export function qualifyRow(row, subject, ctx = {}, params = V3) {
+export function qualifyRow(row, subject, ctx = {}, params = INVESTOR_RULES_SFR) {
   const reasons = [];
   const price = num(row.price);
-  if (!(price > 0)) return [V3_REASONS.unpriced];
-  if (text(row.property_id) && text(row.property_id) === text(subject.property_id)) reasons.push(V3_REASONS.self);
-  if (ctx.asOf && day(row.sold_on) >= day(ctx.asOf)) reasons.push(V3_REASONS.leak);
-  if (!Number.isFinite(num(row.lat)) || !Number.isFinite(num(row.lng))) reasons.push(V3_REASONS.noCoords);
+  if (!(price > 0)) return [INVESTOR_RULE_REASONS.unpriced];
+  if (text(row.property_id) && text(row.property_id) === text(subject.property_id)) reasons.push(INVESTOR_RULE_REASONS.self);
+  if (ctx.asOf && day(row.sold_on) >= day(ctx.asOf)) reasons.push(INVESTOR_RULE_REASONS.leak);
+  if (!Number.isFinite(num(row.lat)) || !Number.isFinite(num(row.lng))) reasons.push(INVESTOR_RULE_REASONS.noCoords);
   const type = text(row.property_type);
   const mf = params.lane !== 'sfr';
-  if (!mf && (!['Single Family', 'SFR', 'Townhouse', ''].includes(type) || (num(row.units) ?? 1) > 1)) reasons.push(V3_REASONS.asset);
+  if (!mf && (!['Single Family', 'SFR', 'Townhouse', ''].includes(type) || (num(row.units) ?? 1) > 1)) reasons.push(INVESTOR_RULE_REASONS.asset);
   if (mf) {
     const cu = pos(row.units);
     const su = pos(subject.units);
-    if (cu === null || su === null) reasons.push(V3_REASONS.unitsUnknown);
-    else if (!unitBandOk(su, cu, params)) reasons.push(V3_REASONS.unitBand);
-    else if (price / cu < params.junkMinPerDoor) reasons.push(V3_REASONS.junkPerDoor);
+    if (cu === null || su === null) reasons.push(INVESTOR_RULE_REASONS.unitsUnknown);
+    else if (!unitBandOk(su, cu, params)) reasons.push(INVESTOR_RULE_REASONS.unitBand);
+    else if (price / cu < params.junkMinPerDoor) reasons.push(INVESTOR_RULE_REASONS.junkPerDoor);
   }
-  if (price < params.junkMinPrice) reasons.push(V3_REASONS.junkPrice);
+  if (price < params.junkMinPrice) reasons.push(INVESTOR_RULE_REASONS.junkPrice);
   const sqft = pos(row.sqft);
-  if (!mf && sqft && price / sqft < params.junkMinPpsf) reasons.push(V3_REASONS.junkPpsf);
-  if (row.is_arms_length === false) reasons.push(V3_REASONS.nonArms);
-  if (row.doc_type && DISTRESSED_DEED.test(row.doc_type)) reasons.push(V3_REASONS.distressedDeed);
-  if ((num(row.portfolio_size) ?? 1) >= 2) reasons.push(V3_REASONS.portfolio);
-  if (ctx.bulkOf && ctx.bulkOf(row)) reasons.push(V3_REASONS.bulk);
-  if (['builder', 'bank', 'government'].includes(text(row.buyer_class))) reasons.push(V3_REASONS.excludedBuyer);
+  if (!mf && sqft && price / sqft < params.junkMinPpsf) reasons.push(INVESTOR_RULE_REASONS.junkPpsf);
+  if (row.is_arms_length === false) reasons.push(INVESTOR_RULE_REASONS.nonArms);
+  if (row.doc_type && DISTRESSED_DEED.test(row.doc_type)) reasons.push(INVESTOR_RULE_REASONS.distressedDeed);
+  if ((num(row.portfolio_size) ?? 1) >= 2) reasons.push(INVESTOR_RULE_REASONS.portfolio);
+  if (ctx.bulkOf && ctx.bulkOf(row)) reasons.push(INVESTOR_RULE_REASONS.bulk);
+  if (['builder', 'bank', 'government'].includes(text(row.buyer_class))) reasons.push(INVESTOR_RULE_REASONS.excludedBuyer);
   const yb = pos(row.year_built);
   const saleYear = Number(String(day(row.sold_on)).slice(0, 4));
-  if (yb && saleYear && yb >= saleYear - 1) reasons.push(V3_REASONS.newConstruction);
-  if (ctx.flipResaleIds?.has(row.comp_id)) reasons.push(V3_REASONS.flipResale);
+  if (yb && saleYear && yb >= saleYear - 1) reasons.push(INVESTOR_RULE_REASONS.newConstruction);
+  if (ctx.flipResaleIds?.has(row.comp_id)) reasons.push(INVESTOR_RULE_REASONS.flipResale);
   const sSqft = pos(subject.sqft);
-  if (!mf && sSqft && sqft && Math.abs(sqft - sSqft) / sSqft > params.maxSqftDiff) reasons.push(V3_REASONS.sqft);
+  if (!mf && sSqft && sqft && Math.abs(sqft - sSqft) / sSqft > params.maxSqftDiff) reasons.push(INVESTOR_RULE_REASONS.sqft);
   const sBeds = pos(subject.beds);
   const beds = pos(row.beds);
-  if (!mf && sBeds !== null && beds !== null && Math.abs(beds - sBeds) > params.maxBedDiff) reasons.push(V3_REASONS.beds);
+  if (!mf && sBeds !== null && beds !== null && Math.abs(beds - sBeds) > params.maxBedDiff) reasons.push(INVESTOR_RULE_REASONS.beds);
   const sYb = pos(subject.year_built);
   if (sYb && yb && (Math.abs(yb - sYb) > params.maxYearBuiltDiff
-    || (yb >= params.modernEra && sYb < params.olderEra) || (sYb >= params.modernEra && yb < params.olderEra))) reasons.push(V3_REASONS.yearEra);
+    || (yb >= params.modernEra && sYb < params.olderEra) || (sYb >= params.modernEra && yb < params.olderEra))) reasons.push(INVESTOR_RULE_REASONS.yearEra);
   const sLot = pos(subject.lot_sqft);
   const lot = pos(row.lot_sqft);
-  if (sLot && lot && lot > sLot * params.maxLotRatio && lot - sLot > params.minLotExcessSqft) reasons.push(V3_REASONS.lotMuchBigger);
+  if (sLot && lot && lot > sLot * params.maxLotRatio && lot - sLot > params.minLotExcessSqft) reasons.push(INVESTOR_RULE_REASONS.lotMuchBigger);
   return reasons;
 }
 
 /** Multifamily unit band: 2-4 unit subjects take 2-4 unit comps; 5+ take 0.5x-2x the count. */
-export function unitBandOk(subjectUnits, compUnits, params = V3_MF24) {
+export function unitBandOk(subjectUnits, compUnits, params = INVESTOR_RULES_MF24) {
   if (params.lane === 'mf24') return compUnits >= 2 && compUnits <= 4;
   return compUnits >= 5 && compUnits / subjectUnits >= params.unitRatioMin && compUnits / subjectUnits <= params.unitRatioMax;
 }
@@ -359,7 +308,7 @@ export function unitBandOk(subjectUnits, compUnits, params = V3_MF24) {
  * months at >= 1.3x the first: the later sale is a renovated resale (retail
  * ARV evidence), not an as-is investor price. Returns the later comp ids.
  */
-export function flipResaleIds(rows, params = V3) {
+export function flipResaleIds(rows, params = INVESTOR_RULES_SFR) {
   const byParcel = new Map();
   for (const r of rows) {
     if (!text(r.property_id) || !(num(r.price) > 0)) continue;
@@ -397,7 +346,7 @@ export function bulkIndex(bulkRows = []) {
 }
 
 // ── weights + adjustments ─────────────────────────────────────────────────────
-export function compWeight(row, subject, asOf, params = V3) {
+export function compWeight(row, subject, asOf, params = INVESTOR_RULES_SFR) {
   const d = num(row.distance_miles);
   const distance = d === null ? 0 : 0.5 ** (d / params.distanceHalfLifeMiles);
 
@@ -470,7 +419,7 @@ export function compWeight(row, subject, asOf, params = V3) {
   };
 }
 
-export function adjustCompPrice(row, subject, params = V3) {
+export function adjustCompPrice(row, subject, params = INVESTOR_RULES_SFR) {
   const price = num(row.price);
   const adjustments = [];
   if (params.lane !== 'sfr') {
@@ -521,7 +470,7 @@ export function weightedQuantile(items, key, q) {
 }
 
 /** Within-set outliers on log price around the weighted median. Mutates status. */
-export function rejectOutliers(comps, params = V3) {
+export function rejectOutliers(comps, params = INVESTOR_RULES_SFR) {
   if (comps.length < 3) return { median: null, mad: null, fence: null, method: 'insufficient_count' };
   const logs = comps.map((c) => ({ ...c, lp: Math.log(c.adjusted_price) }));
   const med = weightedQuantile(logs, 'lp', 0.5);
@@ -530,7 +479,7 @@ export function rejectOutliers(comps, params = V3) {
   const fence = Math.max(params.outlierMadK * 1.4826 * mad, params.outlierMinLog);
   for (const c of comps) {
     const d = Math.log(c.adjusted_price) - med;
-    if (Math.abs(d) > fence) { c.status = 'excluded'; c.reasons = [d < 0 ? V3_REASONS.outlierLow : V3_REASONS.outlierHigh]; }
+    if (Math.abs(d) > fence) { c.status = 'excluded'; c.reasons = [d < 0 ? INVESTOR_RULE_REASONS.outlierLow : INVESTOR_RULE_REASONS.outlierHigh]; }
   }
   return { median: round(Math.exp(med)), mad: round(mad, 4), fence: round(fence, 4), method: 'weighted_log_mad' };
 }
@@ -548,9 +497,9 @@ export function capShares(top, maxShare) {
   }
 }
 
-function estimateFrom(comps, params = V3) {
+function estimateFrom(comps, params = INVESTOR_RULES_SFR) {
   const top = [...comps].sort((a, b) => b.weight - a.weight).slice(0, params.topK);
-  for (const c of comps) if (!top.includes(c)) { c.status = 'excluded'; c.reasons = [V3_REASONS.outsideTopK]; }
+  for (const c of comps) if (!top.includes(c)) { c.status = 'excluded'; c.reasons = [INVESTOR_RULE_REASONS.outsideTopK]; }
   if (!top.length || !top.reduce((s, c) => s + c.weight, 0)) return null;
   capShares(top, params.maxCompShare);
   const W = top.reduce((s, c) => s + c.weight, 0);
@@ -585,9 +534,9 @@ function confidenceOf(est, method) {
  * (sales strictly before it). Returns value, the explained comp ledger and
  * the v3 offer.
  */
-export function valueSubjectV3({ subject, rows = [], bulkRows = [], asOf, offerParams = undefined, params = laneFor(subject), gate = null }) {
+export function valueInvestorUniverse({ subject, rows = [], bulkRows = [], bulkOf: bulkOfIn = null, asOf, params = laneFor(subject), gate = null }) {
   const ledger = [];
-  const bulkOf = bulkIndex(bulkRows);
+  const bulkOf = bulkOfIn ?? bulkIndex(bulkRows);
   const lat = num(subject.latitude);
   const lng = num(subject.longitude);
   const priorRows = rows.filter((r) => !asOf || day(r.sold_on) < day(asOf));
@@ -602,10 +551,10 @@ export function valueSubjectV3({ subject, rows = [], bulkRows = [], asOf, offerP
     // The production engine's comp gates (normalizePropertyFeatures + evaluateCompEligibility),
     // injected by the caller so this module stays engine-free. Radius / age come from the lane.
     if (gate) for (const g of gate(r)) reasons.push(`engine_gate:${g}`);
-    if (d === null || d >= params.radiusMiles) reasons.push(params.lane === 'sfr' && d !== null ? V3_REASONS.beyondSfrMax : V3_REASONS.outsideRadius);
-    if (age !== null && age > params.months) reasons.push(V3_REASONS.tooOld);
+    if (d === null || d >= params.radiusMiles) reasons.push(params.lane === 'sfr' && d !== null ? INVESTOR_RULE_REASONS.beyondSfrMax : INVESTOR_RULE_REASONS.outsideRadius);
+    if (age !== null && age > params.months) reasons.push(INVESTOR_RULE_REASONS.tooOld);
     const key = `${text(r.property_id) || r.comp_id}|${day(r.sold_on)}`;
-    if (!reasons.length && seen.has(key)) reasons.push(V3_REASONS.duplicate);
+    if (!reasons.length && seen.has(key)) reasons.push(INVESTOR_RULE_REASONS.duplicate);
     if (reasons.length) { ledger.push(explainRow(r, 'excluded', reasons)); continue; }
     seen.add(key);
     usable.push(r);
@@ -664,7 +613,7 @@ export function valueSubjectV3({ subject, rows = [], bulkRows = [], asOf, offerP
       const W = rest.reduce((s, c) => s + c.weight, 0);
       const restMid = Math.exp(rest.reduce((s, c) => s + c.weight * Math.log(c.adjusted_price), 0) / W);
       if (Math.abs(Math.log(top.adjusted_price / restMid)) > params.dominantOutlierLog && top.share >= 0.2) {
-        top.status = 'excluded'; top.reasons = [V3_REASONS.dominantOutlier];
+        top.status = 'excluded'; top.reasons = [INVESTOR_RULE_REASONS.dominantOutlier];
         dominant = { comp_id: top.comp_id, share: top.share, adjusted_price: roundMoney(top.adjusted_price), rest_value: roundMoney(restMid) };
         for (const c of pool) if (c !== top) { c.weight = c.weight_uncapped ?? c.weight; delete c.share; }
         const ratioMul = method === 'investor_comps' ? 1 : ratio.ratio;
@@ -706,12 +655,12 @@ export function valueSubjectV3({ subject, rows = [], bulkRows = [], asOf, offerP
   }
   const retail = retailContext(usable, params, subject);
   const comps = [...usable.map((c) => explainComp(c)), ...ledger];
-  return { value, retail_context: retail, offer: computeOfferV3({ value, subject, retail }, offerParams), comps,
+  return { value, retail_context: retail, comps,
     census: { rows: rows.length, usable: usable.length, investor: investorSet.length, excluded: ledger.length } };
 }
 
 /** Local investor / all-sales $/sqft ratio (weighted medians) for the fallback. */
-export function localInvestorRatio(usable, params = V3) {
+export function localInvestorRatio(usable, params = INVESTOR_RULES_SFR) {
   const mf = params.lane !== 'sfr';
   const ok = (c) => (mf ? pos(c.units) > 0 : num(c.sqft) > 0) && num(c.price) > 0;
   const pt = (c) => ({ weight: c.factors.distance * c.factors.recency + 1e-9, v: mf ? c.price / c.units : c.price / c.sqft });
@@ -725,7 +674,7 @@ export function localInvestorRatio(usable, params = V3) {
 }
 
 /** Retail (MLS) as-sold context for the fair-market guard: never above market. */
-function retailContext(usable, params = V3, subject = {}) {
+function retailContext(usable, params = INVESTOR_RULES_SFR, subject = {}) {
   const r = usable.filter((c) => c.source === 'mls').map((c) => ({ weight: c.factors.distance * c.factors.recency * c.factors.similarity, adjusted_price: c.adjusted_price }));
   if (r.length < 3) return { mid: null, n: r.length };
   const m = weightedQuantile(r, 'adjusted_price', 0.5);
@@ -746,41 +695,7 @@ function explainRow(r, status, reasons) {
     distance_miles: r.distance_miles, doc_type: r.doc_type ?? null, buyer_class: r.buyer_class ?? null, status, reasons };
 }
 
-// ── offer ─────────────────────────────────────────────────────────────────────
-/**
- * PROPOSED v3 offer parameters (owner approval required). The value is the
- * as-is investor purchase price, so it IS the buyer ceiling (less a
- * confidence haircut). Repairs are never subtracted again.
- */
-export const V3_OFFER = Object.freeze({
-  version: 'investor-offer-v3.1-proposed',
-  haircutByConfidence: Object.freeze([[70, 0], [50, 0.03], [0, 0.06]]),
-  fallbackExtraHaircut: 0.03,
-  // Backtest calibration (post-2026-05-08 recorded off-market investor purchases):
-  // the v3 value's median bias vs the actual price was SFR +8.9%, 2-4 units
-  // +15.3%, 5+ units +11.5%. The ceiling removes it before the fee.
-  calibrationByLane: Object.freeze({ sfr: 0.08, mf24: 0.15, mf5: 0.12 }),
-  // Assignment fee = the existing margin-policy bands (assignmentMarginPolicy):
-  // SFR 10% (+2% under a $150K ceiling), 2-4 units 11%, 5+ units 6%; $15K floor.
-  feePct: 0.1,
-  feePctSmallDeal: 0.12,
-  feePctByLane: Object.freeze({ mf24: 0.11, mf5: 0.06 }),
-  smallDealCeiling: 150_000,
-  feeFloor: 15_000,
-  feeCap: 40_000,
-  feeCapByLane: Object.freeze({ mf24: 60_000, mf5: Infinity }),
-  negotiationBandPct: 0.03,
-  negotiationBandMin: 5_000,
-  minOfferToValue: 0.35,
-  maxOfferToValue: 0.9,
-});
 
-/**
- * The value is the as-is investor purchase price, so it IS the buyer ceiling
- * (less a confidence haircut). Repairs are never subtracted again. MLS is
- * secondary evidence: an investor value above the retail as-sold context is a
- * REVIEW flag, not a price input.
- */
 /**
  * The record's repair figure is an import formula ($15 / $35 / $75 per sqft by
  * rehab tier), not an inspection. It is LOW confidence unless a real condition
@@ -798,99 +713,6 @@ export function repairEvidence(subject = {}) {
     used_as: 'condition_tier_difference_only',
   };
 }
-
-export function computeOfferV3({ value, subject = {}, retail = null }, p = V3_OFFER) {
-  const mid = num(value?.mid);
-  if (!mid) return { recommended_cash_offer: null, buyer_ceiling: null, reasons: ['no_value'], params_version: p.version };
-  const lane = value.lane ?? 'sfr';
-  const conf = num(value.confidence) ?? 0;
-  let haircut = p.haircutByConfidence.find(([min]) => conf >= min)[1];
-  if (value.method !== 'investor_comps') haircut += p.fallbackExtraHaircut;
-  const reasons = [];
-  const calibration = p.calibrationByLane?.[lane] ?? 0;
-  const ceiling = mid * (1 - calibration) * (1 - haircut);
-  const retailMid = num(retail?.mid);
-  if (retailMid && ceiling > retailMid) reasons.push('investor_ceiling_above_retail_context_review');
-  const pct = lane === 'sfr' ? (ceiling < p.smallDealCeiling ? p.feePctSmallDeal : p.feePct) : p.feePctByLane[lane];
-  const cap = lane === 'sfr' ? p.feeCap : p.feeCapByLane[lane];
-  const fee = clamp(ceiling * pct, p.feeFloor, cap);
-  const offer = Math.max(0, ceiling - fee);
-  const band = Math.max(p.negotiationBandMin, mid * p.negotiationBandPct);
-  const repairs = num(subject.estimated_repairs);
-  const sanity = {
-    offer_to_value: round(offer / mid, 3),
-    within_bounds: offer / mid >= p.minOfferToValue && offer / mid <= p.maxOfferToValue,
-    repairs_to_value: repairs !== null ? round(repairs / mid, 3) : null,
-  };
-  if (!sanity.within_bounds) reasons.push('offer_outside_sanity_bounds_review');
-  const out = {
-    params_version: p.version,
-    lane,
-    buyer_ceiling: roundMoney(ceiling), // the MAO: what the end investor pays as-is
-    assignment_fee_target: roundMoney(fee),
-    recommended_cash_offer: roundMoney(offer),
-    minimum_acceptable_offer: roundMoney(Math.max(0, offer - band)),
-    confidence_haircut_pct: round(haircut * 100, 1),
-    calibration_pct: round(calibration * 100, 1),
-    repairs_basis: 'embedded_in_as_is_investor_comps_not_subtracted_again',
-    repairs_evidence: repairEvidence(subject),
-    sanity, reasons,
-  };
-  const units = num(value.per_door?.units);
-  if (lane !== 'sfr' && units) {
-    out.per_door = { offer: roundMoney(offer / units), ceiling: roundMoney(ceiling / units), value_range: value.per_door.label };
-  }
-  return out;
-}
-
-// ── read-only SQL ────────────────────────────────────────────────────────────
-/**
- * Candidate sales in the bbox with the comp's geography, condition and the
- * owner-of-record signals for the inferred-investor link (mi_owner_link@1):
- * latest sale of the parcel, no later recorded sale > 45 days after, owner
- * snapshot observed >= 30 days after the sale.
- * $1 lat, $2 lng, $3 radius mi, $4 since (incl), $5 as-of (excl), $6 cap.
- */
-export const CANDIDATE_ROWS_SQL = `
-select m.comp_id, m.source, m.sold_on::text sold_on, m.price::float8 price, m.lat, m.lng, m.property_id, m.address, m.city, m.state, m.zip,
-  m.property_type, m.beds::float8 beds, m.baths::float8 baths, m.sqft::float8 sqft, m.year_built, m.units::float8 units,
-  m.portfolio_size, m.buyer_class, m.is_investor, m.buyer_kind, m.doc_type, m.is_cash_purchase, m.is_arms_length, m.price_source,
-  m.estimated_value::float8 estimated_value,
-  cp.subdivision_name, cp.census_tract, cp.fips, cp.estimated_repair_cost::float8 estimated_repair_cost, cp.condition_code,
-  cp.lot_sqft::float8 lot_sqft,
-  (m.buyer is null and m.buyer_kind is null
-    and not exists (select 1 from public.mv_map_market_sales m2 where m2.property_id = m.property_id and m2.sold_on > m.sold_on + 45)
-    and cp.last_observed_at::date >= m.sold_on + 30) as owner_linked,
-  cp.is_corporate_owner as owner_corporate, cp.is_trust as owner_trust, cp.out_of_state_owner as owner_out_of_state,
-  case when cp.owner_mailing_identity_key_v1 is null or cp.is_corporate_owner is true then null
-       else (select count(*) from (select 1 from comp_private.comp_properties c2 where c2.owner_mailing_identity_key_v1 = cp.owner_mailing_identity_key_v1 limit 5) s)::int end as owner_mail_stack
-from public.mv_map_market_sales m
-left join comp_private.comp_properties cp on cp.property_id = m.property_id
-where m.sold_on >= $4::date and m.sold_on < $5::date and m.price > 0
-  and m.lat between $1::float8 - $3::float8 / 68.5 and $1::float8 + $3::float8 / 68.5
-  and m.lng between $2::float8 - $3::float8 / (68.5 * greatest(cos(radians($1::float8)), 0.05))
-              and $2::float8 + $3::float8 / (68.5 * greatest(cos(radians($1::float8)), 0.05))
-  and coalesce(m.property_type, 'Single Family') in ('Single Family', 'SFR', 'Townhouse')
-order by m.sold_on desc
-limit $6`;
-
-/** The same read for the multifamily lanes (recorded MF types or a real count >= 2). */
-export const CANDIDATE_ROWS_MF_SQL = CANDIDATE_ROWS_SQL.replace(
-  "and coalesce(m.property_type, 'Single Family') in ('Single Family', 'SFR', 'Townhouse')",
-  "and (m.property_type in ('Multi-Family', 'Apartment', 'Duplex', 'Triplex', 'Quadruplex') or m.units >= 2)",
-);
-
-/**
- * Subject geography: the 7 nearest parcels of the owner snapshot around the
- * subject point (public.properties ids are not comp_properties ids, and
- * properties.situs_census_tract is ~32% filled). $1 lat, $2 lng.
- */
-export const SUBJECT_GEO_SQL = `
-select cp.fips, cp.county_name, cp.census_tract, cp.subdivision_name,
-  (3958.8 * 2 * asin(sqrt(sin(radians(cp.latitude - $1::float8) / 2) ^ 2 + cos(radians($1::float8)) * cos(radians(cp.latitude)) * sin(radians(cp.longitude - $2::float8) / 2) ^ 2)))::float8 as miles
-from comp_private.comp_properties cp
-where cp.latitude between $1::float8 - 0.003 and $1::float8 + 0.003 and cp.longitude between $2::float8 - 0.0036 and $2::float8 + 0.0036
-order by miles asc limit 7`;
 
 /**
  * Pure: the subject's { fips, census_tract, subdivision_name } from its own
@@ -920,5 +742,3 @@ export function resolveSubjectGeography({ own = {}, neighbors = [] } = {}) {
   if (!subdivision_name && same?.subdivision_name) { subdivision_name = same.subdivision_name; subdivisionBasis = 'same_point_parcel'; }
   return { fips, census_tract, subdivision_name, basis: { tract: tractBasis, subdivision: subdivisionBasis } };
 }
-
-export default { V3, V3_MF24, V3_MF5, laneFor, V3_OFFER, V3_REASONS, valueSubjectV3, computeOfferV3, normalizeSubdivision, classifyCompBuyer, qualifyRow, compWeight, adjustCompPrice, rejectOutliers, flipResaleIds, bulkIndex };

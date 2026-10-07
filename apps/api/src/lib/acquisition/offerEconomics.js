@@ -98,3 +98,126 @@ export function buildCashOffer({
     bridge,
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* MERGED V3 offer (v3.1 math) — owner approval required before any cutover.  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The investor universe prices the AS-IS off-market investor purchase, so the
+ * value already embeds the end buyer's rehab, holding, closing and profit.
+ * Nothing is subtracted from it again (the legacy bridge above subtracted the
+ * full repair estimate AND 13% end-buyer costs from a p25 exit -> ~44% of the
+ * investor price). Ceiling = value x (1 - calibration) x (1 - confidence
+ * haircut); offer = ceiling - assignment fee (existing margin-policy bands).
+ */
+export const MERGED_OFFER_POLICY = Object.freeze({
+  version: 'acq-v3m-offer-1 (from investor-offer-v3.1-proposed)',
+  haircutByConfidence: Object.freeze([[70, 0], [50, 0.03], [0, 0.06]]),
+  fallbackExtraHaircut: 0.03,
+  // Measured median bias of the investor value vs recorded off-market investor
+  // purchases (post-2026-05-08): SFR +8.9%, 2-4 units +15.3%, 5+ +11.5%.
+  calibrationByLane: Object.freeze({ sfr: 0.08, mf24: 0.15, mf5: 0.12 }),
+  feePct: 0.1,
+  feePctSmallDeal: 0.12,
+  feePctByLane: Object.freeze({ mf24: 0.11, mf5: 0.06 }),
+  smallDealCeiling: 150_000,
+  feeFloor: 15_000,
+  feeCap: 40_000,
+  feeCapByLane: Object.freeze({ mf24: 60_000, mf5: Infinity }),
+  negotiationBandPct: 0.03,
+  negotiationBandMin: 5_000,
+  minOfferToValue: 0.35,
+  maxOfferToValue: 0.9,
+});
+
+// Merged money rounds to $100 (identical to the v3.1 oracle it replaces).
+const round100 = (v) => (v === null || !Number.isFinite(v) ? null : Math.round(v / 100) * 100);
+
+/**
+ * @param {object} p
+ * @param {number|null} p.investorValue  as-is investor value (base)
+ * @param {'sfr'|'mf24'|'mf5'} p.lane
+ * @param {number} p.confidence   investor-universe confidence 0-100
+ * @param {string} p.method       'investor_comps' | 'market_ratio_fallback'
+ * @param {number|null} p.retailMid  MLS as-sold context (review flag only)
+ * @param {number|null} p.units   REAL unit count (MF per-door only)
+ * @param {object|null} p.repairEvidence  informational; never subtracted
+ */
+export function buildCashOfferMerged({
+  investorValue,
+  lane = 'sfr',
+  confidence = 0,
+  method = 'investor_comps',
+  retailMid = null,
+  units = null,
+  repairEvidence = null,
+  policy = MERGED_OFFER_POLICY,
+} = {}) {
+  const mid = Number.isFinite(Number(investorValue)) && Number(investorValue) > 0 ? Number(investorValue) : null;
+  if (!mid) {
+    return { available: false, offer_model: 'merged_v31', unavailable_reason: 'no_qualified_investor_value', bridge: [], reasons: ['no_qualified_investor_value'], policy_version: policy.version };
+  }
+  const conf = Number.isFinite(Number(confidence)) ? Number(confidence) : 0;
+  let haircut = policy.haircutByConfidence.find(([min]) => conf >= min)[1];
+  if (method !== 'investor_comps') haircut += policy.fallbackExtraHaircut;
+  const calibration = policy.calibrationByLane[lane] ?? policy.calibrationByLane.sfr;
+  const ceilingRaw = mid * (1 - calibration) * (1 - haircut);
+  const reasons = [];
+  if (Number(retailMid) > 0 && ceilingRaw > Number(retailMid)) reasons.push('investor_ceiling_above_retail_context_review');
+  const pct = lane === 'sfr' ? (ceilingRaw < policy.smallDealCeiling ? policy.feePctSmallDeal : policy.feePct) : policy.feePctByLane[lane];
+  const cap = lane === 'sfr' ? policy.feeCap : policy.feeCapByLane[lane];
+  const feeRaw = clamp(ceilingRaw * pct, policy.feeFloor, cap);
+  const offerRaw = Math.max(0, ceilingRaw - feeRaw);
+  const band = Math.max(policy.negotiationBandMin, mid * policy.negotiationBandPct);
+  const ceiling = round100(ceilingRaw);
+  const fee = round100(feeRaw);
+  const offer = round100(offerRaw);
+  const minimum = round100(Math.max(0, offerRaw - band));
+  const offerToValue = round(offerRaw / mid, 3);
+  const withinBounds = offerRaw / mid >= policy.minOfferToValue && offerRaw / mid <= policy.maxOfferToValue;
+  if (!withinBounds) reasons.push('offer_outside_sanity_bounds_review');
+  const realUnits = Number.isInteger(Number(units)) && Number(units) >= 2 ? Number(units) : null;
+  const out = {
+    available: true,
+    offer_model: 'merged_v31',
+    policy_version: policy.version,
+    lane,
+    investor_value: round100(mid),
+    // The end investor's as-is MAO: what a cash buyer pays (value less calibration/haircut).
+    buyer_ceiling: ceiling,
+    conservative_buyer_exit: ceiling,
+    opening_cash_offer: minimum,
+    target_cash_offer: offer,
+    recommended_cash_offer: offer,
+    // Our maximum while preserving the assignment fee target (not the buyer ceiling).
+    maximum_cash_offer: offer,
+    walkaway_cash_price: offer,
+    minimum_acceptable_offer: minimum,
+    projected_assignment_fee: fee,
+    projected_gross_margin: fee,
+    projected_net_margin: round100(fee - mid * 0.005),
+    margin_on_exit: round(fee / ceilingRaw, 4),
+    margin_on_cost: offerRaw > 0 ? round(fee / offerRaw, 4) : null,
+    margin_pct_used: round(pct, 4),
+    calibration_pct: round(calibration * 100, 1),
+    confidence_haircut_pct: round(haircut * 100, 1),
+    repairs_basis: 'embedded_in_as_is_investor_comps_not_subtracted_again',
+    repairs_evidence: repairEvidence,
+    sanity: { offer_to_value: offerToValue, within_bounds: withinBounds, min: policy.minOfferToValue, max: policy.maxOfferToValue },
+    cost_breakdown: { buyer_repairs: 0, buyer_closing: 0, buyer_holding: 0, buyer_disposition: 0, contingency: 0, acquisition_margin: fee },
+    bridge: [
+      { step: 'as_is_investor_value', amount: round100(mid) },
+      { step: 'less_calibration', amount: -round100(mid * calibration), pct: round(calibration, 4) },
+      { step: 'less_confidence_haircut', amount: -round100(mid * (1 - calibration) * haircut), pct: round(haircut, 4) },
+      { step: 'buyer_ceiling', amount: ceiling },
+      { step: 'less_assignment_fee', amount: -fee, pct: round(pct, 4) },
+      { step: 'recommended_cash_offer', amount: offer },
+    ],
+    reasons,
+  };
+  if (realUnits && lane !== 'sfr') {
+    out.per_unit = { units: realUnits, offer: round100(offerRaw / realUnits), ceiling: round100(ceilingRaw / realUnits), value: round100(mid / realUnits) };
+  }
+  return out;
+}

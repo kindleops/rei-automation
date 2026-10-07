@@ -38,6 +38,7 @@ import {
   recencyScore,
   monthsBetween,
 } from './acquisitionMath.js';
+import { valueInvestorUniverse, laneFor as investorLaneFor } from './investorCompRules.js';
 
 /** Configurable institutional buyer registry (seedable from buyer_entities_v2). */
 export const INSTITUTIONAL_BUYER_PATTERNS = [
@@ -331,8 +332,109 @@ function incomeUniverse(subjectRow, family, anchors) {
   };
 }
 
+// V3 transaction-qualification codes that also remove a canonical row from the
+// merged investor universe (price-integrity defenses). Identity-resolution and
+// review-only codes are NOT applied: the merged rules weight unresolved buyers
+// (public_other 0.30) and use them only in the market-ratio fallback.
+const MERGED_BLOCKING_QUALIFICATION = new Set([
+  'missing_or_invalid_consideration', 'nominal_consideration', 'duplicate_parcel_row',
+  'package_consideration_unresolved', 'asset_lane_mismatch', 'price_exceeds_lane_ceiling',
+  'nominal_price_above_max', 'implausible_ppsf_high', 'implausible_ppsf_low', 'implausible_ppu_high',
+  'implausible_ppu_low', 'price_vs_anchor_high', 'price_vs_anchor_low',
+]);
+
+/**
+ * MERGED LOCAL_INVESTOR_VALUE: the v3.1 comp rules (investorCompRules.js) run
+ * on canonical corpus rows. V3 transaction qualification still applies as a
+ * second gate (package / duplicate / lane / implausible-price codes), recorded
+ * on each excluded row as v3_qualification:<code>.
+ *
+ * @param {object} evidence { subject, rows, bulkRows?, bulkOf?, asOf, gate? }
+ */
+export function buildMergedInvestorUniverse(evidence = {}, qualification = null) {
+  const subject = evidence.subject ?? {};
+  const params = investorLaneFor(subject);
+  const blocked = new Map();
+  for (const r of qualification?.rejected ?? []) {
+    if (r.redundant || !['EXCLUDE', 'QUARANTINE'].includes(r.status)) continue;
+    const id = clean(r.raw?.comp_id ?? r.raw?.id);
+    const codes = (r.reasons ?? []).filter((c) => MERGED_BLOCKING_QUALIFICATION.has(c));
+    if (id && codes.length) blocked.set(id, codes.map((c) => `v3_qualification:${c}`));
+  }
+  const engineGate = typeof evidence.gate === 'function' ? evidence.gate : null;
+  const gate = (row) => [...(engineGate ? engineGate(row) : []), ...(blocked.get(clean(row.comp_id)) ?? [])];
+  const res = valueInvestorUniverse({
+    subject,
+    rows: evidence.rows ?? [],
+    bulkRows: evidence.bulkRows ?? [],
+    bulkOf: evidence.bulkOf ?? null,
+    asOf: evidence.asOf,
+    params,
+    gate,
+  });
+  const v = res.value;
+  const selected = res.comps.filter((c) => c.status === 'selected');
+  const base = {
+    universe: U.LOCAL_INVESTOR_VALUE,
+    model: 'merged_investor_rules',
+    rules_version: params.version,
+    lane: params.lane,
+    method: v.method,
+    basis: v.basis,
+  };
+  if (!v.mid) {
+    return {
+      ...base,
+      available: false,
+      unavailable_reason: params.lane === 'sfr'
+        ? 'no_qualified_investor_comps_within_2_5mi'
+        : `no_qualified_investor_comps_within_${params.radiusMiles}mi`,
+      value_classification: null,
+      low: null, mid: null, high: null, p25: null, p75: null,
+      effective_sample_size: 0,
+      accepted_independent_transaction_count: 0,
+      confidence: 0,
+      census: res.census,
+      retail_context: res.retail_context,
+      comps: [],
+      ledger: res.comps.slice(0, 60),
+    };
+  }
+  const avgSimilarity = selected.length
+    ? (selected.reduce((s, c) => s + (c.factors?.similarity ?? 0) * (c.share ?? 0), 0) /
+        Math.max(1e-9, selected.reduce((s, c) => s + (c.share ?? 0), 0))) * 100
+    : 0;
+  return {
+    ...base,
+    available: true,
+    unavailable_reason: null,
+    value_classification: VC.QUALIFIED,
+    low: v.low,
+    mid: v.mid,
+    high: v.high,
+    weighted_median: v.mid,
+    p25: v.low,
+    p75: v.high,
+    raw_row_count: res.census.rows,
+    transaction_cluster_count: v.selected,
+    accepted_independent_transaction_count: v.selected,
+    effective_sample_size: v.n_eff,
+    avg_similarity: round(avgSimilarity, 1),
+    geographic_score: v.weighted_distance_miles == null ? null : round(clamp(100 - v.weighted_distance_miles * 12, 25, 100), 1),
+    dispersion: v.dispersion_log,
+    confidence: v.confidence,
+    investor_value: v,
+    per_door: v.per_door ?? null,
+    retail_context: res.retail_context,
+    census: res.census,
+    source_lineage: ['comp_canonical_transactions'],
+    comps: selected.slice(0, 25),
+    ledger: res.comps.filter((c) => c.status !== 'selected').slice(0, 60),
+  };
+}
+
 /** @returns {{ universes: Record<string, object>, family: string }} */
-export function buildValuationUniverses(subjectRow = {}, qualification, buyerPurchases = [], now = new Date()) {
+export function buildValuationUniverses(subjectRow = {}, qualification, buyerPurchases = [], now = new Date(), options = {}) {
   const subjectLane = qualification?.anchors?.lane ?? classifyAssetLane(subjectRow).lane;
   const family = LANE_FAMILY[subjectLane] ?? ASSET_FAMILIES.UNKNOWN;
   const accepted = qualification?.accepted ?? [];
@@ -379,7 +481,9 @@ export function buildValuationUniverses(subjectRow = {}, qualification, buyerPur
   const byUniverse = (name) => enriched.filter((e) => e.universe === name);
 
   const universes = {
-    [U.LOCAL_INVESTOR_VALUE]: buildUniverse(U.LOCAL_INVESTOR_VALUE, byUniverse(U.LOCAL_INVESTOR_VALUE)),
+    [U.LOCAL_INVESTOR_VALUE]: options.investorEvidence
+      ? buildMergedInvestorUniverse(options.investorEvidence, qualification)
+      : buildUniverse(U.LOCAL_INVESTOR_VALUE, byUniverse(U.LOCAL_INVESTOR_VALUE)),
     [U.INSTITUTIONAL_VALUE]: buildUniverse(U.INSTITUTIONAL_VALUE, byUniverse(U.INSTITUTIONAL_VALUE)),
     [U.RETAIL_MLS_VALUE]: buildUniverse(U.RETAIL_MLS_VALUE, byUniverse(U.RETAIL_MLS_VALUE)),
     [U.PUBLIC_RECORD_ARM_LENGTH_VALUE]: buildUniverse(

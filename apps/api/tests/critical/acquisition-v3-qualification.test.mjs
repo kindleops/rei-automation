@@ -81,6 +81,9 @@ test('retail-led SFR: NOVATION may lead when fully qualified', () => {
 test('duplex creative: subject-to is UNDERWRITTEN_SHADOW only with verified debt; DATA_REQUIRED without', () => {
   const duplexComps = [300000, 318000, 312000, 325000].map((p, i) => sfr(`d${i}`, p, { type: 'Duplex', units: 2, sqft: 2400, buyer: 'DUO LLC', date: `2025-0${i + 3}-01` }));
   const withDebt = { property_id: 'C', property_type: 'Duplex', property_address_zip: Z, building_square_feet: 2400, units_count: 2, estimated_value: 320000, monthly_rent: 3200, total_loan_balance: 180000, total_loan_payment: 1250, tax_amt: 4200 };
+  // Pre-merge creative-strategy contract (legacy_bridge): the merged engine sends
+  // every 2-4 unit property to REVIEW (owner rule 2026-10-07; see acquisition-v3-merged.test.mjs).
+  const decide = (subject, comps) => buildV3Decision({ subjectRow: subject, qualification: qualifyComps(subject, comps), buyerPurchases: [], now: NOW, offerModel: 'legacy_bridge' });
   const d1 = decide(withDebt, duplexComps);
   const st1 = entryFor(d1.v3, STRATEGIES.SUBJECT_TO);
   assert.equal(st1.qualification_status, Q.UNDERWRITTEN_SHADOW);

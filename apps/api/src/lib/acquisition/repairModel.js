@@ -29,7 +29,19 @@ export function estimateRepairs(subjectRow = {}, { family = ASSET_FAMILIES.UNKNO
   let confidence;
   let source;
   const known = num(subjectRow.estimated_repair_cost);
-  if (known !== null && known >= 0) {
+  // The import writes estimated_repair_cost as a flat tier rate x sqft ($15 /
+  // $35 / $75 per sqft: 88% of SFR records are exactly $35/sqft regardless of
+  // condition). That is a formula, not an inspection: LOW confidence unless a
+  // real condition is recorded (2026-10-07 merge; it was labelled 85).
+  const flatRate = known !== null && known > 0 && sqft > 0 ? Math.round(known / sqft) : null;
+  const importFormula = flatRate !== null && [15, 35, 75].includes(flatRate) && Math.abs(known - flatRate * sqft) <= 1;
+  const realCondition = /heavy|gut|tear|condemn|poor|distress|fire|major|moderate|fixer|fair|needs work|dated|light|good|updated|turnkey|renovated|excellent/.test(lower(conditionText));
+  if (known !== null && known >= 0 && importFormula && !realCondition) {
+    mid = known;
+    confidence = 30;
+    source = 'import_flat_rate_per_sqft';
+    assumptions.push(`import_flat_rate_per_sqft=${flatRate}`, 'low_confidence_formula_not_inspection');
+  } else if (known !== null && known >= 0) {
     mid = known;
     confidence = 85;
     source = 'subject_estimated_repair_cost';

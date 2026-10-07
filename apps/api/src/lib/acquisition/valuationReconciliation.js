@@ -90,7 +90,26 @@ export function reconcileValuation(universes = {}, family = ASSET_FAMILIES.UNKNO
   let investorExit = {
     conservative: null, base: null, optimistic: null, classification: null, confidence: 0,
   };
-  if (wholesaleEntries.length) {
+  const mergedInvestor = investor?.model === 'merged_investor_rules';
+  if (mergedInvestor) {
+    // MERGED (2026-10-07): the investor exit IS the as-is off-market investor
+    // value (v3.1 rules). Institutional / public universes are not blended in
+    // (the merged universe already holds those buyers), and with no qualified
+    // investor value there is NO derived exit from retail or the subject AVM:
+    // the property goes to human review.
+    if (avail(investor) && investor.value_classification === VC.QUALIFIED) {
+      investorExit = {
+        conservative: investor.low,
+        base: investor.mid,
+        optimistic: investor.high,
+        classification: VC.QUALIFIED,
+        confidence: investor.confidence,
+      };
+      reasoning.push(`investor_exit from merged LOCAL_INVESTOR_VALUE (${investor.method}, ${investor.rules_version})`);
+    } else {
+      reasoning.push(`investor_exit UNAVAILABLE: ${investor?.unavailable_reason ?? 'no_qualified_investor_value'} (merged: never derived from retail or AVM)`);
+    }
+  } else if (wholesaleEntries.length) {
     investorExit = {
       conservative: roundMoney(blend(wholesaleEntries, 'p25') ?? blend(wholesaleEntries, 'low')),
       base: roundMoney(blend(wholesaleEntries, 'mid')),
