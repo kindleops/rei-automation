@@ -2,7 +2,7 @@
 /**
  * COMPOSER FILTER MATRIX (2026-10-07) — read-only audit of every catalog field.
  *
- *   node --env-file=.env.local --import ./tests/register-aliases.mjs \
+ *   node --env-file=.env.local --import ./scripts/ops/composer-audit/register-live.mjs \
  *     scripts/ops/composer-audit/filter-matrix.mjs --out=<csv> [--only=key,key] [--market="Dallas, TX"]
  *
  * Per field: mapping, graph fill vs source fill over the SAME properties (full
@@ -27,12 +27,19 @@ const DBURL = readFileSync('/tmp/.dburl', 'utf8').trim()
 const PROD_TIMEOUT_MS = 8000
 
 function sql(text) {
-  const out = execFileSync('psql', [DBURL, '-X', '-q', '-A', '-t', '-F', '\t', '-P', 'pager=off', '-c', text], {
-    env: { ...process.env, PGOPTIONS: '-c statement_timeout=30s -c default_transaction_read_only=on' },
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  })
-  return out.split('\n').filter((line) => line.length).map((line) => line.split('\t'))
+  // The URL travels in an env var, never in argv, so no error message can print it.
+  try {
+    const out = execFileSync('sh', ['-c', 'psql "$AUDIT_DBURL" -X -q -v ON_ERROR_STOP=1 -A -t -F "$(printf \'\\t\')" -P pager=off -f -'], {
+      input: text,
+      env: { ...process.env, AUDIT_DBURL: DBURL, PGOPTIONS: '-c statement_timeout=30s -c default_transaction_read_only=on' },
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    return out.split('\n').filter((line) => line.length).map((line) => line.split('\t'))
+  } catch (error) {
+    throw new Error(`sql failed: ${String(error.stderr || '').trim().slice(0, 200)}`)
+  }
 }
 const lit = (v) => `'${String(v).replace(/'/g, "''")}'`
 
@@ -128,7 +135,13 @@ function fillStats(columns) {
   }
   const stats = {}
   const total = Number(sql('SELECT count(*) FROM public.campaign_target_graph')[0][0])
-  for (const [join, cols] of Object.entries(byJoin)) {
+  // Exact graph fill: one scan of the graph alone.
+  const exactCols = columns.filter(Boolean)
+  const exactRow = sql(`SELECT ${exactCols.map((c) => `count(*) FILTER (WHERE NULLIF(btrim(g.${c}::text), '') IS NOT NULL)`).join(', ')} FROM public.campaign_target_graph g`)[0]
+  const exactFill = Object.fromEntries(exactCols.map((c, i) => [c, Number(exactRow[i])]))
+  const chunks = []
+  for (const [join, cols] of Object.entries(byJoin)) for (let i = 0; i < cols.length; i += 6) chunks.push([join, cols.slice(i, i + 6)])
+  for (const [join, cols] of chunks) {
     const parts = []
     for (const col of cols) {
       const src = SRC[col]
@@ -141,18 +154,30 @@ function fillStats(columns) {
         `count(*) FILTER (WHERE ${nonEmpty(g)} AND NOT ${nonEmpty(src.expr)})`,
       )
     }
+    parts.push('count(*)')
     const started = Date.now()
-    const [row] = sql(`SELECT ${parts.join(', ')} FROM public.campaign_target_graph g ${JOINS[join]}`)
-    process.stderr.write(`fill ${join}: ${cols.length} columns in ${Date.now() - started} ms\n`)
+    let row
+    try {
+      // A 5% block sample of the graph joined by key: the full join of 176k graph rows
+      // to the wide properties heap takes >30 s. Fill % from ~9k rows is ±1 pt.
+      ;[row] = sql(`SELECT ${parts.join(', ')} FROM public.campaign_target_graph g TABLESAMPLE SYSTEM (5) REPEATABLE (42) ${JOINS[join]}`)
+      if (!row) throw new Error('no row returned')
+    } catch (error) {
+      process.stderr.write(`fill ${join} ${cols.join(',')}: ${error.message}\n`)
+      for (const col of cols) stats[col] = { total, gf: null, sf: null, both: null, agree: null, gOnly: null, kind: SRC[col].kind, error: error.message }
+      continue
+    }
+    process.stderr.write(`fill ${join}: ${cols.join(',')} in ${Date.now() - started} ms\n`)
     cols.forEach((col, i) => {
-      const [gf, sf, both, agree, gOnly] = row.slice(i * 5, i * 5 + 5).map(Number)
-      stats[col] = { total, gf, sf, both, agree, gOnly, kind: SRC[col].kind }
+      const [sgf, ssf, both, agree, gOnly] = row.slice(i * 5, i * 5 + 5).map(Number)
+      const n = Number(row[row.length - 1])
+      // sample shares scaled to the population; graph fill itself is exact
+      stats[col] = { total, gf: exactFill[col], sf: Math.round((ssf / n) * total), sampleGf: Math.round((sgf / n) * total), both, agree, gOnly: Math.round((gOnly / n) * total), kind: SRC[col].kind, sampleN: n }
     })
   }
   for (const col of columns) {
     if (stats[col] || SRC[col]) continue
-    const [row] = sql(`SELECT count(*) FILTER (WHERE ${nonEmpty(`g.${col}`)}) FROM public.campaign_target_graph g`)
-    stats[col] = { total, gf: Number(row[0]), sf: null, both: null, agree: null, gOnly: null, kind: 'derived' }
+    stats[col] = { total, gf: exactFill[col], sf: null, both: null, agree: null, gOnly: null, kind: 'derived' }
   }
   return stats
 }
@@ -228,10 +253,11 @@ async function main() {
       if (!s) { status = 'UNMAPPED'; notes.push('graph column missing'); row.unmapped_handling = 'column missing → refused (population probe)' }
       else {
         row.graph_fill_pct = pct(s.gf, s.total)
-        if (s.sf !== null) {
+        if (s.error) notes.push(`source comparison failed: ${s.error.slice(0, 80)}`)
+        if (s.sf !== null && s.sf !== undefined) {
           row.source_fill_pct = pct(s.sf, s.total)
-          row.source_basis = `${SRC[col].expr.slice(0, 60)} over graph properties`
-          const gap = row.source_fill_pct - row.graph_fill_pct
+          row.source_basis = `${SRC[col].expr.slice(0, 60)} over a 5% block sample of graph rows (n=${s.sampleN})`
+          const gap = row.source_fill_pct - pct(s.sampleGf ?? s.gf, s.total)
           row.fill_mismatch = Math.abs(gap) >= 5 ? `${gap > 0 ? 'graph missing' : 'graph extra'} ${Math.abs(Math.round(gap * 10) / 10)} pts` : ''
           row.agreement_pct = s.kind === 'fill_only' ? '' : pct(s.agree, s.both)
           row.graph_only_rows = s.gOnly
