@@ -42,6 +42,7 @@ import {
   buildCampaignTargets,
   countCampaignAudienceCohort,
   countCampaignAudienceUniverse,
+  measureCampaignFilterEffects,
   createCampaign,
   launchCandidateFromTarget,
   loadOwnerPersonas,
@@ -572,6 +573,25 @@ export async function readComposerAudience(spec = {}, deps = {}) {
     ? []
     : await renderComposerSamples(Array.isArray(preview.target_rows) ? preview.target_rows : [], { templateUseCase: strategy.use_case, stageCode, supabase }, deps).catch(() => [])
   return { ok: true, at: new Date().toISOString(), strategy: { use_case: strategy.use_case, stage_code: stageCode }, ...audience, samples }
+}
+
+/**
+ * Reach's per-filter "why": rows each applied filter removed, queue-eligible
+ * rows after it, its column coverage, and every filter that could not be
+ * applied with the reason (measureCampaignFilterEffects). Cached 60 s per spec.
+ */
+const effectsCache = new Map()
+export async function readComposerFilterEffects(spec = {}, deps = {}) {
+  const s = obj(spec)
+  const key = JSON.stringify(obj(s.filters))
+  const hit = effectsCache.get(key)
+  if (!deps.fresh && hit && Date.now() - hit.at < 60_000) return { ...hit.value, cached: true }
+  const result = await (deps.measureCampaignFilterEffects || measureCampaignFilterEffects)({ filters: obj(s.filters) }, deps)
+  if (!result?.ok) return { ok: false, error: clean(result?.error) || 'filter_effects_unavailable', warnings: result?.warnings || [] }
+  const value = { ...result, at: new Date().toISOString() }
+  if (effectsCache.size > 50) effectsCache.clear()
+  effectsCache.set(key, { at: Date.now(), value })
+  return value
 }
 
 /**

@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { LCButton, LCChip, LCCombobox, LCPopover, LCSegmented, LCSkeleton, LCTooltip, cx, lcTransition, LC_SPRING, useLcReducedMotion, type LCComboOption } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
-import { searchFieldOptions, type CampaignFieldCatalog, type CampaignFieldDefinition, type CampaignFieldOption } from '../campaignWizardAdapter'
+import type { CampaignFieldCatalog, CampaignFieldDefinition } from '../campaignWizardAdapter'
+import { loadFieldOptionValues, type FieldOptionValues } from '../field-option-values'
+import { FilterEffectsPanel } from '../FilterEffectsPanel'
 import type { ComposerAudience as Audience } from './composer-types'
 import {
-  buildIsPartial, buildSegments, clauseId, eligibleOf, fmt, hasValue, heldWords, n0, sendableBlocker, sendableSecondary, universeSegments,
+  buildIsPartial, buildSegments, clauseId, eligibleOf, fmt, hasValue, heldWords, n0, sendableBlocker, sendableSecondary, serializeClauses, universeSegments,
   type ComposerSource, type FilterClause, type Segment,
 } from './composer-model'
 import { dragLooksAcceptable, resolveDrop, type DropResolution } from './composer-intake'
@@ -51,16 +53,24 @@ function FieldValueEditor({ field, initial, onApply, onCancel }: {
   const [op, setOp] = useState<string>(initial?.operator ?? (isBool ? 'is_true' : isNumber ? 'between' : ops[0] ?? 'is_any_of'))
   const [values, setValues] = useState<string[]>(() => (Array.isArray(initial?.value) ? (initial!.value as unknown[]).map(String) : initial?.value != null && initial.value !== '' ? [String(initial.value)] : []))
   const [range, setRange] = useState<[string, string]>(() => (Array.isArray(initial?.value) && initial?.operator === 'between' ? [String(initial.value[0] ?? ''), String(initial.value[1] ?? '')] : ['', '']))
-  const [options, setOptions] = useState<{ key: string; rows: CampaignFieldOption[] } | null>(null)
+  const [options, setOptions] = useState<{ key: string; result: FieldOptionValues } | null>(null)
   const wantsOptions = !isNumber && !isBool && field.supports_options
   useEffect(() => {
     if (!wantsOptions) return
     let dead = false
-    searchFieldOptions(field.key, '').then((rows) => { if (!dead) setOptions({ key: field.key, rows }) }).catch(() => { if (!dead) setOptions({ key: field.key, rows: [] }) })
+    loadFieldOptionValues(field.key, '')
+      .then((result) => { if (!dead) setOptions({ key: field.key, result }) })
+      .catch((error: unknown) => { if (!dead) setOptions({ key: field.key, result: { options: [], state: 'unavailable', message: `Values couldn’t load. ${error instanceof Error ? error.message : ''}`.trim(), source: null } }) })
     return () => { dead = true }
   }, [field.key, wantsOptions])
-  const optionRows = options?.key === field.key ? options.rows : null
-  const comboOptions = useMemo<LCComboOption[]>(() => (optionRows ?? []).filter((o) => !values.includes(o.value)).map((o) => ({ value: o.value, label: o.label, meta: typeof o.count === 'number' ? fmt(o.count) : undefined })), [optionRows, values])
+  const optionResult = options?.key === field.key ? options.result : null
+  const optionRows = optionResult ? optionResult.options : null
+  // Both numbers, named: properties in the audience · queue-eligible.
+  const comboOptions = useMemo<LCComboOption[]>(() => (optionRows ?? []).filter((o) => !values.includes(o.value)).map((o) => ({
+    value: o.value,
+    label: o.label,
+    meta: typeof o.count === 'number' ? `${fmt(o.count)}${typeof o.eligibleCount === 'number' ? ` · ${fmt(o.eligibleCount)} eligible` : ''}` : undefined,
+  })), [optionRows, values])
 
   const apply = () => {
     let value: unknown = values
@@ -97,8 +107,14 @@ function FieldValueEditor({ field, initial, onApply, onCancel }: {
             {values.map((v) => <LCChip key={v} value={optionRows?.find((o) => o.value === v)?.label ?? v} onRemove={() => setValues(values.filter((x) => x !== v))} />)}
           </div>
           {wantsOptions ? (
-            optionRows === null ? <LCSkeleton shape="lines" count={1} /> : (
-              <LCCombobox label={`Add ${field.label}`} placeholder={`Find ${field.label.toLowerCase()}…`} options={comboOptions} value={null} clearable={false} onChange={(v) => setValues([...values, v])} emptyText="No values" />
+            optionRows === null ? <LCSkeleton shape="lines" count={1} /> : optionRows.length === 0 ? (
+              // An empty list says why (not counted yet / no values / failed) and still takes a typed value.
+              <>
+                <p className="ccz-note is-attn" role="status">{optionResult?.message}</p>
+                <input className="ccz-fx__free" placeholder="Type an exact value, Enter to add" onKeyDown={(e) => { if (e.key === 'Enter' && e.currentTarget.value.trim()) { setValues([...values, e.currentTarget.value.trim()]); e.currentTarget.value = '' } }} />
+              </>
+            ) : (
+              <LCCombobox label={`Add ${field.label}`} placeholder={`Find ${field.label.toLowerCase()}… (properties · eligible)`} options={comboOptions} value={null} clearable={false} onChange={(v) => setValues([...values, v])} emptyText="No value matches" />
             )
           ) : (
             <input className="ccz-fx__free" placeholder="Type a value, Enter to add" onKeyDown={(e) => { if (e.key === 'Enter' && e.currentTarget.value.trim()) { setValues([...values, e.currentTarget.value.trim()]); e.currentTarget.value = '' } }} />
@@ -257,6 +273,8 @@ export function AudiencePlane({
   // the freshness label's "N hours old" is relative to when this surface opened
   const [openedAt] = useState(() => Date.now())
   const labelOf = (key: string) => catalog?.fields.find((f) => f.key === key)?.label ?? key.split('.').pop()!.replace(/_/g, ' ')
+  // The same serialized clauses the audience read counted (audienceSpec).
+  const filterSpec = useMemo(() => serializeClauses(filters), [filters])
   const eligible = eligibleOf(audience)
   const blocker = sendableBlocker(audience)
   const secondary = sendableSecondary(audience)
@@ -382,8 +400,9 @@ export function AudiencePlane({
                   <p className="ccz-note is-attn"><Icon name="clock" size={13} /> Timezone unavailable for {fmt(audience.zones.unresolved)} of {fmt(audience.zones.scanned)} read — held, never defaulted to a zone.</p>
                 ) : null}
                 {audience.inapplicable_filters.length || audience.dropped_filter_count ? (
-                  <p className="ccz-note is-attn"><Icon name="filter" size={13} /> {audience.inapplicable_filters.length + audience.dropped_filter_count} filter(s) can’t narrow this audience and were not applied.</p>
+                  <p className="ccz-note is-attn"><Icon name="filter" size={13} /> {audience.inapplicable_filters.length + audience.dropped_filter_count} filter(s) can’t narrow this audience and were not applied — listed by name below.</p>
                 ) : null}
+                <FilterEffectsPanel filters={filterSpec} format={fmt} className="ccz-aud__why" />
                 <Footprint audience={audience} />
               </motion.div>
             </AnimatePresence>

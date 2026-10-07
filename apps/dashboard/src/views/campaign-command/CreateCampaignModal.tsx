@@ -841,6 +841,8 @@ export const CreateCampaignModal = ({
     [draft, filterStatuses],
   )
   const hasMeaningfulFilters = draftHasMeaningfulFilters(activeFilterDraft)
+  // The filters Reach counted, for its per-filter "why".
+  const reachFilterSpec = useMemo(() => serializeFilterGroups(activeFilterDraft.target_filters), [activeFilterDraft])
   const activePreviewKey = useMemo(() => {
     const filters = serializeFilterGroups(activeFilterDraft.target_filters)
     return JSON.stringify({
@@ -2819,6 +2821,7 @@ export const CreateCampaignModal = ({
               updatedAt={previewMeta?.at ?? null}
               onRefresh={() => runPreview('manual')}
               readyFallback={canonicalReady}
+              filterSpec={reachFilterSpec}
             />
           )}
 

@@ -7,6 +7,7 @@ import {
   readComposerAudience,
   readComposerCohort,
   readComposerCoverage,
+  readComposerFilterEffects,
   readComposerFleet,
   readComposerGeography,
   readComposerOfferReadiness,
@@ -54,6 +55,14 @@ export async function GET(request) {
         return withCors(request, { ok: false, error: 'invalid_spec' }, 400)
       }
       const result = await readComposerAudience(spec)
+      return withCors(request, result, result.ok === false ? 502 : 200)
+    }
+    if (part === 'filters') {
+      let spec = {}
+      try { spec = JSON.parse(params.get('spec') || '{}') } catch {
+        return withCors(request, { ok: false, error: 'invalid_spec' }, 400)
+      }
+      const result = await readComposerFilterEffects(spec)
       return withCors(request, result, result.ok === false ? 502 : 200)
     }
     if (part === 'cohort') {
