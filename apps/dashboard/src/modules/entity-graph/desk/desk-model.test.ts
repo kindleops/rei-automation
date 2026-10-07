@@ -16,6 +16,7 @@ import {
 } from './desk-model'
 import { IDENTITY_COLUMN_KEY } from '../mobile/entity-graph-table-layout'
 import { PROPERTY_CLUSTER_ID } from '../console/network-layout'
+import { equityLabel, sortLoadedRows, SCOPE_TABLE_COLUMNS } from '../mobile/entity-graph-table-columns'
 
 const row = (over: Partial<EntitySearchResult>): EntitySearchResult => ({ entityType: 'property', entityId: '1', title: 't', badges: [], linkedCounts: {}, ...over })
 
@@ -91,5 +92,26 @@ describe('graph + tags', () => {
     expect(matchingTagTone('Likely Owner')).toBe('ok')
     expect(matchingTagTone('Likely Renting')).toBe('attn')
     expect(matchingTagTone('Family')).toBe('neutral')
+  })
+})
+
+describe('equity column — equity_known_v1', () => {
+  const r = (details: EntitySearchResult['details']) => row({ entityId: String(Math.random()), details })
+  it('never shows a vendor 100% for a property with no loan on file', () => {
+    expect(equityLabel(r({ equity: null, equityRule: 'unknown' }))).toBe('Unknown')
+    expect(equityLabel(r({ equity: 100 }))).toBe('Unknown')
+    expect(equityLabel(r({ equity: 100, equityRule: 'free_and_clear' }))).toBe('Free & clear')
+    expect(equityLabel(r({ equity: null, equityRule: 'vendor_high_equity_flag', equityClass: 'high' }))).toBe('High (flag)')
+    expect(equityLabel(r({ equity: 62.4, equityRule: 'loan_and_value' }))).toBe('62%')
+  })
+  it('has no server sort (equity_percent orders unknowns first) and sorts unknown last', () => {
+    const col = SCOPE_TABLE_COLUMNS.properties.find((c) => c.key === 'equity')!
+    expect(col.sortBy).toBeUndefined()
+    expect(serverSortFor('properties', { key: 'equity', dir: 'desc' }, false).source).toBe('default')
+    const rows = [r({ equity: null, equityRule: 'unknown' }), r({ equity: 20, equityRule: 'loan_and_value' }), r({ equity: 100, equityRule: 'free_and_clear' })]
+    const desc = sortLoadedRows('properties', rows, col, 'desc').map((x) => equityLabel(x))
+    expect(desc).toEqual(['Free & clear', '20%', 'Unknown'])
+    const asc = sortLoadedRows('properties', rows, col, 'asc').map((x) => equityLabel(x))
+    expect(asc).toEqual(['20%', 'Free & clear', 'Unknown'])
   })
 })

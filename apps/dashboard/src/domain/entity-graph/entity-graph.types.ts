@@ -73,7 +73,10 @@ export type EntitySearchResult = {
     assetType?: string
     units?: number
     value?: number
-    equity?: number
+    /** Known equity % only (equity_known_v1); null/absent = unknown. */
+    equity?: number | null
+    equityClass?: 'high' | 'low' | 'unknown'
+    equityRule?: 'loan_and_value' | 'free_and_clear' | 'vendor_high_equity_flag' | 'vendor_low_equity_flag' | 'unknown'
     acquisitionScore?: number
     flagCount?: number
     flags?: string
