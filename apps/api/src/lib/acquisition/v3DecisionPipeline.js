@@ -27,8 +27,8 @@ import { buildValuationUniverses } from './valuationUniverses.js';
 import { reconcileValuation } from './valuationReconciliation.js';
 import { estimateRepairs } from './repairModel.js';
 import { buildBuyerExit } from './buyerExitModel.js';
-import { buildCashOffer, buildCashOfferMerged } from './offerEconomics.js';
-import { repairEvidence as mergedRepairEvidence } from './investorCompRules.js';
+import { buildCashOffer } from './offerEconomics.js';
+import { buildLaneOffer } from './v3LaneValuation.js';
 import { buildNovation } from './novationModel.js';
 import { buildSubjectTo } from './subjectToModel.js';
 import { buildSellerFinance } from './sellerFinanceModel.js';
@@ -63,13 +63,14 @@ export function subjectAssetIdentityConflict(subjectRow = {}) {
  * gated property can never carry an authorized offer. Downgrade-only: a state
  * is never raised. Returns the (possibly) downgraded confidence + the gate log.
  */
-export function applyMergedGates(confidence, { lane, cashOffer, investorUniverse, assetIdentityConflict }) {
+export function applyMergedGates(confidence, { lane, cashOffer, investorUniverse, assetIdentityConflict, rung = null }) {
   const gates = [];
   if (assetIdentityConflict) gates.push({ code: 'asset_identity_conflict_blocks_authorization', to: ES.REVIEW_REQUIRED });
   if (lane === 'mf24') gates.push({ code: 'mf_2_4_units_human_review', to: ES.REVIEW_REQUIRED });
+  if (rung && !['R1', 'R2'].includes(rung)) gates.push({ code: `fallback_rung_${rung}_review_only`, to: ES.REVIEW_REQUIRED });
   if (!cashOffer?.available) gates.push({ code: investorUniverse?.unavailable_reason ?? 'no_qualified_investor_value', to: ES.DATA_REQUIRED });
   for (const r of cashOffer?.reasons ?? []) {
-    if (r === 'no_qualified_investor_value') continue;
+    if (r === 'no_qualified_investor_value' || r === 'no_value_from_any_rung') continue;
     gates.push({ code: r, to: ES.REVIEW_REQUIRED });
   }
   if (!gates.length || !EXECUTABLE_STATES.has(confidence.execution_state)) {
@@ -85,6 +86,68 @@ export function applyMergedGates(confidence, { lane, cashOffer, investorUniverse
       reasons: [...(confidence.reasons ?? []), ...gates.map((g) => `merged_gate:${g.code}`)],
     },
     gates: gates.map((g) => ({ ...g, applied: true, from: confidence.execution_state, result: to })),
+  };
+}
+
+/**
+ * MERGED cash offer from the lane model (owner rules 2026-10-07), mapped onto
+ * the V3 cash-offer contract. NEVER blank: with no lane model (legacy loader)
+ * the legacy exit or, last, the subject AVM feeds the same lane offer.
+ */
+function mergedCashOffer({ laneModel, reconciliation, subjectRow, offerLane, subjectUnits, investorEvidence }) {
+  let lo = laneModel?.offer ?? null;
+  if (!lo || !lo.available) {
+    const exit = num(reconciliation.base_investor_exit);
+    const avm = num(subjectRow.estimated_value);
+    const rung = exit ? (reconciliation.investor_exit_classification === VC.QUALIFIED ? 'R1' : 'R5') : 'R6';
+    lo = buildLaneOffer({
+      investorPrice: exit ?? (avm ? avm * 0.75 : null),
+      lane: offerLane,
+      rung,
+      confidence: exit ? reconciliation.investor_exit_confidence : 10,
+      grade: exit ? (rung === 'R1' ? 'C' : 'E') : 'F',
+      units: subjectUnits,
+      unitsSource: 'recorded',
+      market: subjectRow.market ?? null,
+      env: investorEvidence?.env ?? process.env,
+    });
+  }
+  if (!lo.available) {
+    return { available: false, offer_model: 'lane_v1', unavailable_reason: 'no_value_from_any_rung', reasons: lo.reasons ?? ['no_value_from_any_rung'], bridge: [], policy_version: lo.policy_version, rung: null };
+  }
+  const spread = Math.max(0, (lo.investor_price ?? 0) - (lo.ceiling ?? 0));
+  return {
+    available: true,
+    offer_model: 'lane_v1',
+    policy_version: lo.policy_version,
+    lane: lo.lane,
+    rung: lo.rung,
+    confidence_grade: lo.confidence_grade,
+    investor_value: lo.investor_price,
+    conservative_buyer_exit: lo.investor_price,
+    buyer_ceiling: lo.ceiling,
+    opening_cash_offer: lo.opening_hint,
+    target_cash_offer: lo.ceiling,
+    recommended_cash_offer: lo.recommended_cash_offer,
+    maximum_cash_offer: lo.ceiling,
+    walkaway_cash_price: lo.ceiling,
+    minimum_acceptable_offer: lo.opening_hint,
+    projected_assignment_fee: spread,
+    projected_gross_margin: spread,
+    margin_on_exit: lo.investor_price ? Math.round((spread / lo.investor_price) * 10000) / 10000 : null,
+    margin_pct_used: lo.margin_pct != null ? lo.margin_pct / 100 : null,
+    margin_pct: lo.margin_pct,
+    margin_source: lo.margin_source,
+    margin_key: lo.margin_key,
+    calibration_pct: lo.calibration_pct,
+    confidence_haircut_pct: lo.haircut_pct,
+    repairs_basis: lo.repairs_basis,
+    repairs_evidence: laneModel?.repairs_evidence ?? null,
+    sanity: { offer_to_value: lo.offer_to_investor_price, within_bounds: lo.sanity?.within_bounds },
+    cost_breakdown: { buyer_repairs: 0, buyer_closing: 0, buyer_holding: 0, buyer_disposition: 0, contingency: 0, acquisition_margin: spread },
+    per_unit: lo.per_unit ?? null,
+    bridge: lo.bridge,
+    reasons: lo.reasons ?? [],
   };
 }
 
@@ -117,22 +180,11 @@ export function buildV3Decision({
 
   const buyerExit = buildBuyerExit({ subjectRow, reconciliation, universes, family, buyerPurchases });
   const investorUniverse = universes[U.LOCAL_INVESTOR_VALUE] ?? null;
-  const offerLane = investorUniverse?.lane ?? FAMILY_OFFER_LANE[family] ?? 'sfr';
-  const subjectUnits = num(investorEvidence?.subject?.units) ?? num(subjectRow.units_count);
+  const laneModel = investorUniverse?.lane_model ?? null;
+  const offerLane = laneModel?.lane ?? investorUniverse?.lane ?? FAMILY_OFFER_LANE[family] ?? 'sfr';
+  const subjectUnits = num(laneModel?.identity?.units) ?? num(investorEvidence?.subject?.units) ?? num(subjectRow.units_count);
   const cashOffer = merged
-    ? buildCashOfferMerged({
-        investorValue: reconciliation.base_investor_exit,
-        lane: offerLane,
-        confidence: investorUniverse?.model === 'merged_investor_rules' ? investorUniverse.confidence : reconciliation.investor_exit_confidence,
-        method: investorUniverse?.method ?? 'investor_comps',
-        retailMid: investorUniverse?.retail_context?.mid ?? null,
-        units: subjectUnits,
-        repairEvidence: mergedRepairEvidence({
-          estimated_repairs: num(subjectRow.estimated_repair_cost),
-          sqft: num(subjectRow.building_square_feet) ?? num(subjectRow.sqft),
-          condition: subjectRow.building_condition ?? null,
-        }),
-      })
+    ? mergedCashOffer({ laneModel, reconciliation, subjectRow, offerLane, subjectUnits, investorEvidence })
     : buildCashOffer({
         conservativeBuyerExit: buyerExit.conservative_buyer_exit,
         repair,
@@ -170,7 +222,7 @@ export function buildV3Decision({
   });
   const identityConflict = assetIdentityConflict ?? subjectAssetIdentityConflict(subjectRow);
   const { confidence, gates: mergedGates } = merged
-    ? applyMergedGates(baseConfidence, { lane: offerLane, cashOffer, investorUniverse, assetIdentityConflict: identityConflict })
+    ? applyMergedGates(baseConfidence, { lane: offerLane, cashOffer, investorUniverse, assetIdentityConflict: identityConflict || laneModel?.identity?.identity_conflict === true, rung: cashOffer.rung ?? null })
     : { confidence: baseConfidence, gates: [] };
   const strategy = buildStrategyRanking({
     cashOffer,
@@ -271,7 +323,7 @@ export function buildV3Decision({
     scenario_assumptions:
       !cashUnderwritten && cashOffer.available
         ? merged
-          ? ['as-is investor value, no repair/cost subtraction', `calibration_pct=${cashOffer.calibration_pct}`, `haircut_pct=${cashOffer.confidence_haircut_pct}`, `fee_pct=${cashOffer.margin_pct_used}`]
+          ? ['lane offer: investor price x (1-calibration) x (1-margin) x (1-haircut); repairs only in the ARV rung', `lane=${cashOffer.lane}`, `rung=${cashOffer.rung}`, `grade=${cashOffer.confidence_grade}`, `margin_pct=${cashOffer.margin_pct}(${cashOffer.margin_source})`]
           : ['buyer-exit-anchored bridge', `margin_pct=${cashOffer.margin_pct_used}`, `exit_basis=${reconciliation.investor_exit_classification}`]
         : [],
     // The end investor's as-is MAO (merged) — the negotiation CEILING. Null when not underwritten.
@@ -321,8 +373,23 @@ export function buildV3Decision({
     authority_mode: authorityMode,
     merged: merged
       ? {
-          offer_model: OFFER_MODELS.MERGED_V31,
+          offer_model: cashOffer.offer_model ?? OFFER_MODELS.MERGED_V31,
           offer_policy_version: cashOffer.policy_version ?? null,
+          lane: offerLane,
+          rung: cashOffer.rung ?? null,
+          rung_name: laneModel?.rung_name ?? null,
+          confidence_grade: cashOffer.confidence_grade ?? null,
+          margin_pct: cashOffer.margin_pct ?? null,
+          margin_source: cashOffer.margin_source ?? null,
+          margin_key: cashOffer.margin_key ?? null,
+          identity: laneModel?.identity ?? null,
+          ladder: laneModel?.ladder ?? [],
+          institutional: laneModel?.institutional ?? null,
+          retail_arv: laneModel?.retail_arv ?? null,
+          flipper_signal: laneModel?.flipper_signal ?? null,
+          noi_cross_check: laneModel?.noi_cross_check ?? null,
+          condition_position: laneModel?.condition_position ?? null,
+          evidence_ids: laneModel?.evidence_ids ?? [],
           investor_rules: investorUniverse?.model === 'merged_investor_rules' ? investorUniverse.rules_version : 'v3_legacy_universe_no_canonical_rows',
           investor_method: investorUniverse?.method ?? null,
           offer_lane: offerLane,

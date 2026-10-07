@@ -38,7 +38,7 @@ import {
   recencyScore,
   monthsBetween,
 } from './acquisitionMath.js';
-import { valueInvestorUniverse, laneFor as investorLaneFor } from './investorCompRules.js';
+import { valueLaneModel } from './v3LaneValuation.js';
 
 /** Configurable institutional buyer registry (seedable from buyer_entities_v2). */
 export const INSTITUTIONAL_BUYER_PATTERNS = [
@@ -351,9 +351,8 @@ const MERGED_BLOCKING_QUALIFICATION = new Set([
  *
  * @param {object} evidence { subject, rows, bulkRows?, bulkOf?, asOf, gate? }
  */
-export function buildMergedInvestorUniverse(evidence = {}, qualification = null) {
+export function buildMergedInvestorUniverse(evidence = {}, qualification = null, subjectRow = {}) {
   const subject = evidence.subject ?? {};
-  const params = investorLaneFor(subject);
   const blocked = new Map();
   for (const r of qualification?.rejected ?? []) {
     if (r.redundant || !['EXCLUDE', 'QUARANTINE'].includes(r.status)) continue;
@@ -363,43 +362,45 @@ export function buildMergedInvestorUniverse(evidence = {}, qualification = null)
   }
   const engineGate = typeof evidence.gate === 'function' ? evidence.gate : null;
   const gate = (row) => [...(engineGate ? engineGate(row) : []), ...(blocked.get(clean(row.comp_id)) ?? [])];
-  const res = valueInvestorUniverse({
+  const lm = valueLaneModel({
     subject,
+    raw: subjectRow,
     rows: evidence.rows ?? [],
+    wideRows: evidence.wideRows ?? null,
     bulkRows: evidence.bulkRows ?? [],
     bulkOf: evidence.bulkOf ?? null,
     asOf: evidence.asOf,
-    params,
     gate,
+    areaMedians: evidence.areaMedians ?? null,
+    market: subjectRow.market ?? evidence.market ?? null,
+    env: evidence.env ?? process.env,
+    marginOverrides: evidence.marginOverrides ?? null,
   });
-  const v = res.value;
-  const selected = res.comps.filter((c) => c.status === 'selected');
+  const priced = lm.priced;
+  const comparable = lm.rung === 'R1' || lm.rung === 'R2';
+  const selected = priced ? priced.comps.filter((c) => c.status === 'selected') : [];
   const base = {
     universe: U.LOCAL_INVESTOR_VALUE,
     model: 'merged_investor_rules',
-    rules_version: params.version,
-    lane: params.lane,
-    method: v.method,
-    basis: v.basis,
+    rules_version: lm.version,
+    lane: lm.lane,
+    method: lm.method,
+    rung: lm.rung,
+    confidence_grade: lm.confidence_grade,
+    basis: 'as_is_investor_price',
+    lane_model: { ...lm, priced: undefined },
   };
-  if (!v.mid) {
+  if (!lm.investor_price) {
     return {
-      ...base,
-      available: false,
-      unavailable_reason: params.lane === 'sfr'
-        ? 'no_qualified_investor_comps_within_2_5mi'
-        : `no_qualified_investor_comps_within_${params.radiusMiles}mi`,
-      value_classification: null,
-      low: null, mid: null, high: null, p25: null, p75: null,
-      effective_sample_size: 0,
-      accepted_independent_transaction_count: 0,
-      confidence: 0,
-      census: res.census,
-      retail_context: res.retail_context,
-      comps: [],
-      ledger: res.comps.slice(0, 60),
+      ...base, available: false, unavailable_reason: 'no_value_from_any_rung', value_classification: null,
+      low: null, mid: null, high: null, p25: null, p75: null, effective_sample_size: 0,
+      accepted_independent_transaction_count: 0, confidence: 0, comps: [], ledger: [],
     };
   }
+  const v = comparable ? priced.value : null;
+  const mid = lm.investor_price;
+  const low = v?.low ?? Math.round((mid * 0.85) / 100) * 100;
+  const high = v?.high ?? Math.round((mid * 1.15) / 100) * 100;
   const avgSimilarity = selected.length
     ? (selected.reduce((s, c) => s + (c.factors?.similarity ?? 0) * (c.share ?? 0), 0) /
         Math.max(1e-9, selected.reduce((s, c) => s + (c.share ?? 0), 0))) * 100
@@ -408,28 +409,26 @@ export function buildMergedInvestorUniverse(evidence = {}, qualification = null)
     ...base,
     available: true,
     unavailable_reason: null,
-    value_classification: VC.QUALIFIED,
-    low: v.low,
-    mid: v.mid,
-    high: v.high,
-    weighted_median: v.mid,
-    p25: v.low,
-    p75: v.high,
-    raw_row_count: res.census.rows,
-    transaction_cluster_count: v.selected,
-    accepted_independent_transaction_count: v.selected,
-    effective_sample_size: v.n_eff,
+    // Only priced comps (R1/R2) are QUALIFIED. Lower rungs always produce a
+    // number, but as a PROVISIONAL scenario that can never be executable.
+    value_classification: comparable ? VC.QUALIFIED : VC.PROVISIONAL_SCENARIO,
+    low: Math.min(low, mid), mid, high: Math.max(high, mid),
+    weighted_median: mid, p25: low, p75: high,
+    raw_row_count: priced?.census?.rows ?? null,
+    transaction_cluster_count: v?.selected ?? 0,
+    accepted_independent_transaction_count: v?.selected ?? 0,
+    effective_sample_size: v?.n_eff ?? 0,
     avg_similarity: round(avgSimilarity, 1),
-    geographic_score: v.weighted_distance_miles == null ? null : round(clamp(100 - v.weighted_distance_miles * 12, 25, 100), 1),
-    dispersion: v.dispersion_log,
-    confidence: v.confidence,
+    geographic_score: v?.weighted_distance_miles == null ? null : round(clamp(100 - v.weighted_distance_miles * 12, 25, 100), 1),
+    dispersion: v?.dispersion_log ?? null,
+    confidence: lm.confidence,
     investor_value: v,
-    per_door: v.per_door ?? null,
-    retail_context: res.retail_context,
-    census: res.census,
+    per_door: lm.per_door,
+    retail_context: { mid: lm.retail_arv?.arv ?? null },
+    census: priced?.census ?? null,
     source_lineage: ['comp_canonical_transactions'],
     comps: selected.slice(0, 25),
-    ledger: res.comps.filter((c) => c.status !== 'selected').slice(0, 60),
+    ledger: priced ? priced.comps.filter((c) => c.status !== 'selected').slice(0, 60) : [],
   };
 }
 
@@ -482,7 +481,7 @@ export function buildValuationUniverses(subjectRow = {}, qualification, buyerPur
 
   const universes = {
     [U.LOCAL_INVESTOR_VALUE]: options.investorEvidence
-      ? buildMergedInvestorUniverse(options.investorEvidence, qualification)
+      ? buildMergedInvestorUniverse(options.investorEvidence, qualification, subjectRow)
       : buildUniverse(U.LOCAL_INVESTOR_VALUE, byUniverse(U.LOCAL_INVESTOR_VALUE)),
     [U.INSTITUTIONAL_VALUE]: buildUniverse(U.INSTITUTIONAL_VALUE, byUniverse(U.INSTITUTIONAL_VALUE)),
     [U.RETAIL_MLS_VALUE]: buildUniverse(U.RETAIL_MLS_VALUE, byUniverse(U.RETAIL_MLS_VALUE)),

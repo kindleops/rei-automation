@@ -25,6 +25,8 @@ import { resolveV3Authority, subjectOfferLane } from '../../src/lib/acquisition/
 import { assembleCanonicalCandidates, investorSubjectFrom, loadV3MergedCandidates } from '../../src/lib/acquisition/v3CanonicalCandidates.js'
 import { applyMergedGates, MERGED_ENGINE_VERSION } from '../../src/lib/acquisition/v3DecisionPipeline.js'
 import { authoritativeOfferFromScore, getAuthoritativeOffer, perUnitOf } from '../../src/lib/acquisition/offerAuthority.js'
+import { valueLaneModel, buildLaneOffer, resolveMargin, tuneMarginsFromOutcomes, resolveSubjectLane, noiCrossCheck, LANE_POLICY } from '../../src/lib/acquisition/v3LaneValuation.js'
+import { classifyCompBuyerOwnerPolicy, unitBandOk, INVESTOR_RULES_MF24, INVESTOR_RULES_MF5 } from '../../src/lib/acquisition/investorCompRules.js'
 
 const V3_ENV_KEYS = ['ACQUISITION_ENGINE_V3_ENABLED', 'ACQUISITION_ENGINE_V3_SHADOW_MODE', 'ACQUISITION_ENGINE_V3_ALLOW_PERSIST', 'ACQUISITION_ENGINE_V3_CUTOVER_MARKETS', 'ACQUISITION_ENGINE_V3_CUTOVER_LANES']
 function withEnv(vars, fn) {
@@ -280,13 +282,130 @@ test('engine: MF label with units = 1 (627 Ontario pattern) never carries an aut
   assert.equal(v.merged.asset_identity_conflict, true)
   assert.notEqual(v.execution_state, 'SHADOW_MODE_READY')
   assert.equal(v.offer_authorization.authorized_recommended_offer, null)
+  // NEVER BLANK: a scenario number with a graded, resolved lane is still produced.
+  assert.ok(v.offer_authorization.scenario_recommended_offer > 0)
+  assert.equal(v.merged.identity.identity_conflict, true)
 })
 
-test('merged V3 shadow offer bridge has no repair or end-buyer cost lines and stays under the ceiling', () => {
+// ── owner lane rules (2026-10-07) ──
+test('owner buyer policy: entity = investor (cash weighted up); institutional separate; individual non-MLS and MLS = retail', () => {
+  const p = { buyerPolicy: 'entity_primary', buyer: LANE_POLICY.buyer, cashBoost: LANE_POLICY.cashBoost }
+  const llc = classifyCompBuyerOwnerPolicy({ source: 'public_record', buyer: 'GATOR HOMES LLC', buyer_kind: 'company' }, p)
+  const llcCash = classifyCompBuyerOwnerPolicy({ source: 'public_record', buyer: 'GATOR HOMES LLC', buyer_kind: 'company', is_cash_purchase: true }, p)
+  assert.equal(llc.investor, true)
+  assert.ok(llcCash.weight > llc.weight)
+  const inst = classifyCompBuyerOwnerPolicy({ source: 'public_record', buyer: 'INVITATION HOMES 4 LLC', buyer_kind: 'company' }, p)
+  assert.equal(inst.type, 'institutional')
+  assert.equal(inst.investor, false)
+  assert.equal(classifyCompBuyerOwnerPolicy({ source: 'public_record', buyer: 'OPENDOOR PROPERTY J LLC' }, p).type, 'institutional')
+  const person = classifyCompBuyerOwnerPolicy({ source: 'public_record', buyer_kind: 'person', buyer_class: 'individual' }, p)
+  assert.equal(person.type, 'retail_individual')
+  assert.equal(person.investor, false)
+  assert.equal(classifyCompBuyerOwnerPolicy({ source: 'mls', buyer_kind: 'company' }, p).investor, false)
+  assert.equal(classifyCompBuyerOwnerPolicy({ source: 'public_record', owner_linked: true, owner_corporate: true }, p).type, 'inferred_entity')
+  assert.equal(classifyCompBuyerOwnerPolicy({ source: 'mls' }, { ...p, buyerPolicy: 'retail_primary' }).investor, true)
+})
+
+test('unit bands: 2-4 compares the SAME unit count; 5+ compares inside 5-20 / 21-99 / 100+', () => {
+  const mf24 = { ...INVESTOR_RULES_MF24, sameUnitCount: true }
+  assert.equal(unitBandOk(2, 2, mf24), true)
+  assert.equal(unitBandOk(2, 3, mf24), false)
+  const mf5 = { ...INVESTOR_RULES_MF5, unitBands: true }
+  assert.equal(unitBandOk(11, 18, mf5), true)
+  assert.equal(unitBandOk(11, 24, mf5), false)
+  assert.equal(unitBandOk(150, 120, mf5), true)
+})
+
+const mfSale = (o = {}) => sale({ property_type: 'Apartment', units: 12, sqft: 9000, price: 1_100_000, buyer_kind: 'company', buyer: `APT ${seq} LLC`, buyer_class: 'llc_investor', ...o })
+test('MF 5+ (Conway pattern): per-door investor price x real units, NO SFR rule and NO per-sqft repair subtraction', () => {
+  seq = 0
+  const mfRows = [
+    mfSale({ price: 1_110_000, units: 12, miles: 1.0 }), mfSale({ price: 1_550_000, units: 17, miles: 1.5 }), mfSale({ price: 1_420_000, units: 17, miles: 2.5 }),
+    mfSale({ price: 608_000, units: 8, miles: 2.8 }), mfSale({ price: 1_000_000, units: 11, miles: 2.0 }),
+    mfSale({ price: 450_000, units: 2, property_type: 'Duplex' }), // outside the 5-20 band
+  ]
+  const raw = { property_id: 'C1', property_type: 'Apartment', units_count: 11, building_square_feet: 10476, total_bedrooms: 17, year_built: 1963,
+    estimated_repair_cost: 366660, building_condition: 'Unknown', estimated_value: 800000, market: 'Minneapolis, MN' }
+  const subj = { property_id: 'C1', latitude: LAT, longitude: LNG, sqft: 10476, beds: 17, year_built: 1963, estimated_repairs: 366660, census_tract: '019033', fips: '48113', units: 11, condition: 'Unknown' }
+  const lm = valueLaneModel({ subject: subj, raw, rows: mfRows, asOf: AS_OF, env: {} })
+  assert.equal(lm.lane, 'mf5')
+  assert.ok(['R1', 'R2'].includes(lm.rung), lm.rung)
+  const perDoor = lm.investor_price / 11
+  assert.ok(perDoor > 80000 && perDoor < 100000, `per door ${perDoor}`)
+  assert.equal(lm.offer.per_unit.units, 11)
+  assert.equal(lm.offer.repairs_basis, 'as_is_investor_price_repairs_never_subtracted')
+  // The offer is a pure multiplicative bridge from the investor price: no $366,660 repair line anywhere.
+  const f = (1 - lm.offer.calibration_pct / 100) * (1 - lm.offer.margin_pct / 100) * (1 - lm.offer.haircut_pct / 100)
+  assert.ok(Math.abs(lm.offer.ceiling - lm.investor_price * f) <= 100)
+  assert.equal(lm.noi_cross_check.reason, 'no_real_operating_evidence')
+  // Poor condition moves the position to the low end of the per-door band.
+  const poor = valueLaneModel({ subject: subj, raw: { ...raw, building_condition: 'Poor' }, rows: mfRows, asOf: AS_OF, env: {} })
+  assert.ok(poor.investor_price < lm.investor_price)
+  assert.equal(poor.condition_position, 'band_low_poor_condition')
+})
+
+test('NEVER BLANK: no comps at all -> subject AVM rung R6, grade F, still a number', () => {
+  const lm = valueLaneModel({ subject: { property_id: 'X', latitude: LAT, longitude: LNG, sqft: 1200 }, raw: { estimated_value: 200000, property_type: 'Single Family' }, rows: [], asOf: AS_OF, env: {} })
+  assert.equal(lm.rung, 'R6')
+  assert.equal(lm.confidence_grade, 'F')
+  assert.ok(lm.offer.ceiling > 0 && lm.offer.ceiling < 150000)
+})
+
+test('retail ARV lane is the ONLY lane that subtracts repairs (ARV x 0.70 - repairs), and only as a fallback rung', () => {
+  seq = 0
+  const retailOnly = [230000, 225000, 240000, 235000].map((p, i) => sale({ price: p, miles: 0.2 + i * 0.1, source: 'mls', buyer_class: 'unknown', is_investor: false }))
+  const subj = { property_id: 'R', latitude: LAT, longitude: LNG, sqft: 1400, beds: 3, baths: 2, year_built: 1965, estimated_repairs: 49000, census_tract: '019033', fips: '48113' }
+  const lm = valueLaneModel({ subject: subj, raw: { property_type: 'Single Family', estimated_repair_cost: 49000, building_square_feet: 1400, estimated_value: 200000 }, rows: retailOnly, asOf: AS_OF, env: {} })
+  assert.equal(lm.rung, 'R3')
+  assert.equal(lm.retail_arv.investor_price_implied, Math.round((lm.retail_arv.arv * 0.7 - 49000) / 100) * 100)
+  assert.equal(lm.investor_price, lm.retail_arv.investor_price_implied)
+  assert.equal(lm.offer.repairs_basis, 'arv_lane_only: arv_x_factor_minus_repairs')
+})
+
+test('identity resolution (627 Ontario pattern): MF label + units=1 resolved from beds/sqft, conflict kept, grade capped', () => {
+  assert.equal(resolveSubjectLane({ sqft: 1100, beds: 2 }, { property_type: 'Multi-Family', units_count: 1 }).lane, 'sfr')
+  const dup = resolveSubjectLane({ sqft: 2000, beds: 5 }, { property_type: 'Multi-Family', units_count: 1 })
+  assert.equal(dup.lane, 'mf24')
+  assert.equal(dup.units, 2)
+  assert.equal(dup.identity_conflict, true)
+  assert.equal(dup.units_source, 'inferred_from_beds_sqft')
+  assert.equal(resolveSubjectLane({}, { property_type: 'Apartment', units_count: 18 }).lane, 'mf5')
+})
+
+test('margin: config per market x lane (default 13%), source recorded; outcome hook only suggests', () => {
+  assert.deepEqual(resolveMargin({ market: 'Dallas, TX', lane: 'sfr', env: {} }), { margin: 0.13, source: 'policy_default', key: 'policy|sfr' })
+  const env = { ACQUISITION_ENGINE_V3_MARGINS: JSON.stringify({ default: { mf5: 0.1 }, 'Dallas, TX': { sfr: 0.12 } }) }
+  assert.equal(resolveMargin({ market: 'dallas, tx', lane: 'sfr', env }).margin, 0.12)
+  assert.equal(resolveMargin({ market: 'dallas, tx', lane: 'sfr', env }).source, 'market_lane_config')
+  assert.equal(resolveMargin({ market: 'Houston, TX', lane: 'mf5', env }).source, 'default_lane_config')
+  const o = buildLaneOffer({ investorPrice: 130000, lane: 'sfr', rung: 'R1', confidence: 80, market: 'Dallas, TX', env })
+  assert.equal(o.margin_pct, 12)
+  assert.equal(o.margin_source, 'market_lane_config')
+  // Owner example: investor 130K -> ~110-115K before estimator calibration; calibration is reported separately.
+  const noCal = buildLaneOffer({ investorPrice: 130000, lane: 'sfr', rung: 'R3', confidence: 80, env: {} })
+  assert.ok(noCal.ceiling >= 105000 && noCal.ceiling <= 115000, String(noCal.ceiling))
+  const outcomes = Array.from({ length: 10 }, (_, i) => ({ market: 'Dallas, TX', lane: 'sfr', contract_price: 110000 + i * 1000, end_buyer_price: 128000 + i * 1000 }))
+  const t = tuneMarginsFromOutcomes(outcomes)
+  assert.equal(t.applied, false)
+  assert.ok(t.overrides['Dallas, TX'].sfr > 0.1 && t.overrides['Dallas, TX'].sfr < 0.16)
+  assert.equal(resolveMargin({ market: 'Dallas, TX', lane: 'sfr', env: {}, overrides: t.overrides }).source, 'outcome_tuned_override')
+})
+
+test('NOI/cap cross-check only from REAL operating evidence (never assumed rent or opex)', () => {
+  assert.equal(noiCrossCheck({ monthly_rent: 12000 }).available, false)
+  assert.equal(noiCrossCheck({ noi_estimate: 90000 }).reason, 'no_recorded_cap_rate')
+  assert.equal(noiCrossCheck({ noi_estimate: 90000, cap_rate: 0.075 }).value, 1200000)
+})
+
+test('merged V3 shadow offer bridge (lane_v1) has no repair or end-buyer cost lines and stays under the ceiling', () => {
   const d = withEnv({ ACQUISITION_ENGINE_V3_ENABLED: 'true' }, () => run())
   const v = d.evidence.v3_shadow
-  assert.equal(v.cash_offer.offer_model, 'merged_v31')
-  assert.deepEqual(v.cash_offer.bridge.map((b) => b.step), ['as_is_investor_value', 'less_calibration', 'less_confidence_haircut', 'buyer_ceiling', 'less_assignment_fee', 'recommended_cash_offer'])
+  assert.equal(v.cash_offer.offer_model, 'lane_v1')
+  assert.deepEqual(v.cash_offer.bridge.map((b) => b.step), ['investor_price', 'less_calibration', 'less_margin', 'less_haircut', 'ceiling', 'recommended_cash_offer'])
+  assert.equal(v.merged.lane, 'sfr')
+  assert.equal(v.merged.rung, 'R1')
+  assert.equal(v.merged.margin_pct, 13)
+  assert.equal(v.merged.margin_source, 'policy_default')
   assert.ok(v.cash_offer.recommended_cash_offer <= v.cash_offer.buyer_ceiling)
   assert.equal(v.universes.LOCAL_INVESTOR_VALUE.model, 'merged_investor_rules')
   assert.ok(v.invariants.ok)
@@ -312,12 +431,11 @@ test('authority: production v2 is the source today; shadow is reported but never
   assert.equal(a.engine_version, '2.0.0')
   assert.equal(a.value, 200000)
   assert.equal(a.negotiation_authority.source, 'acquisition_decision_engine')
-  if (a.authorized) {
-    assert.equal(a.offer, 100000)
-    assert.equal(a.ceiling, 118000)
-  } else {
-    assert.equal(a.offer, null)
-  }
+  // NEVER BLANK: numbers always present; money only when authorized.
+  assert.equal(a.offer, 100000)
+  assert.equal(a.ceiling, 118000)
+  assert.equal(a.money_allowed, a.authorized)
+  assert.equal(a.fallback_rung, 'prod_v2')
   assert.ok(a.shadow_candidate)
   assert.equal(a.shadow_candidate.authorized, false)
   assert.ok(a.shadow_candidate.reasons.includes('shadow_only_not_money'))
@@ -333,7 +451,11 @@ test('authority: a live merged block is used only while the market is still cut 
   assert.equal(a.engine, 'offer_engine_v3_merged')
   assert.equal(a.negotiation_authority.value_as_is, a.value)
   assert.equal(a.negotiation_authority.repairs_embedded_in_value, true)
-  if (a.authorized) assert.ok(a.offer <= a.ceiling && a.ceiling <= a.value)
+  assert.ok(a.offer <= a.ceiling && a.ceiling <= a.value)
+  assert.equal(a.lane, 'sfr')
+  assert.ok(['A', 'B', 'C'].includes(a.confidence_grade))
+  assert.equal(a.fallback_rung, 'R1')
+  assert.equal(a.margin.pct, 13)
   const revoked = authoritativeOfferFromScore(row, { now: nowMs, env: { ...env, ACQUISITION_ENGINE_V3_CUTOVER_MARKETS: '' } })
   assert.equal(revoked.engine, 'acquisition_decision_engine')
   const viaLoader = await getAuthoritativeOffer('S1', { loadScore: async () => null, now: nowMs, env })

@@ -12,13 +12,16 @@ import { assembleCanonicalCandidates, investorSubjectFrom } from '../../src/lib/
 const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
 const day = (v) => (v ? (v instanceof Date ? v.toISOString() : String(v)).slice(0, 10) : null)
 
-export function runMergedSubject(c, { engine, v31, engineGate }) {
+export function runMergedSubject(c, { engine, v31, engineGate, env = null }) {
   const pid = String(c.property_id)
   const nowDate = new Date(c.now)
   const asOf = c.as_of
   const subject = engine.normalizePropertyFeatures(c.raw, { source: 'properties', now: nowDate })
   const investorSubject = investorSubjectFrom({ subject, raw: c.raw, own: c.own, neighbors: c.neighbors })
   const assembled = assembleCanonicalCandidates({ rows: c.rows, subject, investorSubject, asOf, bulkRows: c.bulkRows })
+  // Widened-rung rows (second read, only when cached) + an env without margin overrides.
+  if (c.wideRows) assembled.investor_evidence.wideRows = c.wideRows
+  assembled.investor_evidence.env = env ?? {}
   const t0 = Date.now()
   const d = engine.calculateAcquisitionDecision({
     subject, comps: [], buyerPurchases: c.buyerPurchases ?? [], now: nowDate,
@@ -58,7 +61,10 @@ export function runMergedSubject(c, { engine, v31, engineGate }) {
       investor: { available: Boolean(inv.available), mid: inv.mid ?? null, low: inv.low ?? null, high: inv.high ?? null, method: inv.method ?? null, confidence: inv.confidence ?? null, n: inv.accepted_independent_transaction_count ?? 0, n_eff: inv.effective_sample_size ?? null, reason: inv.unavailable_reason ?? null, per_door: inv.per_door ?? null, weighted_distance: inv.investor_value?.weighted_distance_miles ?? null },
       market_mid: v.reconciliation?.reconciled_market_value_mid ?? null,
       exit_base: v.reconciliation?.base_investor_exit ?? null,
-      offer: co.available ? { recommended: co.recommended_cash_offer, minimum: co.minimum_acceptable_offer, ceiling: co.buyer_ceiling, fee: co.projected_assignment_fee, calibration_pct: co.calibration_pct, haircut_pct: co.confidence_haircut_pct, offer_to_value: co.sanity?.offer_to_value, reasons: co.reasons, per_unit: co.per_unit ?? null } : { unavailable: co.unavailable_reason ?? 'n/a' },
+      offer: co.available ? { recommended: co.recommended_cash_offer, minimum: co.minimum_acceptable_offer, ceiling: co.buyer_ceiling, investor_price: co.investor_value, spread: co.projected_assignment_fee, calibration_pct: co.calibration_pct, margin_pct: co.margin_pct, margin_source: co.margin_source, haircut_pct: co.confidence_haircut_pct, offer_to_value: co.sanity?.offer_to_value, reasons: co.reasons, per_unit: co.per_unit ?? null } : { unavailable: co.unavailable_reason ?? 'n/a' },
+      lane: v.merged?.lane ?? null, rung: v.merged?.rung ?? null, grade: v.merged?.confidence_grade ?? null, identity: v.merged?.identity ?? null,
+      institutional: v.merged?.institutional ?? null, retail_arv: v.merged?.retail_arv ?? null, flipper: v.merged?.flipper_signal ?? null,
+      noi: v.merged?.noi_cross_check ?? null, condition_position: v.merged?.condition_position ?? null, ladder: v.merged?.ladder ?? [],
       authorized_recommended: oa.authorized_recommended_offer ?? null,
       authorized_ceiling: oa.authorized_buyer_ceiling ?? null,
       scenario_recommended: oa.scenario_recommended_offer ?? null,

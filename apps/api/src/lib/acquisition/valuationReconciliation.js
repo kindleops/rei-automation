@@ -97,15 +97,18 @@ export function reconcileValuation(universes = {}, family = ASSET_FAMILIES.UNKNO
     // (the merged universe already holds those buyers), and with no qualified
     // investor value there is NO derived exit from retail or the subject AVM:
     // the property goes to human review.
-    if (avail(investor) && investor.value_classification === VC.QUALIFIED) {
+    if (avail(investor)) {
+      // Lane model: priced comps are QUALIFIED; lower fallback rungs carry a
+      // PROVISIONAL classification (never executable) but still a number.
       investorExit = {
         conservative: investor.low,
         base: investor.mid,
         optimistic: investor.high,
-        classification: VC.QUALIFIED,
+        classification: investor.value_classification ?? VC.PROVISIONAL_SCENARIO,
         confidence: investor.confidence,
+        derived_from: investor.rung && investor.rung !== 'R1' ? `lane_rung_${investor.rung}:${investor.method}` : undefined,
       };
-      reasoning.push(`investor_exit from merged LOCAL_INVESTOR_VALUE (${investor.method}, ${investor.rules_version})`);
+      reasoning.push(`investor_exit from merged LOCAL_INVESTOR_VALUE (${investor.lane}, rung ${investor.rung ?? 'R1'}, ${investor.method})`);
     } else {
       reasoning.push(`investor_exit UNAVAILABLE: ${investor?.unavailable_reason ?? 'no_qualified_investor_value'} (merged: never derived from retail or AVM)`);
     }

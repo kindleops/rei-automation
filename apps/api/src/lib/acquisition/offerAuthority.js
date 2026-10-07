@@ -83,13 +83,23 @@ export function mergedViewFromV3Block(v3, { score = {}, nowMs = Date.now(), live
   if (!f.fresh) reasons.push(f.reason);
   for (const g of merged.gates ?? []) if (g.applied) reasons.push(`gate:${g.code}`);
   const authorized = live && Boolean(merged.offer_model) && executable && Boolean(offer && ceiling) && !identityConflict && f.fresh;
+  const anyCeiling = ceiling ?? pos(oa.scenario_buyer_ceiling) ?? pos(v3.cash_offer?.buyer_ceiling);
+  const anyOffer = offer ?? pos(oa.scenario_recommended_offer) ?? pos(v3.cash_offer?.recommended_cash_offer);
+  const pu = perUnitOf({ value, ceiling: anyCeiling, offer: anyOffer, units, identityConflict });
+  const band = merged.per_door_value && pu ? { low: pos(merged.per_door_value.low), high: pos(merged.per_door_value.high), label: merged.per_door_value.label ?? null } : null;
   return {
     value,
-    ceiling: ceiling ?? pos(oa.scenario_buyer_ceiling),
-    offer: offer ?? pos(oa.scenario_recommended_offer),
+    investor_price: pos(merged.investor_value) ?? value,
+    ceiling: anyCeiling,
+    offer: anyOffer,
     offer_is_scenario: !offer,
     minimum: pos(v3.cash_offer?.minimum_acceptable_offer),
-    per_unit: perUnitOf({ value, ceiling: ceiling ?? pos(oa.scenario_buyer_ceiling), offer: offer ?? pos(oa.scenario_recommended_offer), units, identityConflict }),
+    lane: merged.lane ?? merged.offer_lane ?? null,
+    confidence_grade: merged.confidence_grade ?? null,
+    fallback_rung: merged.rung ?? null,
+    fallback_rung_name: merged.rung_name ?? null,
+    margin: merged.margin_pct != null ? { pct: merged.margin_pct, source: merged.margin_source ?? null, key: merged.margin_key ?? null } : null,
+    per_unit: pu ? { ...pu, units_source: merged.identity?.units_source ?? null, band } : null,
     engine: AUTHORITY_SOURCES.MERGED_ENGINE,
     engine_version: `${clean(v3.engine_version)}/${clean(v3.formula_version)}`,
     execution_state: v3.execution_state ?? null,
@@ -97,7 +107,7 @@ export function mergedViewFromV3Block(v3, { score = {}, nowMs = Date.now(), live
     fresh: f.fresh,
     identity_conflict: identityConflict,
     lane: merged.offer_lane ?? null,
-    evidence_ids: (v3.universes?.LOCAL_INVESTOR_VALUE?.comps ?? []).map((c) => clean(c.comp_id)).filter(Boolean).slice(0, 12),
+    evidence_ids: (merged.evidence_ids?.length ? merged.evidence_ids : (v3.universes?.LOCAL_INVESTOR_VALUE?.comps ?? []).map((c) => clean(c.comp_id))).filter(Boolean).slice(0, 12),
     comps: (v3.universes?.LOCAL_INVESTOR_VALUE?.comps ?? []).slice(0, 12).map((c) => ({
       id: clean(c.comp_id) || null, sale_price: num(c.price), distance_miles: num(c.distance_miles), sale_date: c.sold_on ?? null, source: clean(c.source).toLowerCase(), units: num(c.units),
     })),
@@ -168,10 +178,17 @@ export function authoritativeOfferFromScore(score = null, { now = Date.now(), sp
       authority_version: OFFER_AUTHORITY_VERSION,
       property_id: clean(score?.property_id) || null,
       computed_at: score?.computed_at ?? null,
+      // NEVER BLANK (owner 2026-10-07): numbers always present; money only when authorized.
       value: view.value,
-      ceiling: view.authorized ? view.ceiling : null,
-      offer: view.authorized ? view.offer : null,
-      per_unit: view.authorized ? view.per_unit : null,
+      investor_price: view.investor_price,
+      ceiling: view.ceiling,
+      offer: view.offer,
+      per_unit: view.per_unit,
+      lane: view.lane,
+      confidence_grade: view.confidence_grade,
+      fallback_rung: view.fallback_rung,
+      margin: view.margin,
+      money_allowed: view.authorized,
       engine: view.engine,
       engine_version: view.engine_version,
       execution_state: view.execution_state,
@@ -222,10 +239,17 @@ export function authoritativeOfferFromScore(score = null, { now = Date.now(), sp
     authority_version: OFFER_AUTHORITY_VERSION,
     property_id: clean(score?.property_id) || null,
     computed_at: score?.computed_at ?? null,
+    // NEVER BLANK: the v2 numbers are always returned; money only when authorized.
     value,
-    ceiling: neg.ok ? ceiling : null,
-    offer: neg.ok ? offer : null,
-    per_unit: neg.ok ? perUnitOf({ value, ceiling, offer, units: ev.subject?.asset_family === 'multifamily' ? units : null, identityConflict }) : null,
+    investor_price: null, // v2 has no separate investor-price universe
+    ceiling,
+    offer,
+    per_unit: perUnitOf({ value, ceiling, offer, units: ev.subject?.asset_family === 'multifamily' ? units : null, identityConflict }),
+    lane: ev.subject?.asset_family === 'multifamily' ? (units >= 5 ? 'mf5' : units >= 2 ? 'mf24' : 'other') : ev.subject?.asset_family ? 'sfr' : null,
+    confidence_grade: null,
+    fallback_rung: 'prod_v2',
+    margin: null,
+    money_allowed: neg.ok === true,
     engine: AUTHORITY_SOURCES.PRODUCTION_ENGINE,
     engine_version: clean(ev.engine?.version) || null,
     execution_state: clean(score?.decision_tier).toUpperCase() || null,

@@ -218,7 +218,63 @@ export function normalizeSubdivision(name) {
  * when the sale is linked to today's owner of record.
  * Returns { type, investor, weight, evidence[] }.
  */
+// ── owner buyer policy (2026-10-07) ─────────────────────────────────────────
+/** Institutional / hedge-fund / iBuyer registry (normalized-name match). They pay more: separate universe. */
+export const INSTITUTIONAL_BUYER_NAMES = Object.freeze([
+  /invitation homes/, /\binvh\b/, /progress residential/, /american homes 4 rent|\bah4r\b|amh \d|american residential properties/,
+  /tricon/, /firstkey/, /first key homes/, /amherst/, /main street renewal/, /vinebrook/, /home partners/, /pretium/,
+  /cerberus/, /\brenu\b/, /opendoor/, /offerpad/, /\bzillow homes\b/, /redfinnow/, /knock homes/, /orchard property/,
+  /divvy homes/, /roofstock/, /\bmynd\b/, /front yard residential/, /blackstone/, /\bsfr3\b/, /bridge single.?family/,
+  /yes communities/, /\bconrex\b/, /\bcolony (starwood|american)/, /havenbrook/, /lafayette real estate/, /reside[sn]?t? (sfr|homes)/,
+]);
+const ENTITY_NAME_RE = /\b(llc|l\.l\.c|inc|incorporated|corp|corporation|company|co|lp|llp|ltd|holdings?|propert(y|ies)|investments?|capital|homes|realty|partners|ventures|group|trust|fund|enterprises?|reit)\b/i;
+export function isInstitutionalBuyer(row = {}) {
+  const name = text(row.buyer).toLowerCase();
+  return text(row.buyer_class) === 'institutional' || (name !== '' && INSTITUTIONAL_BUYER_NAMES.some((re) => re.test(name)));
+}
+
+/**
+ * Owner buyer policy 'entity_primary' (investor cluster = ENTITY buyers, cash
+ * weighted up; institutional separate; individual non-MLS + MLS = retail) and
+ * the two companion passes 'retail_primary' / 'institutional_primary', which
+ * re-label which buyers form the priced set. Returns the same shape as
+ * classifyCompBuyer.
+ */
+export function classifyCompBuyerOwnerPolicy(row = {}, params) {
+  const mls = row.source === 'mls';
+  const cls = text(row.buyer_class);
+  const cash = row.is_cash_purchase === true;
+  const evidence = [];
+  let type;
+  if (mls) type = 'retail_mls';
+  else if (isInstitutionalBuyer(row)) { type = 'institutional'; evidence.push('institutional_buyer'); }
+  else if (text(row.buyer_kind) === 'company' || ['llc_investor', 'portfolio'].includes(cls) || row.is_investor === true || ENTITY_NAME_RE.test(text(row.buyer))) {
+    type = 'recorded_entity'; evidence.push(`recorded_entity_buyer${cls ? `_${cls}` : ''}`);
+  } else if (text(row.buyer_kind) === 'person' || cls === 'individual') {
+    type = cash ? 'cash_individual' : 'retail_individual';
+    evidence.push(cash ? 'individual_cash_buyer' : 'individual_buyer_non_mls');
+  } else if (row.owner_linked === true && row.owner_corporate === true) {
+    type = 'inferred_entity'; evidence.push('owner_of_record_entity_linked_to_sale');
+  } else if (row.owner_linked === true) {
+    const inferred = classifyOwner({
+      corporate: false, trust: row.owner_trust === true, outOfState: row.owner_out_of_state === true,
+      mailStack: row.owner_mail_stack, residentOwner: row.owner_resident === true,
+    });
+    if (inferred.investor) { type = inferred.tier === 'strong' ? 'inferred_strong' : 'inferred_likely'; evidence.push(`inferred_${inferred.tier}`, ...inferred.evidence); }
+    else type = cash ? 'cash_unknown' : 'public_other';
+  } else type = cash ? 'cash_unknown' : 'public_other';
+  if (cash) evidence.push('recorded_cash_purchase');
+  const INVESTOR = new Set(['recorded_entity', 'inferred_entity', 'inferred_strong', 'inferred_likely', 'cash_unknown', 'cash_individual']);
+  const RETAIL = new Set(['retail_mls', 'retail_individual']);
+  const pass = params.buyerPolicy;
+  const priced = pass === 'retail_primary' ? RETAIL.has(type) : pass === 'institutional_primary' ? type === 'institutional' : INVESTOR.has(type);
+  let weight = params.buyer[type] ?? 0.3;
+  if (cash && pass === 'entity_primary' && INVESTOR.has(type)) weight *= params.cashBoost ?? 1;
+  return { type, investor: priced, weight, evidence };
+}
+
 export function classifyCompBuyer(row = {}, params = INVESTOR_RULES_SFR) {
+  if (params.buyerPolicy) return classifyCompBuyerOwnerPolicy(row, params);
   const mls = row.source === 'mls';
   const cls = text(row.buyer_class);
   const evidence = [];
@@ -298,7 +354,17 @@ export function qualifyRow(row, subject, ctx = {}, params = INVESTOR_RULES_SFR) 
 }
 
 /** Multifamily unit band: 2-4 unit subjects take 2-4 unit comps; 5+ take 0.5x-2x the count. */
+/** Owner 5+ unit bands: 5-20, 21-99, 100+. */
+export function mf5UnitBand(units) {
+  if (!(units >= 5)) return null;
+  return units <= 20 ? '5_20' : units <= 99 ? '21_99' : '100_plus';
+}
+
 export function unitBandOk(subjectUnits, compUnits, params = INVESTOR_RULES_MF24) {
+  // Owner policy: 2-4 units compare the SAME unit count (duplex vs duplex);
+  // 5+ compare inside the same commercial band (5-20 / 21-99 / 100+).
+  if (params.lane === 'mf24' && params.sameUnitCount) return compUnits === subjectUnits;
+  if (params.lane === 'mf5' && params.unitBands) return mf5UnitBand(compUnits) !== null && mf5UnitBand(compUnits) === mf5UnitBand(subjectUnits);
   if (params.lane === 'mf24') return compUnits >= 2 && compUnits <= 4;
   return compUnits >= 5 && compUnits / subjectUnits >= params.unitRatioMin && compUnits / subjectUnits <= params.unitRatioMax;
 }
@@ -497,7 +563,7 @@ export function capShares(top, maxShare) {
   }
 }
 
-function estimateFrom(comps, params = INVESTOR_RULES_SFR) {
+export function estimateFrom(comps, params = INVESTOR_RULES_SFR) {
   const top = [...comps].sort((a, b) => b.weight - a.weight).slice(0, params.topK);
   for (const c of comps) if (!top.includes(c)) { c.status = 'excluded'; c.reasons = [INVESTOR_RULE_REASONS.outsideTopK]; }
   if (!top.length || !top.reduce((s, c) => s + c.weight, 0)) return null;
@@ -516,7 +582,7 @@ function estimateFrom(comps, params = INVESTOR_RULES_SFR) {
   };
 }
 
-function confidenceOf(est, method) {
+export function confidenceOf(est, method) {
   if (!est) return 0;
   const depth = clamp(est.n_eff / 5, 0, 1) * 35;
   const tight = clamp(1 - est.sd_log / 0.4, 0, 1) * 30;
@@ -593,6 +659,12 @@ export function valueInvestorUniverse({ subject, rows = [], bulkRows = [], bulkO
     outlier = invOut;
     est = estimateFrom(invSurvivors, params);
     for (const c of usable) if (!c.investor) { c.status = 'context_only'; c.reasons = ['v3_not_investor_buyer_context_only']; }
+  } else if (params.allowFallback === false) {
+    // Owner ladder: a thin priced set is NOT silently re-based on all sales here;
+    // the lane model moves to the next explicit rung instead.
+    method = 'insufficient_priced_comps';
+    outlier = invOut;
+    est = null;
   } else {
     method = 'market_ratio_fallback';
     for (const c of investorSet) if (c.status === 'excluded') { c.status = 'candidate'; c.reasons = []; }
