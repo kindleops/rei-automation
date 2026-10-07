@@ -244,4 +244,5 @@ test("shadow: the verdict is stamped on the row, nothing is held", async () => {
   assert.equal(inserted.length, 1);
   assert.equal(inserted[0].metadata.property_touch_hold.hold, true);
   assert.equal(inserted[0].metadata.property_touch_hold.mode, "shadow");
+  assert.equal(inserted[0].metadata.property_touch_hold.category, "ambiguous_identity", "prior recipient unknown");
 });

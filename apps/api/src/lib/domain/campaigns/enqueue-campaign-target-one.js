@@ -611,11 +611,16 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
       phone: recipient,
       is_opener: true,
       phone_owned_by_person: target.metadata?.phone_owned_by_person === true,
+      candidate_relationship: target.metadata?.identity_relationship || null,
     })
     if (verdict.hold && touchMode === 'on') {
       return fail(ENQUEUE_REASON.PROPERTY_PRIOR_TOUCH, `${verdict.why}; ${verdict.truths.counts.property} prior send(s) about the property`)
     }
-    propertyTouchShadow = { mode: touchMode, hold: verdict.hold, why: verdict.why, release: verdict.release, counts: verdict.truths.counts }
+    propertyTouchShadow = { mode: touchMode, hold: verdict.hold, would_hold: verdict.hold, category: verdict.category || null, why: verdict.why, release: verdict.release, counts: verdict.truths.counts }
+    if (touchMode === 'shadow' && verdict.hold) {
+      // Shadow: log what WOULD be held (no phone numbers), never block.
+      console.info('[CAMPAIGN_PROPERTY_TOUCH_HOLD_SHADOW]', JSON.stringify({ campaign_target_id: requestedId, campaign_id: target.campaign_id, property_id: target.property_id, category: verdict.category, why: verdict.why, prior_sends: verdict.truths.counts.property }))
+    }
   }
 
 

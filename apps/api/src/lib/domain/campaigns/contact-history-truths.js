@@ -32,6 +32,16 @@ const digits10 = (v) => {
 /** Statuses that mean a human may have received the message (sent, delivered, or in flight). */
 export const TOUCH_STATUSES = Object.freeze(["sent", "delivered", "queued", "scheduled", "sending", "processing", "claimed", "pending", "retry"]);
 
+/** Owner 2026-10-07 shadow categories. */
+export const SHADOW_CATEGORY = Object.freeze({
+  WOULD_HOLD: "would_hold",
+  CONFIDENTLY_DIFFERENT: "confidently_different_person",
+  AMBIGUOUS: "ambiguous_identity",
+  SAME_PERSON_NEW_NUMBER: "same_person_new_number",
+  SPOUSE_CO_OWNER: "spouse_co_owner",
+  ENTITY_PRINCIPAL: "entity_principal",
+});
+
 export function propertyTouchHoldMode(env = process.env) {
   const v = clean(env?.[PROPERTY_TOUCH_HOLD_FLAG]).toLowerCase();
   if (["on", "1", "true", "enforce"].includes(v)) return "on";
@@ -90,6 +100,7 @@ export function evaluatePropertyTouchHold({
   is_opener = true,
   phone_owned_by_person = false,
   same_person_keys = [],
+  candidate_relationship = null, // 'spouse_co_owner' | 'entity_principal' (identity evidence, when known)
 } = {}) {
   const truths = contactHistoryTruths({ prior_rows, property_id, person_key, phone });
   const none = (why) => ({ hold: false, reason: null, release: null, why, truths });
@@ -105,21 +116,31 @@ export function evaluatePropertyTouchHold({
     !truths.prior_property_person_keys.some((k) => aliases.has(k)) &&
     phone_owned_by_person === true;
   if (known_different_person) {
-    return { hold: false, reason: null, release: "known_different_person", why: "different_person_proven", truths };
+    return { hold: false, reason: null, release: "known_different_person", why: "different_person_proven", category: SHADOW_CATEGORY.CONFIDENTLY_DIFFERENT, truths };
   }
+  const why = !K
+    ? "candidate_person_unknown"
+    : truths.prior_property_person_unknown
+      ? "prior_recipient_unknown"
+      : truths.prior_property_person_keys.some((k) => aliases.has(k))
+        ? "same_person_new_phone"
+        : !phone_owned_by_person
+          ? "phone_ownership_unproven"
+          : "different_number_is_not_proof";
+  const category =
+    why === "same_person_new_phone"
+      ? SHADOW_CATEGORY.SAME_PERSON_NEW_NUMBER
+      : candidate_relationship === SHADOW_CATEGORY.ENTITY_PRINCIPAL || candidate_relationship === SHADOW_CATEGORY.SPOUSE_CO_OWNER
+        ? candidate_relationship
+        : why === "candidate_person_unknown" || why === "prior_recipient_unknown"
+          ? SHADOW_CATEGORY.AMBIGUOUS
+          : SHADOW_CATEGORY.WOULD_HOLD;
   return {
     hold: true,
+    category,
     reason: PROPERTY_TOUCH_HOLD_REASON,
     release: null,
-    why: !K
-      ? "candidate_person_unknown"
-      : truths.prior_property_person_unknown
-        ? "prior_recipient_unknown"
-        : truths.prior_property_person_keys.some((k) => aliases.has(k))
-          ? "same_person_new_phone"
-          : !phone_owned_by_person
-            ? "phone_ownership_unproven"
-            : "different_number_is_not_proof",
+    why,
     truths,
   };
 }
