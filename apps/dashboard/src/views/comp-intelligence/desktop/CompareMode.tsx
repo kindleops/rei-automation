@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { cx } from '../../../shared/lc'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
 import { fmtAge, fmtDate, fmtInt, fmtMiles, fmtMoney, fmtUnitValue, saleAgeDays, unitValue } from '../../../domain/comp-intelligence/comps-workstation-model'
@@ -25,6 +25,27 @@ export function CompareMode({ m, store, onOpen }: { m: Workstation; store: Focus
   const focus = useFocus(store)
   const s = m.w.subject
   const comps = m.lensComps
+  const hasComps = comps.length > 0
+  const matrixRef = useRef<HTMLDivElement | null>(null)
+
+  // A vertical mouse wheel with Shift held pans the matrix sideways. macOS
+  // already turns Shift+wheel into a horizontal delta (then deltaX ≠ 0 and this
+  // stays out of the way); other platforms and mice do not.
+  useEffect(() => {
+    const el = matrixRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.shiftKey || e.deltaX !== 0 || e.deltaY === 0) return
+      const max = el.scrollWidth - el.clientWidth
+      if (max <= 0) return
+      const next = Math.max(0, Math.min(max, el.scrollLeft + e.deltaY))
+      if (next === el.scrollLeft) return
+      e.preventDefault()
+      el.scrollLeft = next
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [hasComps])
   const multi = m.kind === 'multifamily'
   const land = m.kind === 'land'
 
@@ -67,7 +88,7 @@ export function CompareMode({ m, store, onOpen }: { m: Workstation; store: Focus
 
   return (
     <div className="ciw-compare">
-      <section className="ciw-block">
+      <section className="ciw-block ciw-block--size">
         <header className="ciw-block__head">
           <span className="ciw-block__title">{multi ? 'Units' : land ? 'Lot size' : 'Size'} against the subject</span>
           <span className="ciw-block__aside">{band ? (bandVisible ? `shaded: what the engine allows (${band.min}% to +${band.max}%)` : `all inside what the engine allows (${band.min}% to +${band.max}%)`) : 'no size rule for this asset class'}</span>
@@ -75,12 +96,12 @@ export function CompareMode({ m, store, onOpen }: { m: Workstation; store: Focus
         <DeviationRows rows={sizeRows} store={store} band={bandVisible ? band : null} bound={bound} ariaLabel="Size deviation of each comp from the subject" />
       </section>
 
-      <section className="ciw-block">
+      <section className="ciw-block ciw-block--matrix">
         <header className="ciw-block__head">
           <span className="ciw-block__title">Feature matrix</span>
           <span className="ciw-block__aside">{comps.length} comps · deltas vs subject · amber = meaningful deviation</span>
         </header>
-        <div className="ciw-matrix lc-scroll" role="region" aria-label="Subject and comps compared feature by feature" tabIndex={0}>
+        <div ref={matrixRef} className="ciw-matrix lc-scroll" role="region" aria-label="Subject and comps compared feature by feature" tabIndex={0}>
           <table>
             <thead>
               <tr>
