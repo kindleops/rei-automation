@@ -31,6 +31,7 @@
 // call without the `behavior` argument.
 
 import { LEAD_TEMPERATURE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
+import { isPositiveReplyIntent } from "@/lib/domain/inbox/reply-actionability.js";
 
 export const TEMPERATURE_MODEL_VERSION = "temperature_signal_model_v1";
 
@@ -48,6 +49,14 @@ const NEGATIVE_INTENTS = new Set([
   "wrong_number",
   "wrong_person",
   "hostile_or_legal",
+  // 8.5 (2026-10-06): a troll, profanity or a "$5 million" joke is never a
+  // warm or hot lead. Capped exactly like an explicit no.
+  "hostile_or_troll",
+  "asking_price_implausible",
+  "property_specific_non_owner",
+  "tenant_respondent",
+  "former_owner_respondent",
+  "sold_property",
 ]);
 
 const HOT_INTENTS = new Set(["asks_offer", "asking_price_provided", "seller_accepts"]);
@@ -92,8 +101,21 @@ export function computeTemperatureSignal({
     reason_codes.push(`INTENT_WARM_${intentKey.toUpperCase()}`);
   }
 
+  // 8.5 (2026-10-06): an asking price counts only when THIS reply is a
+  // plausible positive one. The price fact is merged from earlier turns
+  // (deal_state.known_facts), so "4 car garage and lot", "Y tu?" and
+  // "shitstains all over the walls" each scored PRICE_PROVIDED and floored HOT.
+  // A price the classifier judged implausible never counts at all.
+  const positive_intent = isPositiveReplyIntent(intentKey);
+  const price_implausible = facts?.asking_price?.implausible === true
+    || facts?.asking_price?.implausibility?.implausible === true
+    || facts?.asking_price?.qualifies_as_seller_asking_price === false;
   let pricing_score = 0;
-  if (facts?.asking_price?.value > 0) {
+  if (!positive_intent || price_implausible) {
+    if (facts?.asking_price?.value > 0 || facts?.wants_offer === true) {
+      reason_codes.push("PRICE_FACT_IGNORED_NON_POSITIVE_REPLY");
+    }
+  } else if (facts?.asking_price?.value > 0) {
     pricing_score = 1;
     reason_codes.push("PRICE_PROVIDED");
   } else if (facts?.wants_offer === true) {
@@ -222,6 +244,14 @@ export function computeTemperatureSignal({
     // signal — a ten-second "not interested" is still not interested.
     temperature_floor = LEAD_TEMPERATURE_CODES.COLD;
     reason_codes.push("EXPLICIT_NEGATIVE_CAPS_COLD");
+  } else if (!positive_intent) {
+    // 8.5: warm/hot come only from a plausible positive reply. Urgency or an
+    // engagement streak on an unclear / who-is-this / referral reply lifts an
+    // unscored lead to cold at most (a real human is replying).
+    if (engagement_score >= 0.5 && intent_score >= 0.3) {
+      temperature_floor = LEAD_TEMPERATURE_CODES.COLD;
+      reason_codes.push("FLOOR_COLD_ENGAGEMENT_ONLY");
+    }
   } else if (pricing_score >= 0.8 || (intent_score >= 1 && urgency_score >= 0.7)) {
     temperature_floor = LEAD_TEMPERATURE_CODES.HOT;
     reason_codes.push("FLOOR_HOT_EXPLICIT_PRICE_OR_URGENT_INTENT");

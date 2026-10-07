@@ -50,16 +50,18 @@ test("writer: resolved replies never get the new_replies bucket", () => {
   assert.equal(resolveInboxBucketFromClassification({ primary_intent: "contract_requested" }, inbound, {}, NOW), "priority");
 });
 
-test("writer: a reaction / acknowledgement keeps the state it found; nothing open means cold (waiting inside 24h)", () => {
+test("writer: a reaction / acknowledgement keeps a review or follow-up it found; never New Replies / Priority (8.5); nothing open means cold", () => {
+  // 8.5 (owner 2026-10-06): a thanks / 👍 is not something we can act on.
   assert.equal(
     resolveInboxBucketFromClassification({ primary_intent: "reaction_only" }, inbound, { inbox_bucket: "new_replies" }, NOW),
-    "new_replies",
-    "an earlier unanswered reply is still unanswered after a thumbs-up"
+    "cold",
   );
   assert.equal(
     resolveInboxBucketFromClassification({ primary_intent: "acknowledgement" }, inbound, { inbox_bucket: "priority" }, NOW),
-    "priority"
+    "cold"
   );
+  assert.equal(resolveInboxBucketFromClassification({ primary_intent: "acknowledgement" }, inbound, { inbox_bucket: "needs_review" }, NOW), "needs_review");
+  assert.equal(resolveInboxBucketFromClassification({ primary_intent: "reaction_only" }, inbound, { inbox_bucket: "follow_up" }, NOW), "follow_up");
   assert.equal(resolveInboxBucketFromClassification({ primary_intent: "reaction_only" }, inbound, { inbox_bucket: "waiting" }, NOW), "cold");
   assert.equal(resolveInboxBucketFromClassification({ primary_intent: "acknowledgement" }, inbound, {}, NOW), "cold");
 });
@@ -74,10 +76,11 @@ test("writer: a not-interested seller who writes back with engagement is a NEW R
 });
 
 test("writer: genuine engagement still lands in New Replies or Priority", () => {
-  for (const intent of ["who_is_this", "unclear", "condition_disclosed", "language_switch"]) {
+  // 8.5: ownership_confirmed / latent_interest are replies to work, not Priority.
+  for (const intent of ["who_is_this", "unclear", "condition_disclosed", "language_switch", "ownership_confirmed", "latent_interest"]) {
     assert.equal(resolveInboxBucketFromClassification({ primary_intent: intent }, inbound, {}, NOW), "new_replies", intent);
   }
-  for (const intent of ["asks_offer", "callback_requested", "seller_interested", "ownership_confirmed"]) {
+  for (const intent of ["asks_offer", "callback_requested", "seller_interested", "asking_price_provided"]) {
     assert.equal(resolveInboxBucketFromClassification({ primary_intent: intent }, inbound, {}, NOW), "priority", intent);
   }
 });
@@ -125,15 +128,17 @@ test("reader: a reaction that left nothing open reads as Waiting inside the repl
   const old = resolveInboxBucketFlags(inboundRow({ inbox_bucket: "cold", last_intent: "acknowledgement", last_outbound_at: hoursAgo(30) }), NOW);
   assert.equal(old.in_waiting, false);
   assert.equal(old.in_cold, true);
+  // 8.5: a thumbs-up is not actionable, whatever bucket it was stored under.
   const open = resolveInboxBucketFlags(inboundRow({ inbox_bucket: "new_replies", last_intent: "reaction_only" }), NOW);
-  assert.equal(open.in_new_replies, true, "an earlier unanswered reply keeps the thread in New Replies");
+  assert.equal(open.in_new_replies, false, "a reaction is never a New Reply (8.5)");
 });
 
 // ── Parity with the SQL view (the deployed authority) ───────────────────────
 
 test("the migration and the JS mirror carry the same lists", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const sql = fs.readFileSync(path.join(here, "../../../../supabase/migrations/20261001160000_new_replies_genuine_engagement.sql"), "utf8");
+  // The JS mirror follows the PROPOSED 8.5 view (supersedes 7.2's lists).
+  const sql = fs.readFileSync(path.join(here, "../../../../supabase/migrations/PROPOSED_20261006235000_inbox_actionability_buckets.sql"), "utf8");
   const arrayAfter = (marker) => {
     const at = sql.indexOf(marker);
     assert.ok(at > 0, `marker ${marker} missing`);
@@ -144,7 +149,7 @@ test("the migration and the JS mirror carry the same lists", () => {
   assert.deepEqual(arrayAfter(") as f_reply_resolved"), [...RESOLVED_REPLY_INTENTS].sort());
   assert.deepEqual(arrayAfter(") as f_nonengagement_latest"), [...NON_ENGAGEMENT_REPLY_INTENTS].sort());
   assert.deepEqual(arrayAfter(") as f_closed_disposition"), [...CLOSED_DISPOSITIONS].sort());
-  assert.match(sql, /and not f_reply_resolved/);
+  assert.match(sql, /and not j\.f_reply_resolved/);
   assert.match(sql, /create or replace view public\.v_inbox_thread_state_buckets/);
   assert.equal(/\bdrop\s+view\b/i.test(sql), false, "replace in place; v_inbox_bucket_counts depends on it");
 });

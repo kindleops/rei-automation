@@ -186,7 +186,9 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
     'wants_offer', 'negotiation', 'appointment', 'close', 'handoff', 'price_interest', 'offer_requested',
   ])
   const showInPriority = bool(getAny(thread, 'is_hot_lead', 'isHotLead', 'show_in_priority_inbox', 'showInPriorityInbox'))
-  const isHotLead = bool(getAny(thread, 'is_hot_lead', 'isHotLead')) || hasAny(priorityValue, ['urgent', 'high']) || num(getAny(thread, 'priority_score', 'priorityScore')) >= 80
+  // 8.5: hot comes from the canonical server flag (or an operator's 'urgent'),
+  // never from 'high' (= a new reply) or a numeric score.
+  const isHotLead = bool(getAny(thread, 'is_hot_lead', 'isHotLead')) || hasAny(priorityValue, ['urgent'])
 
   const isDead = bool(getAny(thread, 'is_dead', 'isDead')) || 
     lower(getAny(thread, 'universal_status', 'universalStatus')) === 'dead' ||

@@ -30,6 +30,7 @@ const FIXTURES = [
     name: "priority_overlay",
     row: {
       inbox_bucket: "priority",
+      last_intent: "asks_offer",
       latest_direction: "inbound",
       last_inbound_at: hoursAgo(1),
       last_outbound_at: hoursAgo(5),
@@ -271,6 +272,7 @@ test("L: SQL-equivalent fixtures and JS predicates return identical bucket count
 test("M: category precedence is exclusive", () => {
   const row = {
     inbox_bucket: "priority",
+    last_intent: "asks_offer",
     latest_direction: "inbound",
     last_inbound_at: hoursAgo(1),
     last_outbound_at: hoursAgo(5),

@@ -2128,7 +2128,12 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     subject: dc.propertyAddress || asString(row.propertyAddress || row.property_address || row.subject),
     preview: dc.latestMessageBody || asString(row.latestMessageBody || row.latest_message_body || row.preview || row.message_body),
     status: (row.isArchived || row.is_archived) ? 'archived' : (needsReply ? 'unread' : 'read'),
-    priority: (category === 'hot_leads' || category === 'new_inbound') ? 'urgent' : 'normal',
+    // 8.5 (owner 2026-10-06): 'urgent' is the HOT LEAD signal and comes ONLY
+    // from the server's canonical is_hot_lead (reply-actionability.js). A new
+    // reply is 'high' (needs a human), never hot by itself.
+    priority: asBoolean(row.is_hot_lead, false) ? 'urgent'
+      : (category === 'hot_leads' || category === 'new_inbound') ? 'high'
+      : 'normal',
     sentiment: (dc.reply_intent === 'potential_interest' || dc.reply_intent === 'price_anchor') ? 'hot' : 'neutral',
     messageCount: asNumber(row.message_count || row.messageCount, 1),
     lastMessageLabel: formatRelativeTime(latestMessageAt),

@@ -189,6 +189,7 @@ test("getLiveInbox trusts bucket-scoped SQL for manual bucket switch", async () 
       thread_key: "+15550002222",
       canonical_thread_key: "+15550002222",
       inbox_bucket: "priority",
+      last_intent: "asks_offer",
       latest_message_direction: "inbound",
       latest_message_at: "2026-06-29T11:00:00.000Z",
       is_read: true,

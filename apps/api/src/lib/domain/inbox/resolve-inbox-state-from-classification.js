@@ -4,6 +4,7 @@ import {
   resolveOutboundReplyState,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 import { isStaleExplicitInboxBucket } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
+import { PRIORITY_REPLY_INTENTS } from "@/lib/domain/inbox/reply-actionability.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -270,21 +271,13 @@ export function resolveUniversalStatusFromClassification(classification = {}, me
   };
 }
 
-const PRIORITY_INTENTS = [
-  "seller_interested",
-  "asking_price_provided",
-  "asks_offer",
-  "callback_requested",
-  // "Send the contract on over" is the strongest message a seller can send; it
-  // fell to the new_replies default because nobody listed it here.
-  "contract_requested",
-  // Contact-modality asks route with the callback family: a human owes the
-  // seller a same-channel follow-up.
-  "voicemail_call_request",
-  "requests_email",
-  "latent_interest",
-  "ownership_confirmed",
-];
+// 8.5 (2026-10-06): Priority = high-value actionable only (reply-actionability.js
+// PRIORITY_REPLY_INTENTS): a plausible ask, an offer / contract request, strong
+// interest, a callback. "contract_requested" stays (the strongest message a
+// seller can send). ownership_confirmed, latent_interest and requests_email are
+// New Replies: a bare "Yes" or "only for 1.5 million" is a reply to work, not a
+// hot deal.
+const PRIORITY_INTENTS = PRIORITY_REPLY_INTENTS;
 
 const PRIORITY_OBJECTIONS = [
   "send_offer_first",
@@ -315,7 +308,25 @@ const NEW_REPLY_INTENTS = [
   "condition_disclosed",
   "tenant_occupied",
   "language_switch",
+  "ownership_confirmed",
+  "latent_interest",
+  "requests_email",
 ];
+
+// 8.5: replies that close the conversation for THIS property or are junk.
+// Never New Replies / Priority; they sit in Dead (visible under All).
+//   non-owners / former owners -> the property pairing is closed
+//   hostile_or_troll           -> owner decision 2026-10-01: cool, no nurture, no DNC
+const CLOSED_FOR_PROPERTY_INTENTS = new Set([
+  "property_specific_non_owner",
+  "tenant_respondent",
+  "former_owner_respondent",
+  "hostile_or_troll",
+]);
+// The attention buckets a thanks / 👍 may leave a thread in: a review or a
+// scheduled follow-up is still owed. New Replies / Priority are not: a "thanks"
+// is not something we can act on (owner, 2026-10-06).
+const NON_ENGAGEMENT_KEEP_BUCKETS = new Set(["needs_review", "follow_up"]);
 
 // ── New Replies 7.2 (2026-10-01) ────────────────────────────────────────────
 // New Replies = genuine seller engagement + no resolved disposition + a
@@ -326,9 +337,6 @@ const NEW_REPLY_INTENTS = [
 // provider/system auto-reply (classify.js labels those reaction_only with a
 // non-engagement rule id). The thread keeps the state it was in before.
 const NON_ENGAGEMENT_INTENTS = new Set(["reaction_only", "acknowledgement"]);
-// The attention buckets a non-engagement message must NOT pull a thread out
-// of: an earlier unanswered question is still unanswered after a 👍.
-const ATTENTION_BUCKETS = new Set(["new_replies", "priority", "needs_review", "follow_up"]);
 // Hostility WITHOUT opt-out language: owner decision 2026-10-01 -- archive /
 // cool, no automatic nurture, no DNC. A legal threat keeps the human lane.
 const HOSTILE_COOL_RULE_IDS = new Set([
@@ -357,9 +365,13 @@ export function resolveReplyDispositionBucket({ primary = "", classification = {
   // "Not at this time" / "No sell right now": the not-now family is a
   // follow-up (nurture), never an open New Reply.
   if (intent === "need_time") return "follow_up";
+  if (CLOSED_FOR_PROPERTY_INTENTS.has(intent)) return "dead";
+  // "$5 million" on a $180K house: one reality-check reply goes out, then the
+  // thread waits on a real answer (Waiting inside 24 h, Cold after).
+  if (intent === "asking_price_implausible") return "cold";
   if (NON_ENGAGEMENT_INTENTS.has(intent)) {
     const prior = lower(existingBucket);
-    if (ATTENTION_BUCKETS.has(prior)) return prior;
+    if (NON_ENGAGEMENT_KEEP_BUCKETS.has(prior)) return prior;
     // Nothing was open: the thread is still waiting on a real answer. The view
     // shows it as Waiting inside the reply window and Cold after it.
     void lastOutboundAt;

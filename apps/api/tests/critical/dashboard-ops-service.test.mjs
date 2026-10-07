@@ -167,6 +167,8 @@ test('live inbox exposes cursor pagination, filters, keyword matches, and map pi
     latest_message_body: idx === 0 ? 'yes I am interested, make offer' : idx === 3 ? 'how much is your offer' : `message ${idx}`,
     latest_message_direction: idx % 3 === 0 ? 'inbound' : 'outbound',
     inbox_bucket: idx === 0 ? 'priority' : idx % 3 === 0 ? 'new_replies' : 'follow_up',
+    // 8.5: Priority needs a priority-grade latest intent.
+    last_intent: idx === 0 ? 'seller_interested' : null,
     property_id: idx < 10 ? `prop-${idx + 1}` : null,
     master_owner_id: `owner-${idx + 1}`,
     latitude: idx === 0 ? 34.1 : null,

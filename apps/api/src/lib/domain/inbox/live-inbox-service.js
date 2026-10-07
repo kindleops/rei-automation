@@ -1,3 +1,4 @@
+import { resolveCanonicalLeadHeat } from "@/lib/domain/inbox/reply-actionability.js";
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
 import {
@@ -1933,6 +1934,12 @@ const AUTHORITATIVE_INBOX_THREAD_FIELDS = [
   "seller_stage",
   "lifecycle_stage",
   "lead_temperature",
+  // 8.5: the inputs of the canonical lead heat (reply-actionability.js). All
+  // four are real columns on inbox_thread_state AND the bucket view.
+  "temperature",
+  "temperature_source",
+  "manual_temperature_lock",
+  "is_hot_lead",
   "disposition",
   "seller_phone",
   "canonical_e164",
@@ -2022,6 +2029,10 @@ async function fetchAuthoritativeInboxRowsByThreadKeys(supabase, threadKeys = []
 }
 
 function mapAuthoritativeInboxRow(row = {}) {
+  // 8.5: ONE lead heat for every client. Warm/hot only from a plausible
+  // positive latest reply; HOT LEAD only from a priority-grade one. The
+  // recorded value travels alongside so nothing is hidden.
+  const heat = resolveCanonicalLeadHeat(row);
   return {
     ...row,
     latest_message_direction: row.latest_direction,
@@ -2039,7 +2050,10 @@ function mapAuthoritativeInboxRow(row = {}) {
     conversation_status: row.conversation_status || row.operational_status || null,
     seller_stage: row.seller_stage || row.lifecycle_stage || row.stage || null,
     lifecycle_stage: row.lifecycle_stage || row.seller_stage || null,
-    lead_temperature: row.lead_temperature || null,
+    lead_temperature: heat.lead_temperature || null,
+    recorded_lead_temperature: heat.recorded_lead_temperature || null,
+    temperature: heat.lead_temperature || null,
+    is_hot_lead: heat.is_hot_lead,
     disposition: row.disposition || null,
   };
 }

@@ -3317,7 +3317,9 @@ const DealCommandHeader = ({
   const status = getStatusVisual(thread.inboxStatus)
   const stage = getSellerStageVisual(thread.conversationStage)
   const automation = automationStateVisuals[thread.automationState || 'manual']
-  const isHot = thread.priority === 'urgent' || thread.inboxStatus === 'new_reply'
+  // 8.5: HOT LEAD only from the canonical server flag (priority 'urgent' is set
+  // from is_hot_lead). Every new reply used to read as a HOT LEAD.
+  const isHot = thread.priority === 'urgent'
   const isSuppressed = Boolean(thread.isSuppressed)
   const isUnread = thread.inboxStatus === 'new_reply'
   const priority = (thread.priority || thread.priorityBucket || 'normal').toLowerCase()

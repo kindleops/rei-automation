@@ -14,6 +14,7 @@
 //
 // This module is pure (no I/O) so every transition is unit-testable.
 
+import { isNonActionableReplyIntent } from "@/lib/domain/inbox/reply-actionability.js";
 import {
   LIFECYCLE_STAGE_CODES,
   LIFECYCLE_STAGE_ORDER,
@@ -1188,6 +1189,12 @@ export function resolveSellerStageTransition({
   // economic verdict: responsiveness does not override economic reality.
   if (temperature_signal?.temperature_floor && economic_gate?.economic_fit !== "out_of_band") {
     temperature = bumpTemperature(temperature, temperature_signal.temperature_floor);
+  }
+  // 8.5 (2026-10-06): a troll, an implausible ask, a non-owner or a thanks-only
+  // reply is never warm or hot, whatever earlier turns established
+  // (interestResolved reads merged facts). reply-actionability.js.
+  if (isNonActionableReplyIntent(intentKey)) {
+    temperature = LEAD_TEMPERATURE_CODES.COLD;
   }
 
   const prompt = STAGE_PROMPTS[afterCode] || STAGE_PROMPTS[LIFECYCLE_STAGE_CODES.OWNERSHIP_CONFIRMATION];

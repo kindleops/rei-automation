@@ -107,7 +107,7 @@ export const InboxConversationTable = memo(({
             ? 'Normal'
             : 'Low'
         )
-        const isHot = ['HOT', 'VERY_HOT', 'READY_TO_CLOSE'].includes(decision.lead_temperature) || ['urgent', 'high'].includes(String(thread.priority || '').toLowerCase())
+        const isHot = ['HOT', 'VERY_HOT', 'READY_TO_CLOSE'].includes(decision.lead_temperature) || String(thread.priority || '').toLowerCase() === 'urgent'
         const isSuppressed = decision.suppression_status === 'suppressed' || Boolean(thread.isSuppressed)
         const isUnread = decision.unread || Boolean((thread as any).unread) || Number((thread as any).unreadCount || 0) > 0
         const lastActivityMs = new Date(thread.lastMessageAt || thread.lastMessageIso || 0).getTime()

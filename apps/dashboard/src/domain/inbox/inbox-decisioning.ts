@@ -286,7 +286,8 @@ const inferTemperature = (
   sellerIntent: string,
   priorityScore: number,
 ): LeadTemperature => {
-  if (suppressionStatus === 'suppressed' || includesAny(sellerIntent, ['wrong_number', 'opt_out', 'not_interested', 'negative', 'hostile'])) return 'COLD'
+  // 8.5: non-actionable replies (troll, implausible ask, non-owner) are never warm/hot.
+  if (suppressionStatus === 'suppressed' || includesAny(sellerIntent, ['wrong_number', 'opt_out', 'not_interested', 'negative', 'hostile', 'implausible', 'non_owner', 'former_owner', 'tenant_respondent'])) return 'COLD'
   const explicit = upperTemperature(lower(get(thread, 'lead_temperature', 'temperature', 'dealTemperature')))
   if (explicit) return explicit
   if (stage === 'contract_ready') return 'READY_TO_CLOSE'

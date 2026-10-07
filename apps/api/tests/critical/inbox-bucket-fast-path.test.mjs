@@ -25,6 +25,7 @@ test("manual bucket switch uses authoritative inbox_thread_state for non-all fil
         seller_phone: "+15551230002",
         canonical_e164: "+15551230002",
         inbox_bucket: "priority",
+        last_intent: "asks_offer",
         latest_message_body: "What's your offer",
         latest_message_at: "2026-06-27T11:00:00.000Z",
         latest_direction: "inbound",
