@@ -56,6 +56,9 @@ const PERSON_SELECT = [
   'prospect_id', 'master_owner_id', 'full_name', 'first_name', 'language_preference', 'occupation_group',
   'est_household_income', 'net_asset_value', 'likely_owner', 'likely_renting', 'is_primary_prospect', 'rank_position',
   'source_slot', 'slot_label', 'contact_score_final', 'sms_eligible', 'best_phone', 'best_email',
+  // Vendor contact-matching tags ("Likely Owner, Family", "Resident, Likely Renting", …):
+  // shown verbatim as evidence; a missing tag is absence of evidence, never negative.
+  'matching_flags',
 ].join(',')
 
 const PHONE_SELECT = 'phone_id, canonical_e164, phone, phone_type, primary_prospect_id, canonical_prospect_id, activity_status, contact_score_final, sort_rank, wrong_number_at, phone_contact_status, usage_12_months'
@@ -514,10 +517,32 @@ export async function getEntityNetwork(type, id, deps = {}) {
   const joinedPropertyIds = ownerRow ? parseJsonArray(ownerRow.joined_property_ids_json).map(String) : []
 
   // Wave 1: portfolio, title entities, people, contact points, related owners.
+  /**
+   * joined_property_ids_json is not one id space: 8,055 of 102,252 owners
+   * (measured 2026-10-07) carry property_EXPORT ids ("prop_875d…"), which
+   * never match properties.property_id — their networks drew no properties
+   * at all (Chandler Stonebridge LP: 1 property, 392 units, $111M, an empty
+   * portfolio). Real property ids are read by id; when any export-form id is
+   * present the portfolio is also read by properties.master_owner_id (indexed)
+   * and the two are merged, rather than scanning the unindexed export column.
+   */
+  const exportFormJoined = joinedPropertyIds.some((pid) => /^prop_[a-f0-9]{8,}$/i.test(pid))
   const portfolioQuery = ownerId
-    ? (joinedPropertyIds.length
+    ? (joinedPropertyIds.length && !exportFormJoined
       ? supabase.from('properties').select(PROPERTY_SELECT).in('property_id', joinedPropertyIds.slice(0, PORTFOLIO_CAP))
-      : supabase.from('properties').select(PROPERTY_SELECT).eq('master_owner_id', ownerId).limit(PORTFOLIO_CAP))
+      : Promise.all([
+        joinedPropertyIds.length ? supabase.from('properties').select(PROPERTY_SELECT).in('property_id', joinedPropertyIds.slice(0, PORTFOLIO_CAP)) : Promise.resolve({ data: [] }),
+        supabase.from('properties').select(PROPERTY_SELECT).eq('master_owner_id', ownerId).limit(PORTFOLIO_CAP),
+      ]).then(([byId, byOwner]) => {
+        const seen = new Set()
+        const data = [...(byId.data || []), ...(byOwner.data || [])].filter((row) => {
+          const key = String(row.property_id)
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        return { data: data.slice(0, PORTFOLIO_CAP), error: byId.error || byOwner.error || null }
+      }))
     : clean(anchorProperty?.owner_name_addr_key)
       // No master owner: the same name-at-the-same-mailing-address on other title records.
       ? supabase.from('properties').select(PROPERTY_SELECT).eq('owner_name_addr_key', anchorProperty.owner_name_addr_key).limit(PORTFOLIO_CAP)
@@ -596,6 +621,7 @@ export async function getEntityNetwork(type, id, deps = {}) {
     smsEligible: r.sms_eligible !== false,
     bestPhone: clean(r.best_phone) || null,
     bestEmail: clean(r.best_email) || null,
+    matchingTags: clean(r.matching_flags).split(',').map((t) => t.trim()).filter(Boolean),
   }))
 
   const phones = (phoneRows || []).map((r) => ({
