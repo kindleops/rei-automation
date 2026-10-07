@@ -92,7 +92,9 @@ export async function replayV3(fixture, { catalog = [], languages = "English,Spa
     const ctxSupabase = makeSupabase({
       send_queue: outbound,
       message_events: events,
-      sms_templates: prior?.template_id && prior?.template_use_case ? [{ template_id: prior.template_id, use_case: prior.template_use_case }] : [],
+      sms_templates: prior?.template_id && prior?.template_use_case
+        ? [{ template_id: prior.template_id, use_case: prior.template_use_case, language: (catalog || []).find((r) => r.template_id === prior.template_id)?.language || null }]
+        : [],
       properties: fixture.valuation ? [{ property_id: "prop-1", ...fixture.valuation }] : [],
     });
     const ctx = await buildConversationContext({ thread_key: THREAD, inbound_received_at: fixture.received_at, supabase: ctxSupabase });

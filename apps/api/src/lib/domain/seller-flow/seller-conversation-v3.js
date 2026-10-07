@@ -45,7 +45,11 @@ import {
   computeAsIsAnchor,
   roundAnchorDown,
   isSellerAutopilotV2Enabled,
+  detectIdentityStatement,
+  V2_IDENTITY_KINDS,
 } from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
+import { normalizeMatchingFlags } from "@/lib/identity/ownerProspectAlignment.js";
+import { lexiconIntent, resolveV3ReplyLanguage, LEXICON_INTENTS } from "@/lib/domain/seller-flow/seller-conversation-v3-lexicon.js";
 import {
   isSellerConversationV3Enabled,
   SELLER_CONVERSATION_V3_FLAG,
@@ -54,6 +58,8 @@ import {
 export { isSellerConversationV3Enabled, SELLER_CONVERSATION_V3_FLAG };
 
 export const SELLER_CONVERSATION_V3_VERSION = "seller_conversation_machine_v3_2026_10_06";
+/** Acquisition OS v1 §20–40 additions on top of v3 (same flag; additive). */
+export const SELLER_CONVERSATION_V3_REVISION = "acq_os_v1_2026_10_07";
 
 /** v3 runs only on top of the v2 layer (overlay + template-preference directive + quote log). */
 export function isSellerConversationV3Active(env = process.env) {
@@ -141,6 +147,11 @@ export const V3_USE_CASES = Object.freeze({
   NUMBERS_PENDING: "v3_numbers_pending",
   MF_PER_DOOR_ANCHOR: "v3_mf_per_door_anchor",
   UPDATE_YEARS: "v3_update_year_follow_up",
+  // NEW in Acquisition OS v1 (PROPOSED, inactive, unreviewed — PROPOSED_20261007050000)
+  PRICE_NUMBER: "v3_ask_price_number", // §38 S3 "Yes" to "do you have an asking price?"
+  PRICE_CLARIFY: "v3_price_clarify", // §26–27 a number that is not a price (2020 / 1,500)
+  CONNECTED_PERSON: "v3_connected_person_check", // §21 "my wife owns it" / "I manage it"
+  CONDITIONAL_ASK_PRICE: "v3_conditional_ask_price", // §23 "depends on the price"
 });
 const U = V3_USE_CASES;
 
@@ -160,9 +171,17 @@ export const V3_CONTEXT_ALIASES = Object.freeze({
   [U.ASK_PRICE_FOLLOW_UP]: "asking_price",
   [U.REPAIR_CLARIFICATION]: "condition_check",
   [U.INTEREST_FOLLOW_UP]: "proposal_interest",
+  [U.PRICE_NUMBER]: "asking_price",
+  [U.PRICE_CLARIFY]: "asking_price",
+  [U.CONNECTED_PERSON]: "ownership_check",
+  [U.CONDITIONAL_ASK_PRICE]: "asking_price",
 });
 
-const REASK_USE_CASES = new Set([U.REASK_OWNERSHIP, U.REASK_INTEREST, U.ASK_PRICE_FOLLOW_UP, U.REPAIR_CLARIFICATION, U.INTEREST_FOLLOW_UP, U.OWNERSHIP_CLARIFIER]);
+const REASK_USE_CASES = new Set([U.REASK_OWNERSHIP, U.REASK_INTEREST, U.ASK_PRICE_FOLLOW_UP, U.REPAIR_CLARIFICATION, U.INTEREST_FOLLOW_UP, U.OWNERSHIP_CLARIFIER, U.PRICE_CLARIFY, U.PRICE_NUMBER]);
+/** Condition questions (S4): a bare yes / no answers "anything major?". */
+const CONDITION_QUESTION_USE_CASES = new Set(["ask_condition_clarifier", "price_high_condition_probe", "no_price_condition_probe", "v3_below_value_condition_occupancy"]);
+/** Questions whose plain "Yes" means "I have a number", never a price / ownership / interest fact (§38). */
+const PRICE_QUESTION_USE_CASES = new Set([U.ASK_PRICE, U.TEXT_ONLY, U.CONDITIONAL_ASK_PRICE, "asking_price"]);
 const WHO_USE_CASES = new Set([U.WHO, U.WHO_S1, U.WHO_S3, U.WHO_S4, U.INFO_SOURCE, U.WHO_VARIANT, "how_got_number"]);
 const FAR_ABOVE_USE_CASES = new Set([U.FAR_ABOVE_NURTURE, U.REALITY_CHECK]);
 
@@ -260,9 +279,16 @@ export function deriveChecklist({
   message = "",
   asking_price_this_turn = null,
   prior_template_use_case = null,
+  conditional_interest = false,
+  connected_person_authorized = false,
+  identity_tag = null,
+  lexicon_intent = null,
+  lexicon_needs_work = false,
   now = Date.now(),
 } = {}) {
   const intent = lower(classification?.primary_intent);
+  const lex_offer = lexicon_intent === LEXICON_INTENTS.OFFER_REQUEST;
+  const lex_condition = lexicon_intent === LEXICON_INTENTS.CONDITION;
   const facts = extractSellerFacts({ message, priceSignal: { asking_price: null }, now: new Date(typeof now === "number" ? now : Date.parse(now)).toISOString() }).facts || {};
   const update_years = extractUpdateYears(message, { now });
   const prior_uc = lower(prior_template_use_case);
@@ -277,46 +303,96 @@ export function deriveChecklist({
   // A seller volunteering the house's condition / occupancy / price is speaking
   // as the owner side ("Central air and heat" to "do you own …?").
   const volunteers_property_facts =
-    CONDITION_TURN_INTENTS.has(intent) || OCCUPANCY_TURN_INTENTS.has(intent) || num(asking_price_this_turn) != null;
+    CONDITION_TURN_INTENTS.has(intent) || OCCUPANCY_TURN_INTENTS.has(intent) || num(asking_price_this_turn) != null || lex_offer || lex_condition;
   const ownership =
-    ownership_known || ownership_turn || volunteers_property_facts || stageAtLeast(stage, V3_STAGES.S2) || INTEREST_TURN_INTENTS.has(intent);
+    ownership_known || ownership_turn || connected_person_authorized || conditional_interest || volunteers_property_facts || stageAtLeast(stage, V3_STAGES.S2) || INTEREST_TURN_INTENTS.has(intent);
 
   const interest_known = ["interested", "conditional", "yes"].includes(lower(kf.interest)) || kf.seller_interested === true;
   const interest_turn =
     INTEREST_TURN_INTENTS.has(intent) ||
+    lex_offer ||
     (stage === V3_STAGES.S2 && [V2_INTENTS.AFFIRMATIVE, V2_INTENTS.INTEREST, V2_INTENTS.CONDITIONAL_INTEREST].includes(v2_intent)) ||
     [V2_INTENTS.OFFER_REQUEST, V2_INTENTS.NO_PRICE, V2_INTENTS.PRICE_GIVEN, V2_INTENTS.CONDITIONAL_INTEREST].includes(v2_intent) ||
     Boolean(facts.seller_interest || facts.offer_interest);
-  const interest = interest_known || interest_turn || stageAtLeast(stage, V3_STAGES.S3);
+  // Naming a price is interest (§23): "235k is my bottom" answers "open to a proposal?".
+  const interest = interest_known || interest_turn || conditional_interest || num(asking_price_this_turn) != null || stageAtLeast(stage, V3_STAGES.S3);
 
   const ask_now = num(asking_price_this_turn);
   const ask_known = knownAsk(kf);
   const price_declined =
     ["asking_price_absent", "asks_offer"].includes(intent) ||
+    lex_offer ||
     [V2_INTENTS.NO_PRICE, V2_INTENTS.OFFER_REQUEST].includes(v2_intent) ||
     kf.asking_price_declined === true ||
     // We already moved past the price question without one ("I can run my numbers").
-    [lower(U.NO_PRICE_CONDITION), lower(U.CONDITION_CLARIFIER)].includes(prior_uc) && ask_known == null;
+    ([lower(U.NO_PRICE_CONDITION), lower(U.CONDITION_CLARIFIER)].includes(prior_uc) && ask_known == null) ||
+    // §31: asked for a number, answered with the house ("it needs a new roof") → no ask; run the numbers.
+    (stage === V3_STAGES.S3 && ask_now == null && ask_known == null &&
+      (CONDITION_TURN_INTENTS.has(intent) || OCCUPANCY_TURN_INTENTS.has(intent) || Boolean(majorRepairsFromMessage(message)) || Boolean(occupancyFromMessage(message))));
   const ask = ask_now ?? ask_known;
 
   const condition_known =
     kf.condition_disclosed === true || Boolean(clean(kf.condition_level)) || Boolean(kf.repairs_needed != null && kf.repairs_needed !== "");
+  // The v2 "condition answer" reading counts only when the words carry condition
+  // content ("Rent is 1,500" / "Yes" to the condition question is not a condition).
+  // An overlay-relabelled condition intent (v2 read "anything at S4" as a condition answer) needs condition words too.
+  const overlay_condition = lower(classification?.seller_autopilot_v2?.v2_intent) === V2_INTENTS.CONDITION_ANSWER || lower(classification?.seller_autopilot_v2?.v2_intent) === V2_INTENTS.AFFIRMATIVE;
   const condition_turn =
-    CONDITION_TURN_INTENTS.has(intent) ||
-    v2_intent === V2_INTENTS.CONDITION_ANSWER ||
+    lex_condition ||
+    (CONDITION_TURN_INTENTS.has(intent) && (!overlay_condition || CONDITION_CONTENT_RE.test(String(message || "")))) ||
+    (v2_intent === V2_INTENTS.CONDITION_ANSWER && CONDITION_CONTENT_RE.test(String(message || ""))) ||
     Boolean(facts.condition || facts.repairs) ||
+    Boolean(majorRepairsFromMessage(message)) ||
     update_years.length > 0;
   const condition = condition_known || condition_turn;
 
   const occupancy_value =
     clean(facts.occupancy?.value?.occupancy_status) ||
+    occupancyFromMessage(message) ||
     clean(kf.occupancy_status) ||
     (OCCUPANCY_TURN_INTENTS.has(intent) ? "tenant_occupied" : "");
   const occupancy = Boolean(occupancy_value) && !["unknown", "null"].includes(lower(occupancy_value));
 
+  // §33 major repairs + update years (persisted, never re-asked).
+  const known_years = kf.update_years && typeof kf.update_years === "object" ? kf.update_years : {};
+  // Major repairs are KNOWN only when specific (a component, or "cosmetic only");
+  // a bare "needs some work" is a condition answer that still leaves this open.
+  const specific_items = (facts.repairs?.value?.items || []).map((i) => lower(i?.item)).filter((i) => i && i !== "general");
+  const said = majorRepairsFromMessage(message);
+  const repairs_this_turn =
+    said ||
+    (specific_items.length ? { components: specific_items } : null) ||
+    (lex_condition && lexicon_needs_work ? { components: [], reported_in_language: true, seller_words: String(message || "").slice(0, 160) } : null);
+  const repairs_value = repairs_this_turn || (kf.major_repairs && typeof kf.major_repairs === "object" ? kf.major_repairs : clean(kf.major_repairs) || null);
+  const condition_level = clean(facts.condition?.value?.condition_level) || clean(kf.condition_level) || null;
+  const needs_work =
+    NEEDS_WORK_RE.test(condition_level || "") || NEEDS_WORK_RE.test(String(message || "")) || Boolean(repairs_value?.components?.length) || Boolean(lex_condition && lexicon_needs_work);
+
+  // §22 ownership confidence: the seller's own words, corroborated (or contradicted) by the Contact Matching Tags.
+  const tag = identity_tag ? normalizeMatchingFlags(identity_tag) : "unknown";
+  const ownership_confidence = !ownership
+    ? null
+    : tag === "tenant" || tag === "unrelated"
+      ? "low_contradicted_by_matching_tag"
+      : connected_person_authorized
+        ? "connected_person_authorized"
+        : ["likely_owner", "linked_to_company", "likely_linked_to_company"].includes(tag)
+          ? "high_corroborated"
+          : "medium_seller_stated";
+
   return {
-    ownership: { collected: ownership, source: ownership_known ? "known_facts" : ownership_turn ? "this_turn" : ownership ? "implied_by_stage" : null },
-    interest: { collected: interest, source: interest_known ? "known_facts" : interest_turn ? "this_turn" : interest ? "implied_by_stage" : null },
+    stage,
+    ownership: {
+      collected: ownership,
+      source: ownership_known ? "known_facts" : ownership_turn || connected_person_authorized ? "this_turn" : ownership ? "implied_by_stage" : null,
+      confidence: ownership_confidence,
+      matching_tag: tag,
+    },
+    interest: {
+      collected: interest,
+      value: conditional_interest ? "conditional" : interest ? "interested" : null,
+      source: interest_known ? "known_facts" : interest_turn || conditional_interest || num(asking_price_this_turn) != null ? "this_turn" : interest ? "implied_by_stage" : null,
+    },
     asking_price: {
       collected: ask != null || price_declined,
       value: ask,
@@ -325,13 +401,123 @@ export function deriveChecklist({
     },
     condition: {
       collected: condition,
-      level: clean(facts.condition?.value?.condition_level) || clean(kf.condition_level) || null,
+      level: condition_level,
       repairs: facts.repairs?.value || null,
       update_years,
+      needs_work,
       source: condition_known ? "known_facts" : condition_turn ? "this_turn" : null,
     },
-    occupancy: { collected: occupancy, value: occupancy ? occupancy_value : null, source: occupancy ? (facts.occupancy ? "this_turn" : "known_facts") : null },
+    major_repairs: {
+      collected: Boolean(repairs_value),
+      value: repairs_value,
+      source: repairs_this_turn ? "this_turn" : repairs_value ? "known_facts" : null,
+    },
+    update_years: {
+      collected: update_years.length > 0 || Object.keys(known_years).length > 0,
+      value: { ...known_years, ...Object.fromEntries(update_years.map((f) => [f.component, f.year])) },
+      source: update_years.length ? "this_turn" : Object.keys(known_years).length ? "known_facts" : null,
+    },
+    occupancy: { collected: occupancy, value: occupancy ? occupancy_value : null, source: occupancy ? (facts.occupancy || occupancyFromMessage(message) || (OCCUPANCY_TURN_INTENTS.has(intent) && !clean(kf.occupancy_status)) ? "this_turn" : "known_facts") : null },
   };
+}
+
+const CONDITION_CONTENT_RE =
+  /\b(?:condition|shape|updated?|updates|remodel(?:ed)?|renovat\w*|repairs?|roof|hvac|a\/c|furnace|kitchen|bath\w*|foundation|plumbing|electrical|paint|floors?|flooring|carpet|windows?|good|great|fair|poor|rough|fine|ok|okay|excellent|decent|move[- ]in|new|old|work|cosmetic|tlc|gut|fixer|condici[oó]n|estado|buen[oa]?|reparaci\w*|techo|cocina|ba[nñ]os?)\b/i;
+
+/** Occupancy from the seller's words (rent / tenant → tenant_occupied; vacant; owner lives there). */
+export function occupancyFromMessage(message = "") {
+  const t = String(message || "");
+  if (/\b(?:vacant|empty|nobody\s+lives|no\s+one\s+lives|no\s+one'?s\s+living|unoccupied|desocupad[oa]|vac[ií]a)\b/i.test(t)) return "vacant";
+  if (/\b(?:tenants?|renters?|rented(?:\s+out)?|leased|rents?\s+(?:is|for|at)\b|section\s*8|inquilin[oa]s?|rentad[oa])\b/i.test(t)) return "tenant_occupied";
+  if (/\b(?:i|we)\s+live\s+(?:there|in\s+it|here)\b|\bowner[- ]occupied\b|\b(?:vivo|vivimos)\s+(?:ah[ií]|all[ií])\b/i.test(t)) return "owner_occupied";
+  return null;
+}
+
+const MAJOR_COMPONENTS = Object.freeze([
+  ["roof", /\broofs?\b|\btecho\b/i],
+  ["hvac", /\bhvac\b|\ba\/?c\b|\bair\s+condition(?:er|ing)\b|\bfurnace\b|\bheat(?:er|ing)?\b|\baire\s+acondicionado\b/i],
+  ["foundation", /\bfoundation\b|\bcimientos?\b|\bslab\b/i],
+  ["plumbing", /\bplumbing\b|\bpipes?\b|\bsewer\b|\bplomer[ií]a\b/i],
+  ["electrical", /\belectric(?:al)?\b|\bwiring\b|\bpanel\b/i],
+  ["water_heater", /\bwater\s+heater\b/i],
+  ["windows", /\bwindows?\b|\bventanas?\b/i],
+  ["kitchen", /\bkitchen\b|\bcocina\b/i],
+  ["baths", /\bbath(?:room)?s?\b|\bba[nñ]os?\b/i],
+]);
+const REPAIR_CONTEXT_RE = /\b(?:need|needs|needed|replace|replaced|replacing|issue|issues|problem|problems|bad|leak|leaks|leaking|crack|cracks|cracked|broken|damage|damaged|repair|repairs|redo|fix|shot|rotten|failing)\b|\bnecesita|\bproblema|\bda[nñ]ad/i;
+const CLAUSE_NEGATION_RE = /\b(?:no|not|never|nothing|without|sin|ning[uú]n)\b/i;
+const COSMETIC_ONLY_RE = /\b(?:just|only|mostly)\s+(?:cosmetic|paint|carpet|flooring|floors|updates?)\b|\bcosmetic\s+only\b|\bnothing\s+major\b|\bno\s+major\s+(?:repairs?|issues?|problems?)\b|\bsolo\s+(?:pintura|cosm[eé]tic)/i;
+
+/**
+ * §32 "major repairs" from the seller's words: components named as needing
+ * work ("needs a new roof", "foundation issues"), or "cosmetic only". Read per
+ * clause; a negated clause ("no foundation issues") and an age statement
+ * ("HVAC 3 years old") name no repair.
+ */
+export function majorRepairsFromMessage(message = "") {
+  const text = String(message || "");
+  if (!text.trim()) return null;
+  if (COSMETIC_ONLY_RE.test(text)) return { cosmetic_only: true, components: [] };
+  const components = new Set();
+  for (const sentence of text.split(/[.;!?\n]+/)) {
+    // "needs a new roof and hvac": an "and"-joined part with no verb of its own shares the previous one.
+    let carried = false;
+    for (const part of sentence.split(/,|\s+(?:and|y|&)\s+|\s+(?:but|pero)\s+/i)) {
+      const negated = CLAUSE_NEGATION_RE.test(part);
+      const repair = REPAIR_CONTEXT_RE.test(part);
+      if (negated) { carried = false; continue; }
+      const carry = carried && !/\b(?:is|are|was|fine|good|ok|okay|new|newer|updated|great)\b/i.test(part);
+      if (repair || carry) for (const [k, re] of MAJOR_COMPONENTS) if (re.test(part)) components.add(k);
+      carried = repair || carry;
+    }
+  }
+  return components.size ? { components: [...components] } : null;
+}
+
+const NEEDS_WORK_RE = /\b(?:poor|rough|distress(?:ed)?|fixer|gut|needs?\s+(?:some\s+|a\s+lot\s+of\s+|lots\s+of\s+)?(?:work|repairs?|tlc|updating|updates)|bad\s+shape|not\s+(?:in\s+)?good\s+shape)\b|necesita\s+(?:trabajo|reparaciones)/i;
+
+/** §33 state names. */
+export const CHECKLIST_STATE = Object.freeze({ UNKNOWN: "unknown", KNOWN: "known", NOT_APPLICABLE: "not_applicable" });
+/** The full §33 checklist (the 5 required fields gate the offer path; repairs + years are asked only when they add value). */
+export const CHECKLIST_DISPLAY_FIELDS = Object.freeze(["ownership", "interest", "asking_price", "condition", "major_repairs", "update_years", "occupancy"]);
+
+/**
+ * §33: every checklist field as unknown / known / not_applicable.
+ *   asking_price  known also when the seller declined to price (value = "declined")
+ *   major_repairs not_applicable when the condition is stated and does not need work
+ *   update_years  not_applicable when the house plainly needs heavy work (years add nothing)
+ */
+export function checklistState(checklist = {}) {
+  const S = CHECKLIST_STATE;
+  const st = (f) => (checklist?.[f]?.collected ? S.KNOWN : S.UNKNOWN);
+  const condition_known = Boolean(checklist?.condition?.collected);
+  const needs_work = Boolean(checklist?.condition?.needs_work);
+  const heavy = /poor|distress|gut|heavy|major/i.test(checklist?.condition?.level || "");
+  return {
+    ownership: st("ownership"),
+    interest: st("interest"),
+    asking_price: st("asking_price"),
+    condition: st("condition"),
+    major_repairs: checklist?.major_repairs?.collected ? S.KNOWN : condition_known && !needs_work ? S.NOT_APPLICABLE : S.UNKNOWN,
+    update_years: checklist?.update_years?.collected ? S.KNOWN : heavy || (needs_work && checklist?.major_repairs?.collected) ? S.NOT_APPLICABLE : S.UNKNOWN,
+    occupancy: st("occupancy"),
+  };
+}
+
+/** The highest-value missing S4 question (§32): one question, never a form. */
+export function selectS4Question(checklist = {}, used_use_cases = []) {
+  const used = new Set((used_use_cases || []).map(lower));
+  if (!checklist?.condition?.collected) return "condition";
+  const state = checklistState(checklist);
+  if (checklist.condition.needs_work && state.major_repairs === CHECKLIST_STATE.UNKNOWN && !used.has(lower(U.REPAIR_CLARIFICATION))) return "major_repairs";
+  if (
+    state.update_years === CHECKLIST_STATE.UNKNOWN &&
+    !checklist.condition.needs_work &&
+    checklist.condition.source === "this_turn" &&
+    !used.has(lower(U.UPDATE_YEARS))
+  ) return "update_years";
+  if (!checklist?.occupancy?.collected) return "occupancy";
+  return null;
 }
 
 export function missingChecklist(checklist = {}) {
@@ -344,7 +530,9 @@ const QUESTION_FOR = Object.freeze({
   // first-touch ownership_check rows carry {{property_address}} / agent name.
   ownership: [U.REASK_OWNERSHIP, U.OWNERSHIP],
   interest: [U.INTEREST, U.INTEREST_FOLLOW_UP],
-  asking_price: [U.ASK_PRICE, U.ASK_PRICE_FOLLOW_UP],
+  // asking_price_follow_up presumes a number (executor guard) — the
+  // number-free second ask is the conditional "what would make it worth it?".
+  asking_price: [U.ASK_PRICE, U.CONDITIONAL_ASK_PRICE, U.PRICE_CLARIFY],
   condition: [U.CONDITION_CLARIFIER],
   // price_works_confirm_basics is not used: its prod rows (active, NOT safe)
   // mix occupancy and condition questions.
@@ -354,14 +542,20 @@ const QUESTION_FOR = Object.freeze({
 /** Persistable facts patch (known_facts) for what this turn collected. */
 export function checklistFactsPatch(checklist = {}) {
   const patch = {};
-  if (checklist.ownership?.source === "this_turn") patch.ownership_status = "confirmed";
-  if (checklist.interest?.source === "this_turn") patch.interest = "interested";
+  // §38: past S2 a "yes" answers the current question only — ownership / interest
+  // are implied by the stage, never re-stamped from an affirmative there.
+  const early = !checklist.stage || isEarlyStage(checklist.stage);
+  if (early && checklist.ownership?.source === "this_turn") patch.ownership_status = "confirmed";
+  if (early && checklist.ownership?.confidence && checklist.ownership?.source === "this_turn") patch.ownership_confidence = checklist.ownership.confidence;
+  if (early && checklist.interest?.source === "this_turn") patch.interest = checklist.interest.value === "conditional" ? "conditional" : "interested";
+  if (checklist.major_repairs?.source === "this_turn" && checklist.major_repairs.value) patch.major_repairs = checklist.major_repairs.value;
   if (checklist.asking_price?.declined && checklist.asking_price.source === "seller_declined_to_price") patch.asking_price_declined = true;
   if (checklist.condition?.source === "this_turn") {
     patch.condition_disclosed = true;
     if (checklist.condition.level) patch.condition_level = checklist.condition.level;
     if (checklist.condition.update_years?.length) {
-      patch.update_years = Object.fromEntries(checklist.condition.update_years.map((f) => [f.component, f.year]));
+      // Merged with what the thread already knew, so a later turn never drops an earlier year.
+      patch.update_years = { ...(checklist.update_years?.value || {}), ...Object.fromEntries(checklist.condition.update_years.map((f) => [f.component, f.year])) };
     }
   }
   if (checklist.occupancy?.source === "this_turn" && checklist.occupancy.value) patch.occupancy_status = checklist.occupancy.value;
@@ -535,6 +729,60 @@ const NOT_OWNER_SHORT_RE = /^\s*(?:no+|nope|nah)?[\s,.!]*(?:i'?m|i\s+am)\s+not(?
 const SIGN_OFF_RE =
   /^\s*(?:have\s+a\s+(?:great|good|nice|blessed)\s+(?:day|night|evening|weekend|one)|take\s+care|bye|good\s*bye|god\s+bless|you\s+too|same\s+to\s+you|que\s+(?:tenga|le\s+vaya)\s+bien|buen\s+d[ií]a|bendiciones)[\s.!🙂😊🙏]*$/iu;
 
+/** Reply to "can you speak for the owner?": yes / I can / I handle it / I make the decisions. */
+const SPEAKS_FOR_OWNER_RE =
+  /^\s*(?:yes|yeah|yep|yup|sure|of\s+course|correct|s[ií]|claro)\b|\bi\s+(?:can|do|handle|make\s+(?:the\s+)?decisions?|speak\s+for|decide|have\s+(?:power\s+of\s+attorney|poa|authority))\b|\b(?:power\s+of\s+attorney|poa)\b|\byo\s+(?:puedo|decido|me\s+encargo)\b/i;
+/** §23 conditional interest. A price or offer condition, not a market-timing wish. */
+const CONDITIONAL_INTEREST_RE =
+  /\b(?:depends?|depending)\s+on\s+(?:the\s+|your\s+)?(?:price|offer|number|money)\b|\bfor\s+the\s+right\s+(?:price|offer|number|amount)\b|\b(?:if|when)\s+(?:the\s+)?price\s+is\s+right\b|\bif\s+(?:it'?s|its|it\s+is|you\s+(?:make|have|give\s+me))\s+(?:a\s+)?(?:good|great|fair|decent|reasonable|strong|serious|right)\s+(?:offer|price|number)\b|\bif\s+the\s+(?:offer|number|money)\s+is\s+(?:right|good|fair)\b|\bat\s+the\s+right\s+price\b|\bdepende\s+(?:del?\s+)?(?:precio|oferta)\b|\bpor\s+(?:el|un)\s+(?:buen\s+)?precio\s+(?:justo|correcto|adecuado)\b|\bsi\s+(?:el\s+precio|la\s+oferta)\s+es\s+(?:buen[oa]|justo|correct[oa])\b/i;
+/** A conditional clause inside a definite refusal is still a refusal ("not for any price"). */
+const DEFINITE_DECLINE_RE = /\b(?:not\s+for\s+any\s+price|no\s+price|never\s+sell(?:ing)?|not\s+selling\s+(?:at\s+all|ever)|ni\s+por\s+todo)\b/i;
+const FIRST_PERSON_RE = /\b(?:i|i'?m|me|my|yo|soy|vivo|rento|alquilo)\b/i;
+/** "Call me at …" / "my number is …" is the seller's own contact, not a referral. */
+const SELF_CONTACT_RE = /\b(?:call|text|reach)\s+me\b|\bmy\s+(?:cell|number|phone)\b|\bme\s+puede\s+llamar\b/i;
+const CAPITAL_GAINS_RE = /\bcapital\s+gains?\b|\b1031\b|\bdepreciation\s+recapture\b|\b(?:tax(?:es)?|irs)\s+(?:would|will)\s+(?:kill|eat|hit)\b|\bganancias?\s+de\s+capital\b/i;
+const BARE_MAYBE_RE = /^\s*(?:maybe|perhaps|possibly|not\s+sure|idk|i\s+don'?t\s+know|tal\s+vez|quiz[aá]s?|no\s+s[eé])[\s.!?]*$/i;
+const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|ya|si|sí|correct|👍)[\s.!]*$/iu;
+const BARE_NO_REPLY_RE = /^\s*(?:no+|nope|nah|no\s+sir|no\s+ma'?am|nothing|none|nada)[\s.!]*$/i;
+/** A bare link (an app / listing URL) answers nothing. */
+const URL_ONLY_RE = /^\s*(?:<?https?:\/\/\S+>?\s*)+$/i;
+/** Another investor / wholesaler answering (not the owner side). */
+const NON_PRINCIPAL_RE =
+  /\b(?:i'?m|we'?re|i\s+am|we\s+are)\s+(?:just\s+)?(?:with|from)\s+(?:the|an?)\s+investors?\b|\bwe\s+(?:just\s+)?find\s+(?:cash\s+)?buyers\b|\b(?:i'?m|i\s+am)\s+(?:a|the)\s+wholesaler\b/i;
+/** "235k is my bottom" / "my goal is 200" / "my asking price is $250,000" / "I'd take 180k". */
+const STATED_ASK_RE = [
+  /\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k|m|mil|million|thousand)?\s+(?:is|would\s+be)\s+(?:my|the)\s+(?:bottom(?:\s+line)?|goal|minimum|lowest|price|asking(?:\s+price)?|number|floor)\b/i,
+  /\bmy\s+(?:bottom(?:\s+line)?|goal|minimum|lowest|asking(?:\s+price)?|price|number|floor)\s+(?:is|would\s+be|=)\s*\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k|m|mil|million|thousand)?\b/i,
+  /\b(?:i'?d|i\s+would|i\s+will|i'?ll)\s+(?:take|sell\s+(?:it\s+)?for|accept)\s+\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k|m|mil|million|thousand)?\b/i,
+  // "Sure, for 10 million" / "at $1,000,000": a unit or a $ / thousands comma is required.
+  /\b(?:for|at)\s+\$?\s*(\d+(?:\.\d+)?)\s*(k|m|mil|million|thousand)\b/i,
+  /\b(?:for|at)\s+\$\s*(\d{1,3}(?:,\d{3}){1,3})\b()/i,
+];
+
+/** §26 deterministic: 3 digits → thousands; 3,3 / 6+ digits → dollars; 1,3 or a bare 4-digit → never a price. */
+export function statedAskingPrice(message = "") {
+  const text = String(message || "");
+  for (const re of STATED_ASK_RE) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const raw = m[1].replace(/,/g, "");
+    const unit = (m[2] || "").toLowerCase();
+    let v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0) continue;
+    if (unit === "k" || unit === "thousand") v *= 1_000;
+    else if (unit === "m" || unit === "mil" || unit === "million") v *= 1_000_000;
+    else if (/^\d{1,3}(?:,\d{3})+$/.test(m[1]) && m[1].split(",")[0].length === 1 && m[1].length === 5) continue; // "1,500" — rent-shaped
+    else if (/^\d{3}$/.test(raw)) v *= 1_000;
+    else if (/^\d{4}$/.test(raw) || v < 10_000) continue; // a bare 4-digit is a year or rent, never a price
+    return v;
+  }
+  return null;
+}
+
+/** §38 a "yes" to "do you have an asking price?" — means "I have a number", nothing more. */
+const CONTEXTUAL_YES_RE =
+  /^\s*(?:👍|👌)\s*$|^\s*(?:yes|yeah|yep|yup|ya|sure|correct|i\s+do|yes\s+i\s+do|i\s+have\s+(?:one|a\s+(?:number|price|figure))|i\s+have\s+a\s+price\s+in\s+mind|i\s+do\s+have\s+(?:one|a\s+(?:number|price))|s[ií]|claro|s[ií]\s+tengo)\b[\s.!,]*(?:i\s+do|i\s+have\s+one|tengo)?[\s.!👍🙂]*$/iu;
+
 export function isLegalThreat(message = "") {
   return LEGAL_THREAT_RE.test(String(message || ""));
 }
@@ -661,6 +909,7 @@ const WHO_FIRST_FOR_STAGE = Object.freeze({
  * @param {object|null} p.ade_snapshot
  * @param {Array} p.mf_door_comps          MF sales for the per-door anchor (loader)
  * @param {Array} p.recent_outbound        [{ use_case, template_id, body }], newest first
+ * @param {string|null} p.matching_flags   prospects.matching_flags (Contact Matching Tags, §22)
  */
 export function planSellerConversationV3({
   classification = null,
@@ -668,7 +917,7 @@ export function planSellerConversationV3({
   conversation_context = null,
   stage_before = null,
   known_facts = {},
-  asking_price_this_turn = null,
+  asking_price_this_turn: committed_ask = null,
   v2_plan = null,
   offer_authority = null,
   value_authority = null,
@@ -676,9 +925,12 @@ export function planSellerConversationV3({
   ade_snapshot = null,
   mf_door_comps = [],
   recent_outbound = [],
+  matching_flags = null,
+  negotiation_v3 = null,
   config = V3_CONFIG,
   now = Date.now(),
 } = {}) {
+  let asking_price_this_turn = committed_ask;
   const stage_info = resolveV3Stage({ conversation_context, stage_before });
   const stage = stage_info.stage;
   const thread_language = conversation_context?.last_outbound_language || null;
@@ -692,6 +944,37 @@ export function planSellerConversationV3({
   const v2_intent = [V2_INTENTS.IDENTITY_STATEMENT, V2_INTENTS.BARE_NO_AFTER_CLARIFIER].includes(fresh.intent) ? fresh.intent : v2.intent;
   const intent = lower(classification?.primary_intent) || "unclear";
   const rule_ids = Array.isArray(classification?.matched_rule_ids) ? classification.matched_rule_ids.map(lower) : [];
+  const suppression_action = lower(classification?.automation_decision?.suppression_action);
+  const compliance = clean(classification?.compliance_flag) === "stop_texting" || intent === "opt_out" || suppression_action === "opt_out";
+  const wrong_number_lane = suppression_action === "archive_wrong_number";
+  const hard_lane = compliance || wrong_number_lane || ["hostile_or_legal", "hostile_or_troll", "wrong_number", "wrong_person"].includes(intent) || v2_intent === V2_INTENTS.HOSTILE_LEGAL;
+  // §21 connected person: "my wife owns it" / "I manage it" / "my LLC owns it" / "I rent".
+  const identity_raw = !hard_lane && (isEarlyStage(stage) || v2_intent === V2_INTENTS.IDENTITY_STATEMENT)
+    ? (v2_intent === V2_INTENTS.IDENTITY_STATEMENT ? fresh.identity_kind : null) || detectIdentityStatement(message)
+    : null;
+  // "Tenant lives there" is the owner describing occupancy; only a first-person
+  // "I rent / I'm the tenant / I live there" makes the texted person the occupant.
+  const identity_kind =
+    identity_raw === V2_IDENTITY_KINDS.OCCUPANT && !FIRST_PERSON_RE.test(String(message || "")) ? null : identity_raw;
+  const after_connected_question = lower(prior_uc) === lower(U.CONNECTED_PERSON);
+  const connected_person_authorized =
+    after_connected_question && !hard_lane && !identity_kind && SPEAKS_FOR_OWNER_RE.test(String(message || ""));
+  // §23 conditional interest: "depends on the price" / "for the right price" / "if it's a good offer".
+  const conditional_interest =
+    !hard_lane && (isEarlyStage(stage) || stage === V3_STAGES.S3) && CONDITIONAL_INTEREST_RE.test(String(message || "")) && !DEFINITE_DECLINE_RE.test(String(message || ""));
+  // §26: an explicit price statement the one money path left uncommitted
+  // ("235k is my bottom", "my goal is 200"). Thousands by the 3-digit rule.
+  const stated_ask = !hard_lane && num(asking_price_this_turn) == null ? statedAskingPrice(message) : null;
+  if (stated_ask != null) asking_price_this_turn = stated_ask;
+  const url_only = URL_ONLY_RE.test(String(message || ""));
+  // §34 language → intent → canonical intent (rules only): fills the canonical
+  // turns the classifier does not read in this language. Opt-out always counts.
+  const lex_hit = lexiconIntent(message);
+  // Weakness is judged on the classifier's own verdict (before the v2 overlay relabelled it by stage).
+  const pre_overlay_intent = lower(classification?.seller_autopilot_v2?.previous_primary_intent ?? intent);
+  const weak_intent = ["unclear", "ok", ""].includes(pre_overlay_intent) || ["acknowledgement", "reaction_only"].includes(pre_overlay_intent);
+  const lexicon = lex_hit && (lex_hit.intent === LEXICON_INTENTS.OPT_OUT || weak_intent) ? lex_hit : null;
+  const reply_language = resolveV3ReplyLanguage({ message, classification, conversation_context, lexicon });
 
   const checklist = deriveChecklist({
     known_facts,
@@ -701,6 +984,11 @@ export function planSellerConversationV3({
     message,
     asking_price_this_turn,
     prior_template_use_case: prior_uc,
+    conditional_interest,
+    connected_person_authorized,
+    identity_tag: matching_flags,
+    lexicon_intent: lexicon?.intent || null,
+    lexicon_needs_work: lexicon?.needs_work === true,
     now,
   });
   const missing = missingChecklist(checklist);
@@ -713,15 +1001,42 @@ export function planSellerConversationV3({
     v2_intent,
     checklist,
     missing,
-    facts_patch: checklistFactsPatch(checklist),
+    facts_patch: {
+      ...checklistFactsPatch(checklist),
+      ...(stated_ask != null ? { asking_price: { value: stated_ask, source: "seller_conversation_v3_stated_ask" } } : {}),
+    },
+    stated_ask,
+    lexicon,
+    reply_language,
     known_update_years: known_facts?.update_years || {},
+    checklist_state: checklistState(checklist),
+    revision: SELLER_CONVERSATION_V3_REVISION,
+    identity: identity_kind || connected_person_authorized || matching_flags
+      ? { claim: identity_kind || (connected_person_authorized ? "connected_person_authorized" : null), matching_tag: checklist.ownership.matching_tag, ownership_confidence: checklist.ownership.confidence }
+      : null,
     price_branch: null,
     monetary: null,
   });
 
   // ── 1. compliance + existing automatic lanes ────────────────────────────
+  if (!compliance && (lexicon?.intent === LEXICON_INTENTS.OPT_OUT || v2_intent === V2_INTENTS.OPT_OUT)) {
+    // An opt-out the classifier did not read ("Smetta di scrivermi", "别再给我发短信了",
+    // "No me mande más mensajes"): hand it to the canonical STOP path (the
+    // executor's opt-out branch → record-phone-suppression). Never a reply.
+    return { ...defer(b, V3_TERMINAL.SUPPRESS, "v3_lexicon_opt_out_suppressed", { terminal_action: V3_TERMINAL.SUPPRESS }), force_opt_out: true };
+  }
   if (clean(classification?.compliance_flag) === "stop_texting" || intent === "opt_out") {
     return defer(b, V3_TERMINAL.SUPPRESS, "v3_opt_out_suppressed_silently", { terminal_action: V3_TERMINAL.SUPPRESS });
+  }
+  if (wrong_number_lane || ["wrong_number", "wrong_person"].includes(intent)) {
+    // A TERMINAL (applied), not a deferral: the v2 plan for the same turn can
+    // still name a reply ("Wrong number" read as asking_price_absent at S3 →
+    // "I can run the numbers…"). The wrong-number archive itself is kept.
+    return terminal(b, V3_TERMINAL.WRONG_NUMBER, "v3_existing_lane_wrong_number", { keep_suppression: true });
+  }
+  if (CAPITAL_GAINS_RE.test(String(message || "")) && !compliance && !["not_interested"].includes(intent)) {
+    // "I'd get killed on capital gains if I sold" — a reason to sell creatively, not a sale (§55).
+    return guardedReply(b, [U.CAPITAL_GAINS], "v3_capital_gains_creative_probe", ctx);
   }
   if (intent === "hostile_or_legal" || v2_intent === V2_INTENTS.HOSTILE_LEGAL) {
     if (isLegalThreat(message)) return review(b, "v3_review_legal_threat");
@@ -730,6 +1045,19 @@ export function planSellerConversationV3({
   if (intent === "hostile_or_troll") return terminal(b, V3_TERMINAL.ARCHIVE, "v3_troll_archived_no_reply");
   if (v2_intent === V2_INTENTS.CAPITAL_GAINS) {
     return guardedReply(b, [U.CAPITAL_GAINS], "v3_capital_gains_creative_probe", ctx);
+  }
+  if (conditional_interest && num(asking_price_this_turn) == null) {
+    // "Depends on the price" / "No… I will sell it for the right price" is a yes
+    // with a condition: straight to price discovery (§23), never nurture. At S3
+    // (we already asked for a number) it is a decline to price → run the numbers.
+    if (stage === V3_STAGES.S3) {
+      return guardedReply({ ...b, facts_patch: { ...b.facts_patch, asking_price_declined: true } }, [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], "v3_conditional_at_s3_no_price_condition", ctx, { asking_for: "condition" });
+    }
+    return guardedReply(b, [U.CONDITIONAL_ASK_PRICE, U.ASK_PRICE], "v3_conditional_interest_ask_price", ctx, { asking_for: "asking_price" });
+  }
+  if (!hard_lane && NON_PRINCIPAL_RE.test(String(message || ""))) {
+    // "I'm just with the investor, we find buyers": another investor / wholesaler, not the owner side.
+    return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, "v3_non_principal_investor_archived");
   }
   if (intent === "not_interested" && isCompoundOpportunity(classification)) {
     // "Not selling this one, but I'm selling two parcels…": no review (owner
@@ -746,11 +1074,13 @@ export function planSellerConversationV3({
   if (CLOSED_PROPERTY_INTENTS.has(intent) || v2_intent === V2_INTENTS.SOLD_FORMER_OWNER) {
     return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, "v3_sold_or_not_owner_archived");
   }
-  if (v2_intent === V2_INTENTS.IDENTITY_STATEMENT) {
-    const kind = fresh.identity_kind;
-    if (kind === "entity_owner") return guardedReply(b, [U.INTEREST], "v3_entity_owner_continue_interest", ctx);
-    if (kind === "occupant") return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, "v3_occupant_not_owner_archived");
-    return guardedReply(b, [U.REFERRAL_BEST_CONTACT], `v3_identity_${kind}_ask_best_contact`, ctx);
+  if (identity_kind) return routeConnectedPerson(b, { kind: identity_kind, checklist, used, ctx, message });
+  if (after_connected_question && !hard_lane) {
+    if (connected_person_authorized) return nextChecklistQuestion(b, checklist, missing, ctx, "v3_connected_person_authorized");
+    if (PHONE_IN_TEXT_RE.test(message)) return terminal(b, V3_TERMINAL.REFERRAL_CAPTURE, "v3_connected_person_referral_number_captured");
+    if (v2_intent === V2_INTENTS.BARE_NO_OWNERSHIP || /^\s*(?:no+|nope|nah|not\s+really|no\s+puedo)\b/i.test(message)) {
+      return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, "v3_connected_person_cannot_speak_archived");
+    }
   }
   if (v2_intent === V2_INTENTS.BARE_NO_AFTER_CLARIFIER) return terminal(b, V3_TERMINAL.ARCHIVE, "v3_second_no_after_clarifier_archived");
   if (v2_intent === V2_INTENTS.BARE_NO_OWNERSHIP) {
@@ -761,7 +1091,7 @@ export function planSellerConversationV3({
     if (used.includes(lower(U.OWNERSHIP_CLARIFIER))) return terminal(b, V3_TERMINAL.ARCHIVE, "v3_not_owner_after_clarifier_archived");
     return guardedReply(b, [U.OWNERSHIP_CLARIFIER], "v3_not_owner_short_clarifier_once", ctx);
   }
-  if (intent === "unclear" && PHONE_IN_TEXT_RE.test(message) && REFERRAL_LANGUAGE_RE.test(message)) {
+  if (!hard_lane && PHONE_IN_TEXT_RE.test(message) && REFERRAL_LANGUAGE_RE.test(message) && !SELF_CONTACT_RE.test(message) && !["seller_interested", "asking_price_provided", "asks_offer"].includes(intent)) {
     return terminal(b, V3_TERMINAL.REFERRAL_CAPTURE, "v3_referral_number_captured");
   }
   if (intent === "unclear" && THIRD_PARTY_SPEAKER_RE.test(message)) {
@@ -796,8 +1126,47 @@ export function planSellerConversationV3({
   }
 
   // ── 3. who / why / how'd you get my number ──────────────────────────────
-  if (v2_intent === V2_INTENTS.WHO_WHY || ["who_is_this", "info_request", "how_got_number"].includes(intent)) {
+  if (lexicon?.intent === LEXICON_INTENTS.NOT_INTERESTED) {
+    return terminal(b, V3_TERMINAL.NURTURE, "v3_lexicon_not_interested_nurture");
+  }
+  if (v2_intent === V2_INTENTS.WHO_WHY || ["who_is_this", "info_request", "how_got_number"].includes(intent) || lexicon?.intent === LEXICON_INTENTS.WHO_WHY) {
     return whoLoop(b, used, ctx);
+  }
+
+  // ── 3b. S3 contextual YES / a number that is not a price (§26–27, §38) ──
+  if (stage === V3_STAGES.S3 && num(asking_price_this_turn) == null && !compliance) {
+    const prior_is_price_question = PRICE_QUESTION_USE_CASES.has(lower(prior_uc)) || lower(conversation_context?.last_outbound_use_case) === "asking_price";
+    if (prior_is_price_question && CONTEXTUAL_YES_RE.test(String(message || "")) && !used.includes(lower(U.PRICE_NUMBER))) {
+      return guardedReply(b, [U.PRICE_NUMBER, U.ASK_PRICE_FOLLOW_UP], "v3_s3_yes_continue_price_discovery", ctx, { asking_for: "asking_price" });
+    }
+    if (intent === "unclear" && /\d/.test(String(message || "")) && !checklist.asking_price.collected && !used.includes(lower(U.PRICE_CLARIFY))) {
+      // "2020" / "1,500" / "15": never a price (year, rent, ambiguous) — clarify once.
+      return guardedReply(b, [U.PRICE_CLARIFY, U.ASK_PRICE_FOLLOW_UP], "v3_s3_number_not_a_price_clarify", ctx, { asking_for: "asking_price" });
+    }
+  }
+
+  // ── 3c. contextual short answers (§38): the reply means what the LAST question asked ──
+  if (stage === V3_STAGES.S1 && BARE_MAYBE_RE.test(String(message || "")) && !checklist.ownership.source?.startsWith("known")) {
+    // "Maybe" to "are you the owner?" confirms nothing: re-ask once, then archive.
+    if (used[0] && REASK_USE_CASES.has(used[0])) return terminal(b, V3_TERMINAL.ARCHIVE, "v3_unclear_after_reask_archived");
+    return guardedReply(b, REASK_FOR_STAGE[V3_STAGES.S1], "v3_s1_maybe_reask_ownership", ctx, { asking_for: "ownership" });
+  }
+  if (stage === V3_STAGES.S4 && CONDITION_QUESTION_USE_CASES.has(lower(prior_uc))) {
+    if (BARE_YES_RE.test(String(message || ""))) {
+      // "Yes" to "anything major like roof, HVAC, foundation?" → which ones.
+      if (!used.includes(lower(U.REPAIR_CLARIFICATION))) {
+        return guardedReply({ ...b, facts_patch: { ...b.facts_patch, condition_disclosed: true } }, [U.REPAIR_CLARIFICATION], "v3_s4_yes_major_repairs_which", ctx, { asking_for: "major_repairs" });
+      }
+    } else if (BARE_NO_REPLY_RE.test(String(message || ""))) {
+      // "No" → nothing major: condition + repairs known; next is the next missing fact.
+      const cl = {
+        ...checklist,
+        condition: { ...checklist.condition, collected: true, needs_work: false, source: "this_turn", level: checklist.condition.level || "no_major_repairs" },
+        major_repairs: { collected: true, value: { none_major: true, components: [] }, source: "this_turn" },
+      };
+      const nb = { ...b, checklist: cl, checklist_state: checklistState(cl), missing: missingChecklist(cl), facts_patch: { ...b.facts_patch, condition_disclosed: true, major_repairs: { none_major: true, components: [] } } };
+      return priceAndChecklist(nb, { checklist: cl, missing: nb.missing, ctx, v2_plan, offer_authority, value_authority, property_metadata, ade_snapshot, mf_door_comps, config, now });
+    }
   }
 
   // ── 4. frustration / implausible / unreadable ───────────────────────────
@@ -824,12 +1193,18 @@ export function planSellerConversationV3({
   }
 
   const understood =
-    !["unclear", "ok", ""].includes(intent) ||
+    Boolean(lexicon) ||
+    (!url_only && !["unclear", "ok", ""].includes(intent)) ||
     [V2_INTENTS.AFFIRMATIVE, V2_INTENTS.INTEREST, V2_INTENTS.CONDITIONAL_INTEREST, V2_INTENTS.PRICE_GIVEN, V2_INTENTS.NO_PRICE, V2_INTENTS.OFFER_REQUEST, V2_INTENTS.CONDITION_ANSWER].includes(v2_intent);
-  const answered_this_turn = CHECKLIST_FIELDS.some((k) => checklist[k]?.source === "this_turn");
+  const answered_this_turn = !url_only && CHECKLIST_FIELDS.some((k) => checklist[k]?.source === "this_turn");
   if (!understood && !answered_this_turn) {
     const reasked = used[0] && REASK_USE_CASES.has(used[0]);
     if (reasked) {
+      // S3: a seller who will not name a number after one clarification has
+      // declined to price — run the numbers on condition instead (no number talk).
+      if (stage === V3_STAGES.S3 && !used.includes(lower(U.NO_PRICE_CONDITION)) && !checklist.condition.collected) {
+        return guardedReply({ ...b, facts_patch: { ...b.facts_patch, asking_price_declined: true } }, [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], "v3_s3_unclear_after_clarify_no_price_condition", ctx, { asking_for: "condition" });
+      }
       return isEarlyStage(stage)
         ? terminal(b, V3_TERMINAL.ARCHIVE, "v3_unclear_after_reask_archived")
         : terminal(b, V3_TERMINAL.NURTURE, "v3_unclear_after_reask_nurture");
@@ -853,6 +1228,7 @@ export function planSellerConversationV3({
     mf_door_comps,
     config,
     now,
+    negotiation_v3,
   });
 }
 
@@ -863,6 +1239,31 @@ function isCompoundOpportunity(classification = {}) {
   const positive = intents.some((i) => COMPOUND_POSITIVE.has(i));
   const addresses = Array.isArray(classification?.address_signals) ? classification.address_signals : [];
   return positive || addresses.some((a) => a?.confidence === "high") || (positive && addresses.length > 0);
+}
+
+/**
+ * §21/§22 connected-person routing (S1). Outcomes are automatic, never review:
+ *   entity owner ("my LLC owns it")  → interest, unless the Matching Tag says the
+ *                                       texted person is a resident/renter → ask once
+ *                                       whether they can speak for the owner;
+ *   family / spouse / manager        → ask once whether they can speak for the owner
+ *                                       or how best to reach them; a second statement →
+ *                                       the best-contact question; then archive the pairing;
+ *   occupant / renter                → archive the pairing (hold; no suppression).
+ */
+function routeConnectedPerson(b, { kind, checklist, used, ctx }) {
+  const tag = checklist?.ownership?.matching_tag || "unknown";
+  if (kind === V2_IDENTITY_KINDS.OCCUPANT) return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, "v3_occupant_not_owner_archived");
+  if (kind === V2_IDENTITY_KINDS.ENTITY && tag !== "tenant" && tag !== "unrelated") {
+    return guardedReply(b, [U.INTEREST], "v3_entity_owner_continue_interest", ctx, { asking_for: "interest" });
+  }
+  if (!used.includes(lower(U.CONNECTED_PERSON))) {
+    return guardedReply(b, [U.CONNECTED_PERSON, U.REFERRAL_BEST_CONTACT], `v3_connected_${kind}_can_speak_for_owner`, ctx, { asking_for: "ownership" });
+  }
+  if (!used.includes(lower(U.REFERRAL_BEST_CONTACT))) {
+    return guardedReply(b, [U.REFERRAL_BEST_CONTACT], `v3_connected_${kind}_ask_best_contact`, ctx, { asking_for: "ownership" });
+  }
+  return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, `v3_connected_${kind}_unresolved_archived`);
 }
 
 function whoLoop(b, used, ctx) {
@@ -882,7 +1283,7 @@ function nextChecklistQuestion(b, checklist, missing, ctx, reason) {
   return guardedReply(b, QUESTION_FOR[next], `${reason}:ask_${next}`, ctx, { asking_for: next });
 }
 
-function priceAndChecklist(b, { checklist, missing, ctx, v2_plan, offer_authority, value_authority, property_metadata, ade_snapshot, mf_door_comps, config, now }) {
+function priceAndChecklist(b, { checklist, missing, ctx, v2_plan, offer_authority, value_authority, property_metadata, ade_snapshot, mf_door_comps, config, now, negotiation_v3 = null }) {
   const ask = checklist.asking_price.value;
   const { multifamily, units } = resolveUnitCount({ property_metadata, ade_snapshot });
   const asked_this_turn = checklist.asking_price.source === "this_turn";
@@ -898,6 +1299,9 @@ function priceAndChecklist(b, { checklist, missing, ctx, v2_plan, offer_authorit
     if (!units) return guardedReply(mb, [U.MF_CONFIRM_UNITS], "v3_mf_confirm_units", ctx);
     if (!checklist.condition.collected) return guardedReply(mb, [U.CONDITION_CLARIFIER], "v3_mf_ask_condition", ctx, { asking_for: "condition" });
     if (!checklist.occupancy.collected) return guardedReply(mb, [U.MF_OCCUPANCY, U.OCCUPANCY], "v3_mf_ask_occupancy", ctx, { asking_for: "occupancy" });
+    // With Negotiation v3 on, the per-unit number is C's (never computed here).
+    const handed = mapNegotiationMove(mb, negotiation_v3, ctx);
+    if (handed) return handed;
     const mao = offer_authority?.mao ?? null;
     const anchor = computePerDoorAnchor({ comps: mf_door_comps, units, mao, now, rules: config.mf });
     if (!anchor.ok) return review(mb, anchor.reason, { mf_anchor: anchor, stage_gate: "s4_plus" });
@@ -933,30 +1337,26 @@ function priceAndChecklist(b, { checklist, missing, ctx, v2_plan, offer_authorit
 
   const need_condition = !checklist.condition.collected;
   const need_occupancy = !checklist.occupancy.collected;
-  // A generic condition answer ("good shape", "it's updated") gets ONE
-  // update-year follow-up (kitchen / baths / roof); never twice, never when the
-  // years were already given or the house plainly needs heavy work.
-  const ask_update_years =
-    !need_condition &&
-    checklist.condition.source === "this_turn" &&
-    !checklist.condition.update_years?.length &&
-    !Object.keys(b.known_update_years || {}).length &&
-    !ctx.used_use_cases?.includes(lower(U.UPDATE_YEARS)) &&
-    !/poor|distress|heavy|major|gut/i.test(checklist.condition.level || "") &&
-    !checklist.condition.repairs;
-  if (ask_update_years && verdict.branch !== PRICE_BRANCHES.FAR_ABOVE) {
+  // §32: ONE question — the highest-value missing fact (condition → major
+  // repairs when it needs work → update years once for a generic "good shape"
+  // → occupancy). Never a form; never a known fact again.
+  const next = selectS4Question(checklist, ctx.used_use_cases);
+  if (next === "major_repairs") {
+    return guardedReply(sb, [U.REPAIR_CLARIFICATION, U.CONDITION_CLARIFIER], "v3_s4_major_repairs", ctx, { asking_for: "major_repairs" });
+  }
+  if (next === "update_years" && !Object.keys(b.known_update_years || {}).length && !checklist.condition.repairs) {
     return guardedReply(sb, [U.UPDATE_YEARS], "v3_condition_update_year_follow_up", ctx, { asking_for: "update_years" });
   }
   if (verdict.branch === PRICE_BRANCHES.BELOW) {
     if (need_condition && need_occupancy) return guardedReply(sb, [U.BELOW_VALUE_BASICS, U.CONDITION_CLARIFIER], "v3_below_value_condition_and_occupancy", ctx, { asking_for: "condition+occupancy" });
     if (need_condition) return guardedReply(sb, [U.CONDITION_CLARIFIER], "v3_below_value_condition", ctx, { asking_for: "condition" });
     if (need_occupancy) return guardedReply(sb, [U.OCCUPANCY], "v3_below_value_occupancy", ctx, { asking_for: "occupancy" });
-    return offerPath(sb, { v2_plan, offer_authority, ctx, now });
+    return offerPath(sb, { v2_plan, offer_authority, ctx, now, negotiation_v3 });
   }
   if (verdict.branch === PRICE_BRANCHES.NEAR) {
     if (need_condition) return guardedReply(sb, [U.CONDITION_NEAR_VALUE, U.CONDITION_CLARIFIER], "v3_near_value_condition", ctx, { asking_for: "condition" });
     if (need_occupancy) return guardedReply(sb, [U.OCCUPANCY], "v3_near_value_occupancy", ctx, { asking_for: "occupancy" });
-    return offerPath(sb, { v2_plan, offer_authority, ctx, now });
+    return offerPath(sb, { v2_plan, offer_authority, ctx, now, negotiation_v3 });
   }
 
   // No price (declined) or no trusted value: condition, no number talk.
@@ -967,7 +1367,7 @@ function priceAndChecklist(b, { checklist, missing, ctx, v2_plan, offer_authorit
     return guardedReply(sb, pref, checklist.asking_price.declined ? "v3_no_price_condition" : "v3_no_trusted_value_condition", ctx, { asking_for: "condition" });
   }
   if (need_occupancy) return guardedReply(sb, [U.OCCUPANCY], "v3_checklist_occupancy", ctx, { asking_for: "occupancy" });
-  return offerPath(sb, { v2_plan, offer_authority, ctx, now });
+  return offerPath(sb, { v2_plan, offer_authority, ctx, now, negotiation_v3 });
 }
 
 /**
@@ -976,7 +1376,75 @@ function priceAndChecklist(b, { checklist, missing, ctx, v2_plan, offer_authorit
  * ready; otherwise "running the numbers" (no number) and the thread waits for
  * the engine. A guard failure at this point (S4+) is the only money review.
  */
-function offerPath(b, { v2_plan, offer_authority, ctx, now }) {
+/**
+ * §46/§49 S4 → negotiation handoff to agent C (negotiation-v3, flag
+ * NEGOTIATION_ENGINE_V3). The orchestrator computes C's plan + move (pure) and
+ * passes them in; B only maps the move to an approved template family and
+ * never computes a number. Money leaves only as a QUOTE (C already enforced
+ * ceiling / autonomous limit / authority; AUTONOMOUS_MONETARY_QUOTES off turns
+ * every money move into HUMAN). The executor's fail-closed quote log still
+ * runs before the send.
+ */
+const NEGOTIATION_BRANCH_USE_CASES = Object.freeze({
+  comps: [U.ANCHOR_COMPS],
+  numbers: [U.ANCHOR_ABOVE_MAX, U.ANCHOR_COMPS],
+  per_unit: [U.MF_PER_DOOR_ANCHOR],
+  creative: [U.CAPITAL_GAINS],
+  unrealistic_close: [U.FAR_ABOVE_NURTURE],
+});
+
+export function mapNegotiationMove(b, negotiation_v3, ctx) {
+  const move = negotiation_v3?.move || null;
+  const nplan = negotiation_v3?.plan || null;
+  if (!move) return null;
+  const nb = {
+    ...b,
+    negotiation: {
+      source: "negotiation_v3",
+      version: nplan?.version || null,
+      action: move.action,
+      quote_type: move.quote_type || null,
+      rule_branch: move.rule_branch || null,
+      language_branch: move.language_branch || null,
+    },
+  };
+  switch (move.action) {
+    case "QUOTE": {
+      const pref = NEGOTIATION_BRANCH_USE_CASES[move.language_branch] || [U.ANCHOR_COMPS];
+      const amount = num(move.amount);
+      if (amount == null || amount <= 0 || (num(nplan?.ceiling) != null && amount > num(nplan.ceiling))) {
+        return review(nb, "v3_negotiation_quote_outside_authority", { stage_gate: "s4_plus" });
+      }
+      return guardedReply(nb, pref, `v3_negotiation_${String(move.quote_type || "quote").toLowerCase()}`, ctx, {
+        monetary: {
+          kind: String(move.quote_type || "NEGOTIATION_ANCHOR").toLowerCase(),
+          amount,
+          ceiling: num(nplan?.ceiling),
+          per_unit: move.per_unit || null,
+          comp_ids: nplan?.comp_support?.ids || [],
+          rule: move.rule_branch || null,
+          source: "negotiation_v3",
+        },
+        render_overrides: move.per_unit ? { per_door_low: move.per_unit.low, per_door_high: move.per_unit.high } : null,
+      });
+    }
+    case "HUMAN":
+      // S4+ only: a money decision above the autonomous authority (or autonomy off).
+      return review(nb, `v3_negotiation_human:${move.rule_branch || "authority"}`, { stage_gate: "s4_plus", proposal: { amount: num(move.amount), quote_type: move.quote_type || null } });
+    case "CLOSE_UNREALISTIC":
+      return guardedReply(nb, [U.FAR_ABOVE_NURTURE], "v3_negotiation_close_unrealistic", ctx, { then: V3_TERMINAL.NURTURE });
+    default:
+      // HOLD / NO_NUMBER: "running the numbers", no number talk.
+      if (lower(ctx.conversation_context?.last_outbound_template_use_case) === lower(U.NUMBERS_PENDING)) {
+        return terminal(nb, V3_TERMINAL.WAIT, "v3_negotiation_hold_wait");
+      }
+      return guardedReply(nb, [U.NUMBERS_PENDING], `v3_negotiation_${String(move.action || "hold").toLowerCase()}_numbers_pending`, ctx);
+  }
+}
+
+function offerPath(b, { v2_plan, offer_authority, ctx, now, negotiation_v3 = null }) {
+  const handed = mapNegotiationMove(b, negotiation_v3, ctx);
+  if (handed) return handed;
   if (v2_plan?.action === "reply" && v2_plan.monetary) {
     return guardedReply(b, v2_plan.template_preference, `v3_offer_path:${v2_plan.reasoning_code}`, ctx, {
       monetary: v2_plan.monetary,
@@ -1050,9 +1518,34 @@ export function applySellerConversationV3(classification = null, plan = null) {
     missing: plan.missing,
     price_branch: plan.price_branch,
     facts_patch: plan.facts_patch,
+    checklist_state: plan.checklist_state || null,
+    asking_for: plan.asking_for || null,
+    reply_language: plan.reply_language || null,
+    lexicon_rule: plan.lexicon?.rule_id || null,
   };
+  if (plan.force_opt_out) {
+    // Hand the opt-out to the canonical STOP path (executor opt-out branch).
+    return {
+      classification: {
+        ...classification,
+        primary_intent: "opt_out",
+        compliance_flag: "stop_texting",
+        automation_decision: { ...(classification.automation_decision || {}), auto_reply_allowed: false, queue_action: "none", suppression_action: "opt_out", human_review_required: false, decided_by: "seller_conversation_v3_lexicon" },
+        needs_review: false,
+        seller_conversation_v3: stamp,
+      },
+      strategyDirective: null,
+      dealAuthorityPatch: null,
+      applied: true,
+    };
+  }
   if (plan.action === V3_ACTIONS.DEFER) {
     return { classification: { ...classification, seller_conversation_v3: stamp }, strategyDirective: null, dealAuthorityPatch: null, applied: false };
+  }
+  // §92 the reply goes in the seller's language; a v3 language resolution
+  // (lexicon / no-letters / not-the-English-default) replaces the classifier's.
+  if (plan.reply_language?.changed && plan.reply_language.language) {
+    classification = { ...classification, language: plan.reply_language.language, v3_language_resolution: plan.reply_language };
   }
   if (plan.action === V3_ACTIONS.REVIEW) {
     return {
@@ -1080,7 +1573,7 @@ export function applySellerConversationV3(classification = null, plan = null) {
           // Owner 2026-10-06: suppression is a contact-permission state
           // (opt-out / do-not-text / wrong number), never an emotion. An
           // archived insult stays contactable by future campaigns.
-          suppression_action: "none",
+          suppression_action: plan.keep_suppression ? classification.automation_decision?.suppression_action || "archive_wrong_number" : "none",
           decided_by: "seller_conversation_v3_rules",
           v3_terminal_action: plan.terminal_action,
         },

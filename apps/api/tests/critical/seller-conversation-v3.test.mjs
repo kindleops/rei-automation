@@ -195,8 +195,13 @@ test("unclear: re-ask once, then archive (S1/S2) or nurture (S3+)", () => {
   assert.equal(once.template_use_case, U.REASK_OWNERSHIP);
   const twice = plan({ classification: C("unclear"), message: "Ñ", stage_before: STAGE.S1, conversation_context: ctx(U.REASK_OWNERSHIP) });
   assert.equal(twice.terminal_action, V3_TERMINAL.ARCHIVE);
+  // Acquisition OS v1: at S3 a second unclear answer is "declined to price" →
+  // run the numbers on condition (no number talk); with condition known → nurture.
   const s3 = plan({ classification: C("unclear"), message: "hmm", stage_before: STAGE.S3, conversation_context: ctx(U.ASK_PRICE_FOLLOW_UP) });
-  assert.equal(s3.terminal_action, V3_TERMINAL.NURTURE);
+  assert.equal(s3.template_use_case, U.NO_PRICE_CONDITION);
+  assert.equal(s3.facts_patch.asking_price_declined, true);
+  const s3b = plan({ classification: C("unclear"), message: "hmm", stage_before: STAGE.S3, conversation_context: ctx(U.ASK_PRICE_FOLLOW_UP), known_facts: { condition_disclosed: true } });
+  assert.equal(s3b.terminal_action, V3_TERMINAL.NURTURE);
   const signoff = plan({ classification: C("unclear"), message: "Have a great day", stage_before: STAGE.S1 });
   assert.equal(signoff.terminal_action, V3_TERMINAL.WAIT);
 });

@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { proposedTemplateRows } from "../../scripts/ops/seller-autopilot-v2-templates.proposed.mjs";
 import { proposedV3TemplateRows } from "../../scripts/ops/seller-conversation-v3-templates.proposed.mjs";
+import { proposedAcqOsTemplateRows } from "../../scripts/ops/seller-conversation-v3-acq-os-templates.proposed.mjs";
 
 const MIGRATIONS = new URL("../../../../supabase/migrations/", import.meta.url);
 const read = (name) => readFileSync(new URL(name, MIGRATIONS), "utf8");
@@ -64,6 +65,7 @@ export function draftRows() {
     ...parseApology(),
     ...parseNative(),
     ...proposedV3TemplateRows().map((r) => row(r.use_case, r.template_id, r.language, r.template_body, "PROPOSED_20261007030000")),
+    ...proposedAcqOsTemplateRows().map((r) => row(r.use_case, r.template_id, r.language, r.template_body, "PROPOSED_20261007050000")),
   ];
   return cache;
 }

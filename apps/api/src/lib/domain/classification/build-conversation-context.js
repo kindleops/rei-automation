@@ -199,6 +199,43 @@ export function isInterveningAnswer(row) {
  * mapped onto an approved outbound use case. Best effort: any failure returns
  * null and the body decides.
  */
+const V3_OUTBOUND_HISTORY_LIMIT = 6;
+
+/** One batched read: template_id → raw use_case for the outbound history (v3 only). */
+async function loadTemplateUseCasesRaw(supabase, template_ids = []) {
+  const ids = [...new Set(template_ids.map((t) => String(t ?? "").trim()).filter(Boolean))];
+  if (!ids.length) return new Map();
+  try {
+    const { data, error } = await supabase
+      .from("sms_templates")
+      .select("template_id,use_case,language")
+      .in("template_id", ids)
+      .limit(ids.length * 2);
+    if (error || !Array.isArray(data)) return new Map();
+    return new Map(data.map((r) => [String(r.template_id ?? "").trim(), { use_case: String(r.use_case ?? "").trim() || null, language: String(r.language ?? "").trim() || null }]));
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * The outbound history, newest first: [{ template_id, use_case, body, sent_at }].
+ * use_case is the template's raw use case, else the body-derived one (operator
+ * typed messages carry no template).
+ */
+async function buildRecentOutbound(supabase, rows = [], head_use_case = null) {
+  const list = Array.isArray(rows) ? rows : [];
+  const map = await loadTemplateUseCasesRaw(supabase, list.map((r) => r?.template_id));
+  return list.map((r, i) => {
+    const tid = String(r?.template_id ?? "").trim() || null;
+    const hit = tid ? map.get(tid) : null;
+    const use_case = i === 0 && head_use_case ? head_use_case : hit?.use_case || deriveUseCaseFromBody(r?.message_body) || null;
+    // The template's catalog language is the thread language when the body
+    // detector cannot name it (short native-script / Latin non-EN questions).
+    return { template_id: tid, use_case, language: hit?.language || null, body: String(r?.message_body || "") || null, sent_at: r?.sent_at || null };
+  });
+}
+
 async function loadTemplateUseCaseRaw(supabase, template_id) {
   const id = String(template_id ?? "").trim();
   if (!id) return null;
@@ -232,6 +269,9 @@ export async function buildConversationContext({
 } = {}) {
   if (!supabase || !isCanonicalE164(thread_key) || !inbound_received_at) return null;
 
+  // v3 reads a short outbound history (repeat guard / who loop / re-ask-once
+  // counters need more than the last question). Flag off: the 2-row read as before.
+  const v3_history = isSellerConversationV3Active();
   let rows;
   try {
     const { data, error } = await supabase
@@ -246,7 +286,7 @@ export async function buildConversationContext({
       .not("sent_at", "is", null)
       .lte("sent_at", inbound_received_at)
       .order("sent_at", { ascending: false })
-      .limit(2);
+      .limit(v3_history ? V3_OUTBOUND_HISTORY_LIMIT : 2);
     if (error) return null;
     rows = data;
   } catch {
@@ -440,6 +480,10 @@ export async function buildConversationContext({
     // "$240k?" sets the thousands scale, "how many square feet?" un-prices it.
     last_outbound_question: describeLastQuestion(last_outbound.message_body),
     ...(v2_enabled ? { last_outbound_template_use_case: raw_template_use_case || null } : {}),
+    ...(v3_history ? await (async () => {
+      const recent_outbound = await buildRecentOutbound(supabase, rows, raw_template_use_case || use_case);
+      return { recent_outbound, last_outbound_template_language: recent_outbound[0]?.language || null };
+    })() : {}),
   };
 }
 

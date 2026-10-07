@@ -73,8 +73,18 @@ import {
   resolveV3ValueAuthority,
   resolveUnitCount,
   missingChecklist,
+  V3_TERMINAL,
 } from "@/lib/domain/seller-flow/seller-conversation-v3.js";
+import {
+  buildV3AuditRecord,
+  compactV3AuditForInbox,
+  isUncertainTurn,
+  buildV3ResearchRecord,
+  V3_AUDIT_EVENT,
+  V3_UNCERTAIN_EVENT,
+} from "@/lib/domain/seller-flow/seller-conversation-v3-audit.js";
 import { loadMultifamilyDoorComps } from "@/lib/domain/seller-flow/multifamily-door-comps.js";
+import { buildNegotiationPlan, nextNegotiationMove, isNegotiationEngineV3Enabled } from "@/lib/domain/negotiation-v3/index.js";
 import { authoritativeMaxOffer } from "@/lib/acquisition/offerReadiness.js";
 import {
   autoReplyModeAllowsQueue,
@@ -1923,6 +1933,22 @@ export async function processSellerInboundMessage({
       const known_facts_v3 = deal_state?.known_facts || {};
       const unit_info = resolveUnitCount({ property_metadata: negotiation_context_summary, ade_snapshot: effective_ade_snapshot });
       let mf_door_comps = [];
+      // §22 Contact Matching Tags: one bounded read, only while ownership is
+      // still being resolved (S1/S2), only for a known prospect.
+      let matching_flags = null;
+      const early_v3 = !effective_stage_before || ["ownership_confirmation", "offer_interest"].includes(effective_stage_before);
+      if (early_v3 && prospectId && supabase && !known_facts_v3?.ownership_status) {
+        try {
+          const { data: prospect_row } = await supabase
+            .from("prospects")
+            .select("matching_flags")
+            .eq("prospect_id", prospectId)
+            .limit(1);
+          matching_flags = Array.isArray(prospect_row) ? prospect_row[0]?.matching_flags ?? null : null;
+        } catch {
+          matching_flags = null;
+        }
+      }
       const plan_input = {
         classification,
         message,
@@ -1935,8 +1961,30 @@ export async function processSellerInboundMessage({
         value_authority: resolveV3ValueAuthority({ ade_snapshot: effective_ade_snapshot }),
         property_metadata: negotiation_context_summary,
         ade_snapshot: effective_ade_snapshot,
-        recent_outbound: [],
+        // Outbound history (newest first) from the context read: the repeat
+        // guard, the who loop and re-ask-once count on it (was always []).
+        recent_outbound: Array.isArray(autopilot_v2_context?.recent_outbound) ? autopilot_v2_context.recent_outbound : [],
+        matching_flags,
+        negotiation_v3: null,
       };
+      // §46 handoff to Negotiation v3 (agent C; flag NEGOTIATION_ENGINE_V3,
+      // default OFF). Pure plan + move; B maps the move, never the number.
+      if (isNegotiationEngineV3Enabled()) {
+        try {
+          const ask = Number(autopilot_v2_ask_now ?? known_facts_v3?.asking_price?.value ?? known_facts_v3?.asking_price) || null;
+          const nplan = buildNegotiationPlan({
+            ade_snapshot: effective_ade_snapshot,
+            property: { property_id: propertyId, property_type: negotiation_context_summary?.property_type || null, units_count: unit_info.units || null },
+            seller: { asking_price: ask, condition: known_facts_v3?.condition_level || null, occupancy: known_facts_v3?.occupancy_status || null, stated_motivation: [] },
+            history: [],
+            now: Date.now(),
+          });
+          const move = nextNegotiationMove(nplan, { lc_positions: [], seller_positions: ask ? [ask] : [] }, ask ? { kind: "price", amount: ask } : { kind: "no_price" });
+          plan_input.negotiation_v3 = { plan: nplan, move };
+        } catch (negotiation_error) {
+          runtimeDeps.warn("[SELLER_CONVERSATION_V3_NEGOTIATION_HANDOFF_FAILED]", { thread_key: threadKey || inboundFrom, error: negotiation_error?.message || "handoff_failed" });
+        }
+      }
       let plan = planSellerConversationV3(plan_input);
       // Multifamily per-door anchor: comps are read only when the checklist is
       // complete and the anchor is the next step (one bounded read).
@@ -1948,6 +1996,18 @@ export async function processSellerInboundMessage({
       const applied = applySellerConversationV3(classification, plan);
       conversation_v3 = { plan, applied };
       if (applied.applied) classification = applied.classification;
+      // §33 persistence: what the checklist collected this turn (update years,
+      // declined-to-price, major repairs, occupancy, ownership confidence) rides
+      // the transition's facts patch into deal metadata.seller_facts, so it is
+      // never asked again. Additive: keys the transition already set win.
+      const v3_patch = plan?.facts_patch && typeof plan.facts_patch === "object" ? plan.facts_patch : null;
+      if (v3_patch && Object.keys(v3_patch).length && transition) {
+        const existing = transition.facts_patch && typeof transition.facts_patch === "object" ? transition.facts_patch : {};
+        const merged = { ...existing };
+        for (const [k, v] of Object.entries(v3_patch)) if (merged[k] === undefined || merged[k] === null) merged[k] = v;
+        if (v3_patch.update_years) merged.update_years = { ...(known_facts_v3?.update_years || {}), ...(existing.update_years || {}), ...v3_patch.update_years };
+        transition = { ...transition, facts_patch: merged };
+      }
     } catch (v3_error) {
       runtimeDeps.warn("[SELLER_CONVERSATION_V3_PLAN_FAILED]", {
         thread_key: threadKey || inboundFrom,
@@ -2143,12 +2203,19 @@ export async function processSellerInboundMessage({
 
   if (systemFollowupEnabled) {
     const follow_up_intent =
-      contract.ownership_probe_transition
+      contract.ownership_probe_transition ||
+      conversation_v3?.applied?.classification?.seller_conversation_v3?.terminal_action === V3_TERMINAL.NURTURE
         ? "not_interested"
         : intelligence_snapshot?.canonical_intent || contract.normalized_intent;
 
+    // §60 v3 nurture (terminal nurture, or a reply-then-nurture such as the
+    // far-above "let me know when you're serious"): the 30-day follow-up is
+    // scheduled so an early reply wakes the thread and silence still gets one.
+    const v3_nurture_stamp = conversation_v3?.applied?.applied ? conversation_v3.applied.classification?.seller_conversation_v3 : null;
+    const v3_nurture = v3_nurture_stamp?.terminal_action === V3_TERMINAL.NURTURE;
     const should_schedule_followup = Boolean(
       contract.ownership_probe_transition ||
+        v3_nurture ||
         (!execution?.queued &&
           (canonical_decision?.next_action === "schedule_later_followup" ||
             canonical_decision?.next_action === "do_not_reply"))
@@ -2203,6 +2270,70 @@ export async function processSellerInboundMessage({
         scheduled_for: canonical_decision?.follow_up_at || null,
         reason: "followup_preview_writes_suppressed",
       };
+    }
+  }
+
+  // §83 audit trail per autonomous v3 turn (+ §39 research log for uncertain
+  // turns): emitted to automation_events and stamped (compact) on the
+  // executor decision, so message_events.metadata carries the "why".
+  if (conversation_v3?.plan) {
+    try {
+      const v3_audit = buildV3AuditRecord({
+        plan: conversation_v3.plan,
+        message,
+        classification,
+        stage_before: effective_stage_before,
+        execution,
+        follow_up: follow_up_result,
+        inbound_event_id: inboundEventId,
+        thread_key: threadKey || inboundFrom,
+        property_id: propertyId,
+        negotiation_state: negotiation?.strategy_decision
+          ? { position: negotiation.strategy_decision.strategy || null, quote_type: conversation_v3.plan.monetary?.kind || null }
+          : null,
+      });
+      if (execution?.automation_decision && typeof execution.automation_decision === "object") {
+        execution.automation_decision.seller_conversation_v3_audit = compactV3AuditForInbox(v3_audit);
+      }
+      if (!writes_suppressed) {
+        const emit_options = supabase ? { supabaseClient: supabase } : {};
+        await runtimeDeps.emitAutomationEvent(
+          {
+            event_type: V3_AUDIT_EVENT,
+            source: "seller_conversation_v3",
+            property_id: propertyId || null,
+            dedupe_key: `seller-conversation-v3-turn:${inboundEventId || providerMessageId || threadKey || inboundFrom}`,
+            conversation_thread_id: clean(threadKey || inboundFrom) || null,
+            payload: v3_audit,
+          },
+          emit_options
+        );
+        if (isUncertainTurn(conversation_v3.plan, classification)) {
+          await runtimeDeps.emitAutomationEvent(
+            {
+              event_type: V3_UNCERTAIN_EVENT,
+              source: "seller_conversation_v3",
+              property_id: propertyId || null,
+              dedupe_key: `seller-conversation-v3-uncertain:${inboundEventId || providerMessageId || threadKey || inboundFrom}`,
+              conversation_thread_id: clean(threadKey || inboundFrom) || null,
+              payload: buildV3ResearchRecord({
+                plan: conversation_v3.plan,
+                message,
+                classification,
+                conversation_context: autopilot_v2_context,
+                inbound_event_id: inboundEventId,
+                thread_key: threadKey || inboundFrom,
+              }),
+            },
+            emit_options
+          );
+        }
+      }
+    } catch (v3_audit_error) {
+      runtimeDeps.warn("[SELLER_CONVERSATION_V3_AUDIT_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        error: v3_audit_error?.message || "audit_failed",
+      });
     }
   }
 

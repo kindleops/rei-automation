@@ -1133,6 +1133,8 @@ export const V2_TEMPLATE_LANGUAGES = Object.freeze([
 ]);
 const LANGUAGE_ALIASES = Object.freeze({
   hindi: "Indian (Hindi or Other)", indian: "Indian (Hindi or Other)", chinese: "Mandarin", zh: "Mandarin",
+  // The language registry (canonical-language-adapter / language_aliases) names it "Asian Indian (Hindi or Other)".
+  "asian indian (hindi or other)": "Indian (Hindi or Other)",
   en: "English", es: "Spanish", pt: "Portuguese", fr: "French", de: "German", it: "Italian", pl: "Polish",
   vi: "Vietnamese", ko: "Korean", ja: "Japanese", he: "Hebrew", ar: "Arabic", ru: "Russian", el: "Greek", hi: "Indian (Hindi or Other)",
 });
