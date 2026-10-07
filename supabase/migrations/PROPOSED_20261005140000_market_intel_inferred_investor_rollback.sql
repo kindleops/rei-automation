@@ -7,7 +7,7 @@ update public.mi_rollup_builds set status = 'failed', last_error = 'inferred ext
  where status = 'building' and units @> array['i:clusters'];
 update public.mi_rollup_builds set cursor = cardinality(units)
  where status = 'ready' and cursor < cardinality(units) and units @> array['i:clusters'];
-update public.mi_rollup_builds set notes = notes - 'inferred_investor' - 'inferred_errors' where notes ?| array['inferred_investor', 'inferred_errors'];
+update public.mi_rollup_builds set notes = notes - 'inferred_investor' - 'inferred_errors' - 'inferred_link_bounds' where notes ?| array['inferred_investor', 'inferred_errors', 'inferred_link_bounds'];
 
 create or replace function public.mi_rollup_run_unit(p_build bigint, p_unit text, p_as_of date)
 returns bigint language plpgsql security definer set search_path = '' as $$

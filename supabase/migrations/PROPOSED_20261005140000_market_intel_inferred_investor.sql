@@ -7,12 +7,20 @@
 --   precision 87.1%, recall 80.7% for strong+likely (unchanged by tier@2, which only moves 9,537 stack-only
 --   individual/trust sales from strong to likely); trust 23.1%, absentee-only 3.3%, no signal 2.7%.
 --   tier@2 counts: strong 95,776 · likely 60,997 · trust 1,881 · absentee-only 12,643 · no signal 427,544.
---   Measured read side: i:clusters 5.2 s; one quarter of i:link 20.6 s (+5 s inline clusters) → link split in 8.
+--   Pretest 2026-10-07 09:00Z: link slices took 17-56 s (hash slices, per-row index probes into the
+--   516 MB comp_properties heap, ~1 cold random read per sale, and the lateral CASE inlined so the
+--   transfer probe ran up to 5x per sale). v2 (this file): contiguous property_id range slices, one
+--   ordered range scan per source + merge/hash joins, owner columns from a covering index (pre-step).
+--   Measured 2026-10-07 on a 108,831-sale range with the existing indexes: 2.6 s cold; per-row rule
+--   vs set-based rule on 5,948 sales: 0 differences (link reason and resident flag).
 -- APPLY PLAN (owner approval required; nothing here is applied):
+--   0. PRE-STEP: PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql (CREATE INDEX CONCURRENTLY; execute_sql, NOT apply_migration,
+--      CONCURRENTLY cannot run inside a transaction). The pretest refuses to run without it.
 --   1. Outside 05:00-08:59 / 09:15-11:59 UTC: run the _pretest (SET statement_timeout = '300s'); expect
---      'pretest ok', per-unit ms (each i:link must be < 15 s) and the national matrix ≈ the numbers above.
+--      'pretest ok' with per-unit ms; it RAISEs 'pretest FAILED' if any unit takes >= 15000 ms.
+--      National matrix ≈ the numbers above.
 --   2. Apply this file (MCP apply_migration) outside the windows; no cron change (same 75 ticks).
---   3. The fingerprint now includes owner snapshots, so the next nightly tick starts build 2 with 65 units
+--   3. The fingerprint now includes owner snapshots, so the next nightly tick starts build 2 with 66 units
 --      (~ +3 min DB time). Until it is ready, MI keeps serving build 1; inferred metrics read 'unavailable'.
 --   4. Verify: select notes->'inferred_investor' from mi_rollup_builds where status = 'ready';
 --      GET op=status → inferred_investor.available = true.
@@ -44,7 +52,7 @@
 --   public.mi_infer_run_unit(...)       the 'i:' units
 -- PATCHED (exact insertions into the applied text; the rollback restores the originals):
 --   mi_rollup_sales_v      + property_id (last column)
---   mi_rollup_units()      + 18 'i:' units (65 units; the nightly window has 75 ticks)
+--   mi_rollup_units()      + 18 'i:' units (66 units; the nightly window has 75 ticks)
 --   mi_rollup_fingerprint()+ owner snapshot (count, max observed) so an owner refresh rebuilds
 --   mi_rollup_run_unit()   + one dispatch line for 'i:' units
 -- ISOLATION: an 'i:' unit that fails on its RETRY is recorded in notes.inferred_errors and skipped;
@@ -200,6 +208,10 @@ declare
   v_n bigint;
   v_attempts integer;
   v_keep bigint;
+  v_bounds jsonb;
+  v_lo text;
+  v_hi text;
+  v_rng text;
   v_having text := '((grouping(x.asset) = 0 and x.asset in (''sfr'', ''mf_2_4'', ''mf_5_plus'', ''land'', ''commercial''))
                      or (grouping(x.asset) = 1 and grouping(x.is_mf) = 0 and x.is_mf)
                      or (grouping(x.asset) = 1 and grouping(x.is_mf) = 1))';
@@ -221,34 +233,71 @@ begin
                where cp.owner_mailing_identity_key_v1 is not null
                group by 1 having count(*) >= 2) c;
       get diagnostics v_rows = row_count;
+      analyze comp_private.mi_owner_mail_cluster;
+      -- the link slices: 8 contiguous property_id ranges of equal sale count, fixed for this build
+      -- (the ranges partition all text values, so every sale lands in exactly one slice)
+      update public.mi_rollup_builds b set notes = b.notes || jsonb_build_object('inferred_link_bounds', (
+        select to_jsonb(percentile_disc(array[0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875]::float8[]) within group (order by m.property_id))
+          from public.mv_map_market_sales m where m.property_id is not null))
+       where b.build_id = p_build;
 
     elsif v_kind = 'link' then
-      -- one eighth of the properties (all sales of a property land in the same eighth, so
-      -- "most recent sale" is decided over the property's whole history)
-      insert into public.mi_sale_owner_link (build_id, comp_id, sold_on, state, zip, city_key, asset, is_mf, buyer_known, is_investor, buyer,
-                                             link, tier, corp, trust, oos, resident, stack_n, stack_id)
-      select p_build, s.comp_id, s.sold_on, s.state, s.zip, s.city_key, s.asset, s.is_mf, s.buyer_known, s.is_investor,
-             case when c.stack_id is not null then s.buyer end,
-             l.link,
-             case when l.link = 'linked' then public.mi_owner_tier(coalesce(cp.is_corporate_owner, false), coalesce(cp.is_trust, false),
-               coalesce(cp.out_of_state_owner, false), coalesce(c.props_n, 1), r.resident) end,
-             cp.is_corporate_owner, cp.is_trust, cp.out_of_state_owner, case when l.link = 'linked' then r.resident end,
-             case when cp.owner_mailing_identity_key_v1 is not null then coalesce(c.props_n, 1) end, c.stack_id
-        from (select v.*, v.sold_on = max(v.sold_on) over (partition by v.property_id) as latest
-                from public.mi_rollup_sales_v v
-               where coalesce(hashtext(v.property_id) & 7, 0) = v_arg::int) s
-        left join comp_private.comp_properties cp on cp.property_id = s.property_id
-        left join comp_private.mi_owner_mail_cluster c on c.build_id = p_build and c.mail_key = cp.owner_mailing_identity_key_v1
-        cross join lateral (select case
-            when s.property_id is null then 'no_property'
-            when not s.latest then 'not_latest_sale'
-            when exists (select 1 from comp_private.comp_canonical_transactions t
-                          where t.primary_property_id = s.property_id and t.event_date > s.sold_on + 45) then 'later_transfer'
-            when cp.property_id is null or cp.last_observed_at is null then 'no_owner_record'
-            when cp.last_observed_at::date - s.sold_on < 30 then 'owner_snapshot_before_sale'
-            else 'linked' end as link) l
-        cross join lateral (select case when l.link = 'linked' then exists (
-            select 1 from comp_private.comp_property_contacts pc where pc.property_id = s.property_id and pc.resident and pc.likely_owner) else false end as resident) r;
+      -- One slice of the properties as a CONTIGUOUS property_id range (bounds fixed per build by
+      -- i:clusters in notes.inferred_link_bounds). All sales of a property land in the same slice, so
+      -- "most recent sale" is decided over the property's whole history. Set-based: each source is
+      -- read once, as an ordered range scan of its property_id index (owner columns from the covering
+      -- index comp_properties_mi_owner_cover, the pre-step), then merge/hash joined. Identical to the
+      -- per-row rule: "a transfer > 45 days after the sale exists" is "the property's latest transfer
+      -- is > 45 days after the sale"; resident is "some contact is a resident likely owner".
+      select b.notes -> 'inferred_link_bounds' into v_bounds from public.mi_rollup_builds b where b.build_id = p_build;
+      if v_bounds is null or jsonb_array_length(v_bounds) <> 7 then
+        raise exception 'mi_infer: no link bounds for build % (i:clusters sets them)', p_build;
+      end if;
+      v_lo := case when v_arg::int > 0 then v_bounds ->> (v_arg::int - 1) else '' end;  -- '' sorts before every text
+      v_hi := case when v_arg::int < 7 then v_bounds ->> v_arg::int end;
+      v_rng := '@ >= ' || quote_literal(v_lo) || coalesce(' and @ < ' || quote_literal(v_hi), '');
+      execute format($q$
+        insert into public.mi_sale_owner_link (build_id, comp_id, sold_on, state, zip, city_key, asset, is_mf, buyer_known, is_investor, buyer,
+                                               link, tier, corp, trust, oos, resident, stack_n, stack_id)
+        with s as materialized (
+          select v.comp_id, v.sold_on, v.state, v.zip, v.city_key, v.asset, v.is_mf, v.buyer_known, v.is_investor, v.buyer, v.property_id,
+                 v.sold_on = max(v.sold_on) over (partition by v.property_id) as latest
+            from public.mi_rollup_sales_v v
+           where %1$s
+        ), tx as (
+          select t.primary_property_id as property_id, max(t.event_date) as last_event
+            from comp_private.comp_canonical_transactions t where %2$s group by 1
+        ), pc as (
+          select c.property_id, bool_or(c.resident and c.likely_owner) as resident
+            from comp_private.comp_property_contacts c where %3$s group by 1
+        ), j as (
+          select s.*, cp.is_corporate_owner, cp.is_trust, cp.out_of_state_owner, cp.owner_mailing_identity_key_v1 as mail_key,
+                 c.props_n, c.stack_id, coalesce(pc.resident, false) as resident_any,
+                 case
+                   when s.property_id is null then 'no_property'
+                   when not s.latest then 'not_latest_sale'
+                   when tx.last_event > s.sold_on + 45 then 'later_transfer'
+                   when cp.property_id is null or cp.last_observed_at is null then 'no_owner_record'
+                   when cp.last_observed_at::date - s.sold_on < 30 then 'owner_snapshot_before_sale'
+                   else 'linked' end as link
+            from s
+            left join comp_private.comp_properties cp on cp.property_id = s.property_id and %4$s
+            left join tx on tx.property_id = s.property_id
+            left join pc on pc.property_id = s.property_id
+            left join comp_private.mi_owner_mail_cluster c on c.build_id = $1 and c.mail_key = cp.owner_mailing_identity_key_v1
+        )
+        select $1, j.comp_id, j.sold_on, j.state, j.zip, j.city_key, j.asset, j.is_mf, j.buyer_known, j.is_investor,
+               case when j.stack_id is not null then j.buyer end,
+               j.link,
+               case when j.link = 'linked' then public.mi_owner_tier(coalesce(j.is_corporate_owner, false), coalesce(j.is_trust, false),
+                 coalesce(j.out_of_state_owner, false), coalesce(j.props_n, 1), j.resident_any) end,
+               j.is_corporate_owner, j.is_trust, j.out_of_state_owner, case when j.link = 'linked' then j.resident_any end,
+               case when j.mail_key is not null then coalesce(j.props_n, 1) end, j.stack_id
+          from j
+      $q$, case when v_arg::int = 0 then format('(v.property_id is null or %s)', replace(v_rng, '@', 'v.property_id'))
+                else replace(v_rng, '@', 'v.property_id') end,
+           replace(v_rng, '@', 't.primary_property_id'), replace(v_rng, '@', 'c.property_id'), replace(v_rng, '@', 'cp.property_id'))
+      using p_build;
       get diagnostics v_rows = row_count;
 
     elsif v_kind = 'stacks' then

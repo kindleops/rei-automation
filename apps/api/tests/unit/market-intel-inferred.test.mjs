@@ -178,6 +178,18 @@ test('generated migration: patches the applied objects by insertion; rollback re
   assert.ok(mig.includes('m.property_id\n  from public.mv_map_market_sales m'))
   assert.match(mig, /'i:validate', 'finalize', 'i:cleanup'/)
   assert.match(mig, /'i:link:7', 'i:stacks'/)
+  // link v2: contiguous property_id range slices (bounds per build), set-based, no per-row probes
+  assert.ok(!/hashtext/.test(mig), 'link slices are property_id ranges, not hash buckets')
+  assert.ok(mig.includes("'inferred_link_bounds'") && mig.includes('with s as materialized'))
+  assert.ok(!/exists \(select 1 from comp_private\.comp_canonical_transactions/.test(mig), 'no correlated transfer probe')
+  assert.ok(mig.includes('when tx.last_event > s.sold_on + 45 then \'later_transfer\''))
+  assert.ok(mig.includes('when cp.last_observed_at::date - s.sold_on < 30 then \'owner_snapshot_before_sale\''))
+  // the pre-step covering index, and the pretest's hard per-unit limit
+  const pix = readFileSync(join(MIG, 'PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql'), 'utf8')
+  assert.match(pix, /create index concurrently if not exists comp_properties_mi_owner_cover\s+on comp_private\.comp_properties \(property_id\)\s+include \(last_observed_at, is_corporate_owner, is_trust, out_of_state_owner, owner_mailing_identity_key_v1\)/)
+  assert.ok(pre.includes("comp_properties_mi_owner_cover') AND i.indisvalid"), 'pretest refuses without the index')
+  assert.ok(pre.includes('IF u_ms >= 15000 THEN') && pre.includes("'pretest FAILED: unit(s) over the 15000 ms limit"))
+  assert.ok(pre.includes("'i:g:city', 'i:g:zip', 'i:validate', 'i:cleanup'"), 'pretest times every inferred unit')
   assert.ok(!/cron\.schedule/.test(mig), 'no schedule change')
   assert.ok(pre.includes(mig) && /RAISE EXCEPTION 'pretest ok/.test(pre), 'pretest embeds the migration and rolls back')
   // investor_count (recorded) is never touched by the extension
