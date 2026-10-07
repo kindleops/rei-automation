@@ -77,3 +77,30 @@ test("a filter that can't be applied is listed with its reason, never silently d
   for (const r of result.refused) assert.match(r.message, /Not applied/);
   assert.equal(result.effects.length, 1);
 });
+
+// ── "is not any of" on scalar audience columns ──────────────────────────────
+import { applyGraphFilter } from "@/lib/domain/campaigns/campaign-graph-filter-plan.js";
+
+function recorder() {
+  const calls = [];
+  const q = new Proxy({}, { get: (_t, name) => (...args) => { calls.push([name, ...args]); return q; } });
+  return { q, calls };
+}
+
+test("excluding a market with a comma in its name is quoted, and unknowns are kept", () => {
+  const { q, calls } = recorder();
+  applyGraphFilter(q, { field_key: "properties.market", operator: "is_not_any_of", value: ["Dallas, TX"], graph_column: "market" });
+  assert.deepEqual(calls, [["or", 'market.is.null,market.not.in.("Dallas, TX")']]);
+});
+
+test("excluding a building condition keeps properties with no condition on file", () => {
+  const { q, calls } = recorder();
+  applyGraphFilter(q, { field_key: "properties.building_condition", operator: "is_not_any_of", value: ["Poor", "Very Good"], graph_column: "building_condition" });
+  assert.deepEqual(calls, [["or", 'building_condition.is.null,building_condition.not.in.("Poor","Very Good")']]);
+});
+
+test("is any of is unchanged", () => {
+  const { q, calls } = recorder();
+  applyGraphFilter(q, { field_key: "properties.building_condition", operator: "is_any_of", value: ["Poor"], graph_column: "building_condition" });
+  assert.deepEqual(calls, [["in", "building_condition", ["Poor"]]]);
+});

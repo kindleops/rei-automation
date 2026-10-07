@@ -324,11 +324,30 @@ export function applyGraphFilter(query, filter = {}) {
     if (operator === 'is_any_of' || operator === 'is_not_any_of' || operator === 'eq') {
       const expanded = expandPropertyTypeValues(filterScalarValues({ ...filter, operator }))
       if (!expanded.length) return query
-      if (operator === 'is_not_any_of') return query.not(column, 'in', `(${expanded.map(quoteLogicValue).join(',')})`)
+      if (operator === 'is_not_any_of') return applyExcludeKeepingUnknown(query, column, expanded)
       return query.in(column, expanded)
     }
   }
+  const field = filter.fieldDefinition || getCampaignFieldDefinition(key)
+  if (field && field.type !== 'number' && field.type !== 'boolean' && normalizePreviewOperator(filter.operator || 'eq', field) === 'is_not_any_of') {
+    const values = filterScalarValues({ ...filter, operator: 'is_not_any_of' }).map(clean).filter(Boolean)
+    return values.length ? applyExcludeKeepingUnknown(query, column, values) : query
+  }
   return applySupabaseFilterToColumn(query, filter, column)
+}
+
+/**
+ * "Is not any of" on a scalar column. Two defects of the generic compiler
+ * (`not.in.(a,b)`, unquoted) on the audience, found 2026-10-07:
+ *   • values with a comma split: "Market is not Dallas, TX" excluded "Dallas"
+ *     and " TX" — i.e. nothing;
+ *   • SQL `NOT IN` drops NULL rows: "Building condition is not Poor" also
+ *     dropped every property with no condition on file (~45% of the graph).
+ * Values are quoted, and a property with no value is kept — it is not known
+ * to be any excluded value (the same rule as the list-token filters).
+ */
+function applyExcludeKeepingUnknown(query, column, values) {
+  return query.or(`${column}.is.null,${column}.not.in.(${values.map(quoteLogicValue).join(',')})`)
 }
 
 /**
