@@ -48,18 +48,18 @@ import {
   getFieldCatalog,
   isFieldCampaignInapplicable,
   previewTargets,
-  searchFieldOptions,
   serializeFilterGroups,
   type CampaignDomainKey,
   type CampaignFieldCatalog,
   type CampaignFieldDefinition,
-  type CampaignFieldOption,
   type CampaignFilterCondition,
   type CampaignFilterGroups,
   type CampaignPreviewResult,
   type CampaignSampleTarget,
   type CampaignWizardDraft,
 } from './campaignWizardAdapter'
+import { loadFieldOptionValues, type FieldOptionValue, type FieldValuesState } from './field-option-values'
+import { FieldValuePicker } from './FieldValuePicker'
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
@@ -122,6 +122,8 @@ interface OptionLoadState {
   loading: boolean
   degraded?: boolean
   message?: string
+  /** Why the value list is what it is (field-option-values.ts). */
+  state?: FieldValuesState
 }
 
 interface PreviewMeta {
@@ -776,7 +778,7 @@ export const CreateCampaignModal = ({
   const [activeDomain, setActiveDomain] = useState<CampaignDomainKey>('properties')
   const [fieldSearch, setFieldSearch] = useState<Record<string, string>>({})
   const [optionSearch, setOptionSearch] = useState<Record<string, string>>({})
-  const [optionsCache, setOptionsCache] = useState<Record<string, CampaignFieldOption[]>>({})
+  const [optionsCache, setOptionsCache] = useState<Record<string, FieldOptionValue[]>>({})
   const [optionStatus, setOptionStatus] = useState<Record<string, OptionLoadState>>({})
   const [preview, setPreview] = useState<CampaignPreviewResult | null>(null)
   const [isCatalogLoading, setIsCatalogLoading] = useState(true)
@@ -1096,16 +1098,16 @@ export const CreateCampaignModal = ({
       ...prev,
       [cacheKey]: { loading: true },
     }))
-    searchFieldOptions(fieldKey, search)
-      .then((items) => {
-        setOptionsCache((prev) => ({ ...prev, [cacheKey]: items }))
-        const degradedItem = items.find((item) => item.degraded)
+    loadFieldOptionValues(fieldKey, search)
+      .then((result) => {
+        // An unavailable list is not cached as an answer: reopening retries.
+        if (result.state !== 'unavailable') setOptionsCache((prev) => ({ ...prev, [cacheKey]: result.options }))
         setOptionStatus((prev) => ({
           ...prev,
           [cacheKey]: {
             loading: false,
-            degraded: Boolean(degradedItem),
-            message: degradedItem?.degradedReason,
+            state: result.state,
+            message: result.message ?? undefined,
           },
         }))
       })
@@ -1115,7 +1117,8 @@ export const CreateCampaignModal = ({
           ...prev,
           [cacheKey]: {
             loading: false,
-            message: 'Options unavailable',
+            state: 'unavailable',
+            message: 'Values couldn’t load.',
           },
         }))
       })
@@ -1222,7 +1225,7 @@ export const CreateCampaignModal = ({
     loadOptions(field.key, search)
   }
 
-  const getCachedOptions = (filter: CampaignFilterCondition): CampaignFieldOption[] => {
+  const getCachedOptions = (filter: CampaignFilterCondition): FieldOptionValue[] => {
     const field = fieldsByKey.get(filter.fieldKey)
     if (!field?.supports_options) return []
     const search = optionSearch[filter.id] ?? ''
@@ -1511,11 +1514,6 @@ export const CreateCampaignModal = ({
     const search = optionSearch[filter.id] ?? ''
     const optionState = optionStatus[optionCacheKey(field.key, search)] ?? optionStatus[optionCacheKey(field.key)]
     const selectedValues = valueAsArray(filter.value)
-    const selectedCount = options
-      .filter((option) => selectedValues.includes(option.value))
-      .reduce((sum, option) => sum + Number(option.count || 0), 0)
-    const availableCount = options.reduce((sum, option) => sum + Number(option.count || 0), 0)
-    const badgeCount = selectedCount || availableCount
 
     if (EMPTY_VALUE_OPERATORS.has(filter.operator)) {
       return (
@@ -1586,45 +1584,19 @@ export const CreateCampaignModal = ({
 
     if (field.supports_options && OPTION_OPERATORS.has(filter.operator)) {
       return (
-        <div className="cmp-filter-value-cell">
-          <div className="cmp-option-search">
-            <Icon name="search" size={12} />
-            <input
-              value={optionSearch[filter.id] ?? ''}
-              onChange={(event) => handleOptionSearch(filter, field, event.target.value)}
-              placeholder="Search values"
-            />
-            {field.supports_counts && badgeCount > 0 && (
-              <span className="cmp-option-count">{formatNumber(badgeCount)}</span>
-            )}
-            {optionState?.loading && <span className="cmp-option-state">Loading options</span>}
-            {optionState?.degraded && !optionState.loading && (
-              <span className="cmp-option-state is-degraded">Local options</span>
-            )}
-          </div>
-          <select
-            multiple
-            size={Math.min(4, Math.max(3, options.length || 3))}
-            value={selectedValues}
-            onChange={(event) => {
-              updateFilter(filter, {
-                value: Array.from(event.currentTarget.selectedOptions, (option) => option.value),
-              })
-            }}
-          >
-            {optionState?.loading && options.length === 0 ? (
-              <option value="" disabled>Loading options...</option>
-            ) : null}
-            {!optionState?.loading && options.length === 0 ? (
-              <option value="" disabled>No values found</option>
-            ) : null}
-            {options.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}{option.count ? ` (${formatNumber(option.count)})` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
+        <FieldValuePicker
+          fieldLabel={field.label}
+          options={options}
+          selected={selectedValues}
+          loading={Boolean(optionState?.loading)}
+          state={optionState?.state}
+          message={optionState?.message}
+          search={search}
+          onSearch={(next) => handleOptionSearch(filter, field, next)}
+          onChange={(next) => updateFilter(filter, { value: next })}
+          onRetry={() => loadOptions(field.key, search)}
+          format={formatNumber}
+        />
       )
     }
 
@@ -1664,7 +1636,7 @@ export const CreateCampaignModal = ({
               a card the operator reads while building targeting. The one signal
               worth keeping is a field that will NOT be honoured by preview. */}
           {optionCount > 0 && (
-            <span className="cmp-active-filter-badge cmp-active-filter-badge--count">{formatNumber(optionCount)} options</span>
+            <span className="cmp-active-filter-badge cmp-active-filter-badge--count">{formatNumber(optionCount)} properties</span>
           )}
           {isFieldCampaignInapplicable(field) ? (
             <span
@@ -1736,10 +1708,10 @@ export const CreateCampaignModal = ({
           </select>
         </label>
 
-        <label className="cmp-filter-value-wrap">
-          <span>Value</span>
+        <div className="cmp-filter-value-wrap" role="group" aria-label="Value">
+          <span className="cmp-filter-value-heading">Value</span>
           {renderValueControl(filter, field)}
-        </label>
+        </div>
 
         <div className="cmp-filter-meta">
           <span className="cmp-field-type">{field.type}</span>
