@@ -7,7 +7,7 @@
 -- (apps/api/src/lib/domain/negotiation-v3/quote-log.js logQuoteThenSend).
 --   quote_type 'concession'  a ladder step after the anchor (≠ formal offer)
 --   quote_type 'no_number'   a negotiation turn that deliberately carried no number
--- New columns: target / autonomous limit / fair floor at quote time, previous
+-- New columns: target / autonomous limit / investor-price anchor floor / grade / rung / lane at quote time, previous
 -- LC amount, per-unit range + unit count (MF), negotiation engine + config
 -- versions, seller-situation score_version, language branch, situation /
 -- market / condition evidence, human approval.
@@ -20,10 +20,15 @@ set local lock_timeout = '5s';
 alter table public.negotiation_quotes
   add column if not exists target_at_quote            numeric,
   add column if not exists autonomous_limit_at_quote  numeric,
-  add column if not exists fair_floor_at_quote        numeric,
+  add column if not exists anchor_floor_at_quote      numeric,   -- investor price × (1 − discount); no value − repairs floor (owner 10-07)
+  add column if not exists investor_price_at_quote    numeric,
+  add column if not exists confidence_grade           text,      -- authority grade at quote time (autonomy gate)
+  add column if not exists fallback_rung              integer,
+  add column if not exists lane                       text,      -- sfr | mf24 | mf5
   add column if not exists previous_lc_amount         numeric,
   add column if not exists unit_count                 integer check (unit_count is null or unit_count >= 2),
-  add column if not exists per_unit_low               numeric,
+  add column if not exists per_unit_amount            numeric,   -- "we'd likely be around $Z a door"
+  add column if not exists per_unit_low               numeric,   -- authority investor per-door band quoted
   add column if not exists per_unit_high              numeric,
   add column if not exists negotiation_engine_version text,
   add column if not exists negotiation_config_version text,

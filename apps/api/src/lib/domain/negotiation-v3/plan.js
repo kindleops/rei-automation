@@ -58,6 +58,8 @@ function mergeConfig(overrides = null) {
     ladder: { ...d.ladder, ...(o.ladder || {}), shares: o.ladder?.shares || d.ladder.shares },
     comp_claim: { ...d.comp_claim, ...(o.comp_claim || {}) },
     mf: { ...d.mf, ...(o.mf || {}) },
+    autonomy: { ...d.autonomy, ...(o.autonomy || {}) },
+    anchor_floor: { ...d.anchor_floor, ...(o.anchor_floor || {}) },
     rounding: o.rounding || d.rounding,
   };
 }
@@ -91,6 +93,13 @@ const SFR_TYPE_RE = /single|sfr|residential|house|condo|town/i;
  * ⇒ no per-unit math, no guessed units, no money.
  */
 export function resolvePlanAsset({ property = {}, authority = {} } = {}) {
+  const out = resolveAssetKind({ property, authority });
+  const laneFromUnits = out.units != null ? (out.units >= 5 ? "mf5" : "mf24") : null;
+  const lane = authority?.lane || (out.asset === "sfr" ? "sfr" : laneFromUnits);
+  return { ...out, lane: lane || null };
+}
+
+function resolveAssetKind({ property = {}, authority = {} } = {}) {
   const type = clean(property?.property_type);
   const pUnits = num(property?.units_count ?? property?.unit_count);
   const eUnits = num(authority?.units);
@@ -186,13 +195,13 @@ export function resolveStrategy({ situation = null, seller = {}, config = NEGOTI
 // ═══════════════════════════════════════════════════════════════════════════
 /**
  * d = clamp(d_base + Σ adj, d_min, d_max);  O = roundDown(T × (1 − d));
- * O = max(O, roundUp(F));  O ≤ T;  O < ask (if an ask is known).
+ * O = max(O, roundUp(AF));  O ≤ T;  O < ask (if an ask is known). AF = investor-price floor (may be null).
  * Returns null amount when no anchor below the ask exists (ask ≤ floor/anchor).
  */
-export function computeAnchor({ target, fair_floor, ask = null, strategy = {}, seller = {}, market = {}, config = NEGOTIATION_V3_DEFAULTS } = {}) {
+export function computeAnchor({ target, anchor_floor = null, ask = null, strategy = {}, seller = {}, market = {}, config = NEGOTIATION_V3_DEFAULTS } = {}) {
   const cfg = config.anchor;
   const T = num(target);
-  const F = num(fair_floor);
+  const F = num(anchor_floor);
   if (T == null || T <= 0) return { amount: null, d: null, adjustments: [], reason: "no_target" };
   const adjustments = [];
   const add = (code, value) => {
@@ -223,7 +232,7 @@ export function computeAnchor({ target, fair_floor, ask = null, strategy = {}, s
   }
   if (amount > T) amount = T;
   if (a != null && amount >= a) return { amount: null, d, raw_d: r4(raw), adjustments, floor_applied, reason: "ask_at_or_below_anchor" };
-  return { amount, d, raw_d: r4(raw), adjustments, floor_applied, reason: floor_applied ? "anchor_raised_to_fair_floor" : "anchor_depth" };
+  return { amount, d, raw_d: r4(raw), adjustments, floor_applied, reason: floor_applied ? "anchor_raised_to_investor_floor" : "anchor_depth" };
 }
 
 /** anchor → c1 → c2 → final autonomous (= AL). Decreasing, non-uniform, monotone, ≤ AL. */
@@ -269,7 +278,7 @@ function screenComps(comps = [], { asset, now, config }) {
     if (!Number.isFinite(t) || (nowMs - t) / (86_400_000 * 30.44) > maxAge) continue;
     if (PACKAGE_HINTS.some((h) => clean(c?.source).includes(h))) continue;
     if (mf && !(units != null && Number.isInteger(units) && units >= 2)) continue;
-    out.push({ id: c.id, sale_price: price, per_unit: mf ? price / units : null });
+    out.push({ id: c.id, sale_price: price, units, per_unit: mf ? price / units : null });
   }
   return out;
 }
@@ -281,33 +290,53 @@ export function compSupportFor(plan, amount) {
   if (amt == null || amt <= 0) return { allowed: false, ids: [], prices: [] };
   const mf = plan?.asset === "multifamily";
   const units = plan?.per_unit?.units;
-  const x = mf ? (units ? amt / units : null) : amt;
-  if (x == null) return { allowed: false, ids: [], prices: [] };
+  if (mf && !units) return { allowed: false, ids: [], prices: [] };
+  // MF: only SAME-unit-count sales support a total-price claim (owner 10-07, MF 2–4 rule).
   const hits = (plan?.screened_comps || []).filter((c) => {
-    const p = mf ? c.per_unit : c.sale_price;
-    return p != null && p >= x * (1 - cc.band) && p <= x * (1 + cc.band);
+    if (mf && c.units !== units) return false;
+    return c.sale_price >= amt * (1 - cc.band) && c.sale_price <= amt * (1 + cc.band);
   });
   return { allowed: hits.length >= cc.min_support, ids: hits.map((c) => c.id), prices: hits.map((c) => c.sale_price) };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PLAN
+// AUTONOMY GATE (owner 10-07): by grade, never by blankness
+// ═══════════════════════════════════════════════════════════════════════════
+export function resolveAutonomy({ authority = {}, asset = {}, config = NEGOTIATION_V3_DEFAULTS, extra = [] } = {}) {
+  const g = config.autonomy;
+  const reasons = [];
+  if (authority.authorized !== true) reasons.push("not_authorized");
+  if (authority.fresh !== true) reasons.push("authority_not_fresh");
+  const grade = authority.confidence_grade ?? null;
+  const rung = authority.fallback_rung ?? null;
+  if (grade == null) {
+    if (g.ungraded !== "authorized_only") reasons.push("ungraded");
+  } else if (!g.grades.includes(grade)) reasons.push(`grade_${grade}_not_autonomous`);
+  if (rung != null && rung > g.max_fallback_rung) reasons.push(`fallback_rung_${rung}_not_autonomous`);
+  if (!g.lanes.includes(asset.lane)) reasons.push(`lane_${asset.lane || "unknown"}_is_human`);
+  reasons.push(...(asset.reasons || []), ...extra);
+  return { eligible: reasons.length === 0, grade, fallback_rung: rung, lane: asset.lane || null, basis: grade == null ? g.ungraded : "grade", reasons: [...new Set(reasons)] };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PLAN — never blank when the authority supplies a ceiling and an offer
 // ═══════════════════════════════════════════════════════════════════════════
 function emptyPlan(base, reasons, explain) {
   return {
     ...base,
     ok: false,
     money_allowed: false,
+    autonomy: { eligible: false, grade: base.authority.confidence_grade, fallback_rung: base.authority.fallback_rung, lane: base.lane, reasons },
     ceiling: null,
     target: null,
     opening_anchor: null,
     autonomous_limit: null,
-    fair_floor: null,
+    anchor_floor: null,
     ladder: [],
     per_unit: null,
     screened_comps: [],
     reasons,
-    explain: [...explain, { code: "no_money", text: `No autonomous number: ${reasons.join(", ")}` }],
+    explain: [...explain, { code: "no_numbers", text: `The authority supplied no ceiling/offer: ${reasons.join(", ")}` }],
   };
 }
 
@@ -315,7 +344,7 @@ export function buildNegotiationPlan(ctx = {}) {
   const config = mergeConfig(ctx.config);
   const now = ctx.now ?? Date.now();
   const flags = ctx.flags || resolveNegotiationFlags(ctx.env || process.env);
-  const authority = resolvePlanAuthority({ authority: ctx.authority, ade_snapshot: ctx.ade_snapshot, spendability: ctx.spendability, now });
+  const authority = resolvePlanAuthority({ offer_authority: ctx.offer_authority, authority: ctx.authority, ade_snapshot: ctx.ade_snapshot, spendability: ctx.spendability, now });
   const assetInfo = resolvePlanAsset({ property: ctx.property || {}, authority });
   const seller = ctx.seller || {};
   const strategy = resolveStrategy({ situation: ctx.situation, seller, config });
@@ -326,9 +355,11 @@ export function buildNegotiationPlan(ctx = {}) {
     config,
     flags,
     asset: assetInfo.asset,
+    lane: assetInfo.lane,
     property_id: clean(ctx.property?.property_id ?? authority.property_id) || null,
     seller_ask: num(seller.asking_price),
     valuation_mid: authority.valuation_mid ?? null,
+    investor_price: authority.investor_price ?? null,
     authority: {
       source: authority.source,
       engine_version: authority.engine_version ?? null,
@@ -337,56 +368,55 @@ export function buildNegotiationPlan(ctx = {}) {
       computed_at: authority.computed_at ?? null,
       decision_tier: authority.decision_tier ?? null,
       fresh: authority.fresh === true,
-      ok: authority.ok === true,
+      ok: authority.authorized === true,
+      authorized: authority.authorized === true,
+      confidence_grade: authority.confidence_grade ?? null,
+      fallback_rung: authority.fallback_rung ?? null,
       reasons: authority.reasons || [],
     },
-    // Engine numbers shown to the OPERATOR when authority fails, labelled as
-    // non-authoritative; never usable by a move.
-    engine_reference: { recommended: authority.recommended ?? null, ceiling: authority.ceiling ?? null, valuation_mid: authority.valuation_mid ?? null },
     strategy,
     market: ctx.market ? { buyer_depth: clean(ctx.market.buyer_depth) || null, source: clean(ctx.market.source) || null } : null,
     seller_evidence: { condition: clean(seller.condition) || null, occupancy: clean(seller.occupancy) || null },
   };
 
-  if (!authority.ok) return emptyPlan(base, ["authority_not_ok", ...(authority.reasons || [])], explain);
-  if (assetInfo.asset === "unknown") return emptyPlan(base, assetInfo.reasons, explain);
-  if (assetInfo.asset === "multifamily" && assetInfo.units == null) return emptyPlan(base, ["no_per_unit_math", ...assetInfo.reasons], explain);
+  if (!authority.has_numbers) return emptyPlan(base, ["no_ceiling_or_offer", ...(authority.reasons || [])], explain);
 
   const C = authority.ceiling;
   const R = authority.recommended;
-  const V = authority.valuation_mid;
-  const rep = num(authority.estimated_repairs);
-  const asIs = rep != null && rep > 0 && rep < V ? V - rep : V;
-  const F = roundUpMoney(config.fair_floor_pct * asIs, config.rounding);
-  explain.push({ code: "ceiling", value: C, text: `Ceiling = engine authorized max (${authority.source} ${authority.engine_version || ""})`.trim() });
+  const I = authority.investor_price ?? null;
+  const grade = authority.confidence_grade;
+  explain.push({ code: "ceiling", value: C, text: `Ceiling = authority max (${authority.source || "unknown"} ${authority.engine_version || ""})${grade ? ` · grade ${grade}` : " · ungraded"}${authority.fallback_rung != null ? ` · fallback rung ${authority.fallback_rung}` : ""}`.replace(/\s+/g, " ") });
+  if (I != null) explain.push({ code: "investor_price", value: I, text: "Investor price = the authority's investor purchase cluster (entity/LLC off-market)" });
 
   const alRaw = R + config.autonomy_share_of_reserve * (C - R);
   const alCap = C * (1 - config.min_reserve_pct);
-  const AL = roundDownMoney(Math.min(alRaw, alCap), config.rounding);
-  explain.push({ code: "autonomous_limit", value: AL, text: `Autonomous limit = recommended + ${config.autonomy_share_of_reserve} × (ceiling − recommended), ≤ ceiling − ${config.min_reserve_pct * 100}%` });
-  if (AL == null || F > AL) {
-    return emptyPlan(base, ["fair_floor_above_autonomous_limit"], [...explain, { code: "fair_floor", value: F, text: "Fair-offer floor sits above the autonomous limit — human review" }]);
-  }
-  const T = clamp(roundDownMoney(R, config.rounding), F, AL);
-  explain.push({ code: "target", value: T, text: "Target = engine recommended offer (clamped to [fair floor, autonomous limit])" });
-  explain.push({ code: "fair_floor", value: F, text: `Fair-offer floor = ${config.fair_floor_pct} × as-is value` });
+  const AL = Math.min(roundDownMoney(Math.min(alRaw, alCap), config.rounding) ?? R, C);
+  explain.push({ code: "autonomous_limit", value: AL, text: `Autonomous limit = offer + ${config.autonomy_share_of_reserve} × (ceiling − offer), ≤ ceiling − ${config.min_reserve_pct * 100}%` });
+  const T = Math.min(roundDownMoney(R, config.rounding) ?? R, AL);
+  explain.push({ code: "target", value: T, text: "Target = the authority's offer" });
+  const AF = I != null ? roundUpMoney(I * (1 - config.anchor_floor.discount_from_investor_price), config.rounding) : null;
+  const floorIssue = AF != null && AF > T ? ["investor_floor_above_target"] : [];
+  explain.push(
+    AF != null
+      ? { code: "anchor_floor", value: AF, text: `Anchor floor = investor price × (1 − ${config.anchor_floor.discount_from_investor_price})` }
+      : { code: "anchor_floor", value: null, text: `No investor price: anchor bounded only by ${config.anchor.d_max * 100}% below target` },
+  );
 
-  const anchor = computeAnchor({ target: T, fair_floor: F, ask: base.seller_ask, strategy, seller, market: ctx.market || {}, config });
-  // Without a usable ask-relative anchor (ask ≤ anchor) the plan keeps the
-  // ask-free anchor for the ladder; the move layer confirms the ask instead.
-  const ladderAnchor = anchor.amount ?? computeAnchor({ target: T, fair_floor: F, strategy, seller, market: ctx.market || {}, config }).amount;
+  const anchor = computeAnchor({ target: T, anchor_floor: AF, ask: base.seller_ask, strategy, seller, market: ctx.market || {}, config });
+  const ladderAnchor = anchor.amount ?? computeAnchor({ target: T, anchor_floor: AF, strategy, seller, market: ctx.market || {}, config }).amount;
   explain.push({
     code: "opening_anchor",
     value: anchor.amount,
-    text: `Anchor = target × (1 − ${anchor.d}) [${anchor.adjustments.map((x) => `${x.code} ${x.value > 0 ? "+" : ""}${x.value}`).join(", ") || "base only"}]${anchor.floor_applied ? ", raised to fair floor" : ""}`,
+    text: `Anchor = target × (1 − ${anchor.d}) [${anchor.adjustments.map((x) => `${x.code} ${x.value > 0 ? "+" : ""}${x.value}`).join(", ") || "base only"}]${anchor.floor_applied ? ", raised to investor floor" : ""}`,
   });
   const ladder = planLadder({ anchor: ladderAnchor, autonomous_limit: AL, config });
   explain.push({ code: "ladder", text: `Ladder ${ladder.map((r) => r.amount).join(" → ")} (shares ${config.ladder.shares.join("/")} of the anchor→limit gap); above the limit is human approval` });
 
   let per_unit = null;
-  if (assetInfo.asset === "multifamily") {
+  if (assetInfo.asset === "multifamily" && assetInfo.units != null) {
     const u = assetInfo.units;
     const pu = (v) => (v == null ? null : Math.floor(v / u));
+    const band = authority.per_unit_band;
     per_unit = {
       units: u,
       unit_source: assetInfo.unit_source,
@@ -394,16 +424,25 @@ export function buildNegotiationPlan(ctx = {}) {
       target: pu(T),
       anchor: pu(ladderAnchor),
       autonomous_limit: pu(AL),
-      fair_floor: pu(F),
+      anchor_floor: pu(AF),
+      investor_price: pu(I),
+      band_low: band?.low ?? null,
+      band_high: band?.high ?? null,
     };
-    explain.push({ code: "per_unit", text: `${u} units (${assetInfo.unit_source}): ceiling $${per_unit.ceiling}/unit, target $${per_unit.target}/unit` });
+    explain.push({ code: "per_unit", text: `${u} units (${assetInfo.unit_source}), ${assetInfo.lane}: target $${per_unit.target}/door, ceiling $${per_unit.ceiling}/door${band?.low ? `, investor band $${band.low}–${band.high}/door` : ""}` });
+  } else if (assetInfo.asset === "multifamily") {
+    explain.push({ code: "per_unit", text: `No per-unit math: ${assetInfo.reasons.join(", ")}` });
   }
+
+  const autonomy = resolveAutonomy({ authority, asset: assetInfo, config, extra: floorIssue });
+  explain.push({ code: "autonomy", text: autonomy.eligible ? `Autonomous sending eligible (${autonomy.basis})` : `Operator approval required: ${autonomy.reasons.join(", ")}` });
 
   const screened_comps = screenComps(authority.comps, { asset: assetInfo.asset, now, config });
   const plan = {
     ...base,
     ok: true,
-    money_allowed: true,
+    money_allowed: autonomy.eligible,
+    autonomy,
     ceiling: C,
     target: T,
     recommended: R,
@@ -411,12 +450,11 @@ export function buildNegotiationPlan(ctx = {}) {
     ladder_anchor: ladderAnchor,
     anchor_detail: anchor,
     autonomous_limit: AL,
-    fair_floor: F,
-    as_is_value: asIs,
+    anchor_floor: AF,
     ladder,
     per_unit,
     screened_comps,
-    reasons: [],
+    reasons: autonomy.reasons,
     explain,
   };
   const support = compSupportFor(plan, anchor.amount);
@@ -446,10 +484,13 @@ function eventAmount(plan, event) {
 function moveOut(plan, action, { amount = null, quote_type = null, language_branch = null, rule_branch, explain = [], proposal = null } = {}) {
   let per_unit = null;
   if (amount != null && plan?.asset === "multifamily" && plan?.per_unit?.units) {
+    // MF 5+ wording (owner 10-07): "similar buildings are trading around $X–Y a door;
+    // we'd likely be around $Z a door". X–Y = the authority's investor per-door band.
     const u = plan.per_unit.units;
     const step = plan.config.mf.per_unit_step;
-    const high = Math.floor(amount / u / step) * step;
-    per_unit = { units: u, high, low: Math.max(step, high - step) };
+    const bstep = plan.config.mf.band_step;
+    const fl = (v, k) => (v == null ? null : Math.floor(v / k) * k);
+    per_unit = { units: u, door: fl(amount / u, step), band_low: fl(plan.per_unit.band_low, bstep), band_high: fl(plan.per_unit.band_high, bstep) };
   }
   const comp_support = amount != null && plan?.ok ? compSupportFor(plan, amount) : { allowed: false, ids: [], prices: [] };
   // Comp language is only ever chosen with verified support (no false comp claim).
@@ -468,7 +509,7 @@ export function guardMove(plan, move) {
   const toHuman = (why) => ({
     ...move,
     action: A.HUMAN,
-    proposal: { amount: move.amount, quote_type: move.quote_type, rule_branch: move.rule_branch },
+    proposal: { amount: move.amount, per_unit: move.per_unit, quote_type: move.quote_type, rule_branch: move.rule_branch },
     amount: null,
     per_unit: null,
     quote_type: null,
@@ -476,7 +517,7 @@ export function guardMove(plan, move) {
     rule_branch: `${move.rule_branch}:${why}`,
     explain: [...move.explain, { code: "human_gate", text: why }],
   });
-  if (!plan?.ok || !plan.money_allowed) {
+  if (!plan?.ok) {
     return { ...move, action: A.NO_NUMBER, amount: null, per_unit: null, quote_type: Q.NO_NUMBER, requires_log: true, rule_branch: `${move.rule_branch}:no_authority`, language_branch: L.DISCOVERY };
   }
   if (move.amount > plan.ceiling) {
@@ -485,14 +526,14 @@ export function guardMove(plan, move) {
   }
   if (move.action !== A.QUOTE) return move;
   if (move.amount > plan.autonomous_limit) return toHuman("above_autonomous_limit");
-  if (move.amount < plan.fair_floor) return toHuman("below_fair_floor");
-  if (plan.asset === "multifamily" && !plan.config.mf.autonomous_money) return toHuman("multifamily_money_is_human");
+  if (plan.anchor_floor != null && move.amount < plan.anchor_floor) return toHuman("below_investor_floor");
+  if (!plan.autonomy?.eligible) return toHuman(`autonomy:${(plan.autonomy?.reasons || ["denied"]).join("|")}`);
   if (!plan.flags?.autonomous_monetary_quotes) return toHuman("autonomous_monetary_quotes_off");
   return move;
 }
 
 function quoteBranch(plan, amount) {
-  if (plan.asset === "multifamily") return L.PER_UNIT;
+  if (plan.asset === "multifamily" && plan.lane === "mf5" && plan.per_unit) return L.PER_UNIT;
   return compSupportFor(plan, amount).allowed ? L.COMPS : L.NUMBERS;
 }
 
@@ -522,11 +563,8 @@ function decideMove(plan, state = {}, event = {}) {
   if (kind === "creative_terms") return moveOut(plan, A.HUMAN, { rule_branch: "creative_terms_need_human" });
 
   if (!plan?.ok) {
-    // No authoritative money. Identity / unit conflicts are a human's call; everything else keeps discovering.
-    const conflict = (plan?.reasons || []).some((r) => /identity_conflict|unit_count/.test(r));
-    if (conflict) return moveOut(plan, A.HUMAN, { rule_branch: "asset_identity_or_units_unresolved", explain: ex });
-    // Multifamily without an authoritative number is high-value operator work (§59), never a guess.
-    if (plan?.asset === "multifamily") return moveOut(plan, A.HUMAN, { rule_branch: "multifamily_without_authority_human", explain: ex });
+    // The authority supplied NO numbers at all (D is "never blank"; this is the defensive path).
+    if (plan?.asset === "multifamily") return moveOut(plan, A.HUMAN, { rule_branch: "multifamily_without_numbers_human", explain: ex });
     const amt = eventAmount(plan, event);
     if (amt != null && plan?.valuation_mid != null && plan?.authority?.fresh && isFarAboveReality(amt, plan.valuation_mid, plan?.config || NEGOTIATION_V3_DEFAULTS)) {
       return moveOut(plan, A.CLOSE_UNREALISTIC, { quote_type: Q.NO_NUMBER, language_branch: L.UNREALISTIC_CLOSE, rule_branch: "far_above_reality_no_authority" });
@@ -537,13 +575,18 @@ function decideMove(plan, state = {}, event = {}) {
   const cfg = plan.config;
   const AL = plan.autonomous_limit;
   const C = plan.ceiling;
-  const F = plan.fair_floor;
+  const F = plan.anchor_floor; // may be null (no investor price)
   const amt = eventAmount(plan, event);
   if (Number.isNaN(amt)) return moveOut(plan, A.HUMAN, { rule_branch: "per_unit_ask_without_unit_count" });
 
   // §58: far outside reality ⇒ polite approved close, unless new value evidence arrived.
   if (amt != null && isFarAboveReality(amt, plan.valuation_mid, cfg)) {
     if (event?.new_value_evidence) return moveOut(plan, A.HUMAN, { rule_branch: "far_above_with_new_value_evidence_reunderwrite" });
+    // Closing a seller on a low-confidence value is an operator call.
+    const g = plan.autonomy?.grade;
+    if ((g != null && !cfg.autonomy.grades.includes(g)) || !plan.authority?.fresh) {
+      return moveOut(plan, A.HUMAN, { rule_branch: "far_above_on_low_confidence_value" });
+    }
     return moveOut(plan, A.CLOSE_UNREALISTIC, { quote_type: Q.NO_NUMBER, language_branch: L.UNREALISTIC_CLOSE, rule_branch: "far_above_reality_close" });
   }
 
@@ -558,7 +601,7 @@ function decideMove(plan, state = {}, event = {}) {
     if (["price", "counter", "make_offer", "no_price"].includes(kind) === false) {
       return moveOut(plan, A.HOLD, { rule_branch: "no_price_event" });
     }
-    if (amt != null && amt < F) return moveOut(plan, A.HUMAN, { rule_branch: "ask_below_fair_floor" });
+    if (amt != null && F != null && amt < F) return moveOut(plan, A.HUMAN, { rule_branch: "ask_below_investor_floor" });
     if (amt != null && amt <= plan.target) {
       return moveOut(plan, A.NO_NUMBER, { quote_type: Q.NO_NUMBER, language_branch: L.CONFIRM, rule_branch: "ask_within_target_confirm_basics" });
     }
@@ -567,7 +610,7 @@ function decideMove(plan, state = {}, event = {}) {
     }
     const anchor =
       amt != null
-        ? computeAnchor({ target: plan.target, fair_floor: F, ask: amt, strategy: plan.strategy, seller: plan.seller_evidence, market: plan.market || {}, config: cfg })
+        ? computeAnchor({ target: plan.target, anchor_floor: F, ask: amt, strategy: plan.strategy, seller: plan.seller_evidence, market: plan.market || {}, config: cfg })
         : { amount: plan.ladder_anchor, reason: "ask_unknown_base_anchor", d: null, adjustments: [] };
     if (anchor.amount == null) {
       return moveOut(plan, A.NO_NUMBER, { quote_type: Q.NO_NUMBER, language_branch: L.CONFIRM, rule_branch: "ask_at_or_below_anchor_confirm_basics" });
@@ -587,7 +630,7 @@ function decideMove(plan, state = {}, event = {}) {
     return moveOut(plan, A.HOLD, { rule_branch: "no_counter_hold_position" });
   }
   if (amt <= current) {
-    if (amt < F) return moveOut(plan, A.HUMAN, { rule_branch: "counter_below_fair_floor" });
+    if (F != null && amt < F) return moveOut(plan, A.HUMAN, { rule_branch: "counter_below_investor_floor" });
     return moveOut(plan, A.QUOTE, { amount: amt, quote_type: Q.FORMAL_OFFER, language_branch: L.NUMBERS, rule_branch: "accept_counter_at_or_below_lc" });
   }
   if (current >= AL) {

@@ -45,6 +45,7 @@ export function buildQuoteLogRow(plan, move, ids = {}) {
   } else {
     if (move.action !== NEGOTIATION_ACTIONS.QUOTE) throw new Error("negotiation_v3_amount_without_quote_action");
     if (!plan?.ok || !plan?.authority?.ok) throw new Error("negotiation_v3_amount_without_authority");
+    if (!plan?.autonomy?.eligible) throw new Error("negotiation_v3_amount_not_autonomy_eligible");
     if (amount == null || amount <= 0) throw new Error("negotiation_v3_amount_required");
     if (amount > plan.ceiling) throw new Error("negotiation_v3_amount_above_ceiling");
     if (amount > plan.autonomous_limit) throw new Error("negotiation_v3_amount_above_autonomous_limit");
@@ -62,11 +63,16 @@ export function buildQuoteLogRow(plan, move, ids = {}) {
     recommended_offer_at_quote: plan?.recommended ?? null,
     target_at_quote: plan?.target ?? null,
     autonomous_limit_at_quote: plan?.autonomous_limit ?? null,
-    fair_floor_at_quote: plan?.fair_floor ?? null,
+    anchor_floor_at_quote: plan?.anchor_floor ?? null,
+    investor_price_at_quote: plan?.investor_price ?? null,
+    confidence_grade: plan?.authority?.confidence_grade ?? null,
+    fallback_rung: plan?.authority?.fallback_rung ?? null,
+    lane: plan?.lane ?? null,
     previous_lc_amount: num(ids.previous_lc_amount),
     unit_count: move.per_unit?.units ?? null,
-    per_unit_low: move.per_unit?.low ?? null,
-    per_unit_high: move.per_unit?.high ?? null,
+    per_unit_amount: move.per_unit?.door ?? null, // "we'd likely be around $Z a door"
+    per_unit_low: move.per_unit?.band_low ?? null, // "similar buildings … $X–Y a door" (authority band)
+    per_unit_high: move.per_unit?.band_high ?? null,
     engine: plan?.authority?.source || "acquisition_decision_engine",
     engine_version: plan?.authority?.engine_version ?? null,
     negotiation_engine_version: move.engine_version || plan?.version || null,

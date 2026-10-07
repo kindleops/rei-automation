@@ -18,6 +18,8 @@ alter table public.negotiation_quotes
   drop column if exists language_branch, drop column if exists score_version,
   drop column if exists negotiation_config_version, drop column if exists negotiation_engine_version,
   drop column if exists per_unit_high, drop column if exists per_unit_low, drop column if exists unit_count,
-  drop column if exists previous_lc_amount, drop column if exists fair_floor_at_quote,
+  drop column if exists per_unit_amount, drop column if exists lane, drop column if exists fallback_rung,
+  drop column if exists confidence_grade, drop column if exists investor_price_at_quote,
+  drop column if exists previous_lc_amount, drop column if exists anchor_floor_at_quote,
   drop column if exists autonomous_limit_at_quote, drop column if exists target_at_quote;
 commit;

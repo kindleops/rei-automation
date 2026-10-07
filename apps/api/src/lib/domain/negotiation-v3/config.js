@@ -5,20 +5,25 @@
 // (every plan and every logged quote records the version it ran under).
 //
 // NOTATION (all dollars, totals; MF per-unit = total / units)
-//   C  ceiling           authoritative MAO = evidence.offer_calculation.effective_authorized_ceiling
-//   R  recommended       engine recommended_cash_offer (R ≤ C or authority fails)
-//   V  valuation_mid     engine comp value;  AsIs = V − repairs (0 < repairs < V), else V
-//   F  fair floor        floor_pct × AsIs   (owner rule: applies to every seller)
+//   C  ceiling           authoritative MAO from the offer authority (D: investor cluster × (1 − margin))
+//   R  offer             the authority's recommended offer (R ≤ C or no plan)
+//   I  investor price    D's investor price cluster (entity/LLC off-market purchases), when supplied
 //   AL autonomous limit  R + autonomy_share × (C − R), and ≤ C × (1 − min_reserve_pct)
-//   T  target            R, clamped into [F, AL]
-//   O  opening anchor    T × (1 − d),  d = clamp(d_base + Σ adjustments, d_min, d_max); O ≥ F; O < ask
+//   T  target            min(R, AL)  — "target = D's offer"
+//   AF anchor floor      I × (1 − anchor_floor.discount_from_investor_price)  (none without I)
+//   O  opening anchor    T × (1 − d),  d = clamp(d_base + Σ adjustments, d_min, d_max); O ≥ AF; O < ask
 //   ladder               O → c1 → c2 → AL, steps = decreasing shares of (AL − O)
 //
+// OWNER 10-07: there is NO "value − repairs" floor (the value is already as-is;
+// repairs are never subtracted again). NEVER BLANK: whenever the authority
+// supplies C and R the plan carries numbers for the operator; only AUTONOMOUS
+// sending is gated, by confidence_grade + fallback_rung (+ authorized, lane).
+//
 // Pressure / situation (A1) only moves d and the concession multipliers.
-// C, R, T, AL and F are pressure-INVARIANT (§57) — property-tested.
+// C, R, T, AL and AF are pressure-INVARIANT (§57) — property-tested.
 
 export const NEGOTIATION_V3_VERSION = "negotiation_engine_v3";
-export const NEGOTIATION_V3_CONFIG_VERSION = "neg_v3_config_2026_10_07";
+export const NEGOTIATION_V3_CONFIG_VERSION = "neg_v3_config_2026_10_07b";
 
 export const NEGOTIATION_V3_DEFAULTS = Object.freeze({
   // ── §48 AUTONOMOUS LIMIT ─────────────────────────────────────────────────
@@ -36,9 +41,26 @@ export const NEGOTIATION_V3_DEFAULTS = Object.freeze({
   // ask, not the ceiling.
   target_basis: "engine_recommended",
 
-  // ── FAIR-OFFER FLOOR (owner, 10-06) — same basis as the signal opening ────
-  // Prod: R / AsIs = 0.49 / 0.56 / 0.59, C / AsIs = 0.61 / 0.63 / 0.65.
-  fair_floor_pct: 0.5,
+  // ── ANCHOR FLOOR (owner 10-07) — relative to the INVESTOR price ─────────
+  // The anchor is never below I × (1 − 0.25). Owner example: investors buy at
+  // $130K, we're ~$110–115K (C ≈ I × 0.87); the deepest anchor is $97.5K.
+  // Evidence for 0.25: owner instruction ("e.g. −25%"); no outcome data yet.
+  // Without I (prod v2 rows) the anchor is bounded only by d_max below target.
+  anchor_floor: Object.freeze({ basis: "investor_price", discount_from_investor_price: 0.25 }),
+
+  // ── AUTONOMY GATE (owner 10-07) — by GRADE, never by blankness ───────────
+  // A QUOTE leaves without a human only when: authority.authorized, fresh,
+  // confidence_grade ∈ grades, fallback_rung ≤ max_fallback_rung, lane ∈ lanes,
+  // units resolved, no identity conflict — AND both flags on. Everything else
+  // is a HUMAN proposal with the numbers shown. Grades/rungs are D's scale
+  // (CONTRACT_offer_authority.md); ungraded prod-v2 rows fall back to
+  // `authorized` alone ("authorized_only") until D grades them.
+  autonomy: Object.freeze({
+    grades: Object.freeze(["A", "B"]),
+    max_fallback_rung: 1,
+    lanes: Object.freeze(["sfr"]), // MF 2–4 / 5+ stay human until the owner approves
+    ungraded: "authorized_only",
+  }),
 
   // ── §44 OPENING ANCHOR DEPTH (fraction below T) ──────────────────────────
   // Illustration §45: C 260 / T 225 / ask 245 → 210–220 (d 2–7%). Evidence for
@@ -99,10 +121,8 @@ export const NEGOTIATION_V3_DEFAULTS = Object.freeze({
 
   // ── §53–54 MULTIFAMILY ───────────────────────────────────────────────────
   mf: Object.freeze({
-    per_unit_step: 5_000, // "around $70–75K per unit"
-    // Autopilot v2 is SFR-only (owner 10-06). MF plans are computed for the
-    // operator; every MF money move is HUMAN until the owner flips this.
-    autonomous_money: false,
+    per_unit_step: 1_000, // "we'd likely be around $Z a door" (Z floored to $1K)
+    band_step: 1_000, // "similar buildings are trading around $X–Y a door" (D's per-door band)
   }),
 
   // Conversation order: Autopilot v2 asks condition before any number (§31).

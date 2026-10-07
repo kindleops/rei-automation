@@ -14,6 +14,7 @@ export {
   compSupportFor,
   resolvePlanAsset,
   resolveStrategy,
+  resolveAutonomy,
   isFarAboveReality,
   roundDownMoney,
   roundUpMoney,
@@ -24,6 +25,8 @@ export {
 export {
   isOfferReady,
   authorityFromScoreRow,
+  authorityFromOfferAuthority,
+  normalizeLane,
   normalizeAuthority,
   resolvePlanAuthority,
   OFFER_READY_V3_PROJECTION,

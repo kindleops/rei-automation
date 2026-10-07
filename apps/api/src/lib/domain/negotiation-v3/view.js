@@ -4,18 +4,22 @@
 // OPERATOR-ONLY. Nothing here is seller-facing text. Rendered only when
 // NEGOTIATION_ENGINE_V3 is on (the API omits the block otherwise).
 
+import { authoritativeOfferFromScore } from "@/lib/acquisition/offerAuthority.js";
 import { buildNegotiationPlan, nextNegotiationMove } from "./plan.js";
 import { summarizeNegotiationQuotes } from "./quote-log.js";
 
 const num = (v) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
-export function buildNegotiationDeskView({ ade_snapshot = null, property = {}, seller = {}, quotes = null, situation = null, now = Date.now(), env = process.env } = {}) {
-  const plan = buildNegotiationPlan({ ade_snapshot, property, seller, situation, now, env });
+export function buildNegotiationDeskView({ ade_snapshot = null, offer_authority = null, property = {}, seller = {}, quotes = null, situation = null, now = Date.now(), env = process.env } = {}) {
+  // ONE money interface (agent D's offer authority, CONTRACT_offer_authority.md).
+  const oa = offer_authority || (ade_snapshot ? authoritativeOfferFromScore(ade_snapshot, { now, env }) : null);
+  const plan = buildNegotiationPlan({ offer_authority: oa, property, seller, situation, now, env });
   const history = quotes == null ? null : summarizeNegotiationQuotes(quotes);
   const lc = history?.lc_positions || [];
   const preview = nextNegotiationMove(plan, { lc_positions: lc, seller_positions: [] }, { kind: lc.length ? "counter" : "price", amount: num(seller.asking_price) });
   return {
-    status: plan.ok ? "authorized" : "no_autonomous_money",
+    // Never blank (owner 10-07): numbers + grade + why whenever the authority supplied them.
+    status: !plan.ok ? "no_numbers" : plan.autonomy.eligible ? "autonomous_eligible" : "operator_approval",
     asset: plan.asset,
     ask: num(seller.asking_price),
     anchor: plan.opening_anchor,
@@ -24,12 +28,15 @@ export function buildNegotiationDeskView({ ade_snapshot = null, property = {}, s
     target: plan.target,
     autonomousLimit: plan.autonomous_limit,
     ceiling: plan.ceiling,
-    fairFloor: plan.fair_floor,
+    anchorFloor: plan.anchor_floor,
+    investorPrice: plan.investor_price,
+    lane: plan.lane,
+    grade: plan.authority.confidence_grade,
+    fallbackRung: plan.authority.fallback_rung,
+    autonomy: { eligible: plan.autonomy.eligible, reasons: plan.autonomy.reasons },
     perUnit: plan.per_unit,
     ladder: plan.ladder.map((r) => ({ step: r.step, kind: r.kind, amount: r.amount })),
     authority: plan.authority,
-    // When authority fails, the engine numbers are shown as NON-authoritative reference only.
-    engineReference: plan.ok ? null : plan.engine_reference,
     strategy: { situation: plan.strategy.situation, angle: plan.strategy.angle, creativeProbe: plan.strategy.creative_probe },
     nextMove: {
       action: preview.action,
@@ -38,7 +45,7 @@ export function buildNegotiationDeskView({ ade_snapshot = null, property = {}, s
       quoteType: preview.quote_type || preview.proposal?.quote_type || null,
       rule: preview.rule_branch,
     },
-    why: [...plan.explain.map((e) => e.text), ...(plan.reasons.length ? [`Held: ${plan.reasons.join(", ")}`] : [])],
+    why: plan.explain.map((e) => e.text),
     version: plan.version,
     configVersion: plan.config_version,
   };

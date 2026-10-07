@@ -296,8 +296,10 @@ export function ago(iso: string | null | undefined, now = Date.now()): string | 
 
 /** Negotiation Engine v3 operator view (apps/api negotiation-v3/view.js). Never seller-facing. */
 export interface NegotiationV3Desk {
-  status: 'authorized' | 'no_autonomous_money'
+  /** never blank: numbers shown whenever the offer authority supplied them; only autonomous sending is gated (by grade). */
+  status: 'autonomous_eligible' | 'operator_approval' | 'no_numbers'
   asset: 'sfr' | 'multifamily' | 'unknown'
+  lane: 'sfr' | 'mf24' | 'mf5' | null
   ask: number | null
   anchor: number | null
   currentPosition: { amount: number | null; type: string; quoted_at: string } | null
@@ -305,11 +307,14 @@ export interface NegotiationV3Desk {
   target: number | null
   autonomousLimit: number | null
   ceiling: number | null
-  fairFloor: number | null
-  perUnit: { units: number; unit_source: string | null; ceiling: number | null; target: number | null; anchor: number | null; autonomous_limit: number | null; fair_floor: number | null } | null
+  anchorFloor: number | null
+  investorPrice: number | null
+  grade: string | null
+  fallbackRung: number | null
+  autonomy: { eligible: boolean; reasons: string[] }
+  perUnit: { units: number; unit_source: string | null; ceiling: number | null; target: number | null; anchor: number | null; autonomous_limit: number | null; anchor_floor: number | null; investor_price: number | null; band_low: number | null; band_high: number | null } | null
   ladder: Array<{ step: number; kind: 'anchor' | 'concession' | 'final_autonomous'; amount: number }>
   authority: { source: string | null; engine_version: string | null; computed_at: string | null; decision_tier: string | null; fresh: boolean; ok: boolean; reasons: string[] }
-  engineReference: { recommended: number | null; ceiling: number | null; valuation_mid: number | null } | null
   strategy: { situation: string | null; angle: string | null; creativeProbe: boolean }
   nextMove: { action: 'QUOTE' | 'HOLD' | 'HUMAN' | 'CLOSE_UNREALISTIC' | 'NO_NUMBER'; amount: number | null; proposal: number | null; quoteType: string | null; rule: string }
   why: string[]

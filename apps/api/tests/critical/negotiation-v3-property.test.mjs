@@ -4,8 +4,10 @@
  *   never above the ceiling · never above the autonomous limit without HUMAN ·
  *   every number logged before send · a logging failure blocks the send ·
  *   no false comp claim · no unit math without a unit count ·
- *   no money without authoritative evidence · pressure never moves C/T/AL/F ·
- *   both flags default OFF.
+ *   no money without authoritative evidence · pressure never moves C/T/AL/AF ·
+ *   both flags default OFF · NEVER BLANK (owner 10-07): numbers whenever the
+ *   authority supplies a ceiling + offer; autonomy gated by grade / rung / lane ·
+ *   anchor never below investor price × (1 − 25%).
  */
 import "../helpers/critical-test-environment.mjs";
 import test from "node:test";
@@ -21,10 +23,12 @@ import {
   summarizeNegotiationQuotes,
   isOfferReady,
   normalizeAuthority,
+  authorityFromOfferAuthority,
   resolveNegotiationFlags,
   NEGOTIATION_ACTIONS as A,
   QUOTE_TYPES_V3 as Q,
 } from "../../src/lib/domain/negotiation-v3/index.js";
+import { authoritativeOfferFromScore } from "../../src/lib/acquisition/offerAuthority.js";
 
 const NOW = Date.parse("2026-10-07T05:00:00Z");
 const ON = { NEGOTIATION_ENGINE_V3: "true", AUTONOMOUS_MONETARY_QUOTES: "true" };
@@ -114,6 +118,39 @@ function genScore(r, { mf = false, units = null, corrupt = null } = {}) {
   return row;
 }
 
+/** CONTRACT_offer_authority-shaped output (D), random grade / rung / lane / authorization. */
+function genOfferAuthority(r, { mf = false, units = null } = {}) {
+  const I = round100(uni(r, 60_000, 1_500_000));
+  const C = round100(I * (1 - uni(r, 0.08, 0.2)));
+  const R = round100(C * (1 - uni(r, 0.03, 0.12)));
+  const blank = r() < 0.05;
+  const lane = mf ? pick(r, [units >= 5 ? "mf5" : "mf24", units >= 5 ? "mf5" : "mf24", null]) : pick(r, ["sfr", "sfr", "sfr", null]);
+  const bandMid = units ? I / units : null;
+  return {
+    property_id: `d${Math.floor(r() * 1e9)}`,
+    engine: "offer_engine_v3_merged",
+    engine_version: "test",
+    computed_at: new Date(NOW - 86_400_000).toISOString(),
+    authorized: r() < 0.7,
+    fresh: r() < 0.9,
+    reasons: [],
+    lane,
+    investor_price: r() < 0.85 ? I : null,
+    value: I,
+    ceiling: blank ? null : C,
+    offer: blank ? null : R,
+    per_unit: mf && Number.isInteger(units) && units >= 2 ? { units, value: Math.round(I / units), band: { low: round100(bandMid * 0.92), high: round100(bandMid * 1.06) } } : null,
+    confidence_grade: pick(r, ["A", "B", "C", "D", "F", null]),
+    fallback_rung: pick(r, [0, 1, 2, 3, 4, null]),
+    negotiation_authority: {
+      asset_family: mf ? "multifamily" : "residential",
+      units: mf ? units : 1,
+      asset_identity_conflict: mf && units === 1,
+      comps: genComps(r, I, { mf, units }),
+    },
+  };
+}
+
 function genSituation(r) {
   if (r() < 0.3) return null;
   const c = () => (r() < 0.2 ? null : Math.floor(uni(r, 0, 100)));
@@ -129,11 +166,14 @@ function genCtx(r, opts = {}) {
   const mf = opts.mf ?? r() < 0.25;
   const units = mf ? pick(r, [2, 3, 4, 6, 11, 18, 24, null, 1, 2.5, 0]) : null;
   const corrupt = opts.corrupt === undefined ? (r() < 0.3 ? pick(r, ["tier", "stale", "predates", "no_ceiling", "no_offer", "sanity", "low_n", "identity", "compact", "missing"]) : null) : opts.corrupt;
-  const score = genScore(r, { mf, units, corrupt });
-  const V = score?.valuation_mid ?? 200_000;
+  const useD = opts.d ?? r() < 0.4;
+  const score = useD ? null : genScore(r, { mf, units, corrupt });
+  const oa = useD ? genOfferAuthority(r, { mf, units }) : null;
+  const V = score?.valuation_mid ?? oa?.value ?? 200_000;
   return {
     ade_snapshot: score,
-    property: { property_id: score?.property_id, property_type: mf ? "Multi-Family" : "Single Family", units_count: mf ? pick(r, [units, units, units, null, units === 11 ? 12 : units]) : 1 },
+    offer_authority: oa,
+    property: { property_id: score?.property_id ?? oa?.property_id, property_type: mf ? "Multi-Family" : "Single Family", units_count: mf ? pick(r, [units, units, units, null, units === 11 ? 12 : units]) : 1 },
     seller: {
       asking_price: r() < 0.2 ? null : round100(V * uni(r, 0.3, 2.5)),
       condition: r() < 0.25 ? null : pick(r, ["good", "dated", "needs work"]),
@@ -143,7 +183,7 @@ function genCtx(r, opts = {}) {
     market: r() < 0.5 ? null : { buyer_depth: pick(r, ["strong", "normal", "weak"]) },
     now: NOW,
     env: opts.env ?? ON,
-    _corrupt: corrupt,
+    _corrupt: useD ? null : corrupt,
   };
 }
 
@@ -180,38 +220,52 @@ test("flags: both default OFF; quotes flag alone does nothing", () => {
 
 const counters = { plans: 0, ok_plans: 0, moves: 0, quotes: 0, human: 0, comp_lang: 0, mf_quotes: 0, closes: 0 };
 
-test(`property: ${N_PLANS} random plans × negotiations — money invariants`, () => {
+test(`property: ${N_PLANS} random plans × negotiations — money invariants (prod v2 + D-shaped authorities)`, () => {
   const r = rng(20261007);
+  const GRADES = ["A", "B"];
   for (let i = 0; i < N_PLANS; i += 1) {
     const ctx = genCtx(r, { env: ON });
-    // MF money is HUMAN by default; exercise the MF quote path in half the MF cases.
-    if (ctx.property.property_type === "Multi-Family" && r() < 0.5) ctx.config = { mf: { autonomous_money: true } };
+    // MF lanes are human by default; open them in half the MF cases to exercise per-door quotes.
+    if (ctx.property.property_type === "Multi-Family" && r() < 0.5) ctx.config = { autonomy: { lanes: ["sfr", "mf24", "mf5"] } };
     const plan = buildNegotiationPlan(ctx);
     counters.plans += 1;
+    const oa = ctx.offer_authority;
+    // NEVER BLANK: numbers whenever the authority supplies a ceiling and an offer (R ≤ C).
+    const supplied = oa
+      ? oa.ceiling != null && oa.offer != null && oa.offer <= oa.ceiling
+      : ctx.ade_snapshot != null && !["no_ceiling", "no_offer"].includes(ctx._corrupt);
+    assert.equal(plan.ok, supplied, `never blank (${ctx._corrupt || "d"})`);
     if (plan.ok) {
       counters.ok_plans += 1;
       assert.ok(plan.autonomous_limit < plan.ceiling, "AL strictly below ceiling");
-      assert.ok(plan.target <= plan.autonomous_limit && plan.target >= plan.fair_floor);
-      assert.ok(plan.ladder_anchor >= plan.fair_floor && plan.ladder_anchor <= plan.target);
+      assert.ok(plan.target <= plan.autonomous_limit);
+      assert.ok(plan.ladder_anchor <= plan.target);
+      if (plan.anchor_floor != null && plan.anchor_floor <= plan.target) assert.ok(plan.ladder_anchor >= plan.anchor_floor, "anchor ≥ investor floor");
+      if (oa?.investor_price) assert.equal(plan.anchor_floor, Math.ceil((oa.investor_price * 0.75) / (oa.investor_price * 0.75 >= 100_000 ? 1000 : 500)) * (oa.investor_price * 0.75 >= 100_000 ? 1000 : 500));
       if (plan.opening_anchor != null && plan.seller_ask != null) assert.ok(plan.opening_anchor < plan.seller_ask);
       const lad = plan.ladder.map((x) => x.amount);
       for (let k = 1; k < lad.length; k += 1) assert.ok(lad[k] >= lad[k - 1], "ladder monotone");
       assert.equal(lad[lad.length - 1], plan.autonomous_limit, "final rung = autonomous limit");
-      if (plan.asset === "multifamily") assert.ok(Number.isInteger(plan.per_unit.units) && plan.per_unit.units >= 2);
+      if (plan.per_unit) assert.ok(Number.isInteger(plan.per_unit.units) && plan.per_unit.units >= 2);
+      if (oa && oa.authorized && oa.fresh && plan.autonomy.eligible) {
+        assert.ok(oa.confidence_grade == null || GRADES.includes(oa.confidence_grade), "grade gate");
+        assert.ok(oa.fallback_rung == null || oa.fallback_rung <= 1, "rung gate");
+      }
+      if (oa && (!GRADES.includes(oa.confidence_grade) && oa.confidence_grade != null)) assert.equal(plan.autonomy.eligible, false, "low grade never autonomous");
     } else {
       assert.equal(plan.ceiling, null);
       assert.equal(plan.ladder.length, 0);
     }
-    if (ctx._corrupt) assert.equal(plan.ok, false, `corruption ${ctx._corrupt} must deny authority`);
+    if (ctx._corrupt) assert.equal(plan.autonomy.eligible, false, `corruption ${ctx._corrupt} must deny autonomy`);
     for (const { move } of simulate(r, plan)) {
       counters.moves += 1;
       if (move.amount != null) assert.ok(plan.ok && move.amount <= plan.ceiling, "never above ceiling");
       if (move.proposal?.amount != null) assert.ok(plan.ceiling == null || move.proposal.amount <= plan.ceiling, "proposal never above ceiling");
       if (move.action === A.QUOTE) {
         counters.quotes += 1;
-        assert.ok(plan.ok && plan.authority.ok, "no money without authority");
+        assert.ok(plan.ok && plan.authority.authorized && plan.autonomy.eligible, "no money without authority + grade");
         assert.ok(move.amount <= plan.autonomous_limit, "never above AL without HUMAN");
-        assert.ok(move.amount >= plan.fair_floor, "never below fair floor");
+        if (plan.anchor_floor != null) assert.ok(move.amount >= plan.anchor_floor, "never below investor floor");
         assert.equal(move.requires_log, true);
         assert.ok([Q.NEGOTIATION_ANCHOR, Q.CONCESSION, Q.FORMAL_OFFER].includes(move.quote_type));
         if (move.language_branch === "comps") {
@@ -221,7 +275,8 @@ test(`property: ${N_PLANS} random plans × negotiations — money invariants`, (
         }
         if (plan.asset === "multifamily") {
           counters.mf_quotes += 1;
-          assert.ok(move.per_unit && move.per_unit.units === plan.per_unit.units && move.per_unit.high * move.per_unit.units <= plan.autonomous_limit);
+          assert.ok(move.per_unit && move.per_unit.units === plan.per_unit.units && move.per_unit.door * move.per_unit.units <= move.amount);
+          if (move.language_branch === "per_unit") assert.equal(plan.lane, "mf5");
         } else assert.equal(move.per_unit, null, "no unit math on SFR");
       } else {
         assert.equal(move.amount, null, "only QUOTE carries an amount");
@@ -230,7 +285,7 @@ test(`property: ${N_PLANS} random plans × negotiations — money invariants`, (
       if (move.action === A.CLOSE_UNREALISTIC) counters.closes += 1;
     }
   }
-  assert.ok(counters.quotes > 1000 && counters.ok_plans > 500, JSON.stringify(counters));
+  assert.ok(counters.quotes > 600 && counters.ok_plans > 1000, JSON.stringify(counters));
   console.log("[nv3 property]", JSON.stringify(counters));
 });
 
@@ -239,7 +294,7 @@ test("property: our numbers never go down; anchor below the ask; non-uniform con
   let sequences = 0;
   let nonUniform = 0;
   for (let i = 0; i < N_PLANS; i += 1) {
-    const plan = buildNegotiationPlan(genCtx(r, { mf: false, corrupt: null }));
+    const plan = buildNegotiationPlan(genCtx(r, { mf: false, corrupt: null, d: false }));
     if (!plan.ok) continue;
     const moves = simulate(r, plan);
     const ours = moves.filter((m) => m.move.action === A.QUOTE && m.move.quote_type !== Q.FORMAL_OFFER).map((m) => m.move.amount);
@@ -263,7 +318,8 @@ test("property: pressure / situation never moves ceiling, target, autonomous lim
     const ctx = genCtx(r, { corrupt: null });
     const a = buildNegotiationPlan({ ...ctx, situation: null, market: null });
     const b = buildNegotiationPlan({ ...ctx, situation: genSituation(r) || { components: { forced_sale_pressure: 100, tax_pain: 100 } }, market: { buyer_depth: "weak" } });
-    for (const k of ["ok", "ceiling", "target", "autonomous_limit", "fair_floor"]) assert.equal(b[k], a[k], k);
+    for (const k of ["ok", "ceiling", "target", "autonomous_limit", "anchor_floor"]) assert.equal(b[k], a[k], k);
+    assert.equal(b.autonomy.eligible, a.autonomy.eligible, "pressure never changes autonomy");
   }
 });
 
@@ -284,14 +340,14 @@ test("property: AUTONOMOUS_MONETARY_QUOTES off ⇒ zero QUOTE moves, money becom
 test("property: no unit math without a valid unit count", () => {
   const r = rng(54);
   for (let i = 0; i < N_PLANS; i += 1) {
-    const ctx = genCtx(r, { mf: true, corrupt: null });
-    ctx.config = { mf: { autonomous_money: true } };
+    const ctx = genCtx(r, { mf: true, corrupt: null, d: false });
+    ctx.config = { autonomy: { lanes: ["sfr", "mf24", "mf5"] } };
     const plan = buildNegotiationPlan(ctx);
     const u = [ctx.property.units_count, ctx.ade_snapshot.evidence.subject.normalized_features.units].filter((x) => x != null);
     const valid = u.length > 0 && u.every((x) => Number.isInteger(x) && x >= 2) && new Set(u).size === 1;
     if (!valid) {
-      assert.equal(plan.ok, false);
       assert.equal(plan.per_unit, null);
+      assert.equal(plan.autonomy.eligible, false);
       const m = nextNegotiationMove(plan, {}, { kind: "price", per_unit: 70_000 });
       assert.equal(m.amount, null);
       assert.equal(m.per_unit, null);
@@ -303,7 +359,7 @@ test("property: logged BEFORE send, and a logging failure blocks the send", asyn
   const r = rng(11);
   let checked = 0;
   for (let i = 0; i < 1500; i += 1) {
-    const plan = buildNegotiationPlan(genCtx(r, { mf: false, corrupt: null }));
+    const plan = buildNegotiationPlan(genCtx(r, { mf: false, corrupt: null, d: false }));
     if (!plan.ok) continue;
     const move = nextNegotiationMove(plan, {}, { kind: "price", amount: plan.target + 25_000 });
     if (!(move.action === A.QUOTE || move.quote_type === Q.NO_NUMBER)) continue;
@@ -327,7 +383,7 @@ test("property: logged BEFORE send, and a logging failure blocks the send", asyn
     checked += 1;
   }
   // A thrown client is also a failure, never a send.
-  const plan = buildNegotiationPlan(genCtx(rng(1), { mf: false, corrupt: null }));
+  const plan = buildNegotiationPlan(genCtx(rng(1), { mf: false, corrupt: null, d: false }));
   const res = await logQuoteThenSend({ supabase: null, plan, move: { requires_log: true, quote_type: Q.NO_NUMBER, rule_branch: "x" }, ids: { thread_key: "t" }, send: () => assert.fail("sent") });
   assert.equal(res.sent, false);
   assert.ok(checked > 300);
@@ -426,54 +482,99 @@ test("D's merged-engine authority must be ok AND fresh with a ceiling", () => {
   assert.equal(normalizeAuthority({ ok: true, fresh: true, ceiling: 300, recommended: 400, valuation_mid: 500 }).ok, false); // R > C
 });
 
-// ── golden cases (prod rows, read-only extract 2026-10-07) ───────────────────
-const golden = JSON.parse(readFileSync(new URL("../fixtures/negotiation-v3-golden.json", import.meta.url), "utf8")).rows;
+// ── golden cases ─────────────────────────────────────────────────────────────
+// rows: prod property_acquisition_scores (read-only extract 2026-10-07), read through
+// agent D's authoritativeOfferFromScore (the ONE money interface).
+// d_merged: agent D's merged-engine SHADOW output mapped to CONTRACT_offer_authority
+// (D does not emit confidence_grade / fallback_rung yet — tests set them explicitly).
+const goldenFile = JSON.parse(readFileSync(new URL("../fixtures/negotiation-v3-golden.json", import.meta.url), "utf8"));
+const golden = goldenFile.rows;
+const dMerged = goldenFile.d_merged;
+const viaD = (row) => authoritativeOfferFromScore(row, { now: NOW, env: {} });
 
-test("golden 1311 Conway 274574569 (MF 11 units; owner manually offered $825K): no autonomous money", () => {
-  const row = golden["274574569"];
-  const plan = buildNegotiationPlan({ ade_snapshot: row, property: { property_type: "Multi-Family", units_count: 11 }, seller: { asking_price: 1_100_000, condition: "dated" }, now: NOW, env: ON });
-  assert.equal(plan.ok, false);
-  assert.ok(plan.reasons.includes("tier_not_offer_authoritative"));
-  assert.equal(plan.engine_reference.ceiling, 211_800); // engine MAO — the owner's $825K is 3.9× it
-  const m = nextNegotiationMove(plan, {}, { kind: "price", amount: 1_100_000 });
+test("golden 1311 Conway 274574569 (MF 5+, 11 doors; owner offered $825K): real per-door plan, ~$78.5K/door target", () => {
+  const property = { property_type: "Multi-Family", units_count: 11 };
+  const plan = buildNegotiationPlan({ offer_authority: dMerged["274574569"], property, seller: { condition: "dated" }, now: NOW, env: ON });
+  assert.equal(plan.ok, true, "never blank");
+  assert.equal(plan.lane, "mf5");
+  assert.equal(plan.ceiling, 919_242);
+  assert.equal(plan.target, 864_000);
+  assert.ok(plan.per_unit.target >= 75_000 && plan.per_unit.target <= 80_000, String(plan.per_unit.target));
+  assert.equal(plan.autonomous_limit, 891_000); // $81K/door
+  assert.equal(plan.anchor_floor, 808_000); // investor $1,076,900 × 0.75
+  assert.deepEqual([plan.per_unit.band_low, plan.per_unit.band_high], [93_000, 103_000]);
+  // D shadow (not authorized) + MF lane ⇒ numbers for the operator, HUMAN proposal; anchor $829K ≈ the owner's $825K.
+  const m = nextNegotiationMove(plan, {}, { kind: "make_offer" });
   assert.equal(m.action, A.HUMAN);
-  assert.equal(m.amount, null);
+  assert.equal(m.proposal.amount, 829_000);
+  assert.deepEqual(m.proposal.per_unit, { units: 11, door: 75_000, band_low: 93_000, band_high: 103_000 });
+  assert.equal(m.language_branch, "per_unit");
+  // If D authorizes it at grade A AND the owner opens the MF 5+ lane: an autonomous per-door anchor.
+  const open = buildNegotiationPlan({ offer_authority: { ...dMerged["274574569"], authorized: true, confidence_grade: "A", fallback_rung: 0 }, property, seller: { condition: "dated" }, now: NOW, env: ON, config: { autonomy: { lanes: ["sfr", "mf5"] } } });
+  const q = nextNegotiationMove(open, {}, { kind: "make_offer" });
+  assert.equal(q.action, A.QUOTE);
+  assert.equal(q.per_unit.door, 75_000);
+  // Through today's prod row the engine is v2: numbers still shown ($211.8K = $19.3K/door), never autonomous.
+  const v2 = buildNegotiationPlan({ offer_authority: viaD(golden["274574569"]), property, seller: { condition: "dated" }, now: NOW, env: ON });
+  assert.equal(v2.ok, true);
+  assert.equal(v2.ceiling, 211_800);
+  assert.equal(v2.autonomy.eligible, false);
 });
 
-test("golden 627 Ontario 273586189 (MF label, units = 1): no money, human", () => {
-  const plan = buildNegotiationPlan({ ade_snapshot: golden["273586189"], property: { property_type: "Multi-Family", units_count: 1 }, seller: { asking_price: 300_000, condition: "ok" }, now: NOW, env: ON });
-  assert.equal(plan.ok, false);
-  assert.equal(plan.per_unit, null);
-  const m = nextNegotiationMove(plan, {}, { kind: "price", amount: 300_000 });
-  assert.equal(m.action, A.HUMAN);
-  assert.equal(m.amount, null);
+test("golden 627 Ontario 273586189 (MF label, units = 1): numbers shown, low grade / conflict ⇒ no autonomous quote", () => {
+  const property = { property_type: "Multi-Family", units_count: 1 };
+  const plan = buildNegotiationPlan({ offer_authority: viaD(golden["273586189"]), property, seller: { asking_price: 300_000, condition: "ok" }, now: NOW, env: ON });
+  assert.equal(plan.ok, true, "never blank");
+  assert.equal(plan.ceiling, 27_300);
+  assert.equal(plan.per_unit, null, "no per-unit math on 1 unit");
+  assert.equal(plan.autonomy.eligible, false);
+  // D resolving the lane, with a low grade: still numbers, still no autonomous quote.
+  for (const lane of ["sfr", "mf24"]) {
+    const p = buildNegotiationPlan({ offer_authority: { ...viaD(golden["273586189"]), lane, confidence_grade: "D", fallback_rung: 3 }, property, seller: { asking_price: 300_000, condition: "ok" }, now: NOW, env: ON });
+    assert.equal(p.ok, true);
+    assert.ok(p.autonomy.reasons.includes("grade_D_not_autonomous"));
+    const m = nextNegotiationMove(p, {}, { kind: "price", amount: 300_000 });
+    assert.notEqual(m.action, A.QUOTE);
+    assert.equal(m.amount, null);
+  }
 });
 
-test("golden Phoenix-area 18-unit 25943678 (value $307K = $17K/door, offer $20K): no money", () => {
-  const plan = buildNegotiationPlan({ ade_snapshot: golden["25943678"], property: { property_type: "Multi-Family", units_count: 18 }, seller: { asking_price: 2_000_000, condition: "ok" }, now: NOW, env: ON });
-  assert.equal(plan.ok, false);
+test("golden Phoenix-area 18-unit 25943678: prod v2 has no ceiling ⇒ the only no-numbers case; never money", () => {
+  const plan = buildNegotiationPlan({ offer_authority: viaD(golden["25943678"]), property: { property_type: "Multi-Family", units_count: 18 }, seller: { asking_price: 2_000_000, condition: "ok" }, now: NOW, env: ON });
+  assert.equal(plan.ok, false); // D's never-blank fallback will supply numbers here; until then nothing to show
   const m = nextNegotiationMove(plan, {}, { kind: "price", amount: 2_000_000 });
-  assert.notEqual(m.action, A.QUOTE);
+  assert.equal(m.action, A.HUMAN);
   assert.equal(m.amount, null);
 });
 
-test("golden Houston SFR 2131325199 (AUTO_HARD_OFFER): bounded plan, fair floor binds, no comp claim", () => {
+test("golden Houston SFR 2131325199 (prod v2 AUTO_HARD_OFFER): no value−repairs floor; bounded plan, no comp claim", () => {
   const row = golden["2131325199"];
   assert.equal(isOfferReady(row, { now: NOW }).ready, true);
-  const plan = buildNegotiationPlan({ ade_snapshot: row, property: { property_type: "Single Family" }, seller: { asking_price: 95_000, condition: "dated" }, now: NOW, env: ON });
+  const ctx = { offer_authority: viaD(row), property: { property_type: "Single Family" }, seller: { asking_price: 95_000, condition: "dated" }, now: NOW, env: ON };
+  const plan = buildNegotiationPlan(ctx);
   assert.equal(plan.ok, true);
-  assert.equal(plan.ceiling, 69_400);
-  assert.equal(plan.autonomous_limit, 61_000);
-  assert.equal(plan.fair_floor, 57_000); // 0.5 × (146.2K − 32.9K) — above the engine's $53.4K offer
-  assert.equal(plan.target, 57_000);
+  assert.deepEqual([plan.ceiling, plan.autonomous_limit, plan.target, plan.anchor_floor], [69_400, 61_000, 53_000, null]);
   const m = nextNegotiationMove(plan, {}, { kind: "price", amount: 95_000 });
-  assert.equal(m.action, A.QUOTE);
-  assert.equal(m.amount, 57_000);
-  assert.equal(m.language_branch, "numbers"); // comps ~$150K+ never support "$57K nearby"
-  assert.deepEqual(plan.ladder.map((x) => x.amount), [57_000, 58_500, 60_000, 61_000]);
-  // Flags off (default) ⇒ HUMAN proposal, nothing autonomous.
-  const off = buildNegotiationPlan({ ade_snapshot: row, property: { property_type: "Single Family" }, seller: { asking_price: 95_000, condition: "dated" }, now: NOW });
-  assert.equal(nextNegotiationMove(off, {}, { kind: "price", amount: 95_000 }).action, A.HUMAN);
+  assert.equal(m.action, A.QUOTE); // ungraded v2 row: autonomy = authorized_only
+  assert.equal(m.amount, 47_500);
+  assert.equal(m.language_branch, "numbers");
+  assert.deepEqual(plan.ladder.map((x) => x.amount), [47_500, 53_500, 57_500, 61_000]);
+  assert.equal(nextNegotiationMove(buildNegotiationPlan({ ...ctx, env: {} }), {}, { kind: "price", amount: 95_000 }).action, A.HUMAN); // flags default OFF
+});
+
+test("golden Houston SFR 2130847744 (D merged shadow): investor floor binds; grade B autonomous, grade D human", () => {
+  const ctx = { property: { property_type: "Single Family" }, seller: { asking_price: 230_000, condition: "dated" }, now: NOW, env: ON };
+  const base = buildNegotiationPlan({ ...ctx, offer_authority: dMerged["2130847744"] });
+  assert.deepEqual([base.ceiling, base.target, base.autonomous_limit, base.anchor_floor, base.opening_anchor], [186_244, 167_000, 176_000, 157_000, 157_000]);
+  assert.equal(nextNegotiationMove(base, {}, { kind: "price", amount: 230_000 }).action, A.HUMAN); // shadow: not authorized
+  const b = buildNegotiationPlan({ ...ctx, offer_authority: { ...dMerged["2130847744"], authorized: true, confidence_grade: "B", fallback_rung: 1 } });
+  assert.equal(nextNegotiationMove(b, {}, { kind: "price", amount: 230_000 }).amount, 157_000);
+  const d = buildNegotiationPlan({ ...ctx, offer_authority: { ...dMerged["2130847744"], authorized: true, confidence_grade: "D", fallback_rung: 3 } });
+  assert.equal(d.ok, true);
+  assert.equal(d.target, 167_000, "same numbers at a low grade");
+  const md = nextNegotiationMove(d, {}, { kind: "price", amount: 230_000 });
+  assert.equal(md.action, A.HUMAN);
+  assert.equal(md.proposal.amount, 157_000);
 });
 
 test("planLadder: shares 0.45/0.30/0.25, ends at AL, empty when anchor > AL", () => {
@@ -486,7 +587,7 @@ test("property: comp language only with verified support (dense comps near the n
   let comps = 0;
   let numbers = 0;
   for (let i = 0; i < N_PLANS; i += 1) {
-    const ctx = genCtx(r, { mf: false, corrupt: null });
+    const ctx = genCtx(r, { mf: false, corrupt: null, d: false });
     const plan0 = buildNegotiationPlan(ctx);
     if (!plan0.ok) continue;
     const near = r() < 0.5;
@@ -514,17 +615,19 @@ test("property: comp language only with verified support (dense comps near the n
   assert.ok(comps > 200 && numbers > 200, `${comps}/${numbers}`);
 });
 
-test("Deal Intelligence desk view (§82): ask / anchor / position / target / limit / ceiling + why; MF per-unit", async () => {
+test("Deal Intelligence desk view (§82): numbers + grade + why always; autonomy shown separately", async () => {
   const { buildNegotiationDeskView } = await import("../../src/lib/domain/negotiation-v3/view.js");
-  const v = buildNegotiationDeskView({ ade_snapshot: golden["2131325199"], property: { property_type: "Single Family" }, seller: { asking_price: 95_000, condition: "dated" }, quotes: [{ quote_type: "anchor", amount: 57_000, quoted_at: "2026-10-07T01:00:00Z", rule_branch: "opening_anchor_vs_ask" }], now: NOW, env: {} });
-  assert.equal(v.status, "authorized");
-  assert.deepEqual([v.ask, v.anchor, v.currentPosition.amount, v.target, v.autonomousLimit, v.ceiling], [95_000, 57_000, 57_000, 57_000, 61_000, 69_400]);
+  const v = buildNegotiationDeskView({ ade_snapshot: golden["2131325199"], property: { property_type: "Single Family" }, seller: { asking_price: 95_000, condition: "dated" }, quotes: [{ quote_type: "anchor", amount: 47_500, quoted_at: "2026-10-07T01:00:00Z", rule_branch: "opening_anchor_vs_ask" }], now: NOW, env: {} });
+  assert.equal(v.status, "autonomous_eligible");
+  assert.deepEqual([v.ask, v.anchor, v.currentPosition.amount, v.target, v.autonomousLimit, v.ceiling], [95_000, 47_500, 47_500, 53_000, 61_000, 69_400]);
   assert.equal(v.nextMove.action, "HUMAN"); // flags off ⇒ proposal only
   assert.ok(v.why.length >= 5);
-  const conway = buildNegotiationDeskView({ ade_snapshot: golden["274574569"], property: { property_type: "Multi-Family", units_count: 11 }, seller: { asking_price: 900_000 }, quotes: null, now: NOW, env: {} });
-  assert.equal(conway.status, "no_autonomous_money");
-  assert.equal(conway.engineReference.ceiling, 211_800);
+  const conway = buildNegotiationDeskView({ offer_authority: dMerged["274574569"], property: { property_type: "Multi-Family", units_count: 11 }, seller: { asking_price: 900_000, condition: "dated" }, quotes: null, now: NOW, env: {} });
+  assert.equal(conway.status, "operator_approval");
+  assert.equal(conway.target, 864_000);
+  assert.equal(conway.perUnit.band_low, 93_000);
   assert.equal(conway.quotesCaptured, false);
+  assert.ok(conway.autonomy.reasons.includes("lane_mf5_is_human"));
 });
 
 test("quote log row columns ⊆ PROPOSED negotiation_quotes columns (no phantom column)", () => {

@@ -496,5 +496,70 @@
     ]
    }
   }
+ },
+ "d_merged": {
+  "274574569": {
+   "_note": "agent D merged-engine SHADOW output (tmp/acq-os/D/out/golden), mapped to CONTRACT_offer_authority shape; confidence_grade/fallback_rung not yet emitted by D",
+   "property_id": "274574569",
+   "engine": "offer_engine_v3_merged",
+   "engine_version": "acq-v3-merged",
+   "execution_state": "SHADOW_MODE_READY",
+   "authorized": false,
+   "fresh": true,
+   "reasons": [
+    "shadow_only_not_money"
+   ],
+   "lane": "mf5",
+   "investor_price": 1076900,
+   "value": 1076900,
+   "ceiling": 919242,
+   "offer": 864087,
+   "per_unit": {
+    "units": 11,
+    "value": 97900,
+    "ceiling": 83567,
+    "offer": 78553,
+    "band": {
+     "low": 93000,
+     "high": 103000
+    }
+   },
+   "confidence_grade": null,
+   "fallback_rung": null,
+   "negotiation_authority": {
+    "source": "offer_engine_v3_merged",
+    "asset_family": "multifamily",
+    "units": 11,
+    "asset_identity_conflict": false,
+    "comps": []
+   }
+  },
+  "2130847744": {
+   "_note": "agent D merged-engine SHADOW output (tmp/acq-os/D/out/golden), mapped to CONTRACT_offer_authority shape; confidence_grade/fallback_rung not yet emitted by D",
+   "property_id": "2130847744",
+   "engine": "offer_engine_v3_merged",
+   "engine_version": "acq-v3-merged",
+   "execution_state": "SHADOW_MODE_READY",
+   "authorized": false,
+   "fresh": true,
+   "reasons": [
+    "shadow_only_not_money"
+   ],
+   "lane": "sfr",
+   "investor_price": 208700,
+   "value": 208700,
+   "ceiling": 186244,
+   "offer": 167619,
+   "per_unit": null,
+   "confidence_grade": null,
+   "fallback_rung": null,
+   "negotiation_authority": {
+    "source": "offer_engine_v3_merged",
+    "asset_family": "residential",
+    "units": 1,
+    "asset_identity_conflict": false,
+    "comps": []
+   }
+  }
  }
 }

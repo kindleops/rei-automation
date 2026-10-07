@@ -42,7 +42,8 @@ for (const row of rows) {
   moveT.push((performance.now() - t1) / iters);
   if (plan.ok) {
     summary.plan_ok += 1;
-    if (plan.target > plan.recommended) summary.floor_binds_target += 1;
+    if (plan.anchor_floor != null && plan.ladder_anchor === plan.anchor_floor) summary.floor_binds_target += 1;
+    summary.autonomy_eligible = (summary.autonomy_eligible || 0) + (plan.autonomy.eligible ? 1 : 0);
     summary.al_to_c.push(+(plan.autonomous_limit / plan.ceiling).toFixed(3));
     summary.anchor_to_target.push(+(plan.ladder_anchor / plan.target).toFixed(3));
   } else {
