@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 
 import { classify } from "@/lib/domain/classification/classify.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
+import { classifyStopScope, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
 
 // [language, positives[], negatives[] (plain no / not interested / hostile / near-miss)]
 const CASES = [
@@ -75,23 +76,39 @@ test("live classifier: a multilingual opt-out is opt_out + stop_texting + suppre
   }
 });
 
-// Near-misses built on a bare "stop" verb ("Pare de llorar", "Хватит", "그만 좀…")
-// are already read as opt-outs by the PRE-EXISTING multilingual short-reply
-// canonicalization (unchanged here, measured 2026-10-07: 11 of the near-misses
-// above). This change never ADDS one: the module returns null for every one of
-// them (first test). The live classifier is asserted on the plain negatives
-// and insults, which must stay nurture / quiet archive.
-const PRE_EXISTING_STOP_VERB_NEAR_MISSES = new Set([
-  "Pare de llorar", "Pare de brincadeira", "Arrêtez de rêver, c'est trop bas", "Hören Sie auf zu träumen", "Przestań żartować",
-  "Dừng lại một chút để tôi nghĩ", "그만 좀 웃기세요 가격이 너무 낮아요", "その価格はやめてください", "Хватит", "Σταματήστε να ονειρεύεστε", "रुको",
-]);
-
 test("live classifier: plain negatives stay not-opt-out (nurture), insults are not opt-outs", async () => {
   for (const [language, , negatives] of CASES) {
-    for (const n of negatives.filter((x) => !PRE_EXISTING_STOP_VERB_NEAR_MISSES.has(x))) {
+    for (const n of negatives) {
       const c = await classify(n, null, { heuristicOnly: true });
       assert.notEqual(c.compliance_flag, "stop_texting", `${language}: ${n}`);
       assert.notEqual(c.primary_intent, "opt_out", `${language}: ${n} → opt_out`);
     }
+  }
+});
+
+// ── CONTEXTUAL STOP (owner 2026-10-07): STOP_COMMUNICATION vs STOP_OTHER_ACTION ──
+const STOP_OTHER = ["Pare de llorar", "Pare de brincadeira", "Arrêtez de rêver, c'est trop bas", "Hören Sie auf zu träumen", "Przestań żartować",
+  "Dừng lại một chút để tôi nghĩ", "그만 좀 웃기세요 가격이 너무 낮아요", "その価格はやめてください", "Хватит", "Σταματήστε να ονειρεύεστε", "रुको",
+  "stop crying", "stop asking that", "enough with the lowballs", "Basta de ofertas bajas", "Stop with the lowball offers"];
+const STOP_COMM = ["STOP", "Stop", "stop.", "Please stop", "停止", "Стоп", "중지", "STOP!!!", "Stop texting me", "Stop calling me", "Stop bugging me", "Stop asking",
+  "Remove my number", "Unsubscribe", "Pare de me mandar mensagens", "Deja de escribirme", "Arrêtez de m'écrire", "Hören Sie auf, mir zu schreiben",
+  "Smetta di scrivermi", "Przestań do mnie pisać", "Đừng nhắn tin cho tôi nữa", "别再给我发短信了", "문자 그만 보내세요", "もう連絡しないでください",
+  "Перестаньте мне писать", "Хватит писать", "Σταματήστε να μου στέλνετε μηνύματα", "मुझे मैसेज करना बंद करो"];
+
+test("stop scope: other actions are never communication; communication phrases never other actions", () => {
+  for (const m of STOP_OTHER) assert.equal(classifyStopScope(m), STOP_SCOPE.OTHER_ACTION, m);
+  for (const m of STOP_COMM) assert.notEqual(classifyStopScope(m), STOP_SCOPE.OTHER_ACTION, m);
+});
+
+test("live classifier: STOP_OTHER_ACTION is not an opt-out (no suppression); STOP_COMMUNICATION and bare keywords stay opt-out", async () => {
+  for (const m of STOP_OTHER) {
+    const c = await classify(m, null, { heuristicOnly: true });
+    assert.notEqual(c.primary_intent, "opt_out", `${m} → opt_out`);
+    assert.notEqual(c.compliance_flag, "stop_texting", m);
+    assert.notEqual(c.automation_decision?.suppression_action, "opt_out", m);
+  }
+  for (const m of STOP_COMM) {
+    const c = await classify(m, null, { heuristicOnly: true });
+    assert.equal(c.primary_intent, "opt_out", `${m} → ${c.primary_intent}`);
   }
 });

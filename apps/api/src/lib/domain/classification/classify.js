@@ -25,6 +25,7 @@ import { resolveSellerReplyLanguage } from "@/lib/domain/classification/seller-r
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
 import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
+import { classifyStopScope, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
 import {
   resolveCanonicalAskingPrice,
   isCommittedAskingPrice,
@@ -4826,6 +4827,8 @@ function resolveIntents(
     // 7.2 layers, computed once in classifyHeuristic and passed in.
     emoji_interpretation = null,
     reply_signals = null,
+    // CONTEXTUAL STOP: the original words stop something other than communication.
+    stop_other_action = false,
   } = {}
 ) {
   const text = lower(message);
@@ -5024,7 +5027,7 @@ function resolveIntents(
   const is_ownership_disconnect = matchesOwnershipDisconnect(text);
   const is_opt_out =
     compliance_flag === "stop_texting" ||
-    includesAny(text, [
+    (!stop_other_action && includesAny(text, [
       "unsubscribe",
       "opt out",
       "opt-out",
@@ -5072,7 +5075,7 @@ function resolveIntents(
       "deje de escribirme",
       "dejen de escribirme",
     ]) ||
-    /^(stop|stop\.|quit|end|cancel|remove)[\s!.]*$/i.test(text.trim()) ||
+    /^(stop|stop\.|quit|end|cancel|remove)[\s!.]*$/i.test(text.trim())) ||
     (/\bstop\b/i.test(text) &&
       includesAny(text, ["text", "message", "messaging", "list", "contact", "call", "harass"]) &&
       // "Stop calling me, text me instead" is a channel preference, not an
@@ -6827,13 +6830,21 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
     thread_language:
       early_context && typeof early_context === "object" ? early_context.last_outbound_language || null : null,
   });
-  let message = multilingual ? multilingual.canonical_text : correctKeyMisspellings(original_message);
+  // CONTEXTUAL STOP (owner 2026-10-07): "stop crying", "Pare de llorar",
+  // "Хватит", "रुको" stop something other than communication — never an opt-out,
+  // and never canonicalized to a bare "stop".
+  const stop_other_action = classifyStopScope(original_message) === STOP_SCOPE.OTHER_ACTION;
+  let message = multilingual && !(stop_other_action && /^stop\b/i.test(String(multilingual.canonical_text || "")))
+    ? multilingual.canonical_text
+    : correctKeyMisspellings(original_message);
   // A bare "?" / "???" to our message is the who-are-you question (round 8).
   if (/^\s*[?¿]{1,6}\s*$/.test(message)) message = "huh?";
   // COMPLIANCE in every registry language (owner 2026-10-07): a confident
   // contact-revocation phrase or whole-message STOP keyword in the ORIGINAL
   // words is an opt-out — independent of any conversation flag.
-  const compliance_flag  = detectComplianceFlag(message) || (matchMultilingualOptOut(original_message) ? "stop_texting" : null);
+  const compliance_flag  = stop_other_action
+    ? (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
+    : detectComplianceFlag(message) || (matchMultilingualOptOut(original_message) ? "stop_texting" : null);
   let language           = detectLanguageHeuristic(original_message, brain_item);
   // An explicit Spanish-switch request ("no hablo inglés", "en español por
   // favor") is deterministic evidence of language preference even when the
@@ -6945,6 +6956,7 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   const stage_hint       = detectStageHint(authored, brain_item, objection);
   const intents          = resolveIntents(message, {
     compliance_flag,
+    stop_other_action,
     objection,
     positive_signals,
     conversation_context,
@@ -7773,6 +7785,7 @@ export async function classify(message, brain_item = null, options = {}) {
   const final_compliance = heuristic.compliance_flag ?? ai_result.compliance_flag;
   const final_intents = resolveIntents(text, {
     compliance_flag: final_compliance,
+    stop_other_action: classifyStopScope(text) === STOP_SCOPE.OTHER_ACTION,
     objection: ai_result.objection,
     positive_signals: ai_result.positive_signals,
   });
