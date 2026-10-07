@@ -6737,6 +6737,112 @@ export async function countCampaignAudienceUniverse(input = {}, deps = {}) {
 }
 
 /**
+ * WHAT EACH FILTER DID (Reach's "why"): the audience counted step by step —
+ * location filters first (the universe), then each targeting filter in the
+ * operator's order — so every applied filter shows the rows it removed, the
+ * queue-eligible rows left after it, and how much of the universe even has a
+ * value in its column (coverage). A filter on a 27%-filled column that
+ * "removes" 73% of the market is a data gap, not a seller trait; Reach says so.
+ * Every filter that could NOT be applied is listed with its reason (never
+ * silently dropped). Exact head counts, at most 4 at a time.
+ */
+export async function measureCampaignFilterEffects(input = {}, deps = {}) {
+  const startedAt = Date.now()
+  const supabase = deps.supabase || defaultSupabase
+  const baseOptions = previewOptionsFromInput(input, null)
+  const population = await resolveGraphColumnPopulation(deps, baseOptions.catalog_filters)
+  const resolved = resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters, { population })
+  const applied = resolved.supported || []
+  const isLocation = (filter) => isUniverseFilter(filter, getCampaignFieldDefinition(filter.field_key))
+  const location = applied.filter(isLocation)
+  const targeting = applied.filter((filter) => !isLocation(filter))
+  const steps = [...location, ...targeting]
+  const optionsWith = (supported) => ({ ...baseOptions, catalog_filters: { ...resolved, supported } })
+  const jobs = []
+  const count = (supported, { eligible = false, extra = null } = {}) => {
+    const job = () => countCampaignGraphRows({ supabase, options: optionsWith(supported), requireQueueEligible: eligible, extra })
+    jobs.push(job)
+    return jobs.length - 1
+  }
+  const baseIndex = count([])
+  const plan = steps.map((filter, index) => {
+    const prefix = steps.slice(0, index + 1)
+    const column = filter.graph_column || null
+    return {
+      filter,
+      after: count(prefix),
+      eligibleAfter: count(prefix, { eligible: true }),
+      // Coverage inside the universe this filter acts on (location filters:
+      // the whole audience table; targeting filters: the location universe).
+      coverage: column ? count(isLocation(filter) ? [] : location, { extra: (q) => q.not(column, 'is', null) }) : null,
+      coverageOf: isLocation(filter) ? baseIndex : null,
+    }
+  })
+  const universeIndex = location.length ? plan[location.length - 1].after : baseIndex
+  const results = new Array(jobs.length)
+  let cursor = 0
+  const concurrency = Math.max(1, Number(deps.filterEffectConcurrency) || 4)
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
+    while (cursor < jobs.length) {
+      const index = cursor++
+      results[index] = await jobs[index]().catch((error) => ({ ok: false, count: 0, warnings: [errorMessage(error)] }))
+    }
+  }))
+  const value = (index) => (index === null || index === undefined || !results[index]?.ok ? null : results[index].count)
+  const warnings = uniqueClean(results.flatMap((result) => result?.warnings || []))
+  let previous = value(baseIndex)
+  const effects = plan.map(({ filter, after, eligibleAfter, coverage, coverageOf }) => {
+    const countAfter = value(after)
+    const withValue = coverage === null ? null : value(coverage)
+    const of = value(coverageOf ?? universeIndex)
+    const removed = previous !== null && countAfter !== null ? Math.max(0, previous - countAfter) : null
+    previous = countAfter
+    return {
+      field_key: filter.field_key,
+      label: filter.label || getCampaignFieldDefinition(filter.field_key)?.label || filter.field_key,
+      operator: filter.operator,
+      value: filter.field_key === DRAWN_AREA_FIELD_KEY ? null : filter.value,
+      stage: isLocation(filter) ? 'location' : 'targeting',
+      graph_column: filter.graph_column || null,
+      count_after: countAfter,
+      removed,
+      eligible_after: value(eligibleAfter),
+      coverage: withValue === null || !of ? null : {
+        with_value: withValue,
+        of,
+        pct: Math.round((withValue / of) * 1000) / 10,
+      },
+      failed: countAfter === null,
+    }
+  })
+  const refused = [
+    ...(resolved.unsupported || []),
+    ...(resolved.unknown || []),
+    ...((baseOptions.catalog_filters.dropped || []).filter((filter) => filter.reason === 'empty_filter_value')),
+  ].map((filter) => ({
+    field_key: filter.field_key,
+    label: filter.label || getCampaignFieldDefinition(filter.field_key)?.label || filter.field_key,
+    operator: filter.operator || null,
+    reason: filter.unsupported_reason || filter.reason || 'not_applied',
+    message: filter.message || (filter.reason === 'empty_filter_value' ? 'Not applied: no value chosen.' : `Not applied: ${INAPPLICABLE_REASONS.not_in_audience}`),
+  }))
+  return {
+    // Per-filter failures are flagged on the filter; the read fails only without a base count.
+    ok: value(baseIndex) !== null,
+    audience_table: CAMPAIGN_TARGET_GRAPH_TABLE,
+    count_unit: 'properties',
+    base_count: value(baseIndex),
+    universe_count: value(universeIndex),
+    final_count: steps.length ? value(plan[plan.length - 1].after) : value(baseIndex),
+    final_eligible: steps.length ? value(plan[plan.length - 1].eligibleAfter) : null,
+    effects,
+    refused,
+    warnings,
+    timings_ms: { total: Date.now() - startedAt, counts: jobs.length },
+  }
+}
+
+/**
  * Record the built cohort's canonical market identity on the campaign
  * (campaign-market-identity.js). Re-reads the row so the metadata merge is
  * against the latest state (the status transition above just wrote it).

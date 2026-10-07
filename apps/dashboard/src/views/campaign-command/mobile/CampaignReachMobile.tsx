@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { FilterEffectsPanel } from '../FilterEffectsPanel'
 import { Icon } from '../../../shared/icons'
 import type { CampaignPreviewResult } from '../campaignWizardAdapter'
 import { describeHeldReason } from '../campaign-launch-plan'
@@ -131,8 +132,11 @@ export function CampaignReachMobile({
   updatedAt,
   onRefresh,
   readyFallback = null,
+  filterSpec = null,
 }: {
   preview: CampaignPreviewResult | null
+  /** The serialized filter groups this preview counted — drives "Why this audience". */
+  filterSpec?: Record<string, unknown> | null
   loading: boolean
   stale: boolean
   updatedAt: string | null
@@ -304,6 +308,12 @@ export function CampaignReachMobile({
             <p key={`n-${note.field_key}-${note.message}`} className="crx__note">{note.message}</p>
           ))}
         </section>
+      ) : null}
+
+      {!loading && filterSpec ? (
+        <div className="cdb__band">
+          <FilterEffectsPanel filters={filterSpec} format={nf} />
+        </div>
       ) : null}
 
       {sim && !loading && (

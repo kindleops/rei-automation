@@ -1,0 +1,132 @@
+/* "Why this audience" — per-filter effect, coverage and refusals (2026-10-07). */
+.cfx {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cfx__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cfx__kicker {
+  color: var(--lc-ink-3, #71717a);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cfx__total {
+  color: var(--lc-ink-2, #a1a1aa);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cfx__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--lc-hairline, rgba(255, 255, 255, 0.08));
+  border-radius: var(--lc-r-md, 8px);
+}
+
+.cfx__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--lc-hairline, rgba(255, 255, 255, 0.06));
+  font-size: 12px;
+}
+
+.cfx__row:last-child {
+  border-bottom: 0;
+}
+
+.cfx__label {
+  color: var(--lc-ink-1, #e4e4e7);
+  font-weight: 650;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cfx__cond {
+  grid-column: 1;
+  grid-row: 2;
+  color: var(--lc-ink-3, #71717a);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cfx__nums {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cfx__nums b {
+  color: var(--lc-ink-1, #e4e4e7);
+  font-size: 13px;
+}
+
+.cfx__nums em,
+.cfx__removed {
+  color: var(--lc-ink-3, #71717a);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.cfx__cov {
+  grid-column: 1 / -1;
+  color: var(--lc-ink-3, #71717a);
+  font-size: 11px;
+}
+
+.cfx__cov.is-low,
+.cfx__warn,
+.cfx__note.is-warn {
+  color: var(--lc-attn, #f5b849);
+}
+
+.cfx__warn {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.cfx__row.is-base .cfx__label {
+  color: var(--lc-ink-2, #a1a1aa);
+}
+
+.cfx__refused {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cfx__note {
+  margin: 0;
+  color: var(--lc-ink-3, #71717a);
+  font-size: 12px;
+  line-height: 1.4;
+}
