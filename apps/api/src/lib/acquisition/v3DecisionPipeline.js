@@ -379,6 +379,8 @@ export function buildV3Decision({
           rung: cashOffer.rung ?? null,
           rung_name: laneModel?.rung_name ?? null,
           confidence_grade: cashOffer.confidence_grade ?? null,
+          ring: laneModel?.ring ?? null,
+          radius_miles: laneModel?.radius_miles ?? null,
           margin_pct: cashOffer.margin_pct ?? null,
           margin_source: cashOffer.margin_source ?? null,
           margin_key: cashOffer.margin_key ?? null,

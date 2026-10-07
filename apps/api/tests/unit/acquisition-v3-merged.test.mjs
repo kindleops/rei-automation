@@ -24,7 +24,7 @@ import { estimateRepairs } from '../../src/lib/acquisition/repairModel.js'
 import { resolveV3Authority, subjectOfferLane } from '../../src/lib/acquisition/v3Authority.js'
 import { assembleCanonicalCandidates, investorSubjectFrom, loadV3MergedCandidates } from '../../src/lib/acquisition/v3CanonicalCandidates.js'
 import { applyMergedGates, MERGED_ENGINE_VERSION } from '../../src/lib/acquisition/v3DecisionPipeline.js'
-import { authoritativeOfferFromScore, getAuthoritativeOffer, perUnitOf } from '../../src/lib/acquisition/offerAuthority.js'
+import { authoritativeOfferFromScore, getAuthoritativeOffer, perUnitOf, negotiationBoundsFor } from '../../src/lib/acquisition/offerAuthority.js'
 import { valueLaneModel, buildLaneOffer, resolveMargin, tuneMarginsFromOutcomes, resolveSubjectLane, noiCrossCheck, LANE_POLICY } from '../../src/lib/acquisition/v3LaneValuation.js'
 import { classifyCompBuyerOwnerPolicy, unitBandOk, INVESTOR_RULES_MF24, INVESTOR_RULES_MF5 } from '../../src/lib/acquisition/investorCompRules.js'
 
@@ -492,4 +492,13 @@ test('production pin (same fixture as investor-valuation-v3.test.mjs) is unchang
   })).digest('hex')
   assert.equal(sig, 'fd6b8fc103ca987f03a836f12fb398182d1101586b0c989827ea0a623c86e6c7')
   assert.equal(INVESTOR_RULES_SFR.radiusMiles, 2.5)
+})
+
+test('negotiation_bounds: default 13% / 25% until an approved cell (n >= 8) exists; market x lane, then ALL x lane', () => {
+  assert.deepEqual(negotiationBoundsFor({ market: 'Dallas, TX', lane: 'sfr', env: {} }), { market: 'Dallas, TX', lane: 'sfr', margin: 0.13, max_opening_discount: 0.25, n: 0, evidence: { basis: 'policy_default_no_approved_cell' } })
+  const cells = [{ market: 'ALL', lane: 'sfr', margin: 0.149, max_opening_discount: 0.25, n: 114, evidence: {} }, { market: 'Houston, TX', lane: 'sfr', margin: 0.105, max_opening_discount: 0.233, n: 8, evidence: {} }, { market: 'Tampa, FL', lane: 'sfr', margin: 0.2, max_opening_discount: 0.1, n: 5, evidence: {} }]
+  const env = { ACQUISITION_ENGINE_V3_NEGOTIATION_BOUNDS: JSON.stringify(cells) }
+  assert.equal(negotiationBoundsFor({ market: 'houston, tx', lane: 'sfr', env }).margin, 0.105)
+  assert.equal(negotiationBoundsFor({ market: 'Tampa, FL', lane: 'sfr', env }).margin, 0.149, 'n < 8 falls back to ALL')
+  assert.equal(negotiationBoundsFor({ market: 'Tampa, FL', lane: 'mf5', env }).n, 0)
 })

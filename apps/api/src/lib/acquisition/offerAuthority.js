@@ -62,6 +62,24 @@ function freshness(computedAt, nowMs) {
   return { fresh: true, reason: null };
 }
 
+/**
+ * negotiation_bounds{market, lane, margin, max_opening_discount, n, evidence}
+ * Config: ACQUISITION_ENGINE_V3_NEGOTIATION_BOUNDS = JSON array of cells (the
+ * backtest writes tmp/acq-os/D/negotiation_bounds_*.json in this exact shape;
+ * owner approves before it is set). Lookup: market x lane, then 'ALL' x lane,
+ * then the defaults (13% margin / 25% max opening discount, n = 0).
+ */
+export const DEFAULT_NEGOTIATION_BOUNDS = Object.freeze({ margin: 0.13, max_opening_discount: 0.25 });
+export function negotiationBoundsFor({ market = null, lane = null, env = process.env } = {}) {
+  let cells = [];
+  try { cells = JSON.parse(env?.ACQUISITION_ENGINE_V3_NEGOTIATION_BOUNDS ?? '[]'); } catch { cells = []; }
+  const norm = (m) => clean(m).toLowerCase().replace(/\s+/g, ' ');
+  const hit = (Array.isArray(cells) ? cells : []).find((c) => c.lane === lane && norm(c.market) === norm(market) && c.n >= 8)
+    ?? (Array.isArray(cells) ? cells : []).find((c) => c.lane === lane && c.market === 'ALL' && c.n >= 8);
+  if (hit) return { market, lane, margin: num(hit.margin), max_opening_discount: num(hit.max_opening_discount), n: hit.n, evidence: { ...(hit.evidence ?? {}), cell: `${hit.market}|${hit.lane}` } };
+  return { market, lane, ...DEFAULT_NEGOTIATION_BOUNDS, n: 0, evidence: { basis: 'policy_default_no_approved_cell' } };
+}
+
 /** The merged-V3 view of a v3 block (live or shadow). Pure. */
 export function mergedViewFromV3Block(v3, { score = {}, nowMs = Date.now(), live = false } = {}) {
   if (!v3 || typeof v3 !== 'object') return null;
@@ -98,6 +116,8 @@ export function mergedViewFromV3Block(v3, { score = {}, nowMs = Date.now(), live
     confidence_grade: merged.confidence_grade ?? null,
     fallback_rung: merged.rung ?? null,
     fallback_rung_name: merged.rung_name ?? null,
+    ring: merged.ring ?? null,
+    radius_miles: merged.radius_miles ?? null,
     margin: merged.margin_pct != null ? { pct: merged.margin_pct, source: merged.margin_source ?? null, key: merged.margin_key ?? null } : null,
     per_unit: pu ? { ...pu, units_source: merged.identity?.units_source ?? null, band } : null,
     engine: AUTHORITY_SOURCES.MERGED_ENGINE,
@@ -187,6 +207,8 @@ export function authoritativeOfferFromScore(score = null, { now = Date.now(), sp
       lane: view.lane,
       confidence_grade: view.confidence_grade,
       fallback_rung: view.fallback_rung,
+      ring: view.ring,
+      radius_miles: view.radius_miles,
       margin: view.margin,
       money_allowed: view.authorized,
       engine: view.engine,
@@ -197,6 +219,7 @@ export function authoritativeOfferFromScore(score = null, { now = Date.now(), sp
       evidence_ids: view.evidence_ids,
       reasons: view.reasons,
       negotiation_authority: negotiationAuthorityFromMerged(view, score),
+      negotiation_bounds: negotiationBoundsFor({ market: ev.subject?.market ?? null, lane: view.lane, env }),
       shadow_candidate: null,
     };
   }
@@ -258,6 +281,7 @@ export function authoritativeOfferFromScore(score = null, { now = Date.now(), sp
     evidence_ids: (ev.selected_comps ?? []).map((c) => clean(c?.comp_id ?? c?.id)).filter(Boolean).slice(0, 12),
     reasons: neg.reasons ?? [],
     negotiation_authority: neg,
+    negotiation_bounds: negotiationBoundsFor({ market: ev.subject?.market ?? null, lane: ev.subject?.asset_family === 'multifamily' ? (units >= 5 ? 'mf5' : units >= 2 ? 'mf24' : 'other') : ev.subject?.asset_family ? 'sfr' : null, env }),
     shadow_candidate: shadowView,
   };
 }

@@ -49,7 +49,12 @@ const addDays = (d, n) => { const x = new Date(`${day(d)}T00:00:00Z`); x.setUTCD
 const monthsBefore = (d, m) => { const x = new Date(`${day(d)}T00:00:00Z`); x.setUTCMonth(x.getUTCMonth() - m); return x.toISOString().slice(0, 10) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const cacheFile = (pid) => resolve(CACHE, `${pid}.json.gz`)
-export const readCache = (pid) => JSON.parse(gunzipSync(readFileSync(cacheFile(pid))).toString('utf8'))
+const wideFile = (pid) => resolve(CACHE, `${pid}.wide.json.gz`)
+export const readCache = (pid) => {
+  const c = JSON.parse(gunzipSync(readFileSync(cacheFile(pid))).toString('utf8'))
+  if (existsSync(wideFile(pid))) c.wideRows = JSON.parse(gunzipSync(readFileSync(wideFile(pid))).toString('utf8')).rows
+  return c
+}
 
 let frames
 if (args['frame-file']) {
@@ -70,7 +75,7 @@ const engineGate = (subject, nowDate) => (row) => {
 }
 const asOfFor = (frame) => (KIND === 'current' ? day(addDays(new Date(args.now ?? Date.now()), 1)) : day(frame.sold_on))
 
-if (MODE === 'fetch') {
+if (MODE === 'fetch' || MODE === 'fetch-wide') {
   const pg = (await import('pg')).default
   function loadEnv(p) {
     if (!existsSync(p)) return {}
@@ -144,8 +149,35 @@ if (MODE === 'fetch') {
   const SET_LEVEL = new Set([v31.V3_REASONS.outsideTopK, v31.V3_REASONS.outlierLow, v31.V3_REASONS.outlierHigh, v31.V3_REASONS.dominantOutlier])
   let done = 0
   let pauses = 0
+  const { valueLaneModel, resolveSubjectLane, LANE_POLICY } = await import('../src/lib/acquisition/v3LaneValuation.js')
+  const { investorSubjectFrom } = await import('../src/lib/acquisition/v3CanonicalCandidates.js')
   for (const frame of frames) {
     const pid = String(frame.property_id)
+    if (MODE === 'fetch-wide') {
+      // Widened-rung read only for subjects whose R1 (lane radius) fails, decided offline.
+      if (!existsSync(cacheFile(pid)) || existsSync(wideFile(pid))) continue
+      const c = JSON.parse(gunzipSync(readFileSync(cacheFile(pid))).toString('utf8'))
+      if (c.error) continue
+      const nowDate = new Date(c.now)
+      const subject = engine.normalizePropertyFeatures(c.raw, { source: 'properties', now: nowDate })
+      const s = investorSubjectFrom({ subject, raw: c.raw, own: c.own, neighbors: c.neighbors })
+      const lm = valueLaneModel({ subject: s, raw: c.raw, rows: c.rows, bulkRows: c.bulkRows, asOf: c.as_of, gate: engineGate(subject, nowDate), env: {} })
+      if (lm.rung === 'R1') continue
+      const hhmm2 = new Date().toISOString().slice(11, 16)
+      if (args['stop-at-utc'] && hhmm2 >= args['stop-at-utc'] && hhmm2 < (args['resume-after-utc'] ?? '09:00')) { console.error(`\n[window] stop at ${hhmm2} UTC`); break }
+      const lane = resolveSubjectLane(s, c.raw).lane
+      const radius = LANE_POLICY[lane].radii[LANE_POLICY[lane].radii.length - 1]
+      const months = LANE_POLICY[lane].wideMonths
+      try {
+        const rowsW = await sql(lane === 'sfr' ? CANON_SQL : CANON_MF_SQL, [s.latitude, s.longitude, radius, monthsBefore(c.as_of, months), c.as_of, 9000])
+        const inW = rowsW.filter((r) => { const d = v31.haversineMiles(s.latitude, s.longitude, num(r.lat), num(r.lng)); return d !== null && d < radius })
+        writeFileSync(wideFile(pid), gzipSync(JSON.stringify({ property_id: pid, lane, radius, months, rows: inW, read_rows: rowsW.length })))
+      } catch (e) { console.error(`\n[error-wide] ${pid}: ${String(e?.message || e).slice(0, 160)}`) }
+      done += 1
+      process.stdout.write('w')
+      await sleep(Number(args['pause-ms'] ?? 250))
+      continue
+    }
     if (existsSync(cacheFile(pid))) { done += 1; continue }
     const hhmm = new Date().toISOString().slice(11, 16)
     if (args['stop-at-utc'] && hhmm >= args['stop-at-utc'] && hhmm < (args['resume-after-utc'] ?? '09:00')) { console.error(`\n[window] stop at ${hhmm} UTC; resume later`); break }

@@ -62,7 +62,7 @@ export function runMergedSubject(c, { engine, v31, engineGate, env = null }) {
       market_mid: v.reconciliation?.reconciled_market_value_mid ?? null,
       exit_base: v.reconciliation?.base_investor_exit ?? null,
       offer: co.available ? { recommended: co.recommended_cash_offer, minimum: co.minimum_acceptable_offer, ceiling: co.buyer_ceiling, investor_price: co.investor_value, spread: co.projected_assignment_fee, calibration_pct: co.calibration_pct, margin_pct: co.margin_pct, margin_source: co.margin_source, haircut_pct: co.confidence_haircut_pct, offer_to_value: co.sanity?.offer_to_value, reasons: co.reasons, per_unit: co.per_unit ?? null } : { unavailable: co.unavailable_reason ?? 'n/a' },
-      lane: v.merged?.lane ?? null, rung: v.merged?.rung ?? null, grade: v.merged?.confidence_grade ?? null, identity: v.merged?.identity ?? null,
+      lane: v.merged?.lane ?? null, rung: v.merged?.rung ?? null, ring: v.merged?.ring ?? null, radius_miles: v.merged?.radius_miles ?? null, grade: v.merged?.confidence_grade ?? null, identity: v.merged?.identity ?? null,
       institutional: v.merged?.institutional ?? null, retail_arv: v.merged?.retail_arv ?? null, flipper: v.merged?.flipper_signal ?? null,
       noi: v.merged?.noi_cross_check ?? null, condition_position: v.merged?.condition_position ?? null, ladder: v.merged?.ladder ?? [],
       authorized_recommended: oa.authorized_recommended_offer ?? null,

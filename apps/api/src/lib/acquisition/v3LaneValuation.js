@@ -355,6 +355,8 @@ export function valueLaneModel({
     rung,
     rung_name: rung ? RUNGS[rung] : null,
     radius_miles: radiusUsed,
+    // Ring: 1 = the nearest radius of the lane ladder (autonomy starts at grade A + ring 1).
+    ring: radiusUsed != null ? radii.indexOf(radiusUsed) + 1 : null,
     method,
     investor_price: investorPrice,
     confidence: investorPrice ? Math.round(confidence) : 0,
