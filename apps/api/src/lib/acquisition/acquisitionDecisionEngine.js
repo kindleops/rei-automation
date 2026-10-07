@@ -24,6 +24,9 @@ import { loadV3CompCandidates } from './compCandidateLoader.js';
 import { resolveV3Authority, V3_AUTHORITY_MODES } from './v3Authority.js';
 import { canonicalRowToEngineComp, loadV3MergedCandidates } from './v3CanonicalCandidates.js';
 import { MAD_MIN_OBSERVATIONS, readFeatureFlag } from './modelConstants.js';
+// SELLER_SCORING_RAW_FACTS (A1, Acquisition OS §3–4): raw-facts motivation/distress, default OFF.
+import { buildRawFactsFromRows, scoreSellerSituation, engineMotivationDistress } from './seller-situation/model.js';
+import { isSellerScoringRawFactsActive } from './seller-situation/flag.js';
 
 /** market_status values that mean a live listing exists (so an MLS listing
  * price is legitimately expected evidence). Everything else -- notably
@@ -743,6 +746,51 @@ function normalizeBooleanCategory(value) {
   return 'yes';
 }
 
+/**
+ * Motivation / distress inputs for the subject.
+ *
+ * OFF (default): the legacy-hybrid inputs, unchanged — Podio-era
+ * tag_distress_score and structured_motivation_score / final_acquisition_score
+ * / deal_strength_score. These ARE engine inputs on this path (they feed
+ * distressAndMotivation and the transaction-probability model).
+ *
+ * ON (SELLER_SCORING_RAW_FACTS env ceiling + system_control switch, or an
+ * explicit options.sellerScoringRawFacts === true from a shadow harness), and
+ * only for the subject (source 'properties'; comps never): seller_situation_v2
+ * / raw_facts_v1 replaces every Podio-era score, and the legacy master-owner
+ * pressure/urgency scores are nulled. The subject is stamped
+ * motivation_input_model = 'raw_facts_v1' so legacy-hybrid and raw-facts
+ * outputs are never indistinguishable (§6).
+ */
+function motivationDistressInputs(row = {}, options = {}) {
+  const requested = options.sellerScoringRawFacts ?? isSellerScoringRawFactsActive();
+  if (requested !== true || (options.source ?? row.source ?? 'unknown') !== 'properties') {
+    return {
+      distress_score: num(first(row.tag_distress_score, row.distress_purchase_score)),
+      motivation_score: num(
+        first(
+          row.structured_motivation_score,
+          row.final_acquisition_score,
+          row.deal_strength_score,
+        ),
+      ),
+    };
+  }
+  const situation = scoreSellerSituation(
+    buildRawFactsFromRows({ property: row, features: row.seller_features_v1 ?? null }),
+    { now: options.now },
+  );
+  const { motivation, distress } = engineMotivationDistress(situation);
+  return {
+    distress_score: distress,
+    motivation_score: motivation,
+    master_financial_pressure_score: null,
+    master_urgency_score: null,
+    motivation_input_model: situation.input_model_version,
+    seller_situation_v2: situation,
+  };
+}
+
 export function normalizePropertyFeatures(row = {}, options = {}) {
   const source = options.source ?? row.source ?? 'unknown';
   const salePrice = num(first(row.mls_sold_price, row.sale_price, row.purchase_price));
@@ -965,14 +1013,7 @@ export function normalizePropertyFeatures(row = {}, options = {}) {
     phone_prepaid_indicator: bool(
       first(row.phone_prepaid_indicator, row.prepaid_indicator),
     ),
-    distress_score: num(first(row.tag_distress_score, row.distress_purchase_score)),
-    motivation_score: num(
-      first(
-        row.structured_motivation_score,
-        row.final_acquisition_score,
-        row.deal_strength_score,
-      ),
-    ),
+    ...motivationDistressInputs(row, options),
     buyer_key: clean(row.buyer_key) || null,
     buyer_type: clean(row.buyer_type) || null,
     likely_strategy: clean(row.likely_strategy) || null,
@@ -2129,6 +2170,7 @@ function creativeFinanceScores(subject, valuation) {
 }
 
 function distressAndMotivation(subject) {
+  if (subject.seller_situation_v2) return rawFactsDistressAndMotivation(subject);
   const reasons = [];
   let score = num(subject.motivation_score, 0) * 0.45 + num(subject.distress_score, 0) * 0.35;
   score += addFactor(reasons, subject.vacant, 12, 'vacancy');
@@ -2140,6 +2182,16 @@ function distressAndMotivation(subject) {
   score += addFactor(reasons, subject.absentee_owner, 5, 'absentee_owner');
   score += addFactor(reasons, subject.landlord_profile, 5, 'landlord_profile');
   return { score: Math.round(clamp(score)), reasons };
+}
+
+/** SELLER_SCORING_RAW_FACTS path: no Podio score, no tag-text bonus (the raw facts already carry them). */
+function rawFactsDistressAndMotivation(subject) {
+  const situation = subject.seller_situation_v2;
+  const score = Math.round(clamp(0.55 * num(subject.motivation_score, 0) + 0.45 * num(subject.distress_score, 0)));
+  const reasons = (situation.evidence || [])
+    .filter((e) => e.component === 'forced_sale_pressure' || e.component === 'property_burden')
+    .map((e) => ({ reason: String(e.code).toLowerCase(), points: e.points, source: `${e.source_table}.${e.source_field}` }));
+  return { score, reasons, input_model: situation.input_model_version, score_version: situation.score_version };
 }
 
 function addThresholdFactor(factors, value, tiers, reason) {
