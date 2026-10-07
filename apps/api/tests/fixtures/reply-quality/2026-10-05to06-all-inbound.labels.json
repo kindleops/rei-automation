@@ -1,0 +1,2370 @@
+{
+ "labelled_at": "2026-10-07T00:51:09.243Z",
+ "note": "Expected intent / outcome / sentiment per fixture at round 8 (feat), against the prod EN/ES safe catalog; outcome_with_en_es_drafts = with the PROPOSED EN/ES clarifier, reality-check and apology rows active. Holds: opt-out/wrong-number suppression, hostile/troll, referrals/relationship, links, unreadable fragments.",
+ "labels": {
+  "100": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "101": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "102": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "103": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "104": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "105": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "106": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "107": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "108": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "109": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "110": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "111": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "112": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "113": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "114": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "115": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "116": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "117": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "118": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "119": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "120": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "121": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "122": {
+   "intent": "ownership_confirmed",
+   "outcome": "review",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "123": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "124": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "125": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "126": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "127": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "128": {
+   "intent": "need_time",
+   "outcome": "auto_reply",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "129": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "130": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "131": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "132": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "133": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "134": {
+   "intent": "latent_interest",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "135": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "136": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "137": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "138": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "139": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "140": {
+   "intent": "language_switch",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "141": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "142": {
+   "intent": "seller_interested",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "143": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "144": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "145": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "146": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "147": {
+   "intent": "need_time",
+   "outcome": "auto_reply",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "148": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "149": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "150": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "151": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "152": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "153": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "154": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "155": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "156": {
+   "intent": "acknowledgement",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "157": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "158": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "159": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "160": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "161": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "162": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "163": {
+   "intent": "need_time",
+   "outcome": "auto_reply",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "164": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "165": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "166": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "167": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "168": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "169": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "170": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "171": {
+   "intent": "tenant_occupied",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "172": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "173": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "174": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "175": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "176": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "177": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "178": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "179": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "180": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "181": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "182": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "183": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "184": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "185": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "186": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "187": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "188": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "189": {
+   "intent": "asking_price_implausible",
+   "outcome": "review",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "190": {
+   "intent": "asking_price_implausible",
+   "outcome": "review",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "191": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "192": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "193": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "194": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "195": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "196": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "197": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "198": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "199": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "200": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "201": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "202": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "203": {
+   "intent": "sold_property",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "204": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "205": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "206": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "207": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "208": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "209": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "210": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "211": {
+   "intent": "hostile_or_legal",
+   "outcome": "review",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "212": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "213": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "214": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "215": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "216": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "217": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "218": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "219": {
+   "intent": "seller_interested",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "220": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "221": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "222": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "223": {
+   "intent": "latent_interest",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "224": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "225": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "226": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "227": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "228": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "229": {
+   "intent": "not_interested",
+   "outcome": "review",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "230": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "231": {
+   "intent": "acknowledgement",
+   "outcome": "no_reply_by_design",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "232": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "233": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "234": {
+   "intent": "seller_interested",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "235": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "236": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "237": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "238": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "239": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "240": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "241": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "242": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "243": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "244": {
+   "intent": "seller_interested",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "245": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "246": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "247": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "248": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "249": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "250": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "251": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "252": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "253": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "254": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "255": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "256": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "257": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "258": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "259": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "260": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "261": {
+   "intent": "sold_property",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "262": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "263": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "264": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "265": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "266": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "267": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "268": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "269": {
+   "intent": "seller_interested",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "270": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "271": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "272": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "273": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "274": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "275": {
+   "intent": "hostile_or_legal",
+   "outcome": "review",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "276": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "277": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "278": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "279": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "280": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "281": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "282": {
+   "intent": "seller_interested",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "283": {
+   "intent": "condition_disclosed",
+   "outcome": "review",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "284": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "285": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "286": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "287": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "288": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "289": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "290": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "291": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "292": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "293": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "294": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "295": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "296": {
+   "intent": "language_switch",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "297": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "298": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "299": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "300": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "301": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "302": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "303": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "304": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "305": {
+   "intent": "latent_interest",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "306": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "307": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "308": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "309": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "310": {
+   "intent": "sold_property",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "311": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "312": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "313": {
+   "intent": "sold_property",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "314": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "315": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "316": {
+   "intent": "latent_interest",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "317": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "318": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "319": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "320": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "321": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "322": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "323": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "324": {
+   "intent": "acknowledgement",
+   "outcome": "no_reply_by_design",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "325": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "326": {
+   "intent": "latent_interest",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "327": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "328": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "329": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "330": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "331": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "332": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "333": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "334": {
+   "intent": "latent_interest",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "335": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "336": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "337": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "338": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "339": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "340": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "341": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "342": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "343": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "344": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "345": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "346": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "347": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "348": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "349": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "350": {
+   "intent": "hostile_or_legal",
+   "outcome": "review",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "351": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "352": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "353": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "354": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "355": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "356": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "357": {
+   "intent": "tenant_occupied",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "358": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "359": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "360": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "361": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "362": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "363": {
+   "intent": "tenant_occupied",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "364": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "365": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "366": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "367": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "368": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "369": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "370": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "371": {
+   "intent": "latent_interest",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "372": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "373": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "374": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "375": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "376": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "377": {
+   "intent": "sold_property",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "378": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "379": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "380": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "381": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "382": {
+   "intent": "tenant_occupied",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "383": {
+   "intent": "condition_disclosed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "384": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "385": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "386": {
+   "intent": "asking_price_implausible",
+   "outcome": "review",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "387": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "388": {
+   "intent": "hostile_or_troll",
+   "outcome": "review",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "389": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "390": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "391": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "392": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "393": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "394": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "001": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "002": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "003": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "004": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "005": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "006": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "007": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "008": {
+   "intent": "acknowledgement",
+   "outcome": "no_reply_by_design",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "009": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "010": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "011": {
+   "intent": "acknowledgement",
+   "outcome": "no_reply_by_design",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "012": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "013": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "014": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "015": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "016": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "017": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "018": {
+   "intent": "seller_interested",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "019": {
+   "intent": "seller_interested",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "020": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "021": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "022": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "023": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "024": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "025": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "026": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "027": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "028": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "029": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "030": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "031": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "032": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "033": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "034": {
+   "intent": "asking_price_provided",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "035": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "036": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "037": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "038": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "039": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "040": {
+   "intent": "hostile_or_legal",
+   "outcome": "review",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "041": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "042": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "043": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "044": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "045": {
+   "intent": "sold_property",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "046": {
+   "intent": "not_interested",
+   "outcome": "review",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "047": {
+   "intent": "asking_price_implausible",
+   "outcome": "review",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "048": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "049": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "050": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "051": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "052": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "053": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "054": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "055": {
+   "intent": "asks_offer",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "056": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "057": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "058": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "059": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "060": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "061": {
+   "intent": "asking_price_implausible",
+   "outcome": "review",
+   "sentiment": "sarcastic",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "062": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "063": {
+   "intent": "latent_interest",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "064": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "065": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "066": {
+   "intent": "hostile_or_legal",
+   "outcome": "review",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "067": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "068": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "069": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "070": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "071": {
+   "intent": "need_time",
+   "outcome": "auto_reply",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "072": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "073": {
+   "intent": "not_interested",
+   "outcome": "review",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "074": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "075": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "076": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "077": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "078": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "079": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "080": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "081": {
+   "intent": "seller_interested",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "082": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "083": {
+   "intent": "wrong_number",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "084": {
+   "intent": "acknowledgement",
+   "outcome": "no_reply_by_design",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "085": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "086": {
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "087": {
+   "intent": "hostile_or_legal",
+   "outcome": "review",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "088": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "089": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "090": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "091": {
+   "intent": "sold_property",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "092": {
+   "intent": "opt_out",
+   "outcome": "suppressed",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "suppressed"
+  },
+  "093": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "094": {
+   "intent": "unclear",
+   "outcome": "review",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "review"
+  },
+  "095": {
+   "intent": "ownership_confirmed",
+   "outcome": "auto_reply",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "096": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "097": {
+   "intent": "who_is_this",
+   "outcome": "auto_reply",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "auto_reply"
+  },
+  "098": {
+   "intent": "sold_property",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  },
+  "099": {
+   "intent": "acknowledgement",
+   "outcome": "no_reply_by_design",
+   "sentiment": "neutral",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
+  }
+ }
+}

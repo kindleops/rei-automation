@@ -410,6 +410,96 @@ function detectLanguageHeuristic(message, brain_item = null) {
   return brain_language || "English";
 }
 
+/**
+ * Do two texts say the same thing? Token overlap (Jaccard >= 0.5) so a quoted
+ * copy of our message still matches when a name / address differs.
+ */
+function textsLookAlike(a, b) {
+  const tokens = (t) => new Set(lower(t).normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 1));
+  const A = tokens(a);
+  const B = tokens(b);
+  if (!A.size || !B.size) return false;
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter += 1;
+  return inter / (A.size + B.size - inter) >= 0.5;
+}
+
+const POSITIVE_SENTIMENT_INTENTS = new Set([
+  "ownership_confirmed", "seller_interested", "latent_interest", "asks_offer", "asking_price_provided",
+  "asking_price_absent", "condition_disclosed", "tenant_occupied", "callback_requested", "contract_requested",
+  "going_to_market",
+]);
+const NEGATIVE_SENTIMENT_INTENTS = new Set([
+  "opt_out", "wrong_number", "not_interested", "hostile_or_legal", "sold_property", "need_time",
+  "property_specific_non_owner", "former_owner_respondent",
+]);
+const SARCASM_RULE_RE = /^(?:sarcasm_not_interest|non_literal_laughter|asking_price_implausible_|troll_after_implausible_ask|profanity_in_reply)/;
+
+/** positive | negative | neutral | sarcastic -- from the resolved intents and rules. */
+export function deriveReplySentiment(intents = {}) {
+  const rules = [...(intents.matched_rule_ids || [])];
+  const primary = intents.primary_intent || "unclear";
+  if (
+    primary === "hostile_or_troll" ||
+    primary === "asking_price_implausible" ||
+    intents.price_parse?.non_literal === true ||
+    intents.price_parse?.implausibility?.implausible === true ||
+    rules.some((r) => SARCASM_RULE_RE.test(String(r)))
+  ) {
+    return "sarcastic";
+  }
+  if (POSITIVE_SENTIMENT_INTENTS.has(primary)) return "positive";
+  if (NEGATIVE_SENTIMENT_INTENTS.has(primary)) return "negative";
+  return "neutral";
+}
+
+// ── Misspelling tolerance (round 8) ─────────────────────────────────────────
+// Key real-estate words, corrected only when one edit (insert / delete /
+// substitute / adjacent swap) away, same first letter, and the typed word is
+// not itself a common word. Everything else is left exactly as typed.
+const KEY_WORDS = [
+  "interested", "interesting", "property", "properties", "proposal", "selling", "number", "owner", "offer",
+  "price", "house", "wrong", "realtor", "investor", "wholesaler", "message", "texting",
+];
+const COMMON_WORDS = new Set([
+  "power", "other", "offers", "offered", "offset", "prices", "priced", "pricey", "prize", "pride", "owned", "owners",
+  "owing", "ownes", "order", "older", "horse", "hours", "houses", "housed", "rouse", "mouse", "spouse", "dumber", "lumber",
+  "numbers", "numbed", "wronged", "wrongs", "realty", "realtors", "invest", "investors", "messages", "messaged",
+  "texted", "texter", "texts", "propose", "proposed", "proposals", "selling", "seller", "sellers",
+  "interests", "interest",
+]);
+function oneEditApart(a, b) {
+  if (a === b) return false;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  if (la === lb) {
+    const diff = [];
+    for (let i = 0; i < la; i += 1) if (a[i] !== b[i]) diff.push(i);
+    if (diff.length === 1) return true;
+    return diff.length === 2 && diff[1] === diff[0] + 1 && a[diff[0]] === b[diff[1]] && a[diff[1]] === b[diff[0]];
+  }
+  const [s1, s2] = la < lb ? [a, b] : [b, a];
+  let i = 0, j = 0, skipped = false;
+  while (i < s1.length && j < s2.length) {
+    if (s1[i] === s2[j]) { i += 1; j += 1; continue; }
+    if (skipped) return false;
+    skipped = true; j += 1;
+  }
+  return true;
+}
+export function correctKeyMisspellings(message) {
+  const text = String(message ?? "");
+  if (!/[a-z]/i.test(text)) return text;
+  return text.replace(/[A-Za-z]{5,}/g, (word) => {
+    const w = word.toLowerCase();
+    if (COMMON_WORDS.has(w) || KEY_WORDS.includes(w)) return word;
+    for (const key of KEY_WORDS) {
+      if (key[0] === w[0] && Math.abs(key.length - w.length) <= 1 && oneEditApart(w, key)) return key;
+    }
+    return word;
+  });
+}
+
 /** True when a language pattern (script or keyword) actually matched. */
 function hasExplicitLanguageEvidence(message) {
   const text = lower(message);
@@ -591,6 +681,10 @@ const COMPLIANCE_PHRASES = [
   // 2026-10-06 round 6: "Error number no more texting", "No please remove from
   // outreach list".
   "no more texting", "no more texts", "no more text messages", "no more messages",
+  // round 8: "Don't ever text me again" was hostile_or_legal, not an opt-out.
+  "don't ever text", "dont ever text", "do not ever text", "never text me", "don't text me again",
+  "dont text me again", "do not text me again", "don't ever contact", "dont ever contact",
+  "don't ever message", "dont ever message", "stop contacting me", "lose my number",
   "remove from outreach", "remove from your list", "remove from the list", "remove from list",
   "remove me from", "remove my number", "please remove me", "please remove from",
   "no me vuelvan a escribir", "no me vuelvas a mandar", "no me vuelva a mandar",
@@ -4300,6 +4394,8 @@ function matchesSoldTransfer(text = "") {
   const normalized = lower(text);
   // "No ya tiene Nuevo dueño" / "It has a new owner" (2026-10-06): a transfer
   // with no "sold" word.
+  // round 8: "I have the house to my son and that's the only house I own".
+  if (/\b(?:gave|have\s+given|have|left|transferred|deeded|signed)\s+(?:over\s+)?(?:the|my|that)\s+(?:house|home|property)\s+(?:over\s+)?to\s+my\s+(?:son|daughter|kids|children|grandson|granddaughter|brother|sister|wife|husband)\b/i.test(normalized)) return true;
   if (/(?:tiene|hay)\s+(?:un\s+)?nuevo\s+due[ñn]o|\bnuevos?\s+due[ñn]os?\b|\b(?:has|have|got)\s+(?:a\s+)?new\s+owners?\b|\bnew\s+owners?\s+now\b/i.test(normalized)) return true;
   if (!/\bsold\b|vend(?:[íi]|imos)/i.test(normalized)) return false;
   if (SOLD_NEGATION_RE.test(normalized)) return false;
@@ -4842,7 +4938,12 @@ function resolveIntents(
   if (
     !compliance_flag &&
     (/^(?:yes|yeah|yep|si|sí|yea)[\s.,!¿?]*(?:why|por\s*qu[eé]|porque|pq)\s*[?!.]*$/i.test(rawMessage.trim()) ||
-      /^¿?\s*(?:what|wut|wat|huh|que|qué|eh|como|cómo)\s*[?!.]*$/i.test(rawMessage.trim()))
+      /^¿?\s*(?:what|wut|wat|huh|que|qué|eh|como|cómo|y\s+tu|y\s+tú|y\s+usted)\s*[?!.]*$/i.test(rawMessage.trim()) ||
+      /^[?¿]{1,6}$/.test(rawMessage.trim()) ||
+      // round 8: "Why , are you a corporation?", "if your a wholesaler",
+      // "Are you in a real state?", "This is Alex, right", "Do you have any
+      // problem with the building?", "You just ask a random person ..."
+      /\b(?:are|r)\s+(?:you|u)\s+(?:a|an|in\s+a)\s+(?:wholesaler|realtor|real\s*-?\s*(?:estate|state)|agent|broker|corporation|company|investor|bot|robot|scam(?:mer)?|business)\b|\bif\s+(?:you'?re|your|ur|you\s+are)\s+a\s+(?:wholesaler|realtor|agent|broker|investor)\b|\bwhat'?s\s+the\s+name\s+of\s+(?:the|your)\s+(?:company|real\s*-?\s*(?:estate|state)|business)\b|^this\s+is\s+\w+\s*,?\s+right\s*\??$|\bdo\s+you\s+have\s+(?:any\s+)?(?:a\s+)?problem\s+with\s+the\s+(?:building|house|property)\b|\b(?:just|randomly)\s+(?:ask|text|message)\s+a\s+random\s+person\b/i.test(rawMessage))
   ) {
     return finalizeIntentResult({
       primary_intent: "who_is_this",
@@ -5172,6 +5273,9 @@ function resolveIntents(
       "nothing's for sell", "nothing is for sell", "not for sell",
       // 2026-10-06 round 6
       "i don't care", "i dont care", "i do not care", "not if it involves",
+      // round 8
+      "almost certainly no", "certainly not", "definitely not", "absolutely not", "no way", "no thank u",
+      "no gracias", "no grasias", "not intrested", "not intersted", "not interseted", "no intereste",
       "para venderla no", "venderla no", "no para vender", "no para venderla",
       "no for now", "no por ahora", "por ahora no",
     ]) ||
@@ -5233,6 +5337,9 @@ function resolveIntents(
       "maybe someday",
       "down the road",
       "no sell right now",
+      // round 8
+      "not now", "not at this point", "not yet", "not right now", "not at the moment",
+      "trying to get a loan", "getting a loan", "refinancing", "ahorita no", "todavia no", "todavía no",
       "próximo mes",
       "proximo mes",
       "más adelante",
@@ -6001,7 +6108,11 @@ function resolveIntents(
       "techo malo",
       "techo nuevo",
     ]) ||
-    (/\broof\b/i.test(text) && /\b(cost|costs|quote|estimate)\b/i.test(text))
+    (/\broof\b/i.test(text) && /\b(cost|costs|quote|estimate)\b/i.test(text)) ||
+    // round 8: condition answers that matched nothing ("move in ready", "Good..it
+    // does not need any repair.", "Central air and heat", "4 car garage and lot",
+    // "up to date with LA county and section8 code", "It's ready to move")
+    /\bmove\s*-?\s*in\s+ready\b|\bready\s+to\s+move\b|\b(?:does\s*n[o']?t|doesn'?t|dont|don'?t|no)\s+need\s+(?:any\s+)?(?:repairs?|work|fixing)\b|\bno\s+repairs?\b|\bcentral\s+(?:air|heat|a\s*\/?\s*c)\b|\b\d+\s*(?:car\s+)?garage\b|\bup\s+to\s+(?:date|code)\b|\bsection\s*8\b|\b(?:fully\s+)?(?:remodel(?:l)?ed|renovated|updated|upgraded)\b|\bnew\s+(?:roof|hvac|ac|a\/c|water\s+heater|floors?|kitchen|windows)\b|\b(?:good|great|excellent|fair|decent|rough|bad|poor)\s+(?:condition|shape)\b|\bneeds?\s+(?:some\s+|a\s+lot\s+of\s+)?(?:work|repairs?|updating|tlc)\b|\bbuen(?:as)?\s+condici[oó]n(?:es)?\b|\bnecesita\s+(?:reparaciones|arreglos|trabajo)\b/i.test(text)
   ) {
     intents.push("condition_disclosed");
   }
@@ -6273,7 +6384,7 @@ function resolveIntents(
       /\bonly\s+(?:for|if|at)\b[^.?!]{0,40}\b(?:money|price|amount|offer|number|dollars?)\b/i.test(text) ||
       /\b(?:for|at)\s+the\s+right\s+(?:price|number|offer)\b|\bif\s+the\s+(?:price|offer|number)\s+(?:is|was)\s+right\b|\bif\s+(?:the\s+offer\s+is|it'?s)\s+(?:good|right|fair)\b/i.test(text) ||
       /\bnot\s+accepting\s+(?:a\s+)?low\s*-?\s*ball|\bno\s+low\s*-?\s*ball|\bwould\s+only\s+consider\b/i.test(text) ||
-      /\bsi\s+(?:es|está|esta)\s+buen[ao]\b|\bsi\s+la\s+oferta\s+es\s+buena\b|\bdepende\s+(?:del|de\s+la)\s+(?:precio|oferta)\b|\bsi\s+el\s+precio\s+es\s+(?:bueno|justo)\b/i.test(text);
+      /\bsi\s+(?:es|está|esta)\s+(?:una?\s+)?buen[ao]\b|\bno\s+but\s+(?:at\s+)?(?:market|fair|full)\s+(?:value|price)\b|\b(?:at|for)\s+(?:market|fair|full)\s+(?:value|price)\b|\bsi\s+la\s+oferta\s+es\s+buena\b|\bdepende\s+(?:del|de\s+la)\s+(?:precio|oferta)\b|\bsi\s+el\s+precio\s+es\s+(?:bueno|justo)\b/i.test(text);
     if (conditional_interest && !intents.includes("latent_interest") && !intents.includes("asking_price_provided")) {
       intents.push("latent_interest");
       reply_rule_ids.push("conditional_interest_open_on_price");
@@ -6297,6 +6408,19 @@ function resolveIntents(
       intents.push("seller_interested");
       reply_rule_ids.push("affirmative_with_tail_to_proposal_question");
     }
+  }
+
+  // SARCASM (round 8, owner): "yeah right", "sure buddy", "nice try", "in your
+  // dreams", "a gift lol" -- never positive, never hot, never a price. Every
+  // positive reading is dropped; what remains (a decline, an identity
+  // question) still answers, otherwise a person reads it.
+  if (
+    !compliance_flag &&
+    /\b(?:yeah|ya|yea|sure|oh)\s+right\b|\bsure\s+(?:buddy|pal|bud|jan|thing\s+buddy|you\s+are)\b|\bnice\s+try\b|\bgood\s+one\b|\bin\s+your\s+dreams\b|\bdream\s+on\b|\bkeep\s+dreaming\b|\bwhat\s+a\s+joke\b|\b(?:sending|send)\s+me\s+a\s+gift\b|\bgift\s+(?:lol|lmao|haha)\b|\bclaro\s+que\s+no\b|\bni\s+so[ñn]ando\b/i.test(rawMessage)
+  ) {
+    const POSITIVE = new Set(["seller_interested", "latent_interest", "asking_price_provided", "asks_offer", "ownership_confirmed", "condition_disclosed"]);
+    for (let i = intents.length - 1; i >= 0; i -= 1) if (POSITIVE.has(intents[i])) intents.splice(i, 1);
+    reply_rule_ids.push("sarcasm_not_interest");
   }
 
   // IMPLAUSIBLE ASK (2026-10-06, +17276319579): "1 million dollars" on a
@@ -6702,7 +6826,9 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
     thread_language:
       early_context && typeof early_context === "object" ? early_context.last_outbound_language || null : null,
   });
-  let message = multilingual ? multilingual.canonical_text : original_message;
+  let message = multilingual ? multilingual.canonical_text : correctKeyMisspellings(original_message);
+  // A bare "?" / "???" to our message is the who-are-you question (round 8).
+  if (/^\s*[?¿]{1,6}\s*$/.test(message)) message = "huh?";
   const compliance_flag  = detectComplianceFlag(message);
   let language           = detectLanguageHeuristic(original_message, brain_item);
   // An explicit Spanish-switch request ("no hablo inglés", "en español por
@@ -6739,7 +6865,9 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
       (conversation_context.last_outbound_use_case === "ownership_check" ||
         conversation_context.last_outbound_question_type === "ownership")
   );
-  let emoji_interpretation = interpretEmojiReply(original_message, signal_context);
+  let emoji_interpretation = /^\s*[?¿]{1,6}\s*$/.test(original_message)
+    ? null
+    : interpretEmojiReply(original_message, signal_context);
   // OWNER RULE 2026-10-06 (round 6): a typed "👍" alone after OUR ownership or
   // sale question answers THAT question: it is read as "yes" and gets the
   // same reply the affirmative gets (no confirmation question, no review).
@@ -6757,13 +6885,24 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   // An iMessage "Questioned/Emphasized “…”" whose quoted text is NOT our last
   // outbound quotes the SELLER's own words ("Questioned “What's Your
   // Proposal”", "Questioned “No estoy interesada”"): read those words.
+  // A 👍 / "Liked" tapback ON our ownership or sale question answers it like
+  // "Yes" (owner rule 2026-10-06, round 8: every reply gets a set response).
   if (emoji_interpretation?.reaction_type === "platform_reaction" && emoji_interpretation.reaction?.target_text) {
     const raw_ctx = conversation_context && typeof conversation_context === "object" ? conversation_context : null;
-    const ours = lower(raw_ctx?.last_outbound_body || "").replace(/\s+/g, " ").trim();
-    const target = lower(emoji_interpretation.reaction.target_text).replace(/\s+/g, " ").trim();
-    if (ours && target && !ours.includes(target) && !target.includes(ours.slice(0, 40))) {
+    const ours = raw_ctx?.last_outbound_body || "";
+    const target = emoji_interpretation.reaction.target_text;
+    const on_our_message = ours && target ? textsLookAlike(ours, target) : null;
+    if (on_our_message === false) {
       message = emoji_interpretation.reaction.target_text;
       emoji_interpretation = interpretEmojiReply(message, signal_context);
+    } else if (
+      on_our_message === true &&
+      emoji_interpretation.family === "affirmative" &&
+      signal_context &&
+      ["ownership_check", "proposal_interest", "proposal_request"].includes(signal_context.last_outbound_use_case)
+    ) {
+      message = "yes";
+      emoji_interpretation = null;
     }
   }
   // OWNER RULE (2026-10-05): reply in the language the SELLER replied in --
@@ -6887,6 +7026,9 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
       emoji_interpretation,
     }),
     language_preference: deriveLanguagePreference({ message: original_message, language, reply_signals }),
+    // Round 8: sentiment of the reply, for the inbox / hot-flag owner to map.
+    // sarcastic beats everything; it is never positive.
+    reply_sentiment: deriveReplySentiment(intents),
     // Audit: the canonical phrase a non-English/Spanish reply was read as.
     multilingual_canonicalization: multilingual
       ? { category: multilingual.category, language: multilingual.language, canonical_text: multilingual.canonical_text, amount: multilingual.amount, version: multilingual.version }
@@ -7531,6 +7673,7 @@ export async function classify(message, brain_item = null, options = {}) {
     });
     return {
       language:        "English",
+      reply_sentiment: "neutral",
       primary_intent:  "unclear",
       secondary_intent: null,
       objection:       null,

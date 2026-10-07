@@ -128,7 +128,8 @@ const LABELS = {
   "002": { intent: "unclear", review: true },
   "016": { intent: "unclear", review: true },
   "022": { intent: "unclear", review: true },
-  "030": { intent: "unclear", review: true },
+  // Round 8 owner rule: a bare "?" gets the who_is_this reply.
+  "030": { intent: "who_is_this", auto: true },
   "039": { intent: "unclear", review: true },
   "012": { intent: "hostile_or_legal", auto: false },
   // ── bare "No" to the ownership question: ONE clarifier (owner decision 2026-10-06) ──

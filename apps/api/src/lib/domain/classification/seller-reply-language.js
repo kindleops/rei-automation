@@ -86,6 +86,12 @@ export function identifyReplyLanguage(message, { detected_language = null, expli
     if (set.has(folded)) return language;
   }
 
+  // Short English real-estate words ("199k sale", "cash offer") identify
+  // English even in a thread we opened in another language (round 8).
+  if (/^[\p{Script=Latin}\p{N}\p{P}\p{S}\s]+$/u.test(raw) && /\b(?:sale|sell|selling|sold|price|offer|house|home|property|owner|interested|million|thousand|cash|buy|buyer)\b/i.test(folded)) {
+    return "English";
+  }
+
   const fromWords = detectMessageLanguage(raw);
   if (fromWords) return fromWords;
 
