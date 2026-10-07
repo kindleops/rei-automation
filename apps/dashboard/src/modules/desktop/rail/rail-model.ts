@@ -30,7 +30,14 @@ export interface ShellEvent {
 export interface ShellMetrics {
   inbox: { awaiting: number; needs_review: number } | null
   email: { needs_you: number; system_handling: number; failed: number; sending_enabled: boolean; lower_bound?: boolean } | null
-  queue: { today_remaining: number; approval: number | null; processing: number | null; sent_today: number | null; delivered_today: number | null; failed_today: number | null; status: string | null; latest_sent_at: string | null } | null
+  queue: {
+    today_remaining: number; approval: number | null; processing: number | null; sent_today: number | null; delivered_today: number | null; failed_today: number | null; status: string | null; latest_sent_at: string | null
+    /** sends past their due time that nothing has moved (the reason behind a degraded status) */
+    overdue?: number | null
+    oldest_overdue_due_at?: string | null
+    /** rows the dispatcher keeps refusing — attention, never degraded */
+    refused_repeatedly?: number | null
+  } | null
   campaigns: { active: number; paused: number; scheduled: number; attention: number | null } | null
   pipeline: { live: number; need_you: number; system: number; moved_today: number; blocked: number } | null
   workflow: { live_runs: number; human_holds: number; events_today: number } | null
@@ -212,34 +219,64 @@ const cadenceMs = (c: string | null | undefined): number | null => {
 
 export type RuntimeHealth = 'current' | 'delayed' | 'off' | 'event' | 'never'
 
+/** never call a beat late sooner than the server does (registry stale_ms: 5 min for every-minute runtimes) */
+const MIN_DELAY_MS = 5 * 60_000
+
 export function runtimeHealth(r: ShellRuntime, now: number): RuntimeHealth {
   if (r.status === 'off') return 'off'
   if (r.heartbeat_state === 'never') return 'never'
   const at = r.heartbeat_at ? Date.parse(r.heartbeat_at) : null
   if (!at) return r.heartbeat_state === 'event_driven' || r.heartbeat_state === 'on_demand' ? 'event' : 'never'
+  if (r.heartbeat_state === 'stale') return 'delayed'
   const every = cadenceMs(r.cadence)
-  if (every && now - at > every * 3) return 'delayed'
+  if (every && now - at > Math.max(every * 3, MIN_DELAY_MS)) return 'delayed'
   return 'current'
 }
 
 export interface MachineState {
   state: 'live' | 'degraded' | 'idle' | 'unknown'
+  /** what is wrong, specifically — set whenever state is degraded */
   reason: string | null
   needYou: number
+  /** awareness, not degradation: a quiet count, never the yellow state */
+  attention: { count: number; reason: string | null }
+}
+
+/** "42m", "3h", "2d" — the age of the oldest overdue send */
+export function shortAge(fromIso: string | null | undefined, now: number): string | null {
+  const t = fromIso ? Date.parse(fromIso) : NaN
+  if (!Number.isFinite(t) || !Number.isFinite(now) || now <= 0) return null
+  const m = Math.max(0, Math.floor((now - t) / 60_000))
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 48) return `${h}h`
+  return `${Math.floor(h / 24)}d`
+}
+
+function queueReason(q: NonNullable<ShellMetrics['queue']>, now: number): string {
+  const overdue = n(q.overdue)
+  if (overdue && overdue > 0) {
+    const age = shortAge(q.oldest_overdue_due_at, now)
+    return `${fmt(overdue)} ${overdue === 1 ? 'send' : 'sends'} overdue${age ? ` · oldest ${age}` : ''}`
+  }
+  // an older server that does not report the overdue detail
+  return `Queue ${q.status}`
 }
 
 /** LIVE when runtimes beat; DEGRADED names what; never a health percentage. */
 export function machineState(t: Pick<ShellTelemetry, 'metrics' | 'runtimes'> | null, now: number): MachineState {
-  if (!t) return { state: 'unknown', reason: null, needYou: 0 }
+  if (!t) return { state: 'unknown', reason: null, needYou: 0, attention: { count: 0, reason: null } }
   const delayed = t.runtimes.filter((r) => runtimeHealth(r, now) === 'delayed')
   const reasons: string[] = []
   if (delayed.length) reasons.push(delayed.length === 1 ? `${delayed[0].name} heartbeat delayed` : `${delayed.length} runtimes delayed`)
-  const qs = t.metrics?.queue?.status
-  if (qs === 'degraded' || qs === 'critical') reasons.push(`Queue ${qs}`)
+  const q = t.metrics?.queue
+  if (q && (q.status === 'degraded' || q.status === 'critical')) reasons.push(queueReason(q, now))
   const needYou = (t.metrics?.workflow?.human_holds ?? 0)
-  if (reasons.length) return { state: 'degraded', reason: reasons.join(' · '), needYou }
+  const refused = n(q?.refused_repeatedly) ?? 0
+  const attention = { count: refused, reason: refused ? `${fmt(refused)} ${refused === 1 ? 'send' : 'sends'} refused repeatedly` : null }
+  if (reasons.length) return { state: 'degraded', reason: reasons.join(' · '), needYou, attention }
   const anyCurrent = t.runtimes.some((r) => runtimeHealth(r, now) === 'current')
-  return { state: anyCurrent ? 'live' : 'idle', reason: null, needYou }
+  return { state: anyCurrent ? 'live' : 'idle', reason: null, needYou, attention }
 }
 
 /* ── which machine events are worth a sound ─────────────────────────────

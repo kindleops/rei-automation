@@ -14,6 +14,7 @@
 .mf-rt.is-delayed i { background: var(--lc-attn); opacity: 1; }
 .mf-rt.is-event i { background: var(--lc-exec); opacity: 0.8; }
 .mf-reason { margin: 8px 2px 0; font: 500 11.5px/1.4 var(--lc-font-ui); color: var(--lc-ink-2); }
+.mf-attn { margin: 4px 2px 0; font: 500 11px/1.4 var(--lc-font-ui); color: var(--lc-ink-3); }
 
 .mf-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 0 8px; }
 .mf-filters__gap { flex: 1; }

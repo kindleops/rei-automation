@@ -100,6 +100,11 @@ async function readQueue(db, now) {
     delivered_today: Number.isFinite(c.deliveredToday) ? c.deliveredToday : null,
     failed_today: Number.isFinite(c.failedToday) ? c.failedToday : null,
     status: health?.status || null,
+    // the reason behind a degraded status, so the badge can say it
+    overdue: Number.isFinite(c.overdueActive) ? c.overdueActive : null,
+    oldest_overdue_due_at: health?.oldestOverdueDueAt || null,
+    // attention, never degraded: rows the dispatcher keeps refusing
+    refused_repeatedly: Number.isFinite(c.refusedRepeatedly) ? c.refusedRepeatedly : null,
     latest_sent_at: health?.latestSentAt || null,
     day_ends_at: end,
   }

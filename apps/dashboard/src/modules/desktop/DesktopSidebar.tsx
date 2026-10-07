@@ -299,12 +299,13 @@ export function DesktopSidebar({ routePath, onOpenSettings }: DesktopSidebarProp
             width={360}
             label="Machine"
             trigger={
-              <button type="button" className={cx('cr-dock', `is-${machine.state}`)} aria-label={`Machine ${machine.state}${machine.reason ? ` — ${machine.reason}` : ''}`}>
+              <button type="button" className={cx('cr-dock', `is-${machine.state}`)} aria-label={`Machine ${machine.state}${machine.reason ? ` — ${machine.reason}` : ''}${machine.attention.reason ? ` — ${machine.attention.reason}` : ''}`}>
                 <i className="cr-dock__dot" aria-hidden="true" />
                 <span className="cr-dock__text">
                   <b>{machine.state === 'degraded' ? 'System · degraded' : machine.state === 'live' ? 'Machine · live' : machine.state === 'idle' ? 'Machine · idle' : 'Machine'}</b>
                   {machine.state === 'degraded' && machine.reason ? <small>{machine.reason}</small> : null}
                 </span>
+                {machine.state !== 'degraded' && machine.attention.count ? <span className="cr-dock__attn" title={machine.attention.reason ?? undefined}>{machine.attention.count}</span> : null}
                 {machine.needYou ? <span className="cr-dock__need" title={`${machine.needYou} need you`}>{machine.needYou}</span> : null}
               </button>
             }
