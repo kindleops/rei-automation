@@ -22,9 +22,28 @@ export class ClosingBlockedError extends Error {
   }
 }
 
+/**
+ * A move to Formal Contract / Escrow refused because no contract record exists.
+ * It explains itself and names the action that unblocks it (never a silent move,
+ * never an unexplained failure).
+ */
+export class ContractRequiredError extends Error {
+  readonly open: string
+  readonly actionLabel: string
+  constructor(open: string, actionLabel = 'Record contract to continue') {
+    super(`${actionLabel}: Formal Contract and later stages follow a contract created in Closing Desk.`)
+    this.name = 'ContractRequiredError'
+    this.open = open
+    this.actionLabel = actionLabel
+  }
+}
+
 function unwrap<T>(result: Awaited<ReturnType<typeof callBackend>>): T {
   if (!result.ok) {
     const upstream = result.upstream as Record<string, unknown> | undefined
+    if (upstream && upstream.code === 'CONTRACT_EVENT_REQUIRED') {
+      throw new ContractRequiredError(String(upstream.open || '/closing-desk'), String(upstream.action_label || 'Record contract to continue'))
+    }
     if (upstream && (upstream.code === 'CLOSING_BLOCKED' || upstream.error === 'closing_blocked')) {
       throw new ClosingBlockedError((upstream.blockers as Array<{ code: string; message?: string; owner?: string }>) || [], String(upstream.open || '/closing-desk'))
     }
