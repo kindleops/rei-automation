@@ -66,6 +66,7 @@ export function resolveCanonicalAskingPrice(message, {
   reference = null,
   negotiationActive = false,
   shorthandConvention = false,
+  numberRules = null,
   lastOutboundBody = null,
   lastQuestion = null,
   classification = null,
@@ -79,6 +80,8 @@ export function resolveCanonicalAskingPrice(message, {
     reference: reference ?? questionReference(question),
     negotiationActive,
     shorthandConvention: shorthandConvention === true || questionEstablishesThousandsShorthand(question),
+    // null = the SELLER_CONVERSATION_V3 flag decides (monetary-understanding.js).
+    numberRules,
     sourceMessageId,
     now,
   });

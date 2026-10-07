@@ -14,6 +14,8 @@
 // by the stage engines; this module is the orchestration-layer authority that
 // distinguishes WHAT a number means before it can touch negotiation state.
 
+import { isSellerConversationV3Enabled } from "@/lib/domain/seller-flow/seller-conversation-v3-flag.js";
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -841,6 +843,207 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
   return best.kind;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SELLER CONVERSATION v3 NUMBER RULES (owner brief 2026-10-06, flag
+// SELLER_CONVERSATION_V3, default OFF)
+// ═══════════════════════════════════════════════════════════════════════════
+//   3 digits ("250", "$250")             -> PRICE in thousands ($250,000)
+//   3,3 / 6+ digits / "250k" / "1.5M"    -> PRICE as written (unchanged)
+//   1,3 ("1,500")                        -> RENT, never a price
+//   bare 4 digits ("2020", "1500")       -> a YEAR (1900-2099, no rent cue)
+//                                           or a RENT; never a price
+//   condition word + year ("roof 2020")  -> an UPDATE-YEAR fact
+//                                           (extractUpdateYears)
+// The cue classifier still decides what a number IS: "rent 950" stays a
+// $950 rent, "taxes 900" a tax figure, "I owe 120" a $120,000 payoff.
+
+export const NUMBER_RULES = Object.freeze({ RC71: "rc71", V3: "v3" });
+
+/** Explicit option wins; otherwise the env flag decides (default RC 7.1 rules). */
+export function resolveNumberRules(explicit = null, env = process.env) {
+  const value = lower(explicit);
+  if (value === NUMBER_RULES.V3 || value === NUMBER_RULES.RC71) return value;
+  return isSellerConversationV3Enabled(env) ? NUMBER_RULES.V3 : NUMBER_RULES.RC71;
+}
+
+const V3_SHAPES = Object.freeze({
+  THREE_DIGIT: "three_digit_thousands",
+  RENT_OR_YEAR: "four_digit_rent_or_year",
+  YEAR: "four_digit_year",
+});
+
+/** Cue kinds a 3-digit number keeps literally (a rent, a tax bill, a repair figure). */
+const V3_NO_THOUSANDS_KINDS = new Set([
+  MONETARY_KINDS.MONTHLY_AMOUNT,
+  MONETARY_KINDS.TAX_AMOUNT,
+  MONETARY_KINDS.REPAIR_AMOUNT,
+  MONETARY_KINDS.EARNEST_MONEY,
+  MONETARY_KINDS.CLOSING_COST_TERM,
+]);
+
+/** Price-setting kinds a 4-digit / 1,3 number is rewritten from (to a rent). */
+const V3_RENT_REWRITE_KINDS = new Set([
+  MONETARY_KINDS.ASKING_PRICE,
+  MONETARY_KINDS.COUNTER_OFFER,
+  MONETARY_KINDS.UNKNOWN,
+  MONETARY_KINDS.MINIMUM_PRICE,
+  MONETARY_KINDS.MAXIMUM_PRICE,
+  MONETARY_KINDS.NET_REQUIREMENT,
+  MONETARY_KINDS.PER_UNIT_PRICE,
+  MONETARY_KINDS.PACKAGE_PRICE,
+]);
+
+const V3_UNIT_CONTEXT_RE = /\b(?:units?|doors?|apartments?|apts?|tenants?|rents?|rented|sides?)\b/i;
+
+function v3NumberShape(text, amount) {
+  if (amount.from_words || amount.range_scale_inherited || amount.scale_suffix) return null;
+  const raw = clean(amount.raw).replace(/^\$\s*/, "").trim();
+  if (/[a-z]/i.test(raw)) return null;
+  if (/^\d{3}$/.test(raw) && amount.value >= 100 && amount.value <= 999) {
+    // "2 units, 950 each" is a rent per door, not $950,000.
+    const after = text.slice(amount.end);
+    if (/^\s*(?:each|apiece|a\s+piece|per\s+(?:month|mo))\b/i.test(after) && V3_UNIT_CONTEXT_RE.test(text)) return null;
+    return V3_SHAPES.THREE_DIGIT;
+  }
+  const four = /^\d{4}$/.test(raw);
+  if (four || /^\d,\d{3}$/.test(raw)) {
+    if (four && !amount.has_currency && amount.value >= 1900 && amount.value <= 2099) {
+      // "Roof 2020. Rents 1500": the condition word beside it makes it a year
+      // even with a rent cue in the next sentence.
+      const near = text.slice(Math.max(0, amount.index - 24), Math.min(text.length, amount.end + 24));
+      if (UPDATE_COMPONENTS.some(({ re }) => new RegExp(re.source, "i").test(near))) return V3_SHAPES.YEAR;
+      const kind = classifyByNearestCue(text, amount);
+      return kind === MONETARY_KINDS.MONTHLY_AMOUNT ? V3_SHAPES.RENT_OR_YEAR : V3_SHAPES.YEAR;
+    }
+    return V3_SHAPES.RENT_OR_YEAR;
+  }
+  return null;
+}
+
+// ── update-year facts ("roof 2020", "kitchen redone 3 years ago") ──────────
+
+/** Condition components. water_heater is listed before hvac so "water heater" is not read as heating. */
+export const UPDATE_COMPONENTS = Object.freeze([
+  { component: "water_heater", re: /\b(?:hot\s+)?water\s+heater\b|\bcalentador(?:\s+de\s+agua)?\b/gi },
+  { component: "roof", re: /\broof(?:ing)?\b|\btecho\b/gi },
+  { component: "kitchen", re: /\bkitchen\b|\bcocina\b/gi },
+  { component: "bathrooms", re: /\bbath(?:room)?s?\b|\bba[ñn]os?\b/gi },
+  { component: "hvac", re: /\bhvac\b|\bfurnace\b|\ba\/c\b|\bac\b|\bair\s+condition\w*|\bcentral\s+air\b|\bheat\s+pump\b|\bheat(?:er|ing)\b|\baire\s+acondicionado\b|\bclima\b/gi },
+  { component: "windows", re: /\bwindows?\b|\bventanas?\b/gi },
+  { component: "foundation", re: /\bfoundation\b|\bcimientos?\b/gi },
+  { component: "plumbing", re: /\bplumbing\b|\bplomer[ií]a\b/gi },
+  { component: "electrical", re: /\belectrical\b|\belectric\s+panel\b|\bwiring\b|\bpanel\b/gi },
+  { component: "flooring", re: /\bfloor(?:s|ing)\b|\bpisos?\b/gi },
+  { component: "siding", re: /\bsiding\b/gi },
+]);
+
+function yearTokens(clause, nowYear) {
+  const out = [];
+  let m;
+  const abs = /(?<![\d$,.])(19[5-9]\d|20\d{2})(?!\d|,\d)/g;
+  while ((m = abs.exec(clause)) !== null) {
+    const year = Number(m[1]);
+    if (year <= nowYear) out.push({ year, index: m.index, raw: m[0], relative: false });
+  }
+  const apostrophe = /['’](\d{2})\b/g;
+  while ((m = apostrophe.exec(clause)) !== null) {
+    const yy = Number(m[1]);
+    const year = yy + (2000 + yy <= nowYear ? 2000 : 1900);
+    out.push({ year, index: m.index, raw: m[0], relative: false });
+  }
+  const ago = /\b(\d{1,2}|a|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:years?|yrs?)\s+(?:ago|old)\b|\bhace\s+(\d{1,2})\s+a[ñn]os\b/gi;
+  const words = { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+  while ((m = ago.exec(clause)) !== null) {
+    const token = lower(m[1] ?? m[2]);
+    const n = words[token] ?? Number(token);
+    if (Number.isFinite(n) && n >= 0 && n <= 80) out.push({ year: nowYear - n, index: m.index, raw: m[0], relative: true });
+  }
+  const named = /\b(last\s+year|this\s+year|el\s+a[ñn]o\s+pasado|este\s+a[ñn]o)\b/gi;
+  while ((m = named.exec(clause)) !== null) {
+    const last = /last|pasado/i.test(m[1]);
+    out.push({ year: last ? nowYear - 1 : nowYear, index: m.index, raw: m[0], relative: true });
+  }
+  return out;
+}
+
+/**
+ * Update-year facts: a year attached to a condition word. "Roof 2020, kitchen
+ * and baths 2018, AC is 5 years old" -> roof 2020, kitchen 2018, bathrooms
+ * 2018, hvac (now - 5). A year with no condition word ("built in 1985") is not
+ * an update. Binding: nearest year within 40 characters in the same clause.
+ */
+export function extractUpdateYears(message, { now = Date.now() } = {}) {
+  const text = clean(message);
+  if (!text) return [];
+  const nowYear = new Date(typeof now === "number" ? now : Date.parse(now) || Date.now()).getUTCFullYear();
+  const facts = [];
+  let offset = 0;
+  for (const clause of text.split(/(?<=[.;!?\n])/)) {
+    const years = yearTokens(clause, nowYear);
+    if (years.length) {
+      const taken = [];
+      const components = [];
+      for (const { component, re } of UPDATE_COMPONENTS) {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(clause)) !== null) {
+          const span = [m.index, m.index + m[0].length];
+          if (taken.some(([a, b]) => span[0] < b && span[1] > a)) continue;
+          taken.push(span);
+          components.push({ component, index: m.index, end: span[1] });
+        }
+      }
+      for (const c of components) {
+        // The nearest FOLLOWING year within 40 characters ("roof 2020",
+        // "kitchen and baths 2018", "AC is 5 years old"), else the nearest
+        // PRECEDING one within 25 ("2018 roof", "roof 2020 and kitchen").
+        let best = null;
+        for (const y of years) {
+          if (y.index < c.end) continue;
+          const dist = y.index - c.end;
+          if (dist <= 40 && (!best || dist < best.dist)) best = { ...y, dist };
+        }
+        if (!best) {
+          for (const y of years) {
+            const dist = c.index - (y.index + y.raw.length);
+            if (dist < 0 || dist > 25) continue;
+            if (!best || dist < best.dist) best = { ...y, dist };
+          }
+        }
+        if (best && !facts.some((f) => f.component === c.component)) {
+          facts.push({ component: c.component, year: best.year, raw: best.raw, relative: best.relative, index: offset + c.index });
+        }
+      }
+    }
+    offset += clause.length;
+  }
+  return facts;
+}
+
+/**
+ * Every number in a seller message, read by the v3 rules: prices, rents,
+ * years and update-year facts. For audit and the checklist; the asking price
+ * itself still comes from resolveAskingPriceSignal (the one money path).
+ */
+export function interpretSellerNumbers(message, { now = Date.now(), negotiationActive = false } = {}) {
+  const text = clean(message);
+  const mentions = extractMonetaryMentions(text, { negotiationActive, numberRules: NUMBER_RULES.V3 });
+  const update_years = extractUpdateYears(text, { now });
+  const years = [];
+  const yearRe = /(?<![\d$,.])(19\d{2}|20\d{2})(?!\d|,\d)/g;
+  let m;
+  while ((m = yearRe.exec(text)) !== null) years.push({ year: Number(m[1]), raw: m[0] });
+  const rentLike = mentions.filter((x) => x.kind === MONETARY_KINDS.MONTHLY_AMOUNT);
+  return {
+    rules: NUMBER_RULES.V3,
+    prices: mentions.filter((x) => PRICE_SETTING_KINDS.has(x.kind) && x.confidence >= 0.5),
+    rents: rentLike,
+    years: years.filter((y) => !rentLike.some((r) => Number(r.value) === y.year)),
+    update_years,
+    other: mentions.filter((x) => !PRICE_SETTING_KINDS.has(x.kind) && x.kind !== MONETARY_KINDS.MONTHLY_AMOUNT),
+  };
+}
+
 /**
  * Extract and semantically classify every monetary mention in a message.
  *
@@ -857,6 +1060,7 @@ export function extractMonetaryMentions(message, {
   reference = null,
   negotiationActive = false,
   shorthandConvention = false,
+  numberRules = null,
 } = {}) {
   const text = clean(message);
   if (!text) return [];
@@ -864,12 +1068,49 @@ export function extractMonetaryMentions(message, {
   const ref = num(reference);
   const priceContext = ref !== null && ref >= 20_000;
   const mentions = [];
+  const v3 = resolveNumberRules(numberRules) === NUMBER_RULES.V3;
 
   for (const amount of tokenizeAmounts(text)) {
     let value = amount.value;
     let confidence = amount.has_currency || amount.has_scale ? 0.9 : 0.5;
     const window = windowFor(text, amount);
     const before = precedingWindow(text, amount);
+
+    // ── SELLER CONVERSATION v3 NUMBER RULES (flag SELLER_CONVERSATION_V3) ──
+    // Owner, 2026-10-06: a 3-digit number is a price in thousands; a 4-digit
+    // number (or 1,500) is a year or a rent, never a price. Off by default:
+    // the RC 7.1 scale rules below are untouched unless the flag is on.
+    const v3_shape = v3 ? v3NumberShape(text, amount) : null;
+    if (v3_shape === V3_SHAPES.YEAR) continue;
+    if (v3_shape === V3_SHAPES.THREE_DIGIT) {
+      const kind0 = classifyByNearestCue(text, amount, { negotiationActive });
+      if (!V3_NO_THOUSANDS_KINDS.has(kind0) && !isInRefusalClause(text, amount)) {
+        const kind = kind0 === MONETARY_KINDS.UNKNOWN
+          ? (negotiationActive ? MONETARY_KINDS.COUNTER_OFFER : MONETARY_KINDS.ASKING_PRICE)
+          : kind0;
+        const approximate = includesCue(before, APPROX_CUES);
+        mentions.push({
+          kind,
+          value: Math.round(amount.value * 1000),
+          raw: amount.raw,
+          confidence: 0.7,
+          qualifiers: {
+            firm: includesCue(window, FIRM_CUES),
+            approximate,
+            net: kind === MONETARY_KINDS.NET_REQUIREMENT,
+            minimum: kind === MONETARY_KINDS.MINIMUM_PRICE,
+            maximum: kind === MONETARY_KINDS.MAXIMUM_PRICE,
+            per_unit: kind === MONETARY_KINDS.PER_UNIT_PRICE,
+            package: kind === MONETARY_KINDS.PACKAGE_PRICE,
+            contingent_on_closing_costs: kind === MONETARY_KINDS.CLOSING_COST_TERM,
+          },
+          // The magnitude was read by rule, not written by the seller.
+          scaled_from_reference: true,
+          scale_rule: "v3_three_digit_thousands",
+        });
+        continue;
+      }
+    }
 
     // Bare small number ("65", "160", "2.5"): a price conversation alone does
     // NOT make it thousands. Property 273312064 (2026-10-01): the seller wrote
@@ -1005,6 +1246,14 @@ export function extractMonetaryMentions(message, {
 
     if (qualifiers.approximate) confidence = Math.min(confidence, 0.75);
 
+    // v3: 1,500 / 1500 / $1500 is a rent (or a year), never a price.
+    let v3_rent = false;
+    if (v3_shape === V3_SHAPES.RENT_OR_YEAR && V3_RENT_REWRITE_KINDS.has(kind)) {
+      kind = MONETARY_KINDS.MONTHLY_AMOUNT;
+      confidence = Math.min(confidence, 0.5);
+      v3_rent = true;
+    }
+
     mentions.push({
       kind,
       // A scale-ambiguous mention keeps the literal the seller typed ("2.5").
@@ -1014,6 +1263,7 @@ export function extractMonetaryMentions(message, {
       qualifiers,
       scaled_from_reference,
       ...(scale_ambiguous ? { scale_ambiguous: true } : {}),
+      ...(v3_rent ? { scale_rule: "v3_four_digit_is_rent" } : {}),
     });
   }
 
@@ -1170,10 +1420,11 @@ export function resolveAskingPriceSignal(message, {
   reference = null,
   negotiationActive = false,
   shorthandConvention = false,
+  numberRules = null,
   sourceMessageId = null,
   now = null,
 } = {}) {
-  const mentions = extractMonetaryMentions(message, { reference, negotiationActive, shorthandConvention });
+  const mentions = extractMonetaryMentions(message, { reference, negotiationActive, shorthandConvention, numberRules });
 
   // A digit-anchored floor ("has to start with a 4") carries no parseable
   // amount, so the tokenizer finds nothing. Consulted ONLY when no real
@@ -1282,7 +1533,10 @@ export function resolveAskingPriceSignal(message, {
 
 export default {
   MONETARY_KINDS,
+  NUMBER_RULES,
   extractMonetaryMentions,
+  extractUpdateYears,
+  interpretSellerNumbers,
   establishesThousandsShorthand,
   resolveAskingPriceSignal,
 };
