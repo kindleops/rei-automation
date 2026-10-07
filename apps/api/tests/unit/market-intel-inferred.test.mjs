@@ -177,7 +177,7 @@ test('generated migration: patches the applied objects by insertion; rollback re
   assert.ok(mig.includes("if v_kind = 'i' then return public.mi_infer_run_unit(p_build, p_unit, p_as_of); end if;"))
   assert.ok(mig.includes('m.property_id\n  from public.mv_map_market_sales m'))
   assert.match(mig, /'i:validate', 'finalize', 'i:cleanup'/)
-  assert.match(mig, /'i:link:7', 'i:stacks'/)
+  assert.match(mig, /'i:link:11', 'i:stacks'/)
   // link v2: contiguous property_id range slices (bounds per build), set-based, no per-row probes
   assert.ok(!/hashtext/.test(mig), 'link slices are property_id ranges, not hash buckets')
   assert.ok(mig.includes("'inferred_link_bounds'") && mig.includes('with s as materialized'))
@@ -203,6 +203,12 @@ test('generated migration: patches the applied objects by insertion; rollback re
   const ver = readFileSync(join(MIG, 'PROPOSED_20261005140000_market_intel_inferred_investor_verify.sql'), 'utf8')
   assert.ok(!/\b(insert|update|delete|create|alter|drop|truncate)\b/i.test(ver.replace(/^--.*$/gm, '')), 'verify is read-only')
   assert.ok(ver.includes("RAISE EXCEPTION 'verify FAILED: recorded counts of build % differ from the live source") && ver.includes("('strong', 95776)") && ver.includes("('likely', 60997)"))
+  const pmv = readFileSync(join(MIG, 'PROPOSED_20261005140000_market_intel_inferred_investor_pre_index_mv.sql'), 'utf8')
+  assert.match(pmv, /create index concurrently if not exists mv_map_market_sales_mi_link_cover\s+on public\.mv_map_market_sales \(property_id\)\s+include \(comp_id, sold_on, state, zip, city, property_type, units, buyer_kind, is_investor, buyer\)/)
+  assert.ok(pre.includes("to_regclass('public.mv_map_market_sales_mi_link_cover') AND i.indisvalid"))
+  // 12 link slices: 71 units, within the 75 nightly ticks
+  const units = /select array\['prepare'[\s\S]*?\n\$\$;/.exec(mig)[0]
+  assert.equal((units.match(/'i:link:\d+'/g) || []).length, 12)
   const proof = readFileSync(join(MIG, 'PROPOSED_20261005140000_market_intel_inferred_investor_plan_proof.sql'), 'utf8')
   assert.ok(proof.includes('explain (analyze, buffers'))
   assert.ok(!/cron\.schedule/.test(mig), 'no schedule change')

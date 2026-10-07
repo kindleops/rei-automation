@@ -2,9 +2,9 @@
 -- Rollback-only: every change is undone by the RAISE at the end. Expected result:
 --   ERROR:  pretest ok: ...      and NO schema change afterwards.
 -- Run OUTSIDE 05:00-08:59, 09:15-11:59 UTC with:  SET statement_timeout = '600s';
--- Requires the pre-step index (PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql) to exist and be valid.
+-- Requires both pre-step indexes (PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql, PROPOSED_20261005140000_market_intel_inferred_investor_pre_index_mv.sql) to exist and be valid.
 -- It runs the full inferred chain against the live ready build's id space in a scratch build:
--- clusters, the 8 link slices, stacks, all six geography units, validate and cleanup (~40-60 s).
+-- clusters, the 12 link slices, stacks, all six geography units, validate and cleanup (~40-60 s).
 -- What it proves: the DDL and the patches apply over the live objects; every inferred unit runs;
 -- each unit's time is reported (RAISE NOTICE as it goes) and gated (every unit PASS < 8000 ms, SOFT FAIL
 -- below 15000 ms, HARD FAIL at >= 15000 ms, which stops the pretest at once). Only a message starting 'pretest ok' permits the apply. The national
@@ -24,6 +24,9 @@ DECLARE
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i WHERE i.indexrelid = to_regclass('comp_private.comp_properties_mi_owner_cover') AND i.indisvalid AND i.indisready) THEN
     RAISE EXCEPTION 'pretest FAILED: apply the pre-step PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql first (comp_private.comp_properties_mi_owner_cover missing or invalid)';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_index i WHERE i.indexrelid = to_regclass('public.mv_map_market_sales_mi_link_cover') AND i.indisvalid AND i.indisready) THEN
+    RAISE EXCEPTION 'pretest FAILED: apply the pre-step PROPOSED_20261005140000_market_intel_inferred_investor_pre_index_mv.sql first (public.mv_map_market_sales_mi_link_cover missing or invalid)';
   END IF;
   EXECUTE $mig$-- =============================================================================
 -- Market Intelligence: INFERRED INVESTOR (owner-based), an extension of the market summary.
@@ -50,15 +53,19 @@ BEGIN
 --   Note: the nightly ticks run with statement_timeout = '30s' (cron mi_rollup_tick_a/b), so the v1 17-56 s
 --   link slices would have been cancelled in production; v2 targets < 8 s per linking unit.
 -- APPLY PLAN (owner approval required; nothing here is applied):
---   0. PRE-STEP: PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql (CREATE INDEX CONCURRENTLY; execute_sql, NOT apply_migration,
---      CONCURRENTLY cannot run inside a transaction). The pretest refuses to run without it.
+--   0. PRE-STEPS: PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql (owner columns) then PROPOSED_20261005140000_market_intel_inferred_investor_pre_index_mv.sql
+--      (sale columns) — each ONE CREATE INDEX CONCURRENTLY via execute_sql, NOT apply_migration (CONCURRENTLY
+--      cannot run inside a transaction). The pretest refuses to run without both.
+--   TICKS: 71 units, one per tick; the nightly window has 75 ticks (10:45-10:59 = 15, 11:00-11:59 = 60),
+--      so 4 spare ticks for retries. Link slices: 12 (12:12Z pretest with 8: slice 0 9.5 s cold,
+--      slice 7 8.1 s — the MV heap re-read per slice; fixed by pre-step 2, and 12 slices halve the insert per unit).
 --   1. Outside 05:00-08:59 / 09:15-11:59 UTC: run the _pretest (SET statement_timeout = '600s'); expect
 --      'pretest ok' with per-unit ms and a PASS / SOFT FAIL / HARD FAIL per unit (also a NOTICE per unit as it
 --      runs). Any unit >= 15000 ms: 'pretest FAILED (HARD ...)' at once. Any unit at 8000-15000 ms:
 --      'pretest SOFT FAIL — do not apply'. Only 'pretest ok' permits the apply.
 --      National matrix ≈ the numbers above.
 --   2. Apply this file (MCP apply_migration) outside the windows; no cron change (same 75 ticks).
---   3. The fingerprint now includes owner snapshots, so the next nightly tick starts build 2 with 67 units
+--   3. The fingerprint now includes owner snapshots, so the next nightly tick starts build 2 with 71 units
 --      (~ +3 min DB time). Until it is ready, MI keeps serving build 1; inferred metrics read 'unavailable'.
 --   4. Verify (read-only) the day the new build is ready: PROPOSED_20261005140000_market_intel_inferred_investor_verify.sql — asserts the
 --      recorded counts equal a fresh count of the live source (never changed by the extension) and reports nation + top markets against the 10-05 snapshot;
@@ -98,7 +105,7 @@ BEGIN
 --   public.mi_infer_run_unit(...)       the 'i:' units
 -- PATCHED (exact insertions into the applied text; the rollback restores the originals):
 --   mi_rollup_sales_v      + property_id (last column)
---   mi_rollup_units()      + 19 'i:' units (67 units; the nightly window has 75 ticks)
+--   mi_rollup_units()      + 23 'i:' units (71 units; the nightly window has 75 ticks)
 --   mi_rollup_fingerprint()+ owner snapshot (count, max observed) so an owner refresh rebuilds
 --   mi_rollup_run_unit()   + one dispatch line for 'i:' units
 -- ISOLATION: an 'i:' unit that fails on its RETRY is recorded in notes.inferred_errors and skipped;
@@ -283,11 +290,11 @@ begin
       analyze comp_private.mi_owner_mail_cluster;
 
     elsif v_kind = 'bounds' then
-      -- the link slices: 8 contiguous property_id ranges of equal sale count, fixed for this build
+      -- the link slices: 12 contiguous property_id ranges of equal sale count, fixed for this build
       -- (the ranges partition all text values, so every sale lands in exactly one slice). One index-only
       -- pass over mv_map_market_sales_property_id (~0.9 s measured).
       update public.mi_rollup_builds b set notes = b.notes || jsonb_build_object('inferred_link_bounds', (
-        select to_jsonb(percentile_disc(array[0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875]::float8[]) within group (order by m.property_id))
+        select to_jsonb(percentile_disc(array[0.0833333, 0.166667, 0.25, 0.333333, 0.416667, 0.5, 0.583333, 0.666667, 0.75, 0.833333, 0.916667]::float8[]) within group (order by m.property_id))
           from public.mv_map_market_sales m where m.property_id is not null))
        where b.build_id = p_build;
       get diagnostics v_rows = row_count;
@@ -301,11 +308,11 @@ begin
       -- per-row rule: "a transfer > 45 days after the sale exists" is "the property's latest transfer
       -- is > 45 days after the sale"; resident is "some contact is a resident likely owner".
       select b.notes -> 'inferred_link_bounds' into v_bounds from public.mi_rollup_builds b where b.build_id = p_build;
-      if v_bounds is null or jsonb_array_length(v_bounds) <> 7 then
+      if v_bounds is null or jsonb_array_length(v_bounds) <> 11 then
         raise exception 'mi_infer: no link bounds for build % (i:bounds sets them)', p_build;
       end if;
       v_lo := case when v_arg::int > 0 then v_bounds ->> (v_arg::int - 1) else '' end;  -- '' sorts before every text
-      v_hi := case when v_arg::int < 7 then v_bounds ->> v_arg::int end;
+      v_hi := case when v_arg::int < 11 then v_bounds ->> v_arg::int end;
       v_rng := '@ >= ' || quote_literal(v_lo) || coalesce(' and @ < ' || quote_literal(v_hi), '');
       execute format($q$
         insert into public.mi_sale_owner_link (build_id, comp_id, sold_on, state, zip, city_key, asset, is_mf, buyer_known, is_investor, buyer,
@@ -474,7 +481,7 @@ $$;
 
 create or replace function public.mi_rollup_units()
 returns text[] language sql immutable as $$
-  select array['prepare', 'buyers', 'i:clusters', 'i:bounds', 'i:link:0', 'i:link:1', 'i:link:2', 'i:link:3', 'i:link:4', 'i:link:5', 'i:link:6', 'i:link:7', 'i:stacks']
+  select array['prepare', 'buyers', 'i:clusters', 'i:bounds', 'i:link:0', 'i:link:1', 'i:link:2', 'i:link:3', 'i:link:4', 'i:link:5', 'i:link:6', 'i:link:7', 'i:link:8', 'i:link:9', 'i:link:10', 'i:link:11', 'i:stacks']
     || (select array_agg(format('p:%s:%s', l, p) order by pi, li)
           from unnest(array['1y', '90d', '30d', '6m', '3y', 'all']) with ordinality as pp(p, pi),
                unnest(array['nation', 'state', 'market', 'county', 'city', 'zip']) with ordinality as ll(l, li))
@@ -678,7 +685,7 @@ $mig$;
   INSERT INTO public.mi_zip_geo SELECT b, zip, state, city_key, county_key, county_name, county_via, market_key, sales_n, min_lat, max_lat, min_lng, max_lng
     FROM public.mi_zip_geo WHERE build_id = (SELECT max(build_id) FROM public.mi_rollup_builds WHERE status = 'ready');
 
-  FOREACH u IN ARRAY array['i:clusters', 'i:bounds', 'i:link:0', 'i:link:1', 'i:link:2', 'i:link:3', 'i:link:4', 'i:link:5', 'i:link:6', 'i:link:7', 'i:stacks', 'i:g:nation', 'i:g:state', 'i:g:market', 'i:g:county', 'i:g:city', 'i:g:zip', 'i:validate', 'i:cleanup'] LOOP
+  FOREACH u IN ARRAY array['i:clusters', 'i:bounds', 'i:link:0', 'i:link:1', 'i:link:2', 'i:link:3', 'i:link:4', 'i:link:5', 'i:link:6', 'i:link:7', 'i:link:8', 'i:link:9', 'i:link:10', 'i:link:11', 'i:stacks', 'i:g:nation', 'i:g:state', 'i:g:market', 'i:g:county', 'i:g:city', 'i:g:zip', 'i:validate', 'i:cleanup'] LOOP
     RAISE NOTICE 'pretest unit % start %', u, to_char(clock_timestamp() AT TIME ZONE 'UTC', 'HH24:MI:SS.MS');
     t0 := clock_timestamp();
     n := public.mi_rollup_run_unit(b, u, (SELECT source_as_of FROM public.mi_rollup_builds WHERE build_id = b));

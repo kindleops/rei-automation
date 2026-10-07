@@ -5,6 +5,8 @@
 -- Expect BEFORE: comp_properties via "Index Scan using comp_properties_property_id_key" with shared read
 --   ~= 1 heap page per sale (2026-10-07 09:08Z per-row form: read=12,971 for 10,165 lookups, 13.7 s).
 -- Expect AFTER: "Index Only Scan using comp_properties_mi_owner_cover", Heap Fetches ~0, reads ~1/100 per sale.
+-- With pre-step 2 also: the sales CTE is "Index Only Scan using mv_map_market_sales_mi_link_cover" instead of a
+--   Bitmap Heap Scan touching 16-19K MV heap pages.
 -- Transfers already use comp_canon_tx_property_idx index-only (Heap Fetches 0) and contacts are 12 MB:
 -- neither needs a new index, so none is proposed.
 explain (analyze, buffers, timing off)
