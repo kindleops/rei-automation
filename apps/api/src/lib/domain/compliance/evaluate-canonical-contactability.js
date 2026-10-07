@@ -200,6 +200,37 @@ export async function evaluateCanonicalContactability(
     }
   }
 
+  // Fail-closed fallback (record-phone-suppression.js, 2026-10-06): when an
+  // opt-out could not be written to sms_suppression_list, the writer leaves an
+  // active automation_suppressions block. Enqueue and the campaign graph
+  // already honour it; the send-time guard must too.
+  if (normalized_to) {
+    try {
+      const query = supabase
+        .from("automation_suppressions")
+        .select("id,expires_at,status,suppression_reason")
+        .eq("phone_e164", normalized_to);
+      const result = typeof query?.limit === "function" ? await query.limit(20) : await query;
+      const now_ms = Date.now();
+      const active = !result?.error && Array.isArray(result?.data)
+        ? result.data.find((row) =>
+          lower(row?.status || "active") === "active" &&
+          (!row?.expires_at || new Date(row.expires_at).getTime() > now_ms))
+        : null;
+      if (active) {
+        return {
+          blocked: true,
+          reason: "automation_suppression_active",
+          detail_reason: active.suppression_reason || null,
+          reason_code: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
+          fail_closed: false,
+        };
+      }
+    } catch {
+      // non-fatal: sms_suppression_list above is the fail-closed authority
+    }
+  }
+
   if (!is_enqueue_check && (phone_id || normalized_to)) {
     try {
       const { row: phone_row } = await lookupCanonicalPhoneRow(
@@ -219,7 +250,7 @@ export async function evaluateCanonicalContactability(
     try {
       const { data: thread_state, error } = await supabase
         .from("inbox_thread_state")
-        .select("status,contactability_status,metadata")
+        .select("status,contactability_status,is_suppressed,metadata")
         .eq("thread_key", normalized_thread)
         .maybeSingle();
       inbox_thread_state = thread_state;
@@ -241,6 +272,16 @@ export async function evaluateCanonicalContactability(
               fail_closed: false,
             };
           }
+        }
+        // Belt and braces (2026-10-06): a thread marked suppressed is never
+        // texted, even when its sms_suppression_list row is missing.
+        if (thread_state.is_suppressed === true) {
+          return {
+            blocked: true,
+            reason: "thread_is_suppressed",
+            reason_code: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
+            fail_closed: false,
+          };
         }
         if (!is_enqueue_check) {
           const contactability = normalizeContactability(thread_state.contactability_status);

@@ -661,6 +661,16 @@ export const EVENT_CATALOG = Object.freeze({
     defaultActions: ['inspect_thread'],
     titleTemplate: 'Thread assigned — {{thread_key}}',
   },
+  // 2026-10-06: an opt-out could not be written to sms_suppression_list after
+  // retries (record-phone-suppression.js). The number is blocked by a fallback
+  // automation_suppressions row; a human must confirm the list row.
+  compliance_suppression_write_failed: {
+    domain: 'inbox',
+    defaultSeverity: 'critical',
+    soundCategory: 'compliance',
+    defaultActions: ['inspect_thread', 'acknowledge'],
+    titleTemplate: 'Opt-out NOT on the suppression list — {{thread_key}}',
+  },
   inbox_suppression_conflict: {
     domain: 'inbox',
     defaultSeverity: 'warning',

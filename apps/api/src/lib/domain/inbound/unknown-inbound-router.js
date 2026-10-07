@@ -202,25 +202,20 @@ async function upsertSmsSuppression(db, {
   source = "textgrid_inbound_unknown_router",
   metadata = {},
 }) {
-  const now = new Date().toISOString();
-  const payload = {
-    phone_e164,
-    suppressed_at: now,
-    reason,
-    source,
-    opt_out_keyword,
-    metadata,
-    updated_at: now,
-  };
-
-  const { data, error } = await db
-    .from("sms_suppression_list")
-    .upsert(payload, { onConflict: "phone_e164", ignoreDuplicates: false })
-    .select()
-    .maybeSingle();
-
-  if (error) throw error;
-  return data || payload;
+  // 2026-10-06: this upsert could never succeed (columns opt_out_keyword /
+  // metadata / updated_at do not exist, NOT NULL suppression_type omitted,
+  // onConflict "phone_e164" matches no unique index) — prod has zero rows from
+  // this source. Route through the one fail-closed writer.
+  void opt_out_keyword;
+  void metadata;
+  const { recordPhoneSuppression } = await import("@/lib/domain/compliance/record-phone-suppression.js");
+  const recorded = await recordPhoneSuppression({ supabase: db, phone: phone_e164, reason, source });
+  if (!recorded.ok) {
+    const error = new Error(recorded.error || recorded.reason || "suppression_failed");
+    error.fail_closed = recorded;
+    throw error;
+  }
+  return recorded;
 }
 
 async function insertUnknownInboundMessageEvent(db, {

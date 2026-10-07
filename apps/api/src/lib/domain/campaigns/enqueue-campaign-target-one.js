@@ -46,6 +46,7 @@
  * `textgrid_numbers` table the feeder ultimately selects from.
  */
 
+import { BLOCKING_CONTACTABILITY } from '@/lib/domain/lead-state/universal-lead-state-registry.js'
 import { withDerivedSentToday } from '@/lib/domain/delivery/sender-sent-today.js'
 import { evaluateOutboundNumberEligibility } from '@/lib/supabase/sms-engine.js'
 import {
@@ -180,6 +181,7 @@ export const ENQUEUE_REASON = {
   SUPPRESSED: 'target_suppressed',
   DNC: 'recipient_on_suppression_list',
   AUTOMATION_SUPPRESSED: 'automation_suppression_active',
+  THREAD_SUPPRESSED: 'recipient_thread_suppressed',
   PRIOR_CONTACT: 'prior_contact_exists',
   ALREADY_QUEUED: 'already_queued',
   INVALID_RECIPIENT: 'invalid_recipient_number',
@@ -522,6 +524,23 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
     return !expires || new Date(expires).getTime() > new Date(nowIso).getTime()
   })
   if (activeSuppression) return fail(ENQUEUE_REASON.AUTOMATION_SUPPRESSED, recipient.slice(-4))
+
+  // Belt and braces (2026-10-06): a seller whose conversation is marked
+  // suppressed / opted out is never re-texted by a campaign, even if the
+  // sms_suppression_list row is missing (2 of 72 live opt-outs since 09-25 had
+  // none). The thread key is the seller's E.164.
+  const { data: threadRows, error: threadErr } = await supabase
+    .from('inbox_thread_state')
+    .select('thread_key, is_suppressed, contactability_status')
+    .eq('thread_key', recipient)
+    .range(0, 4)
+  if (threadErr) throw threadErr
+  const suppressedThread = (threadRows || []).find(
+    (row) => row?.is_suppressed === true || BLOCKING_CONTACTABILITY.has(clean(row?.contactability_status).toLowerCase())
+  )
+  if (suppressedThread) {
+    return fail(ENQUEUE_REASON.THREAD_SUPPRESSED, `${recipient.slice(-4)} ${suppressedThread.is_suppressed === true ? 'is_suppressed' : clean(suppressedThread.contactability_status)}`)
+  }
 
   // ── 6. Prior contact and live rows ──────────────────────────────────────
   // Checked by recipient number, not just by target: contacting the same human

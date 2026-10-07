@@ -365,6 +365,10 @@ const rejects = [
   ["invalid recipient", { campaign_targets: baseTarget({ to_phone_number: "5551234" }) }, ENQUEUE_REASON.INVALID_RECIPIENT],
   ["DNC listed", { sms_suppression_list: [{ id: "s1", phone_e164: "+19514720295", is_active: true }] }, ENQUEUE_REASON.DNC],
   ["automation suppression", { automation_suppressions: [{ id: "a1", phone_e164: "+19514720295", expires_at: null }] }, ENQUEUE_REASON.AUTOMATION_SUPPRESSED],
+  // 2026-10-06 belt and braces: a suppressed / opted-out conversation blocks the
+  // campaign even when its sms_suppression_list row is missing.
+  ["thread is_suppressed, no list row", { inbox_thread_state: [{ thread_key: "+19514720295", is_suppressed: true, contactability_status: "contactable" }] }, ENQUEUE_REASON.THREAD_SUPPRESSED],
+  ["thread opted_out, no list row", { inbox_thread_state: [{ thread_key: "+19514720295", is_suppressed: false, contactability_status: "opted_out" }] }, ENQUEUE_REASON.THREAD_SUPPRESSED],
   ["no template assigned", { campaign_targets: baseTarget({ metadata: { candidate_snapshot: { seller_first_name: "Rodolfo" } } }) }, ENQUEUE_REASON.TEMPLATE_MISSING],
   ["template not in catalog", { sms_templates: [] }, ENQUEUE_REASON.TEMPLATE_NOT_FOUND],
   ["paused template", { ownership_template_rotation_control: [baseGov({ rotation_status: "pause", daily_cap: 0 })] }, ENQUEUE_REASON.TEMPLATE_UNGOVERNED],
