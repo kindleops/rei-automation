@@ -2325,6 +2325,8 @@ export async function applyInboundSuppression({
   reason = "opt_out",
   threadKey = "",
   dryRun = false,
+  // Test seam for record-phone-suppression.js ({ sleep, alert, maxAttempts }).
+  suppressionDeps = null,
 } = {}) {
   if (!canUseSupabase(supabaseClient)) {
     return { ok: false, reason: "missing_supabase_or_phone" };
@@ -2365,40 +2367,37 @@ export async function applyInboundSuppression({
         .eq("master_owner_id", clean(ownerId));
       if (error) throw error;
     } else {
-      // DURABLE COMPLIANCE WRITE (repaired 2026-09-09).
+      // DURABLE COMPLIANCE WRITE (repaired 2026-09-09; fail-closed 2026-10-06).
       //
-      // The previous insert named four columns and omitted BOTH of the table's
-      // NOT NULL columns (phone_e164, suppression_type), so any call that
-      // reached it would have failed the not-null constraint -- and it was
-      // additionally unreachable, because the caller passed dryRun=true for any
-      // inbound that was not also queueing a live reply. Five live STOP replies
-      // on 2026-09-08/09 produced no durable record at all.
-      //
-      // Row shape mirrors the one writer proven in production
-      // (sms-engine.js persistProviderBlacklistSuppression). phone_e164 is what
-      // campaign eligibility actually reads (enqueue-campaign-target-one.js
-      // "Compliance" step filters .eq('phone_e164', recipient)), so omitting it
-      // means the block does not bind. sender_phone_e164 is NULL on purpose:
-      // this is a PHONE-scoped block covering every sender, not a pair block,
-      // and the unique index is NULLS NOT DISTINCT so the upsert is idempotent.
-      const { error } = await supabase.from("sms_suppression_list").upsert(
-        {
-          phone_e164: normalized_phone,
-          sender_phone_e164: null,
-          phone_number: normalized_phone,
-          suppression_type: reason,
-          suppression_reason: reason,
-          reason,
-          is_active: true,
-          suppressed_at: new Date().toISOString(),
-          source: "inbound_opt_out",
-        },
-        { onConflict: "phone_e164,sender_phone_e164", ignoreDuplicates: false }
+      // One writer for every phone-level opt-out: record-phone-suppression.js.
+      // It upserts the phone-scoped sms_suppression_list row campaign
+      // eligibility reads (phone_e164, sender NULL, NULLS NOT DISTINCT unique
+      // index), retries, and when every attempt fails it writes a durable
+      // automation_suppressions block and raises a critical alert. Before
+      // this, a failed upsert was caught below, logged with warn() and
+      // dropped: 2 of 72 opt-outs since 2026-09-25 left no list row.
+      const { recordPhoneSuppression } = await import(
+        "@/lib/domain/compliance/record-phone-suppression.js"
       );
-      // PostgREST reports failures by RETURN VALUE, not by throwing: without
-      // this check a constraint violation is swallowed and the caller is still
-      // told ok:true. That is how this stayed invisible.
-      if (error) throw error;
+      const recorded = await recordPhoneSuppression(
+        {
+          supabase,
+          phone: normalized_phone,
+          reason,
+          source: "inbound_opt_out",
+          threadKey,
+        },
+        suppressionDeps || {}
+      );
+      if (!recorded.ok) {
+        warn("[AUTO_REPLY_SUPPRESSION_FAILED_CLOSED]", {
+          phone_number: normalized_phone,
+          suppression_reason: reason,
+          error: recorded.error || recorded.reason,
+          fallback_block: recorded.fallback_block === true,
+        });
+        return { ...recorded, reason: "suppression_failed" };
+      }
     }
 
     info("[AUTO_REPLY_SUPPRESSION_APPLIED]", {

@@ -324,13 +324,17 @@ async function suppressInboundContact({ message_event_id = "", discord_user_id =
       }).eq("canonical_e164", from_phone_number).catch(() => null);
       if (wrongNumberWrite && !wrongNumberWrite.error) correction.commit();
     } else {
-      await supabase.from("sms_suppression_list").insert({
-        phone_number: from_phone_number,
-        suppression_reason,
-        is_active: true,
-        suppressed_by_discord_user_id: discord_user_id,
-        suppressed_at: new Date().toISOString(),
-      }).maybeSingle().catch(() => null);
+      // 2026-10-06: the old insert omitted both NOT NULL columns (phone_e164,
+      // suppression_type) and swallowed the error, so it never wrote a row.
+      // One fail-closed writer (retry -> automation_suppressions block -> alert).
+      const { recordPhoneSuppression } = await import("@/lib/domain/compliance/record-phone-suppression.js");
+      await recordPhoneSuppression({
+        supabase,
+        phone: from_phone_number,
+        reason: suppression_reason || "opt_out",
+        source: "discord_opt_out",
+        extra: { suppressed_by_discord_user_id: discord_user_id || null },
+      });
     }
   }
 
@@ -480,19 +484,18 @@ export async function handleSuppressNumber({
   const supabase = getDefaultSupabaseClient();
 
   try {
-    const { error } = await supabase
-      .from("sms_suppression_list")
-      .insert({
-        phone_number: from_phone_number,
-        suppression_reason: "discord_suppress_action",
-        is_active: true,
-        suppressed_by_discord_user_id: discord_user_id,
-        suppressed_at: new Date().toISOString(),
-      })
-      .maybeSingle();
-
-    if (error && !error?.message?.includes("duplicate")) {
-      throw error;
+    // 2026-10-06: the old insert omitted both NOT NULL columns, so it always
+    // failed. One fail-closed writer; a failure still blocks the number.
+    const { recordPhoneSuppression } = await import("@/lib/domain/compliance/record-phone-suppression.js");
+    const recorded = await recordPhoneSuppression({
+      supabase,
+      phone: from_phone_number,
+      reason: "discord_suppress_action",
+      source: "discord_suppress_action",
+      extra: { suppressed_by_discord_user_id: discord_user_id || null },
+    });
+    if (!recorded.ok && recorded.fallback_block !== true) {
+      throw new Error(recorded.error || "suppression_failed");
     }
 
     logger.info("number_suppressed", {

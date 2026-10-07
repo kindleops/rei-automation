@@ -1096,10 +1096,16 @@ describe("Discord SMS Reply Action Handlers", () => {
           };
         }
         if (table === "sms_suppression_list") {
+          // 2026-10-06: the canonical writer upserts the phone-scoped row with
+          // both NOT NULL columns (the old bare insert never succeeded).
           return {
-            insert() {
-              suppression_inserted = true;
-              return { maybeSingle: async () => ({ data: null, error: null }) };
+            upsert(row, options) {
+              suppression_inserted =
+                row.phone_e164 === "+16025550112" &&
+                Boolean(row.suppression_type) &&
+                row.sender_phone_e164 === null &&
+                options?.onConflict === "phone_e164,sender_phone_e164";
+              return { select: () => ({ maybeSingle: async () => ({ data: { id: "s1" }, error: null }) }) };
             },
           };
         }
