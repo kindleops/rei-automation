@@ -24,6 +24,8 @@ import {
   V3_TERMINAL,
   V3_ACTIONS,
   mapNegotiationMove,
+  classifyTaxContext,
+  TAX_CONTEXT,
 } from "@/lib/domain/seller-flow/seller-conversation-v3.js";
 import { buildNegotiationPlan, nextNegotiationMove } from "@/lib/domain/negotiation-v3/index.js";
 import { buildV3AuditRecord, compactV3AuditForInbox, isUncertainTurn, buildV3ResearchRecord, nextExpectedInfo } from "@/lib/domain/seller-flow/seller-conversation-v3-audit.js";
@@ -96,6 +98,14 @@ test("§22 Contact Matching Tags: corroborate / contradict ownership; an LLC cla
   assert.equal(contradicted.checklist.ownership.confidence, "low_contradicted_by_matching_tag");
   assert.equal(contradicted.review, false, "contradiction lowers confidence; S1 never goes to a person");
   assert.equal(contradicted.facts_patch.ownership_confidence, "low_contradicted_by_matching_tag");
+  assert.equal(contradicted.facts_patch.ownership_status, "seller_stated_unverified", "never silently verified");
+  assert.deepEqual(
+    { tag: contradicted.facts_patch.ownership_evidence.matching_tag, raw: contradicted.facts_patch.ownership_evidence.matching_tag_raw, contradiction: contradicted.facts_patch.ownership_evidence.contradiction, verified: contradicted.facts_patch.ownership_evidence.verified },
+    { tag: "tenant", raw: "Resident, Likely Renting", contradiction: true, verified: false },
+    "both the tag and the conversational claim are preserved",
+  );
+  assert.equal(contradicted.template_use_case, U.INTEREST, "the conversation continues");
+  assert.equal(corroborated.facts_patch.ownership_status, "confirmed");
   const renterLlc = plan({ classification: C("llc_corporation"), message: "my LLC owns it", stage_before: STAGE.S1, matching_flags: "Likely Renting" });
   assert.equal(renterLlc.template_use_case, U.CONNECTED_PERSON);
 });
@@ -280,6 +290,13 @@ test("§62 retext: no second opener because the best phone changed; release only
   assert.equal(evaluatePropertyTouchHold({ ...base, prior_rows: [sent("P1", "+16125550001", "K1")], person_key: null }).why, "candidate_person_unknown", "T10");
   assert.equal(evaluatePropertyTouchHold({ ...base, is_opener: false, prior_rows: [sent("P1", "+16125550001", "K1")], person_key: "K1" }).hold, false, "T14 follow-ups are never held");
   assert.equal(propertyTouchHoldMode({}), "off", "default OFF");
+  const cat = (o) => evaluatePropertyTouchHold({ ...base, prior_rows: [sent("P1", "+16125550001", "K1")], ...o }).category;
+  assert.equal(cat({ person_key: "K1" }), "same_person_new_number");
+  assert.equal(cat({ person_key: null }), "ambiguous_identity");
+  assert.equal(cat({ person_key: "K2", candidate_relationship: "spouse_co_owner" }), "spouse_co_owner");
+  assert.equal(cat({ person_key: "K2", candidate_relationship: "entity_principal" }), "entity_principal");
+  assert.equal(cat({ person_key: "K2" }), "would_hold");
+  assert.equal(cat({ person_key: "K2", phone_owned_by_person: true }), "confidently_different_person");
   assert.equal(propertyTouchHoldMode({ CAMPAIGN_PROPERTY_TOUCH_HOLD: "shadow" }), "shadow");
 });
 
@@ -315,4 +332,29 @@ test("§46 handoff with C's real engine and both money flags OFF: money becomes 
   });
   assert.equal(move.action === "QUOTE", false, "autonomy off: C never returns a QUOTE");
   if (p.monetary) assert.fail(`money left B with autonomy off: ${JSON.stringify(p.monetary)}`);
+});
+
+// ── owner 2026-10-07: "1031" never erases an explicit No ──────────────────
+test("1031 nuance: structure needed → tax branch; a plain No that mentions 1031 → nurture; ambiguous → nurture (no approved clarifier)", () => {
+  const needs = ["No, I'd need a 1031", "Not unless I can do a 1031", "only if it's a 1031 exchange", "I'd get killed on capital gains if I sold", "it would have to be a 1031"];
+  for (const m of needs) {
+    assert.equal(classifyTaxContext(m), TAX_CONTEXT.STRUCTURE_NEEDED, m);
+    const p = plan({ classification: C(m.startsWith("No") || m.startsWith("Not") ? "not_interested" : "unclear"), message: m, stage_before: STAGE.S2 });
+    assert.equal(p.template_use_case, U.CAPITAL_GAINS, m);
+  }
+  const declines = [
+    ["Almost certainly no. Little equity in property now since values are down, so 1031 not possible", "unclear"],
+    ["No, not interested. I already did a 1031 on it", "not_interested"],
+    ["Not selling, capital gains isn't an issue for me", "not_interested"],
+  ];
+  for (const [m, intent] of declines) {
+    assert.equal(classifyTaxContext(m, intent), TAX_CONTEXT.DECLINE, m);
+    const p = plan({ classification: C(intent), message: m, stage_before: STAGE.S2 });
+    assert.equal(p.terminal_action, V3_TERMINAL.NURTURE, m);
+    assert.notEqual(p.template_use_case, U.CAPITAL_GAINS, m);
+  }
+  const amb = plan({ classification: C("unclear"), message: "what about a 1031?", stage_before: STAGE.S2 });
+  assert.equal(classifyTaxContext("what about a 1031?"), TAX_CONTEXT.AMBIGUOUS);
+  assert.equal(amb.terminal_action, V3_TERMINAL.NURTURE);
+  assert.equal(amb.review, false);
 });

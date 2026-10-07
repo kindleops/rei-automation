@@ -2005,6 +2005,13 @@ export async function processSellerInboundMessage({
         const existing = transition.facts_patch && typeof transition.facts_patch === "object" ? transition.facts_patch : {};
         const merged = { ...existing };
         for (const [k, v] of Object.entries(v3_patch)) if (merged[k] === undefined || merged[k] === null) merged[k] = v;
+        // A contradicted Contact Matching Tag is never silently upgraded by
+        // another layer's "confirmed": both the tag and the claim are kept.
+        if (v3_patch.ownership_evidence?.contradiction === true) {
+          merged.ownership_status = v3_patch.ownership_status;
+          merged.ownership_evidence = v3_patch.ownership_evidence;
+          merged.ownership_confidence = v3_patch.ownership_confidence;
+        }
         if (v3_patch.update_years) merged.update_years = { ...(known_facts_v3?.update_years || {}), ...(existing.update_years || {}), ...v3_patch.update_years };
         transition = { ...transition, facts_patch: merged };
       }

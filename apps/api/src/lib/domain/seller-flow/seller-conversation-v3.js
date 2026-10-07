@@ -254,7 +254,7 @@ const isEarlyStage = (stage) => stage === V3_STAGES.S1 || stage === V3_STAGES.S2
 
 export const CHECKLIST_FIELDS = Object.freeze(["ownership", "interest", "asking_price", "condition", "occupancy"]);
 
-const OWNERSHIP_YES = new Set(["confirmed", "owner", "owner_confirmed", "yes", "verified", "entity_owner", "trust_owner", "estate"]);
+const OWNERSHIP_YES = new Set(["confirmed", "owner", "owner_confirmed", "yes", "verified", "entity_owner", "trust_owner", "estate", "seller_stated_unverified"]);
 const OWNERSHIP_TURN_INTENTS = new Set(["ownership_confirmed", "llc_corporation", "trust_ownership"]);
 const INTEREST_TURN_INTENTS = new Set(["seller_interested", "latent_interest", "asks_offer", "asking_price_provided", "asking_price_absent", "contract_requested"]);
 const CONDITION_TURN_INTENTS = new Set(["condition_disclosed"]);
@@ -387,6 +387,8 @@ export function deriveChecklist({
       source: ownership_known ? "known_facts" : ownership_turn || connected_person_authorized ? "this_turn" : ownership ? "implied_by_stage" : null,
       confidence: ownership_confidence,
       matching_tag: tag,
+      matching_tag_raw: identity_tag ? String(identity_tag).slice(0, 200) : null,
+      claim: connected_person_authorized ? "connected_person_authorized" : null,
     },
     interest: {
       collected: interest,
@@ -545,8 +547,21 @@ export function checklistFactsPatch(checklist = {}) {
   // §38: past S2 a "yes" answers the current question only — ownership / interest
   // are implied by the stage, never re-stamped from an affirmative there.
   const early = !checklist.stage || isEarlyStage(checklist.stage);
-  if (early && checklist.ownership?.source === "this_turn") patch.ownership_status = "confirmed";
-  if (early && checklist.ownership?.confidence && checklist.ownership?.source === "this_turn") patch.ownership_confidence = checklist.ownership.confidence;
+  // Owner 2026-10-07: a contradicted tag continues on the conversational claim
+  // with REDUCED confidence, never silently "verified" — both sides are kept.
+  const contradicted = checklist.ownership?.confidence === "low_contradicted_by_matching_tag";
+  if (early && checklist.ownership?.source === "this_turn") patch.ownership_status = contradicted ? "seller_stated_unverified" : "confirmed";
+  if (early && checklist.ownership?.confidence && checklist.ownership?.source === "this_turn") {
+    patch.ownership_confidence = checklist.ownership.confidence;
+    patch.ownership_evidence = {
+      conversational_claim: checklist.ownership.claim || "seller_affirmed_ownership",
+      matching_tag: checklist.ownership.matching_tag || "unknown",
+      matching_tag_raw: checklist.ownership.matching_tag_raw || null,
+      contradiction: contradicted,
+      verified: false,
+      source: "seller_conversation_v3",
+    };
+  }
   if (early && checklist.interest?.source === "this_turn") patch.interest = checklist.interest.value === "conditional" ? "conditional" : "interested";
   if (checklist.major_repairs?.source === "this_turn" && checklist.major_repairs.value) patch.major_repairs = checklist.major_repairs.value;
   if (checklist.asking_price?.declined && checklist.asking_price.source === "seller_declined_to_price") patch.asking_price_declined = true;
@@ -741,6 +756,30 @@ const FIRST_PERSON_RE = /\b(?:i|i'?m|me|my|yo|soy|vivo|rento|alquilo)\b/i;
 /** "Call me at …" / "my number is …" is the seller's own contact, not a referral. */
 const SELF_CONTACT_RE = /\b(?:call|text|reach)\s+me\b|\bmy\s+(?:cell|number|phone)\b|\bme\s+puede\s+llamar\b/i;
 const CAPITAL_GAINS_RE = /\bcapital\s+gains?\b|\b1031\b|\bdepreciation\s+recapture\b|\b(?:tax(?:es)?|irs)\s+(?:would|will)\s+(?:kill|eat|hit)\b|\bganancias?\s+de\s+capital\b/i;
+/**
+ * Owner 2026-10-07: "1031" never erases an explicit No — decide what the No answered.
+ *   structure_needed  the No rejects a plain cash sale because they need a
+ *                     1031-compatible / tax-aware transaction ("no, I'd need a 1031",
+ *                     "not unless I can do a 1031", "taxes would kill me if I sold")
+ *   decline           a plain not-interested that merely mentions 1031 / gains
+ *   ambiguous         a tax mention with neither
+ */
+export const TAX_CONTEXT = Object.freeze({ STRUCTURE_NEEDED: "structure_needed", DECLINE: "decline", AMBIGUOUS: "ambiguous" });
+const TAX_STRUCTURE_RE =
+  /\b(?:i'?d|i\s+would|i'?ll|i\s+will|i)\s+(?:need|have|want)\s+(?:to\s+(?:do|have)\s+)?(?:a\s+)?1031\b|\bnot\s+(?:unless|without)\s+(?:i\s+can\s+(?:do|get)\s+)?(?:a\s+)?1031\b|\bonly\s+(?:if|with|as)\s+(?:it'?s\s+|i\s+can\s+do\s+)?(?:a\s+)?1031\b|\b(?:would|will)\s+(?:have|need)\s+to\s+be\s+(?:a\s+)?1031\b|\bif\s+i\s+(?:can|could)\s+(?:do|get)\s+(?:a\s+)?1031\b|\b1031\s+(?:exchange\s+)?(?:is\s+)?(?:required|needed|a\s+must)\b/i;
+const TAX_PAIN_RE =
+  /\b(?:get|got|be)\s+killed\s+(?:on|by|with)\s+(?:the\s+)?(?:capital\s+gains?|taxes)\b|\b(?:capital\s+gains?|taxes)\s+(?:would|will)\s+(?:kill|eat|crush|hit)\b|\b(?:too\s+much|huge|big)\s+(?:capital\s+gains?|tax(?:es)?)\s+(?:hit|bill)?\b|\bdepreciation\s+recapture\b/i;
+const TAX_DECLINE_RE =
+  /^\s*(?:no+|nope|nah|not\s+interested|almost\s+certainly\s+(?:no|not)|definitely\s+(?:no|not)|not\s+(?:selling|for\s+sale))\b|\b(?:1031|capital\s+gains?)\s+(?:is\s+)?(?:not|isn'?t|wouldn'?t\s+be)\s+(?:possible|an\s+option|relevant|an\s+issue)\b|\bnot\s+(?:interested|selling)\b/i;
+
+export function classifyTaxContext(message = "", classifier_intent = null) {
+  const text = String(message || "");
+  if (TAX_STRUCTURE_RE.test(text)) return TAX_CONTEXT.STRUCTURE_NEEDED;
+  if (TAX_DECLINE_RE.test(text) || lower(classifier_intent) === "not_interested") return TAX_CONTEXT.DECLINE;
+  if (TAX_PAIN_RE.test(text)) return TAX_CONTEXT.STRUCTURE_NEEDED;
+  return TAX_CONTEXT.AMBIGUOUS;
+}
+
 const BARE_MAYBE_RE = /^\s*(?:maybe|perhaps|possibly|not\s+sure|idk|i\s+don'?t\s+know|tal\s+vez|quiz[aá]s?|no\s+s[eé])[\s.!?]*$/i;
 const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|ya|si|sí|correct|👍)[\s.!]*$/iu;
 const BARE_NO_REPLY_RE = /^\s*(?:no+|nope|nah|no\s+sir|no\s+ma'?am|nothing|none|nada)[\s.!]*$/i;
@@ -1034,18 +1073,28 @@ export function planSellerConversationV3({
     // "I can run the numbers…"). The wrong-number archive itself is kept.
     return terminal(b, V3_TERMINAL.WRONG_NUMBER, "v3_existing_lane_wrong_number", { keep_suppression: true });
   }
-  if (CAPITAL_GAINS_RE.test(String(message || "")) && !compliance && !["not_interested"].includes(intent)) {
-    // "I'd get killed on capital gains if I sold" — a reason to sell creatively, not a sale (§55).
-    return guardedReply(b, [U.CAPITAL_GAINS], "v3_capital_gains_creative_probe", ctx);
+  const tax_context = !compliance && (CAPITAL_GAINS_RE.test(String(message || "")) || v2_intent === V2_INTENTS.CAPITAL_GAINS)
+    ? classifyTaxContext(message, intent)
+    : null;
+  if (tax_context === TAX_CONTEXT.STRUCTURE_NEEDED) {
+    // "No, I'd need a 1031" / "taxes would kill me if I sold": the No rejects a plain
+    // cash sale, not a deal — the tax / transaction-structure branch (§55, approved wording).
+    return guardedReply(b, [U.CAPITAL_GAINS], "v3_capital_gains_creative_probe", ctx, { tax_context });
+  }
+  if (tax_context === TAX_CONTEXT.DECLINE) {
+    // "Almost certainly no… 1031 not possible": an explicit No that merely mentions 1031.
+    return terminal(b, V3_TERMINAL.NURTURE, "v3_decline_mentions_tax_nurture", { tax_context });
+  }
+  if (tax_context === TAX_CONTEXT.AMBIGUOUS) {
+    // No approved tax clarifier template exists yet (owner: clarifier if approved, else nurture).
+    return terminal(b, V3_TERMINAL.NURTURE, "v3_tax_mention_ambiguous_nurture", { tax_context });
   }
   if (intent === "hostile_or_legal" || v2_intent === V2_INTENTS.HOSTILE_LEGAL) {
     if (isLegalThreat(message)) return review(b, "v3_review_legal_threat");
     return terminal(b, V3_TERMINAL.ARCHIVE, "v3_hostile_archived_no_reply");
   }
   if (intent === "hostile_or_troll") return terminal(b, V3_TERMINAL.ARCHIVE, "v3_troll_archived_no_reply");
-  if (v2_intent === V2_INTENTS.CAPITAL_GAINS) {
-    return guardedReply(b, [U.CAPITAL_GAINS], "v3_capital_gains_creative_probe", ctx);
-  }
+  // (capital gains / 1031 is decided by classifyTaxContext above.)
   if (conditional_interest && num(asking_price_this_turn) == null) {
     // "Depends on the price" / "No… I will sell it for the right price" is a yes
     // with a condition: straight to price discovery (§23), never nurture. At S3
