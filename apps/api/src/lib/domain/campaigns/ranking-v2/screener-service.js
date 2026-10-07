@@ -11,7 +11,7 @@
 import { isSellerScreenerEnabled, SELLER_SCREENER_FLAG } from '@/lib/domain/campaigns/ranking-v2/flags.js'
 import { buildRowContexts, runSellerScreener, SCREENER_GRAPH_COLUMNS, normalizeScreenerExpression, compileGraphPushdown } from '@/lib/domain/campaigns/ranking-v2/seller-screener.js'
 import { measureMetricCoverage, screenerMetricCatalog, SCREENER_METRICS } from '@/lib/domain/campaigns/ranking-v2/screener-metrics.js'
-import { loadMarketsForRows, loadSituationsForRows } from '@/lib/domain/campaigns/ranking-v2/ranking-context.js'
+import { loadMarketsForRows, loadMatchingFlagsForRows, loadResponseContext, loadSituationsForRows } from '@/lib/domain/campaigns/ranking-v2/ranking-context.js'
 import { rankDiscoveryZips } from '@/lib/domain/campaigns/ranking-v2/campaign-discovery.js'
 import { summarizeCampaignQuality } from '@/lib/domain/campaigns/ranking-v2/campaign-quality-report.js'
 
@@ -35,6 +35,8 @@ function contextDeps(db, deps = {}) {
   return {
     loadSituations: deps.loadSituations || ((rows) => loadSituationsForRows(rows, { db })),
     loadMarkets: deps.loadMarkets || ((rows) => loadMarketsForRows(rows, { db })),
+    loadMatchingFlags: deps.loadMatchingFlags || ((rows) => loadMatchingFlagsForRows(rows, { db })),
+    loadResponse: deps.loadResponse || (() => loadResponseContext({ db })),
   }
 }
 
@@ -174,4 +176,36 @@ export async function readQualityReportForIds(ids = [], deps = {}) {
   const t2 = Date.now()
   const report = summarizeCampaignQuality(rows, contexts, { now: deps.now ?? Date.now() })
   return { ok: true, ...report, requested: new Set(ids).size, timings_ms: { graph: t1 - t0, context: t2 - t1, summarize: Date.now() - t2, total: Date.now() - t0 } }
+}
+
+/**
+ * TARGETING FUNNEL (owner rebuild 2026-10-07) — delivered → replied → owner →
+ * interested → price → realistic → negotiation → deal, by every targeting
+ * signal, optionally conditional on a stage (e.g. 'owner'). Read-only; one
+ * set-based outcome query + `= ANY($1)` graph reads + set-based contexts.
+ * input: { campaign_ids?: uuid[], since?: ISO, conditional_on?: stage }
+ */
+export async function runFunnel(input = {}, deps = {}) {
+  if (!isSellerScreenerEnabled(deps.env || process.env)) return screenerDisabledResponse()
+  const { FUNNEL_OUTCOME_SQL, FUNNEL_STAGES, funnelBySignal, funnelLabels, funnelSignals } = await import('@/lib/domain/campaigns/ranking-v2/funnel-analytics.js')
+  const campaignIds = [].concat(input.campaign_ids || []).map((v) => String(v).trim()).filter((v) => /^[0-9a-f-]{36}$/i.test(v))
+  const since = input.since && Number.isFinite(Date.parse(input.since)) ? new Date(input.since).toISOString() : null
+  if (!campaignIds.length && !since) return { ok: false, status: 400, error: 'scope_required', message: 'Pass campaign_ids and/or since.' }
+  const conditionalOn = FUNNEL_STAGES.includes(input.conditional_on) ? input.conditional_on : null
+  const db = deps.db || await defaultDb()
+  const t0 = Date.now()
+  const { rows: outcomes } = await db.query(FUNNEL_OUTCOME_SQL, [campaignIds.length ? campaignIds : null, since])
+  const capped = outcomes.slice(0, 50000)
+  const graph = await graphRowsByIds(capped.map((o) => o.property_id), db)
+  const contexts = await buildRowContexts(graph, contextDeps(db, deps))
+  const byId = new Map(graph.map((r, i) => [String(r.property_id), { row: r, ctx: contexts[i] }]))
+  const items = []
+  for (const o of capped) {
+    const hit = byId.get(String(o.property_id))
+    if (!hit) continue
+    const labels = funnelLabels({ delivered: true, inbound: o.inbound, intents: o.intents, stages: o.stages, opt_out: o.opt_out, ask: o.ask, value: hit.row.estimated_value, opportunity_stage: o.opportunity_stage })
+    items.push({ labels, signals: funnelSignals(hit.row, hit.ctx) })
+  }
+  const report = funnelBySignal(items, { conditionalOn })
+  return { ok: true, version: 'targeting_funnel_v1', scope: { campaign_ids: campaignIds, since }, delivered_properties: outcomes.length, truncated: outcomes.length > capped.length, matched_to_graph: items.length, ...report, ms: Date.now() - t0 }
 }

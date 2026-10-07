@@ -23,6 +23,9 @@
 import { SCREENER_METRICS, metricDefinition, metricThreshold, measureMetricCoverage } from '@/lib/domain/campaigns/ranking-v2/screener-metrics.js'
 import { computeCampaignRankV2, compareCampaignRankV2, RANK_BANDS } from '@/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js'
 import { marketQualityForRow } from '@/lib/domain/campaigns/ranking-v2/market-quality.js'
+import { equityEvidence, contactConfidenceBucket } from '@/lib/domain/campaigns/ranking-v2/contact-evidence.js'
+import { annotatePhoneOwnerCounts } from '@/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js'
+import { responseContextFor } from '@/lib/domain/campaigns/ranking-v2/market-response.js'
 
 export const SCREENER_VERSION = 'seller_screener_v1'
 
@@ -238,15 +241,18 @@ export function screenRows(rows, contexts, expr, { now = Date.now(), sellerLimit
     const mk = row.market || '(no market)'
     markets.set(mk, (markets.get(mk) || 0) + 1)
     const z = String(row.property_zip ?? '').slice(0, 5) || '(no zip)'
-    if (!zips.has(z)) zips.set(z, { zip: z, market: row.market || null, count: 0, equity: [], high_pressure: 0, tier_a: 0, market_quality: ctx.market?.score ?? null, market_label: ctx.market?.label ?? 'unknown' })
+    if (!zips.has(z)) zips.set(z, { zip: z, market: row.market || null, count: 0, equity: [], equity_class: { high: 0, low: 0, unknown: 0 }, contact_high: 0, high_pressure: 0, tier_a: 0, market_quality: ctx.market?.score ?? null, market_label: ctx.market?.label ?? 'unknown' })
     const zr = zips.get(z)
     zr.count += 1
-    zr.equity.push(row.equity_percent === null || row.equity_percent === undefined ? null : Number(row.equity_percent))
+    const eq = equityEvidence(row)
+    zr.equity.push(eq.known ? eq.percent : null) // median over KNOWN equity only
+    zr.equity_class[eq.class] += 1
+    if (contactConfidenceBucket(ctx.rank?.contact_score) === 'high') zr.contact_high += 1
     const fsp = ctx.situation?.opportunity_tier !== 'UNKNOWN' ? ctx.situation?.components?.forced_sale_pressure ?? null : null
     // high-pressure = acute tier A (A1); the raw forced-sale scale is not calibrated (§10)
     if (tier === 'A') zr.high_pressure += 1
     if (tier === 'A') zr.tier_a += 1
-    rankScores.push(ctx.rank?.rank_source === 'v2' ? ctx.rank.score : null)
+    rankScores.push(ctx.rank?.priority_score ?? null)
     forced.push(fsp)
   }
   const sorted = [...matched].sort((a, b) => compareCampaignRankV2({ property_id: a.row.property_id, _rank_v2: a.ctx.rank }, { property_id: b.row.property_id, _rank_v2: b.ctx.rank }))
@@ -258,7 +264,7 @@ export function screenRows(rows, contexts, expr, { now = Date.now(), sellerLimit
     property_type: row.property_type ?? null,
     tier: ctx.situation?.opportunity_tier ?? 'UNKNOWN',
     seller_situation: ctx.situation?.seller_situation ?? null,
-    rank: ctx.rank ? { band: ctx.rank.band, score: ctx.rank.score, priority_score: ctx.rank.priority_score, rank_source: ctx.rank.rank_source } : null,
+    rank: ctx.rank ? { band: ctx.rank.band, score: ctx.rank.score, priority_score: ctx.rank.priority_score, rank_source: ctx.rank.rank_source, layers: { contact: ctx.rank.layers.contact.score, pressure: ctx.rank.layers.pressure.effective, deal: ctx.rank.layers.deal.score, market: ctx.rank.layers.market.score }, equity_class: ctx.rank.layers.deal.equity.class } : null,
     components: ctx.situation?.components ?? null,
     sell365: ctx.situation?.sell_probability?.d365 ?? null,
     why: (ctx.rank?.why || []).map((w) => ({ code: w.code, label: w.label, kind: w.kind })),
@@ -270,7 +276,7 @@ export function screenRows(rows, contexts, expr, { now = Date.now(), sellerLimit
     tiers,
     markets: [...markets].map(([market, count]) => ({ market, count })).sort((a, b) => b.count - a.count),
     zips: [...zips.values()]
-      .map((z) => ({ zip: z.zip, market: z.market, count: z.count, high_pressure: z.high_pressure, tier_a: z.tier_a, median_equity_percent: median(z.equity), market_quality: z.market_quality, market_label: z.market_label }))
+      .map((z) => ({ zip: z.zip, market: z.market, count: z.count, high_pressure: z.high_pressure, tier_a: z.tier_a, contact_high: z.contact_high, median_equity_percent_known: median(z.equity), equity_known: z.equity.filter((v) => v !== null).length, equity_class: z.equity_class, market_quality: z.market_quality, market_label: z.market_label }))
       .sort((a, b) => b.high_pressure - a.high_pressure || b.count - a.count)
       .slice(0, 100),
     score_distribution: {
@@ -287,14 +293,26 @@ export function screenRows(rows, contexts, expr, { now = Date.now(), sellerLimit
  * deps.loadMarkets(rows)    → Map<`${zip}|${asset}`, MarketQuality>
  */
 export async function buildRowContexts(rows, deps = {}) {
-  const [situations, markets] = await Promise.all([
+  const [situations, markets, flags, response] = await Promise.all([
     typeof deps.loadSituations === 'function' ? deps.loadSituations(rows) : Promise.resolve(new Map()),
     typeof deps.loadMarkets === 'function' ? deps.loadMarkets(rows) : Promise.resolve(new Map()),
+    // prospects.matching_flags by seller_person_key (ONE read per batch)
+    typeof deps.loadMatchingFlags === 'function' ? deps.loadMatchingFlags(rows) : Promise.resolve(new Map()),
+    // fitted market response context (bounded; see market-response.js)
+    typeof deps.loadResponse === 'function' ? deps.loadResponse() : Promise.resolve(null),
   ])
+  // Rows are enriched IN PLACE with the contact evidence they need (matching
+  // tag, shared-phone count) so filters and ranking read the same values.
+  const annotated = annotatePhoneOwnerCounts(rows)
+  for (let i = 0; i < rows.length; i += 1) {
+    const key = String(rows[i].seller_person_key ?? '').trim()
+    if (rows[i].matching_flags === undefined) rows[i].matching_flags = key && flags?.has(key) ? flags.get(key) : null
+    if (rows[i].phone_owner_count === undefined) rows[i].phone_owner_count = annotated[i].phone_owner_count ?? null
+  }
   return rows.map((row) => {
     const situation = situations?.get(String(row.property_id)) ?? null
     const market = marketQualityForRow(row, markets)
-    const rank = computeCampaignRankV2(row, { situation, market, includeWhy: true })
+    const rank = computeCampaignRankV2(row, { situation, market, response: responseContextFor(row, response), includeWhy: true })
     return { situation, market, rank }
   })
 }
@@ -305,6 +323,7 @@ export const SCREENER_GRAPH_COLUMNS = Object.freeze([
   'ownership_years', 'year_built', 'tax_delinquent', 'active_lien', 'out_of_state_owner', 'is_corporate_owner',
   'sms_eligible', 'queue_eligible', 'phone_type', 'usage_2_months', 'identity_alignment', 'never_contacted',
   'last_outbound_at', 'acquisition_score', 'aos_score', 'total_loan_balance', 'language',
+  'canonical_e164', 'seller_person_key', 'owner_type', 'property_flags_text', 'true_post_contact_suppression',
 ])
 
 /**

@@ -18,6 +18,7 @@
 // proxy, sex, religion, disability, familial status, age, marital status).
 
 import { contactabilityScore } from '@/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js'
+import { equityEvidence, matchingTagClass } from '@/lib/domain/campaigns/ranking-v2/contact-evidence.js'
 
 function num(value) {
   if (value === null || value === undefined || value === '') return null
@@ -58,7 +59,10 @@ export const SCREENER_METRICS = Object.freeze({
   property_type: { label: 'Property type', source: 'graph', column: 'property_type', type: 'text', get: (r) => text(r.property_type), threshold: 0.5 },
   units_count: { label: 'Units', source: 'graph', column: 'units_count', type: 'number', get: (r) => num(r.units_count), threshold: 0.3 },
   // ── raw facts (graph) ──
-  equity_percent: { label: 'Equity %', source: 'graph', column: 'equity_percent', type: 'number', get: (r) => num(r.equity_percent) },
+  // equity_known_v1: the % exists only when loan>0 & value>0, or vendor Free-And-Clear;
+  // a zero/blank loan is UNKNOWN (never 100%). Not pushed down (no column = the rule).
+  equity_percent: { label: 'Equity % (known only)', source: 'derived', type: 'number', formula: 'equity_known_v1', get: (r) => equityEvidence(r).percent, threshold: 0.4 },
+  equity_class: { label: 'Equity (High / Low / Unknown)', source: 'derived', type: 'text', formula: 'equity_known_v1 class; vendor High/Low Equity flag gives a class without a %', get: (r) => equityEvidence(r).class, threshold: 0 },
   ownership_years: { label: 'Years owned', source: 'graph', column: 'ownership_years', type: 'number', get: (r) => num(r.ownership_years) },
   year_built: { label: 'Year built', source: 'graph', column: 'year_built', type: 'number', get: (r) => num(r.year_built) },
   estimated_value: { label: 'Estimated value', source: 'graph', column: 'estimated_value', type: 'number', get: (r) => num(r.estimated_value) },
@@ -96,7 +100,10 @@ export const SCREENER_METRICS = Object.freeze({
     },
     threshold: 0.5,
   },
-  contactability: { label: 'Contactability', source: 'derived', type: 'number', formula: 'identity + line type + usage (campaign_rank_v2.contactabilityScore)', get: (r) => contactabilityScore(r) },
+  contact_confidence: { label: 'Contact confidence (L1)', source: 'derived', type: 'number', formula: 'line type + identity + match tag + usage − shared phone (contact-evidence.js)', get: (r) => contactabilityScore(r), threshold: 0 },
+  contactability: { label: 'Contact confidence (L1, alias)', source: 'derived', type: 'number', formula: 'contact_confidence', get: (r) => contactabilityScore(r), threshold: 0 },
+  identity_alignment: { label: 'Identity alignment', source: 'graph', column: 'identity_alignment', type: 'text', get: (r) => text(r.identity_alignment), threshold: 0.5 },
+  matching_tag: { label: 'Contact match tag', source: 'derived', type: 'text', formula: 'prospects.matching_flags → likely_owner | linked_to_company | potential_owner | potentially_linked_to_company | family_only | renter_no_owner', get: (r) => { const t = matchingTagClass(r.matching_flags, { entityOwned: r.is_corporate_owner === true || r.is_corporate_owner === 't' }); return t === 'missing' ? null : t }, threshold: 0.2 },
   // ── seller situation (A1) ──
   forced_sale_pressure: { label: 'Forced-sale pressure', source: 'situation', type: 'number', get: comp('forced_sale_pressure') },
   landlord_fatigue: { label: 'Landlord fatigue', source: 'situation', type: 'number', get: comp('landlord_fatigue') },
@@ -116,7 +123,7 @@ export const SCREENER_METRICS = Object.freeze({
   liquidity: { label: 'Market liquidity', source: 'market', type: 'number', get: (r, ctx) => num(ctx?.market?.terms?.liquidity), threshold: 0.4 },
   investor_activity: { label: 'Investor activity', source: 'market', type: 'number', get: (r, ctx) => num(ctx?.market?.terms?.investor_activity), threshold: 0.4 },
   // ── rank ──
-  rank_score: { label: 'Rank v2 score (within tier)', source: 'rank', type: 'number', get: (r, ctx) => (ctx?.rank?.rank_source === 'v2' ? num(ctx.rank.score) : null) },
+  rank_score: { label: 'Rank v2.1 priority', source: 'rank', type: 'number', get: (r, ctx) => num(ctx?.rank?.priority_score), threshold: 0 },
 })
 
 export function metricDefinition(key) {

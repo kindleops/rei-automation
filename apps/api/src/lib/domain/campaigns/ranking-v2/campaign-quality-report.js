@@ -17,6 +17,7 @@
 
 import { measureMetricCoverage } from '@/lib/domain/campaigns/ranking-v2/screener-metrics.js'
 import { HARD_FAMILIES } from '@/lib/acquisition/seller-situation/index.js'
+import { contactConfidenceBucket, equityEvidence } from '@/lib/domain/campaigns/ranking-v2/contact-evidence.js'
 
 export const QUALITY_REPORT_VERSION = 'campaign_quality_report_v1'
 
@@ -83,6 +84,9 @@ export function summarizeCampaignQuality(rows = [], contexts = [], { now = Date.
   let touchUnknown = 0
   let reviewExpected = 0
   const liquidity = { strong: 0, moderate: 0, thin: 0, unknown: 0 }
+  const equity = { high: 0, low: 0, unknown: 0, known_percent: 0 }
+  const contactConf = { high: 0, medium: 0, low: 0, unknown: 0 }
+  const tags = {}
   for (let i = 0; i < n; i += 1) {
     const row = rows[i]
     const ctx = contexts[i] || {}
@@ -106,13 +110,18 @@ export function summarizeCampaignQuality(rows = [], contexts = [], { now = Date.
     if (nc === true || nc === 't') { /* never touched */ } else if (nc === false || nc === 'f' || row.last_outbound_at) touched += 1
     else touchUnknown += 1
     inc(liquidity, ctx.market?.label && liquidity[ctx.market.label] !== undefined ? ctx.market.label : 'unknown')
+    const eq = equityEvidence(row)
+    equity[eq.class] += 1
+    if (eq.known) equity.known_percent += 1
+    inc(contactConf, contactConfidenceBucket(ctx.rank?.contact_score))
+    inc(tags, ctx.rank?.layers?.contact?.tag || 'missing')
   }
   const coverage = measureMetricCoverage(rows, contexts, [
     'forced_sale_pressure', 'sell365', 'equity_unlock', 'landlord_fatigue', 'tax_pain', 'opportunity_tier',
-    'market_quality', 'buyer_depth', 'contactability', 'equity_percent', 'ownership_years', 'phone_type',
+    'market_quality', 'buyer_depth', 'contact_confidence', 'equity_percent', 'equity_class', 'matching_tag', 'ownership_years', 'phone_type',
   ], now)
   const ranked = contexts.map((c, i) => ({ row: rows[i], ctx: c }))
-    .filter((x) => x.ctx?.rank?.rank_source === 'v2')
+    .filter((x) => x.ctx?.rank?.priority_score !== null && x.ctx?.rank?.priority_score !== undefined)
     .sort((a, b) => (b.ctx.rank.priority_score ?? 0) - (a.ctx.rank.priority_score ?? 0))
   const pick = (list) => list.slice(0, examples).map(({ row, ctx }) => ({
     property_id: row.property_id,
@@ -120,7 +129,8 @@ export function summarizeCampaignQuality(rows = [], contexts = [], { now = Date.
     zip: String(row.property_zip ?? '').slice(0, 5) || null,
     tier: ctx.situation?.opportunity_tier ?? 'UNKNOWN',
     band: ctx.rank?.band ?? null,
-    score: ctx.rank?.score ?? null,
+    score: ctx.rank?.priority_score ?? null,
+    layers: ctx.rank?.layers ? { contact: ctx.rank.layers.contact.score, pressure: ctx.rank.layers.pressure.effective, deal: ctx.rank.layers.deal.score, market: ctx.rank.layers.market.score } : null,
     why: (ctx.rank?.why || []).map((w) => w.label),
   }))
   return {
@@ -138,6 +148,10 @@ export function summarizeCampaignQuality(rows = [], contexts = [], { now = Date.
     prior_property_touch: { touched, never: n - touched - touchUnknown, unknown: touchUnknown },
     expected_review_only: { count: reviewExpected, rule: "identity_alignment not in ('verified','probable')" },
     buyer_liquidity: liquidity,
+    // equity_known_v1: unknown is never shown as 100%
+    equity: { ...equity, rule: 'known only when loan>0 & value>0, or vendor Free And Clear; vendor High/Low Equity flag = class without %' },
+    contact_confidence: contactConf,
+    matching_tags: sortedEntries(tags, 10),
     examples: { top_ranked: pick(ranked), soft_only: pick(ranked.filter((x) => x.ctx.situation?.opportunity_tier === 'C').reverse()) },
   }
 }

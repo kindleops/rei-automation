@@ -171,9 +171,9 @@ export function SellerScreener({ onClose }: { onClose?: () => void }) {
                   <section className="aqi-block">
                     <h4 className="aqi-eyebrow">ZIP distribution</h4>
                     <table className="aqi-table">
-                      <thead><tr><th>ZIP</th><th>Market</th><th className="is-n">Sellers</th><th className="is-n">Tier A</th><th className="is-n">Med. equity</th><th>Market quality</th></tr></thead>
+                      <thead><tr><th>ZIP</th><th>Market</th><th className="is-n">Sellers</th><th className="is-n">Tier A</th><th className="is-n">Known equity</th><th className="is-n">H / L / ?</th><th>Market quality</th></tr></thead>
                       <tbody>{r.zips.slice(0, 10).map((z) => (
-                        <tr key={z.zip}><td className="aqi-num">{z.zip}</td><td>{z.market ?? '—'}</td><td className="is-n aqi-num">{fmtN(z.count)}</td><td className="is-n aqi-num">{fmtN(z.tier_a)}</td><td className="is-n aqi-num">{z.median_equity_percent === null ? '—' : `${Math.round(z.median_equity_percent)}%`}</td><td><span className={cx('aqi-mq', `is-${z.market_label}`)}>{z.market_quality ?? '—'} · {z.market_label}</span></td></tr>
+                        <tr key={z.zip}><td className="aqi-num">{z.zip}</td><td>{z.market ?? '—'}</td><td className="is-n aqi-num">{fmtN(z.count)}</td><td className="is-n aqi-num">{fmtN(z.tier_a)}</td><td className="is-n aqi-num">{z.median_equity_percent_known === null ? 'unknown' : `${Math.round(z.median_equity_percent_known)}% · n ${fmtN(z.equity_known ?? 0)}`}</td><td className="is-n aqi-num">{z.equity_class ? `${fmtN(z.equity_class.high)} / ${fmtN(z.equity_class.low)} / ${fmtN(z.equity_class.unknown)}` : '—'}</td><td><span className={cx('aqi-mq', `is-${z.market_label}`)}>{z.market_quality ?? '—'} · {z.market_label}</span></td></tr>
                       ))}</tbody>
                     </table>
                   </section>
@@ -235,6 +235,8 @@ export function SellerScreener({ onClose }: { onClose?: () => void }) {
                       <div><dt>Tier A</dt><dd className="is-tier-A">{fmtN(z.tiers.A)}</dd></div>
                       <div><dt>Tier B</dt><dd>{fmtN(z.tiers.B)}</dd></div>
                       <div><dt>Reachable</dt><dd>{fmtN(z.reachable)}</dd></div>
+                      <div><dt>High contact</dt><dd>{z.contact_high === undefined ? '—' : fmtN(z.contact_high)}</dd></div>
+                      <div><dt>Known equity</dt><dd>{z.median_equity_percent_known === null ? 'unknown' : `${Math.round(z.median_equity_percent_known)}%`}</dd></div>
                       <div><dt>Liquidity</dt><dd>{z.market_terms?.liquidity ?? '—'}</dd></div>
                       <div><dt>Buyers</dt><dd>{z.market_terms?.buyer_depth ?? '—'}</dd></div>
                       <div><dt>Investor</dt><dd>{z.market_terms?.investor_activity ?? '—'}</dd></div>

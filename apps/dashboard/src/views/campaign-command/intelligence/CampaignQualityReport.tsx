@@ -69,7 +69,7 @@ export function CampaignQualityReport({ report, onOpenProperty }: { report: Qual
   const n = report.denominator
   const tiers = TIER_ORDER.map((t) => ({ key: t, count: report.tiers[t] ?? 0, tone: TIER_TONE[t], label: TIER_LABEL[t] }))
   const segments = SEGMENT_ORDER.map((k) => report.segments.find((s) => s.key === k)).filter((s): s is NonNullable<typeof s> => Boolean(s))
-  const sources: RankSource[] = ['v2', 'legacy_fallback', 'unranked']
+  const sources: RankSource[] = ['v2', 'legacy_fallback', 'v2_no_situation', 'unranked']
   const cov = Object.values(report.coverage)
   const lt = report.contactability.line_type
   const liq = report.buyer_liquidity
@@ -137,6 +137,30 @@ export function CampaignQualityReport({ report, onOpenProperty }: { report: Qual
             {report.contactability.identity.map((r) => <li key={r.key}><span>Identity · {titleCase(r.key)}</span><Share count={r.count} of={n} /></li>)}
           </ul>
         </section>
+        {report.equity || report.contact_confidence ? (
+          <section className="aqi-block">
+            <h4 className="aqi-eyebrow">Equity · contact confidence</h4>
+            {report.equity ? (
+              <>
+                <Bar parts={[{ key: 'high', count: report.equity.high, tone: 'ok', label: 'High equity' }, { key: 'low', count: report.equity.low, tone: 'attn', label: 'Low equity' }, { key: 'unknown', count: report.equity.unknown, tone: 'void', label: 'Equity unknown' }]} of={n} label="Equity class" />
+                <ul className="aqi-kv">
+                  <li><span>High equity</span><Share count={report.equity.high} of={n} /></li>
+                  <li><span>Low equity</span><Share count={report.equity.low} of={n} /></li>
+                  <li><LCTooltip content={`Unknown is never shown as 100%. Rule: ${report.equity.rule}`}><span>Equity unknown</span></LCTooltip><Share count={report.equity.unknown} of={n} /></li>
+                  <li><span>Equity % known (loan + value)</span><Share count={report.equity.known_percent} of={n} /></li>
+                </ul>
+              </>
+            ) : null}
+            {report.contact_confidence ? (
+              <ul className="aqi-kv aqi-kv--sub">
+                <li><span>Contact confidence · high</span><Share count={report.contact_confidence.high} of={n} /></li>
+                <li><span>Contact confidence · medium</span><Share count={report.contact_confidence.medium} of={n} /></li>
+                <li><span>Contact confidence · low</span><Share count={report.contact_confidence.low} of={n} /></li>
+                {(report.matching_tags || []).slice(0, 5).map((t) => <li key={t.key}><span>Match tag · {t.key === 'missing' ? 'not recorded' : titleCase(t.key)}</span><Share count={t.count} of={n} /></li>)}
+              </ul>
+            ) : null}
+          </section>
+        ) : null}
         <section className="aqi-block">
           <h4 className="aqi-eyebrow">Touch · review · liquidity</h4>
           <ul className="aqi-kv">

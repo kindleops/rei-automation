@@ -5,8 +5,10 @@
  */
 
 export type Tier = 'A' | 'B' | 'C' | 'UNKNOWN'
-export type Band = 'A' | 'B' | 'C' | 'FALLBACK' | 'UNRANKED'
-export type RankSource = 'v2' | 'legacy_fallback' | 'unranked'
+export type Band = 'A' | 'B' | 'C' | 'UNKNOWN' | 'FALLBACK' | 'UNRANKED'
+export type RankSource = 'v2' | 'legacy_fallback' | 'v2_no_situation' | 'unranked'
+export type EquityClass = 'high' | 'low' | 'unknown'
+export interface RankLayersCompact { contact: number; pressure: number; deal: number; market: number }
 
 export interface Counted { key: string; count: number }
 
@@ -56,7 +58,7 @@ export interface ScreenerSeller {
   property_type: string | null
   tier: Tier
   seller_situation: string | null
-  rank: { band: Band; score: number | null; priority_score: number | null; rank_source: RankSource } | null
+  rank: { band: Band; score: number | null; priority_score: number | null; rank_source: RankSource; layers?: RankLayersCompact; equity_class?: EquityClass } | null
   components: Record<string, number | null> | null
   sell365: number | null
   why: WhyItem[]
@@ -75,7 +77,7 @@ export interface ScreenerResult {
   unknown_excluded: Record<string, number>
   tiers: Record<Tier, number>
   markets: Array<{ market: string; count: number }>
-  zips: Array<{ zip: string; market: string | null; count: number; high_pressure: number; tier_a: number; median_equity_percent: number | null; market_quality: number | null; market_label: string }>
+  zips: Array<{ zip: string; market: string | null; count: number; high_pressure: number; tier_a: number; contact_high?: number; median_equity_percent_known: number | null; equity_known?: number; equity_class?: Record<EquityClass, number>; market_quality: number | null; market_label: string }>
   score_distribution: { rank_score: Histogram; forced_sale_pressure: Histogram }
   sellers: ScreenerSeller[]
   coverage_in_cohort?: Record<string, MetricCoverage>
@@ -97,7 +99,11 @@ export interface DiscoveryZip {
   tiers: Record<Tier, number>
   high_pressure: number
   pressure_pool: number
-  median_equity_percent: number | null
+  median_equity_percent_known: number | null
+  equity_known?: number
+  equity_class?: Record<EquityClass, number>
+  contact_high?: number
+  cohort_ready?: number
   market_quality: number | null
   market_label: string
   market_terms: MarketTerms | null
@@ -134,6 +140,13 @@ export interface SituationRead {
   computed: string
 }
 
+export interface LayerEvidence { code: string; points: number; source: string }
+export interface RankLayers {
+  contact: { score: number; weight: number; line: string; identity: string; tag: string; known_signals: number; evidence: LayerEvidence[] }
+  pressure: { score: number; gate: number; effective: number; weight: number; source: string; terms: Array<{ key: string; value: number | null; used_prior: boolean; weight: number; points: number }> }
+  deal: { score: number; weight: number; equity: { known: boolean; percent: number | null; class: EquityClass; rule: string }; value_known: boolean }
+  market: { score: number; weight: number; market_quality: number | null; used_prior: boolean; response_context_points: number | null }
+}
 export interface RankTerm { key: string; weight: number; value: number | null; used_prior: boolean; prior: number; points: number }
 
 export interface WhyTargetedProperty {
@@ -142,7 +155,12 @@ export interface WhyTargetedProperty {
   zip: string | null
   situation: SituationRead | null
   market: { score: number | null; label: string; terms: MarketTerms; inputs: Record<string, number | null>; provenance: Record<string, unknown> } | null
-  rank: { ranking_version: string; rank_source: RankSource; band: Band; score: number | null; priority_score: number | null; coverage: { terms_known: number; terms_total: number; ratio: number }; terms: RankTerm[]; fallback_reason: string | null } | null
+  rank: {
+    ranking_version: string; rank_source: RankSource; band: Band; score: number | null; priority_score: number | null; fallback_reason: string | null
+    coverage: { contact_signals_known?: number; situation?: boolean; equity_known?: boolean; market_known?: boolean; terms_known?: number; terms_total?: number }
+    terms?: RankTerm[]
+    layers?: RankLayers
+  } | null
   why: WhyItem[]
 }
 
@@ -167,6 +185,9 @@ export interface QualityReport {
   prior_property_touch: { touched: number; never: number; unknown: number }
   expected_review_only: { count: number; rule: string }
   buyer_liquidity: { strong: number; moderate: number; thin: number; unknown: number }
+  equity?: { high: number; low: number; unknown: number; known_percent: number; rule: string }
+  contact_confidence?: { high: number; medium: number; low: number; unknown: number }
+  matching_tags?: Counted[]
   examples: { top_ranked: QualityExample[]; soft_only: QualityExample[] }
   fixture?: boolean
 }

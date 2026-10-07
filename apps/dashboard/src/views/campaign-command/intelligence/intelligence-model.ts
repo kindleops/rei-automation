@@ -26,9 +26,11 @@ export const TIER_LABEL: Record<Tier, string> = { A: 'A · Acute pressure', B: '
 export const TIER_SHORT: Record<Tier, string> = { A: 'Tier A', B: 'Tier B', C: 'Tier C', UNKNOWN: 'Unknown' }
 
 export const BAND_LABEL: Record<Band, string> = {
-  A: 'Band A · acute', B: 'Band B · stacked', C: 'Band C · soft', FALLBACK: 'Legacy fallback (no current evidence)', UNRANKED: 'Unranked',
+  A: 'Tier A · acute', B: 'Tier B · stacked', C: 'Tier C · soft', UNKNOWN: 'No current seller evidence', FALLBACK: 'Legacy fallback (no current evidence)', UNRANKED: 'Unranked',
 }
-export const RANK_SOURCE_LABEL: Record<RankSource, string> = { v2: 'Ranked by v2', legacy_fallback: 'Legacy fallback', unranked: 'Unranked' }
+export const RANK_SOURCE_LABEL: Record<RankSource, string> = { v2: 'Ranked by v2.1', legacy_fallback: 'Legacy fallback (pressure layer)', v2_no_situation: 'v2.1 · no seller evidence', unranked: 'Unranked' }
+export const EQUITY_CLASS_LABEL = { high: 'High equity', low: 'Low equity', unknown: 'Equity unknown' } as const
+export const LAYER_LABEL = { contact: 'Contact confidence', pressure: 'Seller pressure × contact', deal: 'Deal quality', market: 'Market liquidity' } as const
 
 export const SEGMENT_ORDER = ['acute', 'tax_lien', 'vacancy_repair', 'stacked_landlord', 'other_soft', 'unknown_score'] as const
 

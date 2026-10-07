@@ -10,6 +10,11 @@
 
 import { describeMarketQuality } from '@/lib/domain/campaigns/ranking-v2/market-quality.js'
 import { EVIDENCE_CATALOG } from '@/lib/acquisition/seller-situation/index.js'
+import { equityEvidence } from '@/lib/domain/campaigns/ranking-v2/contact-evidence.js'
+
+// Equity codes derived from equity_percent are only shown when equity is KNOWN
+// (equity_known_v1): a zero/blank loan balance is not proof of 100% equity.
+const DERIVED_EQUITY_CODE = /^(EQUITY_\d+P|EQUITY_GE_\d+|HIGH_EQUITY_CORROBORATED|LONG_HOLD_EQUITY|MID_HOLD_EQUITY|NON_PRIMARY_EQUITY|FREE_AND_CLEAR)$/
 
 /**
  * Fallback operator labels. A1's EVIDENCE_CATALOG (seller-situation) is the
@@ -114,7 +119,8 @@ function num(value) {
 /**
  * @returns {{code:string,label:string,kind:'situation'|'fact'|'market'|'contact',points:number|null,source:string}[]}
  */
-export function buildWhyTargeted({ row = {}, situation = null, market = null, limit = 8 } = {}) {
+export function buildWhyTargeted({ row = {}, situation = null, market = null, contact = null, limit = 8 } = {}) {
+  const equity = equityEvidence(row)
   const out = []
   const seen = new Set()
   const push = (item) => {
@@ -126,6 +132,7 @@ export function buildWhyTargeted({ row = {}, situation = null, market = null, li
   evidence.sort((a, b) => (num(b.points) ?? 0) - (num(a.points) ?? 0))
   for (const e of evidence) {
     if ((num(e.points) ?? 0) <= 0) continue
+    if (!equity.known && DERIVED_EQUITY_CODE.test(String(e.code))) continue
     const label = labelForEvidenceCode(e.code)
     if (!label) continue
     push({ code: String(e.code), label, kind: 'situation', points: num(e.points), source: `${e.source_table || '?'}.${e.source_field || '?'}` })
@@ -133,9 +140,12 @@ export function buildWhyTargeted({ row = {}, situation = null, market = null, li
   // Raw graph facts that are evidence in their own right (only when present).
   const years = num(row.ownership_years)
   if (years !== null && years >= 10) push({ code: 'TENURE_YEARS', label: `${Math.floor(years)} yrs owned`, kind: 'fact', points: null, source: 'campaign_target_graph.ownership_years' })
-  const eq = num(row.equity_percent)
-  const loanKnown = num(row.total_loan_balance) !== null
-  if (eq !== null && eq >= 40 && loanKnown) push({ code: 'EQUITY_PERCENT', label: `${Math.round(eq)}% equity`, kind: 'fact', points: null, source: 'campaign_target_graph.equity_percent' })
+  if (equity.known && equity.percent >= 40) push({ code: 'EQUITY_PERCENT', label: `${Math.round(equity.percent)}% equity`, kind: 'fact', points: null, source: `equity_known_v1:${equity.rule}` })
+  else if (!equity.known && equity.class === 'high') push({ code: 'EQUITY_CLASS_VENDOR', label: 'high equity (vendor flag, % unknown)', kind: 'fact', points: null, source: 'properties.property_flags_text' })
+  if (contact) {
+    if (contact.line === 'W' && (contact.identity === 'verified' || contact.identity === 'probable')) push({ code: 'CONTACT_VERIFIED_MOBILE', label: `${contact.identity} mobile`, kind: 'contact', points: null, source: 'campaign_target_graph.phone_type+identity_alignment' })
+    if (contact.tag === 'likely_owner' || contact.tag === 'linked_to_company') push({ code: `TAG_${contact.tag.toUpperCase()}`, label: contact.tag === 'likely_owner' ? 'likely owner (match tag)' : 'linked to company (entity owner)', kind: 'contact', points: null, source: 'prospects.matching_flags' })
+  }
   if (row.tax_delinquent === true || row.tax_delinquent === 't') push({ code: 'TAX_DELINQUENT', label: 'tax delinquent', kind: 'fact', points: null, source: 'campaign_target_graph.tax_delinquent' })
   if (row.active_lien === true || row.active_lien === 't') push({ code: 'ACTIVE_LIEN', label: 'active lien', kind: 'fact', points: null, source: 'campaign_target_graph.active_lien' })
   const mq = describeMarketQuality(market)

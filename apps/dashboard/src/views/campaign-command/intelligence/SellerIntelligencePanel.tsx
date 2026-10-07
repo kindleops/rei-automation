@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { LCError, LCSkeleton, LCTooltip, cx } from '../../../shared/lc'
 import { readWhyTargeted } from './intelligence-api'
-import { BAND_LABEL, COMPONENT_LABEL, PROVENANCE_LABEL, RANK_SOURCE_LABEL, TIER_LABEL, angleLabel, componentWords, fmtN, situationLabel, titleCase } from './intelligence-model'
+import { BAND_LABEL, COMPONENT_LABEL, EQUITY_CLASS_LABEL, LAYER_LABEL, PROVENANCE_LABEL, RANK_SOURCE_LABEL, TIER_LABEL, angleLabel, componentWords, fmtN, situationLabel, titleCase } from './intelligence-model'
 import type { WhyTargetedProperty } from './intelligence-types'
 import './intelligence.css'
 
@@ -46,7 +46,6 @@ export function SellerIntelligencePanel({ propertyId, preload = null, fixture = 
 }
 
 const COMPONENT_ORDER = ['forced_sale_pressure', 'equity_unlock', 'landlord_fatigue', 'tax_pain', 'property_burden', 'debt_pressure']
-const TERM_LABEL: Record<string, string> = { sell365: 'Sell chance 365d', forced_sale: 'Forced-sale', stacked: 'Stacked evidence', equity: 'Equity', other_pressure: 'Other pressure', aos: 'AOS', market: 'Market', contact: 'Contactability' }
 
 export function SellerIntelligenceBody({ p, fixture = false }: { p: WhyTargetedProperty; fixture?: boolean }) {
   const s = p.situation
@@ -128,22 +127,31 @@ export function SellerIntelligenceBody({ p, fixture = false }: { p: WhyTargetedP
           <h4 className="aqi-eyebrow">Campaign rank</h4>
           <p className={cx('aqi-si__rank', r.rank_source !== 'v2' && 'is-fallback')}>
             <b>{BAND_LABEL[r.band]}</b>
-            <span className="aqi-num">{r.score === null ? '—' : `score ${r.score.toFixed(1)}`} · priority {r.priority_score === null ? '—' : r.priority_score.toFixed(2)}</span>
+            <span className="aqi-num">priority {r.score === null ? '—' : r.score.toFixed(1)}{r.priority_score === null ? ' · not eligible' : ''}</span>
             <span>{RANK_SOURCE_LABEL[r.rank_source]}{r.fallback_reason ? ` · ${titleCase(r.fallback_reason)}` : ''}</span>
           </p>
-          {r.terms.length ? (
+          {r.layers ? (
             <ul className="aqi-terms">
-              {r.terms.map((t) => (
-                <li key={t.key} className={cx(t.used_prior && 'is-prior')}>
-                  <LCTooltip content={t.used_prior ? `Unknown — neutral prior ${t.prior} used (weight ${t.weight})` : `Value ${t.value} × weight ${t.weight}`}>
-                    <span>{TERM_LABEL[t.key] ?? t.key}</span>
-                  </LCTooltip>
-                  <b className="aqi-num">{t.points.toFixed(1)}</b>
-                </li>
-              ))}
+              {(['contact', 'pressure', 'deal', 'market'] as const).map((k) => {
+                const L = r.layers![k]
+                const shown = k === 'pressure' ? r.layers!.pressure.effective : L.score
+                const tip = k === 'contact'
+                  ? r.layers!.contact.evidence.map((e) => `${titleCase(e.code)} ${e.points >= 0 ? '+' : ''}${e.points}`).join(' · ')
+                  : k === 'pressure'
+                    ? `${r.layers!.pressure.source === 'legacy_fallback' ? 'Legacy fallback (no current seller evidence)' : 'Seller situation v2'} · ${r.layers!.pressure.score.toFixed(1)} × contact gate ${r.layers!.pressure.gate.toFixed(2)}`
+                    : k === 'deal'
+                      ? `${EQUITY_CLASS_LABEL[r.layers!.deal.equity.class]}${r.layers!.deal.equity.percent === null ? ' (% unknown — never assumed 100%)' : ` · ${r.layers!.deal.equity.percent}%`} · rule ${r.layers!.deal.equity.rule}`
+                      : `${r.layers!.market.used_prior ? 'Market quality not measured — neutral 50' : `Market quality ${r.layers!.market.market_quality}`}${r.layers!.market.response_context_points === null ? ' · no response context' : ` · response context ${r.layers!.market.response_context_points} (capped ±4)`}`
+                return (
+                  <li key={k} className={cx(k === 'pressure' && r.layers!.pressure.source !== 'seller_situation_v2' && 'is-prior')}>
+                    <LCTooltip content={tip}><span>{LAYER_LABEL[k]} <em className="aqi-muted">×{L.weight}</em></span></LCTooltip>
+                    <b className="aqi-num">{shown.toFixed(1)}</b>
+                  </li>
+                )
+              })}
             </ul>
           ) : null}
-          <p className="aqi-foot aqi-num">{r.ranking_version} · {r.coverage.terms_known}/{r.coverage.terms_total} inputs known</p>
+          <p className="aqi-foot aqi-num">{r.ranking_version} · contact signals known {r.coverage.contact_signals_known ?? '—'}/5 · equity {r.coverage.equity_known ? 'known' : 'unknown'} · market {r.coverage.market_known ? 'measured' : 'not measured'}</p>
         </section>
       ) : null}
 

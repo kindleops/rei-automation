@@ -1,20 +1,17 @@
--- PROPOSED — NOT APPLIED. Acquisition OS §11–19 / §67–69 (agent A2), 2026-10-07.
+-- PROPOSED — NOT APPLIED. Acquisition OS ranking v2.1 (owner rebuild 2026-10-07, agent A2).
 -- Owner approval required (§86/§87). Rollback: PROPOSED_20261007080000_campaign_ranking_v2_rollback.sql
 --
--- CAMPAIGN RANKING v2 — the SQL twin of
---   apps/api/src/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js
--- (formula-identical; tests pin both to the same fixtures). Until this lands,
--- CAMPAIGN_RANKING_V2=on ranks in-process over a 20,000-row window; with it,
--- the graph read itself orders by campaign_rank_v2_priority (whole cohort).
+-- CAMPAIGN RANKING v2.1 — the SQL twin of
+--   apps/api/src/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js  (+ contact-evidence.js)
+-- (formula-identical; tests pin both). Layers: L1 contact confidence → L2 seller
+-- pressure CONDITIONAL on contact → L3 deal (equity KNOWN only) → L4 market.
+--   priority = 0.4·L1 + 0.3·L2·(0.4 + 0.6·L1/100) + 0.15·L3 + 0.15·L4
+-- No tier bands. Legacy acquisition_score is read only as a marked L2 fallback.
+-- Market response-rate context is NOT persisted (refit + capped ±4 in the app).
 --
 -- Depends on PROPOSED_20261007071100_seller_situation_scores.sql (A1).
--- Nothing here changes the legacy order: acquisition_score stays as it is and
--- the existing builds keep ordering by it while the flag is OFF.
---
--- Cost notes: the projection is a keyset-batched UPDATE (≤ 2,000 rows/call,
--- statement_timeout 30 s) run off-peak (before 05:00Z / 09:00–09:15Z / after
--- 12:00Z), never a trigger, never one national statement. Added graph bytes:
--- ~10 narrow columns ≈ 40 B/row ≈ 7 MB for 170K rows + one btree ≈ 8 MB.
+-- Cost: keyset-batched UPDATE (≤ 5,000 rows/call, statement_timeout 30 s),
+-- off-peak, never a trigger; ~12 narrow columns ≈ 50 B/row ≈ 9 MB + one btree.
 
 BEGIN;
 SET LOCAL statement_timeout = '30s';
@@ -22,52 +19,95 @@ SET LOCAL lock_timeout = '3s';
 
 -- ── 1. formula functions (immutable, no table access) ────────────────────────
 
--- Contactability 0–100: identity + line type + 2-month usage; null when none known.
-CREATE OR REPLACE FUNCTION public.campaign_rank_v2_contact(p_identity text, p_phone_type text, p_usage text)
-RETURNS smallint LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-  SELECT CASE
-    WHEN lower(coalesce(p_identity,'')) NOT IN ('verified','probable','entity_company_linked','unknown','mismatch')
-     AND upper(coalesce(p_phone_type,'')) NOT IN ('W','L')
-     AND lower(coalesce(p_usage,'')) NOT IN ('very heavy usage','heavy usage','moderate usage','light usage','minimal usage')
-    THEN NULL
-    ELSE (
-      CASE lower(coalesce(p_identity,'')) WHEN 'verified' THEN 40 WHEN 'probable' THEN 28 WHEN 'entity_company_linked' THEN 22
-        WHEN 'unknown' THEN 10 WHEN 'mismatch' THEN 0 ELSE 20 END
-      + CASE upper(coalesce(p_phone_type,'')) WHEN 'W' THEN 30 WHEN 'L' THEN 12 ELSE 15 END
-      + CASE lower(coalesce(p_usage,'')) WHEN 'very heavy usage' THEN 30 WHEN 'heavy usage' THEN 30 WHEN 'moderate usage' THEN 24
-        WHEN 'light usage' THEN 16 WHEN 'minimal usage' THEN 8 ELSE 15 END
-    )::smallint
-  END
-$$;
-
--- Within-band score 0–100. Unknown term → its neutral prior (documented in JS).
-CREATE OR REPLACE FUNCTION public.campaign_rank_v2_score(
-  p_sell365 numeric, p_forced_sale numeric, p_stacked_codes integer, p_equity numeric,
-  p_other_pressure numeric, p_aos numeric, p_market numeric, p_contact numeric)
-RETURNS numeric LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-  SELECT round((
-      0.22 * coalesce(least(greatest(p_sell365, 0), 100), 20)
-    + 0.2 * coalesce(least(greatest(p_forced_sale, 0), 100), 20)
-    + 0.12 * least(coalesce(p_stacked_codes, 0) * 15, 100)
-    + 0.12 * coalesce(least(greatest(p_equity, 0), 100), 40)
-    + 0.06 * coalesce(least(greatest(p_other_pressure, 0), 100), 20)
-    + 0.06 * coalesce(least(greatest(CASE WHEN p_aos > 100 THEN p_aos / 10 ELSE p_aos END, 0), 100), 50)
-    + 0.14 * coalesce(least(greatest(p_market, 0), 100), 50)
-    + 0.08 * coalesce(least(greatest(p_contact, 0), 100), 50)
-  )::numeric, 2)
-$$;
-
--- Band-encoded priority (one sortable number, 0–100):
---   A 75+.2499·score · B 50+.2499·score · C 25+.2499·score · no tier → .2499·legacy (FALLBACK) · neither → NULL (bands never touch)
-CREATE OR REPLACE FUNCTION public.campaign_rank_v2_priority(p_tier text, p_score numeric, p_legacy numeric)
+-- equity_known_v1: a 0/blank loan is NOT proof of no debt. Known only when
+-- loan>0 & value>0, or (loan 0/blank AND vendor "Free And Clear" flag AND value>0).
+CREATE OR REPLACE FUNCTION public.campaign_equity_known_pct(p_value numeric, p_loan numeric, p_flags text)
 RETURNS numeric LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
   SELECT CASE
-    WHEN p_tier = 'A' AND p_score IS NOT NULL THEN round(75 + 0.2499 * least(greatest(p_score,0),100), 2)
-    WHEN p_tier = 'B' AND p_score IS NOT NULL THEN round(50 + 0.2499 * least(greatest(p_score,0),100), 2)
-    WHEN p_tier = 'C' AND p_score IS NOT NULL THEN round(25 + 0.2499 * least(greatest(p_score,0),100), 2)
-    WHEN p_legacy IS NOT NULL THEN round(0.2499 * least(greatest(p_legacy,0),100), 2)
+    WHEN p_value > 0 AND p_loan > 0 THEN greatest(-100, least(100, round(((p_value - p_loan) / p_value) * 1000) / 10))
+    WHEN p_value > 0 AND coalesce(p_loan, 0) = 0 AND lower(coalesce(p_flags,'')) ~ '(^|;\s*)free and clear(\s*;|$)' THEN 100
     ELSE NULL
   END
+$$;
+
+-- 'high' | 'low' | 'unknown' (vendor High/Low Equity flag gives a class without a %)
+CREATE OR REPLACE FUNCTION public.campaign_equity_class(p_value numeric, p_loan numeric, p_flags text)
+RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT CASE
+    WHEN public.campaign_equity_known_pct(p_value, p_loan, p_flags) IS NOT NULL
+      THEN CASE WHEN public.campaign_equity_known_pct(p_value, p_loan, p_flags) >= 40 THEN 'high' ELSE 'low' END
+    WHEN lower(coalesce(p_flags,'')) ~ '(^|;\s*)high equity(\s*;|$)' THEN 'high'
+    WHEN lower(coalesce(p_flags,'')) ~ '(^|;\s*)low equity(\s*;|$)' THEN 'low'
+    ELSE 'unknown'
+  END
+$$;
+
+-- L1 contact confidence 0–100 (contact-evidence.js CONTACT_POINTS; max raw 92).
+-- p_tag: likely_owner | linked_to_company | potential_owner | potentially_linked_to_company
+--        | family_only | renter_no_owner | NULL (missing)
+CREATE OR REPLACE FUNCTION public.campaign_rank_v2_contact(p_identity text, p_phone_type text, p_usage text, p_tag text, p_phone_owner_count integer)
+RETURNS smallint LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT greatest(0, least(100, round((
+      CASE upper(coalesce(p_phone_type,'')) WHEN 'W' THEN 30 WHEN 'L' THEN 4 ELSE 14 END
+    + CASE lower(coalesce(p_identity,'')) WHEN 'verified' THEN 32 WHEN 'probable' THEN 26 WHEN 'entity_company_linked' THEN 20
+        WHEN 'unknown' THEN 6 WHEN 'mismatch' THEN 0 ELSE 12 END
+    + CASE p_tag WHEN 'likely_owner' THEN 20 WHEN 'linked_to_company' THEN 18 WHEN 'potential_owner' THEN 10
+        WHEN 'potentially_linked_to_company' THEN 8 WHEN 'family_only' THEN 4 WHEN 'renter_no_owner' THEN -14 ELSE 7 END
+    + CASE lower(coalesce(p_usage,'')) WHEN 'very heavy usage' THEN 10 WHEN 'heavy usage' THEN 10 WHEN 'moderate usage' THEN 8
+        WHEN 'light usage' THEN 5 WHEN 'minimal usage' THEN 0 ELSE 5 END
+    + CASE WHEN p_phone_owner_count > 1 THEN -15 ELSE 0 END
+  )::numeric / 92 * 100)))::smallint
+$$;
+
+-- prospects.matching_flags → tag class (contact-evidence.js matchingTagClass)
+CREATE OR REPLACE FUNCTION public.campaign_matching_tag_class(p_flags text, p_entity_owned boolean)
+RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT CASE
+    WHEN nullif(trim(coalesce(p_flags,'')), '') IS NULL THEN NULL
+    WHEN lower(p_flags) ~ '(^|,\s*)likely owner(\s*,|$)' THEN 'likely_owner'
+    WHEN lower(p_flags) ~ '(^|,\s*)linked to company(\s*,|$)' THEN CASE WHEN p_entity_owned THEN 'linked_to_company' ELSE 'potential_owner' END
+    WHEN lower(p_flags) ~ '(^|,\s*)potential owner(\s*,|$)' THEN 'potential_owner'
+    WHEN lower(p_flags) ~ 'potentially linked to company' THEN 'potentially_linked_to_company'
+    WHEN lower(p_flags) ~ '(resident|likely renting)' THEN 'renter_no_owner'
+    WHEN lower(p_flags) ~ 'family' THEN 'family_only'
+    ELSE NULL
+  END
+$$;
+
+-- L2 seller pressure 0–100 (unknown → prior). Tier points A 100 / B 65 / C 25.
+CREATE OR REPLACE FUNCTION public.campaign_rank_v2_pressure(p_tier text, p_sell365 numeric, p_forced_sale numeric, p_stacked_codes integer, p_other_pressure numeric, p_legacy numeric)
+RETURNS numeric LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT CASE
+    WHEN p_tier IN ('A','B','C') THEN round((
+        0.3 * CASE p_tier WHEN 'A' THEN 100 WHEN 'B' THEN 65 ELSE 25 END
+      + 0.25 * coalesce(least(greatest(p_sell365, 0), 100), 20)
+      + 0.2 * coalesce(least(greatest(p_forced_sale, 0), 100), 20)
+      + 0.1 * least(coalesce(p_stacked_codes, 0) * 15, 100)
+      + 0.15 * coalesce(least(greatest(p_other_pressure, 0), 100), 20))::numeric, 2)
+    WHEN p_legacy IS NOT NULL THEN round(least(50, least(greatest(p_legacy,0),100) / 2)::numeric, 2)  -- marked legacy_fallback
+    ELSE 25
+  END
+$$;
+
+-- L3 deal 0–100: 0.75·equity term + 0.25·valuation term
+CREATE OR REPLACE FUNCTION public.campaign_rank_v2_deal(p_equity_pct numeric, p_equity_class text, p_value numeric)
+RETURNS numeric LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT round((0.75 * CASE
+                  WHEN p_equity_pct IS NOT NULL THEN greatest(0, least(100, p_equity_pct))
+                  WHEN p_equity_class = 'high' THEN 70
+                  WHEN p_equity_class = 'low' THEN 25
+                  ELSE 45 END
+              + 0.25 * CASE WHEN p_value > 0 THEN 70 ELSE 30 END)::numeric, 2)
+$$;
+
+-- priority 0–100 (no bands). p_market = market_quality (NULL → 50). Response
+-- context is applied in the app only (refit, capped ±4) and never stored.
+CREATE OR REPLACE FUNCTION public.campaign_rank_v2_priority(p_contact numeric, p_pressure numeric, p_deal numeric, p_market numeric)
+RETURNS numeric LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT round((0.4 * p_contact
+              + 0.3 * p_pressure * (0.4 + 0.6 * p_contact / 100)
+              + 0.15 * p_deal
+              + 0.15 * coalesce(least(greatest(p_market,0),100), 50))::numeric, 2)
 $$;
 
 -- ── 2. ZIP market quality (market_quality_v1, transparent; see market-quality.js) ──
@@ -111,14 +151,16 @@ ALTER TABLE public.campaign_target_graph
   ADD COLUMN IF NOT EXISTS sell_p365 smallint,
   ADD COLUMN IF NOT EXISTS situation_score_version text,
   ADD COLUMN IF NOT EXISTS market_quality smallint,
-  ADD COLUMN IF NOT EXISTS campaign_rank_v2_score numeric(5,2),
+  ADD COLUMN IF NOT EXISTS matching_tag text,
+  ADD COLUMN IF NOT EXISTS contact_confidence smallint,
+  ADD COLUMN IF NOT EXISTS equity_known_pct numeric(5,1),
+  ADD COLUMN IF NOT EXISTS equity_class text,
   ADD COLUMN IF NOT EXISTS campaign_rank_v2_priority numeric(5,2),
   ADD COLUMN IF NOT EXISTS campaign_rank_v2_source text,
   ADD COLUMN IF NOT EXISTS campaign_rank_v2_at timestamptz;
 
 COMMIT;
 
--- Index outside the transaction (CONCURRENTLY; no write lock on the graph).
 CREATE INDEX CONCURRENTLY IF NOT EXISTS campaign_target_graph_rank_v2_idx
   ON public.campaign_target_graph (queue_eligible DESC, campaign_rank_v2_priority DESC NULLS LAST, graph_id);
 
@@ -131,25 +173,35 @@ BEGIN
   WITH batch AS (
     SELECT g.property_id FROM public.campaign_target_graph g
      WHERE g.property_id > coalesce(p_after, '') ORDER BY g.property_id LIMIT least(greatest(p_limit, 1), 5000)
+  ), phones AS (   -- distinct owners per phone, for the batch's phones only (indexed canonical_e164)
+    SELECT g2.canonical_e164, count(DISTINCT g2.master_owner_id)::int AS owners
+      FROM public.campaign_target_graph g2
+     WHERE g2.canonical_e164 IN (SELECT g.canonical_e164 FROM batch b JOIN public.campaign_target_graph g USING (property_id) WHERE g.canonical_e164 IS NOT NULL)
+     GROUP BY 1
   ), src AS (
     SELECT g.property_id, s.opportunity_tier, s.seller_situation, s.forced_sale_pressure, s.sell_p365, s.score_version,
-           mq.market_quality,
-           public.campaign_rank_v2_contact(g.identity_alignment, g.phone_type, g.usage_2_months) AS contact,
+           mq.market_quality, g.acquisition_score, g.estimated_value,
+           public.campaign_equity_known_pct(g.estimated_value, g.total_loan_balance, g.property_flags_text) AS eq_pct,
+           public.campaign_equity_class(g.estimated_value, g.total_loan_balance, g.property_flags_text) AS eq_class,
+           public.campaign_matching_tag_class(pr.matching_flags, coalesce(g.is_corporate_owner, false)) AS tag,
+           ph.owners AS phone_owners,
+           g.identity_alignment, g.phone_type, g.usage_2_months,
            (SELECT count(DISTINCT e->>0)::int FROM jsonb_array_elements(coalesce(s.evidence,'[]'::jsonb)) e
              WHERE (e->>1) ~ '^-?[0-9.]+$' AND (e->>1)::numeric > 0) AS stacked,
-           greatest(s.landlord_fatigue, s.tax_pain, s.debt_pressure, s.property_burden) AS other_pressure,
-           s.equity_unlock, g.aos_score, g.acquisition_score
+           greatest(s.landlord_fatigue, s.tax_pain, s.debt_pressure, s.property_burden) AS other_pressure
       FROM batch b
       JOIN public.campaign_target_graph g ON g.property_id = b.property_id
       LEFT JOIN public.seller_situation_scores s ON s.property_id = g.property_id
+      LEFT JOIN LATERAL (SELECT p.matching_flags FROM public.prospects p WHERE p.individual_key = g.seller_person_key AND p.matching_flags IS NOT NULL LIMIT 1) pr ON true
+      LEFT JOIN phones ph ON ph.canonical_e164 = g.canonical_e164
       LEFT JOIN public.v_zip_market_quality_v1 mq
         ON mq.zip = left(g.property_zip, 5)
        AND mq.asset = CASE WHEN g.units_count >= 5 THEN 'mf_5_plus' WHEN g.units_count >= 2 THEN 'mf_2_4' ELSE 'sfr' END
   ), scored AS (
     SELECT src.*,
-           CASE WHEN opportunity_tier IN ('A','B','C')
-                THEN public.campaign_rank_v2_score(sell_p365, forced_sale_pressure, stacked, equity_unlock, other_pressure, aos_score, market_quality, contact)
-           END AS v2_score
+           public.campaign_rank_v2_contact(identity_alignment, phone_type, usage_2_months, tag, phone_owners) AS contact,
+           public.campaign_rank_v2_pressure(opportunity_tier, sell_p365, forced_sale_pressure, stacked, other_pressure, acquisition_score) AS pressure,
+           public.campaign_rank_v2_deal(eq_pct, eq_class, estimated_value) AS deal
       FROM src
   ), upd AS (
     UPDATE public.campaign_target_graph g SET
@@ -159,15 +211,18 @@ BEGIN
       sell_p365 = s.sell_p365,
       situation_score_version = s.score_version,
       market_quality = s.market_quality,
-      campaign_rank_v2_score = s.v2_score,
-      campaign_rank_v2_priority = public.campaign_rank_v2_priority(s.opportunity_tier, s.v2_score, s.acquisition_score),
-      campaign_rank_v2_source = CASE WHEN s.v2_score IS NOT NULL THEN 'v2' WHEN s.acquisition_score IS NOT NULL THEN 'legacy_fallback' ELSE 'unranked' END,
+      matching_tag = s.tag,
+      contact_confidence = s.contact,
+      equity_known_pct = s.eq_pct,
+      equity_class = s.eq_class,
+      campaign_rank_v2_priority = public.campaign_rank_v2_priority(s.contact, s.pressure, s.deal, s.market_quality),
+      campaign_rank_v2_source = CASE WHEN s.opportunity_tier IN ('A','B','C') THEN 'v2' WHEN s.acquisition_score IS NOT NULL THEN 'legacy_fallback' ELSE 'v2_no_situation' END,
       campaign_rank_v2_at = now()
       FROM scored s
      WHERE g.property_id = s.property_id
-       AND (g.campaign_rank_v2_priority IS DISTINCT FROM public.campaign_rank_v2_priority(s.opportunity_tier, s.v2_score, s.acquisition_score)
+       AND (g.campaign_rank_v2_priority IS DISTINCT FROM public.campaign_rank_v2_priority(s.contact, s.pressure, s.deal, s.market_quality)
          OR g.opportunity_tier IS DISTINCT FROM s.opportunity_tier
-         OR g.market_quality IS DISTINCT FROM s.market_quality)
+         OR g.equity_class IS DISTINCT FROM s.eq_class)
     RETURNING g.property_id
   )
   SELECT count(*)::int INTO v_n FROM upd;
@@ -188,7 +243,9 @@ SELECT left(g.property_zip, 5) AS zip,
        count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'B') AS tier_b,
        count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'C') AS tier_c,
        count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'A') AS high_pressure,  -- acute tier A; FSP not calibrated (§10)
-       percentile_cont(0.5) WITHIN GROUP (ORDER BY g.equity_percent) FILTER (WHERE g.queue_eligible) AS median_equity_percent,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY g.equity_known_pct) FILTER (WHERE g.queue_eligible AND g.equity_known_pct IS NOT NULL) AS median_known_equity_percent,
+       count(*) FILTER (WHERE g.queue_eligible AND g.equity_known_pct IS NOT NULL) AS equity_known,
+       count(*) FILTER (WHERE g.queue_eligible AND g.contact_confidence >= 75) AS contact_high,
        max(g.market_quality) AS market_quality,
        round((count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'A')
             + 0.5 * count(*) FILTER (WHERE g.queue_eligible AND g.opportunity_tier = 'B'))

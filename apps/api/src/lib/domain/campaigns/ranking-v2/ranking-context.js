@@ -11,6 +11,9 @@
 
 import { compareCampaignRankV2, computeCampaignRankV2, CAMPAIGN_RANKING_VERSION } from '@/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js'
 import { loadZipMarketQuality, marketQualityForRow } from '@/lib/domain/campaigns/ranking-v2/market-quality.js'
+import { annotatePhoneOwnerCounts } from '@/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js'
+import { fitMarketResponse, responseContextFor, responseLane } from '@/lib/domain/campaigns/ranking-v2/market-response.js'
+import { INTEREST_INTENTS, INTEREST_STAGES } from '@/lib/domain/campaigns/ranking-v2/funnel-analytics.js'
 
 /** Rows the graph read fetches when v2 is on: the whole cohort up to this window. */
 export const RANKING_V2_WINDOW = 20000
@@ -25,6 +28,7 @@ export function rankingV2FetchLimit(limit, window = RANKING_V2_WINDOW) {
 
 export function _resetRankingContextCache() {
   marketCache.clear()
+  responseCache = null
 }
 
 async function defaultDb() {
@@ -41,6 +45,40 @@ export async function loadSituationsForRows(rows, { db, now = new Date() } = {})
     for (const [id, rf] of facts) out.set(String(id), scoreSellerSituation(rf, { now }))
   }
   return out
+}
+
+/** prospects.matching_flags keyed by individual_key (= graph seller_person_key). ONE read per call. */
+export async function loadMatchingFlagsForRows(rows, { db } = {}) {
+  const keys = [...new Set(rows.map((r) => String(r.seller_person_key ?? '').trim()).filter(Boolean))]
+  const out = new Map()
+  for (let i = 0; i < keys.length; i += 5000) {
+    const { rows: page } = await db.query(
+      'select individual_key, matching_flags from public.prospects where individual_key = any($1::text[]) and matching_flags is not null',
+      [keys.slice(i, i + 5000)],
+    )
+    for (const r of page) if (!out.has(String(r.individual_key))) out.set(String(r.individual_key), r.matching_flags)
+  }
+  return out
+}
+
+const RESPONSE_TTL_MS = 60 * 60 * 1000
+let responseCache = null
+/** Market response context, refit from history (cached 1 h). Bounded by market-response.js. */
+export async function loadResponseContext({ db, nowMs = Date.now() } = {}) {
+  if (responseCache && nowMs - responseCache.at < RESPONSE_TTL_MS) return responseCache.value
+  const { rows } = await db.query(
+    `with o as (select property_id, min(created_at) first_out from public.message_events
+                 where direction = 'outbound' and property_id is not null and created_at > now() - interval '365 days' group by 1),
+          i as (select property_id, bool_or(detected_intent = any($1::text[]) or stage_after = any($2::text[])) interested
+                  from public.message_events where direction = 'inbound' and property_id is not null group by 1)
+     select g.market, g.property_type, g.units_count, o.first_out, coalesce(i.interested, false) interested
+       from o join public.campaign_target_graph g on g.property_id = o.property_id
+       left join i on i.property_id = o.property_id`,
+    [INTEREST_INTENTS, INTEREST_STAGES],
+  )
+  const value = fitMarketResponse(rows.map((r) => ({ market: r.market, lane: responseLane(r), contacted_at: r.first_out, interested: r.interested })), { now: nowMs })
+  responseCache = { at: nowMs, value }
+  return value
 }
 
 export async function loadMarketsForRows(rows, { db, nowMs = Date.now() } = {}) {
@@ -73,24 +111,35 @@ export async function applyCampaignRankingV2(rows = [], deps = {}) {
   if (needDb && !db) {
     try { db = await defaultDb() } catch (error) { errors.push(`db_unavailable:${error?.message || error}`) }
   }
-  const [situations, markets] = await Promise.all([
+  const [situations, markets, flags, response] = await Promise.all([
     (typeof hooks.loadSituations === 'function' ? hooks.loadSituations(rows) : db ? loadSituationsForRows(rows, { db }) : Promise.resolve(new Map()))
       .catch((error) => { errors.push(`situations_unavailable:${error?.message || error}`); return new Map() }),
     (typeof hooks.loadMarkets === 'function' ? hooks.loadMarkets(rows) : db ? loadMarketsForRows(rows, { db }) : Promise.resolve(new Map()))
       .catch((error) => { errors.push(`markets_unavailable:${error?.message || error}`); return new Map() }),
+    (typeof hooks.loadMatchingFlags === 'function' ? hooks.loadMatchingFlags(rows) : db ? loadMatchingFlagsForRows(rows, { db }) : Promise.resolve(new Map()))
+      .catch((error) => { errors.push(`matching_flags_unavailable:${error?.message || error}`); return new Map() }),
+    (typeof hooks.loadResponse === 'function' ? hooks.loadResponse() : db ? loadResponseContext({ db }) : Promise.resolve(null))
+      .catch((error) => { errors.push(`response_context_unavailable:${error?.message || error}`); return null }),
   ])
   const tCtx = Date.now() - t0
-  const ranked = rows.map((row) => {
+  const enriched = annotatePhoneOwnerCounts(rows.map((row) => {
+    const key = String(row.seller_person_key ?? '').trim()
+    return row.matching_flags !== undefined ? row : { ...row, matching_flags: key && flags.has(key) ? flags.get(key) : null }
+  }))
+  const ranked = enriched.map((row) => {
     const situation = situations.get(String(row.property_id)) ?? null
     const market = marketQualityForRow(row, markets)
-    return { ...row, _rank_v2: computeCampaignRankV2(row, { situation, market, includeWhy: true }) }
+    return { ...row, _rank_v2: computeCampaignRankV2(row, { situation, market, response: responseContextFor(row, response), includeWhy: true }) }
   })
   ranked.sort(compareCampaignRankV2)
   const byBand = {}
   const bySource = {}
+  const responseCapped = { applied: 0, max_abs_points: 0 }
   for (const r of ranked) {
     byBand[r._rank_v2.band] = (byBand[r._rank_v2.band] || 0) + 1
     bySource[r._rank_v2.rank_source] = (bySource[r._rank_v2.rank_source] || 0) + 1
+    const pts = r._rank_v2.layers.market.response_context_points
+    if (pts !== null && pts !== undefined) { responseCapped.applied += 1; responseCapped.max_abs_points = Math.max(responseCapped.max_abs_points, Math.abs(pts)) }
   }
   return {
     rows: ranked,
@@ -101,6 +150,8 @@ export async function applyCampaignRankingV2(rows = [], deps = {}) {
       by_band: byBand,
       by_source: bySource,
       situations_loaded: situations.size,
+      matching_flags_loaded: flags.size,
+      response_context: responseCapped,
       markets_loaded: markets.size,
       context_ms: tCtx,
       total_ms: Date.now() - t0,

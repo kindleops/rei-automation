@@ -9,9 +9,12 @@ import fs from "node:fs";
 import { SCORE_VERSION, INPUT_MODEL_VERSION, buildRawFactsFromRows, scoreSellerSituation } from "@/lib/acquisition/seller-situation/index.js";
 import { isCampaignRankingV2Enabled, isSellerScreenerEnabled } from "@/lib/domain/campaigns/ranking-v2/flags.js";
 import {
-  CAMPAIGN_RANKING_VERSION, RANK_TERMS, compareCampaignRankV2, computeCampaignRankV2, contactabilityScore,
-  hasCurrentSituation, rankCampaignRowsV2, rankingMetadata,
+  CAMPAIGN_RANKING_VERSION, LAYER_WEIGHTS, MARKET_PRIOR, PRESSURE_GATE_FLOOR, PRESSURE_TERMS, TIER_POINTS,
+  compareCampaignRankV2, computeCampaignRankV2, hasCurrentSituation, rankCampaignRowsV2, rankingMetadata,
 } from "@/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js";
+import { CONTACT_POINTS, contactConfidence, equityEvidence, matchingTagClass } from "@/lib/domain/campaigns/ranking-v2/contact-evidence.js";
+import { RESPONSE_CONTEXT, fitMarketResponse } from "@/lib/domain/campaigns/ranking-v2/market-response.js";
+import { funnelBySignal, funnelLabels, wilson } from "@/lib/domain/campaigns/ranking-v2/funnel-analytics.js";
 import { computeMarketQuality, marketAssetLane, marketQualityForRow } from "@/lib/domain/campaigns/ranking-v2/market-quality.js";
 import { buildWhyTargeted, labelForEvidenceCode } from "@/lib/domain/campaigns/ranking-v2/why-targeted.js";
 import {
@@ -21,7 +24,7 @@ import { measureMetricCoverage, screenerMetricCatalog } from "@/lib/domain/campa
 import { cohortSegment, summarizeCampaignQuality } from "@/lib/domain/campaigns/ranking-v2/campaign-quality-report.js";
 import { rankDiscoveryZips } from "@/lib/domain/campaigns/ranking-v2/campaign-discovery.js";
 import { applyCampaignRankingV2, rankingV2FetchLimit } from "@/lib/domain/campaigns/ranking-v2/ranking-context.js";
-import { readWhyTargeted, runDiscovery, runScreener, _resetScreenerServiceCache } from "@/lib/domain/campaigns/ranking-v2/screener-service.js";
+import { readWhyTargeted, runDiscovery, runFunnel, runScreener, _resetScreenerServiceCache } from "@/lib/domain/campaigns/ranking-v2/screener-service.js";
 import { collapseGraphRowsToRecipients } from "@/lib/domain/campaigns/campaign-recipient-dedup.js";
 import { planCampaignTargetRows, launchCandidateFromTarget } from "@/lib/domain/campaigns/campaign-automation-service.js";
 import { graphFieldApplicability } from "@/lib/domain/campaigns/campaign-graph-filter-plan.js";
@@ -95,118 +98,166 @@ test("flags: CAMPAIGN_RANKING_V2 and SELLER_SCREENER are separate and default OF
 });
 
 // ── ranking v2 (§11 / §12 / §67) ─────────────────────────────────────────────
-test("§67: a tired-landlord-only seller (tier C) with legacy 99 never outranks a tax-delinquent, vacant, high-equity, long-tenure, high-repair seller (tier A) with no legacy score", () => {
-  const softLegacy = { ...row(1, { acquisition_score: 99 }), _rank_v2: computeCampaignRankV2(row(1, { acquisition_score: 99 }), { situation: sit("C", { fatigue: 40, codes: ["VF_TIRED_LANDLORD"] }) }) };
-  const acute = { ...row(2, { acquisition_score: null }), _rank_v2: computeCampaignRankV2(row(2, { acquisition_score: null }), { situation: sit("A", { fsp: 80, sell365: 40, equity: 85, codes: ["TAX_DELINQUENT", "VACANT", "EQUITY_80P", "TENURE_20Y", "REPAIR_TIER_HEAVY_FORMULA"] }) }) };
-  assert.ok(compareCampaignRankV2(acute, softLegacy) < 0);
-  assert.ok(acute._rank_v2.priority_score >= 75);
-  assert.ok(softLegacy._rank_v2.priority_score < 50);
-  assert.equal(softLegacy._rank_v2.legacy_shadow.final_acquisition_score, 99, "legacy is echoed, not used");
+const GOOD_CONTACT = { phone_type: "W", identity_alignment: "verified", matching_flags: "Likely Owner, Family", usage_2_months: "Heavy Usage", phone_owner_count: 1 };
+const BAD_CONTACT = { phone_type: "L", identity_alignment: "mismatch", matching_flags: "Resident, Likely Renting", usage_2_months: null, phone_owner_count: 3 };
+const ACUTE = () => sit("A", { fsp: 80, sell365: 40, equity: 85, codes: ["TAX_DELINQUENT", "VACANT", "EQUITY_80P", "TENURE_20Y", "REPAIR_TIER_HEAVY_FORMULA"] });
+const SOFT = () => sit("C", { fatigue: 40, codes: ["VF_TIRED_LANDLORD"] });
+
+// ── ranking v2.1 (owner rebuild 2026-10-07) ──────────────────────────────────
+test("§67 at equal contact: a tired-landlord-only seller with legacy 99 never outranks a tax-delinquent/vacant/long-tenure/high-repair seller — legacy is never read when current evidence exists", () => {
+  const soft = computeCampaignRankV2(row(1, { ...GOOD_CONTACT, acquisition_score: 99 }), { situation: SOFT() });
+  const acute = computeCampaignRankV2(row(2, { ...GOOD_CONTACT, acquisition_score: null }), { situation: ACUTE() });
+  assert.ok(acute.priority_score > soft.priority_score, `${acute.priority_score} > ${soft.priority_score}`);
+  assert.equal(soft.layers.pressure.source, "seller_situation_v2");
+  assert.equal(soft.legacy_shadow.final_acquisition_score, 99, "legacy is echoed, not used");
+  const soft2 = computeCampaignRankV2(row(1, { ...GOOD_CONTACT, acquisition_score: 0 }), { situation: SOFT() });
+  assert.equal(soft2.priority_score, soft.priority_score, "the legacy number has zero influence");
 });
 
-test("§12 fallback: no current situation → LEGACY FALLBACK band, marked, always below every v2 band; neither → unranked last", () => {
+test("hierarchy: contact confidence comes first — distress at a landline/mismatch/renter/shared phone does not outrank a verified-mobile likely owner", () => {
+  const acuteBad = computeCampaignRankV2(row(1, BAD_CONTACT), { situation: ACUTE() });
+  const softGood = computeCampaignRankV2(row(2, GOOD_CONTACT), { situation: SOFT() });
+  assert.ok(softGood.priority_score > acuteBad.priority_score);
+  assert.ok(acuteBad.layers.pressure.gate < 0.5, "pressure is conditional on contact");
+  assert.ok(acuteBad.layers.contact.evidence.some((e) => e.code === "SHARED_PHONE_AMBIGUOUS"));
+  assert.equal(acuteBad.layers.contact.tag, "renter_no_owner");
+  // ...and at equal contact, pressure decides
+  const acuteGood = computeCampaignRankV2(row(3, GOOD_CONTACT), { situation: ACUTE() });
+  assert.ok(acuteGood.priority_score > softGood.priority_score);
+});
+
+test("layers are explainable: weights sum to 1, every layer carries its score, terms and evidence", () => {
+  assert.equal(Object.values(LAYER_WEIGHTS).reduce((a, b) => a + b, 0).toFixed(6), "1.000000");
+  assert.equal(Object.values(PRESSURE_TERMS).reduce((a, t) => a + t.weight, 0).toFixed(6), "1.000000");
+  const r = computeCampaignRankV2(row(1, GOOD_CONTACT), { situation: ACUTE(), market: computeMarketQuality({ qualified_sales_1y: 250, distinct_investor_buyers_36m: 20, investor_purchases_1y: 30, buyer_known_1y: 60 }) });
+  const L = r.layers;
+  const expected = Math.round((0.4 * L.contact.score + 0.3 * L.pressure.effective + 0.15 * L.deal.score + 0.15 * L.market.score) * 100) / 100;
+  assert.ok(Math.abs(r.priority_score - expected) < 0.02, `${r.priority_score} vs ${expected}`);
+  assert.equal(L.market.score, 100);
+  assert.ok(L.contact.evidence.length >= 4);
+  assert.ok(L.pressure.terms.every((t) => "used_prior" in t));
+});
+
+test("§12 fallback: no current situation → legacy halved and capped at 50 in L2 only, marked; stub/UNKNOWN/foreign-version never count as current", () => {
   const fb = computeCampaignRankV2(row(1, { acquisition_score: 100 }), { situation: null });
   assert.equal(fb.rank_source, "legacy_fallback");
-  assert.equal(fb.band, "FALLBACK");
+  assert.equal(fb.layers.pressure.score, 50);
   assert.equal(fb.fallback_reason, "seller_situation_absent");
-  assert.ok(fb.priority_score < 25, `fallback max ${fb.priority_score} must sit below tier C's floor`);
-  const cZero = computeCampaignRankV2(row(2), { situation: sit("C", { fsp: 0, sell365: 0, equity: 0, fatigue: 0, tax: 0 }) });
-  assert.ok(cZero.priority_score >= 25);
-  const none = computeCampaignRankV2(row(3, { acquisition_score: null }), { situation: null });
-  assert.equal(none.rank_source, "unranked");
-  assert.equal(none.priority_score, null);
-  const sorted = [none, fb, cZero].map((r, i) => ({ property_id: `p${i}`, _rank_v2: r })).sort(compareCampaignRankV2);
-  assert.deepEqual(sorted.map((x) => x._rank_v2.band), ["C", "FALLBACK", "UNRANKED"]);
-});
-
-test("§12: stub, UNKNOWN tier and foreign score_version results never rank as v2", () => {
+  const none = computeCampaignRankV2(row(2, { acquisition_score: null }), { situation: null });
+  assert.equal(none.rank_source, "v2_no_situation");
+  assert.equal(none.layers.pressure.score, PRESSURE_TERMS.tier.prior);
   assert.equal(hasCurrentSituation(sit("A", { reasons: ["STUB"] })), false);
   assert.equal(hasCurrentSituation(sit("UNKNOWN")), false);
   assert.equal(hasCurrentSituation({ ...sit("A"), score_version: "seller_situation_v1" }), false);
-  const r = computeCampaignRankV2(row(1), { situation: sit("UNKNOWN") });
-  assert.equal(r.rank_source, "legacy_fallback");
-  assert.equal(r.fallback_reason, "seller_situation_tier_unknown");
+  assert.equal(computeCampaignRankV2(row(3), { situation: sit("UNKNOWN") }).fallback_reason, "seller_situation_tier_unknown");
 });
 
-test("unknown inputs use their documented neutral prior (never 0) and are reported as used_prior", () => {
-  const r = computeCampaignRankV2(row(1, { identity_alignment: null, phone_type: null }), { situation: sit("B", {}) });
-  const byKey = Object.fromEntries(r.terms.map((t) => [t.key, t]));
-  for (const key of ["sell365", "forced_sale", "equity", "other_pressure", "aos", "market", "contact"]) {
-    assert.equal(byKey[key].used_prior, true, key);
-    assert.equal(byKey[key].points, Math.round(RANK_TERMS[key].weight * RANK_TERMS[key].prior * 100) / 100, key);
-  }
-  assert.equal(r.coverage.terms_known, 1, "only the stacked count is known");
-  assert.equal(Object.values(RANK_TERMS).reduce((s, t) => s + t.weight, 0).toFixed(6), "1.000000");
+test("L0: an ineligible row is reported and sorts last (gates are not re-decided here)", () => {
+  const out = rankCampaignRowsV2([row(1, { queue_eligible: false, ...GOOD_CONTACT }), row(2, BAD_CONTACT)], { situations: new Map([["prop_1", ACUTE()], ["prop_2", SOFT()]]) });
+  assert.deepEqual(out.map((r) => r.property_id), ["prop_2", "prop_1"]);
+  assert.equal(out[1]._rank_v2.eligible, false);
+  assert.equal(out[1]._rank_v2.priority_score, null);
 });
 
-test("ties and totals: equal ranks break by contactability then property id — a total, deterministic order", () => {
+test("UNKNOWN semantics — equity: a 0/blank loan is unknown (never 100%); known only with loan>0, or vendor Free-And-Clear", () => {
+  assert.deepEqual(equityEvidence({ estimated_value: 200000, total_loan_balance: 0, property_flags_text: "Absentee Owner" }), { known: false, percent: null, class: "unknown", rule: "no_loan_evidence", provenance: null });
+  assert.equal(equityEvidence({ estimated_value: 200000, total_loan_balance: null }).class, "unknown");
+  assert.deepEqual(equityEvidence({ estimated_value: 200000, total_loan_balance: 50000 }).percent, 75);
+  assert.equal(equityEvidence({ estimated_value: 200000, total_loan_balance: 0, property_flags_text: "Free And Clear; Absentee Owner" }).percent, 100);
+  const flagOnly = equityEvidence({ estimated_value: 200000, total_loan_balance: 0, property_flags_text: "High Equity" });
+  assert.equal(flagOnly.known, false);
+  assert.equal(flagOnly.class, "high");
+  assert.equal(flagOnly.percent, null);
+  const unknown = computeCampaignRankV2(row(1, { total_loan_balance: 0, equity_percent: 100, property_flags_text: null }), { situation: SOFT() });
+  assert.equal(unknown.layers.deal.equity.class, "unknown");
+  assert.ok(!unknown.why.some((w) => /100% equity/.test(w.label)), "no 100% equity claim from a zero loan");
+});
+
+test("UNKNOWN semantics — phone: empty best_phone_score / line type / tag are unknown (neutral), never 0; evidence we have is used", () => {
+  const empty = contactConfidence({ best_phone_score: null });
+  assert.equal(empty.known_signals, 0);
+  assert.ok(empty.score > 40 && empty.score < 60, `neutral ${empty.score}`);
+  assert.equal(contactConfidence({ best_phone_score: 99 }).score, empty.score, "best_phone_score is never read");
+  assert.equal(contactConfidence(GOOD_CONTACT).score, 100);
+  assert.ok(contactConfidence(BAD_CONTACT).score < 10);
+  assert.equal(matchingTagClass("Linked To Company, Family", { entityOwned: true }), "linked_to_company");
+  assert.equal(matchingTagClass("Linked To Company, Family", { entityOwned: false }), "potential_owner");
+  assert.equal(matchingTagClass("Resident, Likely Renting"), "renter_no_owner");
+  assert.equal(matchingTagClass("Likely Owner, Family, Resident"), "likely_owner", "ownership evidence beats resident");
+  assert.equal(matchingTagClass(null), "missing");
+});
+
+test("market response is bounded context: min effective n, shrinkage toward the lane rate, recency decay, immature excluded, capped ±4", () => {
+  const now = Date.parse("2026-10-07T00:00:00Z");
+  const day = 86400000;
+  const outcomes = [];
+  for (let i = 0; i < 3000; i += 1) outcomes.push({ market: "Hot, TX", lane: "sfr", contacted_at: new Date(now - 30 * day).toISOString(), interested: i % 10 === 0 });
+  for (let i = 0; i < 3000; i += 1) outcomes.push({ market: "Cold, TX", lane: "sfr", contacted_at: new Date(now - 30 * day).toISOString(), interested: i % 100 === 0 });
+  for (let i = 0; i < 50; i += 1) outcomes.push({ market: "Tiny, TX", lane: "sfr", contacted_at: new Date(now - 30 * day).toISOString(), interested: true });
+  for (let i = 0; i < 5000; i += 1) outcomes.push({ market: "Fresh, TX", lane: "sfr", contacted_at: new Date(now - 3 * day).toISOString(), interested: true });
+  const fit = fitMarketResponse(outcomes, { now });
+  assert.ok(fit.get("Hot, TX|sfr").points > 3.9 && fit.get("Hot, TX|sfr").points <= RESPONSE_CONTEXT.CAP, "strong market saturates at the cap (shrunk)");
+  assert.ok(fit.get("Hot, TX|sfr").shrunk < fit.get("Hot, TX|sfr").raw, "shrunk toward the lane rate");
+  assert.equal(fit.get("Cold, TX|sfr").points < 0 && fit.get("Cold, TX|sfr").points >= -RESPONSE_CONTEXT.CAP, true);
+  assert.equal(fit.get("Tiny, TX|sfr").points, null, "below min effective n → no context");
+  assert.equal(fit.has("Fresh, TX|sfr"), false, "immature outcomes excluded");
+  const hot = computeCampaignRankV2(row(1, GOOD_CONTACT), { situation: SOFT(), response: fit.get("Hot, TX|sfr") });
+  const flat = computeCampaignRankV2(row(1, GOOD_CONTACT), { situation: SOFT() });
+  assert.ok(hot.priority_score - flat.priority_score <= 0.15 * RESPONSE_CONTEXT.CAP + 0.01, "influence ≤ 0.15 × cap");
+});
+
+test("ties and totals: equal priorities break by contact then property id — a total, deterministic order", () => {
   const rows = [3, 1, 2].map((i) => row(i));
   const situations = new Map(rows.map((r) => [r.property_id, sit("B", { fsp: 50 })]));
   const a = rankCampaignRowsV2(rows, { situations }).map((r) => r.property_id);
   const b = rankCampaignRowsV2([...rows].reverse(), { situations }).map((r) => r.property_id);
   assert.deepEqual(a, ["prop_1", "prop_2", "prop_3"]);
   assert.deepEqual(a, b);
-  const landline = row(0, { phone_type: "L" });
-  const ranked = rankCampaignRowsV2([landline, row(9)], { situations: new Map([["prop_0", sit("B", { fsp: 50 })], ["prop_9", sit("B", { fsp: 50 })]]) });
-  assert.equal(ranked[0].property_id, "prop_9", "same score: the mobile line ranks first");
 });
 
-test("property-based: 3,000 random rows — bands never interleave, legacy never lifts a row over current evidence", () => {
+test("property-based: 3,000 random rows — priority within 0–100, monotone in contact and in tier, legacy never moves a row with current evidence", () => {
   let seed = 42;
   const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-  const tiers = ["A", "B", "C", "UNKNOWN", null];
-  const rows = [];
-  const situations = new Map();
   for (let i = 0; i < 3000; i += 1) {
-    const r = row(i, { acquisition_score: rnd() < 0.3 ? null : Math.round(rnd() * 100), phone_type: rnd() < 0.5 ? "W" : "L", identity_alignment: ["verified", "probable", "unknown", null][Math.floor(rnd() * 4)] });
-    rows.push(r);
-    const t = tiers[Math.floor(rnd() * tiers.length)];
-    if (t) situations.set(r.property_id, sit(t, { fsp: rnd() < 0.2 ? null : Math.round(rnd() * 100), sell365: Math.round(rnd() * 95), equity: Math.round(rnd() * 100), codes: Array.from({ length: Math.floor(rnd() * 6) }, (_, k) => `CODE_${k}`) }));
-  }
-  const ranked = rankCampaignRowsV2(rows, { situations });
-  const order = { A: 0, B: 1, C: 2, FALLBACK: 3, UNRANKED: 4 };
-  for (let i = 1; i < ranked.length; i += 1) {
-    assert.ok(order[ranked[i - 1]._rank_v2.band] <= order[ranked[i]._rank_v2.band], `band order broken at ${i}`);
-    const p0 = ranked[i - 1]._rank_v2.priority_score;
-    const p1 = ranked[i]._rank_v2.priority_score;
-    if (p1 !== null) assert.ok(p0 >= p1);
-  }
-  for (const r of ranked) {
-    const p = r._rank_v2.priority_score;
-    if (p === null) continue;
-    assert.ok(p >= 0 && p <= 100);
-    if (r._rank_v2.band === "FALLBACK") assert.ok(p < 25);
+    const base = row(i, { phone_type: rnd() < 0.5 ? "W" : rnd() < 0.5 ? "L" : null, identity_alignment: ["verified", "probable", "unknown", "mismatch", null][Math.floor(rnd() * 5)], matching_flags: [null, "Likely Owner", "Resident, Likely Renting", "Family"][Math.floor(rnd() * 4)], total_loan_balance: rnd() < 0.5 ? 0 : 100000, estimated_value: 250000 });
+    const s = sit(["A", "B", "C"][Math.floor(rnd() * 3)], { fsp: Math.round(rnd() * 100), sell365: Math.round(rnd() * 95), equity: Math.round(rnd() * 100), codes: Array.from({ length: Math.floor(rnd() * 6) }, (_, k) => `CODE_${k}`) });
+    const r = computeCampaignRankV2({ ...base, acquisition_score: Math.round(rnd() * 100) }, { situation: s });
+    assert.ok(r.priority_score >= 0 && r.priority_score <= 100);
+    assert.equal(computeCampaignRankV2({ ...base, acquisition_score: 0 }, { situation: s }).priority_score, r.priority_score);
+    const better = computeCampaignRankV2({ ...base, ...GOOD_CONTACT }, { situation: s });
+    assert.ok(better.priority_score >= r.priority_score - 1e-9, "better contact never lowers priority");
+    if (s.opportunity_tier !== "A") {
+      const upTier = computeCampaignRankV2(base, { situation: { ...s, opportunity_tier: "A" } });
+      assert.ok(upTier.priority_score >= computeCampaignRankV2(base, { situation: s }).priority_score - 1e-9, "a higher tier never lowers priority");
+    }
   }
 });
 
-test("rankingMetadata is compact and labelled (never the legacy name)", () => {
-  const m = rankingMetadata(computeCampaignRankV2(row(1), { situation: sit("A", { fsp: 80, codes: ["TAX_DELINQUENT", "VACANT"] }) }));
+test("rankingMetadata is compact, layered and labelled (never the legacy name)", () => {
+  const m = rankingMetadata(computeCampaignRankV2(row(1, GOOD_CONTACT), { situation: sit("A", { fsp: 80, codes: ["TAX_DELINQUENT", "VACANT"] }) }));
   assert.equal(m.ranking_version, CAMPAIGN_RANKING_VERSION);
-  assert.equal(m.rank_source, "v2");
-  assert.ok(Array.isArray(m.why) && m.why.some((w) => /tax delinquent/i.test(w)));
+  assert.equal(CAMPAIGN_RANKING_VERSION, "campaign_rank_v2.1");
+  assert.deepEqual(Object.keys(m.layers).sort(), ["contact", "deal", "market", "pressure", "pressure_effective", "response_context_points"]);
+  assert.ok(m.why.some((w) => /tax delinquent/i.test(w)));
   assert.equal("final_acquisition_score" in m, false);
 });
 
-test("SQL twin pins the JS weights, priors and band encoding (PROPOSED_20261007080000)", () => {
+test("SQL twin pins the v2.1 layer weights, gate, contact points and the equity rule (PROPOSED_20261007080000)", () => {
   const sql = fs.readFileSync(new URL("../../../../supabase/migrations/PROPOSED_20261007080000_campaign_ranking_v2.sql", import.meta.url), "utf8");
-  const sqlArg = { sell365: "p_sell365", forced_sale: "p_forced_sale", equity: "p_equity", other_pressure: "p_other_pressure", market: "p_market", contact: "p_contact" };
-  for (const [key, arg] of Object.entries(sqlArg)) {
-    const t = RANK_TERMS[key];
-    assert.ok(sql.includes(`${t.weight} * coalesce(least(greatest(${arg}, 0), 100), ${t.prior})`), `SQL term ${key}`);
-  }
-  assert.ok(sql.includes(`${RANK_TERMS.stacked.weight} * least(coalesce(p_stacked_codes, 0) * 15, 100)`));
-  assert.ok(sql.includes(`${RANK_TERMS.aos.weight} * coalesce(least(greatest(CASE WHEN p_aos > 100 THEN p_aos / 10 ELSE p_aos END, 0), 100), ${RANK_TERMS.aos.prior})`));
-  for (const floor of [75, 50, 25]) assert.ok(sql.includes(`round(${floor} + 0.2499 * least(greatest(p_score,0),100), 2)`));
-  assert.ok(sql.includes("round(0.2499 * least(greatest(p_legacy,0),100), 2)"));
+  assert.ok(sql.includes(`${LAYER_WEIGHTS.contact} * p_contact`));
+  assert.ok(sql.includes(`${LAYER_WEIGHTS.pressure} * p_pressure * (${PRESSURE_GATE_FLOOR} + ${1 - PRESSURE_GATE_FLOOR} * p_contact / 100)`));
+  assert.ok(sql.includes(`${LAYER_WEIGHTS.deal} * p_deal`));
+  assert.ok(sql.includes(`${LAYER_WEIGHTS.market} * coalesce(least(greatest(p_market,0),100), ${MARKET_PRIOR})`));
+  for (const [k, v] of Object.entries(CONTACT_POINTS.line)) if (k !== "unknown") assert.ok(sql.includes(`WHEN '${k}' THEN ${v}`), `line ${k}`);
+  assert.ok(sql.includes(`ELSE ${CONTACT_POINTS.line.unknown} END`));
+  for (const k of ["verified", "probable", "entity_company_linked", "unknown", "mismatch"]) assert.ok(sql.includes(`'${k}' THEN ${CONTACT_POINTS.identity[k]}`), `identity ${k}`);
+  for (const k of ["likely_owner", "linked_to_company", "potential_owner", "potentially_linked_to_company", "family_only", "renter_no_owner"]) assert.ok(sql.includes(`'${k}' THEN ${CONTACT_POINTS.tag[k]}`), `tag ${k}`);
+  assert.ok(sql.includes(`${CONTACT_POINTS.shared_phone_penalty} ELSE 0 END`));
+  for (const [t, pts] of Object.entries(TIER_POINTS)) assert.ok(t === "C" ? sql.includes(`ELSE ${pts} END`) : sql.includes(`'${t}' THEN ${pts}`));
+  assert.ok(sql.includes("WHEN p_value > 0 AND p_loan > 0 THEN"));
+  assert.ok(sql.includes("free and clear"));
+  assert.ok(!/campaign_rank_v2_score\(/.test(sql.split("-- ── 2.")[0]), "no v2.0 band score function");
   assert.ok(fs.existsSync(new URL("../../../../supabase/migrations/PROPOSED_20261007080000_campaign_ranking_v2_rollback.sql", import.meta.url)));
-});
-
-test("contactability: identity + line type + usage; null when nothing known (best_phone_score is never read)", () => {
-  assert.equal(contactabilityScore({}), null);
-  assert.equal(contactabilityScore({ best_phone_score: 99 }), null);
-  assert.equal(contactabilityScore({ identity_alignment: "verified", phone_type: "W", usage_2_months: "Heavy Usage" }), 100);
-  assert.equal(contactabilityScore({ identity_alignment: "mismatch", phone_type: "L", usage_2_months: "Minimal Usage" }), 20);
-  assert.equal(contactabilityScore({ phone_type: "W" }), 20 + 30 + 15);
 });
 
 // ── build integration (byte-identical OFF, ranked ON) ────────────────────────
@@ -220,33 +271,38 @@ test("planCampaignTargetRows with the flag OFF: legacy order, legacy priority_sc
   assert.equal(planned.summary.ranking_v2, undefined);
 });
 
-test("planCampaignTargetRows with CAMPAIGN_RANKING_V2=on: tier order, v2 priority_score, metadata.ranking, limit applied AFTER ranking, set-based context (one call each)", async () => {
+test("planCampaignTargetRows with CAMPAIGN_RANKING_V2=on: layered order, v2.1 priority_score + metadata.ranking, limit applied AFTER ranking, one context call each", async () => {
   const store = makeCampaignQueuePlanStore();
-  const rows = [row(1, { acquisition_score: 95 }), row(2, { acquisition_score: 10 }), row(3, { acquisition_score: 50 }), row(4, { acquisition_score: 99 })];
-  const calls = { situations: 0, markets: 0 };
-  const situations = new Map([["prop_1", sit("C", { fatigue: 50 })], ["prop_2", sit("A", { fsp: 85, codes: ["TAX_DELINQUENT", "VACANT"] })], ["prop_3", sit("B", { fsp: 40, codes: ["ABSENTEE", "TENURE_20Y"] })]]);
+  const rows = [
+    row(1, { ...GOOD_CONTACT, seller_person_key: "k1", matching_flags: undefined, acquisition_score: 95 }),
+    row(2, { ...GOOD_CONTACT, seller_person_key: "k2", matching_flags: undefined, acquisition_score: 10 }),
+    row(3, { ...BAD_CONTACT, seller_person_key: "k3", matching_flags: undefined, acquisition_score: 99 }),
+    row(4, { ...GOOD_CONTACT, seller_person_key: "k4", matching_flags: undefined, acquisition_score: 50 }),
+  ].map((r) => { delete r.matching_flags; return r; });
+  const calls = { situations: 0, markets: 0, flags: 0, response: 0 };
+  const situations = new Map([["prop_1", SOFT()], ["prop_2", ACUTE()], ["prop_3", ACUTE()], ["prop_4", sit("B", { fsp: 40, codes: ["ABSENTEE", "TENURE_20Y"] })]]);
   const deps = {
     supabase: store.supabase,
     env: ON,
     rankingV2: {
       loadSituations: async (r) => { calls.situations += 1; assert.equal(r.length, 4); return situations; },
       loadMarkets: async () => { calls.markets += 1; return new Map(); },
+      loadMatchingFlags: async () => { calls.flags += 1; return new Map([["k1", "Likely Owner"], ["k2", "Likely Owner"], ["k3", "Resident, Likely Renting"], ["k4", "Likely Owner"]]); },
+      loadResponse: async () => { calls.response += 1; return null; },
     },
   };
   const planned = await planCampaignTargetRows({ campaign: { id: "c2", name: "c2", metadata: {} }, options: {}, graph: { rows }, targetLimit: 3, deps, resolveLanguages: false });
-  assert.deepEqual(planned.rows.map((r) => r.property_id), ["prop_2", "prop_3", "prop_1"], "A, B, C — prop_4 (legacy 99, no evidence) is cut by the limit");
-  assert.ok(planned.rows[0].priority_score >= 75);
-  assert.equal(planned.rows[0].metadata.ranking.band, "A");
-  assert.equal(planned.rows[2].metadata.ranking.band, "C");
-  assert.equal(planned.summary.ranking_v2.by_band.FALLBACK, 1);
-  assert.deepEqual(calls, { situations: 1, markets: 1 });
+  assert.deepEqual(planned.rows.map((r) => r.property_id), ["prop_2", "prop_4", "prop_1"], "acute+good contact, stacked+good, soft+good; acute at a bad contact (legacy 99) is cut");
+  assert.equal(planned.rows[0].metadata.ranking.ranking_version, "campaign_rank_v2.1");
+  assert.ok(planned.rows[0].priority_score > planned.rows[2].priority_score);
+  assert.deepEqual(calls, { situations: 1, markets: 1, flags: 1, response: 1 });
 });
 
-test("ranking context failure never fails a build: rows fall to the marked fallback band", async () => {
+test("ranking context failure never fails a build: rows rank on the marked legacy fallback in L2", async () => {
   const out = await applyCampaignRankingV2([row(1, { acquisition_score: 70 }), row(2, { acquisition_score: 30 })], {
     rankingV2: { loadSituations: async () => { throw new Error("boom"); }, loadMarkets: async () => new Map() },
   });
-  assert.deepEqual(out.rows.map((r) => r._rank_v2.band), ["FALLBACK", "FALLBACK"]);
+  assert.deepEqual(out.rows.map((r) => r._rank_v2.rank_source), ["legacy_fallback", "legacy_fallback"]);
   assert.deepEqual(out.rows.map((r) => r.property_id), ["prop_1", "prop_2"]);
   assert.match(out.summary.errors[0], /situations_unavailable:boom/);
   assert.equal(rankingV2FetchLimit(1000), 20000);
@@ -255,8 +311,8 @@ test("ranking context failure never fails a build: rows fall to the marked fallb
 
 test("dedupe: with the v2 comparator the better-ranked property of a shared phone is the primary", () => {
   const phone = "+15553000001";
-  const a = { ...row(1, { canonical_e164: phone, acquisition_score: 99 }), _rank_v2: computeCampaignRankV2(row(1), { situation: sit("C", {}) }) };
-  const b = { ...row(2, { canonical_e164: phone, master_owner_id: "mo_1", acquisition_score: 10 }), _rank_v2: computeCampaignRankV2(row(2), { situation: sit("A", { fsp: 90, codes: ["TAX_DELINQUENT", "LIEN_RECORDED"] }) }) };
+  const a = { ...row(1, { canonical_e164: phone, acquisition_score: 99 }), _rank_v2: computeCampaignRankV2(row(1, GOOD_CONTACT), { situation: SOFT() }) };
+  const b = { ...row(2, { canonical_e164: phone, master_owner_id: "mo_1", acquisition_score: 10 }), _rank_v2: computeCampaignRankV2(row(2, GOOD_CONTACT), { situation: sit("A", { fsp: 90, codes: ["TAX_DELINQUENT", "LIEN_RECORDED"] }) }) };
   const legacy = collapseGraphRowsToRecipients([a, b]);
   assert.equal(legacy.recipients[0].primary_property_id, "prop_1", "OFF: legacy score picks the primary");
   const v2 = collapseGraphRowsToRecipients([a, b], { comparePriority: compareCampaignRankV2 });
@@ -270,6 +326,41 @@ test("a v2-ranked target never relabels its v2 priority as the legacy Final Acqu
   const ranked = launchCandidateFromTarget({ ...base, metadata: { ...base.metadata, ranking: { ranking_version: CAMPAIGN_RANKING_VERSION } } }, { id: "c" });
   assert.equal(ranked.final_acquisition_score, 61);
   assert.equal(ranked.acquisition_score, 61);
+});
+
+// ── funnel analytics ─────────────────────────────────────────────────────────
+test("funnel: stages imply their predecessors, who-is-this/SP is not interest, transitions are k/n with Wilson CIs", () => {
+  const who = funnelLabels({ delivered: true, inbound: 1, intents: ["who_is_this"], stages: ["SP"] });
+  assert.equal(who.replied, true);
+  assert.equal(who.interested, false);
+  assert.equal(who.owner, false);
+  const own = funnelLabels({ delivered: true, inbound: 1, intents: ["ownership_confirmed"], stages: ["asking_price"] });
+  assert.equal(own.owner, true);
+  assert.equal(own.interested, false);
+  const priced = funnelLabels({ delivered: true, inbound: 2, intents: ["asking_price_provided"], stages: ["S4B"], ask: 220000, value: 200000 });
+  assert.deepEqual([priced.owner, priced.interested, priced.price, priced.realistic], [true, true, true, true]);
+  assert.equal(funnelLabels({ delivered: true, inbound: 1, intents: [], stages: [], ask: 2020 }).price, false, "a year is never a price");
+  assert.equal(funnelLabels({ delivered: true, inbound: 1, intents: ["wrong_number"], stages: [] }).owner, false);
+  const items = [
+    { labels: priced, signals: { tier: "A" } },
+    { labels: own, signals: { tier: "A" } },
+    { labels: who, signals: { tier: "C" } },
+    { labels: funnelLabels({ delivered: true, inbound: 0 }), signals: { tier: "C" } },
+  ];
+  const f = funnelBySignal(items, { signals: ["tier"] });
+  const t = Object.fromEntries(f.overall.transitions.map((x) => [`${x.from}→${x.to}`, x]));
+  assert.deepEqual([t["delivered→replied"].k, t["delivered→replied"].n], [3, 4]);
+  assert.deepEqual([t["owner→interested"].k, t["owner→interested"].n], [1, 2]);
+  assert.ok(t["owner→interested"].thin);
+  const given = funnelBySignal(items, { signals: ["tier"], conditionalOn: "owner" });
+  assert.equal(given.overall.n, 2);
+  assert.deepEqual(given.by_signal.tier.map((g) => [g.value, g.n]), [["A", 2]]);
+  assert.deepEqual(wilson(0, 0), [null, null]);
+});
+
+test("funnel API is dark by default and needs a scope", async () => {
+  assert.equal((await runFunnel({ since: "2026-09-01" }, { env: {}, db: { query: async () => { throw new Error("no"); } } })).error, "seller_screener_disabled");
+  assert.equal((await runFunnel({}, { env: { SELLER_SCREENER: "on" }, db: { query: async () => ({ rows: [] }) } })).error, "scope_required");
 });
 
 // ── tiers (§14) on the real A1 model ─────────────────────────────────────────
@@ -337,9 +428,9 @@ test("§69 DSL validates, and the brief's Texas example compiles: graph leaves p
   const norm = normalizeScreenerExpression(TEXAS_SCREEN);
   assert.equal(norm.ok, true, norm.errors.join());
   const { where, params, pushed } = compileGraphPushdown(norm.expr, { startParam: 2 });
-  assert.deepEqual(where, ["state = any($2::text[])", "equity_percent >= $3"]);
-  assert.deepEqual(params, [["TX"], 35]);
-  assert.equal(pushed.size, 2);
+  assert.deepEqual(where, ["state = any($2::text[])"], "equity is a derived (known-only) metric — never pushed down as the raw column");
+  assert.deepEqual(params, [["TX"]]);
+  assert.equal(pushed.size, 1);
 });
 
 test("three-valued logic: unknown is not no — an unknown metric excludes the row AND is counted", () => {
@@ -410,7 +501,7 @@ test("screener/discovery/why-targeted APIs are dark by default (flag OFF → 404
 test("why-targeted service: one ANY() read for ≤200 ids, situation + market + rank + why per property", async () => {
   let reads = 0;
   const db = { query: async (sql, params) => { reads += 1; assert.match(sql, /property_id = any\(\$1::text\[\]\)/); return { rows: params[0].filter((id) => id !== "missing").map((id, i) => row(i, { property_id: id })) }; } };
-  const res = await readWhyTargeted(["a", "b", "missing"], { env: { SELLER_SCREENER: "on" }, db, loadSituations: async () => new Map([["a", sit("A", { fsp: 80, codes: ["TAX_DELINQUENT", "VACANT"] })]]), loadMarkets: async () => new Map() });
+  const res = await readWhyTargeted(["a", "b", "missing"], { env: { SELLER_SCREENER: "on" }, db, loadSituations: async () => new Map([["a", sit("A", { fsp: 80, codes: ["TAX_DELINQUENT", "VACANT"] })]]), loadMarkets: async () => new Map(), loadMatchingFlags: async () => new Map(), loadResponse: async () => null });
   assert.equal(reads, 1);
   assert.deepEqual(res.missing, ["missing"]);
   assert.equal(res.properties.find((p) => p.property_id === "a").rank.band, "A");
@@ -449,7 +540,8 @@ test("§16 discovery ranks ZIPs by (tier A + ½ tier B) × market quality, reach
   assert.equal(out.zips[0].zip, "75217");
   assert.equal(out.zips[0].reachable, 18);
   assert.equal(out.zips[1].market_quality_assumed, true);
-  assert.match(out.zips[0].headline, /^Dallas, TX 75217 · \d+ high-pressure sellers \(tier A\) · \d+ stacked \(tier B\) of 18 reachable · median equity \d+% · strong buyer depth · investor activity high$/);
+  assert.match(out.zips[0].headline, /^Dallas, TX 75217 · \d+ high-pressure sellers \(tier A\) · \d+ stacked \(tier B\) of 18 reachable · \d+ high-contact-confidence · equity % unknown · strong buyer depth · investor activity high$/);
+  assert.equal(out.zips[0].median_equity_percent_known, null, "no loan+value evidence → equity unknown, never 100%");
   assert.equal(out.zips[0].high_pressure, out.zips[0].tiers.A);
 });
 
