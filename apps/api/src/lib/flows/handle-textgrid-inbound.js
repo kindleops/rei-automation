@@ -1,4 +1,5 @@
 // ─── handle-textgrid-inbound.js ──────────────────────────────────────────
+import { isPriorityReplyIntent } from "@/lib/domain/inbox/reply-actionability.js";
 import crypto from "node:crypto";
 import { buildConversationContext } from "@/lib/domain/classification/build-conversation-context.js";
 import { markInboundAwaitingBurst as markInboundAwaitingBurstImpl } from "@/lib/domain/inbound/inbound-processing-ledger.js";
@@ -3390,7 +3391,13 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
         inbox_event_type = "inbox_opt_out_received";
       } else if (compliance_flag.includes("wrong_number")) {
         inbox_event_type = "inbox_wrong_number";
-      } else if (lead_temperature === "hot" || detected_intent === "hot_lead") {
+      } else if (
+        // 8.5 (2026-10-06): a HOT LEAD alert only from a priority-grade reply
+        // (reply-actionability.js); a sticky "hot" temperature on a troll, a
+        // "$5 million" joke or a non-owner never pings the operator as hot.
+        (lead_temperature === "hot" && isPriorityReplyIntent(detected_intent)) ||
+        detected_intent === "hot_lead"
+      ) {
         inbox_event_type = "inbox_hot_lead";
       } else if (detected_intent === "asking_price" || detected_intent === "price_captured") {
         inbox_event_type = "inbox_price_captured";

@@ -4,6 +4,11 @@ import {
   isOutboundLastWithoutReply,
   parseTimestampMs,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
+import {
+  NON_ACTIONABLE_REPLY_INTENTS,
+  isPriorityReplyIntent,
+  isReopeningReplyIntent,
+} from "@/lib/domain/inbox/reply-actionability.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -42,15 +47,10 @@ function object(value) {
 // reply, whatever its stored bucket says: an opt-out, a wrong person, a sale,
 // a decline or a "not now", hostility. Mirrors f_reply_resolved in
 // v_inbox_thread_state_buckets (migration 20261001160000).
-export const RESOLVED_REPLY_INTENTS = Object.freeze([
-  "opt_out",
-  "wrong_number",
-  "wrong_person",
-  "sold_property",
-  "not_interested",
-  "need_time",
-  "hostile_or_legal",
-]);
+//
+// 8.5 (2026-10-06): widened to every NON-ACTIONABLE reply (reply-actionability.js):
+// non-owners, trolls, implausible asks and thanks-only replies join the list.
+export const RESOLVED_REPLY_INTENTS = NON_ACTIONABLE_REPLY_INTENTS;
 // Replies that carry no engagement: they leave the thread where it was.
 export const NON_ENGAGEMENT_REPLY_INTENTS = Object.freeze(["reaction_only", "acknowledgement"]);
 // Dispositions that close the thread for this property (derived "dead").
@@ -213,7 +213,8 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
       return threadMatchesAllMessagesFacts(thread, nowMs);
     case "priority":
       if (isArchivedThread(thread) || isTerminalNoContactThread(thread)) return false;
-      return bucket === "priority";
+      // 8.5: Priority is high-value actionable only (reply-actionability.js).
+      return bucket === "priority" && isPriorityReplyIntent(thread.last_intent || thread.latest_intent || thread.primary_intent);
     case "new_replies":
       return threadMatchesNewRepliesFacts(thread, nowMs);
     case "needs_review":
@@ -382,16 +383,32 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
       && (nowMs - realOutMs) <= WAITING_REPLY_WINDOW_MS
       && !metadataNoContact);
 
+  // 8.5: the thread's latest inbound intent, whatever was sent after it
+  // (last_intent is written on inbound only). Priority is gated on it so a
+  // stored 'priority' bucket cannot hold an implausible ask, a troll or a bare
+  // "Yes" once the reply is answered.
+  const threadIntent = lower(row.last_intent);
+  const threadResolved = RESOLVED_REPLY_INTENTS.includes(threadIntent);
+  const inPriority = actionable && bucket === "priority" && isPriorityReplyIntent(threadIntent) && !threadResolved;
+  const unanswered = direction === "inbound"
+    && inboundAtMs > 0
+    && (!realOutMs || inboundAtMs >= realOutMs);
   const inNewReplies = actionable
-    && !["priority", "needs_review", "waiting", "cold", "follow_up"].includes(bucket)
+    && !inPriority
     && !needsReviewFlag
     && !replyResolved
-    && direction === "inbound"
-    && inboundAtMs > 0
-    && (!parseTimestampMs(row.last_outbound_at) || inboundAtMs >= parseTimestampMs(row.last_outbound_at));
+    && unanswered
+    && (
+      !["priority", "needs_review", "waiting", "cold", "follow_up"].includes(bucket)
+      // 8.5: a stored 'priority' whose latest reply is not priority-grade is
+      // still a reply to work ("Yes", "only for 1.5M") -> New Replies.
+      || bucket === "priority"
+      // 8.5: a parked nurture re-opens on a later actionable reply (owner
+      // rule: dead deals reopen on a new reply). "unclear" alone does not.
+      || (bucket === "follow_up" && isReopeningReplyIntent(lastIntent))
+    );
   const inNeedsReview = available && (bucket === "needs_review" || needsReviewFlag);
-  const inFollowUp = available && bucket === "follow_up";
-  const inPriority = actionable && bucket === "priority";
+  const inFollowUp = available && bucket === "follow_up" && !inNewReplies;
 
   return {
     derived_bucket: bucket,

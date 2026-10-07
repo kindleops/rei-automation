@@ -211,6 +211,8 @@ export function deriveInboxThreadStateRows(threadRows = []) {
       unread_count: row.unread_count ?? 0,
       last_outbound_at: direction === "outbound" ? latestAt : row.last_outbound_at || null,
       last_inbound_at: direction === "inbound" ? latestAt : row.last_inbound_at || null,
+      // 8.5: Priority is gated on the latest inbound intent.
+      last_intent: row.last_intent ?? null,
     };
   }).filter((row) => row.thread_key);
 }

@@ -78,9 +78,15 @@ const FIXTURES = [
     expect: "needs_review",
   },
   {
-    name: "explicit priority bucket -> Priority",
-    row: { thread_key: "k", inbox_bucket: "priority", latest_direction: "inbound", last_inbound_at: hoursAgo(1), latest_message_at: hoursAgo(1), property_id: "p11" },
+    name: "explicit priority bucket + priority-grade latest intent -> Priority",
+    row: { thread_key: "k", inbox_bucket: "priority", last_intent: "asks_offer", latest_direction: "inbound", last_inbound_at: hoursAgo(1), latest_message_at: hoursAgo(1), property_id: "p11" },
     expect: "priority",
+  },
+  {
+    // 8.5: a bare "Yes" stored under 'priority' is a reply to work, not a hot deal.
+    name: "explicit priority bucket + ownership_confirmed -> New Replies (8.5)",
+    row: { thread_key: "k2", inbox_bucket: "priority", last_intent: "ownership_confirmed", latest_direction: "inbound", last_inbound_at: hoursAgo(1), latest_message_at: hoursAgo(1), property_id: "p12" },
+    expect: "new_replies",
   },
 ];
 
