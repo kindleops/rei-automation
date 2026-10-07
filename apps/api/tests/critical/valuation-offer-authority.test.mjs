@@ -50,6 +50,9 @@ const HEALTHY = Object.freeze({
   valuation_confidence: 82,
   comp_count: 6,
   investor_ceiling_mid: 300000,
+  // Real score rows always carry the value the offer was built on; the offer
+  // sanity guard fails closed on an offer with no value.
+  valuation_mid: 400000,
   recommended_cash_offer: 250000,
 });
 

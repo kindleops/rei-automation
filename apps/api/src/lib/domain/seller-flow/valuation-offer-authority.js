@@ -26,6 +26,8 @@
 // NOT A RENAME. REVIEW_REQUIRED keeps its meaning and is still persisted; this
 // module only stops it from being *spent*.
 
+import { evaluateScoreOfferSanity } from "@/lib/acquisition/offer-sanity.js";
+
 function num(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -83,6 +85,9 @@ export const NON_SPENDABLE_REASONS = Object.freeze({
   NO_RECOMMENDATION: "valuation_has_no_recommendation",
   TIER_NOT_AUTHORITATIVE: "valuation_tier_not_offer_authoritative",
   UNDEFENDED_LOW_N: "valuation_low_comp_count_without_contamination_defense",
+  // offer-sanity.js: offer/MAO/repairs implausible against the engine's own
+  // value, AVM vs comps >2x apart, or an asset-identity conflict.
+  OFFER_SANITY: "valuation_offer_sanity_failed",
 });
 
 /**
@@ -138,6 +143,14 @@ export function resolveValuationSpendability({ valuation = null, v3_qualificatio
   // (1) The engine's own tier must say this is automatable as a cash offer.
   if (!OFFER_AUTHORITATIVE_TIERS.includes(decision_tier)) {
     return { spendable: false, reason: NON_SPENDABLE_REASONS.TIER_NOT_AUTHORITATIVE, ...base };
+  }
+
+  // (1b) The numbers themselves must be plausible (fail-closed, price-neutral).
+  // A row scored before the engine gate existed can still carry an AUTO_* tier
+  // on an offer of 5% of value; this is the last stop before a number is spent.
+  const offer_sanity = evaluateScoreOfferSanity(valuation);
+  if (!offer_sanity.sane) {
+    return { spendable: false, reason: NON_SPENDABLE_REASONS.OFFER_SANITY, offer_sanity, ...base };
   }
 
   // (2) "Too few observations for MAD" must never be read as "all observations

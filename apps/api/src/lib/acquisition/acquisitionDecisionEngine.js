@@ -3,6 +3,7 @@ import {
   resolveEffectiveAuthorizedCeiling,
 } from './buyerCeilingAuthority.js';
 import { resolveTargetAssignmentMargin } from './assignmentMarginPolicy.js';
+import { evaluateOfferSanity, hasAssetIdentityConflict } from './offer-sanity.js';
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import {
   normalizeAssetClass,
@@ -3167,7 +3168,20 @@ function determineDecisionTier({
   // a $40,000 aspiration failed its own gate at $37,300, and a genuinely
   // excellent $25,000 fee was routed away from cash entirely.
   minimumMargin,
+  subject = {},
+  repairs = null,
 }) {
+  // OFFER SANITY (fail-closed, price-neutral): the same plausibility guard the
+  // offer-ready predicate applies to the persisted row. A failing check never
+  // changes a number; it removes monetary authority and routes to review.
+  const offerSanity = evaluateOfferSanity({
+    valuation_mid: valuation.mid,
+    recommended_cash_offer: offer.recommended_cash_offer,
+    mao: offer.effective_buyer_ceiling,
+    estimated_repairs: repairs?.amount ?? null,
+    avm: subject.estimated_value ?? null,
+    asset_identity_conflict: hasAssetIdentityConflict(subject),
+  });
   const hardGateChecks = {
     confidence_at_least_85: confidence >= 85,
     comp_count_at_least_4: compCount >= 4,
@@ -3176,12 +3190,16 @@ function determineDecisionTier({
       num(offer.expected_assignment_fee, 0) >= minimumMargin,
     recommended_offer_available: num(offer.recommended_cash_offer, 0) > 0,
     aos_at_least_780: aos.score >= 780,
+    offer_economics_within_sanity_bounds: offerSanity.sane,
   };
   const hardGatePassed = Object.values(hardGateChecks).every(Boolean);
   let tier;
   const reasons = [];
 
-  if (hardGatePassed) {
+  if (!offerSanity.sane) {
+    tier = DECISION_TIERS.REVIEW_REQUIRED;
+    reasons.push('offer_sanity_review', ...offerSanity.reasons.map((r) => `offer_sanity:${r}`));
+  } else if (hardGatePassed) {
     tier = DECISION_TIERS.AUTO_HARD_OFFER;
     reasons.push('all_auto_hard_offer_gates_passed');
   } else if (
@@ -3214,7 +3232,7 @@ function determineDecisionTier({
   for (const [gate, passed] of Object.entries(hardGateChecks)) {
     if (!passed) reasons.push(`hard_gate_failed:${gate}`);
   }
-  return { tier, reasons, hard_gate_checks: hardGateChecks };
+  return { tier, reasons, hard_gate_checks: hardGateChecks, offer_sanity: offerSanity };
 }
 
 function scoreRowFromDecision(propertyId, decision, now = new Date()) {
@@ -3439,6 +3457,8 @@ export function calculateAcquisitionDecision({
     confidence,
     compCount: selected.length,
     minimumMargin: dealMinimumMargin,
+    subject,
+    repairs,
   });
   // "Is cash viable?" is a viability question -> hard floor, not aspiration.
   const cashViability =

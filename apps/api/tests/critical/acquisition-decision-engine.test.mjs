@@ -1025,3 +1025,38 @@ test('Phase 2 migration does not alter queue, send, or message tables', () => {
     /ALTER\s+TABLE\s+(?:public\.)?(?:send_queue|message_events|email_send_queue|follow_up_queue)/i,
   );
 });
+
+// ─── Offer sanity guard (2026-10-06, 627 Ontario St SE: $11.8K on $230K) ─────
+test('offer sanity: a sane deal keeps its tier and the gate reads true', () => {
+  const decision = calculateAcquisitionDecision({
+    subject: SUBJECT, comps: GOOD_COMPS, buyerPurchases: BUYER_PURCHASES, now: NOW, targetAssignmentFee: 10_000,
+  });
+  assert.equal(decision.decision.tier, 'AUTO_HARD_OFFER');
+  assert.equal(decision.decision.hard_gate_checks.offer_economics_within_sanity_bounds, true);
+  assert.equal(decision.decision.offer_sanity.sane, true);
+});
+
+test('offer sanity: AVM 3.5x the comp value -> REVIEW_REQUIRED, price untouched', () => {
+  const base = calculateAcquisitionDecision({
+    subject: SUBJECT, comps: GOOD_COMPS, buyerPurchases: BUYER_PURCHASES, now: NOW, targetAssignmentFee: 10_000,
+  });
+  const divergent = calculateAcquisitionDecision({
+    subject: { ...SUBJECT, estimated_value: 1_200_000 }, comps: GOOD_COMPS, buyerPurchases: BUYER_PURCHASES, now: NOW, targetAssignmentFee: 10_000,
+  });
+  assert.equal(divergent.decision.tier, 'REVIEW_REQUIRED');
+  assert.ok(divergent.decision.reasons.includes('offer_sanity:avm_diverges_from_comp_value'));
+  assert.equal(divergent.decision.hard_gate_checks.offer_economics_within_sanity_bounds, false);
+  // The guard withholds authority; it never moves a number.
+  assert.equal(divergent.offer.recommended_cash_offer, base.offer.recommended_cash_offer);
+  assert.equal(divergent.valuation.mid, base.valuation.mid);
+});
+
+test('offer sanity: repairs that are most of the value can never auto-offer', () => {
+  const decision = calculateAcquisitionDecision({
+    subject: { ...SUBJECT, estimated_repair_cost: 200_000 }, comps: GOOD_COMPS, buyerPurchases: BUYER_PURCHASES, now: NOW, targetAssignmentFee: 10_000,
+  });
+  assert.equal(decision.decision.tier, 'REVIEW_REQUIRED');
+  assert.ok(decision.decision.offer_sanity.reasons.includes('repairs_above_max_fraction_of_value'));
+  assert.notEqual(decision.decision.tier, 'AUTO_HARD_OFFER');
+  assert.notEqual(decision.decision.tier, 'AUTO_RANGE_OFFER');
+});

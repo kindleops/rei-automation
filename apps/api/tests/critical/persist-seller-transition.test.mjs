@@ -88,7 +88,7 @@ test("qualifying transition creates an opportunity with facts, stage, and negoti
     // authority the send path already applies. This fixture therefore states a
     // genuinely authoritative valuation -- authoritative tier + enough comps for
     // the MAD contamination defense. The unsupported case is asserted below.
-    deps: { scoreProperty: async () => ({ ok: true, score: { recommended_cash_offer: 71000, minimum_acceptable_offer: 65000, investor_ceiling_mid: 80000, decision_tier: "AUTO_HARD_OFFER", comp_count: 8, valuation_confidence: 82, evidence: { offer_calculation: { valuation_based_ceiling: 80000, effective_authorized_ceiling: 80000 } } } }) },
+    deps: { scoreProperty: async () => ({ ok: true, score: { valuation_mid: 130000, recommended_cash_offer: 71000, minimum_acceptable_offer: 65000, investor_ceiling_mid: 80000, decision_tier: "AUTO_HARD_OFFER", comp_count: 8, valuation_confidence: 82, evidence: { offer_calculation: { valuation_based_ceiling: 80000, effective_authorized_ceiling: 80000 } } } }) },
   });
 
   assert.equal(result.ok, true);

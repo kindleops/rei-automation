@@ -93,6 +93,7 @@ test("PINNED COUNTERFACTUAL: $5,479,900 is unauthorizable even at an auto-offer 
       confidence: 88,
       valuation_confidence: 82,
       comp_count: 12, // the valuation leg genuinely passes MAD
+      valuation_mid: 9_000_000, // offer ~0.61 of value: inside the sanity bounds
       recommended_cash_offer: CONTAMINATED_RECOMMENDATION,
       investor_ceiling_mid: 21284800,
     };
