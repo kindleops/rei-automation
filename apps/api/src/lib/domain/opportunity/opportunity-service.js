@@ -23,7 +23,7 @@ import {
   validateTemperatureTransition,
 } from '@/lib/domain/opportunity/opportunity-stage-registry.js';
 import { emitOpportunityWorkflowEvent } from '@/lib/domain/opportunity/opportunity-workflow-bridge.js';
-import { evaluateStageAdvance, DEAD_CLOSING_STATUSES } from '@/lib/domain/opportunity/stage-advance-guard.js';
+import { evaluateStageAdvance, DEAD_CLOSING_STATUSES, offerEventFromSellerOffer, offerEventFromQuote } from '@/lib/domain/opportunity/stage-advance-guard.js';
 import { buildOpportunityActivityTimeline } from '@/lib/domain/opportunity/opportunity-activity-timeline.js';
 import { batchHydrateOpportunityProperties } from '@/lib/domain/opportunity/opportunity-property-hydration.js';
 import { applyRegistryFilters, applyRegistrySorts } from '@/lib/domain/opportunity/pipeline-query-builder.js';
@@ -620,8 +620,27 @@ export async function transitionOpportunityStage(id, input = {}, deps = {}) {
         live_closing_case = false; // fail closed
       }
     }
-    const guard = evaluateStageAdvance({ current, to_stage: requestedStage, source: input.source, live_closing_case });
-    if (!guard.ok) return guard;
+    // Offer events: the Offer Term Authority (seller_offers) and, when present,
+    // negotiation_quotes. An unreadable table counts as no event (fail closed).
+    const offer_events = [];
+    if (requestedStage === 'offer') {
+      try {
+        const { data: offers } = await client.from('seller_offers').select('offer_id, opportunity_id, thread_key, purchase_price, status, sent_at, ade_snapshot_id, policy_version, valuation_mid, authorized_ceiling, metadata').eq('opportunity_id', id).limit(20);
+        for (const row of offers || []) offer_events.push(offerEventFromSellerOffer(row));
+      } catch { /* none */ }
+      try {
+        const { data: quotes } = await client.from('negotiation_quotes').select('*').eq('opportunity_id', id).limit(20);
+        for (const row of quotes || []) offer_events.push(offerEventFromQuote(row));
+      } catch { /* table may not exist */ }
+      if (input.offer_event && typeof input.offer_event === 'object') offer_events.push({ ...input.offer_event, opportunity_id: input.offer_event.opportunity_id || id });
+    }
+    const guard = evaluateStageAdvance({ current, to_stage: requestedStage, source: input.source, live_closing_case, offer_events, valuation: { valuation_mid: input.valuation_mid ?? null, mao: input.mao ?? null } });
+    if (!guard.ok) {
+      // D — a refused manual move explains itself and names the action that unblocks it.
+      return guard.code === 'CONTRACT_EVENT_REQUIRED'
+        ? { ...guard, action_label: 'Record contract to continue', open: `/closing-desk?opportunity=${encodeURIComponent(id)}` }
+        : guard;
+    }
   }
 
   const validation = validateStageTransition({
