@@ -322,10 +322,11 @@ test("automation engine: asking price moves thread hot and urgent without sendin
   );
 
   assert.equal(result.ok, true);
-  // "needs_offer" normalizes to the canonical `offer` stage via the universal
-  // lead-state write service (legacy mirrors stay in sync).
-  assert.equal(thread.stage, "offer");
-  assert.equal(thread.lifecycle_stage, "offer");
+  // Lifecycle money/contract gate (2026-10-07): a seller asking for an offer is
+  // evidence, not an offer event — an automated write never moves the thread
+  // projection to Offer by itself. Hot/urgent still apply.
+  assert.notEqual(thread.stage, "offer");
+  assert.notEqual(thread.lifecycle_stage, "offer");
   assert.equal(thread.priority, "urgent");
   assert.equal(thread.is_urgent, true);
   assert.equal(thread.metadata.automation_engine.lead_temperature, "hot");
@@ -590,8 +591,10 @@ test("automation engine: safe action aliases are dry-run or existing-table only"
   // ("open" → not_contacted, "needs_offer" → offer) and mirrors legacy columns.
   assert.equal(thread.status, "not_contacted");
   assert.equal(thread.operational_status, "not_contacted");
-  assert.equal(thread.stage, "offer");
-  assert.equal(thread.lifecycle_stage, "offer");
+  // update_stage → needs_offer is withheld by the lifecycle money/contract gate
+  // (2026-10-07): Offer+ follows the gated opportunity, never an automation rule.
+  assert.notEqual(thread.stage, "offer");
+  assert.notEqual(thread.lifecycle_stage, "offer");
   assert.equal(thread.metadata.automation_engine.lead_temperature, "hot");
   assert.equal(supabase.rows.ops_notifications.length, 1);
   assert.equal(followupAction.result.dry_run, true);
