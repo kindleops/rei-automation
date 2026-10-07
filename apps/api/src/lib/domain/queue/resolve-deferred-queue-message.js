@@ -18,6 +18,10 @@ import { info, warn } from "@/lib/logging/logger.js";
 import { selectVariant } from "@/lib/domain/messaging/adaptive-template-selection.js";
 import { filterTemplatesForProperty, isTemplateCompatibleWithProperty, canonicalPropertyGroupOf } from "@/lib/domain/templates/template-asset-compatibility.js";
 import { loadPropertyAssetRecord } from "@/lib/domain/queue/template-asset-guard.js";
+import {
+  isNoResponseFollowUpRow,
+  resolveNoResponseFollowUpMessage,
+} from "@/lib/domain/seller-flow/no-response-followup.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -108,6 +112,25 @@ export async function resolveDeferredQueueMessage(queue_row = {}, deps = {}) {
   const supabase = deps.supabase || deps.supabaseClient || getDefaultSupabaseClient();
   if (!supabase) {
     return { ok: false, resolved: false, reason: "missing_supabase" };
+  }
+
+  // No-response follow-ups (S2 question / offer): re-validated silence,
+  // strict reply language, the offer number exactly as sent (or no number).
+  if (isNoResponseFollowUpRow(queue_row)) {
+    try {
+      const resolved = await resolveNoResponseFollowUpMessage(queue_row, { supabase, loadPropertyAssetRecord });
+      if (resolved.resolved) {
+        info("[DEFERRED_FOLLOWUP_RESOLVED]", {
+          queue_row_id: queue_row.id || null,
+          intent: "stage_no_reply",
+          use_case: resolved.use_case,
+          template_id: resolved.template_id,
+        });
+      }
+      return resolved;
+    } catch (error) {
+      return { ok: false, resolved: false, reason: error?.message || "no_response_resolution_failed" };
+    }
   }
 
   const intent = nurtureIntentFromRow(queue_row);
