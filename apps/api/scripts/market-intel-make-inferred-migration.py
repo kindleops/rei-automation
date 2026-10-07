@@ -41,7 +41,7 @@ LINK_UNITS_SQL = ', '.join(f"'{u}'" for u in LINK_UNITS)
 BOUND_FRACTIONS = ', '.join(f'{k / LINK_SLICES:g}' for k in range(1, LINK_SLICES))
 # every unit must finish well inside one tick; the pretest RAISEs above this
 UNIT_LIMIT_MS = 15000
-# owner gate: an ownership-linking unit (i:clusters, i:bounds, i:link:*) passes only below this
+# owner gate: a unit passes only below this (8-15 s = SOFT FAIL, do not apply)
 LINK_PASS_MS = 8000
 
 view_orig = block(r"create or replace view public\.mi_rollup_sales_v as.*?\n where m\.sold_on is not null and upper\(btrim\(m\.state\)\) ~ '\^\[A-Z\]\{2\}\$';\n")
@@ -115,16 +115,16 @@ mig = f"""-- ===================================================================
 -- APPLY PLAN (owner approval required; nothing here is applied):
 --   0. PRE-STEP: PROPOSED_{STAMP}_pre_index.sql (CREATE INDEX CONCURRENTLY; execute_sql, NOT apply_migration,
 --      CONCURRENTLY cannot run inside a transaction). The pretest refuses to run without it.
---   1. Outside 05:00-08:59 / 09:15-11:59 UTC: run the _pretest (SET statement_timeout = '300s'); expect
---      'pretest ok' with per-unit ms and a PASS / SOFT FAIL / HARD FAIL per unit. Any unit >= {UNIT_LIMIT_MS} ms:
---      'pretest FAILED (HARD ...)'. A linking unit (i:clusters, i:bounds, i:link:*) at {LINK_PASS_MS}-{UNIT_LIMIT_MS} ms:
+--   1. Outside 05:00-08:59 / 09:15-11:59 UTC: run the _pretest (SET statement_timeout = '600s'); expect
+--      'pretest ok' with per-unit ms and a PASS / SOFT FAIL / HARD FAIL per unit (also a NOTICE per unit as it
+--      runs). Any unit >= {UNIT_LIMIT_MS} ms: 'pretest FAILED (HARD ...)' at once. Any unit at {LINK_PASS_MS}-{UNIT_LIMIT_MS} ms:
 --      'pretest SOFT FAIL — do not apply'. Only 'pretest ok' permits the apply.
 --      National matrix ≈ the numbers above.
 --   2. Apply this file (MCP apply_migration) outside the windows; no cron change (same 75 ticks).
 --   3. The fingerprint now includes owner snapshots, so the next nightly tick starts build 2 with {59 + LINK_SLICES} units
 --      (~ +3 min DB time). Until it is ready, MI keeps serving build 1; inferred metrics read 'unavailable'.
---   4. Verify (read-only) once the new build is ready: PROPOSED_{STAMP}_verify.sql — asserts recorded
---      counts equal build 2's and reports nation + top markets against the 10-05 snapshot;
+--   4. Verify (read-only) the day the new build is ready: PROPOSED_{STAMP}_verify.sql — asserts the
+--      recorded counts equal a fresh count of the live source (never changed by the extension) and reports nation + top markets against the 10-05 snapshot;
 --      GET op=status → inferred_investor.available = true.
 --      Index evidence: PROPOSED_{STAMP}_plan_proof.sql (EXPLAIN ANALYZE BUFFERS, before and after step 0).
 --   5. Rollback: the _rollback file (restores the applied functions and view byte for byte).
@@ -282,6 +282,7 @@ declare
   v_lo text;
   v_hi text;
   v_rng text;
+  v_nestloop text;
   v_having text := '((grouping(x.asset) = 0 and x.asset in (''sfr'', ''mf_2_4'', ''mf_5_plus'', ''land'', ''commercial''))
                      or (grouping(x.asset) = 1 and grouping(x.is_mf) = 0 and x.is_mf)
                      or (grouping(x.asset) = 1 and grouping(x.is_mf) = 1))';
@@ -375,6 +376,10 @@ begin
       get diagnostics v_rows = row_count;
 
     elsif v_kind = 'stacks' then
+      -- The link slices just wrote ~665K rows: give the planner real statistics before the first reader
+      -- (an un-analyzed mapping is estimated at 0.5% of its size, which steered i:g:market into a
+      -- nested loop that rescanned the mapping once per zip: the 2026-10-07 12:00Z pretest timeout).
+      analyze public.mi_sale_owner_link;
       insert into public.mi_owner_stack (build_id, stack_id, props_n, corp_n, oos_n, trust_n, linked_n, named_n, label, label_n)
       select p_build, x.stack_id, c.props_n, c.corp_n, c.oos_n, c.trust_n, x.linked_n, x.named_n, nm.buyer, coalesce(nm.n, 0)
         from (select l.stack_id, count(*)::int as linked_n, count(*) filter (where l.buyer is not null)::int as named_n
@@ -397,6 +402,11 @@ begin
       if v_key is null then raise exception 'mi_infer: unknown level in unit %', p_unit; end if;
       -- Periods are nested windows ending at the as-of, so each sale is counted once in its
       -- narrowest band and every period sums the bands it contains.
+      -- Plan safety: the build's mi_zip_geo rows are new, so the planner estimates them at ~1 row and
+      -- may put them on the outer side of a nested loop over the whole mapping (1,961 zips x 665K rows
+      -- for i:g:market). This unit is one scan of the mapping + one tiny lookup: hash joins only.
+      v_nestloop := current_setting('enable_nestloop');
+      perform set_config('enable_nestloop', 'off', true);
       execute format($q$
         insert into public.mi_geo_period_inferred (build_id, geo_level, geo_key, period, asset, sale_count, linked_count,
           strong_n, likely_n, trust_n, absentee_n, no_signal_n, stack3_n, {val_names})
@@ -428,6 +438,7 @@ begin
         having coalesce(sum(a.n) filter (where a.band <= p.maxband), 0) > 0
       $q$, v_key, v_asset, v_having) using p_build, v_arg, p_as_of;
       get diagnostics v_rows = row_count;
+      perform set_config('enable_nestloop', v_nestloop, true);
 
     elsif v_kind = 'validate' then
       -- the build's published validation: the national, all-time, all-asset matrix
@@ -532,13 +543,13 @@ $fn_grants$;
 pretest = f"""-- PRETEST for PROPOSED_{STAMP}.sql. GENERATED by apps/api/scripts/market-intel-make-inferred-migration.py.
 -- Rollback-only: every change is undone by the RAISE at the end. Expected result:
 --   ERROR:  pretest ok: ...      and NO schema change afterwards.
--- Run OUTSIDE 05:00-08:59, 09:15-11:59 UTC with:  SET statement_timeout = '300s';
+-- Run OUTSIDE 05:00-08:59, 09:15-11:59 UTC with:  SET statement_timeout = '600s';
 -- Requires the pre-step index (PROPOSED_{STAMP}_pre_index.sql) to exist and be valid.
 -- It runs the full inferred chain against the live ready build's id space in a scratch build:
 -- clusters, the {LINK_SLICES} link slices, stacks, all six geography units, validate and cleanup (~40-60 s).
 -- What it proves: the DDL and the patches apply over the live objects; every inferred unit runs;
--- each unit's time is reported and gated (linking units PASS < {LINK_PASS_MS} ms, SOFT FAIL below {UNIT_LIMIT_MS} ms;
--- every unit HARD FAIL at >= {UNIT_LIMIT_MS} ms). Only a message starting 'pretest ok' permits the apply. The national
+-- each unit's time is reported (RAISE NOTICE as it goes) and gated (every unit PASS < {LINK_PASS_MS} ms, SOFT FAIL
+-- below {UNIT_LIMIT_MS} ms, HARD FAIL at >= {UNIT_LIMIT_MS} ms, which stops the pretest at once). Only a message starting 'pretest ok' permits the apply. The national
 -- validation matrix is produced.
 DO $pretest$
 DECLARE
@@ -567,19 +578,24 @@ BEGIN
     FROM public.mi_zip_geo WHERE build_id = (SELECT max(build_id) FROM public.mi_rollup_builds WHERE status = 'ready');
 
   FOREACH u IN ARRAY array['i:clusters', 'i:bounds', {LINK_UNITS_SQL}, 'i:stacks', 'i:g:nation', 'i:g:state', 'i:g:market', 'i:g:county', 'i:g:city', 'i:g:zip', 'i:validate', 'i:cleanup'] LOOP
+    RAISE NOTICE 'pretest unit % start %', u, to_char(clock_timestamp() AT TIME ZONE 'UTC', 'HH24:MI:SS.MS');
     t0 := clock_timestamp();
     n := public.mi_rollup_run_unit(b, u, (SELECT source_as_of FROM public.mi_rollup_builds WHERE build_id = b));
     u_ms := floor(extract(epoch from clock_timestamp() - t0) * 1000)::bigint;
-    -- gates: every unit HARD FAIL at >= {UNIT_LIMIT_MS} ms; ownership-linking units (i:clusters, i:bounds, i:link:*)
-    -- PASS only below {LINK_PASS_MS} ms, {LINK_PASS_MS}-{UNIT_LIMIT_MS} ms is a SOFT FAIL (do not apply).
+    -- gates: every unit PASS below {LINK_PASS_MS} ms; {LINK_PASS_MS}-{UNIT_LIMIT_MS} ms is a SOFT FAIL (do not apply);
+    -- >= {UNIT_LIMIT_MS} ms is a HARD FAIL and stops the pretest at once.
     IF u_ms >= {UNIT_LIMIT_MS} THEN
       hard := hard || format('%s %s ms; ', u, u_ms);
       ms := ms || format('%s=%s rows/%s ms HARD FAIL; ', u, n, u_ms);
-    ELSIF (u IN ('i:clusters', 'i:bounds') OR u LIKE 'i:link:%') AND u_ms >= {LINK_PASS_MS} THEN
+      RAISE NOTICE 'pretest unit % = % rows / % ms HARD FAIL', u, n, u_ms;
+      RAISE EXCEPTION 'pretest FAILED (HARD, unit >= {UNIT_LIMIT_MS} ms): % · so far: %', hard, ms;
+    ELSIF u_ms >= {LINK_PASS_MS} THEN
       soft := soft || format('%s %s ms; ', u, u_ms);
       ms := ms || format('%s=%s rows/%s ms SOFT FAIL; ', u, n, u_ms);
+      RAISE NOTICE 'pretest unit % = % rows / % ms SOFT FAIL', u, n, u_ms;
     ELSE
       ms := ms || format('%s=%s rows/%s ms PASS; ', u, n, u_ms);
+      RAISE NOTICE 'pretest unit % = % rows / % ms PASS', u, n, u_ms;
     END IF;
   END LOOP;
   IF (SELECT notes ? 'inferred_errors' FROM public.mi_rollup_builds WHERE build_id = b) THEN
@@ -596,7 +612,7 @@ BEGIN
   SELECT linked_count, strong_n, likely_n, trust_n, sale_count INTO r FROM public.mi_geo_period_inferred
    WHERE build_id = b AND geo_level = 'nation' AND period = 'all' AND asset = 'all';
   -- a SOFT FAIL still reports the numbers, but its first words say do not apply
-  verdict := CASE WHEN soft <> '' THEN format('pretest SOFT FAIL — do not apply (linking unit(s) {LINK_PASS_MS}-{UNIT_LIMIT_MS} ms: %s)', soft) ELSE 'pretest ok' END;
+  verdict := CASE WHEN soft <> '' THEN format('pretest SOFT FAIL — do not apply (unit(s) {LINK_PASS_MS}-{UNIT_LIMIT_MS} ms: %s)', soft) ELSE 'pretest ok' END;
   RAISE EXCEPTION '%: build % · sales % · linked % · strong % · likely % · trust % · % · validation %',
     verdict, b, r.sale_count, r.linked_count, r.strong_n, r.likely_n, r.trust_n, ms,
     (SELECT notes -> 'inferred_investor' -> 'matrix' FROM public.mi_rollup_builds WHERE build_id = b);
@@ -629,10 +645,14 @@ snap_markets_sql = ', '.join(f"('{m}', {a}, {b}, {c}, {d})" for m, a, b, c, d in
 verify_sql = f"""-- POST-APPLY VERIFICATION for PROPOSED_{STAMP}.sql. GENERATED by apps/api/scripts/market-intel-make-inferred-migration.py.
 -- READ-ONLY. Run after the first build with the extension is READY (notes ? 'inferred_investor'), outside
 -- 05:00-08:59 / 09:15-11:59 UTC, with SET statement_timeout = '60s'.
--- Statement 1 (assertion): recorded investor_count (and sale_count / buyer_known_count, period and month
---   rollups) of the new build equal build 2's, row for row. RAISEs 'verify FAILED' on any difference,
---   'verify INCONCLUSIVE' if the source fingerprint moved between build 2 and the new build (then the
---   recorded numbers may legitimately differ; re-run the comparison against the build sharing its source).
+-- Statement 1 (assertion): the extension never changes RECORDED counts. For the newest ready build that
+--   carries notes.inferred_investor, its recorded nation and per-state rows (period 'all', asset 'all':
+--   sale_count, investor_count, buyer_known_count) must equal a fresh count over the live source
+--   (public.mi_rollup_sales_v), and the inferred sale_count must equal the recorded one. Guarded by the
+--   source fingerprint: mv_map_market_sales refreshes daily (rolling 5-year window: build 2 665,245 ->
+--   build 4 665,232), so run this the same day the build finished; if the source moved, it RAISEs
+--   'verify INCONCLUSIVE' instead of a false failure. Any difference: 'verify FAILED'.
+--   It also lists the previous core build's recorded nation counts as context (they differ by the drift).
 -- Statement 2 (report): nation — eligible sales, linked latest sales, strong / likely inferred, unresolved by
 --   reason, recorded buyer coverage, inferred coverage, the validation matrix — and the top 15 markets (1y),
 --   each against the 10-05 validation snapshot. status: PASS (|delta| <= max(50, 0.1%)), CHECK (look at it),
@@ -640,35 +660,40 @@ verify_sql = f"""-- POST-APPLY VERIFICATION for PROPOSED_{STAMP}.sql. GENERATED 
 DO $verify$
 DECLARE
   b bigint;
-  f2 jsonb;
   fb jsonb;
-  n2 bigint;
+  src record;
   n bigint;
-  m bigint;
+  prev record;
 BEGIN
-  SELECT build_id, fingerprint - 'owners' INTO b, fb FROM public.mi_rollup_builds
+  SELECT build_id, fingerprint INTO b, fb FROM public.mi_rollup_builds
    WHERE status = 'ready' AND notes ? 'inferred_investor' ORDER BY build_id DESC LIMIT 1;
   IF b IS NULL THEN RAISE EXCEPTION 'verify FAILED: no ready build carries notes.inferred_investor yet'; END IF;
-  SELECT fingerprint INTO f2 FROM public.mi_rollup_builds WHERE build_id = 2;
-  SELECT count(*) INTO n2 FROM public.mi_geo_period_rollup WHERE build_id = 2;
-  IF f2 IS NULL OR n2 = 0 THEN RAISE EXCEPTION 'verify FAILED: build 2 rollup rows are gone (cleanup keeps current + previous ready build)'; END IF;
-  IF fb IS DISTINCT FROM f2 THEN
-    RAISE EXCEPTION 'verify INCONCLUSIVE: source changed between build 2 and build % (build 2 % · build % %)', b, f2, b, fb;
+  SELECT count(*) AS n, max(sold_on) AS last, min(sold_on) AS first, coalesce(sum(price), 0)::text AS psum INTO src FROM public.mi_rollup_sales_v;
+  IF src.n <> (fb ->> 'rows')::bigint OR src.last::text <> fb ->> 'as_of' OR src.first::text <> fb ->> 'first' OR src.psum <> fb ->> 'price_sum' THEN
+    RAISE EXCEPTION 'verify INCONCLUSIVE: the source moved since build % (build: % rows %..% · now: % rows %..%); verify on the day the build finishes',
+      b, fb ->> 'rows', fb ->> 'first', fb ->> 'as_of', src.n, src.first, src.last;
   END IF;
-  SELECT count(*) INTO n FROM
-    (SELECT geo_level, geo_key, period, asset, sale_count, investor_count, buyer_known_count FROM public.mi_geo_period_rollup WHERE build_id = 2) x
-    FULL JOIN (SELECT geo_level, geo_key, period, asset, sale_count, investor_count, buyer_known_count FROM public.mi_geo_period_rollup WHERE build_id = b) y
-    USING (geo_level, geo_key, period, asset)
-   WHERE x.investor_count IS DISTINCT FROM y.investor_count OR x.sale_count IS DISTINCT FROM y.sale_count
-      OR x.buyer_known_count IS DISTINCT FROM y.buyer_known_count;
-  SELECT count(*) INTO m FROM
-    (SELECT geo_level, geo_key, asset, month, sales, investor, buyer_known FROM public.mi_geo_month_rollup WHERE build_id = 2) x
-    FULL JOIN (SELECT geo_level, geo_key, asset, month, sales, investor, buyer_known FROM public.mi_geo_month_rollup WHERE build_id = b) y
-    USING (geo_level, geo_key, asset, month)
-   WHERE x.investor IS DISTINCT FROM y.investor OR x.sales IS DISTINCT FROM y.sales OR x.buyer_known IS DISTINCT FROM y.buyer_known;
-  IF n + m > 0 THEN
-    RAISE EXCEPTION 'verify FAILED: recorded counts differ from build 2 in % period rows and % month rows (build %)', n, m, b;
-  END IF;
+  SELECT count(*) INTO n FROM (
+    SELECT 'nation' AS geo_level, 'US'::text AS geo_key, count(*)::int AS sale_count, count(*) FILTER (WHERE v.is_investor)::int AS investor_count,
+           count(*) FILTER (WHERE v.buyer_known)::int AS buyer_known_count FROM public.mi_rollup_sales_v v
+    UNION ALL
+    SELECT 'state', v.state, count(*)::int, count(*) FILTER (WHERE v.is_investor)::int, count(*) FILTER (WHERE v.buyer_known)::int
+      FROM public.mi_rollup_sales_v v GROUP BY v.state) live
+    FULL JOIN (SELECT r.geo_level, r.geo_key, r.sale_count, r.investor_count, r.buyer_known_count FROM public.mi_geo_period_rollup r
+                WHERE r.build_id = b AND r.geo_level IN ('nation', 'state') AND r.period = 'all' AND r.asset = 'all') rec
+    USING (geo_level, geo_key)
+   WHERE live.sale_count IS DISTINCT FROM rec.sale_count OR live.investor_count IS DISTINCT FROM rec.investor_count
+      OR live.buyer_known_count IS DISTINCT FROM rec.buyer_known_count;
+  IF n > 0 THEN RAISE EXCEPTION 'verify FAILED: recorded counts of build % differ from the live source in % nation/state rows', b, n; END IF;
+  SELECT count(*) INTO n FROM public.mi_geo_period_rollup r
+    JOIN public.mi_geo_period_inferred i USING (build_id, geo_level, geo_key, period, asset)
+   WHERE r.build_id = b AND r.sale_count IS DISTINCT FROM i.sale_count;
+  IF n > 0 THEN RAISE EXCEPTION 'verify FAILED: inferred sale_count differs from recorded sale_count in % rows (build %)', n, b; END IF;
+  SELECT r.build_id, r.sale_count, r.investor_count, r.buyer_known_count INTO prev FROM public.mi_geo_period_rollup r
+   WHERE r.build_id = (SELECT max(build_id) FROM public.mi_rollup_builds WHERE build_id < b AND status IN ('ready', 'superseded'))
+     AND r.geo_level = 'nation' AND r.period = 'all' AND r.asset = 'all';
+  RAISE NOTICE 'verify: recorded counts of build % equal the live source; previous core build % (context): sales % · investor % · buyer_known %',
+    b, prev.build_id, prev.sale_count, prev.investor_count, prev.buyer_known_count;
 END
 $verify$;
 

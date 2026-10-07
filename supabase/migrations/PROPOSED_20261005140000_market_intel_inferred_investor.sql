@@ -25,16 +25,16 @@
 -- APPLY PLAN (owner approval required; nothing here is applied):
 --   0. PRE-STEP: PROPOSED_20261005140000_market_intel_inferred_investor_pre_index.sql (CREATE INDEX CONCURRENTLY; execute_sql, NOT apply_migration,
 --      CONCURRENTLY cannot run inside a transaction). The pretest refuses to run without it.
---   1. Outside 05:00-08:59 / 09:15-11:59 UTC: run the _pretest (SET statement_timeout = '300s'); expect
---      'pretest ok' with per-unit ms and a PASS / SOFT FAIL / HARD FAIL per unit. Any unit >= 15000 ms:
---      'pretest FAILED (HARD ...)'. A linking unit (i:clusters, i:bounds, i:link:*) at 8000-15000 ms:
+--   1. Outside 05:00-08:59 / 09:15-11:59 UTC: run the _pretest (SET statement_timeout = '600s'); expect
+--      'pretest ok' with per-unit ms and a PASS / SOFT FAIL / HARD FAIL per unit (also a NOTICE per unit as it
+--      runs). Any unit >= 15000 ms: 'pretest FAILED (HARD ...)' at once. Any unit at 8000-15000 ms:
 --      'pretest SOFT FAIL — do not apply'. Only 'pretest ok' permits the apply.
 --      National matrix ≈ the numbers above.
 --   2. Apply this file (MCP apply_migration) outside the windows; no cron change (same 75 ticks).
 --   3. The fingerprint now includes owner snapshots, so the next nightly tick starts build 2 with 67 units
 --      (~ +3 min DB time). Until it is ready, MI keeps serving build 1; inferred metrics read 'unavailable'.
---   4. Verify (read-only) once the new build is ready: PROPOSED_20261005140000_market_intel_inferred_investor_verify.sql — asserts recorded
---      counts equal build 2's and reports nation + top markets against the 10-05 snapshot;
+--   4. Verify (read-only) the day the new build is ready: PROPOSED_20261005140000_market_intel_inferred_investor_verify.sql — asserts the
+--      recorded counts equal a fresh count of the live source (never changed by the extension) and reports nation + top markets against the 10-05 snapshot;
 --      GET op=status → inferred_investor.available = true.
 --      Index evidence: PROPOSED_20261005140000_market_intel_inferred_investor_plan_proof.sql (EXPLAIN ANALYZE BUFFERS, before and after step 0).
 --   5. Rollback: the _rollback file (restores the applied functions and view byte for byte).
@@ -231,6 +231,7 @@ declare
   v_lo text;
   v_hi text;
   v_rng text;
+  v_nestloop text;
   v_having text := '((grouping(x.asset) = 0 and x.asset in (''sfr'', ''mf_2_4'', ''mf_5_plus'', ''land'', ''commercial''))
                      or (grouping(x.asset) = 1 and grouping(x.is_mf) = 0 and x.is_mf)
                      or (grouping(x.asset) = 1 and grouping(x.is_mf) = 1))';
@@ -324,6 +325,10 @@ begin
       get diagnostics v_rows = row_count;
 
     elsif v_kind = 'stacks' then
+      -- The link slices just wrote ~665K rows: give the planner real statistics before the first reader
+      -- (an un-analyzed mapping is estimated at 0.5% of its size, which steered i:g:market into a
+      -- nested loop that rescanned the mapping once per zip: the 2026-10-07 12:00Z pretest timeout).
+      analyze public.mi_sale_owner_link;
       insert into public.mi_owner_stack (build_id, stack_id, props_n, corp_n, oos_n, trust_n, linked_n, named_n, label, label_n)
       select p_build, x.stack_id, c.props_n, c.corp_n, c.oos_n, c.trust_n, x.linked_n, x.named_n, nm.buyer, coalesce(nm.n, 0)
         from (select l.stack_id, count(*)::int as linked_n, count(*) filter (where l.buyer is not null)::int as named_n
@@ -346,6 +351,11 @@ begin
       if v_key is null then raise exception 'mi_infer: unknown level in unit %', p_unit; end if;
       -- Periods are nested windows ending at the as-of, so each sale is counted once in its
       -- narrowest band and every period sums the bands it contains.
+      -- Plan safety: the build's mi_zip_geo rows are new, so the planner estimates them at ~1 row and
+      -- may put them on the outer side of a nested loop over the whole mapping (1,961 zips x 665K rows
+      -- for i:g:market). This unit is one scan of the mapping + one tiny lookup: hash joins only.
+      v_nestloop := current_setting('enable_nestloop');
+      perform set_config('enable_nestloop', 'off', true);
       execute format($q$
         insert into public.mi_geo_period_inferred (build_id, geo_level, geo_key, period, asset, sale_count, linked_count,
           strong_n, likely_n, trust_n, absentee_n, no_signal_n, stack3_n, v_strong_known, v_strong_inv, v_likely_known, v_likely_inv, v_trust_estate_known, v_trust_estate_inv, v_absentee_only_known, v_absentee_only_inv, v_no_signal_known, v_no_signal_inv)
@@ -385,6 +395,7 @@ begin
         having coalesce(sum(a.n) filter (where a.band <= p.maxband), 0) > 0
       $q$, v_key, v_asset, v_having) using p_build, v_arg, p_as_of;
       get diagnostics v_rows = row_count;
+      perform set_config('enable_nestloop', v_nestloop, true);
 
     elsif v_kind = 'validate' then
       -- the build's published validation: the national, all-time, all-asset matrix

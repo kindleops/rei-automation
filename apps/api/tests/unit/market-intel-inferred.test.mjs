@@ -190,7 +190,9 @@ test('generated migration: patches the applied objects by insertion; rollback re
   assert.ok(pre.includes("comp_properties_mi_owner_cover') AND i.indisvalid"), 'pretest refuses without the index')
   // gates: every unit HARD FAIL at >= 15 s; linking units PASS only < 8 s, 8-15 s is SOFT FAIL (do not apply)
   assert.ok(pre.includes('IF u_ms >= 15000 THEN') && pre.includes("'pretest FAILED (HARD, unit >= 15000 ms)"))
-  assert.ok(pre.includes("ELSIF (u IN ('i:clusters', 'i:bounds') OR u LIKE 'i:link:%') AND u_ms >= 8000 THEN"))
+  assert.ok(pre.includes('ELSIF u_ms >= 8000 THEN') && pre.includes("RAISE NOTICE 'pretest unit % = % rows / % ms PASS'"))
+  // plan safety: the mapping is analyzed before its first reader; geography units use hash joins only
+  assert.ok(mig.includes('analyze public.mi_sale_owner_link;') && mig.includes("perform set_config('enable_nestloop', 'off', true);"))
   assert.ok(pre.includes("'pretest SOFT FAIL — do not apply"))
   assert.ok(pre.includes("'i:g:city', 'i:g:zip', 'i:validate', 'i:cleanup'"), 'pretest times every inferred unit')
   assert.match(mig, /'i:clusters', 'i:bounds', 'i:link:0'/)
@@ -200,7 +202,7 @@ test('generated migration: patches the applied objects by insertion; rollback re
   // post-apply verification: read-only, asserts recorded counts equal build 2's
   const ver = readFileSync(join(MIG, 'PROPOSED_20261005140000_market_intel_inferred_investor_verify.sql'), 'utf8')
   assert.ok(!/\b(insert|update|delete|create|alter|drop|truncate)\b/i.test(ver.replace(/^--.*$/gm, '')), 'verify is read-only')
-  assert.ok(ver.includes("RAISE EXCEPTION 'verify FAILED: recorded counts differ from build 2") && ver.includes("('strong', 95776)") && ver.includes("('likely', 60997)"))
+  assert.ok(ver.includes("RAISE EXCEPTION 'verify FAILED: recorded counts of build % differ from the live source") && ver.includes("('strong', 95776)") && ver.includes("('likely', 60997)"))
   const proof = readFileSync(join(MIG, 'PROPOSED_20261005140000_market_intel_inferred_investor_plan_proof.sql'), 'utf8')
   assert.ok(proof.includes('explain (analyze, buffers'))
   assert.ok(!/cron\.schedule/.test(mig), 'no schedule change')
