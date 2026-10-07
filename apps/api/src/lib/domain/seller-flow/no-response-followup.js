@@ -27,6 +27,7 @@
 // followup_automation_mode must be a scheduling mode. Deploying this file
 // changes nothing until the owner sets the key.
 
+import { classifyOfferWording } from "@/lib/domain/opportunity/stage-advance-guard.js";
 import { extractMonetaryMentions } from "@/lib/domain/seller-flow/monetary-understanding.js";
 import { identifyReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
@@ -470,7 +471,15 @@ export function buildObservedOfferQuote({ thread_key, message_event_id, offer, a
     property_id: clean(anchor.property_id) || null,
     master_owner_id: clean(anchor.master_owner_id) || null,
     send_queue_key: clean(anchor.queue_key) || null,
-    evidence: { raw: offer.raw || null, extractor: NO_RESPONSE_FOLLOWUP_VERSION },
+    // Strict offer-event invariant (2026-10-07): the wording names the quote kind
+    // (FORMAL_OFFER / NEGOTIATION_ANCHOR, or null = ambiguous → no offer event);
+    // the operator action id attributes a manual offer.
+    evidence: {
+      raw: offer.raw || null,
+      extractor: NO_RESPONSE_FOLLOWUP_VERSION,
+      offer_kind: classifyOfferWording(anchor.message_body || anchor.message_text || anchor.body || ""),
+      operator_action_id: clean(anchor?.metadata?.operator_action_id) || null,
+    },
     quoted_at: quoted_at || new Date().toISOString(),
   };
 }
