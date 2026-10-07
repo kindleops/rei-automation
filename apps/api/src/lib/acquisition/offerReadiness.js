@@ -13,13 +13,15 @@
 //   • has a positive recommended offer and a positive authorized ceiling
 //     (evidence.offer_calculation.effective_authorized_ceiling),
 //   • is NOT a compact backfill row (those carry monetary_authority:false),
-//   • passes the OFFER SANITY GUARD (evaluateOfferSanity, below): offer and
+//   • passes the OFFER SANITY GUARD (offer-sanity.js): offer and
 //     MAO are a believable fraction of the engine's as-is value, repairs are
 //     not most of the value, the AVM does not disagree with the comps by >2x,
 //     and the subject carries no asset-identity conflict. Fail-closed: no
 //     valuation_mid ⇒ not offer-ready.
 // Missing / stale / non-authoritative ⇒ Autopilot may converse but must NOT
 // quote money. Pure; no I/O.
+
+import { evaluateScoreOfferSanity } from "./offer-sanity.js";
 
 export const OFFER_POLICY_EPOCH = "2026-09-12T00:00:00.000Z";
 export const OFFER_READY_MAX_AGE_DAYS = 30;
@@ -37,34 +39,9 @@ export const OFFER_READY_REASONS = Object.freeze({
   SANITY: "offer_sanity_review",
 });
 
-// ─── Offer sanity guard (2026-10-06, "627 Ontario St SE") ─────────────────────
-// The engine quoted $11.8K cash / $4.9K floor on a $230K value (5%), with a
-// $746K AVM. Three inputs compounded: a Multi-Family record with units_count=1
-// (price_per_unit halved every 2-unit comp), a $138K sqft-rate repair estimate
-// (60% of the deflated value), and valuation_mid*0.72 - repairs. Each input is
-// individually "valid", so no existing gate caught the product. This guard
-// does NOT change any price: it only withholds MONETARY AUTHORITY (offer-ready
-// / AUTO_* tiers) when the numbers fail a plausibility check, routing them to
-// human review.
-export const OFFER_SANITY_BOUNDS = Object.freeze({
-  min_offer_to_value: 0.35,
-  max_offer_to_value: 0.9,
-  max_mao_to_value: 0.9,
-  max_repair_to_value: 0.45,
-  // valuation_mid vs the record's AVM: outside [1/2, 2] the comps and the AVM
-  // describe different buildings.
-  max_avm_divergence: 2,
-});
-
-export const OFFER_SANITY_REASONS = Object.freeze({
-  NO_VALUATION: "valuation_mid_missing",
-  OFFER_LOW: "offer_below_min_fraction_of_value",
-  OFFER_HIGH: "offer_above_max_fraction_of_value",
-  MAO_HIGH: "mao_above_max_fraction_of_value",
-  REPAIRS_HIGH: "repairs_above_max_fraction_of_value",
-  AVM_DIVERGENT: "avm_diverges_from_comp_value",
-  IDENTITY_CONFLICT: "asset_identity_conflict",
-});
+// Offer sanity guard: ONE implementation, shared with the Decision Engine tier
+// gate and the valuation spendability rule. See offer-sanity.js.
+export { OFFER_SANITY_BOUNDS, OFFER_SANITY_REASONS, evaluateOfferSanity, offerSanityInputs } from "./offer-sanity.js";
 
 function num(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -76,70 +53,6 @@ function num(value) {
 export function authoritativeMaxOffer(score = null) {
   const v = num(score?.evidence?.offer_calculation?.effective_authorized_ceiling);
   return v != null && v > 0 ? v : null;
-}
-
-const ratio = (a, b) => (a != null && b != null && b > 0 ? Math.round((a / b) * 1000) / 1000 : null);
-const truthy = (v) => v === true || v === "true";
-
-/**
- * Pure plausibility check over the engine's own numbers. Inputs that are absent
- * skip their check, EXCEPT valuation_mid with a positive offer (cannot verify ⇒
- * fail closed). Returns every failing reason, not just the first.
- */
-export function evaluateOfferSanity({
-  valuation_mid = null,
-  recommended_cash_offer = null,
-  mao = null,
-  estimated_repairs = null,
-  avm = null,
-  asset_identity_conflict = false,
-} = {}, bounds = OFFER_SANITY_BOUNDS) {
-  const S = OFFER_SANITY_REASONS;
-  const value = num(valuation_mid);
-  const offer = num(recommended_cash_offer);
-  const ceiling = num(mao);
-  const repairs = num(estimated_repairs);
-  const avmValue = num(avm);
-  const reasons = [];
-  const ratios = {
-    offer_to_value: ratio(offer, value),
-    mao_to_value: ratio(ceiling, value),
-    repair_to_value: ratio(repairs, value),
-    avm_to_value: ratio(avmValue, value),
-  };
-  if (truthy(asset_identity_conflict)) reasons.push(S.IDENTITY_CONFLICT);
-  if (value == null || value <= 0) {
-    if (offer != null && offer > 0) reasons.push(S.NO_VALUATION);
-    return { sane: reasons.length === 0, reasons, ratios, bounds };
-  }
-  if (ratios.offer_to_value != null && offer > 0) {
-    if (ratios.offer_to_value < bounds.min_offer_to_value) reasons.push(S.OFFER_LOW);
-    if (ratios.offer_to_value > bounds.max_offer_to_value) reasons.push(S.OFFER_HIGH);
-  }
-  if (ratios.mao_to_value != null && ratios.mao_to_value > bounds.max_mao_to_value) reasons.push(S.MAO_HIGH);
-  if (ratios.repair_to_value != null && ratios.repair_to_value > bounds.max_repair_to_value) reasons.push(S.REPAIRS_HIGH);
-  if (avmValue != null && avmValue > 0) {
-    const divergence = Math.max(avmValue / value, value / avmValue);
-    if (divergence > bounds.max_avm_divergence) reasons.push(S.AVM_DIVERGENT);
-  }
-  return { sane: reasons.length === 0, reasons, ratios, bounds };
-}
-
-/** Sanity inputs from a full score row OR a projected one (top-level aliases win). */
-export function offerSanityInputs(score = null) {
-  const ev = score?.evidence || {};
-  return {
-    valuation_mid: num(score?.valuation_mid),
-    recommended_cash_offer: num(score?.recommended_cash_offer),
-    mao: authoritativeMaxOffer(score),
-    estimated_repairs: num(score?.estimated_repairs ?? ev.repair_estimate?.amount),
-    avm: num(
-      score?.avm ??
-        ev.decision_inputs?.inputs?.property?.estimated_value ??
-        ev.subject?.normalized_features?.estimated_value,
-    ),
-    asset_identity_conflict: truthy(score?.asset_identity_conflict ?? ev.subject?.asset_identity_conflict),
-  };
 }
 
 /**
@@ -171,7 +84,7 @@ export function evaluateOfferReadiness(score = null, { now = Date.now(), maxAgeD
   if (offer == null || offer <= 0) return { ready: false, reason: R.NO_OFFER, tier };
   const mao = authoritativeMaxOffer(score);
   if (mao == null) return { ready: false, reason: R.NO_CEILING, tier };
-  const sanity = evaluateOfferSanity(offerSanityInputs(score));
+  const sanity = evaluateScoreOfferSanity(score);
   if (!sanity.sane) return { ready: false, reason: R.SANITY, tier, offer, mao, sanity };
   return { ready: true, reason: R.READY, tier, offer, mao, computed_at: new Date(computed).toISOString() };
 }

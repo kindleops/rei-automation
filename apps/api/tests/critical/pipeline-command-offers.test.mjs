@@ -20,7 +20,8 @@ import {
 
 const score = (over = {}) => ({
   decision_tier: 'AUTO_RANGE_OFFER', comp_count: 12, confidence: 88, valuation_confidence: 84,
-  recommended_cash_offer: 120000, minimum_acceptable_offer: 105000, ...over,
+  // valuation_mid: every real score row carries it; the offer sanity guard fails closed without it.
+  valuation_mid: 200000, recommended_cash_offer: 120000, minimum_acceptable_offer: 105000, ...over,
 })
 
 test('an unpriced property is not priced, never authorized', () => {

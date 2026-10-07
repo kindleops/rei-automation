@@ -3,7 +3,7 @@ import {
   resolveEffectiveAuthorizedCeiling,
 } from './buyerCeilingAuthority.js';
 import { resolveTargetAssignmentMargin } from './assignmentMarginPolicy.js';
-import { evaluateOfferSanity } from './offerReadiness.js';
+import { evaluateOfferSanity, hasAssetIdentityConflict } from './offer-sanity.js';
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import {
   normalizeAssetClass,
@@ -3233,14 +3233,6 @@ function determineDecisionTier({
     if (!passed) reasons.push(`hard_gate_failed:${gate}`);
   }
   return { tier, reasons, hard_gate_checks: hardGateChecks, offer_sanity: offerSanity };
-}
-
-function hasAssetIdentityConflict(subject = {}) {
-  return Boolean(
-    subject.asset_family === 'multifamily' &&
-      num(subject.units) !== null &&
-      num(subject.units) <= 1,
-  );
 }
 
 function scoreRowFromDecision(propertyId, decision, now = new Date()) {
