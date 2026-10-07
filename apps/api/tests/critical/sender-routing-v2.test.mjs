@@ -413,16 +413,18 @@ test("route-edit impact preview: N become routable, N lose coverage", () => {
 });
 
 // ── the proposal itself ─────────────────────────────────────────────────────
-test("proposed graph: canonical-shaped, one pool per number, Miami 4780 excluded, pending numbers only after onboarding", () => {
+test("proposed graph: canonical-shaped, one pool per number, Miami 4780 excluded, pending (Chicago) numbers only after onboarding", () => {
   const phones = PROPOSED_POOLS.flatMap((p) => [...p.members, ...(p.pending_onboarding || [])]);
   assert.equal(new Set(phones).size, phones.length);
   assert.ok(!phones.includes("+13057604780"));
   const markets = Object.keys(PROPOSED_ROUTES).map((id) => ({ id, display_name: id }));
   const g = buildRoutingGraph(proposedGraphRows({ markets, fleet: [] }));
   assert.deepEqual(g.issues.filter((i) => i.code !== "pool_number_unresolved"), []);
-  assert.equal((g.numbersByPool.get("indianapolis") || []).length, 0);
+  // r3: Indianapolis / Tampa finished onboarding (members); Chicago is the pending number
+  assert.equal((g.numbersByPool.get("chicago") || []).length, 0);
+  assert.equal(g.numbersByPool.get("indianapolis").length, 1);
   const g2 = buildRoutingGraph(proposedGraphRows({ markets, fleet: [], includePending: true }));
-  assert.equal(g2.numbersByPool.get("indianapolis").length, 1);
+  assert.equal(g2.numbersByPool.get("chicago").length, 1);
   for (const list of Object.values(PROPOSED_ROUTES)) for (const r of list) assert.ok(["owner", "proposal", "confirm"].includes(r.provenance));
 });
 

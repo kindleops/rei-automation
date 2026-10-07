@@ -12,8 +12,9 @@
  *     queue_per_number_cap, canonical_markets, the TextGrid inventory (GET)
  * Each row is routed through selectSender() under the proposed graph:
  *   A  today's inventory (+ the evidence backfill the seed proposes)
- *   B  A + Indianapolis / Tampa onboarded (simulated: registered, inbound
- *      verified, active at the owner's fixed 25/day) — what the graph does once the owner finishes onboarding
+ *   B  A + Chicago +18722547122 onboarded (simulated: registered, inbound
+ *      verified, active at the fleet standard 800/day) — what the graph does once the owner finishes onboarding
+ *      (r3; Indianapolis / Tampa finished onboarding on 2026-10-03 and are in A)
  * and reported with market, current state, pool, number, tier, eligibility.
  * "legacy_at_send" shows what today's router does for the row.
  */
@@ -29,8 +30,7 @@ import { computeCoverage } from "../../../src/lib/domain/routing/sender-routing/
 const HELD_13 = ["a8a68af2-7016-487b-ab72-6c27cf51c523", "537d5fcf-d81a-4005-9b80-21b2741c1aee", "1ae5b9de-8802-45a5-b7fb-65f1ffa8b184", "e4a5d3b6-e731-47f3-8f9c-ffbeae814b07", "0d43521a-be75-4423-b034-c53a26ef33de", "fd9dd740-001e-49fc-8975-2388de51f4b6", "ab74d8c6-66e5-4a84-885b-91e0f23f97ba", "f9eb92fa-0b36-44b7-b344-c05230ea48e6", "b5ad155c-11b6-484b-95ff-3b9932da27b5", "a2dca29d-af1f-4f80-9808-77fc60eb0e66", "cd5a81f8-59ee-4da7-abe6-c2aa44df34ea", "a09e8ebc-8e9b-4dad-8bc6-f1123011d343", "08fd5cb5-7e1d-4992-8787-8f6c980a67dd"];
 const E740 = "e740c6d8-3286-42f2-9f1d-a0ca405a7d8f";
 const PENDING = [
-  { phone_number: "+13173494612", market: "Indianapolis, IN", friendly_name: "INDIANAPOLIS" },
-  { phone_number: "+18138947553", market: "Tampa, FL", friendly_name: "TAMPA, FL" },
+  { phone_number: "+18722547122", market: "Chicago, IL", friendly_name: "CHICAGO" },
 ];
 
 const sb = readOnlyClient();
@@ -61,14 +61,14 @@ const recon = reconcileInventory(provider || OWNER_PASTE_2026_10_02, rawFleet, {
 const backfill = proposedEvidenceBackfill(recon);
 const fleetA = applyBackfillToFleet(fleetToday, backfill);
 const fleetB = [
-  ...fleetA,
+  ...fleetA.filter((row) => !PENDING.some((p) => p.phone_number === row.phone_number)),
   ...PENDING.map((p, i) => ({
     id: `00000000-0000-4000-8000-00000000000${i + 1}`,
     ...p,
     status: "active",
     health_state: "unverified",
     registration_status: "registered",
-    daily_limit: 25, // owner decision 2026-10-02: fixed 25/day, no warm-up algorithm
+    daily_limit: 800, // fleet standard (owner rejected 25/day on 2026-10-03)
     messages_sent_today: 0,
     last_used_at: null,
     metadata: { onboarding_stage: "active", sms_webhook_status: "verified", inbound_verified_at: "SIMULATED" },
@@ -173,10 +173,10 @@ const graphTable = covA.markets
 const md = [];
 md.push(`# Sender Routing 2.0 — dry run (${now.toISOString()})`, "", "READ-ONLY. Nothing was queued, released or sent.", "");
 md.push(`Inventory: ${rawFleet.length} local numbers; provider ${provider ? "TextGrid API (GET)" : "owner paste"}; blocklist ${blocked.size}; per-number cap ${per_sender_cap}.`, "");
-md.push(`Coverage A (today): ${JSON.stringify(covA.metrics)}`, `Coverage B (+Indianapolis/Tampa): ${JSON.stringify(covB.metrics)}`, "");
-md.push("## Proposed graph", "", "| TARGET MARKET | PRIMARY | PREFERRED | REGIONAL | LAST RESORT | HEALTH today | HEALTH +Indy/Tampa | HELD NOW | UNLOCKED today | UNLOCKED +Indy/Tampa |", "|---|---|---|---|---|---|---|---|---|---|");
+md.push(`Coverage A (today): ${JSON.stringify(covA.metrics)}`, `Coverage B (+Chicago): ${JSON.stringify(covB.metrics)}`, "");
+md.push("## Proposed graph", "", "| TARGET MARKET | PRIMARY | PREFERRED | REGIONAL | LAST RESORT | HEALTH today | HEALTH +Chicago | HELD NOW | UNLOCKED today | UNLOCKED +Chicago |", "|---|---|---|---|---|---|---|---|---|---|");
 for (const t of graphTable) md.push(`| ${t.market} | ${t.primary} | ${t.preferred} | ${t.regional} | ${t.last_resort} | ${t.health_today} | ${t.health_after_onboarding} | ${t.held_now} | ${t.unlocked_today} | ${t.unlocked_after_onboarding} |`);
-md.push("", "## Rows", "", "| kind | ref | market | purpose | current | legacy at send | A: proposed graph today | B: + Indianapolis/Tampa |", "|---|---|---|---|---|---|---|---|");
+md.push("", "## Rows", "", "| kind | ref | market | purpose | current | legacy at send | A: proposed graph today | B: + Chicago |", "|---|---|---|---|---|---|---|---|");
 for (const r of results) md.push(`| ${r.kind} | ${r.ref} | ${r.market_id || r.market || "?"} | ${r.purpose} | ${r.current} | ${r.legacy_at_send} | ${r.A.cell} | ${r.B.cell} |`);
 md.push("", "## Hold detail (A)", "");
 for (const r of results.filter((x) => !x.A.ok)) md.push(`- ${r.ref} ${r.A.detail}`);
