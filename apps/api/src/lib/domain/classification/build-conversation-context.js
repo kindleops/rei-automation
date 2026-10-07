@@ -25,6 +25,7 @@ import { describeLastQuestion } from "./last-question.js";
 import { parsePlatformReaction } from "./emoji-interpretation.js";
 import { latestIdentifiableSellerLanguage } from "./seller-reply-language.js";
 import { isSellerAutopilotV2Enabled, V2_CONTEXT_ALIASES } from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
+import { isSellerConversationV3Active, V3_CONTEXT_ALIASES } from "@/lib/domain/seller-flow/seller-conversation-v3.js";
 
 /**
  * Maps a persisted send_queue.message_type onto an approved outbound use case.
@@ -69,7 +70,11 @@ export function mapMessageTypeToUseCase(message_type) {
   // body fallback below only reads English/Spanish wording).
   const v2_mapped =
     !aliases[direct] && isSellerAutopilotV2Enabled() ? V2_CONTEXT_ALIASES[direct] || null : null;
-  const mapped = aliases[direct] || v2_mapped || null;
+  // SELLER CONVERSATION v3 (flags SELLER_CONVERSATION_V3 + SELLER_AUTOPILOT_V2):
+  // the v3 questions (occupancy, re-asks, referral, update years) bind too.
+  const v3_mapped =
+    !aliases[direct] && !v2_mapped && isSellerConversationV3Active() ? V3_CONTEXT_ALIASES[direct] || null : null;
+  const mapped = aliases[direct] || v2_mapped || v3_mapped || null;
   return mapped && APPROVED_OUTBOUND_USE_CASES.includes(mapped) ? mapped : null;
 }
 

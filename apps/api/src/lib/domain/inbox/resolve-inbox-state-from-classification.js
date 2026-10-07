@@ -356,8 +356,15 @@ function classificationRuleIds(classification = {}) {
  * The 7.2 reply dispositions that decide the bucket regardless of read/queue
  * state. Returns undefined when the generic resolution should continue.
  */
+// SELLER CONVERSATION v3 (flag-gated upstream: the stamp exists only when
+// SELLER_CONVERSATION_V3 + SELLER_AUTOPILOT_V2 planned the turn): an automatic
+// terminal names where the thread rests. Never New Replies / Priority.
+const V3_TERMINAL_BUCKETS = new Set(["dead", "follow_up", "cold"]);
+
 export function resolveReplyDispositionBucket({ primary = "", classification = {}, existingBucket = "", lastOutboundAt = null, now = Date.now() } = {}) {
   const intent = lower(primary);
+  const v3_bucket = lower(classification?.seller_conversation_v3?.inbox_bucket);
+  if (classification?.seller_conversation_v3?.action === "terminal" && V3_TERMINAL_BUCKETS.has(v3_bucket)) return v3_bucket;
   if (intent === "sold_property") return "dead";
   if (intent === "hostile_or_legal" && classificationRuleIds(classification).some((id) => HOSTILE_COOL_RULE_IDS.has(id))) {
     return "dead";

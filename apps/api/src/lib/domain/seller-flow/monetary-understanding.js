@@ -854,6 +854,7 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
 //                                           or a RENT; never a price
 //   condition word + year ("roof 2020")  -> an UPDATE-YEAR fact
 //                                           (extractUpdateYears)
+//   bare non-round 5 digits ("76015")    -> a ZIP, never money
 // The cue classifier still decides what a number IS: "rent 950" stays a
 // $950 rent, "taxes 900" a tax figure, "I owe 120" a $120,000 payoff.
 
@@ -869,7 +870,7 @@ export function resolveNumberRules(explicit = null, env = process.env) {
 const V3_SHAPES = Object.freeze({
   THREE_DIGIT: "three_digit_thousands",
   RENT_OR_YEAR: "four_digit_rent_or_year",
-  YEAR: "four_digit_year",
+  YEAR: "four_digit_year", // also: a bare non-round 5-digit number (ZIP) — dropped, never money
 });
 
 /** Cue kinds a 3-digit number keeps literally (a rent, a tax bill, a repair figure). */
@@ -905,6 +906,9 @@ function v3NumberShape(text, amount) {
     if (/^\s*(?:each|apiece|a\s+piece|per\s+(?:month|mo))\b/i.test(after) && V3_UNIT_CONTEXT_RE.test(text)) return null;
     return V3_SHAPES.THREE_DIGIT;
   }
+  // A bare, non-round 5-digit number is a ZIP / street / account number, not a
+  // price ("Fort Worth 76015"); prices in that band are round ("95000").
+  if (/^\d{5}$/.test(raw) && !amount.has_currency && amount.value % 1000 !== 0) return V3_SHAPES.YEAR;
   const four = /^\d{4}$/.test(raw);
   if (four || /^\d,\d{3}$/.test(raw)) {
     if (four && !amount.has_currency && amount.value >= 1900 && amount.value <= 2099) {

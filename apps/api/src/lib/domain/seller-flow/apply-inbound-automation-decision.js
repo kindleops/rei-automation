@@ -36,6 +36,10 @@ import {
   uncertaintyTypeForReason,
 } from "@/lib/domain/seller-flow/coverage-net/safe-fallback.js";
 import { normalizeCanonicalIntent } from "@/lib/domain/seller-flow/coverage-net/canonical-intent-aliases.js";
+// SELLER CONVERSATION v3 (flags SELLER_CONVERSATION_V3 + SELLER_AUTOPILOT_V2,
+// default OFF): a planned terminal (archive / nurture / wait) is no reply AND
+// no human review; compliance suppression above it always wins.
+import { applySellerConversationV3TerminalDecision } from "@/lib/domain/seller-flow/seller-conversation-v3.js";
 import { resolveContactIdentityClass } from "@/lib/domain/inbox/contact-identity.js";
 import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
 import { resolveThreadLanguage } from "@/lib/domain/seller-flow/resolve-thread-language.js";
@@ -889,7 +893,10 @@ export function applyInboundAutomationDecision(args = {}) {
     conversation_stage: stage,
     metadata: classification.metadata || {},
   });
-  return ensureInboundCoverage(raw, { stage, contact_identity, classification });
+  return applySellerConversationV3TerminalDecision(
+    ensureInboundCoverage(raw, { stage, contact_identity, classification }),
+    classification,
+  );
 }
 
 function templateCandidateSet(decision = {}, classification = {}) {

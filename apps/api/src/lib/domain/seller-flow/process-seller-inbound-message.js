@@ -66,6 +66,15 @@ import {
   buildV2ExecutionDirectives,
   V2_STAGES,
 } from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
+import {
+  isSellerConversationV3Active,
+  planSellerConversationV3,
+  applySellerConversationV3,
+  resolveV3ValueAuthority,
+  resolveUnitCount,
+  missingChecklist,
+} from "@/lib/domain/seller-flow/seller-conversation-v3.js";
+import { loadMultifamilyDoorComps } from "@/lib/domain/seller-flow/multifamily-door-comps.js";
 import { authoritativeMaxOffer } from "@/lib/acquisition/offerReadiness.js";
 import {
   autoReplyModeAllowsQueue,
@@ -120,6 +129,8 @@ const defaultDeps = {
   getSupabaseClient: getDefaultSupabaseClient,
   getDealContextByThread,
   probeDealContextAmbiguity: probeDealContextAmbiguityDefault,
+  // v3 terminal bucket re-projection; null = lazy sms-engine import.
+  syncClassifiedInboxThreadState: null,
   info,
   warn,
 };
@@ -1848,6 +1859,8 @@ export async function processSellerInboundMessage({
   // authority or listing gates.
   let autopilot_v2_plan = null;
   let autopilot_v2_directives = null;
+  let autopilot_v2_ask_now = null;
+  let autopilot_v2_offer_authority = null;
   if (autopilot_v2_enabled) {
     try {
       const known_ask_raw =
@@ -1858,23 +1871,25 @@ export async function processSellerInboundMessage({
       const known_ask = Number(
         known_ask_raw && typeof known_ask_raw === "object" ? known_ask_raw.value : known_ask_raw
       );
+      autopilot_v2_ask_now = resolveV2AskingPriceThisTurn({
+        committed_value: isCommittedAskingPrice(price_signal) ? price_signal.asking_price.value : null,
+        classification,
+        message,
+        thread_language: autopilot_v2_context?.last_outbound_language || null,
+      }).amount;
+      autopilot_v2_offer_authority = resolveV2OfferAuthority({
+        ade_snapshot: effective_ade_snapshot,
+        spendability: valuation_spendability,
+        property_metadata: negotiation_context_summary,
+      });
       autopilot_v2_plan = planSellerAutopilotV2({
         classification,
         message,
         conversation_context: autopilot_v2_context,
         stage_before: effective_stage_before,
-        asking_price_this_turn: resolveV2AskingPriceThisTurn({
-          committed_value: isCommittedAskingPrice(price_signal) ? price_signal.asking_price.value : null,
-          classification,
-          message,
-          thread_language: autopilot_v2_context?.last_outbound_language || null,
-        }).amount,
+        asking_price_this_turn: autopilot_v2_ask_now,
         known_asking_price: Number.isFinite(known_ask) && known_ask > 0 ? known_ask : null,
-        offer_authority: resolveV2OfferAuthority({
-          ade_snapshot: effective_ade_snapshot,
-          spendability: valuation_spendability,
-          property_metadata: negotiation_context_summary,
-        }),
+        offer_authority: autopilot_v2_offer_authority,
       });
       if (autopilot_v2_plan?.handled && (authority_gate_applied || transition?.listing_gate?.applied)) {
         autopilot_v2_plan = {
@@ -1893,6 +1908,60 @@ export async function processSellerInboundMessage({
       autopilot_v2_plan = null;
       autopilot_v2_directives = null;
     }
+  }
+
+  // ── SELLER CONVERSATION MACHINE v3 (flags SELLER_CONVERSATION_V3 +
+  // SELLER_AUTOPILOT_V2, default OFF). The checklist planner names the next
+  // action for EVERY intent: an auto-reply (exact template preference) or an
+  // automatic terminal (no reply, no review, no alert). Its directive replaces
+  // the v2 one for this turn; the executor's suppression / language / render /
+  // quote-log / mode gates all still run. Never applied over the seller
+  // authority or listing gates.
+  let conversation_v3 = null;
+  if (autopilot_v2_enabled && isSellerConversationV3Active() && !authority_gate_applied && !transition?.listing_gate?.applied) {
+    try {
+      const known_facts_v3 = deal_state?.known_facts || {};
+      const unit_info = resolveUnitCount({ property_metadata: negotiation_context_summary, ade_snapshot: effective_ade_snapshot });
+      let mf_door_comps = [];
+      const plan_input = {
+        classification,
+        message,
+        conversation_context: autopilot_v2_context,
+        stage_before: effective_stage_before,
+        known_facts: known_facts_v3,
+        asking_price_this_turn: autopilot_v2_ask_now,
+        v2_plan: autopilot_v2_plan,
+        offer_authority: autopilot_v2_offer_authority,
+        value_authority: resolveV3ValueAuthority({ ade_snapshot: effective_ade_snapshot }),
+        property_metadata: negotiation_context_summary,
+        ade_snapshot: effective_ade_snapshot,
+        recent_outbound: [],
+      };
+      let plan = planSellerConversationV3(plan_input);
+      // Multifamily per-door anchor: comps are read only when the checklist is
+      // complete and the anchor is the next step (one bounded read).
+      if (unit_info.multifamily && unit_info.units && plan?.mf_anchor?.reason === "v3_hold_mf_insufficient_door_comps" && !missingChecklist(plan.checklist).length) {
+        const loaded = await loadMultifamilyDoorComps({ supabase, propertyId });
+        mf_door_comps = loaded.comps || [];
+        if (mf_door_comps.length) plan = planSellerConversationV3({ ...plan_input, mf_door_comps });
+      }
+      const applied = applySellerConversationV3(classification, plan);
+      conversation_v3 = { plan, applied };
+      if (applied.applied) classification = applied.classification;
+    } catch (v3_error) {
+      runtimeDeps.warn("[SELLER_CONVERSATION_V3_PLAN_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        error: v3_error?.message || "plan_failed",
+      });
+      conversation_v3 = null;
+    }
+  }
+  const v3_applied = conversation_v3?.applied?.applied === true ? conversation_v3.applied : null;
+  if (v3_applied) {
+    // The v3 directive (or terminal: none) supersedes the v2 one for this turn.
+    autopilot_v2_directives = v3_applied.strategyDirective
+      ? { strategyDirective: v3_applied.strategyDirective, dealAuthorityPatch: v3_applied.dealAuthorityPatch }
+      : null;
   }
 
   const execution = await runtimeDeps.executeInboundAutomationDecision({
@@ -1931,7 +2000,9 @@ export async function processSellerInboundMessage({
     channel,
     emailReplyImpl,
     channelSuppressionCheck,
-    strategyDirective: autopilot_v2_directives
+    strategyDirective: v3_applied && !v3_applied.strategyDirective
+      ? null // v3 terminal: no reply, no review (executor hook)
+      : autopilot_v2_directives
       ? autopilot_v2_directives.strategyDirective
       : negotiation?.strategy_decision && !authority_gate_applied
         ? {
@@ -1991,6 +2062,45 @@ export async function processSellerInboundMessage({
     supabaseClient: supabase,
     getSystemValue,
   });
+
+  // v3 terminal (archive / nurture / wait): the webhook already projected the
+  // thread from the RAW classification; re-project it through the canonical
+  // writer with the v3 stamp so it rests in Dead / Follow-up / Cold — never
+  // New Replies or Priority, no alert. Presentation fields only.
+  const v3_stamp = v3_applied?.classification?.seller_conversation_v3 || null;
+  if (v3_stamp?.action === "terminal" && v3_stamp.inbox_bucket && !writes_suppressed && !execution?.automation_decision?.should_suppress_contact) {
+    try {
+      const sync =
+        runtimeDeps.syncClassifiedInboxThreadState ||
+        (await import("@/lib/supabase/sms-engine.js")).syncClassifiedInboxThreadState;
+      await sync(
+        {
+          thread_key: threadKey || inboundFrom,
+          seller_phone: inboundFrom,
+          our_number: inboundTo,
+          master_owner_id: ownerId,
+          prospect_id: prospectId,
+          property_id: propertyId,
+          classification: v3_applied.classification,
+          decision_fields_deferred: true,
+          messageEvent: {
+            id: inboundEventId || null,
+            provider_message_sid: providerMessageId || null,
+            direction: "inbound",
+            message_body: message,
+            received_at: inboundReceivedAt || new Date().toISOString(),
+            delivery_status: "received",
+          },
+        },
+        { supabase },
+      );
+    } catch (v3_bucket_error) {
+      runtimeDeps.warn("[SELLER_CONVERSATION_V3_BUCKET_SYNC_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        error: v3_bucket_error?.message || "bucket_sync_failed",
+      });
+    }
+  }
 
   // v2 evidence log: every number put to a seller is recorded with the comps,
   // the offer version and the rule that produced it (also stamped on the
