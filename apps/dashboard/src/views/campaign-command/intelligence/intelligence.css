@@ -231,3 +231,22 @@
 
 @media (prefers-reduced-motion: reduce) { .aqi * { transition: none !important; } }
 html[data-lc-motion='off'] .aqi * { transition: none !important; }
+
+/* ── Audience filters vs message angle (never merged) ─────────────────────── */
+.aqi-aa-wrap { container-type: inline-size; }
+.aqi-aa__badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.aqi-aa__grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@container (min-width: 720px) { .aqi-aa__grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.aqi-aa__aud { box-shadow: inset 3px 0 0 var(--lc-exec), inset 0 0 0 1px var(--aqi-edge); }
+.aqi-aa__ang { box-shadow: inset 3px 0 0 var(--lc-flow, var(--lc-ink-3)), inset 0 0 0 1px var(--aqi-edge); }
+.aqi-aa__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.aqi-aa__list li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 12.5px; }
+.aqi-aa__k { color: var(--lc-ink-1); font-weight: 600; }
+.aqi-aa__op { color: var(--lc-ink-3); font-size: 11.5px; }
+.aqi-aa__v { color: var(--lc-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aqi-aa__uc { margin: 0 0 6px; font-size: 13px; color: var(--lc-ink-1); }
+.aqi-aa__tpl { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.aqi-aa__tpl li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; font-size: 12px; }
+.aqi-aa__tname { color: var(--lc-ink-2); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aqi-aa__body { grid-column: 1 / -1; margin: 0; color: var(--lc-ink-3); font-size: 11.5px; line-height: 1.4; }
+.aqi-aa.is-compact .aqi-aa__body { display: none; }

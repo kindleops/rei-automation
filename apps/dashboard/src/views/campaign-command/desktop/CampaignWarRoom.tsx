@@ -23,6 +23,7 @@ import { GeoPlane } from './WarGeo'
 import { WarHero, type HeroAction } from './WarHero'
 import { CoveragePlane, LifecycleRail, RoomInstrument } from './WarBook'
 import { WarInspector, type InspectorCtx } from './WarInspector'
+import { AudienceVsAngle } from '../intelligence/AudienceVsAngle'
 import { PerformanceMode } from './WarPerformance'
 import { AudiencePlane, FleetPlane, LatestActivity, OutcomePlane, TimePlane } from './WarPlanes'
 import { MissionRail } from './WarRail'
@@ -461,6 +462,7 @@ export function CampaignWarRoom({
                       <GeoPlane campaignId={selectedId} campaignName={name} demo={demoOn ? (demo?.geos[selectedId] ?? null) : undefined} />
                     </div>
                     <CoveragePlane markets={intel.data ? (intel.data.audience?.markets ?? {}) : null} enabled={!demoOn} />
+                    {!demoOn && selectedId ? <AudienceVsAngle campaignId={selectedId} /> : null}
                     <LatestActivity events={activity} tz={f.tz} loading={intel.loading && !activity.length} onAll={() => setMode('activity')} />
                   </div>
                 ) : null}

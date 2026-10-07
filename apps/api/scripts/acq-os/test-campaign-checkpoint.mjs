@@ -27,7 +27,12 @@ for (const checkpoint of checkpoints) {
     const d = r.test_minus_control[m]
     console.log(`${m.padEnd(12)} test ${String(r.arms.test[m].k).padStart(3)} ${pct(r.arms.test[m].rate).padStart(7)} · control ${String(r.arms.control[m].k).padStart(3)} ${pct(r.arms.control[m].rate).padStart(7)} · Δ ${pct(d.diff)} [${pct(d.ci95[0])}, ${pct(d.ci95[1])}]`)
   }
-  console.log('north star contracts/1000:', r.arms.test.north_star.contracts_per_1000, 'vs', r.arms.control.north_star.contracts_per_1000)
+  for (const m of ['interested', 'realistic', 'negotiation']) {
+    const d = r.test_minus_control_per_owner[m]
+    console.log(`${(m + '/owner').padEnd(18)} test ${r.per_right_owner.test[m].k}/${r.per_right_owner.test.owners} ${pct(r.per_right_owner.test[m].rate)} · control ${r.per_right_owner.control[m].k}/${r.per_right_owner.control.owners} ${pct(r.per_right_owner.control[m].rate)} · Δ ${pct(d.diff)} [${pct(d.ci95[0])}, ${pct(d.ci95[1])}]`)
+  }
+  console.log('north star /1000 — contracts:', r.arms.test.north_star.contracts_per_1000, 'vs', r.arms.control.north_star.contracts_per_1000, '· profitable deals:', r.arms.test.north_star.profitable_deals_per_1000, 'vs', r.arms.control.north_star.profitable_deals_per_1000)
+  console.log('decomposition:', r.decomposition.reads_as, JSON.stringify({ reach: r.decomposition.reach_rr, motivation: r.decomposition.motivation_rr, share_from_reach: r.decomposition.share_of_log_lift_from_reach }))
   console.log('verdict:', JSON.stringify(r.verdict))
 }
 if (args.out) fs.writeFileSync(args.out, JSON.stringify(out, null, 1))

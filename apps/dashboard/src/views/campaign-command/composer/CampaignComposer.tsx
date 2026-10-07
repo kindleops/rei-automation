@@ -25,6 +25,7 @@ import { DeliveryBody, ScheduleBody, StrategyBody } from './ComposerPlanes'
 import { reasonWords } from './composer-format'
 import { Plane } from './ComposerParts'
 import { ComposerIntelligence } from '../intelligence/ComposerIntelligence'
+import { AudienceVsAngle } from '../intelligence/AudienceVsAngle'
 import './composer.css'
 
 /**
@@ -590,6 +591,8 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
             <ReadinessList checks={readiness.checks} onFocus={focusLayer} />
           </Plane>
         </div>
+        {/* Audience filters vs message angle — always visible, read-only (never merged visually) */}
+        {hasAudience ? <AudienceVsAngle spec={{ name: composition.name, filters: spec.filters, template_use_case: spec.template_use_case }} specKey={`${composition.name}|${cohortKey}`} /> : null}
         {/* Seller intelligence (Acquisition OS §19/§69/§79) — read-only; renders nothing while SELLER_SCREENER is off */}
         <ComposerIntelligence spec={{ filters: spec.filters, template_use_case: spec.template_use_case }} specKey={cohortKey} active={hasAudience && cohortReady} />
       </div>

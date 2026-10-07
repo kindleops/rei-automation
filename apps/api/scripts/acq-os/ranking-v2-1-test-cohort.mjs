@@ -104,8 +104,9 @@ const cohort = pool.slice(0, MAX)
 // ── CONTROL ARM + COUNTERFACTUAL: the OLD broad tired-landlord targeting ──
 // Old method = campaign A's ACTUAL saved filter (campaigns.metadata.target_filters:
 // properties.market ∈ {…} AND property_type = Single Family — no tired-landlord
-// field; "tired landlord" was the angle/template, and every one of A's 2,689
-// targets carried the DealMachine "Tired Landlord" flag), the same Layer-0
+// field and no tired-landlord template copy — its S1 templates are neutral
+// ownership checks; A's targets carried the DealMachine "Tired Landlord" flag
+// via the legacy-score order, not a filter), the same Layer-0
 // eligibility, ordered by legacy final_acquisition_score desc, id asc (the
 // production SQL order). No contact / pressure / equity / buyer-depth filter.
 // Applied to the EXACT same ZIPs. TL-flag share is reported.
@@ -173,6 +174,14 @@ const PREREG = {
     { id: 'P1', metric: 'owner reached per delivered (delivered → owner)', test: 'two-proportion difference test − control, Newcombe hybrid-score 95% CI', win: 'lower bound > 0' },
     { id: 'P2', metric: 'interested per delivered (delivered → interested)', test: 'same', win: 'lower bound > 0 (secondary to P1 for the decision)' },
   ],
+  per_right_owner: [
+    { id: 'R1', metric: 'right owner / delivered (= P1)' },
+    { id: 'R2', metric: 'interested / right owner' },
+    { id: 'R3', metric: 'realistic price / right owner' },
+    { id: 'R4', metric: 'negotiation / right owner' },
+  ],
+  north_star: ['contracts per 1,000 delivered', 'profitable deals per 1,000 delivered'],
+  decomposition: 'RR(interested/delivered) = RR(right owner/delivered) × RR(interested/right owner), Katz 95% CIs; reported as a win on REACHING the owner, on OWNER MOTIVATION, or BOTH (CI lower bound > 1)',
   secondary: ['replied per delivered', 'price obtained per delivered', 'realistic price per delivered', 'negotiation per delivered', 'contracts per 1,000 delivered (north star, descriptive)', 'profitable deals per 1,000 delivered (descriptive)'],
   guardrails: [{ metric: 'opt-out per delivered', stop_if: 'test − control lower bound > +5 pp at ≥72h' }, { metric: 'hostile per delivered', stop_if: 'test − control lower bound > +3 pp at ≥72h' }, 'wrong-number per delivered (reported)'],
   checkpoints: ['24h', '72h', '7d', '14d', '21d'],
@@ -206,6 +215,12 @@ const result = {
   interleave: { daily_per_arm: DAILY_PER_ARM, days: Math.ceil(orderedPairs.length / DAILY_PER_ARM), pairs: orderedPairs.length, cross_zip_pairs: pairs.filter((p) => p.cross_zip).length, rules: ['same template (ownership_check S1, the approved English/Spanish variants by canonical language)', 'same sender pool (Dallas + Houston approved pools); pair members from the same sender, same 15-minute block', 'same send window (recipient-local 8am–9pm policy)', 'equal daily cap per arm', 'ABBA counterbalancing of which arm goes first in a pair'], launch_reality: 'Composer launches campaigns, not pairs: create TWO drafts (test / control) with identical settings and launch them in the same minute; the 24h checkpoint verifies hour/sender/template balance and flags contamination', schedule },
   preregistration: PREREG,
   arms: { test: cohort.map((e) => e.row.property_id), control: control.map((e) => e.row.property_id) },
+  members: (() => {
+    const slot = new Map()
+    for (const x of schedule) { slot.set(x.test, { pair_id: x.pair, send_day: x.day, block_15m: x.block_15m, first_in_pair: x.first }); slot.set(x.control, { pair_id: x.pair, send_day: x.day, block_15m: x.block_15m, first_in_pair: x.first }) }
+    const sel = (e, arm) => ({ property_id: e.row.property_id, arm, zip: String(e.row.property_zip).slice(0, 5), ...(slot.get(e.row.property_id) || {}), selection: { tier: e.c.situation?.opportunity_tier ?? 'UNKNOWN', identity_tier: e.c.rank.layers.contact.identity_tier, contact: e.c.rank.contact_score, priority_v2_1: e.c.rank.score, legacy_score: e.row.acquisition_score === null ? null : Number(e.row.acquisition_score), equity_class: equityEvidence(e.row).class } })
+    return [...cohort.map((e) => sel(e, 'test')), ...control.map((e) => sel(e, 'control'))]
+  })(),
   composer_spec_control: {
     note: 'CONTROL arm draft (owner saves + launches; nothing saved here).',
     name: 'TEST v2.1 · CONTROL · broad tired landlord, same ZIPs (DRAFT — do not launch alone)',

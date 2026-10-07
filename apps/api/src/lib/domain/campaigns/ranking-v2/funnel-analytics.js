@@ -263,5 +263,38 @@ export function armComparison(items = [], { arms = ['test', 'control'], checkpoi
     decision_checkpoint: checkpoint === '21d' ? 'FINAL' : 'informational only (pre-registered: decide at 21d)',
     min_n_met: perArm[A].delivered >= 250 && perArm[B].delivered >= 250,
   }
-  return { checkpoint, arms: perArm, test_minus_control: diffs, verdict, preregistration }
+  // ── per-RIGHT-OWNER metrics + decomposition (owner 2026-10-07) ──
+  //   interested/delivered = (owner/delivered) × (interested/owner)
+  // so the win is attributed to REACHING the owner, to the owner's MOTIVATION,
+  // or both: log RR_interest = log RR_reach + log RR_motivation (Katz CIs).
+  const ownerMetrics = ['interested', 'realistic', 'negotiation', 'price', 'contract']
+  const perOwner = {}
+  for (const a of arms) {
+    const g = byArm[a].filter((x) => x.labels.owner)
+    perOwner[a] = { owners: g.length, ...Object.fromEntries(ownerMetrics.map((m) => { const k = g.filter((x) => x.labels[m]).length; return [m, { k, rate: g.length ? Math.round((k / g.length) * 10000) / 10000 : null, ci95: wilson(k, g.length) }] })) }
+  }
+  const ownerDiffs = Object.fromEntries(ownerMetrics.map((m) => [m, diffCI(perOwner[A][m].k, perOwner[A].owners, perOwner[B][m].k, perOwner[B].owners)]))
+  const rr = (k1, n1, k2, n2) => {
+    if (!n1 || !n2 || !k1 || !k2) return { rr: null, ci95: [null, null], log: null }
+    const lr = Math.log((k1 / n1) / (k2 / n2))
+    const se = Math.sqrt(1 / k1 - 1 / n1 + 1 / k2 - 1 / n2)
+    const r = (x) => Math.round(x * 1000) / 1000
+    return { rr: r(Math.exp(lr)), ci95: [r(Math.exp(lr - 1.96 * se)), r(Math.exp(lr + 1.96 * se))], log: lr }
+  }
+  const reach = rr(perArm[A].owner.k, perArm[A].delivered, perArm[B].owner.k, perArm[B].delivered)
+  const motivation = rr(perOwner[A].interested.k, perOwner[A].owners, perOwner[B].interested.k, perOwner[B].owners)
+  const total = rr(perArm[A].interested.k, perArm[A].delivered, perArm[B].interested.k, perArm[B].delivered)
+  const share = total.log && reach.log !== null && motivation.log !== null && Math.abs(total.log) > 1e-9 ? Math.round((reach.log / total.log) * 1000) / 1000 : null
+  const wins = (x) => (x.rr === null ? 'no data' : x.ci95[0] > 1 ? 'test better' : x.ci95[1] < 1 ? 'control better' : 'inconclusive')
+  const decomposition = {
+    identity: 'RR(interested/delivered) = RR(owner/delivered) × RR(interested/owner)',
+    reach_rr: { rr: reach.rr, ci95: reach.ci95 },
+    motivation_rr: { rr: motivation.rr, ci95: motivation.ci95 },
+    total_rr: { rr: total.rr, ci95: total.ci95 },
+    share_of_log_lift_from_reach: share,
+    verdict: { reach: wins(reach), motivation: wins(motivation), combined: wins(total) },
+    reads_as: wins(reach) === 'test better' && wins(motivation) === 'test better' ? 'wins on BOTH reaching the owner and owner motivation'
+      : wins(reach) === 'test better' ? 'wins on REACHING the owner' : wins(motivation) === 'test better' ? 'wins on OWNER MOTIVATION' : 'no decomposed win yet',
+  }
+  return { checkpoint, arms: perArm, per_right_owner: perOwner, test_minus_control: diffs, test_minus_control_per_owner: ownerDiffs, decomposition, verdict, preregistration }
 }

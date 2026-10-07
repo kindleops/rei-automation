@@ -63,3 +63,20 @@ export const readQualityReport = (input: { spec?: Record<string, unknown> | null
     : `spec=${encodeURIComponent(JSON.stringify(input.spec ?? {}))}`
   return request<QualityReport>(`${BASE}/composer?part=quality&${q}`, { signal, timeoutMs: 240_000 })
 }
+
+/** Audience filter vs message angle (read-only, NOT flag-gated: it only explains stored rows). */
+export const readAudienceAngle = (q: { campaignId?: string; spec?: Record<string, unknown> }, signal?: AbortSignal) =>
+  request<AudienceAngle>(q.campaignId ? `${BASE}/audience-angle?campaign_id=${encodeURIComponent(q.campaignId)}` : `${BASE}/audience-angle?spec=${encodeURIComponent(JSON.stringify(q.spec ?? {}))}`, { signal, timeoutMs: 45_000 })
+
+export interface AudienceAngle {
+  ok: true
+  version: string
+  name: string | null
+  audience_filters: Array<{ field_key: string; label: string; category: string; operator: string; value: unknown }>
+  audience_summary: string[]
+  drawn_area: boolean
+  message_angle: { use_case: string | null; stage_code: string | null; template_source: string; templates: Array<{ template_id: string; name: string | null; use_case: string | null; body_preview: string | null; sends: number }> }
+  terms: Array<{ key: string; label: string; implied_by: string[]; filtered_by: string[]; status: 'filtered' | 'filter_only' | 'angle_only_not_filtered' }>
+  badges: Array<{ key: string; label: string; implied_by: string[] }>
+  campaigns?: AudienceAngle[]
+}

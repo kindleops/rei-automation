@@ -264,15 +264,15 @@ test("SQL twin pins the v2.1 layer weights, gate, contact points and the equity 
 
 test("migration (a) is schema-support only: new tables/views, CONCURRENTLY indexes, no existing table altered, pretest rolls back", () => {
   const dir = new URL("../../../../supabase/migrations/", import.meta.url);
-  const a = fs.readFileSync(new URL("PROPOSED_20261007090000_ranking_shadow_support.sql", dir), "utf8");
+  const a = fs.readFileSync(new URL("20261007090000_ranking_shadow_support.sql", dir), "utf8");
   const code = a.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
   assert.ok(!/ALTER TABLE public\.(?!campaign_rank_shadow|campaign_test_)/.test(code), "no ALTER of an existing table");
   assert.ok(!/campaign_target_graph/.test(code), "never touches the graph");
   assert.ok(!/^\s*(UPDATE|DELETE|TRUNCATE|INSERT)\s/im.test(code), "no data rewrites");
   for (const m of code.matchAll(/CREATE INDEX (\w+)/g)) assert.equal(m[1], "CONCURRENTLY");
-  const pre = fs.readFileSync(new URL("PROPOSED_20261007090000_ranking_shadow_support_pretest.sql", dir), "utf8");
+  const pre = fs.readFileSync(new URL("20261007090000_ranking_shadow_support_pretest.sql", dir), "utf8");
   assert.match(pre.trim(), /ROLLBACK;$/);
-  assert.ok(fs.existsSync(new URL("PROPOSED_20261007090000_ranking_shadow_support_rollback.sql", dir)));
+  assert.ok(fs.existsSync(new URL("20261007090000_ranking_shadow_support_rollback.sql", dir)));
 });
 
 test("identity tiers: missing vendor tag is absence of evidence; contradictions are lower", () => {
@@ -677,4 +677,41 @@ test("§94 performance: rank 100K rows and screen 25K rows in-process within bud
   assert.ok(screenMs < 3000, `screen ${screenMs}ms`);
   assert.ok(whyMs < 500, `why ${whyMs}ms`);
   assert.ok(res.matched >= 0);
+});
+
+// ── audience filter vs message angle (owner 2026-10-07) ──────────────────────
+test("audience vs angle: a name/copy-implied term with no filter is 'angle-only, not filtered'; a real filter is 'filtered'; discovery questions in copy never imply targeting", async () => {
+  const { deriveAudienceVsAngle } = await import("@/lib/domain/campaigns/campaign-audience-angle.js");
+  const tlOnlyName = deriveAudienceVsAngle({ name: "Dallas SFR · TL", metadata: { template_use_case: "ownership_check", target_filters: { properties: [{ field_key: "properties.market", operator: "is_any_of", value: ["Dallas, TX"] }, { field_key: "properties.property_type", operator: "is_any_of", value: ["Single Family"] }] } } }, { templates: [{ template_id: "1", template_body: "Hi, are you still the owner of {{property_address}}?", sends: 10 }] });
+  assert.deepEqual(tlOnlyName.badges.map((b) => b.key), ["tired_landlord"]);
+  assert.equal(tlOnlyName.terms.find((t) => t.key === "single_family").status, "filtered");
+  assert.equal(tlOnlyName.audience_filters.length, 2);
+  assert.equal(tlOnlyName.message_angle.use_case, "ownership_check");
+  const filtered = deriveAudienceVsAngle({ name: "Los Angeles · MFR / TL", metadata: { target_filters: { properties: [{ field_key: "properties.property_flags_text", operator: "is_any_of", value: ["Tired Landlord"] }, { field_key: "properties.property_type", operator: "is_any_of", value: ["Multi-Family"] }] } } });
+  assert.equal(filtered.badges.length, 0);
+  assert.equal(filtered.terms.find((t) => t.key === "tired_landlord").status, "filtered");
+  const question = deriveAudienceVsAngle({ name: "Miami - Test", metadata: {} }, { templates: [{ template_id: "2", template_body: "Is the home vacant or rented right now?" }] });
+  assert.equal(question.badges.length, 0, "a vacancy QUESTION is not a vacancy TARGET");
+  const copy = deriveAudienceVsAngle({ name: "Spring", metadata: {} }, { templates: [{ template_id: "3", template_body: "Tired of being a landlord? We buy as-is." }] });
+  assert.deepEqual(copy.badges.map((b) => [b.key, b.implied_by]), [["tired_landlord", ["template_copy"]]]);
+  assert.deepEqual(deriveAudienceVsAngle({ name: "x" }).audience_summary, ["(no saved audience filter)"]);
+});
+
+test("experiment decomposition: interest/delivered = reach × motivation, with per-right-owner rates and Katz RR CIs", () => {
+  const mk = (arm, owner, interested) => ({ labels: funnelLabels({ delivered: true, inbound: owner ? 1 : 0, intents: owner ? (interested ? ["seller_interested"] : ["ownership_confirmed"]) : [] }), signals: { arm } });
+  const items = [
+    ...Array.from({ length: 300 }, (_, i) => mk("test", i < 60, i < 20)),     // reach 20%, motivation 33%
+    ...Array.from({ length: 300 }, (_, i) => mk("control", i < 20, i < 7)),   // reach 6.7%, motivation 35%
+  ];
+  const cmp = armComparison(items, { checkpoint: "21d" });
+  assert.equal(cmp.per_right_owner.test.owners, 60);
+  assert.equal(cmp.per_right_owner.test.interested.k, 20);
+  assert.equal(cmp.decomposition.verdict.reach, "test better");
+  assert.equal(cmp.decomposition.verdict.motivation, "inconclusive");
+  assert.match(cmp.decomposition.reads_as, /REACHING the owner/);
+  const rrProduct = cmp.decomposition.reach_rr.rr * cmp.decomposition.motivation_rr.rr;
+  assert.ok(Math.abs(rrProduct - cmp.decomposition.total_rr.rr) < 0.02, "RR_total = RR_reach × RR_motivation");
+  assert.ok(cmp.decomposition.share_of_log_lift_from_reach > 1, "all of the lift (and more) comes from reach");
+  assert.ok("realistic" in cmp.test_minus_control_per_owner && "negotiation" in cmp.test_minus_control_per_owner);
+  assert.equal(cmp.arms.test.north_star.contracts_per_1000, 0, "north star reported even at 0");
 });
