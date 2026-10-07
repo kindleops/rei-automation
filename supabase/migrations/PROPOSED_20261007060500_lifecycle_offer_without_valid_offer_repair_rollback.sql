@@ -1,4 +1,4 @@
--- Rollback for PROPOSED_20261007060000 (append-only: reverse history rows are added, none deleted).
+-- Rollback for PROPOSED_20261007060500 (append-only: reverse history rows are added, none deleted).
 begin;
 set local lock_timeout = '5s';
 insert into public.acquisition_opportunity_history (opportunity_id, event_type, field_name, previous_value, new_value, reason, actor, source, idempotency_key)

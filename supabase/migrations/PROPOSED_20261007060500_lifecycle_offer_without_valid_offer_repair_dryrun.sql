@@ -3,7 +3,7 @@
 -- no offer-bearing message). Each returns to the HIGHEST stage its conversation
 -- supports; the fake $331 / 2024 asks are cleared (kept as rejected evidence);
 -- history is appended, never deleted. Row-count assertions abort on any drift.
--- DRY RUN: PROPOSED_20261007060000_lifecycle_offer_without_valid_offer_repair_dryrun.sql
+-- DRY RUN: PROPOSED_20261007060500_lifecycle_offer_without_valid_offer_repair_dryrun.sql
 -- (identical, ends in ROLLBACK). The 5 operator-number threads are handled separately.
 
 begin;
