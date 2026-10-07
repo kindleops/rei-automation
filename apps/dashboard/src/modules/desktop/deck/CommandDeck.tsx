@@ -216,7 +216,7 @@ export function CommandDeck(p: CommandDeckProps) {
             width={640}
             label="Machine activity"
             trigger={
-              <button type="button" className={cx('cd-machine', `is-${machine.state}`, line && `has-line tone-${line.tone}`)} aria-label={line ? `${line.text}` : `Machine ${machineLabel}${machine.reason ? ` — ${machine.reason}` : ''}`}>
+              <button type="button" className={cx('cd-machine', `is-${machine.state}`, line && `has-line tone-${line.tone}`)} aria-label={line ? `${line.text}` : `Machine ${machineLabel}${machine.reason ? ` — ${machine.reason}` : ''}${machine.attention.reason ? ` — ${machine.attention.reason}` : ''}`} title={!line ? [machine.reason, machine.attention.reason].filter(Boolean).join(' · ') || undefined : undefined}>
                 <AnimatePresence mode="wait" initial={false}>
                   {line ? (
                     <motion.span key={line.key} className="cd-machine__face" {...fade} transition={{ duration: 0.2 }}>
@@ -226,7 +226,9 @@ export function CommandDeck(p: CommandDeckProps) {
                   ) : (
                     <motion.span key={`rest-${machine.state}`} className="cd-machine__face" {...fade} transition={{ duration: 0.2 }}>
                       <i className="cd-machine__dot" aria-hidden="true" />
-                      <span className="cd-machine__text">{machineLabel}</span>
+                      {/* degraded always names its reason ("3 sends overdue · oldest 42m") */}
+                      <span className="cd-machine__text">{machine.state === 'degraded' && machine.reason ? machine.reason : machineLabel}</span>
+                      {machine.state !== 'degraded' && machine.attention.count ? <span className="cd-machine__attn" aria-hidden="true">{machine.attention.count}</span> : null}
                     </motion.span>
                   )}
                 </AnimatePresence>

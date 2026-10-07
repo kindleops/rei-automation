@@ -48,6 +48,7 @@ export function MachinePlane({ rail }: { rail: RailSnapshot }) {
         {rail.updatedAt ? <span className="crm__meta">updated {clock(rail.updatedAt)}</span> : null}
       </header>
       {m.reason ? <p className="crm__reason">{m.reason}</p> : null}
+      {m.attention.reason ? <p className="crm__attn">{m.attention.reason}</p> : null}
 
       <section className="crm__sec" aria-label="Live machine">
         <span className="lc-eyebrow">Live machine</span>

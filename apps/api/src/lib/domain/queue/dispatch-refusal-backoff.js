@@ -41,4 +41,72 @@ export function buildDispatchRefusalBackoff(queue_row = {}, now = new Date()) {
   };
 }
 
+// ─── terminal refusals ──────────────────────────────────────────────────────
+// Backoff bounds how often a refused row is retried, not whether it ever
+// stops. Some refusals can never clear on their own: a row whose identity the
+// seam cannot derive (no action anchor) will be refused on every attempt
+// forever (send_queue 51c8ae5c…, Indianapolis: 62 refusals over five days).
+// After `limit` consecutive refusals for such a reason the row is terminalized
+// (blocked, with the reason) and ops are told once, instead of looping.
+
+/** Refusal reasons that cannot clear by waiting. */
+export const TERMINAL_REFUSAL_REASONS = Object.freeze(new Set(["queue_row_identity_underivable"]));
+
+/** Consecutive refusals before a permanently-refused row is terminalized. */
+export const DEFAULT_TERMINAL_REFUSAL_LIMIT = 10;
+
+/** system_control key that overrides the limit (positive integer). */
+export const TERMINAL_REFUSAL_LIMIT_KEY = "queue_terminal_refusal_limit";
+
+export function resolveTerminalRefusalLimit(value) {
+  const n = Math.trunc(Number(clean(value)));
+  return Number.isFinite(n) && n >= 1 ? n : DEFAULT_TERMINAL_REFUSAL_LIMIT;
+}
+
+/**
+ * @param {string} reason          the seam's refusal reason
+ * @param {number} refusal_count   the count INCLUDING this refusal
+ * @param {number} [limit]
+ */
+export function shouldTerminalizeRefusal(reason, refusal_count, limit = DEFAULT_TERMINAL_REFUSAL_LIMIT) {
+  if (!TERMINAL_REFUSAL_REASONS.has(clean(reason))) return false;
+  return Math.trunc(Number(refusal_count) || 0) >= resolveTerminalRefusalLimit(limit);
+}
+
+/**
+ * The update that ends a permanently-refused row. Terminal `blocked` (not
+ * `failed`: the provider was never contacted, nothing was attempted), unlocked,
+ * with the reason on the row and the refusal history kept in metadata.
+ */
+export function buildTerminalRefusalUpdate(queue_row = {}, reason, backoff_metadata = {}, now = new Date()) {
+  const md = queue_row?.metadata && typeof queue_row.metadata === "object" ? queue_row.metadata : {};
+  const at = (now instanceof Date ? now : new Date(now)).toISOString();
+  const why = clean(reason);
+  return {
+    queue_status: "blocked",
+    guard_status: "blocked",
+    guard_reason: why,
+    blocked_reason: why,
+    is_locked: false,
+    locked_at: null,
+    lock_token: null,
+    updated_at: at,
+    metadata: {
+      ...md,
+      ...backoff_metadata,
+      skip_reason: why,
+      final_queue_status: "blocked",
+      blocked_by: "process_send_queue_terminal_refusal",
+      terminal_refusal: {
+        reason: why,
+        refusal_count: backoff_metadata.dispatch_refusal_count ?? md.dispatch_refusal_count ?? null,
+        first_refused_at: md.dispatch_refusal_first_at || backoff_metadata.dispatch_refusal_first_at || null,
+        terminalized_at: at,
+      },
+      blocked_at: at,
+      finalized_at: at,
+    },
+  };
+}
+
 export default buildDispatchRefusalBackoff;

@@ -85,6 +85,27 @@ describe('machine state', () => {
     expect(m.state).toBe('degraded')
     expect(m.reason).toContain('Queue processor')
   })
+  it('does not call an every-minute beat late before the server does (5 min)', () => {
+    expect(runtimeHealth(rt({ heartbeat_at: '2026-10-01T14:58:30Z' }), now)).toBe('current')
+    expect(runtimeHealth(rt({ heartbeat_at: '2026-10-01T14:59:00Z', heartbeat_state: 'stale' }), now)).toBe('delayed')
+  })
+  it('degraded always names the overdue sends and the oldest age', () => {
+    const q = { ...metrics().queue!, status: 'degraded', overdue: 3, oldest_overdue_due_at: new Date(now - 42 * 60_000).toISOString() }
+    const m = machineState({ metrics: metrics({ queue: q }), runtimes: [rt()] }, now)
+    expect(m.state).toBe('degraded')
+    expect(m.reason).toBe('3 sends overdue · oldest 42m')
+  })
+  it('a repeatedly refused send is a quiet attention count, not degraded', () => {
+    const q = { ...metrics().queue!, status: 'attention', overdue: 0, refused_repeatedly: 1 }
+    const m = machineState({ metrics: metrics({ queue: q }), runtimes: [rt()] }, now)
+    expect(m.state).toBe('live')
+    expect(m.reason).toBeNull()
+    expect(m.attention).toEqual({ count: 1, reason: '1 send refused repeatedly' })
+  })
+  it('future-scheduled work alone is healthy and live', () => {
+    const q = { ...metrics().queue!, status: 'healthy', overdue: 0, refused_repeatedly: 0 }
+    expect(machineState({ metrics: metrics({ queue: q }), runtimes: [rt()] }, now).state).toBe('live')
+  })
   it('is unknown before the first read — not "live"', () => {
     expect(machineState(null, now).state).toBe('unknown')
   })

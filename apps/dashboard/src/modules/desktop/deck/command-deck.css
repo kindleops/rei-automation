@@ -164,6 +164,9 @@ html.is-desktop-modern .nx-stage { transition: filter 0.22s ease; }
 .cd-machine.is-live .cd-machine__dot { background: var(--lc-ok); box-shadow: 0 0 8px rgba(var(--lc-ok-rgb), 0.65); }
 .cd-machine.is-degraded .cd-machine__dot { background: var(--lc-attn); box-shadow: 0 0 8px rgba(var(--lc-attn-rgb), 0.65); }
 .cd-machine.is-degraded:not(.has-line) .cd-machine__text { color: var(--lc-attn); }
+.cd-machine.is-degraded:not(.has-line) .cd-machine__text { text-transform: none; letter-spacing: 0.01em; font-size: 11.5px; }
+/* attention is a quiet count beside the state, never the yellow degraded face */
+.cd-machine__attn { flex: none; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; display: inline-grid; place-items: center; font: 600 10px/1 var(--lc-font-ui); font-variant-numeric: tabular-nums; color: var(--lc-ink-2); background: rgba(var(--lc-attn-rgb), 0.08); box-shadow: inset 0 0 0 1px rgba(var(--lc-attn-rgb), 0.22); }
 .cd-machine.tone-exec { box-shadow: inset 0 0 0 1px rgba(var(--lc-exec-rgb), 0.22); background: radial-gradient(120% 140% at 0% 50%, rgba(var(--lc-exec-rgb), 0.12), transparent 70%); }
 .cd-machine.tone-ok { box-shadow: inset 0 0 0 1px rgba(var(--lc-ok-rgb), 0.24); background: radial-gradient(120% 140% at 0% 50%, rgba(var(--lc-ok-rgb), 0.1), transparent 70%); }
 .cd-machine.tone-attn { box-shadow: inset 0 0 0 1px rgba(var(--lc-attn-rgb), 0.3); background: radial-gradient(120% 140% at 0% 50%, rgba(var(--lc-attn-rgb), 0.12), transparent 70%); }

@@ -99,6 +99,7 @@ export function MachineFeed({ rail, linked, onLeave }: { rail: RailSnapshot; lin
         </ul>
       </header>
       {m.reason ? <p className="mf-reason">{m.reason}</p> : null}
+      {m.attention.reason ? <p className="mf-attn">{m.attention.reason}</p> : null}
 
       <div className="mf-filters" role="toolbar" aria-label="Filter machine activity">
         <LCSelect<FeedApp> size="sm" variant="chip" label="App" value={f.app} onChange={(v) => setFeedFilters({ app: v })} options={FEED_APPS.map((a) => ({ value: a.value, label: a.label }))} />

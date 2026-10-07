@@ -27,7 +27,15 @@ import {
   sendTextgridSMS,
 } from "@/lib/providers/textgrid.js";
 import { dispatchSellerQueueRow } from "@/lib/domain/communications/dispatch-seller-queue-row.js";
-import { buildDispatchRefusalBackoff } from "@/lib/domain/queue/dispatch-refusal-backoff.js";
+import {
+  buildDispatchRefusalBackoff,
+  buildTerminalRefusalUpdate,
+  resolveTerminalRefusalLimit,
+  shouldTerminalizeRefusal,
+  TERMINAL_REFUSAL_LIMIT_KEY,
+  TERMINAL_REFUSAL_REASONS,
+} from "@/lib/domain/queue/dispatch-refusal-backoff.js";
+import { recordLaunchCriticalAlert } from "@/lib/domain/alerts/launch-critical-alerts.js";
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
 import { loadPropertyGeography, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
@@ -2432,6 +2440,53 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     // every claim batch (dispatch-refusal-backoff.js).
     if (dispatch.provider_invoked === false) {
       const backoff = buildDispatchRefusalBackoff(queue_row, now);
+
+      // A refusal that can never clear by waiting (no derivable identity)
+      // ends the row after N consecutive refusals instead of looping forever,
+      // and ops hear about it once (the dedupe key is the row).
+      if (TERMINAL_REFUSAL_REASONS.has(clean(dispatch.reason))) {
+        const limit = resolveTerminalRefusalLimit(
+          await Promise.resolve().then(() => (deps.getSystemValue || getSystemValue)(TERMINAL_REFUSAL_LIMIT_KEY)).catch(() => null)
+        );
+        if (shouldTerminalizeRefusal(dispatch.reason, backoff.metadata.dispatch_refusal_count, limit)) {
+          const terminal = buildTerminalRefusalUpdate(queue_row, dispatch.reason, backoff.metadata, now);
+          await updateQueueRow(queue_row_id, terminal, deps);
+          warn("queue.canonical_dispatch_refusal_terminalized", {
+            queue_row_id,
+            reason: dispatch.reason,
+            refusal_count: backoff.metadata.dispatch_refusal_count,
+            limit,
+          });
+          await Promise.resolve().then(() => (deps.recordLaunchCriticalAlert || recordLaunchCriticalAlert)({
+            code: "queue_row_refusal_terminalized",
+            subsystem: "queue",
+            severity: "warning",
+            summary: `Queued send blocked after ${backoff.metadata.dispatch_refusal_count} dispatch refusals: ${clean(dispatch.reason)}`,
+            dedupe_key: `queue:refusal_terminalized:${queue_row_id}`,
+            source_entity_type: "send_queue",
+            source_entity_id: queue_row_id,
+            metadata: {
+              queue_row_id,
+              reason: clean(dispatch.reason),
+              refusal_count: backoff.metadata.dispatch_refusal_count,
+              limit,
+              market: queue_row.market || null,
+              source: queue_row.source || null,
+            },
+          })).catch(() => null);
+          return {
+            ok: false,
+            skipped: true,
+            sent: false,
+            reason: dispatch.reason,
+            queue_status: "blocked",
+            final_queue_status: "blocked",
+            queue_row_id,
+            queue_item_id: queue_row_id,
+            terminal_refusal: true,
+          };
+        }
+      }
       warn("queue.canonical_dispatch_refused", {
         queue_row_id,
         stage: dispatch.stage,
