@@ -73,9 +73,20 @@ export const CURRENT_ENGINE_VERSION = '2.0.0';
  *
  * Deliberately NOT included: `cash_offer`, `final_acquisition_score`,
  * `tag_distress_score`, `deal_strength_score`, `structured_motivation_score`,
- * `ai_score`, and the `offer_pp*` family. Those are Podio-era OUTPUT columns,
- * never inputs to this engine, and a change in one must not trigger — or
- * suppress — a recompute.
+ * `ai_score`, and the `offer_pp*` family. Those are Podio-era columns and a
+ * change in one must not trigger — or suppress — a recompute.
+ *
+ * CORRECTION (Acquisition OS §3, 2026-10-07): they are NOT "never inputs".
+ * On the default legacy-hybrid path the engine DOES read them:
+ * acquisitionDecisionEngine.motivationDistressInputs builds motivation_score
+ * from structured_motivation_score → final_acquisition_score →
+ * deal_strength_score and distress_score from tag_distress_score;
+ * distressAndMotivation weights them 0.45 / 0.35, and the result moves the
+ * transaction probabilities and the motivation discount (≤ 3.5%) of the offer.
+ * Under SELLER_SCORING_RAW_FACTS (default OFF) they are replaced by
+ * seller_situation_v2 / raw_facts_v1 and are no longer inputs. They stay out
+ * of this list on both paths: they are frozen Podio exports, so a change in one
+ * is an import artefact, not new evidence.
  */
 export const MATERIAL_PROPERTY_FIELDS = Object.freeze([
   // Valuation anchors

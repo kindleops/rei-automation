@@ -21,11 +21,8 @@
 //   * Not monetary authority (§75). Rows target / rank / explain / pick an
 //     angle; they never produce a quoted amount.
 //
-// The stub below returns a well-formed UNKNOWN result; the real model lives in
-// ./model.js and replaces it via the re-export at the bottom of this file.
-
-export const SCORE_VERSION = 'seller_situation_v2';
-export const INPUT_MODEL_VERSION = 'raw_facts_v1';
+// Implementation: ./model.js (scoring), ./loader.js (batched raw facts),
+// ./codec.js (slim storage row), ./flag.js (SELLER_SCORING_RAW_FACTS double gate).
 
 /** @typedef {'forced_sale_pressure'|'landlord_fatigue'|'equity_unlock'|'property_burden'|'tax_pain'|'debt_pressure'} ComponentKey */
 
@@ -63,59 +60,40 @@ export const INPUT_MODEL_VERSION = 'raw_facts_v1';
  * @property {{d90:number|null, d180:number|null, d365:number|null}} sell_probability  percent 0–95; heuristic, NOT a calibrated probability until §10 sign-off
  * @property {string} seller_situation                  'FINANCIALLY_PRESSURED'|'FATIGUED_LANDLORD'|'EQUITY_RICH_ABSENTEE'|'INHERITED_PROBATE'|'TAX_DISTRESSED'|'HIGH_REPAIR_BURDEN'|'WEALTH_PRESERVATION'|'NO_CLEAR_SITUATION'
  * @property {string|null} conversation_angle           'SPEED_CERTAINTY'|'AS_IS_NO_REPAIRS'|'TENANT_RELIEF'|'CONVENIENCE'|'TAX_FLEXIBILITY'|'SELLER_FINANCE'|'LEASE_OPTION'|null (null unless evidence supports one)
- * @property {'A'|'B'|'C'|'UNKNOWN'} opportunity_tier   A acute (≥2 hard signals) / B stacked (1 strong + ≥2 supporting, or ≥4 supporting) / C soft / UNKNOWN (coverage too low)
+ * @property {'A'|'B'|'C'|'UNKNOWN'} opportunity_tier   A acute (≥2 hard families, or 1 acute hard signal + equity ≥40%) / B stacked (1 hard + ≥2 supporting, or ≥4 supporting) / C soft / UNKNOWN (coverage too low)
  * @property {string[]} tier_reasons                    evidence codes that decided the tier
  * @property {EvidenceItem[]} evidence
+ * @property {string[]} hard_signal_families           TAX / FORECLOSURE / LEGAL_LIEN / PROBATE / VACANCY / CONDITION that fired
+ * @property {string} weights_version
  * @property {{fields_known:number, fields_total:number, ratio:number, missing:string[]}} coverage
  * @property {number} confidence                        0–1, from coverage + provenance quality
  * @property {{final_acquisition_score:number|null, structured_motivation_score:number|null, tag_distress_score:number|null, deal_strength_score:number|null}} legacy_shadow  comparison only
  */
 
-/**
- * @param {SellerRawFacts} rawFacts
- * @param {{now?: Date|string, legacy?: Object}} [ctx]
- * @returns {SellerSituationResult}
- */
-export function scoreSellerSituationStub(rawFacts, ctx = {}) {
-  const legacy = { ...(rawFacts?.legacy ?? {}), ...(ctx?.legacy ?? {}) };
-  return {
-    score_version: SCORE_VERSION,
-    input_model_version: INPUT_MODEL_VERSION,
-    scored_at: new Date(ctx?.now ?? Date.now()).toISOString(),
-    property_id: rawFacts?.property_id ?? null,
-    components: {
-      forced_sale_pressure: null,
-      landlord_fatigue: null,
-      equity_unlock: null,
-      property_burden: null,
-      tax_pain: null,
-      debt_pressure: null,
-    },
-    sell_probability: { d90: null, d180: null, d365: null },
-    seller_situation: 'NO_CLEAR_SITUATION',
-    conversation_angle: null,
-    opportunity_tier: 'UNKNOWN',
-    tier_reasons: ['STUB'],
-    evidence: [],
-    coverage: { fields_known: 0, fields_total: 0, ratio: 0, missing: [] },
-    confidence: 0,
-    legacy_shadow: {
-      final_acquisition_score: legacy.final_acquisition_score ?? null,
-      structured_motivation_score: legacy.structured_motivation_score ?? null,
-      tag_distress_score: legacy.tag_distress_score ?? null,
-      deal_strength_score: legacy.deal_strength_score ?? null,
-    },
-  };
-}
-
-export const scoreSellerSituation = scoreSellerSituationStub;
-
-/**
- * Batched loader. One query per source table for the whole id list.
- * @param {string[]} propertyIds
- * @param {{ query?: (sql:string, params:any[]) => Promise<{rows:any[]}>, from?: Function }} db
- * @returns {Promise<Map<string, SellerRawFacts>>}
- */
-export async function loadSellerRawFacts(propertyIds, db) { // eslint-disable-line no-unused-vars
-  return new Map();
-}
+export {
+  SCORE_VERSION,
+  INPUT_MODEL_VERSION,
+  WEIGHTS_VERSION,
+  COMPONENTS,
+  EXCLUDED_INPUTS,
+  VENDOR_FLAG_CODES,
+  FACT_FIELDS,
+  CORE_FIELDS,
+  HARD_FAMILIES,
+  SUPPORTING_CODES,
+  STRONG_SUPPORTING_CODES,
+  scoreSellerSituation,
+  buildRawFactsFromRows,
+  parseVendorFlags,
+  resolveSituation,
+  engineMotivationDistress,
+} from './model.js';
+export { loadSellerRawFacts, loaderColumns, MAX_IDS_PER_CALL } from './loader.js';
+export { EVIDENCE_CATALOG, evidenceLabel, whyTargeted } from './evidence-catalog.js';
+export { encodeSellerSituationRow, decodeEvidence, rowBytes, SOURCE_REGISTRY, ROW_COLUMNS } from './codec.js';
+export {
+  SELLER_SCORING_RAW_FACTS_ENV,
+  SELLER_SCORING_RAW_FACTS_CONTROL,
+  primeSellerScoringRawFactsFlag,
+  isSellerScoringRawFactsActive,
+} from './flag.js';
