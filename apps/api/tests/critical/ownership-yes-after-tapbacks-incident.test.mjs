@@ -242,15 +242,13 @@ test("'Removed 👍' is ignored: no reply, no review, nothing suppressed", async
   assert.equal(isInterveningAnswer({ message_body: REMOVED, detected_intent: "unclear" }), false);
 });
 
-test("a lone 👍 tapback on the ownership question is never ownership_confirmed; it earns only the existing confirmation question", async () => {
+test("a lone 👍 tapback ON our ownership question answers it like 'Yes' (owner rule 2026-10-06, round 8)", async () => {
   const ctx = await contextFor([]);
   const r = await classify(LIKE, null, { heuristicOnly: true, conversation_context: ctx });
-  assert.notEqual(r.primary_intent, "ownership_confirmed");
-  assert.equal(r.automation_decision.queue_action, "queue_clarification");
-  assert.equal(r.automation_decision.clarification_use_case, "emoji_confirm_ownership");
-  // No seller text yet: a tapback quotes OUR Spanish words, so the opener language.
+  assert.equal(r.primary_intent, "ownership_confirmed");
+  assert.equal(r.automation_decision.auto_reply_allowed, true);
+  // No seller text: the opener's language.
   assert.equal(r.language, "Spanish");
-  assert.equal(r.reply_language_source, "thread");
 });
 
 test("compliance is untouched: STOP and wrong number after the tapbacks", async () => {

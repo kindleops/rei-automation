@@ -593,6 +593,26 @@ function computeInboundAutomationDecisionRaw({
     });
   }
 
+  // A polite close ("Thanks", "OK, thank you very much") or a retracted
+  // tapback: the classifier already decided no reply and no review. Nothing
+  // goes to a person's queue for it (round 8).
+  const closing_kind = clean(automation_decision?.reply_kind);
+  if (
+    (primary_intent === "acknowledgement" || primary_intent === "reaction_only") &&
+    (closing_kind === "polite_close" || closing_kind === "reaction_removed") &&
+    automation_decision?.human_review_required === false
+  ) {
+    return buildDecisionResult({
+      should_mark_human_review: false,
+      reply_mode: "none",
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: "none",
+      audit_reason: closing_kind,
+    });
+  }
+
   if (
     primary_intent === "reaction_only" ||
     primary_intent === "property_correction" ||
@@ -799,6 +819,14 @@ function applyOwnershipProbeOverlay(decision = {}, args = {}) {
   // This overlay only applies to a PURE property-specific decline.
   const compound = resolveCompoundOpportunitySignal(args.classification || {});
   if (compound.is_compound_opportunity) return decision;
+  // Owner decision 2026-10-06: a bare "No"/"Nope" to the OWNERSHIP question
+  // gets the ONE connection clarifier the classifier authorized; it is not a
+  // property decline to park for 30 days.
+  if (
+    clean(args.classification?.automation_decision?.clarification_use_case) === "ownership_connection_clarifier"
+  ) {
+    return decision;
+  }
 
   const ownership_probe = resolveOwnershipProbeDisinterestTransition({
     classification: args.classification || {},

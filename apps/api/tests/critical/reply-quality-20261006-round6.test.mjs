@@ -78,7 +78,7 @@ const LABELS = {
   "045": { intent: "unclear", outcome: "review" },
   "046": { intent: "latent_interest", outcome: "auto_reply" },
   "047": { intent: "unclear", outcome: "review" },
-  "048": { intent: "sold_property", outcome: "review" },
+  "048": { intent: "sold_property", outcome: "no_reply_by_design" },
   "049": { intent: "unclear", outcome: "review" },
   "050": { intent: "unclear", outcome: "review" },
   "051": { intent: "latent_interest", outcome: "auto_reply" },

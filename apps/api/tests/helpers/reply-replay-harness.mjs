@@ -87,8 +87,8 @@ export async function replayReply(fixture, { catalog = [] } = {}) {
     ? "suppressed"
     : text && !d.should_mark_human_review
       ? "auto_reply"
-      : classification.automation_decision?.reply_kind === "polite_close" || (classification.primary_intent === "not_interested" && !d.should_mark_human_review)
-        ? "no_reply_by_design"
-        : "review";
+      : d.should_mark_human_review
+        ? "review"
+        : "no_reply_by_design";
   return { ctx, classification, result, decision: d, text, outcome, template: result.selected_template || null };
 }
