@@ -69,6 +69,10 @@ export const LANE_POLICY = Object.freeze({
   // price vs recorded off-market investor purchases (backtest, tmp/acq-os/D).
   calibration: Object.freeze({ sfr: 0.1, mf24: 0.15, mf5: 0.12 }),
   defaultMargin: 0.13,
+  // Final defaults per lane: SFR / 2-4 13% (owner starting margin). 5+ 6%: the
+  // v3.1 5+ fee, which reproduces the owner's manual 1311 Conway offer
+  // ($825K = $75K/door on a $92.9K/door investor price). Override per market x lane.
+  defaultMarginByLane: Object.freeze({ sfr: 0.13, mf24: 0.13, mf5: 0.06 }),
   rungHaircut: Object.freeze({ R1: 0, R2: 0.04, R3: 0.06, R4: 0.08, R5: 0.1, R6: 0.15 }),
   confidenceHaircut: Object.freeze([[70, 0], [50, 0.03], [0, 0.06]]),
   sanity: Object.freeze({ minOfferToValue: 0.35, maxOfferToValue: 0.9 }),
@@ -106,7 +110,7 @@ export function resolveMargin({ market = null, lane = 'sfr', env = process.env, 
   const byMarket = Object.entries(cfg).find(([k]) => k !== 'default' && normMarket(k) === normMarket(market));
   if (byMarket && validMargin(byMarket[1]?.[lane])) return { margin: Number(byMarket[1][lane]), source: overrides && byMarket[0] in overrides ? 'outcome_tuned_override' : 'market_lane_config', key: `${byMarket[0]}|${lane}` };
   if (validMargin(cfg.default?.[lane])) return { margin: Number(cfg.default[lane]), source: 'default_lane_config', key: `default|${lane}` };
-  return { margin: policy.defaultMargin, source: 'policy_default', key: `policy|${lane}` };
+  return { margin: policy.defaultMarginByLane?.[lane] ?? policy.defaultMargin, source: 'policy_default', key: `policy|${lane}` };
 }
 
 /**
