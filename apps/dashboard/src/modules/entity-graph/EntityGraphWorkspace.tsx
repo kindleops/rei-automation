@@ -45,6 +45,7 @@ import { EntityGraphRelationshipGraph } from './EntityGraphRelationshipGraph'
 import { EntityGraphTableView } from './EntityGraphTableView'
 import { useBreakpoint } from '../mobile/useBreakpoint'
 import { EntityGraphConsole } from './console/EntityGraphConsole'
+import { EntityGraphDesk } from './desk/EntityGraphDesk'
 import { gestureOf, handleObjectClick } from '../desktop/objects'
 import { egObject } from './eg-objects'
 import './entity-graph.css'
@@ -93,7 +94,20 @@ function ResultSkeleton({ count = 6 }: { count?: number }) {
  * ones — otherwise every mobile page load issues each request twice.
  */
 export function EntityGraphWorkspace(props: EntityGraphWorkspaceProps) {
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isModernDesktop } = useBreakpoint()
+
+  // A desk gets the desk workspace (grid · rail · inspector · relationship
+  // view); phones keep the console exactly as it was.
+  if (isModernDesktop) {
+    return (
+      <EntityGraphDesk
+        themeMode={props.themeMode}
+        universalContext={props.universalContext}
+        onUniversalContextChange={props.onUniversalContextChange}
+        onAction={props.onAction}
+      />
+    )
+  }
 
   if (isMobile) {
     return (
