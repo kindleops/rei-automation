@@ -250,6 +250,15 @@ export function CampaignReachMobile({
   const sim = preview?.build_simulation?.ok ? preview.build_simulation : null
   const partitionMissing = counted && !model && !sim
   const shownReady = model ? (ready ?? 0) : (counted && readyFallback != null ? readyFallback : null)
+  // The headline is what can be texted TODAY (the planner's router per market),
+  // "ready" is secondary: ready sellers in a market with no sender route are not sendable.
+  const sendableToday = sim
+    ? (typeof sim.sendable_after_language === 'number' ? sim.sendable_after_language : typeof sim.sendable_now === 'number' ? sim.sendable_now : null)
+    : null
+  const noRouteHeld = sim
+    ? (typeof sim.no_sender_route_recipients === 'number' ? sim.no_sender_route_recipients : Number(sim.no_sendable_number ?? 0))
+    : 0
+  const headline = !loading && sendableToday != null ? sendableToday : shownReady
   const countedAgo = (() => {
     if (!updatedAt) return null
     const t = new Date(updatedAt).getTime()
@@ -274,13 +283,15 @@ export function CampaignReachMobile({
       </div>
 
       {/* The answer, before the shape is inspected. */}
-      <section className={`crx__summary${stale ? ' is-stale' : ''}${shownReady != null ? '' : ' is-skeleton'}`}>
+      <section className={`crx__summary${stale ? ' is-stale' : ''}${headline != null ? '' : ' is-skeleton'}`}>
         <span className="crx__summary-value">
-          {shownReady != null ? <StageValue value={shownReady} animate={animate} /> : '—'}
+          {headline != null ? <StageValue value={headline} animate={animate} /> : '—'}
         </span>
-        <span className="crx__summary-unit">ready to message</span>
+        <span className="crx__summary-unit">{!loading && sendableToday != null ? 'sendable today' : 'ready to message'}</span>
         <span className="crx__summary-sub">
-          {!loading && sim
+          {!loading && sim && sendableToday != null
+            ? `${nf(sim.ready)} ready${noRouteHeld > 0 ? ` · ${nf(noRouteHeld)} held: no sender route` : ''} · of ${nf(sim.eligible_in_audience ?? 0)} eligible (limit ${nf(sim.requested_limit ?? sim.simulated_limit ?? 0)})`
+            : !loading && sim
             ? `of ${nf(sim.eligible_in_audience ?? 0)} eligible · built exactly as Schedule builds it (limit ${nf(sim.requested_limit ?? sim.simulated_limit ?? 0)})`
             : model && readyPct != null
             ? `${readyPct.toFixed(1)}% of the ${nf(matched)} sellers targeted`

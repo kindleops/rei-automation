@@ -6531,7 +6531,24 @@ export async function planCampaignTargetRows({ campaign = null, options = {}, gr
     ...(rankingV2 ? { comparePriority: rankingV2.compare } : {}),
   })
   if (rankingV2) recipients.sort(rankingV2.compare)
-  const rows = recipients
+  /**
+   * THE SEND LIMIT COUNTS SENDABLE SELLERS FIRST (owner, 2026-10-07). The limit
+   * used to slice the ranked recipients before anyone asked whether a sender
+   * could carry them, so sellers in markets with no route (Baltimore, Tulsa…)
+   * took limit slots: 4,345 eligible -> 783 ready -> 159 sendable today. The
+   * planner's own router (the same per-market chooseTextgridNumber the Composer
+   * cohort, readiness and the launch plan call; exact-market today, approved
+   * regional pools once Sender Routing 2.0 is on) now answers per market BEFORE
+   * the slice: sendable recipients keep their order and fill the limit first;
+   * recipients with no sender route follow (they are built only if the limit
+   * still has room, and are counted either way). A market the router did not
+   * answer (budget, error) is never treated as unsendable.
+   */
+  const sendability = await planRecipientSendability(recipients, deps)
+  const orderedRecipients = sendability.evaluated
+    ? [...recipients.filter((row) => sendability.of(row) !== false), ...recipients.filter((row) => sendability.of(row) === false)]
+    : recipients
+  const rows = orderedRecipients
     .slice(0, limit)
     .map((row, index) => {
       const snapshot = buildTargetSnapshotFromGraphRow(campaign, row, index, options)
@@ -6579,8 +6596,65 @@ export async function planCampaignTargetRows({ campaign = null, options = {}, gr
       limit,
       limited: recipients.length > rows.length,
       entity_review_held: Number(heldByReason.entity_contact_requires_review || 0),
+      ...sendabilitySummary(sendability, recipients, rows),
       ...(rankingV2 ? { ranking_v2: rankingV2.summary } : {}),
     },
+  }
+}
+
+const SENDABILITY_MARKET_KEY = (row = {}) => clean(row.market) || 'Unknown market'
+
+/**
+ * Per market of the recipients: can the planner's router place a first touch
+ * there today? { evaluated, of(row) -> true | false | null, markets }.
+ * Injectable (deps.evaluateRecipientSendability) for tests; an unreadable
+ * router leaves the order untouched (evaluated: false).
+ */
+export async function planRecipientSendability(recipients = [], deps = {}) {
+  const none = { evaluated: false, of: () => null, markets: [] }
+  if (!recipients.length) return none
+  try {
+    const evaluate = typeof deps.evaluateRecipientSendability === 'function'
+      ? deps.evaluateRecipientSendability
+      : (await import('@/lib/domain/campaigns/campaign-launch-readiness.js')).evaluateAudienceSenderCoverage
+    const result = await evaluate(recipients.map((row) => ({ market: row.market, state: row.state })), deps)
+    const markets = Array.isArray(result?.markets) ? result.markets : null
+    if (!markets) return none
+    const byMarket = new Map(markets.map((entry) => [clean(entry.market) || 'Unknown market', entry.sendable === true ? true : entry.sendable === false ? false : null]))
+    return { evaluated: true, of: (row) => (byMarket.has(SENDABILITY_MARKET_KEY(row)) ? byMarket.get(SENDABILITY_MARKET_KEY(row)) : null), markets }
+  } catch {
+    return none
+  }
+}
+
+function sendabilitySummary(sendability, recipients = [], rows = []) {
+  if (!sendability?.evaluated) return { sender_routing_evaluated: false }
+  const byMarket = {}
+  let sendable = 0
+  let noRoute = 0
+  for (const row of recipients) {
+    const verdict = sendability.of(row)
+    if (verdict === false) {
+      noRoute += 1
+      increment(byMarket, SENDABILITY_MARKET_KEY(row))
+    } else if (verdict === true) sendable += 1
+  }
+  const built = { sendable: 0, no_route: 0 }
+  for (const row of rows) {
+    const verdict = sendability.of(row)
+    if (verdict === true && row.target_status === 'ready') built.sendable += 1
+    if (verdict === false) built.no_route += 1
+  }
+  return {
+    sender_routing_evaluated: true,
+    // every recipient (before the limit): the router's answer per market
+    sendable_recipients: sendable,
+    no_sender_route_recipients: noRoute,
+    no_sender_route_by_market: byMarket,
+    // inside the build: ready AND a sender can carry them (the headline), and
+    // no-route rows that only entered because the limit had room left
+    ready_sendable: built.sendable,
+    no_sender_route_in_build: built.no_route,
   }
 }
 

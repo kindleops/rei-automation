@@ -282,6 +282,10 @@ export interface CampaignPreviewResult {
     limited?: boolean
     sendable_now?: number | null
     no_sendable_number?: number | null
+    /** sendable_now minus language holds in sendable markets */
+    sendable_after_language?: number | null
+    /** recipients with no sender route, counted BEFORE the send limit (they never take limit slots) */
+    no_sender_route_recipients?: number | null
     sender_markets?: Array<{ market: string; sellers: number; sendable: boolean | null; summary?: string | null }>
   } | null
   /** A selection that stood for more values than it named (property-type families). */
