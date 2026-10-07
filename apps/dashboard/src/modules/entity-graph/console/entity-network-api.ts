@@ -93,7 +93,7 @@ export interface EntityNetwork {
   propertiesTruncated: number
   debt: { properties: number; totalValue: number | null; totalEquity: number | null; totalLoanBalance: number; monthlyPayment: number | null; withDebt: number; freeAndClear: number; activeLiens: number; taxDelinquent: number; blendedLtv: number | null }
   entities: Array<{ id: string; name: string; kind: HolderKind; kindLabel: string; mailing: string | null }>
-  people: Array<{ id: string; name: string; role: string; primary: boolean; language: string | null; occupation: string | null; householdIncome: string | null; netAssets: string | null; smsEligible: boolean; bestPhone: string | null; bestEmail: string | null }>
+  people: Array<{ id: string; name: string; role: string; primary: boolean; language: string | null; occupation: string | null; householdIncome: string | null; netAssets: string | null; smsEligible: boolean; bestPhone: string | null; bestEmail: string | null; /** Vendor contact-matching tags (prospects.matching_flags), verbatim. Absent on older APIs. */ matchingTags?: string[] }>
   phones: Array<{ id: string; e164: string; display: string; type: string; personId: string | null; score: number | null; active: string | null; wrongNumber: boolean }>
   emails: Array<{ id: string; value: string; personId: string | null }>
   related: Array<{ id: string; name: string; kind: HolderKind; propertyCount: number; value: number | null; mailing: string | null; reasons: Array<'household' | 'cluster' | 'mailing'> }>
