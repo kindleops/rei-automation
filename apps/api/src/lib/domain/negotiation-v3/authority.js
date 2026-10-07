@@ -172,6 +172,8 @@ export function authorityFromOfferAuthority(a = null) {
     investor_price: a.investor_price ?? null,
     confidence_grade: a.confidence_grade ?? null,
     fallback_rung: a.fallback_rung ?? null,
+    fallback_geography: a.fallback_geography === true,
+    noi_corroborated: a.noi_corroborated === true,
     lane: a.lane ?? na.lane ?? null,
     units: pu?.units ?? na.units ?? null,
     per_unit_band: band ? { low: pos(band.low), high: pos(band.high) } : null,

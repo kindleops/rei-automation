@@ -311,12 +311,13 @@ export interface NegotiationV3Desk {
   investorPrice: number | null
   grade: string | null
   fallbackRung: number | null
-  autonomy: { eligible: boolean; reasons: string[] }
+  autonomy: { eligible: boolean; ladderPosition: 'autonomous' | 'proposal_review'; reasons: string[] }
+  anchorFloorPolicy: { discount: number; basis: string; key: string | null; source: string } | null
   perUnit: { units: number; unit_source: string | null; ceiling: number | null; target: number | null; anchor: number | null; autonomous_limit: number | null; anchor_floor: number | null; investor_price: number | null; band_low: number | null; band_high: number | null } | null
   ladder: Array<{ step: number; kind: 'anchor' | 'concession' | 'final_autonomous'; amount: number }>
   authority: { source: string | null; engine_version: string | null; computed_at: string | null; decision_tier: string | null; fresh: boolean; ok: boolean; reasons: string[] }
   strategy: { situation: string | null; angle: string | null; creativeProbe: boolean }
-  nextMove: { action: 'QUOTE' | 'HOLD' | 'HUMAN' | 'CLOSE_UNREALISTIC' | 'NO_NUMBER'; amount: number | null; proposal: number | null; quoteType: string | null; rule: string }
+  nextMove: { action: 'QUOTE' | 'HOLD' | 'HUMAN' | 'CLOSE_UNREALISTIC' | 'NO_NUMBER'; amount: number | null; proposal: number | null; quoteType: string | null; rule: string; reply: { branch: string; text: string } | null }
   why: string[]
   version: string
   configVersion: string

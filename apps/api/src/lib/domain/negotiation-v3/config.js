@@ -10,7 +10,7 @@
 //   I  investor price    D's investor price cluster (entity/LLC off-market purchases), when supplied
 //   AL autonomous limit  R + autonomy_share × (C − R), and ≤ C × (1 − min_reserve_pct)
 //   T  target            min(R, AL)  — "target = D's offer"
-//   AF anchor floor      I × (1 − anchor_floor.discount_from_investor_price)  (none without I)
+//   AF anchor floor      I × (1 − discount[market|lane])  (temporary, configurable; none without I)
 //   O  opening anchor    T × (1 − d),  d = clamp(d_base + Σ adjustments, d_min, d_max); O ≥ AF; O < ask
 //   ladder               O → c1 → c2 → AL, steps = decreasing shares of (AL − O)
 //
@@ -18,12 +18,13 @@
 // repairs are never subtracted again). NEVER BLANK: whenever the authority
 // supplies C and R the plan carries numbers for the operator; only AUTONOMOUS
 // sending is gated, by confidence_grade + fallback_rung (+ authorized, lane).
+// Seller-facing wording is governed by disclosure.js (position-only by default).
 //
 // Pressure / situation (A1) only moves d and the concession multipliers.
 // C, R, T, AL and AF are pressure-INVARIANT (§57) — property-tested.
 
 export const NEGOTIATION_V3_VERSION = "negotiation_engine_v3";
-export const NEGOTIATION_V3_CONFIG_VERSION = "neg_v3_config_2026_10_07b";
+export const NEGOTIATION_V3_CONFIG_VERSION = "neg_v3_config_2026_10_07c";
 
 export const NEGOTIATION_V3_DEFAULTS = Object.freeze({
   // ── §48 AUTONOMOUS LIMIT ─────────────────────────────────────────────────
@@ -41,26 +42,48 @@ export const NEGOTIATION_V3_DEFAULTS = Object.freeze({
   // ask, not the ceiling.
   target_basis: "engine_recommended",
 
-  // ── ANCHOR FLOOR (owner 10-07) — relative to the INVESTOR price ─────────
-  // The anchor is never below I × (1 − 0.25). Owner example: investors buy at
-  // $130K, we're ~$110–115K (C ≈ I × 0.87); the deepest anchor is $97.5K.
-  // Evidence for 0.25: owner instruction ("e.g. −25%"); no outcome data yet.
-  // Without I (prod v2 rows) the anchor is bounded only by d_max below target.
-  anchor_floor: Object.freeze({ basis: "investor_price", discount_from_investor_price: 0.25 }),
-
-  // ── AUTONOMY GATE (owner 10-07) — by GRADE, never by blankness ───────────
-  // A QUOTE leaves without a human only when: authority.authorized, fresh,
-  // confidence_grade ∈ grades, fallback_rung ≤ max_fallback_rung, lane ∈ lanes,
-  // units resolved, no identity conflict — AND both flags on. Everything else
-  // is a HUMAN proposal with the numbers shown. Grades/rungs are D's scale
-  // (CONTRACT_offer_authority.md); ungraded prod-v2 rows fall back to
-  // `authorized` alone ("authorized_only") until D grades them.
-  autonomy: Object.freeze({
-    grades: Object.freeze(["A", "B"]),
-    max_fallback_rung: 1,
-    lanes: Object.freeze(["sfr"]), // MF 2–4 / 5+ stay human until the owner approves
-    ungraded: "authorized_only",
+  // ── ANCHOR FLOOR (owner decision 10-07) — TEMPORARY, per market × lane ──
+  // Max opening discount below the INVESTOR price: AF = I × (1 − discount).
+  // Never universal: resolved per `${market}|${lane}` → per lane → default, and
+  // the value used is recorded in every plan (plan.anchor_floor_policy) and
+  // every logged quote. Default 25% is a TEMPORARY owner placeholder until D's
+  // backtest (actual investor acquisitions vs the investor cluster, by market
+  // and lane) lands — pass it as config.anchor_floor.by_market_lane.
+  // Lanes: sfr | mf24 (2–4) | mf5 (5+). Example key: "Dallas, TX|sfr".
+  anchor_floor: Object.freeze({
+    basis: "investor_price",
+    default_discount: 0.25,
+    by_lane: Object.freeze({}),
+    by_market_lane: Object.freeze({}),
+    source: "temporary_owner_default_2026_10_07",
   }),
+
+  // ── AUTONOMY LADDER (owner decision 10-07, initial) ──────────────────────
+  //   grade A + nearest ring (fallback_rung 0, no fallback geography) → eligible
+  //   grade B → proposal / review (full numbers + pre-populated reply)
+  //   grade C, or a fallback geography → proposal / review
+  // Widen `grades` only after the one-week shadow compares B vs A.
+  // Ungraded rows (prod v2 today) are NOT eligible ("deny").
+  autonomy: Object.freeze({
+    grades: Object.freeze(["A"]),
+    max_fallback_rung: 0,
+    ungraded: "deny",
+  }),
+
+  // ── LANES (owner decision 10-07) — all closed except SFR ────────────────
+  //   sfr   first.
+  //   mf24  opens BEFORE mf5: confirmed unit count, grade A, like-unit-count
+  //         comps, nearest ring, AND lane_backtest_passed["2_4"].
+  //   mf5   operator-approved until its own backtest passes AND (when real
+  //         income data exists) NOI/cap corroboration.
+  lanes: Object.freeze({
+    sfr: Object.freeze({ enabled: true }),
+    mf24: Object.freeze({ enabled: false }),
+    mf5: Object.freeze({ enabled: false }),
+  }),
+  lane_backtest_passed: Object.freeze({ sfr: true, "2_4": false, "5_plus": false }),
+  mf24_min_like_unit_comps: 2,
+  mf5_requires_noi_corroboration: true,
 
   // ── §44 OPENING ANCHOR DEPTH (fraction below T) ──────────────────────────
   // Illustration §45: C 260 / T 225 / ask 245 → 210–220 (d 2–7%). Evidence for

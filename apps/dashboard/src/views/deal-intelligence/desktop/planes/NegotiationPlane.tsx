@@ -12,7 +12,7 @@ import { Figure, Tag } from '../di-ui'
 const ACTION_LABEL: Record<NegotiationV3Desk['nextMove']['action'], string> = {
   QUOTE: 'Quote',
   HOLD: 'Hold position',
-  HUMAN: 'Needs your approval',
+  HUMAN: 'Proposal for your review',
   CLOSE_UNREALISTIC: 'Close politely (too far apart)',
   NO_NUMBER: 'No number yet',
 }
@@ -47,9 +47,9 @@ export function NegotiationPlane({ n }: { n: NegotiationV3Desk }) {
           </div>
           <p className="dr-quiet">
             Ladder {n.ladder.map((r) => money(r.amount)).join(' → ')} · above {money(n.autonomousLimit)} needs your approval
-            {n.anchorFloor != null ? ` · anchor floor ${money(n.anchorFloor)} (investor price ${money(n.investorPrice)})` : ''}
+            {n.anchorFloor != null ? ` · anchor floor ${money(n.anchorFloor)} (investor price ${money(n.investorPrice)} − ${Math.round((n.anchorFloorPolicy?.discount ?? 0) * 100)}%, ${n.anchorFloorPolicy?.basis ?? 'default'})` : ''}
             {pu ? ` · ${pu.units} doors (${pu.unit_source ?? 'source unknown'})` : ''}
-            {pu?.band_low != null ? ` · investor band ${money(pu.band_low)}–${money(pu.band_high)}/door` : ''}
+            {pu?.band_low != null ? ` · investor band ${money(pu.band_low)}–${money(pu.band_high)}/door (internal — never disclosed)` : ''}
           </p>
           {!n.autonomy.eligible ? <p className="dr-quiet">Automation will not send these numbers: {n.autonomy.reasons.join(', ')} <Tag kind="policy">Gate</Tag></p> : null}
         </>
@@ -61,6 +61,7 @@ export function NegotiationPlane({ n }: { n: NegotiationV3Desk }) {
         {nextAmount != null ? <> {money(nextAmount)}{next.proposal != null && next.amount == null ? ' (proposal)' : ''}</> : null}
         {next.quoteType ? ` · ${next.quoteType.replace(/_/g, ' ').toLowerCase()}` : ''} · rule {next.rule}
       </p>
+      {next.reply ? <p className="dr-quiet">Seller would read ({next.reply.branch.replace(/_/g, ' ')}): <q>{next.reply.text}</q></p> : null}
       {n.why.length ? (
         <ul className="dr-quiet" aria-label="Why">
           {n.why.slice(0, 10).map((w, i) => <li key={i}>{w}</li>)}

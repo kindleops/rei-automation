@@ -2,6 +2,7 @@
 begin;
 set local lock_timeout = '5s';
 delete from public.negotiation_quotes where quote_type in ('concession', 'no_number');
+alter table public.negotiation_quotes drop constraint if exists negotiation_quotes_comp_claim_bound;
 alter table public.negotiation_quotes drop constraint if exists negotiation_quotes_autonomous_bound;
 alter table public.negotiation_quotes drop constraint if exists negotiation_quotes_amount_by_type;
 alter table public.negotiation_quotes add constraint negotiation_quotes_amount_by_type check (
@@ -18,6 +19,8 @@ alter table public.negotiation_quotes
   drop column if exists language_branch, drop column if exists score_version,
   drop column if exists negotiation_config_version, drop column if exists negotiation_engine_version,
   drop column if exists per_unit_high, drop column if exists per_unit_low, drop column if exists unit_count,
+  drop column if exists comp_claim_figure, drop column if exists disclosure_policy_version,
+  drop column if exists anchor_floor_basis, drop column if exists anchor_floor_discount,
   drop column if exists per_unit_amount, drop column if exists lane, drop column if exists fallback_rung,
   drop column if exists confidence_grade, drop column if exists investor_price_at_quote,
   drop column if exists previous_lc_amount, drop column if exists anchor_floor_at_quote,

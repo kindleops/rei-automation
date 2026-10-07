@@ -24,6 +24,9 @@ import {
   isOfferReady,
   normalizeAuthority,
   authorityFromOfferAuthority,
+  validateSellerFacing,
+  sellerFacingReply,
+  supportiveComps,
   resolveNegotiationFlags,
   NEGOTIATION_ACTIONS as A,
   QUOTE_TYPES_V3 as Q,
@@ -140,8 +143,9 @@ function genOfferAuthority(r, { mf = false, units = null } = {}) {
     ceiling: blank ? null : C,
     offer: blank ? null : R,
     per_unit: mf && Number.isInteger(units) && units >= 2 ? { units, value: Math.round(I / units), band: { low: round100(bandMid * 0.92), high: round100(bandMid * 1.06) } } : null,
-    confidence_grade: pick(r, ["A", "B", "C", "D", "F", null]),
-    fallback_rung: pick(r, [0, 1, 2, 3, 4, null]),
+    confidence_grade: pick(r, ["A", "A", "A", "B", "C", "D", null]),
+    fallback_rung: pick(r, [0, 0, 0, 1, 2, null]),
+    fallback_geography: r() < 0.1,
     negotiation_authority: {
       asset_family: mf ? "multifamily" : "residential",
       units: mf ? units : 1,
@@ -193,13 +197,13 @@ function simulate(r, plan) {
   const state = { lc_positions: [], seller_positions: [], holds: 0 };
   let ask = plan.seller_ask ?? round100((plan.valuation_mid ?? 200_000) * uni(r, 0.4, 2.2));
   for (let i = 0; i < 8; i += 1) {
-    const kind = i === 0 ? pick(r, ["price", "make_offer", "no_price", "price"]) : pick(r, ["counter", "counter", "counter", "accept", "reject", "capital_gains"]);
+    const kind = i === 0 ? pick(r, ["price", "make_offer", "no_price", "price"]) : pick(r, ["counter", "counter", "counter", "pushback", "accept", "reject", "capital_gains"]);
     const event = { kind, amount: ["price", "counter"].includes(kind) ? ask : null };
     const move = nextNegotiationMove(plan, state, event);
     moves.push({ move, event, state: { ...state, lc_positions: [...state.lc_positions] } });
     if (move.action === A.QUOTE) {
       if (move.quote_type === Q.FORMAL_OFFER) break;
-      state.lc_positions.push(move.amount);
+      if (!state.lc_positions.length || move.amount > Math.max(...state.lc_positions)) state.lc_positions.push(move.amount);
       state.holds = 0;
     } else if (move.action === A.HOLD) {
       state.holds += 1;
@@ -222,11 +226,15 @@ const counters = { plans: 0, ok_plans: 0, moves: 0, quotes: 0, human: 0, comp_la
 
 test(`property: ${N_PLANS} random plans × negotiations — money invariants (prod v2 + D-shaped authorities)`, () => {
   const r = rng(20261007);
-  const GRADES = ["A", "B"];
+  const GRADES = ["A"]; // owner ladder 10-07: only grade A + nearest ring is autonomous
   for (let i = 0; i < N_PLANS; i += 1) {
     const ctx = genCtx(r, { env: ON });
     // MF lanes are human by default; open them in half the MF cases to exercise per-door quotes.
-    if (ctx.property.property_type === "Multi-Family" && r() < 0.5) ctx.config = { autonomy: { lanes: ["sfr", "mf24", "mf5"] } };
+    // Ungraded prod rows are review by default; in half the cases use the legacy fallback to exercise the
+    // money path. MF lanes are closed by default; open them in half the MF cases to exercise per-unit quotes.
+    ctx.config = {};
+    if (r() < 0.5) ctx.config.autonomy = { ungraded: "authorized_only" };
+    if (ctx.property.property_type === "Multi-Family" && r() < 0.5) Object.assign(ctx.config, { lanes: { mf24: { enabled: true }, mf5: { enabled: true } }, lane_backtest_passed: { "2_4": true, "5_plus": true }, mf5_requires_noi_corroboration: false });
     const plan = buildNegotiationPlan(ctx);
     counters.plans += 1;
     const oa = ctx.offer_authority;
@@ -249,7 +257,8 @@ test(`property: ${N_PLANS} random plans × negotiations — money invariants (pr
       if (plan.per_unit) assert.ok(Number.isInteger(plan.per_unit.units) && plan.per_unit.units >= 2);
       if (oa && oa.authorized && oa.fresh && plan.autonomy.eligible) {
         assert.ok(oa.confidence_grade == null || GRADES.includes(oa.confidence_grade), "grade gate");
-        assert.ok(oa.fallback_rung == null || oa.fallback_rung <= 1, "rung gate");
+        assert.ok(oa.fallback_rung == null || oa.fallback_rung === 0, "nearest ring only");
+        assert.notEqual(oa.fallback_geography, true, "no fallback geography");
       }
       if (oa && (!GRADES.includes(oa.confidence_grade) && oa.confidence_grade != null)) assert.equal(plan.autonomy.eligible, false, "low grade never autonomous");
     } else {
@@ -268,15 +277,18 @@ test(`property: ${N_PLANS} random plans × negotiations — money invariants (pr
         if (plan.anchor_floor != null) assert.ok(move.amount >= plan.anchor_floor, "never below investor floor");
         assert.equal(move.requires_log, true);
         assert.ok([Q.NEGOTIATION_ANCHOR, Q.CONCESSION, Q.FORMAL_OFFER].includes(move.quote_type));
-        if (move.language_branch === "comps") {
+        // Disclosure (owner 10-07): position-only by default; comps only on pushback, ≤ our number, verifiable.
+        const check = validateSellerFacing({ text: move.reply.text_en, branch: move.reply.branch, claims: move.reply.claims, quoted_amount: move.reply.quoted_amount, quoted_per_unit: move.reply.quoted_per_unit, plan });
+        assert.ok(check.ok, check.violations.join(","));
+        if (move.reply.branch === "comps_support") {
           counters.comp_lang += 1;
-          assert.ok(move.comp_support.ids.length >= 2, "comp language needs ≥2 supporting comps");
-          for (const p of move.comp_support.prices) assert.ok(p >= move.amount * 0.9 && p <= move.amount * 1.1);
-        }
+          assert.equal(move.rule_branch, "pushback_restate_position", "comp claims only in the pushback branch");
+          assert.ok(move.reply.claims[0].figure <= (move.reply.quoted_per_unit ?? move.amount));
+        } else assert.ok(["position", "position_per_unit"].includes(move.reply.branch));
         if (plan.asset === "multifamily") {
           counters.mf_quotes += 1;
           assert.ok(move.per_unit && move.per_unit.units === plan.per_unit.units && move.per_unit.door * move.per_unit.units <= move.amount);
-          if (move.language_branch === "per_unit") assert.equal(plan.lane, "mf5");
+          assert.equal(move.per_unit.band_low, undefined, "investor band never seller-facing");
         } else assert.equal(move.per_unit, null, "no unit math on SFR");
       } else {
         assert.equal(move.amount, null, "only QUOTE carries an amount");
@@ -285,7 +297,7 @@ test(`property: ${N_PLANS} random plans × negotiations — money invariants (pr
       if (move.action === A.CLOSE_UNREALISTIC) counters.closes += 1;
     }
   }
-  assert.ok(counters.quotes > 600 && counters.ok_plans > 1000, JSON.stringify(counters));
+  assert.ok(counters.quotes > 300 && counters.ok_plans > 1000, JSON.stringify(counters));
   console.log("[nv3 property]", JSON.stringify(counters));
 });
 
@@ -294,10 +306,10 @@ test("property: our numbers never go down; anchor below the ask; non-uniform con
   let sequences = 0;
   let nonUniform = 0;
   for (let i = 0; i < N_PLANS; i += 1) {
-    const plan = buildNegotiationPlan(genCtx(r, { mf: false, corrupt: null, d: false }));
+    const plan = buildNegotiationPlan({ ...genCtx(r, { mf: false, corrupt: null, d: false }), config: { autonomy: { ungraded: "authorized_only" } } });
     if (!plan.ok) continue;
     const moves = simulate(r, plan);
-    const ours = moves.filter((m) => m.move.action === A.QUOTE && m.move.quote_type !== Q.FORMAL_OFFER).map((m) => m.move.amount);
+    const ours = moves.filter((m) => m.move.action === A.QUOTE && m.move.quote_type !== Q.FORMAL_OFFER && m.move.rule_branch !== "pushback_restate_position").map((m) => m.move.amount);
     for (let k = 1; k < ours.length; k += 1) assert.ok(ours[k] > ours[k - 1], "monotone LC positions");
     const first = moves.find((m) => m.move.quote_type === Q.NEGOTIATION_ANCHOR);
     if (first?.event.amount != null) assert.ok(first.move.amount < first.event.amount, "anchor below the ask");
@@ -341,7 +353,7 @@ test("property: no unit math without a valid unit count", () => {
   const r = rng(54);
   for (let i = 0; i < N_PLANS; i += 1) {
     const ctx = genCtx(r, { mf: true, corrupt: null, d: false });
-    ctx.config = { autonomy: { lanes: ["sfr", "mf24", "mf5"] } };
+    ctx.config = { lanes: { mf24: { enabled: true }, mf5: { enabled: true } }, lane_backtest_passed: { "2_4": true, "5_plus": true }, mf5_requires_noi_corroboration: false };
     const plan = buildNegotiationPlan(ctx);
     const u = [ctx.property.units_count, ctx.ade_snapshot.evidence.subject.normalized_features.units].filter((x) => x != null);
     const valid = u.length > 0 && u.every((x) => Number.isInteger(x) && x >= 2) && new Set(u).size === 1;
@@ -359,7 +371,7 @@ test("property: logged BEFORE send, and a logging failure blocks the send", asyn
   const r = rng(11);
   let checked = 0;
   for (let i = 0; i < 1500; i += 1) {
-    const plan = buildNegotiationPlan(genCtx(r, { mf: false, corrupt: null, d: false }));
+    const plan = buildNegotiationPlan({ ...genCtx(r, { mf: false, corrupt: null, d: false }), config: { autonomy: { ungraded: "authorized_only" } } });
     if (!plan.ok) continue;
     const move = nextNegotiationMove(plan, {}, { kind: "price", amount: plan.target + 25_000 });
     if (!(move.action === A.QUOTE || move.quote_type === Q.NO_NUMBER)) continue;
@@ -392,7 +404,10 @@ test("property: logged BEFORE send, and a logging failure blocks the send", asyn
 test("log row: refuses money above AL / without template / without authority; anchor ≠ formal offer", () => {
   const plan = buildNegotiationPlan(illustrative({ ask: 245_000 }));
   const ids = { thread_key: "t", inbound_message_event_id: "e", language: "English", template_id: "tpl" };
-  const mk = (amount, quote_type = Q.NEGOTIATION_ANCHOR) => ({ action: A.QUOTE, amount, quote_type, rule_branch: "r", requires_log: true });
+  const mk = (amount, quote_type = Q.NEGOTIATION_ANCHOR) => {
+    const m = { action: A.QUOTE, amount, quote_type, rule_branch: "r", requires_log: true, language_branch: "position" };
+    return { ...m, reply: sellerFacingReply(plan, m) };
+  };
   assert.throws(() => buildQuoteLogRow(plan, mk(plan.autonomous_limit + 1000), ids), /above_autonomous_limit/);
   assert.throws(() => buildQuoteLogRow(plan, mk(200_000), { thread_key: "t" }), /template_and_language/);
   assert.throws(() => buildQuoteLogRow({ ...plan, ok: false }, mk(200_000), ids), /without_authority/);
@@ -427,6 +442,7 @@ function illustrative({ ask = 245_000, situation = null, condition = "dated" } =
     situation,
     now: NOW,
     env: ON,
+    config: { autonomy: { ungraded: "authorized_only" } },
   };
 }
 
@@ -507,10 +523,16 @@ test("golden 1311 Conway 274574569 (MF 5+, 11 doors; owner offered $825K): real 
   const m = nextNegotiationMove(plan, {}, { kind: "make_offer" });
   assert.equal(m.action, A.HUMAN);
   assert.equal(m.proposal.amount, 829_000);
-  assert.deepEqual(m.proposal.per_unit, { units: 11, door: 75_000, band_low: 93_000, band_high: 103_000 });
-  assert.equal(m.language_branch, "per_unit");
+  assert.deepEqual(m.proposal.per_unit, { units: 11, door: 75_000 });
+  // Disclosure (owner 10-07): position-only — the $93–103K investor band is NEVER volunteered.
+  assert.equal(m.proposal.reply.branch, "position_per_unit");
+  assert.equal(m.proposal.reply.text_en, "Based on the building, the condition and the numbers, we'd need to be around $75K a unit to make it work.");
+  assert.ok(!/93|103/.test(m.proposal.reply.text_en));
+  assert.ok(m.proposal.reply.claims.length === 0);
+  assert.equal(plan.anchor_floor_policy.discount, 0.25);
+  assert.equal(plan.anchor_floor_policy.basis, "default_temporary");
   // If D authorizes it at grade A AND the owner opens the MF 5+ lane: an autonomous per-door anchor.
-  const open = buildNegotiationPlan({ offer_authority: { ...dMerged["274574569"], authorized: true, confidence_grade: "A", fallback_rung: 0 }, property, seller: { condition: "dated" }, now: NOW, env: ON, config: { autonomy: { lanes: ["sfr", "mf5"] } } });
+  const open = buildNegotiationPlan({ offer_authority: { ...dMerged["274574569"], authorized: true, confidence_grade: "A", fallback_rung: 0 }, property, seller: { condition: "dated" }, now: NOW, env: ON, config: { lanes: { mf24: { enabled: true }, mf5: { enabled: true } }, lane_backtest_passed: { "2_4": true, "5_plus": true }, mf5_requires_noi_corroboration: false } });
   const q = nextNegotiationMove(open, {}, { kind: "make_offer" });
   assert.equal(q.action, A.QUOTE);
   assert.equal(q.per_unit.door, 75_000);
@@ -532,7 +554,7 @@ test("golden 627 Ontario 273586189 (MF label, units = 1): numbers shown, low gra
   for (const lane of ["sfr", "mf24"]) {
     const p = buildNegotiationPlan({ offer_authority: { ...viaD(golden["273586189"]), lane, confidence_grade: "D", fallback_rung: 3 }, property, seller: { asking_price: 300_000, condition: "ok" }, now: NOW, env: ON });
     assert.equal(p.ok, true);
-    assert.ok(p.autonomy.reasons.includes("grade_D_not_autonomous"));
+    assert.ok(p.autonomy.reasons.includes("grade_D_review"));
     const m = nextNegotiationMove(p, {}, { kind: "price", amount: 300_000 });
     assert.notEqual(m.action, A.QUOTE);
     assert.equal(m.amount, null);
@@ -555,20 +577,30 @@ test("golden Houston SFR 2131325199 (prod v2 AUTO_HARD_OFFER): no value−repair
   assert.equal(plan.ok, true);
   assert.deepEqual([plan.ceiling, plan.autonomous_limit, plan.target, plan.anchor_floor], [69_400, 61_000, 53_000, null]);
   const m = nextNegotiationMove(plan, {}, { kind: "price", amount: 95_000 });
-  assert.equal(m.action, A.QUOTE); // ungraded v2 row: autonomy = authorized_only
-  assert.equal(m.amount, 47_500);
-  assert.equal(m.language_branch, "numbers");
+  assert.equal(m.action, A.HUMAN); // ungraded v2 row ⇒ proposal / review (owner ladder 10-07)
+  assert.equal(m.proposal.amount, 47_500);
+  assert.equal(m.proposal.reply.text_en, "Based on the condition and the numbers, we'd need to be around $47,500 to make it work.");
+  const legacy = buildNegotiationPlan({ ...ctx, config: { autonomy: { ungraded: "authorized_only" } } });
+  assert.equal(nextNegotiationMove(legacy, {}, { kind: "price", amount: 95_000 }).action, A.QUOTE);
   assert.deepEqual(plan.ladder.map((x) => x.amount), [47_500, 53_500, 57_500, 61_000]);
-  assert.equal(nextNegotiationMove(buildNegotiationPlan({ ...ctx, env: {} }), {}, { kind: "price", amount: 95_000 }).action, A.HUMAN); // flags default OFF
+  assert.equal(nextNegotiationMove(buildNegotiationPlan({ ...ctx, env: {}, config: { autonomy: { ungraded: "authorized_only" } } }), {}, { kind: "price", amount: 95_000 }).action, A.HUMAN); // flags default OFF
 });
 
-test("golden Houston SFR 2130847744 (D merged shadow): investor floor binds; grade B autonomous, grade D human", () => {
+test("golden Houston SFR 2130847744 (D merged shadow): investor floor binds; grade A + nearest ring autonomous, B / D / fallback geography review", () => {
   const ctx = { property: { property_type: "Single Family" }, seller: { asking_price: 230_000, condition: "dated" }, now: NOW, env: ON };
   const base = buildNegotiationPlan({ ...ctx, offer_authority: dMerged["2130847744"] });
   assert.deepEqual([base.ceiling, base.target, base.autonomous_limit, base.anchor_floor, base.opening_anchor], [186_244, 167_000, 176_000, 157_000, 157_000]);
   assert.equal(nextNegotiationMove(base, {}, { kind: "price", amount: 230_000 }).action, A.HUMAN); // shadow: not authorized
-  const b = buildNegotiationPlan({ ...ctx, offer_authority: { ...dMerged["2130847744"], authorized: true, confidence_grade: "B", fallback_rung: 1 } });
-  assert.equal(nextNegotiationMove(b, {}, { kind: "price", amount: 230_000 }).amount, 157_000);
+  const a = buildNegotiationPlan({ ...ctx, offer_authority: { ...dMerged["2130847744"], authorized: true, confidence_grade: "A", fallback_rung: 0 } });
+  assert.equal(nextNegotiationMove(a, {}, { kind: "price", amount: 230_000 }).amount, 157_000);
+  const b = buildNegotiationPlan({ ...ctx, offer_authority: { ...dMerged["2130847744"], authorized: true, confidence_grade: "B", fallback_rung: 0 } });
+  const mb = nextNegotiationMove(b, {}, { kind: "price", amount: 230_000 });
+  assert.equal(mb.action, A.HUMAN);
+  assert.equal(mb.proposal.reply.text_en, "Based on the condition and the numbers, we'd need to be around $157K to make it work."); // pre-populated
+  const fg = buildNegotiationPlan({ ...ctx, offer_authority: { ...dMerged["2130847744"], authorized: true, confidence_grade: "A", fallback_rung: 0, fallback_geography: true } });
+  assert.ok(fg.autonomy.reasons.includes("fallback_geography_review"));
+  const market = buildNegotiationPlan({ ...ctx, property: { property_type: "Single Family", market: "Houston, TX" }, offer_authority: dMerged["2130847744"], config: { anchor_floor: { by_market_lane: { "Houston, TX|sfr": 0.15 } } } });
+  assert.deepEqual([market.anchor_floor_policy.discount, market.anchor_floor_policy.basis, market.anchor_floor], [0.15, "market_lane", 178_000]);
   const d = buildNegotiationPlan({ ...ctx, offer_authority: { ...dMerged["2130847744"], authorized: true, confidence_grade: "D", fallback_rung: 3 } });
   assert.equal(d.ok, true);
   assert.equal(d.target, 167_000, "same numbers at a low grade");
@@ -582,43 +614,66 @@ test("planLadder: shares 0.45/0.30/0.25, ends at AL, empty when anchor > AL", ()
   assert.deepEqual(planLadder({ anchor: 250_000, autonomous_limit: 240_000 }), []);
 });
 
-test("property: comp language only with verified support (dense comps near the number)", () => {
+test("property: disclosure — comps only on pushback, only truthful + supportive, never a figure above our number", () => {
   const r = rng(404);
   let comps = 0;
-  let numbers = 0;
+  let positionOnPushback = 0;
   for (let i = 0; i < N_PLANS; i += 1) {
-    const ctx = genCtx(r, { mf: false, corrupt: null, d: false });
+    const ctx = { ...genCtx(r, { mf: false, corrupt: null, d: false }), config: { autonomy: { ungraded: "authorized_only" } } };
     const plan0 = buildNegotiationPlan(ctx);
     if (!plan0.ok) continue;
-    const near = r() < 0.5;
-    ctx.ade_snapshot.evidence.selected_comps = Array.from({ length: Math.floor(uni(r, 0, 6)) }, (_, k) => ({
+    const below = r() < 0.5; // comps mostly at/below our number vs mostly above it
+    ctx.ade_snapshot.evidence.selected_comps = Array.from({ length: Math.floor(uni(r, 0, 7)) }, (_, k) => ({
       comp_id: `n${k}`,
-      sale_price: round100(plan0.target * (near ? uni(r, 0.85, 1.15) : uni(r, 1.5, 2.5))),
+      sale_price: round100(plan0.ladder_anchor * (below ? uni(r, 0.7, 1.02) : uni(r, 0.95, 1.8))),
       distance_miles: uni(r, 0, 1.4),
       sale_date: new Date(NOW - uni(r, 0, 420) * 86_400_000).toISOString().slice(0, 10),
       source: pick(r, ["public_record_sold", "mls_sold", "bulk_portfolio"]),
     }));
     const plan = buildNegotiationPlan(ctx);
-    for (const { move } of simulate(r, plan)) {
-      if (move.action !== A.QUOTE) continue;
-      if (move.language_branch === "comps") {
+    const state = { lc_positions: [plan.ladder_anchor], seller_positions: [] };
+    for (const kind of ["pushback", "counter", "price"]) {
+      const m = nextNegotiationMove(plan, state, { kind, amount: kind === "pushback" ? null : round100(plan.target * 1.3) });
+      const reply = m.reply || m.proposal?.reply;
+      if (!reply) continue;
+      const check = validateSellerFacing({ text: reply.text_en, branch: reply.branch, claims: reply.claims, quoted_amount: reply.quoted_amount, quoted_per_unit: reply.quoted_per_unit, plan });
+      assert.ok(check.ok, check.violations.join(","));
+      if (reply.branch === "comps_support") {
         comps += 1;
-        assert.ok(move.comp_support.ids.length >= 2);
-        const used = ctx.ade_snapshot.evidence.selected_comps.filter((c) => move.comp_support.ids.includes(c.comp_id));
-        for (const c of used) {
-          assert.ok(c.sale_price >= move.amount * 0.9 && c.sale_price <= move.amount * 1.1, "comp within ±10%");
-          assert.ok(c.distance_miles <= 1.0 && !/portfolio|bulk/.test(c.source), "comp nearby, not a package");
-        }
-      } else numbers += 1;
+        assert.equal(kind, "pushback", "comp claims only in the pushback branch");
+        const used = ctx.ade_snapshot.evidence.selected_comps.filter((c) => reply.claims[0].evidence_ids.includes(c.comp_id));
+        assert.ok(used.length >= 2);
+        for (const c of used) assert.ok(c.sale_price <= reply.quoted_amount && c.distance_miles <= 1.0 && !/bulk|portfolio/.test(c.source), "cited comps are real, nearby, at or below our number");
+        // Not cherry-picked: the median of ALL qualifying comps is at or below our number.
+        const pool = plan.screened_comps.map((c) => c.sale_price).sort((x, y) => x - y);
+        assert.ok(pool[Math.floor((pool.length - 1) / 2)] <= reply.quoted_amount);
+      } else if (kind === "pushback") positionOnPushback += 1;
     }
   }
-  assert.ok(comps > 200 && numbers > 200, `${comps}/${numbers}`);
+  assert.ok(comps > 100 && positionOnPushback > 100, `${comps}/${positionOnPushback}`);
+});
+
+test("disclosure validator: rejects bands above our number, market talk outside pushback, unverifiable claims", () => {
+  const plan = buildNegotiationPlan({ offer_authority: dMerged["274574569"], property: { property_type: "Multi-Family", units_count: 11 }, seller: { condition: "dated" }, now: NOW, env: ON });
+  const base = { branch: "position_per_unit", claims: [], quoted_amount: 829_000, quoted_per_unit: 75_000, plan };
+  assert.equal(validateSellerFacing({ ...base, text: "Based on the building, the condition and the numbers, we'd need to be around $75K a unit to make it work." }).ok, true);
+  const leak = validateSellerFacing({ ...base, text: "Similar buildings are trading around $93K–$103K a door; we'd likely be around $75K a door." });
+  assert.equal(leak.ok, false);
+  assert.ok(leak.violations.some((v) => /above_quoted/.test(v)) && leak.violations.includes("market_language_outside_pushback_branch"));
+  assert.equal(validateSellerFacing({ ...base, text: "Nearby sales support $70K a unit." }).ok, false); // market talk outside pushback
+  assert.ok(validateSellerFacing({ ...base, claims: [{ figure: 70_000, evidence_ids: ["x"], evidence_prices: [70_000] }], text: "we'd need $75K a unit" }).violations.includes("comp_claim_outside_pushback_branch"));
+  const fake = validateSellerFacing({ ...base, branch: "comps_support", claims: [{ figure: 70_000, evidence_ids: ["not-a-real-comp"], evidence_prices: [70_000] }], text: "comparable buildings nearby recently sold around $70K a unit" });
+  assert.ok(fake.violations.includes("claim_evidence_not_verifiable"));
+  // The plan knows the band (operator), the seller-facing reply never carries it.
+  assert.equal(plan.per_unit.band_low, 93_000);
+  assert.equal(supportiveComps(plan, 829_000).allowed, false);
 });
 
 test("Deal Intelligence desk view (§82): numbers + grade + why always; autonomy shown separately", async () => {
   const { buildNegotiationDeskView } = await import("../../src/lib/domain/negotiation-v3/view.js");
   const v = buildNegotiationDeskView({ ade_snapshot: golden["2131325199"], property: { property_type: "Single Family" }, seller: { asking_price: 95_000, condition: "dated" }, quotes: [{ quote_type: "anchor", amount: 47_500, quoted_at: "2026-10-07T01:00:00Z", rule_branch: "opening_anchor_vs_ask" }], now: NOW, env: {} });
-  assert.equal(v.status, "autonomous_eligible");
+  assert.equal(v.status, "operator_approval"); // ungraded prod row ⇒ review
+  assert.equal(v.nextMove.reply.branch, "position");
   assert.deepEqual([v.ask, v.anchor, v.currentPosition.amount, v.target, v.autonomousLimit, v.ceiling], [95_000, 47_500, 47_500, 53_000, 61_000, 69_400]);
   assert.equal(v.nextMove.action, "HUMAN"); // flags off ⇒ proposal only
   assert.ok(v.why.length >= 5);
@@ -627,7 +682,7 @@ test("Deal Intelligence desk view (§82): numbers + grade + why always; autonomy
   assert.equal(conway.target, 864_000);
   assert.equal(conway.perUnit.band_low, 93_000);
   assert.equal(conway.quotesCaptured, false);
-  assert.ok(conway.autonomy.reasons.includes("lane_mf5_is_human"));
+  assert.ok(conway.autonomy.reasons.includes("lane_mf5_closed"));
 });
 
 test("quote log row columns ⊆ PROPOSED negotiation_quotes columns (no phantom column)", () => {
@@ -635,6 +690,17 @@ test("quote log row columns ⊆ PROPOSED negotiation_quotes columns (no phantom 
     .map((f) => readFileSync(new URL(`../../../../supabase/migrations/${f}`, import.meta.url), "utf8"))
     .join("\n");
   const plan = buildNegotiationPlan(illustrative({ ask: 245_000 }));
-  const row = buildQuoteLogRow(plan, { action: A.QUOTE, amount: 213_000, quote_type: Q.NEGOTIATION_ANCHOR, rule_branch: "r", requires_log: true, per_unit: null }, { thread_key: "t", language: "English", template_id: "tpl" });
+  const mv = { action: A.QUOTE, amount: 213_000, quote_type: Q.NEGOTIATION_ANCHOR, rule_branch: "r", requires_log: true, per_unit: null, language_branch: "position" };
+  const row = buildQuoteLogRow(plan, { ...mv, reply: sellerFacingReply(plan, mv) }, { thread_key: "t", language: "English", template_id: "tpl" });
   for (const col of Object.keys(row)) assert.ok(new RegExp(`\\b${col}\\b\\s+(text|numeric|integer|jsonb|uuid|timestamptz)`).test(sql), `column ${col} missing from PROPOSED SQL`);
+});
+
+test("disclosure blocks the send: a rendered text leaking a figure above our number never logs or sends", async () => {
+  const plan = buildNegotiationPlan(illustrative({ ask: 245_000 }));
+  const move = nextNegotiationMove(plan, {}, { kind: "price", amount: 245_000 });
+  assert.equal(move.action, A.QUOTE);
+  const ids = { thread_key: "t", inbound_message_event_id: "e", language: "English", template_id: "tpl", rendered_text: "Homes nearby sell for $260K, but we'd need to be around $213K." };
+  const res = await logQuoteThenSend({ supabase: {}, plan, move, ids, send: () => assert.fail("sent"), record: async () => assert.fail("logged") });
+  assert.equal(res.sent, false);
+  assert.match(res.reason, /disclosure_violation/);
 });

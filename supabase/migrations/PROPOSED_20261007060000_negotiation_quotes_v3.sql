@@ -12,7 +12,8 @@
 -- versions, seller-situation score_version, language branch, situation /
 -- market / condition evidence, human approval.
 -- DB invariant (automated rows): amount ≤ autonomous_limit_at_quote ≤ max_offer_at_quote,
--- unless a human approved it (approved_by). Additive. Rollback: _rollback.sql.
+-- unless a human approved it (approved_by); a comp claim figure is never above the amount.
+-- Additive. Rollback: _rollback.sql.
 
 begin;
 set local lock_timeout = '5s';
@@ -27,9 +28,13 @@ alter table public.negotiation_quotes
   add column if not exists lane                       text,      -- sfr | mf24 | mf5
   add column if not exists previous_lc_amount         numeric,
   add column if not exists unit_count                 integer check (unit_count is null or unit_count >= 2),
-  add column if not exists per_unit_amount            numeric,   -- "we'd likely be around $Z a door"
-  add column if not exists per_unit_low               numeric,   -- authority investor per-door band quoted
+  add column if not exists per_unit_amount            numeric,   -- "we'd need to be around $Z a unit" (our position only)
+  add column if not exists per_unit_low               numeric,   -- reserved; investor bands are never disclosed (owner 10-07)
   add column if not exists per_unit_high              numeric,
+  add column if not exists anchor_floor_discount      numeric,   -- the max opening discount used (temporary, per market × lane)
+  add column if not exists anchor_floor_basis         text,      -- market_lane:<key> | lane:<lane> | default_temporary
+  add column if not exists disclosure_policy_version  text,      -- seller-facing disclosure policy the reply passed
+  add column if not exists comp_claim_figure          numeric,   -- pushback-only comp figure (≤ amount), with comp_ids as its evidence
   add column if not exists negotiation_engine_version text,
   add column if not exists negotiation_config_version text,
   add column if not exists score_version              text,      -- seller-situation model (never a price input)
@@ -54,6 +59,11 @@ alter table public.negotiation_quotes add constraint negotiation_quotes_amount_b
 -- Autonomy bound: an automated v3 number never exceeds the autonomous limit
 -- recorded with it unless a human approved it. Rows without the v3 columns
 -- (Autopilot v2 writer) are unaffected.
+alter table public.negotiation_quotes drop constraint if exists negotiation_quotes_comp_claim_bound;
+alter table public.negotiation_quotes add constraint negotiation_quotes_comp_claim_bound check (
+  comp_claim_figure is null or (amount is not null and cardinality(comp_ids) >= 2 and comp_claim_figure <= coalesce(per_unit_amount, amount))
+);
+
 alter table public.negotiation_quotes drop constraint if exists negotiation_quotes_autonomous_bound;
 alter table public.negotiation_quotes add constraint negotiation_quotes_autonomous_bound check (
   autonomous_limit_at_quote is null

@@ -54,6 +54,17 @@ for (const row of rows) {
   const key = `${first.action}:${first.rule_branch}`;
   summary.by_first_move[key] = (summary.by_first_move[key] || 0) + 1;
 }
+// Autonomy ladder split (owner 10-07): position + reason, and the legacy ungraded fallback for comparison.
+summary.ladder = { autonomous: 0, proposal_review: 0, no_numbers: 0, legacy_authorized_only_autonomous: 0, top_reasons: {} };
+for (const row of rows) {
+  const property = { property_type: row.asset_family === "multifamily" ? "Multi-Family" : "Single Family", units_count: row.units != null ? Number(row.units) : null };
+  const p = buildNegotiationPlan({ ade_snapshot: row, property, seller: {}, now, env });
+  if (!p.ok) summary.ladder.no_numbers += 1;
+  else summary.ladder[p.autonomy.ladder_position] += 1;
+  for (const r of p.autonomy?.reasons || []) summary.ladder.top_reasons[r] = (summary.ladder.top_reasons[r] || 0) + 1;
+  const legacy = buildNegotiationPlan({ ade_snapshot: row, property, seller: {}, now, env, config: { autonomy: { ungraded: "authorized_only" } } });
+  if (legacy.ok && legacy.autonomy.eligible) summary.ladder.legacy_authorized_only_autonomous += 1;
+}
 summary.al_to_c = { p10: pct(summary.al_to_c, 0.1), p50: pct(summary.al_to_c, 0.5), p90: pct(summary.al_to_c, 0.9) };
 summary.anchor_to_target = { p10: pct(summary.anchor_to_target, 0.1), p50: pct(summary.anchor_to_target, 0.5), p90: pct(summary.anchor_to_target, 0.9) };
 summary.timing_ms = {

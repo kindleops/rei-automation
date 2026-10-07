@@ -33,7 +33,8 @@ export function buildNegotiationDeskView({ ade_snapshot = null, offer_authority 
     lane: plan.lane,
     grade: plan.authority.confidence_grade,
     fallbackRung: plan.authority.fallback_rung,
-    autonomy: { eligible: plan.autonomy.eligible, reasons: plan.autonomy.reasons },
+    autonomy: { eligible: plan.autonomy.eligible, ladderPosition: plan.autonomy.ladder_position, reasons: plan.autonomy.reasons },
+    anchorFloorPolicy: plan.anchor_floor_policy || null,
     perUnit: plan.per_unit,
     ladder: plan.ladder.map((r) => ({ step: r.step, kind: r.kind, amount: r.amount })),
     authority: plan.authority,
@@ -44,6 +45,10 @@ export function buildNegotiationDeskView({ ade_snapshot = null, offer_authority 
       proposal: preview.proposal?.amount ?? null,
       quoteType: preview.quote_type || preview.proposal?.quote_type || null,
       rule: preview.rule_branch,
+      // The seller-facing reply (position-only by default), pre-populated for review.
+      reply: (preview.reply || preview.proposal?.reply)
+        ? { branch: (preview.reply || preview.proposal.reply).branch, text: (preview.reply || preview.proposal.reply).text_en }
+        : null,
     },
     why: plan.explain.map((e) => e.text),
     version: plan.version,

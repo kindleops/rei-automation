@@ -11,7 +11,7 @@ export {
   guardMove,
   computeAnchor,
   planLadder,
-  compSupportFor,
+  resolveAnchorFloorPolicy,
   resolvePlanAsset,
   resolveStrategy,
   resolveAutonomy,
@@ -33,6 +33,7 @@ export {
   AUTHORITY_SOURCES,
   AUTHORITY_REASONS,
 } from "./authority.js";
+export { sellerFacingReply, supportiveComps, validateSellerFacing, displayMoney, REFERENCE_WORDING_EN, DISCLOSURE_RULES, DISCLOSURE_POLICY_VERSION } from "./disclosure.js";
 export { buildQuoteLogRow, logQuoteThenSend, summarizeNegotiationQuotes, PERSISTED_QUOTE_TYPES } from "./quote-log.js";
 export {
   NEGOTIATION_ENGINE_V3_FLAG,

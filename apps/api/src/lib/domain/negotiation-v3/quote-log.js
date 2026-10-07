@@ -8,6 +8,7 @@
 
 import { recordNegotiationQuote } from "@/lib/domain/seller-flow/negotiation-quotes.js";
 import { NEGOTIATION_ACTIONS, QUOTE_TYPES_V3 } from "./plan.js";
+import { validateSellerFacing } from "./disclosure.js";
 
 /** v3 type → persisted quote_type (anchor / formal_offer keep the 10-06 values). */
 export const PERSISTED_QUOTE_TYPES = Object.freeze({
@@ -53,7 +54,15 @@ export function buildQuoteLogRow(plan, move, ids = {}) {
   }
   const event = clean(ids.inbound_message_event_id) || "no_event";
   const quote_key = `nv3:${thread_key}:${event}:${quote_type}:${amount ?? 0}`;
-  const comp = move.language_branch === "comps" ? move.comp_support || null : null;
+  // Disclosure gate (owner 10-07): the reply must pass validateSellerFacing before it is logged/sent.
+  if (amount != null) {
+    if (!move.reply) throw new Error("negotiation_v3_amount_without_disclosure_reply");
+    const text = ids.rendered_text ?? move.reply.text_en;
+    const check = validateSellerFacing({ text, branch: move.reply.branch, claims: move.reply.claims, quoted_amount: move.reply.quoted_amount, quoted_per_unit: move.reply.quoted_per_unit, plan });
+    if (!check.ok) throw new Error(`negotiation_v3_disclosure_violation:${check.violations.join("|")}`);
+  }
+  const claim = move.reply?.branch === "comps_support" ? move.reply.claims?.[0] || null : null;
+  const comp = claim ? { ids: claim.evidence_ids, prices: claim.evidence_prices } : null;
   return {
     quote_key,
     quote_type,
@@ -70,9 +79,13 @@ export function buildQuoteLogRow(plan, move, ids = {}) {
     lane: plan?.lane ?? null,
     previous_lc_amount: num(ids.previous_lc_amount),
     unit_count: move.per_unit?.units ?? null,
-    per_unit_amount: move.per_unit?.door ?? null, // "we'd likely be around $Z a door"
-    per_unit_low: move.per_unit?.band_low ?? null, // "similar buildings … $X–Y a door" (authority band)
-    per_unit_high: move.per_unit?.band_high ?? null,
+    per_unit_amount: move.per_unit?.door ?? null, // "we'd need to be around $Z a unit"
+    per_unit_low: null, // investor bands are never disclosed to the seller (owner 10-07)
+    per_unit_high: null,
+    anchor_floor_discount: plan?.anchor_floor_policy?.discount ?? null,
+    anchor_floor_basis: plan?.anchor_floor_policy ? `${plan.anchor_floor_policy.basis}${plan.anchor_floor_policy.key ? `:${plan.anchor_floor_policy.key}` : ""}` : null,
+    disclosure_policy_version: move.reply?.policy_version ?? null,
+    comp_claim_figure: claim?.figure ?? null,
     engine: plan?.authority?.source || "acquisition_decision_engine",
     engine_version: plan?.authority?.engine_version ?? null,
     negotiation_engine_version: move.engine_version || plan?.version || null,
