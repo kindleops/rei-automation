@@ -417,6 +417,30 @@ export function isNurtureFollowUpRow(row = {}) {
   return lower(row?.type) === "followup" && lower(row?.use_case_template).startsWith("nurture_");
 }
 
+/**
+ * Reasons that end the relationship: opt-out / DNC / wrong number / not the
+ * owner / suppression. Only these may cancel a nurture follow-up.
+ */
+const NURTURE_TERMINAL_CANCEL_REASON =
+  /(stop|dnc|do_not_contact|opt[_ -]?out|unsubscrib|wrong[_ -]?number|not[_ -]?owner|tenant|bad[_ -]?contact|suppress|litigat|deceased|compliance)/i;
+
+/**
+ * Does this cancel_pending_queue call spare nurture follow-ups?
+ *
+ * 2026-10-07 (prod 083f768d): the stored `automation_rules` row for
+ * stage.not_interested_cold predates `keep_nurture_follow_ups` and its
+ * `actions` replace the code default (hydrateRule), so the flag never reached
+ * this action and every 30-day check-back was cancelled ~5s after it was
+ * scheduled. The rule cannot depend on a stored flag: a nurture survives any
+ * cancel that is not an opt-out / suppression / wrong-number class, unless a
+ * caller explicitly passes keep_nurture_follow_ups:false.
+ */
+export function shouldKeepNurtureFollowUps(params = {}) {
+  const reason = clean(params?.reason);
+  if (NURTURE_TERMINAL_CANCEL_REASON.test(reason)) return false;
+  return params?.keep_nurture_follow_ups !== false;
+}
+
 async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
   const phone_e164 = resolvePhoneE164(event, params);
   const queue_item_id = clean(params.queue_item_id || event.queue_item_id);
@@ -462,7 +486,7 @@ async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
   }
 
   const rows = Array.isArray(data) ? data : [];
-  const kept = params.keep_nurture_follow_ups === true ? rows.filter(isNurtureFollowUpRow) : [];
+  const kept = shouldKeepNurtureFollowUps({ ...params, reason }) ? rows.filter(isNurtureFollowUpRow) : [];
   const ids = rows
     .filter((row) => !kept.includes(row))
     .map((row) => clean(row?.id))
