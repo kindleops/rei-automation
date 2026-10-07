@@ -179,3 +179,80 @@ test('a street search with no market name stays a plain address probe', async ()
   assert.ok(!calls.some(([, op]) => op === 'or'))
   assert.ok(calls.some(([table, op, col]) => table === 'v_entity_graph_properties' && op === 'ilike' && col === 'property_address_full'))
 })
+
+test('header KPIs are exact head counts; a failed count is null, never 0', async () => {
+  const { getEntityGraphKpis } = await import('../../src/lib/domain/entity-graph/entity-graph-kpis.js')
+  const seen = []
+  const client = {
+    from(table) {
+      const filters = []
+      const q = {
+        select(col, opts) { assert.deepEqual(opts, { count: 'exact', head: true }); return q },
+        not(c, op, v) { filters.push(`${c} not ${op} ${v}`); return q },
+        gte(c, v) { filters.push(`${c}>=${v}`); return q },
+        then(res, rej) {
+          seen.push(`${table}${filters.length ? `|${filters.join('&')}` : ''}`)
+          if (table === 'sub_owners') return Promise.resolve({ count: null, error: { message: 'timeout' } }).then(res, rej)
+          return Promise.resolve({ count: table === 'properties' ? (filters.length ? 41533 : 176610) : 102252, error: null }).then(res, rej)
+        },
+      }
+      return q
+    },
+  }
+  const k = await getEntityGraphKpis({ supabase: client })
+  assert.equal(k.properties, 176610)
+  assert.equal(k.linkedProperties, 41533)
+  assert.equal(k.entities, null)
+  assert.ok(seen.includes('master_owners|property_count>=2'))
+  assert.ok(seen.includes('master_owners|best_phone_1 not is null'))
+  assert.match(k.definitions.ownersWithPhone, /eligibility is decided at send/i)
+})
+
+test('an owner whose joined ids are property EXPORT ids still draws its portfolio (read by master_owner_id)', async () => {
+  const { getEntityNetwork } = await import('../../src/lib/domain/entity-graph/entity-network-service.js')
+  const reads = []
+  const from = (name) => {
+    const filters = []
+    const q = {
+      select() { return q }, neq() { return q }, gt() { return q }, ilike() { return q }, order() { return q }, limit() { return q },
+      eq(c, v) { filters.push(['eq', c, v]); return q },
+      in(c, v) { filters.push(['in', c, v]); return q },
+      maybeSingle() {
+        if (name === 'master_owners') return Promise.resolve({ data: { master_owner_id: 'mo_e3', display_name: 'Chandler Stonebridge LP', property_count: 1, joined_property_ids_json: '["prop_875d0ee2eacd14798bb4adf4"]' } })
+        return Promise.resolve({ data: null })
+      },
+      then(res, rej) {
+        reads.push([name, ...filters.map((f) => f.join(':'))].join('|'))
+        let data = []
+        if (name === 'properties' && filters.some(([op, c, v]) => op === 'eq' && c === 'master_owner_id' && v === 'mo_e3')) {
+          data = [{ property_id: '24507162', master_owner_id: 'mo_e3', property_address_full: '575 W Pecos Rd', estimated_value: 111363200, units_count: 392 }]
+        }
+        return Promise.resolve({ data }).then(res, rej)
+      },
+    }
+    return q
+  }
+  const n = await getEntityNetwork('owner', 'mo_e3', { supabase: { from, rpc: async () => ({ data: null }) } })
+  assert.equal(n.properties.length, 1)
+  assert.equal(n.properties[0].id, '24507162')
+  assert.ok(n.graph.nodes.some((x) => x.id === 'property:24507162'))
+  assert.ok(reads.some((r) => r.startsWith('properties|in:property_id:prop_875d0ee2eacd14798bb4adf4')))
+  assert.ok(reads.some((r) => r === 'properties|eq:master_owner_id:mo_e3'))
+})
+
+test('network people carry their vendor contact-matching tags verbatim', async () => {
+  const { getEntityNetwork } = await import('../../src/lib/domain/entity-graph/entity-network-service.js')
+  const from = (name) => {
+    const q = {
+      select() { return q }, neq() { return q }, gt() { return q }, ilike() { return q }, order() { return q }, limit() { return q }, eq() { return q }, in() { return q },
+      maybeSingle() { return Promise.resolve({ data: name === 'master_owners' ? { master_owner_id: 'mo1', display_name: 'A', joined_property_ids_json: '[]' } : null }) },
+      then(res, rej) {
+        const data = name === 'prospects' ? [{ prospect_id: 'pr1', full_name: 'JANE DOE', matching_flags: 'Likely Owner, Family' }, { prospect_id: 'pr2', full_name: 'JOHN DOE', matching_flags: null }] : []
+        return Promise.resolve({ data }).then(res, rej)
+      },
+    }
+    return q
+  }
+  const n = await getEntityNetwork('owner', 'mo1', { supabase: { from, rpc: async () => ({ data: null }) } })
+  assert.deepEqual(n.people.map((p) => p.matchingTags), [['Likely Owner', 'Family'], []])
+})
