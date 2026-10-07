@@ -24,6 +24,15 @@ import {
   scoreComparable,
 } from '../acquisition/acquisitionDecisionEngine.js'
 import { DEAL_DOSSIER_SCHEMA } from './deal-dossier-schema.js'
+import {
+  BUYER_TYPE_LABELS,
+  CANONICAL_CORPUS_SOURCE,
+  LEGACY_POOL_SOURCE,
+  canonicalRowToEngineInput,
+  corpusLaneOf,
+  fetchCanonicalCorpusComps,
+  freshnessLabel,
+} from '../domain/comp-intelligence/canonical-corpus-reads.js'
 
 const ACQUISITION_SCORE_SELECT = [
   'property_id',
@@ -710,6 +719,10 @@ async function fetchBuyerGeoRollup(subject, abortSignal) {
   }
 }
 
+function latestSaleOf(records = []) {
+  return records.map((r) => String(r.sale_date || '').slice(0, 10)).filter(Boolean).sort().pop() || null
+}
+
 async function fetchCompsSection(property, location, propertyRow, abortSignal) {
   if (!property?.property_id) {
     return {
@@ -742,15 +755,36 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
     { source: 'properties' },
   )
 
+  // DISPLAY comps: the canonical corpus (flag COMPS_CANONICAL_CORPUS_READS, default on);
+  // RPC not applied / flag off -> today's engine pool, labelled with its data date.
   let rawComps = []
-  try {
-    rawComps = await loadComparableProperties(subject, { supabase })
-  } catch (error) {
-    console.warn('[DEAL_INTEL_COMPS]', error?.message)
+  let identityById = new Map()
+  const canonical = await fetchCanonicalCorpusComps(supabase, {
+    lat: subject.latitude, lng: subject.longitude, radiusMiles: corpusLaneOf(subject) === 'mf' ? 5 : 2.5,
+    months: corpusLaneOf(subject) === 'mf' ? 36 : 24, lane: corpusLaneOf(subject), limit: 150,
+  })
+  const corpusActive = canonical.available ? CANONICAL_CORPUS_SOURCE : LEGACY_POOL_SOURCE
+  if (canonical.available) {
+    const rows = canonical.rows.filter((r) => clean(r.property_id) !== clean(property.property_id))
+    rawComps = rows.map((r) => ({ ...canonicalRowToEngineInput(r, subject), _buyer_type: r.buyer_type, _junk: r.junk_reasons }))
+    identityById = new Map(rows.map((r) => [clean(r.comp_id), {
+      owner_name: r.buyer || null,
+      is_corporate_owner: ['investor_llc', 'institutional', 'investor_inferred'].includes(r.buyer_type),
+      document_type: r.doc_type || null,
+      sale_price: num(r.price),
+      mls_sold_price: r.source === 'mls' ? num(r.price) : null,
+      subdivision_name: r.subdivision_name || null,
+      recording_date: r.sold_on || null,
+    }]))
+  } else {
+    try {
+      rawComps = await loadComparableProperties(subject, { supabase })
+    } catch (error) {
+      console.warn('[DEAL_INTEL_COMPS]', error?.message)
+    }
+    const compIds = [...new Set(rawComps.map((raw) => clean(raw.comp_id || raw.id)).filter(Boolean))]
+    identityById = await fetchCompIdentityBatch(compIds, abortSignal)
   }
-
-  const compIds = [...new Set(rawComps.map((raw) => clean(raw.comp_id || raw.id)).filter(Boolean))]
-  const identityById = await fetchCompIdentityBatch(compIds, abortSignal)
 
   const qualification = {
     candidates_found: rawComps.length,
@@ -768,7 +802,7 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
       distance_miles: raw.distance_miles,
     })
     const gateEligibility = evaluateCompEligibility(subject, comp)
-    const eligibilityReasons = scored?.eligible === false ? (scored.reasons || []) : []
+    const eligibilityReasons = [...(scored?.eligible === false ? (scored.reasons || []) : []), ...(raw._junk || [])]
     const eligibility = {
       eligible: scored?.eligible === true,
       reasons: eligibilityReasons,
@@ -780,7 +814,7 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
       ['outside_radius', 'outside_zip_without_coordinates'].includes(r),
     )
     const similarityScore = num(scored?.comp_confidence ?? scored?.weighted_score)
-    const usable = scored?.eligible === true && (similarityScore ?? 0) >= 45
+    const usable = scored?.eligible === true && (similarityScore ?? 0) >= 45 && !(raw._junk || []).length
 
     if (assetMatch) qualification.asset_type_matches += 1
     if (locationOk) qualification.location_qualified += 1
@@ -836,7 +870,9 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
         : compRejectionLabel(
           eligibilityReasons[0] || (scored?.eligible ? 'low_similarity' : 'not_eligible'),
         ),
-      source: comp.source || 'v_recent_sold_comps',
+      source: raw._buyer_type ? CANONICAL_CORPUS_SOURCE : comp.source || 'v_recent_sold_comps',
+      buyer_category: raw._buyer_type || null,
+      buyer_category_label: raw._buyer_type ? BUYER_TYPE_LABELS[raw._buyer_type] ?? raw._buyer_type : null,
     }
   })
 
@@ -877,7 +913,10 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
     confidence,
     freshness: usableRecords[0]?.sale_date || analyzed[0]?.sale_date || null,
     records: analyzed.sort((a, b) => (num(b.similarity_score) || 0) - (num(a.similarity_score) || 0)),
-    source: 'v_recent_sold_comps',
+    source: corpusActive,
+    corpus_latest_sale: canonical.available ? canonical.latestSale : latestSaleOf(analyzed),
+    freshness_label: freshnessLabel(canonical.available ? canonical.latestSale : latestSaleOf(analyzed)),
+    corpus_fallback_reason: canonical.available ? null : canonical.reason ?? null,
     match_context: {
       zip: location.zip,
       market: location.market,
