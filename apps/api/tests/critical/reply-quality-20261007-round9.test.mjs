@@ -188,3 +188,25 @@ for (const message of ["Is this number still good for you?", "Remove the old car
     assert.notEqual(c.primary_intent, "opt_out");
   });
 }
+
+// ── Lead decision 2026-10-07: a stop aimed at our outreach is an opt-out ────
+for (const message of [
+  "Stop looking up properties to buy when you think there not being tend to!",
+  "stop contacting me about properties",
+  "stop messaging about my house",
+  "stop with the property texts",
+  "Please stop asking about my house",
+  "Quit trying to buy my home",
+]) {
+  test(`outreach stop: ${JSON.stringify(message)} -> opt_out`, async () => {
+    const c = await classify(message, null, { heuristicOnly: true });
+    assert.equal(c.primary_intent, "opt_out");
+    assert.equal(c.compliance_flag, "stop_texting");
+  });
+}
+for (const message of ["stop crying", "Stop asking that", "Stop lowballing me", "Stop looking at the price, look at the condition", "Stop being so cheap with your offer"]) {
+  test(`still not an opt-out (other action): ${JSON.stringify(message)}`, async () => {
+    const c = await classify(message, null, { heuristicOnly: true });
+    assert.notEqual(c.primary_intent, "opt_out");
+  });
+}

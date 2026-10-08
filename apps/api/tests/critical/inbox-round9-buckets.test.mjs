@@ -94,3 +94,18 @@ test("Priority: '2 million' / '$1M' (implausible) and a frustration close are ne
   }
   assert.equal(resolveInboxBucketFlags(reply({ inbox_bucket: "priority", last_intent: "asks_offer" }), NOW).in_priority, true);
 });
+
+test("who_is_this rests in Unclear (the approved auto-reply answers it); a failed / blocked auto-reply makes it a New Reply", () => {
+  const ok = resolveInboxBucketFlags(reply({ last_intent: "who_is_this" }), NOW);
+  assert.equal(ok.in_new_replies, false);
+  assert.equal(ok.in_unclear, true);
+  for (const extra of [{ failed_queue_count: 1 }, { blocked_queue_count: 2 }]) {
+    const failed = resolveInboxBucketFlags(reply({ last_intent: "who_is_this", ...extra }), NOW);
+    assert.equal(failed.in_new_replies, true, JSON.stringify(extra));
+    assert.equal(failed.in_unclear, false, JSON.stringify(extra));
+    assert.equal(threadMatchesBucketFilter(reply({ last_intent: "who_is_this", ...extra }), "new_replies", NOW), true);
+  }
+  // Only who_is_this: a failed send does not promote a bare "unclear".
+  assert.equal(resolveInboxBucketFlags(reply({ last_intent: "unclear", failed_queue_count: 1 }), NOW).in_new_replies, false);
+  assert.match(SQL, /f\.f_last_intent = 'who_is_this' and \(coalesce\(f\.failed_queue_count, 0\) > 0 or coalesce\(f\.blocked_queue_count, 0\) > 0\)/);
+});

@@ -183,10 +183,15 @@ function threadMatchesReplyCandidateFacts(thread = {}, nowMs = Date.now()) {
   return true;
 }
 
+// The thread's queued reply failed or was blocked (send_queue counters on the row).
+function autoReplyFailed(row = {}) {
+  return Number(row.failed_queue_count || 0) > 0 || Number(row.blocked_queue_count || 0) > 0;
+}
+
 // No recorded intent = unknown, kept visible in New Replies (see resolveInboxBucketFlags).
 function isNewReplyWorthy(thread = {}) {
   const intent = threadReplyIntent(thread);
-  return !intent || isNewReplyActionableIntent(intent);
+  return !intent || isNewReplyActionableIntent(intent) || (intent === "who_is_this" && autoReplyFailed(thread));
 }
 
 export function threadMatchesNewRepliesFacts(thread = {}, nowMs = Date.now()) {
@@ -424,7 +429,10 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
   // Round 9: New Replies = an ACTIONABLE latest reply only (whitelist). A
   // reply with NO recorded intent is unknown, not unclear: it stays visible in
   // New Replies (the live path always records one; a gap must not hide).
-  const newReplyIntent = !lastIntent || isNewReplyActionableIntent(lastIntent);
+  const newReplyIntent = !lastIntent || isNewReplyActionableIntent(lastIntent)
+    // Lead decision 2026-10-07: a who-is-this is answered by the approved
+    // who_is_this auto-reply; it is a New Reply only when that send failed.
+    || (lastIntent === "who_is_this" && autoReplyFailed(row));
   const inNewReplies = replyCandidate
     && newReplyIntent
     && (

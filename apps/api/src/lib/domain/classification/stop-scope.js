@@ -64,6 +64,23 @@ const BARE_OTHER_ACTION = new Set(["хватит", "रुको", "ruko", "wait
 
 const bare = (s) => String(s || "").trim().replace(/^[^\p{L}\p{M}\p{N}]+/u, "").replace(/[^\p{L}\p{M}\p{N}]+$/u, "").toLowerCase();
 
+// Round 9 (lead decision 2026-10-07, compliance-safe): a stop whose object is
+// OUR OUTREACH ITSELF revokes communication -- "Stop looking up properties to
+// buy when you think there not being tend to!", "stop contacting me about
+// properties", "stop with the property texts". A stop verb + an outreach
+// activity aimed at a property / house / home / land, or "stop ... about my
+// house". Checked before the other-action complements ("stop looking ..." is
+// otherwise a complement).
+const OUTREACH_STOP_RE = [
+  /\b(?:stop|quit|quite|cease)\b[^.!?\n]{0,24}?\b(?:look(?:ing)?\s+(?:up|for|at|into)|search(?:ing)?|asking\s+(?:about|for)|inquir(?:e|ing)\s+about|try(?:ing)?\s+to\s+buy|buy(?:ing)?|offer(?:ing)?|send(?:ing)?|target(?:ing)?|pursu(?:e|ing)|chasing|hunting)\b[^.!?\n]{0,40}?\b(?:propert(?:y|ies)|houses?|homes?|land|lots?|real\s+estate|my\s+place)\b/i,
+  /\b(?:stop|quit|cease)\b[^.!?\n]{0,30}?\babout\s+(?:my|the|this|that|our|his|her)\s+(?:propert(?:y|ies)|house|home|land|lot|place)\b/i,
+];
+
+export function matchesOutreachStop(message = "") {
+  const text = String(message || "");
+  return OUTREACH_STOP_RE.some((re) => re.test(text));
+}
+
 /**
  * @returns {"stop_communication" | "stop_other_action" | null}
  *   null = no stop-scope judgement (the existing rules decide).
@@ -72,6 +89,7 @@ export function classifyStopScope(message = "") {
   const text = String(message || "");
   if (!text.trim()) return null;
   if (COMMUNICATION_RE.test(text)) return STOP_SCOPE.COMMUNICATION;
+  if (matchesOutreachStop(text)) return STOP_SCOPE.COMMUNICATION;
   if (BARE_OTHER_ACTION.has(bare(text))) return STOP_SCOPE.OTHER_ACTION;
   if (STOP_WITH_COMPLEMENT.some((re) => re.test(text))) return STOP_SCOPE.OTHER_ACTION;
   return null;
