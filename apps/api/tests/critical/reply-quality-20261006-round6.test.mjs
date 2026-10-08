@@ -11,6 +11,7 @@
 
 import "../helpers/critical-test-environment.mjs";
 import test from "node:test";
+import { withBareNoClarifierOn } from "../helpers/bare-no-clarifier-flag.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
@@ -106,10 +107,14 @@ for (const [id, e] of Object.entries(LABELS)) {
 
 const BARE_NO = Object.entries(LABELS).filter(([id]) => /^(?:no|no,? i'?m not|no i am not)[.!]*$/i.test(byId.get(id).seller_message.trim())).map(([id]) => id);
 
-test("bare 'No' to the ownership question: ONE owner-approved clarifier once its template is active", async () => {
+test("bare 'No' to the ownership question: ONE owner-approved clarifier once its template is active AND BARE_NO_AUTO_CLARIFIER is on", async () => {
   assert.ok(BARE_NO.length >= 10, `bare No rows: ${BARE_NO.length}`);
   for (const id of BARE_NO) {
-    const r = await replayReply(byId.get(id), { catalog: [...CATALOG, ...CLARIFIER_ROWS] });
+    // Round 10: flag OFF (default) -> hold, no outbound, no review.
+    const off = await replayReply(byId.get(id), { catalog: [...CATALOG, ...CLARIFIER_ROWS] });
+    assert.equal(off.outcome, "no_reply_by_design", id);
+    assert.equal(off.decision.audit_reason, "bare_no_auto_clarifier_off", id);
+    const r = await withBareNoClarifierOn(() => replayReply(byId.get(id), { catalog: [...CATALOG, ...CLARIFIER_ROWS] }));
     assert.equal(r.classification.automation_decision.clarification_use_case, "ownership_connection_clarifier", id);
     assert.equal(r.outcome, "auto_reply", id);
     assert.equal(r.template.use_case, "ownership_connection_clarifier", id);

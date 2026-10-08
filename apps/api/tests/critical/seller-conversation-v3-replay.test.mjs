@@ -11,6 +11,7 @@
 
 import "../helpers/critical-test-environment.mjs";
 import test from "node:test";
+import { withBareNoClarifierOn } from "../helpers/bare-no-clarifier-flag.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
@@ -28,7 +29,9 @@ const results = {};
 async function run(name) {
   if (!results[name]) {
     results[name] = [];
-    for (const c of CASES) results[name].push({ c, r: await replayV3(c, SCENARIOS[name]) });
+    // Both scenarios are "drafts active": the bare-No clarifier counts as
+    // validated (round 10: BARE_NO_AUTO_CLARIFIER on for the scenario).
+    for (const c of CASES) results[name].push({ c, r: await withBareNoClarifierOn(() => replayV3(c, SCENARIOS[name])) });
   }
   return results[name];
 }

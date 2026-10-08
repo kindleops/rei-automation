@@ -11,6 +11,7 @@
 
 import "../helpers/critical-test-environment.mjs";
 import test from "node:test";
+import { withBareNoClarifierOn } from "../helpers/bare-no-clarifier-flag.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
@@ -35,7 +36,9 @@ const results = new Map();
 async function run(id) {
   if (!results.has(id)) {
     const c = CASES.find((x) => x.fixture_id.endsWith(id));
-    results.set(id, { today: await replayReply(c, { catalog: CATALOG }), drafts: await replayReply(c, { catalog: [...CATALOG, ...EN_ES_DRAFTS] }), c });
+    results.set(id, { today: await replayReply(c, { catalog: CATALOG }), // "With EN/ES drafts" = the drafts active AND the bare-No clarifier
+      // validated (round 10: BARE_NO_AUTO_CLARIFIER on); today = defaults.
+      drafts: await withBareNoClarifierOn(() => replayReply(c, { catalog: [...CATALOG, ...EN_ES_DRAFTS] })), c });
   }
   return results.get(id);
 }
