@@ -52,6 +52,7 @@ import {
   normalizeDrawnArea,
 } from '@/lib/domain/campaigns/campaign-drawn-area.js'
 import { evaluatePreSendEligibility } from '@/lib/domain/outbound/presend-eligibility-engine.js'
+import { resolveCampaignTargetReadiness } from '@/lib/domain/campaigns/campaign-target-readiness.js'
 import { evaluateOpenerReplyExclusion, loadOpenerReplyFacts, phoneKey, phoneLookupVariants } from '@/lib/domain/campaigns/opener-reply-exclusion.js'
 import { isValidIanaTimezone } from '@/lib/domain/acquisition-brain/shadow-burst-timing.js'
 import { resolveTimezone } from '@/lib/sms/latency.js'
@@ -3802,7 +3803,69 @@ function missingOptionalGraphColumn(error) {
   return null
 }
 
+/**
+ * A LARGE PINNED PROPERTY LIST IS READ IN CHUNKS.
+ *
+ * An explicit `properties.property_id is any of [...]` (Entity Graph "Add to
+ * campaign", stacked cohorts) compiles to one PostgREST `in` list in the URL.
+ * Property ids are ~9 characters, so past a few hundred ids the request line
+ * outgrows the gateway and the read fails — Build and Reach could only ever
+ * carry a few hundred pinned properties. The list is split into disjoint
+ * chunks (same rule as checkExplicitTargetContainment): rows are concatenated
+ * and re-ordered by the graph's total order, counts are summed. Each graph row
+ * has exactly one property_id, so the chunks partition the audience and the
+ * sums are exact.
+ */
+export const EXPLICIT_PROPERTY_CHUNK = 150
+export function explicitPropertyChunkOptions(options = {}, size = EXPLICIT_PROPERTY_CHUNK) {
+  const supported = options.catalog_filters?.supported || []
+  const index = supported.findIndex((filter) => clean(filter?.field_key || filter?.fieldKey) === 'properties.property_id'
+    && ['is_any_of', 'in', 'eq'].includes(clean(filter?.operator) || 'is_any_of')
+    && Array.isArray(filter?.value)
+    && filter.value.length > size)
+  if (index < 0) return null
+  const values = [...new Set(supported[index].value.map(clean).filter(Boolean))]
+  const parts = []
+  for (let i = 0; i < values.length; i += size) parts.push(values.slice(i, i + size))
+  return parts.map((part) => ({
+    ...options,
+    catalog_filters: {
+      ...options.catalog_filters,
+      supported: supported.map((filter, i) => (i === index ? { ...filter, operator: 'is_any_of', value: part } : filter)),
+    },
+  }))
+}
+
+const desc = (a, b) => {
+  const na = a === null || a === undefined
+  const nb = b === null || b === undefined
+  if (na && nb) return 0
+  if (na) return 1
+  if (nb) return -1
+  if (typeof a === 'boolean' || typeof b === 'boolean') return Number(Boolean(b)) - Number(Boolean(a))
+  return Number(b) - Number(a)
+}
+/** The graph read order (queue_eligible, acquisition_score, best_phone_score desc nulls last, graph_id asc). */
+export function compareGraphReadOrder(a = {}, b = {}) {
+  return desc(a.queue_eligible, b.queue_eligible)
+    || desc(a.acquisition_score, b.acquisition_score)
+    || desc(a.best_phone_score, b.best_phone_score)
+    || String(a.graph_id ?? '').localeCompare(String(b.graph_id ?? ''))
+}
+
 async function countCampaignGraphRows({ supabase, options, extra = null, requireQueueEligible = false }) {
+  const chunked = explicitPropertyChunkOptions(options)
+  if (chunked) {
+    let count = 0
+    const warnings = []
+    for (const part of chunked) {
+      const result = await countCampaignGraphRows({ supabase, options: part, extra, requireQueueEligible })
+      warnings.push(...(result.warnings || []))
+      if (result.ok === false) return { ok: false, count: 0, warnings: uniqueClean(warnings) }
+      count += Number(result.count || 0)
+    }
+    return { ok: true, count, warnings: uniqueClean(warnings) }
+  }
   const warnings = []
   let query = campaignGraphQuery(supabase, {
     area: drawnAreaFromFilters(options.catalog_filters?.supported),
@@ -3827,6 +3890,17 @@ async function fetchCampaignGraphRows({ supabase, options, limit, requireQueueEl
   const rows = []
   const warnings = []
   const cappedLimit = Math.max(1, Math.min(Number(limit || CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT), CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT))
+  const chunked = explicitPropertyChunkOptions(options)
+  if (chunked) {
+    for (const part of chunked) {
+      const result = await fetchCampaignGraphRows({ supabase, options: part, limit: CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT, requireQueueEligible, selectColumns, didCompatRetry })
+      warnings.push(...(result.warnings || []))
+      if (result.ok === false) return { ok: false, rows: [], warnings: uniqueClean(warnings) }
+      rows.push(...(result.rows || []))
+    }
+    rows.sort(compareGraphReadOrder)
+    return { ok: true, rows: rows.slice(0, cappedLimit), warnings: uniqueClean(warnings) }
+  }
   // With a drawn area the audience is the exact polygon cohort, resolved in the
   // database; the same order and paging apply on top, so Reach and Build agree.
   const area = drawnAreaFromFilters(options.catalog_filters?.supported)
@@ -4159,90 +4233,9 @@ export function graphDistributionCounts(rows = []) {
   return counts
 }
 
-// campaign_target_graph.queue_eligible is a purely mechanical messaging-
-// mechanics flag (sms_eligible/suppression/wrong_number/pending_touch/
-// active_queue/sender_covered) — it carries no owner-identity, timezone, or
-// phone-ownership-ambiguity signal. buildCampaignTargets only ever receives
-// queue_eligible=true rows, so status/target_status must not be derived from
-// queue_eligible alone or every graph-sourced target is marked 'ready'
-// regardless of identity/timezone/ambiguity. Reuses the same canonical,
-// fail-closed identity policy createCampaignQueuePlan already gates on
-// (evaluatePreSendEligibility -> isIdentityEligibleForLiveOutbound) so the
-// two layers cannot silently drift apart.
-function resolveCampaignTargetReadiness(row = {}) {
-  /**
-   * IDENTITY LINKAGE, READ FROM THE CANONICAL SCHEMA.
-   *
-   * This required `master_owner_id` AND `prospect_id` AND `phone_id` AND
-   * `canonical_e164` together. Three of those four are legacy identifiers from
-   * the retired `public.phones` export, and the canonical graph builder
-   * deliberately leaves them NULL — its own comment says
-   * "prospect_id / phone_id do not exist anywhere in the seller schema, so they
-   * stay NULL provenance rather than being manufactured from the stale
-   * public.phones export (which covers only 37.7% of the modern corpus)".
-   *
-   * Measured 2026-09-15 across all 169,797 graph rows:
-   *   prospect_id       0
-   *   phone_id          0
-   *   master_owner_id   41,532  (26% of Individual, 12.5% of Corporate — legacy, not entity-only)
-   *   seller_person_key 138,680
-   *   canonical_e164    136,127
-   *
-   * So the gate was not strict, it was BROKEN CLOSED: no graph-sourced target
-   * could ever be campaign-ready, which is exactly what production showed.
-   *
-   * Person identity is now `seller_person_key`
-   * (seller.property_owner_resolution_v1.individual_key, via
-   * COALESCE(sel_person_key, individual_key)), with the legacy prospect ids
-   * still accepted so older rows that do carry them keep working. The phone is
-   * `canonical_e164`, which the builder joins from seller.owner_phone ON THE
-   * SAME individual_key — so the number provably belongs to the resolved
-   * person rather than being the property's first available phone.
-   *
-   * `master_owner_id` is provenance "where applicable", not a gate: it is
-   * absent on three quarters of rows across every ownership shape, and its
-   * absence says nothing about whether a real person is reachable.
-   *
-   * Nothing else is relaxed. queue_eligible still carries sms_eligible /
-   * suppression / wrong_number / pending_prior_touch / active_queue_item /
-   * sender_covered, and identity_alignment, timezone and phone-ownership
-   * ambiguity are all still enforced below.
-   */
-  const personKey = clean(row.seller_person_key)
-    || clean(row.prospect_id)
-    || clean(row.canonical_prospect_id)
-  const phoneKey = clean(row.canonical_e164) || clean(row.phone_id)
-  const hasLinkage = Boolean(personKey && phoneKey)
-  const hasTimezone = Boolean(clean(row.timezone))
-  const ambiguousPhone = Boolean(row.ambiguous_phone_ownership)
-  const eligibility = evaluatePreSendEligibility(
-    { identity_alignment: { status: clean(row.identity_alignment) || 'unknown' } },
-    {}
-  )
-
-  const blockReason = !row.queue_eligible
-    ? clean(row.queue_block_reason || 'graph_not_queue_eligible')
-    : !hasLinkage
-      ? 'missing_identity_linkage'
-      /**
-       * An entity-owned property whose person link the canonical source flags
-       * for review has no defensible contact, so it stays blocked however well
-       * the rest of the linkage resolves. seller.property_entity_contact_v1
-       * raises this via ENT_ROLE_UNCORROBORATED / ENT_NO_REGISTRY_LINK, and
-       * 19,346 queue-eligible entity contacts carry it.
-       */
-      : row.entity_contact_requires_review === true
-        ? 'entity_contact_requires_review'
-      : !eligibility.eligible
-        ? clean(eligibility.reason) || 'identity_not_verified'
-        : !hasTimezone
-          ? 'missing_timezone'
-          : ambiguousPhone
-            ? 'ambiguous_phone_ownership'
-            : null
-
-  return { ready: blockReason === null, blockReason }
-}
+export { resolveCampaignTargetReadiness }
+// resolveCampaignTargetReadiness lives in campaign-target-readiness.js (one
+// per-row readiness truth, shared with Entity Graph's eligibility column).
 
 function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options = {}) {
   const campaignId = campaign?.id || null
