@@ -58,9 +58,9 @@ Not wired, deliberately: the legacy DocuSign path (`advanceClosingWorkflow`) alr
 1. **Merge order.** `feat/seller-portal-api` → `feat/scheduling-core` (stacked) onto the API release branch. The branch is based on `c8f33381`; local `feat/mobile-product-v1` is 3 commits ahead (rc-7.1 / ic8) — rebase onto it first; the only overlapping file is `infra/cloudflare/worker/index.ts` (cron table).
 2. **Intake.** `external_seller_intake` and `external_seller_inbox_projection` are already applied in production (recorded 20260908082307 / 20260908082317). The files on this branch are byte-identical; do not re-apply. Set `PROMINENT_INTAKE_SHARED_SECRET` on the API and the matching secret on the Prominent site.
 3. **Migrations, in order** (staging project first):
-   1. `supabase/migrations/20261002120000_seller_portal.sql`
-   2. `supabase/migrations/20261003120000_scheduling_core.sql` (installs `btree_gist` in `extensions`)
-   3. `supabase/migrations/20261003121000_scheduling_prominent_types.sql`
+   1. `supabase/migrations/20261009100000_seller_portal.sql`
+   2. `supabase/migrations/20261009101000_scheduling_core.sql` (installs `btree_gist` in `extensions`)
+   3. `supabase/migrations/20261009102000_scheduling_prominent_types.sql`
    All are idempotent (`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`).
 4. **API environment.**
    - Seller portal: `SELLER_PORTAL_ENABLED=1`, `SELLER_PORTAL_INTERNAL_SECRET` (≥32 random chars), `SELLER_PORTAL_CODE_PEPPER` (≥32 random chars; rotating it invalidates open codes and throttle keys only), `SELLER_PORTAL_PUBLIC_BASE_URL=https://www.prominentcashoffer.com`, `SELLER_PORTAL_EMAIL_ENABLED=1` when ready to email, `SELLER_PORTAL_OPERATOR_DIRECTORY` only if a named contact should show.

@@ -40,8 +40,11 @@ export async function scheduleReminders({ appointment, eventType, adapter, now, 
       email_body: content.html,
       html_body: content.html,
       text_body: content.text,
-      brand_key: appointment.brand_key,
+      // The sending identity is the brand's email_senders row (sender_key), which
+      // may differ from the scheduling brand key (Prominent: 'prominent').
+      brand_key: adapter.email_sender_key || appointment.brand_key,
       source: 'scheduling',
+      lane: 'transactional', // a requested appointment, never marketing
       source_ref: `appointment:${appointment.id}:reminder:${offset}`,
       action_key: `scheduling.reminder.${offset}`,
       requested_by: 'scheduling_core',

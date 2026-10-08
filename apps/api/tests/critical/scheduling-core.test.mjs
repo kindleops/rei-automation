@@ -424,3 +424,48 @@ test('client API: each brand authenticates separately and can never touch anothe
   assert.equal(stale.status, 409);
   assert.ok(Array.isArray((await stale.json()).slots), 'refreshed availability returned with the refusal');
 });
+
+// ---------------------------------------------------------------------------
+// Least privilege: scheduling configuration needs scheduling.admin
+// ---------------------------------------------------------------------------
+
+test('only a scheduling admin can change people, pools and routing; operators keep self-service', async () => {
+  const { handleSchedulingCockpitPost } = await import('@/app/api/cockpit/scheduling/[action]/route.js');
+  const ADMIN = '11111111-2222-4333-8444-555555555555';
+  const OPERATOR = '66666666-7777-4888-8999-000000000000';
+  const { service, store } = world();
+  store.state.permissions = [{ user_id: ADMIN, permission: 'scheduling.admin' }];
+  store.state.resources[0].ops_user_id = OPERATOR;
+  const post = (user, action, body) => handleSchedulingCockpitPost(new Request(`http://local/api/cockpit/scheduling/${action}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-ops-user-id': user }, body: JSON.stringify(body) }), action, { service });
+
+  for (const [action, body] of [
+    ['pool-member', { brand: P, pool_key: 'team', resource_id: PERSON, active: false }],
+    ['resource', { ops_user_id: OPERATOR, display_name: 'x', timezone: 'America/New_York', weekly_hours: {}, operator_keys: ['steal-routing'] }],
+    ['event-type', { id: `${P}:offer_review`, routing: { strategy: 'round_robin', pool: 'team' } }],
+  ]) {
+    const res = await post(OPERATOR, action, body);
+    assert.equal(res.status, 403, `${action} must be refused for a plain operator`);
+    assert.equal((await res.json()).error, 'scheduling_admin_required');
+  }
+  assert.deepEqual(store.state.resources[0].operator_keys, ['op-1'], 'routing keys untouched');
+
+  // Self-service still works for the operator's own hours…
+  const mine = await post(OPERATOR, 'me', { timezone: 'America/Chicago', weekly_hours: { 1: [['10:00', '16:00']] }, operator_keys: ['ignored'] });
+  assert.equal(mine.status, 200);
+  assert.equal(store.state.resources[0].timezone, 'America/Chicago');
+  assert.deepEqual(store.state.resources[0].operator_keys, ['op-1'], 'self-service cannot set routing keys');
+  // …but nobody makes themselves bookable.
+  assert.equal((await post(ADMIN, 'me', { timezone: 'America/Chicago', weekly_hours: {} })).status, 403);
+
+  // The admin can.
+  assert.equal((await post(ADMIN, 'pool-member', { brand: P, pool_key: 'team', resource_id: PERSON, active: true })).status, 200);
+  const created = await post(ADMIN, 'resource', { ops_user_id: ADMIN, display_name: 'Admin Advisor (fixture)', timezone: 'America/New_York', weekly_hours: { 1: [['09:00', '12:00']] }, operator_keys: ['admin-key'] });
+  assert.equal(created.status, 200);
+  const bad = await post(ADMIN, 'event-type', { id: `${P}:offer_review`, routing: { strategy: 'anything_goes' } });
+  assert.equal(bad.status, 422, 'routing is validated');
+  const ok = await post(ADMIN, 'event-type', { id: `${P}:offer_review`, buffer_after_minutes: 15, routing: { strategy: 'round_robin', pool: 'team' } });
+  assert.equal(ok.status, 200);
+  assert.equal(store.state.eventTypes.find((t) => t.id === `${P}:offer_review`).buffer_after_minutes, 15);
+  // A header that is not a user id is not an admin.
+  assert.equal((await post('not-a-user', 'pool-member', { brand: P, pool_key: 'team', resource_id: PERSON })).status, 403);
+});

@@ -18,7 +18,7 @@
 --   * throttling and an audit trail for seller sign-in.
 --
 -- Seller-scheduled calls are NOT stored here: they are appointments in the
--- shared scheduling core (20261003120000_scheduling_core.sql).
+-- shared scheduling core (20261009101000_scheduling_core.sql).
 --
 -- WHY NOT SUPABASE AUTH: in this project the `authenticated` role has blanket
 -- read on acquisition_opportunities, message_events, send_queue and others.

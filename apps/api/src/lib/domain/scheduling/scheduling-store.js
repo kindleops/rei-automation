@@ -70,6 +70,19 @@ export function createSupabaseSchedulingStore(deps = {}) {
       return out;
     },
 
+    /** Least privilege: an explicit grant on an allowlisted operator (ops_operator_permissions). */
+    async hasPermission(userId, permission) {
+      if (!/^[0-9a-f-]{36}$/i.test(String(userId || ''))) return false;
+      const { data, error } = await db().from('ops_operator_permissions').select('permission').eq('user_id', userId).eq('permission', permission).maybeSingle();
+      if (error) throw mapPgError(error, 'permission_read_failed');
+      return Boolean(data);
+    },
+    async updateEventType(id, patch) {
+      const { data, error } = await db().from('scheduling_event_types').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id).select('*').maybeSingle();
+      if (error) throw mapPgError(error, 'event_type_write_failed');
+      return data;
+    },
+    listAllEventTypes: () => many(db().from('scheduling_event_types').select('*').order('brand_key').order('name'), 'event_type_read_failed'),
     async upsertResource(row) {
       const { data, error } = await db().from('scheduling_resources').upsert({ ...row, updated_at: new Date().toISOString() }, { onConflict: row.id ? 'id' : 'ops_user_id' }).select('*').single();
       if (error) throw mapPgError(error, 'resource_write_failed');
@@ -243,6 +256,9 @@ export function createInMemorySchedulingStore(seed = {}) {
       }
       return out;
     },
+    hasPermission: async (uid, perm) => (s.permissions || []).some((p) => p.user_id === uid && p.permission === perm),
+    async updateEventType(id, patch) { const t = s.eventTypes.find((x) => x.id === id); if (!t) return null; Object.assign(t, patch); return t; },
+    listAllEventTypes: async () => s.eventTypes,
     async upsertResource(row) {
       const existing = s.resources.find((r) => (row.id && r.id === row.id) || (row.ops_user_id && r.ops_user_id === row.ops_user_id));
       if (existing) { Object.assign(existing, row); return existing; }

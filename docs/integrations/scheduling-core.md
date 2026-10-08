@@ -16,7 +16,7 @@ Everline and SignPro plug in the same way.
                        Google Calendar (per team member, below the brand layer)
 ```
 
-## Data (supabase/migrations/20261003120000_scheduling_core.sql)
+## Data (supabase/migrations/20261009101000_scheduling_core.sql)
 | Table | Purpose |
 |---|---|
 | `scheduling_resources` | A bookable person (or shared resource): time zone, weekly hours, `ops_user_id` (the Supabase user the ops worker forwards as `x-ops-user-id`), `operator_keys` (values canonical tables use in `assigned_operator`). No second user table. |
@@ -129,7 +129,7 @@ order).
    no sensitive data), `onChange` (domain exposure + customer messages),
    `reminder` (template). Register it in `scheduling-runtime.js`.
 2. Insert its event types and pools as data (a migration like
-   `20261003121000_scheduling_prominent_types.sql`).
+   `20261009102000_scheduling_prominent_types.sql`).
 3. Issue it a client secret in `SCHEDULING_CLIENT_SECRETS`.
 Nothing in the core changes.
 

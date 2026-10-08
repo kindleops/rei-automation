@@ -39,6 +39,8 @@ export function createProminentSchedulingAdapter(deps = {}) {
 
   return {
     brand_key: PROMINENT_BRAND,
+    // email_senders.sender_key for Prominent (PROPOSED_20261004090100_email_sender_prominent.sql).
+    email_sender_key: 'prominent',
 
     /**
      * Owner roles used by Prominent's routing configuration.

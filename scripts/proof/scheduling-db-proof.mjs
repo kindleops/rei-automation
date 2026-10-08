@@ -40,8 +40,9 @@ await db.exec(`
   CREATE SCHEMA IF NOT EXISTS extensions; CREATE ROLE anon; CREATE ROLE authenticated;
   CREATE TABLE public.acquisition_opportunities (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
   CREATE TABLE public.email_attachments (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
+  CREATE TABLE public.ops_operators (user_id uuid PRIMARY KEY);
 `)
-for (const f of ["20261002120000_seller_portal.sql", "20261003120000_scheduling_core.sql", "20261003121000_scheduling_prominent_types.sql"]) {
+for (const f of ["20261009100000_seller_portal.sql", "20261009101000_scheduling_core.sql", "20261009102000_scheduling_prominent_types.sql", "20261009103000_ops_operator_permissions.sql"]) {
   await db.exec(readFileSync(path.join(ROOT, "supabase/migrations", f), "utf8"))
 }
 check("migrations apply on Postgres 17 (PGlite)", true)
