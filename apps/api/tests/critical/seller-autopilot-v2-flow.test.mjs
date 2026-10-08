@@ -7,6 +7,7 @@
  */
 import "../helpers/critical-test-environment.mjs";
 import test, { afterEach } from "node:test";
+import { withBareNoClarifierOn } from "../helpers/bare-no-clarifier-flag.mjs";
 import assert from "node:assert/strict";
 
 import { memoryDb, tpl, adeSnapshot, runSellerTurn, seedOpener } from "../helpers/seller-autopilot-v2-harness.mjs";
@@ -242,7 +243,10 @@ test("PER-LANGUAGE: Portuguese is not enabled by default → human review even w
   assert.deepEqual(sent(es.results[0]), ["consider_selling"], "EN/ES are on by default");
 });
 
-test("BARE NO to the ownership question → ONE clarifier; next reply decides; never a second clarification", async () => {
+test("BARE NO to the ownership question → ONE clarifier (BARE_NO_AUTO_CLARIFIER on); next reply decides; never a second clarification", async () => {
+  const off = await runFlow({ turns: [["No", "ownership_check"]] });
+  assert.deepEqual(sent(off.results[0]), [], "round 10: flag OFF (default) -> no clarifier");
+  await withBareNoClarifierOn(async () => {
   const wrong = await runFlow({ turns: [["No", "ownership_check"], ["Wrong number", "ownership_check"]] });
   assert.deepEqual(sent(wrong.results[0]), ["ownership_connection_clarifier"]);
   assert.equal(body(wrong.results[0]), "Got it. Are you connected to the property, or do I have the wrong number?");
@@ -262,6 +266,7 @@ test("BARE NO to the ownership question → ONE clarifier; next reply decides; n
 
   const es = await runFlow({ language: "Spanish", turns: [["No", "ownership_check"]] });
   assert.equal(body(es.results[0]), "Entendido. ¿Tiene alguna relación con la propiedad, o tengo el número equivocado?");
+  });
 });
 
 test("DEFECT 4a: the legacy comp_anchor cannot send an unlogged number (flag on: logged as an anchor, blocked if the log fails)", async () => {
