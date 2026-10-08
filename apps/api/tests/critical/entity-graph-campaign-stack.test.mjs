@@ -277,3 +277,9 @@ test('a draft that stops being a draft mid-run is not written', async () => {
   )
   assert.equal(explicitSelectedPropertyIds(store.get('X')).size, 0)
 })
+
+test('a legacy param that narrows nothing on this scope is not a cohort', async () => {
+  const supabase = fakeSupabase({})
+  await assert.rejects(resolveStackPropertyIds({ scope: 'properties', mode: 'cohort', score_min: '50' }, { supabase }), (e) => e.code === 'cohort_has_no_filters')
+  await assert.rejects(resolveStackPropertyIds({ scope: 'people', mode: 'cohort', market: 'Dallas' }, { supabase }), (e) => e.code === 'cohort_has_no_filters')
+})

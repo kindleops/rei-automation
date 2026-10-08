@@ -143,7 +143,11 @@ export async function resolveStackPropertyIds(input = {}, deps = {}) {
   }
 
   if (mode !== 'cohort') throw new StackRefusal(422, 'unknown_mode', 'mode must be selection or cohort.')
-  if (!fieldFilters.length && !Object.entries(filters).some(([k, v]) => k !== 'includeTest' && v !== '' && v !== null && v !== false)) {
+  // Only the legacy params this scope's browse query actually APPLIES count as
+  // narrowing (e.g. score_min is parsed but applies to no property query) —
+  // otherwise a filter that narrows nothing would read as a cohort.
+  const NARROWING = { properties: ['market', 'city', 'state', 'zip', 'assetType', 'unitsMin', 'unitsMax', 'county'], master_owners: ['ownerType', 'priorityTier', 'market', 'coverageMin'], people: ['language', 'reachable'] }
+  if (!fieldFilters.length && !NARROWING[scope].some((k) => filters[k] !== '' && filters[k] !== null && filters[k] !== false && filters[k] !== undefined)) {
     throw new StackRefusal(422, 'cohort_has_no_filters', 'No filters are active, so this would add the entire universe. Narrow the cohort first.')
   }
   if (scope === 'properties') {

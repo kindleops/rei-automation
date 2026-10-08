@@ -1,46 +1,59 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { MobileSheet } from '../../mobile/MobileSheet'
 import * as backendClient from '../../../lib/api/backendClient'
 import type { EntityGraphFilters, EntitySearchResult } from '../../../domain/entity-graph/entity-graph.types'
-import { cohortToCampaignFilters, describeCampaignFilters, unmappedCohortFilters } from './entity-graph-cohort'
+import type { EntityGraphFieldFilter } from '../../../domain/entity-graph/entity-graph-field-filters'
+import { filtersToApiParams } from '../../../domain/entity-graph/entity-graph-workspace-state'
 import type { EntityScope } from './entity-graph-mobile-format'
-import type {
-  EntityGraphFieldFilter,
-  EntityGraphFilterCatalog,
-} from '../../../domain/entity-graph/entity-graph-field-filters'
-import { fetchEntityGraphFilterCatalog } from '../../../domain/entity-graph/entity-graph-field-filters'
+import { smsBlockLabel } from './entity-graph-table-columns'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
 export type HandoffMode = 'cohort' | 'selection'
 
-type DraftCampaign = { id: string; name: string; status: string; market?: string | null }
-
 /**
- * Add to Campaign.
+ * Add to Campaign (phone) — the SAME stacking endpoint as the desk
+ * (POST /api/cockpit/entity-graph/campaign-stack).
  *
- * Two explicit modes, because they target different things and silently picking
- * one would be a correctness bug:
- *   • cohort    — hands over the *filter set*, so Campaigns re-resolves it and
- *                 picks up rows added since this screen loaded.
- *   • selection — hands over an explicit `properties.property_id in [...]`
- *                 filter, so exactly the chosen records are targeted.
+ * It used to PATCH the draft's target_filters, which REPLACED whatever the
+ * draft already targeted: run filter A into draft X, then filter B into X,
+ * and X only held B. Now the server resolves the selection or the whole
+ * filtered cohort, counts it against the campaign target graph with the
+ * builder's own readiness rule (dry run first), and pins only the
+ * targetable properties on the DRAFT, unioned with what it already holds —
+ * written by compare-and-set, so two adds never lose each other.
  *
- * Either way this writes a campaign *draft* and nothing else. It never builds
- * targets and never touches send_queue: Campaigns still runs its own REACH /
- * LAUNCH readiness, routing, suppression, template and schedulability checks
- * before anything becomes sendable. That separation is the whole point — this
- * screen decides *who*, Campaigns decides *whether*.
+ * Nothing here builds targets, schedules, launches or sends. Campaigns'
+ * Build and every gate still run on the draft.
  */
 
-async function loadDraftCampaigns(signal?: AbortSignal): Promise<DraftCampaign[]> {
-  const res = await backendClient.callBackend<{ ok: boolean; campaigns: DraftCampaign[] }>(
-    '/api/cockpit/campaigns',
-    { signal },
-  )
-  if (!res.ok || !res.data?.campaigns) return []
-  return res.data.campaigns.filter((c) => c.status === 'draft')
+type StackDraft = { id: string; name: string; pinned_properties: number; segments: number; stackable: boolean }
+type StackResult = {
+  ok: boolean
+  campaign_id: string | null
+  campaign_name: string | null
+  requested: number
+  resolved_properties: number
+  already_present: number
+  added: number
+  added_ready: number
+  added_held: number
+  held_by_reason: Record<string, number>
+  ineligible: number
+  ineligible_by_reason: Record<string, number>
+  total_after: number
+  notes?: string[]
+  created?: boolean
+}
+
+const STACKABLE: EntityScope[] = ['properties', 'master_owners', 'people']
+
+async function postStack(body: Record<string, unknown>): Promise<StackResult> {
+  const res = await backendClient.callBackend<StackResult & { message?: string }>('/api/cockpit/entity-graph/campaign-stack', { method: 'POST', body: JSON.stringify(body) })
+  if (!res.ok) throw new Error((res.upstream as { message?: string } | undefined)?.message || res.message || res.error || 'campaign_stack_failed')
+  if (!res.data?.ok) throw new Error(res.data?.message || 'campaign_stack_failed')
+  return res.data
 }
 
 type Props = {
@@ -55,266 +68,157 @@ type Props = {
   onDone: (message: string) => void
 }
 
-export function EntityGraphCampaignSheet({
-  open,
-  scope,
-  filters,
-  fieldFilters,
-  query,
-  cohortTotal,
-  selected,
-  onClose,
-  onDone,
-}: Props) {
-  // The catalog decides which field filters the campaign pipeline can resolve.
-  // Without it we report every field filter as not-carrying rather than
-  // assuming it will -- an assumed filter is how a cohort silently widens.
-  const [catalog, setCatalog] = useState<EntityGraphFilterCatalog | null>(null)
+export function EntityGraphCampaignSheet({ open, scope, filters, fieldFilters, query, cohortTotal, selected, onClose, onDone }: Props) {
   const [mode, setMode] = useState<HandoffMode>(selected.length > 0 ? 'selection' : 'cohort')
   const [target, setTarget] = useState<'new' | string>('new')
   const [name, setName] = useState('')
-  const [drafts, setDrafts] = useState<DraftCampaign[] | null>(null)
+  const [drafts, setDrafts] = useState<StackDraft[] | null>(null)
+  const [preview, setPreview] = useState<{ sig: string; data: StackResult | null; error: string | null } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [wasOpen, setWasOpen] = useState(open)
 
-  // The sheet stays mounted, so `useState` ran once with whatever the selection
-  // was at mount — usually empty. Re-derive the default on the closed → open
-  // transition, otherwise opening it with 4 records selected still defaulted to
-  // targeting the whole cohort.
+  // The sheet stays mounted: re-derive the default mode on each open.
   if (open !== wasOpen) {
     setWasOpen(open)
     if (open) {
       setMode(selected.length > 0 ? 'selection' : 'cohort')
       setError(null)
+      setPreview(null)
     }
   }
 
   useEffect(() => {
     if (!open) return
     const controller = new AbortController()
-    void loadDraftCampaigns(controller.signal).then(setDrafts).catch(() => setDrafts([]))
-    void fetchEntityGraphFilterCatalog(scope, controller.signal)
-      .then(setCatalog)
-      .catch(() => setCatalog(null))
+    setDrafts(null)
+    void backendClient.callBackend<{ ok: boolean; drafts: StackDraft[] }>('/api/cockpit/entity-graph/campaign-stack', { signal: controller.signal })
+      .then((res) => { if (!controller.signal.aborted) setDrafts(res.ok && res.data?.drafts ? res.data.drafts : []) })
+      .catch(() => { if (!controller.signal.aborted) setDrafts([]) })
     return () => controller.abort()
-  }, [open, scope])
+  }, [open])
 
-  const campaignFilters = cohortToCampaignFilters({ scope, filters, fieldFilters, catalog, mode, selected })
-  const described = describeCampaignFilters(campaignFilters)
-  const unmapped = mode === 'cohort' ? unmappedCohortFilters(filters, fieldFilters, catalog) : []
-  const targetCount = mode === 'selection' ? selected.length : cohortTotal
-  const unsupported = mode === 'cohort' && campaignFilters.length === 0 && !query
-  /**
-   * When a filter does not carry, the number on this screen is NOT the number
-   * Campaigns will resolve. Saying "Create draft · 11" beside a filter set that
-   * resolves to 8,283 is the same lie in the other direction as the handoff
-   * that showed 0 targets for five selected properties -- so the count is
-   * withheld rather than restated.
-   */
-  const countIsExact = mode === 'selection' || unmapped.length === 0
-  const countLabel = targetCount === null
-    ? '—'
-    : countIsExact
-      ? targetCount.toLocaleString()
-      : `wider than ${targetCount.toLocaleString()}`
+  const stackable = STACKABLE.includes(scope)
+  const legacy = filtersToApiParams(filters)
+  const hasFilters = fieldFilters.length > 0 || Object.values(legacy).some((v) => v !== undefined && v !== '')
+  const cohortBlocked = !stackable ? 'Campaigns target properties, owners and people.'
+    : query.trim() ? 'A search is not a cohort — clear it and use filters, or select records.'
+      : !hasFilters ? 'No filters are active — narrow the cohort first.' : null
+  const defaultName = defaultNameFor(mode, scope, selected.length, cohortTotal)
+  const body = useMemo(() => ({
+    scope,
+    mode,
+    ...(mode === 'selection' ? { ids: selected.map((r) => r.entityId) } : { ...legacy, field_filters: fieldFilters }),
+    ...(target === 'new' ? { new_campaign_name: name.trim() || defaultName } : { campaign_id: target }),
+  }), [scope, mode, selected, legacy, fieldFilters, target, name, defaultName]) // eslint-disable-line react-hooks/exhaustive-deps
+  const sig = JSON.stringify({ ...body, new_campaign_name: undefined })
+  const canRun = stackable && (mode === 'selection' ? selected.length > 0 : !cohortBlocked)
+
+  useEffect(() => {
+    if (!open || !canRun) return
+    let alive = true
+    const t = window.setTimeout(() => {
+      setPreview({ sig, data: null, error: null })
+      postStack({ ...body, dry_run: true })
+        .then((data) => { if (alive) setPreview({ sig, data, error: null }) })
+        .catch((e: unknown) => { if (alive) setPreview({ sig, data: null, error: e instanceof Error ? e.message : 'Could not count this cohort' }) })
+    }, 250)
+    return () => { alive = false; window.clearTimeout(t) }
+  }, [open, sig, canRun]) // eslint-disable-line react-hooks/exhaustive-deps -- sig encodes body
+
+  const current = preview?.sig === sig ? preview : null
+  const counts = current?.data ?? null
 
   const submit = async () => {
     setSubmitting(true)
     setError(null)
     try {
-      const label = name.trim() || defaultName(mode, scope, selected.length, cohortTotal)
-      const targetFilters = { properties: campaignFilters }
-
-      if (target === 'new') {
-        const res = await backendClient.callBackend<{ ok: boolean; campaign_id?: string; message?: string }>(
-          '/api/cockpit/campaigns',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              name: label,
-              status: 'draft',
-              // Explicitly inert. createCampaign rejects both of these anyway,
-              // but stating them keeps the intent legible at the call site.
-              auto_send_enabled: false,
-              auto_reply_mode: 'disabled',
-              metadata: { target_filters: targetFilters, source: 'entity_graph', handoff_mode: mode },
-              target_filters: targetFilters,
-            }),
-          },
-        )
-        if (!res.ok) throw new Error(res.message || res.error || 'campaign_create_failed')
-        onDone(`Draft “${label}” created. Open Campaigns to run readiness and launch checks.`)
-      } else {
-        const res = await backendClient.callBackend<{ ok: boolean; message?: string }>(
-          `/api/cockpit/campaigns/${encodeURIComponent(target)}`,
-          {
-            method: 'PATCH',
-            body: JSON.stringify({
-              metadata: { target_filters: targetFilters, source: 'entity_graph', handoff_mode: mode },
-              target_filters: targetFilters,
-            }),
-          },
-        )
-        if (!res.ok) throw new Error(res.message || res.error || 'campaign_update_failed')
-        const draftName = drafts?.find((d) => d.id === target)?.name ?? 'draft'
-        onDone(`Cohort applied to “${draftName}”. Campaigns will re-resolve targets on its next build.`)
-      }
+      const result = await postStack(body)
+      onDone(result.created
+        ? `Draft “${result.campaign_name ?? ''}” created with ${result.added.toLocaleString()} properties. Open Campaigns to build and review.`
+        : `${result.added.toLocaleString()} added to “${result.campaign_name ?? 'draft'}” · ${result.total_after.toLocaleString()} pinned in total.`)
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'campaign_handoff_failed')
+      setError(err instanceof Error ? err.message : 'campaign_stack_failed')
     } finally {
       setSubmitting(false)
     }
   }
 
+  const reasons = (map: Record<string, number>) => Object.entries(map).sort((a, b) => b[1] - a[1])
+
   return (
-    <MobileSheet
-      open={open}
-      title="Add to Campaign"
-      subtitle={scope.replace(/_/g, ' ')}
-      height="full"
-      className="egm-sheet"
-      onClose={onClose}
-    >
+    <MobileSheet open={open} title="Add to Campaign" subtitle={scope.replace(/_/g, ' ')} height="full" className="egm-sheet" onClose={onClose}>
       <div className="egc">
         <section className="egc-block">
-          <h4>What gets targeted</h4>
+          <h4>What gets added</h4>
           <div className="egc-modes">
-            <button
-              type="button"
-              className={cls('egc-mode', mode === 'cohort' && 'is-on')}
-              onClick={() => setMode('cohort')}
-            >
-              <span className="egc-mode__top">
-                <Icon name="filter" />
-                <strong>Current filtered cohort</strong>
-              </span>
-              <span className="egc-mode__count">
-                {cohortTotal === null ? '—' : cohortTotal.toLocaleString()} records
-                {unmapped.length > 0 ? ' shown · campaign resolves more' : ''}
-              </span>
-              <span className="egc-mode__note">
-                Hands over the filter set. Campaigns re-resolves it at build time, so
-                records added later are included.
-              </span>
+            <button type="button" className={cls('egc-mode', mode === 'cohort' && 'is-on')} disabled={Boolean(cohortBlocked)} onClick={() => setMode('cohort')}>
+              <span className="egc-mode__top"><Icon name="filter" /><strong>Current filtered cohort</strong></span>
+              <span className="egc-mode__count">{cohortTotal === null ? '—' : cohortTotal.toLocaleString()} records</span>
+              <span className="egc-mode__note">{cohortBlocked ?? 'Every record these filters match, resolved on the server — not just the loaded rows.'}</span>
             </button>
-
-            <button
-              type="button"
-              className={cls('egc-mode', mode === 'selection' && 'is-on')}
-              disabled={selected.length === 0}
-              onClick={() => setMode('selection')}
-            >
-              <span className="egc-mode__top">
-                <Icon name="check-double" />
-                <strong>Selected records</strong>
-              </span>
+            <button type="button" className={cls('egc-mode', mode === 'selection' && 'is-on')} disabled={selected.length === 0 || !stackable} onClick={() => setMode('selection')}>
+              <span className="egc-mode__top"><Icon name="check-double" /><strong>Selected records</strong></span>
               <span className="egc-mode__count">{selected.length.toLocaleString()} selected</span>
-              <span className="egc-mode__note">
-                {selected.length === 0
-                  ? 'Select records in the list to enable this.'
-                  : 'Pins an explicit id list. Exactly these records, nothing else.'}
-              </span>
+              <span className="egc-mode__note">{selected.length === 0 ? 'Select records in the list to enable this.' : 'Exactly these records.'}</span>
             </button>
           </div>
         </section>
 
         <section className="egc-block">
-          <h4>Filters handed to Campaigns</h4>
-          {described.length > 0 ? (
-            <ul className="egc-filters">
-              {described.map((line) => (
-                <li key={line.key}>
-                  <span className="egc-filters__key">{line.label}</span>
-                  <span className="egc-filters__val">{line.value}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="egc-warn">
-              {mode === 'selection'
-                ? 'No records selected.'
-                : 'No filters are active, so this would target the entire universe. Narrow the cohort first.'}
-            </p>
-          )}
-          {unmapped.length > 0 ? (
-            <p className="egc-warn">
-              Not carried over (Campaigns has no equivalent target filter):{' '}
-              {unmapped.join(' · ')}. The campaign cohort will be wider than what you see here.
-            </p>
-          ) : null}
-          {query ? (
-            <p className="egc-warn">
-              The active search “{query}” is not a campaign filter and will not be carried over —
-              only the filters listed above are.
-            </p>
-          ) : null}
-        </section>
-
-        <section className="egc-block">
-          <h4>Destination</h4>
-          <button
-            type="button"
-            className={cls('egc-dest', target === 'new' && 'is-on')}
-            onClick={() => setTarget('new')}
-          >
-            <Icon name="spark" />
-            <span>Create new campaign</span>
+          <h4>Destination · drafts only</h4>
+          <button type="button" className={cls('egc-dest', target === 'new' && 'is-on')} onClick={() => setTarget('new')}>
+            <Icon name="spark" /><span>Create new draft</span>
           </button>
-          {drafts === null ? (
-            <p className="egc-hint">Loading draft campaigns…</p>
-          ) : drafts.length === 0 ? (
-            <p className="egc-hint">No draft campaigns to add to.</p>
-          ) : (
-            drafts.map((draft) => (
-              <button
-                key={draft.id}
-                type="button"
-                className={cls('egc-dest', target === draft.id && 'is-on')}
-                onClick={() => setTarget(draft.id)}
-              >
-                <Icon name="file-text" />
-                <span>{draft.name}</span>
-                <em>draft</em>
-              </button>
-            ))
-          )}
-
+          {drafts === null ? <p className="egc-hint">Loading draft campaigns…</p>
+            : drafts.length === 0 ? <p className="egc-hint">No draft campaigns to add to.</p>
+              : drafts.map((draft) => (
+                <button key={draft.id} type="button" disabled={!draft.stackable} className={cls('egc-dest', target === draft.id && 'is-on')} onClick={() => setTarget(draft.id)}>
+                  <Icon name="file-text" />
+                  <span>{draft.name}</span>
+                  <em>{draft.stackable ? `${draft.pinned_properties.toLocaleString()} pinned` : 'targets by filters'}</em>
+                </button>
+              ))}
           {target === 'new' ? (
             <label className="egm-field" style={{ marginTop: 10 }}>
               <span>Campaign name</span>
-              <input
-                value={name}
-                placeholder={defaultName(mode, scope, selected.length, cohortTotal)}
-                onChange={(e) => setName(e.target.value)}
-              />
+              <input value={name} placeholder={defaultName} onChange={(e) => setName(e.target.value)} />
             </label>
           ) : null}
         </section>
 
+        <section className="egc-block" aria-live="polite">
+          <h4>What will be added</h4>
+          {!canRun ? <p className="egc-warn">{mode === 'cohort' ? cohortBlocked : 'No records selected.'}</p>
+            : current?.error ? <p className="egc-error">{current.error}</p>
+              : !counts ? <p className="egc-hint">Counting against the campaign audience…</p>
+                : (
+                  <ul className="egc-filters">
+                    <li><span className="egc-filters__key">Properties</span><span className="egc-filters__val">{counts.resolved_properties.toLocaleString()}</span></li>
+                    <li><span className="egc-filters__key">Already on the draft</span><span className="egc-filters__val">{counts.already_present.toLocaleString()}</span></li>
+                    <li><span className="egc-filters__key">Ready</span><span className="egc-filters__val">{counts.added_ready.toLocaleString()}</span></li>
+                    <li><span className="egc-filters__key">Held (pinned)</span><span className="egc-filters__val">{counts.added_held.toLocaleString()}</span></li>
+                    {reasons(counts.held_by_reason).map(([k, n]) => <li key={`h:${k}`}><span className="egc-filters__key">· {smsBlockLabel(k)}</span><span className="egc-filters__val">{n.toLocaleString()}</span></li>)}
+                    <li><span className="egc-filters__key">Not targetable</span><span className="egc-filters__val">{counts.ineligible.toLocaleString()}</span></li>
+                    {reasons(counts.ineligible_by_reason).map(([k, n]) => <li key={`i:${k}`}><span className="egc-filters__key">· {smsBlockLabel(k)}</span><span className="egc-filters__val">{n.toLocaleString()}</span></li>)}
+                    <li><span className="egc-filters__key">Draft total after</span><span className="egc-filters__val">{counts.total_after.toLocaleString()}</span></li>
+                  </ul>
+                )}
+          {(counts?.notes ?? []).map((n) => <p key={n} className="egc-hint">{n}</p>)}
+        </section>
+
         <p className="egc-contract">
           <Icon name="shield" />
-          This creates or updates a campaign <strong>draft</strong> only. Entity Graph never
-          builds targets or writes queue rows — Campaigns runs REACH and LAUNCH readiness,
-          routing, suppression, template and schedulability checks before anything can send.
+          Only the draft’s target list changes. Nothing is built, scheduled, launched or sent — Campaigns runs Build and every gate (suppression, contactability, identity, sender coverage, templates) on the draft.
         </p>
 
         {error ? <p className="egc-error">{error}</p> : null}
 
         <div className="egm-filters__footer">
           <button type="button" className="egm-btn is-ghost" onClick={onClose}>Cancel</button>
-          <button
-            type="button"
-            className="egm-btn is-primary"
-            disabled={submitting || described.length === 0 || unsupported}
-            onClick={() => void submit()}
-          >
-            {submitting
-              ? 'Saving…'
-              : target === 'new'
-                ? `Create draft · ${countLabel}`
-                : `Apply to draft · ${countLabel}`}
+          <button type="button" className="egm-btn is-primary" disabled={submitting || !canRun || !counts || counts.added === 0} onClick={() => void submit()}>
+            {submitting ? 'Adding…' : counts ? `Add ${counts.added.toLocaleString()} to ${target === 'new' ? 'new draft' : 'draft'}` : 'Add to draft'}
           </button>
         </div>
       </div>
@@ -322,7 +226,7 @@ export function EntityGraphCampaignSheet({
   )
 }
 
-function defaultName(mode: HandoffMode, scope: EntityScope, selectedCount: number, cohortTotal: number | null): string {
+function defaultNameFor(mode: HandoffMode, scope: EntityScope, selectedCount: number, cohortTotal: number | null): string {
   const size = mode === 'selection' ? selectedCount : (cohortTotal ?? 0)
   const noun = scope === 'properties' ? 'properties' : scope.replace(/_/g, ' ')
   return `Entity Graph · ${size.toLocaleString()} ${noun}`
