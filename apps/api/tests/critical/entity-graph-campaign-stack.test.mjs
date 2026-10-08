@@ -92,9 +92,10 @@ test('unreadable review flags refuse — eligibility is never assumed', async ()
 
 function campaignsFake(rows, log) {
   const store = new Map(rows.map((c) => [c.id, structuredClone(c)]))
+  const api = {}
   return {
     store,
-    api: {
+    api: Object.assign(api, {
       getCampaign: async (id) => ({ campaign: store.has(id) ? structuredClone(store.get(id)) : null }),
       createCampaign: async (payload) => { log.push({ create: payload }); const id = 'new-1'; store.set(id, { id, name: payload.name, status: 'draft', metadata: { ...payload.metadata, target_filters: payload.target_filters } }); return { ok: true, campaign_id: id, campaign: store.get(id) } },
       // compare-and-set on updated_at, as the default does against campaigns (trigger-bumped)
@@ -105,13 +106,14 @@ function campaignsFake(rows, log) {
         log.push({ update: id, payload: patch })
         Object.assign(c, structuredClone(patch))
         c.updated_at = `v${Number(String(c.updated_at || 'v0').slice(1)) + 1}`
-        return true
+        return c.updated_at
       },
-      afterStackWrite: async (id) => { log.push({ synced: id }) },
+      syncFilters: async (id) => { if (api.failSync) throw new Error('campaign_filters insert failed'); log.push({ synced: id }) },
+      recordStackEvent: async (id) => { if (api.failEvent) throw new Error('event insert failed'); log.push({ event: id }) },
       explicitSelectedPropertyIds,
       resolveCampaignTargetMode,
       normalizeCampaignStatus: (s) => String(s || '').toLowerCase(),
-    },
+    }),
   }
 }
 
@@ -322,4 +324,38 @@ test('the stacked cohort is exactly the browse cohort: same filters, same rows, 
   assert.equal(new Set(cohort.propertyIds).size, cohort.propertyIds.length, 'no duplicate ids')
   assert.ok(!cohort.propertyIds.includes('canaryprop_1'), 'test fixtures excluded, as in browse')
   assert.equal(browsed.pagination.total, cohort.propertyIds.length, 'the dialog count is the grid count')
+})
+
+test('the pins land but the filter mirror fails: success + warning, then the next read heals it', async () => {
+  const { listStackableDrafts } = await import('../../src/lib/domain/entity-graph/entity-graph-campaign-stack.js')
+  const log = []
+  const supabase = fakeSupabase({ campaign_target_graph: [ready('A'), ready('B')] }, log)
+  const { api, store } = campaignsFake([{ id: 'X', name: 'X', status: 'draft', metadata: {}, updated_at: 'v0' }], log)
+  const deps = { supabase, campaigns: api, fetchEntityContactReviewBlocks: async () => ({ ok: true, blocked: new Set() }) }
+  api.failSync = true
+  api.failEvent = true
+  const out = await stackEntityGraphCohort({ campaign_id: 'X', scope: 'properties', mode: 'selection', ids: ['A', 'B'] }, deps)
+  assert.equal(out.ok, true, 'a landed write is not reported as a failure')
+  assert.equal(out.added, 2)
+  assert.deepEqual(out.warnings.map((w) => w.code), ['campaign_filters_sync_pending', 'activity_event_not_recorded'])
+  assert.deepEqual([...explicitSelectedPropertyIds(store.get('X'))].sort(), ['A', 'B'], 'the pins are on the draft')
+  assert.equal(store.get('X').metadata.entity_graph_filters_sync.state, 'pending')
+
+  // a retry of the same add is idempotent: nothing new, nothing doubled
+  const again = await stackEntityGraphCohort({ campaign_id: 'X', scope: 'properties', mode: 'selection', ids: ['A', 'B'] }, deps)
+  assert.equal(again.added, 0)
+  assert.equal(again.already_present, 2)
+
+  // self-heal on the next read of the drafts
+  api.failSync = false
+  const drafts = await listStackableDrafts({ supabase: fakeSupabase({ campaigns: [store.get('X')] }), campaigns: api })
+  assert.ok(log.some((e) => e.synced === 'X'), 'campaign_filters re-synced')
+  assert.equal(drafts[0].sync_pending, false)
+  assert.equal(store.get('X').metadata.entity_graph_filters_sync, undefined, 'pending flag cleared by CAS')
+
+  // a clean write clears its own flag and carries no warning
+  const { api: api2, store: store2 } = campaignsFake([{ id: 'Y', name: 'Y', status: 'draft', metadata: {}, updated_at: 'v0' }], [])
+  const ok = await stackEntityGraphCohort({ campaign_id: 'Y', scope: 'properties', mode: 'selection', ids: ['A'] }, { ...deps, campaigns: api2 })
+  assert.equal(ok.warnings, undefined)
+  assert.equal(store2.get('Y').metadata.entity_graph_filters_sync, undefined)
 })

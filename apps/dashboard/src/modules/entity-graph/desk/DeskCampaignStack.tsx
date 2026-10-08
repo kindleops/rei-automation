@@ -40,6 +40,8 @@ export type StackResult = {
   notes?: string[]
   created?: boolean
   unchanged?: boolean
+  /** The pins landed; bookkeeping (filter mirror / activity entry) is pending and self-heals. */
+  warnings?: Array<{ code: string; message: string }>
 }
 
 type Props = {

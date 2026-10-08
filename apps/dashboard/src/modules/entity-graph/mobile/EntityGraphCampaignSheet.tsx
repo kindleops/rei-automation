@@ -45,6 +45,7 @@ type StackResult = {
   total_after: number
   notes?: string[]
   created?: boolean
+  warnings?: Array<{ code: string; message: string }>
 }
 
 const STACKABLE: EntityScope[] = ['properties', 'master_owners', 'people']
@@ -136,7 +137,7 @@ export function EntityGraphCampaignSheet({ open, scope, filters, fieldFilters, q
       const result = await postStack(body)
       onDone(result.created
         ? `Draft “${result.campaign_name ?? ''}” created with ${result.added.toLocaleString()} properties. Open Campaigns to build and review.`
-        : `${result.added.toLocaleString()} added to “${result.campaign_name ?? 'draft'}” · ${result.total_after.toLocaleString()} pinned in total.`)
+        : `${result.added.toLocaleString()} added to “${result.campaign_name ?? 'draft'}” · ${result.total_after.toLocaleString()} pinned in total.${result.warnings?.length ? ` ${result.warnings.map((w) => w.message).join(' ')}` : ''}`)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'campaign_stack_failed')

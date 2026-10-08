@@ -233,7 +233,7 @@ function pinnedClause(ids) {
 
 /**
  * Add a cohort / selection to a draft campaign (new or existing).
- * deps: { supabase, campaigns: { getCampaign, createCampaign, casUpdate, afterStackWrite, explicitSelectedPropertyIds, resolveCampaignTargetMode, normalizeCampaignStatus } }
+ * deps: { supabase, campaigns: { getCampaign, createCampaign, casUpdate, syncFilters, recordStackEvent, explicitSelectedPropertyIds, resolveCampaignTargetMode, normalizeCampaignStatus } }
  */
 export async function stackEntityGraphCohort(input = {}, deps = {}) {
   const campaignsApi = deps.campaigns || await loadCampaignsApi()
@@ -363,16 +363,49 @@ export async function stackEntityGraphCohort(input = {}, deps = {}) {
     const metadata = {
       ...(row.metadata || {}),
       target_filters: targetFilters,
+      // cleared once campaign_filters is synced; a pending flag is healed on the next read
+      entity_graph_filters_sync: { state: 'pending', at: new Date().toISOString() },
       entity_graph_stack: [...previous, { ...segment, already_present: landed.already_present, added_ready: landed.added_ready, added_held: landed.added_held }].slice(-STACK_MAX_SEGMENTS),
     }
     const written = await campaignsApi.casUpdate(row.id, row.updated_at, { metadata, market: null, state: null }, deps)
     if (written) {
-      await campaignsApi.afterStackWrite(row.id, targetFilters, landed, deps)
-      return landed
+      /**
+       * THE PINS HAVE LANDED. What follows is bookkeeping: the campaign_filters
+       * mirror and the activity event. A failure there must not report the
+       * landed write as a failure (the operator would re-run and see "already
+       * present") — it returns success with a warning, and the pending flag
+       * lets the next read re-sync (replaceCampaignFilters is idempotent:
+       * delete + insert of the same rows).
+       */
+      const warnings = []
+      const synced = await syncStackFilters(campaignsApi, { id: row.id, updatedAt: typeof written === 'string' ? written : null, metadata }, deps)
+      if (!synced.ok) warnings.push({ code: 'campaign_filters_sync_pending', message: 'The properties were pinned. The campaign’s filter mirror did not update yet; it re-syncs automatically the next time this draft is read.' })
+      try {
+        await campaignsApi.recordStackEvent(row.id, landed, deps)
+      } catch {
+        warnings.push({ code: 'activity_event_not_recorded', message: 'The properties were pinned, but the activity entry could not be written.' })
+      }
+      return warnings.length ? { ...landed, warnings } : landed
     }
   }
   throw new StackRefusal(409, 'campaign_changed', 'The campaign kept changing while this was being added. Run it again.')
 }
+
+/** Sync campaign_filters from the draft's pins and clear the pending flag (by CAS — a later write keeps its own flag). Never throws. */
+export async function syncStackFilters(api, { id, updatedAt, metadata }, deps = {}) {
+  try {
+    await api.syncFilters(id, metadata?.target_filters || {}, deps)
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) }
+  }
+  if (updatedAt) {
+    const { entity_graph_filters_sync: _flag, ...clean } = metadata || {}
+    await api.casUpdate(id, updatedAt, { metadata: clean }, deps).catch(() => null)
+  }
+  return { ok: true }
+}
+
+const syncPending = (row) => row?.metadata?.entity_graph_filters_sync?.state === 'pending'
 
 function safeJson(value) {
   if (!value) return []
@@ -393,6 +426,12 @@ export async function listStackableDrafts(deps = {}) {
   const api = deps.campaigns || await loadCampaignsApi()
   const { data, error } = await supabase.from('campaigns').select('id, name, status, metadata, updated_at').eq('status', 'draft').order('updated_at', { ascending: false }).limit(100)
   if (error) throw error
+  // self-heal: a draft whose last stack landed but whose filter mirror did not sync
+  const healed = new Set()
+  for (const c of (data || []).filter(syncPending)) {
+    const r = await syncStackFilters(api, { id: c.id, updatedAt: c.updated_at, metadata: c.metadata }, deps)
+    if (r.ok) healed.add(c.id)
+  }
   return (data || []).map((c) => {
     const mode = api.resolveCampaignTargetMode(c.metadata)
     const stackable = ['none', 'explicit'].includes(mode.target_mode)
@@ -406,6 +445,7 @@ export async function listStackableDrafts(deps = {}) {
       from_entity_graph: c.metadata?.source === 'entity_graph',
       stackable,
       reason: stackable ? null : 'campaign_has_dynamic_filters',
+      sync_pending: syncPending(c) && !healed.has(c.id),
     }
   })
 }
@@ -419,12 +459,13 @@ async function loadCampaignsApi() {
       const supabase = d.supabase || defaultSupabase
       let q = supabase.from('campaigns').update(patch).eq('id', id).eq('status', 'draft')
       q = expectedUpdatedAt ? q.eq('updated_at', expectedUpdatedAt) : q.is('updated_at', null)
-      const { data, error } = await q.select('id')
+      const { data, error } = await q.select('id, updated_at')
       if (error) throw error
-      return Array.isArray(data) && data.length === 1
+      // the new updated_at (the token for a follow-up CAS), or false when the row moved
+      return Array.isArray(data) && data.length === 1 ? (data[0].updated_at || true) : false
     },
-    afterStackWrite: async (id, targetFilters, landed, d = {}) => {
-      await service.replaceCampaignFilters(id, targetFilters, d)
+    syncFilters: (id, targetFilters, d = {}) => service.replaceCampaignFilters(id, targetFilters, d),
+    recordStackEvent: async (id, landed, d = {}) => {
       await service.recordCampaignEvent({
         campaign_id: id,
         event_type: 'campaign.entity_graph_stacked',

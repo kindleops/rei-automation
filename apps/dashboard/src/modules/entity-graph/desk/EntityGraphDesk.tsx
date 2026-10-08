@@ -474,6 +474,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   const openStack = (ids: string[], forScope: EntityScope = scope, label = cohortLabel, cohort = true) => setStack({ open: true, scope: forScope, ids, label, cohort })
   const onStacked = (r: StackResult) => {
     lcToast({ title: r.created ? `Draft “${r.campaign_name ?? ''}” created · ${fmtCount(r.added)} properties` : `${fmtCount(r.added)} added to “${r.campaign_name ?? 'draft'}” · ${fmtCount(r.total_after)} total`, severity: 'success' })
+    for (const w of r.warnings ?? []) lcToast({ title: w.message, severity: 'info' })
   }
 
   /* ── The relationship view: map + campaign for the network on screen ───── */
