@@ -377,6 +377,33 @@ export function canonicalMarketKey(market, marketRegion, city, state) {
   return resolveEntityGraphMarket({ market, marketRegion, city, state }).canonicalKey || ''
 }
 
+/**
+ * THE ENRICHED PROPERTY TYPE (owner, 2026-10-08: "use storage, mixed use…
+ * instead of just apartment / multifamily / other"). Most specific source
+ * first: the classifier's asset_subclass, the vendor acquisition bucket, the
+ * vendor's own type tokens, then the unit count / style for 2–4 units.
+ */
+const BUCKET_TYPE = Object.freeze({ STORAGE_FACILITIES: 'Storage facility', STRIP_CENTERS: 'Strip center / retail', COMMERCIAL_PROPERTIES: 'Commercial', APARTMENT_BUILDINGS: 'Apartment building', MOBILE_HOME_PARKS: 'Mobile home park', MIXED_USE: 'Mixed use' })
+const FLAG_TYPE = [['storage units', 'Storage facility'], ['strip malls', 'Strip center / retail'], ['mixed use', 'Mixed use'], ['mobile home', 'Mobile home park']]
+const SMALL_MF = { 2: 'Duplex', 3: 'Triplex', 4: 'Fourplex' }
+export function enrichedPropertyType(row = {}, fallback = null) {
+  const sub = clean(row.asset_subclass)
+  if (sub && !/^single family$/i.test(sub)) return sub.replace(/\bProperty$/, '').trim()
+  const bucket = BUCKET_TYPE[clean(row.acquisition_bucket).toUpperCase()]
+  if (bucket) return bucket
+  const flags = lower(row.property_flags_text)
+  for (const [token, label] of FLAG_TYPE) if (flags.includes(token)) return label
+  const units = Number(row.units_count)
+  const style = lower(row.style)
+  if (/duplex/.test(style)) return 'Duplex'
+  if (/triplex/.test(style)) return 'Triplex'
+  if (/quad|fourplex/.test(style)) return 'Fourplex'
+  const base = fallback ?? normalizeAssetTypeLabel(row.normalized_asset_class || row.property_type)
+  if (Number.isFinite(units) && SMALL_MF[units] && base !== 'SFR') return SMALL_MF[units]
+  if (Number.isFinite(units) && units >= 5 && base !== 'SFR') return `Apartment · ${units} units`
+  return base
+}
+
 export function formatPropertySummary(row) {
   const street = cleanAddressPart(row.property_address_street) || extractStreetFromFull(row.property_address_full)
   const city = cleanAddressPart(row.property_address_city)
@@ -409,7 +436,7 @@ export function formatPropertySummary(row) {
   return {
     title,
     subtitle: subtitleParts.join(', '),
-    assetType: assetType || undefined,
+    assetType: enrichedPropertyType(row, assetType) || undefined,
     units,
     marketLabel: market.displayMarket,
     marketKey: market.canonicalKey,

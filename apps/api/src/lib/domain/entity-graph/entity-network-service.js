@@ -25,7 +25,7 @@
 import { displayableCompanyName } from './buyer-name-privacy.js'
 import { equityTruth, repairTruth } from './entity-graph-truth.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
-import { clean, formatReadablePhone, parseJsonArray } from './entity-graph-normalize.js'
+import { clean, enrichedPropertyType, formatReadablePhone, parseJsonArray } from './entity-graph-normalize.js'
 
 const PORTFOLIO_CAP = 60
 const RELATED_CAP = 12
@@ -33,7 +33,7 @@ const RELATED_CAP = 12
 const PROPERTY_SELECT = [
   'property_id', 'master_owner_id', 'property_address_full', 'property_address_city', 'property_address_state',
   'property_address_zip', 'property_zip', 'property_address_county_name', 'market', 'latitude', 'longitude',
-  'property_type', 'asset_type_label', 'normalized_asset_class', 'units_count', 'total_bedrooms', 'total_baths',
+  'property_type', 'asset_type_label', 'normalized_asset_class', 'asset_subclass', 'acquisition_bucket', 'style', 'units_count', 'total_bedrooms', 'total_baths',
   'building_square_feet', 'year_built', 'lot_acreage', 'estimated_value', 'equity_percent', 'equity_amount',
   'total_loan_balance', 'total_loan_amt', 'total_loan_payment', 'active_lien', 'tax_amt', 'tax_delinquent',
   'tax_delinquent_year', 'sale_date', 'sale_price', 'last_sale_doc_type', 'ownership_years', 'streetview_image',
@@ -102,7 +102,7 @@ function mapProperty(p) {
     market: clean(p.market),
     lat: num(p.latitude),
     lng: num(p.longitude),
-    type: clean(p.asset_type_label || p.property_type || p.normalized_asset_class),
+    type: enrichedPropertyType(p, clean(p.asset_type_label || p.property_type || p.normalized_asset_class) || null) || '',
     units: num(p.units_count),
     beds: num(p.total_bedrooms),
     baths: num(p.total_baths),

@@ -44,6 +44,7 @@ const PROPERTY_SUMMARY_SELECT = [
   'latitude', 'longitude', 'property_type', 'property_class', 'normalized_asset_class',
   'estimated_value', 'equity_percent', 'equity_amount', 'total_loan_balance',
   'property_flags_text', 'owner_name', 'is_corporate_owner', 'out_of_state_owner',
+  'asset_subclass', 'acquisition_bucket', 'style',
   'tax_delinquent', 'active_lien',
   'total_bedrooms', 'total_baths', 'building_square_feet', 'units_count', 'year_built',
 ].join(',')
@@ -58,7 +59,7 @@ const PROPERTY_BROWSE_SOURCE = 'v_entity_graph_properties'
 const PROPERTY_BROWSE_SELECT = [
   PROPERTY_SUMMARY_SELECT,
   'rec_mortgage_count', 'rec_mortgage_balance', 'rec_first_rate', 'rec_first_lender', 'rec_has_private_lender',
-  'rec_lien_count', 'rec_has_probate', 'rec_has_lis_pendens', 'rec_has_death_record', 'rec_has_tax_lien',
+  'rec_lien_count', 'rec_lien_categories', 'rec_lien_amount_due', 'rec_last_sale_doc_type', 'rec_has_probate', 'rec_has_lis_pendens', 'rec_has_death_record', 'rec_has_tax_lien',
   'rec_has_judgment', 'rec_has_default_notice', 'rec_foreclosure_count', 'rec_foreclosure_stage', 'rec_auction_date',
   'rec_sale_count', 'rec_last_sale_date', 'rec_last_sale_price', 'rec_last_sale_distress', 'rec_years_owned',
   'rec_owner_buyer_id', 'rec_owner_buyer_status', 'rec_owner_buyer_acquisitions', 'rec_owner_buyer_basis',
@@ -555,6 +556,10 @@ function propertyRecordSummary(row) {
     firstRate: row.rec_first_rate ?? undefined,
     firstLender: row.rec_first_lender || undefined,
     lienCount: row.rec_lien_count ?? 0,
+    // which liens, not just how many: the recorded document categories + the amount due
+    lienCategories: Array.isArray(row.rec_lien_categories) ? row.rec_lien_categories.filter(Boolean) : [],
+    lienAmountDue: row.rec_lien_amount_due ?? undefined,
+    lastSaleDocType: row.rec_last_sale_doc_type || undefined,
     saleCount: row.rec_sale_count ?? 0,
     lastSaleDate: row.rec_last_sale_date || undefined,
     lastSalePrice: row.rec_last_sale_price ?? undefined,
