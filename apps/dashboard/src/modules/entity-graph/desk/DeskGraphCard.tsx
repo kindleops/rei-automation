@@ -158,10 +158,10 @@ export function nodeCardFacts(node: NetworkNode, network: EntityNetwork, outreac
   return empty
 }
 
-export function GraphHoverCard({ node, network, outreach, style }: { node: NetworkNode; network: EntityNetwork; outreach: Map<string, OutreachState | null>; style?: CSSProperties }) {
+export function GraphHoverCard({ node, network, outreach, style, measure }: { node: NetworkNode; network: EntityNetwork; outreach: Map<string, OutreachState | null>; style?: CSSProperties; measure?: (height: number) => void }) {
   const f = nodeCardFacts(node, network, outreach)
   return (
-    <div className={cx('egdk-gcard', `is-${node.type}`)} role="status" style={style}>
+    <div ref={(el) => { if (el && measure) measure(el.offsetHeight) }} className={cx('egdk-gcard', `is-${node.type}`)} role="status" style={style}>
       <div className="egdk-gcard__head">
         <span className={cx('egdk-dot', `is-${node.type === 'related_owner' ? 'related' : node.type === 'phone' || node.type === 'email' ? 'contact' : node.type}`)} aria-hidden="true" />
         <span className="egdk-gcard__type">{TYPE_LABEL[node.type] ?? node.type}</span>

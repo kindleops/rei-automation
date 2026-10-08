@@ -38,6 +38,7 @@ export function DeskGraph({ network, compact = false, hiddenTypes, onOpen, onExp
   const [expanded, setExpanded] = useState(false)
   const [hover, setHover] = useState<string | null>(null)
   const [hoverAt, setHoverAt] = useState<{ x: number; y: number } | null>(null)
+  const [cardH, setCardH] = useState(360)
   // outreach for the network's properties: fetched ONCE per network, read by the hover card
   const propertyIds = useMemo(() => (compact ? [] : network.properties.map((p) => p.id)), [network, compact])
   const outreach = useNetworkOutreach(propertyIds)
@@ -233,7 +234,8 @@ export function DeskGraph({ network, compact = false, hiddenTypes, onOpen, onExp
               node={hoverNode}
               network={network}
               outreach={outreach}
-              style={hoverAt ? cardPosition(hoverAt, box) : undefined}
+              style={hoverAt ? cardPosition(hoverAt, box, cardH) : undefined}
+              measure={setCardH}
             />
           ) : null}
         </>
@@ -257,10 +259,10 @@ function truncate(s: string, n: number): string {
   return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t
 }
 
-/** Beside the pointer, flipped to stay inside the pane (card ≈ 320 × 360). */
-function cardPosition(at: { x: number; y: number }, box: { w: number; h: number }): CSSProperties {
+/** Beside the pointer, flipped / lifted to stay inside the pane (the card's measured height). */
+function cardPosition(at: { x: number; y: number }, box: { w: number; h: number }, measured: number): CSSProperties {
   const W = 320
-  const H = 360
+  const H = Math.min(measured, box.h - 16)
   const left = at.x + 18 + W > box.w ? Math.max(8, at.x - 18 - W) : at.x + 18
   const top = Math.min(Math.max(8, at.y - 40), Math.max(8, box.h - H - 8))
   return { left, top, right: 'auto', bottom: 'auto' }

@@ -102,7 +102,7 @@ type Props = {
 
 const PAGE_SIZE = 60
 const NO_FILTERS: EntityGraphFieldFilter[] = []
-const OUTREACH_SEED = ['lastContact', 'stage', 'status', 'smsEligible']
+const OUTREACH_SEED = ['smsEligible', 'lastContact', 'stage', 'status']
 const RAIL_KEY = 'nexus.entityGraph.desk.rail.v1'
 const readRailCollapsed = (uid: string): boolean => { try { return window.localStorage.getItem(`${RAIL_KEY}:${uid}`) === 'collapsed' } catch { return false } }
 const rowKey = (r: EntitySearchResult) => `${r.entityType}:${r.entityId}`
@@ -317,9 +317,15 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   const [inspectorOpen, setInspectorOpen] = useState(() => Boolean(anchorFromContext(universalContext)))
   // The inspector docks wherever the grid keeps ≥ ~600px; on a mid-width pane
   // an open inspector folds the rail (auto) rather than squeezing the grid.
-  const railW = narrow ? 44 : railCollapsed ? 44 : 272
-  const inspectorMode: 'dock' | 'float' = wide && width - railW - 440 >= 600 ? 'dock' : 'float'
-  const railShown = narrow ? railOverOpen : !railCollapsed
+  // The relationship view needs the width: with an open inspector that would
+  // otherwise FLOAT over the graph, the rail shows as its slim strip (filter
+  // count still in view; one click re-expands it) so the inspector can dock.
+  const [railGraphOverride, setRailGraphOverride] = useState(false)
+  const fitsWith = (rw: number) => wide && width - rw - 440 >= 600
+  const graphFold = center === 'graph' && inspectorOpen && !narrow && !railCollapsed && !railGraphOverride && !fitsWith(272) && fitsWith(44)
+  const railW = narrow ? 44 : railCollapsed || graphFold ? 44 : 272
+  const inspectorMode: 'dock' | 'float' = fitsWith(railW) ? 'dock' : 'float'
+  const railShown = narrow ? railOverOpen : !railCollapsed && !graphFold
   // A subject arriving from another app (Map, Inbox, a deep link) re-anchors the inspector.
   const ctxAnchor = anchorFromContext(universalContext)
   const ctxKey = anchorKey(ctxAnchor)
@@ -568,7 +574,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       </header>
 
       <div className="egdk-bar">
-        <LCIconButton icon="filter" label={railShown ? 'Collapse filters' : 'Show filters'} size="sm" selected={railShown} count={filters.length || null} onClick={() => (narrow ? setRailOverOpen((o) => !o) : setRailCollapsed(railShown))} className="egdk-bar__rail" />
+        <LCIconButton icon="filter" label={railShown ? 'Collapse filters' : 'Show filters'} size="sm" selected={railShown} count={filters.length || null} onClick={() => { if (narrow) { setRailOverOpen((o) => !o); return } if (!railShown && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(railShown) }} className="egdk-bar__rail" />
         <LCTabs items={scopeTabs} value={scope} onChange={(id) => { setScope(id as EntityScope); setSelected(new Set()) }} label="Entity scope" variant="line" className="egdk-bar__tabs" />
         <div className="egdk-bar__tools">
           {stackScopeSupported(scope) ? (
@@ -583,7 +589,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
 
       <div className="egdk-body">
         {narrow && !railShown ? <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed onCollapsedChange={() => setRailOverOpen(true)} />
-          : <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed={!railShown} onCollapsedChange={(c) => (narrow ? setRailOverOpen(!c) : setRailCollapsed(c))} />}
+          : <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed={!railShown} onCollapsedChange={(c) => { if (narrow) { setRailOverOpen(!c); return } if (!c && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(c) }} />}
         <main className="egdk-center" aria-label={center === 'grid' ? 'Records' : 'Relationship view'}>
           {center === 'grid' ? (
             <>

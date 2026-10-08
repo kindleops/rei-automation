@@ -727,3 +727,29 @@ html.is-desktop-modern .egdk-gcard__hint { font-size: 11px; color: var(--lc-acce
 .egdk-cols__orderitem span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .egdk-cols__x { border: 0; background: transparent; color: var(--lc-ink-3); cursor: pointer; padding: 2px; border-radius: 5px; display: grid; place-items: center; }
 .egdk-cols__x:hover { color: var(--lc-ink-1); background: rgba(var(--lc-edge-rgb), 0.1); }
+
+/* QA 2026-10-08: long chips stay inside the rail; card never taller than the pane */
+html.is-desktop-modern .egdk-rail__active > * { max-width: 100%; min-width: 0; }
+html.is-desktop-modern .egdk-rail__active .lc-chip { max-width: 100%; }
+html.is-desktop-modern .egdk-rail__active .lc-chip > span:first-child,
+html.is-desktop-modern .egdk-rail__active .lc-chip__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.is-desktop-modern .egdk-gcard { max-height: calc(100% - 16px); overflow: hidden; }
+.egdk-stack__fig span, .egdk-stack__fig small { white-space: normal; overflow: visible; text-overflow: clip; }
+
+/* QA 2026-10-08 · a 50% pane: the tool bar wraps (scope tabs keep a full
+   row instead of collapsing to nothing) and the KPI strip stays one row */
+@container egdk (max-width: 820px) {
+  html.is-desktop-modern .egdk-bar { flex-wrap: wrap; row-gap: 6px; }
+  html.is-desktop-modern .egdk-bar__tabs { order: 3; flex: 1 1 100%; }
+  html.is-desktop-modern .egdk-bar__tools { margin-left: auto; padding-bottom: 0; }
+  html.is-desktop-modern .egdk-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  html.is-desktop-modern .egdk-kpi { padding: 7px 10px 8px; }
+  html.is-desktop-modern .egdk-kpi__value { font-size: 16px; line-height: 20px; }
+  html.is-desktop-modern .egdk-kpi__basis { display: none; }
+  html.is-desktop-modern .egdk-tablebar { flex-wrap: wrap; }
+  html.is-desktop-modern .egdk-tablebar__search { flex: 1 1 100%; }
+  html.is-desktop-modern .egdk-graphpane__actions { margin-left: 0; }
+}
+@container egdk (max-width: 640px) {
+  html.is-desktop-modern .egdk-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

@@ -41,7 +41,7 @@ const GRAPH_SELECT = [
 ].join(',')
 const THREAD_SELECT = [
   'thread_key', 'property_id', 'latest_message_at', 'latest_direction', 'latest_message_body', 'seller_stage', 'stage',
-  'conversation_status', 'status', 'inbox_bucket', 'is_suppressed', 'last_inbound_at', 'last_outbound_at',
+  'conversation_status', 'status', 'is_suppressed', 'last_inbound_at', 'last_outbound_at',
 ].join(',')
 const OPP_SELECT = 'id, primary_property_id, acquisition_stage, opportunity_status, universal_status, last_contact_at'
 const TARGET_SELECT = 'property_id, campaign_id, target_status, block_reason, created_at'
@@ -198,7 +198,7 @@ export async function getEntityGraphOutreachState(params = {}, deps = {}) {
             at: thread.latest_message_at || null,
             direction: clean(thread.latest_direction).toLowerCase() || null,
             preview: preview(thread.latest_message_body),
-            bucket: thread.inbox_bucket || null,
+            bucket: null,
             suppressed: Boolean(thread.is_suppressed),
           }
         : null,
