@@ -114,7 +114,8 @@ test("misspelling tolerance on key words; ordinary words untouched", async () =>
   }
   assert.equal((await classify("not intrested", null, { heuristicOnly: true })).primary_intent, "not_interested");
   assert.equal((await classify("wrong numbr", null, { heuristicOnly: true })).primary_intent, "wrong_number");
-  assert.equal((await classify("Never owned that house", null, { heuristicOnly: true })).primary_intent, "wrong_number");
+  // Round 10 (owner 2026-10-08): an ownership denial is property-scoped.
+  assert.equal((await classify("Never owned that house", null, { heuristicOnly: true })).primary_intent, "property_specific_non_owner");
 });
 
 test("round-8 rules: condition statements, purpose questions, need-time, bare '?', tapback 👍 on our question", async () => {

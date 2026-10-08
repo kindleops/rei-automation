@@ -138,8 +138,9 @@ const CANONICAL_CORPUS = [
   { label: "owner_confirmed", text: "Yes I own it", primary_intent: "ownership_confirmed" },
   { label: "owner_confirmed_casual", text: "yea thats mine", primary_intent: "ownership_confirmed" },
   { label: "wrong_number", text: "Wrong number", primary_intent: "wrong_number" },
-  { label: "not_owner", text: "I don't own that house", primary_intent: "wrong_number" },
-  { label: "never_owned", text: "I've never owned that property", primary_intent: "wrong_number" },
+  // Round 10 (owner 2026-10-08): ownership denials are property-scoped.
+  { label: "not_owner", text: "I don't own that house", primary_intent: "property_specific_non_owner" },
+  { label: "never_owned", text: "I've never owned that property", primary_intent: "property_specific_non_owner" },
   // Certification pass 2026-08-25: sold is the property-scoped sold_property
   // lane, never the wrong_number contact-suppression fold.
   { label: "former_owner", text: "I sold that house last year", primary_intent: "sold_property" },

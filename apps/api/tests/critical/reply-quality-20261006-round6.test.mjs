@@ -44,7 +44,8 @@ const LABELS = {
   "010": { intent: "not_interested", outcome: "no_reply_by_design" },
   "011": { intent: "not_interested", outcome: "no_reply_by_design" },
   "012": { intent: "unclear", outcome: "review" },
-  "013": { intent: "asks_offer", outcome: "auto_reply" },
+  // Round 10 (owner 2026-10-08): a tapback carries no seller language evidence -> language HOLD.
+  "013": { intent: "asks_offer", outcome: "review" },
   "014": { intent: "not_interested", outcome: "no_reply_by_design" },
   "015": { intent: "seller_interested", outcome: "auto_reply" },
   "016": { intent: "ownership_confirmed", outcome: "auto_reply" },
@@ -61,11 +62,11 @@ const LABELS = {
   "027": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "028": { intent: "wrong_number", outcome: "suppressed" },
   "029": { intent: "seller_interested", outcome: "auto_reply" },
-  "030": { intent: "ownership_confirmed", outcome: "auto_reply" },
+  "030": { intent: "ownership_confirmed", outcome: "review" }, // round 10: 👍 alone -> language HOLD
   "031": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "032": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "033": { intent: "who_is_this", outcome: "auto_reply" },
-  "034": { intent: "ownership_confirmed", outcome: "auto_reply" },
+  "034": { intent: "ownership_confirmed", outcome: "review" }, // round 10: 👍 alone -> language HOLD
   "035": { intent: "seller_interested", outcome: "auto_reply" },
   "036": { intent: "ownership_confirmed", outcome: "auto_reply" },
   "037": { intent: "who_is_this", outcome: "auto_reply" },
@@ -116,9 +117,15 @@ test("bare 'No' to the ownership question: ONE owner-approved clarifier once its
     assert.equal(off.decision.audit_reason, "bare_no_auto_clarifier_off", id);
     const r = await withBareNoClarifierOn(() => replayReply(byId.get(id), { catalog: [...CATALOG, ...CLARIFIER_ROWS] }));
     assert.equal(r.classification.automation_decision.clarification_use_case, "ownership_connection_clarifier", id);
-    assert.equal(r.outcome, "auto_reply", id);
-    assert.equal(r.template.use_case, "ownership_connection_clarifier", id);
-    assert.equal(r.template.language, r.classification.language === "Spanish" ? "Spanish" : "English", id);
+    // Round 10: "No" / "No, I'm not" carry no reliable seller language
+    // evidence on their own; with no earlier identifiable seller reply the
+    // clarifier HOLDS (no send) -- never an English default.
+    if (r.outcome === "auto_reply") {
+      assert.equal(r.template.use_case, "ownership_connection_clarifier", id);
+      assert.notEqual(r.classification.reply_language_source, "thread", id);
+    } else {
+      assert.equal(r.text, null, id);
+    }
   }
 });
 

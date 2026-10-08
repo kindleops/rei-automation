@@ -122,7 +122,8 @@ test("Stage 1 outcomes covered", async () => {
   const cases = [
     ["Yes I own it", "ownership_confirmed"],
     ["Wrong number", "wrong_number"],
-    ["I never owned that property", "wrong_number"],
+    // Round 10 (owner 2026-10-08): an ownership denial is property-scoped.
+    ["I never owned that property", "property_specific_non_owner"],
     // Certification pass 2026-08-25: sold → property-scoped sold_property.
     ["I sold it years ago", "sold_property"],
     ["I am just a tenant on a lease", "tenant_occupied"],

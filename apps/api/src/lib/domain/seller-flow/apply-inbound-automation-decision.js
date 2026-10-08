@@ -44,6 +44,7 @@ import { applySellerConversationV3TerminalDecision } from "@/lib/domain/seller-f
 import { resolveContactIdentityClass } from "@/lib/domain/inbox/contact-identity.js";
 import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
 import { resolveThreadLanguage } from "@/lib/domain/seller-flow/resolve-thread-language.js";
+import { identifyReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { templateCatalogLanguageName } from "@/lib/sms/language_aliases.js";
 import { buildOutboundTemplateAttribution } from "@/lib/domain/templates/outbound-attribution.js";
 import { resolveOwnershipProbeDisinterestTransition } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
@@ -329,9 +330,26 @@ function hasUsableContext({
   );
 }
 
+const ROUND10_INFO_SOURCE_PROFILE = Object.freeze({
+  route_hint: "info_request",
+  allowed_template_stages: ["info_source_explanation", "identity_response", "who_is_this"],
+  template_use_case_candidates: ["info_source_explanation", "how_got_number", "who_is_this"],
+  next_action: "queue_auto_reply",
+});
+
 function resolveRouteProfile(classification = {}) {
   const primary_intent = clean(classification.primary_intent) || "unclear";
   const objection = clean(classification.objection) || null;
+
+  // Round 10: "how did you get my number" is answered with the info-source
+  // explanation (public county records) first.
+  if (
+    primary_intent === "who_is_this" &&
+    Array.isArray(classification.matched_rule_ids) &&
+    classification.matched_rule_ids.includes("r10_info_source_question")
+  ) {
+    return ROUND10_INFO_SOURCE_PROFILE;
+  }
 
   if (primary_intent === "callback_requested") return ROUTE_PROFILES.callback_requested;
   if (objection === "needs_call") return ROUTE_PROFILES.needs_call;
@@ -495,13 +513,24 @@ function computeInboundAutomationDecisionRaw({
     automation_decision?.should_suppress_contact === true ||
     automation_decision?.suppression_action === "opt_out"
   ) {
-    return buildDecisionResult({
+    const opt_out_decision = buildDecisionResult({
       should_suppress_contact: true,
       reply_mode: "none",
       suppression_reason: "opt_out",
       next_action: "suppress_contact",
       audit_reason: "opt_out",
     });
+    // Round 10 (owner 2026-10-08): a legal threat with a stop demand is the
+    // opt-out (canonical suppression, unchanged) PLUS a human legal review.
+    if (classification?.legal_review_required === true || automation_decision?.legal_review_required === true) {
+      return {
+        ...opt_out_decision,
+        should_mark_human_review: true,
+        human_review_reason: "legal_threat_opt_out",
+        legal_review_required: true,
+      };
+    }
+    return opt_out_decision;
   }
 
   // Property sold — terminal for the seller×property PAIRING only. The
@@ -527,6 +556,38 @@ function computeInboundAutomationDecisionRaw({
       reply_mode: "none",
       next_action: "disposition_property_sold",
       audit_reason: "property_sold",
+    });
+  }
+
+  // Round 10 (owner 2026-10-08): an OWNERSHIP DENIAL ("I never owned it",
+  // "it isn't mine", "keep looking", "not my house") closes the person x
+  // property only. The phone is NOT marked wrong and NOT suppressed: it stays
+  // usable for its real owner context. A wrong-number claim (below) still
+  // blocks the phone.
+  if (
+    primary_intent === "property_specific_non_owner" &&
+    Array.isArray(classification?.matched_rule_ids) &&
+    classification.matched_rule_ids.some((id) => id === "r10_ownership_denial_not_owner" || id === "r10_ownership_question_denial")
+  ) {
+    const compound = resolveCompoundOpportunitySignal(classification);
+    if (compound.is_compound_opportunity) {
+      return buildDecisionResult({
+        should_mark_human_review: true,
+        reply_mode: "manual_review",
+        human_review_reason: "not_owner_with_seller_signal",
+        route_hint,
+        stage_hint,
+        allowed_template_stages,
+        next_action: "mark_human_review",
+        audit_reason: "not_owner_with_seller_signal",
+        compound_opportunity: compound,
+      });
+    }
+    return buildDecisionResult({
+      should_suppress_contact: false,
+      reply_mode: "none",
+      next_action: "disposition_property_not_owner",
+      audit_reason: "property_scoped_not_owner",
     });
   }
 
@@ -1465,6 +1526,60 @@ export function inboundCarriesNumber(text = "") {
   return /\b(hundred|thousand|million|mil|grand|k)\b/.test(value);
 }
 
+/**
+ * Round 10 (owner 2026-10-08, corrected): the reply language comes from the
+ * SELLER's own inbound evidence only, never from a default and never from our
+ * previous outbound.
+ *  1. classify.js's seller-derived language (this reply, the seller's history,
+ *     or an explicit switch request: reply_language_source seller_reply /
+ *     seller_history / language_switch_request);
+ *  2. an explicit inbound language on the classification;
+ *  3. language evidence in this reply's own text (identifyReplyLanguage);
+ *  4. a caller-built classification that STATES a language and never went
+ *     through the resolver (no reply_language_source: not classify.js output);
+ *  otherwise UNKNOWN -> the caller holds (no automated send).
+ * The thread / prospect / last-outbound languages are logged as context only.
+ */
+const SELLER_LANGUAGE_SOURCES = new Set(["seller_reply", "seller_history", "language_switch_request"]);
+export function resolveRound10ReplyLanguage(resolution = {}, { classification = null, context = null, messageText = "" } = {}) {
+  const base = resolution && typeof resolution === "object" ? resolution : {};
+  const context_languages = {
+    resolver: base.is_unknown ? null : clean(base.language) || null,
+    resolver_source: clean(base.source) || null,
+    thread: clean(context?.summary?.language) || null,
+    last_outbound:
+      (clean(classification?.reply_language_source) === "thread" ? clean(classification?.language) : "") ||
+      clean(context?.summary?.last_outbound_language) ||
+      null,
+  };
+  const known = (language, source) => ({
+    language,
+    source,
+    is_unknown: false,
+    resolver_version: base.resolver_version || null,
+    context_languages,
+  });
+  const usable = (v) => clean(v) && lower(v) !== "unknown";
+
+  const source = clean(classification?.reply_language_source);
+  // Conflicting seller evidence (this reply says one language, the seller's
+  // earlier identifiable reply another, and no explicit switch request) holds.
+  const history = clean(classification?.seller_history_language);
+  if (source === "seller_reply" && usable(history) && usable(classification?.language) && lower(history) !== lower(classification.language)) {
+    return { language: "unknown", source: "hold_language_conflict", is_unknown: true, conflict: { reply: clean(classification.language), history }, resolver_version: base.resolver_version || null, context_languages };
+  }
+  if (SELLER_LANGUAGE_SOURCES.has(source) && usable(classification?.language)) {
+    return known(clean(classification.language), `seller_${source.replace(/^seller_/, "")}`);
+  }
+  if (usable(classification?.explicit_language)) return known(clean(classification.explicit_language), "explicit_inbound_language");
+  const evidence = identifyReplyLanguage(messageText || "");
+  if (usable(evidence)) return known(evidence, "reply_text_evidence");
+  if (classification && classification.reply_language_source == null && usable(classification.language)) {
+    return known(clean(classification.language), "stated_classification_language");
+  }
+  return { language: "unknown", source: "hold_language", is_unknown: true, resolver_version: base.resolver_version || null, context_languages };
+}
+
 export async function selectSafeAutoReplyTemplate({
   supabaseClient = null,
   classification = null,
@@ -1478,6 +1593,9 @@ export async function selectSafeAutoReplyTemplate({
   // Templates already sent on this thread: a repeat would be duplicate_blocked
   // (or, worse, the identical text twice), so they are skipped.
   excludeTemplateIds = [],
+  // Round 10: the seller's own words this turn (language evidence). Never the
+  // classifier's canonicalized text ("👍" is read as "yes" -- not English).
+  inboundMessageText = null,
 } = {}) {
   if (!canUseSupabase(supabaseClient)) {
     return { ok: false, reason: "missing_supabase", template: null };
@@ -1504,7 +1622,7 @@ export async function selectSafeAutoReplyTemplate({
     clean(classification?.language)
       ? clean(classification.language)
       : null;
-  const language_resolution = resolveThreadLanguage({
+  const base_language_resolution = resolveThreadLanguage({
     threadLanguage:
       seller_language ||
       context?.automation_decision?.classification?.language ||
@@ -1519,10 +1637,27 @@ export async function selectSafeAutoReplyTemplate({
     messageText:
       context?.automation_decision?.inbound_detection?.latest_inbound_text || "",
   });
+  // OWNER RULE (round 10, 2026-10-08): the reply language is the SELLER's own
+  // inbound language evidence. Unknown is never defaulted to English and our
+  // previous outbound language never decides it: no evidence -> HOLD (no send).
+  const language_resolution = resolveRound10ReplyLanguage(base_language_resolution, {
+    classification,
+    context,
+    messageText: clean(inboundMessageText) || context?.automation_decision?.inbound_detection?.latest_inbound_text || "",
+  });
+  if (language_resolution.is_unknown) {
+    return {
+      ok: false,
+      reason: "hold_language",
+      detail: "no language evidence in the seller's own inbound messages",
+      human_review_required: true,
+      language: null,
+      language_resolution,
+      template: null,
+    };
+  }
   // sms_templates labels (Hindi is stored as "Indian (Hindi or Other)").
-  const language = language_resolution.is_unknown
-    ? "English"
-    : templateCatalogLanguageName(language_resolution.language) || language_resolution.language;
+  const language = templateCatalogLanguageName(language_resolution.language) || language_resolution.language;
   const languages = language === "English" ? ["English"] : [language, "English"];
 
   // Safe-fallback clarifier dispatch: the decision carries the coverage-net's
@@ -3506,6 +3641,7 @@ export async function executeInboundAutomationDecision({
     classification,
     decision: base_decision,
     context: reply_context,
+    inboundMessageText: message,
     threadKey,
     inboundEventId,
   });
@@ -3536,7 +3672,11 @@ export async function executeInboundAutomationDecision({
       should_mark_human_review: true,
       reply_mode: "manual_review",
       human_review_reason:
-        template_result.reason === "language_template_missing" ? "language_template_missing" : "no_safe_template",
+        template_result.reason === "language_template_missing"
+          ? "language_template_missing"
+          : template_result.reason === "hold_language"
+            ? "hold_language"
+            : "no_safe_template",
       audit_reason: "no_safe_template",
       ...(template_result.detail ? { human_review_detail: template_result.detail } : {}),
     };
@@ -3640,6 +3780,7 @@ export async function executeInboundAutomationDecision({
       classification,
       decision: base_decision,
       context: reply_context,
+      inboundMessageText: message,
       threadKey,
       inboundEventId,
       excludePlaceholders: render_result.missing,
@@ -3685,6 +3826,7 @@ export async function executeInboundAutomationDecision({
         classification,
         decision: base_decision,
         context: reply_context,
+        inboundMessageText: message,
         threadKey,
         inboundEventId,
         excludeTemplateIds: [
@@ -3700,6 +3842,7 @@ export async function executeInboundAutomationDecision({
             classification,
             decision: { ...base_decision, required_template_use_case: alt },
             context: reply_context,
+            inboundMessageText: message,
             threadKey,
             inboundEventId,
             excludeTemplateIds: already_sent_ids,

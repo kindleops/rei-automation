@@ -16,7 +16,7 @@
   {
     "family": "es_v2_own_deny",
     "text": "No soy el dueño de esa propiedad",
-    "expected_primary_intent": "wrong_number",
+    "expected_primary_intent": "property_specific_non_owner",
     "language": "es",
     "development_after_blind_evaluation": true
   },
@@ -30,7 +30,7 @@
   {
     "family": "es_v2_never",
     "text": "Nunca he sido el dueño",
-    "expected_primary_intent": "wrong_number",
+    "expected_primary_intent": "property_specific_non_owner",
     "language": "es",
     "development_after_blind_evaluation": true
   },
@@ -58,7 +58,7 @@
   {
     "family": "es_v2_family",
     "text": "Es de mi hermano no mía",
-    "expected_primary_intent": "wrong_number",
+    "expected_primary_intent": "property_specific_non_owner",
     "language": "es",
     "development_after_blind_evaluation": true
   },

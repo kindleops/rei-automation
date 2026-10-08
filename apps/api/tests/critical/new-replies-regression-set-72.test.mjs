@@ -133,7 +133,8 @@ test("an emoji never confirms ownership, a price, an acceptance or a contract (S
 test("explicit denials answer the ownership question even when the context is valid; a bare 'No' still asks", async () => {
   const ctx = contextFor({ id: "ctx", context: "ownership_check", previous_outbound: "Hi Pat, this is Sam. Do you still own 123 Main St?" });
   assert.equal((await classify("Wrong number", null, { heuristicOnly: true, conversation_context: ctx })).primary_intent, "wrong_number");
-  assert.equal((await classify("Not mine", null, { heuristicOnly: true, conversation_context: ctx })).primary_intent, "wrong_number");
+  // Round 10 (owner 2026-10-08): "Not mine" denies ownership of the property (property-scoped).
+  assert.equal((await classify("Not mine", null, { heuristicOnly: true, conversation_context: ctx })).primary_intent, "property_specific_non_owner");
   assert.equal((await classify("I sold it", null, { heuristicOnly: true, conversation_context: ctx })).primary_intent, "sold_property");
   const bare = await classify("No", null, { heuristicOnly: true, conversation_context: ctx });
   assert.equal(bare.primary_intent, "unclear");

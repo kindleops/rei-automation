@@ -99,10 +99,18 @@ export function resolveOwnershipProbeDisinterestTransition({
     universal_stage: "consider_selling",
     seller_stage: "consider_selling",
     conversation_stage: "consider_selling",
-    ownership_status: existingState.ownership_status === "confirmed" ? "confirmed" : "inferred",
-    ownership_inference_reason: existingState.ownership_status === "confirmed"
-      ? null
-      : "property_specific_non_sale_response",
+    // Round 10 (owner 2026-10-08): "Yes, but not for sale" CONFIRMS ownership;
+    // the fact is kept while the decline goes to the 30-day nurture.
+    ownership_status:
+      existingState.ownership_status === "confirmed" || classification?.ownership_fact?.ownership_confirmed === true
+        ? "confirmed"
+        : "inferred",
+    ownership_inference_reason:
+      existingState.ownership_status === "confirmed"
+        ? null
+        : classification?.ownership_fact?.ownership_confirmed === true
+          ? "owner_confirmed_declined_sale"
+          : "property_specific_non_sale_response",
     disposition: "not_interested",
     lead_temperature: "cold",
     not_interested: true,
@@ -127,10 +135,15 @@ export function resolveThreadFlagsFromClassification(classification = {}) {
     primary === "opt_out" ||
     disposition === "suppressed" ||
     disposition === "opt_out";
+  // Round 10 (owner 2026-10-08): an ownership DENIAL (property-scoped,
+  // classify.js primary property_specific_non_owner) is never a wrong-number
+  // mark on the phone, even though its words also hit the wrong_number
+  // objection list ("not mine", "never owned").
+  const ownership_denial = primary === "property_specific_non_owner";
   const wrong_number =
     classification.wrong_number === true ||
     primary === "wrong_number" ||
-    objection === "wrong_number" ||
+    (objection === "wrong_number" && !ownership_denial) ||
     disposition === "wrong_number";
   const not_interested =
     primary === "property_correction"
@@ -734,6 +747,13 @@ export function resolveDispositionFromClassification(
 
   if (flags.opt_out || lower(inbox_bucket) === "suppressed") return "suppressed";
   if (flags.wrong_number) return "wrong_number";
+  // Round 10: an ownership denial closes the person x property -- the
+  // stage-transition registry's UNQUALIFIED (a closed disposition, Dead), never
+  // wrong_number. Opener exclusion reads last_intent property_specific_non_owner
+  // as person x property scope.
+  if (clean(classification.primary_intent) === "property_specific_non_owner" && lower(classification.disposition_hint) === "not_owner") {
+    return "unqualified";
+  }
   const ownershipProbeTransition = resolveOwnershipProbeDisinterestTransition({
     classification,
     messageEvent,

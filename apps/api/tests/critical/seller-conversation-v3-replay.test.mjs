@@ -14,6 +14,7 @@ import test from "node:test";
 import { withBareNoClarifierOn } from "../helpers/bare-no-clarifier-flag.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { identifyReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 
 import { replayV3 } from "../helpers/seller-conversation-v3-harness.mjs";
 import { catalogFor, ALL_LANGUAGES_SWITCH } from "../helpers/seller-conversation-v3-catalog.mjs";
@@ -50,10 +51,21 @@ test("(a) EN/ES: no S1/S2 review except a language that is not switched on", asy
   assert.ok(auto >= 220, `auto-replies: ${auto} (round 8 with EN/ES drafts: 201)`);
 });
 
-test("(b) all drafts active: zero review", async () => {
+// Round 10 (owner 2026-10-08): the reply language comes from the SELLER's own
+// inbound evidence only; our outbound / stored thread language never decides.
+// An emoji / number-only reply with no seller language evidence HOLDS.
+test("(b) all drafts active: zero review (a language HOLD only where the seller gave no language evidence)", async () => {
   const rows = await run("b");
-  const reviews = rows.filter(({ r }) => r.outcome === "review").map(({ c, r }) => `${c.fixture_id}:${r.review_reason}`);
+  const reviews = rows.filter(({ r }) => r.outcome === "review" && r.review_reason !== "hold_language").map(({ c, r }) => `${c.fixture_id}:${r.review_reason}`);
   assert.deepEqual(reviews, []);
+  for (const { c, r } of rows) {
+    if (r.review_reason !== "hold_language") continue;
+    // Held only for no seller evidence, or conflicting seller evidence (this
+    // reply vs the seller's earlier identifiable reply).
+    const now_lang = identifyReplyLanguage(c.seller_message);
+    const history = r.classification?.seller_history_language || null;
+    assert.ok(now_lang === null || (history && history !== now_lang), `${c.fixture_id}: held although the seller's language is clear (${now_lang}/${history})`);
+  }
 });
 
 test("compliance and hostility: opt-outs suppressed silently, insults archived (never suppressed), never a reply", async () => {

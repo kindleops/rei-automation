@@ -35,7 +35,7 @@
   {
     "family": "es_never",
     "text": "Nunca fui el dueño",
-    "expected_primary_intent": "wrong_number",
+    "expected_primary_intent": "property_specific_non_owner",
     "stage": "ownership_check",
     "terminal": true
   },

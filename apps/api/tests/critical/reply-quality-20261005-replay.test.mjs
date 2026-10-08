@@ -107,8 +107,9 @@ const LABELS = {
   // ── unclear Spanish ──
   "026": { intent: "not_interested", lang: "Spanish", suppress: "none" },
   "047": { intent: "not_interested", lang: "Spanish", suppress: "none" },
-  "034": { intent: "wrong_number", lang: "Spanish" },
-  "052": { intent: "wrong_number", lang: "Spanish" },
+  // Round 10 (owner 2026-10-08): ownership denials are property-scoped.
+  "034": { intent: "property_specific_non_owner", lang: "Spanish" },
+  "052": { intent: "property_specific_non_owner", lang: "Spanish" },
   "036": { intent: "hostile_or_legal", lang: "Spanish", auto: false },
   "040": { intent: "who_is_this", lang: "Spanish" },
   "041": { intent: "who_is_this", lang: "Spanish" },
@@ -139,9 +140,10 @@ const LABELS = {
   "033": { intent: "unclear", auto: true, review: false },
   "037": { intent: "unclear", auto: true, review: false },
   // ── classifier-level intent (live layers refine these) ──
-  "009": { intent: "wrong_number" },
-  "024": { intent: "wrong_number" },
-  "049": { intent: "wrong_number" },
+  // Round 10: "I do not own any property …" / "Not the owner" are property-scoped.
+  "009": { intent: "property_specific_non_owner" },
+  "024": { intent: "property_specific_non_owner" },
+  "049": { intent: "property_specific_non_owner" },
   "014": { intent: "not_interested" },
   "017": { intent: "sold_property" },
 };

@@ -93,8 +93,11 @@ function buildRowPersonalization(queue_row = {}) {
   };
 }
 
+// OWNER RULE (round 10, 2026-10-08): the language is exact. An unknown
+// language is never defaulted to English (the caller holds instead), and a
+// known non-English row is never rendered from English copy.
 async function fetchCandidateTemplates(supabase, useCases, language) {
-  const languages = lower(language) === "english" || !language ? ["English"] : [language, "English"];
+  const languages = [language];
   const { data, error } = await supabase
     .from("sms_templates")
     .select("*")
@@ -178,6 +181,9 @@ export async function resolveDeferredQueueMessage(input_row = {}, deps = {}) {
             property_address: queue_row.property_address,
             from_phone_number: queue_row.from_phone_number,
             language: queue_row.language || meta.language,
+            // Round 10: a language that came only from our outbound is not
+            // seller evidence -- the builder re-resolves it from the seller.
+            language_source: clean(meta?.nurture_render_context?.language_source) || null,
             agent_name: queue_row.agent_name,
           },
         });
@@ -186,6 +192,10 @@ export async function resolveDeferredQueueMessage(input_row = {}, deps = {}) {
             missing.filter((f) => clean(resolved[f])).map((f) => [f, resolved[f]])
           );
           queue_row = { ...queue_row, ...render_context };
+          // Outbound-only language and no seller evidence: unknown (hold below).
+          if (lower(meta?.nurture_render_context?.language_source) === "last_outbound" && !clean(resolved.language)) {
+            queue_row = { ...queue_row, language: null, metadata: { ...meta, language: null } };
+          }
         }
       } catch {
         render_context = null;
@@ -193,6 +203,18 @@ export async function resolveDeferredQueueMessage(input_row = {}, deps = {}) {
     }
   }
   const row_language = clean(queue_row.language) || clean(queue_row?.metadata?.language);
+  // Unknown after the render-context resolution (the SELLER's own inbound
+  // evidence only; our outbound language never decides): HOLD -- never an
+  // English default.
+  if (!row_language || lower(row_language) === "unknown") {
+    warn("[DEFERRED_FOLLOWUP_HOLD_LANGUAGE]", { queue_row_id: queue_row.id || null, intent });
+    return {
+      ok: false,
+      resolved: false,
+      reason: "hold_language",
+      render_context: render_context && Object.keys(render_context).length ? render_context : null,
+    };
+  }
 
   let templates = [];
   try {
@@ -217,16 +239,10 @@ export async function resolveDeferredQueueMessage(input_row = {}, deps = {}) {
   const asset_group = canonicalPropertyGroupOf(asset_record || { property_type: queue_row.property_type });
   templates = filterTemplatesForProperty(templates, { propertyGroup: asset_group }).kept;
 
-  // Preserve candidate priority order, then language preference.
-  const rowLanguage = lower(row_language) || "english";
+  // Preserve candidate priority order; the row's language only (exact).
+  const rowLanguage = lower(row_language);
   const ordered = candidates
-    .flatMap((useCase) => {
-      const matching = templates.filter((t) => lower(t.use_case) === useCase);
-      return [
-        ...matching.filter((t) => lower(t.language) === rowLanguage),
-        ...matching.filter((t) => lower(t.language) !== rowLanguage),
-      ];
-    });
+    .flatMap((useCase) => templates.filter((t) => lower(t.use_case) === useCase && lower(t.language) === rowLanguage));
 
   const personalization = buildRowPersonalization(queue_row);
 
@@ -328,7 +344,25 @@ export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
    *   QUARANTINED COPY IS UNREACHABLE. Demoted templates are excluded here,
    *   which is what makes quarantine mean anything at dispatch time.
    */
-  const rowLanguage = clean(queue_row.language) || "English";
+  // Round 10 (owner 2026-10-08): an unknown language is never English by
+  // default. The row's language (column or metadata), else the language of the
+  // template this row was rendered from (the outbound we are rotating away
+  // from -- normalizeSendQueueRow drops the language column), else HOLD.
+  let rowLanguage = clean(queue_row.language) || clean(meta.language);
+  if (!rowLanguage) {
+    const failed_template_id = clean(queue_row.template_id || queue_row.selected_template_id || meta.selected_template_id || meta.template_id);
+    if (failed_template_id) {
+      try {
+        const { data } = await supabase.from("sms_templates").select("language").eq("template_id", failed_template_id).maybeSingle();
+        rowLanguage = clean(data?.language);
+      } catch {
+        rowLanguage = "";
+      }
+    }
+  }
+  if (!rowLanguage || lower(rowLanguage) === "unknown") {
+    return { ok: false, resolved: false, reason: "hold_language" };
+  }
   const stage_code = clean(meta.stage_code || queue_row.current_stage_code || meta.current_stage_code);
 
   let query = supabase

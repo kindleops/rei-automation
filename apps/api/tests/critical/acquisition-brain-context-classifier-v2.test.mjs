@@ -244,7 +244,8 @@ test("ownership neighbors never false owner", async () => {
     ["Property manager here", "tenant_occupied"],
     // Certification pass 2026-08-25: sold → property-scoped sold_property.
     ["Sold it years ago", "sold_property"],
-    ["Never owned it", "wrong_number"],
+    // Round 10 (owner 2026-10-08): an ownership denial is property-scoped.
+    ["Never owned it", "property_specific_non_owner"],
     ["Wrong number", "wrong_number"],
     ["Stop texting me", "opt_out"],
   ];
@@ -343,7 +344,8 @@ test("terminal safety: opt-out and wrong-number never ownership", async () => {
     assert.ok(
       // sold_property is equally terminal-safe: never ownership, never a
       // reply lane (certification pass 2026-08-25).
-      ["opt_out", "wrong_number", "sold_property"].includes(c.primary_intent),
+      // Round 10: a property-scoped ownership denial is equally terminal-safe.
+      ["opt_out", "wrong_number", "sold_property", "property_specific_non_owner"].includes(c.primary_intent),
       `${text} -> ${c.primary_intent}`
     );
   }

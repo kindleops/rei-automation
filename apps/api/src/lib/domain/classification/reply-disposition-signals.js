@@ -349,6 +349,10 @@ const NOT_FOR_SALE_PATTERNS = [
   /\bnever\s+(?:leaving|moving)\b/,
   // Spanish
   /\bno\s+(?:esta|estan|es)\s+(?:de|a|en|para\s+la|ala|a\s+la)\s*venta\b/,
+  // round 10 (2026-10-08 audit): misspelled "venta" ("No esta de bents", "No
+  // esta d vents", "No esta en banta") and a truncated "No la vend".
+  /\bno\s+(?:esta|estan|es)\s+(?:de|d|a|en|para\s+la|ala|a\s+la)\s*(?:vents?|bents?|bentas?|banta|vnta|vemta)\b/,
+  /\bno\s+(?:la|lo)\s+vend[\s.!]*$/,
   /\bno\s+(?:estoy|estamos)\s+vendiendo\b/,
   /\bno\s+(?:la\s+|lo\s+)?vend(?:o|emos)\b/,
   /\bno\s+(?:se\s+)?vende\b/,
@@ -543,7 +547,13 @@ export function detectMessageLanguage(message) {
   if (/\b(?:marhaba|huna|astathmir|ahlan|hal\s+\S+\s+lak)\b/.test(folded)) return "Arabic";
   if (/\b(?:bonjour|aviez|avez|vous|prix demande|propriete)\b/.test(folded)) return "French";
   if (/\b(?:ola|voce|proprietario|imovel|sou\s+\w+|e sua propriedade|ainda e)\b/.test(folded)) return "Portuguese";
+  // round 10 (owner 2026-10-08): plain Portuguese seller phrases ("Não estou
+  // vendendo a casa") are read before the Spanish words they share ("casa").
+  if (/\b(?:nao\s+(?:estou|estamos|quero|tenho|vendo|sou)|estou\s+vendendo|vendendo|obrigad[oa]|minha\s+casa|tenho\s+interesse)\b/.test(folded)) return "Portuguese";
   if (/\b(?:hola|soy|eres|dueno|duena|propiedad|todavia|sigues|estaria|estas|usted|venta|vender|aqui|gracias)\b/.test(folded) || /[¿¡]/.test(message)) return "Spanish";
+  // round 10 (owner 2026-10-08): "No estoy vendiendo la casa" came back unknown
+  // and the nurture rendered in English. Common Spanish seller words.
+  if (/\b(?:estoy|estamos|vendiendo|vendo|vendemos|vende|vendi|vendimos|vendida|vendido|casa|casas|interesa|interesad[oa]s?|quiero|queremos|tengo|tenemos|nunca|ahorita|ahora\s+no|todavia\s+no|numero\s+equivocado|equivocado|numero|lista|escrib\w+|borr(?:a|e|en|ar)|quit(?:a|e|en|ar)|mensajes?|molest\w+|llam(?:e|en|ar|ame|enme)|senor|senora|pero|tambien|porque|ninguna?|esta\s+(?:rentada|ocupada|vendida))\b/.test(folded)) return "Spanish";
   if (/\b(?:the|this|is|are|you|your|i|do|own|still|hello|hi|hey|yours|understand|speak|english)\b/.test(folded)) return "English";
   return null;
 }

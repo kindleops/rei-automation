@@ -308,6 +308,7 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
 
 const BUCKET_BY_CATEGORY = Object.freeze({
   [CLEANUP_CATEGORY.WRONG_PERSON]: "dead",
+  [CLEANUP_CATEGORY.NOT_OWNER]: "dead",
   [CLEANUP_CATEGORY.SOLD]: "dead",
   [CLEANUP_CATEGORY.HOSTILE]: "dead",
   [CLEANUP_CATEGORY.NOT_INTERESTED]: "follow_up",
@@ -414,6 +415,7 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
         const disposition =
           plan.category === CLEANUP_CATEGORY.SOLD ? "sold"
           : plan.category === CLEANUP_CATEGORY.HOSTILE ? "unqualified"
+          : plan.category === CLEANUP_CATEGORY.NOT_OWNER ? "unqualified"
           : "wrong_person";
         record(action, await deps.patchUniversalLeadState({
           threadKey,

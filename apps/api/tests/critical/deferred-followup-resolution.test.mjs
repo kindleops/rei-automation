@@ -144,11 +144,13 @@ test("template with unfillable placeholders is skipped, next candidate wins", as
   assert.equal(result.template_id, "tpl-not-ready");
 });
 
-test("non-English rows fall back to English templates", async () => {
+// Round 10 (owner 2026-10-08): the language is exact. A Spanish row is never
+// rendered from English copy, and an unknown language holds (no send).
+test("non-English rows never fall back to English templates (round 10)", async () => {
   const row = deferredRow({ language: "Spanish" });
   const result = await resolveDeferredQueueMessage(row, {
     supabase: fakeSupabase([FOLLOW_UP_TEMPLATE]),
   });
-  assert.equal(result.ok, true);
-  assert.equal(result.language, "English");
+  assert.equal(result.ok, false);
+  assert.equal(result.resolved, false);
 });

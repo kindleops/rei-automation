@@ -419,7 +419,10 @@ test("English opener → a Spanish sentence → the reply is the SPANISH templat
   assert.equal(result.template.language, "Spanish");
 });
 
-test("a bare 👍 / 'ok' never flips an established thread: the stored thread language still decides", async () => {
+// Round 10 (owner 2026-10-08): the reply language comes from the SELLER's own
+// inbound evidence only; our outbound / stored thread language never decides.
+// An emoji / number-only reply with no seller language evidence HOLDS.
+test("a bare 👍 / 'ok' never flips an established thread: with no seller language evidence the reply HOLDS (round 10)", async () => {
   for (const message of ["ok", "👍"]) {
     const classification = await classify(message, null, { heuristicOnly: true });
     // No context, no seller history: the language is not seller-derived, so
@@ -431,8 +434,9 @@ test("a bare 👍 / 'ok' never flips an established thread: the stored thread la
       decision: { route_hint: "consider_selling", allowed_template_stages: ["consider_selling"] },
       context: SPANISH_THREAD,
     });
-    assert.equal(result.ok, true, message);
-    assert.equal(result.template.language, "Spanish", message);
+    assert.equal(result.ok, false, message);
+    assert.equal(result.reason, "hold_language", message);
+    assert.equal(result.template, null, message);
   }
 });
 

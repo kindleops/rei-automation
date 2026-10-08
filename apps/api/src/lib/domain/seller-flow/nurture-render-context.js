@@ -22,12 +22,16 @@
 //                      property, else the canonical property street address.
 //   from_phone_number  the thread's sticky number (inbox_thread_state.our_number),
 //                      else the inbound's own "to" number, else the last outbound's.
-//   language           the seller's reply text (identifyReplyLanguage), else the
-//                      last outbound's language; unknown stays unknown (null).
+//   language           OWNER RULE (round 10, 2026-10-08): the SELLER's own
+//                      inbound evidence only -- this reply (identifyReplyLanguage),
+//                      else the seller's most recent identifiable inbound on the
+//                      thread. Our outbound language is logged as context, never
+//                      the deciding signal. No seller evidence ⇒ null ⇒ the
+//                      deferred resolver HOLDS (never an English default).
 //   agent_name         the persona of the last sent outbound on this thread.
 // Read-only. Any lookup failure leaves that field unresolved — it never throws.
 
-import { identifyReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
+import { identifyReplyLanguage, latestIdentifiableSellerLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { confidentFirstName } from "@/lib/domain/seller-flow/no-response-followup.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 
@@ -60,7 +64,10 @@ export function missingNurtureContextFields(row = {}) {
   if (!confidentFirstName(row.seller_first_name || metadata.seller_first_name)) missing.push("seller_first_name");
   if (!clean(row.property_address)) missing.push("property_address");
   if (!clean(row.from_phone_number)) missing.push("from_phone_number");
-  if (!clean(row.language || metadata.language)) missing.push("language");
+  // A language that came only from OUR last outbound (rows scheduled before the
+  // round-10 rule) is not seller evidence: re-resolve it.
+  const language_source = clean(metadata?.nurture_render_context?.language_source).toLowerCase();
+  if (!clean(row.language || metadata.language) || language_source === "last_outbound") missing.push("language");
   if (!clean(row.agent_name)) missing.push("agent_name");
   return missing;
 }
@@ -85,6 +92,8 @@ export function buildNurtureRenderContext({
   thread_state = null,
   property = null,
   reply_text = null,
+  // The seller's inbound messages on this thread, newest first ({ message_body, language }).
+  inbound_rows_newest_first = [],
   intent = null,
 } = {}) {
   const sent = Array.isArray(sent_rows_newest_first) ? sent_rows_newest_first : [];
@@ -119,15 +128,24 @@ export function buildNurtureRenderContext({
     (from_phone_number && normalizePhone(last?.from_phone_number) === from_phone_number ? clean(last?.textgrid_number_id) : "") ||
     null;
 
+  // Round 10: seller inbound evidence only. A caller language that was itself
+  // taken from our outbound (known.language_source "last_outbound") is ignored.
+  const known_language = clean(known.language_source).toLowerCase() === "last_outbound" ? "" : clean(known.language);
   const reply_language = identifyReplyLanguage(reply_text);
-  const language = clean(known.language) || reply_language || clean(last?.language) || null;
-  const language_source = clean(known.language)
+  const history_language = latestIdentifiableSellerLanguage(Array.isArray(inbound_rows_newest_first) ? inbound_rows_newest_first : []);
+  // Conflicting seller evidence (this reply vs an earlier one) is unknown -> hold.
+  const conflict = Boolean(!known_language && reply_language && history_language && reply_language.toLowerCase() !== history_language.toLowerCase());
+  const language = conflict ? null : known_language || reply_language || history_language || null;
+  const language_source = known_language
     ? "caller"
-    : reply_language
-      ? "seller_reply"
-      : language
-        ? "last_outbound"
-        : "unknown";
+    : conflict
+      ? "conflict"
+      : reply_language
+        ? "seller_reply"
+        : history_language
+          ? "seller_history"
+          : "unknown";
+  const outbound_language_context = clean(last?.language) || null;
 
   const agent_name = clean(known.agent_name) || clean(sent.find((r) => clean(r?.agent_name))?.agent_name) || null;
   const timezone = clean(known.timezone) || clean(last?.timezone) || null;
@@ -149,6 +167,8 @@ export function buildNurtureRenderContext({
       template_use_case: family ? family[0] : null,
       template_family: family ? [...family] : null,
       language_source,
+      // Logged as context only -- never the deciding signal (round 10).
+      outbound_language_context,
       sender_source: from_source,
       first_name_source: known_first ? "caller" : seller_first_name ? "sent_rows_single_name" : "unresolved",
     },
@@ -189,8 +209,21 @@ export async function loadNurtureRenderContext(
     return q;
   };
   const need_reply = !clean(known.language) && !clean(reply_text) && clean(inbound_message_event_id);
+  // Round 10: the seller's own inbound history decides the language when the
+  // reply itself does not identify one.
+  const need_history = !clean(known.language) || clean(known.language_source).toLowerCase() === "last_outbound";
+  const historyQuery = () => {
+    let q = supabase
+      .from("message_events")
+      .select("message_body,language:metadata->>language,created_at")
+      .eq("thread_key", phone)
+      .eq("direction", "inbound")
+      .order("created_at", { ascending: false });
+    if (typeof q.limit === "function") q = q.limit(15);
+    return q;
+  };
 
-  const [sent, thread, property, inbound] = await Promise.all([
+  const [sent, thread, property, inbound, history] = await Promise.all([
     safe(sentQuery),
     safe(() => supabase.from("inbox_thread_state").select("our_number").eq("thread_key", phone).maybeSingle()),
     clean(property_id) && !clean(known.property_address)
@@ -199,6 +232,7 @@ export async function loadNurtureRenderContext(
     need_reply
       ? safe(() => supabase.from("message_events").select("message_body").eq("id", clean(inbound_message_event_id)).maybeSingle())
       : Promise.resolve(null),
+    need_history ? safe(historyQuery) : Promise.resolve(null),
   ]);
 
   return buildNurtureRenderContext({
@@ -207,6 +241,7 @@ export async function loadNurtureRenderContext(
     thread_state: thread && typeof thread === "object" ? thread : null,
     property: property && typeof property === "object" ? property : null,
     reply_text: clean(reply_text) || clean(inbound?.message_body) || null,
+    inbound_rows_newest_first: Array.isArray(history) ? history : [],
     intent,
   });
 }

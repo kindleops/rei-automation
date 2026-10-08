@@ -49,7 +49,8 @@ const TEST_CASES = [
   // Wrong Number
   { text: "Wrong number", expected: "wrong_number" },
   { text: "You have the wrong person", expected: "wrong_number" },
-  { text: "I don't own that house", expected: "wrong_number" },
+  // Round 10 (owner 2026-10-08): ownership denials are property-scoped.
+  { text: "I don't own that house", expected: "property_specific_non_owner" },
   { text: "This is not Shirley...", expected: "wrong_number" },
 
   // Sold — property-scoped disposition (sold_property), never the
@@ -57,8 +58,8 @@ const TEST_CASES = [
   { text: "Sold it 10 yrs ago", expected: "sold_property" },
   { text: "Sold it last week for $80,000!", expected: "sold_property" },
   { text: "No It sold", expected: "sold_property" },
-  { text: "No la Mia es 2711 Degen Dr. Bonita CA 91902", expected: "wrong_number" },
-  { text: "esa. Casa. llanoesmia", expected: "wrong_number" },
+  { text: "No la Mia es 2711 Degen Dr. Bonita CA 91902", expected: "property_specific_non_owner" },
+  { text: "esa. Casa. llanoesmia", expected: "property_specific_non_owner" },
   
   // Opt Out
   { text: "Stop", expected: "opt_out" },

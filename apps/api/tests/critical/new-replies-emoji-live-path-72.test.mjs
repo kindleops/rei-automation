@@ -210,9 +210,12 @@ test("ownership question + 👍: answered like 'Yes' -- ownership_confirmed and 
   assert.equal(classification.primary_intent, "ownership_confirmed");
   assert.equal(classification.primary_intent, yes.classification.primary_intent);
   assert.notEqual(classification.automation_decision.reply_kind, "clarification");
-  assert.equal(out.execution.queued, yes.out.execution.queued, `blocked: ${out.execution.execution_blocked_reason || out.execution.audit_reason}`);
   assert.equal(inserts.some((r) => String(r.use_case_template).startsWith("emoji_confirm")), false);
-  assert.deepEqual(inserts.map((r) => r.use_case_template), yes.inserts.map((r) => r.use_case_template));
+  // Round 10 (owner 2026-10-08): "Yes" is English evidence and gets the S2
+  // reply; a 👍 alone carries no seller language evidence -> language HOLD.
+  assert.ok(yes.inserts.length >= 1, "the typed Yes still gets the S2 reply");
+  assert.equal(inserts.length, 0, "no language evidence: no send");
+  assert.equal(out.execution.queued, false);
 });
 
 test("✅ behaves like 👍 after an ownership question", async () => {
@@ -249,9 +252,10 @@ test("a language with no confirmation row fails closed to review: never free tex
 test("inactive emoji-confirmation rows do not matter for a typed 👍 to the ownership question", async () => {
   const inactive = CATALOG.map((r) => (String(r.use_case).startsWith("emoji_confirm") ? { ...r, is_active: false } : r));
   const { inserts, classification } = await runInbound({ message: "👍", priorBody: OWNERSHIP_Q, catalog: inactive });
-  const yes = await runInbound({ message: "Yes", priorBody: OWNERSHIP_Q, catalog: inactive });
   assert.equal(classification.primary_intent, "ownership_confirmed");
-  assert.deepEqual(inserts.map((r) => r.use_case_template), yes.inserts.map((r) => r.use_case_template));
+  // Round 10: never an emoji-confirmation row; with no seller language evidence it holds.
+  assert.equal(inserts.some((r) => String(r.use_case_template).startsWith("emoji_confirm")), false);
+  assert.equal(inserts.length, 0);
 });
 
 test("🖕 is hostile: no reply and no DNC write", async () => {
@@ -276,7 +280,8 @@ test("👎 to an offer question: likely negative, confirm with the not-intereste
   assert.equal(classification.primary_intent, "unclear");
   assert.equal(classification.emoji_interpretation.semantic_signal, "likely_negative");
   assert.notEqual(classification.compliance_flag, "stop_texting");
-  assert.equal(inserts[0]?.use_case_template, "emoji_confirm_not_interested");
+  // Round 10: the confirmation question needs seller language evidence; none -> HOLD.
+  assert.equal(inserts.length, 0);
 });
 
 test("😂 after 'Would you take $175,000?' is non-literal: no acceptance, no price fact", async () => {

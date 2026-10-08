@@ -124,9 +124,12 @@ export async function reselectTemplateForAsset({ supabase, queue_row, body, prop
   }
   const snapshot = row?.metadata?.template_snapshot || {};
   const use_case = clean(original?.use_case) || clean(row.use_case_template) || clean(snapshot.template_use_case);
-  const language = clean(original?.language) || clean(row.language) || clean(snapshot.language) || "English";
+  // Round 10 (owner 2026-10-08): an unknown language is never English by
+  // default -- no reselection (the row keeps its hold / failure path).
+  const language = clean(original?.language) || clean(row.language) || clean(snapshot.language) || clean(row?.metadata?.language);
   const stage_code = clean(original?.stage_code) || clean(snapshot.stage_code) || null;
   if (!use_case) return fail("reselection_use_case_unknown");
+  if (!language || language.toLowerCase() === "unknown") return fail("reselection_hold_language");
 
   let query = supabase
     .from("sms_templates")

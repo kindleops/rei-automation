@@ -253,5 +253,7 @@ test("send time: no name anywhere ⇒ pause for review, never the 'Thanks for co
     loadNurtureRenderContext: async (_s, args) => buildNurtureRenderContext({ known: args.known, property: { property_address: "412 W Oak St" }, intent: args.intent }),
   });
   assert.equal(result.resolved, false);
-  assert.equal(result.reason, "no_renderable_followup_template");
+  // Round 10: with no reply text and no sent row the language is unknown too,
+  // which holds first (never an English default); either way nothing sends.
+  assert.ok(["no_renderable_followup_template", "hold_language"].includes(result.reason), result.reason);
 });

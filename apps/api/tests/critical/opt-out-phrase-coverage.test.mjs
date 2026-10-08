@@ -65,10 +65,10 @@ test("ordinary messages containing 'remove' or 'number' are NOT opt-outs", () =>
   }
 });
 
-test("a misspelled cessation request is still NOT matched, by design", () => {
-  // Documents the live ••1156 behaviour rather than silently fixing it with
-  // fuzzy matching. This one is handled as an operator action.
-  assert.notEqual(intentOf("rwmove me from all you lists"), "opt_out");
+test("a misspelled cessation request IS an opt-out (round 10, owner 2026-10-08)", () => {
+  // Was documented as an operator action; the owner's round-10 rule makes the
+  // typo-tolerant "remove me from (all your) lists" an opt-out.
+  assert.equal(intentOf("rwmove me from all you lists"), "opt_out");
 });
 
 test("Spanish cessation phrases are unaffected", () => {

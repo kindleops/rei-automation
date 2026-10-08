@@ -179,7 +179,9 @@ for (const [message, estimated_value] of [["2 million", 254000], ["It can be you
 
 test("'As I have said 4-6 times, I do not own any land in OKlahoma.' -> not the owner", async () => {
   const r = await replay("As I have said 4-6 times, I do not own any land in OKlahoma.  If U have");
-  assert.equal(r.classification.primary_intent, "wrong_number");
+  // Round 10 (owner 2026-10-08): an ownership DENIAL is property-scoped
+  // (property_specific_non_owner); wrong_number is kept for person/phone mismatch.
+  assert.equal(r.classification.primary_intent, "property_specific_non_owner");
 });
 
 // ── Not opt-outs (precision) ────────────────────────────────────────────────

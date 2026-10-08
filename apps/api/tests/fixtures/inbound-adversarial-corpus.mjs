@@ -608,9 +608,10 @@ export const ADVERSARIAL_INBOUND_CASES = [
     category: "wrong_number",
     message_body: "who dis? I never owned that",
     expected: {
-      intent_any_of: ["wrong_number", "who_is_this"],
+      // Round 10 (owner 2026-10-08): a never-owned denial is property-scoped.
+      intent_any_of: ["wrong_number", "who_is_this", "property_specific_non_owner"],
       must_not_auto_reply: true,
-      disposition_any_of: ["suppressed_wrong_number", "human_review_required"],
+      disposition_any_of: ["suppressed_wrong_number", "human_review_required", "no_reply_required"],
     },
     notes: "Slang identity question plus never-owned denial; ownership disconnect outranks the identity question.",
   }),

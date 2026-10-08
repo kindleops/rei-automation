@@ -44,6 +44,9 @@ export const CLEANUP_VERSION = "new_replies_cleanup_v1";
 export const CLEANUP_CATEGORY = Object.freeze({
   KEEP: "KEEP AS GENUINE NEW REPLY",
   WRONG_PERSON: "WRONG PERSON",
+  // Round 10 (owner 2026-10-08): an ownership DENIAL closes the person x
+  // property only; the phone is never marked wrong.
+  NOT_OWNER: "NOT OWNER (property-scoped)",
   SOLD: "SOLD",
   NOT_INTERESTED: "NOT INTERESTED",
   NOT_FOR_SALE: "NOT FOR SALE",
@@ -203,6 +206,7 @@ export function categorizeReply({ classification = {}, body = "", open_engagemen
   // archived away).
   if (rules.includes("other_property_for_sale")) return CLEANUP_CATEGORY.KEEP;
   if (intent === "wrong_number") return CLEANUP_CATEGORY.WRONG_PERSON;
+  if (intent === "property_specific_non_owner") return CLEANUP_CATEGORY.NOT_OWNER;
   if (intent === "sold_property") return CLEANUP_CATEGORY.SOLD;
   if (intent === "hostile_or_legal") return CLEANUP_CATEGORY.HOSTILE;
   if (emojiTurn) {
@@ -414,6 +418,16 @@ export function planThreadCleanup({
         proposed_send: "no (next contact recorded only; contacting them is a separate campaign action)",
         why: "the reply says we reached someone other than the owner; the number is invalid for this owner only, never globally",
         apply: ["write_reclassification", "mark_relationship_not_owner", "archive_thread", "record_next_contact_plan"],
+      });
+    case CLEANUP_CATEGORY.NOT_OWNER:
+      return row({
+        proposed_state: { bucket: "dead", disposition: "unqualified", archived: true, archive_reason: "not_owner", relationship: "person x property closed; phone kept" },
+        new_replies: "remove",
+        follow_up: "none",
+        next_contact: next_contact || { channel: "none", why: "next contact not evaluated" },
+        proposed_send: "no",
+        why: "the reply denies owning this property; the person x property is closed, the phone stays usable for its real owner context",
+        apply: ["write_reclassification", "archive_thread", "record_next_contact_plan"],
       });
     case CLEANUP_CATEGORY.SOLD:
       return row({

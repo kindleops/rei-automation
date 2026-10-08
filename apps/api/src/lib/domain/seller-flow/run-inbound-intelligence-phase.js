@@ -288,6 +288,7 @@ export async function runInboundIntelligencePhase({
           classification,
           decision: canonical_decision,
           context: context || latestThreadContext,
+          inboundMessageText: message,
         });
 
   const universal_stage = deriveUniversalStage(

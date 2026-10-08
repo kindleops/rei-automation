@@ -297,6 +297,9 @@ export function deriveChecklist({
   const ownership_known = OWNERSHIP_YES.has(lower(kf.ownership_status)) || kf.ownership_confirmed === true;
   const ownership_turn =
     OWNERSHIP_TURN_INTENTS.has(intent) ||
+    // Round 10 (owner 2026-10-08): "Yes, but not for sale" / "Yes. Why" confirm
+    // ownership whatever the intent; the classifier keeps it as ownership_fact.
+    classification?.ownership_fact?.ownership_confirmed === true ||
     (stage === V3_STAGES.S1 && (v2_intent === V2_INTENTS.AFFIRMATIVE || v2_intent === V2_INTENTS.INTEREST)) ||
     lower(facts.ownership?.value?.status || facts.ownership?.value?.ownership_status) === "owner";
   // Every later question was asked only after ownership (and interest) were answered.
@@ -1120,6 +1123,13 @@ export function planSellerConversationV3({
   }
 
   // ── 2. relationship intents → automatic dispositions ────────────────────
+  // Round 10 (owner 2026-10-08): an ownership DENIAL ("I never owned it",
+  // "keep looking") closes the person x property -- no reply, no review, the
+  // phone untouched. A number in the text is a referral to capture.
+  if (rule_ids.includes("r10_ownership_denial_not_owner") || rule_ids.includes("r10_ownership_question_denial")) {
+    if (PHONE_IN_TEXT_RE.test(String(message || ""))) return terminal(b, V3_TERMINAL.REFERRAL_CAPTURE, "v3_not_owner_referral_number_captured");
+    return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, "v3_not_owner_denial_archived_property");
+  }
   if (CLOSED_PROPERTY_INTENTS.has(intent) || v2_intent === V2_INTENTS.SOLD_FORMER_OWNER) {
     return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, "v3_sold_or_not_owner_archived");
   }
@@ -1179,7 +1189,8 @@ export function planSellerConversationV3({
     return terminal(b, V3_TERMINAL.NURTURE, "v3_lexicon_not_interested_nurture");
   }
   if (v2_intent === V2_INTENTS.WHO_WHY || ["who_is_this", "info_request", "how_got_number"].includes(intent) || lexicon?.intent === LEXICON_INTENTS.WHO_WHY) {
-    return whoLoop(b, used, ctx);
+    // Round 10: "how did you get my number" -> the info-source explanation first.
+    return whoLoop(b, used, ctx, { info_source: rule_ids.includes("r10_info_source_question") });
   }
 
   // ── 3b. S3 contextual YES / a number that is not a price (§26–27, §38) ──
@@ -1315,11 +1326,13 @@ function routeConnectedPerson(b, { kind, checklist, used, ctx }) {
   return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, `v3_connected_${kind}_unresolved_archived`);
 }
 
-function whoLoop(b, used, ctx) {
+function whoLoop(b, used, ctx, { info_source = false } = {}) {
   const answered = used.filter((u) => WHO_USE_CASES.has(u)).length;
   if (answered >= V3_CONFIG.who_answer_limit) return terminal(b, V3_TERMINAL.ARCHIVE, "v3_who_asked_again_archived");
   const preference = answered === 0
-    ? WHO_FIRST_FOR_STAGE[b.stage] || [U.WHO]
+    ? info_source
+      ? [U.INFO_SOURCE, ...(WHO_FIRST_FOR_STAGE[b.stage] || [U.WHO])]
+      : WHO_FIRST_FOR_STAGE[b.stage] || [U.WHO]
     : [U.INFO_SOURCE, U.WHO_VARIANT];
   return guardedReply(b, preference, answered === 0 ? "v3_who_local_investor_then_resume" : "v3_who_second_answer_different_text", ctx, {
     resume_stage: b.stage,

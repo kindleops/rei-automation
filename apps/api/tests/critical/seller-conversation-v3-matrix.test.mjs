@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { runCell, INTENT_MESSAGES, MATRIX_STAGES, PHRASEBOOK, MULTILINGUAL_TURNS, trustedSnapshot } from "../helpers/seller-conversation-v3-matrix.mjs";
 import { catalogFor, PROD_SAFE } from "../helpers/seller-conversation-v3-catalog.mjs";
 import { CANONICAL_LANGUAGES } from "@/lib/domain/templates/canonical-language-adapter.js";
+import { identifyReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { canonicalTemplateLanguage } from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
 
 const ACTIONS = new Set(["auto_reply", "auto_terminal", "suppressed", "review"]);
@@ -119,7 +120,10 @@ test("§73: 21 intents × S1–S4 — every cell has the golden deterministic st
       assert.equal(a.plan?.reasoning_code, b.plan?.reasoning_code, `${stage}.${key} is deterministic`);
       assert.equal(a.text, b.text, `${stage}.${key} same text`);
       assert.equal(a.plan?.reasoning_code, GOLDEN_73[`${stage}.${key}`], `${stage}.${key} "${message}"`);
-      assert.notEqual(a.outcome, "review", `${stage}.${key} must not need a person`);
+      // Round 10: a number / emoji-only cell carries no seller language
+      // evidence -> language HOLD (no send); every other cell needs no person.
+      if (a.review_reason === "hold_language") assert.equal(identifyReplyLanguage(message), null, `${stage}.${key} held with language evidence`);
+      else assert.notEqual(a.outcome, "review", `${stage}.${key} must not need a person`);
     }
   }
   assert.equal(cells.length, 84);
@@ -182,9 +186,14 @@ test("§92 per-language activation: drafts exist but the language is not switche
   assert.equal(on.template.language, "French");
 });
 
-test("§92 numerals / emoji speak the thread language; the English default is not English in a non-English thread", async () => {
+// Round 10 (owner 2026-10-08): the reply language comes from the SELLER's own
+// inbound evidence only; our outbound / stored thread language never decides.
+// An emoji / number-only reply with no seller language evidence HOLDS.
+test("§92 numerals / emoji never borrow the thread language: no seller evidence -> HOLD; the English default is not English in a non-English thread", async () => {
   const price = await runCell({ stage: "S3", message: "$250,000", language: "German", ade_snapshot: trustedSnapshot() });
-  assert.equal(price.template?.language, "German");
+  assert.notEqual(price.outcome, "auto_reply");
+  assert.equal(price.review_reason, "hold_language");
+  assert.notEqual(price.template?.language, "English");
   const why = await runCell({ stage: "S1", message: "Warum fragen Sie?", language: "German" });
   assert.equal(why.template?.language, "German");
   const en = await runCell({ stage: "S1", message: "Huh?", language: "Hebrew" });

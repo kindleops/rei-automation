@@ -25,6 +25,7 @@ import { resolveSellerReplyLanguage } from "@/lib/domain/classification/seller-r
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
 import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
+import { applyRound10IntentRules, matchRound10OptOut } from "@/lib/domain/classification/round10-reply-rules.js";
 import { classifyStopScope, matchesOutreachStop, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
 import {
   resolveCanonicalAskingPrice,
@@ -121,6 +122,11 @@ const LANGUAGE_PATTERNS = [
       // Greetings & general
       "hola", "buenas", "buenos días", "buenas tardes", "buenas noches",
       "buen día", "qué tal", "cómo estás",
+      // round 10 (owner 2026-10-08): plain Spanish seller phrases that fell to
+      // the English default ("Estoy vendiendo", "No estoy vendiendo la casa").
+      "estoy vendiendo", "no estoy vendiendo", "vendiendo", "no vendo", "la casa",
+      "mi casa", "esa casa", "no está a la venta", "no esta a la venta", "a la venta",
+      "no gracias", "dueño", "dueña", "no se vende", "ya la vendí", "ya lo vendí",
       // Ownership / property
       "propiedad", "propiedades", "el dueño", "la dueña", "soy el dueño",
       "soy dueño", "soy la dueña", "soy dueña", "el propietario",
@@ -6983,11 +6989,17 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   // COMPLIANCE in every registry language (owner 2026-10-07): a confident
   // contact-revocation phrase or whole-message STOP keyword in the ORIGINAL
   // words is an opt-out — independent of any conversation flag.
-  const compliance_flag  = stop_other_action
+  // Round 10 (owner 2026-10-08): explicit revocations the phrase list missed
+  // ("please do not bother us", "borra mi número", "cease and desist",
+  // "rwmove me from all you lists", a closing "No more") are opt-outs and
+  // OVERRIDE every ordinary intent -- read from the ORIGINAL words.
+  const round10_opt_out = matchRound10OptOut(original_message);
+  const compliance_flag  = (stop_other_action
     ? (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
     : detectComplianceFlag(message) || (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
       // round 9: a stop aimed at our outreach ("Stop looking up properties to buy").
-      || (matchesOutreachStop(original_message) ? "stop_texting" : null);
+      || (matchesOutreachStop(original_message) ? "stop_texting" : null))
+    || (round10_opt_out.matched ? "stop_texting" : null);
   let language           = detectLanguageHeuristic(original_message, brain_item);
   // An explicit Spanish-switch request ("no hablo inglés", "en español por
   // favor") is deterministic evidence of language preference even when the
@@ -7097,7 +7109,7 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   const emotion          = detectEmotion(authored);
   const positive_signals = detectPositiveSignals(authored);
   const stage_hint       = detectStageHint(authored, brain_item, objection);
-  const intents          = resolveIntents(message, {
+  const resolved_intents = resolveIntents(message, {
     compliance_flag,
     stop_other_action,
     objection,
@@ -7105,6 +7117,20 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
     conversation_context,
     emoji_interpretation,
     reply_signals,
+  });
+  // Round 10 (owner 2026-10-08): ownership confirmation kept as a fact while
+  // declining; ownership DENIAL (property-scoped) split from WRONG NUMBER
+  // (phone); legal threat + opt-out -> legal review flag; info-source, who/why
+  // and listed dispositions. Pure; see round10-reply-rules.js.
+  const authored_text = emoji_interpretation?.reaction_type === "platform_reaction" ? "" : message;
+  const { intents, facts: round10 } = applyRound10IntentRules(resolved_intents, {
+    message: authored_text,
+    ownership_question,
+    compliance_flag,
+    round10_opt_out,
+    is_true_wrong: matchesTrueWrongNumber(lower(authored_text)),
+    is_ownership_disconnect: matchesOwnershipDisconnect(lower(authored_text)),
+    wrong_person_rule: reply_signals?.wrong_person?.matched ? reply_signals.wrong_person.rule_id : null,
   });
 
   let confidence = computeHeuristicConfidence({
@@ -7196,6 +7222,10 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
     // detected | language_switch_request. The auto-reply template selector
     // honours a seller-derived language over the stored thread language.
     reply_language_source,
+    // Round 10: the seller's most recent identifiable EARLIER inbound language
+    // (conversation context), so a reply-language conflict can hold.
+    seller_history_language:
+      (conversation_context && typeof conversation_context === "object" ? conversation_context.seller_reply_language : null) || null,
     call_request: reply_signals.call_request?.matched
       ? {
           state: reply_signals.call_request.state,
@@ -7205,6 +7235,13 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
         }
       : null,
     reply_signals: summarizeReplySignals(reply_signals),
+    // Round 10: ownership evidence kept whatever the intent ("Yes, but not for
+    // sale"), the legal-review flag on an opt-out, the disposition hint
+    // (not_owner / already_listed) and the audit of which round-10 rules ran.
+    ownership_fact: round10.ownership_fact,
+    legal_review_required: round10.legal_review_required === true,
+    disposition_hint: round10.disposition_hint,
+    round10_rules: round10.rule_ids.length ? round10 : null,
     classifier_version: CLASSIFY_VERSION,
   };
 }
@@ -7424,6 +7461,7 @@ function deriveAutomationDecision({
   confidence = 0,
   emoji_interpretation = null,
   matched_rule_ids = [],
+  legal_review_required = false,
 } = {}) {
   const intent = cleanMessage(primary_intent) || "unclear";
   const normalized_objection = cleanMessage(objection);
@@ -7467,6 +7505,19 @@ function deriveAutomationDecision({
   }
 
   if (compliance_flag === "stop_texting" || intent === "opt_out") {
+    // Round 10: a legal threat with a stop demand is the opt-out PLUS a human
+    // legal review (never a quiet hostile archive). Suppression is unchanged.
+    if (legal_review_required === true) {
+      return {
+        auto_reply_allowed: false,
+        queue_action: "none",
+        suppression_action: "opt_out",
+        human_review_required: false,
+        legal_review_required: true,
+        review_reason: "legal_threat_opt_out",
+        risk_level: "high",
+      };
+    }
     return {
       auto_reply_allowed: false,
       queue_action: "none",
@@ -7631,6 +7682,19 @@ function deriveAutomationDecision({
       auto_reply_allowed: false,
       queue_action: "none",
       suppression_action: "none",
+      human_review_required: false,
+      risk_level: "medium",
+    };
+  }
+
+  // Round 10 (owner 2026-10-08): an OWNERSHIP DENIAL ("I never owned it",
+  // "it isn't mine", "keep looking") closes the person x property; the phone
+  // stays usable for its real owner context -- never a wrong-number mark.
+  if (intent === "property_specific_non_owner") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "close_property_not_owner",
       human_review_required: false,
       risk_level: "medium",
     };

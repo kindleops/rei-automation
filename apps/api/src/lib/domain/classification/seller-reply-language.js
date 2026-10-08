@@ -43,6 +43,12 @@ const SHORT_REPLY_LEXICON = new Map(
   }).map(([language, list]) => [language, new Set(list)])
 );
 
+// Words that, on their own, belong to exactly one of the two main languages.
+const SHORT_WORD_LANGUAGES = new Map([
+  ["English", new Set(["yes", "yeah", "yep", "yup", "yea", "nope", "nah", "why", "what", "who", "how", "when", "where", "thanks", "thank", "you", "sure", "correct", "right", "please", "hello", "hi", "hey", "is", "this", "it", "i", "do", "am", "still", "sir", "maam", "of", "course", "absolutely", "not", "anymore", "ask", "asking", "the", "owner", "which", "its", "yet", "occupied", "rented", "vacant", "numbers", "number", "mine", "my", "your", "me", "and", "are", "was", "did", "sold", "nothing", "never"])],
+  ["Spanish", new Set(["si", "porque", "por", "que", "quien", "como", "cuando", "donde", "gracias", "claro", "bueno", "pero", "soy", "yo", "es", "senor", "senora", "hola", "buenas", "ya", "tal", "vez", "asi", "de", "acuerdo", "esta", "bien", "dueno", "duena", "cual", "cuál", "y", "tu", "usted", "nada", "nunca", "mia", "mio", "vendida", "vendido", "rentada", "ocupada"])],
+]);
+
 function foldShort(text) {
   return foldReplyText(text)
     .replace(/[^\p{L}\p{N}\s']/gu, " ")
@@ -84,6 +90,25 @@ export function identifyReplyLanguage(message, { detected_language = null, expli
   const folded = foldShort(raw);
   for (const [language, set] of SHORT_REPLY_LEXICON) {
     if (set.has(folded)) return language;
+  }
+
+  // round 10 (owner 2026-10-08): a short reply made only of words that belong
+  // to ONE language ("Yes. Why", "Si porque", "Yes thanks") identifies it.
+  // "no", "ok" and numbers are shared and never decide.
+  // A capitalized word in the seller's own text ("Chris who?", "Cuál Michael")
+  // is a name, not language evidence; at least one language word must remain.
+  const capitalized = new Set(
+    (raw.match(/\p{Lu}[\p{Ll}'’-]+/gu) || [])
+      .map((w) => foldShort(w))
+      .filter((w) => w && !SHORT_WORD_LANGUAGES.get("English").has(w) && !SHORT_WORD_LANGUAGES.get("Spanish").has(w))
+  );
+  const tokens = folded
+    .split(" ")
+    .filter((t) => t && !/^[$]?\d[\d,.]*(?:k|m|mil)?$/.test(t) && !["no", "ok", "okay", "k"].includes(t) && !capitalized.has(t));
+  if (tokens.length >= 1 && tokens.length <= 6) {
+    for (const [language, words] of SHORT_WORD_LANGUAGES) {
+      if (tokens.every((t) => words.has(t))) return language;
+    }
   }
 
   // Short English real-estate words ("199k sale", "cash offer") identify

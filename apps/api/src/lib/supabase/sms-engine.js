@@ -2589,7 +2589,11 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
       const { resolveRotationTemplate } = await import(
         "@/lib/domain/queue/resolve-deferred-queue-message.js"
       );
-      const result = await resolveRotationTemplate(normalized, {
+      // Round 10 (owner 2026-10-08): rotation keeps the row's exact language;
+      // normalizeSendQueueRow drops the column, so carry it from the raw row
+      // (an unknown language holds -- never an English default).
+      const rotation_language = String(row?.language || row?.metadata?.language || "").trim();
+      const result = await resolveRotationTemplate(rotation_language ? { ...normalized, language: rotation_language } : normalized, {
         excludeTemplateIds: tried_template_ids,
         supabase: options.supabase || options.supabaseClient,
       });

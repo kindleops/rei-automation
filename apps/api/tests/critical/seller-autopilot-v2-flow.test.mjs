@@ -247,25 +247,28 @@ test("BARE NO to the ownership question → ONE clarifier (BARE_NO_AUTO_CLARIFIE
   const off = await runFlow({ turns: [["No", "ownership_check"]] });
   assert.deepEqual(sent(off.results[0]), [], "round 10: flag OFF (default) -> no clarifier");
   await withBareNoClarifierOn(async () => {
+  // Round 10 (owner 2026-10-08): a bare "No" carries no seller language
+  // evidence (shared by English and Spanish) and our outbound language never
+  // decides -> even with the flag on, the clarifier HOLDS (no send).
   const wrong = await runFlow({ turns: [["No", "ownership_check"], ["Wrong number", "ownership_check"]] });
-  assert.deepEqual(sent(wrong.results[0]), ["ownership_connection_clarifier"]);
-  assert.equal(body(wrong.results[0]), "Got it. Are you connected to the property, or do I have the wrong number?");
+  assert.deepEqual(sent(wrong.results[0]), [], "no language evidence: the clarifier holds");
   assert.equal(wrong.results[1].inserts.length, 0);
   assert.equal(wrong.results[1].out.execution.automation_decision.should_suppress_contact, true);
   assert.equal(wrong.results[1].out.execution.automation_decision.suppression_reason, "wrong_number");
 
-  for (const [msg, kind] of [["I manage it for the owner", "property_manager"], ["My wife owns it", "family_owner"], ["My LLC owns it", "entity_owner"]]) {
+  // (The identity answers to a SENT clarifier -- v2_identity_resolution -- are
+  // unreachable while the clarifier holds for language; they need no send.)
+  for (const msg of ["I manage it for the owner", "My wife owns it", "My LLC owns it"]) {
     const id = await runFlow({ turns: [["No", "ownership_check"], [msg, "ownership_check"]] });
     assert.equal(id.results[1].inserts.length, 0, msg);
-    assert.equal(id.results[1].out.execution.automation_decision.human_review_reason, `v2_identity_resolution:${kind}`, msg);
   }
 
   const again = await runFlow({ turns: [["No", "ownership_check"], ["No", "ownership_check"]] });
   assert.equal(again.results[1].inserts.length, 0, "no second clarification");
-  assert.equal(again.results[1].out.execution.automation_decision.human_review_reason, "v2_bare_no_after_ownership_clarifier");
 
+  // Round 10: a Spanish thread does not make a bare "No" Spanish -- hold.
   const es = await runFlow({ language: "Spanish", turns: [["No", "ownership_check"]] });
-  assert.equal(body(es.results[0]), "Entendido. ¿Tiene alguna relación con la propiedad, o tengo el número equivocado?");
+  assert.deepEqual(sent(es.results[0]), []);
   });
 });
 

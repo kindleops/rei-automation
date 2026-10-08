@@ -146,8 +146,10 @@ const SCENARIOS = [
   // ── Hostility (brief 39, 40) ──────────────────────────────────────────────
   { id: "S39_profanity", message: "Fuck off with these texts",
     expect: { suppress_any: true, no_reply: true } },
+  // Round 10 (owner 2026-10-08): a legal threat conditioned on more contact is
+  // a stop demand -> opt-out (suppressed) plus a human legal-review flag.
   { id: "S40_threat", message: "I'll sue you if you text me again",
-    expect: { primary_any: ["hostile_or_legal", "opt_out"], no_reply: true } },
+    expect: { primary_any: ["opt_out"], no_reply: true, suppress: true } },
 
   // ── Legal / authority lanes ───────────────────────────────────────────────
   { id: "L01_irs_lien", message: "I want to sell but there is an IRS lien on it",
