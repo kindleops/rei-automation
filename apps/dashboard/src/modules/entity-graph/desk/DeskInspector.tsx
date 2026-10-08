@@ -427,7 +427,7 @@ function OutreachSection({ anchorProperty, ids, states, onAddToCampaign }: { anc
             <div className={cx('egdk-outreach__sms', st.sms ? (st.sms.eligible ? 'is-ok' : 'is-blocked') : 'is-na')}>
               <span className="egdk-outreach__k">SMS eligible</span>
               <strong>{st.sms ? (st.sms.eligible ? 'Yes' : 'No') : 'Not available'}</strong>
-              {st.sms && !st.sms.eligible ? <small>{smsReasonLabel(st.sms.reason)}</small> : st.sms ? <small>{`${st.sms.ready} of ${st.sms.rows} contact ${st.sms.rows === 1 ? 'route' : 'routes'} ready`}</small> : null}
+              {st.sms && !st.sms.eligible ? <small>{st.contactCandidates && st.contactCandidates.phones > 0 && ['missing_phone', 'NO_PHONE', 'not_in_campaign_audience', 'missing_identity_linkage'].includes(st.sms.reason ?? '') ? 'The campaign graph has no phone for this property — candidates below' : smsReasonLabel(st.sms.reason)}</small> : st.sms ? <small>{`${st.sms.ready} of ${st.sms.rows} contact ${st.sms.rows === 1 ? 'route' : 'routes'} ready`}</small> : null}
             </div>
             <dl className="egdk-outreach__facts">
               <div><dt>Last contact</dt><dd>{lastContactLabel(st.lastContact) ?? 'Never contacted'}</dd></div>

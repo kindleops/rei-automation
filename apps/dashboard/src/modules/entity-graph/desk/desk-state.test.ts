@@ -104,6 +104,6 @@ describe('contact discovery wording', () => {
   it('a graph gap with linked-prospect phones is not shown as plain "No phone"', () => {
     const col = SCOPE_TABLE_COLUMNS.properties.find((c) => c.key === 'smsEligible')!
     const r = { entityType: 'property', entityId: '1', title: 'x', linkedCounts: {}, contextIds: {}, details: { outreach: { sms: { eligible: false, reason: 'missing_phone' }, contactCandidates: { people: 1, phones: 2, unresolved: 1, candidates: [] } } } } as unknown as EntitySearchResult
-    expect(col.render(r)).toBe('No · not in campaign graph · 2 phone candidates (unresolved)')
+    expect(col.render(r)).toBe('No · 2 phone candidates, not in graph · unresolved')
   })
 })

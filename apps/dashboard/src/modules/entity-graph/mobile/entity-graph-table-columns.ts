@@ -122,7 +122,7 @@ export const smsBlockLabel = (code: string | null | undefined): string => (code 
  */
 const OUTREACH_COLUMNS: TableColumn[] = [
   {
-    key: 'smsEligible', group: 'outreach', label: 'SMS eligible', width: 170, outreach: true,
+    key: 'smsEligible', group: 'outreach', label: 'SMS eligible', width: 230, outreach: true,
     source: 'Campaign target graph · the builder’s readiness rule',
     render: (r) => {
       const s = r.details?.outreach?.sms
@@ -130,7 +130,7 @@ const OUTREACH_COLUMNS: TableColumn[] = [
       if (s.eligible) return 'Yes'
       // a gap in the campaign graph is not "no phone" when linked prospects carry candidates
       const c = r.details?.outreach?.contactCandidates
-      if (c && c.phones > 0) return `No · not in campaign graph · ${c.phones} phone ${c.phones === 1 ? 'candidate' : 'candidates'}${c.unresolved ? ' (unresolved)' : ''}`
+      if (c && c.phones > 0) return `No · ${c.phones} phone ${c.phones === 1 ? 'candidate' : 'candidates'}, not in graph${c.unresolved ? ' · unresolved' : ''}`
       return `No · ${smsBlockLabel(s.reason)}`
     },
     sortValue: (r) => { const s = r.details?.outreach?.sms; return s ? (s.eligible ? 1 : 0) : null },
