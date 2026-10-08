@@ -132,7 +132,8 @@ function mapProperty(p) {
     repairEstimate: repairTruth(p).value,
     repairStatus: repairTruth(p).status,
     streetview: clean(p.streetview_image) || null,
-    tags: clean(p.seller_tags_text).split(/[,|;]/).map((t) => t.trim()).filter(Boolean).slice(0, 8),
+    // vendor property flags + seller tags, deduplicated (the client maps them to one signal vocabulary)
+    tags: [...new Set([...clean(p.property_flags_text).split(/[;|]/), ...clean(p.seller_tags_text).split(/[,|;]/)].map((t) => t.trim()).filter(Boolean))].slice(0, 16),
     outOfStateOwner: bool(p.out_of_state_owner),
     corporateOwner: bool(p.is_corporate_owner),
   }
