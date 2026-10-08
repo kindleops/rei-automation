@@ -916,10 +916,49 @@ export function applyInboundAutomationDecision(args = {}) {
     conversation_stage: stage,
     metadata: classification.metadata || {},
   });
-  return applySellerConversationV3TerminalDecision(
-    ensureInboundCoverage(raw, { stage, contact_identity, classification }),
+  return applySuppressionCandidateHold(
+    applySellerConversationV3TerminalDecision(
+      ensureInboundCoverage(raw, { stage, contact_identity, classification }),
+      classification,
+    ),
     classification,
   );
+}
+
+/**
+ * Round 10 (owner 2026-10-08): a repeated demand to stop contacting without an
+ * explicit revocation phrase (classify.js rule repeat_no_contact_frustration)
+ * is a SUPPRESSION CANDIDATE. It is applied LAST so no overlay (ownership
+ * probe nurture, coverage fallback, v3 terminal) can turn it into a reply, a
+ * nurture or a quiet archive. An explicit opt-out (should_suppress_contact)
+ * always wins -- that is the canonical suppression path.
+ */
+export function isSuppressionCandidateClassification(classification = {}) {
+  const decision = classification?.automation_decision || {};
+  if (clean(classification?.compliance_flag) === "stop_texting") return false;
+  if (clean(classification?.primary_intent) === "opt_out") return false;
+  return (
+    decision.suppression_candidate === true ||
+    (Array.isArray(classification?.matched_rule_ids) &&
+      classification.matched_rule_ids.includes("repeat_no_contact_frustration"))
+  );
+}
+
+function applySuppressionCandidateHold(decision = {}, classification = {}) {
+  if (!decision || decision.should_suppress_contact) return decision;
+  if (!isSuppressionCandidateClassification(classification)) return decision;
+  return {
+    ...decision,
+    should_queue_reply: false,
+    should_suppress_contact: false,
+    should_mark_human_review: true,
+    reply_mode: "manual_review",
+    human_review_reason: "suppression_candidate",
+    next_action: "hold_suppression_candidate",
+    audit_reason: "suppression_candidate",
+    suppression_candidate: true,
+    hold_pending_sends: true,
+  };
 }
 
 function templateCandidateSet(decision = {}, classification = {}) {
@@ -2772,6 +2811,69 @@ export async function executeInboundAutomationDecision({
     });
   } catch {
     base_decision.latest_intent_precedence = null;
+  }
+
+  // ── SUPPRESSION CANDIDATE (round 10, owner 2026-10-08) ────────────────────
+  // A repeated demand to stop contacting with no explicit revocation phrase:
+  // no outbound on this turn, every pending send for the thread is held
+  // (cancelled through the canonical cancellation, compliance_terminal policy,
+  // thread scope), and the thread goes to the operator lane for a person to
+  // confirm the suppression. Runs BEFORE every directive / clarifier / mode
+  // gate so nothing downstream can queue a reply. An explicit opt-out never
+  // reaches here (should_suppress_contact is decided by the opt-out branch).
+  if (base_decision.next_action === "hold_suppression_candidate" && !base_decision.should_suppress_contact) {
+    const compliance_dry_run = complianceDryRun == null ? dryRun : Boolean(complianceDryRun);
+    let queue_cancellation = { ok: true, cancelled: 0, reason: "not_attempted" };
+    if (!compliance_dry_run && supabase) {
+      try {
+        queue_cancellation = await cancelSupabasePendingOutbound(
+          {
+            thread_key: threadKey || inboundFrom,
+            to_phone_number: inboundFrom || threadKey,
+            phone_id: phoneId,
+            policy: CANCELLATION_POLICIES.COMPLIANCE_TERMINAL,
+            reason: "suppression_candidate_hold",
+            suppression_reason: "suppression_candidate",
+            inbound_event_id: inboundEventId,
+            inbound_received_at: inboundReceivedAt || null,
+            cancelled_by: "inbound_suppression_candidate",
+          },
+          { supabase }
+        );
+      } catch (candidate_cancel_error) {
+        queue_cancellation = { ok: false, cancelled: 0, reason: candidate_cancel_error?.message || "cancel_failed" };
+        warn("inbound.suppression_candidate_hold_failed", {
+          thread_key: threadKey || inboundFrom,
+          error: candidate_cancel_error?.message || "unknown_error",
+        });
+      }
+    }
+    return {
+      ok: true,
+      automation_decision: base_decision,
+      selected_template: null,
+      rendered_message_text: null,
+      queued: false,
+      queue_item_id: null,
+      queue_row_id: null,
+      queue_result: null,
+      suppression_applied: false,
+      suppression_candidate: true,
+      queue_cancellation,
+      duplicate_suppressed: false,
+      dry_run: Boolean(dryRun),
+      auto_reply_mode: effective_auto_reply_mode,
+      queue_permission,
+      audit_reason: "suppression_candidate",
+      seller_stage_reply: {
+        ok: true,
+        queued: false,
+        handled: true,
+        reason: "suppression_candidate",
+        plan: automationDecisionToLegacyPlan({ decision: base_decision, classification }),
+        brain_stage: null,
+      },
+    };
   }
 
   // Deterministic negotiation strategy directive (spec §7/§12): the router's

@@ -53,11 +53,27 @@ function includesAny(text, phrases = []) {
   return phrases.some((phrase) => normalized.includes(phrase));
 }
 
+// Round 10 (owner 2026-10-08): a repeated demand to stop contacting with no
+// explicit revocation (classify.js repeat_no_contact_frustration) is a
+// SUPPRESSION CANDIDATE: the operator lane (needs_review) until a person
+// confirms the suppression. Never a nurture / Dead / New Replies.
+function isSuppressionCandidate(classification = {}) {
+  if (!classification || typeof classification !== "object") return false;
+  if (String(classification.compliance_flag || "").trim() === "stop_texting") return false;
+  if (String(classification.primary_intent || "").trim() === "opt_out") return false;
+  return (
+    classification.automation_decision?.suppression_candidate === true ||
+    (Array.isArray(classification.matched_rule_ids) &&
+      classification.matched_rule_ids.some((id) => String(id).toLowerCase() === "repeat_no_contact_frustration"))
+  );
+}
+
 export function resolveOwnershipProbeDisinterestTransition({
   classification = {},
   messageEvent = {},
   existingState = {},
 } = {}) {
+  if (isSuppressionCandidate(classification)) return null;
   const flags = resolveThreadFlagsFromClassification(classification);
   if (!flags.not_interested) return null;
 
@@ -166,6 +182,13 @@ export function resolveUniversalStatusFromClassification(classification = {}, me
     return {
       universal_status: "dead",
       universal_stage: "wrong_number"
+    };
+  }
+
+  if (direction !== "outbound" && isSuppressionCandidate(classification)) {
+    return {
+      universal_status: "needs_review",
+      universal_stage: "suppression_candidate"
     };
   }
 
@@ -364,6 +387,15 @@ const V3_TERMINAL_BUCKETS = new Set(["dead", "follow_up", "cold"]);
 export function resolveReplyDispositionBucket({ primary = "", classification = {}, existingBucket = "", lastOutboundAt = null, now = Date.now() } = {}) {
   const intent = lower(primary);
   const v3_bucket = lower(classification?.seller_conversation_v3?.inbox_bucket);
+  // Round 10 (owner 2026-10-08): a suppression candidate (repeated demand to
+  // stop contacting) waits for a person to confirm the suppression -- the
+  // operator lane, never Dead / quiet archive, never New Replies.
+  if (
+    classification?.automation_decision?.suppression_candidate === true ||
+    classificationRuleIds(classification).includes("repeat_no_contact_frustration")
+  ) {
+    return "needs_review";
+  }
   if (classification?.seller_conversation_v3?.action === "terminal" && V3_TERMINAL_BUCKETS.has(v3_bucket)) return v3_bucket;
   if (intent === "sold_property") return "dead";
   if (intent === "hostile_or_legal" && classificationRuleIds(classification).some((id) => HOSTILE_COOL_RULE_IDS.has(id))) {
@@ -529,6 +561,10 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
     reasonCodes.includes("wrong_number")
   ) {
     return null;
+  }
+
+  if (!is_outbound && isSuppressionCandidate(classification)) {
+    return "needs_review";
   }
 
   const ownershipProbeTransition = resolveOwnershipProbeDisinterestTransition({

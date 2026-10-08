@@ -681,6 +681,15 @@ const COMPLIANCE_PHRASES = [
   "ya no me escriba", "ya no me escriban", "ya no me escribas", "no me escriban",
   "dejen de escribirme", "dejen de escribir", "dejen de mandarme mensajes",
   "deje de mandarme mensajes", "deja de mandarme mensajes",
+  // round 10 (owner 2026-10-08: any phrasing that demands we stop contacting
+  // is an opt-out): plural / usted "leave me alone" and "send me no more
+  // messages" sat as unclear ("Ya les dije, déjenme en paz").
+  "déjenme en paz", "dejenme en paz", "déjennos en paz", "dejennos en paz",
+  "déjanos en paz", "dejanos en paz", "leave me be", "leave us alone", "leave us be",
+  "no me manden mensajes", "no me manden más mensajes", "no me manden mas mensajes",
+  "ya no me manden mensajes", "ya no me manden", "no me mande más mensajes",
+  "no me mande mas mensajes", "no me envíen mensajes", "no me envien mensajes",
+  "no me envíes mensajes", "no me envies mensajes", "no me mandes mas mensajes",
   // Remove / delete my number, and blocking (2026-10-05 reply-quality: "Ya
   // quita mi número de tus contactos", "Mejor te blokeo..." were held for
   // review, not suppressed). "blokeo" is how "bloqueo" is actually typed.
@@ -4732,6 +4741,52 @@ function matchesBareNameReply(raw = "") {
   return t.split(/\s+/).every((w) => w.length >= 2 && !BARE_NAME_STOPWORDS.has(w.toLowerCase()));
 }
 
+// round 10 (owner 2026-10-08): a REPEATED demand to stop contacting. Two
+// shapes, neither carrying an explicit revocation phrase (those are opt-outs):
+//  1. the repetition IS the complaint: "how many times do I have to tell
+//     you", "you always/keep text(ing) me", "why do you keep texting me",
+//     "cuántas veces te tengo que decir", "siguen escribiendo";
+//  2. "I (already) told you" / "I said no already" / "ya te dije" that is a
+//     bare repeat or carries a decline / annoyance -- never a fact ("I told
+//     you the price is 200k", "I told you it needs a roof" keep their meaning).
+const REPEAT_CONTACT_STRONG_RES = [
+  /\bhow\s+many\s+(?:more\s+)?times\s+(?:do|did|must|should|will|have)\s+(?:i|we)\s+(?:have\s+to\s+|got\s+to\s+|gotta\s+|need\s+to\s+)?(?:tell|told|say|said|ask|asked|repeat|explain)\b/i,
+  /\bhow\s+many\s+(?:more\s+)?times\s+(?:i\s+(?:have\s+to|gotta|got\s+to|need\s+to)|i'?ve|have\s+i|i\s+have)\s+(?:tell|told|say|said|repeat)\b/i,
+  /\b(?:you|u|y'?all|you\s+guys|you\s+people|ya'?ll)\s+(?:always|keep|kept|constantly|still|continue\s+to|won'?t\s+stop|never\s+stop)\s+(?:on\s+)?(?:text|texting|txt|txting|messag(?:e|ing)|msg|call|calling|contact|contacting|hitting\s+me\s+up|hit\s+me\s+up|bother|bothering|sending|reaching\s+out)\b/i,
+  /\bwhy\s+(?:do|are|does|would|is)\s+(?:you|u|y'?all|you\s+guys|you\s+people|this\s+number|someone)\s+(?:keep|kept|still|continue|continuing|always)\s+(?:to\s+)?(?:on\s+)?(?:text|texting|messag(?:e|ing)|call|calling|contact|contacting|sending|bothering|hitting\s+me\s+up)\b/i,
+  /\bc(?:u[aá])ntas\s+veces\s+(?:m[aá]s\s+)?(?:te|le|les|se)\s+(?:lo\s+)?(?:tengo|tenemos|he|hemos|voy|debo)\s+(?:que\s+|a\s+)?(?:decir|dicho|repetir|repetido|explicar)\b/i,
+  /\b(?:siempre|todav[ií]a|siguen|sigues|sigue|otra\s+vez)\s+(?:me\s+)?(?:escribiendo|mandando|llamando|molestando|texteando|textiando|enviando)\b/i,
+  /\bpor\s*qu[eé]\s+(?:me\s+)?(?:siguen|sigues|sigue)\s+(?:escribiendo|mandando|llamando|molestando|texteando|enviando)\b/i,
+];
+const REPEAT_MARKER_RE =
+  /\bi\s+(?:already\s+|just\s+|have\s+|'?ve\s+)?(?:told|tld)\s+(?:you|u|y'?all|ya|you\s+guys|you\s+people|ur\s+company|your\s+company)\b|\bi\s+(?:already\s+)?said\s+no\b|\bi\s+already\s+(?:said|answered|replied|responded)\b|\bi\s+said\s+(?:it\s+|that\s+)?(?:before|already)\b|\b(?:ya\s+)?te\s+(?:lo\s+)?dije\b|\bya\s+(?:le|les|se)\s+(?:lo\s+)?(?:dije|hab[ií]a\s+dicho)\b|\bya\s+(?:te|le|les)\s+(?:conteste|contesté|respond[ií])\b|\bya\s+dije\s+que\s+no\b/i;
+// A decline / annoyance / profanity next to the repeat marker. A bare "no"
+// counts only as the first word after the marker ("I told you no", "ya te
+// dije que no") -- "I told you it needs a roof, no AC" keeps its meaning.
+const REPEAT_DECLINE_RE =
+  /\b(?:not\s+(?:interested|selling|for\s+sale|gonna\s+sell|going\s+to\s+sell)|(?:do\s+not|don'?t|dont)\s+(?:want|wanna|wish)\s+to\s+sell|no\s+vendo|no\s+(?:me\s+)?interesa|no\s+est[aá]\s+en\s+venta|no\s+quiero\s+vender|not\s+(?:the\s+)?owner|wrong\s+number|again|otra\s+vez|stop|quit|enough|basta|leave|alone|text\w*|messag\w*|call\w*|bother\w*|contact\w*|escrib\w*|molest\w*|llam\w*|fuck\w*|f\*+k?|shit|damn|hell|pendej\w*|chinga\w*)\b/i;
+const REPEAT_LEADING_NO_RE =
+  /^[^\p{L}\p{N}]*(?:(?:that|already|before|guys|ya|que)[^\p{L}\p{N}]+)*(?:no+|nope|nah|never|i'?m\s+not|i\s+am\s+not|i\s+(?:do\s+not|don'?t|dont)|it'?s\s+not|we'?re\s+not)\b/iu;
+// Words that may sit around a bare repeat ("I told you already guys!!").
+const REPEAT_FILLER_RE =
+  /\b(?:already|before|guys|man|dude|bro|sir|ma'?am|lady|lol|ok|okay|so|many\s+times|several\s+times|multiple\s+times|times|twice|a\s+million\s+times|last\s+time|the\s+last\s+time|ya|antes|varias\s+veces|muchas\s+veces|se[ñn]or|se[ñn]ora|oiga|pues|this|that|it|yesterday|last\s+week|then|and|but)\b/gi;
+export function matchesRepeatNoContactFrustration(raw = "") {
+  const text = String(raw ?? "").replace(/[’‘`]/g, "'").trim();
+  if (!text || text.length > 280) return false;
+  if (REPEAT_CONTACT_STRONG_RES.some((re) => re.test(text))) return true;
+  const marker = REPEAT_MARKER_RE.exec(text);
+  if (!marker) return false;
+  const after = text.slice(marker.index + marker[0].length);
+  if (REPEAT_DECLINE_RE.test(text.replace(marker[0], " "))) return true;
+  if (REPEAT_LEADING_NO_RE.test(after)) return true;
+  const rest = text
+    .replace(marker[0], " ")
+    .replace(REPEAT_FILLER_RE, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  return rest.length === 0;
+}
+
 export function matchesPurposeOrIdentityQuestion(text = "") {
   const t = lower(text).replace(/[’‘`]/g, "'").trim();
   if (!t || wordCount(t) > 12) return false;
@@ -4945,6 +5000,29 @@ function resolveIntents(
       calibrated_rule_family_id: "thanks_only_close",
       confidence_rationale: "thanks_only_close",
       contextual_confidence: 0.9,
+    });
+  }
+
+  // REPEATED DEMAND TO STOP CONTACTING (owner, round 10 2026-10-08): "You
+  // always text me I told you…", "how many times do I have to tell you", "I
+  // told you already", "Ya te dije que no". A repeat of a no-contact demand
+  // with an explicit revocation phrase never reaches here (compliance ran
+  // first -> opt_out). Without one it is a SUPPRESSION CANDIDATE: no outbound,
+  // pending sends held, a person confirms -- never an apology / re-ask, never a
+  // nurture, never quiet-archived as merely hostile.
+  if (!compliance_flag && matchesRepeatNoContactFrustration(rawMessage)) {
+    return finalizeIntentResult({
+      primary_intent: "unclear",
+      secondary_intents: ["suppression_candidate", "seller_frustration"],
+      matched_intents: ["unclear"],
+      matched_rule_ids: ["repeat_no_contact_frustration"],
+      context_status: ctxValidation.context_status,
+      evidence_spans: [rawMessage],
+      precedence_result: "repeat_no_contact_frustration",
+      ambiguity_flags: ["suppression_candidate"],
+      calibrated_rule_family_id: "repeat_no_contact_frustration",
+      confidence_rationale: "repeat_no_contact_frustration",
+      contextual_confidence: 0.85,
     });
   }
 
@@ -7394,6 +7472,28 @@ function deriveAutomationDecision({
       queue_action: "none",
       suppression_action: "opt_out",
       human_review_required: false,
+      risk_level: "high",
+    };
+  }
+
+  // Round 10 (owner 2026-10-08): a repeated demand to stop contacting WITHOUT
+  // an explicit revocation phrase is a SUPPRESSION CANDIDATE. No outbound;
+  // every pending send for the thread is held; a person confirms the
+  // suppression (operator lane, never the alerting New Replies, never a quiet
+  // hostile archive, never a nurture). Explicit revocations are opt-outs above.
+  if (
+    Array.isArray(matched_rule_ids) &&
+    matched_rule_ids.includes("repeat_no_contact_frustration")
+  ) {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "hold_pending_sends",
+      suppression_action: "suppression_candidate",
+      suppression_candidate: true,
+      human_review_required: true,
+      operator_escalation: true,
+      escalation_policy: "operator_exception",
+      review_reason: "suppression_candidate",
       risk_level: "high",
     };
   }
