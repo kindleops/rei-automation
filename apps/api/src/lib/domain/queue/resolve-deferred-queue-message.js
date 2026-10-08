@@ -22,6 +22,11 @@ import {
   isNoResponseFollowUpRow,
   resolveNoResponseFollowUpMessage,
 } from "@/lib/domain/seller-flow/no-response-followup.js";
+import {
+  NURTURE_TEMPLATE_FAMILIES,
+  loadNurtureRenderContext,
+  missingNurtureContextFields,
+} from "@/lib/domain/seller-flow/nurture-render-context.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -40,7 +45,9 @@ export const NURTURE_TEMPLATE_CANDIDATES = Object.freeze({
   // Last-resort fallbacks (consider_selling / seller_asking_price) are the
   // catalog's approved safe_for_auto_reply pools, so a nurture follow-up can
   // always execute even while stage-specific variants await safety approval.
-  not_interested: ["consider_selling_follow_up", "not_ready", "consider_selling"],
+  // 30-day re-engage: the nurture family only — never the S1 first-touch
+  // `consider_selling` pool ("Thanks for confirming…"). Unrenderable ⇒ pause.
+  not_interested: NURTURE_TEMPLATE_FAMILIES.not_interested,
   listed_or_unavailable: ["listed_or_unavailable", "not_ready", "consider_selling"],
   tenant_or_occupancy: ["tenant_or_occupancy", "consider_selling_follow_up", "consider_selling"],
   condition_signal: ["condition_probe", "consider_selling_follow_up", "consider_selling"],
@@ -104,7 +111,8 @@ async function fetchCandidateTemplates(supabase, useCases, language) {
  * Resolve a deferred follow-up row into a sendable message.
  * Returns { ok, resolved, message_body, template_id, use_case, reason }.
  */
-export async function resolveDeferredQueueMessage(queue_row = {}, deps = {}) {
+export async function resolveDeferredQueueMessage(input_row = {}, deps = {}) {
+  let queue_row = input_row;
   if (!isDeferredQueueRow(queue_row)) {
     return { ok: true, resolved: false, reason: "not_deferred" };
   }
@@ -150,9 +158,45 @@ export async function resolveDeferredQueueMessage(queue_row = {}, deps = {}) {
     candidates = NURTURE_TEMPLATE_CANDIDATES[intent] || NURTURE_TEMPLATE_CANDIDATES.unclear;
   }
 
+  // Render context at send time: a nurture row written without name /
+  // address / language / agent (every row before 2026-10-08) is re-resolved
+  // from the thread and property — never rendered from a first-touch pool.
+  let render_context = null;
+  if (intent !== "stage_no_reply") {
+    const missing = missingNurtureContextFields(queue_row).filter((f) => f !== "from_phone_number");
+    if (missing.length) {
+      try {
+        const meta = queue_row?.metadata && typeof queue_row.metadata === "object" ? queue_row.metadata : {};
+        const loader = typeof deps.loadNurtureRenderContext === "function" ? deps.loadNurtureRenderContext : loadNurtureRenderContext;
+        const resolved = await loader(supabase, {
+          thread_key: queue_row.to_phone_number || queue_row.thread_key,
+          property_id: clean(queue_row.property_id) || null,
+          inbound_message_event_id: clean(meta.inbound_message_event_id) || null,
+          intent,
+          known: {
+            seller_first_name: queue_row.seller_first_name || meta.seller_first_name,
+            property_address: queue_row.property_address,
+            from_phone_number: queue_row.from_phone_number,
+            language: queue_row.language || meta.language,
+            agent_name: queue_row.agent_name,
+          },
+        });
+        if (resolved && typeof resolved === "object") {
+          render_context = Object.fromEntries(
+            missing.filter((f) => clean(resolved[f])).map((f) => [f, resolved[f]])
+          );
+          queue_row = { ...queue_row, ...render_context };
+        }
+      } catch {
+        render_context = null;
+      }
+    }
+  }
+  const row_language = clean(queue_row.language) || clean(queue_row?.metadata?.language);
+
   let templates = [];
   try {
-    templates = await fetchCandidateTemplates(supabase, candidates, clean(queue_row.language));
+    templates = await fetchCandidateTemplates(supabase, candidates, row_language);
   } catch (error) {
     warn("[DEFERRED_FOLLOWUP_TEMPLATE_LOOKUP_FAILED]", {
       queue_row_id: queue_row.id || null,
@@ -174,7 +218,7 @@ export async function resolveDeferredQueueMessage(queue_row = {}, deps = {}) {
   templates = filterTemplatesForProperty(templates, { propertyGroup: asset_group }).kept;
 
   // Preserve candidate priority order, then language preference.
-  const rowLanguage = lower(queue_row.language) || "english";
+  const rowLanguage = lower(row_language) || "english";
   const ordered = candidates
     .flatMap((useCase) => {
       const matching = templates.filter((t) => lower(t.use_case) === useCase);
@@ -214,6 +258,9 @@ export async function resolveDeferredQueueMessage(queue_row = {}, deps = {}) {
       stage_code: clean(template.stage_code) || null,
       language: clean(template.language) || null,
       intent,
+      // Fields re-resolved at send time (the processor persists them so the
+      // name guard and the row agree with what was rendered).
+      render_context: render_context && Object.keys(render_context).length ? render_context : null,
       reason: "deferred_template_resolved",
     };
   }

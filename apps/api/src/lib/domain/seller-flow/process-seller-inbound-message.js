@@ -2246,6 +2246,11 @@ export async function processSellerInboundMessage({
           master_owner_id: ownerId,
           property_id: propertyId,
           classification_confidence: classification?.confidence ?? null,
+          // Render context for the deferred nurture (name / address / sticky
+          // sender / reply language / agent): the scheduler resolves what is
+          // not given here from the thread's own history.
+          inbound_to: inboundTo || null,
+          reply_text: typeof message === "string" ? message : null,
         }, supabase);
       } catch (followup_error) {
         runtimeDeps.warn("[SELLER_INBOUND_FOLLOWUP_FAILED]", {

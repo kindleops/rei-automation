@@ -17,6 +17,11 @@ import crypto from "node:crypto";
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { enqueueSendQueueItem } from "@/lib/supabase/sms-engine.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
+import {
+  isNurtureIntent,
+  loadNurtureRenderContext,
+  missingNurtureContextFields,
+} from "@/lib/domain/seller-flow/nurture-render-context.js";
 
 // Canonical intent names — must match CANONICAL_INTENTS in
 // coverage-net/canonical-intent-aliases.js, the single reconciled vocabulary
@@ -365,6 +370,62 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     ? `${buildFollowupDedupeKey(normalized_thread_key, intent)}:${dedupe_scope}`
     : buildFollowupDedupeKey(normalized_thread_key, intent);
   const scheduled_for = plan.scheduled_for;
+
+  // RENDER CONTEXT (2026-10-08). A nurture row is rendered 30 days from now by
+  // the deferred resolver from the row's own fields. Callers that only knew ids
+  // wrote rows with no name / address / sender / language / agent, so the
+  // resolver fell to the S1 "Thanks for confirming…" copy and the send guard
+  // blocked on missing_seller_first_name. Persist the full context now, from
+  // the thread's own history; known caller values always win.
+  if (isNurtureIntent(intent) && context.skip_render_context !== true) {
+    const missing = missingNurtureContextFields({
+      seller_first_name: context.seller_first_name,
+      property_address: context.property_address,
+      from_phone_number: context.from_phone_number,
+      language: context.language,
+      agent_name: context.agent_name,
+    });
+    if (missing.length) {
+      try {
+        const loader = typeof context.render_context_loader === "function" ? context.render_context_loader : loadNurtureRenderContext;
+        const resolved = await loader(supabase, {
+          thread_key: to_phone_number,
+          property_id: clean(context.property_id) || null,
+          inbound_message_event_id: clean(context.inbound_message_event_id) || null,
+          reply_text: clean(context.reply_text) || null,
+          intent,
+          known: {
+            seller_first_name: context.seller_first_name,
+            property_address: context.property_address,
+            from_phone_number: context.from_phone_number,
+            textgrid_number_id: context.textgrid_number_id,
+            inbound_to: context.inbound_to,
+            language: context.language,
+            agent_name: context.agent_name,
+            timezone: context.timezone,
+            market: context.market,
+          },
+        });
+        if (resolved && typeof resolved === "object") {
+          context = {
+            ...context,
+            ...Object.fromEntries(
+              ["seller_first_name", "property_address", "from_phone_number", "textgrid_number_id", "language", "agent_name", "timezone", "market"]
+                .filter((k) => clean(resolved[k]))
+                .map((k) => [k, resolved[k]])
+            ),
+            nurture_render_context: resolved.nurture_render_context || null,
+          };
+        }
+      } catch {
+        // Context hydration never blocks the follow-up; the send-time resolver
+        // re-resolves whatever is still missing.
+      }
+    }
+  }
+  // Never persisted as metadata: the reply text and the loader hook.
+  const { reply_text: _reply_text, render_context_loader: _loader, inbound_to: _inbound_to, ...persisted_context } = context;
+
   const use_case_template =
     intent === STAGE_NO_REPLY_FOLLOWUP_INTENT
       ? clean(context.followup_use_case) || "stage_no_reply"
@@ -437,13 +498,18 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
       ...(clean(context.property_address) ? { property_address: clean(context.property_address) } : {}),
       ...(clean(context.timezone) ? { timezone: clean(context.timezone) } : {}),
       ...(clean(context.market) ? { market: clean(context.market) } : {}),
+      // Sticky sender: the thread's own number (re-validated by the processor
+      // at send time; sticky-thread fallback if it is no longer eligible).
+      ...(normalizePhone(context.from_phone_number) ? { from_phone_number: normalizePhone(context.from_phone_number) } : {}),
+      ...(clean(context.textgrid_number_id) ? { textgrid_number_id: clean(context.textgrid_number_id) } : {}),
+      ...(clean(context.language) ? { language: clean(context.language) } : {}),
       metadata: {
         deferred_message_resolution: true,
         source: clean(context.source) || "seller_followup_scheduler",
         intent,
         followup_reason: plan.reason,
         days_until_followup: plan.days,
-        ...context,
+        ...persisted_context,
       },
     },
     { supabase }
