@@ -60,6 +60,23 @@ export function equityTruth(row = {}) {
   if (value !== null && value > 0 && (loan === null || loan === 0) && flags.has('free and clear')) {
     return { known: true, percent: 100, amount: value, class: 'high', rule: 'free_and_clear' }
   }
+  /**
+   * c. (Entity Graph rows only — v_entity_graph_properties carries rec_*): the
+   *    county record says it. A recorded open-mortgage balance makes equity
+   *    known; recorded documents captured with NO open mortgage mean equity
+   *    is the whole value. Measured 2026-10-08: 327 of 356 sampled "High
+   *    Equity (flag)" properties have recorded documents with 0 open
+   *    mortgages — they read "High (flag)" while the record answered.
+   */
+  const recBalance = num(row.rec_mortgage_balance)
+  const recCount = num(row.rec_mortgage_count)
+  if (value !== null && value > 0 && (loan === null || loan === 0) && recBalance !== null && recBalance > 0) {
+    const percent = Math.max(-100, Math.min(100, Math.round(((value - recBalance) / value) * 1000) / 10))
+    return { known: true, percent, amount: value - recBalance, class: percent >= EQUITY_HIGH_THRESHOLD ? 'high' : 'low', rule: 'recorded_mortgage_balance' }
+  }
+  if (value !== null && value > 0 && (loan === null || loan === 0) && recCount === 0) {
+    return { known: true, percent: 100, amount: value, class: 'high', rule: 'no_recorded_mortgage' }
+  }
   if (flags.has('high equity')) return { known: false, percent: null, amount: null, class: 'high', rule: 'vendor_high_equity_flag' }
   if (flags.has('low equity')) return { known: false, percent: null, amount: null, class: 'low', rule: 'vendor_low_equity_flag' }
   return { known: false, percent: null, amount: null, class: 'unknown', rule: 'unknown' }

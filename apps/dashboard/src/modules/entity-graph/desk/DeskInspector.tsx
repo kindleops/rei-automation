@@ -181,7 +181,17 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
       {anchorProperty ? (
         <div className="egdk-figures">
           <Figure label="Est. value" value={fmtMoney(anchorProperty.value)} />
-          <Figure label="Equity" value={equityText(anchorProperty)} hint={anchorProperty.equity !== null ? fmtMoney(anchorProperty.equity) : anchorProperty.equityRule?.startsWith('vendor') ? 'vendor class · no loan data' : 'no loan on file'} />
+          {(() => {
+            // the county record answers where the vendor only flagged: no open
+            // mortgage recorded → equity is the value (equityTruth rule c)
+            const recorded = anchorProperty.equityRule !== 'loan_and_value' && anchorProperty.equityRule !== 'free_and_clear'
+              && rec && rec.totals.openMortgages === 0 && (anchorProperty.loanBalance ?? 0) === 0 && anchorProperty.value
+            if (recorded) return <Figure label="Equity" value={`${fmtMoney(anchorProperty.value)}`} hint="100% · no recorded mortgage" />
+            const pct = anchorProperty.equityRule === 'loan_and_value' && anchorProperty.equityPct !== null ? `${Math.round(anchorProperty.equityPct)}%` : null
+            return anchorProperty.equity !== null
+              ? <Figure label="Equity" value={fmtMoney(anchorProperty.equity)} hint={pct ?? equityText(anchorProperty)} />
+              : <Figure label="Equity" value={equityText(anchorProperty)} hint={anchorProperty.equityRule?.startsWith('vendor') ? 'vendor class · no loan data' : 'no loan on file'} />
+          })()}
           <Figure label="Open loans" value={rec ? String(rec.totals.openMortgages) : '—'} hint={rec ? (rec.totals.balance !== null ? `${fmtMoney(rec.totals.balance)} balance` : 'no balance on file') : 'not captured'} />
           <Figure label="Last sale" value={anchorProperty.lastSale?.price ? fmtMoney(anchorProperty.lastSale.price) : '—'} hint={yr(anchorProperty.lastSale?.date) ?? undefined} />
         </div>

@@ -20,8 +20,10 @@ const text = (v: unknown): string | null => {
 /** The equity cell under equity_known_v1 (see the Equity column). */
 export function equityLabel(r: EntitySearchResult): string {
   const d = r.details
-  if (d?.equityRule === 'free_and_clear') return 'Free & clear'
-  if (typeof d?.equity === 'number' && d.equityRule === 'loan_and_value') return `${Math.round(d.equity)}%`
+  const amt = typeof d?.equityAmount === 'number' ? compactCurrency(d.equityAmount) : null
+  if (d?.equityRule === 'free_and_clear') return amt ? `${amt} · free & clear` : 'Free & clear'
+  if (d?.equityRule === 'no_recorded_mortgage') return amt ? `${amt} · 100%` : '100%'
+  if (typeof d?.equity === 'number' && (d.equityRule === 'loan_and_value' || d.equityRule === 'recorded_mortgage_balance')) return amt ? `${amt} · ${Math.round(d.equity)}%` : `${Math.round(d.equity)}%`
   if (d?.equityRule === 'vendor_high_equity_flag') return 'High (flag)'
   if (d?.equityRule === 'vendor_low_equity_flag') return 'Low (flag)'
   return 'Unknown'
@@ -191,7 +193,7 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
       group: 'scores',
       label: 'Equity',
       align: 'right',
-      width: 82,
+      width: 128,
       render: (r) => equityLabel(r),
       sortValue: (r) => (typeof r.details?.equity === 'number' ? r.details.equity : null),
     },

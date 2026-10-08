@@ -606,7 +606,8 @@ export function applyKnownEquity(query, entry) {
     return q
   }
   const flag = flagTokenPatterns('Free And Clear').map((p) => `property_flags_text.ilike.${orFilterValue(p)}`).join(',')
-  return query.or(`and(${loanBranch.join(',')}),and(estimated_value.gt.0,or(total_loan_balance.is.null,total_loan_balance.eq.0),or(${flag}))`)
+  // c. recorded documents captured with no open mortgage (equityTruth rule no_recorded_mortgage)
+  return query.or(`and(${loanBranch.join(',')}),and(estimated_value.gt.0,or(total_loan_balance.is.null,total_loan_balance.eq.0),or(${flag})),and(estimated_value.gt.0,or(total_loan_balance.is.null,total_loan_balance.eq.0),rec_mortgage_count.eq.0)`)
 }
 
 const ym = (date) => `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}`

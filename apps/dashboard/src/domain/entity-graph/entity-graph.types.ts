@@ -76,7 +76,9 @@ export type EntitySearchResult = {
     /** Known equity % only (equity_known_v1); null/absent = unknown. */
     equity?: number | null
     equityClass?: 'high' | 'low' | 'unknown'
-    equityRule?: 'loan_and_value' | 'free_and_clear' | 'vendor_high_equity_flag' | 'vendor_low_equity_flag' | 'unknown'
+    equityRule?: 'loan_and_value' | 'free_and_clear' | 'no_recorded_mortgage' | 'recorded_mortgage_balance' | 'vendor_high_equity_flag' | 'vendor_low_equity_flag' | 'unknown'
+    /** Known equity in dollars (equity_known_v1 + recorded documents); null = unknown. */
+    equityAmount?: number | null
     acquisitionScore?: number
     flagCount?: number
     flags?: string

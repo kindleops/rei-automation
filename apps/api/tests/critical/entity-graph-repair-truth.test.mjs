@@ -29,3 +29,11 @@ test('the column enrichment never returns an implausible repair estimate', async
   assert.equal(values['2'].estimated_repair_cost, 42000)
   assert.ok(!('estimated_value' in values['2']), 'helper columns are not leaked as values')
 })
+
+test('equity: a recorded-documents answer beats the vendor flag', async () => {
+  const { equityTruth } = await import('../../src/lib/domain/entity-graph/entity-graph-truth.js')
+  assert.deepEqual(equityTruth({ estimated_value: 472000, total_loan_balance: 0, property_flags_text: 'High Equity', rec_mortgage_count: 0 }), { known: true, percent: 100, amount: 472000, class: 'high', rule: 'no_recorded_mortgage' })
+  assert.equal(equityTruth({ estimated_value: 400000, total_loan_balance: null, rec_mortgage_balance: 100000, rec_mortgage_count: 1 }).percent, 75)
+  // no records captured: still only the flag class, never a fabricated 100%
+  assert.equal(equityTruth({ estimated_value: 472000, total_loan_balance: 0, property_flags_text: 'High Equity' }).rule, 'vendor_high_equity_flag')
+})

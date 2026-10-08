@@ -514,6 +514,7 @@ function propertyToResult(row, score = 100) {
       units: summary.units,
       value: summary.value,
       equity: equity.known ? equity.percent : null,
+      equityAmount: equity.known ? equity.amount : null,
       equityClass: equity.class,
       equityRule: equity.rule,
       flagCount: summary.flagCount,
