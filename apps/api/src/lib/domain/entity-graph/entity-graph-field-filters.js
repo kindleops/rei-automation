@@ -367,6 +367,7 @@ const TOKEN_OPS = Object.freeze([
 /** Raw columns that answer, but not the question their label suggests. Shown with the field. */
 export const ENTITY_GRAPH_FIELD_CAUTIONS = Object.freeze({
   'properties.equity_percent': 'Vendor value: reads 100% whenever no loan is on file. Use "Known equity %" to filter on equity that is actually known.',
+  'properties.estimated_repair_cost': 'Vendor $/sqft × building sqft — absurd where the recorded sqft is wrong (1,909 properties exceed their whole value). Display withholds implausible values; a repair figure belongs to the MLS-ARV lane only.',
 })
 
 export const ENTITY_GRAPH_FILTERABLE_TABS = Object.freeze(Object.keys(ENTITY_GRAPH_FILTER_SOURCE_BY_TAB))

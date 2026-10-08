@@ -23,7 +23,7 @@
  * Read-only. Every query is indexed; the network is capped at 60 properties.
  */
 import { displayableCompanyName } from './buyer-name-privacy.js'
-import { equityTruth } from './entity-graph-truth.js'
+import { equityTruth, repairTruth } from './entity-graph-truth.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { clean, formatReadablePhone, parseJsonArray } from './entity-graph-normalize.js'
 
@@ -128,7 +128,9 @@ function mapProperty(p) {
       ? { date: p.sale_date || null, price: num(p.sale_price), docType: clean(p.last_sale_doc_type) || null }
       : null,
     ownershipYears: num(p.ownership_years),
-    repairEstimate: num(p.estimated_repair_cost),
+    // vendor $/sqft × building sqft — withheld when implausible (entity-graph-truth repairTruth)
+    repairEstimate: repairTruth(p).value,
+    repairStatus: repairTruth(p).status,
     streetview: clean(p.streetview_image) || null,
     tags: clean(p.seller_tags_text).split(/[,|;]/).map((t) => t.trim()).filter(Boolean).slice(0, 8),
     outOfStateOwner: bool(p.out_of_state_owner),

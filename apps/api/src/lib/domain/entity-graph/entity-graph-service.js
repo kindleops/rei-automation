@@ -32,7 +32,7 @@ import {
   keysetSupported,
 } from './entity-graph-property-sort.js'
 import { facetsAvailable, groupedFacetCounts } from './entity-graph-facet-sql.js'
-import { equityTruth, excludeTestOwners, excludeTestProperties } from './entity-graph-truth.js'
+import { equityTruth, excludeTestOwners, excludeTestProperties, withRepairTruth } from './entity-graph-truth.js'
 
 const DEFAULT_PAGE_SIZE = 25
 const MAX_PAGE_SIZE = 100
@@ -2387,7 +2387,7 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
     entityType: 'property',
     entityId: propertyId,
     summary: {
-      ...withoutWithheldFields(property),
+      ...withRepairTruth(withoutWithheldFields(property)),
       marketLabel: propertyPresentation.marketLabel,
       marketKey: propertyPresentation.marketKey,
       isUnmappedMarket: propertyPresentation.isUnmappedMarket,

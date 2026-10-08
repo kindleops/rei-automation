@@ -417,7 +417,7 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
   { key: 'rent_estimate', label: 'Rent estimate', group: 'scores', width: 118, numeric: true },
   { key: 'cap_rate', label: 'Cap rate', group: 'scores', width: 92, numeric: true },
   { key: 'ppsf', label: 'PPSF', group: 'scores', width: 84, numeric: true },
-  { key: 'estimated_repair_cost', label: 'Repair estimate', group: 'scores', width: 126, numeric: true },
+  { key: 'estimated_repair_cost', label: 'Repair est. (vendor · MLS lane)', group: 'scores', width: 170, numeric: true },
   { key: 'rehab_level', label: 'Rehab level', group: 'scores', width: 106 },
   /* cash_offer / structured_motivation_score / deal_strength_score /
      tag_distress_score / ai_score removed — see the note on the Score column
@@ -497,6 +497,8 @@ const LITERAL_NUMERIC = /(zip|year|_id$|apn|parcel|latitude|longitude)/i
 const CURRENCY = /(value|price|amount|balance|offer|cost|estimate|equity|valuation|fee|debt|tax_amount)/i
 
 function renderRawField(key: string, numeric: boolean | undefined, result: EntitySearchResult): string | null {
+  // a vendor repair figure the server judged implausible (repairTruth) is withheld, said so
+  if (key === 'estimated_repair_cost' && (result.details?.row ?? {}).estimated_repair_cost_status === 'unreliable') return 'Unreliable'
   const raw = (result.details?.row ?? {})[key]
   if (raw === null || raw === undefined || raw === '') return null
   if (typeof raw === 'boolean') return raw ? 'Yes' : 'No'

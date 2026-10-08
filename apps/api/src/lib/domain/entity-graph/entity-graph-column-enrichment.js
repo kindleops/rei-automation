@@ -22,6 +22,7 @@
  * the authenticated role's grants (the 10-03 operator lockdown).
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
+import { withRepairTruth } from './entity-graph-truth.js'
 
 export const MAX_IDS = 300
 const CHUNK = 150
@@ -206,13 +207,17 @@ export async function getEntityGraphColumnEnrichment(params = {}, deps = {}) {
   if (columns.length && ids.length) {
     for (let i = 0; i < ids.length; i += CHUNK) {
       const part = ids.slice(i, i + CHUNK)
-      const { data, error } = await client.from('properties').select(['property_id', ...columns].join(',')).in('property_id', part)
+      // the repair estimate is checked against value / sqft / units before it is shown (repairTruth)
+      const helper = columns.includes('estimated_repair_cost') ? ['estimated_value', 'building_square_feet', 'units_count'].filter((c) => !columns.includes(c)) : []
+      const { data: raw, error } = await client.from('properties').select(['property_id', ...columns, ...helper].join(',')).in('property_id', part)
+      const data = columns.includes('estimated_repair_cost') ? (raw || []).map((r) => { const t = withRepairTruth(r); return { ...t, estimated_repair_cost_status: t.estimated_repair_cost_status } }) : raw
       if (error) throw error
       for (const row of data || []) {
         const id = clean(row.property_id)
         if (!id) continue
         const vals = values[id] || {}
         for (const c of columns) if (vals[c] === undefined && row[c] !== null && row[c] !== undefined && row[c] !== '') vals[c] = row[c]
+        if (row.estimated_repair_cost_status && row.estimated_repair_cost_status !== 'unknown') vals.estimated_repair_cost_status = row.estimated_repair_cost_status
         values[id] = vals
       }
     }

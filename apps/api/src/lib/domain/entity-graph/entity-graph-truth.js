@@ -64,3 +64,42 @@ export function equityTruth(row = {}) {
   if (flags.has('low equity')) return { known: false, percent: null, amount: null, class: 'low', rule: 'vendor_low_equity_flag' }
   return { known: false, percent: null, amount: null, class: 'unknown', rule: 'unknown' }
 }
+
+/**
+ * 3. A REPAIR ESTIMATE IS SHOWN ONLY WHEN IT IS PLAUSIBLE (owner, 2026-10-08:
+ *    "$71M on a $3M property").
+ *
+ *    ROOT CAUSE: the vendor's estimated_repair_cost is a flat per-sqft rate
+ *    (estimated_repair_cost_per_sqft, e.g. $35 for "Structural") × the
+ *    record's building_square_feet. On large / multi-parcel records that sqft
+ *    is wrong (an 18-unit building recorded at 2,184,392 sqft → $76.5M), so
+ *    the product is absurd. Measured 2026-10-08: 1,909 properties carry a
+ *    repair estimate larger than their whole estimated value.
+ *
+ *    The estimate is UNRELIABLE (withheld, with the reason) when the value is
+ *    unknown, when it exceeds 60% of the value, or when the building sqft per
+ *    unit is implausible (> 6,000 sqft/unit). Valuation lanes: a repair figure
+ *    belongs only to the MLS-ARV lane — never the SFR investor-cluster lane —
+ *    so Entity Graph labels it as a vendor reference, never as a valuation input.
+ */
+export const REPAIR_MAX_SHARE_OF_VALUE = 0.6
+export const REPAIR_MAX_SQFT_PER_UNIT = 6000
+
+export function repairTruth(row = {}) {
+  const repair = num(row.estimated_repair_cost)
+  if (repair === null || repair <= 0) return { value: null, status: 'unknown', reason: null }
+  const value = num(row.estimated_value)
+  const sqft = num(row.building_square_feet)
+  const units = Math.max(1, num(row.units_count) || 1)
+  if (value === null || value <= 0) return { value: null, status: 'unreliable', reason: 'no_value_to_check_against' }
+  if (sqft !== null && sqft / units > REPAIR_MAX_SQFT_PER_UNIT) return { value: null, status: 'unreliable', reason: 'building_sqft_implausible' }
+  if (repair > value * REPAIR_MAX_SHARE_OF_VALUE) return { value: null, status: 'unreliable', reason: 'exceeds_share_of_value' }
+  return { value: repair, status: 'vendor_estimate', reason: null }
+}
+
+/** Replace a row's raw repair estimate with the checked one (+ status/reason columns). */
+export function withRepairTruth(row) {
+  if (!row || typeof row !== 'object' || !('estimated_repair_cost' in row)) return row
+  const t = repairTruth(row)
+  return { ...row, estimated_repair_cost: t.value, estimated_repair_cost_status: t.status, estimated_repair_cost_reason: t.reason }
+}
