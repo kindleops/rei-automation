@@ -161,6 +161,8 @@ const LANGUAGE_PATTERNS = [
       "alludar", "alludes", "ya la vendí", "ya la vendi", "la vendí", "la vendi",
       "en venta", "en banta", "señor", "senor", "por qué", "por que", "porque",
       "no vendo", "quien te dijo", "wuien",
+      // round 9: "La casa esta ocupada ahora mismo" was detected as English.
+      "la casa", "ocupada", "ahora mismo",
       // Misc affirmations
       "gracias", "por favor", "sí señor", "sí señora",
       "entendido", "de acuerdo", "está bien", "claro",
@@ -588,6 +590,16 @@ const COMPLIANCE_PHRASES = [
   // lists") was a MISSPELLING of a phrase already on the list; fuzzy matching
   // would be a far wider semantic change than the problem warrants.
   "lose my number", "loose my number", "forget my number",
+  // round 9 (2026-10-07 live misses, held as unclear in New Replies):
+  // "Remove this number from your contacts", "NOT TYREN!!!!!!!!!! Lose this
+  // number.", "Owner of EraseMyNumber.com". "this number" is the phone the
+  // seller is texting from: a removal verb bound to it is a revocation.
+  "remove this number", "remove this phone number", "remove this #",
+  "delete this number", "delete this phone number", "erase this number",
+  "erase my number", "erasemynumber", "erase me", "lose this number",
+  "loose this number", "forget this number", "take this number off",
+  "remove me from your contacts", "remove from your contacts",
+  "delete me from your contacts", "delete my contact", "remove my contact",
   "do not text", "do not text me", "do not contact",
   "do not contact me", "do not message", "do not message me",
   "do not call", "do not call me", "do not reach out",
@@ -4401,6 +4413,9 @@ function matchesSoldTransfer(text = "") {
   if (/(?:tiene|hay)\s+(?:un\s+)?nuevo\s+due[ñn]o|\bnuevos?\s+due[ñn]os?\b|\b(?:has|have|got)\s+(?:a\s+)?new\s+owners?\b|\bnew\s+owners?\s+now\b/i.test(normalized)) return true;
   if (!/\bsold\b|vend(?:[íi]|imos)/i.test(normalized)) return false;
   if (SOLD_NEGATION_RE.test(normalized)) return false;
+  // round 9: "Sold 💯" -- the whole message is "sold" (emoji / punctuation aside).
+  // A question ("Sold?") is not an answer.
+  if (!normalized.includes("?") && /^(?:it'?s\s+|it\s+is\s+|it\s+was\s+|been\s+|already\s+|house\s+|home\s+|property\s+)?sold(?:\s+(?:it|already|out))?$/.test(normalized.replace(/[^a-z'\s]+/g, " ").replace(/\s+/g, " ").trim())) return true;
   if (includesAny(normalized, SOLD_TRANSFER_PHRASES)) return true;
   if (/\b(?:i|we)\s+sold\b/.test(normalized)) return true;
   if (/\bsold\b[^.!?\n]{0,50}?\b(?:yrs?|years?|months?|weeks?|days?)\s+ago\b/.test(normalized)) return true;
@@ -4691,11 +4706,31 @@ const PURPOSE_OR_IDENTITY_QUESTION_PATTERNS = [
   /^(?:regarding|about|re|in\s+reference\s+to|in\s+regards?\s+to)\s+what[\s?.!]*$/,
   // "What's it about?" / "What is it regarding?" / "What is this for?"
   /^what(?:'s|s|\s+is)\s+(?:it|this|that)\s+(?:about|regarding|in\s+reference\s+to|for)[\s?.!]*$/,
+  // round 9: "Are you saying is this for rent" -- what is this about?
+  /^(?:are\s+(?:you|u)\s+saying\s+|so\s+)?(?:is\s+(?:this|it|that)|are\s+(?:you|u))\s+(?:for\s+(?:a\s+)?rent(?:al)?|about\s+(?:a\s+)?rent(?:al|ing)?|looking\s+to\s+rent|wanting\s+to\s+rent)[\s?.!]*$/,
 ];
 
 // An affirmative head with more after it (see 14b in resolveIntents).
 const OWNERSHIP_YES_WITH_MORE_RE =
   /^(?:(?:lol|lmao|haha+|ha|well|um+|uh+|oh)[\s,.!]+)*(?:yes|yeah|yea|yep|yup|si|sim|correct|i\s+do|it\s+is|that'?s\s+(?:me|right|correct))\b(?=[\s,.!]*\S)/;
+
+// round 9: "Joseph Casassa". Two or three Capitalized words and nothing else,
+// none of them an ordinary word ("Of Course Not", "Move In Ready", "La Casa").
+const BARE_NAME_STOPWORDS = new Set([
+  "of", "course", "not", "no", "yes", "ok", "okay", "thank", "thanks", "you", "sure", "maybe",
+  "never", "please", "stop", "sold", "the", "a", "an", "in", "is", "it", "my", "me", "ready",
+  "move", "good", "great", "fine", "hello", "hi", "hey", "who", "what", "why", "wrong", "number",
+  "house", "home", "call", "text", "later", "nope", "yeah", "yep", "absolutely", "definitely",
+  "correct", "right", "sorry", "la", "el", "casa", "si", "sí", "gracias", "hola", "bueno", "and",
+  "or", "for", "sale", "rent", "lol", "god", "bless", "have", "nice", "day", "deal", "done",
+  "all", "set", "got", "it's", "this", "that", "there", "here", "dear", "mr", "mrs", "ms",
+  "sir", "maam", "ma'am", "go", "away", "leave", "alone", "busy", "wait", "soon", "now",
+]);
+function matchesBareNameReply(raw = "") {
+  const t = String(raw ?? "").trim().replace(/[.!]+$/, "");
+  if (!/^[A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+){1,2}$/.test(t)) return false;
+  return t.split(/\s+/).every((w) => w.length >= 2 && !BARE_NAME_STOPWORDS.has(w.toLowerCase()));
+}
 
 export function matchesPurposeOrIdentityQuestion(text = "") {
   const t = lower(text).replace(/[’‘`]/g, "'").trim();
@@ -5208,11 +5243,17 @@ function resolveIntents(
   const hostile_profanity = includesAny(text, [
     "fuck", "shit", "bitch", "asshole", "f***",
     "damn business", "drop dead", "vete a", "chingaos", "mames",
+    // round 9 (2026-10-07: "Suck a dick", "FU!" sat as unclear in New Replies).
+    "suck a dick", "suck my dick", "suck dick", "eat a dick", "eat shit",
+    "screw you", "screw off", "go to hell", "piss off", "kiss my ass",
+    "stfu", "gtfo", "eff you", "eff off",
     // Spanish profanity (2026-10-05: "Chinga tu madre" sat as unclear).
     "chinga tu madre", "chingas tu madre", "chinga a tu madre", "chingate", "chíngate",
     "tu puta madre", "hijo de puta", "hija de puta", "pendejo", "pendeja", "cabrón",
     "vete a la verga", "a la verga", "pinche",
   ]);
+  // round 9: a whole-message "FU!" / "F you" / "F off".
+  const hostile_bare_fu = /^[^\p{L}\p{N}]*(?:f+u+|f\s+u|f\s+you|f\s+off)[^\p{L}\p{N}]*$/iu.test(text);
   const hostile_insult = reply_signals?.hostile?.matched === true;
   const hostile_emoji = emoji_interpretation?.semantic_signal === "hostile";
   // TROLL (2026-10-06 round 7, +14692307043): "There are shitstains all over
@@ -5243,10 +5284,10 @@ function resolveIntents(
     intents.push("condition_disclosed");
     reply_rule_ids.push("condition_gross_disclosure");
   }
-  if (hostile_legal_threat || hostile_profanity || hostile_insult || hostile_emoji) {
+  if (hostile_legal_threat || hostile_profanity || hostile_bare_fu || hostile_insult || hostile_emoji) {
     intents.push("hostile_or_legal");
     if (hostile_legal_threat) rule_tags.push("hostile_legal_threat");
-    else if (hostile_profanity) rule_tags.push("hostile_profanity");
+    else if (hostile_profanity || hostile_bare_fu) rule_tags.push("hostile_profanity");
     else reply_rule_ids.push(hostile_insult ? reply_signals.hostile.rule_id : "emoji_hostile_with_text");
   }
 
@@ -5268,6 +5309,8 @@ function resolveIntents(
       "ain't interested in selling", "aint interested in selling",
       "aren't selling", "arent selling", "isn't selling", "isnt selling",
       "not interested in selling", "dont want to sell", "don't want to sell",
+      // round 9: "Yes, and I do not want to sell it" was ownership_confirmed.
+      "do not want to sell", "dont wanna sell", "don't wanna sell", "do not wish to sell",
       "not for rent", "no esta d vents",
       // Spanish
 
@@ -5647,6 +5690,8 @@ function resolveIntents(
     ]) ||
       terse_offer_request ||
       offer_price_solicitation ||
+      // round 9: "Do you have an offer? Do you know its just land, no house?"
+      /\b(?:do|did|would|will)\s+(?:you|u|y'?all)\s+(?:have|got|make|give)\s+(?:me\s+)?(?:an?\s+)?(?:offer|number|price)\b|\bwhat(?:'s|\s+is)\s+(?:your|ur|the)\s+offer\b/i.test(text) ||
       /\b(proposal|offer|numbers|terms)\b/i.test(text) &&
         /\b(send|put together|look at|want|need|see|give|mánd|mand|envi)/i.test(text))
   ) {
@@ -6056,7 +6101,11 @@ function resolveIntents(
       "i manage it",
       "i manage the",
       "administrador",
-    ])
+      // round 9: "La casa esta ocupada ahora mismo".
+      "inquilinos", "hay inquilinos", "tiene inquilinos", "está rentada", "esta rentada",
+      "está alquilada", "esta alquilada",
+    ]) ||
+    /\b(?:la\s+)?(?:casa|propiedad|vivienda)\s+(?:est[aá]|sigue)\s+(?:ocupada|habitada|rentada|alquilada)\b/i.test(text)
   ) {
     intents.push("tenant_occupied");
   }
@@ -6116,6 +6165,9 @@ function resolveIntents(
     // round 8: condition answers that matched nothing ("move in ready", "Good..it
     // does not need any repair.", "Central air and heat", "4 car garage and lot",
     // "up to date with LA county and section8 code", "It's ready to move")
+    // round 9: "Bigger repairs as the home was impacted by tornado last May",
+    // "It's going to be need roof soon".
+    /\b(?:tornado|hurricane|hail\s+damage|storm\s+damage|flood(?:ed|ing|\s+damage)|fire\s+damage|water\s+damage|smoke\s+damage|termites?|mold|mildew)\b|\b(?:big(?:ger)?|major|minor|some|lots?\s+of|a\s+lot\s+of|many|serious|costly|expensive)\s+repairs?\b|\bneed(?:s|ing)?\s+(?:a\s+)?(?:new\s+)?roof\b|\broof\s+(?:soon|leaks?|leaking|is\s+old|is\s+bad)\b/i.test(text) ||
     /\bmove\s*-?\s*in\s+ready\b|\bready\s+to\s+move\b|\b(?:does\s*n[o']?t|doesn'?t|dont|don'?t|no)\s+need\s+(?:any\s+)?(?:repairs?|work|fixing)\b|\bno\s+repairs?\b|\bcentral\s+(?:air|heat|a\s*\/?\s*c)\b|\b\d+\s*(?:car\s+)?garage\b|\bup\s+to\s+(?:date|code)\b|\bsection\s*8\b|\b(?:fully\s+)?(?:remodel(?:l)?ed|renovated|updated|upgraded)\b|\bnew\s+(?:roof|hvac|ac|a\/c|water\s+heater|floors?|kitchen|windows)\b|\b(?:good|great|excellent|fair|decent|rough|bad|poor)\s+(?:condition|shape)\b|\bneeds?\s+(?:some\s+|a\s+lot\s+of\s+)?(?:work|repairs?|updating|tlc)\b|\bbuen(?:as)?\s+condici[oó]n(?:es)?\b|\bnecesita\s+(?:reparaciones|arreglos|trabajo)\b/i.test(text)
   ) {
     intents.push("condition_disclosed");
@@ -6226,7 +6278,10 @@ function resolveIntents(
     /\bwhere\s+(?:do|can)\s+i\s+sign\b/i.test(text) ||
     /\b(?:ready|happy|willing)\s+to\s+sign\b/i.test(text) ||
     /\blet'?s\s+(?:get\s+)?(?:the\s+)?(?:contract|paperwork|agreement|deal)\s+(?:done|going|started|moving)\b/i.test(text) ||
-    /\b(?:manda|env[ií]a|mandame|env[ií]ame)\s+(?:el\s+)?(?:contrato|papeleo|acuerdo)\b/i.test(text)
+    /\b(?:manda|env[ií]a|mandame|env[ií]ame)\s+(?:el\s+)?(?:contrato|papeleo|acuerdo)\b/i.test(text) ||
+    // round 9 (2026-10-07: "what's up with the contract?" sat as unclear):
+    // a seller chasing OUR paperwork.
+    /\b(?:what'?s\s+(?:up|going\s+on|happening)\s+with|where'?s|where\s+is|any\s+(?:update|news)\s+on|status\s+(?:of|on)|did\s+(?:you|u)\s+send)\s+(?:the|my|our|that|your)\s+(?:contract|agreement|paperwork|papers)\b/i.test(text)
   ) {
     intents.push("contract_requested");
   }
@@ -6298,6 +6353,14 @@ function resolveIntents(
     intents.length === 0
   ) {
     intents.push("who_is_this");
+  }
+
+  // round 9 (2026-10-07: "Joseph Casassa" to "Are you still the owner of
+  // ...?"): a bare personal name, nothing else, is an identity exchange --
+  // the who-is-this answer, never an ownership confirmation or a review item.
+  if (intents.length === 0 && matchesBareNameReply(rawMessage)) {
+    intents.push("who_is_this");
+    matched_rule_ids.push("bare_name_reply");
   }
 
   // 14. SHORT NEGATIVE FALLBACK
@@ -7264,6 +7327,16 @@ function computeSellerState({
   };
 }
 
+// Hostility WITHOUT a legal threat or opt-out language (owner decisions
+// 2026-10-01 + round 9): quiet archive, never a review item. Mirrors
+// HOSTILE_COOL_RULE_IDS in inbox/resolve-inbox-state-from-classification.js.
+const HOSTILE_QUIET_RULE_IDS = new Set([
+  "hostile_insult_no_opt_out",
+  "hostile_profanity",
+  "emoji_hostile",
+  "emoji_hostile_with_text",
+]);
+
 function deriveAutomationDecision({
   primary_intent,
   objection = null,
@@ -7323,13 +7396,33 @@ function deriveAutomationDecision({
     };
   }
 
-  // Trolling / profanity: a person decides. No reply, nothing suppressed.
+  // Trolling / profanity (owner, round 9 2026-10-07: "Suck a dick", "FU!",
+  // "👹" are not work): no reply, nothing suppressed, NO human review -- the
+  // thread rests quietly in Dead (resolve-inbox-state CLOSED_FOR_PROPERTY /
+  // HOSTILE_COOL_RULE_IDS). Opt-out language never reaches here (compliance
+  // ran above); a legal threat keeps the human lane below.
   if (intent === "hostile_or_troll") {
     return {
       auto_reply_allowed: false,
       queue_action: "none",
       suppression_action: "none",
-      human_review_required: true,
+      human_review_required: false,
+      quiet_archive: true,
+      risk_level: "high",
+    };
+  }
+  if (
+    intent === "hostile_or_legal" &&
+    Array.isArray(matched_rule_ids) &&
+    !matched_rule_ids.includes("hostile_legal_threat") &&
+    matched_rule_ids.some((id) => HOSTILE_QUIET_RULE_IDS.has(id))
+  ) {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      quiet_archive: true,
       risk_level: "high",
     };
   }

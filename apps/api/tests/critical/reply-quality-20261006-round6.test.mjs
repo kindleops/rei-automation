@@ -37,8 +37,8 @@ const LABELS = {
   "004": { intent: "unclear", outcome: "review" },
   "005": { intent: "unclear", outcome: "review" },
   "006": { intent: "unclear", outcome: "review" },
-  "007": { intent: "unclear", outcome: "review" },
-  "008": { intent: "unclear", outcome: "review" },
+  "007": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "008": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "009": { intent: "who_is_this", outcome: "auto_reply" },
   "010": { intent: "not_interested", outcome: "no_reply_by_design" },
   "011": { intent: "not_interested", outcome: "no_reply_by_design" },
@@ -54,15 +54,15 @@ const LABELS = {
   "021": { intent: "unclear", outcome: "review" },
   "022": { intent: "seller_interested", outcome: "auto_reply" },
   "023": { intent: "wrong_number", outcome: "suppressed" },
-  "024": { intent: "unclear", outcome: "review" },
+  "024": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "025": { intent: "asks_offer", outcome: "auto_reply" },
   "026": { intent: "who_is_this", outcome: "auto_reply" },
-  "027": { intent: "unclear", outcome: "review" },
+  "027": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "028": { intent: "wrong_number", outcome: "suppressed" },
   "029": { intent: "seller_interested", outcome: "auto_reply" },
   "030": { intent: "ownership_confirmed", outcome: "auto_reply" },
-  "031": { intent: "unclear", outcome: "review" },
-  "032": { intent: "unclear", outcome: "review" },
+  "031": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "032": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "033": { intent: "who_is_this", outcome: "auto_reply" },
   "034": { intent: "ownership_confirmed", outcome: "auto_reply" },
   "035": { intent: "seller_interested", outcome: "auto_reply" },
@@ -72,21 +72,21 @@ const LABELS = {
   "039": { intent: "not_interested", outcome: "no_reply_by_design" },
   "040": { intent: "who_is_this", outcome: "auto_reply" },
   "041": { intent: "who_is_this", outcome: "auto_reply" },
-  "042": { intent: "unclear", outcome: "review" },
+  "042": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "043": { intent: "not_interested", outcome: "no_reply_by_design" },
   "044": { intent: "opt_out", outcome: "suppressed" },
-  "045": { intent: "unclear", outcome: "review" },
+  "045": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "046": { intent: "latent_interest", outcome: "auto_reply" },
-  "047": { intent: "unclear", outcome: "review" },
+  "047": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "048": { intent: "sold_property", outcome: "no_reply_by_design" },
-  "049": { intent: "unclear", outcome: "review" },
-  "050": { intent: "unclear", outcome: "review" },
+  "049": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "050": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "051": { intent: "latent_interest", outcome: "auto_reply" },
   "052": { intent: "not_interested", outcome: "no_reply_by_design" },
   "053": { intent: "who_is_this", outcome: "auto_reply" },
   "054": { intent: "acknowledgement", outcome: "no_reply_by_design" },
   "055": { intent: "latent_interest", outcome: "auto_reply" },
-  "056": { intent: "unclear", outcome: "review" },
+  "056": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
   "057": { intent: "latent_interest", outcome: "auto_reply" },};
 
 test("fixture set is the 57 round-6 messages", () => {

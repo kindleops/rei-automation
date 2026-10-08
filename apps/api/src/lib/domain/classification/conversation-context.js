@@ -269,7 +269,7 @@ const AFFIRMATIVE_TAIL =
   "(?:\\s+(?:is\\s+)?(?:what'?s up|whats up|why|what about it|what do you want|who is this|who'?s this|who are you)|\\s+and\\s+(?:i am|i'm|im)\\s+(?:selling it now|selling it|selling|looking to sell|trying to sell))?";
 const AFFIRMATIVE_TOKENS = `(?:${AFFIRMATIVE_HEAD}${AFFIRMATIVE_TAIL})`;
 const NEGATIVE_TOKENS =
-  '(?:no|nope|nah|nel|not anymore|no longer|not any more|no i do not|no i dont|i do not|no i am not|not really|do not own it|sold it|i sold it|already sold|sold already|wrong number|wrong house|wrong property|never owned it|never owned|not mine|not my house|ya no|no ya no|không|không phải|khong|khong phai|ko phải|ko phai|não|nao)';
+  '(?:no|nope|nah|nel|no+|no no|no no no|no and no|no not at all|not at all|of course not|absolutely not|hell no|no sir|no ma\'am|no maam|no i never did|i never did|never did|no never|no i never owned it|no i never have|never have|sold|it is sold|it sold|not anymore|no longer|not any more|no i do not|no i dont|i do not|no i am not|not really|do not own it|sold it|i sold it|already sold|sold already|wrong number|wrong house|wrong property|never owned it|never owned|not mine|not my house|ya no|no ya no|không|không phải|khong|khong phai|ko phải|ko phai|não|nao)';
 
 // ABSENCE OF A VALUE IS NOT DISINTEREST. "No I don't have one" answering "do you
 // have an asking price in mind?" says the seller has no number yet -- they are
@@ -291,6 +291,10 @@ const NO_VALUE_TOKENS =
 // Negative tokens that EXPLICITLY disown the property: not a bare "no".
 const EXPLICIT_DISOWN_RE =
   /^(?:wrong number|wrong house|wrong property|not mine|not my house|never owned(?: it)?|do not own it|sold it|i sold it|already sold|sold already)$/u;
+// round 9: "No I never did sorry" to "Are you still the owner?" -- they never
+// owned it: a non-owner, closed (owner rule). "Sold 💯" -- a former owner.
+const NEVER_OWNED_RE = /^(?:no i never did|i never did|never did|no never|no i never owned it|no i never have|never have)$/u;
+const BARE_SOLD_RE = /^(?:sold|it is sold|it sold)$/u;
 
 /** Normalizes punctuation, contractions and spacing before token matching. */
 function normalizeShortReply(text) {
@@ -311,6 +315,9 @@ function normalizeShortReply(text) {
     .replace(/\bim\b/g, 'i am')
     // "Hello, yes this is she." (2026-10-06): a greeting in front of the answer.
     .replace(/^(?:hello|hi|hey|hola|ola|good\s+(?:morning|afternoon|evening))[\s,.!]+(?=\S)/, '')
+    // round 9: a trailing apology carries no answer ("No I never did sorry").
+    // "No thanks" keeps its decline meaning.
+    .replace(/[\s,.!]+sorry[\s.!]*$/u, '')
     // Internal punctuation, not just trailing: "No, I don't" normalized to
     // "no, i do not" and matched no token, so a comma was enough to make a
     // seller's answer unreadable. No token contains punctuation.
@@ -321,7 +328,10 @@ function normalizeShortReply(text) {
 
 // Bare denials of "do you own / are you the owner / is it yours?". Hedges
 // ("not really") stay in the clarification rule below.
-const BARE_NO_RE = /^(?:no|nope|nah|nel|no i do not|no i dont|i do not|no i am not|no no|não|nao|không|khong)$/u;
+// round 9 (2026-10-07 live, all held in New Replies): "No, I'm not", "No not
+// at all", "No and no", "Of Course Not", "Noo" answer the ownership question
+// exactly like "No".
+const BARE_NO_RE = /^(?:no+|nope|nah|nel|no i do not|no i dont|i do not|no i am not|no no|no no no|no and no|no not at all|not at all|of course not|absolutely not|hell no|no sir|no ma'am|no maam|não|nao|không|khong)$/u;
 export { BARE_NO_RE };
 const NO_LONGER_OWNER_RE = /^(?:not anymore|no longer|not any more|ya no|no ya no)$/u;
 
@@ -455,6 +465,30 @@ export function applyContextualShortReply(messageText, validated) {
   }
 
   if (isNo) {
+    if ((useCase === 'ownership_check' || qType === 'ownership') && NEVER_OWNED_RE.test(t)) {
+      return {
+        applied: true,
+        primary_intent: 'wrong_number',
+        labels: ['ownership_denied', 'never_owned'],
+        rule_id: 'ctx_never_owned_after_ownership_check',
+        confidence: 0.9,
+        rationale: 'never_owned_bound_to_validated_ownership_question',
+        evidence_span: String(messageText).trim(),
+        ...base,
+      };
+    }
+    if ((useCase === 'ownership_check' || qType === 'ownership') && BARE_SOLD_RE.test(t)) {
+      return {
+        applied: true,
+        primary_intent: 'sold_property',
+        labels: ['ownership_denied', 'no_longer_owner'],
+        rule_id: 'ctx_sold_after_ownership_check',
+        confidence: 0.9,
+        rationale: 'bare_sold_bound_to_validated_ownership_question',
+        evidence_span: String(messageText).trim(),
+        ...base,
+      };
+    }
     if ((useCase === 'ownership_check' || qType === 'ownership') && EXPLICIT_DISOWN_RE.test(t)) {
       // "Wrong number" / "Not mine" / "I sold it" / "Never owned it" ANSWER the
       // ownership question explicitly. Binding them to the clarification rule

@@ -61,7 +61,8 @@ const VARIATION_RE = /️/g;
 const FAMILY_MEMBERS = Object.freeze({
   affirmative: ["👍", "✅", "👌", "🙌", "☑", "✔", "🆗", "💯"],
   negative: ["👎", "❌", "✖", "🚫", "⛔", "🙅"],
-  hostile: ["🖕", "🤬", "😡", "👿", "😠", "💩"],
+  // round 9: "👹" alone sat as unclear in New Replies (2026-10-07).
+  hostile: ["🖕", "🤬", "😡", "👿", "😠", "💩", "👹", "👺"],
   laughter: ["😂", "🤣", "😆", "😹", "😅", "😝"],
   heart: ["❤", "💙", "💚", "💛", "💜", "🧡", "🤍", "🖤", "💕", "💖", "💗", "♥", "🙏", "😊", "☺", "🙂", "🥰", "😍", "🤗"],
   confusion: ["🤔", "❓", "❔", "😕", "🧐", "🤷", "😐", "😶"],

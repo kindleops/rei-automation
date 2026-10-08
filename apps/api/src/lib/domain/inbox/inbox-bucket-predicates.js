@@ -6,6 +6,7 @@ import {
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 import {
   NON_ACTIONABLE_REPLY_INTENTS,
+  isNewReplyActionableIntent,
   isPriorityReplyIntent,
   isReopeningReplyIntent,
 } from "@/lib/domain/inbox/reply-actionability.js";
@@ -147,7 +148,13 @@ export function threadMatchesAllMessagesFacts(thread = {}, nowMs = Date.now()) {
   return !threadMatchesWaitingFacts(thread, nowMs);
 }
 
-export function threadMatchesNewRepliesFacts(thread = {}, nowMs = Date.now()) {
+function threadReplyIntent(thread = {}) {
+  return lower(thread.last_intent || thread.latest_intent || thread.primary_intent);
+}
+
+// Round 9: New Replies holds only an actionable latest reply (whitelist);
+// the rest of the would-be New Replies is the non-alerting Unclear lane.
+function threadMatchesReplyCandidateFacts(thread = {}, nowMs = Date.now()) {
   if (isArchivedThread(thread)) return false;
   if (isTerminalNoContactThread(thread)) return false;
   if (isResolvedReplyRow(thread)) return false;
@@ -174,6 +181,20 @@ export function threadMatchesNewRepliesFacts(thread = {}, nowMs = Date.now()) {
 
   if (thread.needs_review === true || bucket === "needs_review") return false;
   return true;
+}
+
+// No recorded intent = unknown, kept visible in New Replies (see resolveInboxBucketFlags).
+function isNewReplyWorthy(thread = {}) {
+  const intent = threadReplyIntent(thread);
+  return !intent || isNewReplyActionableIntent(intent);
+}
+
+export function threadMatchesNewRepliesFacts(thread = {}, nowMs = Date.now()) {
+  return threadMatchesReplyCandidateFacts(thread, nowMs) && isNewReplyWorthy(thread);
+}
+
+export function threadMatchesUnclearFacts(thread = {}, nowMs = Date.now()) {
+  return threadMatchesReplyCandidateFacts(thread, nowMs) && !isNewReplyWorthy(thread);
 }
 
 export function isStaleExplicitInboxBucket(row = {}, explicitBucket = "", nowMs = Date.now()) {
@@ -217,6 +238,8 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
       return bucket === "priority" && isPriorityReplyIntent(thread.last_intent || thread.latest_intent || thread.primary_intent);
     case "new_replies":
       return threadMatchesNewRepliesFacts(thread, nowMs);
+    case "unclear":
+      return threadMatchesUnclearFacts(thread, nowMs);
     case "needs_review":
       if (isArchivedThread(thread)) return false;
       if (bucket === "needs_review") return true;
@@ -393,11 +416,17 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
   const unanswered = direction === "inbound"
     && inboundAtMs > 0
     && (!realOutMs || inboundAtMs >= realOutMs);
-  const inNewReplies = actionable
+  const replyCandidate = actionable
     && !inPriority
     && !needsReviewFlag
     && !replyResolved
-    && unanswered
+    && unanswered;
+  // Round 9: New Replies = an ACTIONABLE latest reply only (whitelist). A
+  // reply with NO recorded intent is unknown, not unclear: it stays visible in
+  // New Replies (the live path always records one; a gap must not hide).
+  const newReplyIntent = !lastIntent || isNewReplyActionableIntent(lastIntent);
+  const inNewReplies = replyCandidate
+    && newReplyIntent
     && (
       !["priority", "needs_review", "waiting", "cold", "follow_up"].includes(bucket)
       // 8.5: a stored 'priority' whose latest reply is not priority-grade is
@@ -407,6 +436,12 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
       // rule: dead deals reopen on a new reply). "unclear" alone does not.
       || (bucket === "follow_up" && isReopeningReplyIntent(lastIntent))
     );
+  // Round 9: the non-alerting Unclear lane -- an unanswered reply that would
+  // have been New Replies but is not actionable (unclear, who-is-this, a bare
+  // "No" awaiting its clarifier, a language switch, an unread emoji).
+  const inUnclear = replyCandidate
+    && !newReplyIntent
+    && (!["priority", "needs_review", "waiting", "cold", "follow_up"].includes(bucket) || bucket === "priority");
   const inNeedsReview = available && (bucket === "needs_review" || needsReviewFlag);
   const inFollowUp = available && bucket === "follow_up" && !inNewReplies;
 
@@ -417,6 +452,7 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
     in_scheduled: !archived && pendingSchedule,
     in_priority: inPriority,
     in_new_replies: inNewReplies,
+    in_unclear: inUnclear,
     in_needs_review: inNeedsReview,
     in_follow_up: inFollowUp,
     // `active` is a LENS, not a bucket: the union of the four an operator works.

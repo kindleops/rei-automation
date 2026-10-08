@@ -481,6 +481,10 @@ const LANGUAGE_NAMES = {
   english: "English",
   ingles: "English",
   spanish: "Spanish",
+  aspanish: "Spanish",
+  espanish: "Spanish",
+  spanich: "Spanish",
+  spanis: "Spanish",
   espanol: "Spanish",
   portuguese: "Portuguese",
   portugues: "Portuguese",
@@ -489,8 +493,11 @@ const LANGUAGE_NAMES = {
   french: "French",
 };
 
+// round 9 (2026-10-07: "no speako aspanish" to a Spanish text sat as unclear):
+// the subject is optional after a bare "no", and the misspellings sellers type
+// ("speako", "aspanish", "espanish", "spanich") name the same refusal.
 const CANNOT_READ_RE =
-  /\b(?:i|we)\s+(?:do\s*n'?t|dont|do not|can'?t|cant|cannot|can not|no)\s+(?:speak|read|reed|understand|talk|speek|habla)\s+(spanish|espanol|portuguese|portugues|vietnamese|arabic|french|that language|this language)\b/;
+  /(?:\b(?:i|we)\s+(?:do\s*n'?t|dont|do not|can'?t|cant|cannot|can not|no)|^no)\s+(?:speak|speako|speeko|spik|read|reed|understand|talk|speek|habla|hablo)\s+(spanish|aspanish|espanish|spanich|spanis|espanol|portuguese|portugues|vietnamese|arabic|french|that language|this language)\b/;
 const ENGLISH_PLEASE_PATTERNS = [
   /^(?:in\s+)?english(?:\s+(?:please|pls|plz|only))?[\s.!?]*$/,
   /\b(?:speak|text|write|send(?:\s+it)?|talk|reply|respond)\s+(?:to\s+me\s+|me\s+)?in\s+english\b/,
