@@ -397,3 +397,31 @@ test('every email renders with only its own context (no other template is evalua
     assert.ok(renderSellerEmail({ kind, context: { code: '123456', minutes: 15 } }, {}), kind);
   }
 });
+
+test('a failed notification can be retried; a sent one never repeats', async () => {
+  const w = world();
+  await signIn(w, 'blair@example.test');
+  let fail = true;
+  const deps = { store: w.store, force: true, notify: async () => (fail ? { sent: false, reason: 'brevo_timeout' } : { sent: true }) };
+  assert.equal((await emitSellerLifecycle({ kind: 'closed', opportunityId: OPP_B, dedupeKey: 'closed:x' }, deps)).sent, 0);
+  assert.equal(w.store.state.notifications[0].status, 'failed');
+  fail = false;
+  assert.equal((await emitSellerLifecycle({ kind: 'closed', opportunityId: OPP_B, dedupeKey: 'closed:x' }, deps)).sent, 1, 'retried after the failure');
+  assert.equal((await emitSellerLifecycle({ kind: 'closed', opportunityId: OPP_B, dedupeKey: 'closed:x' }, deps)).sent, 0, 'never twice once sent');
+});
+
+test('public booking is throttled per network and per phone', async () => {
+  const w = world();
+  const { slots } = await listCallSlots({ reason: 'property' }, w.deps);
+  for (let i = 0; i < SIGN_IN_LIMITS.publicBookingsPerPhoneDay; i++) {
+    await bookCall({ reason: 'property', startAt: slots[i * 2].start_at, contact: { name: 'Same Phone', phone: '555-555-0444' }, ip: `10.1.0.${i}` }, w.deps);
+  }
+  await assert.rejects(bookCall({ reason: 'property', startAt: slots[10].start_at, contact: { name: 'Same Phone', phone: '555-555-0444' }, ip: '10.1.0.99' }, w.deps), (e) => e.code === 'too_many_requests' && e.status === 429);
+  const w2 = world();
+  const s2 = (await listCallSlots({ reason: 'property' }, w2.deps)).slots;
+  for (let i = 0; i < SIGN_IN_LIMITS.publicBookingsPerIpHour; i++) {
+    await bookCall({ reason: 'property', startAt: s2[i * 2].start_at, contact: { name: 'Bot', phone: `555-555-05${10 + i}` }, ip: '203.0.113.50' }, w2.deps);
+  }
+  await assert.rejects(bookCall({ reason: 'property', startAt: s2[12].start_at, contact: { name: 'Bot', phone: '555-555-0599' }, ip: '203.0.113.50' }, w2.deps), (e) => e.code === 'too_many_requests');
+  assert.ok(w2.store.state.audits.some((a) => a.event === 'public_booking_throttled'));
+});

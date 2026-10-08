@@ -84,6 +84,8 @@ export const SIGN_IN_LIMITS = Object.freeze({
   startsPerIp: 20,
   startsPerAddress: 5,
   verifiesPerIp: 30,
+  publicBookingsPerIpHour: 5,
+  publicBookingsPerPhoneDay: 3,
   maxActiveSessions: 5,
   idleTimeoutDays: 14,
 });
@@ -450,7 +452,7 @@ export async function listCallSlots({ token, opportunityId, reason, from, to, ti
  * optional); the booking is linked to an opportunity only when the email
  * deterministically matches exactly one accepted Prominent intake.
  */
-export async function bookCall({ token, opportunityId, reason, startAt, contact = {}, note, timezone, idempotencyKey } = {}, deps = {}) {
+export async function bookCall({ token, opportunityId, reason, startAt, contact = {}, note, timezone, idempotencyKey, ip } = {}, deps = {}) {
   const ctx = context(deps);
   const reasonKey = clean(reason);
   if (!CALL_REASONS[reasonKey]) throw new SellerPortalError('invalid_reason', 422);
@@ -465,6 +467,20 @@ export async function bookCall({ token, opportunityId, reason, startAt, contact 
   } else {
     customer = { name: clean(contact.name), phone: normalizePhone(contact.phone), email: normalizeEmail(contact.email) };
     if (!customer.name || !customer.phone) throw new SellerPortalError('invalid_contact', 422);
+    // Abuse protection for the unauthenticated path: a script must not be able
+    // to fill everyone's calendar. Keyed hashes only; limits are generous for
+    // a real seller (an hour / a day) and invisible below them.
+    const now = ctx.now();
+    const ipKey = clean(ip) ? keyed(ctx.env, `ip:${clean(ip)}`) : null;
+    const phoneKey = keyed(ctx.env, `phone:${customer.phone}`);
+    const since = (minutes) => new Date(now.getTime() - minutes * MIN).toISOString();
+    if ((ipKey && (await ctx.store.countThrottle('public_book_ip', ipKey, since(60))) >= SIGN_IN_LIMITS.publicBookingsPerIpHour)
+      || (await ctx.store.countThrottle('public_book_phone', phoneKey, since(24 * 60))) >= SIGN_IN_LIMITS.publicBookingsPerPhoneDay) {
+      await audit(ctx, 'public_booking_throttled', { ipHash: ipKey });
+      throw new SellerPortalError('too_many_requests', 429);
+    }
+    if (ipKey) await ctx.store.recordThrottle('public_book_ip', ipKey, now.toISOString());
+    await ctx.store.recordThrottle('public_book_phone', phoneKey, now.toISOString());
     if (customer.email) {
       const claims = await ctx.store.findIntakeClaims(customer.email);
       const ids = [...new Set(claims.map((c) => c.lead_id))];

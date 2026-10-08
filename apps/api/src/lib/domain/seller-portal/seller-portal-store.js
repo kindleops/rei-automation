@@ -159,10 +159,18 @@ export function createSupabaseSellerPortalStore(deps = {}) {
       const grants = await many(db().from('seller_portal_grants').select('identity:seller_portal_identities(id, email, display_name, status)').eq('opportunity_id', oppId).is('revoked_at', null), 'grant_read_failed');
       return grants.map((g) => g.identity).filter((i) => i && i.status === 'active');
     },
-    /** Returns the new row, or null when this (event, seller) was already claimed. */
+    /**
+     * Returns the claimed row, or null when this (event, seller) was already
+     * sent or deliberately skipped. A FAILED earlier attempt is reclaimable,
+     * so a transient provider error does not lose the notification forever.
+     */
     async claimNotification(row) {
       const { data, error } = await db().from('seller_portal_notifications').insert(row).select('id').maybeSingle();
-      if (error?.code === '23505') return null;
+      if (error?.code === '23505') {
+        const { data: retry, error: e2 } = await db().from('seller_portal_notifications').update({ status: 'pending', reason: null }).eq('dedupe_key', row.dedupe_key).eq('status', 'failed').select('id').maybeSingle();
+        if (e2) fail('notification_write_failed', e2);
+        return retry ?? null;
+      }
       if (error) fail('notification_write_failed', error);
       return data;
     },
@@ -314,7 +322,9 @@ export function createInMemorySellerPortalStore(seed = {}) {
     async revokeAllSessions(iid, reason, at) { s.sessions.filter((x) => x.identity_id === iid && !x.revoked_at).forEach((x) => { x.revoked_at = at; x.revoked_reason = reason; }); },
     listIdentitiesForOpportunity: async (oid) => s.grants.filter((g) => g.opportunity_id === oid && !g.revoked_at).map((g) => s.identities.find((i) => i.id === g.identity_id)).filter((i) => i && i.status === 'active'),
     async claimNotification(row) {
-      if (s.notifications.some((n) => n.dedupe_key === row.dedupe_key)) return null;
+      const prior = s.notifications.find((n) => n.dedupe_key === row.dedupe_key);
+      if (prior?.status === 'failed') { prior.status = 'pending'; return { id: prior.id }; }
+      if (prior) return null;
       const r = { id: id(), status: 'pending', ...row };
       s.notifications.push(r);
       return { id: r.id };

@@ -45,7 +45,10 @@ export async function emitSellerLifecycle({ kind, opportunityId, dedupeKey, cont
       const claim = await store.claimNotification({ dedupe_key: `${dedupeKey}:${identity.id}`, opportunity_id: clean(opportunityId), identity_id: identity.id, kind });
       if (!claim) continue; // already sent for this event
       const result = await notify({ kind, to: identity.email, context: { ...context, name: identity.display_name } });
-      await store.updateNotification(claim.id, result?.sent ? { status: 'sent', sent_at: new Date().toISOString() } : { status: 'skipped', reason: clean(result?.reason) || 'not_sent' });
+      // Disabled email is a deliberate skip; anything else is a failure that a
+      // later firing of the same canonical event may retry.
+      const status = result?.sent ? 'sent' : result?.reason === 'seller_email_disabled' ? 'skipped' : 'failed';
+      await store.updateNotification(claim.id, status === 'sent' ? { status, sent_at: new Date().toISOString() } : { status, reason: clean(result?.reason) || 'not_sent' });
       if (result?.sent) sent++;
       else if (result?.reason && result.reason !== 'seller_email_disabled') logger.warn('seller_portal.notification_failed', { kind, reason: result.reason });
     }
