@@ -126,6 +126,7 @@ const PERMANENT_INELIGIBLE_REASONS = new Set([
   'missing_to_phone_number',
   'missing_prospect_id',
   'prior_contacted_suppression',
+  'prior_reply_not_owner',
   'graph_suppression_or_queue_block',
   'owner_identity_not_verified',
   'renter_not_owner',
