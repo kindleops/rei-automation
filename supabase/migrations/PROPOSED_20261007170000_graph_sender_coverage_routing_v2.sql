@@ -39,18 +39,21 @@
 -- Pacing (recipient-local contact window, daily / per-number caps) stays out of coverage,
 -- exactly as before.
 --
--- APPLY ORDER (owner present; each step its own session):
+-- APPLY ORDER (owner present; each step its own session; revised 2026-10-07 evening for the live fleet):
 --   0. pretest   PROPOSED_20261007170000_graph_sender_coverage_routing_v2_pretest.sql
---                (one transaction, ends in ROLLBACK: applies 1-3 in-txn, flips the flag
---                in-txn, prints per-market routes; nothing persists)
+--                (one transaction, ends in ROLLBACK: applies 1-4 in-txn, flips the flag in-txn,
+--                asserts every market that sends today still resolves; nothing persists)
 --   1. psql --single-transaction -f 20261002130000_sender_routing_v2.sql        (tables, switches OFF)
---   2. psql --single-transaction -f 20261002130100_sender_routing_v2_seed_proposed_graph.sql (r3 seed + Chicago CONFIGURING row)
---   3. psql --single-transaction -f PROPOSED_20261007170000_graph_sender_coverage_routing_v2.sql (this file)
---   4. SELECT * FROM public.refresh_campaign_target_graph_sender_coverage('routing_v2_exact_20261007');
+--   2. psql --single-transaction -f 20261002130100_sender_routing_v2_seed_proposed_graph.sql (r3 pools/routes; Chicago kept as is)
+--   3. psql --single-transaction -f PROPOSED_20261007171000_sender_routing_v2_evidence_backfill.sql
+--        (registration + inbound evidence from the delivery/inbound ledgers — WITHOUT it v2 ON stops sending)
+--   4. psql --single-transaction -f PROPOSED_20261007170000_graph_sender_coverage_routing_v2.sql (this file)
+--   5. SELECT * FROM public.refresh_campaign_target_graph_sender_coverage('routing_v2_exact_20261007');
 --        flag still OFF -> exact-only truth (the 010000 effect: legacy state fallback removed)
---   5. deploy env SENDER_ROUTING_V2_ENABLED=true (inert while system_control is 'false')
---   6. UPDATE public.system_control SET value='true', updated_at=now() WHERE key='sender_routing_v2_enabled';
---   7. SELECT * FROM public.refresh_campaign_target_graph_sender_coverage('routing_v2_regional_20261007');
+--   6. deploy env SENDER_ROUTING_V2_ENABLED=true (inert while system_control is 'false')
+--   7. UPDATE public.system_control SET value='true', updated_at=now() WHERE key='sender_routing_v2_enabled';
+--   8. SELECT * FROM public.refresh_campaign_target_graph_sender_coverage('routing_v2_regional_20261007');
+--   Re-run step 3 after Chicago's first inbound lands (idempotent) so v2 starts using it.
 --   Turning routing OFF later = step 6 with 'false' + step 7 (the graph returns to exact-only).
 --   The send-time health guard refuses regional first touches unless
 --   system_control.allow_regional_fallback_for_first_touch is truthy ('true' since 2026-06-07)

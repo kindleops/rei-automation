@@ -1,6 +1,6 @@
 -- SENDER ROUTING 2.0 — PROPOSED INITIAL GRAPH SEED — PROPOSED, NOT APPLIED.
--- Generated 2026-10-07T10:18:01.160Z by apps/api/scripts/ops/sender-routing/build-seed-sql.mjs
--- from proposed-initial-graph.js (proposal-2026-10-07-r3) and the dry-run evidence of 2026-10-07T10:15:05.682Z.
+-- Generated 2026-10-08T00:53:34.255Z by apps/api/scripts/ops/sender-routing/build-seed-sql.mjs
+-- from proposed-initial-graph.js (proposal-2026-10-07-r3) and the dry-run evidence of 2026-10-07T10:35:43.007Z.
 --
 -- APPLY ONLY AFTER: (1) 20261002130000_sender_routing_v2.sql is applied, and
 -- (2) the owner has approved the graph table (owner / proposal / confirm rows).
@@ -9,41 +9,19 @@
 --
 -- r3 (owner regional map 2026-10-07). Indianapolis (+13173494612) and Tampa (+18138947553) finished
 -- onboarding on 2026-10-03 and are regular members. Chicago (+18722547122) is written here as a
--- CONFIGURING row (status paused, onboarding_stage configuring, daily_limit 800) and joins the chicago
--- pool, but both routers refuse it until the inbound proof + activate-number.mjs (onboard-chicago-18722547122.sql).
--- St. Louis (+13149268488): webhook evidence is decided AT APPLY TIME (verified only if an inbound SMS
--- has reached message_events); its daily_limit (owner ramp, metadata.warmup_ramp) is not touched.
+-- row only if absent (owner activated it on 2026-10-07; never paused here) and joins the chicago pool.
+-- Registration / inbound evidence for every number: the 171000 evidence backfill (apply-time ledgers).
 -- +13057604780 (local-only, retired, absent from the provider) is in no pool.
 -- Unmapped markets (no routes; they HOLD as today): memphis-tn, new-orleans-la, louisville-ky, pittsburgh-pa, rochester-ny.
 -- No BEGIN/COMMIT inside: apply with psql --single-transaction (or MCP apply_migration, which wraps it)
 -- so the rollback-txn pretest (PROPOSED_20261007170000_..._pretest.sql) can \ir it inside ITS transaction.
 
--- ── 1. evidence backfill on textgrid_numbers (registration + webhook evidence only) ──
---    registered   = provider (TextGrid API GET, 2026-10-07) reports campaign CHM4NL2 and nothing local disputes it
---    verified     = inbound SMS has reached LeadCommand on the number (message_events history)
---    configured   = provider points at the inbound URL; no inbound yet
---    Atlanta 2 / Atlanta 3 are NOT marked registered: the API says CHM4NL2, the owner's console paste and the local
---    hold_reason say "not linked" — CONFIG MISMATCH until the owner confirms.
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+12818458577';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+13058975670';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', case when exists (select 1 from public.message_events me where me.to_phone_number = '+13149268488' and me.direction = 'inbound') then 'verified' else 'configured' end, 'sms_webhook_evidence_at', now()::date::text) where phone_number = '+13149268488';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+13173494612';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'configured', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+13234104544';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+13235589881';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+14693131600';
-update public.textgrid_numbers set metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'configured', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+14702936385';
-update public.textgrid_numbers set metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'configured', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+14702936402';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+14704920588';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+16125092382';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+16125092623';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+16128060495';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+17042405818';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+17866052999';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+18138947553';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+19048774448';
-update public.textgrid_numbers set registration_status = coalesce(registration_status, 'registered'), metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('sms_webhook_status', 'verified', 'sms_webhook_evidence_at', '2026-10-07') where phone_number = '+19804589889';
+-- ── 1. evidence (registration / inbound webhook) is NOT seeded here: it is computed at apply time from
+--    the delivery + inbound ledgers by PROPOSED_20261007171000_sender_routing_v2_evidence_backfill.sql (next step).
 
--- ── 1b. Chicago +18722547122: CONFIGURING row (paused; refused by both routers until activation) ──
+-- ── 1b. Chicago +18722547122: ensure the row exists. ON CONFLICT DO NOTHING: an existing row (prod 2026-10-07:
+--    owner-activated, active, 800/day) is never paused or changed. v2 still skips it until its first inbound
+--    (webhook unverified); the evidence backfill flips it once that inbound lands.
 insert into public.textgrid_numbers (phone_number, friendly_name, market, status, health_state, registration_status, daily_limit, messages_sent_today, metadata)
 values ('+18722547122', 'CHICAGO', 'Chicago, IL', 'paused', 'unverified', 'registered', 800, 0, jsonb_build_object('market', 'Chicago, IL', 'friendly_name', 'CHICAGO', 'campaign_id_10dlc', 'CHM4NL2', 'onboarding_stage', 'configuring', 'sms_webhook_status', 'configured', 'provider_checked_at', '2026-10-07', 'onboarded_by', 'owner_approved_seed_r3'))
 on conflict (phone_number) do nothing;

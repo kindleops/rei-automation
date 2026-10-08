@@ -23,10 +23,11 @@ import { isSenderRoutingFlagEnabled, SENDER_ROUTING_FLAGS } from "@/lib/domain/r
 import { chooseTextgridNumber } from "@/lib/domain/outbound/supabase-candidate-feeder.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
 import { BLOCKING_HEALTH_STATE, BLOCKING_NUMBER_STATUS } from "@/lib/supabase/sms-engine.js";
-import { buildParitySql, helperBody } from "../../scripts/ops/sender-routing/coverage-sql-parity.mjs";
+import { buildParitySql, evidenceBlock, helperBody } from "../../scripts/ops/sender-routing/coverage-sql-parity.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SQL = fs.readFileSync(path.resolve(here, "../../../../supabase/migrations/PROPOSED_20261007170000_graph_sender_coverage_routing_v2.sql"), "utf8");
+const BACKFILL_SQL = fs.readFileSync(path.resolve(here, "../../../../supabase/migrations/PROPOSED_20261007171000_sender_routing_v2_evidence_backfill.sql"), "utf8");
 const NOW = new Date("2026-10-07T16:00:00Z");
 
 // The 58 active canonical markets (canonical_markets, prod 2026-10-07).
@@ -266,5 +267,37 @@ test("the parity tool runs the migration's helper body verbatim against stand-in
   assert.doesNotMatch(sql, /public\.(market_sender_routes|sender_pools|sender_pool_numbers)\b/);
   assert.match(sql, /FROM public\.textgrid_numbers tn LEFT JOIN sr_backfill/);
   assert.ok(sql.includes(helperBody(SQL).replaceAll("public.market_sender_routes", "sr_routes").replaceAll("public.sender_pools", "sr_pools").replaceAll("public.sender_pool_numbers", "sr_members").replaceAll("public.textgrid_numbers", "sr_numbers").replaceAll("p_market_id", "m.id")));
+  assert.doesNotMatch(sql, /\b(insert|update|delete|create|drop|alter)\b/i);
+});
+
+// ── 4. the evidence backfill (without it v2 ON would stop nearly every number) ──
+test("evidence backfill is data-only: registration + inbound fields, never status / daily_limit / health / blocklist", () => {
+  const code = strip(BACKFILL_SQL);
+  const set = code.slice(code.indexOf("UPDATE public.textgrid_numbers"));
+  assert.match(set, /registration_status = CASE WHEN p\.set_registered THEN 'registered'/);
+  assert.match(set, /'inbound_verified_at', to_char\(p\.first_inbound/);
+  assert.doesNotMatch(set, /\b(status|daily_limit|health_state|cooling_until)\s*=/);
+  assert.doesNotMatch(code, /system_control/);
+  // the rule: delivered => registered; delivered AND inbound => verified; existing proofs kept
+  assert.match(code, /e\.delivered > 0 AND lower\(trim\(COALESCE\(tn\.registration_status, ''\)\)\) <> 'registered'/);
+  assert.match(code, /e\.delivered > 0 AND e\.first_inbound IS NOT NULL\s+AND NULLIF\(trim\(COALESCE\(tn\.metadata->>'inbound_verified_at', ''\)\), ''\) IS NULL/);
+  assert.match(code, /'evidence_backfill', jsonb_build_object/, "rollback marker");
+});
+
+test("after the backfill rule a delivering + replying number is v2-eligible; Chicago (no traffic yet) stays out", () => {
+  const before = live("stl", "+13149268488", "St. Louis, MO", { registration_status: null, metadata: {} });
+  assert.equal(evaluateSenderEligibility(before, { now: NOW }).reason, "unregistered", "today's prod row: v2 would stop it");
+  const after = { ...before, registration_status: "registered", metadata: { inbound_verified_at: "2026-10-07T13:14:57.759Z", sms_webhook_status: "verified" } };
+  assert.equal(evaluateSenderEligibility(after, { now: NOW }).ok, true);
+  const chicago = live("chi", "+18722547122", "Chicago, IL", { registration_status: null, metadata: {} });
+  assert.equal(evaluateSenderEligibility(chicago, { now: NOW }).ok, false);
+});
+
+test("the live preview embeds the backfill's evidence CTE verbatim", () => {
+  const block = evidenceBlock(BACKFILL_SQL);
+  assert.match(block, /^evidence AS \(/);
+  const fleet = FLEET();
+  const sql = buildParitySql({ sqlText: SQL, graphRows: graphRowsFor(fleet), fleet, backfill: [], backfillSqlText: BACKFILL_SQL });
+  assert.ok(sql.includes(block));
   assert.doesNotMatch(sql, /\b(insert|update|delete|create|drop|alter)\b/i);
 });

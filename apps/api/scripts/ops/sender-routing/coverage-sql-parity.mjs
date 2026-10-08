@@ -27,6 +27,15 @@ import { applyBackfillToFleet } from "../../../src/lib/domain/routing/sender-rou
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION = path.resolve(here, "../../../../../supabase/migrations/PROPOSED_20261007170000_graph_sender_coverage_routing_v2.sql");
+const BACKFILL = path.resolve(here, "../../../../../supabase/migrations/PROPOSED_20261007171000_sender_routing_v2_evidence_backfill.sql");
+
+/** The evidence CTE of the 171000 backfill, verbatim ("evidence AS (...)"). */
+export function evidenceBlock(backfillSqlText) {
+  const a = backfillSqlText.indexOf("-- evidence:begin");
+  const b = backfillSqlText.indexOf("-- evidence:end");
+  const block = backfillSqlText.slice(backfillSqlText.indexOf("\n", a) + 1, b).trim();
+  return block.replace(/,\s*$/, "");
+}
 
 export function helperBody(sqlText) {
   const start = sqlText.indexOf("AS $function$") + "AS $function$".length;
@@ -36,7 +45,7 @@ export function helperBody(sqlText) {
 
 const q = (v) => (v === null || v === undefined ? "NULL" : `'${String(v).replaceAll("'", "''")}'`);
 
-export function buildParitySql({ sqlText, graphRows, fleet, backfill }) {
+export function buildParitySql({ sqlText, graphRows, fleet, backfill, backfillSqlText = null }) {
   const poolId = (key) => `00000000-0000-4000-9000-${String([...graphRows.pools.map((p) => p.pool_key)].indexOf(key) + 1).padStart(12, "0")}`;
   const idByPhone = new Map(fleet.map((row) => [normalizeE164(row.phone_number), row.id]));
   const pools = graphRows.pools.map((p) => `(${q(poolId(p.pool_key))}::uuid, ${q(p.pool_key)}, ${q(p.home_market_id)}, true)`);
@@ -54,13 +63,21 @@ WITH sr_pools(id, pool_key, home_market_id, is_active) AS (VALUES ${pools.join("
 sr_members(sender_pool_id, textgrid_number_id, status) AS (VALUES ${members.join(", ")}),
 sr_routes(market_id, sender_pool_id, priority, affinity_tier, enabled) AS (VALUES ${routes.join(", ")}),
 sr_backfill(phone, registration_status, sms_webhook_status) AS (VALUES ${bf.length ? bf.join(", ") : "(NULL::text, NULL::text, NULL::text)"}),
+${backfillSqlText ? `${evidenceBlock(backfillSqlText)},
+-- = the 171000 backfill's patch rule (delivered => registered; delivered + inbound => inbound verified)
 sr_numbers AS (
+  SELECT tn.id, tn.phone_number, tn.market, tn.status, tn.health_state, tn.cooling_until, tn.messages_sent_today, tn.last_used_at,
+         CASE WHEN e.delivered > 0 THEN 'registered' ELSE tn.registration_status END AS registration_status,
+         COALESCE(tn.metadata, '{}'::jsonb) || CASE WHEN e.delivered > 0 AND e.first_inbound IS NOT NULL AND NULLIF(trim(COALESCE(tn.metadata->>'inbound_verified_at', '')), '') IS NULL
+           THEN jsonb_build_object('inbound_verified_at', e.first_inbound::text, 'sms_webhook_status', 'verified') ELSE '{}'::jsonb END AS metadata
+  FROM public.textgrid_numbers tn LEFT JOIN evidence e ON e.id = tn.id
+)` : `sr_numbers AS (
   SELECT tn.id, tn.phone_number, tn.market, tn.status, tn.health_state, tn.cooling_until, tn.messages_sent_today, tn.last_used_at,
          COALESCE(b.registration_status, tn.registration_status) AS registration_status,
          COALESCE(tn.metadata, '{}'::jsonb) || CASE WHEN b.sms_webhook_status IS NOT NULL THEN jsonb_build_object('sms_webhook_status', b.sms_webhook_status) ELSE '{}'::jsonb END AS metadata
   FROM public.textgrid_numbers tn LEFT JOIN sr_backfill b ON b.phone = tn.phone_number
-)
-SELECT m.id AS market_id, pick.pool_key, pick.sender_phone_number, pick.is_local
+)`}
+SELECT m.id AS market_id, pick.pool_key, pick.sender_phone_number, pick.is_local, pick.affinity_tier, pick.sender_market
 FROM public.canonical_markets m
 LEFT JOIN LATERAL (
 ${body}
@@ -69,40 +86,75 @@ WHERE m.is_active
 ORDER BY m.id`;
 }
 
+function runPsql(dburlFile, sql) {
+  const script = `SET statement_timeout='30s';\nBEGIN READ ONLY;\n\\pset format unaligned\n\\pset tuples_only on\n\\pset fieldsep '|'\n${sql};\nROLLBACK;\n`;
+  // Only psql's stderr is ever printed (the Node error message would echo the argv,
+  // which carries the connection string).
+  try {
+    return execFileSync("psql", ["--dbname", fs.readFileSync(dburlFile, "utf8").trim(), "-X", "-q", "-v", "ON_ERROR_STOP=1"], { input: script, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+  } catch (error) {
+    console.error(`psql failed: ${String(error.stderr || "").slice(0, 2000)}`);
+    process.exit(1);
+  }
+}
+const lines = (out) => out.trim().split("\n").filter((l) => l.includes("|")).map((l) => l.split("|"));
+
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
-  const evidence = JSON.parse(fs.readFileSync(arg("evidence"), "utf8"));
+  // --live-evidence: the 171000 backfill rule evaluated now, in SQL (verbatim evidence CTE) and in JS.
+  // otherwise: --evidence=<activation-dry-run.json> (the earlier static backfill).
+  const liveEvidence = Boolean(arg("live-evidence"));
+  const dburlFile = arg("dburl-file");
+  const evidence = liveEvidence ? null : JSON.parse(fs.readFileSync(arg("evidence"), "utf8"));
   const sb = readOnlyClient();
   const rawFleet = await readAll(sb, "textgrid_numbers", "*");
   const markets = (await readAll(sb, "canonical_markets", "id,display_name,state,is_active")).filter((m) => m.is_active !== false);
   const graphRows = proposedGraphRows({ markets, fleet: rawFleet });
-  const sql = buildParitySql({ sqlText: fs.readFileSync(MIGRATION, "utf8"), graphRows, fleet: rawFleet, backfill: evidence.backfill });
+  const backfillSqlText = liveEvidence ? fs.readFileSync(BACKFILL, "utf8") : null;
+  const sql = buildParitySql({ sqlText: fs.readFileSync(MIGRATION, "utf8"), graphRows, fleet: rawFleet, backfill: evidence?.backfill || [], backfillSqlText });
   if (arg("sql-out")) fs.writeFileSync(arg("sql-out"), `${sql};\n`);
-  const dburlFile = arg("dburl-file");
   if (dburlFile) {
-    const script = `SET statement_timeout='30s';\nBEGIN READ ONLY;\n\\pset format unaligned\n\\pset tuples_only on\n\\pset fieldsep '|'\n${sql};\nROLLBACK;\n`;
-    // Only psql's stderr is ever printed (the Node error message would echo the argv,
-    // which carries the connection string).
-    let out;
-    try {
-      out = execFileSync("psql", ["--dbname", fs.readFileSync(dburlFile, "utf8").trim(), "-X", "-q", "-v", "ON_ERROR_STOP=1"], { input: script, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
-    } catch (error) {
-      console.error(`psql failed: ${String(error.stderr || "").slice(0, 2000)}`);
-      process.exit(1);
+    let fleet;
+    let blocked;
+    let evidenceRows = [];
+    if (liveEvidence) {
+      evidenceRows = lines(runPsql(dburlFile, `WITH ${evidenceBlock(backfillSqlText)} SELECT phone_number, delivered, COALESCE(first_inbound::text, '') FROM evidence ORDER BY phone_number`));
+      const ev = new Map(evidenceRows.map(([phone, delivered, first]) => [phone, { delivered: Number(delivered), first: first || null }]));
+      fleet = rawFleet.map((row) => {
+        const e = ev.get(row.phone_number);
+        if (!e || !(e.delivered > 0)) return row;
+        const meta = { ...(row.metadata || {}) };
+        if (e.first && !String(meta.inbound_verified_at || "").trim()) Object.assign(meta, { inbound_verified_at: e.first, sms_webhook_status: "verified" });
+        return { ...row, registration_status: "registered", metadata: meta };
+      });
+      const { data: sc } = await sb.from("system_control").select("value").eq("key", "sms_blocked_sender_numbers").maybeSingle();
+      blocked = new Set(String(sc?.value || "").split(",").map(normalizeE164).filter(Boolean));
+    } else {
+      fleet = applyBackfillToFleet(rawFleet, evidence.backfill);
+      blocked = new Set(evidence.blocked || []);
     }
-    const sqlPick = new Map(out.trim().split("\n").filter((l) => l.includes("|")).map((l) => { const [id, pool, phone] = l.split("|"); return [id, { pool: pool || null, phone: phone || null }]; }));
-    const fleet = applyBackfillToFleet(rawFleet, evidence.backfill);
+    const sqlPick = new Map(lines(runPsql(dburlFile, sql)).map(([id, pool, phone, local, tier, mkt]) => [id, { pool: pool || null, phone: phone || null, local: local === "t", tier: tier || null, market: mkt || null }]));
     const graph = buildRoutingGraph(graphRows);
     let same = 0;
     const diffs = [];
+    const table = [];
     for (const m of markets) {
-      const r = selectSender({ market_id: m.id, purpose: PURPOSES.PROACTIVE }, { graph, fleet, blocked: new Set(evidence.blocked || []), now: new Date(), ignore_daily_limit: true });
+      const r = selectSender({ market_id: m.id, purpose: PURPOSES.PROACTIVE }, { graph, fleet, blocked, now: new Date(), ignore_daily_limit: true });
       const js = r.ok ? r.pool_key : null;
-      const s = sqlPick.get(m.id) || { pool: null };
-      if (js === s.pool) same += 1;
-      else diffs.push({ market: m.id, js, sql: s.pool });
+      const sp = sqlPick.get(m.id) || { pool: null };
+      if (js === sp.pool) same += 1;
+      else diffs.push({ market: m.id, js, sql: sp.pool });
+      table.push(`| ${m.display_name} | ${sp.pool ? `${sp.local ? "exact" : "regional"} · ${sp.pool} ···${String(sp.phone).slice(-4)} (${sp.market}) · ${sp.tier}` : `NOT COVERED${r.ok ? "" : ` (${r.cause})`}`} |`);
     }
-    console.log(JSON.stringify({ markets: markets.length, same_pool: same, diffs }, null, 1));
+    const md = [
+      `# v2 ON resolver preview (read-only, ${new Date().toISOString()})`, "",
+      liveEvidence ? `Evidence (171000 rule, live): ${evidenceRows.map(([p, d, f]) => `···${p.slice(-4)} delivered ${d}${f ? `, first inbound ${f.slice(0, 16)}` : ", no inbound"}`).join(" · ")}` : "static evidence",
+      `Blocklist: ${[...blocked].join(", ") || "(empty)"}`, "",
+      "| market | v2 ON pick (SQL helper) |", "|---|---|", ...table, "",
+      `SQL vs JS: ${same}/${markets.length} same pool${diffs.length ? `; diffs ${JSON.stringify(diffs)}` : ""}`,
+    ].join("\n");
+    console.log(md);
+    if (arg("out")) fs.writeFileSync(arg("out"), md);
     if (diffs.length) process.exit(1);
   }
 }
