@@ -25,7 +25,7 @@ import { resolveSellerReplyLanguage } from "@/lib/domain/classification/seller-r
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
 import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
-import { classifyStopScope, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
+import { classifyStopScope, matchesOutreachStop, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
 import {
   resolveCanonicalAskingPrice,
   isCommittedAskingPrice,
@@ -6907,7 +6907,9 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   // words is an opt-out — independent of any conversation flag.
   const compliance_flag  = stop_other_action
     ? (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
-    : detectComplianceFlag(message) || (matchMultilingualOptOut(original_message) ? "stop_texting" : null);
+    : detectComplianceFlag(message) || (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
+      // round 9: a stop aimed at our outreach ("Stop looking up properties to buy").
+      || (matchesOutreachStop(original_message) ? "stop_texting" : null);
   let language           = detectLanguageHeuristic(original_message, brain_item);
   // An explicit Spanish-switch request ("no hablo inglés", "en español por
   // favor") is deterministic evidence of language preference even when the
