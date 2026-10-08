@@ -51,6 +51,7 @@ import {
   normalizeDrawnArea,
 } from '@/lib/domain/campaigns/campaign-drawn-area.js'
 import { evaluatePreSendEligibility } from '@/lib/domain/outbound/presend-eligibility-engine.js'
+import { evaluateOpenerReplyExclusion, loadOpenerReplyFacts, phoneKey, phoneLookupVariants } from '@/lib/domain/campaigns/opener-reply-exclusion.js'
 import { isValidIanaTimezone } from '@/lib/domain/acquisition-brain/shadow-burst-timing.js'
 import { resolveTimezone } from '@/lib/sms/latency.js'
 import { campaignMarketIdentityPatch, summarizeCampaignMarketIdentity } from '@/lib/domain/campaigns/campaign-market-identity.js'
@@ -8128,6 +8129,7 @@ const PLAN_SKIP_LABELS = Object.freeze({
   template_blocked_by_operator: 'message blocked by operator',
   active_queue_row_exists: 'already queued',
   prior_contacted_suppression: 'already contacted',
+  prior_reply_not_owner: 'replied not the owner',
   graph_suppression_or_queue_block: 'suppressed',
   duplicate_phone_in_launch_batch: 'duplicate phone',
   per_sender_cap_reached: 'sender daily cap reached',
@@ -8454,20 +8456,30 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
 
   const now = new Date(input.now || Date.now())
   const phones = readyTargets.map((target) => firstNonEmpty(target.to_phone_number, target.metadata?.candidate_snapshot?.to_phone_number))
-  const [activeQueueRows, priorContactRows] = await Promise.all([
-    phones.length ? fetchActiveQueueRowsByPhone(supabase, phones) : Promise.resolve([]),
-    suppressPreviouslyContacted && phones.length ? fetchPriorContactRowsByPhone(supabase, phones) : Promise.resolve([]),
+  /**
+   * PHONE SHAPE. campaign_targets.to_phone_number is stored as 10 digits;
+   * send_queue / message_events store E.164. Looking rows up by the raw target
+   * phone matched nothing, so "already queued" and "already contacted" never
+   * fired for a 10-digit target (2026-10-08: a seller who replied "gave it to
+   * my daughter" on 9-28 got a new campaign's touch-1 on 10-06 while a nurture
+   * was scheduled for them). Look up both shapes; key every map by phoneKey().
+   */
+  const lookupPhones = phoneLookupVariants(phones)
+  const [activeQueueRows, priorContactRows, openerReplyFacts] = await Promise.all([
+    lookupPhones.length ? fetchActiveQueueRowsByPhone(supabase, lookupPhones) : Promise.resolve([]),
+    suppressPreviouslyContacted && lookupPhones.length ? fetchPriorContactRowsByPhone(supabase, lookupPhones) : Promise.resolve([]),
+    lookupPhones.length ? loadOpenerReplyFacts(supabase, lookupPhones) : Promise.resolve(new Map()),
   ])
   const activeByPhone = new Map()
   const priorByPhone = new Map()
   for (const row of activeQueueRows) {
-    const phone = clean(row.to_phone_number)
+    const phone = phoneKey(row.to_phone_number)
     if (!phone) continue
     if (!activeByPhone.has(phone)) activeByPhone.set(phone, [])
     activeByPhone.get(phone).push(row)
   }
   for (const row of priorContactRows) {
-    const phone = clean(row.to_phone_number)
+    const phone = phoneKey(row.to_phone_number)
     if (!phone) continue
     if (!priorByPhone.has(phone)) priorByPhone.set(phone, [])
     priorByPhone.get(phone).push(row)
@@ -8671,10 +8683,22 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       recordSkip('duplicate_phone_in_launch_batch', target)
       continue
     }
-    if (activeByPhone.has(phone)) {
+    const phoneLookupKey = phoneKey(phone)
+    if (activeByPhone.has(phoneLookupKey)) {
       recordSkip('active_queue_row_exists', target, {
-        active_queue_row_ids: activeByPhone.get(phone).slice(0, 5).map((row) => row.id),
+        active_queue_row_ids: activeByPhone.get(phoneLookupKey).slice(0, 5).map((row) => row.id),
       })
+      continue
+    }
+    // A not-owner / former-owner / wrong-number reply ends openers for that
+    // person × property (wrong number: for the phone). Never lifted by the
+    // previously-contacted override — it is a statement, not a contact count.
+    const notOwner = evaluateOpenerReplyExclusion({
+      property_id: candidate.property_id || target.property_id || null,
+      ...(openerReplyFacts.get(phoneLookupKey) || {}),
+    })
+    if (notOwner.excluded) {
+      recordSkip('prior_reply_not_owner', target, { scope: notOwner.scope, signal: notOwner.signal, source: notOwner.source })
       continue
     }
     if (candidate.true_post_contact_suppression || candidate.wrong_number || candidate.pending_prior_touch || candidate.active_queue_item) {
@@ -8691,9 +8715,9 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
 	        candidate.never_contacted === false ||
 	        Boolean(candidate.last_outbound_at || candidate.latest_contact_at) ||
 	        Number(candidate.touch_count || 0) > 0
-      if (outreachTouched || priorByPhone.has(phone)) {
+      if (outreachTouched || priorByPhone.has(phoneLookupKey)) {
         recordSkip('prior_contacted_suppression', target, {
-          prior_contact_row_ids: (priorByPhone.get(phone) || []).slice(0, 5).map((row) => row.id),
+          prior_contact_row_ids: (priorByPhone.get(phoneLookupKey) || []).slice(0, 5).map((row) => row.id),
         })
         continue
       }
@@ -9176,7 +9200,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     already_queued: Number(skippedCounts.active_queue_row_exists || 0),
     duplicate_phone: Number(skippedCounts.duplicate_phone_in_launch_batch || 0),
     duplicate_owner: 0,
-    suppressed: Number(skippedCounts.graph_suppression_or_queue_block || 0) + Number(skippedCounts.prior_contacted_suppression || 0),
+    suppressed: Number(skippedCounts.graph_suppression_or_queue_block || 0) + Number(skippedCounts.prior_contacted_suppression || 0) + Number(skippedCounts.prior_reply_not_owner || 0),
     wrong_number: 0,
     opted_out: 0,
     template_missing: Number(skippedCounts.template_render_failed || 0),
@@ -9186,7 +9210,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     other_failed: Object.entries(skippedCounts)
       .filter(([key]) => ![
         'active_queue_row_exists', 'duplicate_phone_in_launch_batch', 'graph_suppression_or_queue_block',
-        'prior_contacted_suppression', 'template_render_failed', ...SENDER_SKIP_REASONS,
+        'prior_contacted_suppression', 'prior_reply_not_owner', 'template_render_failed', ...SENDER_SKIP_REASONS,
         'schedule_window_full', 'missing_master_owner_id', 'missing_prospect_id',
       ].includes(key))
       .reduce((sum, [, count]) => sum + Number(count || 0), 0),

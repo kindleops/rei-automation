@@ -325,7 +325,8 @@ test("plan: the fleet, the template pool and message history are read once per p
   // Active-queue + prior-contact checks, then batched history (one chunk), plus
   // ONE fleet sends-today ledger read (rc-7.1: derived, not the counter).
   assert.ok((reads.get("send_queue") || 0) <= 4, `send_queue read ${reads.get("send_queue")} times`);
-  assert.ok((reads.get("message_events") || 0) <= 2, `message_events read ${reads.get("message_events")} times`);
+  // + ONE batched not-owner reply read (opener-reply-exclusion, 2026-10-08).
+  assert.ok((reads.get("message_events") || 0) <= 3, `message_events read ${reads.get("message_events")} times`);
 });
 
 // ── (e) the rolling plan ─────────────────────────────────────────────────────
