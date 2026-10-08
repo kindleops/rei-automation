@@ -32,7 +32,8 @@ describe('graph hover card', () => {
     expect(rows['SMS eligible']).toBe('No · No phone on file')
     expect(rows.Stage).toContain('Offer Sent')
     expect(rows.Campaign).toContain('Dallas S1')
-    expect(f.flags).toEqual(expect.arrayContaining(['Tax delinquent 2024', 'Active lien', 'Lis pendens', 'Vacant Home']))
+    expect(f.flags).toEqual(expect.arrayContaining(['Tax delinquent', 'Active lien', 'Lis pendens', 'Vacant']))
+    expect(f.signals?.[0].tone).toBe('distress')
     expect(f.message?.text).toContain('what would you offer')
   })
   it('a cluster node says how to expand it', () => {

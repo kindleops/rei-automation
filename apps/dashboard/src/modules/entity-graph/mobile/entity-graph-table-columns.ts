@@ -1,4 +1,5 @@
 import type { EntitySearchResult } from '../../../domain/entity-graph/entity-graph.types'
+import { humanBucket, propertySignals } from './property-signals'
 import {
   compactCount,
   compactCurrency,
@@ -32,13 +33,14 @@ export function equityLabel(r: EntitySearchResult): string {
 const recordsCaptured = (r: EntitySearchResult): boolean => Boolean(r.details?.records) && r.details?.records?.captured !== false
 
 export type ColumnGroup =
-  | 'overview' | 'outreach' | 'geography' | 'property' | 'ownership' | 'owner'
+  | 'overview' | 'outreach' | 'geography' | 'market' | 'property' | 'ownership' | 'owner'
   | 'people' | 'contacts' | 'signals' | 'scores' | 'engine' | 'provenance'
 
 export const COLUMN_GROUP_LABELS: Record<ColumnGroup, string> = {
   overview: 'Overview',
   outreach: 'Outreach, pipeline & campaigns',
   geography: 'Geography',
+  market: 'ZIP market (Market Intelligence)',
   property: 'Property',
   ownership: 'Ownership (on the property)',
   owner: 'Owner record (master owner)',
@@ -47,11 +49,11 @@ export const COLUMN_GROUP_LABELS: Record<ColumnGroup, string> = {
   signals: 'Debt, liens & sales',
   scores: 'Value & equity',
   engine: 'Decision Engine',
-  provenance: 'Provenance & system',
+  provenance: 'Advanced / debug (ids, system)',
 }
 
 export const COLUMN_GROUP_ORDER: ColumnGroup[] = [
-  'overview', 'outreach', 'geography', 'property', 'ownership', 'owner',
+  'overview', 'outreach', 'geography', 'market', 'property', 'ownership', 'owner',
   'people', 'contacts', 'signals', 'scores', 'engine', 'provenance',
 ]
 
@@ -76,6 +78,10 @@ export type TableColumn = {
   outreach?: boolean
   /** Column-picker definition: where the value comes from, said plainly. */
   source?: string
+  /** Rendered as colored signal badges on the desk (property-signals.ts). */
+  signals?: boolean
+  /** Extra enrichment fields a computed column reads from `details.row`. */
+  fields?: string[]
 }
 
 /**
@@ -210,27 +216,62 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
      */
     { key: 'owner', group: 'ownership', label: 'Owner', width: 170, render: (r) => text(r.details?.ownerName) },
     {
+      /**
+       * The owner as a BUYER elsewhere. Every owner "bought" their own property
+       * once, so "1 · inactive" said nothing (owner, 2026-10-08): shown only for
+       * a repeat buyer (2+ observed purchases) or one still buying.
+       */
       key: 'ownerBuyer',
       group: 'ownership',
-      label: 'Owner buys',
-      align: 'right',
-      width: 96,
+      label: 'Owner is a buyer',
+      width: 140,
       render: (r) => {
         const b = r.details?.records?.ownerBuyer
-        return b ? `${b.acquisitions ?? '—'} · ${b.status ?? ''}`.trim() : null
+        if (!b || !((b.acquisitions ?? 0) >= 2 || b.status === 'active')) return null
+        return `${b.acquisitions ?? '—'} purchases${b.status ? ` · ${b.status}` : ''}`
       },
     },
     { key: 'loans', group: 'signals', label: 'Loans', sortBy: 'rec_mortgage_count', align: 'right', width: 62, render: (r) => (recordsCaptured(r) ? String(r.details!.records!.mortgageCount) : null) },
     { key: 'balance', group: 'scores', label: 'Balance', sortBy: 'rec_mortgage_balance', align: 'right', width: 88, render: (r) => compactCurrency(r.details?.records?.mortgageBalance) },
     { key: 'rate', group: 'signals', label: 'Rate', align: 'right', width: 64, render: (r) => (typeof r.details?.records?.firstRate === 'number' ? `${Number(r.details.records.firstRate).toFixed(2)}%` : null) },
     { key: 'lender', group: 'signals', label: 'Lender', width: 170, render: (r) => text(r.details?.records?.firstLender) },
-    { key: 'liens', group: 'signals', label: 'Liens', sortBy: 'rec_lien_count', align: 'right', width: 60, render: (r) => (recordsCaptured(r) ? String(r.details!.records!.lienCount) : null) },
-    { key: 'lastSale', group: 'signals', label: 'Last sale', sortBy: 'rec_last_sale_date', width: 96, render: (r) => text(r.details?.records?.lastSaleDate)?.slice(0, 7) ?? null },
-    { key: 'lastPrice', group: 'scores', label: 'Sale price', align: 'right', width: 90, render: (r) => compactCurrency(r.details?.records?.lastSalePrice) },
-    { key: 'records', group: 'signals', label: 'Recorded signals', width: 220, render: (r) => (r.details?.records?.signals ?? []).map((s) => s.label).join(' · ') || null },
+    {
+      // which liens, not just how many: recorded document categories + amount due
+      key: 'liens', group: 'signals', label: 'Liens', sortBy: 'rec_lien_count', width: 200,
+      render: (r) => {
+        const rec = r.details?.records
+        if (!recordsCaptured(r) || !rec) return null
+        if (!rec.lienCount) return 'None recorded'
+        const cats = (rec.lienCategories ?? []).map((c) => humanizeEnum(c) ?? c)
+        return [cats.length ? cats.slice(0, 2).join(', ') + (cats.length > 2 ? ` +${cats.length - 2}` : '') : `${rec.lienCount} recorded`, typeof rec.lienAmountDue === 'number' && rec.lienAmountDue > 0 ? `${compactCurrency(rec.lienAmountDue)} due` : null].filter(Boolean).join(' · ')
+      },
+      sortValue: (r) => (recordsCaptured(r) ? r.details?.records?.lienCount ?? null : null),
+    },
+    {
+      // one last-sale column (records first, the property's own sale fields as fallback): full date + price
+      key: 'lastSale', group: 'signals', label: 'Last sale', sortBy: 'rec_last_sale_date', width: 190, fields: ['sale_date', 'sale_price'],
+      render: (r) => {
+        const rec = r.details?.records
+        const row = r.details?.row ?? {}
+        const date = text(rec?.lastSaleDate) ?? text(row.sale_date)
+        const price = typeof rec?.lastSalePrice === 'number' ? rec.lastSalePrice : typeof row.sale_price === 'number' ? row.sale_price : null
+        if (!date && price === null) return null
+        const d = date ? new Date(`${date.slice(0, 10)}T12:00:00`) : null
+        const when = d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : date
+        return [when, price !== null ? compactCurrency(price) : null, rec?.lastSaleDocType ?? null].filter(Boolean).join(' · ')
+      },
+      sortValue: (r) => text(r.details?.records?.lastSaleDate) ?? text((r.details?.row ?? {}).sale_date),
+    },
     { key: 'units', group: 'property', label: 'Units', sortBy: 'units_count', align: 'right', width: 60, render: (r) => compactCount(r.details?.units) },
     { key: 'zip', group: 'geography', label: 'ZIP', width: 72, render: (r) => text(r.details?.zip) },
-    { key: 'flags', group: 'signals', label: 'Signals', width: 200, render: (r) => text(r.details?.flags) },
+    {
+      // ONE signal system (property-signals.ts): vendor flags + seller tags +
+      // recorded signals, deduplicated, colored by meaning; facts are not badges
+      key: 'flags', group: 'overview', label: 'Signals', width: 320,
+      render: (r) => propertySignals(r).map((x) => x.label).join(' · ') || null,
+      signals: true,
+      sortValue: (r) => propertySignals(r).filter((x) => x.tone === 'distress').length || null,
+    },
   ],
   master_owners: [
     { key: 'ownerType', group: 'ownership', label: 'Owner type', width: 150, render: (r) => humanizeEnum(r.details?.ownerType) },
@@ -373,7 +414,6 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
 
   { key: 'year_built', label: 'Year built', group: 'property', width: 92, numeric: true },
   { key: 'effective_year_built', label: 'Eff. year built', group: 'property', width: 110, numeric: true },
-  { key: 'stories', label: 'Stories', group: 'property', width: 72, numeric: true },
   { key: 'total_bedrooms', label: 'Beds', group: 'property', width: 64, numeric: true },
   { key: 'total_baths', label: 'Baths', group: 'property', width: 64, numeric: true },
   { key: 'building_square_feet', label: 'Building sqft', group: 'property', width: 110, numeric: true },
@@ -408,17 +448,10 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
   { key: 'tax_delinquent_year', label: 'Tax delinq. year', group: 'signals', width: 120, numeric: true },
   { key: 'active_lien', label: 'Active lien', group: 'signals', width: 100 },
   { key: 'is_hot_preforeclosure', label: 'Hot pre-foreclosure', group: 'signals', width: 140 },
-  { key: 'seller_tags_text', label: 'Seller tags', group: 'signals', width: 210 },
-  { key: 'acquisition_bucket', label: 'Acquisition bucket', group: 'signals', width: 140 },
+  { key: 'acquisition_bucket', label: 'Acquisition bucket', group: 'property', width: 160 },
 
   { key: 'total_loan_balance', label: 'Loan balance', group: 'scores', width: 112, numeric: true },
   { key: 'assd_total_value', label: 'Assessed value', group: 'scores', width: 120, numeric: true },
-  { key: 'sale_price', label: 'Last sale price', group: 'scores', width: 118, numeric: true },
-  { key: 'sale_date', label: 'Last sale date', group: 'scores', width: 118 },
-  { key: 'arv_estimate', label: 'ARV estimate', group: 'scores', width: 118, numeric: true },
-  { key: 'rent_estimate', label: 'Rent estimate', group: 'scores', width: 118, numeric: true },
-  { key: 'cap_rate', label: 'Cap rate', group: 'scores', width: 92, numeric: true },
-  { key: 'ppsf', label: 'PPSF', group: 'scores', width: 84, numeric: true },
   { key: 'estimated_repair_cost', label: 'Repair est. (vendor · MLS lane)', group: 'scores', width: 170, numeric: true },
   { key: 'rehab_level', label: 'Rehab level', group: 'scores', width: 106 },
   /* cash_offer / structured_motivation_score / deal_strength_score /
@@ -487,6 +520,122 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
   { key: 'scores.recommended_conversation_angle', label: 'Conversation angle', group: 'engine', width: 200 },
   { key: 'scores.computed_at', label: 'Engine run', group: 'engine', width: 118 },
 
+  /* field audit 2026-10-08: every public.properties column with data (≥1% of a 2% sample) */
+  { key: 'original_property_type', label: 'Vendor property type', group: 'property', width: 150 },
+  { key: 'asset_class', label: 'Asset class', group: 'property', width: 120 },
+  { key: 'asset_subclass', label: 'Asset subclass', group: 'property', width: 160 },
+  { key: 'style', label: 'Style', group: 'property', width: 110 },
+  { key: 'county_land_use_code', label: 'Land use code', group: 'property', width: 110 },
+  { key: 'construction_type', label: 'Construction', group: 'property', width: 120 },
+  { key: 'exterior_walls', label: 'Exterior walls', group: 'property', width: 120 },
+  { key: 'interior_walls', label: 'Interior walls', group: 'property', width: 120 },
+  { key: 'floor_cover', label: 'Flooring', group: 'property', width: 110 },
+  { key: 'roof_type', label: 'Roof type', group: 'property', width: 100 },
+  { key: 'air_conditioning', label: 'Air conditioning', group: 'property', width: 120 },
+  { key: 'heating_fuel_type', label: 'Heating fuel', group: 'property', width: 110 },
+  { key: 'porch', label: 'Porch', group: 'property', width: 90 },
+  { key: 'deck', label: 'Deck', group: 'property', width: 90 },
+  { key: 'driveway', label: 'Driveway', group: 'property', width: 100 },
+  { key: 'num_of_fireplaces', label: 'Fireplaces', group: 'property', width: 90, numeric: true },
+  { key: 'sum_garage_sqft', label: 'Garage sqft', group: 'property', width: 100, numeric: true },
+  { key: 'sum_buildings_nbr', label: 'Buildings', group: 'property', width: 90, numeric: true },
+  { key: 'sum_commercial_units', label: 'Commercial units', group: 'property', width: 124, numeric: true },
+  { key: 'avg_sqft_per_unit', label: 'Sqft per unit', group: 'property', width: 104, numeric: true },
+  { key: 'beds_per_unit', label: 'Beds per unit', group: 'property', width: 104, numeric: true },
+  { key: 'sqft_range', label: 'Sqft range', group: 'property', width: 104 },
+  { key: 'lot_nbr', label: 'Lot number', group: 'property', width: 100 },
+  { key: 'lot_size_depth_feet', label: 'Lot depth (ft)', group: 'property', width: 104, numeric: true },
+  { key: 'lot_size_frontage_feet', label: 'Lot frontage (ft)', group: 'property', width: 120, numeric: true },
+  { key: 'topography', label: 'Topography', group: 'property', width: 110 },
+  { key: 'geographic_features', label: 'Geographic features', group: 'geography', width: 150 },
+  { key: 'legal_description', label: 'Legal description', group: 'geography', width: 240 },
+  { key: 'situs_census_tract', label: 'Census tract', group: 'geography', width: 110 },
+  { key: 'property_address2', label: 'Address line 2', group: 'geography', width: 120 },
+  { key: 'property_address_range', label: 'Address range', group: 'geography', width: 120 },
+  { key: 'market_region', label: 'Market region', group: 'geography', width: 140 },
+  { key: 'hoa1_name', label: 'HOA', group: 'property', width: 160 },
+  { key: 'hoa1_type', label: 'HOA type', group: 'property', width: 100 },
+  { key: 'hoa_fee_amount', label: 'HOA fee', group: 'scores', width: 90, numeric: true },
+  { key: 'owner_1_name', label: 'Owner 1 (deed)', group: 'ownership', width: 170 },
+  { key: 'owner_2_name', label: 'Owner 2 (deed)', group: 'ownership', width: 170 },
+  { key: 'owner_type', label: 'Owner type (vendor)', group: 'ownership', width: 140 },
+  { key: 'owner_location', label: 'Owner location', group: 'ownership', width: 130 },
+  { key: 'market_status_label', label: 'Market status', group: 'signals', width: 120 },
+  { key: 'equity_amount', label: 'Equity amount (vendor)', group: 'scores', width: 150, numeric: true },
+  { key: 'total_loan_amt', label: 'Original loan amount', group: 'scores', width: 140, numeric: true },
+  { key: 'total_loan_payment', label: 'Loan payment', group: 'scores', width: 110, numeric: true },
+  { key: 'tax_amt', label: 'Property tax', group: 'scores', width: 104, numeric: true },
+  { key: 'tax_year', label: 'Tax year', group: 'scores', width: 84 },
+  { key: 'assd_land_value', label: 'Assessed land', group: 'scores', width: 116, numeric: true },
+  { key: 'assd_improvement_value', label: 'Assessed improvements', group: 'scores', width: 150, numeric: true },
+  { key: 'assd_year', label: 'Assessment year', group: 'scores', width: 120 },
+  { key: 'calculated_total_value', label: 'Calculated value', group: 'scores', width: 124, numeric: true },
+  { key: 'calculated_land_value', label: 'Calculated land', group: 'scores', width: 120, numeric: true },
+  { key: 'calculated_improvement_value', label: 'Calculated improvements', group: 'scores', width: 160, numeric: true },
+  { key: 'estimated_repair_cost_per_sqft', label: 'Repair $/sqft (vendor)', group: 'scores', width: 140, numeric: true },
+  { key: 'last_sale_doc_type', label: 'Last sale document', group: 'signals', width: 150 },
+  { key: 'deal_list_label', label: 'Deal list', group: 'provenance', width: 140 },
+  { key: 'source_list_label', label: 'Source list', group: 'provenance', width: 140 },
+  { key: 'source_list_category', label: 'Source list category', group: 'provenance', width: 150 },
+
+  /* recorded documents (rec.*: seller.* records via v_entity_graph_properties) */
+  { key: 'rec.mortgage_payment', label: 'Mortgage payment (rec.)', group: 'signals', width: 150, numeric: true },
+  { key: 'rec.max_rate', label: 'Highest rate', group: 'signals', width: 100, numeric: true },
+  { key: 'rec.first_loan_type', label: 'First loan type', group: 'signals', width: 120 },
+  { key: 'rec.first_recording_date', label: 'First loan recorded', group: 'signals', width: 140 },
+  { key: 'rec.first_due_date', label: 'First loan matures', group: 'signals', width: 140 },
+  { key: 'rec.has_private_lender', label: 'Private lender', group: 'signals', width: 110 },
+  { key: 'rec.has_heloc', label: 'HELOC', group: 'signals', width: 80 },
+  { key: 'rec.has_fha', label: 'FHA loan', group: 'signals', width: 84 },
+  { key: 'rec.has_va', label: 'VA loan', group: 'signals', width: 80 },
+  { key: 'rec.has_seller_financing', label: 'Seller-financed', group: 'signals', width: 120 },
+  { key: 'rec.has_adjustable', label: 'Adjustable rate', group: 'signals', width: 120 },
+  { key: 'rec.lien_amount_due', label: 'Lien amount due', group: 'signals', width: 124, numeric: true },
+  { key: 'rec.has_probate', label: 'Probate filing', group: 'signals', width: 110 },
+  { key: 'rec.has_lis_pendens', label: 'Lis pendens', group: 'signals', width: 100 },
+  { key: 'rec.has_death_record', label: 'Death record', group: 'signals', width: 104 },
+  { key: 'rec.has_divorce_record', label: 'Divorce record', group: 'signals', width: 110 },
+  { key: 'rec.has_judgment', label: 'Judgment', group: 'signals', width: 90 },
+  { key: 'rec.has_mechanics_lien', label: "Mechanic's lien", group: 'signals', width: 120 },
+  { key: 'rec.has_tax_lien', label: 'Tax lien', group: 'signals', width: 84 },
+  { key: 'rec.has_hoa_lien', label: 'HOA lien', group: 'signals', width: 84 },
+  { key: 'rec.has_default_notice', label: 'Notice of default', group: 'signals', width: 130 },
+  { key: 'rec.sale_count', label: 'Recorded sales', group: 'signals', width: 110, numeric: true },
+  { key: 'rec.last_sale_distress', label: 'Bought at trustee sale', group: 'signals', width: 150 },
+  { key: 'rec.last_sale_intrafamily', label: 'Intrafamily transfer', group: 'signals', width: 140 },
+  { key: 'rec.years_owned', label: 'Years since last sale', group: 'signals', width: 140, numeric: true },
+  { key: 'rec.foreclosure_count', label: 'Foreclosure filings', group: 'signals', width: 130, numeric: true },
+  { key: 'rec.foreclosure_stage', label: 'Foreclosure stage', group: 'signals', width: 130 },
+  { key: 'rec.auction_date', label: 'Auction date', group: 'signals', width: 110 },
+
+  /* the canonical person (person.*: campaign-graph person -> prospects by individual_key) */
+  { key: 'person.age', label: 'Owner age', group: 'people', width: 90, numeric: true },
+  { key: 'person.language_preference', label: 'Owner language', group: 'people', width: 120 },
+  { key: 'person.gender', label: 'Gender', group: 'people', width: 90 },
+  { key: 'person.marital_status', label: 'Marital status', group: 'people', width: 110 },
+  { key: 'person.occupation_group', label: 'Occupation', group: 'people', width: 140 },
+  { key: 'person.education_model', label: 'Education', group: 'people', width: 120 },
+  { key: 'person.est_household_income', label: 'Household income', group: 'people', width: 130 },
+  { key: 'person.net_asset_value', label: 'Net asset value', group: 'people', width: 120 },
+  { key: 'person.buying_power', label: 'Buying power', group: 'people', width: 110 },
+  { key: 'person.person_flags_text', label: 'Person flags', group: 'people', width: 200 },
+  { key: 'person.matching_flags', label: 'Owner matching', group: 'people', width: 150 },
+  { key: 'person.timezone', label: 'Owner time zone', group: 'people', width: 130 },
+  { key: 'person.contact_window', label: 'Contact window', group: 'people', width: 120 },
+
+  /* the property's ZIP market (zip.*: MI rollup of the current build + buyer index) */
+  { key: 'zip.sales_1y', label: 'ZIP sales (1y)', group: 'market', width: 110, numeric: true },
+  { key: 'zip.sales_90d', label: 'ZIP sales (90d)', group: 'market', width: 116, numeric: true },
+  { key: 'zip.median_price', label: 'ZIP median price', group: 'market', width: 124, numeric: true },
+  { key: 'zip.median_ppsf', label: 'ZIP median $/sqft', group: 'market', width: 130, numeric: true },
+  { key: 'zip.investor_share', label: 'ZIP investor share %', group: 'market', width: 140, numeric: true },
+  { key: 'zip.cash_share', label: 'ZIP cash share %', group: 'market', width: 124, numeric: true },
+  { key: 'zip.latest_sale', label: 'ZIP latest sale', group: 'market', width: 120 },
+  { key: 'zip.active_buyers', label: 'Active buyers in ZIP', group: 'market', width: 140, numeric: true },
+  { key: 'zip.buyers', label: 'Buyers in ZIP (all)', group: 'market', width: 130, numeric: true },
+
+  { key: 'property_export_id', label: 'Export id', group: 'provenance', width: 140 },
+  { key: 'canonical_market_id', label: 'Canonical market id', group: 'provenance', width: 160 },
   { key: 'master_owner_id', label: 'Master owner ID', group: 'provenance', width: 190 },
   { key: 'source_system', label: 'Source system', group: 'provenance', width: 130 },
   { key: 'created_at', label: 'Created', group: 'provenance', width: 118 },
@@ -495,12 +644,13 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
 ]
 
 /** ZIPs, years and ids must not be thousands-separated. */
-const LITERAL_NUMERIC = /(zip|year|_id$|apn|parcel|latitude|longitude)/i
-const CURRENCY = /(value|price|amount|balance|offer|cost|estimate|equity|valuation|fee|debt|tax_amount)/i
+const LITERAL_NUMERIC = /(^zip$|_zip$|year|_id$|apn|parcel|latitude|longitude|tract|lot_nbr|\.age$|count$|rate$)/i
+const CURRENCY = /(value|price|amount|balance|offer|cost|estimate|equity|valuation|fee|debt|tax_amount|ppsf)/i
 
 function renderRawField(key: string, numeric: boolean | undefined, result: EntitySearchResult): string | null {
   // a vendor repair figure the server judged implausible (repairTruth) is withheld, said so
   if (key === 'estimated_repair_cost' && (result.details?.row ?? {}).estimated_repair_cost_status === 'unreliable') return 'Unreliable'
+  if (key === 'acquisition_bucket') return humanBucket((result.details?.row ?? {})[key])
   const raw = (result.details?.row ?? {})[key]
   if (raw === null || raw === undefined || raw === '') return null
   if (typeof raw === 'boolean') return raw ? 'Yes' : 'No'
@@ -515,7 +665,7 @@ function renderRawField(key: string, numeric: boolean | undefined, result: Entit
 /** Mirrors KEYSET_SORT_COLUMNS (entity-graph-property-sort.js): picker fields the server may sort. */
 const SERVER_SORTABLE_FIELDS = new Set([
   'year_built', 'effective_year_built', 'total_bedrooms', 'total_baths', 'building_square_feet', 'lot_square_feet',
-  'equity_amount', 'estimated_repair_cost', 'sale_date', 'sale_price', 'zoning', 'total_loan_balance', 'ownership_years',
+  'equity_amount', 'zoning', 'total_loan_balance', 'ownership_years',
 ])
 
 function rawSortValue(key: string, numeric: boolean | undefined, result: EntitySearchResult): string | number | null {
@@ -581,7 +731,6 @@ const HAND_SORT_VALUES: Partial<Record<EntityScope, Record<string, (r: EntitySea
     rate: (r) => num(r.details?.records?.firstRate),
     liens: (r) => (recordsCaptured(r) ? num(r.details?.records?.lienCount) : null),
     lastSale: (r) => text(r.details?.records?.lastSaleDate),
-    lastPrice: (r) => num(r.details?.records?.lastSalePrice),
     units: (r) => num(r.details?.units),
   },
   master_owners: {
@@ -657,5 +806,5 @@ export function sortLoadedRows(
 export function visibleEnrichmentFields(scope: EntityScope, visible: readonly string[]): string[] {
   if (scope !== 'properties') return []
   const set = new Set(visible)
-  return SCOPE_TABLE_COLUMNS.properties.filter((c) => c.field && set.has(c.key)).map((c) => c.field as string)
+  return [...new Set(SCOPE_TABLE_COLUMNS.properties.filter((c) => (c.field || c.fields) && set.has(c.key)).flatMap((c) => [...(c.field ? [c.field] : []), ...(c.fields ?? [])]))]
 }

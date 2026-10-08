@@ -17,6 +17,9 @@ import { cx } from '../../../shared/lc'
 import type { EntityNetwork, NetworkNode, NetworkProperty } from '../console/entity-network-api'
 import { fmtCount, fmtMoney, nodeAnchor } from './desk-model'
 import { humanize, lastContactLabel, relativeDay, smsReasonLabel, type OutreachState } from './desk-outreach'
+import { networkPropertySignals } from './network-signals'
+import { SignalBadges } from './SignalBadges'
+import type { PropertySignal } from '../mobile/property-signals'
 
 const TYPE_LABEL: Record<string, string> = {
   owner: 'Owner', property: 'Property', entity: 'Title entity', person: 'Person', phone: 'Phone', email: 'Email',
@@ -39,7 +42,7 @@ function equityText(p: NetworkProperty): string {
 type Row = { k: string; v: string; tone?: 'ok' | 'attn' | 'crit' }
 
 /** Pure: the facts a node's card shows (tested in desk-graph-card.test.ts). */
-export function nodeCardFacts(node: NetworkNode, network: EntityNetwork, outreach: Map<string, OutreachState | null>): { title: string; subtitle: string | null; figures: Row[]; rows: Row[]; flags: string[]; message: { who: string; text: string } | null } {
+export function nodeCardFacts(node: NetworkNode, network: EntityNetwork, outreach: Map<string, OutreachState | null>): { title: string; subtitle: string | null; figures: Row[]; rows: Row[]; flags: string[]; signals?: PropertySignal[]; message: { who: string; text: string } | null } {
   const empty = { title: node.label, subtitle: node.sub ?? null, figures: [] as Row[], rows: [] as Row[], flags: [] as string[], message: null as { who: string; text: string } | null }
   if (node.type === 'property' && node.meta?.cluster) {
     return { ...empty, title: `${node.label} more properties`, subtitle: 'Click to expand the cluster' }
@@ -52,12 +55,8 @@ export function nodeCardFacts(node: NetworkNode, network: EntityNetwork, outreac
     const st = outreach.get(p.id) ?? null
     const thread = network.outreach.threads.filter((t) => t.propertyId === p.id).sort((a, b) => Date.parse(b.at ?? '') - Date.parse(a.at ?? ''))[0] ?? null
     const owners = [network.owner.name, ...network.entities.map((e) => e.name)].filter(Boolean)
-    const flags = [
-      ...(p.taxDelinquent ? [`Tax delinquent${p.taxDelinquentYear ? ` ${p.taxDelinquentYear}` : ''}`] : []),
-      ...(p.activeLien ? ['Active lien'] : []),
-      ...(rec ? rec.liens.filter((l) => l.distress).map((l) => l.label) : []),
-      ...p.tags.slice(0, 6),
-    ]
+    const signals = networkPropertySignals(p, rec)
+    const flags = signals.map((x) => x.label)
     const rows: Row[] = [
       { k: 'Owner', v: spec([owners.slice(0, 2).join(' · '), owners.length > 2 ? `+${owners.length - 2}` : null, network.owner.kindLabel]) },
       { k: 'Asset', v: spec([p.type, p.units && p.units > 1 ? `${p.units} units` : null, p.beds ? `${p.beds} bd` : null, p.sqft ? `${p.sqft.toLocaleString('en-US')} sqft` : null, p.yearBuilt ? `built ${p.yearBuilt}` : null]) || '—' },
@@ -80,6 +79,7 @@ export function nodeCardFacts(node: NetworkNode, network: EntityNetwork, outreac
     if (st?.campaigns) rows.push({ k: 'Campaign', v: st.campaigns.count ? spec([st.campaigns.latest?.name ?? 'Campaign', st.campaigns.count > 1 ? `+${st.campaigns.count - 1}` : null, st.campaigns.latest?.targetStatus ? humanize(st.campaigns.latest.targetStatus) : null]) : 'Not in a campaign' })
     const preview = st?.conversation?.preview ?? thread?.preview ?? null
     return {
+      signals,
       title: p.address,
       subtitle: spec([[p.city, p.state].filter(Boolean).join(', '), p.market]),
       figures: [
@@ -182,7 +182,7 @@ export function GraphHoverCard({ node, network, outreach, style, measure }: { no
           {f.rows.map((r) => <div key={r.k} className={cx(r.tone && `is-${r.tone}`)}><dt>{r.k}</dt><dd>{r.v}</dd></div>)}
         </dl>
       ) : null}
-      {f.flags.length ? <div className="egdk-gcard__flags">{f.flags.slice(0, 6).map((x) => <span key={x}>{x}</span>)}</div> : null}
+      {f.signals?.length ? <SignalBadges size="md" max={6} signals={f.signals} /> : f.flags.length ? <div className="egdk-gcard__flags">{f.flags.slice(0, 6).map((x) => <span key={x}>{x}</span>)}</div> : null}
       {f.message ? <blockquote className="egdk-gcard__msg"><span>{f.message.who}</span>{f.message.text}</blockquote> : null}
       {nodeAnchor(node) ? <span className="egdk-gcard__hint">Click to open its network</span> : null}
     </div>

@@ -159,6 +159,10 @@ export type PropertyRecordFacts = {
   firstRate?: number
   firstLender?: string
   lienCount: number
+  /** Recorded lien document categories (rec_lien_categories) and the amount due. */
+  lienCategories?: string[]
+  lienAmountDue?: number
+  lastSaleDocType?: string
   saleCount: number
   lastSaleDate?: string
   lastSalePrice?: number

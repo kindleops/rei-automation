@@ -12,11 +12,14 @@ import { Icon } from '../../../shared/icons'
 import type { EntityGraphAction, UniversalEntityContext } from '../../../domain/entity-graph/entity-graph.types'
 import { EMPTY_UNIVERSAL_ENTITY_CONTEXT } from '../../../domain/entity-graph/universal-entity-context'
 import { buildEntityGraphActions } from '../../../domain/entity-graph/entity-graph-actions'
+import { callBackend } from '../../../lib/api/backendClient'
 import { openInboxThread } from '../../mobile/mobile-inbox-bridge'
 import { REASON_LABEL, type EntityNetwork, type NetworkProperty } from '../console/entity-network-api'
 import { DeskGraph } from './DeskGraph'
 import { fmtCount, fmtMoney, matchingTagTone, type NetworkAnchor } from './desk-model'
 import { EntityGraphPropertyVisual } from '../mobile/EntityGraphPropertyVisual'
+import { SignalBadges } from './SignalBadges'
+import { networkPropertySignals } from './network-signals'
 import { humanize, lastContactLabel, relativeDay, smsReasonLabel, useNetworkOutreach, type OutreachState } from './desk-outreach'
 
 const ACTION_LABEL: Partial<Record<EntityGraphAction, string>> = {
@@ -172,6 +175,7 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
           <EntityGraphPropertyVisual address={[anchorProperty.address, anchorProperty.city, anchorProperty.state, anchorProperty.zip].filter(Boolean).join(', ')} lat={anchorProperty.lat} lng={anchorProperty.lng} onOpenMap={onOpenMap} />
         </div>
       ) : null}
+      {anchorProperty?.zip ? <ZipMarketSection zip={anchorProperty.zip} /> : null}
       <OutreachSection
         anchorProperty={anchorProperty}
         ids={outreachIds}
@@ -203,6 +207,11 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
           <Figure label="Loan balance" value={network.debt.withDebt ? fmtMoney(network.debt.totalLoanBalance) : '—'} hint={network.debt.withDebt ? `${network.debt.withDebt} with a balance` : 'no balance on file'} />
         </div>
       )}
+      {anchorProperty ? (
+        <div className="egdk-insp__signals">
+          <SignalBadges size="md" max={12} signals={networkPropertySignals(anchorProperty, rec)} />
+        </div>
+      ) : null}
       {anchorProperty ? (
         <p className="egdk-spec">{spec([anchorProperty.type, anchorProperty.units && anchorProperty.units > 1 ? `${anchorProperty.units} units` : null, anchorProperty.beds ? `${anchorProperty.beds} bd` : null, anchorProperty.baths ? `${anchorProperty.baths} ba` : null, anchorProperty.sqft ? `${anchorProperty.sqft.toLocaleString('en-US')} sqft` : null, anchorProperty.yearBuilt ? `built ${anchorProperty.yearBuilt}` : null, anchorProperty.ownershipYears !== null ? `owned ${anchorProperty.ownershipYears} yrs` : null])}</p>
       ) : null}
@@ -485,6 +494,39 @@ function OutreachSection({ anchorProperty, ids, states, onAddToCampaign }: { anc
         <div><dt>Pipeline deals</dt><dd>{deals.length ? deals.map((d) => humanize(d.stage?.value)).slice(0, 3).join(', ') : 'None'}</dd></div>
         <div><dt>In a campaign</dt><dd>{`${fmtCount(inCampaign)} of ${fmtCount(loaded.length)}`}</dd></div>
       </dl>
+    </LCInspectorSection>
+  )
+}
+
+type ZipContext = { zip: string; sales90d: number | null; sales1y: number | null; investorShare1y: number | null; cashShare1y: number | null; medianPrice1y: number | null; medianPpsf1y: number | null; latestSale: string | null; buyers: number | null; activeBuyers: number | null; demographics: { medianIncome: number | null; population: number | null; renterRate: number | null; vacancyRate: number | null } | null }
+const zipCache = new Map<string, ZipContext | null>()
+
+/** ZIP market context — Market Intelligence rollup + buyers active in the zip (one keyed read). */
+function ZipMarketSection({ zip }: { zip: string }) {
+  const z5 = String(zip).slice(0, 5)
+  const [state, setState] = useState<{ zip: string; data: ZipContext | null; done: boolean }>(() => ({ zip: z5, data: zipCache.get(z5) ?? null, done: zipCache.has(z5) }))
+  useEffect(() => {
+    if (zipCache.has(z5)) { setState({ zip: z5, data: zipCache.get(z5) ?? null, done: true }); return }
+    const ctl = new AbortController()
+    void callBackend<{ ok: boolean; zips: Record<string, ZipContext>; demographicsAvailable?: boolean }>(`/api/cockpit/entity-graph/zip-context?zips=${encodeURIComponent(z5)}&buyers=1`, { signal: ctl.signal })
+      .then((res) => { if (ctl.signal.aborted) return; const d = res.ok ? res.data?.zips?.[z5] ?? null : null; zipCache.set(z5, d); setState({ zip: z5, data: d, done: true }) })
+      .catch(() => { if (!ctl.signal.aborted) setState({ zip: z5, data: null, done: true }) })
+    return () => ctl.abort()
+  }, [z5])
+  const d = state.zip === z5 ? state.data : null
+  return (
+    <LCInspectorSection title={`ZIP ${z5} market`}>
+      {!state.done ? <LCSkeleton shape="lines" count={2} label="Reading the ZIP market" /> : !d || d.sales1y === null ? <None>No Market Intelligence rollup for this ZIP.</None> : (
+        <>
+          <div className="egdk-figures">
+            <Figure label="Sales · 1y" value={fmtCount(d.sales1y)} hint={d.sales90d !== null ? `${fmtCount(d.sales90d)} in 90 days` : undefined} />
+            <Figure label="Median price" value={fmtMoney(d.medianPrice1y)} hint={d.medianPpsf1y !== null ? `$${Math.round(d.medianPpsf1y)}/sqft` : undefined} />
+            <Figure label="Active buyers" value={d.activeBuyers !== null ? fmtCount(d.activeBuyers) : '—'} hint={d.buyers !== null ? `${fmtCount(d.buyers)} bought here` : undefined} />
+            <Figure label="Investor share" value={d.investorShare1y !== null ? `${d.investorShare1y}%` : '—'} hint={d.cashShare1y !== null ? `${d.cashShare1y}% cash` : undefined} />
+          </div>
+          <p className="egdk-spec">{spec([d.latestSale ? `latest sale ${day(d.latestSale)}` : null, d.demographics ? spec([d.demographics.medianIncome ? `median income ${fmtMoney(d.demographics.medianIncome)}` : null, d.demographics.renterRate !== null ? `${Math.round(d.demographics.renterRate)}% renters` : null]) : 'demographics: no census data loaded'])}</p>
+        </>
+      )}
     </LCInspectorSection>
   )
 }

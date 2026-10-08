@@ -29,7 +29,8 @@ describe('Entity Graph table columns', () => {
 
   it('every picker column the browse row lacks is enrichment-backed (none silently empty)', () => {
     // RC 8.3.1: these rendered from details.row, which browse never returned.
-    for (const key of ['year_built', 'zoning', 'effective_year_built', 'estimated_repair_cost', 'total_bedrooms', 'total_baths', 'building_square_feet', 'sale_date']) {
+    // sale_date / sale_price are folded into the one Last sale column (field audit 2026-10-08)
+    for (const key of ['year_built', 'zoning', 'effective_year_built', 'estimated_repair_cost', 'total_bedrooms', 'total_baths', 'building_square_feet', 'basement', 'air_conditioning', 'rec.first_loan_type', 'person.age']) {
       expect(col(key).field).toBe(key)
     }
     expect(visibleEnrichmentFields('properties', ['value', 'year_built', 'zoning'])).toEqual(['zoning', 'year_built'])
@@ -37,7 +38,10 @@ describe('Entity Graph table columns', () => {
   })
 
   it('index-backed picker fields ask the server for a whole-cohort sort', () => {
-    for (const key of ['year_built', 'zoning', 'total_bedrooms', 'sale_date', 'estimated_repair_cost']) expect(col(key).sortBy).toBe(key)
+    for (const key of ['year_built', 'zoning', 'total_bedrooms']) expect(col(key).sortBy).toBe(key)
+    // the repair estimate is not server-sorted: the raw vendor values are often absurd (repairTruth withholds them)
+    expect(col('estimated_repair_cost').sortBy).toBeUndefined()
+    expect(col('lastSale').fields).toEqual(['sale_date', 'sale_price'])
     expect(col('units').sortBy).toBe('units_count')
     expect(col('loans').sortBy).toBe('rec_mortgage_count')
     // No index planned: stays a loaded-rows sort.
@@ -64,7 +68,8 @@ describe('Entity Graph table columns', () => {
     const uncaptured = prop('P1', { records: { captured: false, mortgageCount: 0, lienCount: 0, saleCount: 0, signals: [] } })
     const captured = prop('P2', { records: { captured: true, mortgageCount: 0, lienCount: 2, saleCount: 0, signals: [] } })
     expect(col('loans').render(uncaptured)).toBeNull()
-    expect(col('liens').render(captured)).toBe('2')
+    expect(col('liens').render(captured)).toBe('2 recorded')
+    expect(col('liens').render(prop('P3', { records: { captured: true, mortgageCount: 0, lienCount: 1, lienCategories: ['LIS PENDENS'], lienAmountDue: 12000, saleCount: 0, signals: [] } }))).toBe('Lis Pendens · $12K due')
     expect(col('loans').render(captured)).toBe('0')
   })
 
@@ -101,5 +106,20 @@ describe('Entity Graph table columns', () => {
     expect(layout.sort.properties).toEqual({ key: 'zoning', dir: 'desc' })
     expect(layout.sort.buyers).toBeUndefined()
     expect(normalizeTableLayout('garbage')).toEqual({ columns: {}, sort: {} })
+  })
+})
+
+describe('field audit (2026-10-08)', () => {
+  it('columns with no data source are gone, the sale columns are one, debug ids are grouped', () => {
+    const keys = new Set(SCOPE_TABLE_COLUMNS.properties.map((c) => c.key))
+    for (const k of ['ppsf', 'cap_rate', 'rent_estimate', 'arv_estimate', 'stories', 'sale_date', 'sale_price', 'lastPrice', 'records', 'seller_tags_text']) expect(keys.has(k)).toBe(false)
+    expect(keys.has('basement')).toBe(true)
+    expect(col('master_owner_id').group).toBe('provenance')
+    expect(col('source_system').group).toBe('provenance')
+    expect(SCOPE_TABLE_COLUMNS.properties.length).toBeGreaterThanOrEqual(200)
+  })
+  it('owner-as-buyer shows only a repeat or active buyer', () => {
+    expect(col('ownerBuyer').render(prop('A', { records: { captured: true, mortgageCount: 0, lienCount: 0, saleCount: 0, signals: [], ownerBuyer: { buyerId: 'b', acquisitions: 1, status: 'inactive' } } }))).toBeNull()
+    expect(col('ownerBuyer').render(prop('B', { records: { captured: true, mortgageCount: 0, lienCount: 0, saleCount: 0, signals: [], ownerBuyer: { buyerId: 'b', acquisitions: 4, status: 'active' } } }))).toBe('4 purchases · active')
   })
 })

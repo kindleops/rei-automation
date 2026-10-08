@@ -761,3 +761,34 @@ html.is-desktop-modern .egdk-outreach__candhead small { font-size: 11px; font-we
 html.is-desktop-modern .egdk-outreach__cands ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 html.is-desktop-modern .egdk-outreach__cands li { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; font-size: 12.5px; }
 html.is-desktop-modern .egdk-outreach__cands li small { grid-column: 2; font-size: 11.5px; color: var(--lc-ink-3); }
+
+/* ══ Signal badges — color carries meaning (2026-10-08) ════════════════ */
+html.is-desktop-modern .egdk-sigs { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; flex-wrap: nowrap; }
+html.is-desktop-modern .egdk-sigs.is-md { flex-wrap: wrap; overflow: visible; gap: 5px; }
+html.is-desktop-modern .egdk-sig {
+  --t: 148, 163, 184;
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; flex: none;
+  font-size: 11px; font-weight: 560; letter-spacing: 0.005em; white-space: nowrap;
+  color: rgb(var(--t)); background: rgba(var(--t), 0.13); box-shadow: inset 0 0 0 1px rgba(var(--t), 0.28);
+}
+html.is-desktop-modern .egdk-sigs.is-md .egdk-sig { height: 22px; font-size: 11.5px; }
+html.is-desktop-modern .egdk-sig.is-distress { --t: 244, 114, 128; }
+html.is-desktop-modern .egdk-sig.is-opportunity { --t: 74, 222, 158; }
+html.is-desktop-modern .egdk-sig.is-risk { --t: 245, 180, 80; }
+html.is-desktop-modern .egdk-sig.is-neutral { --t: 160, 174, 196; }
+html.is-desktop-modern .egdk-sig.is-more { --t: 160, 174, 196; font-weight: 500; }
+html.is-desktop-modern[data-nexus-theme='light'] .egdk-sig.is-distress { --t: 200, 40, 62; }
+html.is-desktop-modern[data-nexus-theme='light'] .egdk-sig.is-opportunity { --t: 14, 140, 86; }
+html.is-desktop-modern[data-nexus-theme='light'] .egdk-sig.is-risk { --t: 176, 104, 0; }
+html.is-desktop-modern[data-nexus-theme='light'] .egdk-sig.is-neutral,
+html.is-desktop-modern[data-nexus-theme='light'] .egdk-sig.is-more { --t: 84, 98, 122; }
+html.is-desktop-modern .egdk-insp__signals { margin: -2px 0 12px; }
+
+/* good vs bad in the grid: SMS eligibility and equity carry tone */
+html.is-desktop-modern .egdk-tone { font-weight: 560; }
+html.is-desktop-modern .egdk-tone.is-ok { color: rgb(74, 222, 158); }
+html.is-desktop-modern .egdk-tone.is-bad { color: rgb(245, 180, 80); }
+html.is-desktop-modern .egdk-tone.is-crit { color: rgb(244, 114, 128); }
+html.is-desktop-modern[data-nexus-theme='light'] .egdk-tone.is-ok { color: rgb(14, 140, 86); }
+html.is-desktop-modern[data-nexus-theme='light'] .egdk-tone.is-bad { color: rgb(176, 104, 0); }
+html.is-desktop-modern[data-nexus-theme='light'] .egdk-tone.is-crit { color: rgb(200, 40, 62); }

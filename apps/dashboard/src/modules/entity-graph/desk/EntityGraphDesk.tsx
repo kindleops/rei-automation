@@ -69,6 +69,8 @@ import { IDENTITY_COLUMN_KEY, useEntityGraphTableLayout } from '../mobile/entity
 import { useEntityGraphColumns } from '../mobile/use-entity-graph-columns'
 import { MOBILE_SCOPES, resolveIdentity, scopeNoun, tabForScope, type EntityScope } from '../mobile/entity-graph-mobile-format'
 import { DeskFilterRail } from './DeskFilterRail'
+import { SignalBadges } from './SignalBadges'
+import { propertySignals } from '../mobile/property-signals'
 import { DeskCampaignStack, stackScopeSupported, type StackResult } from './DeskCampaignStack'
 import { deskSearch, initialDeskState, writeSessionDeskState, type DeskState } from './desk-state'
 import { useOutreachStates } from './desk-outreach'
@@ -102,7 +104,7 @@ type Props = {
 
 const PAGE_SIZE = 60
 const NO_FILTERS: EntityGraphFieldFilter[] = []
-const OUTREACH_SEED = ['smsEligible', 'lastContact', 'stage', 'status']
+const OUTREACH_SEED = ['smsEligible', 'lastContact', 'stage', 'status', 'flags']
 const RAIL_KEY = 'nexus.entityGraph.desk.rail.v1'
 const readRailCollapsed = (uid: string): boolean => { try { return window.localStorage.getItem(`${RAIL_KEY}:${uid}`) === 'collapsed' } catch { return false } }
 const rowKey = (r: EntitySearchResult) => `${r.entityType}:${r.entityId}`
@@ -193,7 +195,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   // Outreach columns (last contact · stage · status · SMS eligible) are put in
   // front once per operator, also into a layout saved before they existed.
   useEffect(() => {
-    const key = `nexus.entityGraph.desk.outreachSeeded.v1:${uid}`
+    const key = `nexus.entityGraph.desk.outreachSeeded.v2:${uid}`
     try {
       if (window.localStorage.getItem(key)) return
       const current = layout.columns.properties ?? defaultVisibleColumns('properties')
@@ -398,8 +400,18 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       sortable: true,
       hint: c.sortBy && !searching ? `${c.label} · sorts the whole cohort` : `${c.label} · sorts the loaded rows`,
       render: (r) => {
+        if (c.signals) return <SignalBadges signals={propertySignals(r)} />
         const v = c.render(r)
-        return v === null || v === '' ? <span className="egdk-cell-none">—</span> : v
+        if (v === null || v === '') return <span className="egdk-cell-none">—</span>
+        // good vs bad, at a glance: eligibility and equity carry a tone
+        if (c.key === 'smsEligible') return <span className={cx('egdk-tone', v === 'Yes' ? 'is-ok' : 'is-bad')}>{v}</span>
+        if (c.key === 'equity') {
+          const pct = typeof r.details?.equity === 'number' ? r.details.equity : null
+          const tone = pct !== null ? (pct >= 40 ? 'is-ok' : pct < 15 ? 'is-crit' : '') : r.details?.equityClass === 'high' ? 'is-ok' : r.details?.equityClass === 'low' ? 'is-bad' : ''
+          return <span className={cx('egdk-tone', tone)}>{v}</span>
+        }
+        if (c.key === 'liens' && r.details?.records?.lienCount) return <span className="egdk-tone is-crit">{v}</span>
+        return v
       },
     }))
     return [identity, ...cols]
