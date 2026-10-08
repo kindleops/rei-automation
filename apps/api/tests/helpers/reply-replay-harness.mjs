@@ -39,7 +39,7 @@ function makeSupabase(tables) {
   return { from, rpc: async () => ({ data: null, error: null }) };
 }
 
-export async function replayReply(fixture, { catalog = [] } = {}) {
+export async function replayReply(fixture, { catalog = [], executorOverrides = {} } = {}) {
   const prior = fixture.prior_question;
   const outbound = prior
     ? [{
@@ -80,6 +80,7 @@ export async function replayReply(fixture, { catalog = [] } = {}) {
     classification, inboundEventId: fixture.fixture_id, inboundReceivedAt: fixture.received_at,
     dryRun: true, autoReplyMode: "dry_run", applySuppression: false,
     supabaseClient: makeSupabase({ sms_templates: catalog, send_queue: outbound, properties: [] }),
+    ...executorOverrides,
   });
   const d = result.automation_decision || {};
   const text = result.rendered_message_text || null;

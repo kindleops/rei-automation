@@ -30,6 +30,7 @@ import {
   resolveAutoReplyScopeConfig,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { isBareNoAutoClarifierEnabled } from "@/lib/domain/seller-flow/bare-no-clarifier-gate.js";
 import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ensure-inbound-coverage.js";
 import {
   buildSafeFallback,
@@ -2750,6 +2751,9 @@ export async function executeInboundAutomationDecision({
   getSystemValue: getSystemValueImpl = null,
   naturalReplyModelCall = null,
   renderFailureNotifyImpl = null,
+  // Round 10: BARE_NO_AUTO_CLARIFIER double gate (env ceiling + system_control
+  // bare_no_auto_clarifier). Injectable for tests: async () => boolean.
+  bareNoAutoClarifierGate = null,
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
   const effective_auto_reply_mode = normalizeAutoReplyMode(
@@ -2874,6 +2878,63 @@ export async function executeInboundAutomationDecision({
         brain_stage: null,
       },
     };
+  }
+
+  // ── BARE "NO" AUTO CLARIFIER GATE (round 10, owner 2026-10-08) ────────────
+  // Until contextual behaviour is validated, an ambiguous bare "No" to the
+  // ownership question gets NO automatic clarifier -- even when the clarifier
+  // row is active. Flag BARE_NO_AUTO_CLARIFIER (env ceiling AND
+  // system_control.bare_no_auto_clarifier; default OFF). OFF: hold, no
+  // outbound, quiet (non-alerting Unclear) lane, no review. Runs before the
+  // directives so no v2/v3 plan can send it either.
+  if (
+    !base_decision.should_suppress_contact &&
+    clean(classification?.automation_decision?.clarification_use_case) === "ownership_connection_clarifier"
+  ) {
+    let clarifier_on = false;
+    try {
+      clarifier_on =
+        typeof bareNoAutoClarifierGate === "function"
+          ? (await bareNoAutoClarifierGate()) === true
+          : (await isBareNoAutoClarifierEnabled()).enabled === true;
+    } catch {
+      clarifier_on = false;
+    }
+    if (!clarifier_on) {
+      const hold_decision = {
+        ...base_decision,
+        should_queue_reply: false,
+        should_mark_human_review: false,
+        reply_mode: "none",
+        human_review_reason: null,
+        next_action: "hold_ownership_clarifier",
+        audit_reason: "bare_no_auto_clarifier_off",
+      };
+      return {
+        ok: true,
+        automation_decision: hold_decision,
+        selected_template: null,
+        rendered_message_text: null,
+        queued: false,
+        queue_item_id: null,
+        queue_row_id: null,
+        queue_result: null,
+        suppression_applied: false,
+        duplicate_suppressed: false,
+        dry_run: Boolean(dryRun),
+        auto_reply_mode: effective_auto_reply_mode,
+        queue_permission,
+        audit_reason: "bare_no_auto_clarifier_off",
+        seller_stage_reply: {
+          ok: true,
+          queued: false,
+          handled: true,
+          reason: "bare_no_auto_clarifier_off",
+          plan: automationDecisionToLegacyPlan({ decision: hold_decision, classification }),
+          brain_stage: null,
+        },
+      };
+    }
   }
 
   // Deterministic negotiation strategy directive (spec §7/§12): the router's
