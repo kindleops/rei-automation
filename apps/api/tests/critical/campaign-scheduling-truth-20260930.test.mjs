@@ -323,8 +323,9 @@ test("plan: the fleet, the template pool and message history are read once per p
   assert.equal(reads.get("textgrid_numbers"), 1, "one fleet read for eight routings");
   assert.ok((reads.get("sms_templates") || 0) <= 2, `template pool read ${reads.get("sms_templates")} times`);
   // Active-queue + prior-contact checks, then batched history (one chunk), plus
-  // ONE fleet sends-today ledger read (rc-7.1: derived, not the counter).
-  assert.ok((reads.get("send_queue") || 0) <= 4, `send_queue read ${reads.get("send_queue")} times`);
+  // ONE fleet sends-today ledger read (rc-7.1: derived, not the counter),
+  // + ONE batched thread-persona (sticky) read (hotfix 8.4.8).
+  assert.ok((reads.get("send_queue") || 0) <= 5, `send_queue read ${reads.get("send_queue")} times`);
   // + ONE batched not-owner reply read (opener-reply-exclusion, 2026-10-08).
   assert.ok((reads.get("message_events") || 0) <= 3, `message_events read ${reads.get("message_events")} times`);
 });

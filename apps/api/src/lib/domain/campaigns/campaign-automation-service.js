@@ -32,6 +32,7 @@ import {
   recentTemplateIdsFromHistory,
   renderOutboundTemplate,
 } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
+import { loadThreadPersonas, personaStableKey, PERSONA_UNRESOLVED } from '@/lib/domain/outbound/outbound-persona.js'
 import { readGraphFunnelCounts } from '@/lib/domain/campaigns/campaign-graph-funnel.js'
 import {
   applyGraphFilter,
@@ -7842,6 +7843,10 @@ export function buildQueueRowForLaunch({ campaign, target, candidate, routing, r
     source: 'campaign_launch_execution',
     campaign_id: campaign.id,
     campaign_target_id: target.id,
+    // Sticky persona record (hotfix 8.4.8): later replies/follow-ups on this
+    // thread reuse exactly this persona.
+    agent_persona: clean(rendered.agent_persona) || null,
+    agent_persona_source: clean(rendered.agent_persona_source) || null,
     ...(spamRetryGeneration > 0 ? { spam_retry_generation: spamRetryGeneration } : {}),
     campaign_send_window_id: window.id || null,
     campaign_session_id: campaignSessionId,
@@ -7943,7 +7948,9 @@ export function buildQueueRowForLaunch({ campaign, target, candidate, routing, r
     thread_key: candidate.canonical_e164,
     seller_first_name: candidate.seller_first_name || null,
     seller_display_name: candidate.seller_full_name || candidate.owner_display_name || null,
-    agent_name: clean(campaign.agent_persona) || clean(candidate.agent_persona) || null,
+    // The persona the body was rendered with (renderOutboundTemplate). First
+    // name in agent_name (the historical contract), full persona in metadata.
+    agent_name: clean(rendered.agent_first_name) || null,
     language: candidate.language || null,
     routing_reason: routing.selection_reason || routing.routing_rule_name || null,
     campaign_id: campaign.id,
@@ -8613,10 +8620,24 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const fullCohort = dryRun && asBoolean(input.full_cohort ?? input.evaluate_full_cohort, false)
   const planDeps = await buildQueuePlanReadDeps(readyTargets, caps, deps, { fullCohort })
   const routingBlocksByMarket = {}
-  // An explicit campaign persona wins; otherwise each owner's own (see loadOwnerPersonas).
-  const ownerPersonas = clean(campaign.agent_persona)
-    ? new Map()
-    : await (deps.loadOwnerPersonas || loadOwnerPersonas)(supabase, readyTargets.map((target) => target.master_owner_id))
+  // PERSONA (hotfix 8.4.8): established thread persona -> campaign -> owner ->
+  // existing master_owners distribution, resolved per target inside
+  // renderOutboundTemplate. Owner personas and each phone's already-shown
+  // persona(s) are read once here.
+  const ownerPersonas = await (deps.loadOwnerPersonas || loadOwnerPersonas)(supabase, readyTargets.map((target) => target.master_owner_id))
+  let threadPersonas = new Map()
+  let threadPersonasUnreadable = false
+  try {
+    threadPersonas = await (deps.loadThreadPersonas || loadThreadPersonas)(
+      supabase,
+      readyTargets.map((target) => launchCandidateFromTarget(target, campaign).canonical_e164),
+    )
+  } catch (threadPersonaError) {
+    // Unknown thread history must not silently re-assign a seller a new
+    // name: targets fail closed (persona_unresolved) this pass.
+    threadPersonasUnreadable = true
+    console.warn('campaign_plan.thread_personas_unreadable', { campaign_id: campaignId, error: threadPersonaError?.message || String(threadPersonaError) })
+  }
   let planLoopCounter = 0
   for (const target of readyTargets) {
     if (!fullCohort && plannedItems.length >= caps.effective_limit) break
@@ -8631,6 +8652,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       recordSkip('missing_to_phone_number', target)
       continue
     }
+    if (threadPersonasUnreadable) {
+      recordSkip(PERSONA_UNRESOLVED, target, { detail: 'thread_persona_history_unreadable' })
+      continue
+    }
+    candidate.thread_agent_personas = threadPersonas.get(personaStableKey(phone)) || []
+    candidate.campaign_agent_persona = clean(campaign.agent_persona) || null
     /**
      * Identity at queue time: a resolved PERSON and a reachable PHONE.
      *

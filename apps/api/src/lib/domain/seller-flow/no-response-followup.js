@@ -35,6 +35,7 @@ import {
   canonicalPropertyGroupOf,
   filterTemplatesForProperty,
 } from "@/lib/domain/templates/template-asset-compatibility.js";
+import { agentNameForRow } from "@/lib/domain/outbound/outbound-persona.js";
 
 export const NO_RESPONSE_FOLLOWUP_VERSION = "no_response_followup_v1_2026_10_06";
 export const NO_RESPONSE_MODE_KEY = "followup_no_response_mode";
@@ -422,7 +423,7 @@ export function buildNoResponseScheduleContext(plan, { thread_key, anchor = {}, 
     property_city: clean(anchor.property_city) || null,
     timezone: clean(anchor.timezone) || null,
     market: clean(anchor.market) || null,
-    agent_name: clean(anchor.agent_name) || null,
+    agent_name: agentNameForRow(anchor, { thread_key }),
     master_owner_id: clean(anchor.master_owner_id) || null,
     property_id: clean(anchor.property_id) || null,
     delivered_provider_message_sid,
@@ -625,7 +626,7 @@ export async function resolveNoResponseFollowUpMessage(queue_row = {}, { supabas
   const personalization = {
     seller_first_name: first,
     first_name: first,
-    agent_name: clean(queue_row.agent_name) || null,
+    agent_name: agentNameForRow(queue_row, { thread_key: queue_row.thread_key || queue_row.to_phone_number }),
     property_address: clean(queue_row.property_address) || null,
     property_city: clean(queue_row.property_city) || null,
     offer_price,

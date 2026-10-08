@@ -1,5 +1,6 @@
 import { fetchSupabaseTemplateCandidates } from "@/lib/domain/templates/load-supabase-template-candidates.js";
 import { LOCAL_TEMPLATE_CANDIDATES } from "@/lib/domain/templates/local-template-registry.js";
+import { resolveOutboundPersona } from "@/lib/domain/outbound/outbound-persona.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -19,17 +20,45 @@ function localCandidates(useCase) {
   );
 }
 
+const AGENT_KEYS = new Set(["agent_first_name", "agent_name", "sms_agent_name", "sender_name", "rep_name"]);
+
+/**
+ * Sender persona for this render (hotfix 8.4.8): the context's own agent name,
+ * else the ONE resolver (established thread persona, owner persona, then the
+ * existing master_owners distribution for the thread). The hardcoded "Ryan"
+ * fallback is gone.
+ */
+function acquisitionAgentName(context = {}) {
+  const given = clean(context.agent_first_name ?? context.agent_name);
+  if (given) return given.split(/\s+/)[0];
+  const resolved = resolveOutboundPersona({
+    thread_persona: context.thread_agent_persona,
+    owner_persona: context.agent_persona,
+    stable_key: clean(context.thread_key ?? context.phone_e164 ?? context.to_phone_number ?? context.canonical_e164),
+    language: context.language,
+  });
+  return resolved.ok ? resolved.first_name : "";
+}
+
+/** Returns the rendered body, or null when a persona is required but unresolved. */
 export function renderAcquisitionTemplate(template, context = {}) {
+  const agent = acquisitionAgentName(context);
+  const body = templateBody(template);
+  const usesAgent = [...body.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)].some((m) => AGENT_KEYS.has(m[1]));
+  if (usesAgent && !agent) return null;
   const values = {
     seller_first_name:
       clean(context.seller_first_name ?? context.first_name) || "there",
-    agent_first_name:
-      clean(context.agent_first_name ?? context.agent_name) || "Ryan",
+    agent_first_name: agent,
+    agent_name: agent,
+    sms_agent_name: agent,
+    sender_name: agent,
+    rep_name: agent,
     property_address:
       clean(context.property_address ?? context.property_address_full) || "the property",
   };
 
-  return templateBody(template).replace(
+  return body.replace(
     /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g,
     (_, key) => clean(values[key] ?? context[key]) || ""
   );
@@ -75,12 +104,16 @@ export async function selectAcquisitionTemplate(
     };
   }
 
+  const message_body = renderAcquisitionTemplate(selected, context);
+  if (message_body === null) {
+    return { ok: false, reason: "persona_unresolved", use_case: useCase, template_id: templateId(selected) };
+  }
   return {
     ok: true,
     template: selected,
     template_id: templateId(selected),
     use_case: clean(selected.use_case) || useCase,
-    message_body: renderAcquisitionTemplate(selected, context),
+    message_body,
     source: clean(selected.source) || "supabase",
   };
 }

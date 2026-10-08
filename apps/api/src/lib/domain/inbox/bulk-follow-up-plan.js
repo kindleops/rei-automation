@@ -17,6 +17,7 @@ import {
   resolveSellerLanguage,
   FUS2_OPERATOR_LABEL,
 } from "@/lib/domain/inbox/fus2-follow-up-service.js";
+import { loadThreadPersonas, personaStableKey, resolveOutboundPersona } from "@/lib/domain/outbound/outbound-persona.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -228,6 +229,38 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
       // AGENT and is never read as a signal about the seller.
       ctx.best_language = assigned.best_language || null;
       ctx.master_owner_id = ownerId;
+    }
+  }
+
+  // PERSONA (hotfix 8.4.8): the persona already SHOWN on the thread wins over
+  // the owner assignment (any name, Alex included); two shown personas is a
+  // conflict -> unresolved (NEED REVIEW), never auto-switched. A thread with
+  // no shown persona and no owner persona (~75% of campaign threads have no
+  // master owner) gets the existing master_owners distribution persona. An
+  // unreadable history leaves agent_name unresolved, never a default.
+  const allKeys = [...contexts.keys()];
+  if (allKeys.length) {
+    let shown = null;
+    try {
+      shown = await loadThreadPersonas(supabase, allKeys);
+    } catch {
+      shown = null;
+    }
+    for (const key of allKeys) {
+      const ctx = contexts.get(key);
+      if (!ctx) continue;
+      if (!shown) {
+        ctx.agent_name = null;
+        continue;
+      }
+      const resolved = resolveOutboundPersona({
+        thread_persona: shown.get(personaStableKey(key)) || [],
+        owner_persona: ctx.agent_name || null,
+        stable_key: key,
+        language: ctx.best_language || null,
+      });
+      ctx.agent_name = resolved.ok ? resolved.persona : null;
+      ctx.agent_persona_source = resolved.ok ? resolved.source : resolved.reason;
     }
   }
 

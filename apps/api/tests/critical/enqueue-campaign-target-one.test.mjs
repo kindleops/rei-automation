@@ -102,6 +102,8 @@ function makeSupabase(fixtures = {}) {
       eq(column, value) { state.filters[column] = value; return api; },
       in(column, values) { state.inFilter = { column, values }; return api; },
       order() { return api; },
+      // hotfix 8.4.8: the persona pool / thread-persona loaders end in .limit().
+      async limit() { return api.range(); },
       async range() {
         let rows = applyFilters(rowsFor());
         if (state.inFilter) {
@@ -375,7 +377,6 @@ const rejects = [
   ["ungoverned template", { ownership_template_rotation_control: [] }, ENQUEUE_REASON.TEMPLATE_UNGOVERNED],
   ["exhausted cap", { ownership_template_rotation_control: [baseGov({ daily_cap: 20, last_40d_total_sent: 20 })] }, ENQUEUE_REASON.TEMPLATE_UNGOVERNED],
   ["language mismatch", { sms_templates: baseTemplate({ language: "English" }) }, ENQUEUE_REASON.LANGUAGE_MISMATCH],
-  ["no agent persona", { master_owners: { master_owner_id: "mo-1", agent_persona: "" } }, ENQUEUE_REASON.IDENTITY_MISSING],
   ["unresolvable timezone", { properties: { property_id: "prop-1", property_address_state: "TX", property_address_zip: "" }, campaign_targets: baseTarget({ state: "TX" }) }, ENQUEUE_REASON.TZ_UNRESOLVED],
   ["no sender in market", { textgrid_numbers: [] }, ENQUEUE_REASON.NO_SENDER],
   ["sender has no capacity", { textgrid_numbers: [baseSender({ messages_sent_today: 800 })] }, ENQUEUE_REASON.NO_SENDER],
@@ -815,4 +816,45 @@ test("a Hindi-family target is not a language mismatch with the catalog's Hindi 
   }));
   const result = await enqueueCampaignTargetOne(TARGET_ID, deps);
   assert.notEqual(result.reason, ENQUEUE_REASON.LANGUAGE_MISMATCH);
+});
+
+// ── hotfix 8.4.8: persona resolution ───────────────────────────────────────
+
+async function enqueueWith(over = {}, extraDeps = {}) {
+  const inserted = [];
+  const supabase = makeSupabase(fixturesWithReadback(inserted, over));
+  const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
+    supabase,
+    now: NOON_PT,
+    insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
+    ...extraDeps,
+  });
+  return { result, inserted };
+}
+
+const shownAs = (personas) => async (_sb, phones) =>
+  new Map(phones.map((p) => [String(p).replace(/\D/g, "").slice(-10), personas]));
+
+test("an owner with no persona gets the existing distribution persona, never a literal fallback", async () => {
+  const { result, inserted } = await enqueueWith({ master_owners: { master_owner_id: "mo-1", agent_persona: "" } });
+  assert.equal(result.created, true, result.reason);
+  assert.ok(inserted[0].agent_name && inserted[0].agent_name.length > 1);
+  assert.ok(inserted[0].metadata.agent_persona);
+  assert.match(inserted[0].message_body, new RegExp(inserted[0].agent_name));
+});
+
+test("the persona already shown on the phone wins over the owner persona (Alex is a real persona)", async () => {
+  const { result, inserted } = await enqueueWith({}, { loadThreadPersonas: shownAs(["Alex"]) });
+  assert.equal(result.created, true, result.reason);
+  assert.equal(inserted[0].agent_name, "Alex", "an established Alex conversation keeps Alex");
+});
+
+test("conflicting shown personas or an unreadable history create nothing", async () => {
+  for (const loadThreadPersonas of [shownAs(["Alex", "Helen Crawford"]), async () => { throw new Error("history unreadable"); }]) {
+    const { result, inserted } = await enqueueWith({}, { loadThreadPersonas });
+    assert.equal(result.created, false);
+    assert.equal(result.reason, ENQUEUE_REASON.IDENTITY_MISSING);
+    assert.equal(inserted.length, 0);
+  }
 });

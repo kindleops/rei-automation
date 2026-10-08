@@ -71,6 +71,7 @@ import {
 } from '@/lib/domain/campaigns/contact-window-timezone.js'
 import { renderTemplateBody } from '@/lib/domain/campaigns/template-render-validation.js'
 import { buildOutboundMergeValues } from '@/lib/domain/campaigns/outbound-agent-identity.js'
+import { loadThreadPersonas, personaStableKey, PERSONA_UNRESOLVED } from '@/lib/domain/outbound/outbound-persona.js'
 import { insertSupabaseSendQueueRow } from '@/lib/supabase/sms-engine.js'
 import { normalizeCampaignMode } from '@/lib/domain/queue/queue-control-safety.js'
 import { getSystemValueFresh } from '@/lib/system-control.js'
@@ -697,14 +698,33 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   }
 
   // ── 9. Identity + render (reuses #92 and #91) ───────────────────────────
-  const { data: owner, error: ownerErr } = await supabase
-    .from('master_owners')
-    .select('master_owner_id, agent_persona')
-    .eq('master_owner_id', target.master_owner_id)
-    .maybeSingle()
-  if (ownerErr) throw ownerErr
+  let owner = null
+  if (clean(target.master_owner_id)) {
+    const { data: ownerRow, error: ownerErr } = await supabase
+      .from('master_owners')
+      .select('master_owner_id, agent_persona')
+      .eq('master_owner_id', target.master_owner_id)
+      .maybeSingle()
+    if (ownerErr) throw ownerErr
+    owner = ownerRow || null
+  }
 
-  const merge = buildOutboundMergeValues({ target, masterOwner: owner, property })
+  // Established persona (hotfix 8.4.8): the persona already shown on this
+  // phone wins. An unreadable history fails closed rather than re-naming.
+  let threadPersona = []
+  try {
+    const sticky = await (deps.loadThreadPersonas || loadThreadPersonas)(supabase, [recipient])
+    threadPersona = sticky.get(personaStableKey(recipient)) || []
+  } catch {
+    return fail(ENQUEUE_REASON.IDENTITY_MISSING, PERSONA_UNRESOLVED)
+  }
+  const merge = buildOutboundMergeValues({
+    target: { ...target, to_phone_number: target.to_phone_number || recipient },
+    masterOwner: owner,
+    property,
+    threadPersona,
+    campaignPersona: campaign?.agent_persona || null,
+  })
   if (!merge.ok) return fail(ENQUEUE_REASON.IDENTITY_MISSING, merge.reason)
 
   const rendered = renderTemplateBody(template.template_body, merge.values)

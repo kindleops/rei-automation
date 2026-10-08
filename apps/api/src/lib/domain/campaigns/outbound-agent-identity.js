@@ -41,6 +41,8 @@
  * rendering succeed is how a stranger's name ends up in a real seller's phone.
  */
 
+import { resolveOutboundPersona, PERSONA_UNRESOLVED } from "@/lib/domain/outbound/outbound-persona.js";
+
 const clean = (value) => String(value ?? "").trim();
 
 export const AGENT_IDENTITY_SOURCE = "master_owners.agent_persona";
@@ -127,12 +129,13 @@ export function resolveAgentIdentity(masterOwner) {
  */
 export const OUTBOUND_MERGE_KEYS = Object.freeze(["agent_name", "seller_first_name", "property_address", "city"]);
 
-export function buildOutboundMergeValues({ target = {}, masterOwner = null, property = null } = {}) {
-  const identity = resolveAgentIdentity(masterOwner);
-  if (!identity.ok) {
-    return { ok: false, reason: identity.reason, source: identity.source };
-  }
-
+export function buildOutboundMergeValues({
+  target = {},
+  masterOwner = null,
+  property = null,
+  threadPersona = null,
+  campaignPersona = null,
+} = {}) {
   const metadata =
     target.metadata && typeof target.metadata === "object" && !Array.isArray(target.metadata)
       ? target.metadata
@@ -141,6 +144,22 @@ export function buildOutboundMergeValues({ target = {}, masterOwner = null, prop
     metadata.candidate_snapshot && typeof metadata.candidate_snapshot === "object"
       ? metadata.candidate_snapshot
       : {};
+
+  // hotfix 8.4.8: the ONE outbound persona resolver (established thread ->
+  // campaign -> owner -> existing master_owners distribution). A target with no
+  // master owner is no longer an identity failure; an unresolvable or
+  // conflicting persona still is.
+  const resolved = resolveOutboundPersona({
+    thread_persona: threadPersona,
+    campaign_persona: campaignPersona,
+    owner_persona: masterOwner && typeof masterOwner === "object" ? masterOwner.agent_persona : null,
+    stable_key: clean(snapshot.canonical_e164) || clean(target.to_phone_number) || clean(target.id),
+    language: clean(target.language) || clean(snapshot.best_language) || clean(snapshot.language),
+  });
+  if (!resolved.ok) {
+    return { ok: false, reason: resolved.reason || PERSONA_UNRESOLVED, detail: resolved.detail || null, source: AGENT_IDENTITY_SOURCE };
+  }
+  const identity = { agent_name: resolved.first_name, persona: resolved.persona, source: resolved.source };
 
   return {
     ok: true,

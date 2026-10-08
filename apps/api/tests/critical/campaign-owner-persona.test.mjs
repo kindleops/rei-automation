@@ -79,9 +79,9 @@ test("the owner's persona reaches the render candidate; an explicit one is never
 test("the planner applies owner personas, and the renderer reads agent_persona first", async () => {
   const service = await readFile(new URL("../../src/lib/domain/campaigns/campaign-automation-service.js", import.meta.url), "utf8");
   assert.match(service, /const candidate = applyOwnerPersona\(launchCandidateFromTarget\(target, campaign\), ownerPersonas\)/);
-  assert.match(service, /agent_name: clean\(campaign\.agent_persona\) \|\| clean\(candidate\.agent_persona\) \|\| null/);
+  assert.match(service, /agent_name: clean\(rendered\.agent_first_name\) \|\| null/);
 
   const feeder = await readFile(new URL("../../src/lib/domain/outbound/supabase-candidate-feeder.js", import.meta.url), "utf8");
   const chain = feeder.slice(feeder.indexOf("const agent_name_raw = clean("));
-  assert.match(chain, /pick\(\s*candidate\.agent_persona,/, "persona is the first source the renderer consults");
+  assert.match(chain, /pick\(\s*candidate\.resolved_agent_persona,\s*candidate\.agent_persona,/, "the resolved persona is the first source the renderer consults");
 });

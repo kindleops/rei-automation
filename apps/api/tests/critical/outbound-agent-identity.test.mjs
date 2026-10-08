@@ -90,12 +90,16 @@ test("merge values assemble from the target and its owner", () => {
   });
 });
 
-test("no persona means no merge values at all", () => {
+test("no owner persona -> the existing master_owners distribution persona, never a literal fallback (hotfix 8.4.8)", () => {
   const result = buildOutboundMergeValues({ target: target(), masterOwner: owner(null) });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, AGENT_IDENTITY_FAILURE.NO_PERSONA);
-  assert.equal(result.values, undefined);
+  assert.equal(result.ok, true);
+  assert.ok(result.values.agent_name.length > 1);
+  assert.notEqual(result.values.agent_name, "Alex", "first touches draw from the owner distribution, which has no Alex");
+  // ...and with no stable key there is no persona and no merge values at all.
+  const keyless = buildOutboundMergeValues({ target: { metadata: {} }, masterOwner: owner(null) });
+  assert.equal(keyless.ok, false);
+  assert.equal(keyless.values, undefined);
 });
 
 test("a target with no candidate snapshot yields a blank seller name, which render then rejects", () => {
@@ -165,9 +169,11 @@ test("identity depends only on the owner, not the campaign, template or sender",
 
 test("the live blank-render defect is now impossible", () => {
   // Podio-sourced agent_name resolved to "" and shipped "Hola Rodolfo,  aqui."
-  // With no persona, there are no merge values, so nothing can render.
+  // A blank owner persona now resolves through the ONE resolver to a real
+  // name (hotfix 8.4.8), never to "".
   const result = buildOutboundMergeValues({ target: target(), masterOwner: owner("") });
-  assert.equal(result.ok, false);
+  assert.equal(result.ok, true);
+  assert.ok(result.values.agent_name.trim().length > 1);
 
   // And if a caller forced a blank through anyway, render still refuses.
   const forced = renderTemplateBody(SPANISH_201362, {

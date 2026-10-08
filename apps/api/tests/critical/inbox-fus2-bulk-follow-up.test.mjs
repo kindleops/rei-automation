@@ -420,11 +420,10 @@ test("a full agent_persona renders as a first name", async () => {
 
 // ── IDENTITY CONTRACT: no stale identity fallback ───────────────────────────
 
-test("missing assignment + PRESENT queue-history agent => still NEED REVIEW", async () => {
-  // The seller has a rich send history signed by "Scott Harper", but no
-  // canonical master-owner assignment. History records who texted them before,
-  // which is NOT who is assigned to them now -- a reassigned or departed agent
-  // must never sign a new message. This must be NEED REVIEW, not "Scott".
+test("missing assignment + persona already SHOWN on the thread => the same persona continues", async () => {
+  // hotfix 8.4.8, owner decision 2026-10-08 (supersedes the earlier rule):
+  // the persona a seller has already seen on this thread wins, so a follow-up
+  // never renames an established conversation. No literal fallback is used.
   const noAssignment = {
     from(name) {
       const t = (rows) => {
@@ -444,7 +443,7 @@ test("missing assignment + PRESENT queue-history agent => still NEED REVIEW", as
       if (name === "send_queue") {
         return t([{
           thread_key: CANARY_A, timezone: "Central", contact_window: "9AM-8PM CT",
-          agent_name: "Scott Harper", sms_agent_id: "agent-scott",
+          agent_name: "Scott Harper", sms_agent_id: "agent-scott", queue_status: "delivered",
           template_id: "lc-reengage-agent-en-001", created_at: "2026-08-01T12:00:00Z",
         }]);
       }
@@ -455,12 +454,9 @@ test("missing assignment + PRESENT queue-history agent => still NEED REVIEW", as
   const plan = await buildBulkFollowUpPlan({ threadKeys: [CANARY_A], now: NOW }, { supabase: noAssignment });
   const a = plan.recipients[0];
 
-  assert.equal(a.eligible, false, "no assignment must mean NEED REVIEW");
-  assert.equal(plan.needs_review_count, 1);
-  assert.equal(a.assigned_agent_name, null, "no identity may be synthesised");
-  assert.equal(a.message_body, undefined, "no copy may be rendered");
-  // The historical name must appear nowhere in the recipient plan.
-  assert.ok(!JSON.stringify(a).includes("Scott"), "stale queue identity leaked into the plan");
+  assert.equal(a.assigned_agent_name, "Scott Harper", "the shown persona continues");
+  assert.ok(!JSON.stringify(a).includes("Alex"), "no literal fallback");
+  if (a.message_body) assert.match(a.message_body, /Scott/);
 });
 
 test("queue history is still used for TEMPLATE anti-repeat, just not identity", async () => {

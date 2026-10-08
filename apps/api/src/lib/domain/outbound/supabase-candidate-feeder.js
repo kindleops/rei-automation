@@ -34,6 +34,7 @@ import { isLanguagePolicyToken, resolveLanguage, templateCatalogLanguageName, te
 import { normalizeCampaignStageCode } from "@/lib/domain/campaigns/campaign-stage-code.js";
 import { canonicalPropertyGroupOf, filterTemplatesForProperty } from "@/lib/domain/templates/template-asset-compatibility.js";
 import { evaluateRotationEligibility, rotationTrafficWeight, UNGOVERNED_POLICY } from "@/lib/domain/campaigns/template-governance.js";
+import { resolveOutboundPersona, PERSONA_UNRESOLVED } from "@/lib/domain/outbound/outbound-persona.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
@@ -1175,27 +1176,6 @@ function runOutboundSafetyGate(candidate, rendered, options, batchState = {}) {
   return { ok: true };
 }
 
-function buildNeutralGreetingMessage(variable_payload = {}) {
-  const agent = clean(
-    pick(
-      variable_payload.agent_name,
-      variable_payload.agent_first_name,
-      variable_payload.sms_agent_name,
-      variable_payload.sender_name,
-      "Alex"
-    )
-  ) || "Alex";
-  const address = clean(
-    pick(
-      variable_payload.property_street_address,
-      variable_payload.property_address,
-      variable_payload.property_address_full,
-      "this property"
-    )
-  ) || "this property";
-  return `Hi, this is ${agent}. Quick question - do you still own ${address}?`;
-}
-
 function buildTemplateVariablePayload(candidate = {}) {
   const seller_identity = resolveSellerIdentity(candidate);
   const resolved_seller_full_name = clean(
@@ -1270,8 +1250,14 @@ function buildTemplateVariablePayload(candidate = {}) {
     )
   );
 
+  // PERSONA (hotfix 8.4.8). The resolved persona (renderOutboundTemplate ->
+  // resolveOutboundPersona) is the only authority. There is NO literal default:
+  // the hardcoded fallback signed ~75% of campaign texts. agent_family ("General",
+  // "Spanish Local") is a routing label, never a name. An unresolved persona
+  // leaves these empty, and renderOutboundTemplate refuses to render.
   const agent_name_raw = clean(
     pick(
+      candidate.resolved_agent_persona,
       candidate.agent_persona,
       candidate.agent_name_raw,
       candidate.agent_full_name_raw,
@@ -1284,20 +1270,19 @@ function buildTemplateVariablePayload(candidate = {}) {
       candidate.raw?.sms_agent_name,
       candidate.raw?.assigned_agent_name,
       candidate.raw?.acquisition_agent_name,
-      candidate.raw?.agent_family,
-      candidate.agent_family,
-      "Alex"
+      ""
     )
-  ) || "Alex";
+  );
   const agent_first_name = firstNameOnly(
     pick(
+      candidate.resolved_agent_first_name,
       candidate.agent_first_name,
       candidate.sms_agent_first_name,
       candidate.raw?.agent_first_name,
       candidate.raw?.sms_agent_first_name,
       agent_name_raw
     )
-  ) || "Alex";
+  ) || "";
   const property_zip = clean(
     pick(
       candidate.property_zip,
@@ -3370,10 +3355,93 @@ function templateIdSet(value) {
  * the exclusion must have found a template. Absent the option (every other
  * caller), behaviour is unchanged.
  */
+/**
+ * Persona for one outbound render (hotfix 8.4.8): persona already shown on the
+ * thread -> campaign -> master owner -> existing master_owners distribution
+ * (conflicting shown personas hold). Mutates the candidate so the
+ * queue row records exactly the persona the body was rendered with.
+ * Returns the resolver result; { ok:false } means DO NOT RENDER.
+ */
+export function applyResolvedPersona(candidate = {}, options = {}) {
+  if (candidate?.thread_persona_unreadable) {
+    return { ok: false, reason: PERSONA_UNRESOLVED, detail: "thread_history_unreadable" };
+  }
+  const resolved = resolveOutboundPersona({
+    thread_persona: Array.isArray(candidate.thread_agent_personas)
+      ? candidate.thread_agent_personas
+      : pick(candidate.thread_agent_persona, candidate.raw?.thread_agent_persona),
+    campaign_persona: pick(candidate.campaign_agent_persona),
+    owner_persona: pick(candidate.owner_agent_persona, candidate.agent_persona, candidate.raw?.agent_persona),
+    stable_key: pick(
+      candidate.canonical_e164,
+      candidate.to_phone_number,
+      candidate.phone_e164,
+      candidate.best_phone_e164,
+      candidate.raw?.canonical_e164,
+      candidate.phone_id,
+      candidate.best_phone_id,
+      candidate.property_id,
+      candidate.master_owner_id,
+      candidate.prospect_id,
+      candidate.property_address_full,
+      candidate.property_address,
+      candidate.owner_display_name
+    ),
+    language: pick(candidate.best_language, candidate.language, candidate.raw?.best_language),
+  });
+  if (!resolved.ok) return resolved;
+  if (candidate && typeof candidate === "object") {
+    if (!candidate.owner_agent_persona && clean(candidate.agent_persona)) {
+      candidate.owner_agent_persona = clean(candidate.agent_persona);
+    }
+    candidate.resolved_agent_persona = resolved.persona;
+    candidate.resolved_agent_first_name = resolved.first_name;
+    candidate.agent_persona = resolved.persona;
+    candidate.agent_first_name = resolved.first_name;
+    candidate.agent_persona_source = resolved.source;
+  }
+  return resolved;
+}
+
 export async function renderOutboundTemplate(candidate = {}, options = {}, deps = {}) {
   if (typeof deps.renderOutboundTemplate === "function") {
     return deps.renderOutboundTemplate(candidate, options);
   }
+  const persona = applyResolvedPersona(candidate, options);
+  if (!persona.ok) {
+    // Run the render with EVERY agent source blanked, so an earlier, truer
+    // refusal (unsupported language, no template) still reports as itself;
+    // the renderer's own persona guard refuses anything that reaches the
+    // payload. Nothing renders without a resolved persona.
+    const AGENT_FIELDS = ["resolved_agent_persona", "resolved_agent_first_name", "agent_persona", "agent_first_name", "agent_name", "agent_name_raw", "agent_full_name_raw", "selected_agent_display_name", "sms_agent_name", "sms_agent_first_name", "assigned_agent_name", "acquisition_agent_name"];
+    const blank = Object.fromEntries(AGENT_FIELDS.map((k) => [k, ""]));
+    const stripped = { ...candidate, ...blank, raw: candidate?.raw && typeof candidate.raw === "object" ? { ...candidate.raw, ...blank } : candidate?.raw };
+    const refused = await renderOutboundTemplateWithGovernance(stripped, options, deps);
+    if (refused && refused.ok === false && refused.reason_code !== PERSONA_UNRESOLVED) return refused;
+    // persona_conflict: two personas were already shown on this thread — held
+    // for owner review, never auto-switched.
+    const code = persona.reason || PERSONA_UNRESOLVED;
+    return {
+      ok: false,
+      reason_code: code,
+      reason: code,
+      persona_conflict_shown: persona.shown || null,
+      render_error_message: `No sender persona (${persona.detail || "unresolved"})`,
+      rendered_message_body: null,
+      template: refused?.template || null,
+      template_id: refused?.template_id || null,
+    };
+  }
+  const result = await renderOutboundTemplateWithGovernance(candidate, options, deps);
+  if (result && typeof result === "object") {
+    result.agent_persona = persona.persona;
+    result.agent_first_name = persona.first_name;
+    result.agent_persona_source = persona.source;
+  }
+  return result;
+}
+
+async function renderOutboundTemplateWithGovernance(candidate = {}, options = {}, deps = {}) {
   const excluded = templateIdSet(options.governance_excluded_template_ids);
   const hasRotationGovernance = options.rotation_governance instanceof Map;
   if (!excluded.size && !hasRotationGovernance) return renderOutboundTemplateCore(candidate, options, deps);
@@ -3910,9 +3978,9 @@ async function renderOutboundTemplateCore(candidate = {}, options = {}, deps = {
       variable_payload.sender_name,
       variable_payload.rep_name,
       variable_payload.acquisition_agent_name,
-      "Alex"
+      ""
     )
-  ) || "Alex";
+  );
   const agent_first_name_safe = firstNameOnly(
     pick(
       variable_payload.agent_first_name,
@@ -3923,7 +3991,20 @@ async function renderOutboundTemplateCore(candidate = {}, options = {}, deps = {
       variable_payload.acquisition_agent_name,
       raw_agent_name
     )
-  ) || "Alex";
+  ) || "";
+  if (!agent_first_name_safe) {
+    return {
+      ok: false,
+      reason_code: PERSONA_UNRESOLVED,
+      reason: PERSONA_UNRESOLVED,
+      render_error_message: "No sender persona resolved for this seller",
+      template: selected_template_with_source,
+      template_id: selected_template?.template_id || selected_template?.id || null,
+      rendered_message_body: null,
+      template_rotation,
+      ...template_routing_details,
+    };
+  }
   variable_payload.agent_name = agent_first_name_safe;
   variable_payload.agent_first_name = agent_first_name_safe;
   variable_payload.sms_agent_name = agent_first_name_safe;
@@ -4386,8 +4467,6 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
       candidate.raw?.sms_agent_name,
       candidate.raw?.assigned_agent_name,
       candidate.raw?.acquisition_agent_name,
-      candidate.raw?.agent_family,
-      candidate.agent_family,
       ""
     )
   );

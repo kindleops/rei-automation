@@ -27,6 +27,7 @@ import {
   loadNurtureRenderContext,
   missingNurtureContextFields,
 } from "@/lib/domain/seller-flow/nurture-render-context.js";
+import { agentNameForRow } from "@/lib/domain/outbound/outbound-persona.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -81,7 +82,7 @@ function buildRowPersonalization(queue_row = {}) {
   return {
     first_name: first_name || null,
     seller_first_name: first_name || null,
-    agent_name: clean(queue_row.agent_name) || null,
+    agent_name: agentNameForRow(queue_row, { thread_key: queue_row.thread_key || queue_row.to_phone_number }),
     owner_name: display_name || first_name || null,
     seller_display_name: display_name || first_name || null,
     property_address: clean(queue_row.property_address) || null,

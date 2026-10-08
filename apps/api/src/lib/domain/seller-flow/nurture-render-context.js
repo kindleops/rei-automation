@@ -30,6 +30,7 @@
 import { identifyReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { confidentFirstName } from "@/lib/domain/seller-flow/no-response-followup.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
+import { resolveOutboundPersona, shownPersonas } from "@/lib/domain/outbound/outbound-persona.js";
 
 export const NURTURE_RENDER_CONTEXT_VERSION = "nurture_render_context_v1_2026_10_08";
 
@@ -129,7 +130,17 @@ export function buildNurtureRenderContext({
         ? "last_outbound"
         : "unknown";
 
-  const agent_name = clean(known.agent_name) || clean(sent.find((r) => clean(r?.agent_name))?.agent_name) || null;
+  // PERSONA (hotfix 8.4.8): the persona already shown on this thread (sent
+  // rows) wins — any name, Alex included; two different shown personas is a
+  // conflict and resolves nothing (held for review). With nothing shown, the
+  // caller's / owner's / existing-distribution persona. Never a literal default.
+  const persona = resolveOutboundPersona({
+    thread_persona: shownPersonas(sent),
+    owner_persona: clean(known.agent_name) || null,
+    stable_key: clean(known.thread_key) || clean(sent[0]?.to_phone_number) || null,
+    language,
+  });
+  const agent_name = persona.ok ? persona.first_name : null;
   const timezone = clean(known.timezone) || clean(last?.timezone) || null;
   const market = clean(known.market) || clean(last?.market) || null;
 
@@ -181,7 +192,7 @@ export async function loadNurtureRenderContext(
   const sentQuery = () => {
     let q = supabase
       .from("send_queue")
-      .select("seller_first_name,property_address,property_id,from_phone_number,textgrid_number_id,agent_name,language,timezone,market,sent_at")
+      .select("seller_first_name,property_address,property_id,from_phone_number,textgrid_number_id,agent_name,language,timezone,market,sent_at,to_phone_number,metadata,message_body")
       .eq("to_phone_number", phone)
       .not("sent_at", "is", null)
       .order("sent_at", { ascending: false });
@@ -202,7 +213,7 @@ export async function loadNurtureRenderContext(
   ]);
 
   return buildNurtureRenderContext({
-    known: { ...known, property_id },
+    known: { ...known, property_id, thread_key: clean(known.thread_key) || phone },
     sent_rows_newest_first: Array.isArray(sent) ? sent : [],
     thread_state: thread && typeof thread === "object" ? thread : null,
     property: property && typeof property === "object" ? property : null,

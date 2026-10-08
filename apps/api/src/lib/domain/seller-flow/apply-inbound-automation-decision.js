@@ -5,6 +5,7 @@ import {
   insertSupabaseSendQueueRow,
 } from "@/lib/supabase/sms-engine.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
+import { hydrateContextPersona } from "@/lib/domain/outbound/outbound-persona.js";
 import {
   isSellerAutopilotV2Enabled,
   isReplyLanguageEnabled,
@@ -3495,10 +3496,17 @@ export async function executeInboundAutomationDecision({
 
   // Fill the property address from the canonical sources before any template
   // is chosen or rendered (see hydrateReplyAddressContext).
-  const reply_context = await hydrateReplyAddressContext({
+  // ...and the sender persona (hotfix 8.4.8): the persona already shown on the
+  // thread, else owner, else the existing master_owners distribution. No
+  // literal fallback; unresolved/conflict leaves it empty and the render holds.
+  const reply_context = await hydrateContextPersona({
     supabase,
-    context: context || latestThreadContext,
-    propertyId,
+    context: await hydrateReplyAddressContext({
+      supabase,
+      context: context || latestThreadContext,
+      propertyId,
+      threadKey,
+    }),
     threadKey,
   });
   let template_result = await selectSafeAutoReplyTemplate({
