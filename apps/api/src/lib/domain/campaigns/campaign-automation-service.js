@@ -366,7 +366,7 @@ function filterRowsFromPayload(campaignId, filters = {}) {
   return rows
 }
 
-async function replaceCampaignFilters(campaignId, filters = {}, deps = {}) {
+export async function replaceCampaignFilters(campaignId, filters = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   await supabase.from('campaign_filters').delete().eq('campaign_id', campaignId)
   const rows = filterRowsFromPayload(campaignId, filters)

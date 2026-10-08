@@ -96,12 +96,17 @@ function campaignsFake(rows, log) {
     api: {
       getCampaign: async (id) => ({ campaign: store.has(id) ? structuredClone(store.get(id)) : null }),
       createCampaign: async (payload) => { log.push({ create: payload }); const id = 'new-1'; store.set(id, { id, name: payload.name, status: 'draft', metadata: { ...payload.metadata, target_filters: payload.target_filters } }); return { ok: true, campaign_id: id, campaign: store.get(id) } },
-      updateCampaign: async (id, payload) => {
-        log.push({ update: id, payload })
+      // compare-and-set on updated_at, as the default does against campaigns (trigger-bumped)
+      casUpdate: async (id, expected, patch) => {
+        await new Promise((r) => setTimeout(r, 1))
         const c = store.get(id)
-        c.metadata = { ...c.metadata, ...payload.metadata, target_filters: payload.target_filters }
-        return { ok: true }
+        if (!c || c.status !== 'draft' || c.updated_at !== expected) { log.push({ casConflict: id }); return false }
+        log.push({ update: id, payload: patch })
+        Object.assign(c, structuredClone(patch))
+        c.updated_at = `v${Number(String(c.updated_at || 'v0').slice(1)) + 1}`
+        return true
       },
+      afterStackWrite: async (id) => { log.push({ synced: id }) },
       explicitSelectedPropertyIds,
       resolveCampaignTargetMode,
       normalizeCampaignStatus: (s) => String(s || '').toLowerCase(),
@@ -114,7 +119,7 @@ test('stacking: filter A then filter B into the same draft — union, dedupe, co
   const supabase = fakeSupabase({
     campaign_target_graph: [ready('A'), ready('B'), ready('C', { timezone: '' }), { property_id: 'D', queue_eligible: false, queue_block_reason: 'NO_PHONE' }],
   }, log)
-  const { api, store } = campaignsFake([{ id: 'X', name: 'Probate stack', status: 'draft', metadata: {} }], log)
+  const { api, store } = campaignsFake([{ id: 'X', name: 'Probate stack', status: 'draft', metadata: {}, updated_at: 'v0' }], log)
   const deps = { supabase, campaigns: api, fetchEntityContactReviewBlocks: async () => ({ ok: true, blocked: new Set() }) }
 
   const first = await stackEntityGraphCohort({ campaign_id: 'X', scope: 'properties', mode: 'selection', ids: ['A', 'D'] }, deps)
@@ -137,6 +142,7 @@ test('stacking: filter A then filter B into the same draft — union, dedupe, co
   // the only writes were the draft's definition — no targets, no queue, no status
   assert.ok(!log.some((e) => e.table === 'campaign_targets' || e.table === 'send_queue'))
   assert.ok(!log.some((e) => e.update && 'status' in (e.payload || {})))
+  assert.ok(log.some((e) => e.synced === 'X'), 'campaign_filters + event synced after the write')
 })
 
 test('dry run counts and writes nothing', async () => {
@@ -241,4 +247,33 @@ test('linked-entity columns: owner via master owner, contact from the campaign g
   assert.equal(values['2']['contact.line_type'], 'Wireless')
   assert.equal(values['2']['scores.decision_tier'], 'B')
   assert.ok(!JSON.stringify(values).includes('+1555'))
+})
+
+test('two concurrent adds to the same draft both land — compare-and-set, no lost update', async () => {
+  const log = []
+  const supabase = fakeSupabase({ campaign_target_graph: ['A', 'B', 'C', 'D', 'E'].map((id) => ready(id)) }, log)
+  const { api, store } = campaignsFake([{ id: 'X', name: 'Race', status: 'draft', metadata: {}, updated_at: 'v0' }], log)
+  const deps = { supabase, campaigns: api, fetchEntityContactReviewBlocks: async () => ({ ok: true, blocked: new Set() }) }
+  const [first, second] = await Promise.all([
+    stackEntityGraphCohort({ campaign_id: 'X', scope: 'properties', mode: 'selection', ids: ['A', 'B', 'C'] }, deps),
+    stackEntityGraphCohort({ campaign_id: 'X', scope: 'properties', mode: 'selection', ids: ['C', 'D', 'E'] }, deps),
+  ])
+  assert.deepEqual([...explicitSelectedPropertyIds(store.get('X'))].sort(), ['A', 'B', 'C', 'D', 'E'])
+  assert.ok(log.some((e) => e.casConflict), 'the second writer hit the stale token and retried')
+  // the overlap is counted once: whoever wrote second reports C as already present
+  assert.equal(first.added + second.added, 5)
+  assert.equal(store.get('X').metadata.entity_graph_stack.length, 2)
+})
+
+test('a draft that stops being a draft mid-run is not written', async () => {
+  const log = []
+  const supabase = fakeSupabase({ campaign_target_graph: [ready('A')] }, log)
+  const { api, store } = campaignsFake([{ id: 'X', name: 'X', status: 'draft', metadata: {}, updated_at: 'v0' }], log)
+  const origCas = api.casUpdate
+  api.casUpdate = async (...args) => { store.get('X').status = 'built'; store.get('X').updated_at = 'v9'; return origCas(...args) }
+  await assert.rejects(
+    stackEntityGraphCohort({ campaign_id: 'X', scope: 'properties', mode: 'selection', ids: ['A'] }, { supabase, campaigns: api, fetchEntityContactReviewBlocks: async () => ({ ok: true, blocked: new Set() }) }),
+    (e) => e.code === 'campaign_not_draft',
+  )
+  assert.equal(explicitSelectedPropertyIds(store.get('X')).size, 0)
 })

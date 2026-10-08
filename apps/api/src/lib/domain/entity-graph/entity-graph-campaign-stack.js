@@ -43,6 +43,7 @@ import { propertySmsEligibility } from './entity-graph-outreach-state.js'
 /** Total pinned properties one campaign can carry through Entity Graph stacking. */
 export const STACK_MAX_PROPERTIES = 25000
 export const STACK_MAX_SEGMENTS = 50
+export const STACK_WRITE_ATTEMPTS = 4
 const PAGE = 1000
 const CHUNK = 150
 
@@ -228,7 +229,7 @@ function pinnedClause(ids) {
 
 /**
  * Add a cohort / selection to a draft campaign (new or existing).
- * deps: { supabase, campaigns: { getCampaign, createCampaign, updateCampaign, explicitSelectedPropertyIds, resolveCampaignTargetMode, normalizeCampaignStatus } }
+ * deps: { supabase, campaigns: { getCampaign, createCampaign, casUpdate, afterStackWrite, explicitSelectedPropertyIds, resolveCampaignTargetMode, normalizeCampaignStatus } }
  */
 export async function stackEntityGraphCohort(input = {}, deps = {}) {
   const campaignsApi = deps.campaigns || await loadCampaignsApi()
@@ -314,21 +315,59 @@ export async function stackEntityGraphCohort(input = {}, deps = {}) {
     return { ...summary, campaign_id: created.campaign_id, campaign_name: created.campaign?.name || newName, created: true }
   }
 
-  // Re-read just before writing: if another stack landed meanwhile, refuse
-  // rather than overwrite its ids (the operator re-runs; nothing is lost).
-  const fresher = (await campaignsApi.getCampaign(campaign.id, deps))?.campaign
-  const fresherIds = fresher ? [...campaignsApi.explicitSelectedPropertyIds(fresher)] : []
-  if (!fresher || campaignsApi.normalizeCampaignStatus(fresher.status) !== 'draft' || fresherIds.length !== existing.length) {
-    throw new StackRefusal(409, 'campaign_changed', 'The campaign changed while this was being counted. Run it again.')
+  /**
+   * COMPARE-AND-SET ON updated_at (trg_campaigns_updated_at bumps it on every
+   * write). The pin list is rewritten only if the row is still the one this
+   * run read; when another add landed in between, the row is re-read, the
+   * union recomputed (ids that other add pinned become "already present"),
+   * and the write retried. Two concurrent adds therefore both land — no lost
+   * update — and the draft must still be a draft at the moment of writing.
+   */
+  const pinnedSet = new Set(pinned)
+  let row = campaign
+  for (let attempt = 0; attempt < STACK_WRITE_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      row = (await campaignsApi.getCampaign(campaign.id, deps))?.campaign
+      if (!row) throw new StackRefusal(404, 'campaign_not_found', 'That campaign no longer exists.')
+      if (campaignsApi.normalizeCampaignStatus(row.status) !== 'draft') {
+        throw new StackRefusal(409, 'campaign_not_draft', `“${row.name || 'This campaign'}” stopped being a draft while this was counted. Nothing was added.`)
+      }
+      if (!['none', 'explicit'].includes(campaignsApi.resolveCampaignTargetMode(row.metadata).target_mode)) {
+        throw new StackRefusal(409, 'campaign_has_dynamic_filters', `“${row.name || 'This campaign'}” now targets by filters. Nothing was added.`)
+      }
+    }
+    const current = [...campaignsApi.explicitSelectedPropertyIds(row)]
+    const currentSet = new Set(current)
+    const toAdd = [...pinnedSet].filter((id) => !currentSet.has(id))
+    const unionNow = [...current, ...toAdd]
+    if (unionNow.length > STACK_MAX_PROPERTIES) {
+      throw new StackRefusal(422, 'campaign_stack_too_large', `This would pin ${unionNow.length.toLocaleString('en-US')} properties on one campaign; the limit is ${STACK_MAX_PROPERTIES.toLocaleString('en-US')}. Add this cohort to a new draft instead.`, { limit: STACK_MAX_PROPERTIES })
+    }
+    const raced = pinned.length - toAdd.length
+    const landed = {
+      ...summary,
+      already_present: alreadyPresent + raced,
+      added: toAdd.length,
+      added_ready: classified.ready.filter((id) => !currentSet.has(id)).length,
+      added_held: classified.held.filter((id) => !currentSet.has(id)).length,
+      total_after: unionNow.length,
+    }
+    if (!toAdd.length) return { ...landed, unchanged: true }
+    const previous = Array.isArray(row.metadata?.entity_graph_stack) ? row.metadata.entity_graph_stack : []
+    const filtersKeep = Object.fromEntries(Object.entries(row.metadata?.target_filters || {}).filter(([, v]) => !Array.isArray(v)))
+    const targetFilters = { ...filtersKeep, properties: [pinnedClause(unionNow)] }
+    const metadata = {
+      ...(row.metadata || {}),
+      target_filters: targetFilters,
+      entity_graph_stack: [...previous, { ...segment, already_present: landed.already_present, added_ready: landed.added_ready, added_held: landed.added_held }].slice(-STACK_MAX_SEGMENTS),
+    }
+    const written = await campaignsApi.casUpdate(row.id, row.updated_at, { metadata, market: null, state: null }, deps)
+    if (written) {
+      await campaignsApi.afterStackWrite(row.id, targetFilters, landed, deps)
+      return landed
+    }
   }
-  const previous = Array.isArray(campaign.metadata?.entity_graph_stack) ? campaign.metadata.entity_graph_stack : []
-  const filtersKeep = Object.fromEntries(Object.entries(campaign.metadata?.target_filters || {}).filter(([, v]) => !Array.isArray(v)))
-  const updated = await campaignsApi.updateCampaign(campaign.id, {
-    target_filters: { ...filtersKeep, properties: [pinnedClause(union)] },
-    metadata: { entity_graph_stack: [...previous, segment].slice(-STACK_MAX_SEGMENTS) },
-  }, deps)
-  if (!updated?.ok) throw new StackRefusal(Number(updated?.status) || 500, updated?.error || 'campaign_update_failed', updated?.message || 'The draft could not be updated.')
-  return summary
+  throw new StackRefusal(409, 'campaign_changed', 'The campaign kept changing while this was being added. Run it again.')
 }
 
 function safeJson(value) {
@@ -372,6 +411,25 @@ async function loadCampaignsApi() {
   const machine = await import('@/lib/domain/campaigns/campaign-state-machine.js')
   return {
     getCampaign: readCampaignRow,
+    casUpdate: async (id, expectedUpdatedAt, patch, d = {}) => {
+      const supabase = d.supabase || defaultSupabase
+      let q = supabase.from('campaigns').update(patch).eq('id', id).eq('status', 'draft')
+      q = expectedUpdatedAt ? q.eq('updated_at', expectedUpdatedAt) : q.is('updated_at', null)
+      const { data, error } = await q.select('id')
+      if (error) throw error
+      return Array.isArray(data) && data.length === 1
+    },
+    afterStackWrite: async (id, targetFilters, landed, d = {}) => {
+      await service.replaceCampaignFilters(id, targetFilters, d)
+      await service.recordCampaignEvent({
+        campaign_id: id,
+        event_type: 'campaign.entity_graph_stacked',
+        severity: 'info',
+        title: 'Entity Graph cohort added',
+        description: `${landed.added} properties pinned (${landed.already_present} already present, ${landed.ineligible} not targetable). No targets built, nothing sent.`,
+        metadata: { added: landed.added, added_ready: landed.added_ready, added_held: landed.added_held, already_present: landed.already_present, ineligible_by_reason: landed.ineligible_by_reason, total_after: landed.total_after },
+      }, d)
+    },
     createCampaign: service.createCampaign,
     updateCampaign: service.updateCampaign,
     explicitSelectedPropertyIds: service.explicitSelectedPropertyIds,
