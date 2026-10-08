@@ -114,6 +114,7 @@ import {
 import { isCampaignRankingV2Enabled } from '@/lib/domain/campaigns/ranking-v2/flags.js'
 import { rankingMetadata } from '@/lib/domain/campaigns/ranking-v2/campaign-rank-v2.js'
 import { applyCampaignRankingV2, rankingV2FetchLimit } from '@/lib/domain/campaigns/ranking-v2/ranking-context.js'
+import { freshOpenerVerdict, contactTruthsMode } from '@/lib/domain/campaigns/contact-history-truths.js'
 
 const DEFAULT_CANDIDATE_SOURCE = 'v_feeder_candidates_fast'
 const DEFAULT_SCAN_LIMIT = 1000
@@ -532,7 +533,12 @@ function candidateMatchesFilters(candidate = {}, filters = {}) {
   if (asBoolean(filters.require_linked_property, false) && !candidate.property_id) reasons.push('filter_linked_property')
   if (asBoolean(filters.require_linked_master_owner, false) && !candidate.master_owner_id) reasons.push('filter_linked_master_owner')
   if (asBoolean(filters.require_seller_first_name, false) && candidate.seller_name_missing) reasons.push('filter_seller_first_name')
-  if (asBoolean(filters.never_contacted_only, false) && candidate.never_contacted !== true) reasons.push('filter_never_contacted')
+  if (asBoolean(filters.never_contacted_only, false)) {
+    // One contact-history truth (contact-history-truths.js). Flag CAMPAIGN_CONTACT_TRUTHS off (default)
+    // or graph not yet projected → identical to the legacy phone-level never_contacted check.
+    const fresh = freshOpenerVerdict(candidate, contactTruthsMode())
+    if (!fresh.fresh) reasons.push(fresh.reason || 'filter_never_contacted')
+  }
   if (asBoolean(filters.likely_owner_required, false)) {
     const status = lower(candidate.identity_alignment?.status)
     const likelyOwner = candidate.likely_owner === true || status === 'verified' || status === 'probable'
