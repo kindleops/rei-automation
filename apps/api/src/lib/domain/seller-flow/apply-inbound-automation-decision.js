@@ -573,6 +573,29 @@ function computeInboundAutomationDecisionRaw({
     });
   }
 
+  // Round 9 (owner 2026-10-07): hostility with no legal threat and no opt-out
+  // language ("Suck a dick", "FU!", "👹", trolling) is a QUIET ARCHIVE: no
+  // reply, nothing suppressed, never a review item. The classifier sets
+  // quiet_archive only for those rule families; a legal threat keeps review.
+  if (
+    (primary_intent === "hostile_or_legal" || primary_intent === "hostile_or_troll") &&
+    automation_decision?.quiet_archive === true &&
+    automation_decision?.human_review_required === false
+  ) {
+    return buildDecisionResult({
+      should_mark_human_review: false,
+      reply_mode: "none",
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      // A concrete terminal action (not a bare "none"), so the coverage net
+      // records no_reply_action_coverage instead of forcing a review. Never
+      // "do_not_reply": that schedules a nurture, and hostility gets none.
+      next_action: "close_quietly",
+      audit_reason: "hostile_quiet_archive",
+    });
+  }
+
   if (
     primary_intent === "hostile_or_legal" ||
     (automation_decision?.human_review_required === true &&
@@ -911,6 +934,12 @@ function templateCandidateSet(decision = {}, classification = {}) {
   }
   if (objection === "needs_email") {
     return ROUTE_PROFILES.needs_email.template_use_case_candidates;
+  }
+  // Round 9 (2026-10-07: "no speako aspanish" to a Spanish ownership text):
+  // a language switch / refusal is answered with the SAME question in the
+  // language the seller can read -- the question it answered, when known.
+  if (primary_intent === "language_switch" && clean(classification.context_use_case)) {
+    return [clean(classification.context_use_case)];
   }
 
   return routeProfileCandidates(decision.route_hint, primary_intent);
@@ -3319,7 +3348,26 @@ export async function executeInboundAutomationDecision({
   });
 
   if (!template_result.ok || !template_result.template) {
-    const no_template_decision = {
+    // Round 9 (owner 2026-10-07, "zero S1/S2 review"): a bare "No" to the
+    // ownership question whose ONE clarifier has no active safe row is NOT a
+    // review item. Deterministic outcome: no reply, no review; the thread rests
+    // in the non-alerting Unclear lane with reason
+    // ownership_clarifier_template_inactive until the clarifier row is
+    // activated (or LC_BARE_NO_OWNERSHIP_MODE=non_owner closes it).
+    const bare_no_clarifier =
+      clean(classification?.automation_decision?.clarification_use_case) === "ownership_connection_clarifier";
+    const no_template_decision = bare_no_clarifier
+      ? {
+          ...base_decision,
+          should_queue_reply: false,
+          should_mark_human_review: false,
+          reply_mode: "none",
+          human_review_reason: null,
+          next_action: "hold_ownership_clarifier",
+          audit_reason: "ownership_clarifier_template_inactive",
+          ...(template_result.detail ? { human_review_detail: template_result.detail } : {}),
+        }
+      : {
       ...base_decision,
       should_queue_reply: false,
       should_mark_human_review: true,

@@ -105,8 +105,14 @@ test("reader: a stale explicit 'new_replies' bucket cannot hold a resolved conve
     assert.equal(flags.in_active, flags.in_priority || flags.in_needs_review || flags.in_follow_up, `${last_intent}: active stays the union`);
     assert.equal(isStaleExplicitInboxBucket(inboundRow({ last_intent }), "new_replies", NOW), true, `${last_intent} is a stale New Reply`);
   }
-  for (const last_intent of ["who_is_this", "unclear", "asks_offer", "callback_requested", "language_switch"]) {
+  for (const last_intent of ["asks_offer", "callback_requested", "condition_disclosed"]) {
     assert.equal(resolveInboxBucketFlags(inboundRow({ last_intent }), NOW).in_new_replies, true, last_intent);
+  }
+  // Round 9 (owner 2026-10-07): not actionable -> the non-alerting Unclear lane.
+  for (const last_intent of ["who_is_this", "unclear", "language_switch"]) {
+    const flags = resolveInboxBucketFlags(inboundRow({ last_intent }), NOW);
+    assert.equal(flags.in_new_replies, false, last_intent);
+    assert.equal(flags.in_unclear, true, last_intent);
   }
 });
 

@@ -71,12 +71,15 @@ test("Garland 'Yes. $5 million' on a $262K house -> implausible (already fixed b
   assert.equal(r.outcome, "review", "reality-check templates are proposed, not active");
 });
 
-test("Garland 'shitstains ... dead rats' after the implausible ask -> hostile_or_troll: review, no auto-reply", async () => {
+// Round 9 (owner 2026-10-07): trolling is a QUIET ARCHIVE -- no reply, no
+// review item, nothing suppressed (was: review).
+test("Garland 'shitstains ... dead rats' after the implausible ask -> hostile_or_troll: quiet archive, no auto-reply", async () => {
   const r = await replayReply(byId("004"), { catalog: CATALOG });
   assert.equal(r.classification.primary_intent, "hostile_or_troll");
   assert.equal(r.classification.automation_decision.auto_reply_allowed, false);
-  assert.equal(r.classification.automation_decision.human_review_required, true);
-  assert.equal(r.outcome, "review");
+  assert.equal(r.classification.automation_decision.human_review_required, false);
+  assert.equal(r.classification.automation_decision.quiet_archive, true);
+  assert.equal(r.outcome, "no_reply_by_design");
   assert.equal(r.text, null);
 });
 

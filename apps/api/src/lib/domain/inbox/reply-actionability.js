@@ -80,7 +80,40 @@ export const POSITIVE_REPLY_INTENTS = Object.freeze([
   "condition_disclosed",
 ]);
 
+/**
+ * Round 9 (owner, 2026-10-07: "All the messages in New Replies and Priority
+ * really shouldn't even be there"). New Replies is a WHITELIST: only a
+ * positive or actionable latest reply -- interest, an asking price, a
+ * condition / occupancy fact, an offer ask, a referral or co-owner / heir /
+ * agent who can talk, a creative / tax / title disclosure, near-acceptance.
+ * Everything else that is not already resolved (unclear, who-is-this, a
+ * language switch, a bare "No" waiting on its clarifier, an unread emoji)
+ * goes to the non-alerting UNCLEAR lane: shown under All, counted, no badge,
+ * no push. The automation answers or closes those deterministically.
+ */
+export const NEW_REPLY_ACTIONABLE_INTENTS = Object.freeze([
+  ...POSITIVE_REPLY_INTENTS,
+  "asking_price_absent",
+  "tenant_occupied",
+  "non_owner_referral",
+  "co_owner_respondent",
+  "executor_heir_respondent",
+  "family_member_respondent",
+  "entity_representative_respondent",
+  "agent_representative_respondent",
+  "property_manager_respondent",
+  "lien_tax_issue",
+  "title_issue",
+  "bankruptcy_disclosed",
+  "trust_ownership",
+  "llc_corporation",
+  "requests_email",
+  "property_correction",
+  "going_to_market",
+]);
+
 const NON_ACTIONABLE = new Set(NON_ACTIONABLE_REPLY_INTENTS);
+const NEW_REPLY_ACTIONABLE = new Set(NEW_REPLY_ACTIONABLE_INTENTS);
 const PRIORITY = new Set(PRIORITY_REPLY_INTENTS);
 const POSITIVE = new Set(POSITIVE_REPLY_INTENTS);
 
@@ -96,14 +129,19 @@ export function isPositiveReplyIntent(intent) {
   return POSITIVE.has(lower(intent));
 }
 
+/** A latest reply New Replies may hold (round 9 whitelist). */
+export function isNewReplyActionableIntent(intent) {
+  return NEW_REPLY_ACTIONABLE.has(lower(intent));
+}
+
 /**
- * A reply that re-opens a parked (follow-up / nurture) thread: anything the
- * classifier understood that is not itself a non-actionable reply. "unclear"
- * alone does not re-open a nurture — that is usually "so I don't care".
+ * A reply that re-opens a parked (follow-up / nurture) thread: an actionable
+ * reply (round 9: the New Replies whitelist). "unclear" / who-is-this alone do
+ * not re-open a nurture — that is usually "so I don't care".
  */
 export function isReopeningReplyIntent(intent) {
   const key = lower(intent);
-  return Boolean(key) && key !== "unclear" && !NON_ACTIONABLE.has(key);
+  return Boolean(key) && NEW_REPLY_ACTIONABLE.has(key) && !NON_ACTIONABLE.has(key);
 }
 
 const HEAT_RANK = Object.freeze({ unscored: 0, cold: 1, warm: 2, hot: 3 });
@@ -166,7 +204,9 @@ export default {
   NON_ACTIONABLE_REPLY_INTENTS,
   PRIORITY_REPLY_INTENTS,
   POSITIVE_REPLY_INTENTS,
+  NEW_REPLY_ACTIONABLE_INTENTS,
   isNonActionableReplyIntent,
+  isNewReplyActionableIntent,
   isPriorityReplyIntent,
   isPositiveReplyIntent,
   isReopeningReplyIntent,

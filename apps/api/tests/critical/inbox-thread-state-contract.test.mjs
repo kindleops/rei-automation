@@ -105,7 +105,8 @@ test("count/list predicate matches for derived new reply", () => {
   const row = normalizeInboxThreadStateRow({
     inbox_bucket: null,
     latest_direction: "inbound",
-    last_intent: "who_is_this",
+    // round 9: who_is_this is the Unclear lane; an actionable reply is a New Reply.
+    last_intent: "ownership_confirmed",
     last_inbound_at: "2026-06-23T12:00:00.000Z",
     last_outbound_at: "2026-06-20T12:00:00.000Z",
   });

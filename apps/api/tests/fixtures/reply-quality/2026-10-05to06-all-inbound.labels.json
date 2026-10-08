@@ -100,7 +100,7 @@
   },
   "116": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -118,7 +118,7 @@
   },
   "119": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -202,7 +202,7 @@
   },
   "133": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -238,7 +238,7 @@
   },
   "139": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -520,13 +520,13 @@
   },
   "186": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
   "187": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -670,9 +670,9 @@
   },
   "211": {
    "intent": "hostile_or_legal",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "negative",
-   "outcome_with_en_es_drafts": "review"
+   "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "212": {
    "intent": "opt_out",
@@ -952,7 +952,7 @@
   },
   "258": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -994,7 +994,7 @@
   },
   "265": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1048,19 +1048,19 @@
   },
   "274": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
   "275": {
    "intent": "hostile_or_legal",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "sarcastic",
-   "outcome_with_en_es_drafts": "review"
+   "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "276": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1198,7 +1198,7 @@
   },
   "299": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1228,7 +1228,7 @@
   },
   "304": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1258,7 +1258,7 @@
   },
   "309": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1270,13 +1270,13 @@
   },
   "311": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
   "312": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1366,7 +1366,7 @@
   },
   "327": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1498,15 +1498,15 @@
   },
   "349": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
   "350": {
    "intent": "hostile_or_legal",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "sarcastic",
-   "outcome_with_en_es_drafts": "review"
+   "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "351": {
    "intent": "not_interested",
@@ -1552,7 +1552,7 @@
   },
   "358": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1576,7 +1576,7 @@
   },
   "362": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1660,7 +1660,7 @@
   },
   "376": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -1732,9 +1732,9 @@
   },
   "388": {
    "intent": "hostile_or_troll",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "sarcastic",
-   "outcome_with_en_es_drafts": "review"
+   "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "389": {
    "intent": "unclear",
@@ -1804,7 +1804,7 @@
   },
   "006": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -2008,13 +2008,13 @@
   },
   "040": {
    "intent": "hostile_or_legal",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "sarcastic",
-   "outcome_with_en_es_drafts": "review"
+   "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "041": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -2086,7 +2086,7 @@
   },
   "053": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -2164,9 +2164,9 @@
   },
   "066": {
    "intent": "hostile_or_legal",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "negative",
-   "outcome_with_en_es_drafts": "review"
+   "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "067": {
    "intent": "opt_out",
@@ -2260,7 +2260,7 @@
   },
   "082": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },
@@ -2290,9 +2290,9 @@
   },
   "087": {
    "intent": "hostile_or_legal",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "negative",
-   "outcome_with_en_es_drafts": "review"
+   "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "088": {
    "intent": "opt_out",
@@ -2302,7 +2302,7 @@
   },
   "089": {
    "intent": "unclear",
-   "outcome": "review",
+   "outcome": "no_reply_by_design",
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "auto_reply"
   },

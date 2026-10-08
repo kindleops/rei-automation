@@ -20,6 +20,7 @@ import {
   NON_ACTIONABLE_REPLY_INTENTS,
   PRIORITY_REPLY_INTENTS,
   POSITIVE_REPLY_INTENTS,
+  NEW_REPLY_ACTIONABLE_INTENTS,
   resolveCanonicalLeadHeat,
 } from "@/lib/domain/inbox/reply-actionability.js";
 import { resolveInboxBucketFlags } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
@@ -45,6 +46,7 @@ const reply = (extra = {}) => ({
 const bucketOf = (flags) =>
   flags.in_priority ? "priority"
     : flags.in_new_replies ? "new_replies"
+      : flags.in_unclear ? "unclear"
       : flags.in_needs_review ? "needs_review"
         : flags.in_follow_up ? "follow_up"
           : flags.in_suppressed ? "suppressed"
@@ -69,17 +71,18 @@ const READER_EXPECT = {
   asking_price_implausible: "all",
   acknowledgement: "all",
   reaction_only: "all",
-  // Actionable or undetermined-but-human-worthy.
+  // Actionable (round 9 whitelist).
   ownership_confirmed: "new_replies",
   latent_interest: "new_replies",
   condition_disclosed: "new_replies",
   tenant_occupied: "new_replies",
-  who_is_this: "new_replies",
-  info_request: "new_replies",
   non_owner_referral: "new_replies",
   executor_heir_respondent: "new_replies",
   family_member_respondent: "new_replies",
-  unclear: "new_replies",
+  // Round 9 (owner 2026-10-07): not actionable -> the non-alerting Unclear lane.
+  who_is_this: "unclear",
+  info_request: "unclear",
+  unclear: "unclear",
   // Priority-grade — stored under a writer-assigned 'priority'.
   asking_price_provided: "priority",
   asks_offer: "priority",
@@ -127,12 +130,16 @@ test("reader: buckets stay exclusive and active stays the union", () => {
   }
 });
 
-test("every canonical intent is classified as non-actionable, priority, or New-Replies-worthy (no intent is forgotten)", () => {
+test("every canonical intent is classified as non-actionable, New-Replies-worthy or Unclear (no intent is forgotten)", () => {
   const nonActionable = new Set(NON_ACTIONABLE_REPLY_INTENTS);
+  const actionable = new Set(NEW_REPLY_ACTIONABLE_INTENTS);
   for (const intent of CANONICAL_INTENTS) {
     const flags = resolveInboxBucketFlags(reply({ last_intent: intent }), NOW);
-    assert.equal(flags.in_new_replies, !nonActionable.has(intent), intent);
+    assert.equal(flags.in_new_replies, actionable.has(intent), intent);
+    assert.equal(flags.in_unclear, !nonActionable.has(intent) && !actionable.has(intent), intent);
   }
+  // No recorded intent is unknown, not unclear: it stays visible in New Replies.
+  assert.equal(resolveInboxBucketFlags(reply({ last_intent: null }), NOW).in_new_replies, true);
 });
 
 // ── Writer ──────────────────────────────────────────────────────────────────
@@ -197,12 +204,12 @@ test("re-promotion: a parked nurture re-opens on a later actionable reply; never
     reply({ inbox_bucket: null, disposition: "not_interested", last_intent, ...extra }),
     NOW,
   );
-  for (const intent of ["ownership_confirmed", "asks_offer", "asking_price_provided", "who_is_this", "executor_heir_respondent"]) {
+  for (const intent of ["ownership_confirmed", "asks_offer", "asking_price_provided", "executor_heir_respondent"]) {
     const flags = nurture(intent);
     assert.equal(flags.in_new_replies, true, intent);
     assert.equal(flags.in_follow_up, false, `${intent}: one bucket per thread`);
   }
-  for (const intent of ["unclear", "not_interested", "need_time", "hostile_or_troll", "asking_price_implausible"]) {
+  for (const intent of ["unclear", "who_is_this", "not_interested", "need_time", "hostile_or_troll", "asking_price_implausible"]) {
     const flags = nurture(intent);
     assert.equal(flags.in_new_replies, false, intent);
     assert.equal(flags.in_follow_up, true, `${intent}: stays a 30-day nurture (not suppressed, not archived)`);
