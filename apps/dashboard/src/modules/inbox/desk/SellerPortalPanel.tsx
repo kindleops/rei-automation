@@ -43,7 +43,7 @@ export function SellerPortalPanel() {
   }, [openId])
 
   const markedRead = useCallback((id: string) => {
-    setList((l) => (l ? { ...l, rows: l.rows.map((r) => (r.opportunity_id === id ? { ...r, unread: false } : r)) } : l))
+    setList((l) => (l ? { ...l, rows: l.rows.map((r) => (r.opportunity_id === id ? { ...r, unread: 0 } : r)) } : l))
   }, [])
 
   if (openId) return <PortalThreadPane id={openId} onBack={() => { setOpenId(null); setTick((t) => t + 1) }} onRead={markedRead} />

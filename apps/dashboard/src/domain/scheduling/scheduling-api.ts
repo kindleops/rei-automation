@@ -58,7 +58,9 @@ export interface TeamMember {
 
 export interface TeamPool { brand: string; key: string; name: string; members: string[] }
 
-export interface SchedulingMe { user_id: string; resource: TeamMember | null; calendar: CalendarConnection | null }
+/** /me returns the raw resource row (display_name), unlike /team (name). */
+export interface MyResource { id: string; display_name: string; public_name: string | null; timezone: string; weekly_hours: WeeklyHours; active: boolean }
+export interface SchedulingMe { user_id: string; resource: MyResource | null; calendar: CalendarConnection | null }
 
 export type AppointmentOutcome = 'confirmed' | 'completed' | 'no_show'
 export type TimeOffKind = 'pto' | 'holiday' | 'block'
@@ -110,7 +112,8 @@ export const fetchMe = (signal?: AbortSignal) =>
 /* ── writes: each is one canonical server action ── */
 export const startCalendarConnect = () => post<{ ok: true; url: string }>('connect', { return_to: '/calendar' })
 export const disconnectCalendar = () => post<{ ok: true }>('disconnect', {})
-export const saveMe = (body: { display_name?: string; public_name?: string; email?: string; timezone: string; weekly_hours: WeeklyHours }) => post<{ ok: true }>('me', body)
+/** Self-service: own hours and time zone only. Becoming bookable, names and routing are a scheduling admin's. */
+export const saveMe = (body: { timezone: string; weekly_hours: WeeklyHours }) => post<{ ok: true }>('me', body)
 export const addTimeOff = (body: { start_at: string; end_at: string; kind: TimeOffKind; note: string }) => post<{ ok: true }>('time-off', body)
 export const setPoolMember = (body: { brand: string; pool_key: string; resource_id: string; active: boolean }) => post<{ ok: true }>('pool-member', body)
 export const recordOutcome = (id: string, outcome: AppointmentOutcome) => post<{ ok: true }>('outcome', { id, outcome })
@@ -172,3 +175,19 @@ const LIVE = new Set(['scheduled', 'booked', 'confirmed', 'pending', 'reschedule
 /** Still ahead of its outcome: confirm, complete, no-show, assign and cancel apply. */
 export const isLive = (a: Appointment) => LIVE.has(a.status)
 export const statusWord = (s: string) => STATUS_WORD[s] || brandLabel(s)
+
+/* ── scheduling administration (server enforces scheduling.admin) ── */
+export interface EventTypeConfig {
+  id: string; brand: string; key: string; name: string
+  duration_minutes: number; slot_interval_minutes: number; buffer_before_minutes: number; buffer_after_minutes: number
+  min_notice_minutes: number; horizon_days: number
+  routing: { strategy?: string; owner?: string; owner_unavailable?: string; pool?: string; fallback_pool?: string }
+  reminder_offsets_minutes: number[]; active: boolean; environment: string
+}
+export const fetchPermissions = (signal?: AbortSignal) =>
+  call<{ ok: true; user_id: string | null; scheduling_admin: boolean }>('/api/cockpit/scheduling/permissions', { signal })
+export const fetchEventTypes = (signal?: AbortSignal) =>
+  call<{ ok: true; event_types: EventTypeConfig[] }>('/api/cockpit/scheduling/event-types', { signal })
+export const saveResource = (body: { id?: string; ops_user_id?: string; display_name: string; public_name?: string; email?: string; timezone: string; weekly_hours: WeeklyHours; operator_keys: string[]; active: boolean }) =>
+  post<{ ok: true }>('resource', body)
+export const saveEventType = (body: Partial<EventTypeConfig> & { id: string }) => post<{ ok: true }>('event-type', body)

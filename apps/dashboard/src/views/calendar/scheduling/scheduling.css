@@ -129,3 +129,10 @@ textarea.sch-input { resize: vertical; min-height: 72px; }
 .sch-history { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .sch-history li { display: flex; flex-direction: column; gap: 1px; padding-left: 10px; border-left: 2px solid var(--lc-hairline); }
 .sch-history span, .sch-history em { font: var(--lc-t-meta); color: var(--lc-ink-3); font-style: normal; }
+
+/* Team & routing (scheduling.admin) */
+.sch-admin .sch-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+.sch-admin .sch-table th, .sch-admin .sch-table td { border-bottom: 1px solid var(--lc-border, rgba(255,255,255,.08)); padding: 6px 8px; text-align: left; }
+.sch-admin .sch-table small, .sch-type small { color: var(--lc-text-muted, rgba(255,255,255,.55)); font-weight: 400; margin-left: 4px; }
+.sch-type { border-top: 1px solid var(--lc-border, rgba(255,255,255,.08)); padding-top: 10px; }
+.sch-admin dt, .sch-form dl dt { color: var(--lc-text-muted, rgba(255,255,255,.55)); font-size: 11px; }

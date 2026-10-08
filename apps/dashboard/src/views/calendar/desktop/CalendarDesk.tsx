@@ -21,6 +21,7 @@ import { TimeScrubber } from './TimeScrubber'
 import { AppointmentsDesk } from '../scheduling/AppointmentsDesk'
 import { AppointmentDrawer } from '../scheduling/AppointmentDrawer'
 import { MyCalendarCard } from '../scheduling/MyCalendarCard'
+import { TeamAdminCard } from '../scheduling/TeamAdminCard'
 import {
   NO_FILTERS, SOURCES, SOURCE_LABEL, STATUSES, STATUS_LABEL, aggregatesFrom, applyFilters, briefModel, carryInto, filterCount, fitDomain, marketsOf, ownerClass,
   parseDateCommand, rangeFor, scrubberModel, searchEvents, sourceOf, statusOf, timelineDomain, zoomDomain,
@@ -400,6 +401,7 @@ export function CalendarDesk() {
     <div className="sch-desk">
       <AppointmentsDesk tz={tz} refreshKey={apptTick} onOpen={(id) => commit({ appointment: id })} />
       <MyCalendarCard notice={connection} onDismissNotice={() => setConnection(null)} />
+      <TeamAdminCard />
     </div>
   )
   else if (mode === 'attention') stage = <AttentionView data={data} tz={tz} now={now} filter={(e) => applyFilters([e], filters).length > 0} onOpen={openEvent} />

@@ -121,9 +121,8 @@ export function createSchedulingService(deps = {}) {
    * a time is busy, never anything from a calendar.
    */
   async function computeSlots({ brand, eventType, refs, fromMs, toMs, excludeAppointmentId, excludeGoogleWindow }) {
-    const owner = await ownerResource(brand, eventType, refs);
     const poolKeys = [eventType.routing?.pool, eventType.routing?.fallback_pool].filter(Boolean);
-    const pools = await store.poolMembers(brand, poolKeys);
+    const [owner, pools] = await Promise.all([ownerResource(brand, eventType, refs), store.poolMembers(brand, poolKeys)]);
     const plan = planRouting({ routing: eventType.routing || {}, ownerResourceId: owner, pools });
     const dur = eventType.duration_minutes * MIN;
     const pad = ((eventType.buffer_before_minutes || 0) + (eventType.buffer_after_minutes || 0)) * MIN + dur;
@@ -206,7 +205,7 @@ export function createSchedulingService(deps = {}) {
         });
         metric('booking', { ok: true, ms: Date.now() - started, brand, type: eventType.type_key });
         await afterCommit('booked', appt, eventType, { actor });
-        return { ok: true, appointment: present(await store.getAppointment(appt.id) ?? appt, eventType) };
+        return { ok: true, appointment: present(appt, eventType) };
       } catch (error) {
         if (error instanceof SchedulingStoreError && error.code === 'slot_conflict') {
           metric('booking_conflict', { ok: false, brand, type: eventType.type_key, resource_id: resourceId });
@@ -254,7 +253,7 @@ export function createSchedulingService(deps = {}) {
         const next = await store.getAppointment(newId);
         if (resourceId !== current.resource_id && current.google_event_id) await removeGoogleEvent(current).catch(() => null);
         await afterCommit('rescheduled', next, eventType, { actor, previous: current });
-        return { ok: true, appointment: present(await store.getAppointment(newId) ?? next, eventType), previous_id: current.id };
+        return { ok: true, appointment: present(next, eventType), previous_id: current.id };
       } catch (error) {
         if (error instanceof SchedulingStoreError && error.code === 'slot_conflict') { metric('booking_conflict', { ok: false, op: 'reschedule' }); continue; }
         if (error instanceof SchedulingStoreError && ['version_conflict', 'appointment_not_active'].includes(error.code)) throw new SchedulingError(error.code, 409);
@@ -273,7 +272,7 @@ export function createSchedulingService(deps = {}) {
     if (!updated) throw new SchedulingError('version_conflict', 409);
     const eventType = await store.getEventTypeById(current.event_type_id);
     await afterCommit('cancelled', updated, eventType, { actor, previous: current });
-    return { ok: true, appointment: present(await store.getAppointment(current.id) ?? updated, eventType) };
+    return { ok: true, appointment: present(updated, eventType) };
   }
 
   /** Ops outcome: confirmed / completed / no_show. */
@@ -310,18 +309,21 @@ export function createSchedulingService(deps = {}) {
   }
 
   async function afterCommit(kind, appointment, eventType, { actor, previous } = {}) {
-    if (kind === 'booked') await store.appendEvent({ appointment_id: appointment.id, brand_key: appointment.brand_key, event: 'booked', actor: clean(actor) || null, detail: { routed_via: appointment.routed_via } });
-    if (kind === 'cancelled') await store.appendEvent({ appointment_id: appointment.id, brand_key: appointment.brand_key, event: 'cancelled', actor: clean(actor) || null, detail: {} });
-    await syncAppointment(appointment);
+    // The booking is committed; these consequences are independent of each
+    // other, so they run concurrently (one round trip of latency, not four).
+    // None can undo the booking; each failure is recorded where it belongs.
     const adapter = adapterFor(appointment.brand_key);
-    try {
-      await adapter.onChange(kind, { appointment, eventType, previous, deps });
-    } catch (error) {
-      metric('notification_failed', { ok: false, kind, brand: appointment.brand_key, reason: error.message });
-    }
-    if (kind !== 'cancelled') {
-      await scheduleReminders({ appointment, eventType, adapter, now: now(), deps }).catch((e) => metric('notification_failed', { ok: false, kind: 'reminder', reason: e.message }));
-    }
+    const ledger = kind === 'booked' || kind === 'cancelled'
+      ? store.appendEvent({ appointment_id: appointment.id, brand_key: appointment.brand_key, event: kind, actor: clean(actor) || null, detail: kind === 'booked' ? { routed_via: appointment.routed_via } : {} })
+      : Promise.resolve();
+    await Promise.allSettled([
+      ledger,
+      syncAppointment(appointment),
+      Promise.resolve().then(() => adapter.onChange(kind, { appointment, eventType, previous, deps })).catch((error) => metric('notification_failed', { ok: false, kind, brand: appointment.brand_key, reason: error.message })),
+      kind !== 'cancelled'
+        ? scheduleReminders({ appointment, eventType, adapter, now: now(), deps }).catch((e) => metric('notification_failed', { ok: false, kind: 'reminder', reason: e.message }))
+        : Promise.resolve(),
+    ]);
   }
 
   // -------------------------------------------------------------------------

@@ -55,7 +55,8 @@ ${t.cta ? `<a href="${esc(t.cta[1])}" style="display:inline-block;background:#16
 }
 
 /**
- * Staging capture sink: outside production, SELLER_PORTAL_EMAIL_CAPTURE_DIR
+ * Staging capture sink: outside production (or with STAGING_CERTIFICATION=1),
+ * SELLER_PORTAL_EMAIL_CAPTURE_DIR
  * makes the notifier write each rendered email to a JSON file instead of
  * sending it — rendering, dedupe and deep links are provable with zero
  * delivery risk. STAGING_EMAIL_RECIPIENT, when also set, receives a real copy
@@ -76,7 +77,10 @@ export function createSellerNotifier(deps = {}) {
     if (clean(env.SELLER_PORTAL_EMAIL_ENABLED) !== '1') return { sent: false, reason: 'seller_email_disabled' };
     const rendered = renderSellerEmail({ kind, context }, env);
     if (!rendered || !clean(to)) return { sent: false, reason: 'unrenderable' };
-    if (clean(env.SELLER_PORTAL_EMAIL_CAPTURE_DIR) && clean(env.NODE_ENV) !== 'production') {
+    // Capture only outside production, or in a staging production build whose
+    // launcher proved staging identity (scripts/staging/run-api.sh). Leaking the
+    // flag into production can only capture, never send to a seller.
+    if (clean(env.SELLER_PORTAL_EMAIL_CAPTURE_DIR) && (clean(env.NODE_ENV) !== 'production' || clean(env.STAGING_CERTIFICATION) === '1')) {
       const file = capture(env, kind, to, rendered);
       const staged = clean(env.STAGING_EMAIL_RECIPIENT);
       if (staged) {

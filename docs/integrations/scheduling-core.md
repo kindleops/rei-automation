@@ -145,11 +145,11 @@ Structured logs (no message bodies, no document data, no tokens):
 ## Environment
 | Variable | Purpose |
 |---|---|
-| `GOOGLE_CALENDAR_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI` | OAuth client (Google Cloud, "Web application"); redirect = `<api>/api/scheduling/google/callback` |
-| `GOOGLE_CALENDAR_WEBHOOK_URL` | `<public api>/api/webhooks/google-calendar` (HTTPS; without it, the tick polls) |
+| `GOOGLE_CALENDAR_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI` | OAuth client (Google Cloud, "Web application"). Production redirect: `https://ops.leadcommand.ai/api/scheduling/google/callback` (staging: `http://localhost:3201/api/scheduling/google/callback`) |
+| `GOOGLE_CALENDAR_WEBHOOK_URL` | Production: `https://ops.leadcommand.ai/api/webhooks/google-calendar` (HTTPS; without it, the tick polls). Both paths are outside the worker's browser session gate, as Google calls them directly. |
 | `SCHEDULING_TOKEN_KEYS` / `SCHEDULING_TOKEN_ACTIVE_KEY` | `{"k1":"<base64 32 bytes>"}` / `k1` |
 | `SCHEDULING_CLIENT_SECRETS` | `{"<brand>":"<secret>"}` for non-Prominent clients |
-| `SCHEDULING_OPS_APP_URL` | dashboard origin for OAuth return and calendar links |
+| `SCHEDULING_OPS_APP_URL` | dashboard origin for OAuth return and calendar links — production `https://ops.leadcommand.ai` |
 | `SCHEDULING_BUSY_MAX_AGE_MINUTES` | default 15 |
 | `SCHEDULING_ALLOW_TEST_TYPES` | `1` only on staging, to serve `environment='test'` types |
 | `CRON_SCHEDULING_ENABLED` | Cloudflare worker flag for the tick |

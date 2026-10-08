@@ -1,0 +1,2 @@
+.seller-portal-view { box-sizing: border-box; margin: 0 auto; max-width: 980px; padding: 72px 24px 48px; width: 100%; }
+@media (max-width: 640px) { .seller-portal-view { padding: 64px 12px 32px; } }

@@ -31,6 +31,9 @@ const HomeView = lazyWithRecovery(() =>
 const InboxView = lazyWithRecovery(() =>
   import('../views/inbox/InboxView').then((m) => ({ default: m.InboxView })),
 )
+const SellerPortalView = lazyWithRecovery(() =>
+  import('../views/seller-portal/SellerPortalView').then((m) => ({ default: m.SellerPortalView })),
+)
 const EntityGraphView = lazyWithRecovery(() =>
   import('../views/entity-graph/EntityGraphView').then((m) => ({ default: m.EntityGraphView })),
 )
@@ -139,6 +142,13 @@ const inboxRoute = defineRoute<null>({
   title: 'LeadCommand | Inbox',
   loader: async () => null,
   render: () => <InboxView routeMode="workspace" />,
+})
+
+const sellerPortalRoute = defineRoute<null>({
+  path: '/seller-portal',
+  title: 'LeadCommand | Seller portal',
+  loader: async () => null,
+  render: () => wrapFullscreen(<SellerPortalView />, 'seller-portal'),
 })
 
 const conversationRoute = defineRoute<null>({
@@ -413,6 +423,7 @@ const routes = [
   rootRoute,
   homeRoute,
   inboxRoute,
+  sellerPortalRoute,
   conversationRoute,
   dealIntelligenceRoute,
   propertiesRoute,

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Start the REI Automation API against the isolated staging branch — only.
-#   scripts/staging/run-api.sh            (port 3201)
+#   scripts/staging/run-api.sh            (port 3201; production build — STAGING_API_MODE=dev for next dev)
 # • verifies staging identity first (scripts/staging/guard.mjs) — refuses otherwise;
 # • starts from an EMPTY environment (env -i): no production secret, SMS,
 #   CRM or campaign credential can be inherited; outbound email is forced off
@@ -23,7 +23,7 @@ v() { grep "^$1=" "$ENVF" | head -1 | cut -d= -f2-; }
 
 mkdir -p /tmp/sched-cert/emails
 cd "$ROOT/apps/api"
-exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" NODE_ENV=development NEXT_TELEMETRY_DISABLED=1 \
+exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" NODE_ENV="$( [ "${STAGING_API_MODE:-prod}" = dev ] && echo development || echo production )" STAGING_CERTIFICATION=1 NEXT_TELEMETRY_DISABLED=1 \
   SUPABASE_URL="$(v STAGING_SUPABASE_URL)" SUPABASE_SERVICE_ROLE_KEY="$(v STAGING_SUPABASE_SERVICE_ROLE_KEY)" \
   SELLER_PORTAL_ENABLED=1 SELLER_PORTAL_INTERNAL_SECRET="$(v STAGING_PORTAL_SECRET)" SELLER_PORTAL_CODE_PEPPER="$(v STAGING_CODE_PEPPER)" \
   SELLER_PORTAL_PUBLIC_BASE_URL=http://localhost:3113 SELLER_PORTAL_SIGNIN_MIN_MS=0 \
@@ -36,4 +36,4 @@ exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" NODE_ENV=developm
   GOOGLE_CALENDAR_REDIRECT_URI="$(v GOOGLE_CALENDAR_REDIRECT_URI)" GOOGLE_CALENDAR_WEBHOOK_URL="$(v GOOGLE_CALENDAR_WEBHOOK_URL)" \
   PODIO_CLIENT_ID=staging-disabled PODIO_CLIENT_SECRET=staging-disabled PODIO_USERNAME=staging-disabled PODIO_PASSWORD=staging-disabled \
   BUYER_WEBHOOK_SECRET="$(v STAGING_OPS_SECRET)" APP_BASE_URL=http://localhost:3201 \
-  npx next dev --port 3201
+  sh -c 'if [ "${STAGING_API_MODE:-prod}" = dev ]; then exec npx next dev --port 3201; else npx next build >/tmp/sched-cert/api-build.log 2>&1 || { echo "API build failed (see /tmp/sched-cert/api-build.log)" >&2; exit 1; }; exec npx next start --port 3201; fi'

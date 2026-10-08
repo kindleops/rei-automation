@@ -30,6 +30,8 @@ import {
   resolveInboxStageBadge,
 } from '../inbox-card-signals'
 import { VirtualizedInboxList } from './VirtualizedInboxList'
+import { pushRoutePath } from '../../../app/router'
+import { fetchPortalConversations } from '../../../domain/seller-portal/seller-portal-ops-api'
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
 /**
@@ -1897,6 +1899,7 @@ export const InboxSidebar = ({
             </button>
           )
         })}
+        <SellerPortalRailEntry />
       </div>
       {activeBucketConfig.bucket === 'cold' && (
         <div className="nx-cold-stale-chips" role="group" aria-label="Cold follow-up age filter">
@@ -2311,3 +2314,35 @@ const viewToPreset = (view: InboxViewSelectValue | string): InboxSavedFilterPres
 
 void _resolveMaterialIntent
 void _DealSnapshotPlaceholder
+
+/**
+ * Seller portal messages live in their own panel and API (they are not SMS
+ * threads), so the rail links to them instead of filtering the thread list.
+ * Shows the unread count from the seller-portal conversations endpoint.
+ */
+function SellerPortalRailEntry() {
+  const [unread, setUnread] = useState<number | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    const load = () => fetchPortalConversations(true, controller.signal)
+      .then((res) => setUnread(res.conversations.reduce((n, c) => n + (Number(c.unread) || 0), 0)))
+      .catch(() => setUnread(null))
+    void load()
+    const timer = window.setInterval(load, 60_000)
+    return () => { controller.abort(); window.clearInterval(timer) }
+  }, [])
+  return (
+    <button
+      type="button"
+      className="nx-cat-nav__item"
+      data-category="seller_portal"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); pushRoutePath('/seller-portal') }}
+      aria-label={`Seller portal${unread ? `, ${unread} unread` : ''}`}
+    >
+      <span className="nx-cat-nav__icon" aria-hidden="true">🏠</span>
+      <span className="nx-cat-nav__label" title="Seller portal">Seller portal</span>
+      <span className="nx-cat-nav__count">{unread == null ? '—' : unread}</span>
+      {unread ? <span className="nx-cat-nav__unread" aria-hidden="true" /> : null}
+    </button>
+  )
+}

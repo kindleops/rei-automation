@@ -92,7 +92,9 @@ export function MyCalendarCard({ notice, onDismissNotice }: { notice?: string | 
                 </div>
                 {actionError ? <p className="sch-error" role="alert">{actionError}</p> : null}
               </div>
-              <HoursForm key={me.resource?.id ?? 'new'} me={me} onSaved={() => setTick((t) => t + 1)} />
+              {me.resource
+                ? <HoursForm key={me.resource.id} me={me} onSaved={() => setTick((t) => t + 1)} />
+                : <p className="sch-muted">You are not bookable yet. A scheduling admin adds you to the team; your hours and calendar then appear here.</p>}
               <TimeOffForm />
             </>
           )}
@@ -111,8 +113,6 @@ export function MyCalendarCard({ notice, onDismissNotice }: { notice?: string | 
 function HoursForm({ me, onSaved }: { me: SchedulingMe; onSaved: () => void }) {
   const r = me.resource
   const initial = useMemo(() => ({
-    name: r?.name ?? '',
-    publicName: r?.public_name ?? '',
     tz: r?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
     days: Object.fromEntries(DAYS.map(([k]) => [k, hoursText(r?.weekly_hours?.[k])])) as Record<string, string>,
   }), [r])
@@ -129,7 +129,7 @@ function HoursForm({ me, onSaved }: { me: SchedulingMe; onSaved: () => void }) {
     setSaving(true)
     setMsg(null)
     try {
-      await saveMe({ display_name: form.name.trim() || undefined, public_name: form.publicName.trim() || undefined, timezone: form.tz.trim(), weekly_hours: weekly })
+      await saveMe({ timezone: form.tz.trim(), weekly_hours: weekly })
       setMsg({ ok: true, text: 'Saved. New bookings use these hours.' })
       onSaved()
     } catch (err) { setMsg({ ok: false, text: schedulingErrorText(err) }) } finally { setSaving(false) }
@@ -138,11 +138,12 @@ function HoursForm({ me, onSaved }: { me: SchedulingMe; onSaved: () => void }) {
   return (
     <form className="sch-form" onSubmit={(e) => void submit(e)} aria-label="Working hours">
       <span className="sch-eyebrow">Working hours</span>
-      {!r ? <p className="sch-muted">You are not set up to take appointments yet. Saving hours here sets you up.</p> : null}
-      <div className="sch-grid2">
-        <label className="sch-field"><span>Name (team)</span><input className="sch-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="name" /></label>
-        <label className="sch-field"><span>Name customers see</span><input className="sch-input" value={form.publicName} onChange={(e) => setForm({ ...form, publicName: e.target.value })} /></label>
-      </div>
+      {r ? (
+        <dl className="sch-grid2" aria-label="Set by a scheduling admin">
+          <div className="sch-field"><dt>Name (team)</dt><dd>{r.display_name}</dd></div>
+          <div className="sch-field"><dt>Name customers see</dt><dd>{r.public_name || 'Not shown to customers'}</dd></div>
+        </dl>
+      ) : null}
       <label className="sch-field">
         <span>Time zone</span>
         <input className="sch-input" list="sch-zones" value={form.tz} onChange={(e) => setForm({ ...form, tz: e.target.value })} required spellCheck={false} />

@@ -12,6 +12,7 @@ import { AttentionList, DayStrip, DayTimeline, EventSheet, MonthGrid, WeekList, 
 import { AppointmentsDesk } from '../scheduling/AppointmentsDesk'
 import { AppointmentDrawer } from '../scheduling/AppointmentDrawer'
 import { MyCalendarCard } from '../scheduling/MyCalendarCard'
+import { TeamAdminCard } from '../scheduling/TeamAdminCard'
 import './calendar-surface.css'
 import './calendar-desktop.css'
 
@@ -322,6 +323,7 @@ function CalendarPhoneSurface() {
         <div className="cal2-appts">
           <AppointmentsDesk tz={tz} compact refreshKey={apptTick} onOpen={setAppointmentId} />
           <MyCalendarCard notice={connection} onDismissNotice={() => setConnection(null)} />
+          <TeamAdminCard />
         </div>
       ) : null}
       {appointmentId ? <AppointmentDrawer id={appointmentId} tz={tz} onClose={() => setAppointmentId(null)} onChanged={() => setApptTick((t) => t + 1)} /> : null}

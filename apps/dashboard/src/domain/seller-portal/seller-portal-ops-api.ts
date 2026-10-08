@@ -11,7 +11,7 @@ export interface PortalConversation {
   last_at: string
   last_author: 'seller' | 'operator' | 'system'
   preview: string | null
-  unread: boolean
+  unread: number
   opportunity: {
     id: string
     property_address_full: string | null
