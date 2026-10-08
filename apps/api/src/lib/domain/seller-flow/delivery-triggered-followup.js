@@ -40,7 +40,9 @@ const DELIVERED_STATUSES = new Set(["delivered", "delivery_confirmed", "confirme
 // carry. The old local set missed invalid_number — the code the wrong-number
 // intent actually writes — as well as dnc and provider_blacklisted.
 const BLOCKED_CONTACTABILITY = new Set([...BLOCKING_CONTACTABILITY, "wrong_number"]);
-const TERMINAL_STAGES = new Set(["closed", "dead", "closed_lost", "archived"]);
+// 'archived' is deliberately absent: archive is a visibility flag, never a
+// terminal lifecycle (owner, 2026-10-08 — archive must never stop nurture).
+const TERMINAL_STAGES = new Set(["closed", "dead", "closed_lost"]);
 
 function clean(value) {
   return String(value ?? "").trim();

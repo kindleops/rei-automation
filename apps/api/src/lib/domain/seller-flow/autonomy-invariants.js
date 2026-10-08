@@ -125,7 +125,9 @@ export function evaluateAutonomyInvariants({
   thread_states = rows(thread_states);
   const terminalThreads = new Set(
     thread_states
-      .filter((t) => t.is_suppressed === true || t.is_archived === true)
+      // Suppression only: an archived thread is merely hidden (visibility) and
+      // still owes its next action, so it is NOT terminal here.
+      .filter((t) => t.is_suppressed === true)
       .map((t) => clean(t.thread_key))
       .filter(Boolean)
   );
@@ -291,7 +293,7 @@ export function evaluateAutonomyInvariants({
     const stage = clean(opp.acquisition_stage).toLowerCase();
     const status = clean(opp.opportunity_status).toLowerCase();
     if (TERMINAL_STAGES.has(stage) || TERMINAL_STAGES.has(status)) continue;
-    // A suppressed / archived thread is terminal for the seller; no next action
+    // A suppressed thread is terminal for the seller (archive is not); no next action
     // is expected and it is not a dead end.
     if (terminalThreads.has(clean(opp.primary_thread_key))) continue;
     if (!clean(opp.next_action)) {

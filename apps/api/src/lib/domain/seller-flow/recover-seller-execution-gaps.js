@@ -172,8 +172,9 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
         // .is("next_action", null) filter was structurally blind to every one
         // of them: a live dry-run saw 3 rows against a 3,289-row backlog.
         .or("next_action.is.null,next_action.eq.")
-        .lt("updated_at", hoursAgoIso(STALE_ACTIVE_HOURS, now))
-        .eq("is_archived", false);
+        // No is_archived filter: archive is visibility only, and an archived
+        // conversation with no next step is still a gap to recover (owner, 2026-10-08).
+        .lt("updated_at", hoursAgoIso(STALE_ACTIVE_HOURS, now));
       if (cursor) query = query.gt("thread_key", cursor);
       const page = await query.order("thread_key", { ascending: true }).limit(limit);
       if (!page.error && Array.isArray(page.data) && page.data.length) await prefetchPage(page.data);

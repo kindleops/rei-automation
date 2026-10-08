@@ -346,7 +346,9 @@ export function evaluateNoResponseCandidate(facts = {}, { config = resolveNoResp
   if (!has_inbound_before_anchor) return { eligible: false, reason: "seller_never_replied" };
   if (on_suppression_list) return { eligible: false, reason: "phone_suppressed" };
   if (thread_state.is_suppressed === true) return { eligible: false, reason: "thread_suppressed" };
-  if (thread_state.is_archived === true) return { eligible: false, reason: "thread_archived" };
+  // ARCHIVE IS VISIBILITY ONLY (owner, 2026-10-04 / 10-08): an archived
+  // conversation keeps its follow-ups and nurture. is_archived / archived_at /
+  // archive_scope are never an eligibility input here.
   if (BLOCKED_CONTACTABILITY.has(lower(thread_state.contactability_status))) {
     return { eligible: false, reason: `contact_blocked:${lower(thread_state.contactability_status)}` };
   }
@@ -357,7 +359,8 @@ export function evaluateNoResponseCandidate(facts = {}, { config = resolveNoResp
   if (DISQUALIFYING_INTENTS.has(lower(thread_state.last_intent))) {
     return { eligible: false, reason: `disposition_rules_own_thread:${lower(thread_state.last_intent)}` };
   }
-  if (["closed", "dead", "closed_lost", "archived"].includes(lower(thread_state.lifecycle_stage))) {
+  // 'archived' is not a lifecycle stage; a visibility archive never terminates a thread.
+  if (["closed", "dead", "closed_lost"].includes(lower(thread_state.lifecycle_stage))) {
     return { eligible: false, reason: `terminal_stage:${lower(thread_state.lifecycle_stage)}` };
   }
   const sent_ms = Date.parse(clean(anchor_sent_at));
@@ -496,7 +499,7 @@ export async function loadNoResponseThreadFacts(supabase, { thread_key, anchor_s
   const [state, supp, inbound] = await Promise.all([
     supabase
       .from("inbox_thread_state")
-      .select("is_suppressed,is_archived,contactability_status,last_intent,lifecycle_stage")
+      .select("is_suppressed,contactability_status,last_intent,lifecycle_stage")
       .eq("thread_key", thread_key)
       .maybeSingle(),
     supabase

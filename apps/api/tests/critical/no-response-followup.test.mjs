@@ -177,7 +177,6 @@ test("gates: every disqualifier blocks FU1", () => {
     [{ has_inbound_before_anchor: false }, "seller_never_replied"],
     [{ on_suppression_list: true }, "phone_suppressed"],
     [{ thread_state: { is_suppressed: true } }, "thread_suppressed"],
-    [{ thread_state: { is_archived: true } }, "thread_archived"],
     [{ thread_state: { contactability_status: "opted_out" } }, "contact_blocked:opted_out"],
     [{ thread_state: { contactability_status: "invalid_number" } }, "contact_blocked:invalid_number"],
     [{ thread_state: { last_intent: "not_interested" } }, "disposition_rules_own_thread:not_interested"],

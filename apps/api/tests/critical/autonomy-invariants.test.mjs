@@ -232,7 +232,7 @@ test("every violation is machine-readable and frozen", () => {
 
 // ── §19 precision: suppression lives on the projection, not the canonical record ──
 
-test("a suppressed or archived thread is NOT a missing-next-action dead end", () => {
+test("a suppressed thread is NOT a missing-next-action dead end; an archived one still is (archive = visibility)", () => {
   const suppressed = opp({ id: "opp-s", primary_thread_key: "+15550100001", next_action: null });
   const archived = opp({ id: "opp-a", primary_thread_key: "+15550100002", next_action: null });
   const live = opp({ id: "opp-l", primary_thread_key: "+15550100003", next_action: null });
@@ -245,7 +245,7 @@ test("a suppressed or archived thread is NOT a missing-next-action dead end", ()
     now: NOW,
   });
   const ids = vs.filter((v) => v.code === INVARIANT_CODES.STAGE_WITHOUT_NEXT_ACTION).map((v) => v.entity_id);
-  assert.deepEqual(ids, ["opp-l"], "only the live thread is a dead end");
+  assert.deepEqual(ids.sort(), ["opp-a", "opp-l"], "archive hides a thread, it does not end it");
 });
 
 test("a due follow-up on a suppressed thread is not flagged", () => {
