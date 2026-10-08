@@ -219,3 +219,26 @@ test('outreach state: eligibility + reason, last contact, stage/status by source
   assert.ok(!JSON.stringify(states).includes('+1555'), 'no phone number leaves the server')
   assert.equal(latestContact({ graphRows: [{ last_outbound_at: '2026-01-01' }, { last_inbound_at: '2026-02-01' }] }).direction, 'inbound')
 })
+
+test('linked-entity columns: owner via master owner, contact from the campaign graph (primary + count, no number), scores, entities', async () => {
+  const { getEntityGraphColumnEnrichment, parseEntityGraphColumnFields } = await import('../../src/lib/domain/entity-graph/entity-graph-column-enrichment.js')
+  assert.deepEqual(parseEntityGraphColumnFields('owner.priority_tier,owner.row_hash,contact.person,contact.canonical_e164,year_built,x.y'), ['owner.priority_tier', 'contact.person', 'year_built'])
+  const supabase = fakeSupabase({
+    properties: [{ property_id: '1', master_owner_id: 'o1', year_built: 1950 }, { property_id: '2', master_owner_id: null, year_built: 2001 }],
+    master_owners: [{ master_owner_id: 'o1', priority_tier: 'A' }],
+    property_acquisition_scores: [{ property_id: '2', decision_tier: 'B' }],
+    campaign_target_graph: [
+      { property_id: '2', seller_full_name: 'Ana Ruiz', seller_person_key: 'k1', canonical_e164: '+15550001111', best_phone_score: 80, phone_type: 'Wireless' },
+      { property_id: '2', seller_full_name: 'Luis Ruiz', seller_person_key: 'k2', canonical_e164: '+15550002222', best_phone_score: 40, phone_type: 'Landline' },
+    ],
+    sub_owners: [{ master_owner_id: 'o1', owner_name: 'Ruiz Family Trust' }],
+  })
+  const { values } = await getEntityGraphColumnEnrichment({ property_ids: '1,2', fields: 'year_built,owner.priority_tier,scores.decision_tier,contact.person,contact.person_count,contact.phone_count,contact.line_type,entity.name,entity.count' }, { supabase })
+  assert.deepEqual(values['1'], { 'owner.priority_tier': 'A', 'entity.name': 'Ruiz Family Trust', 'entity.count': 1, year_built: 1950 })
+  assert.equal(values['2']['contact.person'], 'Ana Ruiz')
+  assert.equal(values['2']['contact.person_count'], 2)
+  assert.equal(values['2']['contact.phone_count'], 2)
+  assert.equal(values['2']['contact.line_type'], 'Wireless')
+  assert.equal(values['2']['scores.decision_tier'], 'B')
+  assert.ok(!JSON.stringify(values).includes('+1555'))
+})
