@@ -23,7 +23,34 @@
  * There is NO literal default. If nothing resolves the caller must not render.
  */
 
-import { extractSenderName } from "@/lib/domain/classification/reply-disposition-signals.js";
+import { extractSenderName, normalizeReplyText } from "@/lib/domain/classification/reply-disposition-signals.js";
+
+// How our ACTIVE templates sign in every language (sms_templates, 2026-10-08):
+// "ana Michael", "je suis …", "Michael hier", "wo shi …", "… desu". The
+// classifier's extractSenderName covers EN/ES/PT/VI only; persona continuity
+// must recognise every language we send in, or a non-English thread would be
+// re-signed with a different name. Used only here (classification unchanged).
+const NAME = "([A-Z][A-Za-z'-]{1,20})";
+const MULTILINGUAL_SIGNATURE_RES = [
+  // prefix signatures, case-sensitive so a seller named "Ana" or "1 Main St" never reads as a signature
+  new RegExp(`(?:^|[\\s,،.!?])(?:ana|je suis|Je suis|c'est|C'est|ich bin|Ich bin|hier ist|Hier ist|eimai|Eimai|ani|sono|Sono|wo shi|Wo shi|eto|Eto|tu|sou|Sou|é o|É o)\\s+${NAME}(?=$|[\\s.,!?;:،])`),
+  new RegExp(`\\bmain\\s+${NAME}\\s+hoon\\b`),
+  // suffix signatures ("Michael hier", "Michael desu")
+  new RegExp(`(?:^|[\\s,،])${NAME}\\s+(?:huna|ici|hier|edo|po|yahan|qui|desu|yeoyo|imnida|zai|tutaj|zdes|đây|day|aqui|aquí|here)(?=$|[\\s.,!?;:،])`),
+];
+const NOT_A_NAME = new Set(["there", "again", "neighbor", "friend", "sir", "madam", "maam", "team", "folks", "all", "i", "im", "we"]);
+
+/** The name our outbound body signed with, in any language we send in. */
+export function extractSignedPersonaName(body = "") {
+  const classic = extractSenderName(body);
+  if (classic) return classic;
+  const raw = normalizeReplyText(body);
+  for (const re of MULTILINGUAL_SIGNATURE_RES) {
+    const m = re.exec(raw);
+    if (m && /^[A-Z]/.test(m[1]) && !NOT_A_NAME.has(m[1].toLowerCase())) return m[1];
+  }
+  return null;
+}
 import { PERSONA_DISTRIBUTION } from "@/lib/domain/outbound/outbound-persona-distribution.generated.js";
 
 const clean = (value) => (value === null || value === undefined ? "" : String(value).trim());
@@ -160,7 +187,7 @@ export function personaFromQueueRow(row = {}) {
     const m = personaValue(candidate);
     if (m) return m;
   }
-  const signed = extractSenderName(row?.message_body || row?.message_text || "");
+  const signed = extractSignedPersonaName(row?.message_body || row?.message_text || "");
   return signed ? personaValue(signed) : null;
 }
 

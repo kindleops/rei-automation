@@ -244,9 +244,9 @@
   },
   "140": {
    "intent": "language_switch",
-   "outcome": "review",
+   "outcome": "auto_reply",
    "sentiment": "neutral",
-   "outcome_with_en_es_drafts": "review"
+   "outcome_with_en_es_drafts": "auto_reply"
   },
   "141": {
    "intent": "ownership_confirmed",
@@ -1180,9 +1180,9 @@
   },
   "296": {
    "intent": "language_switch",
-   "outcome": "review",
+   "outcome": "auto_reply",
    "sentiment": "neutral",
-   "outcome_with_en_es_drafts": "review"
+   "outcome_with_en_es_drafts": "auto_reply"
   },
   "297": {
    "intent": "who_is_this",
