@@ -54,15 +54,15 @@ test("Tampa 'Did you read my text?' -> frustration: ONE apology + nurture once t
   const later = await replayReply(byId("002"), { catalog: [...CATALOG, ...APOLOGY_ROWS] });
   assert.equal(later.outcome, "auto_reply");
   assert.equal(later.template.use_case, "seller_frustration_apology");
-  for (const m of ["Did u even read my message?", "I said no"]) {
+  for (const m of ["Did u even read my message?"]) {
     const c = await classify(m, null, { heuristicOnly: true });
     assert.ok(c.matched_rule_ids.includes("seller_frustration_after_misread"), m);
     assert.notEqual(c.automation_decision.queue_action, "queue_auto_reply", m);
   }
   // Round 10 (owner 2026-10-08): a REPEATED demand ("I already told you", "I
-  // told you already", "Ya te dije que no") is a suppression candidate, never
+  // said no", "I told you already", "Ya te dije que no") is a suppression candidate, never
   // an apology / re-ask.
-  for (const m of ["I already told you", "I told you already", "Ya te dije que no"]) {
+  for (const m of ["I already told you", "I said no", "I told you already", "Ya te dije que no"]) {
     const c = await classify(m, null, { heuristicOnly: true });
     assert.ok(c.matched_rule_ids.includes("repeat_no_contact_frustration"), m);
     assert.equal(c.automation_decision.suppression_candidate, true, m);
