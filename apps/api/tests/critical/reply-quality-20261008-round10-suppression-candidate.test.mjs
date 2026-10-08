@@ -85,30 +85,19 @@ for (const message of [
 }
 
 // ── 1b. Repeated frustration, no revocation phrase -> SUPPRESSION_CANDIDATE ─
+// Policy correction (owner 2026-10-08): NOT INTERESTED IS NOT AN OPT-OUT. A
+// candidate needs CONTACT language with the repetition.
 const CANDIDATES_EN = [
   "You always text me I told you",
   "You always text me I told you I'm not selling",
-  "how many times do I have to tell you",
-  "How many times do I have to tell you no",
-  "I already told you no",
-  "I told you before",
-  "I said no already!!",
-  "I told you guys I'm not interested",
   "Why do you keep texting me",
   "Why are you still texting me",
   "You keep texting me",
-  "Again? I said no",
-  "I told you already fuck off",
+  "How many times do I have to tell you not to text me",
 ];
 const CANDIDATES_ES = [
-  "Ya te dije que no",
-  "Ya te dije",
-  "Te dije que no vendo",
-  "Ya te dije que no me interesa",
-  "Cuántas veces te tengo que decir",
-  "Cuantas veces les tengo que decir que no",
-  "Otra vez? Ya les dije que no",
   "Por que me siguen mandando mensajes",
+  "Siguen escribiendo",
 ];
 for (const message of [...CANDIDATES_EN, ...CANDIDATES_ES]) {
   test(`suppression candidate: ${JSON.stringify(message)} -> no outbound, sends held, operator lane`, async () => {
@@ -137,20 +126,34 @@ for (const message of [...CANDIDATES_EN, ...CANDIDATES_ES]) {
   });
 }
 
-// Facts restated after "I told you" keep their meaning -- not a candidate.
+// A repeated NO ABOUT SELLING is not a contact demand: never a candidate,
+// never suppressed (nurture / its ordinary meaning). Restated facts too.
 for (const message of [
+  "I said no",
+  "I said no already!!",
+  "I already told you no",
+  "I told you before",
+  "I told you guys I'm not interested",
+  "how many times do I have to tell you",
+  "How many times do I have to tell you no",
+  "Ya te dije que no",
+  "Te dije que no vendo",
+  "Ya te dije que no me interesa",
   "I told you the price is 200k",
   "I told you it needs a roof, no AC",
-  "I told you 150k",
   "Like I told you, it's rented",
-  "I told you my wife owns it",
   "Did you read my text?",
   "Not interested",
+  "No thanks",
+  "Not selling right now",
 ]) {
-  test(`not a candidate: ${JSON.stringify(message)}`, async () => {
+  test(`not a candidate, not suppressed: ${JSON.stringify(message)}`, async () => {
     assert.equal(matchesRepeatNoContactFrustration(message), false, message);
     const c = await classify(message, null, { heuristicOnly: true });
     assert.equal((c.matched_rule_ids || []).includes("repeat_no_contact_frustration"), false);
+    assert.notEqual(c.primary_intent, "opt_out", message);
+    assert.notEqual(c.automation_decision?.suppression_action, "opt_out", message);
+    assert.notEqual(c.automation_decision?.suppression_candidate, true, message);
   });
 }
 

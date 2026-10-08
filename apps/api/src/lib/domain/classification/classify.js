@@ -4741,50 +4741,36 @@ function matchesBareNameReply(raw = "") {
   return t.split(/\s+/).every((w) => w.length >= 2 && !BARE_NAME_STOPWORDS.has(w.toLowerCase()));
 }
 
-// round 10 (owner 2026-10-08): a REPEATED demand to stop contacting. Two
-// shapes, neither carrying an explicit revocation phrase (those are opt-outs):
-//  1. the repetition IS the complaint: "how many times do I have to tell
-//     you", "you always/keep text(ing) me", "why do you keep texting me",
-//     "cuántas veces te tengo que decir", "siguen escribiendo";
-//  2. "I (already) told you" / "I said no already" / "ya te dije" that is a
-//     bare repeat or carries a decline / annoyance -- never a fact ("I told
-//     you the price is 200k", "I told you it needs a roof" keep their meaning).
+// round 10 (owner 2026-10-08, policy correction): a REPEATED demand to stop
+// CONTACTING. NOT INTERESTED IS NOT AN OPT-OUT: a repeated no about selling
+// ("I said no", "I told you I'm not selling", "Ya te dije que no", "how many
+// times do I have to tell you no") keeps its ordinary meaning (nurture).
+// A candidate needs CONTACT language with the repetition:
+//  1. the complaint is the contact itself: "you always/keep text(ing) me",
+//     "why do you keep texting me", "siguen escribiendo", "por qué me siguen
+//     mandando mensajes";
+//  2. a repeat marker ("I (already) told you", "how many times", "ya te
+//     dije", "cuántas veces") together with a contact word (text / message /
+//     call / contact / bother / escribir / molestar / llamar).
+// Explicit revocations ("stop texting me", "leave me alone") never reach here
+// (compliance ran first -> opt_out).
 const REPEAT_CONTACT_STRONG_RES = [
-  /\bhow\s+many\s+(?:more\s+)?times\s+(?:do|did|must|should|will|have)\s+(?:i|we)\s+(?:have\s+to\s+|got\s+to\s+|gotta\s+|need\s+to\s+)?(?:tell|told|say|said|ask|asked|repeat|explain)\b/i,
-  /\bhow\s+many\s+(?:more\s+)?times\s+(?:i\s+(?:have\s+to|gotta|got\s+to|need\s+to)|i'?ve|have\s+i|i\s+have)\s+(?:tell|told|say|said|repeat)\b/i,
   /\b(?:you|u|y'?all|you\s+guys|you\s+people|ya'?ll)\s+(?:always|keep|kept|constantly|still|continue\s+to|won'?t\s+stop|never\s+stop)\s+(?:on\s+)?(?:text|texting|txt|txting|messag(?:e|ing)|msg|call|calling|contact|contacting|hitting\s+me\s+up|hit\s+me\s+up|bother|bothering|sending|reaching\s+out)\b/i,
   /\bwhy\s+(?:do|are|does|would|is)\s+(?:you|u|y'?all|you\s+guys|you\s+people|this\s+number|someone)\s+(?:keep|kept|still|continue|continuing|always)\s+(?:to\s+)?(?:on\s+)?(?:text|texting|messag(?:e|ing)|call|calling|contact|contacting|sending|bothering|hitting\s+me\s+up)\b/i,
-  /\bc(?:u[aá])ntas\s+veces\s+(?:m[aá]s\s+)?(?:te|le|les|se)\s+(?:lo\s+)?(?:tengo|tenemos|he|hemos|voy|debo)\s+(?:que\s+|a\s+)?(?:decir|dicho|repetir|repetido|explicar)\b/i,
   /\b(?:siempre|todav[ií]a|siguen|sigues|sigue|otra\s+vez)\s+(?:me\s+)?(?:escribiendo|mandando|llamando|molestando|texteando|textiando|enviando)\b/i,
   /\bpor\s*qu[eé]\s+(?:me\s+)?(?:siguen|sigues|sigue)\s+(?:escribiendo|mandando|llamando|molestando|texteando|enviando)\b/i,
 ];
 const REPEAT_MARKER_RE =
-  /\bi\s+(?:already\s+|just\s+|have\s+|'?ve\s+)?(?:told|tld)\s+(?:you|u|y'?all|ya|you\s+guys|you\s+people|ur\s+company|your\s+company)\b|\bi\s+(?:already\s+)?said\s+no\b|\bi\s+already\s+(?:said|answered|replied|responded)\b|\bi\s+said\s+(?:it\s+|that\s+)?(?:before|already)\b|\b(?:ya\s+)?te\s+(?:lo\s+)?dije\b|\bya\s+(?:le|les|se)\s+(?:lo\s+)?(?:dije|hab[ií]a\s+dicho)\b|\bya\s+(?:te|le|les)\s+(?:conteste|contesté|respond[ií])\b|\bya\s+dije\s+que\s+no\b/i;
-// A decline / annoyance / profanity next to the repeat marker. A bare "no"
-// counts only as the first word after the marker ("I told you no", "ya te
-// dije que no") -- "I told you it needs a roof, no AC" keeps its meaning.
-const REPEAT_DECLINE_RE =
-  /\b(?:not\s+(?:interested|selling|for\s+sale|gonna\s+sell|going\s+to\s+sell)|(?:do\s+not|don'?t|dont)\s+(?:want|wanna|wish)\s+to\s+sell|no\s+vendo|no\s+(?:me\s+)?interesa|no\s+est[aá]\s+en\s+venta|no\s+quiero\s+vender|not\s+(?:the\s+)?owner|wrong\s+number|again|otra\s+vez|stop|quit|enough|basta|leave|alone|text\w*|messag\w*|call\w*|bother\w*|contact\w*|escrib\w*|molest\w*|llam\w*|fuck\w*|f\*+k?|shit|damn|hell|pendej\w*|chinga\w*)\b/i;
-const REPEAT_LEADING_NO_RE =
-  /^[^\p{L}\p{N}]*(?:(?:that|already|before|guys|ya|que)[^\p{L}\p{N}]+)*(?:no+|nope|nah|never|i'?m\s+not|i\s+am\s+not|i\s+(?:do\s+not|don'?t|dont)|it'?s\s+not|we'?re\s+not)\b/iu;
-// Words that may sit around a bare repeat ("I told you already guys!!").
-const REPEAT_FILLER_RE =
-  /\b(?:already|before|guys|man|dude|bro|sir|ma'?am|lady|lol|ok|okay|so|many\s+times|several\s+times|multiple\s+times|times|twice|a\s+million\s+times|last\s+time|the\s+last\s+time|ya|antes|varias\s+veces|muchas\s+veces|se[ñn]or|se[ñn]ora|oiga|pues|this|that|it|yesterday|last\s+week|then|and|but)\b/gi;
+  /\bi\s+(?:already\s+|just\s+|have\s+|'?ve\s+)?(?:told|tld)\s+(?:you|u|y'?all|ya|you\s+guys|you\s+people|ur\s+company|your\s+company)\b|\bi\s+already\s+(?:said|answered|replied|responded)\b|\bhow\s+many\s+(?:more\s+)?times\b|\b(?:ya\s+)?te\s+(?:lo\s+)?dije\b|\bya\s+(?:le|les|se)\s+(?:lo\s+)?(?:dije|hab[ií]a\s+dicho)\b|\bc(?:u[aá])ntas\s+veces\b/i;
+const REPEAT_CONTACT_WORD_RE =
+  /\b(?:text\w*|txt\w*|messag\w*|msg\w*|call\w*|contact\w*|bother\w*|harass\w*|pester\w*|reach(?:ing)?\s+out|hit(?:ting)?\s+me\s+up|escrib\w*|mensaj\w*|molest\w*|llam\w*|textea\w*)\b/i;
 export function matchesRepeatNoContactFrustration(raw = "") {
   const text = String(raw ?? "").replace(/[’‘`]/g, "'").trim();
   if (!text || text.length > 280) return false;
   if (REPEAT_CONTACT_STRONG_RES.some((re) => re.test(text))) return true;
   const marker = REPEAT_MARKER_RE.exec(text);
   if (!marker) return false;
-  const after = text.slice(marker.index + marker[0].length);
-  if (REPEAT_DECLINE_RE.test(text.replace(marker[0], " "))) return true;
-  if (REPEAT_LEADING_NO_RE.test(after)) return true;
-  const rest = text
-    .replace(marker[0], " ")
-    .replace(REPEAT_FILLER_RE, " ")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
-  return rest.length === 0;
+  return REPEAT_CONTACT_WORD_RE.test(text.replace(marker[0], " "));
 }
 
 export function matchesPurposeOrIdentityQuestion(text = "") {
