@@ -175,7 +175,11 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
           <EntityGraphPropertyVisual address={[anchorProperty.address, anchorProperty.city, anchorProperty.state, anchorProperty.zip].filter(Boolean).join(', ')} lat={anchorProperty.lat} lng={anchorProperty.lng} onOpenMap={onOpenMap} />
         </div>
       ) : null}
-      {anchorProperty?.zip ? <ZipMarketSection zip={anchorProperty.zip} /> : null}
+      {anchorProperty ? (
+        <div className="egdk-insp__signals">
+          <SignalBadges size="md" max={12} signals={networkPropertySignals(anchorProperty, rec)} />
+        </div>
+      ) : null}
       <OutreachSection
         anchorProperty={anchorProperty}
         ids={outreachIds}
@@ -208,14 +212,10 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
         </div>
       )}
       {anchorProperty ? (
-        <div className="egdk-insp__signals">
-          <SignalBadges size="md" max={12} signals={networkPropertySignals(anchorProperty, rec)} />
-        </div>
-      ) : null}
-      {anchorProperty ? (
         <p className="egdk-spec">{spec([anchorProperty.type, anchorProperty.units && anchorProperty.units > 1 ? `${anchorProperty.units} units` : null, anchorProperty.beds ? `${anchorProperty.beds} bd` : null, anchorProperty.baths ? `${anchorProperty.baths} ba` : null, anchorProperty.sqft ? `${anchorProperty.sqft.toLocaleString('en-US')} sqft` : null, anchorProperty.yearBuilt ? `built ${anchorProperty.yearBuilt}` : null, anchorProperty.ownershipYears !== null ? `owned ${anchorProperty.ownershipYears} yrs` : null])}</p>
       ) : null}
 
+      {anchorProperty?.zip ? <ZipMarketSection zip={anchorProperty.zip} /> : null}
       <LCInspectorSection title="Controlled by">
         <button type="button" className="egdk-party" onClick={() => o.id && onOpen({ type: 'owner', id: o.id })} disabled={!o.id || network.anchor.type === 'owner'}>
           <span className={cx('egdk-dot', 'is-owner')} aria-hidden="true" />

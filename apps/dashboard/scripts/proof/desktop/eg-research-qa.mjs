@@ -41,6 +41,7 @@ const { getEntityGraphColumnEnrichment } = await import('@/lib/domain/entity-gra
 const { getEntityGraphOutreachState } = await import('@/lib/domain/entity-graph/entity-graph-outreach-state.js')
 const { getEntityNetwork } = await import('@/lib/domain/entity-graph/entity-network-service.js')
 const { listStackableDrafts, stackEntityGraphCohort, StackRefusal } = await import('@/lib/domain/entity-graph/entity-graph-campaign-stack.js')
+const { getEntityGraphZipContext } = await import('@/lib/domain/entity-graph/entity-graph-zip-context.js')
 
 /* ── synthetic dataset (deterministic) ─────────────────────────────────── */
 let seed = 7
@@ -122,6 +123,24 @@ T.campaigns.push(
   { id: 'cmp_draft_market', name: 'Atlanta market draft', status: 'draft', metadata: { target_filters: { properties: [{ field_key: 'properties.market', operator: 'is_any_of', value: ['Atlanta, GA'] }] } }, updated_at: '2026-10-06T00:00:00Z' },
 )
 T.v_entity_graph_properties = T.properties
+// MI rollup (current ready build) per ZIP, buyers, lien categories, enriched types
+T.mi_rollup_builds = [{ build_id: 10, status: 'ready' }]
+T.mi_geo_period_rollup = []
+T.eg_buyer_index = []
+T.census_geo_metrics = []
+for (const zip of new Set(T.properties.map((p) => p.property_address_zip))) {
+  T.mi_geo_period_rollup.push({ build_id: 10, geo_level: 'zip', asset: 'all', period: '1y', geo_key: zip, sale_count: 40 + Math.round(rnd() * 120), investor_count: 6, buyer_known_count: 20, cash_known_count: 18, cash_count: 7, median_price: 240000 + Math.round(rnd() * 300) * 1000, median_ppsf: 140 + Math.round(rnd() * 120), latest_sale: '2026-08-13' })
+  T.mi_geo_period_rollup.push({ build_id: 10, geo_level: 'zip', asset: 'all', period: '90d', geo_key: zip, sale_count: 8 + Math.round(rnd() * 30) })
+  for (let b = 0; b < 3; b += 1) T.eg_buyer_index.push({ buyer_id: `b_${zip}_${b}`, zips: [zip], activity_status: b ? 'active' : 'slowing' })
+}
+for (const p of T.properties) {
+  if (p.rec_lien_count) { p.rec_lien_categories = [pick(['LIS PENDENS', 'JUDGMENT', 'TAX LIEN', 'HOA LIEN'])]; p.rec_lien_amount_due = 4000 + Math.round(rnd() * 30) * 1000 }
+  p.rec_last_sale_doc_type = p.last_sale_doc_type
+}
+T.properties[3].asset_subclass = 'Storage Facility'
+T.properties[7].acquisition_bucket = 'STRIP_CENTERS'
+T.properties[11].units_count = 3
+T.properties[11].property_type = 'Multi-Family'
 
 /* ── a minimal supabase-js stand-in over T ─────────────────────────────── */
 const likeRe = (p) => new RegExp(`^${String(p).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/[%*]/g, '.*')}$`, 'i')
@@ -238,6 +257,7 @@ async function api(u, req) {
   if (p === '/filter-catalog') { const c = getEntityGraphFilterCatalog(params.tab || 'properties'); return c.source ? { ok: true, ...c } : { ok: false, error: 'tab_does_not_support_field_filters' } }
   if (p === '/composition') return params.catalog ? { ok: true, ...getCompositionCatalog(params.tab) } : { ok: true, composition: await buildEntityGraphComposition(params, compDeps) }
   if (p === '/columns') return { ok: true, ...(await getEntityGraphColumnEnrichment(params, { supabase: sb })) }
+  if (p === '/zip-context') return { ok: true, ...(await getEntityGraphZipContext(params, { supabase: sb })) }
   if (p === '/outreach-state') return { ok: true, ...(await getEntityGraphOutreachState(params, { supabase: sb })) }
   const net = /^\/network\/(property|owner|person)\/(.+)$/.exec(p)
   if (net) { const data = await getEntityNetwork(net[1], decodeURIComponent(net[2]), { supabase: sb }); return data ? { ok: true, data } : { ok: false, error: 'entity_not_found' } }
