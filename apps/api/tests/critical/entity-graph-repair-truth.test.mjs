@@ -37,3 +37,38 @@ test('equity: a recorded-documents answer beats the vendor flag', async () => {
   // no records captured: still only the flag class, never a fabricated 100%
   assert.equal(equityTruth({ estimated_value: 472000, total_loan_balance: 0, property_flags_text: 'High Equity' }).rule, 'vendor_high_equity_flag')
 })
+
+test('zip context: MI rollup of the current ready build, buyers on request, demographics unavailable when census is empty', async () => {
+  const { getEntityGraphZipContext, __zipContextTest } = await import('../../src/lib/domain/entity-graph/entity-graph-zip-context.js')
+  __zipContextTest.reset()
+  const calls = []
+  const tables = {
+    mi_rollup_builds: [{ build_id: 10, status: 'ready' }, { build_id: 9, status: 'superseded' }],
+    mi_geo_period_rollup: [
+      { build_id: 10, geo_level: 'zip', asset: 'all', period: '1y', geo_key: '75001', sale_count: 100, investor_count: 3, buyer_known_count: 9, cash_known_count: 4, cash_count: 1, median_price: 653229, median_ppsf: 275, latest_sale: '2026-08-13' },
+      { build_id: 10, geo_level: 'zip', asset: 'all', period: '90d', geo_key: '75001', sale_count: 23 },
+    ],
+    census_geo_metrics: [],
+    eg_buyer_index: [{ buyer_id: 'a', zips: ['75001'], activity_status: 'active' }, { buyer_id: 'b', zips: ['75001'], activity_status: 'slowing' }],
+  }
+  const q = (t) => {
+    const preds = []; let head = false; let count = false
+    const api = {
+      select(_c, o = {}) { head = !!o.head; count = !!o.count; return api },
+      eq(c, v) { preds.push((r) => String(r[c]) === String(v)); return api },
+      in(c, vs) { preds.push((r) => vs.map(String).includes(String(r[c]))); return api },
+      overlaps(c, vs) { preds.push((r) => (r[c] || []).some((x) => vs.includes(x))); return api },
+      order() { return api }, limit() { return api },
+      then(res) { calls.push(t); const rows = (tables[t] || []).filter((r) => preds.every((p) => p(r))); return Promise.resolve({ data: head ? null : rows, count: count ? rows.length : null, error: null }).then(res) },
+    }
+    return api
+  }
+  const out = await getEntityGraphZipContext({ zips: '75001,abc', buyers: '1' }, { supabase: { from: q } })
+  const z = out.zips['75001']
+  assert.equal(out.buildId, 10)
+  assert.deepEqual([z.sales1y, z.sales90d, z.investorShare1y, z.cashShare1y, z.medianPrice1y], [100, 23, 33, 25, 653229])
+  assert.deepEqual([z.buyers, z.activeBuyers], [2, 1])
+  assert.equal(z.demographics, null)
+  assert.equal(out.demographicsAvailable, false)
+  assert.ok(!('abc' in out.zips))
+})

@@ -43,6 +43,17 @@ export const ENTITY_GRAPH_PROPERTY_COLUMNS = Object.freeze(new Set([
   'equity_amount', 'total_loan_balance', 'assd_total_value', 'sale_price', 'sale_date', 'arv_estimate',
   'rent_estimate', 'cap_rate', 'ppsf', 'estimated_repair_cost', 'rehab_level',
   'master_owner_id', 'source_system', 'created_at', 'updated_at', 'exported_at_utc',
+  // field audit 2026-10-08: every public.properties column with data (≥1% of a 2% sample), not internal
+  'property_address2', 'property_address_range', 'owner_type', 'owner_location', 'owner_1_name', 'owner_2_name',
+  'equity_amount', 'total_loan_amt', 'total_loan_payment', 'tax_amt', 'tax_year', 'last_sale_doc_type',
+  'air_conditioning', 'construction_type', 'county_land_use_code', 'exterior_walls', 'floor_cover', 'heating_fuel_type',
+  'interior_walls', 'porch', 'deck', 'driveway', 'roof_type', 'legal_description', 'geographic_features',
+  'hoa1_name', 'hoa1_type', 'hoa_fee_amount', 'market_status_label', 'avg_sqft_per_unit', 'beds_per_unit', 'sqft_range',
+  'assd_improvement_value', 'assd_land_value', 'assd_year', 'calculated_improvement_value', 'calculated_land_value',
+  'calculated_total_value', 'lot_nbr', 'lot_size_depth_feet', 'lot_size_frontage_feet', 'num_of_fireplaces',
+  'situs_census_tract', 'style', 'topography', 'sum_buildings_nbr', 'sum_commercial_units', 'sum_garage_sqft',
+  'estimated_repair_cost_per_sqft', 'original_property_type', 'asset_class', 'asset_subclass', 'market_region',
+  'deal_list_label', 'source_list_label', 'source_list_category', 'property_export_id', 'canonical_market_id',
 ]))
 
 /**
@@ -81,6 +92,22 @@ export const ENTITY_GRAPH_LINKED_COLUMNS = Object.freeze({
   contact: Object.freeze(new Set([
     'person', 'person_count', 'phone_count', 'line_type', 'phone_activity', 'identity', 'matching', 'phone_owner',
   ])),
+  // recorded documents (seller.* via public.v_entity_graph_properties rec_* — loans, liens, sales, foreclosure)
+  rec: Object.freeze(new Set([
+    'mortgage_count', 'mortgage_balance', 'mortgage_payment', 'first_rate', 'max_rate', 'first_lender', 'first_loan_type',
+    'first_recording_date', 'first_due_date', 'has_private_lender', 'has_heloc', 'has_fha', 'has_va', 'has_seller_financing',
+    'has_adjustable', 'lien_count', 'lien_amount_due', 'lien_categories', 'has_probate', 'has_lis_pendens', 'has_death_record',
+    'has_divorce_record', 'has_judgment', 'has_mechanics_lien', 'has_tax_lien', 'has_hoa_lien', 'has_default_notice',
+    'sale_count', 'last_sale_date', 'last_sale_price', 'last_sale_doc_type', 'last_sale_distress', 'last_sale_intrafamily',
+    'years_owned', 'foreclosure_count', 'foreclosure_stage', 'auction_date',
+  ])),
+  // the canonical person on the campaign graph's best row (prospects by individual_key)
+  person: Object.freeze(new Set([
+    'language_preference', 'gender', 'marital_status', 'occupation_group', 'education_model', 'est_household_income',
+    'net_asset_value', 'buying_power', 'age', 'person_flags_text', 'matching_flags', 'timezone', 'contact_window',
+  ])),
+  // the property's ZIP market (entity-graph-zip-context.js: MI rollup + buyer index)
+  zip: Object.freeze(new Set(['sales_90d', 'sales_1y', 'investor_share', 'cash_share', 'median_price', 'median_ppsf', 'latest_sale', 'buyers', 'active_buyers'])),
   entity: Object.freeze(new Set(['name', 'count'])),
   email: Object.freeze(new Set(['count'])),
 })
@@ -117,6 +144,8 @@ async function enrichLinked(client, ids, linked, values) {
   const scoreCols = want('scores')
   const contactCols = want('contact')
   const entityCols = want('entity')
+  const recCols = want('rec')
+  const personCols = want('person')
   const emailCols = want('email')
   const put = (id, key, v) => {
     if (!present(v)) return
@@ -131,7 +160,51 @@ async function enrichLinked(client, ids, linked, values) {
   }
   const ownerIds = ownerOf ? [...new Set(ownerOf.values())] : []
 
+  const zipCols = want('zip')
   await Promise.all([
+    (async () => {
+      if (!zipCols.length) return
+      const props = await readIn(client, 'properties', 'property_id, property_address_zip', 'property_id', ids)
+      const zipOf = new Map(props.map((p) => [clean(p.property_id), clean(p.property_address_zip).slice(0, 5)]))
+      const { getEntityGraphZipContext } = await import('./entity-graph-zip-context.js')
+      const wantsBuyers = zipCols.some((c) => c === 'buyers' || c === 'active_buyers')
+      const { zips } = await getEntityGraphZipContext({ zips: [...new Set(zipOf.values())].join(','), buyers: wantsBuyers ? '1' : '0' }, { supabase: client })
+      const map = { sales_90d: 'sales90d', sales_1y: 'sales1y', investor_share: 'investorShare1y', cash_share: 'cashShare1y', median_price: 'medianPrice1y', median_ppsf: 'medianPpsf1y', latest_sale: 'latestSale', buyers: 'buyers', active_buyers: 'activeBuyers' }
+      for (const [pid, zip] of zipOf) for (const c of zipCols) put(pid, `zip.${c}`, zips[zip]?.[map[c]])
+    })(),
+    (async () => {
+      if (!recCols.length) return
+      const rows = await readIn(client, 'v_entity_graph_properties', ['property_id', ...recCols.map((c) => `rec_${c}`)].join(','), 'property_id', ids)
+      for (const r of rows) for (const c of recCols) {
+        const v = r[`rec_${c}`]
+        put(clean(r.property_id), `rec.${c}`, Array.isArray(v) ? (v.length ? v.join(', ') : null) : v)
+      }
+    })(),
+    (async () => {
+      if (!personCols.length) return
+      const graph = await readIn(client, 'campaign_target_graph', 'property_id, seller_person_key, best_phone_score', 'property_id', ids)
+      const best = new Map()
+      for (const g of graph) {
+        const id = clean(g.property_id)
+        const cur = best.get(id)
+        if (clean(g.seller_person_key) && (!cur || (Number(g.best_phone_score) || -1) > (Number(cur.best_phone_score) || -1))) best.set(id, g)
+      }
+      const keys = [...new Set([...best.values()].map((g) => clean(g.seller_person_key)))]
+      if (!keys.length) return
+      const cols = personCols.filter((c) => c !== 'age')
+      const people = await readIn(client, 'prospects', ['individual_key', 'mob', ...cols].join(','), 'individual_key', keys)
+      const byKey = new Map(people.map((p) => [clean(p.individual_key), p]))
+      const now = new Date()
+      for (const [id, g] of best) {
+        const p = byKey.get(clean(g.seller_person_key))
+        if (!p) continue
+        for (const c of cols) put(id, `person.${c}`, p[c])
+        if (personCols.includes('age') && /^\d{6}$/.test(clean(p.mob))) {
+          const y = Number(p.mob.slice(0, 4)); const m = Number(p.mob.slice(4))
+          put(id, 'person.age', now.getUTCFullYear() - y - (now.getUTCMonth() + 1 < m ? 1 : 0))
+        }
+      }
+    })(),
     (async () => {
       if (!ownerCols.length || !ownerIds.length) return
       const rows = await readIn(client, 'master_owners', ['master_owner_id', ...ownerCols].join(','), 'master_owner_id', ownerIds)
