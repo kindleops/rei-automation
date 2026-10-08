@@ -405,6 +405,8 @@ function ContactLine({ icon, value, meta, warn }: { icon: 'phone' | 'mail'; valu
  * blocking reason: the campaign target builder's own readiness rule), the
  * latest message and campaign membership. A network shows the roll-up.
  */
+const RESOLUTION_LABEL: Record<string, string> = { resolved_owner: 'Resolved owner', graph_person: 'Graph person · no phone', linked_unresolved: 'Linked · unresolved' }
+
 function OutreachSection({ anchorProperty, ids, states, onAddToCampaign }: { anchorProperty: NetworkProperty | null; ids: string[]; states: Map<string, OutreachState | null>; onAddToCampaign?: () => void }) {
   const loaded = ids.filter((id) => states.has(id))
   const list = loaded.map((id) => states.get(id)).filter((x): x is OutreachState => Boolean(x))
@@ -433,6 +435,23 @@ function OutreachSection({ anchorProperty, ids, states, onAddToCampaign }: { anc
               <div><dt>Status</dt><dd>{st.status ? humanize(st.status.value) : '—'}{st.status ? <small>{st.status.source === 'pipeline' ? 'pipeline deal' : 'conversation'}</small> : null}</dd></div>
               <div><dt>Campaigns</dt><dd>{st.campaigns ? (st.campaigns.count ? `${st.campaigns.latest?.name ?? 'Campaign'}${st.campaigns.count > 1 ? ` +${st.campaigns.count - 1}` : ''}` : 'Not in a campaign') : '—'}{st.campaigns?.latest?.targetStatus ? <small>{humanize(st.campaigns.latest.targetStatus)}{st.campaigns.latest.blockReason ? ` · ${smsReasonLabel(st.campaigns.latest.blockReason)}` : ''}</small> : null}</dd></div>
             </dl>
+            {st.contactCandidates && st.contactCandidates.phones > 0 ? (
+              <div className="egdk-outreach__cands">
+                <p className="egdk-outreach__candhead">
+                  {`${st.contactCandidates.phones} phone ${st.contactCandidates.phones === 1 ? 'candidate' : 'candidates'} on linked people`}
+                  <small>Evidence only — not in the campaign graph, so not SMS-eligible until the graph resolves them.</small>
+                </p>
+                <ul>
+                  {st.contactCandidates.candidates.map((c) => (
+                    <li key={`${c.name}:${c.phones.map((p) => p.masked).join()}`}>
+                      <span className={cx('egdk-tag', c.resolution === 'linked_unresolved' ? 'is-attn' : 'is-ok')}>{RESOLUTION_LABEL[c.resolution]}</span>
+                      <strong>{c.name}</strong>
+                      <small>{c.phones.map((p) => spec([p.masked, p.type === 'W' ? 'wireless' : p.type === 'L' ? 'landline' : p.type, p.score !== null ? `score ${p.score}` : null])).join(' · ')}</small>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {st.conversation?.preview ? (
               <blockquote className="egdk-outreach__msg">
                 <span>{st.conversation.direction === 'inbound' ? 'Seller' : 'Us'} · {relativeDay(st.conversation.at)}</span>

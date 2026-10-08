@@ -753,3 +753,11 @@ html.is-desktop-modern .egdk-gcard { max-height: calc(100% - 16px); overflow: hi
 @container egdk (max-width: 640px) {
   html.is-desktop-modern .egdk-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* contact discovery: linked-prospect phone candidates (evidence, not eligibility) */
+html.is-desktop-modern .egdk-outreach__cands { padding: 9px 12px; border-radius: 10px; background: rgba(var(--lc-edge-rgb), 0.035); box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.09); }
+html.is-desktop-modern .egdk-outreach__candhead { margin: 0 0 6px; font-size: 12.5px; font-weight: 560; display: flex; flex-direction: column; gap: 2px; }
+html.is-desktop-modern .egdk-outreach__candhead small { font-size: 11px; font-weight: 450; color: var(--lc-ink-3); }
+html.is-desktop-modern .egdk-outreach__cands ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+html.is-desktop-modern .egdk-outreach__cands li { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; font-size: 12.5px; }
+html.is-desktop-modern .egdk-outreach__cands li small { grid-column: 2; font-size: 11.5px; color: var(--lc-ink-3); }

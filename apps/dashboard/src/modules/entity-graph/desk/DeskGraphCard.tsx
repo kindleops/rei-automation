@@ -70,7 +70,11 @@ export function nodeCardFacts(node: NetworkNode, network: EntityNetwork, outreac
       },
     ]
     if (rec && rec.liens.length) rows.push({ k: 'Liens', v: spec([`${rec.liens.length} recorded`, rec.liens.slice(0, 2).map((l) => l.label).join(', ')]) })
-    if (st?.sms) rows.push({ k: 'SMS eligible', v: st.sms.eligible ? 'Yes' : `No · ${smsReasonLabel(st.sms.reason)}`, tone: st.sms.eligible ? 'ok' : 'attn' })
+    if (st?.sms) {
+      const cands = st.contactCandidates
+      const gap = !st.sms.eligible && cands && cands.phones > 0
+      rows.push({ k: 'SMS eligible', v: st.sms.eligible ? 'Yes' : gap ? `No · ${cands.phones} phone ${cands.phones === 1 ? 'candidate' : 'candidates'} on linked people (not in campaign graph)` : `No · ${smsReasonLabel(st.sms.reason)}`, tone: st.sms.eligible ? 'ok' : 'attn' })
+    }
     rows.push({ k: 'Last contact', v: lastContactLabel(st?.lastContact ?? null) ?? (st ? 'Never contacted' : '—') })
     if (st?.stage || st?.status) rows.push({ k: 'Stage', v: spec([st?.stage ? humanize(st.stage.value) : null, st?.status ? humanize(st.status.value) : null, st?.stage?.source === 'pipeline' ? 'pipeline deal' : st?.stage ? 'conversation' : null]) })
     if (st?.campaigns) rows.push({ k: 'Campaign', v: st.campaigns.count ? spec([st.campaigns.latest?.name ?? 'Campaign', st.campaigns.count > 1 ? `+${st.campaigns.count - 1}` : null, st.campaigns.latest?.targetStatus ? humanize(st.campaigns.latest.targetStatus) : null]) : 'Not in a campaign' })

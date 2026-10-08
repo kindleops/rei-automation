@@ -283,3 +283,28 @@ test('a legacy param that narrows nothing on this scope is not a cohort', async 
   await assert.rejects(resolveStackPropertyIds({ scope: 'properties', mode: 'cohort', score_min: '50' }, { supabase }), (e) => e.code === 'cohort_has_no_filters')
   await assert.rejects(resolveStackPropertyIds({ scope: 'people', mode: 'cohort', market: 'Dallas' }, { supabase }), (e) => e.code === 'cohort_has_no_filters')
 })
+
+test('contact discovery: linked-prospect phones show as masked candidates with resolution, eligibility untouched', async () => {
+  const { getEntityGraphOutreachState, contactCandidates, maskPhone } = await import('../../src/lib/domain/entity-graph/entity-graph-outreach-state.js')
+  assert.equal(maskPhone('+15551234567'), '•••-4567')
+  const supabase = fakeSupabase({
+    campaign_target_graph: [{ property_id: '9', queue_eligible: false, queue_block_reason: 'missing_phone', seller_person_key: 'ik1', canonical_e164: null }],
+    properties: [{ property_id: '9', master_owner_id: null }],
+    prospects: [
+      { prospect_id: 'a', individual_key: 'ik1', master_owner_id: null, full_name: 'Ana Ruiz', linked_property_ids_json: ['9'], phones_json: [{ canonical_e164: '+15550001111', phone_type: 'W', phone_score: 81 }] },
+      { prospect_id: 'b', individual_key: 'ik2', master_owner_id: null, full_name: 'Luis Ruiz', linked_property_ids_json: ['9'], phones_json: [{ canonical_e164: '+15550002222', phone_type: 'L' }] },
+    ],
+  })
+  // the fake has no .contains — add a tiny one for jsonb array containment
+  const from = supabase.from
+  supabase.from = (t) => { const q = from(t); q.contains = (c, vs) => { q.__c = [c, vs]; return q.in('prospect_id', (t === 'prospects' ? ['a', 'b'] : [])) }; return q }
+  const { states } = await getEntityGraphOutreachState({ property_ids: '9' }, { supabase })
+  const st = states['9']
+  assert.equal(st.sms.eligible, false, 'eligibility is still the graph verdict')
+  assert.equal(st.sms.reason, 'missing_phone')
+  assert.equal(st.contactCandidates.people, 2)
+  assert.equal(st.contactCandidates.phones, 2)
+  assert.deepEqual(st.contactCandidates.candidates.map((c) => c.resolution), ['graph_person', 'linked_unresolved'])
+  assert.ok(!JSON.stringify(states).includes('+1555'), 'no raw number leaves the server')
+  assert.equal(contactCandidates({ prospects: [{ master_owner_id: 'o1', full_name: 'X', phones_json: [{ canonical_e164: '+15550003333' }] }], propertyOwnerId: 'o1' })[0].resolution, 'resolved_owner')
+})

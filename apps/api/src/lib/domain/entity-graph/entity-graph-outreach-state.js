@@ -107,6 +107,63 @@ function preview(body) {
 }
 
 /**
+ * CONTACT DISCOVERY (owner defect 2026-10-08): a property whose campaign-graph
+ * rows carry no phone — or that has no graph row / no master owner at all —
+ * read "No phone" even when prospects linked to it (prospects.linked_property_ids_json,
+ * GIN-indexed) carry phone candidates. Measured on a 361-property sample of
+ * owner-less properties: 185 have a linked prospect with a phone; 41 of
+ * those show no phone in the campaign graph.
+ *
+ * These candidates are EVIDENCE, never eligibility: SMS eligible stays the
+ * builder's readiness verdict, and Add to Campaign still pins only what the
+ * graph allows. Each candidate states how it is tied to the property:
+ *   resolved_owner      the prospect's master owner IS the property's master owner
+ *   graph_person        the prospect's individual_key is the graph's resolved person
+ *   linked_unresolved   linked to the property by the vendor, identity not resolved
+ * Numbers leave the server masked (last four digits only).
+ */
+export const CONTACT_GAP_REASONS = new Set(['not_in_campaign_audience', 'missing_phone', 'NO_PHONE', 'missing_identity_linkage'])
+const PROSPECT_CANDIDATE_SELECT = 'prospect_id, master_owner_id, individual_key, full_name, matching_flags, phones_json, sms_eligible'
+export const maskPhone = (value) => {
+  const digits = String(value ?? '').replace(/\D/g, '')
+  return digits.length >= 4 ? `•••-${digits.slice(-4)}` : '•••'
+}
+
+export function contactCandidates({ prospects = [], propertyOwnerId = null, graphRows = [] } = {}) {
+  const graphPeople = new Set(graphRows.map((r) => clean(r.seller_person_key)).filter(Boolean))
+  const graphPhones = new Set(graphRows.map((r) => clean(r.canonical_e164)).filter(Boolean))
+  const out = []
+  for (const p of prospects) {
+    const resolution = propertyOwnerId && clean(p.master_owner_id) === clean(propertyOwnerId) ? 'resolved_owner'
+      : graphPeople.has(clean(p.individual_key)) ? 'graph_person'
+        : 'linked_unresolved'
+    const evidence = ['linked_property']
+    if (resolution === 'resolved_owner') evidence.push('same_master_owner')
+    if (graphPeople.has(clean(p.individual_key))) evidence.push('campaign_graph_person')
+    const phones = (Array.isArray(p.phones_json) ? p.phones_json : [])
+      .filter((ph) => ph && (ph.canonical_e164 || ph.phone_raw))
+      .map((ph) => ({
+        masked: maskPhone(ph.canonical_e164 || ph.phone_raw),
+        type: clean(ph.phone_type) || null,
+        score: Number.isFinite(Number(ph.phone_score)) ? Number(ph.phone_score) : null,
+        usage: clean(ph.usage_2_months) || null,
+        inCampaignGraph: graphPhones.has(clean(ph.canonical_e164)),
+      }))
+    if (!phones.length) continue
+    out.push({ name: clean(p.full_name) || 'Linked person', resolution, evidence, matching: clean(p.matching_flags) || null, phones })
+  }
+  const rank = { resolved_owner: 0, graph_person: 1, linked_unresolved: 2 }
+  return out.sort((a, b) => rank[a.resolution] - rank[b.resolution])
+}
+
+async function pooled(items, limit, fn) {
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next; next += 1; await fn(items[i]) }
+  }))
+}
+
+/**
  * Returns { states: { [property_id]: OutreachState }, generatedAt, partial }.
  * A source that fails is reported in `unavailable` and its facts stay absent
  * — never filled with a guess.
@@ -136,6 +193,25 @@ export async function getEntityGraphOutreachState(params = {}, deps = {}) {
       return result?.blocked || new Set()
     }),
   ])
+
+  // contact discovery only where the graph has no phone for the property
+  const gapIds = graphRows === null ? [] : ids.filter((id) => {
+    const rows = graphRows.filter((r) => clean(r.property_id) === id)
+    return !rows.some((r) => clean(r.canonical_e164))
+  })
+  const candidatesBy = new Map()
+  const propertyOwner = new Map()
+  if (gapIds.length) {
+    await guard('contact_candidates', async () => {
+      const owners = await inChunks(gapIds, (part) => readOrThrow(supabase.from('properties').select('property_id, master_owner_id').in('property_id', part)))
+      for (const o of owners) propertyOwner.set(clean(o.property_id), clean(o.master_owner_id) || null)
+      await pooled(gapIds, 6, async (id) => {
+        // jsonb containment takes a JSON array STRING (an Array is sent as a Postgres array literal)
+        const rows = await readOrThrow(supabase.from('prospects').select(PROSPECT_CANDIDATE_SELECT).contains('linked_property_ids_json', JSON.stringify([String(id)])).limit(12))
+        candidatesBy.set(id, rows)
+      })
+    })
+  }
 
   const campaignIds = [...new Set((targets || []).map((t) => clean(t.campaign_id)).filter(Boolean))]
   const campaigns = campaignIds.length
@@ -186,8 +262,20 @@ export async function getEntityGraphOutreachState(params = {}, deps = {}) {
     }
     const latestTarget = [...byCampaign.values()].sort((a, b) => (time(b.created_at) || 0) - (time(a.created_at) || 0))[0] || null
     const latestCampaign = latestTarget ? campaignById.get(clean(latestTarget.campaign_id)) : null
+    const discovered = candidatesBy.has(id)
+      ? contactCandidates({ prospects: candidatesBy.get(id), propertyOwnerId: propertyOwner.get(id) ?? null, graphRows: rows })
+      : null
     states[id] = {
       sms,
+      // null = not looked up (the graph already has a phone, or the read failed)
+      contactCandidates: discovered
+        ? {
+            people: discovered.length,
+            phones: discovered.reduce((n, c) => n + c.phones.length, 0),
+            unresolved: discovered.filter((c) => c.resolution === 'linked_unresolved').length,
+            candidates: discovered.slice(0, 6),
+          }
+        : null,
       lastContact: contact,
       stage,
       status,

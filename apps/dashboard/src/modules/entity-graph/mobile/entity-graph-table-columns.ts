@@ -127,7 +127,11 @@ const OUTREACH_COLUMNS: TableColumn[] = [
     render: (r) => {
       const s = r.details?.outreach?.sms
       if (!s) return null
-      return s.eligible ? 'Yes' : `No · ${smsBlockLabel(s.reason)}`
+      if (s.eligible) return 'Yes'
+      // a gap in the campaign graph is not "no phone" when linked prospects carry candidates
+      const c = r.details?.outreach?.contactCandidates
+      if (c && c.phones > 0) return `No · not in campaign graph · ${c.phones} phone ${c.phones === 1 ? 'candidate' : 'candidates'}${c.unresolved ? ' (unresolved)' : ''}`
+      return `No · ${smsBlockLabel(s.reason)}`
     },
     sortValue: (r) => { const s = r.details?.outreach?.sms; return s ? (s.eligible ? 1 : 0) : null },
   },

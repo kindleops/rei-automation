@@ -351,6 +351,16 @@ export type EntityGraphAction =
  */
 export type EntityOutreachState = {
   sms: { eligible: boolean; reason: string | null; rows: number; ready: number; source: string; reviewChecked: boolean } | null
+  /**
+   * Phones on prospects linked to the property when the campaign graph has none
+   * for it. EVIDENCE only — never eligibility. Numbers arrive masked.
+   */
+  contactCandidates?: {
+    people: number
+    phones: number
+    unresolved: number
+    candidates: Array<{ name: string; resolution: 'resolved_owner' | 'graph_person' | 'linked_unresolved'; evidence: string[]; matching: string | null; phones: Array<{ masked: string; type: string | null; score: number | null; usage: string | null; inCampaignGraph: boolean }> }>
+  } | null
   lastContact: { at: string; direction: 'inbound' | 'outbound'; channel: string; source: string } | null
   stage: { value: string; source: 'pipeline' | 'conversation' } | null
   status: { value: string; source: 'pipeline' | 'conversation' } | null
