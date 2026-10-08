@@ -100,6 +100,22 @@ for (const o of T.master_owners) {
     if (n % 9 === 0) T.property_acquisition_scores.push({ property_id: id, aos_score: 62, decision_tier: 'B', best_strategy: 'cash' })
   }
 }
+// contact discovery: owner-less properties whose graph rows carry no phone,
+// with prospects linked to the property that DO carry phones
+for (const p of T.properties.slice(40, 46)) {
+  p.master_owner_id = null
+  for (const g of T.campaign_target_graph.filter((r) => r.property_id === p.property_id)) { g.canonical_e164 = null; g.queue_eligible = false; g.queue_block_reason = 'missing_phone' }
+  T.prospects.push({ prospect_id: `lp_${p.property_id}`, master_owner_id: null, individual_key: `ik_${p.property_id}`, full_name: `${pick(FIRST)} ${pick(LAST)}`, linked_property_ids_json: [p.property_id], phones_json: [{ canonical_e164: `+1555${p.property_id.slice(-7)}`, phone_type: 'W', phone_score: 74, usage_2_months: 'Heavy Usage' }], matching_flags: 'Likely Owner' })
+}
+// a large portfolio for the graph performance pass (owner with 90 properties)
+{
+  const big = { master_owner_id: 'mo_big', display_name: 'Lone Star Rentals LLC', owner_type_guess: 'LLC/CORP | ABSENTEE', priority_tier: 'A', property_count: 90, portfolio_total_value: 0, portfolio_total_units: 0, markets_text: 'Dallas, TX' }
+  T.master_owners.push(big)
+  for (let i = 0; i < 90; i += 1) {
+    const id = String(239000000 + i)
+    T.properties.push({ ...T.properties[i % 40], property_id: id, master_owner_id: 'mo_big', property_address_full: `${2000 + i} Commerce St, Dallas, TX`, owner_name: big.display_name, estimated_value: 150000 + i * 5000 })
+  }
+}
 T.campaigns.push(
   { id: 'cmp_dallas', name: 'Dallas S1 · ownership check', status: 'built', metadata: {}, updated_at: '2026-09-20T00:00:00Z' },
   { id: 'cmp_draft_probate', name: 'Probate + vacant · stacked', status: 'draft', metadata: { source: 'entity_graph', target_filters: { properties: [{ field_key: 'properties.property_id', operator: 'is_any_of', value: T.properties.slice(0, 6).map((p) => p.property_id) }] }, entity_graph_stack: [{ at: '2026-10-07' }] }, updated_at: '2026-10-07T00:00:00Z' },
@@ -166,7 +182,7 @@ function fake() {
       not: (c, op, v) => cmp(c, (x) => (op === 'is' ? (v === null ? x != null : x !== v) : op === 'like' || op === 'ilike' ? !likeRe(v).test(String(x ?? '')) : op === 'eq' ? String(x) !== String(v) : true)),
       or: (expr) => { st.preds.push(orPred(String(expr))); return api },
       overlaps: (c, vs) => cmp(c, (x) => Array.isArray(x) && x.some((y) => vs.includes(y))),
-      contains: (c, vs) => cmp(c, (x) => Array.isArray(x) && vs.every((y) => x.includes(y))),
+      contains: (c, vs) => { const want = typeof vs === 'string' ? JSON.parse(vs) : vs; return cmp(c, (x) => Array.isArray(x) && want.every((y) => x.includes(y))) },
       order: (c, o = {}) => { st.order.push([c, o.ascending !== false]); return api },
       range: (a, b) => { st.from = a; st.to = b; return api },
       limit: (k) => { st.limit = k; return api },
@@ -278,6 +294,8 @@ const SCENES = [
   ['05-inspector-streetview', `/entity-graph/property/${PROP.property_id}?${ff([{ field_key: 'properties.flags', operator: 'is_any_of', value: ['Vacant Home', 'Probate'] }])}`, 'inspector'],
   ['06-graph-hover-card', `/entity-graph/property/${PROP.property_id}?egv=graph`, 'hover'],
   ['07-graph-fullscreen', `/entity-graph/property/${PROP.property_id}?egv=graph&egfs=1`, 'hover'],
+  ['10-contact-discovery', `/entity-graph/property/${T.properties[41].property_id}`, 'inspector'],
+  ['09-perf', `/entity-graph`, 'perf'],
   ['08-pane-50', `/entity-graph?${ff([{ field_key: 'properties.flags', operator: 'is_any_of', value: ['Vacant Home'] }])}`, 'split'],
 ].filter(([nm]) => !ONLY || ONLY.split(',').some((o) => nm.startsWith(o)))
 
@@ -341,6 +359,61 @@ for (const theme of THEMES) for (const [W, H] of SIZES) {
         if (box) { await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.waitForTimeout(700) }
         row.hoverCard = await page.locator('.egdk-gcard').innerText().catch(() => null)
         row.streetViewThisScene = streetView.byScene[scene] || 0
+      }
+      if (mode === 'perf') {
+        // filter latency: click a quick filter → the summary changes (client + in-process API)
+        const before = await page.locator('.egdk-head__summary').innerText()
+        const t0 = Date.now()
+        await page.locator('.egdk-preset', { hasText: 'Tax delinquent' }).first().click()
+        await page.waitForFunction((b) => document.querySelector('.egdk-head__summary')?.textContent !== b && !/Reading/.test(document.querySelector('.egdk-head__summary')?.textContent || ''), before, { timeout: 15_000 })
+        row.filterLatencyMs = Date.now() - t0
+        await page.locator('.egdk-preset', { hasText: 'Tax delinquent' }).first().click()
+        await page.waitForTimeout(800)
+        // grid scroll: frames painted during a 1.2 s programmatic scroll of the whole grid
+        const reqDuring = []
+        const onReq = (r) => { if (r.url().includes('/api/')) reqDuring.push(new URL(r.url()).pathname.split('/').pop()) }
+        page.on('request', onReq)
+        await page.evaluate(() => { window.__lt = []; try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)) }).observe({ type: 'longtask', buffered: false }) } catch { /* */ } })
+        const scrollRun = () => page.evaluate(async () => {
+          const el = document.querySelector('.egdk .lc-grid__scroller')
+          if (!el) return null
+          let frames = 0; let worst = 0; let last = performance.now()
+          const start = last
+          await new Promise((done) => {
+            const tick = (t) => { frames += 1; worst = Math.max(worst, t - last); last = t; el.scrollTop = ((t - start) / 1200) * (el.scrollHeight - el.clientHeight); el.dispatchEvent(new Event('scroll')); if (t - start < 1200) requestAnimationFrame(tick); else done() }
+            requestAnimationFrame(tick)
+          })
+          return { frames, fps: Math.round(frames / 1.2), worstFrameMs: Math.round(worst), rowsMounted: el.querySelectorAll('.lc-grid__row').length, longTasks: window.__lt.slice(0, 20) }
+        })
+        // calibration: frames in an IDLE 1.2 s on this page (no scroll) — the machine's ceiling
+        row.idleFps = await page.evaluate(async () => { let f = 0; const s0 = performance.now(); await new Promise((d) => { const t = (n) => { f += 1; if (n - s0 < 1200) requestAnimationFrame(t); else d() }; requestAnimationFrame(t) }); return Math.round(f / 1.2) })
+        row.gridScroll = await scrollRun()
+        // the same scroll with glass blur off: separates JS/render cost from
+        // software rasterisation of backdrop-filter (headless has no GPU)
+        await page.addStyleTag({ content: '* { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }' })
+        await page.evaluate(() => { const el = document.querySelector('.egdk .lc-grid__scroller'); if (el) el.scrollTop = 0 })
+        await page.waitForTimeout(300)
+        row.gridScrollNoBlur = await scrollRun()
+        // JS cost of one scroll update (React render of the grid), measured directly
+        row.scrollHandlerMs = await page.evaluate(async () => {
+          const el = document.querySelector('.egdk .lc-grid__scroller'); if (!el) return null
+          const t = performance.now(); el.scrollTop = 200; el.dispatchEvent(new Event('scroll'))
+          await new Promise((r) => setTimeout(r, 0)); return Math.round(performance.now() - t)
+        })
+        page.off('request', onReq)
+        row.gridScroll.requestsDuringScroll = reqDuring
+        // large network: open the 90-property owner's graph, time to first paint + hover
+        const t1 = Date.now()
+        await page.goto(`${BASE}/entity-graph/owner/mo_big?egv=graph&egfs=1`, { waitUntil: 'domcontentloaded' })
+        await page.waitForSelector('.egdk-graphpane .egdk-node', { timeout: 20_000 })
+        row.bigGraphMs = Date.now() - t1
+        row.bigGraphNodes = await page.locator('.egdk-graphpane .egdk-node').count()
+        const nodes = page.locator('.egdk-graphpane .egdk-node.is-property')
+        const t2 = Date.now()
+        for (let i = 0; i < Math.min(8, await nodes.count()); i += 1) { const b = await nodes.nth(i).boundingBox(); if (b) await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2) }
+        await page.waitForSelector('.egdk-gcard', { timeout: 5000 }).catch(() => {})
+        row.hoverSweepMs = Date.now() - t2
+        row.streetViewAfterHoverSweep = streetView.byScene[scene] || 0
       }
       if (mode === 'split') {
         // ⌥-click a sidebar app = "Open beside" (the shell's own split gesture)
