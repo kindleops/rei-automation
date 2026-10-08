@@ -1,0 +1,1 @@
+col,inbox_thread_state.latest_message_event_id uuid

@@ -391,3 +391,9 @@ test('seller emails deep-link into the account and never ask the seller to call'
     assert.doesNotMatch(email.html, /[?&](token|session|code)=/i, 'no sensitive state in links');
   }
 });
+
+test('every email renders with only its own context (no other template is evaluated)', () => {
+  for (const kind of ['sign_in_code', 'action_needed', 'document_ready', 'message', 'offer_ready', 'closed']) {
+    assert.ok(renderSellerEmail({ kind, context: { code: '123456', minutes: 15 } }, {}), kind);
+  }
+});
