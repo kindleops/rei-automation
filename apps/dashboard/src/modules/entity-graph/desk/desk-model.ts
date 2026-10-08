@@ -15,6 +15,7 @@ import { IDENTITY_COLUMN_KEY } from '../mobile/entity-graph-table-layout'
 import { SCOPE_DEFAULT_SORT_KEY, SCOPE_SORTS, type EntityScope } from '../mobile/entity-graph-mobile-format'
 import type { NetworkNode } from '../console/entity-network-api'
 import { PROPERTY_CLUSTER_ID } from '../console/network-layout'
+import { PRESETS, type PresetGroup } from '../mobile/entity-graph-presets'
 
 export type NetworkAnchor = { type: 'property' | 'owner' | 'person'; id: string }
 
@@ -242,3 +243,130 @@ export const DESK_DISTRESS_TOGGLES: DeskToggle[] = [
   { key: 'fc', label: 'Foreclosure filing', filter: { field_key: 'records.foreclosure_count', operator: 'gte', value: 1 } },
   { key: 'probate', label: 'Probate filing', filter: { field_key: 'records.has_probate', operator: 'is_true' } },
 ]
+
+/* ── The rail, organised (owner 2026-10-08: "clear groups", People filters) ── */
+
+export type DeskFacetGroup = { id: string; label: string; facets: DeskFacet[]; toggles?: DeskToggle[] }
+
+/**
+ * Facet groups per scope — each facet is a composition dimension (exact
+ * counts, one GROUP BY) whose bucket taps become an ordinary catalog filter.
+ * Every dimension named here exists server-side (entity-graph-composition.js).
+ */
+export const DESK_FACET_GROUPS: Partial<Record<EntityScope, DeskFacetGroup[]>> = {
+  properties: [
+    { id: 'distress', label: 'Distress & condition', facets: DESK_DISTRESS_FACETS, toggles: DESK_DISTRESS_TOGGLES },
+    { id: 'location', label: 'Location', facets: [
+      { dimension: 'market', label: 'Market', fieldKey: 'properties.market' },
+      { dimension: 'state', label: 'State', fieldKey: 'properties.property_address_state' },
+      { dimension: 'county', label: 'County', fieldKey: 'properties.property_address_county_name' },
+      { dimension: 'city', label: 'City', fieldKey: 'properties.property_address_city' },
+    ] },
+    { id: 'asset', label: 'Asset', facets: [
+      { dimension: 'property_type', label: 'Property type', fieldKey: 'properties.property_type' },
+    ] },
+    { id: 'records', label: 'Debt & sale records', facets: [
+      { dimension: 'loan_type', label: 'Loan type', fieldKey: 'records.first_loan_type' },
+      { dimension: 'last_deed', label: 'Last sale document', fieldKey: 'records.last_sale_doc_type' },
+    ] },
+  ],
+  people: [
+    { id: 'matching', label: 'Owner matching', facets: [
+      { dimension: 'matching', label: 'Matching tags', fieldKey: 'prospects.matching_flags' },
+      { dimension: 'person_flags', label: 'Person flags', fieldKey: 'prospects.person_flags_text' },
+    ] },
+    { id: 'demographics', label: 'Demographics', facets: [
+      { dimension: 'language', label: 'Language', fieldKey: 'prospects.language_preference' },
+      { dimension: 'gender', label: 'Gender', fieldKey: 'prospects.gender' },
+      { dimension: 'marital', label: 'Marital status', fieldKey: 'prospects.marital_status' },
+      { dimension: 'occupation', label: 'Occupation', fieldKey: 'prospects.occupation_group' },
+      { dimension: 'education', label: 'Education', fieldKey: 'prospects.education_model' },
+    ] },
+    { id: 'financial', label: 'Financial', facets: [
+      { dimension: 'income', label: 'Household income', fieldKey: 'prospects.est_household_income' },
+      { dimension: 'net_assets', label: 'Net asset value', fieldKey: 'prospects.net_asset_value' },
+      { dimension: 'buying_power', label: 'Buying power', fieldKey: 'prospects.buying_power' },
+    ] },
+    { id: 'contact', label: 'Contact', facets: [
+      { dimension: 'timezone', label: 'Time zone', fieldKey: 'prospects.timezone' },
+      { dimension: 'contact_window', label: 'Contact window', fieldKey: 'prospects.contact_window' },
+    ] },
+  ],
+  master_owners: [
+    { id: 'profile', label: 'Owner profile', facets: [
+      { dimension: 'owner_type', label: 'Owner type', fieldKey: 'master_owners.owner_type_guess' },
+      { dimension: 'tier', label: 'Priority tier', fieldKey: 'master_owners.priority_tier' },
+      { dimension: 'cadence', label: 'Follow-up cadence', fieldKey: 'master_owners.follow_up_cadence' },
+    ] },
+  ],
+  contact_methods: [
+    { id: 'phone', label: 'Phone line', facets: [
+      { dimension: 'line', label: 'Line type', fieldKey: 'phones.phone_type' },
+      { dimension: 'phone_owner', label: 'Phone owner', fieldKey: 'phones.phone_owner' },
+      { dimension: 'activity', label: 'Activity', fieldKey: 'phones.activity_status' },
+      { dimension: 'usage12', label: 'Usage, 12 months', fieldKey: 'phones.usage_12_months' },
+      { dimension: 'usage2', label: 'Usage, 2 months', fieldKey: 'phones.usage_2_months' },
+    ] },
+  ],
+  buyers: [
+    { id: 'buyers', label: 'Buyer profile', facets: DESK_FACETS.buyers ?? [] },
+  ],
+}
+
+const pf = (field_key: string, operator: string, value?: unknown): EntityGraphFieldFilter => ({ field_key, operator, value })
+
+/** Desk-only quick filters for the scopes the phone never had them for; ordinary catalog filters. */
+const DESK_EXTRA_PRESETS: Partial<Record<EntityScope, PresetGroup[]>> = {
+  people: [
+    { label: 'Owner matching', presets: [
+      { key: 'likely_owner', label: 'Likely owner', tone: 'info', filter: pf('prospects.matching_flags', 'is_any_of', ['Likely Owner']) },
+      { key: 'linked_company', label: 'Linked to company', filter: pf('prospects.matching_flags', 'is_any_of', ['Linked To Company']) },
+      { key: 'renting', label: 'Likely renting', tone: 'warn', filter: pf('prospects.matching_flags', 'is_any_of', ['Likely Renting']) },
+      { key: 'decision_maker', label: 'Primary decision maker', filter: pf('prospects.person_flags_text', 'is_any_of', ['Primary Decision Maker']) },
+    ] },
+    { label: 'Age & language', presets: [
+      { key: 'age65', label: 'Age 65+', filter: pf('prospects.age_years', 'gte', 65) },
+      { key: 'age55', label: 'Age 55–64', filter: pf('prospects.age_years', 'between', [55, 64]) },
+      { key: 'age_u45', label: 'Under 45', filter: pf('prospects.age_years', 'lte', 44) },
+      { key: 'spanish', label: 'Spanish', filter: pf('prospects.language_preference', 'is_any_of', ['Spanish']) },
+      { key: 'english', label: 'English', filter: pf('prospects.language_preference', 'is_any_of', ['English']) },
+    ] },
+    { label: 'Reachability', presets: [
+      { key: 'sms', label: 'SMS eligible', filter: pf('prospects.sms_eligible', 'is_true') },
+      { key: 'email', label: 'Email eligible', filter: pf('prospects.email_eligible', 'is_true') },
+    ] },
+  ],
+  master_owners: [
+    { label: 'Portfolio', presets: [
+      { key: 'p2', label: '2+ properties', filter: pf('master_owners.property_count', 'gte', 2) },
+      { key: 'p5', label: '5+ properties', filter: pf('master_owners.property_count', 'gte', 5) },
+      { key: 'p10', label: '10+ properties', filter: pf('master_owners.property_count', 'gte', 10) },
+      { key: 'held20', label: 'Held 20+ years', filter: pf('master_owners.max_ownership_years', 'gte', 20) },
+    ] },
+    { label: 'Pressure', presets: [
+      { key: 'taxdel', label: 'Tax-delinquent property', tone: 'warn', filter: pf('master_owners.tax_delinquent_count', 'gte', 1) },
+      { key: 'liens', label: 'Property with a lien', tone: 'warn', filter: pf('master_owners.active_lien_count', 'gte', 1) },
+    ] },
+  ],
+}
+
+export function deskPresets(scope: EntityScope): PresetGroup[] {
+  return [...(PRESETS[scope] ?? []), ...(DESK_EXTRA_PRESETS[scope] ?? [])]
+}
+
+/** Every facet field a scope's rail renders (to tell facet filters from field filters). */
+export function deskFacetFields(scope: EntityScope): DeskFacet[] {
+  return (DESK_FACET_GROUPS[scope] ?? []).flatMap((g) => g.facets)
+}
+export function deskToggles(scope: EntityScope): DeskToggle[] {
+  return (DESK_FACET_GROUPS[scope] ?? []).flatMap((g) => g.toggles ?? [])
+}
+
+/** Rail group open/closed — remembered per operator, per scope. */
+const RAIL_GROUPS_KEY = 'nexus.entityGraph.desk.railGroups.v1'
+export function readRailGroups(uid: string, storage: Pick<Storage, 'getItem'> | null = safeStorage()): Record<string, boolean> {
+  try { const v = JSON.parse(storage?.getItem(`${RAIL_GROUPS_KEY}:${uid}`) || '{}'); return v && typeof v === 'object' ? v : {} } catch { return {} }
+}
+export function writeRailGroups(uid: string, groups: Record<string, boolean>, storage: Pick<Storage, 'setItem'> | null = safeStorage()): void {
+  try { storage?.setItem(`${RAIL_GROUPS_KEY}:${uid}`, JSON.stringify(groups)) } catch { /* private mode */ }
+}

@@ -24,7 +24,7 @@
  * Phones never mount this (EntityGraphWorkspace routes isPhone to the
  * console), so the phone DOM is unchanged.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   LCBulkBar,
   LCButton,
@@ -44,13 +44,15 @@ import {
   type LCSort,
 } from '../../../shared/lc'
 import { useAuth } from '../../../components/auth/AuthProvider'
+import { Icon } from '../../../shared/icons'
+import { reorderColumnIds } from '../../../shared/lc/DataGrid'
 import { fetchEntityGraphList, fetchEntityGraphTabCounts, EntityGraphFilterError } from '../../../domain/entity-graph/entity-graph-api'
 import type { EntityGraphAction, EntityGraphTabCounts, EntitySearchResult, UniversalEntityContext } from '../../../domain/entity-graph/entity-graph.types'
 import { EMPTY_UNIVERSAL_ENTITY_CONTEXT } from '../../../domain/entity-graph/universal-entity-context'
 import { fieldFiltersToApiParams } from '../../../domain/entity-graph/entity-graph-workspace-state'
-import { parseFieldFiltersParam, type EntityGraphFieldFilter, type UnsupportedFieldFilter } from '../../../domain/entity-graph/entity-graph-field-filters'
+import type { EntityGraphFieldFilter, UnsupportedFieldFilter } from '../../../domain/entity-graph/entity-graph-field-filters'
 import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
-import { useRouteLocation } from '../../../app/router'
+import { PaneRouteContext, replaceRoutePath, useRouteLocation } from '../../../app/router'
 import { BuyerInspectorSheet, type BuyerMapPoint } from '../buyer/BuyerInspector'
 import { fetchEntityNetwork, type EntityNetwork } from '../console/entity-network-api'
 import {
@@ -67,6 +69,9 @@ import { IDENTITY_COLUMN_KEY, useEntityGraphTableLayout } from '../mobile/entity
 import { useEntityGraphColumns } from '../mobile/use-entity-graph-columns'
 import { MOBILE_SCOPES, resolveIdentity, scopeNoun, tabForScope, type EntityScope } from '../mobile/entity-graph-mobile-format'
 import { DeskFilterRail } from './DeskFilterRail'
+import { DeskCampaignStack, stackScopeSupported, type StackResult } from './DeskCampaignStack'
+import { deskSearch, initialDeskState, writeSessionDeskState, type DeskState } from './desk-state'
+import { useOutreachStates } from './desk-outreach'
 import { DeskGraph } from './DeskGraph'
 import { DeskInspector } from './DeskInspector'
 import { fetchDeskKpis, kpisFromCounts } from './desk-api'
@@ -96,6 +101,10 @@ type Props = {
 }
 
 const PAGE_SIZE = 60
+const NO_FILTERS: EntityGraphFieldFilter[] = []
+const OUTREACH_SEED = ['lastContact', 'stage', 'status', 'smsEligible']
+const RAIL_KEY = 'nexus.entityGraph.desk.rail.v1'
+const readRailCollapsed = (uid: string): boolean => { try { return window.localStorage.getItem(`${RAIL_KEY}:${uid}`) === 'collapsed' } catch { return false } }
 const rowKey = (r: EntitySearchResult) => `${r.entityType}:${r.entityId}`
 
 type ListState = {
@@ -145,19 +154,30 @@ function useElementWidth<T extends HTMLElement>(): [React.RefObject<T>, number] 
 export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniversalContextChange, onAction }: Props) {
   const uid = useAuth().user?.id || 'local'
   const location = useRouteLocation()
+  const pane = useContext(PaneRouteContext)
+  // [persistence] scope · search · per-scope filters · Grid/Graph/fullscreen
+  // start from this pane's URL (reload / Back / a shared link) or, when the
+  // address carries none, from the session — see desk-state.ts.
+  const [deskInit] = useState<DeskState>(() => initialDeskState(new URLSearchParams(location.split('?')[1] ?? '')))
   const initialParams = useMemo(() => new URLSearchParams(location.split('?')[1] ?? ''), []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [scope, setScope] = useState<EntityScope>(() => {
-    const s = initialParams.get('egs') as EntityScope | null
-    return s && SCOPE_TABLE_COLUMNS[s] ? s : 'properties'
-  })
-  const [contactSubtype, setContactSubtype] = useState<'phone' | 'email'>('phone')
-  const [query, setQuery] = useState(() => initialParams.get('q') ?? '')
-  const [debouncedQuery, setDebouncedQuery] = useState(() => (initialParams.get('q') ?? '').trim())
-  const [filters, setFilters] = useState<EntityGraphFieldFilter[]>(() => parseFieldFiltersParam(initialParams.get('ff')))
-  const [center, setCenter] = useState<'grid' | 'graph'>(() => (initialParams.get('egv') === 'graph' ? 'graph' : 'grid'))
-  // 'auto' = shown on a wide pane, folded on a narrow one; a click makes it explicit.
-  const [railPref, setRailPref] = useState<'auto' | 'shown' | 'hidden'>('auto')
+  const [scope, setScope] = useState<EntityScope>(deskInit.scope)
+  const [contactSubtype, setContactSubtype] = useState<'phone' | 'email'>(deskInit.contactSubtype)
+  const [query, setQuery] = useState(deskInit.query)
+  const [debouncedQuery, setDebouncedQuery] = useState(deskInit.query.trim())
+  const [filtersByScope, setFiltersByScope] = useState<DeskState['filtersByScope']>(deskInit.filtersByScope)
+  const filters = filtersByScope[scope] ?? NO_FILTERS
+  const setFilters = (next: EntityGraphFieldFilter[]) => setFiltersByScope((cur) => ({ ...cur, [scope]: next }))
+  const [center, setCenter] = useState<'grid' | 'graph'>(deskInit.center)
+  const [graphFull, setGraphFull] = useState(deskInit.graphFull)
+  // The rail stays where the operator left it (collapsed strip or open) —
+  // it no longer folds itself away when the inspector opens.
+  const [railCollapsed, setRailCollapsedState] = useState(() => readRailCollapsed(uid))
+  const setRailCollapsed = (next: boolean) => {
+    setRailCollapsedState(next)
+    try { window.localStorage.setItem(`${RAIL_KEY}:${uid}`, next ? 'collapsed' : 'open') } catch { /* private mode */ }
+  }
+  const [railOverOpen, setRailOverOpen] = useState(false)
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(() => new Set())
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   // `?buyer=<public buyer_id>` (Comps "View buyer", Buyer Match) opens that buyer.
@@ -170,6 +190,32 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   const { layout, setColumns, setSort } = useEntityGraphTableLayout()
   const headerSort: HeaderSort | null = layout.sort[scope] ?? null
   const visibleKeys = layout.columns[scope] ?? defaultVisibleColumns(scope)
+  // Outreach columns (last contact · stage · status · SMS eligible) are put in
+  // front once per operator, also into a layout saved before they existed.
+  useEffect(() => {
+    const key = `nexus.entityGraph.desk.outreachSeeded.v1:${uid}`
+    try {
+      if (window.localStorage.getItem(key)) return
+      const current = layout.columns.properties ?? defaultVisibleColumns('properties')
+      setColumns('properties', [...OUTREACH_SEED.filter((k) => !current.includes(k)), ...current])
+      window.localStorage.setItem(key, '1')
+    } catch { /* private mode */ }
+  }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // [persistence] write the state back: session (every scope) + this pane's URL
+  useEffect(() => {
+    const state: DeskState = { scope, query: debouncedQuery, filtersByScope, center, graphFull: center === 'graph' && graphFull, contactSubtype }
+    writeSessionDeskState(state)
+    // The primary pane IS the address bar (read it live — the hook's copy can
+    // lag a transition behind a property click); a side pane owns its own path.
+    const here = pane ? location : `${window.location.pathname}${window.location.search}`
+    const at = here.indexOf('?')
+    const path = at >= 0 ? here.slice(0, at) : here
+    const search = at >= 0 ? here.slice(at) : ''
+    const next = deskSearch(search, state)
+    if (next !== search) replaceRoutePath(`${path}${next}`)
+    // `location` is read, not followed: a path change (property click) keeps the search
+  }, [scope, debouncedQuery, filtersByScope, center, graphFull, contactSubtype]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQuery(query.trim()), 260)
@@ -255,13 +301,15 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   }, [signature, cursor])
 
   const enrichment = useEntityGraphColumns(results, visibleEnrichmentFields(scope, visibleKeys), scope === 'properties')
+  const wantsOutreach = scope === 'properties' && visibleKeys.some((k) => SCOPE_TABLE_COLUMNS.properties.find((c) => c.key === k)?.outreach)
+  const outreach = useOutreachStates(enrichment.rows, wantsOutreach)
   const headerColumn = headerSort && headerSort.key !== IDENTITY_COLUMN_KEY ? columnByKey(scope, headerSort.key) : null
   const identitySortColumn = useMemo<TableColumn>(() => ({ key: IDENTITY_COLUMN_KEY, label: 'Name', group: 'overview', width: 0, render: (r) => resolveIdentity(scope, r).primary || null }), [scope])
   const rows = useMemo(() => {
-    if (!localSort || !headerSort) return enrichment.rows
+    if (!localSort || !headerSort) return outreach.rows
     const col = headerSort.key === IDENTITY_COLUMN_KEY ? identitySortColumn : headerColumn
-    return col ? sortLoadedRows(scope, enrichment.rows, col, headerSort.dir) : enrichment.rows
-  }, [enrichment.rows, localSort, headerSort, headerColumn, identitySortColumn, scope])
+    return col ? sortLoadedRows(scope, outreach.rows, col, headerSort.dir) : outreach.rows
+  }, [outreach.rows, localSort, headerSort, headerColumn, identitySortColumn, scope])
 
   /* ── Selection → inspector ─────────────────────────────────────────────── */
   const [anchor, setAnchor] = useState<NetworkAnchor | null>(() => anchorFromContext(universalContext))
@@ -269,8 +317,9 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   const [inspectorOpen, setInspectorOpen] = useState(() => Boolean(anchorFromContext(universalContext)))
   // The inspector docks wherever the grid keeps ≥ ~600px; on a mid-width pane
   // an open inspector folds the rail (auto) rather than squeezing the grid.
-  const inspectorMode: 'dock' | 'float' = wide ? 'dock' : 'float'
-  const railShown = railPref === 'auto' ? !narrow && !(inspectorOpen && inspectorMode === 'dock' && width < 1420) : railPref === 'shown'
+  const railW = narrow ? 44 : railCollapsed ? 44 : 272
+  const inspectorMode: 'dock' | 'float' = wide && width - railW - 440 >= 600 ? 'dock' : 'float'
+  const railShown = narrow ? railOverOpen : !railCollapsed
   // A subject arriving from another app (Map, Inbox, a deep link) re-anchors the inspector.
   const ctxAnchor = anchorFromContext(universalContext)
   const ctxKey = anchorKey(ctxAnchor)
@@ -410,6 +459,34 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     onAction?.('open_in_map', { ...EMPTY_UNIVERSAL_ENTITY_CONTEXT, entityType: 'property', entityId: first.entityId, propertyId: first.entityId })
   }
 
+  /* ── Add to campaign (stacked cohorts into a DRAFT) ────────────────────── */
+  const [stack, setStack] = useState<{ open: boolean; scope: EntityScope; ids: string[]; label: string; cohort: boolean }>({ open: false, scope: 'properties', ids: [], label: '', cohort: true })
+  const cohortLabel = (() => {
+    const parts = filters.slice(0, 2).map((f) => (Array.isArray(f.value) ? `${f.field_key.split('.').pop()}: ${(f.value as unknown[]).slice(0, 2).join(', ')}` : f.field_key.split('.').pop()))
+    return `${MOBILE_SCOPES.find((x) => x.key === scope)?.label ?? scope}${parts.length ? ` · ${parts.join(' · ')}` : ''}${filters.length > 2 ? ` +${filters.length - 2}` : ''}`
+  })()
+  const openStack = (ids: string[], forScope: EntityScope = scope, label = cohortLabel, cohort = true) => setStack({ open: true, scope: forScope, ids, label, cohort })
+  const onStacked = (r: StackResult) => {
+    lcToast({ title: r.created ? `Draft “${r.campaign_name ?? ''}” created · ${fmtCount(r.added)} properties` : `${fmtCount(r.added)} added to “${r.campaign_name ?? 'draft'}” · ${fmtCount(r.total_after)} total`, severity: 'success' })
+  }
+
+  /* ── The relationship view: map + campaign for the network on screen ───── */
+  const networkPropertyIds = network ? network.properties.map((p) => p.id) : []
+  const showNetworkOnMap = () => {
+    if (!network) return
+    const pts = network.properties.map((p) => ({ id: p.id, lat: Number(p.lat), lng: Number(p.lng), label: p.address }))
+    if (!writeMapFocusSet({ label: `${network.owner.name} · ${pts.length} properties`, tone: 'property', points: pts })) { lcToast({ title: 'None of these properties have map coordinates.', severity: 'info' }); return }
+    const first = network.properties.find((p) => p.id === (anchor?.type === 'property' ? anchor.id : '')) ?? network.properties[0]
+    if (first) onAction?.('open_in_map', { ...EMPTY_UNIVERSAL_ENTITY_CONTEXT, entityType: 'property', entityId: first.id, propertyId: first.id })
+  }
+  // fullscreen graph: Esc returns to the split view, state intact
+  useEffect(() => {
+    if (!(center === 'graph' && graphFull)) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) setGraphFull(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [center, graphFull])
+
   /* ── Render ────────────────────────────────────────────────────────────── */
   const scopeTabs = MOBILE_SCOPES.map((s) => ({
     id: s.key,
@@ -454,6 +531,11 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                 )
               })}
             </div>
+            <div className="egdk-graphpane__actions">
+              <LCButton size="sm" variant="quiet" icon="map" onClick={showNetworkOnMap} title="Show this network's properties on the Map">Map</LCButton>
+              <LCButton size="sm" variant="quiet" icon="target" disabled={!networkPropertyIds.length} onClick={() => openStack(networkPropertyIds, 'properties', `${network.owner.name} · network`, false)} title="Pin this network's properties on a draft campaign">Add to campaign</LCButton>
+              <LCIconButton icon={graphFull ? 'close' : 'maximize'} label={graphFull ? 'Exit fullscreen (Esc)' : 'Fullscreen graph'} size="sm" selected={graphFull} onClick={() => setGraphFull((f) => !f)} />
+            </div>
           </div>
           <DeskGraph network={network} hiddenTypes={hiddenLayers} onOpen={(a) => openAnchor(a)} />
         </>
@@ -468,7 +550,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   )
 
   return (
-    <section ref={rootRef} className={cx('egdk', `is-${themeMode}`, narrow && 'is-narrow', wide && 'is-wide', !railShown && 'is-rail-hidden', narrow && railShown && 'is-rail-over', inspectorOpen && inspectorMode === 'dock' && 'has-dock')} data-scope={scope}>
+    <section ref={rootRef} className={cx('egdk', `is-${themeMode}`, narrow && 'is-narrow', wide && 'is-wide', !railShown && 'is-rail-hidden', narrow && railShown && 'is-rail-over', inspectorOpen && inspectorMode === 'dock' && 'has-dock', center === 'graph' && graphFull && 'is-graph-full')} data-scope={scope}>
       <header className="egdk-head">
         <div className="egdk-head__id">
           <h1>Entity Graph</h1>
@@ -486,15 +568,22 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       </header>
 
       <div className="egdk-bar">
-        <LCIconButton icon="filter" label={railShown ? 'Hide filters' : 'Show filters'} size="sm" selected={railShown} count={filters.length || null} onClick={() => setRailPref(railShown ? 'hidden' : 'shown')} className="egdk-bar__rail" />
-        <LCTabs items={scopeTabs} value={scope} onChange={(id) => { setScope(id as EntityScope); setFilters([]) }} label="Entity scope" variant="line" className="egdk-bar__tabs" />
+        <LCIconButton icon="filter" label={railShown ? 'Collapse filters' : 'Show filters'} size="sm" selected={railShown} count={filters.length || null} onClick={() => (narrow ? setRailOverOpen((o) => !o) : setRailCollapsed(railShown))} className="egdk-bar__rail" />
+        <LCTabs items={scopeTabs} value={scope} onChange={(id) => { setScope(id as EntityScope); setSelected(new Set()) }} label="Entity scope" variant="line" className="egdk-bar__tabs" />
         <div className="egdk-bar__tools">
-          <LCSegmented size="sm" label="View" value={center} onChange={(v) => setCenter(v as 'grid' | 'graph')} options={[{ value: 'grid', icon: 'list', label: 'Grid' }, { value: 'graph', icon: 'layers', label: 'Graph' }]} />
+          {stackScopeSupported(scope) ? (
+            <LCButton size="sm" variant="secondary" icon="target" onClick={() => openStack(selectedRows.map((r) => r.entityId))} title="Pin this cohort (or the selected rows) on a draft campaign — nothing is sent">
+              Add to campaign
+            </LCButton>
+          ) : null}
+          <LCSegmented size="sm" label="View" value={center} onChange={(v) => { setCenter(v as 'grid' | 'graph'); if (v === 'grid') setGraphFull(false) }} options={[{ value: 'grid', icon: 'list', label: 'Grid' }, { value: 'graph', icon: 'layers', label: 'Graph' }]} />
+          {center === 'graph' ? <LCIconButton icon="maximize" label="Fullscreen graph (Esc to exit)" size="sm" selected={graphFull} onClick={() => setGraphFull((f) => !f)} /> : null}
         </div>
       </div>
 
       <div className="egdk-body">
-        {railShown ? <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} /> : null}
+        {narrow && !railShown ? <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed onCollapsedChange={() => setRailOverOpen(true)} />
+          : <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed={!railShown} onCollapsedChange={(c) => (narrow ? setRailOverOpen(!c) : setRailCollapsed(c))} />}
         <main className="egdk-center" aria-label={center === 'grid' ? 'Records' : 'Relationship view'}>
           {center === 'grid' ? (
             <>
@@ -522,6 +611,8 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                 onActivate={(r) => activate(r)}
                 selected={selected}
                 onSelectedChange={setSelected}
+                onColumnOrderChange={(ids) => setColumns(scope, ids.filter((id) => id !== IDENTITY_COLUMN_KEY))}
+                pinnedColumns={[IDENTITY_COLUMN_KEY]}
                 density="dense"
                 loading={loading}
                 error={isCurrent && list.error && !list.unsupported ? { what: 'These records didn’t load', onRetry: () => setList(EMPTY_LIST) } : null}
@@ -541,6 +632,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                   onSelectAll={() => setSelected(new Set(rows.map(rowKey)))}
                   onClear={() => setSelected(new Set())}
                   actions={[
+                    { id: 'campaign', label: 'Add to campaign', icon: 'target', onRun: () => openStack(selectedRows.map((r) => r.entityId)), disabled: !stackScopeSupported(scope), disabledReason: 'Campaigns target properties, owners and people' },
                     { id: 'map', label: 'Show on Map', icon: 'map', onRun: showOnMap, disabled: scope !== 'properties', disabledReason: 'Map handoff is property-scoped' },
                     { id: 'export', label: 'Export CSV', icon: 'archive', onRun: exportSelected },
                   ]}
@@ -562,8 +654,21 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
           onOpenGraph={() => setCenter('graph')}
           onAction={onAction}
           onOpenBuyer={(id) => setBuyerId(id)}
+          onAddToCampaign={(ids, label) => openStack(ids, 'properties', label, false)}
         />
       </div>
+
+      <DeskCampaignStack
+        open={stack.open}
+        onOpenChange={(o) => setStack((cur) => ({ ...cur, open: o }))}
+        scope={stack.scope}
+        selectedIds={stack.ids}
+        filters={stack.cohort && stack.scope === scope ? filters : NO_FILTERS}
+        query={stack.cohort ? debouncedQuery : ''}
+        cohortTotal={stack.cohort && stack.scope === scope ? total : null}
+        cohortLabel={stack.label}
+        onDone={onStacked}
+      />
 
       <BuyerInspectorSheet
         buyerId={buyerId}
@@ -589,12 +694,15 @@ function ColumnPicker({ scope, visible, onChange }: { scope: EntityScope; visibl
   const on = new Set(visible)
   const groups = COLUMN_GROUP_ORDER.map((g) => ({ g, cols: all.filter((c) => c.group === g) })).filter((x) => x.cols.length)
   const [find, setFind] = useState('')
+  const [drag, setDrag] = useState<string | null>(null)
   const q = find.trim().toLowerCase()
+  const byKey = new Map(all.map((c) => [c.key, c]))
+  const shownVisible = visible.filter((k) => byKey.has(k))
   return (
     <LCPopover
       trigger={<LCButton size="sm" variant="quiet" icon="grid">Columns · {visible.length}</LCButton>}
       align="end"
-      width={320}
+      width={360}
       label="Columns"
       className="egdk-cols"
     >
@@ -603,17 +711,39 @@ function ColumnPicker({ scope, visible, onChange }: { scope: EntityScope; visibl
         <button type="button" className="egdk-link" onClick={() => onChange(defaultVisibleColumns(scope))}>Reset</button>
       </div>
       <div className="egdk-cols__list lc-scroll">
+        {!q && shownVisible.length ? (
+          <div className="egdk-cols__group">
+            <span className="egdk-eyebrow">Shown · drag to reorder (or drag a header in the grid)</span>
+            <ol className="egdk-cols__order">
+              {shownVisible.map((k) => (
+                <li
+                  key={k}
+                  draggable
+                  className={cx('egdk-cols__orderitem', drag === k && 'is-dragging')}
+                  onDragStart={(e) => { setDrag(k); e.dataTransfer.effectAllowed = 'move' }}
+                  onDragOver={(e) => { if (drag) e.preventDefault() }}
+                  onDrop={(e) => { e.preventDefault(); if (drag && drag !== k) onChange(reorderColumnIds(visible, drag, k)); setDrag(null) }}
+                  onDragEnd={() => setDrag(null)}
+                >
+                  <Icon name="drag" size={12} />
+                  <span>{byKey.get(k)?.label}</span>
+                  <button type="button" className="egdk-cols__x" aria-label={`Hide ${byKey.get(k)?.label}`} onClick={() => onChange(visible.filter((x) => x !== k))}><Icon name="x" size={11} /></button>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
         {groups.map(({ g, cols }) => {
-          const shown = q ? cols.filter((c) => c.label.toLowerCase().includes(q)) : cols
+          const shown = q ? cols.filter((c) => c.label.toLowerCase().includes(q) || c.key.toLowerCase().includes(q)) : cols
           if (!shown.length) return null
           return (
             <div key={g} className="egdk-cols__group">
-              <span className="egdk-eyebrow">{COLUMN_GROUP_LABELS[g]}</span>
+              <span className="egdk-eyebrow">{COLUMN_GROUP_LABELS[g]} · {cols.length}</span>
               {shown.map((c) => (
-                <label key={c.key} className="egdk-cols__item">
+                <label key={c.key} className="egdk-cols__item" title={c.source}>
                   <input type="checkbox" checked={on.has(c.key)} onChange={() => onChange(on.has(c.key) ? visible.filter((k) => k !== c.key) : [...visible, c.key])} />
                   <span>{c.label}</span>
-                  {c.sortBy ? <small title="Sorts the whole cohort">indexed</small> : null}
+                  {c.sortBy ? <small title="Sorts the whole cohort">indexed</small> : c.outreach ? <small>live</small> : null}
                 </label>
               ))}
             </div>

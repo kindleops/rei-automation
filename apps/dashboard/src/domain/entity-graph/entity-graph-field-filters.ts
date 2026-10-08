@@ -34,6 +34,10 @@ export type EntityGraphFilterField = {
   /** 'empty' when the column was measured to hold no values -- see the backend note. */
   data_coverage?: 'empty'
   data_coverage_note?: string
+  /** The raw column answers, but not the question its label suggests (shown with the field). */
+  caution?: string
+  /** Delimited-list column matched as whole tokens. */
+  token_separator?: string
 }
 
 export type EntityGraphFilterGroup = { id: string; label: string; fields: EntityGraphFilterField[] }

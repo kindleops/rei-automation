@@ -87,6 +87,24 @@ export interface LCDataGridProps<R> {
   total?: number | null
   height?: number | string
   className?: string
+  /**
+   * Column reorder by dragging a header. Called with the new order of the
+   * visible column ids; the caller persists it (the grid never reorders on
+   * its own). Columns listed in `pinnedColumns` neither move nor accept drops.
+   */
+  onColumnOrderChange?: (orderedIds: string[]) => void
+  pinnedColumns?: ReadonlyArray<string>
+}
+
+/** Move `from` to the position of `to` (before it when moving left, after it when moving right). Pure — tested. */
+export function reorderColumnIds(ids: readonly string[], from: string, to: string): string[] {
+  const a = ids.indexOf(from)
+  const b = ids.indexOf(to)
+  if (a < 0 || b < 0 || a === b) return [...ids]
+  const next = ids.filter((id) => id !== from)
+  const at = next.indexOf(to)
+  next.splice(a < b ? at + 1 : at, 0, from)
+  return next
 }
 
 const ROW_H = { dense: 30, standard: 36, comfortable: 44 } as const
@@ -106,8 +124,11 @@ function readPrefs(id: string): { widths: Record<string, number>; hidden: string
 export function LCDataGrid<R>({
   id, label, rows, rowKey, columns, sort, onSortChange, activeKey, onActivate, selected, onSelectedChange,
   density = 'standard', groupBy, groupLabel, rowMenu, rowTone, renderExpanded, loading, error, empty, onEndReached,
-  loadingMore, total, height = '100%', className,
+  loadingMore, total, height = '100%', className, onColumnOrderChange, pinnedColumns,
 }: LCDataGridProps<R>) {
+  const [dragCol, setDragCol] = useState<string | null>(null)
+  const [dropCol, setDropCol] = useState<string | null>(null)
+  const pinned = useMemo(() => new Set(pinnedColumns ?? []), [pinnedColumns])
   const domId = useId()
   const scroller = useRef<HTMLDivElement>(null)
   const [prefs, setPrefs] = useState(() => readPrefs(id))
@@ -405,8 +426,20 @@ export function LCDataGrid<R>({
                 key={c.id}
                 role="columnheader"
                 aria-sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : c.sortable ? 'none' : undefined}
-                className={cx('lc-grid__th', c.align === 'right' && 'is-num', c.align === 'center' && 'is-center', c.sortable && 'is-sortable', dir && 'is-sorted')}
+                className={cx('lc-grid__th', c.align === 'right' && 'is-num', c.align === 'center' && 'is-center', c.sortable && 'is-sortable', dir && 'is-sorted', onColumnOrderChange && !pinned.has(c.id) && 'is-movable', dragCol === c.id && 'is-dragging', dropCol === c.id && dragCol !== c.id && 'is-drop')}
                 title={c.hint}
+                draggable={Boolean(onColumnOrderChange) && !pinned.has(c.id)}
+                onDragStart={onColumnOrderChange && !pinned.has(c.id) ? (e) => { setDragCol(c.id); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', c.id) } catch { /* old engines */ } } : undefined}
+                onDragOver={onColumnOrderChange && dragCol && !pinned.has(c.id) ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dropCol !== c.id) setDropCol(c.id) } : undefined}
+                onDragLeave={onColumnOrderChange ? () => setDropCol((d) => (d === c.id ? null : d)) : undefined}
+                onDrop={onColumnOrderChange && dragCol && !pinned.has(c.id) ? (e) => {
+                  e.preventDefault()
+                  const ids = visibleCols.map((x) => x.id)
+                  const next = reorderColumnIds(ids, dragCol, c.id)
+                  setDragCol(null); setDropCol(null)
+                  if (next.join('|') !== ids.join('|')) onColumnOrderChange(next)
+                } : undefined}
+                onDragEnd={onColumnOrderChange ? () => { setDragCol(null); setDropCol(null) } : undefined}
               >
                 {c.sortable && onSortChange ? (
                   <button type="button" className="lc-grid__sort" onClick={() => onHeaderSort(c)} aria-label={`Sort by ${c.header}${dir ? `, currently ${dir === 'asc' ? 'ascending' : 'descending'}` : ''}`}>

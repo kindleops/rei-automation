@@ -31,7 +31,10 @@ export const PRESETS: Partial<Record<EntityScope, PresetGroup[]>> = {
     {
       label: 'Equity & debt',
       presets: [
-        { key: 'equity60', label: 'Equity 60%+', filter: f('properties.equity_percent', 'gte', 60) },
+        // Known equity only (equity_known_v1): the vendor equity_percent reads
+        // 100% with no loan on file, so the raw column matched 164,245 of
+        // ~177K properties for "60%+" (filter audit 2026-10-08).
+        { key: 'equity60', label: 'Equity 60%+', filter: f('properties.known_equity_percent', 'gte', 60) },
         { key: 'freeclear', label: 'No open mortgage', filter: f('records.mortgage_count', 'lte', 0) },
         { key: 'rate7', label: 'Rate 7%+', filter: f('records.first_rate', 'gte', 7) },
         { key: 'ratelow', label: 'Rate under 4%', filter: f('records.first_rate', 'lte', 3.9999) },

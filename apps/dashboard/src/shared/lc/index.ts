@@ -18,7 +18,7 @@ export { LCDialog, LCConfirm, LCSheet, LCDialogClose, type LCEffect, type LCConf
 export { LCTabs, LCSegmented, type LCTabItem, type LCTabsProps, type LCSegmentOption, type LCSegmentedProps } from './Tabs'
 export { LCInspector, LCInspectorSection, LCFacts, type LCInspectorProps } from './Inspector'
 export { LCSearch, LCChip, LCFilterBar, LCFilterInspector, LCToolbar, type LCActiveFilter, type LCFilterSection, type LCSearchProps } from './Filter'
-export { LCDataGrid, type LCColumn, type LCDataGridProps, type LCRowActivationEvent, type LCSort } from './DataGrid'
+export { LCDataGrid, reorderColumnIds, type LCColumn, type LCDataGridProps, type LCRowActivationEvent, type LCSort } from './DataGrid'
 export { LCActivityFeed } from './Activity'
 export { groupActivity, type LCActivityEvent, type LCActivityEntry } from './activity-model'
 export { LCTimeline, type LCTimelineItem } from './Timeline'

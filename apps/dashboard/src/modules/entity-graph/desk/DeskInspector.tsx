@@ -16,6 +16,8 @@ import { openInboxThread } from '../../mobile/mobile-inbox-bridge'
 import { REASON_LABEL, type EntityNetwork, type NetworkProperty } from '../console/entity-network-api'
 import { DeskGraph } from './DeskGraph'
 import { fmtCount, fmtMoney, matchingTagTone, type NetworkAnchor } from './desk-model'
+import { EntityGraphPropertyVisual } from '../mobile/EntityGraphPropertyVisual'
+import { humanize, lastContactLabel, relativeDay, smsReasonLabel, useNetworkOutreach, type OutreachState } from './desk-outreach'
 
 const ACTION_LABEL: Partial<Record<EntityGraphAction, string>> = {
   open_in_map: 'Map',
@@ -39,6 +41,8 @@ type Props = {
   onOpenGraph: () => void
   onAction?: (action: EntityGraphAction, context: UniversalEntityContext) => void
   onOpenBuyer?: (buyerId: string) => void
+  /** Pin these properties on a draft campaign (the stack dialog). */
+  onAddToCampaign?: (propertyIds: string[], label: string) => void
 }
 
 /** equity_known_v1: free & clear, a known %, a vendor class, or Unknown — never a vendor 100%. */
@@ -60,7 +64,7 @@ function None({ children }: { children: ReactNode }) {
   return <p className="egdk-none">{children}</p>
 }
 
-export function DeskInspector({ open, mode, anchor, network, loading, error, onRetry, onClose, onOpen, onOpenGraph, onAction, onOpenBuyer }: Props) {
+export function DeskInspector({ open, mode, anchor, network, loading, error, onRetry, onClose, onOpen, onOpenGraph, onAction, onOpenBuyer, onAddToCampaign }: Props) {
   const anchorProperty = useMemo<NetworkProperty | null>(() => {
     if (!network || network.anchor.type !== 'property') return null
     return network.properties.find((p) => p.id === network.anchor.id) ?? null
@@ -129,14 +133,24 @@ export function DeskInspector({ open, mode, anchor, network, loading, error, onR
       ) : error || !network ? (
         <LCError what="The relationship network didn’t load" onRetry={onRetry} compact />
       ) : (
-        <InspectorBody network={network} anchorProperty={anchorProperty} onOpen={onOpen} onOpenGraph={onOpenGraph} onOpenBuyer={onOpenBuyer} />
+        <InspectorBody
+          network={network}
+          anchorProperty={anchorProperty}
+          onOpen={onOpen}
+          onOpenGraph={onOpenGraph}
+          onOpenBuyer={onOpenBuyer}
+          onOpenMap={context ? () => onAction?.('open_in_map', context) : undefined}
+          onAddToCampaign={onAddToCampaign}
+        />
       )}
     </LCInspector>
   )
 }
 
-function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuyer }: { network: EntityNetwork; anchorProperty: NetworkProperty | null; onOpen: (a: NetworkAnchor) => void; onOpenGraph: () => void; onOpenBuyer?: (id: string) => void }) {
+function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuyer, onOpenMap, onAddToCampaign }: { network: EntityNetwork; anchorProperty: NetworkProperty | null; onOpen: (a: NetworkAnchor) => void; onOpenGraph: () => void; onOpenBuyer?: (id: string) => void; onOpenMap?: () => void; onAddToCampaign?: (ids: string[], label: string) => void }) {
   const o = network.owner
+  const outreachIds = useMemo(() => (anchorProperty ? [anchorProperty.id] : network.properties.map((p) => p.id)), [anchorProperty, network.properties])
+  const outreach = useNetworkOutreach(outreachIds)
   const rec = network.records ?? null
   const openMortgages = rec ? rec.mortgages.filter((m) => m.open) : []
   const phonesByPerson = new Map<string, EntityNetwork['phones']>()
@@ -150,6 +164,20 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
 
   return (
     <div className="egdk-insp__body">
+      {anchorProperty ? (
+        /* ONE selected property = ONE intentional Street View request (the
+           fan-out rule: off on lists, on for a single detail). The panorama
+           stays opt-in inside the visual. */
+        <div className="egdk-insp__visual">
+          <EntityGraphPropertyVisual address={[anchorProperty.address, anchorProperty.city, anchorProperty.state, anchorProperty.zip].filter(Boolean).join(', ')} lat={anchorProperty.lat} lng={anchorProperty.lng} onOpenMap={onOpenMap} />
+        </div>
+      ) : null}
+      <OutreachSection
+        anchorProperty={anchorProperty}
+        ids={outreachIds}
+        states={outreach}
+        onAddToCampaign={onAddToCampaign ? () => onAddToCampaign(outreachIds, anchorProperty ? anchorProperty.address : `${network.owner.name} · network`) : undefined}
+      />
       {anchorProperty ? (
         <div className="egdk-figures">
           <Figure label="Est. value" value={fmtMoney(anchorProperty.value)} />
@@ -369,5 +397,65 @@ function ContactLine({ icon, value, meta, warn }: { icon: 'phone' | 'mail'; valu
       <span className="egdk-contact__value">{value}</span>
       <small>{meta}</small>
     </div>
+  )
+}
+
+/**
+ * OUTREACH & PIPELINE — last contact, stage, status, SMS eligibility (+ the
+ * blocking reason: the campaign target builder's own readiness rule), the
+ * latest message and campaign membership. A network shows the roll-up.
+ */
+function OutreachSection({ anchorProperty, ids, states, onAddToCampaign }: { anchorProperty: NetworkProperty | null; ids: string[]; states: Map<string, OutreachState | null>; onAddToCampaign?: () => void }) {
+  const loaded = ids.filter((id) => states.has(id))
+  const list = loaded.map((id) => states.get(id)).filter((x): x is OutreachState => Boolean(x))
+  const aside = onAddToCampaign ? <button type="button" className="egdk-link" onClick={onAddToCampaign}>Add to campaign</button> : null
+  if (!loaded.length) {
+    return (
+      <LCInspectorSection title="Outreach & pipeline" aside={aside}>
+        <LCSkeleton shape="lines" count={2} label="Reading outreach state" />
+      </LCInspectorSection>
+    )
+  }
+  if (anchorProperty) {
+    const st = states.get(anchorProperty.id) ?? null
+    return (
+      <LCInspectorSection title="Outreach & pipeline" aside={aside}>
+        {!st ? <None>Outreach state is not available for this property.</None> : (
+          <div className="egdk-outreach">
+            <div className={cx('egdk-outreach__sms', st.sms ? (st.sms.eligible ? 'is-ok' : 'is-blocked') : 'is-na')}>
+              <span className="egdk-outreach__k">SMS eligible</span>
+              <strong>{st.sms ? (st.sms.eligible ? 'Yes' : 'No') : 'Not available'}</strong>
+              {st.sms && !st.sms.eligible ? <small>{smsReasonLabel(st.sms.reason)}</small> : st.sms ? <small>{`${st.sms.ready} of ${st.sms.rows} contact ${st.sms.rows === 1 ? 'route' : 'routes'} ready`}</small> : null}
+            </div>
+            <dl className="egdk-outreach__facts">
+              <div><dt>Last contact</dt><dd>{lastContactLabel(st.lastContact) ?? 'Never contacted'}</dd></div>
+              <div><dt>Stage</dt><dd>{st.stage ? `${humanize(st.stage.value)}` : 'No deal'}{st.stage ? <small>{st.stage.source === 'pipeline' ? 'pipeline deal' : 'conversation'}</small> : null}</dd></div>
+              <div><dt>Status</dt><dd>{st.status ? humanize(st.status.value) : '—'}{st.status ? <small>{st.status.source === 'pipeline' ? 'pipeline deal' : 'conversation'}</small> : null}</dd></div>
+              <div><dt>Campaigns</dt><dd>{st.campaigns ? (st.campaigns.count ? `${st.campaigns.latest?.name ?? 'Campaign'}${st.campaigns.count > 1 ? ` +${st.campaigns.count - 1}` : ''}` : 'Not in a campaign') : '—'}{st.campaigns?.latest?.targetStatus ? <small>{humanize(st.campaigns.latest.targetStatus)}{st.campaigns.latest.blockReason ? ` · ${smsReasonLabel(st.campaigns.latest.blockReason)}` : ''}</small> : null}</dd></div>
+            </dl>
+            {st.conversation?.preview ? (
+              <blockquote className="egdk-outreach__msg">
+                <span>{st.conversation.direction === 'inbound' ? 'Seller' : 'Us'} · {relativeDay(st.conversation.at)}</span>
+                {st.conversation.preview}
+              </blockquote>
+            ) : null}
+          </div>
+        )}
+      </LCInspectorSection>
+    )
+  }
+  const eligible = list.filter((x) => x.sms?.eligible).length
+  const latest = list.map((x) => x.lastContact).filter(Boolean).sort((a, b) => Date.parse(b!.at) - Date.parse(a!.at))[0] ?? null
+  const deals = list.filter((x) => x.stage?.source === 'pipeline')
+  const inCampaign = list.filter((x) => (x.campaigns?.count ?? 0) > 0).length
+  return (
+    <LCInspectorSection title="Outreach & pipeline" aside={aside}>
+      <dl className="egdk-outreach__facts">
+        <div><dt>SMS eligible</dt><dd>{`${fmtCount(eligible)} of ${fmtCount(loaded.length)} properties`}</dd></div>
+        <div><dt>Last contact</dt><dd>{lastContactLabel(latest) ?? 'Never contacted'}</dd></div>
+        <div><dt>Pipeline deals</dt><dd>{deals.length ? deals.map((d) => humanize(d.stage?.value)).slice(0, 3).join(', ') : 'None'}</dd></div>
+        <div><dt>In a campaign</dt><dd>{`${fmtCount(inCampaign)} of ${fmtCount(loaded.length)}`}</dd></div>
+      </dl>
+    </LCInspectorSection>
   )
 }

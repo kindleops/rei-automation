@@ -52,7 +52,7 @@ export function EntityGraphMobileTable({
   onOpen,
   onToggleSelect,
 }: Props) {
-  const columns = SCOPE_TABLE_COLUMNS[scope].filter((c) => visibleColumns.includes(c.key))
+  const columns = SCOPE_TABLE_COLUMNS[scope].filter((c) => visibleColumns.includes(c.key) && !c.outreach)
   const identitySort = IDENTITY_SORT_COLUMN[scope]
   const bodyWidth = columns.reduce((acc, c) => acc + c.width, 0)
   /** Direction shown on a header: the header sort, else the Sort menu's server column. */

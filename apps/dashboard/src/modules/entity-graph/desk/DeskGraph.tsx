@@ -11,11 +11,13 @@
  * is not its immediate neighbourhood; clicking an owner, property or person
  * re-anchors the network on it.
  */
-import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from 'react'
 import { LCButton, LCIconButton, cx } from '../../../shared/lc'
 import type { EntityNetwork, NetworkNode } from '../console/entity-network-api'
 import { layoutNetwork, neighbours, visibleNetwork, PROPERTY_CLUSTER_ID } from '../console/network-layout'
 import { fmtMoney, nodeAnchor, type NetworkAnchor } from './desk-model'
+import { GraphHoverCard } from './DeskGraphCard'
+import { useNetworkOutreach } from './desk-outreach'
 
 const TYPE_LABEL: Record<string, string> = {
   owner: 'Owner', property: 'Property', entity: 'Title entity', person: 'Person', phone: 'Phone', email: 'Email',
@@ -35,6 +37,10 @@ type Props = {
 export function DeskGraph({ network, compact = false, hiddenTypes, onOpen, onExpand, label }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [hover, setHover] = useState<string | null>(null)
+  const [hoverAt, setHoverAt] = useState<{ x: number; y: number } | null>(null)
+  // outreach for the network's properties: fetched ONCE per network, read by the hover card
+  const propertyIds = useMemo(() => (compact ? [] : network.properties.map((p) => p.id)), [network, compact])
+  const outreach = useNetworkOutreach(propertyIds)
   const [view, setView] = useState({ k: 1, x: 0, y: 0 })
   const drag = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean } | null>(null)
   const boxRef = useRef<HTMLDivElement | null>(null)
@@ -182,7 +188,12 @@ export function DeskGraph({ network, compact = false, hiddenTypes, onOpen, onExp
                 data-node={n.id}
                 transform={`translate(${p.x} ${p.y})`}
                 className={cx('egdk-node', `is-${n.type}`, dim && 'is-dim', isHub && 'is-hub', isAnchor && 'is-anchor', opens && 'is-opens', Boolean(n.meta?.distress) && 'is-distress', Boolean(n.meta?.wrong) && 'is-wrong')}
-                onPointerEnter={() => !compact && setHover(n.id)}
+                onPointerEnter={(e) => {
+                  if (compact) return
+                  setHover(n.id)
+                  const rect = boxRef.current?.getBoundingClientRect()
+                  if (rect) setHoverAt({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+                }}
                 onPointerLeave={() => !compact && setHover((h) => (h === n.id ? null : h))}
                 onClick={(e) => { if (compact) return; e.stopPropagation(); pick(n) }}
                 tabIndex={compact || !opens ? -1 : 0}
@@ -218,12 +229,12 @@ export function DeskGraph({ network, compact = false, hiddenTypes, onOpen, onExp
             <p className="egdk-graph__note">Showing the {vis.nodes.filter((n) => n.type === 'property' && n.id !== PROPERTY_CLUSTER_ID).length} most valuable properties · {vis.hiddenProperties} more in the cluster</p>
           ) : null}
           {hoverNode ? (
-            <div className="egdk-graph__card" role="status">
-              <span className="egdk-graph__card-type">{TYPE_LABEL[hoverNode.type] ?? hoverNode.type}</span>
-              <strong>{hoverNode.label}</strong>
-              {hoverNode.sub ? <span>{subFor(hoverNode)}</span> : null}
-              {nodeAnchor(hoverNode) ? <span className="egdk-graph__card-hint">Click to open its network</span> : null}
-            </div>
+            <GraphHoverCard
+              node={hoverNode}
+              network={network}
+              outreach={outreach}
+              style={hoverAt ? cardPosition(hoverAt, box) : undefined}
+            />
           ) : null}
         </>
       ) : onExpand ? (
@@ -244,4 +255,13 @@ function subFor(n: NetworkNode): string {
 function truncate(s: string, n: number): string {
   const t = String(s ?? '')
   return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t
+}
+
+/** Beside the pointer, flipped to stay inside the pane (card ≈ 320 × 360). */
+function cardPosition(at: { x: number; y: number }, box: { w: number; h: number }): CSSProperties {
+  const W = 320
+  const H = 360
+  const left = at.x + 18 + W > box.w ? Math.max(8, at.x - 18 - W) : at.x + 18
+  const top = Math.min(Math.max(8, at.y - 40), Math.max(8, box.h - H - 8))
+  return { left, top, right: 'auto', bottom: 'auto' }
 }

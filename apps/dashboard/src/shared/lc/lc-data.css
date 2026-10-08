@@ -470,3 +470,9 @@ button.lc-rail__hit:focus-visible { box-shadow: var(--lc-focus-ring); }
 .lc-spark__line { fill: none; stroke: rgb(var(--lc-st-rgb, var(--lc-exec-rgb))); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .lc-spark__area { fill: rgba(var(--lc-st-rgb, var(--lc-exec-rgb)), 0.12); stroke: none; }
 .lc-spark__dot { fill: rgb(var(--lc-st-rgb, var(--lc-exec-rgb))); }
+
+/* column reorder (onColumnOrderChange): grab a header, drop it on another */
+.lc-grid__th.is-movable { cursor: grab; }
+.lc-grid__th.is-movable:active { cursor: grabbing; }
+.lc-grid__th.is-dragging { opacity: 0.45; }
+.lc-grid__th.is-drop { box-shadow: inset 2px 0 0 rgb(var(--lc-select-rgb)); background: rgba(var(--lc-select-rgb), 0.08); }

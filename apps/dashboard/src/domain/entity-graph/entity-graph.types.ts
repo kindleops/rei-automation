@@ -134,6 +134,8 @@ export type EntitySearchResult = {
     crossover?: boolean
     confidence?: number
     entityGrade?: string
+    /** Outreach facts merged client-side from /entity-graph/outreach-state (property rows). */
+    outreach?: EntityOutreachState | null
   }
   contextIds: {
     buyerId?: string
@@ -342,3 +344,17 @@ export type EntityGraphAction =
   | 'apply_market_filter'
   | 'view_zip_intelligence'
   | 'view_market_intelligence'
+/**
+ * Per-property outreach facts (GET /api/cockpit/entity-graph/outreach-state).
+ * `sms` is the campaign target builder's own readiness verdict; null = the
+ * source did not answer (never "not eligible").
+ */
+export type EntityOutreachState = {
+  sms: { eligible: boolean; reason: string | null; rows: number; ready: number; source: string; reviewChecked: boolean } | null
+  lastContact: { at: string; direction: 'inbound' | 'outbound'; channel: string; source: string } | null
+  stage: { value: string; source: 'pipeline' | 'conversation' } | null
+  status: { value: string; source: 'pipeline' | 'conversation' } | null
+  dealId: string | null
+  conversation: { threadKey: string | null; at: string | null; direction: string | null; preview: string | null; bucket: string | null; suppressed: boolean } | null
+  campaigns: { count: number; latest: { id: string; name: string | null; status: string | null; targetStatus: string | null; blockReason: string | null } | null } | null
+}

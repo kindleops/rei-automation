@@ -30,24 +30,27 @@ export function equityLabel(r: EntitySearchResult): string {
 const recordsCaptured = (r: EntitySearchResult): boolean => Boolean(r.details?.records) && r.details?.records?.captured !== false
 
 export type ColumnGroup =
-  | 'overview' | 'geography' | 'property' | 'ownership'
-  | 'people' | 'contacts' | 'signals' | 'scores' | 'provenance'
+  | 'overview' | 'outreach' | 'geography' | 'property' | 'ownership' | 'owner'
+  | 'people' | 'contacts' | 'signals' | 'scores' | 'engine' | 'provenance'
 
 export const COLUMN_GROUP_LABELS: Record<ColumnGroup, string> = {
   overview: 'Overview',
+  outreach: 'Outreach, pipeline & campaigns',
   geography: 'Geography',
   property: 'Property',
-  ownership: 'Ownership',
+  ownership: 'Ownership (on the property)',
+  owner: 'Owner record (master owner)',
   people: 'People / entity',
   contacts: 'Contacts',
-  signals: 'Acquisition & signals',
-  scores: 'Scores, value & equity',
+  signals: 'Debt, liens & sales',
+  scores: 'Value & equity',
+  engine: 'Decision Engine',
   provenance: 'Provenance & system',
 }
 
 export const COLUMN_GROUP_ORDER: ColumnGroup[] = [
-  'overview', 'geography', 'property', 'ownership',
-  'people', 'contacts', 'signals', 'scores', 'provenance',
+  'overview', 'outreach', 'geography', 'property', 'ownership', 'owner',
+  'people', 'contacts', 'signals', 'scores', 'engine', 'provenance',
 ]
 
 export type TableColumn = {
@@ -67,6 +70,10 @@ export type TableColumn = {
   field?: string
   /** Raw comparable value for sorting the loaded rows (null sorts last). */
   sortValue?: (result: EntitySearchResult) => string | number | null
+  /** Rendered from `details.outreach` (GET /entity-graph/outreach-state), loaded while visible. */
+  outreach?: boolean
+  /** Column-picker definition: where the value comes from, said plainly. */
+  source?: string
 }
 
 /**
@@ -80,8 +87,90 @@ export type TableColumn = {
  * sort.sortApplied=false when it cannot, and the table then sorts the loaded
  * rows and says so; a header never silently does nothing.
  */
+const humanizeCode = (v: string | null | undefined): string | null => (v ? v.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : null)
+const outreachDay = (iso: string | null | undefined): string | null => {
+  if (!iso) return null
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return null
+  return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+}
+/** Plain words for the campaign readiness reasons (the same codes the builder writes). */
+export const SMS_BLOCK_LABEL: Record<string, string> = {
+  not_in_campaign_audience: 'Not in campaign audience',
+  missing_phone: 'No phone',
+  NO_PHONE: 'No phone',
+  non_sms_capable: 'No SMS line',
+  pending_prior_touch: 'Recently contacted',
+  suppressed: 'Suppressed',
+  suppression_blocked: 'Suppressed',
+  wrong_number: 'Wrong number',
+  active_queue_item: 'Already queued',
+  routing_blocked: 'No sender coverage',
+  graph_not_queue_eligible: 'Not queue-eligible',
+  missing_identity_linkage: 'No person + phone',
+  entity_contact_requires_review: 'Entity contact review',
+  identity_not_verified: 'Identity not verified',
+  missing_timezone: 'No time zone',
+  ambiguous_phone_ownership: 'Shared phone',
+}
+export const smsBlockLabel = (code: string | null | undefined): string => (code ? SMS_BLOCK_LABEL[code] ?? humanizeCode(code) ?? code : '')
+
+/**
+ * OUTREACH COLUMNS (owner, 2026-10-08): last contact, stage, status and SMS
+ * eligibility on every row — from /entity-graph/outreach-state, which answers
+ * eligibility with the campaign target builder's own readiness rule.
+ */
+const OUTREACH_COLUMNS: TableColumn[] = [
+  {
+    key: 'smsEligible', group: 'outreach', label: 'SMS eligible', width: 170, outreach: true,
+    source: 'Campaign target graph · the builder’s readiness rule',
+    render: (r) => {
+      const s = r.details?.outreach?.sms
+      if (!s) return null
+      return s.eligible ? 'Yes' : `No · ${smsBlockLabel(s.reason)}`
+    },
+    sortValue: (r) => { const s = r.details?.outreach?.sms; return s ? (s.eligible ? 1 : 0) : null },
+  },
+  {
+    key: 'lastContact', group: 'outreach', label: 'Last contact', width: 150, outreach: true,
+    source: 'Inbox thread + campaign graph timestamps',
+    render: (r) => {
+      const c = r.details?.outreach?.lastContact
+      return c ? `${outreachDay(c.at)} · ${c.direction === 'inbound' ? 'In' : 'Out'} · ${String(c.channel).toUpperCase()}` : null
+    },
+    sortValue: (r) => { const at = r.details?.outreach?.lastContact?.at; return at ? Date.parse(at) : null },
+  },
+  {
+    key: 'stage', group: 'outreach', label: 'Stage', width: 130, outreach: true,
+    source: 'Pipeline deal, else the conversation’s seller stage',
+    render: (r) => { const st = r.details?.outreach?.stage; return st ? `${humanizeCode(st.value)}${st.source === 'conversation' ? ' · convo' : ''}` : null },
+  },
+  {
+    key: 'status', group: 'outreach', label: 'Status', width: 120, outreach: true,
+    source: 'Pipeline deal, else the conversation',
+    render: (r) => { const st = r.details?.outreach?.status; return st ? `${humanizeCode(st.value)}${st.source === 'conversation' ? ' · convo' : ''}` : null },
+  },
+  {
+    key: 'campaigns', group: 'outreach', label: 'Campaigns', width: 190, outreach: true,
+    source: 'campaign_targets',
+    render: (r) => {
+      const c = r.details?.outreach?.campaigns
+      if (!c || !c.count) return c ? 'None' : null
+      const name = c.latest?.name ?? 'campaign'
+      return c.count > 1 ? `${name} +${c.count - 1}` : name
+    },
+    sortValue: (r) => r.details?.outreach?.campaigns?.count ?? null,
+  },
+  {
+    key: 'lastMessage', group: 'outreach', label: 'Last message', width: 240, outreach: true,
+    source: 'Inbox thread (latest message)',
+    render: (r) => r.details?.outreach?.conversation?.preview ?? null,
+  },
+]
+
 export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
   properties: [
+    ...OUTREACH_COLUMNS,
     { key: 'market', group: 'geography', label: 'Market', sortBy: 'market', width: 132, render: (r) => resolveMarket(r).label },
     { key: 'assetType', group: 'property', label: 'Type', width: 84, render: (r) => text(r.details?.assetType) },
     { key: 'value', group: 'scores', label: 'Value', sortBy: 'estimated_value', align: 'right', width: 84, render: (r) => compactCurrency(r.details?.value) },
@@ -330,6 +419,68 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
      tag_distress_score / ai_score removed — see the note on the Score column
      above and domain/acquisition/legacy-acquisition-fields. */
 
+  /* Linked entities (server: ENTITY_GRAPH_LINKED_COLUMNS). A field with several
+     linked records shows the primary value; its count is its own column. */
+  { key: 'contact.person', label: 'Contact person (primary)', group: 'contacts', width: 170 },
+  { key: 'contact.person_count', label: 'People linked', group: 'contacts', width: 104, numeric: true },
+  { key: 'contact.phone_count', label: 'Phones linked', group: 'contacts', width: 104, numeric: true },
+  { key: 'contact.line_type', label: 'Best line type', group: 'contacts', width: 116 },
+  { key: 'contact.phone_activity', label: 'Phone activity', group: 'contacts', width: 120 },
+  { key: 'contact.phone_owner', label: 'Phone owner (vendor)', group: 'contacts', width: 150 },
+  { key: 'contact.identity', label: 'Owner identity', group: 'contacts', width: 112 },
+  { key: 'contact.matching', label: 'Matching tags', group: 'contacts', width: 170 },
+  { key: 'email.count', label: 'Emails linked', group: 'contacts', width: 104, numeric: true },
+  { key: 'entity.name', label: 'Title entity', group: 'people', width: 190 },
+  { key: 'entity.count', label: 'Title entities', group: 'people', width: 100, numeric: true },
+
+  { key: 'owner.display_name', label: 'Owner (master record)', group: 'owner', width: 180 },
+  { key: 'owner.owner_type_guess', label: 'Owner type', group: 'owner', width: 160 },
+  { key: 'owner.priority_tier', label: 'Owner tier', group: 'owner', width: 90 },
+  { key: 'owner.property_count', label: 'Owner properties', group: 'owner', width: 118, numeric: true },
+  { key: 'owner.portfolio_total_units', label: 'Owner units', group: 'owner', width: 100, numeric: true },
+  { key: 'owner.portfolio_total_value', label: 'Portfolio value', group: 'owner', width: 120, numeric: true },
+  { key: 'owner.portfolio_total_equity', label: 'Portfolio equity', group: 'owner', width: 124, numeric: true },
+  { key: 'owner.portfolio_total_loan_balance', label: 'Portfolio debt', group: 'owner', width: 116, numeric: true },
+  { key: 'owner.portfolio_total_tax_amount', label: 'Portfolio tax', group: 'owner', width: 110, numeric: true },
+  { key: 'owner.tax_delinquent_count', label: 'Tax-delinquent props', group: 'owner', width: 144, numeric: true },
+  { key: 'owner.active_lien_count', label: 'Props with liens', group: 'owner', width: 120, numeric: true },
+  { key: 'owner.max_ownership_years', label: 'Longest held (yrs)', group: 'owner', width: 128, numeric: true },
+  { key: 'owner.contactability_score', label: 'Contactability', group: 'owner', width: 112, numeric: true },
+  { key: 'owner.financial_pressure_score', label: 'Financial pressure', group: 'owner', width: 132, numeric: true },
+  { key: 'owner.urgency_score', label: 'Urgency', group: 'owner', width: 90, numeric: true },
+  { key: 'owner.priority_score', label: 'Owner priority', group: 'owner', width: 112, numeric: true },
+  { key: 'owner.best_language', label: 'Owner language', group: 'owner', width: 116 },
+  { key: 'owner.best_channel', label: 'Best channel', group: 'owner', width: 106 },
+  { key: 'owner.best_contact_window', label: 'Best contact window', group: 'owner', width: 140 },
+  { key: 'owner.routing_timezone', label: 'Owner time zone', group: 'owner', width: 130 },
+  { key: 'owner.routing_market', label: 'Routing market', group: 'owner', width: 140 },
+  { key: 'owner.markets_text', label: 'Owner markets', group: 'owner', width: 180 },
+  { key: 'owner.follow_up_cadence', label: 'Follow-up cadence', group: 'owner', width: 130 },
+  { key: 'owner.seller_tags_text', label: 'Owner tags', group: 'owner', width: 200 },
+  { key: 'owner.agent_persona', label: 'Agent persona', group: 'owner', width: 130 },
+  { key: 'owner.primary_owner_address', label: 'Owner primary address', group: 'owner', width: 220 },
+
+  { key: 'scores.aos_score', label: 'AOS score', group: 'engine', width: 90, numeric: true },
+  { key: 'scores.decision_tier', label: 'Decision tier', group: 'engine', width: 106 },
+  { key: 'scores.confidence', label: 'Engine confidence', group: 'engine', width: 128, numeric: true },
+  { key: 'scores.best_strategy', label: 'Best strategy', group: 'engine', width: 130 },
+  { key: 'scores.valuation_mid', label: 'Valuation (mid)', group: 'engine', width: 120, numeric: true },
+  { key: 'scores.valuation_low', label: 'Valuation (low)', group: 'engine', width: 120, numeric: true },
+  { key: 'scores.valuation_high', label: 'Valuation (high)', group: 'engine', width: 124, numeric: true },
+  { key: 'scores.comp_count', label: 'Comps used', group: 'engine', width: 96, numeric: true },
+  { key: 'scores.recommended_cash_offer', label: 'Recommended offer', group: 'engine', width: 136, numeric: true },
+  { key: 'scores.minimum_acceptable_offer', label: 'Minimum offer', group: 'engine', width: 116, numeric: true },
+  { key: 'scores.expected_assignment_fee', label: 'Assignment fee', group: 'engine', width: 120, numeric: true },
+  { key: 'scores.buyer_demand_score', label: 'Buyer demand', group: 'engine', width: 110, numeric: true },
+  { key: 'scores.liquidity_score', label: 'Liquidity', group: 'engine', width: 90, numeric: true },
+  { key: 'scores.transaction_probability_90', label: 'Sale chance (90d)', group: 'engine', width: 130, numeric: true },
+  { key: 'scores.transaction_probability_365', label: 'Sale chance (1y)', group: 'engine', width: 124, numeric: true },
+  { key: 'scores.seller_financial_pressure_score', label: 'Seller pressure', group: 'engine', width: 120, numeric: true },
+  { key: 'scores.foreclosure_risk_score', label: 'Foreclosure risk', group: 'engine', width: 124, numeric: true },
+  { key: 'scores.owner_situation_primary', label: 'Owner situation', group: 'engine', width: 150 },
+  { key: 'scores.recommended_conversation_angle', label: 'Conversation angle', group: 'engine', width: 200 },
+  { key: 'scores.computed_at', label: 'Engine run', group: 'engine', width: 118 },
+
   { key: 'master_owner_id', label: 'Master owner ID', group: 'provenance', width: 190 },
   { key: 'source_system', label: 'Source system', group: 'provenance', width: 130 },
   { key: 'created_at', label: 'Created', group: 'provenance', width: 118 },
@@ -339,7 +490,7 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
 
 /** ZIPs, years and ids must not be thousands-separated. */
 const LITERAL_NUMERIC = /(zip|year|_id$|apn|parcel|latitude|longitude)/i
-const CURRENCY = /(value|price|amount|balance|offer|cost|estimate)/i
+const CURRENCY = /(value|price|amount|balance|offer|cost|estimate|equity|valuation|fee|debt|tax_amount)/i
 
 function renderRawField(key: string, numeric: boolean | undefined, result: EntitySearchResult): string | null {
   const raw = (result.details?.row ?? {})[key]

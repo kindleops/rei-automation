@@ -33,7 +33,8 @@ type Props = {
 
 export function EntityGraphColumnSheet({ open, scope, visible, onClose, onChange }: Props) {
   const [query, setQuery] = useState('')
-  const catalog = SCOPE_TABLE_COLUMNS[scope]
+  // outreach columns load only on the desk (/entity-graph/outreach-state); the phone never offers them
+  const catalog = SCOPE_TABLE_COLUMNS[scope].filter((c) => !c.outreach)
   const byKey = useMemo(() => new Map(catalog.map((c) => [c.key, c])), [catalog])
 
   const grouped = useMemo(() => {
