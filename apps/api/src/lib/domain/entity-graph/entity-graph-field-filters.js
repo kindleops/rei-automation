@@ -247,11 +247,26 @@ export const ENTITY_GRAPH_FLAG_FIELD = syntheticField('properties', 'properties'
   description: 'Vendor property flags (Vacant Home, Tax Delinquent, Tired Landlord, Preforeclosure, Probate, …) matched as whole tokens; several are ORed.',
 })
 
-/** Whole-token ilike patterns for one flag in a "; "-separated list. */
-export function flagTokenPatterns(token) {
+/**
+ * Whole-token ilike patterns for one token in a delimited list ("; " by
+ * default, ", " for prospects.matching_flags). A token never matches inside
+ * another ("Foreclosure" is inside "Preforeclosure").
+ */
+export function flagTokenPatterns(token, separator = '; ') {
   const t = String(token ?? '').replace(/[^A-Za-z0-9 +\-/&']/g, '').trim()
   if (!t) return []
-  return [t, `${t};%`, `%; ${t}`, `%; ${t};%`]
+  const sep = String(separator || '; ')
+  const core = sep.trim() || sep
+  return [t, `${t}${core}%`, `%${sep}${t}`, `%${sep}${t}${core}%`]
+}
+
+/**
+ * A value inside a PostgREST `or=(…)` expression. Commas and parentheses are
+ * the expression's own syntax, so a value carrying one is double-quoted.
+ */
+export function orFilterValue(value) {
+  const v = String(value ?? '')
+  return /[,()"\\]/.test(v) ? `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : v
 }
 
 /** Buyer entities (public.eg_buyer_index — service-role read model over comp_private). */
@@ -287,7 +302,72 @@ export const ENTITY_GRAPH_BUYER_FIELDS = Object.freeze([
   B('Identity', 'confidence', 'Identity confidence', 'number', { format: 'share' }),
 ])
 
-const SYNTHETIC_BY_KEY = new Map([...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_BUYER_FIELDS, ENTITY_GRAPH_FLAG_FIELD].map((field) => [field.key, field]))
+/**
+ * DERIVED FIELDS — a question the raw column answers wrongly, compiled to the
+ * predicate that answers it (filter audit, 2026-10-08).
+ *
+ *   properties.known_equity_percent — equity_known_v1 (entity-graph-truth.js):
+ *     the vendor equity_percent reads 100% whenever no loan is on file (96,910
+ *     of 176,610 properties), so "equity 60%+" on the raw column returned every
+ *     property with no recorded loan. Known = a loan on file and a value (the
+ *     vendor percentage), or no loan + the vendor "Free And Clear" flag (100%).
+ *   prospects.age_years — prospects has no age column; the catalog's
+ *     "Age bucket" compiles to prospects.mob, the month of birth as YYYYMM, so
+ *     a bucket value never matched. An age range is a month-of-birth range.
+ */
+export const ENTITY_GRAPH_DERIVED_FIELDS = Object.freeze([
+  syntheticField('properties', 'properties', 'Value & Equity', 'known_equity_percent', 'Known equity %', 'number', {
+    key: 'properties.known_equity_percent',
+    derived: 'known_equity',
+    format: 'percent',
+    operators: Object.freeze([{ key: 'gte', label: 'At least' }, { key: 'lte', label: 'At most' }, { key: 'between', label: 'Between' }]),
+    description: 'Equity only where it is known: a loan on file and a value, or no loan with the vendor "Free And Clear" flag (100%). Unknown equity never matches.',
+  }),
+  syntheticField('prospects', 'prospects', 'Demographics', 'age_years', 'Age (years)', 'number', {
+    key: 'prospects.age_years',
+    derived: 'age_from_mob',
+    operators: Object.freeze([{ key: 'gte', label: 'At least' }, { key: 'lte', label: 'At most' }, { key: 'between', label: 'Between' }]),
+    description: 'Age from the month of birth on file (prospects.mob, YYYYMM), to the month. People with no month of birth never match.',
+  }),
+])
+
+const SYNTHETIC_BY_KEY = new Map([...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_BUYER_FIELDS, ENTITY_GRAPH_FLAG_FIELD, ...ENTITY_GRAPH_DERIVED_FIELDS].map((field) => [field.key, field]))
+
+/**
+ * Catalogued fields Entity Graph CANNOT execute on the table its tab reads
+ * (filter audit 2026-10-08, information_schema against prod). They are not
+ * offered, and a request naming one fails closed with the reason.
+ */
+export const ENTITY_GRAPH_UNEXECUTABLE_FIELDS = Object.freeze({
+  'properties.aos_score': 'lives on property_acquisition_scores (Decision Engine), not on properties',
+  'properties.decision_tier': 'lives on property_acquisition_scores (Decision Engine), not on properties',
+  'properties.acquisition_confidence': 'lives on property_acquisition_scores (Decision Engine), not on properties',
+  'properties.transaction_probability_365': 'lives on property_acquisition_scores (Decision Engine), not on properties',
+  'properties.best_strategy': 'lives on property_acquisition_scores (Decision Engine), not on properties',
+  'prospects.age_bucket': 'compiles to prospects.mob (month of birth, YYYYMM) — a bucket never matches; use prospects.age_years',
+})
+
+/**
+ * Delimited-list text columns. "Is any of" on them compiled to whole-string
+ * equality — "Likely Owner" matched only rows whose ENTIRE value was "Likely
+ * Owner" (2,511 of 3,638 sampled properties carry several flags). They match
+ * as whole tokens, like properties.flags.
+ */
+export const ENTITY_GRAPH_TOKEN_FIELDS = Object.freeze({
+  'properties.property_flags_text': '; ',
+  'prospects.person_flags_text': '; ',
+  'prospects.matching_flags': ', ',
+})
+const TOKEN_OPS = Object.freeze([
+  { key: 'is_any_of', label: 'Has any of' },
+  { key: 'is_empty', label: 'Is empty' },
+  { key: 'is_not_empty', label: 'Has a value' },
+])
+
+/** Raw columns that answer, but not the question their label suggests. Shown with the field. */
+export const ENTITY_GRAPH_FIELD_CAUTIONS = Object.freeze({
+  'properties.equity_percent': 'Vendor value: reads 100% whenever no loan is on file. Use "Known equity %" to filter on equity that is actually known.',
+})
 
 export const ENTITY_GRAPH_FILTERABLE_TABS = Object.freeze(Object.keys(ENTITY_GRAPH_FILTER_SOURCE_BY_TAB))
 
@@ -296,8 +376,15 @@ export function entityGraphFilterSourceForTab(tab) {
 }
 
 function decorate(field) {
+  if (!field) return field
+  let out = field
   const emptyReason = ENTITY_GRAPH_EMPTY_SOURCE_COLUMNS[field.key]
-  return emptyReason ? { ...field, data_coverage: 'empty', data_coverage_note: emptyReason } : field
+  if (emptyReason) out = { ...out, data_coverage: 'empty', data_coverage_note: emptyReason }
+  const separator = ENTITY_GRAPH_TOKEN_FIELDS[field.key]
+  if (separator) out = { ...out, type: 'flags', operators: TOKEN_OPS, token_separator: separator, supports_options: true }
+  const caution = ENTITY_GRAPH_FIELD_CAUTIONS[field.key]
+  if (caution) out = { ...out, caution }
+  return out
 }
 
 /** Every catalogued field a tab's own browse query can execute, in catalog order. */
@@ -306,13 +393,15 @@ export function getEntityGraphFilterFields(tab) {
   if (!source) return []
   if (source === 'eg_buyer_index') return [...ENTITY_GRAPH_BUYER_FIELDS]
   const catalog = CAMPAIGN_FIELD_CATALOG
-    .filter((field) => field.source_table_or_view === source && field.filterable && !ENTITY_GRAPH_WITHHELD_FIELDS.has(field.key))
+    .filter((field) => field.source_table_or_view === source && field.filterable
+      && !ENTITY_GRAPH_WITHHELD_FIELDS.has(field.key) && !ENTITY_GRAPH_UNEXECUTABLE_FIELDS[field.key])
     .map(decorate)
-  return source === 'properties' ? [ENTITY_GRAPH_FLAG_FIELD, ...catalog, ...ENTITY_GRAPH_RECORD_FIELDS] : catalog
+  const derived = ENTITY_GRAPH_DERIVED_FIELDS.filter((field) => field.source_table_or_view === source)
+  return source === 'properties' ? [ENTITY_GRAPH_FLAG_FIELD, ...derived, ...catalog, ...ENTITY_GRAPH_RECORD_FIELDS] : [...derived, ...catalog]
 }
 
 function lookupField(fieldKey) {
-  return SYNTHETIC_BY_KEY.get(fieldKey) || getCampaignFieldDefinition(fieldKey)
+  return SYNTHETIC_BY_KEY.get(fieldKey) || decorate(getCampaignFieldDefinition(fieldKey))
 }
 
 /** The same fields grouped for the filter builder, one group per catalog category. */
@@ -399,6 +488,10 @@ export function resolveEntityGraphFieldFilters(tab, requested = []) {
       unsupported.push({ field_key: fieldKey, reason: 'field_withheld_from_entity_graph' })
       continue
     }
+    if (ENTITY_GRAPH_UNEXECUTABLE_FIELDS[fieldKey]) {
+      unsupported.push({ field_key: fieldKey, reason: 'field_not_executable_on_entity_graph', note: ENTITY_GRAPH_UNEXECUTABLE_FIELDS[fieldKey] })
+      continue
+    }
     const field = lookupField(fieldKey)
     if (!field) {
       unsupported.push({ field_key: requestedKey, reason: 'unknown_campaign_field' })
@@ -458,20 +551,83 @@ export function applyEntityGraphFieldFilters(query, resolved = []) {
   if (!resolved.length) return query
   // Array columns (buyer geography, lien categories) are an OVERLAP test; the
   // shared compiler has no array type, so they are applied here directly.
-  const arrays = resolved.filter((entry) => entry.fieldDefinition?.type === 'array')
-  const flags = resolved.filter((entry) => entry.fieldDefinition?.type === 'flags')
-  const scalar = resolved.filter((entry) => entry.fieldDefinition?.type !== 'array' && entry.fieldDefinition?.type !== 'flags')
+  const type = (entry) => entry.fieldDefinition?.type
+  const isTokenMatch = (entry) => type(entry) === 'flags' && entry.operator === 'is_any_of'
+  const arrays = resolved.filter((entry) => type(entry) === 'array')
+  const flags = resolved.filter(isTokenMatch)
+  const derived = resolved.filter((entry) => entry.fieldDefinition?.derived)
+  const scalar = resolved
+    .filter((entry) => type(entry) !== 'array' && !isTokenMatch(entry) && !entry.fieldDefinition?.derived)
+    // a token field's empty / not-empty test is an ordinary text predicate
+    .map((entry) => (type(entry) === 'flags' ? { ...entry, fieldDefinition: { ...entry.fieldDefinition, type: 'text' } } : entry))
   let next = scalar.length ? applySupabaseFilters(query, scalar) : query
   for (const entry of flags) {
     const values = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(Boolean)
-    const parts = values.flatMap((v) => flagTokenPatterns(v)).map((pattern) => `${entry.source_column}.ilike.${pattern}`)
+    const separator = entry.fieldDefinition?.token_separator || '; '
+    const parts = values.flatMap((v) => flagTokenPatterns(v, separator)).map((pattern) => `${entry.source_column}.ilike.${orFilterValue(pattern)}`)
     if (parts.length) next = next.or(parts.join(','))
+  }
+  for (const entry of derived) {
+    if (entry.fieldDefinition.derived === 'known_equity') next = applyKnownEquity(next, entry)
+    else if (entry.fieldDefinition.derived === 'age_from_mob') next = applyAgeFromMob(next, entry)
   }
   for (const entry of arrays) {
     const values = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(Boolean)
     if (values.length) next = next.overlaps(entry.source_column, values)
   }
   return next
+}
+
+function rangeOf(entry) {
+  const num = (v) => {
+    if (v === null || v === undefined || v === '') return null
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  const v = entry.value
+  if (entry.operator === 'gte') return { lo: num(Array.isArray(v) ? v[0] : v), hi: null }
+  if (entry.operator === 'lte') return { lo: null, hi: num(Array.isArray(v) ? v[0] : v) }
+  if (entry.operator === 'between') return { lo: num(Array.isArray(v) ? v[0] : null), hi: num(Array.isArray(v) ? v[1] : null) }
+  return { lo: null, hi: null }
+}
+
+/** equity_known_v1 as a predicate — see ENTITY_GRAPH_DERIVED_FIELDS. */
+export function applyKnownEquity(query, entry) {
+  const { lo, hi } = rangeOf(entry)
+  const loanBranch = ['total_loan_balance.gt.0', 'estimated_value.gt.0']
+  if (lo !== null) loanBranch.push(`equity_percent.gte.${lo}`)
+  if (hi !== null) loanBranch.push(`equity_percent.lte.${hi}`)
+  const freeAndClear = (lo === null || lo <= 100) && (hi === null || hi >= 100)
+  if (!freeAndClear) {
+    let q = query.gt('total_loan_balance', 0).gt('estimated_value', 0)
+    if (lo !== null) q = q.gte('equity_percent', lo)
+    if (hi !== null) q = q.lte('equity_percent', hi)
+    return q
+  }
+  const flag = flagTokenPatterns('Free And Clear').map((p) => `property_flags_text.ilike.${orFilterValue(p)}`).join(',')
+  return query.or(`and(${loanBranch.join(',')}),and(estimated_value.gt.0,or(total_loan_balance.is.null,total_loan_balance.eq.0),or(${flag}))`)
+}
+
+const ym = (date) => `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+
+/** An age range as a month-of-birth (YYYYMM text) range. `now` is injectable for tests. */
+export function ageMobBounds({ lo = null, hi = null } = {}, now = new Date()) {
+  const shift = (years, months = 0) => {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+    d.setUTCFullYear(d.getUTCFullYear() - years)
+    d.setUTCMonth(d.getUTCMonth() + months)
+    return d
+  }
+  // at least `lo` years old  → born in or before (now − lo years)
+  // at most `hi` years old   → born after (now − (hi + 1) years)
+  const upper = lo !== null ? ym(shift(lo)) : '209912'
+  const lower = hi !== null ? ym(shift(hi + 1, 1)) : '190001'
+  return { lower: lower < '190001' ? '190001' : lower, upper }
+}
+
+export function applyAgeFromMob(query, entry, now = new Date()) {
+  const { lower, upper } = ageMobBounds(rangeOf(entry), now)
+  return query.gte('mob', lower).lte('mob', upper)
 }
 
 /**

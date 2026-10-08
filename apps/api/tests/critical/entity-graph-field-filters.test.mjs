@@ -82,7 +82,7 @@ test("the exposed fields come from the campaign catalog, not a second list", () 
       // declared once in entity-graph-field-filters.js and flagged as such;
       // they never pose as campaign catalog fields.
       if (field.entity_graph_only) {
-        assert.ok(/^(records|buyers)\./.test(field.key) || field.key === 'properties.flags', `${field.key} is an unflagged synthetic field`);
+        assert.ok(/^(records|buyers)\./.test(field.key) || field.key === 'properties.flags' || Boolean(field.derived), `${field.key} is an unflagged synthetic field`);
         assert.ok(!catalogKeys.has(field.key), `${field.key} shadows a campaign catalog field`);
         assert.equal(field.supported_in_preview, false);
         assert.equal(field.source_table_or_view, ENTITY_GRAPH_FILTER_SOURCE_BY_TAB[tab]);

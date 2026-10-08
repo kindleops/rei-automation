@@ -24,7 +24,7 @@ import {
   applyEntityGraphFieldFilters,
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
-import { applyBuyerFilters, applyPropertyFilters, parseBrowseFilters } from './entity-graph-service.js'
+import { applyBuyerFilters, applyOwnerFilters, applyPhoneFilters, applyPropertyFilters, applyProspectFilters, parseBrowseFilters } from './entity-graph-service.js'
 import { FacetUntranslatable, facetsAvailable, groupedFacetCounts, groupedTokenCounts } from './entity-graph-facet-sql.js'
 
 const clean = (value) => String(value ?? '').trim()
@@ -126,9 +126,52 @@ const BUYER_DIMENSIONS = [
   ] },
 ]
 
+/**
+ * PEOPLE / OWNERS / PHONES (owner defect 2026-10-08: "People tab has no
+ * filters in the sidebar"). Facets over the catalog fields each tab's own
+ * browse query reads (prospects / master_owners / phones), counted by the same
+ * exact GROUP BY as the property facets. Delimited lists (matching flags,
+ * person flags) are counted per whole token — the same token rule the filter
+ * applies (ENTITY_GRAPH_TOKEN_FIELDS).
+ */
+const top = (key, label, group, column, filterKey) => ({ key, label, group, kind: 'top', column, filterKey })
+const PEOPLE_DIMENSIONS = [
+  top('language', 'Language', 'Demographics', 'language_preference', 'prospects.language_preference'),
+  { key: 'matching', label: 'Owner matching', group: 'Matching', kind: 'tokens', column: 'matching_flags', split: ', ', filterKey: 'prospects.matching_flags' },
+  { key: 'person_flags', label: 'Person flags', group: 'Matching', kind: 'tokens', column: 'person_flags_text', split: '; ', filterKey: 'prospects.person_flags_text' },
+  top('gender', 'Gender', 'Demographics', 'gender', 'prospects.gender'),
+  top('marital', 'Marital status', 'Demographics', 'marital_status', 'prospects.marital_status'),
+  top('income', 'Household income', 'Financial', 'est_household_income', 'prospects.est_household_income'),
+  top('net_assets', 'Net asset value', 'Financial', 'net_asset_value', 'prospects.net_asset_value'),
+  top('buying_power', 'Buying power', 'Financial', 'buying_power', 'prospects.buying_power'),
+  top('occupation', 'Occupation', 'Demographics', 'occupation_group', 'prospects.occupation_group'),
+  top('education', 'Education', 'Demographics', 'education_model', 'prospects.education_model'),
+  top('timezone', 'Time zone', 'Contact', 'timezone', 'prospects.timezone'),
+  top('contact_window', 'Contact window', 'Contact', 'contact_window', 'prospects.contact_window'),
+]
+const OWNER_DIMENSIONS = [
+  top('owner_type', 'Owner type', 'Profile', 'owner_type_guess', 'master_owners.owner_type_guess'),
+  top('tier', 'Priority tier', 'Profile', 'priority_tier', 'master_owners.priority_tier'),
+  top('cadence', 'Follow-up cadence', 'Profile', 'follow_up_cadence', 'master_owners.follow_up_cadence'),
+  { key: 'portfolio', label: 'Properties owned', group: 'Portfolio', kind: 'banded', column: 'property_count', buckets: [
+    { key: '1', label: '1', gte: 0, lt: 2 }, { key: '2_4', label: '2–4', gte: 2, lt: 5 }, { key: '5_9', label: '5–9', gte: 5, lt: 10 },
+    { key: '10', label: '10+', gte: 10 },
+  ] },
+]
+const PHONE_DIMENSIONS = [
+  top('line', 'Line type', 'Phone', 'phone_type', 'phones.phone_type'),
+  top('phone_owner', 'Phone owner', 'Phone', 'phone_owner', 'phones.phone_owner'),
+  top('activity', 'Activity', 'Phone', 'activity_status', 'phones.activity_status'),
+  top('usage12', 'Usage, 12 months', 'Phone', 'usage_12_months', 'phones.usage_12_months'),
+  top('usage2', 'Usage, 2 months', 'Phone', 'usage_2_months', 'phones.usage_2_months'),
+]
+
 const TAB_CONFIG = {
   properties: { table: 'v_entity_graph_properties', countColumn: 'property_id', dimensions: PROPERTY_DIMENSIONS, applyBase: applyPropertyFilters },
   buyers: { table: 'eg_buyer_index', countColumn: 'buyer_id', dimensions: BUYER_DIMENSIONS, applyBase: applyBuyerFilters },
+  people: { table: 'prospects', countColumn: 'prospect_id', dimensions: PEOPLE_DIMENSIONS, applyBase: applyProspectFilters, fieldPrefix: 'prospects' },
+  master_owners: { table: 'master_owners', countColumn: 'master_owner_id', dimensions: OWNER_DIMENSIONS, applyBase: applyOwnerFilters, fieldPrefix: 'master_owners' },
+  contact_methods: { table: 'phones', countColumn: 'phone_id', dimensions: PHONE_DIMENSIONS, applyBase: applyPhoneFilters, fieldPrefix: 'phones' },
 }
 
 export function getCompositionCatalog(tab = 'properties') {
@@ -269,6 +312,7 @@ async function tokenComposition({ deps, config, dimension, filters, fieldFilters
     result = await grouped({
       source: config.table,
       column: dimension.column,
+      ...(dimension.split ? { split: dimension.split } : {}),
       applyFilters: (builder) => applyEntityGraphFieldFilters(config.applyBase(builder, filters), fieldFilters),
     })
   } catch (error) {
@@ -286,7 +330,7 @@ async function tokenComposition({ deps, config, dimension, filters, fieldFilters
     additive: false,
     exhaustive: true,
     distinct: sorted.length,
-    note: 'A property can carry several flags, so these shares do not add up to 100%.',
+    note: `A ${config.countColumn === 'property_id' ? 'property' : 'record'} can carry several flags, so these shares do not add up to 100%.`,
     buckets: shown.map((row) => ({
       key: row.value,
       label: row.value,
@@ -357,8 +401,9 @@ async function exhaustiveTopComposition({ deps, config, dimension, filters, fiel
  */
 function bucketFilter(dimension, bucket) {
   const synthetic = (column) => (column.startsWith('rec_') ? `records.${column.slice(4)}` : null)
+  const prefix = Object.values(TAB_CONFIG).find((config) => config.dimensions.includes(dimension))?.fieldPrefix
   const colKey = (column) => synthetic(column)
-    || (TAB_CONFIG.buyers.dimensions.includes(dimension) ? `buyers.${column}` : `properties.${column}`)
+    || (prefix ? `${prefix}.${column}` : TAB_CONFIG.buyers.dimensions.includes(dimension) ? `buyers.${column}` : `properties.${column}`)
   if (dimension.kind === 'top') {
     return dimension.filterKey ? { field_key: dimension.filterKey, operator: 'is_any_of', value: [bucket.value] } : null
   }

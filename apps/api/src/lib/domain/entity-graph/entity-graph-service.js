@@ -20,6 +20,7 @@ import {
   resolveEntityGraphMarket,
 } from './entity-graph-normalize.js'
 import {
+  EntityGraphUnsupportedFilterError,
   applyEntityGraphFieldFilters,
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
@@ -936,7 +937,7 @@ export function applyBuyerFilters(query, filters) {
   return query
 }
 
-function applyOwnerFilters(query, filters) {
+export function applyOwnerFilters(query, filters) {
   query = excludeTestOwners(query, { includeTest: Boolean(filters?.includeTest) })
   if (filters.ownerType) query = query.ilike('owner_type_guess', `%${filters.ownerType}%`)
   if (filters.priorityTier) query = query.ilike('priority_tier', `%${filters.priorityTier}%`)
@@ -965,13 +966,13 @@ function applyOwnerFilters(query, filters) {
   return query
 }
 
-function applyProspectFilters(query, filters) {
+export function applyProspectFilters(query, filters) {
   if (filters.language) query = query.ilike('language_preference', `%${filters.language}%`)
   if (filters.reachable) query = query.gt('contact_score_final', 0)
   return query
 }
 
-function applyPhoneFilters(query, filters) {
+export function applyPhoneFilters(query, filters) {
   if (filters.contactStatus === 'wrong') query = query.not('wrong_number_at', 'is', null)
   if (filters.contactStatus === 'eligible') query = query.is('wrong_number_at', null)
   if (filters.reachable) query = query.gt('contact_score_final', 0)
@@ -1339,6 +1340,12 @@ async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascendi
 
 async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascending, subtype, filters = {}, fieldFilters = [] }) {
   const contactSubtype = lower(subtype || 'phone')
+  if (contactSubtype === 'email' && fieldFilters.length) {
+    // The field catalog for this tab is the PHONES table; the email list
+    // never applied it, so a filtered email list was the whole table wearing
+    // the cohort's label (filter audit 2026-10-08). Fail closed instead.
+    throw new EntityGraphUnsupportedFilterError(fieldFilters.map((entry) => ({ field_key: entry.field_key, reason: 'email_list_has_no_field_filters' })))
+  }
   if (contactSubtype === 'email') {
     const orderCol = sortBy === 'contact_score_final' ? 'contact_score_final' : 'sort_rank'
     const { data, error, count } = await supabase

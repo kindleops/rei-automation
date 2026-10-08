@@ -45,7 +45,39 @@ function ident(column) {
   return `"${c}"`
 }
 
-const OR_PART_SPLIT = /,(?=[a-z_][a-z0-9_]*\.(?:not\.)?(?:eq|neq|gt|gte|lt|lte|ilike|like|is|in)\.)/
+const PART_START = /^(?:[a-z_][a-z0-9_]*\.(?:not\.)?(?:eq|neq|gt|gte|lt|lte|ilike|like|is|in)\.|(?:and|or)\()/
+
+/**
+ * Split a PostgREST logical expression body at its top-level commas: never
+ * inside a "quoted value" or a nested (…) group, and only where the next part
+ * starts like a condition (an unquoted comma inside a value stays a value).
+ */
+export function splitLogicalParts(expression) {
+  const text = String(expression ?? '')
+  const parts = []
+  let depth = 0
+  let quoted = false
+  let start = 0
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]
+    if (quoted) {
+      if (ch === '\\') { i += 1; continue }
+      if (ch === '"') quoted = false
+      continue
+    }
+    if (ch === '"') { quoted = true; continue }
+    if (ch === '(') depth += 1
+    else if (ch === ')') depth = Math.max(0, depth - 1)
+    else if (ch === ',' && depth === 0 && PART_START.test(text.slice(i + 1).trimStart())) {
+      parts.push(text.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(text.slice(start))
+  return parts.map((p) => p.trim()).filter(Boolean)
+}
+
+const GROUP = /^(and|or)\(([\s\S]*)\)$/
 const OR_PART = /^([a-z_][a-z0-9_]*)\.(not\.)?(eq|neq|gt|gte|lt|lte|ilike|like|is|in)\.([\s\S]*)$/
 
 function unquote(raw) {
@@ -119,6 +151,12 @@ export function createSqlRecorder() {
   const likeClause = (column, pattern, insensitive = true) => `${ident(column)} ${insensitive ? 'ilike' : 'like'} ${bind(String(pattern).replace(/\*/g, '%'))}`
 
   const orPart = (part) => {
+    const group = GROUP.exec(part.trim())
+    if (group) {
+      const inner = splitLogicalParts(group[2])
+      if (!inner.length) throw new FacetUntranslatable(`empty ${group[1]}`)
+      return `(${inner.map(orPart).join(group[1] === 'and' ? ' and ' : ' or ')})`
+    }
     const m = OR_PART.exec(part.trim())
     if (!m) throw new FacetUntranslatable(`or part ${part}`)
     const [, column, not, op, rawValue] = m
@@ -151,7 +189,7 @@ export function createSqlRecorder() {
       return builder
     },
     or(expression) {
-      const parts = String(expression ?? '').split(OR_PART_SPLIT).filter((p) => p.trim())
+      const parts = splitLogicalParts(expression)
       if (!parts.length) throw new FacetUntranslatable('empty or')
       clauses.push(`(${parts.map(orPart).join(' or ')})`)
       return builder
@@ -218,15 +256,24 @@ export async function groupedFacetCounts({ source, column, applyFilters = (b) =>
  * cohort, plus the cohort size. Tokens are not exclusive — a property carries
  * several — so the counts do not add up to the total (callers say so).
  */
-export async function groupedTokenCounts({ source, column, applyFilters = (b) => b, query = queryWithTimeout, timeoutMs = 25_000, now = Date.now() }) {
-  const { where, params } = compileFacetWhere(applyFilters)
+export async function groupedTokenCounts({ source, column, split = null, applyFilters = (b) => b, query = queryWithTimeout, timeoutMs = 25_000, now = Date.now() }) {
+  const { where, params: whereParams } = compileFacetWhere(applyFilters)
   const col = ident(column)
-  const sql = `select u.v as value, count(*)::bigint as n from public.${ident(source)} cross join lateral jsonb_array_elements_text(case when jsonb_typeof(${col}) = 'array' then ${col} else '[]'::jsonb end) as u(v) ${where} group by 1`
+  const params = [...whereParams]
+  // `split` = a delimited TEXT column ("a; b", "a, b"); otherwise a jsonb array.
+  const tokens = split
+    ? (() => {
+        const core = String(split).trim() || String(split)
+        params.push(`\\s*${core.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`)
+        return `regexp_split_to_table(coalesce(${col}::text, ''), $${params.length})`
+      })()
+    : `jsonb_array_elements_text(case when jsonb_typeof(${col}) = 'array' then ${col} else '[]'::jsonb end)`
+  const sql = `select btrim(u.v) as value, count(*)::bigint as n from public.${ident(source)} cross join lateral ${tokens} as u(v) ${where} group by 1`
   const totalSql = `select count(*)::bigint as n from public.${ident(source)} ${where}`
   const key = `${sql}|${JSON.stringify(params)}`
   const hit = cache.get(key)
   if (hit && now - hit.at < CACHE_TTL_MS) return hit.rows
-  const [grouped, counted] = await Promise.all([query(sql, params, timeoutMs), query(totalSql, params, timeoutMs)])
+  const [grouped, counted] = await Promise.all([query(sql, params, timeoutMs), query(totalSql, whereParams, timeoutMs)])
   const folded = new Map()
   for (const row of grouped?.rows || []) {
     const value = String(row.value ?? '').trim()
