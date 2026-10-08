@@ -3291,10 +3291,10 @@ async function hydratePreviewSourceForCatalogFilters(source = {}, catalogFilters
   }
 }
 
-const CAMPAIGN_TARGET_GRAPH_TABLE = 'campaign_target_graph'
+export const CAMPAIGN_TARGET_GRAPH_TABLE = 'campaign_target_graph'
 const CAMPAIGN_TARGET_GRAPH_FACET_TABLE = 'campaign_target_graph_facets'
 const CAMPAIGN_TARGET_GRAPH_REFRESH_RUN_TABLE = 'campaign_target_graph_refresh_runs'
-const CAMPAIGN_TARGET_GRAPH_SELECT = [
+export const CAMPAIGN_TARGET_GRAPH_SELECT = [
   'graph_id',
   'property_id',
   'property_export_id',
@@ -4050,7 +4050,7 @@ function graphDistributionCounts(rows = []) {
 // fail-closed identity policy createCampaignQueuePlan already gates on
 // (evaluatePreSendEligibility -> isIdentityEligibleForLiveOutbound) so the
 // two layers cannot silently drift apart.
-function resolveCampaignTargetReadiness(row = {}) {
+export function resolveCampaignTargetReadiness(row = {}) {
   /**
    * IDENTITY LINKAGE, READ FROM THE CANONICAL SCHEMA.
    *

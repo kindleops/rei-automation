@@ -1433,6 +1433,37 @@ export interface PreviewTargetsResponse {
   by_language: any[]
 }
 
+export type ExactSelectionOutcome = {
+  property_id: string
+  status: 'included' | 'excluded' | 'held' | 'duplicate' | 'unresolved'
+  reason: string | null
+  address?: string | null
+  owner_name?: string | null
+  identity_alignment?: string | null
+  vendor_dnc_advisory?: boolean | 'unknown'
+  sender_market?: string | null
+}
+
+export type ExactSelectionPreviewResponse = {
+  ok: boolean
+  error?: string | null
+  requested_count: number
+  outcome_count: number
+  outside_selection_count: number
+  counts: Record<ExactSelectionOutcome['status'], number>
+  results: ExactSelectionOutcome[]
+  target_filter: { field_key: 'properties.property_id'; operator: 'in'; value: string[] }
+  dry_run: true
+}
+
+/** Read-only exact-selection preview (never writes targets or queue rows). */
+export function previewCampaignSelection(payload: { property_ids: string[]; cohort_confirmation?: { confirmed_count: number } }): Promise<BackendResult<ExactSelectionPreviewResponse>> {
+  return callBackend<ExactSelectionPreviewResponse>('/api/cockpit/campaigns/preview-selection', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function previewCampaignTargets(payload: Record<string, unknown>): Promise<BackendResult<PreviewTargetsResponse>> {
   return callBackend<PreviewTargetsResponse>('/api/cockpit/campaigns/preview-targets', {
     method: 'POST',
