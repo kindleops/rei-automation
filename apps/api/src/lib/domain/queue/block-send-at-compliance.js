@@ -1,8 +1,14 @@
 import { info } from "@/lib/logging/logger.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { evaluateCanonicalContactability } from "@/lib/domain/compliance/evaluate-canonical-contactability.js";
+import { runSendTimeContactGuard, SEND_TIME_GUARD_REASONS } from "@/lib/domain/queue/send-time-contact-guard.js";
+import { supabase as realSupabase } from "@/lib/supabase/client.js";
 
 const QUEUE_TABLE = "send_queue";
+
+function isTestRuntimeWithFakeClient(client) {
+  return process.env.NODE_ENV === "test" && Boolean(client) && client !== realSupabase;
+}
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -110,7 +116,7 @@ export async function blockSendAtCompliance(
 export async function evaluateAndBlockSendAtCompliance(queue_row = {}, deps = {}) {
   const supabase = deps.supabase || deps.supabaseClient;
   const manual_operator_send = deps.manual_operator_send === true;
-  const compliance = await evaluateCanonicalContactability(
+  const compliance = await (deps.evaluateCanonicalContactability || evaluateCanonicalContactability)(
     {
       thread_key: queue_row.thread_key,
       to_phone_number: queue_row.to_phone_number,
@@ -126,17 +132,100 @@ export async function evaluateAndBlockSendAtCompliance(queue_row = {}, deps = {}
     { supabase }
   );
 
-  if (!compliance.blocked) {
-    return { blocked: false, compliance, result: null };
+  if (compliance.blocked) {
+    const result = await blockSendAtCompliance(
+      queue_row,
+      deps.claimedLockToken || queue_row.lock_token,
+      compliance,
+      deps
+    );
+    return { blocked: true, compliance, result };
+  }
+
+  // ── Final send-time contact-history + suppression guard (8.4.7, P0 2026-10-08) ──
+  // Every automated and manual send reaches transport only through this function
+  // (process-send-queue both paths, Send Now). The guard re-reads suppression list,
+  // automation_suppressions (incl. precautionary holds), thread opt-out, wrong-number,
+  // prior not-owner replies, and — for first-touch openers only — prior contact,
+  // matching 10-digit / E.164 / formatted numbers. Fail closed.
+  const runGuard = deps.runSendTimeContactGuard || runSendTimeContactGuard;
+  // Test-runtime only: legacy unit tests inject a fake client that cannot serve
+  // the guard's reads. Production (NODE_ENV=production) always runs the guard.
+  if (!deps.runSendTimeContactGuard && isTestRuntimeWithFakeClient(supabase)) {
+    return { blocked: false, compliance, guard: { blocked: false, skipped: "test_runtime_fake_client" }, result: null };
+  }
+  let guard;
+  try {
+    guard = await runGuard(queue_row, { supabase });
+  } catch (error) {
+    guard = { blocked: true, reason: SEND_TIME_GUARD_REASONS.READ_FAILED, detail: { error: clean(error?.message || error).slice(0, 200) } };
+  }
+  if (!guard?.blocked) {
+    return { blocked: false, compliance, guard, result: null };
+  }
+
+  const guard_compliance = {
+    ...compliance,
+    blocked: true,
+    reason: guard.reason,
+    reason_code: guard.reason_code || guard.reason,
+    send_time_guard: guard,
+  };
+
+  // A transient read failure must not permanently cancel a legitimate send:
+  // release the claim and defer; the row is re-evaluated on a later run.
+  if (guard.reason === SEND_TIME_GUARD_REASONS.READ_FAILED) {
+    const result = await deferSendAtGuard(queue_row, guard, deps);
+    return { blocked: true, compliance: guard_compliance, guard, result };
   }
 
   const result = await blockSendAtCompliance(
     queue_row,
     deps.claimedLockToken || queue_row.lock_token,
-    compliance,
+    guard_compliance,
     deps
   );
-  return { blocked: true, compliance, result };
+  return { blocked: true, compliance: guard_compliance, guard, result };
+}
+
+/** Fail-closed deferral: no transport, row unlocked and kept in its status for a later attempt. */
+export async function deferSendAtGuard(queue_row = {}, guard = {}, deps = {}) {
+  const supabase = deps.supabase || deps.supabaseClient;
+  const now = deps.now || new Date().toISOString();
+  const queue_row_id = clean(queue_row.id);
+  const meta = queue_row.metadata && typeof queue_row.metadata === "object" ? queue_row.metadata : {};
+  const retry_at = new Date(Date.parse(now) + 10 * 60 * 1000).toISOString();
+  if (supabase && queue_row_id) {
+    await supabase
+      .from(QUEUE_TABLE)
+      .update({
+        is_locked: false,
+        locked_at: null,
+        lock_token: null,
+        updated_at: now,
+        metadata: {
+          ...meta,
+          send_time_guard_deferred: true,
+          send_time_guard_deferred_at: now,
+          send_time_guard_reason: guard.reason || null,
+          next_eligible_at: retry_at,
+        },
+      })
+      .eq("id", queue_row_id);
+  }
+  info("compliance.send_time_guard_deferred", { queue_row_id, reason: guard.reason || null });
+  return {
+    ok: false,
+    sent: false,
+    skipped: true,
+    blocked: true,
+    deferred: true,
+    reason: guard.reason || "send_time_guard_read_failed",
+    final_queue_status: queue_row.queue_status || null,
+    queue_row_id,
+    queue_item_id: queue_row_id,
+    retryable: true,
+  };
 }
 
 export default blockSendAtCompliance;

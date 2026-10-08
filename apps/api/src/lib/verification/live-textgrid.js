@@ -10,7 +10,7 @@ import {
   parseMessageEventMetadata,
   serializeMessageEventMetadata,
 } from "@/lib/domain/events/message-event-metadata.js";
-import { getSystemFlag } from "@/lib/system-control.js";
+import { getSystemFlag, getSystemValue } from "@/lib/system-control.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -31,6 +31,23 @@ function toVerificationMessageBody(body = "", note = "") {
   if (trimmed_body) return trimmed_body;
   if (trimmed_note) return `Verification: ${trimmed_note}`;
   return `Verification ping ${new Date().toISOString()}`;
+}
+
+function normalizeVerificationPhone(value) {
+  const digits = clean(value).replace(/\D+/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return null;
+}
+
+async function resolveVerificationRecipientAllowlist(deps = {}) {
+  try {
+    const get_system_value = deps.getSystemValue || getSystemValue;
+    const raw = clean(await get_system_value("verification_textgrid_allowed_recipients"));
+    return new Set(raw.split(/[\s,]+/).map(normalizeVerificationPhone).filter(Boolean));
+  } catch {
+    return new Set();
+  }
 }
 
 async function resolveLiveTextgridVerificationSendGate(deps = {}) {
@@ -85,6 +102,23 @@ export async function runLiveTextgridSendVerification({
     return {
       ok: false,
       ...send_gate,
+      run_id,
+      client_reference_id,
+    };
+  }
+
+  // P0 2026-10-08: never an arbitrary-number sender. The recipient must be on an
+  // explicit operator test allowlist (system_control
+  // verification_textgrid_allowed_recipients, comma-separated). Empty or
+  // unreadable allowlist = refuse.
+  const allowed = await resolveVerificationRecipientAllowlist(deps);
+  const to_e164 = normalizeVerificationPhone(to);
+  if (!to_e164 || !allowed.has(to_e164)) {
+    return {
+      ok: false,
+      skipped: true,
+      status: 403,
+      reason: "verification_recipient_not_allowlisted",
       run_id,
       client_reference_id,
     };

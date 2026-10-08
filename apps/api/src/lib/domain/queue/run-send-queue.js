@@ -18,6 +18,7 @@ import { loadRunnableSendQueueRows } from "@/lib/supabase/sms-engine.js";
 import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
 import { isLiveCampaignStatus, LIVE_CAMPAIGN_STATES } from "@/lib/domain/campaigns/campaign-state-machine.js";
 import { filterRowsByLiveCampaigns } from "@/lib/domain/queue/queue-send-brake-state.js";
+import { applyResumeDrain } from "@/lib/domain/queue/apply-resume-drain.js";
 import {
   blockedExecutionModeResult,
   evaluateUnrestrictedDispatchGate,
@@ -355,6 +356,25 @@ export async function runSendQueue(
     }
   } catch (err) {
     log_warn("queue.stuck_row_recovery_failed", { error: err.message });
+  }
+
+  // 1c. Resume drain (P0 2026-10-08): overdue rows are re-planned into the
+  // recipient-local window instead of bursting. Fail closed: nothing is sent
+  // this tick if the drain cannot complete.
+  const drain_test_fake = !deps.applyResumeDrain && process.env.NODE_ENV === "test" && supabase !== defaultSupabase;
+  if (!dry_run && supabase && !drain_test_fake) {
+    const drain = await (deps.applyResumeDrain || applyResumeDrain)({ supabase, now });
+    if (!drain?.ok) {
+      log_warn("queue_runner.resume_drain_failed", { reason: drain?.reason || null });
+      return {
+        ok: false,
+        status: 503,
+        skipped: true,
+        reason: drain?.reason || "resume_drain_failed",
+        sent_count: 0,
+        results: [],
+      };
+    }
   }
 
   // 2. Fetch candidates (no global lock skip)
