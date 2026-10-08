@@ -23,7 +23,7 @@ function fakeSupabase(tables, log = []) {
     const state = { table, preds: [], order: null, limit: null, writes: null }
     const rows = () => (tables[table] || []).filter((r) => state.preds.every((p) => p(r)))
     const api = {
-      select() { return api },
+      select(_c, opts = {}) { if (opts.count) state.count = true; if (opts.head) state.head = true; return api },
       eq(c, v) { state.preds.push((r) => String(r[c]) === String(v)); return api },
       in(c, vs) { const set = new Set(vs.map(String)); state.preds.push((r) => set.has(String(r[c]))); return api },
       gt(c, v) { state.preds.push((r) => String(r[c]) > String(v)); return api },
@@ -42,7 +42,8 @@ function fakeSupabase(tables, log = []) {
         if (state.order) out = [...out].sort((a, b) => String(a[state.order]).localeCompare(String(b[state.order])))
         if (state.limit) out = out.slice(0, state.limit)
         log.push({ table, read: out.length })
-        return Promise.resolve({ data: out, error: null }).then(resolve, reject)
+        const total = rows().length
+        return Promise.resolve({ data: state.head ? null : out, error: null, count: state.count ? total : null }).then(resolve, reject)
       },
     }
     return api
@@ -307,4 +308,18 @@ test('contact discovery: linked-prospect phones show as masked candidates with r
   assert.deepEqual(st.contactCandidates.candidates.map((c) => c.resolution), ['graph_person', 'linked_unresolved'])
   assert.ok(!JSON.stringify(states).includes('+1555'), 'no raw number leaves the server')
   assert.equal(contactCandidates({ prospects: [{ master_owner_id: 'o1', full_name: 'X', phones_json: [{ canonical_e164: '+15550003333' }] }], propertyOwnerId: 'o1' })[0].resolution, 'resolved_owner')
+})
+
+test('the stacked cohort is exactly the browse cohort: same filters, same rows, same total, deduped', async () => {
+  const { browseEntityGraph } = await import('../../src/lib/domain/entity-graph/entity-graph-service.js')
+  const rows = Array.from({ length: 1700 }, (_, i) => ({ property_id: `P${String(i).padStart(5, '0')}`, tax_delinquent: i % 3 === 0 }))
+  rows.push({ property_id: 'canaryprop_1', tax_delinquent: true })
+  const supabase = fakeSupabase({ v_entity_graph_properties: rows })
+  const ff = JSON.stringify([{ field_key: 'properties.tax_delinquent', operator: 'is_true' }])
+  const cohort = await resolveStackPropertyIds({ scope: 'properties', mode: 'cohort', field_filters: ff }, { supabase })
+  const browsed = await browseEntityGraph({ tab: 'properties', field_filters: ff, page_size: 1 }, { supabase, propertySortIndexes: async () => new Set() })
+  assert.equal(cohort.propertyIds.length, 567)
+  assert.equal(new Set(cohort.propertyIds).size, cohort.propertyIds.length, 'no duplicate ids')
+  assert.ok(!cohort.propertyIds.includes('canaryprop_1'), 'test fixtures excluded, as in browse')
+  assert.equal(browsed.pagination.total, cohort.propertyIds.length, 'the dialog count is the grid count')
 })
