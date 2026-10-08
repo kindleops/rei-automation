@@ -1,4 +1,14 @@
--- Owner-approved repair (2026-09-30): "A not interested is a 30 day follow up",
+-- ════════════════════════════════════════════════════════════════════════
+-- SUPERSEDED (2026-10-08): DO NOT RUN. Replaced by the nurture-reconcile held
+-- staging (NURTURE_STAGE_APPLY.sql: held rows, owner release by explicit id
+-- list after re-running the gates). This one-off writes queue_status
+-- 'scheduled' directly and would bypass the hold. The guard below refuses.
+-- ════════════════════════════════════════════════════════════════════════
+do $superseded$ begin
+  raise exception 'superseded by the nurture-reconcile held staging; do not run';
+end $superseded$;
+
+-- SUPERSEDED — DO NOT RUN (was: owner-approved repair 2026-09-30): "A not interested is a 30 day follow up",
 -- and the dead-deal reopen. Run AFTER deploy #2+#3 is live. One atomic block.
 --
 -- 1. Snapshot every row this touches (RLS on, anon/authenticated revoked).

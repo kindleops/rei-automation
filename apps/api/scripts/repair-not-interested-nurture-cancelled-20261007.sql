@@ -1,4 +1,14 @@
--- PROPOSED (not applied) — restore 30-day "not interested" nurture follow-ups
+-- ════════════════════════════════════════════════════════════════════════
+-- SUPERSEDED (2026-10-08): DO NOT RUN. Replaced by the nurture-reconcile held
+-- staging (NURTURE_STAGE_APPLY.sql: held rows, owner release by explicit id
+-- list after re-running the gates). This one-off writes queue_status
+-- 'scheduled' directly and would bypass the hold. The guard below refuses.
+-- ════════════════════════════════════════════════════════════════════════
+do $superseded$ begin
+  raise exception 'superseded by the nurture-reconcile held staging; do not run';
+end $superseded$;
+
+-- SUPERSEDED — DO NOT RUN (was: PROPOSED, not applied) — restore 30-day "not interested" nurture follow-ups
 -- that the stored automation rule stage.not_interested_cold cancelled.
 --
 -- Owner rule (2026-09-30): "A not interested is a 30 day follow up."
