@@ -197,12 +197,12 @@ export function WallMap(props: WallMapProps) {
         if (isOwnedMapLayer(l.id)) continue
         try {
           if (l.type === 'background') map.setPaintProperty(l.id, 'background-color', black ? '#000000' : '#080b12')
-          else if (l.type === 'fill' && /water/i.test(l.id)) map.setPaintProperty(l.id, 'fill-color', black ? '#000000' : '#04060b')
+          else if (l.type === 'fill' && /water/i.test(l.id)) map.setPaintProperty(l.id, 'fill-color', black ? '#000000' : '#020306')
           else if (l.type === 'symbol') {
             // national framing: the wall's own market lockups name the places — basemap names (countries, oceans,
             // states, and cities that would collide with a market lockup) only appear from metro zoom
             map.setLayerZoomRange(l.id, Math.max(7, (l as { minzoom?: number }).minzoom ?? 0), (l as { maxzoom?: number }).maxzoom ?? 24)
-            map.setPaintProperty(l.id, 'text-color', black ? 'rgba(170,182,204,0.5)' : 'rgba(182,194,216,0.62)')
+            map.setPaintProperty(l.id, 'text-color', black ? 'rgba(178,190,212,0.56)' : 'rgba(190,202,224,0.7)')
             map.setPaintProperty(l.id, 'text-halo-color', black ? '#000000' : 'rgba(8,11,18,0.92)')
           }
         } catch { /* layer variant without this property */ }
@@ -220,13 +220,13 @@ export function WallMap(props: WallMapProps) {
     for (const id of Object.values(SRC)) if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: empty })
     if (!map.getLayer(LYR.land) && dark) {
       // the operating country lifts a breath off the sea: a near-black cobalt wash, no texture
-      map.addLayer({ id: LYR.land, type: 'fill', source: SRC.states, paint: { 'fill-color': rgb(WALL_RGB.cobalt, black ? 0.016 : 0.045), 'fill-antialias': false } } as never)
+      map.addLayer({ id: LYR.land, type: 'fill', source: SRC.states, paint: { 'fill-color': rgb(WALL_RGB.cobalt, black ? 0.045 : 0.075), 'fill-antialias': false } } as never)
     }
     if (!map.getLayer(LYR.statesGlow) && dark && full) {
-      map.addLayer({ id: LYR.statesGlow, type: 'line', source: SRC.states, paint: { 'line-color': rgb(WALL_RGB.cobalt, black ? 0.05 : 0.08), 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 3, 8, 6], 'line-blur': ['interpolate', ['linear'], ['zoom'], 3, 3, 8, 6] } } as never)
+      map.addLayer({ id: LYR.statesGlow, type: 'line', source: SRC.states, paint: { 'line-color': rgb(WALL_RGB.cobalt, black ? 0.06 : 0.09), 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 3, 8, 6], 'line-blur': ['interpolate', ['linear'], ['zoom'], 3, 3, 8, 6] } } as never)
     }
     if (!map.getLayer(LYR.states)) {
-      map.addLayer({ id: LYR.states, type: 'line', source: SRC.states, paint: { 'line-color': p.theme === 'light' ? 'rgba(11,18,32,0.22)' : rgb(WALL_RGB.cobalt, black ? 0.2 : 0.24), 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.55, 8, 1.1] } } as never)
+      map.addLayer({ id: LYR.states, type: 'line', source: SRC.states, paint: { 'line-color': p.theme === 'light' ? 'rgba(11,18,32,0.22)' : rgb(WALL_RGB.cobalt, black ? 0.3 : 0.36), 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.8, 8, 1.4] } } as never)
       void loadStates().then((fc) => { const src = map.getSource(SRC.states) as GeoJSONSource | undefined; if (fc && src) src.setData(fc) })
     }
     if (!map.getLayer(LYR.mi)) {

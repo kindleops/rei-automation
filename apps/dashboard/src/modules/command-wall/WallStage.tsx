@@ -192,7 +192,7 @@ export function WallStage(props: WallStageProps) {
             return (
               <div key={c.key} className="cw-rail__cell" data-key={c.key} data-state={c.state} data-tone={c.tone ?? (gold ? 'gold' : undefined)}>
                 <span className="cw-rail__k">{c.label}{x?.spark && rich && c.state !== 'unavailable' ? <span className="cw-rail__win">{x.window}</span> : null}</span>
-                <span className="cw-rail__line">
+                <span className={c.key === 'queue' && c.state !== 'unavailable' ? 'cw-rail__line cw-rail__line--pill' : 'cw-rail__line'}>
                   {c.key === 'queue' && c.state !== 'unavailable' ? <i className="cw-rail__qdot" /> : null}
                   <RollNumber className="cw-rail__v" value={c.value} animate={roll} />
                   {x?.spark && rich && c.state !== 'unavailable' ? <Sparkline className="cw-rail__spark" values={x.spark} tone={gold ? 'gold' : 'cobalt'} /> : null}
