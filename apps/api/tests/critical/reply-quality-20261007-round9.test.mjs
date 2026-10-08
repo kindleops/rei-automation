@@ -90,16 +90,17 @@ for (const message of ["No", "No, I'm not", "No, I don't", "No not at all", "No 
     assert.equal(r.classification.primary_intent, "unclear");
     assert.ok(r.classification.matched_rule_ids.includes("ctx_no_after_ownership_check"));
     assert.equal(r.classification.automation_decision.clarification_use_case, "ownership_connection_clarifier");
-    // The 10-06 prod catalog has no active clarifier row: deterministic hold, not review.
+    // Deterministic hold, not review. Round 10: BARE_NO_AUTO_CLARIFIER is OFF by
+    // default, so the hold comes from the flag before the catalog is read.
     assert.equal(r.outcome, "no_reply_by_design");
-    assert.equal(r.decision.audit_reason, "ownership_clarifier_template_inactive");
+    assert.equal(r.decision.audit_reason, "bare_no_auto_clarifier_off");
   });
 }
 
-test("bare no with the clarifier row active -> the clarifier is sent", async () => {
+test("bare no with the clarifier row active AND BARE_NO_AUTO_CLARIFIER on -> the clarifier is sent", async () => {
   const clarifier = { id: "c1", template_id: "lc-ap2-ocl-en-1", use_case: "ownership_connection_clarifier", language: "English", stage_code: null, is_active: true, safe_for_auto_reply: true, reply_mode: "auto_reply", template_body: "Got it. Are you connected to the property, or do I have the wrong number?" };
   const fixture = { fixture_id: "r9", received_at: "2026-10-07T18:00:00.000Z", seller_message: "No, I'm not", prior_question: { template_id: "t-r9", template_use_case: "ownership_check", text: QUESTIONS.ownership_check, sent_at: "2026-10-07T17:00:00.000Z", delivered_at: "2026-10-07T17:00:05.000Z" }, intervening_inbound: [], r7_history: [], valuation: null };
-  const r = await replayReply(fixture, { catalog: [...CATALOG, clarifier] });
+  const r = await replayReply(fixture, { catalog: [...CATALOG, clarifier], executorOverrides: { bareNoAutoClarifierGate: async () => true } });
   assert.equal(r.outcome, "auto_reply");
   assert.match(r.text, /connected to the property/);
 });
