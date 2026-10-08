@@ -6,7 +6,7 @@
  * properties → people/phones/emails → entities → seller.* records); a value
  * the record does not carry says "not recorded", never a default.
  */
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { LCButton, LCError, LCInspector, LCInspectorSection, LCSkeleton, cx } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
 import type { EntityGraphAction, UniversalEntityContext } from '../../../domain/entity-graph/entity-graph.types'
