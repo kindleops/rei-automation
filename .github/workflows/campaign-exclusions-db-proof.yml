@@ -1,0 +1,81 @@
+# Real-Postgres proof for the PROPOSED campaign recipient exclusions migration.
+#
+# Disposable postgres:17 service container on a GitHub-hosted runner only.
+# No secrets, no deploy, no production access. Runs on this feature branch or
+# manual dispatch; never on main.
+
+name: campaign-exclusions-db-proof
+
+on:
+  push:
+    branches: ["feat/campaign-recipient-exclusion"]
+    paths:
+      - "apps/api/supabase/migrations/PROPOSED_20261008120000_campaign_recipient_exclusions.sql"
+      - "apps/api/supabase/tests/PROPOSED_campaign_recipient_exclusions.db-test.sql"
+      - "apps/api/scripts/proof/campaign-exclusions-db-proof.mjs"
+      - "apps/api/src/lib/domain/campaigns/campaign-recipient-exclusions.js"
+      - ".github/workflows/campaign-exclusions-db-proof.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  db-proof:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: proofdb
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DB: postgres://postgres:postgres@127.0.0.1:5432/proofdb
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Supabase-like roles + minimal campaigns stub (test DB only)
+        run: |
+          psql "$DB" -v ON_ERROR_STOP=1 -q <<'SQL'
+          DO $$ BEGIN
+            CREATE ROLE anon NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+          DO $$ BEGIN
+            CREATE ROLE authenticated NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+          DO $$ BEGIN
+            CREATE ROLE service_role NOLOGIN BYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+          GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+          -- Mirror Supabase defaults: API roles receive table privileges by default, so RLS is what protects data.
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+          CREATE TABLE IF NOT EXISTS public.campaigns (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            name text,
+            status text
+          );
+          SQL
+
+      - name: Apply PROPOSED migration (ephemeral DB only)
+        run: psql "$DB" -v ON_ERROR_STOP=1 -q -f apps/api/supabase/migrations/PROPOSED_20261008120000_campaign_recipient_exclusions.sql
+
+      - name: Apply migration twice (idempotency)
+        run: psql "$DB" -v ON_ERROR_STOP=1 -q -f apps/api/supabase/migrations/PROPOSED_20261008120000_campaign_recipient_exclusions.sql
+
+      - name: Single-session SQL assertions
+        run: psql "$DB" -v ON_ERROR_STOP=1 -f apps/api/supabase/tests/PROPOSED_campaign_recipient_exclusions.db-test.sql
+
+      - name: Parallel-connection invariants + shared rule over the real DB
+        run: node apps/api/scripts/proof/campaign-exclusions-db-proof.mjs
+        env:
+          CAMPAIGN_EXCLUSIONS_PROOF_DB_URL: postgres://postgres:postgres@127.0.0.1:5432/proofdb
+          CAMPAIGN_EXCLUSIONS_PROOF_PARALLEL: 24
