@@ -1860,7 +1860,17 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
           deferred_resolved_at: now,
           deferred_resolved_use_case: deferred.use_case,
           deferred_resolved_template_id: deferred.template_id,
+          ...(deferred.render_context ? { deferred_render_context_resolved: Object.keys(deferred.render_context) } : {}),
+          ...(deferred.render_context?.language ? { language: deferred.render_context.language } : {}),
         };
+        // Context re-resolved at send time (name / address / agent / language)
+        // lands on the row so the name guard below and the stored row agree
+        // with the rendered message.
+        const deferred_context_fields = Object.fromEntries(
+          ["seller_first_name", "property_address", "agent_name", "language"]
+            .filter((k) => clean(deferred.render_context?.[k]))
+            .map((k) => [k, deferred.render_context[k]])
+        );
         await getSupabase(deps)
           .from(QUEUE_TABLE)
           .update({
@@ -1871,12 +1881,14 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
             selected_template_id: deferred.template_id,
             use_case_template: deferred.use_case || queue_row.use_case_template,
             character_count: deferred.message_body.length,
+            ...deferred_context_fields,
             metadata: deferred_metadata,
             updated_at: now,
           })
           .eq("id", queue_row_id);
         queue_row = normalizeSendQueueRow({
           ...queue_row,
+          ...deferred_context_fields,
           message_body: deferred.message_body,
           message_text: deferred.message_body,
           rendered_message: deferred.message_body,
