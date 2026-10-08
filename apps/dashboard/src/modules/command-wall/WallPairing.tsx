@@ -81,10 +81,14 @@ export function WallPairing({ api, client, onPaired, cooldownMs = 0 }: { api: Wa
   return (
     <div className="cw-pair">
       <div className="cw-pair__card">
-        <div className="cw-pair__brand"><img src="/favicon.svg" alt="" /> LeadCommand <span>·</span> Command Wall</div>
+        <div className="cw-pair__brand"><img src="/favicon.svg" alt="" /><span className="cw-pair__wm">LeadCommand</span><i /><span>Command Wall</span></div>
         <div className="cw-pair__k">Pair this display</div>
         <div className="cw-pair__code" aria-live="polite">{pending ? pending.code.split('').map((ch, i) => <span key={i} className={ch === '-' ? 'is-dash' : ''}>{ch === '-' ? '–' : ch}</span>) : <span className="cw-pair__wait">· · · ·</span>}</div>
-        <div className="cw-pair__how">On your computer, open <b>Settings → Displays → Add display</b> and enter this code.</div>
+        <div className="cw-pair__how">
+          <span><b>1</b>On your computer, open <em>Settings → Displays</em></span>
+          <span><b>2</b>Choose <em>Add display</em></span>
+          <span><b>3</b>Enter this code</span>
+        </div>
         <div className="cw-pair__meta">{problem ? problem : minutes !== null ? `Code renews in ${minutes} min · single use` : 'Requesting a code…'}</div>
       </div>
     </div>

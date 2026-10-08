@@ -2,7 +2,7 @@
  * Command Wall map model — pure helpers for framing and GeoJSON (§11, §13, §41).
  */
 import type { WallCampaign, WallEvent, WallMarket, WallMiMarket, WallThemeId } from '../wall-types'
-import type { MarketActivity } from '../wall-feed-model'
+import { visualTone, type MarketActivity, type WallVisualTone } from '../wall-feed-model'
 import { CONUS_BOUNDS } from '../wall-presets'
 
 /** Display theme → the Map engine's own theme id. Dark Satellite stays out (§33). */
@@ -62,7 +62,7 @@ export function marketGlowFeatures(markets: WallMarket[], campaigns: WallCampaig
       return {
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [m.lng as number, m.lat as number] },
-        properties: { id: m.id, name: m.name, campaigns: live.get(m.id) || 0, energy: Math.round(energy * 100) / 100, active: (live.get(m.id) || 0) > 0 || sends > 0 ? 1 : 0, sends, replies },
+        properties: { id: m.id, name: m.name, campaigns: live.get(m.id) || 0, energy: Math.round(energy * 100) / 100, active: (live.get(m.id) || 0) > 0 || sends > 0 ? 1 : 0, sends, replies, discoveries: a?.discoveries || 0 },
       }
     }),
   }
@@ -91,7 +91,7 @@ export function activityFeatures(events: Iterable<WallEvent>, now: number, windo
     if (ev.priority > 1 || !ev.geo || !Number.isFinite(ev.geo.lat) || !Number.isFinite(ev.geo.lng)) continue
     const age = now - Date.parse(ev.occurred_at)
     if (age > windowMs || age < 0) continue
-    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [ev.geo.lng as number, ev.geo.lat as number] }, properties: { kind: ev.kind, fresh: Math.round(Math.max(0, 1 - age / windowMs) * 100) / 100 } })
+    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [ev.geo.lng as number, ev.geo.lat as number] }, properties: { kind: ev.kind, vt: visualTone(ev.kind, ev.tone), fresh: Math.round(Math.max(0, 1 - age / windowMs) * 100) / 100 } })
   }
   return { type: 'FeatureCollection', features }
 }
@@ -106,4 +106,22 @@ export function toneVar(tone: WallEvent['tone']): string {
     case 'neutral': return 'var(--lc-neutral-rgb)'
     default: return 'var(--lc-exec-rgb)'
   }
+}
+
+/**
+ * The wall palette (RGB triples). Restrained: cobalt = the machine working,
+ * gold = a seller moving toward a deal. Map paint needs literal colours (the
+ * map reads no CSS vars), so command-wall.css mirrors these as --cw-*-rgb.
+ */
+export const WALL_RGB = {
+  cobalt: '108, 150, 255',
+  cobaltDeep: '58, 92, 200',
+  gold: '228, 190, 118',
+  red: '255, 104, 112',
+  amber: '240, 182, 74',
+  neutral: '148, 160, 180',
+} as const
+
+export function visualToneRgb(vt: WallVisualTone): string {
+  return vt === 'gold' ? WALL_RGB.gold : vt === 'red' ? WALL_RGB.red : vt === 'amber' ? WALL_RGB.amber : vt === 'neutral' ? WALL_RGB.neutral : WALL_RGB.cobalt
 }

@@ -17,6 +17,7 @@ const OPS = arg('ops', null) ? loadFixture(arg('ops')) : null
 const DIST = arg('dist', '/tmp/cw-dist')
 const SCENES = arg('scenes', 'national,pulse,campaign_ops,mi,signal,reconnect,privacy,oled,pairing').split(',')
 const VARIANTS = arg('variants', '1920x1080:dark,1920x1080:true_black,3840x2160:dark,3840x2160:true_black').split(',').map((v) => { const [s, theme] = v.split(':'); const [w, h] = s.split('x').map(Number); return { w, h, theme } })
+const SETTLE_MS = Number(arg('settle', '9000'))
 const GPU = ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist']
 await fs.mkdir(OUT, { recursive: true })
 const { server, base } = await startStaticServer(DIST)
@@ -64,7 +65,7 @@ for (const v of VARIANTS) {
       await page.waitForSelector('.cw-stage', { timeout: 60_000 })
       // let the map load tiles and the replay deliver real arrivals
       await page.waitForFunction(() => document.querySelector('.cw-map canvas') || document.querySelector('.cw-atlas'), null, { timeout: 30_000 }).catch(() => {})
-      await page.waitForTimeout(9_000)
+      await page.waitForTimeout(v.w >= 3000 ? Math.max(SETTLE_MS, 20_000) : SETTLE_MS)
       if (sc.offline) { mock.setOffline(true); await page.waitForSelector('.cw-conn', { timeout: 120_000 }).catch(() => {}); await page.waitForTimeout(1_000) }
       if (sc.oledPair) {
         // OLED drift: the same view at the two horizontal extremes of the surface path (half a period apart)

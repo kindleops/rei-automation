@@ -20,7 +20,8 @@ import { applyVisualPresetBasemapPaint } from '../../../views/map/map-basemap-pa
 import { isOwnedMapLayer } from '../../../views/map/map-layer-ownership'
 import { cameraFeatures, ensureCameras, removeCameras, crimeFeatures, ensureCrime, removeCrime, presenceData, ensurePresence, removePresence } from '../../../views/map/desktop/context/context-layers'
 import type { CamerasReply, CrimeReply, PresenceReply } from '../../../views/map/desktop/context/context-model'
-import { mapThemeFor, toneVar, type Bounds } from './wall-map-model'
+import { mapThemeFor, visualToneRgb, WALL_RGB, type Bounds } from './wall-map-model'
+import { visualTone } from '../wall-feed-model'
 import { flightDurationMs, haversineKm } from '../wall-rotation'
 import { mapPixelRatio } from '../render-mode'
 import type { WallEvent, WallLayerId, WallRenderMode, WallThemeId } from '../wall-types'
@@ -46,7 +47,7 @@ export interface WallMapProps {
 }
 
 const SRC = { glow: 'nx-wall-glow-src', activity: 'nx-wall-activity-src', mi: 'nx-wall-mi-src', states: 'nx-wall-states-src' } as const
-const LYR = { states: 'nx-wall-states', glowHalo: 'nx-wall-glow-halo', glowCore: 'nx-wall-glow-core', activity: 'nx-wall-activity', mi: 'nx-wall-mi' } as const
+const LYR = { land: 'nx-wall-land', statesGlow: 'nx-wall-states-glow', states: 'nx-wall-states', glowHalo: 'nx-wall-glow-halo', glowRing: 'nx-wall-glow-ring', glowGold: 'nx-wall-glow-gold', glowCore: 'nx-wall-glow-core', activity: 'nx-wall-activity', mi: 'nx-wall-mi' } as const
 
 let statesData: Promise<GeoJSON.FeatureCollection | null> | null = null
 /** The state outlines the app already ships (/geo/us-states.json), loaded once per page. */
@@ -56,15 +57,6 @@ function loadStates(): Promise<GeoJSON.FeatureCollection | null> {
 }
 const CONTEXT_REFRESH_MS = 10 * 60_000
 const STYLE_TIMEOUT_MS = 25_000
-
-function rgbVar(name: string, fallback: string): string {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return v ? `rgb(${v})` : fallback
-}
-function rgbaVar(name: string, alpha: number, fallback: string): string {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return v ? `rgba(${v}, ${alpha})` : fallback
-}
 
 /** Scales a text-size value (number, zoom interpolate/step, or legacy stops) — TV 4K legibility. */
 function scaleTextSize(v: unknown, k: number): unknown {
@@ -197,25 +189,94 @@ export function WallMap(props: WallMapProps) {
         if (l.type === 'background') { try { map.setPaintProperty(l.id, 'background-color', '#000000') } catch { /* style variant */ } }
       }
     }
-    const exec = rgbVar('--lc-exec-rgb', 'rgb(76,201,240)')
-    const ok = rgbVar('--lc-ok-rgb', 'rgb(61,220,151)')
-    const attn = rgbVar('--lc-attn-rgb', 'rgb(240,182,74)')
-    const ink = p.theme === 'light' ? 'rgba(11,18,32,0.55)' : 'rgba(226,232,244,0.55)'
-    const blur = p.mode === 'full' ? 1 : 0.6
+    // ── wall finish over the shared basemap: graphite land, deeper water, quiet labels ──
+    const dark = p.theme !== 'light'
+    const black = p.theme === 'true_black'
+    if (dark && p.theme !== 'red_ops') {
+      for (const l of map.getStyle()?.layers ?? []) {
+        if (isOwnedMapLayer(l.id)) continue
+        try {
+          if (l.type === 'background') map.setPaintProperty(l.id, 'background-color', black ? '#000000' : '#080b12')
+          else if (l.type === 'fill' && /water/i.test(l.id)) map.setPaintProperty(l.id, 'fill-color', black ? '#000000' : '#04060b')
+          else if (l.type === 'symbol') {
+            // national framing: the wall's own market lockups name the places — basemap names (countries, oceans,
+            // states, and cities that would collide with a market lockup) only appear from metro zoom
+            map.setLayerZoomRange(l.id, Math.max(7, (l as { minzoom?: number }).minzoom ?? 0), (l as { maxzoom?: number }).maxzoom ?? 24)
+            map.setPaintProperty(l.id, 'text-color', black ? 'rgba(170,182,204,0.5)' : 'rgba(182,194,216,0.62)')
+            map.setPaintProperty(l.id, 'text-halo-color', black ? '#000000' : 'rgba(8,11,18,0.92)')
+          }
+        } catch { /* layer variant without this property */ }
+      }
+    }
+    const rgb = (t: string, a = 1) => (a >= 1 ? `rgb(${t})` : `rgba(${t}, ${a})`)
+    const cobalt = rgb(WALL_RGB.cobalt)
+    const gold = rgb(WALL_RGB.gold)
+    const red = rgb(WALL_RGB.red)
+    const neutral = rgb(WALL_RGB.neutral, 0.75)
+    const ink = p.theme === 'light' ? 'rgba(11,18,32,0.55)' : 'rgba(226,232,244,0.5)'
+    const full = p.mode === 'full'
+    const blur = full ? 1 : 0.6
     const empty: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
     for (const id of Object.values(SRC)) if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: empty })
+    if (!map.getLayer(LYR.land) && dark) {
+      // the operating country lifts a breath off the sea: a near-black cobalt wash, no texture
+      map.addLayer({ id: LYR.land, type: 'fill', source: SRC.states, paint: { 'fill-color': rgb(WALL_RGB.cobalt, black ? 0.016 : 0.045), 'fill-antialias': false } } as never)
+    }
+    if (!map.getLayer(LYR.statesGlow) && dark && full) {
+      map.addLayer({ id: LYR.statesGlow, type: 'line', source: SRC.states, paint: { 'line-color': rgb(WALL_RGB.cobalt, black ? 0.05 : 0.08), 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 3, 8, 6], 'line-blur': ['interpolate', ['linear'], ['zoom'], 3, 3, 8, 6] } } as never)
+    }
     if (!map.getLayer(LYR.states)) {
-      map.addLayer({ id: LYR.states, type: 'line', source: SRC.states, paint: { 'line-color': p.theme === 'light' ? 'rgba(11,18,32,0.22)' : 'rgba(170,190,220,0.16)', 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.6, 8, 1.2] } } as never)
+      map.addLayer({ id: LYR.states, type: 'line', source: SRC.states, paint: { 'line-color': p.theme === 'light' ? 'rgba(11,18,32,0.22)' : rgb(WALL_RGB.cobalt, black ? 0.2 : 0.24), 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.55, 8, 1.1] } } as never)
       void loadStates().then((fc) => { const src = map.getSource(SRC.states) as GeoJSONSource | undefined; if (fc && src) src.setData(fc) })
     }
+    if (!map.getLayer(LYR.mi)) {
+      // MI ZIPs: sales density is context, not a discovery → cobalt, size by sales, depth by RECORDED investor share
+      map.addLayer({
+        id: LYR.mi, type: 'circle', source: SRC.mi,
+        paint: {
+          'circle-color': cobalt,
+          'circle-radius': ['interpolate', ['linear'], ['sqrt', ['max', 1, ['get', 'sales']]], 1, 4, 30, 26],
+          'circle-opacity': ['case', ['<', ['get', 'inv'], 0], 0.16, ['+', 0.16, ['*', 0.5, ['get', 'inv']]]],
+          'circle-blur': full ? 0.18 : 0,
+          'circle-stroke-width': 1,
+          'circle-stroke-color': rgb(WALL_RGB.cobalt, 0.78),
+        },
+      } as never)
+    }
     if (!map.getLayer(LYR.glowHalo)) {
+      // market halo: radius and depth scale with REAL recent sends + replies; a quiet market is only a faint ring
       map.addLayer({
         id: LYR.glowHalo, type: 'circle', source: SRC.glow,
         paint: {
-          'circle-color': exec,
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['+', 18, ['*', 34, ['get', 'energy']]], 9, ['+', 46, ['*', 96, ['get', 'energy']]]],
+          'circle-color': cobalt,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['+', 16, ['*', 40, ['get', 'energy']]], 9, ['+', 44, ['*', 110, ['get', 'energy']]]],
           'circle-blur': blur,
-          'circle-opacity': ['case', ['==', ['get', 'active'], 1], ['+', 0.16, ['*', 0.22, ['get', 'energy']]], 0.06],
+          'circle-opacity': ['case', ['==', ['get', 'active'], 1], ['+', black ? 0.08 : 0.12, ['*', black ? 0.16 : 0.24, ['get', 'energy']]], 0.04],
+        },
+      } as never)
+    }
+    if (!map.getLayer(LYR.glowRing)) {
+      map.addLayer({
+        id: LYR.glowRing, type: 'circle', source: SRC.glow,
+        filter: ['==', ['get', 'active'], 1],
+        paint: {
+          'circle-color': 'rgba(0,0,0,0)',
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['+', 8, ['*', 10, ['get', 'energy']]], 9, ['+', 16, ['*', 22, ['get', 'energy']]]],
+          'circle-stroke-width': 1,
+          'circle-stroke-color': rgb(WALL_RGB.cobalt, 0.5),
+        },
+      } as never)
+    }
+    if (!map.getLayer(LYR.glowGold)) {
+      // gold only where a seller moved toward a deal in the activity window
+      map.addLayer({
+        id: LYR.glowGold, type: 'circle', source: SRC.glow,
+        filter: ['>', ['get', 'discoveries'], 0],
+        paint: {
+          'circle-color': 'rgba(0,0,0,0)',
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['+', 13, ['*', 10, ['get', 'energy']]], 9, ['+', 24, ['*', 22, ['get', 'energy']]]],
+          'circle-stroke-width': 1.4,
+          'circle-stroke-color': rgb(WALL_RGB.gold, 0.85),
         },
       } as never)
     }
@@ -223,22 +284,10 @@ export function WallMap(props: WallMapProps) {
       map.addLayer({
         id: LYR.glowCore, type: 'circle', source: SRC.glow,
         paint: {
-          'circle-color': ['case', ['==', ['get', 'active'], 1], exec, ink],
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 3.5, 9, 6],
-          'circle-stroke-width': 1.5,
-          'circle-stroke-color': p.theme === 'light' ? 'rgba(255,255,255,0.9)' : 'rgba(5,8,13,0.85)',
-        },
-      } as never)
-    }
-    if (!map.getLayer(LYR.mi)) {
-      map.addLayer({
-        id: LYR.mi, type: 'circle', source: SRC.mi,
-        paint: {
-          'circle-color': attn,
-          'circle-radius': ['interpolate', ['linear'], ['sqrt', ['max', 1, ['get', 'sales']]], 1, 4, 30, 26],
-          'circle-opacity': ['case', ['<', ['get', 'inv'], 0], 0.16, ['+', 0.14, ['*', 0.5, ['get', 'inv']]]],
-          'circle-stroke-width': 1,
-          'circle-stroke-color': rgbaVar('--lc-attn-rgb', 0.55, 'rgba(240,182,74,0.55)'),
+          'circle-color': ['case', ['==', ['get', 'active'], 1], 'rgb(214,226,255)', ink],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 3, 9, 5],
+          'circle-stroke-width': ['case', ['==', ['get', 'active'], 1], 2.5, 1.5],
+          'circle-stroke-color': ['case', ['==', ['get', 'active'], 1], rgb(WALL_RGB.cobalt, 0.9), p.theme === 'light' ? 'rgba(255,255,255,0.9)' : 'rgba(5,8,13,0.85)'],
         },
       } as never)
     }
@@ -246,9 +295,11 @@ export function WallMap(props: WallMapProps) {
       map.addLayer({
         id: LYR.activity, type: 'circle', source: SRC.activity,
         paint: {
-          'circle-color': ['match', ['get', 'kind'], 'interest', ok, 'deal', ok, 'offer', attn, 'counter', attn, 'asking_price', attn, exec],
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 2.5, 10, 5],
-          'circle-opacity': ['+', 0.35, ['*', 0.6, ['get', 'fresh']]],
+          'circle-color': ['match', ['get', 'vt'], 'gold', gold, 'red', red, 'neutral', neutral, cobalt],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['match', ['get', 'vt'], 'gold', 3.4, 2.4], 10, ['match', ['get', 'vt'], 'gold', 6, 4.5]],
+          'circle-opacity': ['+', 0.3, ['*', 0.6, ['get', 'fresh']]],
+          'circle-stroke-width': ['match', ['get', 'vt'], 'gold', 1, 0],
+          'circle-stroke-color': rgb(WALL_RGB.gold, 0.35),
         },
       } as never)
     }
@@ -259,7 +310,11 @@ export function WallMap(props: WallMapProps) {
     const set = new Set(propsRef.current.layers)
     const vis = (id: string, on: boolean) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none') }
     vis(LYR.states, set.has('boundaries'))
+    vis(LYR.statesGlow, set.has('boundaries'))
+    vis(LYR.land, set.has('boundaries'))
     vis(LYR.glowHalo, set.has('campaigns'))
+    vis(LYR.glowRing, set.has('campaigns'))
+    vis(LYR.glowGold, set.has('campaigns') || set.has('activity'))
     vis(LYR.glowCore, set.has('campaigns') || set.has('mi_heat') || set.has('activity'))
     vis(LYR.mi, set.has('mi_heat'))
     vis(LYR.activity, set.has('activity') || set.has('pipeline'))
@@ -275,10 +330,12 @@ export function WallMap(props: WallMapProps) {
       for (const f of p.glow.features.slice(0, 14)) {
         const pr = f.properties || {}
         const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
-        const name = String(pr.name || '').replace(/,\s*[A-Z]{2}$/, '')
-        const bits = [pr.sends ? `${pr.sends} out` : null, pr.replies ? `${pr.replies} repl${pr.replies === 1 ? 'y' : 'ies'}` : null].filter(Boolean)
-        const sub = bits.length ? `${bits.join(' · ')} · 30 min` : pr.campaigns ? `${pr.campaigns} campaign${pr.campaigns === 1 ? '' : 's'}` : ''
-        want.set(String(pr.id), { lng, lat, html: `<span class="cw-mlabel__n">${name.replace(/[<>&]/g, '')}</span>${sub ? `<span class="cw-mlabel__s">${sub}</span>` : ''}` })
+        const name = String(pr.name || '').replace(/,\s*[A-Z]{2}$/, '').replace(/[<>&"]/g, '')
+        const n = (v: unknown) => Number(v) || 0
+        const bits = [n(pr.sends) ? `<b>${n(pr.sends).toLocaleString('en-US')}</b> out` : null, n(pr.replies) ? `<b>${n(pr.replies)}</b> repl${n(pr.replies) === 1 ? 'y' : 'ies'}` : null].filter(Boolean)
+        const sub = bits.length ? `${bits.join('<i>·</i>')}<em>30 min</em>` : n(pr.campaigns) ? `<b>${n(pr.campaigns)}</b> campaign${n(pr.campaigns) === 1 ? '' : 's'}` : ''
+        const disc = n(pr.discoveries) ? `<span class="cw-mlabel__d"><b>${n(pr.discoveries)}</b> discover${n(pr.discoveries) === 1 ? 'y' : 'ies'}</span>` : ''
+        want.set(String(pr.id), { lng, lat, html: `<span class="cw-mlabel__n" data-active="${pr.active === 1 ? '1' : '0'}">${name}</span>${sub ? `<span class="cw-mlabel__s">${sub}</span>` : ''}${disc}` })
       }
     }
     for (const [id, m] of labelsRef.current) if (!want.has(id)) { m.marker.remove(); labelsRef.current.delete(id) }
@@ -288,7 +345,7 @@ export function WallMap(props: WallMapProps) {
       const el = document.createElement('div')
       el.className = 'cw-mlabel'
       el.innerHTML = w.html
-      const marker = new lib.Marker({ element: el, anchor: 'left', offset: [12, 0] }).setLngLat([w.lng, w.lat]).addTo(map)
+      const marker = new lib.Marker({ element: el, anchor: 'left', offset: [14, 0] }).setLngLat([w.lng, w.lat]).addTo(map)
       labelsRef.current.set(id, { marker, html: w.html })
     }
   }
@@ -374,12 +431,14 @@ export function WallMap(props: WallMapProps) {
       const list = p.pulseFilter(evs).slice(0, p.mode === 'lite' ? 3 : 8)
       for (const ev of list) {
         const el = document.createElement('div')
-        el.className = `cw-pulse cw-pulse--p${ev.priority} cw-pulse--${ev.kind}`
-        el.style.setProperty('--cw-pulse-rgb', toneVar(ev.tone))
+        const vt = visualTone(ev.kind, ev.tone)
+        el.className = `cw-pulse cw-pulse--p${ev.priority} cw-pulse--${ev.kind} cw-pulse--${vt}`
+        el.style.setProperty('--cw-pulse-rgb', visualToneRgb(vt))
+        if (p.mode === 'full') el.appendChild(document.createElement('i'))
         if (p.reducedMotion) el.classList.add('cw-pulse--still')
         const marker = new lib.Marker({ element: el }).setLngLat([ev.geo!.lng as number, ev.geo!.lat as number]).addTo(map)
         markersRef.current.add(marker)
-        const ttl = p.reducedMotion ? 6_000 : ev.kind === 'offer' || ev.kind === 'deal' ? 5_200 : 3_600
+        const ttl = p.reducedMotion ? 6_000 : vt === 'gold' ? 5_200 : 3_600
         setTimeout(() => { marker.remove(); markersRef.current.delete(marker) }, ttl)
       }
     })

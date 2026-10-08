@@ -7,7 +7,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { WallEvent } from '../wall-types'
-import { toneVar } from './wall-map-model'
+import { visualToneRgb } from './wall-map-model'
+import { visualTone } from '../wall-feed-model'
 
 type Ring = [number, number][]
 interface StateFeature { id?: string; geometry: { type: 'Polygon' | 'MultiPolygon'; coordinates: Ring[] | Ring[][] } }
@@ -46,7 +47,7 @@ function featurePath(f: StateFeature): string {
   return (g.coordinates as Ring[][]).map((poly) => poly.map(ringPath).join('')).join('')
 }
 
-export interface AtlasMarket { id: string; name: string; lng: number; lat: number; active: boolean; energy: number }
+export interface AtlasMarket { id: string; name: string; lng: number; lat: number; active: boolean; energy: number; discoveries?: number }
 
 export function WallAtlas({ markets, subscribeArrivals, pulseFilter }: { markets: AtlasMarket[]; subscribeArrivals: (fn: (evs: WallEvent[]) => void) => () => void; pulseFilter: (evs: WallEvent[]) => WallEvent[] }) {
   const [paths, setPaths] = useState<string[]>([])
@@ -64,7 +65,7 @@ export function WallAtlas({ markets, subscribeArrivals, pulseFilter }: { markets
     const off = subscribeArrivals((evs) => {
       const add = pulseFilter(evs).slice(0, 4).map((ev) => {
         const [x, y] = atlasProject(ev.geo!.lng as number, ev.geo!.lat as number)
-        return { id: `${ev.id}:${ev.seq}`, x, y, rgb: toneVar(ev.tone), born: Date.now() }
+        return { id: `${ev.id}:${ev.seq}`, x, y, rgb: visualToneRgb(visualTone(ev.kind, ev.tone)), born: Date.now() }
       })
       if (!add.length) return
       setPulses((p) => [...p, ...add].slice(-12))
@@ -83,7 +84,9 @@ export function WallAtlas({ markets, subscribeArrivals, pulseFilter }: { markets
         {dots.map((m) => (
           <g key={m.id} transform={`translate(${m.xy[0].toFixed(1)} ${m.xy[1].toFixed(1)})`} className={m.active ? 'is-active' : ''}>
             {m.active ? <circle className="cw-atlas__halo" r={10 + m.energy * 18} /> : null}
-            <circle className="cw-atlas__dot" r={m.active ? 4.2 : 3} />
+            {m.active ? <circle className="cw-atlas__ring" r={6.5 + m.energy * 6} /> : null}
+            {m.discoveries ? <circle className="cw-atlas__gold" r={9 + m.energy * 6} /> : null}
+            <circle className="cw-atlas__dot" r={m.active ? 3.6 : 2.6} />
           </g>
         ))}
       </g>

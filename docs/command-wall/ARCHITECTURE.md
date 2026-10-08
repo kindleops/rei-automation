@@ -19,6 +19,28 @@ Companion to `AUDIT.md`. Code: `apps/api/src/lib/domain/command-wall/`, `apps/ap
 - **Map.** The wall uses the Map engine's style system (`commandMapThemes`, `map-basemap-paint`) and the owned `nx-*`
   layer contract, plus the desktop camera/crime/presence context layers. All of it is read-only: no handlers and no clicks.
 
+## Visual language (elite pass, 2026-10-08)
+- **Palette roles** (`WALL_RGB` in `map/wall-map-model.ts`, mirrored as `--cw-*-rgb` in `command-wall.css`):
+  cobalt = the machine working (sends, replies, halos, sparklines); gold = a discovery only (`interest`,
+  `asking_price`, `offer`, `counter`, `deal` — `DISCOVERY_KINDS` / `visualTone()` in `wall-feed-model.ts`);
+  red = blockers/critical signals; amber = attention. Sales density in MI is context, so it is cobalt, not gold.
+- **Header lockup**: brand tile + `LEADCOMMAND · COMMAND WALL` eyebrow, preset title, system spec line; thin clock,
+  date, live pill (the live dot breathes in FULL only).
+- **Live activity**: two-line ticker rows with an event-type glyph token (`WallUi.tsx`); discoveries sit on a faint
+  gold plate; routine volume recedes; the list fades out at the bottom instead of clipping.
+- **KPI rail**: terminal cells. Sparklines and `+N · 30 min` deltas are computed from the events the channel holds
+  (`eventSeries`, `recentTotal`). Bins older than the oldest held event are `null`, so a line never draws history
+  the wall did not receive; the caption shows the real covered window. Senders show online/total as a bar, the
+  queue shows `waiting`. Figures roll to a new value on a state refresh (FULL only, rAF for 720 ms, then still).
+- **Map finish** (wall only, applied after the shared basemap painter): graphite land, deeper water, muted labels,
+  basemap place names hidden below z7 (the wall's market lockups name the places), a near-black cobalt land wash,
+  hairline state lines (+ a soft glow line in FULL), market halo + ring scaled by real activity, a gold ring only
+  where a discovery happened in the activity window. Pulses: core + ring (+ a second delayed ring in FULL).
+- **Budgets**: LITE/SAFE drop blur, the second pulse ring, row entrance motion, the breathing dot and rolls.
+  true_black removes sheen, atmosphere and shadows (hairline glass only) and dims the brand tile.
+  Reduced motion collapses every animation. Apart from the FULL-only live dot, nothing runs on a timer: motion is tied to a real arrival
+  or a real value change.
+
 ## Pairing and display authentication
 1. **TV.** `POST /api/wall/pair {action:'start'}` returns:
    - an 8-character code (`ABCD-2345`, with no I/O/0/1), valid for 10 minutes;

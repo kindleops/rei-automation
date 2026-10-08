@@ -38,7 +38,7 @@ export function applyEventsReply(state: WallEventsState, reply: { epoch: string;
   return { state: { byId, epoch: reply.epoch, head: reply.head }, arrived }
 }
 
-export interface FeedRow { id: string; time: string; title: string; place: string | null; detail: string | null; priority: number; tone: WallEvent['tone']; at: number }
+export interface FeedRow { id: string; kind: WallEvent['kind']; time: string; title: string; place: string | null; detail: string | null; priority: number; tone: WallEvent['tone']; at: number }
 
 const KIND_TITLE: Record<string, string> = {
   reply: 'SELLER REPLY', interest: 'INTERESTED', asking_price: 'ASKING PRICE', offer: 'OFFER', counter: 'COUNTER', deal: 'DEAL', stage: 'STAGE', campaign: 'CAMPAIGN', signal: 'SIGNAL', sends: 'OUTBOUND', opt_out: 'OPT-OUTS',
@@ -91,7 +91,7 @@ export function feedRows(state: WallEventsState, { limit = 12, timeZone }: { lim
       const parts = [...byMarket.entries()].sort((a, b) => b[1] - a[1])
       const total = parts.reduce((s, [, n]) => s + n, 0)
       const detail = parts.length === 1 ? parts[0][0] : parts.slice(0, 3).map(([m, n]) => `${m} ${n}`).join(' · ') + (parts.length > 3 ? ` · +${parts.length - 3}` : '')
-      rows.push({ id: `sends-group:${bucketOf(ev)}`, time: clock(at, timeZone), title: 'OUTBOUND', place: `${total} sent`, detail, priority: 3, tone: 'cyan', at })
+      rows.push({ id: `sends-group:${bucketOf(ev)}`, kind: 'sends', time: clock(at, timeZone), title: 'OUTBOUND', place: `${total} sent`, detail, priority: 3, tone: 'cyan', at })
       continue
     }
     // low-signal replies (wrong person, hostile) stay off the wall feed
@@ -100,7 +100,7 @@ export function feedRows(state: WallEventsState, { limit = 12, timeZone }: { lim
     if (ev.kind === 'opt_out') detail = `${ev.count}`
     else if (ev.amount && Number.isFinite(ev.amount)) detail = fmtK(ev.amount)
     else if (ev.kind !== 'signal' && ev.label && KIND_TITLE[ev.kind] && ev.label.toUpperCase() !== KIND_TITLE[ev.kind]) detail = ev.label
-    rows.push({ id: ev.id, time: clock(at, timeZone), title: ev.kind === 'signal' ? ev.label.toUpperCase() : KIND_TITLE[ev.kind] || ev.label.toUpperCase(), place: placeLabel(ev), detail, priority: ev.priority, tone: ev.tone, at })
+    rows.push({ id: ev.id, kind: ev.kind, time: clock(at, timeZone), title: ev.kind === 'signal' ? ev.label.toUpperCase() : KIND_TITLE[ev.kind] || ev.label.toUpperCase(), place: placeLabel(ev), detail, priority: ev.priority, tone: ev.tone, at })
   }
   return rows
 }
@@ -121,7 +121,7 @@ export function capsuleEvent(state: WallEventsState, now: number): WallEvent | n
   return best
 }
 
-export interface MarketActivity { marketId: string; sends: number; replies: number; highValue: number; lastAt: number }
+export interface MarketActivity { marketId: string; sends: number; replies: number; highValue: number; discoveries: number; lastAt: number }
 
 export function marketActivity(state: WallEventsState, now: number): Map<string, MarketActivity> {
   const out = new Map<string, MarketActivity>()
@@ -130,10 +130,11 @@ export function marketActivity(state: WallEventsState, now: number): Map<string,
     if (now - at > ACTIVITY_WINDOW_MS) continue
     const id = ev.geo?.market_id
     if (!id) continue
-    const m = out.get(id) || { marketId: id, sends: 0, replies: 0, highValue: 0, lastAt: 0 }
+    const m = out.get(id) || { marketId: id, sends: 0, replies: 0, highValue: 0, discoveries: 0, lastAt: 0 }
     if (ev.kind === 'sends') m.sends += ev.count
     else if (ev.kind === 'reply' || ev.kind === 'interest') m.replies += 1
     if (ev.priority <= 1) m.highValue += 1
+    if (isDiscovery(ev.kind)) m.discoveries += 1
     m.lastAt = Math.max(m.lastAt, at)
     out.set(id, m)
   }
@@ -165,4 +166,59 @@ export function idleMs(state: WallEventsState, now: number): number {
   let last = 0
   for (const ev of state.byId.values()) if (ev.priority <= 2) last = Math.max(last, Date.parse(ev.occurred_at))
   return last ? now - last : Number.POSITIVE_INFINITY
+}
+
+/* ── presentation helpers (pure; every value is derived from the events the channel holds) ── */
+
+/** Discoveries — a seller moving toward a deal. The only events the wall paints gold. */
+export const DISCOVERY_KINDS: ReadonlySet<WallEvent['kind']> = new Set(['interest', 'asking_price', 'offer', 'counter', 'deal'])
+export const isDiscovery = (kind: WallEvent['kind']) => DISCOVERY_KINDS.has(kind)
+
+/** Wall palette role for an event: gold = discovery, cobalt = activity/computation, red = blocker, neutral = noise. */
+export type WallVisualTone = 'gold' | 'cobalt' | 'red' | 'amber' | 'neutral'
+export function visualTone(kind: WallEvent['kind'], tone: WallEvent['tone']): WallVisualTone {
+  if (isDiscovery(kind)) return 'gold'
+  if (kind === 'signal') return tone === 'red' ? 'red' : 'amber'
+  if (kind === 'opt_out' || tone === 'neutral') return 'neutral'
+  if (tone === 'red') return 'red'
+  return 'cobalt'
+}
+
+/**
+ * A count series over fixed bins ending at `now`, from the events the client holds.
+ * Bins older than the oldest held event are null (not covered), never 0 — a
+ * sparkline must not draw a flat line where the wall simply has no history.
+ */
+export function eventSeries(state: WallEventsState, now: number, { kinds, bins = 24, binMs = 5 * 60_000, weight = 'count' }: { kinds: ReadonlySet<WallEvent['kind']> | WallEvent['kind'][]; bins?: number; binMs?: number; weight?: 'count' | 'events' }): { values: (number | null)[]; from: number; coveredFrom: number | null; total: number } {
+  const want = kinds instanceof Set ? kinds : new Set(kinds as WallEvent['kind'][])
+  const end = Math.ceil(now / binMs) * binMs
+  const from = end - bins * binMs
+  let oldest = Number.POSITIVE_INFINITY
+  for (const ev of state.byId.values()) oldest = Math.min(oldest, Date.parse(ev.occurred_at))
+  const values: (number | null)[] = Array.from({ length: bins }, (_, i) => (Number.isFinite(oldest) && from + (i + 1) * binMs > oldest ? 0 : null))
+  let total = 0
+  for (const ev of state.byId.values()) {
+    if (!want.has(ev.kind)) continue
+    const at = Date.parse(ev.occurred_at)
+    if (!(at >= from && at < end)) continue
+    const i = Math.floor((at - from) / binMs)
+    const w = weight === 'count' ? (Number.isFinite(ev.count) ? ev.count : 1) : 1
+    values[i] = (values[i] ?? 0) + w
+    total += w
+  }
+  return { values, from, coveredFrom: Number.isFinite(oldest) ? Math.max(from, oldest) : null, total }
+}
+
+/** How many (count-weighted) events of these kinds occurred in the last `windowMs`. null when the client holds no history that far back. */
+export function recentTotal(state: WallEventsState, now: number, kinds: WallEvent['kind'][], windowMs = ACTIVITY_WINDOW_MS, weight: 'count' | 'events' = 'count'): number | null {
+  if (!state.byId.size) return null
+  const want = new Set(kinds)
+  let n = 0
+  for (const ev of state.byId.values()) {
+    if (!want.has(ev.kind)) continue
+    const at = Date.parse(ev.occurred_at)
+    if (now - at > windowMs || at > now + 60_000) continue
+    n += weight === 'count' ? (Number.isFinite(ev.count) ? ev.count : 1) : 1
+  }
+  return n
 }

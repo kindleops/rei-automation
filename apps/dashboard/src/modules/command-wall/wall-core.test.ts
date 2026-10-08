@@ -3,7 +3,7 @@ import { browserFamily, chooseRenderMode, mapPixelRatio, type WallCapabilities }
 import { createRecoveryLadder, FULL_RELOAD_AFTER, FULL_RELOADS_PER_DAY, FULL_RELOAD_GAP_MS, STABLE_MS, backoffFor, type RecoveryStorage } from './wall-recovery'
 import { surfaceDrift, railShift, mapDrift, dimLevel, OLED_AMPLITUDE_PX, RAIL_SHIFT_PX, MAP_DRIFT_PX, IDLE_DIM_AFTER_MS, feedSide } from './wall-oled'
 import { rotationAt, resolveActiveView, cameraDecision, flightDurationMs, FOLLOW_MIN_GAP_MS, TOUR_DWELL_MS } from './wall-rotation'
-import { applyEventsReply, emptyEvents, feedRows, pulseCandidates, capsuleEvent, isQuietMoment, idleMs, pulseFunnel, MAX_EVENTS } from './wall-feed-model'
+import { applyEventsReply, emptyEvents, feedRows, pulseCandidates, capsuleEvent, isQuietMoment, idleMs, pulseFunnel, MAX_EVENTS, visualTone, eventSeries, recentTotal, marketActivity } from './wall-feed-model'
 import { WALL_PRESET_IDS, presetFor, effectiveLayers } from './wall-presets'
 import type { WallEvent } from './wall-types'
 
@@ -244,5 +244,38 @@ describe('feed model', () => {
     expect(isQuietMoment(s, now + 10 * 60_000)).toBe(true)
     expect(idleMs(emptyEvents(), now)).toBe(Number.POSITIVE_INFINITY)
     expect(pulseFunnel(s, now).replies).toBe(2)
+  })
+  it('elite presentation: gold only for discoveries; series are null before the held history, never a fabricated zero', () => {
+    expect(visualTone('interest', 'green')).toBe('gold')
+    expect(visualTone('offer', 'gold')).toBe('gold')
+    expect(visualTone('deal', 'green')).toBe('gold')
+    expect(visualTone('reply', 'cyan')).toBe('cobalt')
+    expect(visualTone('sends', 'cyan')).toBe('cobalt')
+    expect(visualTone('opt_out', 'neutral')).toBe('neutral')
+    expect(visualTone('signal', 'red')).toBe('red')
+    expect(visualTone('signal', 'gold')).toBe('amber')
+    expect(visualTone('stage', 'violet')).toBe('cobalt')
+
+    const now = Date.parse('2026-10-06T08:00:00Z')
+    const at = (min: number) => new Date(now - min * 60_000).toISOString()
+    const s = applyEventsReply(emptyEvents(), { epoch: 'a', reset: true, head: 4, events: [
+      ev('sends:dallas-tx:1', { kind: 'sends', priority: 3, count: 12, occurred_at: at(40) }),
+      ev('sends:dallas-tx:2', { kind: 'sends', priority: 3, count: 5, occurred_at: at(12) }),
+      ev('r1', { occurred_at: at(8) }),
+      ev('i1', { kind: 'interest', tone: 'green', occurred_at: at(3) }),
+    ] }).state
+    const series = eventSeries(s, now, { kinds: ['sends'], bins: 12, binMs: 5 * 60_000 })
+    expect(series.values).toHaveLength(12)
+    // the wall holds nothing older than 40 min → the first bins are "not covered", not 0
+    expect(series.values.slice(0, 3)).toEqual([null, null, null])
+    expect(series.values.filter((v) => v !== null).length).toBeGreaterThanOrEqual(8)
+    expect(series.total).toBe(17)
+    expect(eventSeries(emptyEvents(), now, { kinds: ['sends'], bins: 4 }).values).toEqual([null, null, null, null])
+    expect(recentTotal(s, now, ['sends'])).toBe(5) // 30-min window: the 40-min-old aggregate is outside
+    expect(recentTotal(s, now, ['sends'], 60 * 60_000)).toBe(17)
+    expect(recentTotal(s, now, ['reply', 'interest'], undefined, 'events')).toBe(2)
+    expect(recentTotal(emptyEvents(), now, ['sends'])).toBeNull()
+    expect(marketActivity(s, now).get('dallas-tx')).toMatchObject({ sends: 5, replies: 2, discoveries: 1 })
+    expect(feedRows(s, { timeZone: 'UTC' })[0]).toMatchObject({ kind: 'interest', title: 'INTERESTED' })
   })
 })
