@@ -85,6 +85,8 @@ test('dry_run queue action does not mutate', async () => {
     payload: { queue_item_id: 'q1', dry_run: true },
     supabase,
     getFlags: flagsAllOn,
+    getValue: async () => 'live',
+    dispatchGate: async () => ({ blocked: false }),
   })
   assert.equal(result.ok, true)
   assert.equal(result.dry_run, true)

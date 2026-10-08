@@ -1,5 +1,7 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
-import { getSystemFlags } from '@/lib/system-control.js'
+import { getSystemFlags, getSystemValue } from '@/lib/system-control.js'
+import { evaluateCanonicalContactability } from '@/lib/domain/compliance/evaluate-canonical-contactability.js'
+import { runSendTimeContactGuard } from '@/lib/domain/queue/send-time-contact-guard.js'
 import { createInboxSendNowQueueRow, executeManualInboxSendNow } from '@/lib/domain/inbox/send-now-service.js'
 import { child } from '@/lib/logging/logger.js'
 import { resolveInboxSchedule } from '@/lib/domain/inbox/resolve-inbox-schedule.js'
@@ -191,7 +193,64 @@ export async function getCockpitQueueStatus({ supabase = defaultSupabase } = {})
   })
 }
 
-export async function runQueueAction({ action, payload = {}, supabase = defaultSupabase, getFlags = getSystemFlags } = {}) {
+// ── Held-row protection (P1, owner 2026-10-08) ──────────────────────────────
+// A row in queue_status 'held' (or carrying metadata.dispatch_hold) is
+// released ONLY by an explicit owner release: action 'owner-release' with
+// confirm 'OWNER_RELEASE', an id list naming the row, an actor and a reason,
+// written to the audit log BEFORE the row moves. Every other action except
+// 'cancel' is refused on a held row. Every releasing action (approve / retry /
+// retry-routing / reschedule / owner-release) also needs outbound + runner on,
+// queue_processor_mode not 'off' (unreadable = off), and the final-dispatch
+// gate (canonical contactability + the send-time contact guard) to pass.
+export const OWNER_RELEASE_CONFIRM = 'OWNER_RELEASE'
+const RELEASING_ACTIONS = new Set(['approve', 'retry', 'retry-routing', 'reschedule', 'owner-release'])
+
+export function isDispatchHeld(row = {}) {
+  const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+  return toStatus(row?.queue_status) === 'held' || (meta.dispatch_hold !== undefined && meta.dispatch_hold !== null && meta.dispatch_hold !== false)
+}
+
+async function defaultReleaseAudit(entry, { supabase }) {
+  const { error } = await supabase.from('automation_events').insert({
+    event_type: 'QUEUE_OWNER_RELEASE',
+    dedupe_key: `queue_owner_release:${entry.queue_item_id}:${entry.at}`,
+    queue_item_id: entry.queue_item_id,
+    payload: entry,
+  })
+  return { ok: !error, error: error?.message || null }
+}
+
+async function defaultDispatchGate(row, { supabase }) {
+  const canonical = await evaluateCanonicalContactability(
+    {
+      thread_key: row.thread_key,
+      to_phone_number: row.to_phone_number,
+      from_phone_number: row.from_phone_number,
+      phone_id: row.phone_number_id || row.metadata?.phone_id,
+      prospect_id: row.prospect_id,
+      master_owner_id: row.master_owner_id,
+      queue_row_id: null,
+      queue_status: null,
+      manual_operator_send: false,
+      fail_closed_for_automated: true,
+    },
+    { supabase }
+  )
+  if (canonical?.blocked) return { blocked: true, reason: canonical.reason || 'canonical_contactability_blocked' }
+  const guard = await runSendTimeContactGuard(row, { supabase })
+  if (guard?.blocked) return { blocked: true, reason: guard.reason }
+  return { blocked: false }
+}
+
+export async function runQueueAction({
+  action,
+  payload = {},
+  supabase = defaultSupabase,
+  getFlags = getSystemFlags,
+  getValue = getSystemValue,
+  releaseAudit = defaultReleaseAudit,
+  dispatchGate = defaultDispatchGate,
+} = {}) {
   const queueItemId = clean(payload.queue_item_id || payload.queue_id || payload.id)
   const dryRun = asBoolean(payload.dry_run, true)
   if (!queueItemId) return blockedResponse(action, 'missing_queue_item_id')
@@ -214,7 +273,45 @@ export async function runQueueAction({ action, payload = {}, supabase = defaultS
   if (isPausedReview(row)) return blockedResponse(action, 'paused_review', { queue_item_id: queueItemId, dry_run: dryRun })
   if (isIncidentQuarantine(row)) return blockedResponse(action, 'incident_quarantine', { queue_item_id: queueItemId, dry_run: dryRun })
 
-  const requiresOutbound = new Set(['approve', 'retry', 'retry-routing']).has(action)
+  const held = isDispatchHeld(row)
+  if (held && action !== 'cancel' && action !== 'owner-release') {
+    return blockedResponse(action, 'held_row_requires_owner_release', { queue_item_id: queueItemId, dry_run: dryRun })
+  }
+  let release_entry = null
+  if (action === 'owner-release') {
+    if (!held) return blockedResponse(action, 'owner_release_row_not_held', { queue_item_id: queueItemId, dry_run: dryRun })
+    const ids = Array.isArray(payload.release_ids) ? payload.release_ids.map(clean) : []
+    const actor = clean(payload.actor)
+    const reason = clean(payload.reason)
+    if (clean(payload.confirm) !== OWNER_RELEASE_CONFIRM) return blockedResponse(action, 'owner_release_confirmation_missing', { queue_item_id: queueItemId, dry_run: dryRun })
+    if (!ids.includes(queueItemId)) return blockedResponse(action, 'owner_release_id_not_listed', { queue_item_id: queueItemId, dry_run: dryRun })
+    if (!actor) return blockedResponse(action, 'owner_release_actor_missing', { queue_item_id: queueItemId, dry_run: dryRun })
+    if (!reason) return blockedResponse(action, 'owner_release_reason_missing', { queue_item_id: queueItemId, dry_run: dryRun })
+    release_entry = { queue_item_id: queueItemId, release_ids: ids, actor, reason, previous_status: row.queue_status, at: new Date().toISOString() }
+  }
+
+  if (RELEASING_ACTIONS.has(action)) {
+    let mode = null
+    try {
+      mode = clean(await getValue('queue_processor_mode')).toLowerCase()
+    } catch {
+      mode = null
+    }
+    if (!mode || mode === 'off') {
+      return blockedResponse(action, 'queue_processor_mode_off', { queue_item_id: queueItemId, dry_run: dryRun, queue_processor_mode: mode || null })
+    }
+    let gate
+    try {
+      gate = await dispatchGate(row, { supabase })
+    } catch (gate_error) {
+      gate = { blocked: true, reason: 'final_dispatch_gate_read_failed' }
+    }
+    if (gate?.blocked) {
+      return blockedResponse(action, `final_dispatch_gate:${gate.reason || 'blocked'}`, { queue_item_id: queueItemId, dry_run: dryRun })
+    }
+  }
+
+  const requiresOutbound = RELEASING_ACTIONS.has(action)
   if (requiresOutbound && !flags.outbound_sms_enabled) {
     return blockedResponse(action, 'outbound_sms_disabled', { queue_item_id: queueItemId, dry_run: dryRun })
   }
@@ -257,7 +354,15 @@ export async function runQueueAction({ action, payload = {}, supabase = defaultS
     })
   }
 
+  if (release_entry) {
+    const audit = await releaseAudit(release_entry, { supabase })
+    if (!audit || audit.ok !== true) {
+      return blockedResponse(action, 'owner_release_audit_write_failed', { queue_item_id: queueItemId })
+    }
+  }
+
   const statusMap = {
+    'owner-release': 'scheduled',
     approve: 'queued',
     cancel: 'cancelled',
     retry: 'queued',
@@ -273,6 +378,7 @@ export async function runQueueAction({ action, payload = {}, supabase = defaultS
       ...(row.metadata || {}),
       cockpit_action: action,
       cockpit_action_at: new Date().toISOString(),
+      ...(release_entry ? { owner_release: release_entry, dispatch_hold: null } : {}),
     },
   }
 
@@ -306,10 +412,14 @@ export async function runQueueAction({ action, payload = {}, supabase = defaultS
     .from('send_queue')
     .update(patch)
     .eq('id', queueItemId)
+    .eq('queue_status', row.queue_status)
     .select('id,queue_status,thread_key')
     .maybeSingle()
 
   if (updateErr) throw updateErr
+  if (!updated) {
+    return blockedResponse(action, 'queue_row_changed_concurrently', { queue_item_id: queueItemId, dry_run: false })
+  }
 
   return okResponse(action, {
     dry_run: false,
