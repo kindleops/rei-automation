@@ -373,7 +373,7 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
                 title={`${day(s.date) ?? 'Date not recorded'}${s.current ? ' · last sale' : ''}`}
                 sub={spec([s.docType, s.buyerName ? `to ${s.buyerName}` : null, s.sellerName ? `from ${s.sellerName}` : null, s.cash ? 'cash' : null])}
                 num={s.price ? fmtMoney(s.price) : '—'}
-                numHint={s.price && anchorProperty?.value && s.price > anchorProperty.value * 4 ? 'price ≫ value · bulk / multi-parcel?' : s.price && anchorProperty?.value && s.price < anchorProperty.value * 0.1 ? 'nominal price' : ''}
+                numHint={s.price && anchorProperty?.value && s.price > anchorProperty.value * 4 ? 'price ≫ value · bulk / multi-parcel?' : s.price && s.price <= 1000 ? 'nominal price' : s.price && anchorProperty?.value && s.price < anchorProperty.value * 0.1 ? 'price ≪ value' : ''}
                 facts={[['Date', day(s.date)], ['Price', s.price ? fmtMoney(s.price) : null], ['Document', s.docType], ['Buyer', spec([s.buyerName, s.buyer2Name])], ['Seller', spec([s.sellerName, s.seller2Name])], ['Cash', s.cash === true ? 'Yes' : s.cash === false ? 'No' : null], ["Arm's length", s.armsLength === false ? 'No' : s.armsLength === true ? 'Yes' : null], ['Price note', s.priceNote], ['Lender', s.lender], ['Loan amount', s.loanAmount ? fmtMoney(s.loanAmount) : null], ['Buyer match', s.buyer ? spec([s.buyer.name, s.buyer.basis ? `by ${s.buyer.basis}` : null]) : null]]}
                 action={s.buyer?.id && onOpenBuyer ? <button type="button" className="egdk-link" onClick={() => onOpenBuyer(s.buyer!.id)}>Open buyer</button> : undefined} />
             ))}

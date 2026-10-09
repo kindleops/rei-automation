@@ -35,6 +35,8 @@ const ONLY = arg('scenes', '')
 await fs.mkdir(OUT, { recursive: true })
 
 const { browseEntityGraph } = await import('@/lib/domain/entity-graph/entity-graph-service.js')
+// 8.5.1: one complete page (rows + visible column values + outreach); older checkouts have no module
+const browsePage = await import('@/lib/domain/entity-graph/entity-graph-browse-page.js').then((m) => m.browseEntityGraphPage).catch(() => null)
 const { getEntityGraphFilterCatalog } = await import('@/lib/domain/entity-graph/entity-graph-field-filters.js')
 const { buildEntityGraphComposition, getCompositionCatalog } = await import('@/lib/domain/entity-graph/entity-graph-composition.js')
 const { getEntityGraphColumnEnrichment } = await import('@/lib/domain/entity-graph/entity-graph-column-enrichment.js')
@@ -136,6 +138,24 @@ for (const zip of new Set(T.properties.map((p) => p.property_address_zip))) {
 for (const p of T.properties) {
   if (p.rec_lien_count) { p.rec_lien_categories = [pick(['LIS PENDENS', 'JUDGMENT', 'TAX LIEN', 'HOA LIEN'])]; p.rec_lien_amount_due = 4000 + Math.round(rnd() * 30) * 1000 }
   p.rec_last_sale_doc_type = p.last_sale_doc_type
+  p.lot_square_feet = 5000 + Math.round(rnd() * 6000)
+  p.lot_acreage = Math.round((p.lot_square_feet / 43560) * 100) / 100
+  // the flat vendor tier × sqft, as stored in prod
+  p.estimated_repair_cost = 35 * p.building_square_feet
+  p.estimated_repair_cost_per_sqft = 35
+}
+/* prod-shaped defects (owner, 2026-10-08/09) on the first rows of the default (value desc) screen */
+{
+  const byValue = [...T.properties].sort((a, b) => b.estimated_value - a.estimated_value)
+  const [apt, ucc, neg, sigs] = byValue
+  // 392-unit $111M apartment, a "$13M repair", no recorded mortgage (equity = value)
+  Object.assign(apt, { property_type: 'Apartment', units_count: 392, estimated_value: 111363200, total_loan_balance: 0, equity_percent: 100, equity_amount: 111363200, property_flags_text: 'High Equity', building_square_feet: 371000, estimated_repair_cost: 12985000, rec_mortgage_count: 0, rec_mortgage_balance: null, rec_last_sale_date: '2020-03-02', rec_last_sale_price: 9800000 })
+  // a UCC financing statement + an affidavit recorded alongside one real lien
+  Object.assign(ucc, { rec_lien_count: 3, rec_lien_categories: ['FINANCING STATEMENT', 'AFFIDAVIT', 'LIEN <GENERAL>'], rec_lien_amount_due: 278000 })
+  // underwater: loan above value
+  Object.assign(neg, { total_loan_balance: Math.round(neg.estimated_value * 1.11), equity_amount: -Math.round(neg.estimated_value * 0.11), equity_percent: -11, rec_mortgage_count: 1, rec_mortgage_balance: Math.round(neg.estimated_value * 1.11) })
+  // many signals on one row ("+4")
+  Object.assign(sigs, { property_flags_text: 'Vacant Home; Tax Delinquent; Probate; Preforeclosure; Absentee Owner; Tired Landlord; High Equity; Out Of State Owner', tax_delinquent: true, rec_has_probate: true, rec_has_lis_pendens: true, rec_lien_count: 1, rec_lien_categories: ['JUDGMENT'] })
 }
 T.properties[3].asset_subclass = 'Storage Facility'
 T.properties[7].acquisition_bucket = 'STRIP_CENTERS'
@@ -253,7 +273,10 @@ async function api(u, req) {
   const params = Object.fromEntries(u.searchParams.entries())
   if (p === '/counts') return { ok: true, counts: { properties: T.properties.length, master_owners: T.master_owners.length, people: T.prospects.length, organizations: T.sub_owners.length, contact_methods: T.phones.length, buyers: 0, markets: 4, zips: 40 } }
   if (p === '/kpis') return { ok: true, kpis: { properties: T.properties.length, linkedProperties: T.properties.length, owners: T.master_owners.length, portfolioOwners: T.master_owners.filter((o) => o.property_count > 1).length, entities: T.sub_owners.length, ownersWithPhone: T.master_owners.length - 3 } }
-  if (p === '/browse') return { ok: true, ...(await browseEntityGraph(params, { supabase: sb, propertySortIndexes: async () => new Set() })) }
+  if (p === '/browse') {
+    const deps = { supabase: sb, propertySortIndexes: async () => new Set() }
+    return { ok: true, ...(browsePage ? await browsePage(params, { supabase: sb, browse: (bp) => browseEntityGraph(bp, deps) }) : await browseEntityGraph(params, deps)) }
+  }
   if (p === '/filter-catalog') { const c = getEntityGraphFilterCatalog(params.tab || 'properties'); return c.source ? { ok: true, ...c } : { ok: false, error: 'tab_does_not_support_field_filters' } }
   if (p === '/composition') return params.catalog ? { ok: true, ...getCompositionCatalog(params.tab) } : { ok: true, composition: await buildEntityGraphComposition(params, compDeps) }
   if (p === '/columns') return { ok: true, ...(await getEntityGraphColumnEnrichment(params, { supabase: sb })) }
@@ -315,6 +338,12 @@ const SCENES = [
   ['06-graph-hover-card', `/entity-graph/property/${PROP.property_id}?egv=graph`, 'hover'],
   ['07-graph-fullscreen', `/entity-graph/property/${PROP.property_id}?egv=graph&egfs=1`, 'hover'],
   ['10-contact-discovery', `/entity-graph/property/${T.properties[41].property_id}`, 'inspector'],
+  ['11-default-columns', `/entity-graph`, 'grid'],
+  ['12-columns-units-liens', `/entity-graph`, 'columns'],
+  ['13-inspector-records', `/entity-graph/property/${[...T.properties].sort((a, b) => b.estimated_value - a.estimated_value)[1].property_id}`, 'records'],
+  ['14-inspector-apartment', `/entity-graph/property/${[...T.properties].sort((a, b) => b.estimated_value - a.estimated_value)[0].property_id}`, 'inspector'],
+  ['15-person-network', `/entity-graph/prospect/${T.prospects[0].prospect_id}`, 'inspector'],
+  ['16-column-picker', `/entity-graph`, 'picker'],
   ['09-perf', `/entity-graph`, 'perf'],
   ['08-pane-50', `/entity-graph?${ff([{ field_key: 'properties.flags', operator: 'is_any_of', value: ['Vacant Home'] }])}`, 'split'],
 ].filter(([nm]) => !ONLY || ONLY.split(',').some((o) => nm.startsWith(o)))
@@ -342,6 +371,12 @@ for (const theme of THEMES) for (const [W, H] of SIZES) {
     const row = { label, name }
     try {
       await page.evaluate(() => { try { localStorage.removeItem(Object.keys(localStorage).find((k) => k.startsWith('nexus.entityGraph.desk.rail.v1')) || '_') } catch { /* */ } sessionStorage.clear() }).catch(() => {})
+      if (mode === 'columns') {
+        // a layout saved on 8.5.0 with the columns the owner flagged (a stale layout must migrate cleanly)
+        await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('nexus.entityGraph.table.v1')) localStorage.removeItem(k); localStorage.setItem('nexus.entityGraph.table.v1:local', JSON.stringify({ columns: { properties: ['flags', 'latitude', 'building_square_feet', 'lot_square_feet', 'lot_acreage', 'equity', 'liens', 'estimated_repair_cost', 'lastSale', 'stage', 'status'] }, sort: {} })) }).catch(() => {})
+      } else {
+        await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('nexus.entityGraph.table.v1') || k.startsWith('nexus.entityGraph.desk.outreachSeeded')) localStorage.removeItem(k) }).catch(() => {})
+      }
       await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await page.waitForSelector('.egdk', { timeout: 60_000 })
       await page.waitForTimeout(1800)
@@ -349,6 +384,26 @@ for (const theme of THEMES) for (const [W, H] of SIZES) {
         await page.locator('.egdk-rgroup__head', { hasText: 'Location' }).first().click().catch(() => {})
         await page.locator('.egdk-facet__head', { hasText: /^Market/ }).first().click().catch(() => {})
         await page.waitForTimeout(900)
+      }
+      if (mode === 'records') {
+        await page.waitForSelector('.egdk-insp', { timeout: 15_000 }).catch(() => {})
+        await page.waitForTimeout(1200)
+        await page.locator('.egdk-recrow summary').first().click().catch(() => {})
+        await page.locator('.egdk-insp__body').first().evaluate((el) => { const t = [...el.querySelectorAll('.lc-insp-section, section, h3')].find((x) => /Debt & recorded/.test(x.textContent || '')); t?.scrollIntoView() }).catch(() => {})
+        await page.waitForTimeout(500)
+        row.records = await page.locator('.egdk-insp').innerText().then((t) => (t.match(/(Debt & recorded documents[\s\S]{0,600})/) || [])[1] || null).catch(() => null)
+      }
+      if (mode === 'picker') {
+        await page.locator('.egdk-tablebar button', { hasText: /^Columns/ }).first().click().catch(() => {})
+        await page.waitForTimeout(400)
+        await page.locator('.egdk-cols input[type="search"], .egdk-cols input').first().fill('sqft').catch(() => {})
+        await page.waitForTimeout(400)
+      }
+      if (mode === 'grid' || mode === 'columns') {
+        await page.waitForSelector('.egdk .lc-grid__row', { timeout: 20_000 }).catch(() => {})
+        await page.waitForTimeout(600)
+        row.headers = await page.locator('.egdk .lc-grid__head [role="columnheader"]').allInnerTexts().catch(() => null)
+        row.firstRows = await page.locator('.egdk .lc-grid__row').evaluateAll((els) => els.slice(0, 4).map((e) => e.innerText.replace(/\n+/g, ' | ').slice(0, 400))).catch(() => null)
       }
       if (mode === 'collapse') { await page.locator('.egdk-rail__collapse').first().click(); await page.waitForTimeout(500) }
       if (mode === 'people') {

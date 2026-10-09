@@ -277,7 +277,7 @@ export function lastSaleText(r: EntitySearchResult): string | null {
   // measured 2026-10-09 (240 sales since 2019 on a 3% slice): 6 sold for > 4× today's value
   // (portfolio / multi-parcel deeds), 45 for < ¼ of it (nominal / non-arm's-length transfers)
   const note = value && price !== null && price > 0
-    ? price > value * 4 ? 'price ≫ value · bulk / multi-parcel?' : price < value * 0.1 ? 'nominal price' : null
+    ? price > value * 4 ? 'price ≫ value · bulk / multi-parcel?' : price <= 1000 ? 'nominal price' : price < value * 0.1 ? 'price ≪ value' : null
     : null
   return [formatUnit('date', date), price !== null && price > 0 ? signedMoney(price) : null, fromRecord ? rec?.lastSaleDocType ?? null : text(row.last_sale_doc_type), note, fromRecord ? 'recorded' : 'vendor'].filter(Boolean).join(' · ')
 }
