@@ -1,96 +1,72 @@
-# Final-dispatch guard: proposal for sending-safety review
+# Final-dispatch exclusion check: proposal for sending-safety review
 
-> **Status:** proposal only. `process-send-queue.js` is **not** edited on this branch. The sending-safety owners must review, decide the open questions below, and implement it. Until then this PR stays blocked from merging.
+> **Status:** proposal only. No send-path file is edited on this branch, and this PR stays draft / DO NOT MERGE until the review below is complete, the migration is separately authorized and applied, and build/plan hooks plus this check ship together.
 
-## Why it is needed
-This branch's hooks keep excluded recipients out of **target build** and **queue planning**. A row that was already queued before an exclusion was added is still dispatchable. The final guard closes that gap at send time.
+## Revision (2026-10-09): fold into the existing P0 send-time guard
+8.5.0 already has the final send-time check: `runSendTimeContactGuard`, added in `send-time-contact-guard.js` and wired in `7dce1e2a`.
+- `evaluateAndBlockSendAtCompliance` (`block-send-at-compliance.js`) runs it for **every** send that reaches transport: both `process-send-queue` paths and Send Now.
+- **Its conventions:**
+  - a block → `blockSendAtCompliance` (row `cancelled`, terminal, no transport);
+  - a read error → `send_time_guard_read_failed` → `deferSendAtGuard` (claim released, status kept, re-evaluated next run; never sent).
 
-## Anchors at `91b4f873` (Entity Graph 8.5.0, `release/cloudflare-production`)
-- `apps/api/src/lib/domain/queue/process-send-queue.js:2333`: `const sms_health_guard = evaluateSmsHealthGuard({`. The guard goes immediately before this line.
-- `:573`: `blockQueueRowBySmsHealthGuard`. The new helpers go next to it.
-- `:1510`: `const manual_inbox_send = isManualInboxSend(queue_row)`. Manual inbox sends are not affected.
+The earlier draft of this proposal added a separate check before `evaluateSmsHealthGuard`, with its own `blocked` / `held` statuses. **That draft is withdrawn.** A second, differently behaving final check would duplicate the P0 guard. The exclusion becomes one more fact and one more reason inside the existing guard.
 
-## Proposed change (verbatim)
+## Proposed change (in `apps/api/src/lib/domain/queue/send-time-contact-guard.js`)
 
-```text
-PROPOSED (NOT APPLIED) — final-dispatch campaign recipient exclusion guard
-File: apps/api/src/lib/domain/queue/process-send-queue.js
-Owner review: 8.4.7 sending-safety owners. The send path was not edited from this session (code-edit safety boundary).
+```js
+// SEND_TIME_GUARD_REASONS
+CAMPAIGN_RECIPIENT_EXCLUDED: "campaign_recipient_excluded",
+// REASON_CODE
+[R.CAMPAIGN_RECIPIENT_EXCLUDED]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
 
-1) Imports (with the other domain imports):
-
-  import {
-    loadCampaignRecipientExclusions,
-    isRecipientExcluded,
-  } from "@/lib/domain/campaigns/campaign-recipient-exclusions.js";
-
-2) Helpers (next to blockQueueRowBySmsHealthGuard):
-
-  async function blockQueueRowByCampaignExclusion(queue_row, deps = {}) {
-    const now = new Date().toISOString();
-    await getSupabase(deps).from(QUEUE_TABLE).update({
-      queue_status: "blocked",                      // terminal (TERMINAL_QUEUE_OUTCOMES)
-      guard_status: "blocked",
-      guard_reason: "campaign_recipient_excluded",
-      failed_reason: "campaign_recipient_excluded",
-      is_locked: false, locked_at: null, lock_token: null, updated_at: now,
-      metadata: { ...(queue_row.metadata ?? {}), skip_reason: "campaign_recipient_excluded",
-        final_queue_status: "blocked", blocked_by: "campaign_recipient_exclusion",
-        blocked_at: now, finalized_at: now },
-    }).eq("id", queue_row.id);
-    return { ok: false, skipped: true, reason: "campaign_recipient_excluded",
-      queue_status: "blocked", final_queue_status: "blocked", queue_row_id: queue_row.id, queue_item_id: queue_row.id };
+// evaluateSendTimeContactGuard — before "6. already contacted":
+// campaign-scoped, exact campaign + exact phone; applies to every row of that campaign (openers and follow-ups)
+const campaign_id = clean(row.campaign_id)
+if (campaign_id) {
+  for (const x of facts.campaign_exclusions || []) {
+    if (x.is_active === false) continue
+    if (clean(x.campaign_id) !== campaign_id) continue
+    if (!same(x.phone_e164)) continue
+    return block(R.CAMPAIGN_RECIPIENT_EXCLUDED, { scope: "campaign_recipient" })
   }
+}
 
-  async function holdQueueRowForExclusionLookup(queue_row, error_code, deps = {}) {
-    const now = new Date().toISOString();
-    await getSupabase(deps).from(QUEUE_TABLE).update({
-      queue_status: "held",                         // non-terminal, cancellable; nothing is sent
-      guard_status: "blocked",
-      guard_reason: error_code,
-      is_locked: false, locked_at: null, lock_token: null, updated_at: now,
-      metadata: { ...(queue_row.metadata ?? {}), skip_reason: error_code,
-        held_by: "campaign_recipient_exclusion_lookup", held_at: now },
-    }).eq("id", queue_row.id);
-    return { ok: false, skipped: true, reason: error_code, queue_status: "held",
-      queue_row_id: queue_row.id, queue_item_id: queue_row.id };
-  }
-
-3) Guard, immediately BEFORE `const sms_health_guard = evaluateSmsHealthGuard({`:
-
-  if (!manual_inbox_send) {
-    const exclusion_campaign_id = queue_row.campaign_id || queue_row.metadata?.campaign_id || null;
-    if (exclusion_campaign_id) {
-      const exclusion_read = await loadCampaignRecipientExclusions(getSupabase(deps), exclusion_campaign_id);
-      if (!exclusion_read.ok) {
-        warn("queue.campaign_exclusion_lookup_failed", { queue_row_id, campaign_id: exclusion_campaign_id, error: exclusion_read.error });
-        return holdQueueRowForExclusionLookup({ ...queue_row, id: queue_row_id }, exclusion_read.error, deps);
-      }
-      if (isRecipientExcluded(exclusion_read.phones, queue_row)) {
-        warn("queue.campaign_recipient_excluded", { queue_row_id, campaign_id: exclusion_campaign_id });
-        return blockQueueRowByCampaignExclusion({ ...queue_row, id: queue_row_id }, deps);
-      }
-    }
-  }
-
-Tests to add (tests/critical/campaign-recipient-exclusion-dispatch.test.mjs):
-  a) campaign row + active exclusion for the phone  -> status 'blocked', transport never called
-  b) exclusion lookup error / unreadable rows      -> status 'held', transport never called
-  c) empty exclusion set                           -> unaffected (normal path continues)
-  d) row without campaign_id, and manual inbox rows -> unaffected
-  e) exclusion on campaign A, row for campaign B   -> unaffected
-  f) retry after 'held' with a healthy lookup      -> proceeds normally
-
-Owner decisions:
-  - Is 'held' the right recoverable state in the 8.4.7 dispatcher (and who/what releases it)?
-  - Placement relative to assertDispatchAuthorization / claim (recommend: after claim+authorization, before transport, as above).
-  - Release order: migration first, then campaign-service hooks, then this guard (otherwise lookups fail closed and block builds/plans/sends).
+// loadSendTimeContactFacts — only for rows that carry a campaign_id:
+const campaign_exclusions = clean(row.campaign_id)
+  ? await read(supabase.from("campaign_recipient_exclusions")
+      .select("campaign_id,phone_e164,is_active")
+      .eq("campaign_id", clean(row.campaign_id))
+      .eq("is_active", true)
+      .in("phone_e164", variants)
+      .limit(5))
+  : []
 ```
 
-## Required release order (no step without separate authorization)
-1. Review and approve the migration. CI proof is green: `campaign-exclusions-db-proof`.
-2. Apply the migration. **This needs separate authorization.**
+- Rows with no `campaign_id` (manual inbox sends, inbound auto-replies) read nothing new and behave exactly as today.
+- A read error throws, so the guard returns `send_time_guard_read_failed` and the row is **deferred** (existing path). Nothing is sent, and nothing is cancelled because of a transient failure.
+
+### Tests to add (beside `send-time-contact-guard-20261008.test.mjs`)
+- **a)** An active exclusion for (campaign A, phone) blocks a campaign-A row, whether the phone is stored as 10 digits, `1`+10 or E.164 → `cancelled`; transport is never called.
+- **b)** A campaign-B row for the same phone passes. So do inactive exclusions, and rows with no `campaign_id`.
+- **c)** An exclusion read error → `deferred`. The row is unlocked with its status kept; the next run with a healthy read proceeds.
+- **d)** Empty table → no change for any row.
+- **e)** Existing P0 guard tests stay green, with suppression, opt-out, wrong-number, not-owner and already-contacted unchanged.
+
+## Questions for the reviewer
+1. **Missing table.** With this read in place and the table **not** yet migrated, every campaign row would defer, halting campaign sending. The required order is migration → verify → code. Should the loader also treat `relation does not exist` as a hard deployment error? Never as "no exclusions".
+2. **Existing queue rows.** Already-queued rows are cancelled at send time. Is `cancelled` with `campaign_recipient_excluded` the right terminal state, or should they stay retryable after a deactivation?
+3. **Retries.** A deferred row keeps its status and retries. Confirm the resume drain (`apply-resume-drain.js`) re-plans it in-window as for other deferrals.
+4. **Rollback.**
+   - The code is reversible by revert.
+   - The migration adds two tables, two functions and triggers, and alters no existing object.
+   - Rolling back means deactivating rows, or dropping the objects after reverting the code. Agree?
+
+## Required release order (each step separately authorized)
+1. Review and approve the migration. CI proof is green (`campaign-exclusions-db-proof`, real Postgres 17).
+2. Apply the migration (**separate authorization**).
 3. Verify the table, constraints, grants and RLS in production (read-only).
-4. Deploy the build/plan hooks **and** this dispatch guard **together**. The hooks fail closed if the table is missing, which would block **every** campaign's build and queue plan.
-5. Verify end to end with no exclusion rows: no change in behaviour.
+4. Ship the build/plan hooks **and** this guard change **together**.
+5. Verify end to end with zero exclusion rows: no behaviour change.
 6. Only then request approval for the first exclusion (Erika Rivers, Miami Test).
+
+No merges, migrations or deploys during the Atlanta/St. Louis sending ramp.
