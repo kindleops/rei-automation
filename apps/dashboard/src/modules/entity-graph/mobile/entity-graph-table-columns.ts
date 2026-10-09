@@ -265,6 +265,23 @@ const lienText = (r: EntitySearchResult): string | null => {
   return [labels.join(', '), typeof rec.lienAmountDue === 'number' && rec.lienAmountDue > 0 ? `${signedMoney(rec.lienAmountDue)} due` : null].filter(Boolean).join(' · ')
 }
 
+/** The last sale from ONE source, with a consistency note when the price cannot be this parcel's value. */
+export function lastSaleText(r: EntitySearchResult): string | null {
+  const rec = r.details?.records
+  const row = r.details?.row ?? {}
+  const fromRecord = Boolean(text(rec?.lastSaleDate) || typeof rec?.lastSalePrice === 'number')
+  const date = fromRecord ? text(rec?.lastSaleDate) : text(row.sale_date)
+  const price = fromRecord ? (typeof rec?.lastSalePrice === 'number' ? rec.lastSalePrice : null) : finiteNum(row.sale_price)
+  if (!date && price === null) return null
+  const value = typeof r.details?.value === 'number' && r.details.value > 0 ? r.details.value : null
+  // measured 2026-10-09 (240 sales since 2019 on a 3% slice): 6 sold for > 4× today's value
+  // (portfolio / multi-parcel deeds), 45 for < ¼ of it (nominal / non-arm's-length transfers)
+  const note = value && price !== null && price > 0
+    ? price > value * 4 ? 'price ≫ value · bulk / multi-parcel?' : price < value * 0.1 ? 'nominal price' : null
+    : null
+  return [formatUnit('date', date), price !== null && price > 0 ? signedMoney(price) : null, fromRecord ? rec?.lastSaleDocType ?? null : text(row.last_sale_doc_type), note, fromRecord ? 'recorded' : 'vendor'].filter(Boolean).join(' · ')
+}
+
 export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
   properties: [
     ...OUTREACH_COLUMNS,
@@ -323,16 +340,12 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
       sortValue: (r) => r.details?.records?.filings?.length ?? null,
     },
     {
-      // one last-sale column (records first, the property's own sale fields as fallback): full date + price
-      key: 'lastSale', group: 'signals', label: 'Last sale', sortBy: 'rec_last_sale_date', width: 190, unit: 'composite', fields: ['sale_date', 'sale_price'],
-      render: (r) => {
-        const rec = r.details?.records
-        const row = r.details?.row ?? {}
-        const date = text(rec?.lastSaleDate) ?? text(row.sale_date)
-        const price = typeof rec?.lastSalePrice === 'number' ? rec.lastSalePrice : finiteNum(row.sale_price)
-        if (!date && price === null) return null
-        return [formatUnit('date', date), price !== null ? signedMoney(price) : null, rec?.lastSaleDocType ?? null].filter(Boolean).join(' · ')
-      },
+      // one last-sale column, ONE source per cell (owner, 2026-10-09: "none of these values add up"):
+      // the recorded sale when the record has one, else the vendor's sale fields — never a recorded
+      // date with a vendor price. A price far from the value says so (bulk / nominal transfers).
+      key: 'lastSale', group: 'signals', label: 'Last sale', sortBy: 'rec_last_sale_date', width: 230, unit: 'composite', fields: ['sale_date', 'sale_price', 'last_sale_doc_type'],
+      source: 'Recorded sale (seller.property_sale) first, else properties.sale_date / sale_price — never mixed',
+      render: (r) => lastSaleText(r),
       sortValue: (r) => text(r.details?.records?.lastSaleDate) ?? text((r.details?.row ?? {}).sale_date),
     },
     { key: 'units', group: 'property', label: 'Units', sortBy: 'units_count', align: 'right', width: 60, unit: 'count', render: (r) => compactCount(r.details?.units) },

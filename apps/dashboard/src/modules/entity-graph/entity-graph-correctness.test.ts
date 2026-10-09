@@ -139,3 +139,16 @@ describe('entity contact needing review is a candidate, never "No phone"', () =>
     expect(col('convoStage').render(convoOnly)).toBe('Interested')
   })
 })
+
+describe('values add up: one source per cell, a basis for every number', () => {
+  it('last sale never mixes the recorded date with the vendor price, and flags prices that cannot be this parcel', () => {
+    const rec = { captured: true, mortgageCount: 0, lienCount: 0, saleCount: 1, signals: [], lastSaleDate: '2020-06-05', lastSaleDocType: 'Warranty Deed' }
+    // recorded sale without a price: the vendor price is NOT borrowed
+    expect(col('lastSale').render(prop('L1', { value: 600000, records: rec, row: { sale_price: 9800000, sale_date: '2019-01-01' } }))).toBe('Jun 5, 2020 · Warranty Deed · recorded')
+    // $9.8M sale on a $600K-valued parcel: said, not silently shown
+    expect(col('lastSale').render(prop('L2', { value: 600000, records: { ...rec, lastSalePrice: 9800000 } }))).toBe('Jun 5, 2020 · $9.8M · Warranty Deed · price ≫ value · bulk / multi-parcel? · recorded')
+    expect(col('lastSale').render(prop('L3', { value: 600000, records: { ...rec, lastSalePrice: 10 } }))).toContain('nominal price')
+    // no recorded sale: the vendor fields, labelled vendor
+    expect(col('lastSale').render(prop('L4', { value: 300000, records: { captured: true, mortgageCount: 0, lienCount: 0, saleCount: 0, signals: [] }, row: { sale_date: '2006-06-05', sale_price: 120000, last_sale_doc_type: 'Grant Deed' } }))).toBe('Jun 5, 2006 · $120K · Grant Deed · vendor')
+  })
+})

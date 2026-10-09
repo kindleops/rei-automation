@@ -41,7 +41,7 @@ describe('Entity Graph table columns', () => {
     for (const key of ['year_built', 'zoning', 'total_bedrooms']) expect(col(key).sortBy).toBe(key)
     // the vendor repair estimate is not a grid column at all (valuation lanes: MLS ARV lane reference only)
     expect(SCOPE_TABLE_COLUMNS.properties.some((c) => /repair/.test(c.key))).toBe(false)
-    expect(col('lastSale').fields).toEqual(['sale_date', 'sale_price'])
+    expect(col('lastSale').fields).toEqual(['sale_date', 'sale_price', 'last_sale_doc_type'])
     expect(col('units').sortBy).toBe('units_count')
     expect(col('loans').sortBy).toBe('rec_mortgage_count')
     // No index planned: stays a loaded-rows sort.
