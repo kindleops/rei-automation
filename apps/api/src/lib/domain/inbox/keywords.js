@@ -14,12 +14,18 @@ export function findMatchedKeywords(messageBody = "", groupsOrTerms = []) {
   const body = clean(messageBody);
   if (!body) return [];
   const requested = Array.isArray(groupsOrTerms) ? groupsOrTerms : [groupsOrTerms];
-  const terms = requested.flatMap((entry) => KEYWORD_GROUPS[clean(entry).toLowerCase()] || [entry]).map(clean).filter(Boolean);
+  // Group keywords match WHOLE WORDS: "Christopher" is not the opt-out keyword
+  // "stop", "removed" is not "remove" (P0 2026-10-09). A free search term the
+  // operator typed keeps substring semantics ("chris" finds "Christopher").
+  const terms = requested.flatMap((entry) => {
+    const group = KEYWORD_GROUPS[clean(entry).toLowerCase()];
+    return group ? group.map((term) => ({ term: clean(term), whole: true })) : [{ term: clean(entry), whole: clean(entry).length <= 3 }];
+  }).filter((entry) => entry.term);
   const seen = new Set();
   const matches = [];
-  for (const term of terms) {
-    const pattern = term.length <= 3 ? `\\b${escapeRegExp(term)}\\b` : escapeRegExp(term);
-    const rx = new RegExp(pattern, "ig");
+  for (const { term, whole } of terms) {
+    const pattern = whole ? `(?<![\\p{L}\\p{N}_-])${escapeRegExp(term)}(?![\\p{L}\\p{N}_])` : escapeRegExp(term);
+    const rx = new RegExp(pattern, "igu");
     let match;
     while ((match = rx.exec(body)) !== null) {
       const key = `${term.toLowerCase()}:${match.index}`;

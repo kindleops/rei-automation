@@ -1,4 +1,5 @@
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
+import { containsAnyWord } from './opt-out-text'
 
 export type CanonicalBucket =
   | 'new_replies'
@@ -171,13 +172,18 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
   const followUpAt = followUpAtRaw || null
   const messageBlob = str(thread.lastMessageBody, thread.preview, getAny(thread, 'latest_message_body'))
 
+  // Suppression is SERVER STATE: the flag, the server bucket, or an opt-out
+  // intent CODE (exact). It is never re-derived from message text — an
+  // outbound "Hi Christopher, …" contains the substring "stop" and used to
+  // pull the thread into Suppressed over the server bucket (P0 2026-10-09).
   const isHardSuppressed = bool(getAny(thread, 'is_suppressed', 'isSuppressed', 'threadIsSuppressed')) ||
+    bool(getAny(thread, 'is_opt_out', 'isOptOut', 'opt_out')) ||
+    // intent is a server CODE (detected_intent / ui_intent), not prose.
     hasAny(intent, ['stop', 'opt_out', 'optout', 'dnc', 'do_not_contact', 'legal_threat', 'hostile_legal', 'permanent_suppression']) ||
-    hasAny(statusBucket, ['suppressed', 'dnc', 'opt_out']) ||
-    hasAny(messageBlob, ['stop', 'unsubscribe', 'do not contact', 'legal threat', 'attorney'])
+    hasAny(statusBucket, ['suppressed', 'dnc', 'opt_out'])
   const isWrongNumberSuppression = hasAny(intent, ['wrong_number']) && (
     bool(getAny(thread, 'is_suppressed', 'isSuppressed', 'threadIsSuppressed')) ||
-    hasAny(messageBlob, ['wrong number', 'not owner', 'not me'])
+    containsAnyWord(messageBlob, ['wrong number', 'not owner', 'not me'])
   )
   const isSuppressed = isHardSuppressed || isWrongNumberSuppression
 

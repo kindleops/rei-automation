@@ -418,7 +418,7 @@ const detectIntentSlug = (thread: InboxThread, threadContext: ThreadContext | nu
   const slugs: string[] = []
 
   if (/wrong number|dont know|not .*owner/.test(text)) slugs.push('wrong_number')
-  if (/not interested|stop|remove me|opt out/.test(text)) slugs.push('not_interested', 'opt_out_compliance')
+  if (/\bnot interested\b|(?<![\w-])stop\b|\bremove me\b|\bopt[ -]?out\b/.test(text)) slugs.push('not_interested', 'opt_out_compliance')
   if (/offer|price|number/.test(text)) slugs.push('offer_reveal', 'asking_price')
   if (/yes|interested|tell me more/.test(text)) slugs.push('soft_intent_probe', 'asking_price')
   if (/condition|repair|fix/.test(text)) slugs.push('condition_probe')

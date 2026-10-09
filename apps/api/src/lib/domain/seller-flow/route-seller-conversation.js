@@ -1,4 +1,5 @@
 import { getCategoryValue, getNumberValue } from "@/lib/providers/podio.js";
+import { includesAnyWholeWord } from "@/lib/domain/compliance/whole-word.js";
 import { formatUsd } from "@/lib/utils/money.js";
 import { extractUnderwritingSignals } from "@/lib/domain/underwriting/extract-underwriting-signals.js";
 import { collapseConversationStageToLegacy } from "@/lib/domain/communications-engine/state-machine.js";
@@ -201,7 +202,8 @@ function detectNotInterested(message = "", classification = null) {
 function detectOptOut(message = "", classification = null) {
   if (classification?.compliance_flag === "stop_texting") return true;
 
-  return includesAny(message, [
+  // Whole words only — "This is Christopher" is not an opt-out (P0 2026-10-09).
+  return includesAnyWholeWord(message, [
     "stop",
     "unsubscribe",
     "remove me",

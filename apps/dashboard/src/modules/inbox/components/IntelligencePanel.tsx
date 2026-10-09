@@ -64,6 +64,7 @@ const asFiniteNumber = (value: unknown): number | null => {
 }
 import { DealIntelligenceHeaderActions } from '../../deal-intelligence/DealIntelligenceLeadStateBar'
 import '../../deal-intelligence/deal-intelligence-25.css'
+import { containsWord, isOptOutWording } from '../../../domain/inbox/opt-out-text'
 
 const formatMoney = formatCurrency
 const fmtPhone = formatPhone
@@ -2227,7 +2228,7 @@ export const TimelinePanel = ({ thread, messages, phase3 }: { thread: WorkflowTh
         'listed', 'realtor', 'agent', 'mls', 'zillow', 'another offer', 'realtor.com', // Market
         'divorce', 'probate', 'inheritance', 'passed away', 'foreclosure', 'bankruptcy', 'behind on payments', // Distress
         'buzz off', 'leave me alone', 'get lost', 'get out', 'stfu', 'wtf', 'wth', 'annoying', 'harassment', 'harassing' // Aggressive
-      ].some(p => text.includes(p))
+      ].some(p => containsWord(text, p))
       
       if (isNegative) return { label: 'Negative Intent', state: 'negative' }
       
@@ -2236,11 +2237,11 @@ export const TimelinePanel = ({ thread, messages, phase3 }: { thread: WorkflowTh
         'yes', 'yeah', 'yup', 'sure', 'ok', 'let\'s talk', 'call me', 'email me', 'send offer',
         'affirmative', 'correct', 'that is correct', 'i am the owner', 'soy el dueño',
         'quick close', 'fast close', 'asap', 'need to sell', 'want to sell'
-      ].some(p => text.includes(p))
+      ].some(p => containsWord(text, p))
       
       if (isPositive) return { label: 'Positive Intent', state: 'positive' }
       
-      const isCurious = ['how does it work', 'process', 'info', 'details', 'who is this', 'who are you', 'how did you get my number'].some(p => text.includes(p))
+      const isCurious = ['how does it work', 'process', 'info', 'details', 'who is this', 'who are you', 'how did you get my number'].some(p => containsWord(text, p))
       if (isCurious) return { label: 'Neutral Intent (Curious)', state: 'neutral' }
       
       return { label: 'Neutral Intent', state: 'neutral' }
@@ -4369,7 +4370,7 @@ const _CompactDealIntelligenceCapsule = ({
               if (!isInbound && i === latestEvents.length - 1) { label = 'Initial Outreach'; }
               if (isInbound && body) {
                 const lc = body.toLowerCase()
-                if (/stop|unsubscribe|remove|opt.?out/.test(lc)) { label = 'Opt-Out Request'; tone = 'is-red'; }
+                if ((msg as { isOptOut?: boolean }).isOptOut || isOptOutWording(lc)) { label = 'Opt-Out Request'; tone = 'is-red'; }
                 else if (/price|how much|offer|interested|ready/.test(lc)) { label = 'Seller Showing Interest'; tone = 'is-green'; }
                 else if (/wrong number|not (the )?owner|already sold/.test(lc)) { label = 'Disqualification Signal'; tone = 'is-amber'; }
                 else if (/yes|sure|call|talk|available/.test(lc)) { label = 'Positive Engagement'; tone = 'is-green'; }
@@ -5868,7 +5869,7 @@ const MediumDealWorkspace = ({
             let label = isInbound ? 'Seller Response' : i === 0 ? 'Initial Outreach' : 'Follow-Up Attempt'
             let tone = isInbound ? 'is-green' : 'is-blue'
             if (isInbound) {
-              if (/stop|unsubscribe|opt.?out/.test(lc)) { label = 'Opt-Out Request'; tone = 'is-red'; }
+              if ((msg as { isOptOut?: boolean }).isOptOut || isOptOutWording(lc)) { label = 'Opt-Out Request'; tone = 'is-red'; }
               else if (/price|offer|interested|ready/.test(lc)) { label = 'Showing Interest'; tone = 'is-green'; }
               else if (/wrong number|not.*owner|already sold/.test(lc)) { label = 'Disqualification'; tone = 'is-amber'; }
               else if (/yes|sure|call|talk|available/.test(lc)) { label = 'Positive Engagement'; tone = 'is-green'; }

@@ -1,3 +1,4 @@
+import { includesAnyWholeWord } from "@/lib/domain/compliance/whole-word.js";
 const num = (v, fallback = 0) => {
   const n = Number(String(v ?? '').replace(/[,$\s]/g, ''))
   return Number.isFinite(n) ? n : fallback
@@ -55,7 +56,8 @@ export const resolveInboxThreadState = (thread, _now = new Date()) => {
   const stage = str(getAny(thread, 'conversation_stage', 'thread_stage', 'conversationStage'))
   
   const isHostile = bool(getAny(thread, 'hostile')) || hasAny(messageBlob, ['fuck', 'lawsuit', 'attorney', 'cease', 'harass'])
-  if (isHostile || hasAny(messageBlob, ['wrong number', 'stop', 'unsubscribe'])) {
+  // Whole words only — "Hi Christopher" is not "stop" (P0 2026-10-09).
+  if (isHostile || includesAnyWholeWord(messageBlob, ['wrong number', 'stop', 'unsubscribe'])) {
     reasons.push('suppressed via intent/keywords')
     return { bucket: 'suppressed', reasons }
   }

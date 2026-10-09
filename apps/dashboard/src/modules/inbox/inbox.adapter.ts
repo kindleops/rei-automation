@@ -810,8 +810,10 @@ const resolveRealtimeBucketForRow = (row: Record<string, unknown>, table: string
   const explicit = normalizeRealtimeBucket(row.inbox_bucket ?? row.inboxBucket ?? row.inbox_category ?? row.inboxCategory)
   if (explicit) return explicit
   const intent = String(row.detected_intent ?? row.primary_intent ?? '').toLowerCase()
-  const body = String(row.message_body ?? row.message_text ?? '').toLowerCase()
-  if (row.opt_out === true || row.is_opt_out === true || ['stop', 'opt_out', 'dnc'].some((token) => intent.includes(token) || body.includes(token))) return 'suppressed'
+  // Suppression is server state: the row's opt-out flag or the server intent
+  // CODE (detected_intent). Never the message body — "Hi Christopher" contains "stop"
+  // (P0 2026-10-09) and an outbound greeting suppressed the thread.
+  if (row.opt_out === true || row.is_opt_out === true || row.is_suppressed === true || ['stop', 'opt_out', 'dnc'].some((token) => intent.includes(token))) return 'suppressed'
   if (row.wrong_number === true || row.not_interested === true || ['wrong_number', 'not_interested'].some((token) => intent.includes(token))) return 'dead'
   if (row.needs_review === true || intent.includes('manual_review')) return 'needs_review'
   if (table === 'send_queue') return 'follow_up'

@@ -1,4 +1,5 @@
 import { hasSupabaseConfig, supabase } from "@/lib/supabase/client.js";
+import { includesAnyWholeWord } from "@/lib/domain/compliance/whole-word.js";
 import { warn } from "@/lib/logging/logger.js";
 import crypto from "crypto";
 import {
@@ -169,7 +170,9 @@ export function normalizeSellerInboundIntent(input) {
     return "timing_complaint";
   }
 
-  if (isMatch(["stop", "unsubscribe", "remove me", "take me off", "no me contactes", "elimíname", "borrar de lista"]) || classification.compliance_flag === "stop_texting") {
+  // Compliance + legal lists match WHOLE WORDS: "Christopher" is not "stop",
+  // "issue" is not "sue" (P0 2026-10-09).
+  if (includesAnyWholeWord(text, ["stop", "unsubscribe", "remove me", "take me off", "no me contactes", "elimíname", "borrar de lista"]) || classification.compliance_flag === "stop_texting") {
     return "opt_out";
   }
 
@@ -177,7 +180,7 @@ export function normalizeSellerInboundIntent(input) {
     return "wrong_person";
   }
 
-  if (isMatch(["sue", "attorney", "lawyer", "report", "fcc", "harassment", "fuck", "bitch", "shit"]) || classification.compliance_flag === "litigator") {
+  if (includesAnyWholeWord(text, ["sue", "sued", "suing", "attorney", "lawyer", "report", "fcc", "harassment", "fuck", "bitch", "shit"]) || classification.compliance_flag === "litigator") {
     return "hostile_or_legal";
   }
 

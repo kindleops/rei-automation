@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { includesAnyWholeWord } from "@/lib/domain/compliance/whole-word.js";
 
 import {
   getCategoryValue,
@@ -247,7 +248,8 @@ export function extractOptOutDetails(message_body = "") {
   const normalized = lower(message_body);
   if (!normalized) return {};
 
-  const matched_keyword = OPT_OUT_KEYWORDS.find((keyword) => normalized.includes(keyword));
+  // Whole words only: "christopher" is not "stop", "weekend" is not "end".
+  const matched_keyword = OPT_OUT_KEYWORDS.find((keyword) => includesAnyWholeWord(normalized, [keyword]));
   if (!matched_keyword) return {};
 
   return {

@@ -19,6 +19,7 @@ import {
 import type { InboxStageSelectValue, InboxViewSelectValue } from '../../domain/inbox/inbox-view-types'
 export type { InboxStageSelectValue, InboxViewSelectValue } from '../../domain/inbox/inbox-view-types'
 import type { InboxSavedFilterPreset } from '../../domain/inbox/inbox-filter-types'
+import { containsWord, isOptOutWording, isServerSuppressed } from '../../domain/inbox/opt-out-text'
 export type { InboxSavedFilterPreset } from '../../domain/inbox/inbox-filter-types'
 
 export interface InboxAdvancedFilters {
@@ -425,30 +426,24 @@ export const getThreadMatchedKeywords = (thread: InboxWorkflowThread, query?: st
   const words = new Set(backend.map(String).filter(Boolean))
   const q = String(query ?? '').trim().toLowerCase()
   if (q && searchableThreadText(thread).includes(q)) words.add(q)
+  // Keyword chips read the MESSAGE text only, as whole words — never names or
+  // addresses ("Christopher" is not the keyword "stop", P0 2026-10-09).
+  const messageText = [thread.lastMessageBody, thread.preview, thread.latestMessageBody].filter(Boolean).join(' ')
   for (const group of Object.values(KEYWORD_GROUPS)) {
-    for (const word of group) if (searchableThreadText(thread).includes(word)) words.add(word)
+    for (const word of group) if (containsWord(messageText, word)) words.add(word)
   }
   return Array.from(words).slice(0, 6)
 }
 
+// Suppression is SERVER STATE (is_suppressed / is_opt_out / suppressed bucket /
+// opt-out code / dead_suppressed stage). This gate disables the composer, so it
+// must never re-scan message text: an outbound "Hi Christopher, …" contains the
+// substring "stop" and used to lock every Christopher thread (P0 2026-10-09).
 export const isSuppressedThread = (thread: InboxWorkflowThread): boolean => {
-  const priorityBucket = toLower(getField(thread, 'priorityBucket') || getField(thread, 'priority_bucket'))
-  if (priorityBucket === 'suppressed') return true
-
-  const blob = [
-    thread.conversationStage,
-    thread.inboxStatus,
-    thread.preview,
-    thread.lastMessageBody,
-    thread.labels?.join(' '),
-    getField(thread, 'opt_out_keyword'),
-  ].map(toLower).join(' ')
-
-  return Boolean(
-    thread.isOptOut ||
-    thread.inboxStatus === 'suppressed' ||
-    containsAny(blob, ['opt_out', 'dnc', 'stop', 'unsubscribe', 'suppressed', 'remove me']),
-  )
+  const record = thread as unknown as Record<string, unknown>
+  if (isServerSuppressed(record)) return true
+  if (toLower(thread.conversationStage) === 'dead_suppressed') return true
+  return !['', 'none', 'null', 'false'].includes(toLower(getField(thread, 'opt_out_keyword')))
 }
 
 const isPriorityCandidate = (thread: InboxWorkflowThread): boolean => {
@@ -1077,7 +1072,8 @@ export const buildSmsActivityEvents = (thread: InboxWorkflowThread, messageEvent
 
     if (!outbound) {
       const inboundText = body.toLowerCase()
-      if (containsAny(inboundText, ['stop', 'unsubscribe', 'do not text'])) {
+      const serverOptOut = Boolean((message as unknown as Record<string, unknown>).isOptOut ?? (message as unknown as Record<string, unknown>).is_opt_out)
+      if (serverOptOut || isOptOutWording(inboundText)) {
         events.push(buildBaseEvent(threadId, {
           id: `sms-optout-${message.id}`,
           entityType: 'sms',

@@ -1,5 +1,6 @@
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import { resolveInboxThreadState } from './resolveInboxThreadState'
+import { isOptOutCode, isOptOutWording, isServerSuppressed } from './opt-out-text'
 
 export type InboxBucket =
   | 'new_replies'
@@ -172,7 +173,8 @@ const inferSellerIntent = (thread: InboxWorkflowThread): string => {
   if (rawIntent) return rawIntent.replace(/\s+/g, '_')
   const blob = lower([thread.lastMessageBody, thread.preview, get(thread, 'latest_message_body')].filter(Boolean).join(' '))
   if (includesAny(blob, ['wrong number', 'not me'])) return 'wrong_number'
-  if (includesAny(blob, ['stop', 'remove me', 'unsubscribe'])) return 'opt_out'
+  // Whole-word opt-out wording only ("Hi Christopher" is not "stop", P0 2026-10-09).
+  if (isOptOutWording(blob)) return 'opt_out'
   if (includesAny(blob, HOSTILE_TERMS)) return 'hostile'
   if (includesAny(blob, ['not interested', 'not for sale'])) return 'not_interested'
   if (/\bno\b/.test(blob) || includesAny(blob, ['no thanks', 'nope', 'nah'])) return 'negative'
@@ -190,22 +192,22 @@ const inferLanguage = (thread: InboxWorkflowThread): string | null => {
   return null
 }
 
-const getSuppressionStatus = (thread: InboxWorkflowThread, sellerIntent: string): 'clear' | 'suppressed' => {
-  const blob = lower([
-    sellerIntent,
-    thread.inboxStatus,
-    thread.conversationStage,
-    thread.lastMessageBody,
-    thread.preview,
-    get(thread, 'opt_out_keyword'),
-    get(thread, 'suppression_reason'),
-  ].filter(Boolean).join(' '))
+// Suppression is SERVER STATE only: flags, the server bucket / status codes,
+// the server's own opt-out keyword / suppression reason, or the server-written
+// intent code. Never the message text (an outbound "Hi Christopher" contains
+// "stop", P0 2026-10-09) and never an intent this file inferred from text.
+const isPresentCode = (v: unknown): boolean => !['', 'none', 'null', 'false', 'clear', 'n/a'].includes(lower(v))
+
+const getSuppressionStatus = (thread: InboxWorkflowThread, _sellerIntent: string): 'clear' | 'suppressed' => {
+  const record = asRecord(thread)
+  const serverIntent = lower(get(thread, 'seller_intent', 'detected_intent', 'uiIntent', 'ui_intent'))
   const rawSuppressed =
-    bool(get(thread, 'isSuppressed', 'threadIsSuppressed', 'is_suppressed')) ||
-    bool(get(thread, 'isOptOut', 'is_opt_out', 'opt_out')) ||
-    bool(get(thread, 'isDnc', 'is_dnc', 'dnc')) ||
+    isServerSuppressed(record) ||
     bool(get(thread, 'wrong_number')) ||
-    includesAny(blob, ['opt_out', 'dnc', 'wrong number', 'legal threat', 'lawsuit', 'suppressed', 'remove me', 'stop'])
+    lower(thread.conversationStage) === 'dead_suppressed' ||
+    isOptOutCode(serverIntent) ||
+    isPresentCode(get(thread, 'opt_out_keyword')) ||
+    isPresentCode(get(thread, 'suppression_reason'))
   return rawSuppressed ? 'suppressed' : 'clear'
 }
 

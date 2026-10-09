@@ -57,7 +57,7 @@ function eventStyle(item: NotificationEvent): { icon: IconName; hue: string } | 
   const t = `${item.type} ${item.title}`.toLowerCase()
   if (/hot[ _-]?lead|hot\b/.test(t)) return { icon: 'bolt', hue: '#ff5a64' }
   if (/price|offer|captured/.test(t)) return { icon: 'dollar-sign', hue: '#34e8a0' }
-  if (/opt[ _-]?out|stop|unsubscrib|dnc/.test(t)) return { icon: 'slash', hue: '#94a3b8' }
+  if (/opt[ _-]?out|(?<![a-z])stop(?![a-z])|unsubscrib|\bdnc\b/.test(t)) return { icon: 'slash', hue: '#94a3b8' }
   if (/fail|error|undeliver|bounce/.test(t)) return { icon: 'alert', hue: '#ff5a74' }
   if (/contract|closing|escrow/.test(t)) return { icon: 'key', hue: '#4ade80' }
   if (/campaign/.test(t)) return { icon: 'bolt', hue: '#22d3ee' }

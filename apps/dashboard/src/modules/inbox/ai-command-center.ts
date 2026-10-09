@@ -1,5 +1,6 @@
 import type { ThreadContext, ThreadIntelligenceRecord, ThreadMessage } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
+import { containsWord, countWordHits, isServerSuppressed } from '../../domain/inbox/opt-out-text'
 
 export type CommandTone = 'default' | 'accent' | 'success' | 'warning' | 'danger'
 
@@ -87,8 +88,11 @@ const latestByDirection = (messages: ThreadMessage[], direction: 'inbound' | 'ou
   return null
 }
 
+// Whole words only: "Christopher" is not "stop", "weekend" is not "end" (P0 2026-10-09).
+// '$' is a symbol, not a word — kept as a literal test.
 const keywordScore = (text: string, patterns: string[]): number =>
-  patterns.reduce((score, pattern) => score + (text.includes(pattern) ? 1 : 0), 0)
+  patterns.reduce((score, pattern) => score + (/^\W+$/.test(pattern) ? (text.includes(pattern) ? 1 : 0) : 0), 0)
+  + countWordHits(text, patterns.filter((pattern) => !/^\W+$/.test(pattern)))
 
 const getThreadField = (thread: InboxWorkflowThread | null, intelligence: ThreadIntelligenceRecord | null, keys: string[]): unknown => {
   const threadRecord = (thread ?? {}) as Record<string, unknown>
@@ -102,7 +106,9 @@ const getThreadField = (thread: InboxWorkflowThread | null, intelligence: Thread
 
 const inferPersona = (thread: InboxWorkflowThread, combinedText: string, motivation: number): string => {
   const ownerType = asText(getThreadField(thread, null, ['ownerType', 'owner_type'])).toLowerCase()
-  if (thread.isOptOut || thread.isSuppressed || combinedText.includes('stop') || combinedText.includes('wrong number')) return 'Suppressed / DNC'
+  // Suppressed / DNC is server state only — never a text scan.
+  if (thread.isOptOut || thread.isSuppressed || isServerSuppressed(thread as unknown as Record<string, unknown>)) return 'Suppressed / DNC'
+  if (containsWord(combinedText, 'wrong number')) return 'Wrong Number'
   if (ownerType.includes('llc') || combinedText.includes('tenant') || combinedText.includes('rent')) return 'Landlord / Investor'
   if (combinedText.includes('probate') || combinedText.includes('inherited') || combinedText.includes('estate')) return 'Estate / Inherited'
   if (combinedText.includes('divorce') || combinedText.includes('foreclosure') || combinedText.includes('behind on')) return 'Distressed Owner'
