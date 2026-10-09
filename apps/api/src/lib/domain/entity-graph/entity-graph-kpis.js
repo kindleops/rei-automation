@@ -26,20 +26,34 @@ export const ENTITY_GRAPH_KPI_DEFINITIONS = Object.freeze({
 })
 
 async function exactCount(supabase, table, column, apply = (q) => q) {
-  try {
-    const { count, error } = await apply(supabase.from(table).select(column, { count: 'exact', head: true }))
-    if (error) return null
-    return typeof count === 'number' ? count : null
-  } catch {
-    return null
+  // one retry: these are 2.5–4.2 s exact counts (measured 2026-10-08) that can
+  // hit the role's statement timeout under load
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const { count, error } = await apply(supabase.from(table).select(column, { count: 'exact', head: true }))
+      if (!error && typeof count === 'number') return count
+    } catch { /* retry once */ }
   }
+  return null
 }
+
+/**
+ * "Portfolio stacks: Not available" flickered (owner, 2026-10-08): one count
+ * timing out came back null and the WHOLE payload — null included — was
+ * cached for 10 minutes. Now a null never replaces a value measured within
+ * STALE_MS (the tile shows the last good count, said so by measuredAt per
+ * field), and a payload with a null is not cached, so the next read retries.
+ */
+const STALE_MS = 6 * 60 * 60_000
+const lastGood = new Map()
 
 export async function getEntityGraphKpis(deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const now = deps.now ?? Date.now()
+  const memo = deps.lastGood || (deps.supabase ? new Map() : lastGood)
   if (!deps.supabase && cached && now - cached.at < TTL_MS) return cached.data
-  const [properties, linkedProperties, owners, portfolioOwners, entities, ownersWithPhone] = await Promise.all([
+  const keys = ['properties', 'linkedProperties', 'owners', 'portfolioOwners', 'entities', 'ownersWithPhone']
+  const fresh = await Promise.all([
     // Internal canary fixtures are not the universe (entity-graph-truth.js).
     exactCount(supabase, 'properties', 'property_id', (q) => excludeTestProperties(q)),
     exactCount(supabase, 'properties', 'property_id', (q) => excludeTestProperties(q).not('master_owner_id', 'is', null)),
@@ -48,16 +62,14 @@ export async function getEntityGraphKpis(deps = {}) {
     exactCount(supabase, 'sub_owners', 'sub_owner_id'),
     exactCount(supabase, 'master_owners', 'master_owner_id', (q) => excludeTestOwners(q).not('best_phone_1', 'is', null)),
   ])
-  const data = {
-    properties,
-    linkedProperties,
-    owners,
-    portfolioOwners,
-    entities,
-    ownersWithPhone,
-    definitions: ENTITY_GRAPH_KPI_DEFINITIONS,
-    measuredAt: new Date(now).toISOString(),
-  }
-  if (!deps.supabase) cached = { at: now, data }
+  const data = { definitions: ENTITY_GRAPH_KPI_DEFINITIONS, measuredAt: new Date(now).toISOString(), stale: {} }
+  let complete = true
+  keys.forEach((k, i) => {
+    if (fresh[i] !== null) { data[k] = fresh[i]; memo.set(k, { value: fresh[i], at: now }); return }
+    const prev = memo.get(k)
+    if (prev && now - prev.at < STALE_MS) { data[k] = prev.value; data.stale[k] = new Date(prev.at).toISOString() } else data[k] = null
+    complete = false
+  })
+  if (!deps.supabase && complete) cached = { at: now, data }
   return data
 }
