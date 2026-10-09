@@ -12,7 +12,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { StackRefusal, classifyStackProperties, resolveStackPropertyIds, stackEntityGraphCohort } from '../../src/lib/domain/entity-graph/entity-graph-campaign-stack.js'
+import { PREVIEW_ROW_LIMIT, StackRefusal, classifyStackProperties, exactSelectionResults, resolveStackPropertyIds, stackEntityGraphCohort } from '../../src/lib/domain/entity-graph/entity-graph-campaign-stack.js'
 import { getEntityGraphOutreachState, latestContact, propertySmsEligibility } from '../../src/lib/domain/entity-graph/entity-graph-outreach-state.js'
 import { compareGraphReadOrder, explicitPropertyChunkOptions, resolveCampaignTargetMode, explicitSelectedPropertyIds } from '../../src/lib/domain/campaigns/campaign-automation-service.js'
 import { resolveCampaignTargetReadiness } from '../../src/lib/domain/campaigns/campaign-target-readiness.js'
@@ -358,4 +358,85 @@ test('the pins land but the filter mirror fails: success + warning, then the nex
   const ok = await stackEntityGraphCohort({ campaign_id: 'Y', scope: 'properties', mode: 'selection', ids: ['A'] }, { ...deps, campaigns: api2 })
   assert.equal(ok.warnings, undefined)
   assert.equal(store2.get('Y').metadata.entity_graph_filters_sync, undefined)
+})
+
+/* ── EXACT SELECTION (owner, 2026-10-09) ─────────────────────────────────── */
+
+const SOUTH_FLORIDA = ['227990249', '232476849', '232481638'] // 520 NW 17th Ave · 376 NW 80th St · 3101 NW 66th St
+const reviewOk = async () => ({ ok: true, blocked: new Set() })
+
+test('ACCEPTANCE: exactly the three selected South Florida properties — no other recipient, nothing queued', async () => {
+  const log = []
+  const supabase = fakeSupabase({
+    campaign_target_graph: [
+      ready('227990249', { canonical_e164: '+13055550001' }),
+      ready('232476849', { canonical_e164: '+13055550002' }),
+      ready('232481638', { canonical_e164: '+13055550003' }),
+      ready('999999999', { canonical_e164: '+13055550099' }), // unrelated: must never appear
+    ],
+    properties: [
+      { property_id: '227990249', property_address_full: '520 Nw 17th Ave, Fort Lauderdale, Fl 33311' },
+      { property_id: '232476849', property_address_full: '376 Nw 80th St, Miami, Fl 33150' },
+      { property_id: '232481638', property_address_full: '3101 Nw 66th St, Miami, Fl 33147' },
+    ],
+  }, log)
+  const { api, store } = campaignsFake([], log)
+  const deps = { supabase, campaigns: api, fetchEntityContactReviewBlocks: reviewOk }
+  const preview = await stackEntityGraphCohort({ scope: 'properties', mode: 'selection', ids: SOUTH_FLORIDA, dry_run: true }, deps)
+  assert.deepEqual(preview.property_results.map((r) => r.property_id), SOUTH_FLORIDA)
+  assert.deepEqual(preview.property_results.map((r) => r.status), ['ready', 'ready', 'ready'])
+  assert.equal(preview.property_results[2].address, '3101 Nw 66th St, Miami, Fl 33147')
+  assert.equal(preview.duplicate_recipients, 0)
+  assert.ok(!JSON.stringify(preview).includes('+1305'), 'no phone number leaves the server')
+  const done = await stackEntityGraphCohort({ scope: 'properties', mode: 'selection', ids: SOUTH_FLORIDA, new_campaign_name: 'South Florida 3' }, deps)
+  assert.equal(done.added, 3)
+  assert.deepEqual([...explicitSelectedPropertyIds(store.get(done.campaign_id))].sort(), [...SOUTH_FLORIDA].sort())
+  assert.equal(store.get(done.campaign_id).status, 'draft')
+  assert.ok(!log.some((e) => e.table === 'campaign_targets' || e.table === 'send_queue'))
+})
+
+test('exact outcomes: one per property — already present, held + reason, not targetable + reason, duplicate recipient', async () => {
+  const supabase = fakeSupabase({
+    campaign_target_graph: [
+      ready('A', { canonical_e164: '+15550000001' }),
+      ready('B', { canonical_e164: '+15550000001' }), // same phone as A
+      ready('C', { canonical_e164: '+15550000003', timezone: '' }),
+      { property_id: 'D', queue_eligible: false, queue_block_reason: 'suppression_blocked' },
+      ready('E'),
+    ],
+  })
+  const { api } = campaignsFake([{ id: 'X', name: 'X', status: 'draft', metadata: { target_filters: { properties: [{ field_key: 'properties.property_id', operator: 'is_any_of', value: ['E'] }] } }, updated_at: 'v0' }], [])
+  const out = await stackEntityGraphCohort({ campaign_id: 'X', scope: 'properties', mode: 'selection', ids: ['A', 'B', 'C', 'D', 'E', 'Z'], dry_run: true }, { supabase, campaigns: api, fetchEntityContactReviewBlocks: reviewOk })
+  const by = Object.fromEntries(out.property_results.map((r) => [r.property_id, r]))
+  assert.equal(out.property_results.length, 6)
+  assert.equal(by.A.status, 'ready')
+  assert.equal(by.B.status, 'duplicate_recipient')
+  assert.equal(by.B.reason, 'same_recipient_as:A')
+  assert.equal(by.B.pinned, true)
+  assert.equal(by.C.status, 'held')
+  assert.equal(by.C.reason, 'missing_timezone')
+  assert.equal(by.D.status, 'not_targetable')
+  assert.equal(by.D.reason, 'suppression_blocked')
+  assert.equal(by.D.pinned, false)
+  assert.equal(by.E.status, 'already_present')
+  assert.equal(by.Z.reason, 'not_in_campaign_audience')
+  assert.equal(out.duplicate_recipients, 1)
+})
+
+test('whole cohort: a size that changed since the operator confirmed it is refused, nothing written', async () => {
+  const log = []
+  const supabase = fakeSupabase({ v_entity_graph_properties: [{ property_id: 'P1', tax_delinquent: true }, { property_id: 'P2', tax_delinquent: true }, { property_id: 'P3', tax_delinquent: false }], campaign_target_graph: [ready('P1'), ready('P2'), ready('P3')] }, log)
+  const { api } = campaignsFake([], log)
+  const deps = { supabase, campaigns: api, fetchEntityContactReviewBlocks: reviewOk }
+  const input = { scope: 'properties', mode: 'cohort', field_filters: JSON.stringify([{ field_key: 'properties.tax_delinquent', operator: 'is_true' }]), new_campaign_name: 'Tax delinquent' }
+  await assert.rejects(stackEntityGraphCohort({ ...input, expected_count: 3 }, deps), (e) => e instanceof StackRefusal && e.code === 'cohort_count_changed' && e.status === 409)
+  assert.ok(!log.some((e) => e.create || e.update))
+  const ok = await stackEntityGraphCohort({ ...input, expected_count: 2 }, deps)
+  assert.equal(ok.added, 2)
+})
+
+test('per-property outcomes are bounded; counts still cover the whole cohort', () => {
+  assert.equal(PREVIEW_ROW_LIMIT, 500)
+  const { results } = exactSelectionResults({ resolvedIds: ['a'], verdicts: new Map([['a', { status: 'ready', reason: null, recipient: null }]]) })
+  assert.deepEqual(results, [{ property_id: 'a', address: null, status: 'ready', reason: null, pinned: true }])
 })

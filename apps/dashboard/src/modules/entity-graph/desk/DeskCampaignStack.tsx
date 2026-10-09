@@ -11,6 +11,12 @@
  * operator sees "already present / ready / held / not targetable" before
  * anything is written. Nothing here builds targets, schedules, launches or
  * sends — Campaigns' Build and every gate still run on the draft.
+ *
+ * EXACT SELECTION (2026-10-09): selected rows come from the desk's persistent
+ * selection (every page and filter run, not just the loaded rows); up to 500
+ * properties are previewed one by one with the reason each is held, not
+ * targetable or a duplicate recipient; a whole cohort is added only after the
+ * operator confirms its exact size, and the server refuses if it changed.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { LCButton, LCDialog, LCSkeleton, cx } from '../../../shared/lc'
@@ -42,6 +48,17 @@ export type StackResult = {
   unchanged?: boolean
   /** The pins landed; bookkeeping (filter mirror / activity entry) is pending and self-heals. */
   warnings?: Array<{ code: string; message: string }>
+  /** One outcome per property when the cohort is ≤ property_results_limit; null above it. */
+  property_results?: StackPropertyResult[] | null
+  property_results_limit?: number
+  duplicate_recipients?: number | null
+}
+export type StackPropertyResult = {
+  property_id: string
+  address: string | null
+  status: 'already_present' | 'ready' | 'held' | 'not_targetable' | 'duplicate_recipient'
+  reason: string | null
+  pinned: boolean
 }
 
 type Props = {
@@ -81,12 +98,17 @@ export function DeskCampaignStack({ open, onOpenChange, scope, selectedIds, filt
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState<StackResult | null>(null)
   const [wasOpen, setWasOpen] = useState(open)
+  const [cohortConfirmed, setCohortConfirmed] = useState(false)
+  const [recount, setRecount] = useState(0)
+  const [notice, setNotice] = useState<string | null>(null)
   if (wasOpen !== open) {
     setWasOpen(open)
     if (open) {
       setMode(selectedIds.length ? 'selection' : 'cohort')
       setDone(null)
       setPreview(null)
+      setCohortConfirmed(false)
+      setNotice(null)
     }
   }
 
@@ -114,6 +136,8 @@ export function DeskCampaignStack({ open, onOpenChange, scope, selectedIds, filt
     label: cohortLabel,
   }), [scope, mode, selectedIds, filters, target, name, defaultName, cohortLabel])
   const sig = JSON.stringify({ ...body, new_campaign_name: undefined })
+  const [confirmedSig, setConfirmedSig] = useState(sig)
+  if (confirmedSig !== sig) { setConfirmedSig(sig); setCohortConfirmed(false); setNotice(null) }
   const canRun = mode === 'selection' ? selectedIds.length > 0 : !cohortBlocked
 
   // dry run: the counts before anything is written
@@ -127,7 +151,7 @@ export function DeskCampaignStack({ open, onOpenChange, scope, selectedIds, filt
         .catch((e: unknown) => { if (alive) setPreview({ sig, data: null, error: e instanceof Error ? e.message : 'Could not count this cohort' }) })
     }, 250)
     return () => { alive = false; window.clearTimeout(t) }
-  }, [open, sig, canRun, done]) // eslint-disable-line react-hooks/exhaustive-deps -- sig encodes body
+  }, [open, sig, canRun, done, recount]) // eslint-disable-line react-hooks/exhaustive-deps -- sig encodes body
 
   const current = preview?.sig === sig ? preview : null
   const counts = done ?? current?.data ?? null
@@ -135,14 +159,23 @@ export function DeskCampaignStack({ open, onOpenChange, scope, selectedIds, filt
   const commit = async () => {
     setSaving(true)
     try {
-      const result = await postStack(body)
+      // a whole cohort carries the size the operator confirmed; the server refuses if it moved
+      const result = await postStack(mode === 'cohort' && counts ? { ...body, expected_count: counts.resolved_properties } : body)
       setDone(result)
       onDone?.(result)
       // the draft list now carries the new pin count (and the new draft)
       void callBackend<{ ok: boolean; drafts: StackDraft[] }>('/api/cockpit/entity-graph/campaign-stack').then((res) => { if (res.ok && res.data?.drafts) setDrafts(res.data.drafts) })
       if (result.campaign_id) setTarget(result.campaign_id)
     } catch (e) {
-      setPreview({ sig, data: null, error: e instanceof Error ? e.message : 'The draft was not updated' })
+      const message = e instanceof Error ? e.message : 'The draft was not updated'
+      if (mode === 'cohort') {
+        // the cohort moved (or the add failed): re-count and ask for a fresh confirmation
+        setCohortConfirmed(false)
+        setNotice(message)
+        setRecount((n) => n + 1)
+      } else {
+        setPreview({ sig, data: null, error: message })
+      }
     } finally {
       setSaving(false)
     }
@@ -167,7 +200,7 @@ export function DeskCampaignStack({ open, onOpenChange, scope, selectedIds, filt
       ) : (
         <>
           <LCButton variant="quiet" onClick={() => onOpenChange(false)}>Cancel</LCButton>
-          <LCButton variant="primary" disabled={!canRun || !counts || counts.added === 0 || saving || Boolean(current?.error)} onClick={() => { void commit() }}>{saving ? 'Adding…' : addLabel}</LCButton>
+          <LCButton variant="primary" disabled={!canRun || !counts || counts.added === 0 || saving || Boolean(current?.error) || (mode === 'cohort' && !cohortConfirmed)} onClick={() => { void commit() }}>{saving ? 'Adding…' : addLabel}</LCButton>
         </>
       )}
     >
@@ -221,10 +254,18 @@ export function DeskCampaignStack({ open, onOpenChange, scope, selectedIds, filt
 
         <section className="egdk-stack__sec" aria-live="polite">
           <span className="egdk-eyebrow">{done ? 'What was added' : 'What will be added'}</span>
+          {notice && !done ? <p className="egdk-stack__error" role="alert"><Icon name="alert-circle" size={13} />{notice}</p> : null}
           {!canRun ? <p className="egdk-none">{mode === 'cohort' ? cohortBlocked : 'Select rows first.'}</p>
             : current?.error ? <p className="egdk-stack__error"><Icon name="alert-circle" size={13} />{current.error}</p>
               : !counts ? <LCSkeleton shape="lines" count={3} label="Counting against the campaign audience" />
                 : <StackCounts result={counts} scope={scope} />}
+          {!done && mode === 'cohort' && counts && !current?.error ? (
+            <label className="egdk-stack__confirm">
+              <input type="checkbox" checked={cohortConfirmed} onChange={(e) => setCohortConfirmed(e.target.checked)} />
+              <span>Add all <b>{fmtCount(counts.resolved_properties)}</b> properties these filters match — not only the rows on screen. If the count changes before adding, nothing is added.</span>
+            </label>
+          ) : null}
+          {counts?.property_results?.length ? <PropertyOutcomes results={counts.property_results} /> : counts && counts.property_results === null ? <p className="egdk-stack__note">Over {fmtCount(counts.property_results_limit ?? 500)} properties: counts by reason above; per-property detail is shown for smaller selections.</p> : null}
         </section>
 
         <p className="egdk-stack__contract"><Icon name="shield" size={13} />Only the draft’s target list changes. Nothing is built, scheduled, launched or sent — Campaigns runs Build and every gate (suppression, contactability, identity, sender coverage, templates) on the draft.</p>
@@ -257,6 +298,50 @@ function StackCounts({ result, scope }: { result: StackResult; scope: EntityScop
       {result.ineligible ? <><p className="egdk-stack__why">Not targetable (not pinned)</p><ReasonList reasons={result.ineligible_by_reason} /></> : null}
       {(result.notes ?? []).map((n) => <p key={n} className="egdk-stack__note">{n}</p>)}
       <p className="egdk-stack__note">Draft total after this: <b>{fmtCount(result.total_after)}</b> properties. Phones shared across properties are collapsed to one recipient at Build.</p>
+    </div>
+  )
+}
+
+const OUTCOME_GROUPS: Array<{ status: StackPropertyResult['status']; title: string; tone?: 'ok' | 'attn' | 'mute' }> = [
+  { status: 'ready', title: 'Ready — pinned', tone: 'ok' },
+  { status: 'held', title: 'Held — pinned; Build holds them until the reason clears', tone: 'attn' },
+  { status: 'duplicate_recipient', title: 'Same recipient as another selected property — pinned; Build sends that phone once', tone: 'attn' },
+  { status: 'already_present', title: 'Already on the draft' },
+  { status: 'not_targetable', title: 'Not targetable — not pinned', tone: 'mute' },
+]
+
+function outcomeReason(r: StackPropertyResult, byId: Map<string, StackPropertyResult>): string | null {
+  if (!r.reason) return null
+  if (r.reason.startsWith('same_recipient_as:')) {
+    const other = byId.get(r.reason.slice('same_recipient_as:'.length))
+    return `same phone as ${other?.address ?? other?.property_id ?? 'another selected property'}`
+  }
+  return smsBlockLabel(r.reason)
+}
+
+/** One line per selected property, grouped by outcome — exactly the selection, nothing else. */
+function PropertyOutcomes({ results }: { results: StackPropertyResult[] }) {
+  const byId = new Map(results.map((r) => [r.property_id, r]))
+  return (
+    <div className="egdk-stack__outcomes">
+      <p className="egdk-stack__why">Each selected property ({fmtCount(results.length)})</p>
+      {OUTCOME_GROUPS.map((g) => {
+        const rows = results.filter((r) => r.status === g.status)
+        if (!rows.length) return null
+        return (
+          <section key={g.status} className={cx('egdk-stack__outcome', g.tone && `is-${g.tone}`)}>
+            <span className="egdk-eyebrow">{g.title} · {fmtCount(rows.length)}</span>
+            <ul>
+              {rows.map((r) => (
+                <li key={r.property_id}>
+                  <span>{r.address ?? r.property_id}</span>
+                  {outcomeReason(r, byId) ? <small>{outcomeReason(r, byId)}</small> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
+      })}
     </div>
   )
 }

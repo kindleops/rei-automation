@@ -29,7 +29,14 @@
  * Refusals (nothing is written): the campaign is not a draft; the draft uses
  * dynamic filters (pinning ids beside them would INTERSECT, not stack); a
  * search term (search is ranked, not a cohort); a cohort over the stacking
- * limit — stated with its exact size, never silently clipped.
+ * limit — stated with its exact size, never silently clipped; a whole cohort
+ * whose size is no longer the size the operator confirmed (expected_count).
+ *
+ * EXACT SELECTION (owner, 2026-10-09): up to PREVIEW_ROW_LIMIT properties get
+ * one outcome each (`property_results`): already_present / ready / held /
+ * not_targetable with the builder's reason, and duplicate_recipient when two
+ * pinned properties resolve to the same phone (Build sends that phone once).
+ * Every pinned id is one the operator selected — checked, not assumed.
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
@@ -39,11 +46,14 @@ import {
 import { applyOwnerFilters, applyPropertyFilters, applyProspectFilters, parseBrowseFilters } from './entity-graph-service.js'
 import { isTestPropertyId } from './entity-graph-truth.js'
 import { propertySmsEligibility } from './entity-graph-outreach-state.js'
+import { resolveCampaignTargetReadiness } from '@/lib/domain/campaigns/campaign-target-readiness.js'
 
 /** Total pinned properties one campaign can carry through Entity Graph stacking. */
 export const STACK_MAX_PROPERTIES = 25000
 export const STACK_MAX_SEGMENTS = 50
 export const STACK_WRITE_ATTEMPTS = 4
+/** Per-property outcomes are returned up to this many resolved properties. */
+export const PREVIEW_ROW_LIMIT = 500
 const PAGE = 1000
 const CHUNK = 150
 
@@ -216,15 +226,58 @@ export async function classifyStackProperties(propertyIds = [], deps = {}) {
   const heldByReason = {}
   const ineligible = []
   const ineligibleByReason = {}
+  /** id → { status, reason, recipient } — recipient is the phone Build would use; never returned. */
+  const verdicts = new Map()
   const bump = (map, key) => { map[key] = (map[key] || 0) + 1 }
   for (const id of ids) {
     const rows = byProperty.get(id) || []
     const verdict = propertySmsEligibility(rows, blocked.has(id))
-    if (verdict.eligible) ready.push(id)
-    else if (rows.some((row) => row.queue_eligible)) { held.push(id); bump(heldByReason, verdict.reason) }
-    else { ineligible.push(id); bump(ineligibleByReason, verdict.reason) }
+    const readyRow = rows.find((row) => resolveCampaignTargetReadiness({ ...row, entity_contact_requires_review: blocked.has(id) }).ready)
+    const recipient = clean((readyRow || rows.find((row) => row.queue_eligible))?.canonical_e164) || null
+    if (verdict.eligible) { ready.push(id); verdicts.set(id, { status: 'ready', reason: null, recipient }) }
+    else if (rows.some((row) => row.queue_eligible)) { held.push(id); bump(heldByReason, verdict.reason); verdicts.set(id, { status: 'held', reason: verdict.reason, recipient }) }
+    else { ineligible.push(id); bump(ineligibleByReason, verdict.reason); verdicts.set(id, { status: 'not_targetable', reason: verdict.reason, recipient: null }) }
   }
-  return { ready, held, heldByReason, ineligible, ineligibleByReason }
+  return { ready, held, heldByReason, ineligible, ineligibleByReason, verdicts }
+}
+
+/**
+ * One outcome per resolved property, in the operator's order. Pinned
+ * properties that share a recipient phone are marked duplicate_recipient
+ * (still pinned — Build collapses the phone to one send). Phones never leave.
+ */
+export function exactSelectionResults({ resolvedIds = [], alreadyPresent = new Set(), verdicts = new Map(), addresses = new Map() } = {}) {
+  const firstByRecipient = new Map()
+  let duplicates = 0
+  const results = resolvedIds.map((id) => {
+    const address = addresses.get(id) ?? null
+    if (alreadyPresent.has(id)) return { property_id: id, address, status: 'already_present', reason: null, pinned: true }
+    const v = verdicts.get(id) || { status: 'not_targetable', reason: 'not_in_campaign_audience', recipient: null }
+    const pinned = v.status === 'ready' || v.status === 'held'
+    if (pinned && v.recipient) {
+      const first = firstByRecipient.get(v.recipient)
+      if (first) {
+        duplicates += 1
+        return { property_id: id, address, status: 'duplicate_recipient', reason: `same_recipient_as:${first}`, underlying_status: v.status, underlying_reason: v.reason, pinned: true }
+      }
+      firstByRecipient.set(v.recipient, id)
+    }
+    return { property_id: id, address, status: v.status, reason: v.reason, pinned }
+  })
+  return { results, duplicates }
+}
+
+async function readAddresses(supabase, ids) {
+  const out = new Map()
+  try {
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const rows = await readOrThrow(supabase.from('properties').select('property_id, property_address_full').in('property_id', ids.slice(i, i + CHUNK)))
+      for (const r of rows) out.set(clean(r.property_id), clean(r.property_address_full) || null)
+    }
+  } catch {
+    /* addresses are a label only — absent reads as the id */
+  }
+  return out
 }
 
 function pinnedClause(ids) {
@@ -260,12 +313,31 @@ export async function stackEntityGraphCohort(input = {}, deps = {}) {
   }
 
   const resolved = await resolveStackPropertyIds(input, deps)
+  // EXACT COHORT CONFIRMATION: the operator confirmed N; a cohort that is no longer N is not added.
+  const expected = input.expected_count === undefined || input.expected_count === null || input.expected_count === '' ? null : Number(input.expected_count)
+  if (expected !== null && clean(input.mode || 'selection') === 'cohort' && expected !== resolved.propertyIds.length) {
+    throw new StackRefusal(409, 'cohort_count_changed', `This cohort now resolves to ${resolved.propertyIds.length.toLocaleString('en-US')} properties, not the ${expected.toLocaleString('en-US')} you confirmed. Nothing was added — review the new count.`, { expected_count: expected, resolved_count: resolved.propertyIds.length })
+  }
   const existing = campaign ? [...campaignsApi.explicitSelectedPropertyIds(campaign)] : []
   const existingSet = new Set(existing)
   const fresh = resolved.propertyIds.filter((id) => !existingSet.has(id))
   const alreadyPresent = resolved.propertyIds.length - fresh.length
   const classified = await classifyStackProperties(fresh, deps)
   const pinned = [...classified.ready, ...classified.held]
+  // never pin outside what was selected / resolved — an invariant, not an assumption
+  const resolvedSet = new Set(resolved.propertyIds)
+  if (pinned.some((id) => !resolvedSet.has(id))) {
+    throw new StackRefusal(500, 'pinned_outside_selection', 'An internal check found a property outside your selection. Nothing was added.')
+  }
+  const supabaseForLabels = deps.supabase || defaultSupabase
+  const exact = resolved.propertyIds.length <= PREVIEW_ROW_LIMIT
+    ? exactSelectionResults({
+        resolvedIds: resolved.propertyIds,
+        alreadyPresent: new Set(resolved.propertyIds.filter((id) => existingSet.has(id))),
+        verdicts: classified.verdicts,
+        addresses: await readAddresses(supabaseForLabels, resolved.propertyIds),
+      })
+    : null
   const totalAfter = existing.length + pinned.length
   if (totalAfter > STACK_MAX_PROPERTIES) {
     throw new StackRefusal(422, 'campaign_stack_too_large', `This would pin ${totalAfter.toLocaleString('en-US')} properties on one campaign; the limit is ${STACK_MAX_PROPERTIES.toLocaleString('en-US')}. Add this cohort to a new draft instead.`, { limit: STACK_MAX_PROPERTIES })
@@ -296,6 +368,10 @@ export async function stackEntityGraphCohort(input = {}, deps = {}) {
     added: pinned.length,
     total_after: totalAfter,
     notes: resolved.notes,
+    resolved_property_ids_count: resolved.propertyIds.length,
+    duplicate_recipients: exact ? exact.duplicates : null,
+    property_results: exact ? exact.results : null,
+    property_results_limit: PREVIEW_ROW_LIMIT,
     no_targets_built: true,
     no_send_queue_rows_created: true,
   }
