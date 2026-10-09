@@ -193,7 +193,8 @@ export function bandsFromEdges(edges, { format = 'number', integer = false, unde
   const eps = integer ? 1 : format === 'money' ? 0.01 : 0.0001
   const out = []
   const f = (n) => formatEdge(n, format)
-  if (under) out.push({ key: `lt_${edges[0]}`, label: `Under ${f(edges[0])}`, lo: null, hi: +(edges[0] - eps).toFixed(6) })
+  // a first edge of 1 on a money / count column means "none": the band below it reads ≤ 0, not "Under $1"
+  if (under) out.push({ key: `lt_${edges[0]}`, label: edges[0] === 1 ? `≤ ${f(0)}` : `Under ${f(edges[0])}`, lo: null, hi: +(edges[0] - eps).toFixed(6) })
   for (let i = 0; i < edges.length - 1; i += 1) {
     const lo = edges[i]
     const hi = +(edges[i + 1] - eps).toFixed(6)

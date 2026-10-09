@@ -81,6 +81,7 @@ import { useOutreachStates } from './desk-outreach'
 import { equityDisplay } from '../equity-display'
 import { absorbPageAttachments, completePageParams, pageKey } from './desk-page'
 import { DeskGraph } from './DeskGraph'
+import { DeskOverviewBand, DeskOverviewMode, useOverviewPrefs } from './overview/DeskOverview'
 import { DeskInspector } from './DeskInspector'
 import { fetchDeskKpis, kpisFromCounts } from './desk-api'
 import {
@@ -179,6 +180,10 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   const filters = filtersByScope[scope] ?? NO_FILTERS
   const setFilters = (next: EntityGraphFieldFilter[]) => setFiltersByScope((cur) => ({ ...cur, [scope]: next }))
   const [center, setCenter] = useState<'grid' | 'graph'>(deskInit.center)
+  // Overview (spec 9 §4): a band above the grid + a full mode in the centre, properties scope
+  const overviewPrefs = useOverviewPrefs(uid)
+  const overviewMode = overviewPrefs.mode && scope === 'properties' && center === 'grid'
+  const onOverviewFilters = (next: EntityGraphFieldFilter[], opts?: { showRecords?: boolean }) => { setFilters(next); if (opts?.showRecords) overviewPrefs.setMode(false) }
   const [graphFull, setGraphFull] = useState(deskInit.graphFull)
   // The rail stays where the operator left it (collapsed strip or open) —
   // it no longer folds itself away when the inspector opens.
@@ -671,7 +676,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
               Add to campaign
             </LCButton>
           ) : null}
-          <LCSegmented size="sm" label="View" value={center} onChange={(v) => { setCenter(v as 'grid' | 'graph'); if (v === 'grid') setGraphFull(false) }} options={[{ value: 'grid', icon: 'list', label: 'Grid' }, { value: 'graph', icon: 'layers', label: 'Graph' }]} />
+          <LCSegmented size="sm" label="View" value={overviewMode ? 'overview' : center} onChange={(v) => { if (v === 'overview') { setCenter('grid'); setGraphFull(false); overviewPrefs.setMode(true); return } overviewPrefs.setMode(false); setCenter(v as 'grid' | 'graph'); if (v === 'grid') setGraphFull(false) }} options={[{ value: 'grid', icon: 'list', label: 'Grid' }, ...(scope === 'properties' ? [{ value: 'overview', icon: 'stats' as const, label: 'Overview' }] : []), { value: 'graph', icon: 'layers', label: 'Graph' }]} />
           {center === 'graph' ? <LCIconButton icon="maximize" label="Fullscreen graph (Esc to exit)" size="sm" selected={graphFull} onClick={() => setGraphFull((f) => !f)} /> : null}
         </div>
       </div>
@@ -680,7 +685,9 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
         {narrow && !railShown ? <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed onCollapsedChange={() => setRailOverOpen(true)} />
           : <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed={!railShown} onCollapsedChange={(c) => { if (narrow) { setRailOverOpen(!c); return } if (!c && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(c) }} />}
         <main className="egdk-center" aria-label={center === 'grid' ? 'Records' : 'Relationship view'}>
-          {center === 'grid' ? (
+          {overviewMode ? (
+            <DeskOverviewMode filters={filters} onFiltersChange={onOverviewFilters} onClose={() => overviewPrefs.setMode(false)} />
+          ) : center === 'grid' ? (
             <>
               <div className="egdk-tablebar">
                 <LCSearch value={query} onChange={setQuery} label={`Search ${MOBILE_SCOPES.find((s) => s.key === scope)?.label.toLowerCase() ?? 'records'}`} placeholder={scope === 'properties' ? 'Search address, city or market…' : 'Search name, phone, email…'} loading={loading && searching} className="egdk-tablebar__search" />
@@ -691,6 +698,9 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                 <LCMenu trigger={<LCButton size="sm" variant="quiet" icon="bookmark">Views{views.length ? ` · ${views.length}` : ''}</LCButton>} items={viewItems} label="Saved views" title="Saved views" width={280} />
                 <ColumnPicker scope={scope} visible={visibleKeys} onChange={(next) => setColumns(scope, next)} />
               </div>
+              {scope === 'properties' && !searching ? (
+                <DeskOverviewBand filters={filters} onFiltersChange={onOverviewFilters} open={overviewPrefs.bandOpen} onOpenChange={overviewPrefs.setBandOpen} onOpenMode={() => overviewPrefs.setMode(true)} />
+              ) : null}
               {sortNote || enrichment.error ? (
                 <p className="egdk-note" role="status">{sortNote}{sortNote && enrichment.error ? ' · ' : ''}{enrichment.error ? 'Some column values did not load — those cells read —' : ''}</p>
               ) : null}
