@@ -86,11 +86,29 @@ async function keysetIds({ build, key, max, noun }) {
   return out
 }
 
+/**
+ * Every property an owner holds. properties.master_owner_id is set on only
+ * ~23% of properties; the owner's own joined_property_ids_json is the full
+ * list (measured 2026-10-09 on 300 owners: property_count 371, by the FK 105,
+ * joined ids 370 — all of them existing properties). An owner / people cohort
+ * added to a campaign only 28% of its properties. Both are read and merged;
+ * export-form ids ("prop_…") never match property_id and are skipped (the FK
+ * read covers those owners).
+ */
 async function propertiesForOwners(supabase, ownerIds) {
   const out = []
   const ids = uniq(ownerIds)
   for (let i = 0; i < ids.length; i += CHUNK) {
     const part = ids.slice(i, i + CHUNK)
+    const owners = await readOrThrow(supabase.from('master_owners').select('master_owner_id, joined_property_ids_json').in('master_owner_id', part))
+    for (const o of owners) {
+      let joined = o.joined_property_ids_json
+      if (typeof joined === 'string') { try { joined = JSON.parse(joined) } catch { joined = [] } }
+      for (const pid of Array.isArray(joined) ? joined : []) {
+        const id = clean(pid)
+        if (id && !/^prop_/i.test(id) && !isTestPropertyId(id)) out.push(id)
+      }
+    }
     let last = null
     for (;;) {
       let q = supabase.from('properties').select('property_id, master_owner_id').in('master_owner_id', part).order('property_id', { ascending: true }).limit(PAGE)
@@ -100,7 +118,7 @@ async function propertiesForOwners(supabase, ownerIds) {
       if (page.length < PAGE) break
       last = clean(page[page.length - 1].property_id)
     }
-    if (out.length > STACK_MAX_PROPERTIES) {
+    if (new Set(out).size > STACK_MAX_PROPERTIES) {
       throw new StackRefusal(422, 'cohort_too_large', `These owners hold more than ${STACK_MAX_PROPERTIES.toLocaleString('en-US')} properties. Narrow the cohort, or add it in parts.`, { limit: STACK_MAX_PROPERTIES })
     }
   }

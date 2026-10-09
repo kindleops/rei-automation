@@ -155,3 +155,11 @@ test('column enrichment: owner.* and person.* fill for properties linked only th
   assert.equal(typeof values['216455040']['person.age'], 'number')
   assert.equal(values['216455099'], undefined, 'no source data stays absent')
 })
+
+test('Add to campaign: an owner cohort adds every property the owner holds, not only the 23% carrying master_owner_id', async () => {
+  const { resolveStackPropertyIds } = await import('../../src/lib/domain/entity-graph/entity-graph-campaign-stack.js')
+  const t = TABLES()
+  t.master_owners[0].joined_property_ids_json = '["216455040","216455041","prop_875d0ee2eacd14798bb4adf4","canaryprop_1"]'
+  const out = await resolveStackPropertyIds({ scope: 'master_owners', mode: 'selection', ids: ['mo_6ae6ed8a02724ee3e8366fdd'] }, { supabase: db(t) })
+  assert.deepEqual([...out.propertyIds].sort(), ['216455040', '216455041'], 'joined ids (FK-less 216455040 included), export-form + test ids skipped, deduped')
+})
