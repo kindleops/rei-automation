@@ -15,7 +15,7 @@
 - **Add to Campaign** pins property IDs on drafts only, through the builder's gates.
 
 ### Partial
-- Candidates are looked up **only when the campaign graph has no phone for the property**. Hidden phones on properties that already show one phone are not surfaced. In baseline sample A, most of the 936 hidden associations sit on such properties.
+- Candidates are looked up **only when the campaign graph has no phone for the property**. Hidden phones on properties that already show one phone are not surfaced. In baseline sample A, 634 properties have hidden associations, but only 183 of them have no graph phone at all. The other 451 are never looked up.
 - At most 12 linked prospects are read and 6 shown per property.
 - **No non-owner role.** `likely_renting`, `reach_phone` (best-contact reach role) and occupant evidence are not classified. Renters fall into `linked_unresolved`. A renter can also read `resolved_owner` when the vendor links it to the owner's master owner.
 - **History** is latest-contact only: no `send_queue` statuses or holds (e.g. `blocked_by_health_guard`), and no `message_events` timeline.
