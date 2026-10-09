@@ -106,9 +106,9 @@ test('a sale bought by the CURRENT owner points at the owner node, not a duplica
     eg_buyer_index: [{ buyer_id: 'company:us_mn:1', display_name: 'ACME LLC', entity_type: 'company', acquisition_count: 4 }],
   }
   const from = (name) => {
-    const rows = tables[name] ?? []
+    const rows = tables[name === 'v_entity_graph_properties' ? 'properties' : name] ?? []
     const q = {
-      select() { return q }, eq() { return q }, neq() { return q }, in() { return q }, gt() { return q }, ilike() { return q },
+      select() { return q }, eq() { return q }, neq() { return q }, in() { return q }, gt() { return q }, ilike() { return q }, or() { return q },
       order() { return q }, limit() { return q },
       maybeSingle() { return Promise.resolve({ data: rows[0] ?? null }) },
       then(res, rej) { return Promise.resolve({ data: rows }).then(res, rej) },

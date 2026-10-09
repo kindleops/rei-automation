@@ -22,7 +22,7 @@
  * the authenticated role's grants (the 10-03 operator lockdown).
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
-import { withRepairTruth } from './entity-graph-truth.js'
+import { primaryLinkedProspect, prospectsLinkedToProperties, resolvePropertyOwners } from './entity-graph-owner-link.js'
 
 export const MAX_IDS = 300
 const CHUNK = 150
@@ -41,7 +41,7 @@ export const ENTITY_GRAPH_PROPERTY_COLUMNS = Object.freeze(new Set([
   'best_phone', 'best_email', 'sms_eligible', 'contact_status', 'best_language', 'timezone',
   'tax_delinquent', 'tax_delinquent_year', 'active_lien', 'is_hot_preforeclosure', 'seller_tags_text', 'acquisition_bucket',
   'equity_amount', 'total_loan_balance', 'assd_total_value', 'sale_price', 'sale_date', 'arv_estimate',
-  'rent_estimate', 'cap_rate', 'ppsf', 'estimated_repair_cost', 'rehab_level',
+  'rent_estimate', 'cap_rate', 'ppsf', 'rehab_level',
   'master_owner_id', 'source_system', 'created_at', 'updated_at', 'exported_at_utc',
   // field audit 2026-10-08: every public.properties column with data (≥1% of a 2% sample), not internal
   'property_address2', 'property_address_range', 'owner_type', 'owner_location', 'owner_1_name', 'owner_2_name',
@@ -52,7 +52,7 @@ export const ENTITY_GRAPH_PROPERTY_COLUMNS = Object.freeze(new Set([
   'assd_improvement_value', 'assd_land_value', 'assd_year', 'calculated_improvement_value', 'calculated_land_value',
   'calculated_total_value', 'lot_nbr', 'lot_size_depth_feet', 'lot_size_frontage_feet', 'num_of_fireplaces',
   'situs_census_tract', 'style', 'topography', 'sum_buildings_nbr', 'sum_commercial_units', 'sum_garage_sqft',
-  'estimated_repair_cost_per_sqft', 'original_property_type', 'asset_class', 'asset_subclass', 'market_region',
+  'original_property_type', 'asset_class', 'asset_subclass', 'market_region',
   'deal_list_label', 'source_list_label', 'source_list_category', 'property_export_id', 'canonical_market_id',
 ]))
 
@@ -83,10 +83,11 @@ export const ENTITY_GRAPH_LINKED_COLUMNS = Object.freeze({
     'portfolio_total_units', 'tax_delinquent_count', 'oldest_tax_delinquent_year', 'active_lien_count',
     'max_ownership_years', 'seller_tags_text', 'agent_persona', 'primary_owner_address',
   ])),
+  // (no estimated_repairs: the engine's repair input IS the vendor estimate — not an Entity Graph field)
   scores: Object.freeze(new Set([
     'aos_score', 'decision_tier', 'confidence', 'best_strategy', 'valuation_low', 'valuation_mid', 'valuation_high',
     'valuation_confidence', 'comp_count', 'recommended_cash_offer', 'minimum_acceptable_offer', 'expected_assignment_fee',
-    'buyer_demand_score', 'liquidity_score', 'estimated_repairs', 'transaction_probability_90', 'transaction_probability_365',
+    'buyer_demand_score', 'liquidity_score', 'transaction_probability_90', 'transaction_probability_365',
     'seller_financial_pressure_score', 'foreclosure_risk_score', 'owner_situation_primary', 'recommended_conversation_angle', 'computed_at',
   ])),
   contact: Object.freeze(new Set([
@@ -145,7 +146,6 @@ async function enrichLinked(client, ids, linked, values) {
   const contactCols = want('contact')
   const entityCols = want('entity')
   const recCols = want('rec')
-  const personCols = want('person')
   const emailCols = want('email')
   const put = (id, key, v) => {
     if (!present(v)) return
@@ -153,10 +153,21 @@ async function enrichLinked(client, ids, linked, values) {
     values[id][key] = v
   }
 
+  // properties.master_owner_id is set on ~23% of properties; the rest are
+  // linked through their prospects (entity-graph-owner-link.js) — one read of
+  // linked prospects serves both the owner and the person fallback.
+  const personCols = want('person')
+  let linkedProspects = null
+  const linkedFor = async () => {
+    if (!linkedProspects) linkedProspects = await prospectsLinkedToProperties(client, ids, ['rank_position', 'is_primary_prospect', 'mob', ...personCols.filter((c) => c !== 'age')].join(','))
+    return linkedProspects
+  }
   let ownerOf = null
   if (ownerCols.length || entityCols.length || emailCols.length) {
     const rows = await readIn(client, 'properties', 'property_id, master_owner_id', 'property_id', ids)
-    ownerOf = new Map(rows.filter((r) => clean(r.master_owner_id)).map((r) => [clean(r.property_id), clean(r.master_owner_id)]))
+    const needsLink = rows.some((r) => !clean(r.master_owner_id))
+    const resolved = await resolvePropertyOwners(client, rows, { linked: needsLink ? await linkedFor() : new Map() })
+    ownerOf = new Map([...resolved].map(([pid, r]) => [pid, r.ownerId]))
   }
   const ownerIds = ownerOf ? [...new Set(ownerOf.values())] : []
 
@@ -190,14 +201,19 @@ async function enrichLinked(client, ids, linked, values) {
         if (clean(g.seller_person_key) && (!cur || (Number(g.best_phone_score) || -1) > (Number(cur.best_phone_score) || -1))) best.set(id, g)
       }
       const keys = [...new Set([...best.values()].map((g) => clean(g.seller_person_key)))]
-      if (!keys.length) return
       const cols = personCols.filter((c) => c !== 'age')
-      const people = await readIn(client, 'prospects', ['individual_key', 'mob', ...cols].join(','), 'individual_key', keys)
+      const people = keys.length ? await readIn(client, 'prospects', ['individual_key', 'mob', ...cols].join(','), 'individual_key', keys) : []
       const byKey = new Map(people.map((p) => [clean(p.individual_key), p]))
+      // the campaign graph's person first; else the property's own linked
+      // prospect (seller_person_key joins prospects for only ~42% of properties)
+      const personOf = new Map()
+      for (const [id, g] of best) { const p = byKey.get(clean(g.seller_person_key)); if (p) personOf.set(id, p) }
+      if (ids.some((id) => !personOf.has(id))) {
+        const linked = await linkedFor()
+        for (const id of ids) if (!personOf.has(id)) { const p = primaryLinkedProspect(linked.get(id)); if (p) personOf.set(id, p) }
+      }
       const now = new Date()
-      for (const [id, g] of best) {
-        const p = byKey.get(clean(g.seller_person_key))
-        if (!p) continue
+      for (const [id, p] of personOf) {
         for (const c of cols) put(id, `person.${c}`, p[c])
         if (personCols.includes('age') && /^\d{6}$/.test(clean(p.mob))) {
           const y = Number(p.mob.slice(0, 4)); const m = Number(p.mob.slice(4))
@@ -280,17 +296,13 @@ export async function getEntityGraphColumnEnrichment(params = {}, deps = {}) {
   if (columns.length && ids.length) {
     for (let i = 0; i < ids.length; i += CHUNK) {
       const part = ids.slice(i, i + CHUNK)
-      // the repair estimate is checked against value / sqft / units before it is shown (repairTruth)
-      const helper = columns.includes('estimated_repair_cost') ? ['estimated_value', 'building_square_feet', 'units_count'].filter((c) => !columns.includes(c)) : []
-      const { data: raw, error } = await client.from('properties').select(['property_id', ...columns, ...helper].join(',')).in('property_id', part)
-      const data = columns.includes('estimated_repair_cost') ? (raw || []).map((r) => { const t = withRepairTruth(r); return { ...t, estimated_repair_cost_status: t.estimated_repair_cost_status } }) : raw
+      const { data, error } = await client.from('properties').select(['property_id', ...columns].join(',')).in('property_id', part)
       if (error) throw error
       for (const row of data || []) {
         const id = clean(row.property_id)
         if (!id) continue
         const vals = values[id] || {}
         for (const c of columns) if (vals[c] === undefined && row[c] !== null && row[c] !== undefined && row[c] !== '') vals[c] = row[c]
-        if (row.estimated_repair_cost_status && row.estimated_repair_cost_status !== 'unknown') vals.estimated_repair_cost_status = row.estimated_repair_cost_status
         values[id] = vals
       }
     }

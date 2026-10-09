@@ -36,10 +36,12 @@ function keyedClient(rows) {
 }
 
 test('owner-named columns are whitelisted; internal / unknown columns are dropped', () => {
-  for (const c of ['year_built', 'zoning', 'units_count', 'effective_year_built', 'estimated_repair_cost', 'total_bedrooms', 'total_baths', 'building_square_feet', 'sale_date']) {
+  for (const c of ['year_built', 'zoning', 'units_count', 'effective_year_built', 'total_bedrooms', 'total_baths', 'building_square_feet', 'sale_date']) {
     if (c === 'units_count') continue // Units is on the browse row itself
     assert.ok(ENTITY_GRAPH_PROPERTY_COLUMNS.has(c), c)
   }
+  // the vendor repair estimate is not an Entity Graph column (valuation lanes, owner 2026-10-08)
+  for (const c of ['estimated_repair_cost', 'estimated_repair_cost_per_sqft']) assert.ok(!ENTITY_GRAPH_PROPERTY_COLUMNS.has(c), c)
   assert.deepEqual(
     parseEntityGraphColumnFields('year_built,raw_payload_json,row_hash,zoning;drop table,year_built, zoning '),
     ['year_built', 'zoning'],

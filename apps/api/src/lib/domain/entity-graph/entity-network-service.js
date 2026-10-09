@@ -24,6 +24,8 @@
  */
 import { displayableCompanyName } from './buyer-name-privacy.js'
 import { equityTruth, repairTruth } from './entity-graph-truth.js'
+import { prospectsLinkedToProperties, resolvePropertyOwners } from './entity-graph-owner-link.js'
+import { classifyRecordedDocument, isLienClass, recordedDocumentLabel, splitRecordedCategories } from './entity-graph-recorded-docs.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { clean, enrichedPropertyType, formatReadablePhone, parseJsonArray } from './entity-graph-normalize.js'
 
@@ -40,7 +42,13 @@ const PROPERTY_SELECT = [
   'owner_display_name', 'owner_name', 'owner_type_guess', 'is_corporate_owner', 'out_of_state_owner',
   'owner_address_full', 'owner_address_city', 'owner_address_state', 'owner_address_zip', 'owner_name_addr_key',
   'seller_tags_text', 'estimated_repair_cost', 'property_flags_text',
+  // recorded documents (v_entity_graph_properties): equityTruth rule c reads the
+  // recorded mortgages exactly as the grid does — without them the hover card
+  // said "High (flag)" while the grid said "$111M · 100%" for the same property
+  'rec_mortgage_count', 'rec_mortgage_balance', 'rec_lien_categories',
 ].join(',')
+/** Same source as the browse grid (properties + property_record_summary), keyed reads only. */
+const PROPERTY_SOURCE = 'v_entity_graph_properties'
 
 const OWNER_SELECT = [
   'master_owner_id', 'display_name', 'owner_type_guess', 'primary_owner_address', 'household_key', 'owner_cluster_key',
@@ -128,9 +136,12 @@ function mapProperty(p) {
       ? { date: p.sale_date || null, price: num(p.sale_price), docType: clean(p.last_sale_doc_type) || null }
       : null,
     ownershipYears: num(p.ownership_years),
-    // vendor $/sqft × building sqft — withheld when implausible (entity-graph-truth repairTruth)
-    repairEstimate: repairTruth(p).value,
-    repairStatus: repairTruth(p).status,
+    // NOT a property figure (valuation lanes): a plausible SFR / 2–4 vendor repair
+    // figure is only an MLS-ARV-lane reference, "vendor estimate · unverified"
+    repairReference: (() => { const t = repairTruth(p); return t.value === null ? null : { value: t.value, lane: t.lane, label: t.label } })(),
+    // which recorded documents on this property are liens vs other filings (portfolio rows too)
+    recordedLiens: splitRecordedCategories(p.rec_lien_categories).liens.map((d) => d.label),
+    recordedFilings: splitRecordedCategories(p.rec_lien_categories).filings.map((d) => d.label),
     streetview: clean(p.streetview_image) || null,
     // vendor property flags + seller tags, deduplicated (the client maps them to one signal vocabulary)
     tags: [...new Set([...clean(p.property_flags_text).split(/[;|]/), ...clean(p.seller_tags_text).split(/[,|;]/)].map((t) => t.trim()).filter(Boolean))].slice(0, 16),
@@ -272,18 +283,9 @@ export function nameKey(value) {
   return key || null
 }
 
-const DOC_CATEGORY_LABEL = {
-  'LIEN <GENERAL>': 'General lien',
-  'LIS PENDENS': 'Lis pendens',
-  'AFFIDAVIT OF DEATH': 'Affidavit of death',
-  'ASSIGNMENT OF RENTS': 'Assignment of rents',
-  'MECHANICS LIEN': "Mechanic's lien",
-  'ASSESSMENT LIEN': 'Assessment lien',
-  'STATE TAX LIEN': 'State tax lien',
-  'NOTICE OF REDEMPTION': 'Notice of redemption',
-  'FINANCING STATEMENT': 'Financing statement',
-}
-const lienLabel = (l) => DOC_CATEGORY_LABEL[clean(l.doc_category)] || titleCase(l.doc_category || l.doc_type_description || (l.lien_type === 'hoa_lien' ? 'HOA lien' : 'Recorded notice'))
+// every recorded non-mortgage document, classified (entity-graph-recorded-docs.js):
+// only the lien / judgment classes are liens — a UCC financing statement is not
+const lienLabel = (l) => (clean(l.doc_category) || l.lien_type === 'hoa_lien' ? recordedDocumentLabel(l.doc_category, l.lien_type) : titleCase(l.doc_type_description) || 'Recorded document')
 const DISTRESS_CATEGORIES = new Set(['PROBATE', 'LIS PENDENS', 'AFFIDAVIT OF DEATH', 'JUDGMENT', 'STATE TAX LIEN', 'MECHANICS LIEN'])
 
 /**
@@ -313,6 +315,8 @@ export function shapeRecords(raw) {
     id: `${i}`,
     label: lienLabel(l),
     category: clean(l.doc_category) || null,
+    docClass: classifyRecordedDocument(l.doc_category, l.lien_type),
+    isLien: isLienClass(classifyRecordedDocument(l.doc_category, l.lien_type)),
     type: clean(l.lien_type) || null,
     title: titleCase(l.doc_title) || null,
     description: titleCase(l.doc_type_description) || null,
@@ -385,7 +389,9 @@ export function shapeRecords(raw) {
       openMortgages: open.length,
       balance: open.reduce((sum, m) => sum + (m.balance || 0), 0) || null,
       payment: open.reduce((sum, m) => sum + (m.payment || 0), 0) || null,
-      liens: liens.length,
+      // true liens only (lien + judgment classes); every other recorded filing counted apart
+      liens: liens.filter((l) => l.isLien).length,
+      filings: liens.filter((l) => !l.isLien).length,
       distressLiens: liens.filter((l) => l.distress).length,
       sales: sales.length,
     },
@@ -410,20 +416,21 @@ function buildGraph({ anchor, owner, ownerNode, properties, entities, people, ph
     if (ownerId) edge(ownerId, `property:${p.id}`, 'owns', 'Owns')
   }
   for (const e of entities) {
-    node({ id: `entity:${e.id}`, type: 'entity', label: e.name, sub: e.kindLabel, meta: { kind: e.kind, mailing: e.mailing } })
+    node({ id: `entity:${e.id}`, type: 'entity', label: e.name, sub: e.kindLabel, meta: { kind: e.kind, mailing: e.mailing, ownerId: owner?.master_owner_id ? String(owner.master_owner_id) : null } })
     if (ownerId) edge(ownerId, `entity:${e.id}`, 'titled_as', 'Holds title as')
   }
   for (const person of people) {
-    node({ id: `person:${person.id}`, type: 'person', label: person.name, sub: person.role, meta: { primary: person.primary, language: person.language } })
-    if (ownerId) edge(ownerId, `person:${person.id}`, 'person_of', person.primary ? 'Decision maker' : 'Linked person')
+    node({ id: `person:${person.id}`, type: 'person', label: person.name, sub: person.role, meta: { primary: person.primary, language: person.language, linkedBy: person.linkedBy } })
+    if (person.linkedBy === 'property' && anchorPropertyId) edge(`property:${anchorPropertyId}`, `person:${person.id}`, 'linked_person', 'Linked to this property')
+    else if (ownerId) edge(ownerId, `person:${person.id}`, 'person_of', person.primary ? 'Decision maker' : 'Linked person')
   }
   for (const ph of phones) {
-    node({ id: `phone:${ph.id}`, type: 'phone', label: ph.display, sub: ph.type, meta: { wrong: ph.wrongNumber, score: ph.score } })
+    node({ id: `phone:${ph.id}`, type: 'phone', label: ph.display, sub: ph.type, meta: { wrong: ph.wrongNumber, score: ph.score, personId: ph.personId, ownerId: owner?.master_owner_id ? String(owner.master_owner_id) : null } })
     const from = ph.personId && ids.has(`person:${ph.personId}`) ? `person:${ph.personId}` : ownerId
     if (from) edge(from, `phone:${ph.id}`, 'reaches', 'Reached at')
   }
   for (const em of emails) {
-    node({ id: `email:${em.id}`, type: 'email', label: em.value, sub: 'Email', meta: {} })
+    node({ id: `email:${em.id}`, type: 'email', label: em.value, sub: 'Email', meta: { personId: em.personId, ownerId: owner?.master_owner_id ? String(owner.master_owner_id) : null } })
     const from = em.personId && ids.has(`person:${em.personId}`) ? `person:${em.personId}` : ownerId
     if (from) edge(from, `email:${em.id}`, 'reaches', 'Reached at')
   }
@@ -511,20 +518,40 @@ export async function getEntityNetwork(type, id, deps = {}) {
   let anchorProperty = null
   let ownerRow = null
   let anchorPersonId = null
+  let personLinkedPropertyIds = []
 
   if (type === 'property') {
-    const { data } = await supabase.from('properties').select(PROPERTY_SELECT).eq('property_id', key).maybeSingle()
+    const { data } = await supabase.from(PROPERTY_SOURCE).select(PROPERTY_SELECT).eq('property_id', key).maybeSingle()
     if (!data) return null
     anchorProperty = data
-    ownerRow = await loadOwner(supabase, data.master_owner_id)
+    // properties.master_owner_id is set on ~23% of properties — the rest are
+    // linked through their prospects (entity-graph-owner-link.js), so the
+    // inspector no longer draws an owner-less, people-less network for them
+    let ownerId = clean(data.master_owner_id)
+    if (!ownerId) {
+      try {
+        const resolved = await resolvePropertyOwners(supabase, [data])
+        ownerId = resolved.get(String(data.property_id))?.ownerId || ''
+      } catch { ownerId = '' }
+    }
+    ownerRow = await loadOwner(supabase, ownerId || null)
   } else if (type === 'owner') {
     ownerRow = await loadOwner(supabase, key)
     if (!ownerRow) return null
   } else if (type === 'person') {
-    const { data } = await supabase.from('prospects').select('prospect_id, master_owner_id').eq('prospect_id', key).maybeSingle()
+    const { data } = await supabase.from('prospects').select('prospect_id, master_owner_id, linked_property_ids_json').eq('prospect_id', key).maybeSingle()
     if (!data) return null
     anchorPersonId = String(data.prospect_id)
-    ownerRow = await loadOwner(supabase, data.master_owner_id)
+    // person → properties: the properties this person is linked to, not only the owner's portfolio
+    personLinkedPropertyIds = parseJsonArray(data.linked_property_ids_json).map(String).filter(Boolean).slice(0, PORTFOLIO_CAP)
+    let ownerId = clean(data.master_owner_id)
+    if (!ownerId && personLinkedPropertyIds.length) {
+      try {
+        const { data: linkedProps } = await supabase.from('properties').select('property_id, master_owner_id').in('property_id', personLinkedPropertyIds.slice(0, 12))
+        ownerId = [...new Set((linkedProps || []).map((r) => clean(r.master_owner_id)).filter(Boolean))].length === 1 ? clean(linkedProps.find((r) => clean(r.master_owner_id)).master_owner_id) : ''
+      } catch { ownerId = '' }
+    }
+    ownerRow = await loadOwner(supabase, ownerId || null)
   } else {
     return null
   }
@@ -545,10 +572,10 @@ export async function getEntityNetwork(type, id, deps = {}) {
   const exportFormJoined = joinedPropertyIds.some((pid) => /^prop_[a-f0-9]{8,}$/i.test(pid))
   const portfolioQuery = ownerId
     ? (joinedPropertyIds.length && !exportFormJoined
-      ? supabase.from('properties').select(PROPERTY_SELECT).in('property_id', joinedPropertyIds.slice(0, PORTFOLIO_CAP))
+      ? supabase.from(PROPERTY_SOURCE).select(PROPERTY_SELECT).in('property_id', joinedPropertyIds.slice(0, PORTFOLIO_CAP))
       : Promise.all([
-        joinedPropertyIds.length ? supabase.from('properties').select(PROPERTY_SELECT).in('property_id', joinedPropertyIds.slice(0, PORTFOLIO_CAP)) : Promise.resolve({ data: [] }),
-        supabase.from('properties').select(PROPERTY_SELECT).eq('master_owner_id', ownerId).limit(PORTFOLIO_CAP),
+        joinedPropertyIds.length ? supabase.from(PROPERTY_SOURCE).select(PROPERTY_SELECT).in('property_id', joinedPropertyIds.slice(0, PORTFOLIO_CAP)) : Promise.resolve({ data: [] }),
+        supabase.from(PROPERTY_SOURCE).select(PROPERTY_SELECT).eq('master_owner_id', ownerId).limit(PORTFOLIO_CAP),
       ]).then(([byId, byOwner]) => {
         const seen = new Set()
         const data = [...(byId.data || []), ...(byOwner.data || [])].filter((row) => {
@@ -561,7 +588,7 @@ export async function getEntityNetwork(type, id, deps = {}) {
       }))
     : clean(anchorProperty?.owner_name_addr_key)
       // No master owner: the same name-at-the-same-mailing-address on other title records.
-      ? supabase.from('properties').select(PROPERTY_SELECT).eq('owner_name_addr_key', anchorProperty.owner_name_addr_key).limit(PORTFOLIO_CAP)
+      ? supabase.from(PROPERTY_SOURCE).select(PROPERTY_SELECT).eq('owner_name_addr_key', anchorProperty.owner_name_addr_key).limit(PORTFOLIO_CAP)
       : Promise.resolve({ data: anchorProperty ? [anchorProperty] : [] })
 
   const [
@@ -580,7 +607,36 @@ export async function getEntityNetwork(type, id, deps = {}) {
     loadRelatedOwners(supabase, ownerRow),
   ])
 
+  // property → people: prospects linked to the anchor property itself
+  // (prospects.linked_property_ids_json — the contact-discovery linkage) join
+  // the owner's people, so a property whose people sit under another / no
+  // master owner no longer reads "People 0".
+  const [linkedPeople, personProps] = await Promise.all([
+    anchorProperty
+      ? prospectsLinkedToProperties(supabase, [String(anchorProperty.property_id)], `${PERSON_SELECT}, phones_json`)
+        .then((m) => m.get(String(anchorProperty.property_id)) || [])
+        .catch(() => [])
+      : Promise.resolve([]),
+    personLinkedPropertyIds.length
+      ? supabase.from(PROPERTY_SOURCE).select(PROPERTY_SELECT).in('property_id', personLinkedPropertyIds).then((r) => r.data || []).catch(() => [])
+      : Promise.resolve([]),
+  ])
+  const personRowsAll = [...(personRows || [])]
+  const extraPhoneRows = []
+  for (const lp of linkedPeople) {
+    if (personRowsAll.some((r) => String(r.prospect_id) === String(lp.prospect_id))) continue
+    personRowsAll.push(lp)
+    const known = new Set((phoneRows || []).map((r) => clean(r.canonical_e164)))
+    ;(Array.isArray(lp.phones_json) ? lp.phones_json : []).forEach((ph, i) => {
+      const e164 = clean(ph?.canonical_e164 || ph?.phone_raw)
+      if (!e164 || known.has(e164)) return
+      known.add(e164)
+      extraPhoneRows.push({ phone_id: `pj:${lp.prospect_id}:${i}`, canonical_e164: e164, phone_type: ph.phone_type, primary_prospect_id: lp.prospect_id, activity_status: ph.activity_status || null, contact_score_final: ph.phone_score ?? null })
+    })
+  }
+
   const propertyRows = [...(portfolioRows || [])]
+  for (const r of personProps) if (!propertyRows.some((x) => String(x.property_id) === String(r.property_id))) propertyRows.push(r)
   if (anchorProperty && !propertyRows.some((r) => String(r.property_id) === String(anchorProperty.property_id))) propertyRows.unshift(anchorProperty)
   const properties = propertyRows.map(mapProperty)
     .sort((a, b) => (anchorProperty && a.id === String(anchorProperty.property_id) ? -1 : 0) - (anchorProperty && b.id === String(anchorProperty.property_id) ? -1 : 0) || (b.value || 0) - (a.value || 0))
@@ -624,11 +680,14 @@ export async function getEntityNetwork(type, id, deps = {}) {
     // The master owner's own name is the owner node, not a separate entity.
     .filter((e) => e.name.toLowerCase() !== ownerName.toLowerCase())
 
-  const people = (personRows || []).map((r) => ({
+  const ownerPersonIds = new Set((personRows || []).map((r) => String(r.prospect_id)))
+  const people = personRowsAll.map((r) => ({
     id: String(r.prospect_id),
+    // how the person is connected: through the master owner, or linked to the property itself
+    linkedBy: ownerPersonIds.has(String(r.prospect_id)) ? 'owner' : 'property',
     name: titleCase(r.full_name) || 'Unnamed person',
     // slot_label is often a technical source path ("phone_numbers[1]|…"): only a human label is shown.
-    role: r.is_primary_prospect ? 'Decision maker' : (/^[A-Za-z][A-Za-z ,&'-]{1,40}$/.test(clean(r.slot_label)) ? clean(r.slot_label) : (r.likely_owner ? 'Likely owner' : 'Linked person')),
+    role: r.is_primary_prospect ? 'Decision maker' : (/^[A-Za-z][A-Za-z ,&'-]{1,40}$/.test(clean(r.slot_label)) ? clean(r.slot_label) : (r.likely_owner ? 'Likely owner' : ownerPersonIds.has(String(r.prospect_id)) ? 'Linked person' : 'Linked to this property')),
     primary: r.is_primary_prospect === true,
     language: clean(r.language_preference) || null,
     occupation: clean(r.occupation_group) || null,
@@ -640,7 +699,7 @@ export async function getEntityNetwork(type, id, deps = {}) {
     matchingTags: clean(r.matching_flags).split(',').map((t) => t.trim()).filter(Boolean),
   }))
 
-  const phones = (phoneRows || []).map((r) => ({
+  const phones = [...(phoneRows || []), ...extraPhoneRows].map((r) => ({
     id: String(r.phone_id),
     e164: clean(r.canonical_e164 || r.phone),
     display: formatReadablePhone(r.canonical_e164 || r.phone) || clean(r.phone),

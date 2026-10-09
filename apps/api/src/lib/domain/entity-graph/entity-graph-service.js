@@ -33,6 +33,7 @@ import {
 } from './entity-graph-property-sort.js'
 import { facetsAvailable, groupedFacetCounts } from './entity-graph-facet-sql.js'
 import { equityTruth, excludeTestOwners, excludeTestProperties, withRepairTruth } from './entity-graph-truth.js'
+import { splitRecordedCategories } from './entity-graph-recorded-docs.js'
 
 const DEFAULT_PAGE_SIZE = 25
 const MAX_PAGE_SIZE = 100
@@ -537,6 +538,7 @@ function propertyToResult(row, score = 100) {
 /** The recorded-document facts a card can state, only when the row carries them. */
 function propertyRecordSummary(row) {
   if (!('rec_mortgage_count' in row)) return undefined
+  const recDocs = splitRecordedCategories(row.rec_lien_categories)
   const signals = []
   if (row.rec_foreclosure_count > 0) signals.push({ key: 'foreclosure', label: row.rec_foreclosure_stage || 'Foreclosure', tone: 'alert' })
   if (row.rec_has_probate) signals.push({ key: 'probate', label: 'Probate', tone: 'alert' })
@@ -555,10 +557,17 @@ function propertyRecordSummary(row) {
     mortgageBalance: row.rec_mortgage_balance ?? undefined,
     firstRate: row.rec_first_rate ?? undefined,
     firstLender: row.rec_first_lender || undefined,
-    lienCount: row.rec_lien_count ?? 0,
-    // which liens, not just how many: the recorded document categories + the amount due
-    lienCategories: Array.isArray(row.rec_lien_categories) ? row.rec_lien_categories.filter(Boolean) : [],
-    lienAmountDue: row.rec_lien_amount_due ?? undefined,
+    // seller.property_lien is every non-mortgage recorded document, not only
+    // liens (entity-graph-recorded-docs.js): UCC filings, affidavits, probate,
+    // lis pendens and contracts are split out as `filings`. lienCount is the
+    // number of distinct LIEN categories; documentCount every recorded filing.
+    lienCount: recDocs.liens.length,
+    lienCategories: recDocs.liens.map((d) => d.category),
+    liens: recDocs.liens.map((d) => d.label),
+    filings: recDocs.filings.map((d) => ({ category: d.category, class: d.class, label: d.label })),
+    documentCount: row.rec_lien_count ?? 0,
+    // the summary's amount sums ALL documents — a lien amount only when every document is a lien
+    lienAmountDue: recDocs.amountIsLiens ? row.rec_lien_amount_due ?? undefined : undefined,
     lastSaleDocType: row.rec_last_sale_doc_type || undefined,
     saleCount: row.rec_sale_count ?? 0,
     lastSaleDate: row.rec_last_sale_date || undefined,

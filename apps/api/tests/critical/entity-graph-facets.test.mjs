@@ -227,7 +227,8 @@ test('an owner whose joined ids are property EXPORT ids still draws its portfoli
       then(res, rej) {
         reads.push([name, ...filters.map((f) => f.join(':'))].join('|'))
         let data = []
-        if (name === 'properties' && filters.some(([op, c, v]) => op === 'eq' && c === 'master_owner_id' && v === 'mo_e3')) {
+        // the network reads the grid's own source (properties + recorded documents)
+        if (name === 'v_entity_graph_properties' && filters.some(([op, c, v]) => op === 'eq' && c === 'master_owner_id' && v === 'mo_e3')) {
           data = [{ property_id: '24507162', master_owner_id: 'mo_e3', property_address_full: '575 W Pecos Rd', estimated_value: 111363200, units_count: 392 }]
         }
         return Promise.resolve({ data }).then(res, rej)
@@ -239,8 +240,8 @@ test('an owner whose joined ids are property EXPORT ids still draws its portfoli
   assert.equal(n.properties.length, 1)
   assert.equal(n.properties[0].id, '24507162')
   assert.ok(n.graph.nodes.some((x) => x.id === 'property:24507162'))
-  assert.ok(reads.some((r) => r.startsWith('properties|in:property_id:prop_875d0ee2eacd14798bb4adf4')))
-  assert.ok(reads.some((r) => r === 'properties|eq:master_owner_id:mo_e3'))
+  assert.ok(reads.some((r) => r.startsWith('v_entity_graph_properties|in:property_id:prop_875d0ee2eacd14798bb4adf4')))
+  assert.ok(reads.some((r) => r === 'v_entity_graph_properties|eq:master_owner_id:mo_e3'))
 })
 
 test('network people carry their vendor contact-matching tags verbatim', async () => {

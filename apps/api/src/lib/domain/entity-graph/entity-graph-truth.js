@@ -83,40 +83,75 @@ export function equityTruth(row = {}) {
 }
 
 /**
- * 3. A REPAIR ESTIMATE IS SHOWN ONLY WHEN IT IS PLAUSIBLE (owner, 2026-10-08:
- *    "$71M on a $3M property").
+ * 3. THE VENDOR REPAIR ESTIMATE IS NOT AN ENTITY GRAPH FIELD (owner,
+ *    2026-10-08: "The repair est for the entity graph is completely fucked…
+ *    I told you this"; valuation lanes, BINDING 2026-10-07: SFR = LLC
+ *    investor cluster −13%, NO repairs; MLS ARV is a separate lane — repairs
+ *    only there; MF5+ per door).
  *
- *    ROOT CAUSE: the vendor's estimated_repair_cost is a flat per-sqft rate
- *    (estimated_repair_cost_per_sqft, e.g. $35 for "Structural") × the
- *    record's building_square_feet. On large / multi-parcel records that sqft
- *    is wrong (an 18-unit building recorded at 2,184,392 sqft → $76.5M), so
- *    the product is absurd. Measured 2026-10-08: 1,909 properties carry a
- *    repair estimate larger than their whole estimated value.
+ *    What the field is (measured 2026-10-08, 5% sample, 8,941 estimates):
+ *    estimated_repair_cost = a flat vendor tier ($15 / $35 / $75 per sqft —
+ *    p1..p99 of repair ÷ building sqft is exactly 35, 35, 35, 35, 35, 75, 75)
+ *    × the record's building_square_feet. It says nothing about the property
+ *    beyond its sqft and a tier, and where the sqft is wrong it is absurd
+ *    ($13M on a 392-unit $111M property; $76M on a $3.4M one).
  *
- *    The estimate is UNRELIABLE (withheld, with the reason) when the value is
- *    unknown, when it exceeds 60% of the value, or when the building sqft per
- *    unit is implausible (> 6,000 sqft/unit). Valuation lanes: a repair figure
- *    belongs only to the MLS-ARV lane — never the SFR investor-cluster lane —
- *    so Entity Graph labels it as a vendor reference, never as a valuation input.
+ *    So it is never shown by default — not in the grid, hover card, network,
+ *    exports, filters or sort. It survives ONLY as an "MLS ARV lane · vendor
+ *    reference" detail labelled "vendor estimate · unverified", and only for
+ *    the lanes where a repair figure means anything and when it passes
+ *    plausibility bounds taken from the data:
+ *      lane         Single Family (units ≤ 1) or Multi-Family 2–4 units —
+ *                   never MF5+ (per door), commercial or land
+ *      sqft / unit  400 – 4,000  (SFR p1 578 · p99 3,833; 2–4 p1 396 · p99 2,679)
+ *      $ / sqft     ≤ $75        (the vendor's top tier — more is arithmetic error)
+ *      $ / unit     ≤ $150,000   (SFR p99 $183K is the $75 tier on a wrong sqft)
+ *      share        ≤ 50% of the estimated value (SFR median 18%)
+ *    ~93% of SFR and ~93% of 2–4 estimates pass (5% sample); MF5+ is never applicable.
  */
-export const REPAIR_MAX_SHARE_OF_VALUE = 0.6
-export const REPAIR_MAX_SQFT_PER_UNIT = 6000
+export const REPAIR_LANE_REFERENCE_LABEL = 'vendor estimate · unverified'
+export const REPAIR_BOUNDS = Object.freeze({ minSqftPerUnit: 400, maxSqftPerUnit: 4000, maxPerSqft: 75, maxPerUnit: 150000, maxShareOfValue: 0.5 })
 
-export function repairTruth(row = {}) {
-  const repair = num(row.estimated_repair_cost)
-  if (repair === null || repair <= 0) return { value: null, status: 'unknown', reason: null }
-  const value = num(row.estimated_value)
-  const sqft = num(row.building_square_feet)
-  const units = Math.max(1, num(row.units_count) || 1)
-  if (value === null || value <= 0) return { value: null, status: 'unreliable', reason: 'no_value_to_check_against' }
-  if (sqft !== null && sqft / units > REPAIR_MAX_SQFT_PER_UNIT) return { value: null, status: 'unreliable', reason: 'building_sqft_implausible' }
-  if (repair > value * REPAIR_MAX_SHARE_OF_VALUE) return { value: null, status: 'unreliable', reason: 'exceeds_share_of_value' }
-  return { value: repair, status: 'vendor_estimate', reason: null }
+/** 'sfr' | 'mf2_4' | null — the only lanes a vendor repair reference may appear in. */
+export function repairReferenceLane(row = {}) {
+  const type = String(row.property_type ?? '').trim().toLowerCase()
+  const units = num(row.units_count)
+  if (type === 'single family' && (units === null || units <= 1)) return 'sfr'
+  if ((type === 'multi-family' || type === 'multifamily' || type === 'multi family') && units !== null && units >= 2 && units <= 4) return 'mf2_4'
+  return null
 }
 
-/** Replace a row's raw repair estimate with the checked one (+ status/reason columns). */
+/**
+ * @returns {{ value: number|null, status: 'unknown'|'not_applicable'|'unreliable'|'vendor_reference', reason: string|null, lane: string|null, label: string|null }}
+ */
+export function repairTruth(row = {}) {
+  const repair = num(row.estimated_repair_cost)
+  const lane = repairReferenceLane(row)
+  const out = (status, reason = null, value = null) => ({ value, status, reason, lane, label: value === null ? null : REPAIR_LANE_REFERENCE_LABEL })
+  if (repair === null || repair <= 0) return out('unknown')
+  if (!lane) return out('not_applicable', 'lane_without_repairs')
+  const value = num(row.estimated_value)
+  const sqft = num(row.building_square_feet)
+  const units = lane === 'sfr' ? 1 : num(row.units_count)
+  if (value === null || value <= 0) return out('unreliable', 'no_value_to_check_against')
+  if (sqft === null || sqft <= 0) return out('unreliable', 'no_building_sqft')
+  const perUnitSqft = sqft / units
+  if (perUnitSqft < REPAIR_BOUNDS.minSqftPerUnit || perUnitSqft > REPAIR_BOUNDS.maxSqftPerUnit) return out('unreliable', 'building_sqft_implausible')
+  if (repair / sqft > REPAIR_BOUNDS.maxPerSqft) return out('unreliable', 'rate_above_vendor_tiers')
+  if (repair / units > REPAIR_BOUNDS.maxPerUnit) return out('unreliable', 'per_unit_implausible')
+  if (repair > value * REPAIR_BOUNDS.maxShareOfValue) return out('unreliable', 'exceeds_share_of_value')
+  return out('vendor_reference', null, repair)
+}
+
+/**
+ * The vendor repair figure never travels as a property field: both raw
+ * columns are removed from a row, and a plausible SFR / 2–4 figure moves to
+ * `mls_arv_lane_reference` (label "vendor estimate · unverified").
+ */
 export function withRepairTruth(row) {
-  if (!row || typeof row !== 'object' || !('estimated_repair_cost' in row)) return row
+  if (!row || typeof row !== 'object') return row
+  if (!('estimated_repair_cost' in row) && !('estimated_repair_cost_per_sqft' in row)) return row
   const t = repairTruth(row)
-  return { ...row, estimated_repair_cost: t.value, estimated_repair_cost_status: t.status, estimated_repair_cost_reason: t.reason }
+  const { estimated_repair_cost: _r, estimated_repair_cost_per_sqft: _rate, ...rest } = row
+  return t.value === null ? rest : { ...rest, mls_arv_lane_reference: { vendor_repair_estimate: t.value, lane: t.lane, label: t.label } }
 }

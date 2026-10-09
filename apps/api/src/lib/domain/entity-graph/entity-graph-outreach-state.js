@@ -150,7 +150,7 @@ export function contactCandidates({ prospects = [], propertyOwnerId = null, grap
         inCampaignGraph: graphPhones.has(clean(ph.canonical_e164)),
       }))
     if (!phones.length) continue
-    out.push({ name: clean(p.full_name) || 'Linked person', resolution, evidence, matching: clean(p.matching_flags) || null, phones })
+    out.push({ prospectId: clean(p.prospect_id) || null, name: clean(p.full_name) || 'Linked person', resolution, evidence, matching: clean(p.matching_flags) || null, phones })
   }
   const rank = { resolved_owner: 0, graph_person: 1, linked_unresolved: 2 }
   return out.sort((a, b) => rank[a.resolution] - rank[b.resolution])
