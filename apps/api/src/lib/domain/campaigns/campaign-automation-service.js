@@ -54,6 +54,7 @@ import {
 import { evaluatePreSendEligibility } from '@/lib/domain/outbound/presend-eligibility-engine.js'
 import { resolveCampaignTargetReadiness } from '@/lib/domain/campaigns/campaign-target-readiness.js'
 import { evaluateOpenerReplyExclusion, loadOpenerReplyFacts, phoneKey, phoneLookupVariants } from '@/lib/domain/campaigns/opener-reply-exclusion.js'
+import { loadCampaignRecipientExclusions, isRecipientExcluded } from '@/lib/domain/campaigns/campaign-recipient-exclusions.js'
 import { isValidIanaTimezone } from '@/lib/domain/acquisition-brain/shadow-burst-timing.js'
 import { resolveTimezone } from '@/lib/sms/latency.js'
 import { campaignMarketIdentityPatch, summarizeCampaignMarketIdentity } from '@/lib/domain/campaigns/campaign-market-identity.js'
@@ -7133,7 +7134,17 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
       }
     }
 
-    const planned = await planCampaignTargetRows({ campaign, options, graph, targetLimit, deps })
+    // Fail closed BEFORE deleting existing targets: an unreadable exclusion
+    // list must never be treated as "no exclusions". Campaign-scoped recipient
+    // exclusions survive target regeneration.
+    const exclusionRead = await loadCampaignRecipientExclusions(supabase, campaignId)
+    if (!exclusionRead.ok) {
+      return { ok: false, error: exclusionRead.error, campaign_id: campaignId, blockers: [exclusionRead.error] }
+    }
+    const graphForBuild = exclusionRead.phones.size
+      ? { ...graph, rows: (graph.rows || []).filter((row) => !isRecipientExcluded(exclusionRead.phones, row)) }
+      : graph
+    const planned = await planCampaignTargetRows({ campaign, options, graph: graphForBuild, targetLimit, deps })
     const rows = planned.rows.map((row) => ({ ...row, campaign_id: campaignId }))
     await supabase.from('campaign_targets').delete().eq('campaign_id', campaignId)
 
@@ -8366,7 +8377,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     .limit(10000)
   if (targetError) throw targetError
 
-  const readyTargets = targets || []
+  const planExclusionRead = await loadCampaignRecipientExclusions(supabase, campaignId)
+  if (!planExclusionRead.ok) {
+    return { ok: false, error: planExclusionRead.error, campaign_id: campaignId, blockers: [planExclusionRead.error] }
+  }
+  // A target that was ready before an exclusion was added must still not be planned.
+  const readyTargets = (targets || []).filter((target) => !isRecipientExcluded(planExclusionRead.phones, target))
 
   /**
    * Containment is checked BEFORE the execution lock, before any run row and
