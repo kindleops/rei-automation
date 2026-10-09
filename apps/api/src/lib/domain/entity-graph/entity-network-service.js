@@ -458,7 +458,7 @@ function buildGraph({ anchor, owner, ownerNode, properties, entities, people, ph
     const liens = records.liens.slice(0, 6)
     for (const l of liens) {
       const id = `lien:${l.id}`
-      node({ id, type: 'lien', label: l.label, sub: [l.recorded ? String(l.recorded).slice(0, 4) : null, l.amountDue ? `$${Math.round(l.amountDue).toLocaleString()}` : null].filter(Boolean).join(' · '), meta: { distress: l.distress, category: l.category } })
+      node({ id, type: 'lien', label: l.label, sub: [l.recorded ? String(l.recorded).slice(0, 4) : null, l.amountDue ? `$${Math.round(l.amountDue).toLocaleString()}` : null].filter(Boolean).join(' · '), meta: { distress: l.distress, category: l.category, docClass: l.docClass, isLien: l.isLien, amountDue: l.amountDue, recorded: l.recorded } })
       edge(anchorProp, id, 'encumbered_by', 'Recorded against')
     }
     for (const sale of records.sales.slice(0, 4)) {

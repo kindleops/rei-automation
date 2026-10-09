@@ -37,8 +37,9 @@ export const ENTITY_GRAPH_PROPERTY_COLUMNS = Object.freeze(new Set([
   'year_built', 'effective_year_built', 'stories', 'total_bedrooms', 'total_baths', 'building_square_feet',
   'lot_acreage', 'lot_square_feet', 'building_condition', 'building_quality', 'garage', 'pool', 'basement',
   'heating_type', 'roof_cover', 'sewer', 'water', 'property_class',
-  'owner_name', 'owner_address_full', 'ownership_years', 'is_corporate_owner', 'out_of_state_owner', 'priority_tier',
-  'best_phone', 'best_email', 'sms_eligible', 'contact_status', 'best_language', 'timezone',
+  'owner_name', 'owner_address_full', 'ownership_years', 'is_corporate_owner', 'out_of_state_owner',
+  // (no priority_tier / best_phone / best_email / sms_eligible / contact_status / best_language / timezone:
+  // Podio-era copies on ~4% of properties — the owner.* / person.* / contact.* columns read the sources)
   'tax_delinquent', 'tax_delinquent_year', 'active_lien', 'is_hot_preforeclosure', 'seller_tags_text', 'acquisition_bucket',
   'equity_amount', 'total_loan_balance', 'assd_total_value', 'sale_price', 'sale_date', 'arv_estimate',
   'rent_estimate', 'cap_rate', 'ppsf', 'rehab_level',
@@ -48,12 +49,18 @@ export const ENTITY_GRAPH_PROPERTY_COLUMNS = Object.freeze(new Set([
   'equity_amount', 'total_loan_amt', 'total_loan_payment', 'tax_amt', 'tax_year', 'last_sale_doc_type',
   'air_conditioning', 'construction_type', 'county_land_use_code', 'exterior_walls', 'floor_cover', 'heating_fuel_type',
   'interior_walls', 'porch', 'deck', 'driveway', 'roof_type', 'legal_description', 'geographic_features',
-  'hoa1_name', 'hoa1_type', 'hoa_fee_amount', 'market_status_label', 'avg_sqft_per_unit', 'beds_per_unit', 'sqft_range',
+  'hoa1_name', 'hoa1_type', 'hoa_fee_amount', 'market_status_label',
   'assd_improvement_value', 'assd_land_value', 'assd_year', 'calculated_improvement_value', 'calculated_land_value',
   'calculated_total_value', 'lot_nbr', 'lot_size_depth_feet', 'lot_size_frontage_feet', 'num_of_fireplaces',
   'situs_census_tract', 'style', 'topography', 'sum_buildings_nbr', 'sum_commercial_units', 'sum_garage_sqft',
-  'original_property_type', 'asset_class', 'asset_subclass', 'market_region',
+  'asset_class', 'asset_subclass', 'market_region',
   'deal_list_label', 'source_list_label', 'source_list_category', 'property_export_id', 'canonical_market_id',
+  // owner field list 2026-10-09 (property use type, patio, vendor equity %; stories / other_rooms /
+  // property_use / land_use exist but are 0% — offered as "no data")
+  'property_type', 'property_use', 'land_use', 'patio', 'stories', 'other_rooms', 'equity_percent',
+  // legacy-derived, never offered: ai_score, offer_vs_loan, offer_vs_sale_price, options, contact_status,
+  // offer_ppsf/ppu/ppbd/ppls, search_profile_hash, sqft_range, avg_sqft_per_unit, beds_per_unit,
+  // original_property_type (a subset of property_type)
 ]))
 
 /**

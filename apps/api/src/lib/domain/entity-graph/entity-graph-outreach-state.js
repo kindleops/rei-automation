@@ -130,6 +130,67 @@ export const maskPhone = (value) => {
   return digits.length >= 4 ? `•••-${digits.slice(-4)}` : '•••'
 }
 
+/**
+ * ENTITY CONTACT NEEDING REVIEW (owner P0, 2026-10-09): 24,717 properties
+ * held by an entity have a contact whose ROLE at the entity is uncorroborated
+ * (seller.property_entity_contact_v1 requires_review, contact_role unknown,
+ * ENT_ROLE_UNCORROBORATED) — 20,059 of them with a selected phone. The grid
+ * said "No · Entity contact review" / "No phone" as if there were no contact.
+ * They DISPLAY their candidate: the entity, the selected person, the phone
+ * masked to its last 4, whether it is callable, role "unknown · needs review"
+ * and the review reasons. Display only: SMS eligibility stays the campaign
+ * target graph's verdict (not loosened); the role resolver is fixed elsewhere.
+ */
+export const ENTITY_REVIEW_REASON_LABEL = Object.freeze({
+  ENT_ROLE_UNCORROBORATED: "The person's role at the entity is not corroborated",
+  ENT_NO_REGISTRY_LINK: 'No state business-registry link for the entity',
+  ENT_NO_COMPLIANT_CHANNEL: 'No compliant contact channel',
+  ENT_NO_HUMAN_CANDIDATE: 'No person identified at the entity',
+  ENT_DISSOLVED: 'The entity is dissolved',
+})
+const ROLE_LABEL = { principal: 'Principal', authorized_representative: 'Authorized representative', entity_mailing_contact: 'Entity mailing contact', unknown: 'Unknown' }
+
+export const ENTITY_CONTACT_SQL = `
+  select ec.property_id, ec.owning_entity_name, ec.entity_status, ec.selected_person_key, ec.contact_role,
+         ec.selected_phone, ec.phone_callable, (ec.selected_email is not null and ec.selected_email <> '') as has_email,
+         ec.email_usable, ec.exclusion_reasons, ec.requires_review, p.full_name as person_name
+    from seller.property_entity_contact_v1 ec
+    left join lateral (select full_name from public.prospects pr where pr.individual_key = ec.selected_person_key limit 1) p on true
+   where ec.property_id = any($1::text[])`
+
+/** Shape one seller.property_entity_contact_v1 row for display. The phone leaves only masked. */
+export function shapeEntityContact(row) {
+  if (!row) return null
+  const role = clean(row.contact_role) || 'unknown'
+  const review = row.requires_review !== false
+  const reasons = (Array.isArray(row.exclusion_reasons) ? row.exclusion_reasons : []).map(clean).filter(Boolean)
+  return {
+    entityName: clean(row.owning_entity_name) || null,
+    entityStatus: clean(row.entity_status) || null,
+    person: clean(row.person_name) || (clean(row.selected_person_key) ? 'Selected person (name not on file)' : null),
+    phoneMasked: clean(row.selected_phone) ? maskPhone(row.selected_phone) : null,
+    phoneCallable: row.phone_callable === true,
+    hasEmail: row.has_email === true,
+    emailUsable: row.email_usable === true,
+    role,
+    roleLabel: review && role === 'unknown' ? 'Unknown · needs review' : `${ROLE_LABEL[role] || role}${review ? ' · needs review' : ''}`,
+    requiresReview: review,
+    reviewReasons: reasons.map((code) => ({ code, label: ENTITY_REVIEW_REASON_LABEL[code] || code.replace(/^ENT_/, '').replace(/_/g, ' ').toLowerCase() })),
+  }
+}
+
+async function readEntityContacts(ids, query) {
+  const { hasDatabaseUrl, queryWithTimeout } = await import('@/lib/postgres/client.js')
+  const q = query || (hasDatabaseUrl() ? queryWithTimeout : null)
+  if (!q) return null
+  const out = new Map()
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const res = await q(ENTITY_CONTACT_SQL, [ids.slice(i, i + CHUNK)], 8_000)
+    for (const row of res?.rows || []) out.set(clean(row.property_id), shapeEntityContact(row))
+  }
+  return out
+}
+
 export function contactCandidates({ prospects = [], propertyOwnerId = null, graphRows = [] } = {}) {
   const graphPeople = new Set(graphRows.map((r) => clean(r.seller_person_key)).filter(Boolean))
   const graphPhones = new Set(graphRows.map((r) => clean(r.canonical_e164)).filter(Boolean))
@@ -187,6 +248,12 @@ export async function getEntityGraphOutreachState(params = {}, deps = {}) {
       return result?.blocked || new Set()
     }),
   ])
+
+  // the entity contact behind every review-blocked property (display only; direct PG, keyed by the PK)
+  const reviewIds = review ? ids.filter((id) => review.has(id)) : []
+  const entityContacts = reviewIds.length
+    ? await guard('entity_contact', () => readEntityContacts(reviewIds, deps.query))
+    : null
 
   // contact discovery only where the graph has no phone for the property
   const gapIds = graphRows === null ? [] : ids.filter((id) => {
@@ -271,6 +338,8 @@ export async function getEntityGraphOutreachState(params = {}, deps = {}) {
             candidates: discovered.slice(0, 6),
           }
         : null,
+      // the entity's candidate contact when its role needs review (never "no contact")
+      entityContact: entityContacts?.get(id) ?? null,
       lastContact: contact,
       stage,
       status,
