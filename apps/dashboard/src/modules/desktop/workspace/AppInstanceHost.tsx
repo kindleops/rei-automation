@@ -45,8 +45,22 @@ function entry(key: string, pathname: string) {
   return e
 }
 
+/**
+ * Route data is keyed by the ROUTE, not the pathname (owner, 2026-10-08:
+ * "after loading ~1,200 rows, clicking a property reloads the whole list and
+ * loses scroll position"). A loader takes no arguments, so two paths of one
+ * route share its data — keyed by pathname, /entity-graph → /entity-graph/
+ * property/:id was a NEW entry in 'loading', the pane rendered its skeleton,
+ * and the Entity Graph unmounted (loaded pages, scroll, selection gone).
+ */
+export function routeDataKey(pathname: string, attempt: number): string {
+  let routeKey = pathname
+  try { routeKey = resolveRoute(pathname).path } catch { /* unknown path: its own entry */ }
+  return `${routeKey}#${attempt}`
+}
+
 function useRouteData(pathname: string, attempt: number): RouteData {
-  const key = `${pathname}#${attempt}`
+  const key = routeDataKey(pathname, attempt)
   const e = entry(key, pathname)
   return useSyncExternalStore(
     (l) => { e.listeners.add(l); return () => { e.listeners.delete(l) } },
