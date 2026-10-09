@@ -296,14 +296,14 @@ async function searchProspects(supabase, query, limit) {
   return results
 }
 
-async function searchPhones(supabase, query, limit) {
+async function searchPhones(supabase, query, limit, narrow = (q) => q) {
   const results = []
   const e164 = normalizePhoneE164(query)
   const digits = clean(query).replace(/\D/g, '')
   if (!e164 && digits.length < 7) return results
 
   if (e164) {
-    const { data } = await supabase.from('phones').select(PHONE_SUMMARY_SELECT).eq('canonical_e164', e164).limit(3)
+    const { data } = await narrow(supabase.from('phones').select(PHONE_SUMMARY_SELECT)).eq('canonical_e164', e164).limit(3)
     for (const row of data || []) {
       results.push(buildSearchResult({
         entityType: 'phone',
@@ -322,9 +322,9 @@ async function searchPhones(supabase, query, limit) {
   }
 
   const like = `%${digits.slice(-10)}%`
-  const { data: fuzzy } = await supabase
+  const { data: fuzzy } = await narrow(supabase
     .from('phones')
-    .select(PHONE_SUMMARY_SELECT)
+    .select(PHONE_SUMMARY_SELECT))
     .or(`phone.ilike.${like},canonical_e164.ilike.%${e164 || digits}%`)
     .limit(limit)
   for (const row of fuzzy || []) {
@@ -1202,12 +1202,12 @@ async function browseBuyers(supabase, { cursor, pageSize, sortBy, ascending, fil
   return paginatedResponse(rows.map((row) => buyerToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
 
-async function searchBuyers(supabase, query, limit) {
+async function searchBuyers(supabase, query, limit, narrow = (q) => q) {
   const q = normalizeSearchQuery(query)
   if (!q || q.length < 3 || /^\d+$/.test(q)) return []
-  const { data } = await supabase
+  const { data } = await narrow(supabase
     .from('eg_buyer_index')
-    .select(BUYER_SELECT)
+    .select(BUYER_SELECT))
     .ilike('search_text', `%${q.toUpperCase()}%`)
     .order('acquisition_count', { ascending: false, nullsFirst: false })
     .limit(limit)
@@ -1800,6 +1800,26 @@ export async function searchEntityGraph(params = {}, deps = {}) {
     return browseEntityGraph(params, deps)
   }
 
+  /**
+   * A SEARCH INSIDE A COHORT IS STILL THE COHORT (filter audit 2026-10-09).
+   * The search path ignored every filter: with "Probate" + "Out-of-state" on,
+   * typing a city returned that city's whole table while the header still
+   * read "· 2 filters". The tab's filters now narrow the search exactly as
+   * they narrow browse, and a filter the search cannot apply fails closed.
+   */
+  const browseFilters = parseBrowseFilters(params)
+  const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow(tab, params)
+  const cohort = {
+    properties: (q) => applyEntityGraphFieldFilters(applyPropertyFilters(q, browseFilters), fieldFilters),
+    master_owners: (q) => applyEntityGraphFieldFilters(applyOwnerFilters(q, browseFilters), fieldFilters),
+    people: (q) => applyEntityGraphFieldFilters(applyProspectFilters(q, browseFilters), fieldFilters),
+    buyers: (q) => applyEntityGraphFieldFilters(applyBuyerFilters(q, browseFilters), fieldFilters),
+    contact_methods: (q) => applyEntityGraphFieldFilters(applyPhoneFilters(q, browseFilters), fieldFilters),
+  }
+  if (fieldFilters.length && (tab === 'organizations' || (tab === 'contact_methods' && (subtype === 'email' || query.includes('@'))))) {
+    throw new EntityGraphUnsupportedFilterError(fieldFilters.map((entry) => ({ field_key: entry.field_key, reason: 'search_has_no_field_filters_on_this_list' })))
+  }
+
   if (tab === 'properties') {
     const q = query
     const predicate = await propertySearchPredicateWithMarket(q, deps)
@@ -1812,9 +1832,9 @@ export async function searchEntityGraph(params = {}, deps = {}) {
      * estimate. ('planned' reported 17 matches for a term with 2, which is the
      * same class of lie as a chip that disagrees with its list.)
      */
-    let dbQuery = predicate.apply(
+    let dbQuery = cohort.properties(predicate.apply(
       excludeTestProperties(supabase.from(PROPERTY_BROWSE_SOURCE).select(PROPERTY_BROWSE_SELECT, { count: 'exact' }), { includeTest: ['1', 'true'].includes(lower(params.include_test)) }),
-    )
+    ))
       .order('estimated_value', { ascending: false, nullsFirst: false })
       .range(cursor, cursor + pageSize - 1)
     const { data, error, count } = await dbQuery
@@ -1828,9 +1848,9 @@ export async function searchEntityGraph(params = {}, deps = {}) {
 
   if (tab === 'master_owners') {
     const like = `%${query}%`
-    let ownerQuery = excludeTestOwners(supabase
+    let ownerQuery = cohort.master_owners(excludeTestOwners(supabase
       .from('master_owners')
-      .select(OWNER_SUMMARY_SELECT, { count: 'exact' }), { includeTest: ['1', 'true'].includes(lower(params.include_test)) })
+      .select(OWNER_SUMMARY_SELECT, { count: 'exact' }), { includeTest: ['1', 'true'].includes(lower(params.include_test)) }))
     ownerQuery = looksLikeEntityId(query)
       ? ownerQuery.eq('master_owner_id', query)
       : ownerQuery.ilike('display_name', like)
@@ -1844,9 +1864,9 @@ export async function searchEntityGraph(params = {}, deps = {}) {
 
   if (tab === 'people') {
     const like = `%${query}%`
-    let peopleQuery = supabase
+    let peopleQuery = cohort.people(supabase
       .from('prospects')
-      .select(PROSPECT_SUMMARY_SELECT, { count: 'exact' })
+      .select(PROSPECT_SUMMARY_SELECT, { count: 'exact' }))
     // full_name already contains the first name, so the name probe is one
     // trigram-indexable column rather than a four-way OR.
     peopleQuery = looksLikeEntityId(query)
@@ -1861,7 +1881,7 @@ export async function searchEntityGraph(params = {}, deps = {}) {
   }
 
   if (tab === 'buyers') {
-    const merged = dedupeResults(sortResults(await searchBuyers(supabase, query, pageSize + cursor), query))
+    const merged = dedupeResults(sortResults(await searchBuyers(supabase, query, pageSize + cursor, cohort.buyers), query))
     const page = merged.slice(cursor, cursor + pageSize)
     return paginatedResponse(page, merged.length, cursor, pageSize)
   }
@@ -1878,7 +1898,7 @@ export async function searchEntityGraph(params = {}, deps = {}) {
       const page = merged.slice(cursor, cursor + pageSize)
       return paginatedResponse(page, merged.length, cursor, pageSize)
     }
-    const merged = dedupeResults(sortResults(await searchPhones(supabase, query, pageSize + cursor), query))
+    const merged = dedupeResults(sortResults(await searchPhones(supabase, query, pageSize + cursor, cohort.contact_methods), query))
     const page = merged.slice(cursor, cursor + pageSize)
     return paginatedResponse(page, merged.length, cursor, pageSize)
   }

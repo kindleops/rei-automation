@@ -34,6 +34,7 @@ import {
   getCampaignFieldDefinition,
   normalizeCampaignFieldKey,
 } from '@/lib/domain/campaigns/campaign-field-catalog.js'
+import { JUDGMENT_CATEGORIES, LIEN_CATEGORIES } from './entity-graph-recorded-docs.js'
 import {
   applySupabaseFilters,
   EMPTY_FILTER_OPERATORS,
@@ -130,6 +131,23 @@ export const ENTITY_GRAPH_WITHHELD_FIELDS = Object.freeze(new Set([
   'properties.structured_motivation_score',
   'properties.deal_strength_score',
   'properties.tag_distress_score',
+  /**
+   * The vendor repair estimate (owner valuation lanes, 2026-10-09): a flat
+   * per-sqft rate × the record's building sqft — $13M on a 392-unit property,
+   * and 91% of rows carry no per-sqft rate at all. Repairs belong to the MLS
+   * ARV lane only, so Entity Graph neither filters nor sorts on them; the
+   * column, where shown, is a "vendor estimate · unverified" reference.
+   */
+  'properties.estimated_repair_cost',
+  'properties.estimated_repair_cost_per_sqft',
+  // internal plumbing, not a question an operator asks
+  'properties.search_profile_hash',
+  /**
+   * prospects.mob is the month of birth as YYYYMM text; the catalog labels it
+   * "Age" with text operators, so "Age contains 65" matched birth months. The
+   * age question is prospects.age_years (a month-of-birth range).
+   */
+  'prospects.mob',
 ]))
 
 const BOOL_OPS = Object.freeze([{ key: 'is_true', label: 'Yes' }, { key: 'is_false', label: 'No' }])
@@ -205,18 +223,30 @@ export const ENTITY_GRAPH_RECORD_FIELDS = Object.freeze([
   R('Mortgages & Debt', 'rec_has_va', 'VA loan', 'boolean'),
   R('Mortgages & Debt', 'rec_has_seller_financing', 'Seller-financed', 'boolean'),
   R('Mortgages & Debt', 'rec_has_adjustable', 'Adjustable / variable rate', 'boolean'),
-  R('Liens & Notices', 'rec_lien_count', 'Recorded liens & notices', 'number'),
-  R('Liens & Notices', 'rec_lien_amount_due', 'Lien amount due', 'number', { format: 'money' }),
-  R('Liens & Notices', 'rec_lien_categories', 'Document category', 'array'),
-  R('Liens & Notices', 'rec_has_probate', 'Probate filing', 'boolean'),
-  R('Liens & Notices', 'rec_has_lis_pendens', 'Lis pendens', 'boolean'),
-  R('Liens & Notices', 'rec_has_death_record', 'Death record / affidavit', 'boolean'),
-  R('Liens & Notices', 'rec_has_divorce_record', 'Divorce record', 'boolean'),
-  R('Liens & Notices', 'rec_has_judgment', 'Judgment', 'boolean'),
-  R('Liens & Notices', 'rec_has_mechanics_lien', "Mechanic's lien", 'boolean'),
-  R('Liens & Notices', 'rec_has_tax_lien', 'Tax lien', 'boolean'),
-  R('Liens & Notices', 'rec_has_hoa_lien', 'HOA lien', 'boolean'),
-  R('Liens & Notices', 'rec_has_default_notice', 'Notice of default', 'boolean'),
+  /**
+   * seller.property_lien is EVERY recorded non-mortgage, non-sale document —
+   * UCC financing statements, affidavits, probate, lis pendens, contracts — so
+   * rec_lien_count is a document count, not a lien count: on a 5% slice
+   * "liens ≥ 1" matched 1,266 properties of which 444 carry an actual lien
+   * (audit 2026-10-09). The lien question is records.has_lien (derived, below).
+   */
+  R('Recorded documents & liens', 'rec_lien_count', 'Recorded documents (non-mortgage, any type)', 'number', {
+    description: 'Every recorded non-mortgage, non-sale document on the parcel: liens and judgments, but also UCC financing statements, affidavits, probate, lis pendens, orders and contracts. Use "Has a recorded lien" for liens.',
+  }),
+  R('Recorded documents & liens', 'rec_lien_amount_due', 'Amount due on recorded documents (all types)', 'number', {
+    format: 'money',
+    caution: 'Summed across every recorded document type (agreements and contracts included), so it is not a lien balance.',
+  }),
+  R('Recorded documents & liens', 'rec_lien_categories', 'Recorded document type', 'array'),
+  R('Recorded documents & liens', 'rec_has_probate', 'Probate filing', 'boolean'),
+  R('Recorded documents & liens', 'rec_has_lis_pendens', 'Lis pendens', 'boolean'),
+  R('Recorded documents & liens', 'rec_has_death_record', 'Death record / affidavit', 'boolean'),
+  R('Recorded documents & liens', 'rec_has_divorce_record', 'Divorce record', 'boolean'),
+  R('Recorded documents & liens', 'rec_has_judgment', 'Judgment', 'boolean'),
+  R('Recorded documents & liens', 'rec_has_mechanics_lien', "Mechanic's lien", 'boolean'),
+  R('Recorded documents & liens', 'rec_has_tax_lien', 'Tax lien', 'boolean'),
+  R('Recorded documents & liens', 'rec_has_hoa_lien', 'HOA lien', 'boolean'),
+  R('Recorded documents & liens', 'rec_has_default_notice', 'Notice of default', 'boolean'),
   R('Sale History', 'rec_sale_count', 'Recorded sales', 'number'),
   R('Sale History', 'rec_last_sale_date', 'Last sale date', 'date'),
   R('Sale History', 'rec_last_sale_price', 'Last sale price', 'number', { format: 'money' }),
@@ -315,7 +345,40 @@ export const ENTITY_GRAPH_BUYER_FIELDS = Object.freeze([
  *     "Age bucket" compiles to prospects.mob, the month of birth as YYYYMM, so
  *     a bucket value never matched. An age range is a month-of-birth range.
  */
+const YES_ONLY = Object.freeze([{ key: 'is_true', label: 'Yes' }])
+
 export const ENTITY_GRAPH_DERIVED_FIELDS = Object.freeze([
+  /**
+   * properties.tax_delinquent_any — the vendor carries tax delinquency twice:
+   * the tax_delinquent column and a "Tax Delinquent" token in
+   * property_flags_text. They disagree (5% slice 2026-10-09: column 453, flag
+   * 601, both 289), and the grid's Signals badge reads EITHER, so "Tax
+   * delinquent" on the column alone dropped 312 properties the grid labels
+   * tax delinquent. Either source counts.
+   */
+  syntheticField('properties', 'properties', 'Distress & Condition', 'tax_delinquent_any', 'Tax delinquent (vendor column or flag)', 'boolean', {
+    key: 'properties.tax_delinquent_any',
+    derived: 'tax_delinquent_any',
+    operators: YES_ONLY,
+    description: 'The vendor tax_delinquent column OR the "Tax Delinquent" property flag — the same rule the Signals badge uses.',
+  }),
+  /**
+   * records.has_lien — an actual lien among the recorded documents
+   * (entity-graph-recorded-docs.js LIEN_CATEGORIES: general, mechanic's,
+   * assessment, HOA, state / federal tax, improvement district, levy, support).
+   * Judgments are their own filter (records.has_judgment).
+   */
+  syntheticField('records', 'properties', 'Recorded documents & liens', 'rec_lien_categories', 'Has a recorded lien', 'boolean', {
+    key: 'records.has_lien',
+    derived: 'recorded_lien',
+    operators: YES_ONLY,
+    description: 'A recorded lien: general, mechanic\u2019s, assessment, HOA, state / federal tax, improvement-district, levy or support lien. UCC filings, affidavits, probate, lis pendens and contracts are not liens; judgments have their own filter.',
+  }),
+  syntheticField('records', 'properties', 'Recorded documents & liens', 'rec_lien_categories', 'Has a recorded lien or judgment', 'boolean', {
+    key: 'records.has_lien_or_judgment',
+    derived: 'recorded_lien_or_judgment',
+    operators: YES_ONLY,
+  }),
   syntheticField('properties', 'properties', 'Value & Equity', 'known_equity_percent', 'Known equity %', 'number', {
     key: 'properties.known_equity_percent',
     derived: 'known_equity',
@@ -367,7 +430,6 @@ const TOKEN_OPS = Object.freeze([
 /** Raw columns that answer, but not the question their label suggests. Shown with the field. */
 export const ENTITY_GRAPH_FIELD_CAUTIONS = Object.freeze({
   'properties.equity_percent': 'Vendor value: reads 100% whenever no loan is on file. Use "Known equity %" to filter on equity that is actually known.',
-  'properties.estimated_repair_cost': 'Vendor $/sqft × building sqft — absurd where the recorded sqft is wrong (1,909 properties exceed their whole value). Display withholds implausible values; a repair figure belongs to the MLS-ARV lane only.',
 })
 
 export const ENTITY_GRAPH_FILTERABLE_TABS = Object.freeze(Object.keys(ENTITY_GRAPH_FILTER_SOURCE_BY_TAB))
@@ -557,8 +619,10 @@ export function applyEntityGraphFieldFilters(query, resolved = []) {
   const arrays = resolved.filter((entry) => type(entry) === 'array')
   const flags = resolved.filter(isTokenMatch)
   const derived = resolved.filter((entry) => entry.fieldDefinition?.derived)
+  const isNotAnyOfText = (entry) => entry.operator === 'is_not_any_of' && ['text', 'enum'].includes(type(entry)) && !entry.fieldDefinition?.derived
+  const notAnyOf = resolved.filter(isNotAnyOfText)
   const scalar = resolved
-    .filter((entry) => type(entry) !== 'array' && !isTokenMatch(entry) && !entry.fieldDefinition?.derived)
+    .filter((entry) => type(entry) !== 'array' && !isTokenMatch(entry) && !entry.fieldDefinition?.derived && !isNotAnyOfText(entry))
     // a token field's empty / not-empty test is an ordinary text predicate
     .map((entry) => (type(entry) === 'flags' ? { ...entry, fieldDefinition: { ...entry.fieldDefinition, type: 'text' } } : entry))
   let next = scalar.length ? applySupabaseFilters(query, scalar) : query
@@ -569,8 +633,23 @@ export function applyEntityGraphFieldFilters(query, resolved = []) {
     if (parts.length) next = next.or(parts.join(','))
   }
   for (const entry of derived) {
-    if (entry.fieldDefinition.derived === 'known_equity') next = applyKnownEquity(next, entry)
-    else if (entry.fieldDefinition.derived === 'age_from_mob') next = applyAgeFromMob(next, entry)
+    const kind = entry.fieldDefinition.derived
+    if (kind === 'known_equity') next = applyKnownEquity(next, entry)
+    else if (kind === 'age_from_mob') next = applyAgeFromMob(next, entry)
+    else if (kind === 'tax_delinquent_any') {
+      const flag = flagTokenPatterns('Tax Delinquent').map((p) => `property_flags_text.ilike.${orFilterValue(p)}`)
+      next = next.or(['tax_delinquent.is.true', ...flag].join(','))
+    } else if (kind === 'recorded_lien') next = next.overlaps('rec_lien_categories', [...LIEN_CATEGORIES])
+    else if (kind === 'recorded_lien_or_judgment') next = next.overlaps('rec_lien_categories', [...LIEN_CATEGORIES, ...JUDGMENT_CATEGORIES])
+  }
+  for (const entry of notAnyOf) {
+    // "is not any of" = every other row, the ones with no value included, and
+    // a value with a comma ("Miami, FL") quoted. The shared compiler wrote
+    // not.in.(Miami, FL) — two values "Miami" and "FL" — so it excluded
+    // nothing, and NOT IN dropped every blank row (audit 2026-10-09:
+    // market_region "is not Houston, TX" returned 389 of 8,656).
+    const values = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(Boolean)
+    if (values.length) next = next.or(`${entry.source_column}.is.null,${entry.source_column}.not.in.(${values.map(orFilterValue).join(',')})`)
   }
   for (const entry of arrays) {
     const values = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(Boolean)

@@ -121,14 +121,17 @@ export function createSqlRecorder() {
       if (op === 'neq') return `${ident(column)} is not null`
       throw new FacetUntranslatable(`null ${op}`)
     }
-    // Text comparison keeps typed columns honest without knowing their type:
-    // equality on a boolean/number column compares its text form.
+    // The parameter is sent UNTYPED, so Postgres reads it as the column's own
+    // type — the same comparison PostgREST makes. Comparing the column's TEXT
+    // form was wrong for numeric(…, 2) columns: total_loan_balance = 0 stores
+    // as '0.00', so `total_loan_balance.eq.0` (the known-equity filter's
+    // no-loan branch) matched nothing in the facet counts while the list,
+    // through PostgREST, matched 4,276 of 8,656 sampled rows (audit 2026-10-09).
     if (typeof value === 'boolean') {
       if (op !== 'eq' && op !== 'neq') throw new FacetUntranslatable(`boolean ${op}`)
       return `${ident(column)} ${op === 'eq' ? 'is' : 'is not'} ${value ? 'true' : 'false'}`
     }
     if (typeof value === 'number') return `${ident(column)} ${sqlOp} ${bind(value)}::numeric`
-    if (op === 'eq' || op === 'neq') return `${ident(column)}::text ${sqlOp} ${bind(String(value))}`
     return `${ident(column)} ${sqlOp} ${bind(String(value))}`
   }
 
@@ -143,9 +146,10 @@ export function createSqlRecorder() {
   const inClause = (column, values, negate = false) => {
     const list = (Array.isArray(values) ? values : parseInList(values)).map((v) => String(v))
     if (!list.length) throw new FacetUntranslatable('empty in')
+    // untyped array parameter: Postgres resolves it as an array of the column's type
     return negate
-      ? `not (${ident(column)}::text = any(${bind(list)}::text[]))`
-      : `${ident(column)}::text = any(${bind(list)}::text[])`
+      ? `not (${ident(column)} = any(${bind(list)}))`
+      : `${ident(column)} = any(${bind(list)})`
   }
 
   const likeClause = (column, pattern, insensitive = true) => `${ident(column)} ${insensitive ? 'ilike' : 'like'} ${bind(String(pattern).replace(/\*/g, '%'))}`

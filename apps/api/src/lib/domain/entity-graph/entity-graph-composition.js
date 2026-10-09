@@ -22,6 +22,7 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
   applyEntityGraphFieldFilters,
+  resolveEntityGraphFieldFilters,
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
 import { applyBuyerFilters, applyOwnerFilters, applyPhoneFilters, applyPropertyFilters, applyProspectFilters, parseBrowseFilters } from './entity-graph-service.js'
@@ -54,7 +55,18 @@ const PROPERTY_DIMENSIONS = [
   { key: 'county', label: 'County', group: 'Geography', kind: 'top', column: 'property_address_county_name', filterKey: 'properties.property_address_county_name' },
   { key: 'city', label: 'City', group: 'Geography', kind: 'top', column: 'property_address_city', filterKey: 'properties.property_address_city' },
   { key: 'value', label: 'Estimated value', group: 'Value', kind: 'banded', column: 'estimated_value', format: 'money', buckets: bands([100000, 250000, 500000, 1000000, 5000000], money) },
-  { key: 'equity', label: 'Equity', group: 'Value', kind: 'banded', column: 'equity_percent', format: 'percent', buckets: bands([0, 20, 40, 60, 80], (n) => `${n}%`) },
+  /**
+   * KNOWN equity (equity_known_v1), not the vendor equity_percent: the raw
+   * column reads 100% wherever no loan is on file, so "80%+" counted every
+   * unknown-equity property (audit 2026-10-09). Each band is the derived
+   * Known-equity filter; unknown equity lands in "Not recorded".
+   */
+  { key: 'equity', label: 'Known equity', group: 'Value', kind: 'banded', column: 'equity_percent', format: 'percent', derivedKey: 'properties.known_equity_percent', buckets: [
+    { key: 'lt_0', label: 'Under 0%', lte: -0.0001 },
+    { key: '0_20', label: '0%–20%', gte: 0, lt: 20 }, { key: '20_40', label: '20%–40%', gte: 20, lt: 40 },
+    { key: '40_60', label: '40%–60%', gte: 40, lt: 60 }, { key: '60_80', label: '60%–80%', gte: 60, lt: 80 },
+    { key: 'gte_80', label: '80%+', gte: 80 },
+  ] },
   { key: 'year_built', label: 'Year built', group: 'Asset', kind: 'banded', column: 'year_built', buckets: bands([1940, 1960, 1980, 2000, 2010], String) },
   { key: 'units', label: 'Units', group: 'Asset', kind: 'banded', column: 'units_count', buckets: [
     { key: '1', label: '1', gte: 0, lt: 2 }, { key: '2', label: '2', gte: 2, lt: 3 }, { key: '3_4', label: '3–4', gte: 3, lt: 5 },
@@ -222,7 +234,11 @@ export async function buildEntityGraphComposition(params = {}, deps = {}) {
   )
   const count = async (bucket) => {
     let query = base(config.countColumn, { count: 'exact', head: true })
-    if (bucket) query = applyBucket(query, dimension.column, bucket)
+    if (bucket && dimension.derivedKey) {
+      const { resolved, unsupported } = resolveEntityGraphFieldFilters(tab, [bucketFilter(dimension, bucket)])
+      if (unsupported.length) return null
+      query = applyEntityGraphFieldFilters(query, resolved)
+    } else if (bucket) query = applyBucket(query, dimension.column, bucket)
     const { count: n, error } = await query
     return error ? null : (n ?? null)
   }
@@ -406,6 +422,12 @@ function bucketFilter(dimension, bucket) {
     || (prefix ? `${prefix}.${column}` : TAB_CONFIG.buyers.dimensions.includes(dimension) ? `buyers.${column}` : `properties.${column}`)
   if (dimension.kind === 'top') {
     return dimension.filterKey ? { field_key: dimension.filterKey, operator: 'is_any_of', value: [bucket.value] } : null
+  }
+  if (dimension.derivedKey) {
+    if (bucket.gte !== undefined && bucket.lt !== undefined) return { field_key: dimension.derivedKey, operator: 'between', value: [bucket.gte, bucket.lt - 0.0001] }
+    if (bucket.gte !== undefined) return { field_key: dimension.derivedKey, operator: 'gte', value: bucket.gte }
+    if (bucket.lte !== undefined) return { field_key: dimension.derivedKey, operator: 'lte', value: bucket.lte }
+    return null
   }
   const column = bucket.column || dimension.column
   if (bucket.notNull) return { field_key: colKey(column), operator: 'is_not_empty', value: null }

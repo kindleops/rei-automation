@@ -142,7 +142,7 @@ test('composition: exact counts per band, and a tap becomes a builder field filt
     from: () => {
       const filters = []
       const q = {
-        select() { return q }, eq(c, v) { filters.push(['eq', c, v]); return q }, gte(c, v) { filters.push(['gte', c, v]); return q },
+        select() { return q }, eq(c, v) { filters.push(['eq', c, v]); return q }, gte(c, v) { filters.push(['gte', c, v]); return q }, gt(c, v) { filters.push(['gt', c, v]); return q },
         lt(c, v) { filters.push(['lt', c, v]); return q }, lte() { return q }, ilike() { return q }, or() { return q }, not() { return q },
         is() { return q }, in() { return q }, overlaps() { return q }, contains() { return q }, order() { return q }, range() { return q }, limit() { return q },
         then(res, rej) {
@@ -157,7 +157,12 @@ test('composition: exact counts per band, and a tap becomes a builder field filt
   const c = await buildEntityGraphComposition({ tab: 'properties', dimension: 'equity' }, { supabase: client })
   assert.equal(c.total, 100)
   assert.equal(c.dimension.kind, 'banded')
+  // KNOWN equity (equity_known_v1), never the vendor equity_percent that reads 100% with no loan on file
+  assert.equal(c.dimension.label, 'Known equity')
   const band = c.buckets.find((b) => b.key === '20_40')
-  assert.deepEqual(band.filter, { field_key: 'properties.equity_percent', operator: 'between', value: [20, 39.9999] })
+  assert.deepEqual(band.filter, { field_key: 'properties.known_equity_percent', operator: 'between', value: [20, 39.9999] })
+  assert.deepEqual(c.buckets.find((b) => b.key === 'lt_0').filter, { field_key: 'properties.known_equity_percent', operator: 'lte', value: -0.0001 })
+  // each band count ran the known-equity predicate (a loan on file AND a value), not a bare equity_percent range
+  assert.ok(counts.some((f) => f.some(([op, col]) => op === 'gt' && col === 'total_loan_balance')))
   assert.ok(getCompositionCatalog('buyers').dimensions.some((d) => d.key === 'roles'))
 })

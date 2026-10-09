@@ -71,7 +71,7 @@ test('token patterns and or-values', () => {
 test('the facet recorder reads nested and()/or() groups and quoted values', () => {
   assert.deepEqual(splitLogicalParts('a.eq.1,and(b.gt.0,c.lt.2),d.ilike."x, y"'), ['a.eq.1', 'and(b.gt.0,c.lt.2)', 'd.ilike."x, y"'])
   const { where, params } = compileFacetWhere((b) => b.or('and(total_loan_balance.gt.0,equity_percent.gte.60),and(estimated_value.gt.0,or(total_loan_balance.is.null,total_loan_balance.eq.0))'))
-  assert.equal(where, 'where (("total_loan_balance" > $1 and "equity_percent" >= $2) or ("estimated_value" > $3 and ("total_loan_balance" is null or "total_loan_balance"::text = $4)))')
+  assert.equal(where, 'where (("total_loan_balance" > $1 and "equity_percent" >= $2) or ("estimated_value" > $3 and ("total_loan_balance" is null or "total_loan_balance" = $4)))')
   assert.deepEqual(params, ['0', '60', '0', '0'])
 })
 
@@ -81,7 +81,7 @@ test('known equity never counts a missing loan as equity', () => {
   const { where } = compileFacetWhere((b) => applyEntityGraphFieldFilters(b, resolved))
   // branch a: a loan on file and a value; branch b: no loan + the Free And Clear flag
   assert.match(where, /"total_loan_balance" > \$1 and "estimated_value" > \$2 and "equity_percent" >= \$3/)
-  assert.match(where, /"total_loan_balance" is null or "total_loan_balance"::text = \$\d+/)
+  assert.match(where, /"total_loan_balance" is null or "total_loan_balance" = \$\d+/)
   assert.match(where, /"property_flags_text" ilike/)
   // below 100 % the Free And Clear branch cannot apply
   const capped = resolveOne('properties', { field_key: 'properties.known_equity_percent', operator: 'between', value: [20, 50] })
@@ -117,7 +117,7 @@ test('people, owners and phones have facets, counted by one grouped query over t
     groupedTokenCounts: async (args) => {
       seen.push(args)
       const { where } = compileFacetWhere(args.applyFilters)
-      assert.match(where, /"language_preference"::text = any/)
+      assert.match(where, /"language_preference" = any/)
       return { tokens: [{ value: 'Likely Owner', count: 5 }, { value: 'Family', count: 3 }], total: 7 }
     },
   }

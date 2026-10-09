@@ -44,7 +44,8 @@ export const KEYSET_SORT_COLUMNS = Object.freeze({
   estimated_value: { table: 'properties', column: 'estimated_value' },
   equity_percent: { table: 'properties', column: 'equity_percent' },
   equity_amount: { table: 'properties', column: 'equity_amount' },
-  estimated_repair_cost: { table: 'properties', column: 'estimated_repair_cost' },
+  // estimated_repair_cost is deliberately absent: the vendor repair estimate is
+  // not a sort (owner valuation lanes 2026-10-09 — MLS ARV lane only).
   sale_date: { table: 'properties', column: 'sale_date' }, // ISO text (YYYY-MM-DD), sorts lexically
   sale_price: { table: 'properties', column: 'sale_price' },
   zoning: { table: 'properties', column: 'zoning' },

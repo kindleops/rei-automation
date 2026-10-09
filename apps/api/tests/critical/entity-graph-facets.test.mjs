@@ -42,11 +42,11 @@ test('the facet WHERE is recorded from the list appliers and fully parameterised
   assert.match(where, /^where /)
   assert.match(where, /^where not \("property_id" like \$1\) and /)
   assert.match(where, /\("market" ilike \$2 or "market_region" ilike \$3\)/)
-  assert.match(where, /"property_address_state"::text = \$4/)
+  assert.match(where, /"property_address_state" = \$4/)
   assert.match(where, /"units_count" >= \$5::numeric/)
   assert.match(where, /"rec_has_probate" is true/)
   assert.match(where, /"equity_percent" >= \$\d+::numeric and "equity_percent" <= \$\d+::numeric/)
-  assert.match(where, /"property_address_county_name"::text = any\(\$\d+::text\[\]\)/)
+  assert.match(where, /"property_address_county_name" = any\(\$\d+\)/)
   assert.deepEqual(params.slice(0, 5), ['canaryprop%', '%Atlanta%', '%Atlanta%', 'GA', 2])
   assert.ok(params.some((p) => Array.isArray(p) && p.join() === 'Fulton,DeKalb'))
   // no value is ever spliced into the SQL text
@@ -65,7 +65,7 @@ test('grouped counts fold blanks into one "not recorded" value and cache per WHE
   const query = async (sql, params) => {
     calls += 1
     assert.match(sql, /group by 1$/)
-    assert.match(sql, /from public\."v_entity_graph_properties" where "property_address_state"::text = \$1/)
+    assert.match(sql, /from public\."v_entity_graph_properties" where "property_address_state" = \$1/)
     assert.deepEqual(params, ['GA'])
     return { rows: [{ value: 'Fulton', n: '3190' }, { value: null, n: '4' }, { value: 'DeKalb', n: '1200' }] }
   }
@@ -300,7 +300,7 @@ test('distress flags match WHOLE tokens (Foreclosure is not Preforeclosure), ORe
   ])
   assert.deepEqual(unsupported, [])
   const { where, params } = compileFacetWhere((b) => applyEntityGraphFieldFilters(applyPropertyFilters(b, parseBrowseFilters({})), resolved))
-  assert.match(where, /"building_condition"::text = any\(\$2::text\[\]\) and \("property_flags_text" ilike \$3 or "property_flags_text" ilike \$4 or "property_flags_text" ilike \$5 or "property_flags_text" ilike \$6\)/)
+  assert.match(where, /"building_condition" = any\(\$2\) and \("property_flags_text" ilike \$3 or "property_flags_text" ilike \$4 or "property_flags_text" ilike \$5 or "property_flags_text" ilike \$6\)/)
   assert.deepEqual(params.slice(2, 6), ['Vacant Home', 'Vacant Home;%', '%; Vacant Home', '%; Vacant Home;%'])
 })
 
