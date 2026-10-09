@@ -317,6 +317,21 @@ export const DESK_FACET_GROUPS: Partial<Record<EntityScope, DeskFacetGroup[]>> =
       { dimension: 'loan_type', label: 'Loan type', fieldKey: 'records.first_loan_type' },
       { dimension: 'last_deed', label: 'Last sale document', fieldKey: 'records.last_sale_doc_type' },
     ] },
+    // property facts (owner 2026-10-09): counted on the facts relation — the read model, else live
+    { id: 'outreach', label: 'Outreach & pipeline', facets: [
+      { dimension: 'sms_status', label: 'SMS eligibility', fieldKey: 'facts.sms_status' },
+      { dimension: 'pipeline_stage', label: 'Pipeline stage', fieldKey: 'facts.pipeline_stage' },
+      { dimension: 'conversation_stage', label: 'Conversation stage', fieldKey: 'facts.conversation_stage' },
+    ], toggles: [
+      { key: 'sms_yes', label: 'SMS eligible', filter: { field_key: 'facts.sms_eligible', operator: 'is_true' } },
+    ] },
+    { id: 'company', label: 'Owning company (state registry)', facets: [
+      { dimension: 'company_status', label: 'Company status', fieldKey: 'facts.company_status_class' },
+      { dimension: 'company_status_raw', label: 'Registry wording', fieldKey: 'facts.company_status_raw' },
+      { dimension: 'company_jurisdiction', label: 'Jurisdiction', fieldKey: 'facts.company_jurisdiction' },
+    ], toggles: [
+      { key: 'co_inactive', label: 'Flagged inactive (registry)', filter: { field_key: 'facts.company_inactive', operator: 'is_true' } },
+    ] },
   ],
   people: [
     { id: 'matching', label: 'Owner matching', facets: [

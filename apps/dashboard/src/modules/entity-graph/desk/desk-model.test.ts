@@ -37,9 +37,15 @@ describe('serverSortFor — whole-cohort order only where the server can give it
     expect(serverSortFor('properties', { key: IDENTITY_COLUMN_KEY, dir: 'asc' }, false)).toEqual({ sortBy: 'property_address_full', ascending: true, source: 'header' })
     expect(headerSortIsLocal('properties', { key: 'value', dir: 'desc' }, false)).toBe(false)
   })
-  it('a display-only column, or any column while searching, sorts the loaded rows over the default order', () => {
-    expect(serverSortFor('properties', { key: 'lender', dir: 'asc' }, false).source).toBe('default')
-    expect(headerSortIsLocal('properties', { key: 'lender', dir: 'asc' }, false)).toBe(true)
+  it('every property column is a server sort (owner 2026-10-09: "ALL the columns … click and sort"), joined / computed ones included', () => {
+    expect(serverSortFor('properties', { key: 'lender', dir: 'asc' }, false)).toEqual({ sortBy: 'rec_first_lender', ascending: true, source: 'header' })
+    expect(serverSortFor('properties', { key: 'smsEligible', dir: 'desc' }, false)).toEqual({ sortBy: 'sms_sort', ascending: false, source: 'header' })
+    expect(headerSortIsLocal('properties', { key: 'lender', dir: 'asc' }, false)).toBe(false)
+  })
+  it('a display-only column of another scope, or any column while searching, keeps the default order', () => {
+    expect(serverSortFor('master_owners', { key: 'people', dir: 'asc' }, false).source).toBe('default')
+    expect(headerSortIsLocal('master_owners', { key: 'people', dir: 'asc' }, false)).toBe(true)
+    expect(serverSortFor('master_owners', { key: 'ownerType', dir: 'asc' }, false)).toEqual({ sortBy: 'owner_type_guess', ascending: true, source: 'header' })
     expect(headerSortIsLocal('properties', { key: 'value', dir: 'asc' }, true)).toBe(true)
     expect(serverSortFor('properties', null, false)).toEqual({ sortBy: 'estimated_value', ascending: false, source: 'default' })
   })
@@ -108,10 +114,10 @@ describe('equity column — equity_known_v1', () => {
     expect(equityLabel(r({ equity: -11, equityAmount: -42000, equityRule: 'loan_and_value' }))).toBe('−$42K · −11%')
     expect(equityLabel(r({ equity: 100, equityAmount: 111363200, equityRule: 'no_recorded_mortgage' }))).toBe('$111M · 100%')
   })
-  it('has no server sort (equity_percent orders unknowns first) and sorts unknown last', () => {
+  it('sorts the whole cohort by KNOWN equity (unknown last — never the vendor 100%), and the loaded rows agree', () => {
     const col = SCOPE_TABLE_COLUMNS.properties.find((c) => c.key === 'equity')!
-    expect(col.sortBy).toBeUndefined()
-    expect(serverSortFor('properties', { key: 'equity', dir: 'desc' }, false).source).toBe('default')
+    expect(col.sortBy).toBe('equity_known_pct')
+    expect(serverSortFor('properties', { key: 'equity', dir: 'desc' }, false)).toEqual({ sortBy: 'equity_known_pct', ascending: false, source: 'header' })
     const rows = [r({ equity: null, equityRule: 'unknown' }), r({ equity: 20, equityRule: 'loan_and_value' }), r({ equity: 100, equityRule: 'free_and_clear' })]
     const desc = sortLoadedRows('properties', rows, col, 'desc').map((x) => equityLabel(x))
     expect(desc).toEqual(['100% · free & clear', '20%', 'Unknown'])

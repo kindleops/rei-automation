@@ -22,8 +22,11 @@ import {
 import {
   EntityGraphUnsupportedFilterError,
   applyEntityGraphFieldFilters,
+  isComputedFactFilter,
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
+import { FactsCohortTooLarge, factsCohortIds, factsColumnSupported, factsSortedPage } from './entity-graph-facts-query.js'
+import { FacetUntranslatable } from './entity-graph-facet-sql.js'
 import { shapeRecords } from './entity-network-service.js'
 import {
   decodeAfter,
@@ -892,11 +895,13 @@ function paginatedResponse(results, total, cursor, pageSize, { pageWasFull = nul
 
 const BROWSE_SORT_COLUMNS = {
   properties: { default: 'property_address_full', columns: ['property_address_full', 'market', 'estimated_value', 'equity_percent', 'rec_last_sale_date', 'rec_mortgage_balance'] },
-  buyers: { default: 'acquisition_count', columns: ['acquisition_count', 'last_acquisition', 'trailing_365d', 'activity_score', 'owned_count', 'sold_count', 'price_p50'] },
-  master_owners: { default: 'display_name', columns: ['display_name', 'property_count', 'priority_score', 'portfolio_total_value'] },
-  people: { default: 'full_name', columns: ['full_name', 'contact_score_final', 'rank_position'] },
-  organizations: { default: 'owner_name', columns: ['owner_name', 'owner_entity_id'] },
-  contact_methods: { default: 'sort_rank', columns: ['sort_rank', 'contact_score_final'] },
+  // every grid column that IS a table column sorts the whole tab (owner 2026-10-09: "ALL the columns up top");
+  // unindexed ones are an exact top-N over the base table + a primary-key tie-break (measured 0.1–2.0 s cold)
+  buyers: { default: 'acquisition_count', tie: 'buyer_id', columns: ['acquisition_count', 'last_acquisition', 'trailing_365d', 'activity_score', 'owned_count', 'sold_count', 'price_p50', 'activity_status', 'primary_market', 'archetype', 'cash_share', 'entity_type'] },
+  master_owners: { default: 'display_name', tie: 'master_owner_id', columns: ['display_name', 'property_count', 'priority_score', 'portfolio_total_value', 'owner_type_guess', 'priority_tier'] },
+  people: { default: 'full_name', tie: 'prospect_id', columns: ['full_name', 'contact_score_final', 'rank_position', 'occupation_group', 'language_preference', 'owner_display_name'] },
+  organizations: { default: 'owner_name', tie: 'sub_owner_id', columns: ['owner_name', 'owner_entity_id', 'owner_address_full'] },
+  contact_methods: { default: 'sort_rank', tie: 'phone_id', columns: ['sort_rank', 'contact_score_final', 'phone_type', 'owner_display_name'] },
   markets: { default: 'market_key', columns: ['market_key', 'property_count'] },
   zips: { default: 'zip', columns: ['zip', 'property_count'] },
 }
@@ -1166,7 +1171,22 @@ export async function listEntityGraphPropertyIds(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const cap = int(params.limit, 2000, 5000)
   const filters = parseBrowseFilters(params)
-  const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow('properties', params)
+  const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow('properties', params, { allowComputedFacts: true })
+  if (fieldFilters.some(isComputedFactFilter)) {
+    // the cohort only exists on the facts relation: its ids from there, coordinates by id
+    const cohort = await factsCohortIds({ applyFilters: (q) => applyEntityGraphFieldFilters(applyPropertyFilters(q, filters), fieldFilters), cap, deps: deps.factsDeps || {} })
+    const points = []
+    for (let i = 0; i < cohort.ids.length; i += 150) {
+      const { data, error } = await supabase.from(PROPERTY_BROWSE_SOURCE).select('property_id, latitude, longitude').in('property_id', cohort.ids.slice(i, i + 150))
+      if (error) throw error
+      for (const row of data || []) {
+        const lat = Number(row.latitude)
+        const lng = Number(row.longitude)
+        if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0) points.push({ id: String(row.property_id), lat, lng })
+      }
+    }
+    return { ids: cohort.ids, points, truncated: cohort.truncated, cap, total: cohort.total, factsMode: cohort.mode, asOf: cohort.asOf }
+  }
   const ids = []
   const points = []
   const chunk = 1000
@@ -1198,6 +1218,7 @@ async function browseBuyers(supabase, { cursor, pageSize, sortBy, ascending, fil
     ascending,
     cursor,
     pageSize,
+    tieCol: BROWSE_SORT_COLUMNS.buyers.tie,
   })
   return paginatedResponse(rows.map((row) => buyerToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
@@ -1244,8 +1265,57 @@ export function resolvePropertySort(sortBy, ascending) {
   return { requested, applied: PROPERTY_FALLBACK_SORT, sortApplied: false }
 }
 
-async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [], after = null, sortIndexes = detectPropertySortIndexes }) {
+/** Rows of the browse view for `ids`, in that order (a property gone since the order was taken is dropped). */
+async function propertyRowsInOrder(supabase, ids) {
+  const byId = new Map()
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error } = await supabase.from(PROPERTY_BROWSE_SOURCE).select(PROPERTY_BROWSE_SELECT).in('property_id', ids.slice(i, i + 150))
+    if (error) throw error
+    for (const row of data || []) byId.set(String(row.property_id), row)
+  }
+  return ids.map((id) => byId.get(id)).filter(Boolean)
+}
+
+/**
+ * WHOLE-COHORT SORT / FILTER ON PROPERTY FACTS (owner, 2026-10-09: "ALL the
+ * columns up top — you should be able to click and sort and filter"). Taken
+ * when the requested sort has no (col, property_id) index, or any filter is a
+ * computed fact (SMS eligible, pipeline stage…). entity-graph-facts-query.js
+ * reads public.eg_property_facts when the read model is applied, else
+ * computes the cohort's facts live (bounded, exact). Rows are then read by id
+ * from the browse view, in that order.
+ */
+async function browsePropertiesByFacts(supabase, { cursor, pageSize, sortBy, ascending, buildQuery, after, factsDeps = {} }) {
+  const page = await factsSortedPage({ sortBy, ascending, applyFilters: buildQuery, after, cursor, pageSize, deps: factsDeps })
+  const rows = await propertyRowsInOrder(supabase, page.ids)
+  const requested = { column: sortBy, ascending: Boolean(ascending) }
+  return {
+    results: rows.map((row) => propertyToResult(row)),
+    pagination: {
+      cursor: page.offset,
+      pageSize,
+      total: page.total,
+      hasMore: page.hasMore,
+      nextCursor: page.hasMore ? page.offset + page.ids.length : null,
+      previousCursor: null,
+      nextAfter: page.nextAfter,
+      sort: {
+        requested,
+        applied: requested,
+        sortApplied: true,
+        mode: page.mode === 'table' ? 'facts_table' : 'facts_live',
+        // table: the read model's last successful refresh; live: when these facts were computed
+        asOf: page.asOf ?? null,
+        source: page.source ?? page.mode,
+        ...(page.computedMs !== undefined ? { computedMs: page.computedMs, cached: Boolean(page.cached) } : {}),
+      },
+    },
+  }
+}
+
+async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [], after = null, sortIndexes = detectPropertySortIndexes, factsDeps = {}, factsEnabled = facetsAvailable }) {
   const buildQuery = (query) => applyEntityGraphFieldFilters(applyPropertyFilters(query, filters), fieldFilters)
+  const computedFilters = fieldFilters.filter(isComputedFactFilter)
 
   /**
    * Whole-cohort keyset sort when a (column, property_id) index exists — see
@@ -1253,7 +1323,24 @@ async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending,
    * later pages carry the first page's count on the client.
    */
   const indexSet = await sortIndexes()
-  if (keysetSupported(sortBy, indexSet)) {
+  const keysetOk = keysetSupported(sortBy, indexSet)
+  const fastOk = resolvePropertySort(sortBy, ascending).sortApplied
+  const wantsFacts = computedFilters.length > 0 || (!keysetOk && !fastOk && factsColumnSupported(sortBy))
+  if (wantsFacts) {
+    if (!factsEnabled()) {
+      if (computedFilters.length) throw new EntityGraphUnsupportedFilterError(computedFilters.map((f) => ({ field_key: f.field_key, reason: 'fact_filter_needs_facts_path' })))
+    } else {
+      try {
+        // with a computed filter, even an indexed sort runs on the facts relation (the filter only exists there)
+        return await browsePropertiesByFacts(supabase, { cursor, pageSize, sortBy: factsColumnSupported(sortBy) ? sortBy : 'property_address_full', ascending: factsColumnSupported(sortBy) ? ascending : true, buildQuery, after, factsDeps })
+      } catch (error) {
+        if (error instanceof FactsCohortTooLarge) throw error
+        // an untranslatable filter / missing connection: the previous behaviour (never a guessed order)
+        if (!(error instanceof FacetUntranslatable) || computedFilters.length) throw error
+      }
+    }
+  }
+  if (keysetOk) {
     const column = sortBy
     const asc = Boolean(ascending)
     const token = decodeAfter(after, { column, ascending: asc })
@@ -1311,6 +1398,7 @@ async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, fil
     ascending,
     cursor,
     pageSize,
+    tieCol: BROWSE_SORT_COLUMNS.master_owners.tie,
   })
   return paginatedResponse(rows.map((row) => ownerToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
@@ -1325,6 +1413,7 @@ async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending, 
     ascending,
     cursor,
     pageSize,
+    tieCol: BROWSE_SORT_COLUMNS.people.tie,
   })
   return paginatedResponse(rows.map((row) => prospectToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
@@ -1335,6 +1424,7 @@ async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascendi
     .from('sub_owners')
     .select(SUB_OWNER_SELECT, { count: 'exact' })
     .order(orderCol, { ascending, nullsFirst: false })
+    .order('sub_owner_id', { ascending: true })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
   const results = (data || []).map((row) => buildSearchResult({
@@ -1373,7 +1463,7 @@ async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascend
     if (error) throw error
     return paginatedResponse((data || []).map((row) => emailToResult(row)), count || 0, cursor, pageSize)
   }
-  const orderCol = sortBy === 'contact_score_final' ? 'contact_score_final' : 'sort_rank'
+  const orderCol = BROWSE_SORT_COLUMNS.contact_methods.columns.includes(sortBy) ? sortBy : 'sort_rank'
   const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
     table: 'phones',
     select: PHONE_SUMMARY_SELECT,
@@ -1382,6 +1472,7 @@ async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascend
     ascending,
     cursor,
     pageSize,
+    tieCol: BROWSE_SORT_COLUMNS.contact_methods.tie,
   })
   return paginatedResponse(rows.map((row) => phoneToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
@@ -1583,11 +1674,13 @@ export async function browseEntityGraph(params = {}, deps = {}) {
    * this tab cannot execute. A filter the backend drops is not a narrower
    * cohort -- it is the entire table wearing a cohort's label.
    */
-  const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow(tab, params)
+  const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow(tab, params, { allowComputedFacts: tab === 'properties' })
   const browseArgs = {
     cursor, pageSize, sortBy, ascending, subtype: params.subtype, filters, fieldFilters,
     after: clean(params.after) || null,
     ...(deps.propertySortIndexes ? { sortIndexes: deps.propertySortIndexes } : {}),
+    ...(deps.factsDeps ? { factsDeps: deps.factsDeps } : {}),
+    ...(deps.factsEnabled ? { factsEnabled: deps.factsEnabled } : {}),
   }
 
   switch (tab) {

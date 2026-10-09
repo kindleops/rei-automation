@@ -39,9 +39,13 @@ export class FacetUntranslatable extends Error {
   }
 }
 
+// the columns the clause being built touches (createSqlRecorder tracks them per clause)
+let touched = null
+
 function ident(column) {
   const c = String(column ?? '')
   if (!IDENT.test(c)) throw new FacetUntranslatable(`identifier ${c}`)
+  if (touched) touched.add(c)
   return `"${c}"`
 }
 
@@ -173,43 +177,57 @@ export function createSqlRecorder() {
     return not ? `not (${clause})` : clause
   }
 
+  // per clause: the columns it reads (lets a caller split plain vs computed-fact predicates)
+  const clauseColumns = []
+  const push = (make) => {
+    const prev = touched
+    touched = new Set()
+    try {
+      const sql = make()
+      clauses.push(sql)
+      clauseColumns.push(touched)
+    } finally {
+      touched = prev
+    }
+  }
+
   const builder = {
-    eq(column, value) { clauses.push(compare(column, 'eq', value)); return builder },
-    neq(column, value) { clauses.push(compare(column, 'neq', value)); return builder },
-    gt(column, value) { clauses.push(compare(column, 'gt', value)); return builder },
-    gte(column, value) { clauses.push(compare(column, 'gte', value)); return builder },
-    lt(column, value) { clauses.push(compare(column, 'lt', value)); return builder },
-    lte(column, value) { clauses.push(compare(column, 'lte', value)); return builder },
-    is(column, value) { clauses.push(isClause(column, value)); return builder },
-    in(column, values) { clauses.push(inClause(column, values)); return builder },
-    ilike(column, pattern) { clauses.push(likeClause(column, pattern, true)); return builder },
-    like(column, pattern) { clauses.push(likeClause(column, pattern, false)); return builder },
+    eq(column, value) { push(() => compare(column, 'eq', value)); return builder },
+    neq(column, value) { push(() => compare(column, 'neq', value)); return builder },
+    gt(column, value) { push(() => compare(column, 'gt', value)); return builder },
+    gte(column, value) { push(() => compare(column, 'gte', value)); return builder },
+    lt(column, value) { push(() => compare(column, 'lt', value)); return builder },
+    lte(column, value) { push(() => compare(column, 'lte', value)); return builder },
+    is(column, value) { push(() => isClause(column, value)); return builder },
+    in(column, values) { push(() => inClause(column, values)); return builder },
+    ilike(column, pattern) { push(() => likeClause(column, pattern, true)); return builder },
+    like(column, pattern) { push(() => likeClause(column, pattern, false)); return builder },
     not(column, op, value) {
-      if (op === 'is') clauses.push(isClause(column, value, true))
-      else if (op === 'in') clauses.push(inClause(column, value, true))
-      else if (op === 'eq') clauses.push(compare(column, 'neq', value))
-      else if (op === 'like' || op === 'ilike') clauses.push(`not (${likeClause(column, value, op === 'ilike')})`)
+      if (op === 'is') push(() => isClause(column, value, true))
+      else if (op === 'in') push(() => inClause(column, value, true))
+      else if (op === 'eq') push(() => compare(column, 'neq', value))
+      else if (op === 'like' || op === 'ilike') push(() => `not (${likeClause(column, value, op === 'ilike')})`)
       else throw new FacetUntranslatable(`not ${op}`)
       return builder
     },
     or(expression) {
       const parts = splitLogicalParts(expression)
       if (!parts.length) throw new FacetUntranslatable('empty or')
-      clauses.push(`(${parts.map(orPart).join(' or ')})`)
+      push(() => `(${parts.map(orPart).join(' or ')})`)
       return builder
     },
     overlaps(column, values) {
       const list = (Array.isArray(values) ? values : [values]).map(String)
-      clauses.push(`${ident(column)} && ${bind(list)}::text[]`)
+      push(() => `${ident(column)} && ${bind(list)}::text[]`)
       return builder
     },
     contains(column, values) {
       if (!Array.isArray(values)) throw new FacetUntranslatable('contains non-array')
-      clauses.push(`${ident(column)} @> ${bind(values.map(String))}::text[]`)
+      push(() => `${ident(column)} @> ${bind(values.map(String))}::text[]`)
       return builder
     },
   }
-  return { builder, clauses, params }
+  return { builder, clauses, params, clauseColumns }
 }
 
 /** Translate the list's own filter appliers into a WHERE clause. Throws FacetUntranslatable. */
@@ -224,7 +242,32 @@ export function compileFacetWhere(applyFilters) {
     throw error
   }
   if (result && result !== recorder.builder) throw new FacetUntranslatable('applier returned a foreign builder')
-  return { where: recorder.clauses.length ? `where ${recorder.clauses.join(' and ')}` : '', params: recorder.params }
+  return {
+    where: recorder.clauses.length ? `where ${recorder.clauses.join(' and ')}` : '',
+    params: recorder.params,
+    clauses: recorder.clauses,
+    clauseColumns: recorder.clauseColumns,
+  }
+}
+
+/**
+ * The subset of compiled clauses `keep(columns)` accepts, as one AND-ed
+ * predicate with its parameters renumbered from `offset + 1`. Bind markers are
+ * the only `$n` in a clause (identifiers are [a-z0-9_], values are bound).
+ */
+export function selectClauses(compiled, keep, offset = 0) {
+  const params = []
+  const parts = []
+  compiled.clauses.forEach((clause, i) => {
+    if (!keep(compiled.clauseColumns[i] || new Set())) return
+    const map = new Map()
+    parts.push(clause.replace(/\$(\d+)/g, (_, n) => {
+      const k = Number(n)
+      if (!map.has(k)) { params.push(compiled.params[k - 1]); map.set(k, offset + params.length) }
+      return `$${map.get(k)}`
+    }))
+  })
+  return { sql: parts.join(' and '), params }
 }
 
 export function facetsAvailable() {

@@ -72,6 +72,20 @@ export class EntityGraphFilterError extends Error {
   }
 }
 
+/**
+ * A live whole-cohort sort / filter the server refused with a reason the
+ * operator can act on (facts_cohort_too_large, header values unavailable):
+ * the server's own sentence, not the transport envelope.
+ */
+export function factsReasonFromUpstream(upstream: unknown): string | null {
+  if (!upstream || typeof upstream !== 'object') return null
+  const u = upstream as { error?: unknown; message?: unknown }
+  if ((u.error === 'facts_cohort_too_large' || u.error === 'header_values_unavailable') && typeof u.message === 'string') {
+    return u.message.replace(/^facts_cohort_too_large:\s*/, '').replace(/^facet_untranslatable:\s*/, '')
+  }
+  return null
+}
+
 function unsupportedFiltersFromUpstream(upstream: unknown): UnsupportedFieldFilter[] {
   if (!upstream || typeof upstream !== 'object') return []
   const list = (upstream as { unsupported_filters?: unknown }).unsupported_filters
@@ -93,6 +107,8 @@ export async function browseEntityGraph(
     if (unsupported.length) {
       throw new EntityGraphFilterError('unsupported_entity_graph_filters', unsupported)
     }
+    const reason = factsReasonFromUpstream(res.upstream)
+    if (reason) throw new Error(reason)
     throw new Error(res.message || res.error || 'entity_graph_browse_failed')
   }
   return normalizeListResponse(res.data)
@@ -244,4 +260,47 @@ export async function fetchEntityGraphColumns(
   )
   if (!res.ok) throw new Error(res.message || res.error || 'entity_graph_columns_failed')
   return res.data?.values ?? {}
+}
+
+/* ── header filter values (GET /api/cockpit/entity-graph/header-values) ─────── */
+
+export type HeaderValueKind = 'categorical' | 'numeric' | 'date' | 'boolean' | 'text' | 'tokens'
+
+export type EntityGraphHeaderValues = {
+  supported: boolean
+  reason?: string
+  /** the filter-catalog field a header filter writes (same AST as the rail) */
+  field: { key: string; label: string; type: string; operators: Array<{ key: string; label: string }>; kind: string | null } | null
+  column: string
+  kind: HeaderValueKind
+  total: number
+  known: number
+  values?: Array<{ value: string | null; count: number }>
+  truncated?: boolean
+  range?: { min: string | null; max: string | null }
+  mode: 'table' | 'live'
+  source?: string
+  asOf: string | null
+  computedMs?: number
+  ms?: number
+}
+
+/** Exact value counts / range of one property column over the filtered cohort (its own filter left out). */
+export async function fetchEntityGraphHeaderValues(
+  params: Record<string, string | number | undefined>,
+  signal?: AbortSignal,
+): Promise<EntityGraphHeaderValues> {
+  const qs = buildQueryString(params)
+  const res = await backendClient.callBackend<EntityGraphHeaderValues & { ok: boolean }>(
+    `/api/cockpit/entity-graph/header-values?${qs}`,
+    { signal },
+  )
+  if (!res.ok) {
+    const unsupported = unsupportedFiltersFromUpstream(res.upstream)
+    if (unsupported.length) throw new EntityGraphFilterError('unsupported_entity_graph_filters', unsupported)
+    const reason = factsReasonFromUpstream(res.upstream)
+    if (reason) throw new Error(reason)
+    throw new Error(res.message || res.error || 'entity_graph_header_values_failed')
+  }
+  return res.data as EntityGraphHeaderValues
 }

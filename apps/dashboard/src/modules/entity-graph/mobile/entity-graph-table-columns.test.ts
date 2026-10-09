@@ -37,15 +37,15 @@ describe('Entity Graph table columns', () => {
     expect(visibleEnrichmentFields('buyers', ['year_built'])).toEqual([])
   })
 
-  it('index-backed picker fields ask the server for a whole-cohort sort', () => {
+  it('every picker field asks the server for a whole-cohort sort on its facts column', () => {
     for (const key of ['year_built', 'zoning', 'total_bedrooms']) expect(col(key).sortBy).toBe(key)
     // the vendor repair estimate is not a grid column at all (valuation lanes: MLS ARV lane reference only)
     expect(SCOPE_TABLE_COLUMNS.properties.some((c) => /repair/.test(c.key))).toBe(false)
     expect(col('lastSale').fields).toEqual(['sale_date', 'sale_price', 'last_sale_doc_type'])
     expect(col('units').sortBy).toBe('units_count')
     expect(col('loans').sortBy).toBe('rec_mortgage_count')
-    // No index planned: stays a loaded-rows sort.
-    expect(col('flood_zone').sortBy).toBeUndefined()
+    // no (col, property_id) index today: still a whole-cohort server sort (facts relation, live or read model)
+    expect(col('flood_zone').sortBy).toBe('flood_zone')
   })
 
   it('enriched values render; missing values are null ("—"), never 0', () => {

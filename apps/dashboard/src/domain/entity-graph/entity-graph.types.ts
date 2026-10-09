@@ -199,8 +199,17 @@ export type EntityGraphPagination = {
     requested: { column: string; ascending: boolean }
     applied: { column: string; ascending: boolean }
     sortApplied: boolean
-    /** 'keyset' = whole-cohort order continued page to page via `nextAfter`. */
-    mode?: 'keyset'
+    /**
+     * 'keyset' = whole-cohort order continued page to page via `nextAfter`.
+     * 'facts_table' = the eg_property_facts read model (values as of `asOf`, its last successful refresh).
+     * 'facts_live' = computed for this cohort at request time (as of `asOf`; `source: 'memo'` = the
+     * universe facts computed at `asOf` and reused for ≤ 10 min).
+     */
+    mode?: 'keyset' | 'facts_table' | 'facts_live'
+    asOf?: string | null
+    source?: string
+    computedMs?: number
+    cached?: boolean
   }
   /** Opaque continuation token; send as `after` for the next page. */
   nextAfter?: string | null

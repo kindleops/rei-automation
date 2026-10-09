@@ -121,6 +121,17 @@
 .lc-grid__sorticon { opacity: 0; transition: opacity var(--lc-dur-fast); }
 .lc-grid__th.is-sortable:hover .lc-grid__sorticon { opacity: 0.5; }
 .lc-grid__th.is-sorted .lc-grid__sorticon { opacity: 1; color: rgb(var(--lc-select-rgb)); }
+/* header accessory (a per-column filter trigger): quiet until the header is hovered or the column is filtered */
+.lc-grid__th.has-accessory { gap: 2px; padding-right: 6px; }
+.lc-grid__th.has-accessory .lc-grid__sort,
+.lc-grid__th.has-accessory .lc-grid__thtext { flex: 0 1 auto; }
+.lc-grid__th.is-num.has-accessory { flex-direction: row; }
+.lc-grid__thacc { display: inline-flex; flex: none; margin-left: auto; opacity: 0; transition: opacity var(--lc-dur-fast); }
+.lc-grid__th.is-num .lc-grid__thacc { margin-left: 2px; order: -1; }
+.lc-grid__th:hover .lc-grid__thacc,
+.lc-grid__th:focus-within .lc-grid__thacc,
+.lc-grid__th.is-filtered .lc-grid__thacc { opacity: 1; }
+.lc-grid__th.is-filtered { color: var(--lc-ink-1); }
 .lc-grid__resize {
   position: absolute;
   top: 8px;

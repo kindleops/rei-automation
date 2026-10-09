@@ -43,6 +43,10 @@ export async function GET(request) {
         { status: 422, headers },
       )
     }
+    // a live whole-cohort sort that would exceed its bound says so (never a sample, never a partial order)
+    if (error?.code === 'facts_cohort_too_large') {
+      return NextResponse.json({ ok: false, error: error.code, message: error.message, limit: error.limit, results: [], total: 0 }, { status: 422, headers })
+    }
     return NextResponse.json(
       { ok: false, error: error?.message || 'entity_graph_browse_failed' },
       { status: 500, headers },

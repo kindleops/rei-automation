@@ -44,7 +44,7 @@ const THREAD_SELECT = [
   'thread_key', 'property_id', 'latest_message_at', 'latest_direction', 'latest_message_body', 'seller_stage', 'stage',
   'conversation_status', 'status', 'is_suppressed', 'last_inbound_at', 'last_outbound_at',
 ].join(',')
-const OPP_SELECT = 'id, primary_property_id, acquisition_stage, opportunity_status, universal_status, last_contact_at'
+const OPP_SELECT = 'id, primary_property_id, acquisition_stage, opportunity_status, universal_status, last_contact_at, updated_at'
 const TARGET_SELECT = 'property_id, campaign_id, target_status, block_reason, created_at'
 
 async function inChunks(ids, read) {
@@ -299,7 +299,8 @@ export async function getEntityGraphOutreachState(params = {}, deps = {}) {
   for (const id of ids) {
     const rows = graphBy.get(id) || []
     const thread = (threadBy.get(id) || []).sort((a, b) => (time(b.latest_message_at) || 0) - (time(a.latest_message_at) || 0))[0] || null
-    const opp = (oppBy.get(id) || [])[0] || null
+    // the most recently updated deal (5 properties carry two) — the facts registry applies the same rule
+    const opp = [...(oppBy.get(id) || [])].sort((a, b) => (time(b.updated_at) ?? -Infinity) - (time(a.updated_at) ?? -Infinity) || String(a.id).localeCompare(String(b.id)))[0] || null
     const memberships = targetBy.get(id) || []
     const sms = graphRows === null
       ? null

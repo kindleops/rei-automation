@@ -82,7 +82,8 @@ test("the exposed fields come from the campaign catalog, not a second list", () 
       // declared once in entity-graph-field-filters.js and flagged as such;
       // they never pose as campaign catalog fields.
       if (field.entity_graph_only) {
-        assert.ok(/^(records|buyers)\./.test(field.key) || field.key === 'properties.flags' || Boolean(field.derived), `${field.key} is an unflagged synthetic field`);
+        // facts.* = property fact fields (entity-graph-facts.js): computed facts + view columns the catalog lacks
+        assert.ok(/^(records|buyers|facts)\./.test(field.key) || field.key === 'properties.flags' || Boolean(field.derived), `${field.key} is an unflagged synthetic field`);
         assert.ok(!catalogKeys.has(field.key), `${field.key} shadows a campaign catalog field`);
         assert.equal(field.supported_in_preview, false);
         assert.equal(field.source_table_or_view, ENTITY_GRAPH_FILTER_SOURCE_BY_TAB[tab]);
@@ -117,7 +118,7 @@ test("every exposed field compiles to at least one predicate", () => {
       const operator = field.operators?.[0]?.key;
       const { resolved, unsupported } = resolveEntityGraphFieldFilters(tab, [
         { field_key: field.key, operator, value: sampleValueFor(field) },
-      ]);
+      ], { allowComputedFacts: true });
       if (unsupported.length) {
         dead.push(`${field.key} -> ${unsupported[0].reason}`);
         continue;
@@ -138,7 +139,7 @@ test("every operator the catalog advertises for a field is executable", () => {
         const value = operator === "between" ? [1, 9] : sampleValueFor(field);
         const { resolved, unsupported } = resolveEntityGraphFieldFilters(tab, [
           { field_key: field.key, operator, value },
-        ]);
+        ], { allowComputedFacts: true });
         if (unsupported.length) {
           broken.push(`${field.key} ${operator} -> ${unsupported[0].reason}`);
           continue;

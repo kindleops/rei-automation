@@ -35,6 +35,7 @@ import {
   normalizeCampaignFieldKey,
 } from '@/lib/domain/campaigns/campaign-field-catalog.js'
 import { JUDGMENT_CATEGORIES, LIEN_CATEGORIES } from './entity-graph-recorded-docs.js'
+import { COMPUTED_FACTS, PLAIN_FACT_COLUMNS, kindOfPg, plainColumnType } from './entity-graph-facts.js'
 import {
   applySupabaseFilters,
   EMPTY_FILTER_OPERATORS,
@@ -410,7 +411,45 @@ export const ENTITY_GRAPH_DERIVED_FIELDS = Object.freeze([
   }),
 ])
 
-const SYNTHETIC_BY_KEY = new Map([...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_BUYER_FIELDS, ENTITY_GRAPH_FLAG_FIELD, ...ENTITY_GRAPH_DERIVED_FIELDS].map((field) => [field.key, field]))
+/**
+ * PROPERTY FACT FIELDS (owner, 2026-10-09: "ALL the columns up top — you should
+ * be able to click and sort and filter"). Every property grid column has a
+ * field here or in the catalog, so a header filter adds an ordinary chip to
+ * the same AST the rail edits, compiled by the same compiler.
+ *
+ *   facts.<col> (computed)  values entity-graph-facts.js computes with the
+ *                           cell's own function (SMS eligibility, last contact,
+ *                           pipeline / conversation stage, known equity, liens
+ *                           vs filings, signals, owner / person / contact /
+ *                           ZIP fields…). They exist only on the property
+ *                           facts relation (the eg_property_facts read model,
+ *                           or the interim live computation), never on the
+ *                           PostgREST view: a consumer that can only run
+ *                           PostgREST refuses them (fail closed, 422).
+ *   facts.<col> (plain)     a view column the campaign catalog does not
+ *                           describe (zoning, HOA name, …). Executable anywhere.
+ */
+const FACT_FIELD_TYPE = { boolean: 'boolean', numeric: 'number', date: 'date', categorical: 'enum', text: 'text', tokens: 'array' }
+const factField = (col, label, kind, category, extra = {}) => syntheticField('facts', 'properties', category, col, label, FACT_FIELD_TYPE[kind] || 'text', { key: `facts.${col}`, fact_kind: kind, ...extra })
+export const ENTITY_GRAPH_COMPUTED_FACT_FIELDS = Object.freeze(COMPUTED_FACTS
+  .filter((f) => !f.internal)
+  .map((f) => factField(f.col, f.label, f.kind, f.group || ({ owner: 'Owner record', scores: 'Decision Engine', person: 'People / entity', zip: 'ZIP market', contact: 'Contacts', entity: 'Ownership', email: 'Contacts' }[String(f.field || '').split('.')[0]] || 'Property facts'), { computed_fact: true, ...(f.field ? { column_field: f.field } : {}) })))
+
+/** Plain view columns no catalogued / record field covers (the catalog field wins where one exists). */
+export const ENTITY_GRAPH_PLAIN_FACT_FIELDS = Object.freeze((() => {
+  const covered = new Set([
+    ...CAMPAIGN_FIELD_CATALOG.filter((f) => f.source_table_or_view === 'properties').map((f) => f.source_column),
+    ...ENTITY_GRAPH_RECORD_FIELDS.map((f) => f.source_column),
+  ])
+  return PLAIN_FACT_COLUMNS
+    .filter((col) => !covered.has(col) && col !== 'property_id' && plainColumnType(col) && plainColumnType(col) !== 'jsonb')
+    .map((col) => factField(col, col.replace(/^rec_/, 'recorded ').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()), kindOfPg(plainColumnType(col)), 'More property fields'))
+})())
+
+const SYNTHETIC_BY_KEY = new Map([...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_BUYER_FIELDS, ENTITY_GRAPH_FLAG_FIELD, ...ENTITY_GRAPH_DERIVED_FIELDS, ...ENTITY_GRAPH_COMPUTED_FACT_FIELDS, ...ENTITY_GRAPH_PLAIN_FACT_FIELDS].map((field) => [field.key, field]))
+
+/** A resolved filter that only the property facts relation can execute. */
+export const isComputedFactFilter = (entry) => Boolean(entry?.fieldDefinition?.computed_fact)
 
 /**
  * Catalogued fields Entity Graph CANNOT execute on the table its tab reads
@@ -477,7 +516,9 @@ export function getEntityGraphFilterFields(tab) {
       && !ENTITY_GRAPH_WITHHELD_FIELDS.has(field.key) && !ENTITY_GRAPH_UNEXECUTABLE_FIELDS[field.key])
     .map(decorate)
   const derived = ENTITY_GRAPH_DERIVED_FIELDS.filter((field) => field.source_table_or_view === source)
-  return source === 'properties' ? [ENTITY_GRAPH_FLAG_FIELD, ...derived, ...catalog, ...ENTITY_GRAPH_RECORD_FIELDS] : [...derived, ...catalog]
+  return source === 'properties'
+    ? [ENTITY_GRAPH_FLAG_FIELD, ...derived, ...catalog, ...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_COMPUTED_FACT_FIELDS, ...ENTITY_GRAPH_PLAIN_FACT_FIELDS]
+    : [...derived, ...catalog]
 }
 
 function lookupField(fieldKey) {
@@ -537,7 +578,7 @@ export function parseEntityGraphFieldFilters(params = {}) {
  * Split requested filters into ones this tab can execute and ones it cannot.
  * Callers must treat a non-empty `unsupported` as a hard error.
  */
-export function resolveEntityGraphFieldFilters(tab, requested = []) {
+export function resolveEntityGraphFieldFilters(tab, requested = [], { allowComputedFacts = false } = {}) {
   const source = entityGraphFilterSourceForTab(tab)
   const resolved = []
   const unsupported = []
@@ -575,6 +616,11 @@ export function resolveEntityGraphFieldFilters(tab, requested = []) {
     const field = lookupField(fieldKey)
     if (!field) {
       unsupported.push({ field_key: requestedKey, reason: 'unknown_campaign_field' })
+      continue
+    }
+    if (field.computed_fact && !allowComputedFacts) {
+      // only the property facts relation carries it; a PostgREST read would fail on the column
+      unsupported.push({ field_key: field.key, reason: 'fact_filter_needs_facts_path' })
       continue
     }
     if (field.source_table_or_view !== source) {
@@ -742,10 +788,10 @@ export function applyAgeFromMob(query, entry, now = new Date()) {
  * Parse, resolve and fail closed in one step. Returns the resolved filters
  * ready for applyEntityGraphFieldFilters, or throws.
  */
-export function resolveEntityGraphFieldFiltersOrThrow(tab, params = {}) {
+export function resolveEntityGraphFieldFiltersOrThrow(tab, params = {}, options = {}) {
   const requested = parseEntityGraphFieldFilters(params)
   if (!requested.length) return { resolved: [], requested_count: 0 }
-  const { resolved, unsupported } = resolveEntityGraphFieldFilters(tab, requested)
+  const { resolved, unsupported } = resolveEntityGraphFieldFilters(tab, requested, options)
   if (unsupported.length) throw new EntityGraphUnsupportedFilterError(unsupported)
   return { resolved, requested_count: requested.length }
 }

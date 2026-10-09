@@ -70,6 +70,9 @@ import { IDENTITY_COLUMN_KEY, migrateLayoutColumns, useEntityGraphTableLayout } 
 import { useEntityGraphColumns } from '../mobile/use-entity-graph-columns'
 import { MOBILE_SCOPES, resolveIdentity, scopeNoun, tabForScope, type EntityScope } from '../mobile/entity-graph-mobile-format'
 import { DeskFilterRail } from './DeskFilterRail'
+import { DeskHeaderFilter } from './DeskHeaderFilter'
+import { headerAsOfText, headerFieldKeyFor } from './desk-header-filter'
+import { fetchEntityGraphFilterCatalog, type EntityGraphFilterCatalog } from '../../../domain/entity-graph/entity-graph-field-filters'
 import { SignalBadges, signalLines, signalRowHeight } from './SignalBadges'
 import { propertySignals } from '../mobile/property-signals'
 import { DeskCampaignStack, stackScopeSupported, type StackResult } from './DeskCampaignStack'
@@ -118,6 +121,8 @@ type ListState = {
   hasMore: boolean
   nextAfter: string | null
   sortApplied: boolean | null
+  /** how the server ordered the whole cohort (facts read model / live facts / keyset) and as of when */
+  sortMeta?: { mode?: string; asOf?: string | null; source?: string; computedMs?: number; cached?: boolean } | null
   error: string | null
   unsupported: UnsupportedFieldFilter[] | null
   /** browse attachments that failed for the latest page (those cells read —, said so) */
@@ -227,6 +232,15 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     return () => window.clearTimeout(t)
   }, [query])
 
+  /* ── Filter catalog (header filters resolve their field from it, the same rule as the server) ── */
+  const [catalog, setCatalog] = useState<EntityGraphFilterCatalog | null>(null)
+  useEffect(() => {
+    if (scope !== 'properties') return
+    const ctl = new AbortController()
+    void fetchEntityGraphFilterCatalog('properties', ctl.signal).then((c) => { if (!ctl.signal.aborted) setCatalog(c) }).catch(() => {})
+    return () => ctl.abort()
+  }, [scope])
+
   /* ── KPIs + scope counts ───────────────────────────────────────────────── */
   const [counts, setCounts] = useState<EntityGraphTabCounts | null>(null)
   const [kpis, setKpis] = useState<DeskKpis | null | 'loading'>('loading')
@@ -311,6 +325,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
             hasMore: res.pagination.hasMore,
             nextAfter: res.pagination.nextAfter ?? null,
             sortApplied: res.pagination.sort ? res.pagination.sort.sortApplied : null,
+            sortMeta: res.pagination.sort ? { mode: res.pagination.sort.mode, asOf: res.pagination.sort.asOf ?? null, source: res.pagination.sort.source, computedMs: res.pagination.sort.computedMs, cached: res.pagination.sort.cached } : (appending ? cur.sortMeta : null),
             error: null,
             unsupported: null,
             attachErrors: res.attached?.errors ?? [],
@@ -429,11 +444,31 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       width: Math.round(c.width * 1.18) + 12,
       minWidth: 64,
       align: c.align === 'right' ? 'right' : 'left',
-      // whole-cohort server sort, or not sortable (never a sort of just the loaded rows)
+      // whole-cohort server sort (properties: every column, on its facts column); never a sort of just the loaded rows
       sortable: Boolean(c.sortBy) && !searching,
       hint: searching ? `${c.label} · search results are ranked by match — sort is off while searching`
-        : c.sortBy ? `${c.label} · sorts the whole filtered cohort (server)`
-          : `${c.label} · not sortable: the database has no whole-cohort order for it${c.source ? ` · ${c.source}` : ''}`,
+        : c.sortBy ? `${c.label} · click to sort the whole filtered cohort (server)${scope === 'properties' ? ' · ▾ to filter' : ''}${c.source ? ` · ${c.source}` : ''}`
+          : `${c.label}${c.source ? ` · ${c.source}` : ''}`,
+      ...(scope === 'properties' && c.sortBy && !searching ? (() => {
+        const factCol = c.filterColumn ?? c.sortBy
+        const fieldKey = headerFieldKeyFor(catalog, factCol)
+        const dir = headerSort?.key === c.key && headerSortActive ? headerSort.dir : null
+        return {
+          headerActive: Boolean(fieldKey && filters.some((f) => f.field_key === fieldKey)),
+          headerAccessory: (
+            <DeskHeaderFilter
+              label={c.label}
+              column={factCol}
+              fieldKey={fieldKey}
+              filters={filters}
+              onFiltersChange={setFilters}
+              sortDir={dir}
+              onSort={(d) => setSort(scope, d ? { key: c.key, dir: d } : null)}
+              sortable
+            />
+          ),
+        }
+      })() : {}),
       render: (r) => {
         if (c.signals) return <SignalBadges signals={propertySignals(r)} />
         const v = c.render(r)
@@ -449,7 +484,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       },
     }))
     return [identity, ...cols]
-  }, [scope, visibleKeys, searching])
+  }, [scope, visibleKeys, searching, catalog, filters, headerSort, headerSortActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // a saved sort on a column that cannot be server-sorted shows no arrow (the order IS the default)
   // every signal is listed: rows grow to fit the wrapped chips (no "+N")
@@ -558,8 +593,10 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     : list.error && !results.length
       ? 'This cohort could not be read'
       : `${total !== null ? fmtCount(total) : 'Uncounted'} ${noun}${searching ? ` matching “${debouncedQuery}”` : ''}${filters.length ? ` · ${filters.length} ${filters.length === 1 ? 'filter' : 'filters'}` : ''}`
+  const factsSort = isCurrent && (list.sortMeta?.mode === 'facts_live' || list.sortMeta?.mode === 'facts_table') ? list.sortMeta : null
   const sortNote = !isCurrent ? null
     : list.sortApplied === false ? 'The server could not apply that order — showing its fallback order'
+      : factsSort && headerSortActive ? `Sorted across the whole cohort · ${headerAsOfText(factsSort.mode, factsSort.source, factsSort.asOf)}${factsSort.mode === 'facts_live' && factsSort.computedMs && !factsSort.cached ? ` · ${(factsSort.computedMs / 1000).toFixed(1)} s` : ''}`
       : list.attachErrors?.length ? `Some column values did not load (${list.attachErrors.map((e) => e.source).join(', ')}) — those cells read —`
         : null
 
@@ -674,7 +711,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                 rowHeight={signalsVisible ? (r, colWidth) => signalRowHeight(signalLines(propertySignals(r).map((x) => x.label), colWidth('flags') ?? 390), 30) : undefined}
                 density="dense"
                 loading={loading}
-                error={isCurrent && list.error && !list.unsupported ? { what: 'These records didn’t load', onRetry: () => setList(EMPTY_LIST) } : null}
+                error={isCurrent && list.error && !list.unsupported ? { what: /more than [\d,]+ properties match/.test(list.error) ? list.error : 'These records didn’t load', onRetry: () => setList(EMPTY_LIST) } : null}
                 empty={emptyState}
                 total={total}
                 loadingMore={loadingMore}

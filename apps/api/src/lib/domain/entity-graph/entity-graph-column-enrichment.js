@@ -125,6 +125,8 @@ const list = (v) => [...new Set(String(v ?? '').split(',').map(clean).filter(Boo
 
 function isLinkedField(field) {
   const [source, col, extra] = field.split('.')
+  // fact.<col>: a computed property fact (entity-graph-facts.js), validated against the registry when read
+  if (source === 'fact') return !extra && /^[a-z][a-z0-9_]*$/.test(col || '')
   return !extra && Boolean(ENTITY_GRAPH_LINKED_COLUMNS[source]?.has(col))
 }
 
@@ -179,7 +181,21 @@ async function enrichLinked(client, ids, linked, values) {
   const ownerIds = ownerOf ? [...new Set(ownerOf.values())] : []
 
   const zipCols = want('zip')
+  const factCols = want('fact')
   await Promise.all([
+    (async () => {
+      // computed facts (company registry status…) with the registry's own computes, keyed for this page
+      if (!factCols.length) return
+      const { FACT_BY_COL, baseColumnsFor, computeFacts } = await import('./entity-graph-facts.js')
+      const cols = factCols.filter((c) => FACT_BY_COL.has(c) && !FACT_BY_COL.get(c).internal)
+      const { hasDatabaseUrl, queryWithTimeout } = await import('@/lib/postgres/client.js')
+      if (!cols.length || !hasDatabaseUrl()) return
+      const { entityRoleMode } = await import('@/lib/domain/campaigns/entity-contact-role.js')
+      const baseCols = baseColumnsFor(cols)
+      const base = await queryWithTimeout(`select ${baseCols.map((c) => `"${c}"`).join(', ')} from public.v_entity_graph_properties where "property_id" = any($1::text[])`, [ids], 15_000)
+      const facts = await computeFacts(base?.rows || [], cols, { query: queryWithTimeout, timeoutMs: 15_000, entityRoleMode: entityRoleMode() })
+      for (const [pid, values] of facts) for (const c of cols) put(pid, `fact.${c}`, values[c])
+    })(),
     (async () => {
       if (!zipCols.length) return
       const props = await readIn(client, 'properties', 'property_id, property_address_zip', 'property_id', ids)

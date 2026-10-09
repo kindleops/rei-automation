@@ -44,6 +44,13 @@ export interface LCColumn<R> {
   render: (row: R) => ReactNode
   /** text for the header tooltip: definition / unit */
   hint?: string
+  /**
+   * A control rendered inside the header cell after the label (e.g. a filter
+   * menu trigger). It owns its own events; a click on it never sorts.
+   */
+  headerAccessory?: ReactNode
+  /** the accessory is in an active state (a filter is applied on this column) */
+  headerActive?: boolean
 }
 
 export type LCSort = { id: string; dir: 'asc' | 'desc' } | null
@@ -433,7 +440,7 @@ export function LCDataGrid<R>({
                 key={c.id}
                 role="columnheader"
                 aria-sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : c.sortable ? 'none' : undefined}
-                className={cx('lc-grid__th', c.align === 'right' && 'is-num', c.align === 'center' && 'is-center', c.sortable && 'is-sortable', dir && 'is-sorted', onColumnOrderChange && !pinned.has(c.id) && 'is-movable', dragCol === c.id && 'is-dragging', dropCol === c.id && dragCol !== c.id && 'is-drop')}
+                className={cx('lc-grid__th', c.align === 'right' && 'is-num', c.align === 'center' && 'is-center', c.sortable && 'is-sortable', dir && 'is-sorted', c.headerAccessory ? 'has-accessory' : null, c.headerActive && 'is-filtered', onColumnOrderChange && !pinned.has(c.id) && 'is-movable', dragCol === c.id && 'is-dragging', dropCol === c.id && dragCol !== c.id && 'is-drop')}
                 title={c.hint}
                 draggable={Boolean(onColumnOrderChange) && !pinned.has(c.id)}
                 onDragStart={onColumnOrderChange && !pinned.has(c.id) ? (e) => { setDragCol(c.id); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', c.id) } catch { /* old engines */ } } : undefined}
@@ -454,6 +461,9 @@ export function LCDataGrid<R>({
                     <Icon name={dir === 'asc' ? 'chevron-up' : 'chevron-down'} size={11} className="lc-grid__sorticon" />
                   </button>
                 ) : <span className="lc-grid__thtext">{c.header}</span>}
+                {c.headerAccessory ? (
+                  <span className="lc-grid__thacc" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} draggable={false} onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}>{c.headerAccessory}</span>
+                ) : null}
                 <span
                   className="lc-grid__resize lc-resize-x"
                   aria-hidden="true"

@@ -29,7 +29,7 @@ const recordsCaptured = (r: EntitySearchResult): boolean => Boolean(r.details?.r
 
 export type ColumnGroup =
   | 'overview' | 'outreach' | 'geography' | 'market' | 'property' | 'ownership' | 'owner'
-  | 'people' | 'contacts' | 'signals' | 'scores' | 'engine' | 'provenance'
+  | 'people' | 'contacts' | 'signals' | 'scores' | 'engine' | 'provenance' | 'company'
 
 export const COLUMN_GROUP_LABELS: Record<ColumnGroup, string> = {
   overview: 'Overview',
@@ -45,10 +45,11 @@ export const COLUMN_GROUP_LABELS: Record<ColumnGroup, string> = {
   scores: 'Value & equity',
   engine: 'Decision Engine',
   provenance: 'Advanced / debug (ids, system)',
+  company: 'Owning company (state registry)',
 }
 
 export const COLUMN_GROUP_ORDER: ColumnGroup[] = [
-  'overview', 'outreach', 'geography', 'market', 'property', 'ownership', 'owner',
+  'overview', 'outreach', 'geography', 'market', 'property', 'ownership', 'owner', 'company',
   'people', 'contacts', 'signals', 'scores', 'engine', 'provenance',
 ]
 
@@ -116,8 +117,20 @@ export type TableColumn = {
   unit: ColumnUnit
   /** The source column exists but carries no data: listed in the picker as "no data", not offered. */
   noData?: boolean
-  /** Backend sort column; absent means the column is display-only. */
+  /**
+   * Backend sort column. Properties: EVERY column has one — its column on the
+   * property facts relation (eg_property_facts, or the live computation until
+   * that read model is applied), so the server orders the WHOLE filtered
+   * cohort (entity-graph-facts-query.js). Other scopes: absent = display-only.
+   */
   sortBy?: string
+  /**
+   * Properties: the facts column the header filter counts and filters on when
+   * it differs from `sortBy` (SMS eligible sorts by its order key, filters by
+   * the eligibility / reason value; Signals sorts by distress count, filters by
+   * the signal labels).
+   */
+  filterColumn?: string
   align?: 'right'
   width: number
   render: (result: EntitySearchResult) => string | null
@@ -265,6 +278,23 @@ const lienText = (r: EntitySearchResult): string | null => {
   return [labels.join(', '), typeof rec.lienAmountDue === 'number' && rec.lienAmountDue > 0 ? `${signedMoney(rec.lienAmountDue)} due` : null].filter(Boolean).join(' · ')
 }
 
+export const COMPANY_STATUS_LABEL: Record<string, string> = {
+  active: 'Active', inactive: 'Inactive', dissolved: 'Dissolved', forfeited: 'Forfeited', terminated_cancelled: 'Terminated / cancelled',
+  withdrawn: 'Withdrawn', unknown: 'Unknown', not_a_company: 'Not a company',
+}
+/** "Dissolved · Admin. Dissolved", "Unknown · not in the state registry", "Not a company". */
+export function companyStatusText(r: EntitySearchResult): string | null {
+  const row = r.details?.row ?? {}
+  const cls = text(row['fact.company_status_class'])
+  if (!cls) return null
+  const raw = text(row['fact.company_status_raw'])
+  const match = text(row['fact.company_registry_match'])
+  const label = COMPANY_STATUS_LABEL[cls] ?? humanizeCode(cls)
+  if (cls === 'unknown' && match === 'name_only') return 'Unknown · not in the state registry'
+  if (cls === 'unknown' && match === 'no_entity_record') return 'Unknown · no entity record'
+  return raw && raw.toLowerCase() !== String(label).toLowerCase() ? `${label} · ${raw}` : label
+}
+
 /** The last sale from ONE source, with a consistency note when the price cannot be this parcel's value. */
 export function lastSaleText(r: EntitySearchResult): string | null {
   const rec = r.details?.records
@@ -318,6 +348,13 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
         return `${b.acquisitions ?? '—'} purchases${b.status ? ` · ${b.status}` : ''}`
       },
     },
+    {
+      // the owning LLC / corp in its state registry (owner, 2026-10-09: "inactive / dissolved … and the reason")
+      key: 'companyStatus', group: 'company', label: 'Company status', width: 220, unit: 'composite',
+      fields: ['fact.company_status_class', 'fact.company_status_raw', 'fact.company_registry_match'],
+      source: 'State business registry (seller.company) for the owning entity — class + the registry’s own wording',
+      render: (r) => companyStatusText(r),
+    },
     { key: 'loans', group: 'signals', label: 'Open loans', sortBy: 'rec_mortgage_count', align: 'right', width: 84, unit: 'count', source: 'Recorded open mortgages (seller.property_mortgage)', render: (r) => (recordsCaptured(r) ? String(r.details!.records!.mortgageCount) : null) },
     { key: 'balance', group: 'scores', label: 'Loan balance (recorded)', sortBy: 'rec_mortgage_balance', align: 'right', width: 150, unit: 'currency', render: (r) => (typeof r.details?.records?.mortgageBalance === 'number' ? signedMoney(r.details.records.mortgageBalance) : null) },
     { key: 'rate', group: 'signals', label: 'First loan rate', align: 'right', width: 104, unit: 'rate', render: (r) => formatUnit('rate', r.details?.records?.firstRate) },
@@ -354,14 +391,16 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
       // ONE signal system (property-signals.ts): vendor flags + seller tags +
       // recorded signals, deduplicated, colored by meaning, ALL of them listed
       key: 'flags', group: 'overview', label: 'Signals', width: 320, unit: 'signals',
+      // seller tags are part of the one signal system — loaded with the column so the cell, its sort and its filter agree
+      fields: ['seller_tags_text'],
       render: (r) => propertySignals(r).map((x) => x.label).join(' · ') || null,
       signals: true,
       sortValue: (r) => propertySignals(r).filter((x) => x.tone === 'distress').length || null,
     },
   ],
   master_owners: [
-    { key: 'ownerType', group: 'ownership', label: 'Owner type', width: 150, unit: 'text', render: (r) => humanizeEnum(r.details?.ownerType) },
-    { key: 'tier', group: 'ownership', label: 'Tier', width: 74, unit: 'code', render: (r) => humanizeEnum(r.details?.priorityTier) },
+    { key: 'ownerType', sortBy: 'owner_type_guess', group: 'ownership', label: 'Owner type', width: 150, unit: 'text', render: (r) => humanizeEnum(r.details?.ownerType) },
+    { key: 'tier', sortBy: 'priority_tier', group: 'ownership', label: 'Tier', width: 74, unit: 'code', render: (r) => humanizeEnum(r.details?.priorityTier) },
     { key: 'portfolio', group: 'ownership', label: 'Properties', sortBy: 'property_count', align: 'right', width: 90, unit: 'count', render: (r) => compactCount(r.linkedCounts.properties) },
     { key: 'portfolioValue', group: 'scores', label: 'Portfolio value', sortBy: 'portfolio_total_value', align: 'right', width: 120, unit: 'currency', render: (r) => compactCurrency(r.details?.portfolioValue) },
     {
@@ -373,37 +412,76 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
     { key: 'priority', group: 'scores', label: 'Priority', sortBy: 'priority_score', align: 'right', width: 76, unit: 'score', render: (r) => (typeof r.score === 'number' ? String(Math.round(r.score)) : null) },
   ],
   people: [
-    { key: 'occupation', group: 'people', label: 'Occupation', width: 190, unit: 'text', render: (r) => text(r.details?.occupation) },
-    { key: 'language', group: 'people', label: 'Language', width: 92, unit: 'text', render: (r) => text(r.details?.language) },
-    { key: 'owner', group: 'ownership', label: 'Linked owner', width: 168, unit: 'text', render: (r) => text(r.details?.ownerName) },
+    { key: 'occupation', sortBy: 'occupation_group', group: 'people', label: 'Occupation', width: 190, unit: 'text', render: (r) => text(r.details?.occupation) },
+    { key: 'language', sortBy: 'language_preference', group: 'people', label: 'Language', width: 92, unit: 'text', render: (r) => text(r.details?.language) },
+    { key: 'owner', sortBy: 'owner_display_name', group: 'ownership', label: 'Linked owner', width: 168, unit: 'text', render: (r) => text(r.details?.ownerName) },
     { key: 'properties', group: 'ownership', label: 'Properties', align: 'right', width: 90, unit: 'count', render: (r) => compactCount(r.linkedCounts.properties) },
     { key: 'contacts', group: 'contacts', label: 'Contacts', align: 'right', width: 84, unit: 'count', render: (r) => compactCount(r.linkedCounts.contacts) },
     { key: 'contactScore', group: 'contacts', label: 'Contact score', sortBy: 'contact_score_final', align: 'right', width: 108, unit: 'score', render: (r) => (typeof r.score === 'number' ? String(Math.round(r.score)) : null) },
   ],
   buyers: [
     { key: 'purchases', group: 'overview', label: 'Purchases', sortBy: 'acquisition_count', align: 'right', width: 88, unit: 'count', render: (r) => compactCount(r.details?.acquisitions) },
-    { key: 'status', group: 'overview', label: 'Activity', width: 88, unit: 'text', render: (r) => humanizeEnum(r.details?.activityStatus) },
-    { key: 'market', group: 'geography', label: 'Primary market', width: 150, unit: 'text', render: (r) => text(r.details?.primaryMarket) },
-    { key: 'archetype', group: 'signals', label: 'Archetype', width: 150, unit: 'text', render: (r) => text(r.details?.archetypeLabel) },
+    { key: 'status', sortBy: 'activity_status', group: 'overview', label: 'Activity', width: 88, unit: 'text', render: (r) => humanizeEnum(r.details?.activityStatus) },
+    { key: 'market', sortBy: 'primary_market', group: 'geography', label: 'Primary market', width: 150, unit: 'text', render: (r) => text(r.details?.primaryMarket) },
+    { key: 'archetype', sortBy: 'archetype', group: 'signals', label: 'Archetype', width: 150, unit: 'text', render: (r) => text(r.details?.archetypeLabel) },
     { key: 'last', group: 'overview', label: 'Last buy', sortBy: 'last_acquisition', width: 96, unit: 'date', render: (r) => { const d = text(r.details?.lastAcquisition); return d ? new Date(`${d.slice(0, 10)}T12:00:00`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : null } },
     { key: 'year', group: 'overview', label: 'Purchases (12 mo)', sortBy: 'trailing_365d', align: 'right', width: 120, unit: 'count', render: (r) => compactCount(r.details?.trailing365) },
-    { key: 'median', group: 'scores', label: 'Median price', align: 'right', width: 100, unit: 'currency', render: (r) => compactCurrency(r.details?.priceP50) },
-    { key: 'cash', group: 'scores', label: 'Cash share', align: 'right', width: 84, unit: 'percent', render: (r) => (typeof r.details?.cashShare === 'number' ? `${Math.round(r.details.cashShare * 100)}%` : null) },
+    { key: 'median', sortBy: 'price_p50', group: 'scores', label: 'Median price', align: 'right', width: 100, unit: 'currency', render: (r) => compactCurrency(r.details?.priceP50) },
+    { key: 'cash', sortBy: 'cash_share', group: 'scores', label: 'Cash share', align: 'right', width: 84, unit: 'percent', render: (r) => (typeof r.details?.cashShare === 'number' ? `${Math.round(r.details.cashShare * 100)}%` : null) },
     { key: 'owns', group: 'ownership', label: 'Owns here', sortBy: 'owned_count', align: 'right', width: 84, unit: 'count', render: (r) => compactCount(r.details?.ownedCount) },
-    { key: 'sold', group: 'ownership', label: 'Sold', align: 'right', width: 64, unit: 'count', render: (r) => compactCount(r.details?.soldCount) },
-    { key: 'kind', group: 'people', label: 'Kind', width: 90, unit: 'text', render: (r) => (r.details?.entityKind === 'person' ? 'Individual' : 'Company') },
+    { key: 'sold', sortBy: 'sold_count', group: 'ownership', label: 'Sold', align: 'right', width: 64, unit: 'count', render: (r) => compactCount(r.details?.soldCount) },
+    { key: 'kind', sortBy: 'entity_type', group: 'people', label: 'Kind', width: 90, unit: 'text', render: (r) => (r.details?.entityKind === 'person' ? 'Individual' : 'Company') },
   ],
   organizations: [
     { key: 'entityType', group: 'ownership', label: 'Entity type', width: 140, unit: 'text', render: (r) => text(r.details?.entityType) ?? text(r.subtitle) },
-    { key: 'mailing', group: 'geography', label: 'Mailing address', width: 250, unit: 'text', render: (r) => text(r.details?.mailingAddress) },
+    { key: 'mailing', sortBy: 'owner_address_full', group: 'geography', label: 'Mailing address', width: 250, unit: 'text', render: (r) => text(r.details?.mailingAddress) },
   ],
   contact_methods: [
-    { key: 'type', group: 'contacts', label: 'Line type', width: 96, unit: 'text', render: (r) => text(r.details?.phoneType) ?? text(r.details?.contactType) },
-    { key: 'linked', group: 'people', label: 'Linked to', width: 190, unit: 'text', render: (r) => text(r.subtitle) },
+    { key: 'type', sortBy: 'phone_type', group: 'contacts', label: 'Line type', width: 96, unit: 'text', render: (r) => text(r.details?.phoneType) ?? text(r.details?.contactType) },
+    { key: 'linked', sortBy: 'owner_display_name', group: 'people', label: 'Linked to', width: 190, unit: 'text', render: (r) => text(r.subtitle) },
     { key: 'eligibility', group: 'contacts', label: 'Status', width: 100, unit: 'text', render: (r) => text(r.details?.eligibility) },
     { key: 'reachability', group: 'contacts', label: 'Reachability', width: 110, unit: 'text', render: (r) => text(r.details?.reachability) },
     { key: 'score', group: 'scores', label: 'Score', sortBy: 'contact_score_final', align: 'right', width: 70, unit: 'score', render: (r) => (typeof r.score === 'number' ? String(Math.round(r.score)) : null) },
   ],
+}
+
+/**
+ * Every hand-built property column → its facts column (sort) and, where it
+ * differs, the column its header filter reads. One table, tested against the
+ * server's facts registry (entity-graph-facts.test.mjs reads this file).
+ */
+export const PROPERTY_COLUMN_FACTS: Record<string, { sortBy: string; filterColumn?: string }> = {
+  smsEligible: { sortBy: 'sms_sort', filterColumn: 'sms_status' },
+  lastContact: { sortBy: 'last_contact_at' },
+  stage: { sortBy: 'pipeline_stage' },
+  status: { sortBy: 'pipeline_status' },
+  convoStage: { sortBy: 'conversation_stage' },
+  convoStatus: { sortBy: 'conversation_status' },
+  campaigns: { sortBy: 'campaign_count', filterColumn: 'latest_campaign_name' },
+  lastMessage: { sortBy: 'last_message_at' },
+  market: { sortBy: 'market' },
+  assetType: { sortBy: 'asset_type' },
+  value: { sortBy: 'estimated_value' },
+  equity: { sortBy: 'equity_known_pct' },
+  owner: { sortBy: 'owner_name' },
+  ownerBuyer: { sortBy: 'owner_buyer_purchases' },
+  loans: { sortBy: 'rec_mortgage_count' },
+  balance: { sortBy: 'rec_mortgage_balance' },
+  rate: { sortBy: 'rec_first_rate' },
+  lender: { sortBy: 'rec_first_lender' },
+  liens: { sortBy: 'lien_count', filterColumn: 'lien_types' },
+  filings: { sortBy: 'filing_count', filterColumn: 'filing_types' },
+  // the cell reads the recorded sale, else the vendor's — so does its order
+  lastSale: { sortBy: 'last_sale_on' },
+  units: { sortBy: 'units_count' },
+  zip: { sortBy: 'zip_code' },
+  flags: { sortBy: 'distress_signal_count', filterColumn: 'signal_labels' },
+  companyStatus: { sortBy: 'company_status_class' },
+  property_id: { sortBy: 'property_id' },
+}
+for (const c of SCOPE_TABLE_COLUMNS.properties) {
+  const m = PROPERTY_COLUMN_FACTS[c.key]
+  if (m) { c.sortBy = m.sortBy; if (m.filterColumn) c.filterColumn = m.filterColumn }
 }
 
 export function defaultVisibleColumns(scope: EntityScope): string[] {
@@ -685,6 +763,16 @@ const EXTRA_PROPERTY_COLUMNS: Extra[] = [
   { key: 'zip.active_buyers', label: 'Active buyers in ZIP', group: 'market', width: 140, unit: 'count' },
   { key: 'zip.buyers', label: 'Buyers in ZIP (all)', group: 'market', width: 130, unit: 'count' },
 
+  /* the owning company's state-registry record (seller.company via the entity contact's owning_entity_id) */
+  { key: 'fact.company_name', label: 'Owning company', group: 'company', width: 200, unit: 'text', source: 'State business registry name (seller.company), else the entity name on the deed' },
+  { key: 'fact.company_status_raw', label: 'Company status (registry wording)', group: 'company', width: 200, unit: 'text', source: 'seller.company.current_status, verbatim' },
+  { key: 'fact.company_inactive', label: 'Company flagged inactive', group: 'company', width: 150, unit: 'boolean', source: 'seller.company.inactive (the registry flag; the status wording wins where they disagree)' },
+  { key: 'fact.company_dissolution_date', label: 'Company dissolved on', group: 'company', width: 150, unit: 'date' },
+  { key: 'fact.company_incorporation_date', label: 'Company incorporated on', group: 'company', width: 160, unit: 'date' },
+  { key: 'fact.company_age_years', label: 'Company age', group: 'company', width: 110, unit: 'years' },
+  { key: 'fact.company_jurisdiction', label: 'Company jurisdiction', group: 'company', width: 140, unit: 'code' },
+  { key: 'fact.company_registry_match', label: 'Registry match', group: 'company', width: 130, unit: 'code', source: 'matched · name_only (no registry record) · no_entity_record · individual' },
+
   { key: 'property_export_id', label: 'Export id', group: 'provenance', width: 140, unit: 'id' },
   { key: 'canonical_market_id', label: 'Canonical market id', group: 'provenance', width: 160, unit: 'id' },
   { key: 'master_owner_id', label: 'Master owner ID', group: 'provenance', width: 190, unit: 'id' },
@@ -704,11 +792,18 @@ function renderRawField(key: string, unit: ColumnUnit, result: EntitySearchResul
   return formatUnit(unit, (result.details?.row ?? {})[key])
 }
 
-/** Mirrors KEYSET_SORT_COLUMNS (entity-graph-property-sort.js): picker fields the server may sort. */
-const SERVER_SORTABLE_FIELDS = new Set([
-  'year_built', 'effective_year_built', 'total_bedrooms', 'total_baths', 'building_square_feet', 'lot_square_feet',
-  'zoning', 'total_loan_balance', 'ownership_years', 'sale_date', 'sale_price',
-])
+/**
+ * The facts column a picker field sorts / filters by: the view column itself,
+ * `<source>.<field>` → `<source>_<field>` (rec.first_rate → rec_first_rate,
+ * owner.priority_score → owner_priority_score…), `fact.<col>` → `<col>`. The
+ * vendor equity columns order by the KNOWN equity they display (never by a
+ * fabricated 100%).
+ */
+export function factColumnForField(key: string, extra?: { vendorEquity?: boolean }): string {
+  if (extra?.vendorEquity) return key === 'equity_amount' ? 'equity_known_amount' : 'equity_known_pct'
+  if (key.startsWith('fact.')) return key.slice('fact.'.length)
+  return key.replace('.', '_')
+}
 
 function rawSortValue(key: string, unit: ColumnUnit, result: EntitySearchResult): string | number | null {
   const raw = (result.details?.row ?? {})[key]
@@ -736,10 +831,8 @@ function rawSortValue(key: string, unit: ColumnUnit, result: EntitySearchResult)
       align: RIGHT_ALIGNED_UNITS.has(extra.unit) ? 'right' : undefined,
       field: extra.key,
       source: extra.source,
-      // Asks the server for a whole-cohort sort; the server answers with
-      // sort.sortApplied=false when no (column, property_id) index exists and
-      // the table falls back to "sorted within loaded rows".
-      sortBy: SERVER_SORTABLE_FIELDS.has(extra.key) ? extra.key : undefined,
+      // whole-cohort server sort + header filter on its facts column (every picker field)
+      sortBy: factColumnForField(extra.key, extra),
       noData: extra.noData,
       render: (r) => renderRawField(extra.key, extra.unit, r, extra),
       sortValue: (r) => rawSortValue(extra.key, extra.unit, r),
@@ -751,6 +844,7 @@ function rawSortValue(key: string, unit: ColumnUnit, result: EntitySearchResult)
     group: 'provenance',
     unit: 'id',
     width: 130,
+    sortBy: 'property_id',
     render: (r) => text(r.entityId),
   })
 }

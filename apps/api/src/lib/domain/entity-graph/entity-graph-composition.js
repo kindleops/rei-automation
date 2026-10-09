@@ -22,9 +22,14 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
   applyEntityGraphFieldFilters,
+  isComputedFactFilter,
   resolveEntityGraphFieldFilters,
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
+import { compileFacetWhere, selectClauses } from './entity-graph-facet-sql.js'
+import { factsCohortRelation } from './entity-graph-facts-query.js'
+import { isComputedFactColumn } from './entity-graph-facts.js'
+import { queryWithTimeout } from '@/lib/postgres/client.js'
 import { applyBuyerFilters, applyOwnerFilters, applyPhoneFilters, applyPropertyFilters, applyProspectFilters, parseBrowseFilters } from './entity-graph-service.js'
 import { FacetUntranslatable, facetsAvailable, groupedFacetCounts, groupedTokenCounts } from './entity-graph-facet-sql.js'
 
@@ -178,6 +183,16 @@ const PHONE_DIMENSIONS = [
   top('usage2', 'Usage, 2 months', 'Phone', 'usage_2_months', 'phones.usage_2_months'),
 ]
 
+/* property facts (entity-graph-facts.js) — counted on the facts relation (read model, else live); appended so the default dimension stays cheap */
+PROPERTY_DIMENSIONS.push(
+  { key: 'sms_status', label: 'SMS eligibility', group: 'Outreach & pipeline', kind: 'top', column: 'sms_status', filterKey: 'facts.sms_status' },
+  { key: 'pipeline_stage', label: 'Pipeline stage', group: 'Outreach & pipeline', kind: 'top', column: 'pipeline_stage', filterKey: 'facts.pipeline_stage' },
+  { key: 'conversation_stage', label: 'Conversation stage', group: 'Outreach & pipeline', kind: 'top', column: 'conversation_stage', filterKey: 'facts.conversation_stage' },
+  { key: 'company_status', label: 'Company status', group: 'Owning company', kind: 'top', column: 'company_status_class', filterKey: 'facts.company_status_class' },
+  { key: 'company_status_raw', label: 'Company status (registry wording)', group: 'Owning company', kind: 'top', column: 'company_status_raw', filterKey: 'facts.company_status_raw' },
+  { key: 'company_jurisdiction', label: 'Company jurisdiction', group: 'Owning company', kind: 'top', column: 'company_jurisdiction', filterKey: 'facts.company_jurisdiction' },
+)
+
 const TAB_CONFIG = {
   properties: { table: 'v_entity_graph_properties', countColumn: 'property_id', dimensions: PROPERTY_DIMENSIONS, applyBase: applyPropertyFilters },
   buyers: { table: 'eg_buyer_index', countColumn: 'buyer_id', dimensions: BUYER_DIMENSIONS, applyBase: applyBuyerFilters },
@@ -227,7 +242,11 @@ export async function buildEntityGraphComposition(params = {}, deps = {}) {
   const dimension = config.dimensions.find((entry) => entry.key === clean(params.dimension)) || config.dimensions[0]
 
   const filters = parseBrowseFilters(params)
-  const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow(tab, params)
+  const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow(tab, params, { allowComputedFacts: tab === 'properties' })
+  // a computed-fact filter or dimension (SMS eligible, company status…) exists only on the property facts relation
+  if (fieldFilters.some(isComputedFactFilter) || (tab === 'properties' && isComputedFactColumn(dimension.column))) {
+    return { tab, ...(await factsComposition({ deps, config, dimension, filters, fieldFilters, all: isTruthy(params.all) })) }
+  }
   const base = (select, options) => applyEntityGraphFieldFilters(
     config.applyBase(supabase.from(config.table).select(select, options), filters),
     fieldFilters,
@@ -358,6 +377,94 @@ async function tokenComposition({ deps, config, dimension, filters, fieldFilters
 }
 
 const isTruthy = (value) => ['1', 'true', 'yes'].includes(clean(value).toLowerCase())
+
+const IDENT_RE = /^[a-z_][a-z0-9_]*$/
+const qi = (c) => { if (!IDENT_RE.test(c)) throw new FacetUntranslatable(`identifier ${c}`); return `"${c}"` }
+
+/**
+ * Composition over the property facts relation (entity-graph-facts-query.js):
+ * the cohort with its computed-fact filters, every bucket counted exactly in
+ * ONE statement (count(*) filter (where <the bucket's own predicate>), each
+ * predicate compiled by the same recorder from the same applier).
+ */
+async function factsComposition({ deps, config, dimension, filters, fieldFilters, all }) {
+  const query = deps.factsDeps?.query || deps.query || queryWithTimeout
+  const dim = { key: dimension.key, label: dimension.label, group: dimension.group, kind: dimension.kind === 'tokens' ? 'signals' : dimension.kind, format: dimension.format || null }
+  const applyFilters = (builder) => applyEntityGraphFieldFilters(config.applyBase(builder, filters), fieldFilters)
+  try {
+    // bucket predicates first: the columns they read must ride in the relation
+    const buckets = dimension.kind === 'banded' || dimension.kind === 'signals' ? (dimension.buckets || []) : []
+    const compiledBuckets = buckets.map((bucket) => {
+      if (dimension.derivedKey) {
+        const { resolved, unsupported } = resolveEntityGraphFieldFilters('properties', [bucketFilter(dimension, bucket)])
+        if (unsupported.length) return null
+        return compileFacetWhere((b) => applyEntityGraphFieldFilters(b, resolved))
+      }
+      return compileFacetWhere((b) => applyBucket(b, dimension.column, bucket))
+    })
+    const columns = [...new Set([
+      ...(dimension.column && dimension.kind !== 'signals' ? [dimension.column] : []),
+      ...compiledBuckets.flatMap((c) => (c ? c.clauseColumns.flatMap((set) => [...set]) : [])),
+    ])]
+    const rel = await factsCohortRelation({ applyFilters, columns, deps: deps.factsDeps || {} })
+    const params = [...rel.params]
+    const filtersSql = compiledBuckets.map((c) => {
+      if (!c) return 'false'
+      const sel = selectClauses(c, () => true, params.length)
+      params.push(...sel.params)
+      return sel.sql || 'true'
+    })
+    const asOf = { factsMode: rel.mode, asOf: rel.asOf ?? null }
+    if (dimension.kind === 'top' || dimension.kind === 'tokens') {
+      const col = `f.${qi(dimension.column)}`
+      const value = dimension.kind === 'tokens' ? 'btrim(u.v)' : `nullif(btrim(${col}::text), '')`
+      const from = dimension.kind === 'tokens'
+        ? `${rel.from} cross join lateral jsonb_array_elements_text(case when jsonb_typeof(${col}) = 'array' then ${col} else '[]'::jsonb end) as u(v)`
+        : rel.from
+      const [grouped, counted] = await Promise.all([
+        query(`select ${value} as value, count(*)::bigint as n from ${from} ${rel.where} group by 1`, rel.params, 25_000),
+        query(`select count(*)::bigint as n from ${rel.from} ${rel.where}`, rel.params, 25_000),
+      ])
+      const total = Number(counted?.rows?.[0]?.n ?? 0)
+      const rows = (grouped?.rows || []).map((r) => ({ value: r.value === null ? null : String(r.value), count: Number(r.n || 0) }))
+      const valued = rows.filter((r) => r.value !== null).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+      const blank = rows.filter((r) => r.value === null).reduce((n, r) => n + r.count, 0)
+      const shown = all ? valued : valued.slice(0, TOP_BUCKETS)
+      const out = shown.map((r) => ({
+        key: r.value,
+        label: r.value,
+        value: r.count,
+        share: total ? r.count / total : null,
+        filter: dimension.kind === 'tokens' ? { field_key: dimension.filterKey, operator: 'is_any_of', value: [r.value] } : bucketFilter(dimension, { key: r.value, label: r.value, value: r.value }),
+      }))
+      if (dimension.kind === 'top') {
+        const other = valued.slice(shown.length).reduce((n, r) => n + r.count, 0)
+        if (other > 0) out.push({ key: '__other', label: 'Everything else', value: other, share: total ? other / total : null, filter: null })
+        if (blank > 0) out.push({ key: '__blank', label: 'Not recorded', value: blank, share: total ? blank / total : null, filter: null })
+      }
+      return { supported: true, dimension: dim, total, additive: dimension.kind === 'top', exhaustive: true, distinct: valued.length, note: dimension.kind === 'tokens' ? 'A property can carry several flags, so these shares do not add up to 100%.' : null, buckets: out, ...asOf }
+    }
+    const res = await query(`select count(*)::bigint as total${filtersSql.map((sql, i) => `, count(*) filter (where ${sql})::bigint as b${i}`).join('')} from ${rel.from} ${rel.where}`, params, 25_000)
+    const r = res?.rows?.[0] || {}
+    const total = Number(r.total ?? 0)
+    const out = buckets.map((bucket, i) => {
+      const value = compiledBuckets[i] ? Number(r[`b${i}`] ?? 0) : null
+      return { key: bucket.key, label: bucket.label, value, share: total && value !== null ? value / total : null, filter: bucketFilter(dimension, bucket) }
+    })
+    if (dimension.kind === 'banded') {
+      const shown = out.reduce((n, b) => n + (b.value || 0), 0)
+      if (total - shown > 0) out.push({ key: '__blank', label: 'Not recorded', value: total - shown, share: (total - shown) / total, filter: null })
+    }
+    return {
+      supported: true, dimension: dim, total, additive: dimension.kind !== 'signals', exhaustive: true,
+      note: dimension.kind === 'signals' ? 'A record can carry several signals, so these shares do not add up to 100%.' : null,
+      buckets: out, ...asOf,
+    }
+  } catch (error) {
+    if (!(error instanceof FacetUntranslatable)) throw error
+    return { supported: false, dimension: dim, total: null, additive: false, exhaustive: false, note: `This breakdown cannot be computed with the current filters (${error.message}).`, buckets: [] }
+  }
+}
 
 /**
  * Every value of a categorical dimension with its exact count, from one
