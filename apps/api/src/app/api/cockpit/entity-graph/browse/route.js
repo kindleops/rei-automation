@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, corsHeaders } from '../../_shared.js'
-import { browseEntityGraph } from '@/lib/domain/entity-graph/entity-graph-service.js'
+import { browseEntityGraphPage } from '@/lib/domain/entity-graph/entity-graph-browse-page.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -22,7 +22,8 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url)
     const params = Object.fromEntries(searchParams.entries())
-    const data = await browseEntityGraph(params)
+    // one complete page: rows + every visible column value + outreach state (no client lazy fill)
+    const data = await browseEntityGraphPage(params)
     return NextResponse.json({ ok: true, ...data }, { status: 200, headers })
   } catch (error) {
     /**

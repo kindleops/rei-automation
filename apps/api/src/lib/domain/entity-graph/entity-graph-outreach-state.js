@@ -21,6 +21,7 @@
  * at most MAX_IDS per call in CHUNK pieces, absent = absent (the UI says "—").
  * Phone numbers are read server-side for the linkage rule and NEVER returned.
  */
+import { prospectsLinkedToProperties } from './entity-graph-owner-link.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { resolveCampaignTargetReadiness } from '@/lib/domain/campaigns/campaign-target-readiness.js'
 
@@ -156,13 +157,6 @@ export function contactCandidates({ prospects = [], propertyOwnerId = null, grap
   return out.sort((a, b) => rank[a.resolution] - rank[b.resolution])
 }
 
-async function pooled(items, limit, fn) {
-  let next = 0
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) { const i = next; next += 1; await fn(items[i]) }
-  }))
-}
-
 /**
  * Returns { states: { [property_id]: OutreachState }, generatedAt, partial }.
  * A source that fails is reported in `unavailable` and its facts stay absent
@@ -201,22 +195,23 @@ export async function getEntityGraphOutreachState(params = {}, deps = {}) {
   })
   const candidatesBy = new Map()
   const propertyOwner = new Map()
-  if (gapIds.length) {
-    await guard('contact_candidates', async () => {
-      const owners = await inChunks(gapIds, (part) => readOrThrow(supabase.from('properties').select('property_id, master_owner_id').in('property_id', part)))
-      for (const o of owners) propertyOwner.set(clean(o.property_id), clean(o.master_owner_id) || null)
-      await pooled(gapIds, 6, async (id) => {
-        // jsonb containment takes a JSON array STRING (an Array is sent as a Postgres array literal)
-        const rows = await readOrThrow(supabase.from('prospects').select(PROSPECT_CANDIDATE_SELECT).contains('linked_property_ids_json', JSON.stringify([String(id)])).limit(12))
-        candidatesBy.set(id, rows)
-      })
-    })
-  }
-
   const campaignIds = [...new Set((targets || []).map((t) => clean(t.campaign_id)).filter(Boolean))]
-  const campaigns = campaignIds.length
-    ? await guard('campaigns', () => inChunks(campaignIds, (part) => readOrThrow(supabase.from('campaigns').select('id, name, status').in('id', part))))
-    : []
+  const [, campaigns] = await Promise.all([
+    gapIds.length
+      ? guard('contact_candidates', async () => {
+        // one batched GIN read per 40 ids (was one containment query PER property — ~60 per page)
+        const [owners, linked] = await Promise.all([
+          inChunks(gapIds, (part) => readOrThrow(supabase.from('properties').select('property_id, master_owner_id').in('property_id', part))),
+          prospectsLinkedToProperties(supabase, gapIds, PROSPECT_CANDIDATE_SELECT),
+        ])
+        for (const o of owners) propertyOwner.set(clean(o.property_id), clean(o.master_owner_id) || null)
+        for (const id of gapIds) candidatesBy.set(id, (linked.get(id) || []).slice(0, 12))
+      })
+      : Promise.resolve(null),
+    campaignIds.length
+      ? guard('campaigns', () => inChunks(campaignIds, (part) => readOrThrow(supabase.from('campaigns').select('id, name, status').in('id', part))))
+      : Promise.resolve([]),
+  ])
   const campaignById = new Map((campaigns || []).map((c) => [clean(c.id), c]))
 
   const group = (rows, key) => {
