@@ -77,6 +77,8 @@ import { deskSearch, initialDeskState, withViewFilters, writeSessionDeskState, t
 import { useOutreachStates } from './desk-outreach'
 import { equityDisplay } from '../equity-display'
 import { absorbPageAttachments, completePageParams, pageKey } from './desk-page'
+import { buildSelectionDetail, publishSelection, selectionSignature } from './desk-selection'
+import { useAppInstance } from '../../desktop/workspace/instance-context'
 import { DeskGraph } from './DeskGraph'
 import { DeskInspector } from './DeskInspector'
 import { fetchDeskKpis, kpisFromCounts } from './desk-api'
@@ -401,6 +403,23 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     if (!a) { lcToast({ title: 'This record has no relationship network to open.', severity: 'info' }); return }
     openAnchor(a, { rowKey: rowKey(r) })
   }
+
+  /* ── Selection → the agent (contract: agent-context.ts) ────────────────── */
+  const instanceId = useAppInstance().instanceId
+  const publishedSig = useRef('')
+  useEffect(() => {
+    const selectedIds = [...selected].filter((k) => k.startsWith('property:')).map((k) => k.slice('property:'.length))
+    const focusId = anchor?.type === 'property' ? anchor.id : null
+    const focusRow = focusId ? rows.find((r) => r.entityType === 'property' && r.entityId === focusId) : null
+    const focusAddress = focusId
+      ? (network?.properties.find((p) => p.id === focusId)?.address ?? (focusRow ? [focusRow.title, focusRow.subtitle].filter(Boolean).join(', ') : null))
+      : null
+    const detail = buildSelectionDetail({ scope, selectedPropertyIds: selectedIds, focused: focusId ? { property_id: focusId, address: focusAddress || null } : null, instanceId })
+    const sig = selectionSignature(detail)
+    if (sig === publishedSig.current) return
+    publishedSig.current = sig
+    publishSelection(detail)
+  }, [selected, anchor, scope, rows, network, instanceId])
 
   /* ── Grid columns ──────────────────────────────────────────────────────── */
   const gridColumns = useMemo<Array<LCColumn<EntitySearchResult>>>(() => {
