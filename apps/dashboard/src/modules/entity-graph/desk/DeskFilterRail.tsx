@@ -20,7 +20,7 @@
  * showing an unfiltered list.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { LCButton, LCChip, LCError, LCSearch, LCSelect, LCSkeleton, cx } from '../../../shared/lc'
+import { LCButton, LCChip, LCError, LCSearch, LCSegmented, LCSelect, LCSkeleton, cx } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
 import { useAuth } from '../../../components/auth/AuthProvider'
 import {
@@ -47,13 +47,17 @@ import {
   deskFacetFields,
   deskPresets,
   deskToggles,
+  FACET_OPERATORS,
+  facetCountFilters,
+  facetMatch,
   facetValues,
-  filtersExcept,
   fmtCount,
   readRailGroups,
+  setFacetMatch,
   toggleFacetValue,
   writeRailGroups,
   type DeskFacet as Facet,
+  type FacetMatch,
 } from './desk-model'
 
 type Props = {
@@ -87,7 +91,7 @@ export function DeskFilterRail({ scope, filters, onChange, collapsed = false, on
   const facetKeys = useMemo(() => new Set(facets.map((f) => f.fieldKey)), [facets])
   const isToggle = (f: EntityGraphFieldFilter) => toggles.some((t) => sameFilter(t.filter, f))
   const isPreset = (f: EntityGraphFieldFilter) => presets.some((g) => g.presets.some((p) => sameFilter(p.filter, f)))
-  const isFacet = (f: EntityGraphFieldFilter) => facetKeys.has(f.field_key) && f.operator === 'is_any_of'
+  const isFacet = (f: EntityGraphFieldFilter) => facetKeys.has(f.field_key) && FACET_OPERATORS.has(f.operator)
   const custom = filters.filter((f) => !isPreset(f) && !isFacet(f) && !isToggle(f))
 
   // Field drafts: edited locally, applied together.
@@ -115,7 +119,9 @@ export function DeskFilterRail({ scope, filters, onChange, collapsed = false, on
     if (isFacet(f)) {
       const facet = facets.find((x) => x.fieldKey === f.field_key)
       const vals = Array.isArray(f.value) ? f.value.map(String) : []
-      return `${facet?.label ?? field?.label ?? f.field_key}: ${vals.length > 2 ? `${vals.slice(0, 2).join(', ')} +${vals.length - 2}` : vals.join(', ')}`
+      // a stacking facet says how its values combine: "all of" narrows, "any of" widens
+      const how = facet?.match && vals.length > 1 ? (f.operator === 'is_all_of' ? ' all of' : ' any of') : ''
+      return `${facet?.label ?? field?.label ?? f.field_key}${how}: ${vals.length > 2 ? `${vals.slice(0, 2).join(', ')} +${vals.length - 2}` : vals.join(', ')}`
     }
     const preset = presets.flatMap((g) => g.presets).find((p) => sameFilter(p.filter, f))
     if (preset) return preset.label
@@ -209,7 +215,7 @@ export function DeskFilterRail({ scope, filters, onChange, collapsed = false, on
                 })}
               </div>
             ) : null}
-            {group.facets.length > 1 || group.toggles?.length ? <p className="egdk-facet__foot">Any of within a list · all lists together</p> : null}
+            {group.facets.length > 1 || group.toggles?.length ? <p className="egdk-facet__foot">{group.facets.some((f) => f.match) ? 'Flags: all or any, as set · other lists any of · all lists together' : 'Any of within a list · all lists together'}</p> : null}
           </RailGroup>
         )
       })}
@@ -356,10 +362,14 @@ function FieldEditor({ field, filter, onChange, onRemove }: { field: EntityGraph
 
 function FacetSection({ tab, facet, filters, onChange }: { tab: string; facet: Facet; filters: EntityGraphFieldFilter[]; onChange: (f: EntityGraphFieldFilter[]) => void }) {
   const selected = facetValues(filters, facet.fieldKey)
+  // the mode chosen before any value is picked is remembered here; an active filter's operator wins
+  const [chosenMatch, setChosenMatch] = useState<FacetMatch>(facet.match ?? 'any')
+  const match: FacetMatch = facet.match ? facetMatch(filters, facet.fieldKey, chosenMatch) : 'any'
   const [open, setOpen] = useState(selected.length > 0)
   const [find, setFind] = useState('')
   const [attempt, setAttempt] = useState(0)
-  const others = filtersExcept(filters, facet.fieldKey)
+  // "all of": counts include the selection (each = the cohort if that value is added)
+  const others = facetCountFilters(filters, facet.fieldKey, match)
   const sig = `${tab}|${facet.dimension}|${JSON.stringify(others)}|${attempt}`
   const [state, setState] = useState<{ sig: string; data: Composition | null; failed: boolean } | null>(null)
   const current = state?.sig === sig ? state : null
@@ -400,6 +410,10 @@ function FacetSection({ tab, facet, filters, onChange }: { tab: string; facet: F
       </button>
       {open ? (
         <div className="egdk-facet__body">
+          {facet.match ? (
+            <LCSegmented label={`${facet.label}: match`} size="sm" value={match} onChange={(m) => { setChosenMatch(m); if (selected.length) onChange(setFacetMatch(filters, facet.fieldKey, m)) }}
+              options={[{ value: 'all', label: 'Match all' }, { value: 'any', label: 'Match any' }]} />
+          ) : null}
           {!current ? <LCSkeleton shape="lines" count={4} label={`Counting ${facet.label.toLowerCase()}`} /> : current.failed ? (
             <LCError what={`${facet.label} counts didn’t load`} onRetry={() => setAttempt((a) => a + 1)} compact />
           ) : (
@@ -415,7 +429,7 @@ function FacetSection({ tab, facet, filters, onChange }: { tab: string; facet: F
                   const on = selected.includes(b.key)
                   return (
                     <li key={b.key}>
-                      <button type="button" role="option" aria-selected={on} className={cx('egdk-bucket', on && 'is-on')} onClick={() => onChange(toggleFacetValue(filters, facet.fieldKey, b.key))} style={{ ['--w' as string]: `${Math.max(1, ((b.value ?? 0) / max) * 100)}%` }}>
+                      <button type="button" role="option" aria-selected={on} className={cx('egdk-bucket', on && 'is-on')} onClick={() => onChange(toggleFacetValue(filters, facet.fieldKey, b.key, match))} style={{ ['--w' as string]: `${Math.max(1, ((b.value ?? 0) / max) * 100)}%` }}>
                         <span className="egdk-bucket__check" aria-hidden="true">{on ? <Icon name="check" size={10} /> : null}</span>
                         <span className="egdk-bucket__label">{b.label}</span>
                         <span className="egdk-bucket__n">{fmtCount(b.value)}</span>

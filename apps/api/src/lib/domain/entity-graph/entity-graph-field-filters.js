@@ -174,7 +174,15 @@ const TEXT_OPS = Object.freeze([
 ])
 const ARRAY_OPS = Object.freeze([{ key: 'is_any_of', label: 'Includes any of' }])
 
-const FLAG_OPS = Object.freeze([{ key: 'is_any_of', label: 'Has any of' }])
+/**
+ * Property flags STACK (owner 2026-10-09: "when I click multiple property
+ * flags it doesn't add them … it's all the same amount"). Several flags were
+ * ORed, and the common ones (Absentee Owner 5,765 · High Equity 5,841 of
+ * Dallas's 7,738) cover almost every flagged property, so Tax Delinquent +
+ * Absentee Owner read 5,766 and + High Equity 5,898 — the market's flagged
+ * total. "Has all of" (the default) narrows: 738 → 737 → 737, + Vacant 44.
+ */
+const FLAG_OPS = Object.freeze([{ key: 'is_all_of', label: 'Has all of' }, { key: 'is_any_of', label: 'Has any of' }])
 
 const OPS_BY_TYPE = { boolean: BOOL_OPS, number: NUM_OPS, date: DATE_OPS, text: TEXT_OPS, enum: TEXT_OPS, array: ARRAY_OPS, flags: FLAG_OPS }
 
@@ -267,14 +275,14 @@ export const ENTITY_GRAPH_RECORD_FIELDS = Object.freeze([
  *
  * properties.property_flags_text is "Vacant Home; Tax Delinquent; …". A
  * substring match is wrong ("Foreclosure" is inside "Preforeclosure"), so a
- * flag matches only as a whole "; "-separated token, and several flags are
- * ORed (any of). Owner reference 2026-10-07 (read-only, canaries excluded):
+ * flag matches only as a whole "; "-separated token. Several flags are ANDed
+ * by default (is_all_of — every selected flag) or ORed (is_any_of). Owner reference 2026-10-07 (read-only, canaries excluded):
  * Vacant Home 7,814 · Poor/Unsound 8,427 · Vacant AND Poor/Unsound 1,076.
  */
 export const ENTITY_GRAPH_FLAG_FIELD = syntheticField('properties', 'properties', 'Distress & Condition', 'property_flags_text', 'Property flags', 'flags', {
   key: 'properties.flags',
   supports_options: true,
-  description: 'Vendor property flags (Vacant Home, Tax Delinquent, Tired Landlord, Preforeclosure, Probate, …) matched as whole tokens; several are ORed.',
+  description: 'Vendor property flags (Vacant Home, Tax Delinquent, Tired Landlord, Preforeclosure, Probate, …) matched as whole tokens; several must ALL be present (has all of) unless the filter asks for any of.',
 })
 
 /**
@@ -431,6 +439,7 @@ export const ENTITY_GRAPH_TOKEN_FIELDS = Object.freeze({
 })
 const TOKEN_OPS = Object.freeze([
   { key: 'is_any_of', label: 'Has any of' },
+  { key: 'is_all_of', label: 'Has all of' },
   { key: 'is_empty', label: 'Is empty' },
   { key: 'is_not_empty', label: 'Has a value' },
 ])
@@ -593,7 +602,8 @@ export function resolveEntityGraphFieldFilters(tab, requested = []) {
       })
       continue
     }
-    const value = normalizePreviewFilterValue(entry.value, operator)
+    // is_all_of is a token-only operator the shared compiler does not know: its value is a list, like is_any_of
+    const value = normalizePreviewFilterValue(entry.value, operator === 'is_all_of' ? 'is_any_of' : operator)
     if (!VALUELESS_OPERATORS.has(operator) && !hasMeaningfulFilterValue(value, operator)) {
       // An operator that needs a value and did not get one would compile to
       // nothing at all, which is the silent-everything shape.
@@ -623,7 +633,7 @@ export function applyEntityGraphFieldFilters(query, resolved = []) {
   // Array columns (buyer geography, lien categories) are an OVERLAP test; the
   // shared compiler has no array type, so they are applied here directly.
   const type = (entry) => entry.fieldDefinition?.type
-  const isTokenMatch = (entry) => type(entry) === 'flags' && entry.operator === 'is_any_of'
+  const isTokenMatch = (entry) => type(entry) === 'flags' && (entry.operator === 'is_any_of' || entry.operator === 'is_all_of')
   const arrays = resolved.filter((entry) => type(entry) === 'array')
   const flags = resolved.filter(isTokenMatch)
   const derived = resolved.filter((entry) => entry.fieldDefinition?.derived)
@@ -637,7 +647,16 @@ export function applyEntityGraphFieldFilters(query, resolved = []) {
   for (const entry of flags) {
     const values = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(Boolean)
     const separator = entry.fieldDefinition?.token_separator || '; '
-    const parts = values.flatMap((v) => flagTokenPatterns(v, separator)).map((pattern) => `${entry.source_column}.ilike.${orFilterValue(pattern)}`)
+    const partsFor = (v) => flagTokenPatterns(v, separator).map((pattern) => `${entry.source_column}.ilike.${orFilterValue(pattern)}`)
+    if (entry.operator === 'is_all_of') {
+      // one or=(…) per token — PostgREST ANDs repeated params: every token present
+      for (const v of values) {
+        const parts = partsFor(v)
+        if (parts.length) next = next.or(parts.join(','))
+      }
+      continue
+    }
+    const parts = values.flatMap(partsFor)
     if (parts.length) next = next.or(parts.join(','))
   }
   for (const entry of derived) {

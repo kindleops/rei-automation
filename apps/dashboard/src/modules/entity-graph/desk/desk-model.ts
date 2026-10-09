@@ -96,18 +96,49 @@ export function kpiTiles(k: DeskKpis | null): KpiTile[] {
   ]
 }
 
-/* ── Facet filters (multi-select `is_any_of` on one catalog field) ──────── */
+/* ── Facet filters (multi-select on one catalog field) ─────────────────── */
+
+/**
+ * A facet selection is `is_any_of` (OR within the list) or — for a stacking
+ * facet (property flags) — `is_all_of` (every selected value).
+ */
+export type FacetMatch = 'all' | 'any'
+export const FACET_OPERATORS = new Set(['is_any_of', 'is_all_of'])
+const matchOperator = (match: FacetMatch) => (match === 'all' ? 'is_all_of' : 'is_any_of')
+const isFacetFilter = (x: EntityGraphFieldFilter, fieldKey: string) => x.field_key === fieldKey && FACET_OPERATORS.has(x.operator)
 
 export function facetValues(filters: EntityGraphFieldFilter[], fieldKey: string): string[] {
-  const f = filters.find((x) => x.field_key === fieldKey && x.operator === 'is_any_of')
+  const f = filters.find((x) => isFacetFilter(x, fieldKey))
   return Array.isArray(f?.value) ? (f!.value as unknown[]).map(String) : []
 }
 
-export function toggleFacetValue(filters: EntityGraphFieldFilter[], fieldKey: string, value: string): EntityGraphFieldFilter[] {
+/** The facet's match mode: the active filter's operator, else the facet default. */
+export function facetMatch(filters: EntityGraphFieldFilter[], fieldKey: string, fallback: FacetMatch = 'any'): FacetMatch {
+  const f = filters.find((x) => isFacetFilter(x, fieldKey))
+  return f ? (f.operator === 'is_all_of' ? 'all' : 'any') : fallback
+}
+
+export function toggleFacetValue(filters: EntityGraphFieldFilter[], fieldKey: string, value: string, fallback: FacetMatch = 'any'): EntityGraphFieldFilter[] {
   const current = facetValues(filters, fieldKey)
+  const operator = matchOperator(facetMatch(filters, fieldKey, fallback))
   const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value]
-  const rest = filters.filter((x) => !(x.field_key === fieldKey && x.operator === 'is_any_of'))
-  return next.length ? [...rest, { field_key: fieldKey, operator: 'is_any_of', value: next }] : rest
+  const rest = filters.filter((x) => !isFacetFilter(x, fieldKey))
+  return next.length ? [...rest, { field_key: fieldKey, operator, value: next }] : rest
+}
+
+/** Switch a facet's selection between "all of" and "any of" (values kept). */
+export function setFacetMatch(filters: EntityGraphFieldFilter[], fieldKey: string, match: FacetMatch): EntityGraphFieldFilter[] {
+  return filters.map((x) => (isFacetFilter(x, fieldKey) ? { ...x, operator: matchOperator(match) } : x))
+}
+
+/**
+ * The filters a facet's bucket counts are computed under. An "any of" facet
+ * counts WITHOUT its own selection so the other values stay pickable; an
+ * "all of" facet counts WITH it — each count is the cohort if that value is
+ * added (the selected ones read the cohort total).
+ */
+export function facetCountFilters(filters: EntityGraphFieldFilter[], fieldKey: string, fallback: FacetMatch = 'any'): EntityGraphFieldFilter[] {
+  return facetMatch(filters, fieldKey, fallback) === 'all' ? filters : filtersExcept(filters, fieldKey)
 }
 
 /** A facet counts the cohort WITHOUT its own selection, so the other values stay pickable. */
@@ -218,7 +249,8 @@ export function nodeAnchor(node: NetworkNode): NetworkAnchor | null {
   return null
 }
 
-export type DeskFacet = { dimension: string; label: string; fieldKey: string }
+/** `match` = the facet stacks (default all of, with an all/any toggle); absent = any of. */
+export type DeskFacet = { dimension: string; label: string; fieldKey: string; match?: FacetMatch }
 
 /** Categorical facets per scope: composition dimension → the catalog field its buckets filter. */
 export const DESK_FACETS: Partial<Record<EntityScope, DeskFacet[]>> = {
@@ -240,10 +272,12 @@ export const DESK_FACETS: Partial<Record<EntityScope, DeskFacet[]>> = {
  * DISTRESS & CONDITION (owner 2026-10-07: "vacant AND poor/unsound, by
  * market"). Three exact facets — property flags as whole tokens, building
  * condition, rehab level (source values only) — and the boolean distress
- * columns that hold data. OR within a facet, AND across facets and toggles.
+ * columns that hold data. Flags: ALL selected by default (any-of toggle);
+ * other facets OR within; AND across facets and toggles.
  */
 export const DESK_DISTRESS_FACETS: DeskFacet[] = [
-  { dimension: 'flags', label: 'Property flags', fieldKey: 'properties.flags' },
+  // flags STACK (owner 2026-10-09): default all of — each flag narrows the cohort
+  { dimension: 'flags', label: 'Property flags', fieldKey: 'properties.flags', match: 'all' },
   { dimension: 'condition', label: 'Building condition', fieldKey: 'properties.building_condition' },
   { dimension: 'rehab', label: 'Rehab level', fieldKey: 'properties.rehab_level' },
 ]

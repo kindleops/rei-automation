@@ -68,7 +68,7 @@ export type UnsupportedFieldFilter = {
 
 const VALUELESS_OPERATORS = new Set(['is_empty', 'is_not_empty', 'is_true', 'is_false'])
 const RANGE_OPERATORS = new Set(['between'])
-const MULTI_VALUE_OPERATORS = new Set(['is_any_of', 'is_not_any_of', 'contains_any'])
+const MULTI_VALUE_OPERATORS = new Set(['is_any_of', 'is_all_of', 'is_not_any_of', 'contains_any'])
 
 export function operatorNeedsValue(operator: string): boolean {
   return !VALUELESS_OPERATORS.has(operator)
