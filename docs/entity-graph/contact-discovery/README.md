@@ -1,8 +1,46 @@
 # Entity Graph: contact discovery and history (integration packet)
 
-**For:** whoever owns the Entity Graph release candidate on `main`.
-**Status:** specification + regression baseline only. **There is no competing implementation.** Fold this into the existing RC work; do not branch a second Entity Graph.
-**Approved by:** Ryan, 2026-10-08.
+**For:** the Entity Graph owner, on `release/cloudflare-production`.
+**Status:** specification and regression baseline. **Entity Graph 8.5.0 (`91b4f873`) already implements part of it. Extend that implementation; do not build a second one.**
+**Approved by:** Ryan, 2026-10-08. Reconciled with 8.5.0 on 2026-10-09.
+
+## Reconciliation with 8.5.0 (`91b4f873`), from reading the code
+
+### Already live
+- **Linked contact candidates.** Produced by `contactCandidates()` in `apps/api/src/lib/domain/entity-graph/entity-graph-outreach-state.js`.
+  - Prospects linked through `linked_property_ids_json`, shown with masked numbers.
+  - Each is tagged `resolved_owner`, `graph_person` or `linked_unresolved`, with evidence.
+- **SMS eligibility** is the builder's own readiness rule (`propertySmsEligibility`). Candidates never change it.
+- **Last contact** (inbox thread + graph timestamps), **campaign membership** (count + latest) and the **thread suppression flag** per property.
+- **Add to Campaign** pins property IDs on drafts only, through the builder's gates.
+
+### Partial
+- Candidates are looked up **only when the campaign graph has no phone for the property**. Hidden phones on properties that already show one phone are not surfaced. In baseline sample A, most of the 936 hidden associations sit on such properties.
+- At most 12 linked prospects are read and 6 shown per property.
+- **No non-owner role.** `likely_renting`, `reach_phone` (best-contact reach role) and occupant evidence are not classified. Renters fall into `linked_unresolved`. A renter can also read `resolved_owner` when the vendor links it to the owner's master owner.
+- **History** is latest-contact only: no `send_queue` statuses or holds (e.g. `blocked_by_health_guard`), and no `message_events` timeline.
+
+### Missing
+- The dossier still hard-codes `suppressed: false` and `optedOut: false` (`entity-graph-service.js:1979-1980`, `:1998-1999`, `:2529-2530`). `timeline: []` remains at `:2312`, `:2430`, `:2475`, `:2540`, `:2614`, `:2637` and `:2656`.
+- Tri-state restrictions are not shown: `sms_suppression_list`, `automation_suppressions`, `contact_outreach_state.dnc`, vendor-DNC `unknown`.
+- Queue overlap (active/held queue rows per candidate phone) is not shown.
+
+### Narrowly scoped fix (inside the existing implementation)
+All inside `entity-graph-outreach-state.js` / `entity-graph-service.js`; no new read model.
+1. Look up candidates for **every** property in the request, not only gap properties. Mark phones already in the graph `inCampaignGraph: true` (that field already exists).
+2. Add a `role` field next to `resolution`, from evidence only:
+   - `likely_renting` → `renter_or_occupant`;
+   - best-contact `reach_phone` → `reach_relative`;
+   - otherwise unchanged.
+   Never derive `resolved_owner` for a prospect whose own flags say renter.
+3. Add `restrictions` per candidate phone, tri-state, from `sms_suppression_list`, `phones.wrong_number_at`, `contact_outreach_state` and vendor DNC (missing = `unknown`).
+4. Add queue overlap per property: count of non-terminal `send_queue` rows plus held rows with their reason.
+5. Replace the hard-coded dossier `suppressed` / `optedOut` and the empty `timeline` with the same reads.
+
+Gates: eligibility untouched (keep the `contact discovery … eligibility untouched` test green), no owner promotion, no target writes.
+
+### Regression against the live model
+The before/after run against 8.5.0's live model was **not executed in this session** (production read permission). The command is below.
 
 | File | What it is |
 |---|---|
@@ -25,16 +63,16 @@ The PR must make all of these hold:
 
 ## Integration steps
 
-1. **Read model.**
-   - Add a read-only view or RPC, `public.property_contact_candidates`, as specified in HANDOFF.md §"Required read model". Unapplied migrations use the `PROPOSED_` filename prefix.
+1. **Read model.** Superseded by 8.5.0's `getEntityGraphOutreachState` / `contactCandidates`. Extend those (see "Narrowly scoped fix" above) instead of adding a view.
+   - Original spec, for reference: a read-only view or RPC `public.property_contact_candidates`, as in HANDOFF.md §"Required read model". Unapplied migrations use the `PROPOSED_` filename prefix.
    - It gets one row per (property_id, person_key, phone), with:
      - `relationship_role`;
      - `contact_state`;
      - `provenance` (source list);
      - tri-state restriction columns.
-2. **Service** (`apps/api/src/lib/domain/entity-graph/entity-graph-service.js`, line numbers at `fa12ff7b`):
-   - `:1603-1608`: replace `eligible: !row.wrong_number_at`, `suppressed: false`, `optedOut: false`, `lastContacted: null` and `lastResponse: null` with values from the read model, plus the history join.
-   - `timeline: []` at `:1938`, `:2050`, `:2095`, `:2160` and `:2225`: populate it from the real events:
+2. **Service** (`apps/api/src/lib/domain/entity-graph/entity-graph-service.js`, line numbers at `91b4f873`):
+   - `:1979-1982`, `:1998-1999` and `:2529-2530`: replace the hard-coded `suppressed: false`, `optedOut: false`, `lastContacted: null` and `lastResponse: null` with real values.
+   - `timeline: []` at `:2312`, `:2430`, `:2475`, `:2540`, `:2614`, `:2637` and `:2656`: populate it from the real events:
      - send_queue status changes, including holds and their reasons (e.g. `blocked_by_health_guard: blocked_template_id`);
      - sends, deliveries and inbound replies (`message_events`);
      - suppressions (`sms_suppression_list`, `automation_suppressions`, `contact_outreach_state`);
