@@ -92,6 +92,8 @@ const PROSPECT_SUMMARY_SELECT = [
   'language_preference', 'gender', 'marital_status', 'education_model', 'likely_owner',
   'likely_renting', 'person_flags_text', 'linked_property_ids_json', 'phones_json', 'emails_json',
   'rank_position', 'source_slot',
+  // the People grid's "Linked owner" column read owner_display_name, never selected: blank on 100% of rows
+  'owner_display_name',
 ].join(',')
 
 const PHONE_SUMMARY_SELECT = [

@@ -279,6 +279,11 @@ export async function getEntityGraphOutreachState(params = {}, deps = {}) {
       lastContact: contact,
       stage,
       status,
+      // the two systems apart (owner, 2026-10-08: "Status/Stage columns mixing
+      // pipeline vs conversation values"): a deal's stage/status and the
+      // conversation's seller stage/status are different vocabularies
+      pipeline: opp ? { stage: clean(opp.acquisition_stage) || null, status: clean(opp.opportunity_status || opp.universal_status) || null } : null,
+      conversationState: thread ? { stage: clean(thread.seller_stage || thread.stage) || null, status: clean(thread.conversation_status || thread.status) || null } : null,
       dealId: opp?.id ? String(opp.id) : null,
       conversation: thread
         ? {
