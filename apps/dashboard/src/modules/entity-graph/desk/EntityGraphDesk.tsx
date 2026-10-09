@@ -73,6 +73,7 @@ import { SignalBadges } from './SignalBadges'
 import { propertySignals } from '../mobile/property-signals'
 import { DeskCampaignStack, stackScopeSupported, type StackResult } from './DeskCampaignStack'
 import { deskSearch, initialDeskState, writeSessionDeskState, type DeskState } from './desk-state'
+import { entityIdsOf, mergeGridSelection, readDeskSelection, withScopeSelection, writeDeskSelection, type DeskSelection } from './desk-selection'
 import { useOutreachStates } from './desk-outreach'
 import { DeskGraph } from './DeskGraph'
 import { DeskInspector } from './DeskInspector'
@@ -181,7 +182,15 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   }
   const [railOverOpen, setRailOverOpen] = useState(false)
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(() => new Set())
-  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  // Checked rows persist per scope across load-more, filters, search, scope switches and reload
+  // (exact-property campaign selection) — see desk-selection.ts.
+  const [selectionByScope, setSelectionByScope] = useState<DeskSelection>(() => readDeskSelection())
+  const selected = useMemo(() => new Set(selectionByScope[scope] ?? []), [selectionByScope, scope])
+  const setSelected = (next: ReadonlySet<string>) => setSelectionByScope((cur) => {
+    const out = withScopeSelection(cur, scope, next)
+    writeDeskSelection(out)
+    return out
+  })
   // `?buyer=<public buyer_id>` (Comps "View buyer", Buyer Match) opens that buyer.
   const [buyerId, setBuyerId] = useState<string | null>(() => initialParams.get('buyer') || null)
   const [views, setViews] = useState<DeskView[]>(() => readViews(uid))
@@ -247,7 +256,6 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   if (seenSig !== signature) {
     setSeenSig(signature)
     setCursor(0)
-    setSelected(new Set())
   }
   const isCurrent = list.signature === signature
   const results = isCurrent ? list.results : EMPTY_LIST.results
@@ -588,10 +596,10 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
 
       <div className="egdk-bar">
         <LCIconButton icon="filter" label={railShown ? 'Collapse filters' : 'Show filters'} size="sm" selected={railShown} count={filters.length || null} onClick={() => { if (narrow) { setRailOverOpen((o) => !o); return } if (!railShown && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(railShown) }} className="egdk-bar__rail" />
-        <LCTabs items={scopeTabs} value={scope} onChange={(id) => { setScope(id as EntityScope); setSelected(new Set()) }} label="Entity scope" variant="line" className="egdk-bar__tabs" />
+        <LCTabs items={scopeTabs} value={scope} onChange={(id) => { setScope(id as EntityScope) }} label="Entity scope" variant="line" className="egdk-bar__tabs" />
         <div className="egdk-bar__tools">
           {stackScopeSupported(scope) ? (
-            <LCButton size="sm" variant="secondary" icon="target" onClick={() => openStack(selectedRows.map((r) => r.entityId))} title="Pin this cohort (or the selected rows) on a draft campaign — nothing is sent">
+            <LCButton size="sm" variant="secondary" icon="target" onClick={() => openStack(entityIdsOf(selected))} title="Pin this cohort (or the selected rows) on a draft campaign — nothing is sent">
               Add to campaign
             </LCButton>
           ) : null}
@@ -629,7 +637,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                 activeKey={activeKey}
                 onActivate={(r) => activate(r)}
                 selected={selected}
-                onSelectedChange={setSelected}
+                onSelectedChange={(next) => setSelected(mergeGridSelection(selected, rows.map(rowKey), next))}
                 onColumnOrderChange={(ids) => setColumns(scope, ids.filter((id) => id !== IDENTITY_COLUMN_KEY))}
                 pinnedColumns={[IDENTITY_COLUMN_KEY]}
                 density="dense"
@@ -648,10 +656,10 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                   inView={rows.length}
                   all={selected.size >= rows.length ? 'all' : 'some'}
                   noun={{ one: scopeNoun(scope, 1), many: scopeNoun(scope, 2) }}
-                  onSelectAll={() => setSelected(new Set(rows.map(rowKey)))}
+                  onSelectAll={() => setSelected(mergeGridSelection(selected, rows.map(rowKey), new Set(rows.map(rowKey))))}
                   onClear={() => setSelected(new Set())}
                   actions={[
-                    { id: 'campaign', label: 'Add to campaign', icon: 'target', onRun: () => openStack(selectedRows.map((r) => r.entityId)), disabled: !stackScopeSupported(scope), disabledReason: 'Campaigns target properties, owners and people' },
+                    { id: 'campaign', label: selected.size > selectedRows.length ? `Add ${fmtCount(selected.size)} to campaign` : 'Add to campaign', icon: 'target', onRun: () => openStack(entityIdsOf(selected)), disabled: !stackScopeSupported(scope), disabledReason: 'Campaigns target properties, owners and people' },
                     { id: 'map', label: 'Show on Map', icon: 'map', onRun: showOnMap, disabled: scope !== 'properties', disabledReason: 'Map handoff is property-scoped' },
                     { id: 'export', label: 'Export CSV', icon: 'archive', onRun: exportSelected },
                   ]}

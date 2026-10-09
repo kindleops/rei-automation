@@ -643,6 +643,18 @@ html.is-desktop-modern .egdk-rail__strip-label { writing-mode: vertical-rl; tran
 .egdk-stack__contract { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border-radius: 10px; font-size: 11.5px; line-height: 16px; color: var(--lc-ink-3); background: rgba(var(--lc-edge-rgb), 0.035); }
 .egdk-stack__contract svg { flex: none; margin-top: 1px; }
 .egdk-stack .egdk-none { margin: 0; font-size: 12px; color: var(--lc-ink-3); }
+/* exact selection (2026-10-09): cohort confirmation + one line per selected property */
+.egdk-stack__confirm { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; padding: 9px 10px; border-radius: 10px; font-size: 12px; line-height: 17px; color: var(--lc-ink-2); background: rgba(var(--lc-edge-rgb), 0.04); box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.12); cursor: pointer; }
+.egdk-stack__confirm input { flex: none; margin-top: 2px; }
+.egdk-stack__confirm b { color: var(--lc-ink-1); font-weight: 600; }
+.egdk-stack__outcomes { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; margin-top: 4px; }
+.egdk-stack__outcome ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.egdk-stack__outcome li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 2px; font-size: 12px; color: var(--lc-ink-1); box-shadow: inset 0 -1px 0 rgba(var(--lc-edge-rgb), 0.07); min-width: 0; }
+.egdk-stack__outcome li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.egdk-stack__outcome li small { flex: none; max-width: 55%; text-align: right; color: var(--lc-ink-3); font-size: 11.5px; }
+.egdk-stack__outcome.is-ok .egdk-eyebrow { color: var(--lc-ok, #6fcf97); }
+.egdk-stack__outcome.is-attn .egdk-eyebrow { color: var(--lc-attn, #e0b25b); }
+.egdk-stack__outcome.is-mute li span { color: var(--lc-ink-2); }
 
 /* ══ Inspector · Street View + outreach (2026-10-08) ═══════════════════ */
 html.is-desktop-modern .egdk-insp__visual { margin: 0 0 12px; border-radius: 12px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--egdk-edge, rgba(var(--lc-edge-rgb), 0.1)); }
