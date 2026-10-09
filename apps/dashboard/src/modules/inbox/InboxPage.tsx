@@ -78,6 +78,7 @@ import {
   type ThreadContext,
   dedupeMessages,
   toThreadMessage,
+  resolveInboxProspectNameWithSource,
 } from '../../lib/data/inboxData'
 import { getDealContextByProperty, getDealContextByThread, normalizeDealContext, type DealContext } from '../../lib/data/dealContext'
 
@@ -4670,7 +4671,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         }
       : null
 
-    const threadProspectName = selected ? resolveThreadPrimaryName(selected) : null
+    // Only a REAL name from the thread may relabel the server's participant: the
+    // "Unknown Contact" / formatted-phone fallbacks used to overwrite the
+    // enriched display_name on the contact card (P0 2026-10-09).
+    const threadProspectNameResolved = selected
+      ? resolveInboxProspectNameWithSource(selected as unknown as Record<string, unknown>)
+      : null
+    const threadProspectName = threadProspectNameResolved
+      && threadProspectNameResolved.source !== 'none'
+      && threadProspectNameResolved.source !== 'phone_fallback'
+      ? threadProspectNameResolved.value
+      : null
 
     const loadParticipants = () => {
       if (cancelled) return

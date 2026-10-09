@@ -86,12 +86,75 @@ export function buildThreadStateListPatch(row: Record<string, unknown>): Record<
     patch.last_outbound_at = row.last_outbound_at
   }
   if (present(row.message_count)) patch.messageCount = Number(row.message_count)
+  Object.assign(patch, buildThreadStateIdentityPatch(row))
+  return patch
+}
+
+const toE164 = (value: unknown): string => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length === 10) return `+1${digits}`
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  if (raw.startsWith('+') && digits.length >= 8 && digits.length <= 15) return `+${digits}`
+  return ''
+}
+
+/**
+ * WHO THE THREAD IS WITH, from the canonical read model.
+ *
+ * P0 2026-10-09: an inbox_thread_state change for a thread the list had not
+ * loaded (a fresh reply on a new campaign) used to create the row from the
+ * list fields alone -- no phone, no prospect, no property. The composer then
+ * held a phone-less thread ("Thread has no valid phone number", no send_queue
+ * row) and the contact card fell back to "Unknown Contact" even though the
+ * server row had thread_key, seller_phone and canonical_e164. The row carries
+ * them, so the patch carries them. Only present values are emitted, and the
+ * seller phone is never our own number.
+ */
+export function buildThreadStateIdentityPatch(row: Record<string, unknown>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  const ourNumber = toE164(row.our_number)
+  const sellerPhone = [row.canonical_e164, row.seller_phone, row.thread_key]
+    .map(toE164)
+    .find((phone) => phone && phone !== ourNumber) ?? ''
+  if (sellerPhone) {
+    patch.canonicalE164 = sellerPhone
+    patch.canonical_e164 = sellerPhone
+    patch.phoneNumber = sellerPhone
+    patch.sellerPhone = sellerPhone
+    patch.seller_phone = sellerPhone
+  }
+  if (ourNumber) patch.ourNumber = ourNumber
+  if (present(row.property_id)) {
+    patch.propertyId = String(row.property_id)
+    patch.property_id = String(row.property_id)
+  }
+  if (present(row.prospect_id)) {
+    patch.prospectId = String(row.prospect_id)
+    patch.prospect_id = String(row.prospect_id)
+  }
+  if (present(row.master_owner_id)) {
+    patch.ownerId = String(row.master_owner_id)
+    patch.master_owner_id = String(row.master_owner_id)
+  }
+  if (present(row.seller_display_name)) {
+    patch.sellerDisplayName = String(row.seller_display_name)
+    patch.seller_display_name = String(row.seller_display_name)
+  }
+  if (present(row.market)) patch.market = String(row.market)
   return patch
 }
 
 // ── Overlay store ─────────────────────────────────────────────────────────────
 
 export const REALTIME_OVERLAY_TTL_MS = 60_000
+
+const OVERLAY_IDENTITY_FIELDS = [
+  'canonicalE164', 'canonical_e164', 'phoneNumber', 'sellerPhone', 'seller_phone', 'ourNumber',
+  'propertyId', 'property_id', 'prospectId', 'prospect_id', 'ownerId', 'master_owner_id',
+  'sellerDisplayName', 'seller_display_name',
+] as const
 
 export interface RealtimeOverlayStore {
   /** Remember a change. A canonical (inbox_thread_state) change replaces any
@@ -114,7 +177,18 @@ export function createRealtimeOverlayStore(options: { ttlMs?: number; now?: () =
       const key = overlay.threadKey
       if (!key) return
       const previous = entries.get(key)
-      const merged: RealtimeRowOverlay = canonical || !previous
+      // A canonical change replaces the event-derived one, but never drops who
+      // the thread is with: an identity field the canonical patch lacks is kept.
+      const keptIdentity: Record<string, unknown> = {}
+      if (canonical && previous) {
+        for (const key of OVERLAY_IDENTITY_FIELDS) {
+          const value = previous.overlay.patch[key]
+          if (present(value) && !present(overlay.patch[key])) keptIdentity[key] = value
+        }
+      }
+      const merged: RealtimeRowOverlay = canonical && previous && Object.keys(keptIdentity).length > 0
+        ? { ...overlay, patch: { ...keptIdentity, ...overlay.patch } }
+        : canonical || !previous
         ? overlay
         : {
             threadKey: key,

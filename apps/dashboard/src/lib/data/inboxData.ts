@@ -928,6 +928,50 @@ const normalizePhone = (value: unknown): string => {
   return hasPlus ? `+${digits}` : digits
 }
 
+/** A value as a valid E.164 number, or '' (10 / 11-digit NANP or +[8-15 digits]). */
+const strictE164 = (value: unknown): string => {
+  const raw = asString(value, '').trim()
+  if (!raw) return ''
+  const digits = raw.replace(/\D/g, '')
+  if (raw.toLowerCase().startsWith('phone:')) return strictE164(raw.slice(6))
+  if (raw.includes('|') || raw.includes(':')) return ''
+  if (digits.length === 10) return `+1${digits}`
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  if (raw.startsWith('+') && digits.length >= 8 && digits.length <= 15 && digits[0] !== '0') return `+${digits}`
+  return ''
+}
+
+/**
+ * THE SELLER'S NUMBER FOR A THREAD — one resolver for the mapper and every
+ * composer send guard.
+ *
+ * P0 2026-10-09: a thread object built without the phone fields (a realtime
+ * row for a thread the list had not loaded) reached the composer with
+ * canonicalE164/phoneNumber empty while the thread key itself was the
+ * seller's E.164, so Send failed client-side ("Thread has no valid phone
+ * number") and no send_queue row was written. The first valid E.164 among the
+ * thread's own phone fields and its key wins; our own numbers never do. This
+ * only names the target -- the server send route still validates and decides.
+ */
+export const resolveThreadSellerE164 = (thread: unknown): string => {
+  const row = (thread ?? {}) as AnyRecord
+  const ours = new Set(
+    [row.ourNumber, row.our_number, row.senderPhone, row.sender_phone].map(strictE164).filter(Boolean),
+  )
+  const candidates = [
+    row.canonicalE164, row.canonical_e164,
+    row.phoneNumber, row.phone_number,
+    row.sellerPhone, row.seller_phone,
+    row.bestPhone, row.best_phone,
+    row.threadKey, row.thread_key, row.legacyThreadKey, row.legacy_thread_key,
+  ]
+  for (const candidate of candidates) {
+    const phone = strictE164(candidate)
+    if (phone && !ours.has(phone) && !isTextGridNumber(phone)) return phone
+  }
+  return ''
+}
+
 const firstNonEmptyString = (...values: unknown[]): string => {
   for (const value of values) {
     const text = asString(value, '').trim()
@@ -2106,6 +2150,21 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
   // Merge row and dc carefully: row (live) takes precedence for existing fields.
   const merged = fillEmptyFields(row, dc as unknown as AnyRecord)
 
+  // The seller's number: the deal-context pick (never one of our numbers),
+  // else the row's own canonical / seller phone, else the E.164 thread key.
+  // An empty dc.sellerPhone used to blank phoneNumber/canonicalE164 over a
+  // row that carried them (P0 2026-10-09, "Thread has no valid phone number").
+  const mappedOurNumber = isTextGridNumber(dc.senderPhone) ? dc.senderPhone : (isTextGridNumber(dc.sellerPhone) ? dc.sellerPhone : dc.senderPhone)
+  const dcSellerPhone = isTextGridNumber(dc.sellerPhone) ? (isTextGridNumber(dc.senderPhone) ? null : dc.senderPhone) : dc.sellerPhone
+  const mappedSellerPhone = resolveThreadSellerE164({
+    canonicalE164: dcSellerPhone,
+    canonical_e164: row.canonical_e164 ?? row.canonicalE164,
+    seller_phone: row.seller_phone ?? row.sellerPhone,
+    thread_key: legacyThreadKey || row.thread_key || row.threadKey,
+    ourNumber: mappedOurNumber,
+    our_number: row.our_number,
+  }) || dcSellerPhone || null
+
   return {
     ...merged,
     id: conversationThreadId,
@@ -2143,11 +2202,11 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     labels: safeArray((row.labels || row.tags) as string[]),
     threadKey,
     
-    // Explicit phone mapping
-    sellerPhone: isTextGridNumber(dc.sellerPhone) ? (isTextGridNumber(dc.senderPhone) ? null : dc.senderPhone) : dc.sellerPhone,
-    ourNumber: isTextGridNumber(dc.senderPhone) ? dc.senderPhone : (isTextGridNumber(dc.sellerPhone) ? dc.sellerPhone : dc.senderPhone),
-    phoneNumber: isTextGridNumber(dc.sellerPhone) ? (isTextGridNumber(dc.senderPhone) ? null : dc.senderPhone) : dc.sellerPhone,
-    canonicalE164: isTextGridNumber(dc.sellerPhone) ? (isTextGridNumber(dc.senderPhone) ? null : dc.senderPhone) : dc.sellerPhone,
+    // Explicit phone mapping -- one seller number (mappedSellerPhone above).
+    sellerPhone: mappedSellerPhone,
+    ourNumber: mappedOurNumber,
+    phoneNumber: mappedSellerPhone,
+    canonicalE164: mappedSellerPhone,
     
     latestDirection: latestMessageDirection,
     latestMessage: dc.latestMessageBody || asString(row.latestMessageBody || row.latest_message_body || row.preview || row.message_body),
@@ -2225,7 +2284,7 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     property_address_full: dc.propertyAddress,
     owner_name: dc.ownerName,
     display_name: dc.displayName,
-    seller_phone: dc.sellerPhone,
+    seller_phone: mappedSellerPhone || dc.sellerPhone,
     sender_phone: dc.senderPhone,
     universal_status: dc.universalStatus,
     universal_stage: dc.universalStage,
@@ -4638,7 +4697,7 @@ export const queueReplyFromInbox = async (
   const personalization = buildQueuePersonalization(thread, trimmedText)
   const templateAttachment = buildSelectedTemplatePayload(options?.selectedTemplate, options?.threadContext)
 
-  const toPhone = normalizePhone(thread.canonicalE164 || thread.phoneNumber)
+  const toPhone = resolveThreadSellerE164(thread)
   if (!toPhone) {
     return { ok: false, queueId: null, status: null, errorMessage: 'Thread has no valid phone number', insertPayloadKeys: [] }
   }
@@ -4647,7 +4706,7 @@ export const queueReplyFromInbox = async (
     marketId: thread.marketId,
     market: thread.market || thread.marketName,
     ourNumber: thread.ourNumber,
-    phoneNumber: thread.phoneNumber,
+    phoneNumber: toPhone,
     textgridNumberId: thread.textgridNumberId,
     property_address_state: thread.property_address_state,
     propertyId: thread.propertyId,
@@ -4691,7 +4750,7 @@ export const queueReplyFromInbox = async (
       selected_thread_id: thread.id,
       created_from: 'leadcommand_inbox',
       our_number: thread.ourNumber,
-      seller_phone: thread.phoneNumber,
+      seller_phone: toPhone,
       ...buildQueueRoutingMetadata(thread),
       template_variables: personalization.renderVariables,
       candidate_snapshot: personalization.candidateSnapshot,
@@ -5140,7 +5199,7 @@ export const sendInboxMessageNow = async (
     : buildQueuePersonalization(thread, trimmedText)
   const templateAttachment = buildSelectedTemplatePayload(options?.selectedTemplate, options?.threadContext)
 
-  const toPhone = normalizePhone(thread.canonicalE164 || thread.phoneNumber)
+  const toPhone = resolveThreadSellerE164(thread)
   if (!toPhone) {
     return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Thread has no valid phone number', guardReason: null, backendReason: null, insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false, proof: null }
   }
@@ -5152,7 +5211,7 @@ export const sendInboxMessageNow = async (
   }
 
   // ── Resolve from number (STRICT RULE) ──────────────────────────────────────
-  const sellerPhone = toE164(thread.sellerPhone || thread.canonicalE164 || thread.phoneNumber || toPhone)
+  const sellerPhone = toE164(toPhone)
   const threadRecord = thread as unknown as AnyRecord
   const threadStateData = (threadRecord.thread_state_data as AnyRecord) || {}
   const latestMessageEventData = (threadRecord.latest_message_event_data as AnyRecord) || {}
@@ -5521,7 +5580,7 @@ export const scheduleReplyFromInbox = async (
   const personalization = buildQueuePersonalization(thread, trimmedText)
   const templateAttachment = buildSelectedTemplatePayload(options?.selectedTemplate, options?.threadContext)
 
-  const toPhone = normalizePhone(thread.canonicalE164 || thread.phoneNumber)
+  const toPhone = resolveThreadSellerE164(thread)
   if (!toPhone) {
     return { ok: false, queueId: null, status: null, errorMessage: 'Thread has no valid phone number', insertPayloadKeys: [] }
   }
@@ -5530,7 +5589,7 @@ export const scheduleReplyFromInbox = async (
     marketId: thread.marketId,
     market: thread.market || thread.marketName,
     ourNumber: thread.ourNumber,
-    phoneNumber: thread.phoneNumber,
+    phoneNumber: toPhone,
     textgridNumberId: thread.textgridNumberId,
     property_address_state: thread.property_address_state,
     propertyId: thread.propertyId,
@@ -5575,7 +5634,7 @@ export const scheduleReplyFromInbox = async (
       selected_thread_id: thread.id,
       created_from: 'leadcommand_inbox',
       our_number: thread.ourNumber,
-      seller_phone: thread.phoneNumber,
+      seller_phone: toPhone,
       ...buildQueueRoutingMetadata(thread),
       template_variables: personalization.renderVariables,
       candidate_snapshot: personalization.candidateSnapshot,
