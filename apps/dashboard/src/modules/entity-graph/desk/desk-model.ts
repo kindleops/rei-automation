@@ -238,8 +238,10 @@ export const DESK_DISTRESS_FACETS: DeskFacet[] = [
 
 export type DeskToggle = { key: string; label: string; filter: EntityGraphFieldFilter }
 export const DESK_DISTRESS_TOGGLES: DeskToggle[] = [
-  { key: 'taxdel', label: 'Tax delinquent', filter: { field_key: 'properties.tax_delinquent', operator: 'is_true' } },
-  { key: 'lien', label: 'Active lien', filter: { field_key: 'properties.active_lien', operator: 'is_true' } },
+  { key: 'taxdel', label: 'Tax delinquent', filter: { field_key: 'properties.tax_delinquent_any', operator: 'is_true' } },
+  // recorded lien documents (not UCC filings / affidavits / probate) — and the vendor's own flag, which disagrees with the record
+  { key: 'reclien', label: 'Recorded lien', filter: { field_key: 'records.has_lien', operator: 'is_true' } },
+  { key: 'lien', label: 'Active lien (vendor flag)', filter: { field_key: 'properties.active_lien', operator: 'is_true' } },
   { key: 'fc', label: 'Foreclosure filing', filter: { field_key: 'records.foreclosure_count', operator: 'gte', value: 1 } },
   { key: 'probate', label: 'Probate filing', filter: { field_key: 'records.has_probate', operator: 'is_true' } },
 ]
@@ -345,7 +347,7 @@ const DESK_EXTRA_PRESETS: Partial<Record<EntityScope, PresetGroup[]>> = {
     ] },
     { label: 'Pressure', presets: [
       { key: 'taxdel', label: 'Tax-delinquent property', tone: 'warn', filter: pf('master_owners.tax_delinquent_count', 'gte', 1) },
-      { key: 'liens', label: 'Property with a lien', tone: 'warn', filter: pf('master_owners.active_lien_count', 'gte', 1) },
+      { key: 'liens', label: 'Property with a vendor lien flag', tone: 'warn', filter: pf('master_owners.active_lien_count', 'gte', 1) },
     ] },
   ],
 }

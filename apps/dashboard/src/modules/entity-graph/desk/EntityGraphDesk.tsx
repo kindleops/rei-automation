@@ -72,7 +72,7 @@ import { DeskFilterRail } from './DeskFilterRail'
 import { SignalBadges } from './SignalBadges'
 import { propertySignals } from '../mobile/property-signals'
 import { DeskCampaignStack, stackScopeSupported, type StackResult } from './DeskCampaignStack'
-import { deskSearch, initialDeskState, writeSessionDeskState, type DeskState } from './desk-state'
+import { deskSearch, initialDeskState, withViewFilters, writeSessionDeskState, type DeskState } from './desk-state'
 import { useOutreachStates } from './desk-outreach'
 import { DeskGraph } from './DeskGraph'
 import { DeskInspector } from './DeskInspector'
@@ -433,7 +433,8 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     setScope(v.scope)
     setQuery(v.query)
     setDebouncedQuery(v.query)
-    setFilters(v.fieldFilters)
+    // the VIEW's scope: setFilters writes the scope being left (stale closure)
+    setFiltersByScope((cur) => withViewFilters(cur, v))
     setSort(v.scope, v.sort)
     if (v.columns) setColumns(v.scope, v.columns)
   }

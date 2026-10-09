@@ -119,6 +119,18 @@ export function deskSearch(current: string, state: DeskState): string {
   return s ? `?${s}` : ''
 }
 
+/**
+ * Opening a saved view puts ITS filters on ITS scope. The desk's setFilters
+ * closes over the scope being left, so a Properties view opened from the
+ * People tab used to land its filters on People (audit 2026-10-09).
+ */
+export function withViewFilters(
+  byScope: DeskState['filtersByScope'],
+  view: { scope: EntityScope; fieldFilters: EntityGraphFieldFilter[] },
+): DeskState['filtersByScope'] {
+  return { ...byScope, [view.scope]: sanitizeFilters(view.fieldFilters) }
+}
+
 function safeSession(): Storage | null {
   try { return typeof window !== 'undefined' ? window.sessionStorage : null } catch { return null }
 }

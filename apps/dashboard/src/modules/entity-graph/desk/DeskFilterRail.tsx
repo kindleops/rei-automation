@@ -224,7 +224,7 @@ export function DeskFilterRail({ scope, filters, onChange, collapsed = false, on
         onToggle={() => toggleGroup('fields', !groups.length && !presets.length)}
       >
         {catalogLoading ? <LCSkeleton shape="lines" count={3} label="Loading the field catalog" /> : !catalog ? (
-          <p className="egdk-none">This scope has no field filters — its rows are an aggregate.</p>
+          <p className="egdk-none">{scope === 'organizations' ? 'Companies have no field filters — the title-entity list has no catalogued fields. Filter Owners or Properties, or search by name.' : 'This scope has no field filters.'}</p>
         ) : (
           <>
             <LCSearch value={fieldQuery} onChange={setFieldQuery} label="Find a field" placeholder={`Find a field · ${catalog.total_fields} on ${catalog.source}`} className="egdk-rail__find" />

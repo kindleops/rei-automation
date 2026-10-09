@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_DESK_STATE, deskSearch, initialDeskState, readSessionDeskState, writeSessionDeskState, type DeskState } from './desk-state'
+import { DEFAULT_DESK_STATE, deskSearch, initialDeskState, readSessionDeskState, withViewFilters, writeSessionDeskState, type DeskState } from './desk-state'
 import { reorderColumnIds } from '../../../shared/lc/DataGrid'
-import { deskFacetFields, deskPresets, DESK_FACET_GROUPS } from './desk-model'
+import { deskFacetFields, deskPresets, DESK_DISTRESS_TOGGLES, DESK_FACET_GROUPS } from './desk-model'
+import { PRESETS } from '../mobile/entity-graph-presets'
 import { lastContactLabel, smsLabel, smsReasonLabel } from './desk-outreach'
 import { SCOPE_TABLE_COLUMNS, smsBlockLabel } from '../mobile/entity-graph-table-columns'
 import type { EntitySearchResult } from '../../../domain/entity-graph/entity-graph.types'
@@ -105,5 +106,24 @@ describe('contact discovery wording', () => {
     const col = SCOPE_TABLE_COLUMNS.properties.find((c) => c.key === 'smsEligible')!
     const r = { entityType: 'property', entityId: '1', title: 'x', linkedCounts: {}, contextIds: {}, details: { outreach: { sms: { eligible: false, reason: 'missing_phone' }, contactCandidates: { people: 1, phones: 2, unresolved: 1, candidates: [] } } } } as unknown as EntitySearchResult
     expect(col.render(r)).toBe('No · 2 phone candidates, not in graph · unresolved')
+  })
+})
+
+describe('saved views land on their own scope', () => {
+  it('a Properties view opened from People puts its filters on Properties and leaves People alone', () => {
+    const people = [{ field_key: 'prospects.age_years', operator: 'gte', value: 65 }]
+    const view = { scope: 'properties' as const, fieldFilters: [{ field_key: 'records.has_probate', operator: 'is_true' }] }
+    const next = withViewFilters({ people }, view)
+    expect(next.properties).toEqual(view.fieldFilters)
+    expect(next.people).toEqual(people)
+  })
+})
+
+describe('rail presets read the corrected fields', () => {
+  it('tax delinquent reads either vendor source; a recorded lien is its own toggle', () => {
+    const tax = PRESETS.properties!.flatMap((g) => g.presets).find((p) => p.key === 'taxdel')!
+    expect(tax.filter.field_key).toBe('properties.tax_delinquent_any')
+    expect(DESK_DISTRESS_TOGGLES.map((t) => t.filter.field_key)).toEqual(expect.arrayContaining(['properties.tax_delinquent_any', 'records.has_lien', 'properties.active_lien']))
+    expect(DESK_DISTRESS_TOGGLES.find((t) => t.filter.field_key === 'properties.active_lien')!.label).toMatch(/vendor/i)
   })
 })

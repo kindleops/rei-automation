@@ -21,7 +21,10 @@ export const PRESETS: Partial<Record<EntityScope, PresetGroup[]>> = {
         { key: 'lis', label: 'Lis pendens', tone: 'alert', filter: f('records.has_lis_pendens', 'is_true') },
         { key: 'fc', label: 'Foreclosure filing', tone: 'alert', filter: f('records.foreclosure_count', 'gte', 1) },
         { key: 'nod', label: 'Notice of default', tone: 'alert', filter: f('records.has_default_notice', 'is_true') },
-        { key: 'taxdel', label: 'Tax delinquent', tone: 'warn', filter: f('properties.tax_delinquent', 'is_true') },
+        // either vendor source — the column and the "Tax Delinquent" flag disagree (453 vs 601 on a 5% slice); the Signals badge reads both
+        { key: 'taxdel', label: 'Tax delinquent', tone: 'warn', filter: f('properties.tax_delinquent_any', 'is_true') },
+        // an actual recorded lien — not a UCC filing, affidavit, probate or contract (records.lien_count counts all of those)
+        { key: 'reclien', label: 'Recorded lien', tone: 'warn', filter: f('records.has_lien', 'is_true') },
         { key: 'taxlien', label: 'Tax lien', tone: 'warn', filter: f('records.has_tax_lien', 'is_true') },
         { key: 'judgment', label: 'Judgment', tone: 'warn', filter: f('records.has_judgment', 'is_true') },
         { key: 'mech', label: "Mechanic's lien", tone: 'warn', filter: f('records.has_mechanics_lien', 'is_true') },
@@ -71,8 +74,9 @@ export const PRESETS: Partial<Record<EntityScope, PresetGroup[]>> = {
       label: 'Activity',
       presets: [
         { key: 'active', label: 'Active', tone: 'buyer', filter: f('buyers.activity_status', 'is_any_of', ['active']) },
-        { key: 'd90', label: 'Bought in last 90 days', tone: 'buyer', filter: f('buyers.trailing_90d', 'gte', 1) },
-        { key: 'y3', label: '3+ in 12 months', tone: 'buyer', filter: f('buyers.trailing_365d', 'gte', 3) },
+        // the buyer index counts back from its latest recorded sale (not today): label says so
+        { key: 'd90', label: 'Bought in last 90 days of sales data', tone: 'buyer', filter: f('buyers.trailing_90d', 'gte', 1) },
+        { key: 'y3', label: '3+ in last 12 months of sales data', tone: 'buyer', filter: f('buyers.trailing_365d', 'gte', 3) },
         { key: 'p5', label: '5+ purchases', filter: f('buyers.acquisition_count', 'gte', 5) },
         { key: 'p25', label: '25+ purchases', filter: f('buyers.acquisition_count', 'gte', 25) },
         { key: 'slowing', label: 'Slowing down', tone: 'warn', filter: f('buyers.activity_status', 'is_any_of', ['slowing']) },
