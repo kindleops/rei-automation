@@ -65,6 +65,10 @@ export type LienRecord = {
   taxPeriod: [string, string | null] | null
   county: string | null
   distress: boolean
+  /** Recorded-document class (lien, judgment, lis_pendens, ucc, probate, death, …); absent on older APIs. */
+  docClass?: string
+  /** Only the lien / judgment classes are liens. Absent on older APIs (treat by category). */
+  isLien?: boolean
 }
 
 export type SaleRecord = {
@@ -114,7 +118,10 @@ export type PropertyRecords = {
     openMortgages: number
     balance: number | null
     payment: number | null
+    /** True liens (lien + judgment classes). */
     liens: number
+    /** Every other recorded non-mortgage document (absent on older APIs). */
+    filings?: number
     distressLiens: number
     sales: number
   }

@@ -49,6 +49,7 @@ function normalizeListResponse(body: EntityGraphListResponse | null | undefined)
     ok: Boolean(body.ok),
     results: body.results ?? [],
     pagination: body.pagination ?? { cursor: 0, pageSize: 25, total: 0, hasMore: false, nextCursor: null },
+    ...(body.attached ? { attached: body.attached } : {}),
   }
 }
 

@@ -41,7 +41,7 @@ export interface NetworkProperty {
   equityPct: number | null
   equity: number | null
   equityClass?: 'high' | 'low' | 'unknown'
-  equityRule?: 'loan_and_value' | 'free_and_clear' | 'vendor_high_equity_flag' | 'vendor_low_equity_flag' | 'unknown'
+  equityRule?: 'loan_and_value' | 'free_and_clear' | 'no_recorded_mortgage' | 'recorded_mortgage_balance' | 'vendor_high_equity_flag' | 'vendor_low_equity_flag' | 'unknown'
   loanBalance: number | null
   loanAmount: number | null
   loanPayment: number | null
@@ -53,7 +53,14 @@ export interface NetworkProperty {
   taxDelinquentYear: number | null
   lastSale: { date: string | null; price: number | null; docType: string | null } | null
   ownershipYears: number | null
-  repairEstimate: number | null
+  /**
+   * Valuation lanes: never a property figure. A plausible SFR / 2–4 vendor
+   * repair figure only, as an MLS-ARV-lane reference ("vendor estimate · unverified").
+   */
+  repairReference?: { value: number; lane: 'sfr' | 'mf2_4'; label: string } | null
+  /** Recorded documents on this property: liens vs every other filing (labels). */
+  recordedLiens?: string[]
+  recordedFilings?: string[]
   streetview: string | null
   tags: string[]
   outOfStateOwner: boolean
@@ -96,7 +103,7 @@ export interface EntityNetwork {
   propertiesTruncated: number
   debt: { properties: number; totalValue: number | null; totalEquity: number | null; equityKnown?: number; totalLoanBalance: number; monthlyPayment: number | null; withDebt: number; freeAndClear: number; activeLiens: number; taxDelinquent: number; blendedLtv: number | null }
   entities: Array<{ id: string; name: string; kind: HolderKind; kindLabel: string; mailing: string | null }>
-  people: Array<{ id: string; name: string; role: string; primary: boolean; language: string | null; occupation: string | null; householdIncome: string | null; netAssets: string | null; smsEligible: boolean; bestPhone: string | null; bestEmail: string | null; /** Vendor contact-matching tags (prospects.matching_flags), verbatim. Absent on older APIs. */ matchingTags?: string[] }>
+  people: Array<{ id: string; /** connected through the master owner, or linked to the property itself */ linkedBy?: 'owner' | 'property'; name: string; role: string; primary: boolean; language: string | null; occupation: string | null; householdIncome: string | null; netAssets: string | null; smsEligible: boolean; bestPhone: string | null; bestEmail: string | null; /** Vendor contact-matching tags (prospects.matching_flags), verbatim. Absent on older APIs. */ matchingTags?: string[] }>
   phones: Array<{ id: string; e164: string; display: string; type: string; personId: string | null; score: number | null; active: string | null; wrongNumber: boolean }>
   emails: Array<{ id: string; value: string; personId: string | null }>
   related: Array<{ id: string; name: string; kind: HolderKind; propertyCount: number; value: number | null; mailing: string | null; reasons: Array<'household' | 'cluster' | 'mailing'> }>
@@ -126,12 +133,20 @@ export interface TopNetwork {
 
 const cache = new Map<string, { at: number; data: EntityNetwork }>()
 
+export class EntityNetworkError extends Error {}
+
 export async function fetchEntityNetwork(type: 'property' | 'owner' | 'person', id: string, signal?: AbortSignal): Promise<EntityNetwork | null> {
   const key = `${type}:${id}`
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < 60_000) return hit.data
   const res = await callBackend<{ ok: boolean; data: EntityNetwork }>(`/api/cockpit/entity-graph/network/${type}/${encodeURIComponent(id)}`, { signal })
-  if (!res.ok || !res.data?.data) return null
+  // a missing record is null; any other failure carries its status + reason so the
+  // inspector can say WHY ("network didn't load" with no reason was undiagnosable)
+  if (!res.ok) {
+    if (res.status === 404) return null
+    throw new EntityNetworkError(`${res.status ?? 'no response'} · ${res.message || res.error || 'request failed'}`)
+  }
+  if (!res.data?.data) return null
   cache.set(key, { at: Date.now(), data: res.data.data })
   return res.data.data
 }

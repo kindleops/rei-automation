@@ -310,7 +310,7 @@ export function EntityGraphMobile({
   const headerSort = viewMode === 'table' ? tableLayout.sort[scope] ?? null : null
   /** The pinned identity column, as a sortable column (sorted by its primary label). */
   const identityColumn = useMemo<TableColumn>(
-    () => ({ key: IDENTITY_COLUMN_KEY, label: 'Name', group: 'overview', width: 0, render: (r) => resolveIdentity(scope, r).primary || null }),
+    () => ({ key: IDENTITY_COLUMN_KEY, label: 'Name', group: 'overview', unit: 'text', width: 0, render: (r) => resolveIdentity(scope, r).primary || null }),
     [scope],
   )
   const headerSortKey = headerSort?.key ?? null

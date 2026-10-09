@@ -22,7 +22,7 @@ import { useNetworkOutreach } from './desk-outreach'
 const TYPE_LABEL: Record<string, string> = {
   owner: 'Owner', property: 'Property', entity: 'Title entity', person: 'Person', phone: 'Phone', email: 'Email',
   mailing: 'Mailing address', related_owner: 'Related owner', conversation: 'Conversation', mortgage: 'Mortgage',
-  lien: 'Lien / record', sale: 'Transaction', buyer: 'Buyer',
+  lien: 'Lien / recorded filing', sale: 'Transaction', buyer: 'Buyer',
 }
 
 type Props = {

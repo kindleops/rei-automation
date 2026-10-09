@@ -17,6 +17,7 @@ import { openInboxThread } from '../../mobile/mobile-inbox-bridge'
 import { REASON_LABEL, type EntityNetwork, type NetworkProperty } from '../console/entity-network-api'
 import { DeskGraph } from './DeskGraph'
 import { fmtCount, fmtMoney, matchingTagTone, type NetworkAnchor } from './desk-model'
+import { equityDisplay } from '../equity-display'
 import { EntityGraphPropertyVisual } from '../mobile/EntityGraphPropertyVisual'
 import { SignalBadges } from './SignalBadges'
 import { networkPropertySignals } from './network-signals'
@@ -38,6 +39,8 @@ type Props = {
   network: EntityNetwork | null
   loading: boolean
   error: boolean
+  /** why the network failed (status · reason), shown under the error */
+  errorDetail?: string
   onRetry: () => void
   onClose: () => void
   onOpen: (anchor: NetworkAnchor) => void
@@ -48,13 +51,9 @@ type Props = {
   onAddToCampaign?: (propertyIds: string[], label: string) => void
 }
 
-/** equity_known_v1: free & clear, a known %, a vendor class, or Unknown — never a vendor 100%. */
-const equityText = (p: Pick<NetworkProperty, 'equityPct' | 'equityRule'>) => (
-  p.equityRule === 'free_and_clear' ? 'Free & clear'
-    : p.equityRule === 'loan_and_value' && p.equityPct !== null ? `${Math.round(p.equityPct)}%`
-      : p.equityRule === 'vendor_high_equity_flag' ? 'High (flag)'
-        : p.equityRule === 'vendor_low_equity_flag' ? 'Low (flag)' : 'Unknown'
-)
+/** The ONE equity rendering (equity-display.ts) — identical to the grid cell and the hover card. */
+const equityOf = (p: Pick<NetworkProperty, 'equityPct' | 'equity' | 'equityRule'>) => equityDisplay({ percent: p.equityPct, amount: p.equity, rule: p.equityRule })
+const equityText = (p: Pick<NetworkProperty, 'equityPct' | 'equity' | 'equityRule'>) => equityOf(p).text
 const yr = (s: string | null | undefined) => (s ? String(s).slice(0, 4) : null)
 const day = (s: string | null | undefined) => {
   if (!s) return null
@@ -67,7 +66,7 @@ function None({ children }: { children: ReactNode }) {
   return <p className="egdk-none">{children}</p>
 }
 
-export function DeskInspector({ open, mode, anchor, network, loading, error, onRetry, onClose, onOpen, onOpenGraph, onAction, onOpenBuyer, onAddToCampaign }: Props) {
+export function DeskInspector({ open, mode, anchor, network, loading, error, errorDetail, onRetry, onClose, onOpen, onOpenGraph, onAction, onOpenBuyer, onAddToCampaign }: Props) {
   const anchorProperty = useMemo<NetworkProperty | null>(() => {
     if (!network || network.anchor.type !== 'property') return null
     return network.properties.find((p) => p.id === network.anchor.id) ?? null
@@ -134,7 +133,7 @@ export function DeskInspector({ open, mode, anchor, network, loading, error, onR
       {loading && !network ? (
         <div className="egdk-insp__loading"><LCSkeleton shape="lines" count={8} label="Reading the relationship network" /></div>
       ) : error || !network ? (
-        <LCError what="The relationship network didn’t load" onRetry={onRetry} compact />
+        <LCError what="The relationship network didn’t load" detail={errorDetail} onRetry={onRetry} compact />
       ) : (
         <InspectorBody
           network={network}
@@ -177,7 +176,7 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
       ) : null}
       {anchorProperty ? (
         <div className="egdk-insp__signals">
-          <SignalBadges size="md" max={12} signals={networkPropertySignals(anchorProperty, rec)} />
+          <SignalBadges size="md" signals={networkPropertySignals(anchorProperty, rec)} />
         </div>
       ) : null}
       <OutreachSection
@@ -185,20 +184,15 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
         ids={outreachIds}
         states={outreach}
         onAddToCampaign={onAddToCampaign ? () => onAddToCampaign(outreachIds, anchorProperty ? anchorProperty.address : `${network.owner.name} · network`) : undefined}
+        onOpenPerson={(id) => onOpen({ type: 'person', id })}
       />
       {anchorProperty ? (
         <div className="egdk-figures">
           <Figure label="Est. value" value={fmtMoney(anchorProperty.value)} />
           {(() => {
-            // the county record answers where the vendor only flagged: no open
-            // mortgage recorded → equity is the value (equityTruth rule c)
-            const recorded = anchorProperty.equityRule !== 'loan_and_value' && anchorProperty.equityRule !== 'free_and_clear'
-              && rec && rec.totals.openMortgages === 0 && (anchorProperty.loanBalance ?? 0) === 0 && anchorProperty.value
-            if (recorded) return <Figure label="Equity" value={`${fmtMoney(anchorProperty.value)}`} hint="100% · no recorded mortgage" />
-            const pct = anchorProperty.equityRule === 'loan_and_value' && anchorProperty.equityPct !== null ? `${Math.round(anchorProperty.equityPct)}%` : null
-            return anchorProperty.equity !== null
-              ? <Figure label="Equity" value={fmtMoney(anchorProperty.equity)} hint={pct ?? equityText(anchorProperty)} />
-              : <Figure label="Equity" value={equityText(anchorProperty)} hint={anchorProperty.equityRule?.startsWith('vendor') ? 'vendor class · no loan data' : 'no loan on file'} />
+            // ONE rule everywhere (equityTruth on the server, equity-display here)
+            const e = equityOf(anchorProperty)
+            return <Figure label="Equity" value={e.figure} hint={e.hint} tone={e.tone} />
           })()}
           <Figure label="Open loans" value={rec ? String(rec.totals.openMortgages) : '—'} hint={rec ? (rec.totals.balance !== null ? `${fmtMoney(rec.totals.balance)} balance` : 'no balance on file') : 'not captured'} />
           <Figure label="Last sale" value={anchorProperty.lastSale?.price ? fmtMoney(anchorProperty.lastSale.price) : '—'} hint={yr(anchorProperty.lastSale?.date) ?? undefined} />
@@ -245,7 +239,7 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
             <li key={p.id}>
               <button type="button" className={cx('egdk-row', p.id === anchorProperty?.id && 'is-current')} onClick={() => onOpen({ type: 'property', id: p.id })} disabled={p.id === anchorProperty?.id}>
                 <span className="egdk-row__main"><strong>{p.address}</strong><small>{spec([[p.city, p.state].filter(Boolean).join(', '), p.type, p.units && p.units > 1 ? `${p.units} units` : null])}</small></span>
-                <span className="egdk-row__num"><b>{fmtMoney(p.value)}</b><small>{equityText(p) === 'Unknown' ? 'equity unknown' : `${equityText(p)}${p.equityRule === 'loan_and_value' ? ' equity' : ''}`}</small></span>
+                <span className="egdk-row__num"><b>{fmtMoney(p.value)}</b><small>{equityText(p) === 'Unknown' ? 'equity unknown' : `equity ${equityText(p)}`}</small></span>
               </button>
             </li>
           ))}
@@ -263,21 +257,21 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
               <button type="button" className="egdk-person__head" onClick={() => onOpen({ type: 'person', id: person.id })} disabled={network.anchor.type === 'person' && network.anchor.id === person.id}>
                 <span className={cx('egdk-dot', 'is-person')} aria-hidden="true" />
                 <strong>{person.name}</strong>
-                <small>{spec([person.role, person.language, person.occupation])}</small>
+                <small>{spec([person.role, person.language, person.occupation, person.linkedBy === 'property' ? 'linked to this property' : null])}</small>
               </button>
               <div className="egdk-tags" aria-label="Contact matching tags">
                 {(person.matchingTags ?? []).length ? (person.matchingTags ?? []).map((t) => (
                   <span key={t} className={cx('egdk-tag', `is-${matchingTagTone(t)}`)}>{t}</span>
                 )) : <span className="egdk-tag is-none">No matching tag</span>}
               </div>
-              {(phonesByPerson.get(person.id) ?? []).map((ph) => <ContactLine key={ph.id} icon="phone" value={ph.display} meta={spec([ph.type, ph.active, ph.wrongNumber ? 'wrong number' : null])} warn={ph.wrongNumber} />)}
-              {(emailsByPerson.get(person.id) ?? []).map((em) => <ContactLine key={em.id} icon="mail" value={em.value} meta="Email" />)}
+              {(phonesByPerson.get(person.id) ?? []).map((ph) => <ContactLine key={ph.id} icon="phone" value={ph.display} meta={spec([ph.type, ph.active, ph.wrongNumber ? 'wrong number' : null])} warn={ph.wrongNumber} onClick={network.anchor.type === 'person' && network.anchor.id === person.id ? undefined : () => onOpen({ type: 'person', id: person.id })} />)}
+              {(emailsByPerson.get(person.id) ?? []).map((em) => <ContactLine key={em.id} icon="mail" value={em.value} meta="Email" onClick={network.anchor.type === 'person' && network.anchor.id === person.id ? undefined : () => onOpen({ type: 'person', id: person.id })} />)}
             </li>
           ))}
           {loosePhones.length ? (
             <li className="egdk-person">
               <span className="egdk-person__head is-static"><span className={cx('egdk-dot', 'is-contact')} aria-hidden="true" /><strong>Owner contact methods</strong><small>not tied to a person</small></span>
-              {loosePhones.map((ph) => <ContactLine key={ph.id} icon="phone" value={ph.display} meta={spec([ph.type, ph.active, ph.wrongNumber ? 'wrong number' : null])} warn={ph.wrongNumber} />)}
+              {loosePhones.map((ph) => <ContactLine key={ph.id} icon="phone" value={ph.display} meta={spec([ph.type, ph.active, ph.wrongNumber ? 'wrong number' : null])} warn={ph.wrongNumber} onClick={o.id && network.anchor.type !== 'owner' ? () => onOpen({ type: 'owner', id: o.id! }) : undefined} />)}
             </li>
           ) : null}
         </ul>
@@ -287,9 +281,13 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
         {network.entities.length === 0 ? <None>Title is held in the owner’s own name — no separate entity on record.</None> : (
           <ul className="egdk-list">
             {network.entities.map((e) => (
-              <li key={e.id} className="egdk-row is-static">
-                <span className={cx('egdk-dot', 'is-entity')} aria-hidden="true" />
-                <span className="egdk-row__main"><strong>{e.name}</strong><small>{spec([e.kindLabel, e.mailing])}</small></span>
+              <li key={e.id}>
+                {/* a title entity opens its master owner's network (the entity holds title for that owner) */}
+                <button type="button" className="egdk-row" onClick={() => o.id && onOpen({ type: 'owner', id: o.id })} disabled={!o.id || network.anchor.type === 'owner'} title={o.id ? `Open ${o.name}` : undefined}>
+                  <span className={cx('egdk-dot', 'is-entity')} aria-hidden="true" />
+                  <span className="egdk-row__main"><strong>{e.name}</strong><small>{spec([e.kindLabel, e.mailing, `holds title for ${o.name}`])}</small></span>
+                  {o.id && network.anchor.type !== 'owner' ? <Icon name="chevron-right" size={13} /> : null}
+                </button>
               </li>
             ))}
           </ul>
@@ -300,37 +298,65 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
         <LCInspectorSection title="Debt & recorded documents">
           {!rec ? <None>Recorded documents were not captured for this property.</None> : (
             <>
+              {/* every loan, lien, filing and sale is its own row — open one to read the whole record */}
+              <span className="egdk-eyebrow">Open loans · {openMortgages.length}</span>
               {openMortgages.length === 0 ? <None>No open mortgage on record.</None> : (
                 <ul className="egdk-list">
                   {openMortgages.map((m) => (
-                    <li key={m.slot} className="egdk-row is-static">
-                      <span className={cx('egdk-dot', 'is-debt')} aria-hidden="true" />
-                      <span className="egdk-row__main"><strong>{m.lender ?? 'Lender not recorded'}</strong><small>{spec([m.position ? `${m.position === 1 ? '1st' : m.position === 2 ? '2nd' : `${m.position}th`} position` : null, m.loanType, m.rate ? `${m.rate}%` : null, m.privateLender ? 'private lender' : null, day(m.recorded) ? `recorded ${day(m.recorded)}` : null])}</small></span>
-                      <span className="egdk-row__num"><b>{m.balance !== null ? fmtMoney(m.balance) : fmtMoney(m.amount)}</b><small>{m.balance !== null ? 'balance' : m.amount !== null ? 'original' : 'amount not recorded'}</small></span>
-                    </li>
+                    <RecordRow key={m.slot} dot="is-debt"
+                      title={m.lender ?? 'Lender not recorded'}
+                      sub={spec([m.position ? `${m.position === 1 ? '1st' : m.position === 2 ? '2nd' : `${m.position}th`} position` : null, m.loanType, m.rate ? `${m.rate}%` : null, m.privateLender ? 'private lender' : null])}
+                      num={m.balance !== null ? fmtMoney(m.balance) : fmtMoney(m.amount)} numHint={m.balance !== null ? 'balance' : m.amount !== null ? 'original' : 'amount not recorded'}
+                      facts={[['Lender', m.lender], ['Position', m.position ? String(m.position) : null], ['Original amount', m.amount !== null ? fmtMoney(m.amount) : null], ['Est. balance', m.balance !== null ? fmtMoney(m.balance) : null], ['Est. payment', m.payment !== null ? `${fmtMoney(m.payment)}/mo` : null], ['Rate', m.rate ? `${m.rate}%` : null], ['Loan type', m.loanType], ['Financing', m.financing], ['Term', m.termMonths ? `${m.termMonths} months` : null], ['Recorded', day(m.recorded)], ['Matures', day(m.due)], ['Private lender', m.privateLender ? 'Yes' : null]]} />
                   ))}
                 </ul>
               )}
-              {rec.liens.length || rec.foreclosures.length ? (
-                <ul className="egdk-list">
-                  {rec.foreclosures.map((f, i) => (
-                    <li key={`fc${i}`} className="egdk-row is-static is-alert">
-                      <span className={cx('egdk-dot', 'is-alert')} aria-hidden="true" />
-                      <span className="egdk-row__main"><strong>{f.stage ?? 'Foreclosure'}</strong><small>{spec([f.auctionDate ? `auction ${day(f.auctionDate)}` : null, f.lender, f.caseNumber ? `case ${f.caseNumber}` : null])}</small></span>
-                      <span className="egdk-row__num"><b>{fmtMoney(f.unpaidBalance)}</b><small>{f.unpaidBalance !== null ? 'unpaid' : ''}</small></span>
-                    </li>
-                  ))}
-                  {rec.liens.map((l) => (
-                    <li key={l.id} className={cx('egdk-row', 'is-static', l.distress && 'is-alert')}>
-                      <span className={cx('egdk-dot', l.distress ? 'is-alert' : 'is-lien')} aria-hidden="true" />
-                      <span className="egdk-row__main"><strong>{l.label}</strong><small>{spec([day(l.recorded), l.party1, l.county])}</small></span>
-                      <span className="egdk-row__num"><b>{l.amountDue !== null ? fmtMoney(l.amountDue) : ''}</b></span>
-                    </li>
-                  ))}
-                </ul>
-              ) : <None>No liens or filings on record.</None>}
+              {(() => {
+                // liens (lien + judgment classes) apart from every other recorded filing
+                const liens = rec.liens.filter((l) => l.isLien ?? true)
+                const filings = rec.liens.filter((l) => l.isLien === false)
+                const docFacts = (l: typeof rec.liens[number]): Array<[string, string | null]> => [['Document', l.label], ['Category', l.category], ['Title', l.title], ['Description', l.description], ['Amount due', l.amountDue !== null ? fmtMoney(l.amountDue) : null], ['Recorded', day(l.recorded)], ['Party 1', l.party1], ['Party 2', l.party2], ['HOA', l.hoaName], ['Default amount', l.defaultAmount !== null ? fmtMoney(l.defaultAmount) : null], ['Date of death', day(l.dateOfDeath)], ['Tax period', l.taxPeriod ? l.taxPeriod.filter(Boolean).map((x) => day(x)).join(' – ') : null], ['County', l.county]]
+                return (
+                  <>
+                    <span className="egdk-eyebrow">Liens & foreclosure · {liens.length + rec.foreclosures.length}</span>
+                    {liens.length || rec.foreclosures.length ? (
+                      <ul className="egdk-list">
+                        {rec.foreclosures.map((f, i) => (
+                          <RecordRow key={`fc${i}`} dot="is-alert" alert title={f.stage ?? 'Foreclosure'} sub={spec([f.auctionDate ? `auction ${day(f.auctionDate)}` : null, f.lender])}
+                            num={fmtMoney(f.unpaidBalance)} numHint={f.unpaidBalance !== null ? 'unpaid' : ''}
+                            facts={[['Stage', f.stage], ['Recorded', day(f.recorded)], ['Default date', day(f.defaultDate)], ['Auction', spec([day(f.auctionDate), f.auctionTime, f.auctionLocation])], ['Case', f.caseNumber], ['Unpaid balance', f.unpaidBalance !== null ? fmtMoney(f.unpaidBalance) : null], ['Opening bid', f.minBid !== null ? fmtMoney(f.minBid) : null], ['Lender', f.lender], ['Original loan', f.originalLoan !== null ? fmtMoney(f.originalLoan) : null], ['Trustee', f.trustee], ['Borrower', f.borrower]]} />
+                        ))}
+                        {liens.map((l) => (
+                          <RecordRow key={l.id} dot={l.distress ? 'is-alert' : 'is-lien'} alert={l.distress} title={l.label} sub={spec([day(l.recorded), l.party1, l.county])}
+                            num={l.amountDue !== null ? fmtMoney(l.amountDue) : ''} numHint={l.amountDue !== null ? 'due' : ''} facts={docFacts(l)} />
+                        ))}
+                      </ul>
+                    ) : <None>No liens or foreclosure filings on record.</None>}
+                    {filings.length ? (
+                      <>
+                        <span className="egdk-eyebrow">Other recorded filings · {filings.length} · not liens</span>
+                        <ul className="egdk-list">
+                          {filings.map((l) => (
+                            <RecordRow key={l.id} dot={l.distress ? 'is-alert' : 'is-record'} alert={l.distress} title={l.label} sub={spec([day(l.recorded), l.party1, l.county])}
+                              num={l.amountDue !== null ? fmtMoney(l.amountDue) : ''} numHint={l.amountDue !== null ? 'stated amount' : ''} facts={docFacts(l)} />
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+                  </>
+                )
+              })()}
             </>
           )}
+          {anchorProperty.repairReference ? (
+            /* valuation lanes (owner, BINDING): repairs exist only in the MLS ARV lane —
+               never in the SFR investor-cluster value; a vendor reference, collapsed */
+            <details className="egdk-lane">
+              <summary>MLS ARV lane · vendor reference</summary>
+              <p className="egdk-line"><span>Vendor repair estimate</span>{fmtMoney(anchorProperty.repairReference.value)} · {anchorProperty.repairReference.label}</p>
+              <small className="egdk-none">A flat vendor $/sqft tier × building sqft ({anchorProperty.repairReference.lane === 'sfr' ? 'single family' : '2–4 units'}); not an input to the investor-cluster value or any offer shown here.</small>
+            </details>
+          ) : null}
         </LCInspectorSection>
       ) : (
         <LCInspectorSection title="Portfolio debt">
@@ -343,11 +369,13 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
         {rec && rec.sales.length ? (
           <ul className="egdk-list">
             {rec.sales.map((s) => (
-              <li key={s.id} className="egdk-row is-static">
-                <span className={cx('egdk-dot', 'is-sale')} aria-hidden="true" />
-                <span className="egdk-row__main"><strong>{day(s.date) ?? 'Date not recorded'}{s.current ? ' · last sale' : ''}</strong><small>{spec([s.docType, s.buyerName ? `to ${s.buyerName}` : null, s.sellerName ? `from ${s.sellerName}` : null, s.cash ? 'cash' : null])}</small></span>
-                <span className="egdk-row__num"><b>{s.price ? fmtMoney(s.price) : '—'}</b>{s.buyer?.id && onOpenBuyer ? <button type="button" className="egdk-link" onClick={() => onOpenBuyer(s.buyer!.id)}>Buyer</button> : null}</span>
-              </li>
+              <RecordRow key={s.id} dot="is-sale"
+                title={`${day(s.date) ?? 'Date not recorded'}${s.current ? ' · last sale' : ''}`}
+                sub={spec([s.docType, s.buyerName ? `to ${s.buyerName}` : null, s.sellerName ? `from ${s.sellerName}` : null, s.cash ? 'cash' : null])}
+                num={s.price ? fmtMoney(s.price) : '—'}
+                numHint={s.price && anchorProperty?.value && s.price > anchorProperty.value * 4 ? 'price ≫ value · bulk / multi-parcel?' : s.price && anchorProperty?.value && s.price < anchorProperty.value * 0.1 ? 'nominal price' : ''}
+                facts={[['Date', day(s.date)], ['Price', s.price ? fmtMoney(s.price) : null], ['Document', s.docType], ['Buyer', spec([s.buyerName, s.buyer2Name])], ['Seller', spec([s.sellerName, s.seller2Name])], ['Cash', s.cash === true ? 'Yes' : s.cash === false ? 'No' : null], ["Arm's length", s.armsLength === false ? 'No' : s.armsLength === true ? 'Yes' : null], ['Price note', s.priceNote], ['Lender', s.lender], ['Loan amount', s.loanAmount ? fmtMoney(s.loanAmount) : null], ['Buyer match', s.buyer ? spec([s.buyer.name, s.buyer.basis ? `by ${s.buyer.basis}` : null]) : null]]}
+                action={s.buyer?.id && onOpenBuyer ? <button type="button" className="egdk-link" onClick={() => onOpenBuyer(s.buyer!.id)}>Open buyer</button> : undefined} />
             ))}
           </ul>
         ) : network.history.length ? (
@@ -399,9 +427,30 @@ function InspectorBody({ network, anchorProperty, onOpen, onOpenGraph, onOpenBuy
   )
 }
 
-function Figure({ label, value, hint }: { label: string; value: string; hint?: string }) {
+/** One recorded item (loan, lien, filing, foreclosure, sale): a row that opens to its whole record. */
+function RecordRow({ dot, alert, title, sub, num, numHint, facts, action }: { dot: string; alert?: boolean; title: string; sub?: string; num?: string; numHint?: string; facts: Array<[string, string | null | undefined]>; action?: ReactNode }) {
+  const shown = facts.filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== '—')
   return (
-    <div className="egdk-figure">
+    <li className={cx('egdk-recrow', alert && 'is-alert')}>
+      <details>
+        <summary className="egdk-row">
+          <span className={cx('egdk-dot', dot)} aria-hidden="true" />
+          <span className="egdk-row__main"><strong>{title}</strong>{sub ? <small>{sub}</small> : null}</span>
+          <span className="egdk-row__num">{num ? <b>{num}</b> : null}{numHint ? <small>{numHint}</small> : null}</span>
+          <Icon name="chevron-down" size={12} />
+        </summary>
+        <dl className="egdk-recrow__facts">
+          {shown.length ? shown.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>) : <div><dt>Record</dt><dd>No further fields recorded</dd></div>}
+        </dl>
+        {action ? <div className="egdk-recrow__action">{action}</div> : null}
+      </details>
+    </li>
+  )
+}
+
+function Figure({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: string }) {
+  return (
+    <div className={cx('egdk-figure', tone && `is-${tone}`)}>
       <span className="egdk-figure__label">{label}</span>
       <b className="egdk-figure__value">{value}</b>
       {hint ? <span className="egdk-figure__hint">{hint}</span> : null}
@@ -409,14 +458,18 @@ function Figure({ label, value, hint }: { label: string; value: string; hint?: s
   )
 }
 
-function ContactLine({ icon, value, meta, warn }: { icon: 'phone' | 'mail'; value: string; meta: string; warn?: boolean }) {
-  return (
-    <div className={cx('egdk-contact', warn && 'is-warn')}>
+function ContactLine({ icon, value, meta, warn, onClick }: { icon: 'phone' | 'mail'; value: string; meta: string; warn?: boolean; onClick?: () => void }) {
+  const body = (
+    <>
       <Icon name={icon} size={12} />
       <span className="egdk-contact__value">{value}</span>
       <small>{meta}</small>
-    </div>
+    </>
   )
+  // a contact point opens its person's network
+  return onClick
+    ? <button type="button" className={cx('egdk-contact', 'is-link', warn && 'is-warn')} onClick={onClick}>{body}</button>
+    : <div className={cx('egdk-contact', warn && 'is-warn')}>{body}</div>
 }
 
 /**
@@ -426,7 +479,7 @@ function ContactLine({ icon, value, meta, warn }: { icon: 'phone' | 'mail'; valu
  */
 const RESOLUTION_LABEL: Record<string, string> = { resolved_owner: 'Resolved owner', graph_person: 'Graph person · no phone', linked_unresolved: 'Linked · unresolved' }
 
-function OutreachSection({ anchorProperty, ids, states, onAddToCampaign }: { anchorProperty: NetworkProperty | null; ids: string[]; states: Map<string, OutreachState | null>; onAddToCampaign?: () => void }) {
+function OutreachSection({ anchorProperty, ids, states, onAddToCampaign, onOpenPerson }: { anchorProperty: NetworkProperty | null; ids: string[]; states: Map<string, OutreachState | null>; onAddToCampaign?: () => void; onOpenPerson?: (prospectId: string) => void }) {
   const loaded = ids.filter((id) => states.has(id))
   const list = loaded.map((id) => states.get(id)).filter((x): x is OutreachState => Boolean(x))
   const aside = onAddToCampaign ? <button type="button" className="egdk-link" onClick={onAddToCampaign}>Add to campaign</button> : null
@@ -446,12 +499,30 @@ function OutreachSection({ anchorProperty, ids, states, onAddToCampaign }: { anc
             <div className={cx('egdk-outreach__sms', st.sms ? (st.sms.eligible ? 'is-ok' : 'is-blocked') : 'is-na')}>
               <span className="egdk-outreach__k">SMS eligible</span>
               <strong>{st.sms ? (st.sms.eligible ? 'Yes' : 'No') : 'Not available'}</strong>
-              {st.sms && !st.sms.eligible ? <small>{st.contactCandidates && st.contactCandidates.phones > 0 && ['missing_phone', 'NO_PHONE', 'not_in_campaign_audience', 'missing_identity_linkage'].includes(st.sms.reason ?? '') ? 'The campaign graph has no phone for this property — candidates below' : smsReasonLabel(st.sms.reason)}</small> : st.sms ? <small>{`${st.sms.ready} of ${st.sms.rows} contact ${st.sms.rows === 1 ? 'route' : 'routes'} ready`}</small> : null}
+              {st.sms && !st.sms.eligible ? <small>{st.entityContact?.requiresReview && st.sms.reason === 'entity_contact_requires_review' ? 'The entity’s contact needs role review — candidate below' : st.contactCandidates && st.contactCandidates.phones > 0 && ['missing_phone', 'NO_PHONE', 'not_in_campaign_audience', 'missing_identity_linkage'].includes(st.sms.reason ?? '') ? 'The campaign graph has no phone for this property — candidates below' : smsReasonLabel(st.sms.reason)}</small> : st.sms ? <small>{`${st.sms.ready} of ${st.sms.rows} contact ${st.sms.rows === 1 ? 'route' : 'routes'} ready`}</small> : null}
             </div>
+            {st.entityContact ? (
+              /* the entity's candidate contact (display only; eligibility stays the campaign graph's) */
+              <div className="egdk-outreach__cands">
+                <p className="egdk-outreach__candhead">
+                  {`Entity contact${st.entityContact.entityName ? ` · ${st.entityContact.entityName}` : ''}`}
+                  <small>Role: {st.entityContact.roleLabel}</small>
+                </p>
+                <ul>
+                  <li>
+                    <span className={cx('egdk-tag', st.entityContact.requiresReview ? 'is-attn' : 'is-ok')}>{st.entityContact.requiresReview ? 'Needs review' : 'Resolved'}</span>
+                    <strong>{st.entityContact.person ?? 'No person identified'}</strong>
+                    <small>{spec([st.entityContact.phoneMasked ? `${st.entityContact.phoneMasked} · ${st.entityContact.phoneCallable ? 'callable' : 'not callable'}` : 'no phone selected', st.entityContact.hasEmail ? (st.entityContact.emailUsable ? 'email usable' : 'email on file') : null, st.entityContact.entityStatus])}</small>
+                  </li>
+                  {st.entityContact.reviewReasons.map((r) => <li key={r.code}><small>{r.label}</small></li>)}
+                </ul>
+              </div>
+            ) : null}
             <dl className="egdk-outreach__facts">
               <div><dt>Last contact</dt><dd>{lastContactLabel(st.lastContact) ?? 'Never contacted'}</dd></div>
-              <div><dt>Stage</dt><dd>{st.stage ? `${humanize(st.stage.value)}` : 'No deal'}{st.stage ? <small>{st.stage.source === 'pipeline' ? 'pipeline deal' : 'conversation'}</small> : null}</dd></div>
-              <div><dt>Status</dt><dd>{st.status ? humanize(st.status.value) : '—'}{st.status ? <small>{st.status.source === 'pipeline' ? 'pipeline deal' : 'conversation'}</small> : null}</dd></div>
+              {/* pipeline and conversation apart — two different vocabularies */}
+              <div><dt>Pipeline</dt><dd>{(() => { const p = st.pipeline !== undefined ? st.pipeline : st.stage?.source === 'pipeline' ? { stage: st.stage.value, status: st.status?.source === 'pipeline' ? st.status.value : null } : null; return p ? spec([humanize(p.stage), p.status ? humanize(p.status) : null]) || 'Deal' : 'No deal' })()}</dd></div>
+              <div><dt>Conversation</dt><dd>{(() => { const c = st.conversationState !== undefined ? st.conversationState : st.stage?.source === 'conversation' ? { stage: st.stage.value, status: st.status?.source === 'conversation' ? st.status.value : null } : null; return c ? spec([humanize(c.stage), c.status ? humanize(c.status) : null]) || 'Open' : 'No conversation' })()}</dd></div>
               <div><dt>Campaigns</dt><dd>{st.campaigns ? (st.campaigns.count ? `${st.campaigns.latest?.name ?? 'Campaign'}${st.campaigns.count > 1 ? ` +${st.campaigns.count - 1}` : ''}` : 'Not in a campaign') : '—'}{st.campaigns?.latest?.targetStatus ? <small>{humanize(st.campaigns.latest.targetStatus)}{st.campaigns.latest.blockReason ? ` · ${smsReasonLabel(st.campaigns.latest.blockReason)}` : ''}</small> : null}</dd></div>
             </dl>
             {st.contactCandidates && st.contactCandidates.phones > 0 ? (
@@ -464,7 +535,8 @@ function OutreachSection({ anchorProperty, ids, states, onAddToCampaign }: { anc
                   {st.contactCandidates.candidates.map((c) => (
                     <li key={`${c.name}:${c.phones.map((p) => p.masked).join()}`}>
                       <span className={cx('egdk-tag', c.resolution === 'linked_unresolved' ? 'is-attn' : 'is-ok')}>{RESOLUTION_LABEL[c.resolution]}</span>
-                      <strong>{c.name}</strong>
+                      {/* a candidate is a person: open their network */}
+                      {c.prospectId && onOpenPerson ? <button type="button" className="egdk-link" onClick={() => onOpenPerson(c.prospectId!)}><strong>{c.name}</strong></button> : <strong>{c.name}</strong>}
                       <small>{c.phones.map((p) => spec([p.masked, p.type === 'W' ? 'wireless' : p.type === 'L' ? 'landline' : p.type, p.score !== null ? `score ${p.score}` : null])).join(' · ')}</small>
                     </li>
                   ))}

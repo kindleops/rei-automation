@@ -11,7 +11,7 @@ import {
   type HeaderSort,
   type TableColumn,
 } from '../mobile/entity-graph-table-columns'
-import { IDENTITY_COLUMN_KEY } from '../mobile/entity-graph-table-layout'
+import { IDENTITY_COLUMN_KEY, TABLE_LAYOUT_VERSION } from '../mobile/entity-graph-table-layout'
 import { SCOPE_DEFAULT_SORT_KEY, SCOPE_SORTS, type EntityScope } from '../mobile/entity-graph-mobile-format'
 import type { NetworkNode } from '../console/entity-network-api'
 import { PROPERTY_CLUSTER_ID } from '../console/network-layout'
@@ -125,6 +125,8 @@ export type DeskView = {
   fieldFilters: EntityGraphFieldFilter[]
   sort: HeaderSort | null
   columns: string[] | null
+  /** layout version the columns were saved under (absent = 1) — migrated on open */
+  layoutVersion?: number
   savedAt: string
 }
 
@@ -150,7 +152,7 @@ export function writeViews(uid: string, views: DeskView[], storage: Pick<Storage
 }
 
 export function makeView(input: Omit<DeskView, 'id' | 'savedAt'>, now = Date.now()): DeskView {
-  return { ...input, name: input.name.trim() || 'Untitled view', id: `v_${now.toString(36)}`, savedAt: new Date(now).toISOString() }
+  return { layoutVersion: TABLE_LAYOUT_VERSION, ...input, name: input.name.trim() || 'Untitled view', id: `v_${now.toString(36)}`, savedAt: new Date(now).toISOString() }
 }
 
 function safeStorage(): Storage | null {
@@ -201,8 +203,18 @@ export function nodeAnchor(node: NetworkNode): NetworkAnchor | null {
   const id = rest.join(':')
   if (!id || node.id === PROPERTY_CLUSTER_ID) return null
   if (kind === 'property') return { type: 'property', id }
+  // 'owner:unlinked' is the name-on-title node of a property with no master owner — not a network
+  // (clicking it asked for owner "unlinked" → 404 → "The relationship network didn't load")
+  if (kind === 'owner' && id === 'unlinked') return null
   if (kind === 'owner' || kind === 'related') return { type: 'owner', id }
   if (kind === 'person') return { type: 'person', id }
+  // every linked item opens a network: a phone / email opens its person (else the owner),
+  // a title entity its master owner
+  const meta = (node.meta ?? {}) as { personId?: unknown; ownerId?: unknown }
+  const personId = typeof meta.personId === 'string' && meta.personId && !meta.personId.startsWith('pj:') ? meta.personId : null
+  const ownerId = typeof meta.ownerId === 'string' && meta.ownerId ? meta.ownerId : null
+  if (kind === 'phone' || kind === 'email') return personId ? { type: 'person', id: personId } : ownerId ? { type: 'owner', id: ownerId } : null
+  if (kind === 'entity') return ownerId ? { type: 'owner', id: ownerId } : null
   return null
 }
 

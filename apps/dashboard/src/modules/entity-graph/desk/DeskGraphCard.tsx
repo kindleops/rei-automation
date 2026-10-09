@@ -16,6 +16,7 @@ import type { CSSProperties } from 'react'
 import { cx } from '../../../shared/lc'
 import type { EntityNetwork, NetworkNode, NetworkProperty } from '../console/entity-network-api'
 import { fmtCount, fmtMoney, nodeAnchor } from './desk-model'
+import { equityDisplay } from '../equity-display'
 import { humanize, lastContactLabel, relativeDay, smsReasonLabel, type OutreachState } from './desk-outreach'
 import { networkPropertySignals } from './network-signals'
 import { SignalBadges } from './SignalBadges'
@@ -24,20 +25,15 @@ import type { PropertySignal } from '../mobile/property-signals'
 const TYPE_LABEL: Record<string, string> = {
   owner: 'Owner', property: 'Property', entity: 'Title entity', person: 'Person', phone: 'Phone', email: 'Email',
   mailing: 'Mailing address', related_owner: 'Related owner', conversation: 'Conversation', mortgage: 'Mortgage',
-  lien: 'Lien / record', sale: 'Transaction', buyer: 'Buyer',
+  lien: 'Lien / recorded filing', sale: 'Transaction', buyer: 'Buyer',
 }
 
 const idOf = (node: NetworkNode) => node.id.split(':').slice(1).join(':')
 const spec = (parts: Array<string | null | undefined | false>) => parts.filter(Boolean).join(' · ')
 const yr = (s: string | null | undefined) => (s ? String(s).slice(0, 4) : null)
 
-function equityText(p: NetworkProperty): string {
-  if (p.equityRule === 'free_and_clear') return 'Free & clear'
-  if (p.equityRule === 'loan_and_value' && p.equityPct !== null) return `${Math.round(p.equityPct)}%`
-  if (p.equityRule === 'vendor_high_equity_flag') return 'High (flag)'
-  if (p.equityRule === 'vendor_low_equity_flag') return 'Low (flag)'
-  return 'Unknown'
-}
+/** The ONE equity rendering (equity-display.ts) — identical to the grid cell and the inspector. */
+const equityText = (p: NetworkProperty): string => equityDisplay({ percent: p.equityPct, amount: p.equity, rule: p.equityRule }).text
 
 type Row = { k: string; v: string; tone?: 'ok' | 'attn' | 'crit' }
 
@@ -68,11 +64,17 @@ export function nodeCardFacts(node: NetworkNode, network: EntityNetwork, outreac
           : p.loanBalance ? `${fmtMoney(p.loanBalance)} loan balance` : 'No loan on file',
       },
     ]
-    if (rec && rec.liens.length) rows.push({ k: 'Liens', v: spec([`${rec.liens.length} recorded`, rec.liens.slice(0, 2).map((l) => l.label).join(', ')]) })
+    // liens (lien + judgment classes) apart from every other recorded filing — a UCC statement is not a lien
+    const lienLabels = rec ? rec.liens.filter((l) => l.isLien ?? true).map((l) => l.label) : p.recordedLiens ?? []
+    const filingLabels = rec ? rec.liens.filter((l) => l.isLien === false).map((l) => l.label) : p.recordedFilings ?? []
+    if (lienLabels.length) rows.push({ k: 'Liens', v: [...new Set(lienLabels)].join(', '), tone: 'crit' })
+    if (filingLabels.length) rows.push({ k: 'Recorded filings', v: [...new Set(filingLabels)].join(', ') })
     if (st?.sms) {
       const cands = st.contactCandidates
       const gap = !st.sms.eligible && cands && cands.phones > 0
-      rows.push({ k: 'SMS eligible', v: st.sms.eligible ? 'Yes' : gap ? `No · ${cands.phones} phone ${cands.phones === 1 ? 'candidate' : 'candidates'} on linked people (not in campaign graph)` : `No · ${smsReasonLabel(st.sms.reason)}`, tone: st.sms.eligible ? 'ok' : 'attn' })
+      const ec = st.entityContact
+      if (!st.sms.eligible && ec?.requiresReview) rows.push({ k: 'Entity contact', v: spec([ec.person ?? 'No person identified', ec.phoneMasked ? `${ec.phoneMasked} · ${ec.phoneCallable ? 'callable' : 'not callable'}` : null, ec.roleLabel]), tone: 'attn' })
+      rows.push({ k: 'SMS eligible', v: st.sms.eligible ? 'Yes' : !st.sms.eligible && ec?.requiresReview && st.sms.reason === 'entity_contact_requires_review' ? 'No · entity contact needs review' : gap ? `No · ${cands.phones} phone ${cands.phones === 1 ? 'candidate' : 'candidates'} on linked people (not in campaign graph)` : `No · ${smsReasonLabel(st.sms.reason)}`, tone: st.sms.eligible ? 'ok' : 'attn' })
     }
     rows.push({ k: 'Last contact', v: lastContactLabel(st?.lastContact ?? null) ?? (st ? 'Never contacted' : '—') })
     if (st?.stage || st?.status) rows.push({ k: 'Stage', v: spec([st?.stage ? humanize(st.stage.value) : null, st?.status ? humanize(st.status.value) : null, st?.stage?.source === 'pipeline' ? 'pipeline deal' : st?.stage ? 'conversation' : null]) })
@@ -145,6 +147,15 @@ export function nodeCardFacts(node: NetworkNode, network: EntityNetwork, outreac
     const m = node.meta ?? {}
     return { ...empty, rows: [{ k: 'Balance', v: fmtMoney(m.balance as number) }, { k: 'Original', v: fmtMoney(m.amount as number) }, { k: 'Rate', v: m.rate ? `${m.rate}%` : '—' }, { k: 'Type', v: m.privateLender ? 'Private lender' : (m.loanType as string) || '—' }] }
   }
+  if (node.type === 'lien') {
+    const m = node.meta ?? {}
+    if (m.foreclosure) return { ...empty, rows: [{ k: 'Kind', v: 'Foreclosure filing', tone: 'crit' }, ...(node.sub ? [{ k: 'When', v: node.sub }] : [])] }
+    return { ...empty, rows: [
+      { k: 'Kind', v: m.isLien === false ? 'Recorded filing — not a lien' : 'Lien', tone: m.isLien === false ? undefined : 'crit' },
+      ...(m.recorded ? [{ k: 'Recorded', v: String(m.recorded).slice(0, 10) }] : []),
+      ...(typeof m.amountDue === 'number' ? [{ k: 'Amount', v: fmtMoney(m.amountDue) }] : []),
+    ] }
+  }
   if (node.type === 'sale') {
     const m = node.meta ?? {}
     return { ...empty, rows: [{ k: 'Price', v: fmtMoney(m.price as number) }, { k: 'Date', v: (m.date as string)?.slice(0, 10) ?? '—' }, ...(m.cash ? [{ k: 'Financing', v: 'Cash' }] : [])] }
@@ -182,7 +193,7 @@ export function GraphHoverCard({ node, network, outreach, style, measure }: { no
           {f.rows.map((r) => <div key={r.k} className={cx(r.tone && `is-${r.tone}`)}><dt>{r.k}</dt><dd>{r.v}</dd></div>)}
         </dl>
       ) : null}
-      {f.signals?.length ? <SignalBadges size="md" max={6} signals={f.signals} /> : f.flags.length ? <div className="egdk-gcard__flags">{f.flags.slice(0, 6).map((x) => <span key={x}>{x}</span>)}</div> : null}
+      {f.signals?.length ? <SignalBadges size="md" signals={f.signals} /> : f.flags.length ? <div className="egdk-gcard__flags">{f.flags.map((x) => <span key={x}>{x}</span>)}</div> : null}
       {f.message ? <blockquote className="egdk-gcard__msg"><span>{f.message.who}</span>{f.message.text}</blockquote> : null}
       {nodeAnchor(node) ? <span className="egdk-gcard__hint">Click to open its network</span> : null}
     </div>

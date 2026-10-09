@@ -495,6 +495,8 @@ html.is-desktop-modern .egdk-contact.is-warn small { color: var(--egdk-alert); }
 .egdk-cols__item input { accent-color: var(--lc-accent); margin: 0; }
 .egdk-cols__item span { flex: 1; }
 .egdk-cols__item small { font-size: 10.5px; color: var(--lc-ink-3); }
+.egdk-cols__item.is-nodata { opacity: 0.55; cursor: not-allowed; }
+.egdk-cols__item small.is-nodata { color: rgb(245, 180, 80); }
 .egdk-cols .egdk-link { border: 0; padding: 0; background: transparent; font: inherit; font-size: 12px; font-weight: 520; color: var(--lc-accent-text, var(--lc-accent)); cursor: pointer; }
 
 /* ── The pane decides the composition ─────────────────────────────────── */
@@ -765,6 +767,9 @@ html.is-desktop-modern .egdk-outreach__cands li small { grid-column: 2; font-siz
 /* ══ Signal badges — color carries meaning (2026-10-08) ════════════════ */
 html.is-desktop-modern .egdk-sigs { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; flex-wrap: nowrap; }
 html.is-desktop-modern .egdk-sigs.is-md { flex-wrap: wrap; overflow: visible; gap: 5px; }
+/* every signal listed (no "+N"): chips wrap; the grid row takes the height they need (signalLines) */
+html.is-desktop-modern .egdk-sigs.is-wrap { flex-wrap: wrap; overflow: visible; row-gap: 4px; padding: 5px 0; }
+html.is-desktop-modern .lc-grid__cell:has(> .egdk-sigs.is-wrap) { white-space: normal; overflow: visible; align-self: center; }
 html.is-desktop-modern .egdk-sig {
   --t: 148, 163, 184;
   display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; flex: none;
@@ -792,3 +797,26 @@ html.is-desktop-modern .egdk-tone.is-crit { color: rgb(244, 114, 128); }
 html.is-desktop-modern[data-nexus-theme='light'] .egdk-tone.is-ok { color: rgb(14, 140, 86); }
 html.is-desktop-modern[data-nexus-theme='light'] .egdk-tone.is-bad { color: rgb(176, 104, 0); }
 html.is-desktop-modern[data-nexus-theme='light'] .egdk-tone.is-crit { color: rgb(200, 40, 62); }
+
+/* ── 8.5.1 correctness: every recorded item is a row that opens to its record ── */
+html.is-desktop-modern .egdk-recrow { list-style: none; }
+html.is-desktop-modern .egdk-recrow > details > summary { list-style: none; cursor: pointer; }
+html.is-desktop-modern .egdk-recrow > details > summary::-webkit-details-marker { display: none; }
+html.is-desktop-modern .egdk-recrow > details > summary:hover { background: rgba(var(--lc-edge-rgb), 0.05); }
+html.is-desktop-modern .egdk-recrow > details > summary > svg { flex: none; color: var(--lc-ink-3); transition: transform 120ms ease; }
+html.is-desktop-modern .egdk-recrow > details[open] > summary > svg { transform: rotate(180deg); }
+html.is-desktop-modern .egdk-recrow.is-alert .egdk-row__main strong { color: var(--egdk-alert); }
+html.is-desktop-modern .egdk-recrow__facts { display: grid; grid-template-columns: minmax(96px, auto) 1fr; gap: 3px 12px; margin: 2px 0 8px 22px; padding: 8px 10px; border-radius: 8px; background: rgba(var(--lc-edge-rgb), 0.035); font-size: 12px; }
+html.is-desktop-modern .egdk-recrow__facts > div { display: contents; }
+html.is-desktop-modern .egdk-recrow__facts dt { color: var(--lc-ink-3); }
+html.is-desktop-modern .egdk-recrow__facts dd { margin: 0; color: var(--lc-ink-1); overflow-wrap: anywhere; }
+html.is-desktop-modern .egdk-recrow__action { margin: -4px 0 8px 22px; }
+html.is-desktop-modern :is(.egdk-dot.is-record) { --c: var(--lc-ink-3); }
+html.is-desktop-modern .egdk-lane { margin-top: 10px; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.12); font-size: 12px; }
+html.is-desktop-modern .egdk-lane > summary { cursor: pointer; color: var(--lc-ink-3); font-size: 11px; letter-spacing: 0.02em; }
+html.is-desktop-modern .egdk-lane[open] > summary { margin-bottom: 6px; }
+html.is-desktop-modern button.egdk-contact.is-link { background: none; border: 0; padding: 2px 0; width: 100%; text-align: left; cursor: pointer; font: inherit; }
+html.is-desktop-modern button.egdk-contact.is-link:hover .egdk-contact__value { text-decoration: underline; }
+html.is-desktop-modern .egdk-figure.is-ok .egdk-figure__value { color: rgb(74, 222, 158); }
+html.is-desktop-modern .egdk-figure.is-crit .egdk-figure__value { color: var(--egdk-alert); }
+html.is-desktop-modern .egdk-figure.is-bad .egdk-figure__value { color: rgb(245, 180, 80); }

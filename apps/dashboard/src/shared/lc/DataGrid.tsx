@@ -94,6 +94,12 @@ export interface LCDataGridProps<R> {
    */
   onColumnOrderChange?: (orderedIds: string[]) => void
   pinnedColumns?: ReadonlyArray<string>
+  /**
+   * Per-row height (px) for rows whose content wraps (e.g. a full signal list).
+   * Receives the row and the current width of a column (persisted resize
+   * included). Absent = the density's fixed height. Never below that height.
+   */
+  rowHeight?: (row: R, columnWidth: (id: string) => number | undefined) => number
 }
 
 /** Move `from` to the position of `to` (before it when moving left, after it when moving right). Pure — tested. */
@@ -124,7 +130,7 @@ function readPrefs(id: string): { widths: Record<string, number>; hidden: string
 export function LCDataGrid<R>({
   id, label, rows, rowKey, columns, sort, onSortChange, activeKey, onActivate, selected, onSelectedChange,
   density = 'standard', groupBy, groupLabel, rowMenu, rowTone, renderExpanded, loading, error, empty, onEndReached,
-  loadingMore, total, height = '100%', className, onColumnOrderChange, pinnedColumns,
+  loadingMore, total, height = '100%', className, onColumnOrderChange, pinnedColumns, rowHeight,
 }: LCDataGridProps<R>) {
   const [dragCol, setDragCol] = useState<string | null>(null)
   const [dropCol, setDropCol] = useState<string | null>(null)
@@ -177,13 +183,14 @@ export function LCDataGrid<R>({
 
   const rowItems = useMemo(() => items.filter((i): i is Extract<Item<R>, { kind: 'row' }> => i.kind === 'row'), [items])
   const windowed = items.length > WINDOW_AFTER && !renderExpanded
-  const heightOf = (it: Item<R>) => (it.kind === 'group' ? GROUP_H : rowH)
+  const colWidth = (cid: string) => prefs.widths[cid] ?? columns.find((c) => c.id === cid)?.width
+  const heightOf = (it: Item<R>) => (it.kind === 'group' ? GROUP_H : rowHeight ? Math.max(rowH, Math.round(rowHeight(it.row, colWidth))) : rowH)
   const offsets = useMemo(() => {
     const o = new Array(items.length + 1)
     o[0] = 0
     for (let i = 0; i < items.length; i += 1) o[i + 1] = o[i] + heightOf(items[i])
     return o as number[]
-  }, [items, rowH]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, rowH, rowHeight, prefs.widths]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useLayoutEffect(() => {
     const el = scroller.current
@@ -388,7 +395,7 @@ export function LCDataGrid<R>({
     <div className="lc-grid__flow" style={{ minWidth: minInner }}>
       {items.map((it) => (it.kind === 'group'
         ? <div key={it.key} className="lc-grid__group" role="row"><span role="gridcell">{it.label}</span></div>
-        : renderRow(it, { height: rowH })))}
+        : renderRow(it, { height: heightOf(it) })))}
     </div>
   )
 

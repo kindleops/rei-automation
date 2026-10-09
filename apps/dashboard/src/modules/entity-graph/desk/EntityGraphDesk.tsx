@@ -47,7 +47,7 @@ import { useAuth } from '../../../components/auth/AuthProvider'
 import { Icon } from '../../../shared/icons'
 import { reorderColumnIds } from '../../../shared/lc/DataGrid'
 import { fetchEntityGraphList, fetchEntityGraphTabCounts, EntityGraphFilterError } from '../../../domain/entity-graph/entity-graph-api'
-import type { EntityGraphAction, EntityGraphTabCounts, EntitySearchResult, UniversalEntityContext } from '../../../domain/entity-graph/entity-graph.types'
+import type { EntityGraphAction, EntityGraphListResponse, EntityGraphTabCounts, EntitySearchResult, UniversalEntityContext } from '../../../domain/entity-graph/entity-graph.types'
 import { EMPTY_UNIVERSAL_ENTITY_CONTEXT } from '../../../domain/entity-graph/universal-entity-context'
 import { fieldFiltersToApiParams } from '../../../domain/entity-graph/entity-graph-workspace-state'
 import type { EntityGraphFieldFilter, UnsupportedFieldFilter } from '../../../domain/entity-graph/entity-graph-field-filters'
@@ -58,22 +58,25 @@ import { fetchEntityNetwork, type EntityNetwork } from '../console/entity-networ
 import {
   COLUMN_GROUP_LABELS,
   COLUMN_GROUP_ORDER,
+  IDENTITY_SORT_COLUMN,
   SCOPE_TABLE_COLUMNS,
   defaultVisibleColumns,
-  sortLoadedRows,
   visibleEnrichmentFields,
+  type ColumnUnit,
   type HeaderSort,
   type TableColumn,
 } from '../mobile/entity-graph-table-columns'
-import { IDENTITY_COLUMN_KEY, useEntityGraphTableLayout } from '../mobile/entity-graph-table-layout'
+import { IDENTITY_COLUMN_KEY, migrateLayoutColumns, useEntityGraphTableLayout } from '../mobile/entity-graph-table-layout'
 import { useEntityGraphColumns } from '../mobile/use-entity-graph-columns'
 import { MOBILE_SCOPES, resolveIdentity, scopeNoun, tabForScope, type EntityScope } from '../mobile/entity-graph-mobile-format'
 import { DeskFilterRail } from './DeskFilterRail'
-import { SignalBadges } from './SignalBadges'
+import { SignalBadges, signalLines, signalRowHeight } from './SignalBadges'
 import { propertySignals } from '../mobile/property-signals'
 import { DeskCampaignStack, stackScopeSupported, type StackResult } from './DeskCampaignStack'
 import { deskSearch, initialDeskState, withViewFilters, writeSessionDeskState, type DeskState } from './desk-state'
 import { useOutreachStates } from './desk-outreach'
+import { equityDisplay } from '../equity-display'
+import { absorbPageAttachments, completePageParams, pageKey } from './desk-page'
 import { DeskGraph } from './DeskGraph'
 import { DeskInspector } from './DeskInspector'
 import { fetchDeskKpis, kpisFromCounts } from './desk-api'
@@ -81,9 +84,7 @@ import {
   anchorForResult,
   anchorKey,
   GRAPH_LAYERS,
-  columnByKey,
   fmtCount,
-  headerSortIsLocal,
   kpiTiles,
   makeView,
   readViews,
@@ -104,7 +105,7 @@ type Props = {
 
 const PAGE_SIZE = 60
 const NO_FILTERS: EntityGraphFieldFilter[] = []
-const OUTREACH_SEED = ['smsEligible', 'lastContact', 'stage', 'status', 'flags']
+const OUTREACH_SEED = ['smsEligible', 'lastContact', 'stage', 'convoStage', 'flags']
 const RAIL_KEY = 'nexus.entityGraph.desk.rail.v1'
 const readRailCollapsed = (uid: string): boolean => { try { return window.localStorage.getItem(`${RAIL_KEY}:${uid}`) === 'collapsed' } catch { return false } }
 const rowKey = (r: EntitySearchResult) => `${r.entityType}:${r.entityId}`
@@ -119,6 +120,8 @@ type ListState = {
   sortApplied: boolean | null
   error: string | null
   unsupported: UnsupportedFieldFilter[] | null
+  /** browse attachments that failed for the latest page (those cells read —, said so) */
+  attachErrors?: Array<{ source: string; message: string }>
 }
 const EMPTY_LIST: ListState = { signature: '', cursor: 0, results: [], total: null, hasMore: false, nextAfter: null, sortApplied: null, error: null, unsupported: null }
 
@@ -237,9 +240,16 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   const tiles = kpiTiles(effectiveKpis)
 
   /* ── The list ──────────────────────────────────────────────────────────── */
+  /*
+   * Sorting is SERVER-SIDE over the whole filtered cohort, or not offered
+   * (owner, 2026-10-08: "sorting doesn't show everything"). A header without a
+   * whole-cohort order is not sortable (its tooltip says why) — the old
+   * "sorted within N loaded rows" reordered a fraction of the cohort and
+   * sorted not-yet-enriched cells as blanks.
+   */
   const searching = Boolean(debouncedQuery)
   const sort = serverSortFor(scope, headerSort, searching)
-  const localSort = headerSortIsLocal(scope, headerSort, searching)
+  const headerSortActive = Boolean(headerSort) && sort.source === 'header'
   const signature = `${scope}|${contactSubtype}|${debouncedQuery}|${JSON.stringify(filters)}|${sort.sortBy}|${sort.ascending ? 1 : 0}`
   const [list, setList] = useState<ListState>(EMPTY_LIST)
   const [cursor, setCursor] = useState(0)
@@ -255,22 +265,38 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   const loadingMore = isCurrent && cursor > list.cursor
   const generation = useRef(0)
 
+  // ONE complete page: the visible columns' values + outreach ride on the browse request
+  const enrichFields = visibleEnrichmentFields(scope, visibleKeys)
+  const wantsOutreach = scope === 'properties' && visibleKeys.some((k) => SCOPE_TABLE_COLUMNS.properties.find((c) => c.key === k)?.outreach)
+  const pageExtras = useRef({ fields: enrichFields, outreach: wantsOutreach })
+  pageExtras.current = { fields: enrichFields, outreach: wantsOutreach }
+  const prefetch = useRef<{ key: string; promise: Promise<EntityGraphListResponse>; ctl: AbortController } | null>(null)
+  const requestPage = (reqSig: string, reqCursor: number, after: string | null, signal?: AbortSignal): Promise<EntityGraphListResponse> => {
+    const key = pageKey(reqSig, reqCursor, after)
+    const hit = prefetch.current
+    if (hit && hit.key === key) { prefetch.current = null; return hit.promise }
+    return fetchEntityGraphList({
+      tab: tabForScope(scope),
+      q: debouncedQuery || undefined,
+      cursor: reqCursor,
+      page_size: PAGE_SIZE,
+      ...(reqCursor > 0 && after ? { after } : {}),
+      subtype: scope === 'contact_methods' ? contactSubtype : undefined,
+      sort_by: sort.sortBy,
+      ascending: sort.ascending ? '1' : '0',
+      ...fieldFiltersToApiParams(filters),
+      ...completePageParams(pageExtras.current.fields, pageExtras.current.outreach),
+    }, signal).then((res) => { absorbPageAttachments(res); return res })
+  }
+
   useEffect(() => {
     const ctl = new AbortController()
     const gen = ++generation.current
     const reqSig = signature
     const reqCursor = cursor
-    void fetchEntityGraphList({
-      tab: tabForScope(scope),
-      q: debouncedQuery || undefined,
-      cursor,
-      page_size: PAGE_SIZE,
-      ...(reqCursor > 0 && list.signature === reqSig && list.nextAfter ? { after: list.nextAfter } : {}),
-      subtype: scope === 'contact_methods' ? contactSubtype : undefined,
-      sort_by: sort.sortBy,
-      ascending: sort.ascending ? '1' : '0',
-      ...fieldFiltersToApiParams(filters),
-    }, ctl.signal)
+    const after = reqCursor > 0 && list.signature === reqSig ? list.nextAfter : null
+    if (prefetch.current && !prefetch.current.key.startsWith(`${reqSig}#`)) { prefetch.current.ctl.abort(); prefetch.current = null }
+    void requestPage(reqSig, reqCursor, after, ctl.signal)
       .then((res) => {
         if (gen !== generation.current) return
         setList((cur) => {
@@ -287,8 +313,18 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
             sortApplied: res.pagination.sort ? res.pagination.sort.sortApplied : null,
             error: null,
             unsupported: null,
+            attachErrors: res.attached?.errors ?? [],
           }
         })
+        // prefetch the next page in the background: scrolling reaches it already loaded
+        if (res.pagination.hasMore) {
+          const nextCursor = reqCursor + PAGE_SIZE
+          const nextAfter = res.pagination.nextAfter ?? null
+          const pctl = new AbortController()
+          const promise = requestPage(reqSig, nextCursor, nextAfter, pctl.signal)
+          promise.catch(() => { if (prefetch.current?.promise === promise) prefetch.current = null })
+          prefetch.current = { key: pageKey(reqSig, nextCursor, nextAfter), promise, ctl: pctl }
+        }
       })
       .catch((error: unknown) => {
         if (gen !== generation.current || ctl.signal.aborted) return
@@ -302,16 +338,10 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     // eslint-disable-next-line react-hooks/exhaustive-deps -- signature + cursor encode the request
   }, [signature, cursor])
 
-  const enrichment = useEntityGraphColumns(results, visibleEnrichmentFields(scope, visibleKeys), scope === 'properties')
-  const wantsOutreach = scope === 'properties' && visibleKeys.some((k) => SCOPE_TABLE_COLUMNS.properties.find((c) => c.key === k)?.outreach)
+  // a column made visible AFTER the page loaded is read for the loaded rows (user-driven, once)
+  const enrichment = useEntityGraphColumns(results, enrichFields, scope === 'properties')
   const outreach = useOutreachStates(enrichment.rows, wantsOutreach)
-  const headerColumn = headerSort && headerSort.key !== IDENTITY_COLUMN_KEY ? columnByKey(scope, headerSort.key) : null
-  const identitySortColumn = useMemo<TableColumn>(() => ({ key: IDENTITY_COLUMN_KEY, label: 'Name', group: 'overview', width: 0, render: (r) => resolveIdentity(scope, r).primary || null }), [scope])
-  const rows = useMemo(() => {
-    if (!localSort || !headerSort) return outreach.rows
-    const col = headerSort.key === IDENTITY_COLUMN_KEY ? identitySortColumn : headerColumn
-    return col ? sortLoadedRows(scope, outreach.rows, col, headerSort.dir) : outreach.rows
-  }, [outreach.rows, localSort, headerSort, headerColumn, identitySortColumn, scope])
+  const rows = outreach.rows
 
   /* ── Selection → inspector ─────────────────────────────────────────────── */
   const [anchor, setAnchor] = useState<NetworkAnchor | null>(() => anchorFromContext(universalContext))
@@ -340,7 +370,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     }
   }
 
-  const [netState, setNetState] = useState<{ key: string; data: EntityNetwork | null; failed: boolean } | null>(null)
+  const [netState, setNetState] = useState<{ key: string; data: EntityNetwork | null; failed: boolean; reason?: string } | null>(null)
   const [netAttempt, setNetAttempt] = useState(0)
   const netKey = `${anchorKey(anchor)}#${netAttempt}`
   const network = netState?.key === netKey ? netState.data : null
@@ -351,8 +381,8 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     const ctl = new AbortController()
     const key = netKey
     void fetchEntityNetwork(anchor.type, anchor.id, ctl.signal)
-      .then((n) => { if (!ctl.signal.aborted) setNetState({ key, data: n, failed: !n }) })
-      .catch(() => { if (!ctl.signal.aborted) setNetState({ key, data: null, failed: true }) })
+      .then((n) => { if (!ctl.signal.aborted) setNetState({ key, data: n, failed: !n, reason: n ? undefined : 'This record has no network on file (404)' }) })
+      .catch((e: unknown) => { if (!ctl.signal.aborted) setNetState({ key, data: null, failed: true, reason: e instanceof Error ? e.message : undefined }) })
     return () => ctl.abort()
   }, [anchor, netKey])
 
@@ -379,7 +409,9 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       header: scope === 'properties' ? 'Property' : scope === 'contact_methods' ? 'Contact' : 'Name',
       width: scope === 'properties' ? 300 : 260,
       minWidth: 180,
-      sortable: true,
+      // server-side whole-cohort order or not offered (search results are ranked)
+      sortable: Boolean(IDENTITY_SORT_COLUMN[scope]) && !searching,
+      hint: searching ? 'Search results are ranked by match — sort is off while searching' : IDENTITY_SORT_COLUMN[scope] ? 'Sorts the whole cohort (server)' : 'Not sortable — no whole-cohort order for this scope',
       render: (r) => {
         const id = resolveIdentity(scope, r)
         return (
@@ -397,8 +429,11 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       width: Math.round(c.width * 1.18) + 12,
       minWidth: 64,
       align: c.align === 'right' ? 'right' : 'left',
-      sortable: true,
-      hint: c.sortBy && !searching ? `${c.label} · sorts the whole cohort` : `${c.label} · sorts the loaded rows`,
+      // whole-cohort server sort, or not sortable (never a sort of just the loaded rows)
+      sortable: Boolean(c.sortBy) && !searching,
+      hint: searching ? `${c.label} · search results are ranked by match — sort is off while searching`
+        : c.sortBy ? `${c.label} · sorts the whole filtered cohort (server)`
+          : `${c.label} · not sortable: the database has no whole-cohort order for it${c.source ? ` · ${c.source}` : ''}`,
       render: (r) => {
         if (c.signals) return <SignalBadges signals={propertySignals(r)} />
         const v = c.render(r)
@@ -406,9 +441,8 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
         // good vs bad, at a glance: eligibility and equity carry a tone
         if (c.key === 'smsEligible') return <span className={cx('egdk-tone', v === 'Yes' ? 'is-ok' : 'is-bad')}>{v}</span>
         if (c.key === 'equity') {
-          const pct = typeof r.details?.equity === 'number' ? r.details.equity : null
-          const tone = pct !== null ? (pct >= 40 ? 'is-ok' : pct < 15 ? 'is-crit' : '') : r.details?.equityClass === 'high' ? 'is-ok' : r.details?.equityClass === 'low' ? 'is-bad' : ''
-          return <span className={cx('egdk-tone', tone)}>{v}</span>
+          const e = equityDisplay({ percent: r.details?.equity ?? null, amount: r.details?.equityAmount ?? null, rule: r.details?.equityRule ?? null })
+          return <span className={cx('egdk-tone', e.tone && `is-${e.tone}`)} title={e.hint}>{v}</span>
         }
         if (c.key === 'liens' && r.details?.records?.lienCount) return <span className="egdk-tone is-crit">{v}</span>
         return v
@@ -417,7 +451,10 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     return [identity, ...cols]
   }, [scope, visibleKeys, searching])
 
-  const gridSort: LCSort = headerSort ? { id: headerSort.key, dir: headerSort.dir } : null
+  // a saved sort on a column that cannot be server-sorted shows no arrow (the order IS the default)
+  // every signal is listed: rows grow to fit the wrapped chips (no "+N")
+  const signalsVisible = scope === 'properties' && visibleKeys.includes('flags')
+  const gridSort: LCSort = headerSort && headerSortActive ? { id: headerSort.key, dir: headerSort.dir } : null
   const onSortChange = (next: LCSort) => setSort(scope, next ? { key: next.id, dir: next.dir } : null)
 
   /* ── Saved views ───────────────────────────────────────────────────────── */
@@ -436,7 +473,8 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     // the VIEW's scope: setFilters writes the scope being left (stale closure)
     setFiltersByScope((cur) => withViewFilters(cur, v))
     setSort(v.scope, v.sort)
-    if (v.columns) setColumns(v.scope, v.columns)
+    // a view saved under an older layout is migrated (a renamed key never shows the wrong value)
+    if (v.columns) setColumns(v.scope, migrateLayoutColumns(v.scope, v.columns, v.layoutVersion ?? 1))
   }
   const deleteView = (v: DeskView) => {
     const next = views.filter((x) => x.id !== v.id)
@@ -521,8 +559,8 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       ? 'This cohort could not be read'
       : `${total !== null ? fmtCount(total) : 'Uncounted'} ${noun}${searching ? ` matching “${debouncedQuery}”` : ''}${filters.length ? ` · ${filters.length} ${filters.length === 1 ? 'filter' : 'filters'}` : ''}`
   const sortNote = !isCurrent ? null
-    : localSort && headerSort ? `Sorted within ${fmtCount(results.length)} loaded rows${searching ? ' — search results are ranked' : ' — this column has no whole-cohort index'}`
-      : list.sortApplied === false ? 'The server could not apply that order — showing its fallback order'
+    : list.sortApplied === false ? 'The server could not apply that order — showing its fallback order'
+      : list.attachErrors?.length ? `Some column values did not load (${list.attachErrors.map((e) => e.source).join(', ')}) — those cells read —`
         : null
 
   const emptyState: { title: string; body?: ReactNode } = list.unsupported?.length
@@ -633,6 +671,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                 onSelectedChange={setSelected}
                 onColumnOrderChange={(ids) => setColumns(scope, ids.filter((id) => id !== IDENTITY_COLUMN_KEY))}
                 pinnedColumns={[IDENTITY_COLUMN_KEY]}
+                rowHeight={signalsVisible ? (r, colWidth) => signalRowHeight(signalLines(propertySignals(r).map((x) => x.label), colWidth('flags') ?? 390), 30) : undefined}
                 density="dense"
                 loading={loading}
                 error={isCurrent && list.error && !list.unsupported ? { what: 'These records didn’t load', onRetry: () => setList(EMPTY_LIST) } : null}
@@ -668,6 +707,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
           network={network}
           loading={netLoading}
           error={netFailed}
+          errorDetail={netFailed ? netState?.reason : undefined}
           onRetry={() => setNetAttempt((n) => n + 1)}
           onClose={() => { setInspectorOpen(false); setActiveKey(null) }}
           onOpen={(a) => openAnchor(a)}
@@ -707,6 +747,12 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       />
     </section>
   )
+}
+
+const UNIT_LABEL: Record<ColumnUnit, string> = {
+  currency: '$', currency_per_sqft: '$/sqft', count: 'count', decimal: 'number', sqft: 'sqft', acres: 'acres', feet: 'ft',
+  percent: '%', rate: 'rate %', date: 'date', year: 'year', years: 'years', score: 'score', coordinate: 'lat/lng', code: 'code',
+  id: 'id', text: 'text', list: 'list', boolean: 'yes/no', composite: 'combined', signals: 'signals',
 }
 
 function ColumnPicker({ scope, visible, onChange }: { scope: EntityScope; visible: string[]; onChange: (next: string[]) => void }) {
@@ -760,10 +806,12 @@ function ColumnPicker({ scope, visible, onChange }: { scope: EntityScope; visibl
             <div key={g} className="egdk-cols__group">
               <span className="egdk-eyebrow">{COLUMN_GROUP_LABELS[g]} · {cols.length}</span>
               {shown.map((c) => (
-                <label key={c.key} className="egdk-cols__item" title={c.source}>
-                  <input type="checkbox" checked={on.has(c.key)} onChange={() => onChange(on.has(c.key) ? visible.filter((k) => k !== c.key) : [...visible, c.key])} />
+                <label key={c.key} className={cx('egdk-cols__item', c.noData && 'is-nodata')} title={[c.source, `unit: ${UNIT_LABEL[c.unit]}`].filter(Boolean).join(' · ')}>
+                  {/* a column whose source holds no data is listed, never offered as a normal column */}
+                  <input type="checkbox" checked={on.has(c.key)} disabled={c.noData && !on.has(c.key)} onChange={() => onChange(on.has(c.key) ? visible.filter((k) => k !== c.key) : [...visible, c.key])} />
                   <span>{c.label}</span>
-                  {c.sortBy ? <small title="Sorts the whole cohort">indexed</small> : c.outreach ? <small>live</small> : null}
+                  {c.noData ? <small className="is-nodata">no data in source</small>
+                    : <small title={c.sortBy ? 'Sorts the whole cohort (server)' : 'Not sortable across the cohort'}>{UNIT_LABEL[c.unit]}{c.sortBy ? ' · sortable' : c.outreach ? ' · live' : ''}</small>}
                 </label>
               ))}
             </div>

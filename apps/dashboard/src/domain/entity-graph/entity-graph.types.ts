@@ -158,9 +158,17 @@ export type PropertyRecordFacts = {
   mortgageBalance?: number
   firstRate?: number
   firstLender?: string
+  /** Distinct LIEN categories (lien + judgment classes only — entity-graph-recorded-docs.js). */
   lienCount: number
-  /** Recorded lien document categories (rec_lien_categories) and the amount due. */
+  /** Recorded LIEN categories only; UCC filings, affidavits, probate… are `filings`. */
   lienCategories?: string[]
+  /** Lien labels ("General lien", "Mechanic's lien"). */
+  liens?: string[]
+  /** Every other recorded non-mortgage document, correctly named. */
+  filings?: Array<{ category: string; class: string; label: string }>
+  /** Every recorded non-mortgage document (liens + filings). */
+  documentCount?: number
+  /** Present only when every recorded document is a lien (the source sums all documents). */
   lienAmountDue?: number
   lastSaleDocType?: string
   saleCount: number
@@ -202,6 +210,12 @@ export type EntityGraphListResponse = {
   ok: boolean
   results: EntitySearchResult[]
   pagination: EntityGraphPagination
+  /**
+   * What browse attached to the rows in this same response (fields=… / outreach=1):
+   * the visible column values (details.row) and outreach state (details.outreach).
+   * A failed attachment is named in `errors` — those cells read "—", said so.
+   */
+  attached?: { fields: string[]; fieldsLoaded?: string[]; outreach: boolean; errors: Array<{ source: string; message: string }> }
 }
 
 export type EntityGraphTabCounts = {
@@ -365,11 +379,32 @@ export type EntityOutreachState = {
     people: number
     phones: number
     unresolved: number
-    candidates: Array<{ name: string; resolution: 'resolved_owner' | 'graph_person' | 'linked_unresolved'; evidence: string[]; matching: string | null; phones: Array<{ masked: string; type: string | null; score: number | null; usage: string | null; inCampaignGraph: boolean }> }>
+    candidates: Array<{ prospectId?: string | null; name: string; resolution: 'resolved_owner' | 'graph_person' | 'linked_unresolved'; evidence: string[]; matching: string | null; phones: Array<{ masked: string; type: string | null; score: number | null; usage: string | null; inCampaignGraph: boolean }> }>
+  } | null
+  /**
+   * The entity's candidate contact when its role needs review
+   * (seller.property_entity_contact_v1). Display only — SMS eligibility stays
+   * the campaign graph's verdict. The phone arrives masked (•••-1234).
+   */
+  entityContact?: {
+    entityName: string | null
+    entityStatus: string | null
+    person: string | null
+    phoneMasked: string | null
+    phoneCallable: boolean
+    hasEmail: boolean
+    emailUsable: boolean
+    role: string
+    roleLabel: string
+    requiresReview: boolean
+    reviewReasons: Array<{ code: string; label: string }>
   } | null
   lastContact: { at: string; direction: 'inbound' | 'outbound'; channel: string; source: string } | null
   stage: { value: string; source: 'pipeline' | 'conversation' } | null
   status: { value: string; source: 'pipeline' | 'conversation' } | null
+  /** The deal's stage/status and the conversation's, kept apart (absent on older APIs). */
+  pipeline?: { stage: string | null; status: string | null } | null
+  conversationState?: { stage: string | null; status: string | null } | null
   dealId: string | null
   conversation: { threadKey: string | null; at: string | null; direction: string | null; preview: string | null; bucket: string | null; suppressed: boolean } | null
   campaigns: { count: number; latest: { id: string; name: string | null; status: string | null; targetStatus: string | null; blockReason: string | null } | null } | null

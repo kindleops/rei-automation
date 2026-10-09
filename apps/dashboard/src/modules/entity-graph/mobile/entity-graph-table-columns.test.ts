@@ -30,7 +30,7 @@ describe('Entity Graph table columns', () => {
   it('every picker column the browse row lacks is enrichment-backed (none silently empty)', () => {
     // RC 8.3.1: these rendered from details.row, which browse never returned.
     // sale_date / sale_price are folded into the one Last sale column (field audit 2026-10-08)
-    for (const key of ['year_built', 'zoning', 'effective_year_built', 'estimated_repair_cost', 'total_bedrooms', 'total_baths', 'building_square_feet', 'basement', 'air_conditioning', 'rec.first_loan_type', 'person.age']) {
+    for (const key of ['year_built', 'zoning', 'effective_year_built', 'total_bedrooms', 'total_baths', 'building_square_feet', 'basement', 'air_conditioning', 'rec.first_loan_type', 'person.age']) {
       expect(col(key).field).toBe(key)
     }
     expect(visibleEnrichmentFields('properties', ['value', 'year_built', 'zoning'])).toEqual(['zoning', 'year_built'])
@@ -39,8 +39,8 @@ describe('Entity Graph table columns', () => {
 
   it('index-backed picker fields ask the server for a whole-cohort sort', () => {
     for (const key of ['year_built', 'zoning', 'total_bedrooms']) expect(col(key).sortBy).toBe(key)
-    // the repair estimate is not server-sorted: the raw vendor values are often absurd (repairTruth withholds them)
-    expect(col('estimated_repair_cost').sortBy).toBeUndefined()
+    // the vendor repair estimate is not a grid column at all (valuation lanes: MLS ARV lane reference only)
+    expect(SCOPE_TABLE_COLUMNS.properties.some((c) => /repair/.test(c.key))).toBe(false)
     expect(col('lastSale').fields).toEqual(['sale_date', 'sale_price'])
     expect(col('units').sortBy).toBe('units_count')
     expect(col('loans').sortBy).toBe('rec_mortgage_count')
@@ -68,8 +68,14 @@ describe('Entity Graph table columns', () => {
     const uncaptured = prop('P1', { records: { captured: false, mortgageCount: 0, lienCount: 0, saleCount: 0, signals: [] } })
     const captured = prop('P2', { records: { captured: true, mortgageCount: 0, lienCount: 2, saleCount: 0, signals: [] } })
     expect(col('loans').render(uncaptured)).toBeNull()
-    expect(col('liens').render(captured)).toBe('2 recorded')
-    expect(col('liens').render(prop('P3', { records: { captured: true, mortgageCount: 0, lienCount: 1, lienCategories: ['LIS PENDENS'], lienAmountDue: 12000, saleCount: 0, signals: [] } }))).toBe('Lis Pendens · $12K due')
+    // an older API counted every recorded document as a lien — say documents, not liens
+    expect(col('liens').render(captured)).toBe('2 recorded documents')
+    // liens only (lien + judgment classes); a UCC financing statement is a filing, not a lien
+    const split = prop('P3', { records: { captured: true, mortgageCount: 0, lienCount: 1, liens: ["Mechanic's lien"], filings: [{ category: 'FINANCING STATEMENT', class: 'ucc', label: 'UCC financing statement' }], lienAmountDue: 12000, saleCount: 0, signals: [] } })
+    expect(col('liens').render(split)).toBe("Mechanic's lien · $12K due")
+    expect(col('filings').render(split)).toBe('UCC financing statement')
+    const uccOnly = prop('P4', { records: { captured: true, mortgageCount: 0, lienCount: 0, liens: [], filings: [{ category: 'FINANCING STATEMENT', class: 'ucc', label: 'UCC financing statement' }], saleCount: 0, signals: [] } })
+    expect(col('liens').render(uccOnly)).toBe('None recorded')
     expect(col('loans').render(captured)).toBe('0')
   })
 
@@ -112,7 +118,11 @@ describe('Entity Graph table columns', () => {
 describe('field audit (2026-10-08)', () => {
   it('columns with no data source are gone, the sale columns are one, debug ids are grouped', () => {
     const keys = new Set(SCOPE_TABLE_COLUMNS.properties.map((c) => c.key))
-    for (const k of ['ppsf', 'cap_rate', 'rent_estimate', 'arv_estimate', 'stories', 'sale_date', 'sale_price', 'lastPrice', 'records', 'seller_tags_text']) expect(keys.has(k)).toBe(false)
+    for (const k of ['ppsf', 'cap_rate', 'rent_estimate', 'arv_estimate', 'lastPrice', 'records', 'seller_tags_text', 'sqft_range', 'avg_sqft_per_unit', 'beds_per_unit', 'best_phone', 'contact_status', 'estimated_repair_cost']) expect(keys.has(k)).toBe(false)
+    // owner field list 2026-10-09: offered (stories exists but is empty → listed as "no data", not offered)
+    for (const k of ['sale_date', 'sale_price', 'property_type', 'patio', 'equity_percent', 'equity_amount']) expect(keys.has(k)).toBe(true)
+    expect(col('stories').noData).toBe(true)
+    expect(col('property_type').label).toBe('Property use type')
     expect(keys.has('basement')).toBe(true)
     expect(col('master_owner_id').group).toBe('provenance')
     expect(col('source_system').group).toBe('provenance')

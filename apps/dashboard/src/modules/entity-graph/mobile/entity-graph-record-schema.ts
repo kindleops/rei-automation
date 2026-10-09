@@ -101,7 +101,7 @@ export const RECORD_SECTIONS: FieldSectionDef[] = [
       'arv_estimate', 'arv_ppsf', 'rent_estimate', 'monthly_rent', 'gross_monthly_income',
       'gross_annual_income', 'noi_estimate', 'cap_rate', 'ppsf', 'ppu', 'ppbd',
       'sqft_per_unit', 'avg_sqft_per_unit', 'beds_per_unit', 'rehab_level',
-      'estimated_repair_cost', 'estimated_repair_cost_per_sqft',
+      // (no vendor repair estimate: never a property field — valuation lanes, MLS ARV lane only)
       'potential_spread', 'price_off_value', 'percent_off',
       'comp_confidence_score', 'renovation_level_classification', 'latitude', 'longitude',
       'total_loan_balance', 'total_loan_amt', 'total_loan_payment', 'sale_date', 'sale_price',

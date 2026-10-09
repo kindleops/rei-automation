@@ -111,8 +111,6 @@ const PARCEL_ALIAS: Record<string, string> = {
   mail_city: 'owner_address_city',
   mail_state: 'owner_address_state',
   mail_zip5: 'owner_address_zip',
-  estimated_repair_cost: 'estimated_repair_cost',
-  repair_cost_per_sqft: 'estimated_repair_cost_per_sqft',
   property_use: 'property_use',
 }
 
@@ -127,7 +125,9 @@ const EXCLUDE_EXACT = new Set([
   'canonical_market_id', 'best_phone_id', 'best_phone', 'best_phone_e164', 'best_phone_score', 'best_email_id',
   'best_email', 'email_score_final', 'phone_type', 'sms_eligible', 'activity_status', 'usage_12_months',
   'usage_2_months', 'contact_window', 'timezone', 'agent_persona', 'agent_family', 'follow_up_cadence', 'best_channel',
-  'best_language', 'contact_status', 'acquisition_bucket', 'import_asset_signal', 'search_profile', 'marketLabel',
+  'best_language', 'contact_status', 'acquisition_bucket',
+  // the vendor repair estimate is never a property field (valuation lanes: MLS ARV lane reference only)
+  'estimated_repair_cost', 'estimated_repair_cost_per_sqft', 'repair_cost_per_sqft', 'mls_arv_lane_reference', 'import_asset_signal', 'search_profile', 'marketLabel',
   'marketKey', 'isUnmappedMarket', 'property_data_id', 'owner_hash', 'address_mak', 'priority_tier',
   'source_market_label', 'deal_list_label', 'deal_list_type', 'deal_list_normalized', 'deal_list_name',
   'deal_lists_label', 'comp_confidence_score', 'distress_flags', 'person_flags', 'owner_type_guess',
@@ -148,7 +148,7 @@ type GroupDef = { key: FieldGroupKey; label: string; exact?: string[]; patterns?
 const GROUPS: GroupDef[] = [
   {
     key: 'building', label: 'Building',
-    exact: ['property_type', 'property_class', 'property_group', 'property_subtype', 'asset_type', 'asset_class', 'asset_subtype', 'asset_label', 'asset_type_label', 'normalized_asset_class', 'normalized_asset_subclass', 'asset_subclass', 'original_property_type', 'building_class', 'property_use_standardized', 'property_use', 'units_count', 'total_rooms', 'total_bedrooms', 'total_baths', 'building_square_feet', 'year_built', 'effective_year_built', 'year_built_bucket', 'stories', 'style', 'construction_type', 'exterior_walls', 'interior_walls', 'floor_cover', 'roof_cover', 'roof_type', 'basement', 'garage', 'garage_spaces', 'sum_garage_sqft', 'building_condition', 'building_quality', 'num_of_fireplaces', 'porch', 'patio', 'deck', 'pool', 'sum_buildings_nbr', 'other_rooms', 'avg_sqft_per_unit', 'sqft_per_unit', 'beds_per_unit', 'sqft_range', 'estimated_repair_cost', 'estimated_repair_cost_per_sqft', 'rehab_level', 'renovation_level_classification', 'commercial_units', 'multifamily_units', 'storage_units', 'strip_center_units', 'sum_commercial_units'],
+    exact: ['property_type', 'property_class', 'property_group', 'property_subtype', 'asset_type', 'asset_class', 'asset_subtype', 'asset_label', 'asset_type_label', 'normalized_asset_class', 'normalized_asset_subclass', 'asset_subclass', 'original_property_type', 'building_class', 'property_use_standardized', 'property_use', 'units_count', 'total_rooms', 'total_bedrooms', 'total_baths', 'building_square_feet', 'year_built', 'effective_year_built', 'year_built_bucket', 'stories', 'style', 'construction_type', 'exterior_walls', 'interior_walls', 'floor_cover', 'roof_cover', 'roof_type', 'basement', 'garage', 'garage_spaces', 'sum_garage_sqft', 'building_condition', 'building_quality', 'num_of_fireplaces', 'porch', 'patio', 'deck', 'pool', 'sum_buildings_nbr', 'other_rooms', 'avg_sqft_per_unit', 'sqft_per_unit', 'beds_per_unit', 'sqft_range', 'rehab_level', 'renovation_level_classification', 'commercial_units', 'multifamily_units', 'storage_units', 'strip_center_units', 'sum_commercial_units'],
   },
   { key: 'systems', label: 'Systems & Utilities', exact: ['air_conditioning', 'heating_type', 'heating_fuel_type', 'sewer', 'water'] },
   { key: 'lot', label: 'Lot & Land', exact: ['lot_acreage', 'lot_square_feet', 'lot_size_depth_feet', 'lot_size_frontage_feet', 'lot_nbr', 'topography', 'driveway', 'geographic_features', 'land_use', 'flood_zone'] },
