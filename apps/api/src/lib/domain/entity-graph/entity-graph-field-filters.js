@@ -299,14 +299,22 @@ export function orFilterValue(value) {
   return /[,()"\\]/.test(v) ? `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : v
 }
 
+const AS_OF_NOTE = 'Counted back from the latest recorded sale in the comp data, not from today — the windows end when the sales feed ends.'
+
 /** Buyer entities (public.eg_buyer_index — service-role read model over comp_private). */
 const B = (category, column, label, type, extra) => syntheticField('buyers', 'eg_buyer_index', category, column, label, type, extra)
 export const ENTITY_GRAPH_BUYER_FIELDS = Object.freeze([
   B('Activity', 'activity_status', 'Activity status', 'enum'),
-  B('Activity', 'days_since_last', 'Days since last purchase', 'number'),
-  B('Activity', 'trailing_90d', 'Purchases, last 90 days', 'number'),
-  B('Activity', 'trailing_180d', 'Purchases, last 180 days', 'number'),
-  B('Activity', 'trailing_365d', 'Purchases, last 12 months', 'number'),
+  /**
+   * The buyer index counts its windows back from the LATEST RECORDED SALE in
+   * the comp data, not from today (eg_buyer_index max(last_acquisition) =
+   * 2026-07-28 at the 2026-10-09 audit): "bought in the last 90 days" matched
+   * 2,023 of 10,136 sampled buyers, 6 of whom bought within 90 days of today.
+   */
+  B('Activity', 'days_since_last', 'Days since last purchase (to latest sale on file)', 'number', { description: AS_OF_NOTE }),
+  B('Activity', 'trailing_90d', 'Purchases, last 90 days of sales data', 'number', { description: AS_OF_NOTE }),
+  B('Activity', 'trailing_180d', 'Purchases, last 180 days of sales data', 'number', { description: AS_OF_NOTE }),
+  B('Activity', 'trailing_365d', 'Purchases, last 12 months of sales data', 'number', { description: AS_OF_NOTE }),
   B('Activity', 'acquisition_count', 'Observed purchases', 'number'),
   B('Activity', 'acquisitions_per_year', 'Purchases per year', 'number'),
   B('Activity', 'last_acquisition', 'Last purchase', 'date'),

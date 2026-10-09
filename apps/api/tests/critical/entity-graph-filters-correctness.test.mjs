@@ -151,3 +151,9 @@ test('every rail preset, toggle and facet field the dashboard ships is a field i
   assert.ok(keys.includes('properties.tax_delinquent_any') && keys.includes('records.has_lien'))
   assert.ok(!keys.includes('properties.tax_delinquent'), 'the tax-delinquent preset reads one source only')
 })
+
+test('buyer recency windows say they end at the latest recorded sale, not today', () => {
+  const f = getEntityGraphFilterFields('buyers').find((x) => x.key === 'buyers.trailing_90d')
+  assert.match(f.label, /of sales data/)
+  assert.match(f.description, /latest recorded sale/)
+})
