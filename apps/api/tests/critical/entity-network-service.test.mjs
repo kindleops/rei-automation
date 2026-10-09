@@ -37,6 +37,8 @@ test('a property network: owner hub, portfolio, entities, people, debt, history 
   }
   const { client, selects } = stubSupabase({
     properties: [property],
+    // the network reads the property through the browse view (same equityTruth source as the grid)
+    v_entity_graph_properties: [property],
     master_owners: [{ master_owner_id: 'mo1', display_name: 'ACME HOLDINGS LLC', property_count: 1, household_key: 'h1', primary_owner_address: '1 PO BOX', joined_property_ids_json: '["p1"]' }],
     sub_owners: [{ sub_owner_id: 's1', master_owner_id: 'mo1', owner_name: 'ACME TRUST' }],
     prospects: [{ prospect_id: 'x1', full_name: 'JANE DOE', is_primary_prospect: true, slot_label: 'phone_numbers[1]' }],
