@@ -253,5 +253,6 @@ test("send time: no name anywhere ⇒ pause for review, never the 'Thanks for co
     loadNurtureRenderContext: async (_s, args) => buildNurtureRenderContext({ known: args.known, property: { property_address: "412 W Oak St" }, intent: args.intent }),
   });
   assert.equal(result.resolved, false);
-  assert.equal(result.reason, "no_renderable_followup_template");
+  // held either way: no renderable copy, or (row with no language) language_unknown
+  assert.ok(["no_renderable_followup_template", "language_unknown"].includes(result.reason), result.reason);
 });

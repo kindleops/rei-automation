@@ -420,3 +420,39 @@ test("stage: a follow-up keeps its anchor's stage — never scheduled or sent on
   const same = createDb({ sms_templates: APPROVED_S2F, inbox_thread_state: [{ thread_key: PHONE, lifecycle_stage: "offer_interest" }] });
   assert.equal((await resolveDeferredQueueMessage(dueRow("s2_interest", "s2_no_response_fu1"), { supabase: same })).resolved, true);
 });
+
+// ── 6. Recovery reconciliation fixes (2026-10-10) ──────────────────────────
+
+test("S2 dispatch: an anchor row with no address re-resolves it from properties before parking", async () => {
+  const row = dueRow("s2_interest", "s2_no_response_fu1", { property_address: null, property_id: "p-77" });
+  const withProp = createDb({ sms_templates: APPROVED_S2F, properties: [{ property_id: "p-77", property_address: "12 Oak St", property_address_city: "Dallas" }] });
+  const out = await resolveDeferredQueueMessage(row, { supabase: withProp });
+  assert.equal(out.resolved, true, out.reason);
+  assert.match(out.message_body, /12 Oak St/);
+  assert.equal(out.render_context.property_address, "12 Oak St", "persisted onto the row by the processor");
+  const noProp = createDb({ sms_templates: APPROVED_S2F, properties: [] });
+  const parked = await resolveDeferredQueueMessage(row, { supabase: noProp });
+  assert.equal(parked.resolved, false, "no address anywhere → park, never a blank address");
+});
+
+test("nurture dispatch: unknown language holds (language_unknown) — never English", async () => {
+  const row = {
+    id: "q_nurture", thread_key: PHONE, to_phone_number: PHONE, type: "followup", use_case_template: "nurture_not_interested",
+    seller_first_name: "Charles", property_address: "12 Oak St", agent_name: "Sam", language: null, message_body: "",
+    metadata: { deferred_message_resolution: true, intent: "not_interested" },
+  };
+  const out = await resolveDeferredQueueMessage(row, {
+    supabase: createDb({ sms_templates: APPROVED_S2F }),
+    loadNurtureRenderContext: async () => ({}),
+  });
+  assert.equal(out.resolved, false);
+  assert.equal(out.reason, "language_unknown");
+});
+
+test("archive is visibility only: no repair SQL filters archived threads out of follow-ups / nurture", () => {
+  const dir = path.resolve(import.meta.dirname, "../../scripts/repairs");
+  for (const f of ["20261010130000_PROPOSED_rearm_missed_no_response_followups.sql", "20261010130001_PROPOSED_rearm_missed_no_response_followups_write.sql", "20261010130002_PROPOSED_not_interested_30day_nurture.sql"]) {
+    const sql = fs.readFileSync(path.join(dir, f), "utf8").split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    assert.ok(!/is_archived\s*,\s*false\)\s*=\s*false|is_archived\s*=\s*false|not\s+(coalesce\()?\s*\w*\.?is_archived/i.test(sql), f);
+  }
+});

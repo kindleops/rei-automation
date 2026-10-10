@@ -14,22 +14,24 @@
 -- nurture copy (consider_selling_follow_up / not_ready rows), render context
 -- and the 8am–9pm recipient-local window at send time.
 --
--- DRY RUN 2026-10-10 (prod, read-only), class 4 "negative" = 162:
---   WILL GET 30-day nurture                          47
---   already has nurture (future follow-up)           68
---   excluded: wrong number / non-owner               26
+-- DRY RUN 2026-10-10, re-run after the archive (prod, read-only; archived
+-- threads INCLUDED — archive is visibility only), class 4 "negative" = 166:
+--   WILL GET 30-day nurture                          48
+--   already has nurture (future follow-up)           69
+--   excluded: wrong number / non-owner               27
 --   excluded: opt-out / STOP / stop-contact request  21
--- class 3 "noise" = 39: 15 suppressed · 4 wrong number / non-owner · 6 already
---   have a follow-up · 14 silence-cadence candidates (only 4 have a recent S2
---   question → covered by 20261010130000 if they pass its gates; 10 are S1 /
---   check-in / stale / failed → not eligible).
+--   excluded: suppressed (suppression wins)           1
+-- class 3 "noise" = 110: 19 suppressed · 4 wrong number / non-owner · 6
+--   already have a follow-up · 81 silence-cadence candidates (eligible only
+--   via 20261010130000 when the last outbound is a recent S2 / S3 / offer).
 -- class 5 "no reply" = 19: S1 cold — no automated S1 cadence (campaign-owned).
+-- (The first run, 47, wrongly excluded archived threads.)
 
 -- ═══ STEP 1 — DRY RUN (read-only) ═══════════════════════════════════════════
 with opp as (
   select o.id, o.primary_thread_key tk, o.opportunity_status st, o.acquisition_stage stage
     from acquisition_opportunities o join inbox_thread_state t on t.thread_key=o.primary_thread_key
-   where o.opportunity_status in ('active','nurture','waiting','paused') and coalesce(t.is_archived,false)=false
+   where o.opportunity_status in ('active','nurture','waiting','paused')  -- no is_archived filter: archive is visibility only (owner 10-04 / 10-08)
 ), ev as (
   select opp.id,
     count(m.*) filter (where m.direction='inbound') n_in,
@@ -95,7 +97,7 @@ set local statement_timeout = '30s';
 with opp as (
   select o.id, o.primary_thread_key tk, o.opportunity_status st, o.acquisition_stage stage
     from acquisition_opportunities o join inbox_thread_state t on t.thread_key=o.primary_thread_key
-   where o.opportunity_status in ('active','nurture','waiting','paused') and coalesce(t.is_archived,false)=false
+   where o.opportunity_status in ('active','nurture','waiting','paused')  -- no is_archived filter: archive is visibility only (owner 10-04 / 10-08)
 ), ev as (
   select opp.id,
     count(m.*) filter (where m.direction='inbound') n_in,
@@ -185,7 +187,7 @@ select 'followup:' || encode(extensions.digest(s.dedupe_key, 'sha1'), 'hex'),
    and not exists (select 1 from public.send_queue q where q.thread_key = s.tk and q.type = 'followup'
                     and q.queue_status in ('scheduled','queued','held','processing','paused_operator_review','paused_deferred_unresolved'));
 select queue_status, count(*), min(scheduled_for), max(scheduled_for) from public.send_queue
- where metadata->'rearm'->>'batch' = 'rearm_not_interested_nurture_20261010' group by 1;   -- expect 47 held
+ where metadata->'rearm'->>'batch' = 'rearm_not_interested_nurture_20261010' group by 1;   -- expect 48 held
 rollback;  -- COMMIT only after the owner checks the count
 
 -- ═══ STEP 3 — RELEASE (separate owner GO) ════════════════════════════════════

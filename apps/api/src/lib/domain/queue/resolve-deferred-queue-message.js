@@ -95,7 +95,9 @@ function buildRowPersonalization(queue_row = {}) {
 }
 
 async function fetchCandidateTemplates(supabase, useCases, language) {
-  const languages = lower(language) === "english" || !language ? ["English"] : [language, "English"];
+  // The seller's language only — never English by default (unknown language
+  // is unknown; the caller holds before reaching here).
+  const languages = [language];
   const { data, error } = await supabase
     .from("sms_templates")
     .select("*")
@@ -194,6 +196,12 @@ export async function resolveDeferredQueueMessage(input_row = {}, deps = {}) {
     }
   }
   const row_language = clean(queue_row.language) || clean(queue_row?.metadata?.language);
+  // UNKNOWN LANGUAGE IS UNKNOWN (owner): never fall back to English — hold the
+  // row for review (the processor parks it as paused_deferred_unresolved).
+  if (!row_language) {
+    warn("[DEFERRED_FOLLOWUP_LANGUAGE_UNKNOWN]", { queue_row_id: queue_row.id || null, intent });
+    return { ok: false, resolved: false, intent, reason: "language_unknown" };
+  }
 
   let templates = [];
   try {

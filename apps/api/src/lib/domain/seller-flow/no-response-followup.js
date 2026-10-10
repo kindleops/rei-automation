@@ -777,6 +777,28 @@ export async function resolveNoResponseFollowUpMessage(queue_row = {}, { supabas
   templates = filterTemplatesForProperty(templates, { propertyGroup: group }).kept;
 
   const first = confidentFirstName(queue_row.seller_first_name);
+  // The anchor send row may carry no address (e.g. an owner-typed S2 question):
+  // re-resolve it from the property before any copy that names it is skipped.
+  let render_context = null;
+  let property_address = clean(queue_row.property_address) || null;
+  let property_city = clean(queue_row.property_city) || null;
+  if (!property_address && clean(queue_row.property_id)) {
+    try {
+      const { data: prop } = await supabase
+        .from("properties")
+        .select("property_address,property_address_full,property_address_city")
+        .eq("property_id", clean(queue_row.property_id))
+        .maybeSingle();
+      const resolved = clean(prop?.property_address) || clean(prop?.property_address_full) || null;
+      if (resolved) {
+        property_address = resolved;
+        property_city = property_city || clean(prop?.property_address_city) || null;
+        render_context = { property_address, ...(property_city ? { property_city } : {}) };
+      }
+    } catch {
+      // unreadable property → render only copy that does not name the address
+    }
+  }
   // Use-case priority first (the step's own copy before any fallback), then
   // named-vs-unnamed copy within each use case.
   const ordered = use_cases.flatMap((uc) =>
@@ -786,8 +808,8 @@ export async function resolveNoResponseFollowUpMessage(queue_row = {}, { supabas
     seller_first_name: first,
     first_name: first,
     agent_name: agentNameForRow(queue_row, { thread_key: queue_row.thread_key || queue_row.to_phone_number }),
-    property_address: clean(queue_row.property_address) || null,
-    property_city: clean(queue_row.property_city) || null,
+    property_address,
+    property_city,
     offer_price,
   };
   for (const template of ordered) {
@@ -810,6 +832,7 @@ export async function resolveNoResponseFollowUpMessage(queue_row = {}, { supabas
       language: clean(template.language) || language,
       intent: "stage_no_reply",
       offer_price_quoted: offer_price,
+      render_context,
       reason: "no_response_template_resolved",
     };
   }
