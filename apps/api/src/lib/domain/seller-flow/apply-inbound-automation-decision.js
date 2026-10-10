@@ -62,6 +62,10 @@ import {
   CANCELLATION_POLICIES,
 } from "@/lib/domain/queue/cancel-supabase-pending-outbound.js";
 import { isExplicitCallRequest, threadHasMissedCall } from "@/lib/domain/classification/round11-unclear-rules.js";
+import {
+  buildQueueTimeConversationalReplyMetadata,
+  loadConversationalReplyWindowMinutes,
+} from "@/lib/domain/queue/conversational-reply-window.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
 /** Upper bound on active+safe template rows read per language pair (see selectSafeAutoReplyTemplate). */
@@ -4422,6 +4426,20 @@ export async function executeInboundAutomationDecision({
   }
 
   const email_channel = channel === "email" && typeof emailReplyImpl === "function";
+  // OWNER 2026-10-10: this reply answers inboundEventId. Stamp the inbound's
+  // time + the queue-time in-session verdict so the send path can prove the
+  // reply was queued within conversational_reply_window_minutes (default 30)
+  // and cross the contact window; a late queue (released review, recovery
+  // replay of an old inbound) is not in session and keeps the window.
+  const conversational_reply = buildQueueTimeConversationalReplyMetadata({
+    inbound_message_event_id: inboundEventId || null,
+    inbound_received_at: inboundReceivedAt || null,
+    queued_at: now,
+    timezone: timezone_label,
+    window_minutes: await loadConversationalReplyWindowMinutes({
+      getSystemValue: getSystemValueImpl || (hasSupabaseConfig() ? getSystemValue : null),
+    }),
+  });
   const queue_result = email_channel
     ? await emailReplyImpl({
         rendered_message_text,
@@ -4554,6 +4572,7 @@ export async function executeInboundAutomationDecision({
       phone_id: phoneId || null,
       thread_key: clean(threadKey) || normalized_to_phone,
       inbound_message_event_id: inboundEventId || null,
+      ...conversational_reply.metadata,
       // Binds this exact SMS to the persisted active offer it advertises. The
       // body's amount and offer_price are the same resolved authority value, so
       // the queued message and the offer record can never disagree.

@@ -20,6 +20,15 @@
 // replan = the next opening of the recipient-local 08:00–21:00 window, with a
 // deterministic per-row jitter, never earlier than the thread's previous
 // planned row (per-thread order preserved).
+// OWNER 2026-10-10: an IN-SESSION reply (conversational-reply-window.js) that
+// would otherwise `send` is never re-planned just because it is outside the
+// local window — a reply to a seller who just texted us goes now. The stale-
+// reply reevaluate rule above still applies to it.
+
+import {
+  evaluateInSessionReply,
+  DEFAULT_CONVERSATIONAL_REPLY_WINDOW_MINUTES,
+} from "@/lib/domain/queue/conversational-reply-window.js";
 
 export const RESUME_DRAIN_POLICY_VERSION = "resume_drain.v1.2026-10-08";
 export const RESUME_DEFAULTS = Object.freeze({
@@ -77,7 +86,7 @@ export function inLocalWindow(ms, timeZone = "America/Chicago", { start = RESUME
  * rows: overdue unsent rows. Returns [{ id, action, reason, scheduled_for_utc? }]
  * in input order; replans per thread are monotonic in the thread's order.
  */
-export function planResumeDrain(rows = [], { now = Date.now(), config = RESUME_DEFAULTS } = {}) {
+export function planResumeDrain(rows = [], { now = Date.now(), config = RESUME_DEFAULTS, conversational_reply_window_minutes = DEFAULT_CONVERSATIONAL_REPLY_WINDOW_MINUTES } = {}) {
   const c = { ...RESUME_DEFAULTS, ...config };
   const lastPerThread = new Map();
   const ordered = [...rows].sort((a, b) => Date.parse(a.scheduled_for_utc || a.scheduled_for || a.created_at || 0) - Date.parse(b.scheduled_for_utc || b.scheduled_for || b.created_at || 0) || clean(a.id).localeCompare(clean(b.id)));
@@ -96,7 +105,10 @@ export function planResumeDrain(rows = [], { now = Date.now(), config = RESUME_D
     else if (kind === "opener" && overdue_min > c.OPENER_STALE_H * 60) decision = { action: "replan", reason: "stale_opener" };
     else decision = { action: "send", reason: "within_tolerance" };
     if (decision.action === "send" && !inLocalWindow(now, tz, { start: c.WINDOW_START_H, end: c.WINDOW_END_H })) {
-      decision = { action: "replan", reason: "outside_local_window" };
+      const session = evaluateInSessionReply(row, { now: new Date(now).toISOString(), window_minutes: conversational_reply_window_minutes });
+      decision = session.in_session === true
+        ? { action: "send", reason: "in_session_reply", inbound_message_event_id: session.inbound_message_event_id, inbound_age_minutes: session.inbound_age_minutes }
+        : { action: "replan", reason: "outside_local_window" };
     }
     if (decision.action === "replan") {
       const base = nextWindowOpening(Math.max(now, lastPerThread.get(thread) ?? 0), tz, { start: c.WINDOW_START_H, end: c.WINDOW_END_H });

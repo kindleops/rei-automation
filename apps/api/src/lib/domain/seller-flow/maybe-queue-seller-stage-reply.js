@@ -2,6 +2,10 @@ import { getCategoryValue, getNumberValue } from "@/lib/providers/podio.js";
 import { queueOutboundMessage } from "@/lib/flows/queue-outbound-message.js";
 import { resolveLatencyAwareQueueSchedule } from "@/lib/domain/queue/queue-schedule.js";
 import {
+  buildQueueTimeConversationalReplyMetadata,
+  DEFAULT_CONVERSATIONAL_REPLY_WINDOW_MINUTES,
+} from "@/lib/domain/queue/conversational-reply-window.js";
+import {
   brainStageForUseCase,
   SELLER_FLOW_STAGES,
 } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
@@ -169,6 +173,11 @@ export async function maybeQueueSellerStageReply({
   scheduled_for_utc = null,
   timezone_override = null,
   contact_window_override = null,
+  // OWNER 2026-10-10: when the inbound this reply answers arrived (ISO). With
+  // the inbound id (extra_queue_context.inbound_message_event_id) it makes the
+  // reply IN SESSION if queued within conversational_reply_window_minutes.
+  inbound_received_at = null,
+  conversational_reply_window_minutes = DEFAULT_CONVERSATIONAL_REPLY_WINDOW_MINUTES,
   send_priority_override = null,
   preview_only = false,
   now = new Date().toISOString(),
@@ -281,7 +290,23 @@ export async function maybeQueueSellerStageReply({
   );
   const rotation_key = deriveRotationKey({ context, plan });
   const timezone_label = clean(timezone_override) || deriveTimezoneLabel(context);
-  const contact_window = clean(contact_window_override) || buildAlwaysOnContactWindow(timezone_label);
+  // An in-session reply (answers a specific inbound, queued within the
+  // session window, not a follow-up / nurture / campaign touch) is never
+  // deferred by a restrictive contact-window override here; the send path
+  // re-proves the session before it crosses the window.
+  const reply_inbound_event_id =
+    clean(extra_queue_context?.inbound_message_event_id) || clean(extra_queue_context?.source_event_id) || null;
+  const conversational_reply = buildQueueTimeConversationalReplyMetadata({
+    inbound_message_event_id: reply_inbound_event_id,
+    inbound_received_at: clean(inbound_received_at) || clean(extra_queue_context?.inbound_received_at) || null,
+    queued_at: now,
+    timezone: timezone_label,
+    window_minutes: conversational_reply_window_minutes,
+    is_outreach: plan.selected_use_case === "reengagement",
+  });
+  const in_session_reply = conversational_reply.evaluation.in_session === true;
+  const contact_window =
+    (!in_session_reply && clean(contact_window_override)) || buildAlwaysOnContactWindow(timezone_label);
   const schedule = clean(scheduled_for_local) || clean(scheduled_for_utc)
     ? {
         scheduled_for_local: clean(scheduled_for_local) || clean(scheduled_for_utc),
@@ -351,6 +376,7 @@ export async function maybeQueueSellerStageReply({
       message_text: plan.fallback_reply || null,
       extra_queue_context: {
         ...(extra_queue_context || {}),
+        ...conversational_reply.metadata,
         // Auto-reply fields
         type: "auto_reply",
         detected_intent: plan.detected_intent || plan.inbound_intent || null,

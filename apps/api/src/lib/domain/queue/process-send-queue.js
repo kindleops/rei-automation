@@ -78,7 +78,12 @@ import { addSentryBreadcrumb } from "@/lib/monitoring/sentry.js";
 import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { syncOfferRecord } from "@/lib/domain/offers/sync-offer-record.js";
 import { sanitizeSmsTextValue } from "@/lib/sms/sanitize.js";
-import { isManualInboxSend, isFreshManualInboxSend, isImmediateInboundAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { isManualInboxSend, isFreshManualInboxSend } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import {
+  evaluateInSessionReply,
+  loadConversationalReplyWindowMinutes,
+  buildInSessionBypassMetadata,
+} from "@/lib/domain/queue/conversational-reply-window.js";
 import {
   isDeferredQueueRow,
   resolveDeferredQueueMessage,
@@ -1513,9 +1518,21 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
   // backlog item, not "the operator meant now", and must respect the contact
   // window like anything else.
   const fresh_manual_inbox_send = isFreshManualInboxSend(queue_row, now);
-  // Immediate reply to a consumer-initiated inbound → exempt from quiet hours,
-  // but only while still fresh (aged/backlogged replies respect the window).
-  const inbound_auto_reply = isImmediateInboundAutoReply(queue_row, now);
+  // OWNER 2026-10-10: a reply to a seller who just texted us is IN SESSION —
+  // it answers a specific inbound, was queued within
+  // conversational_reply_window_minutes (default 30) of it, the session is
+  // still open, and it is not a follow-up / nurture / campaign touch — and it
+  // crosses the contact window. Anything else (incl. a reply queued late or
+  // left in a paused queue) respects the window. Only the window is lifted:
+  // compliance / suppression / template governance below still run.
+  const conversational_reply_window_minutes = await loadConversationalReplyWindowMinutes({
+    getSystemValue: deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : null),
+  });
+  const in_session_reply = evaluateInSessionReply(queue_row, {
+    now,
+    window_minutes: conversational_reply_window_minutes,
+  });
+  const inbound_auto_reply = in_session_reply.in_session === true;
   let lock_token = clean(deps.claimedLockToken || queue_row?.lock_token) || null;
   let authorization_consumed_at = null;
 
@@ -1803,6 +1820,37 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
           queue_item_id: queue_row_id,
         };
       }
+    }
+
+    // In-session reply crossing the contact window: record why on the row
+    // (lock-gated, best effort — the decision is derived from the row itself,
+    // so a lost audit write does not change it). Every later gate still runs.
+    if (
+      (contact_window.allowed !== true || contact_window.hold === true) &&
+      inbound_auto_reply &&
+      !fresh_manual_inbox_send
+    ) {
+      const bypass_metadata = {
+        ...(queue_row.metadata ?? {}),
+        ...buildInSessionBypassMetadata(in_session_reply, { stage: "dispatch", at: now }),
+        contact_window_bypass_underlying_reason: contact_window.reason || null,
+      };
+      queue_row = normalizeSendQueueRow({ ...queue_row, metadata: bypass_metadata });
+      try {
+        await updateSendQueueRowWithLock(queue_row_id, lock_token, { metadata: bypass_metadata, updated_at: now }, deps);
+      } catch (audit_error) {
+        warn("queue.in_session_reply_bypass_audit_write_failed", {
+          queue_row_id,
+          message: audit_error?.message || "unknown",
+        });
+      }
+      info("queue.contact_window_in_session_reply", {
+        queue_row_id,
+        inbound_message_event_id: in_session_reply.inbound_message_event_id || null,
+        inbound_age_minutes: in_session_reply.inbound_age_minutes ?? null,
+        window_minutes: in_session_reply.window_minutes ?? null,
+        underlying_reason: contact_window.reason || null,
+      });
     }
 
     const destination = resolveQueueDestinationPhone(queue_row);

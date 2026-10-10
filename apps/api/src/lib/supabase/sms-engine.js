@@ -15,7 +15,8 @@ import { captureRouteException, addSentryBreadcrumb } from "@/lib/monitoring/sen
 import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { sendCriticalAlert } from "@/lib/alerts/discord.js";
 import { info, warn } from "@/lib/logging/logger.js";
-import { isManualInboxSend, isUnknownAutoReply, isImmediateInboundAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { evaluateInSessionReply, loadConversationalReplyWindowMinutes } from "@/lib/domain/queue/conversational-reply-window.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { resolveConversationalCeiling, withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
@@ -903,6 +904,11 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
   const preclaim_scan_limit = resolvePreclaimScanLimit(requested_limit, deps);
   const evaluate_contact_window = deps.evaluateContactWindow || evaluateContactWindow;
   const dry_run = Boolean(deps.dry_run || deps.dryRun);
+  // OWNER 2026-10-10: in-session replies (conversational-reply-window.js) are
+  // not held back by the contact window at pre-claim either. One cached read.
+  const conversational_reply_window_minutes = await loadConversationalReplyWindowMinutes({
+    getSystemValue: deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : null),
+  });
 
   // FENCE AUTHORITY FAILS CLOSED.
   //
@@ -1088,10 +1094,12 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
       propertyGeography: property_geography.get(clean(decision.row?.property_id)) || null,
     });
     const manual_inbox_send = isManualInboxSend(decision.row);
-    // Immediate replies to a consumer-initiated inbound are exempt from the
-    // outbound quiet-hours window (same rationale as manual inbox sends), but
-    // only while still FRESH — an aged/backlogged reply must respect the window.
-    const inbound_auto_reply = isImmediateInboundAutoReply(decision.row, now);
+    // A reply to a seller who just texted us (IN SESSION: inbound-linked,
+    // queued within conversational_reply_window_minutes of the inbound, session
+    // still open, not a follow-up / nurture / campaign touch) is exempt from
+    // the contact window. An aged/backlogged reply must respect the window.
+    const inbound_auto_reply =
+      evaluateInSessionReply(decision.row, { now, window_minutes: conversational_reply_window_minutes }).in_session === true;
     // rc-7.1 D10: no recipient zone → HOLD (never a Chicago guess). Exempt
     // traffic (a reply to a seller who just texted, an operator's send) does
     // not need a window, so it is not held here.

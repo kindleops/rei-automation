@@ -166,6 +166,11 @@ export function revalidateBeforeDispatch({
   template_governed = true,
   sender_health = null,
   inside_contact_window = true,
+  // OWNER 2026-10-10: an in-session reply (conversational-reply-window.js —
+  // answers a specific inbound, queued within the session window, not a
+  // follow-up / nurture / campaign touch) is not held by the contact window.
+  // It lifts ONLY that blocker; suppression / dnc / template governance stand.
+  in_session_reply = false,
   authorization_scope_valid = true,
 } = {}) {
   const blockers = []
@@ -196,7 +201,7 @@ export function revalidateBeforeDispatch({
   if (!contact_relationship_valid) blockers.push('contact_relationship_invalid')
   if (!template_governed) blockers.push('template_not_governed')
   if (sender_health && sender_health !== 'active_healthy') blockers.push(`sender_not_healthy:${sender_health}`)
-  if (!inside_contact_window) blockers.push('outside_contact_window')
+  if (!inside_contact_window && in_session_reply !== true) blockers.push('outside_contact_window')
   if (!authorization_scope_valid) blockers.push('authorization_scope_invalid')
 
   return {
