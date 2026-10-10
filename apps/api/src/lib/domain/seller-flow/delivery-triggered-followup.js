@@ -16,7 +16,7 @@ import {
   scheduleFollowUp,
   STAGE_NO_REPLY_FOLLOWUP_INTENT,
 } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
-import { getSystemValue } from "@/lib/system-control.js";
+import { getSystemValue, setSystemValues } from "@/lib/system-control.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { BLOCKING_CONTACTABILITY } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { resolveFollowUpPolicyForStage } from "@/lib/domain/seller-flow/followup-policy-registry.js";
@@ -526,7 +526,60 @@ export async function maybeScheduleNoResponseFollowUp({
  * Requires an explicit follow-up automation mode: a delivered receipt alone
  * is never enough authority to create a send_queue row.
  */
-export async function maybeScheduleFollowUpAfterDelivery({
+// ── Scheduler heartbeat (owner 2026-10-10: restored + visible) ─────────────
+// Every run of this leg (each provider-confirmed delivery receipt) stamps
+// system_control so Operations can see the follow-up scheduler is alive:
+//   followup_no_response_heartbeat_at   this leg ran
+//   follow_up_scheduler_heartbeat_at    the legacy key the dashboards read
+//                                       (frozen at 2026-09-17 when the Vercel
+//                                       lane was retired)
+//   followup_no_response_last_result    {mode, reason, scheduled} of the run
+// Throttled per process (default 60 s) so a receipt burst is one write;
+// best-effort — a heartbeat failure never touches the webhook path.
+export const FOLLOWUP_HEARTBEAT_KEY = "followup_no_response_heartbeat_at";
+export const LEGACY_FOLLOWUP_HEARTBEAT_KEY = "follow_up_scheduler_heartbeat_at";
+export const FOLLOWUP_LAST_RESULT_KEY = "followup_no_response_last_result";
+let last_heartbeat_ms = 0;
+
+export async function recordFollowUpHeartbeat(
+  result = {},
+  { setSystemValuesImpl = setSystemValues, now = new Date(), throttleMs = 60_000 } = {}
+) {
+  const at = now instanceof Date ? now : new Date(now);
+  if (throttleMs > 0 && at.getTime() - last_heartbeat_ms < throttleMs) return { written: false, reason: "throttled" };
+  last_heartbeat_ms = at.getTime();
+  const iso = at.toISOString();
+  try {
+    await setSystemValuesImpl({
+      [FOLLOWUP_HEARTBEAT_KEY]: iso,
+      [LEGACY_FOLLOWUP_HEARTBEAT_KEY]: iso,
+      [FOLLOWUP_LAST_RESULT_KEY]: JSON.stringify({
+        at: iso,
+        mode: result?.mode ?? null,
+        no_response_mode: result?.no_response_mode ?? null,
+        scheduled: Boolean(result?.scheduled),
+        reason: result?.reason ?? null,
+      }),
+    });
+    return { written: true, at: iso };
+  } catch (error) {
+    return { written: false, reason: error?.message || "heartbeat_write_failed" };
+  }
+}
+
+export async function maybeScheduleFollowUpAfterDelivery(args = {}) {
+  const result = await scheduleFollowUpAfterDeliveryRun(args);
+  const can_write = typeof args.setSystemValuesImpl === "function" || hasSupabaseConfig();
+  if (can_write) {
+    await recordFollowUpHeartbeat(result, {
+      ...(typeof args.setSystemValuesImpl === "function" ? { setSystemValuesImpl: args.setSystemValuesImpl } : {}),
+      ...(args.heartbeatThrottleMs !== undefined ? { throttleMs: args.heartbeatThrottleMs } : {}),
+    });
+  }
+  return result;
+}
+
+async function scheduleFollowUpAfterDeliveryRun({
   provider_message_sid = null,
   final_delivery_status = null,
   supabase = defaultSupabase,
