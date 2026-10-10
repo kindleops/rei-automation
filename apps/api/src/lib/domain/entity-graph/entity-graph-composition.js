@@ -19,6 +19,7 @@
  *             "Everything else" = total − Σ. The sample only chooses which
  *             buckets to show; every number shown is exact.
  */
+import { primeCampaignScope } from './entity-graph-campaign-scope.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
   applyEntityGraphFieldFilters,
@@ -252,6 +253,7 @@ export async function buildEntityGraphComposition(params = {}, deps = {}) {
   const dimension = config.dimensions.find((entry) => entry.key === clean(params.dimension)) || config.dimensions[0]
 
   const filters = parseBrowseFilters(params)
+  await primeCampaignScope(params, deps.campaignScopeDeps || {})
   const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow(tab, params, { allowComputedFacts: tab === 'properties' })
   // a computed-fact filter or dimension (SMS eligible, company status…) exists only on the property facts relation
   if (fieldFilters.some(isComputedFactFilter) || (tab === 'properties' && isComputedFactColumn(dimension.column))) {

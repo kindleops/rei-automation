@@ -26,6 +26,10 @@ export async function GET(request) {
     const data = await browseEntityGraphPage(params)
     return NextResponse.json({ ok: true, ...data }, { status: 200, headers })
   } catch (error) {
+    // the campaign scope chip could not be resolved / does not apply here — never a quiet universe
+    if (error?.name === 'CampaignScopeError') {
+      return NextResponse.json({ ok: false, error: error.code, message: error.message, results: [], total: null, sections: [] }, { status: error.code === 'campaign_scope_not_found' ? 404 : 422, headers })
+    }
     /**
      * A filter this tab cannot execute is a 422 naming the filter, never a
      * quiet unfiltered page. `results: []` and `total: 0` so a client that

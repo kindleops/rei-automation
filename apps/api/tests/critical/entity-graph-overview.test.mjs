@@ -8,7 +8,8 @@
  *   - every bucket carries the rail's own filter AST, and that filter resolves
  *     (clicking a bar can never 422 or widen the cohort)
  *   - a flag token's grouped count is the flag filter's own match rule
- *   - protected classes are never charted; identifiers are coverage only
+ *   - protected-class-adjacent fields are charted WITH a sensitive marker (owner + counsel 2026-10-10);
+ *     identifiers are coverage only
  *   - computed facts are read from the property facts read model only (a
  *     same-named legacy view column is NOT the fact)
  *   - a filter the tab cannot execute fails closed
@@ -94,7 +95,8 @@ test('the cohort statement scans the relation ONCE under exactly that WHERE', as
   const { query, seen } = fakeQuery()
   const out = await buildEntityGraphOverview({ tab: 'properties', field_filters: DALLAS, sections: 'pinned,headline' }, deps(query))
   const cohortSql = seen.filter((s) => /with c as materialized/.test(s.sql))
-  assert.equal(cohortSql.length, 2, 'pinned (+ the headline riding on it) + one ghost for the filtered market field')
+  // pinned (+ the headline riding on it); the market card's ghost would be the WHOLE universe — never scanned live
+  assert.equal(cohortSql.length, 1, 'one scan: pinned + headline; no live universe ghost')
   const cohort = compileCohort({ field_filters: DALLAS })
   const P = paramList()
   const where = P.embed(cohort.clauses, cohort.params)
@@ -145,26 +147,30 @@ test('a flag token grouped by the split rule matches exactly the rows its chip (
   assert.equal(sanitizeToken("Mechanic's (lien)"), "Mechanic's lien")
 })
 
-test('protected classes are never charted; names, addresses, phones and identifiers are coverage only', () => {
+test('protected-class-adjacent fields are charted with a sensitive marker; names, addresses, phones and identifiers are coverage only', () => {
   const registry = overviewRegistry()
   assert.ok(registry.length > 100, `registry has ${registry.length} fields`)
   for (const f of registry) {
-    assert.ok(!/gender|marital|(^|_)age(_|$)|race|ethnic|religio|national|disab|familial|language|(^|_)mob$/.test(f.column), `protected ${f.key}`)
+    // policy (owner + counsel, 2026-10-10): every prospect field is a live targeting input; charted as descriptive
+    // analytics, MARKED, never priced
+    if (/gender|marital|(^|_)age(_|$)|race|ethnic|religio|national|disab|familial|language|(^|_)mob$/.test(f.column)) assert.equal(f.sensitive, true, `sensitive ${f.key}`)
     assert.ok(OVERVIEW_SECTION_IDS.includes(f.section), `${f.key} section ${f.section}`)
   }
   for (const col of ['owner_name', 'property_address_full', 'apn_parcel_id', 'legal_description', 'latitude', 'owner_1_name', 'owner_address_full']) {
     const f = registry.find((x) => x.column === col)
     if (f) assert.equal(f.privacy, 'coverage_only', col)
   }
-  // a synthetic person-age / gender / language field is dropped even when the catalog offers it
+  // a person-age / gender / language field is charted and marked sensitive
   const fake = buildOverviewRegistry('properties', { fields: [
     { key: 'facts.person_gender', source_column: 'person_gender', type: 'enum', category: 'People / entity', operators: [] },
     { key: 'facts.person_age', source_column: 'person_age', type: 'number', category: 'People / entity', operators: [] },
     { key: 'facts.owner_best_language', source_column: 'owner_best_language', type: 'enum', category: 'Owner record', operators: [] },
     { key: 'facts.contact_phone_count', source_column: 'contact_phone_count', type: 'number', category: 'Contacts', operators: [] },
   ] })
-  assert.deepEqual(fake.map((f) => f.key), ['facts.contact_phone_count'])
-  assert.equal(fake[0].kind, 'numeric', 'a phone COUNT is a number, not an identifier')
+  assert.deepEqual(fake.filter((f) => f.sensitive).map((f) => f.key), ['facts.person_gender', 'facts.person_age', 'facts.owner_best_language'])
+  const count = fake.find((f) => f.key === 'facts.contact_phone_count')
+  assert.equal(count.sensitive, false)
+  assert.equal(count.kind, 'numeric', 'a phone COUNT is a number, not an identifier')
   assert.ok(isProtectedField({ source_column: 'person_marital_status' }))
   const catalog = getOverviewCatalog('properties')
   assert.ok(catalog.sections.some((s) => s.id === 'company' && s.fields.some((f) => f.key === 'facts.company_status_class')))
@@ -207,6 +213,7 @@ test('fails closed: an unexecutable filter throws (422 upstream), a search term 
     (e) => e.code === 'unsupported_entity_graph_filters',
   )
   await assert.rejects(buildEntityGraphOverview({ tab: 'properties', q: 'main st' }, deps(query)), (e) => e.code === 'overview_search_unsupported')
-  const other = await buildEntityGraphOverview({ tab: 'master_owners' }, deps(query))
+  // every desk scope is supported now; an aggregate tab (zips) is not
+  const other = await buildEntityGraphOverview({ tab: 'zips' }, deps(query))
   assert.equal(other.supported, false)
 })

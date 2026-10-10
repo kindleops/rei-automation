@@ -65,7 +65,7 @@ function sampleValueFor(field) {
 test("every filterable tab maps to the table its browse query reads", () => {
   assert.deepEqual(
     ENTITY_GRAPH_FILTER_SOURCE_BY_TAB,
-    { properties: "properties", master_owners: "master_owners", people: "prospects", contact_methods: "phones", buyers: "eg_buyer_index" },
+    { properties: "properties", master_owners: "master_owners", people: "prospects", contact_methods: "phones", buyers: "eg_buyer_index", organizations: "sub_owners" },
   );
   // markets and zips are RPC aggregates -- a property column filter cannot be
   // pushed into them, so they must not claim support.
@@ -84,7 +84,8 @@ test("the exposed fields come from the campaign catalog, not a second list", () 
       // they never pose as campaign catalog fields.
       if (field.entity_graph_only) {
         // facts.* = property fact fields (entity-graph-facts.js): computed facts + view columns the catalog lacks
-        assert.ok(/^(records|buyers|facts)\./.test(field.key) || field.key === 'properties.flags' || Boolean(field.derived), `${field.key} is an unflagged synthetic field`);
+        // organizations.* = the title-holding entity fields (sub_owners has no campaign catalog fields)
+        assert.ok(/^(records|buyers|facts|organizations)\./.test(field.key) || field.key === 'properties.flags' || Boolean(field.derived), `${field.key} is an unflagged synthetic field`);
         assert.ok(!catalogKeys.has(field.key), `${field.key} shadows a campaign catalog field`);
         assert.equal(field.supported_in_preview, false);
         assert.equal(field.source_table_or_view, ENTITY_GRAPH_FILTER_SOURCE_BY_TAB[tab]);

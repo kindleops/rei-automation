@@ -38,6 +38,14 @@ import { JUDGMENT_CATEGORIES, LIEN_CATEGORIES } from './entity-graph-recorded-do
 import { COMPUTED_FACTS, PLAIN_FACT_COLUMNS, kindOfPg, plainColumnType } from './entity-graph-facts.js'
 import { requiredFairnessClass } from '@/lib/domain/intelligence/registry/prohibited.js'
 import {
+  CAMPAIGN_MEMBERSHIP_FIELD,
+  CAMPAIGN_MEMBERSHIP_KEY,
+  CAMPAIGN_SCOPE_ID_COLUMN,
+  CampaignScopeError,
+  applyCampaignMembership,
+  isCampaignId,
+} from './entity-graph-campaign-scope.js'
+import {
   applySupabaseFilters,
   EMPTY_FILTER_OPERATORS,
   filterColumn,
@@ -92,6 +100,8 @@ export const ENTITY_GRAPH_FILTER_SOURCE_BY_TAB = Object.freeze({
   people: 'prospects',
   contact_methods: 'phones',
   buyers: 'eg_buyer_index',
+  // title-holding entities (sub_owners): the synthetic fields below (state, city, ZIP, entity class)
+  organizations: 'sub_owners',
   // `zips` and `markets` are deliberately absent. Both are per-zip/per-market
   // AGGREGATES built by an RPC over properties, so a property column filter
   // cannot be pushed into them -- and accepting one only to ignore it is the
@@ -351,6 +361,37 @@ export const ENTITY_GRAPH_BUYER_FIELDS = Object.freeze([
 ])
 
 /**
+ * TITLE-HOLDING ENTITIES (public.sub_owners — the Companies tab). The table
+ * carries names, mailing addresses and links only, so the filters are the
+ * mailing geography and the entity class the grid already shows
+ * (classifyOwnershipEntity: LLC / corporation, trust, estate, other).
+ */
+const O = (column, label, type, extra) => syntheticField('organizations', 'sub_owners', 'Entity', column, label, type, extra)
+export const ORGANIZATION_CLASSES = Object.freeze(['LLC/Corporation', 'Trust', 'Estate', 'Other'])
+/** The entity-class name patterns, in classification order (first match wins). */
+export const ORGANIZATION_CLASS_PATTERNS = Object.freeze([
+  { key: 'LLC/Corporation', patterns: ['%llc%', '%l.l.c%', '%corp%', '%inc%'] },
+  { key: 'Trust', patterns: ['%trust%'] },
+  { key: 'Estate', patterns: ['%estate%'] },
+])
+export const ENTITY_GRAPH_ORGANIZATION_FIELDS = Object.freeze([
+  O('owner_address_state', 'Mailing state', 'text'),
+  O('owner_address_city', 'Mailing city', 'text'),
+  O('owner_address_zip', 'Mailing ZIP', 'text'),
+  O('owner_name', 'Entity class', 'enum', {
+    key: 'organizations.entity_class',
+    derived: 'organization_class',
+    operators: Object.freeze([{ key: 'is_any_of', label: 'Is any of' }]),
+    description: 'From the entity name, first match wins: LLC / corporation (llc, l.l.c, corp, inc), trust, estate; everything else is Other.',
+  }),
+  O('master_owner_id', 'Linked to an owner record', 'boolean', {
+    key: 'organizations.has_master_owner',
+    derived: 'organization_has_owner',
+    operators: Object.freeze([{ key: 'is_true', label: 'Yes' }, { key: 'is_false', label: 'No' }]),
+  }),
+])
+
+/**
  * DERIVED FIELDS — a question the raw column answers wrongly, compiled to the
  * predicate that answers it (filter audit, 2026-10-08).
  *
@@ -447,7 +488,7 @@ export const ENTITY_GRAPH_PLAIN_FACT_FIELDS = Object.freeze((() => {
     .map((col) => factField(col, col.replace(/^rec_/, 'recorded ').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()), kindOfPg(plainColumnType(col)), 'More property fields'))
 })())
 
-const SYNTHETIC_BY_KEY = new Map([...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_BUYER_FIELDS, ENTITY_GRAPH_FLAG_FIELD, ...ENTITY_GRAPH_DERIVED_FIELDS, ...ENTITY_GRAPH_COMPUTED_FACT_FIELDS, ...ENTITY_GRAPH_PLAIN_FACT_FIELDS].map((field) => [field.key, field]))
+const SYNTHETIC_BY_KEY = new Map([CAMPAIGN_MEMBERSHIP_FIELD, ...ENTITY_GRAPH_ORGANIZATION_FIELDS, ...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_BUYER_FIELDS, ENTITY_GRAPH_FLAG_FIELD, ...ENTITY_GRAPH_DERIVED_FIELDS, ...ENTITY_GRAPH_COMPUTED_FACT_FIELDS, ...ENTITY_GRAPH_PLAIN_FACT_FIELDS].map((field) => [field.key, field]))
 
 /** A resolved filter that only the property facts relation can execute. */
 export const isComputedFactFilter = (entry) => Boolean(entry?.fieldDefinition?.computed_fact)
@@ -563,6 +604,7 @@ export function getEntityGraphFilterFields(tab) {
   const source = entityGraphFilterSourceForTab(tab)
   if (!source) return []
   if (source === 'eg_buyer_index') return ENTITY_GRAPH_BUYER_FIELDS.map(markSensitive)
+  if (source === 'sub_owners') return ENTITY_GRAPH_ORGANIZATION_FIELDS.map(markSensitive)
   const catalog = CAMPAIGN_FIELD_CATALOG
     .filter((field) => field.source_table_or_view === source && field.filterable
       && !ENTITY_GRAPH_WITHHELD_FIELDS.has(field.key) && !ENTITY_GRAPH_UNEXECUTABLE_FIELDS[field.key])
@@ -657,6 +699,17 @@ export function resolveEntityGraphFieldFilters(tab, requested = [], { allowCompu
       continue
     }
     const fieldKey = SYNTHETIC_BY_KEY.has(requestedKey) ? requestedKey : normalizeCampaignFieldKey(requestedKey)
+    if (fieldKey === CAMPAIGN_MEMBERSHIP_KEY) {
+      // the campaign scope chip: exact membership, primed before the query (entity-graph-campaign-scope.js)
+      const tabKey = clean(tab).toLowerCase()
+      const column = CAMPAIGN_SCOPE_ID_COLUMN[tabKey]
+      const ids = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(isCampaignId)
+      if (!column) unsupported.push({ field_key: fieldKey, reason: 'campaign_scope_not_on_this_tab' })
+      else if (clean(entry.operator || 'is_any_of') !== 'is_any_of') unsupported.push({ field_key: fieldKey, reason: 'unsupported_operator', operator: clean(entry.operator), supported_operators: ['is_any_of'] })
+      else if (!ids.length) unsupported.push({ field_key: fieldKey, reason: 'missing_value', operator: 'is_any_of' })
+      else resolved.push({ field_key: fieldKey, fieldDefinition: { ...CAMPAIGN_MEMBERSHIP_FIELD, source_column: column }, operator: 'is_any_of', value: ids, source_column: column, tab: tabKey })
+      continue
+    }
     if (ENTITY_GRAPH_WITHHELD_FIELDS.has(fieldKey)) {
       unsupported.push({ field_key: fieldKey, reason: 'field_withheld_from_entity_graph' })
       continue
@@ -764,7 +817,10 @@ export function applyEntityGraphFieldFilters(query, resolved = []) {
     else if (kind === 'tax_delinquent_any') {
       const flag = flagTokenPatterns('Tax Delinquent').map((p) => `property_flags_text.ilike.${orFilterValue(p)}`)
       next = next.or(['tax_delinquent.is.true', ...flag].join(','))
-    } else if (kind === 'recorded_lien') next = next.overlaps('rec_lien_categories', [...LIEN_CATEGORIES])
+    } else if (kind === 'campaign_membership') next = applyCampaignMembership(next, entry, { tab: entry.tab || 'properties', applyDefinition: applyCampaignDefinition })
+    else if (kind === 'organization_class') next = applyOrganizationClass(next, entry)
+    else if (kind === 'organization_has_owner') next = entry.operator === 'is_false' ? next.is('master_owner_id', null) : next.not('master_owner_id', 'is', null)
+    else if (kind === 'recorded_lien') next = next.overlaps('rec_lien_categories', [...LIEN_CATEGORIES])
     else if (kind === 'recorded_lien_or_judgment') next = next.overlaps('rec_lien_categories', [...LIEN_CATEGORIES, ...JUDGMENT_CATEGORIES])
   }
   for (const entry of notAnyOf) {
@@ -781,6 +837,34 @@ export function applyEntityGraphFieldFilters(query, resolved = []) {
     if (values.length) next = next.overlaps(entry.source_column, values)
   }
   return next
+}
+
+/** A draft campaign's saved property filters, compiled by the same resolver (fail closed on anything else). */
+function applyCampaignDefinition(query, definition) {
+  if (definition.foreign?.length) {
+    throw new CampaignScopeError('campaign_scope_definition_not_property', `This draft also filters ${[...new Set(definition.foreign.map((f) => f.domain))].join(', ')} — those clauses cannot run on the property list; build the campaign to see its exact audience.`)
+  }
+  const { resolved, unsupported } = resolveEntityGraphFieldFilters('properties', definition.clauses)
+  if (unsupported.length) throw new EntityGraphUnsupportedFilterError(unsupported.map((u) => ({ ...u, reason: `campaign_definition_${u.reason}` })))
+  return applyEntityGraphFieldFilters(query, resolved)
+}
+
+/** organizations.entity_class: classification order — a class excludes every class before it. */
+export function applyOrganizationClass(query, entry) {
+  const wanted = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(Boolean)
+  const classes = ORGANIZATION_CLASS_PATTERNS
+  const branch = (key) => {
+    // a nameless entity is Other too (the grid's classifier reads an empty name as Other/Unknown)
+    if (key === 'Other') return `or(owner_name.is.null,and(${classes.flatMap((c) => c.patterns.map((p) => `owner_name.not.ilike.${orFilterValue(p)}`)).join(',')}))`
+    const i = classes.findIndex((c) => c.key === key)
+    if (i < 0) return null
+    const before = classes.slice(0, i).flatMap((c) => c.patterns.map((p) => `owner_name.not.ilike.${orFilterValue(p)}`))
+    const mine = `or(${classes[i].patterns.map((p) => `owner_name.ilike.${orFilterValue(p)}`).join(',')})`
+    return before.length ? `and(${[...before, mine].join(',')})` : mine
+  }
+  const parts = wanted.map(branch).filter(Boolean)
+  if (!parts.length) return query.in('sub_owner_id', ['__no_entity_class__'])
+  return query.or(parts.join(','))
 }
 
 function rangeOf(entry) {

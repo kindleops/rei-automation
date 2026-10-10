@@ -407,7 +407,8 @@ test('every dashboard property column sorts / filters on a column the facts rela
   const hand = [...map.matchAll(/sortBy: '([a-z0-9_]+)'(?:, filterColumn: '([a-z0-9_]+)')?/g)].flatMap((m) => [m[1], m[2]]).filter(Boolean)
   assert.ok(hand.length >= 25, `parsed ${hand.length} hand-built column keys`)
   const extras = ts.slice(ts.indexOf('const EXTRA_PROPERTY_COLUMNS: Extra[] = ['), ts.indexOf('// recorded_mortgage_balance is excluded'))
-  const extraCols = [...extras.matchAll(/\{ key: '([a-z0-9_.]+)'[^}]*?(vendorEquity: true)?[^}]*\}/g)].map((m) => {
+  // noSort: true = a page read (the scoped campaign's outcome camp.*, the probate audit probate.*) — no whole-cohort sort offered
+  const extraCols = [...extras.matchAll(/\{ key: '([a-z0-9_.]+)'[^}]*?(vendorEquity: true)?[^}]*\}/g)].filter((m) => !/noSort: true/.test(m[0])).map((m) => {
     const key = m[1]
     if (m[2]) return key === 'equity_amount' ? 'equity_known_amount' : 'equity_known_pct'
     return key.startsWith('fact.') ? key.slice(5) : key.replace('.', '_')

@@ -36,6 +36,8 @@ import {
   applyEntityGraphFieldFilters,
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
+import { isCampaignMembership, primeCampaignScope } from './entity-graph-campaign-scope.js'
+import { factsCohortIds } from './entity-graph-facts-query.js'
 import { applyOwnerFilters, applyPropertyFilters, applyProspectFilters, parseBrowseFilters } from './entity-graph-service.js'
 import { isTestPropertyId } from './entity-graph-truth.js'
 import { propertySmsEligibility } from './entity-graph-outreach-state.js'
@@ -143,6 +145,7 @@ export async function resolveStackPropertyIds(input = {}, deps = {}) {
   }
   const filters = parseBrowseFilters(input)
   const tab = scope
+  await primeCampaignScope(input, deps.campaignScopeDeps || {})
   const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow(tab, input)
 
   if (mode === 'selection') {
@@ -167,6 +170,13 @@ export async function resolveStackPropertyIds(input = {}, deps = {}) {
   const NARROWING = { properties: ['market', 'city', 'state', 'zip', 'assetType', 'unitsMin', 'unitsMax', 'county'], master_owners: ['ownerType', 'priorityTier', 'market', 'coverageMin'], people: ['language', 'reachable'] }
   if (!fieldFilters.length && !NARROWING[scope].some((k) => filters[k] !== '' && filters[k] !== null && filters[k] !== false && filters[k] !== undefined)) {
     throw new StackRefusal(422, 'cohort_has_no_filters', 'No filters are active, so this would add the entire universe. Narrow the cohort first.')
+  }
+  if (fieldFilters.some(isCampaignMembership)) {
+    // a campaign-scoped cohort: its ids come off the direct-PG facts path (thousands of ids are not a PostgREST URL)
+    if (scope !== 'properties') throw new StackRefusal(422, 'campaign_scope_stack_properties_only', 'A campaign-scoped cohort is added from the Properties tab.')
+    const cohort = await (deps.factsCohortIds || factsCohortIds)({ applyFilters: (b) => applyEntityGraphFieldFilters(applyPropertyFilters(b, filters), fieldFilters), cap: STACK_MAX_PROPERTIES, deps: deps.factsDeps || {} })
+    if (cohort.truncated) throw new StackRefusal(422, 'cohort_too_large', `More than ${STACK_MAX_PROPERTIES.toLocaleString('en-US')} properties match — narrow the cohort first.`)
+    return { propertyIds: cohort.ids, requested: cohort.ids.length, notes }
   }
   if (scope === 'properties') {
     const rows = await keysetIds({

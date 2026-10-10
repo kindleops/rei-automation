@@ -45,33 +45,52 @@ import { createHash } from 'node:crypto'
 import { hasDatabaseUrl, queryWithTimeout } from '@/lib/postgres/client.js'
 import { createSqlRecorder, FacetUntranslatable } from './entity-graph-facet-sql.js'
 import { applyEntityGraphFieldFilters, resolveEntityGraphFieldFilters, resolveEntityGraphFieldFiltersOrThrow } from './entity-graph-field-filters.js'
-import { applyPropertyFilters, parseBrowseFilters } from './entity-graph-service.js'
+import { applyBuyerFilters, applyOwnerFilters, applyPhoneFilters, applyPropertyFilters, applyProspectFilters, parseBrowseFilters } from './entity-graph-service.js'
 import { propertySmsEligibility } from './entity-graph-outreach-state.js'
+import { primeCampaignScope } from './entity-graph-campaign-scope.js'
 import {
   CATEGORICAL_TOP,
   OVERVIEW_COMPANY_FIELDS,
-  OVERVIEW_PINNED,
-  OVERVIEW_SECTIONS,
   OVERVIEW_TAB,
+  bandsFromEdges,
+  formatEdge,
+  moneyRangeFloor,
   numericBinsFor,
+  overviewPinnedFor,
   overviewRegistry,
+  overviewSectionsFor,
 } from './entity-graph-overview-catalog.js'
 
 const VIEW = 'v_entity_graph_properties'
 const FACTS = 'eg_property_facts'
 const SNAPSHOT = 'eg_overview_snapshot'
 const STATEMENT_MS = 8_000
-const UNIVERSE_STATEMENT_MS = 30_000
 const CACHE_TTL_MS = 5 * 60_000
 const UNIVERSE_TTL_MS = 10 * 60_000
 const CACHE_MAX = 300
 const SCHEMA_TTL_MS = 10 * 60_000
 const ENGAGEMENT_TTL_MS = 5 * 60_000
 const LIVE_SMS_MAX = 10_000
-const DISTINCT_MAX_COHORT = 50_000
 const GROUP_SETS_PER_STATEMENT = 40
 const GHOST_MAX = 5
 const CONCURRENCY = 2
+/** Engagement for a cohort is read keyed by its ids (indexed) — above this, only from the facts read model. */
+const ENGAGEMENT_KEYED_MAX = 20_000
+
+/**
+ * The relation, id column and browse appliers of each scope — the list's own
+ * (entity-graph-service.js browse*), so an Overview total is the grid total.
+ * `browseKeys` = the legacy params that scope's appliers actually narrow on.
+ */
+export const OVERVIEW_SCOPE = Object.freeze({
+  properties: { relation: 'v_entity_graph_properties', id: 'property_id', noun: 'properties', base: applyPropertyFilters, browseKeys: ['market', 'city', 'state', 'zip', 'assetType', 'county', 'unitsMin', 'unitsMax'] },
+  master_owners: { relation: 'master_owners', id: 'master_owner_id', noun: 'owners', base: applyOwnerFilters, browseKeys: ['ownerType', 'priorityTier', 'market', 'coverageMin'] },
+  people: { relation: 'prospects', id: 'prospect_id', noun: 'people', base: applyProspectFilters, browseKeys: ['language', 'reachable'] },
+  contact_methods: { relation: 'phones', id: 'phone_id', noun: 'phones', base: applyPhoneFilters, browseKeys: ['contactStatus', 'reachable'] },
+  buyers: { relation: 'eg_buyer_index', id: 'buyer_id', noun: 'buyers', base: applyBuyerFilters, browseKeys: ['state', 'entityType'] },
+  organizations: { relation: 'sub_owners', id: 'sub_owner_id', noun: 'companies', base: (b) => b, browseKeys: [] },
+})
+const scopeOf = (tab) => OVERVIEW_SCOPE[String(tab || OVERVIEW_TAB).toLowerCase()] || null
 
 const clean = (v) => String(v ?? '').trim()
 // computed-fact filters compile here; the relation choice then requires the facts read model for them
@@ -82,11 +101,9 @@ const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v)
 
 const cache = new Map()
 let schemaMemo = null
-let engagementMemo = null
-let engagementLoading = null
 
 export const __overviewTest = {
-  reset() { cache.clear(); schemaMemo = null; engagementMemo = null; engagementLoading = null },
+  reset() { cache.clear(); schemaMemo = null; engagementCache.clear(); edgeMemo.clear() },
 }
 
 function cacheGet(key, now) {
@@ -145,15 +162,15 @@ export function columnsIn(sql) {
 }
 
 /** A click filter (the rail's AST entry) → its resolved entry, or null when the catalog would refuse it. */
-function resolveFilter(filter) {
+function resolveFilter(filter, tab = OVERVIEW_TAB) {
   if (!filter) return null
-  const { resolved, unsupported } = resolveEntityGraphFieldFilters(OVERVIEW_TAB, [filter], FACTS_OK)
+  const { resolved, unsupported } = resolveEntityGraphFieldFilters(tab, [filter], tab === OVERVIEW_TAB ? FACTS_OK : {})
   return unsupported.length || !resolved.length ? null : resolved[0]
 }
 
 /** The click filter, compiled exactly as the list compiles it, as one predicate in `P`. */
-function predicateFor(filter, P) {
-  const entry = resolveFilter(filter)
+function predicateFor(filter, P, tab = OVERVIEW_TAB) {
+  const entry = resolveFilter(filter, tab)
   if (!entry) return null
   const { clauses, params } = record((b) => applyEntityGraphFieldFilters(b, [entry]))
   if (!clauses.length) return null
@@ -161,30 +178,40 @@ function predicateFor(filter, P) {
 }
 
 /** The columns a field reads: its own, or — for a derived field — the ones its filter compiles to. */
-function fieldColumns(field) {
+function fieldColumns(field, tab = OVERVIEW_TAB) {
   if (!field.derived) return new Set([field.column])
   const sample = field.kind === 'derived_boolean'
     ? { field_key: field.key, operator: 'is_true', value: null }
-    : { field_key: field.key, operator: 'gte', value: 0 }
-  const pred = predicateFor(sample, paramList())
+    : field.kind === 'derived_categorical'
+      ? { field_key: field.key, operator: 'is_any_of', value: [field.derivedValues?.[0]] }
+      : { field_key: field.key, operator: 'gte', value: 0 }
+  const pred = predicateFor(sample, paramList(), tab)
   return pred ? columnsIn(pred) : new Set([field.column])
 }
 
 /* ── the cohort ───────────────────────────────────────────────────────────── */
 
 /** The list's WHERE for these params, as clauses + params (never re-implemented). */
-export function compileCohort(params = {}, { exceptFieldKey = null } = {}) {
+export function compileCohort(params = {}, { exceptFieldKey = null, tab = clean(params.tab || OVERVIEW_TAB).toLowerCase() } = {}) {
+  const scope = scopeOf(tab)
+  if (!scope) throw new FacetUntranslatable(`overview tab ${tab}`)
   const filters = parseBrowseFilters(params)
-  const { resolved } = resolveEntityGraphFieldFiltersOrThrow(OVERVIEW_TAB, params, FACTS_OK)
+  const { resolved } = resolveEntityGraphFieldFiltersOrThrow(tab, params, tab === OVERVIEW_TAB ? FACTS_OK : {})
   const fieldFilters = exceptFieldKey ? resolved.filter((r) => r.field_key !== exceptFieldKey) : resolved
-  const { clauses, params: values } = record((b) => applyEntityGraphFieldFilters(applyPropertyFilters(b, filters), fieldFilters))
-  return { clauses, params: values, filters, fieldFilters: resolved, includeTest: Boolean(filters.includeTest) }
+  const { clauses, params: values } = record((b) => applyEntityGraphFieldFilters(scope.base(b, filters), fieldFilters))
+  // fieldFilters: every requested chip (the ghost bars' "active" set); applied: the ones this WHERE carries
+  return { clauses, params: values, filters, fieldFilters: resolved, applied: fieldFilters, includeTest: Boolean(filters.includeTest), tab }
 }
 
-function isUnfiltered(cohort, params) {
+/** No narrowing at all: the whole scope (only ever read from the snapshot / facts read model, never scanned live). */
+export function isUnfiltered(cohort, params = {}) {
   const f = cohort.filters
-  const browseFilterSet = ['market', 'city', 'state', 'zip', 'assetType', 'county'].some((k) => clean(f[k])) || f.unitsMin !== null || f.unitsMax !== null
-  return !browseFilterSet && !cohort.fieldFilters.length && !cohort.includeTest && !clean(params.q)
+  const keys = scopeOf(cohort.tab)?.browseKeys || []
+  const set = keys.some((k) => {
+    const v = f[k]
+    return v !== null && v !== undefined && v !== '' && v !== false
+  })
+  return !set && !(cohort.applied ?? cohort.fieldFilters).length && !cohort.includeTest && !clean(params.q)
 }
 
 /* ── schema (which relations exist, with which columns) ──────────────────── */
@@ -194,7 +221,7 @@ async function loadSchema(query, now) {
   const { rows } = await query(
     `select table_name, column_name, data_type from information_schema.columns
       where table_schema = 'public' and table_name = any($1::text[])`,
-    [[VIEW, FACTS, SNAPSHOT, 'eg_refresh_log']],
+    [[VIEW, FACTS, SNAPSHOT, 'eg_refresh_log', ...Object.values(OVERVIEW_SCOPE).map((x) => x.relation)]],
     STATEMENT_MS,
   )
   const value = {}
@@ -206,9 +233,13 @@ async function loadSchema(query, now) {
   return value
 }
 
-/** Pick the relation: the facts read model when it covers `needed`, else the view. */
-export function chooseRelation(schema, needed, { includeTest = false } = {}) {
+/** Pick the relation: the facts read model when it covers `needed`, else the view (other scopes: their base table). */
+export function chooseRelation(schema, needed, { includeTest = false, tab = OVERVIEW_TAB } = {}) {
   const covers = (rel) => schema[rel] && [...needed].every((c) => schema[rel].has(c))
+  if (tab !== OVERVIEW_TAB) {
+    const rel = scopeOf(tab)?.relation
+    return rel && covers(rel) ? { relation: rel, mode: 'base' } : null
+  }
   if (!includeTest && covers(FACTS)) return { relation: FACTS, mode: 'facts' }
   if (covers(VIEW)) return { relation: VIEW, mode: 'view' }
   return null
@@ -239,6 +270,13 @@ const bandFilter = (key, band) => (band.lo !== null && band.hi !== null
 
 const isoDay = (d) => d.toISOString().slice(0, 10)
 
+/** The "has a value" filter of a derived number (its own predicate with no bound). */
+function knownFilterFor(field) {
+  // an age is 0–150 years: an unbounded month-of-birth range would be an invalid date
+  if (field.derived === 'age_from_mob' || field.key === 'prospects.age_years') return { field_key: field.key, operator: 'between', value: [0, 150] }
+  return { field_key: field.key, operator: 'gte', value: -1e15 }
+}
+
 /**
  * The plan for one field: aggregate slots (FILTER counts, coverage, stats),
  * grouping sets, or a token statement. `pg` is the column's type on the relation.
@@ -252,7 +290,7 @@ function planField(field, pg, P, ctx) {
   let tokens = null
   const add = (slot, sql) => agg.push({ slot, sql })
   const filtered = (slot, filter) => {
-    const pred = predicateFor(filter, P)
+    const pred = predicateFor(filter, P, ctx.tab)
     if (pred) add(slot, `count(*) filter (where ${pred})`)
     return Boolean(pred)
   }
@@ -281,8 +319,8 @@ function planField(field, pg, P, ctx) {
       add('min', `min(${q(col)})::float8`)
       add('max', `max(${q(col)})::float8`)
     } else {
-      // derived (known equity): "known" is the derived filter with no bound
-      filtered('known', { field_key: key, operator: 'gte', value: -1e15 })
+      // derived (known equity, age from month of birth): "known" is the derived filter with no bound
+      filtered('known', knownFilterFor(field))
     }
   } else if (field.kind === 'date') {
     add('known', `count(${q(col)})`)
@@ -295,8 +333,10 @@ function planField(field, pg, P, ctx) {
     }).filter((w) => filtered(`w:${w.key}`, w.filter))
     const ex = dateGroupExprs(col, pg)
     groups.push({ id: `${key}|year`, expr: ex.year }, { id: `${key}|month`, expr: ex.month })
-  } else if (field.kind === 'categorical') {
+  } else if (field.kind === 'categorical' || field.kind === 'banded_text') {
     groups.push({ id: `${key}|value`, expr: `${q(col)}::text` })
+  } else if (field.kind === 'derived_categorical') {
+    plan.values = (field.derivedValues || []).filter((v, i) => filtered(`v:${i}`, { field_key: key, operator: 'is_any_of', value: [v] }))
   } else if (field.kind === 'tokens' || field.kind === 'array') {
     const isArray = field.kind === 'array' || /\[\]|ARRAY/.test(pg || '')
     add('known', isArray ? `count(*) filter (where cardinality(${q(col)}) > 0)` : `count(nullif(btrim(${q(col)}::text), ''))`)
@@ -404,7 +444,17 @@ async function runCohortStatement(ctx, plans, extraAgg = null) {
     }
   }
   const extras = extraAgg ? extraAgg(P) : []
-  for (const e of extras) { aggExprs.push(`${e.sql} as "${e.alias}"`); fragments.push(e.sql) }
+  // the headline's grouped extras (distress × market) are subqueries over the SAME materialised cohort
+  const extraSubs = extras.filter((e) => e.subquery)
+  for (const e of extras.filter((x) => !x.subquery)) { aggExprs.push(`${e.sql} as "${e.alias}"`); fragments.push(e.sql) }
+  for (const e of extraSubs) fragments.push(e.sql)
+  // distinct counts of coverage-only fields ride on the same scan (never a second read of the relation)
+  const distinctPlans = plans.filter((p) => p.field.kind === 'coverage')
+  distinctPlans.forEach((p, i) => {
+    const sql = `count(distinct nullif(btrim(${q(p.field.column)}::text), ''))`
+    aggExprs.push(`${sql} as "d${i}"`)
+    fragments.push(sql)
+  })
   const sets = plans.flatMap((plan) => plan.fresh.groups)
   for (const g of sets) fragments.push(g.expr)
   const from = 'c'
@@ -412,13 +462,14 @@ async function runCohortStatement(ctx, plans, extraAgg = null) {
   const tokenParts = tokenPlans.map((p) => { p.fresh.tokens = p.tokens || p.fresh.tokens; const sql = tokenSql(p.fresh, P, from); fragments.push(sql); return { plan: p, sql } })
   const relCols = ctx.schema[ctx.relation]
   const cols = [...new Set([...fragments.flatMap((f) => [...columnsIn(f)])])].filter((c) => relCols.has(c))
-  const select = cols.length ? cols.map(q).join(', ') : q('property_id')
+  const select = cols.length ? cols.map(q).join(', ') : q(scopeOf(ctx.tab)?.id || 'property_id')
   const groupBatches = []
   for (let i = 0; i < sets.length; i += GROUP_SETS_PER_STATEMENT) groupBatches.push(sets.slice(i, i + GROUP_SETS_PER_STATEMENT))
   const sql = `with c as materialized (select ${select} from public.${q(ctx.relation)} where ${where})
     select (select row_to_json(a) from (select count(*)::bigint as "t"${aggExprs.length ? `, ${aggExprs.join(', ')}` : ''} from c) a) as agg
     ${groupBatches.map((batch, i) => `, (select coalesce(json_agg(gw), '[]'::json) from (${groupsSql(batch, from)}) gw) as "g${i}"`).join('\n')}
-    ${tokenParts.map((t, i) => `, (select coalesce(json_agg(tk), '[]'::json) from (${t.sql}) tk) as "k${i}"`).join('\n')}`
+    ${tokenParts.map((t, i) => `, (select coalesce(json_agg(tk), '[]'::json) from (${t.sql}) tk) as "k${i}"`).join('\n')}
+    ${extraSubs.map((e) => `, (select coalesce(json_agg(xs), '[]'::json) from (${e.sql}) xs) as "${e.alias}"`).join('\n')}`
   const [row] = await run(ctx, sql, P.list, plans.length ? `cohort(${plans.length} fields)` : 'cohort(headline)')
   const agg = row?.agg || {}
   const total = num(agg.t) ?? 0
@@ -438,16 +489,10 @@ async function runCohortStatement(ctx, plans, extraAgg = null) {
   })
   const tokens = new Map()
   tokenParts.forEach((t, i) => tokens.set(t.plan, (row?.[`k${i}`] || []).map((r) => ({ key: String(r.k), label: clean(r.label ?? r.k), count: Number(r.n) }))))
-  return { total, values, groups, tokens, extras: agg }
-}
-
-/** Exact distinct counts for coverage fields — only where cheap (cohort ≤ 50,000). */
-async function runDistinct(ctx, plans) {
-  const P = paramList()
-  const where = whereSql(ctx, P)
-  const exprs = plans.map((p, i) => `count(distinct nullif(btrim(${q(p.field.column)}::text), '')) as "d${i}"`)
-  const [row] = await run(ctx, `select ${exprs.join(', ')} from public.${q(ctx.relation)} ${where}`, P.list, 'distinct')
-  return new Map(plans.map((p, i) => [p, num(row?.[`d${i}`])]))
+  const distinct = new Map(distinctPlans.map((p, i) => [p, num(agg[`d${i}`])]))
+  const extrasOut = { ...agg }
+  for (const e of extraSubs) extrasOut[e.alias] = row?.[e.alias] || []
+  return { total, values, groups, tokens, distinct, extras: extrasOut }
 }
 
 /** Universe p02 / p98 for numeric columns without catalog edges (the read model only), cached an hour. */
@@ -502,6 +547,47 @@ function categoricalBuckets(field, group, total) {
   return { buckets, known, distinct: group ? group.distinct - (blankKey ? 1 : 0) : 0, truncated }
 }
 
+/**
+ * Money-range text ("$35,000-$39,999") folded into ordered currency bands by
+ * each stored value's lower bound. A band's chip is `is_any_of` its exact
+ * stored values, so its cohort is exactly the bar. Values without a readable
+ * bound are "Other values" (shown, not a chip); blanks are "Not recorded".
+ */
+export function bandedTextBuckets(field, group, total) {
+  const values = group?.values || []
+  const edges = field.bandEdges || [25000, 50000, 100000, 250000]
+  const bands = bandsFromEdges(edges, { format: field.format || 'money', under: edges[0] > 0, over: true })
+    .map((b) => ({ ...b, count: 0, values: [], clickable: true }))
+  let unread = 0
+  let none = 0
+  for (const v of values) {
+    if (v.key === null || v.key.trim() === '') { none += v.count; continue }
+    const floor = moneyRangeFloor(v.key)
+    const band = floor === null ? null : bands.find((b) => (b.lo === null || floor >= b.lo) && (b.hi === null || floor <= b.hi))
+    if (!band) { unread += v.count; continue }
+    band.count += v.count
+    band.values.push(v.key)
+    if (v.key !== v.key.trim()) band.clickable = false
+  }
+  const canAny = field.operators.includes('is_any_of')
+  const truncated = group && group.distinct > 501
+  const buckets = bands.map((b) => ({
+    key: b.key,
+    label: b.label,
+    count: b.count,
+    filter: canAny && b.values.length && b.clickable && !truncated ? { field_key: field.key, operator: 'is_any_of', value: [...b.values].sort() } : null,
+    tone: 'value',
+    lo: b.lo,
+    hi: b.hi,
+  }))
+  while (buckets.length && buckets[0].count === 0) buckets.shift()
+  while (buckets.length && buckets[buckets.length - 1].count === 0) buckets.pop()
+  if (unread > 0) buckets.push({ key: '__other', label: 'Other values', count: unread, filter: null, tone: 'other' })
+  const missing = Math.max(0, total - values.reduce((acc, v) => acc + v.count, 0)) + none
+  if (missing > 0) buckets.push({ key: '__none', label: 'Not recorded', count: missing, filter: field.operators.includes('is_empty') ? { field_key: field.key, operator: 'is_empty', value: null } : null, tone: 'none' })
+  return { buckets, known: total - missing, distinct: values.filter((v) => v.key !== null && v.key.trim()).length }
+}
+
 function dateBuckets(field, years, months, total, known) {
   const yv = (years?.values || []).filter((v) => v.key)
   const keys = yv.map((v) => Number(v.key)).filter(Number.isFinite)
@@ -553,6 +639,7 @@ function shapeField(plan, { total, values, groups, tokens = new Map(), distinct 
   const base = {
     key: field.key, label: field.label, kind: field.kind, format: field.format, section: field.section, column: field.column,
     privacy: field.privacy, computedFact: field.computedFact, emptySource: field.emptySource, pinned: field.pinned,
+    ...(field.sensitive ? { sensitive: true } : {}),
     ...(field.caution ? { caution: field.caution } : {}),
   }
   const coverage = (known) => ({ known, total, share: pct(known, total) })
@@ -601,6 +688,14 @@ function shapeField(plan, { total, values, groups, tokens = new Map(), distinct 
     const { buckets, grain } = dateBuckets({ ...field, pg: plan.pg }, groups.get(`${field.key}|year`), groups.get(`${field.key}|month`), total, known)
     const windows = (plan.fresh.windows || []).map((w) => ({ key: w.key, label: w.label, count: num(v[`w:${w.key}`]) ?? 0, filter: w.filter }))
     return { ...base, coverage: coverage(known), buckets, grain, windows, stats: known ? { min: v.min ? String(v.min).slice(0, 10) : null, max: v.max ? String(v.max).slice(0, 10) : null } : null }
+  }
+  if (field.kind === 'banded_text') {
+    const { buckets, known, distinct: d } = bandedTextBuckets(field, groups.get(`${field.key}|value`), total)
+    return { ...base, coverage: coverage(known), buckets, distinct: d, note: 'Bands of the stored ranges (by each range’s lower bound); a bar filters the exact stored values in it.' }
+  }
+  if (field.kind === 'derived_categorical') {
+    const buckets = (plan.fresh.values || []).map((value, i) => ({ key: value, label: value, count: num(v[`v:${i}`]) ?? 0, filter: { field_key: field.key, operator: 'is_any_of', value: [value] }, tone: value === 'Other' ? 'other' : 'value' }))
+    return { ...base, coverage: coverage(total), buckets }
   }
   if (field.kind === 'categorical') {
     const { buckets, known, distinct: d, truncated } = categoricalBuckets(field, groups.get(`${field.key}|value`), total)
@@ -651,14 +746,18 @@ async function computeFields(ctx, fields, extraAgg = null) {
   const probe = paramList()
   for (const plan of plans) Object.assign(plan, planField(plan.field, plan.pg, probe, ctx))
   if (plans.some((p) => p.needsEdges) && ctx.mode === 'facts') ctx.edgeHints = { ...(ctx.edgeHints || {}), ...(await loadEdgeHints(ctx, plans)) }
-  const { total, values, groups, tokens, extras } = await runCohortStatement(ctx, plans, extraAgg)
-  const coveragePlans = plans.filter((p) => p.field.kind === 'coverage')
-  const distinct = coveragePlans.length && total <= DISTINCT_MAX_COHORT ? await runDistinct(ctx, coveragePlans).catch(() => new Map()) : new Map()
+  const { total, values, groups, tokens, distinct, extras } = await runCohortStatement(ctx, plans, extraAgg)
   return { total, extras, fields: plans.map((plan) => shapeField(plan, { total, values, groups, tokens, distinct: distinct.get(plan) })) }
 }
 
 /* ── engagement (per-property facts that are not property columns) ───────── */
 
+/**
+ * Engagement for a cohort, KEYED by its property ids (inbox_thread_state,
+ * campaign_target_graph and acquisition_opportunities are all indexed on the
+ * property) — never a scan of the graph. The cohort's ids come off the
+ * section's own materialised cohort (no extra read of the relation).
+ */
 export const ENGAGEMENT_SQL = Object.freeze({
   threads: `select property_id,
                    bool_or(coalesce(outbound_count, 0) > 0 or last_outbound_at is not null) as contacted,
@@ -666,15 +765,15 @@ export const ENGAGEMENT_SQL = Object.freeze({
                    bool_or(lead_temperature in ('warm', 'hot')) as positive,
                    (array_agg(inbox_bucket order by latest_message_at desc nulls last, thread_key))[1] as inbox_bucket
               from public.inbox_thread_state
-             where nullif(btrim(property_id), '') is not null
+             where property_id = any($1::text[])
              group by property_id`,
   graph: `select property_id, bool_or(last_outbound_at is not null) as contacted, bool_or(last_inbound_at is not null) as replied
             from public.campaign_target_graph
-           where last_outbound_at is not null or last_inbound_at is not null
+           where property_id = any($1::text[]) and (last_outbound_at is not null or last_inbound_at is not null)
            group by property_id`,
   deals: `select distinct on (primary_property_id) primary_property_id as property_id, acquisition_stage, opportunity_status
             from public.acquisition_opportunities
-           where nullif(btrim(primary_property_id), '') is not null
+           where primary_property_id = any($1::text[])
            order by primary_property_id, updated_at desc nulls last, id`,
 })
 
@@ -686,25 +785,27 @@ export const ENGAGEMENT_DEFINITIONS = Object.freeze({
   pipeline: 'The property’s most recently updated deal (acquisition_opportunities.acquisition_stage). "Closed" is closed-lost.',
 })
 
-async function loadEngagement(query, now) {
-  if (engagementMemo && now - engagementMemo.at < ENGAGEMENT_TTL_MS) return engagementMemo
-  if (engagementLoading) return engagementMemo || engagementLoading
-  engagementLoading = (async () => {
+const engagementCache = new Map()
+async function engagementForIds(query, ids, now) {
+  const key = createHash('sha1').update(ids.join(',')).digest('hex')
+  const hit = engagementCache.get(key)
+  if (hit && now - hit.at < ENGAGEMENT_TTL_MS) return hit
+  const out = { at: Date.now(), map: new Map() }
+  if (ids.length) {
     const [threads, graph, deals] = await Promise.all([
-      query(ENGAGEMENT_SQL.threads, [], 20_000),
-      query(ENGAGEMENT_SQL.graph, [], 20_000),
-      query(ENGAGEMENT_SQL.deals, [], 20_000),
+      query(ENGAGEMENT_SQL.threads, [ids], STATEMENT_MS),
+      query(ENGAGEMENT_SQL.graph, [ids], STATEMENT_MS),
+      query(ENGAGEMENT_SQL.deals, [ids], STATEMENT_MS),
     ])
-    const map = new Map()
-    const get = (id) => { const k = clean(id); if (!map.has(k)) map.set(k, { contacted: false, replied: false, positive: false, inbox: undefined, stage: null, status: null }); return map.get(k) }
+    const get = (id) => { const k = clean(id); if (!out.map.has(k)) out.map.set(k, { contacted: false, replied: false, positive: false, inbox: undefined, stage: null, status: null }); return out.map.get(k) }
     for (const r of threads.rows || []) { const e = get(r.property_id); e.contacted ||= Boolean(r.contacted); e.replied ||= Boolean(r.replied); e.positive ||= Boolean(r.positive); e.inbox = r.inbox_bucket ?? null }
     for (const r of graph.rows || []) { const e = get(r.property_id); e.contacted ||= Boolean(r.contacted); e.replied ||= Boolean(r.replied) }
     for (const r of deals.rows || []) { const e = get(r.property_id); e.stage = clean(r.acquisition_stage) || null; e.status = clean(r.opportunity_status) || null }
-    map.delete('')
-    engagementMemo = { at: Date.now(), map, ids: [...map.keys()] }
-    return engagementMemo
-  })().finally(() => { engagementLoading = null })
-  return engagementMemo || engagementLoading
+    out.map.delete('')
+  }
+  if (engagementCache.size >= 50) engagementCache.delete(engagementCache.keys().next().value)
+  engagementCache.set(key, out)
+  return out
 }
 
 const STAGE_LABEL = Object.freeze({
@@ -717,15 +818,13 @@ const BUCKET_LABEL = Object.freeze({
   cold: 'Cold', dead: 'Dead', suppressed: 'Suppressed',
 })
 
-async function engagementFor(ctx) {
-  const e = await loadEngagement(ctx.query, ctx.now)
-  const P = paramList()
-  const where = P.embed(ctx.cohort.clauses, ctx.cohort.params)
-  const ids = P.bind(e.ids)
-  const rows = await run(ctx, `select property_id from public.${q(ctx.relation)} where ${where} and property_id = any(${ids}::text[])`, P.list, 'engagement')
+/** The cohort's engagement tally from its ids (≤ 20,000 — above that the read model answers). */
+async function engagementFor(ctx, ids) {
+  if (!ids) throw new Error(`Engagement is counted for cohorts up to ${ENGAGEMENT_KEYED_MAX.toLocaleString('en-US')} properties (larger cohorts: the property facts read model / snapshot)`)
+  const e = await engagementForIds(ctx.query, ids, ctx.now)
   const tally = { contacted: 0, replied: 0, positive: 0, inbox: new Map(), stage: new Map(), threads: 0 }
-  for (const r of rows) {
-    const x = e.map.get(clean(r.property_id))
+  for (const id of ids) {
+    const x = e.map.get(clean(id))
     if (!x) continue
     if (x.contacted) tally.contacted += 1
     if (x.replied) tally.replied += 1
@@ -737,12 +836,8 @@ async function engagementFor(ctx) {
 }
 
 /** SMS eligibility without the read model: the campaign graph's verdict, per property, for a cohort ≤ 10,000. */
-async function liveSmsEligibility(ctx, total, deps) {
-  if (total > LIVE_SMS_MAX) return { unavailable: `Cohort above ${LIVE_SMS_MAX.toLocaleString('en-US')} — needs the property facts read model (eg_property_facts).` }
-  const P = paramList()
-  const where = whereSql(ctx, P)
-  const idRows = await run(ctx, `select property_id from public.${q(ctx.relation)} ${where}`, P.list, 'sms-ids')
-  const ids = idRows.map((r) => clean(r.property_id)).filter(Boolean)
+async function liveSmsEligibility(ctx, ids, deps) {
+  if (!ids || ids.length > LIVE_SMS_MAX) return { unavailable: `Cohort above ${LIVE_SMS_MAX.toLocaleString('en-US')} — needs the property facts read model (eg_property_facts).` }
   if (!ids.length) return { eligible: 0, reasons: new Map() }
   const graph = await run(ctx, `select property_id, queue_eligible, queue_block_reason, seller_person_key, prospect_id, canonical_prospect_id,
                                        canonical_e164, phone_id, timezone, identity_alignment
@@ -771,7 +866,7 @@ async function liveSmsEligibility(ctx, total, deps) {
 
 /* ── headline (KPIs) ──────────────────────────────────────────────────────── */
 
-const DISTRESS_SIGNALS = Object.freeze([
+export const DISTRESS_SIGNALS = Object.freeze([
   { key: 'tax', label: 'Tax delinquent', filter: { field_key: 'properties.tax_delinquent_any', operator: 'is_true', value: null } },
   { key: 'lien', label: 'Recorded lien', filter: { field_key: 'records.has_lien', operator: 'is_true', value: null } },
   { key: 'judgment', label: 'Judgment', filter: { field_key: 'records.has_judgment', operator: 'is_true', value: null } },
@@ -782,77 +877,173 @@ const DISTRESS_SIGNALS = Object.freeze([
   { key: 'foreclosure', label: 'Foreclosure filing', filter: { field_key: 'records.foreclosure_count', operator: 'gte', value: 1 } },
   { key: 'vacant', label: 'Vacant', filter: { field_key: 'properties.flags', operator: 'is_all_of', value: ['Vacant Home'] } },
 ])
+/** "Distress signals by market": the cohort's largest markets × each signal. */
+const MARKET_MATRIX_TOP = 12
+/** Signal stack: how many of the signals above each property carries (0 · 1 · 2 · 3 · 4+). */
+export const STACK_BUCKETS = Object.freeze([
+  { key: 's0', label: 'None', test: '= 0' },
+  { key: 's1', label: '1 signal', test: '= 1' },
+  { key: 's2', label: '2 signals', test: '= 2' },
+  { key: 's3', label: '3 signals', test: '= 3' },
+  { key: 's4', label: '4+ signals', test: '>= 4' },
+])
+
+/** The other scopes' headline counts: each is a chip of that scope (so a metric is clickable). */
+export const SCOPE_METRICS = Object.freeze({
+  master_owners: [
+    { key: 'multi', label: '3+ properties', filter: { field_key: 'master_owners.property_count', operator: 'gte', value: 3 } },
+    { key: 'tax', label: 'Tax-delinquent holdings', filter: { field_key: 'master_owners.tax_delinquent_count', operator: 'gte', value: 1 } },
+    { key: 'lien', label: 'Active liens', filter: { field_key: 'master_owners.active_lien_count', operator: 'gte', value: 1 } },
+    { key: 'equity', label: '$250K+ portfolio equity', filter: { field_key: 'master_owners.portfolio_total_equity', operator: 'gte', value: 250000 } },
+    { key: 'reach', label: 'Contactability 50+', filter: { field_key: 'master_owners.contactability_score', operator: 'gte', value: 50 } },
+  ],
+  people: [
+    { key: 'sms', label: 'SMS eligible', filter: { field_key: 'prospects.sms_eligible', operator: 'is_true', value: null } },
+    { key: 'age_known', label: 'Age on file', filter: { field_key: 'prospects.age_years', operator: 'between', value: [0, 150] }, sensitive: true },
+    { key: 'age_65', label: '65 or older', filter: { field_key: 'prospects.age_years', operator: 'gte', value: 65 }, sensitive: true },
+    { key: 'income', label: 'Income on file', filter: { field_key: 'prospects.est_household_income', operator: 'is_not_empty', value: null } },
+    { key: 'nav', label: 'Net asset value on file', filter: { field_key: 'prospects.net_asset_value', operator: 'is_not_empty', value: null } },
+  ],
+  contact_methods: [
+    { key: 'wireless', label: 'Wireless', filter: { field_key: 'phones.phone_type', operator: 'is_any_of', value: ['W'] } },
+    { key: 'active12', label: 'Active 12+ months', filter: { field_key: 'phones.activity_status', operator: 'is_any_of', value: ['Active for 12 months or longer'] } },
+    { key: 'heavy', label: 'Heavy usage (12 mo)', filter: { field_key: 'phones.usage_12_months', operator: 'is_any_of', value: ['Heavy Usage', 'Very Heavy Usage'] } },
+  ],
+  buyers: [
+    { key: 'active', label: 'Active', filter: { field_key: 'buyers.activity_status', operator: 'is_any_of', value: ['active'] } },
+    { key: 'recent', label: 'Bought, last 90 days of sales', filter: { field_key: 'buyers.trailing_90d', operator: 'gte', value: 1 } },
+    { key: 'buybox', label: 'Has a buy box', filter: { field_key: 'buyers.has_buybox', operator: 'is_true', value: null } },
+    { key: 'crossover', label: 'Owns and sells', filter: { field_key: 'buyers.is_crossover', operator: 'is_true', value: null } },
+  ],
+  organizations: [
+    { key: 'llc', label: 'LLC / corporation', filter: { field_key: 'organizations.entity_class', operator: 'is_any_of', value: ['LLC/Corporation'] } },
+    { key: 'trust', label: 'Trust', filter: { field_key: 'organizations.entity_class', operator: 'is_any_of', value: ['Trust'] } },
+    { key: 'estate', label: 'Estate', filter: { field_key: 'organizations.entity_class', operator: 'is_any_of', value: ['Estate'] } },
+    { key: 'linked', label: 'Linked to an owner', filter: { field_key: 'organizations.has_master_owner', operator: 'is_true', value: null } },
+  ],
+})
 
 /** The headline counts as extra aggregates on a cohort statement (no scan of their own). */
 function headlineAgg(ctx) {
   const relCols = ctx.schema[ctx.relation]
   const facts = ctx.mode === 'facts'
-  const meta = { signals: [], sms: false, stack: false }
+  const props = ctx.tab === OVERVIEW_TAB
+  const meta = { signals: [], sms: false, stack: false, metrics: [], ids: false, matrix: false }
+  const compiles = (pred) => pred && [...columnsIn(pred)].every((c) => relCols.has(c))
   const make = (P) => {
     const out = []
     meta.signals = []
+    meta.metrics = []
+    if (!props) {
+      for (const m of SCOPE_METRICS[ctx.tab] || []) {
+        const pred = predicateFor(m.filter, P, ctx.tab)
+        if (!compiles(pred)) continue
+        meta.metrics.push(m)
+        out.push({ alias: `h_m_${m.key}`, sql: `count(*) filter (where ${pred})` })
+      }
+      return out
+    }
+    const preds = []
     for (const s of DISTRESS_SIGNALS) {
-      const pred = predicateFor(s.filter, P)
-      if (!pred || ![...columnsIn(pred)].every((c) => relCols.has(c))) continue
+      const pred = predicateFor(s.filter, P, ctx.tab)
+      if (!compiles(pred)) continue
       meta.signals.push(s)
+      preds.push({ key: s.key, pred })
       out.push({ alias: `h_s_${s.key}`, sql: `count(*) filter (where ${pred})` })
     }
-    const knownPred = predicateFor({ field_key: 'properties.known_equity_percent', operator: 'gte', value: -1e15 }, P)
+    if (preds.length) {
+      // the signal stack: how many of these each property carries, from the same predicates
+      const sum = preds.map((x) => `(coalesce((${x.pred}), false))::int`).join(' + ')
+      for (const b of STACK_BUCKETS) out.push({ alias: `h_st_${b.key}`, sql: `count(*) filter (where (${sum}) ${b.test})` })
+      meta.stack = true
+      if (relCols.has('market')) {
+        meta.matrix = true
+        out.push({
+          alias: 'h_mkt',
+          subquery: true,
+          sql: `select "market" as k, count(*)::bigint as n, ${preds.map((x) => `count(*) filter (where ${x.pred})::bigint as "s_${x.key}"`).join(', ')}
+                  from c group by 1 order by ("market" is null), count(*) desc, "market" limit ${MARKET_MATRIX_TOP}`,
+        })
+      }
+    }
+    const knownPred = predicateFor({ field_key: 'properties.known_equity_percent', operator: 'gte', value: -1e15 }, P, ctx.tab)
     if (knownPred) out.push({ alias: 'h_known_equity', sql: `count(*) filter (where ${knownPred})` })
-    const highPred = predicateFor({ field_key: 'properties.known_equity_percent', operator: 'gte', value: 60 }, P)
+    const highPred = predicateFor({ field_key: 'properties.known_equity_percent', operator: 'gte', value: 60 }, P, ctx.tab)
     if (highPred) out.push({ alias: 'h_high_equity', sql: `count(*) filter (where ${highPred})` })
-    const smsPred = facts ? predicateFor({ field_key: 'facts.sms_eligible', operator: 'is_true', value: null }, P) : null
+    const smsPred = facts ? predicateFor({ field_key: 'facts.sms_eligible', operator: 'is_true', value: null }, P, ctx.tab) : null
     meta.sms = Boolean(smsPred)
     if (smsPred) out.push({ alias: 'h_sms', sql: `count(*) filter (where ${smsPred})` })
-    meta.stack = facts && relCols.has('distress_signal_count')
-    if (meta.stack) {
-      out.push(
-        { alias: 'h_s0', sql: 'count(*) filter (where coalesce("distress_signal_count", 0) = 0)' },
-        { alias: 'h_s1', sql: 'count(*) filter (where "distress_signal_count" = 1)' },
-        { alias: 'h_s2', sql: 'count(*) filter (where "distress_signal_count" = 2)' },
-        { alias: 'h_s3', sql: 'count(*) filter (where "distress_signal_count" >= 3)' },
-      )
-    }
+    // the cohort's ids for the KEYED engagement + live SMS reads (bounded; above it the read model answers)
+    meta.ids = !ctx.allowUniverseScan
+    if (meta.ids) out.push({ alias: 'h_ids', subquery: true, sql: `select "property_id" as id from c limit ${ENGAGEMENT_KEYED_MAX + 1}` })
     return out
   }
   return { make, meta }
 }
 
-async function headline(ctx, deps, agg, extrasRow, engagementPromise) {
+async function universeEngagementIds(ctx) {
+  // the snapshot job only (allowUniverseScan): the cohort's ids, read once with the job's own budget
+  const P = paramList()
+  const where = P.embed(ctx.cohort.clauses, ctx.cohort.params)
+  const rows = await run(ctx, `select property_id from public.${q(ctx.relation)} where ${where}`, P.list, 'universe-ids')
+  return rows.map((r) => clean(r.property_id)).filter(Boolean)
+}
+
+async function headline(ctx, deps, agg, extrasRow) {
   const { meta } = agg
   const facts = ctx.mode === 'facts'
   const row = extrasRow || {}
   const total = num(row.t) ?? 0
-  const smsPred = meta.sms
-  const signals = meta.signals
-  const stackCol = meta.stack
   const unavailable = []
+  const noun = scopeOf(ctx.tab)?.noun || 'records'
+  const cohortMetric = { key: 'cohort', label: noun.replace(/^\w/, (c) => c.toUpperCase()), value: total, basis: 'The filtered cohort — the same count as the grid.' }
 
+  if (ctx.tab !== OVERVIEW_TAB) {
+    const metrics = [cohortMetric, ...meta.metrics.map((m) => ({ key: m.key, label: m.label, value: num(row[`h_m_${m.key}`]), basis: `${m.label} — the rail’s own filter, counted on this cohort.`, filter: m.filter, ...(m.sensitive ? { sensitive: true } : {}) }))]
+    return { total, metrics, distress: [], stack: null, pipeline: null, inbox: null, smsReasons: null, distressByMarket: null, engagementRefreshedAt: null, definitions: {}, unavailable }
+  }
+
+  let ids = null
+  if (meta.ids) {
+    const list = (row.h_ids || []).map((r) => clean(r.id)).filter(Boolean)
+    ids = list.length > ENGAGEMENT_KEYED_MAX ? null : list
+  } else if (ctx.allowUniverseScan) {
+    ids = await universeEngagementIds(ctx)
+  }
   const [eng, sms] = await Promise.all([
-    engagementPromise.catch((error) => { unavailable.push({ section: 'headline', field: 'engagement', reason: timeoutReason(error) }); return null }),
-    facts ? Promise.resolve(null) : liveSmsEligibility(ctx, total, deps).catch((error) => ({ unavailable: timeoutReason(error) })),
+    (ctx.allowUniverseScan ? engagementForIdsUnbounded(ctx, ids) : engagementFor(ctx, ids)).catch((error) => { unavailable.push({ section: 'headline', field: 'engagement', reason: timeoutReason(error) }); return null }),
+    facts ? Promise.resolve(null) : liveSmsEligibility(ctx, ids, deps).catch((error) => ({ unavailable: timeoutReason(error) })),
   ])
 
   const metrics = [
-    { key: 'cohort', label: 'Properties', value: total, basis: 'The filtered cohort — the same count as the grid.' },
-    smsPred
+    cohortMetric,
+    meta.sms
       ? { key: 'sms', label: 'SMS eligible', value: num(row.h_sms), basis: 'The campaign target builder’s readiness rule, per property (eg_property_facts.sms_eligible).', filter: { field_key: 'facts.sms_eligible', operator: 'is_true', value: null } }
       : sms?.unavailable
         ? { key: 'sms', label: 'SMS eligible', value: null, unavailable: sms.unavailable, basis: 'The campaign target builder’s readiness rule, per property.' }
         : { key: 'sms', label: 'SMS eligible', value: sms?.eligible ?? null, basis: 'The campaign target builder’s readiness rule, per property (live: campaign_target_graph + entity-contact review).' },
-    { key: 'known_equity', label: 'Known equity', value: num(row.h_known_equity), basis: 'Equity that is actually known (equity_known_v1): a loan on file and a value, or free & clear evidence.' },
+    { key: 'known_equity', label: 'Known equity', value: num(row.h_known_equity), basis: 'Equity that is actually known (equity_known_v1): a loan on file and a value, or free & clear evidence.', filter: { field_key: 'properties.known_equity_percent', operator: 'gte', value: -1e15 } },
     { key: 'high_equity', label: '60%+ known equity', value: num(row.h_high_equity), basis: 'Known equity of 60% or more.', filter: { field_key: 'properties.known_equity_percent', operator: 'gte', value: 60 } },
+    { key: 'distressed', label: '2+ distress signals', value: meta.stack ? (num(row.h_st_s2) ?? 0) + (num(row.h_st_s3) ?? 0) + (num(row.h_st_s4) ?? 0) : null, basis: 'Properties carrying two or more of the distress signals below (tax, liens, judgment, probate, death, lis pendens, default, foreclosure, vacant).' },
     { key: 'contacted', label: 'Contacted', value: eng ? eng.tally.contacted : null, basis: ENGAGEMENT_DEFINITIONS.contacted },
     { key: 'replied', label: 'Replied', value: eng ? eng.tally.replied : null, basis: ENGAGEMENT_DEFINITIONS.replied },
     { key: 'positive', label: 'Positive', value: eng ? eng.tally.positive : null, basis: ENGAGEMENT_DEFINITIONS.positive },
+    { key: 'pipeline', label: 'In pipeline', value: eng ? [...eng.tally.stage.entries()].filter(([k]) => k !== 'closed').reduce((acc, [, n]) => acc + n, 0) : null, basis: `${ENGAGEMENT_DEFINITIONS.pipeline} Counts open deals (not closed-lost).` },
   ]
-  const distress = signals.map((s) => ({ key: s.key, label: s.label, count: num(row[`h_s_${s.key}`]) ?? 0, filter: s.filter, tone: 'value' }))
-  const stack = stackCol ? [
-    { key: 's0', label: 'No distress signal', count: num(row.h_s0) ?? 0, filter: null, tone: 'none' },
-    { key: 's1', label: '1 signal', count: num(row.h_s1) ?? 0, filter: { field_key: 'facts.distress_signal_count', operator: 'between', value: [1, 1] }, tone: 'value' },
-    { key: 's2', label: '2 signals', count: num(row.h_s2) ?? 0, filter: { field_key: 'facts.distress_signal_count', operator: 'between', value: [2, 2] }, tone: 'value' },
-    { key: 's3', label: '3+ signals', count: num(row.h_s3) ?? 0, filter: { field_key: 'facts.distress_signal_count', operator: 'gte', value: 3 }, tone: 'value' },
-  ] : null
+  for (const m of metrics) if (m.value === null && !m.unavailable && ['contacted', 'replied', 'positive', 'pipeline'].includes(m.key)) m.unavailable = unavailable.find((u) => u.field === 'engagement')?.reason || null
+  const distress = meta.signals.map((s) => ({ key: s.key, label: s.label, count: num(row[`h_s_${s.key}`]) ?? 0, filter: s.filter, tone: 'value' }))
+  const stack = meta.stack ? STACK_BUCKETS.map((b) => ({ key: b.key, label: b.label, count: num(row[`h_st_${b.key}`]) ?? 0, filter: null, tone: 'value' })) : null
+  const distressByMarket = meta.matrix ? {
+    signals: meta.signals.map((s) => ({ key: s.key, label: s.label, filter: s.filter })),
+    markets: (row.h_mkt || []).map((m) => ({
+      key: m.k ?? '__none',
+      label: m.k ?? 'Not recorded',
+      total: Number(m.n) || 0,
+      filter: m.k ? { field_key: 'properties.market', operator: 'is_any_of', value: [m.k] } : null,
+      counts: Object.fromEntries(meta.signals.map((s) => [s.key, Number(m[`s_${s.key}`]) || 0])),
+    })),
+    note: `The cohort’s ${MARKET_MATRIX_TOP} largest markets. A property can carry several signals.`,
+  } : null
   const pipeline = eng ? [...eng.tally.stage.entries()].sort((a, b) => b[1] - a[1]).map(([stage, count]) => ({
     key: stage, label: STAGE_LABEL[stage] || stage.replace(/_/g, ' '), count,
     filter: facts ? { field_key: 'facts.pipeline_stage', operator: 'is_any_of', value: [stage] } : null, tone: stage === 'closed' ? 'none' : 'value',
@@ -867,6 +1058,8 @@ async function headline(ctx, deps, agg, extrasRow, engagementPromise) {
     distress,
     distressNote: 'A property can carry several signals, so these do not add up.',
     stack,
+    stackNote: `How many of the ${meta.signals.length} distress signals each property carries.`,
+    distressByMarket,
     pipeline,
     inbox,
     smsReasons,
@@ -876,13 +1069,30 @@ async function headline(ctx, deps, agg, extrasRow, engagementPromise) {
   }
 }
 
+/** The snapshot job's engagement: the same keyed reads, chunked over the whole universe. */
+async function engagementForIdsUnbounded(ctx, ids) {
+  const tally = { contacted: 0, replied: 0, positive: 0, inbox: new Map(), stage: new Map(), threads: 0 }
+  let at = Date.now()
+  for (let i = 0; i < (ids || []).length; i += ENGAGEMENT_KEYED_MAX) {
+    const part = ids.slice(i, i + ENGAGEMENT_KEYED_MAX)
+    const { tally: t, refreshedAt } = await engagementFor(ctx, part)
+    at = Math.min(at, new Date(refreshedAt).getTime())
+    tally.contacted += t.contacted; tally.replied += t.replied; tally.positive += t.positive; tally.threads += t.threads
+    for (const [k, n] of t.inbox) tally.inbox.set(k, (tally.inbox.get(k) || 0) + n)
+    for (const [k, n] of t.stage) tally.stage.set(k, (tally.stage.get(k) || 0) + n)
+  }
+  return { tally, refreshedAt: new Date(at).toISOString() }
+}
+
 function timeoutReason(error) {
   const m = String(error?.message || '')
-  if (/statement timeout|canceling statement/i.test(m)) return 'Unavailable — took longer than the time budget. Retry.'
+  if (/statement timeout|canceling statement/i.test(m)) return 'Unavailable — took longer than the 8 s budget. Retry.'
   return `Unavailable — ${m.slice(0, 140) || 'the read failed'}. Retry.`
 }
 
 /* ── the endpoint ─────────────────────────────────────────────────────────── */
+
+export const UNIVERSE_COMPUTING = 'Computing — the whole-universe Overview is precomputed by the snapshot job (eg_overview_snapshot, after the morning refresh) and is not live yet. It is never scanned live: pick any filter to chart that cohort now.'
 
 function parseSections(raw) {
   const ids = clean(raw) ? clean(raw).split(',').map(clean).filter(Boolean) : ['pinned', 'headline']
@@ -891,38 +1101,43 @@ function parseSections(raw) {
 
 export async function buildEntityGraphOverview(params = {}, deps = {}) {
   const tab = clean(params.tab || OVERVIEW_TAB).toLowerCase()
-  if (tab !== OVERVIEW_TAB) return { tab, supported: false, total: null, sections: [], unavailable: [{ reason: 'The Overview covers the properties tab first (spec 9 §4); other tabs come next.' }] }
+  const sectionsMeta = overviewSectionsFor(tab)
+  if (!sectionsMeta || !scopeOf(tab)) return { tab, supported: false, total: null, sections: [], unavailable: [{ reason: 'The Overview has no registry for this tab.' }] }
   const query = deps.query || queryWithTimeout
   if (!deps.query && !hasDatabaseUrl()) return { tab, supported: false, total: null, sections: [], unavailable: [{ reason: 'The Overview needs the direct database connection.' }] }
   const now = deps.now ?? Date.now()
   const started = Date.now()
 
-  // fail closed on an untranslatable filter (422 upstream), never a silent universe
-  const cohort = compileCohort(params)
-  const unfiltered = isUnfiltered(cohort, params)
   if (clean(params.q)) {
     const error = new Error('overview_search_unsupported')
     error.code = 'overview_search_unsupported'
     throw error
   }
+  // the campaign scope chip resolves its exact membership before the cohort compiles (never "no filter")
+  await primeCampaignScope(params, deps.campaignScopeDeps || (deps.query ? { query: deps.query } : {}))
+  // fail closed on an untranslatable filter (422 upstream), never a silent universe
+  const cohort = compileCohort(params, { tab })
+  const unfiltered = isUnfiltered(cohort, params)
   const loaded = await loadSchema(query, now)
   // the read model counts only once a refresh has logged 'ok' (until then the live relation answers)
-  const factsAt = loaded[FACTS] ? await factsRefreshed(query, loaded).catch(() => null) : null
+  const factsAt = tab === OVERVIEW_TAB && loaded[FACTS] ? await factsRefreshed(query, loaded).catch(() => null) : null
   const schema = factsAt ? loaded : { ...loaded, [FACTS]: undefined }
-  const registry = deps.registry || overviewRegistry()
+  const registry = deps.registry || overviewRegistry(tab)
   const whereCols = columnsIn(cohort.clauses.join(' '))
-  const picked = chooseRelation(schema, whereCols, { includeTest: cohort.includeTest })
+  const picked = chooseRelation(schema, whereCols, { includeTest: cohort.includeTest, tab })
   if (!picked) {
     const error = new Error('overview_filters_need_facts')
     error.code = 'overview_filters_need_facts'
-    error.columns = [...whereCols].filter((c) => !schema[VIEW]?.has(c))
+    error.columns = [...whereCols].filter((c) => !schema[tab === OVERVIEW_TAB ? VIEW : scopeOf(tab).relation]?.has(c))
     throw error
   }
   const factsRefreshedAt = picked.mode === 'facts' ? factsAt : null
+  const allowUniverseScan = Boolean(deps.allowUniverseScan)
   const ctx = {
-    query, now, schema, cohort, unfiltered, timings: [],
+    query, now, schema, cohort, unfiltered, timings: [], tab, allowUniverseScan,
     relation: picked.relation, mode: picked.mode, factsRefreshedAt,
-    timeoutMs: deps.timeoutMs ?? (unfiltered ? UNIVERSE_STATEMENT_MS : STATEMENT_MS),
+    // 8 s per statement in live mode (the snapshot job passes its own budget)
+    timeoutMs: deps.timeoutMs ?? STATEMENT_MS,
   }
 
   const wanted = parseSections(params.sections)
@@ -932,34 +1147,47 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
   let total = null
 
   // the snapshot (PROPOSED eg_overview_snapshot) answers the unfiltered universe instantly when present
-  const snapshot = unfiltered && schema[SNAPSHOT] && !deps.skipSnapshot ? await readSnapshot(query, wanted).catch(() => null) : null
+  const snapshot = unfiltered && schema[SNAPSHOT] && !deps.skipSnapshot ? await readSnapshot(query, wanted, tab).catch(() => null) : null
+  // NO unbounded scan in live mode: the unfiltered universe is the snapshot's (or the narrow facts table's), else "computing"
+  const universeBlocked = unfiltered && !allowUniverseScan && !(tab === OVERVIEW_TAB && ctx.mode === 'facts')
 
+  // the universe snapshot, read once per request, for ghost bars of a field whose own chip is the only filter
+  let universeSnap = null
+  const universeSnapshotField = async (key) => {
+    if (!schema[SNAPSHOT] || deps.skipSnapshot) return null
+    if (!universeSnap) universeSnap = readSnapshot(query, ['pinned', ...sectionsMeta.map((x) => x.id)], tab).catch(() => new Map())
+    const map = await universeSnap
+    for (const [, payload] of map) {
+      const hit = (payload?.fields || []).find((x) => x.key === key && Array.isArray(x.buckets))
+      if (hit) return hit
+    }
+    return null
+  }
   const fieldsFor = (id) => {
-    if (id === 'pinned') return OVERVIEW_PINNED.map((k) => registry.find((f) => f.key === k)).filter(Boolean)
+    if (id === 'pinned') return overviewPinnedFor(tab).map((k) => registry.find((f) => f.key === k)).filter(Boolean)
     return registry.filter((f) => f.section === id)
   }
   // the headline's counts ride on the first section's scan (pinned in the band), else on a scan of their own
   const wantsHead = wanted.includes('headline')
   const headAgg = wantsHead ? headlineAgg(ctx) : null
-  const engagementPromise = wantsHead ? engagementFor(ctx) : null
-  engagementPromise?.catch(() => {})
-  const fieldSections = wanted.filter((id) => id !== 'headline' && (id === 'pinned' || OVERVIEW_SECTIONS.some((s) => s.id === id)) && !snapshot?.has(id))
-  const host = wantsHead ? fieldSections[0] || null : null
+  const fieldSections = wanted.filter((id) => id !== 'headline' && (id === 'pinned' || sectionsMeta.some((x) => x.id === id)) && !snapshot?.has(id))
+  const host = wantsHead && !(snapshot?.has('headline')) ? fieldSections[0] || null : null
   let headRow = null
 
   const tasks = wanted.filter((id) => id !== 'headline').map((id) => async () => {
-    const meta = id === 'pinned' ? { id: 'pinned', label: 'Pinned' } : OVERVIEW_SECTIONS.find((s) => s.id === id)
+    const meta = id === 'pinned' ? { id: 'pinned', label: 'Pinned' } : sectionsMeta.find((x) => x.id === id)
     if (!meta) return null
     if (snapshot?.has(id)) return { ...snapshot.get(id), snapshot: true }
+    if (universeBlocked) return { id: meta.id, label: meta.label, fields: [], computing: true, unavailable: UNIVERSE_COMPUTING }
     const all = fieldsFor(id)
     const usable = []
     const missing = []
     for (const f of all) {
       // a computed fact is only ever read from the facts read model — a same-named legacy view column is not it
-      if ((!f.computedFact || ctx.mode === 'facts') && [...fieldColumns(f)].every((c) => relCols.has(c))) usable.push(f)
-      else missing.push({ key: f.key, label: f.label, kind: f.kind, section: f.section, computedFact: f.computedFact, unavailable: f.computedFact ? 'Needs the property facts read model (eg_property_facts) — not live yet.' : 'This column is not on the cohort relation.' })
+      if ((!f.computedFact || ctx.mode === 'facts') && [...fieldColumns(f, tab)].every((c) => relCols.has(c))) usable.push(f)
+      else missing.push({ key: f.key, label: f.label, kind: f.kind, section: f.section, computedFact: f.computedFact, ...(f.sensitive ? { sensitive: true } : {}), unavailable: f.computedFact ? 'Needs the property facts read model (eg_property_facts) — not live yet.' : 'This column is not on the cohort relation.' })
     }
-    if (id === 'company') {
+    if (id === 'company' && tab === OVERVIEW_TAB) {
       for (const c of OVERVIEW_COMPANY_FIELDS) {
         if (!all.some((f) => f.key === c.key)) missing.push({ key: c.key, label: c.label, kind: c.kind, section: 'company', computedFact: true, unavailable: 'Not in the field catalog yet — arrives with the property facts read model (company registry status).' })
       }
@@ -967,7 +1195,7 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
     // in facts mode, a plain field the read model does not carry is read from the view (exact, one more scan)
     const viewCols = schema[VIEW]
     const viewOk = ctx.mode === 'facts' && viewCols && [...whereCols].every((c) => viewCols.has(c))
-    const viaView = viewOk ? missing.filter((m) => !m.computedFact).map((m) => all.find((f) => f.key === m.key)).filter((f) => f && [...fieldColumns(f)].every((c) => viewCols.has(c))) : []
+    const viaView = viewOk ? missing.filter((m) => !m.computedFact).map((m) => all.find((f) => f.key === m.key)).filter((f) => f && [...fieldColumns(f, tab)].every((c) => viewCols.has(c))) : []
     if (viaView.length) for (const f of viaView) missing.splice(missing.findIndex((m) => m.key === f.key), 1)
     const hosting = host === id
     try {
@@ -981,8 +1209,14 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
       if (ghostFields.length) {
         await Promise.all(ghostFields.map(async (f) => {
           try {
-            const gctx = { ...ctx, cohort: compileCohort(params, { exceptFieldKey: f.key }) }
-            const g = await computeFields(gctx, [usable.find((u) => u.key === f.key)])
+            const gcohort = compileCohort(params, { exceptFieldKey: f.key, tab })
+            // a ghost of the WHOLE universe is a universe scan: only from the snapshot / read model
+            if (isUnfiltered(gcohort, params) && !allowUniverseScan && !(tab === OVERVIEW_TAB && ctx.mode === 'facts')) {
+              const snap = await universeSnapshotField(f.key)
+              if (snap) f.ghost = { total: snap.coverage?.total ?? null, buckets: (snap.buckets || []).map((b) => ({ key: b.key, label: b.label, count: b.count, filter: b.filter, tone: b.tone })), snapshot: true }
+              return
+            }
+            const g = await computeFields({ ...ctx, cohort: gcohort }, [usable.find((u) => u.key === f.key)])
             // the field's own distribution without its own filter: the context its chip was picked from
             f.ghost = { total: g.total, buckets: g.fields[0].buckets.map((b) => ({ key: b.key, label: b.label, count: b.count, filter: b.filter, tone: b.tone })) }
           } catch { /* a ghost is context, never a blocker */ }
@@ -1000,11 +1234,13 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
   for (const sct of done) if (sct) sections.push(sct)
   let head = null
   if (wantsHead && snapshot?.has('headline')) {
-    head = { ...snapshot.get('headline').headline, total: snapshot.get('headline').total, unavailable: [] }
+    head = { ...snapshot.get('headline').headline, total: snapshot.get('headline').total, unavailable: [], snapshot: true }
+  } else if (wantsHead && universeBlocked) {
+    unavailable.push({ section: 'headline', reason: UNIVERSE_COMPUTING, computing: true })
   } else if (wantsHead) {
     try {
       if (!headRow) headRow = (await computeFields(ctx, [], headAgg.make)).extras
-      head = await headline(ctx, deps, headAgg, headRow, engagementPromise)
+      head = await headline(ctx, deps, headAgg, headRow)
     } catch (error) {
       if (error instanceof FacetUntranslatable) throw error
       unavailable.push({ section: 'headline', reason: timeoutReason(error), retry: true })
@@ -1019,16 +1255,21 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
     tab,
     supported: true,
     total,
+    computing: universeBlocked && !snapshot?.size,
     source: {
       relation: ctx.relation,
-      mode: ctx.mode,
-      note: ctx.mode === 'facts'
-        ? 'Property facts read model (eg_property_facts).'
-        : 'Browse relation (v_entity_graph_properties) — exact; computed facts (SMS eligibility, owner, people, contacts, company status, ZIP market) arrive with the property facts read model.',
+      mode: snapshot?.size ? 'snapshot' : ctx.mode,
+      note: snapshot?.size
+        ? 'Universe snapshot (eg_overview_snapshot) — exact as of its refresh.'
+        : ctx.mode === 'facts'
+          ? 'Property facts read model (eg_property_facts).'
+          : ctx.mode === 'base'
+            ? `${scopeOf(tab).relation} — exact, live.`
+            : 'Browse relation (v_entity_graph_properties) — exact; computed facts (SMS eligibility, owner, people, contacts, company status, ZIP market) arrive with the property facts read model.',
       factsFiltersExecutable: ctx.mode === 'facts',
     },
-    refreshed_at: { facts: factsRefreshedAt, engagement: head?.engagementRefreshedAt ?? (engagementMemo ? new Date(engagementMemo.at).toISOString() : null) },
-    headline: head ? { metrics: head.metrics, distress: head.distress, distressNote: head.distressNote, stack: head.stack, pipeline: head.pipeline, inbox: head.inbox, smsReasons: head.smsReasons, definitions: head.definitions } : null,
+    refreshed_at: { facts: factsRefreshedAt, engagement: head?.engagementRefreshedAt ?? null, snapshot: snapshot?.refreshedAt ?? null },
+    headline: head ? { metrics: head.metrics, distress: head.distress, distressNote: head.distressNote, stack: head.stack, stackNote: head.stackNote, distressByMarket: head.distressByMarket ?? null, pipeline: head.pipeline, inbox: head.inbox, smsReasons: head.smsReasons, definitions: head.definitions } : null,
     sections,
     unavailable,
     timings: { totalMs: Date.now() - started, statements: ctx.timings },
@@ -1051,34 +1292,71 @@ async function factsRefreshed(query, schema) {
 
 /** A snapshot row is only read while the registry it was built from is the current one. */
 export function overviewRegistryVersion(registry = overviewRegistry()) {
-  return createHash('sha1').update(JSON.stringify(registry.map((f) => [f.key, f.kind, f.section]))).digest('hex').slice(0, 16)
+  return createHash('sha1').update(JSON.stringify(registry.map((f) => [f.key, f.kind, f.section, f.sensitive ? 1 : 0]))).digest('hex').slice(0, 16)
 }
 
-async function readSnapshot(query, wanted) {
+async function readSnapshot(query, wanted, tab = OVERVIEW_TAB) {
   const { rows } = await query(
-    `select distinct on (section) section, payload from public.${q(SNAPSHOT)}
+    `select distinct on (section) section, payload, refreshed_at from public.${q(SNAPSHOT)}
       where tab = $1 and section = any($2::text[]) and registry_version = $3 order by section, refreshed_at desc`,
-    [OVERVIEW_TAB, wanted, overviewRegistryVersion()], STATEMENT_MS,
+    [tab, wanted, overviewRegistryVersion(overviewRegistry(tab))], STATEMENT_MS,
   )
-  return new Map((rows || []).filter((r) => r.payload && (Array.isArray(r.payload.fields) || r.payload.headline)).map((r) => [r.section, r.payload]))
+  const map = new Map((rows || []).filter((r) => r.payload && (Array.isArray(r.payload.fields) || r.payload.headline)).map((r) => [r.section, r.payload]))
+  const at = (rows || []).map((r) => r.refreshed_at).filter(Boolean).sort()[0]
+  map.refreshedAt = at ? new Date(at).toISOString() : null
+  return map
 }
 
 /**
  * The rows the refresh job writes into eg_overview_snapshot after a successful
  * facts refresh (D8: after the 09:17 UTC read-model refresh and after property
- * imports, outside 11:15–14:30 UTC). Read-only here: it computes the
- * unfiltered universe Overview; the job does the insert.
+ * imports, outside 11:15–14:30 UTC) — every scope's unfiltered universe.
+ * Read-only here (it computes); writeOverviewSnapshots does the insert.
  */
 export async function buildOverviewSnapshotRows(deps = {}) {
-  const sections = ['pinned', 'headline', ...OVERVIEW_SECTIONS.map((x) => x.id).filter((id) => id !== 'headline')]
-  const out = await buildEntityGraphOverview({ tab: OVERVIEW_TAB, sections: sections.join(',') }, { ...deps, skipSnapshot: true, timeoutMs: deps.timeoutMs ?? 120_000 })
-  if (out.unavailable?.length) throw new Error(`overview_snapshot_incomplete: ${out.unavailable.map((u) => u.section).join(',')}`)
-  const version = overviewRegistryVersion()
-  const base = { tab: OVERVIEW_TAB, registry_version: version, total: out.total, source_relation: out.source.relation }
-  return [
-    ...out.sections.map((section) => ({ ...base, section: section.id, payload: section })),
-    { ...base, section: 'headline', payload: { headline: out.headline, total: out.total } },
-  ]
+  const out = []
+  for (const tab of (deps.tabs || Object.keys(OVERVIEW_SCOPE)).filter((t) => scopeOf(t) && overviewSectionsFor(t))) {
+    const sectionIds = ['pinned', 'headline', ...overviewSectionsFor(tab).map((x) => x.id).filter((id) => id !== 'headline')]
+    const res = await buildEntityGraphOverview({ tab, sections: sectionIds.join(',') }, { ...deps, skipSnapshot: true, allowUniverseScan: true, timeoutMs: deps.timeoutMs ?? 120_000 })
+    if (!res.supported) continue
+    if (res.unavailable?.length) throw new Error(`overview_snapshot_incomplete: ${tab}: ${res.unavailable.map((u) => u.section).join(',')}`)
+    const base = { tab, registry_version: overviewRegistryVersion(overviewRegistry(tab)), total: res.total, source_relation: res.source.relation }
+    out.push(...res.sections.map((section) => ({ ...base, section: section.id, payload: section })))
+    out.push({ ...base, section: 'headline', payload: { headline: res.headline, total: res.total } })
+  }
+  return out
+}
+
+/**
+ * Write every scope's snapshot in ONE transaction (the job; never a request
+ * path). Inert unless EG_OVERVIEW_SNAPSHOT_ENABLED=true and the table exists.
+ */
+export async function writeOverviewSnapshots({ pool, env = process.env, tabs } = {}) {
+  if (String(env?.EG_OVERVIEW_SNAPSHOT_ENABLED ?? '').toLowerCase() !== 'true') return { ok: false, skipped: 'EG_OVERVIEW_SNAPSHOT_ENABLED is not true' }
+  const client = await pool.connect()
+  const started = Date.now()
+  try {
+    await client.query(`set statement_timeout = '120s'`)
+    const present = await client.query(`select to_regclass('public.${SNAPSHOT}') is not null as ok`)
+    if (!present.rows[0]?.ok) return { ok: false, skipped: 'eg_overview_snapshot not applied' }
+    const query = (sql, params) => client.query({ text: sql, values: params })
+    const rows = await buildOverviewSnapshotRows({ query, tabs })
+    await client.query('begin')
+    for (const r of rows) {
+      await client.query(
+        `insert into public.${SNAPSHOT} (tab, section, registry_version, payload, total, source_relation) values ($1, $2, $3, $4::jsonb, $5, $6)`,
+        [r.tab, r.section, r.registry_version, JSON.stringify(r.payload), r.total ?? 0, r.source_relation],
+      )
+    }
+    await client.query(`delete from public.${SNAPSHOT} where refreshed_at < now() - interval '7 days'`)
+    await client.query('commit')
+    return { ok: true, rows: rows.length, ms: Date.now() - started }
+  } catch (error) {
+    await client.query('rollback').catch(() => {})
+    throw error
+  } finally {
+    client.release()
+  }
 }
 
 export default buildEntityGraphOverview

@@ -13,6 +13,7 @@
  * stay pickable (the rail's facet rule). Counts are exact over the whole
  * filtered cohort — never a sample.
  */
+import { primeCampaignScope } from './entity-graph-campaign-scope.js'
 import {
   applyEntityGraphFieldFilters,
   getEntityGraphFilterFields,
@@ -52,6 +53,7 @@ export async function getEntityGraphHeaderValues(params = {}, deps = {}) {
   if (!factsColumnSupported(column)) return { supported: false, column, reason: 'unknown_column' }
   const field = headerFieldFor(column)
   const filters = parseBrowseFilters(params)
+  await primeCampaignScope(params, deps.campaignScopeDeps || {})
   const { resolved } = resolveEntityGraphFieldFiltersOrThrow('properties', params, { allowComputedFacts: true })
   // the column's own filter is not applied to its own value counts
   const others = resolved.filter((f) => f.source_column !== column && (!field || f.field_key !== field.key))

@@ -28,6 +28,9 @@ function refuse(request, error) {
   if (error?.code === 'unsupported_entity_graph_filters') {
     return NextResponse.json({ ok: false, error: error.code, unsupported_filters: error.unsupported_filters || [] }, { status: 422, headers })
   }
+  if (error?.name === 'CampaignScopeError') {
+    return NextResponse.json({ ok: false, error: error.code, message: error.message }, { status: 422, headers })
+  }
   console.error('entity_graph.campaign_stack_failed', error)
   return NextResponse.json({ ok: false, error: 'entity_graph_campaign_stack_failed', message: error?.message || null }, { status: 500, headers })
 }

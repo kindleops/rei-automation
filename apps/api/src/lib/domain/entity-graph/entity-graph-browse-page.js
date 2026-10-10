@@ -19,6 +19,7 @@
 import { browseEntityGraph } from './entity-graph-service.js'
 import { getEntityGraphColumnEnrichment, parseEntityGraphColumnFields } from './entity-graph-column-enrichment.js'
 import { getEntityGraphOutreachState } from './entity-graph-outreach-state.js'
+import { campaignIdsInParams } from './entity-graph-campaign-scope.js'
 
 const truthy = (v) => ['1', 'true', 'yes'].includes(String(v ?? '').trim().toLowerCase())
 
@@ -42,7 +43,8 @@ export async function browseEntityGraphPage(params = {}, deps = {}) {
   const t1 = Date.now()
   const [cols, out] = await Promise.all([
     fields.length
-      ? enrich({ fields: fields.join(','), property_ids: ids.join(',') }, deps.supabase ? { supabase: deps.supabase } : {})
+      // camp.* columns read the campaign the cohort is scoped to (the first membership chip)
+      ? enrich({ fields: fields.join(','), property_ids: ids.join(','), ...(campaignIdsInParams(browseParams)[0] ? { campaign_id: campaignIdsInParams(browseParams)[0] } : {}) }, deps.supabase ? { supabase: deps.supabase } : {})
         .catch((error) => { attached.errors.push({ source: 'columns', message: String(error?.message || 'columns_failed').slice(0, 160) }); return null })
       : Promise.resolve(null),
     wantsOutreach
@@ -52,6 +54,8 @@ export async function browseEntityGraphPage(params = {}, deps = {}) {
   ])
   attached.ms.attach = Date.now() - t1
   for (const u of out?.unavailable || []) attached.errors.push({ source: `outreach.${u.source}`, message: u.message })
+  // a column source that failed is named; the others' values still arrive
+  for (const e of cols?.errors || []) attached.errors.push(e)
   if (cols && fields.length) attached.fieldsLoaded = fields
   const values = cols?.values || {}
   const states = out?.states || null

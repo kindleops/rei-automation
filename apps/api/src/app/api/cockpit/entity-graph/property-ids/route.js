@@ -30,6 +30,10 @@ export async function GET(request) {
     const result = await listEntityGraphPropertyIds(params)
     return NextResponse.json({ ok: true, ...result }, { status: 200, headers })
   } catch (error) {
+    // the campaign scope chip could not be resolved / does not apply here — never a quiet universe
+    if (error?.name === 'CampaignScopeError') {
+      return NextResponse.json({ ok: false, error: error.code, message: error.message, results: [], total: null, sections: [] }, { status: error.code === 'campaign_scope_not_found' ? 404 : 422, headers })
+    }
     if (error?.code === 'unsupported_entity_graph_filters') {
       return NextResponse.json({ ok: false, error: error.code, unsupported_filters: error.unsupported_filters || [] }, { status: 422, headers })
     }

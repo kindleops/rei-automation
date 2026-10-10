@@ -26,7 +26,9 @@ import {
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
 import { FactsCohortTooLarge, factsCohortIds, factsColumnSupported, factsSortedPage } from './entity-graph-facts-query.js'
-import { FacetUntranslatable } from './entity-graph-facet-sql.js'
+import { FacetUntranslatable, compileFacetWhere } from './entity-graph-facet-sql.js'
+import { isCampaignMembership, primeCampaignScope } from './entity-graph-campaign-scope.js'
+import { hasDatabaseUrl as hasDirectDatabase, queryWithTimeout as directQuery } from '@/lib/postgres/client.js'
 import { shapeRecords } from './entity-network-service.js'
 import {
   decodeAfter,
@@ -841,6 +843,41 @@ function emailToResult(row, score = 100) {
  * `hasMore` then falls back to whether the page came back full, which is the
  * one thing the page itself proves.
  */
+/**
+ * A page whose cohort carries the campaign scope (an id list of up to
+ * thousands): ordered ids + the exact total from ONE direct-PG statement over
+ * the same recorded WHERE (the list's own appliers), then the rows by id in
+ * chunks — a PostgREST `in (…)` URL of 3,000 ids is not a request.
+ */
+const SAFE_IDENT = /^[a-z_][a-z0-9_]*$/
+async function fetchPageByDirectIds(supabase, { table, select, idCol, buildQuery, orderCol, ascending, cursor, pageSize, tieCol = null, query = null }) {
+  const run = query || directQuery
+  if (!query && !hasDirectDatabase()) throw new FacetUntranslatable('campaign scope needs the direct database connection')
+  for (const c of [table, idCol, orderCol, tieCol].filter(Boolean)) if (!SAFE_IDENT.test(c)) throw new FacetUntranslatable(`identifier ${c}`)
+  const compiled = compileFacetWhere(buildQuery)
+  const params = [...compiled.params, cursor, pageSize]
+  const order = `"${orderCol}" ${ascending ? 'asc' : 'desc'} nulls last${tieCol && tieCol !== orderCol ? `, "${tieCol}" asc` : ''}`
+  const res = await run(
+    `select "${idCol}"::text as id, count(*) over ()::bigint as n from public."${table}" ${compiled.where} order by ${order} offset $${params.length - 1} limit $${params.length}`,
+    params, 8_000,
+  )
+  const ids = (res?.rows || []).map((r) => String(r.id))
+  let total = res?.rows?.length ? Number(res.rows[0].n) : null
+  if (total === null && cursor === 0) total = 0
+  if (total === null) {
+    const counted = await run(`select count(*)::bigint as n from public."${table}" ${compiled.where}`, compiled.params, 8_000)
+    total = Number(counted?.rows?.[0]?.n ?? 0)
+  }
+  const byId = new Map()
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error } = await supabase.from(table).select(select).in(idCol, ids.slice(i, i + 150))
+    if (error) throw error
+    for (const row of data || []) byId.set(String(row[idCol]), row)
+  }
+  const rows = ids.map((id) => byId.get(id)).filter(Boolean)
+  return { rows, total, pageWasFull: ids.length >= pageSize }
+}
+
 async function fetchPageWithCount(supabase, {
   table,
   select,
@@ -1171,8 +1208,9 @@ export async function listEntityGraphPropertyIds(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const cap = int(params.limit, 2000, 5000)
   const filters = parseBrowseFilters(params)
+  await primeCampaignScope(params, deps.campaignScopeDeps || {})
   const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow('properties', params, { allowComputedFacts: true })
-  if (fieldFilters.some(isComputedFactFilter)) {
+  if (fieldFilters.some((f) => isComputedFactFilter(f) || isCampaignMembership(f))) {
     // the cohort only exists on the facts relation: its ids from there, coordinates by id
     const cohort = await factsCohortIds({ applyFilters: (q) => applyEntityGraphFieldFilters(applyPropertyFilters(q, filters), fieldFilters), cap, deps: deps.factsDeps || {} })
     const points = []
@@ -1315,7 +1353,8 @@ async function browsePropertiesByFacts(supabase, { cursor, pageSize, sortBy, asc
 
 async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [], after = null, sortIndexes = detectPropertySortIndexes, factsDeps = {}, factsEnabled = facetsAvailable }) {
   const buildQuery = (query) => applyEntityGraphFieldFilters(applyPropertyFilters(query, filters), fieldFilters)
-  const computedFilters = fieldFilters.filter(isComputedFactFilter)
+  // computed facts AND the campaign scope (an id list of up to thousands — never a PostgREST URL) run on the direct-PG facts path
+  const computedFilters = fieldFilters.filter((f) => isComputedFactFilter(f) || isCampaignMembership(f))
 
   /**
    * Whole-cohort keyset sort when a (column, property_id) index exists — see
@@ -1388,9 +1427,10 @@ async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending,
   return response
 }
 
-async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {
+async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [], directQueryFn = null }) {
   const orderCol = BROWSE_SORT_COLUMNS.master_owners.columns.includes(sortBy) ? sortBy : 'display_name'
-  const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
+  const pager = fieldFilters.some(isCampaignMembership) ? (s, a) => fetchPageByDirectIds(s, { ...a, idCol: 'master_owner_id', query: directQueryFn }) : fetchPageWithCount
+  const { rows, total, pageWasFull } = await pager(supabase, {
     table: 'master_owners',
     select: OWNER_SUMMARY_SELECT,
     buildQuery: (query) => applyEntityGraphFieldFilters(applyOwnerFilters(query, filters), fieldFilters),
@@ -1403,9 +1443,10 @@ async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, fil
   return paginatedResponse(rows.map((row) => ownerToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
 
-async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {
+async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [], directQueryFn = null }) {
   const orderCol = BROWSE_SORT_COLUMNS.people.columns.includes(sortBy) ? sortBy : 'full_name'
-  const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
+  const pager = fieldFilters.some(isCampaignMembership) ? (s, a) => fetchPageByDirectIds(s, { ...a, idCol: 'prospect_id', query: directQueryFn }) : fetchPageWithCount
+  const { rows, total, pageWasFull } = await pager(supabase, {
     table: 'prospects',
     select: PROSPECT_SUMMARY_SELECT,
     buildQuery: (query) => applyEntityGraphFieldFilters(applyProspectFilters(query, filters), fieldFilters),
@@ -1418,11 +1459,11 @@ async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending, 
   return paginatedResponse(rows.map((row) => prospectToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
 
-async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascending }) {
+async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascending, fieldFilters = [] }) {
   const orderCol = BROWSE_SORT_COLUMNS.organizations.columns.includes(sortBy) ? sortBy : 'owner_name'
-  const { data, error, count } = await supabase
+  const { data, error, count } = await applyEntityGraphFieldFilters(supabase
     .from('sub_owners')
-    .select(SUB_OWNER_SELECT, { count: 'exact' })
+    .select(SUB_OWNER_SELECT, { count: 'exact' }), fieldFilters)
     .order(orderCol, { ascending, nullsFirst: false })
     .order('sub_owner_id', { ascending: true })
     .range(cursor, cursor + pageSize - 1)
@@ -1669,6 +1710,8 @@ export async function browseEntityGraph(params = {}, deps = {}) {
   const sortBy = clean(params.sort_by || params.sortBy) || BROWSE_SORT_COLUMNS[tab]?.default || 'id'
   const ascending = ['1', 'true', 'yes'].includes(lower(params.ascending))
   const filters = parseBrowseFilters(params)
+  // the campaign scope chip resolves its exact membership first (never applied as "no filter")
+  await primeCampaignScope(params, deps.campaignScopeDeps || {})
   /**
    * Catalog-backed filters resolve BEFORE any query runs and throw on anything
    * this tab cannot execute. A filter the backend drops is not a narrower
@@ -1681,6 +1724,7 @@ export async function browseEntityGraph(params = {}, deps = {}) {
     ...(deps.propertySortIndexes ? { sortIndexes: deps.propertySortIndexes } : {}),
     ...(deps.factsDeps ? { factsDeps: deps.factsDeps } : {}),
     ...(deps.factsEnabled ? { factsEnabled: deps.factsEnabled } : {}),
+    ...(deps.directQuery ? { directQueryFn: deps.directQuery } : {}),
   }
 
   switch (tab) {

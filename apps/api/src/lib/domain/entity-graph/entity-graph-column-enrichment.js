@@ -23,6 +23,7 @@
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { primaryLinkedProspect, prospectsLinkedToProperties, resolvePropertyOwners } from './entity-graph-owner-link.js'
+import { CAMPAIGN_OUTCOME_FIELDS, campaignOutcomes, isCampaignId } from './entity-graph-campaign-scope.js'
 
 export const MAX_IDS = 300
 const CHUNK = 150
@@ -118,6 +119,23 @@ export const ENTITY_GRAPH_LINKED_COLUMNS = Object.freeze({
   zip: Object.freeze(new Set(['sales_90d', 'sales_1y', 'investor_share', 'cash_share', 'median_price', 'median_ppsf', 'latest_sale', 'buyers', 'active_buyers'])),
   entity: Object.freeze(new Set(['name', 'count'])),
   email: Object.freeze(new Set(['count'])),
+  /**
+   * probate.*  public.probate_status (probate audit, applied 2026-10-10), one row
+   *            per audited property: is the estate a real, open opportunity, and
+   *            who is the best LIVING decision maker to contact (role only —
+   *            never a name, never a phone).
+   */
+  probate: Object.freeze(new Set([
+    'validity_class', 'validity_subclass', 'estate_status', 'best_contact_role', 'best_contact_tier',
+    'reachable_living_dm', 'only_deceased_reachable', 'exclude_targeting', 'opportunity_score', 'date_of_death', 'audited_at',
+  ])),
+  /**
+   * camp.*     the outcome of the campaign the cohort is scoped to (the
+   *            campaign.membership chip): template sent, sent at, delivery,
+   *            target status, touch, the reply's intent, replied at, opt-out.
+   *            Needs `campaign_id`; without one these read "—".
+   */
+  camp: Object.freeze(new Set(CAMPAIGN_OUTCOME_FIELDS)),
 })
 
 const clean = (v) => String(v ?? '').trim()
@@ -148,7 +166,7 @@ async function readIn(client, table, select, key, ids) {
 const present = (v) => v !== null && v !== undefined && v !== ''
 
 /** Linked-entity values for `ids`, merged into `values`. */
-async function enrichLinked(client, ids, linked, values) {
+async function enrichLinked(client, ids, linked, values, { campaignId = null, deps = {}, errors = [] } = {}) {
   const want = (source) => linked.filter((f) => f.startsWith(`${source}.`)).map((f) => f.slice(source.length + 1))
   const ownerCols = want('owner')
   const scoreCols = want('scores')
@@ -182,7 +200,24 @@ async function enrichLinked(client, ids, linked, values) {
 
   const zipCols = want('zip')
   const factCols = want('fact')
-  await Promise.all([
+  const probateCols = want('probate')
+  const campCols = want('camp')
+  // one source failing (a column not on the view yet, a timeout) never blanks the other sources' columns
+  const sources = ['probate', 'camp', 'fact', 'zip', 'rec', 'person', 'owner', 'scores', 'contact', 'entity', 'email']
+  const guarded = (blocks) => blocks.map((block, i) => block.catch((error) => { errors.push({ source: `columns.${sources[i] || i}`, message: String(error?.message || error).slice(0, 160) }) }))
+  await Promise.all(guarded([
+    (async () => {
+      if (!probateCols.length) return
+      const rows = await readIn(client, 'probate_status', ['property_id', ...probateCols].join(','), 'property_id', ids)
+      for (const r of rows) for (const c of probateCols) put(clean(r.property_id), `probate.${c}`, r[c])
+    })(),
+    (async () => {
+      if (!campCols.length || !isCampaignId(campaignId)) return
+      const { hasDatabaseUrl } = await import('@/lib/postgres/client.js')
+      if (!deps.query && !hasDatabaseUrl()) return
+      const outcomes = await campaignOutcomes(campaignId, ids, deps)
+      for (const [pid, o] of outcomes) for (const c of campCols) put(pid, `camp.${c}`, o[c])
+    })(),
     (async () => {
       // computed facts (company registry status…) with the registry's own computes, keyed for this page
       if (!factCols.length) return
@@ -208,8 +243,22 @@ async function enrichLinked(client, ids, linked, values) {
     })(),
     (async () => {
       if (!recCols.length) return
-      const rows = await readIn(client, 'v_entity_graph_properties', ['property_id', ...recCols.map((c) => `rec_${c}`)].join(','), 'property_id', ids)
-      for (const r of rows) for (const c of recCols) {
+      // a rec_* column the deployed view does not carry yet (e.g. the verified pre-foreclosure columns before
+      // the view rebuild) drops out ALONE — named in errors — instead of failing every recorded-document column
+      let cols = [...recCols]
+      let rows = null
+      for (let attempt = 0; attempt < 6 && cols.length; attempt += 1) {
+        try {
+          rows = await readIn(client, 'v_entity_graph_properties', ['property_id', ...cols.map((c) => `rec_${c}`)].join(','), 'property_id', ids)
+          break
+        } catch (error) {
+          const missing = /column [^ ]*?"?rec_([a-z0-9_]+)"? does not exist/i.exec(String(error?.message || ''))?.[1]
+          if (!missing || !cols.includes(missing)) throw error
+          cols = cols.filter((c) => c !== missing)
+          errors.push({ source: `columns.rec.${missing}`, message: `rec_${missing} is not on v_entity_graph_properties yet` })
+        }
+      }
+      for (const r of rows || []) for (const c of cols) {
         const v = r[`rec_${c}`]
         put(clean(r.property_id), `rec.${c}`, Array.isArray(v) ? (v.length ? v.join(', ') : null) : v)
       }
@@ -301,7 +350,7 @@ async function enrichLinked(client, ids, linked, values) {
       for (const r of rows) count.set(clean(r.master_owner_id), (count.get(clean(r.master_owner_id)) || 0) + 1)
       for (const [pid, oid] of ownerOf) put(pid, 'email.count', count.get(oid) || null)
     })(),
-  ])
+  ]))
 }
 
 /**
@@ -315,7 +364,8 @@ export async function getEntityGraphColumnEnrichment(params = {}, deps = {}) {
   const linked = requested.filter((c) => !ENTITY_GRAPH_PROPERTY_COLUMNS.has(c))
   const ids = list(params.property_ids).slice(0, MAX_IDS)
   const values = {}
-  if (linked.length && ids.length) await enrichLinked(client, ids, linked, values)
+  const errors = []
+  if (linked.length && ids.length) await enrichLinked(client, ids, linked, values, { campaignId: clean(params.campaign_id) || null, deps: deps.campaignDeps || {}, errors })
   if (columns.length && ids.length) {
     for (let i = 0; i < ids.length; i += CHUNK) {
       const part = ids.slice(i, i + CHUNK)
@@ -330,5 +380,5 @@ export async function getEntityGraphColumnEnrichment(params = {}, deps = {}) {
       }
     }
   }
-  return { values, requested, generatedAt: new Date().toISOString() }
+  return { values, requested, errors, generatedAt: new Date().toISOString() }
 }
