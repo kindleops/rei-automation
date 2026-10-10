@@ -28,7 +28,8 @@ import { getPgPool } from '@/lib/postgres/client.js'
 import { COMPUTED_FACTS, baseColumnsFor, computeFacts, plainColumnType } from './entity-graph-facts.js'
 import { FACTS_TABLE_NAME, factsTableColumns } from './entity-graph-facts-ddl.js'
 
-const LOCK_KEY = 917_200_9 // eg_property_facts refresh
+export const FACTS_REFRESH_LOCK_KEY = 917_200_9 // eg_property_facts refresh (also held by scripts/entity-graph/backfill-eg-property-facts.mjs)
+const LOCK_KEY = FACTS_REFRESH_LOCK_KEY
 const FULL_CHUNK = 25_000
 const UPSERT_BATCH = 2_000
 const INCREMENTAL_CAP = 20_000
@@ -36,6 +37,49 @@ const q = (c) => `"${c}"`
 
 export function refreshEnabled(env = process.env) {
   return String(env?.EG_FACTS_REFRESH_ENABLED ?? '').toLowerCase() === 'true'
+}
+
+/* ── the write contract (shared with scripts/entity-graph/backfill-eg-property-facts.mjs) ── */
+
+/** The v_entity_graph_properties columns a facts row needs: every plain column + every computed fact's base inputs. */
+export function factsBaseColumns(columns = factsTableColumns()) {
+  const allComputed = COMPUTED_FACTS.map((f) => f.col)
+  return [...new Set([...columns.filter((c) => c.plain || c.col === 'property_id').map((c) => c.col), ...baseColumnsFor(allComputed)])].filter((c) => c === 'property_id' || plainColumnType(c))
+}
+
+/** One eg_property_facts record per base row: plain columns verbatim, computed facts from `facts` (Map id → values). */
+export function factRecords(baseRows, facts, runAt, columns = factsTableColumns()) {
+  return baseRows.map((r) => {
+    const id = String(r.property_id)
+    const f = facts.get(id) || {}
+    const o = {}
+    for (const c of columns) {
+      let v = c.plain || c.col === 'property_id' ? r[c.col] : f[c.col]
+      if (v instanceof Date) v = v.toISOString()
+      o[c.col] = v === undefined ? null : v
+    }
+    o.refreshed_at = runAt.toISOString()
+    return o
+  })
+}
+
+/** The upsert statement; $1 = JSON array of factRecords(). */
+export function factsUpsertSql(columns = factsTableColumns()) {
+  const set = columns.filter((c) => c.col !== 'property_id').map((c) => `${q(c.col)} = excluded.${q(c.col)}`).concat(['"refreshed_at" = excluded."refreshed_at"']).join(', ')
+  const list = [...columns.map((c) => q(c.col)), '"refreshed_at"'].join(', ')
+  return `insert into public.${FACTS_TABLE_NAME} (${list})
+             select ${list} from jsonb_populate_recordset(null::public.${FACTS_TABLE_NAME}, $1::jsonb)
+             on conflict ("property_id") do update set ${set}`
+}
+
+/**
+ * The 11:15–14:30 UTC heavy-read blackout (outbound start + morning refresh).
+ * The Worker's 5-minute lane calls the incremental refresh at every tick; inside
+ * this window the refresh does nothing.
+ */
+export function inRefreshBlackout(at = new Date()) {
+  const m = at.getUTCHours() * 60 + at.getUTCMinutes()
+  return m >= 11 * 60 + 15 && m < 14 * 60 + 30
 }
 
 /** Changed property ids since `since` (one statement per source, keyed by their own indexes). */
@@ -55,6 +99,7 @@ export const CHANGED_IDS_SQL = `
  */
 export async function refreshPropertyFacts({ mode = 'incremental', pool = null, now = () => new Date(), env = process.env, log = () => {} } = {}) {
   if (!refreshEnabled(env)) return { ok: false, skipped: 'EG_FACTS_REFRESH_ENABLED is not true' }
+  if (mode === 'incremental' && inRefreshBlackout(now())) return { ok: false, skipped: 'heavy_read_blackout' }
   const client = await (pool || getPgPool()).connect()
   const started = Date.now()
   let logId = null
@@ -74,32 +119,15 @@ export async function refreshPropertyFacts({ mode = 'incremental', pool = null, 
       const query = (sql, params, timeoutMs) => client.query({ text: sql, values: params }).then((r) => r)
       const allComputed = COMPUTED_FACTS.map((f) => f.col)
       const columns = factsTableColumns()
-      const baseCols = [...new Set([...columns.filter((c) => c.plain || c.col === 'property_id').map((c) => c.col), ...baseColumnsFor(allComputed)])].filter((c) => c === 'property_id' || plainColumnType(c))
+      const baseCols = factsBaseColumns(columns)
+      const upsert = factsUpsertSql(columns)
 
       let rows = 0
       const writeChunk = async (baseRows, { keyedMax }) => {
         const facts = await computeFacts(baseRows, allComputed, { query, timeoutMs: 60_000, now: runAt, keyedMax })
-        const records = baseRows.map((r) => {
-          const id = String(r.property_id)
-          const f = facts.get(id) || {}
-          const o = {}
-          for (const c of columns) {
-            let v = c.plain || c.col === 'property_id' ? r[c.col] : f[c.col]
-            if (v instanceof Date) v = v.toISOString()
-            o[c.col] = v === undefined ? null : v
-          }
-          o.refreshed_at = runAt.toISOString()
-          return o
-        })
-        const set = columns.filter((c) => c.col !== 'property_id').map((c) => `${q(c.col)} = excluded.${q(c.col)}`).concat(['"refreshed_at" = excluded."refreshed_at"']).join(', ')
-        const list = [...columns.map((c) => q(c.col)), '"refreshed_at"'].join(', ')
+        const records = factRecords(baseRows, facts, runAt, columns)
         for (let i = 0; i < records.length; i += UPSERT_BATCH) {
-          await client.query(
-            `insert into public.${FACTS_TABLE_NAME} (${list})
-             select ${list} from jsonb_populate_recordset(null::public.${FACTS_TABLE_NAME}, $1::jsonb)
-             on conflict ("property_id") do update set ${set}`,
-            [JSON.stringify(records.slice(i, i + UPSERT_BATCH))],
-          )
+          await client.query(upsert, [JSON.stringify(records.slice(i, i + UPSERT_BATCH))])
         }
         rows += records.length
       }

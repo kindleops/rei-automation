@@ -74,6 +74,14 @@ export class ApiContainer extends Container<Env> {
       // acquisition_scoring_backfill.status='running'. Default OFF.
       ACQUISITION_SCORING_BACKFILL_ENABLED:
         env.ACQUISITION_SCORING_BACKFILL_ENABLED === "true" ? "true" : "false",
+      // Entity Graph property facts (RC 8.5.5). The refresh writes only
+      // public.eg_property_facts + eg_refresh_log; default OFF. Table reads
+      // default ON (the API reads the table only once eg_refresh_log has an ok
+      // run); "off" is the kill switch back to the live computation.
+      EG_FACTS_REFRESH_ENABLED:
+        env.EG_FACTS_REFRESH_ENABLED === "true" ? "true" : "false",
+      EG_FACTS_TABLE_READS:
+        env.EG_FACTS_TABLE_READS === "off" ? "off" : "on",
 
       ...(env.DEPLOYMENT_ID ? { DEPLOYMENT_ID: env.DEPLOYMENT_ID } : {}),
       ...(env.DEPLOY_GIT_SHA ? { DEPLOY_GIT_SHA: env.DEPLOY_GIT_SHA } : {}),
@@ -253,6 +261,10 @@ interface Env {
   SIGNAL_CENTER_ENABLED?: string;
   /** Scoring backfill ceiling (container env). Absent => "false". */
   ACQUISITION_SCORING_BACKFILL_ENABLED?: string;
+  /** Entity Graph facts refresh ceiling (container env). Absent => "false". */
+  EG_FACTS_REFRESH_ENABLED?: string;
+  /** Entity Graph facts table reads. Absent => "on"; "off" = live computation. */
+  EG_FACTS_TABLE_READS?: string;
   // Email (Brevo transport + inbound verification).
   EMAIL_SEND_ENABLED?: string;
   BREVO_API_KEY?: string;
@@ -825,6 +837,22 @@ const SCORING_BACKFILL: CronJob = {
 };
 
 /**
+ * Entity Graph property facts INCREMENTAL refresh (RC 8.5.5, NOT commissioned).
+ * Recomputes eg_property_facts rows whose inputs changed since the last ok run
+ * (entity-graph-facts-refresh.js). Send-incapable: it writes only
+ * public.eg_property_facts + public.eg_refresh_log, never a source table.
+ * Self-skips the 11:15-14:30 UTC heavy-read blackout. Double gate:
+ * CRON_EG_FACTS_REFRESH_ENABLED (this registration) + EG_FACTS_REFRESH_ENABLED
+ * (container ceiling). No body and no query: the route's default mode is
+ * incremental; the full refresh is an operator run, never scheduled here.
+ */
+const EG_FACTS_REFRESH: CronJob = {
+  id: "eg_facts_refresh",
+  enabledBy: "CRON_EG_FACTS_REFRESH_ENABLED",
+  path: "/api/internal/entity-graph/facts-refresh",
+};
+
+/**
  * THE ONE GOVERNED PRODUCTION SCHEDULE.
  *
  * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
@@ -861,6 +889,7 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
     WORKFLOW_ORCHESTRATOR,
     SIGNAL_EVALUATE,
     SCORING_BACKFILL,
+    EG_FACTS_REFRESH,
   ],
   // Separate expression: the send lane's cadence must be tunable without
   // touching reconciliation, and a reader must see at a glance which schedule

@@ -73,7 +73,7 @@ describe('rail groups', () => {
     expect(deskPresets('master_owners').length).toBeGreaterThan(0)
   })
   it('every facet field belongs to its scope’s domain', () => {
-    const prefix: Record<string, RegExp> = { properties: /^(properties|records)\./, people: /^prospects\./, master_owners: /^master_owners\./, contact_methods: /^phones\./, buyers: /^buyers\./ }
+    const prefix: Record<string, RegExp> = { properties: /^(properties|records|facts)\./, people: /^prospects\./, master_owners: /^master_owners\./, contact_methods: /^phones\./, buyers: /^buyers\./ }
     for (const [scope, groups] of Object.entries(DESK_FACET_GROUPS)) {
       for (const f of (groups ?? []).flatMap((g) => g.facets)) expect(f.fieldKey).toMatch(prefix[scope])
     }

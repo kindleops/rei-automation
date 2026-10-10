@@ -101,7 +101,15 @@ const NOTIFICATION_PROJECTION_JOB_PATHS = ["/api/internal/notifications/stories/
  */
 const SCORING_BACKFILL_JOB_PATHS = ["/api/internal/acquisition/scoring-backfill"];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS, ...SCORING_BACKFILL_JOB_PATHS];
+/**
+ * Entity Graph property facts incremental refresh (RC 8.5.5) — registered on
+ * the reconciliation cadence, NOT commissioned: CRON_EG_FACTS_REFRESH_ENABLED
+ * and the container ceiling EG_FACTS_REFRESH_ENABLED are absent from every
+ * wrangler config. Send-incapable (writes only eg_property_facts + eg_refresh_log).
+ */
+const EG_FACTS_REFRESH_JOB_PATHS = ["/api/internal/entity-graph/facts-refresh"];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS, ...SCORING_BACKFILL_JOB_PATHS, ...EG_FACTS_REFRESH_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -488,5 +496,24 @@ test("the scoring backfill is registered on the reconciliation cadence but switc
     const vars = await configVars(cfg);
     assert.notEqual(vars.CRON_SCORING_BACKFILL_ENABLED, "true", "not commissioned: the owner flips this");
     assert.notEqual(vars.ACQUISITION_SCORING_BACKFILL_ENABLED, "true", "not commissioned: the owner flips this");
+  }
+});
+
+test("the EG facts refresh rides the reconciliation cadence, incremental only, switched OFF everywhere (flag + ceiling default-deny); table reads default on", async () => {
+  const code = await workerCode();
+  const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  const fiveMin = table[1].match(/"\*\/5 \* \* \* \*":\s*\[([^\]]*)\]/);
+  const oneMin = table[1].match(/"\* \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(fiveMin[1].includes("EG_FACTS_REFRESH"));
+  assert.ok(!oneMin[1].includes("EG_FACTS_REFRESH"), "never on the send lane");
+  const block = code.match(/const EG_FACTS_REFRESH: CronJob = \{([\s\S]*?)\};/);
+  assert.ok(block && block[1].includes('"CRON_EG_FACTS_REFRESH_ENABLED"') && block[1].includes('"/api/internal/entity-graph/facts-refresh"'));
+  assert.ok(!/body\s*:/.test(block[1]) && !/\?mode=/.test(block[1]), "the cron runs the default (incremental) mode only");
+  assert.match(code, /EG_FACTS_REFRESH_ENABLED:\s*\n?\s*env\.EG_FACTS_REFRESH_ENABLED === "true" \? "true" : "false"/);
+  assert.match(code, /EG_FACTS_TABLE_READS:\s*\n?\s*env\.EG_FACTS_TABLE_READS === "off" \? "off" : "on"/);
+  for (const cfg of [PRODUCTION, STAGING]) {
+    const vars = await configVars(cfg);
+    assert.notEqual(vars.CRON_EG_FACTS_REFRESH_ENABLED, "true", "not commissioned: the owner flips this");
+    assert.notEqual(vars.EG_FACTS_REFRESH_ENABLED, "true", "not commissioned: the owner flips this");
   }
 });
