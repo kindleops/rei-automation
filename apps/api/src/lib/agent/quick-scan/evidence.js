@@ -145,7 +145,7 @@ export function findingsFromTool(tool, output, ctx) {
         break
       }
       const parcel = output.parcel
-      const vendorAsOfParcel = parcel?.last_observed_at || parcel?.updated_at || parcel?.valuation_date || null
+      const vendorAsOfParcel = parcel?.updated_at || parcel?.valuation_date || null
       // mortgages
       const recMtg = (output.mortgages || []).filter((m) => m.recorded)
       if (recMtg.length) {
@@ -339,7 +339,7 @@ export function detectConflicts({ run_id, property_id, findings, outputs }) {
   const valuation = outputs['valuation.read']
   if (!recDocs?.available) return conflicts
   const parcel = recDocs.parcel || {}
-  const vendorAsOf = parcel.last_observed_at || parcel.updated_at || valuation?.provenance?.vendor_as_of || null
+  const vendorAsOf = parcel.updated_at || valuation?.provenance?.vendor_as_of || null
   const vendorFlags = valuation?.vendor?.equity_flags || []
   const vendorFreeClear = vendorFlags.includes('free and clear')
   const vendorLoan = num(valuation?.vendor?.total_loan_balance)

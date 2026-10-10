@@ -65,7 +65,7 @@ export interface SourceOpRow {
   purpose: string
   status: SourceOperationStatus
   retrieved_at: string | null
-  observation_count: number
+  finding_count: number
   reason: string | null
   message: string | null
   alternatives: string[]
@@ -208,7 +208,7 @@ function upsertSourceOp(v: ResearchView, task: TaskRow | undefined, e: AgentEven
   const key = `${e.task_id}:${source_id}`
   let i = v.sources.findIndex((s) => s.key === key)
   if (i < 0) {
-    v.sources = [...v.sources, { key, task_id: e.task_id, source_id, property_id: e.property_id, purpose: str(p.purpose) ?? (task?.finding_type ? (findingTypeMeta(task.finding_type)?.label ?? task.finding_type).toLowerCase() : 'lookup'), status: 'planned', retrieved_at: null, observation_count: 0, reason: null, message: null, alternatives: [], bytes: null, last_event_id: e.event_id }]
+    v.sources = [...v.sources, { key, task_id: e.task_id, source_id, property_id: e.property_id, purpose: str(p.purpose) ?? (task?.finding_type ? (findingTypeMeta(task.finding_type)?.label ?? task.finding_type).toLowerCase() : 'lookup'), status: 'planned', retrieved_at: null, finding_count: 0, reason: null, message: null, alternatives: [], bytes: null, last_event_id: e.event_id }]
     i = v.sources.length - 1
   }
   const cur = v.sources[i]
@@ -331,7 +331,7 @@ export function applyResearchEvent(prev: ResearchView, e: AgentEvent): ResearchV
     case 'observation.extracted': {
       touchTask((t) => ({ ...t, observations: [...t.observations, { display_value: str(p.display_value) ?? '', citation: str(p.citation), at: e.at }] }))
       const key = e.task_id ? v.sources.findIndex((s) => s.task_id === e.task_id) : -1
-      if (key >= 0) { const list = v.sources.slice(); list[key] = { ...list[key], observation_count: list[key].observation_count + 1 }; v.sources = list }
+      if (key >= 0) { const list = v.sources.slice(); list[key] = { ...list[key], finding_count: list[key].finding_count + 1 }; v.sources = list }
       break
     }
     case 'finding.upserted': {

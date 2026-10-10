@@ -229,7 +229,7 @@ export function applyEvent(view, event) {
     case 'source.failed': {
       const status = event.type.split('.')[1]
       const sk = `${p.source_id}:${event.property_id || '*'}`
-      const prev = view.sources[sk] || { source_id: p.source_id, property_id: event.property_id, observation_count: 0 }
+      const prev = view.sources[sk] || { source_id: p.source_id, property_id: event.property_id, finding_count: 0 }
       view.sources[sk] = {
         ...prev,
         status,
@@ -247,7 +247,7 @@ export function applyEvent(view, event) {
       const row = findRow(view, key)
       if (row && p.display_value) row.evidence.push({ display_value: p.display_value, finding_type: p.finding_type })
       for (const s of Object.values(view.sources)) {
-        if (s.task_id === event.task_id) s.observation_count += Array.isArray(p.observation_ids) ? p.observation_ids.length : 1
+        if (s.task_id === event.task_id) s.finding_count += Array.isArray(p.observation_ids) ? p.observation_ids.length : 1
       }
       break
     }

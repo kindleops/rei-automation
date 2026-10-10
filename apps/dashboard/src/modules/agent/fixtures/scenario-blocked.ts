@@ -45,7 +45,7 @@ if (import.meta.env.DEV || import.meta.env.VITE_LC_AGENT_FIXTURES === '1') regis
       { t: 980, type: 'source.retrieved', attempt: 2, payload: { ...base, bytes: 8_840 }, ...ids },
       { t: 1120, type: 'observation.extracted', attempt: 2, payload: { observation_ids: ['fx-o-d9'], finding_type: 'ownership', display_value: 'Warranty deed 2016 · homestead exemption on file', citation: 'OR book 17602 page 1189' }, ...ids },
       { t: 1240, type: 'finding.upserted', attempt: 2, payload: { finding: fxFinding({ finding_id: 'fx-f-d-own', property_id: pid, finding_type: 'ownership', evidence_status: 'recorded', value: { since: 2016, homestead: true }, display_value: 'Deeded 2016 · homestead exemption (owner-occupied)', source_id: SRC.duvalOr.source_id, observed_at: '2016-04-02', retrieved_at: '2026-10-08', fresh_until: '2027-01-06', citation: 'OR 17602/1189' }) }, ...ids },
-      { t: 1320, type: 'task.completed', attempt: 2, payload: { duration_ms: 1160, cost_usd: 0, observation_count: 1 }, ...ids },
+      { t: 1320, type: 'task.completed', attempt: 2, payload: { duration_ms: 1160, cost_usd: 0, finding_count: 1 }, ...ids },
     ]
   },
 })
@@ -80,7 +80,7 @@ export function blockedConflictScenario(): FixtureScenario {
     ...retrievalSteps(SRC.duvalPa, 'tax status', '2026-10-08', 22_310, [280, 760, 1300]),
     ['observation.extracted', 1460, { observation_ids: ['fx-o-d2'], finding_type: 'tax_status', display_value: '2025 taxes paid 2026-03-28 · $2,116.40', citation: 'tax_roll 2025 · paid_date' }],
     ['finding.upserted', 1580, { finding: fxFinding({ finding_id: 'fx-f-d-paid', property_id: pid, finding_type: 'tax_status', evidence_status: 'county_confirmed', value: { year: 2025, paid: '2026-03-28', amount: 2116.4 }, display_value: 'Paid · 2025 taxes (2026-03-28)', source_id: SRC.duvalPa.source_id, observed_at: '2026-03-28', retrieved_at: '2026-10-08', fresh_until: '2026-11-01', citation: 'tax roll 2025 · paid 2026-03-28' }) }],
-  ], end: ['task.completed', 1660, { duration_ms: 1660, cost_usd: 0, observation_count: 1 }] })
+  ], end: ['task.completed', 1660, { duration_ms: 1660, cost_usd: 0, finding_count: 1 }] })
   w.emit(4120, 'finding.conflict', { conflict_group_id: 'fx-cg-d-tax', finding_type: 'tax_delinquency', members: ['fx-f-d-vtax', 'fx-f-d-paid'], rule: 'county_beats_vendor', resolution_state: 'open' }, ids)
   w.emit(4180, 'decision', { summary: 'Conflict: vendor says delinquent, the county roll says 2025 taxes were paid. Holding both until the cross-check.', basis_finding_ids: ['fx-f-d-vtax', 'fx-f-d-paid'], criterion: 'conflict_open' }, ids)
 
@@ -89,7 +89,7 @@ export function blockedConflictScenario(): FixtureScenario {
     ...retrievalSteps(SRC.duvalClerk, 'tax-deed applications', '2026-10-08', 7_120, [300, 820, 1420]),
     ['observation.extracted', 1560, { observation_ids: ['fx-o-d3'], finding_type: 'tax_delinquency', display_value: 'No tax-deed application for the parcel', citation: 'tax-deed index · 0 applications' }],
     ['finding.upserted', 1680, { finding: fxFinding({ finding_id: 'fx-f-d-deed', property_id: pid, finding_type: 'tax_delinquency', key: 'tax_deed', evidence_status: 'county_confirmed', value: { applications: 0 }, display_value: 'No tax-deed application on file', is_negative_claim: true, source_id: SRC.duvalClerk.source_id, observed_at: '2026-10-08', retrieved_at: '2026-10-08', fresh_until: '2026-10-22', citation: 'tax-deed index · covering query' }) }],
-  ], end: ['task.completed', 1760, { duration_ms: 1760, cost_usd: 0, observation_count: 1 }] })
+  ], end: ['task.completed', 1760, { duration_ms: 1760, cost_usd: 0, finding_count: 1 }] })
 
   // 4 · official records → two parcels match → needs input
   w.task({ id: PARCEL_TASK, property: P, operation: 'research.match_parcel', source: SRC.duvalOr, finding_type: 'ownership', planned_at: 2280, start: 4400, steps: [
@@ -109,7 +109,7 @@ export function blockedConflictScenario(): FixtureScenario {
     ['source.searched', 200, { source_id: SRC.lcComps.source_id, host: SRC.lcComps.host, http_class: '2xx', retrieved_at: '2026-10-08', fetch_id: 'fx-fetch-dcomps', purpose: 'comparable sales' }],
     ['source.retrieved', 700, { source_id: SRC.lcComps.source_id, host: SRC.lcComps.host, http_class: '2xx', bytes: 4_880, retrieved_at: '2026-10-08', fetch_id: 'fx-fetch-dcomps', purpose: 'comparable sales' }],
     ['finding.upserted', 900, { finding: fxFinding({ finding_id: 'fx-f-d-comps', property_id: pid, finding_type: 'comparable_sales', evidence_status: 'recorded', value: { n: 4, median: 118000 }, display_value: '4 investor sales ≤ 0.6 mi · median $118,000', source_id: SRC.lcComps.source_id, observed_at: '2026-10-07', retrieved_at: '2026-10-08', fresh_until: '2026-10-22', citation: 'investor cluster lane · 12 months' }) }],
-  ], end: ['task.completed', 980, { duration_ms: 980, cost_usd: 0, observation_count: 4 }] })
+  ], end: ['task.completed', 980, { duration_ms: 980, cost_usd: 0, finding_count: 4 }] })
 
   // analyzing → cross-checking: the conflict resolves by rule; the vendor flag is downgraded
   w.emit(8400, 'job.phase', { phase: 'analyzing' })
@@ -119,7 +119,7 @@ export function blockedConflictScenario(): FixtureScenario {
   w.task({ id: 'fx-t-d-xc', property: P, operation: 'research.cross_check', source: SRC.duvalPa, other_source: SRC.vendor, finding_type: 'tax_delinquency', planned_at: 8850, start: 9000, steps: [
     ['finding.conflict', 900, { conflict_group_id: 'fx-cg-d-tax', finding_type: 'tax_delinquency', members: ['fx-f-d-vtax', 'fx-f-d-paid'], rule: 'county_beats_vendor', resolution_state: 'resolved_by_rule' }],
     ['finding.upserted', 960, { finding: fxFinding({ finding_id: 'fx-f-d-vtax', property_id: pid, finding_type: 'tax_delinquency', key: 'vendor_tax_flag', evidence_status: 'vendor_reported', value: true, display_value: 'Tax delinquent (vendor flag)', source_id: SRC.vendor.source_id, observed_at: '2026-05-31', freshness_state: 'stale', contradicted_by: 'fx-f-d-paid', conflict_group_id: 'fx-cg-d-tax', confidence: 0.15, citation: 'vendor snapshot · tax_delinquent=Y' }) }],
-  ], end: ['task.completed', 1000, { duration_ms: 1000, cost_usd: 0, observation_count: 0 }] })
+  ], end: ['task.completed', 1000, { duration_ms: 1000, cost_usd: 0, finding_count: 0 }] })
   w.emit(10060, 'decision', { summary: 'County roll shows 2025 taxes paid and no tax-deed application. The vendor delinquency flag is contradicted and no longer used.', basis_finding_ids: ['fx-f-d-paid', 'fx-f-d-deed', 'fx-f-d-vtax'], criterion: 'county_beats_vendor' }, ids)
 
   // synthesizing
@@ -166,7 +166,7 @@ export function blockedConflictScenario(): FixtureScenario {
     for (const [claims, when] of variants) {
       w.log.push({ t: t + 400, type: 'brief.section', payload: { section_key: s.key, label: s.label, claims, claim_count: claims.length, finding_refs: [...new Set(claims.flatMap((c) => c.finding_ids))] }, property_id: pid, task_id: id, ...when })
     }
-    w.emit(t + 440, 'task.completed', { duration_ms: 440, cost_usd: 0, observation_count: 0 }, { property_id: pid, task_id: id })
+    w.emit(t + 440, 'task.completed', { duration_ms: 440, cost_usd: 0, finding_count: 0 }, { property_id: pid, task_id: id })
     t += 500
   }
   w.emit(t + 40, 'usage.settled', { reserve_id: 'fx-res-dsyn', op_type: 'research.synthesize', route: 'research.synthesize', provider: 'fixture', model: 'fixture-sonnet', tokens: 5480, actual_usd: 0.024, accrued_usd: 0.024, remaining_usd: 0.726 }, ids)

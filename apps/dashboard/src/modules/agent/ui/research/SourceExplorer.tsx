@@ -43,7 +43,7 @@ export function SourceExplorer({ view, sources, propertyId, arrivalFloor, mode }
       seen.add(s.key)
       const src = sources[s.source_id] ?? null
       const t = view.tasks[view.taskIndex[s.task_id]]
-      out.push({ key: s.key, task_id: s.task_id, source: src, source_id: s.source_id, purpose: s.purpose, status: s.status, retrieved_at: s.retrieved_at, at: t?.ended_at ?? t?.started_at ?? null, observations: s.observation_count, reason: s.reason, message: s.message, alternatives: s.alternatives, arrival: s.last_event_id, cls: clsFor(s.task_id, src, s.status), noValue: noValueOf(s.task_id) })
+      out.push({ key: s.key, task_id: s.task_id, source: src, source_id: s.source_id, purpose: s.purpose, status: s.status, retrieved_at: s.retrieved_at, at: t?.ended_at ?? t?.started_at ?? null, observations: s.finding_count, reason: s.reason, message: s.message, alternatives: s.alternatives, arrival: s.last_event_id, cls: clsFor(s.task_id, src, s.status), noValue: noValueOf(s.task_id) })
     }
     for (const t of view.tasks) {
       if (propertyId && t.property_id !== propertyId) continue

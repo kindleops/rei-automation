@@ -200,7 +200,7 @@ function researchTask(emit, ctx, { property, source_id, finding_type, task_id, o
   const f = outcome.finding
   steps.push(() => emit('observation.extracted', { observation_ids: [`${task_id}-obs1`], finding_type, display_value: f.display_value, citation: f.citation || null }, { ...base, dt: 70 }))
   steps.push(() => emit('finding.upserted', { finding: makeFinding({ finding_id: `${task_id}-f`, property_id: pid, finding_type, source_id, ...f }) }, { ...base, dt: 50 }))
-  steps.push(() => emit('task.completed', { duration_ms: between(ctx.rand, 400, 2400), cost_usd: costUsd, observation_count: 1 }, { ...base, dt: 40 }))
+  steps.push(() => emit('task.completed', { duration_ms: between(ctx.rand, 400, 2400), cost_usd: costUsd, finding_count: 1 }, { ...base, dt: 40 }))
   return { added, steps }
 }
 

@@ -158,7 +158,7 @@ function eventSummary(e: AgentEvent): string {
   const f = p.finding as Record<string, unknown> | undefined
   switch (e.type) {
     case 'plan.task_added': case 'task.started': case 'tool.started': return s(p.label)
-    case 'task.completed': return `done · ${p.duration_ms ?? '—'} ms · ${p.observation_count ?? 0} observation(s) · $${Number(p.cost_usd ?? 0).toFixed(2)}`
+    case 'task.completed': return `done · ${p.duration_ms ?? '—'} ms · ${p.finding_count ?? 0} observation(s) · $${Number(p.cost_usd ?? 0).toFixed(2)}`
     case 'task.unavailable': case 'task.blocked': return `${reasonLabel(s(p.reason)) || s(p.reason)}${p.retry_at ? ` · retry ${fmtClock(s(p.retry_at))}` : ''}`
     case 'task.failed': return s(p.error_code)
     case 'source.retrieved': case 'source.searched': case 'source.opened': return `${s(p.source_id)} · ${s(p.purpose)}${p.http_class ? ` · ${s(p.http_class)}` : ''}`

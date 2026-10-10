@@ -62,33 +62,33 @@ export function singleDeepScenario(): FixtureScenario {
     ...retrievalSteps(SRC.cuyFiscal, 'parcel match', '2026-10-08', 18_412, [240, 560, 980]),
     ['observation.extracted', 1120, { observation_ids: ['fx-o-1'], finding_type: 'parcel', display_value: 'Parcel 128-07-044 · exact situs match', citation: 'parcel_roll.parcel_id' }],
     ['finding.upserted', 1240, { finding: fxFinding({ finding_id: 'fx-f-parcel', property_id: pid, finding_type: 'parcel', evidence_status: 'county_confirmed', value: '128-07-044', display_value: 'Parcel 128-07-044 · exact situs match', source_id: SRC.cuyFiscal.source_id, observed_at: '2026-10-08', retrieved_at: '2026-10-08', fresh_until: '2027-01-06', citation: 'parcel_roll.parcel_id = 128-07-044' }) }],
-  ], end: ['task.completed', 1320, { duration_ms: 1320, cost_usd: 0, observation_count: 2 }] })
+  ], end: ['task.completed', 1320, { duration_ms: 1320, cost_usd: 0, finding_count: 2 }] })
 
   w.task({ ...t2, start: 2900, steps: [
     ...retrievalSteps(SRC.cuyTreasurer, 'tax status', '2026-10-08', 2_406_118, [280, 700, 1480]),
     ['observation.extracted', 1640, { observation_ids: ['fx-o-2'], finding_type: 'tax_delinquency', display_value: 'Delinquent $1,804.22 · 2 half-years', citation: 'delinquent_list row 41,207 · balance_due' }],
     ['finding.upserted', 1780, { finding: fxFinding({ finding_id: 'fx-f-tax', property_id: pid, finding_type: 'tax_delinquency', evidence_status: 'county_confirmed', value: { balance: 1804.22, half_years: 2 }, display_value: 'Delinquent $1,804.22 · 2 half-years', is_discovery: true, source_id: SRC.cuyTreasurer.source_id, observed_at: '2026-10-01', retrieved_at: '2026-10-08', fresh_until: '2026-11-01', citation: 'delinquent_list 2026-10-01 · parcel 128-07-044 · balance_due 1804.22' }) }],
     ['usage.settled', 1840, { reserve_id: 'fx-res-tax', op_type: 'research.fetch', route: 'research.fetch', provider: 'fixture', model: null, tokens: 0, actual_usd: 0, accrued_usd: 0, remaining_usd: 0.75 }],
-  ], end: ['task.completed', 1900, { duration_ms: 1900, cost_usd: 0, observation_count: 1 }] })
+  ], end: ['task.completed', 1900, { duration_ms: 1900, cost_usd: 0, finding_count: 1 }] })
   w.emit(4860, 'decision', { summary: 'County list confirms the delinquency ($1,804.22). The vendor flag agrees — now backed by an official source.', basis_finding_ids: ['fx-f-tax', 'fx-f-vtax'], criterion: 'county_confirmed' }, ids)
 
   w.task({ ...t3, start: 2980, steps: [
     ...retrievalSteps(SRC.cleCode, 'code violations', '2026-10-08', 41_220, [300, 820, 1500]),
     ['observation.extracted', 1700, { observation_ids: ['fx-o-3'], finding_type: 'code_violation', display_value: 'Open case · exterior maintenance · opened 2026-08-14', citation: 'code_cases.case_status = OPEN' }],
     ['finding.upserted', 1880, { finding: fxFinding({ finding_id: 'fx-f-code', property_id: pid, finding_type: 'code_violation', evidence_status: 'county_confirmed', value: { open: 1, type: 'exterior maintenance' }, display_value: 'Open exterior-maintenance case (Aug 2026)', source_id: SRC.cleCode.source_id, observed_at: '2026-08-14', retrieved_at: '2026-10-08', fresh_until: '2026-10-22', citation: 'case CE-26-0814 · status OPEN' }) }],
-  ], end: ['task.completed', 2000, { duration_ms: 2000, cost_usd: 0, observation_count: 1 }] })
+  ], end: ['task.completed', 2000, { duration_ms: 2000, cost_usd: 0, finding_count: 1 }] })
 
   w.task({ ...t4, start: 4900, steps: [
     ...retrievalSteps(SRC.cuyClerk, 'foreclosure filings', '2026-10-08', 9_880, [260, 720, 1240]),
     ['observation.extracted', 1380, { observation_ids: ['fx-o-4'], finding_type: 'foreclosure', display_value: 'No foreclosure case for parcel 128-07-044', citation: 'docket search · parcel 128-07-044 · 0 cases' }],
     ['finding.upserted', 1480, { finding: fxFinding({ finding_id: 'fx-f-fcl', property_id: pid, finding_type: 'foreclosure', evidence_status: 'county_confirmed', value: { cases: 0 }, display_value: 'No foreclosure case filed', is_negative_claim: true, source_id: SRC.cuyClerk.source_id, observed_at: '2026-10-08', retrieved_at: '2026-10-08', fresh_until: '2026-10-22', citation: 'docket covers Cuyahoga Common Pleas · 0 cases' }) }],
-  ], end: ['task.completed', 1560, { duration_ms: 1560, cost_usd: 0, observation_count: 1 }] })
+  ], end: ['task.completed', 1560, { duration_ms: 1560, cost_usd: 0, finding_count: 1 }] })
 
   w.task({ ...t5, start: 5000, steps: [
     ...retrievalSteps(SRC.cuyRecorder, 'ownership', '2026-10-08', 12_604, [320, 900, 1600]),
     ['observation.extracted', 1760, { observation_ids: ['fx-o-5'], finding_type: 'ownership', display_value: 'Deed 2009 · owner mailing address Tucson, AZ', citation: 'deed 200906110412 · grantee mailing address' }],
     ['finding.upserted', 1900, { finding: fxFinding({ finding_id: 'fx-f-own', property_id: pid, finding_type: 'ownership', evidence_status: 'recorded', value: { since: 2009, mailing_state: 'AZ' }, display_value: 'Owned since 2009 · mailing address out of state', source_id: SRC.cuyRecorder.source_id, observed_at: '2009-06-11', retrieved_at: '2026-10-08', fresh_until: '2027-01-06', citation: 'deed 200906110412' }) }],
-  ], end: ['task.completed', 2000, { duration_ms: 2000, cost_usd: 0, observation_count: 1 }] })
+  ], end: ['task.completed', 2000, { duration_ms: 2000, cost_usd: 0, finding_count: 1 }] })
   // the vendor assumption is downgraded (contradicted) by the recorder
   w.emit(7050, 'finding.conflict', { conflict_group_id: 'fx-cg-occ', finding_type: 'ownership', members: ['fx-f-occ', 'fx-f-own'], rule: 'recorded_beats_vendor', resolution_state: 'resolved_by_rule' }, ids)
   w.emit(7100, 'finding.upserted', { finding: fxFinding({ finding_id: 'fx-f-occ', property_id: pid, finding_type: 'ownership', key: 'occupancy', evidence_status: 'vendor_reported', value: 'owner_occupied', display_value: 'Owner-occupied (vendor flag)', source_id: SRC.vendor.source_id, observed_at: '2026-06-30', freshness_state: 'aging', contradicted_by: 'fx-f-own', conflict_group_id: 'fx-cg-occ', confidence: 0.2, citation: 'vendor snapshot · owner_occupied=Y' }) }, ids)
@@ -103,14 +103,14 @@ export function singleDeepScenario(): FixtureScenario {
     ['source.retrieved', 780, { source_id: SRC.lcComps.source_id, host: SRC.lcComps.host, http_class: '2xx', bytes: 6_204, retrieved_at: '2026-10-08', fetch_id: 'fx-fetch-comps', purpose: 'comparable sales' }],
     ['observation.extracted', 960, { observation_ids: ['fx-o-6'], finding_type: 'comparable_sales', display_value: '6 investor-cluster sales · ≤ 0.4 mi · $58k–$71k', citation: 'v_recent_sold_comps · 12 mo · LLC buyers' }],
     ['finding.upserted', 1080, { finding: fxFinding({ finding_id: 'fx-f-comps', property_id: pid, finding_type: 'comparable_sales', evidence_status: 'recorded', value: { n: 6, median: 64500 }, display_value: '6 investor sales ≤ 0.4 mi · median $64,500', source_id: SRC.lcComps.source_id, observed_at: '2026-10-07', retrieved_at: '2026-10-08', fresh_until: '2026-10-22', citation: 'investor cluster lane · 12 months' }) }],
-  ], end: ['task.completed', 1160, { duration_ms: 1160, cost_usd: 0, observation_count: 6 }] })
+  ], end: ['task.completed', 1160, { duration_ms: 1160, cost_usd: 0, finding_count: 6 }] })
 
   w.task({ ...t8, start: 8600, steps: [
     ['source.searched', 200, { source_id: SRC.lcBuyers.source_id, host: SRC.lcBuyers.host, http_class: '2xx', retrieved_at: '2026-10-08', fetch_id: 'fx-fetch-buyers', purpose: 'investor demand' }],
     ['source.retrieved', 640, { source_id: SRC.lcBuyers.source_id, host: SRC.lcBuyers.host, http_class: '2xx', bytes: 3_310, retrieved_at: '2026-10-08', fetch_id: 'fx-fetch-buyers', purpose: 'investor demand' }],
     ['observation.extracted', 800, { observation_ids: ['fx-o-7'], finding_type: 'investor_demand', display_value: '11 cash buyers bought in 44105 · last 12 months', citation: 'buyer index · zip 44105' }],
     ['finding.upserted', 900, { finding: fxFinding({ finding_id: 'fx-f-buyers', property_id: pid, finding_type: 'investor_demand', evidence_status: 'recorded', value: { buyers: 11 }, display_value: '11 cash buyers in 44105 (12 mo)', source_id: SRC.lcBuyers.source_id, observed_at: '2026-10-07', retrieved_at: '2026-10-08', fresh_until: '2026-10-22', citation: 'recorded purchases · 12 months' }) }],
-  ], end: ['task.completed', 980, { duration_ms: 980, cost_usd: 0, observation_count: 11 }] })
+  ], end: ['task.completed', 980, { duration_ms: 980, cost_usd: 0, finding_count: 11 }] })
 
   // ── analyzing: one model extraction over the code-case notes (unstructured) ──
   w.emit(9800, 'job.phase', { phase: 'analyzing' })
@@ -120,14 +120,14 @@ export function singleDeepScenario(): FixtureScenario {
     ['observation.extracted', 1500, { observation_ids: ['fx-o-8'], finding_type: 'physical_condition', display_value: 'Case notes cite roof covering, gutters, porch steps', citation: 'case CE-26-0814 · inspector notes ¶2' }],
     ['finding.upserted', 1640, { finding: fxFinding({ finding_id: 'fx-f-cond', property_id: pid, finding_type: 'physical_condition', evidence_status: 'model_inference', value: ['roof', 'gutters', 'porch steps'], display_value: 'Exterior wear: roof, gutters, porch steps', confidence: 0.5, source_id: SRC.cleCode.source_id, observed_at: '2026-08-14', retrieved_at: '2026-10-08', citation: 'inferred from case CE-26-0814 notes' }) }],
     ['usage.settled', 1700, { reserve_id: 'fx-res-x1', op_type: 'research.extract', route: 'research.extract', provider: 'fixture', model: 'fixture-haiku', tokens: 1840, actual_usd: 0.004, accrued_usd: 0.004, remaining_usd: 0.746 }],
-  ], end: ['task.completed', 1760, { duration_ms: 1760, cost_usd: 0.004, observation_count: 1 }] })
+  ], end: ['task.completed', 1760, { duration_ms: 1760, cost_usd: 0.004, finding_count: 1 }] })
 
   // ── cross-checking ──
   w.emit(11800, 'job.phase', { phase: 'cross_checking' })
   w.emit(11800, 'job.property_state', { state: 'running', phase: 'cross_checking' }, ids)
   w.task({ id: 'fx-t-xc', property: P, operation: 'research.cross_check', source: SRC.cuyTreasurer, other_source: SRC.vendor, finding_type: 'tax_delinquency', planned_at: 11700, start: 11900, steps: [
     ['finding.conflict', 700, { conflict_group_id: 'fx-cg-tax', finding_type: 'tax_delinquency', members: ['fx-f-tax', 'fx-f-vtax'], rule: 'agreement', resolution_state: 'resolved_by_rule' }],
-  ], end: ['task.completed', 900, { duration_ms: 900, cost_usd: 0, observation_count: 0 }] })
+  ], end: ['task.completed', 900, { duration_ms: 900, cost_usd: 0, finding_count: 0 }] })
 
   // ── synthesizing: the brief streams section by section ──
   w.emit(13000, 'job.phase', { phase: 'synthesizing' })
@@ -167,7 +167,7 @@ export function singleDeepScenario(): FixtureScenario {
     const id = `fx-t-syn-${s.key}`
     w.task({ id, property: P, operation: 'research.synthesize_section', source: SRC.model, finding_type: null, section_label: s.label, planned_at: 12950, start: t, steps: [
       ['brief.section', 420, { section_key: s.key, label: s.label, claims, claim_count: claims.length, finding_refs: [...new Set(claims.flatMap((c) => c.finding_ids))] }],
-    ], end: ['task.completed', 460, { duration_ms: 460, cost_usd: 0, observation_count: 0 }] })
+    ], end: ['task.completed', 460, { duration_ms: 460, cost_usd: 0, finding_count: 0 }] })
     t += 520
   }
   w.emit(t + 40, 'usage.settled', { reserve_id: 'fx-res-syn', op_type: 'research.synthesize', route: 'research.synthesize', provider: 'fixture', model: 'fixture-sonnet', tokens: 6120, actual_usd: 0.027, accrued_usd: 0.031, remaining_usd: 0.719 }, ids)

@@ -330,7 +330,7 @@ export const CONFLICT_RESOLUTION_STATES = Object.freeze(['open', 'resolved_by_ru
  * @property {string} purpose              e.g. 'tax status'
  * @property {SourceOperationStatus} status
  * @property {string|null} retrieved_at
- * @property {number} observation_count
+ * @property {number} finding_count
  * @property {string|null} reason          failure/blocked reason code
  * @property {string[]} alternatives       alternatives offered on a blocked card (source names / manual links)
  */

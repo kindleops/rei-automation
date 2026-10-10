@@ -86,7 +86,7 @@ export const PARCEL_KEYS = Object.freeze([
   'fips', 'county_name', 'tax_delinquent', 'tax_delinquent_year', 'tax_year', 'tax_amount', 'active_lien', 'lien_count',
   'mortgage_count', 'open_mortgage_count', 'total_loan_balance', 'equity_percent', 'estimated_equity', 'estimated_value',
   'preforeclosure_status', 'preforeclosure_type', 'is_vacant', 'is_mls_active', 'mls_status', 'distress_flags',
-  'first_observed_at', 'last_observed_at', 'updated_at', 'valuation_date',
+  'updated_at', 'valuation_date',
 ])
 
 export function projectRecordedDocuments(dossier) {

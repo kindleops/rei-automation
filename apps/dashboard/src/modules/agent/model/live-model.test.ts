@@ -44,7 +44,7 @@ function log(): AgentEvent[] {
     ev('source.retrieved', { source_id: 'lc.property_record', host: 'leadcommand', retrieved_at: '2026-10-09T04:20:43Z', purpose: 'property facts' }, t1),
     ev('finding.upserted', { finding: finding({ finding_id: 'f_core', finding_type: 'property_facts', evidence_status: 'vendor_reported', source_class: 'third_party_vendor', display_value: 'Single family · 3 bd', limitations: ['Vendor snapshot attributes; not verified against the assessor.'] }) }, t1),
     ev('finding.upserted', { finding: finding({ finding_id: 'f_free', finding_type: 'equity', evidence_status: 'vendor_reported', source_class: 'third_party_vendor', display_value: 'Free And Clear (vendor flag)' }) }, t1),
-    ev('task.completed', { duration_ms: 812, cost_usd: 0, observation_count: 1 }, t1),
+    ev('task.completed', { duration_ms: 812, cost_usd: 0, finding_count: 1 }, t1),
     ev('task.started', { operation: 'research.check', source_id: 'lc.recorded_documents', finding_type: 'mortgage', label: 'Checking LeadCommand mortgage (Recorded documents (vendor-transcribed))' }, t2),
     ev('task.unavailable', { reason: 'interrupted_by_restart', retry_at: '2026-10-09T04:24:37Z' }, t2),
     ev('task.started', { operation: 'research.check', source_id: 'lc.recorded_documents', finding_type: 'mortgage', label: 'Checking LeadCommand mortgage (Recorded documents (vendor-transcribed))' }, { ...t2, attempt: 2 }),
@@ -52,7 +52,7 @@ function log(): AgentEvent[] {
     ev('finding.upserted', { finding: finding({ finding_id: 'f_lien', finding_type: 'lien', evidence_status: 'unavailable', source_class: 'unavailable_blocked', source_id: 'lc.recorded_documents', confidence: 0, confidence_band: 'low', freshness_state: 'never', unavailable_reason: 'no_rows_in_feed' }) }, { ...t2, attempt: 2 }),
     ev('finding.upserted', { finding: finding({ finding_id: 'f_sms', finding_type: 'sms_eligibility', evidence_status: 'internal_record', source_class: 'internal_record', source_id: 'lc.campaign_target_graph', display_value: 'Not SMS-eligible (no ranked phone)' }) }, { ...t2, attempt: 2 }),
     ev('finding.upserted', { finding: finding({ finding_id: 'f_eq', finding_type: 'equity', evidence_status: 'derived', source_class: 'derived_inferred', source_id: 'lc.derived_rules', display_value: 'Equity 100% (rule free_and_clear)' }) }, { ...t2, attempt: 2 }),
-    ev('task.completed', { duration_ms: 1400, cost_usd: 0, observation_count: 3 }, { ...t2, attempt: 2 }),
+    ev('task.completed', { duration_ms: 1400, cost_usd: 0, finding_count: 3 }, { ...t2, attempt: 2 }),
     ev('job.phase', { phase: 'cross_checking' }),
     ev('finding.conflict', {
       conflict_group_id: 'cfl_open', finding_type: 'mortgage', rule: 'free_clear_flag_vs_recorded_mortgage', resolution_state: 'open', best_supported: null,

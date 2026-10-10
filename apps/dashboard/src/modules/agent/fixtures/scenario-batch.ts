@@ -75,7 +75,7 @@ export function batchScenario(): FixtureScenario {
       ['source.searched', 160, { source_id: j.parcel.source_id, host: j.parcel.host, http_class: '2xx', retrieved_at: '2026-10-08', fetch_id: `fx-fetch-b${i}-p`, purpose: 'parcel match' }],
       ['source.retrieved', 560, { source_id: j.parcel.source_id, host: j.parcel.host, http_class: '2xx', bytes: 9_000 + i * 31, retrieved_at: '2026-10-08', fetch_id: `fx-fetch-b${i}-p`, purpose: 'parcel match' }],
       ['finding.upserted', 640, { finding: fxFinding({ finding_id: `fx-f-b${i}-parcel`, property_id: p.property_id, finding_type: 'parcel', evidence_status: 'county_confirmed', value: `P-${1000 + i}`, display_value: `Parcel P-${1000 + i} · exact match`, source_id: j.parcel.source_id, retrieved_at: '2026-10-08' }) }],
-    ], end: ['task.completed', 700, { duration_ms: 700, cost_usd: 0, observation_count: 1 }] })
+    ], end: ['task.completed', 700, { duration_ms: 700, cost_usd: 0, finding_count: 1 }] })
     t += 820
     // tax
     const discovery = DISCOVERY.has(i)
@@ -93,7 +93,7 @@ export function batchScenario(): FixtureScenario {
         ['source.searched', 200, { source_id: j.tax.source_id, host: j.tax.host, http_class: '2xx', retrieved_at: '2026-10-08', fetch_id: `fx-fetch-b${i}-t`, purpose: 'tax status' }],
         ['source.retrieved', 820, { source_id: j.tax.source_id, host: j.tax.host, http_class: '2xx', bytes: 40_000 + i * 77, retrieved_at: '2026-10-08', fetch_id: `fx-fetch-b${i}-t`, purpose: 'tax status' }],
         ['finding.upserted', 900, { finding: fxFinding({ finding_id: `fx-f-b${i}-tax`, property_id: p.property_id, finding_type: 'tax_delinquency', evidence_status: 'county_confirmed', value: delinquent ? { balance: bal } : { balance: 0 }, display_value: delinquent ? `Delinquent ${money(bal)}` : 'Current', is_discovery: discovery, source_id: j.tax.source_id, retrieved_at: '2026-10-08' }) }],
-      ], end: ['task.completed', 960, { duration_ms: 960, cost_usd: 0, observation_count: 1 }] })
+      ], end: ['task.completed', 960, { duration_ms: 960, cost_usd: 0, finding_count: 1 }] })
     }
     // code (parallel with tax inside the lane)
     const failed = FAILED.has(i)
@@ -107,14 +107,14 @@ export function batchScenario(): FixtureScenario {
         ['source.searched', 220, { source_id: j.code.source_id, host: j.code.host, http_class: '2xx', retrieved_at: '2026-10-08', fetch_id: `fx-fetch-b${i}-c`, purpose: 'code violations' }],
         ['source.retrieved', 900, { source_id: j.code.source_id, host: j.code.host, http_class: '2xx', bytes: 12_000 + i * 51, retrieved_at: '2026-10-08', fetch_id: `fx-fetch-b${i}-c`, purpose: 'code violations' }],
         ['finding.upserted', 980, { finding: fxFinding({ finding_id: `fx-f-b${i}-code`, property_id: p.property_id, finding_type: discovery ? 'condemnation' : 'code_violation', evidence_status: 'county_confirmed', value: discovery ? { condemned: true } : { open: i % 3 === 2 ? 1 : 0 }, display_value: discovery ? 'Condemnation order (2026)' : i % 3 === 2 ? '1 open code case' : 'No open code case', is_discovery: discovery, is_negative_claim: !discovery && i % 3 !== 2, source_id: j.code.source_id, retrieved_at: '2026-10-08' }) }],
-      ], end: ['task.completed', 1040, { duration_ms: 1040, cost_usd: 0, observation_count: 1 }] })
+      ], end: ['task.completed', 1040, { duration_ms: 1040, cost_usd: 0, finding_count: 1 }] })
     }
     t += 1300
     // comps (internal) + one extraction for some
     w.task({ id: tid('comps'), property: p, operation: 'research.check', source: SRC.lcComps, finding_type: 'comparable_sales', planned_at: 600 + i * 8 + 3, start: t, steps: [
       ['source.retrieved', 420, { source_id: SRC.lcComps.source_id, host: SRC.lcComps.host, http_class: '2xx', bytes: 3_000 + i * 17, retrieved_at: '2026-10-08', fetch_id: `fx-fetch-b${i}-m`, purpose: 'comparable sales' }],
       ['finding.upserted', 500, { finding: fxFinding({ finding_id: `fx-f-b${i}-comps`, property_id: p.property_id, finding_type: 'comparable_sales', evidence_status: 'recorded', value: { n: 3 + (i % 5) }, display_value: `${3 + (i % 5)} investor sales nearby`, source_id: SRC.lcComps.source_id, retrieved_at: '2026-10-08' }) }],
-    ], end: ['task.completed', 540, { duration_ms: 540, cost_usd: 0, observation_count: 3 + (i % 5) }] })
+    ], end: ['task.completed', 540, { duration_ms: 540, cost_usd: 0, finding_count: 3 + (i % 5) }] })
     t += 600
     // synthesis (billable, fixture-priced)
     const usd = Math.round((0.009 + (i % 4) * 0.003) * 1000) / 1000
@@ -125,7 +125,7 @@ export function batchScenario(): FixtureScenario {
         ? { text: 'Tax status not read — the collector blocks automated access. Not evidence of current taxes.', finding_ids: [`fx-f-b${i}-tax`], evidence_status: 'blocked', confidence: 0, freshness_state: 'never', source_name: SRC.stlCollector.name, is_inference: false }
         : { text: delinquent ? `Tax delinquent ${money(bal)}` : 'Taxes current', finding_ids: [`fx-f-b${i}-tax`], evidence_status: 'county_confirmed', confidence: 0.93, freshness_state: 'fresh', source_name: j.tax.name, is_inference: false }] as BriefClaim[], claim_count: 1, finding_refs: [`fx-f-b${i}-tax`] }],
       ['usage.settled', 600, { reserve_id: `fx-res-b${i}`, op_type: 'research.synthesize', route: 'research.synthesize', provider: 'fixture', model: 'fixture-haiku', tokens: 1200 + i * 9, actual_usd: usd, accrued_usd: accrued, remaining_usd: Math.round((18.75 - accrued) * 1000) / 1000 }],
-    ], end: ['task.completed', 640, { duration_ms: 640, cost_usd: usd, observation_count: 0 }] })
+    ], end: ['task.completed', 640, { duration_ms: 640, cost_usd: usd, finding_count: 0 }] })
     t += 700
     const opp: OpportunityClass = blocked ? 'unknown' : discovery ? 'priority' : delinquent ? 'strong' : i % 3 === 0 ? 'weak' : 'standard'
     if (discovery) w.emit(t - 40, 'decision', { summary: `High-priority: ${p.address} (synthetic) is county-confirmed tax-delinquent with a condemnation order.`, basis_finding_ids: [`fx-f-b${i}-tax`, `fx-f-b${i}-code`], criterion: 'discovery' }, ids)

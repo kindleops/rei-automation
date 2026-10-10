@@ -498,7 +498,7 @@ export function createQuickScanService({ store, runService, researchJobs, regist
         spec.sources.forEach((source_id, i) => {
           appendEventTx(tx, { ...base, task_id: i === 0 ? task_id : null, type: 'source.retrieved', payload: { source_id, host: 'leadcommand', http_class: '2xx', bytes: null, retrieved_at, fetch_id, purpose: findingLabel(row.finding_type) } }, evOpts)
         })
-        outcome = { type: 'task.completed', state: 'succeeded', payload: { duration_ms, cost_usd: 0, observation_count: findings.filter((f) => f.value !== null).length } }
+        outcome = { type: 'task.completed', state: 'succeeded', payload: { duration_ms, cost_usd: 0, finding_count: findings.filter((f) => f.value !== null).length } }
       }
       const valued = findings.filter((f) => f.value !== null)
       if (valued.length) {

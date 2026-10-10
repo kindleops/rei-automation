@@ -146,7 +146,7 @@ export const EVENT_PAYLOAD_FIELDS = Object.freeze({
 
   // ── research task + source ─────────────────────────────────────────────
   'task.started': ['operation', 'label', 'source_id', 'adapter_id', 'finding_type'],
-  'task.completed': ['duration_ms', 'cost_usd', 'observation_count'],
+  'task.completed': ['duration_ms', 'cost_usd', 'finding_count'],
   'task.blocked': ['reason', 'duration_ms', 'alternatives'],
   'task.failed': ['error_code', 'duration_ms', 'retry_at'],
   'task.unavailable': ['reason', 'retry_at'],
