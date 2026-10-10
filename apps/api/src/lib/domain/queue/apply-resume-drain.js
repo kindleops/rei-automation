@@ -14,18 +14,21 @@
 // this tick.
 import { info, warn } from "@/lib/logging/logger.js";
 import { planResumeDrain, RESUME_DRAIN_POLICY_VERSION } from "@/lib/domain/queue/resume-drain-policy.js";
+import { loadConversationalReplyWindowMinutes } from "@/lib/domain/queue/conversational-reply-window.js";
 
 const OVERDUE_STATUSES = ["queued", "scheduled", "pending"];
 const MAX_ROWS = 2000;
 
 const clean = (v) => String(v ?? "").trim();
 
-export async function applyResumeDrain({ supabase, now = new Date().toISOString(), plan = planResumeDrain, maxRows = MAX_ROWS } = {}) {
+export async function applyResumeDrain({ supabase, now = new Date().toISOString(), plan = planResumeDrain, maxRows = MAX_ROWS, getSystemValue = null } = {}) {
   if (!supabase?.from) return { ok: false, reason: "resume_drain_no_client", changed: 0 };
   const now_ms = Date.parse(now);
   const { data, error } = await supabase
     .from("send_queue")
-    .select("id,queue_status,scheduled_for,scheduled_for_utc,created_at,to_phone_number,thread_key,type,message_type,timezone,metadata")
+    // queue_key / source_event_id / inbound_message_id / touch_number: the
+    // in-session reply predicate (OWNER 2026-10-10) reads them.
+    .select("id,queue_key,queue_status,scheduled_for,scheduled_for_utc,created_at,to_phone_number,thread_key,type,message_type,timezone,source_event_id,inbound_message_id,touch_number,metadata")
     .in("queue_status", OVERDUE_STATUSES)
     .lt("scheduled_for_utc", now)
     .order("scheduled_for_utc", { ascending: true })
@@ -37,7 +40,10 @@ export async function applyResumeDrain({ supabase, now = new Date().toISOString(
   }));
   if (!rows.length) return { ok: true, scanned: 0, changed: 0, counts: {} };
 
-  const decisions = plan(rows, { now: now_ms });
+  // OWNER 2026-10-10: an in-session reply is sent, never re-planned for the
+  // local window. Window from system_control (read-only), code default 30.
+  const conversational_reply_window_minutes = await loadConversationalReplyWindowMinutes({ getSystemValue });
+  const decisions = plan(rows, { now: now_ms, conversational_reply_window_minutes });
   const counts = {};
   let changed = 0;
   for (let i = 0; i < rows.length; i += 1) {

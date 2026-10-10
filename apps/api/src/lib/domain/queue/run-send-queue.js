@@ -363,7 +363,7 @@ export async function runSendQueue(
   // this tick if the drain cannot complete.
   const drain_test_fake = !deps.applyResumeDrain && process.env.NODE_ENV === "test" && supabase !== defaultSupabase;
   if (!dry_run && supabase && !drain_test_fake) {
-    const drain = await (deps.applyResumeDrain || applyResumeDrain)({ supabase, now });
+    const drain = await (deps.applyResumeDrain || applyResumeDrain)({ supabase, now, getSystemValue: get_system_value });
     if (!drain?.ok) {
       log_warn("queue_runner.resume_drain_failed", { reason: drain?.reason || null });
       return {
