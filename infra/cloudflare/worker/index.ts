@@ -217,9 +217,63 @@ export class ApiContainer extends Container<Env> {
       ...(env.BREVO_WEBHOOK_SECRET ? { BREVO_WEBHOOK_SECRET: env.BREVO_WEBHOOK_SECRET } : {}),
       ...(env.EMAIL_INBOUND_SECRET ? { EMAIL_INBOUND_SECRET: env.EMAIL_INBOUND_SECRET } : {}),
       ...(env.EMAIL_INBOUND_DOMAIN ? { EMAIL_INBOUND_DOMAIN: env.EMAIL_INBOUND_DOMAIN } : {}),
+      // READ-ONLY AI AGENT (owner GO 2026-10-10). The API re-checks the operator
+      // allowlist itself (it never trusts this Worker alone), so the list is
+      // forwarded; the agent additionally requires AGENT_ALLOWED_USER_IDS.
+      ...(env.OPS_ALLOWED_USER_IDS ? { OPS_ALLOWED_USER_IDS: env.OPS_ALLOWED_USER_IDS } : {}),
+      ...agentEnvVars(env),
     };
   }
 }
+
+/**
+ * The agent's EXACT container allowlist (reviewed; never a pattern or a spread).
+ * Each is forwarded only when the Worker holds it. Absent => the API fails
+ * closed: AGENT_ENABLED unset => every agent route 404; spend caps unset => $0;
+ * AGENT_DATABASE_URL unset => no store => no run; AGENT_ANTHROPIC_API_KEY unset
+ * => no model call. AGENT_ANTHROPIC_API_KEY is a dedicated name so no other code
+ * path that reads ANTHROPIC_API_KEY ever receives a key.
+ */
+const AGENT_FORWARDED_VARS = [
+  "AGENT_ENABLED",
+  "AGENT_LIVE_ROUTES",
+  "AGENT_LIVE_PRODUCTION_PILOT",
+  "AGENT_STORE",
+  "AGENT_MAX_MODE",
+  "AGENT_RESEARCH_ENABLED",
+  "AGENT_ALLOWED_USER_IDS",
+  "AGENT_DATABASE_URL",
+  "AGENT_DATABASE_CA_PEM",
+  "AGENT_SUPABASE_JWT_SECRET",
+  "AGENT_ANTHROPIC_API_KEY",
+  "AGENT_SPEND_GLOBAL_DAILY_USD",
+  "AGENT_SPEND_USER_DAILY_USD",
+  "AGENT_SPEND_CYCLE_USD",
+  "AGENT_MODEL_DEFAULT_CANDIDATES",
+  "AGENT_MODEL_ESCALATION_CANDIDATES",
+  "AGENT_RATE_MUTATIONS_PER_MIN",
+  "AGENT_RATE_READS_PER_MIN",
+  "AGENT_USER_DAILY_RUNS",
+] as const;
+
+
+function agentEnvVars(env: Env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of AGENT_FORWARDED_VARS) {
+    const value = env[name];
+    if (typeof value === "string" && value !== "") out[name] = value;
+  }
+  return out;
+}
+
+/**
+ * Edge kill switch. The container reads its env only at start, so flipping
+ * AGENT_ENABLED there needs a restart; this check runs on EVERY request in the
+ * Worker (a `wrangler secret put` publishes a new Worker version at once), so
+ * AGENT_ENABLED != "1" makes every agent route 404 immediately, before auth
+ * and before the container sees the request.
+ */
+const isAgentPath = (pathname: string) => pathname === "/api/cockpit/agent" || pathname.startsWith("/api/cockpit/agent/");
 
 interface Env {
   ASSETS: Fetcher;
@@ -281,6 +335,27 @@ interface Env {
   BREVO_WEBHOOK_SECRET?: string;
   EMAIL_INBOUND_SECRET?: string;
   EMAIL_INBOUND_DOMAIN?: string;
+  // Read-only AI agent (see AGENT_FORWARDED_VARS). Secrets: AGENT_DATABASE_URL,
+  // AGENT_DATABASE_CA_PEM, AGENT_SUPABASE_JWT_SECRET, AGENT_ANTHROPIC_API_KEY.
+  AGENT_ENABLED?: string;
+  AGENT_LIVE_ROUTES?: string;
+  AGENT_LIVE_PRODUCTION_PILOT?: string;
+  AGENT_STORE?: string;
+  AGENT_MAX_MODE?: string;
+  AGENT_RESEARCH_ENABLED?: string;
+  AGENT_ALLOWED_USER_IDS?: string;
+  AGENT_DATABASE_URL?: string;
+  AGENT_DATABASE_CA_PEM?: string;
+  AGENT_SUPABASE_JWT_SECRET?: string;
+  AGENT_ANTHROPIC_API_KEY?: string;
+  AGENT_SPEND_GLOBAL_DAILY_USD?: string;
+  AGENT_SPEND_USER_DAILY_USD?: string;
+  AGENT_SPEND_CYCLE_USD?: string;
+  AGENT_MODEL_DEFAULT_CANDIDATES?: string;
+  AGENT_MODEL_ESCALATION_CANDIDATES?: string;
+  AGENT_RATE_MUTATIONS_PER_MIN?: string;
+  AGENT_RATE_READS_PER_MIN?: string;
+  AGENT_USER_DAILY_RUNS?: string;
 }
 
 async function forwardToApi(request: Request, env: Env): Promise<Response> {
@@ -441,6 +516,9 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
+      if (isAgentPath(url.pathname) && env.AGENT_ENABLED !== "1") {
+        return new Response(null, { status: 404, headers: { "Cache-Control": "no-store" } });
+      }
       if (isBrowserApiPath(url.pathname)) {
         return handleBrowserApi(request, env);
       }
