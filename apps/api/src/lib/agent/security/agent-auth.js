@@ -71,9 +71,22 @@ export function decodeJwt(token) {
   return { header, claims, signingInput: `${parts[0]}.${parts[1]}`, signature: parts[2] }
 }
 
-/** The operator allowlist (OPS_ALLOWED_USER_IDS). Empty ⇒ nobody (fail closed). */
+const idList = (v) => new Set(clean(v).split(',').map(clean).filter(Boolean).map((x) => x.toLowerCase()))
+
+/**
+ * The agent operator allowlist. Empty ⇒ nobody (fail closed).
+ *   OPS_ALLOWED_USER_IDS    the dashboard operator allowlist (the Worker's own gate)
+ *   AGENT_ALLOWED_USER_IDS  the AGENT allowlist (owner 10-10: the owner's verified id only)
+ * When AGENT_ALLOWED_USER_IDS is set, a user must be on BOTH lists. In production
+ * it is REQUIRED: unset ⇒ nobody, so a wider dashboard allowlist never widens the agent.
+ */
 export function operatorAllowlist(env = process.env) {
-  return new Set(clean(env?.OPS_ALLOWED_USER_IDS).split(',').map(clean).filter(Boolean))
+  const ops = idList(env?.OPS_ALLOWED_USER_IDS)
+  const agentRaw = clean(env?.AGENT_ALLOWED_USER_IDS)
+  const prod = clean(env?.NODE_ENV) === 'production' || clean(env?.VERCEL_ENV) === 'production'
+  if (!agentRaw) return prod ? new Set() : ops
+  const agent = idList(agentRaw)
+  return new Set([...ops].filter((id) => agent.has(id)))
 }
 
 /**

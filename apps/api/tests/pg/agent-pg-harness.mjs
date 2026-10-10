@@ -23,6 +23,10 @@ export const SQL = {
   pretest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence_pretest.sql'),
   migration: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence.sql'),
   rollback: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence_rollback.sql'),
+  // read-only research agent (companion; applied after the S3 migration)
+  researchPretest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro_pretest.sql'),
+  research: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro.sql'),
+  researchRollback: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro_rollback.sql'),
 }
 
 export const ADMIN_URL = String(process.env.AGENT_PG_TEST_DB_URL || '').trim()

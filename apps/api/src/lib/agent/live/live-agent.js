@@ -90,10 +90,20 @@ export function agentPgPoolConfig(env = process.env, { readFile = (f) => fs.read
   return { connectionString: u.toString(), ssl, max: 3, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000, application_name: 'lc-agent-s3' }
 }
 
+const POOL_KEY = Symbol.for('lc.agent.pg.pool')
+
+/** ONE process-wide agent_api pool (Quick Scan store + research store share it; connection limit 10). */
+export function getAgentPgPool(env = process.env) {
+  if (!globalThis[POOL_KEY]) {
+    const pool = new pg.Pool(agentPgPoolConfig(env))
+    pool.on('error', () => {}) // a dropped idle client is replaced on next checkout
+    globalThis[POOL_KEY] = pool
+  }
+  return globalThis[POOL_KEY]
+}
+
 function createAgentPgPool(env) {
-  const pool = new pg.Pool(agentPgPoolConfig(env))
-  pool.on('error', () => {}) // a dropped idle client is replaced on next checkout
-  return pool
+  return getAgentPgPool(env)
 }
 
 export function defaultStoreDir(env = process.env) {

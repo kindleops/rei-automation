@@ -47,6 +47,7 @@
     "test:critical:chunked": "node scripts/run-critical-suite.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
     "@mapbox/vector-tile": "^2.0.4",
     "@sentry/nextjs": "^10.49.0",
     "@sentry/node": "^10.49.0",
