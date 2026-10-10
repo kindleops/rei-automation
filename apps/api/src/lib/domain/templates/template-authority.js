@@ -37,6 +37,11 @@ export const CONDITION_QUESTION_USE_CASES = Object.freeze(
     "condition_followup",
     "repairs_followup",
     "repair_clarification",
+    // S4 property-detail questions (stage_code S4 in sms_templates): "is it
+    // vacant or occupied?" is part of the condition stage, so it is never
+    // asked before the seller's price either (owner flow 2026-10-10).
+    "occupancy_probe",
+    "vacancy_probe",
   ])
 );
 

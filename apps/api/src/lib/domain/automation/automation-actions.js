@@ -528,7 +528,68 @@ async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
   };
 }
 
+// ── Inbound rule-engine guard (owner P0 2026-10-10) ────────────────────────
+// The Podio-era stage.* rules fire on EVERY inbound and wrote lifecycle codes
+// that the canonical registry inverts: status "open" → operational_status
+// not_contacted (759 prod inbounds in 14 days reset active_communication /
+// needs_review / paused / scheduled to not_contacted), stage "needs_offer" →
+// lifecycle "offer" (a regex on "price|how much" promoted threads to S5),
+// "not_interested" → offer_interest. On an inbound the seller decision spine
+// (process-seller-inbound-message → patchUniversalLeadState) is the ONLY
+// lifecycle / status authority, and pipeline stage derives from offer /
+// contract / closing events only. Parsed text is evidence: an ask may raise
+// urgency only when the classifier HOLDS a plausible seller asking price —
+// never for a question ("how much?"), never for an implausible ask.
+export const INBOUND_RULE_EVENT = "inbound_message_received";
+
+export function isPlausibleHeldAskingPrice(classification = null) {
+  const c = classification && typeof classification === "object" ? classification : {};
+  const intent = clean(c.primary_intent || c.detected_intent).toLowerCase();
+  const parse = c.price_parse || c.metadata?.price_parse || null;
+  return (
+    intent === "asking_price_provided" &&
+    parse?.qualifies_as_seller_asking_price === true &&
+    !parse?.implausibility
+  );
+}
+
+export function guardInboundRulePatch({ event = {}, params = {} } = {}) {
+  if (clean(event?.event_type) !== INBOUND_RULE_EVENT) return { params, suppressed: null };
+  const payload = payloadOf(event);
+  const plausible_ask = isPlausibleHeldAskingPrice(payload.classification);
+  const suppressed = {};
+  const next = { ...params };
+  for (const key of ["stage", "status", "next_action"]) {
+    if (clean(next[key])) {
+      suppressed[key] = next[key];
+      delete next[key];
+    }
+  }
+  const escalates = next.is_urgent === true || clean(next.priority).toLowerCase() === "urgent";
+  if (escalates && !plausible_ask) {
+    if (next.is_urgent === true) suppressed.is_urgent = true;
+    if (clean(next.priority)) suppressed.priority = next.priority;
+    delete next.is_urgent;
+    delete next.priority;
+  }
+  const meta = ensureObject(next.metadata);
+  if (clean(meta.lead_temperature).toLowerCase() === "hot" && !plausible_ask) {
+    suppressed.lead_temperature = meta.lead_temperature;
+    const { lead_temperature: _hot, ...rest } = meta;
+    next.metadata = rest;
+  }
+  return {
+    params: next,
+    suppressed: Object.keys(suppressed).length
+      ? { ...suppressed, reason: plausible_ask ? "inbound_lifecycle_owned_by_seller_flow" : "inbound_lifecycle_owned_by_seller_flow_no_plausible_ask" }
+      : null,
+  };
+}
+
 async function patchThreadState({ db, event, params, dry_run } = {}) {
+  const guarded = guardInboundRulePatch({ event, params });
+  params = guarded.params;
+
   const thread_key = buildThreadKey(event, params);
   if (!thread_key) return { ok: false, skipped: true, reason: "missing_thread_key" };
 
@@ -571,6 +632,7 @@ async function patchThreadState({ db, event, params, dry_run } = {}) {
       automation_engine: {
         ...ensureObject(existing_metadata.automation_engine),
         ...metadata_patch,
+        ...(guarded.suppressed ? { suppressed_patch: guarded.suppressed } : {}),
         last_event_type: event.event_type,
         last_rule_key: params.rule_key || null,
         patched_at: nowIso(),

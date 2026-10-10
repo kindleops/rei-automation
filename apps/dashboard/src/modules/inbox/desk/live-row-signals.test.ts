@@ -71,6 +71,14 @@ describe('signals come only from real events', () => {
     expect(readRowSignal(KEY, T0)?.kind).toBe('failed')
   })
 
+  it('a transport failure reads "failed"; a sender park (daily cap) does not', () => {
+    ingestInboxRealtimeSignal({ table: 'send_queue', eventType: 'UPDATE', row: { source: 'auto_reply', queue_status: 'failed_transport' }, threadKey: KEY }, T0)
+    expect(readRowSignal(KEY, T0)?.kind).toBe('failed')
+    const OTHER = '+15550009999'
+    ingestInboxRealtimeSignal({ table: 'send_queue', eventType: 'UPDATE', row: { source: 'auto_reply', queue_status: 'blocked_sender_ineligible' }, threadKey: OTHER }, T0)
+    expect(readRowSignal(OTHER, T0)?.kind).not.toBe('failed')
+  })
+
   it('a message held for review reads "held" (never replying)', () => {
     ingestInboxRealtimeSignal({ table: 'message_events', eventType: 'UPDATE', row: { direction: 'inbound', metadata: { human_review_required: true } }, threadKey: KEY }, T0)
     expect(readRowSignal(KEY, T0)?.kind).toBe('held')

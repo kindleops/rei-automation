@@ -160,7 +160,11 @@ export function ingestInboxRealtimeSignal(input: InboxRealtimeSignalInput, now =
     const automation = AUTOMATION_QUEUE_SOURCES.has(source)
     if (!automation && !OPERATOR_QUEUE_SOURCES.has(source)) return
     const status = lower(row.queue_status)
-    if (status === 'failed' || status.includes('blocked')) {
+    // A sender park (blocked_sender_ineligible: daily cap / cooling — "parking
+    // is NOT a send failure", sender-routing-wake.js) is not "Send failed";
+    // failed_transport / undelivered are.
+    const parked = status === 'blocked_sender_ineligible'
+    if (!parked && (status.startsWith('failed') || status === 'undelivered' || status.includes('blocked'))) {
       put(key, { kind: 'failed', at: now, until: now + DURATION.failed, automation })
     } else if (status === 'processing' || status === 'sending') {
       put(key, { kind: 'replying', at: now, until: now + DURATION.replying, automation })

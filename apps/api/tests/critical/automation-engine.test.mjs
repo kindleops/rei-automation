@@ -309,11 +309,11 @@ test("automation engine: wrong number suppresses phone and cancels queue", async
   assert.equal(supabase.rows.phones[0].phone_contact_status, "wrong_number");
 });
 
-test("automation engine: asking price moves thread hot and urgent without sending", async () => {
+test("automation engine: a price QUESTION is evidence only — never hot / urgent / Offer (owner 2026-10-10)", async () => {
   const supabase = createFakeSupabase();
 
   const result = await runAutomationEngine({
-    event: inboundEvent("How much is your offer?"),
+    event: inboundEvent("How much is your offer?", { classification: { primary_intent: "asks_offer" } }),
     supabaseClient: supabase,
   });
 
@@ -322,15 +322,52 @@ test("automation engine: asking price moves thread hot and urgent without sendin
   );
 
   assert.equal(result.ok, true);
-  // Lifecycle money/contract gate (2026-10-07): a seller asking for an offer is
-  // evidence, not an offer event — an automated write never moves the thread
-  // projection to Offer by itself. Hot/urgent still apply.
+  // Pipeline = projection: a seller asking for an offer is evidence, not an
+  // offer event, and we do not hold their price — no promotion of any kind.
   assert.notEqual(thread.stage, "offer");
   assert.notEqual(thread.lifecycle_stage, "offer");
-  assert.equal(thread.priority, "urgent");
+  assert.notEqual(thread.priority, "urgent");
+  assert.notEqual(thread.is_urgent, true);
+  assert.notEqual(thread.metadata.automation_engine.lead_temperature, "hot");
+  assert.equal(thread.metadata.automation_engine.suppressed_patch.is_urgent, true);
+  assert.equal((supabase.rows.send_queue || []).length, 0);
+});
+
+test("automation engine: an ABSURD ask ($3M on a $174K house) never becomes priority / hot", async () => {
+  const supabase = createFakeSupabase();
+  await runAutomationEngine({
+    event: inboundEvent("$3M firm, that's my price", {
+      dedupe_key: "absurd-ask-1",
+      classification: {
+        primary_intent: "asking_price_implausible",
+        price_parse: { value: 3_000_000, qualifies_as_seller_asking_price: false, implausibility: { implausible: true, rule: "ratio_to_estimate", ratio: 17.24 } },
+      },
+    }),
+    supabaseClient: supabase,
+  });
+  const thread = supabase.rows.inbox_thread_state.find((row) => row.thread_key === "+15551234567");
+  assert.notEqual(thread.is_urgent, true);
+  assert.notEqual(thread.priority, "urgent");
+  assert.notEqual(thread.metadata.automation_engine.lead_temperature, "hot");
+  assert.notEqual(thread.lifecycle_stage, "offer");
+  // the ask itself is still on record (stored, never promoted)
+  assert.equal(thread.metadata.automation_engine.suppressed_patch.lead_temperature, "hot");
+});
+
+test("automation engine: a plausible HELD asking price may raise urgency; lifecycle still belongs to the seller flow", async () => {
+  const supabase = createFakeSupabase();
+  await runAutomationEngine({
+    event: inboundEvent("I'd take 165k for it, what's your price", {
+      dedupe_key: "plausible-ask-1",
+      classification: { primary_intent: "asking_price_provided", price_parse: { value: 165000, qualifies_as_seller_asking_price: true } },
+    }),
+    supabaseClient: supabase,
+  });
+  const thread = supabase.rows.inbox_thread_state.find((row) => row.thread_key === "+15551234567");
   assert.equal(thread.is_urgent, true);
   assert.equal(thread.metadata.automation_engine.lead_temperature, "hot");
-  assert.equal((supabase.rows.send_queue || []).length, 0);
+  assert.notEqual(thread.lifecycle_stage, "offer");
+  assert.notEqual(thread.operational_status, "not_contacted");
 });
 
 test("automation engine: delivered/no-reply plans one dry-run follow-up and no live outbound send", async () => {
@@ -586,16 +623,15 @@ test("automation engine: safe action aliases are dry-run or existing-table only"
   );
 
   assert.equal(result.ok, true);
-  // Lifecycle fields now flow through patchUniversalLeadState, which
-  // normalizes legacy free-text values into the canonical registry vocabulary
-  // ("open" → not_contacted, "needs_offer" → offer) and mirrors legacy columns.
-  assert.equal(thread.status, "not_contacted");
-  assert.equal(thread.operational_status, "not_contacted");
-  // update_stage → needs_offer is withheld by the lifecycle money/contract gate
-  // (2026-10-07): Offer+ follows the gated opportunity, never an automation rule.
+  // Owner P0 2026-10-10: on an INBOUND the seller decision spine is the only
+  // lifecycle / status writer. The legacy "open" alias (→ not_contacted) reset
+  // 759 live threads in 14 days, so inbound rules never write status / stage,
+  // and a "hot" temperature needs a plausible held asking price.
+  assert.notEqual(thread.status, "not_contacted");
+  assert.notEqual(thread.operational_status, "not_contacted");
   assert.notEqual(thread.stage, "offer");
   assert.notEqual(thread.lifecycle_stage, "offer");
-  assert.equal(thread.metadata.automation_engine.lead_temperature, "hot");
+  assert.notEqual(thread.metadata.automation_engine.lead_temperature, "hot");
   assert.equal(supabase.rows.ops_notifications.length, 1);
   assert.equal(followupAction.result.dry_run, true);
   assert.equal((supabase.rows.send_queue || []).length, 0);

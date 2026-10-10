@@ -42,12 +42,34 @@ export const NO_RESPONSE_MODE_KEY = "followup_no_response_mode";
 export const NO_RESPONSE_CONFIG_KEY = "followup_no_response_config";
 export const NO_RESPONSE_MODES = Object.freeze(["disabled", "dry_run", "live"]);
 
-export const NO_RESPONSE_KINDS = Object.freeze({ S2_INTEREST: "s2_interest", OFFER: "offer" });
+// S3_ASKING_PRICE (owner, 2026-10-10): silence after our "do you have an
+// asking price in mind?" question re-asks the price at 24h, same chain shape.
+export const NO_RESPONSE_KINDS = Object.freeze({
+  S2_INTEREST: "s2_interest",
+  S3_ASKING_PRICE: "s3_asking_price",
+  OFFER: "offer",
+});
 
 /** Step → template use case. Step index 0 = FU1. */
 export const NO_RESPONSE_USE_CASES = Object.freeze({
   [NO_RESPONSE_KINDS.S2_INTEREST]: Object.freeze(["s2_no_response_fu1", "s2_no_response_fu2", "s2_no_response_nurture"]),
+  [NO_RESPONSE_KINDS.S3_ASKING_PRICE]: Object.freeze(["s3_no_response_fu1", "s3_no_response_fu2", "s3_no_response_nurture"]),
   [NO_RESPONSE_KINDS.OFFER]: Object.freeze(["offer_no_response_fu1", "offer_no_response_fu2", "offer_no_response_nurture"]),
+});
+
+/**
+ * Already-APPROVED sms_templates use cases a step may also render from, tried
+ * after the step's own use case. Only active + safe_for_auto_reply rows are
+ * ever selected, and a template already sent on the thread is never repeated.
+ * consider_selling_follow_up (S2F) is the approved "just checking back — would
+ * you be open to a proposal?" copy. S3 / offer steps have NO approved natural
+ * fallback today (asking_price_follow_up auto-safe copy is a clarifier — "just
+ * so I understood the number right" — wrong after silence), so they hold until
+ * the owner approves the PROPOSED rows.
+ */
+export const NO_RESPONSE_APPROVED_FALLBACK_USE_CASES = Object.freeze({
+  s2_no_response_fu1: Object.freeze(["consider_selling_follow_up"]),
+  s2_no_response_fu2: Object.freeze(["consider_selling_follow_up"]),
 });
 /** The offer follow-up used when the number is ambiguous / unusable (never quotes money). */
 export const OFFER_NO_NUMBER_USE_CASE = "offer_no_response_no_number";
@@ -61,6 +83,7 @@ export const ALL_NO_RESPONSE_USE_CASES = Object.freeze(
 export const DEFAULT_NO_RESPONSE_CONFIG = Object.freeze({
   // delays_hours[n] = wait before step n+1, measured from the previous delivered touch.
   [NO_RESPONSE_KINDS.S2_INTEREST]: Object.freeze({ enabled: true, delays_hours: Object.freeze([24, 72, 30 * 24]) }),
+  [NO_RESPONSE_KINDS.S3_ASKING_PRICE]: Object.freeze({ enabled: true, delays_hours: Object.freeze([24, 72, 30 * 24]) }),
   [NO_RESPONSE_KINDS.OFFER]: Object.freeze({ enabled: true, delays_hours: Object.freeze([24, 72, 30 * 24]) }),
   // Reply languages with reviewed copy. Anything else (or unknown) is skipped,
   // never answered in English.
@@ -71,6 +94,8 @@ export const DEFAULT_NO_RESPONSE_CONFIG = Object.freeze({
 
 /** Our templated S2 interest question. */
 export const S2_QUESTION_USE_CASES = Object.freeze(new Set(["consider_selling", "consider_selling_follow_up"]));
+/** Our templated S3 asking-price question. */
+export const S3_QUESTION_USE_CASES = Object.freeze(new Set(["seller_asking_price", "asking_price_follow_up"]));
 /** Templated outbounds that carry an offer number. */
 export const OFFER_USE_CASES = Object.freeze(
   new Set([
@@ -116,8 +141,9 @@ export function resolveNoResponseConfig(override = null) {
     try { raw = JSON.parse(raw); } catch { raw = null; }
   }
   const out = {
-    [NO_RESPONSE_KINDS.S2_INTEREST]: { ...DEFAULT_NO_RESPONSE_CONFIG[NO_RESPONSE_KINDS.S2_INTEREST] },
-    [NO_RESPONSE_KINDS.OFFER]: { ...DEFAULT_NO_RESPONSE_CONFIG[NO_RESPONSE_KINDS.OFFER] },
+    ...Object.fromEntries(
+      Object.values(NO_RESPONSE_KINDS).map((kind) => [kind, { ...DEFAULT_NO_RESPONSE_CONFIG[kind] }])
+    ),
     languages: [...DEFAULT_NO_RESPONSE_CONFIG.languages],
     max_anchor_age_hours: DEFAULT_NO_RESPONSE_CONFIG.max_anchor_age_hours,
   };
@@ -148,6 +174,18 @@ const S2_EN_OBJECT = /\b(proposal|offer|sale|selling|sell|numbers)\b/i;
 const S2_ES_VERB = /(abiert[oa]s?|considerar[ií]a|interesad[oa]|interesa|vistazo|soltar[ií]a)/i;
 const S2_ES_OBJECT = /(propuesta|oferta|vender|venta|n[uú]meros|opciones|vistazo|soltar[ií]a)/i;
 const PRICE_QUESTION = /(asking price|price in mind|precio)/i;
+// Our S3 question in free text (owner-typed or templated): their number.
+const S3_PRICE_QUESTION =
+  /(asking price|price in mind|number in mind|what price|price (?:would|that would) work|what would you (?:take|want|need)|how much (?:would|do) you (?:want|need)|precio|cu[aá]nto (?:pide|quiere|pedir[ií]a))/i;
+
+/** Is this outbound our S3 asking-price question (templated or typed)? Pure. */
+export function isS3AskingPriceQuestion({ use_case = null, message_body = "" } = {}) {
+  if (S3_QUESTION_USE_CASES.has(lower(use_case))) return true;
+  const body = clean(message_body);
+  if (!body || !body.includes("?")) return false;
+  if (/\$\s?\d|\d{2,3}\s?k\b|\d{1,3}(?:,\d{3})+/i.test(body)) return false; // quotes a number → offer / clarifier
+  return S3_PRICE_QUESTION.test(body);
+}
 
 /** Is this outbound our S2 interest question (templated or typed)? Pure. */
 export function isS2InterestQuestion({ use_case = null, message_body = "" } = {}) {
@@ -282,6 +320,10 @@ export function classifyNoResponseAnchor(anchor = {}, config = resolveNoResponse
   if (offer.is_offer) {
     if (!config[NO_RESPONSE_KINDS.OFFER].enabled) return { kind: null, reason: "no_response_kind_disabled:offer" };
     return { kind: NO_RESPONSE_KINDS.OFFER, step: 0, offer };
+  }
+  if (isS3AskingPriceQuestion({ use_case, message_body: anchor.message_body })) {
+    if (!config[NO_RESPONSE_KINDS.S3_ASKING_PRICE].enabled) return { kind: null, reason: "no_response_kind_disabled:s3_asking_price" };
+    return { kind: NO_RESPONSE_KINDS.S3_ASKING_PRICE, step: 0 };
   }
   if (isS2InterestQuestion({ use_case, message_body: anchor.message_body })) {
     if (!config[NO_RESPONSE_KINDS.S2_INTEREST].enabled) return { kind: null, reason: "no_response_kind_disabled:s2_interest" };
@@ -560,6 +602,25 @@ async function loadMaxOffer(supabase, property_id) {
   }
 }
 
+/** template_ids already sent (or in flight) to this thread. Read-only; fails open to "none". */
+export async function loadThreadSentTemplateIds(supabase, thread_key) {
+  const out = new Set();
+  try {
+    const { data, error } = await supabase
+      .from("send_queue")
+      .select("template_id,queue_status")
+      .eq("thread_key", thread_key)
+      .in("queue_status", ["sent", "delivered", "processing", "sending"])
+      .limit(200);
+    if (error) return out;
+    for (const row of data || []) if (clean(row?.template_id)) out.add(clean(row.template_id));
+  } catch {
+    // An unreadable history never blocks a follow-up; the chain step's own
+    // use case already differs from the anchor's.
+  }
+  return out;
+}
+
 /**
  * Re-validate and render a no-response follow-up at dispatch. Fails closed:
  * any doubt returns { ok:false, resolved:false, reason } and the processor
@@ -604,16 +665,25 @@ export async function resolveNoResponseFollowUpMessage(queue_row = {}, { supabas
   // 3. Strict language: the seller's language or nothing.
   const language = clean(nr.language || queue_row.language);
   if (!language) return { ok: false, resolved: false, reason: "language_unknown" };
+  // The step's own use case first, then the already-approved fallbacks (S2
+  // only). Every candidate is an active, auto-safe sms_templates row.
+  const use_cases = [use_case, ...(NO_RESPONSE_APPROVED_FALLBACK_USE_CASES[use_case] || [])];
   const { data, error } = await supabase
     .from("sms_templates")
     .select("template_id,template_body,use_case,language,stage_code,property_type_scope,allowed_property_groups,prohibited_property_groups,is_active,safe_for_auto_reply,quarantine_state")
     .eq("is_active", true)
     .eq("safe_for_auto_reply", true)
-    .eq("use_case", use_case)
+    .in("use_case", use_cases)
     .eq("language", language)
     .limit(50);
   if (error) return { ok: false, resolved: false, reason: "template_lookup_failed" };
-  let templates = (data || []).filter((t) => !t.quarantine_state || lower(t.quarantine_state) === "active");
+  // Never repeat a template this seller already received (FU2 must not re-send
+  // FU1's words; a fallback must not echo an earlier S2 follow-up).
+  const already_sent = await loadThreadSentTemplateIds(supabase, thread_key);
+  let templates = (data || [])
+    .filter((t) => !t.quarantine_state || lower(t.quarantine_state) === "active")
+    .filter((t) => !already_sent.has(clean(t.template_id)))
+    .sort((x, y) => use_cases.indexOf(lower(x.use_case)) - use_cases.indexOf(lower(y.use_case)));
 
   let asset_record = null;
   try {
@@ -625,7 +695,11 @@ export async function resolveNoResponseFollowUpMessage(queue_row = {}, { supabas
   templates = filterTemplatesForProperty(templates, { propertyGroup: group }).kept;
 
   const first = confidentFirstName(queue_row.seller_first_name);
-  const ordered = orderForName(templates, Boolean(first));
+  // Use-case priority first (the step's own copy before any fallback), then
+  // named-vs-unnamed copy within each use case.
+  const ordered = use_cases.flatMap((uc) =>
+    orderForName(templates.filter((t) => lower(t.use_case) === uc), Boolean(first))
+  );
   const personalization = {
     seller_first_name: first,
     first_name: first,

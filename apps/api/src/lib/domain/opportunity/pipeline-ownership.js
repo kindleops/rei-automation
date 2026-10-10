@@ -129,8 +129,12 @@ export function resolveQueuedStep({ due, anchor = null, rows = [], now = Date.no
     .sort((a, b) => (ms(a.created_at) ?? 0) - (ms(b.created_at) ?? 0))
   const sent = after.filter((r) => SEND_SENT.has(lower(r.queue_status)))
   if (sent.length) {
-    const machine = sent.find((r) => !sendIsHuman(r))
-    const row = machine || sent[0]
+    // The LATEST send is what the seller is answering: with a stale `due` the
+    // window can hold the S2 interest question AND the later S3 price
+    // question — labelling the first one kept threads on "interest question".
+    const newestFirst = [...sent].reverse()
+    const machine = newestFirst.find((r) => !sendIsHuman(r))
+    const row = machine || newestFirst[0]
     return { outcome: machine ? 'sent' : 'sent_by_you', at: row.delivered_at || row.sent_at || row.created_at, row }
   }
   const live = after.filter((r) => SEND_IN_FLIGHT.has(lower(r.queue_status)))
