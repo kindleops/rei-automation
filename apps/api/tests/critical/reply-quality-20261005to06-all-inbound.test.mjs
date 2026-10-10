@@ -78,9 +78,11 @@ test("coverage floor: share of inbound that auto-responds / is handled without a
   assert.equal(liveAuto, 104, "prod before: 104 / 394 auto-replied (26.4%)");
   // 170 before the owner rule of 2026-10-09 (#357 #363 #382 now held: their
   // only old reply was a condition question before the price).
-  assert.ok(auto >= 168, `today's catalog: ${auto} auto`);
+  // 167: owner approved 2026-10-10 — #390 (bare "No" to the Spanish price
+  // question) is also held by the Stage 3 rule.
+  assert.ok(auto >= 167, `today's catalog: ${auto} auto`);
   assert.ok(handled >= 328, `today's catalog: ${handled} handled`);
-  assert.ok(autoDrafts >= 199, `with EN/ES drafts: ${autoDrafts} auto`); // 201 before the 2026-10-09 owner rule (same three)
+  assert.ok(autoDrafts >= 198, `with EN/ES drafts: ${autoDrafts} auto`); // 201 before the 2026-10-09 owner rule (same three)
   assert.ok(handledDrafts >= 359, `with EN/ES drafts: ${handledDrafts} handled`);
 });
 
