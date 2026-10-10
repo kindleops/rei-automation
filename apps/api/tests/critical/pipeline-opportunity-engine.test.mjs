@@ -74,6 +74,13 @@ test('mapThreadToUniversalStage does not default all inbound to offer interest',
   assert.equal(stage, UNIVERSAL_STAGE_CODES.OWNERSHIP_CONFIRMATION);
 });
 
+test('mapThreadToUniversalStage: parsed text never projects Offer (pipeline = projection, owner P0 2026-10-10)', () => {
+  const base = { last_inbound_at: '2026-06-01T00:00:00.000Z', inbox_bucket: 'priority', universal_stage: null };
+  assert.equal(mapThreadToUniversalStage({ ...base, primary_intent: 'asks_offer' }), UNIVERSAL_STAGE_CODES.OFFER_INTEREST);
+  assert.equal(mapThreadToUniversalStage({ ...base, primary_intent: 'asking_price_implausible' }), UNIVERSAL_STAGE_CODES.OFFER_INTEREST);
+  assert.equal(mapThreadToUniversalStage({ ...base, primary_intent: 'asking_price_provided' }), UNIVERSAL_STAGE_CODES.ASKING_PRICE);
+});
+
 test('mapThreadToUniversalStage respects deal_thread_state universal_stage', () => {
   const stage = mapThreadToUniversalStage({
     universal_stage: 'asking_price',

@@ -390,17 +390,36 @@ export async function buildConversationContext({
     try {
       const { data, error } = await supabase
         .from("properties")
-        .select("property_id,estimated_value,arv_estimate")
+        .select("property_id,estimated_value,arv_estimate,property_type,units_count")
         .eq("property_id", valuation_property_id)
         .limit(1);
       const row = !error && Array.isArray(data) ? data[0] : null;
       const estimated_value = Number(row?.estimated_value);
       const arv_estimate = Number(row?.arv_estimate);
-      if (row && (estimated_value > 0 || arv_estimate > 0)) {
+      // The canonical valuation (Decision Engine): the latest
+      // property_acquisition_scores row, for the deal-economics gate
+      // (deal-economics-gate.js). Best effort: unreadable -> AVM only.
+      let acquisition_score = null;
+      try {
+        const pas = await supabase
+          .from("property_acquisition_scores")
+          .select("property_id,valuation_low,valuation_mid,valuation_high,valuation_confidence,comp_count,decision_tier,computed_at")
+          .eq("property_id", valuation_property_id)
+          .order("computed_at", { ascending: false })
+          .limit(1);
+        const s = !pas?.error && Array.isArray(pas?.data) ? pas.data[0] : null;
+        if (s && Number(s.valuation_mid) > 0) acquisition_score = s;
+      } catch {
+        acquisition_score = null;
+      }
+      if (row && (estimated_value > 0 || arv_estimate > 0 || acquisition_score)) {
         property_valuation = {
           property_id: valuation_property_id,
           estimated_value: estimated_value > 0 ? estimated_value : null,
           arv_estimate: arv_estimate > 0 ? arv_estimate : null,
+          property_type: row.property_type ?? null,
+          units_count: row.units_count ?? null,
+          acquisition_score,
           source: "properties",
         };
       }

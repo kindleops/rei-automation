@@ -136,8 +136,9 @@ test("inbound reply → New Replies", () => {
 });
 
 test("urgent negotiation → Priority", () => {
+  // Owner P0 2026-10-10: only an ask inside the credible band of the value.
   const bucket = resolveInboxBucketFromClassification(
-    { primary_intent: "asking_price_provided" },
+    { primary_intent: "asking_price_provided", deal_economics: { verdict: "credible", ratio: 0.95, lane: "sfr" } },
     { direction: "inbound" },
     {},
   );

@@ -24,6 +24,7 @@ import { detectReplyDispositionSignals, foldReplyLines } from "@/lib/domain/clas
 import { resolveSellerReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
 import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
+import { assessDealEconomics, isPriceFarAboveValue, PRICE_GAP_REASON_CODE } from "@/lib/domain/inbox/deal-economics-gate.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
 import { applyRound11CounterpartyRule, applyRound11UnclearRules, matchRound11OptOut } from "@/lib/domain/classification/round11-unclear-rules.js";
 import { classifyStopScope, matchesOutreachStop, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
@@ -6566,13 +6567,30 @@ function resolveIntents(
   // $182K house is not an asking price. It does not advance the stage, does not
   // imply ownership, and earns one light reality-check question instead.
   let implausible_price_confidence = null;
+  // DEAL ECONOMICS (owner P0 2026-10-10: "$3M on a $174K property should never
+  // be in Priority"). The ask against the AUTHORITATIVE value
+  // (property_acquisition_scores, then the AVM), per asset lane. Evidence for
+  // the bucket gate; a far-above ask is read exactly like an implausible one.
+  let deal_economics = null;
   if (intents.includes("asking_price_provided")) {
     const raw_context = conversation_context && typeof conversation_context === "object" ? conversation_context : null;
+    const amount = price_parse?.value ?? price_parse?.classifier_parse_value ?? null;
+    const pv = raw_context?.property_valuation || null;
+    deal_economics = assessDealEconomics({ ask: amount, valuation: pv?.acquisition_score || null, property: pv });
     const plausibility = assessAskingPricePlausibility({
-      amount: price_parse?.value ?? price_parse?.classifier_parse_value ?? null,
-      valuation: raw_context?.property_valuation || null,
+      amount,
+      valuation: pv,
       message: rawMessage,
     });
+    // Carried on price_parse (which every result layer passes through) so the
+    // inbox writer can read it: classification.price_parse.deal_economics.
+    if (price_parse && deal_economics) price_parse = { ...price_parse, deal_economics };
+    if (!plausibility.implausible && isPriceFarAboveValue(deal_economics)) {
+      plausibility.implausible = true;
+      plausibility.rule = PRICE_GAP_REASON_CODE;
+      plausibility.reference = deal_economics.reference;
+      plausibility.ratio = deal_economics.ratio;
+    }
     if (plausibility.implausible) {
       for (let i = 0; i < intents.length; i += 1) {
         if (intents[i] === "asking_price_provided") intents[i] = "asking_price_implausible";

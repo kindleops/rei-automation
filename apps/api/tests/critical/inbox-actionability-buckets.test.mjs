@@ -150,10 +150,14 @@ test("writer: junk never gets new_replies / priority; non-owners and trolls clos
   for (const intent of ["property_specific_non_owner", "tenant_respondent", "former_owner_respondent", "hostile_or_troll"]) {
     assert.equal(w(intent), "dead", intent);
   }
-  assert.equal(w("asking_price_implausible"), "cold");
+  // Owner P0 2026-10-10: an absurd ask is the PRICE GAP nurture (follow_up), never Priority.
+  assert.equal(w("asking_price_implausible"), "follow_up");
   assert.equal(w("acknowledgement", { inbox_bucket: "priority" }), "cold");
   assert.equal(w("need_time"), "follow_up");
-  for (const intent of PRIORITY_REPLY_INTENTS) assert.equal(w(intent), "priority", intent);
+  // Owner P0 2026-10-10: a stated ask needs credible economics; interest without an ask does not.
+  for (const intent of PRIORITY_REPLY_INTENTS.filter((i) => i !== "asking_price_provided")) assert.equal(w(intent), "priority", intent);
+  assert.equal(w("asking_price_provided"), "new_replies", "unknown value is never a deal by default");
+  assert.equal(resolveInboxBucketFromClassification({ primary_intent: "asking_price_provided", deal_economics: { verdict: "credible", ratio: 0.95, lane: "sfr" } }, inbound, {}, NOW), "priority");
   for (const intent of ["ownership_confirmed", "latent_interest", "requests_email", "who_is_this", "unclear"]) {
     assert.equal(w(intent), "new_replies", intent);
   }

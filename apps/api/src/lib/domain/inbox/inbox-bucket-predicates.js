@@ -9,6 +9,7 @@ import {
   isNewReplyActionableIntent,
   isPriorityReplyIntent,
   isReopeningReplyIntent,
+  isPriceGapRow,
 } from "@/lib/domain/inbox/reply-actionability.js";
 
 function clean(value) {
@@ -240,7 +241,9 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
     case "priority":
       if (isArchivedThread(thread) || isTerminalNoContactThread(thread)) return false;
       // 8.5: Priority is high-value actionable only (reply-actionability.js).
-      return bucket === "priority" && isPriorityReplyIntent(thread.last_intent || thread.latest_intent || thread.primary_intent);
+      return bucket === "priority" && isPriorityReplyIntent(thread.last_intent || thread.latest_intent || thread.primary_intent) && !isPriceGapRow(thread);
+    case "price_gap":
+      return resolveInboxBucketFlags(thread, nowMs).in_price_gap === true;
     case "new_replies":
       return threadMatchesNewRepliesFacts(thread, nowMs);
     case "unclear":
@@ -417,7 +420,10 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
   // "Yes" once the reply is answered.
   const threadIntent = lower(row.last_intent);
   const threadResolved = RESOLVED_REPLY_INTENTS.includes(threadIntent);
-  const inPriority = actionable && bucket === "priority" && isPriorityReplyIntent(threadIntent) && !threadResolved;
+  // Owner P0 2026-10-10: an ask far above the authoritative value is the
+  // PRICE GAP (a Follow-up sub-bucket), never Priority and never New Replies.
+  const priceGap = isPriceGapRow(row);
+  const inPriority = actionable && bucket === "priority" && isPriorityReplyIntent(threadIntent) && !threadResolved && !priceGap;
   const unanswered = direction === "inbound"
     && inboundAtMs > 0
     && (!realOutMs || inboundAtMs >= realOutMs);
@@ -425,6 +431,7 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
     && !inPriority
     && !needsReviewFlag
     && !replyResolved
+    && !priceGap
     && unanswered;
   // Round 9: New Replies = an ACTIONABLE latest reply only (whitelist). A
   // reply with NO recorded intent is unknown, not unclear: it stays visible in
@@ -452,6 +459,11 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
     && (!["priority", "needs_review", "waiting", "cold", "follow_up"].includes(bucket) || bucket === "priority");
   const inNeedsReview = available && (bucket === "needs_review" || needsReviewFlag);
   const inFollowUp = available && bucket === "follow_up" && !inNewReplies;
+  // Price gap: low-priority, non-alerting. A Follow-up sub-bucket when stored
+  // follow_up; a legacy stored priority / new_replies row with the far-above
+  // fact also lands here instead of an alerting lane.
+  const inPriceGap = actionable && priceGap && !inNeedsReview
+    && ["follow_up", "priority", "new_replies", "cold"].includes(bucket);
 
   return {
     derived_bucket: bucket,
@@ -463,6 +475,7 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
     in_unclear: inUnclear,
     in_needs_review: inNeedsReview,
     in_follow_up: inFollowUp,
+    in_price_gap: inPriceGap,
     // `active` is a LENS, not a bucket: the union of the four an operator works.
     // It needs its own flag now that an unknown filter fails closed.
     in_active: inPriority || inNewReplies || inNeedsReview || inFollowUp,

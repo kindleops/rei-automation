@@ -4,7 +4,7 @@ import {
   resolveOutboundReplyState,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 import { isStaleExplicitInboxBucket } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
-import { PRIORITY_REPLY_INTENTS } from "@/lib/domain/inbox/reply-actionability.js";
+import { PRIORITY_REPLY_INTENTS, resolvePriorityGate } from "@/lib/domain/inbox/reply-actionability.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -405,9 +405,11 @@ export function resolveReplyDispositionBucket({ primary = "", classification = {
   // follow-up (nurture), never an open New Reply.
   if (intent === "need_time") return "follow_up";
   if (CLOSED_FOR_PROPERTY_INTENTS.has(intent)) return "dead";
-  // "$5 million" on a $180K house: one reality-check reply goes out, then the
-  // thread waits on a real answer (Waiting inside 24 h, Cold after).
-  if (intent === "asking_price_implausible") return "cold";
+  // "$5 million" on a $180K house, or any ask far above the authoritative value
+  // (deal-economics-gate.js): one reality-check reply goes out, and the thread
+  // is the PRICE GAP nurture -- Follow-up, never Priority, never New Replies
+  // (owner P0 2026-10-10). Not a decline, not a suppression: follow-ups run.
+  if (intent === "asking_price_implausible") return "follow_up";
   if (NON_ENGAGEMENT_INTENTS.has(intent)) {
     const prior = lower(existingBucket);
     if (NON_ENGAGEMENT_KEEP_BUCKETS.has(prior)) return prior;
@@ -643,7 +645,14 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
   }
 
   if (PRIORITY_INTENTS.includes(primary) || PRIORITY_OBJECTIONS.includes(objection)) {
-    return "priority";
+    // Priority needs credible deal economics (owner P0 2026-10-10): a stated
+    // ask inside the lane's credible band, or interest with good identity.
+    // A priority-grade objection with a non-priority intent keeps its old
+    // route (the D7 rules decide those upstream).
+    if (!PRIORITY_INTENTS.includes(primary)) return "priority";
+    const economics = classification?.deal_economics || classification?.price_parse?.deal_economics || null;
+    const gate = resolvePriorityGate({ intent: primary, economics, thread: existingState });
+    return gate.bucket || "new_replies";
   }
 
   if (shouldRouteToNeedsReview(classification)) {

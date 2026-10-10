@@ -144,6 +144,97 @@ export function isReopeningReplyIntent(intent) {
   return Boolean(key) && NEW_REPLY_ACTIONABLE.has(key) && !NON_ACTIONABLE.has(key);
 }
 
+// ─── Priority gate (owner P0 2026-10-10) ────────────────────────────────────
+// "We should know what's a deal and what isn't." Priority / HOT needs credible
+// deal economics, not just a priority-grade word:
+//   - a stated ask: within the lane's credible band of the authoritative value
+//     (deal-economics-gate.js). A stretch ask, an unknown value or a too-low
+//     number is an actionable New Reply, never Priority. A far-above ask is the
+//     Price gap (nurture), never Priority and never New Replies.
+//   - a positive interest signal with no ask (asks_offer, seller_interested,
+//     contract_requested, a call request): Priority only with good contact
+//     identity: a property on the thread and no non-owner / wrong-number
+//     disposition. And never on a thread whose last ask was far above value
+//     ("2 million" ... "so what's your offer?" is still the same price gap).
+
+export const PRICE_GAP_INTENT = "asking_price_implausible";
+export const PRICE_GAP_REASON = "price_far_above_value";
+
+const NON_OWNER_DISPOSITIONS = new Set(["wrong_number", "wrong_person", "unqualified", "sold", "suppressed", "opt_out"]);
+
+function reasonCodesOf(row = {}) {
+  const raw = row?.reason_codes;
+  if (Array.isArray(raw)) return raw.map(lower);
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.map(lower) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
+ * A thread whose stored facts say "the seller's number is far above value".
+ * The tag (reason code / metadata) only counts while the latest reply is still
+ * that price: a later "ok, what's your offer?" is a new reply and is judged on
+ * its own (resolvePriorityGate keeps it out of Priority via the thread).
+ */
+export function isPriceGapRow(row = {}) {
+  const intent = lower(row.last_intent ?? row.primary_intent ?? row.detected_intent);
+  if (intent === PRICE_GAP_INTENT) return true;
+  const tagged = reasonCodesOf(row).includes(PRICE_GAP_REASON)
+    || lower(row?.metadata?.deal_economics?.verdict) === PRICE_GAP_REASON;
+  return tagged && (!intent || intent === "asking_price_provided");
+}
+
+/** The thread ever carried the far-above tag (any latest intent). */
+export function hasPriceGapTag(row = {}) {
+  return lower(row.last_intent ?? row.primary_intent ?? row.detected_intent) === PRICE_GAP_INTENT
+    || reasonCodesOf(row).includes(PRICE_GAP_REASON)
+    || lower(row?.metadata?.deal_economics?.verdict) === PRICE_GAP_REASON;
+}
+
+/**
+ * May this reply sit in Priority?
+ *
+ * @param {object} args
+ * @param {string} args.intent           canonical intent of the latest reply
+ * @param {object} [args.economics]      deal-economics-gate verdict for THIS reply's ask
+ * @param {object} [args.thread]         existing inbox_thread_state row
+ * @returns {{ priority: boolean, bucket: 'priority'|'new_replies'|'follow_up'|null, reason: string }}
+ *   bucket null = not a priority-grade intent; the caller's ladder decides.
+ */
+export function resolvePriorityGate({ intent = "", economics = null, thread = {} } = {}) {
+  const key = lower(intent);
+  const verdict = lower(economics?.verdict);
+  if (key === PRICE_GAP_INTENT || verdict === PRICE_GAP_REASON) {
+    return { priority: false, bucket: "follow_up", reason: PRICE_GAP_REASON };
+  }
+  if (!PRIORITY.has(key)) return { priority: false, bucket: null, reason: "not_priority_intent" };
+  if (key === "asking_price_provided") {
+    if (verdict === "credible") return { priority: true, bucket: "priority", reason: "ask_in_credible_band" };
+    return { priority: false, bucket: "new_replies", reason: verdict ? `ask_${verdict}` : "ask_value_unknown" };
+  }
+  // A new ask on a positive reply ("send a bid, I want 900k") is judged too.
+  if (verdict && verdict !== "unknown" && verdict !== "credible") {
+    return { priority: false, bucket: "new_replies", reason: `ask_${verdict}` };
+  }
+  if (hasPriceGapTag(thread) && !verdict) {
+    return { priority: false, bucket: "new_replies", reason: "prior_ask_far_above_value" };
+  }
+  const property = String(thread?.property_id ?? "").trim();
+  if (thread && Object.keys(thread).length > 0 && !property) {
+    return { priority: false, bucket: "new_replies", reason: "identity_unlinked_property" };
+  }
+  if (NON_OWNER_DISPOSITIONS.has(lower(thread?.disposition))) {
+    return { priority: false, bucket: "new_replies", reason: "identity_not_owner" };
+  }
+  return { priority: true, bucket: "priority", reason: "positive_interest_identity_ok" };
+}
+
 const HEAT_RANK = Object.freeze({ unscored: 0, cold: 1, warm: 2, hot: 3 });
 
 function normalizeHeat(value) {
@@ -187,9 +278,12 @@ export function resolveCanonicalLeadHeat(row = {}) {
     gated = true;
   }
 
+  // An absurd ask is never HOT, whatever an earlier turn recorded (owner P0
+  // 2026-10-10). A manual temperature is still the operator's call.
+  const priceGap = isPriceGapRow(row);
   const is_hot_lead = !terminal && (
     (manual && recorded === "hot")
-    || (!manual && PRIORITY.has(intent) && (recorded === "hot" || row.is_hot_lead === true))
+    || (!manual && !priceGap && PRIORITY.has(intent) && (recorded === "hot" || row.is_hot_lead === true))
   );
 
   return {
@@ -210,5 +304,8 @@ export default {
   isPriorityReplyIntent,
   isPositiveReplyIntent,
   isReopeningReplyIntent,
+  isPriceGapRow,
+  hasPriceGapTag,
+  resolvePriorityGate,
   resolveCanonicalLeadHeat,
 };

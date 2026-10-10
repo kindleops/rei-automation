@@ -67,7 +67,8 @@ test("writer: a reaction / acknowledgement keeps a review or follow-up it found;
 });
 
 test("writer: a not-interested seller who writes back with engagement is a NEW REPLY again; a reaction is not", () => {
-  const declined = { disposition: "not_interested", inbox_bucket: null };
+  // property_id: the Priority gate needs a linked property (good identity, owner P0 2026-10-10).
+  const declined = { disposition: "not_interested", inbox_bucket: null, property_id: "prop-1" };
   assert.equal(resolveInboxBucketFromClassification({ primary_intent: "asks_offer" }, inbound, declined, NOW), "priority");
   assert.equal(resolveInboxBucketFromClassification({ primary_intent: "who_is_this" }, inbound, declined, NOW), "new_replies");
   assert.equal(resolveInboxBucketFromClassification({ primary_intent: "reaction_only" }, inbound, declined, NOW), null, "stays in follow-up");
@@ -80,9 +81,12 @@ test("writer: genuine engagement still lands in New Replies or Priority", () => 
   for (const intent of ["who_is_this", "unclear", "condition_disclosed", "language_switch", "ownership_confirmed", "latent_interest"]) {
     assert.equal(resolveInboxBucketFromClassification({ primary_intent: intent }, inbound, {}, NOW), "new_replies", intent);
   }
-  for (const intent of ["asks_offer", "callback_requested", "seller_interested", "asking_price_provided"]) {
+  for (const intent of ["asks_offer", "callback_requested", "seller_interested"]) {
     assert.equal(resolveInboxBucketFromClassification({ primary_intent: intent }, inbound, {}, NOW), "priority", intent);
   }
+  // Owner P0 2026-10-10: an ask is Priority only inside the credible band.
+  assert.equal(resolveInboxBucketFromClassification({ primary_intent: "asking_price_provided", deal_economics: { verdict: "credible", ratio: 0.95, lane: "sfr" } }, inbound, {}, NOW), "priority");
+  assert.equal(resolveInboxBucketFromClassification({ primary_intent: "asking_price_provided" }, inbound, {}, NOW), "new_replies");
 });
 
 // ── Reader (JS mirror of the view) ──────────────────────────────────────────

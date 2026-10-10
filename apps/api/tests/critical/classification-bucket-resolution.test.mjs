@@ -57,7 +57,13 @@ describe("Classification Bucket Resolution", () => {
   });
 
   it("resolves priority interest (e.g. asking price) to priority bucket", () => {
-    const classification = { primary_intent: "asking_price_provided", stage_hint: "Offer" };
+    // Owner P0 2026-10-10: an ask is Priority only inside the credible band of
+    // the authoritative value (deal-economics-gate.js); unknown value -> New Replies.
+    assert.strictEqual(
+      resolveInboxBucketFromClassification({ primary_intent: "asking_price_provided" }, { direction: "inbound" }),
+      "new_replies",
+    );
+    const classification = { primary_intent: "asking_price_provided", stage_hint: "Offer", deal_economics: { verdict: "credible", ratio: 0.95, lane: "sfr" } };
     const bucket = resolveInboxBucketFromClassification(classification, { direction: "inbound" });
     const status = resolveUniversalStatusFromClassification(classification, { direction: "inbound" });
 

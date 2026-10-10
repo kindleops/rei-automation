@@ -382,11 +382,14 @@ function deriveStageFromIntent(thread = {}) {
   if (['seller_interested', 'latent_interest', 'consider_selling'].includes(intent)) {
     return UNIVERSAL_STAGE_CODES.OFFER_INTEREST;
   }
-  if (['asking_price_provided', 'asks_offer'].includes(intent)) {
-    return intent === 'asking_price_provided'
-      ? UNIVERSAL_STAGE_CODES.ASKING_PRICE
-      : UNIVERSAL_STAGE_CODES.OFFER;
-  }
+  // PIPELINE = PROJECTION (feedback_pipeline_is_projection_20261007, owner P0
+  // 2026-10-10): parsed seller text is evidence only. "Make me an offer" is
+  // interest, not an offer event -- Offer needs a recorded offer (seller_offers
+  // / stage-advance-guard). An absurd ask (asking_price_implausible) is stored
+  // as an ask but never promotes the stage.
+  if (intent === 'asking_price_provided') return UNIVERSAL_STAGE_CODES.ASKING_PRICE;
+  if (intent === 'asks_offer') return UNIVERSAL_STAGE_CODES.OFFER_INTEREST;
+  if (intent === 'asking_price_implausible') return UNIVERSAL_STAGE_CODES.OFFER_INTEREST;
   if (['condition_disclosed', 'tenant_occupied'].includes(intent)) {
     return UNIVERSAL_STAGE_CODES.PROPERTY_CONDITION;
   }
