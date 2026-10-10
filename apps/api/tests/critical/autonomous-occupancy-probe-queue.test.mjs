@@ -90,7 +90,7 @@ const OCCUPANCY_DIRECTIVE = {
   review_required: false,
 };
 
-function runDecision({ strategyDirective }) {
+function runDecision({ strategyDirective, sellerAskingPriceKnown = false }) {
   const ctx = context();
   return executeInboundAutomationDecision({
     message: "Yeah, I still own it",
@@ -112,6 +112,7 @@ function runDecision({ strategyDirective }) {
       automation_decision: { auto_reply_allowed: false },
     },
     strategyDirective,
+    sellerAskingPriceKnown,
     inboundReceivedAt: "2026-08-27T00:00:00.000Z",
     dryRun: true,
     autoReplyMode: "dry_run",
@@ -119,8 +120,15 @@ function runDecision({ strategyDirective }) {
   });
 }
 
-test("immediate-send strategy directive (OCCUPANCY_DISCOVERY) authorizes the autonomous queue + selects the occupancy_probe template", async () => {
+test("owner flow 2026-10-10: occupancy (an S4 question) is never sent before we hold the seller's price", async () => {
   const result = await runDecision({ strategyDirective: OCCUPANCY_DIRECTIVE });
+  const selected = result.selected_template || result.rendered_template || null;
+  assert.notEqual(clean(selected?.use_case), "occupancy_probe");
+  assert.equal(result.automation_decision.condition_questions_forbidden, true);
+});
+
+test("immediate-send strategy directive (OCCUPANCY_DISCOVERY) authorizes the autonomous queue + selects the occupancy_probe template once the price is held", async () => {
+  const result = await runDecision({ strategyDirective: OCCUPANCY_DIRECTIVE, sellerAskingPriceKnown: true });
 
   const decision = result.automation_decision;
   assert.equal(
