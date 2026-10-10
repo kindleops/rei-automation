@@ -281,9 +281,15 @@ test("KNOWN LIMITATION: a multi-fragment burst answering the question routes to 
   assert.equal(classification.context_status, "valid", "cause one remains fixed");
 
   // CURRENT BEHAVIOUR — the deferred half.
-  assert.equal(classification.primary_intent, "unclear", "CURRENT BEHAVIOUR");
-  assert.equal(classification.confidence, 0.64, "CURRENT BEHAVIOUR");
-  assert.equal(classification.precedence_result, "intent_priority", "CURRENT BEHAVIOUR: no contextual override");
+  // OWNER RULE 2026-10-09 (round 11): a reply a person can read is never
+  // "unclear" — "its a 3br" is a property-condition disclosure, so the round
+  // 11 rescue names it condition_disclosed (0.80). It is still NOT the
+  // contextual ownership override PR #66 deferred: confidence stays below the
+  // automation gate and the burst still goes to a person (Stage 3 is always
+  // the asking price; a condition detail never auto-advances).
+  assert.equal(classification.primary_intent, "condition_disclosed", "CURRENT BEHAVIOUR (round 11 rescue)");
+  assert.equal(classification.confidence, 0.8, "CURRENT BEHAVIOUR");
+  assert.equal(classification.precedence_result, "round11_unclear_rescue", "CURRENT BEHAVIOUR: no contextual ownership override");
   assert.ok(
     classification.confidence < AUTOMATION_CONFIDENCE_GATE,
     "CURRENT BEHAVIOUR: below the automation gate"

@@ -111,7 +111,8 @@ for (const text of [
   "get on a call",
   "call me",
   "give me a call tomorrow",
-  "text me",
+  // OWNER RULE 2026-10-09 (round 11): "text me" / "message me" is a text, not
+  // a call — it is no longer a callback request (asserted below).
   "call anytime",
   "when can you call",
   "what is a good time to call",
@@ -124,6 +125,15 @@ for (const text of [
       "callback_requested",
       `${text} must read as a callback request (got ${result.primary_intent})`
     );
+  });
+}
+
+// OWNER RULE 2026-10-09 (round 11): "message me" is not a call — the seller
+// asked for a TEXT, so "Sorry I missed you" copy must never follow it.
+for (const text of ["text me", "message me"]) {
+  test(`not a callback request (round 11): ${JSON.stringify(text)}`, async () => {
+    const result = await classifyText(text);
+    assert.notEqual(result.primary_intent, "callback_requested", `${text} is a text request, not a call`);
   });
 }
 

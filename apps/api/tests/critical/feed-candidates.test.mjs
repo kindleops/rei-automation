@@ -1056,8 +1056,10 @@ test("chooseTextgridNumber routes Florida to Jacksonville before Miami", async (
 });
 
 test("chooseTextgridNumber blocks unknown state with no approved routing rule", async () => {
+  // OWNER RULE 2026-10-09: every US state has a sender (Alaska now routes), so
+  // the unrouted case is a territory with no approved routing rule.
   const result = await chooseTextgridNumber(
-    { market: "Anchorage, AK", state: "AK" },
+    { market: "San Juan, PR", state: "PR" },
     { routing_safe_only: true },
     { supabase: makeTextgridSupabase([makeTextgridNumber(1, "Los Angeles, CA")]) }
   );

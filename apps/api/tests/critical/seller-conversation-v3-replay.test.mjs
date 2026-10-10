@@ -28,6 +28,10 @@ const OWNER_RULE_20261009_REVIEWS = new Map([
   ["rq-2026-10-05to06-056", "condition_before_seller_price_forbidden"], // "I have no idea"
   ["rq-2026-10-05to06-169", "condition_before_seller_price_forbidden"], // "No price it brings in a good amount…"
   ["rq-2026-10-05to06-289", "repeat_intent_no_alternative"], // "What are u offering" after the price question
+  // Bare "No" to our (Spanish) "¿Tienes un precio de venta en mente?": with the
+  // bare-No clarifier on, its only reply was the same no-price condition probe.
+  // Same owner rule, same reason (Stage 3 is always the asking price).
+  ["rq-2026-10-05to06-390", "condition_before_seller_price_forbidden"],
 ]);
 const ownerRuleReview = ({ c, r }) => OWNER_RULE_20261009_REVIEWS.get(c.fixture_id) === r.review_reason;
 const SCENARIOS = {

@@ -33,6 +33,7 @@ import {
 import { getSystemValue } from "@/lib/system-control.js";
 import { isBareNoAutoClarifierEnabled } from "@/lib/domain/seller-flow/bare-no-clarifier-gate.js";
 import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ensure-inbound-coverage.js";
+import { isCovered } from "@/lib/domain/seller-flow/coverage-net/coverage-contract.js";
 import {
   buildSafeFallback,
   uncertaintyTypeForReason,
@@ -932,20 +933,24 @@ export function applyInboundAutomationDecision(args = {}) {
     conversation_stage: stage,
     metadata: classification.metadata || {},
   });
-  return applySuppressionCandidateHold(
-    applyCounterpartyReviewHold(
-      applyTextOnlyRedirectGate(
-        applySellerConversationV3TerminalDecision(
-          ensureInboundCoverage(raw, { stage, contact_identity, classification }),
-          classification,
-        ),
+  const coverageCtx = { stage, contact_identity, classification };
+  const gated = applyCounterpartyReviewHold(
+    applyTextOnlyRedirectGate(
+      applySellerConversationV3TerminalDecision(
+        ensureInboundCoverage(raw, coverageCtx),
         classification,
-        args,
       ),
       classification,
+      args,
     ),
     classification,
   );
+  // The round-11 gates above can turn a covered reply into a person-review
+  // AFTER coverage enrichment ran (callback / voicemail / e-mail requests now
+  // go to a person instead of "Sorry I missed you"). Re-cover so that review
+  // lands in an owned workflow, never an unowned dead end (owner 2026-10-10).
+  const covered = isCovered(gated) ? gated : ensureInboundCoverage(gated, coverageCtx);
+  return applySuppressionCandidateHold(covered, classification);
 }
 
 /**
