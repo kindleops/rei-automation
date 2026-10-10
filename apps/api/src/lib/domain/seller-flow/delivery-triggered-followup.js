@@ -24,6 +24,10 @@ import { warn } from "@/lib/logging/logger.js";
 import {
   NO_RESPONSE_CONFIG_KEY,
   NO_RESPONSE_MODE_KEY,
+  NO_RESPONSE_ENABLED_AT_KEY,
+  NO_RESPONSE_CANARY_CAP_KEY,
+  resolveNoResponseEnabledAt,
+  resolveCanaryDailyCap,
   buildNoResponseScheduleContext,
   buildObservedOfferQuote,
   classifyNoResponseAnchor,
@@ -349,6 +353,28 @@ async function resolveEffectiveFollowUpMode({
 }
 
 /**
+ * Canary budget: no-response follow-up rows written since 00:00 UTC (any
+ * status — a cancelled row still spent the day's budget). null = unreadable
+ * (the caller fails closed).
+ */
+export async function countNoResponseFollowUpsToday(supabase, now = new Date()) {
+  const day = new Date(now instanceof Date ? now.getTime() : Date.parse(now));
+  day.setUTCHours(0, 0, 0, 0);
+  try {
+    const { data, error } = await supabase
+      .from("send_queue")
+      .select("id,metadata")
+      .eq("type", "followup")
+      .gte("created_at", day.toISOString())
+      .limit(500);
+    if (error) return null;
+    return (data || []).filter((r) => r?.metadata?.source === "no_response_followup").length;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * NO-RESPONSE FOLLOW-UPS (S2 interest question / offer — no-response-followup.js).
  * Runs only when system_control.followup_no_response_mode is dry_run|live;
  * disabled/missing/unreadable ⇒ { handled:false } and the generic path below
@@ -372,9 +398,15 @@ export async function maybeScheduleNoResponseFollowUp({
   const can_read_system = getSystemValueImpl !== getSystemValue || hasSupabaseConfig();
   let nr_mode = "disabled";
   let config_raw = null;
+  let enabled_at = null;
+  let canary_cap = null;
   try {
     nr_mode = can_read_system ? normalizeNoResponseMode(await getSystemValueImpl(NO_RESPONSE_MODE_KEY)) : "disabled";
-    config_raw = nr_mode === "disabled" ? null : await getSystemValueImpl(NO_RESPONSE_CONFIG_KEY);
+    if (nr_mode !== "disabled") {
+      config_raw = await getSystemValueImpl(NO_RESPONSE_CONFIG_KEY);
+      enabled_at = resolveNoResponseEnabledAt(await getSystemValueImpl(NO_RESPONSE_ENABLED_AT_KEY));
+      canary_cap = nr_mode === "canary" ? resolveCanaryDailyCap(await getSystemValueImpl(NO_RESPONSE_CANARY_CAP_KEY)) : null;
+    }
   } catch {
     nr_mode = "disabled";
   }
@@ -386,6 +418,14 @@ export async function maybeScheduleNoResponseFollowUp({
   if (!classifyNoResponseAnchor(anchor, config).kind) return { handled: false };
 
   const thread_key = outbound.thread_key;
+  // PROSPECTIVE ONLY (owner 2026-10-10): a sending mode without an explicit
+  // enable instant fails closed — it can never sweep the historical backlog.
+  if ((nr_mode === "canary" || nr_mode === "live") && !enabled_at) {
+    return {
+      handled: true,
+      result: { ok: true, scheduled: false, mode, no_response_mode: nr_mode, thread_key: outbound.thread_key, reason: "no_response_enabled_at_missing" },
+    };
+  }
   const facts = await loadNoResponseThreadFacts(supabase, {
     thread_key,
     anchor_sent_at: sent_at,
@@ -398,6 +438,7 @@ export async function maybeScheduleNoResponseFollowUp({
       anchor_sent_at: sent_at,
       anchor_message_event_id: outbound.id,
       thread_key,
+      enabled_at,
       has_inbound_after_anchor: Boolean(inbound_after || facts.has_inbound_after_anchor),
       has_newer_outbound: Boolean(outbound_after),
       thread_state: {
@@ -423,12 +464,23 @@ export async function maybeScheduleNoResponseFollowUp({
   if (!FOLLOW_UP_SCHEDULING_MODES.has(mode)) {
     return { handled: true, result: { ...base, reason: "followup_automation_disabled" } };
   }
+  if (nr_mode === "canary") {
+    const used = await countNoResponseFollowUpsToday(supabase, now);
+    if (used === null) return { handled: true, result: { ...base, reason: "canary_cap_unreadable" } };
+    if (used >= canary_cap) {
+      return { handled: true, result: { ...base, reason: `canary_daily_cap_reached:${used}/${canary_cap}` } };
+    }
+  }
   const context = buildNoResponseScheduleContext(plan, {
     thread_key,
     anchor,
     anchor_message_event_id: outbound.id,
     delivered_provider_message_sid: sid,
   });
+  if (nr_mode === "canary") {
+    context.no_response_canary = true;
+    context.no_response_enabled_at = enabled_at;
+  }
   const result = await scheduleFollowUpImpl(STAGE_NO_REPLY_FOLLOWUP_INTENT, thread_key, context, supabase);
   // Track the offer we follow up on like an automated quote (best-effort:
   // the PROPOSED table may not exist yet; the follow-up never depends on it).

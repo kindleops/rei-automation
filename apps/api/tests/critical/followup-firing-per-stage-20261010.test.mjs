@@ -137,8 +137,12 @@ function deliveredThread(anchorKey, { sentAt = new Date(Date.now() - HOUR).toISO
   };
 }
 
-const sys = ({ followup = "full_live", noResponse = "live" } = {}) => async (key) =>
-  key === "followup_automation_mode" ? followup : key === NO_RESPONSE_MODE_KEY ? noResponse : null;
+const sys = ({ followup = "full_live", noResponse = "live", enabledAt = "2026-10-01T00:00:00.000Z", canaryCap = null } = {}) => async (key) =>
+  key === "followup_automation_mode" ? followup
+    : key === NO_RESPONSE_MODE_KEY ? noResponse
+    : key === "followup_no_response_enabled_at" ? enabledAt
+    : key === "followup_no_response_canary_daily_cap" ? canaryCap
+    : null;
 
 async function deliver(db, system) {
   return maybeScheduleFollowUpAfterDelivery({
@@ -343,4 +347,76 @@ test("not-interested nurture on an archived thread is written like any other (ar
   }, db);
   assert.equal(out.ok, true, out.reason);
   assert.equal(followups(db)[0].use_case_template, "nurture_not_interested");
+});
+
+// ── 5. PROSPECTIVE ONLY + CANARY (owner 2026-10-10) ────────────────────────
+
+test("prospective only: a sending mode with no followup_no_response_enabled_at fails closed (no backlog sweep)", async () => {
+  for (const noResponse of ["live", "canary"]) {
+    const { db } = deliveredThread("S2_template");
+    const out = await deliver(db, sys({ noResponse, enabledAt: null }));
+    assert.equal(out.scheduled, false, noResponse);
+    assert.equal(out.reason, "no_response_enabled_at_missing", noResponse);
+    assert.equal(followups(db).length, 0);
+  }
+});
+
+test("prospective only: an anchor delivered BEFORE the enable instant never qualifies; one after it does", async () => {
+  const sentAt = new Date(Date.now() - 2 * HOUR).toISOString();
+  const before = deliveredThread("S2_template", { sentAt });
+  const out = await deliver(before.db, sys({ enabledAt: new Date(Date.now() - HOUR).toISOString() }));
+  assert.equal(out.scheduled, false);
+  assert.equal(out.reason, "anchor_before_enable_cutoff");
+  const after = deliveredThread("S2_template", { sentAt });
+  assert.equal((await deliver(after.db, sys({ enabledAt: new Date(Date.now() - 3 * HOUR).toISOString() }))).scheduled, true);
+});
+
+test("canary: schedules like live (marked canary), honors the daily cap (default 5), never duplicates", async () => {
+  const { db } = deliveredThread("S3_template", { threadState: { lifecycle_stage: "asking_price" } });
+  const first = await deliver(db, sys({ noResponse: "canary" }));
+  assert.equal(first.scheduled, true, first.reason);
+  assert.equal(followups(db)[0].metadata.no_response_canary, true);
+  const replay = await deliver(db, sys({ noResponse: "canary" }));
+  assert.equal(replay.scheduled, false, "idempotent: the same delivery never writes a second row");
+  assert.equal(followups(db).length, 1);
+
+  const today = new Date().toISOString();
+  const spent = [1, 2].map((n) => ({ id: `spent_${n}`, thread_key: `+1612555000${n}`, type: "followup", queue_status: "scheduled", created_at: today, metadata: { source: "no_response_followup" } }));
+  const capped = deliveredThread("S2_template", { extra: {} });
+  for (const row of spent) capped.db.rows("send_queue").push(row);
+  const out = await deliver(capped.db, sys({ noResponse: "canary", canaryCap: "2" }));
+  assert.equal(out.scheduled, false);
+  assert.equal(out.reason, "canary_daily_cap_reached:2/2");
+  const zero = deliveredThread("S2_template");
+  assert.equal((await deliver(zero.db, sys({ noResponse: "canary", canaryCap: "0" }))).reason, "canary_daily_cap_reached:0/0");
+});
+
+test("canary/live gates: identity (wrong number / not owner / sold), legal hold, precautionary hold all block", async () => {
+  for (const [threadState, extra, reason] of [
+    [{ disposition: "wrong_number" }, {}, "identity_not_owner:wrong_number"],
+    [{ disposition: "wrong_person" }, {}, "identity_not_owner:wrong_person"],
+    [{ disposition: "sold" }, {}, "identity_not_owner:sold"],
+    [{ paused_reason: "legal_threat_hold" }, {}, "legal_hold"],
+    [{ last_intent: "hostile_or_legal" }, {}, "disposition_rules_own_thread:hostile_or_legal"],
+    [{}, { automation_suppressions: [{ id: "h", phone_e164: PHONE, status: "active", suppression_type: "precautionary_no_contact" }] }, "precautionary_hold"],
+  ]) {
+    const { db } = deliveredThread("S2_template", { threadState, extra });
+    const out = await deliver(db, sys({ noResponse: "canary" }));
+    assert.equal(out.scheduled, false, reason);
+    assert.equal(out.reason, reason);
+  }
+});
+
+test("stage: a follow-up keeps its anchor's stage — never scheduled or sent once the thread moved past it", async () => {
+  const { db } = deliveredThread("S2_template", { threadState: { lifecycle_stage: "asking_price" } });
+  const out = await deliver(db, sys());
+  assert.equal(out.reason, "thread_stage_advanced:asking_price");
+  // and at dispatch
+  const advanced = createDb({ sms_templates: APPROVED_S2F, inbox_thread_state: [{ thread_key: PHONE, lifecycle_stage: "offer" }] });
+  const res = await resolveDeferredQueueMessage(dueRow("s2_interest", "s2_no_response_fu1"), { supabase: advanced });
+  assert.equal(res.resolved, false);
+  assert.equal(res.reason, "thread_stage_advanced");
+  // same stage (or a stale lower projection) is fine
+  const same = createDb({ sms_templates: APPROVED_S2F, inbox_thread_state: [{ thread_key: PHONE, lifecycle_stage: "offer_interest" }] });
+  assert.equal((await resolveDeferredQueueMessage(dueRow("s2_interest", "s2_no_response_fu1"), { supabase: same })).resolved, true);
 });

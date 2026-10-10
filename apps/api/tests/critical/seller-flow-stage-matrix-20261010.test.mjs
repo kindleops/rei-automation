@@ -335,3 +335,74 @@ test("proposed S3/S4 rows: inactive, unique ids, render, asset words compatible 
     }
   }
 });
+
+// ── 4. LIVE S4 rows (owner 2026-10-10): only when the condition is MISSING ──
+
+const S4_RES_EN = {
+  id: "86fc2409-1b92-4d6d-b194-d1f22e67e7f7", template_id: "lc-s4-condition-res-en-01", use_case: "condition_probe",
+  stage_code: "S4", language: "English", is_active: true, safe_for_auto_reply: true, reply_mode: "auto_reply",
+  property_type_scope: "Residential", allowed_property_groups: ["sfr", "duplex", "triplex", "fourplex", "small_multifamily"],
+  prohibited_property_groups: [...COMMERCIAL, "land", "multifamily_5_plus"],
+  template_body: "Got it. How's the property overall? Anything that needs work?",
+};
+const S4_COM_EN = {
+  id: "b8daba64-0f6c-4572-9d48-cb27bc64616d", template_id: "lc-s4-condition-com-en-01", use_case: "condition_probe",
+  stage_code: "S4", language: "English", is_active: true, safe_for_auto_reply: true, reply_mode: "auto_reply",
+  property_type_scope: "Commercial (Other)", allowed_property_groups: [...COMMERCIAL, "multifamily_5_plus"],
+  prohibited_property_groups: ["sfr", "duplex", "triplex", "fourplex", "small_multifamily", "land"],
+  template_body: "Got it. How's the building overall? Any major repairs or deferred maintenance?",
+};
+const LIVE_S4 = [...PROD_TEMPLATES, S4_RES_EN, S4_COM_EN];
+
+test("live S4: price held, condition MISSING → SFR gets the residential row, retail the commercial row", async () => {
+  const sfr = await run({ message: "$290k firm", intent: "asking_price_provided", stage: "asking_price", asset: "sfr", directive: PROD_CONDITION_DIRECTIVE, priceKnown: true, templates: LIVE_S4 });
+  assert.equal(sfr.selected_template?.template_id, "lc-s4-condition-res-en-01");
+  assert.equal(textOf(sfr), "Got it. How's the property overall? Anything that needs work?");
+  const retail = await run({ message: "$2.9M firm", intent: "asking_price_provided", stage: "asking_price", asset: "retail", directive: PROD_CONDITION_DIRECTIVE, priceKnown: true, templates: LIVE_S4 });
+  assert.equal(retail.selected_template?.template_id, "lc-s4-condition-com-en-01");
+  assert.ok(!RESIDENTIAL_WORDS.test(textOf(retail)), textOf(retail));
+});
+
+test("live S4: condition ALREADY KNOWN (state, or said in this reply) → never re-asked; held for the next step", async () => {
+  const fromState = await executeInboundAutomationDecision({
+    message: "$290k firm", threadKey: THREAD, inboundFrom: THREAD, inboundTo: "+15550002222", propertyId: PROPERTY_ID,
+    context: threadContext("asking_price"), latestThreadContext: threadContext("asking_price"),
+    classification: CLASSIFICATIONS.asking_price_provided("$290k firm"), transitionDirective: PROD_CONDITION_DIRECTIVE,
+    effectiveStageBefore: "asking_price", sellerAskingPriceKnown: true, sellerConditionKnown: true,
+    inboundEventId: "evt-cond-known", dryRun: true, autoReplyMode: "dry_run", applySuppression: false,
+    supabaseClient: makeSupabase({ sms_templates: LIVE_S4, properties: [ASSETS.sfr] }),
+  });
+  assert.equal(fromState.queued, false);
+  assert.equal(fromState.selected_template, null);
+  assert.equal(fromState.automation_decision.human_review_reason, "condition_already_known");
+
+  const inReply = await executeInboundAutomationDecision({
+    message: "290k firm, it needs a new roof", threadKey: THREAD, inboundFrom: THREAD, inboundTo: "+15550002222", propertyId: PROPERTY_ID,
+    context: threadContext("asking_price"), latestThreadContext: threadContext("asking_price"),
+    classification: { ...CLASSIFICATIONS.asking_price_provided("290k firm, it needs a new roof"), secondary_intents: ["condition_disclosed"] },
+    transitionDirective: PROD_CONDITION_DIRECTIVE, effectiveStageBefore: "asking_price", sellerAskingPriceKnown: true,
+    inboundEventId: "evt-cond-in-reply", dryRun: true, autoReplyMode: "dry_run", applySuppression: false,
+    supabaseClient: makeSupabase({ sms_templates: LIVE_S4, properties: [ASSETS.sfr] }),
+  });
+  assert.ok(!/overall|needs work|repairs/i.test(textOf(inReply)), textOf(inReply));
+  assert.notEqual(inReply.selected_template?.use_case, "condition_probe");
+});
+
+test("live S4: condition disclosed but price NOT held → S3 asking price (never S4, never a hold)", async () => {
+  const result = await run({
+    message: "It needs a new roof, what would you offer?", intent: "asks_offer", stage: "offer_interest", asset: "sfr",
+    directive: PROD_CONDITION_DIRECTIVE, templates: LIVE_S4,
+  });
+  assert.equal(result.selected_template?.template_id, "occ_seller_asking_price_en_v1");
+});
+
+test("pure: applyConditionKnownRule only touches condition routes", async () => {
+  const { applyConditionKnownRule, resolveSellerConditionKnown } = await import("@/lib/domain/seller-flow/apply-inbound-automation-decision.js");
+  const offer = { should_queue_reply: true, required_template_use_case: "initial_offer", route_hint: "initial_offer" };
+  assert.equal(applyConditionKnownRule(offer, { condition_known: true }), offer);
+  const cond = { should_queue_reply: true, required_template_use_case: "condition_probe" };
+  assert.equal(applyConditionKnownRule(cond, { condition_known: false }), cond);
+  assert.equal(applyConditionKnownRule(cond, { condition_known: true }).should_queue_reply, false);
+  assert.equal(resolveSellerConditionKnown({ classification: { primary_intent: "condition_disclosed" } }), true);
+  assert.equal(resolveSellerConditionKnown({ classification: { primary_intent: "asking_price_provided" } }), false);
+});

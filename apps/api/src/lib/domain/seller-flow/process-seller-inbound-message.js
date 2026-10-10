@@ -2064,6 +2064,10 @@ export async function processSellerInboundMessage({
     sellerAskingPriceKnown: conversation_state
       ? conversation_state?.acquisition?.asking_price?.resolution === "known"
       : null,
+    // Owner rule 2026-10-10: S4 condition only when the condition is missing.
+    sellerConditionKnown: conversation_state
+      ? conversation_state?.acquisition?.property_condition?.resolution === "known"
+      : null,
     supabaseClient: supabase,
     getSystemValue,
   });

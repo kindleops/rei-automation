@@ -307,7 +307,9 @@ function hookDb(extra = {}) {
   });
 }
 const OUTBOUND = { id: "me_anchor", thread_key: PHONE, queue_id: "q_anchor" };
-const sys = (mode) => async (key) => (key === NO_RESPONSE_MODE_KEY ? mode : null);
+// Prospective-only cutoff (2026-10-10): a sending mode needs an explicit enable instant.
+const sys = (mode, enabled_at = "2026-10-01T00:00:00.000Z") => async (key) =>
+  key === NO_RESPONSE_MODE_KEY ? mode : key === "followup_no_response_enabled_at" ? enabled_at : null;
 
 test("hook: disabled (default) is a no-op — the generic path runs unchanged", async () => {
   for (const mode of [null, "", "garbage"]) {

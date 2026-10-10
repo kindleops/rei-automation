@@ -40,7 +40,45 @@ import { agentNameForRow } from "@/lib/domain/outbound/outbound-persona.js";
 export const NO_RESPONSE_FOLLOWUP_VERSION = "no_response_followup_v1_2026_10_06";
 export const NO_RESPONSE_MODE_KEY = "followup_no_response_mode";
 export const NO_RESPONSE_CONFIG_KEY = "followup_no_response_config";
-export const NO_RESPONSE_MODES = Object.freeze(["disabled", "dry_run", "live"]);
+// canary (owner 2026-10-10): schedules like live, capped at
+// followup_no_response_canary_daily_cap rows per UTC day (default 5).
+export const NO_RESPONSE_MODES = Object.freeze(["disabled", "dry_run", "canary", "live"]);
+/** PROSPECTIVE ONLY: anchors sent before this ISO instant never qualify (no backlog). */
+export const NO_RESPONSE_ENABLED_AT_KEY = "followup_no_response_enabled_at";
+export const NO_RESPONSE_CANARY_CAP_KEY = "followup_no_response_canary_daily_cap";
+export const DEFAULT_CANARY_DAILY_CAP = 5;
+
+/** The explicit enable cutoff, or null (missing / unparseable). Pure. */
+export function resolveNoResponseEnabledAt(value) {
+  const ms = Date.parse(clean(value));
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+/** Canary daily cap: a non-negative integer, default 5. Pure. */
+export function resolveCanaryDailyCap(value) {
+  if (value === null || value === undefined || clean(value) === "") return DEFAULT_CANARY_DAILY_CAP;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_CANARY_DAILY_CAP;
+}
+
+/** Lifecycle order: a follow-up keeps its anchor's stage and never runs after the thread moved past it. */
+const LIFECYCLE_ORDER = [
+  "ownership_confirmation", "offer_interest", "asking_price", "property_condition", "offer",
+  "formal_contract", "under_contract", "disposition", "prepared_to_close", "closed",
+];
+export const NO_RESPONSE_KIND_STAGE = Object.freeze({
+  s2_interest: "offer_interest",
+  s3_asking_price: "asking_price",
+  offer: "offer",
+});
+/** True when the thread's lifecycle is already past the stage this follow-up asks about. Pure. */
+export function threadAdvancedPastKind(kind, lifecycle_stage) {
+  const anchor = LIFECYCLE_ORDER.indexOf(NO_RESPONSE_KIND_STAGE[kind] || "");
+  const current = LIFECYCLE_ORDER.indexOf(lower(lifecycle_stage));
+  return anchor >= 0 && current >= 0 && current > anchor;
+}
+/** Identity: dispositions that mean this phone is not (or no longer) the owner. */
+const NON_OWNER_DISPOSITIONS = new Set(["wrong_number", "wrong_person", "not_owner", "non_owner", "former_owner", "sold", "suppressed", "unqualified"]);
 
 // S3_ASKING_PRICE (owner, 2026-10-10): silence after our "do you have an
 // asking price in mind?" question re-asks the price at 24h, same chain shape.
@@ -377,7 +415,9 @@ export function evaluateNoResponseCandidate(facts = {}, { config = resolveNoResp
     has_newer_outbound = false,
     thread_state = {},
     on_suppression_list = false,
+    precautionary_hold = false,
     inbound_rows_newest_first = [],
+    enabled_at = null,
   } = facts;
 
   const classification = classifyNoResponseAnchor(anchor, config);
@@ -387,6 +427,13 @@ export function evaluateNoResponseCandidate(facts = {}, { config = resolveNoResp
   if (has_newer_outbound) return { eligible: false, reason: "newer_outbound_exists" };
   if (!has_inbound_before_anchor) return { eligible: false, reason: "seller_never_replied" };
   if (on_suppression_list) return { eligible: false, reason: "phone_suppressed" };
+  if (precautionary_hold) return { eligible: false, reason: "precautionary_hold" };
+  if (NON_OWNER_DISPOSITIONS.has(lower(thread_state.disposition))) {
+    return { eligible: false, reason: `identity_not_owner:${lower(thread_state.disposition)}` };
+  }
+  if (/legal/.test(lower(thread_state.paused_reason)) || thread_state?.metadata?.legal_hold === true) {
+    return { eligible: false, reason: "legal_hold" };
+  }
   if (thread_state.is_suppressed === true) return { eligible: false, reason: "thread_suppressed" };
   // ARCHIVE IS VISIBILITY ONLY (owner, 2026-10-04 / 10-08): an archived
   // conversation keeps its follow-ups and nurture. is_archived / archived_at /
@@ -405,8 +452,17 @@ export function evaluateNoResponseCandidate(facts = {}, { config = resolveNoResp
   if (["closed", "dead", "closed_lost"].includes(lower(thread_state.lifecycle_stage))) {
     return { eligible: false, reason: `terminal_stage:${lower(thread_state.lifecycle_stage)}` };
   }
+  if (threadAdvancedPastKind(classification.kind, thread_state.lifecycle_stage)) {
+    return { eligible: false, reason: `thread_stage_advanced:${lower(thread_state.lifecycle_stage)}` };
+  }
   const sent_ms = Date.parse(clean(anchor_sent_at));
   if (!Number.isFinite(sent_ms)) return { eligible: false, reason: "anchor_sent_at_missing" };
+  // PROSPECTIVE ONLY (owner 2026-10-10): only touches delivered after the
+  // explicit enable instant qualify; the historical backlog is never swept.
+  const cutoff_ms = Date.parse(clean(enabled_at));
+  if (Number.isFinite(cutoff_ms) && sent_ms < cutoff_ms) {
+    return { eligible: false, reason: "anchor_before_enable_cutoff" };
+  }
   const now_ms = now instanceof Date ? now.getTime() : Date.parse(now);
   if (classification.step === 0 && now_ms - sent_ms > config.max_anchor_age_hours * HOUR_MS) {
     return { eligible: false, reason: "anchor_too_old" };
@@ -538,12 +594,18 @@ export async function loadAnchorQueueRow(supabase, queue_id) {
 }
 
 export async function loadNoResponseThreadFacts(supabase, { thread_key, anchor_sent_at, anchor_message_event_id = null }) {
-  const [state, supp, inbound] = await Promise.all([
+  const [state, hold, supp, inbound] = await Promise.all([
     supabase
       .from("inbox_thread_state")
-      .select("is_suppressed,contactability_status,last_intent,lifecycle_stage")
+      .select("is_suppressed,contactability_status,last_intent,lifecycle_stage,disposition,paused_reason,metadata")
       .eq("thread_key", thread_key)
       .maybeSingle(),
+    supabase
+      .from("automation_suppressions")
+      .select("id,status,expires_at")
+      .eq("phone_e164", thread_key)
+      .eq("status", "active")
+      .limit(5),
     supabase
       .from("sms_suppression_list")
       .select("id,is_active")
@@ -566,6 +628,10 @@ export async function loadNoResponseThreadFacts(supabase, { thread_key, anchor_s
   return {
     thread_state: state.data || {},
     on_suppression_list: (supp.data || []).some((r) => r.is_active !== false),
+    // precautionary_no_contact holds (10-08); an unreadable table fails closed.
+    precautionary_hold: hold.error
+      ? true
+      : (hold.data || []).some((r) => !r.expires_at || Date.parse(r.expires_at) > Date.now()),
     has_inbound_before_anchor: inbound_rows.some((r) => at(r) < anchor_ms),
     has_inbound_after_anchor: inbound_rows.some((r) => at(r) >= anchor_ms),
     inbound_rows_newest_first: inbound_rows.filter((r) => at(r) < anchor_ms),
@@ -643,6 +709,22 @@ export async function resolveNoResponseFollowUpMessage(queue_row = {}, { supabas
     if ((inb.data || []).length > 0) return { ok: false, resolved: false, reason: "seller_replied_since_anchor" };
     const others = (outb.data || []).filter((r) => r.id !== nr.anchor_message_event_id);
     if (others.length > 0) return { ok: false, resolved: false, reason: "newer_outbound_since_anchor" };
+  } catch {
+    return { ok: false, resolved: false, reason: "no_response_revalidation_failed" };
+  }
+
+  // 1b. Stage + identity at send time: the thread must not have moved past the
+  // stage this follow-up asks about, and the phone must still be the owner's.
+  try {
+    const { data: state, error: state_error } = await supabase
+      .from("inbox_thread_state")
+      .select("lifecycle_stage,disposition,is_suppressed")
+      .eq("thread_key", thread_key)
+      .maybeSingle();
+    if (state_error) return { ok: false, resolved: false, reason: "no_response_revalidation_failed" };
+    if (state?.is_suppressed === true) return { ok: false, resolved: false, reason: "thread_suppressed" };
+    if (NON_OWNER_DISPOSITIONS.has(lower(state?.disposition))) return { ok: false, resolved: false, reason: "identity_not_owner" };
+    if (threadAdvancedPastKind(nr.kind, state?.lifecycle_stage)) return { ok: false, resolved: false, reason: "thread_stage_advanced" };
   } catch {
     return { ok: false, resolved: false, reason: "no_response_revalidation_failed" };
   }

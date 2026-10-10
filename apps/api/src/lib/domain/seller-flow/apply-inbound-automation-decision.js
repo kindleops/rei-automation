@@ -1353,6 +1353,57 @@ export function applyStage3AskingPriceRule(
   };
 }
 
+// ── Stage 4 condition: ask ONLY when the condition is actually missing ──
+// (owner, 2026-10-10, binding). The live S4 rows (lc-s4-condition-res/com-en-01)
+// are a single question; asking it of a seller who already described the
+// property ("needs a new roof", "it's fully updated") is a repeat question.
+export const S4_CONDITION_USE_CASES = Object.freeze(new Set(["condition_probe", "price_high_condition_probe", "ask_condition_clarifier", "no_price_condition_probe"]));
+
+/** Do we already hold the property's condition (state, this reply, or the thread)? */
+export function resolveSellerConditionKnown({ explicit = null, classification = null } = {}) {
+  if (explicit === true) return true;
+  const c = classification && typeof classification === "object" ? classification : {};
+  const intents = [c.primary_intent, ...(Array.isArray(c.secondary_intents) ? c.secondary_intents : []), ...(Array.isArray(c.intents) ? c.intents : [])]
+    .map((v) => lower(v));
+  if (intents.includes("condition_disclosed")) return true;
+  const facts = c.condition_facts || c.metadata?.condition_facts || null;
+  if (facts && typeof facts === "object" && Object.keys(facts).length > 0) return true;
+  if (c.seller_facts?.condition_disclosed === true || c.extracted_facts?.condition_disclosed === true) return true;
+  return false;
+}
+
+/**
+ * Pure. When the condition is known, a condition route is never sent: the
+ * decision is held for a person (the next stage — the offer — is a human /
+ * engine decision, never a re-ask). Non-condition decisions pass unchanged.
+ */
+export function applyConditionKnownRule(decision = {}, { condition_known = false } = {}) {
+  if (!decision || typeof decision !== "object" || !condition_known) return decision;
+  if (!decision.should_queue_reply || decision.should_suppress_contact) return decision;
+  const required = lower(decision.required_template_use_case);
+  const route = lower(decision.route_hint);
+  const allowed = asArray(decision.allowed_template_stages).map((v) => lower(v));
+  const condition_only =
+    S4_CONDITION_USE_CASES.has(required) ||
+    (!required && S4_CONDITION_USE_CASES.has(route)) ||
+    (allowed.length > 0 && allowed.every((v) => S4_CONDITION_USE_CASES.has(v)));
+  if (!condition_only) {
+    return allowed.length
+      ? { ...decision, allowed_template_stages: allowed.filter((v) => !S4_CONDITION_USE_CASES.has(v)) }
+      : decision;
+  }
+  return {
+    ...decision,
+    should_queue_reply: false,
+    should_mark_human_review: true,
+    reply_mode: "manual_review",
+    next_action: "mark_human_review",
+    human_review_reason: "condition_already_known",
+    audit_reason: "condition_already_known",
+    condition_rerouted_from: required || route || null,
+  };
+}
+
 // Diagnostic only (OWNER RULE P0 2026-10-09): which of these use cases exist
 // ONLY as code-registry copy? Used to name the hold reason; registry copy is
 // never selected or sent.
@@ -2933,6 +2984,8 @@ export async function executeInboundAutomationDecision({
   // Canonical "we hold the seller's asking price" (conversation state). null =
   // caller does not know; only this turn's own evidence can then say known.
   sellerAskingPriceKnown = null,
+  // Canonical "we hold the property's condition" (conversation state). null = unknown.
+  sellerConditionKnown = null,
   // ONE BRAIN, TWO TRANSPORTS. Every decision above is channel-free; only the
   // last step differs. channel='email' hands the rendered reply to Email
   // Command (emailReplyImpl → email_queue) instead of send_queue, and lets
@@ -3256,6 +3309,13 @@ export async function executeInboundAutomationDecision({
       clean(latestThreadContext?.summary?.conversation_stage) ||
       null,
     strategy_directive_applied,
+  });
+
+  // OWNER RULE (2026-10-10): the S4 condition question only when the
+  // condition is actually missing — never re-ask what the seller answered.
+  // Runs after the Stage 3 rule, so a price-unknown thread still gets S3.
+  base_decision = applyConditionKnownRule(base_decision, {
+    condition_known: resolveSellerConditionKnown({ explicit: sellerConditionKnown, classification }),
   });
 
   info("[AUTO_REPLY_DECISION]", {
