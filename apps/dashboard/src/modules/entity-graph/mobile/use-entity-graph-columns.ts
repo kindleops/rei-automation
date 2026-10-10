@@ -54,6 +54,26 @@ export function storeColumnValues(ids: readonly string[], fields: readonly strin
 /** For tests. */
 export const __columnCacheTest = { reset: () => cache.clear() }
 
+/**
+ * Drop every cached value whose field starts with `prefix` (e.g. `camp.` when
+ * the campaign scope changes: those values belong to ONE campaign).
+ */
+export function forgetColumnFields(prefix: string) {
+  for (const [id, e] of cache) {
+    const values = Object.fromEntries(Object.entries(e.values).filter(([k]) => !k.startsWith(prefix)))
+    const cols = new Set([...e.cols].filter((c) => !c.startsWith(prefix)))
+    cache.set(id, { ...e, values, cols })
+  }
+}
+
+/** The campaign the camp.* fields are read for (set by the desk from its campaign scope chip). */
+let columnCampaignId: string | null = null
+export function setColumnCampaign(id: string | null) {
+  if (id === columnCampaignId) return
+  columnCampaignId = id
+  forgetColumnFields('camp.')
+}
+
 /** Merge cached values onto `details.row` (property rows only). */
 export function withColumnValues(rows: readonly EntitySearchResult[]): EntitySearchResult[] {
   return rows.map((r) => {
@@ -81,7 +101,7 @@ export function useEntityGraphColumns(rows: readonly EntitySearchResult[], field
         try {
           for (let i = 0; i < ids.length; i += BATCH) {
             const part = ids.slice(i, i + BATCH)
-            const data = await fetchEntityGraphColumns({ fields: fieldsKey, property_ids: part.join(',') }, controller.signal)
+            const data = await fetchEntityGraphColumns({ fields: fieldsKey, property_ids: part.join(','), ...(columnCampaignId && fields.some((f) => f.startsWith('camp.')) ? { campaign_id: columnCampaignId } : {}) }, controller.signal)
             storeColumnValues(part, fields, data)
             if (!controller.signal.aborted) setVersion((v) => v + 1)
           }

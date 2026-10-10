@@ -885,3 +885,27 @@ html.is-desktop-modern .egdk-figure.is-bad .egdk-figure__value { color: rgb(245,
 .egdk-fv__sensitive { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-size: 11px; color: var(--lc-ink-3); }
 .egdk-facet__cohort { color: var(--lc-ink-3); font-variant-numeric: tabular-nums; }
 .egdk-fv__variants { color: var(--lc-ink-3); font-size: 10.5px; }
+/* ── EG 8.6 · campaign scope banner (Campaign → Entity Graph) ─────────── */
+.egdk .egdk-campaign {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 0 0 8px; padding: 9px 12px; border-radius: 14px;
+  background: linear-gradient(110deg, rgba(var(--lc-accent-rgb), 0.12), rgba(var(--lc-edge-rgb), 0.03) 60%);
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-accent-rgb), 0.28), 0 14px 30px -26px rgba(var(--lc-accent-rgb), 0.6);
+  animation: egdk-campaign-in 320ms var(--lc-ease-enter, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+.egdk .egdk-campaign.is-failed { background: rgba(var(--lc-edge-rgb), 0.04); box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.14); }
+.egdk .egdk-campaign__icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; color: var(--lc-accent); background: rgba(var(--lc-accent-rgb), 0.16); flex: none; }
+.egdk .egdk-campaign__id { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.egdk .egdk-campaign__id strong { font-size: 14px; font-weight: 620; color: var(--lc-ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38ch; }
+.egdk .egdk-campaign__skel { display: inline-block; width: 160px; height: 14px; }
+.egdk .egdk-campaign__facts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; flex: 1 1 auto; min-width: 0; }
+.egdk .egdk-campaign__facts div { display: flex; flex-direction: column; min-width: 56px; }
+.egdk .egdk-campaign__facts dt { font-size: 10.5px; font-weight: 560; letter-spacing: 0.06em; text-transform: uppercase; color: var(--lc-ink-3); }
+.egdk .egdk-campaign__facts dd { margin: 0; font-size: 15px; font-weight: 640; font-variant-numeric: tabular-nums; color: var(--lc-ink-1); }
+.egdk .egdk-campaign__facts dd.is-text { font-size: 12.5px; font-weight: 560; text-transform: capitalize; }
+.egdk .egdk-campaign__fill { flex: 1 1 auto; }
+.egdk .egdk-campaign__actions { display: flex; gap: 4px; margin-left: auto; }
+@keyframes egdk-campaign-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .egdk .egdk-campaign { animation: none; } }
+[data-lc-motion='off'] .egdk .egdk-campaign { animation: none; }
+/* the campaign scope chip: its "Campaign" field label never truncates (the name does, with a tooltip) */
+html.is-desktop-modern .egdk-rail__active .lc-chip__field { flex: none; white-space: nowrap; }

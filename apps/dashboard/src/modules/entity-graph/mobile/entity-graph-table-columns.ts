@@ -30,6 +30,7 @@ const recordsCaptured = (r: EntitySearchResult): boolean => Boolean(r.details?.r
 export type ColumnGroup =
   | 'overview' | 'outreach' | 'geography' | 'market' | 'property' | 'ownership' | 'owner'
   | 'people' | 'contacts' | 'signals' | 'scores' | 'engine' | 'provenance' | 'company'
+  | 'campaign' | 'probate'
 
 export const COLUMN_GROUP_LABELS: Record<ColumnGroup, string> = {
   overview: 'Overview',
@@ -46,11 +47,13 @@ export const COLUMN_GROUP_LABELS: Record<ColumnGroup, string> = {
   engine: 'Decision Engine',
   provenance: 'Advanced / debug (ids, system)',
   company: 'Owning company (state registry)',
+  campaign: 'Campaign outcome (the scoped campaign)',
+  probate: 'Probate (audited)',
 }
 
 export const COLUMN_GROUP_ORDER: ColumnGroup[] = [
-  'overview', 'outreach', 'geography', 'market', 'property', 'ownership', 'owner', 'company',
-  'people', 'contacts', 'signals', 'scores', 'engine', 'provenance',
+  'overview', 'campaign', 'outreach', 'geography', 'market', 'property', 'ownership', 'owner', 'company',
+  'people', 'contacts', 'signals', 'probate', 'scores', 'engine', 'provenance',
 ]
 
 /**
@@ -520,7 +523,7 @@ export const IDENTITY_SORT_COLUMN: Record<EntityScope, string | null> = {
  * raw_payload_json) is not selected by the adapter at all, so it cannot leak
  * here.
  */
-type Extra = { key: string; label: string; group: ColumnGroup; width?: number; unit: ColumnUnit; source?: string; noData?: boolean; vendorEquity?: boolean }
+type Extra = { key: string; label: string; group: ColumnGroup; width?: number; unit: ColumnUnit; source?: string; noData?: boolean; vendorEquity?: boolean; noSort?: boolean }
 const NO_DATA = 'No data in the source — 0% of properties carry it (field audit 2026-10-09); offered so its absence is visible, not hidden'
 const SPARSE = (pct: string) => `Sparse in the source — about ${pct} of properties carry it (field audit 2026-10-08)`
 const EXTRA_PROPERTY_COLUMNS: Extra[] = [
@@ -773,6 +776,27 @@ const EXTRA_PROPERTY_COLUMNS: Extra[] = [
   { key: 'fact.company_jurisdiction', label: 'Company jurisdiction', group: 'company', width: 140, unit: 'code' },
   { key: 'fact.company_registry_match', label: 'Registry match', group: 'company', width: 130, unit: 'code', source: 'matched · name_only (no registry record) · no_entity_record · individual' },
 
+  /* the outcome of the campaign the cohort is scoped to (Campaign: <name> chip) — read for the visible page */
+  { key: 'camp.template', label: 'Template sent', group: 'campaign', width: 200, unit: 'text', noSort: true, source: 'sms_templates name of this campaign’s latest send (send_queue.template_id)' },
+  { key: 'camp.sent_at', label: 'Sent at', group: 'campaign', width: 130, unit: 'date', noSort: true, source: 'send_queue.sent_at, this campaign' },
+  { key: 'camp.delivery', label: 'Delivery', group: 'campaign', width: 170, unit: 'text', noSort: true, source: 'Delivered · Failed (reason) · Sent, awaiting delivery · queued / scheduled' },
+  { key: 'camp.target_status', label: 'Target status', group: 'campaign', width: 170, unit: 'text', noSort: true, source: 'campaign_targets.target_status (+ block reason)' },
+  { key: 'camp.touch', label: 'Touch', group: 'campaign', width: 70, unit: 'count', noSort: true },
+  { key: 'camp.reply_intent', label: 'Reply intent', group: 'campaign', width: 150, unit: 'text', noSort: true, source: 'The classifier’s intent on the first inbound after this campaign’s send' },
+  { key: 'camp.replied_at', label: 'Replied at', group: 'campaign', width: 130, unit: 'date', noSort: true },
+  { key: 'camp.opted_out', label: 'Opted out after send', group: 'campaign', width: 150, unit: 'boolean', noSort: true, source: 'An opt-out inbound after this campaign’s send (permission state)' },
+
+  /* probate audit (public.probate_status): is the estate a real open opportunity, and who to contact (role only) */
+  { key: 'probate.validity_class', label: 'Probate validity', group: 'probate', width: 160, unit: 'code', noSort: true, source: 'probate_status.validity_class (probate audit 2026-10-10)' },
+  { key: 'probate.validity_subclass', label: 'Probate validity (detail)', group: 'probate', width: 180, unit: 'code', noSort: true },
+  { key: 'probate.estate_status', label: 'Estate status', group: 'probate', width: 140, unit: 'code', noSort: true },
+  { key: 'probate.best_contact_role', label: 'Best contact role', group: 'probate', width: 150, unit: 'code', noSort: true, source: 'The best LIVING decision maker’s role (never a name or phone)' },
+  { key: 'probate.best_contact_tier', label: 'Best contact tier', group: 'probate', width: 130, unit: 'code', noSort: true },
+  { key: 'probate.reachable_living_dm', label: 'Living decision maker reachable', group: 'probate', width: 190, unit: 'boolean', noSort: true },
+  { key: 'probate.exclude_targeting', label: 'Probate · exclude from targeting', group: 'probate', width: 190, unit: 'boolean', noSort: true },
+  { key: 'probate.opportunity_score', label: 'Probate opportunity score', group: 'probate', width: 170, unit: 'score', noSort: true },
+  { key: 'probate.date_of_death', label: 'Date of death', group: 'probate', width: 120, unit: 'date', noSort: true },
+
   { key: 'property_export_id', label: 'Export id', group: 'provenance', width: 140, unit: 'id' },
   { key: 'canonical_market_id', label: 'Canonical market id', group: 'provenance', width: 160, unit: 'id' },
   { key: 'master_owner_id', label: 'Master owner ID', group: 'provenance', width: 190, unit: 'id' },
@@ -832,7 +856,8 @@ function rawSortValue(key: string, unit: ColumnUnit, result: EntitySearchResult)
       field: extra.key,
       source: extra.source,
       // whole-cohort server sort + header filter on its facts column (every picker field)
-      sortBy: factColumnForField(extra.key, extra),
+      // (campaign outcome / probate columns are page reads, not facts columns: no whole-cohort sort)
+      sortBy: extra.noSort ? undefined : factColumnForField(extra.key, extra),
       noData: extra.noData,
       render: (r) => renderRawField(extra.key, extra.unit, r, extra),
       sortValue: (r) => rawSortValue(extra.key, extra.unit, r),

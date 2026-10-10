@@ -6,6 +6,9 @@
  * and contact subtype live in TWO places, so no hop loses them:
  *
  *   URL (this pane's own address)   egs · q · ff · egv · egfs · egc
+ *   localStorage                    the last view per scope (Overview · Grid ·
+ *     Graph) — a scope opens in the view the operator left it in, Overview
+ *     the first time
  *     — reload, Back/Forward, a shared link, and the workspace's per-pane
  *       path all carry it; a property click only renames the PATH
  *       (/entity-graph/property/:id) and preserves the search params
@@ -19,7 +22,8 @@
 import { parseFieldFiltersParam, type EntityGraphFieldFilter } from '../../../domain/entity-graph/entity-graph-field-filters'
 import type { EntityScope } from '../mobile/entity-graph-mobile-format'
 
-export type DeskCenter = 'grid' | 'graph'
+/** The centre view. Overview is the landing view of every scope (owner 2026-10-10); Grid and Graph are one click away. */
+export type DeskCenter = 'overview' | 'grid' | 'graph'
 
 export type DeskState = {
   scope: EntityScope
@@ -38,12 +42,37 @@ export const DEFAULT_DESK_STATE: DeskState = {
   scope: 'properties',
   query: '',
   filtersByScope: {},
-  center: 'grid',
+  center: 'overview',
   graphFull: false,
   contactSubtype: 'phone',
 }
 
 const isScope = (v: unknown): v is EntityScope => typeof v === 'string' && (SCOPES as string[]).includes(v)
+const isCenter = (v: unknown): v is DeskCenter => v === 'overview' || v === 'grid' || v === 'graph'
+
+/* ── the last view per scope (localStorage, per operator) ────────────────── */
+
+export const DESK_VIEW_KEY = 'nexus.entityGraph.desk.viewByScope.v1'
+export type ViewByScope = Partial<Record<EntityScope, DeskCenter>>
+
+export function readViewByScope(uid: string, storage: Pick<Storage, 'getItem'> | null = safeLocal()): ViewByScope {
+  try {
+    const parsed = JSON.parse(storage?.getItem(`${DESK_VIEW_KEY}:${uid}`) || 'null') as Record<string, unknown> | null
+    if (!parsed || typeof parsed !== 'object') return {}
+    const out: ViewByScope = {}
+    for (const s of SCOPES) if (isCenter(parsed[s])) out[s] = parsed[s] as DeskCenter
+    return out
+  } catch {
+    return {}
+  }
+}
+
+export function writeViewByScope(uid: string, views: ViewByScope, storage: Pick<Storage, 'setItem'> | null = safeLocal()): void {
+  try { storage?.setItem(`${DESK_VIEW_KEY}:${uid}`, JSON.stringify(views)) } catch { /* private mode / full */ }
+}
+
+/** The view a scope opens in: the operator's last one there, else Overview. */
+export const viewForScope = (views: ViewByScope, scope: EntityScope): DeskCenter => views[scope] ?? 'overview'
 
 function sanitizeFilters(raw: unknown): EntityGraphFieldFilter[] {
   if (!Array.isArray(raw)) return []
@@ -57,7 +86,7 @@ export function readSessionDeskState(storage: Pick<Storage, 'getItem'> | null = 
     const out: Partial<DeskState> = {}
     if (isScope(parsed.scope)) out.scope = parsed.scope
     if (typeof parsed.query === 'string') out.query = parsed.query
-    if (parsed.center === 'graph' || parsed.center === 'grid') out.center = parsed.center
+    if (isCenter(parsed.center)) out.center = parsed.center
     if (typeof parsed.graphFull === 'boolean') out.graphFull = parsed.graphFull
     if (parsed.contactSubtype === 'email' || parsed.contactSubtype === 'phone') out.contactSubtype = parsed.contactSubtype
     if (parsed.filtersByScope && typeof parsed.filtersByScope === 'object') {
@@ -88,18 +117,21 @@ export function urlHasDeskState(params: URLSearchParams): boolean {
  * any (a shared link / reload / Back), otherwise the session. The session
  * always supplies the OTHER scopes' filters.
  */
-export function initialDeskState(params: URLSearchParams, session: Partial<DeskState> = readSessionDeskState()): DeskState {
+export function initialDeskState(params: URLSearchParams, session: Partial<DeskState> = readSessionDeskState(), views: ViewByScope = {}): DeskState {
   const base: DeskState = { ...DEFAULT_DESK_STATE, ...session, filtersByScope: { ...(session.filtersByScope ?? {}) } }
-  if (!urlHasDeskState(params)) return base
+  if (!urlHasDeskState(params)) return { ...base, center: session.center ?? viewForScope(views, base.scope) }
   const scope = isScope(params.get('egs')) ? (params.get('egs') as EntityScope) : 'properties'
   const filters = parseFieldFiltersParam(params.get('ff'))
+  const egv = params.get('egv')
+  // an explicit view in the address wins; else the scope's remembered view; else Overview
+  const center: DeskCenter = isCenter(egv) ? egv : viewForScope(views, scope)
   return {
     ...base,
     scope,
     query: params.get('q') ?? '',
     filtersByScope: { ...base.filtersByScope, [scope]: filters },
-    center: params.get('egv') === 'graph' ? 'graph' : 'grid',
-    graphFull: params.get('egv') === 'graph' && params.get('egfs') === '1',
+    center,
+    graphFull: center === 'graph' && params.get('egfs') === '1',
     contactSubtype: params.get('egc') === 'email' ? 'email' : 'phone',
   }
 }
@@ -112,7 +144,7 @@ export function deskSearch(current: string, state: DeskState): string {
   if (state.scope !== 'properties') params.set('egs', state.scope)
   if (state.query.trim()) params.set('q', state.query.trim())
   if (filters.length) params.set('ff', JSON.stringify(filters))
-  if (state.center === 'graph') params.set('egv', 'graph')
+  if (state.center !== 'overview') params.set('egv', state.center)
   if (state.center === 'graph' && state.graphFull) params.set('egfs', '1')
   if (state.scope === 'contact_methods' && state.contactSubtype === 'email') params.set('egc', 'email')
   const s = params.toString()
@@ -129,6 +161,10 @@ export function withViewFilters(
   view: { scope: EntityScope; fieldFilters: EntityGraphFieldFilter[] },
 ): DeskState['filtersByScope'] {
   return { ...byScope, [view.scope]: sanitizeFilters(view.fieldFilters) }
+}
+
+function safeLocal(): Storage | null {
+  try { return typeof window !== 'undefined' ? window.localStorage : null } catch { return null }
 }
 
 function safeSession(): Storage | null {

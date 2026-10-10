@@ -93,8 +93,12 @@ describe('header selection → ONE chip in the rail AST', () => {
 
 describe('every property column sorts the whole cohort on its facts column — never "not sortable"', () => {
   it('each property column has a server sort key', () => {
-    const missing = SCOPE_TABLE_COLUMNS.properties.filter((c) => !c.sortBy).map((c) => c.key)
+    // the scoped campaign's outcome (camp.*) and the probate audit (probate.*) are page reads, not facts
+    // columns — they are not offered as a whole-cohort sort (EG 8.6; their facts columns are a follow-up)
+    const pageReads = (k: string) => k.startsWith('camp.') || k.startsWith('probate.')
+    const missing = SCOPE_TABLE_COLUMNS.properties.filter((c) => !c.sortBy && !pageReads(c.key)).map((c) => c.key)
     expect(missing).toEqual([])
+    expect(SCOPE_TABLE_COLUMNS.properties.filter((c) => pageReads(c.key)).every((c) => !c.sortBy)).toBe(true)
   })
   it('the computed columns sort / filter where the owner expects', () => {
     const col = (k: string) => SCOPE_TABLE_COLUMNS.properties.find((c) => c.key === k)!

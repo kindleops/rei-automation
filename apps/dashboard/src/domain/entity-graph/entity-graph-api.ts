@@ -251,7 +251,7 @@ export type EntityGraphColumnValues = Record<string, Record<string, unknown>>
  * carry (year built, zoning, beds, …). Whitelisted server-side; ≤ 300 ids.
  */
 export async function fetchEntityGraphColumns(
-  params: { fields: string; property_ids: string },
+  params: { fields: string; property_ids: string; campaign_id?: string },
   signal?: AbortSignal,
 ): Promise<EntityGraphColumnValues> {
   const res = await backendClient.callBackend<{ ok: boolean; values?: EntityGraphColumnValues }>(

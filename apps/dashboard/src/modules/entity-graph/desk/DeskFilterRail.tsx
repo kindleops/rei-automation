@@ -20,6 +20,7 @@
  * showing an unfiltered list.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { CAMPAIGN_MEMBERSHIP_KEY } from '../../../domain/entity-graph/entity-graph-campaign-link'
 import { LCButton, LCChip, LCError, LCSearch, LCSegmented, LCSkeleton, cx } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
 import { useAuth } from '../../../components/auth/AuthProvider'
@@ -64,11 +65,13 @@ type Props = {
   onChange: (next: EntityGraphFieldFilter[]) => void
   collapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
+  /** the label of a scope chip (the campaign scope: "Campaign: <name>"); null = not a scope chip */
+  scopeChipLabel?: (f: EntityGraphFieldFilter) => string | null
 }
 
 const sameFilter = (a: EntityGraphFieldFilter, b: EntityGraphFieldFilter) => a.field_key === b.field_key && a.operator === b.operator && JSON.stringify(a.value ?? null) === JSON.stringify(b.value ?? null)
 
-export function DeskFilterRail({ scope, filters, onChange, collapsed = false, onCollapsedChange }: Props) {
+export function DeskFilterRail({ scope, filters, onChange, collapsed = false, onCollapsedChange, scopeChipLabel }: Props) {
   const uid = useAuth().user?.id || 'local'
   const tab = tabForScope(scope)
   const [catalogState, setCatalogState] = useState<{ tab: string; catalog: EntityGraphFilterCatalog | null; failed: boolean } | null>(null)
@@ -90,7 +93,9 @@ export function DeskFilterRail({ scope, filters, onChange, collapsed = false, on
   const isToggle = (f: EntityGraphFieldFilter) => toggles.some((t) => sameFilter(t.filter, f))
   const isPreset = (f: EntityGraphFieldFilter) => presets.some((g) => g.presets.some((p) => sameFilter(p.filter, f)))
   const isFacet = (f: EntityGraphFieldFilter) => facetKeys.has(f.field_key) && FACET_OPERATORS.has(f.operator)
-  const custom = filters.filter((f) => !isPreset(f) && !isFacet(f) && !isToggle(f))
+  // a scope chip (the campaign scope) is a cohort, not a field to edit: shown as its own chip, never in the editor
+  const isScopeChip = (f: EntityGraphFieldFilter) => f.field_key === CAMPAIGN_MEMBERSHIP_KEY
+  const custom = filters.filter((f) => !isPreset(f) && !isFacet(f) && !isToggle(f) && !isScopeChip(f))
 
   // Field drafts: edited locally, applied together.
   const [draft, setDraft] = useState<{ base: string; rows: EntityGraphFieldFilter[] } | null>(null)
@@ -99,7 +104,7 @@ export function DeskFilterRail({ scope, filters, onChange, collapsed = false, on
   const dirty = Boolean(draft && draft.base === customSig && JSON.stringify(completeFieldFilters(draft.rows)) !== customSig)
   const setRows = (next: EntityGraphFieldFilter[]) => setDraft({ base: customSig, rows: next })
   const apply = () => {
-    onChange([...filters.filter((f) => isPreset(f) || isFacet(f) || isToggle(f)), ...completeFieldFilters(rows)])
+    onChange([...filters.filter((f) => isPreset(f) || isFacet(f) || isToggle(f) || isScopeChip(f)), ...completeFieldFilters(rows)])
     setDraft(null)
   }
 
@@ -113,6 +118,7 @@ export function DeskFilterRail({ scope, filters, onChange, collapsed = false, on
   }
 
   const label = (f: EntityGraphFieldFilter) => {
+    if (isScopeChip(f)) return scopeChipLabel?.(f) ?? 'Loading…'
     const field = findCatalogField(catalog, f.field_key)
     if (isFacet(f)) {
       const facet = facets.find((x) => x.fieldKey === f.field_key)
@@ -168,7 +174,7 @@ export function DeskFilterRail({ scope, filters, onChange, collapsed = false, on
       {filters.length ? (
         <div className="egdk-rail__active" aria-label="Active filters">
           {filters.map((f, i) => (
-            <LCChip key={`${f.field_key}:${i}`} value={label(f)} onRemove={() => onChange(filters.filter((_, j) => j !== i))} />
+            <LCChip key={`${f.field_key}:${i}`} field={isScopeChip(f) ? 'Campaign' : undefined} value={label(f)} title={isScopeChip(f) ? 'The campaign’s exact target set (targets + whatever was queued or sent)' : undefined} onRemove={() => onChange(filters.filter((_, j) => j !== i))} />
           ))}
         </div>
       ) : null}

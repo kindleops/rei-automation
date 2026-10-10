@@ -51,6 +51,11 @@ export interface LCColumn<R> {
   headerAccessory?: ReactNode
   /** the accessory is in an active state (a filter is applied on this column) */
   headerActive?: boolean
+  /**
+   * Column group: adjacent visible columns of the same group share one band
+   * above their headers (labelled by `columnGroupLabels[group]` or the group).
+   */
+  group?: string
 }
 
 export type LCSort = { id: string; dir: 'asc' | 'desc' } | null
@@ -61,6 +66,8 @@ export type LCRowActivationEvent = MouseEvent<Element> | KeyboardEvent<Element>
 export interface LCDataGridProps<R> {
   /** persists widths / visibility */
   id: string
+  /** labels for LCColumn.group bands; bands render only when a visible column has a group */
+  columnGroupLabels?: Record<string, string>
   label: string
   rows: ReadonlyArray<R>
   rowKey: (row: R) => string
@@ -137,7 +144,7 @@ function readPrefs(id: string): { widths: Record<string, number>; hidden: string
 export function LCDataGrid<R>({
   id, label, rows, rowKey, columns, sort, onSortChange, activeKey, onActivate, selected, onSelectedChange,
   density = 'standard', groupBy, groupLabel, rowMenu, rowTone, renderExpanded, loading, error, empty, onEndReached,
-  loadingMore, total, height = '100%', className, onColumnOrderChange, pinnedColumns, rowHeight,
+  loadingMore, total, height = '100%', className, onColumnOrderChange, pinnedColumns, rowHeight, columnGroupLabels,
 }: LCDataGridProps<R>) {
   const [dragCol, setDragCol] = useState<string | null>(null)
   const [dropCol, setDropCol] = useState<string | null>(null)
@@ -217,7 +224,21 @@ export function LCDataGrid<R>({
   }
 
   // windowed range (binary search on offsets)
-  const headerH = rowH
+  // column-group bands: one 20px row above the headers when any visible column carries a group
+  const hasBands = visibleCols.some((c) => c.group)
+  const bandH = hasBands ? 20 : 0
+  const headerH = rowH + bandH
+  const bands = useMemo(() => {
+    if (!hasBands) return []
+    const out: Array<{ key: string; group: string | null; span: number }> = []
+    for (const c of visibleCols) {
+      const g = c.group ?? null
+      const last = out[out.length - 1]
+      if (last && last.group === g) last.span += 1
+      else out.push({ key: `${g ?? 'none'}:${c.id}`, group: g, span: 1 })
+    }
+    return out
+  }, [hasBands, visibleCols])
   let start = 0
   let end = items.length
   if (windowed) {
@@ -420,7 +441,18 @@ export function LCDataGrid<R>({
         onScroll={onScroll}
         onKeyDown={onKeyDown}
       >
-        <div className="lc-grid__head" role="row" aria-rowindex={1} style={{ gridTemplateColumns: template, minWidth: minInner, height: headerH }}>
+        {hasBands ? (
+          <div className="lc-grid__bands" aria-hidden="true" style={{ gridTemplateColumns: template, minWidth: minInner, height: bandH }}>
+            {selectable ? <span className="lc-grid__band is-empty" /> : null}
+            {bands.map((b) => (
+              <span key={b.key} className={cx('lc-grid__band', !b.group && 'is-empty')} style={{ gridColumn: `span ${b.span}` }} title={b.group ? (columnGroupLabels?.[b.group] ?? b.group) : undefined}>
+                {b.group ? <span className="lc-grid__bandtext">{columnGroupLabels?.[b.group] ?? b.group}</span> : null}
+              </span>
+            ))}
+            {rowMenu ? <span className="lc-grid__band is-empty" /> : null}
+          </div>
+        ) : null}
+        <div className="lc-grid__head" role="row" aria-rowindex={1} style={{ gridTemplateColumns: template, minWidth: minInner, height: rowH, ...(hasBands ? { top: bandH } : {}) }}>
           {selectable ? (
             <span role="columnheader" className="lc-grid__th is-check">
               <span

@@ -233,3 +233,122 @@
   .egdk .egov-bar__fill, .egdk .egov-col__fill, .egdk .egov-split__seg { background: CanvasText; }
   .egdk .egov-bar.is-none .egov-bar__fill, .egdk .egov-col.is-none .egov-col__fill { background: GrayText; }
 }
+
+/* ── EG 8.6: the Overview as the landing view ───────────────────────────
+ * Motion only for state change: cards rise in staggered (inline delay from
+ * staggerDelay), bars grow once on arrival and GLIDE (width / height
+ * transitions) when a filter changes the cohort; numbers count up in JS.
+ * prefers-reduced-motion and the LC Animations switch turn all of it off.
+ */
+.egdk .egov-enter { animation: egov-rise 420ms var(--lc-ease-enter, cubic-bezier(0.16, 1, 0.3, 1)) both; }
+@keyframes egov-rise { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
+.egdk .egov-bar__fill { transition: width 320ms var(--lc-ease-standard, ease-out), background-color 140ms ease; }
+.egdk .egov-col__fill { transition: height 320ms var(--lc-ease-standard, ease-out), background-color 140ms ease; }
+.egdk .egov-split__seg { transition: flex-grow 320ms var(--lc-ease-standard, ease-out); }
+.egdk .egov-cov__meter i { transition: width 320ms var(--lc-ease-standard, ease-out); }
+.egdk .egov-section.is-stale .egov-grid, .egdk .egov-kpis.is-stale { transition: opacity 160ms ease; }
+
+/* skeleton shimmer (lc-skel is the shimmer; cards keep their real height so nothing jumps) */
+.egdk .egov-card.is-skeleton { min-height: 196px; }
+.egdk .egov-card.is-skeleton.is-compact { min-height: 0; height: 176px; }
+.egdk .egov-card.is-computing .lc-skel { opacity: 0.55; }
+
+/* ── KPI band: animated counters on glass ─────────────────────────────── */
+.egdk .egov-kpis {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(116px, 1fr)); gap: 8px; position: relative;
+}
+/* every bar of a short histogram carries its label (same flex as the columns above it) */
+.egdk .egov-hist__ticks { display: flex; gap: 2px; font-size: 10px; color: var(--lc-ink-3); }
+.egdk .egov-hist__ticks span { flex: 1 1 0; min-width: 4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.egdk .egov-hist__ticks span.is-none { flex: 0.7 1 0; margin-left: 6px; color: var(--lc-ink-4); }
+.egdk .egov-band .egov-kpis { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(120px, 1fr); overflow-x: auto; scrollbar-width: none; }
+.egdk .egov-kpi {
+  position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 11px 13px 12px; border: 0; border-radius: 14px; text-align: left;
+  color: inherit; font: inherit; overflow: hidden;
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(var(--lc-accent-rgb), 0.10), transparent 58%),
+    linear-gradient(180deg, rgba(var(--lc-edge-rgb), 0.06), rgba(var(--lc-edge-rgb), 0.02));
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 16px 30px -26px rgba(var(--lc-shade-rgb), 0.95);
+  -webkit-backdrop-filter: var(--lc-mat-smoke-filter); backdrop-filter: var(--lc-mat-smoke-filter);
+}
+.egdk .egov-kpi.is-hero { background: radial-gradient(130% 160% at 0% 0%, rgba(var(--lc-accent-rgb), 0.2), transparent 60%), linear-gradient(180deg, rgba(var(--lc-edge-rgb), 0.07), rgba(var(--lc-edge-rgb), 0.02)); }
+.egdk .egov-kpi.is-clickable { cursor: pointer; }
+.egdk .egov-kpi.is-clickable:hover { box-shadow: inset 0 0 0 1px rgba(var(--lc-accent-rgb), 0.4), 0 18px 34px -24px rgba(var(--lc-accent-rgb), 0.45); }
+.egdk .egov-kpi:focus-visible { outline: 1px solid var(--lc-accent); outline-offset: 1px; }
+.egdk .egov-kpi.is-skeleton { min-height: 84px; gap: 8px; }
+.egdk .egov-kpi__label { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 560; color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.egdk .egov-kpi__value { font-size: 24px; font-weight: 660; letter-spacing: -0.02em; line-height: 1.1; color: var(--lc-ink-1); font-variant-numeric: tabular-nums; }
+.egdk .egov-kpi.is-hero .egov-kpi__value { font-size: 28px; }
+.egdk .egov-band .egov-kpi__value { font-size: 18px; }
+.egdk .egov-kpi__na { font-size: 13px; font-weight: 520; color: var(--lc-ink-4); }
+.egdk .egov-kpi__sub { font-size: 11px; color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.egdk .egov-kpi__meter { position: absolute; left: 13px; right: 13px; bottom: 6px; height: 2px; border-radius: 2px; background: rgba(var(--lc-edge-rgb), 0.08); overflow: hidden; }
+.egdk .egov-kpi__meter i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: linear-gradient(90deg, rgba(var(--lc-accent-rgb), 0.55), rgba(var(--lc-accent-rgb), 0.95)); transition: width 700ms var(--lc-ease-standard, ease-out); }
+.egdk .egov-kpis__note { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; margin: 0; font-size: 11.5px; color: var(--lc-ink-3); }
+
+/* sensitive-field marker (age, gender, marital status, language…) */
+.egdk .egov-sensitive {
+  display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; margin-left: 6px; border-radius: 4px; vertical-align: 1px;
+  font-style: normal; font-size: 9px; font-weight: 700; letter-spacing: 0; color: var(--lc-ink-2);
+  background: rgba(var(--lc-flow-rgb, var(--lc-edge-rgb)), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--lc-flow-rgb, var(--lc-edge-rgb)), 0.4);
+}
+
+/* ── distress signals × market ────────────────────────────────────────── */
+.egdk .egov-matrix { --egov-hot: var(--lc-attn-rgb, var(--lc-accent-rgb)); gap: 8px; margin-bottom: 8px; }
+.egdk .egov-matrix__hint { margin-left: auto; font-size: 11px; color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+.egdk .egov-matrix__scroll { overflow-x: auto; }
+.egdk .egov-matrix__table { width: 100%; border-collapse: separate; border-spacing: 3px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.egdk .egov-matrix__table th { font-weight: 560; color: var(--lc-ink-3); text-align: left; white-space: nowrap; }
+.egdk .egov-matrix__corner, .egdk .egov-matrix__totalh { font-size: 11px; }
+.egdk .egov-matrix__sig { font-size: 10.5px; text-align: center !important; min-width: 64px; }
+.egdk .egov-matrix__sigbtn, .egdk .egov-matrix__market {
+  border: 0; padding: 2px 4px; background: none; font: inherit; color: inherit; cursor: pointer; border-radius: 5px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.egdk .egov-matrix__sigbtn:hover, .egdk .egov-matrix__market:hover:not(:disabled) { color: var(--lc-ink-1); background: rgba(var(--lc-edge-rgb), 0.06); }
+.egdk .egov-matrix__market { color: var(--lc-ink-2); }
+.egdk .egov-matrix__row { animation: egov-rise 380ms var(--lc-ease-enter, ease-out) both; }
+.egdk .egov-matrix__total { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+.egdk .egov-matrix__total b { font-weight: 600; color: var(--lc-ink-1); min-width: 52px; text-align: right; }
+.egdk .egov-matrix__tbar { position: relative; flex: 1 1 auto; height: 6px; border-radius: 3px; background: rgba(var(--lc-edge-rgb), 0.06); }
+.egdk .egov-matrix__tbar i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: rgba(var(--lc-accent-rgb), 0.55); transition: width 320ms var(--lc-ease-standard, ease-out); }
+.egdk .egov-matrix__cell { padding: 0; }
+.egdk .egov-matrix__btn {
+  display: block; width: 100%; min-width: 58px; height: 26px; border: 0; border-radius: 6px; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 600;
+  color: var(--lc-ink-1); background: rgba(var(--egov-hot), var(--egov-cell, 0)); box-shadow: inset 0 0 0 1px rgba(var(--egov-hot), 0.18);
+  transition: background-color 320ms var(--lc-ease-standard, ease-out), transform 120ms ease;
+}
+.egdk .egov-matrix__btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: inset 0 0 0 1px rgba(var(--egov-hot), 0.6), 0 8px 18px -12px rgba(var(--egov-hot), 0.8); }
+.egdk .egov-matrix__btn:focus-visible { outline: 1px solid var(--lc-accent); outline-offset: 1px; }
+.egdk .egov-matrix__btn.is-zero { cursor: default; color: var(--lc-ink-4); background: transparent; box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.06); }
+
+/* ── computing (the universe is the snapshot's) ───────────────────────── */
+.egdk .egov-computing {
+  position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(160px, 260px); align-items: center; gap: 14px;
+  padding: 14px 16px; border-radius: 14px; overflow: hidden;
+  background: linear-gradient(120deg, rgba(var(--lc-accent-rgb), 0.09), rgba(var(--lc-edge-rgb), 0.03));
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-accent-rgb), 0.22);
+}
+.egdk .egov-computing b { font-size: 13.5px; font-weight: 620; }
+.egdk .egov-computing p { margin: 3px 0 0; font-size: 12px; color: var(--lc-ink-3); max-width: 70ch; }
+.egdk .egov-computing__orb { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: var(--lc-accent); background: rgba(var(--lc-accent-rgb), 0.14); box-shadow: 0 0 0 4px rgba(var(--lc-accent-rgb), 0.06); }
+.egdk .egov-computing__ghost { display: flex; align-items: flex-end; gap: 3px; height: 46px; }
+.egdk .egov-computing__ghost i { flex: 1 1 0; border-radius: 3px 3px 0 0; }
+@container (max-width: 640px) { .egdk .egov-computing { grid-template-columns: auto minmax(0, 1fr); } .egdk .egov-computing__ghost { display: none; } }
+.egdk .egov-source__dot.is-pending { background: var(--lc-ink-4); box-shadow: 0 0 0 3px rgba(var(--lc-edge-rgb), 0.12); }
+
+/* the full Overview: a hero header on glass, the page scrolls under it */
+.egdk .egov-mode__head { background: linear-gradient(180deg, rgba(var(--lc-accent-rgb), 0.06), transparent); }
+.egdk .egov-mode__id h2 { font-variant-numeric: tabular-nums; }
+.egdk .egov-mode { container-type: inline-size; }
+@container (min-width: 1800px) { .egdk .egov-grid:not(.is-band) { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@container (min-width: 2300px) { .egdk .egov-grid:not(.is-band) { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .egdk .egov-enter, .egdk .egov-matrix__row { animation: none; }
+  .egdk .egov-bar__fill, .egdk .egov-col__fill, .egdk .egov-split__seg, .egdk .egov-cov__meter i, .egdk .egov-kpi__meter i, .egdk .egov-matrix__tbar i, .egdk .egov-matrix__btn { transition: none; }
+}
+[data-lc-motion='off'] .egdk .egov-enter, [data-lc-motion='off'] .egdk .egov-matrix__row { animation: none; }
+[data-lc-motion='off'] .egdk .egov-bar__fill, [data-lc-motion='off'] .egdk .egov-col__fill, [data-lc-motion='off'] .egdk .egov-kpi__meter i { transition: none; }
+
+/* the page scrolls: its plates keep their own height (a flex column would squash overflow-hidden children) */
+.egdk .egov-mode__scroll > * { flex-shrink: 0; }

@@ -5,7 +5,7 @@
  */
 import type { EntityGraphFieldFilter } from '../../../../domain/entity-graph/entity-graph-field-filters'
 
-export type OverviewKind = 'categorical' | 'tokens' | 'array' | 'numeric' | 'derived_number' | 'date' | 'boolean' | 'derived_boolean' | 'coverage'
+export type OverviewKind = 'categorical' | 'tokens' | 'array' | 'numeric' | 'derived_number' | 'date' | 'boolean' | 'derived_boolean' | 'coverage' | 'banded_text' | 'derived_categorical'
 export type BucketTone = 'value' | 'other' | 'none' | 'yes' | 'no'
 
 export type OverviewBucket = {
@@ -26,6 +26,8 @@ export type OverviewField = {
   section: string
   column?: string
   privacy?: 'values' | 'coverage_only'
+  /** protected-class-adjacent (age, gender, marital status, language…): charted, marked, never priced */
+  sensitive?: boolean
   computedFact?: boolean
   emptySource?: boolean
   pinned?: boolean
@@ -43,15 +45,23 @@ export type OverviewField = {
   unavailable?: string
 }
 
-export type OverviewSection = { id: string; label: string; fields: OverviewField[]; unavailable?: string; snapshot?: boolean }
+export type OverviewSection = { id: string; label: string; fields: OverviewField[]; unavailable?: string; snapshot?: boolean; computing?: boolean }
 
-export type OverviewMetric = { key: string; label: string; value: number | null; basis: string; filter?: EntityGraphFieldFilter; unavailable?: string }
+export type OverviewMetric = { key: string; label: string; value: number | null; basis: string; filter?: EntityGraphFieldFilter; unavailable?: string | null; sensitive?: boolean }
+
+export type DistressByMarket = {
+  signals: Array<{ key: string; label: string; filter: EntityGraphFieldFilter }>
+  markets: Array<{ key: string; label: string; total: number; filter: EntityGraphFieldFilter | null; counts: Record<string, number> }>
+  note?: string
+}
 
 export type OverviewHeadline = {
   metrics: OverviewMetric[]
   distress: OverviewBucket[]
   distressNote?: string
   stack: OverviewBucket[] | null
+  stackNote?: string
+  distressByMarket?: DistressByMarket | null
   pipeline: OverviewBucket[] | null
   inbox: OverviewBucket[] | null
   smsReasons: OverviewBucket[] | null
@@ -63,11 +73,13 @@ export type OverviewResponse = {
   tab: string
   supported: boolean
   total: number | null
-  source?: { relation: string; mode: 'facts' | 'view'; note: string; factsFiltersExecutable: boolean }
-  refreshed_at?: { facts: string | null; engagement: string | null }
+  /** the unfiltered universe is precomputed by the snapshot job and not live yet (never scanned live) */
+  computing?: boolean
+  source?: { relation: string; mode: 'facts' | 'view' | 'base' | 'snapshot'; note: string; factsFiltersExecutable: boolean }
+  refreshed_at?: { facts: string | null; engagement: string | null; snapshot?: string | null }
   headline: OverviewHeadline | null
   sections: OverviewSection[]
-  unavailable: Array<{ section?: string; field?: string; reason: string; retry?: boolean }>
+  unavailable: Array<{ section?: string; field?: string; reason: string; retry?: boolean; computing?: boolean }>
   timings?: { totalMs: number; statements: Array<{ label: string; ms: number; cached: boolean | 'stale' }> }
   error?: string
   message?: string

@@ -76,12 +76,16 @@ import { fetchEntityGraphFilterCatalog, type EntityGraphFilterCatalog } from '..
 import { SignalBadges, signalLines, signalRowHeight } from './SignalBadges'
 import { propertySignals } from '../mobile/property-signals'
 import { DeskCampaignStack, stackScopeSupported, type StackResult } from './DeskCampaignStack'
-import { deskSearch, initialDeskState, withViewFilters, writeSessionDeskState, type DeskState } from './desk-state'
+import { deskSearch, initialDeskState, readViewByScope, viewForScope, withViewFilters, writeSessionDeskState, writeViewByScope, type DeskCenter, type DeskState, type ViewByScope } from './desk-state'
+import { campaignIdsInFilters, isCampaignScopeFilter } from '../../../domain/entity-graph/entity-graph-campaign-link'
+import { fetchCampaignScope, type CampaignScopeSummary } from './overview/overview-api'
+import { setColumnCampaign } from '../mobile/use-entity-graph-columns'
 import { useOutreachStates } from './desk-outreach'
 import { equityDisplay } from '../equity-display'
 import { absorbPageAttachments, completePageParams, pageKey } from './desk-page'
 import { DeskGraph } from './DeskGraph'
 import { DeskOverviewBand, DeskOverviewMode, useOverviewPrefs } from './overview/DeskOverview'
+import { fmtInt } from './overview/overview-model'
 import { DeskInspector } from './DeskInspector'
 import { fetchDeskKpis, kpisFromCounts } from './desk-api'
 import {
@@ -110,6 +114,8 @@ type Props = {
 const PAGE_SIZE = 60
 const NO_FILTERS: EntityGraphFieldFilter[] = []
 const OUTREACH_SEED = ['smsEligible', 'lastContact', 'stage', 'convoStage', 'flags']
+/** A campaign-scoped grid opens with the campaign's outcome + the facts that decide a target (once per campaign). */
+const CAMPAIGN_SEED = ['camp.template', 'camp.sent_at', 'camp.delivery', 'camp.target_status', 'camp.reply_intent', 'camp.opted_out', 'lastContact', 'stage', 'convoStage', 'smsEligible', 'flags', 'equity', 'fact.company_status_raw', 'rec.pf_verified_verdict', 'probate.validity_class', 'probate.best_contact_role']
 const RAIL_KEY = 'nexus.entityGraph.desk.rail.v1'
 const readRailCollapsed = (uid: string): boolean => { try { return window.localStorage.getItem(`${RAIL_KEY}:${uid}`) === 'collapsed' } catch { return false } }
 const rowKey = (r: EntitySearchResult) => `${r.entityType}:${r.entityId}`
@@ -169,7 +175,9 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   // [persistence] scope · search · per-scope filters · Grid/Graph/fullscreen
   // start from this pane's URL (reload / Back / a shared link) or, when the
   // address carries none, from the session — see desk-state.ts.
-  const [deskInit] = useState<DeskState>(() => initialDeskState(new URLSearchParams(location.split('?')[1] ?? '')))
+  // the last view per scope (Overview the first time) — localStorage, per operator
+  const [viewByScope, setViewByScope] = useState<ViewByScope>(() => readViewByScope(uid))
+  const [deskInit] = useState<DeskState>(() => initialDeskState(new URLSearchParams(location.split('?')[1] ?? ''), undefined, readViewByScope(uid)))
   const initialParams = useMemo(() => new URLSearchParams(location.split('?')[1] ?? ''), []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [scope, setScope] = useState<EntityScope>(deskInit.scope)
@@ -179,11 +187,42 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   const [filtersByScope, setFiltersByScope] = useState<DeskState['filtersByScope']>(deskInit.filtersByScope)
   const filters = filtersByScope[scope] ?? NO_FILTERS
   const setFilters = (next: EntityGraphFieldFilter[]) => setFiltersByScope((cur) => ({ ...cur, [scope]: next }))
-  const [center, setCenter] = useState<'grid' | 'graph'>(deskInit.center)
-  // Overview (spec 9 §4): a band above the grid + a full mode in the centre, properties scope
+  const [center, setCenterState] = useState<DeskCenter>(deskInit.center)
+  // the view is remembered per scope (Overview · Grid · Graph); a scope opens where the operator left it
+  const setCenter = (next: DeskCenter, forScope: EntityScope = scope) => {
+    setCenterState(next)
+    setViewByScope((cur) => { const out = { ...cur, [forScope]: next }; writeViewByScope(uid, out); return out })
+  }
+  const switchScope = (next: EntityScope) => {
+    setScope(next)
+    setSelected(new Set())
+    setCenterState(viewForScope(viewByScope, next))
+    setGraphFull(false)
+  }
+  // Overview (spec 9 §4; owner 2026-10-10): the LANDING view of every scope + a band above the Properties grid
   const overviewPrefs = useOverviewPrefs(uid)
-  const overviewMode = overviewPrefs.mode && scope === 'properties' && center === 'grid'
-  const onOverviewFilters = (next: EntityGraphFieldFilter[], opts?: { showRecords?: boolean }) => { setFilters(next); if (opts?.showRecords) overviewPrefs.setMode(false) }
+  const overviewMode = center === 'overview'
+  const onOverviewFilters = (next: EntityGraphFieldFilter[], opts?: { showRecords?: boolean }) => { setFilters(next); if (opts?.showRecords) setCenter('grid') }
+
+  /* ── Campaign scope (Campaign → Entity Graph): the "Campaign: <name>" chip ── */
+  const campaignId = campaignIdsInFilters(filters)[0] ?? null
+  const [campaignScope, setCampaignScope] = useState<{ id: string; summary: CampaignScopeSummary | null; failed: boolean } | null>(null)
+  useEffect(() => {
+    setColumnCampaign(campaignId)
+    if (!campaignId) return
+    const ctl = new AbortController()
+    void fetchCampaignScope(campaignId, ctl.signal)
+      .then((summary) => { if (!ctl.signal.aborted) setCampaignScope({ id: campaignId, summary, failed: !summary }) })
+      .catch(() => { if (!ctl.signal.aborted) setCampaignScope({ id: campaignId, summary: null, failed: true }) })
+    return () => ctl.abort()
+  }, [campaignId])
+  const campaign = campaignScope?.id === campaignId ? campaignScope.summary : null
+  const scopeChipLabel = (f: EntityGraphFieldFilter) => {
+    if (!isCampaignScopeFilter(f)) return null
+    const ids = campaignIdsInFilters([f])
+    if (campaignScope && ids[0] === campaignScope.id) return campaignScope.summary?.name ?? (campaignScope.failed ? `${ids[0].slice(0, 8)}… (not found)` : 'Loading…')
+    return 'Loading…'
+  }
   const [graphFull, setGraphFull] = useState(deskInit.graphFull)
   // The rail stays where the operator left it (collapsed strip or open) —
   // it no longer folds itself away when the inspector opens.
@@ -216,6 +255,19 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       window.localStorage.setItem(key, '1')
     } catch { /* private mode */ }
   }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // a campaign-scoped Properties grid shows the campaign's outcome columns first (once per campaign, per operator)
+  useEffect(() => {
+    if (!campaignId || scope !== 'properties') return
+    const key = `nexus.entityGraph.desk.campaignSeeded.v1:${uid}:${campaignId}`
+    try {
+      if (window.localStorage.getItem(key)) return
+      const current = layout.columns.properties ?? defaultVisibleColumns('properties')
+      const known = new Set(SCOPE_TABLE_COLUMNS.properties.map((c) => c.key))
+      setColumns('properties', [...CAMPAIGN_SEED.filter((k) => known.has(k)), ...current.filter((k) => !CAMPAIGN_SEED.includes(k))])
+      window.localStorage.setItem(key, '1')
+    } catch { /* private mode */ }
+  }, [campaignId, scope, uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // [persistence] write the state back: session (every scope) + this pane's URL
   useEffect(() => {
@@ -308,7 +360,10 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     }, signal).then((res) => { absorbPageAttachments(res); return res })
   }
 
+  // the Overview reads its own exact totals: the grid's page (and its count) is read only when a records view is open
+  const listActive = center !== 'overview'
   useEffect(() => {
+    if (!listActive) return
     const ctl = new AbortController()
     const gen = ++generation.current
     const reqSig = signature
@@ -356,7 +411,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       })
     return () => ctl.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- signature + cursor encode the request
-  }, [signature, cursor])
+  }, [signature, cursor, listActive])
 
   // a column made visible AFTER the page loaded is read for the loaded rows (user-driven, once)
   const enrichment = useEntityGraphColumns(results, enrichFields, scope === 'properties')
@@ -446,6 +501,8 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     const cols = visibleKeys.map((k) => byKey.get(k)).filter((c): c is TableColumn => Boolean(c)).map((c): LCColumn<EntitySearchResult> => ({
       id: c.key,
       header: c.label,
+      // adjacent columns of one group share a band above their headers
+      group: c.group,
       width: Math.round(c.width * 1.18) + 12,
       minWidth: 64,
       align: c.align === 'right' ? 'right' : 'left',
@@ -508,6 +565,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   }
   const applyView = (v: DeskView) => {
     setScope(v.scope)
+    setCenterState(viewForScope(viewByScope, v.scope))
     setQuery(v.query)
     setDebouncedQuery(v.query)
     // the VIEW's scope: setFilters writes the scope being left (stale closure)
@@ -592,8 +650,11 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     count: counts ? (s.key === 'contact_methods' ? counts.contact_methods : (counts[s.countKey as keyof EntityGraphTabCounts] as number | null | undefined) ?? null) : null,
   }))
   const total = isCurrent ? list.total : null
+  const scopeCount = scopeTabs.find((t) => t.id === scope)?.count ?? null
   const noun = scopeNoun(scope, total ?? 2)
-  const summary = loading
+  const summary = !listActive
+    ? `${MOBILE_SCOPES.find((x) => x.key === scope)?.label ?? 'Records'} · Overview${filters.length ? ` · ${filters.length} ${filters.length === 1 ? 'filter' : 'filters'}` : ''}`
+    : loading
     ? 'Reading the universe…'
     : list.error && !results.length
       ? 'This cohort could not be read'
@@ -669,24 +730,34 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
 
       <div className="egdk-bar">
         <LCIconButton icon="filter" label={railShown ? 'Collapse filters' : 'Show filters'} size="sm" selected={railShown} count={filters.length || null} onClick={() => { if (narrow) { setRailOverOpen((o) => !o); return } if (!railShown && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(railShown) }} className="egdk-bar__rail" />
-        <LCTabs items={scopeTabs} value={scope} onChange={(id) => { setScope(id as EntityScope); setSelected(new Set()) }} label="Entity scope" variant="line" className="egdk-bar__tabs" />
+        <LCTabs items={scopeTabs} value={scope} onChange={(id) => switchScope(id as EntityScope)} label="Entity scope" variant="line" className="egdk-bar__tabs" />
         <div className="egdk-bar__tools">
           {stackScopeSupported(scope) ? (
             <LCButton size="sm" variant="secondary" icon="target" onClick={() => openStack(selectedRows.map((r) => r.entityId))} title="Pin this cohort (or the selected rows) on a draft campaign — nothing is sent">
               Add to campaign
             </LCButton>
           ) : null}
-          <LCSegmented size="sm" label="View" value={overviewMode ? 'overview' : center} onChange={(v) => { if (v === 'overview') { setCenter('grid'); setGraphFull(false); overviewPrefs.setMode(true); return } overviewPrefs.setMode(false); setCenter(v as 'grid' | 'graph'); if (v === 'grid') setGraphFull(false) }} options={[{ value: 'grid', icon: 'list', label: 'Grid' }, ...(scope === 'properties' ? [{ value: 'overview', icon: 'stats' as const, label: 'Overview' }] : []), { value: 'graph', icon: 'layers', label: 'Graph' }]} />
+          <LCSegmented size="sm" label="View" value={center} onChange={(v) => { setCenter(v as DeskCenter); if (v !== 'graph') setGraphFull(false) }} options={[{ value: 'overview', icon: 'stats', label: 'Overview' }, { value: 'grid', icon: 'list', label: 'Grid' }, { value: 'graph', icon: 'layers', label: 'Graph' }]} />
           {center === 'graph' ? <LCIconButton icon="maximize" label="Fullscreen graph (Esc to exit)" size="sm" selected={graphFull} onClick={() => setGraphFull((f) => !f)} /> : null}
         </div>
       </div>
 
       <div className="egdk-body">
-        {narrow && !railShown ? <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed onCollapsedChange={() => setRailOverOpen(true)} />
-          : <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed={!railShown} onCollapsedChange={(c) => { if (narrow) { setRailOverOpen(!c); return } if (!c && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(c) }} />}
-        <main className="egdk-center" aria-label={center === 'grid' ? 'Records' : 'Relationship view'}>
+        {narrow && !railShown ? <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed onCollapsedChange={() => setRailOverOpen(true)} scopeChipLabel={scopeChipLabel} />
+          : <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} scopeChipLabel={scopeChipLabel} collapsed={!railShown} onCollapsedChange={(c) => { if (narrow) { setRailOverOpen(!c); return } if (!c && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(c) }} />}
+        <main className="egdk-center" aria-label={center === 'grid' ? 'Records' : center === 'overview' ? 'Overview' : 'Relationship view'}>
+          {campaignId ? (
+            <CampaignScopeBanner
+              id={campaignId}
+              summary={campaign}
+              failed={Boolean(campaignScope?.id === campaignId && campaignScope.failed)}
+              scope={scope}
+              onClear={() => setFilters(filters.filter((f) => !isCampaignScopeFilter(f)))}
+              onOpenGrid={center !== 'grid' ? () => setCenter('grid') : undefined}
+            />
+          ) : null}
           {overviewMode ? (
-            <DeskOverviewMode filters={filters} onFiltersChange={onOverviewFilters} onClose={() => overviewPrefs.setMode(false)} />
+            <DeskOverviewMode scope={scope} filters={filters} onFiltersChange={onOverviewFilters} onOpenGrid={() => setCenter('grid')} campaign={campaign} universeTotal={scopeCount} />
           ) : center === 'grid' ? (
             <>
               <div className="egdk-tablebar">
@@ -699,7 +770,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                 <ColumnPicker scope={scope} visible={visibleKeys} onChange={(next) => setColumns(scope, next)} />
               </div>
               {scope === 'properties' && !searching ? (
-                <DeskOverviewBand filters={filters} onFiltersChange={onOverviewFilters} open={overviewPrefs.bandOpen} onOpenChange={overviewPrefs.setBandOpen} onOpenMode={() => overviewPrefs.setMode(true)} />
+                <DeskOverviewBand scope={scope} filters={filters} onFiltersChange={onOverviewFilters} open={overviewPrefs.bandOpen} onOpenChange={overviewPrefs.setBandOpen} onOpenMode={() => setCenter('overview')} />
               ) : null}
               {sortNote || enrichment.error ? (
                 <p className="egdk-note" role="status">{sortNote}{sortNote && enrichment.error ? ' · ' : ''}{enrichment.error ? 'Some column values did not load — those cells read —' : ''}</p>
@@ -718,6 +789,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
                 onSelectedChange={setSelected}
                 onColumnOrderChange={(ids) => setColumns(scope, ids.filter((id) => id !== IDENTITY_COLUMN_KEY))}
                 pinnedColumns={[IDENTITY_COLUMN_KEY]}
+                columnGroupLabels={COLUMN_GROUP_LABELS}
                 rowHeight={signalsVisible ? (r, colWidth) => signalRowHeight(signalLines(propertySignals(r).map((x) => x.label), colWidth('flags') ?? 390), 30) : undefined}
                 density="dense"
                 loading={loading}
@@ -821,6 +893,7 @@ function ColumnPicker({ scope, visible, onChange }: { scope: EntityScope; visibl
     >
       <div className="egdk-cols__head">
         <LCSearch value={find} onChange={setFind} label="Find a column" placeholder={`Find a column · ${all.length}`} />
+        <button type="button" className="egdk-link" onClick={() => onChange(all.filter((c) => !c.noData).map((c) => c.key))} title="Every column with data, grouped (scroll sideways)">Show all</button>
         <button type="button" className="egdk-link" onClick={() => onChange(defaultVisibleColumns(scope))}>Reset</button>
       </div>
       <div className="egdk-cols__list lc-scroll">
@@ -866,5 +939,40 @@ function ColumnPicker({ scope, visible, onChange }: { scope: EntityScope; visibl
         })}
       </div>
     </LCPopover>
+  )
+}
+
+/**
+ * The campaign scope, stated: which campaign, how its scope was built and the
+ * exact counts (targets · distinct properties · sent · delivered · failed ·
+ * waiting). Clear removes the chip; nothing else changes.
+ */
+function CampaignScopeBanner({ id, summary, failed, scope, onClear, onOpenGrid }: { id: string; summary: CampaignScopeSummary | null; failed: boolean; scope: EntityScope; onClear: () => void; onOpenGrid?: () => void }) {
+  const unit = scope === 'master_owners' ? summary?.owners : scope === 'people' ? summary?.people : summary?.properties
+  const unitNoun = scope === 'master_owners' ? 'owners' : scope === 'people' ? 'people' : 'properties'
+  const modeText = summary?.mode === 'built' ? 'targets + queued / sent' : summary?.mode === 'explicit' ? 'draft · pinned list' : summary?.mode === 'definition' ? 'draft · saved filters' : summary?.mode === 'empty' ? 'no targets yet' : ''
+  return (
+    <div className={cx('egdk-campaign', failed && 'is-failed')} role="status" aria-live="polite">
+      <span className="egdk-campaign__icon" aria-hidden="true"><Icon name="target" size={14} /></span>
+      <div className="egdk-campaign__id">
+        <span className="egdk-eyebrow">Campaign scope{modeText ? ` · ${modeText}` : ''}</span>
+        <strong title={summary?.basis}>{summary ? summary.name : failed ? `Campaign ${id.slice(0, 8)}… could not be read` : <i className="lc-skel egdk-campaign__skel" />}</strong>
+      </div>
+      {summary ? (
+        <dl className="egdk-campaign__facts">
+          <div><dt>Targets</dt><dd>{fmtInt(summary.targets)}</dd></div>
+          <div><dt>{unitNoun}</dt><dd>{unit === null || unit === undefined ? '—' : fmtInt(unit)}</dd></div>
+          <div><dt>Sent</dt><dd>{fmtInt(summary.queue.sent)}</dd></div>
+          <div><dt>Delivered</dt><dd>{fmtInt(summary.queue.delivered)}</dd></div>
+          <div><dt>Failed</dt><dd>{fmtInt(summary.queue.failed)}</dd></div>
+          <div><dt>Waiting</dt><dd>{fmtInt(summary.queue.waiting)}</dd></div>
+          {summary.status ? <div><dt>Status</dt><dd className="is-text">{summary.status}</dd></div> : null}
+        </dl>
+      ) : <span className="egdk-campaign__fill" />}
+      <div className="egdk-campaign__actions">
+        {onOpenGrid ? <LCButton size="sm" variant="quiet" icon="list" onClick={onOpenGrid} title="Every target, every column">All columns</LCButton> : null}
+        <LCButton size="sm" variant="quiet" icon="x" onClick={onClear} title="Remove the campaign scope">Clear</LCButton>
+      </div>
+    </div>
   )
 }

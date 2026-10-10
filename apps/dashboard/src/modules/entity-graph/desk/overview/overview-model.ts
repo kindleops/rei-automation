@@ -96,7 +96,8 @@ export function barScale(buckets: OverviewBucket[]): number {
 
 export type ChartForm = 'bars' | 'histogram' | 'split' | 'coverage'
 export function chartForm(f: OverviewField): ChartForm {
-  if (f.kind === 'numeric' || f.kind === 'derived_number' || f.kind === 'date') return 'histogram'
+  // ordered bands (numbers, dates, money-range text) are histograms; unordered values are bars
+  if (f.kind === 'numeric' || f.kind === 'derived_number' || f.kind === 'date' || f.kind === 'banded_text') return 'histogram'
   if (f.kind === 'boolean' || f.kind === 'derived_boolean') return 'split'
   if (f.kind === 'coverage') return 'coverage'
   return 'bars'
@@ -113,3 +114,51 @@ export function bucketsCsv(f: OverviewField): string {
 
 /** Stable section order and the band's pinned subset. */
 export const OVERVIEW_SECTION_ORDER = ['outreach', 'geography', 'property', 'distress', 'value', 'debt', 'ownership', 'company', 'owner', 'people', 'contacts', 'decision', 'zip'] as const
+
+/**
+ * Every scope's sections, in page order (mirrors OVERVIEW_SECTIONS_BY_TAB in
+ * apps/api … entity-graph-overview-catalog.js; the server is the authority for
+ * the fields in each).
+ */
+export const OVERVIEW_SCOPE_SECTIONS: Record<string, Array<{ id: string; label: string }>> = {
+  properties: [
+    { id: 'outreach', label: 'Outreach & pipeline' }, { id: 'geography', label: 'Geography' }, { id: 'property', label: 'Property' },
+    { id: 'distress', label: 'Distress & signals' }, { id: 'value', label: 'Value & equity' }, { id: 'debt', label: 'Debt, liens & sales' },
+    { id: 'ownership', label: 'Ownership' }, { id: 'company', label: 'Owning company status' }, { id: 'owner', label: 'Owner' },
+    { id: 'people', label: 'People' }, { id: 'contacts', label: 'Contacts' }, { id: 'decision', label: 'Decision Engine' }, { id: 'zip', label: 'ZIP market' },
+  ],
+  master_owners: [{ id: 'profile', label: 'Owner profile' }, { id: 'portfolio', label: 'Portfolio & value' }, { id: 'distress', label: 'Portfolio distress' }, { id: 'scores', label: 'Scores' }],
+  people: [{ id: 'demographics', label: 'Demographics' }, { id: 'wealth', label: 'Income & net asset value' }, { id: 'matching', label: 'Matching & eligibility' }, { id: 'reach', label: 'Contact window' }],
+  contact_methods: [{ id: 'quality', label: 'Line & activity' }],
+  buyers: [
+    { id: 'activity', label: 'Activity' }, { id: 'behaviour', label: 'Behaviour' }, { id: 'assets', label: 'Assets & price' },
+    { id: 'geography', label: 'Geography' }, { id: 'portfolio', label: 'Portfolio & roles' }, { id: 'identity', label: 'Identity' },
+  ],
+  organizations: [{ id: 'entity', label: 'Entity class & mailing geography' }],
+}
+export const overviewSectionsForScope = (scope: string) => OVERVIEW_SCOPE_SECTIONS[scope] ?? []
+
+/* ── motion ─────────────────────────────────────────────────────────────── */
+
+/** easeOutCubic: fast start, gentle settle (a counter or a bar arriving). */
+export const easeOutCubic = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3
+
+/** The value a count-up shows at progress t ∈ [0, 1] from `from` to `to` (integers stay integers). */
+export function countUpAt(from: number, to: number, t: number): number {
+  const v = from + (to - from) * easeOutCubic(t)
+  return t >= 1 ? to : Math.round(v)
+}
+
+/** Staggered entrance: card i starts i × step ms after the first, capped so a long section never lags. */
+export const staggerDelay = (i: number, step = 28, cap = 420) => Math.min(cap, Math.max(0, i) * step)
+
+/**
+ * A distress-matrix cell's chip: the market's chip REPLACES any market chip,
+ * the signal's chip is added (so a cell = that market × that signal).
+ */
+export function matrixCellFilters(filters: EntityGraphFieldFilter[], market: EntityGraphFieldFilter | null, signal: EntityGraphFieldFilter | null): EntityGraphFieldFilter[] {
+  let next = filters
+  if (market) next = applyBucketClick(next, market, 'replace').filters
+  if (signal) next = applyBucketClick(next, signal, 'replace').filters
+  return next
+}

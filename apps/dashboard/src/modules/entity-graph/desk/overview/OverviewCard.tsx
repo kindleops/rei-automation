@@ -13,7 +13,7 @@ import { useMemo, useState, type MouseEvent } from 'react'
 import { cx, lcToast } from '../../../../shared/lc'
 import { Icon } from '../../../../shared/icons'
 import type { EntityGraphFieldFilter } from '../../../../domain/entity-graph/entity-graph-field-filters'
-import { applyBucketClick, barScale, bucketActive, bucketExcluded, bucketsCsv, chartForm, clickModeFromEvent, fieldFiltered, fmtInt, fmtShare, fmtValue } from './overview-model'
+import { applyBucketClick, barScale, bucketActive, bucketExcluded, bucketsCsv, chartForm, clickModeFromEvent, fieldFiltered, fmtInt, fmtShare, fmtValue, staggerDelay } from './overview-model'
 import type { OverviewBucket, OverviewField } from './overview-types'
 
 type Props = {
@@ -21,11 +21,13 @@ type Props = {
   filters: EntityGraphFieldFilter[]
   onFiltersChange: (next: EntityGraphFieldFilter[], opts?: { showRecords?: boolean }) => void
   compact?: boolean
+  /** position in its grid: the staggered entrance starts this card a little after the previous one */
+  enterIndex?: number
 }
 
 const toneClass = (b: OverviewBucket) => (b.tone === 'none' ? 'is-none' : b.tone === 'other' ? 'is-other' : b.tone === 'no' ? 'is-no' : b.tone === 'yes' ? 'is-yes' : 'is-value')
 
-export function OverviewCard({ field, filters, onFiltersChange, compact = false }: Props) {
+export function OverviewCard({ field, filters, onFiltersChange, compact = false, enterIndex = 0 }: Props) {
   const [table, setTable] = useState(false)
   const [hover, setHover] = useState<OverviewBucket | null>(null)
   const total = field.coverage?.total ?? 0
@@ -55,8 +57,8 @@ export function OverviewCard({ field, filters, onFiltersChange, compact = false 
 
   if (field.unavailable) {
     return (
-      <article className={cx('egov-card', 'is-unavailable', compact && 'is-compact')} aria-label={field.label}>
-        <header className="egov-card__head"><h4 className="egov-card__title">{field.label}</h4></header>
+      <article className={cx('egov-card', 'egov-enter', 'is-unavailable', compact && 'is-compact')} style={{ animationDelay: `${staggerDelay(enterIndex)}ms` }} aria-label={field.label}>
+        <header className="egov-card__head"><h4 className="egov-card__title">{field.label}{field.sensitive ? <SensitiveMark /> : null}</h4></header>
         <p className="egov-card__na"><Icon name="clock" size={12} /> {field.unavailable}</p>
       </article>
     )
@@ -84,9 +86,9 @@ export function OverviewCard({ field, filters, onFiltersChange, compact = false 
   const ghostMax = field.ghost ? barScale(field.ghost.buckets) : 1
 
   return (
-    <article className={cx('egov-card', `is-${form}`, filtered && 'is-filtered', compact && 'is-compact', field.emptySource && 'is-empty')} aria-label={field.label} data-field={field.key}>
+    <article className={cx('egov-card', 'egov-enter', `is-${form}`, filtered && 'is-filtered', compact && 'is-compact', field.emptySource && 'is-empty', field.sensitive && 'is-sensitive')} style={{ animationDelay: `${staggerDelay(enterIndex)}ms` }} aria-label={field.label} data-field={field.key}>
       <header className="egov-card__head">
-        <h4 className="egov-card__title" title={field.caution || undefined}>{field.label}{filtered ? <span className="egov-card__dot" aria-label="filtered" /> : null}</h4>
+        <h4 className="egov-card__title" title={field.caution || undefined}>{field.label}{field.sensitive ? <SensitiveMark /> : null}{filtered ? <span className="egov-card__dot" aria-label="filtered" /> : null}</h4>
         <div className="egov-card__tools">
           {buckets.length ? <button type="button" className={cx('egov-tool', table && 'is-on')} aria-pressed={table} onClick={() => setTable((t) => !t)} title="Exact table"><Icon name="list" size={12} /></button> : null}
           {buckets.length ? <button type="button" className="egov-tool" onClick={() => { void copyCsv() }} title="Copy as CSV"><Icon name="file-text" size={12} /></button> : null}
@@ -152,10 +154,17 @@ export function OverviewCard({ field, filters, onFiltersChange, compact = false 
               )
             })}
           </div>
-          <div className="egov-hist__axis" aria-hidden="true">
-            <span>{buckets[0]?.label ?? ''}</span>
-            <span>{buckets.filter((b) => b.tone !== 'none').at(-1)?.label ?? ''}</span>
-          </div>
+          {buckets.length <= 9 ? (
+            // few bins (beds, baths, age buckets, income bands…): every bar is labelled
+            <div className="egov-hist__ticks" aria-hidden="true">
+              {buckets.map((b) => <span key={b.key} className={cx(b.tone === 'none' && 'is-none')} title={b.label}>{b.tone === 'none' ? '—' : b.label}</span>)}
+            </div>
+          ) : (
+            <div className="egov-hist__axis" aria-hidden="true">
+              <span>{buckets[0]?.label ?? ''}</span>
+              <span>{buckets.filter((b) => b.tone !== 'none').at(-1)?.label ?? ''}</span>
+            </div>
+          )}
         </div>
       ) : (
         <ol className="egov-bars">
@@ -199,4 +208,9 @@ export function OverviewCard({ field, filters, onFiltersChange, compact = false 
       </footer>
     </article>
   )
+}
+
+/** Protected-class-adjacent field (age, gender, marital status, language…): charted as descriptive analytics, never priced. */
+function SensitiveMark() {
+  return <i className="egov-sensitive" title="Sensitive field — descriptive analytics only; never used in pricing or negotiation" aria-label="sensitive field">S</i>
 }

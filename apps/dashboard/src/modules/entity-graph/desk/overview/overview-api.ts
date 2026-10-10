@@ -19,16 +19,16 @@ export class OverviewRequestError extends Error {
   }
 }
 
-export function overviewQuery(filters: EntityGraphFieldFilter[], sections: string[]): string {
-  const qs = new URLSearchParams({ tab: 'properties', sections: sections.join(',') })
+export function overviewQuery(filters: EntityGraphFieldFilter[], sections: string[], tab = 'properties'): string {
+  const qs = new URLSearchParams({ tab, sections: sections.join(',') })
   const ff = fieldFiltersToApiParams(filters).field_filters
   if (ff) qs.set('field_filters', ff)
   return qs.toString()
 }
 
-export async function fetchOverview(filters: EntityGraphFieldFilter[], sections: string[], signal?: AbortSignal): Promise<OverviewResponse> {
-  // the unfiltered universe can take a cold scan the first time (cached after) — allow it
-  const res = await callBackend<OverviewResponse>(`/api/cockpit/entity-graph/overview?${overviewQuery(filters, sections)}`, { signal, timeoutMs: filters.length ? 30_000 : 60_000 })
+export async function fetchOverview(filters: EntityGraphFieldFilter[], sections: string[], signal?: AbortSignal, tab = 'properties'): Promise<OverviewResponse> {
+  // every statement has an 8 s budget server-side; the unfiltered universe is the snapshot's (never scanned live)
+  const res = await callBackend<OverviewResponse>(`/api/cockpit/entity-graph/overview?${overviewQuery(filters, sections, tab)}`, { signal, timeoutMs: 30_000 })
   if (!res.ok) {
     const upstream = (res as { upstream?: { error?: string; message?: string } }).upstream
     throw new OverviewRequestError(upstream?.message || res.message || 'overview_failed', res.status, upstream?.error || res.error || null)
@@ -37,7 +37,27 @@ export async function fetchOverview(filters: EntityGraphFieldFilter[], sections:
   return res.data
 }
 
-export async function fetchOverviewCatalog(signal?: AbortSignal): Promise<OverviewCatalog | null> {
-  const res = await callBackend<OverviewCatalog>('/api/cockpit/entity-graph/overview/catalog?tab=properties', { signal })
+export async function fetchOverviewCatalog(signal?: AbortSignal, tab = 'properties'): Promise<OverviewCatalog | null> {
+  const res = await callBackend<OverviewCatalog>(`/api/cockpit/entity-graph/overview/catalog?tab=${encodeURIComponent(tab)}`, { signal })
   return res.ok && res.data?.ok ? res.data : null
+}
+
+/** The campaign scope chip's label + exact counts (GET /entity-graph/campaign-scope). */
+export type CampaignScopeSummary = {
+  id: string
+  name: string
+  status: string | null
+  mode: 'built' | 'explicit' | 'definition' | 'empty'
+  targets: number
+  properties: number | null
+  owners: number | null
+  people: number | null
+  queue: { rows: number; sent: number; delivered: number; failed: number; waiting: number }
+  definition: { clauses: number; foreign: Array<{ domain: string; field_key: string }> } | null
+  basis: string
+}
+
+export async function fetchCampaignScope(campaignId: string, signal?: AbortSignal): Promise<CampaignScopeSummary | null> {
+  const res = await callBackend<{ ok: boolean; scope?: CampaignScopeSummary }>(`/api/cockpit/entity-graph/campaign-scope?campaign_id=${encodeURIComponent(campaignId)}`, { signal })
+  return res.ok && res.data?.ok && res.data.scope ? res.data.scope : null
 }

@@ -88,7 +88,8 @@ export function operatorIsMultiValue(operator: string): boolean {
 const catalogCache = new Map<string, EntityGraphFilterCatalog>()
 
 /** Tabs whose browse query is an aggregate and cannot take a column filter. */
-export const NON_FILTERABLE_TABS = new Set(['markets', 'zips', 'organizations'])
+// organizations (title-holding entities) gained mailing geography + entity class filters (EG 8.6)
+export const NON_FILTERABLE_TABS = new Set(['markets', 'zips'])
 
 export async function fetchEntityGraphFilterCatalog(
   tab: string,
