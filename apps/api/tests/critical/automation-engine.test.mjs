@@ -359,7 +359,7 @@ test("automation engine: a plausible HELD asking price may raise urgency; lifecy
   await runAutomationEngine({
     event: inboundEvent("I'd take 165k for it, what's your price", {
       dedupe_key: "plausible-ask-1",
-      classification: { primary_intent: "asking_price_provided", price_parse: { value: 165000, qualifies_as_seller_asking_price: true } },
+      classification: { primary_intent: "asking_price_provided", price_parse: { value: 165000, qualifies_as_seller_asking_price: true, deal_economics: { verdict: "credible" } } },
     }),
     supabaseClient: supabase,
   });

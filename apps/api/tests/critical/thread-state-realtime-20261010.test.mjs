@@ -43,7 +43,10 @@ test("hot / urgent only for a plausible HELD asking price — never a question, 
     [{ primary_intent: "asks_offer" }, false],
     [{ primary_intent: "asking_price_implausible", price_parse: { value: 3_000_000, qualifies_as_seller_asking_price: false } }, false],
     [{ primary_intent: "asking_price_provided", price_parse: { value: 3_000_000, qualifies_as_seller_asking_price: true, implausibility: { implausible: true } } }, false],
-    [{ primary_intent: "asking_price_provided", price_parse: { value: 165_000, qualifies_as_seller_asking_price: true } }, true],
+    [{ primary_intent: "asking_price_provided", price_parse: { value: 165_000, qualifies_as_seller_asking_price: true, deal_economics: { verdict: "credible" } } }, true],
+    [{ primary_intent: "asking_price_provided", price_parse: { value: 165_000, qualifies_as_seller_asking_price: true } }, false],
+    [{ primary_intent: "asking_price_provided", price_parse: { value: 400_000, qualifies_as_seller_asking_price: true, deal_economics: { verdict: "stretch" } } }, false],
+    [{ primary_intent: "asking_price_provided", price_parse: { value: 3_000_000, qualifies_as_seller_asking_price: true, deal_economics: { verdict: "price_far_above_value" } } }, false],
   ];
   for (const [classification, allowed] of cases) {
     assert.equal(isPlausibleHeldAskingPrice(classification), allowed, JSON.stringify(classification));

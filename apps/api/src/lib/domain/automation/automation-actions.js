@@ -546,10 +546,15 @@ export function isPlausibleHeldAskingPrice(classification = null) {
   const c = classification && typeof classification === "object" ? classification : {};
   const intent = clean(c.primary_intent || c.detected_intent).toLowerCase();
   const parse = c.price_parse || c.metadata?.price_parse || null;
+  // Same bar as the inbox Priority writer (resolvePriorityGate): the ask must
+  // sit inside the lane's CREDIBLE band of the authoritative value
+  // (deal-economics-gate). Stretch, far-above, implausibly-low and unknown
+  // value never raise urgency.
   return (
     intent === "asking_price_provided" &&
     parse?.qualifies_as_seller_asking_price === true &&
-    !parse?.implausibility
+    !parse?.implausibility &&
+    String(parse?.deal_economics?.verdict || "").toLowerCase() === "credible"
   );
 }
 

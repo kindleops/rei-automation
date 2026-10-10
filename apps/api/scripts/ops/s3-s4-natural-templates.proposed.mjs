@@ -209,7 +209,7 @@ commit;
 }
 
 export function buildS3S4TemplatesRollbackSql() {
-  return `-- ROLLBACK for PROPOSED_20261010120000_s3_s4_natural_templates.sql
+  return `-- ROLLBACK for PROPOSED_20261010121000_s3_s4_natural_templates.sql
 -- Deletes ONLY the rows that migration inserted, and only while still inactive.
 begin;
 set local lock_timeout = '5s';
@@ -222,6 +222,6 @@ commit;
 
 if (process.argv.includes("--write-sql")) {
   const dir = new URL("../../../../supabase/migrations/", import.meta.url);
-  writeFileSync(new URL("PROPOSED_20261010120000_s3_s4_natural_templates.sql", dir), buildS3S4TemplatesSql());
-  writeFileSync(new URL("PROPOSED_20261010120000_s3_s4_natural_templates_rollback.sql", dir), buildS3S4TemplatesRollbackSql());
+  writeFileSync(new URL("PROPOSED_20261010121000_s3_s4_natural_templates.sql", dir), buildS3S4TemplatesSql());
+  writeFileSync(new URL("PROPOSED_20261010121000_s3_s4_natural_templates_rollback.sql", dir), buildS3S4TemplatesRollbackSql());
 }
