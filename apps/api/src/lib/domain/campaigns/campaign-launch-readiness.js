@@ -232,9 +232,26 @@ async function evaluateSenderCoverage(routingReady, deps, blockedSenders) {
   if (!Array.isArray(deps.textgridNumberRows) && typeof deps.chooseTextgridNumber !== 'function') {
     routeDeps.textgridNumberRows = await loadTextgridNumberFleet(deps).catch(() => [])
   }
+  // The preview must route exactly like the feeder that sends (supabase-candidate-feeder
+  // runOutboundFeeder reads these two system_control flags). Without them a first touch
+  // was exact-market-only here, so every approved regional fallback market (OH/MI via
+  // Minneapolis, …) showed "no sending number" although the feeder sends it.
+  const readFlag = async (key) => {
+    try {
+      return deps.getSystemValue ? await deps.getSystemValue(key, deps) : await getSystemValue(key, deps)
+    } catch {
+      return null
+    }
+  }
+  const [allowRegionalFirstTouch, requireLocalRouting] = await Promise.all([
+    readFlag('allow_regional_fallback_for_first_touch'),
+    readFlag('require_local_routing'),
+  ])
   const routeOptions = {
     first_touch: true,
     routing_safe_only: true,
+    allow_regional_fallback_for_first_touch: deps.allow_regional_fallback_for_first_touch ?? allowRegionalFirstTouch ?? false,
+    require_local_routing: deps.require_local_routing ?? requireLocalRouting ?? false,
     blocked_sender_numbers: blockedSenders,
     // Today's per-number cap resets tomorrow; it paces, it doesn't block.
     ignore_daily_limit: true,

@@ -504,7 +504,9 @@ const REGIONAL_ROUTING_RULES = [
   },
   {
     name: "west_mountain_to_los_angeles",
-    states: ["or", "wa", "nv", "az", "id", "ut"],
+    // Owner 2026-10-09: every state has a sender. co/nm match the campaign
+    // graph's resolve_campaign_safe_sender_route; wy/mt/ak/hi added to both.
+    states: ["or", "wa", "nv", "az", "id", "ut", "co", "nm", "wy", "mt", "ak", "hi"],
     target_markets: ["Los Angeles, CA"],
   },
   {
@@ -551,6 +553,11 @@ const REGIONAL_ROUTING_RULES = [
     name: "southeast_inland_to_atlanta_then_charlotte",
     states: ["al", "ms", "tn", "ky"],
     target_markets: ["Atlanta, GA", "Charlotte, NC"],
+  },
+  {
+    name: "west_virginia_to_charlotte_then_atlanta",
+    states: ["wv"],
+    target_markets: ["Charlotte, NC", "Atlanta, GA"],
   },
 ];
 
