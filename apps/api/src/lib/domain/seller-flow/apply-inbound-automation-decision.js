@@ -1359,17 +1359,21 @@ export function applyStage3AskingPriceRule(
 // property ("needs a new roof", "it's fully updated") is a repeat question.
 export const S4_CONDITION_USE_CASES = Object.freeze(new Set(["condition_probe", "price_high_condition_probe", "ask_condition_clarifier", "no_price_condition_probe"]));
 
-/** Do we already hold the property's condition (state, this reply, or the thread)? */
-export function resolveSellerConditionKnown({ explicit = null, classification = null } = {}) {
+// The seller described the property's REPAIR STATE in this reply. Occupancy /
+// layout words ("vacant", "pier/beam", "converted garage") are not condition —
+// the detector's condition_disclosed intent also fires on "vacant", so the
+// words decide, never the intent alone.
+const CONDITION_ANSWER_RE =
+  /\b(roofs?|hvac|furnace|a\/?c unit|air condition\w*|foundation|structural|mold|(?:fire|water|flood|smoke) damage|needs? (?:a lot of |some |major |minor )?(?:work|repairs?|tlc|updat\w*)|deferred maintenance|fixer|rehab|renovat\w*|remodel\w*|updated|move[- ]in ready|turn ?key|(?:good|great|bad|rough|decent|fair|poor) (?:shape|condition)|repairs?|plumbing|electrical|cosmetic|tear ?down|gutted|techo|reparaci\w*|necesita (?:trabajo|arreglos)|remodelad\w*|buen estado|mal estado|moho)\b/i;
+
+/** Do we already hold the property's condition (state, or answered in this reply)? */
+export function resolveSellerConditionKnown({ explicit = null, classification = null, message = "" } = {}) {
   if (explicit === true) return true;
   const c = classification && typeof classification === "object" ? classification : {};
-  const intents = [c.primary_intent, ...(Array.isArray(c.secondary_intents) ? c.secondary_intents : []), ...(Array.isArray(c.intents) ? c.intents : [])]
-    .map((v) => lower(v));
-  if (intents.includes("condition_disclosed")) return true;
   const facts = c.condition_facts || c.metadata?.condition_facts || null;
   if (facts && typeof facts === "object" && Object.keys(facts).length > 0) return true;
   if (c.seller_facts?.condition_disclosed === true || c.extracted_facts?.condition_disclosed === true) return true;
-  return false;
+  return CONDITION_ANSWER_RE.test(String(message || c.message || c.raw_message || ""));
 }
 
 /**
@@ -3315,7 +3319,7 @@ export async function executeInboundAutomationDecision({
   // condition is actually missing — never re-ask what the seller answered.
   // Runs after the Stage 3 rule, so a price-unknown thread still gets S3.
   base_decision = applyConditionKnownRule(base_decision, {
-    condition_known: resolveSellerConditionKnown({ explicit: sellerConditionKnown, classification }),
+    condition_known: resolveSellerConditionKnown({ explicit: sellerConditionKnown, classification, message }),
   });
 
   info("[AUTO_REPLY_DECISION]", {

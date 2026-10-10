@@ -403,6 +403,11 @@ test("pure: applyConditionKnownRule only touches condition routes", async () => 
   const cond = { should_queue_reply: true, required_template_use_case: "condition_probe" };
   assert.equal(applyConditionKnownRule(cond, { condition_known: false }), cond);
   assert.equal(applyConditionKnownRule(cond, { condition_known: true }).should_queue_reply, false);
-  assert.equal(resolveSellerConditionKnown({ classification: { primary_intent: "condition_disclosed" } }), true);
-  assert.equal(resolveSellerConditionKnown({ classification: { primary_intent: "asking_price_provided" } }), false);
+  assert.equal(resolveSellerConditionKnown({ message: "290k firm, it needs a new roof" }), true);
+  assert.equal(resolveSellerConditionKnown({ message: "It's fully updated, move-in ready" }), true);
+  assert.equal(resolveSellerConditionKnown({ message: "necesita reparaciones" }), true);
+  assert.equal(resolveSellerConditionKnown({ classification: { primary_intent: "asking_price_provided" }, message: "$290k firm" }), false);
+  // occupancy / layout is not condition (prod fixture rq-238: "$114,000 obo… Pier/beam… Vacant")
+  assert.equal(resolveSellerConditionKnown({ classification: { primary_intent: "asking_price_provided", secondary_intents: ["condition_disclosed"] }, message: "$114,000 obo. Pier/beam. Vacant on lb." }), false);
+  assert.equal(resolveSellerConditionKnown({ explicit: true }), true);
 });
