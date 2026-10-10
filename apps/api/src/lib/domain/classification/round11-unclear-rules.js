@@ -74,12 +74,14 @@ const OPT_OUT_PATTERNS = [
   // want to get sued!!! If you ask the same question again ...").
   {
     rule_id: "r11_legal_threat_if_asked_again",
-    re: /\b(?:sue|sued|suing|lawsuit|lawyer|attorney|legal\s+action|court)\b[\s\S]{0,80}?\bif\s+(?:you|u|y'?all)\s+(?:ever\s+)?(?:ask|text|txt|call|contact|message|msg|bother)\b[^.!?\n]{0,40}\bagain\b/,
+    // Only the verb round 10 does not cover ("ask"): "sue ... if you text /
+    // contact me again" is round 10's r10_legal_threat_if_contacted.
+    re: /\b(?:sue|sued|suing|lawsuit|lawyer|attorney|legal\s+action|court)\b[\s\S]{0,80}?\bif\s+(?:you|u|y'?all)\s+(?:ever\s+)?ask\b[^.!?\n]{0,40}\bagain\b/,
     legal: true,
   },
   {
     rule_id: "r11_legal_threat_if_asked_again",
-    re: /\bif\s+(?:you|u|y'?all)\s+(?:ever\s+)?(?:ask|text|txt|call|contact|message|msg|bother)\b[^.!?\n]{0,40}\bagain\b[\s\S]{0,80}?\b(?:sue|sued|suing|lawsuit|lawyer|attorney|legal\s+action|court)\b/,
+    re: /\bif\s+(?:you|u|y'?all)\s+(?:ever\s+)?ask\b[^.!?\n]{0,40}\bagain\b[\s\S]{0,80}?\b(?:sue|sued|suing|lawsuit|lawyer|attorney|legal\s+action|court)\b/,
     legal: true,
   },
   // "Blocked 🚫", "I'm blocking you", "I'm block", "blocking this number"
