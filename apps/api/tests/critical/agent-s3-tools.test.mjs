@@ -92,7 +92,7 @@ test('eg.recorded_documents / eg.sales_history ≡ the dossier records (entity_g
     assert.deepEqual([rec.mortgages[i].recorded, rec.mortgages[i].amount, rec.mortgages[i].open, rec.mortgages[i].position, rec.mortgages[i].est_balance, rec.mortgages[i].lender], [m.recorded, m.amount, m.open, m.position, m.balance, m.lender])
   })
   assert.deepEqual(rec.totals, service.records.totals)
-  for (const k of ['tax_delinquent', 'active_lien', 'open_mortgage_count', 'last_observed_at']) assert.deepEqual(rec.parcel[k], service.records.parcel[k] ?? null, k)
+  for (const k of ['tax_delinquent', 'active_lien', 'open_mortgage_count', 'updated_at']) assert.deepEqual(rec.parcel[k], service.records.parcel[k] ?? null, k)
   const sales = await runTool('eg.sales_history', { property_id: PID }, services)
   service.records.sales.forEach((s, i) => {
     assert.deepEqual([sales.sales[i].date, sales.sales[i].price, sales.sales[i].doc_type, sales.sales[i].cash, sales.sales[i].arms_length], [s.date, s.price, s.docType, s.cash, s.armsLength])

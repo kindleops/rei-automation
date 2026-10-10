@@ -12,7 +12,7 @@ import { EVIDENCE_SOURCE_CLASSES, EVIDENCE_SOURCE_CLASS_META, EVIDENCE_STATUSES,
 
 const ctx = { run_id: 'run_t', property_id: 'p1', retrieved_at: '2026-10-09T04:00:00.000Z', now: new Date('2026-10-09T04:00:00Z') }
 
-function recDocs({ mortgages = [], liens = [], foreclosures = [], parcel = { tax_delinquent: false, active_lien: false, open_mortgage_count: 0, last_observed_at: '2026-04-22' } } = {}) {
+function recDocs({ mortgages = [], liens = [], foreclosures = [], parcel = { tax_delinquent: false, active_lien: false, open_mortgage_count: 0, updated_at: '2026-04-22' } } = {}) {
   return { property_id: 'p1', available: true, mortgages, liens, foreclosures, parcel, totals: null }
 }
 const mtg = (over = {}) => ({ open: true, position: 1, recorded: '2019-05-03', amount: 180000, loan_type: 'Conventional', financing: null, private_lender: false, lender: 'Bank', est_balance: 150000, est_payment: 1100, rate: 3.2, due: null, term_months: 360, ...over })
@@ -80,7 +80,7 @@ test('vendor ≠ official: recorded rows WITH a recording date are official (ven
 })
 
 test('stale vendor snapshots are labelled stale, recorded instruments keep their own date; internal + derived classes', () => {
-  const fs = all('eg.recorded_documents', recDocs({ mortgages: [mtg()], parcel: { tax_delinquent: true, last_observed_at: '2025-01-01' } }))
+  const fs = all('eg.recorded_documents', recDocs({ mortgages: [mtg()], parcel: { tax_delinquent: true, updated_at: '2025-01-01' } }))
   assert.equal(fs.find((f) => f.key === 'vendor_parcel_flags').evidence_status, 'stale')
   assert.equal(fs.find((f) => f.key === 'recorded_mortgages').observed_at, '2019-05-03')
   const sms = all('eg.sms_eligibility', { property_id: 'p1', available: true, eligible: false, reason: 'missing_phone', rows: 1, ready: 0, reviewChecked: true, generated_at: ctx.retrieved_at })[0]
