@@ -110,6 +110,7 @@ export async function GET(request) {
 
 /**
  * POST — Campaign Composer writes, each through the canonical writer.
+ *   { action: 'read', part, spec }                        audience | cohort | filters | offer_ready (read-only; large specs)
  *   { action: 'save', composer_key, campaign_id?, composition }
  *   { action: 'prepare', campaign_id }                    build targets + readiness
  *   { action: 'launch', campaign_id, launch_key, start, expected_eligible, audit }
@@ -123,6 +124,18 @@ export async function POST(request) {
   const operator = operatorIdFromHeaders(request.headers) || auth.auth?.email || auth.auth?.user_id || auth.auth?.operator || null
   try {
     let result
+    if (action === 'read') {
+      // The audience reads, for a spec too large for a URL (a pinned Entity Graph
+      // selection of thousands of ids). Same readers as GET; read-only.
+      const part = String(body?.part || '')
+      const spec = body?.spec && typeof body.spec === 'object' ? body.spec : {}
+      if (part === 'audience') result = await readComposerAudience(spec)
+      else if (part === 'cohort') result = await readComposerCohort(spec)
+      else if (part === 'filters') result = await readComposerFilterEffects(spec)
+      else if (part === 'offer_ready') result = await readComposerOfferReadiness({ campaign_id: body?.campaign_id || null, spec })
+      else return withCors(request, { ok: false, error: 'unknown_part' }, 400)
+      return withCors(request, result, result.ok === false ? 502 : 200)
+    }
     if (action === 'save') result = await saveComposerDraft(body)
     else if (action === 'prepare') result = await prepareComposerLaunch(body)
     else if (action === 'launch') result = await launchComposedCampaign({ ...body, operator })

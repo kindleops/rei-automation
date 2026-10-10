@@ -3,7 +3,15 @@ import type { FilterClause } from './composer-model'
 
 const OP_WORDS: Record<string, string> = { is_any_of: 'is', is_not_any_of: 'is not', contains: 'contains', gte: '≥', lte: '≤', between: 'between', eq: '=', is_true: 'yes', is_false: 'no', is_empty: 'is empty', is_not_empty: 'is set', within: 'within', in: 'in' }
 
-export function clauseValueText(f: FilterClause): string {
+/**
+ * A clause in plain words. A pinned selection (properties.property_id) is a
+ * count — "2,010 properties pinned from Entity Graph" — never thousands of ids.
+ */
+export function clauseValueText(f: FilterClause, pinnedFrom?: string | null): string {
+  if (f.fieldKey === 'properties.property_id') {
+    const n = new Set((Array.isArray(f.value) ? f.value : [f.value]).map((v) => String(v ?? '').trim()).filter(Boolean)).size
+    return `${n.toLocaleString('en-US')} ${n === 1 ? 'property' : 'properties'} pinned${pinnedFrom ? ` from ${pinnedFrom}` : ''}`
+  }
   if (f.operator === 'is_true') return 'Yes'
   if (f.operator === 'is_false') return 'No'
   if (f.operator === 'is_empty' || f.operator === 'is_not_empty') return OP_WORDS[f.operator]

@@ -6260,6 +6260,41 @@ export function campaignPatchChanges(existing = {}, patch = {}) {
 
 export const CAMPAIGN_LIFECYCLE_ROUTE_HINT = '/api/cockpit/campaigns/{id}/lifecycle'
 
+/**
+ * AN EXPLICIT SELECTION ONLY SHRINKS ON PURPOSE (P0 2026-10-10).
+ *
+ * HOT LEADS carried 2,010 pinned property ids (Entity Graph stacked_explicit).
+ * One Composer save replaced metadata.target_filters wholesale with a stale
+ * client snapshot of the first 183 ids — the PATCH is a full replace of the
+ * audience definition, so whatever list the client holds wins. The writer now
+ * refuses (422) any update whose target_filters would drop a pinned id unless
+ * the request names that removal: `remove_property_ids: [ids]` (exactly the
+ * ids to drop) or `clear_explicit_selection: true` (drop the whole pinned set).
+ * Additions are always allowed. Returns the refusal, or null when the update
+ * may proceed.
+ */
+export function explicitSelectionShrink(existing = {}, nextMetadata = {}, payload = {}) {
+  const before = explicitSelectedPropertyIds(existing)
+  if (!before.size) return null
+  const after = explicitSelectedPropertyIds({ metadata: metadataObject(nextMetadata) })
+  const removed = [...before].filter((id) => !after.has(id))
+  if (!removed.length) return null
+  if (payload?.clear_explicit_selection === true) return null
+  const authorized = new Set((Array.isArray(payload?.remove_property_ids) ? payload.remove_property_ids : []).map((id) => clean(id)).filter(Boolean))
+  const unauthorized = removed.filter((id) => !authorized.has(id))
+  if (!unauthorized.length) return null
+  return {
+    ok: false,
+    status: 422,
+    error: 'explicit_selection_shrink_refused',
+    message: `This save would drop ${unauthorized.length.toLocaleString('en-US')} of the ${before.size.toLocaleString('en-US')} properties pinned on this campaign (it carries ${after.size.toLocaleString('en-US')}). Nothing was written. Reload the draft — or name the removal (remove_property_ids / clear_explicit_selection).`,
+    pinned_before: before.size,
+    pinned_after: after.size,
+    would_remove: unauthorized.length,
+    sample_removed: unauthorized.slice(0, 5),
+  }
+}
+
 export async function updateCampaign(campaignId, payload = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   // Lifecycle state is owned by the state machine (validated edges, advisory
@@ -6308,6 +6343,10 @@ export async function updateCampaign(campaignId, payload = {}, deps = {}) {
     const metadata = { ...metadataObject(existing.metadata) }
     for (const key of scope.metadataKeys) metadata[key] = full.metadata?.[key]
     patch.metadata = metadata
+  }
+  if (scope.carriesFilters) {
+    const shrink = explicitSelectionShrink(existing, patch.metadata, payload)
+    if (shrink) return shrink
   }
   const changes = campaignPatchChanges(existing, patch)
   const changedColumns = Object.keys(patch).filter((column) => column === 'metadata'

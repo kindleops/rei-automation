@@ -156,6 +156,10 @@ export function composerCampaignPayload(composition = {}, { isUpdate = false } =
       filter_mode: 'grouped_source_of_truth_domains',
       ...c.target_filters,
     }
+    // A pinned id leaves the selection only when the operator removed it (the writer refuses any other shrink).
+    const removals = Array.isArray(c.remove_property_ids) ? [...new Set(c.remove_property_ids.map(clean).filter(Boolean))] : []
+    if (removals.length) out.remove_property_ids = removals
+    if (c.clear_explicit_selection === true) out.clear_explicit_selection = true
   }
   const metadata = {}
   if (size) {
@@ -989,7 +993,7 @@ export async function saveComposerDraft(input = {}, deps = {}) {
         return { ok: false, status: 400, error: error.code || 'invalid_composition', field: error.field || null }
       }
       const result = await (deps.updateCampaign || updateCampaign)(existingId, payload, deps)
-      if (!result?.ok) return { ok: false, status: result?.status || 500, error: result?.error || 'campaign_update_failed', message: result?.message || null }
+      if (!result?.ok) return { ...result, ok: false, status: result?.status || 500, error: result?.error || 'campaign_update_failed', message: result?.message || null }
       return { ok: true, campaign_id: existingId, created: false, changed_fields: result.changed_fields || [], unchanged: result.unchanged === true }
     }
     let payload

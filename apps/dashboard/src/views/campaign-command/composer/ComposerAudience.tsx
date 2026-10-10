@@ -354,7 +354,7 @@ export function AudiencePlane({
 
           <div className="ccz-chips">
             {filters.map((f) => (
-              <LCChip key={f.id} field={f.label} value={clauseValueText(f)} onEdit={f.fieldKey === 'properties.drawn_area' || f.fieldKey === 'properties.property_id' ? undefined : () => setEditing(f.id)} onRemove={() => onFilters(filters.filter((x) => x.id !== f.id))} />
+              <LCChip key={f.id} field={f.label} value={clauseValueText(f, source?.kind === 'graph_selection' ? 'Entity Graph' : null)} onEdit={f.fieldKey === 'properties.drawn_area' || f.fieldKey === 'properties.property_id' ? undefined : () => setEditing(f.id)} onRemove={() => onFilters(filters.filter((x) => x.id !== f.id))} />
             ))}
             <FilterCommand catalog={catalog} filters={filters} onChange={onFilters} editing={editing} setEditing={setEditing} request={fieldRequest} onRequestDone={onFieldRequestDone} />
           </div>

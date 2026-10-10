@@ -45,6 +45,12 @@ export type Composition = {
   contact_window_start: string
   contact_window_end: string
   start: StartPlan
+  /**
+   * Pinned property ids the operator removed in this session (the chip's ×).
+   * The server refuses any save that drops a pinned id it was not told about,
+   * so a stale snapshot can never shrink an Entity Graph selection.
+   */
+  removed_property_ids?: string[]
 }
 
 /**
@@ -133,9 +139,66 @@ export function inferSource(filters: FilterClause[]): ComposerSource | null {
   return { kind: 'filters', label: `${filters.length} ${filters.length === 1 ? 'filter' : 'filters'}` }
 }
 
+/* ── pinned selection (explicit property ids) ───────────────────────────── */
+
+/** The explicit-selection field: Entity Graph stacks, drops and ?property_ids= all pin through it. */
+export const PINNED_FIELD = 'properties.property_id'
+
+const isPinnedClause = (f: Pick<FilterClause, 'fieldKey'>) => f.fieldKey === PINNED_FIELD
+
+/** Every pinned id across the composition's property_id clauses (order kept, de-duplicated), or [] when none. */
+export function pinnedIdsOf(filters: FilterClause[]): string[] {
+  const out = new Set<string>()
+  for (const f of filters) {
+    if (!isPinnedClause(f)) continue
+    for (const v of Array.isArray(f.value) ? f.value : [f.value]) {
+      const id = String(v ?? '').trim()
+      if (id) out.add(id)
+    }
+  }
+  return [...out]
+}
+
+/** The pinned ids a filter edit drops (e.g. the pinned chip removed). */
+export function removedPinnedIds(before: FilterClause[], after: FilterClause[]): string[] {
+  const kept = new Set(pinnedIdsOf(after))
+  return pinnedIdsOf(before).filter((id) => !kept.has(id))
+}
+
+/** A filter edit, carrying forward which pinned ids the operator removed on purpose. */
+export function withFilters(c: Composition, filters: FilterClause[]): Composition {
+  const dropped = removedPinnedIds(c.filters, filters)
+  const readded = new Set(pinnedIdsOf(filters))
+  const removed = [...new Set([...(c.removed_property_ids ?? []).filter((id) => !readded.has(id)), ...dropped])]
+  return { ...c, filters, removed_property_ids: removed }
+}
+
+/**
+ * The server's pinned set is the authority; the session only adds (drops) and
+ * removes (the chip's ×). A local snapshot — a restored session, a pane left
+ * open while Entity Graph stacked more cohorts — never shrinks it.
+ *   pinned = (server ∪ local) − removed in this session
+ */
+export function reconcilePinned(local: Composition, server: Composition): Composition {
+  const serverIds = pinnedIdsOf(server.filters)
+  const localIds = pinnedIdsOf(local.filters)
+  if (!serverIds.length && !localIds.length) return local
+  const removed = new Set(local.removed_property_ids ?? [])
+  const ids = [...new Set([...serverIds, ...localIds])].filter((id) => !removed.has(id))
+  const template = local.filters.find(isPinnedClause) ?? server.filters.find(isPinnedClause)!
+  const others = local.filters.filter((f) => !isPinnedClause(f))
+  if (!ids.length) return { ...local, filters: others }
+  const at = local.filters.findIndex(isPinnedClause)
+  const clause: FilterClause = { ...template, value: ids }
+  const filters = at >= 0 ? [...others.slice(0, at), clause, ...others.slice(at)] : [clause, ...others]
+  return { ...local, filters }
+}
+
 /** What a server-side composition carries (the save action's `composition`). Never status / automation. */
 export function compositionPayload(c: Composition) {
+  const removed = c.removed_property_ids ?? []
   return {
+    ...(removed.length ? { remove_property_ids: removed } : {}),
     name: c.name.trim(),
     description: c.description,
     template_use_case: c.template_use_case,
@@ -152,6 +215,9 @@ export function compositionPayload(c: Composition) {
     source: c.source,
   }
 }
+
+/** The autosave key: what the draft states (a removal intent is carried, not keyed — clearing it never re-saves). */
+export const compositionKey = (c: Composition) => JSON.stringify(compositionPayload({ ...c, removed_property_ids: [] }))
 
 /** The audience read's key: only inputs that change the server's answer. */
 export function audienceSpec(c: Composition) {

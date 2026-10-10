@@ -36,13 +36,38 @@ async function write<T>(body: Record<string, unknown>, timeoutMs = 280_000): Pro
   return { ok: true, data }
 }
 
+/**
+ * A spec'd read. A pinned Entity Graph selection carries thousands of ids — far
+ * past what a URL survives (proxies cap at ~8–16 KB) — so a spec that would not
+ * fit goes as POST { action: 'read' } (read-only on the server, same readers).
+ * The ids are never trimmed to fit.
+ */
+export const SPEC_URL_MAX = 6000
+export function specReadRequest(part: string, spec: Record<string, unknown>): { method: 'GET'; path: string } | { method: 'POST'; path: string; body: string } {
+  const path = `${BASE}?part=${part}&spec=${encodeURIComponent(JSON.stringify(spec))}`
+  if (path.length <= SPEC_URL_MAX) return { method: 'GET', path }
+  return { method: 'POST', path: BASE, body: JSON.stringify({ action: 'read', part, spec }) }
+}
+
+async function readSpec<T>(part: string, spec: Record<string, unknown>, signal?: AbortSignal, timeoutMs = 120_000): Promise<ApiResult<T>> {
+  const req = specReadRequest(part, spec)
+  if (req.method === 'GET') return read<T>(req.path, signal, timeoutMs)
+  const res = await callBackend<T & { ok?: boolean; error?: string; message?: string }>(req.path, { method: 'POST', body: req.body, signal, timeoutMs })
+  if (!res.ok) return { ok: false, error: res.error || 'request_failed', message: res.message || 'Request failed', status: res.status }
+  if (res.data && (res.data as { ok?: boolean }).ok === false) {
+    const body = res.data as unknown as ComposerFailure
+    return { ok: false, error: body.error, message: body.message || body.error, status: res.status, body }
+  }
+  return { ok: true, data: res.data as T }
+}
+
 export const readFleet = (signal?: AbortSignal) => read<ComposerFleet>(`${BASE}?part=fleet`, signal)
 export const readTemplates = (signal?: AbortSignal) => read<ComposerTemplates>(`${BASE}?part=templates`, signal)
 export const readAudience = (spec: Record<string, unknown>, signal?: AbortSignal) =>
-  read<ComposerAudience>(`${BASE}?part=audience&spec=${encodeURIComponent(JSON.stringify(spec))}`, signal, 180_000)
+  readSpec<ComposerAudience>('audience', spec, signal, 180_000)
 
 export const readCohort = (spec: Record<string, unknown>, signal?: AbortSignal) =>
-  read<ComposerCohort>(`${BASE}?part=cohort&spec=${encodeURIComponent(JSON.stringify(spec))}`, signal, 240_000)
+  readSpec<ComposerCohort>('cohort', spec, signal, 240_000)
 
 /** Offer Ready preflight (same predicate Seller Autopilot uses before it may quote money). */
 export type ComposerOfferReady = {
@@ -57,7 +82,7 @@ export type ComposerOfferReady = {
   label: string
 }
 export const readOfferReady = (spec: Record<string, unknown>, signal?: AbortSignal) =>
-  read<ComposerOfferReady>(`${BASE}?part=offer_ready&spec=${encodeURIComponent(JSON.stringify(spec))}`, signal, 240_000)
+  readSpec<ComposerOfferReady>('offer_ready', spec, signal, 240_000)
 
 export const readCoverage = (markets: Array<{ market: string; state: string | null; targets: number }>, signal?: AbortSignal) =>
   read<ComposerCoverage>(`${BASE}?part=coverage&markets=${encodeURIComponent(JSON.stringify(markets))}`, signal, 90_000)

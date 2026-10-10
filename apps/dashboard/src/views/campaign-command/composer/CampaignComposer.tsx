@@ -14,7 +14,7 @@ import { fetchCommandBook, type BookCampaign } from '../desktop/war-room-api'
 import { duplicateAsDraft, launch, loadCampaign, prepareLaunch, readAudience, readCohort, readCoverage, readFleet, readOfferReady, readTemplates, saveDraft, type ComposerOfferReady } from './composer-api'
 import type { ComposerAudience, ComposerCohort, ComposerCoverage, ComposerFleet, ComposerTemplates, PrepareResult } from './composer-types'
 import {
-  audienceSpec, capacityPlan, clauseId, clausesFromTargetFilters, compositionDiff, compositionPayload, campaignSizeAllChoice, deriveReadiness, eligibleOf, emptyComposition, fmt,
+  audienceSpec, capacityPlan, clauseId, clausesFromTargetFilters, compositionDiff, compositionKey, compositionPayload, campaignSizeAllChoice, reconcilePinned, withFilters, deriveReadiness, eligibleOf, emptyComposition, fmt,
   coverageMarkets, inferSource, launchSentence, LAUNCH_ERROR_WORDS, n0, withCohort, zoneWaves,
   type Composition, type FilterClause, type Layer, type ReadinessCheck,
 } from './composer-model'
@@ -123,6 +123,9 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
   const [baseline, setBaseline] = useState<Composition | null>(restored?.baseline ?? null)
   const [campaignId, setCampaignId] = useState<string | null>(restored?.campaignId ?? null)
   const [draftReq, setDraftReq] = useState<string | null>(intake?.kind === 'draft' && !restored ? intake.campaignId : null)
+  // A restored session's draft is re-read before anything saves: the server's pinned selection is the
+  // authority (P0 2026-10-10 — a 00:10 session snapshot of 183 ids overwrote 2,010 at 09:07).
+  const [hydrated, setHydrated] = useState(() => !restored?.campaignId)
   const [draftState, setDraftState] = useState<{ id: string; state: 'ready' | 'not_editable' | 'error'; status?: string; message?: string } | null>(null)
   const [catalog, setCatalog] = useState<CampaignFieldCatalog | null>(null)
   const [markets, setMarkets] = useState<LCComboOption[] | null>(null)
@@ -172,13 +175,38 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
       setComposition(next)
       setBaseline(next)
       setCampaignId(draftReq)
-      setSave({ state: 'saved', key: JSON.stringify(compositionPayload(next)) })
+      setSave({ state: 'saved', key: compositionKey(next) })
+      setHydrated(true)
       setDraftState({ id: draftReq, state: 'ready', status })
     })
     return () => { dead = true }
     // labelOf only names chips; re-reading the draft when the catalog lands would wipe edits
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftReq])
+
+  // a restored session: re-read the draft; the server's pinned ids win over the snapshot (never shrink it)
+  useEffect(() => {
+    const snapshot = restored
+    const id = snapshot?.campaignId
+    if (!snapshot || !id || hydrated) return
+    let dead = false
+    loadCampaign(id).then((r) => {
+      if (dead) return
+      if (!r.ok) { setDraftState({ id, state: 'error', message: r.message }); return }
+      const status = String(r.data.status ?? '').toLowerCase()
+      if (!['draft', 'built'].includes(status)) { setDraftState({ id, state: 'not_editable', status, message: String(r.data.name ?? '') }); return }
+      const server = compositionFromCampaign(r.data, labelOf)
+      const local = snapshot.composition
+      const edited = !snapshot.baseline || compositionKey(local) !== compositionKey(snapshot.baseline)
+      setComposition(edited ? reconcilePinned(local, server) : server)
+      setBaseline(server)
+      setSave({ state: 'saved', key: compositionKey(server) })
+      setHydrated(true)
+    })
+    return () => { dead = true }
+    // once per mount: the snapshot is reconciled against the server a single time
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // the audience: debounced, abortable, keyed by exactly what changes the answer
   const spec = useMemo(() => audienceSpec(composition), [composition])
@@ -236,17 +264,39 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
   const audError = hasAudience && aud?.key === specKey ? aud.error ?? (cohortError ? `whole-cohort count failed — ${cohortError}` : null) : null
 
   /* ── autosave (only once a draft exists; never status / automation) ─── */
-  const payloadKey = useMemo(() => JSON.stringify(compositionPayload(composition)), [composition])
+  const payloadKey = useMemo(() => compositionKey(composition), [composition])
+  // a saved removal is spent: clear exactly the ids that save carried (a later re-pin stays pinned)
+  const settleRemovals = useCallback((sent: string[] | undefined) => {
+    if (!sent?.length) return
+    const spent = new Set(sent)
+    setComposition((c) => (c.removed_property_ids?.length ? { ...c, removed_property_ids: c.removed_property_ids.filter((id) => !spent.has(id)) } : c))
+  }, [])
+  // the server refused a save that would drop pinned ids (stale pane): take its pinned set, keep the edits
+  const resyncPinned = useCallback(async (id: string) => {
+    const r = await loadCampaign(id)
+    if (!r.ok) return
+    const server = compositionFromCampaign(r.data, labelOf)
+    setComposition((c) => reconcilePinned(c, server))
+    setBaseline(server)
+    lcToast({ title: 'Pinned properties refreshed', detail: 'This draft gained properties elsewhere (Entity Graph). The full pinned set is kept; save again.', severity: 'info' })
+  }, [labelOf])
+  const saveComposition = useCallback(async (c: Composition, id: string | null) => {
+    const body = compositionPayload(c)
+    const r = await saveDraft({ composer_key: composerKey, campaign_id: id, composition: body })
+    if (r.ok) settleRemovals(body.remove_property_ids)
+    else if (r.error === 'explicit_selection_shrink_refused' && id) void resyncPinned(id)
+    return r
+  }, [composerKey, settleRemovals, resyncPinned])
   useEffect(() => {
-    if (!campaignId || save.key === payloadKey || !composition.name.trim()) return
+    if (!hydrated || !campaignId || save.key === payloadKey || !composition.name.trim()) return
     const timer = window.setTimeout(() => {
       setSave((s) => ({ ...s, state: 'saving' }))
-      saveDraft({ composer_key: composerKey, campaign_id: campaignId, composition: compositionPayload(composition) }).then((r) => {
+      saveComposition(composition, campaignId).then((r) => {
         setSave(r.ok ? { state: 'saved', key: payloadKey } : { state: 'error', key: null, message: r.message })
       })
     }, 1200)
     return () => window.clearTimeout(timer)
-  }, [campaignId, payloadKey, save.key, composition, composerKey])
+  }, [hydrated, campaignId, payloadKey, save.key, composition, saveComposition])
 
   // the composition survives a workspace move (the pane remounts from its route)
   useEffect(() => {
@@ -324,7 +374,7 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
     el?.focus({ preventScroll: true })
   }
 
-  const setFilters = (filters: FilterClause[]) => setComposition((c) => ({ ...c, filters, source: c.source && c.source.kind !== 'filters' && filters.length ? c.source : inferSource(filters) }))
+  const setFilters = (filters: FilterClause[]) => setComposition((c) => ({ ...withFilters(c, filters), source: c.source && c.source.kind !== 'filters' && filters.length ? c.source : inferSource(filters) }))
 
   const chooseMarket = (market: string) => {
     setComposition((c) => ({
@@ -344,8 +394,7 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
         const ids = [...new Set([...prior, ...res.propertyIds])]
         const clause: FilterClause = { id: existing?.id ?? clauseId(), domain: 'properties', category: 'Identity', fieldKey: 'properties.property_id', label: 'Selected properties', operator: 'in', value: ids }
         return {
-          ...c,
-          filters: existing ? c.filters.map((f) => (f.id === existing.id ? clause : f)) : [...c.filters, clause],
+          ...withFilters(c, existing ? c.filters.map((f) => (f.id === existing.id ? clause : f)) : [...c.filters, clause]),
           source: { kind: 'property_set', label: `${fmt(ids.length)} selected ${ids.length === 1 ? 'property' : 'properties'}`, detail: c.filters.length > (existing ? 1 : 0) ? 'and the filters below (AND)' : 'dropped in' },
         }
       })
@@ -375,11 +424,11 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
   }, [catalog, drafts])
 
   const openReview = async () => {
-    if (busy.current || !canReview || !online) return
+    if (busy.current || !canReview || !online || !hydrated) return
     busy.current = true
     setReview({ open: true, phase: 'saving', prepared: null, error: null, code: null, launchKey: newKey() })
     try {
-      const saved = await saveDraft({ composer_key: composerKey, campaign_id: campaignId, composition: compositionPayload(composition) })
+      const saved = await saveComposition(composition, campaignId)
       if (!saved.ok) { setReview((r) => ({ ...r, phase: 'failed', error: saved.message, code: saved.error })); return }
       const id = saved.data.campaign_id
       setCampaignId(id)
@@ -434,9 +483,10 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
   }
 
   const saveNow = async () => {
+    if (!hydrated) return
     if (!composition.name.trim()) { focusLayer('launch'); return }
     setSave((s) => ({ ...s, state: 'saving' }))
-    const r = await saveDraft({ composer_key: composerKey, campaign_id: campaignId, composition: compositionPayload(composition) })
+    const r = await saveComposition(composition, campaignId)
     if (r.ok) { setCampaignId(r.data.campaign_id); setSave({ state: 'saved', key: payloadKey }); if (!baseline) setBaseline(composition) }
     else setSave({ state: 'error', key: null, message: r.message })
   }
