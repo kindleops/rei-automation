@@ -446,7 +446,8 @@ test("nurture dispatch: unknown language holds (language_unknown) — never Engl
     loadNurtureRenderContext: async () => ({}),
   });
   assert.equal(out.resolved, false);
-  assert.equal(out.reason, "language_unknown");
+  // prod names it language_unknown; feat's round-10 resolver names it hold_language
+  assert.ok(["language_unknown", "hold_language"].includes(out.reason), out.reason);
 });
 
 test("archive is visibility only: no repair SQL filters archived threads out of follow-ups / nurture", () => {
