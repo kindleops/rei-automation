@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import type { CommandResult, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
 import { useAuth } from '../../components/auth/AuthProvider'
 import { LeadCommandNotificationCenter } from '../notifications/LeadCommandNotificationCenter'
@@ -25,6 +25,11 @@ import { UniversalInspector } from './inspector/UniversalInspector'
 import { TimeMachine } from './replay/TimeMachine'
 import { BriefPlane } from '../brief/BriefPlane'
 import { openInspector } from './inspector/inspector-store'
+
+// Global AI Agent S2 prototype (dock + workspace, SIMULATED fixtures). Flag-gated:
+// DEV or VITE_LC_AGENT_PROTOTYPE=1 only; a production build folds this to null.
+// (the env check is inlined so the bundler folds it and drops the chunk)
+const AgentHost = (import.meta.env.DEV || import.meta.env.VITE_LC_AGENT_PROTOTYPE === '1') ? lazy(() => import('../agent/AgentHost')) : null
 
 // DEV: inspect any object from the console — window.__lcInspect({ type: 'property', id: '…' })
 if (import.meta.env.DEV && typeof window !== 'undefined') (window as unknown as { __lcInspect?: typeof openInspector }).__lcInspect = openInspector
@@ -154,6 +159,7 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
       <UniversalInspector />
       <TimeMachine />
       <BriefPlane />
+      {AgentHost ? <Suspense fallback={null}><AgentHost /></Suspense> : null}
       {panel === 'profile' ? <button type="button" className="dsk-scrim" aria-label="Close" onClick={() => setPanel(null)} /> : null}
     </>
   )

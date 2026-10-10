@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Icon } from '../../../shared/icons'
 import { LCPopover, LCTooltip, cx, useLcReducedMotion } from '../../../shared/lc'
@@ -27,7 +27,11 @@ import { goalsDeckCommands } from '../../../views/analytics/goals/goals-commands
 import { goalsNow } from '../../../views/analytics/goals/goals-store'
 import { briefDeckCommands } from '../../brief/brief-commands'
 import { openBrief } from '../../brief/brief-store'
+import { agentDeckCommands, sendAgentCommand } from '../../agent/agent-bridge'
 import './command-deck.css'
+
+// Global AI Agent S2 prototype indicator (flag-gated; folds to null in production)
+const AgentIndicator = (import.meta.env.DEV || import.meta.env.VITE_LC_AGENT_PROTOTYPE === '1') ? lazy(() => import('../../agent/AgentIndicator')) : null
 
 /**
  * THE COMMAND DECK — the horizontal command surface of the OS.
@@ -133,7 +137,7 @@ export function CommandDeck(p: CommandDeckProps) {
     const selection = hasSelection ? readPropertyLocator() : null
     const home = homeDeckCommands(q, { layouts: getBoard().layouts.map((l) => ({ id: l.id, name: l.name })), campaign: subject?.campaignId ? { id: subject.campaignId, label: subject.label } : null })
     const browser = browserDeckCommands(q, { selection: selection ? { propertyId: selection.propertyId, address: selection.address } : null, browserOpen: Boolean(L.instanceForApp(getWorkspace().layout, 'browser')) })
-    return [...briefDeckCommands(q), ...goalsDeckCommands(q, goalsNow().catalogue), ...home, ...browser, ...marketIntelDeckCommands(q), ...composerCommands(q, { selection: selection ? { propertyId: selection.propertyId, address: selection.address } : null }), ...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
+    return [...agentDeckCommands(q, { subject: described?.title ?? (hasSelection ? readPropertyLocator()?.address ?? null : null) }), ...briefDeckCommands(q), ...goalsDeckCommands(q, goalsNow().catalogue), ...home, ...browser, ...marketIntelDeckCommands(q), ...composerCommands(q, { selection: selection ? { propertyId: selection.propertyId, address: selection.address } : null }), ...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
   }
 
   const runWorkspace = (cmd: WorkspaceCommand) => {
@@ -153,6 +157,7 @@ export function CommandDeck(p: CommandDeckProps) {
       case 'machine-feed': setMachineOpen(true); sound.panel.open(); break
       case 'replay': openReplay(cmd.subject); break
       case 'brief': openBrief(); sound.panel.open(); break
+      case 'agent': sendAgentCommand(cmd); break
     }
   }
 
@@ -208,6 +213,7 @@ export function CommandDeck(p: CommandDeckProps) {
         </div>
 
         <div className="cd__right">
+          {AgentIndicator ? <Suspense fallback={null}><AgentIndicator /></Suspense> : null}
           <LCPopover
             open={machineOpen}
             onOpenChange={(o) => { setMachineOpen(o); if (o) sound.panel.open() }}

@@ -1,0 +1,91 @@
+# Agent S3 durable persistence — disposable PostgreSQL 17 proof.
+# Not a deploy workflow: it never touches staging or production. It applies the
+# PROPOSED migration to an ephemeral service container and runs the DB tests +
+# the multi-process concurrency proof (pattern: cloudflare-staging.yml
+# "durable-state concurrency proof (24-way)").
+name: agent-s3-persistence
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/api/src/lib/agent/**'
+      - 'apps/api/tests/critical/agent-s3-*'
+      - 'apps/api/tests/pg/**'
+      - 'apps/api/scripts/proof/agent-s3-*.mjs'
+      - 'supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence*.sql'
+      - '.github/workflows/agent-s3-persistence.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  pg17:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: proofdb
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DB: postgres://postgres:postgres@127.0.0.1:5432/proofdb
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (pinned by SHA)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 (pinned by SHA)
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: migration round-trip (pretest → apply → rollback → re-apply)
+        run: |
+          psql "$DB" -v ON_ERROR_STOP=1 -q -f apps/api/tests/pg/supabase-shim.sql
+          psql "$DB" -v ON_ERROR_STOP=1 -q -f apps/api/supabase/migrations/20260831000000_durable_run_locks_and_idempotency_ledger.sql
+          psql "$DB" -v ON_ERROR_STOP=1 -f supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence_pretest.sql
+          psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence.sql
+          psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence_rollback.sql
+          psql "$DB" -v ON_ERROR_STOP=1 -f supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence_pretest.sql
+          psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence.sql
+
+      - name: PostgREST binary (unauthorized-access tests through the REST layer)
+        run: |
+          curl -sSL -o /tmp/pgrst.tar.xz https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-linux-static-x86-64.tar.xz
+          # pinned checksum (GitHub release asset digest, verified 2026-10-09)
+          echo "b47ecc82fce1dcebbbc4183d839e52f07f7630c9d7ad0f54db753d1939299354  /tmp/pgrst.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/pgrst.tar.xz -C /tmp
+          /tmp/postgrest --version
+
+      - name: agent S3 tests (unit + disposable Postgres + PostgREST)
+        working-directory: apps/api
+        env:
+          AGENT_PG_TEST_DB_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          AGENT_PGRST_BIN: /tmp/postgrest
+        run: >-
+          NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test
+          INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000
+          node --experimental-strip-types --no-warnings=ExperimentalWarning --import ./tests/register-aliases.mjs
+          --test --test-concurrency=1 tests/critical/agent-*.test.mjs
+
+      - name: multi-process concurrency proof (24-way, as the least-privilege agent_api role)
+        run: |
+          psql "$DB" -v ON_ERROR_STOP=1 -c "alter role agent_api login password 'ci-only'"
+          node apps/api/scripts/proof/agent-s3-pg-concurrency-proof.mjs
+        env:
+          AGENT_S3_PROOF_DB_URL: postgres://agent_api:ci-only@127.0.0.1:5432/proofdb
+          AGENT_S3_PROOF_PARALLEL: 24
+
+      - name: migration isolation proof (vs entity-contact v2, when present)
+        run: |
+          OTHER=supabase/migrations/PROPOSED_20261009100000_entity_contact_role_evidence_v2.sql
+          if [ ! -f "$OTHER" ]; then echo "entity-contact v2 migration not on this ref — skipped"; exit 0; fi
+          node apps/api/scripts/proof/agent-s3-migration-isolation-proof.mjs
+        env:
+          AGENT_S3_PROOF_DB_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          OTHER_MIGRATION: supabase/migrations/PROPOSED_20261009100000_entity_contact_role_evidence_v2.sql
+          OTHER_ROLLBACK: supabase/migrations/PROPOSED_20261009100000_entity_contact_role_evidence_v2_rollback.sql

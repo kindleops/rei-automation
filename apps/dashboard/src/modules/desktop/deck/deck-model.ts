@@ -1,4 +1,5 @@
 import type { CommandResult } from '../../../domain/command-center/command.types'
+import type { AgentCommand } from '../../agent/agent-bridge'
 import { NEXUS_APPS } from '../../../domain/app-registry/app-registry'
 import type { ShownTransient } from '../rail/rail-model'
 import { appName } from '../rail/rail-store'
@@ -81,6 +82,7 @@ export type WorkspaceCommand =
   | { kind: 'machine-feed' }
   | { kind: 'replay'; subject: FeedSubject }
   | { kind: 'brief' }
+  | AgentCommand
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 const DESKTOP_APPS = NEXUS_APPS.filter((a) => a.desktop && !a.route.startsWith('__') && a.action !== 'notifications' && a.action !== 'settings')
