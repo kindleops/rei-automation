@@ -47,6 +47,15 @@ import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound
 import { resolveThreadLanguage } from "@/lib/domain/seller-flow/resolve-thread-language.js";
 import { templateCatalogLanguageName } from "@/lib/sms/language_aliases.js";
 import { buildOutboundTemplateAttribution } from "@/lib/domain/templates/outbound-attribution.js";
+import {
+  TEMPLATE_NOT_IN_SUPABASE,
+  isConditionQuestionUseCase,
+} from "@/lib/domain/templates/template-authority.js";
+import {
+  canonicalPropertyGroupOf,
+  isTemplateCompatibleWithProperty,
+} from "@/lib/domain/templates/template-asset-compatibility.js";
+import { loadPropertyAssetRecord } from "@/lib/domain/queue/template-asset-guard.js";
 import { resolveOwnershipProbeDisinterestTransition } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import {
   cancelSupabasePendingOutbound,
@@ -1193,9 +1202,11 @@ function compareTemplateRank(left = {}, right = {}) {
   return right_updated - left_updated;
 }
 
-// §12 negotiation use cases that may auto-reply from the local registry when
-// no sms_templates row exists yet. Deliberately excludes first-touch/cold
-// outbound use cases — this fallback can never widen cold outreach.
+// §12 negotiation use cases that USED TO auto-reply from the local registry
+// when no sms_templates row existed. RETIRED (owner rule P0 2026-10-09: no
+// hard-coded copy, ever): automation no longer selects registry rows. Kept as
+// the inventory of use cases that still need an approved sms_templates row
+// (coverage-graph-audit reads it).
 export const LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES = new Set([
   "condition_probe",
   "occupancy_probe",
@@ -1223,45 +1234,130 @@ export const LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES = new Set([
   "closing_scheduled_update",
 ]);
 
-async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy = null, excludePlaceholders = [], excludeTemplateIds = [] } = {}) {
-  const excluded = new Set(asArray(excludePlaceholders).map((v) => clean(v)).filter(Boolean));
-  const excluded_ids = new Set(asArray(excludeTemplateIds).map((v) => clean(v)).filter(Boolean));
+// ── Stage 3 asking-price rule (OWNER RULE P0 2026-10-09, binding) ─────────
+// "Stage 3 is ALWAYS the asking price. When the seller asks what we'd offer,
+// or we can't make an offer, we ask the asking price. NEVER ask about
+// condition before we have their price."
+export const PRICE_QUESTION_INTENTS = Object.freeze(new Set(["asks_offer", "offer_request"]));
+// Stages at which an offer exists or the deal is past discovery: the
+// negotiation / contract lanes own price questions there.
+const POST_OFFER_STAGES = new Set([
+  "actual_proposal", "offer", "offer_made", "negotiation", "counter_offer",
+  "formal_contract", "contract", "under_contract", "disposition",
+  "under_contract_with_buyer", "escrow", "closing", "closed",
+  "s5", "s6", "s7", "s8", "s9", "s10",
+]);
+
+// S2 / S3: ownership confirmed, interest or price under discussion.
+const INTEREST_OR_PRICE_STAGES = new Set([
+  "offer_interest", "interest_proposal_confirmation", "consider_selling", "interest",
+  "asking_price", "seller_asking_price", "price_discovery", "s2", "s3",
+]);
+
+/** Do we hold the seller's asking price on this turn? */
+export function resolveSellerPriceKnown({ explicit = null, classification = null, decision = null } = {}) {
+  if (explicit === true) return true;
+  const parse = classification?.price_parse || classification?.metadata?.price_parse || null;
+  if (parse?.qualifies_as_seller_asking_price === true) return true;
+  const intent = lower(classification?.primary_intent);
+  if (intent === "asking_price_provided" || intent === "asking_price_implausible") return true;
+  const v2_ask = Number(decision?.seller_autopilot_v2?.asking_price);
+  if (Number.isFinite(v2_ask) && v2_ask > 0) return true;
+  return false;
+}
+
+function stripConditionUseCases(values = []) {
+  return asArray(values).filter((value) => !isConditionQuestionUseCase(value));
+}
+
+/**
+ * Pure. Rewrites a decision so that, while the seller's price is unknown:
+ *   - a price question (asks_offer / offer_request) before any offer exists is
+ *     answered with EXACTLY the S3 seller_asking_price question;
+ *   - any condition use case (required, routed, allowed or v2-preferred) is
+ *     replaced by the asking-price question, or — when the seller has just
+ *     said they have no number — held for a human;
+ *   - selection is told condition questions are forbidden.
+ * Suppression and non-queueing decisions are returned unchanged.
+ */
+export function applyStage3AskingPriceRule(
+  decision = {},
+  { classification = null, seller_price_known = false, stage = null, strategy_directive_applied = false } = {}
+) {
+  if (!decision || typeof decision !== "object") return decision;
+  if (seller_price_known || decision.should_suppress_contact) return decision;
+  const intent = lower(classification?.primary_intent);
+  const stage_key = lower(stage);
+  const post_offer = POST_OFFER_STAGES.has(stage_key);
+  const gated = { ...decision, condition_questions_forbidden: true };
+  if (!decision.should_queue_reply) return gated;
+
+  const condition_requested =
+    isConditionQuestionUseCase(decision.required_template_use_case) ||
+    isConditionQuestionUseCase(decision.route_hint) ||
+    (asArray(decision.v2_template_preference).length > 0 &&
+      stripConditionUseCases(decision.v2_template_preference).length === 0);
+  const price_question = PRICE_QUESTION_INTENTS.has(intent) && !post_offer && !strategy_directive_applied;
+  // The intent profile would have asked a condition question (e.g. "it's
+  // rented, tenants pay on time" → ask_condition_clarifier): once ownership and
+  // interest are behind us (S2/S3) and before an offer, the S3 asking-price
+  // question is asked instead. At S1 the identity is not settled — it holds.
+  const profile_condition =
+    INTEREST_OR_PRICE_STAGES.has(stage_key) &&
+    !strategy_directive_applied &&
+    !clean(decision.required_template_use_case) &&
+    !asArray(decision.v2_template_preference).length &&
+    asArray(templateCandidateSet(decision, classification || {})).some((value) => isConditionQuestionUseCase(value));
+
+  if (price_question || ((condition_requested || profile_condition) && intent !== "asking_price_absent")) {
+    return {
+      ...gated,
+      route_hint: "seller_asking_price",
+      allowed_template_stages: ["seller_asking_price"],
+      required_template_use_case: "seller_asking_price",
+      ...(asArray(decision.v2_template_preference).length ? { v2_template_preference: ["seller_asking_price"] } : {}),
+      template_authority: "stage3_asking_price_rule",
+      template_authority_reason: price_question ? "price_question_before_seller_price" : "condition_before_seller_price",
+      stage3_rerouted_from:
+        clean(decision.required_template_use_case) || clean(decision.route_hint) || null,
+    };
+  }
+  if (condition_requested) {
+    // "I don't have a number": re-asking is a loop and condition is
+    // forbidden — a person decides the next step.
+    return {
+      ...gated,
+      should_queue_reply: false,
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      next_action: "mark_human_review",
+      human_review_reason: "condition_before_seller_price_forbidden",
+      audit_reason: "condition_before_seller_price_forbidden",
+    };
+  }
+  return {
+    ...gated,
+    allowed_template_stages: stripConditionUseCases(decision.allowed_template_stages),
+    ...(asArray(decision.v2_template_preference).length
+      ? { v2_template_preference: stripConditionUseCases(decision.v2_template_preference) }
+      : {}),
+  };
+}
+
+// Diagnostic only (OWNER RULE P0 2026-10-09): which of these use cases exist
+// ONLY as code-registry copy? Used to name the hold reason; registry copy is
+// never selected or sent.
+async function registryOnlyUseCases(allowed_matches = []) {
   try {
-    const { LOCAL_TEMPLATE_CANDIDATES, verifyLocalAutoReplyApproval, isLocalTemplateFallbackKilled } =
-      await import("@/lib/domain/templates/local-template-registry.js");
-    // Immediate kill switch: fallback can be revoked globally without a deploy.
-    if (isLocalTemplateFallbackKilled()) return null;
-    for (const row of LOCAL_TEMPLATE_CANDIDATES) {
-      if (!LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES.has(lower(row.use_case))) continue;
-      if (!allowed_matches.includes(lower(row.use_case))) continue;
-      if (lower(row.active) !== "yes") continue;
-      if (excluded.size > 0 && templatePlaceholders(row.text).some((name) => excluded.has(name))) continue;
-      if (excluded_ids.has(clean(row.item_id))) continue;
-      // A local template is auto-sendable only with a verified approval record:
-      // pinned content hash, approved environment, allowed strategy, no kill.
-      const verification = verifyLocalAutoReplyApproval(row, { strategy });
-      if (!verification.approved) continue;
-      return {
-        template_id: row.item_id,
-        use_case: row.use_case,
-        // Canonical lifecycle stage from the approval record (S4/S5/S6) —
-        // never the template use case.
-        stage_code: verification.approval.stage_code,
-        language: row.language || "English",
-        template_body: row.text,
-        safe_for_auto_reply: true,
-        source: "local_registry",
-        approval: {
-          approval_status: verification.approval.approval_status,
-          approval_version: verification.approval.approval_version,
-          content_hash: verification.approval.content_hash,
-          allowed_strategies: [...verification.approval.allowed_strategies],
-        },
-      };
-    }
-    return null;
+    const { LOCAL_TEMPLATE_CANDIDATES } = await import("@/lib/domain/templates/local-template-registry.js");
+    const wanted = new Set(asArray(allowed_matches).map((v) => lower(v)).filter(Boolean));
+    return uniq(
+      asArray(LOCAL_TEMPLATE_CANDIDATES)
+        .filter((row) => lower(row?.active) === "yes" && wanted.has(lower(row?.use_case)))
+        .map((row) => lower(row.use_case))
+    );
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -1558,6 +1654,9 @@ export async function selectSafeAutoReplyTemplate({
   // Templates already sent on this thread: a repeat would be duplicate_blocked
   // (or, worse, the identical text twice), so they are skipped.
   excludeTemplateIds = [],
+  // The thread's property: its canonical asset classification decides which
+  // approved rows may describe it (same rule as the send-time asset guard).
+  propertyId = null,
 } = {}) {
   if (!canUseSupabase(supabaseClient)) {
     return { ok: false, reason: "missing_supabase", template: null };
@@ -1606,39 +1705,19 @@ export async function selectSafeAutoReplyTemplate({
   const languages = language === "English" ? ["English"] : [language, "English"];
 
   // Safe-fallback clarifier dispatch: the decision carries the coverage-net's
-  // prepared stage-aware clarifier. Same idiom as the local negotiation
-  // registry fallback below — a code-authored, PR-reviewed body instead of a
-  // DB row. Language stays fail-closed: clarifier texts are English (the
-  // `language` uncertainty text is bilingual), so a non-English thread keeps
-  // the review path rather than receiving an English clarifier.
+  // prepared stage-aware clarifier.
   const clarifier = decision?.clarifier_dispatch;
-  if (clean(clarifier?.suggested_text)) {
-    if (language !== "English" && clarifier.uncertainty_type !== "language") {
-      return { ok: false, reason: "clarifier_language_unavailable", template: null };
-    }
-    const clarifier_template = {
-      template_id: `safe_clarifier_${clarifier.uncertainty_type}_${clarifier.stage_bucket}`,
-      use_case: "safe_clarifier",
-      stage_code: null,
-      language: "English",
-      template_body: clarifier.suggested_text,
-      safe_for_auto_reply: true,
-      reply_mode: "auto",
-      template_name: "Stage-aware safe clarifier (coverage-net)",
-    };
-    info("[AUTO_REPLY_TEMPLATE_SELECTED]", {
-      route_hint: decision?.route_hint || null,
-      primary_intent: classification?.primary_intent || null,
-      template_id: clarifier_template.template_id,
-      use_case: clarifier_template.use_case,
-      stage_code: null,
-      language: clarifier_template.language,
-    });
+  // OWNER RULE (P0 2026-10-09): the coverage-net clarifier's suggested_text is
+  // code-authored copy with no sms_templates row. Automation never sends it;
+  // the turn is held for a human instead. (A clarifier that names an
+  // sms_templates use case goes through normal selection below.)
+  if (clean(clarifier?.suggested_text) && !clean(clarifier?.template_use_case)) {
     return {
-      ok: true,
-      reason: "safe_fallback_clarifier",
-      language_resolution,
-      template: clarifier_template,
+      ok: false,
+      reason: TEMPLATE_NOT_IN_SUPABASE,
+      detail: `safe_clarifier_${clean(clarifier.uncertainty_type) || "unknown"}_${clean(clarifier.stage_bucket) || "unknown"} is code copy, not an sms_templates row`,
+      human_review_required: true,
+      template: null,
     };
   }
   // Lifecycle-resolver authority (see executeInboundAutomationDecision): a
@@ -1667,9 +1746,14 @@ export async function selectSafeAutoReplyTemplate({
     : timing_turn
       ? TIMING_SAFE_REPLY_USE_CASES
       : null;
-  const allowed_matches = safe_use_cases
+  // OWNER RULE (P0 2026-10-09): no condition question before we hold the
+  // seller's asking price. The executor marks the decision; selection drops
+  // every condition use case so no profile candidate can leak one in.
+  const condition_forbidden = decision?.condition_questions_forbidden === true;
+  const allowed_matches = (safe_use_cases
     ? route_matches.filter((value) => safe_use_cases.includes(value))
-    : route_matches;
+    : route_matches
+  ).filter((value) => !condition_forbidden || !isConditionQuestionUseCase(value));
   const property_type_scope = derivePropertyTypeScope(context);
   const latest_inbound_text =
     context?.automation_decision?.inbound_detection?.latest_inbound_text ||
@@ -1712,11 +1796,28 @@ export async function selectSafeAutoReplyTemplate({
       warn("[AUTO_REPLY_TEMPLATE_POOL_AT_BOUND]", { bound: TEMPLATE_CANDIDATE_BOUND, languages });
     }
 
-    const candidates = (Array.isArray(data) ? data : [])
+    const route_candidates = (Array.isArray(data) ? data : [])
       .filter((row) => {
         const matches = normalizeTemplateMatchValues(row);
         return matches.some((value) => allowed_matches.includes(value));
       })
+      // Rows also match on stage_code/template_name: the row's own use case
+      // must not be a condition question while the price is unknown.
+      .filter((row) => !condition_forbidden || !isConditionQuestionUseCase(row.use_case));
+    // Canonical asset classification (properties row), judged by the same
+    // rule the send-time asset guard applies. Only when the record exists —
+    // otherwise the legacy scope filter below is unchanged.
+    const asset_property_id = clean(propertyId) || clean(context?.ids?.property_id) || null;
+    const asset_property = asset_property_id
+      ? await loadPropertyAssetRecord(supabase, asset_property_id)
+      : null;
+    const asset_property_group = asset_property ? canonicalPropertyGroupOf(asset_property) : null;
+    const asset_compatible = (row) =>
+      !asset_property ||
+      isTemplateCompatibleWithProperty({ template: row, propertyGroup: asset_property_group, property: asset_property }).compatible;
+    const asset_rejected = route_candidates.filter((row) => !asset_compatible(row));
+    const candidates = route_candidates
+      .filter(asset_compatible)
       // Rows also match on stage_code/stage_label/template_name; on a decline
       // or timing turn the row's own use case must be in the safe profile too.
       .filter((row) => !safe_use_cases || safe_use_cases.includes(lower(row.use_case)))
@@ -1748,6 +1849,26 @@ export async function selectSafeAutoReplyTemplate({
     const exact_language_match = v2_preference.length
       ? v2_preferred_match
       : candidates.find((row) => lower(row.language) === requested_language) || null;
+
+    // Commercial / non-residential assets (owner 2026-10-09): approved rows
+    // exist for the route but none describes this asset. Hold for a human with
+    // a clear reason — never registry copy, never a residential template.
+    if (candidates.length === 0 && asset_rejected.length > 0) {
+      const wanted_use_case = required_use_case || lower(decision?.route_hint) || allowed_matches[0] || "reply";
+      return {
+        ok: false,
+        reason: "asset_compatible_template_missing",
+        detail: `no approved ${wanted_use_case} template for a ${asset_property_group || "unknown"} property (asset-incompatible: ${asset_rejected
+          .map((row) => clean(row.template_id) || clean(row.id))
+          .slice(0, 6)
+          .join(",")})`,
+        human_review_required: true,
+        property_group: asset_property_group,
+        language,
+        language_resolution,
+        template: null,
+      };
+    }
 
     // Language continuity: a non-English thread must never be answered with
     // an English template. Missing language template ⇒ fail closed to review.
@@ -1792,41 +1913,23 @@ export async function selectSafeAutoReplyTemplate({
         template: null,
       };
     }
-    if (!selected && !v2_preference.length) {
-      selected = await selectLocalNegotiationTemplate(allowed_matches, {
-        strategy: decision?.negotiation_strategy || null,
-        excludePlaceholders: [...excluded_placeholders],
-        excludeTemplateIds: [...excluded_template_ids],
-      });
-      if (selected) {
-        try {
-          const { emitAutomationEvent } = await import(
-            "@/lib/domain/automation/automation-events.js"
-          );
-          await emitAutomationEvent(
-            {
-              event_type: "LOCAL_TEMPLATE_FALLBACK_USED",
-              source: "seller_inbound_orchestrator",
-              dedupe_key: `local-template-fallback:${inboundEventId || threadKey || ""}:${selected.template_id}`,
-              conversation_thread_id: clean(threadKey) || null,
-              payload: {
-                template_id: selected.template_id,
-                use_case: selected.use_case,
-                stage_code: selected.stage_code,
-                approval_version: selected.approval?.approval_version ?? null,
-                content_hash: selected.approval?.content_hash ?? null,
-                strategy: decision?.negotiation_strategy || null,
-                inbound_event_id: inboundEventId || null,
-              },
-            },
-            supabase ? { supabaseClient: supabase } : {}
-          );
-        } catch {
-          // Audit emission is observability — never blocks template selection.
-        }
+    // OWNER RULE (P0 2026-10-09, binding): automation never sends code
+    // registry copy (local-template:*). The local negotiation fallback that
+    // used to sit here sent `local-template:condition_probe:v1` to a retail
+    // owner who asked "how much?". No approved sms_templates row ⇒ hold for a
+    // human; when the registry WOULD have answered, the reason says so.
+    if (!selected) {
+      const registry_only = await registryOnlyUseCases(allowed_matches);
+      if (registry_only.length > 0) {
+        return {
+          ok: false,
+          reason: TEMPLATE_NOT_IN_SUPABASE,
+          detail: `no approved sms_templates row for ${registry_only.join(",")} (code registry copy is never sent)`,
+          human_review_required: true,
+          template: null,
+        };
       }
     }
-
     if (!selected) {
       return { ok: false, reason: "no_safe_template", template: null };
     }
@@ -2818,6 +2921,9 @@ export async function executeInboundAutomationDecision({
   strategyDirective = null,
   transitionDirective = null,
   effectiveStageBefore = null,
+  // Canonical "we hold the seller's asking price" (conversation state). null =
+  // caller does not know; only this turn's own evidence can then say known.
+  sellerAskingPriceKnown = null,
   // ONE BRAIN, TWO TRANSPORTS. Every decision above is channel-free; only the
   // last step differs. channel='email' hands the rendered reply to Email
   // Command (emailReplyImpl → email_queue) instead of send_queue, and lets
@@ -3124,6 +3230,25 @@ export async function executeInboundAutomationDecision({
     };
   }
 
+  // OWNER RULE (P0 2026-10-09, binding): Stage 3 is ALWAYS the asking price.
+  // Before we hold the seller's price, a price question is answered with the
+  // S3 asking-price question and no path may ask about condition.
+  base_decision = applyStage3AskingPriceRule(base_decision, {
+    classification,
+    seller_price_known: resolveSellerPriceKnown({
+      explicit: sellerAskingPriceKnown,
+      classification,
+      decision: base_decision,
+    }),
+    stage:
+      transitionDirective?.stage_after ||
+      effectiveStageBefore ||
+      clean(context?.summary?.conversation_stage) ||
+      clean(latestThreadContext?.summary?.conversation_stage) ||
+      null,
+    strategy_directive_applied,
+  });
+
   info("[AUTO_REPLY_DECISION]", {
     thread_key: threadKey || null,
     auto_reply_mode: effective_auto_reply_mode,
@@ -3303,7 +3428,27 @@ export async function executeInboundAutomationDecision({
         classification?.stage_hint ||
         null,
     });
-    if (clarifier_dispatch) {
+    // OWNER RULE (P0 2026-10-09): a clarifier is only sendable when it names
+    // an sms_templates use case. The code-authored suggested_text never is —
+    // the turn keeps its review, with the reason recorded.
+    if (clarifier_dispatch && !clean(clarifier_dispatch.template_use_case)) {
+      warn("[AUTO_REPLY_SAFE_CLARIFIER_WITHHELD]", {
+        thread_key: threadKey || null,
+        primary_intent: classification?.primary_intent || null,
+        uncertainty_type: clarifier_dispatch.uncertainty_type,
+        stage_bucket: clarifier_dispatch.stage_bucket,
+        reason: TEMPLATE_NOT_IN_SUPABASE,
+      });
+      base_decision = {
+        ...base_decision,
+        clarifier_withheld_reason: TEMPLATE_NOT_IN_SUPABASE,
+        clarifier_withheld: {
+          uncertainty_type: clarifier_dispatch.uncertainty_type || null,
+          stage_bucket: clarifier_dispatch.stage_bucket || null,
+        },
+      };
+    }
+    if (clarifier_dispatch && clean(clarifier_dispatch.template_use_case)) {
       info("[AUTO_REPLY_SAFE_CLARIFIER]", {
         thread_key: threadKey || null,
         primary_intent: classification?.primary_intent || null,
@@ -3590,6 +3735,7 @@ export async function executeInboundAutomationDecision({
   });
   let template_result = await selectSafeAutoReplyTemplate({
     supabaseClient: supabase,
+    propertyId,
     classification,
     decision: base_decision,
     context: reply_context,
@@ -3622,8 +3768,13 @@ export async function executeInboundAutomationDecision({
       should_queue_reply: false,
       should_mark_human_review: true,
       reply_mode: "manual_review",
-      human_review_reason:
-        template_result.reason === "language_template_missing" ? "language_template_missing" : "no_safe_template",
+      human_review_reason: [
+        "language_template_missing",
+        TEMPLATE_NOT_IN_SUPABASE,
+        "asset_compatible_template_missing",
+      ].includes(template_result.reason)
+        ? template_result.reason
+        : "no_safe_template",
       audit_reason: "no_safe_template",
       ...(template_result.detail ? { human_review_detail: template_result.detail } : {}),
     };
@@ -3724,6 +3875,7 @@ export async function executeInboundAutomationDecision({
   if (!render_result.ok && asArray(render_result.missing).length > 0) {
     const retry = await selectSafeAutoReplyTemplate({
       supabaseClient: supabase,
+      propertyId,
       classification,
       decision: base_decision,
       context: reply_context,
@@ -3769,6 +3921,7 @@ export async function executeInboundAutomationDecision({
       const already_sent_ids = recent_outbound.map((row) => clean(row?.template_id)).filter(Boolean);
       const variant = await selectSafeAutoReplyTemplate({
         supabaseClient: supabase,
+        propertyId,
         classification,
         decision: base_decision,
         context: reply_context,
@@ -3784,6 +3937,7 @@ export async function executeInboundAutomationDecision({
         for (const alt of REPEAT_REPHRASE_USE_CASES[lower(template_result.template.use_case)] || []) {
           const rephrase = await selectSafeAutoReplyTemplate({
             supabaseClient: supabase,
+            propertyId,
             classification,
             decision: { ...base_decision, required_template_use_case: alt },
             context: reply_context,
@@ -3944,9 +4098,17 @@ export async function executeInboundAutomationDecision({
     inboundEventId,
     supabaseClient: supabase,
   });
-  const rendered_message_text = natural_reply.applied
-    ? natural_reply.text
-    : render_result.rendered_message_text;
+  // OWNER RULE (P0 2026-10-09): every sent word is an sms_templates row. A
+  // model-generated rewrite is never sent in place of the rendered template
+  // (the engine may still run in shadow and audit what it would have said).
+  if (natural_reply.applied) {
+    warn("[AUTO_REPLY_NATURAL_TEXT_REFUSED]", {
+      thread_key: threadKey || null,
+      template_id: selected_template.template_id || selected_template.id || null,
+      reason: TEMPLATE_NOT_IN_SUPABASE,
+    });
+  }
+  const rendered_message_text = render_result.rendered_message_text;
   const scheduled_for = new Date(
     new Date(now).getTime() + Math.max(Number(scheduleDelaySeconds) || 0, 0) * 1000
   ).toISOString();

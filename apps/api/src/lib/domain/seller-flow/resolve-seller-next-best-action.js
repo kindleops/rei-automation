@@ -312,13 +312,20 @@ export function resolveSellerNextBestAction(conversationState = null, economics 
     });
   }
 
+  // OWNER RULE (P0 2026-10-09, binding): Stage 3 is ALWAYS the asking price.
+  // "How much do you think?" / "make me an offer" before we hold the seller's
+  // number is answered with the S3 asking-price question — never a condition
+  // probe. A condition question is selectable only once the seller's price is
+  // KNOWN (the S4B price_high_condition_probe semantics). This loop used to
+  // skip asking_price whenever seller_requests_offer was set, which sent a
+  // retail owner the code-only condition_probe on 2026-10-09.
+  const seller_price_known =
+    state.acquisition.asking_price?.resolution === FACT_RESOLUTION.KNOWN;
   for (const entry of DISCOVERY_PRIORITY) {
     const resolved = state.acquisition[entry.fact];
     if (!resolved || resolved.resolution !== FACT_RESOLUTION.MISSING) continue;
     if (UNSUPPORTED_DISCOVERY_REASONS.has(resolved.reason)) continue;
-    // "Just make me an offer" — never re-ask the price the seller declined to
-    // name; move to the next-highest unresolved underwriting fact instead.
-    if (entry.fact === "asking_price" && state.seller_requests_offer) continue;
+    if (entry.fact === "property_condition" && !seller_price_known) continue;
     return build({
       objective: entry.objective,
       reason_code: `missing_${entry.fact}`,

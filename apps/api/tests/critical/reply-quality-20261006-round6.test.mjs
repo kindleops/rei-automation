@@ -69,7 +69,7 @@ const LABELS = {
   "035": { intent: "seller_interested", outcome: "auto_reply" },
   "036": { intent: "ownership_confirmed", outcome: "auto_reply" },
   "037": { intent: "who_is_this", outcome: "auto_reply" },
-  "038": { intent: "asks_offer", outcome: "auto_reply" },
+  "038": { intent: "asks_offer", outcome: "review" }, // owner rule 2026-10-09: price already asked; no condition before the seller's price -> a person answers
   "039": { intent: "not_interested", outcome: "no_reply_by_design" },
   "040": { intent: "who_is_this", outcome: "auto_reply" },
   "041": { intent: "who_is_this", outcome: "auto_reply" },

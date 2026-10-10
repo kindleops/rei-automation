@@ -438,16 +438,20 @@ test("mode matrix: internal_proof does NOT substitute for a real seller phone", 
   assert.equal(result.natural_reply.shadow_reason, "internal_proof_recipient_not_internal");
 });
 
-test("mode matrix: internal_proof substitutes for an internal test phone", async () => {
+// OWNER RULE (P0 2026-10-09): every sent word is an sms_templates row. The
+// engine may still run and audit, but its text never replaces the template.
+test("mode matrix: internal_proof evaluates for an internal test phone but the template ships", async () => {
   const { result } = await runDecision({ mode: "internal_proof", phone: "+16127433952" });
-  assert.equal(result.rendered_message_text, GENERATED_TEXT);
+  assert.notEqual(result.rendered_message_text, GENERATED_TEXT);
+  assert.match(result.rendered_message_text, /what were you hoping to get/);
   assert.equal(result.natural_reply.source, "generated");
   assert.equal(result.natural_reply.mode, "internal_proof");
 });
 
-test("mode matrix: enabled substitutes and persists an APPLIED audit event", async () => {
+test("mode matrix: enabled persists its audit event but never substitutes the template copy", async () => {
   const { result, inserts } = await runDecision({ mode: "enabled" });
-  assert.equal(result.rendered_message_text, GENERATED_TEXT);
+  assert.notEqual(result.rendered_message_text, GENERATED_TEXT);
+  assert.match(result.rendered_message_text, /what were you hoping to get/);
   const audit_events = inserts.filter((entry) => entry.table === "automation_events");
   assert.ok(
     audit_events.some((entry) => entry.row?.event_type === "NATURAL_REPLY_APPLIED"),

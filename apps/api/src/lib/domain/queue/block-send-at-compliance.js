@@ -3,6 +3,8 @@ import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.j
 import { evaluateCanonicalContactability } from "@/lib/domain/compliance/evaluate-canonical-contactability.js";
 import { runSendTimeContactGuard, SEND_TIME_GUARD_REASONS } from "@/lib/domain/queue/send-time-contact-guard.js";
 import { supabase as realSupabase } from "@/lib/supabase/client.js";
+import { evaluateTemplateAuthority, TEMPLATE_NOT_IN_SUPABASE } from "@/lib/domain/templates/template-authority.js";
+import { REVIEW_HOLD_STATUS } from "@/lib/domain/queue/queue-authority.js";
 
 const QUEUE_TABLE = "send_queue";
 
@@ -113,6 +115,50 @@ export async function blockSendAtCompliance(
   };
 }
 
+async function applyTemplateAuthorityGate(queue_row, compliance, deps, supabase, manual_operator_send) {
+  // ── Template authority (OWNER RULE P0 2026-10-09, system-wide) ──────────────
+  // "We never use a hard-coded template. Ever." Every non-manual outbound —
+  // auto-reply, follow-up, nurture, campaign, map/ownership check, workflow,
+  // agent — must carry a template_id that is an sms_templates row. Empty ids,
+  // local-template:* registry ids, code-authored ids and unknown ids are held
+  // for a human (paused_operator_review, reason template_not_in_supabase); the
+  // provider is never called. Operator-typed composer text is the operator's
+  // own words and stays allowed.
+  const template_authority = await (deps.evaluateTemplateAuthority || evaluateTemplateAuthority)({
+    supabase,
+    queue_row,
+    manual_operator_send,
+    // Test runtime with a fake client: the two static rules still bind; only
+    // the catalogue read is skipped (fakes cannot serve it).
+    skipLookup: !deps.evaluateTemplateAuthority && isTestRuntimeWithFakeClient(supabase),
+  });
+  if (template_authority.allowed && template_authority.body_binding === "mismatch") {
+    // Observed, not enforced, outside the free-text producers: the words on
+    // the row are not a rendering of its template row.
+    info("send.template_body_mismatch_observed", {
+      queue_row_id: clean(queue_row.id) || null,
+      template_id: template_authority.template_id || null,
+      source: queue_row?.metadata?.source || queue_row.source || null,
+      manual_operator_send,
+    });
+  }
+  if (!template_authority.allowed) {
+    if (template_authority.deferred) {
+      const result = await deferSendAtGuard(queue_row, { reason: template_authority.reason }, deps);
+      return { blocked: true, compliance, template_authority, result };
+    }
+    const result = await holdSendForTemplateAuthority(
+      queue_row,
+      deps.claimedLockToken || queue_row.lock_token,
+      template_authority,
+      deps
+    );
+    return { blocked: true, compliance, template_authority, result };
+  }
+
+  return { blocked: false, template_authority };
+}
+
 export async function evaluateAndBlockSendAtCompliance(queue_row = {}, deps = {}) {
   const supabase = deps.supabase || deps.supabaseClient;
   const manual_operator_send = deps.manual_operator_send === true;
@@ -152,7 +198,9 @@ export async function evaluateAndBlockSendAtCompliance(queue_row = {}, deps = {}
   // Test-runtime only: legacy unit tests inject a fake client that cannot serve
   // the guard's reads. Production (NODE_ENV=production) always runs the guard.
   if (!deps.runSendTimeContactGuard && isTestRuntimeWithFakeClient(supabase)) {
-    return { blocked: false, compliance, guard: { blocked: false, skipped: "test_runtime_fake_client" }, result: null };
+    const gate = await applyTemplateAuthorityGate(queue_row, compliance, deps, supabase, manual_operator_send);
+    if (gate.blocked) return gate;
+    return { blocked: false, compliance, guard: { blocked: false, skipped: "test_runtime_fake_client" }, template_authority: gate.template_authority, result: null };
   }
   let guard;
   try {
@@ -161,7 +209,11 @@ export async function evaluateAndBlockSendAtCompliance(queue_row = {}, deps = {}
     guard = { blocked: true, reason: SEND_TIME_GUARD_REASONS.READ_FAILED, detail: { error: clean(error?.message || error).slice(0, 200) } };
   }
   if (!guard?.blocked) {
-    return { blocked: false, compliance, guard, result: null };
+    // Suppression / contact history first (a cancel beats a hold); then the
+    // template authority gate.
+    const gate = await applyTemplateAuthorityGate(queue_row, compliance, deps, supabase, manual_operator_send);
+    if (gate.blocked) return { ...gate, guard };
+    return { blocked: false, compliance, guard, template_authority: gate.template_authority, result: null };
   }
 
   const guard_compliance = {
@@ -186,6 +238,97 @@ export async function evaluateAndBlockSendAtCompliance(queue_row = {}, deps = {}
     deps
   );
   return { blocked: true, compliance: guard_compliance, guard, result };
+}
+
+/**
+ * Needs Review hold for a row whose copy is not an sms_templates row. No
+ * transport; the row stays visible as a review hold for an operator to send by
+ * hand (their own words) or to cancel. Never cancelled silently.
+ */
+export async function holdSendForTemplateAuthority(queue_row = {}, lock_token = null, decision = {}, deps = {}) {
+  const supabase = deps.supabase || deps.supabaseClient;
+  const now = deps.now || new Date().toISOString();
+  const queue_row_id = clean(queue_row.id);
+  const meta = queue_row.metadata && typeof queue_row.metadata === "object" ? queue_row.metadata : {};
+  const reason = clean(decision.reason) || TEMPLATE_NOT_IN_SUPABASE;
+  if (supabase && queue_row_id) {
+    await supabase
+      .from(QUEUE_TABLE)
+      .update({
+        queue_status: REVIEW_HOLD_STATUS,
+        held_at: now,
+        guard_status: "blocked",
+        guard_reason: reason,
+        blocked_reason: reason,
+        paused_reason: reason,
+        last_guard_checked_at: now,
+        is_locked: false,
+        locked_at: null,
+        lock_token: null,
+        updated_at: now,
+        metadata: {
+          ...meta,
+          skip_reason: reason,
+          needs_review_reason: reason,
+          human_review_required: true,
+          template_authority: {
+            reason,
+            detail: decision.detail || null,
+            template_id: decision.template_id || null,
+            held_at: now,
+          },
+          claimed_row_race_prevented: Boolean(lock_token),
+          final_queue_status: REVIEW_HOLD_STATUS,
+          finalized_at: now,
+          next_retry_at: null,
+        },
+      })
+      .eq("id", queue_row_id);
+  }
+  info("send.held_template_not_in_supabase", {
+    queue_row_id,
+    reason,
+    detail: decision.detail || null,
+    template_id: decision.template_id || null,
+    queue_type: queue_row.type || queue_row.message_type || null,
+    source: queue_row.source || meta.source || null,
+  });
+  try {
+    if (supabase && queue_row_id) {
+      await emitAutomationEvent(
+        {
+          event_type: "OUTBOUND_HELD_TEMPLATE_NOT_IN_SUPABASE",
+          dedupe_key: `template_authority_hold:${queue_row_id}`,
+          queue_item_id: queue_row_id,
+          payload: {
+            reason,
+            detail: decision.detail || null,
+            template_id: decision.template_id || null,
+            queue_type: queue_row.type || queue_row.message_type || null,
+            source: queue_row.source || meta.source || null,
+            held_at: now,
+          },
+        },
+        { supabase }
+      );
+    }
+  } catch {
+    // observability must not block the hold
+  }
+  return {
+    ok: true,
+    sent: false,
+    skipped: true,
+    blocked: true,
+    held_for_review: true,
+    reason,
+    template_authority_detail: decision.detail || null,
+    queue_status: REVIEW_HOLD_STATUS,
+    final_queue_status: REVIEW_HOLD_STATUS,
+    queue_row_id,
+    queue_item_id: queue_row_id,
+    retryable: false,
+  };
 }
 
 /** Fail-closed deferral: no transport, row unlocked and kept in its status for a later attempt. */

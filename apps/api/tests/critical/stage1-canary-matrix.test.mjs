@@ -148,7 +148,7 @@ test("matrix#1: 'Yes, I own it' → S1→S2, consider_selling EN queued", async 
 });
 
 // ── 2. Ownership + interest in one reply (EN) ───────────────────────────────
-test("matrix#2: 'Yes, what's your offer?' → S1→S3, condition probe, no Stage 2 re-ask", async () => {
+test("matrix#2: 'Yes, what's your offer?' → S1→S3, the S3 asking-price question, no Stage 2 re-ask", async () => {
   const run = await runCase(2, "Yes, what's your offer?");
   const { result } = run;
   assert.equal(result.contract.normalized_intent, "asks_offer");
@@ -158,7 +158,9 @@ test("matrix#2: 'Yes, what's your offer?' → S1→S3, condition probe, no Stage
   assert.equal(result.transition.disposition, "interested");
   // The reply must move the conversation forward — NEVER the S2 interest question.
   assert.notEqual(result.execution?.selected_template?.use_case, "consider_selling");
-  assertQueuedWithAttribution(run, { use_case: "condition_probe", language: "English", stage_code: "S4" });
+  // OWNER RULE (P0 2026-10-09): Stage 3 is ALWAYS the asking price; never a
+  // condition question before we hold the seller's number.
+  assertQueuedWithAttribution(run, { use_case: "seller_asking_price", language: "English", stage_code: "S3" });
   assertInboundCancelledFollowups(result, run.recorded);
 });
 

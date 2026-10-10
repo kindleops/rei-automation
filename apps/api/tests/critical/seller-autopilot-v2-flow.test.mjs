@@ -125,8 +125,11 @@ test("EN: no price → 'no worries, I'll run my numbers; condition?' → comps A
     ade: adeSnapshot({ comp_prices: [200_000, 210_000, 220_000, 230_000, 240_000], mao: 172_500, offer: 152_300 }),
     turns: [["Yes", "ownership_check"], ["Yes", "offer_interest"], ["I have no idea", "asking_price"], ["Its in good shape", "property_condition"]],
   });
-  assert.deepEqual(sent(results[2]), ["no_price_condition_probe"]);
-  assert.match(body(results[2]), /^No worries, I can run the numbers/);
+  // OWNER RULE (P0 2026-10-09): never a condition question before we hold the
+  // seller's price. The no-price turn asks the S3 price (or, when the seller
+  // already said they have no number, holds for a human) — the old
+  // no_price_condition_probe step is gone.
+  assert.ok(!sent(results[2]).some((u) => /condition/.test(u)), JSON.stringify(sent(results[2])));
   const s4 = results[3];
   assert.deepEqual(sent(s4), ["price_anchor_above_max"]);
   assert.equal(plan(s4).monetary.rule, "above_max");
@@ -141,11 +144,17 @@ test("EN: no price → 'no worries, I'll run my numbers; condition?' → comps A
 test("EN: 'send a bid' → condition → anchor uses the average of 3 when the lowest comp is an outlier", async () => {
   const { results } = await runFlow({
     ade: adeSnapshot({ comp_prices: [90_000, 160_000, 165_000, 170_000, 180_000] }),
-    turns: [["Yes", "ownership_check"], ["Send a bid", "offer_interest"], ["fair", "property_condition"]],
+    turns: [["Yes", "ownership_check"], ["Send a bid", "offer_interest"], ["$240,000", "asking_price"], ["fair", "property_condition"]],
   });
-  assert.deepEqual(sent(results[1]), ["no_price_condition_probe"]);
-  assert.equal(plan(results[2]).monetary.rule, "average_of_3_lowest_non_outlier_comps");
-  assert.match(body(results[2]), /\$165,000/);
+  // OWNER RULE (P0 2026-10-09): never a condition question before we hold the
+  // seller's price. The no-price turn asks the S3 price (or, when the seller
+  // already said they have no number, holds for a human) — the old
+  // no_price_condition_probe step is gone.
+  assert.deepEqual(sent(results[1]), ["seller_asking_price"]);
+  // With the seller's price in hand the condition question is allowed (S4B).
+  assert.deepEqual(sent(results[2]), ["price_high_condition_probe"]);
+  assert.equal(plan(results[3]).monetary.rule, "average_of_3_lowest_non_outlier_comps");
+  assert.match(body(results[3]), /\$165,000/);
 });
 
 test("EN: capital gains → creative probe; conditional interest → price question", async () => {
@@ -192,8 +201,15 @@ test("ZH: 是 → 是 → 24万 (local units) → condition → anchor in Mandar
 
 test("FR: oui → oui → 'faites-moi une offre' → condition → anchor in French", async () => {
   const { results } = await runFlow({ language: "French", systemControl: { seller_autopilot_v2_languages: ALL_LANGUAGES }, turns: [["Oui", "ownership_check"], ["Oui", "offer_interest"], ["Faites-moi une offre", "asking_price"], ["Bon état", "property_condition"]] });
-  assert.deepEqual(results.map(sent), [["consider_selling"], ["seller_asking_price"], ["no_price_condition_probe"], ["as_is_comp_anchor"]]);
-  assert.match(body(results[3]), /^Merci de confirmer\./);
+  // OWNER RULE (P0 2026-10-09): never a condition question before we hold the
+  // seller's price. The no-price turn asks the S3 price (or, when the seller
+  // already said they have no number, holds for a human) — the old
+  // no_price_condition_probe step is gone.
+  assert.deepEqual(results.slice(0, 2).map(sent), [["consider_selling"], ["seller_asking_price"]]);
+  // "Make me an offer" after we already asked the price: no condition, no
+  // number without their price — a person takes it from here.
+  assert.deepEqual(sent(results[2]), []);
+  assert.deepEqual(sent(results[3]), []);
 });
 
 test("GUARD: multifamily → human review, nothing sent", async () => {

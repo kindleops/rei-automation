@@ -191,14 +191,18 @@ test("C: the safe fallback cannot override a classifier review verdict (the prod
   assert.notEqual(result?.execution?.queued, true);
 });
 
-test("D: a classifier-authorized path still queues normally", async () => {
+test("D: a classifier-authorized clarifier turn queues nothing: the clarifier is code copy, not an sms_templates row", async () => {
+  // OWNER RULE (P0 2026-10-09): automation never sends copy without an
+  // sms_templates row. This turn used to queue the coverage-net's code-authored
+  // clarifier; the classifier still authorizes it, but the copy is withheld and
+  // the reason is recorded.
   const supabase = freshSupabase();
   const result = await runMessage(supabase, "hmm", unclearClassification({
     automation_decision: { auto_reply_allowed: true, queue_action: "queue_auto_reply", suppression_action: "none", human_review_required: false, risk_level: "low" },
   }));
-  const rows = supabase.inserted.send_queue;
-  assert.equal(rows.length, 1, `authorized turn must still queue exactly one row (got ${rows.length})`);
-  assert.equal(result.execution?.queued, true);
+  assert.equal(supabase.inserted.send_queue.length, 0);
+  assert.notEqual(result.execution?.queued, true);
+  assert.ok(!JSON.stringify(supabase.inserted.send_queue).includes("safe_clarifier_"));
 });
 
 test("E: a tour / meeting message falls to human review, never the asking-price clarifier", async () => {

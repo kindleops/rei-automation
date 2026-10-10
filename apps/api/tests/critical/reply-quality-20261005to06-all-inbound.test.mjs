@@ -20,6 +20,11 @@ import { classify, correctKeyMisspellings } from "@/lib/domain/classification/cl
 
 const read = (name) => JSON.parse(readFileSync(new URL(`../fixtures/reply-quality/${name}`, import.meta.url), "utf8"));
 const CASES = read("2026-10-05to06-all-inbound.json").cases;
+// OWNER RULE P0 2026-10-09 relabels (auto_reply -> review): #289 "What are u
+// offering" after our price question (re-ask = repeat; condition before the
+// price is forbidden); #357 #363 #382 tenant/condition statements at S1 with no
+// question of ours (the old reply was a condition question before the price; the
+// remaining candidates are code-registry copy, never sent).
 const LABELS = read("2026-10-05to06-all-inbound.labels.json").labels;
 const CATALOG = read("2026-10-06-safe-templates-en-es.json").rows;
 const T = (use_case, language, template_id, template_body) => ({ id: template_id, template_id, use_case, language, stage_code: null, is_active: true, safe_for_auto_reply: true, reply_mode: "auto_reply", template_body });
@@ -71,9 +76,11 @@ test("coverage floor: share of inbound that auto-responds / is handled without a
     if (c.live.auto_reply) liveAuto += 1;
   }
   assert.equal(liveAuto, 104, "prod before: 104 / 394 auto-replied (26.4%)");
-  assert.ok(auto >= 170, `today's catalog: ${auto} auto`);
+  // 170 before the owner rule of 2026-10-09 (#357 #363 #382 now held: their
+  // only old reply was a condition question before the price).
+  assert.ok(auto >= 168, `today's catalog: ${auto} auto`);
   assert.ok(handled >= 328, `today's catalog: ${handled} handled`);
-  assert.ok(autoDrafts >= 201, `with EN/ES drafts: ${autoDrafts} auto`);
+  assert.ok(autoDrafts >= 199, `with EN/ES drafts: ${autoDrafts} auto`); // 201 before the 2026-10-09 owner rule (same three)
   assert.ok(handledDrafts >= 359, `with EN/ES drafts: ${handledDrafts} handled`);
 });
 

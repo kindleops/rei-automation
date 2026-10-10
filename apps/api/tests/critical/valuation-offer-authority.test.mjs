@@ -233,8 +233,12 @@ test("a non-spendable valuation yields a NON-MONETARY autonomous next action", (
   for (const reason of Object.values(NON_SPENDABLE_REASONS)) {
     const next = resolveNonSpendableNextAction({ reason });
     assert.ok(next.use_case, `${reason} has a deterministic next use case`);
+    // Owner rule P0 2026-10-09: without the seller's price we ask it (S3);
+    // a condition question only ever follows their price (S4B semantics).
+    assert.equal(next.use_case, "seller_asking_price", "no price yet → the asking-price question");
+    const after_price = resolveNonSpendableNextAction({ reason }, { seller_asking_price_known: true });
     assert.ok(
-      ["condition_probe", "ask_condition_clarifier"].includes(next.use_case),
+      ["price_high_condition_probe", "ask_condition_clarifier"].includes(after_price.use_case),
       "the fallback is an existing non-monetary discovery route"
     );
     assert.ok(

@@ -211,7 +211,10 @@ const throwingSupabase = {
   },
 };
 
-test("selector returns the synthetic clarifier template without touching the DB", async () => {
+// OWNER RULE (P0 2026-10-09): the clarifier's suggested_text is code copy, not
+// an sms_templates row — the selector refuses it (any language) and the turn
+// is held for a person.
+test("selector refuses the code-authored clarifier copy without touching the DB", async () => {
   const dispatch = resolveSafeFallbackClarifierDispatch({
     decision: reviewDecision(),
     classification: unclearClassification(),
@@ -225,11 +228,10 @@ test("selector returns the synthetic clarifier template without touching the DB"
     context: null,
     threadKey: "+16125550100",
   });
-  assert.equal(result.ok, true);
-  assert.equal(result.reason, "safe_fallback_clarifier");
-  assert.equal(result.template.use_case, "safe_clarifier");
-  assert.equal(result.template.safe_for_auto_reply, true);
-  assert.equal(result.template.template_body, dispatch.suggested_text);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "template_not_in_supabase");
+  assert.equal(result.human_review_required, true);
+  assert.equal(result.template, null);
 });
 
 test("selector fail-closes the clarifier for a non-English thread", async () => {
@@ -247,7 +249,7 @@ test("selector fail-closes the clarifier for a non-English thread", async () => 
     threadKey: "+16125550100",
   });
   assert.equal(result.ok, false);
-  assert.equal(result.reason, "clarifier_language_unavailable");
+  assert.equal(result.reason, "template_not_in_supabase");
 });
 
 // ── V2 withhold carve ──────────────────────────────────────────────────────

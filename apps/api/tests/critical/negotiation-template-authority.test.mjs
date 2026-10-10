@@ -178,9 +178,9 @@ test("§18: duplicate inbound never queues a second reply", async () => {
   assert.equal(result.duplicate_suppressed, true);
 });
 
-test("§12: negotiation strategies fall back to the local template registry", async () => {
-  // No condition_probe row in sms_templates — the canonical local registry
-  // supplies it instead of silently downgrading to review.
+test("§12: a negotiation strategy with no sms_templates row holds for a person — never the code registry", async () => {
+  // OWNER RULE (P0 2026-10-09): "We never use a hard-coded template. Ever."
+  // This used to assert the local registry fallback (local-template:condition_probe).
   const supabase = makeSellerOrchestrationSupabase({ templates: [] });
   const result = await executeInboundAutomationDecision({
     ...baseArgs({ message: "The house needs some work" }),
@@ -194,9 +194,8 @@ test("§12: negotiation strategies fall back to the local template registry", as
     },
     dealAuthority: { recommended_offer: 80000, authorized_offer_ceiling: 90000 },
   });
-  assert.equal(result.queued, true);
-  assert.equal(result.selected_template.use_case, "condition_probe");
-  assert.equal(result.selected_template.source, "local_registry");
-  assert.ok(result.rendered_message_text.length > 0);
-  assert.ok(!/\{\{/.test(result.rendered_message_text), "no unresolved tokens");
+  assert.equal(result.queued, false);
+  assert.equal(result.selected_template, null);
+  assert.equal(result.automation_decision.should_mark_human_review, true);
+  assert.ok(!JSON.stringify(result).includes("local-template:"));
 });

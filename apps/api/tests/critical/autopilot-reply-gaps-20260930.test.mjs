@@ -320,18 +320,19 @@ test("the production decline turn selects a decline-safe template in every catal
   }
 });
 
-test("a decline with only interest-probe templates in the catalog never asks 'would you consider' -- local nurture or nothing", async () => {
+test("a decline with only interest-probe templates in the catalog never asks 'would you consider' -- nothing (no registry nurture)", async () => {
   const message = "Not for sale";
   const classification = await classify(message, null, { heuristicOnly: true });
   const decision = s1Decision(message, classification);
   const probesOnly = () => memoryDb({ sms_templates: [CONSIDER_SELLING, CS_FOLLOW_UP_A, CS_FOLLOW_UP_B] }).client;
   const context = { summary: { language_preference: "English" } };
 
-  // The approved, hash-pinned local future_nurture may answer; a probe may not.
+  // OWNER RULE (P0 2026-10-09): the code registry's future_nurture is no longer
+  // a fallback — only an sms_templates row may answer, and a probe may not.
   const fallback = await selectSafeAutoReplyTemplate({ supabaseClient: probesOnly(), classification, decision, context });
-  assert.equal(fallback.ok, true);
-  assert.equal(fallback.template.source, "local_registry");
-  assert.equal(fallback.template.use_case, "future_nurture");
+  assert.equal(fallback.ok, false);
+  assert.equal(fallback.template, null);
+  assert.equal(fallback.reason, "template_not_in_supabase");
 
   // With the local fallback revoked there is nothing decline-safe: fail closed.
   const previous = process.env.LOCAL_TEMPLATE_FALLBACK_DISABLED;

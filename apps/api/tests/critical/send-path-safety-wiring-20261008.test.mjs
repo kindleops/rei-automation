@@ -79,7 +79,8 @@ test("wired guard: a guard that throws is treated as a read failure (fail closed
 test("wired guard: a clean recipient passes", async () => {
   const supabase = recordingSupabase();
   const out = await evaluateAndBlockSendAtCompliance(
-    { id: "q4", to_phone_number: "+13145550103", queue_status: "processing", metadata: {} },
+    // Owner rule P0 2026-10-09: an automated row carries its sms_templates id.
+    { id: "q4", to_phone_number: "+13145550103", queue_status: "processing", template_id: "200001", metadata: {} },
     { supabase, evaluateCanonicalContactability: contactabilityPass, runSendTimeContactGuard: async () => ({ blocked: false }) },
   );
   assert.equal(out.blocked, false);

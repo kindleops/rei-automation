@@ -563,7 +563,14 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
       pickProvenanceField(input, input_metadata, "selected_template_id") ||
       pickProvenanceField(input, input_metadata, "template_id"),
     template_key: pickProvenanceField(input, input_metadata, "template_key"),
-    template_source: pickProvenanceField(input, input_metadata, "template_source"),
+    // Owner rule P0 2026-10-09: every word is tracked. No template picked ⇒
+    // the operator typed it (manual_composer); a picked template keeps its id.
+    template_source:
+      pickProvenanceField(input, input_metadata, "template_source") ||
+      (pickProvenanceField(input, input_metadata, "template_id") ||
+      pickProvenanceField(input, input_metadata, "selected_template_id")
+        ? null
+        : "manual_composer"),
     language: pickProvenanceField(input, input_metadata, "language"),
     rendered_message:
       pickProvenanceField(input, input_metadata, "rendered_message") || message_body,
@@ -585,7 +592,12 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
         pickProvenanceField(input, input_metadata, "selected_template_id") ||
         pickProvenanceField(input, input_metadata, "template_id"),
       template_key: pickProvenanceField(input, input_metadata, "template_key"),
-      template_source: pickProvenanceField(input, input_metadata, "template_source"),
+      template_source:
+        pickProvenanceField(input, input_metadata, "template_source") ||
+        (pickProvenanceField(input, input_metadata, "template_id") ||
+        pickProvenanceField(input, input_metadata, "selected_template_id")
+          ? null
+          : "manual_composer"),
       language: pickProvenanceField(input, input_metadata, "language"),
       rendered_message:
         pickProvenanceField(input, input_metadata, "rendered_message") || message_body,

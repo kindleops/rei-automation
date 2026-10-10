@@ -2059,6 +2059,11 @@ export async function processSellerInboundMessage({
         null,
     }),
     effectiveStageBefore: transition?.stage_after ?? effective_stage_before,
+    // Owner rule P0 2026-10-09: Stage 3 is always the asking price — the
+    // executor must know whether we already hold it (canonical state).
+    sellerAskingPriceKnown: conversation_state
+      ? conversation_state?.acquisition?.asking_price?.resolution === "known"
+      : null,
     supabaseClient: supabase,
     getSystemValue,
   });

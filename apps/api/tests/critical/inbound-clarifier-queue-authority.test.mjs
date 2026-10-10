@@ -146,7 +146,7 @@ test("INVARIANT: an ambiguous unclear turn whose classifier requires human revie
   assert.notEqual(result.execution?.queued, true);
 });
 
-test("the clarifier still renders the PERSISTED-stage question where a reply is authorized", async () => {
+test("an authorized clarifier turn queues NO code-authored copy (owner rule 2026-10-09: sms_templates only)", async () => {
   const supabase = makeInboundRealPathSupabase({
     send_queue: [sentS1Row()],
     sms_templates: [],
@@ -160,12 +160,11 @@ test("the clarifier still renders the PERSISTED-stage question where a reply is 
   });
 
   const rows = supabase.inserted.send_queue;
-  assert.equal(rows.length, 1, `exactly one clarifier row (got ${rows.length})`);
-  assert.equal(rows[0].use_case_template, "safe_clarifier");
-  const gsm = (t) => String(t).replace(/\u2014/g, "-").replace(/\u2019/g, "'");
+  assert.equal(rows.length, 0, `no clarifier row (got ${rows.length})`);
+  assert.notEqual(result.execution?.queued, true);
+  // The stage-aware clarifier is still PREPARED (persisted stage), never sent.
   const expected = buildSafeFallback({ stage: "asking_price", uncertainty_type: "intent" });
-  assert.equal(gsm(rows[0].message_body), gsm(expected.suggested_text));
-  assert.equal(result.execution?.queued, true);
+  assert.ok(expected.suggested_text);
 });
 
 test("NEGATIVE: probate-objection unclear stays human review — no clarifier row", async () => {

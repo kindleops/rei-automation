@@ -169,19 +169,26 @@ export function resolveValuationSpendability({ valuation = null, v3_qualificatio
  * conversation keeps running autonomously on a discovery route, and the offer is
  * retried once better evidence exists.
  */
-export function resolveNonSpendableNextAction(spendability = {}) {
+export function resolveNonSpendableNextAction(spendability = {}, { seller_asking_price_known = false } = {}) {
+  // OWNER RULE (P0 2026-10-09, binding): when we cannot make an offer and do
+  // not yet hold the seller's number, we ask their asking price (S3). A
+  // condition question is only ever asked AFTER we have their price, with the
+  // approved S4B price_high_condition_probe semantics.
+  if (!seller_asking_price_known) {
+    return { use_case: "seller_asking_price", route: "continue_discovery" };
+  }
   switch (spendability.reason) {
     case NON_SPENDABLE_REASONS.UNDEFENDED_LOW_N:
       // Not enough trustworthy comparable evidence — gather property facts that
       // improve the next valuation rather than guessing a price now.
-      return { use_case: "condition_probe", route: "continue_discovery" };
+      return { use_case: "price_high_condition_probe", route: "continue_discovery" };
     case NON_SPENDABLE_REASONS.TIER_NOT_AUTHORITATIVE:
-      return { use_case: "condition_probe", route: "continue_discovery" };
+      return { use_case: "price_high_condition_probe", route: "continue_discovery" };
     case NON_SPENDABLE_REASONS.NO_RECOMMENDATION:
     case NON_SPENDABLE_REASONS.NO_VALUATION:
       return { use_case: "ask_condition_clarifier", route: "retry_valuation_when_evidence_improves" };
     default:
-      return { use_case: "condition_probe", route: "continue_discovery" };
+      return { use_case: "price_high_condition_probe", route: "continue_discovery" };
   }
 }
 

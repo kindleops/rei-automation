@@ -51,11 +51,23 @@ const OPENER_ROW = {
   delivered_at: "2026-10-06T13:42:30.000Z", queue_status: "delivered", created_at: "2026-10-06T01:46:01Z",
 };
 const PROBE_ROW = {
-  id: "e9b02909", to_phone_number: THREAD, message_type: "Follow-Up", template_id: "local-template:condition_probe:v1",
+  id: "e9b02909", to_phone_number: THREAD, message_type: "Follow-Up", template_id: "cond-probe-v1",
   property_id: PROPERTY_ID, message_body: CONDITION_PROBE_V1_TEXT, provider_message_id: null,
   sent_at: "2026-10-06T13:47:21.861Z", delivered_at: "2026-10-06T13:47:30.000Z", queue_status: "delivered",
   created_at: "2026-10-06T13:45:48.501Z",
 };
+// Owner rule P0 2026-10-09: only sms_templates rows are ever sent (the code
+// registry is never a fallback), so the repeat rule is exercised on approved rows.
+const COND_ROW = (n, body) => ({
+  id: `cond-${n}`, template_id: `cond-probe-${n}`, use_case: "condition_probe", stage_code: "S4", language: "English",
+  is_active: true, safe_for_auto_reply: true, reply_mode: "auto", property_type_scope: "Any Residential",
+  allowed_property_groups: ["sfr", "duplex", "triplex", "fourplex", "small_multifamily", "multifamily_5_plus"],
+  template_body: body, usage_count: n === "v1" ? 10 : 1,
+});
+const COND_ROWS = [
+  COND_ROW("v1", "Thanks for the details on {{property_address}}. How would you describe the overall condition — move-in ready, needs some updating, or bigger repairs?"),
+  COND_ROW("v2", "Got it. Anything on {{property_address}} that would need attention?"),
+];
 const PROPERTY = { property_id: PROPERTY_ID, property_address: "12051 Willow Trl", estimated_value: 182000, arv_estimate: null };
 
 async function contextAt(at, outbound) {
@@ -189,9 +201,9 @@ test("generic repeat rule: the condition probe already sent -> its approved vari
   };
   const result = await run({
     message: "250k", classification, strategyDirective: directive, inboundEventId: "in-generic",
-    tables: { sms_templates: [], send_queue: [PROBE_ROW, OPENER_ROW], properties: [PROPERTY] },
+    tables: { sms_templates: COND_ROWS, send_queue: [PROBE_ROW, OPENER_ROW], properties: [PROPERTY] },
   });
-  assert.equal(result.selected_template?.template_id, "local-template:condition_probe:v2");
+  assert.equal(result.selected_template?.template_id, "cond-probe-v2");
   assert.ok(result.rendered_message_text && result.rendered_message_text !== CONDITION_PROBE_V1_TEXT);
   assert.ok(!result.rendered_message_text.includes("{{"));
 });
@@ -205,12 +217,12 @@ test("generic repeat rule: every variant already sent -> review repeat_intent_no
     strategy: "condition_discovery", reason_code: "S1_TO_S4_ASKING_PRICE_PROVIDED", template_use_case: "condition_probe",
     allowed_template_use_cases: ["condition_probe"], next_action: "send_message_now", review_required: false,
   };
-  const v2Row = { ...PROBE_ROW, id: "v2", template_id: "local-template:condition_probe:v2", message_body: "Got it. Anything on 12051 Willow Trl that would need attention?" };
+  const v2Row = { ...PROBE_ROW, id: "v2", template_id: "cond-probe-v2", message_body: "Got it. Anything on 12051 Willow Trl that would need attention?" };
   const alerts = [];
   const result = await run({
     message: "250k", classification, strategyDirective: directive, inboundEventId: "in-noalt", dryRun: false,
     notify: async (p) => (alerts.push(p), { ok: true }),
-    tables: { sms_templates: [], send_queue: [v2Row, PROBE_ROW, OPENER_ROW], properties: [PROPERTY] },
+    tables: { sms_templates: COND_ROWS, send_queue: [v2Row, PROBE_ROW, OPENER_ROW], properties: [PROPERTY] },
   });
   assert.equal(result.queued, false);
   assert.equal(result.automation_decision.should_mark_human_review, true);

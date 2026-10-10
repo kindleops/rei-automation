@@ -161,6 +161,14 @@ test("hydration: an address already on the thread is kept and nothing is queried
 });
 
 // ── the price-provided reply ────────────────────────────────────────────────
+// Owner rule P0 2026-10-09: only sms_templates rows are sent (this file used to
+// rely on local-template:condition_probe:v1); the approved address-bearing row:
+const ADDRESS_CONDITION_ROW = {
+  id: "cond-addr-row", template_id: "cond-addr-row", use_case: "condition_probe", stage_code: "S4",
+  language: "English", is_active: true, safe_for_auto_reply: true, reply_mode: "auto",
+  property_type_scope: "Any Residential",
+  template_body: "Thanks for the details on {{property_address}}. How would you describe the overall condition: move-in ready, needs some updating, or bigger repairs?",
+};
 
 for (const [label, tables] of [
   ["properties", { properties: [{ property_id: PROPERTY_ID, property_address: "3706 E Lockwood Dr" }] }],
@@ -171,7 +179,7 @@ for (const [label, tables] of [
   }],
 ]) {
   test(`price-provided reply renders with the address from ${label}, no raw {{`, async () => {
-    const result = await runPriceReply({ supabase: makeSupabase(tables), ctx: threadContext() });
+    const result = await runPriceReply({ supabase: makeSupabase({ ...tables, sms_templates: [ADDRESS_CONDITION_ROW] }), ctx: threadContext() });
     assert.notEqual(result.audit_reason, "template_render_failed");
     assert.equal(result.automation_decision.should_mark_human_review, false);
     assert.ok(result.selected_template, "a template is selected");
@@ -202,7 +210,7 @@ test("no address anywhere: falls back to an approved variant WITHOUT {{property_
 test("nothing renders: human review + operator alert, never a raw {{ and never silent", async () => {
   const alerts = [];
   const result = await runPriceReply({
-    supabase: makeSupabase({}),
+    supabase: makeSupabase({ sms_templates: [ADDRESS_CONDITION_ROW] }),
     ctx: threadContext(),
     dryRun: false,
     notify: async (payload) => (alerts.push(payload), { ok: true }),

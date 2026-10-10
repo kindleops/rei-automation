@@ -127,6 +127,9 @@ function buildQueuePayload(candidate, { campaign_id = null, touch_number = 1, us
     phone_id: candidate.phone_id,
     touch_number,
     use_case_template: use_case,
+    // Owner rule P0 2026-10-09: an automated send carries its sms_templates id
+    // (the final send guard holds rows without one).
+    template_id: "e2e_consider_selling_v1",
     seller_first_name: candidate.seller_first_name,
     campaign_id,
     metadata: { source: "e2e_launch_automation_proof" },

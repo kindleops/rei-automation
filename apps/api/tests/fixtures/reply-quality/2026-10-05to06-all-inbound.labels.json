@@ -1138,9 +1138,9 @@
   },
   "289": {
    "intent": "asks_offer",
-   "outcome": "auto_reply",
+   "outcome": "review",
    "sentiment": "positive",
-   "outcome_with_en_es_drafts": "auto_reply"
+   "outcome_with_en_es_drafts": "review"
   },
   "290": {
    "intent": "ownership_confirmed",
@@ -1546,9 +1546,9 @@
   },
   "357": {
    "intent": "tenant_occupied",
-   "outcome": "auto_reply",
+   "outcome": "review",
    "sentiment": "positive",
-   "outcome_with_en_es_drafts": "auto_reply"
+   "outcome_with_en_es_drafts": "review"
   },
   "358": {
    "intent": "unclear",
@@ -1582,9 +1582,9 @@
   },
   "363": {
    "intent": "tenant_occupied",
-   "outcome": "auto_reply",
+   "outcome": "review",
    "sentiment": "positive",
-   "outcome_with_en_es_drafts": "auto_reply"
+   "outcome_with_en_es_drafts": "review"
   },
   "364": {
    "intent": "condition_disclosed",
@@ -1696,9 +1696,9 @@
   },
   "382": {
    "intent": "tenant_occupied",
-   "outcome": "auto_reply",
+   "outcome": "review",
    "sentiment": "positive",
-   "outcome_with_en_es_drafts": "auto_reply"
+   "outcome_with_en_es_drafts": "review"
   },
   "383": {
    "intent": "condition_disclosed",

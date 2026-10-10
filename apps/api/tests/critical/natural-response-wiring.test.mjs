@@ -157,11 +157,13 @@ test("engine disabled by default: template text untouched, no audit", async () =
 });
 
 test(
-  "enabled + valid constrained output substitutes wording without touching the decision",
+  // OWNER RULE (P0 2026-10-09): the generated wording is audited, never sent.
+  "enabled + valid constrained output never replaces the template copy and never touches the decision",
   withEngineEnabled(async () => {
     const baseline = await runDecision();
     const result = await runDecision({ naturalReplyModelCall: goodModelCall() });
-    assert.equal(result.rendered_message_text, GENERATED_TEXT);
+    assert.notEqual(result.rendered_message_text, GENERATED_TEXT);
+    assert.equal(result.rendered_message_text, baseline.rendered_message_text);
     assert.equal(result.natural_reply.source, "generated");
     assert.equal(result.natural_reply.model.provider, "mock");
     // Decision fields identical to the deterministic run.

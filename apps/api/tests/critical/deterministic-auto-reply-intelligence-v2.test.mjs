@@ -356,10 +356,25 @@ test("'just make me an offer' preserves the request but never grants offer permi
   assert.equal(turn.next_best_action.offer_allowed, false);
   assert.equal(turn.response_strategy.offer_allowed, false);
   assert.notEqual(turn.next_best_action.objective, ACQUISITION_OBJECTIVES.PREPARE_OFFER);
-  // Never re-asks the price the seller declined to name.
-  assert.notEqual(turn.next_best_action.objective, ACQUISITION_OBJECTIVES.DISCOVER_ASKING_PRICE);
-  assert.equal(turn.next_best_action.objective, ACQUISITION_OBJECTIVES.DISCOVER_CONDITION);
+  // OWNER RULE (P0 2026-10-09): Stage 3 is ALWAYS the asking price. "Make me
+  // an offer" before we hold their number is answered with the S3 asking-price
+  // question — never a condition probe (this asserted DISCOVER_CONDITION until
+  // a retail owner got the code-only condition_probe for "How much?").
+  assert.equal(turn.next_best_action.objective, ACQUISITION_OBJECTIVES.DISCOVER_ASKING_PRICE);
+  assert.notEqual(turn.next_best_action.objective, ACQUISITION_OBJECTIVES.DISCOVER_CONDITION);
+  assert.equal(turn.response_strategy.template_use_case, "seller_asking_price");
   assert.equal(turn.transition.next_action !== NEXT_ACTIONS.GENERATE_OFFER, true);
+});
+
+test("P0 2026-10-09: S2 asked → 'How much is do u think?' → the S3 asking-price question, never condition", async () => {
+  const turn = await runTurn("How much is do u think?", {
+    known_facts: { ownership_status: "confirmed" },
+    stage_before: "offer_interest",
+  });
+  assert.equal(turn.next_best_action.objective, ACQUISITION_OBJECTIVES.DISCOVER_ASKING_PRICE);
+  assert.equal(turn.response_strategy.template_use_case, "seller_asking_price");
+  assert.notEqual(turn.effective_template_use_case, "condition_probe");
+  assert.equal(turn.next_best_action.offer_allowed, false);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
