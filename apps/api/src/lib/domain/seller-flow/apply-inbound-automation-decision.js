@@ -52,6 +52,7 @@ import {
   cancelSupabasePendingOutbound,
   CANCELLATION_POLICIES,
 } from "@/lib/domain/queue/cancel-supabase-pending-outbound.js";
+import { isExplicitCallRequest, threadHasMissedCall } from "@/lib/domain/classification/round11-unclear-rules.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
 /** Upper bound on active+safe template rows read per language pair (see selectSafeAutoReplyTemplate). */
@@ -919,12 +920,90 @@ export function applyInboundAutomationDecision(args = {}) {
     metadata: classification.metadata || {},
   });
   return applySuppressionCandidateHold(
-    applySellerConversationV3TerminalDecision(
-      ensureInboundCoverage(raw, { stage, contact_identity, classification }),
+    applyCounterpartyReviewHold(
+      applyTextOnlyRedirectGate(
+        applySellerConversationV3TerminalDecision(
+          ensureInboundCoverage(raw, { stage, contact_identity, classification }),
+          classification,
+        ),
+        classification,
+        args,
+      ),
       classification,
     ),
     classification,
   );
+}
+
+/**
+ * TEXT-ONLY REDIRECT GATE (owner P0 2026-10-09). The text_only_redirect copy
+ * ("Sorry I missed you, texting is the fastest way to reach me ...") may only
+ * follow a REAL missed inbound call on the thread, or an explicit request for a
+ * phone call (we only text). Anything else that routed there (a "message me",
+ * an e-mail request, a voicemail mention without a call) goes to a person
+ * instead of an auto-reply that claims a call that never happened.
+ */
+export function isTextOnlyRedirectPermitted({ message = "", classification = {}, latestThreadContext = null, missedCallEvidence = null } = {}) {
+  if (missedCallEvidence === true) return true;
+  const recent = latestThreadContext?.recent?.recent_events || latestThreadContext?.recent_events || [];
+  if (threadHasMissedCall(recent)) return true;
+  if (classification?.missed_call_on_thread === true) return true;
+  // The classifier's explicit phone-call objection (needs_call: "call me",
+  // "give me a call", "llámame" ...) is a call request; a text is not.
+  if (clean(classification?.objection) === "needs_call") return true;
+  return isExplicitCallRequest(message);
+}
+
+/**
+ * COUNTERPARTY IS AN INVESTOR (owner P0 2026-10-09; classify.js rule
+ * r11_counterparty_investor_pitch): the respondent pitched their own inventory
+ * / investor business. A person reads it: Needs Review, no auto-reply, no
+ * nurture follow-up queued by this turn. Never a suppression.
+ */
+export function isCounterpartyInvestorClassification(classification = {}) {
+  if (clean(classification?.compliance_flag) === "stop_texting") return false;
+  if (clean(classification?.primary_intent) === "opt_out") return false;
+  return Array.isArray(classification?.matched_rule_ids) && classification.matched_rule_ids.includes("r11_counterparty_investor_pitch");
+}
+
+function applyCounterpartyReviewHold(decision = {}, classification = {}) {
+  if (!decision || decision.should_suppress_contact) return decision;
+  if (!isCounterpartyInvestorClassification(classification)) return decision;
+  return {
+    ...decision,
+    should_queue_reply: false,
+    should_suppress_contact: false,
+    should_mark_human_review: true,
+    reply_mode: "manual_review",
+    human_review_reason: "counterparty_is_investor",
+    next_action: "await_human",
+    audit_reason: "counterparty_is_investor",
+    follow_up_at: null,
+  };
+}
+
+function applyTextOnlyRedirectGate(decision = {}, classification = {}, args = {}) {
+  if (!decision || decision.should_suppress_contact) return decision;
+  if (!decision.should_queue_reply || clean(decision.route_hint) !== "text_only_redirect") return decision;
+  if (
+    isTextOnlyRedirectPermitted({
+      message: args.message,
+      classification,
+      latestThreadContext: args.latestThreadContext,
+      missedCallEvidence: args.missedCallEvidence,
+    })
+  ) {
+    return decision;
+  }
+  return {
+    ...decision,
+    should_queue_reply: false,
+    should_mark_human_review: true,
+    reply_mode: "manual_review",
+    human_review_reason: "text_only_redirect_without_call",
+    next_action: "await_human",
+    audit_reason: "text_only_redirect_without_call",
+  };
 }
 
 /**

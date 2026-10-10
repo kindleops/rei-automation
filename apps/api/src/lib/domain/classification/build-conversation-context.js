@@ -117,18 +117,24 @@ const BODY_QUESTION_PATTERNS = [
   // matched, the context was null and the seller's "Yes" fell to the
   // context-free default (ownership_confirmed) instead of answering the
   // sale-interest question.
-  [/\bopen\s+to\s+(?:a\s+|an\s+)?(?:proposal|offer|sale|selling|sell)\b|consider\s+(?:a\s+|an\s+)?(?:proposal|offer|sale|selling)\b|would\s+you\s+(?:ever\s+)?(?:consider\s+|be\s+(?:willing|open)\s+to\s+|like\s+to\s+|want\s+to\s+)?sell(?:ing)?\b|interested\s+in\s+(?:selling|a\s+sale|an?\s+(?:offer|proposal))\b|(?:thinking|thought)\s+(?:about|of)\s+selling\b/i, "proposal_interest"],
+  // Round 11 (owner P0 2026-10-09): operators also ask "open to an as-is
+  // sale?", "open to discussing numbers on it?", "open to talking numbers on
+  // 45 Lincoln St?", "see if you'd be open to discussing a number" -- every
+  // one left the seller's "Sure" / "Bet" / "I would." with no question at all.
+  [/\bopen\s+to\s+(?:a\s+|an\s+|some\s+)?(?:as[-\s]is\s+|off[-\s]market\s+|cash\s+|quick\s+)?(?:proposal|offer|sale|selling|sell)\b|\bopen\s+to\s+(?:discussing|talking|hearing|getting|receiving|entertaining|reviewing)\s+(?:a\s+|an\s+|some\s+|the\s+)?(?:numbers?|proposal|offer|price)\b|\b(?:discussing|talking)\s+(?:a\s+|some\s+|the\s+)?numbers?\b|consider\s+(?:a\s+|an\s+)?(?:as[-\s]is\s+|cash\s+)?(?:proposal|offer|sale|selling)\b|would\s+you\s+(?:ever\s+)?(?:consider\s+|be\s+(?:willing|open)\s+to\s+|like\s+to\s+|want\s+to\s+)?sell(?:ing)?\b|interested\s+in\s+(?:selling|a\s+sale|an?\s+(?:offer|proposal))\b|(?:thinking|thought)\s+(?:about|of)\s+selling\b/i, "proposal_interest"],
   // Our multilingual first touches (2026-10-01 corpus). Without these a reply
   // to a Spanish / Portuguese / Vietnamese / French / Arabic-transliterated
   // question had no context at all, so "No" or "Không phải" could not be read
   // against the question that produced it.
-  [/precio\s+en\s+mente|prix\s+(?:demand[eé]|en\s+t[eê]te)/i, "asking_price"],
+  // A question that asks what they OWE as well as the price ("¿sabe cuánto
+  // debe y qué precio desearía?") does not say which number a bare "160" is.
+  [/^(?![\s\S]*(?:cu[aá]nto\s+debe|how\s+much\s+(?:do\s+you\s+|you\s+)?owe))[\s\S]*?(?:precio\s+en\s+mente|precio\s+de\s+venta|qu[eé]\s+precio\s+(?:desear[ií]a|quiere|quisiera|pide|tiene)|cu[aá]nto\s+(?:pide|quiere|est[aá]\s+pidiendo)|prix\s+(?:demand[eé]|en\s+t[eê]te))/i, "asking_price"],
   [/(?:eres|es\s+usted|sigues\s+siendo|todav[ií]a\s+eres|todav[ií]a\s+es)\s+(?:el\s+|la\s+)?due[ñn][oa]|\bes\s+(?:tu|su)\s+propiedad|voc[eê]\s+ainda\s+[eé]\s+(?:o|a)\s+(?:propriet[aá]ri[oa]|don[oa])|\b[eé]\s+sua\s+propriedade|c[oó]\s+ph[aả]i\s+l[aà]\s+c[uủ]a\s+b[aạ]n|\bhal\s+.{1,80}\s+lak\b/i, "ownership_check"],
   // Our romanised ownership openers in the other templated languages
   // (2026-10-06 sms_templates audit). Campaign rows normally name the question
   // through template_id; this is the body fallback.
   [/\bnin hai (?:yongyou|shi)\b|\bvy vse eshche vlad|\bata adayin baal|\bkya aap abhi bhi\b|\bajik soyu\b|\bczy nadal jeste[sś]\s+w[lł]a[sś]ciciel|\bpossiedi\b|\bsind sie (?:noch )?(?:der )?eigent|\best a vous\b|\bexeis akoma\b|\bvoce ainda e\b|\bban van la chu\b/i, "ownership_check"],
-  [/abiert[oa]\s+a\s+(?:una\s+)?(?:propuesta|oferta|venta|vender)|considerar[ií]a\s+(?:una\s+)?(?:propuesta|oferta|venta|vender)|(?:le|te)\s+interesar[ií]a\s+vender|(?:quiere|quieres|quisiera|quisieras)\s+vender|discutir\s+n[uú]meros|abert[oa]\s+(?:a|para)\s+(?:uma\s+)?(?:proposta|discutir)/i, "proposal_interest"],
+  [/abiert[oa]\s+(?:a\s+)?(?:una\s+)?(?:propuesta|oferta|venta|vender|discutir)|considerar[ií]a\s+(?:una\s+)?(?:propuesta|oferta|venta|vender)|(?:le|te)\s+interesar[ií]a\s+vender|(?:quiere|quieres|quisiera|quisieras)\s+vender|dispuest[oa]\s+a\s+(?:discutir|vender|considerar)|discutir\s+(?:los\s+)?n[uú]meros|abert[oa]\s+(?:a|para)\s+(?:uma\s+)?(?:proposta|discutir)/i, "proposal_interest"],
 ];
 
 /**

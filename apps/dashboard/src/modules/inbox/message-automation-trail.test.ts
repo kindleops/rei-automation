@@ -71,3 +71,26 @@ describe('message automation trail', () => {
     expect(humanize('asks_offer')).toBe('Asks offer')
   })
 })
+
+describe('unclear intent shows why, never a percentage (owner P0 2026-10-09)', () => {
+  const unclear = (rules: string[] = [], secondary: string[] = []) => ({
+    ...real,
+    detected_intent: 'unclear',
+    classification_confidence: 0.64,
+    payload: { ...real.payload, metadata: { ...real.payload.metadata, confidence: 0.64, matched_rule_ids: rules, secondary_intents: secondary } },
+  })
+  it('a plain unclear reads "needs your read" with no 64%', () => {
+    const step = buildAutomationTrail(unclear())[0]
+    expect(step.key).toBe('intent')
+    expect(step.value).toBe('Unclear · needs your read')
+    expect(step.value).not.toMatch(/%/)
+  })
+  it('a policy hold names the hold', () => {
+    expect(buildAutomationTrail(unclear(['ctx_no_after_ownership_check']))[0].value).toMatch(/Bare "No" to the ownership question/)
+    expect(buildAutomationTrail(unclear(['seller_frustration_after_misread'], ['seller_frustration']))[0].value).toMatch(/Seller frustrated/)
+    expect(buildAutomationTrail(unclear(['repeat_no_contact_frustration']))[0].value).toMatch(/Repeat no-contact/)
+  })
+  it('a real intent keeps its confidence', () => {
+    expect(buildAutomationTrail(real)[0].value).toBe('Not interested · 92%')
+  })
+})

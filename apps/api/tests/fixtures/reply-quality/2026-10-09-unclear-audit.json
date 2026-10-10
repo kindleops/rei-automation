@@ -1,0 +1,5644 @@
+{
+ "generated_at": "2026-10-10T00:49:33.562Z",
+ "note": "Round 11 (owner P0 2026-10-09): every audited prod inbound the pre-round-11 classifier left unclear, hand-labelled. Redacted: names -> Pat, phones -> 555-010-0199, emails, street addresses -> 1 Main St, cities, ZIPs. known_miss = labelled intent the rules do not reach yet (documented, not asserted).",
+ "cases": [
+  {
+   "id": "ui-b97b45de",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-28T23:55:20.871Z",
+   "seller_message": "No and no",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200210",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Soy comprador local en Springfield. Sigues siendo el dueno de 100 Main St?",
+    "sent_at": "2026-04-28T23:54:04.687Z",
+    "delivered_at": "2026-04-30T11:32:42.705Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-13cd7687",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-25T12:02:35.360Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207697",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-05-25T12:02:05.020Z",
+    "delivered_at": "2026-05-25T12:02:08.062Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-aa84cc59",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-06-24T17:14:36.283Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207729",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-06-24T17:11:55.342Z",
+    "delivered_at": "2026-06-24T17:11:55.342Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-196adeac",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-07-06T20:19:00.505Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-200049",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-07-06T16:39:05.130Z",
+    "delivered_at": "2026-07-06T16:40:05.142Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7598fbff",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-07-10T21:49:45.390Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-200033",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Is 100 Main St yours?",
+    "sent_at": "2026-07-10T20:14:38.432Z",
+    "delivered_at": "2026-07-10T22:30:04.391Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b2cf9597",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-09-08T19:42:05.715Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St, Springfield, Fl 00000 yours?",
+    "sent_at": "2026-09-08T18:28:50.572Z",
+    "delivered_at": "2026-09-08T18:30:08.559Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c0a5474b",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-09-09T15:33:02.318Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St, Springfield, Fl 00000 yours?",
+    "sent_at": "2026-09-09T14:45:21.611Z",
+    "delivered_at": "2026-09-09T14:45:53.100Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c3daeb3f",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-09-28T19:36:02.872Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200049",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Just checking, do you own 100 Main St N?",
+    "sent_at": "2026-09-28T19:08:23.275Z",
+    "delivered_at": "2026-09-28T19:08:43.078Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9f44d317",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T13:45:20.635Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-10-05T13:07:33.203Z",
+    "delivered_at": "2026-10-05T13:07:42.289Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-546c13c1",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T15:45:24.284Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208497",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-10-05T15:41:46.841Z",
+    "delivered_at": "2026-10-05T15:42:03.744Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-31cf01b1",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T17:35:14.153Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200994",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. He estado invirtiendo en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-10-05T16:41:41.609Z",
+    "delivered_at": "2026-10-05T16:41:51.195Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c2474c8b",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T20:40:07.193Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200498",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. Sigues siendo el dueno de 100 Main St?",
+    "sent_at": "2026-10-05T19:58:27.475Z",
+    "delivered_at": "2026-10-05T19:58:50.142Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-1259f033",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T21:02:08.062Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200482",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. Todavia eres el dueno de 100 Main St?",
+    "sent_at": "2026-10-05T17:51:18.903Z",
+    "delivered_at": "2026-10-05T17:51:30.352Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-2ea0460e",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T00:20:08.097Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200146",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Pregunta rapida. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-10-05T21:08:30.497Z",
+    "delivered_at": "2026-10-05T21:08:52.140Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-aa87149b",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T13:06:08.146Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, my name is Pat. Came across 100 Main St, are you still the owner?",
+    "sent_at": "2026-10-06T00:33:24.442Z",
+    "delivered_at": "2026-10-06T00:34:06.288Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c7cc7f2a",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T17:00:04.829Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-10-06T16:59:22.171Z",
+    "delivered_at": "2026-10-06T17:02:22.832Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-8c1b80ab",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T17:55:12.555Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200098",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Pregunta rapida. Todavia eres el dueno de 100 Main St?",
+    "sent_at": "2026-10-06T16:17:21.873Z",
+    "delivered_at": "2026-10-06T16:17:37.731Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3ba3ce4c",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T17:55:51.539Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-06T17:54:21.810Z",
+    "delivered_at": "2026-10-06T17:54:30.391Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e4f5f3bc",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T18:58:21.087Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-06T18:31:23.008Z",
+    "delivered_at": "2026-10-06T18:31:44.325Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4c51e313",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T19:06:20.702Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-10-06T17:32:21.748Z",
+    "delivered_at": "2026-10-06T17:32:50.580Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-65b9edb7",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T19:29:36.859Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201010",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. He estado invirtiendo en Springfield. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-10-06T19:25:22.345Z",
+    "delivered_at": "2026-10-06T19:25:46.458Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d7aeb8d8",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T20:56:54.246Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-10-06T20:55:22.282Z",
+    "delivered_at": "2026-10-06T20:55:36.507Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a5e78c0f",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T22:14:05.532Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-10-06T21:43:22.785Z",
+    "delivered_at": "2026-10-06T21:43:40.152Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c8946687",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T22:23:22.325Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-06T22:13:21.766Z",
+    "delivered_at": "2026-10-06T22:13:44.029Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-dcc29702",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T22:35:22.372Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-10-06T22:32:21.623Z",
+    "delivered_at": "2026-10-06T22:32:53.654Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-89ce3c1b",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T23:15:19.936Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-10-06T23:14:22.098Z",
+    "delivered_at": "2026-10-06T23:14:44.009Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d06eb2f2",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T00:44:18.248Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200530",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-10-07T00:26:21.861Z",
+    "delivered_at": "2026-10-07T00:26:56.495Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3ea98df4",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T14:09:02.803Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-07T14:08:02.184Z",
+    "delivered_at": "2026-10-07T14:08:49.013Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-90d3cbce",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T14:16:28.867Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-10-07T14:11:06.566Z",
+    "delivered_at": "2026-10-07T14:13:05.285Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f8633af9",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T14:54:17.935Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208497",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-10-07T13:55:02.479Z",
+    "delivered_at": "2026-10-07T13:55:49.280Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c7f08dad",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T14:59:44.900Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-10-07T14:58:01.135Z",
+    "delivered_at": "2026-10-07T14:58:49.235Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-5f73d757",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T15:43:59.662Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, my name is Pat. Came across 100 Main St, are you still the owner?",
+    "sent_at": "2026-10-07T15:21:00.950Z",
+    "delivered_at": "2026-10-07T15:28:05.451Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-fa54c022",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T16:30:45.206Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St Pat?",
+    "sent_at": "2026-10-07T16:28:00.849Z",
+    "delivered_at": "2026-10-07T16:28:29.231Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-480908f7",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T16:54:57.378Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201586",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, Pat aqui. Compro propiedad en 00000. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-10-07T16:54:00.923Z",
+    "delivered_at": "2026-10-07T16:56:34.499Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-8fe76be9",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T17:57:20.785Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200017",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-07T16:49:00.920Z",
+    "delivered_at": "2026-10-07T16:49:09.435Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6983e556",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T18:19:56.573Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-10-07T18:19:01.023Z",
+    "delivered_at": "2026-10-07T18:20:02.905Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-810e08d5",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T18:38:43.241Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208497",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-10-07T17:22:02.550Z",
+    "delivered_at": "2026-10-07T17:22:21.093Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d2d5d491",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T19:21:06.799Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-10-07T19:20:02.052Z",
+    "delivered_at": "2026-10-07T19:28:30.024Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e510f4a0",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T19:31:47.408Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-07T19:31:00.968Z",
+    "delivered_at": "2026-10-07T19:31:26.584Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-8f7c9179",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T19:49:28.972Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-10-07T16:55:02.045Z",
+    "delivered_at": "2026-10-07T16:55:35.480Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7359df8d",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T21:23:11.673Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-10-07T21:18:00.795Z",
+    "delivered_at": "2026-10-07T21:19:09.852Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-fc56c873",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T22:03:30.252Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-07T16:38:01.096Z",
+    "delivered_at": "2026-10-07T16:55:01.471Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d9db6a02",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T22:03:44.405Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-07T16:38:01.096Z",
+    "delivered_at": "2026-10-07T16:55:01.471Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-07T22:03:30.252Z",
+     "text": "No",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c868c66f",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-08T00:24:13.437Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi DEOLIA, my name is Pat. Came across 100 Main St, are you still the owner?",
+    "sent_at": "2026-10-07T16:28:00.849Z",
+    "delivered_at": "2026-10-07T16:28:28.802Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-53699ffb",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-08T00:24:58.900Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204513",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Do you still own 100 Main St?",
+    "sent_at": "2026-10-07T23:18:01.077Z",
+    "delivered_at": "2026-10-07T23:18:09.327Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3b48ccec",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-08T01:29:40.937Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200017",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-07T21:18:00.795Z",
+    "delivered_at": "2026-10-07T21:18:57.356Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-2805e0a9",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-08T10:42:03.272Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, my name is Pat. Came across 100 Main St, are you still the owner?",
+    "sent_at": "2026-10-07T22:55:01.691Z",
+    "delivered_at": "2026-10-07T22:55:19.256Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3800d37c",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-08T12:41:46.447Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-10-06T16:55:23.948Z",
+    "delivered_at": "2026-10-06T16:55:38.150Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-0f25bd50",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-08T22:35:22.702Z",
+   "seller_message": "no",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-10-07T20:59:00.880Z",
+    "delivered_at": "2026-10-07T20:59:14.905Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-bbd4b1b3",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-09T13:06:57.757Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200033",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Is 100 Main St yours?",
+    "sent_at": "2026-10-08T23:27:07.554Z",
+    "delivered_at": "2026-10-08T23:27:26.580Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-14665ed9",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-09T13:37:43.156Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-09T13:12:16.524Z",
+    "delivered_at": "2026-10-09T13:12:30.880Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-fc36bc66",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-25T01:19:03.894Z",
+   "seller_message": "Noo",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207697",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-05-23T12:02:56.573Z",
+    "delivered_at": "2026-05-23T12:03:02.016Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d7db7f1a",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-06-16T22:52:17.680Z",
+   "seller_message": "Nooooooooooi",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-06-16T22:51:59.609Z",
+    "delivered_at": "2026-06-16T22:51:59.609Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ee6de46c",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-29T12:44:50.255Z",
+   "seller_message": "Nopde",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-214257",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, my name is Pat. I am looking for another duplex in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-04-29T00:25:04.359Z",
+    "delivered_at": "2026-04-29T00:30:52.972Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7827b704",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T19:47:13.232Z",
+   "seller_message": "El nopo",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200498",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. Sigues siendo el dueno de 100 Main St?",
+    "sent_at": "2026-10-07T19:30:02.344Z",
+    "delivered_at": "2026-10-07T19:33:04.668Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4545692e",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-06-17T17:53:41.689Z",
+   "seller_message": "No... not at all",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204561",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-06-17T17:51:07.504Z",
+    "delivered_at": "2026-06-17T17:51:07.504Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c4901640",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-28T00:22:10.260Z",
+   "seller_message": "Not really",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204561",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-04-28T00:13:34.017Z",
+    "delivered_at": "2026-04-28T00:16:27.841Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-5a4ea1c6",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-06-11T22:17:38.741Z",
+   "seller_message": "Not really",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204705",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I have been investing in Springfield. Do you still own 100 Main St?",
+    "sent_at": "2026-06-11T15:51:58.551Z",
+    "delivered_at": "2026-06-11T15:51:58.551Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6b817a6a",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-13T16:07:54.274Z",
+   "seller_message": "None",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-214321",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am looking for another triplex in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-05-13T12:04:23.318Z",
+    "delivered_at": "2026-05-13T12:04:24.664Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-fc282d4c",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T17:22:10.399Z",
+   "seller_message": "No. What city?",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-07T17:18:01.269Z",
+    "delivered_at": "2026-10-07T17:18:15.787Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9d2a212c",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-23T15:48:31.464Z",
+   "seller_message": "Không phải",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200133",
+    "template_use_case": "ownership_check",
+    "text": "Xin chao Nhat, toi la Minh. Hoi nhanh. 100 Main St co phai la cua ban khong?",
+    "sent_at": "2026-05-23T15:46:20.404Z",
+    "delivered_at": "2026-05-23T15:46:22.304Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-1bf61070",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-08-10T12:24:48.291Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-214273",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am looking for another duplex in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-08-07T00:03:55.012Z",
+    "delivered_at": "2026-08-07T00:04:47.253Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-fc9c4594",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T20:13:01.081Z",
+   "seller_message": "No",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200017",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-06T19:57:22.429Z",
+    "delivered_at": "2026-10-06T19:57:40.526Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ac4b6e77",
+   "family": "F01_bare_no_to_ownership_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T17:22:10.513Z",
+   "seller_message": "No. What city?",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-07T17:18:01.269Z",
+    "delivered_at": "2026-10-07T17:18:15.787Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-07T17:22:10.399Z",
+     "text": "No. What city?",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-fe0c373d",
+   "family": "F03_wrong_person_by_name",
+   "expected_intent": "wrong_number",
+   "known_miss": false,
+   "received_at": "2026-04-28T23:30:28.173Z",
+   "seller_message": "Sorry, not Pat.  Not a Ca resident",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204529",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-04-28T23:25:04.239Z",
+    "delivered_at": "2026-04-28T23:38:03.749Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-1e75bc76",
+   "family": "F03_wrong_person_by_name",
+   "expected_intent": "wrong_number",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:49:17.828Z",
+   "seller_message": "This isn't Pat's phase number.  It hasn't been Pat's number for 9 years",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-213857",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, Pat here. I am looking to acquire more units in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-04-28T23:17:04.549Z",
+    "delivered_at": "2026-04-30T11:13:47.300Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ff35dd72",
+   "family": "F03_wrong_person_by_name",
+   "expected_intent": "wrong_number",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:19:06.251Z",
+   "seller_message": "No Pat here",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-05-04T16:18:13.162Z",
+    "delivered_at": "2026-05-04T16:18:15.219Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9e59698b",
+   "family": "F03_wrong_person_by_name",
+   "expected_intent": "wrong_number",
+   "known_miss": false,
+   "received_at": "2026-05-22T12:54:42.866Z",
+   "seller_message": "Pat is not at this number.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204529",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-05-21T23:59:53.968Z",
+    "delivered_at": "2026-05-21T23:59:55.622Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-29071101",
+   "family": "F03_wrong_person_by_name",
+   "expected_intent": "wrong_number",
+   "known_miss": false,
+   "received_at": "2026-05-23T15:01:46.554Z",
+   "seller_message": "Not pat",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-05-23T15:01:22.265Z",
+    "delivered_at": "2026-05-23T15:01:24.429Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d471a8c8",
+   "family": "F03_wrong_person_by_name",
+   "expected_intent": "wrong_number",
+   "known_miss": false,
+   "received_at": "2026-06-16T17:52:17.610Z",
+   "seller_message": "this isn't pat",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204257",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I invest in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-06-16T17:51:53.696Z",
+    "delivered_at": "2026-06-16T17:51:53.696Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c2c3cfc8",
+   "family": "F03_wrong_person_by_name",
+   "expected_intent": "wrong_number",
+   "known_miss": true,
+   "received_at": "2026-06-17T12:33:12.607Z",
+   "seller_message": "Soy pat",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201458",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, Pat aqui. Soy comprador local en Springfield. Sigues siendo el dueno de 100 Main St?",
+    "sent_at": "2026-06-17T12:31:58.488Z",
+    "delivered_at": "2026-06-17T12:31:58.488Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-96ba6843",
+   "family": "F03_wrong_person_by_name",
+   "expected_intent": "wrong_number",
+   "known_miss": false,
+   "received_at": "2026-07-22T04:25:53.125Z",
+   "seller_message": "Yo no soy Pat tiene el número mal",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-200146",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Pregunta rapida. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-07-07T00:54:15.904Z",
+    "delivered_at": "2026-07-07T00:56:09.176Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-0668b73e",
+   "family": "F04_not_the_owner",
+   "expected_intent": "property_specific_non_owner",
+   "known_miss": false,
+   "received_at": "2026-04-28T23:52:10.263Z",
+   "seller_message": "I am Not",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207985",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I invest in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-04-28T23:26:04.320Z",
+    "delivered_at": "2026-04-28T23:36:31.152Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-44225d7a",
+   "family": "F04_not_the_owner",
+   "expected_intent": "property_specific_non_owner",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:27:50.852Z",
+   "seller_message": "No, I don't",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204561",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-04-29T00:26:04.218Z",
+    "delivered_at": "2026-04-30T11:48:41.511Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6632ad5e",
+   "family": "F04_not_the_owner",
+   "expected_intent": "property_specific_non_owner",
+   "known_miss": false,
+   "received_at": "2026-04-28T23:18:37.367Z",
+   "seller_message": "No. Havent lived there for 5 years",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-215107",
+    "template_use_case": "ownership_check",
+    "text": "Ola Pat, Pat aqui. Estou buscando adquirir mais unidades em Springfield. Voce ainda e o dono de 100 Main St?",
+    "sent_at": "2026-04-28T23:16:04.566Z",
+    "delivered_at": "2026-04-30T11:13:16.863Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7debf16d",
+   "family": "F04_not_the_owner",
+   "expected_intent": "property_specific_non_owner",
+   "known_miss": false,
+   "received_at": "2026-05-04T17:15:16.967Z",
+   "seller_message": "the owner is pat pat",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200001",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Do you still own 100 Main St W?",
+    "sent_at": "2026-05-04T16:20:25.476Z",
+    "delivered_at": "2026-05-04T16:20:30.042Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-04T16:50:38.924Z",
+     "text": "no i lived there shortly when he failed on his half of a lease owing me $1000s . he was teenage friend i thought who i had not seen in years. He gave me the hard luck story . Regardless he turned out to be a thief and a drug addict who ended up with the house after his mom died ands been leaving there with no lights for over a year since i moved out last feb. The back of the house has structural damage . The brick is about to slide off the back of house from constant flooding of the back yard.",
+     "intent": "tenant_respondent"
+    },
+    {
+     "created_at": "2026-05-04T17:01:41.711Z",
+     "text": "hes a con so he may be telling people i own the house for what ever reason . Its strange because u are not the first person who asked me did i own that property and no lights , homeowners , cable or anything was in my name so i find it suspect that twice now ive been asked did i still own it",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7e24dda4",
+   "family": "F04_not_the_owner",
+   "expected_intent": "property_specific_non_owner",
+   "known_miss": false,
+   "received_at": "2026-05-23T14:51:36.917Z",
+   "seller_message": "What are u talking bout I don't know u idk bout no 100 Main St..",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Hey Pat, this is Pat following up on 100 Main St Are you open to discussing numbers on it?",
+    "sent_at": "2026-05-23T14:45:08.952Z",
+    "delivered_at": "2026-05-23T14:45:10.985Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-2c11d49e",
+   "family": "F22_dont_know_reviewed_hold_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:23:58.584Z",
+   "seller_message": "I don’t know.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207713",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-05-04T16:23:33.109Z",
+    "delivered_at": "2026-05-04T16:23:34.839Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3229d7b9",
+   "family": "F22_dont_know_reviewed_hold_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T17:38:11.379Z",
+   "seller_message": "I have no idea",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St E. Is this the correct number for the owner?",
+    "sent_at": "2026-10-05T17:02:52.351Z",
+    "delivered_at": "2026-10-05T17:03:11.748Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9ce8d286",
+   "family": "F22_dont_know_reviewed_hold_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T19:15:41.140Z",
+   "seller_message": "No idea",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-07T18:55:01.800Z",
+    "delivered_at": "2026-10-07T18:55:33.552Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c5a81b54",
+   "family": "F05_referral_with_contact",
+   "expected_intent": "non_owner_referral",
+   "known_miss": false,
+   "received_at": "2026-05-04T17:47:32.846Z",
+   "seller_message": "I have retired. Contact my son Pat at 555-010-0199",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204561",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-05-04T16:24:26.537Z",
+    "delivered_at": "2026-05-04T16:24:27.508Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6fa61d10",
+   "family": "F05_referral_with_contact",
+   "expected_intent": "non_owner_referral",
+   "known_miss": false,
+   "received_at": "2026-10-05T15:22:14.675Z",
+   "seller_message": "Call 555-010-0199 and talk to Pat Pat.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-10-05T15:01:56.905Z",
+    "delivered_at": "2026-10-05T15:02:32.112Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-be96ff72",
+   "family": "F05_referral_with_contact",
+   "expected_intent": "non_owner_referral",
+   "known_miss": false,
+   "received_at": "2026-10-06T15:47:19.700Z",
+   "seller_message": "This is their son Pat, my dads number is 555-010-0199, my mom Pat's number is 555-010-0199. You should be able to reach both of them",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat T And Pat L Pat Joint Living Tr, my name is Pat. Came across 100 Main St S, are you still the owner?",
+    "sent_at": "2026-10-06T15:45:22.987Z",
+    "delivered_at": "2026-10-06T15:46:09.139Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e0f5347f",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:28:46.210Z",
+   "seller_message": "No. Nothing to sell.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-04-29T00:28:04.338Z",
+    "delivered_at": "2026-04-29T00:38:46.677Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b1cdce37",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:41:26.840Z",
+   "seller_message": "Generational wealth for my grand kids, so no",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-213873",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, my name is Pat. I am looking to acquire more units in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-04-29T00:11:04.416Z",
+    "delivered_at": "2026-04-29T00:19:23.440Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ea62a598",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-09-08T18:30:43.624Z",
+   "seller_message": "No nothing for sales",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St, Springfield, Fl 00000 yours?",
+    "sent_at": "2026-09-08T18:28:50.572Z",
+    "delivered_at": "2026-09-08T18:30:15.337Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7aa15611",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-10-09T23:40:09.153Z",
+   "seller_message": "No for sale , at the moment, thanks",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, my name is Pat. Came across 100 Main St, are you still the owner?",
+    "sent_at": "2026-10-09T13:52:16.102Z",
+    "delivered_at": "2026-10-09T13:52:34.199Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-417b91ee",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-04-28T02:31:03.441Z",
+   "seller_message": "Texting someone at 10:30pm with this kind of question is bad business practice, so I will not work with you, Pat.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204513",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Do you still own 100 Main St?",
+    "sent_at": "2026-04-28T02:28:36.473Z",
+    "delivered_at": "2026-04-28T02:28:45.082Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-85f20ff1",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-05-23T04:26:46.278Z",
+   "seller_message": "Puedes checar las propiedades  que estan de venta en el mercado. Sería una opción.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿Estaría abierto a una propuesta fuera del mercado sobre la propiedad?",
+    "sent_at": "2026-05-22T23:46:44.483Z",
+    "delivered_at": "2026-05-22T23:46:46.090Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-62bbd958",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-05-23T14:56:09.146Z",
+   "seller_message": "Play with somebody else ....",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Hey Pat, this is Pat following up on 100 Main St Are you open to discussing numbers on it?",
+    "sent_at": "2026-05-23T14:45:08.952Z",
+    "delivered_at": "2026-05-23T14:45:10.985Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-23T14:51:36.917Z",
+     "text": "What are u talking bout I don't know u idk bout no 100 Main St..",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c451484d",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-10-07T13:38:54.607Z",
+   "seller_message": "No olvídalo si así de rápido como contestas los mensajes haces tus negocios. No no quiero nada contigo.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿Tienes un precio de venta en mente?",
+    "sent_at": "2026-10-07T13:33:11.634Z",
+    "delivered_at": "2026-10-07T13:33:30.274Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-351ff95f",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-10-09T13:16:16.277Z",
+   "seller_message": "No because you want for nothing. Keep your money and buy yourself a pop popsicle",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-400065",
+    "template_use_case": "consider_selling",
+    "text": "Thanks for confirming. Would you consider a proposal for the property?",
+    "sent_at": "2026-10-09T13:14:16.109Z",
+    "delivered_at": "2026-10-09T13:14:33.412Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9cafa3bf",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-05-24T02:43:57.381Z",
+   "seller_message": "It's being sold on time",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200001",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Do you still own 100 Main St?",
+    "sent_at": "2026-05-23T15:47:17.347Z",
+    "delivered_at": "2026-05-23T15:47:19.263Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b20d687a",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-04-28T08:07:59.169Z",
+   "seller_message": "Already have an agent,  preparing it for surgery.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204545",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-04-27T23:38:53.812Z",
+    "delivered_at": "2026-04-27T23:41:07.297Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-97570fbb",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-10-06T18:39:50.211Z",
+   "seller_message": "Hello, actually this is the number for his son.  However, I can confirm that he doesn't have any plans to sell the property.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-06T18:11:21.815Z",
+    "delivered_at": "2026-10-06T18:11:43.925Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b19e6048",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": true,
+   "received_at": "2026-10-07T14:31:11.215Z",
+   "seller_message": "Of Course Not",
+   "prior_question": {
+    "message_type": "manual_scheduled_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "After reviewing the comps and taking the current market into consideration, I’d be at $70,000 cash and can close in 7 days. We’ll cover all closing costs and charge no fees. Let me know if that works for you, and I can get the purchase agreement over right away.",
+    "sent_at": "2026-10-07T13:15:02.541Z",
+    "delivered_at": "2026-10-07T13:15:18.711Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-cfa57a5f",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": true,
+   "received_at": "2026-07-07T23:00:20.717Z",
+   "seller_message": "Claro q no",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Gracias por la informacion. Revise la zona, las propiedades disponibles y las ventas recientes. En este momento el mercado en esa area esta bastante lento, por lo que representa un riesgo importante para nosotros. Ademas, el condado estima aproximadamente $70K en reparaciones, por lo que probablemente se trate de un proyecto de demolicion o reconstruccion.\n\nSi $40K le funciona, puedo preparar el contrato de inmediato y cerrar en aproximadamente siete dias. Nosotros cubrimos todos los costos de cierre y no hay ningun costo para usted.",
+    "sent_at": "2026-07-07T20:14:41.349Z",
+    "delivered_at": "2026-07-07T20:15:37.226Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b7fdc85b",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": true,
+   "received_at": "2026-10-06T06:19:08.952Z",
+   "seller_message": "No price it brings in a good amount of money a month",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-occ_seller_a",
+    "template_use_case": "seller_asking_price",
+    "text": "Got it. What price would you have in mind for the property?",
+    "sent_at": "2026-10-06T01:53:24.934Z",
+    "delivered_at": "2026-10-06T01:53:57.857Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-172bf4ff",
+   "family": "F06_plain_decline",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-05-23T15:30:06.187Z",
+   "seller_message": "No la vengo si es  que conpras",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200514",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-05-23T15:28:04.372Z",
+    "delivered_at": "2026-05-23T15:28:05.312Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-23T15:29:23.701Z",
+     "text": "Si",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-58de0f68",
+   "family": "F07_explicit_stop_missed",
+   "expected_intent": "opt_out",
+   "known_miss": false,
+   "received_at": "2026-10-09T12:42:13.126Z",
+   "seller_message": "YOU BETTER NOT CONTACT THIS NUMBER EVER AGAIN!!!",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200001",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Do you still own 100 Main St?",
+    "sent_at": "2026-10-09T12:40:18.471Z",
+    "delivered_at": "2026-10-09T12:41:07.434Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9ee74f20",
+   "family": "F07_explicit_stop_missed_legal",
+   "expected_intent": "opt_out",
+   "known_miss": false,
+   "received_at": "2026-10-09T14:09:10.633Z",
+   "seller_message": "Pat you must want to get sued!!!If you ask the same question again that's what going to happen!!!!",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200017",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-09T14:03:16.224Z",
+    "delivered_at": "2026-10-09T14:03:35.986Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-976376b5",
+   "family": "F07_seller_blocked_us",
+   "expected_intent": "opt_out",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:39:37.556Z",
+   "seller_message": "Blocked 🚫",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-05-04T16:37:57.184Z",
+    "delivered_at": "2026-05-04T16:37:58.603Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7b038035",
+   "family": "F07_seller_blocked_us",
+   "expected_intent": "opt_out",
+   "known_miss": false,
+   "received_at": "2026-05-25T18:51:48.634Z",
+   "seller_message": "I'm block",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "I can do $115K cash, close in 7 days, as-is — no repairs, no agent fees, no contingencies. Clean and certain close. Let me know if that works.",
+    "sent_at": "2026-05-25T18:50:36.663Z",
+    "delivered_at": "2026-05-25T18:50:36.663Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-25T18:51:25.274Z",
+     "text": "Thanks",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-05-25T18:51:37.956Z",
+     "text": "Don't call me more",
+     "intent": "opt_out"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-1a8384f1",
+   "family": "F09_ownership_yes_phrasing",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-04-27T22:48:15.738Z",
+   "seller_message": "Y",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-04-27T22:46:16.465Z",
+    "delivered_at": "2026-04-27T22:47:13.782Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6bfaeacc",
+   "family": "F09_ownership_yes_phrasing",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-04-28T02:37:53.071Z",
+   "seller_message": "Yes, it is",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-04-27T22:46:16.465Z",
+    "delivered_at": "2026-04-27T22:47:40.116Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e5e8c8dd",
+   "family": "F09_ownership_yes_phrasing",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-05-06T19:58:54.354Z",
+   "seller_message": "Yes, I do 👍",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204561",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-05-04T16:39:50.670Z",
+    "delivered_at": "2026-05-04T16:39:51.853Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4e200aff",
+   "family": "F08_yes_to_interest_question",
+   "expected_intent": "seller_interested",
+   "known_miss": true,
+   "received_at": "2026-05-22T23:03:51.078Z",
+   "seller_message": "Bet",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "yes",
+    "sent_at": "2026-05-01T12:02:02.173Z",
+    "delivered_at": "2026-05-01T12:02:08.658Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-02T11:54:11.081Z",
+     "text": "Hello",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-05-07T11:44:19.819Z",
+     "text": "Yes I own it",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-05-07T12:04:08.213Z",
+     "text": "Yes I own it",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-05-07T12:06:52.944Z",
+     "text": "Yes I own it",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-05-08T03:00:58.235Z",
+     "text": "Yes I own it",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-05-13T12:47:26.541Z",
+     "text": "Yes I own it",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-05-22T22:05:09.564Z",
+     "text": "Yeah",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-0fcffee9",
+   "family": "F08_yes_to_interest_question",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-09-10T12:53:44.622Z",
+   "seller_message": "Sure",
+   "prior_question": {
+    "message_type": "manual_scheduled_reply",
+    "template_id": "t-lc-reengage-",
+    "template_use_case": "reengagement",
+    "text": "Hey Pat, Pat here. Wanted to see if you'd be open to talking numbers on 100 Main St, Springfield, Ct 00000.",
+    "sent_at": "2026-09-10T12:00:20.484Z",
+    "delivered_at": "2026-09-10T12:01:10.553Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c0532ef7",
+   "family": "F08_yes_to_interest_question",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-09-11T14:08:31.555Z",
+   "seller_message": "I would.",
+   "prior_question": {
+    "message_type": "manual_scheduled_reply",
+    "template_id": "t-lc-reengage-",
+    "template_use_case": "reengagement",
+    "text": "Hi Pat, Pat here. Wanted to follow up regarding 100 Main St and see if you'd be open to discussing a number.",
+    "sent_at": "2026-09-11T14:07:20.628Z",
+    "delivered_at": "2026-09-11T14:07:51.452Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f02fc226",
+   "family": "F08_yes_to_interest_question",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-09-10T13:07:44.162Z",
+   "seller_message": "Hey Pat,  I would be happy to talk to you.",
+   "prior_question": {
+    "message_type": "manual_scheduled_reply",
+    "template_id": "t-lc-reengage-",
+    "template_use_case": "reengagement",
+    "text": "Hey Pat, Pat here. Wanted to see if you'd be open to talking numbers on 100 Main St, Springfield, Ri 00000.",
+    "sent_at": "2026-09-10T13:00:23.920Z",
+    "delivered_at": "2026-09-10T13:00:37.965Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a7d7cfbf",
+   "family": "F08_yes_to_interest_question",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:35:52.571Z",
+   "seller_message": "I'd entertain a good offer yes",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "Are you open to a proposal on the the property?",
+    "sent_at": "2026-05-04T16:35:15.303Z",
+    "delivered_at": "2026-05-04T16:35:19.143Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9d0e089e",
+   "family": "F08_yes_to_followup_permission",
+   "expected_intent": "need_time",
+   "known_miss": false,
+   "received_at": "2026-10-07T13:58:29.299Z",
+   "seller_message": "Sure",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-lc-future-nu",
+    "template_use_case": "future_nurture",
+    "text": "No problem at all. Is it alright if I check back down the road?",
+    "sent_at": "2026-10-07T13:54:01.102Z",
+    "delivered_at": "2026-10-07T13:54:14.158Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f1a5c7ec",
+   "family": "F09_ownership_yes_phrasing",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:26:00.581Z",
+   "seller_message": "Hi Pat, yes I am.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207697",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-05-04T16:24:28.879Z",
+    "delivered_at": "2026-05-04T16:24:29.569Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9395c99f",
+   "family": "F09_ownership_yes_phrasing",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-04-29T02:00:25.488Z",
+   "seller_message": "Hola Pat si 👍",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-04-28T23:30:04.270Z",
+    "delivered_at": "2026-04-28T23:38:58.514Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6517a380",
+   "family": "F09_ownership_yes_phrasing",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-07-06T01:23:49.873Z",
+   "seller_message": "This is. What can I do for you?",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat A Pat, hope all is well. This is Pat reaching out about 100 Main St N. Is this the correct number for the owner?",
+    "sent_at": "2026-07-06T01:08:04.472Z",
+    "delivered_at": "2026-07-06T01:10:08.284Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-1f6699b8",
+   "family": "F09_ownership_yes_phrasing",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-05-25T13:20:43.922Z",
+   "seller_message": "100% mine.\nNo lien.",
+   "prior_question": null,
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-25T12:02:44.008Z",
+     "text": "Hi Pat.\nIt is for sale.\nAre U a serious buyer?\n\nGive me an offer.",
+     "intent": "asks_offer"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-03ff6c20",
+   "family": "F09_ownership_yes_phrasing",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-07-10T19:40:15.063Z",
+   "seller_message": "I think so",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-200001",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Do you still own 100 Main St?",
+    "sent_at": "2026-07-10T17:50:59.703Z",
+    "delivered_at": "2026-07-10T17:52:04.202Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e2b89d74",
+   "family": "F09_tapback_on_ownership_question",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-04-28T01:19:52.903Z",
+   "seller_message": "​👍​ to “ Hey Pat, this is Pat. I am a local real estate investor in Springfield. Just checking, do you own 100 Main St? ”",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204561",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-04-28T00:21:08.527Z",
+    "delivered_at": "2026-04-28T00:23:49.884Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-51f41e4a",
+   "family": "F09_tapback_on_ownership_question",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-05-04T18:22:38.964Z",
+   "seller_message": "​👍​ to “ Hello Pat, this is Pat. I am looking for another duplex in Springfield. Are you still the owner of 100 Main St? ”",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-214241",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am looking for another duplex in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-05-04T16:23:43.734Z",
+    "delivered_at": "2026-05-04T16:23:44.837Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-04T16:24:37.602Z",
+     "text": "Dude you got the wrong number",
+     "intent": "wrong_number"
+    },
+    {
+     "created_at": "2026-05-04T16:25:17.773Z",
+     "text": "I don't own a duplexs",
+     "intent": "property_specific_non_owner"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-bbca45a1",
+   "family": "F09_tapback_on_ownership_question",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-05-25T01:19:16.484Z",
+   "seller_message": "​👍​ to “ Hello Pat, this is Pat. I am a local buyer in Springfield. Are you still the owner of 100 Main St? ”",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207697",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-05-23T12:02:56.573Z",
+    "delivered_at": "2026-05-23T12:03:02.016Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-25T01:19:03.894Z",
+     "text": "Noo",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d4873977",
+   "family": "F10_price_or_counter",
+   "expected_intent": "asking_price_provided",
+   "known_miss": false,
+   "received_at": "2026-10-06T01:52:07.670Z",
+   "seller_message": "I've been offered 175 but my goal is 200",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-400065",
+    "template_use_case": "consider_selling",
+    "text": "Thanks for confirming. Would you consider a proposal for the property?",
+    "sent_at": "2026-10-06T01:21:24.647Z",
+    "delivered_at": "2026-10-06T01:21:58.802Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f3637112",
+   "family": "F10_price_or_counter",
+   "expected_intent": "asking_price_provided",
+   "known_miss": false,
+   "received_at": "2026-10-06T23:41:52.356Z",
+   "seller_message": "235k is my bottom. 150k offer is offer for a crack head. Desperate crack head may take that deal",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Got it, thanks. After reviewing the comps and taking the current market into consideration, I’d be at $150,000 cash and can close in 7 days with the tenant in place. We’ll cover all closing costs and charge no fees.\n\nLet me know if that works for you, and I can get the purchase agreement over right away.",
+    "sent_at": "2026-10-06T23:39:52.099Z",
+    "delivered_at": "2026-10-06T23:40:06.143Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-46bddced",
+   "family": "F10_price_or_counter",
+   "expected_intent": "asking_price_provided",
+   "known_miss": false,
+   "received_at": "2026-06-17T20:01:15.962Z",
+   "seller_message": "Es el puro terreno ya tire la casa y quiero 150",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿Está abierta una propuesta sobre la propiedad?",
+    "sent_at": "2026-06-17T19:59:48.928Z",
+    "delivered_at": "2026-06-17T19:59:48.928Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-06-17T20:00:16.062Z",
+     "text": "No esta ala venta",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-06-17T20:00:24.436Z",
+     "text": "Pero esta si",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-06-17T20:00:35.263Z",
+     "text": "100 Main St",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-06-17T20:00:52.377Z",
+     "text": "Springfield tx 00000",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-15592e0e",
+   "family": "F10_price_or_counter",
+   "expected_intent": "asking_price_provided",
+   "known_miss": false,
+   "received_at": "2026-07-09T23:55:00.427Z",
+   "seller_message": "Claro q no. Si estoy. Pidiendo. 120.  Y me das 55. Claro q no.  Siempre. Es asi las cosas con. Investors yo entiendo. Pero no tengo nesesidad.  Solo. Quiero ven der   unas 5",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Entiendo. Gracias por la informacion. Si podemos cerrar en aproximadamente siete dias y nosotros cubrimos todos los costos de cierre, puedo ofrecer $55K. Si le funciona, preparo el contrato hoy mismo.",
+    "sent_at": "2026-07-09T21:33:12.319Z",
+    "delivered_at": "2026-07-09T21:34:08.384Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-21d4b9df",
+   "family": "F10_price_or_counter",
+   "expected_intent": "asking_price_provided",
+   "known_miss": false,
+   "received_at": "2026-10-07T18:18:00.111Z",
+   "seller_message": "Sales price $195",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, my name is Pat. Came across 100 Main St, are you still the owner?",
+    "sent_at": "2026-10-07T17:23:02.730Z",
+    "delivered_at": "2026-10-07T17:24:35.390Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-07T18:17:37.833Z",
+     "text": "Yes",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-58fb7510",
+   "family": "F10_price_or_counter",
+   "expected_intent": "asking_price_implausible",
+   "known_miss": false,
+   "received_at": "2026-06-05T20:28:35.768Z",
+   "seller_message": "It can be your$$$.. for 10 millions",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200033",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Is 100 Main St yours?",
+    "sent_at": "2026-06-05T20:21:55.306Z",
+    "delivered_at": "2026-06-05T20:21:55.306Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-5a9bc104",
+   "family": "F10_obo_or_what_price",
+   "expected_intent": "asks_offer",
+   "known_miss": false,
+   "received_at": "2026-05-01T12:02:57.931Z",
+   "seller_message": "OBO",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "Yeah do you have an asking price in mind?",
+    "sent_at": "2026-05-01T10:45:53.827Z",
+    "delivered_at": "2026-05-01T10:45:58.660Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-01T12:02:48.986Z",
+     "text": "425000",
+     "intent": "asking_price_provided"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-2f46d05d",
+   "family": "F10_obo_or_what_price",
+   "expected_intent": "asks_offer",
+   "known_miss": false,
+   "received_at": "2026-09-22T20:01:04.432Z",
+   "seller_message": "What kind of price are you offering?",
+   "prior_question": {
+    "message_type": "manual_scheduled_reply",
+    "template_id": "t-lc-reengage-",
+    "template_use_case": "reengagement",
+    "text": "Hey there, Pat here. Wanted to see if you'd be open to talking numbers on 100 Main St",
+    "sent_at": "2026-09-11T14:00:21.135Z",
+    "delivered_at": "2026-09-11T14:00:48.161Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a372ce2c",
+   "family": "F11_ready_to_proceed",
+   "expected_intent": "contract_requested",
+   "known_miss": false,
+   "received_at": "2026-09-27T18:58:22.025Z",
+   "seller_message": "Perfect, send it on over. I'll just need a few days to remove all the appliances and copper from the house.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "We’re good to move forward sight unseen based on the photos since we’re a nationwide company and handle acquisitions remotely all the time. Before I send the purchase agreement, I just need to confirm whether there’s currently another signed purchase agreement on the property, or if that contract has been terminated and released.",
+    "sent_at": "2026-09-27T03:14:23.588Z",
+    "delivered_at": "2026-09-27T03:14:29.996Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-075e3e67",
+   "family": "F11_ready_to_proceed",
+   "expected_intent": "contract_requested",
+   "known_miss": false,
+   "received_at": "2026-09-26T01:16:24.827Z",
+   "seller_message": "he will not be involved with this at all. we're good to go.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Perfect. Just to confirm, is the MLS listing agreement already cancelled/released, or will your agent still be involved in the sale?",
+    "sent_at": "2026-09-26T00:55:34.618Z",
+    "delivered_at": "2026-09-26T00:55:42.544Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d5327b04",
+   "family": "F11_email_for_agreement",
+   "expected_intent": "requests_email",
+   "known_miss": false,
+   "received_at": "2026-09-25T16:22:07.491Z",
+   "seller_message": "seller@example.com",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "I’m good to move forward at $315,000. I can send over the purchase agreement today and get everything moving toward closing. What’s your best email?",
+    "sent_at": "2026-09-25T16:21:15.423Z",
+    "delivered_at": "2026-09-25T16:21:23.238Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9d555482",
+   "family": "F11_seller_chasing_us",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-09-28T14:52:33.579Z",
+   "seller_message": "I'm following up about the contract.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "We’re good to move forward sight unseen based on the photos since we’re a nationwide company and handle acquisitions remotely all the time. Before I send the purchase agreement, I just need to confirm whether there’s currently another signed purchase agreement on the property, or if that contract has been terminated and released.",
+    "sent_at": "2026-09-27T03:14:23.588Z",
+    "delivered_at": "2026-09-27T03:14:29.996Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-09-27T18:58:22.025Z",
+     "text": "Perfect, send it on over. I'll just need a few days to remove all the appliances and copper from the house.",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-8a9c101a",
+   "family": "F11_seller_chasing_us",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-10-08T18:58:50.297Z",
+   "seller_message": "dude, you there?",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "We’re good to move forward sight unseen based on the photos since we’re a nationwide company and handle acquisitions remotely all the time. Before I send the purchase agreement, I just need to confirm whether there’s currently another signed purchase agreement on the property, or if that contract has been terminated and released.",
+    "sent_at": "2026-09-27T03:14:23.588Z",
+    "delivered_at": "2026-09-27T03:14:29.996Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-09-27T18:58:22.025Z",
+     "text": "Perfect, send it on over. I'll just need a few days to remove all the appliances and copper from the house.",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-09-28T14:52:33.579Z",
+     "text": "I'm following up about the contract.",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-10-01T00:46:33.476Z",
+     "text": "Send the contract on over. The copper is almost all removed.",
+     "intent": "contract_requested"
+    },
+    {
+     "created_at": "2026-10-07T20:57:11.775Z",
+     "text": "what's up with the contract?",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-55679dff",
+   "family": "F11_seller_chasing_us",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-05-27T18:35:57.868Z",
+   "seller_message": "You didn't respond to my prior text",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Hey Pat, this is Pat following up on 100 Main St Open to discussing numbers?",
+    "sent_at": "2026-05-27T18:30:37.257Z",
+    "delivered_at": "2026-05-27T18:30:37.257Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f9887aea",
+   "family": "F11_seller_chasing_us",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-10-06T23:08:41.592Z",
+   "seller_message": "Checking in the jv",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Yeah",
+    "sent_at": "2026-10-06T22:59:32.347Z",
+    "delivered_at": "2026-10-06T22:59:41.892Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9479b5c6",
+   "family": "F11_seller_chasing_us",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-05-29T17:40:08.696Z",
+   "seller_message": "Que dise pat,ya no contesto",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200514",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-05-27T13:01:26.654Z",
+    "delivered_at": "2026-05-27T13:01:26.654Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-27T13:15:04.681Z",
+     "text": "Si porque?",
+     "intent": "who_is_this"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e272b30f",
+   "family": "F11_invites_walkthrough",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-09-25T03:04:15.968Z",
+   "seller_message": "Do you want to tour the house? We can meet at it.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "I’d be at around $315K, close in 10 days.",
+    "sent_at": "2026-09-25T01:34:30.906Z",
+    "delivered_at": "2026-09-25T01:34:42.858Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c2a9763c",
+   "family": "F11_invites_walkthrough",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-09-27T01:44:56.918Z",
+   "seller_message": "You don't want to check out the house?",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "I’m seeing the property showing as “Under Contract - Continue to Show” / accepting backup offers. Before I send the purchase agreement, can you confirm whether there is currently another signed purchase agreement on the property? If there was, has that contract been fully terminated and released?",
+    "sent_at": "2026-09-27T00:48:21.821Z",
+    "delivered_at": "2026-09-27T00:48:29.927Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a9355c75",
+   "family": "F11_motivation_stated",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-10-01T12:58:03.291Z",
+   "seller_message": "Listen I know it needs love but I'm bout to turn 65 and I'm tired of worrying about things so big. I have invested a life 2x in this home. I raised my kids in it the first time and my grandkids this time. I know that means nothing to you and I don't expect it to, but I just want to continue to take care of my 83yr old today mom and find some peace. And a new family can enjoy the love I leave there.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Right, so $240K is the ARV, meaning that will be the price after it’s fully updated. I will likely need to put around $40K into it with a new roof, new windows, and a full cosmetic rehab throughout. $240K X .75 = $180K - $40K in repairs put me at $140K before taxes/closing costs… the numbers are very tight on this.",
+    "sent_at": "2026-10-01T12:47:09.031Z",
+    "delivered_at": "2026-10-01T12:47:26.340Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9d9f47be",
+   "family": "F11_open_door",
+   "expected_intent": "latent_interest",
+   "known_miss": false,
+   "received_at": "2026-10-01T12:58:32.028Z",
+   "seller_message": "I don't know maybe we can come to an agreement",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Right, so $240K is the ARV, meaning that will be the price after it’s fully updated. I will likely need to put around $40K into it with a new roof, new windows, and a full cosmetic rehab throughout. $240K X .75 = $180K - $40K in repairs put me at $140K before taxes/closing costs… the numbers are very tight on this.",
+    "sent_at": "2026-10-01T12:47:09.031Z",
+    "delivered_at": "2026-10-01T12:47:26.340Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-01T12:58:03.291Z",
+     "text": "Listen I know it needs love but I'm bout to turn 65 and I'm tired of worrying about things so big. I have invested a life 2x in this home. I raised my kids in it the first time and my grandkids this time. I know that means nothing to you and I don't expect it to, but I just want to continue to take care of my 83yr old today mom and find some peace. And a new family can enjoy the love I leave there.",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-89f8ccb8",
+   "family": "F11_open_door",
+   "expected_intent": "latent_interest",
+   "known_miss": false,
+   "received_at": "2026-05-23T00:21:16.185Z",
+   "seller_message": "Pero no m vas a venir con una oferta ridicula por Que no quiero estar perdiendo el tienpo",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Sí, definitivamente estaría interesado. ¿Cuál es la dirección?",
+    "sent_at": "2026-05-23T00:19:40.543Z",
+    "delivered_at": "2026-05-23T00:19:40.987Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-0aab26a1",
+   "family": "F11_open_door",
+   "expected_intent": "latent_interest",
+   "known_miss": false,
+   "received_at": "2026-09-30T17:29:56.115Z",
+   "seller_message": "If you don't dupe by the DCAD appraisal # and you are showing blanket or per square foot, my ear is open",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Would you be open to a proposal on it?",
+    "sent_at": "2026-09-30T17:22:01.429Z",
+    "delivered_at": "2026-09-30T17:22:09.999Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b01b6c35",
+   "family": "F12_has_property_for_sale",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-04-29T13:09:17.688Z",
+   "seller_message": "Tengo una para vender \n100 Main St \n5 bed 2 ba",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200226",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Soy comprador local en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-04-29T13:03:26.486Z",
+    "delivered_at": "2026-04-29T13:03:51.749Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-0d2a9a76",
+   "family": "F12_has_property_for_sale",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:44:59.472Z",
+   "seller_message": "Tengo otra propiedad de venta",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "¿Consideraría una propuesta por la propiedad?",
+    "sent_at": "2026-05-04T16:44:15.940Z",
+    "delivered_at": "2026-05-04T16:44:16.735Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-04T16:44:32.489Z",
+     "text": "No gracias",
+     "intent": "not_interested"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a0da0746",
+   "family": "F12_has_property_for_sale",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-05-23T00:16:43.217Z",
+   "seller_message": "Pero tengo una propiedad Que estoy vendiendo si t interesa con prar",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿Estaría abierto a una propuesta fuera del mercado sobre la propiedad?",
+    "sent_at": "2026-05-22T23:45:44.060Z",
+    "delivered_at": "2026-05-22T23:45:44.879Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-23T00:15:43.245Z",
+     "text": "No",
+     "intent": "not_interested"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-605eb4d4",
+   "family": "F12_has_property_for_sale",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-06-17T20:00:24.436Z",
+   "seller_message": "Pero esta si",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿Está abierta una propuesta sobre la propiedad?",
+    "sent_at": "2026-06-17T19:59:48.928Z",
+    "delivered_at": "2026-06-17T19:59:48.928Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-06-17T20:00:16.062Z",
+     "text": "No esta ala venta",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-aff414c2",
+   "family": "F12_has_property_for_sale",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-05-27T14:55:38.027Z",
+   "seller_message": "Selling. 1145 1/2.   1145.  2.  Home.     1.  Lots",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Do you have an asking price in mind?",
+    "sent_at": "2026-05-27T14:50:38.542Z",
+    "delivered_at": "2026-05-27T14:50:38.542Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-bd2d5db0",
+   "family": "F12_has_property_for_sale",
+   "expected_intent": "seller_interested",
+   "known_miss": true,
+   "received_at": "2026-04-29T00:00:21.878Z",
+   "seller_message": "100 Main St is for sale. Call Pat at 555-010-0199 and give her your bid.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-214305",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am looking for another triplex in Springfield. Do you still own 100 Main St?",
+    "sent_at": "2026-04-28T23:56:04.435Z",
+    "delivered_at": "2026-04-29T00:04:56.305Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-551211e1",
+   "family": "F12_address_only",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-06-17T20:00:35.263Z",
+   "seller_message": "100 Main St",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿Está abierta una propuesta sobre la propiedad?",
+    "sent_at": "2026-06-17T19:59:48.928Z",
+    "delivered_at": "2026-06-17T19:59:48.928Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-06-17T20:00:16.062Z",
+     "text": "No esta ala venta",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-06-17T20:00:24.436Z",
+     "text": "Pero esta si",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-57a98901",
+   "family": "F12_address_only",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-06-17T20:00:52.377Z",
+   "seller_message": "Springfield tx 00000",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿Está abierta una propuesta sobre la propiedad?",
+    "sent_at": "2026-06-17T19:59:48.928Z",
+    "delivered_at": "2026-06-17T19:59:48.928Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-06-17T20:00:16.062Z",
+     "text": "No esta ala venta",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-06-17T20:00:24.436Z",
+     "text": "Pero esta si",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-06-17T20:00:35.263Z",
+     "text": "100 Main St",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c6be6ba3",
+   "family": "F12_address_only",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:45:13.742Z",
+   "seller_message": "100 Main St RI 00000",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "¿Consideraría una propuesta por la propiedad?",
+    "sent_at": "2026-05-04T16:44:15.940Z",
+    "delivered_at": "2026-05-04T16:44:16.735Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-04T16:44:32.489Z",
+     "text": "No gracias",
+     "intent": "not_interested"
+    },
+    {
+     "created_at": "2026-05-04T16:44:59.472Z",
+     "text": "Tengo otra propiedad de venta",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a5404c7f",
+   "family": "F12_address_only",
+   "expected_intent": "seller_interested",
+   "known_miss": true,
+   "received_at": "2026-05-23T00:27:42.432Z",
+   "seller_message": "100 Main St, Springfield, TX 00000 esa es la direcion",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "No señor. Puedo hacerte una oferta justa y cerrar7 días.",
+    "sent_at": "2026-05-23T00:25:41.325Z",
+    "delivered_at": "2026-05-23T00:25:41.857Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4fd55e4c",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-04-27T22:07:40.115Z",
+   "seller_message": "Each side has two bedrooms one bathroom kitchen small shed. One side has a large yard. The other side has a small yard that's fenced.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "What is the total monthly rent?",
+    "sent_at": "2026-04-27T22:02:18.185Z",
+    "delivered_at": "2026-04-27T22:02:25.551Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-04-27T22:05:07.142Z",
+     "text": "$2000 1000 each side I keep it low because my tenants never leave and pay every month",
+     "intent": "tenant_respondent"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-409723ca",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-04-28T23:59:19.519Z",
+   "seller_message": "100 Main St N is. 4 bed, 3 bath single family",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-214273",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am looking for another duplex in Springfield. Just checking, do you own 100 Main St N?",
+    "sent_at": "2026-04-28T23:57:04.577Z",
+    "delivered_at": "2026-04-29T00:06:55.087Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-04-28T23:58:07.322Z",
+     "text": "Yes, how can I help!",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-04-28T23:58:08.536Z",
+     "text": "M",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-04-28T23:58:10.866Z",
+     "text": "?",
+     "intent": "reaction_only"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-444994ef",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-05-27T17:55:54.056Z",
+   "seller_message": "8 units and one house in the front.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Got it, I can run numbers on my end and get something over to you. Just to confirm, the property is 7 units, correct? How many are currently occupied?",
+    "sent_at": "2026-05-27T17:46:39.665Z",
+    "delivered_at": "2026-05-27T17:46:39.665Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-544109a6",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:23:25.270Z",
+   "seller_message": "Need help fixing",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-214305",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am looking for another triplex in Springfield. Do you still own 100 Main St?",
+    "sent_at": "2026-05-04T16:21:58.561Z",
+    "delivered_at": "2026-05-04T16:21:59.343Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-04T16:22:55.756Z",
+     "text": "Yes",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-fc47e623",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-10-01T12:42:19.929Z",
+   "seller_message": "In repairs",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Good morning. The county has the property accessed at around $193K with an estimated $64,500 in repair cost.",
+    "sent_at": "2026-10-01T12:38:18.255Z",
+    "delivered_at": "2026-10-01T12:38:24.776Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-01T12:41:03.185Z",
+     "text": "No $240,00 and maybe $30-$40,000",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3cbbc8de",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-10-08T12:03:14.196Z",
+   "seller_message": "Need little upgrade",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-local-templa",
+    "template_use_case": "condition_probe",
+    "text": "Thanks for the details on 100 Main St How would you describe the overall condition - move-in ready, needs some updating, or bigger repairs?",
+    "sent_at": "2026-10-08T12:01:42.874Z",
+    "delivered_at": "2026-10-08T12:02:08.681Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7245a5c2",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-09-10T11:59:12.185Z",
+   "seller_message": "$4100.00  per  Month. The property is zone Business - B1",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Thanks, what are the current monthly rents?",
+    "sent_at": "2026-09-10T02:28:58.073Z",
+    "delivered_at": "2026-09-10T02:29:06.110Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-718cbc5f",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-07-30T22:14:13.738Z",
+   "seller_message": "I also have pre approved plans from the city if you want to go a different route on developing that parcel.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Yeah, what’s your asking price?",
+    "sent_at": "2026-07-30T22:08:11.005Z",
+    "delivered_at": "2026-07-30T22:08:45.283Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-07-30T22:12:16.761Z",
+     "text": "For 100 Main St alone 130,000...however i have a newly renovated property next door (100 Main St) that i could through in as a package and make you a combo deal.",
+     "intent": "condition_disclosed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6f62a6ec",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-07-09T21:12:18.253Z",
+   "seller_message": "Pero tiene terreno.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿Cuál es el mejor precio que puedes hacer?",
+    "sent_at": "2026-07-09T17:55:00.771Z",
+    "delivered_at": "2026-07-09T18:04:08.141Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-07-09T21:12:04.374Z",
+     "text": "70 mil. Yo l hago. Nueba",
+     "intent": "asking_price_provided"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-1a8e91bf",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-05-30T02:14:45.875Z",
+   "seller_message": "Muy bien por la gracia de dios",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿En qué condiciones se encuentra la propiedad?",
+    "sent_at": "2026-05-30T02:05:19.580Z",
+    "delivered_at": "2026-05-30T02:05:19.580Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a7136506",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-10-07T15:00:39.097Z",
+   "seller_message": "It's so moving ready!! I usually put my properties on the market. And this one is ready to go",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-local-templa",
+    "template_use_case": "condition_probe",
+    "text": "Thanks for the details on 100 Main St How would you describe the overall condition - move-in ready, needs some updating, or bigger repairs?",
+    "sent_at": "2026-10-07T14:58:01.135Z",
+    "delivered_at": "2026-10-07T14:58:51.367Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-abb57d3c",
+   "family": "F13_property_fact",
+   "expected_intent": "condition_disclosed",
+   "known_miss": false,
+   "received_at": "2026-05-23T00:38:56.388Z",
+   "seller_message": "160 es el valance",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Entendido, ya veo ese. Dado que parece que puede haber un préstamo más nuevo, ¿sabe cuánto debe y qué precio desearía por la propiedad?",
+    "sent_at": "2026-05-23T00:33:42.525Z",
+    "delivered_at": "2026-05-23T00:33:44.818Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-23T00:38:39.931Z",
+     "text": "160",
+     "intent": "asking_price_provided"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ed62fbf3",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-04-27T23:40:11.117Z",
+   "seller_message": "What does deed say",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208497",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-04-27T23:37:07.426Z",
+    "delivered_at": "2026-04-27T23:39:12.135Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-dc99b8f6",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-04-28T01:35:27.325Z",
+   "seller_message": "Front Desk\n Who 🐝 the is🤔",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-04-28T01:25:36.354Z",
+    "delivered_at": "2026-04-28T01:27:23.332Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-454269af",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-04-28T01:55:24.468Z",
+   "seller_message": "Questioned “Hello Pat, this is Pat. I am a local buyer in Springfield. Do you still own 100 Main St W?”",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207681",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Do you still own 100 Main St W?",
+    "sent_at": "2026-04-27T23:33:19.165Z",
+    "delivered_at": "2026-04-27T23:35:15.736Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-749c24f3",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:19:25.766Z",
+   "seller_message": "Whatsat whit this adrress",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200033",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Is 100 Main St yours?",
+    "sent_at": "2026-04-29T00:14:04.504Z",
+    "delivered_at": "2026-04-29T00:14:27.510Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-04-29T00:18:05.009Z",
+     "text": "Qué es lo que buscas",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-38535af3",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:57:27.806Z",
+   "seller_message": "En que le puedo debit",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201010",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. He estado invirtiendo en Springfield. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-04-29T00:16:04.230Z",
+    "delivered_at": "2026-04-29T00:16:31.088Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-04-29T00:57:08.820Z",
+     "text": "Si",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e86d903d",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:57:31.857Z",
+   "seller_message": "Servir",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201010",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. He estado invirtiendo en Springfield. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-04-29T00:16:04.230Z",
+    "delivered_at": "2026-04-29T00:16:31.088Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-04-29T00:57:08.820Z",
+     "text": "Si",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-04-29T00:57:27.806Z",
+     "text": "En que le puedo debit",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-0af96aa4",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-04-29T06:36:36.483Z",
+   "seller_message": "You want to rent or buy",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201304",
+    "template_use_case": "ownership_check",
+    "text": "Marhaba Pat, Pat huna. Pat faqat, Pat tamlik 100 Main St?",
+    "sent_at": "2026-04-29T00:29:04.258Z",
+    "delivered_at": "2026-04-29T00:41:46.382Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-04-29T03:31:28.210Z",
+     "text": "Salaam, i dont understand.",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3a664d5d",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-05-05T22:13:59.819Z",
+   "seller_message": "Huh? 😐",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200818",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Soy inversionista local de bienes raices en Springfield. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-05-04T16:27:51.303Z",
+    "delivered_at": "2026-05-04T16:27:53.559Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-05T22:13:38.955Z",
+     "text": "🤔",
+     "intent": "reaction_only"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4091841a",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-04-27T23:54:45.087Z",
+   "seller_message": "I'm sorry, did you see it listed somewhere?",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "I am a local investor, would you be open to an as-is sale?",
+    "sent_at": "2026-04-27T23:48:18.413Z",
+    "delivered_at": "2026-04-27T23:48:32.058Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-291051e0",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:45:06.222Z",
+   "seller_message": "Le miro sign de venta??",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "¿Consideraría una propuesta por la propiedad?",
+    "sent_at": "2026-05-04T16:44:14.197Z",
+    "delivered_at": "2026-05-04T16:44:30.795Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c099fe62",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-05-27T18:38:33.995Z",
+   "seller_message": "Dudó sobre “Hola Pat, soy Pat siguiendo en 100 Main St ¿Está abierto a discutir números?”",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Hola Pat, soy Pat siguiendo en 100 Main St ¿Está abierto a discutir números?",
+    "sent_at": "2026-05-27T18:31:59.041Z",
+    "delivered_at": "2026-05-27T18:31:59.041Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-519d175a",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-05-27T19:51:46.745Z",
+   "seller_message": "What are you following up on ?",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Hey Pat, this is Pat following up on 100 Main St Open to discussing numbers?",
+    "sent_at": "2026-05-27T18:35:40.289Z",
+    "delivered_at": "2026-05-27T18:35:40.289Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-382713be",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-06-11T21:57:45.968Z",
+   "seller_message": "Can't talk now. What's up?",
+   "prior_question": null,
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-fb71c725",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-07-07T16:54:44.010Z",
+   "seller_message": "Came across it where?",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, my name is Pat. Came across 100 Main St S, are you still the owner?",
+    "sent_at": "2026-07-07T16:17:45.327Z",
+    "delivered_at": "2026-07-07T16:18:08.305Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-578f453f",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-09-11T15:09:50.387Z",
+   "seller_message": "Who's in this?",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Do you have an asking price in mind?",
+    "sent_at": "2026-09-11T15:09:15.949Z",
+    "delivered_at": "2026-09-11T15:09:20.810Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7d6ec8b3",
+   "family": "F21_yes_without_context_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-09-28T18:34:41.498Z",
+   "seller_message": "Yes is what's up?",
+   "prior_question": null,
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-afb839cd",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-10-02T22:34:38.579Z",
+   "seller_message": "What are you talking about",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Hi Pat, any update?",
+    "sent_at": "2026-10-02T19:02:57.912Z",
+    "delivered_at": "2026-10-02T19:03:04.725Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6627e1b2",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-10-08T05:39:52.108Z",
+   "seller_message": "What do you want leave a message",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-07T22:30:02.802Z",
+    "delivered_at": "2026-10-07T22:30:22.573Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f4bb16bc",
+   "family": "F14_identity_purpose",
+   "expected_intent": "who_is_this",
+   "known_miss": false,
+   "received_at": "2026-10-09T14:47:26.328Z",
+   "seller_message": "Pat who!!",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200001",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Do you still own 100 Main St?",
+    "sent_at": "2026-10-09T14:05:17.525Z",
+    "delivered_at": "2026-10-09T14:06:24.320Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-54239e85",
+   "family": "F14_buyer_logistics_question",
+   "expected_intent": "info_request",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:36:06.274Z",
+   "seller_message": "Cash or financed?",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "Are you open to a proposal on the the property?",
+    "sent_at": "2026-05-04T16:35:15.303Z",
+    "delivered_at": "2026-05-04T16:35:19.143Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-04T16:35:52.571Z",
+     "text": "I'd entertain a good offer yes",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7d3414e6",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-04-27T22:54:05.582Z",
+   "seller_message": "Quero chocha papi",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200114",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Pregunta rapida. Sigues siendo el dueno de 100 Main St?",
+    "sent_at": "2026-04-27T22:48:18.150Z",
+    "delivered_at": "2026-04-27T22:48:31.054Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-1166181f",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-04-27T23:41:08.810Z",
+   "seller_message": "Hey sexy you single",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204561",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-04-27T23:37:39.512Z",
+    "delivered_at": "2026-04-27T23:39:16.019Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-be102fbb",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:26:05.169Z",
+   "seller_message": "Lmtfa",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200049",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-04-29T00:25:04.359Z",
+    "delivered_at": "2026-04-30T11:48:07.103Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-32c1b736",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-05-14T19:51:32.191Z",
+   "seller_message": "border hopper",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200514",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-05-04T16:27:37.756Z",
+    "delivered_at": "2026-05-04T16:27:39.185Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-14T19:51:12.744Z",
+     "text": "me no speak enSpanish",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-05-14T19:51:23.297Z",
+     "text": "me speak English",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7b3a1653",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-05-14T19:51:12.744Z",
+   "seller_message": "me no speak enSpanish",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200514",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-05-04T16:27:37.756Z",
+    "delivered_at": "2026-05-04T16:27:39.185Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-51597039",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-10-07T20:21:37.192Z",
+   "seller_message": "Hay Pat, what's up bro? Haven't talked to you in forever. How's that rash you were dealing with?",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-10-07T20:18:00.850Z",
+    "delivered_at": "2026-10-07T20:18:27.860Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-5ddde262",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-10-07T20:24:32.191Z",
+   "seller_message": "Did the cream and \"exercises\" make that go away? Funny you should reach out, I actually have symptoms just like you did.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-10-07T20:18:00.850Z",
+    "delivered_at": "2026-10-07T20:18:27.860Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-07T20:21:37.192Z",
+     "text": "Hay Pat, what's up bro? Haven't talked to you in forever. How's that rash you were dealing with?",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b958208c",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-04-28T23:31:42.141Z",
+   "seller_message": "Yo vendo plantas, cactus y árboles",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201250",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, Pat aqui. Todavia eres el dueno de 100 Main St?",
+    "sent_at": "2026-04-28T23:30:04.270Z",
+    "delivered_at": "2026-04-28T23:30:53.648Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7e7b20d8",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": true,
+   "received_at": "2026-06-17T22:56:32.137Z",
+   "seller_message": "Yes, if my family and I can live with you.   And we will require maid service.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Hi Pat, this is Pat following up on 100 Main St Open to a proposal on the property?",
+    "sent_at": "2026-06-17T22:54:05.920Z",
+    "delivered_at": "2026-06-17T22:54:05.920Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-5a46d480",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-09-10T13:08:27.711Z",
+   "seller_message": "My stipulations are that my family and I move in with you.",
+   "prior_question": {
+    "message_type": "manual_scheduled_reply",
+    "template_id": "t-lc-reengage-",
+    "template_use_case": "reengagement",
+    "text": "Hey Pat, Pat here. Wanted to see if you'd be open to talking numbers on 100 Main St, Springfield, Ri 00000.",
+    "sent_at": "2026-09-10T13:00:23.920Z",
+    "delivered_at": "2026-09-10T13:00:37.965Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-09-10T13:07:44.162Z",
+     "text": "Hey Pat,  I would be happy to talk to you.",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-85d3751f",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-09-10T13:08:54.398Z",
+   "seller_message": "You provide maid service and free rent.",
+   "prior_question": {
+    "message_type": "manual_scheduled_reply",
+    "template_id": "t-lc-reengage-",
+    "template_use_case": "reengagement",
+    "text": "Hey Pat, Pat here. Wanted to see if you'd be open to talking numbers on 100 Main St, Springfield, Ri 00000.",
+    "sent_at": "2026-09-10T13:00:23.920Z",
+    "delivered_at": "2026-09-10T13:00:37.965Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-09-10T13:07:44.162Z",
+     "text": "Hey Pat,  I would be happy to talk to you.",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-09-10T13:08:27.711Z",
+     "text": "My stipulations are that my family and I move in with you.",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-810dd731",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-05-21T23:57:28.111Z",
+   "seller_message": "Que bueno felicidades!!",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200514",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-05-21T23:56:53.302Z",
+    "delivered_at": "2026-05-21T23:56:55.229Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e853aab1",
+   "family": "F16_nosy_deflection",
+   "expected_intent": "hostile_or_legal",
+   "known_miss": false,
+   "received_at": "2026-04-28T23:58:38.245Z",
+   "seller_message": "Que es tu problema",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200018",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Sigues siendo el dueno de 100 Main St?",
+    "sent_at": "2026-04-28T23:57:04.577Z",
+    "delivered_at": "2026-04-28T23:57:43.793Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-65e6a401",
+   "family": "F16_nosy_deflection",
+   "expected_intent": "hostile_or_legal",
+   "known_miss": false,
+   "received_at": "2026-08-17T21:00:25.709Z",
+   "seller_message": "My business",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207729",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-08-17T20:56:36.589Z",
+    "delivered_at": "2026-08-17T20:56:49.933Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-cedc6f56",
+   "family": "F16_nosy_deflection",
+   "expected_intent": "hostile_or_legal",
+   "known_miss": false,
+   "received_at": "2026-10-07T15:11:46.917Z",
+   "seller_message": "Why do you  care",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200017",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-07T15:07:00.979Z",
+    "delivered_at": "2026-10-07T15:07:24.643Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4ad5c3ec",
+   "family": "F16_nosy_deflection",
+   "expected_intent": "hostile_or_legal",
+   "known_miss": false,
+   "received_at": "2026-10-09T12:33:01.036Z",
+   "seller_message": "What does it matter who owns the house.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200033",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Is 100 Main St yours?",
+    "sent_at": "2026-10-09T12:22:16.067Z",
+    "delivered_at": "2026-10-09T12:22:36.022Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c699623b",
+   "family": "F16_nosy_deflection",
+   "expected_intent": "hostile_or_legal",
+   "known_miss": false,
+   "received_at": "2026-10-09T12:49:29.731Z",
+   "seller_message": "Mind some others business",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-09T12:48:16.171Z",
+    "delivered_at": "2026-10-09T12:48:28.908Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-dc1d6bc9",
+   "family": "F16_nosy_deflection",
+   "expected_intent": "hostile_or_legal",
+   "known_miss": false,
+   "received_at": "2026-10-09T15:25:05.671Z",
+   "seller_message": "What is that to you ?",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-10-09T13:41:58.615Z",
+    "delivered_at": "2026-10-09T13:42:48.484Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-115c30b0",
+   "family": "F16_nosy_deflection",
+   "expected_intent": "hostile_or_legal",
+   "known_miss": false,
+   "received_at": "2026-05-25T19:55:06.187Z",
+   "seller_message": "Do u own urs",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204561",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-05-23T15:33:12.075Z",
+    "delivered_at": "2026-05-23T15:33:13.707Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-25T19:52:56.011Z",
+     "text": "Why",
+     "intent": "who_is_this"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-acbd9d5b",
+   "family": "F16_nosy_deflection",
+   "expected_intent": "hostile_or_legal",
+   "known_miss": false,
+   "received_at": "2026-05-30T12:18:01.474Z",
+   "seller_message": "Pense q si estas comprando algo tendrias q Saber hermano.",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "¿Hay una casa ahí o es solo terreno?",
+    "sent_at": "2026-05-29T22:49:01.349Z",
+    "delivered_at": "2026-05-29T22:49:01.349Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-dbc1ed21",
+   "family": "F16_nosy_deflection",
+   "expected_intent": "hostile_or_legal",
+   "known_miss": false,
+   "received_at": "2026-07-10T18:25:40.542Z",
+   "seller_message": "Sorry, I don't reveal this type of information.",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-200049",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-07-10T18:18:14.873Z",
+    "delivered_at": "2026-07-10T18:20:04.301Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6beabb29",
+   "family": "F22_reviewed_round9_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T19:26:34.383Z",
+   "seller_message": "Put address in zillow",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-local-templa",
+    "template_use_case": "occupancy_probe",
+    "text": "Is 100 Main St currently vacant, owner-occupied, or rented out?",
+    "sent_at": "2026-10-07T18:38:00.925Z",
+    "delivered_at": "2026-10-07T18:38:25.529Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-07T19:26:19.005Z",
+     "text": "Rented",
+     "intent": "tenant_occupied"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-70149381",
+   "family": "F17_vendor_or_peer_pitch",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-04-28T23:58:54.741Z",
+   "seller_message": "Hola si necesitas un prestamista aqui estoy para ayudarte con prestamos de FHA y nonQM.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200194",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Soy comprador local en Springfield. Todavia eres el dueno de 100 Main St?",
+    "sent_at": "2026-04-28T23:57:04.577Z",
+    "delivered_at": "2026-04-30T11:34:32.460Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d553dc2b",
+   "family": "F17_vendor_or_peer_pitch",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-05-23T17:09:33.781Z",
+   "seller_message": "Hi Pat, i buying and selling just like you.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207969",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I invest in Springfield. Do you still own 100 Main St?",
+    "sent_at": "2026-05-23T15:35:22.738Z",
+    "delivered_at": "2026-05-23T15:35:24.142Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-8086bb53",
+   "family": "F17_vendor_or_peer_pitch",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:30:04.199Z",
+   "seller_message": "Do you have a lender?",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-214257",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, my name is Pat. I am looking for another duplex in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-05-04T16:23:30.556Z",
+    "delivered_at": "2026-05-04T16:25:32.574Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-04T16:23:44.355Z",
+     "text": "It is mine",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-05-04T16:23:50.214Z",
+     "text": "Not selling though",
+     "intent": "not_interested"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e27a6b29",
+   "family": "F18_need_time",
+   "expected_intent": "need_time",
+   "known_miss": false,
+   "received_at": "2026-10-01T16:20:55.217Z",
+   "seller_message": "? Let me think. I'm at work right now. Off 3p",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "I completely understand, Pat, and I appreciate you sharing that with me. I know the home carries a lot of memories and meaning for you, and I’m not trying to take away from that at all.\n\nI do have to make the numbers work as an investment, but I’d genuinely like to see if we can find something that works for both of us. If I’m covering the closing costs, buying it completely as-is, and closing quickly, what’s the lowest number you’d feel comfortable accepting?",
+    "sent_at": "2026-10-01T16:10:24.164Z",
+    "delivered_at": "2026-10-01T16:10:32.386Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-6bf1c678",
+   "family": "F18_need_time",
+   "expected_intent": "need_time",
+   "known_miss": false,
+   "received_at": "2026-05-28T19:53:51.941Z",
+   "seller_message": "7k x 12months/ no sale\nTill jan 1 , cap gains 2 much ,",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Mark, this is Pat following up on 100 Main St Open to discussing numbers?",
+    "sent_at": "2026-05-28T19:45:56.940Z",
+    "delivered_at": "2026-05-28T19:45:56.940Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-28T19:52:29.961Z",
+     "text": "750,000. Paid off no mrtg\n7 k income mix of long term tenants",
+     "intent": "tenant_respondent"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-55d68dfe",
+   "family": "F19_sold_gone",
+   "expected_intent": "sold_property",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:13:44.739Z",
+   "seller_message": "House gone",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204545",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-04-29T00:02:04.488Z",
+    "delivered_at": "2026-04-30T11:37:18.548Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ddde39da",
+   "family": "F15_troll_mockery",
+   "expected_intent": "hostile_or_troll",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:44:14.753Z",
+   "seller_message": "Gfy",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208497",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Just checking, do you own 100 Main St?",
+    "sent_at": "2026-05-04T16:42:51.397Z",
+    "delivered_at": "2026-05-04T16:42:53.842Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7ad92765",
+   "family": "F06_listed_on_market",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:45:31.740Z",
+   "seller_message": "Esta publicada en el mercado",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "inbox_manual_send_now",
+    "text": "¿Consideraría una propuesta por la propiedad?",
+    "sent_at": "2026-05-04T16:44:15.940Z",
+    "delivered_at": "2026-05-04T16:44:16.735Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-04T16:44:32.489Z",
+     "text": "No gracias",
+     "intent": "not_interested"
+    },
+    {
+     "created_at": "2026-05-04T16:44:59.472Z",
+     "text": "Tengo otra propiedad de venta",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-05-04T16:45:13.742Z",
+     "text": "100 Main St RI 00000",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-21f5b12b",
+   "family": "F06_listed_on_market",
+   "expected_intent": "not_interested",
+   "known_miss": false,
+   "received_at": "2026-05-23T12:02:44.282Z",
+   "seller_message": "MLS listing",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200033",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Is 100 Main St yours?",
+    "sent_at": "2026-05-23T12:02:27.387Z",
+    "delivered_at": "2026-05-23T12:02:28.087Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-59fccb51",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-28T00:45:34.734Z",
+   "seller_message": "I have availability in July to a room.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200805",
+    "template_use_case": "ownership_check",
+    "text": "Xin chao Cuong, toi la Minh. Toi la nha dau tu bat dong san dia phuong o Austin. 100 Main St co phai la cua ban khong?",
+    "sent_at": "2026-04-28T00:21:08.527Z",
+    "delivered_at": "2026-04-28T00:22:09.909Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-cac3dabd",
+   "family": "F12_has_property_for_sale",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-05-23T15:30:12.496Z",
+   "seller_message": "Vendo",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200514",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-05-23T15:28:04.372Z",
+    "delivered_at": "2026-05-23T15:28:05.312Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-23T15:29:23.701Z",
+     "text": "Si",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-05-23T15:30:06.187Z",
+     "text": "No la vengo si es  que conpras",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b3ea4fdc",
+   "family": "F19_auto_responder",
+   "expected_intent": "reaction_only",
+   "known_miss": false,
+   "received_at": "2026-08-26T15:47:33.892Z",
+   "seller_message": "ACE Pat here. 👋 Sorry, we missed your call! 📞 We are currently assisting other travelers. If this is urgent, please text us back at this number. Otherwise, you can get 24/7 instant support for many general questions from Ask ACE, our virtual assistant, at: https://example.com/listing 🌴",
+   "prior_question": null,
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-1facf10b",
+   "family": "F19_language_statement",
+   "expected_intent": "language_switch",
+   "known_miss": false,
+   "received_at": "2026-05-14T19:51:23.297Z",
+   "seller_message": "me speak English",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200514",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Invierto en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-05-04T16:27:37.756Z",
+    "delivered_at": "2026-05-04T16:27:39.185Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-14T19:51:12.744Z",
+     "text": "me no speak enSpanish",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4fed683d",
+   "family": "F20_deceased_owner_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-28T00:18:23.574Z",
+   "seller_message": "He died.",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207681",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Do you still own 100 Main St?",
+    "sent_at": "2026-04-28T00:13:34.017Z",
+    "delivered_at": "2026-04-28T00:16:33.086Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-8d8e37aa",
+   "family": "F21_frustration_or_repeat_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T22:05:57.940Z",
+   "seller_message": "Did you read my text?",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-400065",
+    "template_use_case": "consider_selling",
+    "text": "Thanks for confirming. Would you consider a proposal for the property?",
+    "sent_at": "2026-10-06T22:04:41.162Z",
+    "delivered_at": "2026-10-06T22:05:24.950Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-dba007bb",
+   "family": "F21_frustration_or_repeat_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-09T14:25:52.769Z",
+   "seller_message": "I said no!!!!!!",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-400065",
+    "template_use_case": "consider_selling",
+    "text": "Thanks for confirming. Would you consider a proposal for the property?",
+    "sent_at": "2026-10-09T14:24:16.180Z",
+    "delivered_at": "2026-10-09T14:24:50.107Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ccf1e21d",
+   "family": "F21_frustration_or_repeat_unclear_policy_hold",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T18:04:31.979Z",
+   "seller_message": "You always text me I told you the price guess what wait and see when they approve 285 around the area at that time will be downtown Springfield",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-10-07T17:28:00.890Z",
+    "delivered_at": "2026-10-07T17:28:26.576Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3e489767",
+   "family": "F08_yes_to_interest_question",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-05-27T18:35:41.031Z",
+   "seller_message": "Sure",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Hey Pat, this is Pat following up on 100 Main St Open to discussing numbers?",
+    "sent_at": "2026-05-27T18:33:22.580Z",
+    "delivered_at": "2026-05-27T18:33:22.580Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4532c2c5",
+   "family": "F08_yes_to_interest_question",
+   "expected_intent": "seller_interested",
+   "known_miss": false,
+   "received_at": "2026-06-17T23:44:14.997Z",
+   "seller_message": "Of course",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Open to a proposal on the property?",
+    "sent_at": "2026-06-17T20:00:47.060Z",
+    "delivered_at": "2026-06-17T20:00:47.060Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-646223bd",
+   "family": "F09_ownership_yes_phrasing",
+   "expected_intent": "ownership_confirmed",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:31:56.001Z",
+   "seller_message": "I am",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204529",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am a local real estate investor in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-05-04T16:28:26.874Z",
+    "delivered_at": "2026-05-04T16:28:29.586Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-0731b2e1",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-28T12:27:39.995Z",
+   "seller_message": "1.5",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-213857",
+    "template_use_case": "ownership_check",
+    "text": "Hey , Pat here. I am looking to acquire more units in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-04-28T06:06:36.287Z",
+    "delivered_at": "2026-04-28T06:06:59.217Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-918271bf",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-28T23:59:21.899Z",
+   "seller_message": "",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200194",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Soy comprador local en Springfield. Todavia eres el dueno de 100 Main St?",
+    "sent_at": "2026-04-28T23:57:04.577Z",
+    "delivered_at": "2026-04-30T11:34:32.460Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-04-28T23:58:54.741Z",
+     "text": "Hola si necesitas un prestamista aqui estoy para ayudarte con prestamos de FHA y nonQM.",
+     "intent": "opt_out"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ecab2ad7",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:18:10.725Z",
+   "seller_message": "",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201362",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, Pat aqui. Pregunta rapida. Sigues siendo el dueno de 100 Main St?",
+    "sent_at": "2026-04-29T00:01:04.407Z",
+    "delivered_at": "2026-04-29T00:13:14.003Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7c36d29c",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-29T00:17:41.353Z",
+   "seller_message": "To investors",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-213841",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I am looking to acquire more units in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-04-29T00:08:04.099Z",
+    "delivered_at": "2026-04-29T00:17:36.776Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-04-29T00:16:59.647Z",
+     "text": "Yes",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-04-29T00:17:14.595Z",
+     "text": "Not selling",
+     "intent": "not_interested"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-997da0bd",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-04-30T05:37:56.896Z",
+   "seller_message": "Pero",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200098",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Pregunta rapida. Todavia eres el dueno de 100 Main St?",
+    "sent_at": "2026-04-30T03:43:26.459Z",
+    "delivered_at": "2026-04-30T03:43:39.402Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-04-30T05:37:48.475Z",
+     "text": "Si peroxide no estoy interesado do vender mi casa",
+     "intent": "not_interested"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-556f5b2b",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-04T16:27:46.780Z",
+   "seller_message": "Esto",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200050",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-05-04T16:26:45.624Z",
+    "delivered_at": "2026-05-04T16:26:46.305Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-04T16:27:40.929Z",
+     "text": "Aque biene pesto?",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-04069f09",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-05T11:27:58.741Z",
+   "seller_message": "🪭📦📧",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-207697",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I am a local buyer in Springfield. Are you still the owner of 100 Main St?",
+    "sent_at": "2026-05-04T16:36:05.952Z",
+    "delivered_at": "2026-05-04T16:36:34.095Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ad2d184c",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-05T22:13:38.955Z",
+   "seller_message": "🤔",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200818",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Soy inversionista local de bienes raices en Springfield. Solo confirmando, eres dueno de 100 Main St?",
+    "sent_at": "2026-05-04T16:27:51.303Z",
+    "delivered_at": "2026-05-04T16:27:53.559Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-c8ea02f7",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-19T14:18:09.166Z",
+   "seller_message": "​😂​ to “ Hey Pat, this is Pat. 🙂 Is 100 Main St yours? ”",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St yours?",
+    "sent_at": "2026-05-19T14:02:08.037Z",
+    "delivered_at": "2026-05-19T14:02:08.972Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e4b0d12d",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-25T18:34:44.773Z",
+   "seller_message": "Your have too see",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "What condition is the property in?",
+    "sent_at": "2026-05-25T18:33:27.985Z",
+    "delivered_at": "2026-05-25T18:33:27.985Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-5636764d",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-25T18:35:49.956Z",
+   "seller_message": "That is you business",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "What condition is the property in?",
+    "sent_at": "2026-05-25T18:33:27.985Z",
+    "delivered_at": "2026-05-25T18:33:27.985Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-25T18:34:44.773Z",
+     "text": "Your have too see",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-7c3f98e9",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-23T16:05:14.166Z",
+   "seller_message": "Sory",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201442",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, Pat aqui. Soy comprador local en Springfield. Todavia eres el dueno de 100 Main St?",
+    "sent_at": "2026-05-23T15:46:10.723Z",
+    "delivered_at": "2026-05-23T15:46:12.144Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-23T16:04:40.987Z",
+     "text": "Si pero no sebende",
+     "intent": "ownership_confirmed"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4af8cffc",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-23T18:27:05.869Z",
+   "seller_message": "Don't worry about it.",
+   "prior_question": null,
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b97ca17c",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-23T18:28:02.045Z",
+   "seller_message": "",
+   "prior_question": null,
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-23T18:27:05.869Z",
+     "text": "Don't worry about it.",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e986795f",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-05-25T02:37:15.777Z",
+   "seller_message": "",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200786",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Soy inversionista local de bienes raices en Springfield. Sigues siendo el dueno de 100 Main St?",
+    "sent_at": "2026-05-25T02:30:06.774Z",
+    "delivered_at": "2026-05-25T02:30:07.660Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-05-25T02:36:59.916Z",
+     "text": "No mames",
+     "intent": "hostile_or_legal"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e9537e6a",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-06-01T16:44:52.652Z",
+   "seller_message": "Under cam bv",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200033",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Is 100 Main St yours?",
+    "sent_at": "2026-06-01T16:41:06.589Z",
+    "delivered_at": "2026-06-01T16:41:06.589Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d01fffd7",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-06-08T20:52:55.981Z",
+   "seller_message": "",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-204257",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. I invest in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-06-08T16:12:10.337Z",
+    "delivered_at": "2026-06-08T16:12:10.337Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-15666e1b",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-06-10T14:08:19.776Z",
+   "seller_message": "Trust fund",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, my name is Pat. Came across 100 Main St, are you still the owner?",
+    "sent_at": "2026-06-10T03:31:51.509Z",
+    "delivered_at": "2026-06-10T03:31:51.509Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a20222eb",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T14:01:08.163Z",
+   "seller_message": "Vues",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201266",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, Pat aqui. Sigues siendo el dueno de 100 Main St?",
+    "sent_at": "2026-10-05T13:38:37.514Z",
+    "delivered_at": "2026-10-05T13:38:58.718Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-05T14:00:53.640Z",
+     "text": "Removed ‌👍‌ from “ Hola Pat, Pat aqui. Sigues siendo el dueno de 100 Main St? ”",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-10-05T14:00:58.668Z",
+     "text": "​👍​ to “ Hola Pat, Pat aqui. Sigues siendo el dueno de 100 Main St? ”",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f8b53ae1",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T15:17:15.336Z",
+   "seller_message": "",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-208481",
+    "template_use_case": "ownership_check",
+    "text": "Hello Pat, this is Pat. I have been investing in Springfield. Is 100 Main St yours?",
+    "sent_at": "2026-10-05T15:01:56.905Z",
+    "delivered_at": "2026-10-05T15:02:28.867Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-4135ebb2",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T15:40:46.233Z",
+   "seller_message": "​👍​ to “ Yes ”",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Do you have any asking price in mind?",
+    "sent_at": "2026-10-05T14:23:17.272Z",
+    "delivered_at": "2026-10-05T14:23:33.645Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-509315e4",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T15:58:25.923Z",
+   "seller_message": "https://example.com/listing",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201474",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, Pat aqui. Soy comprador local en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-10-05T15:14:32.333Z",
+    "delivered_at": "2026-10-05T15:14:59.564Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f62b26eb",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T15:58:42.617Z",
+   "seller_message": "Busca allí güey allí ay Deamadre",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201474",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, Pat aqui. Soy comprador local en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-10-05T15:14:32.333Z",
+    "delivered_at": "2026-10-05T15:14:59.564Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-05T15:58:25.923Z",
+     "text": "https://example.com/listing",
+     "intent": "asking_price_provided"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-445a602f",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-05T21:18:36.843Z",
+   "seller_message": "Ñ",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-201378",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, Pat aqui. Pregunta rapida. 100 Main St es tu propiedad?",
+    "sent_at": "2026-10-05T21:16:09.561Z",
+    "delivered_at": "2026-10-05T21:16:27.457Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a5a93205",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T13:05:09.000Z",
+   "seller_message": "What happened?",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-06T13:04:21.940Z",
+    "delivered_at": "2026-10-06T13:04:44.888Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e4853862",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T13:05:15.811Z",
+   "seller_message": "Another murder ?",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-06T13:04:21.940Z",
+    "delivered_at": "2026-10-06T13:04:44.888Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-06T13:05:09.000Z",
+     "text": "What happened?",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e83700db",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T13:05:29.017Z",
+   "seller_message": "I'm in Springfield , Pat",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-06T13:04:21.940Z",
+    "delivered_at": "2026-10-06T13:04:44.888Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-06T13:05:09.000Z",
+     "text": "What happened?",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-10-06T13:05:15.811Z",
+     "text": "Another murder ?",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3856e3c0",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T14:20:31.651Z",
+   "seller_message": "https://example.com/listing",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211409",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Are you still the owner of 100 Main St?",
+    "sent_at": "2026-10-06T14:06:21.792Z",
+    "delivered_at": "2026-10-06T14:06:50.380Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b9decd96",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T16:12:19.682Z",
+   "seller_message": "Sorry that I wouldn't know. I'm just with the investor and we just find buyers.",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-lc-ask-condi",
+    "template_use_case": "ask_condition_clarifier",
+    "text": "Thanks, could you tell me a little more about the condition? Anything major like roof, HVAC, or foundation?",
+    "sent_at": "2026-10-06T16:11:22.420Z",
+    "delivered_at": "2026-10-06T16:13:20.799Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-57496ad3",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-09-30T18:38:43.799Z",
+   "seller_message": "Story",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-09-30T14:28:07.300Z",
+    "delivered_at": "2026-09-30T14:29:10.708Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-b29d1a89",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-08-17T16:47:08.718Z",
+   "seller_message": "Hmm",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-manual",
+    "template_use_case": "ownership_check",
+    "text": "One quick question about a property you may own — are you still the owner? Reply YES or NO.",
+    "sent_at": "2026-08-13T02:02:28.827Z",
+    "delivered_at": "2026-08-13T02:02:47.471Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-08-13T02:02:54.786Z",
+     "text": "Yes",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-08-16T23:51:46.401Z",
+     "text": "Yes",
+     "intent": "ownership_confirmed"
+    },
+    {
+     "created_at": "2026-08-16T23:57:16.773Z",
+     "text": "What's your best offer?",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-08-17T01:31:57.066Z",
+     "text": "What’s your best offer?",
+     "intent": "unclear"
+    },
+    {
+     "created_at": "2026-08-17T03:05:38.238Z",
+     "text": "What’s your best offer?",
+     "intent": "asks_offer"
+    },
+    {
+     "created_at": "2026-08-17T16:43:19.529Z",
+     "text": "What's your best offer?",
+     "intent": "asks_offer"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f1764592",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-08-18T01:25:58.366Z",
+   "seller_message": "2",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840901",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, my name is Pat. Came across 100 Main St, are you still the owner?",
+    "sent_at": "2026-08-17T19:37:37.231Z",
+    "delivered_at": "2026-08-17T19:38:35.341Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-5b085f9f",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-08-26T11:12:20.284Z",
+   "seller_message": "Maybe",
+   "prior_question": null,
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-a2a4194e",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-09-08T19:42:28.915Z",
+   "seller_message": "Yours",
+   "prior_question": {
+    "message_type": "ownership_check",
+    "template_id": "t-211393",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Is 100 Main St, Springfield, Fl 00000 yours?",
+    "sent_at": "2026-09-08T18:28:50.572Z",
+    "delivered_at": "2026-09-08T18:30:08.559Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-09-08T19:42:05.715Z",
+     "text": "No",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-9c803671",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-09T12:42:15.532Z",
+   "seller_message": "So",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200802",
+    "template_use_case": "ownership_check",
+    "text": "Hola Pat, soy Pat. Soy inversionista local de bienes raices en Springfield. 100 Main St es tu propiedad?",
+    "sent_at": "2026-10-09T12:40:18.471Z",
+    "delivered_at": "2026-10-09T12:41:40.000Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-e840d4d2",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-08T19:10:00.408Z",
+   "seller_message": "Way",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-211377",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, this is Pat. 🙂 Do you still own 100 Main St?",
+    "sent_at": "2026-10-05T14:13:31.620Z",
+    "delivered_at": "2026-10-05T14:13:54.873Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-ba591a73",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T15:21:06.444Z",
+   "seller_message": "La",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-200120",
+    "template_use_case": "ownership_check",
+    "text": "Marhaba Pat, ana Pat. Su al saree. Pat anta ma zelta malik 100 Main St?",
+    "sent_at": "2026-10-07T15:20:03.118Z",
+    "delivered_at": "2026-10-07T15:26:34.253Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-d44ff16e",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-09T22:08:44.925Z",
+   "seller_message": "Tế",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840914",
+    "template_use_case": "ownership_check",
+    "text": "Hi Pat, this is Pat. Quick question, do you still own the commercial property at 100 Main St?",
+    "sent_at": "2026-10-09T22:06:37.366Z",
+    "delivered_at": "2026-10-09T22:07:23.249Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-3db1e381",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T18:07:08.538Z",
+   "seller_message": "re doing",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-07T18:06:01.700Z",
+    "delivered_at": "2026-10-07T18:06:25.469Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-07T18:07:04.024Z",
+     "text": "not for sale they totally tedoing the entire area now",
+     "intent": "not_interested"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-697b9d2e",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-07T00:39:09.913Z",
+   "seller_message": "Have a great day",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "Got it, thanks. After reviewing the comps and taking the current market into consideration, I’d be at $165,000 cash and can close in 7 days with the tenant in place. We’ll cover all closing costs and charge no fees.\n\nLet me know if that works for you, and I can get the purchase agreement over right away.",
+    "sent_at": "2026-10-06T23:49:10.230Z",
+    "delivered_at": "2026-10-06T23:49:26.442Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-be60c8d5",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-09-10T15:49:36.744Z",
+   "seller_message": "Pretty sure those are numbers up there, looks like numbers to me.",
+   "prior_question": {
+    "message_type": "Follow-Up",
+    "template_id": "t-lc-condition",
+    "template_use_case": "condition_probe",
+    "text": "Happy to. To get you a real number, is it vacant right now or occupied?",
+    "sent_at": "2026-09-10T15:14:30.886Z",
+    "delivered_at": "2026-09-10T15:14:39.898Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-eaa9dc17",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-07-17T05:34:01.271Z",
+   "seller_message": "START",
+   "prior_question": null,
+   "intervening_inbound": [
+    {
+     "created_at": "2026-07-17T05:32:06.221Z",
+     "text": "Hello",
+     "intent": "unclear"
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-f25b25c6",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-09-27T16:16:59.212Z",
+   "seller_message": "Hello",
+   "prior_question": {
+    "message_type": "manual_reply",
+    "template_id": "t-manual",
+    "template_use_case": "manual_reply",
+    "text": "We can get this closed in 7 days.",
+    "sent_at": "2026-09-25T01:29:34.126Z",
+    "delivered_at": "2026-09-25T01:29:40.712Z"
+   },
+   "intervening_inbound": [],
+   "r7_history": [],
+   "valuation": null
+  },
+  {
+   "id": "ui-715d0d14",
+   "family": "F22_unclear_genuine",
+   "expected_intent": "unclear",
+   "known_miss": false,
+   "received_at": "2026-10-06T21:55:20.868Z",
+   "seller_message": "Property inspection?",
+   "prior_question": {
+    "message_type": null,
+    "template_id": "t-840902",
+    "template_use_case": "ownership_check",
+    "text": "Hey Pat, hope all is well. This is Pat reaching out about 100 Main St Is this the correct number for the owner?",
+    "sent_at": "2026-10-06T19:14:21.730Z",
+    "delivered_at": "2026-10-06T19:14:41.421Z"
+   },
+   "intervening_inbound": [
+    {
+     "created_at": "2026-10-06T21:55:13.489Z",
+     "text": "Yes ??",
+     "intent": null
+    }
+   ],
+   "r7_history": [],
+   "valuation": null
+  }
+ ]
+}

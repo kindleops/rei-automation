@@ -25,6 +25,7 @@ import { resolveSellerReplyLanguage } from "@/lib/domain/classification/seller-r
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
 import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
+import { applyRound11CounterpartyRule, applyRound11UnclearRules, matchRound11OptOut } from "@/lib/domain/classification/round11-unclear-rules.js";
 import { classifyStopScope, matchesOutreachStop, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
 import {
   resolveCanonicalAskingPrice,
@@ -2213,8 +2214,10 @@ const OBJECTION_MAP = [
       "give me a ring", "prefer a call",
       "better to talk", "easier to explain over the phone",
       // English slang / misspellings
-      "hit my line", "hit me up", "ring me", "ring me up",
-      "hmu", "call my cell", "jus call me", "just call",
+      // Round 11 (owner P0 2026-10-09): "hit me up" / "hmu" is a text, not a
+      // phone-call request.
+      "hit my line", "ring me", "ring me up",
+      "call my cell", "jus call me", "just call",
       "rather talk than text", "lets talk on the phone",
       "can u call", "can u call me", "plz call", "pls call",
       // Spanish
@@ -5847,7 +5850,12 @@ function resolveIntents(
     spanish_call_report_re.test(text) ||
     includesAny(text, [
       "call me", "phone me", "talk on phone", "give me a call",
-      "text me", "send me a text", "message me", "whatsapp",
+      // Round 11 (owner P0 2026-10-09): "text me" / "send me a text" /
+      // "message me" are a TEXT, never a phone-call request. "Yes, message me
+      // if you are interested in rentals - I have off market units ..." was
+      // callback_requested and got "Sorry I missed you, texting is the fastest
+      // way to reach me" with no call ever placed.
+      "whatsapp",
       "my number is", "reach me at",
       // Scheduling / mutual-availability forms. "We can schedule a call and talk"
       // classified as `unclear` (0.6) and went to review — an explicit
@@ -6969,11 +6977,16 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   // COMPLIANCE in every registry language (owner 2026-10-07): a confident
   // contact-revocation phrase or whole-message STOP keyword in the ORIGINAL
   // words is an opt-out — independent of any conversation flag.
-  const compliance_flag  = stop_other_action
+  // Round 11 (owner P0 2026-10-09): "YOU BETTER NOT CONTACT THIS NUMBER EVER
+  // AGAIN", "I'm blocking you", "sued ... if you ask again" are opt-outs and
+  // override every ordinary intent -- read from the ORIGINAL words.
+  const round11_opt_out = matchRound11OptOut(original_message);
+  const compliance_flag  = (stop_other_action
     ? (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
     : detectComplianceFlag(message) || (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
       // round 9: a stop aimed at our outreach ("Stop looking up properties to buy").
-      || (matchesOutreachStop(original_message) ? "stop_texting" : null);
+      || (matchesOutreachStop(original_message) ? "stop_texting" : null))
+    || (round11_opt_out.matched ? "stop_texting" : null);
   let language           = detectLanguageHeuristic(original_message, brain_item);
   // An explicit Spanish-switch request ("no hablo inglés", "en español por
   // favor") is deterministic evidence of language preference even when the
@@ -7083,7 +7096,7 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   const emotion          = detectEmotion(authored);
   const positive_signals = detectPositiveSignals(authored);
   const stage_hint       = detectStageHint(authored, brain_item, objection);
-  const intents          = resolveIntents(message, {
+  const intents_base     = resolveIntents(message, {
     compliance_flag,
     stop_other_action,
     objection,
@@ -7091,6 +7104,32 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
     conversation_context,
     emoji_interpretation,
     reply_signals,
+  });
+  // Round 11 (owner P0 2026-10-09): a reply a person can read never stays
+  // `unclear`. Only a still-unclear, non-compliance, non-policy-hold primary is
+  // read against what WE asked last; see round11-unclear-rules.js.
+  const authored_text = emoji_interpretation?.reaction_type === "platform_reaction" ? "" : message;
+  const raw_context_for_r11 = conversation_context && typeof conversation_context === "object" ? conversation_context : null;
+  const context_usable_for_r11 =
+    validated_context.context_status === "valid" || validated_context.context_status === "stale";
+  // Round 11: a respondent pitching THEIR inventory / investor business is a
+  // counterparty (Needs Review, no auto-reply); ownership stays a fact. A
+  // tapback quotes OUR words, so it is never read as the respondent's pitch.
+  const { intents: intents_cp } = applyRound11CounterpartyRule(intents_base, {
+    message: authored_text,
+    compliance_flag,
+    ownership_question,
+  });
+  const { intents, facts: round11 } = applyRound11UnclearRules(intents_cp, {
+    message: authored_text,
+    original_message: emoji_interpretation?.reaction_type === "platform_reaction" ? original_message : authored_text,
+    compliance_flag,
+    ownership_question,
+    context_status: validated_context.context_status,
+    last_outbound_body: context_usable_for_r11 ? raw_context_for_r11?.last_outbound_body || null : null,
+    last_outbound_use_case: context_usable_for_r11 ? raw_context_for_r11?.last_outbound_use_case || null : null,
+    last_outbound_addressee: names_context?.last_outbound_addressee || null,
+    emoji_interpretation,
   });
 
   let confidence = computeHeuristicConfidence({
@@ -7191,6 +7230,7 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
         }
       : null,
     reply_signals: summarizeReplySignals(reply_signals),
+    round11_rules: round11.rule_ids.length ? round11 : null,
     classifier_version: CLASSIFY_VERSION,
   };
 }
@@ -7428,6 +7468,27 @@ function deriveAutomationDecision({
       queue_action: "none",
       suppression_action: "none",
       human_review_required: true,
+      risk_level: "medium",
+    };
+  }
+
+  // Round 11 (owner P0 2026-10-09): the respondent is an investor / wholesaler
+  // pitching their own inventory. A person reads it (Needs Review); never an
+  // auto-reply, never a suppression. Compliance still wins below.
+  if (
+    !compliance_flag &&
+    intent !== "opt_out" &&
+    Array.isArray(matched_rule_ids) &&
+    matched_rule_ids.includes("r11_counterparty_investor_pitch")
+  ) {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: true,
+      operator_escalation: true,
+      escalation_policy: "operator_exception",
+      review_reason: "counterparty_is_investor",
       risk_level: "medium",
     };
   }

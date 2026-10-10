@@ -261,9 +261,9 @@
    "outcome_with_en_es_drafts": "auto_reply"
   },
   "143": {
-   "intent": "unclear",
+   "intent": "asking_price_provided",
    "outcome": "review",
-   "sentiment": "neutral",
+   "sentiment": "positive",
    "outcome_with_en_es_drafts": "review"
   },
   "144": {
@@ -322,9 +322,9 @@
   },
   "153": {
    "intent": "who_is_this",
-   "outcome": "auto_reply",
+   "outcome": "review",
    "sentiment": "neutral",
-   "outcome_with_en_es_drafts": "auto_reply"
+   "outcome_with_en_es_drafts": "review"
   },
   "154": {
    "intent": "opt_out",
@@ -1173,10 +1173,10 @@
    "outcome_with_en_es_drafts": "suppressed"
   },
   "295": {
-   "intent": "unclear",
-   "outcome": "review",
-   "sentiment": "neutral",
-   "outcome_with_en_es_drafts": "review"
+   "intent": "not_interested",
+   "outcome": "no_reply_by_design",
+   "sentiment": "negative",
+   "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "296": {
    "intent": "language_switch",
@@ -1617,9 +1617,9 @@
    "outcome_with_en_es_drafts": "auto_reply"
   },
   "369": {
-   "intent": "unclear",
+   "intent": "seller_interested",
    "outcome": "review",
-   "sentiment": "neutral",
+   "sentiment": "positive",
    "outcome_with_en_es_drafts": "review"
   },
   "370": {
@@ -1737,16 +1737,16 @@
    "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "389": {
-   "intent": "unclear",
+   "intent": "asking_price_provided",
    "outcome": "review",
-   "sentiment": "neutral",
+   "sentiment": "positive",
    "outcome_with_en_es_drafts": "review"
   },
   "390": {
-   "intent": "not_interested",
-   "outcome": "no_reply_by_design",
-   "sentiment": "negative",
-   "outcome_with_en_es_drafts": "no_reply_by_design"
+   "intent": "asking_price_absent",
+   "outcome": "review",
+   "sentiment": "positive",
+   "outcome_with_en_es_drafts": "review"
   },
   "391": {
    "intent": "who_is_this",
@@ -2366,5 +2366,13 @@
    "sentiment": "neutral",
    "outcome_with_en_es_drafts": "no_reply_by_design"
   }
+ },
+ "relabels_round11_20261009": {
+  "143": "\"I've been offered 175 but my goal is 200\" is a price counter (asking_price_provided), a person answers it (0.80 < autonomy gate)",
+  "153": "investor/wholesaler counterparty pitch -> Needs Review, no auto-reply (owner P0 2026-10-09)",
+  "295": "\"this is his son ... he doesn't have any plans to sell\" is a decline (not_interested -> nurture); the decline outranks who declines (inbox rulebook 2026-10-08)",
+  "369": "\"Checking in the jv\" -- the counterparty is chasing our reply (seller_interested, human now)",
+  "389": "\"235k is my bottom ...\" is a bottom-line price (asking_price_provided), a person answers it",
+  "390": "\"No\" to \"¿Tienes un precio de venta en mente?\" is an ABSENT VALUE (asking_price_absent, operator contract 2026-09-10); the Spanish price question is now read from the body we sent"
  }
 }

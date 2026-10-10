@@ -65,6 +65,20 @@ const shortDate = (iso: string): string | null => {
   return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+/** Why an `unclear` reply is waiting on a person, from the rule that held it. */
+export function unclearReason(classification: unknown): string {
+  const cls = rec(classification)
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  const tags = new Set([...list(cls.matched_rule_ids), ...list(cls.secondary_intents)])
+  if (tags.has('ctx_no_after_ownership_check') || tags.has('ownership_denial_needs_clarification')) return 'Bare "No" to the ownership question · held for you'
+  if (tags.has('repeat_no_contact_frustration') || tags.has('suppression_candidate')) return 'Repeat no-contact demand · confirm suppression'
+  if (tags.has('seller_frustration_after_misread') || tags.has('seller_frustration')) return 'Seller frustrated · needs your reply'
+  if (tags.has('ctx_yes_after_asking_price')) return '"Yes" to our price question · ask the number'
+  if (tags.has('ctx_yes_after_condition') || tags.has('ctx_no_after_condition')) return 'Short answer to our condition question · needs your read'
+  if (tags.has('non_literal_laughter')) return 'Laughter only · needs your read'
+  return 'Unclear · needs your read'
+}
+
 export function buildAutomationTrail(metadata: unknown): TrailStep[] {
   const meta = rec(metadata)
   const payload = rec(meta.payload)
@@ -78,12 +92,20 @@ export function buildAutomationTrail(metadata: unknown): TrailStep[] {
   if (intent) {
     const conf = num(meta.classification_confidence) ?? num(payload.classification_confidence) ?? num(cls.confidence)
     const pct = conf !== null ? Math.round((conf <= 1 ? conf * 100 : conf)) : null
-    steps.push({
-      key: 'intent',
-      label: 'Intent detected',
-      value: pct !== null ? `${humanize(intent)} · ${pct}%` : humanize(intent),
-      tone: 'accent',
-    })
+    // "Unclear · 64%" read as 64% sure of something. For `unclear` the number
+    // is the classifier's confidence in NOTHING, so it is never shown; the
+    // step says why the reply is waiting on a person instead (owner P0
+    // 2026-10-09).
+    if (/^(unclear|unknown)$/i.test(intent)) {
+      steps.push({ key: 'intent', label: 'Intent detected', value: unclearReason(cls), tone: 'warn' })
+    } else {
+      steps.push({
+        key: 'intent',
+        label: 'Intent detected',
+        value: pct !== null ? `${humanize(intent)} · ${pct}%` : humanize(intent),
+        tone: 'accent',
+      })
+    }
   }
 
   // 2 · sentiment (the classifier's emotional read of the seller)

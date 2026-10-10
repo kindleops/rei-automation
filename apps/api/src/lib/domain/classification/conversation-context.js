@@ -541,6 +541,12 @@ export function applyContextualShortReply(messageText, validated) {
         ...base,
       };
     }
+    // Round 11 (2026-10-09): "Sold" / "It's SOLD" to our interest question is
+    // a property transfer, not a decline -- the classifier's sold detector
+    // decides (it did before operator interest questions bound a context).
+    if ((useCase === 'proposal_interest' || useCase === 'proposal_request') && BARE_SOLD_RE.test(t)) {
+      return { applied: false };
+    }
     if (useCase === 'proposal_interest' || useCase === 'proposal_request') {
       return {
         applied: true,
