@@ -408,3 +408,38 @@ test("scheduling: the live seller-flow auto-reply insert stamps the inbound time
   assert.match(src, /buildQueueTimeConversationalReplyMetadata\(\{\s*inbound_message_event_id: inboundEventId \|\| null,\s*inbound_received_at: inboundReceivedAt \|\| null,\s*queued_at: now,/);
   assert.match(src, /inbound_message_event_id: inboundEventId \|\| null,\s*\.\.\.conversational_reply\.metadata,/);
 });
+
+test("dispatch: an in-session 2am reply carrying code-registry copy is still refused (template_not_in_supabase)", async () => {
+  const row = normalizeSendQueueRow(inSessionReply({
+    lock_token: "lock-crw", is_locked: true, queue_status: "processing",
+    template_id: "local-template:who_is_this",
+    created_at: "2026-10-10T07:00:05.000Z",
+    metadata: { inbound_received_at: "2026-10-10T06:59:40.000Z", selected_template_id: "local-template:who_is_this" },
+  }));
+  let transport_calls = 0;
+  const supabase = extendSupabaseForHealthyCompliance({ rpc: makeQueueTestRpc() }, { suppressed: false });
+  const result = await processSendQueueItem(row, {
+    now: "2026-10-10T07:00:30.000Z",
+    supabase,
+    supabaseClient: supabase,
+    claimedLockToken: "lock-crw",
+    getSystemValue: async (key) => {
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
+    sendTextgridSMS: async () => { transport_calls += 1; return { sid: "SM_must_never_send" }; },
+    selectAvailableTextgridNumber: async () => ({
+      ok: true, from_phone_number: SENDER, selected: { id: "tg-1", phone_number: SENDER, market: "dallas" },
+    }),
+    loadOutboundNumberByPhone: async (phone_number) => ({
+      id: `fleet-${phone_number}`, phone_number, status: "active", health_state: "unverified", daily_limit: 800, messages_sent_today: 0,
+    }),
+    loadCampaignStatus: async () => "active",
+    updateSendQueueRowWithLock: async (row_id, lock_token, payload) => normalizeSendQueueRow({ ...row, ...payload, id: row_id, lock_token }),
+  });
+  assert.equal(transport_calls, 0, "TextGrid is never called");
+  assert.notEqual(result?.reason, "deferred_contact_window");
+  assert.equal(result?.reason, "template_not_in_supabase");
+  assert.notEqual(result?.sent, true);
+});
