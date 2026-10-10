@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
 import { getAvailableCampaignActions } from './campaign-health'
 import type { CampaignSummary } from './campaigns.types'
+import { ENTITY_GRAPH_DOOR_HINT, ENTITY_GRAPH_DOOR_LABEL, ENTITY_GRAPH_DOOR_NO_ID, campaignEntityGraphPath, openCampaignInEntityGraph } from './campaign-entity-graph'
 
 const ACTION_LABELS: Record<string, string> = {
   open: 'Open',
@@ -88,6 +89,18 @@ export const CampaignContextMenu = ({
           {ACTION_LABELS[action] ?? action}
         </button>
       ))}
+      <button
+        type="button"
+        role="menuitem"
+        className="ccc-context-menu__item"
+        disabled={!campaignEntityGraphPath(campaign.id)}
+        title={campaignEntityGraphPath(campaign.id) ? ENTITY_GRAPH_DOOR_HINT : ENTITY_GRAPH_DOOR_NO_ID}
+        onClick={() => {
+          if (openCampaignInEntityGraph(campaign.id)) onClose()
+        }}
+      >
+        {ENTITY_GRAPH_DOOR_LABEL}
+      </button>
     </div>,
     document.body,
   )

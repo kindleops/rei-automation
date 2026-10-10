@@ -6,6 +6,7 @@ import { isTestModeCampaign } from '../campaign-operator'
 import type { CampaignCommandState, CampaignSummary } from '../campaigns.types'
 import { cls, fmt, fmtPct, resolveNextSend } from '../campaign-formatters'
 import { CampaignStatusBadge } from './CampaignStatusBadge'
+import { ENTITY_GRAPH_DOOR_HINT, ENTITY_GRAPH_DOOR_LABEL, ENTITY_GRAPH_DOOR_NO_ID, campaignEntityGraphPath, openCampaignInEntityGraph } from '../campaign-entity-graph'
 
 function actionIcon(actionId: string) {
   switch (actionId) {
@@ -56,6 +57,7 @@ export function CampaignDetailHeader({
   const secondaryActions = detailActions.slice(1)
   const queueRows = campaign.queued_targets + campaign.scheduled_targets
   const nextSend = resolveNextSend(campaign)
+  const egPath = campaignEntityGraphPath(campaign.id)
 
   const statChips = [
     { label: 'Targets', value: fmt(campaign.total_targets) },
@@ -178,6 +180,16 @@ export function CampaignDetailHeader({
                 : primaryAction.label}
             </button>
           )}
+          <button
+            type="button"
+            className="ccc-btn"
+            disabled={!egPath}
+            title={egPath ? ENTITY_GRAPH_DOOR_HINT : ENTITY_GRAPH_DOOR_NO_ID}
+            onClick={() => { openCampaignInEntityGraph(campaign.id) }}
+          >
+            <Icon name="link" size={12} />
+            {ENTITY_GRAPH_DOOR_LABEL}
+          </button>
           <div className="ccc__detail-action-menu-wrap">
             <button
               type="button"

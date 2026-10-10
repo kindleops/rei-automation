@@ -17,6 +17,7 @@ import { queueWordsOf } from './war-room-words'
 import { BatchCard } from './WarExecution'
 import { SenderRail } from './WarPlanes'
 import { missedStartAt } from '../start-now-window'
+import { ENTITY_GRAPH_DOOR_HINT, ENTITY_GRAPH_DOOR_LABEL, ENTITY_GRAPH_DOOR_NO_ID, campaignEntityGraphPath } from '../campaign-entity-graph'
 
 export type InspectorCtx =
   | { kind: 'campaign' }
@@ -56,6 +57,7 @@ function Doors({ input, now, compact }: { input: WarInput; now: number; compact?
   const id = input.book?.id ?? input.summary?.id ?? input.core?.campaign_id ?? ''
   const start = input.core?.lifecycle.activated_at ?? input.core?.lifecycle.created_at ?? null
   const market = input.intel?.routing?.[0]?.market ?? null
+  const egPath = campaignEntityGraphPath(id)
   return (
     <div className={cx('cc3-doors', compact && 'is-compact')}>
       <LCTooltip content="Queue owns dispatch. It has no campaign filter yet — it opens the full queue.">
@@ -65,6 +67,9 @@ function Doors({ input, now, compact }: { input: WarInput; now: number; compact?
       {market ? <LCButton size="sm" variant="quiet" icon="stats" onClick={() => pushRoutePath(analyticsPath(id, { start, tz: f.tz, market }))}>{market} in Analytics</LCButton> : null}
       <LCButton size="sm" variant="secondary" icon="calendar" onClick={() => pushRoutePath(calendarPath(id, { scheduledFor: f.scheduledFor, tz: f.tz, status: f.status, now }))}>Calendar</LCButton>
       <LCButton size="sm" variant="secondary" icon="activity" onClick={() => pushRoutePath(workflowPath(input.intel?.batches?.list[0]?.run_id ?? null))}>Workflow Studio</LCButton>
+      <LCTooltip content={egPath ? ENTITY_GRAPH_DOOR_HINT : ENTITY_GRAPH_DOOR_NO_ID}>
+        <span><LCButton size="sm" variant="secondary" icon="link" disabled={!egPath} onClick={() => { if (egPath) pushRoutePath(egPath) }}>{ENTITY_GRAPH_DOOR_LABEL}</LCButton></span>
+      </LCTooltip>
     </div>
   )
 }
