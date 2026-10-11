@@ -1,0 +1,43 @@
+/* ══ COMP BUYER TYPE chip — entity vs individual, investor vs owner-occupant ══
+ * Shared by Comp Intelligence rows / inspector and the Deal Intelligence comp
+ * grid. Solid outline = recorded (deed / buyer index); dashed = inferred
+ * (current owner of record, entity rule).
+ */
+.cbt {
+  --cbt-rgb: var(--lc-neutral-rgb);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  max-width: 100%;
+  height: 18px;
+  border-radius: 6px;
+  font: 650 10px/1 var(--lc-font-ui);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--lc-ink-1);
+  background: rgba(var(--cbt-rgb), 0.1);
+  box-shadow: inset 0 0 0 1px rgba(var(--cbt-rgb), 0.3);
+  cursor: help;
+  overflow: hidden;
+}
+.cbt[data-prov='inferred'] { background: transparent; box-shadow: none; outline: 1px dashed rgba(var(--cbt-rgb), 0.5); outline-offset: -1px; }
+.cbt[data-entity='llc'], .cbt[data-entity='company'] { --cbt-rgb: var(--lc-attn-rgb); }
+.cbt[data-entity='trust'], .cbt[data-entity='estate'] { --cbt-rgb: var(--lc-accent-rgb); }
+.cbt[data-entity='institution'] { --cbt-rgb: var(--lc-crit-rgb); }
+.cbt[data-entity='individual'] { --cbt-rgb: var(--lc-exec-rgb); }
+.cbt[data-entity='unknown'] { color: var(--lc-ink-3); background: transparent; box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.12); }
+.cbt__entity { display: inline-flex; align-items: center; gap: 5px; padding: 0 7px 0 6px; }
+.cbt__entity::before { content: ''; width: 6px; height: 6px; border-radius: 2px; background: rgb(var(--cbt-rgb)); }
+.cbt[data-entity='individual'] .cbt__entity::before { border-radius: 50%; }
+.cbt[data-entity='unknown'] .cbt__entity::before { background: transparent; box-shadow: inset 0 0 0 1px var(--lc-ink-4); border-radius: 50%; }
+.cbt__use { padding: 0 7px; height: 100%; display: inline-flex; align-items: center; border-left: 1px solid rgba(var(--cbt-rgb), 0.3); font-weight: 600; color: var(--lc-ink-2); }
+.cbt[data-use='investor'] .cbt__use { color: rgb(var(--lc-attn-rgb)); }
+.cbt[data-use='owner_occupant'] .cbt__use { color: rgb(var(--lc-exec-rgb)); }
+.cbt__name { min-width: 0; max-width: 160px; overflow: hidden; text-overflow: ellipsis; padding: 0 7px; border-left: 1px solid rgba(var(--cbt-rgb), 0.3); font-weight: 540; color: var(--lc-ink-2); }
+
+.cbt-tip { display: flex; flex-direction: column; gap: 3px; max-width: 300px; font: 500 11.5px/1.4 var(--lc-font-ui); }
+.cbt-tip b { font-weight: 650; }
+
+.cbt-cover { font: 500 11px/1.4 var(--lc-font-ui); color: var(--lc-ink-3); }
+.cbt-cover b { color: var(--lc-ink-1); font-weight: 650; }

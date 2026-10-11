@@ -1,5 +1,4 @@
 import type { SaleOwnerRow } from '../../../modules/market-intelligence/sale-owner/sale-owner-client'
-import { BuyerOfRecord } from '../../../modules/market-intelligence/sale-owner/BuyerOfRecord'
 import { memo, useState, type KeyboardEvent } from 'react'
 import { LCButton, LCTooltip, cx } from '../../../shared/lc'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
@@ -11,6 +10,8 @@ import { saleTypeOfComp } from '../../../domain/comp-intelligence/comp-sale-type
 import { CompStreetView } from './CompStreetView'
 import type { Tier } from './derive-workstation'
 import { SaleTypeBadge } from './SaleType'
+import { BuyerTypeChip } from './BuyerType'
+import { compBuyerType } from '../../../domain/comp-intelligence/comp-buyer-type'
 import { useFocusOf, type FocusStore } from './focus-store'
 import { displayAddress } from '../utils/comp-display'
 import { handleObjectClick, objectAttrs, ObjectMenu } from '../../../modules/desktop/objects'
@@ -114,7 +115,7 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
         </div>
         <div className="ciw-row__meta lc-num">
           <SaleTypeBadge v={sale} withBuyer />
-          {!c.buyerKind && owner?.buyer_of_record?.basis === 'current_owner_of_record' ? <BuyerOfRecord row={owner} compact /> : null}
+          <BuyerTypeChip t={compBuyerType({ buyerKind: c.buyerKind, buyerCompany: c.buyerCompany, buyerArchetype: c.buyerArchetype, buyerAcquisitions: c.buyerAcquisitions, owner })} />
           <span>{[fmtMiles(c.distanceMiles), c.saleDate ? `${fmtDate(c.saleDate)}${days !== null ? ` · ${fmtAge(days)}` : ''}` : 'Undated sale'].filter(Boolean).join(' · ')}</span>
         </div>
         <div className="ciw-row__spec lc-num">{specLine(c, kind)}</div>

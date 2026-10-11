@@ -1,5 +1,7 @@
 import { BuyerOfRecord } from '../../../modules/market-intelligence/sale-owner/BuyerOfRecord'
 import { propSaleKey, saleOwnerClient, useSaleOwners } from '../../../modules/market-intelligence/sale-owner/sale-owner-client'
+import { BuyerTypeChip } from './BuyerType'
+import { compBuyerType } from '../../../domain/comp-intelligence/comp-buyer-type'
 import { LCButton, LCFacts, LCIconButton, LCInspector, LCInspectorSection, LCStatus, cx } from '../../../shared/lc'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
 import {
@@ -175,6 +177,7 @@ export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, 
           { label: 'Deed', value: c.docType },
           { label: 'Buyer', value: c.buyerKind === 'company' ? c.buyerCompany ?? 'Company' : c.buyerKind === 'person' ? 'Individual'
             : ownerKey ? <BuyerOfRecord row={ownerOf(ownerKey)} pending={saleOwnerClient.statusOf(ownerKey) === 'pending'} /> : null },
+          { label: 'Buyer type', value: <BuyerTypeChip t={compBuyerType({ buyerKind: c.buyerKind, buyerCompany: c.buyerCompany, buyerArchetype: c.buyerArchetype, buyerAcquisitions: c.buyerAcquisitions, owner: ownerKey ? ownerOf(ownerKey) : null })} /> },
           { label: 'Seller', value: c.sellerKind === 'company' ? 'Company' : c.sellerKind === 'person' ? 'Individual' : null },
         ]} />
       </LCInspectorSection>
