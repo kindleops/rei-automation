@@ -163,7 +163,11 @@ test('sensitive fields are charted and marked; nothing in valuation / pricing / 
   for (const key of ['prospects.age_years', 'prospects.gender', 'prospects.marital_status', 'prospects.language_preference']) {
     assert.equal(people.find((f) => f.key === key)?.sensitive, true, key)
   }
-  assert.equal(people.find((f) => f.key === 'prospects.est_household_income')?.sensitive, false)
+  // 8.5.6 (IC8 fairness policy, owner + counsel): income / modeled wealth is a personal attribute too —
+  // display and targeting only, never pricing — so its card carries the marker (it was unmarked before 8.5.6)
+  assert.equal(people.find((f) => f.key === 'prospects.est_household_income')?.sensitive, true)
+  // a non-personal field stays unmarked
+  assert.equal(people.find((f) => f.key === 'prospects.sms_eligible')?.sensitive, false)
   // the Overview / campaign scope modules are read by Entity Graph and its routes only
   const root = new URL('../../src/', import.meta.url).pathname
   const offenders = []

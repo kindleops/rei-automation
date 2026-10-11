@@ -324,7 +324,7 @@ export function DeskOverviewBand({ scope = 'properties', filters, onFiltersChang
           <div className={cx('egov-band__body', req.stale && 'is-stale')}>
             <KpiBand headline={data?.headline ?? null} total={data?.total ?? null} filters={filters} onFiltersChange={onFiltersChange} loading={req.stale} computing={data?.computing} />
             <div className="egov-grid is-band">
-              {pinned.length ? pinned.map((f, i) => <OverviewCard key={f.key} field={f} filters={filters} onFiltersChange={onFiltersChange} compact enterIndex={i} />)
+              {pinned.length ? pinned.map((f, i) => <OverviewCard key={f.key} field={f} filters={filters} onFiltersChange={onFiltersChange} compact enterIndex={i} onRetry={req.retry} />)
                 : Array.from({ length: 6 }, (_, i) => <div key={i} className="egov-card is-skeleton is-compact" aria-hidden="true"><i className="lc-skel" /></div>)}
             </div>
             {data?.unavailable?.length ? <p className="egov-unavail">{data.unavailable.map((u) => u.reason).filter((v, i, a) => a.indexOf(v) === i).join(' · ')} <button type="button" className="egov-link" onClick={req.retry}>Retry</button></p> : null}
@@ -351,8 +351,9 @@ function SectionBlock({ scope, id, label, filters, onFiltersChange, gate }: { sc
   const req = useOverviewRequest(scope, filters, [id], seen, gate)
   const section: OverviewSection | undefined = req.data?.sections.find((s) => s.id === id)
   const fields = section?.fields ?? []
-  const live = fields.filter((f) => !f.unavailable)
-  const pending = fields.filter((f) => f.unavailable)
+  // a field that ran past its budget (retry) is a card with a Retry; only fields the read model lacks are "waiting"
+  const live = fields.filter((f) => !f.unavailable || f.retry)
+  const pending = fields.filter((f) => f.unavailable && !f.retry)
   const [showPending, setShowPending] = useState(false)
   return (
     <section ref={ref} id={`egov-sec-${scope}-${id}`} className={cx('egov-section', req.stale && seen && 'is-stale')} aria-label={label} aria-busy={req.stale && seen}>
@@ -371,7 +372,7 @@ function SectionBlock({ scope, id, label, filters, onFiltersChange, gate }: { sc
         <div className="egov-grid">{Array.from({ length: 4 }, (_, i) => <div key={i} className="egov-card is-skeleton is-computing" aria-hidden="true"><i className="lc-skel" /></div>)}</div>
       ) : (
         <div className="egov-grid">
-          {section ? live.map((f, i) => <OverviewCard key={f.key} field={f} filters={filters} onFiltersChange={onFiltersChange} enterIndex={i} />)
+          {section ? live.map((f, i) => <OverviewCard key={f.key} field={f} filters={filters} onFiltersChange={onFiltersChange} enterIndex={i} onRetry={req.retry} />)
             : Array.from({ length: 4 }, (_, i) => <div key={i} className="egov-card is-skeleton" aria-hidden="true"><i className="lc-skel" /></div>)}
         </div>
       )}

@@ -48,6 +48,8 @@ import { applyEntityGraphFieldFilters, resolveEntityGraphFieldFilters, resolveEn
 import { applyBuyerFilters, applyOwnerFilters, applyPhoneFilters, applyPropertyFilters, applyProspectFilters, parseBrowseFilters } from './entity-graph-service.js'
 import { propertySmsEligibility } from './entity-graph-outreach-state.js'
 import { primeCampaignScope } from './entity-graph-campaign-scope.js'
+import { FACT_BY_COL } from './entity-graph-facts.js'
+import { factsCohortRelation, factsHeaderValues } from './entity-graph-facts-query.js'
 import {
   CATEGORICAL_TOP,
   OVERVIEW_COMPANY_FIELDS,
@@ -201,6 +203,47 @@ export function compileCohort(params = {}, { exceptFieldKey = null, tab = clean(
   const { clauses, params: values } = record((b) => applyEntityGraphFieldFilters(scope.base(b, filters), fieldFilters))
   // fieldFilters: every requested chip (the ghost bars' "active" set); applied: the ones this WHERE carries
   return { clauses, params: values, filters, fieldFilters: resolved, applied: fieldFilters, includeTest: Boolean(filters.includeTest), tab }
+}
+
+/** The facts deps the 8.5.6 facet path runs with (tests inject theirs; a request reads the pool). */
+const factsDepsOf = (deps = {}) => deps.factsDeps || (deps.query ? { query: deps.query } : {})
+
+/** An addendum fact column the read model does not serve (missing, or no refresh wrote it yet). */
+const unservedAddendum = (col, served) => Boolean(FACT_BY_COL.get(col)?.addendum) && !(served && served.has(col))
+
+/**
+ * A cohort chip on an addendum fact the read model cannot execute yet (a
+ * click on the canonical Property type bar) is resolved to its EXACT property
+ * ids on the rail's own facet path (factsCohortRelation: the same filters,
+ * the live facts relation), and the cohort WHERE carries `property_id = any(ids)`
+ * instead — so every other section still reads the read model in one scan.
+ * The ids are computed for THIS cohort's full filter set (a ghost cohort
+ * resolves its own). Nothing is sampled; a failure fails the request (never a
+ * silently wider cohort).
+ */
+export async function substituteLiveChips(cohort, { served = null, deps = {}, timings = [] } = {}) {
+  if (cohort.tab !== OVERVIEW_TAB || cohort.includeTest) return cohort
+  const live = cohort.applied.filter((r) => unservedAddendum(r.source_column, served))
+  if (!live.length) return cohort
+  const scope = scopeOf(cohort.tab)
+  const fdeps = factsDepsOf(deps)
+  const t0 = Date.now()
+  const rel = await (deps.factsCohortRelation || factsCohortRelation)({
+    applyFilters: (b) => applyEntityGraphFieldFilters(scope.base(b, cohort.filters), cohort.applied),
+    columns: [],
+    deps: fdeps,
+  })
+  let ids
+  if (rel.records && !rel.where) ids = rel.records.map((r) => String(r.property_id))
+  else {
+    const res = await (fdeps.query || queryWithTimeout)(`select f."property_id" from ${rel.from} ${rel.where}`, rel.params, 25_000)
+    ids = (res?.rows || []).map((r) => String(r.property_id))
+  }
+  timings.push({ label: `live-chips(${live.map((r) => r.source_column).join(',')})`, ms: Date.now() - t0, cached: Boolean(rel.cached), source: rel.source || rel.mode || null, ids: ids.length })
+  const rest = cohort.applied.filter((r) => !live.includes(r))
+  // an empty match is an empty cohort: a property id no row carries (a predicate, not a value)
+  const { clauses, params } = record((b) => applyEntityGraphFieldFilters(scope.base(b, cohort.filters), rest).in('property_id', ids.length ? ids : ['__no_property__']))
+  return { ...cohort, clauses, params, liveChips: { fields: live.map((r) => r.field_key), ids: ids.length, mode: rel.source || rel.mode || null } }
 }
 
 /** No narrowing at all: the whole scope (only ever read from the snapshot / facts read model, never scanned live). */
@@ -1092,6 +1135,85 @@ function timeoutReason(error) {
 
 /* ── the endpoint ─────────────────────────────────────────────────────────── */
 
+/**
+ * ADDENDUM FACTS (8.5.6: facts.property_type_class / _group / _confidence /
+ * _basis, property_use_raw, person_source) the read model does not serve yet
+ * — the column is missing or no successful refresh has written it. They are
+ * counted on the SAME path the rail's Property type facet and the header
+ * pickers use (factsHeaderValues → factsCohortRelation: the table once it
+ * serves the column, else the live facts relation), so a bar's count is the
+ * facet's count and its click is the facet's own chip. Exact, never sampled.
+ * The unfiltered universe is never computed live here: "Computing" until the
+ * read model serves the column or the snapshot job has run.
+ */
+export const LIVE_FACT_UNIVERSE = 'Computing — this field is counted from the property facts read model once its refresh writes it (eg_property_facts field-accuracy addendum) or by the snapshot job; it is never scanned live for the whole universe. Pick any filter to count it now.'
+
+/**
+ * The canonical property-type family only (one memoised pass over the property-use observations).
+ * person_source is an addendum too, but its family (the person fallbacks) costs 50–100 s cold on the
+ * live path (measured 2026-10-11) — it waits for the read model, labelled.
+ */
+export const LIVE_FACT_COLUMNS = Object.freeze(new Set(['property_type_class', 'property_type_group', 'property_type_confidence', 'property_type_basis', 'property_use_raw']))
+export const LIVE_FACT_PENDING = 'Counting the canonical property type (the first read after a restart computes it for every property, ~20 s) — retry in a moment.'
+
+export function isLiveFactField(field, ctx) {
+  return ctx.tab === OVERVIEW_TAB && !ctx.cohort.includeTest && Boolean(field.computedFact)
+    && field.kind === 'categorical' && LIVE_FACT_COLUMNS.has(field.column) && Boolean(FACT_BY_COL.get(field.column)?.addendum)
+}
+
+/** A facet-path read inside the section's budget; past it the read keeps warming the memo, the card says retry. */
+function withinBudget(promise, ms) {
+  let timer
+  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('live_fact_budget'), { code: 'live_fact_budget' })), ms) })
+  promise.catch(() => {})
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer))
+}
+
+async function liveFactField(ctx, field, params, deps = {}) {
+  const base = {
+    key: field.key, label: field.label, kind: field.kind, format: field.format, section: field.section, column: field.column,
+    privacy: field.privacy, computedFact: true, emptySource: field.emptySource, pinned: field.pinned, liveFact: true,
+    ...(field.sensitive ? { sensitive: true } : {}),
+    ...(field.caution ? { caution: field.caution } : {}),
+  }
+  if (ctx.unfiltered && !ctx.allowUniverseScan) return { ...base, buckets: [], computing: true, unavailable: LIVE_FACT_UNIVERSE }
+  const scope = scopeOf(ctx.tab)
+  const count = async (cohort) => {
+    const t0 = Date.now()
+    const out = await withinBudget((deps.factsHeaderValues || factsHeaderValues)({
+      column: field.column,
+      applyFilters: (b) => applyEntityGraphFieldFilters(scope.base(b, cohort.filters), cohort.applied),
+      deps: factsDepsOf(deps),
+    }), ctx.timeoutMs)
+    ctx.timings.push({ label: `live-fact(${field.column})`, ms: Date.now() - t0, cached: Boolean(out.cached), source: out.source || out.mode || null })
+    const values = (out.values || []).map((v) => ({ key: v.value === null || v.value === undefined ? null : String(v.value), count: Number(v.count) || 0 }))
+    const total = Number(out.total) || 0
+    return { total, out, ...categoricalBuckets(field, { values, distinct: out.truncated ? 502 : values.length }, total) }
+  }
+  try {
+    const r = await count(ctx.cohort)
+    const field_ = {
+      ...base,
+      coverage: { known: r.known, total: r.total, share: pct(r.known, r.total) },
+      buckets: r.buckets,
+      distinct: r.distinct,
+      source: { mode: r.out.mode || null, from: r.out.source || null, asOf: r.out.asOf || null },
+      note: 'Counted on the facet path (the rail’s own counts) — the facts read model does not serve this field yet.',
+    }
+    // the ghost: this field's own distribution without its own chip (never the whole universe live)
+    if (ctx.cohort.fieldFilters.some((x) => x.field_key === field.key)) {
+      const gcohort = compileCohort(params, { exceptFieldKey: field.key, tab: ctx.tab })
+      if (!isUnfiltered(gcohort, params) || ctx.allowUniverseScan) {
+        const g = await count(gcohort).catch(() => null)
+        if (g) field_.ghost = { total: g.total, buckets: g.buckets.map((b) => ({ key: b.key, label: b.label, count: b.count, filter: b.filter, tone: b.tone })) }
+      }
+    }
+    return field_
+  } catch (error) {
+    return { ...base, buckets: [], unavailable: error?.code === 'live_fact_budget' ? LIVE_FACT_PENDING : timeoutReason(error), retry: true }
+  }
+}
+
 export const UNIVERSE_COMPUTING = 'Computing — the whole-universe Overview is precomputed by the snapshot job (eg_overview_snapshot, after the morning refresh) and is not live yet. It is never scanned live: pick any filter to chart that cohort now.'
 
 function parseSections(raw) {
@@ -1116,13 +1238,34 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
   // the campaign scope chip resolves its exact membership before the cohort compiles (never "no filter")
   await primeCampaignScope(params, deps.campaignScopeDeps || (deps.query ? { query: deps.query } : {}))
   // fail closed on an untranslatable filter (422 upstream), never a silent universe
-  const cohort = compileCohort(params, { tab })
+  let cohort = compileCohort(params, { tab })
   const unfiltered = isUnfiltered(cohort, params)
   const loaded = await loadSchema(query, now)
   // the read model counts only once a refresh has logged 'ok' (until then the live relation answers)
-  const factsAt = tab === OVERVIEW_TAB && loaded[FACTS] ? await factsRefreshed(query, loaded).catch(() => null) : null
-  const schema = factsAt ? loaded : { ...loaded, [FACTS]: undefined }
+  const refresh = tab === OVERVIEW_TAB && loaded[FACTS] ? await factsRefreshed(query, loaded).catch(() => null) : null
+  const factsAt = refresh?.at || null
+  // an ADDENDUM column (added after the base eg_property_facts migration: the canonical property type,
+  // person_source …) is read from the table only once a successful refresh wrote it (its log names the
+  // addendum) — the 8.5.6 tableServes rule; until then it is not a column of the read model here
+  const schema = factsAt ? { ...loaded, [FACTS]: servedFactsColumns(loaded[FACTS], refresh.addenda) } : { ...loaded, [FACTS]: undefined }
   const registry = deps.registry || overviewRegistry(tab)
+  const preTimings = []
+  try {
+    cohort = await withinBudget(substituteLiveChips(cohort, { served: schema[FACTS], deps, timings: preTimings }), deps.timeoutMs ?? STATEMENT_MS)
+  } catch (error) {
+    if (error?.code !== 'live_fact_budget') throw error
+    // the chip's ids are still being counted (the memo keeps warming): every section says retry — never a wider cohort
+    const ids = parseSections(params.sections).filter((id) => id !== 'headline')
+    return {
+      tab, supported: true, total: null, computing: false,
+      source: { relation: null, mode: 'live_chips', note: LIVE_FACT_PENDING, factsFiltersExecutable: false },
+      refreshed_at: { facts: factsAt, engagement: null, snapshot: null },
+      headline: null,
+      sections: ids.map((id) => ({ id, label: id === 'pinned' ? 'Pinned' : sectionsMeta.find((x) => x.id === id)?.label || id, fields: [], unavailable: LIVE_FACT_PENDING })),
+      unavailable: [{ reason: LIVE_FACT_PENDING, retry: true }],
+      timings: { totalMs: Date.now() - started, statements: preTimings },
+    }
+  }
   const whereCols = columnsIn(cohort.clauses.join(' '))
   const picked = chooseRelation(schema, whereCols, { includeTest: cohort.includeTest, tab })
   if (!picked) {
@@ -1134,7 +1277,7 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
   const factsRefreshedAt = picked.mode === 'facts' ? factsAt : null
   const allowUniverseScan = Boolean(deps.allowUniverseScan)
   const ctx = {
-    query, now, schema, cohort, unfiltered, timings: [], tab, allowUniverseScan,
+    query, now, schema, cohort, unfiltered, timings: preTimings, tab, allowUniverseScan,
     relation: picked.relation, mode: picked.mode, factsRefreshedAt,
     // 8 s per statement in live mode (the snapshot job passes its own budget)
     timeoutMs: deps.timeoutMs ?? STATEMENT_MS,
@@ -1148,8 +1291,10 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
 
   // the snapshot (PROPOSED eg_overview_snapshot) answers the unfiltered universe instantly when present
   const snapshot = unfiltered && schema[SNAPSHOT] && !deps.skipSnapshot ? await readSnapshot(query, wanted, tab).catch(() => null) : null
-  // NO unbounded scan in live mode: the unfiltered universe is the snapshot's (or the narrow facts table's), else "computing"
-  const universeBlocked = unfiltered && !allowUniverseScan && !(tab === OVERVIEW_TAB && ctx.mode === 'facts')
+  // NO unbounded scan in a request: the unfiltered universe is the snapshot's, else "computing" — the facts
+  // table too (measured 2026-10-11 on prod: pinned + headline over all 176,603 rows of eg_property_facts ran past
+  // the 8 s budget cold and warm; an honest "Computing" beats a "Retry" that can never succeed)
+  const universeBlocked = unfiltered && !allowUniverseScan
 
   // the universe snapshot, read once per request, for ghost bars of a field whose own chip is the only filter
   let universeSnap = null
@@ -1182,9 +1327,12 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
     const all = fieldsFor(id)
     const usable = []
     const missing = []
+    const liveFacts = []
     for (const f of all) {
       // a computed fact is only ever read from the facts read model — a same-named legacy view column is not it
       if ((!f.computedFact || ctx.mode === 'facts') && [...fieldColumns(f, tab)].every((c) => relCols.has(c))) usable.push(f)
+      // an addendum fact the table does not serve yet (the canonical property type): the rail's own live facts path
+      else if (isLiveFactField(f, ctx)) liveFacts.push(f)
       else missing.push({ key: f.key, label: f.label, kind: f.kind, section: f.section, computedFact: f.computedFact, ...(f.sensitive ? { sensitive: true } : {}), unavailable: f.computedFact ? 'Needs the property facts read model (eg_property_facts) — not live yet.' : 'This column is not on the cohort relation.' })
     }
     if (id === 'company' && tab === OVERVIEW_TAB) {
@@ -1198,20 +1346,28 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
     const viaView = viewOk ? missing.filter((m) => !m.computedFact).map((m) => all.find((f) => f.key === m.key)).filter((f) => f && [...fieldColumns(f, tab)].every((c) => viewCols.has(c))) : []
     if (viaView.length) for (const f of viaView) missing.splice(missing.findIndex((m) => m.key === f.key), 1)
     const hosting = host === id
+    // the facet-path fields run beside the section's one scan (their own budget each)
+    const livePending = Promise.all(liveFacts.map((f) => liveFactField(ctx, f, params, deps)))
     try {
       const out = usable.length || hosting ? await computeFields(ctx, usable, hosting ? headAgg.make : null) : { total: null, fields: [] }
       if (viaView.length) out.fields.push(...(await computeFields({ ...ctx, relation: VIEW, mode: 'view' }, viaView)).fields)
+      if (liveFacts.length) {
+        out.fields.push(...(await livePending))
+        // registry order (the pinned band: market, Property type, …), whichever path counted a field
+        const order = new Map(all.map((f, i) => [f.key, i]))
+        out.fields.sort((a, b) => (order.get(a.key) ?? 1e9) - (order.get(b.key) ?? 1e9))
+      }
       if (out.total !== null) total = out.total
       if (hosting) headRow = out.extras
       // ghost bars: each filtered field's own distribution without its own filter (≤ 5, in parallel)
       const active = new Set(cohort.fieldFilters.map((r) => r.field_key))
-      const ghostFields = out.fields.filter((f) => active.has(f.key) && f.buckets?.length).slice(0, GHOST_MAX)
+      const ghostFields = out.fields.filter((f) => active.has(f.key) && f.buckets?.length && !f.liveFact).slice(0, GHOST_MAX)
       if (ghostFields.length) {
         await Promise.all(ghostFields.map(async (f) => {
           try {
-            const gcohort = compileCohort(params, { exceptFieldKey: f.key, tab })
+            const gcohort = await substituteLiveChips(compileCohort(params, { exceptFieldKey: f.key, tab }), { served: schema[FACTS], deps, timings: ctx.timings })
             // a ghost of the WHOLE universe is a universe scan: only from the snapshot / read model
-            if (isUnfiltered(gcohort, params) && !allowUniverseScan && !(tab === OVERVIEW_TAB && ctx.mode === 'facts')) {
+            if (isUnfiltered(gcohort, params) && !allowUniverseScan) {
               const snap = await universeSnapshotField(f.key)
               if (snap) f.ghost = { total: snap.coverage?.total ?? null, buckets: (snap.buckets || []).map((b) => ({ key: b.key, label: b.label, count: b.count, filter: b.filter, tone: b.tone })), snapshot: true }
               return
@@ -1256,6 +1412,7 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
     supported: true,
     total,
     computing: universeBlocked && !snapshot?.size,
+    ...(cohort.liveChips ? { liveChips: cohort.liveChips } : {}),
     source: {
       relation: ctx.relation,
       mode: snapshot?.size ? 'snapshot' : ctx.mode,
@@ -1276,18 +1433,35 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
   }
 }
 
+/** The last successful facts refresh: when, and which addenda it wrote (eg_refresh_log.detail.addenda). */
 async function factsRefreshed(query, schema) {
   if (schema.eg_refresh_log) {
-    const { rows } = await query(`select max(finished_at) as at from public.eg_refresh_log where name = $1 and status = 'ok'`, [FACTS], STATEMENT_MS)
-    if (rows?.[0]?.at) return new Date(rows[0].at).toISOString()
+    const { rows } = await query(`select finished_at as at, detail from public.eg_refresh_log where name = $1 and status = 'ok' order by finished_at desc limit 1`, [FACTS], STATEMENT_MS)
+    const r = rows?.[0]
+    if (r?.at) {
+      const detail = r.detail && typeof r.detail === 'object' ? r.detail : {}
+      return { at: new Date(r.at).toISOString(), addenda: new Set(Array.isArray(detail.addenda) ? detail.addenda.map(String) : []) }
+    }
   }
   for (const col of ['refreshed_at', 'facts_refreshed_at', 'computed_at']) {
     if (schema[FACTS]?.has(col)) {
       const { rows } = await query(`select max(${q(col)}) as at from public.${q(FACTS)}`, [], STATEMENT_MS)
-      return rows?.[0]?.at ? new Date(rows[0].at).toISOString() : null
+      return rows?.[0]?.at ? { at: new Date(rows[0].at).toISOString(), addenda: new Set() } : null
     }
   }
   return null
+}
+
+/** The read model's columns minus addendum columns no successful refresh has written yet. */
+export function servedFactsColumns(columns, addenda = new Set()) {
+  if (!columns) return columns
+  const out = new Map()
+  for (const [col, type] of columns) {
+    const addendum = FACT_BY_COL.get(col)?.addendum
+    if (addendum && !addenda.has(addendum)) continue
+    out.set(col, type)
+  }
+  return out
 }
 
 /** A snapshot row is only read while the registry it was built from is the current one. */

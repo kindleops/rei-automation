@@ -43,6 +43,12 @@ export type OverviewField = {
   ghost?: { total: number; buckets: OverviewBucket[] }
   /** set when the field cannot be computed on this relation yet (never an estimate) */
   unavailable?: string
+  /** the read ran past its budget (still warming server-side): a retry can succeed — shown as a card, not "waiting on the read model" */
+  retry?: boolean
+  /** counted on the rail's facet path (the canonical property type before the read model serves it) */
+  liveFact?: boolean
+  /** a whole-universe count that only the snapshot / read model answers */
+  computing?: boolean
 }
 
 export type OverviewSection = { id: string; label: string; fields: OverviewField[]; unavailable?: string; snapshot?: boolean; computing?: boolean }

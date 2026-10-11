@@ -169,7 +169,9 @@ const SECTION_BY_CATEGORY = Object.freeze({
  */
 export const OVERVIEW_PINNED = Object.freeze([
   'properties.market',
-  'properties.property_type',
+  // THE canonical property type (8.5.6, entity-graph-property-class.js) — the rail's Property type facet;
+  // the vendor's raw string is 'properties.property_type' ("Property type (vendor raw)")
+  'facts.property_type_class',
   'properties.known_equity_percent',
   'properties.estimated_value',
   'properties.flags',
@@ -448,7 +450,8 @@ export function buildOverviewRegistry(tab = OVERVIEW_TAB, { fields = getEntityGr
       section: sectionOf(field, tab),
       kind,
       tab,
-      sensitive: isProtectedField(field),
+      // the 8.5.6 catalog marker (sensitive='personal_attribute': income, NAV, education…) or the protected-class pattern
+      sensitive: isProtectedField(field) || Boolean(field.sensitive),
       column: field.source_column,
       format,
       privacy,

@@ -23,11 +23,13 @@ type Props = {
   compact?: boolean
   /** position in its grid: the staggered entrance starts this card a little after the previous one */
   enterIndex?: number
+  /** re-read the section (a field that ran past its budget says retry) */
+  onRetry?: () => void
 }
 
 const toneClass = (b: OverviewBucket) => (b.tone === 'none' ? 'is-none' : b.tone === 'other' ? 'is-other' : b.tone === 'no' ? 'is-no' : b.tone === 'yes' ? 'is-yes' : 'is-value')
 
-export function OverviewCard({ field, filters, onFiltersChange, compact = false, enterIndex = 0 }: Props) {
+export function OverviewCard({ field, filters, onFiltersChange, compact = false, enterIndex = 0, onRetry }: Props) {
   const [table, setTable] = useState(false)
   const [hover, setHover] = useState<OverviewBucket | null>(null)
   const total = field.coverage?.total ?? 0
@@ -59,7 +61,7 @@ export function OverviewCard({ field, filters, onFiltersChange, compact = false,
     return (
       <article className={cx('egov-card', 'egov-enter', 'is-unavailable', compact && 'is-compact')} style={{ animationDelay: `${staggerDelay(enterIndex)}ms` }} aria-label={field.label}>
         <header className="egov-card__head"><h4 className="egov-card__title">{field.label}{field.sensitive ? <SensitiveMark /> : null}</h4></header>
-        <p className="egov-card__na"><Icon name="clock" size={12} /> {field.unavailable}</p>
+        <p className="egov-card__na"><Icon name="clock" size={12} /> {field.unavailable}{field.retry && onRetry ? <> <button type="button" className="egov-link" onClick={onRetry}>Retry</button></> : null}</p>
       </article>
     )
   }
