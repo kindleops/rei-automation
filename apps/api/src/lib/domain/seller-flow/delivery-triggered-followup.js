@@ -539,15 +539,37 @@ export async function maybeScheduleNoResponseFollowUp({
 export const FOLLOWUP_HEARTBEAT_KEY = "followup_no_response_heartbeat_at";
 export const LEGACY_FOLLOWUP_HEARTBEAT_KEY = "follow_up_scheduler_heartbeat_at";
 export const FOLLOWUP_LAST_RESULT_KEY = "followup_no_response_last_result";
-let last_heartbeat_ms = 0;
+// Per-process throttle state. Injectable (`state`) and resettable so a test
+// owns its clock: no other caller in the same process can pre-stamp it.
+const HEARTBEAT_STATE = { last_ms: null };
+
+/** A fresh, isolated throttle state (tests / one-off callers). */
+export function createFollowUpHeartbeatState() {
+  return { last_ms: null };
+}
+
+/** Reset the shared per-process throttle (tests only). */
+export function resetFollowUpHeartbeatThrottle() {
+  HEARTBEAT_STATE.last_ms = null;
+}
 
 export async function recordFollowUpHeartbeat(
   result = {},
-  { setSystemValuesImpl = setSystemValues, now = new Date(), throttleMs = 60_000 } = {}
+  { setSystemValuesImpl = setSystemValues, now = new Date(), throttleMs = 60_000, state = HEARTBEAT_STATE } = {}
 ) {
   const at = now instanceof Date ? now : new Date(now);
-  if (throttleMs > 0 && at.getTime() - last_heartbeat_ms < throttleMs) return { written: false, reason: "throttled" };
-  last_heartbeat_ms = at.getTime();
+  const at_ms = at.getTime();
+  // Throttled only inside [last, last + throttle). A clock that moved
+  // BACKWARDS (a different clock than the last stamp) is never "recent".
+  if (
+    throttleMs > 0 &&
+    Number.isFinite(state.last_ms) &&
+    at_ms >= state.last_ms &&
+    at_ms - state.last_ms < throttleMs
+  ) {
+    return { written: false, reason: "throttled" };
+  }
+  state.last_ms = at_ms;
   const iso = at.toISOString();
   try {
     await setSystemValuesImpl({
@@ -574,6 +596,8 @@ export async function maybeScheduleFollowUpAfterDelivery(args = {}) {
     await recordFollowUpHeartbeat(result, {
       ...(typeof args.setSystemValuesImpl === "function" ? { setSystemValuesImpl: args.setSystemValuesImpl } : {}),
       ...(args.heartbeatThrottleMs !== undefined ? { throttleMs: args.heartbeatThrottleMs } : {}),
+      ...(args.heartbeatNow !== undefined ? { now: args.heartbeatNow } : {}),
+      ...(args.heartbeatState ? { state: args.heartbeatState } : {}),
     });
   }
   return result;

@@ -461,28 +461,55 @@ test("archive is visibility only: no repair SQL filters archived threads out of 
 // ── 7. Scheduler heartbeat restored (owner 2026-10-10) ─────────────────────
 
 test("heartbeat: every follow-up leg run stamps followup_no_response_heartbeat_at (+ the legacy key) with the run result; throttled", async () => {
-  const { recordFollowUpHeartbeat } = await import("@/lib/domain/seller-flow/delivery-triggered-followup.js");
+  const { recordFollowUpHeartbeat, createFollowUpHeartbeatState, resetFollowUpHeartbeatThrottle } = await import("@/lib/domain/seller-flow/delivery-triggered-followup.js");
+  // Fake clock + an isolated throttle state: nothing else in this process
+  // (another file in the same chunk, the real clock) can pre-stamp it.
+  resetFollowUpHeartbeatThrottle();
+  const state = createFollowUpHeartbeatState();
+  const T0 = Date.parse("2026-10-10T16:00:00.000Z");
   const writes = [];
   const setSystemValuesImpl = async (pairs) => { writes.push(pairs); return { ok: true }; };
   const { db } = deliveredThread("S2_template");
   const out = await maybeScheduleFollowUpAfterDelivery({
     provider_message_sid: "SM_anchor", final_delivery_status: "delivered", supabase: db,
-    getSystemValueImpl: sys(), setSystemValuesImpl, heartbeatThrottleMs: 0,
+    getSystemValueImpl: sys(), setSystemValuesImpl, heartbeatState: state, heartbeatNow: new Date(T0),
   });
   assert.equal(out.scheduled, true, out.reason);
   assert.equal(writes.length, 1);
-  assert.ok(Date.parse(writes[0].followup_no_response_heartbeat_at) > 0);
+  assert.equal(writes[0].followup_no_response_heartbeat_at, new Date(T0).toISOString());
   assert.equal(writes[0].follow_up_scheduler_heartbeat_at, writes[0].followup_no_response_heartbeat_at);
   const last = JSON.parse(writes[0].followup_no_response_last_result);
   assert.equal(last.scheduled, true);
-  // even a disabled / no-op run proves the leg is alive
-  await maybeScheduleFollowUpAfterDelivery({ provider_message_sid: "SM_x", final_delivery_status: "delivered", supabase: createDb(), getSystemValueImpl: async () => null, setSystemValuesImpl, heartbeatThrottleMs: 0 });
+  // even a disabled / no-op run proves the leg is alive (61 s later: past the throttle)
+  await maybeScheduleFollowUpAfterDelivery({
+    provider_message_sid: "SM_x", final_delivery_status: "delivered", supabase: createDb(), getSystemValueImpl: async () => null,
+    setSystemValuesImpl, heartbeatState: state, heartbeatNow: new Date(T0 + 61_000),
+  });
   assert.equal(writes.length, 2);
   assert.equal(JSON.parse(writes[1].followup_no_response_last_result).reason, "followup_automation_disabled");
-  // throttle: a burst is one write; a failing write never throws into the webhook
-  const t0 = new Date("2026-10-10T16:00:00Z");
-  assert.equal((await recordFollowUpHeartbeat({}, { setSystemValuesImpl, now: t0 })).written, true);
-  assert.equal((await recordFollowUpHeartbeat({}, { setSystemValuesImpl, now: new Date(t0.getTime() + 5_000) })).written, false);
-  const failing = await recordFollowUpHeartbeat({}, { setSystemValuesImpl: async () => { throw new Error("down"); }, throttleMs: 0 });
+  // throttle: a burst inside 60 s is one write
+  const t1 = T0 + 200_000;
+  assert.equal((await recordFollowUpHeartbeat({}, { setSystemValuesImpl, now: new Date(t1), state })).written, true);
+  assert.equal((await recordFollowUpHeartbeat({}, { setSystemValuesImpl, now: new Date(t1 + 5_000), state })).written, false);
+  assert.equal((await recordFollowUpHeartbeat({}, { setSystemValuesImpl, now: new Date(t1 + 60_000), state })).written, true);
+  // a failing write never throws into the webhook
+  const failing = await recordFollowUpHeartbeat({}, { setSystemValuesImpl: async () => { throw new Error("down"); }, throttleMs: 0, state: createFollowUpHeartbeatState() });
   assert.equal(failing.written, false);
+});
+
+test("heartbeat throttle is immune to other callers in the process and to the real clock", async () => {
+  const { recordFollowUpHeartbeat, createFollowUpHeartbeatState } = await import("@/lib/domain/seller-flow/delivery-triggered-followup.js");
+  const writes = [];
+  const setSystemValuesImpl = async (pairs) => { writes.push(pairs); };
+  // another file stamps the SHARED state with the real clock…
+  await recordFollowUpHeartbeat({}, { setSystemValuesImpl, throttleMs: 0 });
+  await recordFollowUpHeartbeat({}, { setSystemValuesImpl, now: new Date() });
+  // …an isolated state is untouched, at any fake time (past or future)
+  for (const iso of ["2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z"]) {
+    assert.equal((await recordFollowUpHeartbeat({}, { setSystemValuesImpl, now: new Date(iso), state: createFollowUpHeartbeatState() })).written, true, iso);
+  }
+  // a clock that moved backwards is never "recent"
+  const state = createFollowUpHeartbeatState();
+  await recordFollowUpHeartbeat({}, { setSystemValuesImpl, now: new Date("2026-10-11T02:00:00Z"), state });
+  assert.equal((await recordFollowUpHeartbeat({}, { setSystemValuesImpl, now: new Date("2026-10-10T16:00:00Z"), state })).written, true);
 });
