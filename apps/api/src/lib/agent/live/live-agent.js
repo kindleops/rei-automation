@@ -90,6 +90,51 @@ export function agentPgPoolConfig(env = process.env, { readFile = (f) => fs.read
   return { connectionString: u.toString(), ssl, max: 3, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000, application_name: 'lc-agent-s3' }
 }
 
+/**
+ * CLIENT-side TLS state of a connected node-pg client (the socket we own). Through
+ * Supavisor, server-side pg_stat_ssl describes the pooler → Postgres hop, not ours,
+ * so it is informational only; this is the authority. Pure over the socket: exported for tests.
+ * @returns {{ ok: boolean, encrypted: boolean, authorized: boolean, authorization_error: string|null, protocol: string|null, peer_cn: string|null, issuer_cn: string|null, host_match: boolean }}
+ */
+export function clientTlsState(client, expectedHost = null) {
+  const s = client?.connection?.stream || null
+  const encrypted = Boolean(s && s.encrypted)
+  const authorized = Boolean(s && s.authorized === true)
+  const cert = s && typeof s.getPeerCertificate === 'function' ? s.getPeerCertificate() : null
+  const peer_cn = cert?.subject?.CN ? String(cert.subject.CN) : null
+  const host = String(expectedHost || '').toLowerCase()
+  const cn = String(peer_cn || '').toLowerCase()
+  const host_match = Boolean(host && cn && (cn === host || (cn.startsWith('*.') && host.endsWith(cn.slice(1)) && !host.slice(0, -cn.length + 1).includes('.'))))
+  return {
+    ok: encrypted && authorized && host_match,
+    encrypted,
+    authorized,
+    authorization_error: s?.authorizationError ? String(s.authorizationError) : null,
+    protocol: s && typeof s.getProtocol === 'function' ? s.getProtocol() : null,
+    peer_cn,
+    issuer_cn: cert?.issuer?.CN ? String(cert.issuer.CN) : null,
+    host_match,
+  }
+}
+
+/** Production gate: one pooled client must be on verified client-side TLS to the configured host, else throw. */
+export async function assertAgentPoolTls(pool, env = process.env) {
+  const host = new URL(agentPgPoolConfig(env).connectionString).hostname
+  const client = await pool.connect()
+  try {
+    const st = clientTlsState(client, host)
+    if (!st.ok) {
+      const e = new Error('AGENT_DATABASE_TLS_NOT_VERIFIED')
+      e.code = 'AGENT_DATABASE_TLS_NOT_VERIFIED'
+      e.tls = st
+      throw e
+    }
+    return st
+  } finally {
+    client.release()
+  }
+}
+
 const POOL_KEY = Symbol.for('lc.agent.pg.pool')
 
 /** ONE process-wide agent_api pool (Quick Scan store + research store share it; connection limit 10). */

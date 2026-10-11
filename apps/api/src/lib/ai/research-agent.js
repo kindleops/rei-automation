@@ -10,7 +10,7 @@
 //   models    resolved from GET /v1/models (cached 1 h), never guessed
 //   tools     the sealed read-only research registry over the guarded read client
 import { createAnthropicProvider } from './anthropic-provider.js'
-import { getAgentPgPool, liveStoreKind } from '@/lib/agent/live/live-agent.js'
+import { getAgentPgPool, liveStoreKind, assertAgentPoolTls } from '@/lib/agent/live/live-agent.js'
 import { isProductionRuntime } from '@/lib/agent/config/agent-config.js'
 import { createResearchPgStore } from '@/lib/agent/research/research-store.js'
 import { createResearchToolRegistry } from '@/lib/agent/research/research-tools.js'
@@ -42,7 +42,10 @@ export async function getResearchAgent({ env = process.env } = {}) {
   if (globalThis[KEY]) return globalThis[KEY]
   if (liveStoreKind(env) !== 'postgres') throw new AgentError('RESEARCH_STORE_REQUIRED', 'the research agent requires AGENT_STORE=postgres')
   const agent = buildResearchAgent({ env })
-  if (isProductionRuntime(env)) await agent.store.assertLeastPrivilege()
+  if (isProductionRuntime(env)) {
+    await assertAgentPoolTls(getAgentPgPool(env), env) // client-side verified TLS to the configured host (fail closed)
+    await agent.store.assertLeastPrivilege()
+  }
   // a run left 'running' by a previous container: its open reserves stay counted ('unknown')
   await agent.store.interruptStale({ olderThanMs: 10 * 60 * 1000 }).catch(() => 0)
   globalThis[KEY] = agent

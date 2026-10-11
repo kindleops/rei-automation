@@ -11,7 +11,7 @@
 // Never prints the URL, the password or the certificate. Read-only (selects only).
 import fs from 'node:fs'
 import pg from 'pg'
-import { agentPgPoolConfig } from '@/lib/agent/live/live-agent.js'
+import { agentPgPoolConfig, clientTlsState } from '@/lib/agent/live/live-agent.js'
 
 const urlFile = process.env.AGENT_DATABASE_URL_FILE
 if (!urlFile || !process.env.AGENT_DATABASE_CA_FILE) {
@@ -29,12 +29,15 @@ try {
 const client = new pg.Client({ ...cfg, connectionTimeoutMillis: 15_000, statement_timeout: 15_000 })
 try {
   await client.connect()
-  const r = await client.query(`select current_user as role, r.rolsuper, r.rolbypassrls, r.rolinherit, (select ssl from pg_stat_ssl where pid = pg_backend_pid()) as tls,
+  // client-side TLS (the authority): our socket, verified against the Supabase CA, peer name = the configured host
+  const tlsState = clientTlsState(client, new URL(cfg.connectionString).hostname)
+  const r = await client.query(`select current_user as role, r.rolsuper, r.rolbypassrls, r.rolinherit, (select ssl from pg_stat_ssl where pid = pg_backend_pid()) as server_hop_tls_info,
     has_table_privilege('agent.spend_ledger', 'INSERT') as can_reserve, has_table_privilege('agent.research_limits', 'UPDATE') as can_raise_limits,
     has_table_privilege('public.properties', 'SELECT') as reads_app_tables
     from pg_roles r where r.rolname = current_user`)
-  console.log(JSON.stringify(r.rows[0]))
-  const ok = r.rows[0].role === 'agent_api' && !r.rows[0].rolsuper && !r.rows[0].rolbypassrls && r.rows[0].tls === true && r.rows[0].can_reserve === true && r.rows[0].can_raise_limits === false && r.rows[0].reads_app_tables === false
+  console.log(JSON.stringify({ ...r.rows[0], client_tls: tlsState }))
+  // server_hop_tls_info (pg_stat_ssl) describes the pooler → Postgres hop behind Supavisor: informational only
+  const ok = r.rows[0].role === 'agent_api' && !r.rows[0].rolsuper && !r.rows[0].rolbypassrls && tlsState.ok === true && r.rows[0].can_reserve === true && r.rows[0].can_raise_limits === false && r.rows[0].reads_app_tables === false
   console.log(ok ? 'AGENT DB CREDENTIAL OK' : 'AGENT DB CREDENTIAL NOT OK')
   process.exitCode = ok ? 0 : 1
 } catch (e) {
