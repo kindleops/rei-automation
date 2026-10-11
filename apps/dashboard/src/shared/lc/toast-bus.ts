@@ -31,6 +31,16 @@ export interface LCToastMessage {
   /** the caller already played its own sound (or chose silence) */
   silent?: boolean
   action?: { label: string; onClick: () => void }
+  /**
+   * One toast per key: a toast raised with the key of one still on screen
+   * replaces it IN PLACE (same slot, timer restarted) instead of stacking —
+   * e.g. one per seller conversation.
+   */
+  key?: string
+  /** a person this toast is about: shows their monogram instead of the severity glyph */
+  avatar?: { name?: string | null; seed?: string | null }
+  /** tapping the toast body (not only its action) opens this */
+  onOpen?: () => void
 }
 
 export type LCToastInput = Omit<LCToastMessage, 'id' | 'timestamp'>

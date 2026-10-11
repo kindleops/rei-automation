@@ -21,20 +21,36 @@
 .lc-toast {
   --lc-st-rgb: var(--lc-exec-rgb);
   position: relative;
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 22px;
-  align-items: start;
-  gap: 10px;
   width: 100%;
-  padding: 10px 10px 10px 11px;
+  pointer-events: auto;
+}
+/* the material rides on the swiped element itself: opacity + backdrop-filter on one
+   element keeps the glass while it is dragged (an ancestor's opacity would drop the blur) */
+.lc-toast__swipe {
   border-radius: 14px;
   color: var(--lc-ink-1);
   background: var(--lc-sheen-wash), var(--lc-mat-smoke-bg);
   -webkit-backdrop-filter: var(--lc-mat-smoke-filter);
   backdrop-filter: var(--lc-mat-smoke-filter);
   box-shadow: inset 0 0 0 1px var(--lc-mat-smoke-edge), var(--lc-sheen-top), var(--lc-d4-shadow);
-  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
 }
+.lc-toast__swipe:active { cursor: grabbing; }
+.lc-toast__face {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 22px;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 10px 10px 11px;
+  border-radius: inherit;
+  outline: none;
+}
+.lc-toast__face:focus-visible { box-shadow: var(--lc-focus-ring); }
+.lc-toast__face.is-openable { cursor: pointer; }
+.lc-toast__face:has(.lc-toast__avatar) { grid-template-columns: 30px minmax(0, 1fr) 22px; }
+.lc-toast__avatar { display: inline-grid; place-items: center; width: 30px; height: 30px; }
 .lc-toast[data-tone='ok'] { --lc-st-rgb: var(--lc-ok-rgb); }
 .lc-toast[data-tone='attn'] { --lc-st-rgb: var(--lc-attn-rgb); }
 .lc-toast[data-tone='crit'] { --lc-st-rgb: var(--lc-crit-rgb); }
@@ -60,10 +76,13 @@
   cursor: pointer;
   border-radius: 6px;
 }
+.lc-toast__action { position: relative; }
+.lc-toast__action::after { content: ''; position: absolute; inset: -13px -10px; } /* 44px tall hit area */
 .lc-toast__action:hover { text-decoration: underline; text-underline-offset: 2px; }
 .lc-toast__action:focus-visible { box-shadow: var(--lc-focus-ring); }
 .lc-toast__close {
   all: unset;
+  position: relative;
   display: inline-grid;
   place-items: center;
   width: 22px;
@@ -73,6 +92,7 @@
   cursor: pointer;
   transition: background-color var(--lc-dur-instant), color var(--lc-dur-instant);
 }
+.lc-toast__close::after { content: ''; position: absolute; inset: -11px; } /* 44px hit area, 22px glyph */
 .lc-toast__close:hover { color: var(--lc-ink-1); background: var(--lc-inner-bg-hover); }
 .lc-toast__close:focus-visible { box-shadow: var(--lc-focus-ring); }
 

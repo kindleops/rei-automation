@@ -35,6 +35,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { createPortal } from 'react-dom'
 import { LCBulkBar, LCButton, LCEmpty, LCError, LCIconButton, LCSegmented, LCSkeleton, cx, lcConfirm, useLcReducedMotion, useLcSelection, type LcSelection } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
+import { LCMonogram } from '../../../shared/lc/Monogram'
+import { releaseVelocity } from '../../../shared/lc/swipe-dismiss'
 import { handleObjectClick, inspectObject, MOD_KEY, openObject, openObjectBeside, startObjectMission, type ObjectRef } from '../../desktop/objects'
 import { openReplay } from '../../desktop/replay/replay-store'
 import { requestNotificationsSurface } from '../../mobile/shell-surface-bridge'
@@ -341,7 +343,7 @@ function useStorySwipe({ side, onSettle, canEnd }: { side: SwipeSide | null; onS
   const slideRef = useRef<HTMLDivElement>(null)
   const [dx, setDx] = useState(0)
   const [dragging, setDragging] = useState(false)
-  const g = useRef<{ x: number; y: number; id: number; live: boolean; base: number } | null>(null)
+  const g = useRef<{ x: number; y: number; id: number; live: boolean; base: number; samples: Array<{ x: number; t: number }> } | null>(null)
   const suppressClick = useRef(false)
   const wheel = useRef<{ acc: number; t: ReturnType<typeof setTimeout> | null }>({ acc: 0, t: null })
   const base = side === 'start' ? SWIPE_TRAY_PX * 0.55 : side === 'end' ? -SWIPE_TRAY_PX : 0
@@ -350,7 +352,7 @@ function useStorySwipe({ side, onSettle, canEnd }: { side: SwipeSide | null; onS
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || (e.target as Element).closest('.ncs__check, .ncs__toggle, .ncs__more, .ncs__tray')) return
-    g.current = { x: e.clientX, y: e.clientY, id: e.pointerId, live: false, base }
+    g.current = { x: e.clientX, y: e.clientY, id: e.pointerId, live: false, base, samples: [{ x: e.clientX, t: e.timeStamp }] }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const s = g.current
@@ -363,6 +365,8 @@ function useStorySwipe({ side, onSettle, canEnd }: { side: SwipeSide | null; onS
       setDragging(true)
       try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* ignore */ }
     }
+    s.samples.push({ x: e.clientX, t: e.timeStamp })
+    if (s.samples.length > 8) s.samples.shift()
     let next = s.base + mx
     if (!canEnd && next < 0) next = next * 0.15
     setDx(dampSwipe(next, width()))
@@ -373,7 +377,8 @@ function useStorySwipe({ side, onSettle, canEnd }: { side: SwipeSide | null; onS
     if (!s || !s.live) return
     suppressClick.current = true
     setDragging(false)
-    const r = settleSwipe(dx, width(), opts)
+    // a quick left flick clears the story (velocity from the last pointer samples)
+    const r = settleSwipe(dx, width(), opts, releaseVelocity(s.samples))
     setDx(0)
     onSettle(r)
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* ignore */ }
@@ -505,8 +510,11 @@ function StoryRow({ story: s, now, expanded, sel, swipe, onSwipe, onToggle, onDo
       >
         <div className="ncs__row">
           <span className="ncs__lead">
-            <span className="ncs__glyph" title={src.label} aria-hidden="true">
-              <Icon name={src.icon} size={14} />
+            <span className={cx('ncs__glyph', s.subject?.type === 'seller' && 'is-person')} title={src.label} aria-hidden="true">
+              {/* a seller's story wears their monogram (initials on their own colour), never the inbox glyph */}
+              {s.subject?.type === 'seller'
+                ? <LCMonogram name={s.subject.label} seed={s.subject.thread_key ?? s.subject.id} size={28} />
+                : <Icon name={src.icon} size={14} />}
               {marker ? <i className={cx('ncs__marker', `is-${marker}`)} /> : null}
             </span>
             <input

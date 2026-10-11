@@ -168,3 +168,19 @@ describe('notification plane model', () => {
     expect(inverseAction('unread')).toBe('read')
   })
 })
+
+describe('plane swipe — a left flick clears (notif-ux)', () => {
+  const w = 400
+  it('a fast left flick resolves before the commit line; a slow one only reveals', () => {
+    expect(settleSwipe(-40, w, {}, -900)).toEqual({ open: null, commit: 'end' })
+    expect(settleSwipe(-(SWIPE_REVEAL_PX + 1), w, {}, -100)).toEqual({ open: 'end', commit: null })
+    expect(settleSwipe(-10, w, {}, -2000)).toEqual({ open: null, commit: null }) // jitter, not a flick
+  })
+  it('a right flick never opens by itself; thrown back springs home', () => {
+    expect(settleSwipe(40, w, {}, 900)).toEqual({ open: null, commit: null })
+    expect(settleSwipe(-(w * SWIPE_COMMIT + 5), w, {}, 900)).toEqual({ open: null, commit: null })
+  })
+  it('an expired story reads neutral, like a superseded one', () => {
+    expect(storyTone({ ...({} as Story), resolved: true, resolved_by: 'expired' } as Story)).toBe('neutral')
+  })
+})

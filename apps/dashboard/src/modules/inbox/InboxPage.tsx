@@ -4407,7 +4407,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (pendingThreadBusyRef.current === pending.threadKey) return
     const norm = (v: unknown) => String(v ?? '').trim().toLowerCase()
     const wanted = norm(pending.threadKey)
-    const inList = threads.find((t) => norm(t.threadKey) === wanted || norm(t.id) === wanted)
+    const wantedProperty = norm(pending.propertyId)
+    const sameThread = (t: { threadKey?: unknown; id?: unknown }) => norm(t.threadKey) === wanted || norm(t.id) === wanted
+    // one phone can carry two conversations: the deep link's property picks the right one (else the thread)
+    const sameProperty = (t: { propertyId?: unknown }) => Boolean(wantedProperty) && norm(t.propertyId) === wantedProperty
+    const inList = threads.find((t) => sameThread(t) && sameProperty(t)) ?? threads.find(sameThread)
     if (inList) {
       clearPendingInboxThread()
       handleSelect(inList.id)
@@ -4418,8 +4422,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     pendingThreadBusyRef.current = pending.threadKey
     try {
       const res = await fetchLiveInbox({ filter: 'all', q: pending.threadKey, limit: 10, map: false, skipCounts: true })
-      const hit = (res.threads ?? []).map(toWorkflowThread)
-        .find((t) => norm(t.threadKey) === wanted || norm(t.id) === wanted)
+      const fetched = (res.threads ?? []).map(toWorkflowThread)
+      const hit = fetched.find((t) => sameThread(t) && sameProperty(t)) ?? fetched.find(sameThread)
       if (peekPendingInboxThread()?.threadKey !== pending.threadKey) return
       clearPendingInboxThread()
       if (!hit) {

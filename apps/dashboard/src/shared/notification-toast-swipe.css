@@ -1,0 +1,10 @@
+/* Phone toast stack — swipe-to-dismiss wrapper + 44px controls (the stack itself lives in index.css). */
+.nx-toast-swipe { pointer-events: auto; touch-action: pan-y; }
+.nx-toast-swipe > .nx-toast { -webkit-user-select: none; user-select: none; }
+.nx-toast.is-openable { cursor: pointer; }
+.nx-toast:focus-visible { outline: 2px solid var(--nexus-accent, #5eead4); outline-offset: 2px; }
+.nx-toast__avatar { display: inline-grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; }
+.nx-toast__dismiss { position: relative; }
+.nx-toast__dismiss::after { content: ''; position: absolute; inset: -10px; } /* 44px hit area around the 24px glyph */
+.nx-toast__action { position: relative; }
+.nx-toast__action::after { content: ''; position: absolute; inset: -12px -8px; }

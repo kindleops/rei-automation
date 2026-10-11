@@ -12,6 +12,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from './icons'
 import { playSound } from './sounds'
 import { lcToast, subscribeToasts, type LCToastMessage, type LCToastSeverity } from './lc/toast-bus'
+import { LCSwipeDismiss } from './lc/SwipeDismiss'
+import { LCMonogram } from './lc/Monogram'
+import { upsertToast } from './lc/toast-stack'
+import './notification-toast-swipe.css'
 
 // ── Types + bus ──────────────────────────────────────────────────────────
 // The bus now lives in the Experience System (`shared/lc/toast-bus`, raised
@@ -46,10 +50,12 @@ const severityIcon: Record<NotificationSeverity, string> = {
 
 export const NotificationToasts = () => {
   const [toasts, setToasts] = useState<NexusNotification[]>([])
+  const stackRef = useRef<NexusNotification[]>([])
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const dismiss = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
+    stackRef.current = stackRef.current.filter((t) => t.id !== id)
+    setToasts(stackRef.current)
     const timer = timersRef.current.get(id)
     if (timer) {
       clearTimeout(timer)
@@ -59,7 +65,13 @@ export const NotificationToasts = () => {
 
   useEffect(() => {
     const unsub = subscribeNotifications((notif) => {
-      setToasts((prev) => [notif, ...prev].slice(0, MAX_VISIBLE_TOASTS + 2))
+      // one per key (a seller conversation): a newer alert updates the card in place
+      const { toasts: next, replacedId } = upsertToast(stackRef.current, notif, MAX_VISIBLE_TOASTS + 2)
+      stackRef.current = next
+      setToasts(next)
+      const id = replacedId ?? notif.id
+      const prevTimer = timersRef.current.get(id)
+      if (prevTimer) { clearTimeout(prevTimer); timersRef.current.delete(id) }
 
       // Play sound
       if (notif.silent) {
@@ -76,9 +88,9 @@ export const NotificationToasts = () => {
       if (notif.autoDismiss !== false) {
         const ms = notif.dismissMs ?? 3000
         const timer = setTimeout(() => {
-          dismiss(notif.id)
+          dismiss(id)
         }, ms)
-        timersRef.current.set(notif.id, timer)
+        timersRef.current.set(id, timer)
       }
     })
 
@@ -92,16 +104,26 @@ export const NotificationToasts = () => {
   if (toasts.length === 0) return null
 
   return (
-    <div className="nx-toasts" aria-live="polite">
+    <div className="nx-toasts" aria-live="polite" role="region" aria-label="Notifications">
       {toasts.slice(0, MAX_VISIBLE_TOASTS).map((toast, i) => (
+        // swipe sideways (touch or mouse) to dismiss; the X and Escape still work
+        <LCSwipeDismiss key={toast.id} className="nx-toast-swipe" onDismiss={() => dismiss(toast.id)}>
         <div
-          key={toast.id}
-          className={`nx-toast ${severityClass[toast.severity]}`}
+          className={`nx-toast ${severityClass[toast.severity]}${toast.onOpen ? ' is-openable' : ''}`}
           style={{ '--toast-index': i } as React.CSSProperties}
+          role={toast.severity === 'critical' ? 'alert' : 'status'}
+          aria-roledescription="notification"
+          tabIndex={0}
+          onClick={toast.onOpen ? () => { toast.onOpen?.(); dismiss(toast.id) } : undefined}
+          onKeyDown={toast.onOpen ? (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); toast.onOpen?.(); dismiss(toast.id) } } : undefined}
         >
-          <div className="nx-toast__icon-wrap">
-            <Icon name={severityIcon[toast.severity] as Parameters<typeof Icon>[0]['name']} className="nx-toast__icon" />
-          </div>
+          {toast.avatar ? (
+            <span className="nx-toast__avatar" aria-hidden="true"><LCMonogram name={toast.avatar.name} seed={toast.avatar.seed} size={30} /></span>
+          ) : (
+            <div className="nx-toast__icon-wrap">
+              <Icon name={severityIcon[toast.severity] as Parameters<typeof Icon>[0]['name']} className="nx-toast__icon" />
+            </div>
+          )}
           <div className="nx-toast__body">
             <span className="nx-toast__title">{toast.title}</span>
             {toast.detail && <span className="nx-toast__detail">{toast.detail}</span>}
@@ -119,10 +141,11 @@ export const NotificationToasts = () => {
               </button>
             )}
           </div>
-          <button type="button" className="nx-toast__dismiss" onClick={() => dismiss(toast.id)}>
+          <button type="button" className="nx-toast__dismiss" aria-label="Dismiss" onClick={(e) => { e.stopPropagation(); dismiss(toast.id) }}>
             <Icon name="close" className="nx-toast__dismiss-icon" />
           </button>
         </div>
+        </LCSwipeDismiss>
       ))}
     </div>
   )

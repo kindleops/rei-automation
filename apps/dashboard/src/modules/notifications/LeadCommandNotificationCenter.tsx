@@ -20,6 +20,10 @@ import { LCSegmented } from '../../shared/lc'
 import { SignalsPanel } from './signals/SignalsPanel'
 import { NotificationPlane } from './plane/NotificationPlane'
 import { planeOwnsNotifications } from './plane/plane-host'
+import { openNotificationDestination, resolveNotificationDestination } from './notification-destination'
+import { memberIdsOf, visibleAlerts } from '../../domain/notifications/alert-persistence'
+import { LCMonogram } from '../../shared/lc/Monogram'
+import { LCSwipeDismiss } from '../../shared/lc/SwipeDismiss'
 import './notification-center.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -62,16 +66,8 @@ const severityIcon = (severity: NotificationSeverity): Parameters<typeof Icon>[0
   }
 }
 
-const resolveActionHref = (event: NotificationEvent): string | null => {
-  const primary = event.actions.find((action) => action.primary) ?? event.actions[0]
-  if (primary?.href) return primary.href
-  if (event.threadKey) return `/inbox?thread=${encodeURIComponent(event.threadKey)}`
-  if (event.propertyId) return `/deal-intelligence?property=${encodeURIComponent(event.propertyId)}`
-  if (event.queueId) return '/queue'
-  if (event.contractId) return '/closing-desk'
-  if (event.campaignId) return '/campaign-command'
-  return null
-}
+// one destination rule for every notification surface (exact thread / property / campaign / case)
+const resolveActionHref = resolveNotificationDestination
 
 const NotificationCard = ({
   item,
@@ -104,6 +100,7 @@ const NotificationCard = ({
   const secondaryActions = item.actions.filter((action) => action !== primaryAction)
 
   return (
+    <LCSwipeDismiss className="lcnc-card__swipe" onDismiss={onDismiss}>
     <article
       role="listitem"
       className={cls(
@@ -123,9 +120,13 @@ const NotificationCard = ({
           <label className="lcnc-card__select">
             <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label="Select notification" />
           </label>
-          <span className="lcnc-card__icon-wrap">
-            <Icon name={severityIcon(item.severity)} size={12} />
-          </span>
+          {item.domain === 'inbox' && item.threadKey ? (
+            <LCMonogram name={item.sellerName} seed={item.threadKey} size={22} className="lcnc-card__mono" />
+          ) : (
+            <span className="lcnc-card__icon-wrap">
+              <Icon name={severityIcon(item.severity)} size={12} />
+            </span>
+          )}
           <span className="lcnc-card__domain">{DOMAIN_LABELS[item.domain]}</span>
           {item.groupedCount && item.groupedCount > 1 ? (
             <span className="lcnc-card__group-badge">{item.groupedCount}×</span>
@@ -209,6 +210,7 @@ const NotificationCard = ({
         </div>
       </div>
     </article>
+    </LCSwipeDismiss>
   )
 }
 
@@ -316,8 +318,8 @@ const LegacyNotificationCenter = ({
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
-    return notifications.filter((item) => {
-      if (item.status === 'dismissed') return false
+    // undismissed, unexpired, one card per conversation (visibility only)
+    return visibleAlerts(notifications).filter((item) => {
       if (severityFilter !== 'all' && item.severity !== severityFilter) return false
       if (domainFilter !== 'all' && item.domain !== domainFilter) return false
       if (!query) return true
@@ -333,11 +335,11 @@ const LegacyNotificationCenter = ({
   }, [])
 
   const handleOpen = useCallback(async (item: NotificationEvent) => {
-    await patch(item.id, 'mark_read')
-    const href = resolveActionHref(item)
-    if (href) {
+    const ids = memberIdsOf(item)
+    await (ids.length > 1 ? patch(ids[0], 'bulk_mark_read', { ids }) : patch(item.id, 'mark_read'))
+    if (resolveActionHref(item)) {
       onClose()
-      pushRoutePath(href)
+      openNotificationDestination(item)
     }
   }, [onClose, patch])
 
@@ -531,7 +533,7 @@ const LegacyNotificationCenter = ({
                       selected={selectedIds.includes(item.id)}
                       onToggleSelect={() => toggleSelected(item.id)}
                       onOpen={() => void handleOpen(item)}
-                      onDismiss={() => void patch(item.id, 'dismiss')}
+                      onDismiss={() => { const ids = memberIdsOf(item); void (ids.length > 1 ? patch(ids[0], 'bulk_dismiss', { ids }) : patch(item.id, 'dismiss')) }}
                       onMarkRead={() => void patch(item.id, 'mark_read')}
                       onMarkUnread={() => void patch(item.id, 'mark_unread')}
                       onSnooze={() => void snoozeOneHour(item.id)}

@@ -6,12 +6,16 @@
  * like the notification centre of a device: every card carries its source
  * app's lit tile, severity is a ring and a word rather than a colour wash,
  * phone numbers read like phone numbers, grouped alerts stack like a deck,
- * unread glows, and a swipe left clears a card. Tapping a card goes exactly
- * where it says. Push enrolment lives at the top until it is on.
+ * unread glows, and a swipe (either way, or a flick) clears a card. Tapping a
+ * card goes exactly where it says. Push enrolment lives at the top until it is on.
+ *
+ * What it shows (alert-persistence.ts, visibility only): one card per seller
+ * conversation, updated in place; an alert stops showing once its
+ * conversation was answered, an informational one after a day, an actionable
+ * one after three. A seller's card wears their monogram, not an inbox glyph.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { pushRoutePath } from '../../app/router'
 import { Icon, type IconName } from '../../shared/icons'
 import { formatRelativeTime } from '../../shared/formatters'
 import {
@@ -23,7 +27,10 @@ import {
 } from '../../domain/notifications/notification-contract'
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
 import { enablePush, readPushStatus, type PushStatus } from '../../domain/notifications/push-subscription'
-import { resolveNotificationDestination } from './notification-destination'
+import { openNotificationDestination, resolveNotificationDestination } from './notification-destination'
+import { isActionableAlert, memberIdsOf, visibleAlerts } from '../../domain/notifications/alert-persistence'
+import { LCMonogram } from '../../shared/lc/Monogram'
+import { LCSwipeDismiss } from '../../shared/lc/SwipeDismiss'
 import './mobile-notification-center.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
@@ -82,8 +89,8 @@ function splitTitle(raw: string): { title: string; subject: string | null } {
   return { title: readablePhones(raw), subject: null }
 }
 
-const needsAction = (event: NotificationEvent) =>
-  event.status === 'unread' && (event.severity === 'critical' || event.severity === 'warning')
+/** Urgent = unread and actionable (a seller to work, a failure to fix) — not every warning-coloured fact. */
+const needsAction = (event: NotificationEvent) => event.status === 'unread' && isActionableAlert(event)
 
 function PushCard() {
   const [status, setStatus] = useState<PushStatus | null>(null)
@@ -118,7 +125,7 @@ function PushCard() {
   )
 }
 
-/** One card: tap opens it, swipe left clears it. */
+/** One card: tap opens it, swipe (or flick) sideways clears it, Delete / Escape clears it from the keyboard. */
 function NotificationCard({ item, index, onOpen, onDismiss }: { item: NotificationEvent; index: number; onOpen: () => void; onDismiss: () => void }) {
   const base = DOMAIN_STYLE[item.domain] ?? DOMAIN_STYLE.platform
   const style = { ...base, ...(eventStyle(item) ?? {}) }
@@ -126,70 +133,39 @@ function NotificationCard({ item, index, onOpen, onDismiss }: { item: Notificati
   const body = readablePhones(item.summary || item.body || '')
   const unread = item.status === 'unread'
   const stacked = (item.groupedCount ?? 1) > 1
-  const ref = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ x: number; y: number; dx: number; axis: 'x' | 'y' | null } | null>(null)
-  const [dx, setDx] = useState(0)
-  const [gone, setGone] = useState(false)
-
-  const onDown = (e: React.PointerEvent) => { drag.current = { x: e.clientX, y: e.clientY, dx: 0, axis: null } }
-  const onMove = (e: React.PointerEvent) => {
-    const d = drag.current
-    if (!d) return
-    const mx = e.clientX - d.x
-    const my = e.clientY - d.y
-    if (!d.axis && (Math.abs(mx) > 8 || Math.abs(my) > 8)) {
-      d.axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y'
-      // Once it is a horizontal swipe, keep the pointer: without capture the
-      // drag died the moment the finger/cursor left the card, snapping it back.
-      if (d.axis === 'x') { try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* not capturable */ } }
-    }
-    if (d.axis !== 'x') return
-    d.dx = Math.min(0, mx)
-    setDx(d.dx)
-  }
-  const onUp = () => {
-    const d = drag.current
-    drag.current = null
-    if (!d) return
-    if (d.axis === 'x') {
-      if (d.dx < -96) { setGone(true); window.setTimeout(onDismiss, 260) } else setDx(0)
-      return
-    }
-    if (!d.axis) onOpen()
-  }
+  const seller = item.domain === 'inbox' && Boolean(item.threadKey)
+  // a seller's card names them when the name is known (the title only carries the phone)
+  const heading = seller && item.sellerName ? item.sellerName : null
 
   return (
-    <div className={cls('nx-ntf-card-wrap', stacked && 'is-stacked', gone && 'is-gone')} style={{ ['--i' as string]: Math.min(index, 12), ['--hue' as string]: style.hue }}>
-      <span className="nx-ntf-card__clear" aria-hidden="true" style={{ opacity: Math.min(1, -dx / 90) }}><Icon name="check" />Clear</span>
-      <div
-        ref={ref}
-        role="button"
-        tabIndex={0}
-        data-notif-id={item.id}
-        className={cls('nx-ntf-card', `is-${item.severity}`, unread && 'is-unread')}
-        style={{ transform: dx ? `translateX(${dx}px)` : undefined, transition: drag.current ? 'none' : undefined }}
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerCancel={() => { drag.current = null; setDx(0) }}
-        onKeyDown={(e) => { if (e.key === 'Enter') onOpen() }}
-      >
-        <span className="nx-ntf-card__tile" aria-hidden="true">
-          <Icon name={style.icon} />
-          {item.severity === 'positive' && <b className="nx-ntf-card__badge is-good"><Icon name="check" /></b>}
-          {(item.severity === 'critical' || item.severity === 'warning') && <b className={cls('nx-ntf-card__badge', `is-${item.severity}`)}>!</b>}
-        </span>
-        <div className="nx-ntf-card__copy">
-          <div className="nx-ntf-card__top">
-            <span className="nx-ntf-card__app">{style.label}{SEVERITY_WORD[item.severity] ? <em className={`is-${item.severity}`}> · {SEVERITY_WORD[item.severity]}</em> : null}</span>
-            <time dateTime={item.createdAt}>{formatRelativeTime(item.createdAt)}</time>
-            {unread && <i className="nx-ntf-card__dot" aria-label="Unread" />}
+    <div className={cls('nx-ntf-card-wrap', stacked && 'is-stacked')} style={{ ['--i' as string]: Math.min(index, 12), ['--hue' as string]: style.hue }}>
+      <LCSwipeDismiss className="nx-ntf-card__swipe" onDismiss={onDismiss}>
+        <div
+          role="button"
+          tabIndex={0}
+          data-notif-id={item.id}
+          aria-label={`${heading ? `${heading}: ` : ''}${title}${subject ? ` ${subject}` : ''}. Swipe sideways or press Delete to clear.`}
+          className={cls('nx-ntf-card', `is-${item.severity}`, unread && 'is-unread')}
+          onClick={onOpen}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+        >
+          <span className={cls('nx-ntf-card__tile', seller && 'is-person')} aria-hidden="true">
+            {seller ? <LCMonogram name={item.sellerName} seed={item.threadKey} size={42} /> : <Icon name={style.icon} />}
+            {item.severity === 'positive' && <b className="nx-ntf-card__badge is-good"><Icon name="check" /></b>}
+            {(item.severity === 'critical' || item.severity === 'warning') && <b className={cls('nx-ntf-card__badge', `is-${item.severity}`)}>!</b>}
+          </span>
+          <div className="nx-ntf-card__copy">
+            <div className="nx-ntf-card__top">
+              <span className="nx-ntf-card__app">{heading ?? style.label}{SEVERITY_WORD[item.severity] ? <em className={`is-${item.severity}`}> · {SEVERITY_WORD[item.severity]}</em> : null}</span>
+              <time dateTime={item.createdAt}>{formatRelativeTime(item.createdAt)}</time>
+              {unread && <i className="nx-ntf-card__dot" aria-label="Unread" />}
+            </div>
+            <strong className="nx-ntf-card__title">{title}{subject && !heading ? <span> {subject}</span> : null}</strong>
+            {body && body !== subject ? <p className="nx-ntf-card__body">{body}</p> : null}
+            {stacked && <span className="nx-ntf-card__more">+{(item.groupedCount ?? 1) - 1} more like this</span>}
           </div>
-          <strong className="nx-ntf-card__title">{title}{subject ? <span> {subject}</span> : null}</strong>
-          {body && body !== subject ? <p className="nx-ntf-card__body">{body}</p> : null}
-          {stacked && <span className="nx-ntf-card__more">+{(item.groupedCount ?? 1) - 1} more like this</span>}
         </div>
-      </div>
+      </LCSwipeDismiss>
     </div>
   )
 }
@@ -214,7 +190,8 @@ export const MobileNotificationCenter = ({ open, onClose }: MobileNotificationCe
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
-  const live = useMemo(() => notifications.filter((n) => n.status !== 'dismissed'), [notifications])
+  // undismissed, unexpired, one card per conversation (visibility only — nothing is written)
+  const live = useMemo(() => visibleAlerts(notifications), [notifications])
   const counts = useMemo(() => ({
     action: live.filter(needsAction).length,
     all: live.length,
@@ -229,15 +206,21 @@ export const MobileNotificationCenter = ({ open, onClose }: MobileNotificationCe
   const grouped = useMemo(() => groupNotificationsByTime(shown), [shown])
 
   const handleOpen = useCallback((item: NotificationEvent) => {
-    const href = resolveNotificationDestination(item)
-    void Promise.resolve(patch(item.id, 'mark_read')).catch(() => undefined)
-    if (!href) return
+    const ids = memberIdsOf(item)
+    void Promise.resolve(ids.length > 1 ? patch(ids[0], 'bulk_mark_read', { ids }) : patch(item.id, 'mark_read')).catch(() => undefined)
+    if (!resolveNotificationDestination(item)) return
     onClose()
-    pushRoutePath(href)
+    openNotificationDestination(item)
   }, [onClose, patch])
 
+  /** A collapsed card clears every alert it stands for. */
+  const handleDismiss = useCallback((item: NotificationEvent) => {
+    const ids = memberIdsOf(item)
+    void (ids.length > 1 ? patch(ids[0], 'bulk_dismiss', { ids }) : patch(item.id, 'dismiss'))
+  }, [patch])
+
   const markAllRead = useCallback(async () => {
-    const ids = filtered.filter((n) => n.status === 'unread').map((n) => n.id)
+    const ids = filtered.filter((n) => n.status === 'unread').flatMap(memberIdsOf)
     if (ids.length) await patch(ids[0], 'bulk_mark_read', { ids })
   }, [filtered, patch])
 
@@ -278,7 +261,7 @@ export const MobileNotificationCenter = ({ open, onClose }: MobileNotificationCe
               <section key={g} className="nx-ntf__group">
                 <h3>{TIME_GROUP_LABEL[g]}</h3>
                 {items.map((item) => (
-                  <NotificationCard key={item.id} item={item} index={cardIndex++} onOpen={() => handleOpen(item)} onDismiss={() => void patch(item.id, 'dismiss')} />
+                  <NotificationCard key={item.id} item={item} index={cardIndex++} onOpen={() => handleOpen(item)} onDismiss={() => handleDismiss(item)} />
                 ))}
               </section>
             )
@@ -302,7 +285,7 @@ export const MobileNotificationCenter = ({ open, onClose }: MobileNotificationCe
               <span>{segment === 'action' ? 'Critical and warning signals land here the moment they fire.' : 'Replies, campaigns, closings and platform health land here.'}</span>
             </div>
           )}
-          {shown.length > 0 && <p className="nx-ntf__hint">Swipe left to clear · tap to open</p>}
+          {shown.length > 0 && <p className="nx-ntf__hint">Swipe to clear · tap to open</p>}
         </div>
       </div>
     </>,

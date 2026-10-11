@@ -1,0 +1,52 @@
+/* LCMonogram — initials on a per-seller colour, soft glass gradient.
+   The colour arrives as --lc-mono-c (a token reference from monogram.ts). */
+.lc-mono {
+  --lc-mono-s: 32px;
+  --lc-mono-c: rgb(var(--lc-exec-rgb, 76, 201, 240));
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--lc-mono-s);
+  height: var(--lc-mono-s);
+  border-radius: 50%;
+  overflow: hidden;
+  isolation: isolate;
+  color: #fff;
+  background:
+    radial-gradient(120% 90% at 30% 18%, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 58%),
+    linear-gradient(155deg,
+      color-mix(in srgb, var(--lc-mono-c) 86%, #fff) 0%,
+      var(--lc-mono-c) 46%,
+      color-mix(in srgb, var(--lc-mono-c) 58%, #0a0d14) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 0 0 1px color-mix(in srgb, var(--lc-mono-c) 40%, transparent),
+    0 4px 12px -4px color-mix(in srgb, var(--lc-mono-c) 55%, transparent);
+  user-select: none;
+}
+.lc-mono::after {
+  /* a breath of glass over the lower half */
+  content: '';
+  position: absolute;
+  inset: 52% 8% -30%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+  z-index: -1;
+  pointer-events: none;
+}
+.lc-mono__txt {
+  font-family: var(--lc-font-ui, ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, sans-serif);
+  font-size: calc(var(--lc-mono-s) * 0.4);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.22);
+  font-variant-numeric: lining-nums;
+}
+.lc-mono.is-glyph { color: rgba(255, 255, 255, 0.92); }
+.lc-mono.is-glyph svg { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2)); }
+@media (forced-colors: active) {
+  .lc-mono { forced-color-adjust: none; border: 1px solid CanvasText; }
+}

@@ -90,6 +90,12 @@ export interface NotificationEvent {
   campaignId?: string | null
   groupedCount?: number
   groupKey?: string | null
+  /** inbox rows: the thread's latest outbound (server enrichment) — an answered alert is stale */
+  threadRepliedAt?: string | null
+  /** inbox rows: the seller's display name from their own messages (server enrichment) */
+  sellerName?: string | null
+  /** collapsed cards: every row id the card stands for (dismiss / read act on all of them) */
+  memberIds?: string[]
 }
 
 export interface NotificationPreferences {
@@ -161,6 +167,8 @@ export interface ApiNotificationRow {
   grouping_key?: string | null
   group_key?: string | null
   recommendation?: Record<string, unknown> | null
+  thread_last_outbound_at?: string | null
+  seller_display_name?: string | null
 }
 
 export interface ApiNotificationActionRow {
@@ -408,6 +416,8 @@ function mapMetricsSnapshot(row: ApiNotificationRow): NotificationMetrics[] | un
   return metrics.length ? metrics : undefined
 }
 
+const THREAD_SOURCES = new Set(['thread', 'seller_thread', 'seller'])
+
 export function mapApiNotification(row: ApiNotificationRow): NotificationEvent {
   const domain = normalizeNotificationDomain(row.domain)
   const severity = normalizeNotificationSeverity(row.severity)
@@ -429,7 +439,9 @@ export function mapApiNotification(row: ApiNotificationRow): NotificationEvent {
     snoozedUntil: row.snoozed_until ?? null,
     actions: mapAvailableActions(row),
     metrics: mapMetricsSnapshot(row),
-    threadKey: row.participant_id ?? row.thread_key ?? null,
+    // a workflow alert (notify.operator) names its thread only as the source entity: without this the
+    // "Seller waiting on review" card had no destination and a tap did nothing but mark it read
+    threadKey: row.participant_id ?? row.thread_key ?? (THREAD_SOURCES.has(String(row.source_entity_type ?? '')) ? row.source_entity_id ?? null : null),
     propertyId: row.property_id ?? null,
     ownerId: row.owner_id ?? null,
     queueId: row.queue_id ?? null,
@@ -438,6 +450,8 @@ export function mapApiNotification(row: ApiNotificationRow): NotificationEvent {
     campaignId: row.campaign_id ?? null,
     groupedCount: row.group_count ?? row.grouped_count ?? undefined,
     groupKey: row.grouping_key ?? row.group_key ?? null,
+    threadRepliedAt: row.thread_last_outbound_at ?? null,
+    sellerName: row.seller_display_name ?? null,
   }
 }
 

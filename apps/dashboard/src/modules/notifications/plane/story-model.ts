@@ -41,7 +41,7 @@ export interface Story {
   state: { code: string; label: string | null; tone: StoryTone | null }
   requires_operator: boolean
   resolved: boolean
-  resolved_by: 'machine' | 'operator' | 'superseded' | null
+  resolved_by: 'machine' | 'operator' | 'superseded' | 'expired' | null
   resolved_at: string | null
   read: boolean
   read_at: string | null
@@ -228,7 +228,7 @@ export function runObject(s: Story): ObjectRef | null {
 
 /** Semantic accent: red = real problem, green = resolved, cyan = active/neutral, gold = attention/opportunity. */
 export function storyTone(s: Story): StoryTone {
-  if (s.resolved) return s.resolved_by === 'superseded' ? 'neutral' : 'green'
+  if (s.resolved) return s.resolved_by === 'superseded' || s.resolved_by === 'expired' ? 'neutral' : 'green'
   if (s.priority === 'critical') return 'red'
   if (s.requires_operator) return 'gold'
   if (s.state.tone === 'red') return 'red'
@@ -337,11 +337,22 @@ export const SWIPE_COMMIT = 0.45
 export type SwipeSide = 'start' | 'end' // start: dragged right (left tray: Open) · end: dragged left (right tray: Read / Resolve)
 export interface SwipeSettle { open: SwipeSide | null; commit: SwipeSide | null }
 
-/** Pure: where a released swipe settles. */
-export function settleSwipe(dx: number, width: number, { canStart = true, canEnd = true } = {}): SwipeSettle {
+/** px/s: a left flick at least this fast clears the story (resolve) without travelling to the commit line */
+export const SWIPE_FLICK_VELOCITY = 600
+
+/**
+ * Pure: where a released swipe settles. `velocity` (px/s, negative = leftward)
+ * lets a quick flick commit: a LEFT flick resolves (the dismiss side); a right
+ * flick only reveals Open — opening stays a deliberate drag or tap.
+ * A flick back toward home always springs back.
+ */
+export function settleSwipe(dx: number, width: number, { canStart = true, canEnd = true } = {}, velocity = 0): SwipeSettle {
   const side: SwipeSide | null = dx > 0 ? 'start' : dx < 0 ? 'end' : null
   if (!side || (side === 'start' && !canStart) || (side === 'end' && !canEnd)) return { open: null, commit: null }
   const d = Math.abs(dx)
+  const v = Number.isFinite(velocity) ? velocity : 0
+  if (Math.sign(v) === -Math.sign(dx) && Math.abs(v) >= SWIPE_FLICK_VELOCITY) return { open: null, commit: null }
+  if (side === 'end' && v <= -SWIPE_FLICK_VELOCITY && d >= 24) return { open: null, commit: 'end' }
   if (width > 0 && d >= width * SWIPE_COMMIT) return { open: null, commit: side }
   if (d >= SWIPE_REVEAL_PX) return { open: side, commit: null }
   return { open: null, commit: null }

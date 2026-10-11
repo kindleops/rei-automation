@@ -27,8 +27,8 @@ import { isAlertTypeEnabled, playGroupedNotificationSounds } from './notificatio
 import { alertTypeFor } from './alert-types'
 import { desktopSoundOwnsSurface } from '../../shared/sound/surface'
 import { emitNotification, type NotificationSeverity as ToastSeverity } from '../../shared/NotificationToast'
-import { pushRoutePath } from '../../app/router'
-import { resolveNotificationDestination } from '../../modules/notifications/notification-destination'
+import { openNotificationDestination, resolveNotificationDestination } from '../../modules/notifications/notification-destination'
+import { alertExpiry, collapseByConversation, conversationKey, isActionableAlert, toastLifetime } from './alert-persistence'
 
 const TOAST_SEVERITY: Record<NotificationEvent['severity'], ToastSeverity> = {
   critical: 'critical', warning: 'warning', positive: 'success', neutral: 'info',
@@ -45,17 +45,29 @@ function announceArrivals(items: NotificationEvent[]) {
   if (desktopSoundOwnsSurface()) return
   const settings = loadSettings()
   if (settings.notificationsEnabled === false || settings.notificationMasterMuted) return
-  const shown = items.filter((item) => isAlertTypeEnabled(alertTypeFor(item))).slice(0, 3)
+  // one pop-up per conversation (updated in place), only alerts that still mean something,
+  // actionable ones first; an answered or aged alert never pops up
+  const now = Date.now()
+  const fresh = collapseByConversation(items.filter((item) => isAlertTypeEnabled(alertTypeFor(item)) && !alertExpiry(item, now)))
+  const shown = [...fresh].sort((a, b) => Number(isActionableAlert(b)) - Number(isActionableAlert(a))).slice(0, 3)
+  const infoMs = Math.min(10_000, Math.max(3_000, Number(settings.notificationToastDuration) || 5_000))
   for (const item of shown) {
     const href = resolveNotificationDestination(item)
+    // actionable alerts stay until swiped / closed / opened; informational ones leave on their own
+    const life = toastLifetime(item, infoMs)
+    const open = href ? () => { openNotificationDestination(item) } : undefined
     emitNotification({
       title: item.title,
       detail: item.body || item.summary || undefined,
       severity: TOAST_SEVERITY[item.severity] ?? 'info',
       source: 'notifications',
       silent: true,
-      dismissMs: Math.min(10_000, Math.max(3_000, Number(settings.notificationToastDuration) || 5_000)),
-      action: href ? { label: 'Open', onClick: () => pushRoutePath(href) } : undefined,
+      autoDismiss: life.autoDismiss,
+      dismissMs: life.autoDismiss ? life.dismissMs : undefined,
+      key: conversationKey(item) ?? `notification:${item.id}`,
+      avatar: item.domain === 'inbox' && item.threadKey ? { name: item.sellerName ?? null, seed: item.threadKey } : undefined,
+      onOpen: open,
+      action: open ? { label: 'Open', onClick: open } : undefined,
     })
   }
 }

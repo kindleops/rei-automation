@@ -114,6 +114,7 @@ type BucketConfig = {
 
 import ScheduledFollowupsPanel from './ScheduledFollowupsPanel'
 import BulkFollowUpSheet from './BulkFollowUpSheet'
+import { LCMonogram } from '../../../shared/lc/Monogram'
 
 const BUCKETS: BucketConfig[] = [
   { bucket: 'priority', view: 'priority', label: 'Priority', shortLabel: 'Priority', icon: '🔥', description: 'Evidence-driven high-intent threads (list shows top 50; count is full population)', accentClass: 'is-hot', countKey: 'priority' },
@@ -1245,8 +1246,9 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
       onClick={() => onSelect(thread.id)}
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
-      <span className={cls('nx-row25__avatar', decision.unread && 'is-unread')} aria-hidden="true">
-        {monogramOf(name)}
+      <span className={cls('nx-row25__avatar', 'has-mono', decision.unread && 'is-unread')} aria-hidden="true" data-initials={monogramOf(name)}>
+        {/* the same monogram the notifications wear: the seller's initials on their own colour */}
+        <LCMonogram name={name} seed={thread.threadKey || thread.id} size={46} />
       </span>
       <div className="nx-row25__zone nx-row25__zone--media" aria-hidden>
         <PropertySignalTile model={tileModel} size="rail" />
