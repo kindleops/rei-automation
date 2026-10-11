@@ -148,13 +148,13 @@ function EngineComps({ d, selection, onSelect, now }: { d: DiDecision; selection
   }, [c, sort])
   const columns: LCColumn<DiComp>[] = [
     { id: 'photo', header: '', width: 66, render: (x) => <CompStreetView size="cell" load="visible" photo={x.photo} lat={x.lat} lng={x.lng} address={x.address} /> },
-    { id: 'address', header: 'Address', minWidth: 200, sortable: true, render: (x) => <span className="dr-cell-addr"><b>{x.address?.split(',')[0] ?? '—'}</b>{x.assetMatch ? null : <em className="dr-off">different asset</em>}</span> },
+    { id: 'address', header: 'Address', minWidth: 170, sortable: true, render: (x) => <span className="dr-cell-addr"><b>{x.address?.split(',')[0] ?? '—'}</b>{x.assetMatch ? null : <em className="dr-off">different asset</em>}</span> },
     { id: 'saletype', header: 'Sale type', width: 118, sortable: true, hint: 'How the sale happened — MLS, investor purchase, off-market or public record — from the recorded fields', render: (x) => <SaleTypeBadge v={saleTypeOfDealComp(x)} /> },
     { id: 'buyer', header: 'Buyer', width: 168, hint: 'Who bought it: LLC / trust / company / bank vs individual, and investor vs owner-occupant where known. Solid = recorded deed; dashed = inferred from the current owner of record.', render: (x) => <BuyerTypeChip t={buyerOf(x)} /> },
     { id: 'sale', header: 'Sale', width: 92, align: 'right', sortable: true, render: (x) => usd(x.salePrice) ?? '—' },
     { id: 'adjusted', header: 'Adjusted', width: 96, align: 'right', sortable: true, hint: 'Sale price after the engine’s feature adjustments', render: (x) => <b>{usd(x.adjustedValue) ?? '—'}</b> },
-    { id: 'distance', header: 'Dist.', width: 70, align: 'right', sortable: true, render: (x) => (x.distanceMiles !== null ? `${x.distanceMiles.toFixed(2)} mi` : '—') },
-    { id: 'date', header: 'Sold', width: 96, align: 'right', sortable: true, render: (x) => dateShort(x.saleDate, now) ?? '—' },
+    { id: 'distance', header: 'Dist.', width: 80, align: 'right', sortable: true, render: (x) => (x.distanceMiles !== null ? `${x.distanceMiles.toFixed(2)} mi` : '—') },
+    { id: 'date', header: 'Sold', width: 112, align: 'right', sortable: true, render: (x) => dateShort(x.saleDate, now) ?? '—' },
     { id: 'sqft', header: 'Sq ft', width: 74, align: 'right', sortable: true, render: (x) => int(x.sqft) ?? '—' },
     { id: 'ppsf', header: '$/sf', width: 64, align: 'right', sortable: true, render: (x) => (x.ppsf ? `$${Math.round(x.ppsf)}` : '—') },
     { id: 'bdba', header: 'Bd / Ba', width: 70, align: 'right', render: (x) => `${x.beds ?? '—'} / ${x.baths ?? '—'}` },
@@ -239,15 +239,15 @@ function CandidateComps({ d, now, engine }: { d: DiDecision; now: number; engine
   const cover = buyerTypeCoverage(list.map(buyerOf))
   const columns: LCColumn<EvidenceComp>[] = [
     { id: 'photo', header: '', width: 66, render: (x) => <CompStreetView size="cell" load="visible" photo={x.photo} lat={x.lat} lng={x.lng} address={x.address} /> },
-    { id: 'address', header: 'Address', minWidth: 200, render: (x) => <span className="dr-cell-addr"><b>{x.address?.split(',')[0] ?? '—'}</b>{x.assetMatch ? null : <em className="dr-off">different asset</em>}</span> },
+    { id: 'address', header: 'Address', minWidth: 170, render: (x) => <span className="dr-cell-addr"><b>{x.address?.split(',')[0] ?? '—'}</b>{x.assetMatch ? null : <em className="dr-off">different asset</em>}</span> },
     { id: 'saletype', header: 'Sale type', width: 118, render: (x) => <SaleTypeBadge v={saleTypeOfComp(x)} /> },
     { id: 'buyer', header: 'Buyer', width: 168, hint: 'LLC / trust / company / bank vs individual; investor vs owner-occupant where known. Dashed = inferred from the current owner of record.', render: (x) => <BuyerTypeChip t={buyerOf(x)} /> },
     { id: 'sale', header: 'Sale', width: 92, align: 'right', render: (x) => usd(x.salePrice) ?? '—' },
-    { id: 'date', header: 'Sold', width: 96, align: 'right', render: (x) => dateShort(x.saleDate, now) ?? '—' },
-    { id: 'distance', header: 'Dist.', width: 70, align: 'right', render: (x) => (x.distanceMiles !== null ? `${x.distanceMiles.toFixed(2)} mi` : '—') },
+    { id: 'date', header: 'Sold', width: 112, align: 'right', render: (x) => dateShort(x.saleDate, now) ?? '—' },
+    { id: 'distance', header: 'Dist.', width: 80, align: 'right', render: (x) => (x.distanceMiles !== null ? `${x.distanceMiles.toFixed(2)} mi` : '—') },
     { id: 'sqft', header: 'Sq ft', width: 74, align: 'right', render: (x) => int(x.sqft) ?? '—' },
-    { id: 'ppsf', header: '$/sf', width: 64, align: 'right', render: (x) => (x.ppsf ? `$${Math.round(x.ppsf)}` : '—') },
-    { id: 'bdba', header: 'Bd / Ba', width: 70, align: 'right', render: (x) => `${x.beds ?? '—'} / ${x.baths ?? '—'}` },
+    { id: 'ppsf', header: '$/sf', width: 72, align: 'right', render: (x) => (x.ppsf ? `$${Math.round(x.ppsf)}` : '—') },
+    { id: 'bdba', header: 'Bd / Ba', width: 76, align: 'right', render: (x) => `${x.beds ?? '—'} / ${x.baths ?? '—'}` },
   ]
   const err = engineErrorText(engine.error ?? null)
   return (
