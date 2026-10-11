@@ -44,10 +44,10 @@
   border-radius: 999px;
   font: 600 11.5px/1 var(--lc-font-ui);
   color: var(--lc-ink-2);
-  box-shadow: inset 0 0 0 1px var(--lc-mat-crystal-edge, rgba(255, 255, 255, 0.1));
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi);
   cursor: pointer;
 }
-.uinsp__links button:hover { color: var(--lc-ink-1); background: rgba(255, 255, 255, 0.05); }
+.uinsp__links button:hover { color: var(--lc-ink-1); background: var(--lc-inner-bg-hover); }
 .uinsp__links button:focus-visible { box-shadow: var(--lc-focus-ring); }
 
 .uinsp__foot { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -83,7 +83,7 @@ export function UniversalInspector() {
   if (!current) return null
   if (!renderer) {
     return (
-      <LCInspector open onClose={closeInspector} id="universal" title={current.label ?? current.id} className="uinsp" label="Inspector">
+      <LCInspector open onClose={closeInspector} id="universal" title={current.label ?? current.id} className="uinsp lc-insp--plane" label="Inspector">
         <LCEmpty compact icon="eye" title="No quick view for this yet" body="Open it in its app to see the full picture." />
       </LCInspector>
     )
@@ -138,7 +138,7 @@ export function UniversalInspector() {
       open
       onClose={closeInspector}
       id="universal"
-      className="uinsp"
+      className="uinsp lc-insp--plane"
       title={model?.title ?? current.label ?? renderer.noun}
       eyebrow={<span className="uinsp__eyebrow"><Icon name={renderer.glyph} size={11} />{[renderer.noun, model?.eyebrow].filter(Boolean).join(' · ')}</span>}
       subtitle={model?.subtitle ?? null}

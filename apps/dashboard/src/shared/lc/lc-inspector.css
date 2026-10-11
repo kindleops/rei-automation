@@ -11,12 +11,26 @@
   min-height: 0;
   color: var(--lc-ink-1);
   border-radius: var(--lc-r-plane);
-  /* float material: in-pane, so near-opaque (see --lc-mat-float-bg) */
-  background: var(--lc-sheen-wash), var(--lc-mat-float-bg);
-  -webkit-backdrop-filter: var(--lc-mat-smoke-filter);
-  backdrop-filter: var(--lc-mat-smoke-filter);
-  box-shadow: inset 0 0 0 1px var(--lc-mat-smoke-edge), var(--lc-sheen-top), var(--lc-d4-shadow);
+  /* LIQUID GLASS — the menu family's edge, sheen, tint and depth on every
+     inspector. Float fill stays near-opaque (--lc-mat-float-bg): a float sits
+     over app content INSIDE a pane, where Chromium cannot frost what scrolls
+     beneath it, so any translucency would ghost crisp text through. */
+  background: var(--lc-sheen-wash), linear-gradient(var(--lc-glass-tint), var(--lc-glass-tint)), var(--lc-mat-float-bg);
+  -webkit-backdrop-filter: var(--lc-glass-filter-strong);
+  backdrop-filter: var(--lc-glass-filter-strong);
+  box-shadow: var(--lc-glass-sheen), inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-shadow-menu);
   transform-origin: right center;
+}
+/* Docked: nothing scrolls beneath, so the pane's own frosted glass may show
+   through — menu-grade fill (floored, dense content stays ≥ 4.5:1). */
+.lc-insp.is-dock {
+  background: var(--lc-sheen-wash), linear-gradient(var(--lc-glass-tint), var(--lc-glass-tint)), var(--lc-glass-menu);
+}
+/* PLANE: a shell-level inspector OUTSIDE every pane (Time Machine, Brief,
+   Universal Inspector) — real blur over the room, the Live Activity menu's
+   material at menu-grade fill. */
+.lc-insp.lc-insp--plane {
+  background: var(--lc-sheen-wash), linear-gradient(var(--lc-glass-tint), var(--lc-glass-tint)), var(--lc-glass-menu);
 }
 .lc-insp.is-float {
   position: absolute;
@@ -56,7 +70,7 @@
   width: 2px;
   height: 36px;
   border-radius: 2px;
-  background: rgba(var(--lc-edge-rgb), 0.18);
+  background: var(--lc-glass-line-hi);
   transform: translateY(-50%);
   opacity: 0;
   transition: opacity var(--lc-dur-fast) var(--lc-ease-standard);

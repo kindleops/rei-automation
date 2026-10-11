@@ -144,7 +144,7 @@ function TimeMachinePlane({ subject }: { subject: FeedSubject }) {
 
   return (
     <LCInspector open onClose={closeReplay} id="time-machine" mode="float" width={1080} minWidth={720} maxWidth={1600} resizable
-      className="tm" eyebrow={<span className="tm__eyebrow"><Icon name="clock" size={11} /> Time Machine · {SUBJECT_NOUN[subject.type]}</span>}
+      className="tm lc-insp--plane" eyebrow={<span className="tm__eyebrow"><Icon name="clock" size={11} /> Time Machine · {SUBJECT_NOUN[subject.type]}</span>}
       title={label} status={<LCStatus tone="neutral" quiet hollow label="Read-only replay" />} label={`Time Machine — ${label}`}>
       <div className="tm-body" onKeyDown={onKey}>
         <div className="tm-controls">

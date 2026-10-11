@@ -38,7 +38,7 @@ function BriefPlaneBody() {
   return (
     <LCInspector
       open onClose={closeBrief} id="brief-plane" mode="float" width={wide ? 980 : 560} minWidth={460} maxWidth={1400} resizable
-      className={cx('bf-plane', wide && 'is-wide')}
+      className={cx('bf-plane lc-insp--plane', wide && 'is-wide')}
       eyebrow={<span className="bf-eyebrow"><Icon name="briefing" size={11} /> Intelligence Brief</span>}
       title={headline(brief)}
       subtitle={`${stamp} · every line cites its source`}
