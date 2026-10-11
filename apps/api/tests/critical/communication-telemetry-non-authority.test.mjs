@@ -49,12 +49,44 @@ test("the audit actually covers the source tree", () => {
   assert.ok(SRC_FILES.length > 500, `expected a full source walk, got ${SRC_FILES.length} files`);
 });
 
+/**
+ * HOMONYMS — a DIFFERENT table's column that happens to share a telemetry field's name.
+ * comp_private.comp_properties.last_observed_at is the vendor owner-snapshot date (when the
+ * owner of record was last seen), not seller-communication replay telemetry. Each entry is
+ * one exact source line, pinned below: the line must still exist verbatim, must qualify the
+ * column with the named table's alias, and the file must never touch the communication
+ * tables. Any other occurrence of a telemetry field anywhere (including a second line in an
+ * allowlisted file) is still a consumer.
+ */
+const COMMUNICATION_TABLES = ["seller_logical_communications", "seller_communication_attempts"];
+const HOMONYMS = [
+  {
+    file: "lib/domain/market-intelligence/mi-sale-owner.js",
+    line: "cp.last_observed_at::date::text as owner_observed_on,",
+    alias: "cp",
+    table: "comp_private.comp_properties cp",
+  },
+];
+
+test("telemetry-name homonyms are exact, other-table, and never in a communications module", () => {
+  for (const h of HOMONYMS) {
+    const code = fs.readFileSync(path.join(API_SRC, h.file), "utf8");
+    const lines = code.split("\n").map((l) => l.trim());
+    assert.equal(lines.filter((l) => l === h.line).length, 1, `${h.file}: pinned homonym line missing or duplicated`);
+    assert.ok(h.line.startsWith(`${h.alias}.`), `${h.file}: homonym must be qualified by ${h.alias}.`);
+    assert.ok(code.includes(h.table), `${h.file}: alias ${h.alias} must be bound to ${h.table}`);
+    for (const t of COMMUNICATION_TABLES) assert.ok(!code.includes(t), `${h.file} must not touch ${t}`);
+  }
+});
+
 test("NO application module reads the telemetry fields", () => {
   const consumers = [];
   for (const file of SRC_FILES) {
-    const code = fs.readFileSync(file, "utf8");
+    const rel = path.relative(API_SRC, file);
+    const allowed = new Set(HOMONYMS.filter((h) => h.file === rel).map((h) => h.line));
+    const lines = fs.readFileSync(file, "utf8").split("\n");
     for (const field of TELEMETRY_FIELDS) {
-      if (code.includes(field)) consumers.push(`${path.relative(API_SRC, file)} (${field})`);
+      if (lines.some((l) => l.includes(field) && !allowed.has(l.trim()))) consumers.push(`${rel} (${field})`);
     }
   }
   assert.deepEqual(
