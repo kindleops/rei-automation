@@ -26,6 +26,12 @@ export const BURST_WINDOW_MS = 10 * 60e3
 export const DERIVATIVE_WINDOW_MS = 30 * 60e3
 export const SKEW_MS = 5e3
 export const AGE_INTO_HISTORY_MS = 24 * 3600e3
+/**
+ * A seller story's open need expires after this long with no new activity on
+ * it: the conversation still lives in the Inbox's own buckets (the work queue),
+ * the notification stops asking. Visibility only — no lead state changes.
+ */
+export const NEED_TTL_MS = 72 * 3600e3
 const LATE_MORPHS = new Set(['you_replied', 'response_sent', 'opted_out'])
 
 const clean = (v) => String(v ?? '').trim()
@@ -36,11 +42,14 @@ const fmtPhone = (tk) => { const d = clean(tk).replace(/\D/g, '').replace(/^1(?=
 
 const MORPH = {
   responding: { code: 'responding', label: 'Responding…', tone: 'cyan' },
-  response_sent: { code: 'response_sent', label: 'Response sent ✓', tone: 'green', resolves: 'machine' },
+  // an auto reply that went out after the need answered the seller: the need is over
+  response_sent: { code: 'response_sent', label: 'Response sent ✓', tone: 'green', resolves: 'machine', clearsNeeds: true },
   you_replied: { code: 'you_replied', label: 'You replied ✓', tone: 'green', resolves: 'operator', clearsNeeds: true },
   message_sent: { code: 'message_sent', label: 'Follow-up sent ✓', tone: 'green', resolves: 'machine' },
   handled: { code: 'handled', label: 'Handled by automation ✓', tone: 'green', resolves: 'machine' },
   held: { code: 'held', label: 'Held for your review', tone: 'gold', needs: true },
+  // a workflow escalation (notify.operator) re-asserting the conversation's open need — its own label wins
+  escalated: { code: 'escalated', label: 'Still waiting on your review', tone: 'gold', needs: true },
   automation_failed: { code: 'automation_failed', label: 'Automation failed', tone: 'red', needs: true },
   send_failed: { code: 'send_failed', label: 'Send failed', tone: 'red', needs: true },
   opted_out: { code: 'opted_out', label: 'Opted out · suppression applied', tone: 'neutral', resolves: 'machine', clearsNeeds: true },
@@ -149,7 +158,7 @@ export function groupBursts(items) {
     if (b) { b.items.push(it); index(b, it); continue }
     // a reply that answers the conversation later (outside the burst window) still answers it:
     // it morphs the subject's latest earlier story instead of becoming noise
-    if (LATE_MORPHS.has(it.morph)) { late.push(it); continue }
+    if (LATE_MORPHS.has(it.morph) || it.late) { late.push(it); continue }
     orphans.push(it)
   }
   // pass 3 — standalone orphans open their own story; the rest may join them
@@ -173,6 +182,8 @@ export function groupBursts(items) {
     let prior = null
     for (const b of bursts) if (b.sk === it.sk && b.startMs <= it.t && (!prior || b.startMs > prior.startMs)) prior = b
     if (prior) prior.items.push(it)
+    // an escalation whose conversation left the window still asks once, as its own story
+    else if (it.late) { const b = newBurst({ ...it, role: 'trigger' }, 'fact'); bursts.push(b) }
     else machineFeedOnly += 1
   }
   for (const b of bursts) b.items.sort((x, y) => x.t - y.t || (x.id < y.id ? -1 : 1))
@@ -233,9 +244,10 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
   let peak = 'info'
   let needs = false
   let needsLabel = null
+  let needAtMs = NaN
   for (const it of chainItems) {
     if (it.priority) peak = maxPriority(peak, it.priority)
-    if (it.needs_operator && !it.resolved_at && it.t >= lastTriggerMs - SKEW_MS) { needs = true; needsLabel = it.label || needsLabel }
+    if (it.needs_operator && !it.resolved_at && it.t >= lastTriggerMs - SKEW_MS) { needs = true; needsLabel = it.label || needsLabel; needAtMs = it.t }
   }
   if (b.kind === 'message') peak = maxPriority(peak, 'important')
 
@@ -250,8 +262,9 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
     }
     if (morph) needs = false
   } else {
-    for (const it of chainItems) if (it.morph && MORPH[it.morph] && it.t >= lastTriggerMs - SKEW_MS) morph = MORPH[it.morph]
-    if (morph?.needs) needsLabel = morph.label
+    let morphItem = null
+    for (const it of chainItems) if (it.morph && MORPH[it.morph] && it.t >= lastTriggerMs - SKEW_MS) { morph = MORPH[it.morph]; morphItem = it }
+    if (morph?.needs) { needsLabel = morph.code === 'escalated' ? morphItem.label || morph.label : morph.label; needAtMs = morphItem.t }
     if (b.kind === 'milestone' && b.resolver) morph = MORPH[b.resolver.morph] || morph
     if (morph?.needs) needs = true
     if (morph?.clearsNeeds) needs = false
@@ -260,9 +273,12 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
 
   const op = operatorState(b, state.get(id), lastTriggerMs)
   const machineResolved = Boolean(morph?.resolves) && !needs
-  const resolvedBy = op.resolvedAt ? 'operator' : machineResolved ? (morph.resolves === 'operator' ? 'operator' : 'machine') : null
+  // stale: a seller need nobody acted on for NEED_TTL_MS stops asking (the Inbox keeps the conversation)
+  const needSince = Number.isFinite(needAtMs) ? needAtMs : lastTriggerMs
+  const expired = !op.resolvedAt && !machineResolved && needs && s?.type === 'seller' && now - needSince > NEED_TTL_MS
+  const resolvedBy = op.resolvedAt ? 'operator' : machineResolved ? (morph.resolves === 'operator' ? 'operator' : 'machine') : expired ? 'expired' : null
   const resolved = Boolean(resolvedBy)
-  const resolvedAt = op.resolvedAt || (resolved ? machineResolvedAt || lastTrigger.at : null)
+  const resolvedAt = op.resolvedAt || (expired ? new Date(needSince + NEED_TTL_MS).toISOString() : resolved ? machineResolvedAt || lastTrigger.at : null)
   if (resolved) needs = false
   const priority = resolved ? 'info' : needs ? maxPriority(peak, 'action') : peak === 'action' ? 'important' : peak
   const peakPriority = s?.type === 'seller' && peak === 'critical' ? 'action' : peak
@@ -359,11 +375,11 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
     primary_event: { id: b.first.id, type: b.first.event_type, at: b.first.at },
     title,
     summary,
-    reason: needs ? needsLabel || 'Needs your decision' : morph?.label || (resolvedBy === 'operator' ? 'Resolved by you ✓' : null),
+    reason: needs ? needsLabel || 'Needs your decision' : expired ? 'Expired · no activity in 3 days' : morph?.label || (resolvedBy === 'operator' ? 'Resolved by you ✓' : null),
     priority,
     peak_priority: peakPriority,
     lens,
-    state: morph ? { code: morph.code, label: morph.label, tone: morph.tone } : resolvedBy === 'operator' ? { code: 'resolved', label: 'Resolved by you ✓', tone: 'green' } : { code: resolved ? 'handled' : 'open', label: null, tone: null },
+    state: expired ? { code: 'expired', label: 'Expired', tone: 'neutral' } : morph ? { code: morph.code, label: morph.label, tone: morph.tone } : resolvedBy === 'operator' ? { code: 'resolved', label: 'Resolved by you ✓', tone: 'green' } : { code: resolved ? 'handled' : 'open', label: null, tone: null },
     requires_operator: needs,
     resolved,
     resolved_by: resolvedBy,

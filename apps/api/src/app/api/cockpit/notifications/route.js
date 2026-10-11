@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server.js'
 import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../_shared.js'
 import { listNotificationEvents } from '@/lib/domain/notifications/notification-intelligence-service.js'
 import { runNotificationIntelligenceScan } from '@/lib/domain/notifications/notification-scanners.js'
+import { attachThreadReplyState } from '@/lib/domain/notifications/notification-thread-state.js'
+import { supabase } from '@/lib/supabase/client.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,9 +34,12 @@ export async function GET(request) {
       return NextResponse.json({ ok: false, error: result.error }, { status: 500, headers: cors })
     }
 
+    // inbox alerts carry their thread's latest outbound time: the client expires an answered alert
+    const notifications = await attachThreadReplyState(result.notifications ?? [], { db: supabase })
+
     return NextResponse.json({
       ok: true,
-      notifications: result.notifications,
+      notifications,
       total: result.total,
       meta: { unread_filter: searchParams.get('unread') === 'true' },
     }, { status: 200, headers: cors })

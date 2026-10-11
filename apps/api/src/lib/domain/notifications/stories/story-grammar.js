@@ -188,6 +188,25 @@ const INBOX_FACTS = {
   inbox_follow_up_due: { label: 'Follow-up due', tone: 'gold', priority: 'important', standalone: true },
   inbox_sla_breach: { label: 'Reply overdue', tone: 'gold', priority: 'action', needs: true, standalone: true, sound: 'attention' },
 }
+/**
+ * Workflow operator alerts written through notify.operator onto a seller thread
+ * (`source_entity_type = 'seller_thread'`, dedupe key `wf:<run>:<node>:notify`).
+ * Every one of them used `inbox_needs_call`, so the plane read the review
+ * escalation ("Seller waiting on review for 4 hours") as "Wants a call" — 114 of
+ * 114 prod rows, none a call request. The title says which escalation it is.
+ */
+const ESCALATIONS = [
+  { re: /waiting on review/i, label: 'Still waiting on your review', tone: 'gold', morph: 'escalated' },
+  { re: /offer unanswered/i, label: 'Offer unanswered', tone: 'gold', morph: 'escalated' },
+  { re: /message failed/i, label: 'Message failed', tone: 'red', morph: 'send_failed' },
+]
+export function workflowEscalation(r) {
+  if (!r) return null
+  const fromWorkflow = clean(r.source_entity_type) === 'seller_thread' || clean(r.deduplication_key).startsWith('wf:')
+  if (!fromWorkflow || clean(r.domain) !== 'inbox') return null
+  const title = clean(r.title)
+  return ESCALATIONS.find((x) => x.re.test(title)) || { label: 'Needs your attention', tone: 'gold', morph: 'escalated' }
+}
 const NEG = new Set(['warning', 'critical'])
 const RECOVERY = /(recovered|recovery|healthy|improving)$/
 
@@ -238,6 +257,10 @@ export function itemFromNotification(r) {
   }
   if (domain === 'inbox') {
     if (!thread) return null
+    // A workflow operator alert (notify.operator) borrows `inbox_needs_call` as its event type — the seller
+    // never asked for a call. It re-asserts the conversation's open need on the story it escalates.
+    const escalation = workflowEscalation(r)
+    if (escalation) return { ...base, role: 'derivative', standalone: false, late: true, subject: sellerSubject(thread, r.property_id), label: escalation.label, detail: clean(r.title) || null, tone: escalation.tone, priority: 'action', needs_operator: true, morph: escalation.morph, sound: null }
     const f = INBOX_FACTS[type] || { label: capFirst(humanize(type.replace(/^inbox_/, ''))), tone: NEG.has(sev) ? 'gold' : 'neutral', priority: 'info' }
     return { ...base, role: 'derivative', standalone: Boolean(f.standalone), subject: sellerSubject(thread, r.property_id), label: f.label, detail: null, tone: f.tone, priority: f.priority, needs_operator: Boolean(f.needs), morph: f.morph || null, sound: f.sound || null }
   }

@@ -413,3 +413,60 @@ test('[8.3] partition parsing and lookup', async () => {
   assert.deepEqual([...out], ['seller:+16125550101'])
   assert.deepEqual(seen, [['inbox_thread_state', 1]])
 })
+
+/* ── notif-ux (2026-10-10): workflow escalations, stale needs ─────────── */
+const escalation = (id, { tk = '+16125550101', s = 4 * 3600, title = 'Seller waiting on review for 4 hours' } = {}) => ({
+  ...alert(id, 'inbox_needs_call', { tk, s, severity: 'positive', extra: { title, description: 'The seller brain asked for a human and the conversation is still open.', source_entity_type: 'seller_thread', property_id: null, metrics_snapshot: {} } }),
+})
+
+test('a review escalation (inbox_needs_call from notify.operator) is never "Wants a call" and joins the held story — one per thread', () => {
+  const it = itemFromNotification(escalation('n1'))
+  assert.equal(it.label, 'Still waiting on your review')
+  assert.notEqual(it.label, 'Wants a call')
+  const stories = buildStories({ events: [inbound('m1'), run('r1', 'workflow.held', { s: 5, msg: 'm1' })], notifications: [escalation('n1')], now: T0 + 5 * 3600e3 }).stories
+  assert.equal(stories.length, 1, 'the escalation re-asserts the held story; no second story')
+  assert.equal(stories[0].lens, 'needs_you')
+  assert.equal(stories[0].reason, 'Still waiting on your review')
+  assert.equal(stories[0].title, 'Gale Leflore replied')
+  // a REAL call request from the inbound path keeps its label
+  assert.equal(itemFromNotification(alert('n2', 'inbox_needs_call')).label, 'Wants a call')
+})
+
+test('the escalation stops asking once the conversation is answered (operator reply or an auto reply after it)', () => {
+  const now = T0 + 6 * 3600e3
+  const base = [inbound('m1'), run('r1', 'workflow.held', { s: 5, msg: 'm1' })]
+  const replied = buildStories({ events: [...base, sent('m2', { s: 5 * 3600, origin: 'inbox', operator: true })], notifications: [escalation('n1')], now }).stories
+  assert.equal(replied.length, 1)
+  assert.equal(replied[0].requires_operator, false)
+  assert.equal(replied[0].lens, 'resolved')
+  const auto = buildStories({ events: [...base, sent('m3', { s: 5 * 3600, origin: 'auto_reply' })], notifications: [escalation('n1')], now }).stories
+  assert.equal(auto[0].requires_operator, false, 'a held reply that went out answers the seller')
+  assert.equal(auto[0].lens, 'resolved')
+  // replied BEFORE the escalation: the escalation (conversation still open per the workflow) asks again
+  const before = buildStories({ events: [...base, sent('m4', { s: 3600, origin: 'inbox', operator: true })], notifications: [escalation('n1')], now }).stories
+  assert.equal(before[0].requires_operator, true)
+})
+
+test('an escalation whose conversation left the window still asks once, as its own story', () => {
+  const [s] = buildStories({ events: [], notifications: [escalation('n1', { s: 0 })], now: T0 + 3600e3 }).stories
+  assert.equal(s.lens, 'needs_you')
+  assert.match(s.title, /Still waiting on your review/)
+})
+
+test('stale: a seller need with no activity for 72h expires out of NEEDS YOU (visibility only); system needs never expire', () => {
+  const events = [inbound('m1'), run('r1', 'workflow.held', { s: 5, msg: 'm1' })]
+  const fresh = buildStories({ events, now: T0 + 71 * 3600e3 }).stories
+  assert.equal(fresh[0].lens, 'needs_you')
+  const stale = buildStories({ events, now: T0 + 73 * 3600e3 }).stories
+  assert.equal(stale[0].lens, 'resolved')
+  assert.equal(stale[0].resolved_by, 'expired')
+  assert.equal(stale[0].requires_operator, false)
+  assert.equal(stale[0].sound, null)
+  assert.equal(stale[0].state.code, 'expired')
+  assert.equal(countStories(stale).badge, 0)
+  // the clock runs from the latest need: an escalation at +70h keeps it asking at +73h
+  const escalated = buildStories({ events, notifications: [escalation('n1', { s: 70 * 3600 })], now: T0 + 73 * 3600e3 }).stories
+  assert.equal(escalated[0].lens, 'needs_you')
+  const blocked = buildStories({ events: [campaignEv('ce:1', 'campaign.blocked', 0)], now: T0 + 30 * 24 * 3600e3 }).stories
+  assert.equal(blocked[0].lens, 'needs_you', 'a blocked campaign is a standing condition, not a stale alert')
+})

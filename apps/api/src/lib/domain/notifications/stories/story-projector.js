@@ -25,6 +25,7 @@
 import { supabase as defaultSupabase, hasSupabaseConfig } from '@/lib/supabase/client.js'
 import { listPlatformEvents } from '@/lib/domain/platform/events/platform-events-service.js'
 import { readEvents, readNotifications, isMissingTable, STATE_TABLE, WINDOW_MS } from './story-sources.js'
+import { NEED_TTL_MS } from './story-builder.js'
 import { toInputs, projectPartitions, diffProjection, storyFromRow, countRows, partitionOfStory, PROJECTION_COLS } from './story-projection.js'
 import { archivedFor, isArchivedPartition } from './story-archive-filter.js'
 
@@ -153,6 +154,20 @@ async function ageOut(db, windowStartIso) {
   return [...new Set(old.map((r) => r.partition_key))]
 }
 
+/**
+ * Needs that crossed NEED_TTL_MS since the story last moved: their partitions are re-projected so the
+ * builder (which owns the expiry rule) moves them out of NEEDS YOU even when nothing new arrived.
+ * Best-effort: a failed read only delays the expiry to the next pass.
+ */
+async function expiringPartitions(db, now) {
+  try {
+    const cutoff = new Date(now - NEED_TTL_MS).toISOString()
+    const { data, error } = await db.from(STORIES_TABLE).select('partition_key').eq('requires_operator', true).lt('updated_at', cutoff).limit(2000)
+    if (error || !Array.isArray(data)) return []
+    return [...new Set(data.map((r) => r.partition_key).filter(Boolean))]
+  } catch { return [] }
+}
+
 /** Incremental pass (the normal path). */
 export async function projectStories(deps = {}) {
   const db = dbOf(deps)
@@ -172,7 +187,8 @@ export async function projectStories(deps = {}) {
   const raw = { events: ev.events, notifications: nt.rows }
   const inputs = toInputs(raw, await hostLookup(db, raw))
   const aged = await ageOut(db, new Date(windowStart).toISOString())
-  const r = await applyInputs(db, inputs, { now, since: new Date(windowStart).toISOString(), extraPartitions: aged })
+  const expiring = await expiringPartitions(db, now)
+  const r = await applyInputs(db, inputs, { now, since: new Date(windowStart).toISOString(), extraPartitions: [...aged, ...expiring] })
   const degraded = [...ev.degraded, ...nt.degraded]
   // a source that timed out is re-read from the old cursor next pass (no gap) — for up to an hour,
   // after which a chronically-down source no longer holds every other source's cursor back
