@@ -517,3 +517,19 @@ test("the EG facts refresh rides the reconciliation cadence, incremental only, s
     assert.notEqual(vars.EG_FACTS_REFRESH_ENABLED, "true", "not commissioned: the owner flips this");
   }
 });
+
+test("the Command Wall token pepper is forwarded to the container conditionally (secret, default unset)", async () => {
+  // wall-crypto.js stores display tokens as HMAC-SHA256(COMMAND_WALL_TOKEN_PEPPER, token)
+  // and falls back to plain SHA-256 when the container never receives the pepper.
+  const code = await workerCode();
+  assert.match(
+    code,
+    /env\.COMMAND_WALL_TOKEN_PEPPER\s*\?\s*\{\s*COMMAND_WALL_TOKEN_PEPPER:\s*env\.COMMAND_WALL_TOKEN_PEPPER\s*\}\s*:\s*\{\}/,
+    "the pepper must be forwarded, and only when set"
+  );
+  assert.equal((code.match(/COMMAND_WALL_TOKEN_PEPPER:/g) || []).length, 1, "forwarded exactly once, never unconditionally");
+  for (const cfg of [PRODUCTION, STAGING]) {
+    const vars = await configVars(cfg);
+    assert.ok(!("COMMAND_WALL_TOKEN_PEPPER" in vars), "a secret, never a plain wrangler var");
+  }
+});

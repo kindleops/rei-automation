@@ -196,6 +196,11 @@ export class ApiContainer extends Container<Env> {
       ...(env.SCOPED_CANARY_EXECUTION_SECRET
         ? { SCOPED_CANARY_EXECUTION_SECRET: env.SCOPED_CANARY_EXECUTION_SECRET }
         : {}),
+      // Command Wall display tokens: stored only as HMAC-SHA256(pepper, token)
+      // (wall-crypto.js). Absent => plain SHA-256. Conditional; default unset.
+      ...(env.COMMAND_WALL_TOKEN_PEPPER
+        ? { COMMAND_WALL_TOKEN_PEPPER: env.COMMAND_WALL_TOKEN_PEPPER }
+        : {}),
 
       // EMAIL TRANSPORT (Brevo) -- forwarded by explicit operator decision
       // 2026-09-29 ("Brevo" as the one email transport, brand domains).
@@ -246,6 +251,8 @@ interface Env {
   INTERNAL_API_BASE_URL?: string;
   TEXTGRID_WEBHOOK_PUBLIC_BASE_URL?: string;
   SCOPED_CANARY_EXECUTION_SECRET?: string;
+  /** Command Wall display-token pepper (secret). Unset => tokens hashed with plain SHA-256. */
+  COMMAND_WALL_TOKEN_PEPPER?: string;
   DEPLOYMENT_ENV?: string;
   DEPLOYMENT_ID?: string;
   DEPLOY_GIT_SHA?: string;
