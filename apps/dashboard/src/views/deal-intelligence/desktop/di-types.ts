@@ -229,13 +229,23 @@ export interface DiStory {
   } | null
 }
 
-export type DiMode = 'decision' | 'evidence' | 'record' | 'model' | 'scenario'
+/**
+ * The decision room's sections, in reading order (owner IA 2026-10-10):
+ * the decision, the evidence index (source vs inference), then each evidence
+ * family as its own section, the full record, and the model (incl. the
+ * scenario lab). Number keys 1–9 jump to them.
+ */
+export type DiMode = 'decision' | 'evidence' | 'comps' | 'seller' | 'debt' | 'market' | 'transactions' | 'records' | 'model'
 export const DI_MODES: ReadonlyArray<{ id: DiMode; label: string; key: string }> = [
   { id: 'decision', label: 'Decision', key: '1' },
   { id: 'evidence', label: 'Evidence', key: '2' },
-  { id: 'record', label: 'Record', key: '3' },
-  { id: 'model', label: 'Model', key: '4' },
-  { id: 'scenario', label: 'Scenario', key: '5' },
+  { id: 'comps', label: 'Comps', key: '3' },
+  { id: 'seller', label: 'Seller', key: '4' },
+  { id: 'debt', label: 'Debt & liens', key: '5' },
+  { id: 'market', label: 'Market', key: '6' },
+  { id: 'transactions', label: 'Transactions', key: '7' },
+  { id: 'records', label: 'Records', key: '8' },
+  { id: 'model', label: 'Model', key: '9' },
 ]
 
 /** What the contextual inspector is showing. */

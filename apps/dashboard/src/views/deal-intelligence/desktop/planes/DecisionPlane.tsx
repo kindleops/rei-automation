@@ -1,3 +1,4 @@
+import { engineErrorText } from '../../../../domain/deal-intelligence/decision-engine-run'
 import { Icon } from '../../../../shared/icons'
 import { cx, LCButton, LCCounter, LCTooltip } from '../../../../shared/lc'
 import { ago, dateShort, usd } from '../di-format'
@@ -20,7 +21,7 @@ export interface DecisionPlaneProps {
   selection: DiSelection | null
   onSelect: (s: DiSelection) => void
   now: number
-  engine: { canRun: boolean; running: boolean; onRun: () => void }
+  engine: { canRun: boolean; running: boolean; onRun: () => void; error?: string | null }
 }
 
 /**
@@ -110,7 +111,10 @@ export function DecisionPlane({ d, state, figures: f, spectrum, track, conf, the
             <b>The decision engine has never priced this property.</b>
             <p>There is no valuation, offer range or strategy yet.{v?.avm ? ` The only value on record is the ${usd(v.avm)} AVM (provider estimate).` : ''}</p>
           </div>
-          {engine.canRun ? <LCButton variant="primary" icon="zap" loading={engine.running} onClick={engine.onRun}>Run decision engine</LCButton> : <span className="dr-none">A conversation is needed to run the engine from here.</span>}
+          <div className="dr-hero__analyze">
+            {engine.canRun ? <LCButton variant="primary" icon="zap" loading={engine.running} onClick={engine.onRun}>{engine.running ? 'Analyzing…' : 'Analyze property'}</LCButton> : <span className="dr-none">This subject has no property id to analyze.</span>}
+            {engine.error ? <p className="dr-warn" role="alert">The last analysis did not finish — {engineErrorText(engine.error)}</p> : null}
+          </div>
         </div>
       )}
 

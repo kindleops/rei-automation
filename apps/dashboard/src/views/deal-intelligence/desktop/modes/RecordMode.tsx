@@ -107,7 +107,7 @@ export function RecordMode({ d, category, onCategory, selection, onSelect, links
 }
 
 /** OWNER → PROPERTY → COMPANY / PEOPLE, as recorded. Open Entity Graph for the full graph. */
-function OwnershipSnapshot({ d, onOpenGraph }: { d: DiDecision; onOpenGraph: (() => void) | null }) {
+export function OwnershipSnapshot({ d, onOpenGraph }: { d: DiDecision; onOpenGraph: (() => void) | null }) {
   const owner = d.record.owner?.name ?? d.record.sections.find((s) => s.title === 'Ownership')?.fields.find((f) => f.label === 'Owner of record')?.value ?? null
   const companies = d.record.sections.find((s) => s.title === 'Ownership')?.fields.find((f) => f.label === 'Companies linked')?.value ?? null
   const others = d.record.sections.find((s) => s.title === 'Ownership')?.fields.find((f) => f.label === 'Owns other property')?.value ?? null

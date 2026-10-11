@@ -774,7 +774,7 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   const [compRes, ownerRes, prospectRes, conversation, market, execRes, quotesRes] = await Promise.all([
     compIds.length ? client.from('v_recent_sold_comps').select(COMP_DETAIL_COLUMNS).in('id', compIds) : Promise.resolve({ data: [] }),
     ownerId ? client.from('master_owners').select('*').eq('master_owner_id', ownerId).maybeSingle() : Promise.resolve({ data: null }),
-    ownerId ? client.from('prospects').select('prospect_id, full_name, first_name, gender, marital_status, education_model, occupation_group, est_household_income, net_asset_value, buying_power, language_preference, likely_owner, likely_renting, best_phone, best_email, contact_window, timezone, sms_eligible, email_eligible, contact_score_final, person_flags_text, is_primary_prospect, rank_position').eq('master_owner_id', ownerId).order('rank_position', { ascending: true }).limit(8) : Promise.resolve({ data: [] }),
+    ownerId ? client.from('prospects').select('prospect_id, full_name, first_name, gender, marital_status, education_model, occupation_group, est_household_income, net_asset_value, buying_power, language_preference, likely_owner, likely_renting, best_phone, best_email, contact_window, timezone, sms_eligible, email_eligible, contact_score_final, person_flags_text, is_primary_prospect, rank_position, mob').eq('master_owner_id', ownerId).order('rank_position', { ascending: true }).limit(8) : Promise.resolve({ data: [] }),
     thread ? soft(getConversationSignal({ threadKey: thread, now }, { supabase: client })) : Promise.resolve(null),
     soft(getMarketDemand({ propertyId, radiusMiles: 1.5, months: 18 }, { supabase: client })),
     // The latest seller-automation execution — the same evidence the Pipeline
@@ -1064,7 +1064,7 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
     record: {
       sections: parcelSections(parcel),
       owner: ownerRes.data ? { name: clean(ownerRes.data.display_name) || null, sections: ownerSections(ownerRes.data) } : null,
-      prospects: prospectCards(prospectRes.data),
+      prospects: prospectCards(prospectRes.data, new Date(now)),
     },
     history: history.slice(0, 40),
     valuationHistory: snapshots.map((s) => ({

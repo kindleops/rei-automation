@@ -4,6 +4,7 @@ import { Icon, type IconName } from '../../shared/icons'
 import { buildPropertyExternalLinks } from '../../domain/inbox/inbox-normalization'
 import { useDealIntelligenceDossier } from '../../domain/deal-intelligence/useDealIntelligenceDossier'
 import { useBreakpoint } from '../mobile/useBreakpoint'
+import { contactScoreHint, contactScoreText } from '../../domain/deal-intelligence/contact-score'
 import { MobileSellerCommandCenter } from './mobile/MobileSellerCommandCenter'
 import type { MobileSellerSeed } from './mobile/MobileSellerCommandCenter'
 import type { EngineRunPhase } from '../../domain/deal-intelligence/useDealIntelligenceDossier'
@@ -1294,7 +1295,7 @@ const PhoneIntelligencePanel = ({
     <IntelHeroStrip>
       <IntelHeroMetric label="Primary" value={fmtDiPhone(String(phone?.number || '')) ?? '—'} accent />
       <IntelHeroMetric label="Phone score" value={fmtDiScore(Number(phone?.phone_score)) ?? '—'} />
-      <IntelHeroMetric label="Contact score" value={fmtDiScore(Number(phone?.contact_score)) ?? '—'} />
+      <IntelHeroMetric label="Contact score" value={<span title={contactScoreHint(phone?.contact_score as number | null | undefined)}>{contactScoreText(phone?.contact_score as number | null | undefined) ?? '—'}</span>} sub="vendor, 0–100" />
     </IntelHeroStrip>
 
     <IntelTileGrid>

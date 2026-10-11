@@ -258,7 +258,7 @@ describe('subject contract', () => {
   it('reads and writes only on its own route, as the workspace interceptor attributes paths', () => {
     expect(isDiLocation('/deal-intelligence')).toBe(true)
     expect(isDiLocation('/deal-intelligence?property_id=273312064&mode=record')).toBe(true)
-    expect(isDiLocation(buildDiPath(subjectFromSearch('?property=273312064'), 'scenario'))).toBe(true)
+    expect(isDiLocation(buildDiPath(subjectFromSearch('?property=273312064'), 'comps'))).toBe(true)
     // the shell already pointed this pane at another app: never adopt its params or rewrite it
     expect(isDiLocation('/map?property_id=273312064')).toBe(false)
     expect(isDiLocation('/inbox?thread_key=%2B16122756497')).toBe(false)
@@ -268,7 +268,10 @@ describe('subject contract', () => {
     expect(subjectFromSearch(searchOf('/deal-intelligence?property=273312064')).propertyId).toBe('273312064')
     expect(subjectFromSearch('?property_id=1&thread_key=%2B16122756497').threadKey).toBe('+16122756497')
     expect(subjectFromSearch('?opp=e1db7c94').opportunityId).toBe('e1db7c94')
-    expect(modeFromSearch('?mode=scenario')).toBe('scenario')
+    expect(modeFromSearch('?mode=comps')).toBe('comps')
+    // pre-IA links still land: record → records, scenario → model (the lab lives there now)
+    expect(modeFromSearch('?mode=record')).toBe('records')
+    expect(modeFromSearch('?mode=scenario')).toBe('model')
     expect(modeFromSearch('?mode=bogus')).toBeNull()
   })
   it('keys on property, then thread, then opportunity — a resolved thread is the same subject', () => {

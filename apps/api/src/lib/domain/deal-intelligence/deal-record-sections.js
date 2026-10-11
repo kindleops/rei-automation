@@ -144,18 +144,63 @@ export function ownerSections(owner) {
   return buildGroups(trimmed, OWNER_FIELDS)
 }
 
-export function prospectCards(prospects) {
+/**
+ * Age in whole years from prospects.mob (vendor month of birth, 'YYYYMM').
+ * DISPLAY ONLY: age is a protected characteristic and never a pricing,
+ * ranking or offer input (owner rule) — it is shown, not used.
+ */
+export function ageFromMob(mob, now = new Date()) {
+  const m = /^(\d{4})(\d{2})?/.exec(clean(mob))
+  if (!m) return null
+  const y = Number(m[1])
+  const mo = m[2] ? Number(m[2]) : null
+  const year = now.getUTCFullYear()
+  if (y < 1900 || y > year) return null
+  let age = year - y
+  if (mo && mo >= 1 && mo <= 12 && now.getUTCMonth() + 1 < mo) age -= 1
+  return age >= 18 && age <= 110 ? age : null
+}
+
+/**
+ * prospects.contact_score_final is the skip-trace vendor's contact score,
+ * imported as-is (= raw_contact_score on 98% of rows). Its scale is 0–120
+ * (measured max 120; -1 = not scored), which is why "105" appeared with no
+ * scale. Rescaled to 0–100 for display; the vendor value stays visible.
+ */
+export const CONTACT_SCORE_VENDOR_MAX = 120
+export function contactScore100(raw) {
+  const v = num(raw)
+  if (v === null || v < 0) return null
+  return Math.min(100, Math.round((v / CONTACT_SCORE_VENDOR_MAX) * 100))
+}
+export function contactScoreLabel(raw) {
+  const s = contactScore100(raw)
+  return s === null ? null : `${s} / 100 (vendor ${Math.round(num(raw))} of ${CONTACT_SCORE_VENDOR_MAX})`
+}
+
+export function prospectCards(prospects, now = new Date()) {
   return (Array.isArray(prospects) ? prospects : []).slice(0, 8).map((p) => {
+    const age = ageFromMob(p.mob, now)
     const fields = [
+      ['Age', age !== null ? `${age} (from birth month on record)` : null],
       ['Gender', text(p.gender)], ['Marital status', text(p.marital_status)], ['Education', text(p.education_model)],
       ['Occupation', text(p.occupation_group)], ['Household income', text(p.est_household_income)], ['Net assets', text(p.net_asset_value)],
       ['Buying power', text(p.buying_power)], ['Language', text(p.language_preference)],
       ['Tenure', p.likely_owner && p.likely_renting ? 'Unclear — flagged owner and renter' : p.likely_owner ? 'Likely owner' : p.likely_renting ? 'Likely renter' : null],
       ['Best phone', text(p.best_phone)], ['Best email', text(p.best_email)], ['Contact window', text(p.contact_window)], ['Timezone', text(p.timezone)],
-      ['SMS eligible', yesNo(p.sms_eligible)], ['Email eligible', yesNo(p.email_eligible)], ['Contact score', int(p.contact_score_final)],
+      ['SMS eligible', yesNo(p.sms_eligible)], ['Email eligible', yesNo(p.email_eligible)], ['Contact score', contactScoreLabel(p.contact_score_final)],
       ['Flags', text(p.person_flags_text)],
     ].filter(([, v]) => v).map(([label, value]) => ({ label, value }))
-    return { id: clean(p.prospect_id), name: clean(p.full_name) || clean(p.first_name) || 'Unnamed', primary: p.is_primary_prospect === true, fields }
+    return {
+      id: clean(p.prospect_id),
+      name: clean(p.full_name) || clean(p.first_name) || 'Unnamed',
+      primary: p.is_primary_prospect === true,
+      // display-only (see ageFromMob); never read by pricing
+      age,
+      language: text(p.language_preference),
+      contactScore: contactScore100(p.contact_score_final),
+      fields,
+    }
   })
 }
 

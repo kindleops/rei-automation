@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
 import { pushRoutePath } from '../../../app/router'
-import { useDealIntelligenceDossier } from '../../../domain/deal-intelligence/useDealIntelligenceDossier'
+import { usePropertyEngineRun } from '../../../domain/deal-intelligence/decision-engine-run'
 import { useAppInstance } from '../../../modules/desktop/workspace/instance-context'
 import { Icon } from '../../../shared/icons'
 import { cx, LCButton, LCEmpty, LCError, LCSkeleton } from '../../../shared/lc'
@@ -9,12 +9,13 @@ import { ago, dateShort } from './di-format'
 import { diLinks } from './di-links'
 import {
   availableOf, confidenceModel, decisionState, economicBridge, evidenceGaps, gateViews, offerFigures, offerTrack, sellerIdentity,
-  spectrumModel, thesis, underwritingStatus, type EvidenceFamily, type RecordCategoryKey,
+  spectrumModel, thesis, underwritingStatus, type RecordCategoryKey,
 } from './di-model'
 import { fetchKey, hasSubject, readRecents, type DiSubject } from './di-subject'
 import { DI_MODES, type DiMode, type DiSelection } from './di-types'
 import { DiInspector } from './inspector/DiInspector'
-import { EvidenceMode } from './modes/EvidenceMode'
+import { CompsSection, DebtSection, EvidenceIndex, MarketSection, TransactionsSection } from './modes/EvidenceMode'
+import { SellerMode } from './modes/SellerMode'
 import { ModelMode } from './modes/ModelMode'
 import { RecordMode } from './modes/RecordMode'
 import { ScenarioMode } from './modes/ScenarioMode'
@@ -30,6 +31,7 @@ import { useDecisionRoom, useDealStory } from './useDecisionRoom'
 import { useDecisionSubject } from './useDecisionSubject'
 import { useWidth } from './useWidth'
 import './di-desktop.css'
+import './di-sections.css'
 
 /** The inspector docks beside the work from this app width; below it, it floats over it on selection. */
 const DOCK_AT = 1240
@@ -65,7 +67,6 @@ export function DealIntelligenceDesktop({ subject: explicit }: DealIntelligenceD
   const [inspectorOpen, setInspectorOpen] = useState(true)
   const [floatDefault, setFloatDefault] = useState(false)
   const [selection, setSelection] = useState<DiSelection | null>(null)
-  const [family, setFamily] = useState<EvidenceFamily>('comps')
   const [category, setCategory] = useState<RecordCategoryKey>('valuation')
   const [focusWithin, setFocusWithin] = useState(false)
   useClaimedKeys(MODE_KEYS, focusWithin)
@@ -81,19 +82,15 @@ export function DealIntelligenceDesktop({ subject: explicit }: DealIntelligenceD
 
   const story = useDealStory(room.current ? d?.pipeline?.opportunityId : null)
 
-  // The canonical engine run (run-engine route), reused from the phone's hook
-  // with its dossier fetch disabled: only the run path is used here.
-  const threadKey = d?.contact?.threadKey ?? d?.pipeline?.threadKey ?? subject.threadKey ?? undefined
-  const engine = useDealIntelligenceDossier(
-    threadKey ? { threadKey, propertyId: d?.subject.propertyId ?? subject.propertyId ?? undefined } : null,
-    { enabled: false },
-  )
-  const [wasRunning, setWasRunning] = useState(false)
-  if (engine.engineRunning !== wasRunning) {
-    setWasRunning(engine.engineRunning)
-    if (wasRunning && !engine.engineRunning) room.refresh()
-  }
-  const runEngine = useCallback(() => { void engine.runDecisionEngine() }, [engine])
+  // ANALYZE: the canonical engine run, scoped to the PROPERTY (decision/run route) —
+  // a conversation is no longer required, and a run the engine reports as failed
+  // is shown as a failure. On completion the decision is re-read.
+  const threadKey = d?.contact?.threadKey ?? d?.pipeline?.threadKey ?? subject.threadKey ?? null
+  const runPropertyId = d?.subject.propertyId ?? subject.propertyId ?? null
+  const onEngineFinished = useCallback(() => { room.refresh() }, [room])
+  const engine = usePropertyEngineRun(onEngineFinished)
+  const runEngine = useCallback(() => { void engine.run({ propertyId: runPropertyId, threadKey }) }, [engine, runPropertyId, threadKey])
+  const engineAction = { canRun: Boolean(runPropertyId), running: engine.running, onRun: runEngine, error: engine.error }
 
   const model = useMemo(() => {
     if (!d) return null
@@ -113,7 +110,7 @@ export function DealIntelligenceDesktop({ subject: explicit }: DealIntelligenceD
     }
   }, [d])
 
-  const status = underwritingStatus({ d: room.current ? d : null, pending: room.pending, error: room.error, recomputing: engine.engineRunning })
+  const status = underwritingStatus({ d: room.current ? d : null, pending: room.pending, error: room.error, recomputing: engine.running })
   const pick = useCallback((s: DiSelection) => {
     setSelection(s)
     if (s.type === 'comp' || s.type === 'doc' || s.type === 'loan') setInspectorOpen(true)
@@ -206,7 +203,7 @@ export function DealIntelligenceDesktop({ subject: explicit }: DealIntelligenceD
             {mode === 'decision' ? (
               <div className={cx('dr-decision', decisionInInspector && 'has-prospect-docked')}>
                 <div className="dr-area-hero">
-                  <DecisionPlane d={d} state={m.state} figures={m.figures} spectrum={m.spectrum} track={m.track} conf={m.conf} thesis={m.thesis} selection={selection} onSelect={pick} now={now} engine={{ canRun: Boolean(threadKey), running: engine.engineRunning, onRun: runEngine }} />
+                  <DecisionPlane d={d} state={m.state} figures={m.figures} spectrum={m.spectrum} track={m.track} conf={m.conf} thesis={m.thesis} selection={selection} onSelect={pick} now={now} engine={engineAction} />
                 </div>
                 <div className="dr-area-prop"><PropertyPlane d={d} onOpenMedia={() => pick({ type: 'media' })} /></div>
                 <div className="dr-area-money"><MoneyPlane d={d} bridge={m.bridge} f={m.figures} selection={selection} onSelect={pick} /></div>
@@ -216,13 +213,20 @@ export function DealIntelligenceDesktop({ subject: explicit }: DealIntelligenceD
                 {!decisionInInspector ? <div className="dr-area-prospect">{prospect('inline')}</div> : null}
               </div>
             ) : null}
-            {mode === 'evidence' ? <EvidenceMode d={d} family={family} onFamily={(f) => { setFamily(f); setSelection(null) }} selection={selection} onSelect={pick} links={m.links} now={now} /> : null}
-            {mode === 'record' ? <RecordMode d={d} category={category} onCategory={(c) => { setCategory(c); setSelection(null) }} selection={selection} onSelect={pick} links={m.links} now={now} /> : null}
+            {mode === 'evidence' ? <EvidenceIndex d={d} onOpen={openMode} /> : null}
+            {mode === 'comps' ? <CompsSection d={d} selection={selection} onSelect={pick} links={m.links} now={now} engine={engineAction} /> : null}
+            {mode === 'seller' ? <SellerMode d={d} selection={selection} onSelect={pick} links={m.links} now={now} /> : null}
+            {mode === 'debt' ? <DebtSection d={d} selection={selection} onSelect={pick} now={now} /> : null}
+            {mode === 'market' ? <MarketSection d={d} now={now} /> : null}
+            {mode === 'transactions' ? <TransactionsSection d={d} onSelect={pick} /> : null}
+            {mode === 'records' ? <RecordMode d={d} category={category} onCategory={(c) => { setCategory(c); setSelection(null) }} selection={selection} onSelect={pick} links={m.links} now={now} /> : null}
             {mode === 'model' ? (
-              <ModelMode d={d} conf={m.conf} gates={m.gates} selection={selection} onSelect={pick} now={now}
-                engine={{ canRun: Boolean(threadKey), running: engine.engineRunning, onRun: runEngine, error: engine.engineError, progress: engine.engineProgress }} />
+              <>
+                <ModelMode d={d} conf={m.conf} gates={m.gates} selection={selection} onSelect={pick} now={now}
+                  engine={{ ...engineAction, progress: engine.steps }} />
+                <ScenarioMode d={d} />
+              </>
             ) : null}
-            {mode === 'scenario' ? <ScenarioMode d={d} /> : null}
             <footer className="dr-foot">
               <span>Engine {d.lineage.engineVersion ?? '—'} · {d.lineage.policyVersion ?? 'policy not recorded'}</span>
               {d.lineage.computedAt ? <span>analyzed {dateShort(d.lineage.computedAt, now)} ({ago(d.lineage.computedAt, now)})</span> : <span>never analyzed</span>}
@@ -241,7 +245,7 @@ export function DealIntelligenceDesktop({ subject: explicit }: DealIntelligenceD
           onClose={() => { if (dock) { if (selection) clear(); else setInspectorOpen(false) } else { clear(); setFloatDefault(false) } }}
           dock={dock}
           defaultContent={prospect('column')}
-          defaultTitle={mode === 'decision' ? 'Prospect intelligence' : mode === 'evidence' ? 'Evidence freshness' : mode === 'record' ? 'Record provenance' : 'Model provenance'}
+          defaultTitle={mode === 'decision' ? 'Prospect intelligence' : mode === 'records' ? 'Record provenance' : mode === 'model' ? 'Model provenance' : 'Evidence freshness'}
           figures={m.figures}
           gates={m.gates}
           conf={m.conf}

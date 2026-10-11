@@ -3,76 +3,126 @@ import { Icon, type IconName } from '../../../../shared/icons'
 import { cx, LCButton, LCDataGrid, LCTimeline, type LCColumn, type LCSort, type LCTimelineItem } from '../../../../shared/lc'
 import { dateShort, humanize, int, usd } from '../di-format'
 import type { DiLinks } from '../di-links'
-import { compStats, debtGroups, factsDiffer, familyCount, type EvidenceFamily } from '../di-model'
-import type { DiComp, DiDecision, DiSelection } from '../di-types'
-import { Empty, Plane, Prov, Tag } from '../di-ui'
+import { compStats, debtGroups, factsDiffer } from '../di-model'
+import type { DiComp, DiDecision, DiMode, DiSelection } from '../di-types'
+import { Basis, Cards, Empty, Plane, Prov, SectionHead, Tag } from '../di-ui'
+import { BASIS_LABEL, evidenceLedger, familyCards, isSourceBasis, type EvidenceBasis } from '../di-evidence'
 import { CompDistribution, CompRadar } from './EvidenceCharts'
-import { countSaleTypes, SALE_TYPE_LABEL, SALE_TYPES, saleTypeOfDealComp } from '../../../../domain/comp-intelligence/comp-sale-type'
+import { countSaleTypes, SALE_TYPE_LABEL, SALE_TYPES, saleTypeOfComp, saleTypeOfDealComp } from '../../../../domain/comp-intelligence/comp-sale-type'
+import { buyerTypeCoverage, compBuyerType, type CompBuyerType } from '../../../../domain/comp-intelligence/comp-buyer-type'
+import type { EvidenceComp } from '../../../../domain/comp-intelligence/comps-evidence-api'
+import { propSaleKey, useSaleOwners } from '../../../../modules/market-intelligence/sale-owner/sale-owner-client'
 import { CompStreetView } from '../../../comp-intelligence/desktop/CompStreetView'
+import { BuyerTypeChip, BuyerTypeCoverageLine } from '../../../comp-intelligence/desktop/BuyerType'
+import { useCompsWorkspace } from '../../../comp-intelligence/desktop/use-comps-workspace'
 import { handleObjectClick, objectMenuEntries } from '../../../../modules/desktop/objects'
 import { diCompObject } from '../di-comp-object'
 import { SaleTypeBadge } from '../../../comp-intelligence/desktop/SaleType'
-
-
-const FAMILIES: Array<{ id: EvidenceFamily; label: string; icon: IconName }> = [
-  { id: 'comps', label: 'Comparable sales', icon: 'stats' },
-  { id: 'seller', label: 'Seller facts', icon: 'user' },
-  { id: 'debt', label: 'Debt & liens', icon: 'dollar-sign' },
-  { id: 'market', label: 'Market', icon: 'trending-up' },
-  { id: 'transactions', label: 'Transactions', icon: 'clock' },
-  { id: 'communication', label: 'Communication', icon: 'message' },
-]
+import { engineErrorText } from '../../../../domain/deal-intelligence/decision-engine-run'
 
 /** A comp row as its canonical property (comps without a property id stay local rows). */
 const compObject = diCompObject
 
-export function EvidenceMode({ d, family, onFamily, selection, onSelect, links, now }: {
-  d: DiDecision
-  family: EvidenceFamily
-  onFamily: (f: EvidenceFamily) => void
-  selection: DiSelection | null
-  onSelect: (s: DiSelection) => void
-  links: DiLinks | null
-  now: number
-}) {
+export interface EngineAction { canRun: boolean; running: boolean; onRun: () => void; error?: string | null }
+
+/* ── EVIDENCE: the index — every family, and every fact by its basis ───── */
+
+const FAMILY_ICON: Partial<Record<DiMode, IconName>> = { comps: 'stats', seller: 'user', debt: 'dollar-sign', market: 'trending-up', transactions: 'clock', records: 'database' }
+
+export function EvidenceIndex({ d, onOpen }: { d: DiDecision; onOpen: (m: DiMode) => void }) {
+  const cards = familyCards(d)
+  const ledger = evidenceLedger(d)
+  const source = ledger.filter((r) => isSourceBasis(r.basis))
+  const inference = ledger.filter((r) => !isSourceBasis(r.basis))
+  const ledgerList = (rows: typeof ledger) => (
+    <ul className="dr-ledger">
+      {rows.map((r) => (
+        <li key={r.key}>
+          <button type="button" onClick={() => onOpen(r.mode)}>
+            <span className="dr-ledger__label">{r.label}</span>
+            <b className="dr-ledger__value lc-num">{r.value}</b>
+            <Basis b={r.basis} />
+            <em className="dr-ledger__src">{r.source}</em>
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
   return (
-    <div className="dr-mode dr-evidence">
-      <nav className="dr-rail" aria-label="Evidence families">
-        {FAMILIES.map((f) => {
-          const n = familyCount(d, f.id)
-          return (
-            <button key={f.id} type="button" className={cx('dr-rail__item', family === f.id && 'is-on')} onClick={() => onFamily(f.id)} aria-current={family === f.id ? 'true' : undefined}>
-              <Icon name={f.icon} size={14} />
-              <span>{f.label}</span>
-              {n !== null ? <b className="lc-num">{n.toLocaleString('en-US')}</b> : <em>—</em>}
-            </button>
-          )
-        })}
-      </nav>
-      <div className="dr-evidence__body">
-        {family === 'comps' ? <CompsEvidence d={d} selection={selection} onSelect={onSelect} links={links} now={now} /> : null}
-        {family === 'seller' ? <SellerEvidence d={d} selection={selection} onSelect={onSelect} now={now} /> : null}
-        {family === 'debt' ? <DebtEvidence d={d} selection={selection} onSelect={onSelect} now={now} /> : null}
-        {family === 'market' ? <MarketEvidence d={d} now={now} /> : null}
-        {family === 'transactions' ? <TransactionsEvidence d={d} onSelect={onSelect} /> : null}
-        {family === 'communication' ? <CommunicationEvidence d={d} now={now} /> : null}
-      </div>
+    <div className="dr-mode dr-section">
+      <SectionHead title="Evidence" summary="Every evidence family for this property, and every headline fact labelled by what it stands on. Recorded and seller-said facts are source evidence; engine, estimate and inferred figures are derived from them." bases={['recorded', 'seller', 'modeled', 'estimated', 'inferred']} />
+      <Cards>
+        {cards.map((c) => (
+          <Plane key={c.mode} id={`family-${c.mode}`} eyebrow={<><Icon name={FAMILY_ICON[c.mode] ?? 'database'} size={12} /> {c.label}</>} title={c.headline} depth={1} under={c.empty ? 'neutral' : 'exec'}
+            className={cx('dr-family', c.empty && 'is-empty')}
+            aside={<LCButton size="sm" variant="quiet" icon="chevron-right" onClick={() => onOpen(c.mode)}>Open</LCButton>}>
+            <div className="dr-family__foot">
+              {c.count !== null ? <b className="lc-num">{c.count.toLocaleString('en-US')}</b> : <em>—</em>}
+              <span className="dr-family__bases">{c.bases.map((b) => <Basis key={b} b={b} />)}</span>
+            </div>
+          </Plane>
+        ))}
+      </Cards>
+      <Cards className="is-two">
+        <Plane id="ledger-source" eyebrow="Source evidence" title={`${source.length} recorded or seller-said facts`} under="exec" depth={1}>
+          {source.length ? ledgerList(source) : <p className="dr-none">No recorded or seller-said facts yet.</p>}
+        </Plane>
+        <Plane id="ledger-inference" eyebrow="Inference" title={`${inference.length} engine, estimated or inferred figures`} under="flow" depth={1}>
+          {inference.length ? ledgerList(inference) : <p className="dr-none">Nothing derived yet — the engine has not analyzed this property.</p>}
+          <p className="dr-quiet">{(Object.keys(BASIS_LABEL) as EvidenceBasis[]).filter((b) => !isSourceBasis(b)).map((b) => BASIS_LABEL[b]).join(' · ')}: computed from source evidence, never recorded as such.</p>
+        </Plane>
+      </Cards>
     </div>
   )
 }
 
-/* ── comps ─────────────────────────────────────────────────────────────── */
+/* ── COMPS ───────────────────────────────────────────────────────────── */
 
 const SOURCE_LABEL: Record<string, string> = { mls_sold: 'MLS', public_record_sold: 'Public record' }
 const compValue = (c: DiComp) => c.adjustedValue ?? c.salePrice ?? 0
 
-function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; selection: DiSelection | null; onSelect: (s: DiSelection) => void; links: DiLinks | null; now: number }) {
-  const c = d.comps
+/** A DI comp's buyer as the shared classifier reads it (deed name first, then the owner of record). */
+export function dealCompBuyer(x: DiComp, owner: Parameters<typeof compBuyerType>[0]['owner']): CompBuyerType {
+  return compBuyerType({
+    buyerKind: x.buyerKind === 'company' ? 'company' : x.buyerKind === 'individual' ? 'person' : null,
+    buyerCompany: x.buyerKind === 'company' ? x.buyerLabel : null,
+    owner,
+  })
+}
+
+/**
+ * The Comps section. With an engine analysis: the comps the engine PRICED,
+ * as it weighted them. Without one (most properties have never been
+ * analyzed): the recorded nearby sales Comp Intelligence reads for the same
+ * subject — clearly labelled as candidates, never as the engine's set.
+ */
+export function CompsSection({ d, selection, onSelect, links, now, engine }: { d: DiDecision; selection: DiSelection | null; onSelect: (s: DiSelection) => void; links: DiLinks | null; now: number; engine: EngineAction }) {
+  const analyzed = Boolean(d.comps && d.comps.top.length)
+  return (
+    <div className="dr-mode dr-section">
+      <SectionHead
+        title="Comparable sales"
+        summary={analyzed ? 'The sales the decision engine priced this property from, each with its sale type and buyer.' : 'This property has not been priced by the engine. Recorded nearby sales are shown as candidates.'}
+        bases={analyzed ? ['recorded', 'modeled', 'inferred'] : ['recorded', 'inferred']}
+        aside={<LCButton size="sm" variant="quiet" icon="arrow-up-right" onClick={links?.comps}>Open in Comp Intelligence</LCButton>}
+      />
+      {analyzed ? <EngineComps d={d} selection={selection} onSelect={onSelect} now={now} /> : <CandidateComps d={d} now={now} engine={engine} />}
+    </div>
+  )
+}
+
+function EngineComps({ d, selection, onSelect, now }: { d: DiDecision; selection: DiSelection | null; onSelect: (s: DiSelection) => void; now: number }) {
+  const c = d.comps!
   const stats = useMemo(() => compStats(d), [d])
   const [sort, setSort] = useState<LCSort>({ id: 'weight', dir: 'desc' })
   const selectedId = selection?.type === 'comp' ? selection.id : null
+  // Buyer of record for comps without a recorded company buyer: one batched request for the grid.
+  const ownerKeyOf = (x: DiComp) => (x.buyerKind === 'company' ? null : propSaleKey(x.propertyId, x.saleDate))
+  const ownerOf = useSaleOwners(c.top.map(ownerKeyOf))
+  const buyerOf = (x: DiComp) => dealCompBuyer(x, ownerOf(ownerKeyOf(x)))
+  const cover = buyerTypeCoverage(c.top.map(buyerOf))
   const rows = useMemo(() => {
-    const list = [...(c?.top ?? [])]
+    const list = [...c.top]
     if (!sort) return list
     const key = (x: DiComp): number | string => {
       switch (sort.id) {
@@ -96,28 +146,27 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
     })
     return list
   }, [c, sort])
-  if (!c) return <Empty icon="stats" title="Comp evidence unavailable" body="This property has no analysis, so no comparable sales were selected." />
   const columns: LCColumn<DiComp>[] = [
     { id: 'photo', header: '', width: 66, render: (x) => <CompStreetView size="cell" load="visible" photo={x.photo} lat={x.lat} lng={x.lng} address={x.address} /> },
-    { id: 'address', header: 'Address', minWidth: 210, sortable: true, render: (x) => <span className="dr-cell-addr"><b>{x.address?.split(',')[0] ?? '—'}</b>{x.assetMatch ? null : <em className="dr-off">different asset</em>}</span> },
-    { id: 'saletype', header: 'Sale type', width: 150, sortable: true, hint: 'How the sale happened — MLS, investor purchase, off-market or public record — from the recorded fields', render: (x) => <SaleTypeBadge v={saleTypeOfDealComp(x)} withBuyer /> },
-    { id: 'sale', header: 'Sale', width: 96, align: 'right', sortable: true, render: (x) => usd(x.salePrice) ?? '—' },
-    { id: 'adjusted', header: 'Adjusted', width: 100, align: 'right', sortable: true, hint: 'Sale price after the engine’s feature adjustments', render: (x) => <b>{usd(x.adjustedValue) ?? '—'}</b> },
-    { id: 'distance', header: 'Dist.', width: 74, align: 'right', sortable: true, render: (x) => (x.distanceMiles !== null ? `${x.distanceMiles.toFixed(2)} mi` : '—') },
-    { id: 'date', header: 'Sold', width: 104, align: 'right', sortable: true, render: (x) => dateShort(x.saleDate, now) ?? '—' },
-    { id: 'sqft', header: 'Sq ft', width: 78, align: 'right', sortable: true, render: (x) => int(x.sqft) ?? '—' },
-    { id: 'ppsf', header: '$/sf', width: 70, align: 'right', sortable: true, render: (x) => (x.ppsf ? `$${Math.round(x.ppsf)}` : '—') },
-    { id: 'bdba', header: 'Bd / Ba', width: 74, align: 'right', render: (x) => `${x.beds ?? '—'} / ${x.baths ?? '—'}` },
+    { id: 'address', header: 'Address', minWidth: 200, sortable: true, render: (x) => <span className="dr-cell-addr"><b>{x.address?.split(',')[0] ?? '—'}</b>{x.assetMatch ? null : <em className="dr-off">different asset</em>}</span> },
+    { id: 'saletype', header: 'Sale type', width: 118, sortable: true, hint: 'How the sale happened — MLS, investor purchase, off-market or public record — from the recorded fields', render: (x) => <SaleTypeBadge v={saleTypeOfDealComp(x)} /> },
+    { id: 'buyer', header: 'Buyer', width: 168, hint: 'Who bought it: LLC / trust / company / bank vs individual, and investor vs owner-occupant where known. Solid = recorded deed; dashed = inferred from the current owner of record.', render: (x) => <BuyerTypeChip t={buyerOf(x)} /> },
+    { id: 'sale', header: 'Sale', width: 92, align: 'right', sortable: true, render: (x) => usd(x.salePrice) ?? '—' },
+    { id: 'adjusted', header: 'Adjusted', width: 96, align: 'right', sortable: true, hint: 'Sale price after the engine’s feature adjustments', render: (x) => <b>{usd(x.adjustedValue) ?? '—'}</b> },
+    { id: 'distance', header: 'Dist.', width: 70, align: 'right', sortable: true, render: (x) => (x.distanceMiles !== null ? `${x.distanceMiles.toFixed(2)} mi` : '—') },
+    { id: 'date', header: 'Sold', width: 96, align: 'right', sortable: true, render: (x) => dateShort(x.saleDate, now) ?? '—' },
+    { id: 'sqft', header: 'Sq ft', width: 74, align: 'right', sortable: true, render: (x) => int(x.sqft) ?? '—' },
+    { id: 'ppsf', header: '$/sf', width: 64, align: 'right', sortable: true, render: (x) => (x.ppsf ? `$${Math.round(x.ppsf)}` : '—') },
+    { id: 'bdba', header: 'Bd / Ba', width: 70, align: 'right', render: (x) => `${x.beds ?? '—'} / ${x.baths ?? '—'}` },
     { id: 'type', header: 'Type', width: 112, hideable: true, hiddenByDefault: true, render: (x) => x.propertyType ?? '—' },
     { id: 'weight', header: 'Weight', width: 84, align: 'right', sortable: true, hint: 'The engine’s weight for this comp in the valuation', render: (x) => (x.weight !== null ? <span className="dr-weight"><span className="dr-weight__bar" aria-hidden="true"><i style={{ width: `${Math.min(100, x.weight * 100)}%` }} /></span>{Math.round(x.weight * 100)}%</span> : '—') },
-    { id: 'score', header: 'Match', width: 72, align: 'right', sortable: true, hint: 'Engine comp score (0–100)', render: (x) => (x.score !== null ? Math.round(x.score) : '—') },
+    { id: 'score', header: 'Match', width: 66, align: 'right', sortable: true, hint: 'Engine comp score (0–100)', render: (x) => (x.score !== null ? Math.round(x.score) : '—') },
     { id: 'source', header: 'Engine source', width: 112, hideable: true, hiddenByDefault: true, hint: 'How the engine weighed the source: MLS ×1, other ×0.92', render: (x) => (x.source ? SOURCE_LABEL[x.source] ?? humanize(x.source) : '—') },
-    { id: 'included', header: 'Inclusion', width: 92, hideable: true, hiddenByDefault: true, render: () => <span className="dr-incl">Priced</span> },
   ]
+  const mix = countSaleTypes(rows, (x) => saleTypeOfDealComp(x).type)
   return (
-    <>
-      <Plane id="comps-summary" eyebrow="Comparable sales" title={`${c.selected} qualified of ${c.raw ?? '—'} screened`} under="exec"
-        aside={<LCButton size="sm" variant="quiet" icon="arrow-up-right" onClick={links?.comps}>Open in Comp Intelligence</LCButton>}>
+    <Cards>
+      <Plane id="comps-summary" eyebrow="Engine comp set" title={`${c.selected} qualified of ${c.raw ?? '—'} screened`} under="exec" className="is-wide" aside={<Tag kind="modeled">Engine-selected</Tag>}>
         <div className="dr-statline">
           <div><span>Candidates</span><b className="lc-num">{c.raw ?? '—'}</b><em>{c.eligible !== null ? `${c.eligible} eligible` : ''}</em></div>
           <div><span>Qualified</span><b className="lc-num">{c.selected}</b><em>{c.rejected !== null ? `${c.rejected} rejected` : ''}</em></div>
@@ -129,40 +178,36 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
           <div><span>Asset match</span><b className="lc-num">{c.assetIntegrity ? `${c.assetIntegrity.matched}/${c.assetIntegrity.total}` : '—'}</b><em>{c.assetIntegrity?.mismatched.length ? 'mixed types' : 'same family'}</em></div>
         </div>
         {c.message && c.selected === 0 ? <p className="dr-warn">{c.message}</p> : null}
-        {c.top.length ? (
-          <div className="dr-comps__viz">
-            <CompDistribution d={d} stats={stats} selectedId={selectedId} onSelect={(id) => onSelect({ type: 'comp', id })} />
-            <CompRadar d={d} selectedId={selectedId} onSelect={(id) => onSelect({ type: 'comp', id })} />
-          </div>
-        ) : null}
       </Plane>
-      {c.top.length ? (
-        <Plane id="comps-grid" eyebrow="Comp grid" title="Every qualified comp, as the engine weighted it" depth={1}>
-          {(() => {
-            const mix = countSaleTypes(rows, (x) => saleTypeOfDealComp(x).type)
-            return <p className="dr-quiet dr-salemix lc-num">{SALE_TYPES.filter((t) => mix[t]).map((t) => `${mix[t]} ${SALE_TYPE_LABEL[t].short}`).join(' · ')} — sale type from the recorded fields; the engine weights MLS sales ×1 and other sales ×0.92.</p>
-          })()}
-          <div className="dr-grid-wrap" style={{ height: Math.min(640, 46 + rows.length * 44 + 8) }}>
-            <LCDataGrid
-              id="di-comps"
-              label="Qualified comparable sales"
-              rows={rows}
-              rowKey={(x) => x.id ?? x.address ?? ''}
-              columns={columns}
-              sort={sort}
-              onSortChange={setSort}
-              activeKey={selectedId}
-              // click selects the comp here · ⇧-click inspects its property · ⌘/Ctrl-click opens it beside
-              onActivate={(x, e) => handleObjectClick(e, compObject(x), () => onSelect({ type: 'comp', id: x.id ?? x.address ?? '' }))}
-              rowMenu={(x) => objectMenuEntries(compObject(x), { omit: ['open'], showOnMap: { source: 'deal-intelligence' } })}
-              rowTone={(x) => (x.assetMatch ? null : 'crit')}
-              density="comfortable"
-            />
-          </div>
-        </Plane>
-      ) : null}
+      <Plane id="comps-distribution" eyebrow="Distribution" title="Adjusted value of each comp" depth={1}>
+        <CompDistribution d={d} stats={stats} selectedId={selectedId} onSelect={(id) => onSelect({ type: 'comp', id })} />
+      </Plane>
+      <Plane id="comps-radar" eyebrow="Placement" title="Where each comp sits around the subject" depth={1}>
+        <CompRadar d={d} selectedId={selectedId} onSelect={(id) => onSelect({ type: 'comp', id })} />
+      </Plane>
+      <Plane id="comps-grid" eyebrow="Comp grid" title="Every qualified comp, as the engine weighted it" depth={1} className="is-wide"
+        aside={<BuyerTypeCoverageLine {...cover} />}>
+        <p className="dr-quiet dr-salemix lc-num">{SALE_TYPES.filter((t) => mix[t]).map((t) => `${mix[t]} ${SALE_TYPE_LABEL[t].short}`).join(' · ')} — sale type from the recorded fields; the engine weights MLS sales ×1 and other sales ×0.92.</p>
+        <div className="dr-grid-wrap" style={{ height: Math.min(640, 46 + rows.length * 44 + 8) }}>
+          <LCDataGrid
+            id="di-comps"
+            label="Qualified comparable sales"
+            rows={rows}
+            rowKey={(x) => x.id ?? x.address ?? ''}
+            columns={columns}
+            sort={sort}
+            onSortChange={setSort}
+            activeKey={selectedId}
+            // click selects the comp here · ⇧-click inspects its property · ⌘/Ctrl-click opens it beside
+            onActivate={(x, e) => handleObjectClick(e, compObject(x), () => onSelect({ type: 'comp', id: x.id ?? x.address ?? '' }))}
+            rowMenu={(x) => objectMenuEntries(compObject(x), { omit: ['open'], showOnMap: { source: 'deal-intelligence' } })}
+            rowTone={(x) => (x.assetMatch ? null : 'crit')}
+            density="comfortable"
+          />
+        </div>
+      </Plane>
       {c.rejectionBreakdown.length ? (
-        <Plane id="comps-rejects" eyebrow="Screened out" title={`Why ${c.rejected ?? ''} candidates were not used`} depth={1}>
+        <Plane id="comps-rejects" eyebrow="Screened out" title={`Why ${c.rejected ?? ''} candidates were not used`} depth={1} className="is-wide">
           <div className="dr-bars">
             {c.rejectionBreakdown.map((r) => {
               const max = Math.max(1, ...c.rejectionBreakdown.map((x) => x.count))
@@ -172,19 +217,70 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
           <p className="dr-quiet">Sources of the qualified set: {Object.entries(c.sources).map(([k, n]) => `${SOURCE_LABEL[k] ?? humanize(k)} ${n}`).join(' · ')}. Individual buyers on comps are never named.</p>
         </Plane>
       ) : null}
-    </>
+    </Cards>
+  )
+}
+
+/** The nearest same-family candidates, closest first (pure; exported for the render test). */
+export function candidateRows(comps: readonly EvidenceComp[], limit = 30): EvidenceComp[] {
+  return comps
+    .filter((c) => c.state !== 'excluded' && c.salePrice !== null && c.salePrice > 0)
+    .slice()
+    .sort((a, b) => Number(b.assetMatch) - Number(a.assetMatch) || (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99) || Date.parse(b.saleDate ?? '') - Date.parse(a.saleDate ?? ''))
+    .slice(0, limit)
+}
+
+function CandidateComps({ d, now, engine }: { d: DiDecision; now: number; engine: EngineAction }) {
+  const ws = useCompsWorkspace(d.subject.propertyId)
+  const list = useMemo(() => candidateRows(ws.data?.comps ?? []), [ws.data])
+  const ownerKeyOf = (c: EvidenceComp) => (c.buyerKind === 'company' ? null : propSaleKey(c.propertyId, c.saleDate))
+  const ownerOf = useSaleOwners(list.map(ownerKeyOf))
+  const buyerOf = (c: EvidenceComp) => compBuyerType({ buyerKind: c.buyerKind, buyerCompany: c.buyerCompany, buyerArchetype: c.buyerArchetype, buyerAcquisitions: c.buyerAcquisitions, owner: ownerOf(ownerKeyOf(c)) })
+  const cover = buyerTypeCoverage(list.map(buyerOf))
+  const columns: LCColumn<EvidenceComp>[] = [
+    { id: 'photo', header: '', width: 66, render: (x) => <CompStreetView size="cell" load="visible" photo={x.photo} lat={x.lat} lng={x.lng} address={x.address} /> },
+    { id: 'address', header: 'Address', minWidth: 200, render: (x) => <span className="dr-cell-addr"><b>{x.address?.split(',')[0] ?? '—'}</b>{x.assetMatch ? null : <em className="dr-off">different asset</em>}</span> },
+    { id: 'saletype', header: 'Sale type', width: 118, render: (x) => <SaleTypeBadge v={saleTypeOfComp(x)} /> },
+    { id: 'buyer', header: 'Buyer', width: 168, hint: 'LLC / trust / company / bank vs individual; investor vs owner-occupant where known. Dashed = inferred from the current owner of record.', render: (x) => <BuyerTypeChip t={buyerOf(x)} /> },
+    { id: 'sale', header: 'Sale', width: 92, align: 'right', render: (x) => usd(x.salePrice) ?? '—' },
+    { id: 'date', header: 'Sold', width: 96, align: 'right', render: (x) => dateShort(x.saleDate, now) ?? '—' },
+    { id: 'distance', header: 'Dist.', width: 70, align: 'right', render: (x) => (x.distanceMiles !== null ? `${x.distanceMiles.toFixed(2)} mi` : '—') },
+    { id: 'sqft', header: 'Sq ft', width: 74, align: 'right', render: (x) => int(x.sqft) ?? '—' },
+    { id: 'ppsf', header: '$/sf', width: 64, align: 'right', render: (x) => (x.ppsf ? `$${Math.round(x.ppsf)}` : '—') },
+    { id: 'bdba', header: 'Bd / Ba', width: 70, align: 'right', render: (x) => `${x.beds ?? '—'} / ${x.baths ?? '—'}` },
+  ]
+  const err = engineErrorText(engine.error ?? null)
+  return (
+    <Cards>
+      <Plane id="comps-unanalyzed" eyebrow="Not analyzed" title="The decision engine has not priced this property" under="attn" className="is-wide"
+        aside={engine.canRun ? <LCButton size="sm" variant="primary" icon="zap" loading={engine.running} onClick={engine.onRun}>Analyze property</LCButton> : null}>
+        <p className="dr-quiet">Below are recorded nearby sales from the same read Comp Intelligence uses — <b>candidates</b>, not the engine’s priced set. Analyzing runs the engine, which selects, adjusts and weights comps and records a valuation.</p>
+        {err ? <p className="dr-warn" role="alert">{err}</p> : null}
+      </Plane>
+      <Plane id="comps-candidates" eyebrow="Recorded nearby sales" depth={1} className="is-wide"
+        title={ws.loading && !ws.data ? 'Reading nearby recorded sales…' : ws.failure ? 'Nearby sales could not be read' : `${list.length} nearest of ${ws.data?.comps.length ?? 0} sales within ${ws.data?.query.radiusMiles ?? '—'} mi · ${ws.data?.query.months ?? '—'} mo`}
+        aside={list.length ? <BuyerTypeCoverageLine {...cover} /> : null}>
+        {ws.failure ? (
+          <div className="dr-inline-fail"><p className="dr-none">{ws.failure.kind === 'not_found' ? 'This property is not in the comp corpus.' : `Comp read failed (${ws.failure.detail}).`}</p><LCButton size="sm" icon="refresh-cw" onClick={ws.retry}>Retry</LCButton></div>
+        ) : list.length ? (
+          <div className="dr-grid-wrap" style={{ height: Math.min(640, 46 + list.length * 44 + 8) }}>
+            <LCDataGrid id="di-comp-candidates" label="Recorded nearby sales (not engine-selected)" rows={list} rowKey={(x) => x.key} columns={columns} density="comfortable" rowTone={(x) => (x.assetMatch ? null : 'crit')} />
+          </div>
+        ) : ws.loading ? <div className="dr-skel-rows" aria-busy="true" /> : <p className="dr-none">No recorded sales near this property in the window.</p>}
+      </Plane>
+    </Cards>
   )
 }
 
 /* ── seller facts ──────────────────────────────────────────────────────── */
 
-function SellerEvidence({ d, selection, onSelect, now }: { d: DiDecision; selection: DiSelection | null; onSelect: (s: DiSelection) => void; now: number }) {
+export function SellerFactsCard({ d, selection, onSelect, now }: { d: DiDecision; selection: DiSelection | null; onSelect: (s: DiSelection) => void; now: number }) {
   const facts = d.sellerFacts
   if (!facts.length) return <Empty icon="user" title="No seller facts" body="Nothing has been captured from the conversation or recorded for this property." />
   const groups = new Map<string, typeof facts>()
   for (const f of facts) groups.set(f.label, [...(groups.get(f.label) ?? []), f])
   return (
-    <Plane id="seller-facts" eyebrow="Seller facts" title="What the seller said, what the record says, what the system derived" under="flow">
+    <Plane id="seller-facts" eyebrow="Seller facts" title="What the seller said, what the record says, what the system derived" under="flow" className="is-wide">
       <table className="dr-table">
         <thead><tr><th>Fact</th><th>Value</th><th>Provenance</th><th>Source</th><th>When</th></tr></thead>
         <tbody>
@@ -211,16 +307,18 @@ function SellerEvidence({ d, selection, onSelect, now }: { d: DiDecision; select
 
 /* ── debt & liens ──────────────────────────────────────────────────────── */
 
-function DebtEvidence({ d, selection, onSelect, now }: { d: DiDecision; selection: DiSelection | null; onSelect: (s: DiSelection) => void; now: number }) {
+export function DebtSection({ d, selection, onSelect, now }: { d: DiDecision; selection: DiSelection | null; onSelect: (s: DiSelection) => void; now: number }) {
   const e = d.economics
   const debt = e.debt
   const g = debtGroups(d)
   const docs = e.recordedDocuments ?? []
   const docIndex = (x: (typeof docs)[number]) => docs.indexOf(x)
   return (
-    <>
-      <Plane id="debt" eyebrow="Debt" title={debt.estOpenBalance ? `${usd(debt.estOpenBalance)} estimated open balance` : debt.mortgages.length ? 'Open balance unknown' : 'No current loans recorded'} under={e.foreclosure ? 'crit' : 'exec'}
-        aside={<Tag kind="estimated">Estimated balances</Tag>}>
+    <div className="dr-mode dr-section">
+      <SectionHead title="Debt & liens" summary="Loans and instruments as recorded by the county; balances and equity are provider estimates, never payoff figures." bases={['recorded', 'estimated']} />
+      <Cards>
+      <Plane id="debt" className="is-wide" eyebrow="Debt" title={debt.estOpenBalance ? `${usd(debt.estOpenBalance)} estimated open balance` : debt.mortgages.length ? 'Open balance unknown' : 'No current loans recorded'} under={e.foreclosure ? 'crit' : 'exec'}
+        aside={<span className="dr-asides"><Basis b="recorded" /><Tag kind="estimated">Estimated balances</Tag></span>}>
         <div className="dr-statline is-4">
           <div><span>Current loans</span><b className="lc-num">{debt.mortgages.length}</b><em>{debt.openMortgageCount !== null ? `${debt.openMortgageCount} open per provider` : ''}</em></div>
           <div><span>Original amount</span><b className="lc-num">{usd(debt.originalTotal) ?? '—'}</b><em>recorded</em></div>
@@ -261,7 +359,7 @@ function DebtEvidence({ d, selection, onSelect, now }: { d: DiDecision; selectio
         ) : null}
       </Plane>
 
-      <Plane id="liens" eyebrow="Liens & recorded documents" title={g.liens.length ? `${g.liens.length} recorded lien${g.liens.length === 1 ? '' : 's'}${e.lienSummary?.statedAmount ? ` · ${usd(e.lienSummary.statedAmount)} stated` : ''}` : 'No recorded liens'} under={g.liens.length ? 'attn' : 'exec'}>
+      <Plane id="liens" eyebrow="Liens & recorded documents" aside={<Basis b="recorded" />} title={g.liens.length ? `${g.liens.length} recorded lien${g.liens.length === 1 ? '' : 's'}${e.lienSummary?.statedAmount ? ` · ${usd(e.lienSummary.statedAmount)} stated` : ''}` : 'No recorded liens'} under={g.liens.length ? 'attn' : 'exec'}>
         {g.byKind.length ? (
           <div className="dr-kinds">
             {g.byKind.map((k) => <span key={k.kind}><b>{k.count}</b>{k.label}{k.amount ? <em> · {usd(k.amount)}</em> : null}</span>)}
@@ -301,19 +399,24 @@ function DebtEvidence({ d, selection, onSelect, now }: { d: DiDecision; selectio
       <Plane id="tax" eyebrow="Tax" title={e.tax.annual ? `${usd(e.tax.annual, { exact: true })} annual${e.tax.year ? ` (${e.tax.year})` : ''}` : 'Annual tax not recorded'} depth={1} under={e.tax.delinquent ? 'crit' : null}>
         <p className={cx('dr-taxline', e.tax.delinquent && 'is-crit')}>{e.tax.delinquent ? `Delinquent${e.tax.delinquentYear ? ` since ${e.tax.delinquentYear}` : ''}` : 'No delinquency on the record'}{e.tax.year ? ` · status as of the ${e.tax.year} tax record` : ''}</p>
       </Plane>
-    </>
+      </Cards>
+    </div>
   )
 }
 
 /* ── market ────────────────────────────────────────────────────────────── */
 
-function MarketEvidence({ d, now }: { d: DiDecision; now: number }) {
+export function MarketSection({ d, now }: { d: DiDecision; now: number }) {
   const m = d.market
-  if (!m || !m.ok) return <Empty icon="trending-up" title="Market evidence unavailable" body={m?.error === 'subject_not_geocoded' ? 'This property has no coordinates, so nearby sales can’t be measured.' : 'Nearby sales could not be loaded.'} />
+  const head = <SectionHead title="Market" summary="Recorded sales near the property for the same asset family, and exit demand from Buyer Match. Context only — neither feeds the engine’s value." bases={['recorded', 'modeled']} />
+  if (!m || !m.ok) return <div className="dr-mode dr-section">{head}<Empty icon="trending-up" title="Market evidence unavailable" body={m?.error === 'subject_not_geocoded' ? 'This property has no coordinates, so nearby sales can’t be measured.' : 'Nearby sales could not be loaded.'} /><Cards><Plane id="exit" eyebrow="Exit context" depth={1}><ExitContext d={d} /></Plane></Cards></div>
   const o = m.overall
   const tmax = Math.max(1, ...m.trend.map((t) => t.count))
   return (
-    <Plane id="market" eyebrow="Market" title={`${m.totals.sales} ${m.subject.familyLabel.toLowerCase()} sales within ${m.radius.used} mi`} under="exec"
+    <div className="dr-mode dr-section">
+    {head}
+    <Cards>
+    <Plane id="market" className="is-wide" eyebrow="Market" title={`${m.totals.sales} ${m.subject.familyLabel.toLowerCase()} sales within ${m.radius.used} mi`} under="exec"
       aside={m.window.dataThrough ? <span className="dr-quiet">sales recorded through {dateShort(m.window.dataThrough, now)}</span> : null}>
       <div className="dr-statline">
         <div><span>Median sale</span><b className="lc-num">{usd(o.medianPrice) ?? '—'}</b><em>{o.p25Price && o.p75Price ? `IQR ${usd(o.p25Price)}–${usd(o.p75Price)}` : ''}</em></div>
@@ -340,8 +443,12 @@ function MarketEvidence({ d, now }: { d: DiDecision; now: number }) {
         </div>
       ) : null}
       <p className="dr-quiet">Recorded sales near the property for the same asset family — independent of Buyer Match, and not part of the engine’s value.</p>
+    </Plane>
+    <Plane id="exit" eyebrow="Exit context" title="Buyer Match demand" depth={1} className="is-wide" aside={<Basis b="modeled" />}>
       <ExitContext d={d} />
     </Plane>
+    </Cards>
+    </div>
   )
 }
 
@@ -369,9 +476,10 @@ function ExitContext({ d }: { d: DiDecision }) {
 
 /* ── transactions ──────────────────────────────────────────────────────── */
 
+const TX_KIND_LABEL: Record<string, string> = { sale: 'sales', mortgage: 'loans', lien: 'liens', foreclosure: 'filings', ask: 'seller asks', analysis: 'analyses', offer: 'offers' }
 const KIND_ICON: Record<string, IconName> = { sale: 'home', mortgage: 'dollar-sign', lien: 'flag', foreclosure: 'alert', ask: 'message', analysis: 'cpu', offer: 'send' }
 
-function TransactionsEvidence({ d, onSelect }: { d: DiDecision; onSelect: (s: DiSelection) => void }) {
+export function TransactionsSection({ d, onSelect }: { d: DiDecision; onSelect: (s: DiSelection) => void }) {
   const items: LCTimelineItem[] = d.history.map((h, i) => ({
     id: `${h.kind}-${i}`,
     at: Date.parse(h.at),
@@ -381,25 +489,35 @@ function TransactionsEvidence({ d, onSelect }: { d: DiDecision; onSelect: (s: Di
     state: 'done',
     onOpen: () => onSelect({ type: 'event', index: i, source: 'history' }),
   }))
-  if (!items.length) return <Empty icon="clock" title="No recorded transactions" body="No sales, loans, liens or analyses are on record for this property." />
+  const head = <SectionHead title="Transactions" summary="Recorded sales, loans, liens and filings from the county record, seller asks from the conversation, and every engine analysis." bases={['recorded', 'seller', 'modeled']} />
+  if (!items.length) return <div className="dr-mode dr-section">{head}<Empty icon="clock" title="No recorded transactions" body="No sales, loans, liens or analyses are on record for this property." /></div>
+  const counts = d.history.reduce<Record<string, number>>((a, h) => { a[h.kind] = (a[h.kind] ?? 0) + 1; return a }, {})
   return (
-    <Plane id="transactions" eyebrow="Transaction history" title="Recorded events, what the seller said, and every analysis" under="exec">
-      <LCTimeline items={items} label="Property history" />
-      <p className="dr-quiet">Only factual recorded events: sales and loans from the county record, liens as classified, seller asks from the conversation, engine analyses from immutable snapshots.</p>
-    </Plane>
+    <div className="dr-mode dr-section">
+      {head}
+      <Cards>
+        <Plane id="transactions-mix" eyebrow="On record" title={`${d.history.length} event${d.history.length === 1 ? '' : 's'}`} depth={1}>
+          <div className="dr-kinds">{Object.entries(counts).map(([k, n]) => <span key={k}><b>{n}</b>{TX_KIND_LABEL[k] ?? humanize(k)}</span>)}</div>
+        </Plane>
+        <Plane id="transactions" eyebrow="Transaction history" title="Recorded events, what the seller said, and every analysis" under="exec" className="is-wide">
+          <LCTimeline items={items} label="Property history" />
+          <p className="dr-quiet">Only factual recorded events: sales and loans from the county record, liens as classified, seller asks from the conversation, engine analyses from immutable snapshots.</p>
+        </Plane>
+      </Cards>
+    </div>
   )
 }
 
 /* ── communication ─────────────────────────────────────────────────────── */
 
-function CommunicationEvidence({ d, now }: { d: DiDecision; now: number }) {
+export function CommunicationCard({ d, now }: { d: DiDecision; now: number }) {
   const c = d.conversation
   if (!c) return <Empty icon="message" title="No conversation signal" body="No seller conversation is linked to this property, or it could not be read." />
   const factors = [...c.factors].sort((a, b) => Math.abs(b.points) - Math.abs(a.points))
   const maxPts = Math.max(1, ...factors.map((f) => Math.abs(f.points)))
   const intents = Object.entries(c.intents).sort((a, b) => b[1] - a[1])
   return (
-    <Plane id="communication" eyebrow="Communication signal" title={`${c.band.replace('_', ' ')} · ${c.score ?? '—'} · ${c.confidence} confidence`} under="flow">
+    <Plane id="communication" eyebrow="Conversation signal" title={`${c.band.replace('_', ' ')} · ${c.score ?? '—'}/100 · ${c.confidence} confidence`} under="flow" aside={<Basis b="inferred" />}>
       <ul className="dr-factors">
         {factors.map((f) => (
           <li key={f.key} className={f.points >= 0 ? 'is-plus' : 'is-minus'}>

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../../../_shared.js'
 import { runAcquisitionEngineWithProgress } from '@/lib/cockpit/deal-intelligence-dossier.js'
 import { getUniversalDealDossier } from '@/lib/cockpit/universal-deal-dossier-service.js'
+import { terminalEvent } from '@/lib/domain/deal-intelligence/engine-run-events.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -73,6 +74,13 @@ export async function POST(request, { params }) {
             (progress) => emit({ ok: true, ...progress }),
             { thread_key },
           )
+          // An engine that REPORTED failure still emitted decision_ready…done above;
+          // end the stream with the failure so the client never reads it as success.
+          if (!result?.ok) {
+            emit(terminalEvent(result))
+            controller.close()
+            return
+          }
           const dossier = await getUniversalDealDossier({ thread_key, property_id })
           emit({ ok: true, stage: 'decision_ready', status: 'done', dossier })
           controller.close()

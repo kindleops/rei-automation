@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Icon, type IconName } from '../../../shared/icons'
 import { cx } from '../../../shared/lc'
+import { BASIS_LABEL, isSourceBasis, type EvidenceBasis } from './di-evidence'
 
 /**
  * Decision-room primitives. Planes are glass over the liquid environment;
@@ -132,5 +133,31 @@ export function Facts({ rows }: { rows: ReadonlyArray<[ReactNode, ReactNode] | n
         </div>
       ))}
     </dl>
+  )
+}
+
+/** What kind of fact a figure stands on — source evidence (recorded / seller) vs inference (engine / estimate / inferred). */
+export function Basis({ b }: { b: EvidenceBasis }) {
+  return <span className="dr-basis" data-b={b} data-side={isSourceBasis(b) ? 'source' : 'inference'}>{BASIS_LABEL[b]}</span>
+}
+
+/** A section's consistent card grid: cards flow in equal columns; `is-wide` cards span the row. */
+export function Cards({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cx('dr-cards', className)}>{children}</div>
+}
+
+/** The one-line head every section opens with: what it is, and what kinds of evidence it stands on. */
+export function SectionHead({ title, summary, bases, aside }: { title: string; summary?: ReactNode; bases?: readonly EvidenceBasis[]; aside?: ReactNode }) {
+  return (
+    <header className="dr-section-head">
+      <div>
+        <h2>{title}</h2>
+        {summary ? <p>{summary}</p> : null}
+      </div>
+      <div className="dr-section-head__aside">
+        {bases?.length ? <span className="dr-section-head__bases">{bases.map((b) => <Basis key={b} b={b} />)}</span> : null}
+        {aside}
+      </div>
+    </header>
   )
 }

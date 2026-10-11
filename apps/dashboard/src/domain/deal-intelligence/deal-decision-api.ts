@@ -235,7 +235,8 @@ export type DealDecision = {
   record: {
     sections: RecordSection[]
     owner: { name: string | null; sections: RecordSection[] } | null
-    prospects: Array<{ id: string; name: string; primary: boolean; fields: Array<{ label: string; value: string }> }>
+    /** age is display-only (protected class — never a pricing input); contactScore is the vendor score on 0–100 */
+    prospects: Array<{ id: string; name: string; primary: boolean; age?: number | null; language?: string | null; contactScore?: number | null; fields: Array<{ label: string; value: string }> }>
   }
   history: Array<{ at: string; kind: 'sale' | 'mortgage' | 'lien' | 'foreclosure' | 'ask' | 'analysis' | 'offer'; title: string; amount: number | null; detail: string | null }>
   valuationHistory: Array<{ at: string; low: number | null; mid: number | null; high: number | null; offer: number | null; tier: string | null; comps: number | null }>

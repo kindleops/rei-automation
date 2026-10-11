@@ -1,6 +1,9 @@
 import { Icon } from '../../../../shared/icons'
 import { cx, LCButton, LCIconButton, LCMenu, LCStatus, LCTabs, LCTooltip, lcMenu } from '../../../../shared/lc'
-import { ago, humanize, phone as fmtPhone, splitAddress } from '../di-format'
+import { ago, humanize, phone as fmtPhone, splitAddress, usd } from '../di-format'
+import { sellerIdentityFacts } from '../di-evidence'
+import type { MoneyTag } from '../di-ui'
+import { Tag } from '../di-ui'
 import { resolveCallAction } from '../../../../domain/compliance/call-action'
 import type { DiLinks } from '../di-links'
 import { handleObjectClick, objectAttrs, ObjectMenu } from '../../../../modules/desktop/objects'
@@ -135,6 +138,8 @@ export function CommandStrip({ d: shown, subject, pending, identity: shownIdenti
         </div>
       </div>
 
+      {d ? <KeyNumbers d={d} identity={identity} /> : null}
+
       <div className="dr-strip__row is-modes">
         <LCTabs
           label="Deal Intelligence modes"
@@ -156,5 +161,38 @@ export function CommandStrip({ d: shown, subject, pending, identity: shownIdenti
         </div>
       </div>
     </header>
+  )
+}
+
+/**
+ * The header's key numbers — the same five every time, each tagged with what
+ * kind of number it is: owner of record, engine value (or the AVM when the
+ * engine has not run), recommended offer, seller ask, equity, comps priced.
+ */
+function KeyNumbers({ d, identity }: { d: DiDecision; identity: SellerIdentity | null }) {
+  const analyzed = d.decision.status === 'available'
+  const ask = d.offer?.negotiation.ask ?? [...d.history].reverse().find((h) => h.kind === 'ask')?.amount ?? null
+  const facts = sellerIdentityFacts(d)
+  const owner = identity?.recordOwner ?? d.record.owner?.name ?? null
+  const items: Array<{ k: string; label: string; value: string | null; tag: MoneyTag | null; sub?: string | null }> = [
+    { k: 'owner', label: 'Owner of record', value: owner, tag: owner ? 'record' : null, sub: [facts.age !== null ? `age ${facts.age}` : null, facts.language].filter(Boolean).join(' · ') || null },
+    analyzed && d.valuation?.mid
+      ? { k: 'value', label: 'Engine value', value: usd(d.valuation.mid), tag: 'modeled', sub: d.valuation.low && d.valuation.high ? `${usd(d.valuation.low)}–${usd(d.valuation.high)}` : null }
+      : { k: 'value', label: 'AVM', value: usd(d.economics.avm ?? d.valuation?.avm), tag: 'estimated', sub: 'not engine-priced' },
+    { k: 'offer', label: 'Offer', value: analyzed ? usd(d.offer?.recommended) : null, tag: analyzed && d.offer?.recommended ? 'modeled' : null, sub: analyzed ? null : 'not analyzed' },
+    { k: 'ask', label: 'Seller ask', value: usd(ask), tag: ask ? 'seller' : null, sub: ask ? null : 'not named' },
+    { k: 'equity', label: 'Equity', value: d.economics.equityPercent !== null ? `${Math.round(d.economics.equityPercent)}%` : null, tag: d.economics.equityPercent !== null ? 'estimated' : null, sub: d.economics.equityEstimate !== null ? usd(d.economics.equityEstimate) : null },
+    { k: 'comps', label: 'Comps priced', value: d.comps ? String(d.comps.selected) : null, tag: d.comps ? 'modeled' : null, sub: d.comps ? `of ${d.comps.raw ?? '—'} screened` : 'engine has not run' },
+  ]
+  return (
+    <dl className="dr-strip__keys" aria-label="Key numbers">
+      {items.map((x) => (
+        <div key={x.k} className={cx('dr-key', !x.value && 'is-empty')} data-k={x.k}>
+          <dt>{x.label}{x.tag ? <Tag kind={x.tag} /> : null}</dt>
+          <dd className="lc-num">{x.value ?? '—'}</dd>
+          {x.sub ? <span className="dr-key__sub">{x.sub}</span> : null}
+        </div>
+      ))}
+    </dl>
   )
 }

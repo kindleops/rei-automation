@@ -77,12 +77,12 @@ export function DiInspector(p: DiInspectorProps) {
 function defaultView(p: DiInspectorProps): View {
   const d = p.d
   if (p.mode === 'decision') return { eyebrow: 'Context', title: p.defaultTitle, label: p.defaultTitle, body: p.defaultContent }
-  if (p.mode === 'model' || p.mode === 'scenario') {
+  if (p.mode === 'model') {
     const oc = d.offer
     const inp = d.scenario?.inputs
     const cur = d.scenario?.current
     return {
-      eyebrow: p.mode === 'model' ? 'Model provenance' : 'How the lab computes',
+      eyebrow: 'Model provenance',
       title: `${humanize(d.lineage.engine) ?? 'Decision engine'} ${d.lineage.engineVersion ?? ''}`.trim(),
       label: 'Model provenance',
       body: (
@@ -115,7 +115,7 @@ function defaultView(p: DiInspectorProps): View {
       ),
     }
   }
-  if (p.mode === 'record') {
+  if (p.mode === 'records') {
     const cats = recordCategories(d)
     return {
       eyebrow: 'Record provenance',
@@ -446,7 +446,7 @@ function markerView(p: DiInspectorProps, key: string): View | null {
   const v = d.valuation
   const dec = availableOf(d)
   const c = d.comps
-  const openEvidence = <LCButton size="sm" variant="quiet" icon="stats" onClick={() => p.onOpenMode('evidence')}>Evidence</LCButton>
+  const openEvidence = <LCButton size="sm" variant="quiet" icon="stats" onClick={() => p.onOpenMode('comps')}>Comps</LCButton>
   switch (key) {
     case 'engine':
       return {
