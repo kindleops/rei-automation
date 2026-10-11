@@ -109,7 +109,13 @@ const SCORING_BACKFILL_JOB_PATHS = ["/api/internal/acquisition/scoring-backfill"
  */
 const EG_FACTS_REFRESH_JOB_PATHS = ["/api/internal/entity-graph/facts-refresh"];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS, ...SCORING_BACKFILL_JOB_PATHS, ...EG_FACTS_REFRESH_JOB_PATHS];
+/**
+ * Entity Graph Overview snapshot (RC 8.5.9). Send-incapable: writes only
+ * public.eg_overview_snapshot. NOT commissioned: its flag stays off.
+ */
+const EG_OVERVIEW_SNAPSHOT_JOB_PATHS = ["/api/internal/entity-graph/overview-snapshot"];
+
+const ALLOWED_JOB_PATHS = [...EG_OVERVIEW_SNAPSHOT_JOB_PATHS, ...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS, ...SCORING_BACKFILL_JOB_PATHS, ...EG_FACTS_REFRESH_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -259,7 +265,7 @@ test("the delivery reconciler still runs with its outbound provider call disable
 });
 
 test("production declares the reconciliation and send schedules, and only approved flags", async () => {
-  assert.deepEqual(await declaredCrons(PRODUCTION), ["*/5 * * * *", "* * * * *", "*/1 * * * *"]);
+  assert.deepEqual(await declaredCrons(PRODUCTION), ["*/5 * * * *", "* * * * *", "*/1 * * * *", "45 3,9,15,21 * * *"]);
 
   const vars = await configVars(PRODUCTION);
   assert.equal(vars.DEPLOYMENT_ENV, "production");
@@ -531,5 +537,34 @@ test("the Command Wall token pepper is forwarded to the container conditionally 
   for (const cfg of [PRODUCTION, STAGING]) {
     const vars = await configVars(cfg);
     assert.ok(!("COMMAND_WALL_TOKEN_PEPPER" in vars), "a secret, never a plain wrangler var");
+  }
+});
+
+test("the EG Overview snapshot rides its own daily + 6-hourly lane outside the 11:15-14:30 UTC blackout, switched OFF everywhere (flag + ceiling default unset)", async () => {
+  const code = await workerCode();
+  const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  const lane = table[1].match(/"45 3,9,15,21 \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(lane, "the snapshot lane must be registered");
+  assert.deepEqual(lane[1].split(",").map((x) => x.trim()).filter(Boolean), ["EG_OVERVIEW_SNAPSHOT"], "the lane carries the snapshot and nothing else");
+  for (const [expr, jobs] of [...table[1].matchAll(/"([^"]+)":\s*\[([^\]]*)\]/g)].map((m) => [m[1], m[2]])) {
+    if (expr !== "45 3,9,15,21 * * *") assert.ok(!jobs.includes("EG_OVERVIEW_SNAPSHOT"), `the snapshot must not ride ${expr}`);
+  }
+  // Fire times: 09:45 (after the 09:17 refresh) and every 6 h; none inside 11:15-14:30 UTC.
+  const hours = [3, 9, 15, 21];
+  assert.ok(hours.includes(9));
+  for (let i = 1; i < hours.length; i += 1) assert.equal(hours[i] - hours[i - 1], 6);
+  for (const h of hours) {
+    const m = h * 60 + 45;
+    assert.ok(m < 11 * 60 + 15 || m > 14 * 60 + 30, `${h}:45 UTC falls in the heavy-read blackout`);
+  }
+  const block = code.match(/const EG_OVERVIEW_SNAPSHOT: CronJob = \{([\s\S]*?)\};/);
+  assert.ok(block && block[1].includes('"CRON_EG_OVERVIEW_SNAPSHOT_ENABLED"') && block[1].includes('"/api/internal/entity-graph/overview-snapshot"'));
+  assert.ok(!/body\s*:/.test(block[1]) && !/repeatEveryMs/.test(block[1]), "no body, no sub-minute repeat");
+  assert.match(code, /env\.EG_OVERVIEW_SNAPSHOT_ENABLED\s*\?\s*\{\s*EG_OVERVIEW_SNAPSHOT_ENABLED:\s*env\.EG_OVERVIEW_SNAPSHOT_ENABLED\s*\}\s*:\s*\{\}/, "the ceiling is forwarded only when set");
+  assert.equal((code.match(/EG_OVERVIEW_SNAPSHOT_ENABLED:/g) || []).length, 1, "forwarded exactly once, never unconditionally");
+  for (const cfg of [PRODUCTION, STAGING]) {
+    const vars = await configVars(cfg);
+    assert.notEqual(vars.CRON_EG_OVERVIEW_SNAPSHOT_ENABLED, "true", "not commissioned: the owner flips this");
+    assert.notEqual(vars.EG_OVERVIEW_SNAPSHOT_ENABLED, "true", "not commissioned: the owner flips this");
   }
 });

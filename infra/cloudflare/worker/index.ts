@@ -82,6 +82,11 @@ export class ApiContainer extends Container<Env> {
         env.EG_FACTS_REFRESH_ENABLED === "true" ? "true" : "false",
       EG_FACTS_TABLE_READS:
         env.EG_FACTS_TABLE_READS === "off" ? "off" : "on",
+      // Entity Graph Overview snapshot ceiling (RC 8.5.9). Default unset: the
+      // route answers ok:false + skipped unless this is exactly "true".
+      ...(env.EG_OVERVIEW_SNAPSHOT_ENABLED
+        ? { EG_OVERVIEW_SNAPSHOT_ENABLED: env.EG_OVERVIEW_SNAPSHOT_ENABLED }
+        : {}),
 
       ...(env.DEPLOYMENT_ID ? { DEPLOYMENT_ID: env.DEPLOYMENT_ID } : {}),
       ...(env.DEPLOY_GIT_SHA ? { DEPLOY_GIT_SHA: env.DEPLOY_GIT_SHA } : {}),
@@ -326,6 +331,8 @@ interface Env {
   EG_FACTS_REFRESH_ENABLED?: string;
   /** Entity Graph facts table reads. Absent => "on"; "off" = live computation. */
   EG_FACTS_TABLE_READS?: string;
+  /** Entity Graph Overview snapshot ceiling (container env). Absent => the route skips. */
+  EG_OVERVIEW_SNAPSHOT_ENABLED?: string;
   // Email (Brevo transport + inbound verification).
   EMAIL_SEND_ENABLED?: string;
   BREVO_API_KEY?: string;
@@ -938,6 +945,24 @@ const EG_FACTS_REFRESH: CronJob = {
 };
 
 /**
+ * Entity Graph Overview snapshot (RC 8.5.9, NOT commissioned). Rewrites every
+ * scope's unfiltered universe into public.eg_overview_snapshot
+ * (entity-graph-overview-service.js writeOverviewSnapshots); the live Overview
+ * reads those rows and never scans a universe. Send-incapable: it writes only
+ * public.eg_overview_snapshot. Its own expression, "45 3,9,15,21 * * *":
+ * 09:45 UTC (after the 09:17 read-model refresh), then every 6 hours, so it
+ * never fires inside the 11:15-14:30 UTC heavy-read blackout. Double gate:
+ * CRON_EG_OVERVIEW_SNAPSHOT_ENABLED (this registration) +
+ * EG_OVERVIEW_SNAPSHOT_ENABLED (container ceiling). No body and no query: all
+ * tabs.
+ */
+const EG_OVERVIEW_SNAPSHOT: CronJob = {
+  id: "eg_overview_snapshot",
+  enabledBy: "CRON_EG_OVERVIEW_SNAPSHOT_ENABLED",
+  path: "/api/internal/entity-graph/overview-snapshot",
+};
+
+/**
  * THE ONE GOVERNED PRODUCTION SCHEDULE.
  *
  * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
@@ -985,6 +1010,9 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
   // trigger list yet, so Cloudflare never invokes it until the post-deploy
   // enablement adds the trigger AND CRON_NOTIFICATION_STORIES_PROJECT_ENABLED.
   "*/1 * * * *": [NOTIFICATION_STORIES_PROJECT],
+  // Entity Graph Overview snapshot lane (send-incapable): 03:45, 09:45, 15:45,
+  // 21:45 UTC. None falls inside the 11:15-14:30 UTC heavy-read blackout.
+  "45 3,9,15,21 * * *": [EG_OVERVIEW_SNAPSHOT],
 };
 
 /**

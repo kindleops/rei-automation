@@ -70,7 +70,11 @@
     // */1 = Notification Center projection lane (send-incapable; RC 8.2 E1).
     //       Same minute cadence as the send lane but its own expression, so the
     //       send lane still carries senders only. The job repeats at +30 s.
-    "crons": ["*/5 * * * *", "* * * * *", "*/1 * * * *"]
+    // 45 3,9,15,21 = Entity Graph Overview snapshot (send-incapable; RC 8.5.9):
+    //       09:45 UTC after the 09:17 refresh, then every 6 h, never inside
+    //       11:15-14:30 UTC. Inert until CRON_EG_OVERVIEW_SNAPSHOT_ENABLED and
+    //       EG_OVERVIEW_SNAPSHOT_ENABLED are both "true" (neither is set here).
+    "crons": ["*/5 * * * *", "* * * * *", "*/1 * * * *", "45 3,9,15,21 * * *"]
   },
 
   "vars": {
