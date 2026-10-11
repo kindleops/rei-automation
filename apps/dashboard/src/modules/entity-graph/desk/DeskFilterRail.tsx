@@ -20,7 +20,7 @@
  * showing an unfiltered list.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { LCButton, LCChip, LCError, LCSearch, LCSegmented, LCSelect, LCSkeleton, cx } from '../../../shared/lc'
+import { LCButton, LCChip, LCError, LCSearch, LCSegmented, LCSkeleton, cx } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
 import { useAuth } from '../../../components/auth/AuthProvider'
 import {
@@ -30,9 +30,6 @@ import {
   describeFieldFilter,
   fetchEntityGraphFilterCatalog,
   findCatalogField,
-  operatorIsMultiValue,
-  operatorIsRange,
-  operatorNeedsValue,
   searchCatalogFields,
   type EntityGraphFieldFilter,
   type EntityGraphFilterCatalog,
@@ -59,6 +56,7 @@ import {
   type DeskFacet as Facet,
   type FacetMatch,
 } from './desk-model'
+import { DeskFieldValuePicker } from './DeskFieldValuePicker'
 
 type Props = {
   scope: EntityScope
@@ -253,6 +251,8 @@ export function DeskFilterRail({ scope, filters, onChange, collapsed = false, on
                 {rows.map((row, i) => (
                   <FieldEditor
                     key={`${row.field_key}:${i}`}
+                    tab={tab}
+                    cohort={filters}
                     field={findCatalogField(catalog, row.field_key)}
                     filter={row}
                     onChange={(next) => setRows(rows.map((r, j) => (j === i ? next : r)))}
@@ -318,7 +318,13 @@ function CategoryBrowser({ catalog, onPick }: { catalog: EntityGraphFilterCatalo
   )
 }
 
-function FieldEditor({ field, filter, onChange, onRemove }: { field: EntityGraphFilterField | null; filter: EntityGraphFieldFilter; onChange: (f: EntityGraphFieldFilter) => void; onRemove: () => void }) {
+/**
+ * One field filter being edited: a picker of the field's REAL values (owner P0
+ * 2026-10-10 — never a typed value except for names / addresses / ids). The
+ * picker decides the operator from the selection (any of / all of / exclude,
+ * from–to, Yes / No / Not recorded, contains).
+ */
+function FieldEditor({ tab, cohort, field, filter, onChange, onRemove }: { tab: string; cohort: EntityGraphFieldFilter[]; field: EntityGraphFilterField | null; filter: EntityGraphFieldFilter; onChange: (f: EntityGraphFieldFilter) => void; onRemove: () => void }) {
   if (!field) {
     return (
       <li className="egdk-edit is-unknown">
@@ -327,32 +333,13 @@ function FieldEditor({ field, filter, onChange, onRemove }: { field: EntityGraph
       </li>
     )
   }
-  const op = filter.operator
-  const inputType = field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text'
   return (
     <li className="egdk-edit">
       <div className="egdk-edit__head">
         <strong>{field.label}</strong>
         <button type="button" className="egdk-edit__x" aria-label={`Remove ${field.label}`} onClick={onRemove}><Icon name="x" size={11} /></button>
       </div>
-      <LCSelect
-        size="sm"
-        label={`${field.label} operator`}
-        value={op}
-        options={field.operators.map((o) => ({ value: o.key, label: o.label }))}
-        onChange={(next) => onChange({ ...filter, operator: next, value: defaultValueFor(field, next) })}
-      />
-      {!operatorNeedsValue(op) ? null : operatorIsRange(op) ? (
-        <div className="egdk-edit__range">
-          <input className="egdk-input" type={inputType} placeholder="From" value={String((Array.isArray(filter.value) ? filter.value[0] : '') ?? '')} onChange={(e) => onChange({ ...filter, value: [e.target.value, Array.isArray(filter.value) ? filter.value[1] ?? '' : ''] })} />
-          <span aria-hidden="true">–</span>
-          <input className="egdk-input" type={inputType} placeholder="To" value={String((Array.isArray(filter.value) ? filter.value[1] : '') ?? '')} onChange={(e) => onChange({ ...filter, value: [Array.isArray(filter.value) ? filter.value[0] ?? '' : '', e.target.value] })} />
-        </div>
-      ) : operatorIsMultiValue(op) ? (
-        <input className="egdk-input" type="text" placeholder="Value, value, value" value={(Array.isArray(filter.value) ? filter.value : []).map(String).join(', ')} onChange={(e) => onChange({ ...filter, value: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
-      ) : (
-        <input className="egdk-input" type={inputType} placeholder={field.label} value={String(filter.value ?? '')} onChange={(e) => onChange({ ...filter, value: e.target.value })} />
-      )}
+      <DeskFieldValuePicker tab={tab} field={field} filter={filter} cohort={cohort} onChange={onChange} />
       {field.description ? <p className="egdk-edit__note">{field.description}</p> : null}
       {field.caution ? <p className="egdk-edit__warn">{field.caution}</p> : null}
       {field.data_coverage === 'empty' ? <p className="egdk-edit__warn">This column holds no data ({field.data_coverage_note}) — it can only return 0 records.</p> : null}
@@ -442,6 +429,10 @@ function FacetSection({ tab, facet, filters, onChange }: { tab: string; facet: F
                 {!q && valued.length === 0 ? <li className="egdk-none">No values in this cohort.</li> : null}
               </ul>
               {blank && !q ? <p className="egdk-facet__foot">Not recorded · {fmtCount(blank.value)}</p> : null}
+              {/* what the counts are counted IN (owner 2026-10-10 read a Tax Delinquent cohort's 14,172 as the universe) */}
+              {current?.data?.total !== null && current?.data?.total !== undefined ? (
+                <p className="egdk-facet__foot egdk-facet__cohort">{others.length ? `Counted within the ${fmtCount(current.data.total)} matching your other filters` : `Whole universe · ${fmtCount(current.data.total)}`}</p>
+              ) : null}
               {!exhaustive ? <p className="egdk-facet__foot">{other ? `Sampled list · ${fmtCount(other.value)} in values not shown` : 'Sampled list — may be incomplete'}</p> : null}
             </>
           )}

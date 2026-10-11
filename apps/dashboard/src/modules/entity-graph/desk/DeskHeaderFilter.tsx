@@ -159,7 +159,7 @@ function HeaderMenu({ label, column, filters, onFiltersChange, sortDir, onSort, 
                 <label><span>To</span><input className="egdk-input" type={kind === 'date' ? 'date' : 'number'} value={sel.to ?? ''} placeholder={rangeHint(data.range?.max, kind)} onChange={(e) => setSel((c) => ({ ...c, presence: null, to: e.target.value }))} /></label>
                 <div className="egdk-hf__presence" role="group" aria-label="Presence">
                   <button type="button" className={cx('egdk-hf__sortbtn', sel.presence === 'has' && 'is-on')} onClick={() => setSel({ presence: sel.presence === 'has' ? null : 'has' })}>{`Has a value · ${fmtCount(data.known)}`}</button>
-                  <button type="button" className={cx('egdk-hf__sortbtn', sel.presence === 'none' && 'is-on')} onClick={() => setSel({ presence: sel.presence === 'none' ? null : 'none' })}>{`No value · ${fmtCount(Math.max(0, data.total - data.known))}`}</button>
+                  <button type="button" className={cx('egdk-hf__sortbtn', sel.presence === 'none' && 'is-on')} onClick={() => setSel({ presence: sel.presence === 'none' ? null : 'none' })}>{`No value · ${fmtCount(Math.max(0, (data.total ?? 0) - (data.known ?? 0)))}`}</button>
                 </div>
                 <p className="egdk-hf__note">{`Range in this cohort: ${rangeHint(data.range?.min, kind) || '—'} – ${rangeHint(data.range?.max, kind) || '—'}`}</p>
               </div>

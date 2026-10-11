@@ -38,6 +38,9 @@ export type EntityGraphFilterField = {
   caution?: string
   /** Delimited-list column matched as whole tokens. */
   token_separator?: string
+  /** Personal attribute (IC8 fairness policy): display and targeting only, never pricing. */
+  sensitive?: 'personal_attribute'
+  sensitive_note?: string
 }
 
 export type EntityGraphFilterGroup = { id: string; label: string; fields: EntityGraphFilterField[] }

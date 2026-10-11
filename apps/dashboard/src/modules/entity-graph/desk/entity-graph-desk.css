@@ -870,3 +870,18 @@ html.is-desktop-modern .egdk-figure.is-bad .egdk-figure__value { color: rgb(245,
 }
 .egdk-hf .egdk-input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--lc-accent), 0 0 0 3px color-mix(in srgb, var(--lc-accent) 14%, transparent); }
 .egdk-hf__actions { display: flex; justify-content: flex-end; gap: 6px; padding-top: 4px; box-shadow: inset 0 1px 0 var(--egdk-hf-edge); }
+
+/* ── "All fields" value pickers (DeskFieldValuePicker) ── */
+.egdk-fv { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--lc-ink-2); }
+.egdk-fv .egdk-hf__list { max-height: 220px; }
+.egdk-fv__opt { position: relative; isolation: isolate; }
+.egdk-fv__opt::before { content: ''; position: absolute; inset: 2px auto 2px 0; width: var(--w, 0%); border-radius: 5px; background: rgba(var(--lc-select-rgb), 0.07); z-index: -1; pointer-events: none; }
+.egdk-fv__bool { display: flex; gap: 6px; flex-wrap: wrap; }
+.egdk-fv__bool .egdk-hf__sortbtn:disabled { opacity: 0.45; cursor: default; }
+.egdk-fv__hist { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 2px; height: 38px; padding: 2px 0; }
+.egdk-fv__bar { flex: 1 1 0; min-width: 3px; height: var(--h, 4%); border: 0; padding: 0; border-radius: 2px 2px 0 0; background: rgba(var(--lc-select-rgb), 0.45); cursor: pointer; }
+.egdk-fv__bar:hover, .egdk-fv__bar:focus-visible { background: rgb(var(--lc-select-rgb)); outline: none; }
+.egdk-fv__bar.is-tail { background: rgba(var(--lc-edge-rgb), 0.35); }
+.egdk-fv__sensitive { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-size: 11px; color: var(--lc-ink-3); }
+.egdk-facet__cohort { color: var(--lc-ink-3); font-variant-numeric: tabular-nums; }
+.egdk-fv__variants { color: var(--lc-ink-3); font-size: 10.5px; }

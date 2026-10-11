@@ -270,17 +270,28 @@ export type EntityGraphHeaderValues = {
   supported: boolean
   reason?: string
   /** the filter-catalog field a header filter writes (same AST as the rail) */
-  field: { key: string; label: string; type: string; operators: Array<{ key: string; label: string }>; kind: string | null } | null
+  field: { key: string; label: string; type: string; operators: Array<{ key: string; label: string }>; kind: string | null; token_separator?: string; sensitive?: string } | null
   column: string
   kind: HeaderValueKind
-  total: number
-  known: number
-  values?: Array<{ value: string | null; count: number }>
+  /** the picker this field gets (field values): checklist | range | boolean | text */
+  control?: 'checklist' | 'range' | 'boolean' | 'text'
+  /** null when a value search narrowed the list (the cohort total is not what was counted) */
+  total: number | null
+  known: number | null
+  /** `variants`: case / spacing spellings of one value folded into this option (its filter selects all of them) */
+  values?: Array<{ value: string | null; count: number; variants?: string[] }>
   truncated?: boolean
+  search?: string
   range?: { min: string | null; max: string | null }
-  mode: 'table' | 'live'
+  /** numeric: quantiles + 12 buckets between p1 and p99 (+ tails); date: count per year */
+  histogram?: {
+    quantiles?: Record<string, number>
+    buckets?: Array<{ lo: number; hi: number; count: number; tail?: 'below' | 'above' }>
+    years?: Array<{ year: number; count: number }>
+  } | null
+  mode?: 'table' | 'live'
   source?: string
-  asOf: string | null
+  asOf?: string | null
   computedMs?: number
   ms?: number
 }
@@ -303,4 +314,16 @@ export async function fetchEntityGraphHeaderValues(
     throw new Error(res.message || res.error || 'entity_graph_header_values_failed')
   }
   return res.data as EntityGraphHeaderValues
+}
+
+/**
+ * Real values of ONE filter-catalog field over the filtered cohort (its own
+ * filter left out) — the rail's "All fields" pickers, on the header filters'
+ * endpoint (?field=). Any tab.
+ */
+export async function fetchEntityGraphFieldValues(
+  params: { tab: string; field: string; search?: string } & Record<string, string | number | undefined>,
+  signal?: AbortSignal,
+): Promise<EntityGraphHeaderValues> {
+  return fetchEntityGraphHeaderValues(params, signal)
 }

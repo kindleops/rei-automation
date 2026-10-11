@@ -258,7 +258,7 @@ export const DESK_FACETS: Partial<Record<EntityScope, DeskFacet[]>> = {
     { dimension: 'market', label: 'Market', fieldKey: 'properties.market' },
     { dimension: 'state', label: 'State', fieldKey: 'properties.property_address_state' },
     { dimension: 'county', label: 'County', fieldKey: 'properties.property_address_county_name' },
-    { dimension: 'property_type', label: 'Property type', fieldKey: 'properties.property_type' },
+    { dimension: 'ptype', label: 'Property type', fieldKey: 'facts.property_type_class' },
   ],
   buyers: [
     { dimension: 'market', label: 'Primary market', fieldKey: 'buyers.primary_market' },
@@ -310,8 +310,12 @@ export const DESK_FACET_GROUPS: Partial<Record<EntityScope, DeskFacetGroup[]>> =
       { dimension: 'county', label: 'County', fieldKey: 'properties.property_address_county_name' },
       { dimension: 'city', label: 'City', fieldKey: 'properties.property_address_city' },
     ] },
+    // the canonical classification (entity-graph-property-class.js); the vendor's raw strings stay pickable below it
     { id: 'asset', label: 'Asset', facets: [
-      { dimension: 'property_type', label: 'Property type', fieldKey: 'properties.property_type' },
+      { dimension: 'ptype', label: 'Property type', fieldKey: 'facts.property_type_class' },
+      { dimension: 'ptype_group', label: 'Property type group', fieldKey: 'facts.property_type_group' },
+      { dimension: 'property_use', label: 'Property use (vendor)', fieldKey: 'facts.property_use_raw' },
+      { dimension: 'property_type', label: 'Property type (vendor raw)', fieldKey: 'properties.property_type' },
     ] },
     { id: 'records', label: 'Debt & sale records', facets: [
       { dimension: 'loan_type', label: 'Loan type', fieldKey: 'records.first_loan_type' },
