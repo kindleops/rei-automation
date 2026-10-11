@@ -46,6 +46,7 @@ const LIST_CACHE_MAX = 6
 const STATE_TTL_MS = 60_000
 const TIMEOUT_MS = 25_000
 
+const clean = (v) => String(v ?? '').trim()
 const IDENT = /^[a-z_][a-z0-9_]*$/
 const q = (c) => {
   if (!IDENT.test(String(c))) throw new FacetUntranslatable(`identifier ${c}`)
@@ -76,9 +77,21 @@ export async function factsState({ query = queryWithTimeout, now = Date.now(), f
       const res = await query(`select to_regclass('public.${FACTS_TABLE}') is not null as present, to_regclass('public.eg_refresh_log') is not null as logged`, [], 5_000)
       const r = res?.rows?.[0]
       if (r?.present && r?.logged) {
-        const log = await query(`select finished_at, rows from public.eg_refresh_log where name = $1 and status = 'ok' order by finished_at desc limit 1`, [FACTS_TABLE], 5_000)
+        const log = await query(`select finished_at, rows, detail from public.eg_refresh_log where name = $1 and status = 'ok' order by finished_at desc limit 1`, [FACTS_TABLE], 5_000)
         const last = log?.rows?.[0]
-        if (last?.finished_at) value = { mode: 'table', asOf: new Date(last.finished_at).toISOString(), rows: Number(last.rows) || null }
+        if (last?.finished_at) {
+          // addendum columns (facts added after the base migration) are read from the table only once
+          // they exist AND a successful refresh wrote them (its log names the addendum)
+          const colRes = await query(`select column_name from information_schema.columns where table_schema = 'public' and table_name = $1`, [FACTS_TABLE], 5_000).catch(() => null)
+          const detail = last.detail && typeof last.detail === 'object' ? last.detail : {}
+          value = {
+            mode: 'table',
+            asOf: new Date(last.finished_at).toISOString(),
+            rows: Number(last.rows) || null,
+            columns: colRes?.rows ? new Set(colRes.rows.map((x) => String(x.column_name))) : null,
+            addenda: new Set(Array.isArray(detail.addenda) ? detail.addenda.map(String) : []),
+          }
+        }
       }
     }
   } catch {
@@ -90,6 +103,23 @@ export async function factsState({ query = queryWithTimeout, now = Date.now(), f
 export const __factsStateTest = { reset: () => { stateCache = null } }
 
 /* ── shared pieces ────────────────────────────────────────────────────────────── */
+
+/**
+ * Can the TABLE serve these columns? An addendum column must exist in the
+ * table and have been written by a successful refresh; otherwise the caller
+ * takes the live path for this request (never an error, never a blank column).
+ */
+export function tableServes(state, cols) {
+  if (state?.mode !== 'table') return false
+  for (const c of cols) {
+    const addendum = FACT_BY_COL.get(c)?.addendum
+    if (!addendum) continue
+    if (state.columns && !state.columns.has(c)) return false
+    if (!state.addenda || !state.addenda.has(addendum)) return false
+  }
+  return true
+}
+const compiledColumns = (compiled) => [...new Set(compiled.clauseColumns.flatMap((set) => [...set]))]
 
 /** Canonical order: values asc|desc, property_id in the same direction; nulls last by property_id asc. */
 function orderBy(col, ascending, alias = '') {
@@ -304,8 +334,9 @@ export async function factsCohortRelation({ applyFilters, columns = [], compiled
   const query = deps.query || queryWithTimeout
   const now = deps.now ?? Date.now()
   const compiled = pre || compile(applyFilters)
-  const state = deps.factsState ? await deps.factsState() : await factsState({ query })
+  let state = deps.factsState ? await deps.factsState() : await factsState({ query })
   for (const c of columns) if (c !== 'property_id' && !factsColumnSupported(c)) throw new FacetUntranslatable(`column ${c}`)
+  if (state.mode === 'table' && !tableServes(state, [...columns, ...compiledColumns(compiled)])) state = { mode: 'live', asOf: null }
   if (state.mode === 'table') return { from: `public.${FACTS_TABLE} f`, where: compiled.where, params: compiled.params, mode: 'table', asOf: state.asOf }
   if (state.mode !== 'live') throw new FacetUntranslatable('facts unavailable (no direct database connection)')
   const computedFilterCols = computedColsOfClauses(compiled)
@@ -422,7 +453,8 @@ export async function factsSortedPage({ sortBy, ascending = false, applyFilters,
   const col = String(sortBy || 'property_id')
   if (!factsColumnSupported(col) && col !== 'property_id') throw new FacetUntranslatable(`sort ${col}`)
   const compiled = compile(applyFilters)
-  const state = deps.factsState ? await deps.factsState() : await factsState({ query })
+  let state = deps.factsState ? await deps.factsState() : await factsState({ query })
+  if (state.mode === 'table' && !tableServes(state, [col, ...compiledColumns(compiled)])) state = { mode: 'live', asOf: null }
   const token = decodeFactsAfter(after)
   if (state.mode === 'table') {
     const [page, counted] = await Promise.all([
@@ -469,36 +501,117 @@ export async function factsCohortIds({ applyFilters, cap = 5000, deps = {} }) {
 /* ── header values ────────────────────────────────────────────────────────────── */
 
 const MAX_VALUES = 300
+const HIST_BUCKETS = 12
+const QUANTS = [0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99]
+
+const escapeRe = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** ilike pattern for a value search (the operator's text, literal). */
+const likeOf = (t) => `%${String(t).replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+
+/** Numeric histogram hints from known values (JS form of the SQL form below — same buckets). */
+export function histogramOf(values) {
+  const xs = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b)
+  if (!xs.length) return null
+  const q = (p) => {
+    const pos = (xs.length - 1) * p
+    const lo = Math.floor(pos); const hi = Math.ceil(pos)
+    return xs[lo] + (xs[hi] - xs[lo]) * (pos - lo)
+  }
+  const quantiles = Object.fromEntries(QUANTS.map((p) => [`p${Math.round(p * 100)}`, q(p)]))
+  return { quantiles, buckets: bucketsFrom(quantiles.p1, quantiles.p99, (lo, hi, last) => xs.filter((v) => v >= lo && (last ? v <= hi : v < hi)).length, xs) }
+}
+function bucketsFrom(lo, hi, countIn, xs = null) {
+  if (!(Number.isFinite(lo) && Number.isFinite(hi)) || hi <= lo) return []
+  const w = (hi - lo) / HIST_BUCKETS
+  const out = []
+  for (let i = 0; i < HIST_BUCKETS; i += 1) {
+    const a = lo + w * i
+    const b = i === HIST_BUCKETS - 1 ? hi : lo + w * (i + 1)
+    out.push({ lo: a, hi: b, count: xs ? countIn(a, b, i === HIST_BUCKETS - 1) : 0 })
+  }
+  // outside p1…p99 (the long tails) — counted, never dropped
+  if (xs) {
+    const below = xs.filter((v) => v < lo).length
+    const above = xs.filter((v) => v > hi).length
+    if (below) out.unshift({ lo: xs[0], hi: lo, count: below, tail: 'below' })
+    if (above) out.push({ lo: hi, hi: xs[xs.length - 1], count: above, tail: 'above' })
+  }
+  return out
+}
 
 /**
  * The value distribution of one column over the filtered cohort — the header
  * filter's checklist (categorical / boolean / tokens) or range (numeric / date).
  * `applyFilters` should EXCLUDE the column's own filter so other values stay pickable.
- * @returns {{ column, kind, total, known, values?, distinct?, truncated?, range?, mode, asOf }}
+ *   search     only values containing this text (the checklist's own search, server-side — never a cap)
+ *   split      a delimited TEXT column ("; ") counted per whole token (property flags, person flags)
+ *   histogram  numeric: quantiles + 12 equal buckets between p1 and p99 (+ tails); date: count per year
+ * @returns {{ column, kind, total, known, values?, distinct?, truncated?, range?, histogram?, mode, asOf }}
  */
-export async function factsHeaderValues({ column, applyFilters, deps = {} }) {
+export async function factsHeaderValues({ column, applyFilters, search = '', split = null, histogram = false, deps = {} }) {
   const query = deps.query || queryWithTimeout
   const col = String(column || '')
   if (!factsColumnSupported(col)) throw new FacetUntranslatable(`column ${col}`)
-  const kind = FACT_BY_COL.get(col)?.kind || kindOfPg(plainColumnType(col))
+  const kind = split ? 'tokens' : (FACT_BY_COL.get(col)?.kind || kindOfPg(plainColumnType(col)))
   const rel = await factsCohortRelation({ applyFilters, columns: [col], deps })
   const c = `f.${q(col)}`
   const base = { column: col, kind, mode: rel.mode, source: rel.source || rel.mode, asOf: rel.asOf, ...(rel.computedMs !== undefined ? { computedMs: rel.computedMs, cached: rel.cached } : {}) }
-  if (rel.records) return { ...base, ...(await countRecords(rel, col, kind, query)) }
+  const term = clean(search)
+  if (rel.records) return { ...base, ...(await countRecords(rel, col, kind, query, { search: term, split, histogram })) }
   if (kind === 'numeric' || kind === 'date') {
-    const res = await query(`select count(*)::bigint as total, count(${c})::bigint as known, min(${c})::text as min, max(${c})::text as max from ${rel.from} ${rel.where}`, rel.params, TIMEOUT_MS)
+    const quant = histogram && kind === 'numeric' ? `, percentile_cont(array[${QUANTS.join(',')}]::float8[]) within group (order by (${c})::float8) as q` : ''
+    const res = await query(`select count(*)::bigint as total, count(${c})::bigint as known, min(${c})::text as min, max(${c})::text as max${quant} from ${rel.from} ${rel.where}`, rel.params, TIMEOUT_MS)
     const r = res?.rows?.[0] || {}
-    return { ...base, total: Number(r.total || 0), known: Number(r.known || 0), range: { min: r.min ?? null, max: r.max ?? null } }
+    const out = { ...base, total: Number(r.total || 0), known: Number(r.known || 0), range: { min: r.min ?? null, max: r.max ?? null } }
+    if (histogram && kind === 'numeric' && Array.isArray(r.q)) {
+      const quantiles = Object.fromEntries(QUANTS.map((p, i) => [`p${Math.round(p * 100)}`, Number(r.q[i])]))
+      const lo = quantiles.p1; const hi = quantiles.p99
+      let buckets = []
+      if (Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
+        const params = [...rel.params, lo, hi]
+        const L = `$${params.length - 1}::float8`; const H = `$${params.length}::float8`
+        const v = `(${c})::float8`
+        // bucket: -1 below p1, N above p99, the top edge (v = p99) closes the last bucket — histogramOf's rule
+        const h = await query(`select case when ${v} < ${L} then -1 when ${v} > ${H} then ${HIST_BUCKETS} when ${v} = ${H} then ${HIST_BUCKETS - 1}
+              else least(floor((${v} - ${L}) / ((${H} - ${L}) / ${HIST_BUCKETS}))::int, ${HIST_BUCKETS - 1}) end as b, count(*)::bigint as n, min(${v}) as mn, max(${v}) as mx
+            from ${rel.from} ${rel.where ? `${rel.where} and` : 'where'} ${c} is not null group by 1`, params, TIMEOUT_MS)
+        const by = new Map((h?.rows || []).map((x) => [Number(x.b), x]))
+        buckets = bucketsFrom(lo, hi, () => 0)
+        buckets.forEach((bk, i) => { bk.count = Number(by.get(i)?.n || 0) })
+        const below = by.get(-1); const above = by.get(HIST_BUCKETS)
+        if (below) buckets.unshift({ lo: Number(below.mn), hi: lo, count: Number(below.n || 0), tail: 'below' })
+        if (above) buckets.push({ lo: hi, hi: Number(above.mx), count: Number(above.n || 0), tail: 'above' })
+      }
+      out.histogram = { quantiles, buckets }
+    }
+    if (histogram && kind === 'date') {
+      const h = await query(`select left(${c}::text, 4) as y, count(*)::bigint as n from ${rel.from} ${rel.where ? `${rel.where} and` : 'where'} ${c} is not null group by 1 order by 1`, rel.params, TIMEOUT_MS)
+      out.histogram = { years: (h?.rows || []).filter((x) => /^\d{4}$/.test(String(x.y))).map((x) => ({ year: Number(x.y), count: Number(x.n || 0) })) }
+    }
+    return out
   }
-  const valueExpr = kind === 'tokens' ? 'u.v' : `nullif(btrim(${c}::text), '')`
-  const from = kind === 'tokens' ? `${rel.from} left join lateral unnest(${c}) as u(v) on true` : rel.from
+  const params = [...rel.params]
+  let valueExpr = kind === 'tokens' ? 'btrim(u.v)' : `nullif(btrim(${c}::text), '')`
+  let from = rel.from
+  if (split) {
+    params.push(`\\s*${escapeRe(String(split).trim() || split)}\\s*`)
+    from = `${rel.from} left join lateral regexp_split_to_table(coalesce(${c}::text, ''), $${params.length}) as u(v) on true`
+    valueExpr = `nullif(btrim(u.v), '')`
+  } else if (kind === 'tokens') {
+    from = `${rel.from} left join lateral unnest(${c}) as u(v) on true`
+  }
+  let where = rel.where
+  if (term) {
+    params.push(likeOf(term))
+    where = `${where ? `${where} and` : 'where'} ${valueExpr} ilike $${params.length}`
+  }
   const [grouped, counted] = await Promise.all([
-    query(`select ${valueExpr} as value, count(distinct f."property_id")::bigint as n from ${from} ${rel.where} group by 1 order by 2 desc, 1 asc nulls last limit ${MAX_VALUES + 1}`, rel.params, TIMEOUT_MS),
+    query(`select ${valueExpr} as value, count(distinct f."property_id")::bigint as n from ${from} ${where} group by 1 order by 2 desc, 1 asc nulls last limit ${MAX_VALUES + 1}`, params, TIMEOUT_MS),
     query(`select count(*)::bigint as total, count(${c})::bigint as known from ${rel.from} ${rel.where}`, rel.params, TIMEOUT_MS),
   ])
   const t = counted?.rows?.[0] || {}
   const rows = (grouped?.rows || []).map((r) => ({ value: r.value === null || r.value === undefined ? null : String(r.value), count: Number(r.n || 0) }))
-  return { ...base, total: Number(t.total || 0), known: Number(t.known || 0), values: rows.slice(0, MAX_VALUES), truncated: rows.length > MAX_VALUES }
+  return { ...base, total: Number(t.total || 0), known: Number(t.known || 0), values: rows.slice(0, MAX_VALUES), truncated: rows.length > MAX_VALUES, ...(term ? { search: term } : {}) }
 }
 
 /**
@@ -506,7 +619,7 @@ export async function factsHeaderValues({ column, applyFilters, deps = {} }) {
  * SQL form: btrim, '' = no value, a token counted once per property). Computed
  * filter clauses are still applied by SQL first.
  */
-async function countRecords(rel, col, kind, query) {
+async function countRecords(rel, col, kind, query, { search = '', split = null, histogram = false } = {}) {
   let records = rel.records
   if (rel.where) {
     const kept = await query(`select f."property_id" from ${rel.from} ${rel.where}`, rel.params, TIMEOUT_MS)
@@ -518,6 +631,8 @@ async function countRecords(rel, col, kind, query) {
     let known = 0
     let min = null
     let max = null
+    const xs = []
+    const years = new Map()
     for (const r of records) {
       const v = r[col]
       if (v === null || v === undefined || v === '') continue
@@ -525,27 +640,37 @@ async function countRecords(rel, col, kind, query) {
       const k = kind === 'numeric' ? Number(v) : String(v)
       if (min === null || k < min) min = k
       if (max === null || k > max) max = k
+      if (kind === 'numeric') xs.push(Number(v))
+      else { const y = String(v).slice(0, 4); if (/^\d{4}$/.test(y)) years.set(y, (years.get(y) || 0) + 1) }
     }
-    return { total, known, range: { min: min === null ? null : String(min), max: max === null ? null : String(max) } }
+    const out = { total, known, range: { min: min === null ? null : String(min), max: max === null ? null : String(max) } }
+    if (histogram && kind === 'numeric') out.histogram = histogramOf(xs)
+    if (histogram && kind === 'date') out.histogram = { years: [...years].sort().map(([y, n]) => ({ year: Number(y), count: n })) }
+    return out
   }
   const counts = new Map()
   let known = 0
+  const term = clean(search).toLowerCase()
+  const keep = (t) => !term || (t !== null && t.toLowerCase().includes(term))
+  const sep = split ? new RegExp(`\\s*${escapeRe(String(split).trim() || split)}\\s*`) : null
   for (const r of records) {
     const v = r[col]
     if (kind === 'tokens') {
-      const list = Array.isArray(v) ? [...new Set(v.map((x) => String(x ?? '').trim()).filter(Boolean))] : []
-      if (Array.isArray(v)) known += 1
-      if (!list.length) counts.set(null, (counts.get(null) || 0) + 1)
-      for (const t of list) counts.set(t, (counts.get(t) || 0) + 1)
+      const list = sep
+        ? [...new Set(String(v ?? '').split(sep).map((x) => x.trim()).filter(Boolean))]
+        : Array.isArray(v) ? [...new Set(v.map((x) => String(x ?? '').trim()).filter(Boolean))] : []
+      if (sep ? clean(v) !== '' : Array.isArray(v)) known += 1
+      if (!list.length && keep(null)) counts.set(null, (counts.get(null) || 0) + 1)
+      for (const t of list) if (keep(t)) counts.set(t, (counts.get(t) || 0) + 1)
       continue
     }
     if (v !== null && v !== undefined) known += 1
     const key = v === null || v === undefined ? null : (String(v).trim() || null)
-    counts.set(key, (counts.get(key) || 0) + 1)
+    if (keep(key)) counts.set(key, (counts.get(key) || 0) + 1)
   }
   const rows = [...counts.entries()].map(([value, count]) => ({ value, count }))
     .sort((a, b) => b.count - a.count || (a.value === null ? 1 : b.value === null ? -1 : a.value.localeCompare(b.value)))
-  return { total, known, values: rows.slice(0, MAX_VALUES), truncated: rows.length > MAX_VALUES }
+  return { total, known, values: rows.slice(0, MAX_VALUES), truncated: rows.length > MAX_VALUES, ...(term ? { search: clean(search) } : {}) }
 }
 
 /** Exact count of the filtered cohort on the facts relation (composition / KPIs with fact filters). */

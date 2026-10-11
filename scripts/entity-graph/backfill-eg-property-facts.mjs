@@ -66,7 +66,7 @@ if (!process.cwd().endsWith('/apps/api')) { console.error('run from apps/api (th
 const pg = (await import('pg')).default
 const { computeFacts, COMPUTED_FACTS } = await import('@/lib/domain/entity-graph/entity-graph-facts.js')
 const { factsTableColumns, FACTS_TABLE_NAME } = await import('@/lib/domain/entity-graph/entity-graph-facts-ddl.js')
-const { FACTS_REFRESH_LOCK_KEY, factsBaseColumns, factRecords, factsUpsertSql } = await import('@/lib/domain/entity-graph/entity-graph-facts-refresh.js')
+const { FACTS_REFRESH_LOCK_KEY, addendaWritten, computedColumnsOf, factsBaseColumns, factRecords, factsUpsertSql, writableFactsColumns } = await import('@/lib/domain/entity-graph/entity-graph-facts-refresh.js')
 
 const url = process.env.DATABASE_URL || fs.readFileSync('/tmp/.dburl', 'utf8').trim()
 const client = new pg.Client({ connectionString: url, ssl: url.includes('localhost') ? false : { rejectUnauthorized: false }, application_name: 'eg_facts_backfill' })
@@ -111,9 +111,11 @@ try {
   await client.query(`set lock_timeout = '5s'`)
   if (OPT.dryRun) await client.query('set default_transaction_read_only = on')
 
-  const columns = factsTableColumns()
+  // only the columns the live table has (an addendum migration not applied yet is skipped, not a failed upsert)
+  const presentCols = OPT.dryRun ? null : new Set((await client.query(`select column_name from information_schema.columns where table_schema = 'public' and table_name = $1`, [FACTS_TABLE_NAME])).rows.map((r) => String(r.column_name)))
+  const columns = OPT.dryRun ? factsTableColumns() : writableFactsColumns(presentCols.size ? presentCols : null)
   const baseCols = factsBaseColumns(columns)
-  const allComputed = COMPUTED_FACTS.map((f) => f.col)
+  const allComputed = computedColumnsOf(columns)
   const upsert = factsUpsertSql(columns)
   const universe = Number((await client.query('select count(*)::int as n from public.v_entity_graph_properties')).rows[0].n)
 
@@ -208,7 +210,7 @@ try {
       if (counts.facts !== counts.universe || counts.other_run !== 0) {
         throw new Error(`universe check failed: facts ${counts.facts} vs universe ${counts.universe}, rows from another run ${counts.other_run} — NOT marking ok (rerun to top up: move the state file aside)`)
       }
-      await client.query(`update public.eg_refresh_log set status = 'ok', finished_at = now(), rows = $2, detail = detail || $3::jsonb where id = $1`, [state.logId, counts.facts, JSON.stringify({ deleted: del.rowCount, ms_wall: Date.now() - Date.parse(state.runAt) })])
+      await client.query(`update public.eg_refresh_log set status = 'ok', finished_at = now(), rows = $2, detail = detail || $3::jsonb where id = $1`, [state.logId, counts.facts, JSON.stringify({ deleted: del.rowCount, ms_wall: Date.now() - Date.parse(state.runAt), addenda: addendaWritten(columns) })])
       await client.query('commit')
       log({ phase: 'done', facts: counts.facts, universe: counts.universe, deleted: del.rowCount, logId: state.logId })
       fs.renameSync(OPT.state, `${OPT.state}.done-${Date.now()}`)

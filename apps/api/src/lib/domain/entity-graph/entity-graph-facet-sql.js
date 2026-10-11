@@ -278,9 +278,16 @@ export function facetsAvailable() {
  * Exact count of every value of `column` in the cohort, one GROUP BY.
  * Returns [{ value: string | null, count: number }] (null = not recorded).
  */
-export async function groupedFacetCounts({ source, column, applyFilters = (b) => b, query = queryWithTimeout, timeoutMs = 25_000, now = Date.now() }) {
-  const { where, params } = compileFacetWhere(applyFilters)
-  const sql = `select nullif(btrim(${ident(column)}::text), '') as value, count(*)::bigint as n from public.${ident(source)} ${where} group by 1`
+export async function groupedFacetCounts({ source, column, search = '', applyFilters = (b) => b, query = queryWithTimeout, timeoutMs = 25_000, now = Date.now() }) {
+  const { where: baseWhere, params } = compileFacetWhere(applyFilters)
+  const valueExpr = `nullif(btrim(${ident(column)}::text), '')`
+  let where = baseWhere
+  const term = String(search ?? '').trim()
+  if (term) {
+    params.push(`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`)
+    where = `${where ? `${where} and` : 'where'} ${valueExpr} ilike $${params.length}`
+  }
+  const sql = `select ${valueExpr} as value, count(*)::bigint as n from public.${ident(source)} ${where} group by 1`
   const key = `${sql}|${JSON.stringify(params)}`
   const hit = cache.get(key)
   if (hit && now - hit.at < CACHE_TTL_MS) return hit.rows
@@ -303,7 +310,7 @@ export async function groupedFacetCounts({ source, column, applyFilters = (b) =>
  * cohort, plus the cohort size. Tokens are not exclusive — a property carries
  * several — so the counts do not add up to the total (callers say so).
  */
-export async function groupedTokenCounts({ source, column, split = null, applyFilters = (b) => b, query = queryWithTimeout, timeoutMs = 25_000, now = Date.now() }) {
+export async function groupedTokenCounts({ source, column, split = null, array = false, applyFilters = (b) => b, query = queryWithTimeout, timeoutMs = 25_000, now = Date.now() }) {
   const { where, params: whereParams } = compileFacetWhere(applyFilters)
   const col = ident(column)
   const params = [...whereParams]
@@ -314,7 +321,9 @@ export async function groupedTokenCounts({ source, column, split = null, applyFi
         params.push(`\\s*${core.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`)
         return `regexp_split_to_table(coalesce(${col}::text, ''), $${params.length})`
       })()
-    : `jsonb_array_elements_text(case when jsonb_typeof(${col}) = 'array' then ${col} else '[]'::jsonb end)`
+    : array
+      ? `unnest(coalesce(${col}, '{}'::text[]))`
+      : `jsonb_array_elements_text(case when jsonb_typeof(${col}) = 'array' then ${col} else '[]'::jsonb end)`
   const sql = `select btrim(u.v) as value, count(*)::bigint as n from public.${ident(source)} cross join lateral ${tokens} as u(v) ${where} group by 1`
   const totalSql = `select count(*)::bigint as n from public.${ident(source)} ${where}`
   const key = `${sql}|${JSON.stringify(params)}`
@@ -330,6 +339,45 @@ export async function groupedTokenCounts({ source, column, split = null, applyFi
   if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value)
   cache.set(key, { at: now, rows })
   return rows
+}
+
+/**
+ * Exact range of a numeric / date column over the cohort, with histogram
+ * hints (numeric: quantiles + 12 equal buckets between p1 and p99 and the
+ * tails; date: count per year). Two statements; never sampled.
+ */
+export async function groupedRangeStats({ source, column, kind = 'numeric', applyFilters = (b) => b, query = queryWithTimeout, timeoutMs = 25_000 }) {
+  const { where, params } = compileFacetWhere(applyFilters)
+  const col = ident(column)
+  const and = where ? `${where} and` : 'where'
+  const QS = [0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99]
+  const quant = kind === 'numeric' ? `, percentile_cont(array[${QS.join(',')}]::float8[]) within group (order by (${col})::float8) as q` : ''
+  const res = await query(`select count(*)::bigint as total, count(${col})::bigint as known, min(${col})::text as min, max(${col})::text as max${quant} from public.${ident(source)} ${where}`, params, timeoutMs)
+  const r = res?.rows?.[0] || {}
+  const out = { total: Number(r.total || 0), known: Number(r.known || 0), range: { min: r.min ?? null, max: r.max ?? null } }
+  if (kind === 'numeric' && Array.isArray(r.q)) {
+    const quantiles = Object.fromEntries(QS.map((p, i) => [`p${Math.round(p * 100)}`, Number(r.q[i])]))
+    const lo = quantiles.p1; const hi = quantiles.p99; const N = 12
+    const buckets = []
+    if (Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
+      const p2 = [...params, lo, hi]
+      const L = `$${p2.length - 1}::float8`; const H = `$${p2.length}::float8`; const v = `(${col})::float8`
+      const h = await query(`select case when ${v} < ${L} then -1 when ${v} > ${H} then ${N} when ${v} = ${H} then ${N - 1}
+            else least(floor((${v} - ${L}) / ((${H} - ${L}) / ${N}))::int, ${N - 1}) end as b, count(*)::bigint as n, min(${v}) as mn, max(${v}) as mx
+          from public.${ident(source)} ${and} ${col} is not null group by 1`, p2, timeoutMs)
+      const by = new Map((h?.rows || []).map((x) => [Number(x.b), x]))
+      const w = (hi - lo) / N
+      for (let i = 0; i < N; i += 1) buckets.push({ lo: lo + w * i, hi: i === N - 1 ? hi : lo + w * (i + 1), count: Number(by.get(i)?.n || 0) })
+      if (by.get(-1)) buckets.unshift({ lo: Number(by.get(-1).mn), hi: lo, count: Number(by.get(-1).n || 0), tail: 'below' })
+      if (by.get(N)) buckets.push({ lo: hi, hi: Number(by.get(N).mx), count: Number(by.get(N).n || 0), tail: 'above' })
+    }
+    out.histogram = { quantiles, buckets }
+  }
+  if (kind === 'date') {
+    const h = await query(`select left(${col}::text, 4) as y, count(*)::bigint as n from public.${ident(source)} ${and} ${col} is not null group by 1 order by 1`, params, timeoutMs)
+    out.histogram = { years: (h?.rows || []).filter((x) => /^\d{4}$/.test(String(x.y))).map((x) => ({ year: Number(x.y), count: Number(x.n || 0) })) }
+  }
+  return out
 }
 
 export const __facetCacheTest = { reset: () => cache.clear() }

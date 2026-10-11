@@ -50,7 +50,8 @@ const bands = (edges, fmt = (n) => String(n), { under = true, over = true } = {}
 }
 
 const PROPERTY_DIMENSIONS = [
-  { key: 'property_type', label: 'Property type', group: 'Asset', kind: 'top', column: 'property_type', filterKey: 'properties.property_type' },
+  // the vendor's raw string, unchanged ("Multi-Family", "Multi-family", "SFR"…); the canonical type is `ptype` below
+  { key: 'property_type', label: 'Property type (vendor raw)', group: 'Asset', kind: 'top', column: 'property_type', filterKey: 'properties.property_type' },
   // Distress & condition (owner 2026-10-07: "vacant AND poor/unsound, by market").
   { key: 'flags', label: 'Property flags', group: 'Distress & condition', kind: 'tokens', column: 'property_flags_json', filterKey: 'properties.flags' },
   { key: 'condition', label: 'Building condition', group: 'Distress & condition', kind: 'top', column: 'building_condition', filterKey: 'properties.building_condition' },
@@ -191,6 +192,10 @@ PROPERTY_DIMENSIONS.push(
   { key: 'company_status', label: 'Company status', group: 'Owning company', kind: 'top', column: 'company_status_class', filterKey: 'facts.company_status_class' },
   { key: 'company_status_raw', label: 'Company status (registry wording)', group: 'Owning company', kind: 'top', column: 'company_status_raw', filterKey: 'facts.company_status_raw' },
   { key: 'company_jurisdiction', label: 'Company jurisdiction', group: 'Owning company', kind: 'top', column: 'company_jurisdiction', filterKey: 'facts.company_jurisdiction' },
+  // THE canonical property type (entity-graph-property-class.js) — owner P0 2026-10-10
+  { key: 'ptype', label: 'Property type', group: 'Asset', kind: 'top', column: 'property_type_class', filterKey: 'facts.property_type_class' },
+  { key: 'ptype_group', label: 'Property type group', group: 'Asset', kind: 'top', column: 'property_type_group', filterKey: 'facts.property_type_group' },
+  { key: 'property_use', label: 'Property use (vendor)', group: 'Asset', kind: 'top', column: 'property_use_raw', filterKey: 'facts.property_use_raw' },
 )
 
 const TAB_CONFIG = {
@@ -199,6 +204,11 @@ const TAB_CONFIG = {
   people: { table: 'prospects', countColumn: 'prospect_id', dimensions: PEOPLE_DIMENSIONS, applyBase: applyProspectFilters, fieldPrefix: 'prospects' },
   master_owners: { table: 'master_owners', countColumn: 'master_owner_id', dimensions: OWNER_DIMENSIONS, applyBase: applyOwnerFilters, fieldPrefix: 'master_owners' },
   contact_methods: { table: 'phones', countColumn: 'phone_id', dimensions: PHONE_DIMENSIONS, applyBase: applyPhoneFilters, fieldPrefix: 'phones' },
+}
+
+/** The table + base applier a tab's browse reads (shared with the field-values endpoint). */
+export function compositionTabConfig(tab) {
+  return TAB_CONFIG[clean(tab).toLowerCase()] || null
 }
 
 export function getCompositionCatalog(tab = 'properties') {
@@ -421,12 +431,27 @@ async function factsComposition({ deps, config, dimension, filters, fieldFilters
       const from = dimension.kind === 'tokens'
         ? `${rel.from} cross join lateral jsonb_array_elements_text(case when jsonb_typeof(${col}) = 'array' then ${col} else '[]'::jsonb end) as u(v)`
         : rel.from
-      const [grouped, counted] = await Promise.all([
-        query(`select ${value} as value, count(*)::bigint as n from ${from} ${rel.where} group by 1`, rel.params, 25_000),
-        query(`select count(*)::bigint as n from ${rel.from} ${rel.where}`, rel.params, 25_000),
-      ])
-      const total = Number(counted?.rows?.[0]?.n ?? 0)
-      const rows = (grouped?.rows || []).map((r) => ({ value: r.value === null ? null : String(r.value), count: Number(r.n || 0) }))
+      let total
+      let rows
+      if (rel.records) {
+        // live relation: the records are already here — count them in JS (the same btrim / '' = no value rule)
+        // instead of shipping ~176K rows of JSON to Postgres twice (measured 7–11 s → milliseconds, 2026-10-10)
+        let records = rel.records
+        if (rel.where) {
+          const kept = await query(`select f."property_id" from ${rel.from} ${rel.where}`, rel.params, 25_000)
+          const set = new Set((kept?.rows || []).map((r) => String(r.property_id)))
+          records = records.filter((r) => set.has(String(r.property_id)))
+        }
+        total = records.length
+        rows = recordValueCounts(records, dimension.column, dimension.kind === 'tokens')
+      } else {
+        const [grouped, counted] = await Promise.all([
+          query(`select ${value} as value, count(*)::bigint as n from ${from} ${rel.where} group by 1`, rel.params, 25_000),
+          query(`select count(*)::bigint as n from ${rel.from} ${rel.where}`, rel.params, 25_000),
+        ])
+        total = Number(counted?.rows?.[0]?.n ?? 0)
+        rows = (grouped?.rows || []).map((r) => ({ value: r.value === null ? null : String(r.value), count: Number(r.n || 0) }))
+      }
       const valued = rows.filter((r) => r.value !== null).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
       const blank = rows.filter((r) => r.value === null).reduce((n, r) => n + r.count, 0)
       const shown = all ? valued : valued.slice(0, TOP_BUCKETS)
@@ -464,6 +489,22 @@ async function factsComposition({ deps, config, dimension, filters, fieldFilters
     if (!(error instanceof FacetUntranslatable)) throw error
     return { supported: false, dimension: dim, total: null, additive: false, exhaustive: false, note: `This breakdown cannot be computed with the current filters (${error.message}).`, buckets: [] }
   }
+}
+
+/** Value counts over live fact records — the SQL form's rule: btrim, '' = no value; a token once per record. */
+export function recordValueCounts(records, column, tokens = false) {
+  const counts = new Map()
+  const add = (k) => counts.set(k, (counts.get(k) || 0) + 1)
+  for (const r of records) {
+    const v = r[column]
+    if (tokens) {
+      const list = Array.isArray(v) ? [...new Set(v.map((x) => String(x ?? '').trim()).filter(Boolean))] : []
+      for (const t of list) add(t)
+      continue
+    }
+    add(v === null || v === undefined ? null : (String(v).trim() || null))
+  }
+  return [...counts.entries()].map(([value, count]) => ({ value, count }))
 }
 
 /**

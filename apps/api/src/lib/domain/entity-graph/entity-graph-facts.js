@@ -34,6 +34,7 @@ import { ENTITY_GRAPH_LINKED_COLUMNS, ENTITY_GRAPH_PROPERTY_COLUMNS } from './en
 import { primaryLinkedProspect } from './entity-graph-owner-link.js'
 import { SOURCE_COLUMN_TYPES } from './eg-property-facts-types.js'
 import { propertyCompanyStatus } from './entity-graph-company-status.js'
+import { classifyPropertyType } from './entity-graph-property-class.js'
 import { CAMPAIGN_FIELD_CATALOG } from '@/lib/domain/campaigns/campaign-field-catalog.js'
 
 const clean = (v) => String(v ?? '').trim()
@@ -158,6 +159,8 @@ export const BASE_NEEDS = Object.freeze({
     'rec_foreclosure_stage', 'rec_has_probate', 'rec_has_lis_pendens', 'rec_has_default_notice', 'rec_has_death_record', 'rec_has_tax_lien',
     'rec_has_judgment', 'rec_has_private_lender', 'rec_last_sale_distress'],
   asset: ['asset_subclass', 'acquisition_bucket', 'property_flags_text', 'units_count', 'style', 'normalized_asset_class', 'property_type'],
+  // the canonical property type (entity-graph-property-class.js) + the observed vendor property use (input 'use')
+  ptype: ['property_type', 'property_class', 'units_count', 'building_square_feet', 'asset_subclass', 'acquisition_bucket', 'property_flags_text'],
   zip: ['property_address_zip', 'property_zip'],
   sale: ['rec_last_sale_date', 'rec_last_sale_price', 'sale_date'],
   buyer: ['rec_owner_buyer_acquisitions', 'rec_owner_buyer_status'],
@@ -165,11 +168,14 @@ export const BASE_NEEDS = Object.freeze({
   company: ['is_corporate_owner'],
   linked: ['master_owner_id'],
 })
+/** The canonical property type family (classifyPropertyType) — one derivation, five columns. */
+const PTYPE_COLS = new Set(['property_type_class', 'property_type_group', 'property_type_confidence', 'property_type_basis', 'property_use_raw'])
 const DERIVATION_OF = (col) => (
   /^equity_/.test(col) ? 'equity'
     : /^(lien|filing)_/.test(col) ? 'records'
       : /^(signal_labels|distress_signal_count)$/.test(col) ? 'signals'
         : col === 'asset_type' ? 'asset'
+          : PTYPE_COLS.has(col) ? 'ptype'
           : col === 'zip_code' ? 'zip'
             : col === 'last_sale_on' ? 'sale'
               : col === 'owner_buyer_purchases' ? 'buyer'
@@ -194,10 +200,16 @@ export const BASE_INPUT_COLUMNS = Object.freeze([
   'rec_mortgage_count', 'rec_mortgage_balance', 'rec_lien_categories', 'rec_foreclosure_count', 'rec_foreclosure_stage',
   'rec_has_probate', 'rec_has_lis_pendens', 'rec_has_default_notice', 'rec_has_death_record', 'rec_has_tax_lien',
   'rec_has_judgment', 'rec_has_private_lender', 'rec_last_sale_distress', 'rec_last_sale_date', 'rec_last_sale_price',
-  'rec_owner_buyer_acquisitions', 'rec_owner_buyer_status', 'is_corporate_owner',
+  'rec_owner_buyer_acquisitions', 'rec_owner_buyer_status', 'is_corporate_owner', 'property_class', 'building_square_feet',
 ])
 
 const OWNER_COLS = [...ENTITY_GRAPH_LINKED_COLUMNS.owner]
+/** seller.owner → the prospects person columns (same vendor vocabulary; columns seller.owner lacks stay null). */
+export const SELLER_OWNER_PERSON_COLS = Object.freeze({
+  language_preference: 'o.language_preference', gender: 'o.gender', marital_status: 'o.marital_status', occupation_group: 'o.occupation_group',
+  education_model: 'o.education_model', est_household_income: 'o.est_household_income', net_asset_value: 'o.net_asset_value',
+  buying_power: 'o.buying_power', person_flags_text: "array_to_string(o.person_flags, '; ')",
+})
 const SCORE_COLS = [...ENTITY_GRAPH_LINKED_COLUMNS.scores]
 const PERSON_COLS = [...ENTITY_GRAPH_LINKED_COLUMNS.person].filter((c) => c !== 'age')
 const ZIP_COLS = [...ENTITY_GRAPH_LINKED_COLUMNS.zip]
@@ -271,6 +283,23 @@ export const FACT_INPUTS = Object.freeze({
   sub_owners: { key: 'master_owner_id', sql: (k) => `select s.master_owner_id, s.owner_name from public.sub_owners s where ${k('s.master_owner_id')}` },
   emails: { key: 'master_owner_id', sql: (k) => `select e.master_owner_id, count(*)::int as n from public.emails e where ${k('e.master_owner_id')} group by 1` },
   people: { key: 'individual_key', sql: (k) => `select distinct on (p.individual_key) p.individual_key, p.mob, ${PERSON_COLS.map((c) => `p.${c}`).join(', ')} from public.prospects p where ${k('p.individual_key')} order by p.individual_key, p.prospect_id desc` },
+  /*
+   * PERSON FALLBACKS (owner P0 2026-10-10: age / language / gender / marital / income / net asset value
+   * empty in EG). public.prospects carries only the April + May imports, so the 52,556 compact-import
+   * properties (08-06, 10-07) had no person at all. The same vendor person lives in seller.owner (1.3 M,
+   * keyed by individual_key = the campaign graph's seller_person_key), and the deed owner resolves to a
+   * person in seller.property_owner_resolution_v1. Read-only, keyed; field-by-field fallback (mergePerson).
+   */
+  resolution: {
+    sql: (k) => `select r.property_id, r.individual_key, r.owner_resolution_status, r.owner_role from seller.property_owner_resolution_v1 r
+           where ${k('r.property_id')} and r.owner_role = 'primary_legal_owner' and r.owner_resolution_status in ('confirmed', 'high_confidence') and r.individual_key is not null`,
+  },
+  seller_people: {
+    key: 'individual_key',
+    keyedAlways: true,
+    sql: (k) => `select o.individual_key, o.month_of_birth as mob, ${PERSON_COLS.map((c) => (SELLER_OWNER_PERSON_COLS[c] ? `${SELLER_OWNER_PERSON_COLS[c]} as ${c}` : `null::text as ${c}`)).join(', ')}
+            from seller.owner o where ${k('o.individual_key')}`,
+  },
   scores: { sql: (k) => `select s.property_id, ${SCORE_COLS.map((c) => `s.${c}`).join(', ')} from public.property_acquisition_scores s where ${k('s.property_id')}` },
   zip_rollup: {
     key: 'zip',
@@ -279,6 +308,10 @@ export const FACT_INPUTS = Object.freeze({
             from public.mi_geo_period_rollup r
            where r.build_id = (select b.build_id from public.mi_rollup_builds b where b.status = 'ready' order by b.build_id desc limit 1)
              and r.geo_level = 'zip' and r.asset = 'all' and r.period in ('90d', '1y') and ${k('r.geo_key')}`,
+  },
+  // DealMachine's standardized property use, observed per property (96% of the universe; several rows = several observations)
+  use: {
+    sql: (k) => `select o.property_id, o.property_use from seller.property_use_observation o where ${k('o.property_id')}`,
   },
   zip_buyers: {
     key: 'zip',
@@ -296,6 +329,9 @@ export const FACT_INPUTS = Object.freeze({
  * pg:   the column type in eg_property_facts and in the interim unnest relation
  * plain: copied verbatim from v_entity_graph_properties (sorted/filtered by its own name)
  */
+/** The migration that adds the canonical property-type columns to eg_property_facts. */
+export const PTYPE_ADDENDUM = '20261010200000_eg_property_facts_field_accuracy'
+
 const C = (col, pg, kind, label, inputs, compute, extra = {}) => Object.freeze({ col, pg, kind, label, inputs, compute, ...extra })
 
 const ownerOf = (x) => x.owner?.row || null
@@ -313,6 +349,7 @@ const LINKED_FACTS = [
     const y = Number(p.mob.slice(0, 4)); const m = Number(p.mob.slice(4))
     return now.getUTCFullYear() - y - (now.getUTCMonth() + 1 < m ? 1 : 0)
   }, { field: 'person.age' }),
+  C('person_source', 'text', 'categorical', 'Person data source', ['person'], (x) => x.personSource ?? null, { field: 'person.source', addendum: PTYPE_ADDENDUM }),
   C('zip_sales_90d', 'integer', 'numeric', 'ZIP sales (90d)', ['zip'], (x) => zipOf(x)?.sales90d ?? null, { field: 'zip.sales_90d' }),
   C('zip_sales_1y', 'integer', 'numeric', 'ZIP sales (1y)', ['zip'], (x) => zipOf(x)?.sales1y ?? null, { field: 'zip.sales_1y' }),
   C('zip_investor_share', 'integer', 'numeric', 'ZIP investor share', ['zip'], (x) => zipOf(x)?.investorShare1y ?? null, { field: 'zip.investor_share' }),
@@ -369,6 +406,17 @@ export const COMPUTED_FACTS = ([
   C('distress_signal_count', 'integer', 'numeric', 'Distress signals', [], (x) => x.signals.filter((s) => s.tone === 'distress').length || null, { group: 'Signals' }),
   C('asset_type', 'text', 'categorical', 'Property type (enriched)', [], (x) => x.assetType, { group: 'Property' }),
   C('zip_code', 'text', 'categorical', 'ZIP', [], (x) => x.zip, { group: 'Geography' }),
+  /*
+   * THE canonical property type (owner P0 2026-10-10) — entity-graph-property-class.js.
+   * addendum: not in the 20261009 eg_property_facts migration; added by
+   * PROPOSED_20261010200000_eg_property_facts_property_type.sql. Until that is
+   * applied, reads of these columns take the live path and the refresh skips them.
+   */
+  C('property_type_class', 'text', 'categorical', 'Property type', ['use'], (x) => x.ptype.type, { group: 'Property', addendum: PTYPE_ADDENDUM }),
+  C('property_type_group', 'text', 'categorical', 'Property type group', ['use'], (x) => x.ptype.group, { group: 'Property', addendum: PTYPE_ADDENDUM }),
+  C('property_type_confidence', 'text', 'categorical', 'Property type confidence', ['use'], (x) => x.ptype.confidence, { group: 'Property', addendum: PTYPE_ADDENDUM }),
+  C('property_type_basis', 'text', 'categorical', 'Property type evidence', ['use'], (x) => x.ptype.basis, { group: 'Property', addendum: PTYPE_ADDENDUM }),
+  C('property_use_raw', 'text', 'categorical', 'Property use (vendor)', ['use'], (x) => x.uses.length ? x.uses.join(' || ') : null, { group: 'Property', addendum: PTYPE_ADDENDUM }),
   /* the owning company's state-registry status (entity-graph-company-status.js) */
   C('company_status_class', 'text', 'categorical', 'Company status', ['company'], (x) => x.company.class, { group: 'Owning company' }),
   C('company_status_raw', 'text', 'categorical', 'Company status (registry wording)', ['company'], (x) => x.company.raw, { group: 'Owning company' }),
@@ -447,7 +495,7 @@ export const FACT_BY_COL = new Map(COMPUTED_FACTS.map((f) => [f.col, f]))
 const FAMILY_PREFIX = [
   ['sms', /^sms_/], ['contact_last', /^last_contact_/], ['pipeline', /^(pipeline_|deal_id$)/], ['conversation', /^(conversation_|last_message_at$)/],
   ['campaigns', /^(campaign_count|latest_campaign_name)$/], ['company', /^company_/], ['equity', /^equity_/], ['records', /^(lien|filing)_/],
-  ['signals', /^(signal_labels|distress_signal_count)$/],
+  ['signals', /^(signal_labels|distress_signal_count)$/], ['ptype', /^(property_type_(class|group|confidence|basis)|property_use_raw)$/],
 ]
 export function factFamily(col) {
   for (const [name, re] of FAMILY_PREFIX) if (re.test(col)) return name
@@ -467,7 +515,7 @@ export const isFactSortColumn = (col) => isComputedFactColumn(col) || isPlainFac
 export function inputsFor(cols) {
   const want = new Set()
   for (const col of cols) for (const i of FACT_BY_COL.get(col)?.inputs || []) want.add(i)
-  if (want.has('person')) { want.add('graph'); want.add('linked') }
+  if (want.has('person')) { want.add('graph'); want.add('linked'); want.add('resolution') }
   if (want.has('owner')) want.add('linked')
   if (want.has('zip_buyers')) want.add('zip')
   return want
@@ -506,7 +554,8 @@ export async function computeFacts(baseRows, cols, { query, timeoutMs = 25_000, 
   const read = async (name, keys) => {
     if (!keys.length) return []
     const input = FACT_INPUTS[name]
-    if (keys.length > keyedMax) {
+    // keyedAlways: a source too large to scan (seller.owner, 1.3 M rows) is read by its key index in chunks
+    if (keys.length > keyedMax && !input.keyedAlways) {
       // one sequential scan, filtered here (see FACT_INPUTS)
       const res = await query(input.sql(() => 'true'), [], timeoutMs)
       const set = new Set(keys)
@@ -522,9 +571,11 @@ export async function computeFacts(baseRows, cols, { query, timeoutMs = 25_000, 
     return out
   }
   const fetch = async (name) => (needs.has(name) ? read(name, ids) : null)
-  const [graphRows, reviewRows, threadRows, oppRows, targetRows, linkedRows, scoreRows, companyRows] = await Promise.all([
-    fetch('graph'), fetch('review'), fetch('thread'), fetch('opp'), fetch('targets'), fetch('linked'), fetch('scores'), fetch('company'),
+  const [graphRows, reviewRows, threadRows, oppRows, targetRows, linkedRows, scoreRows, companyRows, useRows, resolutionRows] = await Promise.all([
+    fetch('graph'), fetch('review'), fetch('thread'), fetch('opp'), fetch('targets'), fetch('linked'), fetch('scores'), fetch('company'), fetch('use'), fetch('resolution'),
   ])
+  const resolvedKeyBy = new Map((resolutionRows || []).map((r) => [clean(r.property_id), clean(r.individual_key)]).filter(([, k]) => k))
+  const usesBy = group(useRows, 'property_id')
   const companyBy = one(companyRows, 'property_id')
   const graphBy = group(graphRows, 'property_id')
   const review = reviewRows ? new Set(reviewRows.map((r) => clean(r.property_id))) : null
@@ -557,7 +608,8 @@ export async function computeFacts(baseRows, cols, { query, timeoutMs = 25_000, 
   const zipKey = (r) => clean(r?.property_address_zip || r?.property_zip).slice(0, 5)
   const zips = needs.has('zip') ? [...new Set(baseRows.map(zipKey).filter((z) => /^\d{5}$/.test(z)))] : []
   const latestCampaignIds = targetRows ? [...new Set(targetRows.map((t) => clean(t.latest_campaign_id)).filter(Boolean))] : []
-  const [ownerRows, subRows, emailRows, peopleRows, rollupRows, buyerRows, campaignRows] = await Promise.all([
+  const sellerKeys = needs.has('person') ? [...new Set([...bestPerson.values(), ...resolvedKeyBy.values()])] : []
+  const [ownerRows, subRows, emailRows, peopleRows, rollupRows, buyerRows, campaignRows, sellerPeopleRows] = await Promise.all([
     needs.has('owner') ? read('owners', ownerIds) : null,
     needs.has('owner') && wanted.some((c) => c.startsWith('entity_')) ? read('sub_owners', ownerIds) : null,
     needs.has('owner') && wanted.includes('email_count') ? read('emails', ownerIds) : null,
@@ -565,7 +617,9 @@ export async function computeFacts(baseRows, cols, { query, timeoutMs = 25_000, 
     zips.length ? read('zip_rollup', zips) : null,
     needs.has('zip_buyers') && zips.length ? read('zip_buyers', zips) : null,
     latestCampaignIds.length ? read('campaigns', latestCampaignIds) : null,
+    sellerKeys.length ? read('seller_people', sellerKeys) : null,
   ])
+  const sellerPeopleBy = one(sellerPeopleRows, 'individual_key')
   const ownerBy = one(ownerRows, 'master_owner_id')
   const subBy = new Map()
   for (const r of subRows || []) {
@@ -632,7 +686,14 @@ export async function computeFacts(baseRows, cols, { query, timeoutMs = 25_000, 
     }
     if (needs.has('person')) {
       const key = bestPerson.get(id)
-      x.person = (key && peopleBy.get(key)) || primaryLinkedProspect(linkedBy.get(id)) || null
+      const deedKey = resolvedKeyBy.get(id) || null
+      const merged = mergePerson([
+        ['prospect', (key && peopleBy.get(key)) || primaryLinkedProspect(linkedBy.get(id)) || null],
+        ['seller_owner_contact', key ? sellerPeopleBy.get(key) || null : null],
+        ['seller_owner_deed', deedKey ? sellerPeopleBy.get(deedKey) || null : null],
+      ])
+      x.person = merged.person
+      x.personSource = merged.source
     }
     if (needs.has('scores')) x.scores = scoreBy.get(id) || null
     if (needs.has('company')) {
@@ -647,6 +708,10 @@ export async function computeFacts(baseRows, cols, { query, timeoutMs = 25_000, 
       x.recDocs = splitRecordedCategories(row.rec_lien_categories)
     }
     if (derivations.has('signals')) x.signals = propertySignalsFromRow(row)
+    if (derivations.has('ptype')) {
+      x.uses = [...new Set((usesBy.get(id) || []).map((r) => clean(r.property_use)).filter(Boolean))].sort()
+      x.ptype = classifyPropertyType(row, { uses: x.uses })
+    }
     if (derivations.has('asset')) x.assetType = enrichedPropertyType(row, normalizeAssetTypeLabel(row.normalized_asset_class || row.property_type)) || null
     if (derivations.has('zip')) x.zip = clean(row.property_address_zip || row.property_zip) || null
     if (derivations.has('sale')) {
@@ -667,6 +732,39 @@ export async function computeFacts(baseRows, cols, { query, timeoutMs = 25_000, 
   }
   if (trace) trace(`compute ${ids.length} × ${wanted.length} cols: ${Date.now() - computeStarted} ms`)
   return out
+}
+
+/**
+ * Field-by-field person: the first source with a value for each column wins
+ * (prospects → seller.owner for the graph's contact person → seller.owner for
+ * the resolved deed owner). Month of birth is one field (age derives from it).
+ * `source` = the source that supplied the most fields (ties → precedence).
+ */
+export function mergePerson(sources) {
+  const cols = ['mob', ...PERSON_COLS]
+  const person = {}
+  const used = new Map()
+  let any = false
+  for (const c of cols) {
+    for (const [name, row] of sources) {
+      if (!row) continue
+      const v = row[c]
+      if (v === null || v === undefined || String(v).trim() === '') continue
+      person[c] = v
+      used.set(name, (used.get(name) || 0) + 1)
+      any = true
+      break
+    }
+  }
+  if (!any) {
+    // a person row with no values is still the linked person (keeps identity-only fields stable)
+    const first = sources.find(([, row]) => row)
+    return { person: first ? first[1] : null, source: first ? first[0] : null }
+  }
+  let source = null
+  let best = -1
+  for (const [name] of sources) if ((used.get(name) || 0) > best) { best = used.get(name) || 0; source = name }
+  return { person, source }
 }
 
 export const __factsTest = { time }

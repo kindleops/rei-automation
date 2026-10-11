@@ -26,7 +26,7 @@
  */
 import { getPgPool } from '@/lib/postgres/client.js'
 import { COMPUTED_FACTS, baseColumnsFor, computeFacts, plainColumnType } from './entity-graph-facts.js'
-import { FACTS_TABLE_NAME, factsTableColumns } from './entity-graph-facts-ddl.js'
+import { FACTS_TABLE_NAME, factsAddenda, factsTableColumns } from './entity-graph-facts-ddl.js'
 
 export const FACTS_REFRESH_LOCK_KEY = 917_200_9 // eg_property_facts refresh (also held by scripts/entity-graph/backfill-eg-property-facts.mjs)
 const LOCK_KEY = FACTS_REFRESH_LOCK_KEY
@@ -41,10 +41,32 @@ export function refreshEnabled(env = process.env) {
 
 /* ── the write contract (shared with scripts/entity-graph/backfill-eg-property-facts.mjs) ── */
 
+/**
+ * The registry columns the LIVE table can take: an addendum column the table
+ * does not have yet (its ALTER TABLE not applied) is skipped, never a failed
+ * upsert. `present` = the table's column names (information_schema).
+ */
+export function writableFactsColumns(present, columns = factsTableColumns()) {
+  if (!present) return columns.filter((c) => !c.addendum)
+  return columns.filter((c) => c.col === 'property_id' || present.has(c.col))
+}
+
+/** Addenda whose every column is in `columns` — what a FULL run that wrote `columns` makes readable. */
+export function addendaWritten(columns) {
+  const names = new Set(columns.map((c) => c.col))
+  return factsAddenda().filter((a) => factsTableColumns().filter((c) => c.addendum === a).every((c) => names.has(c.col)))
+}
+
 /** The v_entity_graph_properties columns a facts row needs: every plain column + every computed fact's base inputs. */
 export function factsBaseColumns(columns = factsTableColumns()) {
-  const allComputed = COMPUTED_FACTS.map((f) => f.col)
+  const allComputed = computedColumnsOf(columns)
   return [...new Set([...columns.filter((c) => c.plain || c.col === 'property_id').map((c) => c.col), ...baseColumnsFor(allComputed)])].filter((c) => c === 'property_id' || plainColumnType(c))
+}
+
+/** The computed fact columns among `columns`. */
+export function computedColumnsOf(columns = factsTableColumns()) {
+  const names = new Set(columns.map((c) => c.col))
+  return COMPUTED_FACTS.map((f) => f.col).filter((c) => names.has(c))
 }
 
 /** One eg_property_facts record per base row: plain columns verbatim, computed facts from `facts` (Map id → values). */
@@ -110,15 +132,17 @@ export async function refreshPropertyFacts({ mode = 'incremental', pool = null, 
     const locked = await client.query('select pg_try_advisory_lock($1) as ok', [LOCK_KEY])
     if (!locked.rows[0]?.ok) return { ok: false, skipped: 'another refresh holds the lock' }
     try {
-      const last = await client.query(`select started_at from public.eg_refresh_log where name = $1 and status = 'ok' order by finished_at desc limit 1`, [FACTS_TABLE_NAME])
+      const last = await client.query(`select started_at, detail from public.eg_refresh_log where name = $1 and status = 'ok' order by finished_at desc limit 1`, [FACTS_TABLE_NAME])
       const watermark = last.rows[0]?.started_at || null
+      const priorAddenda = Array.isArray(last.rows[0]?.detail?.addenda) ? last.rows[0].detail.addenda.map(String) : []
       const effective = mode === 'incremental' && !watermark ? 'full' : mode
       const runAt = now()
       const ins = await client.query(`insert into public.eg_refresh_log (name, mode, status, started_at, watermark) values ($1, $2, 'running', $3, $4) returning id`, [FACTS_TABLE_NAME, effective, runAt, watermark])
       logId = ins.rows[0].id
       const query = (sql, params, timeoutMs) => client.query({ text: sql, values: params }).then((r) => r)
-      const allComputed = COMPUTED_FACTS.map((f) => f.col)
-      const columns = factsTableColumns()
+      const presentCols = await client.query(`select column_name from information_schema.columns where table_schema = 'public' and table_name = $1`, [FACTS_TABLE_NAME])
+      const columns = writableFactsColumns(new Set(presentCols.rows.map((r) => String(r.column_name))))
+      const allComputed = computedColumnsOf(columns)
       const baseCols = factsBaseColumns(columns)
       const upsert = factsUpsertSql(columns)
 
@@ -159,7 +183,9 @@ export async function refreshPropertyFacts({ mode = 'incremental', pool = null, 
           if (gone.length) await client.query(`delete from public.${FACTS_TABLE_NAME} where "property_id" = any($1::text[])`, [gone])
         }
       }
-      await client.query(`update public.eg_refresh_log set status = 'ok', finished_at = now(), rows = $2, detail = $3::jsonb where id = $1`, [logId, rows, JSON.stringify({ ms: Date.now() - started })])
+      // an addendum becomes readable only after a FULL run wrote its columns; incremental runs carry the prior state
+      const addenda = effective === 'full' ? addendaWritten(columns) : priorAddenda.filter((a) => addendaWritten(columns).includes(a))
+      await client.query(`update public.eg_refresh_log set status = 'ok', finished_at = now(), rows = $2, detail = $3::jsonb where id = $1`, [logId, rows, JSON.stringify({ ms: Date.now() - started, addenda })])
       return { ok: true, mode: effective, rows, ms: Date.now() - started, logId }
     } finally {
       await client.query('select pg_advisory_unlock($1)', [LOCK_KEY]).catch(() => {})

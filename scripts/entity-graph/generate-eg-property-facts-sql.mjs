@@ -5,12 +5,17 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-const { generateFactsMigrationSql, generateFactsRollbackSql, generateFactsPretestSql } = await import('@/lib/domain/entity-graph/entity-graph-facts-ddl.js')
+const { generateFactsMigrationSql, generateFactsRollbackSql, generateFactsPretestSql, factsAddenda, generateFactsAddendumSql, generateFactsAddendumRollbackSql } = await import('@/lib/domain/entity-graph/entity-graph-facts-ddl.js')
 const dir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../supabase/migrations')
 const files = {
   'PROPOSED_20261009180000_eg_property_facts.sql': generateFactsMigrationSql(),
   'PROPOSED_20261009180000_eg_property_facts_rollback.sql': generateFactsRollbackSql(),
   'PROPOSED_20261009180000_eg_property_facts_pretest.sql': generateFactsPretestSql(),
+  // facts added after the base migration (ALTER TABLE addenda)
+  ...Object.fromEntries(factsAddenda().flatMap((a) => [
+    [`PROPOSED_${a}.sql`, generateFactsAddendumSql(a)],
+    [`PROPOSED_${a}_rollback.sql`, generateFactsAddendumRollbackSql(a)],
+  ])),
 }
 for (const [name, body] of Object.entries(files)) {
   fs.writeFileSync(path.join(dir, name), body)

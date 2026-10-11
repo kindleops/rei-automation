@@ -36,6 +36,7 @@ import {
 } from '@/lib/domain/campaigns/campaign-field-catalog.js'
 import { JUDGMENT_CATEGORIES, LIEN_CATEGORIES } from './entity-graph-recorded-docs.js'
 import { COMPUTED_FACTS, PLAIN_FACT_COLUMNS, kindOfPg, plainColumnType } from './entity-graph-facts.js'
+import { requiredFairnessClass } from '@/lib/domain/intelligence/registry/prohibited.js'
 import {
   applySupabaseFilters,
   EMPTY_FILTER_OPERATORS,
@@ -488,6 +489,44 @@ export const ENTITY_GRAPH_FIELD_CAUTIONS = Object.freeze({
   'properties.equity_percent': 'Vendor value: reads 100% whenever no loan is on file. Use "Known equity %" to filter on equity that is actually known.',
 })
 
+/**
+ * Entity Graph labels that differ from the campaign catalog's: the vendor's
+ * raw property type is NOT "Property type" here — the canonical classification
+ * (facts.property_type_class, entity-graph-property-class.js) is.
+ */
+export const ENTITY_GRAPH_LABEL_OVERRIDES = Object.freeze({
+  'properties.property_type': 'Property type (vendor raw)',
+})
+
+/**
+ * SENSITIVE: personal attributes (gender, marital status, age, language,
+ * income / modeled wealth, education, occupation) per the IC8 fairness policy
+ * (owner + counsel, 2026-10-01) — display and targeting only, NEVER a pricing
+ * or offer input. The marker travels with the field to every picker.
+ */
+export const SENSITIVE_NOTE = 'Personal attribute — display and targeting only, never used in pricing or offers (owner + counsel policy).'
+const sensitiveSource = (field) => {
+  const col = field.source_column
+  const table = field.source_table_or_view
+  // facts.person_* are the prospect's own columns under a prefix
+  const bare = String(col || '').replace(/^person_/, '')
+  // a company's age / status is not a person's attribute
+  if (/^company_/.test(bare)) return false
+  return requiredFairnessClass([`${table}.${bare}`]) === 'personal_attribute'
+}
+/**
+ * Measured 2026-10-10 (50,381 people present in both vendor files, same key, 83% same name): the vendor's modeled
+ * attributes drift between files — gender differs for 12.5%, month of birth for 8.8% (88% of those within a year),
+ * household income for 74%. Shown as the vendor's estimate, never as a fact.
+ */
+export const MODELED_NOTE = 'Vendor-modeled estimate ("likely"); vendor files disagree for the same person (e.g. income 74%, gender 12% of 50K people) — treat as an estimate.'
+function markSensitive(field) {
+  if (!field || field.sensitive !== undefined) return field
+  if (!sensitiveSource(field)) return field
+  const modeled = /(gender|marital|household_income|net_asset|buying_power|education|occupation|language_preference|(^|_)age(_years)?$)/.test(String(field.source_column)) && !/persona|best_language/.test(String(field.source_column))
+  return Object.freeze({ ...field, sensitive: 'personal_attribute', sensitive_note: SENSITIVE_NOTE, ...(modeled && !field.caution ? { caution: MODELED_NOTE } : {}) })
+}
+
 export const ENTITY_GRAPH_FILTERABLE_TABS = Object.freeze(Object.keys(ENTITY_GRAPH_FILTER_SOURCE_BY_TAB))
 
 export function entityGraphFilterSourceForTab(tab) {
@@ -503,6 +542,8 @@ function decorate(field) {
   if (separator) out = { ...out, type: 'flags', operators: TOKEN_OPS, token_separator: separator, supports_options: true }
   const caution = ENTITY_GRAPH_FIELD_CAUTIONS[field.key]
   if (caution) out = { ...out, caution }
+  const label = ENTITY_GRAPH_LABEL_OVERRIDES[field.key]
+  if (label) out = { ...out, label }
   return out
 }
 
@@ -510,15 +551,15 @@ function decorate(field) {
 export function getEntityGraphFilterFields(tab) {
   const source = entityGraphFilterSourceForTab(tab)
   if (!source) return []
-  if (source === 'eg_buyer_index') return [...ENTITY_GRAPH_BUYER_FIELDS]
+  if (source === 'eg_buyer_index') return ENTITY_GRAPH_BUYER_FIELDS.map(markSensitive)
   const catalog = CAMPAIGN_FIELD_CATALOG
     .filter((field) => field.source_table_or_view === source && field.filterable
       && !ENTITY_GRAPH_WITHHELD_FIELDS.has(field.key) && !ENTITY_GRAPH_UNEXECUTABLE_FIELDS[field.key])
     .map(decorate)
   const derived = ENTITY_GRAPH_DERIVED_FIELDS.filter((field) => field.source_table_or_view === source)
-  return source === 'properties'
+  return (source === 'properties'
     ? [ENTITY_GRAPH_FLAG_FIELD, ...derived, ...catalog, ...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_COMPUTED_FACT_FIELDS, ...ENTITY_GRAPH_PLAIN_FACT_FIELDS]
-    : [...derived, ...catalog]
+    : [...derived, ...catalog]).map(markSensitive)
 }
 
 function lookupField(fieldKey) {
