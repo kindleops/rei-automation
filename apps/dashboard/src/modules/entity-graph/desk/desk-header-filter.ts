@@ -12,6 +12,8 @@
 import type { EntityGraphFieldFilter, EntityGraphFilterCatalog, EntityGraphFilterField } from '../../../domain/entity-graph/entity-graph-field-filters'
 import { COMPANY_STATUS_LABEL, smsBlockLabel } from '../mobile/entity-graph-table-columns'
 
+const LINE_TYPE_LABEL: Record<string, string> = { W: 'Wireless', L: 'Landline', V: 'VoIP', C: 'Cellular', M: 'Mobile' }
+
 export type HeaderKind = 'categorical' | 'numeric' | 'date' | 'boolean' | 'text' | 'tokens'
 
 /** The catalog field a header on facts column `col` writes: catalog order, derived + token-flag fields skipped. */
@@ -135,6 +137,8 @@ export function headerValueLabel(col: string, value: string | null, kind: Header
   if (kind === 'boolean') return value === 'true' ? 'Yes' : value === 'false' ? 'No' : value
   if (col === 'sms_status') return value === 'eligible' ? 'Eligible' : smsBlockLabel(value)
   if (col === 'company_status_class') return COMPANY_STATUS_LABEL[value] ?? value
+  // vendor line-type codes (field QA 2026-10-10: W 105,090 · L 37,307 shown as letters)
+  if ((col === 'contact_line_type' || col === 'phone_type') && LINE_TYPE_LABEL[value.toUpperCase()]) return LINE_TYPE_LABEL[value.toUpperCase()]
   if (/^[a-z0-9]+(_[a-z0-9]+)+$/.test(value)) return value.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
   return value
 }

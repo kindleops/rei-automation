@@ -88,7 +88,8 @@ const FIELD_VALUES_MAX = 300
  * Exclusive (one value per record) lists only: a token list could hold two
  * variants on one record, so its counts are left per raw token.
  */
-export const variantKey = (v) => String(v ?? '').toLowerCase().replace(/[\s_\-./]+/g, ' ').trim()
+// conservative: case, whitespace, spacing around / & , and periods only — "C" vs "C-" (a grade) and "R3" vs "R3-" stay apart
+export const variantKey = (v) => String(v ?? '').toLowerCase().replace(/\s*([/&,])\s*/g, '$1').replace(/\./g, '').replace(/\s+/g, ' ').trim()
 export function foldValueVariants(values = []) {
   const groups = new Map()
   for (const row of values) {

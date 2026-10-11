@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { FREE_TEXT_FIELD, fieldControl, foldValueVariants, getEntityGraphFieldValues, getEntityGraphHeaderValues } from '../../src/lib/domain/entity-graph/entity-graph-header-values.js'
+import { FREE_TEXT_FIELD, fieldControl, foldValueVariants, variantKey, getEntityGraphFieldValues, getEntityGraphHeaderValues } from '../../src/lib/domain/entity-graph/entity-graph-header-values.js'
 import { getEntityGraphFilterFields, SENSITIVE_NOTE } from '../../src/lib/domain/entity-graph/entity-graph-field-filters.js'
 import { __factsListCacheTest, __factsUniverseMemoTest, factsHeaderValues, histogramOf } from '../../src/lib/domain/entity-graph/entity-graph-facts-query.js'
 import { groupedFacetCounts, groupedRangeStats, groupedTokenCounts } from '../../src/lib/domain/entity-graph/entity-graph-facet-sql.js'
@@ -146,6 +146,22 @@ test('case / spacing variants fold into ONE option that filters every spelling (
   // owner type through the endpoint: the folded option carries both spellings
   const v = await getEntityGraphFieldValues({ tab: 'master_owners', field: 'master_owners.owner_type_guess' }, { groupedFacetCounts: async () => [{ value: 'Individual', count: 9 }, { value: 'INDIVIDUAL', count: 2 }] })
   assert.deepEqual(v.values, [{ value: 'Individual', count: 11, variants: ['Individual', 'INDIVIDUAL'] }])
+})
+
+test('variant folding is conservative: grades and zoning suffixes stay apart (field QA 2026-10-10)', () => {
+  assert.equal(variantKey('Trust / Estate'), variantKey('TRUST/ESTATE'))
+  assert.equal(variantKey('Siding (Alum/Vinyl)'), variantKey('Siding (alum/vinyl)'))
+  assert.equal(variantKey('Admin. Dissolved'), variantKey('Admin Dissolved'))
+  assert.notEqual(variantKey('C'), variantKey('C-'))
+  assert.notEqual(variantKey('R3'), variantKey('R3-'))
+  assert.notEqual(variantKey('R-1-6'), variantKey('R-1 6'))
+  const f = foldValueVariants([{ value: 'C', count: 80002 }, { value: 'C-', count: 410 }])
+  assert.equal(f.length, 2)
+})
+
+test('fields measured empty on the whole universe are labelled, not silently offered', () => {
+  for (const k of ['facts.arv_estimate', 'facts.rent_estimate', 'facts.cap_rate', 'facts.land_use']) assert.equal(field('properties', k).data_coverage, 'empty', k)
+  assert.equal(field('properties', 'facts.asset_type').label, 'Property type (legacy enriched)')
 })
 
 test('JS histogram: 12 equal buckets between p1 and p99, tails counted, every value counted once', () => {

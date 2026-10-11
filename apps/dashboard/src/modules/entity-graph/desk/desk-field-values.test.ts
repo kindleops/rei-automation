@@ -15,6 +15,7 @@ import {
   textFilterFrom,
 } from './desk-field-values'
 import { DESK_FACET_GROUPS } from './desk-model'
+import { headerValueLabel } from './desk-header-filter'
 
 const TEXT_OPS = [{ key: 'contains' }, { key: 'is_any_of' }, { key: 'is_not_any_of' }, { key: 'is_empty' }, { key: 'is_not_empty' }]
 const FLAG_OPS = [{ key: 'is_all_of' }, { key: 'is_any_of' }]
@@ -80,6 +81,12 @@ describe('All fields value pickers (owner P0 2026-10-10: a dropdown of real valu
     expect(toggleMembers(on, optionMembers(opt))).toEqual(['Duplex'])
     expect(toggleMembers(['Duplex'], [null])).toEqual([null])
     expect(toggleMembers([null], ['Duplex'])).toEqual(['Duplex'])
+  })
+
+  it('vendor line-type codes read as words', () => {
+    expect(headerValueLabel('contact_line_type', 'W', 'categorical')).toBe('Wireless')
+    expect(headerValueLabel('phone_type', 'L', 'categorical')).toBe('Landline')
+    expect(headerValueLabel('zoning', 'W', 'categorical')).toBe('W')
   })
 
   it('histogram bars scale to the tallest bucket; compact numbers', () => {

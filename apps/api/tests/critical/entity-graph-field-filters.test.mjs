@@ -23,6 +23,7 @@ import assert from "node:assert/strict";
 
 import {
   ENTITY_GRAPH_EMPTY_SOURCE_COLUMNS,
+  ENTITY_GRAPH_EMPTY_FIELDS_20261010,
   ENTITY_GRAPH_FILTERABLE_TABS,
   ENTITY_GRAPH_FILTER_SOURCE_BY_TAB,
   EntityGraphUnsupportedFilterError,
@@ -316,7 +317,8 @@ test("columns measured empty are flagged, not silently offered", () => {
     assert.match(field.data_coverage_note, /sample/);
   }
   const flagged = fields.filter((field) => field.data_coverage === "empty").map((field) => field.key);
-  assert.deepEqual(flagged.sort(), Object.keys(ENTITY_GRAPH_EMPTY_SOURCE_COLUMNS).sort());
+  // + the fact fields the 2026-10-10 full-universe field QA measured empty (ENTITY_GRAPH_EMPTY_FIELDS_20261010)
+  assert.deepEqual(flagged.sort(), [...Object.keys(ENTITY_GRAPH_EMPTY_SOURCE_COLUMNS), ...Object.keys(ENTITY_GRAPH_EMPTY_FIELDS_20261010)].sort());
 });
 
 test("the catalog is grouped by category and reaches every executable field", () => {

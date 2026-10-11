@@ -404,7 +404,7 @@ export const COMPUTED_FACTS = ([
   C('owner_buyer_purchases', 'integer', 'numeric', 'Owner is a buyer (purchases)', [], (x) => x.ownerBuyerPurchases, { group: 'Ownership' }),
   C('signal_labels', 'text[]', 'tokens', 'Signals', [], (x) => x.signals.map((s) => s.label), { group: 'Signals' }),
   C('distress_signal_count', 'integer', 'numeric', 'Distress signals', [], (x) => x.signals.filter((s) => s.tone === 'distress').length || null, { group: 'Signals' }),
-  C('asset_type', 'text', 'categorical', 'Property type (enriched)', [], (x) => x.assetType, { group: 'Property' }),
+  C('asset_type', 'text', 'categorical', 'Property type (legacy enriched)', [], (x) => x.assetType, { group: 'Property' }),
   C('zip_code', 'text', 'categorical', 'ZIP', [], (x) => x.zip, { group: 'Geography' }),
   /*
    * THE canonical property type (owner P0 2026-10-10) — entity-graph-property-class.js.

@@ -520,6 +520,17 @@ const sensitiveSource = (field) => {
  * household income for 74%. Shown as the vendor's estimate, never as a fact.
  */
 export const MODELED_NOTE = 'Vendor-modeled estimate ("likely"); vendor files disagree for the same person (e.g. income 74%, gender 12% of 50K people) — treat as an estimate.'
+/**
+ * Fields measured EMPTY on the whole universe (field QA 2026-10-10, eg-field-accuracy CSV): offered, but labelled so
+ * an empty column is never mistaken for an empty cohort.
+ */
+export const ENTITY_GRAPH_EMPTY_FIELDS_20261010 = Object.freeze(Object.fromEntries([
+  'facts.normalized_asset_class', 'facts.arv_estimate', 'facts.rent_estimate', 'facts.cap_rate', 'facts.ppsf', 'facts.property_use', 'facts.land_use',
+].map((k) => [k, 'no values in any of the 176,603 properties (field QA 2026-10-10)'])))
+function markCoverage(field) {
+  const note = ENTITY_GRAPH_EMPTY_FIELDS_20261010[field.key]
+  return note && !field.data_coverage ? Object.freeze({ ...field, data_coverage: 'empty', data_coverage_note: note }) : field
+}
 function markSensitive(field) {
   if (!field || field.sensitive !== undefined) return field
   if (!sensitiveSource(field)) return field
@@ -559,7 +570,7 @@ export function getEntityGraphFilterFields(tab) {
   const derived = ENTITY_GRAPH_DERIVED_FIELDS.filter((field) => field.source_table_or_view === source)
   return (source === 'properties'
     ? [ENTITY_GRAPH_FLAG_FIELD, ...derived, ...catalog, ...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_COMPUTED_FACT_FIELDS, ...ENTITY_GRAPH_PLAIN_FACT_FIELDS]
-    : [...derived, ...catalog]).map(markSensitive)
+    : [...derived, ...catalog]).map(markSensitive).map(markCoverage)
 }
 
 function lookupField(fieldKey) {
