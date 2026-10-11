@@ -16,7 +16,9 @@
  * phantom column cannot break it.
  *
  * Ops: status · registry · search · geography · dossier · rank · screen · compare · trends ·
- * heat · recent_sales · universe_load
+ * heat · recent_sales · universe_load · sale_owner
+ *
+ * sale_owner (the shared sale-buyer resolver, mi-sale-owner.js) needs no summary at all.
  */
 import { createMarketIntelLoader } from './mi-loader.js'
 import { createSalesIndexBuilder } from './mi-sales-index.js'
@@ -32,6 +34,8 @@ import { readMapBoundaries } from '@/lib/domain/map/map-boundaries-service.js'
 import { displayableCompanyName } from '@/lib/domain/entity-graph/buyer-name-privacy.js'
 import { lenderClass } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
 import { queryWithTimeout } from '@/lib/postgres/client.js'
+import { createSaleOwnerReader, saleOwnerIds, salePropertyKeys, SALE_OWNER_MAX_IDS } from './mi-sale-owner.js'
+import { LINK_RULE, TIER_RULE } from './mi-inferred-investor.js'
 
 const SUMMARY_PROBE_MS = 5 * 60_000
 const MISSING_RETRY_MS = 60_000
@@ -53,6 +57,7 @@ export function createMarketIntelService(deps = {}) {
   const env = deps.env || process.env
   const classify = createAssetClassifier()
   const universe = createUniverseStore({ loader, clock, classify })
+  const readSaleOwners = deps.readSaleOwners || createSaleOwnerReader(deps)
   let state = { status: 'cold', progress: null, error: null, retryAt: 0, summary: null }
   let current = null
   let building = null
@@ -357,6 +362,7 @@ export function createMarketIntelService(deps = {}) {
   async function run(op, p = {}) {
     try {
       if (op === 'registry') return { ok: true, ...registryPayload(), asset_filters: ASSET_FILTERS, periods: PERIODS }
+      if (op === 'sale_owner') return await saleOwner(p)
       if (!(await ready())) return warming()
       switch (op) {
         case 'status': return { ok: true, ...statusPayload() }
@@ -425,6 +431,18 @@ export function createMarketIntelService(deps = {}) {
       brief: deterministicBrief(g, values, ctx, topChild),
       coverage_months: current.source.meta.coverage.months.map(({ label, status }) => ({ label, status })),
     }
+  }
+
+  /** op=sale_owner&ids=t:1,p:2 — the shared sale-buyer resolver (≤ 100 sales). Needs no summary. */
+  async function saleOwner(p) {
+    const ids = saleOwnerIds(p.ids || p.id)
+    const props = salePropertyKeys(p.props).keys
+    if (!ids.length && !props.length) return fail(400, 'no_ids', { message: `Pass ids=<comp_id>,… or props=<property_id>@<YYYY-MM-DD>,… (≤ ${SALE_OWNER_MAX_IDS})` })
+    const missing = (id) => ({ comp_id: id, buyer_of_record: null, owner_link: null, inferred: null, missing: true })
+    const rows = []
+    if (ids.length) { const map = await readSaleOwners(ids); for (const id of ids) rows.push(map.get(id) || missing(id)) }
+    if (props.length && readSaleOwners.byProperty) { const map = await readSaleOwners.byProperty(props); for (const k of props) rows.push(map.get(k) || missing(k)) }
+    return { ok: true, rule: { link: LINK_RULE.id, tier: TIER_RULE.id }, rows }
   }
 
   function dataQuality(g, agg, u) {

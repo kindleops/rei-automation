@@ -618,3 +618,17 @@ test('the rollback-only pretest embeds the migration verbatim and rolls back', (
   assert.match(sched, /statement_timeout = '30s'/)
   assert.match(sched, /'45-59 10 \* \* \*'/)
 })
+
+
+test('sale_owner op: the shared buyer resolver needs no summary and never names a person', async () => {
+  const loader = fakeSummaryLoader({ ready: false })
+  const rows = [{ comp_id: 't:5', property_id: 'p5', sold_on: '2025-02-01', buyer: null, buyer_kind: null, is_latest_sale: true, later_transfer_on: null, owner_observed_on: '2026-08-20',
+    is_corporate_owner: false, is_trust: false, out_of_state_owner: true, mail_stack: 1, resident_owner: false, owner_name: 'JOHN SMITH' }]
+  const svc = createMarketIntelService({ loader, warmWaitMs: 50, env: {}, prewarm: false, readBoundaries: BOUNDARIES, query: async () => ({ rows }) })
+  const r = await svc.run('sale_owner', { ids: 't:5,t:6' })
+  assert.equal(r.ok, true)
+  assert.equal(r.rows[0].buyer_of_record.label, 'Individual (absentee · out-of-state mailing) · current owner of record')
+  assert.equal(r.rows[0].inferred.tier, 'absentee_only')
+  assert.equal(r.rows[1].missing, true)
+  assert.equal((await svc.run('sale_owner', {})).ok, false)
+})

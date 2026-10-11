@@ -12,6 +12,8 @@
  *   op=heat&metric=investor_purchase_count&bbox=w,s,e,n&zoom=9.5&period=1y&asset=all
  *   op=recent_sales&id=zip:55411&asset=mf
  *   op=universe_load&states=TX|all     (reads the campaign graph per state, sequentially)
+ *   op=sale_owner&ids=t:123,p:456 | props=<property_id>@2025-06-01,…   buyer of record per sale (≤ 100;
+ *                                       recorded buyer, else today's owner when the sale is owner-linked)
  *
  * Operator-gated like every cockpit read. No writes, no sends, no routing. See
  * lib/domain/market-intelligence/mi-service.js.
@@ -23,7 +25,7 @@ import { marketIntelService } from '@/lib/domain/market-intelligence/mi-service.
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const PARAMS = ['q', 'id', 'ids', 'level', 'within', 'metric', 'period', 'asset', 'min_sales', 'dir', 'limit', 'filters', 'match', 'sort', 'bbox', 'zoom', 'states', 'load_universe']
+const PARAMS = ['q', 'id', 'ids', 'props', 'level', 'within', 'metric', 'period', 'asset', 'min_sales', 'dir', 'limit', 'filters', 'match', 'sort', 'bbox', 'zoom', 'states', 'load_universe']
 
 export async function OPTIONS(request) {
   return new Response(null, { status: 204, headers: corsHeaders(request) })
