@@ -25,7 +25,8 @@ import type { BuyerProfile } from '../../../domain/entity-graph/entity-graph-int
 import { fetchBuyerProfile } from '../../../domain/entity-graph/entity-graph-intel-api'
 import { staticStreetViewUrl } from '../../../modules/entity-graph/mobile/EntityGraphPropertyVisual'
 import { PriceBar, TIER_LABEL, buyerTitle, cls, stageLabel } from './BuyerMatchParts'
-import { ActivityReceipts, Footprint, PriceScatter } from './BuyerMatchCockpitVisuals'
+import { ActivityReceipts, PriceScatter } from './BuyerMatchCockpitVisuals'
+import { BuyerGeoMap } from './BuyerGeoMap'
 import type { Mark, MarkAction, OpenMark } from './BuyerMatchCockpitVisuals'
 import type { Dim, Holding, Receipt } from './buyer-match-cockpit-model'
 import { DIM_LABEL, ageShort, asOfLabel, buildReceipts, fitIndicators, holdingsOf, modelAsOf, shortFamily, strength, street, thesis, verdictOf } from './buyer-match-cockpit-model'
@@ -288,8 +289,8 @@ function Universe(p: CockpitProps & { scope: 'listed' | 'ruledout'; setScope: (s
 
 /* ══ selected buyer ══════════════════════════════════════════════════════ */
 
-function Selected({ b, w, set, holdings, profileState, visual, setVisual, shortlisted, onShortlist, open, action, windowLabel, onBuyerGraph, toMap, asOf }: {
-  b: MatchedBuyer; w: BuyerMatchWorkspace; set: ReturnType<typeof buildReceipts>; holdings: Holding[]; profileState: 'loading' | 'ready' | 'failed'
+function Selected({ b, w, set, holdings, profileState, visual, setVisual, shortlisted, onShortlist, open, action, windowLabel, onBuyerGraph, toMap, asOf, buyers, theme, onSelectBuyer }: {
+  b: MatchedBuyer; w: BuyerMatchWorkspace; buyers: MatchedBuyer[]; theme: string; onSelectBuyer: (id: string) => void; set: ReturnType<typeof buildReceipts>; holdings: Holding[]; profileState: 'loading' | 'ready' | 'failed'
   asOf: number | null
   visual: Visual; setVisual: (v: Visual) => void; shortlisted: boolean; onShortlist: () => void
   open: OpenMark; action: MarkAction; windowLabel: string
@@ -347,7 +348,7 @@ function Selected({ b, w, set, holdings, profileState, visual, setVisual, shortl
           <span className="bmc-visbar__src">{profileState === 'loading' ? 'Loading purchases…' : `${plural(set.receipts.length, 'recorded purchase')}`}</span>
         </div>
         <div className="bmc-visframe">
-          {visual === 'geo' ? <Footprint w={w} set={set} holdings={holdings} open={open} action={action} windowLabel={windowLabel} loading={profileState === 'loading'} asOf={asOf} /> : null}
+          {visual === 'geo' ? <BuyerGeoMap w={w} buyers={buyers} selectedId={b.id} onSelectBuyer={onSelectBuyer} theme={theme} set={set} holdings={holdings} loading={profileState === 'loading'} /> : null}
           {visual === 'price' ? <PriceScatter w={w} set={set} open={open} action={action} loading={profileState === 'loading'} asOf={asOf} /> : null}
           {visual === 'activity' ? <ActivityReceipts w={w} set={set} open={open} action={action} windowLabel={windowLabel} loading={profileState === 'loading'} loadFailed={profileState === 'failed'} asOf={asOf} asOfText={asOfLabel(asOf)} /> : null}
         </div>
@@ -683,6 +684,7 @@ export function BuyerMatchCockpit(p: CockpitProps) {
               shortlisted={p.shortlist.includes(sel.id)} onShortlist={() => p.onShortlist(sel.id)}
               open={open} action={action} windowLabel={windowLabel}
               onBuyerGraph={p.onBuyerGraph} toMap={p.toMap} asOf={asOf}
+              buyers={all} theme={p.theme} onSelectBuyer={p.onSelect}
             />
           ) : (
             <section className="bmc-plane bmc-selected is-empty" aria-label="Selected buyer">

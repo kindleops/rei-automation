@@ -1,0 +1,70 @@
+/* BUYER MATCH · GEOGRAPHY MAP — map + legend + synced list, LC liquid glass. */
+
+/* map over list (the selected-buyer plane is a column); the list stays short so the map leads */
+html .bmx .bmc-vis.bmg { display: flex; flex-direction: column; gap: 8px; margin: 0; min-width: 0; }
+
+.bmx .bmg-stage { position: relative; min-width: 0; height: clamp(300px, 42vh, 460px); border-radius: 12px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi, rgb(255 255 255 / 0.1)); background: var(--bmc-well-solid, #0b0e14); }
+.bmx .bmg-map { position: absolute; inset: 0; }
+.bmx .bmg-map .maplibregl-ctrl-group { background: var(--lc-glass-menu, rgb(16 19 26 / 0.86)); box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi, rgb(255 255 255 / 0.12)); border-radius: 9px; overflow: hidden; }
+.bmx .bmg-map .maplibregl-ctrl-group button { width: 28px; height: 28px; }
+html:not([data-nexus-theme='light']) .bmx .bmg-map .maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(1) brightness(1.4); }
+
+/* glass panels over the map */
+.bmx :is(.bmg-legend, .bmg-pop) {
+  color: var(--lc-ink-1, #eef2f8);
+  background: var(--lc-glass-menu, rgb(14 17 24 / 0.82));
+  -webkit-backdrop-filter: var(--lc-glass-filter, blur(14px) saturate(1.4));
+  backdrop-filter: var(--lc-glass-filter, blur(14px) saturate(1.4));
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi, rgb(255 255 255 / 0.12)), 0 12px 30px -14px rgb(0 0 0 / 0.55);
+  font-family: var(--lc-font-ui, inherit);
+}
+
+.bmx .bmg-legend { position: absolute; left: 8px; top: 8px; z-index: 2; width: min(220px, 46%); max-height: calc(100% - 44px); overflow: auto; padding: 6px 6px 4px; border-radius: 10px; font-size: 11px; scrollbar-width: thin; }
+.bmx .bmg-legend__head { display: block; padding: 0 4px 5px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--lc-ink-3, #8d9ab0); }
+.bmx .bmg-legend ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.bmx .bmg-legend li > button, .bmx .bmg-legend li.bmg-legend__subject, .bmx .bmg-legend li.bmg-legend__radius { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 7px; width: 100%; padding: 2px 4px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; }
+.bmx .bmg-legend li > button:not(:disabled) { cursor: pointer; }
+.bmx .bmg-legend li > button:not(:disabled):hover { background: rgb(255 255 255 / 0.07); }
+.bmx .bmg-legend li.is-sel > button { background: rgb(255 255 255 / 0.09); font-weight: 600; }
+.bmx .bmg-legend li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmx .bmg-legend li b { font-variant-numeric: tabular-nums; color: var(--lc-ink-2, #c7cfdc); font-weight: 600; }
+.bmx .bmg-legend i { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 1.5px rgb(4 6 11 / 0.7); }
+.bmx .bmg-legend i.is-held { border-radius: 2px; }
+.bmx .bmg-legend__subject i { background: #f8fafc; box-shadow: 0 0 0 2px #5eead4; }
+.bmx .bmg-legend__radius i { background: none; border-radius: 50%; box-shadow: inset 0 0 0 1.5px #5eead4; }
+
+/* subject pin */
+.bmg-subject { position: relative; display: grid; place-items: center; width: 22px; height: 22px; pointer-events: none; }
+.bmg-subject i { width: 14px; height: 14px; border-radius: 50%; background: #f8fafc; box-shadow: 0 0 0 3px #5eead4, 0 0 0 9px rgb(94 234 212 / 0.22), 0 4px 14px rgb(0 0 0 / 0.5); }
+.bmg-subject span { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); padding: 1px 6px; border-radius: 5px; font: 600 10px/1.5 var(--lc-font-ui, system-ui); letter-spacing: 0.04em; color: #04121a; background: #5eead4; white-space: nowrap; }
+
+/* hover card */
+.bmx .bmg-pop { position: absolute; z-index: 3; display: grid; gap: 2px; min-width: 180px; max-width: 260px; padding: 8px 10px; border-radius: 10px; font-size: 11.5px; line-height: 1.35; pointer-events: none; transform: translate(-50%, calc(-100% - 14px)); }
+.bmx .bmg-pop.is-below { transform: translate(-50%, 14px); }
+.bmx .bmg-pop b { font-size: 12.5px; font-weight: 600; }
+.bmx .bmg-pop__k { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--lc-ink-2, #c7cfdc); }
+.bmx .bmg-pop__k i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.bmx .bmg-pop .is-quiet { color: var(--lc-ink-3, #8d9ab0); }
+.bmx .bmg-empty { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); margin: 0; padding: 6px 12px; border-radius: 8px; font-size: 12px; color: var(--lc-ink-2, #c7cfdc); background: var(--lc-glass-menu, rgb(14 17 24 / 0.82)); }
+
+/* synced list */
+.bmx .bmg-list { display: flex; flex-direction: column; min-width: 0; height: clamp(180px, 26vh, 280px); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi, rgb(255 255 255 / 0.1)); background: var(--bmc-well, rgb(0 0 0 / 0.2)); overflow: hidden; }
+.bmx .bmg-list__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 10px 6px; font-size: 11px; font-weight: 600; color: var(--lc-ink-2, #c7cfdc); box-shadow: inset 0 -1px 0 var(--lc-glass-line-hi, rgb(255 255 255 / 0.08)); }
+.bmx .bmg-list__head em { font-style: normal; font-weight: 400; color: var(--lc-ink-3, #8d9ab0); text-align: right; }
+.bmx .bmg-list ol { list-style: none; margin: 0; padding: 4px; overflow: auto; flex: 1; }
+.bmx .bmg-row { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; padding: 5px 6px; border: 0; border-radius: 7px; background: none; color: var(--lc-ink-1, #eef2f8); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
+.bmx .bmg-row:hover, .bmx .bmg-row.is-hot { background: rgb(255 255 255 / 0.08); }
+.bmx .bmg-row:focus-visible { outline: 2px solid #5eead4; outline-offset: -2px; }
+.bmx .bmg-row > i { width: 8px; height: 8px; border-radius: 50%; }
+.bmx .bmg-row:not(.is-sel) { opacity: 0.82; }
+.bmx .bmg-row.is-sel .bmg-row__t { font-weight: 600; }
+.bmx .bmg-row__t, .bmx .bmg-row__n { display: grid; min-width: 0; }
+.bmx .bmg-row__t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmx .bmg-row__n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bmx .bmg-row em { font-style: normal; font-size: 10.5px; color: var(--lc-ink-3, #8d9ab0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmx .bmg-list__more { margin: 0; padding: 6px 10px 8px; font-size: 10.5px; color: var(--lc-ink-3, #8d9ab0); }
+
+html[data-nexus-theme='light'] .bmx :is(.bmg-legend, .bmg-pop) { color: #0b1220; background: rgb(255 255 255 / 0.9); box-shadow: inset 0 0 0 1px rgb(15 17 22 / 0.1), 0 12px 28px -16px rgb(30 40 90 / 0.35); }
+html[data-nexus-theme='light'] .bmx .bmg-row { color: #0b1220; }
+html[data-nexus-theme='light'] .bmx :is(.bmg-row:hover, .bmg-row.is-hot, .bmg-legend li > button:not(:disabled):hover, .bmg-legend li.is-sel > button) { background: rgb(15 17 22 / 0.06); }
+@media (prefers-reduced-motion: reduce) { .bmx .bmg-pop { transition: none; } }
