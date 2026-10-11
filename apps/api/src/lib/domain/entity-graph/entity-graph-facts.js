@@ -151,6 +151,24 @@ export function propertySignalsFromRow(row = {}) {
   return [...seen.values()].sort((a, b) => SIGNAL_RANK[a.tone] - SIGNAL_RANK[b.tone])
 }
 
+/**
+ * Whether ANY signal source was present to evaluate: a non-blank flags / tags
+ * text, an evaluated tax-delinquent / out-of-state boolean (false counts — it
+ * was evaluated), or a captured record summary. With a source and no distress
+ * signal the count is 0 (filterable "0 signals"); NULL only when there is no
+ * source at all (unknown, never 0).
+ */
+export function hasSignalSource(row = {}) {
+  const present = (v) => v !== null && v !== undefined
+  return Boolean(
+    String(row.property_flags_text ?? '').trim()
+    || String(row.seller_tags_text ?? '').trim()
+    || present(row.tax_delinquent)
+    || present(row.out_of_state_owner)
+    || present(row.rec_mortgage_count),
+  )
+}
+
 /** Base (view) columns each base-row derivation reads — only the needed ones are selected. */
 export const BASE_NEEDS = Object.freeze({
   equity: ['estimated_value', 'total_loan_balance', 'property_flags_text', 'rec_mortgage_balance', 'rec_mortgage_count'],
@@ -403,7 +421,7 @@ export const COMPUTED_FACTS = ([
   C('last_sale_on', 'text', 'date', 'Last sale (recorded, else vendor)', [], (x) => x.lastSaleOn, { group: 'Debt, liens & sales' }),
   C('owner_buyer_purchases', 'integer', 'numeric', 'Owner is a buyer (purchases)', [], (x) => x.ownerBuyerPurchases, { group: 'Ownership' }),
   C('signal_labels', 'text[]', 'tokens', 'Signals', [], (x) => x.signals.map((s) => s.label), { group: 'Signals' }),
-  C('distress_signal_count', 'integer', 'numeric', 'Distress signals', [], (x) => x.signals.filter((s) => s.tone === 'distress').length || null, { group: 'Signals' }),
+  C('distress_signal_count', 'integer', 'numeric', 'Distress signals', [], (x) => (x.signalSource ? x.signals.filter((s) => s.tone === 'distress').length : null), { group: 'Signals' }),
   C('asset_type', 'text', 'categorical', 'Property type (legacy enriched)', [], (x) => x.assetType, { group: 'Property' }),
   C('zip_code', 'text', 'categorical', 'ZIP', [], (x) => x.zip, { group: 'Geography' }),
   /*
@@ -707,7 +725,7 @@ export async function computeFacts(baseRows, cols, { query, timeoutMs = 25_000, 
       x.recCaptured = row.rec_mortgage_count !== null && row.rec_mortgage_count !== undefined
       x.recDocs = splitRecordedCategories(row.rec_lien_categories)
     }
-    if (derivations.has('signals')) x.signals = propertySignalsFromRow(row)
+    if (derivations.has('signals')) { x.signals = propertySignalsFromRow(row); x.signalSource = hasSignalSource(row) }
     if (derivations.has('ptype')) {
       x.uses = [...new Set((usesBy.get(id) || []).map((r) => clean(r.property_use)).filter(Boolean))].sort()
       x.ptype = classifyPropertyType(row, { uses: x.uses })

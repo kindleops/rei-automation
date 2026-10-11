@@ -24,6 +24,7 @@ import {
   NOT_SIGNALS,
   baseColumnsFor,
   computeFacts,
+  hasSignalSource,
   inputsFor,
   propertySignalsFromRow,
   widenToFamilies,
@@ -129,6 +130,34 @@ test('equity, liens vs filings and signals use the grid functions; unknown equit
   assert.deepEqual(f.get('e1').signal_labels, ['Vacant', 'Tax delinquent'])
   assert.equal(f.get('e1').distress_signal_count, 2)
   assert.equal(f.get('e2').distress_signal_count, null)
+})
+
+test('distress_signal_count: 0 when signals were evaluated and none are distress; NULL only with no signal source', async () => {
+  const rows = [
+    // evaluated sources, no distress tone → 0 (a "0 signals" filter must match these)
+    { property_id: 'z1', property_flags_text: 'High Equity; Corner Lot', rec_mortgage_count: null },
+    { property_id: 'z2', property_flags_text: '', tax_delinquent: false, out_of_state_owner: false },
+    { property_id: 'z3', property_flags_text: null, rec_mortgage_count: 0 },
+    { property_id: 'z4', seller_tags_text: 'Absentee Owner' },
+    // one distress signal → 1
+    { property_id: 'z5', property_flags_text: 'Probate', tax_delinquent: false },
+    // no signal source at all → NULL (unknown, never 0)
+    { property_id: 'z6', property_flags_text: '  ', seller_tags_text: null, tax_delinquent: null, out_of_state_owner: null, rec_mortgage_count: null },
+    { property_id: 'z7' },
+  ]
+  const f = await computeFacts(rows, ['signal_labels', 'distress_signal_count'], { query: fakeInputs({}) })
+  assert.equal(f.get('z1').distress_signal_count, 0)
+  assert.equal(f.get('z2').distress_signal_count, 0)
+  assert.equal(f.get('z3').distress_signal_count, 0)
+  assert.equal(f.get('z4').distress_signal_count, 0)
+  assert.equal(f.get('z5').distress_signal_count, 1)
+  assert.equal(f.get('z6').distress_signal_count, null)
+  assert.equal(f.get('z7').distress_signal_count, null)
+  assert.equal(hasSignalSource({ tax_delinquent: false }), true, 'an evaluated false boolean is a source')
+  assert.equal(hasSignalSource({ property_flags_text: '' }), false)
+  // the count reads only columns the signals derivation already selects
+  const base = new Set(baseColumnsFor(['distress_signal_count']))
+  for (const c of ['property_flags_text', 'seller_tags_text', 'tax_delinquent', 'out_of_state_owner', 'rec_mortgage_count']) assert.ok(base.has(c), c)
 })
 
 test('the server signal table is the dashboard property-signals.ts table (one signal system)', () => {
