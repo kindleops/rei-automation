@@ -11,7 +11,7 @@ import { CompStreetView } from './CompStreetView'
 import type { Tier } from './derive-workstation'
 import { SaleTypeBadge } from './SaleType'
 import { BuyerTypeChip } from './BuyerType'
-import { compBuyerType } from '../../../domain/comp-intelligence/comp-buyer-type'
+import { buyerTypeOfEvidenceComp } from '../../../domain/comp-intelligence/comp-buyer-type'
 import { useFocusOf, type FocusStore } from './focus-store'
 import { displayAddress } from '../utils/comp-display'
 import { handleObjectClick, objectAttrs, ObjectMenu } from '../../../modules/desktop/objects'
@@ -114,8 +114,8 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
           {c.corpus === 'transaction_corpus' ? <LCTooltip content="Recorded deed from the transaction corpus — reviewed with the engine's rules, but not in the engine's own pricing pool."><span className="ciw-pill is-deed">Deed</span></LCTooltip> : null}
         </div>
         <div className="ciw-row__meta lc-num">
-          <SaleTypeBadge v={sale} withBuyer />
-          <BuyerTypeChip t={compBuyerType({ buyerKind: c.buyerKind, buyerCompany: c.buyerCompany, buyerArchetype: c.buyerArchetype, buyerAcquisitions: c.buyerAcquisitions, owner })} />
+          <SaleTypeBadge v={sale} />
+          <BuyerTypeChip t={buyerTypeOfEvidenceComp(c, owner)} />
           <span>{[fmtMiles(c.distanceMiles), c.saleDate ? `${fmtDate(c.saleDate)}${days !== null ? ` · ${fmtAge(days)}` : ''}` : 'Undated sale'].filter(Boolean).join(' · ')}</span>
         </div>
         <div className="ciw-row__spec lc-num">{specLine(c, kind)}</div>

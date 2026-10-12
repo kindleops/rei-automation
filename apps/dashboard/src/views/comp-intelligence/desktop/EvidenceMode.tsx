@@ -9,8 +9,9 @@ import { countSaleTypes, SALE_TYPE_LABEL, SALE_TYPES, saleTypeOfComp } from '../
 import { propSaleKey, useSaleOwners } from '../../../modules/market-intelligence/sale-owner/sale-owner-client'
 import { CompRow } from './CompRow'
 import { BuyerTypeCoverageLine } from './BuyerType'
-import { buyerTypeCoverage, compBuyerType } from '../../../domain/comp-intelligence/comp-buyer-type'
+import { buyerTypeCoverage, buyerTypeOfEvidenceComp } from '../../../domain/comp-intelligence/comp-buyer-type'
 import { RecentSaleRow } from './RecentSaleRow'
+import { recentSaleOwnerKey, recentSaleView } from '../../../domain/comp-intelligence/recent-sale-facts'
 import type { Lens, Tier, Workstation } from './derive-workstation'
 import type { FocusStore } from './focus-store'
 
@@ -80,7 +81,7 @@ export function EvidenceMode({ m, ctx, store, filters, onFilters, filtersOpen, o
       ctx={ctx} store={store} onOpen={onOpen} onInclude={onInclude} onExclude={onExclude} tabStop={tabKey === c.key} onKeyNav={onKeyNav} />
   )
 
-  const buyerCover = buyerTypeCoverage(m.w.comps.map((c) => compBuyerType({ buyerKind: c.buyerKind, buyerCompany: c.buyerCompany, buyerArchetype: c.buyerArchetype, buyerAcquisitions: c.buyerAcquisitions, owner: ownerOf(ownerKeyOf(c)) })))
+  const buyerCover = buyerTypeCoverage(m.w.comps.map((c) => buyerTypeOfEvidenceComp(c, ownerOf(ownerKeyOf(c)))))
   const saleMix = countSaleTypes(m.w.comps, (c) => saleTypeOfComp(c).type)
   const setMix = countSaleTypes(m.lensComps, (c) => saleTypeOfComp(c).type)
   const setMixText = SALE_TYPES.filter((t) => setMix[t]).map((t) => `${setMix[t]} ${SALE_TYPE_LABEL[t].short}`).join(' · ')
@@ -162,8 +163,8 @@ export function EvidenceMode({ m, ctx, store, filters, onFilters, filtersOpen, o
         </LCPopover>
         <span className="ciw-filterbar__count lc-num">{m.candidates.length.toLocaleString('en-US')} of {Math.max(0, m.universeCount - m.lensKeys.size).toLocaleString('en-US')} candidates shown</span>
       </div>
-      <div className="ciw-saletypes" role="radiogroup" aria-label="Sale type">
-        <span className="ciw-saletypes__label lc-eyebrow">Sale type</span>
+      <div className="ciw-saletypes" role="radiogroup" aria-label="Sale channel">
+        <span className="ciw-saletypes__label lc-eyebrow">Channel</span>
         <button type="button" role="radio" aria-checked={filters.saleType === 'all'} className={cx('ciw-saletype', filters.saleType === 'all' && 'is-on')} onClick={() => onFilters({ ...filters, saleType: 'all' })}>
           All <b className="lc-num">{m.w.comps.length.toLocaleString('en-US')}</b>
         </button>
@@ -259,6 +260,9 @@ function PoolAsOf({ m }: { m: Workstation }) {
  */
 function RecentSales({ m, open, onToggle }: { m: Workstation; open: boolean; onToggle: () => void }) {
   const r = m.w.recentSales
+  // buyer of record for sales whose deed names no buyer: the same ONE batched, cached sale_owner read
+  const rows = r?.available ? r.rows : []
+  const ownerOf = useSaleOwners(rows.map((s) => (s.buyerCompany || s.buyerKind === 'company' ? null : recentSaleOwnerKey(s))))
   if (!r) return null
   const aside = r.available
     ? <span className="lc-num">canonical recorded sales{r.latestSale ? ` · newest ${fmtDate(r.latestSale, 'long')}` : ''}{r.radiusMiles ? ` · ${r.radiusMiles} mi` : ''} · not in the valuation</span>
@@ -270,7 +274,7 @@ function RecentSales({ m, open, onToggle }: { m: Workstation; open: boolean; onT
       ) : r.rows.length ? (
         <>
           {r.activityOnly ? <div className="ciw-sec__note lc-num">{r.priced} priced · {r.activityOnly} activity only (no usable price — never a priced comp)</div> : null}
-          {r.rows.map((s) => <RecentSaleRow key={s.key} s={s} now={m.now} />)}
+          {r.rows.map((s) => <RecentSaleRow key={s.key} s={s} now={m.now} view={recentSaleView(s, r.rows, ownerOf(recentSaleOwnerKey(s)))} />)}
         </>
       ) : <div className="ciw-empty-inline">No recorded sales in this search.</div>}
     </Section>

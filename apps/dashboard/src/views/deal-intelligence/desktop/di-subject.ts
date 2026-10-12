@@ -72,9 +72,9 @@ export function subjectFromSearch(search: string): DiSubject {
   }
 }
 
-const MODES: DiMode[] = ['decision', 'evidence', 'comps', 'seller', 'debt', 'market', 'transactions', 'records', 'model']
-/** Links written before the 2026-10-10 IA keep landing on the same content. */
-const MODE_ALIASES: Record<string, DiMode> = { record: 'records', scenario: 'model' }
+const MODES: DiMode[] = ['decision', 'evidence', 'comps', 'seller', 'debt', 'market', 'records', 'model']
+/** Links written before the 2026-10-10 IA (and the 2026-10-11 merge) keep landing on the same content. */
+const MODE_ALIASES: Record<string, DiMode> = { record: 'records', scenario: 'model', transactions: 'market' }
 export function modeFromSearch(search: string): DiMode | null {
   const v = clean(new URLSearchParams(search.startsWith('?') ? search.slice(1) : search).get('mode'))
   if (!v) return null

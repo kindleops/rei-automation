@@ -62,7 +62,7 @@ export function evidenceLedger(d: DiDecision): LedgerRow[] {
   add('liens', 'Recorded liens', liens ? `${liens}${e.lienSummary?.statedAmount ? ` · ${usd(e.lienSummary.statedAmount)} stated` : ''}` : null, 'recorded', 'County record · classified instruments', 'debt')
   add('tax', 'Annual tax', e.tax.annual ? `${usd(e.tax.annual)}${e.tax.year ? ` (${e.tax.year})` : ''}${e.tax.delinquent ? ' · delinquent' : ''}` : null, 'recorded', 'Tax record', 'debt')
   const sale = d.history.find((h) => h.kind === 'sale')
-  add('last_sale', 'Last recorded sale', sale ? `${usd(sale.amount) ?? 'price not recorded'} · ${sale.at.slice(0, 10)}` : null, 'recorded', 'County record · deed', 'transactions')
+  add('last_sale', 'Last recorded sale', sale ? `${usd(sale.amount) ?? 'price not recorded'} · ${sale.at.slice(0, 10)}` : null, 'recorded', 'County record · deed', 'market')
   if (d.comps) {
     add('comps_selected', 'Comps priced by the engine', `${d.comps.selected} of ${d.comps.raw ?? '—'} screened`, 'modeled', 'Engine selection over recorded sales', 'comps')
   }
@@ -89,7 +89,7 @@ export interface FamilyCard {
   empty: boolean
 }
 
-/** One card per evidence family for the index (Comps · Seller · Debt · Market · Transactions · Records). */
+/** One card per evidence family for the index (Comps · Seller · Debt · Market & transactions · Records). */
 export function familyCards(d: DiDecision, fallbackComps: number | null = null): FamilyCard[] {
   const e = d.economics
   const ledger = evidenceLedger(d)
@@ -115,14 +115,12 @@ export function familyCards(d: DiDecision, fallbackComps: number | null = null):
       count: e.debt.mortgages.length + liens, bases: basesOf('debt'), empty: false,
     },
     {
-      mode: 'market', label: 'Market',
-      headline: d.market?.ok ? `${d.market.totals.sales} sales within ${d.market.radius.used} mi · median ${usd(d.market.overall.medianPrice) ?? '—'}` : 'Nearby sales unavailable',
-      count: d.market?.ok ? d.market.totals.sales : null, bases: ['recorded'], empty: !d.market?.ok,
-    },
-    {
-      mode: 'transactions', label: 'Transactions',
-      headline: sales ? `${sales} recorded event${sales === 1 ? '' : 's'} · sales, loans, liens` : 'No recorded transactions',
-      count: sales, bases: ['recorded'], empty: !sales,
+      mode: 'market', label: 'Market & transactions',
+      headline: [
+        d.market?.ok ? `${d.market.totals.sales} nearby sales within ${d.market.radius.used} mi · median ${usd(d.market.overall.medianPrice) ?? '—'}` : 'Nearby sales unavailable',
+        sales ? `${sales} recorded event${sales === 1 ? '' : 's'} on this property` : 'no recorded events on this property',
+      ].join(' · '),
+      count: d.market?.ok ? d.market.totals.sales : sales || null, bases: ['recorded'], empty: !d.market?.ok && !sales,
     },
     {
       mode: 'records', label: 'Records',

@@ -20,7 +20,7 @@ export function buildFilterSections(f: CompFilters, set: (f: CompFilters) => voi
       render: () => (
         <>
           <Choice label="Within" value={str(f.maxDistance)} onChange={(v) => set({ ...f, maxDistance: num(v) })}
-            options={[{ value: 'any', label: 'Search' }, { value: '0.5', label: '0.5 mi' }, { value: '1', label: '1 mi' }, { value: '2', label: '2 mi' }, { value: '3', label: '3 mi' }]} />
+            options={[{ value: 'any', label: 'Search' }, { value: '0.5', label: '0.5 mi' }, { value: '1', label: '1 mi' }, { value: '2', label: '2 mi' }, { value: '4', label: '4 mi' }]} />
           <Choice label="ZIP" value={f.sameZip ? 'same' : 'any'} onChange={(v) => set({ ...f, sameZip: v === 'same' })}
             options={[{ value: 'any', label: 'Any' }, { value: 'same', label: 'Same as subject' }]} />
         </>
@@ -31,7 +31,7 @@ export function buildFilterSections(f: CompFilters, set: (f: CompFilters) => voi
       active: f.maxAgeMonths !== null ? 1 : 0,
       render: () => (
         <Choice label="Sold within" value={str(f.maxAgeMonths)} onChange={(v) => set({ ...f, maxAgeMonths: num(v) })}
-          options={[{ value: 'any', label: 'Search' }, { value: '1', label: '30 d' }, { value: '3', label: '90 d' }, { value: '6', label: '6 mo' }, { value: '12', label: '12 mo' }, { value: '24', label: '24 mo' }]} />
+          options={[{ value: 'any', label: 'Search' }, { value: '1', label: '30 d' }, { value: '3', label: '3 mo' }, { value: '6', label: '6 mo' }, { value: '12', label: '12 mo' }, { value: '24', label: '24 mo' }]} />
       ),
     },
     {
@@ -53,7 +53,7 @@ export function buildFilterSections(f: CompFilters, set: (f: CompFilters) => voi
       ),
     },
     {
-      id: 'transaction', label: 'Transaction & source', keywords: ['arms', 'deed', 'mls', 'pool', 'corpus', 'investor', 'off-market', 'public record', 'sale type'],
+      id: 'transaction', label: 'Transaction & source', keywords: ['arms', 'deed', 'mls', 'pool', 'corpus', 'investor', 'off-market', 'public record', 'sale type', 'channel', 'foreclosure', 'reo'],
       active: (f.armsLengthOnly ? 1 : 0) + (f.corpus !== 'all' ? 1 : 0) + (f.saleType !== 'all' ? 1 : 0),
       render: () => (
         <>
@@ -61,7 +61,7 @@ export function buildFilterSections(f: CompFilters, set: (f: CompFilters) => voi
             options={[{ value: 'any', label: 'Any' }, { value: 'only', label: 'Exclude non-arm’s-length' }]} />
           <Choice label="Source" value={f.corpus} onChange={(v) => set({ ...f, corpus: v as CompFilters['corpus'] })}
             options={[{ value: 'all', label: 'All' }, { value: 'engine_pool', label: 'Engine pool' }, { value: 'transaction_corpus', label: 'Recorded deeds' }]} />
-          <Choice label="Sale type" value={f.saleType} onChange={(v) => set({ ...f, saleType: v as CompFilters['saleType'] })}
+          <Choice label="Channel" value={f.saleType} onChange={(v) => set({ ...f, saleType: v as CompFilters['saleType'] })}
             options={[{ value: 'all', label: 'All' }, ...SALE_TYPES.map((t) => ({ value: t, label: SALE_TYPE_LABEL[t].short }))]} />
         </>
       ),

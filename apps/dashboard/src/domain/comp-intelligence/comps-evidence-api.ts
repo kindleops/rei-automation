@@ -176,6 +176,9 @@ export type RecentSale = {
   armsLength: boolean | null
   cash: boolean | null
   buyerCompany: string | null
+  /** mv_map_market_sales.buyer_kind (company | person); absent on payloads before 2026-10-11 */
+  buyerKind?: 'company' | 'person' | null
+  /** mv_map_market_sales.buyer_class: llc_investor · institutional · portfolio · bank · individual · unknown */
   buyerClass: string | null
   investor: boolean
   portfolioSize: number | null

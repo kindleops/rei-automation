@@ -258,6 +258,21 @@ test('recent sales are newest first and follow the price rule (zero / null = act
   assert.equal(recentSalesBlock({ sales: [SALE({ price: 5, is_priced: false })] }).rows[0].price, null)
 })
 
+test('recent sales carry the MV buyer kind beside buyer class, cash, doc type (the row\'s buyer chip + flags)', () => {
+  const [co, pe, none] = recentSalesBlock({ sales: [
+    SALE({ comp_id: 't:a', sold_on: '2026-09-03', buyer: 'ACME HOMES LLC', buyer_kind: 'company', buyer_class: 'llc_investor', is_investor: true, is_cash_purchase: true, doc_type: 'Warranty Deed' }),
+    SALE({ comp_id: 't:b', sold_on: '2026-09-02', buyer: null, buyer_kind: 'person', buyer_class: 'individual' }),
+    SALE({ comp_id: 't:c', sold_on: '2026-09-01', buyer_kind: null, buyer_class: 'unknown', doc_type: 'Trustee’s Deed' }),
+  ] }).rows
+  assert.equal(co.buyerKind, 'company')
+  assert.equal(co.buyerClass, 'llc_investor')
+  assert.equal(co.investor, true)
+  assert.equal(co.cash, true)
+  assert.equal(pe.buyerKind, 'person')
+  assert.equal(none.buyerKind, null)
+  assert.equal(none.docType, 'Trustee’s Deed')
+})
+
 test('recent sales degrade honestly: no coordinates, or a failed read', () => {
   assert.deepEqual(recentSalesBlock(null), { available: false, source: 'mv_map_market_sales', reason: 'no_subject_coordinates', rows: [] })
   assert.equal(recentSalesBlock({ error: new Error('x') }).reason, 'read_failed')

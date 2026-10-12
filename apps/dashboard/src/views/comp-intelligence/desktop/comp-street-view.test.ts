@@ -92,6 +92,6 @@ describe('evidence row layout', () => {
     expect(meta).toMatch(/flex-wrap: wrap/)
     const badge = readFileSync(fileURLToPath(new URL('./comp-evidence-media.css', import.meta.url)), 'utf8')
     expect(badge.match(/\.cst \{[^}]*\}/)?.[0] ?? '').toMatch(/max-width: 100%/)
-    expect(badge.match(/\.cst__buyer \{[^}]*\}/)?.[0] ?? '').toMatch(/text-overflow: ellipsis/)
+    expect(badge.match(/\.cst__q \{[^}]*\}/)?.[0] ?? '').toMatch(/text-overflow: ellipsis/)
   })
 })

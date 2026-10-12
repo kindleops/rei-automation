@@ -295,6 +295,7 @@ html[data-lc-motion='off'] .ciw-split__grip { transition: none; }
 }
 .ciw-maptop > * { pointer-events: auto; }
 .ciw-maplens { box-shadow: 0 8px 22px -14px rgba(0, 0, 0, 0.7); background: var(--ciw-overlay-bg); border-radius: 10px; }
+.ciw-radius { display: inline-flex; min-width: 0; }
 .ciw-window {
   display: flex;
   align-items: center;
@@ -467,8 +468,7 @@ html[data-lc-motion='off'] .ciw-split__grip { transition: none; }
 .ciw-saletype b { font-weight: 600; color: var(--lc-ink-3); }
 .ciw-saletype i { width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--st-rgb)); }
 .ciw-saletype[data-type='mls'] { --st-rgb: var(--lc-cobalt-rgb); }
-.ciw-saletype[data-type='investor'] { --st-rgb: var(--lc-attn-rgb); }
-.ciw-saletype[data-type='off_market'] i, .ciw-saletype[data-type='public_record'] i, .ciw-saletype[data-type='unknown'] i { background: transparent; box-shadow: inset 0 0 0 1.4px rgb(var(--st-rgb)); }
+.ciw-saletype[data-type='off_market'] i, .ciw-saletype[data-type='unknown'] i { background: transparent; box-shadow: inset 0 0 0 1.4px rgb(var(--st-rgb)); }
 .ciw-saletype:hover { color: var(--lc-ink-1); background: var(--lc-inner-bg-hover); }
 .ciw-saletype.is-on { color: var(--lc-ink-1); background: rgba(var(--st-rgb), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--st-rgb), 0.4); }
 .ciw-saletype.is-on b { color: var(--lc-ink-1); }
@@ -529,16 +529,16 @@ html[data-lc-motion='off'] .ciw-split__grip { transition: none; }
 }
 .ciw-row:hover, .ciw-row.is-hot { background: var(--lc-inner-bg-hover); }
 .ciw-row.is-hot::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--ciw-set); }
-/* Selected = liquid glass, never a blue fill (owner 2026-10-11): the shared Material
-   tokens only — a thin card-glass layer with the accent breath, frosted so the map
-   and plane behind bleed through, lifted by the hi hairline and the top sheen. The
-   --lc-glass-selected-* hooks let the universal material pass restyle it in one place. */
+/* Selected = liquid glass, never a blue fill (owner 2026-10-11): the shared pane
+   material's selection tokens only — a neutral lift (--lc-glass-selected-fill, tint
+   none), frosted by the pane material's own filter so the map and plane behind bleed
+   through, outlined by --lc-glass-selected-line and the top sheen. */
 .ciw-row.is-selected {
   background:
-    linear-gradient(var(--lc-glass-selected-tint, var(--lc-glass-tint)), var(--lc-glass-selected-tint, var(--lc-glass-tint))),
+    linear-gradient(var(--lc-glass-selected-tint, transparent), var(--lc-glass-selected-tint, transparent)),
     var(--lc-glass-selected-fill, var(--lc-glass-field));
-  -webkit-backdrop-filter: var(--lc-glass-filter);
-  backdrop-filter: var(--lc-glass-filter);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter, var(--lc-glass-filter));
+  backdrop-filter: var(--lc-pane-mat-filter, var(--lc-glass-filter));
   box-shadow: var(--lc-glass-sheen), inset 0 0 0 1px var(--lc-glass-selected-line, var(--lc-glass-line-hi));
 }
 .ciw-row:focus-visible { box-shadow: var(--lc-focus-ring); }
@@ -576,6 +576,12 @@ html[data-lc-motion='off'] .ciw-split__grip { transition: none; }
    its own line; only a line narrower than itself (a very narrow pane) ellipsizes. */
 .ciw-row__meta > span { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .ciw-row__meta .cst { height: 17px; }
+/* recent-sale flags — only what the record supports (cash, flip / resale, portfolio, non-arm's-length) */
+.ciw-row__flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.ciw-flag { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 5px; font: 600 10px/1 var(--lc-font-ui); letter-spacing: 0.02em; color: var(--lc-ink-2); background: var(--lc-inner-bg); box-shadow: inset 0 0 0 1px var(--lc-inner-edge); cursor: help; }
+.ciw-flag[data-flag='flip'] { color: var(--lc-ink-1); box-shadow: inset 0 0 0 1px rgba(var(--lc-attn-rgb), 0.4); }
+.ciw-flag[data-flag='non_arms_length'] { color: var(--lc-ink-3); }
+.ciw-flag:focus-visible { outline: none; box-shadow: var(--lc-focus-ring); }
 .ciw-row__spec { font: 500 11.5px/1.35 var(--lc-font-ui); color: var(--lc-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ciw-row__headline { margin-top: 2px; font: 550 11.5px/1.35 var(--lc-font-ui); }
 .ciw-row__headline.is-excluded { color: var(--lc-ink-2); }

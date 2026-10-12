@@ -79,7 +79,7 @@ export function CompareMode({ m, store, onOpen }: { m: Workstation; store: Focus
     { id: 'pool', label: 'Pool', subject: s.pool ?? '—', cell: (c) => ({ text: c.features?.pool ?? '—', tone: c.features?.pool && s.pool && !same(c.features.pool, s.pool) ? 'attn' : null }) },
     { id: 'stories', label: 'Stories', subject: s.stories ?? '—', cell: (c) => ({ text: c.features?.stories ?? '—' }) },
     { id: 'subdivision', label: 'Subdivision', subject: s.subdivision ?? '—', cell: (c) => ({ text: c.features?.subdivision ?? '—', tone: c.features?.subdivision && s.subdivision && same(c.features.subdivision, s.subdivision) ? 'ok' : null }) },
-    { id: 'saletype', label: 'Sale type', subject: '—', cell: (c) => ({ text: <SaleTypeBadge v={saleTypeOfComp(c)} withBuyer /> }) },
+    { id: 'saletype', label: 'Channel', subject: '—', cell: (c) => ({ text: <SaleTypeBadge v={saleTypeOfComp(c)} /> }) },
     { id: 'source', label: 'Record', subject: '—', cell: (c) => ({ text: c.corpus === 'transaction_corpus' ? 'Recorded deed' : 'Engine pool' }) },
     { id: 'arms', label: 'Arm’s-length', subject: '—', cell: (c) => ({ text: c.armsLength === true ? 'Yes' : c.armsLength === false ? 'No' : 'Not recorded' }) },
   ]

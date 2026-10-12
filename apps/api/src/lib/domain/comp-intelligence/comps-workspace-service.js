@@ -453,6 +453,8 @@ export function shapeRecentSale(s) {
     armsLength: s.is_arms_length === true ? true : s.is_arms_length === false ? false : null,
     cash: s.is_cash_purchase === true ? true : s.is_cash_purchase === false ? false : null,
     buyerCompany: s.buyer || null,
+    // the MV's own deed-name classification (company | person); the buyer chip reads it with buyer_class
+    buyerKind: clean(s.buyer_kind) === 'company' ? 'company' : clean(s.buyer_kind) === 'person' ? 'person' : null,
     buyerClass: clean(s.buyer_class) || null,
     investor: s.is_investor === true,
     portfolioSize: num(s.portfolio_size),

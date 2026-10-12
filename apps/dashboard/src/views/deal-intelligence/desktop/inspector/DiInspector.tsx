@@ -616,7 +616,7 @@ function compView(p: DiInspectorProps, id: string): View | null {
       <>
         <div className="dr-comp__media">
           <CompStreetView size="hero" load="eager" photo={c.photo} lat={c.lat} lng={c.lng} address={c.address} />
-          <div className="dr-comp__media-tags"><SaleTypeBadge v={sale} withBuyer /></div>
+          <div className="dr-comp__media-tags"><SaleTypeBadge v={sale} /></div>
         </div>
         <Facts rows={[
           ['Sold', <span key="s">{usd(c.salePrice, { exact: true }) ?? '—'} · {dateShort(c.saleDate, p.now) ?? '—'}</span>],

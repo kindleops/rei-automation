@@ -2,20 +2,24 @@ import { LCTooltip } from '../../../shared/lc'
 import { engineSourceFactor, type SaleTypeVerdict } from '../../../domain/comp-intelligence/comp-sale-type'
 import './comp-evidence-media.css'
 
-/** One badge per comp: how the sale happened, with the facts behind it on hover. */
-export function SaleTypeBadge({ v, withBuyer = false }: { v: SaleTypeVerdict; withBuyer?: boolean }) {
-  const buyer = withBuyer && v.type === 'mls' && (v.buyer === 'investor' || v.buyer === 'institutional') ? v.buyerLabel : withBuyer && v.type === 'investor' && v.buyer === 'institutional' ? 'Institutional' : null
+/**
+ * THE channel chip — exactly one per comp: "MLS" or "Off market" (or "Channel
+ * unknown"), with a forced-sale qualifier inside it when the record says so
+ * ("Foreclosure / auction", "REO"). It never names the buyer: that is the
+ * buyer chip beside it.
+ */
+export function SaleTypeBadge({ v }: { v: SaleTypeVerdict }) {
   return (
-    <LCTooltip content={<span>{v.label}{v.evidence.length ? <> — {v.evidence.join(' · ')}</> : null}</span>}>
-      <span className="cst" data-type={v.type} tabIndex={0} aria-label={`${v.label}${buyer ? `, ${buyer}` : ''}`}>
+    <LCTooltip content={<span>{v.label}{v.qualifierLabel ? ` · ${v.qualifierLabel}` : ''}{v.evidence.length ? <> — {v.evidence.join(' · ')}</> : null}</span>}>
+      <span className="cst" data-type={v.type} data-qualifier={v.qualifier ?? undefined} tabIndex={0} aria-label={`Channel: ${v.short}${v.qualifierLabel ? `, ${v.qualifierLabel}` : ''}`}>
         {v.short}
-        {buyer ? <span className="cst__buyer">{buyer}</span> : null}
+        {v.qualifierLabel ? <span className="cst__q">{v.qualifierLabel}</span> : null}
       </span>
     </LCTooltip>
   )
 }
 
-/** The inspector's sale-type block: type, buyer, the recorded facts, and how the engine weighs the source. */
+/** The inspector's channel block: the chip, the recorded facts, and how the engine weighs the source. */
 export function SaleTypeEvidence({ v, engineSource, rules, weighted }: {
   v: SaleTypeVerdict
   engineSource?: string | null
@@ -28,7 +32,6 @@ export function SaleTypeEvidence({ v, engineSource, rules, weighted }: {
     <div className="cst-evidence">
       <div className="cst-evidence__head">
         <SaleTypeBadge v={v} />
-        {v.buyerLabel ? <span className="cst" data-type={v.buyer === 'individual' ? 'public_record' : 'investor'}>{v.buyerLabel}</span> : null}
       </div>
       {v.evidence.length ? <ul>{v.evidence.map((e) => <li key={e}>{e}</li>)}</ul> : null}
       {f ? (

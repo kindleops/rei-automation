@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { DiDecision } from './di-types'
 import { DI_MODES } from './di-types'
 import { evidenceLedger, familyCards, isSourceBasis, sellerIdentityFacts } from './di-evidence'
-import { candidateRows, CompsSection, dealCompBuyer, EvidenceIndex } from './modes/EvidenceMode'
+import { candidateRows, CompsSection, dealCompBuyer, EvidenceIndex, MarketTransactionsSection } from './modes/EvidenceMode'
+import { modeFromSearch } from './di-subject'
 import { SellerMode } from './modes/SellerMode'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
 
@@ -103,14 +104,30 @@ function fixture(over: Partial<DiDecision> = {}): DiDecision {
 }
 
 
-const text = (el: React.ReactElement) => renderToStaticMarkup(el).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+const text = (el: React.ReactElement) => renderToStaticMarkup(el).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ')
 const noop = () => {}
 const engine = { canRun: true, running: false, onRun: noop, error: null }
 
 describe('IA: one section per evidence family, in reading order', () => {
-  it('Decision · Evidence · Comps · Seller · Debt & liens · Market · Transactions · Records · Model on keys 1–9', () => {
-    expect(DI_MODES.map((m) => m.label)).toEqual(['Decision', 'Evidence', 'Comps', 'Seller', 'Debt & liens', 'Market', 'Transactions', 'Records', 'Model'])
-    expect(DI_MODES.map((m) => m.key)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+  it('Decision · Evidence · Comps · Seller · Debt & liens · Market & transactions · Records · Model on keys 1–8, in tab order', () => {
+    expect(DI_MODES.map((m) => m.label)).toEqual(['Decision', 'Evidence', 'Comps', 'Seller', 'Debt & liens', 'Market & transactions', 'Records', 'Model'])
+    // keys stay consecutive after the merge: the Nth tab is key N
+    expect(DI_MODES.map((m) => m.key)).toEqual(DI_MODES.map((_, i) => String(i + 1)))
+    expect(new Set(DI_MODES.map((m) => m.id)).size).toBe(DI_MODES.length)
+  })
+  it('old links keep landing: ?mode=transactions opens Market & transactions', () => {
+    expect(modeFromSearch('?mode=transactions')).toBe('market')
+    expect(modeFromSearch('?mode=market')).toBe('market')
+  })
+  it('Market & transactions renders both halves in one section — compact empties, never two near-empty tabs', () => {
+    const t = text(<MarketTransactionsSection d={fixture()} now={Date.parse('2026-10-10')} onSelect={noop} />)
+    expect(t).toContain('Market & transactions')
+    expect(t).toContain('Nearby sales unavailable')
+    expect(t).toContain('Buyer Match demand')
+    expect(t).toContain('1 recorded event on this property')
+    expect(t).toContain('Fha recorded')
+    const none = text(<MarketTransactionsSection d={fixture({ history: [] })} now={Date.parse('2026-10-10')} onSelect={noop} />)
+    expect(none).toContain('No recorded transactions')
   })
   it('the evidence index separates source evidence from inference', () => {
     const rows = evidenceLedger(fixture())
@@ -123,7 +140,8 @@ describe('IA: one section per evidence family, in reading order', () => {
     expect(by['fact:occupancy_seller']).toBe('seller')
     expect(by['fact:interest_seller']).toBe('inferred') // extracted from the message, not said verbatim
     expect(rows.filter((r) => isSourceBasis(r.basis)).length).toBeGreaterThan(0)
-    expect(familyCards(fixture()).map((c) => c.mode)).toEqual(['comps', 'seller', 'debt', 'market', 'transactions', 'records'])
+    expect(familyCards(fixture()).map((c) => c.mode)).toEqual(['comps', 'seller', 'debt', 'market', 'records'])
+    expect(familyCards(fixture()).find((c) => c.mode === 'market')?.label).toBe('Market & transactions')
     const t = text(<EvidenceIndex d={fixture()} onOpen={noop} />)
     expect(t).toContain('Source evidence')
     expect(t).toContain('Inference')
@@ -141,8 +159,8 @@ describe('Comps render with data', () => {
   })
   it('the DI comp buyer: an LLC deed buyer is an entity investor; a recorded individual is never named', () => {
     const [ind, llc] = fixture().comps!.top
-    expect(dealCompBuyer(llc, null)).toMatchObject({ entity: 'llc', use: 'investor', name: 'Pinewood LLC' })
-    expect(dealCompBuyer(ind, null)).toMatchObject({ entity: 'individual', name: null })
+    expect(dealCompBuyer(llc, null)).toMatchObject({ entity: 'entity', use: 'investor', label: 'LLC investor', name: 'Pinewood LLC' })
+    expect(dealCompBuyer(ind, null)).toMatchObject({ entity: 'individual', label: 'Individual', name: null })
   })
   it('an UNANALYZED property shows the recorded nearby sales as candidates, plus Analyze', () => {
     const base = fixture().comps!.top[1]

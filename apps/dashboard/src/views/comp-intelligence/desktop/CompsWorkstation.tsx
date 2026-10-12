@@ -269,6 +269,7 @@ export function CompsWorkstation({ hostPropertyId }: { hostPropertyId: string | 
           theme={theme} store={store} onOpen={openComp} camera={camera} onCamera={(kind) => setCamera((c) => ({ kind, n: (c?.n ?? 0) + 1 }))}
           reduced={reduced} mapReady={mapReady} onMapReady={() => setMapReady(true)}
           radius={ws.request.radius ?? m.w.query.radiusMiles} months={ws.request.months ?? m.w.query.months} onWindow={setWindow}
+          auto={Boolean(ws.request.auto)} autoReason={ws.autoReason} onAuto={ws.setAuto}
           refreshing={ws.loading} clustered={bgCount > 80}
         >
           <CompInspector

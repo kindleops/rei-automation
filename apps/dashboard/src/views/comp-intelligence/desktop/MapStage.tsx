@@ -6,6 +6,17 @@ import { EvidenceMap, type CameraAction, type MapPoint } from './EvidenceMap'
 import type { FocusStore } from './focus-store'
 import { rampFor, type MapMode } from './map-style'
 import { RECENT_LAYER_LABEL, recentPoints } from './recent-sales-layer'
+import { QUICK_RADII } from './auto-radius'
+
+/** Radius chips: the quick set, plus the engine window and the current radius when they are not in it. */
+export function radiusChoices(current: number | null, engineRadius: number | null): number[] {
+  return [...new Set<number>([...QUICK_RADII, ...(engineRadius ? [engineRadius] : []), ...(current ? [current] : [])])].sort((a, b) => a - b)
+}
+
+/** Sold-within options: 3 months first (the workspace serves ≥ 3), then the served set and the engine window. */
+export function monthChoices(served: readonly number[], engineMonths: number | null): number[] {
+  return [...new Set<number>([3, ...served, ...(engineMonths ? [engineMonths] : [])])].filter((mo) => mo >= 3).sort((a, b) => a - b)
+}
 
 interface Props {
   m: Workstation
@@ -26,6 +37,10 @@ interface Props {
   radius: number
   months: number
   onWindow: (radius: number | null, months: number | null) => void
+  /** the density-fitted default radius is in charge (auto-radius.ts) */
+  auto?: boolean
+  autoReason?: string | null
+  onAuto?: () => void
   refreshing: boolean
   clustered: boolean
   children?: ReactNode
@@ -34,8 +49,9 @@ interface Props {
 export function MapStage(p: Props) {
   const { m, mode } = p
   const engineWindow = m.w.query.engineWindow
-  const radiusOptions = [...new Set([...m.w.query.radiusOptions, ...(engineWindow ? [engineWindow.radiusMiles] : [])])].sort((a, b) => a - b)
-  const monthOptions = [...new Set([...m.w.query.monthOptions, ...(engineWindow ? [engineWindow.months] : [])])].sort((a, b) => a - b)
+  // quick radius chips 0.5 · 1 · 2 · 4 (+ the engine window and the current radius when they differ)
+  const radiusOptions = radiusChoices(p.radius, engineWindow?.radiusMiles ?? null)
+  const monthOptions = monthChoices(m.w.query.monthOptions, engineWindow?.months ?? null)
   const hasSubjectPin = m.w.subject.lat !== null && m.w.subject.lng !== null
   // Recent market sales: own layer, own toggle (display only — never valuation evidence).
   const recentRows = m.w.recentSales?.available ? m.w.recentSales.rows : null
@@ -80,15 +96,18 @@ export function MapStage(p: Props) {
           ]}
         />
         <div className="ciw-window">
-          <LCSelect
-            label="Search radius"
-            prefix="Within"
-            variant="chip"
-            size="sm"
-            value={String(p.radius)}
-            onChange={(v) => p.onWindow(Number(v), p.months)}
-            options={radiusOptions.map((r) => ({ value: String(r), label: `${r} mi`, hint: engineWindow?.radiusMiles === r ? 'engine window' : undefined }))}
-          />
+          <span className="ciw-radius" title={p.auto ? `Auto radius${p.autoReason ? ` — ${p.autoReason}` : ''}: fitted to how many comps sold nearby (0.5 mi dense · 1 mi · wider when thin, up to the engine window)` : undefined}>
+            <LCSegmented
+              label="Search radius"
+              size="sm"
+              value={p.auto ? 'auto' : String(p.radius)}
+              onChange={(v) => (v === 'auto' ? p.onAuto?.() : p.onWindow(Number(v), p.months))}
+              options={[
+                ...(p.onAuto ? [{ value: 'auto', label: p.auto ? `Auto · ${p.radius} mi` : 'Auto' }] : []),
+                ...radiusOptions.map((r) => ({ value: String(r), label: `${r} mi${engineWindow?.radiusMiles === r && !(QUICK_RADII as readonly number[]).includes(r) ? ' · engine' : ''}` })),
+              ]}
+            />
+          </span>
           <LCSelect
             label="Sold within"
             prefix="Sold"

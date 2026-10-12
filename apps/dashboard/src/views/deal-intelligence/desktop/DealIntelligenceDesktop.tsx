@@ -14,7 +14,7 @@ import {
 import { fetchKey, hasSubject, readRecents, type DiSubject } from './di-subject'
 import { DI_MODES, type DiMode, type DiSelection } from './di-types'
 import { DiInspector } from './inspector/DiInspector'
-import { CompsSection, DebtSection, EvidenceIndex, MarketSection, TransactionsSection } from './modes/EvidenceMode'
+import { CompsSection, DebtSection, EvidenceIndex, MarketTransactionsSection } from './modes/EvidenceMode'
 import { SellerMode } from './modes/SellerMode'
 import { ModelMode } from './modes/ModelMode'
 import { RecordMode } from './modes/RecordMode'
@@ -217,8 +217,7 @@ export function DealIntelligenceDesktop({ subject: explicit }: DealIntelligenceD
             {mode === 'comps' ? <CompsSection d={d} selection={selection} onSelect={pick} links={m.links} now={now} engine={engineAction} /> : null}
             {mode === 'seller' ? <SellerMode d={d} selection={selection} onSelect={pick} links={m.links} now={now} /> : null}
             {mode === 'debt' ? <DebtSection d={d} selection={selection} onSelect={pick} now={now} /> : null}
-            {mode === 'market' ? <MarketSection d={d} now={now} /> : null}
-            {mode === 'transactions' ? <TransactionsSection d={d} onSelect={pick} /> : null}
+            {mode === 'market' ? <MarketTransactionsSection d={d} now={now} onSelect={pick} /> : null}
             {mode === 'records' ? <RecordMode d={d} category={category} onCategory={(c) => { setCategory(c); setSelection(null) }} selection={selection} onSelect={pick} links={m.links} now={now} /> : null}
             {mode === 'model' ? (
               <>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { callBackend } from '../../../lib/api/backendClient'
 import type { CompsWorkspace } from '../../../domain/comp-intelligence/comps-evidence-api'
 import { sound } from '../../../shared/sound'
+import { AUTO_START_MILES, nextAutoRadius } from './auto-radius'
 
 export type WorkspaceFailure = { kind: 'not_found' | 'unavailable'; detail: string }
 
@@ -52,19 +53,28 @@ async function load(pid: string, radius: number | null, months: number | null, s
   return res.data.data
 }
 
-export interface WorkspaceRequest { radius: number | null; months: number | null }
+export interface WorkspaceRequest {
+  radius: number | null
+  months: number | null
+  /** the density-fitted default (auto-radius.ts) is choosing the radius; any explicit choice turns it off */
+  auto?: boolean
+}
+
+const AUTO_REQUEST: WorkspaceRequest = { radius: AUTO_START_MILES, months: null, auto: true }
 
 export function useCompsWorkspace(propertyId: string | null) {
-  const [request, setRequest] = useState<WorkspaceRequest>({ radius: null, months: null })
+  const [request, setRequest] = useState<WorkspaceRequest>(AUTO_REQUEST)
+  const [autoReason, setAutoReason] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
   const [, setVersion] = useState(0)
   const explicit = useRef<string | null>(null)
 
-  // A new subject opens on the engine's own window again.
+  // A new subject opens on the density-fitted radius again.
   const [seenPid, setSeenPid] = useState(propertyId)
   if (seenPid !== propertyId) {
     setSeenPid(propertyId)
-    setRequest({ radius: null, months: null })
+    setRequest(AUTO_REQUEST)
+    setAutoReason(null)
   }
 
   const key = propertyId ? keyOf(propertyId, request.radius, request.months) : null
@@ -96,13 +106,34 @@ export function useCompsWorkspace(propertyId: string | null) {
     return () => ctrl.abort()
   }, [propertyId, key, request.radius, request.months, nonce])
 
-  /** An explicit operator recompute (radius / window): sounds when it lands. */
+  // AUTO: once this radius has landed, step the ladder (0.5 ← 1 → 2 → engine window) or stop.
+  const landed = entry?.data ?? null
+  useEffect(() => {
+    if (!request.auto || !landed) return
+    const current = request.radius ?? landed.query.radiusMiles
+    const step = nextAutoRadius(landed, current)
+    setAutoReason(step.reason)
+    if (step.next === null) return
+    const ew = landed.query.engineWindow
+    const toEngine = ew ? step.next >= ew.radiusMiles && request.months === null : false
+    // still auto at the engine window: the next pass reads "stop here" with its reason
+    setRequest({ radius: toEngine ? null : step.next, months: request.months, auto: true })
+  }, [landed, request.auto, request.radius, request.months])
+
+  /** An explicit operator recompute (radius / window): sounds when it lands. Turns auto off. */
   const setWindow = useCallback((next: WorkspaceRequest) => {
     if (!propertyId) return
     const k = keyOf(propertyId, next.radius, next.months)
     explicit.current = CACHE.get(k)?.data ? null : k
-    setRequest(next)
+    setAutoReason(null)
+    setRequest({ radius: next.radius, months: next.months, auto: false })
   }, [propertyId])
+
+  /** Back to the density-fitted radius (keeps the sold-within window). */
+  const setAuto = useCallback(() => {
+    setAutoReason(null)
+    setRequest((r) => ({ radius: AUTO_START_MILES, months: r.months, auto: true }))
+  }, [])
 
   const retry = useCallback(() => {
     if (!key) return
@@ -119,7 +150,10 @@ export function useCompsWorkspace(propertyId: string | null) {
     loading: Boolean(propertyId) && !entry,
     failure: entry?.failure ?? null,
     request,
+    /** why auto stopped where it did ("dense — 11 comps within 0.5 mi"); null when not auto */
+    autoReason: request.auto ? autoReason : null,
     setWindow,
+    setAuto,
     retry,
   }
 }
