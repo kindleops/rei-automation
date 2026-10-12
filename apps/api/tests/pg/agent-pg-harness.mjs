@@ -27,6 +27,25 @@ export const SQL = {
   researchPretest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro_pretest.sql'),
   research: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro.sql'),
   researchRollback: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro_rollback.sql'),
+  // R2 persistent runtime (applied after the research migration; no BEGIN/COMMIT inside — see applyInTransaction)
+  runtimePretest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime_pretest.sql'),
+  runtime: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime.sql'),
+  runtimeRollback: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime_rollback.sql'),
+}
+
+/** Apply a migration file that carries no BEGIN/COMMIT in ONE transaction (psql --single-transaction equivalent). */
+export async function applyInTransaction(pool, file) {
+  const c = await pool.connect()
+  try {
+    await c.query('begin')
+    await c.query(fs.readFileSync(file, 'utf8'))
+    await c.query('commit')
+  } catch (e) {
+    await c.query('rollback').catch(() => {})
+    throw e
+  } finally {
+    c.release()
+  }
 }
 
 export const ADMIN_URL = String(process.env.AGENT_PG_TEST_DB_URL || '').trim()

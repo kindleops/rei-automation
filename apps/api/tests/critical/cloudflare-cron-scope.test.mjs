@@ -115,7 +115,15 @@ const EG_FACTS_REFRESH_JOB_PATHS = ["/api/internal/entity-graph/facts-refresh"];
  */
 const EG_OVERVIEW_SNAPSHOT_JOB_PATHS = ["/api/internal/entity-graph/overview-snapshot"];
 
-const ALLOWED_JOB_PATHS = [...EG_OVERVIEW_SNAPSHOT_JOB_PATHS, ...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS, ...SCORING_BACKFILL_JOB_PATHS, ...EG_FACTS_REFRESH_JOB_PATHS];
+/**
+ * R2 agent runtime tick (Intelligence 2.0) — registered on the send-incapable
+ * "*\/1" lane, NOT commissioned: CRON_AGENT_RUNTIME_ENABLED and the container
+ * ceiling AGENT_RUNTIME_ENABLED are absent from every wrangler config. Writes
+ * only schema agent; runs only registered deterministic handlers.
+ */
+const AGENT_RUNTIME_JOB_PATHS = ["/api/internal/agent/runtime/tick"];
+
+const ALLOWED_JOB_PATHS = [...AGENT_RUNTIME_JOB_PATHS, ...EG_OVERVIEW_SNAPSHOT_JOB_PATHS, ...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS, ...SCORING_BACKFILL_JOB_PATHS, ...EG_FACTS_REFRESH_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -469,7 +477,8 @@ test("the Notification Center projector rides its own lane at 30 s: commissioned
   const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
   const lane = table[1].match(/"\*\/1 \* \* \* \*":\s*\[([^\]]*)\]/);
   assert.ok(lane, "the projection lane must be declared in the job table");
-  assert.deepEqual(lane[1].split(",").map((x) => x.trim()).filter(Boolean), ["NOTIFICATION_STORIES_PROJECT"], "the projection lane carries the projector only");
+  // R2 (10-12): the send-incapable one-minute lane also carries the agent runtime tick (test below)
+  assert.deepEqual(lane[1].split(",").map((x) => x.trim()).filter(Boolean), ["NOTIFICATION_STORIES_PROJECT", "AGENT_RUNTIME_TICK"], "the projection lane carries the projector and the agent runtime tick only");
   const oneMin = table[1].match(/"\* \* \* \* \*":\s*\[([^\]]*)\]/);
   assert.ok(!oneMin[1].includes("NOTIFICATION_STORIES_PROJECT"), "never on the send lane");
   const block = code.match(/const NOTIFICATION_STORIES_PROJECT: CronJob = \{([\s\S]*?)\};/);
@@ -479,6 +488,28 @@ test("the Notification Center projector rides its own lane at 30 s: commissioned
   assert.equal((await configVars(PRODUCTION)).CRON_NOTIFICATION_STORIES_PROJECT_ENABLED, "true");
   assert.ok((await declaredCrons(PRODUCTION)).includes("*/1 * * * *"), "production declares the projection lane");
   assert.notEqual((await configVars(STAGING)).CRON_NOTIFICATION_STORIES_PROJECT_ENABLED, "true", "staging shares the production DB: no projector");
+});
+
+test("the R2 agent runtime tick rides the send-incapable */1 lane, never the send lane, and is switched OFF everywhere (flag + ceiling default-deny)", async () => {
+  const code = await workerCode();
+  const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  const lane = table[1].match(/"\*\/1 \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(lane[1].includes("AGENT_RUNTIME_TICK"), "registered on the */1 lane");
+  for (const expr of ["\\* \\* \\* \\* \\*", "\\*\\/5 \\* \\* \\* \\*"]) {
+    const other = table[1].match(new RegExp(`"${expr}":\\s*\\[([^\\]]*)\\]`));
+    assert.ok(other && !other[1].includes("AGENT_RUNTIME_TICK"), `never on ${expr}`);
+  }
+  const block = code.match(/const AGENT_RUNTIME_TICK: CronJob = \{([\s\S]*?)\};/);
+  assert.ok(block && block[1].includes('"CRON_AGENT_RUNTIME_ENABLED"') && block[1].includes('"/api/internal/agent/runtime/tick"'));
+  assert.ok(!/body\s*:/.test(block[1]), "the tick takes no body");
+  assert.ok(!/repeatEveryMs/.test(block[1]), "once a minute");
+  const list = /const AGENT_FORWARDED_VARS = \[([\s\S]*?)\] as const;/.exec(code);
+  assert.ok(list && list[1].includes('"AGENT_RUNTIME_ENABLED"'), "the container ceiling is forwarded by the reviewed allowlist");
+  for (const cfg of [PRODUCTION, STAGING]) {
+    const vars = await configVars(cfg);
+    assert.notEqual(vars.CRON_AGENT_RUNTIME_ENABLED, "true", "not commissioned: the owner flips this");
+    assert.notEqual(vars.AGENT_RUNTIME_ENABLED, "true", "not commissioned: the owner flips this");
+  }
 });
 
 test("the Worker source still parses as TypeScript (a cron string inside a /** */ comment closes it)", async () => {

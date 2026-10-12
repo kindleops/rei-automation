@@ -82,6 +82,9 @@ const TABLES = Object.freeze({
   },
   researchJobs: {
     table: 'agent.research_job', key: 'job_id', objKey: 'job_id', child: false,
+    // R2 runtime missions share agent.research_job (doc.runtime = true, CHECK-enforced) but are
+    // owned by the agent.runtime_* functions, never by this store: they are never loaded here
+    filter: "and (doc ->> 'runtime') is distinct from 'true'",
     cols: { job_id: 'text', run_id: 'text', org_id: 'uuid', depth: 'text', state: 'text', scope_hash: 'text', property_ids: 'text[]', created_at: 'timestamptz', ended_at: 'timestamptz', gen: 'bigint', doc: 'jsonb' },
     row: (o, ctx) => ({ job_id: o.job_id, run_id: o.run_id, org_id: ctx.org_id, depth: o.depth, state: o.state, scope_hash: o.scope_hash, property_ids: o.property_ids, created_at: iso(o.created_at), ended_at: iso(o.ended_at), gen: ctx.gen, doc: o }),
   },
@@ -192,7 +195,7 @@ export function createPgAgentStore({ pool, org_id = DEFAULT_ORG_ID, statementTim
     const newlyHot = new Set()
     for (const [name, spec] of Object.entries(TABLES)) {
       if (spec.child) continue
-      const { rows } = await client.query(`select doc${name === 'runs' ? ', last_seq' : ''} from ${spec.table} where org_id = $1 and gen > $2`, [org_id, since])
+      const { rows } = await client.query(`select doc${name === 'runs' ? ', last_seq' : ''} from ${spec.table} where org_id = $1 and gen > $2 ${spec.filter || ''}`, [org_id, since])
       for (const r of rows) {
         state[name].set(r.doc[spec.objKey], decodePropertyIds(r.doc))
         if (name === 'runs') {

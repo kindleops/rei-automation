@@ -259,6 +259,8 @@ const AGENT_FORWARDED_VARS = [
   "AGENT_RATE_MUTATIONS_PER_MIN",
   "AGENT_RATE_READS_PER_MIN",
   "AGENT_USER_DAILY_RUNS",
+  // R2 persistent runtime ceiling (default off): the tick route is inert without it.
+  "AGENT_RUNTIME_ENABLED",
 ] as const;
 
 
@@ -289,6 +291,8 @@ interface Env {
   /** Per-job authority. Absent => "false" => that job does not run. */
   CRON_SELLER_STATE_RECONCILE_ENABLED?: string;
   CRON_DELIVERY_RECONCILE_ENABLED?: string;
+  /** R2 agent runtime tick (send-incapable, "*\/1" lane). Absent => "false". */
+  CRON_AGENT_RUNTIME_ENABLED?: string;
   // Commissioning credentials. Deliberately a SHORT list -- see ApiContainer.
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
@@ -363,6 +367,7 @@ interface Env {
   AGENT_RATE_MUTATIONS_PER_MIN?: string;
   AGENT_RATE_READS_PER_MIN?: string;
   AGENT_USER_DAILY_RUNS?: string;
+  AGENT_RUNTIME_ENABLED?: string;
 }
 
 async function forwardToApi(request: Request, env: Env): Promise<Response> {
@@ -963,6 +968,25 @@ const EG_OVERVIEW_SNAPSHOT: CronJob = {
 };
 
 /**
+ * R2 AGENT RUNTIME TICK (Intelligence 2.0, NOT commissioned). Reaps expired
+ * leases, enqueues due agent.runtime_schedule slots, runs <= tick_max_jobs
+ * registered handlers (R2: ops.health_check only -- deterministic, no LLM, $0)
+ * inside a hard wall-clock budget, heartbeats. Send-incapable: writes only
+ * schema agent (job rows, job_event, findings, heartbeat); its only reads
+ * outside agent are 8 fixed system_control keys and two LIMITed send_queue
+ * counts. Triple gate: CRON_AGENT_RUNTIME_ENABLED (this registration) +
+ * AGENT_RUNTIME_ENABLED and AGENT_ENABLED (container) +
+ * agent.runtime_limits.runtime_enabled (DB, plus per-kind switches and the
+ * emergency stop). Rides the send-incapable one-minute "*\/1" lane, never the
+ * send lane.
+ */
+const AGENT_RUNTIME_TICK: CronJob = {
+  id: "agent_runtime_tick",
+  enabledBy: "CRON_AGENT_RUNTIME_ENABLED",
+  path: "/api/internal/agent/runtime/tick",
+};
+
+/**
  * THE ONE GOVERNED PRODUCTION SCHEDULE.
  *
  * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
@@ -1009,7 +1033,7 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
   // the send lane above carries senders only. NOT declared in any wrangler
   // trigger list yet, so Cloudflare never invokes it until the post-deploy
   // enablement adds the trigger AND CRON_NOTIFICATION_STORIES_PROJECT_ENABLED.
-  "*/1 * * * *": [NOTIFICATION_STORIES_PROJECT],
+  "*/1 * * * *": [NOTIFICATION_STORIES_PROJECT, AGENT_RUNTIME_TICK],
   // Entity Graph Overview snapshot lane (send-incapable): 03:45, 09:45, 15:45,
   // 21:45 UTC. None falls inside the 11:15-14:30 UTC heavy-read blackout.
   "45 3,9,15,21 * * *": [EG_OVERVIEW_SNAPSHOT],
