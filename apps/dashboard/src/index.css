@@ -9796,7 +9796,14 @@ Motion
 /* ── Room Enter Transition ─────────────────────────────────────────────── */
 
 .nx-stage {
-  animation: stage-enter 500ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  /* fill BACKWARDS, never both/forwards: a finished-but-filled animation keeps
+     an animated OPACITY on the stage, and Chromium treats it as a backdrop
+     root — every glass surface inside (inspectors, map overlays, cards) then
+     composites its blur over still-crisp content instead of frosting it.
+     The static translateY(0) keeps the containing block the filled transform
+     used to provide (fixed descendants stay where they were). */
+  animation: stage-enter 500ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) backwards;
+  transform: translateY(0);
 }
 
 @keyframes stage-enter {
