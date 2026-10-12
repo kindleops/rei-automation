@@ -25,6 +25,10 @@ import type { EntityScope } from '../mobile/entity-graph-mobile-format'
 /** The centre view. Overview is the landing view of every scope (owner 2026-10-10); Grid and Graph are one click away. */
 export type DeskCenter = 'overview' | 'grid' | 'graph'
 
+/** The Overview PAGE's global filters (applied to every scope that has the field). */
+export type UniverseGlobals = { markets: string[]; states: string[] }
+export const NO_GLOBALS: UniverseGlobals = Object.freeze({ markets: [], states: [] }) as UniverseGlobals
+
 export type DeskState = {
   scope: EntityScope
   query: string
@@ -32,10 +36,19 @@ export type DeskState = {
   center: DeskCenter
   graphFull: boolean
   contactSubtype: 'phone' | 'email'
+  /**
+   * The Entity Graph Overview PAGE (owner 2026-10-12): one dashboard across
+   * every table, the first thing a fresh visit lands on (`egs=overview`).
+   * Optional so a state written before it existed still reads.
+   */
+  home?: boolean
+  universe?: UniverseGlobals
 }
 
 export const DESK_STATE_KEY = 'lc.entityGraph.desk.state.v1'
-export const DESK_URL_KEYS = ['egs', 'q', 'ff', 'egv', 'egfs', 'egc'] as const
+export const DESK_URL_KEYS = ['egs', 'q', 'ff', 'egv', 'egfs', 'egc', 'egm', 'egst'] as const
+/** `egs=overview` is the Overview page, not a scope. */
+export const HOME_PARAM = 'overview'
 const SCOPES: EntityScope[] = ['properties', 'master_owners', 'buyers', 'organizations', 'people', 'contact_methods']
 
 export const DEFAULT_DESK_STATE: DeskState = {
@@ -74,6 +87,16 @@ export function writeViewByScope(uid: string, views: ViewByScope, storage: Pick<
 /** The view a scope opens in: the operator's last one there, else Overview. */
 export const viewForScope = (views: ViewByScope, scope: EntityScope): DeskCenter => views[scope] ?? 'overview'
 
+const strings = (raw: unknown, max = 60): string[] => (Array.isArray(raw) ? [...new Set(raw.map((v) => String(v ?? '').trim()).filter(Boolean))].slice(0, max) : [])
+export function sanitizeGlobals(raw: unknown): UniverseGlobals {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  return { markets: strings(r.markets), states: strings(r.states).map((s) => s.toUpperCase()) }
+}
+function globalsParam(raw: string | null): string[] {
+  if (!raw) return []
+  try { return strings(JSON.parse(raw)) } catch { return [] }
+}
+
 function sanitizeFilters(raw: unknown): EntityGraphFieldFilter[] {
   if (!Array.isArray(raw)) return []
   return raw.filter((f): f is EntityGraphFieldFilter => Boolean(f) && typeof f === 'object' && typeof (f as EntityGraphFieldFilter).field_key === 'string' && typeof (f as EntityGraphFieldFilter).operator === 'string')
@@ -89,6 +112,8 @@ export function readSessionDeskState(storage: Pick<Storage, 'getItem'> | null = 
     if (isCenter(parsed.center)) out.center = parsed.center
     if (typeof parsed.graphFull === 'boolean') out.graphFull = parsed.graphFull
     if (parsed.contactSubtype === 'email' || parsed.contactSubtype === 'phone') out.contactSubtype = parsed.contactSubtype
+    if (typeof parsed.home === 'boolean') out.home = parsed.home
+    if (parsed.universe && typeof parsed.universe === 'object') out.universe = sanitizeGlobals(parsed.universe)
     if (parsed.filtersByScope && typeof parsed.filtersByScope === 'object') {
       const byScope: DeskState['filtersByScope'] = {}
       for (const s of SCOPES) {
@@ -119,7 +144,11 @@ export function urlHasDeskState(params: URLSearchParams): boolean {
  */
 export function initialDeskState(params: URLSearchParams, session: Partial<DeskState> = readSessionDeskState(), views: ViewByScope = {}): DeskState {
   const base: DeskState = { ...DEFAULT_DESK_STATE, ...session, filtersByScope: { ...(session.filtersByScope ?? {}) } }
-  if (!urlHasDeskState(params)) return { ...base, center: session.center ?? viewForScope(views, base.scope) }
+  // a visit with no desk address lands on the Overview page unless this session left it
+  if (!urlHasDeskState(params)) return { ...base, center: session.center ?? viewForScope(views, base.scope), home: session.home ?? true, universe: session.universe ?? NO_GLOBALS }
+  if (params.get('egs') === HOME_PARAM) {
+    return { ...base, center: session.center ?? viewForScope(views, base.scope), home: true, universe: { markets: globalsParam(params.get('egm')), states: globalsParam(params.get('egst')).map((s) => s.toUpperCase()) } }
+  }
   const scope = isScope(params.get('egs')) ? (params.get('egs') as EntityScope) : 'properties'
   const filters = parseFieldFiltersParam(params.get('ff'))
   const egv = params.get('egv')
@@ -133,6 +162,8 @@ export function initialDeskState(params: URLSearchParams, session: Partial<DeskS
     center,
     graphFull: center === 'graph' && params.get('egfs') === '1',
     contactSubtype: params.get('egc') === 'email' ? 'email' : 'phone',
+    home: false,
+    universe: session.universe ?? NO_GLOBALS,
   }
 }
 
@@ -140,6 +171,13 @@ export function initialDeskState(params: URLSearchParams, session: Partial<DeskS
 export function deskSearch(current: string, state: DeskState): string {
   const params = new URLSearchParams(current.startsWith('?') ? current.slice(1) : current)
   for (const k of DESK_URL_KEYS) params.delete(k)
+  if (state.home) {
+    // the Overview page's address: the page + its global filters (each scope's own filters live in the session)
+    params.set('egs', HOME_PARAM)
+    if (state.universe?.markets.length) params.set('egm', JSON.stringify(state.universe.markets))
+    if (state.universe?.states.length) params.set('egst', JSON.stringify(state.universe.states))
+    return `?${params.toString()}`
+  }
   const filters = state.filtersByScope[state.scope] ?? []
   if (state.scope !== 'properties') params.set('egs', state.scope)
   if (state.query.trim()) params.set('q', state.query.trim())

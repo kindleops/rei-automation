@@ -1,0 +1,233 @@
+/*
+ * ENTITY GRAPH · OVERVIEW PAGE. App-scoped under .egdk .egu — LC tokens only.
+ * Surfaces are THE pane material (--lc-pane-mat-*: the sheet every desktop
+ * pane is made of, driven by Settings → Liquid Glass) with its real blur. No
+ * surface sets its own fill hue and nothing carries an accent tint — the
+ * accent is only a focus ring, a selection outline or a value bar. Charts use the operator's accent
+ * for value bars, neutral for "not recorded" / "the rest"; red never charts.
+ * The grid is a container-queried pane grid: 1 → 2 → 3 → 4 columns.
+ */
+.egdk .egu {
+  --egu-bar: rgba(var(--lc-accent-rgb), 0.58);
+  --egu-bar-hi: rgba(var(--lc-accent-rgb), 0.92);
+  --egu-track: rgba(var(--lc-edge-rgb), 0.05);
+  --egu-neutral: rgba(var(--lc-edge-rgb), 0.2);
+  --egu-hatch: repeating-linear-gradient(135deg, rgba(var(--lc-edge-rgb), 0.26) 0 2px, transparent 2px 6px);
+  container-type: inline-size;
+  container-name: egu;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 2px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--lc-ink-1);
+  font-variant-numeric: tabular-nums;
+  scrollbar-gutter: stable;
+}
+
+/* the page scrolls; its blocks never shrink to fit it */
+.egdk .egu > * { flex: none; }
+
+/* ── the material ─────────────────────────────────────────────────────── */
+.egdk .egu-hero, .egdk .egu-card {
+  background: var(--lc-pane-mat-bg);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
+  box-shadow: var(--lc-pane-mat-edge), var(--lc-d2-shadow);
+}
+
+/* ── hero ─────────────────────────────────────────────────────────────── */
+.egdk .egu-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 2.1fr);
+  align-items: center;
+  gap: 18px;
+  padding: 18px 20px;
+  border-radius: var(--lc-r-plane, 22px);
+  overflow: hidden;
+  animation: egu-rise 520ms var(--lc-ease-enter, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+.egdk .egu-hero::after {
+  /* a slow sheen that crosses the plate once on arrival — light, not colour */
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(var(--lc-edge-rgb), 0.06) 48%, transparent 66%);
+  transform: translateX(-100%);
+  animation: egu-sheen 1600ms 240ms var(--lc-ease-standard, ease) both;
+  pointer-events: none;
+}
+.egdk .egu-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: var(--lc-t-eyebrow); letter-spacing: var(--lc-track-eyebrow); text-transform: uppercase; color: var(--lc-ink-3);
+}
+.egdk .egu-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--lc-ok); box-shadow: 0 0 0 3px rgba(var(--lc-ok-rgb), 0.16); }
+.egdk .egu-pulse.is-busy { animation: egu-pulse 1.2s ease-in-out infinite; }
+.egdk .egu-hero__title { margin: 6px 0 4px; font: 650 22px/1.15 var(--lc-font-display); letter-spacing: var(--lc-track-display); }
+.egdk .egu-hero__asof { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.egdk .egu-hero__totals {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px;
+}
+.egdk .egu-hero__totals li { animation: egu-rise 460ms calc(var(--i, 0) * 45ms + 120ms) var(--lc-ease-enter, ease) both; }
+.egdk .egu-hero__total {
+  inline-size: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  padding: 10px 12px; border: 0; border-radius: var(--lc-r-md, 12px); cursor: pointer; color: inherit; font: inherit; text-align: left;
+  background: var(--lc-inner-bg); box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+  transition: background 160ms ease, box-shadow 160ms ease, transform 160ms var(--lc-ease-standard, ease);
+}
+.egdk .egu-hero__total:hover { background: var(--lc-glass-selected-fill); box-shadow: inset 0 0 0 1px var(--lc-glass-selected-line); transform: translateY(-1px); }
+.egdk .egu-hero__total:focus-visible { outline: 1px solid var(--lc-accent); outline-offset: 2px; }
+.egdk .egu-hero__total span { font: var(--lc-t-label); color: var(--lc-ink-3); }
+.egdk .egu-hero__total b { font: var(--lc-t-metric); letter-spacing: var(--lc-track-tight); min-height: 25px; }
+
+/* ── global filters ───────────────────────────────────────────────────── */
+.egdk .egu-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 0 4px; }
+.egdk .egu-filters__label { display: inline-flex; align-items: center; gap: 6px; font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.egdk .egu-filters__pick { display: flex; gap: 6px; }
+.egdk .egu-filters__combo { inline-size: 220px; }
+.egdk .egu-filters__combo.is-narrow { inline-size: 140px; }
+.egdk .egu-chips { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; }
+.egdk .egu-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px 0 10px; border: 0; border-radius: var(--lc-r-pill, 999px); cursor: pointer;
+  color: var(--lc-ink-1); font: var(--lc-t-label);
+  background: var(--lc-glass-selected-fill); box-shadow: inset 0 0 0 1px var(--lc-glass-selected-line);
+  animation: egu-pop 240ms var(--lc-ease-enter, ease) both;
+}
+.egdk .egu-chip em { font-style: normal; color: var(--lc-ink-3); font-weight: 600; }
+.egdk .egu-chip:hover { background: var(--lc-inner-bg-hover); }
+
+/* ── the card grid ────────────────────────────────────────────────────── */
+.egdk .egu-grid { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
+@container egu (min-width: 720px) {
+  .egdk .egu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .egdk .egu-card.is-properties { grid-column: span 2; }
+}
+@container egu (min-width: 1080px) {
+  .egdk .egu-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .egdk .egu-card.is-properties { grid-column: span 3; }
+}
+@container egu (min-width: 1440px) {
+  .egdk .egu-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .egdk .egu-card.is-properties { grid-column: span 2; grid-row: span 2; }
+}
+@container egu (max-width: 900px) {
+  .egdk .egu-hero { grid-template-columns: 1fr; }
+  .egdk .egu-hero__totals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.egdk .egu-card {
+  position: relative;
+  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  padding: 14px 16px 12px;
+  border-radius: var(--lc-r-xl, 20px);
+  animation: egu-rise 520ms calc(var(--i, 0) * 55ms + 160ms) var(--lc-ease-enter, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  transition: opacity 180ms ease, box-shadow 200ms ease;
+}
+.egdk .egu-card:hover { box-shadow: var(--lc-pane-mat-edge), inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.08), var(--lc-d3-shadow); }
+.egdk .egu-card.is-stale { opacity: 0.64; }
+.egdk .egu-card__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.egdk .egu-card__head h3 { margin: 0; font: var(--lc-t-surface); letter-spacing: -0.01em; }
+.egdk .egu-card__glyph {
+  display: inline-grid; place-items: center; inline-size: 26px; block-size: 26px; border-radius: 8px; color: var(--lc-ink-2);
+  background: var(--lc-inner-bg); box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+}
+.egdk .egu-card__asof { margin-left: auto; font: var(--lc-t-stamp); color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.egdk .egu-src { display: inline-flex; align-items: center; gap: 5px; font: var(--lc-t-eyebrow); letter-spacing: 0.08em; text-transform: uppercase; color: var(--lc-ink-3); }
+.egdk .egu-src i { width: 6px; height: 6px; border-radius: 50%; background: var(--lc-ok); box-shadow: 0 0 0 3px rgba(var(--lc-ok-rgb), 0.14); }
+.egdk .egu-src.is-snapshot i { background: var(--lc-ink-3); box-shadow: 0 0 0 3px rgba(var(--lc-edge-rgb), 0.1); }
+
+.egdk .egu-card__total {
+  display: inline-flex; align-items: baseline; gap: 8px; align-self: flex-start; padding: 2px 6px 2px 0; border: 0; background: none; color: inherit; cursor: pointer; font: inherit;
+  border-radius: 8px;
+}
+.egdk .egu-card__total b { font: var(--lc-t-metric-xl); letter-spacing: var(--lc-track-display); }
+.egdk .egu-card.is-properties .egu-card__total b { font-size: 46px; }
+.egdk .egu-card__total em { font-style: normal; font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.egdk .egu-card__total svg { opacity: 0; transform: translate(-3px, 3px); transition: opacity 160ms ease, transform 160ms ease; color: var(--lc-ink-3); }
+.egdk .egu-card__total:hover svg, .egdk .egu-card__total:focus-visible svg { opacity: 1; transform: none; }
+.egdk .egu-card__total:focus-visible { outline: 1px solid var(--lc-accent); outline-offset: 2px; }
+
+.egdk .egu-kpis { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
+.egdk .egu-kpi {
+  inline-size: 100%; display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'l l' 'v s'; align-items: baseline; gap: 2px 8px;
+  padding: 8px 10px; border: 0; border-radius: 11px; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  background: var(--lc-inner-bg); box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+.egdk .egu-kpi:disabled { cursor: default; }
+.egdk .egu-kpi:not(:disabled):hover { background: var(--lc-glass-selected-fill); box-shadow: inset 0 0 0 1px var(--lc-glass-selected-line); }
+.egdk .egu-kpi:focus-visible { outline: 1px solid var(--lc-accent); outline-offset: 1px; }
+.egdk .egu-kpi span { grid-area: l; font: var(--lc-t-label); color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.egdk .egu-kpi b { grid-area: v; font: var(--lc-t-metric-sm); }
+.egdk .egu-kpi em { grid-area: s; font-style: normal; font: var(--lc-t-stamp); color: var(--lc-ink-3); }
+
+/* ── charts ───────────────────────────────────────────────────────────── */
+.egdk .egu-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 18px; }
+.egdk .egu-chart { margin: 0; min-width: 0; }
+.egdk .egu-chart figcaption, .egdk .egu-chart h4 { margin: 0 0 6px; font: var(--lc-t-label); color: var(--lc-ink-2); }
+.egdk .egu-chart.is-na p { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.egdk .egu-chart__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.egdk .egu-bar {
+  inline-size: 100%; display: grid; grid-template-columns: minmax(80px, 38%) minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  min-height: 24px; padding: 2px 6px; border: 0; border-radius: 7px; background: none; color: inherit; font: var(--lc-t-meta); text-align: left;
+}
+button.egu-bar { cursor: pointer; }
+button.egu-bar:hover { background: rgba(var(--lc-edge-rgb), 0.05); }
+button.egu-bar:hover .egu-bar__fill { background: var(--egu-bar-hi); }
+button.egu-bar:focus-visible { outline: 1px solid var(--lc-accent); outline-offset: 0; }
+.egdk .egu-bar__label { color: var(--lc-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.egdk .egu-bar.is-context .egu-bar__label { color: var(--lc-ink-3); }
+.egdk .egu-bar__track { position: relative; block-size: 8px; border-radius: 99px; background: var(--egu-track); overflow: hidden; }
+.egdk .egu-bar__fill {
+  position: absolute; inset: 0; border-radius: inherit; background: var(--egu-bar);
+  transform-origin: left center; transform: scaleX(var(--v, 0));
+  transition: transform 620ms var(--lc-ease-standard, cubic-bezier(0.22, 1, 0.36, 1)), background 140ms ease;
+  animation: egu-grow-x 760ms calc(var(--i, 0) * 30ms + 260ms) var(--lc-ease-enter, ease) both;
+}
+.egdk .egu-bar__fill.is-none { background: var(--egu-hatch); }
+.egdk .egu-bar__fill.is-other { background: var(--egu-neutral); }
+.egdk .egu-bar__n { color: var(--lc-ink-1); font-weight: 600; min-inline-size: 48px; text-align: right; }
+
+/* histogram: one column per ordered bin */
+.egdk .egu-chart.is-histogram .egu-chart__list { flex-direction: row; align-items: stretch; gap: 6px; block-size: 132px; }
+.egdk .egu-chart.is-histogram li { flex: 1 1 0; min-width: 0; display: flex; }
+.egdk .egu-chart.is-histogram .egu-bar { flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 4px 2px; text-align: center; }
+.egdk .egu-chart.is-histogram .egu-bar__n { order: 0; min-inline-size: 0; text-align: center; font-size: 11px; }
+.egdk .egu-chart.is-histogram .egu-bar__track { order: 1; flex: 1 1 auto; min-block-size: 0; block-size: auto; inline-size: 100%; border-radius: 6px; background: var(--egu-track); }
+.egdk .egu-chart.is-histogram .egu-bar__fill { transform-origin: center bottom; transform: scaleY(var(--v, 0)); animation-name: egu-grow-y; }
+.egdk .egu-chart.is-histogram .egu-bar__label { order: 2; white-space: normal; line-height: 1.15; font-size: 11px; }
+
+/* ── states ───────────────────────────────────────────────────────────── */
+.egdk .egu-card__state { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font: var(--lc-t-body); color: var(--lc-ink-2); }
+.egdk .egu-card__skel { display: flex; flex-direction: column; gap: 10px; }
+.egdk .egu-skel-hero { display: block; inline-size: 46%; block-size: 34px; border-radius: 8px; }
+.egdk .egu-skel-line { display: block; inline-size: 72%; block-size: 12px; border-radius: 6px; }
+.egdk .egu-skel-bars { display: block; inline-size: 100%; block-size: 84px; border-radius: 10px; }
+.egdk .egu-skel-num { display: inline-block; inline-size: 64px; block-size: 20px; border-radius: 6px; }
+
+.egdk .egu-card__foot { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-top: auto; padding-top: 8px; box-shadow: inset 0 1px 0 var(--lc-hairline); font: var(--lc-t-stamp); color: var(--lc-ink-3); }
+.egdk .egu-card__applied { color: var(--lc-ink-2); }
+.egdk .egu-card__ignored { display: inline-flex; align-items: center; gap: 4px; }
+.egdk .egu-link { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; border: 0; border-radius: 7px; background: none; color: var(--lc-ink-2); font: var(--lc-t-label); cursor: pointer; }
+.egdk .egu-link:hover { color: var(--lc-ink-1); background: rgba(var(--lc-edge-rgb), 0.06); }
+.egdk .egu-link:focus-visible { outline: 1px solid var(--lc-accent); }
+
+/* ── motion ───────────────────────────────────────────────────────────── */
+@keyframes egu-rise { from { opacity: 0; transform: translateY(8px) scale(0.988); } to { opacity: 1; transform: none; } }
+@keyframes egu-pop { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes egu-sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes egu-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes egu-grow-x { from { transform: scaleX(0); } }
+@keyframes egu-grow-y { from { transform: scaleY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .egdk .egu-hero, .egdk .egu-hero::after, .egdk .egu-hero__totals li, .egdk .egu-card, .egdk .egu-chip, .egdk .egu-bar__fill, .egdk .egu-pulse.is-busy { animation: none; }
+  .egdk .egu-bar__fill, .egdk .egu-hero__total, .egdk .egu-card__total svg { transition: none; }
+  .egdk .egu-hero::after { display: none; }
+}
+[data-lc-motion='off'] .egdk .egu-hero, [data-lc-motion='off'] .egdk .egu-hero::after, [data-lc-motion='off'] .egdk .egu-hero__totals li,
+[data-lc-motion='off'] .egdk .egu-card, [data-lc-motion='off'] .egdk .egu-chip, [data-lc-motion='off'] .egdk .egu-bar__fill, [data-lc-motion='off'] .egdk .egu-pulse.is-busy { animation: none; }
+[data-lc-motion='off'] .egdk .egu-bar__fill { transition: none; }
+[data-lc-motion='off'] .egdk .egu-hero::after { display: none; }

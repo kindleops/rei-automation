@@ -33,6 +33,7 @@ import {
 import {
   bandedTextBuckets,
   buildEntityGraphOverview,
+  buildOverviewSnapshotRows,
   compileCohort,
   isUnfiltered,
   OVERVIEW_SCOPE,
@@ -65,7 +66,7 @@ function fakeQuery({ total = 500, groups = [], tokens = [] } = {}) {
   const seen = []
   const query = async (sql, params) => {
     seen.push({ sql, params })
-    if (/information_schema\.columns/.test(sql)) return { rows: SCHEMA_ROWS }
+    if (/information_schema\.columns|pg_attribute/.test(sql)) return { rows: SCHEMA_ROWS }
     if (/with c as materialized/.test(sql)) {
       const agg = { t: total }
       for (const m of sql.matchAll(/ as "(a\d+|h_m_[a-z0-9_]+|h_s_[a-z0-9_]+|h_st_[a-z0-9]+|h_known_equity|h_high_equity)"/g)) agg[m[1]] = 3
@@ -255,15 +256,24 @@ test('the organization classes partition every entity (exclusive, first match wi
   assert.ok(/"owner_name" is null/.test(other.where), 'a nameless entity is Other')
 })
 
-test('NO unbounded scan in live mode: the unfiltered universe is "computing" (no cohort statement) until the snapshot exists', async () => {
-  for (const tab of ['properties', 'master_owners', 'people']) {
+test('the properties universe is never scanned live (snapshot / Overview page); the small base-table scopes are (2026-10-12)', async () => {
+  __overviewTest.reset()
+  {
+    const { query, seen } = fakeQuery()
+    const out = await buildEntityGraphOverview({ tab: 'properties', sections: 'pinned,headline' }, deps(query))
+    assert.equal(out.computing, true)
+    assert.equal(seen.filter((s) => /with c as materialized/.test(s.sql)).length, 0, 'properties scanned the universe live')
+    assert.ok(out.sections.every((s) => s.computing && s.unavailable === UNIVERSE_COMPUTING))
+    assert.ok(out.unavailable.some((u) => u.computing))
+  }
+  // owners / people: measured 1.8 s / 2.9 s cold on prod — live, never "Computing"
+  for (const tab of ['master_owners', 'people']) {
     __overviewTest.reset()
     const { query, seen } = fakeQuery()
     const out = await buildEntityGraphOverview({ tab, sections: 'pinned,headline' }, deps(query))
-    assert.equal(out.computing, true, tab)
-    assert.equal(seen.filter((s) => /with c as materialized/.test(s.sql)).length, 0, `${tab} scanned the universe live`)
-    assert.ok(out.sections.every((s) => s.computing && s.unavailable === UNIVERSE_COMPUTING))
-    assert.ok(out.unavailable.some((u) => u.computing))
+    assert.equal(out.computing, false, tab)
+    assert.ok(seen.filter((s) => /with c as materialized/.test(s.sql)).length >= 1, `${tab} answered from its base table`)
+    assert.ok(!out.sections.some((s) => s.computing), tab)
   }
   // a filtered cohort is live
   const cohort = compileCohort({ tab: 'people', field_filters: JSON.stringify(FILTER_BY_TAB.people) }, { tab: 'people' })
@@ -283,4 +293,19 @@ test('the properties headline: distress × market and the signal stack ride on t
   assert.deepEqual(out.headline.stack.map((b) => b.label), ['None', '1 signal', '2 signals', '3 signals', '4+ signals'])
   assert.ok(out.headline.metrics.some((m) => m.key === 'distressed'))
   assert.ok(out.headline.metrics.some((m) => m.key === 'pipeline'))
+})
+
+test('the snapshot job writes every scope it can: a failing scope is skipped and named, never blanking the others (2026-10-12)', async () => {
+  __overviewTest.reset()
+  const { query: base } = fakeQuery()
+  const query = async (sql, params) => {
+    if (/"prospects"/.test(sql) && /with c as materialized/.test(sql)) throw new Error('canceling statement due to statement timeout')
+    return base(sql, params)
+  }
+  const rows = await buildOverviewSnapshotRows({ query, tabs: ['master_owners', 'people'], timeoutMs: 1000 })
+  assert.ok(rows.some((r) => r.tab === 'master_owners' && r.section === 'pinned'), 'owners pinned written')
+  assert.ok(rows.some((r) => r.tab === 'master_owners' && r.section === 'headline'), 'owners headline written')
+  assert.ok(!rows.some((r) => r.tab === 'people' && (r.section === 'pinned' || r.section === 'headline')), 'an incomplete people section is not written')
+  assert.ok(rows.skipped.some((x) => x.tab === 'people' && x.section === 'pinned'), 'the skip is named')
+  for (const r of rows) assert.ok(r.registry_version && r.payload, `${r.tab}/${r.section} carries its registry version`)
 })

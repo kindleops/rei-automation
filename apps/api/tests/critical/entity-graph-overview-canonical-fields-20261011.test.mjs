@@ -46,7 +46,7 @@ function fakeDb({ withPtypeColumn = false, addenda = [] } = {}) {
   ]
   const query = async (sql, params) => {
     seen.push({ sql, params })
-    if (/information_schema\.columns/.test(sql)) return { rows: tables }
+    if (/information_schema\.columns|pg_attribute/.test(sql)) return { rows: tables }
     if (/from public\.eg_refresh_log/.test(sql)) return { rows: [{ at: '2026-10-11T04:24:04Z', detail: { batches: 89, ...(addenda.length ? { addenda } : {}) } }] }
     if (/with c as materialized/.test(sql)) {
       const agg = { t: 7738 }

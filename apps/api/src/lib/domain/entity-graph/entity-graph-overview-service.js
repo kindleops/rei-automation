@@ -261,9 +261,16 @@ export function isUnfiltered(cohort, params = {}) {
 
 async function loadSchema(query, now) {
   if (schemaMemo && now - schemaMemo.at < SCHEMA_TTL_MS) return schemaMemo.value
+  // pg_attribute, not information_schema.columns: the latter omits MATERIALIZED VIEWS, so the buyers
+  // scope (eg_buyer_index is a matview) never had a relation and its Overview always 422'd (measured 2026-10-12)
   const { rows } = await query(
-    `select table_name, column_name, data_type from information_schema.columns
-      where table_schema = 'public' and table_name = any($1::text[])`,
+    `select c.relname as table_name, a.attname as column_name,
+            case when t.typcategory = 'A' then 'ARRAY' else format_type(a.atttypid, null) end as data_type
+       from pg_attribute a
+       join pg_class c on c.oid = a.attrelid
+       join pg_namespace n on n.oid = c.relnamespace
+       join pg_type t on t.oid = a.atttypid
+      where n.nspname = 'public' and c.relname = any($1::text[]) and a.attnum > 0 and not a.attisdropped`,
     [[VIEW, FACTS, SNAPSHOT, 'eg_refresh_log', ...Object.values(OVERVIEW_SCOPE).map((x) => x.relation)]],
     STATEMENT_MS,
   )
@@ -1214,7 +1221,7 @@ async function liveFactField(ctx, field, params, deps = {}) {
   }
 }
 
-export const UNIVERSE_COMPUTING = 'Computing — the whole-universe Overview is precomputed by the snapshot job (eg_overview_snapshot, after the morning refresh) and is not live yet. It is never scanned live: pick any filter to chart that cohort now.'
+export const UNIVERSE_COMPUTING = 'Every field of the whole universe is precomputed by the snapshot job (eg_overview_snapshot) and has not run yet — the Entity Graph Overview page shows the universe now. Pick any filter to chart that cohort here.'
 
 function parseSections(raw) {
   const ids = clean(raw) ? clean(raw).split(',').map(clean).filter(Boolean) : ['pinned', 'headline']
@@ -1291,10 +1298,12 @@ export async function buildEntityGraphOverview(params = {}, deps = {}) {
 
   // the snapshot (PROPOSED eg_overview_snapshot) answers the unfiltered universe instantly when present
   const snapshot = unfiltered && schema[SNAPSHOT] && !deps.skipSnapshot ? await readSnapshot(query, wanted, tab).catch(() => null) : null
-  // NO unbounded scan in a request: the unfiltered universe is the snapshot's, else "computing" — the facts
-  // table too (measured 2026-10-11 on prod: pinned + headline over all 176,603 rows of eg_property_facts ran past
-  // the 8 s budget cold and warm; an honest "Computing" beats a "Retry" that can never succeed)
-  const universeBlocked = unfiltered && !allowUniverseScan
+  // NO unbounded scan of the PROPERTIES universe in a request: the snapshot's, else "computing" (measured
+  // 2026-10-11: pinned + headline over all 176,603 eg_property_facts rows ran past the 8 s budget; the Overview
+  // PAGE answers it from indexed GROUP BYs instead). The other scopes' universes are small base tables: computed
+  // live (measured 2026-10-12 on prod, pinned + headline cold: owners 1.8 s, people 2.9 s, phones 0.9 s, buyers
+  // 0.25 s, companies 2.8 s), then served from the 10-minute universe cache — never "Computing" there.
+  const universeBlocked = unfiltered && !allowUniverseScan && tab === OVERVIEW_TAB
 
   // the universe snapshot, read once per request, for ghost bars of a field whose own chip is the only filter
   let universeSnap = null
@@ -1489,15 +1498,30 @@ async function readSnapshot(query, wanted, tab = OVERVIEW_TAB) {
  */
 export async function buildOverviewSnapshotRows(deps = {}) {
   const out = []
+  const skipped = []
   for (const tab of (deps.tabs || Object.keys(OVERVIEW_SCOPE)).filter((t) => scopeOf(t) && overviewSectionsFor(t))) {
     const sectionIds = ['pinned', 'headline', ...overviewSectionsFor(tab).map((x) => x.id).filter((id) => id !== 'headline')]
-    const res = await buildEntityGraphOverview({ tab, sections: sectionIds.join(',') }, { ...deps, skipSnapshot: true, allowUniverseScan: true, timeoutMs: deps.timeoutMs ?? 120_000 })
+    let res
+    try {
+      res = await buildEntityGraphOverview({ tab, sections: sectionIds.join(',') }, { ...deps, skipSnapshot: true, allowUniverseScan: true, timeoutMs: deps.timeoutMs ?? 120_000 })
+    } catch (error) {
+      // one scope failing never blanks the others (2026-10-12: the table was still empty after the cron lane armed)
+      skipped.push({ tab, section: '*', reason: String(error?.message || error).slice(0, 200) })
+      continue
+    }
     if (!res.supported) continue
-    if (res.unavailable?.length) throw new Error(`overview_snapshot_incomplete: ${tab}: ${res.unavailable.map((u) => u.section).join(',')}`)
     const base = { tab, registry_version: overviewRegistryVersion(overviewRegistry(tab)), total: res.total, source_relation: res.source.relation }
-    out.push(...res.sections.map((section) => ({ ...base, section: section.id, payload: section })))
-    out.push({ ...base, section: 'headline', payload: { headline: res.headline, total: res.total } })
+    // only COMPLETE sections are written; an incomplete one keeps its previous snapshot (or the live path) and is named
+    // (a field-level gap — headline engagement — is written as "unavailable" inside the section, not a missing section)
+    const failed = new Set((res.unavailable || []).filter((u) => !u.field).map((u) => u.section).filter(Boolean))
+    for (const section of res.sections) {
+      if (section.unavailable || failed.has(section.id)) { skipped.push({ tab, section: section.id, reason: section.unavailable || 'unavailable' }); continue }
+      out.push({ ...base, section: section.id, payload: section })
+    }
+    if (res.headline && !failed.has('headline')) out.push({ ...base, section: 'headline', payload: { headline: res.headline, total: res.total } })
+    else skipped.push({ tab, section: 'headline', reason: (res.unavailable || []).find((u) => u.section === 'headline')?.reason || 'unavailable' })
   }
+  out.skipped = skipped
   return out
 }
 
@@ -1524,7 +1548,7 @@ export async function writeOverviewSnapshots({ pool, env = process.env, tabs } =
     }
     await client.query(`delete from public.${SNAPSHOT} where refreshed_at < now() - interval '7 days'`)
     await client.query('commit')
-    return { ok: true, rows: rows.length, ms: Date.now() - started }
+    return { ok: true, rows: rows.length, tabs: [...new Set(rows.map((r) => r.tab))], skipped: rows.skipped || [], ms: Date.now() - started }
   } catch (error) {
     await client.query('rollback').catch(() => {})
     throw error

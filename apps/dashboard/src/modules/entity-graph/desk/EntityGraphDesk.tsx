@@ -76,7 +76,8 @@ import { fetchEntityGraphFilterCatalog, type EntityGraphFilterCatalog } from '..
 import { SignalBadges, signalLines, signalRowHeight } from './SignalBadges'
 import { propertySignals } from '../mobile/property-signals'
 import { DeskCampaignStack, stackScopeSupported, type StackResult } from './DeskCampaignStack'
-import { deskSearch, initialDeskState, readViewByScope, viewForScope, withViewFilters, writeSessionDeskState, writeViewByScope, type DeskCenter, type DeskState, type ViewByScope } from './desk-state'
+import { deskSearch, initialDeskState, NO_GLOBALS, readViewByScope, viewForScope, withViewFilters, writeSessionDeskState, writeViewByScope, type DeskCenter, type DeskState, type UniverseGlobals, type ViewByScope } from './desk-state'
+import { EntityGraphUniverse } from './universe/EntityGraphUniverse'
 import { campaignIdsInFilters, isCampaignScopeFilter } from '../../../domain/entity-graph/entity-graph-campaign-link'
 import { fetchCampaignScope, type CampaignScopeSummary } from './overview/overview-api'
 import { setColumnCampaign } from '../mobile/use-entity-graph-columns'
@@ -193,7 +194,12 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     setCenterState(next)
     setViewByScope((cur) => { const out = { ...cur, [forScope]: next }; writeViewByScope(uid, out); return out })
   }
+  // the Overview PAGE (owner 2026-10-12): one dashboard across every table — the landing view
+  // a deep link to a record (Map / Inbox / ?buyer=) opens the records, not the page
+  const [home, setHome] = useState<boolean>(() => Boolean(deskInit.home) && !/\/entity-graph\/[a-z_]+\/[^/?]+/.test(location.split('?')[0]) && !initialParams.get('buyer') && !anchorFromContext(universalContext))
+  const [universe, setUniverse] = useState<UniverseGlobals>(deskInit.universe ?? NO_GLOBALS)
   const switchScope = (next: EntityScope) => {
+    setHome(false)
     setScope(next)
     setSelected(new Set())
     setCenterState(viewForScope(viewByScope, next))
@@ -203,6 +209,14 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   const overviewPrefs = useOverviewPrefs(uid)
   const overviewMode = center === 'overview'
   const onOverviewFilters = (next: EntityGraphFieldFilter[], opts?: { showRecords?: boolean }) => { setFilters(next); if (opts?.showRecords) setCenter('grid') }
+  // a chart / KPI / total on the Overview page opens that scope's grid with exactly that cohort
+  const drillFromUniverse = (target: EntityScope, next: EntityGraphFieldFilter[]) => {
+    setFiltersByScope((cur) => ({ ...cur, [target]: next }))
+    setQuery('')
+    setDebouncedQuery('')
+    switchScope(target)
+    setCenter('grid', target)
+  }
 
   /* ── Campaign scope (Campaign → Entity Graph): the "Campaign: <name>" chip ── */
   const campaignId = campaignIdsInFilters(filters)[0] ?? null
@@ -271,7 +285,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
 
   // [persistence] write the state back: session (every scope) + this pane's URL
   useEffect(() => {
-    const state: DeskState = { scope, query: debouncedQuery, filtersByScope, center, graphFull: center === 'graph' && graphFull, contactSubtype }
+    const state: DeskState = { scope, query: debouncedQuery, filtersByScope, center, graphFull: center === 'graph' && graphFull, contactSubtype, home, universe }
     writeSessionDeskState(state)
     // The primary pane IS the address bar (read it live — the hook's copy can
     // lag a transition behind a property click); a side pane owns its own path.
@@ -282,7 +296,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     const next = deskSearch(search, state)
     if (next !== search) replaceRoutePath(`${path}${next}`)
     // `location` is read, not followed: a path change (property click) keeps the search
-  }, [scope, debouncedQuery, filtersByScope, center, graphFull, contactSubtype]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scope, debouncedQuery, filtersByScope, center, graphFull, contactSubtype, home, universe]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQuery(query.trim()), 260)
@@ -361,7 +375,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   }
 
   // the Overview reads its own exact totals: the grid's page (and its count) is read only when a records view is open
-  const listActive = center !== 'overview'
+  const listActive = !home && center !== 'overview'
   useEffect(() => {
     if (!listActive) return
     const ctl = new AbortController()
@@ -649,10 +663,13 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
     label: s.label,
     count: counts ? (s.key === 'contact_methods' ? counts.contact_methods : (counts[s.countKey as keyof EntityGraphTabCounts] as number | null | undefined) ?? null) : null,
   }))
+  const pageTabs = [{ id: 'overview', label: 'Overview', count: null }, ...scopeTabs]
   const total = isCurrent ? list.total : null
   const scopeCount = scopeTabs.find((t) => t.id === scope)?.count ?? null
   const noun = scopeNoun(scope, total ?? 2)
-  const summary = !listActive
+  const summary = home
+    ? `Overview · every table${universe.markets.length + universe.states.length ? ` · ${[...universe.markets, ...universe.states].slice(0, 2).join(', ')}${universe.markets.length + universe.states.length > 2 ? ` +${universe.markets.length + universe.states.length - 2}` : ''}` : ''}`
+    : !listActive
     ? `${MOBILE_SCOPES.find((x) => x.key === scope)?.label ?? 'Records'} · Overview${filters.length ? ` · ${filters.length} ${filters.length === 1 ? 'filter' : 'filters'}` : ''}`
     : loading
     ? 'Reading the universe…'
@@ -711,7 +728,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
   )
 
   return (
-    <section ref={rootRef} className={cx('egdk', `is-${themeMode}`, narrow && 'is-narrow', wide && 'is-wide', !railShown && 'is-rail-hidden', narrow && railShown && 'is-rail-over', inspectorOpen && inspectorMode === 'dock' && 'has-dock', center === 'graph' && graphFull && 'is-graph-full')} data-scope={scope}>
+    <section ref={rootRef} className={cx('egdk', `is-${themeMode}`, narrow && 'is-narrow', wide && 'is-wide', (!railShown || home) && 'is-rail-hidden', home && 'is-home', narrow && railShown && 'is-rail-over', inspectorOpen && inspectorMode === 'dock' && 'has-dock', center === 'graph' && graphFull && 'is-graph-full')} data-scope={scope}>
       <header className="egdk-head">
         <div className="egdk-head__id">
           <h1>Entity Graph</h1>
@@ -729,9 +746,9 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
       </header>
 
       <div className="egdk-bar">
-        <LCIconButton icon="filter" label={railShown ? 'Collapse filters' : 'Show filters'} size="sm" selected={railShown} count={filters.length || null} onClick={() => { if (narrow) { setRailOverOpen((o) => !o); return } if (!railShown && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(railShown) }} className="egdk-bar__rail" />
-        <LCTabs items={scopeTabs} value={scope} onChange={(id) => switchScope(id as EntityScope)} label="Entity scope" variant="line" className="egdk-bar__tabs" />
-        <div className="egdk-bar__tools">
+        {!home ? <LCIconButton icon="filter" label={railShown ? 'Collapse filters' : 'Show filters'} size="sm" selected={railShown} count={filters.length || null} onClick={() => { if (narrow) { setRailOverOpen((o) => !o); return } if (!railShown && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(railShown) }} className="egdk-bar__rail" /> : null}
+        <LCTabs items={pageTabs} value={home ? 'overview' : scope} onChange={(id) => { if (id === 'overview') { setHome(true); setSelected(new Set()); setGraphFull(false) } else switchScope(id as EntityScope) }} label="Entity scope" variant="line" className="egdk-bar__tabs" />
+        {home ? null : <div className="egdk-bar__tools">
           {stackScopeSupported(scope) ? (
             <LCButton size="sm" variant="secondary" icon="target" onClick={() => openStack(selectedRows.map((r) => r.entityId))} title="Pin this cohort (or the selected rows) on a draft campaign — nothing is sent">
               Add to campaign
@@ -739,14 +756,17 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
           ) : null}
           <LCSegmented size="sm" label="View" value={center} onChange={(v) => { setCenter(v as DeskCenter); if (v !== 'graph') setGraphFull(false) }} options={[{ value: 'overview', icon: 'stats', label: 'Overview' }, { value: 'grid', icon: 'list', label: 'Grid' }, { value: 'graph', icon: 'layers', label: 'Graph' }]} />
           {center === 'graph' ? <LCIconButton icon="maximize" label="Fullscreen graph (Esc to exit)" size="sm" selected={graphFull} onClick={() => setGraphFull((f) => !f)} /> : null}
-        </div>
+        </div>}
       </div>
 
       <div className="egdk-body">
-        {narrow && !railShown ? <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed onCollapsedChange={() => setRailOverOpen(true)} scopeChipLabel={scopeChipLabel} />
+        {home ? null : narrow && !railShown ? <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} collapsed onCollapsedChange={() => setRailOverOpen(true)} scopeChipLabel={scopeChipLabel} />
           : <DeskFilterRail scope={scope} filters={filters} onChange={setFilters} scopeChipLabel={scopeChipLabel} collapsed={!railShown} onCollapsedChange={(c) => { if (narrow) { setRailOverOpen(!c); return } if (!c && graphFold) { setRailGraphOverride(true); return } setRailGraphOverride(false); setRailCollapsed(c) }} />}
         <main className="egdk-center" aria-label={center === 'grid' ? 'Records' : center === 'overview' ? 'Overview' : 'Relationship view'}>
-          {campaignId ? (
+          {home ? (
+            <EntityGraphUniverse globals={universe} onGlobalsChange={setUniverse} onDrill={drillFromUniverse} />
+          ) : null}
+          {!home && campaignId ? (
             <CampaignScopeBanner
               id={campaignId}
               summary={campaign}
@@ -756,7 +776,7 @@ export function EntityGraphDesk({ themeMode = 'dark', universalContext, onUniver
               onOpenGrid={center !== 'grid' ? () => setCenter('grid') : undefined}
             />
           ) : null}
-          {overviewMode ? (
+          {home ? null : overviewMode ? (
             <DeskOverviewMode scope={scope} filters={filters} onFiltersChange={onOverviewFilters} onOpenGrid={() => setCenter('grid')} campaign={campaign} universeTotal={scopeCount} />
           ) : center === 'grid' ? (
             <>

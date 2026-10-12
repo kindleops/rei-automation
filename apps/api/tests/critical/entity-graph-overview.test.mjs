@@ -57,7 +57,7 @@ function fakeQuery({ total = 1000, aggValue = 7, groups = [], tokens = [], extra
   const seen = []
   const query = async (sql, params) => {
     seen.push({ sql, params })
-    if (/information_schema\.columns/.test(sql)) return { rows: [...VIEW_COLUMNS, ...extraTables] }
+    if (/information_schema\.columns|pg_attribute/.test(sql)) return { rows: [...VIEW_COLUMNS, ...extraTables] }
     if (/from public\.inbox_thread_state/.test(sql)) return { rows: [{ property_id: 'p1', contacted: true, replied: true, positive: false, inbox_bucket: null }] }
     if (/from public\.campaign_target_graph\s+where last_outbound_at/.test(sql)) return { rows: [] }
     if (/from public\.acquisition_opportunities/.test(sql)) return { rows: [{ property_id: 'p1', acquisition_stage: 'offer_interest', opportunity_status: 'active' }] }
