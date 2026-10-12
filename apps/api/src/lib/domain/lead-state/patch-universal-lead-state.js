@@ -326,6 +326,74 @@ async function emitSuppressionAlert(payload) {
 /** Stages an automated thread write may not set directly (they follow the opportunity). */
 const AUTOMATION_GATED_STAGES = new Set(['offer', 'formal_contract', 'disposition', 'under_contract', 'prepared_to_close']);
 
+/**
+ * The residue of a cleared suppression outside inbox_thread_state, released
+ * with clearance provenance. Non-fatal and reported: the thread tuple is
+ * already cleared; a failure here is returned so the operator sees it.
+ *   - sms_suppression_list: every ACTIVE row for the phone → is_active=false
+ *     (the table has no provenance columns; provenance is on the thread's
+ *     audit events and on the message below);
+ *   - message_events[source_event_id]: is_opt_out=false, opt_out_keyword=null,
+ *     metadata.suppression_clearance = { type, actor, source_event_id, cleared_at }.
+ */
+export async function releaseSuppressionResidue(supabase, { phone = null, clearance = null, threadKey = null, now = new Date().toISOString() } = {}) {
+  const out = { ok: true, suppression_list_released: 0, message_event_cleared: false, errors: [] };
+  const e164 = clean(phone);
+  if (e164) {
+    try {
+      const { data, error } = await supabase
+        .from('sms_suppression_list')
+        .update({ is_active: false })
+        .eq('phone_e164', e164)
+        .eq('is_active', true)
+        .select('id');
+      if (error) throw error;
+      out.suppression_list_released = Array.isArray(data) ? data.length : 0;
+    } catch (error) {
+      out.ok = false;
+      out.errors.push(`sms_suppression_list:${error?.message || 'release_failed'}`);
+    }
+  }
+  const eventId = clean(clearance?.source_event_id);
+  if (eventId) {
+    try {
+      const { data: event, error: readError } = await supabase
+        .from('message_events')
+        .select('id,metadata,is_opt_out')
+        .eq('id', eventId)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (event) {
+        const metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+        const { error } = await supabase
+          .from('message_events')
+          .update({
+            is_opt_out: false,
+            opt_out_keyword: null,
+            metadata: {
+              ...metadata,
+              suppression_clearance: {
+                type: clearance?.type || 'operator_release',
+                actor: clearance?.actor || null,
+                source_event_id: eventId,
+                thread_key: threadKey,
+                prior_is_opt_out: event.is_opt_out === true,
+                cleared_at: now,
+              },
+            },
+          })
+          .eq('id', eventId);
+        if (error) throw error;
+        out.message_event_cleared = true;
+      }
+    } catch (error) {
+      out.ok = false;
+      out.errors.push(`message_events:${error?.message || 'clear_failed'}`);
+    }
+  }
+  return out;
+}
+
 export async function patchUniversalLeadState({
   threadKey,
   patch = {},
@@ -747,6 +815,19 @@ export async function patchUniversalLeadState({
     }
   }
 
+  // An operator clear also releases what the thread tuple does not hold
+  // (2026-10-12): the active sms_suppression_list row for the phone, and the
+  // is_opt_out / opt_out_keyword flags on the message the clearance names —
+  // send-now's isHardComplianceBlocked reads those over the last 50 messages.
+  let suppression_release = null;
+  if (suppressionWrite.action === 'clear') {
+    suppression_release = await releaseSuppressionResidue(supabase, {
+      phone: data?.canonical_e164 || previous?.canonical_e164 || (key.startsWith('+') ? key : null),
+      clearance: suppressionWrite.clearance || null,
+      threadKey: key,
+    });
+  }
+
   /**
    * A MANUAL STAGE MOVE MUST REACH THE CANONICAL OPPORTUNITY.
    *
@@ -899,6 +980,7 @@ export async function patchUniversalLeadState({
     stage_guards: stageGuards,
     suppression_guards: suppressionGuards,
     suppression_cancellation,
+    suppression_release,
     audit_event_ids: auditRows.map((row) => row.id),
     user_preferences: userPrefs,
     realtime_event: {

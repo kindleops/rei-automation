@@ -349,26 +349,52 @@ test("an operator clears the whole tuple or none of it", async () => {
   assert.deepEqual(detectSuppressionContradictions(row), []);
 });
 
-test("a clear that cannot be completed is refused rather than half-applied", () => {
+test("an operator clear over legacy residue completes it — never half-applied (2026-10-12)", () => {
   // A legacy row also carries disposition='suppressed'. Writing contactable
   // without also clearing the disposition would leave the row binding AND
-  // contactable — the exact 291-row shape.
+  // contactable — the exact 291-row shape. Before 2026-10-12 this was HELD,
+  // which is why releasing d4b295dd took three hand writes; the operator clear
+  // now resets the residue in the same write, so the row is fully contactable.
   const outcome = resolveSuppressionWrite({
-    previous: { ...SUPPRESSED_ROW, disposition: "suppressed" },
+    previous: { ...SUPPRESSED_ROW, disposition: "suppressed", inbox_bucket: "suppressed", last_intent: "opt_out" },
     patch: { contactability_status: "contactable" },
     change_source: "manual",
     operator: "operator:ryan",
   });
-  assert.equal(outcome.action, "hold");
-  assert.ok(outcome.guards.includes("partial_suppression_clear_blocked"));
-  assert.deepEqual(outcome.strip, ["contactability_status"]);
+  assert.equal(outcome.action, "clear");
+  assert.equal(outcome.fields.disposition, null);
+  assert.equal(outcome.fields.inbox_bucket, null);
+  assert.equal(outcome.fields.last_intent, null);
+  const after = { ...SUPPRESSED_ROW, disposition: "suppressed", inbox_bucket: "suppressed", last_intent: "opt_out", ...outcome.fields };
+  assert.deepEqual(detectSuppressionContradictions(after), []);
 });
 
-test("valid evidence and full operator authority still cannot buy a contradictory row", async () => {
-  // The evidence gate only ever fired on MISSING evidence, so valid evidence
-  // used to be a licence to write anything. Here an operator with evidence AND
-  // a clearance token asks for `contactable` on a row that would remain binding
-  // (inbox_bucket=suppressed). The write must not land.
+test("a patch that re-asserts the residue is never a clear (it stays a whole suppression)", () => {
+  const outcome = resolveSuppressionWrite({
+    previous: { ...SUPPRESSED_ROW, disposition: "suppressed" },
+    patch: { contactability_status: "contactable", disposition: "suppressed" },
+    change_source: "manual",
+    operator: "operator:ryan",
+  });
+  assert.notEqual(outcome.action, "clear");
+  assert.equal(outcome.action, "suppress");
+  assert.equal(outcome.fields.is_suppressed, true);
+});
+
+test("without operator authority, residue or not, nothing is cleared", () => {
+  const outcome = resolveSuppressionWrite({
+    previous: { ...SUPPRESSED_ROW, disposition: "suppressed", inbox_bucket: "suppressed" },
+    patch: { contactability_status: "contactable" },
+    change_source: "automation",
+  });
+  assert.equal(outcome.action, "hold");
+  assert.ok(outcome.guards.includes("suppression_clear_requires_operator_authority"));
+});
+
+test("valid evidence and full operator authority clear a stored inbox_bucket='suppressed' completely", async () => {
+  // An operator with evidence AND a clearance token asks for `contactable` on a
+  // row whose only binding residue is inbox_bucket=suppressed. The clear lands
+  // whole: the bucket is reset (the view derives it), nothing contradictory.
   const store = makeStore({
     initialRow: { thread_key: THREAD, inbox_bucket: "suppressed", is_suppressed: false },
   });
@@ -384,13 +410,9 @@ test("valid evidence and full operator authority still cannot buy a contradictor
     },
   });
 
-  assert.equal(result.blocked, true, "an incompletable clear must not be written");
-  assert.equal(result.reason, "partial_suppression_clear_blocked");
-  assert.equal(
-    store.row().contactability_status,
-    undefined,
-    "no contactability may be written at all"
-  );
+  assert.notEqual(result.blocked, true);
+  assert.equal(store.row().contactability_status, "contactable");
+  assert.equal(store.row().inbox_bucket, null);
   assert.deepEqual(detectSuppressionContradictions(store.row()), []);
 });
 

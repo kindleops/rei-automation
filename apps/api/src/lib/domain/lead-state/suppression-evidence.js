@@ -408,12 +408,28 @@ export function resolveSuppressionWrite({
       allowed = false;
     }
 
+    // A COMPLETE CLEAR LEAVES NO 'suppressed' RESIDUE (2026-10-12). Releasing
+    // the false opt-out on d4b295dd took three hand writes: the tuple, then the
+    // message's intent, then inbox_bucket / last_intent / disposition — because
+    // v_inbox_thread_state_buckets prefers the STORED inbox_bucket, the thread
+    // stayed in Suppressed after the tuple was cleared. The operator clear now
+    // also resets a stored inbox_bucket='suppressed' (NULL → the view derives
+    // it), disposition='suppressed' and last_intent='opt_out', in this write.
+    const residue = {};
+    if (previousShape.inbox_bucket === "suppressed") residue.inbox_bucket = null;
+    if (previousShape.disposition === "suppressed") residue.disposition = null;
+    if (lower(previous?.last_intent) === "opt_out") residue.last_intent = null;
+    const patchKeepsResidue = (field) => Object.prototype.hasOwnProperty.call(patch, field)
+      && lower(patch[field]) === (field === "last_intent" ? "opt_out" : "suppressed");
+    for (const field of Object.keys(residue)) if (patchKeepsResidue(field)) delete residue[field];
+
     // Would the row still be binding after a complete clear? Then this patch
-    // cannot express the clear (e.g. a legacy disposition='suppressed' remains)
-    // and half-clearing it would produce exactly the contradiction we are here
-    // to prevent.
+    // cannot express the clear (e.g. the patch itself re-asserts
+    // disposition='suppressed') and half-clearing it would produce exactly the
+    // contradiction we are here to prevent.
     const projectedAfterClear = normalizeSuppressionShape({
       ...(previous || {}),
+      ...residue,
       ...patch,
       is_suppressed: false,
     });
@@ -432,7 +448,9 @@ export function resolveSuppressionWrite({
         contactability_status: patchShape.contactability || CONTACTABILITY_CODES.CONTACTABLE,
         is_suppressed: false,
         suppressed_at: null,
+        ...residue,
       },
+      clearance: clearanceCheck.ok ? clearanceCheck.clearance : (manualOperator ? { type: "operator_release", actor: String(operator).trim(), source_event_id: null } : null),
       strip: [],
       guards,
     };
