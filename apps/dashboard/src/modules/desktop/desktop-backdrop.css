@@ -221,21 +221,33 @@ html[data-lc-vt]::view-transition { pointer-events: none; }
    sheen and edge. The environment reads through as depth, lit from above. */
 html.is-desktop-modern .dsk-pane__body {
   /* THE material (shared/lc/lc-tokens.css · --lc-pane-mat-*): every glass
-     surface in the product reads these same tokens */
-  background: var(--lc-pane-mat-bg) !important;
-  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
-  backdrop-filter: var(--lc-pane-mat-filter);
+     surface in the product reads these same tokens. The sheet is painted on
+     ::before, BEHIND the content — never on the body itself: an element with
+     backdrop-filter is a backdrop root, and a translucent backdrop root
+     leaves its content crisp under every nested glass (an inspector floating
+     in the pane could not frost what lies beneath it). With the blur on its
+     own layer the body is not a backdrop root, so in-pane glass samples the
+     whole opaque scene (room + pane + content) and frosts it for real. */
+  background: transparent !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  isolation: isolate;
   --dsk-blur: none;
   --dsk-glass: rgb(var(--dsk-fill) / calc(0.5 * var(--lg-alpha, 1)));
 }
-/* Light: real liquid glass — the colour flowing underneath must read through,
-   so the pane is a thin frost with a bright specular edge. */
-html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body {
-  background: var(--lc-pane-mat-bg) !important;
+html.is-desktop-modern .dsk-pane__body::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--lc-pane-mat-bg);
   -webkit-backdrop-filter: var(--lc-pane-mat-filter);
   backdrop-filter: var(--lc-pane-mat-filter);
-  --dsk-glass: rgb(var(--dsk-fill) / calc(0.5 * var(--lg-alpha, 1)));
 }
+/* Light: real liquid glass — the colour flowing underneath must read through,
+   so the pane is a thin frost with a bright specular edge (the light values
+   live in the --lc-pane-mat-* tokens). */
 html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / calc(0.9 * var(--lg-sheen, 1))), inset 0 0 0 1px rgb(255 255 255 / 0.6), 0 0 0 1px rgb(15 17 22 / calc(0.05 * var(--lc-glass-edge, 1))), 0 30px 80px -42px rgb(30 40 90 / 0.3);
 }
