@@ -78,6 +78,7 @@ import {
 } from "@/lib/discord/inbound-autopilot-queue.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
+import { unarchiveThreadOnInbound } from "@/lib/flows/inbound-thread-unarchive.js";
 import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { logInboundMessageEvent as logSupabaseInboundMessageEvent } from "@/lib/supabase/sms-engine.js";
 import { info, warn } from "@/lib/logging/logger.js";
@@ -1619,7 +1620,34 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       return failStepAndReturn("textgrid_inbound_failed_brain_lookup", err);
     }
 
+    // One un-archive for every inbound, whichever branch handles it.
+    const unarchiveOnInbound = async (branch) => {
+      try {
+        const supabase = runtimeDeps.getSupabaseClient?.();
+        if (!supabase || !inbound_from) return null;
+        return await (runtimeDeps.unarchiveThreadOnInbound || unarchiveThreadOnInbound)({
+          supabase,
+          inboundFrom: inbound_from,
+          messageId: extracted.message_id,
+          branch,
+          patch: runtimeDeps.patchUniversalLeadState || patchUniversalLeadState,
+          log: safeWarn,
+        });
+      } catch (unarchive_error) {
+        safeWarn("textgrid.inbound_conversation_unarchive_failed", {
+          message_id: extracted.message_id,
+          inbound_from,
+          branch,
+          error: unarchive_error?.message || "conversation_unarchive_failed",
+        });
+        return null;
+      }
+    };
+
     if (!context?.found) {
+      // An inbound with no seller context still un-archives its thread
+      // (542f27d2, 2026-10-07: archived 09-04, replied, stayed archived).
+      if (!dry_run) await unarchiveOnInbound("unknown_context");
       safeWarn("textgrid.inbound_context_not_found", {
         message_id: extracted.message_id,
         inbound_from,
@@ -1733,54 +1761,15 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       return { ok: true, stage: "after_brain_lookup", brain_id, master_owner_id };
     }
 
-    try {
-      const supabase = runtimeDeps.getSupabaseClient?.();
-      if (supabase && inbound_from) {
-        const { data: thread_state } = await supabase
-          .from("inbox_thread_state")
-          .select("is_archived,archive_scope")
-          .eq("thread_key", inbound_from)
-          .maybeSingle();
-
-        // A SELLER REPLY UN-ARCHIVES THE THREAD, whatever scope archived it.
-        //
-        // This used to require archive_scope === "conversation". Archiving from
-        // the inbox leaves archive_scope NULL, so the common case never
-        // un-archived: MEASURED 2026-09-10, 28 archived threads had a NULL
-        // scope AND an inbound last message, the most recent 4 hours old, while
-        // only 7 carried the "conversation" scope and their newest reply was
-        // from August. A live seller answering "yes, I want to sell" landed in
-        // a thread visible in no operational tab.
-        //
-        // identity_alignment is the one scope deliberately preserved: it
-        // archives a duplicate thread identity rather than a conversation, so
-        // resurrecting it on inbound would reintroduce the split-identity row
-        // the dedup exists to collapse.
-        const archive_scope_value = clean(thread_state?.archive_scope).toLowerCase();
-        if (thread_state?.is_archived === true && archive_scope_value !== "identity_alignment") {
-          await patchUniversalLeadState({
-            threadKey: inbound_from,
-            patch: {
-              is_archived: false,
-              archive_scope: null,
-            },
-            supabase,
-            meta: {
-              change_source: STATE_SOURCE_CODES.SYSTEM,
-              source_view: "inbound_auto_unarchive",
-              reason: "inbound_message_received",
-              prior_archive_scope: archive_scope_value || null,
-            },
-          });
-        }
-      }
-    } catch (unarchive_error) {
-      safeWarn("textgrid.inbound_conversation_unarchive_failed", {
-        message_id: extracted.message_id,
-        inbound_from,
-        error: unarchive_error?.message || "conversation_unarchive_failed",
-      });
-    }
+    // A SELLER REPLY UN-ARCHIVES THE THREAD, whatever scope archived it.
+    //
+    // This used to require archive_scope === "conversation". Archiving from
+    // the inbox leaves archive_scope NULL, so the common case never
+    // un-archived: MEASURED 2026-09-10, 28 archived threads had a NULL
+    // scope AND an inbound last message. identity_alignment is the one scope
+    // deliberately preserved (see inbound-thread-unarchive.js). The same
+    // helper also runs in the unknown-context branch above (2026-10-12).
+    await unarchiveOnInbound("known_context");
 
     // LEAD VISIBILITY (flagged, owner rule 3): the conversation is already back;
     // a linked ARCHIVED deal is restored only when the reply is deterministically
