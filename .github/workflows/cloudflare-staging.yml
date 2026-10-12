@@ -128,6 +128,8 @@ jobs:
           # Production: no dev banner. VITE_BACKEND_API_URL is intentionally
           # unset so the app uses the same-origin /api proxy.
           VITE_SHOW_DEBUG: "false"
+          # Owner 2026-10-11: ship the read-only research agent sidebar. Server-side auth/allowlist still gates every call; fixtures stay excluded (VITE_LC_AGENT_FIXTURES unset).
+          VITE_LC_AGENT_PROTOTYPE: "1"
           VITE_COMMIT_SHA: ${{ github.sha }}
           VITE_DASHBOARD_GIT_SHA: ${{ github.sha }}
 
@@ -182,6 +184,8 @@ jobs:
           # Production: no dev banner. VITE_BACKEND_API_URL is intentionally
           # unset so the app uses the same-origin /api proxy.
           VITE_SHOW_DEBUG: "false"
+          # Owner 2026-10-11: ship the read-only research agent sidebar. Server-side auth/allowlist still gates every call; fixtures stay excluded (VITE_LC_AGENT_FIXTURES unset).
+          VITE_LC_AGENT_PROTOTYPE: "1"
           VITE_COMMIT_SHA: ${{ github.sha }}
           VITE_DASHBOARD_GIT_SHA: ${{ github.sha }}
 
