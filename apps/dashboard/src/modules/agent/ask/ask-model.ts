@@ -32,6 +32,8 @@ export interface AskAuditRow { at: string | null; kind: string; name: string | n
 export interface AskCall { model: string; cost_usd: number | null; latency_ms: number | null; stop: string | null; input_tokens: number | null; output_tokens: number | null; route: string | null }
 
 export type AskRunState = 'running' | 'completed' | 'failed' | 'refused' | 'cancelled'
+/** The server's persisted WHY for a refused / failed run (research_run.doc.refusal): codes only. */
+export interface AskRefusal { code: string; layer: string | null; reason: string | null; phase: string | null; transport: string | null; billed: string | null; route: string | null; binding_cap: string | null; after_ms: number | null }
 export interface AskRun {
   run_id: string
   state: AskRunState
@@ -45,6 +47,7 @@ export interface AskRun {
   answer: { answer_md: string; property_ids: string[]; persisted?: boolean } | null
   calls: AskCall[]
   audit: AskAuditRow[]
+  refusal?: AskRefusal | null
 }
 
 /* ── failures: a clean state per class, never "something went wrong" ──── */
@@ -359,11 +362,103 @@ export function outcomeCopy(run: Pick<AskRun, 'state' | 'outcome'>): string | nu
     case 'AGENT_DISABLED': return 'The agent was switched off during the run.'
     case 'MODEL_REFUSAL': return 'The model declined to answer.'
     case 'PROMPT_HARD_CAP': return 'The gathered evidence grew past the prompt cap.'
-    case 'MODEL_UNRESOLVED': return 'No listed, priced model is resolved on the server.'
+    case 'MODEL_UNRESOLVED': case 'MODELS_UNRESOLVED': case 'DEFAULT_MODEL_UNRESOLVED': return 'No listed, priced model is resolved on the server.'
     default:
       if (/BUDGET|CAP_/.test(o)) return `A spend cap refused the run (${o}).`
       return run.state === 'completed' ? null : `${run.state === 'refused' ? 'Refused' : 'Failed'} · ${o}`
   }
+}
+
+/* ── run failures: one truthful state per class (R1, 10-12) ─────────────────
+ * A refused / failed run used to surface as "Refused · PROVIDER_TIMEOUT" — the
+ * operator could not tell a provider outage from a spend cap or a misconfigured
+ * key. Each class below has its own title and plain-language cause; the server's
+ * persisted refusal detail (reason / phase / transport) is shown as the fine print. */
+
+export type RunFailureKind = 'timeout' | 'provider' | 'configuration' | 'permission' | 'budget'
+export interface RunFailure { kind: RunFailureKind; title: string; message: string; code: string; detail: string | null }
+
+export const RUN_FAILURE_TITLE: Record<RunFailureKind, string> = {
+  timeout: 'Model provider timed out',
+  provider: 'Model provider error',
+  configuration: 'Agent configuration problem',
+  permission: 'Refused by a permission rule',
+  budget: 'Spend budget reached',
+}
+
+const TIMEOUT_COPY: Record<string, string> = {
+  PROVIDER_CONNECT_TIMEOUT: 'The server could not open a connection to the model provider in time. Nothing was answered; the reserved spend stays counted until it is reconciled.',
+  PROVIDER_HEADERS_TIMEOUT: 'The model provider accepted the request but did not start answering in time. The reserved spend stays counted until it is reconciled.',
+  PROVIDER_READ_TIMEOUT: 'The answer was still streaming when the 90-second per-call limit ended it.',
+  PROVIDER_STREAM_STALLED: 'The model provider stopped sending mid-answer, so the call was ended.',
+  PROVIDER_TIMEOUT: 'The model call ran out of time before an answer arrived.',
+  RUN_TIMEOUT: 'The run hit its 4-minute limit.',
+}
+const PROVIDER_COPY: Record<string, string> = {
+  PROVIDER_UNREACHABLE: 'The server could not reach the model provider (network).',
+  PROVIDER_STREAM_INTERRUPTED: 'The connection to the model provider broke mid-answer.',
+  PROVIDER_UNAVAILABLE: 'The model provider is overloaded or unavailable right now.',
+  PROVIDER_RATE_LIMITED: 'The model provider is rate-limiting this key; try again shortly.',
+  PROVIDER_BAD_REQUEST: 'The model provider rejected the request.',
+  MODEL_REJECTED_BY_API: 'The model provider no longer accepts the resolved model; the server will re-resolve models on the next run.',
+  PROVIDER_ABORTED: 'The model call was cancelled.',
+  PROVIDER_ERROR: 'The model provider returned an unexpected error.',
+}
+const CONFIG_COPY: Record<string, string> = {
+  MODELS_UNRESOLVED: 'The server could not list the models its key can use, so no model can be called.',
+  DEFAULT_MODEL_UNRESOLVED: 'None of the configured model candidates is listed and priced for this key.',
+  MODEL_UNRESOLVED: 'No listed, priced model is resolved on the server.',
+  PROVIDER_KEY_MISSING: 'The model provider key is not configured on the server.',
+  PROVIDER_AUTH: 'The model provider rejected the server\'s API key.',
+  PROVIDER_FORBIDDEN: 'The model provider key is not permitted to use this model.',
+  UNPRICED_MODEL: 'The resolved model has no price entry, so it is never spent on.',
+  MODE_NOT_READ: 'The agent mode ceiling is not read-only, so research is refused.',
+  RESEARCH_DISABLED: 'Research is switched off on this server.',
+  AGENT_DISABLED: 'The agent kill switch is off.',
+  AGENT_RESEARCH_DISABLED: 'Research spending is switched off in the database.',
+  AGENT_STORE_UNAVAILABLE: 'The agent\'s audit / budget store is unavailable, so no call is made.',
+  REGISTRY_NOT_READ_ONLY: 'The tool registry is not sealed read-only.',
+}
+const PERMISSION_COPY: Record<string, string> = {
+  IDENTITY_REQUIRED: 'A verified, named operator session is required.',
+  PII_RESIDUAL: 'Contact data could not be removed from the request, so it was not sent.',
+  MODEL_REFUSAL: 'The model declined to answer this question.',
+}
+const REASON_COPY: Record<string, string> = {
+  PROVIDER_AUTH: 'the provider rejected the API key',
+  PROVIDER_FORBIDDEN: 'the key is not permitted',
+  PROVIDER_UNREACHABLE: 'the provider was unreachable',
+  PROVIDER_KEY_MISSING: 'no API key is configured',
+  LIST_FAILED: 'the model listing failed',
+  NO_CANDIDATE_QUALIFIED: 'no configured candidate qualified',
+}
+
+function failureDetail(run: Pick<AskRun, 'refusal'>): string | null {
+  const r = run.refusal
+  if (!r) return null
+  const parts: string[] = []
+  if (r.reason) parts.push(REASON_COPY[r.reason] ? `${REASON_COPY[r.reason]} (${r.reason})` : r.reason)
+  if (r.phase) parts.push(r.phase === 'connect' ? 'before the provider answered' : r.phase === 'stream' ? 'while the answer streamed' : r.phase)
+  if (r.transport) parts.push(`transport ${r.transport}`)
+  if (r.after_ms != null) parts.push(`after ${dur(r.after_ms)}`)
+  if (r.binding_cap) parts.push(`cap ${r.binding_cap}`)
+  return parts.length ? parts.join(' · ') : null
+}
+
+/** The failure class of a terminal, unsuccessful run — null for completed / cancelled / running. */
+export function runFailureOf(run: Pick<AskRun, 'state' | 'outcome' | 'refusal'> | null | undefined): RunFailure | null {
+  if (!run || (run.state !== 'refused' && run.state !== 'failed')) return null
+  const code = String(run.outcome || run.refusal?.code || '').toUpperCase()
+  const detail = failureDetail(run)
+  const mk = (kind: RunFailureKind, message: string): RunFailure => ({ kind, title: RUN_FAILURE_TITLE[kind], message, code, detail })
+  if (TIMEOUT_COPY[code]) return mk('timeout', TIMEOUT_COPY[code])
+  if (/^AGENT_(SPEND|ESCALATION)_CAP_/.test(code) || code === 'DAILY_RUN_CAP') return mk('budget', `A spend cap refused the model call before anything was spent${run.refusal?.binding_cap ? ` (${run.refusal.binding_cap})` : ''}. It resets with the UTC day / billing cycle, or the owner can raise it.`)
+  if (CONFIG_COPY[code]) return mk('configuration', CONFIG_COPY[code])
+  if (PERMISSION_COPY[code]) return mk('permission', PERMISSION_COPY[code])
+  if (PROVIDER_COPY[code]) return mk('provider', PROVIDER_COPY[code])
+  if (code.startsWith('PROVIDER_')) return mk('provider', PROVIDER_COPY.PROVIDER_ERROR)
+  if (code.startsWith('PROMPT_') || code === 'MAX_MODEL_CALLS') return null // limits: the outcome note explains them
+  return mk('provider', `The run stopped (${code || 'unknown'}).`)
 }
 
 export const isTerminalRun = (run: Pick<AskRun, 'state'> | null | undefined) => Boolean(run && run.state !== 'running')

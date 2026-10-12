@@ -16,7 +16,7 @@
  * an owner dossier (its properties) and the Priority inbox (HOT LEADS).
  */
 import { callBackend } from '../../../lib/api/backendClient'
-import { classifyFailure, type AskAuditRow, type AskCall, type AskFailure, type AskRun, type AskRunState, type AskStatus, type AskTool } from './ask-model'
+import { classifyFailure, type AskAuditRow, type AskRefusal, type AskCall, type AskFailure, type AskRun, type AskRunState, type AskStatus, type AskTool } from './ask-model'
 
 const BASE = '/api/cockpit/agent/live/ask'
 export const ASK_ENDPOINTS = { status: BASE, ask: BASE, run: (id: string) => `${BASE}/${encodeURIComponent(id)}` } as const
@@ -54,6 +54,13 @@ export function normalizeStatus(body: unknown): AskStatus {
 }
 
 const STATES: AskRunState[] = ['running', 'completed', 'failed', 'refused', 'cancelled']
+function normalizeRefusal(v: unknown): AskRefusal | null {
+  const r = obj(v)
+  const code = str(r.code)
+  if (!code) return null
+  return { code, layer: str(r.layer), reason: str(r.reason), phase: str(r.phase), transport: str(r.transport), billed: str(r.billed), route: str(r.route), binding_cap: str(r.binding_cap), after_ms: numOrNull(r.after_ms) }
+}
+
 export function normalizeRun(body: unknown): AskRun | null {
   const b = obj(body)
   const run_id = str(b.run_id)
@@ -74,6 +81,7 @@ export function normalizeRun(body: unknown): AskRun | null {
     answer: typeof ans.answer_md === 'string' ? { answer_md: ans.answer_md, property_ids: arr(ans.property_ids).map(String), persisted: ans.persisted !== false } : null,
     calls: arr<Record<string, unknown>>(b.calls).map((x): AskCall => ({ model: String(x.model ?? ''), cost_usd: numOrNull(x.cost_usd), latency_ms: numOrNull(x.latency_ms), stop: str(x.stop), input_tokens: numOrNull(x.input_tokens), output_tokens: numOrNull(x.output_tokens), route: str(x.route) })),
     audit: arr<Record<string, unknown>>(b.audit).map((x): AskAuditRow => ({ at: str(x.at), kind: String(x.kind ?? ''), name: str(x.name), params_sha256: str(x.params_sha256), rows_returned: numOrNull(x.rows_returned), cost_usd: numOrNull(x.cost_usd), latency_ms: numOrNull(x.latency_ms), outcome: str(x.outcome) })),
+    refusal: normalizeRefusal(b.refusal),
   }
 }
 

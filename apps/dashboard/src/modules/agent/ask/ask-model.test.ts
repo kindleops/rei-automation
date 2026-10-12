@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   budgetMeter, buildTimeline, citationsOf, classifyFailure, composeAsk, composerKeyAction, escalationOf, followUpsOf, globalKeyAction, isBlockingFailure,
-  mentionAt, modelIndicator, parseSlash, removeMentionText, shortModelName, slashMatches, summarizeTimeline, SLASH_COMMANDS,
+  mentionAt, modelIndicator, parseSlash, removeMentionText, runFailureOf, shortModelName, slashMatches, summarizeTimeline, SLASH_COMMANDS,
   type AskRun, type AskStatus, type MentionChip,
 } from './ask-model'
 import { normalizeRun, normalizeStatus } from './ask-transport'
@@ -167,5 +167,39 @@ describe('shortcuts', () => {
     expect(globalKeyAction({ key: 'k', metaKey: true }, { insideAgent: false })).toBeNull()
     expect(globalKeyAction({ key: 'k', ctrlKey: true }, { insideAgent: true })).toBe('focus-composer')
     expect(globalKeyAction({ key: 'l' }, { insideAgent: false })).toBeNull()
+  })
+})
+
+describe('run failures (R1 10-12): provider, configuration, permission, budget and timeout are distinct', () => {
+  const r = (state: string, outcome: string, refusal: Record<string, unknown> | null = null) => normalizeRun({ run_id: 'ask_failfail1234', state, outcome, refusal })!
+  it('classifies each class with its own title and the persisted refusal detail', () => {
+    const t = runFailureOf(r('refused', 'PROVIDER_CONNECT_TIMEOUT', { code: 'PROVIDER_CONNECT_TIMEOUT', phase: 'connect', transport: 'UND_ERR_CONNECT_TIMEOUT', after_ms: 10500, billed: 'unknown' }))!
+    expect(t.kind).toBe('timeout')
+    expect(t.title).toBe('Model provider timed out')
+    expect(t.detail).toBe('before the provider answered · transport UND_ERR_CONNECT_TIMEOUT · after 11s')
+    expect(runFailureOf(r('refused', 'PROVIDER_READ_TIMEOUT'))!.kind).toBe('timeout')
+    expect(runFailureOf(r('refused', 'PROVIDER_STREAM_STALLED'))!.kind).toBe('timeout')
+    expect(runFailureOf(r('failed', 'RUN_TIMEOUT'))!.kind).toBe('timeout')
+    const c = runFailureOf(r('refused', 'MODELS_UNRESOLVED', { code: 'MODELS_UNRESOLVED', reason: 'PROVIDER_AUTH' }))!
+    expect(c.kind).toBe('configuration')
+    expect(c.detail).toBe('the provider rejected the API key (PROVIDER_AUTH)')
+    expect(runFailureOf(r('refused', 'DEFAULT_MODEL_UNRESOLVED'))!.kind).toBe('configuration')
+    expect(runFailureOf(r('refused', 'PROVIDER_AUTH'))!.kind).toBe('configuration')
+    expect(runFailureOf(r('refused', 'IDENTITY_REQUIRED'))!.kind).toBe('permission')
+    expect(runFailureOf(r('refused', 'PII_RESIDUAL'))!.kind).toBe('permission')
+    const b = runFailureOf(r('refused', 'AGENT_SPEND_CAP_DAY', { code: 'AGENT_SPEND_CAP_DAY', binding_cap: 'day_usd' }))!
+    expect(b.kind).toBe('budget')
+    expect(b.message).toMatch(/day_usd/)
+    expect(runFailureOf(r('refused', 'PROVIDER_UNAVAILABLE'))!.kind).toBe('provider')
+    expect(runFailureOf(r('refused', 'PROVIDER_STREAM_INTERRUPTED'))!.kind).toBe('provider')
+    expect(runFailureOf(r('refused', 'PROVIDER_SOMETHING_NEW'))!.kind).toBe('provider')
+    const titles = new Set(['PROVIDER_CONNECT_TIMEOUT', 'PROVIDER_UNAVAILABLE', 'MODELS_UNRESOLVED', 'IDENTITY_REQUIRED', 'AGENT_SPEND_CAP_CYCLE'].map((o) => runFailureOf(r('refused', o))!.title))
+    expect(titles.size).toBe(5)
+  })
+  it('completed, cancelled and running runs are never failures; limit stops keep their outcome note', () => {
+    expect(runFailureOf(r('completed', 'completed'))).toBeNull()
+    expect(runFailureOf(r('cancelled', 'CANCELLED'))).toBeNull()
+    expect(runFailureOf(r('running', ''))).toBeNull()
+    expect(runFailureOf(r('failed', 'PROMPT_HARD_CAP'))).toBeNull()
   })
 })

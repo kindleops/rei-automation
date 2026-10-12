@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { cx } from '../../../../shared/lc'
-import { buildTimeline, citationsOf, dur, escalationOf, FAILURE_TITLE, followUpsOf, outcomeCopy, shortModelName, sourcesOf, SLASH_COMMANDS, summarizeTimeline, usd, type AskTool, type Citation, type FollowUp, type MentionChip, type TimelineStep } from '../ask-model'
+import { buildTimeline, citationsOf, dur, escalationOf, FAILURE_TITLE, followUpsOf, outcomeCopy, runFailureOf, shortModelName, sourcesOf, SLASH_COMMANDS, summarizeTimeline, usd, type AskTool, type Citation, type FollowUp, type MentionChip, type TimelineStep } from '../ask-model'
 import type { AskTurn } from '../ask-store'
 import { AskMarkdown } from '../AskMarkdown'
 import { Glyph, KIND_GLYPH } from './glyphs'
@@ -28,7 +28,9 @@ export function AskTurnView({ turn, tools, labels, reduced, now, handlers }: { t
   const shown = useReveal(answer, Boolean(turn.fresh) && !reduced, handlers.onRevealed)
   const cites = citationsOf(run, turn.chips, labels)
   const follow = followUpsOf(run, turn.chips, turn.command)
-  const note = run ? outcomeCopy(run) : null
+  const failure = runFailureOf(run)
+  // a classified failure replaces the generic outcome line: one truthful state, never both
+  const note = run && !failure ? outcomeCopy(run) : null
   const cmd = turn.command ? SLASH_COMMANDS.find((c) => c.id === turn.command) : null
   const elapsed = run?.latency_ms ?? (running ? now - turn.sentAt : null)
   return (
@@ -60,6 +62,14 @@ export function AskTurnView({ turn, tools, labels, reduced, now, handlers }: { t
           <AskMarkdown md={shown} citeIds={run?.answer?.property_ids ?? []} onCite={(id) => handlers.onOpen(`/entity-graph/property/${encodeURIComponent(id)}`)} labelOf={(id) => labels[id] ?? null} />
           {shown.length < answer.length ? <span className="ak-caret" aria-hidden="true" /> : null}
           {run?.answer?.persisted === false ? <p className="ak-note">This answer could not be stored on the server; it is shown once.</p> : null}
+        </div>
+      ) : null}
+
+      {failure ? (
+        <div className={cx('ak-fail', `is-${failure.kind}`)} role="alert" data-failure={failure.kind}>
+          <b>{failure.title}</b>
+          <span>{failure.message}</span>
+          <small className="ak-fail__code">{failure.code}{failure.detail ? ` · ${failure.detail}` : ''}</small>
         </div>
       ) : null}
 

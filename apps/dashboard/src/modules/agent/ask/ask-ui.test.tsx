@@ -52,6 +52,16 @@ describe('run view', () => {
     const steps = buildTimeline(normalizeRun({ run_id: 'ask_x1234567', state: 'running', audit: [{ kind: 'escalation', name: 'claude-sonnet-5-5', outcome: 'contradiction_analysis' }] }), [])
     expect(text(<Timeline steps={steps} running elapsed={1000} reduced />)).toContain('Escalated to Sonnet 5.5')
   })
+  it('a refused run shows its classified failure (title, cause, code + detail) instead of a bare code', () => {
+    const refused = run('refused', { outcome: 'PROVIDER_CONNECT_TIMEOUT', refusal: { code: 'PROVIDER_CONNECT_TIMEOUT', phase: 'connect', transport: 'UND_ERR_CONNECT_TIMEOUT' } })
+    const t = text(<AskTurnView turn={turn({ phase: 'done', run: refused })} tools={[]} labels={{}} reduced now={Date.now()} handlers={handlers} />)
+    expect(t).toContain('Model provider timed out')
+    expect(t).toContain('could not open a connection to the model provider')
+    expect(t).toContain('PROVIDER_CONNECT_TIMEOUT · before the provider answered · transport UND_ERR_CONNECT_TIMEOUT')
+    expect(t).not.toContain('Refused · PROVIDER_CONNECT_TIMEOUT')
+    const budget = text(<AskTurnView turn={turn({ phase: 'done', run: run('refused', { outcome: 'AGENT_SPEND_CAP_DAY' }) })} tools={[]} labels={{}} reduced now={Date.now()} handlers={handlers} />)
+    expect(budget).toContain('Spend budget reached')
+  })
   it('a failed send shows the failure class, not a generic error', () => {
     const t = text(<AskTurnView turn={turn({ phase: 'failed', run: null, failure: classifyFailure(429, 'DAILY_RUN_CAP', 'Daily agent run limit (40) reached for this operator.') })} tools={[]} labels={{}} reduced now={Date.now()} handlers={handlers} />)
     expect(t).toContain('Slow down')
