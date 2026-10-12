@@ -186,6 +186,10 @@ export const CANONICAL_INBOX_COUNT_KEYS = [
   // archived, but nothing ever counted the archived side of that predicate.
   "snoozed",
   "archived",
+  // Round 9 lanes (v_inbox_bucket_counts.unclear / .price_gap): the chip is
+  // the count of the same flag the list filters on (in_unclear / in_price_gap).
+  "unclear",
+  "price_gap",
   // "scheduled" counts MESSAGES in send_queue, not threads.
   //
   // It briefly read inbox_thread_state.next_scheduled_for -- a single per-thread

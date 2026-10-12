@@ -49,3 +49,5 @@ export type InboxViewSelectValue =
   | 'cold'
   | 'dead'
   | 'all_messages'
+  | 'unclear'
+  | 'price_gap'

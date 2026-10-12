@@ -89,6 +89,11 @@ const BUCKET_FLAG_COLUMNS = {
   unlinked: "in_unlinked",
   // A lens over four buckets, not a bucket of its own.
   active: "in_active",
+  // Round 9 lanes (2026-10-08): counted by v_inbox_bucket_counts but, until
+  // 2026-10-12, unlistable — filter=unclear / filter=price_gap had no flag
+  // column and failed closed with []. Non-alerting lanes: no sound, no push.
+  unclear: "in_unclear",
+  price_gap: "in_price_gap",
 };
 
 export function resolveBucketFlagColumn(filter) {

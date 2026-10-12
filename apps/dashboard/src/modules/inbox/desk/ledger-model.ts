@@ -22,7 +22,7 @@ import type { LCTone } from '../../../shared/lc'
 /* ── lenses ─────────────────────────────────────────────────────────────── */
 
 export type DeskPrimaryLens = 'priority' | 'new_replies' | 'needs_review' | 'waiting' | 'follow_up'
-export type DeskMoreLens = 'scheduled' | 'snoozed' | 'suppressed' | 'cold' | 'dead' | 'archived' | 'all_conversations'
+export type DeskMoreLens = 'unclear' | 'price_gap' | 'scheduled' | 'snoozed' | 'suppressed' | 'cold' | 'dead' | 'archived' | 'all_conversations'
 export type DeskLens = DeskPrimaryLens | DeskMoreLens
 /** `filtered` is its own lens: advanced filters never borrow a bucket's name or count. */
 export type DeskLensKey = DeskLens | 'filtered'
@@ -67,6 +67,18 @@ export const PRIMARY_LENSES: readonly DeskLensDef[] = [
 ]
 
 export const MORE_LENSES: readonly DeskLensDef[] = [
+  // Round 9 lanes (2026-10-08, listable 2026-10-12). NON-ALERTING by design:
+  // secondary lenses carry no badge sound and no push — see NON_ALERTING_LENSES.
+  {
+    id: 'unclear', label: 'Unclear', countKey: 'unclear', view: 'unclear',
+    definition: 'The seller replied and the classifier could not tell what they meant — read it when you have a moment',
+    empty: { title: 'Nothing unclear', body: 'Every reply was understood.' },
+  },
+  {
+    id: 'price_gap', label: 'Price gap', countKey: 'price_gap', view: 'price_gap',
+    definition: 'The seller named a price far from our number — a person decides whether to bridge it',
+    empty: { title: 'No price gaps', body: 'No seller ask is far outside our range.' },
+  },
   {
     id: 'scheduled', label: 'Scheduled', countKey: 'scheduled', view: 'scheduled',
     definition: 'Messages queued to send later (counts sends, not conversations)',
@@ -120,8 +132,13 @@ const VIEW_TO_LENS: Record<string, DeskLens> = {
   cold: 'cold', cold_no_response: 'cold',
   dead: 'dead', wrong_number: 'dead',
   archived: 'archived',
+  unclear: 'unclear',
+  price_gap: 'price_gap',
   all: 'all_conversations', all_conversations: 'all_conversations', all_messages: 'all_conversations',
 }
+
+/** Lenses that never chime, badge-sound or push (round 9): a quiet read, not an alert. */
+export const NON_ALERTING_LENSES: ReadonlySet<DeskLens> = new Set<DeskLens>(['unclear', 'price_gap'])
 
 /** The lens a view filter belongs to (aliases folded). Unknown views read as All. */
 export function resolveDeskLens(view: string | null | undefined, filtered = false): DeskLensKey {

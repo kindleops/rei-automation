@@ -329,6 +329,8 @@ export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
       all: n("in_all"),
       unlinked: n("in_unlinked"),
       active: n("in_active"),
+      unclear: n("in_unclear"),
+      price_gap: n("in_price_gap"),
       unread: rows.filter((row) => row.in_all && row.is_read !== true).length,
       scheduled: 0,
     };
