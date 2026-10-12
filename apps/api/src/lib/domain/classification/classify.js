@@ -42,6 +42,7 @@ import {
 // multilingual wrong-person / sold / not-for-sale / hostile / auto-reply
 // detectors, explicit denials no longer held by ownership context, factual
 // commitment and the language triple on every result.
+import { canonicalizeAffirmativeSlang } from "@/lib/domain/classification/affirmative-slang.js";
 export const CLASSIFY_VERSION = "classify_js_context_v3_reply_disposition";
 export { CONTEXT_VERSION, validateConversationContext };
 
@@ -7937,7 +7938,9 @@ Rules:
 const AI_CONFIDENCE_THRESHOLD = 0.82;
 
 export async function classify(message, brain_item = null, options = {}) {
-  const text = cleanMessage(message);
+  // A whole-message slang yes ("Yeppers", "yessir!", "Yuppers 👍") is
+  // classified as "yes" (affirmative-slang.js); every other text is unchanged.
+  const text = canonicalizeAffirmativeSlang(cleanMessage(message));
   const heuristicOnly = options?.heuristicOnly === true;
   const conversation_context =
     options?.conversation_context ?? options?.context ?? null;

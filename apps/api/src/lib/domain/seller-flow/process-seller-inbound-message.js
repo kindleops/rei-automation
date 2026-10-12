@@ -4,6 +4,7 @@ import { buildContextResolutionResult } from "@/lib/domain/context/context-resol
 import { runContactResolutionPhase } from "@/lib/domain/seller-flow/resolve-contact-outcome-phase.js";
 import { probeDealContextAmbiguity as probeDealContextAmbiguityDefault } from "@/lib/domain/deal-context/deal-context-service.js";
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
+import { canonicalizeAffirmativeSlang } from "@/lib/domain/classification/affirmative-slang.js";
 import { buildConversationContext } from "@/lib/domain/classification/build-conversation-context.js";
 import {
   executeInboundAutomationDecision,
@@ -712,6 +713,9 @@ export async function processSellerInboundMessage({
   channelSuppressionCheck = null,
 } = {}) {
   const supabase = supabaseClient || runtimeDeps.getSupabaseClient?.();
+  // Classification / routing reads a whole-message slang yes as "yes"
+  // ("Yeppers", 2026-10-12). The stored and displayed body stays `message`.
+  const routing_message = canonicalizeAffirmativeSlang(message);
 
   // ── Supabase-native inbound context hydration (regression fix) ─────────
   // The legacy Podio-derived context resolver went dark when Podio was
@@ -967,7 +971,7 @@ export async function processSellerInboundMessage({
       conversation_context = null;
     }
 
-    classification = await runtimeDeps.classify(message, conversationBrain, {
+    classification = await runtimeDeps.classify(routing_message, conversationBrain, {
       heuristicOnly: true,
       conversation_context,
     });
@@ -998,7 +1002,7 @@ export async function processSellerInboundMessage({
     }
     try {
       const applied = applySellerAutopilotV2Overlay(classification, {
-        message,
+        message: routing_message,
         conversation_context: autopilot_v2_context,
         stage_before: stageBefore,
       });
@@ -1884,7 +1888,7 @@ export async function processSellerInboundMessage({
       });
       autopilot_v2_plan = planSellerAutopilotV2({
         classification,
-        message,
+        message: routing_message,
         conversation_context: autopilot_v2_context,
         stage_before: effective_stage_before,
         asking_price_this_turn: autopilot_v2_ask_now,
@@ -1925,7 +1929,7 @@ export async function processSellerInboundMessage({
       let mf_door_comps = [];
       const plan_input = {
         classification,
-        message,
+        message: routing_message,
         conversation_context: autopilot_v2_context,
         stage_before: effective_stage_before,
         known_facts: known_facts_v3,
