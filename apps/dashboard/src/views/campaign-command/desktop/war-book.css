@@ -13,14 +13,11 @@ html.is-desktop-modern[data-nexus-theme] .cc3 {
   --cc3-plane-edge: var(--lc-glass-line);
   --cc3-line-2: var(--lc-glass-line-hi);
 }
-html.is-desktop-modern .cc3-plane,
-html.is-desktop-modern .cc3-rail,
-html.is-desktop-modern .cc3-hero {
-  background-image: linear-gradient(180deg, var(--lc-glass-tint), transparent 42%);
-}
+/* no accent tint on glass; a selected campaign is a neutral lift + the
+   accent as an outline only */
 html.is-desktop-modern .cc3-row.is-selected {
-  background: rgba(var(--lc-select-rgb), 0.1);
-  box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.34);
+  background: var(--lc-glass-selected-fill);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-selected-line);
 }
 
 /* ── book instrument (mission rail rows) ───────────────────────────────── */
@@ -71,7 +68,6 @@ html.is-desktop-modern .cc3-inst-room {
   border: 1px solid var(--lc-glass-line);
   border-radius: var(--lc-r-lg);
   background: var(--lc-glass-card);
-  background-image: linear-gradient(180deg, var(--lc-glass-tint), transparent 50%);
   box-shadow: var(--lc-glass-sheen), var(--lc-d2-shadow);
   overflow: hidden;
 }

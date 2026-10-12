@@ -220,22 +220,20 @@ html[data-lc-vt]::view-transition { pointer-events: none; }
    card), driven by the operator's material: blur, saturation, opacity,
    sheen and edge. The environment reads through as depth, lit from above. */
 html.is-desktop-modern .dsk-pane__body {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / calc(0.025 * var(--lg-sheen, 1))), rgb(255 255 255 / 0) 34%),
-    rgb(var(--dsk-fill) / calc(0.54 * var(--lg-alpha, 1))) !important;
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(var(--lg-sat, 1.35));
-  backdrop-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(var(--lg-sat, 1.35));
+  /* THE material (shared/lc/lc-tokens.css · --lc-pane-mat-*): every glass
+     surface in the product reads these same tokens */
+  background: var(--lc-pane-mat-bg) !important;
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
   --dsk-blur: none;
   --dsk-glass: rgb(var(--dsk-fill) / calc(0.5 * var(--lg-alpha, 1)));
 }
 /* Light: real liquid glass — the colour flowing underneath must read through,
    so the pane is a thin frost with a bright specular edge. */
 html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / calc(0.34 * var(--lg-sheen, 1))), rgb(255 255 255 / 0) 42%),
-    rgb(var(--dsk-fill) / calc(0.44 * var(--lg-alpha, 1))) !important;
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(calc(var(--lg-sat, 1.35) * 1.15));
-  backdrop-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(calc(var(--lg-sat, 1.35) * 1.15));
+  background: var(--lc-pane-mat-bg) !important;
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
   --dsk-glass: rgb(var(--dsk-fill) / calc(0.5 * var(--lg-alpha, 1)));
 }
 html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane {

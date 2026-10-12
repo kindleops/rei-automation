@@ -11,26 +11,17 @@
   min-height: 0;
   color: var(--lc-ink-1);
   border-radius: var(--lc-r-plane);
-  /* LIQUID GLASS — the menu family's edge, sheen, tint and depth on every
-     inspector. Float fill stays near-opaque (--lc-mat-float-bg): a float sits
-     over app content INSIDE a pane, where Chromium cannot frost what scrolls
-     beneath it, so any translucency would ghost crisp text through. */
-  background: var(--lc-sheen-wash), linear-gradient(var(--lc-glass-tint), var(--lc-glass-tint)), var(--lc-mat-float-bg);
-  -webkit-backdrop-filter: var(--lc-glass-filter-strong);
-  backdrop-filter: var(--lc-glass-filter-strong);
-  box-shadow: var(--lc-glass-sheen), inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-shadow-menu);
+  /* LIQUID GLASS — THE pane material (Settings → Liquid Glass), the same
+     sheet every workspace pane is made of: its fill, blur, saturation, sheen
+     and edge, so changing the Material repaints every inspector with the
+     panes. No accent tint. Floating over content inside a pane it frosts what
+     lies beneath (nested backdrop-filter runs inside the pane's backdrop
+     root); docked or shell-level it frosts the room. */
+  background: var(--lc-pane-mat-bg);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
+  box-shadow: var(--lc-pane-mat-edge), var(--lc-d4-shadow);
   transform-origin: right center;
-}
-/* Docked: nothing scrolls beneath, so the pane's own frosted glass may show
-   through — menu-grade fill (floored, dense content stays ≥ 4.5:1). */
-.lc-insp.is-dock {
-  background: var(--lc-sheen-wash), linear-gradient(var(--lc-glass-tint), var(--lc-glass-tint)), var(--lc-glass-menu);
-}
-/* PLANE: a shell-level inspector OUTSIDE every pane (Time Machine, Brief,
-   Universal Inspector) — real blur over the room, the Live Activity menu's
-   material at menu-grade fill. */
-.lc-insp.lc-insp--plane {
-  background: var(--lc-sheen-wash), linear-gradient(var(--lc-glass-tint), var(--lc-glass-tint)), var(--lc-glass-menu);
 }
 .lc-insp.is-float {
   position: absolute;

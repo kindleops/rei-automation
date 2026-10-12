@@ -1,8 +1,7 @@
 /* NOTIFICATION CENTER 2.0 — the floating system plane (desktop only).
-   Body-portaled so its backdrop blur is real (nested blur does not run inside
-   a pane). Material, depth, ink and semantic colour are LC tokens; the
-   environment's own anchors tint the glass so the plane belongs to the field
-   behind it. Red is a real problem only; green is resolved; cyan is the
+   Body-portaled over the room. Its glass is THE pane material (Settings →
+   Liquid Glass, --lc-pane-mat-*), real blur, no painted colour wash; depth,
+   ink and semantic colour are LC tokens. Red is a real problem only; green is resolved; cyan is the
    machine working; gold is attention / opportunity. */
 
 .ncp {
@@ -20,12 +19,12 @@
   overflow: hidden;
   border-radius: var(--lc-r-plane, 22px);
   color: var(--lc-ink-1);
-  background: var(--lc-mat-crystal-bg);
-  -webkit-backdrop-filter: var(--lc-mat-crystal-filter);
-  backdrop-filter: var(--lc-mat-crystal-filter);
+  /* THE pane material (Settings → Liquid Glass) — no tint, no colour wash */
+  background: var(--lc-pane-mat-bg);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
   box-shadow:
-    inset 0 0 0 1px var(--lc-mat-crystal-edge),
-    var(--lc-sheen-top),
+    var(--lc-pane-mat-edge),
     var(--lc-d4-shadow),
     0 2px 0 -1px rgba(var(--lc-shade-rgb, 0, 0, 0), 0.25);
   transform-origin: calc(100% - 64px) -8px;
@@ -39,17 +38,9 @@
 html[data-lc-motion='off'] .ncp { animation: none; }
 @media (prefers-reduced-motion: reduce) { .ncp { animation-duration: 0.01s; } }
 
-/* environment colour transmission — the field's anchors, faint, inside the glass */
-.ncp__env {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(120% 70% at 100% 0%, rgb(var(--lc-env-a, 6 182 212) / 0.13), transparent 62%),
-    radial-gradient(90% 60% at 0% 100%, rgb(var(--lc-env-b, 59 130 246) / 0.09), transparent 66%),
-    linear-gradient(180deg, rgba(var(--lc-edge-rgb), 0.035), transparent 28%);
-}
+/* the environment reads through the glass itself (real blur) — no painted
+   colour wash inside it */
+.ncp__env { display: none; }
 
 /* ── head ─────────────────────────────────────────────────────────────── */
 .ncp__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px var(--ncp-pad) 10px; }
@@ -100,10 +91,10 @@ html[data-lc-motion='off'] .ncp { animation: none; }
   border-radius: 999px;
   font: 650 11.5px/1 var(--lc-font-ui);
   color: var(--lc-ink-1);
-  background: var(--lc-mat-smoke-bg);
-  -webkit-backdrop-filter: var(--lc-mat-smoke-filter);
-  backdrop-filter: var(--lc-mat-smoke-filter);
-  box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.4), 0 0 18px -6px var(--lc-accent-glow), var(--lc-d2-shadow, 0 6px 18px -8px rgba(0, 0, 0, 0.5));
+  background: var(--lc-pane-mat-bg);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
+  box-shadow: var(--lc-pane-mat-edge), inset 0 0 0 1px var(--lc-glass-selected-line), var(--lc-d2-shadow, 0 6px 18px -8px rgba(0, 0, 0, 0.5));
   cursor: pointer;
   animation: ncp-pill 0.24s var(--lc-ease-enter) both;
 }
@@ -133,7 +124,7 @@ html[data-lc-motion='off'] .ncp { animation: none; }
 .ncs.app-system { --app: 148 163 184; }
 
 .ncs {
-  --ncs-slide-bg: rgba(20, 24, 33, 0.96);
+  --ncs-slide-bg: rgb(var(--lc-pane-mat-fill) / 0.96);
   position: relative;
   border-radius: 14px;
   isolation: isolate;
@@ -141,7 +132,7 @@ html[data-lc-motion='off'] .ncp { animation: none; }
 }
 .ncs:hover, .ncs.is-open { background: rgba(var(--lc-edge-rgb), 0.04); }
 .ncs.is-open { box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.06), 0 10px 28px -22px rgba(0, 0, 0, 0.6); }
-.ncs.is-selected { background: rgba(var(--lc-select-rgb), 0.09); box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.28); }
+.ncs.is-selected { background: var(--lc-glass-selected-fill); box-shadow: inset 0 0 0 1px var(--lc-glass-selected-line); }
 .ncs:has(.ncs__main:focus-visible) { background: rgba(var(--lc-edge-rgb), 0.05); }
 
 /* the slide moves; the trays sit behind it */
@@ -283,8 +274,8 @@ html[data-lc-motion='off'] .ncs__more { animation: none; }
 .ncp__empty { display: grid; justify-items: center; padding: 34px 18px 30px; text-align: center; }
 .ncp__empty-mark {
   display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 2px; border-radius: 15px; color: var(--lc-ink-2);
-  background: radial-gradient(120% 120% at 30% 20%, rgba(var(--lc-select-rgb), 0.16), rgba(var(--lc-edge-rgb), 0.04) 70%);
-  box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.08), 0 14px 30px -20px rgba(var(--lc-select-rgb), 0.55);
+  background: var(--lc-inner-bg-hover);
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.08);
 }
 
 /* ── bulk bar: the shared LC bar, seated in the plane's foot ───────────────── */
@@ -340,16 +331,10 @@ html[data-lc-motion='off'] .ncs__more { animation: none; }
 /* ── themes ───────────────────────────────────────────────────────────── */
 /* Light: crystal / ivory — warm paper glass, ink stays dark and calm */
 :root[data-nexus-theme='light'] .ncp {
-  background: linear-gradient(180deg, rgba(255, 253, 248, 0.78), rgba(250, 248, 242, 0.7));
-  box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 28px 60px -30px rgba(30, 36, 52, 0.38), 0 8px 22px -14px rgba(30, 36, 52, 0.22);
-}
-:root[data-nexus-theme='light'] .ncp__env {
-  background:
-    radial-gradient(120% 70% at 100% 0%, rgb(var(--lc-env-a, 6 182 212) / 0.08), transparent 62%),
-    radial-gradient(90% 60% at 0% 100%, rgb(var(--lc-env-b, 59 130 246) / 0.05), transparent 66%);
+  box-shadow: var(--lc-pane-mat-edge), 0 28px 60px -30px rgba(30, 36, 52, 0.38), 0 8px 22px -14px rgba(30, 36, 52, 0.22);
 }
 :root[data-nexus-theme='light'] .ncs:hover, :root[data-nexus-theme='light'] .ncs.is-open { background: rgba(11, 18, 32, 0.035); }
-:root[data-nexus-theme='light'] .ncs { --ncs-slide-bg: rgba(252, 250, 246, 0.97); --ncs-ring: #fbf9f4; }
+:root[data-nexus-theme='light'] .ncs { --ncs-slide-bg: rgb(var(--lc-pane-mat-fill) / 0.97); --ncs-ring: rgb(var(--lc-pane-mat-fill)); }
 /* the global light `input { background: … !important }` would paint a checked box white (white tick, invisible) */
 :root[data-nexus-theme='light'] .ncs__check { background: rgba(var(--lc-shade-rgb), 0.04) !important; box-shadow: inset 0 0 0 1.5px rgba(var(--lc-shade-rgb), 0.3); }
 :root[data-nexus-theme='light'] .ncs__check:checked { background: rgb(var(--lc-select-rgb)) !important; box-shadow: none; }
@@ -358,25 +343,18 @@ html[data-lc-motion='off'] .ncs__more { animation: none; }
 
 /* True Black: legible on pure black — a little more lift on the glass, a controlled bloom on what is new */
 :root[data-nexus-theme='true_black'] .ncp {
-  background: rgba(10, 11, 14, 0.82);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 30px 80px -30px rgba(0, 0, 0, 1);
+  box-shadow: var(--lc-pane-mat-edge), 0 30px 80px -30px rgba(0, 0, 0, 1);
 }
-:root[data-nexus-theme='true_black'] .ncs { --ncs-slide-bg: rgba(12, 13, 16, 0.98); --ncs-ring: #0a0b0e; }
+:root[data-nexus-theme='true_black'] .ncs { --ncs-slide-bg: rgb(var(--lc-pane-mat-fill) / 0.98); --ncs-ring: rgb(var(--lc-pane-mat-fill)); }
 :root[data-nexus-theme='true_black'] .ncs__glyph { background: linear-gradient(180deg, rgb(var(--app) / 0.2), rgb(var(--app) / 0.1)); box-shadow: inset 0 0 0 1px rgb(var(--app) / 0.26), 0 0 18px -8px rgb(var(--app) / 0.55); }
 :root[data-nexus-theme='true_black'] .ncs__unread { box-shadow: 0 0 10px 0 rgba(var(--lc-select-rgb), 0.7); }
 :root[data-nexus-theme='true_black'] .ncs__summary { color: rgba(236, 240, 248, 0.78); }
 
-/* Red Ops: the accent is identity only — the plane keeps semantic colour, never paints "new" red */
-:root[data-nexus-theme='red_ops'] .ncp__env {
-  background:
-    radial-gradient(120% 70% at 100% 0%, rgb(var(--lc-env-a, 6 182 212) / 0.08), transparent 62%),
-    linear-gradient(180deg, rgba(var(--lc-edge-rgb), 0.03), transparent 28%);
-}
 
 :root[data-nexus-theme='light'] .ncp .lcsig-rule:hover { background: rgba(11, 18, 32, 0.035); }
 :root[data-nexus-theme='true_black'] .ncp .lcsig-rule.is-armed { background: rgba(var(--lc-exec-rgb), 0.08); }
 
-:root[data-nexus-theme='red_ops'] .ncs { --ncs-slide-bg: rgba(22, 16, 18, 0.97); --ncs-ring: rgba(22, 15, 17, 0.98); }
+:root[data-nexus-theme='red_ops'] .ncs { --ncs-slide-bg: rgb(var(--lc-pane-mat-fill) / 0.97); --ncs-ring: rgb(var(--lc-pane-mat-fill)); }
 
 /* the plane is a desktop surface; it never renders on phones (the shell does not mount it) */
 @media (max-width: 720px) { .ncp { display: none; } }

@@ -941,3 +941,26 @@
 .lcnc-card__swipe { border-radius: inherit; }
 .lcnc-card__dismiss-btn { position: relative; }
 .lcnc-card__dismiss-btn::after { content: ''; position: absolute; inset: -11px; }
+
+/* ── DESKTOP: the Notifications app on THE pane material (Settings → Liquid
+      Glass, --lc-pane-mat-*). No accent wash, no tinted slab; the accent is a
+      selection outline only. Phones keep the rules above. ─────────────── */
+html.is-desktop-modern .lcnc-panel.nx-notification-center,
+html.is-desktop-modern[data-nexus-theme] .lcnc-panel.nx-notification-center {
+  background: var(--lc-pane-mat-bg) !important;
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter) !important;
+  backdrop-filter: var(--lc-pane-mat-filter) !important;
+  border-color: transparent !important;
+  box-shadow: var(--lc-pane-mat-edge), var(--lc-d4-shadow) !important;
+}
+html.is-desktop-modern .lcnc-panel__sheen { display: none; }
+html.is-desktop-modern .lcnc-header { background: transparent; }
+html.is-desktop-modern .lcnc-header-btn.is-active,
+html.is-desktop-modern .lcnc-density-btn.is-active,
+html.is-desktop-modern .lcnc-filter-chip.is-active:not([class*='is-severity-']),
+html.is-desktop-modern .lcnc-space-chip.is-active {
+  background: var(--lc-glass-selected-fill);
+  border-color: rgba(var(--lc-select-rgb), 0.34);
+  box-shadow: none;
+}
+html.is-desktop-modern .lcnc-bulk-bar { background: var(--lc-glass-selected-fill); border-bottom-color: var(--lc-glass-line); }

@@ -487,3 +487,45 @@
   --lc-glass-line: rgba(255, 150, 150, calc(0.085 * var(--lc-glass-edge)));
   --lc-glass-line-hi: rgba(255, 160, 160, calc(0.14 * var(--lc-glass-edge)));
 }
+
+/* ══ THE PANE MATERIAL — the one liquid glass (Settings → Liquid Glass) ════
+   Exactly the sheet every desktop workspace pane is made of
+   (desktop-backdrop.css · .dsk-pane__body reads these same tokens), so the
+   operator's Material — Theme · Clear · Crystal · Frosted · Smoke, plus
+   blur / transparency / sheen / edge — repaints every glass surface at once:
+   panes, inspectors, Replay, the Brief, notifications, toasts, comp and deal
+   planes. The fill is the material's own fill colour at the material's own
+   opacity (--lg-alpha already carries the Studio's readability floor); NO
+   accent tint — the accent is only ever a focus ring or a selection outline.
+
+   A surface floating over content takes the filter too: nested
+   backdrop-filter runs inside a pane (verified in Chromium 148), so the
+   content beneath bleeds through frosted. Never put filter / opacity < 1 /
+   mask / clip-path / mix-blend-mode on an ANCESTOR of a glass surface — any
+   of those makes a new backdrop root and the glass goes flat.
+     --lc-pane-mat-bg      fill + top sheen
+     --lc-pane-mat-filter  backdrop blur + saturation
+     --lc-pane-mat-edge    specular top line + hairline (Edge-scaled)
+     --lc-glass-selected-fill  a selected row/card: neutral lift, never accent
+     --lc-glass-selected-line  the selection outline colour (the accent, as a line)
+     --lc-glass-selected-tint  none — kept as a hook so no surface re-adds one
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --lc-pane-mat-fill: var(--dsk-fill, var(--lc-fill));
+  --lc-pane-mat-bg:
+    linear-gradient(180deg, rgb(255 255 255 / calc(0.025 * var(--lg-sheen, 1))), rgb(255 255 255 / 0) 34%),
+    rgb(var(--lc-pane-mat-fill) / calc(0.54 * var(--lg-alpha, 1)));
+  --lc-pane-mat-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(var(--lg-sat, 1.35));
+  --lc-pane-mat-edge: inset 0 1px 0 rgb(255 255 255 / calc(0.07 * var(--lg-sheen, 1))), inset 0 0 0 1px var(--dsk-edge, rgba(255, 255, 255, 0.08));
+  --lc-glass-selected-fill: rgba(var(--lc-edge-rgb), 0.06);
+  --lc-glass-selected-line: rgba(var(--lc-select-rgb), 0.34);
+  --lc-glass-selected-tint: transparent;
+}
+:root[data-nexus-theme='light'] {
+  --lc-pane-mat-bg:
+    linear-gradient(180deg, rgb(255 255 255 / calc(0.34 * var(--lg-sheen, 1))), rgb(255 255 255 / 0) 42%),
+    rgb(var(--lc-pane-mat-fill) / calc(0.44 * var(--lg-alpha, 1)));
+  --lc-pane-mat-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(calc(var(--lg-sat, 1.35) * 1.15));
+  --lc-pane-mat-edge: inset 0 1px 0 rgb(255 255 255 / calc(0.9 * var(--lg-sheen, 1))), inset 0 0 0 1px rgb(255 255 255 / 0.6), 0 0 0 1px rgb(15 17 22 / calc(0.05 * var(--lc-glass-edge, 1)));
+  --lc-glass-selected-fill: rgba(11, 18, 32, 0.05);
+}

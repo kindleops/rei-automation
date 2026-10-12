@@ -1,6 +1,6 @@
-/* THE TIME MACHINE — content inside the shared LCInspector plane (float, wide,
-   lc-insp--plane: the Live Activity menu's liquid glass). Read-only replay; the
-   plane's glass/depth/motion belong to LCInspector. Inner surfaces are glass
+/* THE TIME MACHINE — content inside the shared LCInspector plane (float, wide:
+   the pane material, Settings → Liquid Glass). Read-only replay; the plane's
+   glass/depth/motion belong to LCInspector. Inner surfaces are glass
    cards (translucent fill + hairline + sheen), never their own blur. */
 .tm { z-index: 61; }
 .tm__eyebrow { display: inline-flex; align-items: center; gap: 6px; }
@@ -36,7 +36,7 @@ html[data-theme='light'] .tm-custom input, [data-nexus-theme='light'] .tm-custom
 .tm-arrow.is-on { stroke: var(--lc-flow); stroke-width: 1.8; }
 .tm-node {
   all: unset; position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; cursor: pointer;
-  background: var(--lc-ink-3); box-shadow: 0 0 0 2px var(--lc-glass-menu); transition: transform 0.12s ease;
+  background: var(--lc-ink-3); box-shadow: 0 0 0 2px rgb(var(--lc-pane-mat-fill) / 0.9); transition: transform 0.12s ease;
 }
 .tm-node[data-tone='exec'] { background: var(--lc-exec); }
 .tm-node[data-tone='ok'] { background: var(--lc-ok); }
@@ -44,7 +44,7 @@ html[data-theme='light'] .tm-custom input, [data-nexus-theme='light'] .tm-custom
 .tm-node[data-tone='crit'] { background: var(--lc-crit); }
 .tm-node[data-tone='flow'] { background: var(--lc-flow); }
 .tm-node:hover { transform: scale(1.35); }
-.tm-node.is-sel { transform: scale(1.5); box-shadow: 0 0 0 2px var(--lc-glass-menu), 0 0 0 4px color-mix(in srgb, var(--lc-ink-1) 55%, transparent); z-index: 2; }
+.tm-node.is-sel { transform: scale(1.5); box-shadow: 0 0 0 2px rgb(var(--lc-pane-mat-fill) / 0.9), 0 0 0 4px color-mix(in srgb, var(--lc-ink-1) 55%, transparent); z-index: 2; }
 .tm-cursor { position: absolute; top: -6px; bottom: -6px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--lc-ink-1); opacity: 0.75; pointer-events: none; }
 .tm-axis { position: relative; height: 18px; margin-top: 6px; }
 .tm-axis span { position: absolute; transform: translateX(-50%); font: 560 10px/1 var(--lc-font-ui); font-variant-numeric: tabular-nums; color: var(--lc-ink-3); white-space: nowrap; }

@@ -29,10 +29,11 @@
 .lc-toast__swipe {
   border-radius: 14px;
   color: var(--lc-ink-1);
-  background: var(--lc-sheen-wash), var(--lc-mat-smoke-bg);
-  -webkit-backdrop-filter: var(--lc-mat-smoke-filter);
-  backdrop-filter: var(--lc-mat-smoke-filter);
-  box-shadow: inset 0 0 0 1px var(--lc-mat-smoke-edge), var(--lc-sheen-top), var(--lc-d4-shadow);
+  /* THE pane material (Settings → Liquid Glass) */
+  background: var(--lc-pane-mat-bg);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
+  box-shadow: var(--lc-pane-mat-edge), var(--lc-d4-shadow);
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;

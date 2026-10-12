@@ -97,7 +97,6 @@
   border: 1px solid var(--lc-glass-line);
   border-radius: var(--lc-r-lg);
   box-shadow: var(--lc-glass-sheen), var(--lc-d2-shadow);
-  background-image: linear-gradient(180deg, var(--lc-glass-tint), transparent 40%);
 }
 
 /* ── flow instrument ───────────────────────────────────────────────────── */

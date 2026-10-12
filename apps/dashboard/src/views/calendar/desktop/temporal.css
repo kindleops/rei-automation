@@ -229,9 +229,11 @@
 .tcc-stalenote { display: flex; align-items: center; gap: 6px; margin: 0; padding: 10px 18px; font: var(--lc-t-meta); color: rgb(var(--lc-attn-rgb)); }
 .tcc-side { position: relative; min-width: 0; min-height: 0; display: flex; }
 .tcc-side > * { flex: 1 1 auto; }
-.tcc-side.is-overlay { position: absolute; z-index: var(--lc-z-inspector); top: 10px; right: var(--tcc-pad); bottom: var(--tcc-pad); width: min(380px, calc(100% - 2 * var(--tcc-pad))); filter: drop-shadow(0 30px 50px rgba(var(--lc-shade-rgb), 0.45)); }
-/* overlaying the canvas (in-pane): near-opaque float fill, the glass edge/tint stays */
-.tcc-side.is-overlay .lc-insp, .tcc-side.is-overlay .tcc-brief { width: 100%; background: var(--lc-sheen-wash), linear-gradient(var(--lc-glass-tint), var(--lc-glass-tint)), var(--lc-mat-float-bg); }
+/* overlaying the canvas (in-pane): the pane material, frosting the canvas
+   beneath. Depth is a box-shadow on the glass itself — a filter on this
+   wrapper would make it a backdrop root and flatten the glass. */
+.tcc-side.is-overlay { position: absolute; z-index: var(--lc-z-inspector); top: 10px; right: var(--tcc-pad); bottom: var(--tcc-pad); width: min(380px, calc(100% - 2 * var(--tcc-pad))); }
+.tcc-side.is-overlay .lc-insp, .tcc-side.is-overlay .tcc-brief { width: 100%; box-shadow: var(--lc-pane-mat-edge), 0 30px 50px -10px rgba(var(--lc-shade-rgb), 0.45); }
 .tcc-skelblock { display: grid; gap: 14px; padding: 22px; }
 .tcc-skelblock i { height: 64px; border-radius: 14px; }
 .tcc-empty { margin: 18px; }
@@ -579,10 +581,11 @@
   overscroll-behavior: contain;
   padding: 18px 18px 16px;
   border-radius: var(--lc-r-plane);
-  /* liquid glass: beside the canvas (nothing scrolls beneath), so the pane's
-     frosted room shows through a card-grade fill; glass edge, sheen, depth */
-  background: var(--lc-sheen-wash), linear-gradient(var(--lc-glass-tint), var(--lc-glass-tint)), var(--lc-glass-card);
-  box-shadow: var(--lc-glass-sheen), inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-shadow-chrome);
+  /* liquid glass: the pane material (Settings → Liquid Glass), no tint */
+  background: var(--lc-pane-mat-bg);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
+  box-shadow: var(--lc-pane-mat-edge), var(--lc-glass-shadow-chrome);
 }
 .tcc-brief.is-skel { display: grid; align-content: start; gap: 14px; }
 .tcc-brief.is-skel i { height: 54px; border-radius: 12px; }

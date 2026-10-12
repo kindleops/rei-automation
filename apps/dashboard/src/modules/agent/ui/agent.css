@@ -62,10 +62,11 @@
 /* ── glass planes ──────────────────────────────────────────────────────── */
 .agx-dock, .agx-spine, .agx-ws {
   position: fixed; z-index: 180;
-  background: var(--lc-sheen-wash, none), var(--lc-mat-frosted-bg, rgba(9, 13, 21, 0.62));
-  -webkit-backdrop-filter: var(--lc-mat-frosted-filter, blur(30px) saturate(1.6));
-  backdrop-filter: var(--lc-mat-frosted-filter, blur(30px) saturate(1.6));
-  box-shadow: inset 0 0 0 1px var(--lc-mat-frosted-edge, rgba(255, 255, 255, 0.085)), var(--lc-sheen-top, none), var(--lc-d4-shadow, 0 30px 70px -34px rgba(0, 0, 0, 0.9));
+  /* THE pane material (Settings → Liquid Glass, --lc-pane-mat-*) */
+  background: var(--lc-pane-mat-bg, rgba(9, 13, 21, 0.62));
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter, blur(30px) saturate(1.6));
+  backdrop-filter: var(--lc-pane-mat-filter, blur(30px) saturate(1.6));
+  box-shadow: var(--lc-pane-mat-edge, inset 0 0 0 1px rgba(255, 255, 255, 0.085)), var(--lc-d4-shadow, 0 30px 70px -34px rgba(0, 0, 0, 0.9));
   border-radius: 14px;
 }
 
