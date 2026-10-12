@@ -28,7 +28,7 @@ import { round6 } from '../budget/budget-config.js'
 import { worstCaseUsd, actualUsd, maxPricedPrompt } from './models.js'
 import { RESEARCH_LIMITS, RESEARCH_HARD_CEILINGS, ESCALATION_REASONS, isResearchEnabled, researchModeOk, resolveResearchCaps, effectiveCaps, checkBudget } from './research-config.js'
 import { RESEARCH_CAPABILITIES, toApiName, fromApiName } from './research-tools.js'
-import { maskContacts, maskString, residualContact, encodeForStore, decodeFromStore, encodeDigits, decodePid, sha256, paramsHash, redactForLog } from './pii.js'
+import { maskContacts, maskString, residualContact, encodeForStore, decodeFromStore, encodeDigits, decodePid, sha256, paramsHash, redactForLog, cuedPropertyIds } from './pii.js'
 
 export const ESCALATION_TOOL = 'request_deeper_analysis'
 
@@ -70,15 +70,52 @@ const SYSTEM_BLOCKS = Object.freeze([{ type: 'text', text: SYSTEM_PROMPT, cache_
 
 const bytes = (v) => Buffer.byteLength(typeof v === 'string' ? v : JSON.stringify(v), 'utf8')
 
+/** context.property_ids (array, or one string) ∪ context.property_id (alias), validated, ≤ 10, order kept. */
+export function contextPropertyIds(context) {
+  const raw = []
+  const add = (v) => { if (Array.isArray(v)) raw.push(...v); else if (v != null && v !== '') raw.push(v) }
+  add(context?.property_ids)
+  add(context?.property_id)
+  const out = []
+  for (const v of raw) {
+    if (typeof v !== 'string' && typeof v !== 'number') continue
+    const p = String(v).trim()
+    if (/^[A-Za-z0-9_.:-]{1,64}$/.test(p) && !out.includes(p)) out.push(p)
+  }
+  return out.slice(0, 10)
+}
+
 function newRunId() {
   return `ask_${crypto.randomBytes(12).toString('base64url')}`
 }
 
-function refuse(code, message) {
+function refuse(code, message, detail = null) {
   const e = new AgentError(code, message)
   e.refusal = true
+  // detail: the diagnosable WHY, persisted in research_run.doc.refusal (codes only, never text
+  // from the provider or a tool) — e.g. MODELS_UNRESOLVED { reason: 'PROVIDER_AUTH' }
+  if (detail) e.detail = detail
   return e
 }
+
+/** What a refusal / failure persists: short codes and counts only (the doc CHECK refuses anything else). */
+const CODE = (v) => (v == null ? null : String(v).replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 60) || null)
+function refusalDoc(err, layer) {
+  const d = err?.detail || {}
+  const out = { code: CODE(err?.code) || 'AGENT_LIVE_ERROR', layer }
+  for (const k of ['reason', 'route', 'phase', 'transport', 'billed', 'binding_cap']) if (d[k] != null) out[k] = CODE(d[k])
+  if (Number.isFinite(d.status)) out.status = d.status
+  if (Number.isFinite(d.after_ms)) out.after_ms = d.after_ms
+  // a candidate is a model id / family pattern: ids like claude-haiku-4-5-20251001 are phone-shaped to
+  // the doc CHECK (4-5-20251001 = 10 digits), so they are stored encoded (decoded by status())
+  if (Array.isArray(d.skipped)) out.skipped = d.skipped.slice(0, 8).map((x) => ({ candidate: x?.candidate == null ? null : encodeForStore(String(x.candidate).slice(0, 80)), reason: CODE(x?.reason) }))
+  return out
+}
+
+const decodeRefusal = (r) => (r && Array.isArray(r.skipped) ? { ...r, skipped: r.skipped.map((x) => ({ ...x, candidate: x?.candidate == null ? null : decodeFromStore(x.candidate) })) } : r)
+
+// the per-call ceiling's abort reason: the provider tells a timeout from a cancel by this code
+const MODEL_TIMEOUT_REASON = Object.freeze({ code: 'MODEL_TIMEOUT' })
 
 /**
  * @param {{
@@ -126,18 +163,18 @@ export function createAskService({ store, registry, provider, resolver, createSe
     const budget = checkBudget({ caps, totals, worst_usd: worst, purpose: route })
     if (!budget.ok) {
       await audit(run, { kind: 'budget_refused', name: model.id, outcome: budget.code, cost_usd: 0, doc: { route, binding_cap: budget.binding_cap, limit_usd: budget.limit, committed_usd: budget.committed, worst_usd: worst } })
-      throw refuse(budget.code, `budget: ${budget.binding_cap}`)
+      throw refuse(budget.code, `budget: ${budget.binding_cap}`, { route, binding_cap: budget.binding_cap })
     }
     let reserveId
     try {
       reserveId = await store.reserve({ run_id: run.run_id, operator_id: run.operator_id, model: model.id, purpose: route, reserved_usd: Math.max(worst, 0.000001) })
     } catch (err) {
       await audit(run, { kind: 'budget_refused', name: model.id, outcome: err.code || 'AGENT_STORE_UNAVAILABLE', cost_usd: 0, doc: { route, worst_usd: worst, layer: 'db_reserve' } }).catch(() => {})
-      throw refuse(err.code || 'AGENT_STORE_UNAVAILABLE', 'reserve refused')
+      throw refuse(err.code || 'AGENT_STORE_UNAVAILABLE', 'reserve refused', { route, reason: 'db_reserve' })
     }
     const t0 = now()
     const ctl = new AbortController()
-    const timer = setTimeout(() => ctl.abort(), RESEARCH_LIMITS.model_timeout_ms)
+    const timer = setTimeout(() => ctl.abort(MODEL_TIMEOUT_REASON), RESEARCH_LIMITS.model_timeout_ms)
     if (typeof timer.unref === 'function') timer.unref()
     let message
     try {
@@ -148,8 +185,12 @@ export function createAskService({ store, registry, provider, resolver, createSe
       if (err?.billed === 'no') await store.release(reserveId)
       else await store.markUnknown(reserveId) // stays counted at the reserve: never under-record
       if (code === 'MODEL_REJECTED_BY_API') resolver.invalidate()
-      await audit(run, { kind: 'model_refused', name: model.id, outcome: code, latency_ms: now() - t0, cost_usd: err?.billed === 'no' ? 0 : worst, doc: { route, billed: err?.billed || 'unknown', status: err?.status ?? null } })
-      throw refuse(code, `provider: ${code}`)
+      const after = now() - t0
+      // phase + transport make a provider failure diagnosable from the audit alone:
+      // connect-phase (DNS / TCP / TLS / headers) vs stream-phase, and the socket code
+      const pd = { route, billed: err?.billed || 'unknown', status: err?.status ?? null, phase: err?.phase ?? null, transport: CODE(err?.transport), after_ms: after }
+      await audit(run, { kind: 'model_refused', name: model.id, outcome: code, latency_ms: after, cost_usd: err?.billed === 'no' ? 0 : worst, doc: pd })
+      throw refuse(code, `provider: ${code}`, pd)
     }
     clearTimeout(timer)
     const latency = now() - t0
@@ -224,7 +265,7 @@ export function createAskService({ store, registry, provider, resolver, createSe
       models = await resolver.resolve()
       run.models = { default: models.default?.id || null, escalation: models.escalation?.id || null }
       await store.updateRun(run.run_id, { default_model: run.models.default, escalation_model: run.models.escalation })
-      if (!models.default?.id) throw refuse(models.code || 'MODEL_UNRESOLVED', 'no listed, priced default model')
+      if (!models.default?.id) throw refuse(models.code || 'MODEL_UNRESOLVED', 'no listed, priced default model', { reason: models.reason || (models.code === 'DEFAULT_MODEL_UNRESOLVED' ? 'NO_CANDIDATE_QUALIFIED' : null), skipped: models.default?.skipped || [] })
       const messages = [{ role: 'user', content: run.userContent }]
       let escalateNext = false
       let calls = 0
@@ -306,11 +347,12 @@ export function createAskService({ store, registry, provider, resolver, createSe
     } catch (err) {
       state = err?.refusal ? 'refused' : 'failed'
       outcome = String(err?.code || 'AGENT_LIVE_ERROR').slice(0, 80)
+      run.refusal = refusalDoc(err, err?.refusal ? 'gate' : 'runtime')
     }
     const [maskedAnswer] = maskString(finalText || '', { knownIds: run.knownIds })
     const safeAnswer = residualContact(maskedAnswer, { knownIds: run.knownIds }) ? '[answer withheld: contact data could not be removed]' : maskedAnswer
     const latency = now() - t0
-    run.result = { state, outcome, answer_md: safeAnswer, latency_ms: latency }
+    run.result = { state, outcome, answer_md: safeAnswer, latency_ms: latency, ...(run.refusal ? { refusal: run.refusal } : {}) }
     try {
       await store.finishRun(run.run_id, {
         state,
@@ -318,14 +360,14 @@ export function createAskService({ store, registry, provider, resolver, createSe
         latency_ms: latency,
         cost_usd: run.costUsd,
         answer: safeAnswer ? { answer_md: encodeForStore(safeAnswer, run.knownIds), property_ids: [...run.propertiesRead].slice(0, 50).map(encodeDigits) } : null,
-        doc: { question_excerpt: encodeForStore(run.questionExcerpt, run.knownIds), tool_calls: run.toolCalls, properties_read: run.propertiesRead.size, inconsistencies: run.inconsistencies },
+        doc: { question_excerpt: encodeForStore(run.questionExcerpt, run.knownIds), tool_calls: run.toolCalls, properties_read: run.propertiesRead.size, inconsistencies: run.inconsistencies, ...(run.refusal ? { refusal: run.refusal } : {}) },
       })
       await audit(run, { kind: 'run_end', outcome, cost_usd: run.costUsd, latency_ms: latency, rows_returned: run.toolCalls })
     } catch (err) {
       // the answer could not be stored (a CHECK refused it): close the run without it, never leave it running
       run.result.persist_error = err?.code || 'AGENT_STORE_UNAVAILABLE'
       try {
-        await store.finishRun(run.run_id, { state, outcome, latency_ms: latency, cost_usd: run.costUsd, answer: null, doc: { answer_not_persisted: true, tool_calls: run.toolCalls } })
+        await store.finishRun(run.run_id, { state, outcome, latency_ms: latency, cost_usd: run.costUsd, answer: null, doc: { answer_not_persisted: true, tool_calls: run.toolCalls, ...(run.refusal ? { refusal: run.refusal } : {}) } })
         await audit(run, { kind: 'run_end', outcome: 'ANSWER_NOT_PERSISTED', cost_usd: run.costUsd, latency_ms: latency, rows_returned: run.toolCalls })
       } catch { /* store down: the stale-run sweeper closes it */ }
     }
@@ -337,7 +379,10 @@ export function createAskService({ store, registry, provider, resolver, createSe
 
   /**
    * Start a run (returns as soon as it is durably recorded; the loop continues in the background).
-   * @param {{ operator_id: string, identity: object, question: string, context?: { campaign_id?: string, property_ids?: string[] } }} input
+   * @param {{ operator_id: string, identity: object, question: string, context?: { campaign_id?: string, property_ids?: string[]|string, property_id?: string } }} input
+   *   context.property_id (one id, string) is accepted as an alias of property_ids: callers
+   *   (Entity Graph / Inbox deep links) already send that shape, and dropping it silently
+   *   left the model without the id it was asked about.
    */
   async function ask({ operator_id, identity, question, context = {} }) {
     if (!isAgentEnabled(env)) throw refuse('AGENT_DISABLED', 'kill switch')
@@ -347,8 +392,10 @@ export function createAskService({ store, registry, provider, resolver, createSe
     const q = String(question ?? '').trim()
     if (!q || q.length > RESEARCH_LIMITS.question_max_chars) throw refuse('QUESTION_INVALID', `question must be 1–${RESEARCH_LIMITS.question_max_chars} characters`)
     const campaignId = context?.campaign_id && /^[0-9a-fA-F-]{36}$/.test(String(context.campaign_id)) ? String(context.campaign_id) : null
-    const propertyIds = Array.isArray(context?.property_ids) ? context.property_ids.map(String).filter((p) => /^[A-Za-z0-9_.:-]{1,64}$/.test(p)).slice(0, 10) : []
-    const knownIds = new Set(propertyIds.filter((p) => /^[0-9]{5,20}$/.test(p)))
+    const propertyIds = contextPropertyIds(context)
+    // the allowlist the masker trusts: ids in context + ids a cue names in the question
+    // (pii.js shape rule; never a phone-shaped run) — tool-returned ids join later (collectIds)
+    const knownIds = new Set([...propertyIds.filter((p) => /^[0-9]{5,20}$/.test(p)), ...cuedPropertyIds(q)])
     const masked = maskContacts(q, { knownIds }).value
     const ctxLines = [campaignId ? `Campaign in context: ${campaignId}` : null, propertyIds.length ? `Properties in context: ${propertyIds.join(', ')}` : null].filter(Boolean)
     const run = {
@@ -381,6 +428,7 @@ export function createAskService({ store, registry, provider, resolver, createSe
       ended_at: row.ended_at,
       latency_ms: row.latency_ms,
       cost_usd: Number(row.cost_usd),
+      refusal: decodeRefusal(row.doc?.refusal || (mem && mem.op === operator_id ? mem.result?.refusal : null) || null),
       models: { default: row.default_model, escalation: row.escalation_model },
       counters: { model_calls: row.model_calls, escalated_calls: row.escalated_calls, escalated_usd: Number(row.escalated_usd), tool_calls: row.tool_calls },
       answer,

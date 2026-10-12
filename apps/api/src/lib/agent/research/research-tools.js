@@ -11,7 +11,7 @@
 //
 // The 9 Quick Scan T0 reads (quick-scan/tools.js) are reused unchanged, plus:
 //   campaign.list · campaign.overview · campaign.targets · campaign.audience_top
-//   eg.distress_signals · eg.contact_map · eg.facts
+//   eg.distress_signals · eg.contact_map · eg.facts · eg.property_lookup
 import { createToolRegistry } from '../tools/registry.js'
 import { QUICK_SCAN_TOOL_SPECS, projectOwnership } from '../quick-scan/tools.js'
 import { maskPhoneDigits } from './pii.js'
@@ -205,16 +205,60 @@ export function findInconsistencies({ graph = null, parcel = null, liens = null,
   return out
 }
 
+// ── address → property_id (R1, 10-12) ───────────────────────────────────────
+// WHY: an operator names a property by its street address ("1947 Johnson St NE"); no
+// tool could turn that into the property_id every other tool needs, so the model
+// either guessed or gave up. eg.property_lookup resolves an address FRAGMENT to at
+// most 5 candidates. Bounded by construction:
+//   * the only predicate on the 176K-row properties table is ILIKE on
+//     property_address_full, which idx_properties_address_full_trgm (GIN trigram)
+//     serves — verified in prod 10-12: Bitmap Index Scan, ~80 ms; with a zip the
+//     planner takes idx_properties_address_zip (~20 ms). Optional state / zip are
+//     btree-indexed equality filters; city is ILIKE on the trigram-indexed city.
+//   * a house number AND a street word of ≥ 3 characters are required, so the
+//     pattern always carries selective trigrams (never '%a%');
+//   * ≤ 25 rows read, ranked here, ≤ 5 returned; the request aborts at 5 s.
+// Projection: id + property address parts only. No owner, no mailing address.
+export const LOOKUP_COLUMNS = 'property_id,property_address_full,property_address_city,property_address_state,property_address_zip,market,property_type,units_count'
+export const LOOKUP_READ_ROWS = 25
+export const LOOKUP_RETURN_ROWS = 5
+export const LOOKUP_TIMEOUT_MS = 5_000
+const DIRECTIONAL = new Set(['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW', 'NORTH', 'SOUTH', 'EAST', 'WEST'])
+const SUFFIX = new Set(['ST', 'STREET', 'AVE', 'AV', 'AVENUE', 'RD', 'ROAD', 'DR', 'DRIVE', 'LN', 'LANE', 'BLVD', 'CT', 'COURT', 'PL', 'PLACE', 'WAY', 'TER', 'TERRACE', 'CIR', 'CIRCLE', 'PKWY', 'HWY', 'TRL', 'SQ'])
+const addrTokens = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean)
+
+/** Parse "1947 Johnson St NE" → { house, street_word, tokens } or null (refused: not selective). */
+export function parseAddressFragment(raw) {
+  const s = String(raw || '').replace(/[^A-Za-z0-9 #.'-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const m = /^([0-9]{1,6})(?:-?[A-Za-z])?\s+(.+)$/.exec(s)
+  if (!m) return null
+  const tokens = addrTokens(m[2])
+  const word = tokens.find((t) => t.length >= 3 && !DIRECTIONAL.has(t) && !SUFFIX.has(t)) || tokens.find((t) => t.length >= 3 && !DIRECTIONAL.has(t))
+  if (!word) return null
+  return { house: m[1], street_word: word, tokens }
+}
+
+const likeSafe = (v) => String(v).replace(/[%_\\]/g, '')
+
+export function rankAddressCandidates(rows, frag) {
+  return rows.map((r) => {
+    const t = addrTokens(r.property_address_full)
+    const houseExact = t[0] === frag.house
+    const matched = frag.tokens.filter((x) => t.includes(x)).length
+    return { r, houseExact, matched }
+  }).sort((a, b) => Number(b.houseExact) - Number(a.houseExact) || b.matched - a.matched || String(a.r.property_address_full || '').length - String(b.r.property_address_full || '').length)
+}
+
 // ── tool specs ───────────────────────────────────────────────────────────────
 
-function readTool({ name, capability, label, description, input_schema, to_model, sources, table, rows_to_model = 25, execute }) {
+function readTool({ name, capability, label, description, input_schema, to_model, sources, table, rows_to_model = 25, max_rows = 200, timeout_ms = 30_000, execute }) {
   return {
     name, version: 1, capability, label, description, input_schema,
     output_schema: { type: 'object', description: 'projected fields only; see research/research-tools.js' },
     side_effect: 'read',
     permission: { min_role: 'operator', apps: ['agent'] },
     cost_class: 'db_light',
-    limits: { rows_to_model, max_rows: 200, timeout_ms: 30_000, per_run: 30 },
+    limits: { rows_to_model, max_rows, timeout_ms, per_run: 30 },
     disclosure: { to_model, never: NEVER },
     wraps: { kind: 'service', module: '@/lib/agent/quick-scan/read-client.js', export: 'createQuickScanReadClient', reads: table, route: 'GET /rest/v1 (read-guarded)' },
     output_trust: 'system',
@@ -401,6 +445,33 @@ export const RESEARCH_TOOL_SPECS = Object.freeze([
       } catch (e) {
         if (e.code === 'SOURCE_NOT_APPLIED') return { property_id: input.property_id, available: false, reason: 'facts_table_not_applied' }
         throw e
+      }
+    },
+  }),
+  readTool({
+    name: 'eg.property_lookup', capability: 2, label: 'Finding the property by address',
+    description: 'Resolve a street address fragment (house number + street, e.g. "1947 Johnson St NE"; optional city, 2-letter state, 5-digit zip) to at most 5 candidate properties with property_id, address, city, state, zip and market. Use it when the question names an address but no property id; then call the other tools with the property_id. Several candidates = ambiguous: say so, do not pick silently.',
+    input_schema: { type: 'object', additionalProperties: false, properties: { address: { type: 'string', minLength: 5, maxLength: 120 }, city: { type: 'string', minLength: 2, maxLength: 60 }, state: { type: 'string', minLength: 2, maxLength: 2, pattern: '^[A-Za-z]{2}$' }, zip: { type: 'string', minLength: 5, maxLength: 5, pattern: '^[0-9]{5}$' } }, required: ['address'] },
+    to_model: ['query', 'candidates', 'ambiguous'], sources: ['lc.properties'], table: 'properties', rows_to_model: LOOKUP_RETURN_ROWS, max_rows: LOOKUP_READ_ROWS, timeout_ms: LOOKUP_TIMEOUT_MS,
+    async execute(input, { db }) {
+      const frag = parseAddressFragment(input.address)
+      if (!frag) throw unavailable('ADDRESS_NOT_SELECTIVE', 'an address needs a house number and a street name (≥ 3 characters)')
+      let q = db.from('properties').select(LOOKUP_COLUMNS).ilike('property_address_full', `%${frag.house} %${likeSafe(frag.street_word)}%`)
+      if (input.zip) q = q.eq('property_address_zip', String(input.zip))
+      if (input.state) q = q.eq('property_address_state', String(input.state).toUpperCase())
+      if (input.city) q = q.ilike('property_address_city', likeSafe(String(input.city).replace(/[^A-Za-z .'-]+/g, ' ').trim()))
+      q = q.limit(LOOKUP_READ_ROWS)
+      // the read client aborts every request at 30 s; this read is held to 5 s (the tool race also holds it)
+      if (typeof q.abortSignal === 'function' && typeof AbortSignal?.timeout === 'function') q = q.abortSignal(AbortSignal.timeout(LOOKUP_TIMEOUT_MS))
+      const { rows } = await read(q, 'properties')
+      const ranked = rankAddressCandidates(rows, frag).slice(0, LOOKUP_RETURN_ROWS)
+      return {
+        query: { house_number: frag.house, street_word: frag.street_word, city: clean(input.city), state: input.state ? String(input.state).toUpperCase() : null, zip: input.zip || null },
+        candidates: ranked.map(({ r, houseExact, matched }) => ({ property_id: String(r.property_id), address: clean(r.property_address_full), city: clean(r.property_address_city), state: clean(r.property_address_state), zip: clean(r.property_address_zip), market: clean(r.market), property_type: clean(r.property_type), units: num(r.units_count), match: { house_number_exact: houseExact, street_tokens_matched: matched, of: frag.tokens.length } })),
+        candidates_examined: rows.length,
+        more_may_exist: rows.length >= LOOKUP_READ_ROWS,
+        ambiguous: ranked.length > 1,
+        note: ranked.length ? null : 'No property matched this address fragment in the LeadCommand property record (not evidence that the property does not exist).',
       }
     },
   }),

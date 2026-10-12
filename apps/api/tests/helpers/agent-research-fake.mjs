@@ -57,10 +57,17 @@ export function fakeDb(tables, { log = [] } = {}) {
       select(cols = '*', opts = {}) { st.cols = cols; st.head = Boolean(opts.head); st.count = opts.count || null; return api },
       eq(k, v) { st.filters.push((r) => String(r[k]) === String(v)); return api },
       in(k, vs) { const s = new Set(vs.map(String)); st.filters.push((r) => s.has(String(r[k]))); return api },
+      ilike(k, pattern) {
+        st.ilike = [...(st.ilike || []), { k, pattern }]
+        const re = new RegExp(`^${String(pattern).split('%').map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 'i')
+        st.filters.push((r) => re.test(String(r[k] ?? '')))
+        return api
+      },
+      abortSignal(sig) { st.signal = sig; return api },
       order(k, o = {}) { st.order = { k, asc: o.ascending !== false }; return api },
       limit(n) { st.limit = n; return api },
       then(res, rej) {
-        log.push({ table, cols: st.cols, method: 'GET' })
+        log.push({ table, cols: st.cols, method: 'GET', ilike: st.ilike || null, limit: st.limit, signal: Boolean(st.signal) })
         if (!Object.prototype.hasOwnProperty.call(tables, table)) return Promise.resolve({ data: null, error: MISSING, count: null }).then(res, rej)
         let rows = tables[table].filter((r) => st.filters.every((f) => f(r)))
         if (st.order) rows = [...rows].sort((a, b) => ((a[st.order.k] ?? -Infinity) - (b[st.order.k] ?? -Infinity)) * (st.order.asc ? 1 : -1))

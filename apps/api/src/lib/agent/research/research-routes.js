@@ -1,8 +1,10 @@
 // Read-only research agent routes.
 //
 //   GET  /api/cockpit/agent/live/ask              status: switches, resolved models (from GET /v1/models), caps, spend today / this cycle
-//   POST /api/cockpit/agent/live/ask              { question, context?: { campaign_id?, property_ids?[] }, wait_ms? ≤ 25000 } → 202 { run_id }
-//   GET  /api/cockpit/agent/live/ask/:run_id      the run: state, answer, latency, cost per call, audit trail
+//   POST /api/cockpit/agent/live/ask              { question, context?: { campaign_id?, property_ids?[] | property_ids?, property_id? }, wait_ms? ≤ 25000 } → 202 { run_id }
+//                                                 (property_id is an alias of property_ids — ask-service.contextPropertyIds)
+//   GET  /api/cockpit/agent/live/ask/:run_id      the run: state, answer, latency, cost per call, audit trail, and for a
+//                                                 refused / failed run its persisted refusal detail (codes only)
 //
 // Order on every request (same as Gate B):
 //   (1) gate → 404 with an EMPTY body unless the live route gate AND

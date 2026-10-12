@@ -31,16 +31,60 @@ export function maskPhoneDigits(digits) {
 
 // shapes that are digit runs but never phones: UUIDs, ISO dates / date-times (protected, then restored)
 const PROTECT_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[T ][0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]{1,9})?)?(?:Z|[+-][0-9]{2}:?[0-9]{2})?)?/g
-function protect(s) {
+
+// PROPERTY IDS INSIDE FREE TEXT (R1, 10-12). Production ids are 8–10 digit strings
+// (prod 10-12: 8,684 × 8 / 116,176 × 9 / 51,743 × 10 digits). A 9-digit id is never
+// phone-shaped alone, but PHONE_RE joins digit runs across up to 4 separators, so
+// "property 273435535 (1947 Johnson St NE)" became ONE 13-digit "phone" and was
+// masked to "•••-••47 Johnson St NE": the model lost the id it was asked about.
+// Two ways an id is recognised BEFORE the phone pass (protected, then restored):
+//   1. the allowlist — knownIds: ids in the run's context plus every property_id a
+//      tool returned. Any length, as a whole digit token (never part of a longer run).
+//   2. the shape — a 6–12 digit run directly after an id cue ("property", "parcel",
+//      "pid", "property_id", "id", "#") that is NOT a phone: the run alone, and the run
+//      joined with the digits phone punctuation glues onto it, must not be NANP-shaped
+//      (10 digits, or 11 starting with 1). So "id 612555-0147" stays a phone (6+4 = 10),
+//      "property 6125550147" stays a phone (a 10-digit id survives only via the
+//      allowlist), and "property 273435535 (1947" frees the id (9+4 = 13, not NANP).
+//      Freeing the id never frees a phone after it: the phone pass still runs on what
+//      follows ("pid 12345678, (612) 555-0147" → the id kept, the phone masked).
+const ID_CUE_RE = /\b(?:property[ _-]?ids?|properties|property|parcel|pid|prop|id)\b\s*(?:#|no\.?|:)?\s*([0-9]{6,12})(?![0-9])/gi
+const GLUED_RE = /^(?:[\s().,:/_+·–—-]{0,4}[0-9]+)+/
+const isNanpShape = (d) => d.length === 10 || (d.length === 11 && d[0] === '1')
+const cuedIdOk = (d, rest) => {
+  if (isNanpShape(d)) return false
+  const glued = (GLUED_RE.exec(rest)?.[0] || '').replace(/[^0-9]/g, '')
+  return !isNanpShape(d + glued)
+}
+
+/** Digit ids that a cue names in this text (shape rule 2). Exported for the ask service. */
+export function cuedPropertyIds(text) {
+  const s = String(text ?? '')
+  const out = []
+  for (const m of s.matchAll(ID_CUE_RE)) if (cuedIdOk(m[1], s.slice(m.index + m[0].length))) out.push(m[1])
+  return [...new Set(out)]
+}
+
+function knownIdRe(knownIds) {
+  if (!knownIds || !knownIds.size) return null
+  const ids = [...knownIds].map(String).filter((x) => /^[0-9]{5,20}$/.test(x)).sort((a, b) => b.length - a.length)
+  return ids.length ? new RegExp(`(?<![0-9])(?:${ids.join('|')})(?![0-9])`, 'g') : null
+}
+
+function protect(s, knownIds = null) {
   const kept = []
-  const out = String(s).replace(PROTECT_RE, (m) => { kept.push(m); return `\u0000${kept.length - 1}\u0000` })
+  const hold = (m) => { kept.push(m); return `\u0000${kept.length - 1}\u0000` }
+  let out = String(s).replace(PROTECT_RE, hold)
+  const known = knownIdRe(knownIds)
+  if (known) out = out.replace(known, hold)
+  out = out.replace(ID_CUE_RE, (m, d, off, all) => (cuedIdOk(d, all.slice(off + m.length)) ? m.slice(0, m.length - d.length) + hold(d) : m))
   return { out, restore: (x) => x.replace(/\u0000([0-9]+)\u0000/g, (_, i) => kept[Number(i)]) }
 }
 
 /** Mask in one string. Returns [masked, count]. */
 export function maskString(s, { knownIds = null } = {}) {
   let n = 0
-  const p = protect(s)
+  const p = protect(s, knownIds)
   let out = p.out.replace(EMAIL_RE, () => { n += 1; return '[email withheld]' })
   out = out.replace(PHONE_RE, (m) => {
     const digits = m.replace(/[^0-9]/g, '')
@@ -94,7 +138,7 @@ export function maskContacts(value, { knownIds = null } = {}) {
 
 /** After masking: is anything phone- or email-shaped left (outside known ids)? */
 export function residualContact(text, { knownIds = null } = {}) {
-  const s = protect(String(text ?? '')).out
+  const s = protect(String(text ?? ''), knownIds).out
   if (new RegExp(EMAIL_RE.source).test(s)) return 'email'
   for (const m of s.matchAll(new RegExp(PHONE_RE.source, 'g'))) {
     const digits = m[0].replace(/[^0-9]/g, '')

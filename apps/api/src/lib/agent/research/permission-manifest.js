@@ -30,7 +30,11 @@ export const RESEARCH_PERMISSION_MANIFEST = Object.freeze([
   { name: 'eg.distress_signals', reads: 'graph flags, parcel, probate_status, preforeclosure_status_v2, eg_property_facts + inconsistencies', rows_to_model: 25 },
   { name: 'eg.contact_map', reads: 'people as handles, phones as last-2 masks, eligibility / blockers', rows_to_model: 25 },
   { name: 'eg.facts', reads: 'eg_property_facts (reports "not applied" when absent)', rows_to_model: 1 },
-].map((e) => Object.freeze({ ...e, tier: 'T0', side_effect: 'read', approval: 'none', cost_class: 'db_light', max_rows_per_request: 200, timeout_ms: 30_000 })))
+  // R1 10-12: address fragment → ≤ 5 property ids (trigram-indexed ILIKE on properties.property_address_full; 25 rows read, 5 s)
+  { name: 'eg.property_lookup', reads: 'properties address parts (id, street address, city, state, zip, market) — no owner fields', rows_to_model: 5, max_rows_per_request: 25, timeout_ms: 5_000 },
+// caps default to 200 rows / 30 s; an entry may only TIGHTEN them. Tier, side effect, approval and
+// cost class come last so no entry can override them.
+].map((e) => Object.freeze({ max_rows_per_request: 200, timeout_ms: 30_000, ...e, tier: 'T0', side_effect: 'read', approval: 'none', cost_class: 'db_light' })))
 
 export const RESEARCH_CONTROL_TOOLS = Object.freeze([
   Object.freeze({ name: 'request_deeper_analysis', kind: 'loop_control', decided_by: 'server', reads: null, writes: null }),
