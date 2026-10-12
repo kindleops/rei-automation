@@ -20,6 +20,8 @@ import {
 } from './composer-model'
 import type { DropResolution, Intake } from './composer-intake'
 import { GEO_INTAKE_FIELD } from './composer-intake'
+import { AudienceLens, PhonePreview, StoryRail } from './ComposerStory'
+import { assistFilters, storySteps, type AssistContext } from './composer-story'
 import { AudiencePlane, type QuickSource } from './ComposerAudience'
 import { DeliveryBody, ScheduleBody, StrategyBody } from './ComposerPlanes'
 import { reasonWords } from './composer-format'
@@ -539,6 +541,16 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
     { layer: 'schedule', label: 'Schedule', line: composition.start.mode === 'now' ? `On launch · ${waves.map((w) => w.short).join(' → ') || 'zones pending'}` : new Date(composition.start.at ?? '').toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) },
     { layer: 'launch', label: 'Launch', line: readiness.state === 'ready' ? 'Ready' : readiness.state === 'warning' ? `Ready · ${readiness.warnings} warnings` : readiness.state === 'blocked' ? `${readiness.blockers} blocking` : 'Checking' },
   ]
+  // the story (presentation only): audience → message → schedule → review over the same layers + states
+  const story = storySteps(Object.fromEntries(spine.map((s) => [s.layer, s.line])), layerState)
+  const assist: AssistContext | null = hasAudience ? {
+    name: composition.name,
+    filters: assistFilters(composition.filters),
+    matched: audience?.matched ?? null,
+    eligible,
+    markets: (audience?.distributions.markets ?? []).map((m) => m.label || m.value),
+    strategy: strategy ? `${strategy.label} (${strategy.stage_code})` : null,
+  } : null
   const plane = (layer: Layer) => ({
     layer,
     state: layerState(layer),
@@ -548,7 +560,7 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
   })
 
   return (
-    <div className={cx('ccz', `is-${readiness.state}`)} ref={rootRef} onKeyDown={onKeyDown} aria-label="Campaign Composer">
+    <div className={cx('ccz', 'is-story', `is-${readiness.state}`)} ref={rootRef} onKeyDown={onKeyDown} aria-label="Campaign Composer">
       <header className="ccz-head">
         <LCTooltip content="Back to Campaign Command"><button type="button" className="ccz-back" onClick={() => { forget(); onClose() }} aria-label="Close Composer"><Icon name="chevron-left" size={15} /></button></LCTooltip>
         <div className="ccz-head__title">
@@ -569,14 +581,7 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
         </div>
       </header>
 
-      <nav className="ccz-spine" aria-label="Composition">
-        {spine.map((s, i) => (
-          <button key={s.layer} type="button" className={cx('ccz-spine__step', `is-${layerState(s.layer)}`)} onClick={() => focusLayer(s.layer)}>
-            <span className="ccz-spine__idx">{String(i + 1).padStart(2, '0')}</span>
-            <span className="ccz-spine__txt"><b>{s.label}</b><em>{s.line}</em></span>
-          </button>
-        ))}
-      </nav>
+      <StoryRail steps={story} onStep={(s) => focusLayer(s.layer)} focused={focus?.layer ?? null} />
 
       {draftState?.state === 'error' ? <div className="ccz-err ccz-err--bar" role="alert"><Icon name="alert-circle" size={14} /> The draft couldn’t be opened — {draftState.message}</div> : null}
       {!online ? <div className="ccz-err ccz-err--bar" role="alert"><Icon name="alert-circle" size={14} /> Connection lost — readiness can’t be verified; launch is disabled.</div> : null}
@@ -584,6 +589,7 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
       <div className="ccz-stage">
         <div className="ccz-grid">
           <Plane {...plane('audience')} title="Audience" className="ccz-col-a" summary={hasAudience ? (eligible === null ? 'Counting…' : `${fmt(eligible)} eligible`) : 'Choose a source'}>
+            {hasAudience ? <AudienceLens audience={audience} eligible={eligible} loading={audLoading} labelOf={labelOf} assist={assist} /> : null}
             <AudiencePlane
               audience={audience}
               offerReady={offerReadyNow}
@@ -607,6 +613,7 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
           <div className="ccz-col-b">
             <Plane {...plane('strategy')} title="Strategy" summary={strategy ? `${strategy.label} · ${strategy.stage_code}` : templates.error ? 'Templates unavailable' : 'Reading…'}>
               {templates.error && !templates.data ? <div className="ccz-err"><Icon name="alert" size={14} /> Template coverage didn’t load — {templates.error}</div> : null}
+              <PhonePreview samples={audience?.samples ?? []} loading={audLoading} assist={assist} onInspect={(sample) => sample.property_id && inspectObject(propertyObject({ propertyId: sample.property_id, label: sample.place, source: 'campaign-composer' }))} />
               <StrategyBody
                 templates={templates.data}
                 audience={audience}

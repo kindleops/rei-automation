@@ -1,0 +1,199 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   CAMPAIGN COMPOSER · STORY (premium redesign, 2026-10-12) — presentation only.
+   Every surface is THE pane material (--lc-pane-mat-*, Settings → Liquid
+   Glass) with its real blur; nothing here sets its own surface hue and no
+   surface carries an accent tint (the accent is a focus ring / outline only). Colour carries meaning: green = done, gold = attention,
+   red = a real blocker, the operator's accent = the value being read.
+   Scoped to .ccz.is-story under html.is-desktop-modern; reduced motion and the
+   LC Animations switch turn every animation off.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-desktop-modern .ccz.is-story {
+  --ccz-plane-edge: rgba(var(--lc-edge-rgb), 0.08);
+  --ccz-gap: 16px;
+  --ccz-val: rgba(var(--lc-accent-rgb), 0.62);
+  --ccz-val-hi: rgba(var(--lc-accent-rgb), 0.95);
+  --ccz-track: rgba(var(--lc-edge-rgb), 0.06);
+}
+html.is-desktop-modern .ccz.is-story .ccz-plane {
+  border-radius: 22px; padding: 16px 20px 20px; animation: ccz-rise 520ms var(--lc-ease-enter) both;
+  background: var(--lc-pane-mat-bg);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
+  box-shadow: var(--lc-pane-mat-edge), var(--lc-d2-shadow);
+}
+html.is-desktop-modern .ccz.is-story .ccz-grid > :nth-child(2) .ccz-plane:nth-child(1) { animation-delay: 60ms; }
+html.is-desktop-modern .ccz.is-story .ccz-grid > :nth-child(2) .ccz-plane:nth-child(2) { animation-delay: 120ms; }
+html.is-desktop-modern .ccz.is-story .ccz-grid > .ccz-col-c { animation-delay: 160ms; }
+html.is-desktop-modern .ccz.is-story .ccz-grid > .ccz-col-d { animation-delay: 200ms; }
+html.is-desktop-modern .ccz.is-story .ccz-plane__title { font: 680 11px/1.2 var(--lc-font-ui); letter-spacing: 0.16em; }
+html.is-desktop-modern .ccz.is-story .ccz-name { font-weight: 650; }
+/* the phone carries the rendered preview now (StrategyBody's text bubble is the same sample) */
+html.is-desktop-modern .ccz.is-story .ccz-plane.is-strategy .ccz-preview { display: none; }
+
+/* ── story rail ─────────────────────────────────────────────────────────── */
+html.is-desktop-modern .ccz-story {
+  position: relative; flex: none;
+  margin: 0 var(--ccz-pad) 14px; padding: 6px;
+  border-radius: 18px;
+  background: var(--lc-pane-mat-bg);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
+  box-shadow: var(--lc-pane-mat-edge), var(--lc-d2-shadow);
+}
+html.is-desktop-modern .ccz-story__track {
+  position: absolute; left: 18px; right: 18px; bottom: 3px; height: 2px; border-radius: 2px; background: var(--ccz-track); overflow: hidden;
+}
+html.is-desktop-modern .ccz-story__track i {
+  position: absolute; inset: 0; transform-origin: left center; transform: scaleX(var(--p, 0));
+  background: linear-gradient(90deg, rgba(var(--lc-ok-rgb), 0.55), rgba(var(--lc-ok-rgb), 0.9));
+  transition: transform 700ms var(--lc-ease-standard);
+}
+html.is-desktop-modern .ccz-story__steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+html.is-desktop-modern .ccz-story__step {
+  appearance: none; border: 0; background: transparent; cursor: pointer; text-align: left; min-width: 0; width: 100%;
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 13px; color: inherit;
+  transition: background var(--lc-dur-instant) var(--lc-ease-standard), box-shadow var(--lc-dur-instant);
+}
+html.is-desktop-modern .ccz-story__step:hover { background: var(--lc-inner-bg-hover); }
+html.is-desktop-modern .ccz-story__step:focus-visible { outline: 1px solid var(--lc-accent); outline-offset: 1px; }
+html.is-desktop-modern .ccz-story__step.is-focused { background: var(--lc-inner-bg); box-shadow: inset 0 0 0 1px var(--lc-inner-edge); }
+html.is-desktop-modern .ccz-story__dot {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  font: 650 11.5px/1 var(--lc-font-ui); color: var(--lc-ink-2);
+  background: var(--lc-inner-bg); box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.14);
+  transition: background 240ms var(--lc-ease-standard), box-shadow 240ms, color 240ms;
+}
+html.is-desktop-modern .ccz-story__step.is-ok .ccz-story__dot { color: rgb(var(--lc-ok-rgb)); background: rgba(var(--lc-ok-rgb), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--lc-ok-rgb), 0.45); animation: ccz-pop 360ms var(--lc-ease-enter) both; }
+html.is-desktop-modern .ccz-story__step.is-warn .ccz-story__dot { color: rgb(var(--lc-attn-rgb)); background: rgba(var(--lc-attn-rgb), 0.13); box-shadow: inset 0 0 0 1px rgba(var(--lc-attn-rgb), 0.45); }
+html.is-desktop-modern .ccz-story__step.is-block .ccz-story__dot { color: rgb(var(--lc-crit-rgb)); background: rgba(var(--lc-crit-rgb), 0.12); box-shadow: inset 0 0 0 1px rgba(var(--lc-crit-rgb), 0.45); }
+html.is-desktop-modern .ccz-story__step.is-checking .ccz-story__dot { box-shadow: inset 0 0 0 1px var(--lc-glass-selected-line); animation: ccz-breathe 1.6s ease-in-out infinite; }
+html.is-desktop-modern .ccz-story__txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+html.is-desktop-modern .ccz-story__txt strong { font: 650 13px/1.2 var(--lc-font-ui); color: var(--lc-ink-1); letter-spacing: -0.005em; }
+html.is-desktop-modern .ccz-story__txt em { font: var(--lc-t-meta); font-style: normal; color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container ccz (max-width: 759px) {
+  html.is-desktop-modern .ccz-story__txt em { display: none; }
+  html.is-desktop-modern .ccz-story__step { gap: 8px; padding: 8px; }
+}
+
+/* ── audience lens ──────────────────────────────────────────────────────── */
+html.is-desktop-modern .ccz-lens {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px;
+  padding: 14px; border-radius: 16px;
+  background: var(--lc-inner-bg); box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+  transition: opacity var(--lc-dur-fast, 140ms) ease;
+}
+html.is-desktop-modern .ccz-lens.is-settling { opacity: 0.72; }
+html.is-desktop-modern .ccz-lens.is-loading { display: flex; gap: 10px; }
+html.is-desktop-modern .ccz-lens__skel { display: block; flex: 1; height: 96px; border-radius: 12px; }
+/* the lens lays out by ITS width (the audience plane), not the Composer's */
+html.is-desktop-modern .ccz-lens-wrap { container: ccz-lens / inline-size; }
+@container ccz-lens (min-width: 560px) {
+  html.is-desktop-modern .ccz-lens { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+  html.is-desktop-modern .ccz-lens .ccz-lens__markets, html.is-desktop-modern .ccz-lens .ccz-assist { grid-column: 1 / -1; }
+}
+@container ccz-lens (min-width: 900px) {
+  html.is-desktop-modern .ccz-lens { grid-template-columns: auto minmax(0, 1.25fr) minmax(0, 1fr); }
+  html.is-desktop-modern .ccz-lens .ccz-lens__markets { grid-column: auto; }
+}
+html.is-desktop-modern .ccz-lens__ring { display: flex; align-items: center; gap: 14px; }
+html.is-desktop-modern .ccz-ring { width: 92px; height: 92px; flex: none; transform: rotate(-90deg); }
+html.is-desktop-modern .ccz-ring text { transform: rotate(90deg); transform-origin: 42px 42px; }
+html.is-desktop-modern .ccz-ring__bg { fill: none; stroke: var(--ccz-track); stroke-width: 7; }
+html.is-desktop-modern .ccz-ring__fg {
+  fill: none; stroke: rgb(var(--lc-ok-rgb)); stroke-width: 7; stroke-linecap: round;
+  transition: stroke-dashoffset 900ms var(--lc-ease-standard);
+  animation: ccz-ring 1100ms 120ms var(--lc-ease-enter) both;
+}
+html.is-desktop-modern .ccz-ring__v { font: 650 15px/1 var(--lc-font-display); fill: var(--lc-ink-1); }
+html.is-desktop-modern .ccz-ring__k { font: 600 8.5px/1 var(--lc-font-ui); fill: var(--lc-ink-3); letter-spacing: 0.1em; text-transform: uppercase; }
+html.is-desktop-modern .ccz-lens__facts { display: flex; flex-direction: column; gap: 8px; }
+html.is-desktop-modern .ccz-lens__facts dt { font: var(--lc-t-label); color: var(--lc-ink-3); }
+html.is-desktop-modern .ccz-lens__facts dd { font: var(--lc-t-metric-sm); letter-spacing: var(--lc-track-tight); }
+html.is-desktop-modern .ccz-lens__facts dd.is-hero { font: var(--lc-t-metric); }
+
+html.is-desktop-modern .ccz-lens figure { min-width: 0; }
+html.is-desktop-modern .ccz-lens figcaption { display: block; margin-bottom: 8px; }
+html.is-desktop-modern .ccz-lens ol { display: flex; flex-direction: column; gap: 5px; }
+html.is-desktop-modern .ccz-lens li {
+  display: grid; grid-template-columns: minmax(84px, 38%) minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
+  font: var(--lc-t-meta); animation: ccz-rise 420ms calc(var(--i, 0) * 50ms + 120ms) var(--lc-ease-enter) both;
+}
+html.is-desktop-modern .ccz-lens__markets li { grid-template-columns: minmax(84px, 38%) minmax(0, 1fr) auto; }
+html.is-desktop-modern .ccz-lens__label { color: var(--lc-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .ccz-lens__bar { position: relative; height: 8px; border-radius: 99px; background: var(--ccz-track); overflow: hidden; }
+html.is-desktop-modern .ccz-lens__bar i {
+  position: absolute; inset: 0; border-radius: inherit; background: var(--ccz-val);
+  transform-origin: left center; transform: scaleX(var(--v, 0));
+  transition: transform 700ms var(--lc-ease-standard);
+  animation: ccz-grow 860ms calc(var(--i, 0) * 60ms + 200ms) var(--lc-ease-enter) both;
+}
+html.is-desktop-modern .ccz-lens__funnel li:last-child .ccz-lens__bar i { background: rgba(var(--lc-ok-rgb), 0.78); }
+html.is-desktop-modern .ccz-lens__markets li.is-rest .ccz-lens__bar i { background: rgba(var(--lc-edge-rgb), 0.2); }
+html.is-desktop-modern .ccz-lens__n { color: var(--lc-ink-1); font-weight: 620; min-width: 52px; text-align: right; }
+html.is-desktop-modern .ccz-lens__drop { font-style: normal; color: var(--lc-ink-4); min-width: 46px; text-align: right; }
+
+/* ── AI assist ──────────────────────────────────────────────────────────── */
+html.is-desktop-modern .ccz-assist { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+html.is-desktop-modern .ccz-assist__tag { display: inline-flex; align-items: center; gap: 5px; font: var(--lc-t-label); color: var(--lc-ink-2); margin-right: 4px; }
+html.is-desktop-modern .ccz-assist__tag em { font-style: normal; font: var(--lc-t-eyebrow); letter-spacing: 0.08em; text-transform: uppercase; color: var(--lc-ink-3); padding: 2px 6px; border-radius: 99px; box-shadow: inset 0 0 0 1px var(--lc-hairline); }
+html.is-desktop-modern .ccz-assist__btn {
+  appearance: none; border: 0; cursor: pointer; height: 28px; padding: 0 12px; border-radius: 99px;
+  font: var(--lc-t-label); color: var(--lc-ink-1);
+  background: var(--lc-inner-bg);
+  box-shadow: inset 0 0 0 1px var(--lc-inner-edge), var(--lc-sheen-top);
+  transition: box-shadow var(--lc-dur-instant), transform var(--lc-dur-instant) var(--lc-ease-standard), background var(--lc-dur-instant);
+}
+html.is-desktop-modern .ccz-assist__btn:hover:not(:disabled) { background: var(--lc-glass-selected-fill); box-shadow: inset 0 0 0 1px var(--lc-glass-selected-line); transform: translateY(-1px); }
+html.is-desktop-modern .ccz-assist__btn:focus-visible { outline: 1px solid var(--lc-accent); outline-offset: 2px; }
+html.is-desktop-modern .ccz-assist__btn:disabled { cursor: not-allowed; color: var(--lc-ink-3); box-shadow: inset 0 0 0 1px var(--lc-hairline); }
+
+/* ── phone ──────────────────────────────────────────────────────────────── */
+html.is-desktop-modern .ccz-phone { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+html.is-desktop-modern .ccz-phone__device {
+  position: relative; width: min(100%, 300px); aspect-ratio: 9 / 16.5; max-height: 470px;
+  display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 38px; padding: 12px 10px 10px;
+  background: var(--lc-pane-mat-bg);
+  -webkit-backdrop-filter: var(--lc-pane-mat-filter);
+  backdrop-filter: var(--lc-pane-mat-filter);
+  box-shadow: inset 0 0 0 1.5px rgba(var(--lc-edge-rgb), 0.16), inset 0 0 0 7px rgba(var(--lc-shade-rgb), 0.35), var(--lc-d3-shadow);
+  animation: ccz-rise 600ms 120ms var(--lc-ease-enter) both;
+}
+html.is-desktop-modern .ccz-phone__notch { position: absolute; top: 14px; left: 50%; width: 76px; height: 20px; margin-left: -38px; border-radius: 12px; background: rgba(var(--lc-shade-rgb), 0.85); }
+html.is-desktop-modern .ccz-phone__bar { display: flex; align-items: center; gap: 8px; padding: 34px 10px 10px; box-shadow: inset 0 -1px 0 var(--lc-hairline); }
+html.is-desktop-modern .ccz-phone__avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: var(--lc-ink-2); background: var(--lc-inner-bg-hover); }
+html.is-desktop-modern .ccz-phone__who { display: flex; flex-direction: column; min-width: 0; }
+html.is-desktop-modern .ccz-phone__who b { font: 620 12.5px/1.2 var(--lc-font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .ccz-phone__who em { font: var(--lc-t-stamp); font-style: normal; color: var(--lc-ink-3); }
+html.is-desktop-modern .ccz-phone__thread { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 12px 8px; }
+html.is-desktop-modern .ccz-phone__bubble {
+  align-self: flex-end; max-width: 86%; padding: 9px 12px; border-radius: 18px 18px 5px 18px;
+  font: 450 13px/1.38 var(--lc-font-ui); color: var(--lc-ink-1); white-space: pre-wrap; overflow-wrap: anywhere;
+  background: rgba(var(--lc-ok-rgb), 0.22); box-shadow: inset 0 0 0 1px rgba(var(--lc-ok-rgb), 0.32);
+  animation: ccz-bubble 460ms var(--lc-ease-enter) both;
+}
+html.is-desktop-modern .ccz-phone__held, html.is-desktop-modern .ccz-phone__empty { margin: auto 0; text-align: center; font: var(--lc-t-meta); color: var(--lc-ink-3); }
+html.is-desktop-modern .ccz-phone__held { color: rgb(var(--lc-attn-rgb)); }
+html.is-desktop-modern .ccz-phone__compose { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 6px 4px; height: 34px; padding: 0 6px 0 14px; border-radius: 99px; box-shadow: inset 0 0 0 1px var(--lc-hairline); font: var(--lc-t-meta); color: var(--lc-ink-4); }
+html.is-desktop-modern .ccz-phone__compose i { width: 24px; height: 24px; border-radius: 50%; background: rgba(var(--lc-ok-rgb), 0.5); }
+html.is-desktop-modern .ccz-phone__cap { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; font: var(--lc-t-meta); color: var(--lc-ink-3); text-align: center; }
+html.is-desktop-modern .ccz-phone__cycle { display: inline-flex; align-items: center; gap: 4px; }
+html.is-desktop-modern .ccz-phone__cycle button { appearance: none; border: 0; background: var(--lc-inner-bg); color: var(--lc-ink-2); width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; cursor: pointer; }
+html.is-desktop-modern .ccz-phone__cycle button:hover { background: var(--lc-inner-bg-hover); color: var(--lc-ink-1); }
+
+/* ── motion ─────────────────────────────────────────────────────────────── */
+@keyframes ccz-rise { from { opacity: 0; transform: translateY(8px) scale(0.99); } to { opacity: 1; transform: none; } }
+@keyframes ccz-grow { from { transform: scaleX(0); } }
+@keyframes ccz-ring { from { stroke-dashoffset: 214; } }
+@keyframes ccz-pop { 0% { transform: scale(0.7); } 60% { transform: scale(1.12); } 100% { transform: none; } }
+@keyframes ccz-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@keyframes ccz-bubble { from { opacity: 0; transform: translateY(10px) scale(0.96); transform-origin: right bottom; } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern .ccz.is-story .ccz-plane, html.is-desktop-modern .ccz-story__step .ccz-story__dot, html.is-desktop-modern .ccz-lens li,
+  html.is-desktop-modern .ccz-lens__bar i, html.is-desktop-modern .ccz-ring__fg, html.is-desktop-modern .ccz-phone__device, html.is-desktop-modern .ccz-phone__bubble { animation: none; }
+  html.is-desktop-modern .ccz-story__track i, html.is-desktop-modern .ccz-lens__bar i, html.is-desktop-modern .ccz-ring__fg, html.is-desktop-modern .ccz-assist__btn { transition: none; }
+}
+[data-lc-motion='off'] .ccz.is-story .ccz-plane, [data-lc-motion='off'] .ccz-story__dot, [data-lc-motion='off'] .ccz-lens li, [data-lc-motion='off'] .ccz-lens__bar i,
+[data-lc-motion='off'] .ccz-ring__fg, [data-lc-motion='off'] .ccz-phone__device, [data-lc-motion='off'] .ccz-phone__bubble { animation: none !important; }
+[data-lc-motion='off'] .ccz-story__track i, [data-lc-motion='off'] .ccz-lens__bar i, [data-lc-motion='off'] .ccz-ring__fg { transition: none !important; }
