@@ -4,6 +4,7 @@ import { batchCounters, progressOf } from './model/research-model'
 import { isActiveStatus, needsOperator, taskStatus, TASK_STATUS_LABEL } from './model/run-status'
 import { selectRun, setUi, snapshotOf, useRuns, type RunSnapshot } from './runtime/agent-store'
 import { fmtUsd } from './ui/format'
+import { runningTurn, useAsk } from './ask/ask-store'
 import { AgentOrb, ProgressBar, ProvenanceBadge, Shimmer } from './ui/primitives'
 import './ui/agent.css'
 import './ui/agent-s3.css'
@@ -16,6 +17,7 @@ import './ui/agent-s3.css'
  */
 export default function AgentIndicator() {
   const runs = useRuns()
+  const asking = Boolean(runningTurn(useAsk()))
   const [open, setOpen] = useState(false)
   const snaps = runs.map((r) => snapshotOf(r.runId)).filter((s): s is RunSnapshot => Boolean(s))
   const active = snaps.filter((s) => s.research && isActiveStatus(taskStatus(s).status))
@@ -25,8 +27,8 @@ export default function AgentIndicator() {
   let done = 0; let planned = 0; let gold = 0
   for (const s of active) { const p = progressOf(s.research!); done += p.done; planned += p.planned; gold += batchCounters(s.research!).discoveries }
   const usd = simActive.reduce((n, s) => n + s.research!.accrued_usd, 0)
-  const running = active.some((s) => s.research!.running_count > 0)
-  const text = active.length
+  const running = asking || active.some((s) => s.research!.running_count > 0)
+  const text = asking && !active.length ? 'Agent · researching' : active.length
     ? `Research · ${active.length} job${active.length === 1 ? '' : 's'} · ${done}/${planned}${simActive.length && !liveActive.length ? ` · ${fmtUsd(usd)}` : ''}`
     : waiting.length ? `Agent · ${waiting.length} waiting on you` : 'Agent'
   const tag = liveActive.length && simActive.length ? 'mixed' : liveActive.length ? 'live' : simActive.length ? 'sim' : null

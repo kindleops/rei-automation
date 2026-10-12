@@ -1,35 +1,29 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Icon } from '../../../../shared/icons'
 import { LCIconButton, cx, useLcReducedMotion } from '../../../../shared/lc'
 import { RESEARCH_DEPTH_LABELS } from '../../contracts/contracts'
-import { useAgentContextSnapshot, type AgentContextSnapshot, type ContextChip } from '../../context/agent-context'
-import { DEFAULT_ASK, FIXTURES_AVAILABLE } from '../../fixtures'
 import { isTerminal, progressOf } from '../../model/research-model'
 import { featuredRun, isActiveStatus, needsOperator, taskStatus, TASK_STATUS_LABEL, type TaskStatus } from '../../model/run-status'
-import { openLivePreflight, refreshLiveCapability, selectRun, setUi, snapshotOf, startRun, useAgentUi, useLiveCapability, useRuns, useRunSnapshot, type RunSnapshot } from '../../runtime/agent-store'
-import { fmtClock, fmtElapsed, fmtUsd } from '../format'
+import { selectRun, setUi, snapshotOf, useAgentUi, useRuns, type RunSnapshot } from '../../runtime/agent-store'
+import { globalKeyAction, modelIndicator } from '../../ask/ask-model'
+import { activeThread, newThread, requestFocus, runningTurn, setPalette, showHistory, useAsk } from '../../ask/ask-store'
+import { AskPanel } from '../../ask/ui/AskPanel'
+import { useAskContext } from '../../ask/ui/use-ask-context'
+import { fmtElapsed, fmtUsd } from '../format'
 import { AgentOrb, ProgressBar, ProvenanceBadge, Shimmer } from '../primitives'
 import { nowWallOf, useTick } from '../hooks'
-import { RunStream } from '../stream/RunStream'
 
 export const DOCK_MIN = 380
 export const DOCK_MAX = 560
 
-const CAPABILITIES = [
-  { id: 'quick', label: '/quick-scan', hint: 'Quick Scan the linked property — LIVE, read-only, $0', live: true },
-  { id: 'research', label: '/research', hint: 'Deep Research replay — SIMULATED fixture', live: false },
-  { id: 'blocked', label: '/research-blocked', hint: 'Blocked county + conflict replay — SIMULATED', live: false },
-  { id: 'batch', label: '/batch', hint: '25-property batch replay — SIMULATED', live: false },
-] as const
-
 /**
- * THE AGENT DOCK (arch §9.1, S3 P1) — mounted once by the desktop shell, so
- * it persists across navigation. Top to bottom: what the agent can see (the
- * context strip follows the focused app and the linked selection), the
- * featured task (needs-you → running → recent), then either the run stream,
- * or a useful idle state: the one live action that applies here, recent
- * runs, and the simulated design fixtures — clearly separated.
+ * THE AGENT DOCK (arch §9.1; 8.5.10 Cursor-grade composer) — mounted once
+ * by the desktop shell, so it persists across navigation. Top to bottom: the
+ * thread title + actions (new · history · palette · workspace), a running
+ * Quick Scan task when there is one, then the ask panel: the thread's turns
+ * (step timeline, answer, evidence) and the composer (context pills, @ and /,
+ * model, budget). Strictly read-only; the server gates every call.
  */
 export function AgentDock() {
   const ui = useAgentUi()
@@ -85,88 +79,43 @@ function Spine() {
 
 function DockBody() {
   const ui = useAgentUi()
-  const ctx = useAgentContextSnapshot()
-  const cap = useLiveCapability()
-  const [removed, setRemoved] = useState<Set<string>>(new Set())
+  const s = useAsk()
   const snaps = useSnaps()
-  // a live run may already know the linked property's address (EG publishes the id only)
-  const knownAddress = ctx.property?.id && !ctx.property.address ? snaps.flatMap((s) => (s.mode === 'live' ? s.properties : [])).find((p) => p.property_id === ctx.property!.id && !p.address.startsWith('Property ••'))?.address ?? null : null
-  const chips = ctx.chips.filter((c) => !removed.has(c.id)).map((c) => (c.kind === 'property' && knownAddress ? { ...c, label: knownAddress } : c))
-  const conv = useRunSnapshot(ui.dockRunId)
-  const featured = featuredRun(snaps.filter((s) => s.record.runId !== ui.dockRunId))
-  const streamRef = useRef<HTMLDivElement>(null)
-  useTick(1000, Boolean(conv?.active) && conv?.record.frozenT === null)
-
-  useEffect(() => { if (cap.status === 'unknown') void refreshLiveCapability() }, [cap.status])
-
-  // follow the stream while it grows (scrolling up stops following)
-  const follow = useRef(true)
-  useEffect(() => {
-    const el = streamRef.current
-    if (el && follow.current && conv) el.scrollTop = el.scrollHeight
-  })
-
-  const onKey = (e: ReactKeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setUi({ dock: 'closed' }) } }
   const counts = useCounts(snaps)
-  const run = conv?.run ?? null
-  const elapsed = run?.created_at ? (run.ended_at ? Date.parse(run.ended_at) : nowWallOf(conv!)) - Date.parse(run.created_at) : 0
+  const featured = featuredRun(snaps)
+  const showTask = featured ? (isActiveStatus(taskStatus(featured).status) || needsOperator(taskStatus(featured).status)) : false
+  const { autoChips, quickScan, suggestions } = useAskContext()
+  const thread = activeThread(s)
+  const asking = Boolean(runningTurn(s))
+  const model = modelIndicator(s.status.data)
+
+  // Esc closes the dock (the composer closes its popover first); ⌘K inside
+  // the agent focuses the composer instead of opening the Command Deck
+  const onKey = (e: ReactKeyboardEvent) => {
+    if (e.key === 'Escape') { e.stopPropagation(); setUi({ dock: 'closed' }); return }
+    if (globalKeyAction(e, { insideAgent: true }) === 'focus-composer') { e.preventDefault(); e.stopPropagation(); requestFocus('dock') }
+  }
+  const sub = [asking ? 'Researching…' : null, counts.running ? `${counts.running} scan${counts.running === 1 ? '' : 's'} running` : null, counts.waiting ? `${counts.waiting} need${counts.waiting === 1 ? 's' : ''} you` : null].filter(Boolean).join(' · ') || (model.primary ? `Read-only · ${model.primary}` : 'Read-only research')
 
   return (
-    <div className="agx-dock__inner" onKeyDown={onKey}>
+    <div className="agx-dock__inner ak-dock" onKeyDown={onKey}>
       <DockResizer />
-      <header className="agx-dock__head">
-        <AgentOrb live={counts.running > 0} />
-        <div className="agx-dock__title">
-          <b>LeadCommand Agent</b>
-          <span className="agx-dock__sum">{[counts.running ? `${counts.running} running` : null, counts.waiting ? `${counts.waiting} need${counts.waiting === 1 ? 's' : ''} you` : null, counts.blocked ? `${counts.blocked} blocked` : null].filter(Boolean).join(' · ') || 'Idle'}</span>
+      <header className="ak-head">
+        <AgentOrb live={asking || counts.running > 0} size={18} />
+        <div className="ak-head__t">
+          <b>{s.view === 'history' ? 'History' : thread?.title ?? 'Agent'}</b>
+          <span>{sub}</span>
         </div>
-        <LCIconButton icon="maximize" label="Expand to the workspace" shortcut={['⌘', '⇧', 'J']} size="sm" onClick={() => selectRun(featured?.record.runId ?? ui.activeRunId, { wsOpen: true })} />
+        <LCIconButton icon="plus" label="New question" size="sm" onClick={() => newThread()} />
+        <LCIconButton icon="clock" label="History" size="sm" selected={s.view === 'history'} onClick={() => showHistory(s.view !== 'history')} />
+        <LCIconButton icon="command" label="Pop out to the palette" shortcut={['⌘', '⇧', 'L']} size="sm" onClick={() => { setUi({ dock: 'closed' }); setPalette(true) }} />
+        {snaps.length ? <LCIconButton icon="maximize" label="Open the research workspace" shortcut={['⌘', '⇧', 'J']} size="sm" onClick={() => selectRun(featured?.record.runId ?? ui.activeRunId, { wsOpen: true })} /> : null}
         <LCIconButton icon="chevron-right" label="Collapse to the spine" size="sm" onClick={() => setUi({ dock: 'spine' })} />
         <LCIconButton icon="x" label="Close the agent" shortcut={['⌘', 'J']} size="sm" onClick={() => setUi({ dock: 'closed' })} />
       </header>
-
-      <ContextStrip chips={chips} onRemove={(id) => setRemoved((s) => new Set([...s, id]))} />
-
-      {featured ? <TaskCard s={featured} /> : null}
-
-      <div className="agx-dock__stream" ref={streamRef} onScroll={(e) => { const el = e.currentTarget; follow.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 24 }}>
-        {conv?.run ? (
-          <>
-            <div className="agx-runhead">
-              <div className="agx-runhead__t"><b>{run!.title}</b><ProvenanceBadge mode={conv.mode} compact /></div>
-              <div className="agx-runhead__m"><span>{TASK_STATUS_LABEL[taskStatus(conv).status]}</span><span>{fmtElapsed(elapsed)}</span><span>{fmtUsd(run!.accrued_usd)} of {fmtUsd(run!.cap_usd)} cap</span><button type="button" className="agx-link" onClick={() => setUi({ dockRunId: null })}>Close conversation</button></div>
-            </div>
-            <RunStream snap={conv} />
-          </>
-        ) : <IdleState ctx={ctx} snaps={snaps} featuredId={featured?.record.runId ?? null} />}
-      </div>
-
-      <Composer onSend={(text) => startRun('conversation', { operatorText: text, open: 'dock' })} chips={chips} ctx={ctx} />
+      {showTask && featured ? <div className="ak-task"><TaskCard s={featured} /></div> : null}
+      <AskPanel surface="dock" autoChips={autoChips} onClose={() => setUi({ dock: 'closed' })} quickScan={quickScan} suggestions={suggestions} />
     </div>
-  )
-}
-
-/* ── context: follows the focused app and the linked selection ────────── */
-
-function ContextStrip({ chips, onRemove }: { chips: ContextChip[]; onRemove: (id: string) => void }) {
-  // plain keyed rows with a CSS arrival (an exit animation could leave a stale app chip behind on fast navigation)
-  return (
-    <div className="agx-dock__ctx" aria-label="What the agent can see">
-      <span className="agx-dock__ctxk">Sees</span>
-      <div className="agx-dock__chips">
-        {chips.length ? chips.map((c) => <span key={c.id} className="agx-dock__chipw"><Chip chip={c} onRemove={() => onRemove(c.id)} /></span>) : <span className="agx-muted">Nothing — the agent sees only what you type.</span>}
-      </div>
-    </div>
-  )
-}
-
-function Chip({ chip, onRemove }: { chip: ContextChip; onRemove: () => void }) {
-  return (
-    <span className={cx('agx-ctxchip', `is-${chip.kind}`)}>
-      <Icon name={chip.kind === 'property' ? 'home' : 'layers'} size={11} />
-      <b>{chip.label}</b>{chip.detail ? <small>{chip.detail}</small> : null}
-      <button type="button" aria-label={`Remove ${chip.label} from the context`} onClick={onRemove}><Icon name="x" size={9} /></button>
-    </span>
   )
 }
 
@@ -203,138 +152,6 @@ function TaskCard({ s }: { s: RunSnapshot }) {
         <span className="agx-task__open">Open <Icon name="chevron-right" size={11} /></span>
       </span>
     </button>
-  )
-}
-
-/* ── idle: the one live action here, recent runs, then the fixtures ───── */
-
-function IdleState({ ctx, snaps, featuredId }: { ctx: AgentContextSnapshot; snaps: RunSnapshot[]; featuredId: string | null }) {
-  const cap = useLiveCapability()
-  const [fixturesOpen, setFixturesOpen] = useState(false)
-  const recent = snaps.filter((s) => s.record.runId !== featuredId).slice(0, 4)
-  const pid = ctx.property?.id ?? null
-  const known = pid ? snaps.find((s) => s.mode === 'live' && s.properties.some((p) => p.property_id === pid && !p.address.startsWith('Property ••'))) : null
-  const address = ctx.property?.address ?? known?.properties.find((p) => p.property_id === pid)?.address ?? null
-  const liveReady = cap.status === 'available'
-  const canScan = Boolean(pid) && liveReady
-  const scan = () => { if (pid) openLivePreflight({ propertyIds: [pid], addresses: [address], originApp: ctx.property?.sourceApp ?? ctx.app, originLabel: `${ctx.property?.sourceLabel ?? ctx.appLabel ?? 'Linked'} selection` }) }
-  return (
-    <div className="agx-idle">
-      <section className="agx-idle__primary" aria-label="Suggested action">
-        <span className="agx-eyebrow">Suggested here</span>
-        <button type="button" className={cx('agx-act', 'is-primary', !canScan && 'is-disabled')} disabled={!canScan} onClick={scan}>
-          <span className="agx-act__ic"><Icon name="radar" size={16} /></span>
-          <span className="agx-act__t">
-            <b>{pid ? `Quick Scan ${address ?? 'the linked property'}` : 'Quick Scan a property'}</b>
-            <small>{!pid ? 'Select a property in Entity Graph — the dock picks it up as context.' : liveReady ? 'Reads LeadCommand records for this property · $0 · read-only · AI off · preflight first' : cap.status === 'checking' || cap.status === 'unknown' ? 'Checking that the live route is available…' : cap.reason ?? 'Live Quick Scan is unavailable on this API.'}</small>
-          </span>
-          {canScan ? <span className="agx-act__badge">Live</span> : null}
-        </button>
-        {ctx.selection && ctx.selection.count > 1 ? (
-          <button type="button" className={cx('agx-act', !liveReady && 'is-disabled')} disabled={!liveReady}
-            onClick={() => openLivePreflight({ propertyIds: ctx.selection!.property_ids, addresses: ctx.selection!.property_ids.map((id) => (ctx.selection!.focused?.property_id === id ? ctx.selection!.focused.address : null)), originApp: 'entity-graph', originLabel: 'Entity Graph selection' })}>
-            <span className="agx-act__ic"><Icon name="layers" size={15} /></span>
-            <span className="agx-act__t"><b>Quick Scan the {ctx.selection.count} selected properties</b><small>The server takes the first test batch and says how many it defers · $0 · read-only</small></span>
-          </button>
-        ) : null}
-        {!liveReady && cap.status === 'unavailable' ? <button type="button" className="agx-link agx-idle__retry" onClick={() => void refreshLiveCapability()}>Check again</button> : null}
-      </section>
-
-      {recent.length ? (
-        <section className="agx-idle__recent" aria-label="Recent runs">
-          <span className="agx-eyebrow">Recent</span>
-          {recent.map((s) => {
-            const st = taskStatus(s).status
-            return (
-              <button key={s.record.runId} type="button" className="agx-recent" onClick={() => (s.run ? setUi({ dockRunId: s.record.runId }) : selectRun(s.record.runId, { wsOpen: true }))}>
-                <span className={cx('agx-recent__dot', `is-${STATUS_TONE[st]}`)} aria-hidden="true" />
-                <span className="agx-recent__t"><b>{s.title}</b><small>{TASK_STATUS_LABEL[st]} · {fmtClock(new Date(s.record.createdAt).toISOString())}</small></span>
-                <span className={cx('agx-recent__mode', `is-${s.mode}`)}>{s.mode === 'live' ? 'Live' : 'Sim'}</span>
-              </button>
-            )
-          })}
-        </section>
-      ) : null}
-
-      <section className="agx-idle__can" aria-label="What the agent can do now">
-        <span className="agx-eyebrow">In S3 the agent can</span>
-        <ul>
-          <li><b>Quick Scan</b> a linked property — live, read-only, $0</li>
-          <li><b>Keep runs going</b> while you navigate — they survive reload</li>
-          <li className="is-off"><b>Not yet:</b> model answers, Deep Research, Diligence, writes or sends</li>
-        </ul>
-      </section>
-
-      {FIXTURES_AVAILABLE ? <section className={cx('agx-idle__fx', fixturesOpen && 'is-open')} aria-label="Design fixtures">
-        <button type="button" className="agx-idle__fxh" onClick={() => setFixturesOpen((o) => !o)} aria-expanded={fixturesOpen}>
-          <span className="agx-eyebrow">Design fixtures</span><span className="agx-sim">SIMULATED</span><Icon name={fixturesOpen ? 'chevron-up' : 'chevron-down'} size={12} />
-        </button>
-        {fixturesOpen ? (
-          <div className="agx-idle__fxl">
-            <FixtureRow icon="radar" title="Deep Research replay" sub="Synthetic property · recorded log" onClick={() => startRun('single-deep', { open: 'workspace' })} />
-            <FixtureRow icon="shield" title="Blocked county + conflict" sub="Tax collector refuses automated access" onClick={() => startRun('blocked-conflict', { open: 'workspace' })} />
-            <FixtureRow icon="layers" title="25-property batch" sub="Pilot counties · concurrency 2" onClick={() => startRun('batch-25', { open: 'workspace' })} />
-            <FixtureRow icon="message" title="Recorded conversation" sub={`“${DEFAULT_ASK}”`} onClick={() => setUi({ composer: DEFAULT_ASK })} />
-          </div>
-        ) : null}
-      </section> : null}
-    </div>
-  )
-}
-
-function FixtureRow({ icon, title, sub, onClick }: { icon: string; title: string; sub: string; onClick: () => void }) {
-  return (
-    <button type="button" className="agx-act is-fixture" onClick={onClick}>
-      <span className="agx-act__ic"><Icon name={icon as 'radar'} size={14} /></span>
-      <span className="agx-act__t"><b>{title}</b><small>{sub}</small></span>
-    </button>
-  )
-}
-
-/* ── composer ──────────────────────────────────────────────────────────── */
-
-function Composer({ onSend, chips, ctx }: { onSend: (text: string) => void; chips: ContextChip[]; ctx: AgentContextSnapshot }) {
-  const ui = useAgentUi()
-  const cap = useLiveCapability()
-  const ta = useRef<HTMLTextAreaElement>(null)
-  const text = ui.composer
-  const slash = text.startsWith('/') ? text.slice(1).toLowerCase() : null
-  const caps = slash !== null ? CAPABILITIES.filter((c) => (c.live || FIXTURES_AVAILABLE) && c.label.slice(1).startsWith(slash)) : []
-  useEffect(() => { const el = ta.current; if (!el) return; el.style.height = 'auto'; el.style.height = `${Math.min(160, el.scrollHeight)}px` }, [text])
-  useEffect(() => { ta.current?.focus({ preventScroll: true }) }, [])
-  const send = () => {
-    const t = text.trim()
-    if (!t) return
-    if (t.startsWith('/')) { runCap(caps[0]?.id); return }
-    if (!FIXTURES_AVAILABLE) return // AI is off: there is no model to answer, and no recorded turn ships in production
-    setUi({ composer: '' })
-    onSend(t)
-  }
-  const runCap = (id: string | undefined) => {
-    setUi({ composer: '' })
-    if (id === 'quick' && ctx.property?.id && cap.status === 'available') openLivePreflight({ propertyIds: [ctx.property.id], addresses: [ctx.property.address], originApp: ctx.property.sourceApp ?? ctx.app, originLabel: `${ctx.property.sourceLabel ?? ctx.appLabel ?? 'Linked'} selection` })
-    else if (id === 'research') startRun('single-deep', { open: 'workspace' })
-    else if (id === 'blocked') startRun('blocked-conflict', { open: 'workspace' })
-    else if (id === 'batch') startRun('batch-25', { open: 'workspace' })
-  }
-  return (
-    <div className="agx-composer">
-      {caps.length ? (
-        <ul className="agx-caps" role="listbox" aria-label="Capabilities">
-          {caps.map((c) => {
-            const off = c.live && (!ctx.property?.id || cap.status !== 'available')
-            return <li key={c.id} role="option" aria-selected={false} aria-disabled={off}><button type="button" disabled={off} onClick={() => runCap(c.id)}><b>{c.label}<span className={cx('agx-caps__mode', c.live ? 'is-live' : 'is-sim')}>{c.live ? 'Live' : 'Sim'}</span></b><small>{off ? (ctx.property?.id ? cap.reason ?? 'Live route unavailable' : 'Select a property first') : c.hint}</small></button></li>
-          })}
-        </ul>
-      ) : null}
-      <textarea ref={ta} value={text} rows={1} placeholder="Ask LeadCommand…  / capabilities" aria-label="Message the agent"
-        onChange={(e) => setUi({ composer: e.target.value })}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
-      <div className="agx-composer__foot">
-        <span className="agx-muted">{chips.length ? `${chips.length} context item${chips.length === 1 ? '' : 's'}` : 'No context'} · AI is off{FIXTURES_AVAILABLE ? <> — a typed question replays a <b className="agx-sim-ink">simulated</b> recorded turn</> : ' — use / for Quick Scan'}</span>
-        <button type="button" className="agx-send" disabled={!text.trim() || (!FIXTURES_AVAILABLE && !text.trim().startsWith('/'))} onClick={send} aria-label="Send"><Icon name="send" size={14} /></button>
-      </div>
-    </div>
   )
 }
 

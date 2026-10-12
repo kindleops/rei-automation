@@ -62,6 +62,8 @@ export function agentDeckCommands(query: string, ctx: { subject: string | null }
   if (WORKSPACE_WORDS.some((w) => w.startsWith(q))) {
     out.push({ id: 'agent:workspace', type: 'system_action', title: 'Open the agent workspace', subtitle: 'Runs · canvas · inspector', icon: 'layout-split', score: 1060, payload: { __workspace: { kind: 'agent', action: 'workspace', query } }, meta: { provider: 'agent', groupLabel: 'Agent', hint: '⌘⇧J' } })
   }
-  if (AGENT_FIXTURES_ENABLED) out.push({ id: 'agent:ask', type: 'system_action', title: `Ask LeadCommand: ${query.trim()}`, subtitle: ctx.subject ? `Opens the agent dock with your question and the current context (${ctx.subject})` : 'Opens the agent dock with your question and the current context', icon: 'spark', score: 1000, payload: { __workspace: { kind: 'agent', action: 'ask', query: query.trim() } }, meta: { provider: 'agent', groupLabel: 'Agent', hint: tag } })
+  // 8.5.10: the read-only research agent answers for real, so this row ships
+  // (it only fills the composer — nothing is sent until the operator sends it)
+  out.push({ id: 'agent:ask', type: 'system_action', title: `Ask LeadCommand: ${query.trim()}`, subtitle: ctx.subject ? `Opens the agent with your question and the current context (${ctx.subject})` : 'Opens the agent with your question and the current context', icon: 'spark', score: 1000, payload: { __workspace: { kind: 'agent', action: 'ask', query: query.trim() } }, meta: { provider: 'agent', groupLabel: 'Agent', hint: '⌘L · read-only' } })
   return out
 }
