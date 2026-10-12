@@ -43,6 +43,12 @@ const RONALD_DECISION = Object.freeze({
   computed_at: '2026-09-12T18:56:40.805Z',
 })
 
+// The clock every freshness verdict here is judged at: one day after the
+// decision was computed (inside the 30-day horizon). Injected, never the real
+// now() — on 2026-10-12 the wall clock crossed the horizon and "current"
+// decisions turned stale, failing the suite on an unchanged SHA.
+const DECISION_NOW = new Date('2026-09-13T18:56:40.805Z')
+
 // The Podio-era import column for the SAME property. Never an answer.
 const RONALD_LEGACY_CASH_OFFER = 26_110
 
@@ -61,7 +67,7 @@ const RONALD_PROPERTY_ROW = Object.freeze({
   final_acquisition_score: 91,
 })
 
-function stampedDecision(decision, propertyRow, sellerFacts = {}, at = new Date()) {
+function stampedDecision(decision, propertyRow, sellerFacts = {}, at = DECISION_NOW) {
   return {
     ...decision,
     evidence: {
@@ -97,7 +103,7 @@ function harness({ score = null, propertyRow = RONALD_PROPERTY_ROW, engine } = {
 
 test('AUTHORITY: no decision row runs the engine rather than reporting unavailable', async () => {
   const h = harness({ score: null })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
 
   assert.equal(result.freshness.status, DECISION_STATUS.NOT_RUN)
   assert.equal(result.freshness.reason, 'no_decision_row')
@@ -108,13 +114,13 @@ test('AUTHORITY: no decision row runs the engine rather than reporting unavailab
 
 test('AUTHORITY: an absent decision never yields the legacy cash_offer', async () => {
   const h = harness({ score: null })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
   assert.notEqual(result.decision.recommended_cash_offer, RONALD_LEGACY_CASH_OFFER)
 })
 
 test('AUTHORITY: a failed engine run is a HOLD, and still not a legacy fallback', async () => {
   const h = harness({ score: null, engine: async () => ({ ok: false, error: 'property_not_found' }) })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
 
   assert.equal(result.status, DECISION_STATUS.ENGINE_FAILED)
   assert.equal(result.error, 'property_not_found')
@@ -123,7 +129,7 @@ test('AUTHORITY: a failed engine run is a HOLD, and still not a legacy fallback'
 
 test('AUTHORITY: an engine that throws becomes a status, not an exception', async () => {
   const h = harness({ score: null, engine: async () => { throw new Error('comp_loader_timeout') } })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
   assert.equal(result.status, DECISION_STATUS.ENGINE_FAILED)
   assert.equal(result.error, 'comp_loader_timeout')
 })
@@ -131,9 +137,9 @@ test('AUTHORITY: an engine that throws becomes a status, not an exception', asyn
 // ── A current row is reused ────────────────────────────────────────────────
 
 test('AUTHORITY: an unchanged property reuses its decision and runs nothing', async () => {
-  const score = stampedDecision(RONALD_DECISION, RONALD_PROPERTY_ROW, {}, new Date())
+  const score = stampedDecision(RONALD_DECISION, RONALD_PROPERTY_ROW, {}, DECISION_NOW)
   const h = harness({ score })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
 
   assert.equal(result.status, DECISION_STATUS.CURRENT)
   assert.equal(result.ran, false)
@@ -155,7 +161,7 @@ test('AUTHORITY: PostgREST numeric strings do not fake a change', () => {
 test('AUTHORITY: a changed seller ask makes the decision stale and reruns', async () => {
   const score = stampedDecision(RONALD_DECISION, RONALD_PROPERTY_ROW, { asking_price: 150_000 })
   const h = harness({ score })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, {
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW,
     sellerFacts: { asking_price: { value: 135_000 } },
     deps: h.deps,
   })
@@ -171,7 +177,7 @@ test('AUTHORITY: a changed seller ask makes the decision stale and reruns', asyn
 test('AUTHORITY: a changed valuation anchor makes the decision stale', async () => {
   const score = stampedDecision(RONALD_DECISION, RONALD_PROPERTY_ROW)
   const h = harness({ score, propertyRow: { ...RONALD_PROPERTY_ROW, estimated_value: 210_000 } })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
   assert.equal(result.freshness.reason, 'material_inputs_changed')
   assert.equal(result.ran, true)
 })
@@ -184,7 +190,7 @@ test('AUTHORITY: a changed LEGACY column does not make the decision stale', asyn
     score,
     propertyRow: { ...RONALD_PROPERTY_ROW, cash_offer: 999_999, final_acquisition_score: 1 },
   })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
   assert.equal(result.status, DECISION_STATUS.CURRENT)
   assert.equal(result.ran, false)
 })
@@ -227,7 +233,7 @@ test('AUTHORITY: an older engine version is stale regardless of inputs', () => {
 test('AUTHORITY: force reruns a decision that is already current', async () => {
   const score = stampedDecision(RONALD_DECISION, RONALD_PROPERTY_ROW)
   const h = harness({ score })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, {
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW,
     force: true,
     reason: 'manual_deal_intelligence_run',
     deps: h.deps,
@@ -244,10 +250,10 @@ test('AUTHORITY: manual and automated runs stamp identical inputs', async () => 
   const automated = harness({ score: null })
   const facts = { asking_price: { value: 150_000 } }
 
-  const a = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, {
+  const a = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW,
     force: true, sellerFacts: facts, deps: manual.deps,
   })
-  const b = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, {
+  const b = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW,
     sellerFacts: facts, deps: automated.deps,
   })
 
@@ -257,7 +263,7 @@ test('AUTHORITY: manual and automated runs stamp identical inputs', async () => 
 
 test('AUTHORITY: the engine is handed the stamp it must record', async () => {
   const h = harness({ score: null })
-  await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
   assert.equal(h.calls[0].stamp.fingerprint_version, 'decision_inputs_v1')
   assert.equal(h.calls[0].stamp.engine_version, CURRENT_ENGINE_VERSION)
 })
@@ -267,7 +273,7 @@ test('AUTHORITY: the engine is handed the stamp it must record', async () => {
 test('RONALD: canonical economics come from the decision row, not properties', async () => {
   const score = stampedDecision(RONALD_DECISION, RONALD_PROPERTY_ROW)
   const h = harness({ score })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
 
   assert.equal(result.decision.recommended_cash_offer, 62_300)
   assert.equal(result.decision.minimum_acceptable_offer, 57_300)
@@ -278,7 +284,7 @@ test('RONALD: canonical economics come from the decision row, not properties', a
 test('RONALD: an absurd legacy cash_offer changes nothing', async () => {
   const score = stampedDecision(RONALD_DECISION, RONALD_PROPERTY_ROW)
   const h = harness({ score, propertyRow: { ...RONALD_PROPERTY_ROW, cash_offer: 999_999 } })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
 
   assert.equal(result.decision.recommended_cash_offer, 62_300)
   assert.notEqual(result.decision.recommended_cash_offer, 999_999)
@@ -291,7 +297,7 @@ test('RONALD: deleting the canonical record yields run-the-engine, never 999,999
     propertyRow: { ...RONALD_PROPERTY_ROW, cash_offer: 999_999 },
     engine: async () => ({ ok: false, error: 'engine_unavailable' }),
   })
-  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { deps: h.deps })
+  const result = await ensurePropertyAcquisitionDecision(RONALD_PROPERTY_ID, { now: DECISION_NOW, deps: h.deps })
 
   assert.equal(result.freshness.status, DECISION_STATUS.NOT_RUN)
   assert.equal(result.status, DECISION_STATUS.ENGINE_FAILED)
