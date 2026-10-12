@@ -3815,11 +3815,19 @@ function missingOptionalGraphColumn(error) {
  * and re-ordered by the graph's total order, counts are summed. Each graph row
  * has exactly one property_id, so the chunks partition the audience and the
  * sums are exact.
+ *
+ * Every explicit id list on a single-valued graph column chunks the same way
+ * (EXPLICIT_ID_CHUNK_FIELDS): each graph row carries exactly one value of it.
+ * Every reader of the audience — count, row pages, the whole-cohort keyset
+ * worker (Composer readiness / map preview) — goes through this, so no single
+ * GET carries more than EXPLICIT_PROPERTY_CHUNK ids (P0 2026-10-12: HOT LEADS'
+ * 1,484 pinned ids → 400 Bad Request → "cohort_rows_unavailable").
  */
 export const EXPLICIT_PROPERTY_CHUNK = 150
+export const EXPLICIT_ID_CHUNK_FIELDS = Object.freeze(['properties.property_id', 'properties.master_owner_id'])
 export function explicitPropertyChunkOptions(options = {}, size = EXPLICIT_PROPERTY_CHUNK) {
   const supported = options.catalog_filters?.supported || []
-  const index = supported.findIndex((filter) => clean(filter?.field_key || filter?.fieldKey) === 'properties.property_id'
+  const index = supported.findIndex((filter) => EXPLICIT_ID_CHUNK_FIELDS.includes(clean(filter?.field_key || filter?.fieldKey))
     && ['is_any_of', 'in', 'eq'].includes(clean(filter?.operator) || 'is_any_of')
     && Array.isArray(filter?.value)
     && filter.value.length > size)
@@ -3834,6 +3842,17 @@ export function explicitPropertyChunkOptions(options = {}, size = EXPLICIT_PROPE
       supported: supported.map((filter, i) => (i === index ? { ...filter, operator: 'is_any_of', value: part } : filter)),
     },
   }))
+}
+
+/**
+ * Every chunk of an audience, flattened: options whose explicit id lists are
+ * all ≤ size (a second large list is chunked inside each part of the first —
+ * still a partition, since both are ANDed). [options] when nothing is large.
+ */
+export function explicitIdChunkParts(options = {}, size = EXPLICIT_PROPERTY_CHUNK) {
+  const parts = explicitPropertyChunkOptions(options, size)
+  if (!parts) return [options]
+  return parts.flatMap((part) => explicitIdChunkParts(part, size))
 }
 
 const desc = (a, b) => {
@@ -3856,15 +3875,20 @@ export function compareGraphReadOrder(a = {}, b = {}) {
 async function countCampaignGraphRows({ supabase, options, extra = null, requireQueueEligible = false }) {
   const chunked = explicitPropertyChunkOptions(options)
   if (chunked) {
-    let count = 0
-    const warnings = []
-    for (const part of chunked) {
-      const result = await countCampaignGraphRows({ supabase, options: part, extra, requireQueueEligible })
-      warnings.push(...(result.warnings || []))
-      if (result.ok === false) return { ok: false, count: 0, warnings: uniqueClean(warnings) }
-      count += Number(result.count || 0)
-    }
-    return { ok: true, count, warnings: uniqueClean(warnings) }
+    // Exact: the chunks partition the audience, so the sum IS the count. A few
+    // chunk counts run at once (10,000 pinned ids = 67 HEAD counts).
+    const results = new Array(chunked.length)
+    let cursor = 0
+    await Promise.all(Array.from({ length: Math.min(4, chunked.length) }, async () => {
+      while (cursor < chunked.length) {
+        const index = cursor++
+        results[index] = await countCampaignGraphRows({ supabase, options: chunked[index], extra, requireQueueEligible })
+          .catch((error) => ({ ok: false, count: 0, warnings: [`campaign_target_graph_count_unavailable:${errorMessage(error)}`] }))
+      }
+    }))
+    const warnings = uniqueClean(results.flatMap((result) => result?.warnings || []))
+    if (results.some((result) => result?.ok === false)) return { ok: false, count: 0, warnings }
+    return { ok: true, count: results.reduce((sum, result) => sum + Number(result.count || 0), 0), warnings }
   }
   const warnings = []
   let query = campaignGraphQuery(supabase, {
@@ -6700,7 +6724,14 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
   // statements. Order is irrelevant to a whole-cohort count (nothing is
   // sliced; the dedupe picks a primary by comparator, not by position).
   const HEX = '0123456789abcdef'
-  const partitions = [...HEX].map((ch, i) => ({ lo: ch, hi: HEX[i + 1] ?? null }))
+  // A large explicit id list (a pinned Entity Graph selection) is read in
+  // disjoint ≤ EXPLICIT_PROPERTY_CHUNK-id chunks — one GET can't carry 1,484
+  // ids. Each chunk is a few hundred rows at most, so it is one keyset range;
+  // the chunks partition the audience, so rows never repeat across them.
+  const chunkParts = explicitIdChunkParts(options)
+  const partitions = chunkParts.length > 1
+    ? chunkParts.map((partOptions) => ({ lo: null, hi: null, options: partOptions }))
+    : [...HEX].map((ch, i) => ({ lo: ch, hi: HEX[i + 1] ?? null, options }))
   const pages = []
   const warnings = []
   let failure = null
@@ -6713,10 +6744,10 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
       for (;;) {
         if (failure || fetched >= readable) return
         let query = campaignGraphQuery(supabase, { area, table: CAMPAIGN_TARGET_GRAPH_TABLE, columns: CAMPAIGN_TARGET_GRAPH_SELECT })
-          .gte('graph_id', part.lo)
+        if (part.lo) query = query.gte('graph_id', part.lo)
         if (part.hi) query = query.lt('graph_id', part.hi)
         if (last) query = query.gt('graph_id', last)
-        query = applyCampaignGraphFilters(query.order('graph_id', { ascending: true }).limit(CAMPAIGN_TARGET_GRAPH_PAGE_SIZE), options, warnings, { requireQueueEligible: true })
+        query = applyCampaignGraphFilters(query.order('graph_id', { ascending: true }).limit(CAMPAIGN_TARGET_GRAPH_PAGE_SIZE), part.options, warnings, { requireQueueEligible: true })
         const { data, error } = await query
         if (error) { failure = errorMessage(error); return }
         const page = Array.isArray(data) ? data : []
