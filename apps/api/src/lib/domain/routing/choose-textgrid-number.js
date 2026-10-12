@@ -18,6 +18,7 @@ import {
 
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { getSystemValue } from "@/lib/system-control.js";
 
 const DEFAULT_FETCH_LIMIT = 200;
 
@@ -421,6 +422,17 @@ function buildNoSelectionResult({
   };
 }
 
+// system_control routing switches, read through the shared cached reader. An
+// unreadable switch is null (the caller/env/default decides), never an error.
+async function readRoutingSwitch(key) {
+  try {
+    const value = await getSystemValue(key);
+    return value === undefined || value === null || value === "" ? null : value;
+  } catch {
+    return null;
+  }
+}
+
 export async function chooseTextgridNumber({
   context = null,
   classification = null,
@@ -454,17 +466,34 @@ export async function chooseTextgridNumber({
     first_touch ?? context?.summary?.first_touch,
     Number(context?.summary?.touch_number || 0) === 1
   );
+  // GLOBAL ROUTING (owner, 10-02; regression found 10-12): exact market → alias →
+  // approved regional cluster → hold, for EVERY send. The operator switches live
+  // in system_control; a caller that does not pass them must not silently fall
+  // back to exact-market-only. Before this, the override below was computed and
+  // never used, so every first touch required an exact-market number and HOT
+  // LEADS held 875 ready sellers (Detroit, Cleveland, Phoenix…) as
+  // no_local_sender_number although their regional pools had live numbers.
+  const passed_require_local = require_local_routing ?? context?.summary?.require_local_routing ?? null;
+  const passed_regional_first_touch =
+    allow_regional_fallback_for_first_touch ?? context?.summary?.allow_regional_fallback_for_first_touch ?? null;
+  const [system_require_local, system_regional_first_touch] = await Promise.all([
+    passed_require_local === null ? readRoutingSwitch("require_local_routing") : null,
+    passed_regional_first_touch === null ? readRoutingSwitch("allow_regional_fallback_for_first_touch") : null,
+  ]);
   const local_routing_required = asBoolean(
-    require_local_routing ?? context?.summary?.require_local_routing ?? process.env.REQUIRE_LOCAL_ROUTING,
+    passed_require_local ??
+      system_require_local ??
+      process.env.REQUIRE_LOCAL_ROUTING,
     false
   );
   const first_touch_regional_override = asBoolean(
-    allow_regional_fallback_for_first_touch ??
-      context?.summary?.allow_regional_fallback_for_first_touch ??
+    passed_regional_first_touch ??
+      system_regional_first_touch ??
       process.env.ALLOW_REGIONAL_FALLBACK_FOR_FIRST_TOUCH,
     false
   );
-  const exact_market_required = local_routing_required || first_touch_required;
+  const exact_market_required =
+    local_routing_required || (first_touch_required && !first_touch_regional_override);
 
   info("routing.choose_textgrid_number_started", {
     phone_item_id: context?.ids?.phone_item_id || null,
