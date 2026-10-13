@@ -42,6 +42,13 @@ const LABELS = Object.fromEntries(
     e.intent === "unclear" && isBareNoToS1(id) ? Object.fromEntries(Object.keys(e).map((k) => [k, BARE_NO_RELABEL[k] ?? e[k]])) : e,
   ])
 );
+// OWNER RULE 2026-10-13 (S3 deflection): #202 "Questioned “What's Your
+// Proposal”" answers OUR asking-price question with an offer request. It no
+// longer gets a second asking-price ask: it requires the S4 condition_probe
+// question, which this 10-06 catalog snapshot does not hold -> fails closed to
+// review (with today's prod catalog it is the condition question).
+const S3_DEFLECTION_RELABEL = { "202": { outcome: "review", outcome_with_en_es_drafts: "review" } };
+for (const [id, patch] of Object.entries(S3_DEFLECTION_RELABEL)) LABELS[id] = { ...LABELS[id], ...patch };
 const BARE_NO_RELABELLED = Object.keys(REVIEWED_LABELS).filter((id) => REVIEWED_LABELS[id].intent === "unclear" && isBareNoToS1(id)).length;
 const CATALOG = read("2026-10-06-safe-templates-en-es.json").rows;
 const T = (use_case, language, template_id, template_body) => ({ id: template_id, template_id, use_case, language, stage_code: null, is_active: true, safe_for_auto_reply: true, reply_mode: "auto_reply", template_body });
@@ -97,13 +104,15 @@ test("coverage floor: share of inbound that auto-responds / is handled without a
   // only old reply was a condition question before the price).
   // 167: owner approved 2026-10-10 — #390 (bare "No" to the Spanish price
   // question) is also held by the Stage 3 rule.
-  assert.ok(auto >= 167, `today's catalog: ${auto} auto`);
+  // 166: owner rule 2026-10-13 -- #202 (offer request after our S3 question)
+  // requires the S4 condition question, absent from this catalog snapshot.
+  assert.ok(auto >= 167 - 1, `today's catalog: ${auto} auto`);
   assert.ok(handled >= 328, `today's catalog: ${handled} handled`);
   // 201 before the 2026-10-09 owner rule (same three); 198 before the
   // 2026-10-13 owner decision -- the 23 bare "No" rows were "auto" only via the
   // ownership clarifier draft and are now the 30-day nurture (handled, no reply).
   assert.equal(BARE_NO_RELABELLED, 23);
-  assert.ok(autoDrafts >= 198 - BARE_NO_RELABELLED, `with EN/ES drafts: ${autoDrafts} auto`);
+  assert.ok(autoDrafts >= 198 - BARE_NO_RELABELLED - 1, `with EN/ES drafts: ${autoDrafts} auto`); // -1: #202, as above
   assert.ok(handledDrafts >= 359, `with EN/ES drafts: ${handledDrafts} handled`);
 });
 

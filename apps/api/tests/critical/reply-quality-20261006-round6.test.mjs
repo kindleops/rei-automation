@@ -44,7 +44,7 @@ const LABELS = {
   "010": { intent: "not_interested", outcome: "no_reply_by_design" },
   "011": { intent: "not_interested", outcome: "no_reply_by_design" },
   "012": { intent: "unclear", outcome: "review" },
-  "013": { intent: "asks_offer", outcome: "auto_reply" },
+  "013": { intent: "asks_offer", outcome: "review" }, // owner 2026-10-13: offer request after our S3 question -> S4 condition_probe, absent from this catalog snapshot -> fails closed (never a second asking-price ask)
   "014": { intent: "not_interested", outcome: "no_reply_by_design" },
   "015": { intent: "seller_interested", outcome: "auto_reply" },
   "016": { intent: "ownership_confirmed", outcome: "auto_reply" },

@@ -64,7 +64,9 @@ test("(a) EN/ES: no S1/S2 review except a language that is not switched on", asy
   // 220 before the owner rule of 2026-10-09 took the three no-price condition
   // probes above out of automation (and S3 asking-price reroutes added others).
   // 218: owner approved 2026-10-10 (the Stage 3 rule holds #390).
-  assert.ok(auto >= 218, `auto-replies: ${auto} (round 8 with EN/ES drafts: 201)`);
+  // 195: owner decision 2026-10-13 -- the 23 bare "No" replies to S1 were
+  // "auto" only via the ownership clarifier; they are now the 30-day nurture.
+  assert.ok(auto >= 218 - 23, `auto-replies: ${auto} (round 8 with EN/ES drafts: 201)`);
 });
 
 test("(b) all drafts active: zero review", async () => {

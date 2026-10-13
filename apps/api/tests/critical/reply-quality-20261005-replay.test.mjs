@@ -132,12 +132,13 @@ const LABELS = {
   "030": { intent: "who_is_this", auto: true },
   "039": { intent: "unclear", review: true },
   "012": { intent: "hostile_or_legal", auto: false },
-  // ── bare "No" to the ownership question: ONE clarifier (owner decision 2026-10-06) ──
-  "001": { intent: "unclear", auto: true, review: false },
-  "013": { intent: "unclear", auto: true, review: false },
-  "019": { intent: "unclear", auto: true, review: false },
-  "033": { intent: "unclear", auto: true, review: false },
-  "037": { intent: "unclear", auto: true, review: false },
+  // ── bare "No" to the ownership question: a decline -> 30-day nurture, never
+  // suppressed (owner decision 2026-10-13; superseded the 2026-10-06 clarifier) ──
+  "001": { intent: "not_interested", review: false, suppress: "none" },
+  "013": { intent: "not_interested", review: false, suppress: "none" },
+  "019": { intent: "not_interested", review: false, suppress: "none" },
+  "033": { intent: "not_interested", review: false, suppress: "none" },
+  "037": { intent: "not_interested", review: false, suppress: "none" },
   // ── classifier-level intent (live layers refine these) ──
   "009": { intent: "wrong_number" },
   "024": { intent: "wrong_number" },
