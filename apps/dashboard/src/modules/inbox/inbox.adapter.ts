@@ -1302,6 +1302,8 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           rows: reconcileFetchedRowsWithRealtime(model.threads, realtimeOverlaysRef.current.list(), bucketKey),
           cursor: model.pagination?.nextCursor ?? null,
           hasMore: Boolean(model.pagination?.hasMore),
+          // realtime rejoin / polling / catch-up: refresh the head, keep loaded pages
+          preserveLoadedTail: normalizedOptions._timeoutMode === 'auto_refresh' || options._automatic === true,
         })
       }
       if (isInboxDebugEnabled()) console.log('[INBOX_COMMIT_DONE]', {

@@ -35,7 +35,7 @@ export interface InboxStoreState {
 export type InboxStoreAction =
   | { type: 'SWITCH_BUCKET'; bucketKey: string }
   | { type: 'BUCKET_FETCH_START'; bucketKey: string; requestId: string }
-  | { type: 'BUCKET_FETCH_DONE'; bucketKey: string; requestId: string; rows: unknown[]; cursor: string | null; hasMore: boolean }
+  | { type: 'BUCKET_FETCH_DONE'; bucketKey: string; requestId: string; rows: unknown[]; cursor: string | null; hasMore: boolean; preserveLoadedTail?: boolean }
   | { type: 'BUCKET_FETCH_ERROR'; bucketKey: string; requestId: string; error: string }
   | { type: 'BUCKET_APPEND_ROWS'; bucketKey: string; requestId: string; rows: unknown[]; cursor: string | null; hasMore: boolean }
   | { type: 'SELECT_THREAD'; threadKey: string | null }
@@ -343,6 +343,42 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
       const bucket = getBucket(state, action.bucketKey)
       // Stale guard: only the latest requestId for this bucket may commit rows.
       if (bucket.lastRequestId !== action.requestId) return state
+      /*
+       * A BACKGROUND REFRESH NEVER THROWS AWAY LOADED PAGES (2026-10-13).
+       * Realtime rejoin, polling and other auto refreshes re-read page 1. They
+       * used to replace the whole list with it: an operator who had pressed
+       * Load More watched 80 rows collapse back to the first 30 and lost their
+       * place. Now page 1 refreshes the head (new/updated threads move to the
+       * top), every already-loaded row below it is kept in order, and the
+       * deeper cursor survives. A deliberate load (tab switch, boot, manual
+       * refresh) still replaces.
+       */
+      if (action.preserveLoadedTail && bucket.rows.length > action.rows.length) {
+        const keyOf = (r: unknown) => {
+          const row = r as Record<string, unknown>
+          return (row.threadKey as string) || (row.id as string) || ''
+        }
+        const headKeys = new Set(action.rows.map(keyOf).filter(Boolean))
+        const tail = bucket.rows.filter((r) => {
+          const key = keyOf(r)
+          return !key || !headKeys.has(key)
+        })
+        return {
+          ...state,
+          buckets: {
+            ...state.buckets,
+            [action.bucketKey]: {
+              ...bucket,
+              rows: [...action.rows, ...tail],
+              loading: false,
+              error: null,
+              cursor: bucket.cursor,
+              hasMore: bucket.hasMore,
+              lastLoadedAt: new Date().toISOString(),
+            },
+          },
+        }
+      }
       return {
         ...state,
         buckets: {
