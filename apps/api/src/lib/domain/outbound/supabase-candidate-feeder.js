@@ -3145,6 +3145,17 @@ export function countSendableSendersByMarket(rows = [], markets = [], options = 
   return out;
 }
 
+// system_control routing switch for a caller that did not pass it. deps.getSystemValue
+// (tests) wins; an unreadable switch is null so the safe default applies.
+async function readRoutingSwitch(key, deps = {}) {
+  try {
+    const value = typeof deps.getSystemValue === "function" ? await deps.getSystemValue(key) : await getSystemValue(key);
+    return value === undefined || value === null || value === "" ? null : value;
+  } catch {
+    return null;
+  }
+}
+
 export async function chooseTextgridNumber(candidate = {}, options = {}, deps = {}) {
   if (typeof deps.chooseTextgridNumber === "function") {
     return deps.chooseTextgridNumber(candidate, options);
@@ -3206,9 +3217,19 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
     options.first_touch ?? candidate.is_first_touch,
     has_explicit_touch ? Number(candidate.touch_number || 1) === 1 : false
   );
-  const require_local_routing = asBoolean(options.require_local_routing, false);
+  // GLOBAL ROUTING (owner 10-02; second regression found 10-12): the campaign
+  // planner (launch plan, rolling feeder, readiness) calls THIS router with
+  // first_touch=true and never passes the operator switches, so they defaulted
+  // to false and every campaign first touch required an exact-market number —
+  // HOT LEADS held 875 ready sellers as no_local_sender_number. A switch the
+  // caller did not pass is read live from system_control (cached reader).
+  const require_local_routing = asBoolean(
+    options.require_local_routing ?? (await readRoutingSwitch("require_local_routing", deps)),
+    false
+  );
   const allow_regional_fallback_for_first_touch = asBoolean(
-    options.allow_regional_fallback_for_first_touch,
+    options.allow_regional_fallback_for_first_touch ??
+      (await readRoutingSwitch("allow_regional_fallback_for_first_touch", deps)),
     false
   );
   const exact_market_required =

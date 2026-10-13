@@ -74,3 +74,46 @@ test("regional never crosses clusters: Detroit is never sent from Los Angeles", 
   const selected = await chooseTextgridNumber({ context: detroit(), candidate_records: [POOL[1]], first_touch: true, allow_regional_fallback_for_first_touch: true });
   assert.ok(!selected?.item_id);
 });
+
+// ── The campaign planner's router (supabase-candidate-feeder) ────────────────
+// Second regression, same day: the launch plan / rolling feeder / readiness call
+// THIS router with first_touch=true and never pass the switches, so they
+// defaulted to false and HOT LEADS stayed held after the first fix shipped.
+import { chooseTextgridNumber as choosePlannerSender } from "@/lib/domain/outbound/supabase-candidate-feeder.js";
+
+const fleet = (rows) => ({
+  from() {
+    return { select() { return { limit: () => Promise.resolve({ data: rows, error: null }) }; } };
+  },
+});
+const tg = (id, market) => ({ id, market, phone_number: `+1612555${String(1000 + id).slice(-4)}`, status: "active", messages_sent_today: 0 });
+const switches = (values) => async (key) => values[key] ?? null;
+
+test("planner router: first touch with no switch passed follows system_control=true → regional pool", async () => {
+  const result = await choosePlannerSender(
+    { market: "Detroit, MI", state: "MI" },
+    { routing_safe_only: true, first_touch: true },
+    { supabase: fleet([tg(1, "Minneapolis, MN"), tg(2, "Los Angeles, CA")]), getSystemValue: switches({ allow_regional_fallback_for_first_touch: "true", require_local_routing: "false" }) }
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.routing_tier, "approved_regional_fallback");
+  assert.equal(result.selected_textgrid_market, "Minneapolis, MN");
+});
+
+test("planner router: system_control=false still holds a first touch with no local number (never mis-routes)", async () => {
+  const result = await choosePlannerSender(
+    { market: "Detroit, MI", state: "MI" },
+    { routing_safe_only: true, first_touch: true },
+    { supabase: fleet([tg(1, "Minneapolis, MN")]), getSystemValue: switches({ allow_regional_fallback_for_first_touch: "false", require_local_routing: "false" }) }
+  );
+  assert.notEqual(result.ok, true);
+});
+
+test("planner router: an explicitly passed switch beats system_control", async () => {
+  const result = await choosePlannerSender(
+    { market: "Detroit, MI", state: "MI" },
+    { routing_safe_only: true, first_touch: true, allow_regional_fallback_for_first_touch: false },
+    { supabase: fleet([tg(1, "Minneapolis, MN")]), getSystemValue: switches({ allow_regional_fallback_for_first_touch: "true" }) }
+  );
+  assert.notEqual(result.ok, true);
+});
