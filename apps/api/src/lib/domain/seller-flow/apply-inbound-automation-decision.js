@@ -1353,6 +1353,80 @@ export function applyStage3AskingPriceRule(
   };
 }
 
+// ── S3 deflection: never re-ask the asking price (owner, 2026-10-13) ────────
+// Live (send_queue e57581b6, cancelled by the owner): our S3 "What price would
+// you be looking for?" was delivered, the seller answered "What would you like
+// to offer?", and the Stage 3 rule above re-routed the offer request to the
+// asking-price question again -- the repeat guard then picked another S3
+// variant ("What price would you have in mind for the property?").
+// Owner rules: never repeat a question already asked; S1 -> S5 in order;
+// automation never invents or sends a number. So once THIS cycle's S3 question
+// was sent, an explicit offer request (asks_offer / offer_request) advances to
+// S4: the condition question while the condition is missing, else a person
+// (the offer is a human / engine decision). This keys on the INTENT and the
+// asked-already fact, never on a template id, so no S3 variant can slip
+// through. The S3 no-response follow-up after real silence is not an inbound
+// turn and is untouched.
+export const S3_ASK_USE_CASES = Object.freeze(new Set(["seller_asking_price", "asking_price_follow_up", "asking_price"]));
+export const S4_DEFLECTION_USE_CASE = "condition_probe";
+
+function isS3AskUseCase(value) {
+  const v = lower(value);
+  return S3_ASK_USE_CASES.has(v) || /^s3_/.test(v);
+}
+
+/**
+ * Pure. Has the current conversation cycle already asked the S3 asking-price
+ * question? Reads the validated conversation context the classifier bound
+ * (our last outbound) and the cycle's send_queue rows (use_case_template).
+ */
+export function resolveS3AlreadyAsked({ classification = null, recent_outbound = [] } = {}) {
+  if (isS3AskUseCase(classification?.context_use_case)) return true;
+  return asArray(recent_outbound).some((row) => isS3AskUseCase(row?.use_case_template));
+}
+
+/**
+ * Pure. After the S3 question was asked, an explicit offer request is answered
+ * with the S4 condition question (condition unknown) or held for a person
+ * (condition known) -- never another asking-price ask, never a number.
+ * Anything else is returned unchanged.
+ */
+export function applyS3DeflectionRule(
+  decision = {},
+  { classification = null, s3_already_asked = false, seller_price_known = false, condition_known = false, stage = null, strategy_directive_applied = false } = {}
+) {
+  if (!decision || typeof decision !== "object") return decision;
+  if (!s3_already_asked || seller_price_known || strategy_directive_applied) return decision;
+  if (decision.should_suppress_contact || !decision.should_queue_reply) return decision;
+  if (!PRICE_QUESTION_INTENTS.has(lower(classification?.primary_intent))) return decision;
+  if (POST_OFFER_STAGES.has(lower(stage))) return decision;
+  const rerouted_from = clean(decision.required_template_use_case) || clean(decision.route_hint) || null;
+  if (condition_known) {
+    return {
+      ...decision,
+      should_queue_reply: false,
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      next_action: "mark_human_review",
+      human_review_reason: "offer_request_after_s3_condition_known",
+      audit_reason: "offer_request_after_s3_condition_known",
+      s3_deflection: { rerouted_from, outcome: "human_hold" },
+    };
+  }
+  return {
+    ...decision,
+    condition_questions_forbidden: false,
+    route_hint: S4_DEFLECTION_USE_CASE,
+    allowed_template_stages: [S4_DEFLECTION_USE_CASE],
+    required_template_use_case: S4_DEFLECTION_USE_CASE,
+    ...(asArray(decision.v2_template_preference).length ? { v2_template_preference: [S4_DEFLECTION_USE_CASE] } : {}),
+    template_authority: "s3_deflection_rule",
+    template_authority_reason: "offer_request_after_s3_asked",
+    audit_reason: "offer_request_after_s3_advance_to_condition",
+    s3_deflection: { rerouted_from, outcome: "condition_question" },
+  };
+}
+
 // ── Stage 4 condition: ask ONLY when the condition is actually missing ──
 // (owner, 2026-10-10, binding). The live S4 rows (lc-s4-condition-res/com-en-01)
 // are a single question; asking it of a seller who already described the
@@ -2213,7 +2287,7 @@ export async function loadRecentThreadOutbound({ supabase = null, threadKey = nu
   try {
     const { data, error } = await supabase
       .from("send_queue")
-      .select("id,template_id,message_body,message_type,source,queue_status,created_at")
+      .select("id,template_id,use_case_template,message_body,message_type,source,queue_status,created_at")
       .in("to_phone_number", phones)
       .in("queue_status", REPEAT_LOOKBACK_STATUSES)
       .order("created_at", { ascending: false })
@@ -3315,11 +3389,32 @@ export async function executeInboundAutomationDecision({
     strategy_directive_applied,
   });
 
+  // OWNER RULE (2026-10-13): once this cycle's S3 asking-price question was
+  // sent, an offer request ("what would you offer?") is never answered with a
+  // second asking-price ask: S4 condition, or a person when condition is known.
+  const condition_known_now = resolveSellerConditionKnown({ explicit: sellerConditionKnown, classification, message });
+  if (PRICE_QUESTION_INTENTS.has(lower(classification?.primary_intent)) && base_decision.should_queue_reply) {
+    const s3_recent_outbound = await loadRecentThreadOutbound({ supabase, threadKey });
+    base_decision = applyS3DeflectionRule(base_decision, {
+      classification,
+      s3_already_asked: resolveS3AlreadyAsked({ classification, recent_outbound: s3_recent_outbound }),
+      seller_price_known: resolveSellerPriceKnown({ explicit: sellerAskingPriceKnown, classification, decision: base_decision }),
+      condition_known: condition_known_now,
+      stage:
+        transitionDirective?.stage_after ||
+        effectiveStageBefore ||
+        clean(context?.summary?.conversation_stage) ||
+        clean(latestThreadContext?.summary?.conversation_stage) ||
+        null,
+      strategy_directive_applied,
+    });
+  }
+
   // OWNER RULE (2026-10-10): the S4 condition question only when the
   // condition is actually missing — never re-ask what the seller answered.
   // Runs after the Stage 3 rule, so a price-unknown thread still gets S3.
   base_decision = applyConditionKnownRule(base_decision, {
-    condition_known: resolveSellerConditionKnown({ explicit: sellerConditionKnown, classification, message }),
+    condition_known: condition_known_now,
   });
 
   info("[AUTO_REPLY_DECISION]", {

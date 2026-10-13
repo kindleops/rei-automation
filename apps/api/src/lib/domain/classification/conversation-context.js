@@ -4,7 +4,7 @@
  * Invalid / missing / stale / conflicting context → status only; no override.
  */
 
-import { matchBareNegative } from "@/lib/domain/classification/seller-reply-families.js";
+import { matchBareNegative, matchOfferDeflection } from "@/lib/domain/classification/seller-reply-families.js";
 
 /** Strict E.164 for conversation-context binding (matches Brain identity rules). */
 export function isCanonicalE164(thread) {
@@ -405,6 +405,26 @@ export function applyContextualShortReply(messageText, validated) {
           context_age_ms: validated.context.context_age_ms,
         };
       }
+    }
+  }
+  // 2026-10-13: "You tell me" to OUR asking-price question turns it back on
+  // us -- an offer request (asks_offer), never a price and never unclear.
+  {
+    const uc = validated.context.last_outbound_use_case;
+    const qt = validated.context.last_outbound_question_type;
+    if ((uc === 'asking_price' || qt === 'asking_price') && matchOfferDeflection(messageText)) {
+      return {
+        applied: true,
+        primary_intent: 'asks_offer',
+        labels: ['asks_offer', 'offer_deflection_to_asking_price_question'],
+        rule_id: 'ctx_offer_deflection_after_asking_price',
+        confidence: 0.86,
+        rationale: 'seller_turned_our_asking_price_question_back_as_an_offer_request',
+        evidence_span: String(messageText).trim(),
+        context_message_id: validated.context.last_outbound_message_id,
+        context_use_case: uc,
+        context_age_ms: validated.context.context_age_ms,
+      };
     }
   }
   if (!isShortContextualReply(messageText)) {

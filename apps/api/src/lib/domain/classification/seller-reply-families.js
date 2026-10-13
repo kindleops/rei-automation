@@ -160,3 +160,17 @@ export function matchPreparingToSell(message) {
   if (/\b(?:not|no|never|nunca)\s+(?:la\s+|lo\s+)?(?:going\s+to\s+|gonna\s+|voy\s+a\s+|vamos\s+a\s+)?(?:sell|vender|venderla|venderlo|vendo|vendemos)\b/.test(folded)) return false;
   return PREPARING_TO_SELL_PATTERNS.some((re) => re.test(folded));
 }
+
+// ── 6. OFFER DEFLECTION (asks_offer, bound to OUR asking-price question) ──
+// "You tell me", "you make the offer", "you first", "dime tú": the seller
+// turns our S3 question back on us. Only a caller holding the asking-price
+// context may read it as an offer request.
+const OFFER_DEFLECTION_RE =
+  /^(?:(?:well|idk|i\s+don'?t\s+know|i\s+dont\s+know|not\s+sure|no\s+idea)\s+)?(?:you\s+tell\s+me|u\s+tell\s+me|you\s+first|you\s+go\s+first|you\s+(?:make|give)\s+(?:me\s+)?(?:the|an|your)\s+offer|make\s+me\s+(?:an|your)\s+(?:offer|best\s+offer)|(?:what'?s|whats|what\s+is)\s+your\s+(?:offer|number|best\s+offer)|what\s+(?:would|will|can|do)\s+(?:you|u)\s+(?:like\s+to\s+)?(?:offer|pay|give)(?:\s+me)?|dime\s+tu|digame\s+usted|usted\s+diga|haga\s+(?:me\s+)?una\s+oferta|hagame\s+una\s+oferta|cuanto\s+(?:me\s+)?(?:ofrece|ofreces|da|das|paga|pagas))$/;
+
+export function matchOfferDeflection(message) {
+  if (typeof message !== "string" || !message.trim() || message.length > 80) return false;
+  const folded = foldSellerReply(message);
+  if (!folded || STOP_WORD_RE.test(folded)) return false;
+  return OFFER_DEFLECTION_RE.test(folded);
+}
