@@ -80,6 +80,16 @@ function apiToolsFor(registry, { includeEscalation, includeResult = true, web = 
   return defs
 }
 
+// ── capability plane registration hook: appended after the read tools, before the cache breakpoint ──
+function withCapabilityTools(defs, hook) {
+  if (!hook) return defs
+  const extra = hook.toolDefs()
+  if (!extra.length) return defs
+  const last = defs.length - 1
+  const { cache_control, ...plain } = defs[last]
+  return [...defs.slice(0, last), plain, ...extra.slice(0, -1), { ...extra[extra.length - 1], cache_control }]
+}
+
 const SYSTEM_BLOCKS = Object.freeze([{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }])
 const CONVERSATION_BLOCKS = Object.freeze([{ type: 'text', text: CONVERSATION_PROMPT }])
 // web tools are offered only while the prompt is small enough for the inflated worst case to stay priced and cheap
@@ -157,7 +167,7 @@ const CANCEL_REASON = Object.freeze({ code: 'CANCELLED' })
  *   env?: object, now?: () => number, log?: (o: object) => void,
  * }} deps
  */
-export function createAskService({ store, registry, provider, resolver, createServices, env = process.env, now = () => Date.now(), log = null }) {
+export function createAskService({ store, registry, provider, resolver, createServices, env = process.env, now = () => Date.now(), log = null, capabilityHook = null }) {
   if (!store || !registry || !provider || !resolver || typeof createServices !== 'function') throw new Error('ask service dependencies required')
   if (registry.readOnly !== true || registry.sealed !== true) throw refuse('REGISTRY_NOT_READ_ONLY', 'the research registry must be read-only and sealed')
   const active = new Map()
@@ -330,6 +340,8 @@ export function createAskService({ store, registry, provider, resolver, createSe
   }
 
   async function runTool(run, services, block) {
+    // ── capability plane registration hook (agent/capabilities/ask-hook.js; absent ⇒ read-only as before) ──
+    if (capabilityHook?.owns(block.name)) return capabilityHook.run({ apiName: block.name, input: block.input && typeof block.input === 'object' ? block.input : {}, run })
     const name = fromApiName(block.name)
     const input = block.input && typeof block.input === 'object' ? block.input : {}
     const ph = paramsHash(input)
@@ -452,7 +464,7 @@ export function createAskService({ store, registry, provider, resolver, createSe
           const web = route === 'default' && !mustAnswer && promptNow <= WEB_PROMPT_MAX_BYTES ? webToolsFor({ env, used: run.web }) : []
           const request = {
             max_tokens: route === 'escalation' ? RESEARCH_LIMITS.escalation_max_tokens : RESEARCH_LIMITS.default_max_tokens,
-            tools: apiToolsFor(registry, { includeEscalation: route === 'default' && run.escalatedCalls < RESEARCH_HARD_CEILINGS.escalation_calls_per_run, web }),
+            tools: withCapabilityTools(apiToolsFor(registry, { includeEscalation: route === 'default' && run.escalatedCalls < RESEARCH_HARD_CEILINGS.escalation_calls_per_run, web }), capabilityHook),
             messages,
             tool_choice: mustAnswer ? { type: 'none' } : undefined,
             effort: route === 'escalation' ? 'medium' : 'low',
