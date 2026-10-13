@@ -543,7 +543,9 @@ export function detectMessageLanguage(message) {
   if (/\b(?:marhaba|huna|astathmir|ahlan|hal\s+\S+\s+lak)\b/.test(folded)) return "Arabic";
   if (/\b(?:bonjour|aviez|avez|vous|prix demande|propriete)\b/.test(folded)) return "French";
   if (/\b(?:ola|voce|proprietario|imovel|sou\s+\w+|e sua propriedade|ainda e)\b/.test(folded)) return "Portuguese";
-  if (/\b(?:hola|soy|eres|dueno|duena|propiedad|todavia|sigues|estaria|estas|usted|venta|vender|aqui|gracias)\b/.test(folded) || /[¿¡]/.test(message)) return "Spanish";
+  // 2026-10-13: "Mandamela por texto...cual es el nombre de tu compañia?" and
+  // "Que nesesitas" were answered in English (no keyword below matched).
+  if (/\b(?:hola|soy|eres|dueno|duena|propiedad|todavia|sigues|estaria|estas|usted|venta|vender|aqui|gracias|cual|nombre|compania|empresa|mandame|mandamela|necesitas?|nesesitas?|quieres|tienes|estamos)\b/.test(folded) || /[¿¡]/.test(message)) return "Spanish";
   if (/\b(?:the|this|is|are|you|your|i|do|own|still|hello|hi|hey|yours|understand|speak|english)\b/.test(folded)) return "English";
   return null;
 }

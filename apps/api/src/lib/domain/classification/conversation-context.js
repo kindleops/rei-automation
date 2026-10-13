@@ -4,6 +4,8 @@
  * Invalid / missing / stale / conflicting context → status only; no override.
  */
 
+import { matchBareNegative } from "@/lib/domain/classification/seller-reply-families.js";
+
 /** Strict E.164 for conversation-context binding (matches Brain identity rules). */
 export function isCanonicalE164(thread) {
   if (thread == null) return false;
@@ -335,17 +337,23 @@ const BARE_NO_RE = /^(?:no+|nope|nah|nel|no i do not|no i dont|i do not|no i am 
 export { BARE_NO_RE };
 const NO_LONGER_OWNER_RE = /^(?:not anymore|no longer|not any more|ya no|no ya no)$/u;
 
-// OWNER DECISION 2026-10-06: a bare "No" to the ownership question gets ONE
-// clarifier ("Got it. Are you connected to the property, or do I have the
-// wrong number?", sms_templates use_case ownership_connection_clarifier). That
-// is the default 'clarify' mode: the classifier keeps the answer `unclear`
-// (rule ctx_no_after_ownership_check) and its automation_decision names the
-// clarifier use case. LC_BARE_NO_OWNERSHIP_MODE=non_owner remains available
-// to bind it straight to wrong_number instead.
-export const BARE_NO_OWNERSHIP_MODES = Object.freeze(['clarify', 'non_owner']);
+// OWNER DECISION 2026-10-13 (supersedes 2026-10-06): a bare negative ("No",
+// "Nope", "No!!!!!", "Not really", "No gracias Carlos!") to the S1 ownership
+// question, with NO ownership-denial words, is a NOT INTERESTED: the same
+// 30-day nurture as an explicit "not interested" -- never wrong_number, never
+// suppressed (rule ctx_bare_no_after_ownership_check_not_interested; the
+// family is seller-reply-families.js matchBareNegative). That is the default
+// 'not_interested' mode. Ownership answers with denial words ("No I don't",
+// "No I'm not", "Not anymore") keep the clarify hold below.
+// LC_BARE_NO_OWNERSHIP_MODE=clarify restores the 2026-10-06 behaviour (bare
+// "No" held `unclear` for the ownership_connection_clarifier), and
+// LC_BARE_NO_OWNERSHIP_MODE=non_owner binds it straight to wrong_number.
+export const BARE_NO_OWNERSHIP_MODES = Object.freeze(['not_interested', 'clarify', 'non_owner']);
 export function bareNoOwnershipMode() {
   const raw = String(process.env.LC_BARE_NO_OWNERSHIP_MODE ?? '').trim().toLowerCase();
-  return raw === 'non_owner' ? 'non_owner' : 'clarify';
+  if (raw === 'non_owner') return 'non_owner';
+  if (raw === 'clarify') return 'clarify';
+  return 'not_interested';
 }
 
 // "Possibly" / "Maybe" (2026-10-06): to OUR proposal question it is an open
@@ -371,6 +379,33 @@ export function isShortContextualReply(text) {
 export function applyContextualShortReply(messageText, validated) {
   if (!validated || validated.context_status !== 'valid' || !validated.context) {
     return { applied: false };
+  }
+  // 2026-10-13: a bare negative to the S1 ownership question (no ownership-
+  // denial words; see bareNoOwnershipMode) is a decline -> 30-day nurture.
+  // Checked before the short-reply gate so a sign-off name ("No gracias
+  // Carlos!") cannot hide it.
+  {
+    const uc = validated.context.last_outbound_use_case;
+    const qt = validated.context.last_outbound_question_type;
+    if ((uc === 'ownership_check' || qt === 'ownership') && bareNoOwnershipMode() === 'not_interested') {
+      const bare = matchBareNegative(messageText, {
+        names: [validated.context.last_outbound_agent, validated.context.last_outbound_addressee].filter(Boolean),
+      });
+      if (bare) {
+        return {
+          applied: true,
+          primary_intent: 'not_interested',
+          labels: ['not_interested', 'bare_negative_to_ownership_question'],
+          rule_id: 'ctx_bare_no_after_ownership_check_not_interested',
+          confidence: 0.88,
+          rationale: 'bare_negative_without_ownership_denial_to_ownership_question_is_a_decline',
+          evidence_span: String(messageText).trim(),
+          context_message_id: validated.context.last_outbound_message_id,
+          context_use_case: uc,
+          context_age_ms: validated.context.context_age_ms,
+        };
+      }
+    }
   }
   if (!isShortContextualReply(messageText)) {
     return { applied: false };

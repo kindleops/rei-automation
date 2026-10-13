@@ -121,8 +121,8 @@ test("Pedro G Gonzalez: a bare App Store URL is unclear/review, never asking_pri
 
 // ── 4. bare "No" bound to the question ──────────────────────────────────────
 
-// HELD behind LC_BARE_NO_OWNERSHIP_MODE (default "clarify" = previous behaviour)
-// until the owner decides: archiving a number is a strong action.
+// LC_BARE_NO_OWNERSHIP_MODE: default "not_interested" (owner 2026-10-13);
+// "clarify" = the 2026-10-06 behaviour; "non_owner" archives (a strong action).
 async function withBareNoMode(mode, fn) {
   const prev = process.env.LC_BARE_NO_OWNERSHIP_MODE;
   if (mode == null) delete process.env.LC_BARE_NO_OWNERSHIP_MODE;
@@ -140,8 +140,29 @@ const NO_OPENERS = [
   "Hello William, this is Alex. I have been investing in Spring. Just checking, do you own 23227 Briarcreek Blvd?",
 ];
 
-test("DEFAULT: bare 'No' to the ownership question keeps the previous clarification behaviour (no archive)", async () => {
+test("DEFAULT (owner 2026-10-13): a bare 'No' to the ownership question is a decline (30-day nurture); denial words keep the clarification hold", async () => {
   await withBareNoMode(null, async () => {
+    for (const opener of NO_OPENERS) {
+      const ctx = await contextAfter(opener, { template_use_case: "ownership_check" });
+      for (const message of ["No", "No.", "Nope"]) {
+        const r = await run(message, ctx);
+        assert.equal(r.primary_intent, "not_interested", `${message} after ${opener}`);
+        assert.ok(r.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_not_interested"), message);
+        assert.notEqual(r.automation_decision.suppression_action, "archive_wrong_number", message);
+        assert.notEqual(r.automation_decision.suppression_action, "opt_out", message);
+      }
+      for (const message of ["No I don't", "Not anymore"]) {
+        const r = await run(message, ctx);
+        assert.equal(r.primary_intent, "unclear", `${message} after ${opener}`);
+        assert.ok(r.secondary_intents.includes("ownership_denial_needs_clarification"), message);
+        assert.equal(r.automation_decision.clarification_use_case, "ownership_connection_clarifier", message);
+      }
+    }
+  });
+});
+
+test("FLAG clarify: bare 'No' to the ownership question keeps the 2026-10-06 clarification behaviour (no archive)", async () => {
+  await withBareNoMode("clarify", async () => {
     for (const opener of NO_OPENERS) {
       const ctx = await contextAfter(opener, { template_use_case: "ownership_check" });
       for (const message of ["No", "No.", "Nope", "No I don't", "Not anymore"]) {

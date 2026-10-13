@@ -130,14 +130,17 @@ test("an emoji never confirms ownership, a price, an acceptance or a contract (S
   }
 });
 
-test("explicit denials answer the ownership question even when the context is valid; a bare 'No' still asks", async () => {
+test("explicit denials answer the ownership question even when the context is valid; a bare 'No' is a decline (owner 2026-10-13)", async () => {
   const ctx = contextFor({ id: "ctx", context: "ownership_check", previous_outbound: "Hi Pat, this is Sam. Do you still own 123 Main St?" });
   assert.equal((await classify("Wrong number", null, { heuristicOnly: true, conversation_context: ctx })).primary_intent, "wrong_number");
   assert.equal((await classify("Not mine", null, { heuristicOnly: true, conversation_context: ctx })).primary_intent, "wrong_number");
   assert.equal((await classify("I sold it", null, { heuristicOnly: true, conversation_context: ctx })).primary_intent, "sold_property");
   const bare = await classify("No", null, { heuristicOnly: true, conversation_context: ctx });
-  assert.equal(bare.primary_intent, "unclear");
-  assert.ok(bare.secondary_intents.includes("ownership_denial_needs_clarification"));
+  assert.equal(bare.primary_intent, "not_interested");
+  assert.ok(bare.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_not_interested"));
+  const denial = await classify("No I don't", null, { heuristicOnly: true, conversation_context: ctx });
+  assert.equal(denial.primary_intent, "unclear");
+  assert.ok(denial.secondary_intents.includes("ownership_denial_needs_clarification"));
 });
 
 test("detector negatives: ordinary seller sentences never trip the new rules", async () => {

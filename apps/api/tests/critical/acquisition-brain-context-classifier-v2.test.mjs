@@ -156,7 +156,9 @@ test("contextual yes/no across outbound questions", async () => {
     heuristicOnly: true,
     conversation_context: baseCtx("ownership_check"),
   });
-  assert.equal(noOwn.primary_intent, "unclear");
+  // Owner 2026-10-13: a bare "no" to the ownership question is a decline (30-day nurture).
+  assert.equal(noOwn.primary_intent, "not_interested");
+  assert.ok(noOwn.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_not_interested"));
 
   const noProp = await classify("no", null, {
     heuristicOnly: true,

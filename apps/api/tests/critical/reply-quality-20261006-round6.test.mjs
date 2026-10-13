@@ -38,8 +38,8 @@ const LABELS = {
   "004": { intent: "unclear", outcome: "review" },
   "005": { intent: "unclear", outcome: "review" },
   "006": { intent: "unclear", outcome: "review" },
-  "007": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
-  "008": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "007": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
+  "008": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
   "009": { intent: "who_is_this", outcome: "auto_reply" },
   "010": { intent: "not_interested", outcome: "no_reply_by_design" },
   "011": { intent: "not_interested", outcome: "no_reply_by_design" },
@@ -55,15 +55,15 @@ const LABELS = {
   "021": { intent: "unclear", outcome: "review" },
   "022": { intent: "seller_interested", outcome: "auto_reply" },
   "023": { intent: "wrong_number", outcome: "suppressed" },
-  "024": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "024": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
   "025": { intent: "asks_offer", outcome: "auto_reply" },
   "026": { intent: "who_is_this", outcome: "auto_reply" },
-  "027": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "027": { intent: "unclear", outcome: "no_reply_by_design" }, // "No, I'm not": denial words, keeps the clarifier hold (round 9)
   "028": { intent: "wrong_number", outcome: "suppressed" },
   "029": { intent: "seller_interested", outcome: "auto_reply" },
   "030": { intent: "ownership_confirmed", outcome: "auto_reply" },
-  "031": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
-  "032": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "031": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
+  "032": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
   "033": { intent: "who_is_this", outcome: "auto_reply" },
   "034": { intent: "ownership_confirmed", outcome: "auto_reply" },
   "035": { intent: "seller_interested", outcome: "auto_reply" },
@@ -73,21 +73,21 @@ const LABELS = {
   "039": { intent: "not_interested", outcome: "no_reply_by_design" },
   "040": { intent: "who_is_this", outcome: "auto_reply" },
   "041": { intent: "who_is_this", outcome: "auto_reply" },
-  "042": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "042": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
   "043": { intent: "not_interested", outcome: "no_reply_by_design" },
   "044": { intent: "opt_out", outcome: "suppressed" },
-  "045": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "045": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
   "046": { intent: "latent_interest", outcome: "auto_reply" },
-  "047": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "047": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
   "048": { intent: "sold_property", outcome: "no_reply_by_design" },
-  "049": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
-  "050": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "049": { intent: "unclear", outcome: "no_reply_by_design" }, // "No, I'm not": denial words, keeps the clarifier hold (round 9)
+  "050": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
   "051": { intent: "latent_interest", outcome: "auto_reply" },
   "052": { intent: "not_interested", outcome: "no_reply_by_design" },
   "053": { intent: "who_is_this", outcome: "auto_reply" },
   "054": { intent: "acknowledgement", outcome: "no_reply_by_design" },
   "055": { intent: "latent_interest", outcome: "auto_reply" },
-  "056": { intent: "unclear", outcome: "no_reply_by_design" }, // round 9: bare No, clarifier row inactive -> hold, not review
+  "056": { intent: "not_interested", outcome: "no_reply_by_design" }, // owner 2026-10-13: bare No to S1 = decline, 30-day nurture (was: clarifier hold)
   "057": { intent: "latent_interest", outcome: "auto_reply" },};
 
 test("fixture set is the 57 round-6 messages", () => {
@@ -107,8 +107,13 @@ for (const [id, e] of Object.entries(LABELS)) {
 
 const BARE_NO = Object.entries(LABELS).filter(([id]) => /^(?:no|no,? i'?m not|no i am not)[.!]*$/i.test(byId.get(id).seller_message.trim())).map(([id]) => id);
 
-test("bare 'No' to the ownership question: ONE owner-approved clarifier once its template is active AND BARE_NO_AUTO_CLARIFIER is on", async () => {
+// Owner 2026-10-13: the default reads a bare "No" as a decline; the clarifier
+// path below is the retained LC_BARE_NO_OWNERSHIP_MODE=clarify mode.
+test("LC_BARE_NO_OWNERSHIP_MODE=clarify: bare 'No' to the ownership question gets ONE owner-approved clarifier once its template is active AND BARE_NO_AUTO_CLARIFIER is on", async () => {
   assert.ok(BARE_NO.length >= 10, `bare No rows: ${BARE_NO.length}`);
+  const prev_mode = process.env.LC_BARE_NO_OWNERSHIP_MODE;
+  process.env.LC_BARE_NO_OWNERSHIP_MODE = "clarify";
+  try {
   for (const id of BARE_NO) {
     // Round 10: flag OFF (default) -> hold, no outbound, no review.
     const off = await replayReply(byId.get(id), { catalog: [...CATALOG, ...CLARIFIER_ROWS] });
@@ -119,6 +124,10 @@ test("bare 'No' to the ownership question: ONE owner-approved clarifier once its
     assert.equal(r.outcome, "auto_reply", id);
     assert.equal(r.template.use_case, "ownership_connection_clarifier", id);
     assert.equal(r.template.language, r.classification.language === "Spanish" ? "Spanish" : "English", id);
+  }
+  } finally {
+    if (prev_mode === undefined) delete process.env.LC_BARE_NO_OWNERSHIP_MODE;
+    else process.env.LC_BARE_NO_OWNERSHIP_MODE = prev_mode;
   }
 });
 

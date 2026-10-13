@@ -84,8 +84,22 @@ test("a legal threat still keeps the human lane", async () => {
 });
 
 // ── Bare "No" to the ownership question ─────────────────────────────────────
-for (const message of ["No", "No, I'm not", "No, I don't", "No not at all", "No and no", "Of Course Not", "Noo"]) {
-  test(`bare no: ${JSON.stringify(message)} -> the ownership clarifier; no template = no review`, async () => {
+// Owner 2026-10-13: a bare negative with no ownership-denial words is a
+// decline (30-day nurture, never suppressed). "No, I'm not" / "No, I don't"
+// answer with denial words and keep the clarifier hold below.
+for (const message of ["No", "No not at all", "No and no", "Of Course Not", "Noo"]) {
+  test(`bare no: ${JSON.stringify(message)} -> not_interested, the S1 30-day nurture, never suppressed`, async () => {
+    const r = await replay(message);
+    assert.equal(r.classification.primary_intent, "not_interested");
+    assert.ok(r.classification.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_not_interested"));
+    assert.equal(r.outcome, "no_reply_by_design");
+    assert.equal(r.decision.audit_reason, "s1_not_for_sale_advance_with_followup");
+    assert.equal(r.decision.should_suppress_contact, false);
+  });
+}
+
+for (const message of ["No, I'm not", "No, I don't"]) {
+  test(`no with denial words: ${JSON.stringify(message)} -> the ownership clarifier; no template = no review`, async () => {
     const r = await replay(message);
     assert.equal(r.classification.primary_intent, "unclear");
     assert.ok(r.classification.matched_rule_ids.includes("ctx_no_after_ownership_check"));

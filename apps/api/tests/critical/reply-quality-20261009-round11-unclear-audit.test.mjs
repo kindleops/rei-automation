@@ -31,6 +31,7 @@ import {
   matchesCounterpartyInvestorPitch,
   matchRound11OptOut,
 } from "@/lib/domain/classification/round11-unclear-rules.js";
+import { matchBareNegative } from "@/lib/domain/classification/seller-reply-families.js";
 
 const read = (name) => JSON.parse(readFileSync(new URL(`../fixtures/reply-quality/${name}`, import.meta.url), "utf8"));
 const AUDIT = read("2026-10-09-unclear-audit.json").cases;
@@ -67,6 +68,13 @@ const canonicalOf = (c, r) => {
 // not hidden; they are not round-11 behaviour.
 const PROD_851_DIVERGENCE = new Set(["ui-44225d7a", "ui-5ddde262"]);
 
+// OWNER DECISION 2026-10-13 (supersedes the F01 policy hold for these rows):
+// a bare negative to the S1 ownership question with no ownership-denial words
+// is not_interested (30-day nurture). F01 rows WITH denial words ("No, I'm
+// not") keep the hold.
+const isBareNegativeF01 = (c) => /F01_bare_no_to_ownership/.test(c.family) && Boolean(matchBareNegative(c.seller_message));
+const expectedIntentOf = (c) => (isBareNegativeF01(c) ? "not_interested" : c.expected_intent);
+
 const results = new Map();
 async function run(c) {
   if (!results.has(c.id)) results.set(c.id, await replayReply(c, { catalog: CATALOG }));
@@ -81,8 +89,9 @@ test("every hand-labelled unclear reply resolves to its canonical intent (known 
     asserted += 1;
     const r = await run(c);
     const got = r.classification.primary_intent;
-    const ok = got === c.expected_intent || (c.expected_intent === "non_owner_referral" && canonicalOf(c, r) === "non_owner_referral");
-    if (!ok) misses.push(`${c.id} [${c.family}] ${JSON.stringify(c.seller_message.slice(0, 60))}: expected ${c.expected_intent}, got ${got}`);
+    const expected = expectedIntentOf(c);
+    const ok = got === expected || (expected === "non_owner_referral" && canonicalOf(c, r) === "non_owner_referral");
+    if (!ok) misses.push(`${c.id} [${c.family}] ${JSON.stringify(c.seller_message.slice(0, 60))}: expected ${expected}, got ${got}`);
   }
   assert.ok(asserted >= 250, `asserted ${asserted}`);
   assert.deepEqual(misses, []);
@@ -105,11 +114,20 @@ test("unclear is reserved for policy holds and genuinely unreadable text", async
 });
 
 test("policy holds keep their routing: bare No to S1, yes to our price question, frustration", async () => {
+  let bare_negatives = 0;
   for (const c of AUDIT.filter((x) => /F01_bare_no_to_ownership/.test(x.family))) {
     const r = await run(c);
-    assert.equal(r.classification.primary_intent, "unclear", c.id);
-    assert.equal(r.text, null, `${c.id} bare No never auto-replies while BARE_NO_AUTO_CLARIFIER is off`);
+    if (isBareNegativeF01(c)) {
+      bare_negatives += 1;
+      // Owner 2026-10-13: a decline -> the S1 30-day nurture, never suppressed.
+      assert.equal(r.classification.primary_intent, "not_interested", c.id);
+      assert.equal(r.decision.should_suppress_contact, false, c.id);
+    } else {
+      assert.equal(r.classification.primary_intent, "unclear", c.id);
+    }
+    assert.equal(r.text, null, `${c.id} a bare No never auto-replies`);
   }
+  assert.ok(bare_negatives > 0);
   const yesPrice = await replayReply(fixture("Sure", "Do you have an asking price in mind?", "seller_asking_price"), { catalog: CATALOG });
   assert.equal(yesPrice.classification.primary_intent, "unclear");
   assert.ok(yesPrice.classification.matched_rule_ids.includes("ctx_yes_after_asking_price"));

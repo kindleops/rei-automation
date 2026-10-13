@@ -35,7 +35,25 @@ function fixture(message, text = QUESTION) {
     valuation: null,
   };
 }
-const replay = (message, opts = {}) => replayReply(fixture(message, opts.text), { catalog: opts.catalog || CATALOG, executorOverrides: opts.executorOverrides || {} });
+// The test environment restores process.env between tests, so the mode is set
+// on every replay: "clarify" unless a test asks for the default (mode: null).
+const replay = (message, opts = {}) => {
+  if (opts.mode === null) delete process.env.LC_BARE_NO_OWNERSHIP_MODE;
+  else process.env.LC_BARE_NO_OWNERSHIP_MODE = opts.mode || "clarify";
+  return replayReply(fixture(message, opts.text), { catalog: opts.catalog || CATALOG, executorOverrides: opts.executorOverrides || {} });
+};
+
+// Owner 2026-10-13: by default a bare negative to the ownership question is a
+// decline (30-day nurture) and never reaches the clarifier gate. This file
+// exercises the clarifier gate itself, so it runs in the retained
+// LC_BARE_NO_OWNERSHIP_MODE=clarify mode (set per replay below).
+test("default mode: a bare 'No' is a decline and never reaches the clarifier gate", async () => {
+  const r = await replay("No", { mode: null, catalog: [...CATALOG, CLARIFIER_ROW], executorOverrides: { bareNoAutoClarifierGate: async () => true } });
+  assert.equal(r.classification.primary_intent, "not_interested");
+  assert.equal(r.classification.automation_decision.clarification_use_case ?? null, null);
+  assert.equal(r.text, null);
+  assert.equal(r.decision.audit_reason, "s1_not_for_sale_advance_with_followup");
+});
 
 // ── 2. BARE_NO_AUTO_CLARIFIER (default OFF) ─────────────────────────────────
 const BARE_NOS = ["No", "No, I'm not", "No not at all", "Of Course Not", "Noo"];

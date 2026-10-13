@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 
 import { replayReply } from "../helpers/reply-replay-harness.mjs";
 import { classify, correctKeyMisspellings } from "@/lib/domain/classification/classify.js";
+import { matchBareNegative } from "@/lib/domain/classification/seller-reply-families.js";
 
 const read = (name) => JSON.parse(readFileSync(new URL(`../fixtures/reply-quality/${name}`, import.meta.url), "utf8"));
 const CASES = read("2026-10-05to06-all-inbound.json").cases;
@@ -25,7 +26,23 @@ const CASES = read("2026-10-05to06-all-inbound.json").cases;
 // price is forbidden); #357 #363 #382 tenant/condition statements at S1 with no
 // question of ours (the old reply was a condition question before the price; the
 // remaining candidates are code-registry copy, never sent).
-const LABELS = read("2026-10-05to06-all-inbound.labels.json").labels;
+const REVIEWED_LABELS = read("2026-10-05to06-all-inbound.labels.json").labels;
+// OWNER DECISION 2026-10-13 relabels: a bare negative ("No", "Nope") to our S1
+// ownership question, with no ownership-denial words, is not_interested -- the
+// 30-day nurture, no reply (was: unclear held for the ownership clarifier).
+// 23 rows in this window; derived, not hand-copied, so the rule is the label.
+const isBareNoToS1 = (id) => {
+  const c = CASES.find((x) => x.fixture_id.endsWith(id));
+  return c?.prior_question?.template_use_case === "ownership_check" && Boolean(matchBareNegative(c.seller_message));
+};
+const BARE_NO_RELABEL = { intent: "not_interested", sentiment: "negative", outcome: "no_reply_by_design", outcome_with_en_es_drafts: "no_reply_by_design" };
+const LABELS = Object.fromEntries(
+  Object.entries(REVIEWED_LABELS).map(([id, e]) => [
+    id,
+    e.intent === "unclear" && isBareNoToS1(id) ? Object.fromEntries(Object.keys(e).map((k) => [k, BARE_NO_RELABEL[k] ?? e[k]])) : e,
+  ])
+);
+const BARE_NO_RELABELLED = Object.keys(REVIEWED_LABELS).filter((id) => REVIEWED_LABELS[id].intent === "unclear" && isBareNoToS1(id)).length;
 const CATALOG = read("2026-10-06-safe-templates-en-es.json").rows;
 const T = (use_case, language, template_id, template_body) => ({ id: template_id, template_id, use_case, language, stage_code: null, is_active: true, safe_for_auto_reply: true, reply_mode: "auto_reply", template_body });
 const EN_ES_DRAFTS = [
@@ -82,7 +99,11 @@ test("coverage floor: share of inbound that auto-responds / is handled without a
   // question) is also held by the Stage 3 rule.
   assert.ok(auto >= 167, `today's catalog: ${auto} auto`);
   assert.ok(handled >= 328, `today's catalog: ${handled} handled`);
-  assert.ok(autoDrafts >= 198, `with EN/ES drafts: ${autoDrafts} auto`); // 201 before the 2026-10-09 owner rule (same three)
+  // 201 before the 2026-10-09 owner rule (same three); 198 before the
+  // 2026-10-13 owner decision -- the 23 bare "No" rows were "auto" only via the
+  // ownership clarifier draft and are now the 30-day nurture (handled, no reply).
+  assert.equal(BARE_NO_RELABELLED, 23);
+  assert.ok(autoDrafts >= 198 - BARE_NO_RELABELLED, `with EN/ES drafts: ${autoDrafts} auto`);
   assert.ok(handledDrafts >= 359, `with EN/ES drafts: ${handledDrafts} handled`);
 });
 

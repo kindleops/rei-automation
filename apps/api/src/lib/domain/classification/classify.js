@@ -43,6 +43,7 @@ import {
 // detectors, explicit denials no longer held by ownership context, factual
 // commitment and the language triple on every result.
 import { canonicalizeAffirmativeSlang } from "@/lib/domain/classification/affirmative-slang.js";
+import { matchConditionalInterest, matchIdentityQuestion, matchKeeper, matchPreparingToSell } from "@/lib/domain/classification/seller-reply-families.js";
 export const CLASSIFY_VERSION = "classify_js_context_v3_reply_disposition";
 export { CONTEXT_VERSION, validateConversationContext };
 
@@ -5051,7 +5052,10 @@ function resolveIntents(
       // round 8: "Why , are you a corporation?", "if your a wholesaler",
       // "Are you in a real state?", "This is Alex, right", "Do you have any
       // problem with the building?", "You just ask a random person ..."
-      /\b(?:are|r)\s+(?:you|u)\s+(?:a|an|in\s+a)\s+(?:wholesaler|realtor|real\s*-?\s*(?:estate|state)|agent|broker|corporation|company|investor|bot|robot|scam(?:mer)?|business)\b|\bif\s+(?:you'?re|your|ur|you\s+are)\s+a\s+(?:wholesaler|realtor|agent|broker|investor)\b|\bwhat'?s\s+the\s+name\s+of\s+(?:the|your)\s+(?:company|real\s*-?\s*(?:estate|state)|business)\b|^this\s+is\s+\w+\s*,?\s+right\s*\??$|\bdo\s+you\s+have\s+(?:any\s+)?(?:a\s+)?problem\s+with\s+the\s+(?:building|house|property)\b|\b(?:just|randomly)\s+(?:ask|text|message)\s+a\s+random\s+person\b/i.test(rawMessage))
+      /\b(?:are|r)\s+(?:you|u)\s+(?:a|an|in\s+a)\s+(?:wholesaler|realtor|real\s*-?\s*(?:estate|state)|agent|broker|corporation|company|investor|bot|robot|scam(?:mer)?|business)\b|\bif\s+(?:you'?re|your|ur|you\s+are)\s+a\s+(?:wholesaler|realtor|agent|broker|investor)\b|\bwhat'?s\s+the\s+name\s+of\s+(?:the|your)\s+(?:company|real\s*-?\s*(?:estate|state)|business)\b|^this\s+is\s+\w+\s*,?\s+right\s*\??$|\bdo\s+you\s+have\s+(?:any\s+)?(?:a\s+)?problem\s+with\s+the\s+(?:building|house|property)\b|\b(?:just|randomly)\s+(?:ask|text|message)\s+a\s+random\s+person\b/i.test(rawMessage) ||
+      // 2026-10-13: "Sorry I dont know who this is", "Que nesesitas", "Why do
+      // you want it", "...cual es el nombre de tu compañia?" (seller-reply-families.js).
+      matchIdentityQuestion(rawMessage))
   ) {
     return finalizeIntentResult({
       primary_intent: "who_is_this",
@@ -5908,7 +5912,10 @@ function resolveIntents(
       "changed my mind about selling", "thinking about selling now",
       "for the right price", "depends on the offer", "depends on price",
     ]) ||
-    conditional_sale_interest_re.test(text)
+    conditional_sale_interest_re.test(text) ||
+    // 2026-10-13: "Only if it's market value", "if the money is right" -- a
+    // condition on the number is an S2 yes (seller-reply-families.js).
+    matchConditionalInterest(rawMessage)
   ) {
     if (!intents.includes("seller_interested") && !intents.includes("not_interested") && !intents.includes("need_time")) {
       intents.push("latent_interest");

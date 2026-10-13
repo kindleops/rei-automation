@@ -259,7 +259,14 @@ test("PER-LANGUAGE: Portuguese is not enabled by default → human review even w
   assert.deepEqual(sent(es.results[0]), ["consider_selling"], "EN/ES are on by default");
 });
 
-test("BARE NO to the ownership question → ONE clarifier (BARE_NO_AUTO_CLARIFIER on); next reply decides; never a second clarification", async () => {
+test("owner 2026-10-13 default: a bare 'No' to the ownership question is a decline — no clarifier, no reply, never suppressed", async () => {
+  const r = await withBareNoClarifierOn(() => runFlow({ turns: [["No", "ownership_check"]] }));
+  assert.deepEqual(sent(r.results[0]), []);
+  assert.equal(r.results[0].out.execution.automation_decision.should_suppress_contact, false);
+});
+
+test("LC_BARE_NO_OWNERSHIP_MODE=clarify: BARE NO to the ownership question → ONE clarifier (BARE_NO_AUTO_CLARIFIER on); next reply decides; never a second clarification", async () => {
+  process.env.LC_BARE_NO_OWNERSHIP_MODE = "clarify";
   const off = await runFlow({ turns: [["No", "ownership_check"]] });
   assert.deepEqual(sent(off.results[0]), [], "round 10: flag OFF (default) -> no clarifier");
   await withBareNoClarifierOn(async () => {
@@ -283,6 +290,7 @@ test("BARE NO to the ownership question → ONE clarifier (BARE_NO_AUTO_CLARIFIE
   const es = await runFlow({ language: "Spanish", turns: [["No", "ownership_check"]] });
   assert.equal(body(es.results[0]), "Entendido. ¿Tiene alguna relación con la propiedad, o tengo el número equivocado?");
   });
+  delete process.env.LC_BARE_NO_OWNERSHIP_MODE;
 });
 
 test("DEFECT 4a: the legacy comp_anchor cannot send an unlogged number (flag on: logged as an anchor, blocked if the log fails)", async () => {

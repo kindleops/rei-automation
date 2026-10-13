@@ -36,6 +36,8 @@
 //  - A positive / price reply bound only to a STALE question is capped below
 //    the 0.82 autonomy gate, so a person answers it.
 
+import { matchKeeper, matchPreparingToSell } from "@/lib/domain/classification/seller-reply-families.js";
+
 export const ROUND11_RULES_VERSION = "round11-2026-10-09";
 
 const ZERO_WIDTH_RE = /[​-‍⁠﻿]/g;
@@ -473,6 +475,11 @@ export function resolveRound11Verdict(ctx = {}) {
   for (const re of PITCH_PATTERNS) if (re.test(text)) return verdict("not_interested", "r11_vendor_or_peer_pitch");
   if (LOGISTICS_QUESTION_RE.test(text)) return verdict("info_request", "r11_buyer_logistics_question");
   for (const [re, id] of DECLINE_PATTERNS) if (re.test(text)) return verdict("not_interested", id);
+  // 2026-10-13 (seller-reply-families.js): "Itsa keeper" -> a decline (30-day
+  // nurture); "...para ponerla a la venta" (getting it ready to list) -> latent
+  // interest held for a person (confidence below every auto-reply gate).
+  if (matchKeeper(raw) || matchKeeper(text)) return verdict("not_interested", "r12_keeping_it_keeper");
+  if (matchPreparingToSell(raw)) return verdict("latent_interest", "r12_preparing_to_sell", { confidence: 0.7 });
   if (question === OUTBOUND_QUESTION.OFFER && OFFER_REJECTION_RE.test(text)) return verdict("not_interested", "r11_rejects_our_offer");
   if (SOLD_RE.test(text)) return verdict("sold_property", "r11_house_gone");
   for (const re of NEED_TIME_PATTERNS) if (re.test(text)) return verdict("need_time", "r11_need_time");
