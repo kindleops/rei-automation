@@ -15,6 +15,7 @@ import { LivePreflight } from '../research/MissionPreflight'
 import { ResearchCanvas } from '../research/ResearchCanvas'
 import { ResearchInspector } from '../research/ResearchInspector'
 import { RunStream } from '../stream/RunStream'
+import { ApprovalsList } from '../../approvals/ApprovalsList'
 
 const LEFT = { min: 248, max: 440, def: 296 }
 const RIGHT = { min: 320, max: 620, def: 404 }
@@ -166,6 +167,7 @@ function LeftRail() {
   const canScan = Boolean(pid) && cap.status === 'available'
   return (
     <div className="agx-left">
+      <ApprovalsList />
       <section className="agx-left__scope" aria-label="Scope">
         <h5>Scope</h5>
         {pid ? (
