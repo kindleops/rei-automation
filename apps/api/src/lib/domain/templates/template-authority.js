@@ -55,7 +55,9 @@ const lower = (value) => clean(value).toLowerCase();
  * with free text is still untracked copy.
  */
 export const FREE_TEXT_PRODUCER_SOURCES = Object.freeze(
-  new Set(["workflow", "workflow_v2", "canonical_queue_writer", "queue_message"])
+  // ai_conversation (8.5.16 R3): an AI row that ever carries a template id must
+  // still be a rendering of that row — a real id never launders AI copy.
+  new Set(["workflow", "workflow_v2", "canonical_queue_writer", "queue_message", "ai_conversation"])
 );
 
 /** Manual surfaces that send a TEMPLATE (not operator-typed words). */

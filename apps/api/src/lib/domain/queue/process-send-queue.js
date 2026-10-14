@@ -53,7 +53,8 @@ import {
   hasSupabaseConfig,
   supabase as defaultSupabase,
 } from "@/lib/supabase/client.js";
-import { getSystemValue } from "@/lib/system-control.js";
+import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
+import { evaluateAiConversationRowGate, aiRowCancelPayload } from "@/lib/domain/queue/ai-conversation-row-gate.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import {
@@ -1654,6 +1655,32 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       } catch (geography_error) {
         warn("queue.property_geography_unavailable", { queue_row_id, message: geography_error?.message || String(geography_error) });
       }
+    }
+
+    // ── 8.5.16 R3: AI conversation rows only (source 'ai_conversation'); no-op for every other row ──
+    // Kill switch system_control[ai_conversation_send_enabled] off ⇒ cancel; recipient-local
+    // window closed or zone unknown ⇒ defer (no in-session bypass for AI rows).
+    const ai_gate = await evaluateAiConversationRowGate(queue_row, {
+      readSwitch: deps.readAiConversationSwitch || (hasSupabaseConfig() ? getSystemValueFresh : async () => null),
+      now,
+      propertyGeography: property_geography,
+    });
+    if (ai_gate.applies && ai_gate.action !== "proceed") {
+      if (ai_gate.action === "cancel") {
+        await updateQueueRow(queue_row_id, aiRowCancelPayload(queue_row, { now, reason: ai_gate.reason }), deps);
+      } else {
+        await releaseSkippedQueueRow(queue_row, lock_token, ai_gate.reason, { ...deps, now });
+      }
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: ai_gate.reason,
+        queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        final_queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
     }
 
     const contact_window = evaluate_contact_window(queue_row, {
