@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { cx } from '../../../../shared/lc'
-import { buildTimeline, citationsOf, dur, escalationOf, FAILURE_TITLE, followUpsOf, outcomeCopy, runFailureOf, shortModelName, sourcesOf, SLASH_COMMANDS, summarizeTimeline, usd, type AskTool, type Citation, type FollowUp, type MentionChip, type TimelineStep } from '../ask-model'
+import { buildTimeline, citationsOf, dur, escalationOf, FAILURE_TITLE, followUpsOf, liveStepsOf, liveViewOf, outcomeCopy, runFailureOf, shortModelName, sourcesOf, SLASH_COMMANDS, summarizeTimeline, usd, type AskTool, type Citation, type FollowUp, type LiveView, type MentionChip, type TimelineStep } from '../ask-model'
 import type { AskTurn } from '../ask-store'
 import { AskMarkdown } from '../AskMarkdown'
 import { Glyph, KIND_GLYPH } from './glyphs'
+import { ResultBlocks } from './ResultBlocks'
 
 export interface TurnHandlers {
   onOpen: (href: string) => void
@@ -14,20 +15,23 @@ export interface TurnHandlers {
 }
 
 /**
- * ONE TURN — the question as asked (its context pills), then the run: a
- * Cursor-style step timeline of the server's tool and model calls (each row
- * expands), the escalation badge, the answer (revealed as it lands), evidence
- * cards that deep-link, sources, cost · latency, copy, follow-ups.
+ * ONE TURN — the question as asked (its context pills), then the run: the live
+ * status line and step rows from the server's event stream while it runs (the
+ * streamed answer text is the model's own, masked server-side), then the
+ * audit-built timeline, typed result cards, evidence, cost · latency, follow-ups.
+ * Nothing here is timed or simulated: no typing effect, no guessed phase.
  */
 export function AskTurnView({ turn, tools, labels, reduced, now, handlers }: { turn: AskTurn; tools: AskTool[]; labels: Record<string, string>; reduced: boolean; now: number; handlers: TurnHandlers }) {
   const run = turn.run
-  const steps = buildTimeline(run, tools)
   const running = turn.phase === 'running' || turn.phase === 'sending'
+  const live = turn.events?.length ? liveViewOf(turn.events, tools) : null
+  const steps = running && turn.events?.length ? liveStepsOf(turn.events, tools) : buildTimeline(run, tools)
   const esc = escalationOf(run)
   const answer = run?.answer?.answer_md ?? ''
-  const shown = useReveal(answer, Boolean(turn.fresh) && !reduced, handlers.onRevealed)
+  const shown = answer
+  useEffect(() => { if (turn.fresh) handlers.onRevealed() }, [turn.fresh, handlers])
   const cites = citationsOf(run, turn.chips, labels)
-  const follow = followUpsOf(run, turn.chips, turn.command)
+  const follow = run?.mode === 'conversation' ? [] : followUpsOf(run, turn.chips, turn.command)
   const failure = runFailureOf(run)
   // a classified failure replaces the generic outcome line: one truthful state, never both
   const note = run && !failure ? outcomeCopy(run) : null
@@ -47,8 +51,8 @@ export function AskTurnView({ turn, tools, labels, reduced, now, handlers }: { t
 
       {turn.phase === 'failed' && turn.failure ? (
         <div className="ak-fail" role="alert"><b>{FAILURE_TITLE[turn.failure.kind]}</b><span>{turn.failure.message}</span></div>
-      ) : (
-        <Timeline steps={steps} running={running} sending={turn.phase === 'sending'} elapsed={elapsed} reduced={reduced} />
+      ) : run?.mode === 'conversation' && !running ? null : (
+        <Timeline steps={steps} running={running} sending={turn.phase === 'sending'} elapsed={elapsed} reduced={reduced} live={live} />
       )}
 
       {esc ? (
@@ -57,12 +61,17 @@ export function AskTurnView({ turn, tools, labels, reduced, now, handlers }: { t
         </div>
       ) : null}
 
-      {answer ? (
-        <div className="ak-answer">
-          <AskMarkdown md={shown} citeIds={run?.answer?.property_ids ?? []} onCite={(id) => handlers.onOpen(`/entity-graph/property/${encodeURIComponent(id)}`)} labelOf={(id) => labels[id] ?? null} />
-          {shown.length < answer.length ? <span className="ak-caret" aria-hidden="true" /> : null}
-          {run?.answer?.persisted === false ? <p className="ak-note">This answer could not be stored on the server; it is shown once.</p> : null}
+      {running && live?.draft ? (
+        <div className="ak-answer is-streaming" aria-live="polite">
+          <AskMarkdown md={live.draft} citeIds={[]} onCite={() => {}} labelOf={(id) => labels[id] ?? null} />
         </div>
+      ) : null}
+
+      {!running && (answer || run?.result?.blocks?.length) ? (
+        <>
+          <ResultBlocks result={run?.result} answerMd={shown} citeIds={run?.answer?.property_ids ?? []} onCite={(id) => handlers.onOpen(`/entity-graph/property/${encodeURIComponent(id)}`)} labelOf={(id) => labels[id] ?? null} onOpen={handlers.onOpen} />
+          {run?.answer?.persisted === false ? <p className="ak-note">This answer could not be stored on the server; it is shown once.</p> : null}
+        </>
       ) : null}
 
       {failure ? (
@@ -77,12 +86,12 @@ export function AskTurnView({ turn, tools, labels, reduced, now, handlers }: { t
 
       {turn.phase === 'stopped' ? (
         <div className="ak-stopped">
-          <span>Stopped watching. The server run still ends inside its own caps (≤ 4 min, ≤ {usd(2.5)}).</span>
+          <span>This page stopped following the run. The server run ends inside its own caps (≤ 4 min, ≤ {usd(2.5)}).</span>
           <button type="button" className="ak-link" onClick={handlers.onResume}>Resume</button>
         </div>
       ) : null}
 
-      {cites.length && turn.phase === 'done' && shown.length >= answer.length ? <Evidence cites={cites} onOpen={handlers.onOpen} /> : null}
+      {cites.length && turn.phase === 'done' ? <Evidence cites={cites} onOpen={handlers.onOpen} /> : null}
 
       {run && turn.phase === 'done' ? (
         <footer className="ak-foot">
@@ -96,7 +105,9 @@ export function AskTurnView({ turn, tools, labels, reduced, now, handlers }: { t
       ) : null}
 
       {running && turn.phase === 'running' ? (
-        <div className="ak-live"><button type="button" className="ak-ghost" onClick={handlers.onStop}><Glyph name="stop" size={11} />Stop<kbd>⌘⌫</kbd></button></div>
+        <div className="ak-live"><button type="button" className="ak-ghost" onClick={handlers.onStop} disabled={Boolean(turn.cancelling)} title="Cancel the run on the server: no further model or tool call">
+          <Glyph name="stop" size={11} />{turn.cancelling ? 'Stopping…' : 'Stop'}{turn.cancelling ? null : <kbd>⌘⌫</kbd>}
+        </button></div>
       ) : null}
 
       {follow.length && turn.phase === 'done' ? (
@@ -112,11 +123,12 @@ export function AskTurnView({ turn, tools, labels, reduced, now, handlers }: { t
 
 const STEP_GLYPH: Record<TimelineStep['kind'], 'tool' | 'model' | 'lift' | 'refused'> = { tool: 'tool', model: 'model', escalation: 'lift', declined: 'refused', refused: 'refused', budget: 'refused', error: 'refused' }
 
-export function Timeline({ steps, running, sending = false, elapsed, reduced }: { steps: TimelineStep[]; running: boolean; sending?: boolean; elapsed: number | null; reduced: boolean }) {
+export function Timeline({ steps, running, sending = false, elapsed, reduced, live = null }: { steps: TimelineStep[]; running: boolean; sending?: boolean; elapsed: number | null; reduced: boolean; live?: LiveView | null }) {
   const [open, setOpen] = useState<boolean | null>(null)
-  const expanded = open ?? running
+  const expanded = open ?? (running && steps.length > 0)
   const sum = summarizeTimeline(steps)
-  const head = sending ? 'Sending to the research agent…' : running ? (steps.length ? `Working · ${sum.tools} read${sum.tools === 1 ? '' : 's'}` : 'Planning…') : `Worked for ${dur(elapsed)} · ${sum.tools} read${sum.tools === 1 ? '' : 's'} · ${sum.rows.toLocaleString('en-US')} row${sum.rows === 1 ? '' : 's'}`
+  // running: the status is the latest SERVER event (no event yet ⇒ the request is still in flight)
+  const head = sending ? 'Sending…' : running ? (live ? live.status : steps.length ? `Working · ${sum.tools} read${sum.tools === 1 ? '' : 's'}` : 'Waiting for the server') : `Worked for ${dur(elapsed)} · ${sum.tools} read${sum.tools === 1 ? '' : 's'} · ${sum.rows.toLocaleString('en-US')} row${sum.rows === 1 ? '' : 's'}`
   if (!running && !steps.length) return null
   return (
     <section className={cx('ak-tl', expanded && 'is-open', running && 'is-running')} aria-label="Agent steps">
@@ -187,31 +199,4 @@ function CopyButton({ text }: { text: string }) {
       <Glyph name={done ? 'check' : 'copy'} size={12} />{done ? 'Copied' : 'Copy'}
     </button>
   )
-}
-
-/** Reveal a freshly arrived answer progressively (the server returns it whole). */
-function useReveal(text: string, animate: boolean, onDone: () => void): string {
-  const [n, setN] = useState(animate ? 0 : text.length)
-  const done = useRef(onDone)
-  done.current = onDone
-  useEffect(() => {
-    if (!animate || !text) { setN(text.length); return }
-    let raf = 0
-    const t0 = performance.now()
-    const total = Math.min(1100, 260 + text.length * 1.4)
-    const step = (t: number) => {
-      const f = Math.min(1, (t - t0) / total)
-      const eased = 1 - Math.pow(1 - f, 2)
-      setN(Math.round(text.length * eased))
-      if (f < 1) raf = requestAnimationFrame(step)
-      else done.current()
-    }
-    raf = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(raf)
-  }, [text, animate])
-  if (!animate) return text
-  // cut at a word boundary so the markdown never shows half a token
-  const cut = text.slice(0, n)
-  const sp = cut.lastIndexOf(' ')
-  return n >= text.length ? text : sp > 0 ? cut.slice(0, sp) : cut
 }

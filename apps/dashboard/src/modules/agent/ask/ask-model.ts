@@ -34,16 +34,122 @@ export interface AskCall { model: string; cost_usd: number | null; latency_ms: n
 export type AskRunState = 'running' | 'completed' | 'failed' | 'refused' | 'cancelled'
 /** The server's persisted WHY for a refused / failed run (research_run.doc.refusal): codes only. */
 export interface AskRefusal { code: string; layer: string | null; reason: string | null; phase: string | null; transport: string | null; billed: string | null; route: string | null; binding_cap: string | null; after_ms: number | null }
+/* ── typed results (server: research/result-schema.js, lc.ask.result v1) ── */
+export interface WebCitation { url: string; title: string | null; retrieved_at: string | null; page_age?: string | null; source?: string | null }
+export interface ResultFact { label: string; value: string; evidence: 'internal' | 'public_web'; source: string | null }
+export type ResultBlock =
+  | { kind: 'answer'; markdown: string }
+  | { kind: 'web_citations'; citations: WebCitation[] }
+  | { kind: 'property_research'; title: string; summary: string | null; property_id: string | null; address_label: string | null; facts: ResultFact[]; listing_status: { status: string; source_url: string; as_of: string | null } | null; gaps: string[] }
+  | { kind: 'conversation_summary'; title: string; summary: string | null; points: string[] }
+  | { kind: 'campaign_audience_preview'; title: string; summary: string | null; filters: string[]; estimated_count: number | null }
+  | { kind: 'approval_preview'; title: string; summary: string | null; action: string; target: string | null; effect: string | null; executed: false }
+  | { kind: string; [k: string]: unknown }
+export interface AskResultEnvelope { schema: 'lc.ask.result'; version: 1; blocks: ResultBlock[]; evidence: { internal: { tools: string[]; property_ids: string[] }; public_web: WebCitation[] } }
+export const RESULT_KINDS_RENDERED = ['answer', 'web_citations', 'property_research'] as const
+
+export function normalizeResult(v: unknown): AskResultEnvelope | null {
+  const o = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+  if (!o || o.schema !== 'lc.ask.result' || o.version !== 1 || !Array.isArray(o.blocks)) return null
+  const ev = (o.evidence && typeof o.evidence === 'object' ? o.evidence : {}) as Record<string, unknown>
+  const internal = (ev.internal && typeof ev.internal === 'object' ? ev.internal : {}) as Record<string, unknown>
+  const blocks = (o.blocks as unknown[]).filter((b): b is ResultBlock => Boolean(b && typeof b === 'object' && typeof (b as { kind?: unknown }).kind === 'string'))
+  const cites = (x: unknown): WebCitation[] => (Array.isArray(x) ? x : []).filter((c) => c && typeof c === 'object' && typeof (c as WebCitation).url === 'string' && /^https?:\/\//i.test((c as WebCitation).url)).map((c) => ({ url: (c as WebCitation).url, title: typeof (c as WebCitation).title === 'string' ? (c as WebCitation).title : null, retrieved_at: typeof (c as WebCitation).retrieved_at === 'string' ? (c as WebCitation).retrieved_at : null, page_age: typeof (c as WebCitation).page_age === 'string' ? (c as WebCitation).page_age : null, source: typeof (c as WebCitation).source === 'string' ? (c as WebCitation).source : null }))
+  return {
+    schema: 'lc.ask.result',
+    version: 1,
+    blocks: blocks.map((b) => (b.kind === 'web_citations' ? { kind: 'web_citations', citations: cites((b as { citations?: unknown }).citations) } : b)),
+    evidence: { internal: { tools: Array.isArray(internal.tools) ? internal.tools.map(String) : [], property_ids: Array.isArray(internal.property_ids) ? internal.property_ids.map(String) : [] }, public_web: cites(ev.public_web) },
+  }
+}
+
+/* ── live run events (server: research/run-events.js) ─────────────────────
+ * Every event is a server fact at the moment it happened. The status line is a
+ * pure function of them — no timers, no percentages, no guessed phases. */
+export type AskEventType = 'run_start' | 'model_call_start' | 'model_call_end' | 'tool_start' | 'tool_end' | 'web_search' | 'text_delta' | 'result' | 'completed' | 'failed' | 'cancelled' | 'snapshot' | 'error'
+export interface AskEvent { seq: number; type: AskEventType; at?: string; [k: string]: unknown }
+export const TERMINAL_EVENT_TYPES: ReadonlyArray<AskEventType> = ['completed', 'failed', 'cancelled']
+
+export interface LiveView {
+  /** the operator-facing status, derived from the latest event */
+  status: string
+  tone: 'active' | 'done' | 'bad'
+  /** masked answer text streamed by the CURRENT model call */
+  draft: string
+  lastSeq: number
+  modelCalls: number
+  reads: number
+  webSearches: number
+  terminal: AskEvent | null
+}
+
+const REFUSAL_CLASS_LABEL: Record<string, string> = { timeout: 'timeout', provider: 'provider error', configuration: 'configuration', permission: 'permission', budget: 'budget', limit: 'limit reached', cancelled: 'cancelled', runtime: 'runtime error' }
+
+export function liveViewOf(events: AskEvent[], tools: AskTool[] = []): LiveView {
+  const label = (name: string) => tools.find((t) => t.name === name)?.label ?? null
+  let status = 'Sent'
+  let tone: LiveView['tone'] = 'active'
+  let draft = ''
+  let call = 0
+  let modelCalls = 0
+  let reads = 0
+  let webSearches = 0
+  let terminal: AskEvent | null = null
+  let lastSeq = 0
+  for (const e of events) {
+    if (typeof e.seq === 'number' && e.seq > lastSeq && e.seq < 1_000_000) lastSeq = e.seq
+    switch (e.type) {
+      case 'run_start': status = 'Started'; break
+      case 'model_call_start': call = Number(e.call) || call + 1; draft = ''; status = `Model call · ${shortModelName(String(e.model ?? '')) ?? 'model'}`; break
+      case 'model_call_end': modelCalls += e.ok === false ? 0 : 1; if (e.ok === false) status = `Model call failed · ${String(e.outcome ?? '')}`; break
+      case 'tool_start':
+        status = e.tool === 'web_search' ? 'Searching web' : e.tool === 'web_fetch' ? 'Reading a web page' : `Reading LeadCommand records${label(String(e.tool)) ? ` · ${label(String(e.tool))}` : ''}`
+        break
+      case 'tool_end': if (e.tool !== 'web_search' && e.tool !== 'web_fetch' && e.outcome === 'ok') reads += 1; break
+      case 'web_search': webSearches += Number(e.searches) || 0; status = `Searched web · ${Number(e.searches) || 0} search${Number(e.searches) === 1 ? '' : 'es'}`; break
+      case 'text_delta': if (Number(e.call) === call || !call) { draft += String(e.text ?? ''); status = 'Writing' } break
+      case 'result': status = 'Preparing result'; break
+      case 'completed': status = 'Completed'; tone = 'done'; terminal = e; break
+      case 'cancelled': status = 'Cancelled'; tone = 'bad'; terminal = e; break
+      case 'failed': status = `Failed: ${REFUSAL_CLASS_LABEL[String(e.refusal_class ?? '')] ?? String(e.refusal_class ?? e.outcome ?? 'error')}`; tone = 'bad'; terminal = e; break
+      default: break
+    }
+  }
+  return { status, tone, draft, lastSeq, modelCalls, reads, webSearches, terminal }
+}
+
+/** Step rows from live events (while running; the audit-built timeline replaces them at the end). */
+export function liveStepsOf(events: AskEvent[], tools: AskTool[] = []): TimelineStep[] {
+  const label = (name: string) => tools.find((t) => t.name === name)?.label ?? name.replace(/[._]/g, ' ')
+  const out: TimelineStep[] = []
+  for (const e of events) {
+    const key = `ev:${e.seq}`
+    if (e.type === 'model_call_end') {
+      const tokens = e.input_tokens != null ? `${Number(e.input_tokens).toLocaleString('en-US')} in · ${Number(e.output_tokens ?? 0).toLocaleString('en-US')} out` : null
+      out.push({ key, kind: e.ok === false ? 'error' : 'model', title: e.ok === false ? 'Model call failed' : e.stop === 'tool_use' ? 'Planned next reads' : 'Wrote the answer', name: shortModelName(String(e.model ?? '')), rows: null, latency_ms: typeof e.latency_ms === 'number' ? e.latency_ms : null, cost_usd: typeof e.cost_usd === 'number' ? e.cost_usd : null, outcome: String(e.stop ?? e.outcome ?? ''), ok: e.ok !== false, at: e.at ?? null, detail: tokens })
+    } else if (e.type === 'tool_end') {
+      const tool = String(e.tool ?? '')
+      const web = tool === 'web_search' || tool === 'web_fetch'
+      const ok = e.outcome === 'ok'
+      out.push({ key, kind: e.refused ? 'refused' : 'tool', title: web ? (tool === 'web_search' ? 'Searched the public web' : 'Read a public web page') : label(tool), name: web ? tool.replace('_', '.') : tool, rows: typeof e.rows === 'number' ? e.rows : null, latency_ms: typeof e.latency_ms === 'number' ? e.latency_ms : null, cost_usd: null, outcome: String(e.outcome ?? ''), ok, at: e.at ?? null, detail: ok ? (web ? 'Provider-executed · public web (not LeadCommand data)' : null) : `Source unavailable (${String(e.outcome)}) — not evidence of absence` })
+    }
+  }
+  return out
+}
+
 export interface AskRun {
   run_id: string
   state: AskRunState
   outcome: string | null
+  mode?: 'conversation' | 'research' | null
+  refusal_class?: string | null
+  result?: AskResultEnvelope | null
   created_at: string | null
   ended_at: string | null
   latency_ms: number | null
   cost_usd: number
   models: { default: string | null; escalation: string | null }
-  counters: { model_calls: number; escalated_calls: number; escalated_usd: number; tool_calls: number }
+  counters: { model_calls: number; escalated_calls: number; escalated_usd: number; tool_calls: number; web_searches?: number }
   answer: { answer_md: string; property_ids: string[]; persisted?: boolean } | null
   calls: AskCall[]
   audit: AskAuditRow[]
@@ -305,7 +411,9 @@ export function buildTimeline(run: Pick<AskRun, 'audit' | 'calls'> | null, tools
       }
       case 'tool_call': {
         const ok = a.outcome === 'ok'
-        out.push({ key, kind: 'tool', title: label(a.name), name: a.name, rows: a.rows_returned, latency_ms: a.latency_ms, cost_usd: null, outcome: a.outcome, ok, at: a.at, detail: ok ? null : `Source unavailable (${a.outcome}) — not evidence of absence` })
+        if (a.name === 'present_result') break // the typed card itself, not a read
+        const web = a.name === 'web.search' || a.name === 'web.fetch'
+        out.push({ key, kind: 'tool', title: web ? (a.name === 'web.search' ? 'Searched the public web' : 'Read a public web page') : label(a.name), name: a.name, rows: a.rows_returned, latency_ms: a.latency_ms, cost_usd: web ? a.cost_usd : null, outcome: a.outcome, ok, at: a.at, detail: ok ? (web ? 'Provider-executed · public web (not LeadCommand data)' : null) : `Source unavailable (${a.outcome}) — not evidence of absence` })
         break
       }
       case 'tool_refused':
@@ -498,7 +606,7 @@ export function citationsOf(run: AskRun | null, chips: MentionChip[], labels: Re
 /** The read tools the run used (for the “Sources” line). */
 export function sourcesOf(run: AskRun | null): string[] {
   if (!run) return []
-  return [...new Set(run.audit.filter((a) => a.kind === 'tool_call' && a.outcome === 'ok' && a.name).map((a) => a.name as string))]
+  return [...new Set(run.audit.filter((a) => a.kind === 'tool_call' && a.outcome === 'ok' && a.name && a.name !== 'present_result').map((a) => a.name as string))]
 }
 
 /* ── follow-up suggestions (they fill the composer; nothing auto-sends) ── */
@@ -509,7 +617,8 @@ export function followUpsOf(run: AskRun | null, chips: MentionChip[], command: S
   const n = new Set(chips.flatMap((c) => c.property_ids).concat(run.answer?.property_ids ?? [])).size
   const hasCampaign = chips.some((c) => c.kind === 'campaign')
   const out: FollowUp[] = []
-  if (run.outcome === 'ANSWER_TRUNCATED_MAX_TOKENS') out.push({ id: 'gaps', label: 'Summarize only the gaps', text: 'Summarize only the gaps and unavailable sources from the previous answer.' })
+  // the server does not carry earlier answers into a new run: this re-asks, it does not "remember"
+  if (run.outcome === 'ANSWER_TRUNCATED_MAX_TOKENS') out.push({ id: 'gaps', label: 'Ask again for the gaps only', text: 'List only the gaps and unavailable sources for this context.' })
   if (n >= 2 && command !== 'compare') out.push({ id: 'compare', label: `Compare these ${n} properties`, text: '/compare ' })
   if (n >= 1 && command !== 'inconsistencies') out.push({ id: 'inconsistencies', label: n === 1 ? 'Check this property for inconsistencies' : 'Check them for inconsistencies', text: '/inconsistencies ' })
   if (hasCampaign) out.push({ id: 'campaign-top', label: 'Strongest targets in this campaign', text: 'Which properties in this campaign have the strongest distress evidence, and what is it?' })

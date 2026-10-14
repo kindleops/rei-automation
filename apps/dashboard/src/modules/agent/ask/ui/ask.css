@@ -281,3 +281,57 @@ html.lc-reduce-motion .agx .ak-turn, html.lc-reduce-motion .agx .ak-step, html.l
 /* while the @ / popover is open the thread recedes, so the list reads cleanly over the pane glass */
 .ak-panel:has(.ak-pop) .ak-scroll { opacity: 0.18; transition: opacity 0.14s var(--ak-ease); }
 @media (prefers-reduced-motion: reduce) { .ak-panel:has(.ak-pop) .ak-scroll { transition: none; } }
+
+/* ── Intelligence 2.0: live status, typed result cards ──────────────────────
+   Same pane material as every plane (no accent fills). Cobalt marks ACTIVE
+   computation only (the running spinner / streaming edge); champagne gold marks
+   what is resolved or selected. Public-web evidence sits in its own card with a
+   label, never styled like a LeadCommand record. */
+.agx {
+  --ak-cobalt: rgb(var(--lc-cobalt-rgb, 99, 140, 255));
+  --ak-gold: rgb(var(--lc-champagne-rgb, 214, 192, 146));
+}
+.ak-tl.is-running .ak-spin.is-on::after { border-top-color: var(--ak-cobalt); }
+.ak-answer.is-streaming { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ak-cobalt) 55%, transparent); padding-left: 10px; }
+.ak-blocks { display: grid; gap: 10px; }
+
+.ak-web, .ak-prc {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--ak-card);
+  box-shadow: inset 0 0 0 1px var(--ak-line), var(--ak-sheen);
+}
+.ak-web__h { display: flex; align-items: baseline; gap: 8px; }
+.ak-web__h small { font: 500 10.5px/1.3 var(--lc-font-ui); color: var(--lc-ink-3); }
+.ak-web__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ak-web__row { display: grid; grid-template-columns: 16px 1fr; gap: 8px; align-items: start; padding: 6px 6px; border-radius: 8px; color: inherit; text-decoration: none; transition: background 0.14s var(--ak-ease); }
+.ak-web__row:hover { background: var(--ak-card-hi); }
+.ak-web__row:focus-visible { outline: 1px solid var(--ak-gold); outline-offset: 1px; }
+.ak-web__ic { color: var(--lc-ink-3); padding-top: 2px; }
+.ak-web__t { display: grid; min-width: 0; }
+.ak-web__t b { font: 550 12px/1.35 var(--lc-font-ui); color: var(--lc-ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ak-web__t small { font: 500 10.5px/1.35 var(--lc-font-ui); color: var(--lc-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ak-prc__h { display: flex; align-items: center; gap: 8px; }
+.ak-prc__ic { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; color: var(--ak-gold); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ak-gold) 35%, transparent); }
+.ak-prc__t { flex: 1; min-width: 0; display: grid; }
+.ak-prc__t b { font: 600 13px/1.3 var(--lc-font-ui); color: var(--lc-ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ak-prc__t small { font: 500 11px/1.3 var(--lc-font-ui); color: var(--lc-ink-3); }
+.ak-prc__listing { display: grid; gap: 2px; padding: 8px 10px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--ak-field-line); }
+.ak-prc__listing b { font: 600 14px/1.3 var(--lc-font-ui); color: var(--ak-gold); }
+.ak-prc__listing a, .ak-prc__src { font: 500 10.5px/1.35 var(--lc-font-ui); color: var(--lc-ink-3); text-decoration: none; }
+.ak-prc__listing a:hover, a.ak-prc__src:hover { color: var(--lc-ink-1); text-decoration: underline; }
+code.ak-prc__src { font-family: var(--ak-mono); margin-left: 6px; }
+a.ak-prc__src { margin-left: 6px; }
+.ak-prc__sum { margin: 0; font: 450 12.5px/1.5 var(--lc-font-ui); color: var(--lc-ink-2); }
+.ak-prc__g { display: grid; gap: 4px; }
+.ak-prc__g.is-web { padding-top: 6px; border-top: 1px dashed var(--ak-line-hi); }
+.ak-prc__g dl { margin: 0; display: grid; gap: 3px; }
+.ak-prc__g dl > div { display: grid; grid-template-columns: minmax(90px, 34%) 1fr; gap: 8px; }
+.ak-prc__g dt { font: 500 11.5px/1.45 var(--lc-font-ui); color: var(--lc-ink-3); }
+.ak-prc__g dd { margin: 0; font: 500 12px/1.45 var(--lc-font-ui); color: var(--lc-ink-1); overflow-wrap: anywhere; }
+.ak-prc__gaps ul { margin: 2px 0 0; padding-left: 16px; font: 450 11.5px/1.5 var(--lc-font-ui); color: var(--lc-ink-3); }
+@media (prefers-reduced-motion: reduce) { .ak-web__row { transition: none; } }

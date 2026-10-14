@@ -4,17 +4,21 @@
  * A thread is a list of turns; each turn is ONE server run (POST /ask). The
  * durable truth is the agent store on the server: a turn keeps only its
  * run_id plus the last snapshot for an instant re-render, and is re-read from
- * GET /ask/:run_id when opened or while it runs. The step timeline grows as
- * the server writes audit rows (poll ~1.2s); the answer arrives when the run
- * ends and is revealed progressively (instant under reduced motion).
+ * GET /ask/:run_id when opened or after it ends.
  *
- * Stop: the research route has no cancel endpoint, so Stop detaches this
- * client from the run (the server run ends inside its own caps: ≤ 4 min,
- * ≤ $2.50); Resume re-attaches. This is said in the UI, not hidden.
+ * LIVE (Intelligence 2.0): while a run is going, the turn follows the server's
+ * event stream (GET /ask/:run_id/events, SSE): every status line, tool row and
+ * streamed answer chunk is a backend event as it happened — nothing is timed or
+ * invented on the client. If the stream cannot be opened or drops before the
+ * terminal event, the turn falls back to polling the durable run.
+ *
+ * Stop = a real server cancel (POST /ask/:run_id/cancel): no further model or tool
+ * call; the run ends `cancelled` and the stream says so.
  */
 import { useSyncExternalStore } from 'react'
 import { composeAsk, isBlockingFailure, isTerminalRun, threadTitle, type AskFailure, type AskRun, type AskStatus, type MentionChip, type SlashCommand, type SlashId } from './ask-model'
-import { fetchAskRun, fetchAskStatus, postAsk } from './ask-transport'
+import { cancelAsk, fetchAskRun, fetchAskStatus, postAsk, streamAskEvents } from './ask-transport'
+import type { AskEvent } from './ask-model'
 
 export type TurnPhase = 'sending' | 'running' | 'done' | 'stopped' | 'failed'
 export interface AskTurn {
@@ -29,8 +33,12 @@ export interface AskTurn {
   phase: TurnPhase
   failure: AskFailure | null
   run: AskRun | null
-  /** the answer arrived in this page session (reveal it) */
+  /** the answer arrived in this page session */
   fresh?: boolean
+  /** live backend events for this run (memory only — never persisted) */
+  events?: AskEvent[]
+  /** a server cancel was requested */
+  cancelling?: boolean
 }
 export interface AskThread { id: string; title: string; createdAt: number; updatedAt: number; turns: AskTurn[] }
 
@@ -66,7 +74,8 @@ const loops = new Map<string, { stop: boolean; ctl: AbortController | null }>()
 function persist() {
   try {
     const { threads, activeThreadId, chips, labels } = state
-    window.sessionStorage.setItem(KEY, JSON.stringify({ v: 1, threads: threads.slice(0, MAX_THREADS), activeThreadId, chips, labels }))
+    const lean = threads.slice(0, MAX_THREADS).map((t) => ({ ...t, turns: t.turns.map(({ events: _e, ...u }) => u) }))
+    window.sessionStorage.setItem(KEY, JSON.stringify({ v: 1, threads: lean, activeThreadId, chips, labels }))
   } catch { /* private mode / quota */ }
 }
 
@@ -81,7 +90,7 @@ function hydrate() {
     }
   } catch { /* corrupt → start clean */ }
   // re-attach to runs that were still running
-  for (const t of state.threads) for (const u of t.turns) if (u.phase === 'running' && u.runId) poll(t.id, u.id, u.runId)
+  for (const t of state.threads) for (const u of t.turns) if (u.phase === 'running' && u.runId) follow(t.id, u.id, u.runId)
 }
 
 function set(patch: Partial<AskState> | ((s: AskState) => Partial<AskState>), save = true) {
@@ -99,8 +108,8 @@ export const getAsk = snapshot
 
 const uid = (p: string) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
 
-function patchTurn(threadId: string, turnId: string, patch: Partial<AskTurn>) {
-  set((s) => ({ threads: s.threads.map((t) => (t.id === threadId ? { ...t, updatedAt: Date.now(), turns: t.turns.map((u) => (u.id === turnId ? { ...u, ...patch } : u)) } : t)) }))
+function patchTurn(threadId: string, turnId: string, patch: Partial<AskTurn> | ((u: AskTurn) => Partial<AskTurn>), save = true) {
+  set((s) => ({ threads: s.threads.map((t) => (t.id === threadId ? { ...t, updatedAt: Date.now(), turns: t.turns.map((u) => (u.id === turnId ? { ...u, ...(typeof patch === 'function' ? patch(u) : patch) } : u)) } : t)) }), save)
 }
 
 /* ── status (models, caps, spend) ───────────────────────────────────────── */
@@ -162,8 +171,40 @@ export async function ask(input: { text: string; command: SlashCommand | null; c
     if (isBlockingFailure(r.failure)) set({ status: { phase: 'failed', data: null, failure: r.failure, at: Date.now() } }, false)
     return
   }
-  patchTurn(threadId, turn.id, { runId: r.data.run_id, phase: 'running' })
-  poll(threadId, turn.id, r.data.run_id)
+  patchTurn(threadId, turn.id, { runId: r.data.run_id, phase: 'running', events: [] })
+  follow(threadId, turn.id, r.data.run_id)
+}
+
+/**
+ * Follow the run's live event stream; on the terminal event, read the durable run
+ * once (audit, per-call cost) and finish. A stream that cannot open or drops early
+ * falls back to polling — the run's truth never depends on the stream.
+ */
+function follow(threadId: string, turnId: string, runId: string) {
+  const prior = loops.get(turnId)
+  if (prior) { prior.stop = true; prior.ctl?.abort() }
+  const loop = { stop: false, ctl: new AbortController() as AbortController | null }
+  loops.set(turnId, loop)
+  void (async () => {
+    const after = 0
+    patchTurn(threadId, turnId, { events: [] }, false)
+    const r = await streamAskEvents(runId, {
+      after,
+      signal: loop.ctl!.signal,
+      onEvent: (e) => { if (!loop.stop) patchTurn(threadId, turnId, (u) => ({ events: [...(u.events ?? []), e].slice(-1500) }), false) },
+    })
+    if (loop.stop) return
+    if (loops.get(turnId) === loop) loops.delete(turnId)
+    if (r.ok && r.end === 'ended') {
+      const run = await fetchAskRun(runId)
+      if (run.ok) patchTurn(threadId, turnId, { run: run.data, phase: 'done', fresh: true, cancelling: false })
+      else patchTurn(threadId, turnId, { phase: 'done', fresh: true, cancelling: false })
+      void refreshStatus()
+      return
+    }
+    if (!r.ok && isBlockingFailure(r.failure)) { patchTurn(threadId, turnId, { phase: 'failed', failure: r.failure }); return }
+    poll(threadId, turnId, runId)
+  })()
 }
 
 async function refreshTurn(threadId: string, turnId: string) {
@@ -192,7 +233,7 @@ function poll(threadId: string, turnId: string, runId: string) {
       if (r.ok) {
         misses = 0
         if (isTerminalRun(r.data)) {
-          patchTurn(threadId, turnId, { run: r.data, phase: 'done', fresh: true })
+          patchTurn(threadId, turnId, { run: r.data, phase: 'done', fresh: true, cancelling: false })
           void refreshStatus()
           break
         }
@@ -212,17 +253,23 @@ function poll(threadId: string, turnId: string, runId: string) {
   })()
 }
 
-/** Stop watching (there is no server cancel for research runs; the run ends inside its caps). */
-export function stopTurn(threadId: string, turnId: string) {
-  const l = loops.get(turnId)
-  if (l) { l.stop = true; l.ctl?.abort() }
-  patchTurn(threadId, turnId, { phase: 'stopped' })
+/**
+ * Stop = cancel the run ON THE SERVER. The turn keeps following until the server's
+ * own `cancelled` (or a terminal event that won the race) arrives.
+ */
+export async function stopTurn(threadId: string, turnId: string) {
+  const u = state.threads.find((t) => t.id === threadId)?.turns.find((x) => x.id === turnId)
+  if (!u?.runId || u.cancelling) return
+  patchTurn(threadId, turnId, { cancelling: true }, false)
+  const r = await cancelAsk(u.runId)
+  if (!r.ok && r.failure.status !== 409) patchTurn(threadId, turnId, { cancelling: false }, false)
 }
+/** Re-attach to a run this page stopped following (e.g. after a reload). */
 export function resumeTurn(threadId: string, turnId: string) {
   const u = state.threads.find((t) => t.id === threadId)?.turns.find((x) => x.id === turnId)
   if (!u?.runId) return
   patchTurn(threadId, turnId, { phase: 'running' })
-  poll(threadId, turnId, u.runId)
+  follow(threadId, turnId, u.runId)
 }
 export function markRevealed(threadId: string, turnId: string) { patchTurn(threadId, turnId, { fresh: false }) }
 

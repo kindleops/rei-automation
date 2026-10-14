@@ -4,7 +4,9 @@
  *
  *   GET  /api/cockpit/agent/live/ask           status: resolved models, caps, spend today / cycle, tools
  *   POST /api/cockpit/agent/live/ask           { question, context?: { campaign_id?, property_ids?[] }, wait_ms? } → 202 { run_id }
- *   GET  /api/cockpit/agent/live/ask/:run_id   the run: state, answer, latency, cost per call, audit trail
+ *   GET  /api/cockpit/agent/live/ask/:run_id   the run: state, answer, latency, cost per call, audit trail, typed result
+ *   GET  /api/cockpit/agent/live/ask/:run_id/events   text/event-stream of the run's real backend events (?after=seq)
+ *   POST /api/cockpit/agent/live/ask/:run_id/cancel   stop the run on the server (no further model / tool call)
  *
  * Server order on every request: route gate (404, empty body) → Worker
  * secret → verified named user on the allowlist (403 otherwise) → rate
@@ -15,11 +17,11 @@
  * Graph search (properties / master owners / markets), the campaign list,
  * an owner dossier (its properties) and the Priority inbox (HOT LEADS).
  */
-import { callBackend } from '../../../lib/api/backendClient'
-import { classifyFailure, type AskAuditRow, type AskRefusal, type AskCall, type AskFailure, type AskRun, type AskRunState, type AskStatus, type AskTool } from './ask-model'
+import { callBackend, getBackendAuthHeaders, getBackendBaseUrl } from '../../../lib/api/backendClient'
+import { classifyFailure, normalizeResult, type AskEvent, type AskAuditRow, type AskRefusal, type AskCall, type AskFailure, type AskRun, type AskRunState, type AskStatus, type AskTool } from './ask-model'
 
 const BASE = '/api/cockpit/agent/live/ask'
-export const ASK_ENDPOINTS = { status: BASE, ask: BASE, run: (id: string) => `${BASE}/${encodeURIComponent(id)}` } as const
+export const ASK_ENDPOINTS = { status: BASE, ask: BASE, run: (id: string) => `${BASE}/${encodeURIComponent(id)}`, events: (id: string, after = 0) => `${BASE}/${encodeURIComponent(id)}/events${after ? `?after=${after}` : ''}`, cancel: (id: string) => `${BASE}/${encodeURIComponent(id)}/cancel` } as const
 
 export type AskResult<T> = { ok: true; data: T } | { ok: false; failure: AskFailure }
 
@@ -77,7 +79,10 @@ export function normalizeRun(body: unknown): AskRun | null {
     latency_ms: numOrNull(b.latency_ms),
     cost_usd: num(b.cost_usd),
     models: { default: str(m.default), escalation: str(m.escalation) },
-    counters: { model_calls: num(c.model_calls), escalated_calls: num(c.escalated_calls), escalated_usd: num(c.escalated_usd), tool_calls: num(c.tool_calls) },
+    mode: b.mode === 'conversation' ? 'conversation' : b.mode === 'research' ? 'research' : null,
+    refusal_class: str(b.refusal_class),
+    result: normalizeResult(b.result),
+    counters: { model_calls: num(c.model_calls), escalated_calls: num(c.escalated_calls), escalated_usd: num(c.escalated_usd), tool_calls: num(c.tool_calls), web_searches: num(c.web_searches) },
     answer: typeof ans.answer_md === 'string' ? { answer_md: ans.answer_md, property_ids: arr(ans.property_ids).map(String), persisted: ans.persisted !== false } : null,
     calls: arr<Record<string, unknown>>(b.calls).map((x): AskCall => ({ model: String(x.model ?? ''), cost_usd: numOrNull(x.cost_usd), latency_ms: numOrNull(x.latency_ms), stop: str(x.stop), input_tokens: numOrNull(x.input_tokens), output_tokens: numOrNull(x.output_tokens), route: str(x.route) })),
     audit: arr<Record<string, unknown>>(b.audit).map((x): AskAuditRow => ({ at: str(x.at), kind: String(x.kind ?? ''), name: str(x.name), params_sha256: str(x.params_sha256), rows_returned: numOrNull(x.rows_returned), cost_usd: numOrNull(x.cost_usd), latency_ms: numOrNull(x.latency_ms), outcome: str(x.outcome) })),
@@ -110,6 +115,71 @@ export async function fetchAskRun(runId: string, signal?: AbortSignal): Promise<
   const run = normalizeRun(res.data)
   if (!run) return { ok: false, failure: { kind: 'unavailable', status: res.status, code: 'RUN_SHAPE', message: 'Unexpected run response.' } }
   return { ok: true, data: run }
+}
+
+/** Cancel a running run on the server: no further model / tool call; an in-flight call is aborted. */
+export async function cancelAsk(runId: string): Promise<AskResult<{ state: string }>> {
+  const res = await callBackend<unknown>(ASK_ENDPOINTS.cancel(runId), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', timeoutMs: 10_000 })
+  if (!res.ok) return failed(res)
+  return { ok: true, data: { state: str(obj(res.data).state) ?? 'cancelling' } }
+}
+
+/** Parse SSE frames out of a text buffer; returns the events and the unconsumed tail. */
+export function parseSseFrames(buf: string): { events: AskEvent[]; rest: string } {
+  const events: AskEvent[] = []
+  const parts = buf.split(/\r?\n\r?\n/)
+  const rest = parts.pop() ?? ''
+  for (const frame of parts) {
+    const data = frame.split(/\r?\n/).filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n')
+    if (!data) continue // comments / heartbeats
+    try {
+      const ev = JSON.parse(data) as AskEvent
+      if (ev && typeof ev.type === 'string') events.push(ev)
+    } catch { /* a malformed frame is skipped, never guessed */ }
+  }
+  return { events, rest }
+}
+
+/**
+ * Follow a run's live events over fetch (EventSource cannot carry the session
+ * header). Resolves when the stream ends: 'ended' after a terminal event, 'closed'
+ * when the server closed without one, 'aborted' on signal, or a failure.
+ */
+export async function streamAskEvents(runId: string, opts: { after?: number; signal?: AbortSignal; onEvent: (e: AskEvent) => void }): Promise<{ ok: true; end: 'ended' | 'closed' | 'aborted' } | { ok: false; failure: AskFailure }> {
+  let res: Response
+  try {
+    res = await fetch(`${getBackendBaseUrl()}${ASK_ENDPOINTS.events(runId, opts.after ?? 0)}`, { headers: { accept: 'text/event-stream', ...(await getBackendAuthHeaders()) }, signal: opts.signal, credentials: 'include', cache: 'no-store' })
+  } catch (err) {
+    if ((err as { name?: string })?.name === 'AbortError') return { ok: true, end: 'aborted' }
+    return { ok: false, failure: { kind: 'unavailable', status: 0, code: 'STREAM_UNREACHABLE', message: 'The live event stream could not be opened.' } }
+  }
+  if (!res.ok || !res.body || !/text\/event-stream/.test(res.headers.get('content-type') || '')) {
+    let up: Record<string, unknown> = {}
+    try { up = obj(await res.json()) } catch { /* empty body */ }
+    return failed({ status: res.status, error: str(up.error) ?? undefined, message: str(up.message) ?? undefined })
+  }
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  let terminal = false
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const { events, rest } = parseSseFrames(buf)
+      buf = rest
+      for (const e of events) {
+        if (e.type === 'snapshot' && obj(e).from === 'durable_status' && (e as { state?: string }).state === 'running') continue
+        opts.onEvent(e)
+        if (e.type === 'completed' || e.type === 'failed' || e.type === 'cancelled') terminal = true
+      }
+    }
+  } catch (err) {
+    if ((err as { name?: string })?.name === 'AbortError') return { ok: true, end: 'aborted' }
+    return { ok: false, failure: { kind: 'unavailable', status: 0, code: 'STREAM_INTERRUPTED', message: 'The live event stream broke.' } }
+  }
+  return { ok: true, end: terminal ? 'ended' : 'closed' }
 }
 
 /* ── mention typeahead: existing READ endpoints only ───────────────────── */
