@@ -32,6 +32,11 @@ export function tickBudgetMs(env = process.env) {
   return Number.isFinite(v) && v > 0 ? Math.min(v, TICK_HARD_MAX_MS) : DEFAULT_TICK_BUDGET_MS
 }
 
+/** AGENT_RUNTIME_TICK_CONCURRENT=1: a tick runs its claims in parallel (bounded by the DB's grants). Default off. */
+export function tickConcurrent(env = process.env) {
+  return ON.has(String(env?.AGENT_RUNTIME_TICK_CONCURRENT ?? '').trim().toLowerCase())
+}
+
 const STORE_KEY = Symbol.for('lc.agent.runtime.store')
 
 /** One process-wide store over the shared agent_api pool (never the app's full-privilege URL in production). */
@@ -63,7 +68,7 @@ export async function runScheduledRuntimeTick({ env = process.env, store = null,
   if (!gate.enabled) return { ok: true, skipped: gate.reason }
   if (inFlight) return { ok: true, skipped: 'in_flight' }
   try {
-    inFlight = (store ? Promise.resolve(store) : getVerifiedRuntimeStore(env)).then((s) => runRuntimeTick({ store: s, handlers, workerId: RUNTIME_WORKER_ID, budgetMs: tickBudgetMs(env), ...(now ? { now } : {}) }))
+    inFlight = (store ? Promise.resolve(store) : getVerifiedRuntimeStore(env)).then((s) => runRuntimeTick({ store: s, handlers, workerId: RUNTIME_WORKER_ID, budgetMs: tickBudgetMs(env), concurrent: tickConcurrent(env), ...(now ? { now } : {}) }))
     const summary = await inFlight
     return { ok: summary.errors.length === 0, skipped: null, summary }
   } finally {
