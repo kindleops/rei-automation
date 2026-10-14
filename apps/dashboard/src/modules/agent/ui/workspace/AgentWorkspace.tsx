@@ -16,6 +16,8 @@ import { ResearchCanvas } from '../research/ResearchCanvas'
 import { ResearchInspector } from '../research/ResearchInspector'
 import { RunStream } from '../stream/RunStream'
 import { ApprovalsList } from '../../approvals/ApprovalsList'
+import { ConversationIntelPanel } from '../../conversation-intel/ConversationIntelPanel'
+import { setIntel, useIntel } from '../../conversation-intel/conversation-intel-model'
 
 const LEFT = { min: 248, max: 440, def: 296 }
 const RIGHT = { min: 320, max: 620, def: 404 }
@@ -62,6 +64,7 @@ function WorkspaceBody() {
   }
   const cols = `${ui.leftCollapsed ? '44px' : `${ui.leftW}px`} 0px minmax(0,1fr) 0px ${ui.rightCollapsed ? '44px' : `${ui.rightW}px`}`
   const showPreflight = Boolean(ui.preflight)
+  const intel = useIntel()
   return (
     <div className="agx-ws__inner" onKeyDown={onKey} tabIndex={-1}>
       <header className="agx-ws__head">
@@ -78,12 +81,13 @@ function WorkspaceBody() {
         <Region side="left" collapsed={ui.leftCollapsed} label="Runs, scope and navigation"><LeftRail /></Region>
         <Grip side="left" />
         <main className={cx('agx-ws__center', snap && `is-${snap.mode}`)} aria-label="Investigation">
-          {showPreflight ? <div className="agx-canvas is-pre"><div className="agx-canvas__pre"><LivePreflight /></div></div>
+          {intel.open && !showPreflight ? <ConversationIntelPanel />
+            : showPreflight ? <div className="agx-canvas is-pre"><div className="agx-canvas__pre"><LivePreflight /></div></div>
             : snap?.research ? <ResearchCanvas snap={snap} /> : snap?.run ? <ConversationCanvas snap={snap} /> : <EmptyCanvas />}
         </main>
         <Grip side="right" />
         <Region side="right" collapsed={ui.rightCollapsed} label="Inspector">
-          {showPreflight ? <PreflightInspector /> : snap?.research ? <ResearchInspectorFor snap={snap} /> : snap?.run ? <RunInspector snap={snap} /> : <p className="agx-empty">The inspector follows the selected run.</p>}
+          {intel.open && !showPreflight ? <IntelInspector /> : showPreflight ? <PreflightInspector /> : snap?.research ? <ResearchInspectorFor snap={snap} /> : snap?.run ? <RunInspector snap={snap} /> : <p className="agx-empty">The inspector follows the selected run.</p>}
         </Region>
       </div>
     </div>
@@ -95,6 +99,19 @@ function ResearchInspectorFor({ snap }: { snap: RunSnapshot }) {
   const isBatch = snap.properties.length > 1
   const property = isBatch ? snap.properties.find((p) => p.property_id === ui.focusPropertyId) ?? null : snap.properties[0] ?? null
   return <ResearchInspector snap={snap} view={snap.research!} property={property} />
+}
+
+function IntelInspector() {
+  return (
+    <div className="agx-insp">
+      <div className="agx-insp__tabs"><b className="agx-insp__t">Shadow policy</b></div>
+      <div className="agx-insp__body">
+        <section className="agx-panel"><h5>What this is</h5><p>Conversation Engine 2.0 (R1 understanding, R2 composition) runs beside the deterministic engine and records what it understood and would have said. The deterministic engine stays authoritative.</p></section>
+        <section className="agx-panel"><h5>What it never does</h5><p>It never sends, queues, or schedules a message, and it never changes a record. STOP, suppression, wrong number, windows and offers are decided by the existing deterministic rules before any model is called.</p></section>
+        <section className="agx-panel"><h5>AI reply policy</h5><p>Off. The kill switch is engaged by default. Turning on template auto-reply does not turn on AI replies.</p></section>
+      </div>
+    </div>
+  )
 }
 
 function PreflightInspector() {
@@ -207,6 +224,12 @@ function LeftRail() {
       {!snaps.length ? <p className="agx-empty">No runs yet. Runs keep going while you navigate and survive a reload.</p> : null}
 
       {active?.research && !ui.preflight ? <NavSection snap={active} /> : null}
+
+      <section className="agx-left__grp" aria-label="Conversation intelligence">
+        <h5>Conversation intelligence<small>shadow</small></h5>
+        <LCButton size="sm" variant="quiet" icon="message" block onClick={() => setIntel({ open: true })}>Review inbound decisions</LCButton>
+        <p className="agx-muted">Read-only. AI understanding + drafts on real inbound; nothing sends.</p>
+      </section>
 
       {FIXTURES_AVAILABLE ? <section className={cx('agx-left__grp', 'agx-left__fx')} aria-label="Design fixtures">
         <button type="button" className="agx-left__fxh" onClick={() => setFxOpen((o) => !o)} aria-expanded={fxOpen}><h5>Design fixtures <span className="agx-sim">SIMULATED</span></h5><Icon name={fxOpen ? 'chevron-up' : 'chevron-down'} size={12} /></button>
