@@ -21,6 +21,7 @@ export function idempotencyKeyFor(inboundMessageId) {
 export function buildShadowRecord({
   inboundMessageId, threadRef, propertyIds = [], createdAt, sellerMessageMasked, decision, path, models = [],
   calls = [], draft = null, validation = null, deterministic = null, latencyMs = null, policyCode = null, contextSummary = null,
+  inboundVersion = null,
 }) {
   const cost = { haiku_usd: 0, sonnet_usd: 0, other_usd: 0, total_usd: 0 }
   for (const c of calls) {
@@ -35,6 +36,8 @@ export function buildShadowRecord({
     record_version: SHADOW_RECORD_VERSION,
     idempotency_key: idempotencyKeyFor(inboundMessageId),
     inbound_message_id: String(inboundMessageId),
+    // 8.5.15: the inbound message VERSION the decision was made on (conversation-ai-shadow-hook.js inboundVersionOf)
+    inbound_version: inboundVersion && /^[a-p]{16}$/.test(inboundVersion) ? inboundVersion : null,
     thread_ref: threadRef,
     property_ids: propertyIds.map(String),
     created_at: createdAt,
