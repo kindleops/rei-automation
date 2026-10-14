@@ -17,6 +17,7 @@ import { buildShadowRecord, idempotencyKeyFor } from './shadow-record.js'
 import { understandInbound } from './understand.js'
 import { validateDraft } from './validator.js'
 import { blockedQuestionKinds, questionLedger } from './questions.js'
+import { ledgerFromContextInput } from './fact-ledger.js'
 
 export const ENGINE_VERSION = 'conv-ai.engine.v1'
 
@@ -97,7 +98,9 @@ export async function runConversationAiShadow({ input, deterministic = null, eli
     const draftText = composeDraft(decision)
     let validation = { status: 'not_applicable', reasons: [] }
     if (decision.outcome === 'REPLY_CANDIDATE' && draftText) {
-      validation = await validateDraft({ decision: { ...decision, proposed_message: draftText }, context: ctxAfter, inboundText: input.inbound.body, policy: p, eligibility, semanticCheck })
+      // 8.5.16: the canonical fact + question ledger (validated model facts merged) also judges the draft
+      const factLedger = ledgerFromContextInput(input, { modelFacts: decision.facts_extracted, now })
+      validation = await validateDraft({ decision: { ...decision, proposed_message: draftText }, context: ctxAfter, inboundText: input.inbound.body, policy: p, eligibility, semanticCheck, factLedger })
       if (validation.semantic?.call) r1.calls.push({ ...validation.semantic.call, route: 'semantic_check' })
     }
     return buildShadowRecord({

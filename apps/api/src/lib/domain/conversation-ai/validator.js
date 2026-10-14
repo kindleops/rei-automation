@@ -18,6 +18,7 @@
 //   - an outcome / category / stage the AI policy does not allow
 import { questionKindOf, isDeflectionToOffer } from './questions.js'
 import { DEFAULT_AI_REPLY_POLICY } from './policy.js'
+import { validateProposedMessage } from './fact-ledger.js'
 
 export const VALIDATOR_VERSION = 'conv-ai.validator.v1'
 export const MAX_DRAFT_CHARS = 240
@@ -72,7 +73,7 @@ export function questionCount(text) {
  *        08–21 recipient-local window function); outside_window null = zone unknown
  * @param {(q: { draft: string, prior_questions: string[], facts: object, inbound: string }) => Promise<{ duplicate: boolean, irrelevant: boolean, reason?: string }>} [a.semanticCheck]
  */
-export async function validateDraft({ decision, context, inboundText = '', policy = DEFAULT_AI_REPLY_POLICY, eligibility = null, semanticCheck = null }) {
+export async function validateDraft({ decision, context, inboundText = '', policy = DEFAULT_AI_REPLY_POLICY, eligibility = null, semanticCheck = null, factLedger = null }) {
   const reasons = []
   if (!decision || NOT_REPLY.has(decision.outcome)) return { status: 'not_applicable', reasons: [], draft: null, validator_version: VALIDATOR_VERSION }
   const text = String(decision.proposed_message || '').trim()
@@ -123,6 +124,12 @@ export async function validateDraft({ decision, context, inboundText = '', polic
   if (qn >= 1 && kindStage != null && stageIdx >= 0 && kindStage > stageIdx + 1) reasons.push(`skips_stage:${kind}`)
   const allowedKinds = OBJECTIVE_KINDS[decision.next_objective]
   if (qn >= 1 && allowedKinds && !allowedKinds.includes(kind)) reasons.push(`question_off_objective:${kind}`)
+
+  // 5b. the CANONICAL fact + question ledger (8.5.16, fact-ledger.js) when supplied:
+  //     an answered or already-asked fact, a backwards / skipped stage, an offer question
+  if (factLedger && qn >= 1) {
+    for (const r of validateProposedMessage(factLedger, { text, inboundIntent: decision.intent }).reasons) reasons.push(`ledger:${r}`)
+  }
 
   // 6. relevance to the latest inbound
   if (decision.intent === 'who_is_this' && !IDENTITY_RE.test(text)) reasons.push('irrelevant:identity_question_unanswered')
