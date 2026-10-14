@@ -13,7 +13,7 @@ import { DECISION_JSON_SCHEMA, failClosedDecision, validateDecision } from './co
 import { deterministicPrecheck } from './precheck.js'
 import { SYSTEM_PROMPT, buildUserPrompt } from './prompts.js'
 
-export const UNDERSTAND_VERSION = 'conv-ai.understand.v1'
+export const UNDERSTAND_VERSION = 'conv-ai.understand.v2'
 
 const FINANCING_RE = /\b(?:owner\s+financ\w*|seller\s+financ\w*|subject[\s-]?to|take\s+over\s+(?:the\s+)?(?:payments|mortgage|loan)|lease\s+option|rent\s+to\s+own|land\s+contract|wrap(?:around)?\s+mortgage|terms|monthly\s+payments|novation)\b/i
 const MULTI_PROPERTY_RE = /\b(?:(?:both|all|several|multiple|two|three|other)\s+(?:of\s+(?:my|the)\s+)?(?:properties|houses|homes|lots|units|addresses)|i\s+(?:own|have)\s+(?:a\s+few|several|multiple|[0-9]+)\s+(?:properties|houses|homes)|which\s+(?:property|house|one))\b/i
@@ -61,7 +61,7 @@ export function contradictsLedger(decision, context) {
 export async function understandInbound({ context, inboundText, inboundId, deterministic = null, eligibility = null, modelClient = null, options = {} }) {
   const calls = []
   const trace = { version: UNDERSTAND_VERSION, path: null, escalation_triggers: [], contradictions: [], errors: [] }
-  const pre = deterministicPrecheck({ text: inboundText, inboundId, deterministic, eligibility })
+  const pre = deterministicPrecheck({ text: inboundText, inboundId, deterministic, eligibility, lastQuestionKind: context?.last_question_kind ?? context?.model?.last_question_kind ?? null })
   trace.precheck = pre.signals
   if (pre.decided) {
     trace.path = 'deterministic_precheck'
@@ -90,21 +90,29 @@ export async function understandInbound({ context, inboundText, inboundId, deter
     }
   }
 
-  const first = await run('default')
+  // RC 8.5.15 escalation policy (eval: Sonnet was 84% of spend and fixed no
+  // next action): an invalid Haiku answer is retried ONCE on Haiku; Sonnet is
+  // consulted only when a REPLY_CANDIDATE is on the table and a trigger could
+  // change it. A Haiku ESCALATE_TO_SONNET without a candidate is a human item.
+  let first = await run('default')
+  if (!first.v.ok && !first.refused) {
+    trace.default_retry = true
+    first = await run('default')
+  }
   let decision = first.v.ok ? first.v.decision : null
   const why = []
-  if (!first.v.ok && !first.refused) why.push('validation_failure')
-  if (decision?.escalation_required || decision?.outcome === 'ESCALATE_TO_SONNET') why.push(decision.escalation_reason || 'other')
+  if (decision?.escalation_required) why.push(decision.escalation_reason || 'other')
   for (const t of triggers) why.push(t)
   if (decision) {
     const c = contradictsLedger(decision, context)
     trace.contradictions = c
     if (c.length) why.push('contradiction')
   }
-  const shouldEscalate = options.escalate !== false && why.length > 0 && !first.refused
+  const candidate = decision?.outcome === 'REPLY_CANDIDATE'
+  const shouldEscalate = options.escalate !== false && candidate && why.length > 0 && !first.refused
   if (shouldEscalate) {
     trace.escalation_reasons = [...new Set(why)]
-    const second = await run('escalation', decision ? { intent: decision.intent, outcome: decision.outcome, next_objective: decision.next_objective, escalation_reason: decision.escalation_reason } : { invalid: first.v.errors?.slice(0, 5) })
+    const second = await run('escalation', { intent: decision.intent, outcome: decision.outcome, next_objective: decision.next_objective, escalation_reason: decision.escalation_reason })
     if (second.v.ok) {
       decision = second.v.decision
       // Sonnet gains no authority: it cannot escalate further or keep a contradiction
@@ -120,8 +128,14 @@ export async function understandInbound({ context, inboundText, inboundId, deter
     trace.path = first.refused ? 'haiku(refused)' : 'haiku(invalid)'
     decision = failClosedDecision({ errors: first.v.errors, sourceMessageIds: [inboundId], producedBy: 'default', raw: first.raw })
   } else {
-    trace.path = 'haiku'
-    if (decision.outcome === 'ESCALATE_TO_SONNET') decision = { ...decision, outcome: 'NEEDS_REVIEW', proposed_message: null }
+    trace.path = trace.default_retry ? 'haiku(retry)' : 'haiku'
+    if (decision.outcome === 'ESCALATE_TO_SONNET') {
+      trace.escalation_withheld = [...new Set(why)]
+      decision = { ...decision, outcome: 'NEEDS_REVIEW', proposed_message: null }
+    } else if (candidate && why.length) {
+      // a candidate that would have escalated (triggers present) but escalation is off
+      trace.escalation_withheld = [...new Set(why)]
+    }
   }
   // the model never overrides the deterministic pre-check: re-assert on the final decision
   return { decision, calls, trace }

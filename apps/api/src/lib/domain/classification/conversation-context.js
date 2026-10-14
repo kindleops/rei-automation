@@ -378,6 +378,8 @@ export function bareNoOwnershipMode() {
 
 const POLITE_DECLINE_TAIL_RE = /(?:^|\s)(?:thanks|thank\s+you|thank\s+u|thx|ty|gracias)$/u;
 const EMOJI_SENTIMENT_RE = /\p{Extended_Pictographic}/u;
+const MARKET_VALUE_ANSWER_RE = /^(?:(?:no+|nope|not\s+really|not\s+yet)[\s,.!]+(?:but\s+|just\s+)?)?(?:(?:the\s+|fair\s+|current\s+)?market\s+(?:value|price|rate)|fmv|whatever\s+(?:it'?s|its|it\s+is)\s+worth|what(?:ever)?\s+it'?s\s+worth|(?:el\s+)?valor\s+(?:de\s+|del\s+)?mercado|precio\s+de\s+mercado)[\s.!]*$/iu;
+const NO_SOMEONE_ELSE_OWNS_RE = /^\s*(?:no+|nope|nah)\b[\s,.!-]+(?:it\s+|that\s+)?(?:should\s+be|belongs\s+to|is\s+owned\s+by|owned\s+by|is\s+the\s+city|is\s+the\s+county)\b[^?]{0,80}$/iu;
 
 // "Possibly" / "Maybe" (2026-10-06): to OUR proposal question it is an open
 // door on price (latent_interest -> the price question); to anything else it
@@ -435,6 +437,11 @@ export function applyContextualShortReply(messageText, validated) {
       if (bare && mode === 'ownership_unverified' && !polite) {
         return ownershipUnverifiedResult(messageText, validated, 'ctx_bare_no_after_ownership_check_ownership_unverified');
       }
+      // "Nope should be the city of Jennings" (eval #131): a "No" that names
+      // someone else as the owner. A phone number in it is a referral -- not here.
+      if (!bare && mode === 'ownership_unverified' && NO_SOMEONE_ELSE_OWNS_RE.test(String(messageText)) && !/\d{3}/.test(String(messageText))) {
+        return ownershipUnverifiedResult(messageText, validated, 'ctx_no_someone_else_owns_after_ownership_check');
+      }
       if (bare) {
         return {
           applied: true,
@@ -477,6 +484,27 @@ export function applyContextualShortReply(messageText, validated) {
           context_age_ms: validated.context.context_age_ms,
         };
       }
+    }
+  }
+  // RC 8.5.15 (eval #20): "market value" / "No but market value" / "whatever
+  // it's worth" to OUR asking-price question names no number: an absent value
+  // (the flow advances to condition), never latent interest that re-asks price.
+  {
+    const uc = validated.context.last_outbound_use_case;
+    const qt = validated.context.last_outbound_question_type;
+    if ((uc === 'asking_price' || qt === 'asking_price') && MARKET_VALUE_ANSWER_RE.test(String(messageText).trim())) {
+      return {
+        applied: true,
+        primary_intent: 'asking_price_absent',
+        labels: ['asking_price_absent', 'asking_price_market_value'],
+        rule_id: 'ctx_market_value_after_asking_price',
+        confidence: 0.86,
+        rationale: 'market_value_names_no_number_after_asking_price_question',
+        evidence_span: String(messageText).trim(),
+        context_message_id: validated.context.last_outbound_message_id,
+        context_use_case: uc,
+        context_age_ms: validated.context.context_age_ms,
+      };
     }
   }
   // 2026-10-13: "You tell me" to OUR asking-price question turns it back on

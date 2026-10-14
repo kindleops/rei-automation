@@ -2,6 +2,7 @@
 // Composition root: the ONLY place a provider client, a DB client and the
 // conversation-ai engine meet. Writes go to public.conversation_ai_shadow_decisions
 // (PROPOSED table) and nowhere else.
+import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
 import { createAnthropicProvider } from './anthropic-provider.js'
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js'
 import { loadInboundRow, loadShadowContext } from '@/lib/domain/conversation-ai/context-loader.js'
@@ -87,6 +88,9 @@ export async function runConversationAiShadowForInbound({ providerMessageSid, in
   }
   const loaded = await loadShadowContext({ supabase, providerMessageSid, inbound })
   if (!loaded) return { ran: false, code: 'INBOUND_NOT_FOUND' }
+  // RC 8.5.15 (eval #128 drafted "Hi Internal..."): internal / test numbers are
+  // never decided -- no model call, no record.
+  if (isInternalTestPhone(loaded.row.from_phone_number) || isInternalTestPhone(loaded.row.to_phone_number)) return { ran: false, code: 'INTERNAL_TEST_THREAD' }
   const modelClient = tracker ? createConversationModelClient({ provider: provider || createAnthropicProvider({ env }), tracker, env, remainingMs, signal }) : null
   const row = hypotheticalReplyRow({ sellerPhone: loaded.row.from_phone_number, ourPhone: loaded.row.to_phone_number, threadKey: loaded.row.thread_key, propertyId: loaded.row.property_id, prospectId: loaded.row.prospect_id, inboundId: loaded.row.id, inboundAt: loaded.input.inbound.at, now: loaded.input.now })
   return runConversationAiShadow({

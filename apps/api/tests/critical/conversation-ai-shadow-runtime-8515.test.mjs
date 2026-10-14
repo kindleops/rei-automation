@@ -137,9 +137,10 @@ test('spend: a routine reply (Haiku decision + semantic check) fits the $0.01 jo
   assert.ok(reserves.every((x) => x.usd > 0 && x.usd <= ROUTINE_REPLY_RESERVE_USD), JSON.stringify(reserves))
   assert.ok(reserves[0].usd + reserves[1].usd <= ROUTINE_REPLY_RESERVE_USD, 'both worst cases together fit $0.01')
 
-  // escalation: Haiku asks for Sonnet; Sonnet's worst case (≈ $0.07) cannot fit what is left of $0.01
+  // escalation: a Haiku reply candidate flags complex_negotiation (8.5.15: Sonnet only
+  // for a candidate); Sonnet's worst case (≈ $0.07) cannot fit what is left of $0.01
   const ctx2 = jobCtx()
-  const p2 = fakeProvider(() => routineDecision({ outcome: 'ESCALATE_TO_SONNET', escalation_required: true, escalation_reason: 'complex_negotiation', proposed_message: null }))
+  const p2 = fakeProvider(() => routineDecision({ escalation_required: true, escalation_reason: 'complex_negotiation' }))
   const r2 = await runConversationAiShadowForInbound({ providerMessageSid: SID, env: ON, supabase: fakeSupabase(threadTables(), { shadowStoreRows: new Map() }), provider: p2, tracker: runtimeJobTracker(ctx2), remainingMs: ctx2.remainingMs, signal: ctx2.signal })
   assert.equal(r2.code, 'SHADOW_RECORDED')
   assert.equal(r2.record.decision.outcome, 'NEEDS_REVIEW')

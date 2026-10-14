@@ -575,6 +575,10 @@ const COUNTERPARTY_PITCH_PATTERNS = [
   /\bi\s+(?:also\s+)?wholesale\b|\bwholesal(?:e|ing)\s+(?:deals|properties|houses|homes)\b/,
   /\b(?:send|text|get)\s+(?:you\s+)?(?:the|my|our)\s+(?:list|inventory|deal\s+sheet|deals?\s+list|buyers?\s+list)\b|\b(?:send|sending)\s+the\s+list\s+to\s+you\b|\bmy\s+(?:buyers?\s+list|inventory|deal\s+list)\b/,
   /\byo\s+tambien\s+compro\s+casas\b|\bestamos\s+en\s+el\s+mismo\s+negocio\b|\bsoy\s+(?:inversionista|mayorista)\b/,
+  // RC 8.5.15 (eval #120, #29): someone working for an investor, or a JV
+  // proposal, is a counterparty -- a person reads it; never asked for a price.
+  /\bi\s+(?:work|am\s+working)\s+(?:for|with)\s+(?:an?\s+|the\s+)?(?:real\s+estate\s+)?(?:investor|investment\s+(?:firm|company|group)|wholesaler|buyer|investing\s+(?:company|group))s?\b/,
+  /\bjv\b|\bjoint\s+venture\b/,
 ];
 
 /** The reply pitches the respondent's own inventory / investor business. */

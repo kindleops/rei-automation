@@ -542,3 +542,40 @@ test("orchestrator: STOP after S1 suppresses and schedules nothing", async () =>
   assert.deepEqual(r.followups, []);
   assert.equal(r.inserts.length, 0);
 });
+
+// ── 7. Deterministic eval fixes (blind 150-item gold set, 2026-10-14) ───────
+test("eval #131: a 'No' that names someone else as the owner is the ownership denial", async () => {
+  const r = await replay("Nope should be the city of Jennings", "s1_yours");
+  assert.equal(r.classification.primary_intent, "property_specific_non_owner");
+  assert.equal(r.decision.should_suppress_contact, false);
+});
+
+test("eval #55: 'Si pero no estoy vendiéndola' / 'Yes but I'm not selling' confirms ownership AND declines: the 30-day decline, never the S2 question again", async () => {
+  for (const [m, q] of [["Si pero no estoy vendiéndola", "s1_es"], ["Yes but I'm not selling", "s1_still_own"]]) {
+    const r = await replay(m, q);
+    assert.equal(r.classification.primary_intent, "not_interested", m);
+    assert.notEqual(r.template?.use_case, "consider_selling", m);
+  }
+  const yes = await replay("Yes I own it", "s1_still_own");
+  assert.equal(yes.classification.primary_intent, "ownership_confirmed");
+});
+
+test("eval #20: 'market value' to our asking-price question names no number -- never latent interest that re-asks the price", async () => {
+  const ask = ["seller_asking_price", "Got it. What price would you be looking for?"];
+  QUESTIONS.s3 = ask;
+  for (const m of ["No but market value", "Market value", "Valor de mercado"]) {
+    const r = await replay(m, "s3");
+    assert.equal(r.classification.primary_intent, "asking_price_absent", m);
+    assert.ok(r.classification.matched_rule_ids.includes("ctx_market_value_after_asking_price"), m);
+    assert.notEqual(r.template?.use_case, "seller_asking_price", m);
+  }
+});
+
+test("eval #120 / #29: someone who works for an investor, or a JV pitch, is a counterparty: a person reads it, no price question", async () => {
+  for (const m of ["No this is Sam and I work for an investor we do have another property we are trying to sell", "Okay she said no big deal on jv"]) {
+    const r = await replay(m, "s1_es");
+    assert.ok(r.classification.matched_rule_ids.includes("r11_counterparty_investor_pitch"), m);
+    assert.equal(r.decision.should_queue_reply, false, m);
+    assert.notEqual(r.template?.use_case, "seller_asking_price", m);
+  }
+});

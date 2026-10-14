@@ -7967,6 +7967,26 @@ const AI_CONFIDENCE_THRESHOLD = 0.82;
  * explicit "wrong number" / "wrong person" / "this is not <name>", a sale, and
  * any compliance signal keep their own classification.
  */
+/**
+ * RC 8.5.15 (eval #55, owner rule "not selling" = the 30-day follow-up): "Si
+ * pero no estoy vendiéndola" / "Yes but I'm not selling" confirms ownership AND
+ * declines. The decline decides the turn (never the S2 interest question again).
+ */
+const OWNER_BUT_NOT_SELLING_RE = /\b(?:pero|but)\s+(?:no\s+(?:estoy|esta|está|la\s+estoy|lo\s+estoy)\s+(?:vendi\w*|a\s+la\s+venta|en\s+venta)|no\s+(?:la|lo)\s+(?:vendo|voy\s+a\s+vender)|no\s+(?:quiero|pienso|planeo)\s+vender\w*|no\s+(?:est[aá]|es)\s+(?:a\s+la|en)\s+venta|(?:i'?m|i\s+am|we'?re|we\s+are|im)\s+not\s+(?:selling|interested|looking\s+to\s+sell)|not\s+(?:selling|for\s+sale|interested)|(?:i|we)\s+(?:do\s*n[o']?t|dont)\s+(?:want|plan|intend)\s+to\s+sell)/i;
+export function rescopeOwnerButNotSelling(text, result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting") return result;
+  if (result.primary_intent !== "ownership_confirmed") return result;
+  if (!OWNER_BUT_NOT_SELLING_RE.test(String(text ?? ""))) return result;
+  return {
+    ...result,
+    primary_intent: "not_interested",
+    secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "ownership_confirmed"])],
+    matched_intents: [...new Set(["not_interested", ...(Array.isArray(result.matched_intents) ? result.matched_intents : [])])],
+    matched_rule_ids: [...(Array.isArray(result.matched_rule_ids) ? result.matched_rule_ids : []), "owner_but_not_selling"],
+  };
+}
+
 export function rescopeWrittenOwnershipDenial(text, result) {
   if (!result || typeof result !== "object") return result;
   if (result.compliance_flag === "stop_texting") return result;
@@ -8028,9 +8048,9 @@ export async function classify(message, brain_item = null, options = {}) {
     };
   }
 
-  const heuristic = rescopeWrittenOwnershipDenial(text, classifyHeuristic(text, brain_item, {
+  const heuristic = rescopeOwnerButNotSelling(text, rescopeWrittenOwnershipDenial(text, classifyHeuristic(text, brain_item, {
     conversation_context,
-  }));
+  })));
 
   if (heuristicOnly) {
     const final_motivation = estimateMotivationScore(heuristic);
