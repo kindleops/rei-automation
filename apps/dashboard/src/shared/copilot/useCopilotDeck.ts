@@ -67,56 +67,9 @@ function buildLifecycle(intent: ResolvedIntent): DeckPhase[] {
     },
   ]
 
-  const needsSearch = intent.domain === 'system' || intent.domain === 'inbox' || intent.domain === 'alerts' || intent.domain === 'briefing' || intent.domain === 'settings'
-  const needsAnalysis = intent.domain !== 'room' && intent.domain !== 'copilot' && intent.domain !== 'split_view'
-  const needsDraft = intent.domain === 'inbox' || intent.domain === 'system' || intent.domain === 'briefing'
-
-  if (needsSearch) {
-    phases.push({
-      state: 'searching',
-      delay: 260,
-      type: 'search',
-      label: 'Context sweep engaged',
-      detail: intent.preview,
-      planDoneCount: 2,
-      planActiveIndex: 2,
-    })
-  }
-
-  if (needsAnalysis) {
-    phases.push({
-      state: 'analyzing',
-      delay: 300,
-      type: 'analysis',
-      label: 'Evaluating live signals',
-      detail: intent.preview,
-      planDoneCount: 3,
-      planActiveIndex: 3,
-    })
-  }
-
-  phases.push({
-    state: 'planning',
-    delay: 260,
-    type: 'analysis',
-    label: 'Generated candidate actions',
-    detail: intent.preview,
-    planDoneCount: 4,
-    planActiveIndex: 4,
-  })
-
-  if (needsDraft) {
-    phases.push({
-      state: 'drafting',
-      delay: 220,
-      type: 'draft',
-      label: 'Drafting operator response',
-      detail: intent.preview,
-      planDoneCount: 4,
-      planActiveIndex: 4,
-    })
-  }
-
+  // INTELLIGENCE 2.0 AUDIT (10-13): the timed "Context sweep engaged" / "Evaluating live
+  // signals" / "Generated candidate actions" / "Drafting operator response" phases were
+  // setTimeout theatre — no search, analysis or draft ran. Only the real parse step remains.
   return phases
 }
 
@@ -219,6 +172,14 @@ export function useCopilotDeck({ open, context, onAction, surface }: UseCopilotD
   }, [addMessage, schedule, setLifecycleState])
 
   const executeIntent = useCallback((intent: ResolvedIntent) => {
+    // free text that matched no command has no handler: never report it as executed
+    if (intent.domain === 'system' && intent.action === 'query') {
+      setLifecycleState('completed', 'system', 'Not understood: no command matched', intent.raw)
+      addMessage('system', 'No command matched, so nothing ran. For questions, use LeadCommand Intelligence (⌘L).', { state: 'error' })
+      setPendingIntent(null)
+      schedule(() => setCopilotState('idle'), 1400)
+      return
+    }
     setPlanSteps(markPlanSteps(planRef.current, Math.max(planRef.current.length - 1, 0), planRef.current.length - 1))
     setLifecycleState('executing', 'execution', 'Executing approved action', intent.preview)
     schedule(() => {
@@ -226,7 +187,7 @@ export function useCopilotDeck({ open, context, onAction, surface }: UseCopilotD
       finalizeCompletedState(intent, intent.preview)
       setPendingIntent(null)
     }, 680)
-  }, [finalizeCompletedState, onAction, schedule, setLifecycleState])
+  }, [addMessage, finalizeCompletedState, onAction, schedule, setLifecycleState])
 
   const determineConfirmation = useCallback((intent: ResolvedIntent, src: 'operator' | 'voice' = 'operator') => {
     const isNavigation = intent.domain === 'room' || intent.domain === 'map' || intent.domain === 'split_view'

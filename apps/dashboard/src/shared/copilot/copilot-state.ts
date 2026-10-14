@@ -501,7 +501,7 @@ export function parseIntent(input: string): ResolvedIntent | null {
           action: rule.action,
           params,
           raw: trimmed,
-          confidence: 90 + Math.random() * 8,
+          confidence: 100, // deterministic: a command pattern matched (was 90 + Math.random() * 8)
           preview: rule.preview(params),
         }
       }
@@ -513,7 +513,7 @@ export function parseIntent(input: string): ResolvedIntent | null {
     action: 'query',
     params: { query: trimmed },
     raw: trimmed,
-    confidence: 60 + Math.random() * 15,
+    confidence: 0, // no command matched (was 60 + Math.random() * 15)
     preview: `Query: "${trimmed}"`,
   }
 }

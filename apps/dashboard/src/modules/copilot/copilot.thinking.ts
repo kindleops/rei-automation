@@ -1,24 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
 import type { CopilotAgent } from './copilot.types';
 
-export const useThinkingRotation = (agent: CopilotAgent, isThinking: boolean) => {
-  const [currentPhrase, setCurrentPhrase] = useState(agent.thinkingPhrases[0]);
-  const phraseIndex = useRef(0);
-
-  useEffect(() => {
-    if (!isThinking) {
-      phraseIndex.current = 0;
-      setCurrentPhrase(agent.thinkingPhrases[0]);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      phraseIndex.current = (phraseIndex.current + 1) % agent.thinkingPhrases.length;
-      setCurrentPhrase(agent.thinkingPhrases[phraseIndex.current]);
-    }, 2500);
-
-    return () => clearInterval(interval);
-  }, [isThinking, agent.id, agent.thinkingPhrases]);
-
-  return currentPhrase;
-};
+/**
+ * The status shown while a request is in flight. It used to rotate scripted
+ * phrases ("Analyzing workflow bottlenecks…") every 2.5 s, unrelated to any
+ * server event; it is now a plain, true "Working…".
+ */
+export const useThinkingRotation = (_agent: CopilotAgent, _isThinking: boolean) => 'Working…';

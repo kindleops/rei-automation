@@ -54,7 +54,7 @@ export function CopilotReasoning({ state, livePreview, pendingIntent, trace }: C
               </div>
               <div className="co-reason__field">
                 <dt>Confidence</dt>
-                <dd>{Math.round(intent.confidence)}%</dd>
+                <dd>{intent.confidence >= 100 ? 'matched' : 'no match'}</dd>
               </div>
               {intent.params.target && (
                 <div className="co-reason__field">

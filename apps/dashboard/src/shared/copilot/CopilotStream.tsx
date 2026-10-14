@@ -92,7 +92,7 @@ export function CopilotStream({
       {livePreview && !pendingIntent && (
         <div className="co-activity__parse">
           <span>{livePreview.domain}.{livePreview.action}</span>
-          <span className="co-activity__parse-conf">{Math.round(livePreview.confidence)}%</span>
+          <span className="co-activity__parse-conf">{livePreview.confidence >= 100 ? 'matched' : 'no match'}</span>
         </div>
       )}
 
@@ -101,7 +101,7 @@ export function CopilotStream({
         <div className="co-activity__approval">
           <div className="co-activity__approval-head">
             <span className="co-activity__approval-tag">Approval Required</span>
-            <span className="co-activity__approval-conf">{Math.round(pendingIntent.confidence)}%</span>
+            <span className="co-activity__approval-conf">{pendingIntent.confidence >= 100 ? 'matched' : 'no match'}</span>
           </div>
           <div className="co-activity__approval-body">
             <span className="co-activity__approval-action">{pendingIntent.domain}.{pendingIntent.action}</span>

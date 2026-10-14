@@ -78,7 +78,7 @@ export function CopilotCommandSurface({
             : livePreview && (
               <span className="co-cmd__parse">
                 <span className="co-cmd__parse-action">{livePreview.domain}.{livePreview.action}</span>
-                <span className="co-cmd__parse-conf">{Math.round(livePreview.confidence)}%</span>
+                <span className="co-cmd__parse-conf">{livePreview.confidence >= 100 ? 'matched' : 'no match'}</span>
               </span>
             )
           }

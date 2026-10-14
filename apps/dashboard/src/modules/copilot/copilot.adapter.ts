@@ -1,18 +1,26 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { ChatMessage, CopilotActionPreviewData, ReasoningContext } from './copilot.types';
-import { getAgentById } from './copilot.agents';
 import { routeQueryToAgent } from './copilot.router';
 import { detectPropertyCategory } from '../inbox/helpers/propertyHelpers';
 
-// Simple in-memory cache for thread persistence across renders during the session
+// Session-only, in-memory: lost on reload. This is NOT agent memory; nothing is sent to a server.
 const messageCache = new Map<string, ChatMessage[]>();
+
+/*
+ * INTELLIGENCE 2.0 AUDIT (10-13): this Inbox assistant is NOT a model. Its only real
+ * server call is underwriting (POST /api/internal/offers/underwrite). Removed here:
+ * a canned "I've reviewed this thread" reply typed out character by character with
+ * random jitter, hard-coded reasoning lines ("Gemini Underwriter API", "Verified
+ * deterministic MAO calculator is active.", "Analyzed recent message history."),
+ * a fake "Agent Handoff … delegated to …" event, and an "Execute Action" that marked
+ * a suppression "executed successfully" WITHOUT any server call.
+ */
 
 export const useCopilotChat = (thread: any, initialAgentId: string = 'ceo') => {
   const threadId = thread?.id || 'global';
   const [messages, setMessages] = useState<ChatMessage[]>(messageCache.get(threadId) || []);
   const [activeAgentId, setActiveAgentId] = useState(initialAgentId);
   const [isThinking, setIsThinking] = useState(false);
-  const typingSpeed = 30; // ms per character
 
   useEffect(() => {
     // Restore or reset messages when thread changes
@@ -35,29 +43,17 @@ export const useCopilotChat = (thread: any, initialAgentId: string = 'ceo') => {
     setMessages(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m));
   }, []);
 
-  const streamText = async (msgId: string, fullText: string) => {
-    let currentText = '';
-    updateMessage(msgId, { status: 'streaming', body: '' });
-    
-    for (let i = 0; i < fullText.length; i++) {
-      currentText += fullText[i];
-      updateMessage(msgId, { body: currentText });
-      await new Promise(r => setTimeout(r, typingSpeed + (Math.random() * 20))); // slight natural jitter
-    }
-    
-    updateMessage(msgId, { status: 'complete' });
-  };
-
+  // There is no server action behind this preview: it is never reported as executed.
   const executeAction = useCallback(async (actionId: string, actionData: CopilotActionPreviewData) => {
     const msgToUpdate = messages.find(m => m.actionPreview?.id === actionId);
     if (msgToUpdate) {
       updateMessage(msgToUpdate.id, {
-        actionPreview: { ...actionData, status: 'success' }
+        actionPreview: { ...actionData, status: 'error' }
       });
       addMessage({
         role: 'agent',
         agentId: msgToUpdate.agentId,
-        body: `Action "${actionData.title}" executed successfully.`,
+        body: `Not executed: "${actionData.title}" is a preview only. Use the thread's own suppression control, which records the change on the server.`,
       });
     }
   }, [messages, updateMessage, addMessage]);
@@ -86,23 +82,9 @@ export const useCopilotChat = (thread: any, initialAgentId: string = 'ceo') => {
     });
 
     let targetAgentId = routeQueryToAgent(text, activeAgentId);
-    let targetAgent = getAgentById(targetAgentId);
 
-    // Collaboration & Handoff
-    if (targetAgentId !== activeAgentId) {
-      const prevAgentId = activeAgentId;
-      setActiveAgentId(targetAgentId);
-      addMessage({
-        role: 'system',
-        agentId: targetAgentId,
-        body: `Handoff requested.`,
-        handoffAgentId: targetAgentId,
-        collaborationEvent: {
-          title: 'Agent Handoff',
-          description: `${getAgentById(prevAgentId).name} delegated to ${targetAgent.name}`
-        }
-      });
-    }
+    // persona label only (keyword routing); there are no separate agents to hand off to
+    if (targetAgentId !== activeAgentId) setActiveAgentId(targetAgentId);
 
     setIsThinking(true);
     const agentMsgId = addMessage({
@@ -125,11 +107,10 @@ export const useCopilotChat = (thread: any, initialAgentId: string = 'ceo') => {
 
     try {
       if (lowerText.includes('underwrite') || lowerText.includes('comps')) {
-        reasoning.toolsConsidered.push('Gemini Underwriter API');
+        reasoning.toolsConsidered.push('POST /api/internal/offers/underwrite');
         if (!thread) throw new Error("Thread context missing. Select a deal first.");
         
         reasoning.dataReads.push(`Property: ${thread.propertyAddress}`);
-        reasoning.safetyChecks.push('Verified deterministic MAO calculator is active.');
         reasoning.finalPlan = 'Running API and displaying results.';
 
         updateMessage(agentMsgId, { reasoning });
@@ -155,14 +136,12 @@ export const useCopilotChat = (thread: any, initialAgentId: string = 'ceo') => {
         });
 
       } else if (lowerText.includes('suppress') || lowerText.includes('dnc')) {
-        reasoning.toolsConsidered.push('Compliance Suppression Tool');
-        reasoning.safetyChecks.push('Requires operator preview before mutating thread state.');
-        reasoning.proposedMutations.push(`Update thread ${thread?.id} status to 'suppressed'`);
-        reasoning.finalPlan = 'Presenting action preview for approval.';
+        reasoning.proposedMutations.push(`Suppress thread ${thread?.id} (not executed here)`);
+        reasoning.finalPlan = 'Preview only: no server action is wired to this assistant.';
         
         updateMessage(agentMsgId, {
           status: 'complete',
-          body: `I've prepared the suppression action for this contact. Please review and execute the mutation below.`,
+          body: `This is a preview only — this assistant cannot suppress a lead. Use the thread's suppression control to make the change.`,
           reasoning,
           actionPreview: {
             id: `act-${Date.now()}`,
@@ -173,12 +152,12 @@ export const useCopilotChat = (thread: any, initialAgentId: string = 'ceo') => {
           }
         });
       } else {
-        await new Promise(r => setTimeout(r, 1000));
-        reasoning.dataReads.push('Analyzed recent message history.');
-        updateMessage(agentMsgId, { reasoning });
-        
-        const responseText = `As your ${targetAgent.role}, I've reviewed this thread. The current stage is ${thread?.conversationStage || 'unknown'}. I'm ready to run numbers, draft a reply, or assist with operations. Let me know how you want to proceed.`;
-        await streamText(agentMsgId, responseText);
+        // no model behind this assistant: say what it can do instead of a canned "I've reviewed this thread"
+        updateMessage(agentMsgId, {
+          status: 'complete',
+          reasoning: { ...reasoning, finalPlan: 'No model call: this assistant only runs underwriting.' },
+          body: `I can run underwriting for this thread ("underwrite" or "comps"). For questions about this lead, open LeadCommand Intelligence (⌘L), which reads the records and cites them.`,
+        });
       }
     } catch (err) {
       updateMessage(agentMsgId, {
@@ -190,7 +169,7 @@ export const useCopilotChat = (thread: any, initialAgentId: string = 'ceo') => {
       setIsThinking(false);
     }
 
-  }, [activeAgentId, thread, addMessage, updateMessage, streamText]);
+  }, [activeAgentId, thread, addMessage, updateMessage]);
 
   return {
     messages,

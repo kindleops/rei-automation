@@ -9,7 +9,8 @@ interface CopilotActionPreviewProps {
   onCancel: (id: string) => void;
 }
 
-export const CopilotActionPreview = ({ action, onExecute, onCancel }: CopilotActionPreviewProps) => {
+export const CopilotActionPreview = ({ action, onExecute: _onExecute, onCancel }: CopilotActionPreviewProps) => {
+  void _onExecute // kept for the prop contract: no execute affordance exists (no server action)
   const isPending = action.status === 'pending' || !action.status;
   const isSuccess = action.status === 'success';
   const isError = action.status === 'error';
@@ -19,33 +20,28 @@ export const CopilotActionPreview = ({ action, onExecute, onCancel }: CopilotAct
       <div className="nx-action-preview-header">
         <div className="nx-action-preview-title">
           <Icon name={action.severity === 'dangerous' ? 'alert' : 'zap'} />
-          <span>ACTION REQUIRED: {action.title}</span>
+          <span>PREVIEW: {action.title}</span>
         </div>
         {action.severity === 'dangerous' && <span className="nx-action-badge is-danger">DANGEROUS</span>}
       </div>
 
       <p className="nx-action-preview-desc">{action.description}</p>
       
-      <div className="nx-action-preview-payload">
-        <pre>{JSON.stringify(action.payload, null, 2)}</pre>
-      </div>
+      <p className="nx-action-preview-desc">Preview only — this assistant has no server action for it. Nothing changes until you use the thread's own control.</p>
 
       <div className="nx-action-preview-controls">
         {isPending && (
           <>
             <button type="button" className="nx-action-btn is-cancel" onClick={() => onCancel(action.id)}>
-              Cancel
-            </button>
-            <button type="button" className="nx-action-btn is-execute" onClick={() => onExecute(action.id)}>
-              Execute Action
+              Dismiss
             </button>
           </>
         )}
         {isSuccess && (
-          <span className="nx-action-result is-success"><Icon name="check" /> Executed successfully</span>
+          <span className="nx-action-result is-success"><Icon name="check" /> Done</span>
         )}
         {isError && (
-          <span className="nx-action-result is-error"><Icon name="close" /> Execution failed</span>
+          <span className="nx-action-result is-error"><Icon name="close" /> Not executed</span>
         )}
       </div>
     </div>
