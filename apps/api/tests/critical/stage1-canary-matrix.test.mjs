@@ -195,13 +195,15 @@ test("matrix#4: 'No, wrong number' → blocked, invalid_number, no reply", async
 });
 
 // ── 5. Not the owner ────────────────────────────────────────────────────────
-test("matrix#5: 'I am not the owner' → non-owner hold, no reply", async () => {
+test("matrix#5: 'I am not the owner' → property-scoped ownership denial, no reply, no review (RC 8.5.15)", async () => {
   const run = await runCase(5, "I am not the owner");
   const { result } = run;
   assert.equal(result.contract.normalized_intent, "property_specific_non_owner");
   assert.equal(result.decision.stage_after, "ownership_confirmation");
   assert.equal(result.queued, false);
-  assert.equal(result.decision.block_reason, "property_relationship_review_required");
+  // Owner 2026-10-14: a written ownership denial is a deterministic
+  // property-scoped stop (no nurture, no suppression), not a review item.
+  assert.notEqual(result.decision.block_reason, "property_relationship_review_required");
   assertInboundCancelledFollowups(result, run.recorded);
 });
 

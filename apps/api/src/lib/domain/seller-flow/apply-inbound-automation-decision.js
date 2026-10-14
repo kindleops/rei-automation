@@ -1,3 +1,4 @@
+import { resolveDeclineFollowupPolicy, NO_FOLLOWUP_NEXT_ACTION } from "@/lib/domain/seller-flow/decline-followup-policy.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import {
@@ -573,6 +574,41 @@ function computeInboundAutomationDecisionRaw({
     });
   }
 
+  // RC 8.5.15: a bare "No" to the S1 ownership question DENIES ownership
+  // (conversation-context.js ownershipUnverifiedResult). Property-scoped
+  // non-owner lane: no reply, no nurture, no further ownership question, no
+  // phone suppression (other properties stay contactable), not a qualified
+  // seller. The contact x property NOT_OWNER record is written by the
+  // contact-resolution phase from the relationship outcome.
+  if (primary_intent === "property_specific_non_owner") {
+    const compound = resolveCompoundOpportunitySignal(classification);
+    if (compound.is_compound_opportunity) {
+      return buildDecisionResult({
+        should_mark_human_review: true,
+        reply_mode: "manual_review",
+        human_review_reason: "non_owner_with_seller_signal",
+        route_hint,
+        stage_hint,
+        allowed_template_stages,
+        next_action: "mark_human_review",
+        audit_reason: "non_owner_with_seller_signal",
+        compound_opportunity: compound,
+      });
+    }
+    const policy = resolveDeclineFollowupPolicy(classification);
+    if (policy?.kind === "ownership_unverified") {
+      return buildDecisionResult({
+        should_suppress_contact: false,
+        should_mark_human_review: false,
+        reply_mode: "none",
+        route_hint: null,
+        stage_hint,
+        next_action: NO_FOLLOWUP_NEXT_ACTION,
+        audit_reason: policy.audit_reason,
+      });
+    }
+  }
+
   // Legal/authority disclosures (ontology legal_financial lane): title
   // problems, liens/back taxes, bankruptcy, trust-held or entity-held
   // ownership. Authority/payoff verification is a human lane BEFORE any offer
@@ -950,7 +986,34 @@ export function applyInboundAutomationDecision(args = {}) {
   // go to a person instead of "Sorry I missed you"). Re-cover so that review
   // lands in an owned workflow, never an unowned dead end (owner 2026-10-10).
   const covered = isCovered(gated) ? gated : ensureInboundCoverage(gated, coverageCtx);
-  return applySuppressionCandidateHold(covered, classification);
+  return applySuppressionCandidateHold(applyDeclineNoFollowupPolicy(covered, classification), classification);
+}
+
+/**
+ * RC 8.5.15 (decline-followup-policy.js): a "No" to S2 ("would you consider
+ * selling?") or to "can we check back?" schedules NO automatic follow-up, and
+ * an S1 ownership denial never inherits a nurture from any overlay. The decline
+ * stays a decline (disposition not_interested / ownership unverified); only the
+ * scheduled follow-up is removed. Never touches a suppression, a reply that
+ * answers a compound positive clause, or a human-review route.
+ */
+function applyDeclineNoFollowupPolicy(decision = {}, classification = {}) {
+  if (!decision || decision.should_suppress_contact) return decision;
+  const policy = resolveDeclineFollowupPolicy(classification);
+  if (!policy) return decision;
+  if (decision.should_queue_reply || decision.should_mark_human_review) return decision;
+  return {
+    ...decision,
+    should_queue_reply: false,
+    should_suppress_contact: false,
+    should_mark_human_review: false,
+    reply_mode: "none",
+    next_action: NO_FOLLOWUP_NEXT_ACTION,
+    scheduled_next_action: NO_FOLLOWUP_NEXT_ACTION,
+    audit_reason: policy.audit_reason,
+    decline_followup_policy: policy,
+    follow_up_at: null,
+  };
 }
 
 /**

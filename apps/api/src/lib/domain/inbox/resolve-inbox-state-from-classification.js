@@ -1,3 +1,4 @@
+import { isOwnershipUnverified, suppressesAutomaticFollowup } from "@/lib/domain/seller-flow/decline-followup-policy.js";
 import {
   isFailedDeliveryStatus,
   isOutboundLastWithoutReply,
@@ -74,6 +75,9 @@ export function resolveOwnershipProbeDisinterestTransition({
   existingState = {},
 } = {}) {
   if (isSuppressionCandidate(classification)) return null;
+  // RC 8.5.15: S2 / contact-permission declines and S1 ownership denials earn
+  // no automatic follow-up (decline-followup-policy.js).
+  if (suppressesAutomaticFollowup(classification)) return null;
   const flags = resolveThreadFlagsFromClassification(classification);
   if (!flags.not_interested) return null;
 
@@ -182,6 +186,15 @@ export function resolveUniversalStatusFromClassification(classification = {}, me
     return {
       universal_status: "dead",
       universal_stage: "wrong_number"
+    };
+  }
+
+  // RC 8.5.15: ownership denied / unverified for this property -- closed for
+  // this recipient x property, never a qualified seller (not a suppression).
+  if (direction !== "outbound" && isOwnershipUnverified(classification)) {
+    return {
+      universal_status: "dead",
+      universal_stage: "ownership_denied"
     };
   }
 
@@ -743,6 +756,9 @@ export function resolveDispositionFromClassification(
 
   if (flags.opt_out || lower(inbox_bucket) === "suppressed") return "suppressed";
   if (flags.wrong_number) return "wrong_number";
+  // RC 8.5.15: ownership denied for this property -- the existing non-owner
+  // disposition (no-response follow-ups and actionability already honour it).
+  if (isOwnershipUnverified(classification)) return "unqualified";
   const ownershipProbeTransition = resolveOwnershipProbeDisinterestTransition({
     classification,
     messageEvent,

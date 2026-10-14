@@ -91,6 +91,7 @@ const USE_CASE_QUESTION_TYPE = {
   timeline_check: "timeline",
   rent_check: "rent",
   occupancy_check: "occupancy",
+  contact_permission: "contact_permission",
   general_followup: "other",
 };
 
@@ -106,6 +107,14 @@ const USE_CASE_QUESTION_TYPE = {
 // most specific first; rent before price, because "what are the monthly rents"
 // contains neither the word price nor a dollar sign but IS a money question.
 const BODY_QUESTION_PATTERNS = [
+  // RC 8.5.15: permission to contact again ("Is it alright if I check back down
+  // the road?", "want me to check back in a few months?", "¿Esta bien si le
+  // escribo mas adelante?"). Read from the BODY only: most future_nurture /
+  // not_interested / not_ready rows ask nothing ("I'll close the loop on my
+  // end"), so their template use case never names this question. First: these
+  // bodies carry no other question.
+  [/\b(?:(?:is\s+it|would\s+it\s+be)\s+(?:alright|all\s+right|ok(?:ay)?|fine)\s+if\s+(?:i|we)|(?:want|would\s+you\s+like)\s+(?:me|us)\s+to|(?:do\s+you\s+)?mind\s+if\s+(?:i|we)|can\s+(?:i|we))\s+(?:check\s+back|check\s+in|reach\s+(?:back\s+)?out|follow\s+up|touch\s+base|text\s+you|contact\s+you)(?:\s+(?:again|later|with\s+you))?(?:\s+(?:down\s+the\s+road|in\s+(?:a\s+few|some|a\s+couple(?:\s+of)?)\s+(?:weeks|months)|(?:later|in\s+the\s+future|sometime)))?\s*\?/i, "contact_permission"],
+  [/(?:est[aá]\s+bien|le\s+parece(?:\s+bien)?)\s+si\s+(?:le|te)\s+(?:escribo|contacto|mando\s+(?:un\s+)?mensaje)|(?:quiere|quieres|desea)\s+que\s+(?:le|te)\s+(?:escriba|contacte|vuelva\s+a\s+escribir)(?:\s+(?:m[aá]s\s+adelante|en\s+unos\s+meses|luego|despu[eé]s))?\s*\?/i, "contact_permission"],
   [/\brents?\b[^.?!]{0,40}\?|what\s+(?:are|is)\s+the\s+(?:current\s+)?(?:monthly\s+)?rents?|how\s+much\s+(?:is|are|does)\s+(?:it|they|the\s+units?)\s+rent|bringing\s+in\s+per\s+month/i, "rent_check"],
   [/\b(?:vacant|occupied|tenanted|occupancy)\b/i, "occupancy_check"],
   [/asking\s+price|price\s+in\s+mind|number\s+in\s+mind|ballpark|what\s+(?:would|do)\s+you\s+want\s+for|how\s+much\s+are\s+you\s+(?:asking|looking)/i, "asking_price"],
@@ -186,6 +195,10 @@ const UNREADABLE_FRAGMENT_RE = /^\p{L}{1,8}[.!?]*$/u;
  * "Yes" was capped at 0.72 (short_reply_without_validated_context) and the
  * seller got no reply.
  */
+function foldRepeat(value) {
+  return String(value ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
 export function isInterveningAnswer(row) {
   const body = String(row?.message_body ?? "").trim();
   // No body to read: we cannot prove it said nothing. Count it.
@@ -235,6 +248,10 @@ export async function buildConversationContext({
   language = null,
   current_inbound_event_id = null,
   burst_event_ids = [],
+  // RC 8.5.15 (eval #10): the SAME reply sent twice ("No", "No" 13 s apart) is
+  // one answer -- an identical earlier copy never settles the question the
+  // current copy answers.
+  current_inbound_body = null,
 } = {}) {
   if (!supabase || !isCanonicalE164(thread_key) || !inbound_received_at) return null;
 
@@ -341,8 +358,10 @@ export async function buildConversationContext({
     if (error) return null;
     // Reactions and unreadable one-word fragments are seller activity, not an
     // answer to the question (see isInterveningAnswer).
+    const same_body = foldRepeat(current_inbound_body);
     const prior_answers = (data || [])
       .filter((row) => !excluded.has(String(row.id)))
+      .filter((row) => !(same_body && foldRepeat(row.message_body) === same_body))
       .filter((row) => isInterveningAnswer(row));
     intervening_inbound_count = prior_answers.length;
     if (prior_answers.length > 0) question_status = "answered";

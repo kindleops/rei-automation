@@ -48,10 +48,10 @@ test('misroute 1: short "No" after a condition question is never not_interested'
   const r = await heur("No", ctxFor("condition_check", "condition"));
   assert.notEqual(r.primary_intent, "not_interested",
     "a seller whose house needs no repairs must not be shelved as not_interested");
-  // fail-closed: it must land in the clarification lane, not a suppressive one
+  // RC 8.5.15 (owner spec): "No" to the condition question reports NO REPAIRS
+  // (condition_disclosed) and the workflow continues; never suppressive.
+  assert.equal(r.primary_intent, "condition_disclosed");
   assert.equal(r.automation_decision.suppression_action, "none");
-  assert.equal(r.automation_decision.auto_reply_allowed, false);
-  assert.equal(r.automation_decision.human_review_required, true);
 });
 
 test('misroute 1 control: short "No" after a proposal-interest question stays not_interested', async () => {

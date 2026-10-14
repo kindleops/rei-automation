@@ -27,6 +27,7 @@
 //     .effective_authorized_ceiling) and is rounded DOWN, so rounding can
 //     never push it over.
 
+import { isOwnershipUnverified } from "@/lib/domain/seller-flow/decline-followup-policy.js";
 import { validateConversationContext } from "@/lib/domain/classification/conversation-context.js";
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
 import { evaluateOfferReadiness, OFFER_READY_REASONS, OFFER_POLICY_EPOCH } from "@/lib/acquisition/offerReadiness.js";
@@ -351,6 +352,11 @@ export function resolveV2Intent({ classification = null, message = "", stage = V
     const kind = detectIdentityStatement(message);
     if (kind) return { intent: I.IDENTITY_STATEMENT, source: `v2_identity_${kind}`, identity_kind: kind, classifier_intent: primary };
     if (isBareNo(message, { thread_language })) return { intent: I.BARE_NO_AFTER_CLARIFIER, source: "v2_bare_no_after_clarifier", classifier_intent: primary };
+  }
+  // RC 8.5.15 (owner 2026-10-14): a context-bound ownership denial is final for
+  // this property -- never the ownership clarifier (no further ownership question).
+  if (!compliance && isOwnershipUnverified(classification)) {
+    return { intent: I.NON_OWNER, source: "v2_ownership_denied_unverified", classifier_intent: primary };
   }
   if (!after_clarifier && stage === V2_STAGES.S1 && !compliance && [I.UNCLEAR, I.NON_OWNER].includes(from_classifier) && isBareNo(message, { thread_language })) {
     return { intent: I.BARE_NO_OWNERSHIP, source: "v2_bare_no_to_ownership", classifier_intent: primary };

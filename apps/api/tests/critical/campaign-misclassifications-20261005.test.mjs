@@ -140,22 +140,32 @@ const NO_OPENERS = [
   "Hello William, this is Alex. I have been investing in Spring. Just checking, do you own 23227 Briarcreek Blvd?",
 ];
 
-test("DEFAULT (owner 2026-10-13): a bare 'No' to the ownership question is a decline (30-day nurture); denial words keep the clarification hold", async () => {
+test("DEFAULT (owner 2026-10-14, RC 8.5.15): a bare 'No' to the ownership question DENIES ownership (property-scoped, no nurture, never suppressed); 'Not anymore' is a former owner", async () => {
   await withBareNoMode(null, async () => {
+    for (const opener of NO_OPENERS) {
+      const ctx = await contextAfter(opener, { template_use_case: "ownership_check" });
+      for (const message of ["No", "No.", "Nope", "No I don't"]) {
+        const r = await run(message, ctx);
+        assert.equal(r.primary_intent, "property_specific_non_owner", `${message} after ${opener}`);
+        assert.ok(r.secondary_intents.includes("ownership_unverified"), message);
+        assert.notEqual(r.automation_decision.suppression_action, "archive_wrong_number", message);
+        assert.notEqual(r.automation_decision.suppression_action, "opt_out", message);
+        assert.equal(r.automation_decision.clarification_use_case ?? null, null, "no further ownership question");
+      }
+      const former = await run("Not anymore", ctx);
+      assert.equal(former.primary_intent, "sold_property", `Not anymore after ${opener}`);
+    }
+  });
+});
+
+test("FLAG not_interested: the 8.5.13 behaviour (bare 'No' = 30-day decline) is reachable only as an explicit mode", async () => {
+  await withBareNoMode("not_interested", async () => {
     for (const opener of NO_OPENERS) {
       const ctx = await contextAfter(opener, { template_use_case: "ownership_check" });
       for (const message of ["No", "No.", "Nope"]) {
         const r = await run(message, ctx);
         assert.equal(r.primary_intent, "not_interested", `${message} after ${opener}`);
         assert.ok(r.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_not_interested"), message);
-        assert.notEqual(r.automation_decision.suppression_action, "archive_wrong_number", message);
-        assert.notEqual(r.automation_decision.suppression_action, "opt_out", message);
-      }
-      for (const message of ["No I don't", "Not anymore"]) {
-        const r = await run(message, ctx);
-        assert.equal(r.primary_intent, "unclear", `${message} after ${opener}`);
-        assert.ok(r.secondary_intents.includes("ownership_denial_needs_clarification"), message);
-        assert.equal(r.automation_decision.clarification_use_case, "ownership_connection_clarifier", message);
       }
     }
   });

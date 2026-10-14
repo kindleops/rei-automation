@@ -1,3 +1,4 @@
+import { isOwnershipUnverified } from "@/lib/domain/seller-flow/decline-followup-policy.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
 import {
   extractReferralCandidates,
@@ -10,6 +11,9 @@ export const RELATIONSHIP_CLAIMS = Object.freeze([
   "actual_wrong_number",
   "never_been_owner",
   "not_owner",
+  // RC 8.5.15: a bare "No" to the S1 ownership question -- ownership denied,
+  // unverified for this recipient x property (decline-followup-policy.js).
+  "ownership_unverified",
   "former_owner",
   "tenant",
   "property_manager",
@@ -24,6 +28,9 @@ export const RELATIONSHIP_CLAIMS = Object.freeze([
 export const PROPERTY_SCOPED_CLAIMS = new Set([
   "never_been_owner",
   "not_owner",
+  // RC 8.5.15: a bare "No" to the S1 ownership question -- ownership denied,
+  // unverified for this recipient x property (decline-followup-policy.js).
+  "ownership_unverified",
   "former_owner",
   "tenant",
   "property_manager",
@@ -516,6 +523,14 @@ export function resolveInboundRelationship({
   let relationship_claim = ownership_confirmed
     ? "ownership_confirmed"
     : detectRelationshipClaim(text);
+  // RC 8.5.15: the context-bound bare "No" carries no denial words for the
+  // text detectors; the classification names it.
+  if (
+    (!relationship_claim || relationship_claim === "not_owner" || relationship_claim === "never_been_owner") &&
+    isOwnershipUnverified(classification)
+  ) {
+    relationship_claim = "ownership_unverified";
+  }
 
   const referral_candidates = extractReferralCandidates(text, known_phones);
   const referral_detected =
@@ -569,7 +584,11 @@ export function resolveInboundRelationship({
       referral_candidates.ambiguous ||
       referrals.length > 1 ||
       relationship_claim === "spouse_co_owner" ||
-      (PROPERTY_SCOPED_CLAIMS.has(relationship_claim) && relationship_claim !== "ownership_confirmed") ||
+      // An unverified-ownership "No" is a deterministic property-scoped hold,
+      // not a review item (RC 8.5.15).
+      (PROPERTY_SCOPED_CLAIMS.has(relationship_claim) &&
+        relationship_claim !== "ownership_confirmed" &&
+        relationship_claim !== "ownership_unverified") ||
       canonical_intent === "unclear"
     );
 

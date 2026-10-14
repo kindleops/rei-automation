@@ -38,8 +38,11 @@ export const platformCapabilities = [
         ctx.services.platform.systemValues([...HEARTBEAT_KEYS, ...FEEDER_KEYS]),
         ctx.services.platform.watchdog().catch((e) => ({ error: String(e?.code || 'watchdog_unavailable') })),
       ])
-      const hb = evaluateHealthSnapshot({ at: new Date(ctx.now()).toISOString(), keys: values, queue: {} })
       const snap = wd?.snapshot || {}
+      // followup_no_response_heartbeat_at is event-driven (written on delivery
+      // receipts): judged against the newest delivery when the snapshot has it,
+      // else 'unverified' -- never a false 'stale' on a quiet night (8.5.15).
+      const hb = evaluateHealthSnapshot({ at: new Date(ctx.now()).toISOString(), keys: values, queue: {}, ...(snap.last_delivered_at ? { deliveries: { last_delivered_at: isoOrNull(snap.last_delivered_at) } } : {}) })
       return {
         at: hb.at,
         heartbeats: hb.heartbeats,
@@ -57,7 +60,7 @@ export const platformCapabilities = [
         },
       }
     },
-    audit: (_i, r) => ({ stale: (r?.heartbeats || []).filter((h) => h.status !== 'fresh').length }),
+    audit: (_i, r) => ({ stale: (r?.heartbeats || []).filter((h) => h.status === 'stale').length, unverified: (r?.heartbeats || []).filter((h) => h.status === 'unverified').length }),
   },
   {
     id: 'missions.create',

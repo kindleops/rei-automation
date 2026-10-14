@@ -66,9 +66,37 @@ for (const [language, words] of Object.entries(EXACT_KEYWORDS)) for (const w of 
  * A confident opt-out in a registry language, or null.
  * @returns {{ language, rule_id, kind: 'keyword'|'phrase', version } | null}
  */
+// RC 8.5.15 (eval item #83, "…JesusSTOP 🛑"): a STOP glued to the previous
+// word, or a stop sign emoji, is a contact revocation. Read from the ORIGINAL
+// text: an upper-case STOP glued after a lower-case letter at the end of the
+// message ("JesusSTOP"), "stop 🛑" / "STOP🛑" anywhere, or a message that ends
+// in 🛑. Lower-case endings ("nonstop") stay ordinary words.
+const GLUED_STOP_RE = /\p{Ll}STOP[\s!.]*(?:\u{1F6D1}\uFE0F?[\s!.]*)*$/u;
+const STOP_SIGN_RE = /\bstop\s*\u{1F6D1}|\u{1F6D1}\uFE0F?[\s!.]*$/iu;
+// OWNER DECISION 2026-10-14 (locked): explicit STOP or ANY request to stop
+// messaging is a suppression. Production misses fixed by hand that day:
+// "…JesusSTOP 🛑", "Not interested please stop sending", "Stop asking me about
+// <address>". A stop aimed at OUR messages / questions, anywhere in the message.
+// "Stop calling, text me" (a channel preference) is not matched: calling is not
+// in the verb list.
+const STOP_REQUEST_RE = /\b(?:stop|quit|cease)\s+(?:sending|texting|txting|messaging|msging|contacting|bugging|bothering|harass\w*|reaching\s+out|writing|emailing|spamming)\b|\bplease\s+stop\b|\bstop\s+please\b|\bno\s+more\s+(?:texts?|messages?|msgs?)\b/i;
+export function matchGluedStop(message = "") {
+  const raw = fold(message);
+  if (!raw) return null;
+  if (GLUED_STOP_RE.test(raw) || STOP_SIGN_RE.test(raw)) {
+    return { language: "English", rule_id: "opt_out_glued_stop_or_stop_sign", kind: "glued_stop", version: MULTILINGUAL_OPT_OUT_VERSION };
+  }
+  if (STOP_REQUEST_RE.test(raw)) {
+    return { language: "English", rule_id: "opt_out_stop_messaging_request", kind: "stop_request", version: MULTILINGUAL_OPT_OUT_VERSION };
+  }
+  return null;
+}
+
 export function matchMultilingualOptOut(message = "") {
   const raw = fold(message);
   if (!raw) return null;
+  const glued = matchGluedStop(raw);
+  if (glued) return glued;
   const bare = bareOf(raw);
   if (EXACT_INDEX.has(bare)) {
     const language = EXACT_INDEX.get(bare);

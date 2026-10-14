@@ -84,44 +84,41 @@ test("a legal threat still keeps the human lane", async () => {
 });
 
 // ── Bare "No" to the ownership question ─────────────────────────────────────
-// Owner 2026-10-13: a bare negative with no ownership-denial words is a
-// decline (30-day nurture, never suppressed). "No, I'm not" / "No, I don't"
-// answer with denial words and keep the clarifier hold below.
-for (const message of ["No", "No not at all", "No and no", "Of Course Not", "Noo"]) {
-  test(`bare no: ${JSON.stringify(message)} -> not_interested, the S1 30-day nurture, never suppressed`, async () => {
+// OWNER DECISION 2026-10-14 (RC 8.5.15; supersedes 2026-10-13 decline and the
+// round-9 clarifier hold): a bare "No" -- and "No, I'm not" / "No, I don't" --
+// to the ownership question DENIES ownership: property-scoped, no nurture, no
+// further ownership question, never suppressed.
+for (const message of ["No", "No not at all", "No and no", "Of Course Not", "Noo", "No, I'm not", "No, I don't"]) {
+  test(`ownership denied: ${JSON.stringify(message)} -> property-scoped denial, no nurture, never suppressed`, async () => {
     const r = await replay(message);
-    assert.equal(r.classification.primary_intent, "not_interested");
-    assert.ok(r.classification.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_not_interested"));
+    assert.equal(r.classification.primary_intent, "property_specific_non_owner");
+    assert.ok(r.classification.secondary_intents.includes("ownership_unverified"));
     assert.equal(r.outcome, "no_reply_by_design");
-    assert.equal(r.decision.audit_reason, "s1_not_for_sale_advance_with_followup");
+    assert.equal(r.decision.audit_reason, "s1_ownership_denied_unverified_no_followup");
     assert.equal(r.decision.should_suppress_contact, false);
+    assert.equal(r.decision.follow_up_at ?? null, null);
   });
 }
 
-for (const message of ["No, I'm not", "No, I don't"]) {
-  test(`no with denial words: ${JSON.stringify(message)} -> the ownership clarifier; no template = no review`, async () => {
-    const r = await replay(message);
-    assert.equal(r.classification.primary_intent, "unclear");
-    assert.ok(r.classification.matched_rule_ids.includes("ctx_no_after_ownership_check"));
-    assert.equal(r.classification.automation_decision.clarification_use_case, "ownership_connection_clarifier");
-    // Deterministic hold, not review. Round 10: BARE_NO_AUTO_CLARIFIER is OFF by
-    // default, so the hold comes from the flag before the catalog is read.
-    assert.equal(r.outcome, "no_reply_by_design");
-    assert.equal(r.decision.audit_reason, "bare_no_auto_clarifier_off");
-  });
-}
-
-test("bare no with the clarifier row active AND BARE_NO_AUTO_CLARIFIER on -> the clarifier is sent", async () => {
-  const clarifier = { id: "c1", template_id: "lc-ap2-ocl-en-1", use_case: "ownership_connection_clarifier", language: "English", stage_code: null, is_active: true, safe_for_auto_reply: true, reply_mode: "auto_reply", template_body: "Got it. Are you connected to the property, or do I have the wrong number?" };
-  const fixture = { fixture_id: "r9", received_at: "2026-10-07T18:00:00.000Z", seller_message: "No, I'm not", prior_question: { template_id: "t-r9", template_use_case: "ownership_check", text: QUESTIONS.ownership_check, sent_at: "2026-10-07T17:00:00.000Z", delivered_at: "2026-10-07T17:00:05.000Z" }, intervening_inbound: [], r7_history: [], valuation: null };
-  const r = await replayReply(fixture, { catalog: [...CATALOG, clarifier], executorOverrides: { bareNoAutoClarifierGate: async () => true } });
-  assert.equal(r.outcome, "auto_reply");
-  assert.match(r.text, /connected to the property/);
+test("the ownership clarifier is reachable only in LC_BARE_NO_OWNERSHIP_MODE=clarify (row active AND BARE_NO_AUTO_CLARIFIER on)", async () => {
+  const prev = process.env.LC_BARE_NO_OWNERSHIP_MODE;
+  process.env.LC_BARE_NO_OWNERSHIP_MODE = "clarify";
+  try {
+    const clarifier = { id: "c1", template_id: "lc-ap2-ocl-en-1", use_case: "ownership_connection_clarifier", language: "English", stage_code: null, is_active: true, safe_for_auto_reply: true, reply_mode: "auto_reply", template_body: "Got it. Are you connected to the property, or do I have the wrong number?" };
+    const fixture = { fixture_id: "r9", received_at: "2026-10-07T18:00:00.000Z", seller_message: "No, I'm not", prior_question: { template_id: "t-r9", template_use_case: "ownership_check", text: QUESTIONS.ownership_check, sent_at: "2026-10-07T17:00:00.000Z", delivered_at: "2026-10-07T17:00:05.000Z" }, intervening_inbound: [], r7_history: [], valuation: null };
+    const r = await replayReply(fixture, { catalog: [...CATALOG, clarifier], executorOverrides: { bareNoAutoClarifierGate: async () => true } });
+    assert.equal(r.outcome, "auto_reply");
+    assert.match(r.text, /connected to the property/);
+  } finally {
+    if (prev === undefined) delete process.env.LC_BARE_NO_OWNERSHIP_MODE;
+    else process.env.LC_BARE_NO_OWNERSHIP_MODE = prev;
+  }
 });
 
 test("'No I never did sorry' -> never owned: not the owner, closed", async () => {
   const r = await replay("No I never did sorry");
-  assert.equal(r.classification.primary_intent, "wrong_number");
+  // RC 8.5.15: a written ownership denial is property-scoped, never wrong_number.
+  assert.equal(r.classification.primary_intent, "property_specific_non_owner");
   assert.ok(r.classification.matched_rule_ids.includes("ctx_never_owned_after_ownership_check"));
 });
 
@@ -193,7 +190,8 @@ for (const [message, estimated_value] of [["2 million", 254000], ["It can be you
 
 test("'As I have said 4-6 times, I do not own any land in OKlahoma.' -> not the owner", async () => {
   const r = await replay("As I have said 4-6 times, I do not own any land in OKlahoma.  If U have");
-  assert.equal(r.classification.primary_intent, "wrong_number");
+  // RC 8.5.15: a written ownership denial is property-scoped, never wrong_number.
+  assert.equal(r.classification.primary_intent, "property_specific_non_owner");
 });
 
 // ── Not opt-outs (precision) ────────────────────────────────────────────────

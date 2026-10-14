@@ -65,47 +65,49 @@ async function replay(message, q = "s1_still_own") {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// ── 1. Bare negative after S1 -> not_interested, 30-day nurture ─────────────
+// ── 1. Bare negative after S1 ─────────────────────────────────────────────
+// OWNER DECISION 2026-10-14 (RC 8.5.15) supersedes the 2026-10-13 decline: a
+// bare negative to the S1 ownership question DENIES ownership -- property-
+// scoped, no nurture, no reply, never suppressed. A polite decline ("No
+// gracias Carlos!") still answers a sales approach: the 30-day decline.
 const BARE_NEGATIVES_AFTER_S1 = [
   ["No", "s1_still_own"],
   ["NO", "s1_yours"],
   ["Nope", "s1_still_own"],
   ["No!!!!!", "s1_still_own"],
   ["Not really", "s1_still_own"],
-  ["No gracias Carlos!", "s1_es"],
   ["No", "s1_es"],
 ];
 
 for (const [message, q] of BARE_NEGATIVES_AFTER_S1) {
-  test(`bare negative after S1 (${q}): ${JSON.stringify(message)} -> not_interested, 30-day nurture, never suppressed`, async () => {
+  test(`bare negative after S1 (${q}): ${JSON.stringify(message)} -> ownership denied, no nurture, never suppressed`, async () => {
     const r = await replay(message, q);
     const c = r.classification;
-    assert.equal(c.primary_intent, "not_interested");
-    assert.ok(c.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_not_interested"), c.matched_rule_ids.join(","));
-    assert.notEqual(c.primary_intent, "wrong_number");
+    assert.equal(c.primary_intent, "property_specific_non_owner");
+    assert.ok(c.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_ownership_unverified"), c.matched_rule_ids.join(","));
     assert.equal(c.compliance_flag ?? null, null);
     assert.equal(c.automation_decision?.suppression_action, "none");
-    assert.equal(c.automation_decision?.clarification_use_case ?? null, null, "no clarifier for a decline");
-    // Same downstream as an explicit "not interested" at S1.
-    assert.equal(r.decision.audit_reason, "s1_not_for_sale_advance_with_followup");
-    assert.equal(r.decision.next_action, "schedule_later_followup");
+    assert.equal(c.automation_decision?.clarification_use_case ?? null, null, "no further ownership question");
+    assert.equal(r.decision.audit_reason, "s1_ownership_denied_unverified_no_followup");
     assert.equal(r.decision.should_suppress_contact, false);
     assert.equal(r.decision.should_queue_reply, false);
+    assert.equal(r.decision.follow_up_at ?? null, null, "no nurture");
     assert.equal(r.text, null, "no immediate reply");
     assert.equal(r.outcome, "no_reply_by_design");
-    const due = Date.parse(r.decision.follow_up_at) - Date.now();
-    assert.ok(due > 29 * DAY_MS && due < 31 * DAY_MS, `follow-up in ~30 days, got ${r.decision.follow_up_at}`);
   });
 }
 
-test("bare 'No' after S1 has exactly the downstream handling of an explicit 'not interested'", async () => {
-  const bare = await replay("No");
+test("a polite decline after S1 ('No gracias Carlos!') is the 30-day decline, exactly like an explicit 'not interested'", async () => {
+  const polite = await replay("No gracias Carlos!", "s1_es");
   const explicit = await replay("Not interested");
+  assert.equal(polite.classification.primary_intent, "not_interested");
+  assert.ok(polite.classification.matched_rule_ids.includes("ctx_polite_no_after_ownership_check_not_interested"));
   assert.equal(explicit.classification.primary_intent, "not_interested");
   for (const key of ["audit_reason", "next_action", "should_suppress_contact", "should_queue_reply", "should_mark_human_review", "route_hint"]) {
-    assert.deepEqual(bare.decision[key], explicit.decision[key], key);
+    assert.deepEqual(polite.decision[key], explicit.decision[key], key);
   }
-  assert.equal(bare.outcome, explicit.outcome);
+  const due = Date.parse(polite.decision.follow_up_at) - Date.now();
+  assert.ok(due > 29 * DAY_MS && due < 31 * DAY_MS, `follow-up in ~30 days, got ${polite.decision.follow_up_at}`);
 });
 
 test("the not_interested nurture is a 30-day follow-up whose copy comes only from sms_templates use cases", () => {
@@ -133,9 +135,10 @@ test("seller autopilot v2 reads the classifier's decline, never the bare-No clar
 // ── 2. Explicit ownership denials keep their classification ────────────────
 for (const [message, q, intent] of [
   ["No, I sold it", "s1_still_own", "sold_property"],
-  ["not mine", "s1_still_own", "wrong_number"],
+  // RC 8.5.15: a written ownership denial is property-scoped, never wrong_number.
+  ["not mine", "s1_still_own", "property_specific_non_owner"],
   ["wrong number", "s1_still_own", "wrong_number"],
-  ["I don't own it", "s1_still_own", "wrong_number"],
+  ["I don't own it", "s1_still_own", "property_specific_non_owner"],
   ["no lo vendí", "s1_es", "sold_property"],
 ]) {
   test(`explicit denial keeps its lane: ${JSON.stringify(message)} -> ${intent}`, async () => {
@@ -146,7 +149,7 @@ for (const [message, q, intent] of [
 }
 
 // "No I don't" / "No I'm not" / "Not anymore" answer the ownership question
-// with denial words: they keep the existing ownership hold.
+// with denial words: never the decline (RC 8.5.15: the denial / former-owner lanes).
 for (const message of ["No, I don't", "No, I'm not", "Not anymore", "ya no es mío"]) {
   test(`ownership answer with denial words is not a bare negative: ${JSON.stringify(message)}`, async () => {
     const r = await replay(message, /ya no/.test(message) ? "s1_es" : "s1_still_own");
@@ -178,10 +181,10 @@ test("bare 'No' after S3 (asking price) keeps its current meaning: no price in m
   assert.ok(r.classification.matched_rule_ids.includes("ctx_no_after_asking_price"));
 });
 
-test("bare 'No' after S4 (condition) keeps its current meaning: condition info, held", async () => {
+test("bare 'No' after S4 (condition) reports no repairs (RC 8.5.15): condition info, never a decline", async () => {
   const r = await replay("No", "s4");
-  assert.equal(r.classification.primary_intent, "unclear");
-  assert.ok(r.classification.matched_rule_ids.includes("ctx_no_after_condition"));
+  assert.equal(r.classification.primary_intent, "condition_disclosed");
+  assert.ok(r.classification.matched_rule_ids.includes("ctx_no_after_condition_no_repairs"));
   assert.notEqual(r.outcome, "suppressed");
 });
 
@@ -197,7 +200,7 @@ test("LC_BARE_NO_OWNERSHIP_MODE=clarify restores the 2026-10-06 clarifier hold",
     if (prev === undefined) delete process.env.LC_BARE_NO_OWNERSHIP_MODE;
     else process.env.LC_BARE_NO_OWNERSHIP_MODE = prev;
   }
-  assert.equal(bareNoOwnershipMode(), "not_interested");
+  assert.equal(bareNoOwnershipMode(), "ownership_unverified");
 });
 
 // ── 5. The other 10-13 misses ─────────────────────────────────────────────

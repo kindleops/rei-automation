@@ -1907,6 +1907,7 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
             // message that counted itself as its own prior answer would mark
             // the question answered and discard the context that binds it.
             current_inbound_event_id: inbound_message_event_id || null,
+            current_inbound_body: typeof message_body === "string" ? message_body : null,
           });
         }
       } catch {
