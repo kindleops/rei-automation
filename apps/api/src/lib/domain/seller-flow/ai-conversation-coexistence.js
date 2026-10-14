@@ -13,7 +13,7 @@
 import { beginIdempotentProcessing, completeIdempotentProcessing } from '@/lib/domain/events/idempotency-ledger.js'
 import {
   AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, INBOUND_REPLY_RESERVATION_SCOPE, R3_EXECUTOR_WIRED,
-  normalizeSendPolicy, parseKillSwitch, templateDeferVerdict, threadInPolicyScope,
+  isOwnerHandledThread, normalizeSendPolicy, parseKillSwitch, templateDeferVerdict, threadInPolicyScope,
 } from '@/lib/domain/conversation-ai/send-policy.js'
 
 const clean = (v) => String(v ?? '').trim()
@@ -26,6 +26,8 @@ export async function evaluateTemplateCoexistence({
   if (!executorWired) return { defer: false, reason: 'r3_executor_not_wired' }
   const inboundId = clean(inbound_message_event_id)
   if (!inboundId || typeof getSystemValue !== 'function') return { defer: false, reason: 'coexistence_not_evaluable' }
+  // owner-handled threads: R3 never touches them, so the template path stays exactly as today
+  if (isOwnerHandledThread({ thread_key })) return { defer: false, reason: 'owner_handled_thread' }
   let killSwitchOn = false
   let policy = null
   try {

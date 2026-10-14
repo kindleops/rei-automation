@@ -17,6 +17,7 @@
 //   no_response           NO_RESPONSE (nothing is enqueued)
 // Excluded (held for a human): money / offers, financial claims, legal / contract,
 // negotiation, multi-property, Spanish (and any language not positively English).
+import crypto from 'node:crypto'
 import { questionCount, moneyMentions } from './validator.js'
 
 export const AI_SEND_POLICY_VERSION = 'conv-ai.send-policy.v1'
@@ -32,6 +33,21 @@ export const R3_EXECUTOR_WIRED = false
 
 // owner limits (8.5.15 spec): a policy row can tighten them, never loosen them
 export const AI_SEND_HARD_LIMITS = Object.freeze({ max_per_day_global: 25, max_per_seller_per_day: 1 })
+
+// OWNER DECISION 2026-10-14 (permanent): the thread at 3746 Baltimore Ave is owner-handled —
+// R3 never touches it. Matched by the sha256 of its thread_key (read 2026-10-14, BEGIN READ
+// ONLY; the key itself is never stored in code) and by the property address.
+export const OWNER_HANDLED_THREAD_SHA256 = Object.freeze(['a4d8943f54734c853e4ef6450db73a0fe8adae6c7351aeff6732c64a8c6effd6'])
+export const OWNER_HANDLED_ADDRESS_PREFIXES = Object.freeze(['3746 baltimore'])
+export function isOwnerHandledThread({ thread_key = null, property_address = null } = {}) {
+  const tk = String(thread_key ?? '').trim()
+  if (tk && OWNER_HANDLED_THREAD_SHA256.includes(crypto.createHash('sha256').update(tk, 'utf8').digest('hex'))) return true
+  const addr = String(property_address ?? '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  return Boolean(addr) && OWNER_HANDLED_ADDRESS_PREFIXES.some((a) => addr.startsWith(a))
+}
+
+export { STOP_REQUEST_RE, isStopRequest } from './stop-request.js'
+import { isStopRequest } from './stop-request.js'
 
 export const ROUTINE_CATEGORIES = Object.freeze(['next_missing_fact', 'identity_answer', 'not_interested_close', 'no_response'])
 
@@ -128,6 +144,7 @@ export function classifyRoutineScope({ decision, draftText = '', inboundText = '
   if (decision.outcome !== 'REPLY_CANDIDATE') return { in_scope: false, category: null, reasons: [`outcome_${String(decision.outcome).toLowerCase()}`] }
   const draft = String(draftText || '')
   const inbound = String(inboundText || '')
+  if (isStopRequest(inbound)) reasons.push('excluded_stop_request')
   const lang = languageVerdict({ language, inboundText: inbound, draftText: draft })
   if (!lang.english) reasons.push(`excluded_language:${lang.reason}`)
   if (NEVER_INTENTS.has(decision.intent)) reasons.push(`excluded_intent:${decision.intent}`)

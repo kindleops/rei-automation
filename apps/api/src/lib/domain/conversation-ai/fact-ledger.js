@@ -30,6 +30,7 @@
 // asked, a backwards question, a skipped stage, and any offer/money question.
 import { buildFactLedger, mergeModelFacts } from './facts.js'
 import { isDeflectionToOffer, isPriceNonAnswer, questionKindOf } from './questions.js'
+import { isStopRequest } from './stop-request.js'
 
 export const FACT_LEDGER_VERSION = 'conv-ai.fact-ledger.v1'
 
@@ -146,6 +147,8 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     if (m.direction !== 'inbound') continue
     const body = String(m.body || '')
     const intent = String(m.intent || '')
+    // OWNER 2026-10-14: explicit STOP or any request to stop messaging = suppression
+    if (isStopRequest(body) || intent === 'opt_out' || intent === 'stop_texting') addFact(facts, 'opt_out', 'stop_requested', m)
     // ownership / representative
     if (OWNERSHIP_INTENTS[intent]) addFact(facts, 'ownership', OWNERSHIP_INTENTS[intent], m)
     else if (OWN_DENY_RE.test(body)) addFact(facts, 'ownership', 'denied', m)
@@ -236,6 +239,7 @@ const ids = (ledger, key) => ledger?.facts?.[key]?.source_message_ids || []
 
 /** Evidence-based stage: every step names the seller messages / records that prove it. */
 export function deriveLedgerStage(ledger) {
+  if (factValue(ledger, 'opt_out')) return { stage: 'closed', evidence_message_ids: ids(ledger, 'opt_out'), rationale: 'stop requested (suppression)' }
   const own = factValue(ledger, 'ownership')
   if (own === 'denied' || own === 'former_owner') return { stage: 'closed', evidence_message_ids: ids(ledger, 'ownership'), rationale: `ownership ${own}` }
   const interest = factValue(ledger, 'seller_interest')
@@ -274,7 +278,9 @@ export function nextMissingFact(ledger) {
 /** Is a no-reply follow-up (template engine) appropriate? Facts only; scheduling stays with the engine. */
 export function followUpEligibility(ledger) {
   const st = ledger.stage?.stage
-  if (st === 'closed') return { eligible: false, reason: 'ownership_denied_or_former' }
+  if (factValue(ledger, 'opt_out')) return { eligible: false, reason: 'stop_requested_suppression' }
+  // "No" to ownership = property-scoped stop: no follow-up, no nurture (owner 2026-10-14)
+  if (st === 'closed') return { eligible: false, reason: 'ownership_denied_or_former_no_nurture' }
   if (ledger.offer_requests.length && !ledger.existing_offers.length) return { eligible: false, reason: 'offer_requested_needs_human' }
   if (ledger.last_message?.direction === 'inbound') return { eligible: false, reason: 'seller_spoke_last_reply_due' }
   if (st === 'nurture') return { eligible: true, reason: 'nurture_30_day' }
@@ -292,6 +298,7 @@ export function followUpEligibility(ledger) {
 export function validateProposedMessage(ledger, { kind = null, text = null, inboundIntent = null } = {}) {
   const k = kind || questionKindOf({ body: text || '' })
   const reasons = []
+  if (factValue(ledger, 'opt_out')) reasons.push('stop_requested_no_message')
   const q = ledger?.questions?.[k]
   if (k === 'offer') reasons.push('offer_question_is_human')
   if (q && q.answered) reasons.push(`already_answered:${k}`)

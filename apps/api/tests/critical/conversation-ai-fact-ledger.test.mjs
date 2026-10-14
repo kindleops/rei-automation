@@ -152,3 +152,32 @@ test('validator wiring: validateDraft adds ledger reasons when a ledger is suppl
   const without = await validateDraft({ decision, context, inboundText: thread[1].body, eligibility: { blocked: false, reasons: [], outside_window: false } })
   assert.ok(!without.reasons.some((r) => r.startsWith('ledger:')))
 })
+
+// ── OWNER DECISIONS 2026-10-14 (permanent) ─────────────────────────────────
+test('owner 10-14: "No" to ownership = denial (property-scoped stop, no nurture); "No" to selling = 30-day nurture', () => {
+  const own = buildCanonicalLedger({ messages: [out('o1', 0, 'Do you still own 9 Birch?', 'ownership_check'), inb('i1', 1, 'No')] })
+  assert.equal(own.facts.ownership.value, 'denied')
+  assert.equal(own.facts.seller_interest, undefined, 'a "No" to ownership is not read as disinterest')
+  assert.equal(own.stage.stage, 'closed')
+  assert.deepEqual(own.follow_up, { eligible: false, reason: 'ownership_denied_or_former_no_nurture' })
+  const sell = buildCanonicalLedger({ messages: [out('o1', 0, 'Do you still own 9 Birch?', 'ownership_check'), inb('i1', 1, 'yes'), out('o2', 2, 'Would you consider selling it?', 'consider_selling'), inb('i2', 3, 'No'), out('o3', 4, 'Understood, thanks.', 'nurture_not_interested')] })
+  assert.equal(sell.facts.ownership.value, 'confirmed')
+  assert.equal(sell.facts.seller_interest.value, 'not_interested')
+  assert.equal(sell.stage.stage, 'nurture')
+  assert.equal(sell.follow_up.eligible, true)
+  assert.equal(sell.follow_up.reason, 'nurture_30_day')
+  for (const t of ['not selling', 'not interested']) {
+    const L = buildCanonicalLedger({ messages: [out('o1', 0, 'Would you consider selling it?', 'consider_selling'), inb('i1', 1, t)] })
+    assert.equal(L.stage.stage, 'nurture', t)
+  }
+})
+
+test('owner 10-14: explicit STOP or any stop request (incl. glued "…STOP 🛑") = suppression; nothing is asked or followed up', () => {
+  for (const t of ['STOP', 'yes i own it STOP🛑', 'not interestedSTOP', 'please remove me from your list', "don't text me again"]) {
+    const L = buildCanonicalLedger({ messages: [out('o1', 0, 'Do you still own it?', 'ownership_check'), inb('i1', 1, t)] })
+    assert.equal(L.facts.opt_out?.value, 'stop_requested', t)
+    assert.equal(L.stage.stage, 'closed', t)
+    assert.deepEqual(L.follow_up, { eligible: false, reason: 'stop_requested_suppression' }, t)
+    assert.ok(validateProposedMessage(L, { text: 'Would you consider selling?' }).reasons.includes('stop_requested_no_message'), t)
+  }
+})

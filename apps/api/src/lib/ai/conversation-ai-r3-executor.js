@@ -41,7 +41,7 @@ import { DEFAULT_AI_REPLY_POLICY } from '@/lib/domain/conversation-ai/policy.js'
 import { questionKindOf } from '@/lib/domain/conversation-ai/questions.js'
 import {
   AI_CONVERSATION_SOURCE, AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, AI_SEND_POLICY_VERSION, INBOUND_REPLY_RESERVATION_SCOPE,
-  R3_EXECUTOR_WIRED, classifyRoutineScope, normalizeSendPolicy, parseKillSwitch, threadInPolicyScope,
+  R3_EXECUTOR_WIRED, classifyRoutineScope, isOwnerHandledThread, normalizeSendPolicy, parseKillSwitch, threadInPolicyScope,
 } from '@/lib/domain/conversation-ai/send-policy.js'
 import { VALIDATOR_VERSION, validateDraft } from '@/lib/domain/conversation-ai/validator.js'
 
@@ -83,6 +83,12 @@ export async function loadR3State({ supabase, candidate, now }) {
   const since = new Date(Date.parse(now) - 75 * 864e5).toISOString()
   const q = await supabase.from('send_queue').select('id,queue_status,use_case_template,created_at,source,inbound_message_id').eq('thread_key', loaded.input.inbound.thread_key).gte('created_at', since).order('created_at', { ascending: false }).limit(60)
   if (q?.error) throw Object.assign(new Error('R3_STATE_READ_FAILED'), { code: 'R3_STATE_READ_FAILED' })
+  let property_address = null
+  if (loaded.row.property_id) {
+    const pr = await supabase.from('properties').select('property_address,property_address_full').eq('property_id', loaded.row.property_id).limit(1)
+    if (pr?.error) throw Object.assign(new Error('R3_STATE_READ_FAILED'), { code: 'R3_STATE_READ_FAILED' })
+    property_address = pr?.data?.[0]?.property_address || pr?.data?.[0]?.property_address_full || null
+  }
   return {
     input: loaded.input,
     queueRows: q?.data || [],
@@ -92,6 +98,7 @@ export async function loadR3State({ supabase, candidate, now }) {
     seller_phone: loaded.row.from_phone_number,
     our_phone: loaded.row.to_phone_number,
     property_id: loaded.row.property_id || null,
+    property_address,
     prospect_id: loaded.row.prospect_id || null,
     master_owner_id: null,
     market_id: null,
@@ -142,6 +149,8 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   const inboundId = clean(candidate.inbound?.id)
   const threadKey = clean(candidate.inbound?.thread_key)
   if (!inboundId || !threadKey) return out('refused', ['inbound_identity_missing'])
+  // OWNER 2026-10-14 (permanent): owner-handled threads are never touched
+  if (isOwnerHandledThread({ thread_key: threadKey })) return out('refused', ['owner_handled_thread'])
   if (decision.outcome === 'NO_RESPONSE') return out('no_response', [], { category: 'no_response' })
   if (decision.outcome !== 'REPLY_CANDIDATE') return out('held', [`outcome_${String(decision.outcome).toLowerCase()}`])
   if (candidate.validation?.status !== 'validated_draft') return out('held', ['draft_not_validated'])
@@ -153,6 +162,7 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   try { state = await loadState({ candidate, now }) } catch { state = null }
   if (!state?.input?.inbound) return out('held', ['state_unavailable'])
   if (clean(state.input.inbound.thread_key) !== threadKey) return out('held', ['thread_mismatch'])
+  if (isOwnerHandledThread({ thread_key: threadKey, property_address: state.property_address })) return out('refused', ['owner_handled_thread'])
   const thread = [...(state.input.thread || [])]
   if (!thread.some((m) => m.id === state.input.inbound.id)) thread.push({ ...state.input.inbound, direction: 'inbound' })
   const inboundRow = thread.find((m) => m.id === inboundId)

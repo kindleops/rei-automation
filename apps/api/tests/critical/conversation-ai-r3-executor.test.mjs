@@ -16,7 +16,7 @@ import { insertSupabaseSendQueueRow, normalizeSendQueueRow } from '../../src/lib
 import { __resetIdempotencyLedgerTestDeps, beginIdempotentProcessing } from '../../src/lib/domain/events/idempotency-ledger.js'
 import { dryRunEligibility } from '../../src/lib/domain/conversation-ai/eligibility-bridge.js'
 import { makeDecision } from '../../src/lib/domain/conversation-ai/contract.js'
-import { DEFAULT_AI_SEND_POLICY, normalizeSendPolicy, AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, templateDeferVerdict } from '../../src/lib/domain/conversation-ai/send-policy.js'
+import { DEFAULT_AI_SEND_POLICY, isOwnerHandledThread, OWNER_HANDLED_THREAD_SHA256, normalizeSendPolicy, AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, templateDeferVerdict } from '../../src/lib/domain/conversation-ai/send-policy.js'
 import { evaluateSendTimeContactGuard } from '../../src/lib/domain/queue/send-time-contact-guard.js'
 import { evaluateTemplateAuthority } from '../../src/lib/domain/templates/template-authority.js'
 import { evaluateAiConversationRowGate, cancelPendingAiConversationRows } from '../../src/lib/domain/queue/ai-conversation-row-gate.js'
@@ -510,4 +510,22 @@ test('E2E: the existing pre-claim loader also holds an AI row (no sms_templates 
   const skip = result.skipped.find((s) => s.id === row.id)
   assert.ok(skip, JSON.stringify(result.skipped))
   assert.equal(skip.reason, 'missing_selected_template_id')
+})
+
+test('owner 10-14: a stop request anywhere in the inbound holds R3; the owner-handled thread (3746 Baltimore Ave) is never touched', async () => {
+  const stopThread = [S1_THREAD()[0], msg('i1', 'inbound', 'Yes I still own it STOP🛑', 5)]
+  const r = await executeAiConversationReply(candidate(), deps({ w: world({ thread: stopThread }) }).d)
+  assert.equal(r.status, 'held')
+  assert.ok(r.reasons.includes('excluded_stop_request'), JSON.stringify(r.reasons))
+  assert.equal(OWNER_HANDLED_THREAD_SHA256.length, 1)
+  assert.match(OWNER_HANDLED_THREAD_SHA256[0], /^[0-9a-f]{64}$/)
+  assert.equal(isOwnerHandledThread({ property_address: '3746 Baltimore Ave' }), true)
+  assert.equal(isOwnerHandledThread({ property_address: '3746 BALTIMORE AVENUE, Unit 2' }), true)
+  assert.equal(isOwnerHandledThread({ thread_key: TK, property_address: '12 Elm St' }), false)
+  const w = world({ thread: S1_THREAD() })
+  w.state.property_address = '3746 Baltimore Ave'
+  const { d, table } = deps({ w })
+  const o = await executeAiConversationReply(candidate(), d)
+  assert.deepEqual([o.status, o.reasons], ['refused', ['owner_handled_thread']])
+  assert.equal(table.inserts.length, 0)
 })
