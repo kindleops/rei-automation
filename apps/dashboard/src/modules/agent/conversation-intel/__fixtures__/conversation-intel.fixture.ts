@@ -1,11 +1,10 @@
 /**
- * DEV-ONLY FIXTURE — masked records from the 2026-10-13 historical shadow replay
- * (phones/emails masked, names → [first]/[name], addresses → [address]). Loaded ONLY
- * through the dev-flagged dynamic import in conversation-intel-model.ts
- * (import.meta.env.DEV && VITE_LC_CONV_AI_SHADOW_FIXTURE === '1'); production
- * builds never reach this module. Always labelled FIXTURE in the UI.
+ * TEST-ONLY FIXTURE — masked records from the 2026-10-13 historical shadow replay
+ * (phones/emails masked, names → [first]/[name], addresses → [address]). Imported
+ * ONLY by conversation-intel tests; no production module imports it, so no build
+ * contains it. The panel never falls back to a fixture.
  */
-import type { ShadowRecord } from './conversation-intel-model'
+import type { ShadowRecord } from '../conversation-intel-model'
 
 export const CONVERSATION_INTEL_FIXTURE: ShadowRecord[] = [
  {
