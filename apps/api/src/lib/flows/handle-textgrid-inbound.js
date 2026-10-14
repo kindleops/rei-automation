@@ -77,6 +77,7 @@ import {
   updateInboundAutopilotQueue,
 } from "@/lib/discord/inbound-autopilot-queue.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { scheduleConversationAiShadow } from "@/lib/ai/conversation-ai-shadow-hook.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
 import { unarchiveThreadOnInbound } from "@/lib/flows/inbound-thread-unarchive.js";
 import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
@@ -130,6 +131,7 @@ const defaultDeps = {
   updateInboundAutopilotQueue,
   getSupabaseClient: getDefaultSupabaseClient,
   logInboundMessageEventSupabase: logSupabaseInboundMessageEvent,
+  scheduleConversationAiShadow,
   getSystemFlags,
   getSystemValue,
   info,
@@ -3117,6 +3119,12 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
           };
 
           await runtimeDeps.logInboundMessageEventSupabase(supabase_payload);
+          // Conversation Engine 2.0 R1/R2 — SHADOW ONLY, NO SEND. Returns at once unless
+          // AI_CONVERSATION_SHADOW_ENABLED=true (default off); never awaited, never throws here.
+          runtimeDeps.scheduleConversationAiShadow({
+            providerMessageSid: extracted.message_id,
+            deterministic: { intent: authoritative_intent || null, compliance_flag: classification?.compliance_flag || null, confidence: classification?.confidence ?? null },
+          });
         } catch (supaErr) {
           safeWarn("textgrid.inbound_supabase_update_failed", {
             message_id: extracted.message_id,

@@ -11,7 +11,8 @@
 import { NextResponse } from 'next/server.js'
 
 import { requireScheduledMutationAuth } from '@/lib/security/cron-auth.js'
-import { runScheduledRuntimeTick } from '@/lib/agent/runtime/runtime-service.js'
+import { runScheduledRuntimeTick, DEFAULT_RUNTIME_HANDLERS } from '@/lib/agent/runtime/runtime-service.js'
+import { conversationRuntimeHandlers } from '@/lib/ai/conversation-decide-handler.js'
 import { child } from '@/lib/logging/logger.js'
 
 export const runtime = 'nodejs'
@@ -25,7 +26,8 @@ export async function POST(request) {
   const auth = requireScheduledMutationAuth(request, logger)
   if (!auth.authorized) return auth.response
   try {
-    const result = await runScheduledRuntimeTick()
+    // conversation.decide (R1/R2 shadow, no send) is registered only when AI_CONVERSATION_SHADOW_ENABLED=true
+    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers() } })
     if (result.summary) {
       const s = result.summary
       logger.info('agent.runtime.tick', { blocked: s.blocked, claimed: s.claimed, jobs: s.jobs.map((j) => `${j.kind}:${j.outcome}`), errors: s.errors.map((e) => `${e.phase}:${e.code}`), elapsed_ms: s.elapsed_ms })
