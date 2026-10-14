@@ -1,0 +1,72 @@
+[
+ {
+  "label": "seeded_2000_all_graph",
+  "sampled_properties": 2000,
+  "properties_with_no_graph_phone_now": 448,
+  "of_those_with_any_candidate_after_fix": 183,
+  "property_phone_associations_total": 2106,
+  "newly_visible_associations": 936,
+  "newly_visible_distinct_phones": 922,
+  "properties_gaining_any_association": 634,
+  "newly_visible_by_class": {
+   "vendor_associated_owner_phone(resolution_entity_owned)": 171,
+   "renter_or_occupant_phone": 150,
+   "unresolved_prospect_phone": 147,
+   "vendor_associated_owner_phone(resolution_confirmed)": 118,
+   "vendor_associated_owner_phone(resolution_medium_confidence)": 109,
+   "vendor_associated_owner_phone(resolution_ambiguous)": 99,
+   "historical_contacted": 74,
+   "other": 18,
+   "vendor_associated_owner_phone(resolution_conflicting_existing_assignment)": 15,
+   "vendor_associated_owner_phone(resolution_unresolved)": 15,
+   "reach_phone_non_owner_role": 12,
+   "suppressed_or_wrong_number": 4,
+   "vendor_associated_owner_phone(resolution_high_confidence)": 3,
+   "historical_target_only": 1
+  },
+  "newly_visible_wireless_vendor_owner_class": 530,
+  "currently_visible_by_class": {
+   "confirmed_owner_phone(vendor_name_exact)": 541,
+   "reach_phone_non_owner_role": 293,
+   "historical_contacted": 100,
+   "vendor_associated_owner_phone(resolution_medium_confidence)": 89,
+   "vendor_associated_owner_phone(resolution_entity_owned)": 61,
+   "historical_target_only": 35,
+   "other": 26,
+   "held_in_queue": 8,
+   "renter_or_occupant_phone": 8,
+   "unresolved_prospect_phone": 5,
+   "suppressed_or_wrong_number": 2,
+   "vendor_associated_owner_phone(resolution_ambiguous)": 1,
+   "vendor_associated_owner_phone(resolution_conflicting_existing_assignment)": 1
+  }
+ },
+ {
+  "label": "seeded_600_missing_phone",
+  "sampled_properties": 600,
+  "properties_with_no_graph_phone_now": 600,
+  "of_those_with_any_candidate_after_fix": 272,
+  "property_phone_associations_total": 448,
+  "newly_visible_associations": 448,
+  "newly_visible_distinct_phones": 448,
+  "properties_gaining_any_association": 272,
+  "newly_visible_by_class": {
+   "vendor_associated_owner_phone(resolution_ambiguous)": 166,
+   "renter_or_occupant_phone": 61,
+   "unresolved_prospect_phone": 60,
+   "vendor_associated_owner_phone(resolution_unresolved)": 51,
+   "historical_contacted": 38,
+   "vendor_associated_owner_phone(resolution_entity_owned)": 19,
+   "vendor_associated_owner_phone(resolution_conflicting_existing_assignment)": 18,
+   "reach_phone_non_owner_role": 10,
+   "vendor_associated_owner_phone(resolution_medium_confidence)": 10,
+   "vendor_associated_owner_phone(resolution_confirmed)": 8,
+   "other": 4,
+   "confirmed_owner_phone(vendor_name_exact)": 1,
+   "suppressed_or_wrong_number": 1,
+   "historical_target_only": 1
+  },
+  "newly_visible_wireless_vendor_owner_class": 272,
+  "currently_visible_by_class": {}
+ }
+]
