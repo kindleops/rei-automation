@@ -40,4 +40,15 @@ export const RESEARCH_CONTROL_TOOLS = Object.freeze([
   Object.freeze({ name: 'request_deeper_analysis', kind: 'loop_control', decided_by: 'server', reads: null, writes: null }),
 ])
 
+// Intelligence 2.0 (increment A): PROVIDER-EXECUTED public-web tools. Anthropic performs the
+// egress inside the model call; LeadCommand's server fetches nothing ('web_egress' stays forbidden).
+// Off unless AGENT_WEB_RESEARCH_ENABLED=1 (and AGENT_WEB_FETCH_ENABLED=1 for fetch); block list,
+// max_uses per call and per run, per-search fee reserved and settled from usage (web-research.js).
+// present_result is loop control: a typed final answer, validated server-side (result-schema.js).
+export const RESEARCH_SERVER_TOOLS = Object.freeze([
+  Object.freeze({ name: 'web_search', kind: 'provider_executed', reads: 'public web search results', writes: null, gate: 'AGENT_WEB_RESEARCH_ENABLED', fee_usd_per_use: 0.01 }),
+  Object.freeze({ name: 'web_fetch', kind: 'provider_executed', reads: 'one public page already in the conversation', writes: null, gate: 'AGENT_WEB_FETCH_ENABLED', fee_usd_per_use: 0 }),
+  Object.freeze({ name: 'present_result', kind: 'loop_control', decided_by: 'server', reads: null, writes: null }),
+])
+
 export const FORBIDDEN_CAPABILITIES = Object.freeze(['sms_send', 'call', 'email_send', 'campaign_status_change', 'campaign_create_or_launch', 'queue_write', 'seller_offer', 'db_write', 'arbitrary_sql', 'web_egress', 'approval_grant', 'self_modification'])

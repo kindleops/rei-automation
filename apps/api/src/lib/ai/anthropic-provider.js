@@ -193,7 +193,7 @@ export function createAnthropicProvider({ env = process.env, client = null, time
    * (the run's per-call ceiling) covers the whole call; the idle watchdog aborts a
    * stream that goes silent for idleMs after headers. No retries (maxRetries 0).
    */
-  async function createMessage(params, { signal = null } = {}) {
+  async function createMessage(params, { signal = null, onEvent = null } = {}) {
     const c = getClient()
     const ctx = { phase: 'connect', stopped: null, callerReason: null, transport: null }
     const ctl = new AbortController()
@@ -212,7 +212,10 @@ export function createAnthropicProvider({ env = process.env, client = null, time
       return await callScope.run(ctx, async () => {
         const stream = c.messages.stream(params, { signal: ctl.signal })
         stream.on?.('connect', () => { ctx.phase = 'stream'; arm() })
-        stream.on?.('streamEvent', arm)
+        // onEvent: the raw provider stream events (message_start, content_block_start /
+        // delta / stop, message_delta, …) for the caller's live run events. A throwing
+        // listener never breaks the call.
+        stream.on?.('streamEvent', (ev) => { arm(); if (onEvent) { try { onEvent(ev) } catch { /* listener errors are the caller's */ } } })
         return await stream.finalMessage()
       })
     } catch (err) {

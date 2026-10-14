@@ -5,6 +5,12 @@
 //                                                 (property_id is an alias of property_ids — ask-service.contextPropertyIds)
 //   GET  /api/cockpit/agent/live/ask/:run_id      the run: state, answer, latency, cost per call, audit trail, and for a
 //                                                 refused / failed run its persisted refusal detail (codes only)
+//   GET  /api/cockpit/agent/live/ask/:run_id/events   text/event-stream of the run's REAL backend events (run-events.js):
+//                                                 replay from ?after= / Last-Event-ID, then live; ends after the terminal
+//                                                 event. A run this process does not hold ⇒ one `snapshot` (the durable
+//                                                 status) and, when terminal, its terminal event — then the stream closes.
+//   POST /api/cockpit/agent/live/ask/:run_id/cancel   stop a running run: no further model / tool call; an in-flight
+//                                                 model call is aborted and its reserve stays counted (unknown)
 //
 // Order on every request (same as Gate B):
 //   (1) gate → 404 with an EMPTY body unless the live route gate AND
@@ -145,4 +151,80 @@ export async function handleResearchRun(request, { params = {}, ...opts } = {}) 
   } catch (err) {
     return json({ ok: false, error: err?.code || 'AGENT_STORE_UNAVAILABLE' }, 503, opts.headers)
   }
+}
+
+const RUN_ID_RE = /^ask_[A-Za-z0-9_-]{8,80}$/
+const SSE_HEARTBEAT_MS = 15_000
+
+function sseFrame(ev) {
+  return `id: ${ev.seq}\nevent: ${ev.type}\ndata: ${JSON.stringify(ev)}\n\n`
+}
+
+/** Terminal event derived from a durable status (a run this process no longer holds). */
+function terminalFromStatus(s) {
+  if (!s || s.state === 'running') return null
+  const type = s.state === 'completed' ? 'completed' : s.state === 'cancelled' ? 'cancelled' : 'failed'
+  return { seq: 1_000_000, type, at: s.ended_at, state: s.state, outcome: s.outcome, cost_usd: s.cost_usd, latency_ms: s.latency_ms, model_calls: s.counters?.model_calls ?? null, tool_calls: s.counters?.tool_calls ?? null, answer_md: s.answer?.answer_md ?? null, result: s.result ?? null, refusal_class: s.refusal_class ?? null, refusal: s.refusal ?? null, from: 'durable_status' }
+}
+
+export async function handleResearchEvents(request, { params = {}, ...opts } = {}) {
+  const p = await prologue(request, opts)
+  if (p.response) return p.response
+  const run_id = String(params.run_id || '')
+  if (!RUN_ID_RE.test(run_id)) return json({ ok: false, error: 'RUN_NOT_FOUND' }, 404, opts.headers)
+  const url = new URL(request.url)
+  const after = Math.max(0, Number(url.searchParams.get('after') || request.headers.get('last-event-id') || 0) || 0)
+  const enc = new TextEncoder()
+  const headers = { ...(opts.headers || {}), 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', 'x-accel-buffering': 'no', 'x-agent-live': 'true' }
+  let unsubscribe = null
+  let heartbeat = null
+  const stream = new ReadableStream({
+    async start(controller) {
+      let closed = false
+      const close = () => {
+        if (closed) return
+        closed = true
+        clearInterval(heartbeat)
+        try { unsubscribe?.() } catch { /* ignore */ }
+        try { controller.close() } catch { /* already closed */ }
+      }
+      const send = (ev) => { if (!closed) { try { controller.enqueue(enc.encode(sseFrame(ev))) } catch { close() } } }
+      request.signal?.addEventListener?.('abort', close, { once: true })
+      controller.enqueue(enc.encode(': lc-ask events\n\n'))
+      heartbeat = setInterval(() => { if (!closed) { try { controller.enqueue(enc.encode(': hb\n\n')) } catch { close() } } }, SSE_HEARTBEAT_MS)
+      if (typeof heartbeat.unref === 'function') heartbeat.unref()
+      let live = null
+      try {
+        live = p.agent.ask.subscribe ? p.agent.ask.subscribe(run_id, p.operator_id, { after }, (ev) => { if (ev) send(ev); else close() }) : null
+      } catch { live = null }
+      if (live) { unsubscribe = live; return }
+      // not held by this process: the durable status, then (if terminal) its terminal event
+      try {
+        const s = await p.agent.ask.status(run_id, p.operator_id)
+        if (!s) { send({ seq: 0, type: 'error', code: 'RUN_NOT_FOUND' }); return close() }
+        send({ seq: 0, type: 'snapshot', state: s.state, outcome: s.outcome, counters: s.counters, from: 'durable_status' })
+        const t = terminalFromStatus(s)
+        if (t) send(t)
+      } catch {
+        send({ seq: 0, type: 'error', code: 'AGENT_STORE_UNAVAILABLE' })
+      }
+      close()
+    },
+    cancel() {
+      clearInterval(heartbeat)
+      try { unsubscribe?.() } catch { /* ignore */ }
+    },
+  })
+  return new Response(stream, { status: 200, headers })
+}
+
+export async function handleResearchCancel(request, { params = {}, ...opts } = {}) {
+  const p = await prologue(request, { ...opts, bucket: 'mutation' })
+  if (p.response) return p.response
+  const run_id = String(params.run_id || '')
+  if (!RUN_ID_RE.test(run_id)) return json({ ok: false, error: 'RUN_NOT_FOUND' }, 404, opts.headers)
+  const r = p.agent.ask.cancel ? p.agent.ask.cancel(run_id, p.operator_id) : { ok: false, code: 'RUN_NOT_FOUND' }
+  if (r.ok) return json({ ok: true, run_id, state: r.state }, 202, opts.headers)
+  if (r.code === 'RUN_NOT_ACTIVE') return json({ ok: false, error: 'RUN_NOT_ACTIVE', message: 'The run has already ended.' }, 409, opts.headers)
+  return json({ ok: false, error: 'RUN_NOT_FOUND' }, 404, opts.headers)
 }
