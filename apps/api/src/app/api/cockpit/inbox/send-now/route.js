@@ -30,7 +30,10 @@ export async function POST(request) {
   })
   
   try {
-    const result = await runInboxAction({ action: 'send-now', payload: { ...payload, dry_run: false } })
+    // The Worker sets x-ops-user-id after verifying the Supabase session; it is the
+    // only actor an audited repeat-asking-price override may carry.
+    const actor = String(request.headers.get('x-ops-user-id') || '').trim() || null
+    const result = await runInboxAction({ action: 'send-now', payload: { ...payload, dry_run: false }, actor })
     const status = result.ok ? 200 : Number(result.status || (result.reason === 'invalid_canonical_thread_key' ? 400 : 423))
     logger.info('cockpit_send_now.route_response', {
       ok: result.ok,

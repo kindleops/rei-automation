@@ -39,7 +39,9 @@ const COMPOSER = () => import('@/lib/domain/campaigns/campaign-composer.js')
 const INBOX = () => import('@/lib/domain/inbox/live-inbox-service.js')
 const SEND_NOW = () => import('@/lib/domain/inbox/send-now-service.js')
 const OPP = () => import('@/lib/domain/opportunity/opportunity-service.js')
-const SUPABASE = () => SUPABASE()
+// the shared server client; the old self-call (`() => SUPABASE()`) recursed forever, so every
+// inbox capability binding that needs the database would have thrown on first use
+const SUPABASE = () => import('@/lib/supabase/client.js')
 
 export const HEARTBEAT_KEYS = Object.freeze(['queue_processor_heartbeat_at', 'campaign_feeder_heartbeat_at', 'followup_no_response_heartbeat_at', 'seller_state_reconcile_heartbeat_at', 'webhook_delivery_recovery_last_at', 'queue_processor_mode', 'queue_execution_mode'])
 export const FEEDER_KEYS = Object.freeze(['campaign_feeder_last_batch_at', 'campaign_feeder_last_inserted_count', 'campaign_feeder_last_blocked_count', 'campaign_feeder_last_campaign_count', 'campaign_feeder_last_stalled_count', 'campaign_feeder_last_reason'])

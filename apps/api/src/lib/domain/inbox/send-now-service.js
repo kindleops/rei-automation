@@ -33,6 +33,12 @@ import {
   evaluateCanonicalContactability,
 } from "@/lib/domain/compliance/evaluate-canonical-contactability.js";
 import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
+import {
+  REPEAT_ASK_OVERRIDE_MAX_REASON,
+  REPEAT_ASK_OVERRIDE_MIN_REASON,
+  REPEAT_ASK_OVERRIDE_SCOPE,
+  repeatAskBlockOf,
+} from "@/lib/domain/queue/outbound-question-kind.js";
 import { promoteFirstContactOnProviderAcceptance } from "@/lib/domain/lead-state/promote-first-contact-on-send.js";
 import { loadDispatchBlockedSets, isSenderDispatchBlocked } from "@/lib/domain/delivery/sms-health-guard.js";
 import {
@@ -432,7 +438,10 @@ function pickProvenanceField(input = {}, metadata = {}, key = "") {
 }
 
 function buildSendNowMetadata(input = {}, normalized = {}) {
-  const input_metadata = objectMetadata(input.metadata);
+  // rc-8.5.15.1: the repeat-asking-price override is minted server-side only
+  // (buildRepeatAskOverride, from the explicit request fields + the verified
+  // operator); a copy arriving inside the caller's metadata is discarded.
+  const { repeat_ask_override: _ignored_override, ...input_metadata } = objectMetadata(input.metadata);
   const merged = {
     ...input_metadata,
     source: normalized.source,
@@ -904,6 +913,50 @@ async function shouldSuppressRecentDeliveryFailuresReconciled({
 
 
 // ════════════════════════════════════════════════════════════════════════════
+// REPEAT-ASKING-PRICE OVERRIDE (rc-8.5.15.1)
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * The audited Inbox override for the repeat-asking-price guard ONLY.
+ *
+ * Owner directive 2026-10-13: a seller is never asked for their asking price
+ * twice. The database guard cancels the repeat; an operator who genuinely needs
+ * to CLARIFY a price may send anyway by ticking the override and giving a reason.
+ * The override is recorded on the row (actor, reason, at) and is honoured by
+ * block_repeat_asking_price() and by nothing else: suppression, STOP, legal,
+ * sender and contact-window gates run unchanged — this never sets
+ * operator_override (which relaxes other guards).
+ *
+ * Returns { requested:false } | { requested:true, ok:true, override } |
+ * { requested:true, ok:false, status, reason }.
+ */
+export function buildRepeatAskOverride(input = {}, { manual_operator_send = false, now = nowIso() } = {}) {
+  const requested = asBoolean(input.repeat_ask_override, false);
+  if (!requested) return { requested: false };
+  if (!manual_operator_send) {
+    return { requested: true, ok: false, status: 400, reason: "repeat_ask_override_not_allowed_for_path" };
+  }
+  const actor = clean(input.repeat_ask_override_actor);
+  if (!actor) return { requested: true, ok: false, status: 403, reason: "repeat_ask_override_actor_required" };
+  const reason = clean(input.override_reason).replace(/\s+/g, " ");
+  if (reason.length < REPEAT_ASK_OVERRIDE_MIN_REASON || reason.length > REPEAT_ASK_OVERRIDE_MAX_REASON) {
+    return { requested: true, ok: false, status: 400, reason: "repeat_ask_override_reason_required" };
+  }
+  return {
+    requested: true,
+    ok: true,
+    override: {
+      scope: REPEAT_ASK_OVERRIDE_SCOPE,
+      actor,
+      operator_email: clean(input.operator_email) || null,
+      reason,
+      at: now,
+      client_send_id: clean(input.client_send_id || objectMetadata(input.metadata).client_send_id) || null,
+    },
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // CREATE QUEUE ROW
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -1129,6 +1182,30 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     clean(normalized.action).toLowerCase() === "send_ownership_check" ||
     normalized.source === "map_command";
   const warning_codes = [];
+
+  // ── Step 2b: the audited repeat-asking-price override (if requested) ──
+  // Validated before anything else happens; it only ever reaches the
+  // repeat-asking-price guard. Every gate below runs exactly as without it.
+  const repeat_ask = buildRepeatAskOverride(input, { manual_operator_send: is_manual_send_now });
+  if (repeat_ask.requested && !repeat_ask.ok) {
+    logger.warn("inbox_send_now.early_exit", { ...request_log, reason: repeat_ask.reason, queue_inserted: false });
+    return {
+      ok: false,
+      status: repeat_ask.status,
+      error: repeat_ask.reason,
+      reason: repeat_ask.reason,
+      queue_created: false,
+      queue_inserted: false,
+    };
+  }
+  if (repeat_ask.ok) {
+    logger.info("inbox_send_now.repeat_ask_override_requested", {
+      thread_key: normalized.thread_key,
+      actor: repeat_ask.override.actor,
+      reason_length: repeat_ask.override.reason.length,
+      at: repeat_ask.override.at,
+    });
+  }
 
   // ── Step 3a: non-bypassable compliance guard ───────────────────────
   const compliance_block = await hardComplianceCheckImpl({
@@ -1483,6 +1560,7 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
           ...(operator_action_id ? { operator_action_id } : {}),
           operator_override: operator_override ? true : false,
           ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
+          ...(repeat_ask.ok ? { repeat_ask_override: repeat_ask.override } : {}),
         },
       },
       insert_deps
@@ -1519,6 +1597,49 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     queue_result?.queue_item_id ||
     queue_result?.item_id ||
     null;
+
+  // ── Step 4b: the repeat-asking-price guard's verdict ─────────────────
+  // block_repeat_asking_price() is a BEFORE trigger that CANCELS (never raises),
+  // so the insert "succeeds" with queue_status='cancelled'. Reporting that as
+  // queued would be the 423→ok:true lie again: report the block, and whether the
+  // audited override can be offered (manual send-now only; never when the guard
+  // cancelled a no-response follow-up because the seller replied).
+  const repeat_block = repeatAskBlockOf(queue_result?.raw);
+  if (queue_result?.ok !== false && repeat_block) {
+    const proof = buildManualSendProof({
+      input,
+      normalized,
+      queue_inserted: true,
+      queue_row_id,
+      queue_status: "cancelled",
+      detail_reason: repeat_block.paused_reason,
+      warning_codes,
+    });
+    logger.warn("inbox_send_now.early_exit", {
+      ...request_log,
+      reason: "repeat_asking_price_blocked",
+      detail_reason: repeat_block.paused_reason,
+      queue_inserted: true,
+      queue_row_id,
+      queue_status: "cancelled",
+    });
+    return {
+      ok: false,
+      status: 409,
+      error: "repeat_asking_price_blocked",
+      reason: "repeat_asking_price_blocked",
+      detail_reason: repeat_block.paused_reason,
+      queue_created: false,
+      queue_inserted: true,
+      queue_row_id,
+      queue_id: queue_result?.queue_id || queue_row_id,
+      queue_key: normalized.queue_key,
+      queue_status: "cancelled",
+      repeat_ask_override_allowed: is_manual_send_now && !repeat_block.seller_replied && !repeat_ask.ok,
+      proof,
+      result: queue_result,
+    };
+  }
 
   if (queue_result?.ok === false) {
     const reason = clean(queue_result?.reason) === "duplicate_blocked"

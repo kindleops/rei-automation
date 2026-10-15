@@ -6,6 +6,7 @@
  * validates safety, then queues through send_queue.
  */
 
+import { stampOutboundQuestionKind } from "@/lib/domain/queue/outbound-question-kind.js";
 import { NextResponse } from "next/server";
 import { resolveOperatorAction } from "@/lib/domain/communications/operator-action-store.js";
 import { randomUUID } from "crypto";
@@ -613,6 +614,10 @@ async function queueReplyWhenSmsSendQueue(
       operator_action_id: operator_action.operator_action_id,
     },
   };
+
+  // rc-8.5.15.1: this route inserts directly (not via the canonical writer), so it
+  // stamps metadata.question_kind itself — the repeat-asking-price guard keys on it.
+  payload.metadata = stampOutboundQuestionKind(payload);
 
   const { data: queue_row, error: queue_error } = await supabase
     .from(SEND_QUEUE_TABLE)

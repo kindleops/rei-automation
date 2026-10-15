@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { stampOutboundQuestionKind } from "@/lib/domain/queue/outbound-question-kind.js";
 import { reconcileProviderCallback } from "@/lib/domain/communications/reconcile-provider-callback.js";
 import {
   normalizeProvenance,
@@ -4824,7 +4825,12 @@ function sanitizeSendQueuePayload(payload) {
 export function buildSendQueueInsertPayload(row = {}, now = null) {
   const ts = now || nowIso();
   const normalized = normalizeSendQueueRow(row);
-  const metadata = ensureObject(normalized.metadata);
+  // rc-8.5.15.1: every canonical-writer row carries metadata.question_kind (the
+  // repeat-asking-price guard keys on it, not on use_case_template alone).
+  const metadata = stampOutboundQuestionKind({
+    ...normalized,
+    metadata: ensureObject(normalized.metadata),
+  });
   // Preserve the canonical ph_ text phone id in metadata (message_events has no
   // canonical text phone_id column; provenance must survive on the queue row too).
   if (normalized.phone_id && metadata.canonical_phone_id == null) {

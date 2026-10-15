@@ -11,8 +11,8 @@
  * because the nurture template was absent. That is the failure mode this file
  * exists to make impossible, and it is checked per route rather than once.
  *
- * Production counts quoted in comments were read from lcppdrmrdfblstpcbgpf on
- * 2026-09-11. The tests themselves never touch the network - they drive the
+ * Production counts quoted in comments were read (read-only) from the production
+ * project on 2026-09-11. The tests themselves never touch the network - they drive the
  * real resolver against explicit pools, so they assert BEHAVIOUR, not a
  * snapshot of the catalog.
  */

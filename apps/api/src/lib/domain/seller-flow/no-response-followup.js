@@ -28,6 +28,7 @@
 // changes nothing until the owner sets the key.
 
 import { extractMonetaryMentions } from "@/lib/domain/seller-flow/monetary-understanding.js";
+import { classifyAskingPriceQuestion } from "@/lib/domain/seller-flow/asking-price-question.js";
 import { identifyReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
 import { prepareRenderedSmsForQueue } from "@/lib/sms/sanitize.js";
@@ -212,17 +213,15 @@ const S2_EN_OBJECT = /\b(proposal|offer|sale|selling|sell|numbers)\b/i;
 const S2_ES_VERB = /(abiert[oa]s?|considerar[ií]a|interesad[oa]|interesa|vistazo|soltar[ií]a)/i;
 const S2_ES_OBJECT = /(propuesta|oferta|vender|venta|n[uú]meros|opciones|vistazo|soltar[ií]a)/i;
 const PRICE_QUESTION = /(asking price|price in mind|precio)/i;
-// Our S3 question in free text (owner-typed or templated): their number.
-const S3_PRICE_QUESTION =
-  /(asking price|price in mind|number in mind|what price|price (?:would|that would) work|what would you (?:take|want|need)|how much (?:would|do) you (?:want|need)|precio|cu[aá]nto (?:pide|quiere|pedir[ií]a))/i;
-
-/** Is this outbound our S3 asking-price question (templated or typed)? Pure. */
+/**
+ * Is this outbound our S3 asking-price question (templated or typed)? Pure.
+ * rc-8.5.15.1: the free-text half is the ONE shared classifier
+ * (asking-price-question.js) — the same truth the send-queue writers stamp as
+ * metadata.question_kind and the repeat-asking-price guard keys on.
+ */
 export function isS3AskingPriceQuestion({ use_case = null, message_body = "" } = {}) {
   if (S3_QUESTION_USE_CASES.has(lower(use_case))) return true;
-  const body = clean(message_body);
-  if (!body || !body.includes("?")) return false;
-  if (/\$\s?\d|\d{2,3}\s?k\b|\d{1,3}(?:,\d{3})+/i.test(body)) return false; // quotes a number → offer / clarifier
-  return S3_PRICE_QUESTION.test(body);
+  return classifyAskingPriceQuestion(message_body).asking_price;
 }
 
 /** Is this outbound our S2 interest question (templated or typed)? Pure. */

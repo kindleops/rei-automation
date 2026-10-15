@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { stampOutboundQuestionKind } from '@/lib/domain/queue/outbound-question-kind.js'
 import { isTemplateHoldReason } from '@/lib/domain/campaigns/campaign-template-hold.js'
 import { cappedSendableTemplateIds, governanceApplies, governanceExcludedTemplateIds, loadGovernance, loadTemplateUsedToday, UNGOVERNED_POLICY } from '@/lib/domain/campaigns/template-governance.js'
 import { effectivePerSenderCap, loadConfiguredPerSenderCap } from '@/lib/domain/campaigns/sender-capacity.js'
@@ -9092,6 +9093,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
            */
           origin_surface: 'internal_canary',
         }
+      }
+
+      // rc-8.5.15.1: this batch bypasses the canonical writer, so it stamps
+      // metadata.question_kind itself (the repeat-asking-price guard keys on it).
+      for (const queueRow of queueRows) {
+        queueRow.metadata = stampOutboundQuestionKind(queueRow)
       }
 
       const hydrationTotal = queueRows.length

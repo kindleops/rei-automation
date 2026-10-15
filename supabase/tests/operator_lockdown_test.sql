@@ -1,19 +1,14 @@
+-- lc-fixture: posttest
 -- =============================================================================
--- Rollback-only pretest for
---   supabase/migrations/20261003130000_operator_lockdown.sql
--- and its rollback,
---   supabase/rollbacks/20261003130000_operator_lockdown.rollback.sql
---
--- Run with psql as postgres, from the repo root:
---   psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/operator_lockdown_test.sql
---
--- ONE transaction, ending in ROLLBACK. If operator_read_policies is not applied yet,
--- it is pulled in first (with \ir), then the lockdown, then the checks, then the
--- lockdown ROLLBACK FILE (also with \ir). The test then proves that the rollback
--- restores the exact pre-lockdown catalog, and finally rolls everything back.
--- While it runs it holds ACCESS EXCLUSIVE locks on ~100 tables and views, so the
--- API waits. It takes tens of seconds. Run off-peak, outside a feeder tick, with
--- the owner present.
+-- POSTTEST for supabase/migrations/20261003130000_operator_lockdown.sql (sections A–E).
+-- DISPOSABLE DATABASE ONLY (owner boundary 2026-10-15): never run against production — not even
+-- inside BEGIN … ROLLBACK. Run through the migration test runner on a disposable database.
+--   node scripts/db/run-migration-test.mjs --pg-bin <dir> --id operator_lockdown --prod-shape …
+-- rc-8.5.15.1: formerly a "rollback-only pretest" that \ir-included the migrations and the
+-- rollback file inside its own transaction (and was run with psql against production).
+-- operator_lockdown_pretest.sql records the BEFORE state in lc_mt; the runner applies the
+-- lockdown; this file asserts A–E in ONE transaction ending in ROLLBACK; section F (the
+-- rollback file restores the catalog) is operator_lockdown_rollback_test.sql.
 --
 -- What it proves (every check RAISEs on failure; it ends with 'ALL PASS'):
 --   A. Operator: every relation the dashboard reads returns exactly what it returned
@@ -40,15 +35,9 @@
 \set ON_ERROR_STOP on
 begin;
 set local statement_timeout = '180s';
-
-select to_regprocedure('public.is_ops_operator()') is null as need_read_policies \gset
-\if :need_read_policies
-\echo 'operator_read_policies not applied: applying it inside this transaction first'
-\ir ../migrations/20261003120000_operator_read_policies.sql
-\endif
-
 \set op_uid    'a2ee0ffe-6f27-475b-a795-ee617c9472c6'
 \set nonop_uid '00000000-0000-4000-8000-00000000beef'
+select pins_before, pins_ms_before from lc_mt.t_vars \gset
 
 -- -------------------------------------------------------------- helpers ----
 create function pg_temp.probe(p_sql text, p_role text, p_sub text)
@@ -114,113 +103,11 @@ returns table (k text, o text, v text) language sql as $$
   from pg_default_acl where defaclnamespace = 'public'::regnamespace
 $$;
 
--- Every relation the dashboard reads directly (audit 2026-10-03), that exists in prod.
-create temp table t_rel on commit drop as
-select r as rel from unnest(array[
-  'ai_decisions', 'buyer_activity_geo_rollups', 'buyer_entities_v2', 'buyer_match_candidates', 'buyer_match_runs',
-  'buyer_profiles', 'buyer_profiles_computed', 'buyer_purchase_events_v2', 'campaign_target_graph', 'campaign_targets',
-  'campaigns', 'census_geo_metrics', 'contact_outreach_state', 'conversation_threads', 'conversation_turns',
-  'emails', 'inbox_activity_events', 'inbox_thread_state', 'map_filter_property_prospect_links', 'master_owners',
-  'message_events', 'negotiation_events', 'number_performance_kpis_v', 'operator_thread_state', 'performance_message_events_v',
-  'phones', 'properties', 'property_acquisition_scores', 'property_cash_offer_snapshots', 'property_participant_graph',
-  'prospects', 'recently_sold_properties', 'recently_sold_properties_computed', 'routing_decisions', 'seller_automation_execution_steps',
-  'seller_automation_executions', 'seller_state_snapshots', 'send_queue', 'sms_campaign_targets', 'sms_suppression_list',
-  'sms_templates', 'sub_owners', 'template_performance_kpis_v', 'textgrid_numbers', 'thread_ai_state',
-  'top_buyer_profiles', 'universal_lead_command_cache', 'v_buyer_entity_leaderboard', 'v_buyer_entity_purchases', 'v_command_map_seller_pin_feed',
-  'v_map_property_pins', 'v_operator_inbox_threads', 'v_recent_sold_comps', 'v_seller_work_items', 'v_universal_inbox_threads'
-]) r where to_regclass('public.' || r) is not null;
-
--- ------------------------------------------------ BEFORE the lockdown ----
-create temp table t_state_pre on commit drop as select * from pg_temp.catalog_state();
-
-create temp table t_pre on commit drop as
-select rel,
-       pg_temp.probe(format('select count(*) from (select 1 from public.%I limit 1000) s', rel), null, null)                 as svc,
-       pg_temp.probe(format('select count(*) from (select 1 from public.%I limit 1000) s', rel), 'authenticated', :'op_uid') as op_pre
-from t_rel;
-
--- Deparse normal form of the 13 gated views. The rollback can only restore a view
--- from its deparsed text, and deparse is not always a fixpoint. Prod 2026-10-03:
--- number_performance_kpis_v / template_performance_kpis_v have a CTE whose later
--- UNION ALL arms carry no alias. Re-parsing the deparsed text names them after the
--- cast (`'24h'::text AS text`). That alias is ignored: a UNION takes its column names
--- from the first arm. So the restored view is the same query with different text.
--- F accepts a view definition that equals either the original text or its
--- one-round-trip normal form. Column names and types are compared exactly.
-create temp table t_viewnorm (relname text primary key, norm_md5 text) on commit drop;
-do $$
-declare r record; d text;
-begin
-  for r in select c.oid, c.relname from pg_class c
-           where c.relnamespace = 'public'::regnamespace and c.relkind = 'v'
-             and c.relname = any (array['v_command_map_seller_pin_feed','v_map_property_pins','v_operator_inbox_threads',
-               'v_recent_sold_comps','v_seller_work_items','v_universal_inbox_threads','property_participant_graph',
-               'performance_message_events_v','number_performance_kpis_v','template_performance_kpis_v',
-               'top_buyer_profiles','buyer_profiles_computed','recently_sold_properties_computed']) loop
-    d := regexp_replace(pg_get_viewdef(r.oid), ';\s*$', '');
-    execute format('create temp view _ops_vn as %s', d);
-    insert into t_viewnorm values (r.relname, md5(pg_get_viewdef('pg_temp._ops_vn'::regclass)));
-    drop view pg_temp._ops_vn;
-  end loop;
-end $$;
-
-create temp table t_keys on commit drop as
-select g.property_id, g.master_owner_id
-from public.campaign_target_graph g
-where g.property_id is not null and g.master_owner_id is not null
-limit 1;
-
--- Heavy dashboard queries, planned as service BEFORE (index names recorded).
-create temp table t_q (name text, sql text) on commit drop;
-insert into t_q
-select * from (values
-  ('properties.by_id',          format('select * from public.properties where property_id = %L', (select property_id from t_keys))),
-  ('ownership.links_by_prop',   format('select * from public.map_filter_property_prospect_links where property_id = %L', (select property_id from t_keys))),
-  ('ownership.graph_pair',      format('select * from public.campaign_target_graph where property_id = %L and master_owner_id = %L', (select property_id from t_keys), (select master_owner_id from t_keys))),
-  ('map.work_item_by_prop',     format('select * from public.v_seller_work_items where property_id = %L', (select property_id from t_keys))),
-  ('map.pin_feed_by_prop',      format('select * from public.v_command_map_seller_pin_feed where property_id = %L', (select property_id from t_keys))),
-  ('comps.recent_sold_by_prop', format('select * from public.v_recent_sold_comps where property_id = %L', (select property_id from t_keys))),
-  ('inbox.threads_by_owner',    format('select * from public.v_operator_inbox_threads where master_owner_id = %L limit 50', (select master_owner_id from t_keys))),
-  ('messages.by_property',      format('select * from public.message_events where property_id = %L order by created_at desc limit 100', (select property_id from t_keys)))
-) v(name, sql);
-
-create temp table t_plan_pre on commit drop as
-select name, pg_temp.lines('explain (costs off) ' || sql, null, null) as plan from t_q;
-
--- Map RPCs: service result and pin timing BEFORE.
-create temp table t_rpc (name text, sql text) on commit drop;
--- Scalar/jsonb RPCs: the probe must CONSUME the returned value. In
--- `select count(*) from (select f(...)) s` the planner drops the unused STABLE
--- call: the function never runs, no EXECUTE check happens, and the count is
--- always 1. That was the 2026-10-03 E false-fail. Hash the value instead:
--- identical results give identical numbers (abs, so they are never negative), and
--- refusals surface as -1/-2.
-insert into t_rpc values
-  ('map_search',              'select abs(coalesce(hashtext(public.map_search(''dallas'')::text), 0)::bigint)'),
-  ('get_map_area_intel',      'select abs(coalesce(hashtext(public.get_map_area_intel(32.78, -96.80)::text), 0)::bigint)'),
-  ('get_map_area_summary',    'select abs(coalesce(hashtext(public.get_map_area_summary(''[[-96.81,32.77],[-96.79,32.77],[-96.79,32.79],[-96.81,32.79]]''::jsonb)::text), 0)::bigint)'),
-  ('get_map_lens_areas',      'select count(*) from public.get_map_lens_areas(''equity'', 32.6, -97.0, 33.0, -96.6, 9)'),
-  ('get_map_lens_points',     'select count(*) from public.get_map_lens_points(''equity'', 32.6, -97.0, 33.0, -96.6, 11)'),
-  ('get_map_sold_comps',      'select count(*) from public.get_map_sold_comps(32.6, -97.0, 33.0, -96.6, 11, ''{}''::jsonb)'),
-  ('get_map_sold_comps_list', 'select count(*) from public.get_map_sold_comps_list(32.6, -97.0, 33.0, -96.6, ''{}''::jsonb)'),
-  ('get_command_map_seller_pins', 'select count(*) from public.get_command_map_seller_pins(32.6, -97.0, 33.0, -96.6, 12, 500)'),
-  ('get_comp_candidates_for_subject', format('select count(*) from public.get_comp_candidates_for_subject(%L, 2, 24, 50)', (select property_id from t_keys))),
-  ('get_buyers_for_property', format('select count(*) from public.get_buyers_for_property(%L, 20)', (select property_id from t_keys)));
-create temp table t_rpc_pre on commit drop as
-select name, pg_temp.probe(sql, null, null) as svc from t_rpc;
-
-select clock_timestamp() as t0 \gset
-select pg_temp.probe('select count(*) from public.get_command_map_seller_pins(32.6, -97.0, 33.0, -96.6, 12, 500)', 'authenticated', :'op_uid') as pins_before \gset
-select round(extract(epoch from clock_timestamp() - :'t0'::timestamptz) * 1000) as pins_ms_before \gset
-
--- ---------------------------------------------------------- APPLY ----
-\ir ../migrations/20261003130000_operator_lockdown.sql
-
 -- ------------------------------------------------------ A / B / C ----
 do $$
 declare r record; op bigint; nonop bigint; an bigint; fails int := 0;
 begin
-  for r in select * from t_pre order by rel loop
+  for r in select * from lc_mt.t_pre order by rel loop
     op    := pg_temp.probe(format('select count(*) from (select 1 from public.%I limit 1000) s', r.rel), 'authenticated', 'a2ee0ffe-6f27-475b-a795-ee617c9472c6');
     nonop := pg_temp.probe(format('select count(*) from (select 1 from public.%I limit 1000) s', r.rel), 'authenticated', '00000000-0000-4000-8000-00000000beef');
     an    := pg_temp.probe(format('select count(*) from (select 1 from public.%I limit 1000) s', r.rel), 'anon', null);
@@ -233,7 +120,7 @@ begin
     if an <> -1 then fails := fails + 1; raise warning 'FAIL C anon not denied on %', r.rel; end if;
   end loop;
   if fails > 0 then raise exception 'FAIL: % dashboard-relation checks failed (see warnings)', fails; end if;
-  raise notice 'PASS A/B/C on % dashboard relations', (select count(*) from t_pre);
+  raise notice 'PASS A/B/C on % dashboard relations', (select count(*) from lc_mt.t_pre);
 end $$;
 
 do $$
@@ -296,7 +183,7 @@ end $$;
 do $$
 declare q record; pre text; post text; idx text; fails int := 0;
 begin
-  for q in select t.name, t.sql, p.plan from t_q t join t_plan_pre p using (name) loop
+  for q in select t.name, t.sql, p.plan from lc_mt.t_q t join lc_mt.t_plan_pre p using (name) loop
     post := pg_temp.lines('explain (costs off) ' || q.sql, 'authenticated', 'a2ee0ffe-6f27-475b-a795-ee617c9472c6');
     for idx in select distinct m[1] from regexp_matches(q.plan, 'Index (?:Only )?Scan(?: Backward)? using (\S+)', 'g') m loop
       if position(idx in post) = 0 then
@@ -332,7 +219,7 @@ end $$;
 do $$
 declare r record; op bigint; nonop bigint; an bigint; fails int := 0;
 begin
-  for r in select t.name, t.sql, p.svc from t_rpc t join t_rpc_pre p using (name) loop
+  for r in select t.name, t.sql, p.svc from lc_mt.t_rpc t join lc_mt.t_rpc_pre p using (name) loop
     op    := pg_temp.probe(r.sql, 'authenticated', 'a2ee0ffe-6f27-475b-a795-ee617c9472c6');
     nonop := pg_temp.probe(r.sql, 'authenticated', '00000000-0000-4000-8000-00000000beef');
     an    := pg_temp.probe(r.sql, 'anon', null);
@@ -356,40 +243,5 @@ select pg_temp.probe('select count(*) from public.get_command_map_seller_pins(32
 select round(extract(epoch from clock_timestamp() - :'t1'::timestamptz) * 1000) as pins_ms_after \gset
 \echo 'INFO pins RPC (operator): before' :pins_before 'rows in' :pins_ms_before 'ms | after' :pins_after 'rows in' :pins_ms_after 'ms'
 
--- --------------------------------------------------------- F. ROLLBACK ----
-\ir ../rollbacks/20261003130000_operator_lockdown.rollback.sql
-
-do $$
-declare n int; cosmetic text;
-begin
-  create temp table t_state_post on commit drop as select * from pg_temp.catalog_state();
-  -- Views whose restored text is the one-round-trip normal form of the original.
-  select string_agg(p.o, ', ') into cosmetic
-  from t_state_pre p join t_state_post q on q.k = p.k and q.o = p.o
-  join t_viewnorm v on v.relname = p.o
-  where p.k = 'view' and q.v <> p.v and q.v = v.norm_md5;
-  if cosmetic is not null then
-    raise notice 'F: restored as deparse normal form (same query, same columns; alias-only text change): %', cosmetic;
-  end if;
-  select count(*) into n from (
-    (select * from t_state_pre except select * from t_state_post)
-    union all
-    (select * from t_state_post except select * from t_state_pre)
-  ) d
-  where not (d.k = 'view' and exists (
-          select 1 from t_viewnorm v join t_state_post q on q.k = 'view' and q.o = v.relname
-          where v.relname = d.o and q.v = v.norm_md5));
-  if n > 0 then
-    raise warning 'rollback diff: %', (select string_agg(k || ':' || o, ', ') from (
-      (select * from t_state_pre except select * from t_state_post)
-      union all (select * from t_state_post except select * from t_state_pre)) d
-      where not (d.k = 'view' and exists (
-          select 1 from t_viewnorm v join t_state_post q on q.k = 'view' and q.o = v.relname
-          where v.relname = d.o and q.v = v.norm_md5)));
-    raise exception 'FAIL F: rollback left % catalog differences', n;
-  end if;
-  raise notice 'PASS F: rollback restores the pre-lockdown catalog (ACLs, policies, RLS, functions, view columns exact; view text exact or deparse-normal)';
-end $$;
-
-do $$ begin raise notice 'ALL PASS (rolling back; nothing persists)'; end $$;
+do $$ begin raise notice 'PASS A–E (rolling back; nothing persists)'; end $$;
 rollback;
