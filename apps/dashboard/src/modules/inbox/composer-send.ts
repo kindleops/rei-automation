@@ -10,7 +10,7 @@
  * code this was lifted out of (InboxPage handleSend / handleQueueTemplate /
  * the schedule panel).
  */
-import { lcConfirm, lcToast } from '../../shared/lc'
+import { lcConfirm, lcPrompt, lcToast } from '../../shared/lc'
 import {
   queueReplyFromInbox,
   scheduleReplyFromInbox,
@@ -26,6 +26,7 @@ export interface ComposerSendDeps {
   queue: typeof queueReplyFromInbox
   schedule: typeof scheduleReplyFromInbox
   confirm: typeof lcConfirm
+  prompt: typeof lcPrompt
   toast: typeof lcToast
 }
 
@@ -34,8 +35,12 @@ const DEFAULT_DEPS: ComposerSendDeps = {
   queue: queueReplyFromInbox,
   schedule: scheduleReplyFromInbox,
   confirm: lcConfirm,
+  prompt: lcPrompt,
   toast: lcToast,
 }
+
+/** Server minimum for the audited repeat-asking-price override reason. */
+export const REPEAT_ASK_OVERRIDE_MIN_REASON = 10
 
 /**
  * Send now: the first attempt, the one explicit operator-override decision when
@@ -64,6 +69,30 @@ export async function sendComposerMessage({
       severity: 'info',
     }),
   })
+  // rc-8.5.15.1: the seller was already asked for their asking price. Offer the
+  // AUDITED override (checkbox + reason) for a genuine price clarification. The
+  // server records it with the verified operator; suppression / STOP / legal /
+  // contact-window guards still apply. Dismissing is "no"; nothing is re-sent.
+  if (!result.ok && result.backendReason === 'repeat_asking_price_blocked' && result.repeatAskOverrideAllowed === true) {
+    const reason = await d.prompt({
+      title: 'Already asked for their price',
+      label: 'Reason for sending a price clarification',
+      placeholder: 'e.g. Seller asked what we meant by price',
+      confirmLabel: 'Send clarification',
+      acknowledge: 'This is a clarification, not a second asking-price ask. Record my override.',
+      minLength: REPEAT_ASK_OVERRIDE_MIN_REASON,
+      nativeText: 'This seller was already asked for their asking price. To send a price CLARIFICATION anyway, type the reason (recorded with your name):',
+    })
+    const trimmed = (reason ?? '').trim()
+    if (trimmed.length >= REPEAT_ASK_OVERRIDE_MIN_REASON) {
+      result = await d.send(thread, text, {
+        selectedTemplate: template ?? null,
+        threadContext,
+        clientSendId,
+        repeatAskOverrideReason: trimmed,
+      })
+    }
+  }
   const overrideAllowed = !result.ok && result.operatorOverrideAllowed === true
   if (overrideAllowed) {
     // Same text and the same single explicit decision as the browser confirm

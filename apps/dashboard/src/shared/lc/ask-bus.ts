@@ -30,6 +30,15 @@ export interface LCPromptRequest {
   initialValue?: string
   placeholder?: string
   confirmLabel?: string
+  /**
+   * An explicit acknowledgement checkbox (its label). When set, the confirm
+   * button stays disabled until it is ticked. The browser fallback has no
+   * checkbox: there, typing an answer into the prompt is the acknowledgement,
+   * so put the acknowledgement in `nativeText` too.
+   */
+  acknowledge?: string
+  /** minimum trimmed length of the answer (default 1) */
+  minLength?: number
   /** the exact prompt text for the browser fallback */
   nativeText: string
 }

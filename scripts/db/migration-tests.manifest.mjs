@@ -101,6 +101,14 @@ export const MIGRATION_TESTS = Object.freeze([
     posttest: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_posttest.sql')],
     rollback: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_rollback.sql')],
   },
+  {
+    id: 'repeat_asking_price_question_kind',
+    setup: [SHIM, SEND_QUEUE_BASELINE],
+    pretest: M('PROPOSED_20261015120000_repeat_asking_price_question_kind_pretest.sql'),
+    apply: [M('PROPOSED_20261015120000_repeat_asking_price_question_kind.sql')],
+    posttest: [M('PROPOSED_20261015120000_repeat_asking_price_question_kind_posttest.sql')],
+    rollback: [M('PROPOSED_20261015120000_repeat_asking_price_question_kind_rollback.sql')],
+  },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──
   {
     id: 'operator_read_policies',

@@ -53,7 +53,12 @@ export async function POST(request) {
     });
 
     // ── Create queue row via service ─────────────────────────────────
-    const result = await createInboxSendNowQueueRow(body);
+    // An audited repeat-asking-price override carries the verified operator only
+    // (x-ops-user-id), never an actor named in the body.
+    const result = await createInboxSendNowQueueRow({
+      ...body,
+      repeat_ask_override_actor: clean(request.headers.get("x-ops-user-id")) || null,
+    });
     let row_result = null;
     const dry_run = body?.dry_run === true;
     if (result?.queue_created && result?.queue_row_id && !dry_run) {
