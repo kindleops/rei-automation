@@ -57,6 +57,7 @@ const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|correct|i\s+do|ok(?:ay)?|si|sÃ
 const BARE_NO_RE = /^\s*(?:no|nope|nah)\s*[.!]*\s*$/i
 const BARE_MAYBE_RE = /^\s*(?:maybe|possibly|perhaps|depends|it\s+depends|could\s+be|might\s+be|not\s+sure)\s*[.!?]*\s*$/i
 const CONDITION_RE = /\b(?:roof|hvac|a\/?c\b|furnace|foundation|plumbing|electrical|needs?\s+(?:some\s+|a\s+lot\s+of\s+)?(?:work|repairs?|updating|tlc)|repairs?|fixer(?:[\s-]upper)?|(?:good|great|fair|rough|bad|poor|decent|excellent)\s+(?:shape|condition)|move[\s-]?in\s+ready|(?:fully\s+)?(?:updated|remodeled|renovated)|as[\s-]is|turnkey)\b/i
+const TIMELINE_RE = /\b(?:close|closing|sell|selling|move|moving|be\s+out|out|done|wrap\s+(?:it\s+)?up)\s+(?:by|before|in|within|after|around|at)\s+(?:the\s+)?(?:end\s+of\s+|beginning\s+of\s+|mid[\s-]?)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter|christmas|thanksgiving|the\s+holidays|(?:this|next)\s+(?:week|month|year|spring|summer|fall|winter)|[0-9]+\s+(?:days?|weeks?|months?)|a\s+(?:week|month|few\s+(?:weeks|months)))\b|\b(?:asap|as\s+soon\s+as\s+possible|no\s+rush|whenever)\b/i
 const WHO_IS_THIS_RE = /\b(?:who\s+(?:is|'?s)\s+(?:this|it)|who\s+are\s+(?:you|u)|whos\s+this|how\s+did\s+you\s+get\s+my\s+(?:number|info|information)|what\s+company)\b/i
 const CALLBACK_RE = /\b(?:call\s+me|give\s+me\s+a\s+call|can\s+(?:you|u)\s+call|rather\s+talk\s+on\s+the\s+phone)\b/i
 const WHICH_PROPERTY_RE = /\b(?:which\s+(?:property|house|one|address)|what\s+(?:property|address|house))\b/i
@@ -70,9 +71,16 @@ const OWNERSHIP_INTENTS = Object.freeze({
 const REPRESENTATIVE_INTENTS = new Set(['executor_heir_respondent', 'family_member_respondent', 'agent_representative_respondent', 'non_owner_referral'])
 const INTEREST_INTENTS = Object.freeze({ not_interested: 'not_interested', seller_interested: 'interested', interested: 'interested', latent_interest: 'conditional', conditional_interest: 'conditional' })
 
-function addFact(facts, key, value, msg, origin = 'seller_stated') {
-  const slot = (facts[key] ||= { value: null, source_message_ids: [], history: [], origin: null })
-  slot.history.push({ value, source_message_id: msg.id, at: msg.at || null, origin })
+// stated = the seller said it; inferred = we concluded it (a price implies interest).
+// Inferred is never treated as confirmed by a reply ("you said you're interested").
+export function factBasis(origin) {
+  return /implies|inferred/.test(String(origin || '')) ? 'inferred' : 'stated'
+}
+
+function addFact(facts, key, value, msg, origin = 'seller_stated', confidence = null) {
+  const slot = (facts[key] ||= { value: null, source_message_ids: [], history: [], origin: null, basis: null, confidence: null })
+  const basis = factBasis(origin)
+  slot.history.push({ value, source_message_id: msg.id, at: msg.at || null, origin, basis, confidence: confidence ?? (basis === 'inferred' ? 0.6 : 0.8) })
   // latest seller statement wins (a correction supersedes; history keeps provenance)
   slot.value = value
   slot.origin = origin
@@ -113,7 +121,7 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
       if (h.origin === 'record_derived' || !h.source_message_id) continue
       const v = mapValue(h.value)
       if (v == null) continue
-      addFact(facts, key, v, { id: h.source_message_id, at: h.at }, h.origin)
+      addFact(facts, key, v, { id: h.source_message_id, at: h.at }, h.origin, Number.isFinite(h.confidence) ? h.confidence : null)
     }
   }
   seed('asking_price')
@@ -166,6 +174,9 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     else if (lastAsked === 'interest' && BARE_YES_RE.test(body)) addFact(facts, 'seller_interest', 'interested', m)
     else if (lastAsked === 'interest' && BARE_NO_RE.test(body)) addFact(facts, 'seller_interest', 'not_interested', m)
     else if (lastAsked === 'interest' && BARE_MAYBE_RE.test(body)) addFact(facts, 'seller_interest', 'conditional', m)
+    // timeline (beyond the extractor): "close before November", "move in 30 days", "asap"
+    const tl = TIMELINE_RE.exec(body)
+    if (tl && !(facts.timeline?.source_message_ids || []).includes(m.id)) addFact(facts, 'timeline', { stated: tl[0].trim().toLowerCase() }, m, 'seller_stated', 0.75)
     // condition (beyond the extractor)
     if (CONDITION_RE.test(body) && !(facts.condition?.source_message_ids || []).includes(m.id)) addFact(facts, 'condition', { disclosed: true }, m)
     // offer request: interest shown, NO asking price inferred, no amount
@@ -193,6 +204,8 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     slot.history = hist
     slot.value = hist[hist.length - 1].value
     slot.origin = hist[hist.length - 1].origin
+    slot.basis = hist[hist.length - 1].basis
+    slot.confidence = hist[hist.length - 1].confidence
   }
 
   // 3. queued / in-flight / sent questions that have no message_events row yet are ASKED
@@ -325,7 +338,7 @@ export function ledgerSummary(ledger) {
     version: ledger.version,
     stage: ledger.stage,
     next_missing: ledger.next_missing,
-    facts: Object.fromEntries(Object.entries(ledger.facts).map(([k, v]) => [k, { value: k === 'asking_price' ? (v.value?.amount != null ? 'stated' : v.value) : v.value, source_message_ids: v.source_message_ids }])),
+    facts: Object.fromEntries(Object.entries(ledger.facts).map(([k, v]) => [k, { value: k === 'asking_price' ? (v.value?.amount != null ? 'stated' : v.value) : v.value, basis: v.basis, confidence: v.confidence, source_message_ids: v.source_message_ids }])),
     questions: Object.fromEntries(Object.entries(ledger.questions).filter(([, q]) => q.asked_count || q.answered || q.deflected).map(([k, q]) => [k, { asked: q.asked_count, answered: q.answered, deflected: q.deflected }])),
     offer_requests: ledger.offer_requests.length,
     existing_offers: ledger.existing_offers.length,

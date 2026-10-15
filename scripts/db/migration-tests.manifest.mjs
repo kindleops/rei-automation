@@ -101,6 +101,24 @@ export const MIGRATION_TESTS = Object.freeze([
     posttest: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_posttest.sql')],
     rollback: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_rollback.sql')],
   },
+  // ── 8.5.16 native AI conversation engine ──
+  {
+    id: 'block_repeat_asking_price_mirror',
+    // the baseline already carries the live trigger: the mirror must re-create it identically
+    setup: [SHIM, SEND_QUEUE_BASELINE],
+    pretest: M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_pretest.sql'),
+    apply: [M('PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql')],
+    posttest: [M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_posttest.sql')],
+  },
+  {
+    id: 'message_origin_ai_generated_messages',
+    setup: [SHIM, SEND_QUEUE_BASELINE],
+    pretest: M('PROPOSED_20261015130000_message_origin_ai_generated_messages_pretest.sql'),
+    apply: [M('PROPOSED_20261015130000_message_origin_ai_generated_messages.sql')],
+    posttest: [M('PROPOSED_20261015130000_message_origin_ai_generated_messages_posttest.sql')],
+    rollback: [M('PROPOSED_20261015130000_message_origin_ai_generated_messages_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261015130000_message_origin_ai_generated_messages_rollback_posttest.sql')],
+  },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──
   {
     id: 'operator_read_policies',

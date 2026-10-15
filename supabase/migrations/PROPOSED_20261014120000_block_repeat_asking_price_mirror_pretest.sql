@@ -1,8 +1,11 @@
+-- lc-fixture: pretest
 -- PROPOSED ONLY — PRETEST for PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql.
--- LOCAL DISPOSABLE DATABASE ONLY (owner testing boundary 2026-10-15: never run migration /
--- rollback / pretest SQL against production). Run after applying the mirror to a fresh
--- local DB by apps/api/scripts/proof/local-pg-migration-proof.mjs; it asserts the applied
--- function body and trigger definition equal the live definitions recorded below.
+-- DISPOSABLE DATABASE ONLY (owner testing boundary 2026-10-15: never run migration /
+-- rollback / pretest SQL against production). The runner restores the live send_queue
+-- baseline (scripts/db/fixtures/send_queue_live_baseline.sql) and runs this before and after
+-- the mirror is applied: the function body and the trigger definition must equal the live
+-- definitions recorded below (md5 read 2026-10-14, BEGIN READ ONLY catalog query).
+--   node scripts/db/run-migration-test.mjs --pg-bin <dir> --id block_repeat_asking_price_mirror
 -- No transaction control, no includes.
 -- Expected last notice: "pretest(block_repeat_asking_price_mirror): ALL OK".
 do $$

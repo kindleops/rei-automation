@@ -54,8 +54,8 @@ import {
   supabase as defaultSupabase,
 } from "@/lib/supabase/client.js";
 import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
-import { evaluateAiConversationRowGate, aiRowCancelPayload } from "@/lib/domain/queue/ai-conversation-row-gate.js";
-import { isVerifiedAiMessageRow, lookupAiMessageRecord } from "@/lib/domain/templates/ai-message-record.js";
+import { evaluateAiConversationRowGate, aiRowCancelPayload, loadNewerInboundsForRow } from "@/lib/domain/queue/ai-conversation-row-gate.js";
+import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey } from "@/lib/domain/messages/ai-generated-message.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import {
@@ -1663,7 +1663,8 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     // window closed or zone unknown ⇒ defer (no in-session bypass for AI rows).
     const ai_gate = await evaluateAiConversationRowGate(queue_row, {
       readSwitch: deps.readAiConversationSwitch || (hasSupabaseConfig() ? getSystemValueFresh : async () => null),
-      loadRecord: deps.loadAiMessageRecord || ((template_id) => lookupAiMessageRecord(getSupabase(deps), template_id)),
+      loadRecord: deps.loadAiGeneratedMessage || ((queue_key) => lookupAiGeneratedMessageByQueueKey(getSupabase(deps), queue_key)),
+      loadNewerInbounds: deps.loadNewerInbounds || ((r) => loadNewerInboundsForRow(getSupabase(deps), r)),
       now,
       propertyGeography: property_geography,
     });
@@ -2017,7 +2018,9 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     // BEFORE the body guards below run, so the replacement passes every one
     // of them. Same row, schedule, sender and keys. Nothing eligible → the
     // final asset guard further down blocks it.
-    if (!manual_inbox_send && clean(queue_row.message_body || queue_row.message_text)) {
+    // 8.5.16: an ai_generated row's text is immutable (its ai_generated_messages record):
+    // it is never swapped for a template here; the final asset guard below still blocks it.
+    if (!manual_inbox_send && !isVerifiedAiGeneratedRow(queue_row) && clean(queue_row.message_body || queue_row.message_text)) {
       const pre_guard = await evaluateTemplateAssetGuard({
         supabase: getSupabase(deps),
         queue_row,
@@ -2095,9 +2098,9 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
      */
     const buyer_disposition_send = isBuyerDispositionSend(queue_row);
 
-    // 8.5.16 R3: a verified AI row's body is its immutable record (no "Hi {first name}"
-    // render), checked against the DB record by the AI row gate above.
-    const ai_message_send = isVerifiedAiMessageRow(queue_row);
+    // 8.5.16 origin ai_generated: the body is final text (no "Hi {first name}" render),
+    // verified against its immutable record by the AI row gate above.
+    const ai_message_send = isVerifiedAiGeneratedRow(queue_row);
 
     if (!manual_inbox_send && !buyer_disposition_send && !ai_message_send && !seller_first_name) {
       // Mark row as blocked — do not send.

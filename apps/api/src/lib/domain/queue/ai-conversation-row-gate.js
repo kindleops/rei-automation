@@ -5,8 +5,9 @@
 //       → CANCEL the row (safe: nothing was sent; reason ai_conversation_send_disabled)
 //   recipient-local window (08–21) closed, or the zone unknown
 //       → DEFER (release; AI rows get NO in-session bypass)
-//   the immutable record (ai_message_templates) missing / not bound / body hash mismatch
+//   the immutable ai_generated_messages record missing / not bound / body hash mismatch
 //       → CANCEL; record unreadable → DEFER
+//   a MATERIALLY new inbound on the thread since generation → CANCEL (stale); unreadable → DEFER
 //   AI send policy no longer authorises it (disabled, scope or category revoked) → CANCEL
 //   otherwise → proceed to every existing guard (send-time contact guard, template
 //       authority, cadence, duplicate, sender routing …), unchanged.
@@ -16,7 +17,9 @@
 import { isOutsideLocalContactWindow } from '@/lib/domain/queue/conversational-reply-window.js'
 import { resolveRecipientTimezone } from '@/lib/domain/queue/recipient-timezone.js'
 import { AI_CONVERSATION_SOURCE, AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, isOwnerHandledThread, normalizeSendPolicy, parseKillSwitch, threadInPolicyScope } from '@/lib/domain/conversation-ai/send-policy.js'
-import { rowTemplateId, verifyAiMessageRecordForRow } from '@/lib/domain/templates/ai-message-record.js'
+import { verifyAiGeneratedRecordForRow } from '@/lib/domain/messages/ai-generated-message.js'
+import { isAiGeneratedOrigin } from '@/lib/domain/messages/message-origin.js'
+import { isStopRequest } from '@/lib/domain/conversation-ai/stop-request.js'
 
 export const AI_ROW_GATE_VERSION = 'conv-ai.row-gate.v1'
 export const AI_ROW_DISABLED_REASON = 'ai_conversation_send_disabled'
@@ -27,7 +30,27 @@ const clean = (v) => String(v ?? '').trim()
 
 export function isAiConversationRow(row = {}) {
   const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
-  return clean(row?.source).toLowerCase() === AI_CONVERSATION_SOURCE || clean(meta.source).toLowerCase() === AI_CONVERSATION_SOURCE
+  return isAiGeneratedOrigin(row) || clean(row?.source).toLowerCase() === AI_CONVERSATION_SOURCE || clean(meta.source).toLowerCase() === AI_CONVERSATION_SOURCE
+}
+
+// A pure acknowledgement ("ok", "thanks", an emoji) does not change what the reply should
+// say; anything else (an answer, a question, a correction, a STOP) is MATERIAL and makes a
+// queued AI reply stale.
+const ACK_ONLY_RE = /^\s*(?:ok(?:ay)?|k|kk|thanks?|thank\s+you|thx|ty|got\s+it|cool|sounds\s+good|great|np|no\s+problem)?\s*[.!]*\s*(?:[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F]\s*)*$/iu
+export function isMaterialInbound(text) {
+  const t = String(text ?? '')
+  if (isStopRequest(t)) return true
+  return !ACK_ONLY_RE.test(t)
+}
+
+/** Default reader: inbounds on the row's thread received after the inbound the row answers. */
+export async function loadNewerInboundsForRow(supabase, row = {}) {
+  const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+  const since = clean(meta.inbound_received_at)
+  if (!supabase?.from || !clean(row.thread_key) || !since) return { read_failed: true, rows: [] }
+  const r = await supabase.from('message_events').select('id,message_body,created_at').eq('thread_key', row.thread_key).eq('direction', 'inbound').gt('created_at', since).order('created_at', { ascending: true }).limit(20)
+  if (r?.error) return { read_failed: true, rows: [] }
+  return { read_failed: false, rows: r?.data || [] }
 }
 
 /**
@@ -35,17 +58,17 @@ export function isAiConversationRow(row = {}) {
  * @param {{ readSwitch: (key: string) => Promise<string|null>, now?: string, propertyGeography?: object|null }} deps
  * @returns {Promise<{ applies: boolean, action?: 'proceed'|'cancel'|'defer', reason?: string }>}
  */
-export async function evaluateAiConversationRowGate(row = {}, { readSwitch, loadRecord = null, now = new Date().toISOString(), propertyGeography = null } = {}) {
+export async function evaluateAiConversationRowGate(row = {}, { readSwitch, loadRecord = null, loadNewerInbounds = null, now = new Date().toISOString(), propertyGeography = null } = {}) {
   if (!isAiConversationRow(row)) return { applies: false }
   let raw = null
   try { raw = typeof readSwitch === 'function' ? await readSwitch(AI_SEND_KILL_SWITCH_KEY) : null } catch { raw = null }
   if (!parseKillSwitch(raw)) return { applies: true, action: 'cancel', reason: AI_ROW_DISABLED_REASON }
   if (isOwnerHandledThread({ thread_key: row.thread_key })) return { applies: true, action: 'cancel', reason: 'ai_conversation_owner_handled_thread' }
-  // the body must equal its IMMUTABLE per-message record (owner 2026-10-15)
+  // the body must equal its IMMUTABLE ai_generated_messages record (owner 2026-10-15)
   let lookup = null
-  try { lookup = typeof loadRecord === 'function' ? await loadRecord(rowTemplateId(row)) : null } catch { lookup = null }
-  if (!lookup || lookup.read_failed) return { applies: true, action: 'defer', reason: 'ai_message_record_unreadable' }
-  const record = verifyAiMessageRecordForRow(row, lookup.record)
+  try { lookup = typeof loadRecord === 'function' ? await loadRecord(row.queue_key) : null } catch { lookup = null }
+  if (!lookup || lookup.read_failed) return { applies: true, action: 'defer', reason: 'ai_generated_record_unreadable' }
+  const record = verifyAiGeneratedRecordForRow(row, lookup.record)
   if (!record.ok) return { applies: true, action: 'cancel', reason: record.reason }
   // …and the AI send policy must STILL authorise it (enabled, thread in scope, category on)
   let policyRaw = null
@@ -53,8 +76,13 @@ export async function evaluateAiConversationRowGate(row = {}, { readSwitch, load
   const policy = normalizeSendPolicy(policyRaw)
   if (!policy.enabled) return { applies: true, action: 'cancel', reason: 'ai_policy_disabled_at_send' }
   if (!threadInPolicyScope(policy, { thread_key: row.thread_key })) return { applies: true, action: 'cancel', reason: 'ai_policy_scope_revoked_at_send' }
-  const category = lookup.record?.policy_authorization?.category
+  const category = lookup.record?.authorization_scope?.category
   if (!category || !(policy.categories || []).includes(category)) return { applies: true, action: 'cancel', reason: 'ai_policy_category_revoked_at_send' }
+  // latest-inbound revalidation: a materially new inbound since generation makes the reply stale
+  let newer = null
+  try { newer = typeof loadNewerInbounds === 'function' ? await loadNewerInbounds(row) : null } catch { newer = null }
+  if (!newer || newer.read_failed) return { applies: true, action: 'defer', reason: 'ai_latest_inbound_unreadable' }
+  if ((newer.rows || []).some((m) => isMaterialInbound(m.message_body))) return { applies: true, action: 'cancel', reason: 'ai_reply_stale_new_inbound' }
   const tz = resolveRecipientTimezone(row, { propertyGeography })
   const outside = tz?.ok ? isOutsideLocalContactWindow(now, tz.iana) : null
   if (outside === null) return { applies: true, action: 'defer', reason: 'ai_conversation_timezone_unknown' }
