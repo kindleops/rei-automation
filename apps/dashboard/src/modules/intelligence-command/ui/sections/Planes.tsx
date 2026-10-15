@@ -7,8 +7,8 @@ import { useRuns } from '../../../agent/runtime/agent-store'
 import { machineState, runtimeHealth } from '../../../desktop/rail/rail-model'
 import { appName, useRail } from '../../../desktop/rail/rail-store'
 import { openApp } from '../../../desktop/workspace/workspace-store'
-import { KNOWN_MISSION_KINDS, RESEARCH_MISSION_KIND, listApprovals, type CapabilityApproval, type PlaneFailure } from '../../api/ic-client'
-import { createMission, inspect, openConversation, refreshApprovals, refreshCapabilities, refreshHealth, refreshMissions, refreshQuickScans, refreshShadow, useIc } from '../../store/ic-store'
+import { isTerminalMission, listApprovals, type CapabilityApproval, type MissionSummary, type PlaneFailure } from '../../api/ic-client'
+import { createMission, followMissionList, inspect, openConversation, openMission, refreshApprovals, refreshCapabilities, refreshHealth, refreshMissions, refreshQuickScans, refreshShadow, useIc } from '../../store/ic-store'
 import { DiffCard } from '../ActCard'
 import { EmptyLine, IcGlyph, PlaneNotice, Spec, ago, clock, usd } from '../primitives'
 
@@ -23,54 +23,76 @@ function SectionHead({ title, summary, children }: { title: string; summary?: Re
   )
 }
 
-/* ── Missions (R2 runtime) ─────────────────────────────────────────────── */
+/* ── Missions (persistent; docs/agent-missions-api.md) ───────────────── */
+
+const MISSION_KIND_LABEL: Record<string, string> = { 'mission.research': 'Research', 'mission.supervisor': 'Supervisor', 'acquisition.discovery': 'Discovery', 'conversation.review_digest': 'Review digest', 'ops.health_check': 'Health check' }
+export const missionKindLabel = (k: string) => MISSION_KIND_LABEL[k] ?? k
 
 export function MissionsSection() {
   const ic = useIc()
-  const [kind, setKind] = useState<string>(KNOWN_MISSION_KINDS[0])
-  // every visit re-reads the planes (a plane can be switched on or off at any time)
-  useEffect(() => { void refreshMissions(); void refreshCapabilities() }, [])
-  const canCreate = ic.capabilities.phase === 'ready' && Boolean(ic.capabilities.data?.some((c) => c.id === 'missions.create'))
-  const rt = ic.runtime.data
+  const [kind, setKind] = useState<'mission.research' | 'mission.supervisor'>('mission.research')
+  const [question, setQuestion] = useState('')
+  const [subs, setSubs] = useState('')
+  const [budget, setBudget] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => followMissionList(), [])
+  const page = ic.missions.data
+  const live = page?.missions.filter((m) => !isTerminalMission(m)) ?? []
+  const done = page?.missions.filter((m) => isTerminalMission(m)) ?? []
+  const notEnabled = ic.missions.phase === 'failed' && ic.missions.failure?.state === 'not_enabled'
+  const submit = async () => {
+    const q = question.trim()
+    if (!q) return
+    setBusy(true)
+    const sub = subs.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 3)
+    const b = Number(budget)
+    await createMission({ kind, question: q, ...(kind === 'mission.supervisor' && sub.length ? { sub_questions: sub } : {}), ...(Number.isFinite(b) && b > 0 ? { budget_usd: Math.min(2.5, b) } : {}) })
+    setBusy(false)
+    setQuestion(''); setSubs('')
+  }
+  const row = (m: MissionSummary) => (
+    <li key={m.mission_id}><button type="button" className={cx('ic-row is-mission', ic.inspector?.kind === 'mission' && ic.inspector.id === m.mission_id && 'is-on')} onClick={() => openMission(m.mission_id)}>
+      <span className={cx('ic-state', `is-${m.display_state}`)}>{m.display_state.replace(/_/g, ' ')}</span>
+      <b>{m.title || m.mission_id}</b>
+      <Spec items={[missionKindLabel(m.kind), m.progress.pct != null ? `${m.progress.pct}%` : null, m.progress.children_total ? `${m.progress.children_done ?? 0}/${m.progress.children_total} sub-missions` : m.progress.step, m.cost_usd != null ? usd(m.cost_usd) : m.budget_cap_usd != null ? `cap ${usd(m.budget_cap_usd)}` : null, m.last_error?.code ?? null, ago(m.updated_at)]} />
+      {m.progress.pct != null && !isTerminalMission(m) ? <i className="ic-row__bar" style={{ width: `${Math.max(0, Math.min(100, m.progress.pct))}%` }} aria-hidden="true" /> : null}
+    </button></li>
+  )
   return (
     <section className="ic-sec">
-      <SectionHead title="Missions" summary={<Spec items={['Persistent jobs on the server runtime (agent.research_job · agent.job_event)', 'they keep running with the browser closed']} />}>
-        <select className="ic-select" value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Mission kind">
-          {KNOWN_MISSION_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-          <option value={RESEARCH_MISSION_KIND} disabled>{RESEARCH_MISSION_KIND} — handler not in this build</option>
-        </select>
-        <button type="button" className="ic-btn" disabled={!canCreate} onClick={() => void createMission(kind)} title={canCreate ? 'missions.create → agent.runtime_enqueue' : 'needs the actions plane (missions.create)'}>Queue mission</button>
+      <SectionHead title="Missions" summary={<Spec items={['Persistent jobs on the server runtime', 'they keep running with the browser closed', page ? `${live.length} active · ${done.length} ended` : null]} />}>
+        <button type="button" className="ic-btn is-quiet" onClick={() => void refreshMissions()}><IcGlyph name="retry" size={12} />Refresh</button>
       </SectionHead>
-      {ic.missionNote ? <p className="ic-note" role="status">{ic.missionNote}</p> : null}
-      {ic.capabilities.phase === 'failed' && ic.capabilities.failure ? <PlaneNotice failure={ic.capabilities.failure} title="Mission creation unavailable (actions plane)" compact /> : null}
-      {ic.runtime.phase === 'failed' && ic.runtime.failure ? <PlaneNotice failure={ic.runtime.failure} onRetry={() => void refreshMissions()} /> : null}
-      {rt ? (
-        <div className="ic-grid3">
-          <Fact k="Runtime" v={rt.limits ? (rt.limits.emergency_stop ? 'emergency stop' : rt.limits.runtime_enabled ? 'armed' : 'disarmed') : 'unknown'} tone={rt.limits?.emergency_stop ? 'bad' : rt.limits?.runtime_enabled ? 'ok' : 'warn'} />
-          <Fact k="Open" v={Object.entries(rt.open).map(([s, n]) => `${n} ${s}`).join(' · ') || '0'} />
-          <Fact k="Ended 24h" v={Object.entries(rt.ended_24h).map(([s, n]) => `${n} ${s}`).join(' · ') || '0'} />
+      {ic.missions.phase === 'failed' && ic.missions.failure ? <PlaneNotice failure={ic.missions.failure} title={notEnabled ? 'Missions API not enabled' : undefined} onRetry={() => void refreshMissions()} /> : null}
+      {!notEnabled ? (
+        <div className="ic-mform">
+          <div className="ic-seg" role="radiogroup" aria-label="Mission kind">
+            <button type="button" role="radio" aria-checked={kind === 'mission.research'} className={cx(kind === 'mission.research' && 'is-on')} onClick={() => setKind('mission.research')}>Research</button>
+            <button type="button" role="radio" aria-checked={kind === 'mission.supervisor'} className={cx(kind === 'mission.supervisor' && 'is-on')} onClick={() => setKind('mission.supervisor')}>Supervisor · up to 3 sub-missions</button>
+          </div>
+          <textarea className="ic-mform__q" value={question} onChange={(e) => setQuestion(e.target.value.slice(0, 2000))} placeholder="What should the mission research? It runs on the server and reports back here." rows={2} aria-label="Mission question" />
+          {kind === 'mission.supervisor' ? <textarea className="ic-mform__q" value={subs} onChange={(e) => setSubs(e.target.value)} placeholder="Sub-questions, one per line (≤ 3). Leave empty and the supervisor splits the question itself." rows={3} aria-label="Sub-questions" /> : null}
+          <div className="ic-mform__f">
+            <label className="ic-field is-inline"><span>Budget $</span><input value={budget} onChange={(e) => setBudget(e.target.value)} placeholder={kind === 'mission.research' ? '0.50' : '0.25'} inputMode="decimal" /></label>
+            <Spec items={['server caps 0.01–2.50', 'idempotent within the UTC hour']} />
+            <button type="button" className="ic-btn is-accept" disabled={busy || !question.trim()} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Start mission'}</button>
+          </div>
         </div>
       ) : null}
-      {ic.missions.phase === 'ready' ? (
-        ic.missions.data?.length ? (
-          <ul className="ic-rows">
-            {ic.missions.data.map((m) => (
-              <li key={m.job_id}><button type="button" className={cx('ic-row', ic.inspector?.kind === 'mission' && ic.inspector.id === m.job_id && 'is-on')} onClick={() => inspect({ kind: 'mission', id: m.job_id })}>
-                <span className={cx('ic-state', `is-${m.state}`)}>{m.state.replace(/_/g, ' ')}</span>
-                <b>{m.kind}</b>
-                <Spec items={[`attempt ${m.attempt}/${m.max_attempts}`, m.trigger_kind, m.budget_cap_usd ? `cap ${usd(m.budget_cap_usd)}` : '$0', `updated ${ago(m.updated_at)}`]} />
-              </button></li>
-            ))}
-          </ul>
-        ) : <EmptyLine>No runtime missions yet.</EmptyLine>
-      ) : ic.missions.phase === 'loading' ? <EmptyLine>Reading the runtime…</EmptyLine> : null}
+      {ic.missionNote ? <p className="ic-note" role="status">{ic.missionNote}</p> : null}
+      {page ? (
+        <>
+          <h3 className="ic-sub">Active</h3>
+          {live.length ? <ul className="ic-rows">{live.map(row)}</ul> : <EmptyLine>No mission is running.</EmptyLine>}
+          <h3 className="ic-sub">Ended</h3>
+          {done.length ? <ul className="ic-rows">{done.map(row)}</ul> : <EmptyLine>No finished missions yet.</EmptyLine>}
+          {page.next_cursor ? <EmptyLine>More missions exist on the server (showing the newest 50).</EmptyLine> : null}
+        </>
+      ) : ic.missions.phase === 'loading' ? <EmptyLine>Reading missions…</EmptyLine> : null}
     </section>
   )
 }
 
-function Fact({ k, v, tone }: { k: string; v: ReactNode; tone?: 'ok' | 'warn' | 'bad' }) {
-  return <div className={cx('ic-fact', tone && `is-${tone}`)}><span>{k}</span><b>{v}</b></div>
-}
 
 /* ── Research: ask runs + live Quick Scans ─────────────────────────────── */
 
@@ -203,6 +225,7 @@ export function WorkforceSection() {
   const ic = useIc()
   useEffect(() => { void refreshMissions() }, [])
   const now = Date.now()
+  const missions = ic.missions.data?.missions.filter((m) => !isTerminalMission(m)) ?? []
   const asking = a.threads.flatMap((t) => t.turns.filter((u) => u.phase === 'running' || u.phase === 'sending').map((u) => ({ t, u })))
   const scans = runs.filter((r) => r.mode === 'live' && r.live && ACTIVE_LIVE.has(r.live.status))
   const runtimes = rail.telemetry?.runtimes ?? []
@@ -210,9 +233,10 @@ export function WorkforceSection() {
     <section className="ic-sec">
       <SectionHead title="Agent workforce" summary={<Spec items={['Only runtimes the shell telemetry reports and runs the agent APIs hold', 'nothing here is simulated']} />} />
       <h3 className="ic-sub">Agents working now</h3>
-      {asking.length || scans.length ? (
+      {asking.length || scans.length || missions.length ? (
         <ul className="ic-rows">
           {asking.map(({ t, u }) => <li key={u.id}><button type="button" className="ic-row" onClick={() => { openConversation(t.id); inspect({ kind: 'turn', threadId: t.id, turnId: u.id }) }}><span className="ic-state is-running">running</span><b>Research agent</b><Spec items={[u.text.slice(0, 80), u.runId ? <code key="r">{u.runId}</code> : 'sending', `since ${ago(u.sentAt)}`]} /></button></li>)}
+          {missions.map((m) => <li key={m.mission_id}><button type="button" className="ic-row" onClick={() => openMission(m.mission_id)}><span className={cx('ic-state', `is-${m.display_state}`)}>{m.display_state.replace(/_/g, ' ')}</span><b>{missionKindLabel(m.kind)} mission · server</b><Spec items={[m.title.slice(0, 80), m.progress.step, `since ${ago(m.created_at)}`]} /></button></li>)}
           {scans.map((r) => <li key={r.runId}><div className="ic-row is-static"><span className="ic-state is-running">{r.live!.status}</span><b>Quick Scan</b><Spec items={[`${r.live!.propertyIds.length} propert${r.live!.propertyIds.length === 1 ? 'y' : 'ies'}`, r.live!.serverRunId ? <code key="s">{r.live!.serverRunId}</code> : null, `since ${ago(r.createdAt)}`]} /></div></li>)}
         </ul>
       ) : <EmptyLine>No agent is running right now.</EmptyLine>}
@@ -235,7 +259,7 @@ export function WorkforceSection() {
           })}
         </div>
       )}
-      {ic.runtime.data?.heartbeats.length ? (<><h3 className="ic-sub">Agent runtime workers</h3><ul className="ic-rows">{ic.runtime.data.heartbeats.map((h) => <li key={h.worker_id}><div className="ic-row is-static"><span className="ic-state">{h.ticks} ticks</span><b>{h.worker_id}</b><Spec items={[`last tick ${ago(h.last_tick_at)}`]} /></div></li>)}</ul></>) : null}
+      {ic.missions.phase === 'failed' && ic.missions.failure ? <p className="ic-note">Background missions: {ic.missions.failure.state === 'not_enabled' ? 'Missions API not enabled on this server.' : ic.missions.failure.message}</p> : null}
     </section>
   )
 }
@@ -254,7 +278,7 @@ export function HealthSection() {
     { id: 'ask', label: 'Research agent (ask)', state: st.phase === 'ready' ? (st.data?.models.ok ? 'ok' : 'bad') : st.phase === 'failed' ? (st.failure?.kind === 'disabled' ? 'off' : 'bad') : 'pending', detail: st.phase === 'ready' ? `models ${st.data?.models.ok ? 'resolved' : `unresolved (${st.data?.models.code ?? '—'})`} · ${st.data?.tools.length ?? 0} read tools · ${st.data?.runs_today ?? 0}/${st.data?.daily_run_cap ?? '—'} runs today` : st.failure ? `${st.failure.message} (${st.failure.code})` : 'reading…' },
     planeRow('actions', 'Actions + approvals', ic.capabilities.phase, ic.capabilities.failure, ic.capabilities.data ? `${ic.capabilities.data.length} capabilities · ${ic.capabilities.data.filter((c) => c.tier === 'requires_explicit_approval').length} need approval` : ''),
     planeRow('shadow', 'Conversation AI · shadow', ic.shadow.phase, ic.shadow.failure, ic.shadow.data ? (ic.shadow.data.available ? `${ic.shadow.data.records.length} recent decisions (read only)` : `table not applied (${ic.shadow.data.code ?? '—'})`) : '', ic.shadow.data && !ic.shadow.data.available ? 'off' : undefined),
-    planeRow('runtime', 'Missions runtime (R2)', ic.runtime.phase, ic.runtime.failure, ic.runtime.data ? `runtime ${ic.runtime.data.limits?.runtime_enabled ? 'armed' : 'disarmed'}` : ''),
+    planeRow('missions', 'Missions (persistent)', ic.missions.phase, ic.missions.failure, ic.missions.data ? `${ic.missions.data.missions.filter((m) => !isTerminalMission(m)).length} active · ${ic.missions.data.missions.length} listed` : ''),
     planeRow('qs', 'Quick Scan (live agent)', ic.quickScans.phase, ic.quickScans.failure, ic.quickScans.data ? `${ic.quickScans.data.length} recent scans` : ''),
     { id: 'telemetry', label: 'Shell telemetry', state: rail.telemetry ? (m.state === 'degraded' ? 'bad' : 'ok') : rail.error ? 'bad' : 'pending', detail: rail.telemetry ? `${m.state}${m.reason ? ` · ${m.reason}` : ''} · ${rail.telemetry.runtimes.length} runtimes${rail.telemetry.degraded.length ? ` · degraded sources: ${rail.telemetry.degraded.join(', ')}` : ''}` : rail.error ? 'unreachable' : 'reading…' },
   ]

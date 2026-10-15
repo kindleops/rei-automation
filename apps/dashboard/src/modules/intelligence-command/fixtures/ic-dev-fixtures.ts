@@ -198,10 +198,56 @@ const SHADOW = {
   ],
 }
 
-const MISSIONS = [
-  { job_id: 'mjob_0000dev1-0000-4000-8000-000000000001', kind: 'ops.health_check', state: 'completed', requested_by: 'operator:dev', trigger_kind: 'manual', attempt: 1, max_attempts: 3, priority: 100, budget_cap_usd: 0, progress: { step: 'record', steps_done: 3, steps_total: 3 }, result: { problems: 0, heartbeats: { queue_processor_last_run_at: 'fresh' } }, last_error: null, created_at: iso(-3600_000), updated_at: iso(-3590_000), ended_at: iso(-3590_000), heartbeat_at: iso(-3591_000) },
-  { job_id: 'mjob_0000dev1-0000-4000-8000-000000000002', kind: 'ops.health_check', state: 'running', requested_by: 'operator:dev', trigger_kind: 'schedule', attempt: 1, max_attempts: 3, priority: 100, budget_cap_usd: 0, progress: { step: 'evaluate', steps_done: 1, steps_total: 3 }, result: null, last_error: null, created_at: iso(-40_000), updated_at: iso(-5_000), ended_at: null, heartbeat_at: iso(-5_000) },
+interface DevMission { id: string; kind: string; question: string; createdAt: number; steps: Array<{ type: string; state: string; step?: string; cost?: number }>; at: number; cancelled: boolean; children: string[]; parent: string | null }
+const devMissions = new Map<string, DevMission>()
+let mSeq = 1
+const mid = () => `mjob_0000dev${String(mSeq++).padStart(1, '0')}-0000-4000-8000-${String(Date.now()).slice(-12).padStart(12, '0')}`
+const RESEARCH_STEPS = [
+  { type: 'job.enqueued', state: 'queued' }, { type: 'job.claimed', state: 'claimed' }, { type: 'job.started', state: 'running' },
+  { type: 'job.budget_reserved', state: 'running', cost: 0.05 }, { type: 'job.step', state: 'running', step: 'ask' },
+  { type: 'job.step', state: 'running', step: 'ask.done', cost: 0.0045 }, { type: 'job.budget_settled', state: 'running', cost: 0.0045 },
+  { type: 'job.finding', state: 'running', step: 'findings' }, { type: 'job.completed', state: 'completed' },
 ]
+function seedMission(kind: string, question: string, ageMs: number, done: boolean, parent: string | null = null): DevMission {
+  const m: DevMission = { id: mid(), kind, question, createdAt: Date.now() - ageMs, steps: RESEARCH_STEPS, at: done ? RESEARCH_STEPS.length : 2, cancelled: false, children: [], parent }
+  devMissions.set(m.id, m)
+  return m
+}
+seedMission('acquisition.discovery', 'Nightly discovery · Dallas SFR', 9 * 3600_000, true)
+seedMission('conversation.review_digest', 'Morning review digest', 5 * 3600_000, true)
+const sup = seedMission('mission.supervisor', 'Compare acquisition evidence across the Dallas, Minneapolis and Houston audiences.', 4 * 60_000, false)
+for (const c of ['Dallas audience evidence.', 'Minneapolis audience evidence.', 'Houston audience evidence.']) sup.children.push(seedMission('mission.research', c, 3 * 60_000, c.startsWith('Dallas'), sup.id).id)
+const isDone = (m: DevMission) => m.cancelled || m.at >= m.steps.length
+function stateOf(m: DevMission): string { return m.cancelled ? 'cancelled' : m.steps[Math.min(m.at, m.steps.length) - 1]?.state ?? 'queued' }
+function summary(m: DevMission): Json {
+  const st = stateOf(m)
+  const done = isDone(m)
+  const kids = m.children.map((c) => devMissions.get(c)!).filter(Boolean)
+  const step = m.steps[Math.max(0, m.at - 1)]
+  const supWaiting = m.kind === 'mission.supervisor' && !done
+  return {
+    mission_id: m.id, kind: m.kind, state: supWaiting ? 'retrying' : st, display_state: m.cancelled ? 'cancelled' : supWaiting ? 'waiting' : st, title: m.question.slice(0, 120),
+    requested_by: '11111111-1111-4111-8111-111111111111', trigger: { kind: m.kind.startsWith('mission.') ? 'manual' : 'schedule', ref: m.kind.startsWith('mission.') ? 'manual' : 'schedule:nightly', schedule_id: m.kind.startsWith('mission.') ? null : 3 },
+    progress: m.kind === 'mission.supervisor' ? { step: done ? 'consolidate.done' : 'wait', pct: Math.round((kids.filter(isDone).length / Math.max(1, kids.length)) * 90), steps_done: null, steps_total: null, children_done: kids.filter(isDone).length, children_total: kids.length } : { step: step?.step ?? (done ? 'done' : 'queued'), pct: Math.round((Math.min(m.at, m.steps.length) / m.steps.length) * 100), steps_done: Math.min(m.at, 3), steps_total: 3, children_done: null, children_total: null },
+    attempt: m.at >= 2 ? 1 : 0, max_attempts: 3, cancel_requested: m.cancelled, budget_cap_usd: m.kind === 'mission.supervisor' ? 0.25 : 0.5, cost_usd: done && !m.cancelled ? (m.kind === 'mission.supervisor' ? 0.0186 : 0.0045) : null,
+    parent_mission_id: m.parent, last_error: null, created_at: new Date(m.createdAt).toISOString(), updated_at: new Date(m.createdAt + m.at * 4000).toISOString(), ended_at: done ? new Date(m.createdAt + m.at * 4000).toISOString() : null, next_attempt_at: done ? null : new Date(Date.now() + 30_000).toISOString(),
+  }
+}
+function detail(m: DevMission, after: number): Json {
+  const events = m.steps.slice(0, m.at).map((e, i) => ({ id: i + 1, at: new Date(m.createdAt + i * 4000).toISOString(), type: e.type, state: e.state, attempt: i >= 2 ? 1 : 0, actor: i === 0 ? 'enqueue:manual' : 'agent-runtime-tick', payload: { ...(e.step ? { step: e.step } : {}), ...(e.cost ? { cost_usd: e.cost } : {}) } }))
+  if (m.cancelled) events.push({ id: events.length + 1, at: new Date().toISOString(), type: 'job.cancelled', state: 'cancelled', attempt: 1, actor: 'operator:dev', payload: {} })
+  const done = isDone(m) && !m.cancelled
+  return { ok: true, mission: { ...summary(m),
+    input: { question: m.question, context: { property_ids: [PIDS[0]] }, sub_questions: m.kind === 'mission.supervisor' ? m.children.map((c) => devMissions.get(c)!.question) : null, parameters: { max_model_calls: 4 } },
+    result: done ? (m.kind === 'mission.research' || m.kind === 'mission.supervisor' ? { mission: m.kind === 'mission.supervisor' ? 'supervisor' : 'research', outcome: 'COMPLETED', state: 'completed', answer: ANSWER, cost_usd: 0.0045, model_calls: 2, tool_calls: 1, web_searches: 0, property_refs: [PIDS[0]], citations: 0, approvals: [], drafts: [], findings: 2, parent_job_id: m.parent, envelope: RESULT } : { mission: 'discovery', generation: 4, scanned: 1840, screened: 212, candidates: [{ property_ref: PIDS[0], rank: 1, deterministic_score: 0.82, model_score: 0.77 }], cost_usd: 0.012 }) : null,
+    cost: { committed_usd: done ? 0.0045 : 0, settled_usd: done ? 0.0045 : 0, open_reserved_usd: done ? 0 : 0.05, unknown_usd: 0, model_calls: done ? 2 : 0, children_committed_usd: 0, total_committed_usd: done ? 0.0045 : 0, budget_cap_usd: 0.5 },
+    children: m.children.map((c) => summary(devMissions.get(c)!)),
+    events: events.filter((e) => e.id > after), events_cursor: events.length,
+    findings: done ? [{ finding_id: `fnd_${m.id.slice(-6)}a`, finding_type: 'mission.answer', key: 'answer', value: {}, source_id: 'agent.research_tools', citation: null, confidence: 1, evidence_status: 'internal_record', retrieved_at: new Date().toISOString() }, { finding_id: `fnd_${m.id.slice(-6)}b`, finding_type: 'mission.property_evidence', key: `property.${PIDS[0]}`, value: { property_ref: PIDS[0] }, source_id: 'agent.research_tools', citation: null, confidence: 1, evidence_status: 'internal_record', retrieved_at: new Date().toISOString() }] : [],
+  } }
+}
+/** a dev mission advances one runtime event per read (the real runtime ticks once a minute) */
+function advance(m: DevMission) { if (!isDone(m) && m.kind !== 'mission.supervisor') m.at += 1; if (m.kind === 'mission.supervisor') { for (const c of m.children) advance(devMissions.get(c)!); if (m.children.every((c) => isDone(devMissions.get(c)!))) m.at = m.steps.length } }
 
 /* ── the double ───────────────────────────────────────────────────────── */
 
@@ -254,7 +300,7 @@ async function route(url: URL, init: RequestInit | undefined): Promise<Response 
     return json(runBody(r))
   }
   if (p === '/api/cockpit/agent/live/runs') return json({ ok: true, live: true, runs: [{ run_id: 'qs_dev0001', title: 'Quick Scan · 1418 Larkspur Ct · synthetic', state: 'completed', property_count: 1, created_at: iso(-7200_000), ended_at: iso(-7190_000) }] })
-  if (p.startsWith('/api/cockpit/agent/actions') || p.startsWith('/api/cockpit/agent/runtime')) {
+  if (p.startsWith('/api/cockpit/agent/actions') || p.startsWith('/api/cockpit/agent/missions')) {
     if (dev.planes === 'off') return off()
   }
   if (p === '/api/cockpit/agent/actions') return json({ ok: true, capabilities: CAPS })
@@ -262,7 +308,6 @@ async function route(url: URL, init: RequestInit | undefined): Promise<Response 
     const cap = String(body.capability_id ?? '')
     const input = (body.input ?? {}) as Json
     if (cap === 'platform.health') return json({ ok: true, status: 'read', capability_id: cap, result: { at: new Date().toISOString(), heartbeats: [{ key: 'queue_processor_last_run_at', status: 'fresh', age_seconds: 41, threshold_seconds: 300, observed_at: iso() }, { key: 'campaign_feeder_last_batch_at', status: 'fresh', age_seconds: 172, threshold_seconds: 900, observed_at: iso() }, { key: 'workflow_runtime_last_tick_at', status: 'stale', age_seconds: 1260, threshold_seconds: 900, observed_at: iso() }], modes: {}, queue: { sends_due_waiting: 0, failed_1h: 1 }, watchdog: { findings: [{ code: 'WORKFLOW_TICK_STALE', severity: 'warning', summary: 'Workflow runtime tick older than its threshold (synthetic)' }], unknown: [] } } })
-    if (cap === 'missions.create') return json({ ok: true, status: 'executed', capability_id: cap, result: { job_id: 'mjob_0000dev1-0000-4000-8000-000000000003', state: 'queued', deduped: false } })
     if (cap === 'pipeline.propose_stage_change') {
       const a = mkApproval(cap, { action: 'stage_change', opportunity_id: input.opportunity_id, from_stage: 'asking_price', to_stage: input.to_stage, reason: input.reason }, { opportunity_id: input.opportunity_id }, [`Move opportunity from asking_price → ${String(input.to_stage)}`, `Reason: ${String(input.reason)}`, 'On approval the pipeline transition re-validates; offer / contract stages need recorded events.'])
       return json({ ok: true, status: 'approval_pending', capability_id: cap, approval_id: a.approval_id, expires_at: a.expires_at, deduped: false })
@@ -289,10 +334,26 @@ async function route(url: URL, init: RequestInit | undefined): Promise<Response 
     return json({ ok: true, state: a.state, code: null, replayed: false, execution_result: a.execution_result })
   }
   if (p === '/api/cockpit/agent/conversation-ai/shadow') return dev.planes === 'off' ? json({ ok: true, available: false, records: [], code: 'SHADOW_TABLE_NOT_APPLIED' }) : json(SHADOW)
-  if (p === '/api/cockpit/agent/runtime/status') return json({ ok: true, status: { at: iso(), limits: { runtime_enabled: true, emergency_stop: false, max_concurrency_global: 2, kind_limits: { 'ops.health_check': { enabled: true } } }, open: { running: 1 }, ended_24h: { completed: 1 }, heartbeats: [{ worker_id: 'agent-runtime-tick', last_tick_at: iso(-30_000), ticks: 1440, age_s: 30 }], schedules: [] } })
-  if (p === '/api/cockpit/agent/runtime/missions') return json({ ok: true, missions: MISSIONS })
-  m = /^\/api\/cockpit\/agent\/runtime\/missions\/([^/]+)\/events$/.exec(p)
-  if (m) return json({ ok: true, events: [{ id: 1, job_id: m[1], at: iso(-40_000), type: 'job.enqueued', state: 'queued', attempt: 0, actor: 'operator:dev', payload: {} }, { id: 2, job_id: m[1], at: iso(-35_000), type: 'job.started', state: 'running', attempt: 1, actor: 'agent-runtime-tick', payload: {} }, { id: 3, job_id: m[1], at: iso(-5_000), type: 'job.progress', state: 'running', attempt: 1, actor: 'agent-runtime-tick', payload: { step: 'evaluate' } }] })
+  if (p === '/api/cockpit/agent/missions') {
+    if (method === 'POST') {
+      const kind = String(body.kind ?? '')
+      if (kind !== 'mission.research' && kind !== 'mission.supervisor') return json({ ok: false, error: 'KIND_NOT_CREATABLE' }, 422)
+      if (!String(body.question ?? '').trim()) return json({ ok: false, error: 'QUESTION_REQUIRED' }, 422)
+      const m: DevMission = { id: mid(), kind, question: String(body.question), createdAt: Date.now(), steps: RESEARCH_STEPS, at: 1, cancelled: false, children: [], parent: null }
+      devMissions.set(m.id, m)
+      return json({ ok: true, status: 'executed', mission_id: m.id, state: 'queued', deduped: false }, 201)
+    }
+    const list = [...devMissions.values()].filter((m) => !m.parent).sort((a, b) => b.createdAt - a.createdAt)
+    return json({ ok: true, scope: 'mine', missions: list.map(summary), next_cursor: null })
+  }
+  m = /^\/api\/cockpit\/agent\/missions\/([^/]+)(\/cancel)?$/.exec(p)
+  if (m) {
+    const dm = devMissions.get(m[1])
+    if (!dm) return json({ ok: false, error: 'MISSION_NOT_FOUND' }, 404)
+    if (m[2]) { const noop = isDone(dm); if (!noop) { dm.cancelled = true; for (const c of dm.children) devMissions.get(c)!.cancelled = true } return json({ ok: true, mission_id: dm.id, state: noop ? stateOf(dm) : 'cancelled', pending: false, noop, children: dm.children.map((c) => ({ mission_id: c, state: 'cancelled', pending: false })) }) }
+    advance(dm)
+    return json(detail(dm, Number(url.searchParams.get('events_after') || 0)))
+  }
   if (p === '/api/cockpit/shell/telemetry') return json(telemetry())
   if (p === '/api/cockpit/entity-graph/search') {
     const tab = url.searchParams.get('tab')

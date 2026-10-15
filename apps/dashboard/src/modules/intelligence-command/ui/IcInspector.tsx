@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { cx } from '../../../shared/lc'
-import { citationsOf, shortModelName, sourcesOf } from '../../agent/ask/ask-model'
+import { citationsOf, normalizeResult, shortModelName, sourcesOf } from '../../agent/ask/ask-model'
 import { useAsk } from '../../agent/ask/ask-store'
 import { openApp } from '../../desktop/workspace/workspace-store'
-import { fetchMissionEvents, type PlaneResult, type RuntimeJobEvent } from '../api/ic-client'
+import { isTerminalMission } from '../api/ic-client'
+import { ResultBlocks } from '../../agent/ask/ui/ResultBlocks'
 import { CAPABILITY_LABEL } from '../model/act-model'
 import { visibleChips, type PageContext } from '../model/context-model'
-import { inspect, useIc } from '../store/ic-store'
+import { cancelMission, inspect, openMission, setSection, useIc } from '../store/ic-store'
 import { runStateOf } from './RunTurn'
 import { EmptyLine, IcGlyph, PlaneNotice, Spec, clock, ms, usd } from './primitives'
 
@@ -134,18 +135,31 @@ function TurnInspector({ threadId, turnId }: { threadId: string; turnId: string 
 
 function MissionInspector({ id }: { id: string }) {
   const ic = useIc()
-  const m = ic.missions.data?.find((x) => x.job_id === id) ?? null
-  const [ev, setEv] = useState<PlaneResult<RuntimeJobEvent[]> | null>(null)
-  useEffect(() => { let live = true; void fetchMissionEvents(id).then((r) => { if (live) setEv(r) }); return () => { live = false } }, [id, m?.updated_at])
-  if (!m) return <EmptyLine>Mission not loaded.</EmptyLine>
+  const [note, setNote] = useState<string | null>(null)
+  const d = ic.mission.data && ic.mission.data.mission_id === id ? ic.mission.data : null
+  const summary = d ?? ic.missions.data?.missions.find((x) => x.mission_id === id) ?? null
+  if (!summary) return ic.mission.phase === 'failed' && ic.mission.failure ? <PlaneNotice failure={ic.mission.failure} compact /> : <EmptyLine>Reading the mission…</EmptyLine>
+  const r = d?.result ?? null
+  const envelope = r && typeof r.envelope === 'object' && r.envelope ? normalizeResult(r.envelope) : null
+  const answer = r && typeof r.answer === 'string' ? r.answer : ''
+  const approvals = Array.isArray(r?.approvals) ? (r!.approvals as Array<Record<string, unknown>>) : []
+  const live = !isTerminalMission(summary)
   return (
     <>
-      <Block title="Job"><KV rows={[['Job', <code key="j">{m.job_id}</code>], ['Kind', m.kind], ['State', m.state], ['Requested by', m.requested_by], ['Trigger', m.trigger_kind], ['Attempts', `${m.attempt}/${m.max_attempts}`], ['Budget cap', usd(m.budget_cap_usd)], ['Heartbeat', clock(m.heartbeat_at)], ['Ended', clock(m.ended_at)]]} /></Block>
-      {Object.keys(m.progress).length ? <Block title="Progress (server)"><pre className="ic-json">{JSON.stringify(m.progress, null, 2)}</pre></Block> : null}
-      {m.result ? <Block title="Result"><pre className="ic-json">{JSON.stringify(m.result, null, 2)}</pre></Block> : null}
-      {m.last_error ? <Block title="Last error"><pre className="ic-json">{JSON.stringify(m.last_error, null, 2)}</pre></Block> : null}
-      <Block title="Job events">
-        {!ev ? <EmptyLine>Reading agent.job_event…</EmptyLine> : !ev.ok ? <PlaneNotice failure={ev} compact /> : ev.data.length ? <ol className="ic-trace">{ev.data.map((e) => <li key={e.id}><time>{clock(e.at)}</time><code>{e.type}</code><span>{e.state}</span><Spec items={[e.actor, `attempt ${e.attempt}`]} /></li>)}</ol> : <EmptyLine>No events.</EmptyLine>}
+      <Block title="Mission" aside={<span className={cx('ic-state', `is-${summary.display_state}`)}>{summary.display_state.replace(/_/g, ' ')}</span>}>
+        <p className="ic-mq">{d?.input?.question ?? summary.title}</p>
+        <KV rows={[['Mission', <code key="j">{summary.mission_id}</code>], ['Kind', summary.kind], ['Trigger', summary.trigger.kind], ['Attempt', `${summary.attempt}/${summary.max_attempts}`], ['Progress', summary.progress.pct != null ? `${summary.progress.pct}%${summary.progress.step ? ` · ${summary.progress.step}` : ''}` : summary.progress.step], ['Sub-missions', summary.progress.children_total ? `${summary.progress.children_done ?? 0}/${summary.progress.children_total}` : null], ['Next claim', live ? clock(summary.next_attempt_at) : null], ['Ended', clock(summary.ended_at)], ['Error', summary.last_error?.code ?? null]]} />
+        {live ? <button type="button" className="ic-btn" disabled={summary.cancel_requested} onClick={() => void cancelMission(id).then(setNote)}><IcGlyph name="stop" size={11} />{summary.cancel_requested ? 'Cancelling' : 'Cancel mission'}</button> : null}
+        {note ? <p className="ic-note" role="status">{note}</p> : null}
+        <p className="ic-note">Runs on the server runtime; closing this browser does not stop it.</p>
+      </Block>
+      {d?.cost ? <Block title="Cost (ledger)" aside={<span className="ic-mono">{usd(d.cost.total_committed_usd)}</span>}><KV rows={[['Committed', usd(d.cost.committed_usd)], ['Open reserve', d.cost.open_reserved_usd ? usd(d.cost.open_reserved_usd) : null], ['Unknown', d.cost.unknown_usd ? usd(d.cost.unknown_usd) : null], ['Children', d.cost.children_committed_usd ? usd(d.cost.children_committed_usd) : null], ['Model calls', String(d.cost.model_calls)], ['Budget cap', usd(d.cost.budget_cap_usd)]]} /></Block> : null}
+      {answer || envelope ? <Block title="Result"><div className="ic-insp__answer"><ResultBlocks result={envelope} answerMd={answer} citeIds={Array.isArray(r?.property_refs) ? (r!.property_refs as unknown[]).map(String) : []} onCite={(pid) => open(`/entity-graph/property/${encodeURIComponent(pid)}`)} labelOf={() => null} onOpen={open} /></div></Block> : r ? <Block title="Result"><pre className="ic-json">{JSON.stringify(r, null, 2)}</pre></Block> : null}
+      {approvals.length ? <Block title="Approvals it prepared">{approvals.map((a) => <button key={String(a.approval_id)} type="button" className="ic-cite" onClick={() => { setSection('approvals') }}><b>{CAPABILITY_LABEL[String(a.capability_id)] ?? String(a.capability_id)}</b><small>{String(a.approval_id)} · decide in Approvals</small></button>)}</Block> : null}
+      {d?.children.length ? <Block title="Sub-missions">{d.children.map((c) => <button key={c.mission_id} type="button" className="ic-cite" onClick={() => openMission(c.mission_id)}><b>{c.title || c.mission_id}</b><small>{c.display_state} · {c.cost_usd != null ? usd(c.cost_usd) : 'cost pending'}</small></button>)}</Block> : null}
+      {d?.findings.length ? <Block title="Findings" aside={<span className="ic-mono">{d.findings.length}</span>}><ul className="ic-tools">{d.findings.map((f) => <li key={f.finding_id}><code>{f.finding_type}</code><small>{f.key}{f.evidence_status ? ` · ${f.evidence_status.replace(/_/g, ' ')}` : ''}</small></li>)}</ul></Block> : null}
+      <Block title="Events" aside={<span className="ic-mono">{d?.events.length ?? 0}{live ? ' · live' : ''}</span>}>
+        {d?.events.length ? <ol className="ic-trace">{d.events.map((e) => <li key={e.id}><time>{clock(e.at)}</time><code>{e.type}</code><span>{e.type.replace(/^job\./, '')}{typeof e.payload.step === 'string' ? ` · ${e.payload.step}` : ''}</span><Spec items={[e.state, e.actor, typeof e.payload.cost_usd === 'number' ? usd(e.payload.cost_usd) : null, typeof e.payload.code === 'string' ? e.payload.code : null]} /></li>)}</ol> : ic.mission.phase === 'failed' && ic.mission.failure ? <PlaneNotice failure={ic.mission.failure} compact /> : <EmptyLine>Reading agent.job_event…</EmptyLine>}
       </Block>
     </>
   )

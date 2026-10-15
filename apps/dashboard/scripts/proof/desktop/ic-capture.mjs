@@ -109,7 +109,19 @@ for (const theme of ['dark', 'light']) {
       await pg.click('.ic-conv .ic-act .ic-btn.is-accept')
       await pg.waitForSelector('.ic-act .ic-diff.is-executed', { timeout: 20000 })
       await shot(pg, `09-${theme}-${tag}-act-approved`)
-      for (const [i, s] of [['10', 'Missions'], ['11', 'Research'], ['12', 'Findings'], ['13', 'Approvals'], ['14', 'Activity'], ['15', 'Agent workforce'], ['16', 'System health']]) {
+      // Missions: start a real (dev-double) mission, follow its events
+      await pg.click('.ic-nav__i:has-text("Missions")')
+      await pg.waitForSelector('.ic-mform', { timeout: 20000 })
+      await pg.fill('.ic-mform__q', 'Research the distress and equity evidence for 1418 Larkspur Ct and cite the sources.')
+      await pg.click('.ic-mform .ic-btn.is-accept')
+      await pg.waitForTimeout(9000)
+      await shot(pg, `10-${theme}-${tag}-missions-running`)
+      await pg.waitForSelector('.ic-insp .ic-state.is-completed', { timeout: 90000 }).catch(() => {})
+      await shot(pg, `10b-${theme}-${tag}-missions-completed`)
+      await pg.click('.ic-row.is-mission:has-text("Compare acquisition")')
+      await pg.waitForTimeout(2500)
+      await shot(pg, `10c-${theme}-${tag}-mission-supervisor`)
+      for (const [i, s] of [['11', 'Research'], ['12', 'Findings'], ['13', 'Approvals'], ['14', 'Activity'], ['15', 'Agent workforce'], ['16', 'System health']]) {
         await pg.click(`.ic-nav__i:has-text("${s}")`)
         await pg.waitForTimeout(s === 'Agent workforce' || s === 'System health' ? 2200 : 900)
         await shot(pg, `${i}-${theme}-${tag}-${s.toLowerCase().replace(/\s+/g, '-')}`)

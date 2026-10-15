@@ -17,9 +17,10 @@ describe('truthful plane states', () => {
     expect(t).toMatch(/AGENT_CAPABILITIES_ENABLED=1/)
     expect(t).toMatch(/404/)
   })
-  it('the missions runtime says exactly what is missing', () => {
-    const t = text(<PlaneNotice failure={classifyPlane('runtime', 404, null)} />)
-    expect(t).toMatch(/Missions runtime read route not deployed/)
+  it('the missions API says exactly what is missing', () => {
+    const t = text(<PlaneNotice failure={classifyPlane('missions', 404, null)} />)
+    expect(t).toMatch(/Missions API not enabled/)
+    expect(t).toMatch(/AGENT_MISSIONS_ENABLED=1/)
     expect(t).toMatch(/PROPOSED_20261012140000_intel_runtime/)
   })
 })

@@ -5,8 +5,9 @@
  *   Ask   research question → POST /ask (read-only research agent)
  *   Plan  the same agent asked to PLAN a mission: numbered steps, the read
  *         tools per step, what it would need approved — nothing executes.
- *         A plan can be queued as a persistent runtime mission only for kinds
- *         the runtime has a handler for (ic-client KNOWN_MISSION_KINDS).
+ *         "Run as background mission" sends the same question to
+ *         POST /api/cockpit/agent/missions (mission.research): it runs on the
+ *         server runtime and keeps running with the browser closed.
  *   Act   capability calls → approvals: an operator-initiated
  *         POST /actions/invoke whose approval-tier result is a PENDING
  *         approval rendered as a diff and decided through /decide.

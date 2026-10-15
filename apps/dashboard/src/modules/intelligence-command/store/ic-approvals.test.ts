@@ -46,14 +46,14 @@ describe('actions plane not enabled (404 with an empty body)', () => {
     }
   })
 
-  it('an unmounted Next route (HTML 404 → 502 BACKEND_HTML_ERROR) is also "not enabled", e.g. the runtime read route', async () => {
+  it('an unmounted Next route (HTML 404 → 502 BACKEND_HTML_ERROR) is also "not enabled", e.g. the missions API', async () => {
     responder = () => ({ ok: false, status: 502, error: 'BACKEND_HTML_ERROR', message: '[404] Backend returned an HTML error page instead of JSON.', upstream: { html_preview: '<html>' } })
     const c = await import('../api/ic-client')
     const r = await c.fetchMissions()
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.state).toBe('not_enabled')
-      expect(r.message).toMatch(/Missions runtime read route not deployed/)
+      expect(r.message).toMatch(/Missions API not enabled/)
     }
   })
 
@@ -122,12 +122,47 @@ describe('Act → approval → decide', () => {
   })
 })
 
-describe('missions are created only through the existing capability', () => {
-  it('createMission → POST /actions/invoke missions.create { kind }', async () => {
-    responder = (c) => (c.path === '/api/cockpit/agent/actions/invoke' ? { ok: true, status: 200, data: { ok: true, status: 'executed', capability_id: 'missions.create', result: { job_id: 'mjob_x', state: 'queued' } } } : { ok: false, status: 404, error: 'x', message: '[404]', upstream: null })
+describe('missions (docs/agent-missions-api.md)', () => {
+  // the store's poll timers use window.setTimeout (node test env has no window)
+  ;(globalThis as unknown as { window?: unknown }).window ??= globalThis
+  const SUMMARY = { mission_id: 'mjob_x', kind: 'mission.research', state: 'running', display_state: 'running', title: 'Q', progress: { step: 'ask', pct: 60 }, attempt: 1, max_attempts: 3, budget_cap_usd: 0.5, cost_usd: null }
+  it('create → POST /api/cockpit/agent/missions with the contract body, then follows the detail', async () => {
+    responder = (c) => {
+      if (c.path === '/api/cockpit/agent/missions' && c.method === 'POST') return { ok: true, status: 201, data: { ok: true, status: 'executed', mission_id: 'mjob_x', state: 'queued', deduped: false } }
+      if (c.path.startsWith('/api/cockpit/agent/missions?')) return { ok: true, status: 200, data: { ok: true, scope: 'mine', missions: [SUMMARY], next_cursor: null } }
+      return { ok: true, status: 200, data: { ok: true, mission: { ...SUMMARY, events: [{ id: 1, type: 'job.enqueued', state: 'queued' }], events_cursor: 1, findings: [], children: [] } } }
+    }
     const s = await import('./ic-store')
-    await s.createMission('ops.health_check')
-    expect(calls[0]).toEqual({ path: '/api/cockpit/agent/actions/invoke', method: 'POST', body: { capability_id: 'missions.create', input: { kind: 'ops.health_check' } } })
-    expect(s.getIc().missionNote).toMatch(/Queued ops.health_check · job mjob_x/)
+    const id = await s.createMission({ kind: 'mission.research', question: 'Research 9100001', context: { property_ids: ['9100001'] } })
+    expect(id).toBe('mjob_x')
+    const create = calls.find((c) => c.method === 'POST')!
+    expect(create).toEqual({ path: '/api/cockpit/agent/missions', method: 'POST', body: { kind: 'mission.research', question: 'Research 9100001', context: { property_ids: ['9100001'] } } })
+    expect(s.getIc().missionNote).toMatch(/Queued · mjob_x · queued/)
+    expect(s.getIc().inspector).toEqual({ kind: 'mission', id: 'mjob_x' })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(calls.some((c) => c.path === '/api/cockpit/agent/missions/mjob_x')).toBe(true)
+    expect(s.getIc().mission.data?.events).toHaveLength(1)
+  })
+  it('incremental events are merged by id (events_after never duplicates)', async () => {
+    const c = await import('../api/ic-client')
+    const a = c.normalizeMissionDetail({ mission: { ...SUMMARY, events: [{ id: 1, type: 'job.enqueued' }, { id: 2, type: 'job.claimed' }], events_cursor: 2 } })!
+    const b = c.normalizeMissionDetail({ mission: { ...SUMMARY, state: 'completed', events: [{ id: 2, type: 'job.claimed' }, { id: 3, type: 'job.completed' }], events_cursor: 3 } })!
+    const m = c.mergeMissionDetail(a, b)
+    expect(m.events.map((e) => e.id)).toEqual([1, 2, 3])
+    expect(m.events_cursor).toBe(3)
+    expect(m.state).toBe('completed')
+    expect(c.MISSIONS_ENDPOINTS.get('mjob_x', 2)).toBe('/api/cockpit/agent/missions/mjob_x?events_after=2')
+  })
+  it('a 404 missions API is "not enabled" with AGENT_MISSIONS_ENABLED, and cancel hits the exact path', async () => {
+    responder = () => ({ ok: false, status: 404, error: 'Not Found', message: '[404]', upstream: null })
+    const c = await import('../api/ic-client')
+    const r = await c.fetchMissions()
+    expect(r.ok).toBe(false)
+    if (!r.ok) { expect(r.state).toBe('not_enabled'); expect(r.next).toMatch(/AGENT_MISSIONS_ENABLED=1/) }
+    responder = () => ({ ok: true, status: 202, data: { ok: true, mission_id: 'mjob_x', state: 'running', pending: true, noop: false, children: [] } })
+    const s = await import('./ic-store')
+    const note = await s.cancelMission('mjob_x')
+    expect(calls.at(-2)?.path === '/api/cockpit/agent/missions/mjob_x/cancel' || calls.some((x) => x.path === '/api/cockpit/agent/missions/mjob_x/cancel' && x.method === 'POST')).toBe(true)
+    expect(note).toMatch(/next step boundary/)
   })
 })

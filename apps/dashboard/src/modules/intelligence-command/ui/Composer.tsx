@@ -6,10 +6,18 @@ import { resolveHotLeadProperties, resolveOwnerProperties, searchMentions, type 
 import { proposalsFor, type ActProposal } from '../model/act-model'
 import { composerKey, MODES, nextMode } from '../model/composer-model'
 import { fromMention, visibleChips, type IcChip, type PageContext } from '../model/context-model'
-import { cancelTurn, dropChip, historyDown, historyUp, mentionChip, proposeAct, refreshCapabilities, sendQuestion, setDraft, setMode, setOverlay, syncContext, useIc } from '../store/ic-store'
+import { cancelTurn, createMission, dropChip, historyDown, historyUp, mentionChip, proposeAct, refreshCapabilities, sendQuestion, setDraft, setMode, setOverlay, setSection, syncContext, useIc } from '../store/ic-store'
 import { IcGlyph, Kbd, PlaneNotice } from './primitives'
 
 const CHIP_GLYPH: Record<IcChip['kind'], 'db' | 'research' | 'chat' | 'mission' | 'workforce' | 'web' | 'finding'> = { property: 'db', campaign: 'mission', thread: 'chat', deal: 'finding', eg_filter: 'workforce', owner: 'research', market: 'web', hot_leads: 'finding' }
+
+/** The mission context: exactly what the ask body accepts (≤ 10 property ids, one campaign). */
+function toContext(chips: IcChip[]): { campaign_id?: string; property_ids?: string[] } | null {
+  const ids = [...new Set(chips.flatMap((c) => c.property_ids))].slice(0, 10)
+  const campaign = chips.find((c) => c.kind === 'campaign' && /^[0-9a-f-]{36}$/i.test(c.id))?.id
+  if (!ids.length && !campaign) return null
+  return { ...(campaign ? { campaign_id: campaign } : {}), ...(ids.length ? { property_ids: ids } : {}) }
+}
 
 type Pop = { q: MentionQuery; hits: MentionHit[]; index: number; loading: boolean } | null
 
@@ -206,6 +214,12 @@ export function Composer({ page, surface }: { page: PageContext; surface: 'dock'
       <div className="ic-composer__foot">
         <span className={cx('ic-model', !model.ok && 'is-bad')} title={model.note ?? ''}><IcGlyph name="model" size={11} />{status.phase === 'failed' && !status.data ? 'Research agent off' : model.primary ?? 'Resolving model'}{model.escalation ? <small> → {model.escalation}</small> : null}</span>
         {budget ? <span className={cx('ic-budget', `is-${budget.tone}`)} title={budget.detail}><i style={{ width: Math.round(budget.fraction * 28) }} />{budget.label} today</span> : null}
+        {ic.mode === 'plan' ? (
+          <button type="button" className="ic-btn is-quiet ic-asmission" disabled={!ic.draft.trim()} title="Run on the server as a persistent mission (POST /api/cockpit/agent/missions) — keeps running with the browser closed"
+            onClick={() => { const ctx = toContext(chips); void createMission({ kind: 'mission.research', question: ic.draft.trim(), ...(ctx ? { context: ctx } : {}) }).then((id) => { if (id) { setDraft(''); if (surface === 'dock') setSection('missions') } }) }}>
+            <IcGlyph name="mission" size={11} />Run as background mission
+          </button>
+        ) : null}
         <span className="ic-keys"><Kbd>↵</Kbd> send <Kbd>⇧↵</Kbd> line <Kbd>↑</Kbd> history <Kbd>⇧⇥</Kbd> mode <Kbd>esc</Kbd> {running ? 'cancel' : surface === 'overlay' ? 'close' : ''}</span>
       </div>
     </div>

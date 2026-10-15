@@ -29,16 +29,15 @@
  *     available:false + SHADOW_TABLE_NOT_APPLIED until PROPOSED_20261013160000_conversation_ai_shadow is applied.
  *   SHELL TELEMETRY: GET /api/cockpit/shell/telemetry — read through desktop/rail/rail-store (one shared poller).
  *
- * PROPOSED (not mounted at 6ecbae6b — every call answers 404 today and the UI
- * says "Missions runtime read route not deployed"). The R2 runtime rows are
- * agent.research_job (runtime_managed), agent.job_event and agent.runtime_status()
- * (PROPOSED_20261012140000_intel_runtime). Missions are CREATED today through
- * the existing capability `missions.create` (POST /actions/invoke); kinds with a
- * registered handler at 6ecbae6b: ops.health_check only.
- *     GET  /api/cockpit/agent/runtime/status                  → { ok, status: RuntimeStatus }      (agent.runtime_status())
- *     GET  /api/cockpit/agent/runtime/missions?kind=&limit=   → { ok, missions: RuntimeMission[] } (runtime_managed rows, newest first)
- *     GET  /api/cockpit/agent/runtime/missions/:job_id/events?after=  → { ok, events: RuntimeJobEvent[], cursor }
- *     POST /api/cockpit/agent/runtime/missions/:job_id/cancel → { ok, state }                       (agent.runtime_cancel)
+ * MISSIONS (rc-8.5.18, docs/agent-missions-api.md — not mounted at 6ecbae6b;
+ * until it is deployed and AGENT_MISSIONS_ENABLED=1 every call answers 404 and
+ * the UI says "Missions API not enabled" with the switches):
+ *     GET  /api/cockpit/agent/missions                 list (scope, kind, state, limit, before)
+ *     GET  /api/cockpit/agent/missions/:id             detail (events_after for incremental polling)
+ *     POST /api/cockpit/agent/missions                 create mission.research | mission.supervisor
+ *     POST /api/cockpit/agent/missions/:id/cancel      cancel (cascades to children)
+ * Missions run on the R2 runtime (agent.research_job / agent.job_event) and keep
+ * running with the browser closed; the browser only creates, watches and cancels.
  */
 import { callBackend, type BackendResult } from '../../../lib/api/backendClient'
 import { decideApproval as decideApprovalRaw, getApproval as getApprovalRaw, listApprovals as listApprovalsRaw, type CapabilityApproval, type DecideOutcome } from '../../agent/approvals/approvals-transport'
@@ -47,7 +46,7 @@ export type { CapabilityApproval, DecideOutcome }
 
 /* ── plane availability: every failure is a named, truthful state ─────── */
 
-export type PlaneId = 'ask' | 'actions' | 'shadow' | 'runtime' | 'telemetry'
+export type PlaneId = 'ask' | 'actions' | 'shadow' | 'missions' | 'telemetry'
 export type PlaneFailureState = 'not_enabled' | 'session' | 'denied' | 'locked' | 'unavailable' | 'error'
 export interface PlaneFailure { ok: false; state: PlaneFailureState; status: number; code: string; message: string; next: string | null }
 export type PlaneResult<T> = { ok: true; data: T } | PlaneFailure
@@ -57,7 +56,7 @@ export const PLANE_NEXT_STEP: Record<PlaneId, string> = {
   ask: 'Research agent route is off: AGENT_ENABLED=1, AGENT_LIVE_ROUTES=1 (production: AGENT_LIVE_PRODUCTION_PILOT=1 + AGENT_STORE=postgres) and AGENT_RESEARCH_ENABLED=1; schema PROPOSED_20261010130000_agent_research_ro.',
   actions: 'Actions plane not enabled: AGENT_ENABLED=1 + AGENT_CAPABILITIES_ENABLED=1 and AGENT_CAPABILITY_SECRET (≥16 chars); schema PROPOSED_20261013120000_agent_capabilities. Writes also need AGENT_CAPABILITIES_WRITES_ENABLED=1 with the read-only switch lifted.',
   shadow: 'Conversation AI shadow table not applied: PROPOSED_20261013160000_conversation_ai_shadow.',
-  runtime: 'Missions runtime read route not deployed: needs GET /api/cockpit/agent/runtime/* (not in this build), schema PROPOSED_20261012140000_intel_runtime, AGENT_RUNTIME_ENABLED=1 + CRON_AGENT_RUNTIME_ENABLED=true, and agent.runtime_limits.runtime_enabled armed by a named operator.',
+  missions: 'Missions API not enabled: needs the /api/cockpit/agent/missions routes (rc-8.5.18) with AGENT_ENABLED=1 + AGENT_MISSIONS_ENABLED=1, the R2 runtime (schema PROPOSED_20261012140000_intel_runtime, AGENT_RUNTIME_ENABLED=1, CRON_AGENT_RUNTIME_ENABLED=true, agent.runtime_limits armed) and the actions plane (missions.create).',
   telemetry: 'Shell telemetry is unreachable from this browser.',
 }
 
@@ -215,92 +214,130 @@ export async function fetchShadow(limit = 50, signal?: AbortSignal): Promise<Pla
   return fromBackend('shadow', res, normalizeShadow)
 }
 
-/* ── R2 runtime missions (PROPOSED read routes) ───────────────────────── */
+/* ── Missions (8.5.18 contract: docs/agent-missions-api.md) ──────────── */
+// GET  /api/cockpit/agent/missions                 ?scope=mine|all&kind=&state=&limit=&before=
+// GET  /api/cockpit/agent/missions/:id             ?events_after=<event id>
+// POST /api/cockpit/agent/missions                 { kind: mission.research|mission.supervisor, question, context?, sub_questions?, budget_usd?, per_mission_budget_usd?, max_model_calls? }
+// POST /api/cockpit/agent/missions/:id/cancel
+// Gate: 404 (empty body) unless AGENT_ENABLED + AGENT_MISSIONS_ENABLED=1. Not in 6ecbae6b; built in rc-8.5.18.
 
-export type RuntimeJobState = 'queued' | 'claimed' | 'running' | 'completed' | 'waiting_for_approval' | 'paused' | 'retrying' | 'failed' | 'cancelled' | 'budget_blocked' | 'dead_letter'
-export interface RuntimeMission {
-  job_id: string
-  kind: string
-  state: RuntimeJobState | string
+export type MissionKind = 'mission.research' | 'mission.supervisor' | 'acquisition.discovery' | 'conversation.review_digest' | 'ops.health_check' | string
+export const CREATABLE_KINDS = ['mission.research', 'mission.supervisor'] as const
+export type MissionState = 'queued' | 'claimed' | 'running' | 'retrying' | 'waiting_for_approval' | 'paused' | 'budget_blocked' | 'completed' | 'failed' | 'cancelled' | 'dead_letter'
+export const TERMINAL_MISSION_STATES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled', 'dead_letter'])
+export const isTerminalMission = (m: Pick<MissionSummary, 'state'>) => TERMINAL_MISSION_STATES.has(m.state)
+
+export interface MissionSummary {
+  mission_id: string
+  kind: MissionKind
+  state: MissionState | string
+  /** state, except `waiting` (yielded between steps) and `cancelling` */
+  display_state: string
+  title: string
   requested_by: string | null
-  trigger_kind: string | null
+  trigger: { kind: string | null; ref: string | null; schedule_id: number | null }
+  progress: { step: string | null; pct: number | null; steps_done: number | null; steps_total: number | null; children_done: number | null; children_total: number | null }
   attempt: number
   max_attempts: number
-  priority: number
-  budget_cap_usd: number
-  progress: Record<string, unknown>
-  result: Record<string, unknown> | null
-  last_error: Record<string, unknown> | null
+  cancel_requested: boolean
+  budget_cap_usd: number | null
+  cost_usd: number | null
+  parent_mission_id: string | null
+  last_error: { code: string } | null
   created_at: string | null
   updated_at: string | null
   ended_at: string | null
-  heartbeat_at: string | null
+  next_attempt_at: string | null
 }
-export interface RuntimeJobEvent { id: number; job_id: string; at: string | null; type: string; state: string; attempt: number; actor: string; payload: Record<string, unknown> }
-export interface RuntimeStatus {
-  at: string | null
-  limits: { runtime_enabled: boolean; emergency_stop: boolean; max_concurrency_global: number | null; kind_limits: Record<string, unknown> } | null
-  open: Record<string, number>
-  ended_24h: Record<string, number>
-  heartbeats: Array<{ worker_id: string; last_tick_at: string | null; ticks: number; age_s: number | null }>
-  schedules: Array<{ schedule_id: number; name: string; kind: string; enabled: boolean; interval_seconds: number; next_run_at: string | null; last_outcome: string | null }>
+export interface MissionEvent { id: number; at: string | null; type: string; state: string; attempt: number; actor: string; payload: Record<string, unknown> }
+export interface MissionFinding { finding_id: string; finding_type: string; key: string; value: Record<string, unknown>; source_id: string | null; citation: unknown; confidence: number | null; evidence_status: string | null; retrieved_at: string | null }
+export interface MissionCost { committed_usd: number; settled_usd: number; open_reserved_usd: number; unknown_usd: number; model_calls: number; children_committed_usd: number; total_committed_usd: number; budget_cap_usd: number | null }
+export interface MissionDetail extends MissionSummary {
+  input: { question: string | null; context: Record<string, unknown> | null; sub_questions: string[] | null; parameters: Record<string, unknown> | null } | null
+  result: Record<string, unknown> | null
+  cost: MissionCost | null
+  children: MissionSummary[]
+  events: MissionEvent[]
+  events_cursor: number
+  findings: MissionFinding[]
 }
+export interface MissionPage { scope: string; missions: MissionSummary[]; next_cursor: string | null }
+export interface MissionCreate { kind: 'mission.research' | 'mission.supervisor'; question: string; context?: { campaign_id?: string; property_ids?: string[] }; sub_questions?: string[]; budget_usd?: number; per_mission_budget_usd?: number; max_model_calls?: number }
+export interface MissionCreated { status: string; mission_id: string; state: string; deduped: boolean }
+export interface MissionCancelled { mission_id: string; state: string; pending: boolean; noop: boolean; children: Array<{ mission_id: string; state: string; pending: boolean }> }
 
-export const RUNTIME_ENDPOINTS = {
-  status: '/api/cockpit/agent/runtime/status',
-  missions: (kind?: string) => `/api/cockpit/agent/runtime/missions?limit=50${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`,
-  events: (jobId: string, after = 0) => `/api/cockpit/agent/runtime/missions/${encodeURIComponent(jobId)}/events${after ? `?after=${after}` : ''}`,
-  cancel: (jobId: string) => `/api/cockpit/agent/runtime/missions/${encodeURIComponent(jobId)}/cancel`,
+const MBASE = '/api/cockpit/agent/missions'
+export const MISSIONS_ENDPOINTS = {
+  list: (q: { scope?: 'mine' | 'all'; kind?: string[]; state?: string[]; limit?: number; before?: string | null } = {}) => {
+    const u = new URLSearchParams()
+    if (q.scope) u.set('scope', q.scope)
+    for (const k of q.kind ?? []) u.append('kind', k)
+    for (const k of q.state ?? []) u.append('state', k)
+    u.set('limit', String(q.limit ?? 50))
+    if (q.before) u.set('before', q.before)
+    return `${MBASE}?${u.toString()}`
+  },
+  get: (id: string, eventsAfter = 0) => `${MBASE}/${encodeURIComponent(id)}${eventsAfter ? `?events_after=${eventsAfter}` : ''}`,
+  create: MBASE,
+  cancel: (id: string) => `${MBASE}/${encodeURIComponent(id)}/cancel`,
 } as const
 
-/** Kinds with a registered runtime handler at 6ecbae6b (capabilities/defs/platform.js MISSION_KINDS). */
-export const KNOWN_MISSION_KINDS = ['ops.health_check'] as const
-/** The research mission kind the backend agent is adding (agent.runtime_enqueue 'research.mission'). */
-export const RESEARCH_MISSION_KIND = 'research.mission'
-
-const numMap = (v: unknown): Record<string, number> => Object.fromEntries(Object.entries(obj(v)).map(([k, n]) => [k, Number(n) || 0]))
-
-export function normalizeRuntimeStatus(b: Record<string, unknown>): RuntimeStatus {
-  const s = obj(b.status ?? b)
-  const lim = s.limits && typeof s.limits === 'object' ? obj(s.limits) : null
+const n0 = (v: unknown) => Number(v) || 0
+export function normalizeMissionSummary(m: Record<string, unknown>): MissionSummary {
+  const t = obj(m.trigger); const p = obj(m.progress); const e = m.last_error && typeof m.last_error === 'object' ? obj(m.last_error) : null
   return {
-    at: str(s.at),
-    limits: lim ? { runtime_enabled: lim.runtime_enabled === true, emergency_stop: lim.emergency_stop === true, max_concurrency_global: numOrNull(lim.max_concurrency_global), kind_limits: obj(lim.kind_limits) } : null,
-    open: numMap(s.open), ended_24h: numMap(s.ended_24h),
-    heartbeats: arr<Record<string, unknown>>(s.heartbeats).map((h) => ({ worker_id: String(h.worker_id ?? ''), last_tick_at: str(h.last_tick_at), ticks: Number(h.ticks) || 0, age_s: numOrNull(h.age_s) })),
-    schedules: arr<Record<string, unknown>>(s.schedules).map((x) => ({ schedule_id: Number(x.schedule_id) || 0, name: String(x.name ?? ''), kind: String(x.kind ?? ''), enabled: x.enabled === true, interval_seconds: Number(x.interval_seconds) || 0, next_run_at: str(x.next_run_at), last_outcome: str(x.last_outcome) })),
+    mission_id: String(m.mission_id ?? ''), kind: String(m.kind ?? ''), state: String(m.state ?? ''), display_state: String(m.display_state ?? m.state ?? ''), title: String(m.title ?? ''),
+    requested_by: str(m.requested_by), trigger: { kind: str(t.kind), ref: str(t.ref), schedule_id: numOrNull(t.schedule_id) },
+    progress: { step: str(p.step), pct: numOrNull(p.pct), steps_done: numOrNull(p.steps_done), steps_total: numOrNull(p.steps_total), children_done: numOrNull(p.children_done), children_total: numOrNull(p.children_total) },
+    attempt: n0(m.attempt), max_attempts: n0(m.max_attempts), cancel_requested: m.cancel_requested === true, budget_cap_usd: numOrNull(m.budget_cap_usd), cost_usd: numOrNull(m.cost_usd),
+    parent_mission_id: str(m.parent_mission_id), last_error: e ? { code: String(e.code ?? 'ERROR') } : null,
+    created_at: str(m.created_at), updated_at: str(m.updated_at), ended_at: str(m.ended_at), next_attempt_at: str(m.next_attempt_at),
+  }
+}
+export function normalizeMissionPage(b: Record<string, unknown>): MissionPage {
+  return { scope: String(b.scope ?? 'mine'), missions: arr<Record<string, unknown>>(b.missions).map(normalizeMissionSummary).filter((m) => m.mission_id), next_cursor: str(b.next_cursor) }
+}
+export function normalizeMissionDetail(b: Record<string, unknown>): MissionDetail | null {
+  const m = obj(b.mission)
+  const base = normalizeMissionSummary(m)
+  if (!base.mission_id) return null
+  const inp = m.input && typeof m.input === 'object' ? obj(m.input) : null
+  const c = m.cost && typeof m.cost === 'object' ? obj(m.cost) : null
+  return {
+    ...base,
+    input: inp ? { question: str(inp.question), context: inp.context && typeof inp.context === 'object' ? obj(inp.context) : null, sub_questions: Array.isArray(inp.sub_questions) ? inp.sub_questions.map(String) : null, parameters: inp.parameters && typeof inp.parameters === 'object' ? obj(inp.parameters) : null } : null,
+    result: m.result && typeof m.result === 'object' ? obj(m.result) : null,
+    cost: c ? { committed_usd: n0(c.committed_usd), settled_usd: n0(c.settled_usd), open_reserved_usd: n0(c.open_reserved_usd), unknown_usd: n0(c.unknown_usd), model_calls: n0(c.model_calls), children_committed_usd: n0(c.children_committed_usd), total_committed_usd: n0(c.total_committed_usd), budget_cap_usd: numOrNull(c.budget_cap_usd) } : null,
+    children: arr<Record<string, unknown>>(m.children).map(normalizeMissionSummary).filter((x) => x.mission_id),
+    events: arr<Record<string, unknown>>(m.events).map((e) => ({ id: n0(e.id), at: str(e.at), type: String(e.type ?? ''), state: String(e.state ?? ''), attempt: n0(e.attempt), actor: String(e.actor ?? ''), payload: obj(e.payload) })),
+    events_cursor: n0(m.events_cursor),
+    findings: arr<Record<string, unknown>>(m.findings).map((f) => ({ finding_id: String(f.finding_id ?? ''), finding_type: String(f.finding_type ?? ''), key: String(f.key ?? ''), value: obj(f.value), source_id: str(f.source_id), citation: f.citation ?? null, confidence: numOrNull(f.confidence), evidence_status: str(f.evidence_status), retrieved_at: str(f.retrieved_at) })).filter((f) => f.finding_id),
   }
 }
 
-export function normalizeMissions(b: Record<string, unknown>): RuntimeMission[] {
-  return arr<Record<string, unknown>>(b.missions).map((m) => ({
-    job_id: String(m.job_id ?? ''), kind: String(m.kind ?? ''), state: String(m.state ?? ''), requested_by: str(m.requested_by), trigger_kind: str(m.trigger_kind),
-    attempt: Number(m.attempt) || 0, max_attempts: Number(m.max_attempts) || 0, priority: Number(m.priority) || 0, budget_cap_usd: Number(m.budget_cap_usd) || 0,
-    progress: obj(m.progress), result: m.result && typeof m.result === 'object' ? obj(m.result) : null, last_error: m.last_error && typeof m.last_error === 'object' ? obj(m.last_error) : null,
-    created_at: str(m.created_at), updated_at: str(m.updated_at), ended_at: str(m.ended_at), heartbeat_at: str(m.heartbeat_at),
-  })).filter((m) => m.job_id)
+/** Incremental detail: merge newly polled events (events_after) onto what is held, de-duplicated by id. */
+export function mergeMissionDetail(prev: MissionDetail | null, next: MissionDetail): MissionDetail {
+  if (!prev || prev.mission_id !== next.mission_id) return next
+  const seen = new Set(prev.events.map((e) => e.id))
+  const events = [...prev.events, ...next.events.filter((e) => !seen.has(e.id))].sort((a, b) => a.id - b.id)
+  return { ...next, events, events_cursor: Math.max(prev.events_cursor, next.events_cursor) }
 }
 
-export function normalizeJobEvents(b: Record<string, unknown>): RuntimeJobEvent[] {
-  return arr<Record<string, unknown>>(b.events).map((e) => ({ id: Number(e.id) || 0, job_id: String(e.job_id ?? ''), at: str(e.at), type: String(e.type ?? ''), state: String(e.state ?? ''), attempt: Number(e.attempt) || 0, actor: String(e.actor ?? ''), payload: obj(e.payload) }))
+export async function fetchMissions(q: Parameters<typeof MISSIONS_ENDPOINTS.list>[0] = {}, signal?: AbortSignal): Promise<PlaneResult<MissionPage>> {
+  return fromBackend('missions', await callBackend<unknown>(MISSIONS_ENDPOINTS.list(q), { signal, timeoutMs: 12_000 }), normalizeMissionPage)
 }
-
-export async function fetchRuntimeStatus(signal?: AbortSignal): Promise<PlaneResult<RuntimeStatus>> {
-  return fromBackend('runtime', await callBackend<unknown>(RUNTIME_ENDPOINTS.status, { signal, timeoutMs: 10_000 }), normalizeRuntimeStatus)
+export async function fetchMission(id: string, eventsAfter = 0, signal?: AbortSignal): Promise<PlaneResult<MissionDetail>> {
+  const r = fromBackend('missions', await callBackend<unknown>(MISSIONS_ENDPOINTS.get(id, eventsAfter), { signal, timeoutMs: 12_000 }), normalizeMissionDetail)
+  if (r.ok && !r.data) return { ok: false, state: 'error', status: 200, code: 'MISSION_SHAPE', message: 'Unexpected mission response.', next: null }
+  return r as PlaneResult<MissionDetail>
 }
-export async function fetchMissions(kind?: string, signal?: AbortSignal): Promise<PlaneResult<RuntimeMission[]>> {
-  return fromBackend('runtime', await callBackend<unknown>(RUNTIME_ENDPOINTS.missions(kind), { signal, timeoutMs: 12_000 }), normalizeMissions)
+export async function createMission(body: MissionCreate): Promise<PlaneResult<MissionCreated>> {
+  const res = await callBackend<unknown>(MISSIONS_ENDPOINTS.create, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 30_000 })
+  return fromBackend('missions', res, (b) => ({ status: String(b.status ?? ''), mission_id: String(b.mission_id ?? ''), state: String(b.state ?? ''), deduped: b.deduped === true }))
 }
-export async function fetchMissionEvents(jobId: string, after = 0, signal?: AbortSignal): Promise<PlaneResult<RuntimeJobEvent[]>> {
-  return fromBackend('runtime', await callBackend<unknown>(RUNTIME_ENDPOINTS.events(jobId, after), { signal, timeoutMs: 12_000 }), normalizeJobEvents)
-}
-export async function cancelMission(jobId: string): Promise<PlaneResult<{ state: string | null }>> {
-  return fromBackend('runtime', await callBackend<unknown>(RUNTIME_ENDPOINTS.cancel(jobId), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', timeoutMs: 10_000 }), (b) => ({ state: str(b.state) }))
-}
-
-/** Create a persistent mission through the EXISTING capability (agent.runtime_enqueue). */
-export async function createMission(kind: string, input: Record<string, unknown> = {}): Promise<PlaneResult<InvokeOutcome>> {
-  return invokeCapability('missions.create', { kind, ...input })
+export async function cancelMission(id: string): Promise<PlaneResult<MissionCancelled>> {
+  const res = await callBackend<unknown>(MISSIONS_ENDPOINTS.cancel(id), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', timeoutMs: 15_000 })
+  return fromBackend('missions', res, (b) => ({ mission_id: String(b.mission_id ?? id), state: String(b.state ?? ''), pending: b.pending === true, noop: b.noop === true, children: arr<Record<string, unknown>>(b.children).map((c) => ({ mission_id: String(c.mission_id ?? ''), state: String(c.state ?? ''), pending: c.pending === true })) }))
 }
 
 /** Platform health through the existing read capability (operator-initiated). */

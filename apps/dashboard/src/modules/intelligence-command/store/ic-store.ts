@@ -15,8 +15,8 @@ import { parseSlash, type MentionChip } from '../../agent/ask/ask-model'
 import { activeThread, ask, getAsk, newThread, openThread, stopTurn } from '../../agent/ask/ask-store'
 import { fetchLiveHistory, liveFailureCopy, type LiveHistoryRow } from '../../agent/runtime/live-transport'
 import {
-  createMission as createMissionCall, decideApproval, fetchCapabilities, fetchMissions, fetchPlatformHealth, fetchRuntimeStatus, fetchShadow, getApproval, invokeCapability, listApprovals,
-  type CapabilityApproval, type CapabilityDescriptor, type InvokeOutcome, type PlaneFailure, type PlaneResult, type RuntimeMission, type RuntimeStatus, type ShadowPage,
+  cancelMission as cancelMissionCall, createMission as createMissionCall, decideApproval, fetchCapabilities, fetchMission, fetchMissions, fetchPlatformHealth, fetchShadow, isTerminalMission, mergeMissionDetail, getApproval, invokeCapability, listApprovals,
+  type CapabilityApproval, type CapabilityDescriptor, type InvokeOutcome, type PlaneFailure, type PlaneResult, type MissionCreate, type MissionDetail, type MissionPage, type ShadowPage,
 } from '../api/ic-client'
 import { decideMessage } from '../model/act-model'
 import { EMPTY_HISTORY, PLAN_COMMAND, historyNext, historyPrev, pushHistory, type ComposerMode, type History } from '../model/composer-model'
@@ -70,8 +70,9 @@ export interface IcState {
   focusTick: number
   capabilities: Load<CapabilityDescriptor[]>
   approvals: Load<CapabilityApproval[]>
-  missions: Load<RuntimeMission[]>
-  runtime: Load<RuntimeStatus>
+  missions: Load<MissionPage>
+  /** the open mission detail (polled with events_after while it runs) */
+  mission: Load<MissionDetail>
   shadow: Load<ShadowPage>
   quickScans: Load<LiveHistoryRow[]>
   health: Load<InvokeOutcome>
@@ -83,7 +84,7 @@ const HISTORY_KEY = 'lc.ic.history.v1'
 
 const INITIAL: IcState = {
   section: 'conversations', overlay: false, mode: 'ask', draft: '', chips: EMPTY_CHIPS, history: EMPTY_HISTORY, turnModes: {}, acts: [], inspector: null, expanded: {}, focusTick: 0,
-  capabilities: idle(), approvals: idle(), missions: idle(), runtime: idle(), shadow: idle(), quickScans: idle(), health: idle(), missionNote: null,
+  capabilities: idle(), approvals: idle(), missions: idle(), mission: idle(), shadow: idle(), quickScans: idle(), health: idle(), missionNote: null,
 }
 
 let state: IcState = INITIAL
@@ -194,7 +195,7 @@ export function openConversation(id: string) { openThread(id); set({ section: 'c
 
 /* ── loads ─────────────────────────────────────────────────────────────── */
 
-type LoadKey = 'capabilities' | 'approvals' | 'missions' | 'runtime' | 'shadow' | 'health'
+type LoadKey = 'capabilities' | 'approvals' | 'missions' | 'shadow' | 'health'
 const inflight = new Map<string, Promise<void>>()
 function load<K extends LoadKey>(key: K, fn: () => Promise<PlaneResult<NonNullable<IcState[K]['data']>>>): Promise<void> {
   const prior = inflight.get(key)
@@ -210,7 +211,7 @@ function load<K extends LoadKey>(key: K, fn: () => Promise<PlaneResult<NonNullab
 
 export const refreshCapabilities = () => load('capabilities', () => fetchCapabilities())
 export const refreshApprovals = () => load('approvals', () => listApprovals('pending'))
-export const refreshMissions = () => Promise.all([load('missions', () => fetchMissions()), load('runtime', () => fetchRuntimeStatus())]).then(() => undefined)
+export const refreshMissions = () => load('missions', () => fetchMissions({ scope: 'mine', limit: 50 }))
 export const refreshShadow = () => load('shadow', () => fetchShadow(50))
 export const refreshHealth = () => load('health', () => fetchPlatformHealth())
 
@@ -220,15 +221,58 @@ export async function refreshQuickScans() {
   set({ quickScans: r.ok ? { phase: 'ready', data: r.data, failure: null, at: Date.now() } : { phase: 'failed', data: null, failure: { ok: false, state: r.status === 404 ? 'not_enabled' : 'error', status: r.status, code: r.code, message: liveFailureCopy(r), next: r.status === 404 ? 'Quick Scan history needs AGENT_LIVE_ROUTES=1 (production: the pilot flags + AGENT_STORE=postgres).' : null }, at: Date.now() } }, false)
 }
 
-/** Queue a persistent runtime mission through missions.create (only kinds with a server handler). */
-export async function createMission(kind: string) {
+/* ── missions (persistent; the server runs them, the browser only watches) ── */
+
+/** Create a mission (POST /missions). The note is the server's own answer. */
+export async function createMission(body: MissionCreate): Promise<string | null> {
   set({ missionNote: null }, false)
-  const r = await createMissionCall(kind)
-  const note = !r.ok ? r.message
-    : r.data.ok ? `Queued ${kind} · job ${String((r.data.result as { job_id?: string } | null)?.job_id ?? '—')}${r.data.status === 'replayed' ? ' (already queued this hour)' : ''}`
-    : `Refused: ${r.data.code ?? r.data.status}`
+  const r = await createMissionCall(body)
+  const note = !r.ok ? `${r.message}${r.code && r.state !== 'not_enabled' ? ` (${r.code})` : ''}`
+    : `${r.data.deduped ? 'Already queued this hour' : 'Queued'} · ${r.data.mission_id} · ${r.data.state}`
+  set((s) => ({ missionNote: note, history: pushHistory(s.history, body.question) }), false)
+  void refreshMissions()
+  if (r.ok && r.data.mission_id) { openMission(r.data.mission_id); return r.data.mission_id }
+  return null
+}
+
+let missionPoll: { id: string; timer: number } | null = null
+/** Open a mission's detail and follow it: events_after every 4 s while it is not terminal. */
+export function openMission(id: string) {
+  if (missionPoll) window.clearTimeout(missionPoll.timer)
+  set((s) => ({ inspector: { kind: 'mission', id }, mission: s.mission.data?.mission_id === id ? s.mission : { phase: 'loading', data: null, failure: null, at: null } }), false)
+  const tick = async () => {
+    const cur = getIc().mission.data
+    const after = cur && cur.mission_id === id ? cur.events_cursor : 0
+    const r = await fetchMission(id, after)
+    if (getIc().inspector?.kind !== 'mission' || (getIc().inspector as { id: string }).id !== id) return
+    if (r.ok) set((s) => ({ mission: { phase: 'ready', data: mergeMissionDetail(s.mission.data, r.data), failure: null, at: Date.now() } }), false)
+    else set({ mission: { phase: 'failed', data: getIc().mission.data, failure: r, at: Date.now() } }, false)
+    const d = getIc().mission.data
+    if (r.ok && d && !isTerminalMission(d)) missionPoll = { id, timer: window.setTimeout(tick, 4000) }
+    else if (d && isTerminalMission(d)) void refreshMissions()
+  }
+  missionPoll = { id, timer: window.setTimeout(tick, 0) }
+}
+
+export async function cancelMission(id: string): Promise<string> {
+  const r = await cancelMissionCall(id)
+  const note = !r.ok ? r.message : r.data.noop ? 'The mission had already ended.' : r.data.pending ? `Cancel requested — it stops at its next step boundary${r.data.children.length ? ` (with ${r.data.children.length} sub-mission${r.data.children.length === 1 ? '' : 's'})` : ''}.` : `Cancelled${r.data.children.length ? ` with ${r.data.children.length} sub-mission${r.data.children.length === 1 ? '' : 's'}` : ''}.`
   set({ missionNote: note }, false)
   void refreshMissions()
+  if (getIc().inspector?.kind === 'mission') openMission(id)
+  return note
+}
+
+/** List polling while any listed mission is non-terminal (every 15 s, per the contract's 10–30 s). */
+let listTimer = 0
+export function followMissionList(): () => void {
+  const loop = async () => {
+    await refreshMissions()
+    const live = getIc().missions.data?.missions.some((m) => !isTerminalMission(m))
+    listTimer = window.setTimeout(loop, live ? 15_000 : 60_000)
+  }
+  void loop()
+  return () => window.clearTimeout(listTimer)
 }
 
 /* ── Act: capability → approval → decide ──────────────────────────────── */

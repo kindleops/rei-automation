@@ -34,7 +34,7 @@ const src = await fs.readFile(fixture, 'utf8')
 const markers = new Set(['installIcDevFixtures', '__icDev'])
 for (const m of src.matchAll(/IC_DEV_FIXTURE_MARKER = '([^']+)'/g)) markers.add(m[1])
 for (const m of src.matchAll(/'(\d{4} [A-Z][a-z]+ (?:Ct|Row|Way) · synthetic)'/g)) markers.add(m[1])
-for (const m of src.matchAll(/'(apr_dev|mjob_0000dev1|ask_dev|qs_dev0001)/g)) markers.add(m[1])
+for (const m of ['apr_dev', 'mjob_0000dev', 'qs_dev0001']) if (src.includes(m)) markers.add(m)
 
 const files = []
 async function walk(d) { for (const e of await fs.readdir(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) await walk(p); else if (/\.(js|css|html|map)$/.test(e.name)) files.push(p) } }
