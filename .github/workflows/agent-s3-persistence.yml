@@ -21,11 +21,47 @@ on:
       - 'apps/api/scripts/agent/**'
       - 'infra/cloudflare/worker/index.ts'
       - '.github/workflows/agent-s3-persistence.yml'
+      # rc-8.5.15.1 test isolation: any fixture, migration, test or harness change
+      - 'scripts/db/**'
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - 'supabase/rollbacks/**'
+      - 'apps/api/tests/**'
+      - 'apps/api/scripts/**'
+      - 'apps/dashboard/**/*.test.*'
+      - '.github/workflows/cloudflare-staging.yml'
 
 permissions:
   contents: read
 
 jobs:
+  # TEST ISOLATION (rc-8.5.15.1, owner boundary 2026-10-15): fixtures never carry
+  # transaction control or include another file; test harnesses never name or read
+  # a production target; every migration round-trip runs on a database the runner
+  # creates on this ephemeral container (production-like targets are refused).
+  test-isolation:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (pinned by SHA)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 (pinned by SHA)
+        with:
+          node-version: 22
+      - name: migration fixture lint
+        run: node scripts/db/lint-migration-fixtures.mjs
+      - name: no production target in test harnesses
+        run: node scripts/db/scan-test-prod-targets.mjs
+      - name: migration round-trips on the disposable Postgres (runner)
+        run: node scripts/db/run-migration-test.mjs --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres --all
+
   pg17:
     runs-on: ubuntu-latest
     services:
@@ -69,13 +105,14 @@ jobs:
           psql "$DB" -v ON_ERROR_STOP=1 -f supabase/migrations/PROPOSED_20261010130000_agent_research_ro_pretest.sql
           psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/migrations/PROPOSED_20261010130000_agent_research_ro.sql
 
-      - name: R2 runtime migration round-trip (pretest in BEGIN…ROLLBACK → apply → verify → rollback → pretest → apply)
+      - name: R2 runtime migration round-trip (pretest → apply → verify → posttest in BEGIN…ROLLBACK → rollback → pretest → apply)
         run: |
           psql "$DB" -v ON_ERROR_STOP=1 -q -c "create table if not exists public.system_control (key text primary key, value text, updated_at timestamptz default now()); create table if not exists public.send_queue (id bigserial primary key, queue_status text, scheduled_for timestamptz)"
           psql "$DB" -v ON_ERROR_STOP=1 -f supabase/migrations/PROPOSED_20261012140000_intel_runtime_pretest.sql
           psql "$DB" -v ON_ERROR_STOP=1 -q --single-transaction -f supabase/migrations/PROPOSED_20261012140000_intel_runtime.sql
           psql "$DB" -v ON_ERROR_STOP=1 -At -F ' | ' -f supabase/migrations/PROPOSED_20261012140000_intel_runtime_verify.sql | tee /tmp/verify-runtime.txt
           if grep -q ' | f | ' /tmp/verify-runtime.txt; then echo "runtime verify FAILED"; exit 1; fi
+          psql "$DB" -v ON_ERROR_STOP=1 -f supabase/migrations/PROPOSED_20261012140000_intel_runtime_posttest.sql
           psql "$DB" -v ON_ERROR_STOP=1 -q -f supabase/migrations/PROPOSED_20261012140000_intel_runtime_rollback.sql
           psql "$DB" -v ON_ERROR_STOP=1 -f supabase/migrations/PROPOSED_20261012140000_intel_runtime_pretest.sql
           psql "$DB" -v ON_ERROR_STOP=1 -q --single-transaction -f supabase/migrations/PROPOSED_20261012140000_intel_runtime.sql

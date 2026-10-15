@@ -1,21 +1,13 @@
+-- lc-fixture: posttest
 -- =============================================================================
--- Rollback-only pretest for
---   supabase/migrations/20261003220000_campaign_audience_completeness.sql
--- and its rollback,
---   supabase/rollbacks/20261003220000_campaign_audience_completeness.rollback.sql
---
--- Run with psql as postgres, from the repo root:
---   psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/campaign_audience_completeness_test.sql
---
--- ONE transaction, ending in ROLLBACK. Nothing persists.
---
--- Locks: the migration's ALTER TABLE … ADD COLUMN takes ACCESS EXCLUSIVE on
--- campaign_target_graph and campaign_target_graph_stage and holds it until the final
--- ROLLBACK, so every graph reader (Composer, Reach, Build) waits while this runs
--- (measured pieces: 200-row projection ≈ 1 s, 25-property contact batch ≈ 1-2 s; the
--- whole test ≈ 10-20 s). lock_timeout 5s: if a reader already holds the graph, the
--- test fails at the ALTER instead of queueing everyone behind it. Run off-window
--- (after 23:00 CDT), outside a campaign build.
+-- POSTTEST for supabase/migrations/20261003220000_campaign_audience_completeness.sql (A–D).
+-- DISPOSABLE DATABASE ONLY (owner boundary 2026-10-15): never run against production — not even
+-- inside BEGIN … ROLLBACK. Run through the migration test runner on a disposable database.
+--   node scripts/db/run-migration-test.mjs --pg-bin <dir> --id campaign_audience_completeness --prod-shape …
+-- rc-8.5.15.1: formerly a "rollback-only pretest" that \ir-included the migration and its
+-- rollback file inside its own transaction (and was run with psql against production). The
+-- runner now applies the migration on a disposable database; this file asserts A–D in ONE
+-- transaction ending in ROLLBACK; E (the rollback file) is campaign_audience_completeness_rollback_test.sql.
 --
 -- What it proves (every check RAISEs on failure; it ends with 'ALL PASS'):
 --   A. Catalog: the new functions exist, the contact batch no longer treats an unknown
@@ -38,26 +30,6 @@
 begin;
 set local statement_timeout = '180s';
 set local lock_timeout = '5s';
-
--- ---------------------------------------------------------- pre-state ----
-create temp table t_pre on commit drop as
-select 'fn:' || p.oid::regprocedure::text as k, md5(pg_get_functiondef(p.oid)) as v
-from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-where n.nspname = 'public'
-  and p.proname in ('refresh_campaign_target_graph_seller_batch', 'campaign_target_graph_apply_filter_columns')
-union all
-select 'cols:' || table_name, md5(string_agg(column_name || ':' || data_type, ',' order by ordinal_position))
-from information_schema.columns
-where table_schema = 'public' and table_name in ('campaign_target_graph', 'campaign_target_graph_stage')
-group by table_name;
-
-do $$ begin
-  if (select count(*) from t_pre) <> 4 then raise exception 'FAIL pre: expected 2 functions + 2 tables, got %', (select count(*) from t_pre); end if;
-end $$;
-
--- ------------------------------------------------------------ migrate ----
-\ir ../migrations/20261003220000_campaign_audience_completeness.sql
-set local statement_timeout = '180s';
 
 -- ---------------------------------------------------------- A. catalog ----
 do $$
@@ -241,38 +213,5 @@ do $$ begin
   raise notice 'PASS D: incremental tick and coverage measurement run';
 end $$;
 
--- ---------------------------------------------------------- E. ROLLBACK ----
-\ir ../rollbacks/20261003220000_campaign_audience_completeness.rollback.sql
-set local statement_timeout = '180s';
-
-do $$
-declare n int; fn text;
-begin
-  create temp table t_post on commit drop as
-  select 'fn:' || p.oid::regprocedure::text as k, md5(pg_get_functiondef(p.oid)) as v
-  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public'
-    and p.proname in ('refresh_campaign_target_graph_seller_batch', 'campaign_target_graph_apply_filter_columns')
-  union all
-  select 'cols:' || table_name, md5(string_agg(column_name || ':' || data_type, ',' order by ordinal_position))
-  from information_schema.columns
-  where table_schema = 'public' and table_name in ('campaign_target_graph', 'campaign_target_graph_stage')
-  group by table_name;
-  select count(*) into n from (
-    (select * from t_pre except select * from t_post) union all (select * from t_post except select * from t_pre)) d;
-  if n > 0 then
-    raise exception 'FAIL E: rollback differs from the live state: %', (select string_agg(k, ', ') from (
-      (select * from t_pre except select * from t_post) union all (select * from t_post except select * from t_pre)) d);
-  end if;
-  foreach fn in array array['public.campaign_target_graph_enrich_rows(text[])', 'public.campaign_target_graph_enrich_market(text,text,integer)',
-                            'public.campaign_target_graph_reconcile_tick(integer,integer)', 'public.campaign_target_graph_incremental_tick(integer)'] loop
-    if to_regprocedure(fn) is not null then raise exception 'FAIL E: % survived the rollback', fn; end if;
-  end loop;
-  if to_regclass('public.campaign_target_graph_sync_state') is not null or to_regclass('public.campaign_target_graph_coverage') is not null then
-    raise exception 'FAIL E: new tables survived the rollback';
-  end if;
-  raise notice 'PASS E: rollback restores both live functions verbatim and the exact column lists; new objects gone';
-end $$;
-
-do $$ begin raise notice 'ALL PASS (rolling back; nothing persists)'; end $$;
+do $$ begin raise notice 'PASS A–D (rolling back; nothing persists)'; end $$;
 rollback;
