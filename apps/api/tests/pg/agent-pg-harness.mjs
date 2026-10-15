@@ -29,6 +29,8 @@ export const SQL = {
   researchRollback: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro_rollback.sql'),
   // R2 persistent runtime (applied after the research migration; no BEGIN/COMMIT inside — see applyInTransaction)
   runtimePretest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime_pretest.sql'),
+  // rc-8.5.15.1: the apply → assert → ROLLBACK half of the old pretest (a fixture never includes a file)
+  runtimePosttest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime_posttest.sql'),
   runtime: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime.sql'),
   runtimeRollback: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime_rollback.sql'),
 }

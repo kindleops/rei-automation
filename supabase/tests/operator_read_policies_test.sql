@@ -1,18 +1,13 @@
+-- lc-fixture: posttest
 -- =============================================================================
--- Rollback-only pretest for
---   supabase/migrations/20261003120000_operator_read_policies.sql
---
--- Run with psql as the DB owner (postgres), from the repo root:
---   psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/operator_read_policies_test.sql
--- It needs psql because it pulls the migration in with \ir, so the test always
--- exercises the exact file that will be applied.
---
--- Everything runs in ONE transaction that ends in ROLLBACK. Nothing survives:
--- not the table, the function, the policies, the grants or the seed row. While it
--- runs, CREATE POLICY holds ACCESS EXCLUSIVE locks on the 16 tables until the
--- ROLLBACK, so API reads of properties, campaign_target_graph and the rest WAIT
--- for the post-apply section, which takes seconds (the heavy BEFORE probes run
--- before any lock is taken). Run it off-peak, outside a feeder or campaign tick.
+-- POSTTEST for supabase/migrations/20261003120000_operator_read_policies.sql.
+-- DISPOSABLE DATABASE ONLY (owner boundary 2026-10-15): never run against production — not even
+-- inside BEGIN … ROLLBACK. Run through the migration test runner on a disposable database.
+--   node scripts/db/run-migration-test.mjs --pg-bin <dir> --id operator_read_policies
+-- rc-8.5.15.1: formerly a "rollback-only pretest" that \ir-included the migration inside its
+-- own transaction (and was run with psql against production). The runner now applies the
+-- migration on a disposable database; operator_read_policies_pretest.sql recorded the BEFORE
+-- state in lc_mt; this file asserts the AFTER state in ONE transaction ending in ROLLBACK.
 --
 -- What it proves (every check RAISEs on failure; it ends with 'ALL PASS'):
 --   1. Allowed operator (a2ee0ffe-...) : rows > 0 wherever service role sees rows.
@@ -30,6 +25,8 @@
 \set ON_ERROR_STOP on
 begin;
 set local statement_timeout = '120s';
+\set op_uid    'a2ee0ffe-6f27-475b-a795-ee617c9472c6'
+\set nonop_uid '00000000-0000-4000-8000-00000000beef'
 
 -- --------------------------------------------------------------- probes ----
 -- Runs a capped count as a given role and JWT subject (p_role null = the
@@ -68,42 +65,6 @@ begin
   return acc;
 end $$;
 
-create temp table t_rel (rel text primary key) on commit drop;
-insert into t_rel values
-  ('properties'),('prospects'),('master_owners'),('phones'),('emails'),('campaigns'),
-  ('campaign_targets'),('campaign_target_graph'),('recently_sold_properties'),
-  ('sms_suppression_list'),('sub_owners'),('thread_ai_state'),
-  ('property_acquisition_scores'),('universal_lead_command_cache'),
-  ('property_cash_offer_snapshots'),('sms_campaign_targets');
-
-\set op_uid    'a2ee0ffe-6f27-475b-a795-ee617c9472c6'
-\set nonop_uid '00000000-0000-4000-8000-00000000beef'
-
--- ------------------------------------------------------- BEFORE state ----
-create temp table t_pre on commit drop as
-select rel,
-       pg_temp.probe(rel, null,            null)          as svc,
-       pg_temp.probe(rel, 'anon',          null)          as anon_pre,
-       pg_temp.probe(rel, 'authenticated', :'op_uid')     as op_pre,
-       has_table_privilege('anon', ('public.' || rel)::regclass, 'SELECT') as anon_grant_pre
-from t_rel;
-
--- Sample keys for the key dashboard queries (read as postgres).
-create temp table t_keys on commit drop as
-select g.property_id, g.master_owner_id,
-       (select array_agg(property_id) from (select property_id from public.properties limit 100) s) as prop_ids,
-       (select master_owner_id from public.prospects where master_owner_id is not null limit 1) as prospect_owner,
-       (select master_owner_id from public.phones    where master_owner_id is not null limit 1) as phone_owner,
-       (select property_address_zip from public.recently_sold_properties
-          where property_address_zip is not null group by 1 order by count(*) desc limit 1) as zip,
-       (select array_agg(id) from (select id from public.campaigns order by created_at desc limit 200) s) as campaign_ids
-from public.campaign_target_graph g
-where g.property_id is not null and g.master_owner_id is not null
-limit 1;
-
--- --------------------------------------------------- APPLY (in txn) ----
-\ir ../migrations/20261003120000_operator_read_policies.sql
-
 -- -------------------------------------------------------- catalog ----
 do $$
 declare r record;
@@ -133,7 +94,7 @@ begin
                and (cmd <> 'SELECT' or roles <> array['authenticated']::name[])) then
     raise exception 'FAIL: an ops_operator_read policy is not SELECT-to-authenticated';
   end if;
-  if (select count(*) from pg_policies p join t_rel t on t.rel = p.tablename
+  if (select count(*) from pg_policies p join lc_mt.t_rel t on t.rel = p.tablename
        where p.schemaname = 'public' and p.policyname = 'ops_operator_read') <> 16 then
     raise exception 'FAIL: expected 16 ops_operator_read policies';
   end if;
@@ -147,7 +108,7 @@ select p.rel, p.svc, p.anon_pre, p.op_pre, p.anon_grant_pre,
        pg_temp.probe(p.rel, 'authenticated', :'nonop_uid') as nonop_post,
        pg_temp.probe(p.rel, 'anon',          null)         as anon_post,
        has_table_privilege('anon', ('public.' || p.rel)::regclass, 'SELECT') as anon_grant_post
-from t_pre p;
+from lc_mt.t_pre p;
 
 do $$
 declare r record;
@@ -178,23 +139,23 @@ select * from (values
   ('map.universe_count',
      'select count(property_id) from public.properties', false),
   ('comps/map.property_by_id',
-     format('select * from public.properties where property_id = %L limit 1', (select property_id from t_keys)), true),
+     format('select * from public.properties where property_id = %L limit 1', (select property_id from lc_mt.t_keys)), true),
   ('inbox/queue.properties_in_100',
-     format('select property_id, property_address_full, market from public.properties where property_id = any(%L::text[])', (select prop_ids from t_keys)), true),
+     format('select property_id, property_address_full, market from public.properties where property_id = any(%L::text[])', (select prop_ids from lc_mt.t_keys)), true),
   ('map.master_owner_by_id',
-     format('select * from public.master_owners where master_owner_id = %L limit 1', (select master_owner_id from t_keys)), true),
+     format('select * from public.master_owners where master_owner_id = %L limit 1', (select master_owner_id from lc_mt.t_keys)), true),
   ('map.prospects_by_owner',
-     format('select * from public.prospects where master_owner_id = %L', (select prospect_owner from t_keys)), true),
+     format('select * from public.prospects where master_owner_id = %L', (select prospect_owner from lc_mt.t_keys)), true),
   ('map.phones_by_owner',
-     format('select * from public.phones where master_owner_id = %L', (select phone_owner from t_keys)), true),
+     format('select * from public.phones where master_owner_id = %L', (select phone_owner from lc_mt.t_keys)), true),
   ('map.ownership_graph_pair',
-     format('select * from public.campaign_target_graph where property_id = %L and master_owner_id = %L', (select property_id from t_keys), (select master_owner_id from t_keys)), true),
+     format('select * from public.campaign_target_graph where property_id = %L and master_owner_id = %L', (select property_id from lc_mt.t_keys), (select master_owner_id from lc_mt.t_keys)), true),
   ('inbox.buyer_match_sold_by_zip',
-     format('select * from public.recently_sold_properties where property_address_zip = %L and sale_price is not null order by sale_date desc limit 50', (select zip from t_keys)), true),
+     format('select * from public.recently_sold_properties where property_address_zip = %L and sale_price is not null order by sale_date desc limit 50', (select zip from lc_mt.t_keys)), true),
   ('campaigns.list',
      'select id, name, status from public.campaigns order by created_at desc limit 200', false),
   ('campaigns.targets_for_list',
-     format('select campaign_id, status from public.campaign_targets where campaign_id = any(%L::uuid[])', (select campaign_ids from t_keys)), false),
+     format('select campaign_id, status from public.campaign_targets where campaign_id = any(%L::uuid[])', (select campaign_ids from lc_mt.t_keys)), false),
   ('nexus.hot_lead_count',
      'select count(*) from public.thread_ai_state where deal_temperature = ''hot''', false)
 ) v(name, sql, want_index);
@@ -244,7 +205,7 @@ end $$;
 do $$
 declare k record; svc bigint; op bigint;
 begin
-  select * into k from t_keys;
+  select * into k from lc_mt.t_keys;
   execute format('select count(*) from public.get_comp_candidates_for_subject(%L, 2, 24, 50)', k.property_id) into svc;
   op := pg_temp.run_as(format('select count(*) from public.get_comp_candidates_for_subject(%L, 2, 24, 50)', k.property_id),
                        'authenticated', 'a2ee0ffe-6f27-475b-a795-ee617c9472c6')::bigint;

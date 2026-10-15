@@ -54,7 +54,7 @@ async function fingerprint(pool) {
   return JSON.stringify({ cols, cons, fns, idx })
 }
 
-test('PG runtime: pretest (BEGIN…ROLLBACK) passes and changes nothing; apply; rollback restores the 10-10 schema exactly; pretest passes again; a reserve open at lease loss becomes unknown and blocks rollback', { skip }, async () => {
+test('PG runtime: pretest (read-only prerequisites) passes and changes nothing; apply; posttest (BEGIN…ROLLBACK) passes and changes nothing; rollback restores the 10-10 schema exactly; pretest passes again; a reserve open at lease loss becomes unknown and blocks rollback', { skip }, async () => {
   const db = await freshDb()
   try {
     await runSqlFile(db.pool, SQL.researchPretest)
@@ -64,11 +64,18 @@ test('PG runtime: pretest (BEGIN…ROLLBACK) passes and changes nothing; apply; 
     const p1 = psqlFile(db.url, SQL.runtimePretest)
     if (!p1.skipped) {
       assert.equal(p1.status, 0, p1.out)
-      assert.match(p1.out, /ALL OK \(rolled back\)/)
+      assert.match(p1.out, /prerequisites OK/)
       assert.equal(await fingerprint(db.pool), before, 'the pretest leaves no trace')
     }
     await applyInTransaction(db.pool, SQL.runtime)
-    assert.notEqual(await fingerprint(db.pool), before)
+    const applied = await fingerprint(db.pool)
+    assert.notEqual(applied, before)
+    if (!p1.skipped) {
+      const post = psqlFile(db.url, SQL.runtimePosttest)
+      assert.equal(post.status, 0, post.out)
+      assert.match(post.out, /ALL OK \(rolled back\)/)
+      assert.equal(await fingerprint(db.pool), applied, 'the posttest leaves no trace')
+    }
     if (!p1.skipped) assert.notEqual(psqlFile(db.url, SQL.runtimePretest).status, 0, 'pretest refuses a second apply')
     // a persisted runtime job blocks the rollback unless discard is explicit
     await arm(db.pool)
