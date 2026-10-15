@@ -68,6 +68,7 @@ import {
   buildQueueTimeConversationalReplyMetadata,
   loadConversationalReplyWindowMinutes,
 } from "@/lib/domain/queue/conversational-reply-window.js";
+import { evaluateTemplateCoexistence } from "@/lib/domain/seller-flow/ai-conversation-coexistence.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
 /** Upper bound on active+safe template rows read per language pair (see selectSafeAutoReplyTemplate). */
@@ -3143,6 +3144,9 @@ export async function executeInboundAutomationDecision({
   // Round 10: BARE_NO_AUTO_CLARIFIER double gate (env ceiling + system_control
   // bare_no_auto_clarifier). Injectable for tests: async () => boolean.
   bareNoAutoClarifierGate = null,
+  // 8.5.16 R3: template ↔ AI coexistence (injectable for tests). Default: the R3
+  // executor is not wired, so this returns { defer: false } with no reads.
+  aiCoexistenceImpl = null,
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
   const effective_auto_reply_mode = normalizeAutoReplyMode(
@@ -4485,6 +4489,44 @@ export async function executeInboundAutomationDecision({
         template_id: clean(selected_template.template_id || selected_template.id) || null,
       },
     };
+  }
+
+  // ── 8.5.16 R3 COEXISTENCE: one automated reply per inbound ─────────────────
+  // When the AI send policy is on for this thread's scope, the template reply
+  // DEFERS for this inbound. Off (the default, and always while the R3 executor
+  // is unwired) ⇒ nothing is read and the template path below is unchanged.
+  if (!dryRun && !proofRun && channel !== "email") {
+    const coexistence = await (aiCoexistenceImpl || evaluateTemplateCoexistence)({
+      inbound_message_event_id: inboundEventId,
+      thread_key: clean(threadKey) || normalized_to_phone,
+      getSystemValue: get_system_value,
+    });
+    if (coexistence?.defer === true) {
+      const deferred_decision = {
+        ...base_decision,
+        should_queue_reply: false,
+        should_mark_human_review: false,
+        reply_mode: "none",
+        audit_reason: "deferred_to_ai_conversation",
+        ai_coexistence: coexistence,
+      };
+      return {
+        ok: true,
+        automation_decision: deferred_decision,
+        selected_template,
+        rendered_message_text,
+        queued: false,
+        queue_item_id: null,
+        queue_row_id: null,
+        queue_result: { ok: false, status: 409, reason: coexistence.reason },
+        suppression_applied: false,
+        duplicate_suppressed: false,
+        dry_run: Boolean(dryRun),
+        auto_reply_mode: effective_auto_reply_mode,
+        queue_permission,
+        audit_reason: "deferred_to_ai_conversation",
+      };
+    }
   }
 
   // ── OFFER TERM AUTHORITY: persist the offer BEFORE the send ────────────────

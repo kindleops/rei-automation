@@ -17,6 +17,7 @@ import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { sendCriticalAlert } from "@/lib/alerts/discord.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { isVerifiedAiGeneratedRow } from "@/lib/domain/messages/ai-generated-message.js";
 import { evaluateInSessionReply, loadConversationalReplyWindowMinutes } from "@/lib/domain/queue/conversational-reply-window.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
@@ -616,6 +617,8 @@ export function normalizeSendQueueRow(row) {
     campaign_target_id: safe_row.campaign_target_id || null,
     campaign_send_window_id: safe_row.campaign_send_window_id || null,
     dedupe_key: clean(safe_row.dedupe_key || safe_row.metadata?.idempotency_key) || null,
+    // 8.5.16 unified origin: carried only when the row states one (no shape change otherwise)
+    ...(clean(safe_row.message_origin) ? { message_origin: clean(safe_row.message_origin) } : {}),
   };
 }
 
@@ -850,6 +853,12 @@ function preclaimInvalidQueueRowReason(row = null) {
 
   // Manual inbox sends and unknown auto replies may omit template/snapshot/seller checks.
   if (manual_inbox_send || unknown_auto_reply) return null;
+
+  // 8.5.16 MESSAGE ORIGIN (owner 2026-10-15): an ai_generated row has NO template id by
+  // contract; its authority is its immutable ai_generated_messages record (verified at
+  // send). Its body is final text (no placeholders), so no candidate snapshot / first-name
+  // render applies. ONLY origin ai_generated + source ai_conversation + matching body hash.
+  if (isVerifiedAiGeneratedRow(normalized)) return null;
 
   if (!hasSelectedTemplateReference(normalized)) return "missing_selected_template_id";
   if (!getCandidateSnapshot(normalized)) return "missing_candidate_snapshot";
@@ -2039,6 +2048,10 @@ export function buildSuccessMessageEvent(row, send_result, options = {}) {
       queue_key,
       send_result,
       client_send_id: normalized.metadata?.client_send_id || null,
+      // 8.5.16 unified origin + the AI record link; present ONLY on rows that state an origin
+      ...(clean(normalized.message_origin || row_metadata.message_origin)
+        ? { message_origin: clean(normalized.message_origin || row_metadata.message_origin), ai_message_id: clean(row_metadata.ai_message_id) || null }
+        : {}),
       enrichment: {
         thread_key,
         property_id: normalized.property_id || null,
@@ -4736,6 +4749,9 @@ export const SEND_QUEUE_INSERT_COLUMNS = [
   "stage_after",
   "textgrid_message_id",
   "selected_template_id",
+  // PROPOSED 20261015130000; written ONLY when a row sets it (the AI path), so every
+  // existing producer's insert payload is unchanged
+  "message_origin",
   "market",
   "textgrid_number",
   "guard_status",
@@ -4944,6 +4960,7 @@ export function buildSendQueueInsertPayload(row = {}, now = null) {
     campaign_id: normalized.campaign_id || null,
     campaign_target_id: normalized.campaign_target_id || null,
     campaign_send_window_id: normalized.campaign_send_window_id || null,
+    ...(clean(normalized.message_origin) ? { message_origin: clean(normalized.message_origin) } : {}),
   };
 
   const payload = {};

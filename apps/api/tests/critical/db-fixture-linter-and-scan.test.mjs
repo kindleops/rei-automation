@@ -134,6 +134,8 @@ test("linter: the repository is clean — every pretest / posttest / verify / te
     "supabase/migrations/PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_posttest.sql",
     "supabase/migrations/PROPOSED_20261007170000_graph_sender_coverage_routing_v2_posttest.sql",
     "supabase/migrations/PROPOSED_20261015120000_repeat_asking_price_question_kind_posttest.sql",
+    "supabase/migrations/PROPOSED_20261014120000_block_repeat_asking_price_mirror_posttest.sql",
+    "supabase/migrations/PROPOSED_20261014130000_message_origin_ai_generated_messages_posttest.sql",
     "supabase/tests/operator_lockdown_test.sql",
     "supabase/tests/campaign_audience_completeness_test.sql",
   ]) assert.ok(fixtures.some((r) => r.file === f), f);

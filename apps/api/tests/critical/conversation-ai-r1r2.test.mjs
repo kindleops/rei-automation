@@ -78,14 +78,16 @@ test('contract: a valid decision passes; unknown keys, bad enums, foreign ids, r
 
 test('contract: invalid model output is retried once on Haiku, then fails closed to NEEDS_REVIEW — never escalated without a candidate (8.5.15)', async () => {
   const { provider, mc } = client({ intent: 'nonsense' })
-  const ctx = buildConversationContext(input('what is your offer', priceAskThread))
-  const r = await understandInbound({ context: ctx, inboundText: 'what is your offer', inboundId: 'in-1', deterministic: { intent: 'asks_offer' }, eligibility: OPEN, modelClient: mc })
+  const ctx = buildConversationContext(input('hmm not sure yet', priceAskThread))
+  const r = await understandInbound({ context: ctx, inboundText: 'hmm not sure yet', inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
   assert.equal(r.decision.outcome, 'NEEDS_REVIEW')
   assert.equal(r.decision.proposed_message, null)
-  assert.equal(provider.calls.length, 2, 'haiku, then one haiku retry')
+  assert.equal(provider.calls.length, 2, 'haiku, then one haiku repair that sees the errors (8.5.16) — no sonnet without a candidate (8.5.15)')
   assert.match(provider.calls[0].model, /haiku/)
   assert.match(provider.calls[1].model, /haiku/)
+  assert.match(JSON.stringify(provider.calls[1].messages), /FAILED VALIDATION/)
   assert.equal(r.trace.default_retry, true)
+  assert.deepEqual(r.trace.repair, { attempted: true, ok: false })
 })
 
 test('escalation (8.5.15): a Haiku ESCALATE with no reply candidate is a human item — Sonnet is not called', async () => {
@@ -97,13 +99,26 @@ test('escalation (8.5.15): a Haiku ESCALATE with no reply candidate is a human i
   assert.ok(r.trace.escalation_withheld.includes('financing'))
 })
 
-test('escalation: a reply candidate with a trigger goes to Sonnet, and Sonnet gains no authority — its ESCALATE becomes NEEDS_REVIEW', async () => {
-  const { provider, mc } = client((p, n) => (n === 1 ? goodDecision({ escalation_required: true, escalation_reason: 'financing' }) : goodDecision({ outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false, escalation_required: true, escalation_reason: 'financing' })))
-  const ctx = buildConversationContext(input('would you do owner financing?', priceAskThread))
-  const r = await understandInbound({ context: ctx, inboundText: 'would you do owner financing?', inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
+test('escalation: a reply candidate with a non-human-bound trigger goes to Sonnet, and Sonnet gains no authority — its ESCALATE becomes NEEDS_REVIEW', async () => {
+  const { provider, mc } = client((p, n) => (n === 1 ? goodDecision({ escalation_required: true, escalation_reason: 'low_confidence' }) : goodDecision({ outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false, escalation_required: true, escalation_reason: 'low_confidence' })))
+  const ctx = buildConversationContext(input('hmm let me see', priceAskThread))
+  const r = await understandInbound({ context: ctx, inboundText: 'hmm let me see', inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
+  assert.deepEqual(provider.calls[1].tool_choice, { type: 'auto' }, 'sonnet 5.5 refuses forced tool_choice')
   assert.equal(r.trace.path, 'haiku→sonnet')
   assert.equal(r.decision.outcome, 'NEEDS_REVIEW')
   assert.match(provider.calls[1].model, /sonnet/)
+})
+
+test('8.5.16 eval: NO Sonnet call when the turn goes to a human anyway (financing, offer request, Spanish); price contradiction is a HOLD', async () => {
+  for (const text of ['would you do owner financing?', 'what is your offer', '¿Cuánto me ofrece por la casa?']) {
+    const { provider, mc } = client(() => goodDecision({ escalation_required: true, escalation_reason: 'other', outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false }))
+    const ctx = buildConversationContext(input(text, priceAskThread))
+    const r = await understandInbound({ context: ctx, inboundText: text, inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
+    assert.equal(provider.calls.length, 1, text)
+    assert.match(provider.calls[0].model, /haiku/)
+    assert.equal(r.trace.escalation_skipped, 'human_bound', text)
+    assert.notEqual(r.decision.outcome, 'ESCALATE_TO_SONNET')
+  }
 })
 
 // ── deterministic pre-check ────────────────────────────────────────────────

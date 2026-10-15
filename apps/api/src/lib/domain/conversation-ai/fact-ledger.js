@@ -1,0 +1,374 @@
+// CANONICAL FACT + QUESTION LEDGER (8.5.16) — pure, derived, no writes.
+//
+// One read model per thread, built only from real events:
+//   messages      message_events rows (inbound + outbound), chronological, each with
+//                 its id; an outbound may carry its send_queue use case
+//   queueRows     send_queue rows for the thread (use_case_template + status): a
+//                 question that is queued / processing / sent is ASKED even before
+//                 a message_events row exists for it
+//   offers        authoritative offer rows (seller_offers …) — never inferred
+//   modelFacts    VALIDATED conv-ai facts_extracted (each cites a seller message id)
+//   recordFacts   LeadCommand record facts (property identity, units …)
+//
+// It tracks, each with its source message ids: ownership / representative status,
+// property identity, interest, asking price, condition, offer requests, existing
+// offers, requests (identity, callback, property identity) and objections; per
+// question kind: asked (count + ids, incl. queued rows), answered (+ by which
+// message), deflected; follow-up eligibility; and an evidence-based stage.
+//
+// Rules the owner fixed (stage flow S1 ownership → S2 interest → S3 asking price
+// → S4 condition → S5 offer):
+//   - one seller message can answer several facts ("I'd sell for $175K but the
+//     roof needs work" = interest + asking price + condition; none is re-asked)
+//   - "What's your offer?" is an OFFER REQUEST: interest is shown, NO asking price
+//     is inferred and no amount is ever produced here
+//   - an asking-price question is never repeated (asked once ⇒ blocked), and a
+//     seller deflection of it is never answered with the same question
+//
+// validateProposedMessage() is the validation API: given a proposed message (or a
+// question kind) it rejects a question about a fact already answered or already
+// asked, a backwards question, a skipped stage, and any offer/money question.
+import { buildFactLedger, mergeModelFacts } from './facts.js'
+import { isDeflectionToOffer, isPriceNonAnswer, questionKindOf } from './questions.js'
+import { isStopRequest } from './stop-request.js'
+
+export const FACT_LEDGER_VERSION = 'conv-ai.fact-ledger.v1'
+
+export const STAGE_KINDS = Object.freeze(['ownership', 'interest', 'asking_price', 'condition'])
+const STAGE_NAME = Object.freeze({ ownership: 'S1_ownership', interest: 'S2_interest', asking_price: 'S3_asking_price', condition: 'S4_condition' })
+const LEDGER_QUESTION_KINDS = Object.freeze(['ownership', 'interest', 'asking_price', 'condition', 'occupancy', 'timeline', 'identity', 'offer'])
+
+// a queued / in-flight / sent question has been asked; a cancelled / failed / held one has not
+const ASKED_QUEUE_STATUSES = new Set(['queued', 'scheduled', 'pending', 'approval', 'processing', 'sending', 'sent', 'delivered'])
+
+// AI rows carry an "ai_" prefixed use case (ai_seller_asking_price …); the kind is the template's
+function useCaseForKind(useCase) {
+  const uc = String(useCase || '').trim().toLowerCase()
+  return uc.startsWith('ai_') ? uc.slice(3) : uc
+}
+
+// ── seller-text evidence (deterministic; each rule names what it proves) ─────
+const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|i'?m\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home)))\b/i
+const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong)\b/i
+const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|the|this)|^\s*(?:already\s+)?sold\b|\b(?:it|house|home|property)\s+(?:was|has\s+been|got)\s+sold|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore|gave\s+(?:the|my|that|this)\s+(?:house|home|property|place)\s+to|(?:it|the\s+house|the\s+home|the\s+property)\s+(?:is|belongs\s+to)\s+my\s+(?:son|daughter|kids?|children|brother|sister|mom|dad|mother|father)(?:'s)?\b|(?:signed|deeded|transferred)\s+(?:it|the\s+(?:house|home|property))\s+(?:over\s+)?to|ya\s+la\s+vend\w*|ya\s+no\s+es\s+m[ií]a)/im
+const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
+const NOT_INTERESTED_RE = /\b(?:not\s+interested|no\s+thanks?|no\s+thank\s+you|not\s+(?:selling|for\s+sale)|(?:don'?t|do\s+not)\s+want\s+to\s+sell|not\s+looking\s+to\s+sell|never\s+selling)\b/i
+const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|correct|i\s+do|ok(?:ay)?|si|sí)\s*[.!]*\s*$/i
+const BARE_NO_RE = /^\s*(?:no|nope|nah)\s*[.!]*\s*$/i
+const BARE_MAYBE_RE = /^\s*(?:maybe|possibly|perhaps|depends|it\s+depends|could\s+be|might\s+be|not\s+sure)\s*[.!?]*\s*$/i
+const CONDITION_RE = /\b(?:roof|hvac|a\/?c\b|furnace|foundation|plumbing|electrical|needs?\s+(?:some\s+|a\s+lot\s+of\s+)?(?:work|repairs?|updating|tlc)|repairs?|fixer(?:[\s-]upper)?|(?:good|great|fair|rough|bad|poor|decent|excellent)\s+(?:shape|condition)|move[\s-]?in\s+ready|(?:fully\s+)?(?:updated|remodeled|renovated)|as[\s-]is|turnkey)\b/i
+const TIMELINE_RE = /\b(?:close|closing|sell|selling|move|moving|be\s+out|out|done|wrap\s+(?:it\s+)?up)\s+(?:by|before|in|within|after|around|at)\s+(?:the\s+)?(?:end\s+of\s+|beginning\s+of\s+|mid[\s-]?)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter|christmas|thanksgiving|the\s+holidays|(?:this|next)\s+(?:week|month|year|spring|summer|fall|winter)|[0-9]+\s+(?:days?|weeks?|months?)|a\s+(?:week|month|few\s+(?:weeks|months)))\b|\b(?:asap|as\s+soon\s+as\s+possible|no\s+rush|whenever)\b/i
+const WHO_IS_THIS_RE = /\b(?:who\s+(?:is|'?s)\s+(?:this|it)|who\s+are\s+(?:you|u)|whos\s+this|who\s+(?:is|are)\s+(?:you|this)\s+with|how\s+did\s+you\s+get\s+my\s+(?:number|info|information)|what\s+company|why\s+do\s+you\s+(?:ask|want|need|care)|why\s+(?:are\s+you|r\s+u)\s+(?:asking|texting|contacting)|what\s+(?:can\s+i\s+do\s+for\s+you|do\s+you\s+want|is\s+this\s+(?:about|regarding|for)|'?s\s+this\s+(?:about|regarding|for))|whats\s+this\s+about)\b|^\s*(?:why|why\s+\?|why\s+do\s+you\s+ask|wym|what\s+for)\s*[?!.]*\s*$/i
+const CALLBACK_RE = /\b(?:call\s+me|give\s+me\s+a\s+call|can\s+(?:you|u)\s+call|rather\s+talk\s+on\s+the\s+phone)\b/i
+const WHICH_PROPERTY_RE = /\b(?:which\s+(?:property|house|one|address)|what\s+(?:property|address|house))\b/i
+const OBJECTION_RE = /\b(?:too\s+low|lowball|low\s*ball|scam|worth\s+(?:a\s+lot\s+)?more|not\s+(?:that|so)\s+cheap|insult(?:ing)?)\b/i
+const NEED_TIME_RE = /\b(?:let\s+me\s+think|need\s+(?:some\s+)?time|not\s+right\s+now|maybe\s+later|in\s+a\s+few\s+(?:months|weeks)|next\s+year|not\s+ready)\b/i
+
+const OWNERSHIP_INTENTS = Object.freeze({
+  ownership_confirmed: 'confirmed', wrong_number: 'denied', not_owner: 'denied', ownership_denied: 'denied',
+  property_specific_non_owner: 'denied', former_owner_respondent: 'former_owner',
+})
+const REPRESENTATIVE_INTENTS = new Set(['executor_heir_respondent', 'family_member_respondent', 'agent_representative_respondent', 'non_owner_referral'])
+const INTEREST_INTENTS = Object.freeze({ not_interested: 'not_interested', seller_interested: 'interested', interested: 'interested', latent_interest: 'conditional', conditional_interest: 'conditional' })
+
+// stated = the seller said it; inferred = we concluded it (a price implies interest).
+// Inferred is never treated as confirmed by a reply ("you said you're interested").
+export function factBasis(origin) {
+  return /implies|inferred/.test(String(origin || '')) ? 'inferred' : 'stated'
+}
+
+function addFact(facts, key, value, msg, origin = 'seller_stated', confidence = null) {
+  const slot = (facts[key] ||= { value: null, source_message_ids: [], history: [], origin: null, basis: null, confidence: null })
+  const basis = factBasis(origin)
+  slot.history.push({ value, source_message_id: msg.id, at: msg.at || null, origin, basis, confidence: confidence ?? (basis === 'inferred' ? 0.6 : 0.8) })
+  // latest seller statement wins (a correction supersedes; history keeps provenance)
+  slot.value = value
+  slot.origin = origin
+  if (!slot.source_message_ids.includes(msg.id)) slot.source_message_ids.push(msg.id)
+}
+
+function pushUnique(arr, item) { if (!arr.includes(item)) arr.push(item) }
+
+/**
+ * @param {object} a
+ * @param {Array<{ id: string, direction: 'inbound'|'outbound', body: string, at: string, use_case?: string|null, intent?: string|null, queue_id?: string|null }>} a.messages chronological
+ * @param {Array<{ id: string, use_case_template?: string|null, queue_status?: string|null, created_at?: string|null }>} [a.queueRows]
+ * @param {Array<{ id: string, amount: number|null, status?: string|null, created_at?: string|null, source_table?: string }>} [a.offers]
+ * @param {Array<{ fact: string, value: any, source_message_id: string, confidence: number }>} [a.modelFacts] validated only
+ * @param {Record<string, any>} [a.recordFacts]
+ * @param {string} [a.now]
+ */
+export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [], modelFacts = [], recordFacts = {}, now = new Date().toISOString() } = {}) {
+  const t = (m) => Date.parse(m?.at || 0) || 0
+  const ordered = [...messages].filter((m) => m && m.id).sort((a, b) => t(a) - t(b))
+  const inbound = ordered.filter((m) => m.direction === 'inbound')
+
+  // 1. the EXISTING deterministic extractor (asking price, condition / repairs, occupancy,
+  //    timeline, interest, intents) + validated model facts
+  let base = buildFactLedger({ inbound: inbound.map((m) => ({ id: m.id, body: m.body, at: m.at, intent: m.intent })), recordFacts, now })
+  if (modelFacts.length) base = mergeModelFacts(base, modelFacts, { inboundIds: new Set(inbound.map((m) => m.id)), atById: Object.fromEntries(inbound.map((m) => [m.id, m.at])) })
+
+  const facts = {}
+  const requests = []
+  const objections = []
+  const offerRequests = []
+  const questions = {}
+  for (const k of LEDGER_QUESTION_KINDS) questions[k] = { kind: k, asked_count: 0, asked_message_ids: [], last_asked_at: null, answered: false, answered_by: [], deflected: false, deflected_by: [] }
+
+  // seed seller-stated facts from the deterministic ledger (only seller-stated / model; record facts stay separate)
+  const seed = (key, mapValue = (v) => v) => {
+    for (const h of base[key]?.history || []) {
+      if (h.origin === 'record_derived' || !h.source_message_id) continue
+      const v = mapValue(h.value)
+      if (v == null) continue
+      addFact(facts, key, v, { id: h.source_message_id, at: h.at }, h.origin, Number.isFinite(h.confidence) ? h.confidence : null)
+    }
+  }
+  seed('asking_price')
+  seed('condition')
+  seed('occupancy')
+  seed('timeline')
+  seed('seller_interest', (v) => (v && typeof v === 'object' ? v.interest ?? null : v))
+  seed('ownership', (v) => {
+    const c = v && typeof v === 'object' ? v.ownership_claim ?? null : v
+    return c === 'contradictory' ? null : c
+  })
+  seed('listing_status')
+
+  // 2. walk the conversation: what did we ask (and what is queued), what did each seller message answer
+  let lastAsked = null
+  const askedFromEvents = new Set()
+  const ask = (kind, id, at) => {
+    const q = questions[kind]
+    if (!q) return
+    q.asked_count += 1
+    q.asked_message_ids.push(id)
+    q.last_asked_at = at || q.last_asked_at
+  }
+  for (const m of ordered) {
+    if (m.direction === 'outbound') {
+      const kind = questionKindOf({ use_case: useCaseForKind(m.use_case), body: m.body })
+      if (m.queue_id) askedFromEvents.add(String(m.queue_id))
+      if (questions[kind]) { ask(kind, m.id, m.at); lastAsked = kind } else if (kind !== 'none') lastAsked = kind
+      continue
+    }
+    if (m.direction !== 'inbound') continue
+    const body = String(m.body || '')
+    const intent = String(m.intent || '')
+    // OWNER 2026-10-14: explicit STOP or any request to stop messaging = suppression
+    if (isStopRequest(body) || intent === 'opt_out' || intent === 'stop_texting') addFact(facts, 'opt_out', 'stop_requested', m)
+    // ownership / representative
+    if (OWNERSHIP_INTENTS[intent]) addFact(facts, 'ownership', OWNERSHIP_INTENTS[intent], m)
+    else if (OWN_DENY_RE.test(body)) addFact(facts, 'ownership', 'denied', m)
+    else if (OWN_FORMER_RE.test(body)) addFact(facts, 'ownership', 'former_owner', m)
+    else if (OWN_CONFIRM_RE.test(body) || (lastAsked === 'ownership' && BARE_YES_RE.test(body))) addFact(facts, 'ownership', 'confirmed', m)
+    else if (lastAsked === 'ownership' && BARE_NO_RE.test(body)) addFact(facts, 'ownership', 'denied', m)
+    if (REPRESENTATIVE_INTENTS.has(intent) || REPRESENTATIVE_RE.test(body)) {
+      addFact(facts, 'representative', intent || 'representative', m)
+      // a representative answers the ownership question for the owner (never "denied")
+      if (!facts.ownership || facts.ownership.value !== 'denied') addFact(facts, 'ownership', 'representative', m)
+    }
+    // interest
+    if (INTEREST_INTENTS[intent]) addFact(facts, 'seller_interest', INTEREST_INTENTS[intent], m)
+    else if (NOT_INTERESTED_RE.test(body)) addFact(facts, 'seller_interest', 'not_interested', m)
+    else if (lastAsked === 'interest' && BARE_YES_RE.test(body)) addFact(facts, 'seller_interest', 'interested', m)
+    else if (lastAsked === 'interest' && BARE_NO_RE.test(body)) addFact(facts, 'seller_interest', 'not_interested', m)
+    else if (lastAsked === 'interest' && BARE_MAYBE_RE.test(body)) addFact(facts, 'seller_interest', 'conditional', m)
+    // timeline (beyond the extractor): "close before November", "move in 30 days", "asap"
+    const tl = TIMELINE_RE.exec(body)
+    if (tl && !(facts.timeline?.source_message_ids || []).includes(m.id)) addFact(facts, 'timeline', { stated: tl[0].trim().toLowerCase() }, m, 'seller_stated', 0.75)
+    // condition (beyond the extractor)
+    if (CONDITION_RE.test(body) && !(facts.condition?.source_message_ids || []).includes(m.id)) addFact(facts, 'condition', { disclosed: true }, m)
+    // offer request: interest shown, NO asking price inferred, no amount
+    if (isDeflectionToOffer(body) || intent === 'asks_offer') {
+      offerRequests.push(m.id)
+      if (!facts.seller_interest || facts.seller_interest.value === 'unknown') addFact(facts, 'seller_interest', 'interested', m, 'offer_request_implies_interest')
+      if (lastAsked === 'asking_price') { questions.asking_price.deflected = true; pushUnique(questions.asking_price.deflected_by, m.id) }
+    } else if (lastAsked === 'asking_price' && isPriceNonAnswer(body)) {
+      questions.asking_price.deflected = true
+      pushUnique(questions.asking_price.deflected_by, m.id)
+    }
+    // a stated price shows interest too (never the other way round)
+    if ((facts.asking_price?.source_message_ids || []).includes(m.id) && !facts.seller_interest) addFact(facts, 'seller_interest', 'interested', m, 'asking_price_implies_interest')
+    // requests / objections
+    if (WHO_IS_THIS_RE.test(body) || intent === 'who_is_this') {
+      requests.push({ kind: 'identity', source_message_id: m.id })
+      // the seller answered our open question with a question about us: that question was
+      // DEFLECTED, and may be re-asked ONCE inside the identity answer (never the price)
+      if (lastAsked && questions[lastAsked] && lastAsked !== 'asking_price') pushUnique((questions[lastAsked].identity_deflected_by ||= []), m.id)
+    }
+    if (CALLBACK_RE.test(body) || intent === 'callback_requested') requests.push({ kind: 'callback', source_message_id: m.id })
+    if (WHICH_PROPERTY_RE.test(body) || intent === 'multi_property') requests.push({ kind: 'property_identity', source_message_id: m.id })
+    if (OBJECTION_RE.test(body) || intent === 'counter_or_negotiation') objections.push({ kind: 'price_objection', source_message_id: m.id })
+    if (NEED_TIME_RE.test(body) || intent === 'need_time') objections.push({ kind: 'need_time', source_message_id: m.id })
+  }
+
+  // latest seller statement wins BY TIME (seeded extractor facts and walked facts interleave)
+  for (const slot of Object.values(facts)) {
+    const hist = slot.history.map((h, i) => ({ h, i })).sort((a, b) => ((Date.parse(a.h.at || 0) || 0) - (Date.parse(b.h.at || 0) || 0)) || a.i - b.i).map((x) => x.h)
+    slot.history = hist
+    slot.value = hist[hist.length - 1].value
+    slot.origin = hist[hist.length - 1].origin
+    slot.basis = hist[hist.length - 1].basis
+    slot.confidence = hist[hist.length - 1].confidence
+  }
+
+  // 3. queued / in-flight / sent questions that have no message_events row yet are ASKED
+  for (const r of queueRows) {
+    if (!r?.id || askedFromEvents.has(String(r.id))) continue
+    const status = String(r.queue_status || '').toLowerCase()
+    if (!ASKED_QUEUE_STATUSES.has(status)) continue
+    if (status === 'sent' || status === 'delivered') continue // a sent row is represented by its message_events row
+    const kind = questionKindOf({ use_case: useCaseForKind(r.use_case_template), body: r.message_body || '' })
+    if (questions[kind]) ask(kind, `queue:${r.id}`, r.created_at || null)
+  }
+
+  // 4. answered: a seller fact of that kind exists (with its message ids)
+  const ANSWER_FACT = { ownership: 'ownership', interest: 'seller_interest', asking_price: 'asking_price', condition: 'condition', occupancy: 'occupancy', timeline: 'timeline' }
+  for (const [kind, key] of Object.entries(ANSWER_FACT)) {
+    if (facts[key]?.value != null) { questions[kind].answered = true; questions[kind].answered_by = [...facts[key].source_message_ids] }
+  }
+
+  const existingOffers = (offers || []).filter((o) => Number(o?.amount) > 0).map((o) => ({ id: o.id, amount: Number(o.amount), status: o.status || null, at: o.created_at || null, source_table: o.source_table || 'seller_offers' }))
+  const property = {
+    property_ids: [...new Set([recordFacts?.property_id, ...(recordFacts?.property_ids || [])].filter(Boolean).map(String))],
+    identity_requested: requests.some((r) => r.kind === 'property_identity'),
+  }
+
+  const ledger = {
+    version: FACT_LEDGER_VERSION,
+    facts,
+    questions,
+    offer_requests: offerRequests,
+    existing_offers: existingOffers,
+    requests,
+    objections,
+    property,
+    last_message: ordered.length ? { id: ordered[ordered.length - 1].id, direction: ordered[ordered.length - 1].direction, at: ordered[ordered.length - 1].at } : null,
+  }
+  ledger.stage = deriveLedgerStage(ledger)
+  ledger.next_missing = nextMissingFact(ledger)
+  ledger.follow_up = followUpEligibility(ledger)
+  return ledger
+}
+
+const factValue = (ledger, key) => ledger?.facts?.[key]?.value ?? null
+const ids = (ledger, key) => ledger?.facts?.[key]?.source_message_ids || []
+
+/** Evidence-based stage: every step names the seller messages / records that prove it. */
+export function deriveLedgerStage(ledger) {
+  if (factValue(ledger, 'opt_out')) return { stage: 'closed', evidence_message_ids: ids(ledger, 'opt_out'), rationale: 'stop requested (suppression)' }
+  const own = factValue(ledger, 'ownership')
+  if (own === 'denied' || own === 'former_owner') return { stage: 'closed', evidence_message_ids: ids(ledger, 'ownership'), rationale: `ownership ${own}` }
+  const interest = factValue(ledger, 'seller_interest')
+  if (interest === 'not_interested') return { stage: 'nurture', evidence_message_ids: ids(ledger, 'seller_interest'), rationale: 'not interested (30-day nurture, never suppressed)' }
+  if (ledger.existing_offers.length) return { stage: 'S5_offer', evidence_message_ids: [], rationale: `authoritative offer record(s): ${ledger.existing_offers.length}` }
+  const price = factValue(ledger, 'asking_price') != null
+  const priceSettled = price || ledger.questions.asking_price.deflected || (ledger.questions.asking_price.asked_count > 0 && ledger.offer_requests.length > 0)
+  const cond = factValue(ledger, 'condition') != null
+  if (priceSettled && cond) return { stage: 'S5_offer', evidence_message_ids: [...ids(ledger, 'asking_price'), ...ids(ledger, 'condition'), ...ledger.questions.asking_price.deflected_by].slice(0, 12), rationale: 'asking price (or deflection) and condition on record; the offer is a human step' }
+  if (priceSettled) return { stage: 'S4_condition', evidence_message_ids: [...ids(ledger, 'asking_price'), ...ledger.questions.asking_price.deflected_by].slice(0, 12), rationale: price ? 'asking price stated' : 'asking price asked and deflected (never re-asked)' }
+  if (interest === 'interested' || interest === 'conditional') return { stage: 'S3_asking_price', evidence_message_ids: ids(ledger, 'seller_interest'), rationale: 'interest shown' }
+  if (own === 'confirmed' || own === 'representative') return { stage: 'S2_interest', evidence_message_ids: ids(ledger, 'ownership'), rationale: `ownership ${own}` }
+  return { stage: 'S1_ownership', evidence_message_ids: [], rationale: 'no ownership evidence yet' }
+}
+
+/** The next fact the S1–S4 flow still needs; null when the flow is past S4 or closed. */
+export function nextMissingFact(ledger) {
+  const st = ledger.stage?.stage
+  if (['closed', 'nurture', 'S5_offer'].includes(st)) return null
+  const done = {
+    ownership: ledger.questions.ownership.answered,
+    interest: ledger.questions.interest.answered,
+    asking_price: ledger.questions.asking_price.answered || ledger.questions.asking_price.deflected || ledger.questions.asking_price.asked_count > 0,
+    condition: ledger.questions.condition.answered,
+  }
+  // a later stage's evidence implies the earlier ones (a stated price implies ownership + interest)
+  const stageIdx = ['S1_ownership', 'S2_interest', 'S3_asking_price', 'S4_condition'].indexOf(st)
+  for (let i = 0; i < STAGE_KINDS.length; i += 1) {
+    const kind = STAGE_KINDS[i]
+    if (i < stageIdx) continue
+    if (!done[kind]) return kind
+  }
+  return null
+}
+
+/** Is a no-reply follow-up (template engine) appropriate? Facts only; scheduling stays with the engine. */
+export function followUpEligibility(ledger) {
+  const st = ledger.stage?.stage
+  if (factValue(ledger, 'opt_out')) return { eligible: false, reason: 'stop_requested_suppression' }
+  // "No" to ownership = property-scoped stop: no follow-up, no nurture (owner 2026-10-14)
+  if (st === 'closed') return { eligible: false, reason: 'ownership_denied_or_former_no_nurture' }
+  if (ledger.offer_requests.length && !ledger.existing_offers.length) return { eligible: false, reason: 'offer_requested_needs_human' }
+  if (ledger.last_message?.direction === 'inbound') return { eligible: false, reason: 'seller_spoke_last_reply_due' }
+  if (st === 'nurture') return { eligible: true, reason: 'nurture_30_day' }
+  const pending = STAGE_KINDS.find((k) => ledger.questions[k].asked_count > 0 && !ledger.questions[k].answered && !(k === 'asking_price' && ledger.questions.asking_price.deflected))
+  return pending ? { eligible: true, reason: `awaiting_answer:${pending}`, awaiting_kind: pending } : { eligible: false, reason: 'no_open_question' }
+}
+
+/**
+ * VALIDATION API. Reject a proposed message that asks an answered or already-asked
+ * fact, goes backwards, skips a stage, or asks about an offer / money.
+ * @param {object} ledger buildCanonicalLedger()
+ * @param {{ kind?: string|null, text?: string|null, inboundIntent?: string|null }} proposal
+ * @returns {{ ok: boolean, reasons: string[], kind: string, next_missing: string|null }}
+ */
+export function validateProposedMessage(ledger, { kind = null, text = null, inboundIntent = null } = {}) {
+  const k = kind || questionKindOf({ body: text || '' })
+  const reasons = []
+  if (factValue(ledger, 'opt_out')) reasons.push('stop_requested_no_message')
+  const q = ledger?.questions?.[k]
+  if (k === 'offer') reasons.push('offer_question_is_human')
+  if (q && q.answered) reasons.push(`already_answered:${k}`)
+  if (q && !q.answered && q.asked_count > 0) {
+    // the single allowed repeat: the seller asked who we are instead of answering, and
+    // we answer that AND re-ask once; never for the asking price (owner 2026-10-13)
+    const deflectedByIdentity = (q.identity_deflected_by || []).includes(ledger?.last_message?.id)
+    // the re-ask is allowed only INSIDE an identity answer ("I'm a local buyer … do you still own it?")
+    const answersIdentity = /\b(?:buyer|investor|local|we\s+buy|real\s+estate|i'?m\s+(?:a|with|from)|we'?re\s+(?:a|local)|public\s+(?:property\s+)?records)\b/i.test(String(text || ''))
+    const identityRepeat = (inboundIntent === 'who_is_this' || (deflectedByIdentity && answersIdentity)) && k !== 'asking_price' && q.asked_count < 2
+    if (!identityRepeat) reasons.push(`already_asked:${k}`)
+  }
+  if (k === 'asking_price' && ledger?.questions?.asking_price?.deflected) reasons.push('asking_price_deflected_never_reask')
+  if (k === 'asking_price' && ledger?.offer_requests?.length && ledger.questions.asking_price.asked_count > 0) reasons.push('offer_requested_after_price_ask')
+  const idx = STAGE_KINDS.indexOf(k)
+  const stage = ledger?.stage?.stage
+  const stageIdx = ['S1_ownership', 'S2_interest', 'S3_asking_price', 'S4_condition'].indexOf(stage)
+  if (idx >= 0 && ['closed', 'nurture', 'S5_offer'].includes(stage)) reasons.push(`stage_${stage}_no_stage_question`)
+  else if (idx >= 0 && stageIdx >= 0 && idx < stageIdx) reasons.push(`backwards_question:${k}`)
+  else if (idx >= 0 && ledger?.next_missing && idx > STAGE_KINDS.indexOf(ledger.next_missing)) reasons.push(`skips_stage:${k}`)
+  return { ok: reasons.length === 0, reasons: [...new Set(reasons)], kind: k, next_missing: ledger?.next_missing ?? null }
+}
+
+/** Compact view for logs / the review UI (no message text). */
+export function ledgerSummary(ledger) {
+  return {
+    version: ledger.version,
+    stage: ledger.stage,
+    next_missing: ledger.next_missing,
+    facts: Object.fromEntries(Object.entries(ledger.facts).map(([k, v]) => [k, { value: k === 'asking_price' ? (v.value?.amount != null ? 'stated' : v.value) : v.value, basis: v.basis, confidence: v.confidence, source_message_ids: v.source_message_ids }])),
+    questions: Object.fromEntries(Object.entries(ledger.questions).filter(([, q]) => q.asked_count || q.answered || q.deflected).map(([k, q]) => [k, { asked: q.asked_count, answered: q.answered, deflected: q.deflected }])),
+    offer_requests: ledger.offer_requests.length,
+    existing_offers: ledger.existing_offers.length,
+    requests: ledger.requests.map((r) => r.kind),
+    objections: ledger.objections.map((o) => o.kind),
+    follow_up: ledger.follow_up,
+  }
+}
+
+export { STAGE_NAME }
+
+/**
+ * The ledger as of ONE inbound, from buildConversationContext() input rows (the
+ * shadow engine and the R3 executor share this): only messages at or before the
+ * inbound, plus the inbound itself.
+ */
+export function ledgerFromContextInput(input = {}, { modelFacts = [], queueRows = [], now = null } = {}) {
+  const inbound = input.inbound || {}
+  const at = Date.parse(inbound.at || 0) || 0
+  const rows = [...(input.thread || [])]
+  if (inbound.id && !rows.some((m) => m.id === inbound.id)) rows.push({ ...inbound, direction: 'inbound' })
+  const messages = rows.filter((m) => m.id === inbound.id || (Date.parse(m.at || 0) || 0) <= at).map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.at, use_case: m.use_case || null, intent: m.intent || null, queue_id: m.queue_id || null }))
+  const propertyIds = [...new Set((input.properties || []).map((p) => p.property_id).filter(Boolean).map(String))]
+  return buildCanonicalLedger({ messages, queueRows, offers: input.offers || [], modelFacts, recordFacts: { property_ids: propertyIds }, now: now || input.now || new Date().toISOString() })
+}

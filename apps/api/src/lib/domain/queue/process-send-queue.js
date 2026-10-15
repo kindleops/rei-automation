@@ -53,7 +53,9 @@ import {
   hasSupabaseConfig,
   supabase as defaultSupabase,
 } from "@/lib/supabase/client.js";
-import { getSystemValue } from "@/lib/system-control.js";
+import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
+import { evaluateAiConversationRowGate, aiRowCancelPayload, loadNewerInboundsForRow } from "@/lib/domain/queue/ai-conversation-row-gate.js";
+import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey } from "@/lib/domain/messages/ai-generated-message.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import {
@@ -1656,6 +1658,34 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       }
     }
 
+    // ── 8.5.16 R3: AI conversation rows only (source 'ai_conversation'); no-op for every other row ──
+    // Kill switch system_control[ai_conversation_send_enabled] off ⇒ cancel; recipient-local
+    // window closed or zone unknown ⇒ defer (no in-session bypass for AI rows).
+    const ai_gate = await evaluateAiConversationRowGate(queue_row, {
+      readSwitch: deps.readAiConversationSwitch || (hasSupabaseConfig() ? getSystemValueFresh : async () => null),
+      loadRecord: deps.loadAiGeneratedMessage || ((queue_key) => lookupAiGeneratedMessageByQueueKey(getSupabase(deps), queue_key)),
+      loadNewerInbounds: deps.loadNewerInbounds || ((r) => loadNewerInboundsForRow(getSupabase(deps), r)),
+      now,
+      propertyGeography: property_geography,
+    });
+    if (ai_gate.applies && ai_gate.action !== "proceed") {
+      if (ai_gate.action === "cancel") {
+        await updateQueueRow(queue_row_id, aiRowCancelPayload(queue_row, { now, reason: ai_gate.reason }), deps);
+      } else {
+        await releaseSkippedQueueRow(queue_row, lock_token, ai_gate.reason, { ...deps, now });
+      }
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: ai_gate.reason,
+        queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        final_queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
     const contact_window = evaluate_contact_window(queue_row, {
       ...deps,
       now,
@@ -1988,7 +2018,9 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     // BEFORE the body guards below run, so the replacement passes every one
     // of them. Same row, schedule, sender and keys. Nothing eligible → the
     // final asset guard further down blocks it.
-    if (!manual_inbox_send && clean(queue_row.message_body || queue_row.message_text)) {
+    // 8.5.16: an ai_generated row's text is immutable (its ai_generated_messages record):
+    // it is never swapped for a template here; the final asset guard below still blocks it.
+    if (!manual_inbox_send && !isVerifiedAiGeneratedRow(queue_row) && clean(queue_row.message_body || queue_row.message_text)) {
       const pre_guard = await evaluateTemplateAssetGuard({
         supabase: getSupabase(deps),
         queue_row,
@@ -2066,7 +2098,11 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
      */
     const buyer_disposition_send = isBuyerDispositionSend(queue_row);
 
-    if (!manual_inbox_send && !buyer_disposition_send && !seller_first_name) {
+    // 8.5.16 origin ai_generated: the body is final text (no "Hi {first name}" render),
+    // verified against its immutable record by the AI row gate above.
+    const ai_message_send = isVerifiedAiGeneratedRow(queue_row);
+
+    if (!manual_inbox_send && !buyer_disposition_send && !ai_message_send && !seller_first_name) {
       // Mark row as blocked — do not send.
       const supabase_client = getSupabase(deps);
       await supabase_client

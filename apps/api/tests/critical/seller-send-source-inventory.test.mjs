@@ -101,6 +101,11 @@ test("no seller-visible provider call site is left UNKNOWN", () => {
 const QUEUE_ROW_CREATORS = [
   "app/api/dev/send-test/route.js",
   "app/api/internal/proof/s1s2-attended/route.js",
+  // 8.5.16 R3 (built OFF, unwired — nothing imports it): the ONE AI conversation
+  // creator. Converged: it inserts only through insertSupabaseSendQueueRow with a
+  // deterministic identity (queue_key = dedupe_key = ai_conversation:<inbound id>)
+  // after an atomic per-inbound idempotency_ledger reservation.
+  "lib/ai/conversation-ai-r3-executor.js",
   "lib/domain/acquisition/delivery-retry-engine.js",
   "lib/domain/acquisition/inbound-dispatcher.js",
   "lib/domain/acquisition/no-reply-followup-scheduler.js",
