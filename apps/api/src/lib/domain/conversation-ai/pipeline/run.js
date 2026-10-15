@@ -41,7 +41,10 @@ export async function runConversationPipeline({
       threadLength: (input.thread || []).length, inboundIntent: judgment?.intent || null, personaPolicy, establishedPersona,
       followupScheduled: plan.actions.find((a) => a.type === ACTIONS.SCHEDULE_FOLLOWUP) || reply.followup_scheduled || null,
     })
-    if (!composition.ok) plan = { ...plan, actions: plan.actions.map((a) => (a === reply ? { type: ACTIONS.HOLD, reason: `composition:${composition.reason}` } : a)) }
+    // a disinterest close is optional (the 30-day follow-up is the owner rule): a rejected close
+    // becomes NO_RESPONSE with the follow-up kept; any other rejected reply goes to a human
+    const optionalClose = reply.category === 'not_interested_close' && plan.actions.some((a) => a.type === ACTIONS.SCHEDULE_FOLLOWUP)
+    if (!composition.ok) plan = { ...plan, actions: plan.actions.map((a) => (a === reply ? (optionalClose ? { type: ACTIONS.NO_RESPONSE, reason: `close_dropped:${composition.reason}` } : { type: ACTIONS.HOLD, reason: `composition:${composition.reason}` }) : a)) }
   }
   return {
     pipeline_version: PIPELINE_VERSION,

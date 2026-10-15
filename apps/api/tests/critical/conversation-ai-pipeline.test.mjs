@@ -350,3 +350,15 @@ test('eval fix 6b: inventory claims and "won\'t take up more of your time" are r
   const L = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Would you consider selling?', 10, 'consider_selling'), m('i1', 'inbound', 'no', 1)] })
   assert.ok(checkComposedText("Understood, we won't take up more of your time.", { ledger: L, objective: 'close_no_question', category: 'not_interested_close', followupScheduled: { days: 30 } }).includes('close:false_no_contact_promise_with_followup_scheduled'))
 })
+
+test('post-measure rules: "about X specifically", invented visits, compound questions, "leave it with them"; a rejected close keeps the follow-up and sends nothing', async () => {
+  assert.ok(validatePlaybookStyle("We buy houses in the area and I reached out about 5 Ash St specifically. Would you sell?").reasons.includes('style:targeting_claim'))
+  assert.ok(validatePlaybookStyle('Before we set up a time to view, what condition is it in?').reasons.includes('style:invented_next_step'))
+  assert.ok(validatePlaybookStyle("What's the condition of the house, and are there any repairs?").reasons.includes('style:compound_question'))
+  assert.equal(validatePlaybookStyle('Would you consider selling it, or is it not on your radar?').ok, true, 'a choice question is one question')
+  const L = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Would you consider selling?', 10, 'consider_selling'), m('i1', 'inbound', 'no its listed', 1)] })
+  assert.ok(checkComposedText("Understood, since it's with an agent we'll leave it with them.", { ledger: L, objective: 'close_no_question', category: 'not_interested_close', followupScheduled: { days: 30 } }).includes('close:false_no_contact_promise_with_followup_scheduled'))
+  const bad = fakeModel(["Understood. I won't bother you again. Take care."])
+  const out = await runConversationPipeline({ input: input([m('o1', 'outbound', 'Would you consider selling?', 10, 'consider_selling'), m('i1', 'inbound', 'nope', 1)]), modelClient: bad, spend: spend() })
+  assert.deepEqual(out.plan.actions.map((a) => a.type), [ACTIONS.UPDATE_SELLER_FACTS, ACTIONS.SCHEDULE_FOLLOWUP, ACTIONS.NO_RESPONSE])
+})
