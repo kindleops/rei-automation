@@ -1,9 +1,10 @@
--- PROPOSED ONLY — READ-ONLY PRETEST for PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql.
--- Changes NOTHING (BEGIN READ ONLY … ROLLBACK). Proves the repo mirror equals the live trigger.
---   psql "$DB" -v ON_ERROR_STOP=1 -f supabase/migrations/PROPOSED_20261014120000_block_repeat_asking_price_mirror_pretest.sql
--- Expected last notice: "pretest(block_repeat_asking_price_mirror): ALL OK (read only)".
-\set ON_ERROR_STOP on
-begin read only;
+-- PROPOSED ONLY — PRETEST for PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql.
+-- LOCAL DISPOSABLE DATABASE ONLY (owner testing boundary 2026-10-15: never run migration /
+-- rollback / pretest SQL against production). Run after applying the mirror to a fresh
+-- local DB by apps/api/scripts/proof/local-pg-migration-proof.mjs; it asserts the applied
+-- function body and trigger definition equal the live definitions recorded below.
+-- No transaction control, no includes.
+-- Expected last notice: "pretest(block_repeat_asking_price_mirror): ALL OK".
 do $$
 declare
   v_md5 text;
@@ -17,7 +18,6 @@ begin
   if v_trg <> 'CREATE TRIGGER trg_block_repeat_asking_price BEFORE INSERT OR UPDATE OF queue_status, use_case_template, scheduled_for_utc ON public.send_queue FOR EACH ROW EXECUTE FUNCTION block_repeat_asking_price()' then
     raise exception 'pretest: live trigger definition differs: %', v_trg;
   end if;
-  raise notice 'pretest(block_repeat_asking_price_mirror): ALL OK (read only)';
+  raise notice 'pretest(block_repeat_asking_price_mirror): ALL OK';
 end
 $$;
-rollback;

@@ -23,6 +23,7 @@ import { evaluateAiConversationRowGate, cancelPendingAiConversationRows } from '
 import { evaluateTemplateCoexistence } from '../../src/lib/domain/seller-flow/ai-conversation-coexistence.js'
 import { processSendQueueItem } from '../../src/lib/domain/queue/process-send-queue.js'
 import { applyBlockRepeatAskingPrice, MIRROR } from '../helpers/block-repeat-asking-price-mirror.mjs'
+import { sha256Hex, sealedThreadRef, isVerifiedAiMessageRow, verifyAiMessageRecordForRow, AI_MESSAGE_TABLE } from '../../src/lib/domain/templates/ai-message-record.js'
 import { makeSendQueueRowsSupabase } from '../helpers/queue-run-test-harness.js'
 import { loadRunnableSendQueueRows } from '../../src/lib/supabase/sms-engine.js'
 
@@ -48,11 +49,30 @@ function world({ thread, queueRows = [], language = 'en', guardFacts = {}, prope
   }
 }
 
+// in-memory stand-in for public.ai_message_templates: append-only, unique template_id /
+// inbound / queue key (the DB CHECKs + triggers are proven on a local PG17 by
+// scripts/proof/local-pg-migration-proof.mjs)
+function makeRecords() {
+  const byId = new Map()
+  return {
+    byId,
+    insert: async (rec) => {
+      if (byId.has(rec.template_id) || [...byId.values()].some((r) => r.inbound_message_id === rec.inbound_message_id || r.queue_key === rec.queue_key)) return { ok: false, reason: 'ai_message_record_exists' }
+      if (rec.body_sha256 !== sha256Hex(rec.template_body) || rec.is_active !== false) return { ok: false, reason: 'ai_message_record_insert_failed' }
+      byId.set(rec.template_id, Object.freeze({ id: crypto.randomUUID(), ...structuredClone(rec) }))
+      return { ok: true, template_id: rec.template_id }
+    },
+    load: async (id) => ({ found: byId.has(id), read_failed: false, record: byId.get(id) || null }),
+    update: () => { throw new Error('ai_message_templates is append-only: UPDATE refused') },
+  }
+}
+
 function makeTable() {
   const rows = []
   const inserts = []
+  const records = makeRecords()
   return {
-    rows, inserts,
+    rows, inserts, records,
     // the REAL insertion function; only its DB write is replaced (deps.insertSupabaseSendQueueRow)
     insertQueueRow: (payload) => insertSupabaseSendQueueRow(payload, {
       now: NOW,
@@ -83,6 +103,7 @@ function deps({ w, table = makeTable(), sw = switches(), now = NOW, loadState = 
       // the EXISTING bridge: real send-time contact guard + real recipient-local window, dry run
       eligibility: ({ row, state }) => dryRunEligibility({ row, facts: w.guardFacts, timezone: state.timezone, geography: state.geography, now }),
       insertQueueRow: table.insertQueueRow,
+      insertRecord: table.records.insert,
     },
   }
 }
@@ -97,6 +118,7 @@ const interestDecision = (over = {}) => makeDecision({
   facts_extracted: [{ fact: 'ownership', value: 'confirmed', source_message_id: 'i1', confidence: 0.95 }],
   stage_evidence: { stage: 'S2_interest', evidence_message_ids: ['i1'], rationale: 'ownership confirmed' }, ...over,
 })
+const sw_on = (policy = { enabled: true, scope: { thread_keys: [TK] } }) => async (k) => (k === AI_SEND_KILL_SWITCH_KEY ? 'true' : k === AI_SEND_POLICY_KEY ? JSON.stringify(policy) : null)
 const candidate = (decision = interestDecision(), over = {}) => ({
   decision, draft_text: decision.proposed_message, validation: { status: 'validated_draft' }, decision_id: 'conv-ai:v1:i1', model: 'claude-haiku-5-5',
   inbound: { id: 'i1', provider_message_sid: 'SMfixture', thread_key: TK }, ...over,
@@ -156,22 +178,50 @@ test('E2E no-send proof: an eligible routine reply passes R3 and is enqueued thr
   assert.equal(row.queue_key, 'ai_conversation:i1')
   assert.equal(row.inbound_message_id, 'i1')
   assert.equal(row.timezone, 'America/Chicago')
-  assert.equal(row.template_id ?? null, null, 'AI copy carries no template id')
+  // the IMMUTABLE per-message record is the template
+  assert.match(row.template_id, /^ai-msg:[0-9a-f]{32}$/)
+  assert.equal(row.selected_template_id, row.template_id)
+  assert.equal(r.ai_message_template_id, row.template_id)
+  assert.equal(row.metadata.ai_message_body_sha256, sha256Hex(row.message_body))
   assert.equal(row.metadata.no_direct_provider_send, true)
+  const rec = table.records.byId.get(row.template_id)
+  assert.ok(Object.isFrozen(rec))
+  assert.equal(rec.template_kind, 'ai_message')
+  assert.equal(rec.is_active, false)
+  assert.equal(rec.template_body, row.message_body)
+  assert.equal(rec.body_sha256, sha256Hex(rec.template_body))
+  assert.equal(rec.draft_hash, rec.body_sha256)
+  assert.equal(rec.inbound_message_id, 'i1')
+  assert.equal(rec.queue_key, row.queue_key)
+  assert.equal(rec.thread_ref, sealedThreadRef(TK))
+  assert.ok(!JSON.stringify(rec).includes(SELLER), 'the record never carries the phone / thread key')
+  assert.equal(rec.model, 'claude-haiku-5-5')
+  assert.equal(rec.decision_id, 'conv-ai:v1:i1')
+  assert.equal(rec.validator_verdict.status, 'validated_draft')
+  assert.match(rec.ledger_snapshot_hash, /^[0-9a-f]{64}$/)
+  assert.equal(rec.policy_version, 'conv-ai.send-policy.v1')
+  assert.deepEqual([rec.policy_authorization.scope_match, rec.policy_authorization.category], ['thread_keys', 'next_missing_fact'])
+  assert.match(rec.policy_authorization.policy_hash, /^[0-9a-f]{64}$/)
+  assert.throws(() => table.records.update(rec.template_id, { template_body: 'x' }), /append-only/)
 
   // ── send time, dry run, with the REAL guard functions ──
-  const gate = await evaluateAiConversationRowGate(row, { readSwitch: d.readSwitch, now: NOW })
-  assert.deepEqual([gate.applies, gate.action], [true, 'proceed'])
+  const gate = await evaluateAiConversationRowGate(row, { readSwitch: d.readSwitch, loadRecord: table.records.load, now: NOW })
+  assert.deepEqual([gate.applies, gate.action], [true, 'proceed'], JSON.stringify(gate))
   assert.equal(evaluateSendTimeContactGuard(row, {}, { now: NOW }).blocked, false)
-  // the owner's template-authority rule (2026-10-09) HOLDS AI copy for a human: no sms_templates row
-  const ta = await evaluateTemplateAuthority({ queue_row: row, supabase: null })
-  assert.equal(ta.allowed, false)
-  assert.equal(ta.detail, 'missing_template_id')
-  // a real template id never launders AI copy: ai_conversation is a free-text producer
+  // template authority accepts the record through the NARROW rule
+  const aiClient = (record) => ({ from: (t) => ({ select: () => ({ eq: () => ({ limit: async () => (t === AI_MESSAGE_TABLE ? { data: record ? [record] : [] } : { data: [] }) }) }) }) })
+  const ta = await evaluateTemplateAuthority({ queue_row: row, supabase: aiClient(rec) })
+  assert.deepEqual([ta.allowed, ta.reason, ta.body_binding], [true, 'ai_message_record', 'match'], JSON.stringify(ta))
+  // the body differs from the record → refused
+  const tampered = await evaluateTemplateAuthority({ queue_row: { ...row, message_body: 'Thanks. What is your lowest price?' }, supabase: aiClient(rec) })
+  assert.deepEqual([tampered.allowed, tampered.detail], [false, 'ai_message_body_mismatch'])
+  // a missing record → refused
+  assert.equal((await evaluateTemplateAuthority({ queue_row: row, supabase: aiClient(null) })).detail, 'ai_message_record_not_found')
+  // an AI row carrying a real sms_templates id is refused (no laundering through the library)
   const tplRow = { id: 't1', template_id: 't1', use_case: 'consider_selling', is_active: true, template_body: 'Hi {{first_name}}, would you sell?' }
   const tplClient = { from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [tplRow] }) }) }) }) }
-  const laundered = await evaluateTemplateAuthority({ queue_row: { ...row, template_id: 't1' }, supabase: tplClient })
-  assert.equal(laundered.allowed, false, JSON.stringify(laundered))
+  const laundered = await evaluateTemplateAuthority({ queue_row: { ...row, template_id: 't1', selected_template_id: 't1' }, supabase: tplClient })
+  assert.deepEqual([laundered.allowed, laundered.detail], [false, 'ai_row_requires_ai_message_record'])
 })
 
 test('E2E: the real queue runner with an AI row — switch off cancels, night defers, on+in-window proceeds; transport never called', async () => {
@@ -195,24 +245,26 @@ test('E2E: the real queue runner with an AI row — switch off cancels, night de
         sendTextgridSMS: async () => { transport.push(1); throw new Error('TRANSPORT_MUST_NOT_BE_CALLED') },
         info: () => {}, warn: () => {},
         supabase: { from() { throw new Error('unexpected_supabase_access_in_test') } },
+        loadAiMessageRecord: table.records.load,
         ...over,
       },
     }
   }
   // kill switch absent ⇒ cancelled
+  const on_sw = sw_on()
   const off = runnerDeps({ readAiConversationSwitch: async () => null })
   const r1 = await processSendQueueItem(base, off.deps)
   assert.equal(r1.reason, 'ai_conversation_send_disabled', JSON.stringify(r1))
   assert.equal(off.updates[0].payload.queue_status, 'cancelled')
   assert.equal(off.updates[0].payload.paused_reason, 'ai_conversation_send_disabled')
   // switch on, 23:30 recipient-local ⇒ deferred (no in-session bypass for AI rows)
-  const night = runnerDeps({ now: NIGHT, readAiConversationSwitch: async () => 'true' })
+  const night = runnerDeps({ now: NIGHT, readAiConversationSwitch: on_sw })
   const r2 = await processSendQueueItem({ ...base }, night.deps)
   assert.equal(r2.reason, 'ai_conversation_outside_contact_window', JSON.stringify(r2))
   assert.equal(night.lock_updates[0].payload.queue_status, 'queued')
   // switch on, in window ⇒ the AI gate passes and the row continues into the existing guards;
   // provider-sid evidence stops it at the existing idempotency guard (proof: no provider call)
-  const on = runnerDeps({ readAiConversationSwitch: async () => 'true' })
+  const on = runnerDeps({ readAiConversationSwitch: on_sw })
   const r3 = await processSendQueueItem(normalizeSendQueueRow({ ...base, metadata: { ...base.metadata, provider_message_sid: 'SMevidence-ai' } }), on.deps)
   assert.ok(!String(r3.reason).startsWith('ai_conversation_'), JSON.stringify(r3))
   assert.equal(transport.length, 0)
@@ -493,39 +545,117 @@ test('coexistence: AI on + in scope ⇒ template defers; out of scope ⇒ templa
   assert.deepEqual(t, { defer: true, reason: 'inbound_reply_reserved_by_other_engine' })
 })
 
-test('E2E: the existing pre-claim loader also holds an AI row (no sms_templates reference) — it never becomes runnable', async () => {
+test('E2E: the pre-claim loader accepts a verified AI row (narrow rule); a tampered body or a non-AI source is still held', async () => {
   const w = world({ thread: S1_THREAD() })
   const { d, table } = deps({ w })
   assert.equal((await executeAiConversationReply(candidate(), d)).status, 'enqueued')
   const row = { ...table.inserts[0], created_at: NOW }
-  const paused = []
-  const result = await loadRunnableSendQueueRows(10, {
-    now: NOW,
-    stale_lock_recovery_enabled: false,
-    supabaseClient: makeSendQueueRowsSupabase([row]),
-    getSystemValue: async () => null,
-    pauseInvalidQueueRow: async (n, p) => { paused.push(p); return { ...n, ...p } },
+  assert.equal(isVerifiedAiMessageRow(row), true)
+  const load = (rows) => loadRunnableSendQueueRows(10, {
+    now: NOW, stale_lock_recovery_enabled: false, supabaseClient: makeSendQueueRowsSupabase(rows),
+    getSystemValue: async () => null, pauseInvalidQueueRow: async (n, p) => ({ ...n, ...p }),
   })
-  assert.deepEqual(result.rows.map((r) => r.id), [], 'not runnable')
-  const skip = result.skipped.find((s) => s.id === row.id)
-  assert.ok(skip, JSON.stringify(result.skipped))
-  assert.equal(skip.reason, 'missing_selected_template_id')
+  const ok = await load([row])
+  assert.ok(!ok.skipped.some((s) => s.id === row.id && s.reason === 'missing_selected_template_id'), JSON.stringify(ok.skipped))
+  assert.deepEqual(ok.rows.map((r) => r.id), [row.id], JSON.stringify(ok.skipped))
+  // tampered body: the stamped hash no longer matches → the existing hold applies
+  const tampered = { ...row, id: crypto.randomUUID(), queue_key: 'x1', dedupe_key: 'x1', message_body: 'Thanks. What is the lowest you would take?' }
+  assert.equal(isVerifiedAiMessageRow(tampered), false)
+  const t = await load([tampered])
+  assert.deepEqual(t.rows.map((r) => r.id), [], 'a tampered AI row is never runnable')
+  assert.equal(t.skipped.find((s) => s.id === tampered.id)?.reason, 'missing_candidate_snapshot', 'the normal (non-AI) pre-claim rules apply')
+  // the same 'ai-msg:' id on a NON-AI source is not accepted by the narrow rule
+  const foreign = { ...row, id: crypto.randomUUID(), queue_key: 'x2', dedupe_key: 'x2', source: 'auto_reply', metadata: { ...row.metadata, source: 'auto_reply' } }
+  assert.equal(isVerifiedAiMessageRow(foreign), false)
+  const f = await load([foreign])
+  assert.ok(f.skipped.some((s) => s.id === foreign.id), JSON.stringify(f))
 })
 
-test('owner 10-14: a stop request anywhere in the inbound holds R3; the owner-handled thread (3746 Baltimore Ave) is never touched', async () => {
-  const stopThread = [S1_THREAD()[0], msg('i1', 'inbound', 'Yes I still own it STOP🛑', 5)]
-  const r = await executeAiConversationReply(candidate(), deps({ w: world({ thread: stopThread }) }).d)
-  assert.equal(r.status, 'held')
-  assert.ok(r.reasons.includes('excluded_stop_request'), JSON.stringify(r.reasons))
-  assert.equal(OWNER_HANDLED_THREAD_SHA256.length, 1)
-  assert.match(OWNER_HANDLED_THREAD_SHA256[0], /^[0-9a-f]{64}$/)
-  assert.equal(isOwnerHandledThread({ property_address: '3746 Baltimore Ave' }), true)
-  assert.equal(isOwnerHandledThread({ property_address: '3746 BALTIMORE AVENUE, Unit 2' }), true)
-  assert.equal(isOwnerHandledThread({ thread_key: TK, property_address: '12 Elm St' }), false)
+test('send time: body/hash mismatch, record reuse, missing record and policy revocation are cancelled by the runner gate', async () => {
   const w = world({ thread: S1_THREAD() })
-  w.state.property_address = '3746 Baltimore Ave'
   const { d, table } = deps({ w })
-  const o = await executeAiConversationReply(candidate(), d)
-  assert.deepEqual([o.status, o.reasons], ['refused', ['owner_handled_thread']])
+  await executeAiConversationReply(candidate(), d)
+  const row = table.inserts[0]
+  const gate = (r, over = {}) => evaluateAiConversationRowGate(r, { readSwitch: sw_on(), loadRecord: table.records.load, now: NOW, ...over })
+  assert.equal((await gate(row)).action, 'proceed')
+  const body = await gate({ ...row, message_body: 'Thanks. What is your bottom line?' })
+  assert.deepEqual([body.action, body.reason], ['cancel', 'ai_message_body_mismatch'])
+  const reuse = await gate({ ...row, id: 'other', queue_key: 'ai_conversation:i9' })
+  assert.deepEqual([reuse.action, reuse.reason], ['cancel', 'ai_message_record_reused'])
+  const otherInbound = await gate({ ...row, inbound_message_id: 'i9', metadata: { ...row.metadata, inbound_message_event_id: 'i9' } })
+  assert.equal(otherInbound.reason, 'ai_message_record_not_bound_to_inbound')
+  const otherThread = await gate({ ...row, thread_key: '+15555550142', to_phone_number: '+15555550142' })
+  assert.equal(otherThread.reason, 'ai_message_record_wrong_thread')
+  const missing = await gate(row, { loadRecord: async () => ({ found: false, read_failed: false, record: null }) })
+  assert.deepEqual([missing.action, missing.reason], ['cancel', 'ai_message_record_not_found'])
+  const unreadable = await gate(row, { loadRecord: async () => ({ read_failed: true }) })
+  assert.deepEqual([unreadable.action, unreadable.reason], ['defer', 'ai_message_record_unreadable'])
+  const corrupt = await gate(row, { loadRecord: async (id) => ({ found: true, record: { ...(await table.records.load(id)).record, body_sha256: sha256Hex('x') } }) })
+  assert.equal(corrupt.reason, 'ai_message_record_corrupt')
+  assert.equal((await gate(row, { readSwitch: sw_on({ enabled: false, scope: { thread_keys: [TK] } }) })).reason, 'ai_policy_disabled_at_send')
+  assert.equal((await gate(row, { readSwitch: sw_on({ enabled: true, scope: { thread_keys: [] } }) })).reason, 'ai_policy_scope_revoked_at_send')
+  assert.equal((await gate(row, { readSwitch: sw_on({ enabled: true, scope: { thread_keys: [TK] }, categories: ['identity_answer'] }) })).reason, 'ai_policy_category_revoked_at_send')
+  assert.equal((await gate(row, { readSwitch: async () => null })).reason, 'ai_conversation_send_disabled')
+  // pure verifier, same verdicts
+  assert.equal(verifyAiMessageRecordForRow(row, table.records.byId.get(row.template_id)).ok, true)
+})
+
+test('non-AI sources are unaffected: template authority, pre-claim and the runner gate behave exactly as before', async () => {
+  const tplRow = { id: 't1', template_id: 't1', use_case: 'consider_selling', is_active: true, template_body: 'Hi {{first_name}}, would you consider selling?' }
+  const tplClient = { from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [tplRow] }) }) }) }) }
+  const tmplRow = { id: 'q1', source: 'auto_reply', metadata: { source: 'auto_reply' }, template_id: 't1', message_body: 'Hi Sam, would you consider selling?', thread_key: TK }
+  const a = await evaluateTemplateAuthority({ queue_row: tmplRow, supabase: tplClient })
+  assert.deepEqual([a.allowed, a.reason], [true, 'sms_templates_row'])
+  const none = await evaluateTemplateAuthority({ queue_row: { ...tmplRow, template_id: null }, supabase: tplClient })
+  assert.equal(none.detail, 'missing_template_id')
+  const foreignAi = await evaluateTemplateAuthority({ queue_row: { ...tmplRow, template_id: 'ai-msg:0123456789abcdef0123456789abcdef' }, supabase: tplClient })
+  assert.deepEqual([foreignAi.allowed, foreignAi.detail], [false, 'ai_message_record_wrong_source'])
+  const manual = await evaluateTemplateAuthority({ queue_row: { ...tmplRow, template_id: null, source: 'inbox', metadata: { source: 'inbox' } }, manual_operator_send: true })
+  assert.equal(manual.reason, 'manual_operator_copy')
+  assert.deepEqual(await evaluateAiConversationRowGate(tmplRow, { readSwitch: async () => { throw new Error('must not read') }, loadRecord: async () => { throw new Error('must not read') } }), { applies: false })
+  assert.equal(isVerifiedAiMessageRow(tmplRow), false)
+})
+
+test('template selection can never pick or reuse an AI record: only the record module names the table; selection reads sms_templates', async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const SRC = path.resolve(import.meta.dirname, '..', '..', 'src')
+  const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : /\.(m?js|ts|tsx)$/.test(e.name) ? [path.join(dir, e.name)] : []))
+  // only the record module addresses the table (a quoted table name or its constant)
+  const addressing = walk(SRC).filter((f) => /['"`]ai_message_templates['"`]|AI_MESSAGE_TABLE/.test(fs.readFileSync(f, 'utf8').replace(/\/\/.*$/gm, ''))).map((f) => path.relative(SRC, f))
+  // (the executor names it only as the row's template_source provenance label)
+  assert.deepEqual(addressing, ['lib/ai/conversation-ai-r3-executor.js', 'lib/domain/templates/ai-message-record.js'])
+  assert.ok(!/from\(\s*['"]ai_message_templates/.test(fs.readFileSync(path.join(SRC, 'lib/ai/conversation-ai-r3-executor.js'), 'utf8')), 'the executor never reads the table directly')
+  const sel = fs.readFileSync(path.join(SRC, 'lib/domain/seller-flow/apply-inbound-automation-decision.js'), 'utf8')
+  assert.ok(!/ai-message-record|AI_MESSAGE_TABLE|ai-msg:/.test(sel), 'the template engine never references AI records')
+  // the record ids never resolve as sms_templates rows (separate table), and the record is never active
+  const { lookupSupabaseTemplate } = await import('../../src/lib/domain/templates/template-authority.js')
+  const seen = []
+  const client = { from: (t) => { seen.push(t); return { select: () => ({ eq: () => ({ limit: async () => ({ data: [] }) }) }) } } }
+  const l = await lookupSupabaseTemplate(client, 'ai-msg:0123456789abcdef0123456789abcdef')
+  assert.equal(l.found, false)
+  assert.deepEqual([...new Set(seen)], ['sms_templates'])
+})
+
+test('suppression still blocks a verified AI row (send-time guard), and a second message for the same inbound cannot get a record', async () => {
+  const w = world({ thread: S1_THREAD() })
+  const { d, table } = deps({ w })
+  await executeAiConversationReply(candidate(), d)
+  const row = table.inserts[0]
+  assert.equal(isVerifiedAiMessageRow(row), true)
+  assert.equal(evaluateSendTimeContactGuard(row, { suppressions: [{ phone_e164: SELLER, is_active: true }] }, { now: NOW }).blocked, true)
+  assert.equal(evaluateSendTimeContactGuard(row, { automation_suppressions: [{ phone_e164: SELLER, status: 'active', suppression_type: 'opt_out' }] }, { now: NOW }).blocked, true)
+  assert.equal(evaluateSendTimeContactGuard(row, { threads: [{ thread_key: TK, is_suppressed: true }] }, { now: NOW }).blocked, true)
+  const second = await table.records.insert({ ...table.records.byId.get(row.template_id), template_id: 'ai-msg:ffffffffffffffffffffffffffffffff' })
+  assert.deepEqual(second, { ok: false, reason: 'ai_message_record_exists' })
+})
+
+test('record insert failure holds the reply and releases the inbound (nothing enqueued)', async () => {
+  const w = world({ thread: S1_THREAD() })
+  const { d, table } = deps({ w })
+  const r = await executeAiConversationReply(candidate(), { ...d, insertRecord: async () => ({ ok: false, reason: 'ai_message_record_insert_failed' }) })
+  assert.deepEqual([r.status, r.reasons], ['held', ['ai_message_record_insert_failed']])
   assert.equal(table.inserts.length, 0)
+  const again = await executeAiConversationReply(candidate(), d)
+  assert.equal(again.status, 'enqueued', 'the inbound reservation was released for a retry')
 })

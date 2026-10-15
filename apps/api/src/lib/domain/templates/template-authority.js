@@ -19,6 +19,8 @@
  * workflow, agent) is judged by the same rule at the same place.
  */
 
+import { isAiMessageTemplateId, lookupAiMessageRecord, rowSourceIsAi, sha256Hex, verifyAiMessageRecordForRow } from "@/lib/domain/templates/ai-message-record.js";
+
 export const TEMPLATE_NOT_IN_SUPABASE = "template_not_in_supabase";
 
 /** Template ids that are code-registry copy, never an sms_templates row. */
@@ -204,6 +206,37 @@ export async function evaluateTemplateAuthority({
   // real row — checked below like any automated send.
   if (manual_operator_send && !template_id && !template_picked_manual) {
     return { allowed: true, reason: "manual_operator_copy", template_id: null };
+  }
+  // ── AI conversation rows (8.5.16, owner 2026-10-15) — a NARROW, explicit rule ──
+  // An 'ai-msg:' id is accepted ONLY on a source='ai_conversation' row, ONLY when the
+  // immutable public.ai_message_templates record exists, is bound to this row and its
+  // body hash equals the row body. An ai_conversation row with any other id is refused;
+  // any other source carrying an 'ai-msg:' id is refused. Nothing changes for other rows.
+  const ai_row = rowSourceIsAi(queue_row);
+  if (ai_row || isAiMessageTemplateId(template_id)) {
+    if (!ai_row) {
+      return { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: "ai_message_record_wrong_source", template_id };
+    }
+    if (manual_operator_send || !isAiMessageTemplateId(template_id)) {
+      return { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: "ai_row_requires_ai_message_record", template_id: template_id || null };
+    }
+    if (skipLookup) {
+      // test runtime with a fake client: the static hash binding still binds
+      const stamped = clean(queue_row?.metadata?.ai_message_body_sha256);
+      const ok = Boolean(stamped) && stamped === sha256Hex(String(queue_row?.message_body ?? queue_row?.message_text ?? ""));
+      return ok
+        ? { allowed: true, reason: "ai_message_record_lookup_skipped_test_runtime", template_id }
+        : { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: "ai_message_body_mismatch", template_id };
+    }
+    const ai_lookup = await lookupAiMessageRecord(supabase, template_id);
+    if (ai_lookup.read_failed) {
+      return { allowed: false, deferred: true, reason: "template_authority_read_failed", template_id };
+    }
+    const verdict = verifyAiMessageRecordForRow(queue_row, ai_lookup.record);
+    if (!verdict.ok) {
+      return { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: verdict.reason, template_id };
+    }
+    return { allowed: true, reason: "ai_message_record", template_id, template_row_id: ai_lookup.record?.id || null, body_binding: "match" };
   }
   if (!template_id) {
     return { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: "missing_template_id", template_id: null };

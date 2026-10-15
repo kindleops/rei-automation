@@ -55,6 +55,7 @@ import {
 } from "@/lib/supabase/client.js";
 import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
 import { evaluateAiConversationRowGate, aiRowCancelPayload } from "@/lib/domain/queue/ai-conversation-row-gate.js";
+import { isVerifiedAiMessageRow, lookupAiMessageRecord } from "@/lib/domain/templates/ai-message-record.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import {
@@ -1662,6 +1663,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     // window closed or zone unknown ⇒ defer (no in-session bypass for AI rows).
     const ai_gate = await evaluateAiConversationRowGate(queue_row, {
       readSwitch: deps.readAiConversationSwitch || (hasSupabaseConfig() ? getSystemValueFresh : async () => null),
+      loadRecord: deps.loadAiMessageRecord || ((template_id) => lookupAiMessageRecord(getSupabase(deps), template_id)),
       now,
       propertyGeography: property_geography,
     });
@@ -2093,7 +2095,11 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
      */
     const buyer_disposition_send = isBuyerDispositionSend(queue_row);
 
-    if (!manual_inbox_send && !buyer_disposition_send && !seller_first_name) {
+    // 8.5.16 R3: a verified AI row's body is its immutable record (no "Hi {first name}"
+    // render), checked against the DB record by the AI row gate above.
+    const ai_message_send = isVerifiedAiMessageRow(queue_row);
+
+    if (!manual_inbox_send && !buyer_disposition_send && !ai_message_send && !seller_first_name) {
       // Mark row as blocked — do not send.
       const supabase_client = getSupabase(deps);
       await supabase_client

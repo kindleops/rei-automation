@@ -24,8 +24,12 @@
 //      INSERT … ON CONFLICT): one reply per inbound (scope 'inbound_reply', shared with
 //      the template engine), one per seller per day, ≤ 25 global slots per day
 //   8. kill switch re-read immediately before the insert
-//   9. insert through insertSupabaseSendQueueRow (the function the template auto-reply
-//      path uses) — source 'ai_conversation', model, decision id, draft hash
+//   9. the IMMUTABLE per-message template record (public.ai_message_templates, append-only:
+//      provenance + policy authorization), then the queue row through
+//      insertSupabaseSendQueueRow (the function the template auto-reply path uses) —
+//      source 'ai_conversation', selected_template_id = the record, model, decision id,
+//      draft hash. A record whose queue insert fails stays unbound (unusable: the
+//      record is bound to this queue key and inbound).
 import crypto from 'node:crypto'
 
 import { insertSupabaseSendQueueRow } from '@/lib/supabase/sms-engine.js'
@@ -44,6 +48,7 @@ import {
   R3_EXECUTOR_WIRED, classifyRoutineScope, isOwnerHandledThread, normalizeSendPolicy, parseKillSwitch, threadInPolicyScope,
 } from '@/lib/domain/conversation-ai/send-policy.js'
 import { VALIDATOR_VERSION, validateDraft } from '@/lib/domain/conversation-ai/validator.js'
+import { buildAiMessageRecord, insertAiMessageRecord } from '@/lib/domain/templates/ai-message-record.js'
 
 export const R3_EXECUTOR_VERSION = 'conv-ai.r3-executor.v1'
 export { R3_EXECUTOR_WIRED }
@@ -127,6 +132,7 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   const readSwitch = deps.readSwitch || ((key) => getSystemValueFresh(key, deps.supabase ? { supabase: deps.supabase } : {}))
   const reservations = deps.reservations || defaultReservations
   const insertQueueRow = deps.insertQueueRow || ((payload) => insertSupabaseSendQueueRow(payload, deps.supabase ? { supabase: deps.supabase } : {}))
+  const insertRecord = deps.insertRecord || ((record) => insertAiMessageRecord(deps.supabase, record))
   const loadState = deps.loadState || ((a) => loadR3State({ supabase: deps.supabase, ...a }))
   const eligibilityFor = deps.eligibility || (({ row, state }) => dryRunEligibility({ row, supabase: deps.supabase, timezone: state.timezone, geography: state.geography, now }))
   const out = (status, reasons = [], extra = {}) => ({ status, reasons: [...new Set(reasons)], executor_version: R3_EXECUTOR_VERSION, inbound_message_id: clean(candidate?.inbound?.id) || null, ...extra })
@@ -231,11 +237,28 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   try { switchAgain = await readSwitch(AI_SEND_KILL_SWITCH_KEY) } catch { switchAgain = null }
   if (!parseKillSwitch(switchAgain)) return holdConsumed(['kill_switch_off_at_enqueue'])
 
-  // 9. the insert — the existing auto-reply insertion function; guards run at send time
+  // 9a. the IMMUTABLE per-message template record (owner 2026-10-15) — append-only
   const kind = questionKindOf({ body: draft })
   const tz = resolveRecipientTimezone({ to_phone_number: state.seller_phone, timezone: state.timezone }, { propertyGeography: state.geography })
   const hash = draftHash(draft)
   const key = `ai_conversation:${inboundId}`
+  const useCase = aiUseCaseFor({ category: scope.category, kind })
+  const scopeMatch = policy.scope.thread_keys.includes(threadKey) ? 'thread_keys' : policy.scope.market_ids.includes(String(state.market_id)) ? 'market_ids' : 'campaign_ids'
+  const record = buildAiMessageRecord({
+    body: draft, inboundMessageId: inboundId, queueKey: key, threadKey, useCase, model: candidate.model, decisionId: candidate.decision_id,
+    validator: { status: val.status, version: VALIDATOR_VERSION, reasons: val.reasons }, ledgerSnapshot: ledgerSummary(ledger),
+    policy, policyAuthorization: { policy_key: AI_SEND_POLICY_KEY, policy_version: policy.policy_version, scope_match: scopeMatch, category: scope.category, kill_switch_key: AI_SEND_KILL_SWITCH_KEY },
+    executorVersion: R3_EXECUTOR_VERSION,
+  })
+  let rec = null
+  try { rec = await insertRecord(record) } catch { rec = { ok: false, reason: 'ai_message_record_insert_threw' } }
+  if (!rec?.ok) {
+    await releaseAll('ai_message_record_insert_failed')
+    try { await reservations.release({ record_item_id: inboundClaim.record_item_id, scope: inboundClaim.scope, key: inboundClaim.key, error: 'ai_message_record_insert_failed' }) } catch { /* lease */ }
+    return out('held', [rec?.reason || 'ai_message_record_insert_failed'])
+  }
+
+  // 9b. the queue insert — the existing auto-reply insertion function; guards run at send time
   const payload = {
     queue_key: key,
     queue_id: key,
@@ -250,19 +273,22 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     max_retries: 3,
     message_body: draft,
     message_text: draft,
+    seller_first_name: clean(state.input?.names?.first_name) || null,
     to_phone_number: state.seller_phone,
     from_phone_number: state.our_phone,
     master_owner_id: state.master_owner_id || null,
     prospect_id: state.prospect_id || null,
     property_id: state.property_id || null,
-    // NO template id: AI copy is not an sms_templates row. The existing template-authority
-    // gate therefore HOLDS this row for a human at send time (owner rule 2026-10-09)
-    // until the owner decides how AI copy is authorised.
-    template_id: null,
-    template_source: AI_CONVERSATION_SOURCE,
+    // the immutable per-message record (public.ai_message_templates) is the template:
+    // template authority + the pre-claim loader accept it ONLY on ai_conversation rows
+    // with a matching body hash (owner 2026-10-15)
+    template_id: record.template_id,
+    selected_template_id: record.template_id,
+    template_key: record.template_id,
+    template_source: 'ai_message_templates',
     message_type: 'ai_conversation_reply',
     type: AI_CONVERSATION_SOURCE,
-    use_case_template: aiUseCaseFor({ category: scope.category, kind }),
+    use_case_template: useCase,
     character_count: draft.length,
     thread_key: threadKey,
     source: AI_CONVERSATION_SOURCE,
@@ -277,6 +303,11 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
       decision_id: clean(candidate.decision_id) || null,
       model: clean(candidate.model) || null,
       draft_hash: hash,
+      ai_message_template_id: record.template_id,
+      ai_message_body_sha256: record.body_sha256,
+      ai_message_record_version: record.record_version,
+      ledger_snapshot_hash: record.ledger_snapshot_hash,
+      selected_template_id: record.template_id,
       decision_contract_version: DECISION_CONTRACT_VERSION,
       validator_version: VALIDATOR_VERSION,
       executor_version: R3_EXECUTOR_VERSION,
@@ -301,8 +332,8 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     try { await reservations.complete({ record_item_id: r.record_item_id, scope: r.scope, key: r.key, metadata: { outcome: 'enqueued', queue_row_id: queueRowId } }) } catch { /* the lease keeps it claimed */ }
   }
   const rawStatus = clean(res?.raw?.queue_status).toLowerCase()
-  if (rawStatus === 'cancelled') return out('blocked_at_insert', [clean(res?.raw?.paused_reason) || 'cancelled_by_trigger'], { queue_row_id: queueRowId })
-  return out('enqueued', [], { queue_row_id: queueRowId, category: scope.category, draft_hash: hash, use_case_template: payload.use_case_template })
+  if (rawStatus === 'cancelled') return out('blocked_at_insert', [clean(res?.raw?.paused_reason) || 'cancelled_by_trigger'], { queue_row_id: queueRowId, ai_message_template_id: record.template_id })
+  return out('enqueued', [], { queue_row_id: queueRowId, category: scope.category, draft_hash: hash, use_case_template: payload.use_case_template, ai_message_template_id: record.template_id })
 }
 
 export default executeAiConversationReply

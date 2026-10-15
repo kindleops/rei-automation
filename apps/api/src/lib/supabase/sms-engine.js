@@ -16,6 +16,7 @@ import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { sendCriticalAlert } from "@/lib/alerts/discord.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { isVerifiedAiMessageRow } from "@/lib/domain/templates/ai-message-record.js";
 import { evaluateInSessionReply, loadConversationalReplyWindowMinutes } from "@/lib/domain/queue/conversational-reply-window.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
@@ -849,6 +850,12 @@ function preclaimInvalidQueueRowReason(row = null) {
 
   // Manual inbox sends and unknown auto replies may omit template/snapshot/seller checks.
   if (manual_inbox_send || unknown_auto_reply) return null;
+
+  // 8.5.16 R3 (owner 2026-10-15): an ai_conversation row whose immutable per-message
+  // record id ('ai-msg:') and stamped body hash match is template-referenced by that
+  // record; its body is fixed (no placeholders), so no candidate snapshot / first-name
+  // render applies. ONLY ai_conversation rows; the record itself is verified at send.
+  if (isVerifiedAiMessageRow(normalized)) return null;
 
   if (!hasSelectedTemplateReference(normalized)) return "missing_selected_template_id";
   if (!getCandidateSnapshot(normalized)) return "missing_candidate_snapshot";
