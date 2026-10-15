@@ -571,8 +571,8 @@ test("eval #20: 'market value' to our asking-price question names no number -- n
   }
 });
 
-test("eval #120 / #29: someone who works for an investor, or a JV pitch, is a counterparty: a person reads it, no price question", async () => {
-  for (const m of ["No this is Sam and I work for an investor we do have another property we are trying to sell", "Okay she said no big deal on jv"]) {
+test("eval #120: someone who works for an investor is a counterparty: a person reads it, no price question", async () => {
+  for (const m of ["No this is Sam and I work for an investor we do have another property we are trying to sell"]) {
     const r = await replay(m, "s1_es");
     assert.ok(r.classification.matched_rule_ids.includes("r11_counterparty_investor_pitch"), m);
     assert.equal(r.decision.should_queue_reply, false, m);

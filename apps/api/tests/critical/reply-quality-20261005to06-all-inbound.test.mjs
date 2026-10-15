@@ -68,6 +68,16 @@ const OWNERSHIP_DENIAL_RELABEL_8515 = {
   "311": { intent: "property_specific_non_owner", sentiment: "negative", outcome_with_en_es_drafts: "no_reply_by_design" },
 };
 for (const [id, patch] of Object.entries(OWNERSHIP_DENIAL_RELABEL_8515)) LABELS[id] = { ...LABELS[id], ...patch };
+// RC 8.5.15 (blind-eval fixes, coordinator 2026-10-14): #228 "Si pero no estoy
+// vendiéndola" = owner but not selling -> the 30-day decline; #234 "I work for
+// an investor" = counterparty -> a person; #371 "No but market value" to the
+// price question = no number -> held by the Stage 3 rule (never a re-ask).
+const EVAL_FIX_RELABEL_8515 = {
+  "228": { intent: "not_interested", outcome: "no_reply_by_design", outcome_with_en_es_drafts: "no_reply_by_design" },
+  "234": { intent: "not_interested", sentiment: "negative", outcome: "review", outcome_with_en_es_drafts: "review" },
+  "371": { intent: "asking_price_absent", outcome: "review", outcome_with_en_es_drafts: "review" },
+};
+for (const [id, patch] of Object.entries(EVAL_FIX_RELABEL_8515)) LABELS[id] = { ...LABELS[id], ...patch };
 const BARE_NO_RELABELLED = Object.keys(REVIEWED_LABELS).filter((id) => REVIEWED_LABELS[id].intent === "unclear" && isBareNoToS1(id)).length;
 const CATALOG = read("2026-10-06-safe-templates-en-es.json").rows;
 const T = (use_case, language, template_id, template_body) => ({ id: template_id, template_id, use_case, language, stage_code: null, is_active: true, safe_for_auto_reply: true, reply_mode: "auto_reply", template_body });
@@ -125,7 +135,9 @@ test("coverage floor: share of inbound that auto-responds / is handled without a
   // question) is also held by the Stage 3 rule.
   // 166: owner rule 2026-10-13 -- #202 (offer request after our S3 question)
   // requires the S4 condition question, absent from this catalog snapshot.
-  assert.ok(auto >= 167 - 1, `today's catalog: ${auto} auto`);
+  // 163: RC 8.5.15 eval fixes -- #228 (owner but not selling), #234 (counterparty),
+  // #371 (market value, no number) are no longer auto-replies.
+  assert.ok(auto >= 167 - 1 - 3, `today's catalog: ${auto} auto`);
   assert.ok(handled >= 328, `today's catalog: ${handled} handled`);
   // 201 before the 2026-10-09 owner rule (same three); 198 before the
   // 2026-10-13 owner decision -- the 23 bare "No" rows were "auto" only via the
@@ -133,7 +145,7 @@ test("coverage floor: share of inbound that auto-responds / is handled without a
   assert.equal(BARE_NO_RELABELLED, 23);
   // RC 8.5.15: #265 / #311 ("No, I'm not") were auto only via the ownership
   // clarifier draft; they are now the property-scoped denial (no reply).
-  assert.ok(autoDrafts >= 198 - BARE_NO_RELABELLED - 1 - 2, `with EN/ES drafts: ${autoDrafts} auto`); // -1: #202, as above
+  assert.ok(autoDrafts >= 198 - BARE_NO_RELABELLED - 1 - 2 - 3, `with EN/ES drafts: ${autoDrafts} auto`); // -3: RC 8.5.15 #228 #234 #371 // -1: #202, as above
   assert.ok(handledDrafts >= 359, `with EN/ES drafts: ${handledDrafts} handled`);
 });
 
