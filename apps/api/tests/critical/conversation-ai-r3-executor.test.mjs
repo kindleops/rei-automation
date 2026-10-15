@@ -390,9 +390,14 @@ test('held: out of scope, money, offers, Spanish, unknown language, multi-proper
   assert.deepEqual(notScoped.reasons, ['thread_not_in_ai_scope'])
   // money: the seller states a price; asking condition is the next fact but the turn carries money
   const priceThread = [msg('o1', 'outbound', 'Would you consider selling it?', 30, { use_case: 'consider_selling' }), msg('i1', 'inbound', "I'd sell for $175K", 5)]
-  const money = await run(world({ thread: priceThread }), candidate(interestDecision({ intent: 'asking_price_provided', seller_interest: 'interested', next_objective: 'get_condition', proposed_message: "Got it. How's the condition of the property?", facts_extracted: [] })))
+  // 8.5.16 eval: a STATED price is not a money turn (owner flow S3 price → S4 condition); money is by INTENT
+  const priced = await run(world({ thread: priceThread }), candidate(interestDecision({ intent: 'asking_price_provided', seller_interest: 'interested', next_objective: 'get_condition', proposed_message: "Got it. How's the condition of the property?", facts_extracted: [] })))
+  assert.equal(priced.status, 'enqueued', JSON.stringify(priced.reasons))
+  __resetIdempotencyLedgerTestDeps()
+  // our own text with an amount is still a money turn
+  const money = await run(world({ thread: priceThread }), candidate(interestDecision({ intent: 'asking_price_provided', seller_interest: 'interested', next_objective: 'get_condition', proposed_message: 'Got it, 175k. How is the condition?', facts_extracted: [] })))
   assert.equal(money.status, 'held')
-  assert.ok(money.reasons.includes('excluded_money_amount') && money.reasons.includes('excluded_money_or_offer'), JSON.stringify(money.reasons))
+  assert.ok(money.reasons.some((x) => /money|dollar/.test(x)), JSON.stringify(money.reasons))
   // offer request
   const offerThread = [msg('o1', 'outbound', 'Would you consider selling it?', 30, { use_case: 'consider_selling' }), msg('i1', 'inbound', "What's your offer?", 5)]
   const offer = await run(world({ thread: offerThread }), candidate(interestDecision({ intent: 'asks_offer', seller_interest: 'interested', next_objective: 'get_asking_price', proposed_message: 'Happy to. What price did you have in mind?', facts_extracted: [] })))
@@ -403,8 +408,12 @@ test('held: out of scope, money, offers, Spanish, unknown language, multi-proper
   const es = await run(world({ thread: esThread, language: 'es' }), candidate(interestDecision({ proposed_message: 'Gracias. ¿Consideraría vender?' })))
   assert.equal(es.status, 'held')
   assert.ok(es.reasons.some((x) => x.startsWith('excluded_language') || x === 'style:non_english_characters'), JSON.stringify(es.reasons))
-  // unknown language is unknown, never assumed English
-  const unk = await run(world({ thread: S1_THREAD(), language: null }), candidate())
+  // 8.5.16 eval: a missing language with ENGLISH text is English; non-English text with no language stays unknown
+  const inferred = await run(world({ thread: S1_THREAD(), language: null }), candidate())
+  assert.ok(!inferred.reasons.some((x) => x.startsWith('excluded_language')), JSON.stringify(inferred.reasons))
+  __resetIdempotencyLedgerTestDeps()
+  const unkThread = [S1_THREAD()[0], msg('i1', 'inbound', 'Ja, das gehört mir', 5)]
+  const unk = await run(world({ thread: unkThread, language: null }), candidate())
   assert.ok(unk.reasons.includes('excluded_language:language_unknown'), JSON.stringify(unk.reasons))
   // multi-property
   const multi = await run(world({ thread: S1_THREAD(), properties: [{ property_id: 'p1', state: 'TX' }, { property_id: 'p2', state: 'TX' }] }), candidate())
@@ -427,7 +436,7 @@ test('routine categories: identity answer and the not-interested close (no quest
   assert.equal(a.category, 'identity_answer')
   __resetIdempotencyLedgerTestDeps()
   const niThread = [msg('o1', 'outbound', 'Would you consider selling it?', 30, { use_case: 'consider_selling' }), msg('i1', 'inbound', 'not interested', 5)]
-  const niDec = makeDecision({ intent: 'not_interested', seller_interest: 'not_interested', outcome: 'REPLY_CANDIDATE', next_objective: 'acknowledge', response_needed: true, proposed_message: 'Understood, thanks for letting me know.', confidence: 0.95, source_message_ids: ['i1'] })
+  const niDec = makeDecision({ intent: 'not_interested', seller_interest: 'not_interested', outcome: 'REPLY_CANDIDATE', next_objective: 'acknowledge', response_needed: true, proposed_message: 'No problem, thanks for the quick reply.', confidence: 0.95, source_message_ids: ['i1'] })
   const t = makeTable()
   const b = await executeAiConversationReply(candidate(niDec), deps({ w: world({ thread: niThread }), table: t }).d)
   assert.equal(b.status, 'enqueued', JSON.stringify(b))

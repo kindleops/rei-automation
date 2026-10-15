@@ -39,6 +39,7 @@ export async function runConversationPipeline({
     composition = await composeReply({
       ledger, inboundText: input.inbound.body, category: reply.category, objective: reply.objective, modelClient, spend, messages, maskOpts,
       threadLength: (input.thread || []).length, inboundIntent: judgment?.intent || null, personaPolicy, establishedPersona,
+      followupScheduled: plan.actions.find((a) => a.type === ACTIONS.SCHEDULE_FOLLOWUP) || reply.followup_scheduled || null,
     })
     if (!composition.ok) plan = { ...plan, actions: plan.actions.map((a) => (a === reply ? { type: ACTIONS.HOLD, reason: `composition:${composition.reason}` } : a)) }
   }

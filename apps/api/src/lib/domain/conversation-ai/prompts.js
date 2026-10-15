@@ -49,6 +49,8 @@ export function buildUserPrompt(modelContext, { escalation = false, priorAttempt
   const head = escalation
     ? 'You are the escalation reviewer. A first-pass model flagged this conversation (reason below) or produced an invalid decision. Decide carefully; you have no send authority. If any doubt remains, choose NEEDS_REVIEW.'
     : 'Decide on the current inbound.'
-  const prior = priorAttempt ? `\n\nFIRST PASS (for reference only): ${JSON.stringify(priorAttempt).slice(0, 1500)}` : ''
+  const prior = priorAttempt?.invalid && !escalation
+    ? `\n\nYOUR PREVIOUS OUTPUT FAILED VALIDATION: ${JSON.stringify(priorAttempt.invalid).slice(0, 600)}. Call the tool again using ONLY the allowed enum values and the message ids shown.`
+    : priorAttempt ? `\n\nFIRST PASS (for reference only): ${JSON.stringify(priorAttempt).slice(0, 1500)}` : ''
   return `${head}\n\nCONTEXT (JSON):\n${JSON.stringify(modelContext)}${prior}`
 }

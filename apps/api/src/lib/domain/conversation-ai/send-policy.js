@@ -113,12 +113,18 @@ export function threadInPolicyScope(policy, { thread_key = null, market_id = nul
   return false
 }
 
+// words that are English and NOT also Spanish ("no", "a", "ok" are shared and prove nothing)
+const ENGLISH_WORD_RE = /\b(?:the|you|it|is|are|not|yes|yeah|yep|nope|my|me|we|this|that|who|what|why|how|sell|selling|own|owner|house|home|property|interested|thanks|thank|please|stop|sorry|okay|sure|wrong|number|maybe|later|call|text|have|don'?t|i'?m|it'?s|thats|already)\b/i
+const SPANISH_STOPWORD_RE = /\b(?:el|la|los|las|del|que|por|para|con|mi|tengo|pero|esta|muy|bien|estoy|tiene|usted|vendo|vender|ahora|gracias|hola|casa|propiedad|soy|somos|quiero|puedo|tambi[eé]n|todav[ií]a|seguro|claro|bueno|nada|algo)\b/i
 const SPANISH_RE = /[¿¡ñ]|\b(?:hola|gracias|vender|casa|propiedad|cu[aá]nto|usted|s[ií]\s+(?:soy|es)|no\s+estoy|due[nñ]o|oferta|precio|quien\s+es|qui[eé]n)\b/i
 const FINANCIAL_RE = /\b(?:mortgage|loan|lien|equity|owe|payoff|refinanc\w*|bank|credit|financ\w*|interest\s+rate|taxes?|appraisal|cash\s+offer|proof\s+of\s+funds|closing\s+costs?|commission)\b/i
 const LEGAL_CONTRACT_RE = /\b(?:contract|agreement|sign|signature|attorney|lawyer|legal|title\s+company|escrow|deed|probate|court|lawsuit|sue|purchase\s+agreement|binding|earnest)\b/i
 const NEGOTIATION_RE = /\b(?:counter|lowest|highest|best\s+(?:offer|price)|meet\s+(?:me\s+)?in\s+the\s+middle|firm|negotiat\w*|come\s+up|go\s+(?:up|higher|lower)|other\s+offers?|another\s+buyer)\b/i
 const MULTI_PROPERTY_RE = /\b(?:(?:both|all|several|multiple|two|three|other)\s+(?:of\s+(?:my|the)\s+)?(?:properties|houses|homes|lots|units|addresses)|i\s+(?:own|have)\s+(?:a\s+few|several|multiple|[0-9]+)\s+(?:properties|houses|homes)|which\s+(?:property|house|one))\b/i
-const MONEY_INTENTS = new Set(['asks_offer', 'counter_or_negotiation', 'asking_price_provided', 'price_and_condition'])
+// money turns are classified by INTENT (an offer request / a negotiation), never by an amount
+// being present in the seller's text: a stated asking price is recorded and the owner's flow
+// then asks the condition (S3 price, then S4 condition). Our OWN text still carries no amount.
+const MONEY_INTENTS = new Set(['asks_offer', 'counter_or_negotiation'])
 const NEVER_INTENTS = new Set(['opt_out', 'hostile_or_legal', 'wrong_number', 'ownership_denied', 'tenant_or_occupant', 'listed_or_sold', 'non_owner_referral', 'multi_property', 'counter_or_negotiation', 'language_switch'])
 const STAGE_OBJECTIVES = Object.freeze({ confirm_ownership: 'ownership', gauge_interest: 'interest', get_asking_price: 'asking_price', get_condition: 'condition' })
 
@@ -127,7 +133,9 @@ export function languageVerdict({ language = null, inboundText = '', draftText =
   const l = String(language || '').trim().toLowerCase()
   if (SPANISH_RE.test(inboundText) || SPANISH_RE.test(draftText)) return { english: false, reason: 'spanish_detected' }
   if (l === 'en' || l === 'english' || l.startsWith('en-')) return { english: true, reason: 'english' }
-  if (!l) return { english: false, reason: 'language_unknown' }
+  // no stored language: English TEXT (Latin-only, no accented letters, no Spanish markers, at
+  // least one English word) is English (8.5.16 eval); anything else stays unknown and is held
+  if (!l) return ENGLISH_WORD_RE.test(inboundText) && !SPANISH_STOPWORD_RE.test(inboundText) && !/[\u00C0-\u024F\u0370-\uFFFF]/.test(String(inboundText).replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\uFE0F\u200D\u2019\u2018\u201C\u201D]/gu, '')) ? { english: true, reason: 'english_inferred_from_text' } : { english: false, reason: 'language_unknown' }
   return { english: false, reason: `language_${l}` }
 }
 
@@ -149,7 +157,7 @@ export function classifyRoutineScope({ decision, draftText = '', inboundText = '
   if (!lang.english) reasons.push(`excluded_language:${lang.reason}`)
   if (NEVER_INTENTS.has(decision.intent)) reasons.push(`excluded_intent:${decision.intent}`)
   if (MONEY_INTENTS.has(decision.intent) || decision.next_objective === 'offer_needs_human') reasons.push('excluded_money_or_offer')
-  if (moneyMentions(draft).length || moneyMentions(inbound).length) reasons.push('excluded_money_amount')
+  if (moneyMentions(draft).length) reasons.push('excluded_money_amount')
   if (ledger?.offer_requests?.length || ledger?.existing_offers?.length) reasons.push('excluded_offer_on_thread')
   if (FINANCIAL_RE.test(draft) || FINANCIAL_RE.test(inbound)) reasons.push('excluded_financial')
   if (LEGAL_CONTRACT_RE.test(draft) || LEGAL_CONTRACT_RE.test(inbound)) reasons.push('excluded_legal_or_contract')

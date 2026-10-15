@@ -12,6 +12,9 @@
 import { DECISION_JSON_SCHEMA, failClosedDecision, validateDecision } from './contract.js'
 import { deterministicPrecheck } from './precheck.js'
 import { SYSTEM_PROMPT, buildUserPrompt } from './prompts.js'
+import { isDeflectionToOffer } from './questions.js'
+
+const NON_ENGLISH_RE = /[¿¡ñáéíóú]|\b(?:hola|gracias|vender|casa|propiedad|usted|due[nñ]o|oferta|precio)\b/i
 
 export const UNDERSTAND_VERSION = 'conv-ai.understand.v1'
 
@@ -90,7 +93,14 @@ export async function understandInbound({ context, inboundText, inboundId, deter
     }
   }
 
-  const first = await run('default')
+  let first = await run('default')
+  // 8.5.16 eval: a schema slip (an out-of-enum value) is repaired by ONE Haiku retry that sees
+  // the validation errors; Sonnet is used only when the repair also fails
+  if (!first.v.ok && !first.refused && options.repair !== false) {
+    const repair = await run('default', { invalid: (first.v.errors || []).slice(0, 8) })
+    trace.repair = { attempted: true, ok: repair.v.ok }
+    if (repair.v.ok || repair.refused) first = repair
+  }
   let decision = first.v.ok ? first.v.decision : null
   const why = []
   if (!first.v.ok && !first.refused) why.push('validation_failure')
@@ -101,7 +111,25 @@ export async function understandInbound({ context, inboundText, inboundId, deter
     trace.contradictions = c
     if (c.length) why.push('contradiction')
   }
-  const shouldEscalate = options.escalate !== false && why.length > 0 && !first.refused
+  // 8.5.16 eval: Sonnet only when it can change the outcome. A turn the pipeline hands to a
+  // human anyway (multi-property / multi-owner / financing / negotiation with an offer, a
+  // non-English thread, an offer request) is NOT escalated; two far-apart asking prices are a
+  // deterministic HOLD (decide.js), not a Sonnet call.
+  const HUMAN_BOUND = new Set(['multiple_properties', 'multiple_owners', 'financing', 'complex_negotiation', 'nonstandard_deal', 'legal'])
+  const humanBound = why.some((w) => HUMAN_BOUND.has(w)) || isDeflectionToOffer(inboundText) || NON_ENGLISH_RE.test(String(inboundText || ''))
+  const priceContradiction = triggers.includes('contradiction')
+  if (priceContradiction || humanBound) {
+    trace.escalation_skipped = priceContradiction ? 'price_contradiction_hold' : 'human_bound'
+    trace.escalation_reasons = [...new Set(why)]
+    if (decision) {
+      trace.path = 'haiku'
+      if (decision.outcome === 'ESCALATE_TO_SONNET') decision = { ...decision, outcome: 'NEEDS_REVIEW', proposed_message: null }
+      if (priceContradiction) decision = { ...decision, outcome: 'NEEDS_REVIEW', proposed_message: null, escalation_required: true, escalation_reason: 'contradiction' }
+      else if (!decision.escalation_required && why.some((w) => HUMAN_BOUND.has(w))) decision = { ...decision, escalation_required: true, escalation_reason: why.find((w) => HUMAN_BOUND.has(w)) }
+      return { decision, calls, trace }
+    }
+  }
+  const shouldEscalate = options.escalate !== false && why.length > 0 && !first.refused && !priceContradiction && !humanBound
   if (shouldEscalate) {
     trace.escalation_reasons = [...new Set(why)]
     const second = await run('escalation', decision ? { intent: decision.intent, outcome: decision.outcome, next_objective: decision.next_objective, escalation_reason: decision.escalation_reason } : { invalid: first.v.errors?.slice(0, 5) })

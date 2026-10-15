@@ -50,7 +50,7 @@ function useCaseForKind(useCase) {
 // ── seller-text evidence (deterministic; each rule names what it proves) ─────
 const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|i'?m\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home)))\b/i
 const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong)\b/i
-const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+)?sold\s+(?:it|that|the)|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore)\b/i
+const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|the|this)|^\s*(?:already\s+)?sold\b|\b(?:it|house|home|property)\s+(?:was|has\s+been|got)\s+sold|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore|gave\s+(?:the|my|that|this)\s+(?:house|home|property|place)\s+to|(?:it|the\s+house|the\s+home|the\s+property)\s+(?:is|belongs\s+to)\s+my\s+(?:son|daughter|kids?|children|brother|sister|mom|dad|mother|father)(?:'s)?\b|(?:signed|deeded|transferred)\s+(?:it|the\s+(?:house|home|property))\s+(?:over\s+)?to|ya\s+la\s+vend\w*|ya\s+no\s+es\s+m[ií]a)/im
 const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
 const NOT_INTERESTED_RE = /\b(?:not\s+interested|no\s+thanks?|no\s+thank\s+you|not\s+(?:selling|for\s+sale)|(?:don'?t|do\s+not)\s+want\s+to\s+sell|not\s+looking\s+to\s+sell|never\s+selling)\b/i
 const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|correct|i\s+do|ok(?:ay)?|si|sí)\s*[.!]*\s*$/i
@@ -58,7 +58,7 @@ const BARE_NO_RE = /^\s*(?:no|nope|nah)\s*[.!]*\s*$/i
 const BARE_MAYBE_RE = /^\s*(?:maybe|possibly|perhaps|depends|it\s+depends|could\s+be|might\s+be|not\s+sure)\s*[.!?]*\s*$/i
 const CONDITION_RE = /\b(?:roof|hvac|a\/?c\b|furnace|foundation|plumbing|electrical|needs?\s+(?:some\s+|a\s+lot\s+of\s+)?(?:work|repairs?|updating|tlc)|repairs?|fixer(?:[\s-]upper)?|(?:good|great|fair|rough|bad|poor|decent|excellent)\s+(?:shape|condition)|move[\s-]?in\s+ready|(?:fully\s+)?(?:updated|remodeled|renovated)|as[\s-]is|turnkey)\b/i
 const TIMELINE_RE = /\b(?:close|closing|sell|selling|move|moving|be\s+out|out|done|wrap\s+(?:it\s+)?up)\s+(?:by|before|in|within|after|around|at)\s+(?:the\s+)?(?:end\s+of\s+|beginning\s+of\s+|mid[\s-]?)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter|christmas|thanksgiving|the\s+holidays|(?:this|next)\s+(?:week|month|year|spring|summer|fall|winter)|[0-9]+\s+(?:days?|weeks?|months?)|a\s+(?:week|month|few\s+(?:weeks|months)))\b|\b(?:asap|as\s+soon\s+as\s+possible|no\s+rush|whenever)\b/i
-const WHO_IS_THIS_RE = /\b(?:who\s+(?:is|'?s)\s+(?:this|it)|who\s+are\s+(?:you|u)|whos\s+this|how\s+did\s+you\s+get\s+my\s+(?:number|info|information)|what\s+company)\b/i
+const WHO_IS_THIS_RE = /\b(?:who\s+(?:is|'?s)\s+(?:this|it)|who\s+are\s+(?:you|u)|whos\s+this|who\s+(?:is|are)\s+(?:you|this)\s+with|how\s+did\s+you\s+get\s+my\s+(?:number|info|information)|what\s+company|why\s+do\s+you\s+(?:ask|want|need|care)|why\s+(?:are\s+you|r\s+u)\s+(?:asking|texting|contacting)|what\s+(?:can\s+i\s+do\s+for\s+you|do\s+you\s+want|is\s+this\s+(?:about|regarding|for)|'?s\s+this\s+(?:about|regarding|for))|whats\s+this\s+about)\b|^\s*(?:why|why\s+\?|why\s+do\s+you\s+ask|wym|what\s+for)\s*[?!.]*\s*$/i
 const CALLBACK_RE = /\b(?:call\s+me|give\s+me\s+a\s+call|can\s+(?:you|u)\s+call|rather\s+talk\s+on\s+the\s+phone)\b/i
 const WHICH_PROPERTY_RE = /\b(?:which\s+(?:property|house|one|address)|what\s+(?:property|address|house))\b/i
 const OBJECTION_RE = /\b(?:too\s+low|lowball|low\s*ball|scam|worth\s+(?:a\s+lot\s+)?more|not\s+(?:that|so)\s+cheap|insult(?:ing)?)\b/i
@@ -191,7 +191,12 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     // a stated price shows interest too (never the other way round)
     if ((facts.asking_price?.source_message_ids || []).includes(m.id) && !facts.seller_interest) addFact(facts, 'seller_interest', 'interested', m, 'asking_price_implies_interest')
     // requests / objections
-    if (WHO_IS_THIS_RE.test(body) || intent === 'who_is_this') requests.push({ kind: 'identity', source_message_id: m.id })
+    if (WHO_IS_THIS_RE.test(body) || intent === 'who_is_this') {
+      requests.push({ kind: 'identity', source_message_id: m.id })
+      // the seller answered our open question with a question about us: that question was
+      // DEFLECTED, and may be re-asked ONCE inside the identity answer (never the price)
+      if (lastAsked && questions[lastAsked] && lastAsked !== 'asking_price') pushUnique((questions[lastAsked].identity_deflected_by ||= []), m.id)
+    }
     if (CALLBACK_RE.test(body) || intent === 'callback_requested') requests.push({ kind: 'callback', source_message_id: m.id })
     if (WHICH_PROPERTY_RE.test(body) || intent === 'multi_property') requests.push({ kind: 'property_identity', source_message_id: m.id })
     if (OBJECTION_RE.test(body) || intent === 'counter_or_negotiation') objections.push({ kind: 'price_objection', source_message_id: m.id })
@@ -317,8 +322,11 @@ export function validateProposedMessage(ledger, { kind = null, text = null, inbo
   if (q && q.answered) reasons.push(`already_answered:${k}`)
   if (q && !q.answered && q.asked_count > 0) {
     // the single allowed repeat: the seller asked who we are instead of answering, and
-    // we answer that AND re-ask once — never for the asking price (owner 2026-10-13)
-    const identityRepeat = inboundIntent === 'who_is_this' && k !== 'asking_price' && q.asked_count < 2
+    // we answer that AND re-ask once; never for the asking price (owner 2026-10-13)
+    const deflectedByIdentity = (q.identity_deflected_by || []).includes(ledger?.last_message?.id)
+    // the re-ask is allowed only INSIDE an identity answer ("I'm a local buyer … do you still own it?")
+    const answersIdentity = /\b(?:buyer|investor|local|we\s+buy|real\s+estate|i'?m\s+(?:a|with|from)|we'?re\s+(?:a|local)|public\s+(?:property\s+)?records)\b/i.test(String(text || ''))
+    const identityRepeat = (inboundIntent === 'who_is_this' || (deflectedByIdentity && answersIdentity)) && k !== 'asking_price' && q.asked_count < 2
     if (!identityRepeat) reasons.push(`already_asked:${k}`)
   }
   if (k === 'asking_price' && ledger?.questions?.asking_price?.deflected) reasons.push('asking_price_deflected_never_reask')

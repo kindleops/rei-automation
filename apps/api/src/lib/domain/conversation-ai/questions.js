@@ -25,8 +25,8 @@ const TEXT_RULES = [
   ['asking_price', /\b(?:what\s+(?:number|price|amount)|(?:a|any)\s+(?:number|price)\s+in\s+mind|how\s+much\s+(?:would|do|are)\s+you|asking\s+price|what\s+would\s+you\s+(?:take|want|need|accept)|cu[aá]nto\s+(?:pide|quiere)|precio)\b/i],
   ['condition', /\b(?:condition|repairs?|needs?\s+work|anything\s+that\s+needs|updates?|roof|hvac|how'?s\s+the\s+property|estado\s+de\s+la\s+propiedad|reparaciones)\b/i],
   ['occupancy', /\b(?:occupied|vacant|tenants?|rented|who\s+lives)\b/i],
-  ['ownership', /\b(?:still\s+own|are\s+you\s+(?:still\s+)?the\s+owner|do\s+you\s+own|owner\s+of|todav[ií]a\s+es\s+(?:el|la)\s+due[nñ]o)\b/i],
-  ['interest', /\b(?:would\s+you\s+(?:consider|be\s+open|take\s+a\s+look|look\s+at)|open\s+to\s+(?:an?\s+)?(?:offer|proposal)|interested\s+in\s+selling|considerar[ií]a\s+vender)\b/i],
+  ['ownership', /\b(?:still\s+own|are\s+you\s+(?:currently\s+|still\s+)?the\s+(?:owner|homeowner|property\s+owner)|do\s+you\s+(?:currently\s+|still\s+)?own|owner\s+of|is\s+(?:this|that|it|[0-9][^?]{0,60}?)\s+(?:still\s+)?(?:yours|your\s+(?:property|house|home))|did\s+i\s+reach\s+the\s+(?:owner|right\s+person)|is\s+this\s+the\s+right\s+(?:person|number)|are\s+you\s+the\s+right\s+person|todav[ií]a\s+es\s+(?:el|la)\s+due[nñ]o|es\s+usted\s+(?:el|la)\s+due[nñ]o)\b/i],
+  ['interest', /\b(?:would\s+you\s+(?:ever\s+|still\s+|maybe\s+)?(?:consider|be\s+open|be\s+interested|entertain|take\s+a\s+look|look\s+at|want\s+to\s+hear)|open\s+to\s+(?:selling|an?\s+(?:offer|proposal)|hearing)|interested\s+in\s+selling|(?:thinking|thought)\s+(?:about|of)\s+selling|ever\s+(?:thought|considered)\s+(?:about\s+)?selling|considerar[ií]a\s+vender|abierto\s+a\s+(?:considerar|recibir|vender))\b/i],
   ['timeline', /\b(?:timeline|how\s+soon|when\s+(?:would|are)\s+you\s+looking)\b/i],
   ['offer', /\$\s?[0-9][0-9,]*(?:\.[0-9]+)?\s?k?\b.*\?|\b(?:our|my)\s+offer\b/i],
 ]

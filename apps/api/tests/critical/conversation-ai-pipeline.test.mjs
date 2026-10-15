@@ -223,3 +223,130 @@ test('STOP plan through the executor: queued / scheduled sends are cancelled eve
   assert.deepEqual([r.status, r.cancel_result], ['suppressed', { ok: true, cancelled_count: 2 }])
   assert.deepEqual([cancelled[0].thread_key, cancelled[0].policy, cancelled[0].reason], [TK, 'compliance_terminal', 'stop_request'])
 })
+
+// ── 8.5.16 held-out evaluation fixes (fixtures are new phrasings, not the held-out texts) ──
+test('eval fix 1: disinterest and ownership denial run BEFORE the language gate; missing language + English text is English', () => {
+  const sellQ = [m('o1', 'outbound', 'Would you consider selling the place?', 20, 'consider_selling')]
+  const p = plan([...sellQ, m('i1', 'inbound', 'Not looking to sell, thanks', 1)], { language: null })
+  assert.deepEqual(types(p), [ACTIONS.UPDATE_SELLER_FACTS, ACTIONS.SCHEDULE_FOLLOWUP, ACTIONS.AI_GENERATED_REPLY])
+  const es = plan([...sellQ, m('i1', 'inbound', 'No gracias, no está a la venta', 1)], { language: 'es', judgment: { intent: 'not_interested', confidence: 0.92, outcome: 'NO_RESPONSE' } })
+  assert.deepEqual(types(es), [ACTIONS.UPDATE_SELLER_FACTS, ACTIONS.SCHEDULE_FOLLOWUP, ACTIONS.NO_RESPONSE], 'the nurture is scheduled; only the text is language-gated')
+  const own = plan([m('o1', 'outbound', 'Is 4 Oak St yours?', 20, 'ownership_check'), m('i1', 'inbound', 'no', 1)], { language: null })
+  assert.deepEqual(types(own), [ACTIONS.UPDATE_SELLER_FACTS, ACTIONS.NO_RESPONSE])
+  const hello = plan([m('o1', 'outbound', 'Do you still own 4 Oak St?', 20, 'ownership_check'), m('i1', 'inbound', 'yes that is mine', 1)], { language: null })
+  assert.notEqual(hello.actions.at(-1).reason, 'language:language_unknown')
+})
+
+test('eval fix 2: a close knows the follow-up is scheduled; false no-contact promises and long closes are refused', async () => {
+  const L = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Would you consider selling?', 10, 'consider_selling'), m('i1', 'inbound', 'nope', 1)] })
+  const opts = { ledger: L, objective: 'close_no_question', category: 'not_interested_close', followupScheduled: { kind: 'nurture_30_day', days: 30 } }
+  for (const t of ["No problem. I won't bother you again.", 'Got it, we will leave you be.', "Understood, I won't reach out again.", "No worries, I'll take you off our list.", "Thanks. We won't take more of your time.", 'All good, I will close this out on my end.']) {
+    assert.ok(checkComposedText(t, opts).includes('close:false_no_contact_promise_with_followup_scheduled'), t)
+  }
+  assert.ok(checkComposedText('No problem at all. Thanks for the reply. Have a great week.', opts).includes('close:more_than_two_sentences'))
+  assert.deepEqual(checkComposedText('No problem at all, thanks for letting me know. If anything changes down the road, I am around.', opts), [])
+  const p = buildComposePrompt({ ledger: L, inboundText: 'nope', category: 'not_interested_close', objective: 'close_no_question', tone: 'direct', followupScheduled: { days: 30 } })
+  assert.match(p.user, /check-in is scheduled in about 30 days/)
+  // the pipeline passes the scheduled follow-up to the writer
+  const model = fakeModel(['No problem at all, thanks for letting me know. If anything changes down the road, I am around.'])
+  const out = await runConversationPipeline({ input: input([m('o1', 'outbound', 'Would you consider selling?', 10, 'consider_selling'), m('i1', 'inbound', 'nope', 1)]), modelClient: model, spend: spend() })
+  assert.match(model.calls[0].user, /check-in is scheduled/)
+  assert.equal(out.composition.ok, true)
+})
+
+test('eval fix 3 + 11: "would you ever consider", "do you currently own", "is <address> yours" and "did I reach the owner" are recognised; abbreviations do not split sentences', async () => {
+  const { questionKindOf } = await import('../../src/lib/domain/conversation-ai/questions.js')
+  const { sentenceCount } = await import('../../src/lib/domain/conversation-ai/playbook/v1/style-validator.js')
+  assert.equal(questionKindOf({ body: 'Thanks for confirming. Would you ever consider selling 18 Pine Ave?' }), 'interest')
+  assert.equal(questionKindOf({ body: 'Would you still be open to selling it?' }), 'interest')
+  assert.equal(questionKindOf({ body: 'Do you currently own the house on Elm?' }), 'ownership')
+  assert.equal(questionKindOf({ body: 'Is 2200 W Main St yours?' }), 'ownership')
+  assert.equal(questionKindOf({ body: 'Did I reach the owner?' }), 'ownership')
+  assert.equal(sentenceCount('Thanks. Would you sell 12 N. Elm St. in Dallas?'), 2)
+  const L = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Do you still own 18 Pine Ave?', 10, 'ownership_check'), m('i1', 'inbound', 'yes I do', 1)] })
+  assert.deepEqual(checkComposedText('Thanks for confirming. Would you ever consider selling 18 Pine Ave.?'.replace('.?', '?'), { ledger: L, objective: 'interest', category: 'next_missing_fact' }), [])
+})
+
+test('eval fix 4 + 9: "who is this" / "why?" / "what can I do for you" are identity requests; ONE re-ask of the deflected question inside the identity answer', () => {
+  for (const t of ['why?', 'Why do you ask', 'What can I do for you?', 'what is this about', 'Why do you want it']) {
+    const p = plan([m('o1', 'outbound', 'Do you still own 9 Birch Rd?', 10, 'ownership_check'), m('i1', 'inbound', t, 1)])
+    assert.equal(p.actions.at(-1).category, 'identity_answer', t)
+  }
+  const L = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Do you still own 9 Birch Rd?', 10, 'ownership_check'), m('i1', 'inbound', 'why?', 1)] })
+  assert.deepEqual(checkComposedText("We're local buyers looking at homes on your street. Do you still own 9 Birch Rd?", { ledger: L, objective: 'ownership', category: 'identity_answer' }), [])
+  assert.ok(checkComposedText('Do you still own 9 Birch Rd?', { ledger: L, objective: 'ownership', category: 'identity_answer' }).some((r) => r.includes('already_asked')), 'a bare repeat is still refused')
+  const L2 = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Do you still own it?', 30, 'ownership_check'), m('i0', 'inbound', 'who is this', 20), m('o2', 'outbound', "I'm a local buyer. Do you still own it?", 10, 'ownership_check'), m('i1', 'inbound', 'why', 1)] })
+  assert.ok(checkComposedText("I'm a local buyer. Do you still own it?", { ledger: L2, objective: 'ownership', category: 'identity_answer' }).some((r) => r.includes('already_asked')), 'only ONE re-ask')
+})
+
+test('eval fix 5: the model verdict (≥ 0.85, not contradicted) drives denial / disinterest; "Sold" and "gave the house to my son" are former owner', () => {
+  const q = [m('o1', 'outbound', 'Would you consider selling?', 10, 'consider_selling')]
+  const dis = plan([...q, m('i1', 'inbound', 'Probably not, I like it here', 1)], { judgment: { intent: 'not_interested', confidence: 0.9, outcome: 'NO_RESPONSE' } })
+  assert.deepEqual(types(dis), [ACTIONS.UPDATE_SELLER_FACTS, ACTIONS.SCHEDULE_FOLLOWUP, ACTIONS.AI_GENERATED_REPLY])
+  const low = plan([...q, m('i1', 'inbound', 'Probably not, I like it here', 1)], { judgment: { intent: 'not_interested', confidence: 0.6, outcome: 'NO_RESPONSE' } })
+  assert.ok(!types(low).includes(ACTIONS.SCHEDULE_FOLLOWUP), 'low confidence is not honoured')
+  const contradicted = plan([...q, m('i1', 'inbound', 'Probably not, I like it here', 1)], { judgment: { intent: 'not_interested', confidence: 0.95 }, deterministic: { intent: 'seller_interested' } })
+  assert.ok(!types(contradicted).includes(ACTIONS.SCHEDULE_FOLLOWUP), 'a contradicting deterministic verdict wins')
+  const den = plan([m('o1', 'outbound', 'Is this the owner of 5 Ash?', 10, 'ownership_check'), m('i1', 'inbound', 'That was my uncle years ago', 1)], { judgment: { intent: 'ownership_denied', outcome: 'UPDATE_ONLY', confidence: 0.9 } })
+  assert.deepEqual(types(den), [ACTIONS.UPDATE_SELLER_FACTS, ACTIONS.NO_RESPONSE])
+  for (const t of ['Sold', 'sold it in March', 'I gave the house to my son last year', 'The property belongs to my daughter now']) {
+    const L = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Do you still own 5 Ash?', 10, 'ownership_check'), m('i1', 'inbound', t, 1)] })
+    assert.equal(L.facts.ownership?.value, 'former_owner', t)
+    assert.deepEqual(types(plan([m('o1', 'outbound', 'Do you still own 5 Ash?', 10, 'ownership_check'), m('i1', 'inbound', t, 1)])), [ACTIONS.UPDATE_SELLER_FACTS, ACTIONS.NO_RESPONSE], t)
+  }
+})
+
+test('eval fix 6: targeting claims and attributions the seller did not make are refused', () => {
+  const unsure = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Do you still own 5 Ash?', 10, 'ownership_check'), m('i1', 'inbound', "I don't know honestly", 1)] })
+  assert.ok(checkComposedText("Since you're confident you own 5 Ash, would you sell?", { ledger: unsure, objective: 'interest', category: 'next_missing_fact' }).some((r) => r.startsWith('ledger:unsupported_attribution')))
+  const owns = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Do you still own 5 Ash?', 10, 'ownership_check'), m('i1', 'inbound', 'yes I own it', 1)] })
+  assert.deepEqual(checkComposedText('Since you own 5 Ash, would you consider selling it?', { ledger: owns, objective: 'interest', category: 'next_missing_fact' }), [])
+  for (const t of ["I'm not just casting a wide net here. Would you sell?", 'You were specifically chosen. Would you sell?', "We're looking at 5 Ash specifically. Would you sell?", 'Your home was hand-picked. Would you sell?']) {
+    assert.ok(validatePlaybookStyle(t).reasons.includes('style:targeting_claim'), t)
+  }
+})
+
+test('eval fix 7: price contradiction is a plain HOLD in decide (no Sonnet)', () => {
+  const p = plan([m('o1', 'outbound', 'What price?', 30, 'seller_asking_price'), m('i0', 'inbound', '90k', 20), m('i1', 'inbound', 'actually 300k', 1)], { judgment: { escalation_required: true, escalation_reason: 'contradiction', outcome: 'NEEDS_REVIEW', confidence: 0.8 } })
+  assert.deepEqual(p.actions.at(-1), { type: ACTIONS.HOLD, reason: 'price_contradiction' })
+})
+
+test('eval fix 8: send-side scope classifies money by INTENT; a stated price lets the condition question through', async () => {
+  const { classifyRoutineScope } = await import('../../src/lib/domain/conversation-ai/send-policy.js')
+  const L = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'What price would you want?', 10, 'seller_asking_price'), m('i1', 'inbound', 'I would take 180k', 1)] })
+  const d = { outcome: 'REPLY_CANDIDATE', intent: 'asking_price_provided', next_objective: 'get_condition', confidence: 0.95 }
+  assert.equal(classifyRoutineScope({ decision: d, draftText: 'Got it, thanks. How is the condition of the house?', inboundText: 'I would take 180k', ledger: L, language: 'en' }).in_scope, true)
+  assert.ok(classifyRoutineScope({ decision: { ...d, intent: 'counter_or_negotiation' }, draftText: 'Got it. How is the condition?', inboundText: 'can you do 200k?', ledger: L, language: 'en' }).reasons.includes('excluded_money_or_offer'))
+  assert.ok(classifyRoutineScope({ decision: d, draftText: 'Would 150k work?', inboundText: 'I would take 180k', ledger: L, language: 'en' }).reasons.includes('excluded_money_amount'))
+})
+
+test('eval fix 10: stock openers refused; never open two consecutive turns the same way', () => {
+  const L = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Do you still own 5 Ash?', 10, 'ownership_check'), m('i1', 'inbound', 'yes', 1)] })
+  for (const t of ['Fair question. Would you consider selling?', 'Quick question: would you consider selling?', 'Understood, thanks for letting me know. Would you sell?']) assert.ok(validatePlaybookStyle(t).reasons.includes('style:stock_opener'), t)
+  assert.ok(checkComposedText('Thanks for confirming. Would you consider selling it?', { ledger: L, objective: 'interest', category: 'next_missing_fact', previousOutbound: 'Thanks for confirming, do you still own it?' }).includes('style:repeated_opening'))
+  assert.deepEqual(checkComposedText('Appreciate it. Would you consider selling it?', { ledger: L, objective: 'interest', category: 'next_missing_fact', previousOutbound: 'Thanks for confirming, do you still own it?' }), [])
+})
+
+test('eval fix 1b/10b: NULL language with Spanish words stays unknown; Spanish text is refused; openings rotate', async () => {
+  const { languageVerdict } = await import('../../src/lib/domain/conversation-ai/send-policy.js')
+  assert.equal(languageVerdict({ language: null, inboundText: 'Not interested in selling, thanks' }).english, true)
+  assert.equal(languageVerdict({ language: null, inboundText: 'No por ahora, tengo el prestamo' }).english, false)
+  assert.equal(languageVerdict({ language: null, inboundText: 'no' }).english, false, '"no" alone proves nothing')
+  assert.ok(validatePlaybookStyle('Entendido, gracias por avisar.').reasons.includes('style:non_english'))
+  const { openingHintFor, OPENING_HINTS } = await import('../../src/lib/domain/conversation-ai/pipeline/compose.js')
+  const hints = new Set(['yes', 'no thanks', 'who is this', 'maybe later', 'not for sale', 'how much', 'sure', 'why'].map(openingHintFor))
+  assert.ok(hints.size >= 3 && [...hints].every((h) => OPENING_HINTS.includes(h)))
+})
+
+test('eval fix 11b: courtesy is not flattery; stock "<ack>, thanks for letting me know" openers are refused', () => {
+  assert.equal(validatePlaybookStyle('No problem, I appreciate you letting me know.').ok, true)
+  assert.ok(validatePlaybookStyle('I appreciate you. Would you sell?').reasons.includes('style:flattery'))
+  for (const t of ['Makes sense, thanks for letting me know.', 'Got it, thank you for letting me know.']) assert.ok(validatePlaybookStyle(t).reasons.includes('style:stock_opener'), t)
+})
+
+test('eval fix 6b: inventory claims and "won\'t take up more of your time" are refused', () => {
+  assert.ok(validatePlaybookStyle("We don't have any cheap fixer uppers to share right now.").reasons.includes('style:inventory_or_capacity_claim'))
+  assert.ok(validatePlaybookStyle('We have a few houses available right now.').reasons.includes('style:inventory_or_capacity_claim'))
+  const L = buildCanonicalLedger({ messages: [m('o1', 'outbound', 'Would you consider selling?', 10, 'consider_selling'), m('i1', 'inbound', 'no', 1)] })
+  assert.ok(checkComposedText("Understood, we won't take up more of your time.", { ledger: L, objective: 'close_no_question', category: 'not_interested_close', followupScheduled: { days: 30 } }).includes('close:false_no_contact_promise_with_followup_scheduled'))
+})

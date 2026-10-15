@@ -78,22 +78,36 @@ test('contract: a valid decision passes; unknown keys, bad enums, foreign ids, r
 
 test('contract: invalid model output fails closed to NEEDS_REVIEW (after the escalation also fails)', async () => {
   const { provider, mc } = client({ intent: 'nonsense' })
-  const ctx = buildConversationContext(input('what is your offer', priceAskThread))
-  const r = await understandInbound({ context: ctx, inboundText: 'what is your offer', inboundId: 'in-1', deterministic: { intent: 'asks_offer' }, eligibility: OPEN, modelClient: mc })
+  const ctx = buildConversationContext(input('hmm not sure yet', priceAskThread))
+  const r = await understandInbound({ context: ctx, inboundText: 'hmm not sure yet', inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
   assert.equal(r.decision.outcome, 'NEEDS_REVIEW')
   assert.equal(r.decision.proposed_message, null)
-  assert.equal(provider.calls.length, 2, 'haiku then sonnet')
+  assert.equal(provider.calls.length, 3, 'haiku, one haiku repair (8.5.16 eval), then sonnet')
   assert.match(provider.calls[0].model, /haiku/)
-  assert.match(provider.calls[1].model, /sonnet/)
-  assert.deepEqual(provider.calls[1].tool_choice, { type: 'auto' }, 'sonnet 5.5 refuses forced tool_choice')
+  assert.match(provider.calls[1].model, /haiku/)
+  assert.match(JSON.stringify(provider.calls[1].messages), /FAILED VALIDATION/)
+  assert.match(provider.calls[2].model, /sonnet/)
+  assert.deepEqual(provider.calls[2].tool_choice, { type: 'auto' }, 'sonnet 5.5 refuses forced tool_choice')
 })
 
 test('escalation: Sonnet gains no authority — its ESCALATE becomes NEEDS_REVIEW', async () => {
-  const { mc } = client((p, n) => (n === 1 ? goodDecision({ escalation_required: true, escalation_reason: 'financing', outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false }) : goodDecision({ outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false, escalation_required: true, escalation_reason: 'financing' })))
-  const ctx = buildConversationContext(input('would you do owner financing?', priceAskThread))
-  const r = await understandInbound({ context: ctx, inboundText: 'would you do owner financing?', inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
+  const { mc } = client((p, n) => (n === 1 ? goodDecision({ escalation_required: true, escalation_reason: 'low_confidence', outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false }) : goodDecision({ outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false, escalation_required: true, escalation_reason: 'low_confidence' })))
+  const ctx = buildConversationContext(input('hmm let me see', priceAskThread))
+  const r = await understandInbound({ context: ctx, inboundText: 'hmm let me see', inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
   assert.equal(r.trace.path, 'haiku→sonnet')
   assert.equal(r.decision.outcome, 'NEEDS_REVIEW')
+})
+
+test('8.5.16 eval: NO Sonnet call when the turn goes to a human anyway (financing, offer request, Spanish); price contradiction is a HOLD', async () => {
+  for (const text of ['would you do owner financing?', 'what is your offer', '¿Cuánto me ofrece por la casa?']) {
+    const { provider, mc } = client(() => goodDecision({ escalation_required: true, escalation_reason: 'other', outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false }))
+    const ctx = buildConversationContext(input(text, priceAskThread))
+    const r = await understandInbound({ context: ctx, inboundText: text, inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
+    assert.equal(provider.calls.length, 1, text)
+    assert.match(provider.calls[0].model, /haiku/)
+    assert.equal(r.trace.escalation_skipped, 'human_bound', text)
+    assert.notEqual(r.decision.outcome, 'ESCALATE_TO_SONNET')
+  }
 })
 
 // ── deterministic pre-check ────────────────────────────────────────────────

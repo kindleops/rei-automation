@@ -9,6 +9,8 @@
 //   offer request                        → no fabricated offer: the approved next step only
 //                                          (PREPARE_OFFER → NegotiationAuthority; stub escalates)
 //   ambiguous                            → context, then a useful clarification or review
+// The model's validated verdict (confidence ≥ 0.85) is honoured for ownership denial and
+// disinterest when the deterministic pre-check does not contradict it.
 import { deterministicPrecheck } from '../precheck.js'
 import { isStopRequest } from '../stop-request.js'
 import { languageVerdict } from '../send-policy.js'
@@ -58,21 +60,38 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   if (eligibility?.blocked) return plan([{ type: ACTIONS.HOLD, reason: 'eligibility_blocked' }], 'eligibility_blocked')
   if (ownerHandled) return plan([{ type: ACTIONS.HOLD, reason: 'owner_handled_thread' }], 'owner_handled_thread')
 
-  // 3. ownership denial read against the actual previous question ("No" to "do you own it?")
+  // 3. ownership denial read against the actual previous question ("No" to "do you own it?"),
+  //    or the model's validated ownership denial when the deterministic pre-check agrees
   const own = ledger?.facts?.ownership
-  if (own && ['denied', 'former_owner'].includes(own.value) && (own.source_message_ids || []).includes(inboundId)) {
-    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: 'denied' }, source_message_id: inboundId }, { type: ACTIONS.NO_RESPONSE }], 'ownership_denied_no_nurture')
-  }
-  // 4. language: only positively-English threads are answered by the engine
   const lang = languageVerdict({ language, inboundText })
+  const confident = (j) => j && Number(j.confidence) >= 0.85
+  const detPositive = ['ownership_confirmed', 'seller_interested', 'interested', 'latent_interest', 'asks_offer'].includes(String(deterministic?.intent))
+  const ledgerDenied = own && ['denied', 'former_owner'].includes(own.value) && (own.source_message_ids || []).includes(inboundId)
+  const modelDenied = confident(judgment) && !detPositive && (judgment.outcome === 'UPDATE_ONLY' || ['ownership_denied', 'wrong_number'].includes(judgment.intent)) &&
+    (['ownership_denied', 'wrong_number'].includes(judgment.intent) || (judgment.facts_extracted || []).some((f) => f.fact === 'ownership' && ['denied', 'former_owner', 'not_owner'].includes(String(f.value)) && f.source_message_id === inboundId))
+  if (ledgerDenied || modelDenied) {
+    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: ledgerDenied ? own.value : 'denied' }, source_message_id: inboundId }, { type: ACTIONS.NO_RESPONSE }], ledgerDenied ? 'ownership_denied_no_nurture' : 'ownership_denied_no_nurture:model')
+  }
+
+  // 4. disinterest → the existing 30-day follow-up, whatever the language; only the reply text
+  //    is language-gated. The model's validated not_interested counts when nothing contradicts it.
+  const interest = ledger?.facts?.seller_interest
+  const ledgerNotInterested = interest?.value === 'not_interested' && (interest.source_message_ids || []).includes(inboundId)
+  const ledgerInterestedNow = interest && interest.value !== 'not_interested' && (interest.source_message_ids || []).includes(inboundId)
+  const modelNotInterested = confident(judgment) && judgment.intent === 'not_interested' && !detPositive && !ledgerInterestedNow && !(ledger?.offer_requests || []).includes(inboundId)
+  if (ledgerNotInterested || modelNotInterested) {
+    const facts = { ...(update[0]?.facts || {}), seller_interest: 'not_interested' }
+    const close = deterministicTemplate?.available ? { type: ACTIONS.DETERMINISTIC_REPLY, use_case: deterministicTemplate.use_case || null }
+      : lang.english ? { type: ACTIONS.AI_GENERATED_REPLY, category: 'not_interested_close', objective: 'close_no_question', followup_scheduled: { kind: 'nurture_30_day', days: 30 } }
+        : { type: ACTIONS.NO_RESPONSE }
+    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts, source_message_id: inboundId }, { type: ACTIONS.SCHEDULE_FOLLOWUP, kind: 'nurture_30_day', days: 30 }, close], ledgerNotInterested ? 'disinterest_30_day_followup' : 'disinterest_30_day_followup:model')
+  }
+
+  // 5. language: only English threads get engine text (a missing language with English text is English)
   if (!lang.english) return plan([...update, { type: ACTIONS.ESCALATE_TO_OPERATOR, reason: `language:${lang.reason}` }], 'language_not_enabled')
 
-  // 5. disinterest → the existing 30-day follow-up, plus a graceful close (no question)
-  const interest = ledger?.facts?.seller_interest
-  if (interest?.value === 'not_interested' && (interest.source_message_ids || []).includes(inboundId)) {
-    const close = deterministicTemplate?.available ? { type: ACTIONS.DETERMINISTIC_REPLY, use_case: deterministicTemplate.use_case || null } : { type: ACTIONS.AI_GENERATED_REPLY, category: 'not_interested_close', objective: 'close_no_question' }
-    return plan([...update, { type: ACTIONS.SCHEDULE_FOLLOWUP, kind: 'nurture_30_day', days: 30 }, close], 'disinterest_30_day_followup')
-  }
+  // 5b. two stated asking prices far apart: a plain HOLD (no model escalation)
+  if (judgment?.escalation_reason === 'contradiction' || judgment?._hold === 'price_contradiction') return plan([...update, { type: ACTIONS.HOLD, reason: 'price_contradiction' }], 'price_contradiction')
 
   // 6. hard escalations: multiple properties, financing structures, legal topics, the model's own escalation
   if ((Number(propertyCount) || 1) > 1 || ledger?.property?.identity_requested) return plan([...update, { type: ACTIONS.RESEARCH_PROPERTY }, { type: ACTIONS.ESCALATE_TO_OPERATOR, reason: 'multiple_properties_or_property_identity' }], 'multi_property')

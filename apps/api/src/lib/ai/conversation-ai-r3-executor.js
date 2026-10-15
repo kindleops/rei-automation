@@ -56,6 +56,7 @@ import { CONTEXT_VERSION } from '@/lib/domain/conversation-ai/context-builder.js
 import { COMPOSE_PROMPT_VERSION, PLAYBOOK_VERSION } from '@/lib/domain/conversation-ai/playbook/v1/index.js'
 import { validatePlaybookStyle } from '@/lib/domain/conversation-ai/playbook/v1/style-validator.js'
 import { ACTIONS, validatePlan } from '@/lib/domain/conversation-ai/pipeline/outcomes.js'
+import { closeAndAttributionReasons } from '@/lib/domain/conversation-ai/pipeline/compose.js'
 
 export const R3_EXECUTOR_VERSION = 'conv-ai.r3-executor.v1'
 export { R3_EXECUTOR_WIRED }
@@ -229,6 +230,9 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   const val = await validateDraft({ decision: { ...decision, proposed_message: draft }, context, inboundText: input.inbound.body, policy: DEFAULT_AI_REPLY_POLICY, eligibility, factLedger: ledger })
   // 6. routine scope (reported together with the re-validation reasons)
   const scope = classifyRoutineScope({ decision, draftText: draft, inboundText: input.inbound.body, ledger, language: state.language, propertyCount: (input.properties || []).length || 1, policy })
+  // a close never promises no further contact (the 30-day follow-up exists); attributions must be stated facts
+  const closeReasons = closeAndAttributionReasons(draft, { ledger, category: scope.category, followupScheduled: scope.category === 'not_interested_close' ? { days: 30 } : null })
+  if (closeReasons.length) return out('held', closeReasons, { category: scope.category, ledger: ledgerSummary(ledger) })
   if (val.status !== 'validated_draft' || !scope.in_scope) {
     const reasons = [...(val.status !== 'validated_draft' ? (val.reasons.length ? val.reasons : ['revalidation_failed']) : []), ...scope.reasons]
     return out('held', reasons, { category: scope.category, ledger: ledgerSummary(ledger) })
