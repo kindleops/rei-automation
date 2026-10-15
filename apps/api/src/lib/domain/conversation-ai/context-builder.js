@@ -9,7 +9,7 @@
 // (CONTEXT_MIXED) — the caller fails closed to NEEDS_REVIEW, it never "filters
 // and continues", because a mixed read means the loader is wrong.
 import { buildFactLedger, factSummary } from './facts.js'
-import { blockedQuestionKinds, questionKindOf, questionLedger } from './questions.js'
+import { blockedQuestionKinds, isDeflectionToOffer, questionKindOf, questionLedger } from './questions.js'
 import { firstNameOnly, maskText, threadRef } from './pii.js'
 
 export const CONTEXT_VERSION = 'conv-ai.context.v1'
@@ -82,7 +82,14 @@ export function buildConversationContext({
   const blocked = blockedQuestionKinds(ledger)
   const stage = deriveStageEvidence({ facts, ledger, offers })
 
-  const firstName = firstNameOnly(names.first_name || null)
+  // A placeholder name on an internal / test record ("Internal", "Test") is not
+  // a seller's name (eval #128 drafted "Hi Internal…").
+  const rawFirst = firstNameOnly(names.first_name || null)
+  const firstName = rawFirst && PLACEHOLDER_FIRST_NAME_RE.test(rawFirst) ? null : rawFirst
+  // OUR last question before this inbound -- every reply is read against it.
+  const lastOutbound = [...ordered].reverse().find((m) => m.direction === 'outbound' && m.id !== inbound.id) || null
+  const lastQuestionKind = lastOutbound ? questionKindOf(lastOutbound) : 'none'
+  const requiredNextObjective = requiredObjectiveFor({ inboundText: inbound.body, ledger, facts, deterministic })
   const maskOpts = { maskNames: names.full_names || [], keepFirstName: firstName }
   const recent = ordered.slice(-MAX_THREAD_MESSAGES)
   const messageIds = recent.map((m) => m.id)
@@ -94,6 +101,8 @@ export function buildConversationContext({
     now,
     language: language || null,
     seller_first_name: firstName,
+    last_question_kind: lastQuestionKind,
+    ...(requiredNextObjective ? { required_next_objective: requiredNextObjective } : {}),
     current_inbound: { id: inbound.id, at: inbound.at, text: maskText(inbound.body, maskOpts).slice(0, MAX_MESSAGE_CHARS) },
     messages: recent.map((m) => ({
       id: m.id,
@@ -128,5 +137,22 @@ export function buildConversationContext({
     property_ids: [...propIds],
     at_by_id: Object.fromEntries(recent.map((m) => [m.id, m.at])),
     mask: maskOpts,
+    last_question_kind: lastQuestionKind,
+    required_next_objective: requiredNextObjective,
   }
+}
+
+const PLACEHOLDER_FIRST_NAME_RE = /^(?:internal|test|tester|testing|unknown|owner|homeowner|resident|seller|n\/?a|none|null|undefined|qa|demo)$/i
+
+/**
+ * Deterministic objective override (eval #14, #92): once we asked the asking
+ * price and the seller asks for OUR offer instead, the price is never asked
+ * again -- condition next, or a human when condition is already known.
+ */
+export function requiredObjectiveFor({ inboundText = '', ledger = null, facts = {}, deterministic = null } = {}) {
+  const askedPrice = (ledger?.asking_price?.asked_count || 0) > 0
+  if (!askedPrice || facts?.asking_price?.current) return null
+  const offerRequest = deterministic?.intent === 'asks_offer' || isDeflectionToOffer(inboundText)
+  if (!offerRequest) return null
+  return facts?.condition?.current ? 'offer_needs_human' : 'get_condition'
 }

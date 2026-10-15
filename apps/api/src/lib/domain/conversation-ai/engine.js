@@ -57,7 +57,7 @@ export function composeDraft(decision) {
  * @param {Function|null} [a.semanticCheck]
  * @param {() => number} [a.clock]
  */
-export async function runConversationAiShadow({ input, deterministic = null, eligibilityFor = null, modelClient = null, policy = DEFAULT_AI_REPLY_POLICY, env = process.env, store = null, semanticCheck = null, clock = () => Date.now() }) {
+export async function runConversationAiShadow({ input, deterministic = null, eligibilityFor = null, modelClient = null, policy = DEFAULT_AI_REPLY_POLICY, env = process.env, store = null, semanticCheck = null, clock = () => Date.now(), inboundVersion = null }) {
   const p = normalizePolicy(policy)
   const gate = shadowAllowed(p, env)
   if (!gate.allowed) return { ran: false, code: gate.code }
@@ -81,7 +81,7 @@ export async function runConversationAiShadow({ input, deterministic = null, eli
     } catch (err) {
       const code = err instanceof ContextError ? err.code : 'CONTEXT_FAILED'
       const decision = failClosedDecision({ errors: [code], sourceMessageIds: [String(input.inbound.id)], producedBy: 'context' })
-      return buildShadowRecord({ inboundMessageId: input.inbound.id, threadRef: null, createdAt: now, sellerMessageMasked: maskText(input.inbound.body), decision, path: 'context_error', latencyMs: clock() - t0, policyCode: assertSendAllowed(p).code, deterministic })
+      return buildShadowRecord({ inboundVersion, inboundMessageId: input.inbound.id, threadRef: null, createdAt: now, sellerMessageMasked: maskText(input.inbound.body), decision, path: 'context_error', latencyMs: clock() - t0, policyCode: assertSendAllowed(p).code, deterministic })
     }
     const r1 = await understandInbound({ context, inboundText: input.inbound.body, inboundId: input.inbound.id, deterministic, eligibility, modelClient })
     const decision = r1.decision
@@ -101,6 +101,7 @@ export async function runConversationAiShadow({ input, deterministic = null, eli
       if (validation.semantic?.call) r1.calls.push({ ...validation.semantic.call, route: 'semantic_check' })
     }
     return buildShadowRecord({
+      inboundVersion,
       inboundMessageId: input.inbound.id,
       threadRef: context.thread_ref,
       propertyIds: context.property_ids,

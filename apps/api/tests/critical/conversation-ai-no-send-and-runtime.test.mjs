@@ -79,7 +79,7 @@ test('hook: off by default — nothing scheduled, nothing imported, nothing enqu
 
 test('hook: duplicate inbound (repeat webhook, parallel) → ONE conversation.decide job', async () => {
   const store = armedStore()
-  const opts = { env: ON, getStore: async () => store }
+  const opts = { env: ON, getStore: async () => store, gate: async () => ({ enabled: true, reason: null }) }
   for (let i = 0; i < 3; i += 1) scheduleConversationAiShadow({ providerMessageSid: 'SM123abc', deterministic: { intent: 'asks_offer' } }, opts)
   await flush(); await flush(); await flush()
   const st = await store.status?.()

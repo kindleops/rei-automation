@@ -1,3 +1,4 @@
+import { suppressesAutomaticFollowup } from "@/lib/domain/seller-flow/decline-followup-policy.js";
 import { buildContextResolutionResult } from "@/lib/domain/context/context-resolution-result.js";
 // V2-1B: durable contact×property resolution. Decides the next contact after
 // an S1 ownership outcome; has no path to a send.
@@ -964,6 +965,7 @@ export async function processSellerInboundMessage({
           burst_event_ids: Array.isArray(burstContext?.constituent_event_ids)
             ? burstContext.constituent_event_ids
             : [],
+          current_inbound_body: typeof message === "string" ? message : null,
         })) ?? null;
     } catch {
       // Non-fatal by contract: classify keeps its existing
@@ -2160,7 +2162,11 @@ export async function processSellerInboundMessage({
         ? "not_interested"
         : intelligence_snapshot?.canonical_intent || contract.normalized_intent;
 
-    const should_schedule_followup = Boolean(
+    // RC 8.5.15 (decline-followup-policy.js): an S1 ownership denial, an S2
+    // "No" and a "No" to "can we check back?" never schedule a follow-up,
+    // whatever any upstream overlay recommended.
+    const decline_no_followup = suppressesAutomaticFollowup(classification);
+    const should_schedule_followup = !decline_no_followup && Boolean(
       contract.ownership_probe_transition ||
         (!execution?.queued &&
           (canonical_decision?.next_action === "schedule_later_followup" ||

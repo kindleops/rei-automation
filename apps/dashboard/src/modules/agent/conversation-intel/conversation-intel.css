@@ -54,3 +54,26 @@
 .cix-cost { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 6px 2px 0; font: var(--lc-t-meta); color: var(--lc-ink-3); font-variant-numeric: tabular-nums; }
 .cix-cost b { color: var(--lc-ink-1); font-weight: 600; }
 @container (max-width: 760px) { .cix-body { grid-template-columns: 1fr; } }
+
+/* ── review detail additions (8.5.15) — neutral surfaces only ── */
+.cix-state { font-style: normal; padding: 2px 7px; border-radius: 999px; background: var(--agx-inner, rgba(255, 255, 255, 0.028)); box-shadow: inset 0 0 0 1px var(--agx-edge, rgba(255, 255, 255, 0.06)); color: var(--lc-ink-3); text-transform: capitalize; }
+.cix-state.is-on { color: rgb(var(--cix-gold-rgb)); box-shadow: inset 0 0 0 1px rgba(var(--cix-gold-rgb), 0.45); }
+.cix-state.is-off { color: var(--lc-ink-2); }
+.cix-step h6 { margin: 2px 0 0; font: var(--lc-t-label); font-size: 10.5px; letter-spacing: 0.04em; color: var(--lc-ink-4); }
+.cix-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; font: var(--lc-t-meta); font-size: 12.5px; }
+.cix-kv dt { color: var(--lc-ink-4); }
+.cix-kv dd { margin: 0; color: var(--lc-ink-2); min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.cix-kv dd b { color: var(--lc-ink-1); font-weight: 600; }
+.cix-reason { color: var(--lc-ink-2); padding: 5px 8px; border-radius: 8px; background: var(--agx-inner-hi, rgba(255, 255, 255, 0.05)); }
+.cix-draftlabel { display: flex; align-items: center; gap: 6px; font: var(--lc-t-label); font-size: 11px; letter-spacing: 0.03em; color: var(--lc-ink-3); }
+.cix-note.is-inline { margin: 0 0 8px; }
+
+/* operator controls (right inspector) */
+.cix-ctl .agx-panel h5 { display: flex; align-items: center; gap: 8px; }
+.cix-gates { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 2px; font: var(--lc-t-meta); font-size: 12px; }
+.cix-gates li { display: flex; justify-content: space-between; gap: 10px; padding: 3px 6px; border-radius: 6px; color: var(--lc-ink-3); }
+.cix-gates li b { font-weight: 600; color: var(--lc-ink-2); }
+.cix-gates li.is-on b { color: rgb(var(--cix-gold-rgb)); }
+.cix-gates li.is-off { background: var(--agx-inner, rgba(255, 255, 255, 0.028)); }
+.cix-gates li.is-off b { color: var(--lc-ink-1); }
+.cix-ctl__actions { display: grid; gap: 6px; }

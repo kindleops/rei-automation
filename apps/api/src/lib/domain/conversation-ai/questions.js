@@ -25,8 +25,9 @@ const TEXT_RULES = [
   ['asking_price', /\b(?:what\s+(?:number|price|amount)|(?:a|any)\s+(?:number|price)\s+in\s+mind|how\s+much\s+(?:would|do|are)\s+you|asking\s+price|what\s+would\s+you\s+(?:take|want|need|accept)|cu[aá]nto\s+(?:pide|quiere)|precio)\b/i],
   ['condition', /\b(?:condition|repairs?|needs?\s+work|anything\s+that\s+needs|updates?|roof|hvac|how'?s\s+the\s+property|estado\s+de\s+la\s+propiedad|reparaciones)\b/i],
   ['occupancy', /\b(?:occupied|vacant|tenants?|rented|who\s+lives)\b/i],
-  ['ownership', /\b(?:still\s+own|are\s+you\s+(?:still\s+)?the\s+owner|do\s+you\s+own|owner\s+of|todav[ií]a\s+es\s+(?:el|la)\s+due[nñ]o)\b/i],
-  ['interest', /\b(?:would\s+you\s+(?:consider|be\s+open|take\s+a\s+look|look\s+at)|open\s+to\s+(?:an?\s+)?(?:offer|proposal)|interested\s+in\s+selling|considerar[ií]a\s+vender)\b/i],
+  ['ownership', /\b(?:still\s+own|are\s+you\s+(?:still\s+)?the\s+owner|do\s+you\s+own|owner\s+of|is\s+[^?]{1,60}?\s+(?:still\s+)?yours|correct\s+number\s+for\s+the\s+owner)\b|(?:todav[ií]a\s+es|es\s+usted|eres|sigue\s+siendo|sigues\s+siendo|usted\s+es)\s+(?:el\s+|la\s+)?(?:due[nñ][oa]|propietari[oa])|\bes\s+(?:tu|su)\s+propiedad|\b[eé]\s+(?:o|a)\s+propriet[aá]ri[oa]/i],
+  // RC 8.5.15 (eval: "Would you ever consider selling…?" / "¿Estaría abierto a…?" read as 'other')
+  ['interest', /\b(?:would\s+you\s+(?:ever\s+|still\s+)?(?:consider|be\s+(?:open|interested|willing)|take\s+a\s+look|look\s+at|entertain|think\s+about)|(?:are|r)\s+you\s+(?:still\s+)?(?:open|interested|willing)\s+to|open\s+to\s+(?:an?\s+|any\s+|some\s+)?(?:(?:cash|as[-\s]is|fair|quick)\s+)?(?:offer|proposal|selling|sell|sale|discussing|talking)|interested\s+in\s+(?:selling|an?\s+(?:offer|proposal)|a\s+sale)|consider\s+(?:selling|an?\s+(?:(?:cash|fair)\s+)?(?:offer|proposal)|a\s+sale)|thought\s+(?:about|of)\s+selling|considerar[ií]a\s+(?:vender|una\s+(?:oferta|propuesta))|estar[ií]a\s+(?:abiert[oa]|dispuest[oa]|interesad[oa])|(?:le|te)\s+interesar[ií]a\s+(?:vender|una\s+(?:oferta|propuesta))|(?:quiere|quisiera|piensa|pensar[ií]a\s+en)\s+vender|abiert[oa]\s+a\s+(?:una\s+)?(?:oferta|propuesta|vender))/i],
   ['timeline', /\b(?:timeline|how\s+soon|when\s+(?:would|are)\s+you\s+looking)\b/i],
   ['offer', /\$\s?[0-9][0-9,]*(?:\.[0-9]+)?\s?k?\b.*\?|\b(?:our|my)\s+offer\b/i],
 ]

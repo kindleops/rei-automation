@@ -202,7 +202,8 @@ export function categorizeReply({ classification = {}, body = "", open_engagemen
   // a different property is for sale. A person answers it (never nurtured or
   // archived away).
   if (rules.includes("other_property_for_sale")) return CLEANUP_CATEGORY.KEEP;
-  if (intent === "wrong_number") return CLEANUP_CATEGORY.WRONG_PERSON;
+  // RC 8.5.15: an ownership denial (property-scoped) is the not-the-owner lane.
+  if (intent === "wrong_number" || intent === "property_specific_non_owner") return CLEANUP_CATEGORY.WRONG_PERSON;
   if (intent === "sold_property") return CLEANUP_CATEGORY.SOLD;
   if (intent === "hostile_or_legal") return CLEANUP_CATEGORY.HOSTILE;
   if (emojiTurn) {

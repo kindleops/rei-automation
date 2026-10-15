@@ -19,7 +19,8 @@ export const STOP_SCOPE = Object.freeze({ COMMUNICATION: "stop_communication", O
 /** Any communication object — texting, messages, calls, contact, my number, a list. */
 const COMMUNICATION_RE = new RegExp(
   [
-    "\\b(?:text|texts|texting|message|messages|messaging|msg|msgs|sms|contact|contacting|call|calls|calling|phone|bother|bothering|bug|bugging|pester\\w*|annoy\\w*|harass\\w*|spam\\w*|number|list|unsubscribe|opt[\\s-]?out|email|emails|write|writing|reach(?:ing)?\\s+out|hit(?:ting)?\\s+me\\s+up)\\b",
+    // RC 8.5.15 (owner 2026-10-14, locked): "please stop sending" is a stop on our messages.
+    "\\b(?:text|texts|texting|message|messages|messaging|msg|msgs|sms|contact|contacting|call|calls|calling|phone|bother|bothering|bug|bugging|pester\\w*|annoy\\w*|harass\\w*|spam\\w*|number|list|unsubscribe|opt[\\s-]?out|email|emails|write|writing|reach(?:ing)?\\s+out|hit(?:ting)?\\s+me\\s+up|send|sending)\\b",
     "\\b(?:escrib\\w*|mensaj\\w*|text\\w*|llam\\w*|contact\\w*|molest\\w*|n[uú]mero|lista|whatsapp)\\b",
     "\\b(?:mensag\\w*|escrev\\w*|lig\\w*|contat\\w*|incomod\\w*)\\b",
     "(?:[ée]cri\\w*|\\bmessage\\w*|\\btexto\\w*|\\bappel\\w*|\\bcontact\\w*|\\bnum[ée]ro|\\bliste\\b|\\bharcel\\w*|\\bd[ée]rang\\w*)",
@@ -74,6 +75,9 @@ const bare = (s) => String(s || "").trim().replace(/^[^\p{L}\p{M}\p{N}]+/u, "").
 const OUTREACH_STOP_RE = [
   /\b(?:stop|quit|quite|cease)\b[^.!?\n]{0,24}?\b(?:look(?:ing)?\s+(?:up|for|at|into)|search(?:ing)?|asking\s+(?:about|for)|inquir(?:e|ing)\s+about|try(?:ing)?\s+to\s+buy|buy(?:ing)?|offer(?:ing)?|send(?:ing)?|target(?:ing)?|pursu(?:e|ing)|chasing|hunting)\b[^.!?\n]{0,40}?\b(?:propert(?:y|ies)|houses?|homes?|land|lots?|real\s+estate|my\s+place)\b/i,
   /\b(?:stop|quit|cease)\b[^.!?\n]{0,30}?\babout\s+(?:my|the|this|that|our|his|her)\s+(?:propert(?:y|ies)|house|home|land|lot|place)\b/i,
+  // RC 8.5.15 (owner 2026-10-14, locked; production miss "Stop asking me about
+  // <address>"): a stop on OUR questions to them is a stop on our messages.
+  /\b(?:stop|quit|cease)\s+asking\s+me\b/i,
 ];
 
 export function matchesOutreachStop(message = "") {

@@ -7709,6 +7709,19 @@ function deriveAutomationDecision({
     };
   }
 
+  // RC 8.5.15 (owner 2026-10-14): ownership denied / unverified for THIS
+  // property -- a deterministic property-scoped stop: no reply, no suppression,
+  // no review item.
+  if (intent === "property_specific_non_owner") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "medium",
+    };
+  }
+
   // A denied premise ("you're misinformed") is a LIKELY wrong person: a person
   // confirms before any wrong-number mark is written.
   if (
@@ -7944,6 +7957,57 @@ Rules:
 
 const AI_CONFIDENCE_THRESHOLD = 0.82;
 
+/**
+ * RC 8.5.15 (owner rule 2026-10-14): a WRITTEN ownership denial ("not mine",
+ * "I don't own it", "never owned it", "no soy el dueño") says this person is
+ * not the owner of THIS property. It is not a wrong number: the phone stays
+ * contactable for every other property and nothing is suppressed (suppression
+ * is a permission state; only an explicit stop/opt-out sets it). It joins the
+ * S1 ownership-denied / unverified lane (decline-followup-policy.js). An
+ * explicit "wrong number" / "wrong person" / "this is not <name>", a sale, and
+ * any compliance signal keep their own classification.
+ */
+/**
+ * RC 8.5.15 (eval #55, owner rule "not selling" = the 30-day follow-up): "Si
+ * pero no estoy vendiéndola" / "Yes but I'm not selling" confirms ownership AND
+ * declines. The decline decides the turn (never the S2 interest question again).
+ */
+const OWNER_BUT_NOT_SELLING_RE = /\b(?:pero|but)\s+(?:no\s+(?:estoy|esta|está|la\s+estoy|lo\s+estoy)\s+(?:vendi\w*|a\s+la\s+venta|en\s+venta)|no\s+(?:la|lo)\s+(?:vendo|voy\s+a\s+vender)|no\s+(?:quiero|pienso|planeo)\s+vender\w*|no\s+(?:est[aá]|es)\s+(?:a\s+la|en)\s+venta|(?:i'?m|i\s+am|we'?re|we\s+are|im)\s+not\s+(?:selling|interested|looking\s+to\s+sell)|not\s+(?:selling|for\s+sale|interested)|(?:i|we)\s+(?:do\s*n[o']?t|dont)\s+(?:want|plan|intend)\s+to\s+sell)/i;
+export function rescopeOwnerButNotSelling(text, result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting") return result;
+  if (result.primary_intent !== "ownership_confirmed") return result;
+  if (!OWNER_BUT_NOT_SELLING_RE.test(String(text ?? ""))) return result;
+  return {
+    ...result,
+    primary_intent: "not_interested",
+    secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "ownership_confirmed"])],
+    matched_intents: [...new Set(["not_interested", ...(Array.isArray(result.matched_intents) ? result.matched_intents : [])])],
+    matched_rule_ids: [...(Array.isArray(result.matched_rule_ids) ? result.matched_rule_ids : []), "owner_but_not_selling"],
+  };
+}
+
+export function rescopeWrittenOwnershipDenial(text, result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting") return result;
+  if (result.primary_intent !== "wrong_number") return result;
+  const ids = Array.isArray(result.matched_rule_ids) ? result.matched_rule_ids : [];
+  if (ids.includes("wrong_person_premise_denied")) return result;
+  const t = String(text ?? "");
+  if (matchesTrueWrongNumber(t) || matchesSoldTransfer(t)) return result;
+  if (!matchesOwnershipDisconnect(t)) return result;
+  if (/\b(?:sold|vend[ií]|vendimos|vendid[ao])\b/i.test(t)) return result;
+  const matched = (Array.isArray(result.matched_intents) ? result.matched_intents : []).map((i) => (i === "wrong_number" ? "property_specific_non_owner" : i));
+  return {
+    ...result,
+    primary_intent: "property_specific_non_owner",
+    objection: result.objection === "wrong_number" ? null : result.objection,
+    matched_intents: matched.length ? [...new Set(matched)] : ["property_specific_non_owner"],
+    secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "ownership_denied", "ownership_unverified", "written_ownership_denial"])],
+    matched_rule_ids: [...ids, "written_ownership_denial_property_scoped"],
+  };
+}
+
 export async function classify(message, brain_item = null, options = {}) {
   // A whole-message slang yes ("Yeppers", "yessir!", "Yuppers 👍") is
   // classified as "yes" (affirmative-slang.js); every other text is unchanged.
@@ -7984,9 +8048,9 @@ export async function classify(message, brain_item = null, options = {}) {
     };
   }
 
-  const heuristic = classifyHeuristic(text, brain_item, {
+  const heuristic = rescopeOwnerButNotSelling(text, rescopeWrittenOwnershipDenial(text, classifyHeuristic(text, brain_item, {
     conversation_context,
-  });
+  })));
 
   if (heuristicOnly) {
     const final_motivation = estimateMotivationScore(heuristic);

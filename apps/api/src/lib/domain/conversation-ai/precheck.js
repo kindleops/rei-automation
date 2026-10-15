@@ -14,9 +14,10 @@
 // to the model, and the AI policy lists it as a never-auto category anyway.
 import { matchMultilingualOptOut } from '../classification/multilingual-opt-out.js'
 import { classifyStopScope, STOP_SCOPE } from '../classification/stop-scope.js'
+import { matchBareNegative } from '../classification/seller-reply-families.js'
 import { makeDecision } from './contract.js'
 
-export const PRECHECK_VERSION = 'conv-ai.precheck.v1'
+export const PRECHECK_VERSION = 'conv-ai.precheck.v2'
 
 const BARE_STOP_RE = /^\s*(?:stop|stopall|stop\s*all|unsubscribe|cancel|end|quit|remove\s+me|opt\s*out|parar|alto|basta)\s*[.!]*\s*$/i
 // classifyStopScope only judges the SCOPE of a stop; it is not a stop detector
@@ -34,7 +35,14 @@ const UPDATE_ONLY_INTENTS = new Set(['wrong_number'])
  * @param {{ text: string, inboundId: string, deterministic?: { intent?: string|null, compliance_flag?: string|null }|null, eligibility?: { blocked: boolean, reasons?: string[] }|null }} a
  * @returns {{ decided: boolean, decision?: object, reason?: string, signals: object }}
  */
-export function deterministicPrecheck({ text, inboundId, deterministic = null, eligibility = null }) {
+// RC 8.5.15 (owner 2026-10-14): ownership denied -> UPDATE_ONLY, no nurture,
+// no further ownership question, no model call. The classifier (which reads the
+// reply against our last question) names it property_specific_non_owner; the
+// pre-check also reads a bare "No" against our last question itself.
+const OWNERSHIP_DENIED_INTENTS = new Set(['property_specific_non_owner', 'ownership_denied'])
+const POLITE_TAIL_RE = /(?:^|\s)(?:thanks|thank\s+you|thank\s+u|thx|ty|gracias)$/u
+
+export function deterministicPrecheck({ text, inboundId, deterministic = null, eligibility = null, lastQuestionKind = null }) {
   const body = String(text ?? '')
   const scope = classifyStopScope(body)
   const signals = {
@@ -63,6 +71,14 @@ export function deterministicPrecheck({ text, inboundId, deterministic = null, e
     return {
       decided: true, reason: 'hostile_no_reply', signals,
       decision: makeDecision({ intent: 'hostile_or_legal', seller_interest: 'not_interested', outcome: 'NO_RESPONSE', next_objective: 'none', response_needed: false, confidence: 1, source_message_ids: src, stage_evidence: { stage: 'nurture', evidence_message_ids: src, rationale: 'deterministic pre-check: hostile without stop or legal threat — no reply, not suppressed' } }),
+    }
+  }
+  const bareNo = lastQuestionKind === 'ownership' ? matchBareNegative(body) : null
+  const bareOwnershipDenial = Boolean(bareNo && !POLITE_TAIL_RE.test(bareNo.canonical) && !/\p{Extended_Pictographic}/u.test(body))
+  if (OWNERSHIP_DENIED_INTENTS.has(String(signals.deterministic_intent)) || bareOwnershipDenial) {
+    return {
+      decided: true, reason: 'ownership_denied', signals: { ...signals, last_question_kind: lastQuestionKind, bare_no_after_ownership: bareOwnershipDenial },
+      decision: makeDecision({ intent: 'ownership_denied', seller_interest: 'unknown', outcome: 'UPDATE_ONLY', next_objective: 'none', response_needed: false, confidence: 1, source_message_ids: src, facts_extracted: [{ fact: 'ownership', value: 'denied', source_message_id: src[0], confidence: 1 }], stage_evidence: { stage: 'closed', evidence_message_ids: src, rationale: 'deterministic pre-check: ownership denied for this property (no nurture, no further ownership question, not suppressed)' } }),
     }
   }
   if (UPDATE_ONLY_INTENTS.has(String(signals.deterministic_intent))) {

@@ -505,10 +505,13 @@ test("the R2 agent runtime tick rides the send-incapable */1 lane, never the sen
   assert.ok(!/repeatEveryMs/.test(block[1]), "once a minute");
   const list = /const AGENT_FORWARDED_VARS = \[([\s\S]*?)\] as const;/.exec(code);
   assert.ok(list && list[1].includes('"AGENT_RUNTIME_ENABLED"'), "the container ceiling is forwarded by the reviewed allowlist");
+  // RC 8.5.15: the conversation shadow ceiling must reach the container (hook + tick read it there)
+  assert.ok(list[1].includes('"AI_CONVERSATION_SHADOW_ENABLED"'), "the conversation shadow ceiling is forwarded by the reviewed allowlist");
   for (const cfg of [PRODUCTION, STAGING]) {
     const vars = await configVars(cfg);
     assert.notEqual(vars.CRON_AGENT_RUNTIME_ENABLED, "true", "not commissioned: the owner flips this");
     assert.notEqual(vars.AGENT_RUNTIME_ENABLED, "true", "not commissioned: the owner flips this");
+    assert.notEqual(vars.AI_CONVERSATION_SHADOW_ENABLED, "true", "not commissioned: the owner flips this");
   }
 });
 

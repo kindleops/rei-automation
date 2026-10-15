@@ -1907,6 +1907,7 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
             // message that counted itself as its own prior answer would mark
             // the question answered and discard the context that binds it.
             current_inbound_event_id: inbound_message_event_id || null,
+            current_inbound_body: typeof message_body === "string" ? message_body : null,
           });
         }
       } catch {
@@ -3123,6 +3124,8 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
           // AI_CONVERSATION_SHADOW_ENABLED=true (default off); never awaited, never throws here.
           runtimeDeps.scheduleConversationAiShadow({
             providerMessageSid: extracted.message_id,
+            // the stored body: the job is keyed per inbound message VERSION (id + body)
+            messageBody: message_body,
             deterministic: { intent: authoritative_intent || null, compliance_flag: classification?.compliance_flag || null, confidence: classification?.confidence ?? null },
           });
         } catch (supaErr) {

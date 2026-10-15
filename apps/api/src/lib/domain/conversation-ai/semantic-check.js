@@ -14,7 +14,7 @@ export const SEMANTIC_SCHEMA = Object.freeze({
   },
 })
 
-const SYSTEM = 'You check one draft SMS reply against the conversation. Answer strictly by calling the tool. duplicate = it repeats a question we already asked (same meaning). already_answered = it asks for information the seller already gave. irrelevant = it does not respond to the seller\'s latest message. A draft with no question is never a duplicate. Policy: we never quote prices by text, so a reply that acknowledges an offer request without a number and asks the next missing fact (e.g. condition) IS relevant.'
+const SYSTEM = 'You check one draft SMS reply against the conversation. Answer strictly by calling the tool. duplicate = it repeats a question we already asked (same meaning). already_answered = it asks for information the seller already gave. irrelevant = it does not respond to the seller\'s latest message. A draft with no question is never a duplicate. Policy: we never quote prices by text, so a reply that acknowledges an offer request without a number and asks the next missing fact (e.g. condition, or ownership when it is not yet confirmed) IS relevant. A reply that answers who we are / why we are texting and then asks the next stage question IS relevant. prior_questions lists only questions the seller already ANSWERED or deflected; re-asking a question that is not in that list is never a duplicate.'
 
 export function createSemanticCheck(modelClient) {
   return async function semanticCheck({ draft, prior_questions, facts, inbound }) {

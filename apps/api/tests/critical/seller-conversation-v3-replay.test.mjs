@@ -32,6 +32,11 @@ const OWNER_RULE_20261009_REVIEWS = new Map([
   // bare-No clarifier on, its only reply was the same no-price condition probe.
   // Same owner rule, same reason (Stage 3 is always the asking price).
   ["rq-2026-10-05to06-390", "condition_before_seller_price_forbidden"],
+  // RC 8.5.15 (owner/coordinator 2026-10-14): "I work for an investor ..." is a
+  // counterparty -> a person, never a price question; "No but market value" to
+  // the price question names no number (same Stage 3 rule as #390).
+  ["rq-2026-10-05to06-234", "counterparty_is_investor"],
+  ["rq-2026-10-05to06-371", "condition_before_seller_price_forbidden"],
 ]);
 const ownerRuleReview = ({ c, r }) => OWNER_RULE_20261009_REVIEWS.get(c.fixture_id) === r.review_reason;
 const SCENARIOS = {
@@ -66,7 +71,9 @@ test("(a) EN/ES: no S1/S2 review except a language that is not switched on", asy
   // 218: owner approved 2026-10-10 (the Stage 3 rule holds #390).
   // 195: owner decision 2026-10-13 -- the 23 bare "No" replies to S1 were
   // "auto" only via the ownership clarifier; they are now the 30-day nurture.
-  assert.ok(auto >= 218 - 23, `auto-replies: ${auto} (round 8 with EN/ES drafts: 201)`);
+  // 190: RC 8.5.15 -- "No, I'm not" to S1 (#265 #311) is the ownership denial (no
+  // clarifier); #228 owner-but-not-selling, #234 counterparty, #371 market value.
+  assert.ok(auto >= 218 - 23 - 5, `auto-replies: ${auto} (round 8 with EN/ES drafts: 201)`);
 });
 
 test("(b) all drafts active: zero review", async () => {
@@ -98,7 +105,8 @@ test("not interested stays a nurture (never suppressed); wrong numbers keep thei
   for (const { c, r } of await run("a")) {
     if (r.raw.primary_intent === "not_interested") {
       assert.notEqual(r.outcome, "suppressed", c.fixture_id);
-      assert.notEqual(r.outcome, "review", c.fixture_id);
+      // a counterparty (investor) decline is a person's call (RC 8.5.15), never suppressed
+      if (!ownerRuleReview({ c, r })) assert.notEqual(r.outcome, "review", c.fixture_id);
     }
     if (r.raw.primary_intent === "wrong_number") assert.equal(r.outcome, "suppressed", c.fixture_id);
   }

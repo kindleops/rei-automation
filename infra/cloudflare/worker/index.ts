@@ -261,6 +261,11 @@ const AGENT_FORWARDED_VARS = [
   "AGENT_USER_DAILY_RUNS",
   // R2 persistent runtime ceiling (default off): the tick route is inert without it.
   "AGENT_RUNTIME_ENABLED",
+  // Conversation Engine 2.0 SHADOW ceiling (RC 8.5.15, default off). Read in the
+  // container by the inbound hook (enqueue conversation.decide) and the tick
+  // (register its handler). Shadow only: nothing it gates can send. Without this
+  // forward the container never saw the flag, so shadow could not be activated.
+  "AI_CONVERSATION_SHADOW_ENABLED",
 ] as const;
 
 
@@ -368,6 +373,7 @@ interface Env {
   AGENT_RATE_READS_PER_MIN?: string;
   AGENT_USER_DAILY_RUNS?: string;
   AGENT_RUNTIME_ENABLED?: string;
+  AI_CONVERSATION_SHADOW_ENABLED?: string;
 }
 
 async function forwardToApi(request: Request, env: Env): Promise<Response> {

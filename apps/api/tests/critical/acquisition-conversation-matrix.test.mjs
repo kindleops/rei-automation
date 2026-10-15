@@ -78,9 +78,10 @@ test("S1 ambiguity holds at S1 and never advances", async () => {
 });
 
 test("S1 wrong owner is suppressed, never advanced", async () => {
-  for (const m of ["Wrong person", "I don't own that"]) {
-    assert.equal(await intentOf(m), "wrong_number", m);
-  }
+  assert.equal(await intentOf("Wrong person"), "wrong_number", "Wrong person");
+  // RC 8.5.15 (owner 2026-10-14): a written ownership denial is property-scoped
+  // (property_specific_non_owner), never a wrong-number suppression.
+  assert.equal(await intentOf("I don't own that"), "property_specific_non_owner", "I don't own that");
   const { t } = turn({ stage: "ownership_confirmation", facts: {}, intent: "wrong_number" });
   assert.notEqual(t.stage_after, "offer_interest");
   assert.ok(t.contactability_patch || t.next_action === "no_action_contact_blocked", "must suppress");
