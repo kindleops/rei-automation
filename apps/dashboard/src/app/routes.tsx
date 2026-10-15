@@ -82,6 +82,7 @@ const WorkflowStudioV2 = lazyWithRecovery(() => import('../views/workflow-studio
 const BrowserApp = lazyWithRecovery(() => import('../modules/browser/BrowserApp'))
 const SearchIntelligenceApp = lazyWithRecovery(() => import('../modules/search-intelligence/SearchIntelligenceApp'))
 const MarketIntelligenceApp = lazyWithRecovery(() => import('../modules/market-intelligence/MarketIntelligenceApp'))
+const IntelligenceCommandApp = lazyWithRecovery(() => import('../modules/intelligence-command/IntelligenceCommandApp'))
 const SettingsView = lazyWithRecovery(() =>
   import('../views/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
 )
@@ -301,6 +302,14 @@ const marketIntelligenceRoute = defineRoute<null>({
   render: () => <MarketIntelligenceApp />,
 })
 
+/** Intelligence Command 8.5.17 — the full-screen intelligence workspace (desktop only; real agent planes only). */
+const intelligenceCommandRoute = defineRoute<null>({
+  path: '/intelligence-command',
+  title: 'LeadCommand | Intelligence Command',
+  loader: async () => null,
+  render: () => <IntelligenceCommandApp />,
+})
+
 /** The desktop's Settings page (the phone keeps its settings sheet). */
 const settingsRoute = defineRoute<null>({
   path: '/settings',
@@ -429,6 +438,7 @@ const routes = [
   workflowStudioRoute,
   browserRoute,
   marketIntelligenceRoute,
+  intelligenceCommandRoute,
   searchIntelligenceRoute,
   settingsRoute,
   entityGraphRoute,
