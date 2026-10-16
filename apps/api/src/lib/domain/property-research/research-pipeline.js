@@ -44,9 +44,11 @@ export async function loadResearchInputs(source, property_id, { now = Date.now()
 
 /**
  * @param {object} inputs  loadResearchInputs() result (or a fixture of the same shape)
- * @param {{ now?: number, zip_cell?: object|null, listings?: Array, web_notes?: Array }} [opts]
+ * @param {{ now?: number, zip_cell?: object|null, zip_prior?: object|null, listings?: Array, web_notes?: Array }} [opts]
+ *   zip_prior (8.5.21-b): zip-prior.resolveZipPrior() for the subject — a labelled market prior the
+ *   offer plan carries as context when engine evidence is thin (never a price)
  */
-export function runInternalResearch(inputs, { now = Date.now(), zip_cell = null, listings = [], web_notes = [] } = {}) {
+export function runInternalResearch(inputs, { now = Date.now(), zip_cell = null, zip_prior = null, listings = [], web_notes = [] } = {}) {
   const { value: inp, stripped } = stripProtectedAttributes(inputs || {})
   if (!inp.found) return { version: RESEARCH_PIPELINE_VERSION, found: false, property_id: inp.property_id || null }
   const inbound = (inp.thread?.inbound || []).map((m) => ({ ...m, body: maskContacts(String(m.body || '')).value }))
@@ -86,7 +88,7 @@ export function runInternalResearch(inputs, { now = Date.now(), zip_cell = null,
     ask_history: fromLedger.history, property: inp.property || {}, valuation: inp.valuation, freshness: null, market, facts,
     seller_messages: inbound.map((m) => m.body), our_last_offer: num(inp.offers?.[0]?.amount), now,
   })
-  const plan = planOffer({ valuation: inp.valuation, property: inp.property || {}, ask: ask ? { amount: ask.amount } : null, ask_history: fromLedger.history, facts, market, now })
+  const plan = planOffer({ valuation: inp.valuation, property: inp.property || {}, ask: ask ? { amount: ask.amount } : null, ask_history: fromLedger.history, facts, market, zip_prior, now })
   const cov = coverage({ ...dossier.sections, ...comps.sections })
   return {
     version: RESEARCH_PIPELINE_VERSION,

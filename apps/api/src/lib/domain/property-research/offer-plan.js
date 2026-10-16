@@ -33,6 +33,7 @@ import { resolveValuationSpendability } from '../seller-flow/valuation-offer-aut
 import { roundAnchorDown, computeAsIsAnchor } from '../seller-flow/seller-autopilot-v2.js'
 import { assessDealEconomics, DEAL_ECONOMICS_VERDICTS } from '../inbox/deal-economics-gate.js'
 import { field } from './provenance.js'
+import { indicativeInvestorBand } from '../zip-intelligence/zip-prior.js'
 
 export const OFFER_PLAN_VERSION = 'offer-plan.v1'
 
@@ -96,6 +97,7 @@ function evidenceStrength(valuation) {
  * @param {object} [a.facts]          conversation-ai factSummary (flexibility signals)
  * @param {object|null} [a.market]    { investor_count, unclassified_count, priced_sales } (market support)
  * @param {{ max_price:number }|null} [a.envelope]  a granted envelope for this scope, if any
+ * @param {object|null} [a.zip_prior]  8.5.21-b: zip-prior.resolveZipPrior() for the subject (labelled market prior)
  * @param {number|string} [a.now]
  */
 export function planOffer(input = {}) {
@@ -138,8 +140,18 @@ export function planOffer(input = {}) {
   }
 
   const notes = []
-  if (lane.lane === 'sfr' && repairs > 0) notes.push('lane_note:engine_applies_repairs_on_sfr_owner_lane_says_investor_value_carries_no_repairs')
+  // OWNER QUESTION (unresolved, 8.5.21): the engine's SFR rows subtract repairs (0.7 × value − repairs)
+  // while the binding SFR lane says "LLC investor cluster −13 %, no repairs". Flagged, never changed here.
+  if (lane.lane === 'sfr' && repairs > 0) notes.push('lane_note:engine_applies_repairs_on_sfr_owner_lane_says_investor_value_carries_no_repairs', 'owner_question:sfr_repairs_in_engine_formula_unresolved')
   if (lane.lane === 'land') notes.push('lane_note:land_needs_land_comps_and_entitlement_no_construction_cost_source')
+
+  // 8.5.21-b: the labelled ZIP × type × condition × value prior (county / metro / state fallback).
+  // Context only: it never sets the MAO, the target or the opening.
+  const zp = a.zip_prior || null
+  const valueRef = asIs ? { value: asIs, source: 'public.property_acquisition_scores.valuation_mid', as_of: vAt } : pos(a.property?.estimated_value) ? { value: pos(a.property.estimated_value), source: 'public.properties.estimated_value (recorded AVM)', as_of: null } : null
+  const market_prior = zp?.available
+    ? { available: true, level: zp.level, label: zp.label, precision: zp.precision, investor_discount_band: zp.investor_discount_band, sample_size: zp.sample_size ?? null, confidence: zp.confidence ?? null, as_of: zp.last_update ?? null, source: zp.source || 'public.zip_acquisition_economics', cell: zp.cell || null, liquidity: zp.liquidity ?? null, indicative: indicativeInvestorBand(zp, valueRef), role: 'context_not_an_offer' }
+    : { available: false, reason: zp?.reason || 'zip_prior_not_loaded' }
 
   const base = {
     version: OFFER_PLAN_VERSION,
@@ -151,6 +163,7 @@ export function planOffer(input = {}) {
     engine: { snapshot_id: v?.evidence?.immutable_snapshot_id ?? v?.id ?? null, computed_at: vAt, decision_tier: v?.decision_tier ?? null, offer_ready: readiness.ready, offer_ready_reason: readiness.reason, spendable: spend.spendable, spendability_reason: spend.reason },
     values,
     costs,
+    market_prior,
     notes,
     ignored: { protected_attributes_stripped: stripped },
   }
@@ -158,6 +171,8 @@ export function planOffer(input = {}) {
   const mao = readiness.ready && spend.spendable ? readiness.mao : null
   const target = readiness.ready && spend.spendable ? readiness.offer : null
   if (!mao || !target) {
+    // engine evidence is thin: the prior is the operator's context (labelled), never a price
+    if (market_prior.available) notes.push(`market_prior_available:${market_prior.label}:${market_prior.precision}:operator_context_only`)
     return { ...base, available: false, reason: !v ? 'no_engine_valuation' : !readiness.ready ? `not_offer_ready:${readiness.reason}` : `not_spendable:${spend.reason}`, mao: null, opening: null, counter_room: null, escalation: null, recommendation: 'operator_must_price_or_rerun_engine' }
   }
 
@@ -246,6 +261,7 @@ export function planOffer(input = {}) {
       ],
     },
     lane_check: laneCheck,
+    market_prior_check: market_prior.available && market_prior.indicative?.price_band ? { engine_mao: r0(mao), indicative_investor_band: market_prior.indicative.price_band, position: mao < market_prior.indicative.price_band[0] ? 'engine_mao_below_market_band' : mao > market_prior.indicative.price_band[1] ? 'engine_mao_above_market_band' : 'engine_mao_inside_market_band', level: market_prior.level } : null,
     seller: { ask: rawAsk ? r0(rawAsk) : null, ask_used: Boolean(ask), ask_verdict: askVerdict?.verdict ?? null, ask_vs_ceiling_pct: rawAsk ? r4(rawAsk / mao - 1) : null, flexibility: flex },
     market_support: { level: demand.level, evidence: demand.evidence },
     reconciliation: asIs ? { as_is_value: r0(asIs), engine_ceiling: r0(mao), implied_discount_usd: r0(asIs - mao), engine_repairs: repairs, reference_cost_stack_usd: costStack ? costStack.transaction + costStack.carrying + costStack.risk : null, margin_target_usd: num(policy.target_margin) ?? null } : null,
