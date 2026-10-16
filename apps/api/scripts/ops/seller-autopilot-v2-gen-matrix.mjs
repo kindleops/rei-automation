@@ -1,11 +1,11 @@
 // READ-ONLY: writes MATRIX.csv + MATRIX_GAPS.txt (intent × stage × 16 languages coverage) to the job tmp dir.
-// Usage (from apps/api): nice -n 15 node --import ./scripts/register-aliases-ops.mjs scripts/ops/seller-autopilot-v2-gen-matrix.mjs
-import { readFileSync, writeFileSync } from "node:fs";
+// Usage (from apps/api): LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> nice -n 15 node --import ./scripts/register-aliases-ops.mjs scripts/ops/seller-autopilot-v2-gen-matrix.mjs
+// (role-enforced read-only diagnostics credential, verified by scripts/lib/prod-db-credentials.mjs)
+import { writeFileSync } from "node:fs";
 import { V2_MATRIX, V2_INTENTS } from "../../src/lib/domain/seller-flow/seller-autopilot-v2.js";
 import { V2_LANGS, proposedTemplateRows } from "./seller-autopilot-v2-templates.proposed.mjs";
-const { default: pg } = await import("pg");
-const client = new pg.Client({ connectionString: readFileSync("/tmp/.dburl", "utf8").trim(), ssl: { rejectUnauthorized: false } });
-await client.connect();
+import { connectReadOnlyDiagnostics } from "../../../../scripts/lib/prod-db-credentials.mjs";
+const client = await connectReadOnlyDiagnostics({ purpose: "ops_diag", applicationName: "lc-autopilot-v2-matrix" });
 await client.query("BEGIN READ ONLY"); await client.query("SET LOCAL statement_timeout='30s'");
 const { rows } = await client.query(`select use_case, language,
   count(*) filter (where is_active and safe_for_auto_reply and coalesce(reply_mode,'auto') in ('auto','auto_reply','')) safe,

@@ -24,20 +24,20 @@
 // It never writes suppression itself: an opt-out whose phone is NOT on the
 // list is reported for the canonical recordPhoneSuppression path.
 //
-//   DATABASE_URL=... node --import ./tests/register-aliases.mjs \
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --import ./tests/register-aliases.mjs \
 //     scripts/repair/inbox-round9-reclassify-20261007.mjs --since=2026-10-01 --out=/tmp/r9
+// (rc-8.5.21-c: the role-enforced read-only diagnostics credential,
+// scripts/lib/prod-db-credentials.mjs; DATABASE_URL is not read)
 
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { createRequire } from "node:module";
 
 import "../../tests/helpers/critical-test-environment.mjs";
 import { replayReply } from "../../tests/helpers/reply-replay-harness.mjs";
 import { resolveInboxBucketFlags } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
 
-const require = createRequire(import.meta.url);
-const pg = require("pg");
+import { connectReadOnlyDiagnostics } from "../../../../scripts/lib/prod-db-credentials.mjs";
 
 const arg = (name, fallback = null) => {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -45,8 +45,8 @@ const arg = (name, fallback = null) => {
 };
 const SINCE = arg("since", "2026-10-01T00:00:00Z");
 const OUT = arg("out");
-if (!OUT || !process.env.DATABASE_URL) {
-  console.error("usage: DATABASE_URL=... inbox-round9-reclassify-20261007.mjs --since=<iso> --out=<dir>");
+if (!OUT || !process.env.LC_RO_OPS_DIAG_DB_URL_FILE) {
+  console.error("usage: LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> inbox-round9-reclassify-20261007.mjs --since=<iso> --out=<dir>");
   process.exit(2);
 }
 fs.mkdirSync(OUT, { recursive: true });
@@ -64,8 +64,7 @@ function bucketOf(f) {
   return f.in_all ? "all_only" : "archived";
 }
 
-const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
-await client.connect();
+const client = await connectReadOnlyDiagnostics({ purpose: "ops_diag", applicationName: "lc-inbox-round9-dryrun" });
 await client.query("begin read only");
 await client.query("set local statement_timeout = '30s'");
 

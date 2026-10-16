@@ -76,6 +76,7 @@ if (ev?.from_phone_number) {
 }
 
 const required = ["webhook_reached", "thread_resolves", "identity_kept", "inbox_receives"];
+await sb.close();
 const pass = required.every((n) => checks.find((c) => c.name === n)?.result === "PASS") && checks.find((c) => c.name === "seller_matching")?.result !== "FAIL";
 for (const c of checks) console.log(`${c.result.padEnd(4)} ${c.name.padEnd(28)} ${c.detail}`);
 console.log(pass ? `\nPROOF PASSED. Next: onboard-indianapolis-tampa.sql -v step=inbound_verified -v proof_at="'${ev.created_at}'"` : "\nPROOF NOT PASSED. The number stays CONFIGURING.");

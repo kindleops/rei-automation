@@ -13,7 +13,8 @@
  * SQL count of the same predicate on eg_property_facts, and latency (cold + warm)
  * ≤ --budget-ms (default 1500).
  *
- * SQL half (always, when /tmp/.dburl exists): the exact tablePage() statements,
+ * SQL half (when LC_RO_ENTITY_GRAPH_DB_URL_FILE is set — the role-enforced read-only diagnostics
+ * credential, scripts/lib/prod-db-credentials.mjs): the exact tablePage() statements,
  * READ ONLY, statement_timeout 15 s, serial; EXPLAIN must use the (col, property_id)
  * index with no Sort node.
  * API half (when --operator=<allowlisted email> is given): mints an operator
@@ -53,13 +54,10 @@ const CASES = [
 ]
 const sqlTotals = {}
 let universe = null
-if (fs.existsSync('/tmp/.dburl')) {
-  const pg = (await import('pg')).default
-  const url = fs.readFileSync('/tmp/.dburl', 'utf8').trim()
-  const c = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false }, application_name: 'eg_facts_proof' })
-  await c.connect()
+if (process.env.LC_RO_ENTITY_GRAPH_DB_URL_FILE) {
+  const { connectReadOnlyDiagnostics } = await import('../lib/prod-db-credentials.mjs')
+  const c = await connectReadOnlyDiagnostics({ purpose: 'entity_graph', applicationName: 'eg_facts_proof', statementTimeoutMs: 15_000 })
   try {
-    await c.query("set default_transaction_read_only = on; set statement_timeout = '15s'")
     const present = (await c.query(`select to_regclass('public.eg_property_facts') is not null as t`)).rows[0].t
     if (!present) {
       record('SQL · eg_property_facts exists', false, { reason: 'not applied' })
@@ -89,7 +87,7 @@ if (fs.existsSync('/tmp/.dburl')) {
     await c.end().catch(() => {})
   }
 } else {
-  console.log('SKIP  SQL half (no /tmp/.dburl)')
+  console.log('SKIP  SQL half (LC_RO_ENTITY_GRAPH_DB_URL_FILE not set)')
 }
 
 /* ── API half ─────────────────────────────────────────────────────────────── */

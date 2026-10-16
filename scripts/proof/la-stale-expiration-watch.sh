@@ -2,9 +2,12 @@
 set -euo pipefail
 
 # Credentials must come from the environment — never hardcode them here.
-# SUPABASE_DB_URL          full Postgres connection string (postgresql://user:pass@host:port/db)
+# LC_RO_OPS_DIAG_DB_URL_FILE  0600 file with the role-enforced read-only diagnostics URL
+#                          (rc-8.5.21-c; the metrics read goes through
+#                          scripts/lib/prod-db-credentials.mjs, which verifies the role)
 # QUEUE_ENGINE_SHARED_SECRET  shared secret for /api/internal/queue/run
-: "${SUPABASE_DB_URL:?SUPABASE_DB_URL must be set}"
+: "${LC_RO_OPS_DIAG_DB_URL_FILE:?LC_RO_OPS_DIAG_DB_URL_FILE must be set}"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 : "${QUEUE_ENGINE_SHARED_SECRET:?QUEUE_ENGINE_SHARED_SECRET must be set}"
 
 CID="${CAMPAIGN_ID:-b821cb13-deeb-4ab4-9505-01dbcdaa136d}"
@@ -16,7 +19,7 @@ for i in $(seq 1 20); do
     -H "x-queue-engine-secret: $QUEUE_ENGINE_SHARED_SECRET" \
     -H "Content-Type: application/json" \
     -d "{\"campaign_id\":\"$CID\"}" >/dev/null || true
-  METRICS=$(psql "$SUPABASE_DB_URL" -t -A -c "
+  METRICS=$(node "$ROOT/scripts/lib/prod-db-credentials.mjs" psql ops_diag -t -A -c "
     SELECT
       COUNT(*) FILTER (WHERE failed_reason='stale_runnable_row_expired'),
       COUNT(*) FILTER (WHERE queue_status='scheduled'),

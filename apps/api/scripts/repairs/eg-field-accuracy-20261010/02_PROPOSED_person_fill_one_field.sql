@@ -1,6 +1,7 @@
 -- PROPOSED — NOT APPLIED (owner GO required). Fills ONE person field on public.prospects from seller.owner (same
 -- individual_key) ONLY where the prospect's value is empty. Never overwrites a value. One field per run:
---   psql "$DATABASE_URL" -v field=gender -f 02_PROPOSED_person_fill_one_field.sql
+--   node ../../../../../scripts/lib/prod-db-credentials.mjs psql-write --prod-write=<approval-ref> -v field=gender -f 02_PROPOSED_person_fill_one_field.sql
+--   (explicit production-write path: LC_PROD_WRITE_DB_URL_FILE + interactive TTY confirmation)
 -- field ∈ language_preference, gender, marital_status, occupation_group, education_model, est_household_income,
 --         net_asset_value, buying_power, mob (from seller.owner.month_of_birth, YYYYMM only)
 -- Protected-class policy (owner + counsel 2026-10-01): these are DISPLAY / TARGETING attributes only — never pricing.

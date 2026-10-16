@@ -13,10 +13,13 @@
 //   urls.json = ["/api/cockpit/entity-graph/counts", "/api/cockpit/entity-graph/browse?tab=properties&…", …]
 // Output: { "<path>?<sorted query>": <response body> } — labelled fixtures for the
 // capture server, which answers only GETs it finds here.
+// Credential (rc-8.5.21-c): the role-enforced read-only diagnostics role,
+// LC_RO_ENTITY_GRAPH_DB_URL_FILE — verified by scripts/lib/prod-db-credentials.mjs before use.
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { resolveReadOnlyUrl } from '../../../scripts/lib/prod-db-credentials.mjs'
 
-const url = readFileSync('/tmp/.dburl', 'utf8').trim()
+const { url } = await resolveReadOnlyUrl({ purpose: 'entity_graph' })
 process.env.SUPABASE_URL ||= 'http://127.0.0.1:1'
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'harness'
 // The services' direct pool (grouped facets, keyset sort) reads through the same URL, read-only.

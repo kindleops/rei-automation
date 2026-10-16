@@ -13,7 +13,7 @@
 //    ready row whose scheduled_for_utc (else scheduled_for) is in the past, by
 //    origin and age.
 //
-//   DATABASE_URL=... node --import ./tests/register-aliases.mjs \
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --import ./tests/register-aliases.mjs \
 //     scripts/ops/r10-safety/active-campaign-reconcile.mjs --out=<dir>
 import { connectReadOnly, arg, writeOut } from "./_ro-db.mjs";
 import { evaluateSendTimeContactGuard, phoneKey, phoneVariants, SEND_TIME_REPLY_INTENTS } from "@/lib/domain/queue/send-time-contact-guard.js";

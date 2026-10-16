@@ -16,8 +16,8 @@
  *   R5 nr       New Replies cleanup 7.2    (scripts/repairs/20261001_new_replies_cleanup.mjs --apply)
  *
  * Usage (from apps/api):
- *   node --env-file=.env.local --no-warnings scripts/repairs/rc71-repair-verify.mjs --mode=before --out=<dir>
- *   node --env-file=.env.local --no-warnings scripts/repairs/rc71-repair-verify.mjs --mode=after \
+ *   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --no-warnings scripts/repairs/rc71-repair-verify.mjs --mode=before --out=<dir>
+ *   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --no-warnings scripts/repairs/rc71-repair-verify.mjs --mode=after \
  *        --before=<dir>/rc71-verify-before.json --out=<dir> [--stage=after-p7]
  *   node scripts/repairs/rc71-repair-verify.mjs --print-sql [--since=<iso>]   # paste into MCP execute_sql
  *   node scripts/repairs/rc71-repair-verify.mjs --ingest=<mcp-results.json> --mode=… # offline
@@ -357,12 +357,10 @@ function get(obj, dotted) {
 }
 
 async function runLive(since) {
-  const { default: pg } = await import("pg");
-  const { resolveDatabaseUrl } = await import("../../src/lib/postgres/resolve-database-url.js");
-  const url = resolveDatabaseUrl();
-  if (!url) throw new Error("no database url (SUPABASE_DB_URL) — run with --env-file=.env.local, or use --print-sql + MCP");
-  const client = new pg.Client({ connectionString: url, ssl: url.includes("localhost") ? false : { rejectUnauthorized: false } });
-  await client.connect();
+  // rc-8.5.21-c: the role-enforced read-only diagnostics credential (LC_RO_OPS_DIAG_DB_URL_FILE),
+  // verified by scripts/lib/prod-db-credentials.mjs; nothing is derived from local env files.
+  const { connectReadOnlyDiagnostics } = await import("../../../../scripts/lib/prod-db-credentials.mjs");
+  const client = await connectReadOnlyDiagnostics({ purpose: "ops_diag", applicationName: "lc-rc71-repair-verify", statementTimeoutMs: TIMEOUT_MS });
   const out = {};
   const errors = {};
   try {

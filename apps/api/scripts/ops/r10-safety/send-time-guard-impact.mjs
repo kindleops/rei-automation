@@ -4,7 +4,7 @@
 // fresh read-only facts and counts the rows it would newly block, by reason
 // and by campaign. Phones are never printed.
 //
-//   DATABASE_URL=... node --import ./tests/register-aliases.mjs \
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --import ./tests/register-aliases.mjs \
 //     scripts/ops/r10-safety/send-time-guard-impact.mjs --out=<dir>
 import { connectReadOnly, phoneRef, arg, writeOut, roSupabase } from "./_ro-db.mjs";
 import { runSendTimeContactGuard } from "@/lib/domain/queue/send-time-contact-guard.js";

@@ -1,38 +1,21 @@
 /**
  * Shared helpers for the Sender Routing 2.0 ops scripts. READ-ONLY by
- * construction: the Supabase client is wrapped so insert / update / upsert /
- * delete / rpc throw before any request is made. The TextGrid read is a GET of
- * IncomingPhoneNumbers only (no POST, no number configuration).
+ * construction (rc-8.5.21-c): the database client is the role-enforced
+ * read-only diagnostics credential from scripts/lib/prod-db-credentials.mjs
+ * (LC_RO_OPS_DIAG_DB_URL_FILE — verified not to be able to write send_queue,
+ * sms_templates, system_control, … before the first query), behind a
+ * supabase-js-shaped builder whose insert / update / upsert / delete / rpc throw.
+ * Nothing is read from local env files and the service-role key is never used.
+ * The TextGrid read is a GET of IncomingPhoneNumbers only (no POST, no number
+ * configuration); its credentials are taken only from the environment the
+ * operator passes explicitly (TEXTGRID_ACCOUNT_SID / TEXTGRID_AUTH_TOKEN).
  */
 import fs from "node:fs";
-import { createClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
+import { readOnlyRestClient } from "../../../../../scripts/lib/pg-readonly-rest.mjs";
 
-dotenv.config({ path: ".env.local", quiet: true });
-
-const WRITE_METHODS = new Set(["insert", "update", "upsert", "delete"]);
-
+/** supabase-js-shaped read-only client; call `await sb.close()` when done. */
 export function readOnlyClient() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing (.env.local)");
-  const sb = createClient(url, key, { auth: { persistSession: false } });
-  return new Proxy(sb, {
-    get(target, prop) {
-      if (prop === "rpc") return () => { throw new Error("read-only script: rpc refused"); };
-      if (prop !== "from") return Reflect.get(target, prop);
-      return (table) => {
-        const builder = target.from(table);
-        return new Proxy(builder, {
-          get(b, method) {
-            if (WRITE_METHODS.has(method)) return () => { throw new Error(`read-only script: ${String(method)} on ${table} refused`); };
-            const v = Reflect.get(b, method);
-            return typeof v === "function" ? v.bind(b) : v;
-          },
-        });
-      };
-    },
-  });
+  return readOnlyRestClient({ purpose: "ops_diag", applicationName: "lc-sender-routing-ro" });
 }
 
 /** TextGrid IncomingPhoneNumbers via GET. null when credentials are absent. */

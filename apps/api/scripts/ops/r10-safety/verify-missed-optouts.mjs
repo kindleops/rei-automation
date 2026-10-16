@@ -12,7 +12,7 @@
 //      (true_post_contact_suppression, or not sms_eligible / not queue_eligible)
 //      and campaign_targets: no row still ready/queued for an active campaign
 //
-//   DATABASE_URL=... node --import ./tests/register-aliases.mjs scripts/ops/r10-safety/verify-missed-optouts.mjs \
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --import ./tests/register-aliases.mjs scripts/ops/r10-safety/verify-missed-optouts.mjs \
 //     --csv=<round9-missed-optouts.csv> [--extra=<event ids>] --out=<dir>
 import fs from "node:fs";
 import { connectReadOnly, phoneRef, phoneVariants, e164, arg, writeOut, csv } from "./_ro-db.mjs";
