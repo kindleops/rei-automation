@@ -28,6 +28,9 @@ import { measureComplexity } from '../pipeline/complexity.js'
 export const TURN_ENGINE_VERSION = 'conv-ai.turn-engine.v1'
 export const CONVERSATION_TURN_KIND = 'conversation.turn'
 export const CONVERSATION_TURN_SWEEP_KIND = 'conversation.turn_sweep'
+/** The recovery sweep schedule (born disabled): seeded by PROPOSED_20261016120100_conversation_reply_turns_schedules.sql.
+ *  600 s = the recovery dedupe epoch (10 min) of recoverDueTurns. */
+export const CONVERSATION_TURN_SWEEP_SCHEDULE = Object.freeze({ name: 'conversation-turn-sweep', kind: CONVERSATION_TURN_SWEEP_KIND, interval_seconds: 600, input: Object.freeze({}) })
 export const TURNS_ENV = 'AI_CONVERSATION_TURNS_ENABLED'
 
 export function turnsRequested(env = process.env) {

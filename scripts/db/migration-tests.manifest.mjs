@@ -217,7 +217,9 @@ export const MIGRATION_TESTS = Object.freeze([
     setup: [SHIM, DURABILITY, S3, RESEARCH, RUNTIME_PUBLIC_FIXTURE, LEGACY_CONVERSATION_TURNS, RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET],
     pretest: M('PROPOSED_20261016120000_conversation_reply_turns_pretest.sql'),
     apply: [M('PROPOSED_20261016120000_conversation_reply_turns.sql')],
-    posttest: [M('PROPOSED_20261016120000_conversation_reply_turns_posttest.sql')],
+    // the turn-sweep schedule seed (PROPOSED_20261016120100: psql -v owner_id, own BEGIN/COMMIT)
+    // is exercised statement-for-statement by its posttest
+    posttest: [M('PROPOSED_20261016120000_conversation_reply_turns_posttest.sql'), M('PROPOSED_20261016120100_conversation_reply_turns_schedules_posttest.sql')],
     rollback: [M('PROPOSED_20261016120000_conversation_reply_turns_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016120000_conversation_reply_turns_rollback_posttest.sql')],
   },
@@ -256,8 +258,9 @@ export const MIGRATION_TESTS = Object.freeze([
       { fixture: M('PROPOSED_20261015120000_repeat_asking_price_question_kind_pretest.sql') }, ASKING_PRICE_QUESTION_KIND,
       // rc-8.5.20 parts A / B / C. zip_acquisition_intelligence is independent; conversation_reply_turns
       // needs the runtime + both event-budget fixes; operations_action_center needs the runtime,
-      // the capability plane and persistent_missions. The operations schedule seed
-      // (PROPOSED_20261016140100: psql -v owner_id, own BEGIN/COMMIT) is exercised by its posttest.
+      // the capability plane and persistent_missions. The schedule seeds (PROPOSED_20261016100100
+      // property research, PROPOSED_20261016120100 turn sweep, PROPOSED_20261016140100 operations:
+      // psql -v owner_id, own BEGIN/COMMIT) are exercised by their posttests.
       { fixture: M('PROPOSED_20261016100000_zip_acquisition_intelligence_pretest.sql') }, M('PROPOSED_20261016100000_zip_acquisition_intelligence.sql'),
       { fixture: M('PROPOSED_20261016120000_conversation_reply_turns_pretest.sql') }, M('PROPOSED_20261016120000_conversation_reply_turns.sql'),
       { fixture: M('PROPOSED_20261016140000_operations_action_center_pretest.sql') }, M('PROPOSED_20261016140000_operations_action_center.sql'),
@@ -275,7 +278,9 @@ export const MIGRATION_TESTS = Object.freeze([
       M('PROPOSED_20261015191000_ai_operator_feedback_posttest.sql'),
       M('PROPOSED_20261015120000_repeat_asking_price_question_kind_posttest.sql'),
       M('PROPOSED_20261016100000_zip_acquisition_intelligence_posttest.sql'),
+      M('PROPOSED_20261016100100_property_research_schedules_posttest.sql'),
       M('PROPOSED_20261016120000_conversation_reply_turns_posttest.sql'),
+      M('PROPOSED_20261016120100_conversation_reply_turns_schedules_posttest.sql'),
       M('PROPOSED_20261016140000_operations_action_center_posttest.sql'),
       M('PROPOSED_20261016140100_operations_schedules_posttest.sql'),
     ],

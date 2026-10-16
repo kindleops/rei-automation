@@ -384,3 +384,14 @@ test('static: the turn engine and its handlers never reach the R3 executor, the 
     assert.ok(!reached.includes(bad), `${bad} reached`)
   }
 })
+
+test('drift: the conversation-turn-sweep seed mirrors CONVERSATION_TURN_SWEEP_SCHEDULE, born disabled, $0; its posttest runs the same statement', async () => {
+  const fs = await import('node:fs')
+  const { CONVERSATION_TURN_SWEEP_SCHEDULE: S, CONVERSATION_TURN_SWEEP_KIND: K } = await import('../../src/lib/domain/conversation-ai/turns/turn-engine.js')
+  assert.equal(S.kind, K)
+  const sql = fs.readFileSync(new URL('../../../../supabase/migrations/PROPOSED_20261016120100_conversation_reply_turns_schedules.sql', import.meta.url), 'utf8')
+  const calls = [...sql.matchAll(/runtime_upsert_schedule\('([a-z-]+)', '([a-z._]+)', (\d+), :'owner_id', '([^']+)'::jsonb, (false|true), null, ([0-9.]+)\);/g)]
+  assert.deepEqual(calls.map((m) => [m[1], m[2], Number(m[3]), JSON.parse(m[4]), m[5], Number(m[6])]), [[S.name, S.kind, S.interval_seconds, { ...S.input }, 'false', 0]])
+  const posttest = fs.readFileSync(new URL('../../../../supabase/migrations/PROPOSED_20261016120100_conversation_reply_turns_schedules_posttest.sql', import.meta.url), 'utf8')
+  assert.match(posttest, /runtime_upsert_schedule\('conversation-turn-sweep', 'conversation\.turn_sweep', 600, op, '\{\}'::jsonb, false, null, 0\);/)
+})

@@ -10,7 +10,7 @@ import { createRuntimeMemoryStore } from '../../src/lib/agent/runtime/job-runtim
 import { runRuntimeTick } from '../../src/lib/agent/runtime/runtime-tick.js'
 import { buildMissionHandlers, createMissionMemoryReads, MISSION_HANDLER_KINDS, OPERATOR_MISSION_KINDS, PROPERTY_RESEARCH_KIND } from '../../src/lib/agent/missions/index.js'
 import { createPropertyResearchHandler } from '../../src/lib/agent/missions/property-research-handler.js'
-import { enqueuePropertyResearch, sweepPropertyResearch, propertyResearchEventKey, PROPERTY_RESEARCH_TRIGGERS } from '../../src/lib/agent/missions/property-research-triggers.js'
+import { enqueuePropertyResearch, sweepPropertyResearch, propertyResearchEventKey, PROPERTY_RESEARCH_TRIGGERS, PROPERTY_RESEARCH_SWEEP } from '../../src/lib/agent/missions/property-research-triggers.js'
 import { encodePropertyRef } from '../../src/lib/agent/missions/mission-codec.js'
 import { decodeFromStore } from '../../src/lib/agent/research/pii.js'
 import { PID, SECRET_NAME, SECRET_PHONE, memorySource } from '../helpers/property-research-fixtures.mjs'
@@ -152,4 +152,14 @@ test('sweep kind: a scheduled sweep enqueues one property.research event per sta
   assert.equal(r1.result.enqueued, 1)
   assert.equal(r2.result.deduped, 1)
   assert.equal([...h.store._state.jobs.values()].filter((j) => j.kind === 'property.research').length, 1)
+})
+
+test('drift: the property-research-sweep seed mirrors PROPERTY_RESEARCH_SWEEP, born disabled, $0; its posttest runs the same statement', async () => {
+  const fs = await import('node:fs')
+  const sql = fs.readFileSync(new URL('../../../../supabase/migrations/PROPOSED_20261016100100_property_research_schedules.sql', import.meta.url), 'utf8')
+  const calls = [...sql.matchAll(/runtime_upsert_schedule\('([a-z-]+)', '([a-z._]+)', (\d+), :'owner_id', '([^']+)'::jsonb, (false|true), null, ([0-9.]+)\);/g)]
+  assert.deepEqual(calls.map((m) => [m[1], m[2], Number(m[3]), JSON.parse(m[4]), m[5], Number(m[6])]),
+    [[PROPERTY_RESEARCH_SWEEP.name, PROPERTY_RESEARCH_SWEEP.kind, PROPERTY_RESEARCH_SWEEP.interval_seconds, { limit: PROPERTY_RESEARCH_SWEEP.max_per_sweep }, 'false', 0]])
+  const posttest = fs.readFileSync(new URL('../../../../supabase/migrations/PROPOSED_20261016100100_property_research_schedules_posttest.sql', import.meta.url), 'utf8')
+  assert.match(posttest, /runtime_upsert_schedule\('property-research-sweep', 'property\.research_sweep', 21600, op, '\{"limit": 25\}'::jsonb, false, null, 0\);/)
 })
