@@ -10,6 +10,9 @@
 //   new_comp_evidence          new sold evidence near the property
 //   market_shift               the ZIP model / market aggregates moved
 //   recovery_finding           a recovery pass surfaced the property
+//   seller_interest            (8.5.21-b) the seller said they may sell
+//   offer_request              (8.5.21-b) the seller asked for our offer
+//   counteroffer               (8.5.21-b) the seller countered a number on record
 // The event key dedupes: one job per (trigger, property, discriminator) — the discriminator is
 // the ask amount, the score computed_at, the comp batch id, or a day bucket.
 import { runtimeIdempotencyKey } from '../runtime/job-runtime.js'
@@ -17,7 +20,9 @@ import { encodePropertyRef } from './mission-codec.js'
 import { PROPERTY_RESEARCH_KIND } from './property-research-handler.js'
 
 export const PROPERTY_RESEARCH_FLAG = 'PROPERTY_RESEARCH_ENABLED'
-export const PROPERTY_RESEARCH_TRIGGERS = Object.freeze(['opportunity_entered', 'asking_price_revealed', 'valuation_stale_or_missing', 'new_comp_evidence', 'market_shift', 'recovery_finding'])
+// 8.5.21-b adds the meaningful-inbound triggers fired by the turn-engine hook
+// (research-trigger-hook.js): seller_interest, offer_request, counteroffer (asking_price_revealed exists).
+export const PROPERTY_RESEARCH_TRIGGERS = Object.freeze(['opportunity_entered', 'asking_price_revealed', 'valuation_stale_or_missing', 'new_comp_evidence', 'market_shift', 'recovery_finding', 'seller_interest', 'offer_request', 'counteroffer'])
 export const PROPERTY_RESEARCH_SWEEP = Object.freeze({ name: 'property-research-sweep', kind: 'property.research_sweep', interval_seconds: 6 * 3600, max_per_sweep: 25, stale_days: 30 })
 
 export function propertyResearchEnabled(env = process.env) {

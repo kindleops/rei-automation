@@ -19,10 +19,10 @@ const OP = '11111111-1111-4111-8111-111111111111'
 const T0 = Date.parse('2026-10-15T15:00:00.000Z')
 const ON = { PROPERTY_RESEARCH_ENABLED: '1' }
 
-function harness({ armed = true, env = ON, buildAsk = null, source = memorySource({ inbound: [{ id: 'in-1', body: `I'd take 185000. text ${SECRET_PHONE}`, at: '2026-10-14T10:00:00Z' }] }) } = {}) {
+function harness({ armed = true, env = ON, buildAsk = null, eventBudget = 0.05, source = memorySource({ inbound: [{ id: 'in-1', body: `I'd take 185000. text ${SECRET_PHONE}`, at: '2026-10-14T10:00:00Z' }] }) } = {}) {
   let t = T0
   const now = () => t
-  const store = createRuntimeMemoryStore({ now, limits: { runtime_enabled: true, max_concurrency_global: 2, tick_max_jobs: 3, lease_seconds: 60, backoff_base_seconds: 5, kind_limits: armed ? { [PROPERTY_RESEARCH_KIND]: { enabled: true, max_concurrency: 1, armed_by: OP } } : {} }, research: { enabled: true, day_usd: 5, run_usd: 1 } })
+  const store = createRuntimeMemoryStore({ now, limits: { runtime_enabled: true, max_concurrency_global: 2, tick_max_jobs: 3, lease_seconds: 60, backoff_base_seconds: 5, kind_limits: armed ? { [PROPERTY_RESEARCH_KIND]: { enabled: true, max_concurrency: 1, armed_by: OP, event_budget_cap_usd: eventBudget } } : {} }, research: { enabled: true, day_usd: 5, run_usd: 1 } })
   const reads = createMissionMemoryReads(store, { members: [{ org_id: 'org', user_id: OP, role: 'owner' }], now })
   const handlers = buildHandlers({ store, reads, env, buildAsk, source, now })
   const tick = () => runRuntimeTick({ store, handlers, workerId: 'w1', budgetMs: 30_000, now, concurrent: false })
@@ -30,7 +30,7 @@ function harness({ armed = true, env = ON, buildAsk = null, source = memorySourc
 }
 function buildHandlers({ store, reads, env, buildAsk, source, now }) {
   if (!buildAsk) return buildMissionHandlers({ env, runtimeStore: store, reads, propertyResearchSource: source, now })
-  return { [PROPERTY_RESEARCH_KIND]: createPropertyResearchHandler({ source, reads, buildAsk, env, now, minAskMs: 0 }) }
+  return { [PROPERTY_RESEARCH_KIND]: createPropertyResearchHandler({ source, reads, buildAsk, env, now, minAskMs: 0, limits: { web_call_reserve_usd: 0.02 } }) }
 }
 const findingsOf = (h, id) => [...h.store._state.findings.values()].filter((f) => f.job_id === id)
 
@@ -40,7 +40,7 @@ test('property.research is a handler kind, never operator-creatable; absent from
   const store = createRuntimeMemoryStore({ now: () => T0 })
   const reads = createMissionMemoryReads(store, { members: [], now: () => T0 })
   assert.equal(buildMissionHandlers({ env: {}, runtimeStore: store, reads })[PROPERTY_RESEARCH_KIND], undefined)
-  assert.deepEqual([...PROPERTY_RESEARCH_TRIGGERS], ['opportunity_entered', 'asking_price_revealed', 'valuation_stale_or_missing', 'new_comp_evidence', 'market_shift', 'recovery_finding'])
+  assert.deepEqual([...PROPERTY_RESEARCH_TRIGGERS], ['opportunity_entered', 'asking_price_revealed', 'valuation_stale_or_missing', 'new_comp_evidence', 'market_shift', 'recovery_finding', 'seller_interest', 'offer_request', 'counteroffer'])
 })
 
 test('OFF by default: no flag ⇒ nothing enqueued; flag but kind not armed ⇒ refused by the runtime', async () => {
