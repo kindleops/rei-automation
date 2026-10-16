@@ -1,5 +1,7 @@
 // Rate, concurrency, time and size budgets. All in-process (one stdio server =
-// one principal); the HTTP design (disabled in 1.0) moves rate state to a shared store.
+// one principal). Streamable HTTP (1.x, loopback only) serves the same one host-configured
+// principal, so the principal-wide rate and the process-wide concurrency gate are shared
+// across HTTP sessions, plus a per-session gate (see protocol/http.mjs).
 import { err } from '../errors.mjs'
 
 /** Sliding-window limiter: `${principal}|${bucket}` → timestamps in the last window. */
@@ -23,12 +25,13 @@ export function createRateLimiter({ now = () => Date.now(), windowMs = 60_000 } 
 }
 
 /** Bounded in-flight calls; a call over the bound is refused (never queued without bound). */
-export function createConcurrencyGate({ max = 4 } = {}) {
+export function createConcurrencyGate({ max = 4, code = 'CONCURRENCY_LIMIT', label = 'concurrent calls' } = {}) {
   let inFlight = 0
   return {
     get inFlight() { return inFlight },
+    get max() { return max },
     async run(fn) {
-      if (inFlight >= max) throw err('rate_limited', `too many concurrent calls (max ${max})`, { code: 'CONCURRENCY_LIMIT' })
+      if (inFlight >= max) throw err('rate_limited', `too many ${label} (max ${max})`, { code })
       inFlight += 1
       try { return await fn() } finally { inFlight -= 1 }
     },

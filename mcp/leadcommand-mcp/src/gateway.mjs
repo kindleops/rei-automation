@@ -4,7 +4,7 @@
 //   2 principal + org + membership + scope + role      → unauthorized / forbidden / unavailable
 //   3 forged-context keys in the arguments              → invalid_input (FORGED_CONTEXT)
 //   4 closed input schema (zod)                         → invalid_input / unsupported_filter
-//   5 rate (principal-wide + per tool) and concurrency  → rate_limited
+//   5 rate (principal-wide + per tool), per-connection and process concurrency → rate_limited
 //   6 cursor (signed, bound to tool + filters + principal) → invalid_input
 //   7 adapter under a hard deadline (abort propagates to every read) → timeout
 //   8 second-net masking of phone / email shapes in every string; secret guard
@@ -81,7 +81,8 @@ export function createGateway({ tools, authorizer, source, auditor, limits, now 
   const rate = createRateLimiter()
   const gate = createConcurrencyGate({ max: limits.max_concurrency })
 
-  async function call(name, rawArgs, { transport = 'stdio' } = {}) {
+  /** @param {{ transport?: string, sessionGate?: { run: Function } | null }} [ctx] sessionGate = per-connection cap (HTTP) */
+  async function call(name, rawArgs, { transport = 'stdio', sessionGate = null } = {}) {
     const started = Date.now()
     const correlation_id = crypto.randomUUID()
     const tool = byName.get(String(name || ''))
@@ -103,7 +104,8 @@ export function createGateway({ tools, authorizer, source, auditor, limits, now 
       const { cursor, limit, ...filters } = input
       const after = tool.paged && cursor ? cursorCodec.decode(cursor, { tool: tool.name, filters, principal: who.user_id }) : null
       const timeout = Math.min(tool.limits.timeout_ms, limits.call_timeout_ms)
-      const payload = await gate.run(() => withDeadline(timeout, (signal) => source.withCall(signal, (svc) => tool.handler(input, svc, { after, now: now(), principal: who }))))
+      const run = () => gate.run(() => withDeadline(timeout, (signal) => source.withCall(signal, (svc) => tool.handler(input, svc, { after, now: now(), principal: who }))))
+      const payload = await (sessionGate ? sessionGate.run(run) : run())
       let result = payload
       let page
       if (tool.paged) {

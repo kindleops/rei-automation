@@ -30,10 +30,12 @@ export async function buildApp(opts = {}) {
   }
   const authorizer = createAuthorizer({ principal: cfg.principal, dataOrgId: cfg.dataOrgId, scopes: cfg.scopes, store })
   const gateway = createGateway({ tools: TOOLS, authorizer, source, auditor, limits: cfg.limits, ...(opts.now ? { now: opts.now } : {}) })
-  const server = createMcpServer({ gateway })
+  const server = cfg.transport === 'stdio' ? createMcpServer({ gateway }) : null
   auditor.event('server_boot', summarize(cfg))
   return {
     cfg, server, gateway, auditor, source, authorizer,
-    async close() { await store?.close?.(); await server.close().catch(() => {}) },
+    /** A fresh protocol Server over the shared gateway (one per HTTP session). */
+    createServer: (o = {}) => createMcpServer({ gateway, ...o }),
+    async close() { await store?.close?.(); await server?.close().catch(() => {}) },
   }
 }

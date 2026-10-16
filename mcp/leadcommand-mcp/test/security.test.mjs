@@ -155,6 +155,7 @@ test('unsupported filters: an unknown filter on a search tool is unsupported_fil
   } finally { await c.close() }
 })
 
-test('HTTP transport is disabled in 1.0: refuses to boot', async () => {
-  await assert.rejects(() => connect({ env: fixtureEnv({ LEADCOMMAND_MCP_TRANSPORT: 'http' }) }), /not enabled in 1\.0/)
+test('transport: only stdio | streamable-http boot; streamable-http without a token file refuses to boot', async () => {
+  for (const t of ['http', 'sse', 'websocket']) await assert.rejects(() => connect({ env: fixtureEnv({ LEADCOMMAND_MCP_TRANSPORT: t }) }), /not supported/)
+  await assert.rejects(() => connect({ env: fixtureEnv({ LEADCOMMAND_MCP_TRANSPORT: 'streamable-http' }) }), /TOKEN_FILE is required/)
 })
