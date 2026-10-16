@@ -144,7 +144,7 @@ test('PG shadow runtime: hook → runtime_enqueue_event → tick (max_concurrenc
   } finally { await db.drop() }
 })
 
-test('PG shadow runtime: spend — Sonnet escalation does not fit $0.01 ⇒ NEEDS_REVIEW hold, Haiku spend only; spend switch off / day cap ⇒ budget_blocked, no record, no call; caps $10/day, $150/cycle, $2.50/run are CHECK-bounded; event budget clamps at $0.05', { skip }, async () => {
+test('PG shadow runtime: spend — a Haiku ESCALATE is a NEEDS_REVIEW hold, Sonnet never attempted, Haiku spend only; spend switch off / day cap ⇒ budget_blocked, no record, no call; caps $10/day, $150/cycle, $2.50/run are CHECK-bounded; event budget clamps at $0.05', { skip }, async () => {
   const db = await shadowRuntimeDb()
   try {
     await arm(db.pool)
@@ -163,7 +163,7 @@ test('PG shadow runtime: spend — Sonnet escalation does not fit $0.01 ⇒ NEED
     assert.equal((await sel(db.pool, 'select count(*)::int n from agent.spend_ledger'))[0].n, 0)
     assert.equal((await sel(db.pool, `select last_error->>'code' c from agent.research_job where kind = $1`, [CONVERSATION_DECIDE_KIND]))[0].c, 'AGENT_RESEARCH_DISABLED')
 
-    // 2. spend on, escalation: Haiku decides it needs Sonnet; Sonnet's worst case does not fit what is left of $0.01
+    // 2. spend on, escalation: Haiku asks for Sonnet without a reply candidate ⇒ human hold, no Sonnet call
     await spendOn(db.pool)
     const jid = (await sel(db.pool, `select job_id from agent.research_job where kind = $1`, [CONVERSATION_DECIDE_KIND]))[0].job_id
     assert.equal((await store.requeue({ job_id: jid, by: OP })).state, 'queued')
@@ -175,7 +175,10 @@ test('PG shadow runtime: spend — Sonnet escalation does not fit $0.01 ⇒ NEED
     const rec = (await sel(db.pool, `select outcome, draft_text, record from public.conversation_ai_shadow_decisions`))[0]
     assert.equal(rec.outcome, 'NEEDS_REVIEW')
     assert.equal(rec.draft_text, null)
-    assert.match(JSON.stringify(rec.record), /JOB_BUDGET_INSUFFICIENT/)
+    // 8.5.15 b8e00ad1 (Sonnet only for a REPLY_CANDIDATE) + 8.5.16 (no Sonnet on a human-bound turn):
+    // a Haiku ESCALATE is a human hold, Sonnet is never attempted. The $0.01 budget refusal of a
+    // Sonnet attempt is covered by conversation-ai-shadow-runtime-8515.test.mjs (rc-8.5.20).
+    assert.ok(rec.record.context_summary.trace.escalation_withheld.includes('complex_negotiation'), JSON.stringify(rec.record.context_summary.trace))
     const led = await sel(db.pool, `select model, state, reserved_usd::float8 r from agent.spend_ledger`)
     assert.deepEqual(led.map((l) => [l.model, l.state]), [['claude-haiku-5-5', 'settled']])
 

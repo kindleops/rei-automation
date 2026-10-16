@@ -27,6 +27,8 @@ const CAPS = path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261013120000_ag
 const MIG = path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261014120000_persistent_missions.sql')
 const MIG_PRETEST = path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261014120000_persistent_missions_pretest.sql')
 const MIG_ROLLBACK = path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261014120000_persistent_missions_rollback.sql')
+// rc-8.5.20: persistent_missions is applied after the 8.5.15 kind-limits fix (production order)
+const KIND_LIMITS_FIX = path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql')
 const SCHEDULES = path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261014120100_persistent_missions_schedules.sql')
 const ENV = Object.freeze({ ...CAP_ENV, AGENT_RESEARCH_ENABLED: '1', AGENT_SPEND_GLOBAL_DAILY_USD: '10', AGENT_SPEND_USER_DAILY_USD: '10', AGENT_SPEND_CYCLE_USD: '150', AGENT_MISSIONS_ENABLED: '1' })
 const PID = '2124415662'
@@ -54,6 +56,7 @@ async function missionsDb({ apply = true } = {}) {
   await db.pool.query(PUBLIC_FIXTURE)
   await applyInTransaction(db.pool, SQL.runtime)
   await applyInTransaction(db.pool, CAPS)
+  await applyInTransaction(db.pool, KIND_LIMITS_FIX)
   if (apply) await applyInTransaction(db.pool, MIG)
   await db.pool.query(`insert into agent.operator_membership (org_id, user_id, role, added_by) values ($1, $2, 'owner', 'test') on conflict do nothing`, [ORG, OP])
   await db.pool.query('update agent.research_limits set enabled = true where id = 1')
@@ -112,13 +115,14 @@ function psql(url, args) {
   return { status: r.status, out: `${r.stdout}\n${r.stderr}` }
 }
 
-test('PG missions migration: pretest passes and rolls back; kind max_concurrency 3 accepted only after apply; rollback restores the R2 rule and refuses while a kind uses 3', { skip }, async () => {
+test('PG missions migration: pretest passes and rolls back; kind max_concurrency 3 accepted only after apply; rollback restores the pre-8.5.18 rule (with the 8.5.15 event budget key) and refuses while a kind uses 3', { skip }, async () => {
   const db = await missionsDb({ apply: false })
   try {
     const three = { [MISSION_RESEARCH_KIND]: { enabled: true, max_concurrency: 3, armed_by: OP } }
     await assert.rejects(db.pool.query('update agent.runtime_limits set kind_limits = $1::jsonb where id = 1', [JSON.stringify(three)]), /runtime_limits_kind_limits_valid/)
-    const p = psql(db.url, ['-v', `migration=${MIG}`, '-f', MIG_PRETEST])
-    if (!p.skipped) { assert.equal(p.status, 0, p.out); assert.match(p.out, /ALL OK \(rolled back\)/) }
+    // rc-8.5.20: the pretest is read-only (prerequisites incl. the 8.5.15 fix); the apply half is the posttest fixture
+    const p = psql(db.url, ['-f', MIG_PRETEST])
+    if (!p.skipped) { assert.equal(p.status, 0, p.out); assert.match(p.out, /prerequisites OK/) }
     await applyInTransaction(db.pool, MIG)
     await db.pool.query('update agent.runtime_limits set kind_limits = $1::jsonb where id = 1', [JSON.stringify(three)])
     await assert.rejects(runSqlFile(db.pool, MIG_ROLLBACK), /max_concurrency 3/)
@@ -126,6 +130,8 @@ test('PG missions migration: pretest passes and rolls back; kind max_concurrency
     await runSqlFile(db.pool, MIG_ROLLBACK)
     await assert.rejects(db.pool.query('update agent.runtime_limits set kind_limits = $1::jsonb where id = 1', [JSON.stringify(three)]), /runtime_limits_kind_limits_valid/)
     assert.equal((await sel(db.pool, "select to_regclass('agent.research_job_requested_recent_idx') r"))[0].r, null)
+    await db.pool.query('update agent.runtime_limits set kind_limits = $1::jsonb where id = 1', [JSON.stringify({ 'conversation.decide': { enabled: false, max_concurrency: 1, armed_by: OP, event_budget_cap_usd: 0.01 } })])
+    await db.pool.query(`update agent.runtime_limits set kind_limits = '{}'::jsonb where id = 1`)
     // the schedules seed: three schedules, all disabled
     await applyInTransaction(db.pool, MIG)
     const s = psql(db.url, ['-v', `owner_id=${OP}`, '-f', SCHEDULES])
