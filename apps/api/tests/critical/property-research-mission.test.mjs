@@ -86,7 +86,7 @@ test('run: internal-first research completes at $0 without web; findings are typ
   assert.equal(j.result.offer_plan.visibility, 'internal_only')
   assert.equal(j.result.offer_plan.available, true)
   const fs = findingsOf(h, job_id)
-  assert.deepEqual(fs.map((f) => f.finding_type).sort(), ['property.comps_area', 'property.dossier', 'property.economics', 'property.offer_plan', 'property.research'])
+  assert.deepEqual(fs.map((f) => f.finding_type).sort(), ['property.comps_area', 'property.dossier', 'property.economics', 'property.offer_plan', 'property.research', 'research.usage'])
   const raw = JSON.stringify(fs)
   for (const bad of [SECRET_PHONE, '2145550147', SECRET_NAME, 'owner@example.com']) assert.ok(!raw.includes(bad), `leaked ${bad}`)
   assert.ok(!raw.includes(`"${PID}"`), 'no raw property id')
@@ -106,7 +106,7 @@ test('web step: runs only when enabled with gaps; only server-cited items are ke
     ask: async ({ question, context }) => { asks += 1; assert.match(question, /Listings are NOT sales/); assert.ok(!question.includes(SECRET_NAME)); assert.deepEqual(context.property_ids, [PID]); return { run_id: 'r1', done: Promise.resolve({ state: 'completed', answer_md: answer, cost_usd: 0.02, result: { evidence: { public_web: [{ url: 'https://listings.example.com/subject', retrieved_at: '2026-10-15T15:00:00Z' }] } } }) } },
     cancel() {},
   })
-  const h = harness({ env: { ...ON, AGENT_WEB_RESEARCH_ENABLED: '1' }, buildAsk })
+  const h = harness({ env: { ...ON, AGENT_WEB_RESEARCH_ENABLED: '1', RESEARCH_PAID_CALLS_APPROVED: '1', RESEARCH_PAID_APPROVAL_REF: 'apr_00000000-0000-4000-8000-0000000000aa' }, buildAsk })
   const { job_id } = await enqueuePropertyResearch({ store: h.store, env: ON, trigger: 'opportunity_entered', property_id: PID })
   const s = await h.tick()
   assert.equal(s.jobs[0].outcome, 'completed', JSON.stringify(s))
@@ -122,7 +122,7 @@ test('web step: runs only when enabled with gaps; only server-cited items are ke
   // resume: the checkpoint marks the web step done ⇒ no second ask
   const job = h.store._state.jobs.get(job_id)
   const ctx = { job: { ...job, checkpoint: { ...job.checkpoint, findings: undefined } }, step: async () => {}, recordFinding: async () => 'f', remainingMs: () => 30_000, yield: () => {}, signal: new AbortController().signal }
-  await createPropertyResearchHandler({ source: memorySource(), reads: h.reads, buildAsk, env: { AGENT_WEB_RESEARCH_ENABLED: '1' }, now: h.now, minAskMs: 0 }).run(ctx)
+  await createPropertyResearchHandler({ source: memorySource(), reads: h.reads, buildAsk, env: { AGENT_WEB_RESEARCH_ENABLED: '1', RESEARCH_PAID_CALLS_APPROVED: '1', RESEARCH_PAID_APPROVAL_REF: 'apr_00000000-0000-4000-8000-0000000000aa' }, now: h.now, minAskMs: 0 }).run(ctx)
   assert.equal(asks, 1, 'a resumed attempt never re-spends the web step')
   // web disabled ⇒ the ask service is never called
   const off = harness({ env: ON, buildAsk })

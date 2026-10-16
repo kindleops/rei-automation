@@ -17,7 +17,9 @@ import { PID, memorySource, score } from '../helpers/property-research-fixtures.
 const OP = '11111111-1111-4111-8111-111111111111'
 const T0 = Date.parse('2026-10-16T15:00:00.000Z')
 const ON = { PROPERTY_RESEARCH_ENABLED: '1' }
-const WEB_ON = { ...ON, AGENT_WEB_RESEARCH_ENABLED: '1' }
+// paid calls are DEFAULT-DENY (owner decision 3): the web tests run with an explicit (test) approval
+const APPROVED = { RESEARCH_PAID_CALLS_APPROVED: '1', RESEARCH_PAID_APPROVAL_REF: 'apr_00000000-0000-4000-8000-0000000000aa' }
+const WEB_ON = { ...ON, AGENT_WEB_RESEARCH_ENABLED: '1', ...APPROVED }
 const ledgerWithAsk = (amount) => ({ asking_price: { current: { value: { amount }, origin: 'seller_stated', source_message_id: 'm1' }, history: [{ value: { amount }, origin: 'seller_stated', source_message_id: 'm1', at: '2026-10-16T14:00:00Z' }] } })
 
 // ── the pure hook ───────────────────────────────────────────────────────────
@@ -132,7 +134,7 @@ test('resumable: a timed-out web step is cancelled, checkpointed and RESUMED nex
   const r = job(h, job_id).result
   assert.equal(r.web.status, 'timed_out')
   assert.equal(r.web.attempts, 2)
-  assert.deepEqual(findings(h, job_id).map((f) => f.finding_type).sort(), ['property.comps_area', 'property.dossier', 'property.economics', 'property.offer_plan', 'property.research'], 'internal findings are never lost to a web timeout')
+  assert.deepEqual(findings(h, job_id).map((f) => f.finding_type).sort(), ['property.comps_area', 'property.dossier', 'property.economics', 'property.offer_plan', 'property.research', 'research.usage'], 'internal findings are never lost to a web timeout')
 })
 
 test('budget: at the 0.05 default ceiling one web call (0.26 reserve) does not fit ⇒ skipped_budget, internal findings recorded, never budget_blocked', async () => {
@@ -146,7 +148,7 @@ test('budget: at the 0.05 default ceiling one web call (0.26 reserve) does not f
   const r = job(h, job_id).result
   assert.equal(r.web.status, 'skipped_budget')
   assert.equal(job(h, job_id).checkpoint.web.budget.cap_usd, 0.05)
-  assert.equal(findings(h, job_id).length, 5)
+  assert.equal(findings(h, job_id).length, 6)
   assert.notEqual(job(h, job_id).state, 'budget_blocked')
 })
 
@@ -176,7 +178,7 @@ test('provenance + listings ≠ sales: every finding names its source; the web l
   const { job_id } = await enqueuePropertyResearch({ store, env: ON, trigger: 'seller_interest', property_id: PID, discriminator: 'interest:2026-10-16' })
   await runRuntimeTick({ store, handlers: { [PROPERTY_RESEARCH_KIND]: handler }, workerId: 'w', budgetMs: 25_000, now: () => t })
   const fs = [...store._state.findings.values()].filter((f) => f.job_id === job_id)
-  for (const f of fs) assert.match(f.source_id, /^(property_research\.|public_web$)/, f.finding_type)
+  for (const f of fs) assert.match(f.source_id, /^(property_research\.|public_web$|agent\.spend_ledger$)/, f.finding_type)
   const web = JSON.parse(decodeFromStore(fs.find((f) => f.finding_type === 'property.web_evidence').value.payload_v1))
   assert.equal(web.listings[0].evidence_kind, 'listing')
   const comps = JSON.parse(decodeFromStore(fs.find((f) => f.finding_type === 'property.comps_area').value.payload_v1))

@@ -2,8 +2,11 @@
 // Production is read inside ONE BEGIN READ ONLY transaction; the R2 runtime is the in-memory twin
 // (same rules, real 25 s ticks, real wall clock); findings stay in memory and are summarized to a
 // local file, anonymized (P1..Pn, amounts rounded to $5,000, no address / zip / owner / phone).
-// The web step runs on at most ONE property, only when ANTHROPIC_API_KEY is in the process env, with
-// a $0.30 job cap and a $0.40 day cap on the memory spend guard.
+// The web step is a PAID call: it runs on at most ONE property and ONLY when the owner approved paid
+// research for this run (RESEARCH_PAID_CALLS_APPROVED=1 + RESEARCH_PAID_APPROVAL_REF=apr_<uuid>, the same
+// default-deny gate as the handler) AND a model key was provided by the operator's environment. Tooling
+// never reads or derives a credential from a file (owner decision 2026-10-16 (4)). $0.30 job cap, $0.40
+// day cap on the memory spend guard, inside the $10 testing ceiling.
 import { createRuntimeMemoryStore } from '../../src/lib/agent/runtime/job-runtime.js'
 import { runRuntimeTick } from '../../src/lib/agent/runtime/runtime-tick.js'
 import { createMissionMemoryReads, PROPERTY_RESEARCH_KIND } from '../../src/lib/agent/missions/index.js'
@@ -23,7 +26,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export async function run({ withRo, write, arg }) {
   const n = Number(arg('--n', 5))
-  const key = String(process.env.ANTHROPIC_API_KEY || '').trim()
+  const approved = String(process.env.RESEARCH_PAID_CALLS_APPROVED || '') === '1' && /^apr_[0-9a-f-]{36}$/.test(String(process.env.RESEARCH_PAID_APPROVAL_REF || ''))
+  const key = approved ? String(process.env.ANTHROPIC_API_KEY || '').trim() : ''
   return withRo(async ({ query }) => {
     // 1 the properties: the head of the valuation refresh queue (active negotiation → offer request → …)
     const rows = await createValuationSqlSource({ query }).candidates({ limit: 2000 })
@@ -53,7 +57,7 @@ export async function run({ withRo, write, arg }) {
       const { createToolRegistry } = await import('../../src/lib/agent/tools/registry.js')
       const { createModelResolver } = await import('../../src/lib/agent/research/models.js')
       const { createAnthropicProvider } = await import('../../src/lib/ai/anthropic-provider.js')
-      env = { ...env, NODE_ENV: 'development', ANTHROPIC_API_KEY: key, AGENT_ENABLED: '1', AGENT_RESEARCH_ENABLED: '1', AGENT_MAX_MODE: 'read', AGENT_WEB_RESEARCH_ENABLED: '1', AGENT_SPEND_GLOBAL_DAILY_USD: '0.4', AGENT_SPEND_USER_DAILY_USD: '0.4', AGENT_SPEND_CYCLE_USD: '0.4' }
+      env = { ...env, RESEARCH_PAID_CALLS_APPROVED: '1', RESEARCH_PAID_APPROVAL_REF: process.env.RESEARCH_PAID_APPROVAL_REF, NODE_ENV: 'development', ANTHROPIC_API_KEY: key, AGENT_ENABLED: '1', AGENT_RESEARCH_ENABLED: '1', AGENT_MAX_MODE: 'read', AGENT_WEB_RESEARCH_ENABLED: '1', AGENT_SPEND_GLOBAL_DAILY_USD: '0.4', AGENT_SPEND_USER_DAILY_USD: '0.4', AGENT_SPEND_CYCLE_USD: '0.4' }
       const provider = createAnthropicProvider({ env })
       const resolver = createModelResolver({ provider, env })
       const registry = createToolRegistry({ readOnly: true }).seal()

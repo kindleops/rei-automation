@@ -33,6 +33,7 @@ import { decodePropertyRef, encodePropertyRef, jsonBytes, storableUrl } from './
 import { recordFindings } from './research-mission-handler.js'
 import { encodeForStore, maskContacts } from '../research/pii.js'
 import { isWebEnabled } from '../research/web-research.js'
+import { paidResearchGate, webEvidenceIsFresh, usageFinding } from '../research/research-usage.js'
 import { loadResearchInputs, runInternalResearch } from '../../domain/property-research/research-pipeline.js'
 import { buildWebQuestion, parseWebAnswer } from '../../domain/property-research/web-listings.js'
 
@@ -142,7 +143,16 @@ export function createPropertyResearchHandler({ source, reads, buildAsk = null, 
           const reserve = Number(input.web_call_reserve_usd ?? L.web_call_reserve_usd)
           // at least ONE worst-case web-call reservation must fit what is left of the job budget
           const calls = room$ + 1e-9 >= reserve ? Math.min(Number(input.max_model_calls) || L.web_model_calls, MISSION_LIMITS.ask_max_model_calls) : 0
-          if (Number(cp.web_attempts || 0) >= L.web_attempts_max) {
+          // 8.5.21-b owner decision (3): dedupe first (recent web evidence is the cache), then DEFAULT-DENY paid
+          // calls unless the owner approved them and the $10 testing ceiling has room
+          const fresh = cp.web_attempts ? { fresh: false } : input.force_web === true ? { fresh: false } : await webEvidenceIsFresh({ reads, property_ref: ref, now: now() })
+          const committedPaid = typeof reads.spendTotals === 'function' ? await reads.spendTotals().then((t) => Number(t?.cycle_usd), () => null) : null
+          const gate = paidResearchGate({ env, committed_paid_usd: Number.isFinite(committedPaid) ? committedPaid : null, estimate_usd: reserve * Math.max(calls, 1) })
+          if (fresh.fresh) {
+            cp.web = { status: 'skipped_recent_web_evidence', listings: [], notes: [], dropped_uncited: 0, cost_usd: 0, dedupe: fresh.reason }
+          } else if (!gate.ok) {
+            cp.web = { status: `skipped_${gate.reason}`, listings: [], notes: [], dropped_uncited: 0, cost_usd: 0, paid_gate: { reason: gate.reason, ceiling_usd: gate.ceiling_usd, committed_usd: gate.committed_usd } }
+          } else if (Number(cp.web_attempts || 0) >= L.web_attempts_max) {
             cp.web = { status: cp.web_last_timeout ? 'timed_out' : 'failed:attempts_exhausted', listings: [], notes: [], dropped_uncited: 0, cost_usd: round6(cp.web_cost_usd), attempts: cp.web_attempts }
           } else if (calls < 1) {
             cp.web = { status: 'skipped_budget', listings: [], notes: [], dropped_uncited: 0, cost_usd: round6(cp.web_cost_usd), budget: { cap_usd: cap, committed_usd: round6(committed), per_call_reserve_usd: reserve } }
@@ -175,6 +185,7 @@ export function createPropertyResearchHandler({ source, reads, buildAsk = null, 
             if (stop) throw stop
             const spent = round6(Number(r?.cost_usd ?? store.settled_usd ?? 0))
             cp.web_cost_usd = round6(Number(cp.web_cost_usd || 0) + spent)
+            cp.web_usage = { model_calls: Number(cp.web_usage?.model_calls || 0) + Number(r?.model_calls || 0), web_searches: Number(cp.web_usage?.web_searches || 0) + Number(r?.web_searches || 0) }
             const timeoutLike = timedOut || /TIMEOUT/.test(String(r?.outcome || ''))
             if (timeoutLike && cp.web_attempts < L.web_attempts_max) {
               cp.web_last_timeout = String(r?.outcome || 'WEB_STEP_TIMEOUT').slice(0, 40)
@@ -195,7 +206,8 @@ export function createPropertyResearchHandler({ source, reads, buildAsk = null, 
       if (!cp.findings) {
         cp.phase = 'findings'
         await ctx.step('findings', { progress: { step: 'findings', steps_done: 2, steps_total: 3, pct: 80 }, checkpoint: cp })
-        cp.findings = await recordFindings(ctx, propertyResearchFindings(ref, research, cp.web.status === 'completed' ? cp.web : null))
+        const usage = usageFinding({ property_ref: ref, mission: PROPERTY_RESEARCH_KIND, provider: 'anthropic', model_calls: cp.web_usage?.model_calls || 0, web_searches: cp.web_usage?.web_searches || 0, usd: cp.web.cost_usd || 0, outcome: cp.web.status, deduped: cp.web.status === 'skipped_recent_web_evidence' })
+        cp.findings = await recordFindings(ctx, [...propertyResearchFindings(ref, research, cp.web.status === 'completed' ? cp.web : null), usage])
         cp.phase = 'done'
         await ctx.step('findings.done', { progress: { step: 'findings', steps_done: 3, steps_total: 3, pct: 99 }, checkpoint: cp, payload: { written: cp.findings.written, refused: cp.findings.refused.length } })
       }
