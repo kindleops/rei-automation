@@ -15,6 +15,8 @@ import { getCapabilityPlane } from '@/lib/agent/capabilities/index.js'
 import { buildMissionHandlers, createMissionPgReads, createMissionsService, missionsEnabled } from '@/lib/agent/missions/index.js'
 import { createDiscoverySupabaseSource } from '@/lib/agent/missions/discovery-source.js'
 import { createShadowSupabaseSource } from '@/lib/agent/missions/review-digest-handler.js'
+import { propertyResearchEnabled, createPropertyResearchSweepSupabaseSource } from '@/lib/agent/missions/property-research-triggers.js'
+import { createResearchSupabaseSource } from '@/lib/domain/property-research/research-source.js'
 
 const HANDLERS = Symbol.for('lc.agent.missions.handlers')
 const SERVICE = Symbol.for('lc.agent.missions.service')
@@ -42,6 +44,9 @@ export function missionRuntimeHandlers(env = process.env) {
     createServices: readDb ? () => createQuickScanServices({ db: createQuickScanReadClient({ env }).client }) : null,
     discoverySource: readDb ? createDiscoverySupabaseSource({ db: readDb }) : null,
     shadowSource: readDb ? createShadowSupabaseSource({ db: readDb }) : null,
+    // 8.5.20-b: OFF unless PROPERTY_RESEARCH_ENABLED=1 (and the kind armed + enabled in kind_limits)
+    propertyResearchSource: readDb && propertyResearchEnabled(env) ? createResearchSupabaseSource({ db: readDb }) : null,
+    propertyResearchSweepSource: readDb && propertyResearchEnabled(env) ? createPropertyResearchSweepSupabaseSource({ db: readDb }) : null,
     log: logLine,
   })
   return globalThis[HANDLERS]
