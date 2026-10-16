@@ -4,8 +4,10 @@
 // caps checked before every call (and the model client's tracker reserves the worst case).
 // The output is never trusted: playbook style + ledger + objective checks, one regeneration
 // with the reasons, then HOLD. Nothing here sends; the model never sees a transport.
-import { COMPOSE_PROMPT_VERSION, PLAYBOOK_RULES, PLAYBOOK_VERSION } from '../playbook/v1/index.js'
-import { validatePlaybookStyle, sentenceCount } from '../playbook/v1/style-validator.js'
+// rc-8.5.20: playbook v2 (owner persona rule: the thread's established persona, no invented
+// backstory / credentials, never deny automation); v1 stays intact for its own records
+import { COMPOSE_PROMPT_VERSION, PLAYBOOK_RULES, PLAYBOOK_VERSION } from '../playbook/v2/index.js'
+import { validatePlaybookStyle, sentenceCount } from '../playbook/v2/style-validator.js'
 import { detectSellerTone } from '../playbook/v1/tone.js'
 import { validateProposedMessage } from '../fact-ledger.js'
 import { questionKindOf } from '../questions.js'
@@ -48,7 +50,7 @@ export function openingHintFor(seed) {
   return OPENING_HINTS[h % OPENING_HINTS.length]
 }
 
-export function buildComposePrompt({ ledger, inboundText, category, objective, tone, maskOpts = {}, messages = [], followupScheduled = null, avoidOpening = null }) {
+export function buildComposePrompt({ ledger, inboundText, category, objective, tone, maskOpts = {}, messages = [], followupScheduled = null, avoidOpening = null, establishedPersona = null }) {
   const system = [
     'You write ONE outbound SMS reply for a local home buyer texting a property owner. Call the tool exactly once with {"message": "..."}.',
     'RULES (code enforces every one; a violation is discarded):',
@@ -58,6 +60,7 @@ export function buildComposePrompt({ ledger, inboundText, category, objective, t
   const user = [
     `SELLER'S LATEST MESSAGE: ${maskText(inboundText, maskOpts)}`,
     `SELLER REGISTER: ${tone}`,
+    `PERSONA: ${establishedPersona ? `${establishedPersona} (the name this seller already knows; use it only if a name is needed)` : 'none on record: give no name'}`,
     'RECENT THREAD (oldest first):',
     ...messages.slice(-6).map((m) => `${m.from}: ${maskText(m.text, maskOpts)}`),
     'FACTS ALREADY KNOWN (never ask for these again; inferred is not confirmed):',
@@ -145,7 +148,7 @@ export async function composeReply({ ledger, inboundText, category, objective, m
     const est = spend?.estimateUsd ? spend.estimateUsd(route) : null
     const cap = checkSpend({ estimateUsd: est, spentTodayUsd: spend?.spentTodayUsd ? spend.spentTodayUsd() : null, perMessageMaxUsd: spend?.perMessageMaxUsd, dailyMaxUsd: spend?.dailyMaxUsd })
     if (!cap.allowed) return { ok: false, reason: cap.reason, attempts, complexity }
-    const p = buildComposePrompt({ ledger, inboundText, category, objective, tone: abusive ? 'frustrated (do not mirror any insult)' : tone, maskOpts, messages, followupScheduled, avoidOpening: previousOutbound ? maskText(previousOutbound, maskOpts).split(/\s+/).slice(0, 3).join(' ') : null })
+    const p = buildComposePrompt({ ledger, inboundText, category, objective, tone: abusive ? 'frustrated (do not mirror any insult)' : tone, maskOpts, messages, followupScheduled, establishedPersona, avoidOpening: previousOutbound ? maskText(previousOutbound, maskOpts).split(/\s+/).slice(0, 3).join(' ') : null })
     const user = feedback ? `${p.user}\nYOUR PREVIOUS DRAFT WAS REJECTED FOR: ${feedback.join(', ')}. Write a new one that fixes every point.` : p.user
     let r
     try {

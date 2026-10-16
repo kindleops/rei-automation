@@ -53,10 +53,11 @@ import { VALIDATOR_VERSION, validateDraft } from '@/lib/domain/conversation-ai/v
 import { buildAiGeneratedMessage, insertAiGeneratedMessage, recordAiGeneratedMessageEvent, sealedThreadRef } from '@/lib/domain/messages/ai-generated-message.js'
 import { cancelSupabasePendingOutbound, CANCELLATION_POLICIES } from '@/lib/domain/queue/cancel-supabase-pending-outbound.js'
 import { CONTEXT_VERSION } from '@/lib/domain/conversation-ai/context-builder.js'
-import { COMPOSE_PROMPT_VERSION, PLAYBOOK_VERSION } from '@/lib/domain/conversation-ai/playbook/v1/index.js'
-import { validatePlaybookStyle } from '@/lib/domain/conversation-ai/playbook/v1/style-validator.js'
+import { COMPOSE_PROMPT_VERSION, PLAYBOOK_VERSION } from '@/lib/domain/conversation-ai/playbook/v2/index.js'
+import { validatePlaybookStyle } from '@/lib/domain/conversation-ai/playbook/v2/style-validator.js'
 import { ACTIONS, validatePlan } from '@/lib/domain/conversation-ai/pipeline/outcomes.js'
 import { closeAndAttributionReasons } from '@/lib/domain/conversation-ai/pipeline/compose.js'
+import { resolveThreadContinuity } from '@/lib/domain/conversation-ai/persona-continuity.js'
 
 export const R3_EXECUTOR_VERSION = 'conv-ai.r3-executor.v1'
 export { R3_EXECUTOR_WIRED }
@@ -94,8 +95,11 @@ export async function loadR3State({ supabase, candidate, now }) {
   const loaded = await loadShadowContext({ supabase, providerMessageSid: sid, now })
   if (!loaded) return null
   const since = new Date(Date.parse(now) - 75 * 864e5).toISOString()
-  const q = await supabase.from('send_queue').select('id,queue_status,use_case_template,created_at,source,inbound_message_id').eq('thread_key', loaded.input.inbound.thread_key).gte('created_at', since).order('created_at', { ascending: false }).limit(60)
+  // rc-8.5.20: agent_name / metadata / body / from number feed the persona + sender continuity
+  const q = await supabase.from('send_queue').select('id,queue_status,use_case_template,created_at,source,inbound_message_id,agent_name,metadata,message_body,from_phone_number').eq('thread_key', loaded.input.inbound.thread_key).gte('created_at', since).order('created_at', { ascending: false }).limit(60)
   if (q?.error) throw Object.assign(new Error('R3_STATE_READ_FAILED'), { code: 'R3_STATE_READ_FAILED' })
+  const ts = await supabase.from('inbox_thread_state').select('our_number').eq('thread_key', loaded.input.inbound.thread_key).limit(1)
+  if (ts?.error) throw Object.assign(new Error('R3_STATE_READ_FAILED'), { code: 'R3_STATE_READ_FAILED' })
   let property_address = null
   if (loaded.row.property_id) {
     const pr = await supabase.from('properties').select('property_address,property_address_full').eq('property_id', loaded.row.property_id).limit(1)
@@ -105,6 +109,7 @@ export async function loadR3State({ supabase, candidate, now }) {
   return {
     input: loaded.input,
     queueRows: q?.data || [],
+    thread_state: ts?.data?.[0] || null,
     timezone: loaded.timezone,
     geography: loaded.geography,
     language: loaded.input.language,
@@ -191,8 +196,10 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     if (!planActions.some((a) => a?.type === ACTIONS.AI_GENERATED_REPLY)) return out('held', ['plan_has_no_ai_generated_reply'])
   }
   // playbook v1 style, enforced in code (no em / en dash, one question, no invented claims, …)
+  // (the persona half of the style rules is judged after the thread's persona is known, step 4)
   const style = validatePlaybookStyle(draft)
-  if (!style.ok) return out('held', style.reasons)
+  const styleEarly = style.reasons.filter((r) => r !== 'persona:name_not_established')
+  if (styleEarly.length) return out('held', styleEarly)
 
   // 4. FRESH state, read immediately before enqueue
   let state = null
@@ -210,6 +217,12 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   if (thread.some((m) => m.direction === 'outbound' && t(m) > t(inboundRow))) return out('held', ['already_answered_by_outbound'])
   const pending = (state.queueRows || []).find((r) => ACTIVE_REPLY_STATUSES.has(clean(r.queue_status).toLowerCase()) && (clean(r.inbound_message_id) === inboundId || t(r) >= t(inboundRow)))
   if (pending) return out('held', ['reply_already_queued'], { existing_queue_row_id: pending.id })
+  // rc-8.5.20 Phase 2: the thread's established persona and sender number (one resolver for
+  // every origin); a conflict or a number mismatch holds for a human, never auto-switches
+  const continuity = state.continuity || resolveThreadContinuity({ sentRows: state.queueRows || [], threadState: state.thread_state || null, inboundTo: state.our_phone })
+  if (!continuity.ok) return out('held', continuity.reasons.map((r) => `continuity:${r}`))
+  const personaStyle = validatePlaybookStyle(draft, { establishedPersona: continuity.persona_name })
+  if (!personaStyle.ok) return out('held', personaStyle.reasons)
   // any other not-yet-sent row on the thread (a scheduled follow-up, a held reply) ⇒ a human decides
   const unsent = (state.queueRows || []).find((r) => NOT_YET_SENT_STATUSES.has(clean(r.queue_status).toLowerCase()))
   if (unsent) return out('held', ['outbound_pending_on_thread'], { existing_queue_row_id: unsent.id })
@@ -281,7 +294,7 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   const comp = candidate.composition || {}
   const record = buildAiGeneratedMessage({
     body: draft, inboundMessageId: inboundId, queueKey: key, threadKey, propertyId: state.property_id, contactId: state.prospect_id,
-    recipientPhone: state.seller_phone, senderPhone: state.our_phone, decisionId: candidate.decision_id, jobId: candidate.job_id || null,
+    recipientPhone: state.seller_phone, senderPhone: continuity.sender_number, decisionId: candidate.decision_id, jobId: candidate.job_id || null,
     model: comp.model || candidate.model, playbookVersion: comp.playbook_version || PLAYBOOK_VERSION, promptVersion: comp.prompt_version || COMPOSE_PROMPT_VERSION,
     contextVersion: CONTEXT_VERSION, validation: { status: 'validated', validators: [VALIDATOR_VERSION, style.version, 'fact-ledger', 'routine-scope'], reasons: [] },
     ledgerSnapshot: ledgerSummary(ledger), policy,
@@ -315,7 +328,8 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     message_text: draft,
     seller_first_name: clean(state.input?.names?.first_name) || null,
     to_phone_number: state.seller_phone,
-    from_phone_number: state.our_phone,
+    from_phone_number: continuity.sender_number,
+    agent_name: continuity.persona_name,
     master_owner_id: state.master_owner_id || null,
     prospect_id: state.prospect_id || null,
     property_id: state.property_id || null,
@@ -358,6 +372,8 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
       inbound_message_event_id: inboundId,
       stage: ledger.stage?.stage || null,
       reservations: { inbound: inboundId, seller_day: `${sealedThreadRef(threadKey)}:${day}`, global_slot: slot.n },
+      agent_persona: continuity.persona_name,
+      persona_continuity: { version: continuity.version, persona_source: continuity.persona_source, sender_source: continuity.sender_source },
       no_direct_provider_send: true,
     },
   }

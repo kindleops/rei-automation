@@ -184,7 +184,7 @@ test('compose: Haiku writes original text; a draft with an em dash is regenerate
   assert.equal(ok.calls.length, 2)
   assert.match(ok.calls[1].user, /style:em_dash/)
   assert.equal(r.route, 'default')
-  assert.equal(r.playbook_version, PLAYBOOK_VERSION)
+  assert.equal(r.playbook_version, 'playbook.v2') // rc-8.5.20: compose runs playbook v2 (v1 rules + the owner persona rule)
   const bad = fakeModel(['Thanks — would you sell?'])
   const held = await composeReply({ ledger: L, inboundText: 'yes', category: 'next_missing_fact', objective: 'interest', modelClient: bad, spend: spend() })
   assert.deepEqual([held.ok, held.reason, bad.calls.length], [false, 'composition_rejected', 2])
