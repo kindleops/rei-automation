@@ -81,6 +81,8 @@ function createJobContext({ store, claim, deadlineAt, now }) {
     /** Hand the job back between steps (release: no attempt burned; re-claimed after backoff_base_seconds). */
     yield(reason = 'yield') { throw new RuntimeStop(`yield:${String(reason).slice(0, 40)}`) },
     read: Object.freeze({ healthSnapshot: (o) => store.healthSnapshot(o) }),
+    /** The claim's lease (8.5.20 C): lease-bound SECURITY DEFINER writers (agent.ops_*) re-check it in SQL. */
+    lease: Object.freeze({ job_id: claim.job_id, token: claim.lease_token }),
   }
   return { ctx, abort: () => ac.abort() }
 }
