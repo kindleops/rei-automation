@@ -22,8 +22,10 @@
 //
 // Output: one row in public.conversation_ai_shadow_decisions (PROPOSED table) and a
 // job result of codes/counts only (agent.payload_is_clean). Nothing is sent.
-import { CONVERSATION_AI_SHADOW_ENV, CONVERSATION_DECIDE_KIND, conversationAiShadowRequested, decodeRef } from './conversation-ai-shadow-hook.js'
+import { CONVERSATION_AI_SHADOW_ENV, CONVERSATION_DECIDE_KIND, conversationAiShadowRequested, decodeRef, encodeRef } from './conversation-ai-shadow-hook.js'
 import { ModelCallRefused } from '@/lib/domain/conversation-ai/model-client.js'
+import { turnsRequested } from '@/lib/domain/conversation-ai/turns/turn-engine.js'
+import { createConversationTurnHandler, createConversationTurnSweepHandler, CONVERSATION_TURN_KIND, CONVERSATION_TURN_SWEEP_KIND } from './conversation-turn-handler.js'
 
 export { CONVERSATION_DECIDE_KIND }
 
@@ -79,16 +81,40 @@ export function runtimeJobTracker(ctx) {
 /**
  * @param {{ run?: Function }} [deps] run = runConversationAiShadowForInbound (injectable for tests)
  */
-export function createConversationDecideHandler({ run = null, env = process.env } = {}) {
+// rc-8.5.20 (Phase 1A): with AI_CONVERSATION_TURNS_ENABLED=true this job no longer decides the
+// inbound on the spot. It ROUTES the event deterministically (no model) into the turn engine: a
+// stop cancels the open turn immediately, a reply-worthy inbound opens / joins the thread's ONE
+// open turn at the planned 3–40 min delay, and the decision runs once, at the due time, in the
+// conversation.turn job. Turns OFF (default) ⇒ this handler behaves exactly as in 8.5.15.
+// A conversation change on a turn (event_kind state_change / failed_outbound_reply, turn_ref)
+// is routed the same way.
+export function createConversationDecideHandler({ run = null, env = process.env, route = null, routeChange = null, runtimeStore = null } = {}) {
   return Object.freeze({
     kind: CONVERSATION_DECIDE_KIND,
     async run(ctx) {
       const input = ctx.job.input || {}
+      if (turnsRequested(env) && (input.event_kind === 'state_change' || input.event_kind === 'failed_outbound_reply')) {
+        const turnId = typeof input.turn_ref === 'string' && input.turn_ref.length <= 160 ? decodeRef(input.turn_ref) : null
+        if (!turnId || !/^[0-9a-f-]{36}$/i.test(turnId)) return { result: { code: 'TURN_REF_INVALID' } }
+        await ctx.step('route', { progress: { step: 'route', steps_done: 0, steps_total: 1, pct: 0 } })
+        const fn = routeChange || (await import('./conversation-turn-wiring.js')).routeTurnChange
+        const rs = runtimeStore || (await (await import('@/lib/agent/runtime/runtime-service.js')).getVerifiedRuntimeStore(env))
+        const safe = (v) => (typeof v === 'string' && /^[a-z_]{1,60}$/.test(v) ? v : null)
+        const r = await fn({ turnId, kind: input.event_kind, change: safe(input.change), failureClass: safe(input.failure_class), runtimeStore: rs })
+        return { result: turnRouteResult(r) }
+      }
       const sid = typeof input.inbound_ref === 'string' && input.inbound_ref.length <= 320 ? decodeRef(input.inbound_ref) : null
       if (!sid) return { result: { code: 'INBOUND_REF_INVALID' } }
       const inboundVersion = typeof input.inbound_version === 'string' && /^[a-p]{16}$/.test(input.inbound_version) ? input.inbound_version : null
       const rev = typeof input.inbound_revision === 'string' ? Number(decodeRef(input.inbound_revision)) : 0
       const inboundRevision = Number.isInteger(rev) && rev > 0 && rev <= 999 ? rev : 0
+      if (turnsRequested(env)) {
+        await ctx.step('route', { progress: { step: 'route', steps_done: 0, steps_total: 1, pct: 0 } })
+        const fn = route || (await import('./conversation-turn-wiring.js')).routeInboundToTurn
+        const rs = runtimeStore || (await (await import('@/lib/agent/runtime/runtime-service.js')).getVerifiedRuntimeStore(env))
+        const r = await fn({ providerMessageSid: sid, inboundVersion, inboundRevision, deterministic: input.deterministic_intent ? { intent: input.deterministic_intent, compliance_flag: input.compliance_flag || null } : null, env, runtimeStore: rs })
+        return { result: turnRouteResult(r) }
+      }
       await ctx.step('decide', { progress: { step: 'decide', steps_done: 0, steps_total: 1, pct: 0 } })
       const exec = run || (await import('./conversation-ai-shadow-wiring.js')).runConversationAiShadowForInbound
       let r
@@ -122,10 +148,26 @@ export function createConversationDecideHandler({ run = null, env = process.env 
   })
 }
 
-/** {} unless the env gate is on — the tick then never claims this kind. */
+/** Codes / counts only (agent.payload_is_clean): the turn id is letter-encoded, never raw. */
+export function turnRouteResult(r = {}) {
+  const id = r?.turn_id ? encodeRef(String(r.turn_id)) : null
+  return {
+    code: r?.code || null, route: r?.route || null, event_type: r?.event_type || null, turn_ref: id,
+    turn_version: Number.isInteger(r?.version) ? r.version : null, delay_minutes: r?.plan?.since_inbound_minutes ?? null,
+    plan_reasons: Array.isArray(r?.plan?.reasons) ? r.plan.reasons.slice(0, 6) : [], cancelled: r?.cancelled ?? null,
+    job_deduped: r?.job ? Boolean(r.job.deduped) : null,
+  }
+}
+
+/** {} unless the env gate is on — the tick then never claims this kind. Turn kinds need BOTH flags. */
 export function conversationRuntimeHandlers(env = process.env) {
   if (!conversationAiShadowRequested(env)) return {}
-  return { [CONVERSATION_DECIDE_KIND]: createConversationDecideHandler({ env }) }
+  const handlers = { [CONVERSATION_DECIDE_KIND]: createConversationDecideHandler({ env }) }
+  if (turnsRequested(env)) {
+    handlers[CONVERSATION_TURN_KIND] = createConversationTurnHandler({ env, trackerFor: runtimeJobTracker })
+    handlers[CONVERSATION_TURN_SWEEP_KIND] = createConversationTurnSweepHandler({ env })
+  }
+  return handlers
 }
 
 export { CONVERSATION_AI_SHADOW_ENV }

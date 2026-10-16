@@ -194,6 +194,16 @@ export const MIGRATION_TESTS = Object.freeze([
     posttest: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_posttest.sql')],
     rollback: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_rollback.sql')],
   },
+  // ── rc-8.5.20 part A: durable consolidated reply turns + the delayed runtime enqueue ──
+  {
+    id: 'conversation_turns',
+    setup: [SHIM, DURABILITY, S3, RESEARCH, RUNTIME_PUBLIC_FIXTURE, RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET],
+    pretest: M('PROPOSED_20261016120000_conversation_turns_pretest.sql'),
+    apply: [M('PROPOSED_20261016120000_conversation_turns.sql')],
+    posttest: [M('PROPOSED_20261016120000_conversation_turns_posttest.sql')],
+    rollback: [M('PROPOSED_20261016120000_conversation_turns_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016120000_conversation_turns_rollback_posttest.sql')],
+  },
   // ── rc-8.5.20: the WHOLE release chain on ONE database, in production apply order ──
   // Each migration's own pretest runs immediately before it (interleaved fixtures); the
   // posttests run on the final state; the rollbacks run in reverse order and must restore

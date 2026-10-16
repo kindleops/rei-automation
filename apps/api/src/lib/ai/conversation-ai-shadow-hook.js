@@ -31,6 +31,7 @@
 // runtime gate (AGENT_ENABLED + AGENT_RUNTIME_ENABLED) — a job nothing would ever
 // claim is never enqueued — AND the DB arming (kind_limits.armed_by).
 import { createHash } from 'node:crypto'
+import { isStopRequest } from '@/lib/domain/conversation-ai/stop-request.js'
 
 export const CONVERSATION_AI_SHADOW_ENV = 'AI_CONVERSATION_SHADOW_ENABLED'
 export const CONVERSATION_DECIDE_KIND = 'conversation.decide'
@@ -97,11 +98,55 @@ export function scheduleConversationAiShadow(args = {}, { env = process.env, get
       const g = await (gate || runtimeGateOpen)(env)
       if (!g?.enabled) { log?.({ event: 'conversation_ai.enqueue_skipped', code: String(g?.reason || 'RUNTIME_OFF').toUpperCase() }); return }
       const store = getStore ? await getStore() : await (await import('@/lib/agent/runtime/runtime-service.js')).getVerifiedRuntimeStore(env)
-      const r = await store.enqueueEvent({ kind: CONVERSATION_DECIDE_KIND, event_key: conversationDecideEventKey(sid, version), input: conversationDecideInput({ providerMessageSid: sid, deterministic: args.deterministic, version, revision: args?.revision ?? 0 }), priority: 120 })
+      const r = await store.enqueueEvent({ kind: CONVERSATION_DECIDE_KIND, event_key: conversationDecideEventKey(sid, version), input: conversationDecideInput({ providerMessageSid: sid, deterministic: args.deterministic, version, revision: args?.revision ?? 0 }), priority: conversationDecidePriority(args) })
       log?.({ event: 'conversation_ai.enqueue', code: r?.ok ? (r.deduped ? 'DEDUPED' : 'ENQUEUED') : String(r?.reason || 'REFUSED').toUpperCase() })
     } catch (err) {
       log?.({ event: 'conversation_ai.enqueue_failed', code: err?.code || 'ENQUEUE_FAILED' })
     }
   })
   return { scheduled: true, code: 'SHADOW_ENQUEUE_SCHEDULED' }
+}
+
+/**
+ * rc-8.5.20: the runtime priority of a decide job (lower = claimed sooner). A stop request is
+ * claimed before anything else (its turn is cancelled immediately, no delay, no model).
+ */
+export function conversationDecidePriority({ messageBody = null, deterministic = null } = {}) {
+  const intent = String(deterministic?.intent || '')
+  if (isStopRequest(messageBody ?? '') || intent === 'opt_out' || intent === 'stop_texting' || deterministic?.compliance_flag === 'stop_texting') return 1
+  return 120
+}
+
+const TURN_CHANGE_KINDS = new Set(['state_change', 'failed_outbound_reply'])
+const SAFE_WORD = /^[a-z_]{1,60}$/
+
+/**
+ * rc-8.5.20 (Phase 1A): a CONVERSATION CHANGE on a turn becomes a conversation.decide event job
+ * (e.g. a queued AI reply that failed before reaching the provider, an operator taking the thread
+ * over, an offer recorded). Same gates as the inbound hook plus AI_CONVERSATION_TURNS_ENABLED;
+ * never throws, never awaited by the caller. Payload: the letter-encoded turn id and the change
+ * word only. Idempotent per (turn, kind, change, bucket).
+ * NOT CALLED by any existing path in this release (integration point for the send-failure and
+ * operator take-over paths).
+ */
+export function scheduleConversationTurnChange(args = {}, { env = process.env, getStore = null, gate = null, defer = (fn) => setImmediate(fn), log = null } = {}) {
+  if (!conversationAiShadowRequested(env) || String(env?.AI_CONVERSATION_TURNS_ENABLED ?? '').trim() !== 'true') return { scheduled: false, code: 'TURNS_ENV_OFF' }
+  const kind = String(args?.kind || '')
+  const turnId = String(args?.turnId || '').trim()
+  if (!TURN_CHANGE_KINDS.has(kind) || !/^[0-9a-f-]{36}$/i.test(turnId)) return { scheduled: false, code: 'TURN_CHANGE_INVALID' }
+  const change = SAFE_WORD.test(String(args?.change || '')) ? args.change : null
+  const failure = SAFE_WORD.test(String(args?.failureClass || '')) ? args.failureClass : null
+  const bucket = String(args?.bucket ?? '').replace(/[^a-z0-9_-]/gi, '').slice(0, 40)
+  defer(async () => {
+    try {
+      const g = await (gate || runtimeGateOpen)(env)
+      if (!g?.enabled) { log?.({ event: 'conversation_ai.turn_change_skipped', code: String(g?.reason || 'RUNTIME_OFF').toUpperCase() }); return }
+      const store = getStore ? await getStore() : await (await import('@/lib/agent/runtime/runtime-service.js')).getVerifiedRuntimeStore(env)
+      const r = await store.enqueueEvent({ kind: CONVERSATION_DECIDE_KIND, event_key: `turnchange:${turnId}:${kind}:${change || failure || 'none'}:${bucket}`, input: { event_kind: kind, turn_ref: encodeRef(turnId), change, failure_class: failure }, priority: kind === 'failed_outbound_reply' ? 30 : 20 })
+      log?.({ event: 'conversation_ai.turn_change_enqueue', code: r?.ok ? (r.deduped ? 'DEDUPED' : 'ENQUEUED') : String(r?.reason || 'REFUSED').toUpperCase() })
+    } catch (err) {
+      log?.({ event: 'conversation_ai.turn_change_failed', code: err?.code || 'ENQUEUE_FAILED' })
+    }
+  })
+  return { scheduled: true, code: 'TURN_CHANGE_ENQUEUE_SCHEDULED' }
 }

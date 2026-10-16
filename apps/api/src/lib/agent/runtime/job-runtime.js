@@ -111,6 +111,8 @@ export function createRuntimePgStore({ pool, statementTimeoutMs = 5000, lockTime
     },
     enqueue: (o) => call('select agent.runtime_enqueue($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9) r', [o.kind, o.idempotency_key, j(o.input || {}), o.requested_by, o.priority ?? 100, o.max_attempts ?? 3, o.budget_cap_usd ?? 0, Boolean(o.require_approval), o.not_before ?? null]),
     enqueueEvent: (o) => call('select agent.runtime_enqueue_event($1, $2, $3::jsonb, $4) r', [o.kind, o.event_key, j(o.input || {}), o.priority ?? 100]),
+    // rc-8.5.20: an event job that is due no earlier than not_before (PROPOSED_20261016120000_conversation_turns.sql)
+    enqueueEventAt: (o) => call('select agent.runtime_enqueue_event_at($1, $2, $3::jsonb, $4, $5::timestamptz) r', [o.kind, o.event_key, j(o.input || {}), o.priority ?? 100, o.not_before ?? null]),
     enqueueDueSchedules: ({ limit = 10 } = {}) => call('select agent.runtime_enqueue_due_schedules($1) r', [limit]),
     claim: ({ worker, limit = 1, kinds = null }) => call('select agent.runtime_claim($1, $2, $3::text[]) r', [worker, limit, kinds]),
     start: ({ job_id, token }) => call('select agent.runtime_start($1, $2::uuid) r', [job_id, token]),
@@ -215,6 +217,14 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
       const armed = lim.kind_limits?.[kind]?.armed_by
       if (!armed) return { ok: false, reason: 'kind_not_armed' }
       return enqueueCore({ kind, idempotency_key: crypto.createHash('sha256').update(`event:${kind}:${event_key}`).digest('hex'), input, requested_by: armed, trigger_kind: 'event', trigger_ref: `event:${kind}`, priority })
+    }),
+    enqueueEventAt: ({ kind, event_key, input = {}, priority = 100, not_before = null }) => serial(() => {
+      if (!event_key || String(event_key).length > 200) return { ok: false, reason: 'event_key_invalid' }
+      if (!not_before || !Number.isFinite(Date.parse(not_before))) return { ok: false, reason: 'not_before_required' }
+      if (Date.parse(not_before) > now() + 2 * 864e5) return { ok: false, reason: 'not_before_too_far' }
+      const armed = lim.kind_limits?.[kind]?.armed_by
+      if (!armed) return { ok: false, reason: 'kind_not_armed' }
+      return enqueueCore({ kind, idempotency_key: crypto.createHash('sha256').update(`event:${kind}:${event_key}`).digest('hex'), input, requested_by: armed, trigger_kind: 'event', trigger_ref: `event:${kind}`, priority, not_before })
     }),
     upsertSchedule: ({ name, kind, interval_seconds, created_by, input = {}, enabled = false, first_run_at = null, budget_cap_usd = 0 }) => serial(() => {
       let s = [...schedules.values()].find((x) => x.name === name)
