@@ -10,13 +10,19 @@
 //
 // Two doors, nothing else:
 //
-//   READ-ONLY DIAGNOSTICS — connectReadOnlyDiagnostics() / openReadOnlyPool()
-//     The connection string comes ONLY from the file named by LC_READONLY_DB_URL_FILE
-//     (absolute path, a regular file owned by you, mode 0600/0400, one postgres:// URL).
-//     Before any other statement the role is VERIFIED to be read-only by the database's
-//     own privilege system — not by a session setting:
-//       - current_user and every role it can SET ROLE to: not rolsuper, not rolbypassrls,
-//         not rolcreaterole / rolcreatedb / rolreplication
+//   READ-ONLY DIAGNOSTICS — loadReadOnly(purpose) / connectReadOnlyDiagnostics({ purpose })
+//                           / openReadOnlyPool({ purpose }) / resolveReadOnlyUrl({ purpose })
+//     There is no single broad diagnostics role (owner decision 2026-10-16): every caller
+//     names a PURPOSE from READONLY_PURPOSES (e.g. 'ops_diag'), and the connection string
+//     comes ONLY from that purpose's file, LC_RO_<PURPOSE>_DB_URL_FILE (absolute path, a
+//     regular file owned by you, mode 0600/0400, one postgres:// URL). An unknown purpose
+//     is refused. Before any other statement the role is VERIFIED to be read-only by the
+//     database's own privilege system — not by a session setting:
+//       - current_user and every role it can SET ROLE to: not rolsuper, not rolcreaterole /
+//         rolcreatedb / rolreplication, and not rolbypassrls — the login role may hold
+//         BYPASSRLS only when its purpose is explicitly allowlisted for it
+//         (READONLY_PURPOSES[p].allowBypassRls; none is today); a role reachable through
+//         SET ROLE never may
 //       - has_table_privilege(role, t, 'INSERT,UPDATE,DELETE,TRUNCATE') is false for
 //         every sentinel (public.send_queue, public.sms_templates, public.system_control,
 //         agent.runtime_limits when present); a required sentinel that is missing means
@@ -36,8 +42,8 @@
 // It never prints a password.
 //
 // CLI:
-//   node scripts/lib/prod-db-credentials.mjs verify-readonly
-//   node scripts/lib/prod-db-credentials.mjs psql [psql args…]                 (read-only role)
+//   node scripts/lib/prod-db-credentials.mjs verify-readonly <purpose>
+//   node scripts/lib/prod-db-credentials.mjs psql <purpose> [psql args…]       (read-only role)
 //   node scripts/lib/prod-db-credentials.mjs psql-write --prod-write=<ref> [psql args…]
 import fs from 'node:fs'
 import path from 'node:path'
@@ -45,9 +51,30 @@ import readline from 'node:readline'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-export const READONLY_URL_FILE_ENV = 'LC_READONLY_DB_URL_FILE'
 export const PROD_WRITE_URL_FILE_ENV = 'LC_PROD_WRITE_DB_URL_FILE'
 export const PROD_WRITE_FLAG = '--prod-write'
+
+/**
+ * Read-only PURPOSES. Each maps to its own credential file (LC_RO_<PURPOSE>_DB_URL_FILE) so
+ * each can be a purpose-specific least-privilege role. allowBypassRls lets that purpose's
+ * LOGIN role hold BYPASSRLS; it is false everywhere until the owner allowlists a purpose.
+ * Adding a purpose or flipping allowBypassRls is a reviewed code change, by design.
+ */
+export const READONLY_PURPOSES = Object.freeze({
+  ops_diag: Object.freeze({ description: 'queue / inbox / sender routing / follow-up / autopilot / safety diagnostics', allowBypassRls: false }),
+  entity_graph: Object.freeze({ description: 'Entity Graph probes, fixtures, captures and facts verification', allowBypassRls: false }),
+  market_intel: Object.freeze({ description: 'Market Intelligence service performance harness', allowBypassRls: false }),
+  seller_intel: Object.freeze({ description: 'seller-schema propagation and scoring comparisons', allowBypassRls: false }),
+  research_agent: Object.freeze({ description: 'read-only research agent local end-to-end proof', allowBypassRls: false }),
+})
+
+/** LC_RO_<PURPOSE>_DB_URL_FILE for a registered purpose; refuses anything else. */
+export function readOnlyUrlFileEnv(purpose) {
+  const p = String(purpose ?? '').trim()
+  if (!p) refuse(`a read-only PURPOSE is required (one of: ${Object.keys(READONLY_PURPOSES).join(', ')}) — there is no default diagnostics role`)
+  if (!Object.hasOwn(READONLY_PURPOSES, p)) refuse(`unknown read-only purpose ${JSON.stringify(p)} (registered: ${Object.keys(READONLY_PURPOSES).join(', ')})`)
+  return `LC_RO_${p.toUpperCase()}_DB_URL_FILE`
+}
 
 /** Tables a diagnostics role must never be able to write. `required: false` = checked when present. */
 export const READONLY_SENTINELS = Object.freeze([
@@ -59,9 +86,6 @@ export const READONLY_SENTINELS = Object.freeze([
 
 // Sources this loader refuses outright, whatever path points at them.
 const FORBIDDEN_URL_FILES = Object.freeze(['/tmp/.dburl', '/private/tmp/.dburl'])
-// Env names that must never be the source (and are never read here); an inline URL
-// variable is refused so nobody "helpfully" adds one.
-const INLINE_URL_ENVS = Object.freeze(['LC_READONLY_DB_URL', 'LC_PROD_WRITE_DB_URL'])
 const GENERIC_APPROVALS = new Set(['1', 'y', 'yes', 'true', 'ok', 'approved', 'go', 'owner', 'confirm'])
 
 export class CredentialRefusedError extends Error {
@@ -130,7 +154,9 @@ function isForbiddenPath(p) {
  * @returns {{ url: string, file: string, target: string }}
  */
 export function readUrlFile({ env = process.env, envName }) {
-  for (const k of INLINE_URL_ENVS) if (env[k]) refuse(`${k} is set: connection strings are never taken from the environment — store it in a 0600 file and point ${k}_FILE at it`)
+  // an inline URL variable next to the file variable is refused so nobody "helpfully" adds one
+  const inline = envName.replace(/_FILE$/, '')
+  if (env[inline]) refuse(`${inline} is set: connection strings are never taken from the environment — store it in a 0600 file and point ${envName} at it`)
   const file = String(env[envName] || '').trim()
   if (!file) refuse(`${envName} is not set (a path to a 0600 file holding one postgres:// URL)`)
   if (/^postgres(?:ql)?:\/\/|\b(?:host|user|password|dbname)\s*=/i.test(file)) refuse(`${envName} must be a FILE PATH, not an inline connection string`)
@@ -180,13 +206,17 @@ select current_user::text as current_user,
          where has_schema_privilege(r.oid, 'public', 'CREATE')) as public_create_by
 `
 
-/** Pure: turn the verification row into { ok, reasons }. */
-export function judgeReadOnly(row) {
+/**
+ * Pure: turn the verification row into { ok, reasons }. `allowBypassRls` (from the purpose)
+ * tolerates BYPASSRLS on the LOGIN role only — never on a role reachable via SET ROLE.
+ */
+export function judgeReadOnly(row, { allowBypassRls = false, purpose = null } = {}) {
   const reasons = []
   for (const r of row.roles || []) {
-    const via = r.role === row.current_user ? '' : ` (reachable via SET ROLE ${r.role})`
+    const self = r.role === row.current_user
+    const via = self ? '' : ` (reachable via SET ROLE ${r.role})`
     if (r.super) reasons.push(`role ${r.role} is a superuser${via}`)
-    if (r.bypassrls) reasons.push(`role ${r.role} has BYPASSRLS${via}`)
+    if (r.bypassrls && !(self && allowBypassRls)) reasons.push(`role ${r.role} has BYPASSRLS${via}${self && purpose ? ` and purpose ${purpose} is not allowlisted for BYPASSRLS` : ''}`)
     if (r.createrole) reasons.push(`role ${r.role} has CREATEROLE${via}`)
     if (r.createdb) reasons.push(`role ${r.role} has CREATEDB${via}`)
     if (r.replication) reasons.push(`role ${r.role} has REPLICATION${via}`)
@@ -203,10 +233,11 @@ export function judgeReadOnly(row) {
 }
 
 /** Run the verification on an open client. Throws CredentialRefusedError unless read-only. */
-export async function verifyRoleEnforcedReadOnly(client, { sentinels = READONLY_SENTINELS } = {}) {
+export async function verifyRoleEnforcedReadOnly(client, { sentinels = READONLY_SENTINELS, purpose = null } = {}) {
+  const spec = purpose ? READONLY_PURPOSES[purpose] : null
   const { rows } = await client.query(VERIFY_READONLY_SQL, [sentinels.map((s) => s.table), sentinels.map((s) => Boolean(s.required))])
-  const verdict = judgeReadOnly(rows[0])
-  if (!verdict.ok) refuse(`refused: the diagnostics credential (role ${verdict.role}) is not role-enforced read-only — ${verdict.reasons.join('; ')}. BEGIN READ ONLY does not make a writable credential acceptable; use a least-privilege read-only role.`, verdict)
+  const verdict = { ...judgeReadOnly(rows[0], { allowBypassRls: Boolean(spec?.allowBypassRls), purpose }), purpose }
+  if (!verdict.ok) refuse(`refused: the ${purpose ? `${purpose} ` : ''}diagnostics credential (role ${verdict.role}) is not role-enforced read-only — ${verdict.reasons.join('; ')}. BEGIN READ ONLY does not make a writable credential acceptable; use a least-privilege read-only role.`, verdict)
   return verdict
 }
 
@@ -216,23 +247,28 @@ async function loadPg(pg) {
   return mod.default || mod
 }
 
-function clientConfig(url, { applicationName, ssl }) {
+function clientConfig(url, { applicationName, ssl, types }) {
   const host = parsePgUrl(url).host
   return {
     connectionString: url,
     application_name: applicationName,
+    ...(types ? { types } : {}),
     ssl: ssl !== undefined ? ssl : isLocalHost(host) ? false : { rejectUnauthorized: false },
   }
 }
 
-async function connectVerified(cred, { pg, applicationName, statementTimeoutMs, ssl, sentinels }) {
+function readPurposeUrlFile(purpose, env) {
+  return readUrlFile({ env, envName: readOnlyUrlFileEnv(purpose) })
+}
+
+async function connectVerified(cred, { purpose, pg, applicationName, statementTimeoutMs, ssl, sentinels, types }) {
   const { Client } = await loadPg(pg)
-  const client = new Client(clientConfig(cred.url, { applicationName, ssl }))
+  const client = new Client(clientConfig(cred.url, { applicationName, ssl, types }))
   await client.connect()
   try {
-    const verdict = await verifyRoleEnforcedReadOnly(client, { sentinels })
+    const verdict = await verifyRoleEnforcedReadOnly(client, { sentinels, purpose })
     await client.query(`set default_transaction_read_only = on; set statement_timeout = ${statementTimeoutMs}`)
-    client.lcCredential = Object.freeze({ kind: 'readonly', target: cred.target, role: verdict.role })
+    client.lcCredential = Object.freeze({ kind: 'readonly', purpose, target: cred.target, role: verdict.role })
     return client
   } catch (e) {
     await client.end().catch(() => {})
@@ -243,37 +279,43 @@ async function connectVerified(cred, { pg, applicationName, statementTimeoutMs, 
 const timeoutMs = (v) => Math.max(1000, Math.floor(Number(v) || 30_000))
 
 /**
- * Open ONE verified read-only connection for diagnostics.
- * @param {{ env?: object, pg?: object, applicationName?: string, statementTimeoutMs?: number, ssl?: any, sentinels?: object[] }} [opts]
+ * Open ONE verified read-only connection for a registered purpose.
+ * @param {{ purpose: string, env?: object, pg?: object, applicationName?: string, statementTimeoutMs?: number, ssl?: any, sentinels?: object[], types?: object }} opts
  */
-export async function connectReadOnlyDiagnostics({ env = process.env, pg, applicationName = 'lc-readonly-diagnostics', statementTimeoutMs = 30_000, ssl, sentinels } = {}) {
-  const cred = readUrlFile({ env, envName: READONLY_URL_FILE_ENV })
-  return connectVerified(cred, { pg, applicationName, statementTimeoutMs: timeoutMs(statementTimeoutMs), ssl, sentinels })
+export async function connectReadOnlyDiagnostics({ purpose, env = process.env, pg, applicationName, statementTimeoutMs = 30_000, ssl, sentinels, types } = {}) {
+  const cred = readPurposeUrlFile(purpose, env)
+  return connectVerified(cred, { purpose, pg, applicationName: applicationName || `lc-ro-${purpose}`, statementTimeoutMs: timeoutMs(statementTimeoutMs), ssl, sentinels, types })
+}
+
+/** loadReadOnly('ops_diag', opts) — the same door, purpose first. */
+export function loadReadOnly(purpose, opts = {}) {
+  return connectReadOnlyDiagnostics({ ...opts, purpose })
 }
 
 /**
  * A pg.Pool for diagnostics: the credential is read once, its role verified on a probe
  * connection, and every pooled session starts default_transaction_read_only.
  */
-export async function openReadOnlyPool({ env = process.env, pg, applicationName = 'lc-readonly-diagnostics', statementTimeoutMs = 30_000, max = 4, ssl, sentinels } = {}) {
-  const cred = readUrlFile({ env, envName: READONLY_URL_FILE_ENV })
+export async function openReadOnlyPool({ purpose, env = process.env, pg, applicationName, statementTimeoutMs = 30_000, max = 4, ssl, sentinels, types } = {}) {
+  const cred = readPurposeUrlFile(purpose, env)
   const timeout = timeoutMs(statementTimeoutMs)
-  const probe = await connectVerified(cred, { pg, applicationName, statementTimeoutMs: timeout, ssl, sentinels })
+  applicationName ||= `lc-ro-${purpose}`
+  const probe = await connectVerified(cred, { purpose, pg, applicationName, statementTimeoutMs: timeout, ssl, sentinels })
   const meta = probe.lcCredential
   await probe.end()
   const { Pool } = await loadPg(pg)
-  const pool = new Pool({ ...clientConfig(cred.url, { applicationName, ssl }), max, options: `-c default_transaction_read_only=on -c statement_timeout=${timeout}` })
+  const pool = new Pool({ ...clientConfig(cred.url, { applicationName, ssl, types }), max, options: `-c default_transaction_read_only=on -c statement_timeout=${timeout}` })
   pool.lcCredential = meta
   return pool
 }
 
 /** The verified read-only URL, for a child process (psql). Verifies the role first. */
-export async function resolveReadOnlyUrl({ env = process.env, pg, sentinels } = {}) {
-  const cred = readUrlFile({ env, envName: READONLY_URL_FILE_ENV })
-  const probe = await connectVerified(cred, { pg, applicationName: 'lc-verify-readonly', statementTimeoutMs: 30_000, sentinels })
+export async function resolveReadOnlyUrl({ purpose, env = process.env, pg, sentinels } = {}) {
+  const cred = readPurposeUrlFile(purpose, env)
+  const probe = await connectVerified(cred, { purpose, pg, applicationName: `lc-verify-ro-${purpose}`, statementTimeoutMs: 30_000, sentinels })
   const meta = probe.lcCredential
   await probe.end()
-  return { url: cred.url, target: meta.target, role: meta.role }
+  return { url: cred.url, purpose, target: meta.target, role: meta.role }
 }
 
 // ── production writes ───────────────────────────────────────────────────────
@@ -338,7 +380,7 @@ export function psqlEnv(url, { env = process.env, readOnly }) {
   const out = {}
   for (const [k, v] of Object.entries(env)) {
     if (/^PG/.test(k)) continue
-    if (/^(SUPABASE_DB_URL|SUPABASE_URL_NO_POOL|SUPABASE_SERVICE_ROLE_KEY|DATABASE_URL|POSTGRES_URL\w*|DIRECT_URL|LC_READONLY_DB_URL_FILE|LC_PROD_WRITE_DB_URL_FILE)$/.test(k)) continue
+    if (/^(SUPABASE_DB_URL|SUPABASE_URL_NO_POOL|SUPABASE_SERVICE_ROLE_KEY|DATABASE_URL|POSTGRES_URL\w*|DIRECT_URL|LC_RO_\w+_DB_URL_FILE|LC_PROD_WRITE_DB_URL_FILE)$/.test(k)) continue
     out[k] = v
   }
   const p = parsePgUrl(url)
@@ -357,15 +399,17 @@ export function psqlEnv(url, { env = process.env, readOnly }) {
 async function cli(argv) {
   const [cmd, ...rest] = argv
   if (cmd === 'verify-readonly') {
-    const c = await connectReadOnlyDiagnostics({ applicationName: 'lc-verify-readonly' })
-    console.log(`read-only verified: role ${c.lcCredential.role} at ${c.lcCredential.target}`)
+    const [purpose] = rest
+    const c = await connectReadOnlyDiagnostics({ purpose, applicationName: `lc-verify-ro-${purpose}` })
+    console.log(`read-only verified: purpose ${purpose}, role ${c.lcCredential.role} at ${c.lcCredential.target}`)
     await c.end()
     return 0
   }
   if (cmd === 'psql') {
-    const { url, role, target } = await resolveReadOnlyUrl()
-    console.error(`read-only verified: role ${role} at ${target} (psql)`)
-    const r = spawnSync(process.env.LC_PSQL || 'psql', ['-X', ...rest], { stdio: 'inherit', env: psqlEnv(url, { readOnly: true }) })
+    const [purpose, ...args] = rest
+    const { url, role, target } = await resolveReadOnlyUrl({ purpose })
+    console.error(`read-only verified: purpose ${purpose}, role ${role} at ${target} (psql)`)
+    const r = spawnSync(process.env.LC_PSQL || 'psql', ['-X', ...args], { stdio: 'inherit', env: psqlEnv(url, { readOnly: true }) })
     return r.status ?? 1
   }
   if (cmd === 'psql-write') {
@@ -375,11 +419,13 @@ async function cli(argv) {
     const r = spawnSync(process.env.LC_PSQL || 'psql', ['-X', ...args], { stdio: 'inherit', env: { ...psqlEnv(w.url, { readOnly: false }), PGAPPNAME: `lc-prod-write:${w.approvalRef}`.slice(0, 63) } })
     return r.status ?? 1
   }
-  console.error('usage: prod-db-credentials.mjs verify-readonly | psql [psql args…] | psql-write --prod-write=<approval-ref> [psql args…]')
+  console.error(`usage: prod-db-credentials.mjs verify-readonly <purpose> | psql <purpose> [psql args…] | psql-write --prod-write=<approval-ref> [psql args…]\n  purposes: ${Object.keys(READONLY_PURPOSES).join(', ')}`)
   return 2
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// realpath: a symlinked checkout or tmp dir (/var → /private/var) must still count as "run directly"
+const isMain = (() => { try { return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)) } catch { return false } })()
+if (isMain) {
   cli(process.argv.slice(2)).then((code) => { process.exitCode = code }, (e) => {
     console.error(`prod-db-credentials: ${e.message}`)
     process.exitCode = e.code === 'LC_CREDENTIAL_REFUSED' ? 3 : 1
