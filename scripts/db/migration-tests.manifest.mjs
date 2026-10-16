@@ -168,6 +168,16 @@ export const MIGRATION_TESTS = Object.freeze([
     rollback: [M('PROPOSED_20261015191000_ai_operator_feedback_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261015191000_ai_operator_feedback_rollback_posttest.sql')],
   },
+  // ── 8.5.20-b ZIP acquisition intelligence + learning loop (independent of the agent chain) ──
+  {
+    id: 'zip_acquisition_intelligence',
+    setup: [SHIM],
+    pretest: M('PROPOSED_20261016100000_zip_acquisition_intelligence_pretest.sql'),
+    apply: [M('PROPOSED_20261016100000_zip_acquisition_intelligence.sql')],
+    posttest: [M('PROPOSED_20261016100000_zip_acquisition_intelligence_posttest.sql')],
+    rollback: [M('PROPOSED_20261016100000_zip_acquisition_intelligence_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016100000_zip_acquisition_intelligence_rollback_posttest.sql')],
+  },
   // ── asking-price guard: the 8.5.16 mirror of the live body, then the 8.5.15.1 replacement ──
   {
     id: 'block_repeat_asking_price_mirror',
