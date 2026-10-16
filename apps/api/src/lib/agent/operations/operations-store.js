@@ -13,6 +13,8 @@ import { ACTION_STATES } from './action-center.js'
 
 const SCOPE_OF_KIND = Object.freeze({ 'recovery.sweep': 'recovery', 'inbox.action_center': 'action_center', 'pipeline.reconcile': 'pipeline', 'ops.supervisor': 'supervisor' })
 const toIso = (v) => (v == null ? null : v instanceof Date ? v.toISOString() : String(v))
+/** the memory twin's work item id: deterministic from the dedupe key (uuid-shaped, never random) */
+const memoryItemId = (key) => { const h = crypto.createHash('sha256').update(String(key)).digest('hex'); return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}` }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function shapeState(r) {
@@ -165,7 +167,7 @@ export function createOperationsMemoryStore({ runtime = null, now = () => Date.n
         clean({ title: it.title, detail: it.detail })
         keys.add(it.dedupe_key)
         if (!cur) {
-          items.set(it.dedupe_key, { work_item_id: crypto.randomUUID(), scope, state: 'open', severity: 'info', escalated: false, detail: {}, priority: 0, ...it, first_seen_at: iso(), last_seen_at: iso(), seen_count: 1, source_job_id: job_id, resolved_at: null, resolved_by: null })
+          items.set(it.dedupe_key, { work_item_id: memoryItemId(it.dedupe_key), scope, state: 'open', severity: 'info', escalated: false, detail: {}, priority: 0, ...it, first_seen_at: iso(), last_seen_at: iso(), seen_count: 1, source_job_id: job_id, resolved_at: null, resolved_by: null })
           out.inserted += 1
         } else {
           const reopen = cur.state === 'resolved' && String(cur.resolved_by || '').startsWith('auto:')
