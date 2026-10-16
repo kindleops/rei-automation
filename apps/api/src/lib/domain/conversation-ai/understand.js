@@ -9,6 +9,23 @@
 //   4. Sonnet output is validated the same way; Sonnet gains NO send authority
 //      (ESCALATE_TO_SONNET from Sonnet ⇒ NEEDS_REVIEW)
 //   5. anything still invalid ⇒ fail closed to NEEDS_REVIEW
+//
+// THE ESCALATION POLICY (merged in rc-8.5.20 from 8.5.15 + 8.5.16; kept as is — review item e;
+// tests: conversation-ai-escalation-policy.test.mjs, conversation-ai-r1r2.test.mjs):
+//   REPAIR  an invalid Haiku answer gets ONE Haiku repair that is shown its validation errors
+//           (8.5.16). Repair valid ⇒ that decision continues; repair invalid ⇒ fail closed to
+//           NEEDS_REVIEW. Sonnet is never asked to fix an invalid answer (no candidate to improve).
+//   HOLD    a turn a human handles anyway is NOT sent to Sonnet: multiple properties / owners,
+//           financing, nonstandard deal, legal, complex negotiation with an offer on record, a
+//           non-English inbound or an offer request ("what's your offer?"). A REPLY_CANDIDATE on such
+//           a turn loses its draft and becomes NEEDS_REVIEW with escalation_required + the reason;
+//           a Haiku ESCALATE_TO_SONNET becomes NEEDS_REVIEW. Two seller asking prices more than 1.5×
+//           apart are a deterministic contradiction HOLD (escalation_reason 'contradiction').
+//   SONNET  only a Haiku REPLY_CANDIDATE with a remaining reason (the model's own escalation, a
+//           contradiction with the deterministic ledger) on a turn that is not human-bound. Sonnet
+//           gains no authority: its ESCALATE and any remaining ledger contradiction ⇒ NEEDS_REVIEW.
+//   The deterministic pre-check (stop, legal, eligibility, ownership denial, hostile) runs before
+//   all of it and is never overridden. Spend: every call reserves on the runtime job first.
 import { DECISION_JSON_SCHEMA, failClosedDecision, validateDecision } from './contract.js'
 import { deterministicPrecheck } from './precheck.js'
 import { SYSTEM_PROMPT, buildUserPrompt } from './prompts.js'
