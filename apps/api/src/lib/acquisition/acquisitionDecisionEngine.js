@@ -22,6 +22,7 @@ import { qualifyComps } from './transactionQualification.js';
 import { buildV3Decision } from './v3DecisionPipeline.js';
 import { loadV3CompCandidates } from './compCandidateLoader.js';
 import { MAD_MIN_OBSERVATIONS, readFeatureFlag } from './modelConstants.js';
+import { SFR_LANE_FLAG, isSfrSubject, sfrLaneCeiling } from './sfrLaneCeiling.js';
 
 /** market_status values that mean a live listing exists (so an MLS listing
  * price is legitimately expected evidence). Everything else -- notably
@@ -2906,7 +2907,7 @@ function calculateOwnerSituationPhase2({
   };
 }
 
-function offerCalculation(subject, valuation, investor, repairs, targetAssignmentFee) {
+function offerCalculation(subject, valuation, investor, repairs, targetAssignmentFee, { sfrLaneV1 = false } = {}) {
   if (!valuation.mid) {
     return {
       recommended_cash_offer: null,
@@ -2983,6 +2984,46 @@ function offerCalculation(subject, valuation, investor, repairs, targetAssignmen
   // opening offer may never leave less than it on the table.
   const protectedMarginCap = effectiveCeiling - marginPolicy.protected_margin;
   const offerBeforeRound = Math.min(marketAdjustedOffer, protectedMarginCap);
+  // 8.5.21-b, OFF BY DEFAULT (ACQUISITION_SFR_LANE_CEILING_V1): the single authoritative SFR lane —
+  // authoritative LLC investor cluster (capped at the as-is value) − 13 %, NO repairs (the as-is basis
+  // already reflects them), the assignment margin and closing costs inside that spread (no second margin
+  // deduction). sfrLaneCeiling.js carries the full trace. Flag off ⇒ this block never runs.
+  if (sfrLaneV1 && isSfrSubject(subject)) {
+    const lane = sfrLaneCeiling({ as_is_value: valuation.mid, investor_cluster_mid: behaviorCeiling, cluster_authoritative: buyerCeilingAuthority.authoritative, protected_margin: marginPolicy.protected_margin, repairs: repairs.amount });
+    const laneCeiling = lane.mao ?? 0;
+    const laneRecommended = Math.max(0, roundMoney(Math.min(laneCeiling, laneCeiling * (1 - confidenceHaircut - motivationDiscount + demandPremium))));
+    const laneMinimum = Math.max(0, roundMoney(laneRecommended - Math.max(5_000, valuation.mid * 0.03)));
+    const laneBasis = lane.basis ?? null;
+    return {
+      recommended_cash_offer: laneCeiling > 0 ? laneRecommended : null,
+      minimum_acceptable_offer: laneCeiling > 0 ? laneMinimum : null,
+      expected_assignment_fee: laneBasis != null && laneCeiling > 0 ? Math.max(0, roundMoney(laneBasis - laneRecommended)) : null,
+      effective_buyer_ceiling: roundMoney(laneCeiling),
+      summary: {
+        method: 'sfr_llc_investor_cluster_less_13pct',
+        lane_flag: SFR_LANE_FLAG,
+        sfr_lane: lane,
+        replaced_formula: { method: 'repair_adjusted_exit_ceiling_less_assignment_target', valuation_based_ceiling: roundMoney(valuationCeiling), effective_authorized_ceiling: roundMoney(effectiveCeiling), recommended_cash_offer: Math.max(0, roundMoney(offerBeforeRound)) },
+        valuation_based_ceiling: roundMoney(valuationCeiling),
+        behavior_based_ceiling: roundMoney(behaviorCeiling),
+        effective_buyer_ceiling: roundMoney(laneCeiling),
+        effective_authorized_ceiling: roundMoney(laneCeiling),
+        ceiling_basis: lane.mao != null ? 'sfr_lane_authoritative_investor_cluster' : `sfr_lane_unavailable:${lane.reason}`,
+        buyer_ceiling_authoritative: buyerCeilingAuthority.authoritative,
+        buyer_ceiling_reasons: buyerCeilingAuthority.reasons,
+        estimated_repairs: repairs.amount,
+        repairs_deducted: 0,
+        target_assignment_fee: dealTargetMargin,
+        assignment_margin_floor: marginPolicy.minimum_margin,
+        protected_margin: marginPolicy.protected_margin,
+        assignment_margin_policy: marginPolicy,
+        confidence_haircut_percent: round(confidenceHaircut * 100, 2),
+        motivation_discount_percent: round(motivationDiscount * 100, 2),
+        demand_premium_percent: round(demandPremium * 100, 2),
+        motivation,
+      },
+    };
+  }
   const recommended = Math.max(0, roundMoney(offerBeforeRound));
   const negotiationBand = Math.max(5_000, valuation.mid * 0.03);
   const minimum = Math.max(0, roundMoney(recommended - negotiationBand));
@@ -3235,7 +3276,7 @@ function determineDecisionTier({
   return { tier, reasons, hard_gate_checks: hardGateChecks, offer_sanity: offerSanity };
 }
 
-function scoreRowFromDecision(propertyId, decision, now = new Date()) {
+export function scoreRowFromDecision(propertyId, decision, now = new Date()) {
   return {
     property_id: clean(propertyId),
     valuation_low: decision.valuation.low,
@@ -3327,6 +3368,8 @@ export function calculateAcquisitionDecision({
   v3LoaderDiagnostics = null,
   // Read-only shadow analysis only. Defaults to ON; production never passes it.
   compIntegrityEnabled = true,
+  // 8.5.21-b SFR lane ceiling (owner decision pending): OFF unless ACQUISITION_SFR_LANE_CEILING_V1.
+  sfrLaneCeilingV1 = readFeatureFlag(SFR_LANE_FLAG),
 } = {}) {
   const subject =
     rawSubject?.asset_family
@@ -3420,6 +3463,7 @@ export function calculateAcquisitionDecision({
     investor,
     repairs,
     targetAssignmentFee,
+    { sfrLaneV1: sfrLaneCeilingV1 === true },
   );
   // Every downstream margin comparison must use the DEAL-SPECIFIC target the
   // offer was actually built against, not the global floor. Using the floor
@@ -3553,9 +3597,12 @@ export function calculateAcquisitionDecision({
         v3_market_value_classification: surfaced.market_value_classification,
       };
     }
-    offer.recommended_cash_offer = surfaced.recommended_cash_offer;
-    offer.minimum_acceptable_offer = surfaced.minimum_acceptable_offer;
-    offer.expected_assignment_fee = surfaced.expected_assignment_fee;
+    // 8.5.21-b: with the (off-by-default) SFR lane on, the lane's offer stands; V3's is kept for reference
+    if (offer.summary?.method !== 'sfr_llc_investor_cluster_less_13pct') {
+      offer.recommended_cash_offer = surfaced.recommended_cash_offer;
+      offer.minimum_acceptable_offer = surfaced.minimum_acceptable_offer;
+      offer.expected_assignment_fee = surfaced.expected_assignment_fee;
+    }
     offer.summary = { ...offer.summary, v3: surfaced.offer_summary };
   }
 
@@ -4209,6 +4256,7 @@ export async function scoreProperty(propertyId, deps = {}) {
     buyerPurchases,
     now,
     targetAssignmentFee,
+    sfrLaneCeilingV1: deps.sfrLaneCeilingV1,
     v3Enabled,
     v3CompCandidates: v3Loaded?.candidates ?? null,
     v3LoaderDiagnostics: v3Loaded?.diagnostics ?? null,
