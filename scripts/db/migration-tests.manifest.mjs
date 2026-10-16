@@ -35,6 +35,13 @@ const RUNTIME_PUBLIC_FIXTURE = {
         revoke all on public.system_control, public.send_queue from agent_api;`,
 }
 const SEND_QUEUE_BASELINE = 'scripts/db/fixtures/send_queue_live_baseline.sql'
+const KIND_LIMITS_FIX = M('PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql')
+const CONV_DECIDE_BUDGET = M('PROPOSED_20261013161000_conversation_decide_event_budget.sql')
+// ops_health_snapshot_delivery_ref reads max(public.send_queue.delivered_at)
+const SEND_QUEUE_DELIVERED_AT = {
+  name: 'public.send_queue.delivered_at (ops health fixture)',
+  sql: `alter table public.send_queue add column if not exists delivered_at timestamptz;`,
+}
 
 export const MIGRATION_TESTS = Object.freeze([
   {
@@ -79,18 +86,35 @@ export const MIGRATION_TESTS = Object.freeze([
     rollbackPosttest: [M('PROPOSED_20261013160000_conversation_ai_shadow_rollback_posttest.sql')],
   },
   {
+    id: 'runtime_kind_limits_event_budget',
+    // 8.5.15: agent.runtime_kind_limits_valid accepts event_budget_cap_usd (needed by
+    // conversation_decide_event_budget, which is applied after this fix)
+    setup: [SHIM, DURABILITY, S3, RESEARCH, RUNTIME_PUBLIC_FIXTURE, RUNTIME],
+    pretest: M('PROPOSED_20261014121000_runtime_kind_limits_event_budget_pretest.sql'),
+    apply: [KIND_LIMITS_FIX],
+    posttest: [M('PROPOSED_20261014121000_runtime_kind_limits_event_budget_posttest.sql')],
+    rollback: [M('PROPOSED_20261014121000_runtime_kind_limits_event_budget_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261014121000_runtime_kind_limits_event_budget_rollback_posttest.sql')],
+  },
+  {
     id: 'conversation_decide_event_budget',
     // The posttest arms event_budget_cap_usd, which agent.runtime_kind_limits_valid
     // (intel_runtime) refuses until PROPOSED_20261014121000_runtime_kind_limits_event_budget
-    // is applied — that fix is not on this release's base (6ecbae6b). Pre-existing: the
-    // original single-file pretest failed the same way here.
-    requires: 'PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql (setup)',
-    setup: [SHIM, DURABILITY, S3, RESEARCH, RUNTIME_PUBLIC_FIXTURE, RUNTIME],
+    // is applied — rc-8.5.20 carries that fix (8.5.15), so it is part of the setup.
+    setup: [SHIM, DURABILITY, S3, RESEARCH, RUNTIME_PUBLIC_FIXTURE, RUNTIME, KIND_LIMITS_FIX],
     pretest: M('PROPOSED_20261013161000_conversation_decide_event_budget_pretest.sql'),
-    apply: [M('PROPOSED_20261013161000_conversation_decide_event_budget.sql')],
+    apply: [CONV_DECIDE_BUDGET],
     posttest: [M('PROPOSED_20261013161000_conversation_decide_event_budget_posttest.sql')],
     rollback: [M('PROPOSED_20261013161000_conversation_decide_event_budget_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261013161000_conversation_decide_event_budget_rollback_posttest.sql')],
+  },
+  {
+    id: 'ops_health_snapshot_delivery_ref',
+    setup: [SHIM, DURABILITY, S3, RESEARCH, RUNTIME_PUBLIC_FIXTURE, SEND_QUEUE_DELIVERED_AT, RUNTIME],
+    pretest: M('PROPOSED_20261014150000_ops_health_snapshot_delivery_ref_pretest.sql'),
+    apply: [M('PROPOSED_20261014150000_ops_health_snapshot_delivery_ref.sql')],
+    posttest: [M('PROPOSED_20261014150000_ops_health_snapshot_delivery_ref_posttest.sql')],
+    rollback: [M('PROPOSED_20261014150000_ops_health_snapshot_delivery_ref_rollback.sql')],
   },
   {
     id: 'unlock_stale_jobs_status_predicate',

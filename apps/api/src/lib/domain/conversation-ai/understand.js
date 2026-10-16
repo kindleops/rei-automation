@@ -135,6 +135,12 @@ export async function understandInbound({ context, inboundText, inboundId, deter
       }
       if (priceContradiction) decision = { ...decision, outcome: 'NEEDS_REVIEW', proposed_message: null, escalation_required: true, escalation_reason: 'contradiction' }
       else if (!decision.escalation_required && why.some((w) => HUMAN_BOUND.has(w))) decision = { ...decision, escalation_required: true, escalation_reason: why.find((w) => HUMAN_BOUND.has(w)) }
+      // RC 8.5.20 (8.5.15 + 8.5.16): a candidate that must go to a human keeps no draft — the
+      // pipeline escalates it to an operator (decide.js) and the shadow records a hold
+      if (decision.outcome === 'REPLY_CANDIDATE' && decision.escalation_required) {
+        trace.escalation_withheld = [...new Set(why)]
+        decision = { ...decision, outcome: 'NEEDS_REVIEW', proposed_message: null }
+      }
       return { decision, calls, trace }
     }
   }

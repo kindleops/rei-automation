@@ -140,7 +140,16 @@ begin
   exception when check_violation then null;
   end;
 
-  -- agent_api reach: select yes, direct update no
+  -- agent_api reach: select yes, direct update no. Asserted from the privilege catalog + RLS
+  -- policies (rc-8.5.15 pretest v2, folded in by rc-8.5.20) AND behaviourally via SET ROLE
+  -- (disposable database only — production's applying role has no SET option on agent_api).
+  if not has_table_privilege('agent_api', 'agent.approval_request', 'SELECT') then raise exception 'assert: agent_api reads approvals (catalog)'; end if;
+  if not exists (select 1 from pg_policies where schemaname = 'agent' and tablename = 'approval_request' and policyname = 'agent_api_select' and 'agent_api' = any (roles) and cmd = 'SELECT') then
+    raise exception 'assert: agent_api SELECT policy on approval_request';
+  end if;
+  if has_table_privilege('agent_api', 'agent.approval_request', 'UPDATE') or exists (select 1 from pg_policies where schemaname = 'agent' and tablename = 'approval_request' and cmd in ('UPDATE','ALL','DELETE','INSERT')) then
+    raise exception 'assert: agent_api cannot update approvals directly (catalog)';
+  end if;
   set local role agent_api;
   if (select count(*) from agent.approval_request where approval_id = id1) <> 1 then raise exception 'assert: agent_api reads approvals'; end if;
   ok := false;
