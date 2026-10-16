@@ -13,7 +13,8 @@ import crypto from 'node:crypto'
 
 import { executeAiConversationReply, draftHash, R3_EXECUTOR_WIRED } from '../../src/lib/ai/conversation-ai-r3-executor.js'
 import { insertSupabaseSendQueueRow, normalizeSendQueueRow } from '../../src/lib/supabase/sms-engine.js'
-import { __resetIdempotencyLedgerTestDeps, beginIdempotentProcessing } from '../../src/lib/domain/events/idempotency-ledger.js'
+import { beginIdempotentProcessing } from '../../src/lib/domain/events/idempotency-ledger.js'
+import { resetMemoryIdempotencyLedger } from '../helpers/memory-idempotency-ledger.mjs'
 import { dryRunEligibility } from '../../src/lib/domain/conversation-ai/eligibility-bridge.js'
 import { makeDecision } from '../../src/lib/domain/conversation-ai/contract.js'
 import { DEFAULT_AI_SEND_POLICY, isOwnerHandledThread, OWNER_HANDLED_THREAD_SHA256, normalizeSendPolicy, AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, templateDeferVerdict } from '../../src/lib/domain/conversation-ai/send-policy.js'
@@ -129,7 +130,7 @@ const candidate = (decision = interestDecision(), over = {}) => ({
   inbound: { id: 'i1', provider_message_sid: 'SMfixture', thread_key: TK }, ...over,
 })
 
-test.beforeEach(() => __resetIdempotencyLedgerTestDeps())
+test.beforeEach(() => resetMemoryIdempotencyLedger())
 
 // ── defaults ────────────────────────────────────────────────────────────────
 test('defaults: everything OFF — no switch, no policy, executor unwired, template never defers', async () => {
@@ -347,7 +348,7 @@ test('no double reply: two parallel inbounds on one thread ⇒ ONE reply (stale 
   assert.equal(table.inserts.length, 1)
 
   // racing views: each loader read happened before the other inbound landed
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const t2 = makeTable()
   const wA = world({ thread: S1_THREAD() })
   const wB = world({ thread: [S1_THREAD()[0], msg('i2', 'inbound', 'Yes thats my house', 3)] })
@@ -393,7 +394,7 @@ test('held: out of scope, money, offers, Spanish, unknown language, multi-proper
   // 8.5.16 eval: a STATED price is not a money turn (owner flow S3 price → S4 condition); money is by INTENT
   const priced = await run(world({ thread: priceThread }), candidate(interestDecision({ intent: 'asking_price_provided', seller_interest: 'interested', next_objective: 'get_condition', proposed_message: "Got it. How's the condition of the property?", facts_extracted: [] })))
   assert.equal(priced.status, 'enqueued', JSON.stringify(priced.reasons))
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   // our own text with an amount is still a money turn
   const money = await run(world({ thread: priceThread }), candidate(interestDecision({ intent: 'asking_price_provided', seller_interest: 'interested', next_objective: 'get_condition', proposed_message: 'Got it, 175k. How is the condition?', facts_extracted: [] })))
   assert.equal(money.status, 'held')
@@ -411,7 +412,7 @@ test('held: out of scope, money, offers, Spanish, unknown language, multi-proper
   // 8.5.16 eval: a missing language with ENGLISH text is English; non-English text with no language stays unknown
   const inferred = await run(world({ thread: S1_THREAD(), language: null }), candidate())
   assert.ok(!inferred.reasons.some((x) => x.startsWith('excluded_language')), JSON.stringify(inferred.reasons))
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const unkThread = [S1_THREAD()[0], msg('i1', 'inbound', 'Ja, das gehört mir', 5)]
   const unk = await run(world({ thread: unkThread, language: null }), candidate())
   assert.ok(unk.reasons.includes('excluded_language:language_unknown'), JSON.stringify(unk.reasons))
@@ -434,7 +435,7 @@ test('routine categories: identity answer and the not-interested close (no quest
   const a = await executeAiConversationReply(candidate(idDec), deps({ w: world({ thread: idThread }) }).d)
   assert.equal(a.status, 'enqueued', JSON.stringify(a))
   assert.equal(a.category, 'identity_answer')
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const niThread = [msg('o1', 'outbound', 'Would you consider selling it?', 30, { use_case: 'consider_selling' }), msg('i1', 'inbound', 'not interested', 5)]
   const niDec = makeDecision({ intent: 'not_interested', seller_interest: 'not_interested', outcome: 'REPLY_CANDIDATE', next_objective: 'acknowledge', response_needed: true, proposed_message: 'No problem, thanks for the quick reply.', confidence: 0.95, source_message_ids: ['i1'] })
   const t = makeTable()
@@ -473,7 +474,7 @@ test('STOP between decision and send: blocked at enqueue (guard) and, when it la
   const r2 = await executeAiConversationReply(candidate(), deps({ w: w2 }).d)
   assert.equal(r2.status, 'stale_inbound')
   // STOP after enqueue: the row is in the queue; the existing send-time guard blocks it
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const w3 = world({ thread: S1_THREAD() })
   const { d, table } = deps({ w: w3 })
   assert.equal((await executeAiConversationReply(candidate(), d)).status, 'enqueued')
@@ -505,7 +506,7 @@ test('caps: 1 per seller per day and the global daily cap (atomic reservations)'
   assert.equal(r.status, 'held')
   assert.deepEqual(r.reasons, ['seller_daily_cap'])
   // global: a policy that tightens the cap to 2 ⇒ the third seller is held
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const sellers = ['+15555550111', '+15555550112', '+15555550113']
   const pol = JSON.stringify({ enabled: true, scope: { thread_keys: sellers }, limits: { max_per_day_global: 2 } })
   const table = makeTable()
@@ -562,7 +563,7 @@ test('repeat price ask: the ledger holds it before insert; if a read race hides 
   assert.equal(r.status, 'held')
   assert.ok(r.reasons.includes('ledger:already_asked:asking_price'), JSON.stringify(r.reasons))
   // read race: the loader saw no price ask, but a price-ask row is being sent right now
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const raceThread = [msg('o1', 'outbound', 'Would you consider selling it?', 40, { use_case: 'consider_selling' }), msg('i1', 'inbound', 'maybe', 5)]
   const table = makeTable()
   table.rows.push({ id: 'prior', thread_key: TK, queue_status: 'processing', use_case_template: 'seller_asking_price', queue_key: 'x' })

@@ -12,7 +12,7 @@ import { buildComposePrompt, checkComposedText } from '../../src/lib/domain/conv
 import { decideActions } from '../../src/lib/domain/conversation-ai/pipeline/decide.js'
 import { buildCanonicalLedger } from '../../src/lib/domain/conversation-ai/fact-ledger.js'
 import { executeAiConversationReply } from '../../src/lib/ai/conversation-ai-r3-executor.js'
-import { __resetIdempotencyLedgerTestDeps } from '../../src/lib/domain/events/idempotency-ledger.js'
+import { resetMemoryIdempotencyLedger } from '../helpers/memory-idempotency-ledger.mjs'
 import { makeDecision } from '../../src/lib/domain/conversation-ai/contract.js'
 import { AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY } from '../../src/lib/domain/conversation-ai/send-policy.js'
 import { insertSupabaseSendQueueRow } from '../../src/lib/supabase/sms-engine.js'
@@ -144,7 +144,7 @@ const identityCandidate = (text) => {
 }
 
 test('R3: the queue row carries the thread persona and sticky number; another name, a conflict or a moved number holds', async () => {
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const ok = executorDeps({ queueRows: [{ id: 'q0', ...sent() }], threadState: { our_number: OURS } })
   const r = await executeAiConversationReply(identityCandidate("This is Helen, I'm a local buyer. Would you consider selling it?"), ok.d)
   assert.equal(r.status, 'enqueued', JSON.stringify(r))
@@ -154,23 +154,23 @@ test('R3: the queue row carries the thread persona and sticky number; another na
   assert.equal(row.metadata.agent_persona, 'Helen')
   assert.deepEqual(row.metadata.persona_continuity, { version: 'conv-ai.persona-continuity.v1', persona_source: 'thread_established', sender_source: 'thread_sticky' })
 
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const other = executorDeps({ queueRows: [{ id: 'q0', ...sent() }] })
   const r2 = await executeAiConversationReply(identityCandidate("This is Mike, I'm a local buyer. Would you consider selling it?"), other.d)
   assert.deepEqual([r2.status, r2.reasons], ['held', ['persona:name_not_established']])
   assert.equal(other.inserts.length, 0)
 
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const conflict = executorDeps({ queueRows: [{ id: 'q0', ...sent() }, { id: 'q00', ...sent({ agent_name: 'Alex', message_body: 'Hi, this is Alex.' }) }] })
   const r3 = await executeAiConversationReply(identityCandidate("I'm a local buyer. Would you consider selling it?"), conflict.d)
   assert.deepEqual([r3.status, r3.reasons], ['held', ['continuity:persona_conflict']])
 
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const moved = executorDeps({ queueRows: [{ id: 'q0', ...sent() }], threadState: { our_number: OTHER } })
   const r4 = await executeAiConversationReply(identityCandidate("I'm a local buyer. Would you consider selling it?"), moved.d)
   assert.deepEqual([r4.status, r4.reasons], ['held', ['continuity:sender_number_mismatch']])
 
-  __resetIdempotencyLedgerTestDeps()
+  resetMemoryIdempotencyLedger()
   const denial = executorDeps({ queueRows: [{ id: 'q0', ...sent() }] })
   const r5 = await executeAiConversationReply(identityCandidate("I'm a real person, a local buyer. Would you consider selling it?"), denial.d)
   assert.equal(r5.status, 'held')
