@@ -111,7 +111,7 @@ export function createRuntimePgStore({ pool, statementTimeoutMs = 5000, lockTime
     },
     enqueue: (o) => call('select agent.runtime_enqueue($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9) r', [o.kind, o.idempotency_key, j(o.input || {}), o.requested_by, o.priority ?? 100, o.max_attempts ?? 3, o.budget_cap_usd ?? 0, Boolean(o.require_approval), o.not_before ?? null]),
     enqueueEvent: (o) => call('select agent.runtime_enqueue_event($1, $2, $3::jsonb, $4) r', [o.kind, o.event_key, j(o.input || {}), o.priority ?? 100]),
-    // rc-8.5.20: an event job that is due no earlier than not_before (PROPOSED_20261016120000_conversation_turns.sql)
+    // rc-8.5.20: an event job that is due no earlier than not_before (PROPOSED_20261016120000_conversation_reply_turns.sql)
     enqueueEventAt: (o) => call('select agent.runtime_enqueue_event_at($1, $2, $3::jsonb, $4, $5::timestamptz) r', [o.kind, o.event_key, j(o.input || {}), o.priority ?? 100, o.not_before ?? null]),
     enqueueDueSchedules: ({ limit = 10 } = {}) => call('select agent.runtime_enqueue_due_schedules($1) r', [limit]),
     claim: ({ worker, limit = 1, kinds = null }) => call('select agent.runtime_claim($1, $2, $3::text[]) r', [worker, limit, kinds]),

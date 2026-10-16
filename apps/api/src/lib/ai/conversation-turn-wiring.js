@@ -1,6 +1,6 @@
 // Composition root for the 24/7 conversation turn engine (rc-8.5.20). Loaded lazily, only when
 // AI_CONVERSATION_TURNS_ENABLED=true (and AI_CONVERSATION_SHADOW_ENABLED=true). The ONLY place the
-// turn engine meets a DB client and the runtime store. Writes: public.conversation_turns (turn
+// turn engine meets a DB client and the runtime store. Writes: public.conversation_reply_turns (turn
 // functions) and runtime jobs (agent.runtime_enqueue_event_at). It never sends: the decision at
 // the due time is the existing shadow decision (public.conversation_ai_shadow_decisions).
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
@@ -93,7 +93,7 @@ export function createShadowTurnDecider({ supabase = getDefaultSupabaseClient(),
  * the job payload.
  */
 export async function routeTurnChange({ turnId, kind, change = null, failureClass = null, supabase = getDefaultSupabaseClient(), runtimeStore, turnStore = null, now = new Date().toISOString() }) {
-  const rows = await rowsOrThrow(supabase.from('conversation_turns').select('thread_key').eq('turn_id', turnId).limit(1))
+  const rows = await rowsOrThrow(supabase.from('conversation_reply_turns').select('thread_key').eq('turn_id', turnId).limit(1))
   const tk = rows[0]?.thread_key
   if (!tk) return { code: 'TURN_NOT_FOUND' }
   const delayPolicy = await readDelayPolicy(supabase)

@@ -2,7 +2,7 @@
 // planner, deterministic event routing, turn consolidation (burst → one decision), stale-draft
 // invalidation, opt-out immediacy, one reply per turn, restart recovery. Memory stores here;
 // the SQL contract is proven on a disposable PG17 (conversation-ai-turns-pg.test.mjs and
-// scripts/db/run-migration-test.mjs --id conversation_turns).
+// scripts/db/run-migration-test.mjs --id conversation_reply_turns).
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'

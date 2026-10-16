@@ -1,7 +1,8 @@
 // rc-8.5.20 part A — the turn engine on a DISPOSABLE local PostgreSQL 17 (AGENT_PG_TEST_DB_URL;
 // skipped — reported, never vacuous — without it). Applied in order: research RO → R2 runtime →
 // kind_limits event budget → conversation.decide event budget → conversation turns
-// (PROPOSED_20261016120000). Parallel workers use separate connections. Nothing is sent.
+// (PROPOSED_20261016120000_conversation_reply_turns; the unrelated legacy
+// public.conversation_turns is modelled and must stay untouched). Parallel workers use separate connections. Nothing is sent.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -22,22 +23,42 @@ const PUBLIC_FIXTURE = `
   create table if not exists public.send_queue (id bigserial primary key, queue_status text, scheduled_for timestamptz, delivered_at timestamptz);
   revoke all on public.system_control, public.send_queue from agent_api;`
 const TZ = 'America/Chicago'
+const LEGACY_TURNS_FIXTURE = path.join(REPO_DIR, 'scripts/db/fixtures/legacy_conversation_turns_baseline.sql')
+const LEGACY_SHAPE_SQL = `select string_agg(format('%s %s %s', column_name, data_type, is_nullable), ',' order by column_name collate "C") shape
+                            from information_schema.columns where table_schema = 'public' and table_name = 'conversation_turns'`
 
 async function turnsDb() {
   const db = await freshDb()
   await runSqlFile(db.pool, SQL.researchPretest)
   await runSqlFile(db.pool, SQL.research)
   await db.pool.query(PUBLIC_FIXTURE)
+  // the UNRELATED legacy public.conversation_turns (phase-3) exists in production: model it
+  await runSqlFile(db.pool, LEGACY_TURNS_FIXTURE)
   await applyInTransaction(db.pool, SQL.runtime)
   await applyInTransaction(db.pool, MIG('PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql'))
   await applyInTransaction(db.pool, MIG('PROPOSED_20261013161000_conversation_decide_event_budget.sql'))
-  await applyInTransaction(db.pool, MIG('PROPOSED_20261016120000_conversation_turns.sql'))
+  await applyInTransaction(db.pool, MIG('PROPOSED_20261016120000_conversation_reply_turns.sql'))
   await db.pool.query(`update agent.runtime_limits set runtime_enabled = true, max_concurrency_global = 2, tick_max_jobs = 2, kind_limits = $1::jsonb where id = 1`,
     [JSON.stringify({ [CONVERSATION_TURN_KIND]: { enabled: true, max_concurrency: 2, armed_by: OP } })])
   return db
 }
 const sel = async (pool, sql, params = []) => (await pool.query(sql, params)).rows
 const iso = (d) => new Date(d).toISOString()
+
+test('PG turns: the engine writes public.conversation_reply_turns only — the legacy public.conversation_turns keeps its 10 columns and rows', { skip }, async () => {
+  const db = await turnsDb()
+  try {
+    const shape0 = (await sel(db.pool, LEGACY_SHAPE_SQL))[0].shape
+    assert.equal(shape0.split(',').length, 10, shape0)
+    const backend = createPgTurnStore(db.pool)
+    const past = iso(Date.now() - 60_000)
+    const r = await backend.open({ thread_key: '+15555550109', inbound_id: 'l1', inbound_at: iso(Date.now() - 120_000), due_at: past })
+    assert.equal((await sel(db.pool, `select count(*)::int n from public.conversation_reply_turns where turn_id = $1`, [r.turn_id]))[0].n, 1)
+    assert.equal((await backend.peekOpen('+15555550109')).turn_id, r.turn_id)
+    assert.equal((await sel(db.pool, LEGACY_SHAPE_SQL))[0].shape, shape0, 'legacy column set unchanged')
+    assert.equal((await sel(db.pool, 'select count(*)::int n from public.conversation_turns'))[0].n, 3, 'legacy rows untouched')
+  } finally { await db.drop() }
+})
 
 test('PG turns: one reply per turn under 8 parallel workers — one claim, one finalize, every member reserved exactly once', { skip }, async () => {
   const db = await turnsDb()
@@ -58,7 +79,7 @@ test('PG turns: one reply per turn under 8 parallel workers — one claim, one f
     assert.equal(decided.length, 1, 'exactly one worker decided')
     const res = await sel(db.pool, `select key, metadata->>'turn_id' t from public.idempotency_ledger where scope = 'inbound_reply' order by key`)
     assert.deepEqual(res.map((x) => [x.key, x.t]), [['m1', r.turn_id], ['m2', r.turn_id]])
-    assert.equal((await sel(db.pool, `select state from public.conversation_turns where turn_id = $1`, [r.turn_id]))[0].state, 'decided')
+    assert.equal((await sel(db.pool, `select state from public.conversation_reply_turns where turn_id = $1`, [r.turn_id]))[0].state, 'decided')
   } finally { await db.drop() }
 })
 
@@ -69,11 +90,11 @@ test('PG turns: 10 parallel inbounds of one seller ⇒ ONE turn at version 10 (a
     const past = iso(Date.now() - 60_000)
     const outs = await Promise.all(pools.map((pool, i) => createPgTurnStore(pool).open({ thread_key: '+15555550102', inbound_id: `b${i}`, inbound_at: iso(Date.now() - 100_000 + i * 1000), due_at: past })))
     assert.equal(new Set(outs.map((o) => o.turn_id)).size, 1)
-    const row = (await sel(db.pool, `select version, cardinality(inbound_ids) n from public.conversation_turns where thread_key = '+15555550102'`))
+    const row = (await sel(db.pool, `select version, cardinality(inbound_ids) n from public.conversation_reply_turns where thread_key = '+15555550102'`))
     assert.deepEqual(row, [{ version: 10, n: 10 }])
     // duplicate deliveries of the same inbound in parallel: no version bump
     await Promise.all(pools.slice(0, 5).map((pool) => createPgTurnStore(pool).open({ thread_key: '+15555550102', inbound_id: 'b3', inbound_at: past, due_at: past })))
-    assert.equal((await sel(db.pool, `select version from public.conversation_turns where thread_key = '+15555550102'`))[0].version, 10)
+    assert.equal((await sel(db.pool, `select version from public.conversation_reply_turns where thread_key = '+15555550102'`))[0].version, 10)
 
     // race: the template path claims ONE member through the existing idempotency_begin while the turn finalizes
     const store = createPgTurnStore(db.pool)
@@ -110,33 +131,33 @@ test('PG turns: restart recovery — the job row IS the schedule (not claimable 
 
     // "restart": every pool and store is replaced; the clock moves past due (simulated on the rows)
     await db.pool.query(`update agent.research_job set next_attempt_at = now() - interval '1 second' where kind = $1`, [CONVERSATION_TURN_KIND])
-    await db.pool.query(`update public.conversation_turns set due_at = now() - interval '1 second'`)
+    await db.pool.query(`update public.conversation_reply_turns set due_at = now() - interval '1 second'`)
     backend = createPgTurnStore(db.trackPool(new pg.Pool({ connectionString: db.url, max: 2 })))
     runtime = createRuntimePgStore({ pool: db.newPool(2) })
     const s = await runRuntimeTick({ store: runtime, handlers: handlers(), workerId: 'w2', budgetMs: 5000 })
     assert.equal(s.claimed, 1)
     assert.deepEqual(decided, [1])
-    assert.equal((await sel(db.pool, `select state from public.conversation_turns where thread_key = '+15555550103'`))[0].state, 'decided')
+    assert.equal((await sel(db.pool, `select state from public.conversation_reply_turns where thread_key = '+15555550103'`))[0].state, 'decided')
     const s2 = await runRuntimeTick({ store: runtime, handlers: handlers(), workerId: 'w2', budgetMs: 5000 })
     assert.equal(s2.claimed, 0, 'decided once; nothing left')
 
     // a lost enqueue: the turn row exists, no job — the sweep re-enqueues, the tick decides
     const lost = await handleConversationEvent({ event: { kind: 'inbound', thread_key: '+15555550104', inbound: { id: 'd1', at: now, body: 'yes' } }, store: backend, enqueueAt: async () => ({ ok: false, reason: 'enqueue_lost' }), planArgs: { timezone: TZ }, now })
     assert.equal(lost.job.ok, false)
-    await db.pool.query(`update public.conversation_turns set due_at = now() - interval '5 minutes' where thread_key = '+15555550104'`)
+    await db.pool.query(`update public.conversation_reply_turns set due_at = now() - interval '5 minutes' where thread_key = '+15555550104'`)
     const rec = await recoverDueTurns({ store: backend, enqueueAt: (o) => runtime.enqueueEventAt(o), now: iso(Date.now()) })
     assert.deepEqual([rec.due, rec.enqueued], [1, 1])
     const again = await recoverDueTurns({ store: backend, enqueueAt: (o) => runtime.enqueueEventAt(o), now: iso(Date.now()) })
     assert.equal(again.deduped + again.enqueued, 1)
     await runRuntimeTick({ store: runtime, handlers: handlers(), workerId: 'w3', budgetMs: 5000 })
-    assert.equal((await sel(db.pool, `select state from public.conversation_turns where thread_key = '+15555550104'`))[0].state, 'decided')
+    assert.equal((await sel(db.pool, `select state from public.conversation_reply_turns where thread_key = '+15555550104'`))[0].state, 'decided')
     assert.deepEqual(decided, [1, 1])
     // a stop request cancels the open turn immediately, no job
     const t = await handleConversationEvent({ event: { kind: 'inbound', thread_key: '+15555550105', inbound: { id: 'e1', at: now, body: 'yes' } }, store: backend, enqueueAt: (o) => runtime.enqueueEventAt(o), planArgs: { timezone: TZ }, now })
     const before = (await sel(db.pool, `select count(*)::int n from agent.research_job where kind = $1`, [CONVERSATION_TURN_KIND]))[0].n
     const stop = await handleConversationEvent({ event: { kind: 'inbound', thread_key: '+15555550105', inbound: { id: 'e2', at: now, body: 'STOP' } }, store: backend, enqueueAt: (o) => runtime.enqueueEventAt(o), planArgs: { timezone: TZ }, now })
     assert.deepEqual([stop.code, stop.cancelled], ['SUPPRESSED_NOW', 1])
-    assert.equal((await sel(db.pool, `select state from public.conversation_turns where turn_id = $1`, [t.turn_id]))[0].state, 'cancelled')
+    assert.equal((await sel(db.pool, `select state from public.conversation_reply_turns where turn_id = $1`, [t.turn_id]))[0].state, 'cancelled')
     assert.equal((await sel(db.pool, `select count(*)::int n from agent.research_job where kind = $1`, [CONVERSATION_TURN_KIND]))[0].n, before)
     assert.equal((await sel(db.pool, 'select count(*)::int n from public.send_queue'))[0].n, 0, 'nothing queued, nothing sent')
   } finally { await db.drop() }

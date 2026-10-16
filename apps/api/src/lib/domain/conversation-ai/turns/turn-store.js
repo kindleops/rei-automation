@@ -1,5 +1,5 @@
 // TURN STORE (rc-8.5.20). The durable record of every reply turn lives in
-// public.conversation_turns (PROPOSED_20261016120000_conversation_turns.sql); every state change
+// public.conversation_reply_turns (PROPOSED_20261016120000_conversation_reply_turns.sql); every state change
 // is ONE SQL function call, so the invariants (one open turn per thread, version-checked claims,
 // stale-draft refusal, the all-or-none inbound_reply reservation) hold across processes and
 // restarts. Three adapters over the same function contract:
@@ -11,25 +11,25 @@
 export const TURN_STORE_VERSION = 'conv-ai.turn-store.v1'
 
 const ARGS = Object.freeze({
-  conversation_turn_open: ['p_thread_key', 'p_inbound_id', 'p_inbound_at', 'p_due_at', 'p_plan', 'p_persona_name', 'p_sender_number'],
-  conversation_turn_claim: ['p_turn_id', 'p_version', 'p_worker', 'p_lease_seconds'],
-  conversation_turn_finalize: ['p_turn_id', 'p_token', 'p_version', 'p_outcome', 'p_result', 'p_reserve', 'p_reply_origin'],
-  conversation_turn_cancel: ['p_thread_key', 'p_reason'],
-  conversation_turn_reopen: ['p_turn_id', 'p_reason', 'p_due_at', 'p_plan'],
-  conversation_turn_due: ['p_limit', 'p_grace_seconds'],
+  conversation_reply_turn_open: ['p_thread_key', 'p_inbound_id', 'p_inbound_at', 'p_due_at', 'p_plan', 'p_persona_name', 'p_sender_number'],
+  conversation_reply_turn_claim: ['p_turn_id', 'p_version', 'p_worker', 'p_lease_seconds'],
+  conversation_reply_turn_finalize: ['p_turn_id', 'p_token', 'p_version', 'p_outcome', 'p_result', 'p_reserve', 'p_reply_origin'],
+  conversation_reply_turn_cancel: ['p_thread_key', 'p_reason'],
+  conversation_reply_turn_reopen: ['p_turn_id', 'p_reason', 'p_due_at', 'p_plan'],
+  conversation_reply_turn_due: ['p_limit', 'p_grace_seconds'],
 })
 
 function storeOver(call) {
   return {
     version: TURN_STORE_VERSION,
     open: ({ thread_key, inbound_id, inbound_at, due_at, plan = {}, persona_name = null, sender_number = null }) =>
-      call('conversation_turn_open', { p_thread_key: thread_key, p_inbound_id: String(inbound_id), p_inbound_at: inbound_at, p_due_at: due_at, p_plan: plan, p_persona_name: persona_name, p_sender_number: sender_number }),
-    claim: ({ turn_id, version, worker, lease_seconds = 120 }) => call('conversation_turn_claim', { p_turn_id: turn_id, p_version: version, p_worker: worker, p_lease_seconds: lease_seconds }),
+      call('conversation_reply_turn_open', { p_thread_key: thread_key, p_inbound_id: String(inbound_id), p_inbound_at: inbound_at, p_due_at: due_at, p_plan: plan, p_persona_name: persona_name, p_sender_number: sender_number }),
+    claim: ({ turn_id, version, worker, lease_seconds = 120 }) => call('conversation_reply_turn_claim', { p_turn_id: turn_id, p_version: version, p_worker: worker, p_lease_seconds: lease_seconds }),
     finalize: ({ turn_id, token, version, outcome, result = null, reserve = false, reply_origin = null }) =>
-      call('conversation_turn_finalize', { p_turn_id: turn_id, p_token: token, p_version: version, p_outcome: outcome, p_result: result, p_reserve: reserve, p_reply_origin: reply_origin }),
-    cancel: ({ thread_key, reason }) => call('conversation_turn_cancel', { p_thread_key: thread_key, p_reason: reason }),
-    reopen: ({ turn_id, reason, due_at, plan = {} }) => call('conversation_turn_reopen', { p_turn_id: turn_id, p_reason: reason, p_due_at: due_at, p_plan: plan }),
-    due: ({ limit = 50, grace_seconds = 60 } = {}) => call('conversation_turn_due', { p_limit: limit, p_grace_seconds: grace_seconds }),
+      call('conversation_reply_turn_finalize', { p_turn_id: turn_id, p_token: token, p_version: version, p_outcome: outcome, p_result: result, p_reserve: reserve, p_reply_origin: reply_origin }),
+    cancel: ({ thread_key, reason }) => call('conversation_reply_turn_cancel', { p_thread_key: thread_key, p_reason: reason }),
+    reopen: ({ turn_id, reason, due_at, plan = {} }) => call('conversation_reply_turn_reopen', { p_turn_id: turn_id, p_reason: reason, p_due_at: due_at, p_plan: plan }),
+    due: ({ limit = 50, grace_seconds = 60 } = {}) => call('conversation_reply_turn_due', { p_limit: limit, p_grace_seconds: grace_seconds }),
   }
 }
 
@@ -43,7 +43,7 @@ export function createSupabaseTurnStore(supabase) {
   })
   /** The thread's open turn (read-only), or null. */
   store.peekOpen = async (thread_key) => {
-    const r = await supabase.from('conversation_turns').select(OPEN_COLUMNS).eq('thread_key', thread_key).in('state', ['pending', 'claimed']).limit(1)
+    const r = await supabase.from('conversation_reply_turns').select(OPEN_COLUMNS).eq('thread_key', thread_key).in('state', ['pending', 'claimed']).limit(1)
     if (r?.error) throw Object.assign(new Error('TURN_STORE_FAILED'), { code: 'TURN_STORE_FAILED', fn: 'peekOpen' })
     return r?.data?.[0] || null
   }
@@ -60,7 +60,7 @@ export function createPgTurnStore(pool) {
     const r = await pool.query(`select public.${fn}(${names.map((k, i) => `${k} => $${i + 1}`).join(', ')}) r`, vals)
     return r.rows[0].r
   })
-  store.peekOpen = async (thread_key) => (await pool.query(`select ${OPEN_COLUMNS} from public.conversation_turns where thread_key = $1 and state in ('pending','claimed') limit 1`, [thread_key])).rows[0] || null
+  store.peekOpen = async (thread_key) => (await pool.query(`select ${OPEN_COLUMNS} from public.conversation_reply_turns where thread_key = $1 and state in ('pending','claimed') limit 1`, [thread_key])).rows[0] || null
   return store
 }
 
