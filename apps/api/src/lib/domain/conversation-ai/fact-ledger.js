@@ -31,6 +31,7 @@
 import { buildFactLedger, mergeModelFacts } from './facts.js'
 import { isDeflectionToOffer, isPriceNonAnswer, questionKindOf } from './questions.js'
 import { isStopRequest } from './stop-request.js'
+import { bareNoAnswer } from './answers.js'
 
 export const FACT_LEDGER_VERSION = 'conv-ai.fact-ledger.v1'
 
@@ -54,7 +55,6 @@ const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|
 const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
 const NOT_INTERESTED_RE = /\b(?:not\s+interested|no\s+thanks?|no\s+thank\s+you|not\s+(?:selling|for\s+sale)|(?:don'?t|do\s+not)\s+want\s+to\s+sell|not\s+looking\s+to\s+sell|never\s+selling)\b/i
 const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|correct|i\s+do|ok(?:ay)?|si|sí)\s*[.!]*\s*$/i
-const BARE_NO_RE = /^\s*(?:no|nope|nah)\s*[.!]*\s*$/i
 const BARE_MAYBE_RE = /^\s*(?:maybe|possibly|perhaps|depends|it\s+depends|could\s+be|might\s+be|not\s+sure)\s*[.!?]*\s*$/i
 const CONDITION_RE = /\b(?:roof|hvac|a\/?c\b|furnace|foundation|plumbing|electrical|needs?\s+(?:some\s+|a\s+lot\s+of\s+)?(?:work|repairs?|updating|tlc)|repairs?|fixer(?:[\s-]upper)?|(?:good|great|fair|rough|bad|poor|decent|excellent)\s+(?:shape|condition)|move[\s-]?in\s+ready|(?:fully\s+)?(?:updated|remodeled|renovated)|as[\s-]is|turnkey)\b/i
 const TIMELINE_RE = /\b(?:close|closing|sell|selling|move|moving|be\s+out|out|done|wrap\s+(?:it\s+)?up)\s+(?:by|before|in|within|after|around|at)\s+(?:the\s+)?(?:end\s+of\s+|beginning\s+of\s+|mid[\s-]?)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter|christmas|thanksgiving|the\s+holidays|(?:this|next)\s+(?:week|month|year|spring|summer|fall|winter)|[0-9]+\s+(?:days?|weeks?|months?)|a\s+(?:week|month|few\s+(?:weeks|months)))\b|\b(?:asap|as\s+soon\s+as\s+possible|no\s+rush|whenever)\b/i
@@ -162,7 +162,8 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     else if (OWN_DENY_RE.test(body)) addFact(facts, 'ownership', 'denied', m)
     else if (OWN_FORMER_RE.test(body)) addFact(facts, 'ownership', 'former_owner', m)
     else if (OWN_CONFIRM_RE.test(body) || (lastAsked === 'ownership' && BARE_YES_RE.test(body))) addFact(facts, 'ownership', 'confirmed', m)
-    else if (lastAsked === 'ownership' && BARE_NO_RE.test(body)) addFact(facts, 'ownership', 'denied', m)
+    // rc-8.5.20: the shared matcher ("Not really", "No!!!", "Nope"); a polite "No thanks" or an emoji reply is not a denial
+    else if (lastAsked === 'ownership' && bareNoAnswer(body).ownership_denial) addFact(facts, 'ownership', 'denied', m)
     if (REPRESENTATIVE_INTENTS.has(intent) || REPRESENTATIVE_RE.test(body)) {
       addFact(facts, 'representative', intent || 'representative', m)
       // a representative answers the ownership question for the owner (never "denied")
@@ -172,7 +173,7 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     if (INTEREST_INTENTS[intent]) addFact(facts, 'seller_interest', INTEREST_INTENTS[intent], m)
     else if (NOT_INTERESTED_RE.test(body)) addFact(facts, 'seller_interest', 'not_interested', m)
     else if (lastAsked === 'interest' && BARE_YES_RE.test(body)) addFact(facts, 'seller_interest', 'interested', m)
-    else if (lastAsked === 'interest' && BARE_NO_RE.test(body)) addFact(facts, 'seller_interest', 'not_interested', m)
+    else if (lastAsked === 'interest' && bareNoAnswer(body).matched) addFact(facts, 'seller_interest', 'not_interested', m)
     else if (lastAsked === 'interest' && BARE_MAYBE_RE.test(body)) addFact(facts, 'seller_interest', 'conditional', m)
     // timeline (beyond the extractor): "close before November", "move in 30 days", "asap"
     const tl = TIMELINE_RE.exec(body)
@@ -249,7 +250,42 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
   ledger.stage = deriveLedgerStage(ledger)
   ledger.next_missing = nextMissingFact(ledger)
   ledger.follow_up = followUpEligibility(ledger)
+  // rc-8.5.20 (review a): the SAME facts in the facts.js { key: { current, history } } shape,
+  // for the 8.5.19 negotiation / economics consumers (ledger.js factLedgerOf). Non-enumerable:
+  // the canonical object's own shape is unchanged.
+  Object.defineProperty(ledger, 'fact_ledger', { value: legacyFactLedgerView(base, facts), enumerable: false })
   return ledger
+}
+
+// coarse walked values ({ disclosed: true }, { stated: … }) never hide the extractor's richer
+// value from the SAME seller message (condition / repairs detail, the timeline parse)
+const isCoarse = (v) => v && typeof v === 'object' && (('disclosed' in v && Object.keys(v).length === 1) || ('stated' in v && Object.keys(v).length === 1))
+
+/**
+ * The canonical facts in the facts.js shape. Base = the extractor ledger the canonical ledger was
+ * seeded from (record-derived facts included); every canonical fact is overlaid as the CURRENT
+ * value (latest seller statement by time, the same value the pipeline reads), its walked entries
+ * appended to history with their source message ids.
+ */
+export function legacyFactLedgerView(base = {}, facts = {}) {
+  const out = structuredClone(base || {})
+  for (const [key, slot] of Object.entries(facts || {})) {
+    const hist = slot.history || []
+    if (!hist.length) continue
+    const last = hist[hist.length - 1]
+    const s = (out[key] ||= { current: null, history: [] })
+    const baseCur = s.current
+    const value = baseCur && baseCur.origin !== 'record_derived' && baseCur.source_message_id === last.source_message_id && isCoarse(slot.value) ? baseCur.value : slot.value
+    for (const h of hist) {
+      if (!s.history.some((x) => x.source_message_id === h.source_message_id && JSON.stringify(x.value) === JSON.stringify(h.value))) {
+        s.history.push({ value: h.value, origin: h.origin, source_message_id: h.source_message_id, at: h.at, confidence: h.confidence })
+      }
+    }
+    s.history.sort((a, b) => (Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0))
+    s.current = { value, origin: last.origin, source_message_id: last.source_message_id, at: last.at, confidence: last.confidence, basis: last.basis }
+    if (baseCur?.corrects && baseCur.source_message_id === last.source_message_id) s.current.corrects = baseCur.corrects
+  }
+  return out
 }
 
 const factValue = (ledger, key) => ledger?.facts?.[key]?.value ?? null

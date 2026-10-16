@@ -8,7 +8,7 @@
 //                 scheduled text no longer fits — R2 composes a new draft in shadow
 //
 // Pure. Shadow verdicts only; nothing here cancels, holds or sends a queue row.
-import { buildFactLedger } from './facts.js'
+import { buildThreadLedger, factLedgerOf } from './ledger.js'
 import { blockedQuestionKinds, questionKindOf, questionLedger } from './questions.js'
 import { deriveStageEvidence } from './context-builder.js'
 
@@ -36,7 +36,8 @@ export function reevaluateFollowUp({ followup, thread = [], now }) {
   const upTo = thread.filter((m) => t(m.at) <= nowMs)
   const inbound = upTo.filter((m) => m.direction === 'inbound')
   const since = inbound.filter((m) => t(m.at) > t(followup.created_at))
-  const facts = buildFactLedger({ inbound: inbound.map((m) => ({ id: m.id, body: m.body, at: m.at, intent: m.intent })), now })
+  // rc-8.5.20: the canonical thread ledger (ledger.js), the same facts every consumer reads
+  const facts = factLedgerOf(buildThreadLedger({ messages: upTo.map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.at, use_case: m.use_case || null, intent: m.intent || null })), now }))
   const ledger = questionLedger(upTo, facts)
   const blocked = blockedQuestionKinds(ledger)
   const stage = deriveStageEvidence({ facts, ledger, offers: [] })

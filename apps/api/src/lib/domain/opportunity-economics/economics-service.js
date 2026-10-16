@@ -10,14 +10,14 @@
 //                                   until the engine is rerun through ensurePropertyAcquisitionDecision)
 //   buyer demand                    the score row (buyer_demand_score / liquidity_score) and,
 //                                   when injected, deal_market_demand (read-only RPC) investor counts
-//   seller facts                    the conversation-ai FACT LEDGER (buildFactLedger / factSummary);
+//   seller facts                    the conversation-ai canonical thread ledger (ledger.js factLedgerOf / factSummaryOf);
 //                                   the engine-input facts of record (acquisition_opportunities
 //                                   .metadata.seller_facts, what persist-seller-transition hands the
 //                                   engine) complete the freshness stamp, with the ledger's ask on top
 //
 // A missing source is reported in uncertainty.missing; it never becomes a guess.
 import { buildDecisionInputStamp, evaluateDecisionFreshness, MATERIAL_PROPERTY_FIELDS } from '../../acquisition/decisionAuthority.js'
-import { factSummary } from '../conversation-ai/facts.js'
+import { factLedgerOf, factSummaryOf } from '../conversation-ai/ledger.js'
 import { classifyOpportunityEconomics } from './classify-opportunity.js'
 
 export const ECONOMICS_PROPERTY_FIELDS = Object.freeze([...new Set([
@@ -34,7 +34,9 @@ async function one(q) {
 }
 
 /** The seller's current ask + its history from a conversation-ai fact ledger (seller_stated / model_extracted only). */
-export function askFromLedger(ledger = {}) {
+export function askFromLedger(input = {}) {
+  // rc-8.5.20: a canonical ledger and a facts.js ledger read the SAME facts (ledger.js adapter)
+  const ledger = factLedgerOf(input)
   const slot = ledger?.asking_price
   const cur = slot?.current
   const usable = cur && cur.origin !== 'record_derived' && Number(cur.value?.amount) > 0
@@ -62,7 +64,7 @@ export async function assessOpportunityEconomics({ supabase, property_id, ledger
   const id = String(property_id ?? '').trim()
   const nowDate = now instanceof Date ? now : new Date(now)
   const { ask, history } = askFromLedger(ledger)
-  if (!id) return classifyOpportunityEconomics({ ask, ask_history: history, facts: factSummary(ledger), now: nowDate.getTime() })
+  if (!id) return classifyOpportunityEconomics({ ask, ask_history: history, facts: factSummaryOf(ledger), now: nowDate.getTime() })
 
   const [property, valuation, opportunity] = await Promise.all([
     one(supabase.from('properties').select(ECONOMICS_PROPERTY_FIELDS.join(',')).eq('property_id', id).limit(1)),
@@ -84,7 +86,7 @@ export async function assessOpportunityEconomics({ supabase, property_id, ledger
   }
 
   const result = classifyOpportunityEconomics({
-    ask, ask_history: history, property: property || {}, valuation, freshness, market, facts: factSummary(ledger), complexity, now: nowDate.getTime(),
+    ask, ask_history: history, property: property || {}, valuation, freshness, market, facts: factSummaryOf(ledger), complexity, now: nowDate.getTime(),
   })
   return {
     ...result,

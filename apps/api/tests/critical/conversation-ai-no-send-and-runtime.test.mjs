@@ -154,8 +154,8 @@ const R3_DIRECT_IMPORTS = [
   'lib/domain/conversation-ai/eligibility-bridge.js', 'lib/domain/conversation-ai/fact-ledger.js', 'lib/domain/conversation-ai/policy.js',
   'lib/domain/conversation-ai/questions.js', 'lib/domain/conversation-ai/send-policy.js', 'lib/domain/conversation-ai/validator.js',
   'lib/domain/messages/ai-generated-message.js', 'lib/domain/queue/cancel-supabase-pending-outbound.js',
-  'lib/domain/conversation-ai/playbook/v1/index.js', 'lib/domain/conversation-ai/playbook/v1/style-validator.js', 'lib/domain/conversation-ai/pipeline/outcomes.js',
-  'lib/domain/conversation-ai/pipeline/compose.js',
+  'lib/domain/conversation-ai/playbook/v2/index.js', 'lib/domain/conversation-ai/playbook/v2/style-validator.js', 'lib/domain/conversation-ai/pipeline/outcomes.js',
+  'lib/domain/conversation-ai/pipeline/compose.js', 'lib/domain/conversation-ai/persona-continuity.js',
 ].sort()
 
 function directImports(file) {

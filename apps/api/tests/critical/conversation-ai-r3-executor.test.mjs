@@ -214,8 +214,8 @@ test('E2E no-send proof: an eligible routine reply passes R3 and is enqueued thr
   assert.equal(rec.decision_id, 'conv-ai:v1:i1')
   assert.equal(rec.decision_outcome, 'AI_GENERATED_REPLY')
   assert.equal(rec.model, 'claude-haiku-5-5')
-  assert.equal(rec.playbook_version, 'playbook.v1')
-  assert.equal(rec.prompt_version, 'compose.v1')
+  assert.equal(rec.playbook_version, 'playbook.v2')
+  assert.equal(rec.prompt_version, 'compose.v2')
   assert.equal(rec.context_version, 'conv-ai.context.v1')
   assert.equal(rec.validation.status, 'validated')
   assert.match(rec.ledger_snapshot_hash, /^[0-9a-f]{64}$/)
@@ -523,12 +523,31 @@ test('caps: 1 per seller per day and the global daily cap (atomic reservations)'
 })
 
 // ── the repeat asking-price trigger ─────────────────────────────────────────
-test('trigger mirror: the live predicate is parsed from the PROPOSED mirror migration', () => {
+test('trigger mirror (rc-8.5.20 review d): the 8.5.15.1 question_kind body is parsed from its PROPOSED migration', () => {
   assert.deepEqual(MIRROR.newStatuses, ['scheduled', 'queued', 'pending', 'approval'])
   assert.deepEqual(MIRROR.priorStatuses, ['sent', 'delivered', 'processing'])
-  assert.equal(MIRROR.pattern, 'asking_price')
+  assert.deepEqual(MIRROR.useCasePatterns, ['asking_price', '^s3_no_response_'])
+  assert.equal(MIRROR.questionKind, 'asking_price')
   assert.equal(MIRROR.paused, 'blocked_repeat_asking_price')
+  assert.equal(MIRROR.pausedSellerReplied, 'blocked_repeat_asking_price_seller_replied')
+  assert.equal(MIRROR.overrideScope, 'repeat_asking_price')
+  assert.equal(MIRROR.overrideMinReason, 10)
   assert.equal(MIRROR.trigger, 'INSERT OR UPDATE OF queue_status, use_case_template, scheduled_for_utc')
+  const prior = { id: 'p', thread_key: TK, queue_status: 'sent', use_case_template: 'manual_reply', metadata: { question_kind: 'asking_price' }, sent_at: at(60) }
+  // an operator-typed price ask (manual_reply + question_kind) now counts as the prior ask …
+  assert.equal(applyBlockRepeatAskingPrice({ id: 'n', thread_key: TK, queue_status: 'queued', use_case_template: 'ai_seller_asking_price' }, [prior]).paused_reason, 'blocked_repeat_asking_price')
+  // … and a manual / AI row stamped question_kind asking_price is blocked as a repeat
+  assert.equal(applyBlockRepeatAskingPrice({ id: 'n', thread_key: TK, queue_status: 'queued', use_case_template: 'manual_reply', metadata: { question_kind: 'asking_price' } }, [prior]).queue_status, 'cancelled')
+  // the S3 no-response follow-up is a re-ask after SILENCE only
+  const s3 = { id: 'n', thread_key: TK, queue_status: 'scheduled', use_case_template: 's3_no_response_fu1' }
+  assert.equal(applyBlockRepeatAskingPrice(s3, [prior]).queue_status, 'scheduled')
+  assert.equal(applyBlockRepeatAskingPrice(s3, [prior], { inbound: [{ thread_key: TK, at: at(30) }] }).paused_reason, 'blocked_repeat_asking_price_seller_replied')
+  // the audited manual override passes this guard only; a short reason does not
+  const ov = (reason) => ({ id: 'n', thread_key: TK, queue_status: 'queued', use_case_template: 'manual_reply', metadata: { question_kind: 'asking_price', manual_operator_send: true, repeat_ask_override: { scope: 'repeat_asking_price', actor: 'op-1', reason, at: NOW } } })
+  assert.equal(applyBlockRepeatAskingPrice(ov('seller asked us to resend it'), [prior]).queue_status, 'queued')
+  assert.equal(applyBlockRepeatAskingPrice(ov('short'), [prior]).queue_status, 'cancelled')
+  // a non-price row is untouched
+  assert.equal(applyBlockRepeatAskingPrice({ id: 'n', thread_key: TK, queue_status: 'queued', use_case_template: 'condition_probe' }, [prior]).queue_status, 'queued')
 })
 
 test('repeat price ask: the ledger holds it before insert; if a read race hides the prior ask, the trigger cancels it at insert', async () => {

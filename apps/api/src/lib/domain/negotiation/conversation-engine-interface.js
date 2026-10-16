@@ -13,7 +13,7 @@
 //                                 terms?: { closing_days?, earnest_money?, as_is?,
 //                                           repairs_by_buyer_before_close?, closing_costs_paid_by?,
 //                                           structure?, contingencies? } },
-//              fact_ledger?: buildFactLedger() result for the thread (conversation-ai/facts.js),
+//              fact_ledger?: the thread ledger (conversation-ai/ledger.js: canonical, or its factLedgerOf() view),
 //              economics?: a precomputed classifyOpportunity() result,
 //              now? }
 //   deps     createNegotiationRuntime({ supabase, refs }) in production; tests inject

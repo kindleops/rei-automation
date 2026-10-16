@@ -8,7 +8,8 @@
 // inbound's thread_key and seller phone; a row that does not is a hard error
 // (CONTEXT_MIXED) — the caller fails closed to NEEDS_REVIEW, it never "filters
 // and continues", because a mixed read means the loader is wrong.
-import { buildFactLedger, factSummary } from './facts.js'
+import { factSummary } from './facts.js'
+import { buildThreadLedger, factLedgerOf } from './ledger.js'
 import { blockedQuestionKinds, isDeflectionToOffer, questionKindOf, questionLedger } from './questions.js'
 import { firstNameOnly, maskText, threadRef } from './pii.js'
 
@@ -76,8 +77,10 @@ export function buildConversationContext({
   const t = (x) => Date.parse(x.at || 0) || 0
   const inboundAt = t(inbound)
   const ordered = rows.filter((m) => t(m) <= inboundAt || m.id === inbound.id).sort((a, b) => t(a) - t(b) || (a.id === inbound.id ? 1 : b.id === inbound.id ? -1 : 0))
-  const sellerMsgs = ordered.filter((m) => m.direction === 'inbound')
-  const facts = buildFactLedger({ inbound: sellerMsgs.map((m) => ({ id: m.id, body: m.body, at: m.at, intent: m.id === inbound.id ? deterministic?.intent ?? m.intent : m.intent })), recordFacts, now })
+  // rc-8.5.20 (review a): the model sees the SAME facts the pipeline and negotiation read —
+  // the canonical thread ledger (ledger.js), in the facts.js shape
+  const canonical = buildThreadLedger({ messages: ordered.map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.at, use_case: m.use_case || null, queue_id: m.queue_id || null, intent: m.id === inbound.id ? deterministic?.intent ?? m.intent : m.intent })), offers, recordFacts, now })
+  const facts = factLedgerOf(canonical)
   const ledger = questionLedger(ordered, facts)
   const blocked = blockedQuestionKinds(ledger)
   const stage = deriveStageEvidence({ facts, ledger, offers })
