@@ -34,4 +34,5 @@ export const OPERATIONS_LIMITS = Object.freeze({
   batch_max: 500,
   findings_per_job: 200,
   proposals_max: 10,
+  research_requests_per_job: 25, // 8.5.21-b: recovery → property.research event enqueues per sweep
 })

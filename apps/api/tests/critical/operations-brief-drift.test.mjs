@@ -21,8 +21,8 @@ const OP = '11111111-1111-4111-8111-111111111111'
 const digest = () => buildDigest({ activity: { jobs: [{ job_id: 'job_a', kind: 'mission.research', state: 'completed', cost_usd: 0.12 }], findings: [{ finding_type: 'discovery.candidate', n: 3 }] }, approvals: [], shadow: null, since: at(T0 - D), at: at(T0) })
 const SECTION_IDS = BRIEF_SECTIONS.map(([id]) => id)
 
-test('brief: the ten sections, in order', () => {
-  assert.deepEqual(SECTION_IDS, ['work_completed', 'new_viable_opportunities', 'offers_prepared', 'negotiations_advanced', 'deals_awaiting_approval', 'followups_completed', 'recovered_opportunities', 'campaign_sender_changes', 'system_incidents', 'recommended_next_actions'])
+test('brief: the eleven sections, in order (8.5.21-b adds research & valuation coverage)', () => {
+  assert.deepEqual(SECTION_IDS, ['work_completed', 'new_viable_opportunities', 'offers_prepared', 'negotiations_advanced', 'deals_awaiting_approval', 'followups_completed', 'recovered_opportunities', 'campaign_sender_changes', 'system_incidents', 'research_and_valuation', 'recommended_next_actions'])
 })
 
 test('brief: every line links to its source records (ids only)', () => {
@@ -88,7 +88,7 @@ test('conversation.review_digest carries the brief: with the operations read mod
     assert.equal(job.state, 'completed', JSON.stringify(job.last_error))
     const f = [...runtime._state.findings.values()].find((x) => x.finding_type === 'digest.morning')
     assert.ok(f.value.brief, 'the brief is in the durable finding')
-    assert.equal(job.result.brief_sections.length, 10)
+    assert.equal(job.result.brief_sections.length, 11)
     const offers = f.value.brief.sections.find((s) => s.id === 'offers_prepared')
     if (withOps) {
       assert.equal(offers.available, true)

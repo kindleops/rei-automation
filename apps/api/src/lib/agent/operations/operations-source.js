@@ -12,9 +12,11 @@
 //   pipelineFacts({ after_id, limit })               → raw rows (id order)
 //   supervisorSnapshot({ now })                      → one object
 //   briefFacts({ since, until })                     → one object
+//   researchValuationSnapshot({ now })               → one object (8.5.21-b; agent.ops_research_valuation_snapshot)
 // A read failure throws an Error with code SOURCE_NOT_APPLIED (function / table missing),
 // SOURCE_TIMEOUT or SOURCE_UNAVAILABLE. Nothing here writes.
 import { OPERATIONS_SQL } from './operations-sql.js'
+import { RESEARCH_VALUATION_SNAPSHOT_SQL } from './research-valuation-sql.js'
 
 const NOT_APPLIED = new Set(['42883', '42P01', 'PGRST202', 'PGRST205', '3F000'])
 function sourceError(err, what) {
@@ -57,6 +59,7 @@ export function createOperationsPgSource({ pool, statementTimeoutMs = 15_000 } =
     },
     supervisorSnapshot: ({ now = null } = {}) => one('select agent.ops_supervisor_snapshot($1) r', [now], 'ops_supervisor_snapshot'),
     briefFacts: ({ since, until = null }) => one('select agent.ops_brief_facts($1, $2) r', [since, until], 'ops_brief_facts'),
+    researchValuationSnapshot: ({ now = null } = {}) => one('select agent.ops_research_valuation_snapshot($1) r', [now], 'ops_research_valuation_snapshot'),
   })
 }
 
@@ -79,6 +82,9 @@ export function createOperationsSqlSource({ query }) {
     async briefFacts({ since, until = null }) {
       return (await run('brief_facts', OPERATIONS_SQL.brief_facts, [since, until]))[0] || null
     },
+    async researchValuationSnapshot({ now = null } = {}) {
+      return (await run('research_valuation_snapshot', RESEARCH_VALUATION_SNAPSHOT_SQL, [now]))[0]?.r || null
+    },
   })
 }
 
@@ -86,7 +92,7 @@ export function createOperationsSqlSource({ query }) {
  * Test source. `conversations` / `opportunities` are raw fact rows (the SQL shapes);
  * `fail` maps a method name to an error code to simulate an unavailable source.
  */
-export function createOperationsMemorySource({ conversations = [], opportunities = [], snapshot = null, brief = null, fail = {} } = {}) {
+export function createOperationsMemorySource({ conversations = [], opportunities = [], snapshot = null, brief = null, researchValuation = null, fail = {} } = {}) {
   const calls = []
   const guard = (m) => { calls.push(m); if (fail[m]) throw Object.assign(new Error(`${m} failed`), { code: fail[m] }) }
   return Object.freeze({
@@ -104,5 +110,6 @@ export function createOperationsMemorySource({ conversations = [], opportunities
     },
     async supervisorSnapshot() { guard('supervisorSnapshot'); return snapshot },
     async briefFacts() { guard('briefFacts'); return brief },
+    async researchValuationSnapshot() { guard('researchValuationSnapshot'); return researchValuation },
   })
 }

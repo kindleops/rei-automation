@@ -109,7 +109,7 @@ test('PG operations jobs as agent_api: recovery → action center → pipeline �
     const ac2 = await run(ACTION_CENTER_KIND, 'e')
     assert.equal(ac2.counts.awaiting_operator_decision, 1)
     const brief = await run(REVIEW_DIGEST_KIND, 'f', { window_hours: 24 })
-    assert.equal(brief.brief_sections.length, 10)
+    assert.equal(brief.brief_sections.length, 11)
     const finding = (await db.pool.query(`select value from agent.finding where finding_type = 'digest.morning' order by retrieved_at desc limit 1`)).rows[0].value
     const sections = Object.fromEntries(finding.brief.sections.map((s) => [s.id, s]))
     assert.equal(sections.offers_prepared.available, true)
