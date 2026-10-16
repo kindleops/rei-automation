@@ -1,13 +1,13 @@
 # LeadCommand MCP 1.0 — Intelligence Gateway
 
-A first-party, provider-neutral, **read-only** MCP server over LeadCommand data, for any MCP host (Claude, Agntei, or another agent runtime).
+A first-party, provider-neutral, **read-only** MCP server over LeadCommand data, for any MCP host (Claude, Agntau, or another agent runtime).
 
 | | |
 |---|---|
 | Status | Built and tested locally. **Not pushed, not merged, not deployed.** |
 | Branch | `feat/leadcommand-mcp-1`, cut from production release `43650af3` (8.5.13) |
 | Package | `mcp/leadcommand-mcp/` |
-| Transport | stdio (enabled). Streamable HTTP is designed but disabled. |
+| Transport | stdio (default) and **loopback-only Streamable HTTP** (`LEADCOMMAND_MCP_TRANSPORT=streamable-http`, 127.0.0.1 / ::1, bearer token from a 0600 file). No public endpoint. |
 | Protocol | MCP `2025-11-25` (the latest the SDK negotiates), official TypeScript SDK `@modelcontextprotocol/sdk@1.32.1` |
 | Phase | Phase One. Every tool is a bounded read. |
 
@@ -97,10 +97,11 @@ A first-party, provider-neutral, **read-only** MCP server over LeadCommand data,
 ## 2. Architecture
 
 ```
-MCP host (Claude / Agntei / any client)
-   │  stdio (JSON-RPC 2.0, MCP 2025-11-25)
+MCP host (Claude / Agntau / any client)
+   │  stdio (JSON-RPC 2.0, MCP 2025-11-25)  — or —  protocol/http.mjs: loopback Streamable HTTP
+   │                                               (Host/Origin check · bearer token · session cap)
    ▼
-protocol/server.mjs      SDK low-level Server: initialize · tools/list · tools/call (tools capability only)
+protocol/server.mjs      SDK low-level Server (one per connection): initialize · tools/list · tools/call
    ▼
 gateway.mjs              ONE enforcement path per call (below)
    ├─ auth/principal.mjs     principal from host config · agent.operator_membership (agent_api, fail-closed) · cross-org
@@ -282,7 +283,7 @@ stdout carries only the protocol. Audit lines go to stderr, or to `LEADCOMMAND_M
 | `LEADCOMMAND_MCP_SERVICE_KEY_FILE` | Live only: **path** to a 0600 file holding the service key (never the key itself) |
 | `LEADCOMMAND_MCP_AGENT_DB_URL_FILE` / `LEADCOMMAND_MCP_AGENT_DB_CA_FILE` | Live only: paths to the `agent_api` URL and the Supabase CA |
 | `LEADCOMMAND_MCP_RATE_PER_MIN`, `_MAX_CONCURRENCY`, `_CALL_TIMEOUT_MS`, `_MAX_RESPONSE_BYTES` | Can only **lower** the budgets (hard ceilings in `config.mjs`) |
-| `LEADCOMMAND_MCP_TRANSPORT` | `stdio` only. Anything else refuses to boot in 1.0. |
+| `LEADCOMMAND_MCP_TRANSPORT` | `stdio` (default) or `streamable-http` (§5.3). Anything else refuses to boot. |
 
 ### 5.2 Generic MCP host profile (works for Claude Desktop / Claude Code / any `mcpServers` host)
 
@@ -314,46 +315,94 @@ For a dry run, set `"LEADCOMMAND_MCP_DATA": "fixture"` and use the fixture ids:
 - org `00000000-0000-4000-8000-0000000000a1`
 - properties `FX1001`–`FX1003`
 
-### 5.3 Streamable HTTP (designed, disabled)
+### 5.3 Streamable HTTP (loopback only, bearer token)
 
-`protocol/transports.mjs#startHttp` refuses unconditionally, and `LEADCOMMAND_MCP_TRANSPORT=http` refuses to boot. The design for 1.1:
+For local hosts that speak only Streamable HTTP (Agntau). Implemented in `src/protocol/http.mjs` on the SDK's `StreamableHTTPServerTransport` (stateful sessions, `enableJsonResponse: true`). It is **not** a public or multi-user endpoint.
 
-- **Authorization.** The server is an OAuth 2.1 resource server.
-  - It publishes RFC 9728 protected-resource metadata and accepts only audience-bound tokens issued for this server.
-  - It does no token passthrough.
-  - The principal comes from the verified token on every request, and membership is checked per session.
-- **Network exposure.**
-  - `Origin` allowlist and DNS-rebinding protection.
-  - Loopback bind by default.
-  - The `MCP-Protocol-Version` header is checked.
-- **Sessions.** Session ids are random, bound to the principal, and never used as authentication.
-- **Shared state.** Rate state moves to the durable store.
+**Start it.**
+
+```bash
+cd mcp/leadcommand-mcp
+node scripts/http-token.mjs ~/.leadcommand/mcp-http-token     # 32 random bytes, base64url, O_EXCL, mode 0600; the token is NOT printed
+LEADCOMMAND_MCP_TRANSPORT=streamable-http \
+LEADCOMMAND_MCP_HTTP_BIND=127.0.0.1 \
+LEADCOMMAND_MCP_HTTP_PORT=8765 \
+LEADCOMMAND_MCP_HTTP_TOKEN_FILE=~/.leadcommand/mcp-http-token \
+<the §5.1 variables: DATA, PRINCIPAL_USER_ID, ORG_ID, SCOPES, live file paths, AUDIT_FILE> \
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON bin/leadcommand-mcp.mjs
+```
+
+Endpoint: `http://127.0.0.1:8765/mcp` (only this path; a query string is refused).
+
+| Variable | Meaning |
+|---|---|
+| `LEADCOMMAND_MCP_HTTP_BIND` | `127.0.0.1` (default) or `::1`. **Anything else refuses to boot** (wildcards, LAN / public addresses, `localhost` and other hostnames, `127.0.0.2`, mapped IPv6). The listening address is re-checked after `listen()`. |
+| `LEADCOMMAND_MCP_HTTP_PORT` | Default `8765`; `0` = ephemeral (tests). |
+| `LEADCOMMAND_MCP_HTTP_TOKEN_FILE` | Required. A regular file owned by the server user with no group / other bits (0600), holding one 32–512 char URL-safe token. |
+| `LEADCOMMAND_MCP_HTTP_ALLOWED_ORIGINS` | Optional. Exact loopback origins (`http(s)://127.0.0.1 \| localhost \| [::1][:port]`) allowed to send an `Origin` header. Default: none. |
+| `LEADCOMMAND_MCP_HTTP_SESSION_CONCURRENCY` | Per-connection (per-session) concurrent tool calls. Default 2, never above `_MAX_CONCURRENCY`. |
+| `LEADCOMMAND_MCP_HTTP_MAX_SESSIONS` | Default 8, ceiling 32. |
+| `LEADCOMMAND_MCP_HTTP_SESSION_IDLE_MS` | Idle expiry. Default 15 min, ceiling 60 min. |
+| `LEADCOMMAND_MCP_HTTP_MAX_BODY_BYTES` | Request body cap. Default 64 KiB, ceiling 256 KiB. |
+
+**Security design.** Checks run in this order on every request:
+
+1. **Host** must name this listener exactly (`127.0.0.1:<port>` or `localhost:<port>`; for `::1`, `[::1]:<port>` or `localhost:<port>`). Otherwise **403**. A missing Host is already refused by `node:http` (400). This is DNS-rebinding protection, and it runs before auth, so a rebinding page learns nothing about the token.
+2. **Origin**: absent (non-browser clients such as Agntau's server-side fetch and Claude Code) or an exact allowlist entry. Otherwise **403**.
+3. **Path** `/mcp` only. Otherwise 404.
+4. **Bearer token** on every request: `Authorization: Bearer <token>`. The server holds only the SHA-256 digest of the file's token and compares digests with `crypto.timingSafeEqual`. A missing, wrong or non-Bearer credential gets **401** with `WWW-Authenticate: Bearer realm="leadcommand-mcp"`. After 30 failures in a minute it gets **429**. The token never appears in a log line, an error, a response or a tool result; the env var is scrubbed after boot. Session ids route requests and are **never** credentials: a request with a valid session id but no token gets 401.
+5. **Method**: POST, GET or DELETE only (405).
+6. **Session**: unknown id → 404 (the client re-initializes). A non-initialize request without a session → 400. At `MAX_SESSIONS`, the least-recently-used **idle** session is evicted (Claude Code 2.1.x never DELETEs its session); if every session has a call in flight → 503.
+7. **Body** over the cap → 413 before parsing.
+
+**Principal.** Unchanged from stdio: the host-configured `LEADCOMMAND_MCP_PRINCIPAL_USER_ID` / `ORG_ID`, verified against `agent.operator_membership`. The token proves only "this local client may connect". It carries no claims and never selects a user, org or scope. Forged context arguments are still refused (`FORGED_CONTEXT`).
+
+**Limits.** All sessions share the one gateway: the principal-wide and per-tool rate limits, the process-wide concurrency gate, the call deadline and the response byte cap. Each session also has its own concurrency gate (`SESSION_CONCURRENCY_LIMIT`, audited as `refused`). Node server timeouts: headers 10 s, request 60 s, keep-alive 5 s, 64 headers.
+
+**Audit.** Tool calls carry `transport: "streamable-http"`. Transport events contain no header values: `http_listen`, `http_session_open`, `http_session_closed` (`client_delete | idle | evicted_lru | shutdown | transport_closed`) and `http_refused` (`status`, `reason`, and the method for no-session refusals).
+
+**Out of scope for 1.x** (§10): remote exposure, OAuth 2.1 resource server (RFC 9728), per-request principals, a durable rate / session store.
+
+**Agntau connection config** (what Agntau stores and generates; verified, §6):
+
+- Connections → "Connect another MCP server by URL…": URL `http://127.0.0.1:8765/mcp`, Name `LeadCommand`, sign-in **Token**, token = the file's contents. Agntau accepts `http:` only for loopback hosts and sends `Authorization: Bearer <token from file>` itself.
+- The Claude Code config Agntau generates (`claudeMcpConfig`):
+
+```json
+{ "mcpServers": { "leadcommand": { "type": "http", "url": "http://127.0.0.1:8765/mcp", "headers": { "Authorization": "${AGNTAU_MCP_LEADCOMMAND_0}" } } } }
+```
+
+  The child environment holds `AGNTAU_MCP_LEADCOMMAND_0="Bearer <token from file>"`. Agent tool names are `mcp__leadcommand__leadcommand_<tool>`.
 
 ---
 
-## 6. Agntei
+## 6. Agntau ("Agntei")
+
+Agntau = `kindleops/agntau` `main @0217a12`, cloned **read-only** to `tmp/agntau`. **Zero Agntau changes**: no branch, no commit. `pnpm install` ran inside the clone only, and its tree is clean.
 
 | Step | Result |
 |---|---|
-| Local search | `ls ~/ ~/Projects ~/code \| grep -i agnt`, `find ~ -maxdepth 6 -iname '*agnt*'` and `mdfind -name agntei` all returned **nothing**. No Agntei memory entry exists. |
-| MCP connection architecture read | **BLOCKED.** There is no checkout to read. |
-| Connection profile | **Prepared, provider-neutral**: §5.2 (stdio `mcpServers` profile). It has not been validated against Agntei. |
-| Tests A–E and G (owner's Agntei plan) | **BLOCKED.** There is no Agntei runtime on this machine. The equivalent generic MCP-host checks were run with the official SDK Client over real stdio (§7.3): initialize, discovery, read calls, typed errors, scope denial, concurrency, and disconnect / relaunch. |
-| Multi-agent Mission | **NOT RUN.** No distinct agents were run. No mission success is claimed. |
+| Connection architecture read | Streamable HTTP only: `connections/mcp-client.ts` (`verifyMcpServer`, `callMcpTool`), `service.ts` (`add` → `setToken` → `verify` → `forRun`), `run-config.ts` (`claudeMcpConfig`), `policy.ts` (risk tiers, `*:read` preapproval), `adapters/claude-code.ts`. Only `claude-code` is a verified agent for connections. |
+| Agntau's own code against the local server (FIXTURE data) | `Connections.add({ url, label: 'LeadCommand', token })` → state `connected`, stages discovered / authenticated / toolsListed, serverInfo `leadcommand-mcp 1.0.0`, protocol `2025-06-18`. 9 tools, each `readOnly: true`, `destructive: false`, risk `read`. Raw `verifyMcpServer`: ok. Wrong token: 401, `failure: auth`. No token: 401. The token is not in Agntau's connection rows. Server down: state `error`, "Could not reach the server". |
+| Real agent turns (`claude` 2.1.281, subscription login, `apiKeySource: none`, model haiku), config from Agntau's `forRun('claude-code')` + `claudeMcpConfig`, env from Agntau's `buildChildEnv`. `--strict-mcp-config`, `--tools ""` (no built-in tools), `--allowedTools` = the 9 leadcommand tools, `--permission-mode dontAsk`. FIXTURE data. | 5 turns, 5 tool calls (+1 smoke). Details in §7.4. |
+| Live-data agent turns | **BLOCKED**: starting the server in live mode was refused by this session's permission classifier. Nothing ran against production over HTTP. |
+| Agntau engine connection tests | `vitest run test/connections.test.ts`: 12 / 12 pass. |
+| Multi-agent Mission | **NOT RUN.** Only single Claude Code runs were driven, outside Agntau's orchestrator. No mission success is claimed. |
 
 ---
 
 ## 7. Testing
 
-### 7.1 MCP suite: 67 tests, 67 pass
+### 7.1 MCP suite: 80 tests, 80 pass
 
 The suite uses FIXTURE data, labelled synthetic. Run it with `cd mcp/leadcommand-mcp && npm test`.
 
 | File | Tests | Covers |
 |---|---|---|
-| `protocol.test.mjs` | 5 | initialize (server info, tools-only capability, instructions), discovery (9 tools, annotations, closed input schemas, scopes, limits), every result validated against its advertised output schema (Ajv and the SDK Client), input bounds, unknown tool as a protocol error (audited) |
+| `protocol.test.mjs` | 6 | initialize (server info, tools-only capability, instructions), discovery (9 tools, annotations, closed input schemas, scopes, limits), every result validated against its advertised output schema (Ajv and the SDK Client), input bounds, typed errors validate against the advertised outputSchema (the SDK Client validates `isError` results too), unknown tool as a protocol error (audited) |
+| `http.test.mjs` | 12 | Streamable HTTP: 401 without a token, with a wrong token, a token prefix, a non-Bearer scheme or a bare token; failed-auth throttle (429); non-loopback binds refuse to boot (0.0.0.0, ::, LAN, public, `localhost`, 127.0.0.2, mapped IPv6); token-file mode / owner / format, digest only; loopback listener; Host and Origin checks (403, Host before auth), path / query / method; SDK Client over HTTP (tools/list, a call, scope denial, forged context, audit transport); per-connection concurrency cap with another connection unaffected; LRU idle-session eviction and 503 when all sessions are busy; unknown / missing session, DELETE, 413; disconnect / recover as a real subprocess; stdio path unchanged; the token never in logs or bodies |
 | `tools.test.mjs` | 15 | each tool's happy path, missing ≠ 0, current / stale / not-run scores, comps lane and buyer basis, exact campaign counts, empty results, not_found on every per-record tool |
-| `security.test.mjs` | 15 | unauthenticated (no principal, non-member), cross-org ×2, forged-context keys, injection-shaped ids, scope denial ×3, role, membership fail-closed, TTL revocation, cursor forgery (tampered, cross-filter, cross-tool, cross-principal), unsupported filters, HTTP disabled |
+| `security.test.mjs` | 15 | unauthenticated (no principal, non-member), cross-org ×2, forged-context keys, injection-shaped ids, scope denial ×3, role, membership fail-closed, TTL revocation, cursor forgery (tampered, cross-filter, cross-tool, cross-principal), unsupported filters, transport allowlist (only stdio / streamable-http; HTTP without a token file refuses to boot) |
 | `limits.test.mjs` | 12 | full keyset traversal (no duplicates or gaps), max-result limits, size cap (truncation and oversize failure), timeout at the deadline, rate limit (principal and tool), DB failure (fault, missing relation), concurrency (bounded, refuse the excess), disconnect / recover in memory **and as a real stdio subprocess** (kill, the process exits, relaunch) |
 | `safety.test.mjs` | 11 | provenance kinds and missing ≠ 0, no fixture phone, name, email or person key anywhere, protected flags dropped, contact handles only, second-net masking, redactor and audit hygiene, secret guard, environment scrub, prompt injection (seller preview never leaves; injected text only at declared untrusted paths; tool surface unchanged), control and bidi stripping, suppression (active, inactive and lookup-failure cases) |
 | `readonly.test.mjs` | 9 | 9 read tools only, the boot guard refuses write-shaped tools, the static import graph reaches no write-capable module, no mutation call or SQL in reachable code, allowed external packages only, the live transport refuses insert / update / delete / non-allowlisted RPC before the network, the abort signal and `Prefer: timeout=5` on every request, fixture tables unchanged after calls |
@@ -400,6 +449,21 @@ What was not done:
 - The temporary 0600 key file was deleted after each run.
 - No full scans were run: every predicate was an indexed equality or range, LIMIT ≤ 50.
 
+### 7.4 Agntau agent proof (FIXTURE data, loopback HTTP)
+
+Server: `streamable-http` on `127.0.0.1:8765`, FIXTURE mode, default scope grant (no `leadcommand.contact_status.read`). Turns 1–5 are one resumed Claude Code session. Evidence comes from the server's audit file (principal hashed; the salt is per process).
+
+| Turn | Prompt (short) | Tool calls (agent) | Audit (tool · outcome · latency) | Answer (summary) |
+|---|---|---|---|---|
+| smoke | score for FX1001 | get_acquisition_score | ok · 13 ms | AOS 71, tier A, current |
+| 1 | up to 3 scored leads in "Fixture Metro, TX", ≤ 4 calls | search_leads {market, limit 3}; get_acquisition_score FX1001 | ok · 18 ms (3 rows); ok · 8 ms | 1 of 3 scored (FX1001: AOS 71 / A, offer, freshness current); FX1002 / FX1003 not run by the engine |
+| 2 | follow-up: comps for that property | search_comps FX1001 | ok · 10 ms (3 rows) | offer sits below the recorded comp range |
+| 3 | permission denial: contact status | get_lead_contact_status FX1001 | **refused · forbidden · SCOPE_NOT_GRANTED** · 0 ms | reported `forbidden`, "scope leadcommand.contact_status.read is not granted" |
+| 4 | server stopped | none: Claude init `mcp_servers: [{leadcommand, status: failed}]`, 0 tools | — | "The LeadCommand server is unavailable." |
+| 5 | server restarted, same session | get_market_intelligence {zip 75001} | ok · 10 ms | "ZIP 75001 is available with build id 42." |
+
+Claude Code 2.1.281 opens each run with a `server/discover` POST and no session (audited 400 `no_session`), then falls back to `initialize`. It does not DELETE its session on exit, which is why idle sessions are LRU-evicted at the cap.
+
 ---
 
 ## 8. Git
@@ -424,7 +488,7 @@ What was not done:
 | G02 | Audit of leads / properties / scores / market / comps / campaigns / eligibility, written into this doc | PASS |
 | G03 | Official MCP TypeScript SDK; spec and API verified (`2025-11-25`, low-level `Server`, stdio) | PASS |
 | G04 | stdio transport with a real MCP client (SDK Client subprocess) | PASS |
-| G05 | Streamable HTTP designed and **disabled** (refuses to boot) | PASS |
+| G05 | Streamable HTTP: loopback only (non-loopback refuses to boot), bearer token from a 0600 file (constant-time), Host / Origin validation, per-connection concurrency cap, shared limits; principal from host config | PASS |
 | G06 | Layered package (protocol, auth, authz, adapters, audit, errors / validation, config) | PASS |
 | G07 | Principal from host config only; forged ids and context refused | PASS |
 | G08 | Org scoping through `agent.operator_membership` as `agent_api`, fail-closed; cross-org refused | PASS |
@@ -440,25 +504,25 @@ What was not done:
 | G18 | Audit record per call (no PII) and secret redaction | PASS |
 | G19 | Provenance on every value group; missing ≠ 0; stale and inferred labelled | PASS |
 | G20 | Suppression correctness (inactive ≠ suppressed; lookup failure = unknown) | PASS |
-| G21 | MCP test suite (fixtures): 67 / 67 | PASS |
+| G21 | MCP test suite (fixtures): 80 / 80 | PASS |
 | G22 | Existing chunked critical suite, no regressions (`CRITICAL_CHUNKS=8`): 834 files, 11,455 tests, 11,399 pass, **0 fail**, 56 skipped — SUITE PASSED; `npm run lint` (2,954 files) passed | PASS |
 | G23 | Local protocol validation: fixture and bounded live (10 calls, ≤ 5 identifiers per call) | PASS |
-| G24 | Agntei MCP connection architecture read, profile prepared, Tests A–E and G | **BLOCKED**. No Agntei checkout or runtime found. Generic profile prepared (§5.2). |
+| G24 | Agntau connection: Agntau's own `Connections.add` / `verifyMcpServer` connect (9 read tools); real Claude Code turns through Agntau's generated config (search, follow-up, scope denial, disconnect / recover); Agntau connection tests 12 / 12 | PASS on FIXTURE data. Live-data agent turns **BLOCKED** (permission). Multi-agent Mission **NOT RUN**. |
 | G25 | No push / merge / deploy / production migration / remote mutation / credential rotation; no paid enrichment | PASS |
 
-Summary: 23 PASS · 1 FAIL (G16, partial) · 1 BLOCKED (G24) · multi-agent Mission NOT RUN.
+Summary: 24 PASS · 1 FAIL (G16, partial) · G24 live-data part BLOCKED · multi-agent Mission NOT RUN.
 
 ---
 
 ## 10. MCP 1.1 plan (hardening, still read-only)
 
 1. Bound statements server-side. Options: a dedicated `mcp_read` login with `statement_timeout = '5s'`, SELECT on exactly the projected columns, and no service role in the path; or STABLE `SECURITY DEFINER` RPCs with `SET statement_timeout`. Either one closes G16 and removes the service key from the gateway.
-2. Streamable HTTP behind OAuth 2.1 (§5.3), with a durable rate and session store, and per-request principal verification.
+2. Remote Streamable HTTP behind OAuth 2.1 (RFC 9728 protected-resource metadata, audience-bound tokens, no passthrough), with a durable rate and session store and per-request principal verification. The 1.x loopback transport (§5.3) stays loopback-only.
 3. A pure campaign readiness core extracted from `campaign-launch-readiness.js`, exposed as `leadcommand_get_campaign_readiness`.
 4. Truthful reply metrics: a STABLE, indexed RPC for `message_events` pairing.
 5. Engine-qualified comps: extract `evaluateCompEligibility` / `normalizePropertyFeatures` into a pure module (the same pattern as `decisionFreshness`), so comps evidence carries the engine's eligibility verdicts.
 6. Publish `resources` for the tool catalog and the provenance legend; add MCP `prompts` for common read workflows.
-7. Agntei: run Tests A–E and G once a checkout or runtime exists.
+7. Agntau: rerun §7.4 against live data (bounded, ≤ 15 calls) once the owner allows it, then a two-agent Mission through Agntau's orchestrator.
 
 ## 11. MCP 2.0 plan (actions, behind approvals)
 
