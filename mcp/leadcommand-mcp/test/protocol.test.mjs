@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import Ajv from 'ajv'
 import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js'
-import { connect, call, HAPPY } from './helpers.mjs'
+import { connect, call, HAPPY, fixtureEnv } from './helpers.mjs'
 
 const EXPECTED = ['leadcommand_search_leads', 'leadcommand_get_lead', 'leadcommand_search_properties', 'leadcommand_get_property', 'leadcommand_get_acquisition_score', 'leadcommand_get_market_intelligence', 'leadcommand_search_comps', 'leadcommand_get_campaign_metrics', 'leadcommand_get_lead_contact_status']
 
@@ -70,6 +70,26 @@ test('schema validation: input schemas are closed and bounded (limit > max, wron
     assert.equal(r.structuredContent.error.class, 'invalid_input')
     r = await call(c.client, 'leadcommand_get_acquisition_score', { property_id: 'FX1001', include_evidence: true })
     assert.equal(r.structuredContent.error.class, 'invalid_input')
+  } finally { await c.close() }
+})
+
+test('typed tool errors validate against the advertised outputSchema, so a validating client (SDK Client after tools/list) receives them instead of throwing', async () => {
+  const c = await connect({ env: fixtureEnv({ LEADCOMMAND_MCP_SCOPES: 'leadcommand.properties.read' }) })
+  try {
+    const { tools } = await c.client.listTools() // primes the SDK Client's output validators
+    const ajv = new Ajv({ strict: false, allErrors: true })
+    const byName = Object.fromEntries(tools.map((t) => [t.name, ajv.compile(t.outputSchema)]))
+    const cases = [
+      ['leadcommand_get_lead_contact_status', { property_id: 'FX1001' }, 'forbidden'],
+      ['leadcommand_get_property', { property_id: 'NOPE404' }, 'not_found'],
+      ['leadcommand_get_property', { property_id: 'FX1001', org_id: 'x' }, 'invalid_input'],
+    ]
+    for (const [name, args, cls] of cases) {
+      const r = await call(c.client, name, args)
+      assert.equal(r.isError, true)
+      assert.equal(r.structuredContent.error.class, cls)
+      assert.ok(byName[name](r.structuredContent), `${name}: ${JSON.stringify(byName[name].errors?.slice(0, 2))}`)
+    }
   } finally { await c.close() }
 })
 

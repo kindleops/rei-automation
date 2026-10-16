@@ -14,7 +14,7 @@
 import crypto from 'node:crypto'
 import { z } from 'zod/v4'
 import { maskString } from '@/lib/agent/research/pii.js'
-import { err, classify, GatewayError } from './errors.mjs'
+import { err, classify, GatewayError, ERROR_CLASSES } from './errors.mjs'
 import { envelope } from './tools/schemas.mjs'
 import { createRateLimiter, createConcurrencyGate, withDeadline } from './safety/limits.mjs'
 import { containsSecret } from './safety/redact.mjs'
@@ -53,6 +53,17 @@ export function maskResult(value) {
   }
   return { value: walk(value, null, 0), masked }
 }
+
+/**
+ * The structured shape of a typed tool error (isError: true). It is advertised in every tool's
+ * outputSchema next to the success envelope: a client that validates structuredContent against
+ * the outputSchema (the SDK Client does, even for isError results) must accept typed errors.
+ */
+export const ERROR_OUTPUT = z.object({
+  tool: z.string(),
+  correlation_id: z.string(),
+  error: z.object({ class: z.enum(ERROR_CLASSES), code: z.string(), message: z.string(), retryable: z.boolean(), details: z.record(z.string(), z.any()).optional() }).strict(),
+}).strict()
 
 function inputError(tool, issues) {
   const unknown = issues.filter((i) => i.code === 'unrecognized_keys').flatMap((i) => i.keys || [])
@@ -150,7 +161,7 @@ export function createGateway({ tools, authorizer, source, auditor, limits, now 
       title: t.title,
       description: t.description,
       inputSchema: toSchema(t.input, 'input'),
-      outputSchema: toSchema(outputs.get(t.name), 'output'),
+      outputSchema: { type: 'object', anyOf: [toSchema(outputs.get(t.name), 'output'), toSchema(ERROR_OUTPUT, 'output')] },
       annotations: { title: t.title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       _meta: { 'leadcommand/scope': t.scope, 'leadcommand/min_role': t.min_role, 'leadcommand/limits': t.limits, 'leadcommand/paged': Boolean(t.paged) },
     }))
