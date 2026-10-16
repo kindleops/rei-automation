@@ -33,6 +33,21 @@ const TEXT_RULES = [
   ['offer', /\$\s?[0-9][0-9,]*(?:\.[0-9]+)?\s?k?\b.*\?|\b(?:our|my)\s+offer\b/i],
 ]
 
+// RC 8.5.20 review (c): audited against 30 days of real sent outbound (read-only, 2026-10-15:
+// 6,924 ownership_check, 137 manual_reply, 110 consider_selling, 44 who_is_this, … rows).
+// The broadened 8.5.15 + 8.5.16 interest union read three operator NEGOTIATION questions as
+// an S2 interest ask: "Are you open to doing a JV?", "… would you be open to a lease
+// option?", "If I can get close to a number that works for you, would you still consider
+// it?". An interest ask is about SELLING (a sale, an offer / proposal, selling, the
+// property); a question whose object is a deal structure or a price is not one, unless it
+// also names selling / a sale / an offer / a proposal.
+const NOT_A_SALE_INTEREST_RE = /\b(?:jv|joint\s+venture|partner(?:ship|ing)?|lease(?:\s+option)?|rent\s+to\s+own|owner\s+financ\w*|seller\s+financ\w*|financing|terms|package\s+deal|number|price|counter|meet\s+(?:me\s+)?in\s+the\s+middle|buy\s+more|wholesal\w*|assign\w*)\b|\$\s?[0-9]/i
+const SALE_OBJECT_RE = /\b(?:sell(?:ing)?|sale|offer|proposal|propuesta|oferta|vender)\b/i
+export function interestQuestionGuard(sentence) {
+  const q = String(sentence || '')
+  return !(NOT_A_SALE_INTEREST_RE.test(q) && !SALE_OBJECT_RE.test(q))
+}
+
 /** @returns {string} a QUESTION_KINDS member */
 export function questionKindOf({ use_case = null, body = '' } = {}) {
   const uc = String(use_case || '').trim().toLowerCase()
@@ -46,7 +61,7 @@ export function questionKindOf({ use_case = null, body = '' } = {}) {
   // only the LAST question sentence counts ("Got it. How's the property?" → condition)
   const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.includes('?'))
   const q = sentences.length ? sentences[sentences.length - 1] : text
-  for (const [kind, re] of TEXT_RULES) if (re.test(q)) return kind
+  for (const [kind, re] of TEXT_RULES) if (re.test(q) && (kind !== 'interest' || interestQuestionGuard(q))) return kind
   return 'other'
 }
 

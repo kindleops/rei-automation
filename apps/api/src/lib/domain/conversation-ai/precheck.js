@@ -14,7 +14,7 @@
 // to the model, and the AI policy lists it as a never-auto category anyway.
 import { matchMultilingualOptOut } from '../classification/multilingual-opt-out.js'
 import { classifyStopScope, STOP_SCOPE } from '../classification/stop-scope.js'
-import { matchBareNegative } from '../classification/seller-reply-families.js'
+import { bareNoAnswer } from './answers.js'
 import { makeDecision } from './contract.js'
 
 export const PRECHECK_VERSION = 'conv-ai.precheck.v2'
@@ -40,7 +40,6 @@ const UPDATE_ONLY_INTENTS = new Set(['wrong_number'])
 // reply against our last question) names it property_specific_non_owner; the
 // pre-check also reads a bare "No" against our last question itself.
 const OWNERSHIP_DENIED_INTENTS = new Set(['property_specific_non_owner', 'ownership_denied'])
-const POLITE_TAIL_RE = /(?:^|\s)(?:thanks|thank\s+you|thank\s+u|thx|ty|gracias)$/u
 
 export function deterministicPrecheck({ text, inboundId, deterministic = null, eligibility = null, lastQuestionKind = null }) {
   const body = String(text ?? '')
@@ -73,8 +72,8 @@ export function deterministicPrecheck({ text, inboundId, deterministic = null, e
       decision: makeDecision({ intent: 'hostile_or_legal', seller_interest: 'not_interested', outcome: 'NO_RESPONSE', next_objective: 'none', response_needed: false, confidence: 1, source_message_ids: src, stage_evidence: { stage: 'nurture', evidence_message_ids: src, rationale: 'deterministic pre-check: hostile without stop or legal threat — no reply, not suppressed' } }),
     }
   }
-  const bareNo = lastQuestionKind === 'ownership' ? matchBareNegative(body) : null
-  const bareOwnershipDenial = Boolean(bareNo && !POLITE_TAIL_RE.test(bareNo.canonical) && !/\p{Extended_Pictographic}/u.test(body))
+  // rc-8.5.20: the ONE shared bare-No matcher (answers.js), also used by the fact ledger
+  const bareOwnershipDenial = lastQuestionKind === 'ownership' && bareNoAnswer(body).ownership_denial
   if (OWNERSHIP_DENIED_INTENTS.has(String(signals.deterministic_intent)) || bareOwnershipDenial) {
     return {
       decided: true, reason: 'ownership_denied', signals: { ...signals, last_question_kind: lastQuestionKind, bare_no_after_ownership: bareOwnershipDenial },

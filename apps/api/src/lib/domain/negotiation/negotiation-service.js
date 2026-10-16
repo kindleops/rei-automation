@@ -9,7 +9,7 @@
 // Nothing here sends, persists a seller_offers row, or moves a stage. A formal offer is
 // persisted by the send path through seller-offer-authority.persistActiveOffer (see
 // ledger.toSellerOfferArgs); stage moves go through stage-advance.js.
-import { buildFactLedger } from '../conversation-ai/facts.js'
+import { factLedgerOf, threadLedgerFromRows } from '../conversation-ai/ledger.js'
 import { stripProtectedAttributes } from '../opportunity-economics/classify-opportunity.js'
 import { buildEnvelopeRow, scopeOf, underwritingBasis, underwritingHash } from './envelope.js'
 import { applyLedgerEvent, buildLedgerEventRow, reconcileWithSellerOffers, replayLedger, validateLedgerEvent } from './ledger.js'
@@ -17,13 +17,19 @@ import { decidePosition } from './position.js'
 
 const fail = (code, detail = null) => Object.assign(new Error(code), { code, detail })
 
-/** Seller (inbound) messages of one thread → fact ledger. Read-only, bounded (≤ 40 rows, 75 days). */
+/**
+ * One thread → THE canonical conversation ledger (rc-8.5.20: the same ledger the conversation
+ * pipeline reads; review item a). Read-only, bounded (≤ 40 rows, 75 days). Both directions are
+ * read: a bare "No" is an ownership denial only against OUR ownership question.
+ * Returns the facts.js-shaped view (`ledger`, what assessEconomics reads) AND the canonical one.
+ */
 export async function loadThreadFactLedger({ supabase, thread_key, now = new Date() }) {
   const since = new Date((now instanceof Date ? now.getTime() : Date.parse(now)) - 75 * 864e5).toISOString()
-  const r = await supabase.from('message_events').select('id,message_body,event_timestamp,created_at,detected_intent,direction,property_id').eq('thread_key', thread_key).eq('direction', 'inbound').gte('created_at', since).order('created_at', { ascending: true }).limit(40)
+  const r = await supabase.from('message_events').select('id,message_body,event_timestamp,created_at,detected_intent,direction,property_id').eq('thread_key', thread_key).gte('created_at', since).order('created_at', { ascending: true }).limit(40)
   if (r?.error) throw fail('THREAD_READ_FAILED')
-  const inbound = (r.data || []).map((m) => ({ id: String(m.id), body: m.message_body || '', at: m.event_timestamp || m.created_at, intent: m.detected_intent || null, property_id: m.property_id || null }))
-  return { ledger: buildFactLedger({ inbound, now: (now instanceof Date ? now : new Date(now)).toISOString() }), inbound_count: inbound.length }
+  const rows = r.data || []
+  const canonical = threadLedgerFromRows(rows, { now: (now instanceof Date ? now : new Date(now)).toISOString() })
+  return { ledger: factLedgerOf(canonical), canonical, inbound_count: rows.filter((m) => String(m.direction || 'inbound').toLowerCase() !== 'outbound').length }
 }
 
 async function loadAuthorityState(store, scope, { thread_key }) {
@@ -49,7 +55,7 @@ async function loadAuthorityState(store, scope, { thread_key }) {
  * @param {string} context.property_id
  * @param {string|null} [context.opportunity_id]
  * @param {{ kind?: string, amount?: number|null, terms?: object }} [context.seller_request]
- * @param {object} [context.fact_ledger]   conversation-ai buildFactLedger() for this thread
+ * @param {object} [context.fact_ledger]   conversation-ai canonical ledger (ledger.js) or its factLedgerOf() view
  * @param {object} [context.economics]     a precomputed classifyOpportunityEconomics() result
  * @param {number|string} [context.now]
  * @param {{ store, assessEconomics?: Function }} deps
