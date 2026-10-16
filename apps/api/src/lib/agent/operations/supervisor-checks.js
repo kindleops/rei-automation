@@ -52,8 +52,9 @@ const unavailable = (id, code, o = {}) => check(id, 'unavailable', { code, ...o 
  * @param {Array|{unavailable:string}} [i.approvals]    pending approvals
  * @param {object|{unavailable:string}} [i.researchValuation]  8.5.21-b agent.ops_research_valuation_snapshot row
  * @param {object|{unavailable:string}} [i.valuationBatch]     8.5.21-b latest valuation.refresh_batch finding value (+ at)
+ * @param {object|{unavailable:string}} [i.holds]              owner P0: active automation holds { count, by_type, items }
  */
-export function evaluateSupervisor({ snapshot, health = null, actionCenter = null, recovery = null, runtime = null, spend = null, approvals = null, researchValuation = null, valuationBatch = null, now = Date.now(), thresholds = SUPERVISOR_THRESHOLDS } = {}) {
+export function evaluateSupervisor({ snapshot, health = null, actionCenter = null, recovery = null, runtime = null, spend = null, approvals = null, researchValuation = null, valuationBatch = null, holds = null, now = Date.now(), thresholds = SUPERVISOR_THRESHOLDS } = {}) {
   const T = { ...SUPERVISOR_THRESHOLDS, ...thresholds }
   const checks = []
   const issues = []
@@ -207,7 +208,16 @@ export function evaluateSupervisor({ snapshot, health = null, actionCenter = nul
 
   // 7 recovery candidates (latest sweep)
   if (!recovery || recovery.unavailable) add(unavailable('recovery_candidates', recovery?.unavailable || 'RECOVERY_NOT_RUN'))
-  else add(check('recovery_candidates', 'ok', { value: { by_class: recovery.by_class || {}, at: recovery.at || null, scanned: recovery.scanned ?? null }, source: 'agent.finding (recovery.batch)' }))
+  else add(check('recovery_candidates', 'ok', { value: { by_class: recovery.by_class || {}, at: recovery.at || null, scanned: recovery.scanned ?? null, held: recovery.held ? { count: recovery.held.count, by_type: recovery.held.by_type } : null }, source: 'agent.finding (recovery.batch)' }))
+  // owner P0: held items are REPORTED ("held: operator review"), never acted on — from the recovery batch and the hold registry
+  const holdsRead = holds && !holds.unavailable ? holds : null
+  if (!holdsRead && !(recovery && !recovery.unavailable && recovery.held)) add(unavailable('automation_holds', holds?.unavailable || 'AUTOMATION_HOLDS_UNAVAILABLE'))
+  else {
+    const byType = { ...(holdsRead?.by_type || {}) }
+    for (const [k, v] of Object.entries(recovery?.held?.by_type || {})) byType[k] = Math.max(byType[k] || 0, v)
+    const items = [...(holdsRead?.items || []), ...((recovery?.held?.items) || [])].slice(0, 20)
+    add(check('automation_holds', 'ok', { value: { held_items: holdsRead?.count ?? recovery?.held?.count ?? 0, by_type: byType, items, action: 'report_only_never_act' }, source: holdsRead ? 'public.automation_holds' : 'agent.finding (recovery.batch held)' }))
+  }
 
   // ── 8.5.21-b: research status, valuation coverage, overdue offers, negotiation authority ──
   // 18 research status (property.research + valuation.refresh runtime jobs, 24 h)

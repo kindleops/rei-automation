@@ -23,6 +23,7 @@
 // otherwise). The event key dedupes: one job per (trigger, property, discriminator).
 import { enqueuePropertyResearch, propertyResearchEnabled } from './property-research-triggers.js'
 import { askFromLedger } from '../../domain/opportunity-economics/economics-service.js'
+import { consultHold, HOLD_CAPABILITIES } from '../operations/automation-hold-gate.js'
 
 export const RESEARCH_TRIGGER_HOOK_VERSION = 'lc.research-trigger-hook.v1'
 
@@ -94,10 +95,13 @@ export function researchTriggerFromTurn(e = {}) {
  * @param {object} event  researchTriggerFromTurn input
  * @param {{ store: { enqueueEvent: Function }, env?: object, web?: boolean }} deps
  */
-export async function enqueueResearchForTurn(event, { store, env = process.env, web = true } = {}) {
+export async function enqueueResearchForTurn(event, { store, env = process.env, web = true, checkAutomationHold = null } = {}) {
   if (!propertyResearchEnabled(env)) return { ok: false, reason: 'PROPERTY_RESEARCH_DISABLED' }
   const t = researchTriggerFromTurn(event)
   if (!t.trigger) return { ok: false, reason: 'NO_TRIGGER', detail: t.reason }
+  // owner P0: the automation-hold registry first (fail closed)
+  const hold = await consultHold(checkAutomationHold, { threadKey: event.thread_key || null, threadId: event.thread_id || null, propertyId: t.property_id, opportunityId: event.opportunity_id || null, capability: HOLD_CAPABILITIES.research_hook })
+  if (hold.held) return { ok: false, reason: 'AUTOMATION_HOLD', hold_type: hold.hold_type, hold_id: hold.hold_id }
   const r = await enqueuePropertyResearch({ store, env, trigger: t.trigger, property_id: t.property_id, discriminator: t.discriminator, priority: t.priority, web, now: event.now })
   return { ...r, trigger: t.trigger }
 }

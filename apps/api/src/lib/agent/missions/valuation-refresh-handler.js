@@ -21,6 +21,7 @@ import { missionIdentity } from './mission-kinds.js'
 import { decodePropertyRef, encodePropertyRef } from './mission-codec.js'
 import { buildValuationQueue, VALUATION_PRIORITY_CLASSES } from '../../domain/valuation-refresh/valuation-queue.js'
 import { valuationWriteEnabled } from '../../domain/valuation-refresh/dry-run.js'
+import { consultHold, HOLD_CAPABILITIES, heldLabel } from '../operations/automation-hold-gate.js'
 
 export const VALUATION_REFRESH_KIND = 'valuation.refresh'
 export const VALUATION_REFRESH_FLAG = 'VALUATION_REFRESH_ENABLED'
@@ -44,7 +45,7 @@ const r0 = (n) => (n == null ? null : Math.round(n))
  * @param {{ source: { candidates: Function }, runDecision: (o: { property_id: string, write: boolean, now: Date }) => Promise<object>,
  *           extraCandidates?: () => Promise<Array<object>>, env?: object, now?: () => number, limits?: object }} deps
  */
-export function createValuationRefreshHandler({ source, runDecision, extraCandidates = null, env = process.env, now = () => Date.now(), limits = {} } = {}) {
+export function createValuationRefreshHandler({ source, runDecision, extraCandidates = null, checkAutomationHold = null, env = process.env, now = () => Date.now(), limits = {} } = {}) {
   if (!source || typeof runDecision !== 'function') throw new Error('valuation.refresh: source and runDecision required')
   const L = { ...VALUATION_REFRESH_LIMITS, ...limits }
   return Object.freeze({
@@ -74,6 +75,15 @@ export function createValuationRefreshHandler({ source, runDecision, extraCandid
         if (ctx.remainingMs() < L.per_property_min_ms) ctx.yield('valuation_next_tick')
         const e = cp.queue[cp.i]
         const pid = decodePropertyRef(e.ref)
+        // owner P0: consult the automation-hold registry first (fail closed); a held property is reported, not valued
+        const hold = await consultHold(checkAutomationHold, { propertyId: pid, capability: HOLD_CAPABILITIES.valuation_refresh })
+        if (hold.held) {
+          R.held = (R.held || 0) + 1
+          await ctx.recordFinding({ finding_type: 'valuation.dry_run', key: `property.${e.ref}`, source_id: 'automation_hold', value: { mode: write ? 'write' : 'dry_run', class: e.class, need: e.need, status: 'held', label: heldLabel(hold), hold_type: hold.hold_type, hold_id: hold.hold_id, writes: 0 }, confidence: 1 })
+          cp.i += 1
+          await ctx.step('value.held', { progress: { step: 'value', steps_done: 1, steps_total: 3, pct: Math.min(95, 10 + Math.round((cp.i / Math.max(cp.queue.length, 1)) * 85)) }, checkpoint: cp, payload: { done: cp.i, of: cp.queue.length, status: 'held' } })
+          continue
+        }
         const r = await runDecision({ property_id: pid, write, now: new Date(now()) }).catch((err) => ({ ok: false, error: String(err?.code || err?.message || 'ENGINE_ERROR').slice(0, 80), before: { present: false }, after: { present: false } }))
         const before = r.before || { present: false }
         const after = r.after || { present: false }

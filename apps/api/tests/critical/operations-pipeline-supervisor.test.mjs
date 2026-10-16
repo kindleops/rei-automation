@@ -89,7 +89,7 @@ const RUNTIME = { jobs: [{ kind: 'ops.health_check', state: 'completed' }, { kin
 // 8.5.21-b: the research / valuation read (agent.ops_research_valuation_snapshot) of a healthy pipeline
 const RV = { valuation: { live: 10, with_score: 10, offer_ready: 8, missing: 0, stale_30d: 0, by_tier: { AUTO_HARD_OFFER: 8, CREATIVE_TERMS: 2 } }, offers: { sent_30d: 4, overdue_no_reply_72h: 0, overdue_opportunity_ids: [] }, negotiations: { envelopes: 2, live_envelopes: 1, ledger_events_7d: 3, send_authorizations: 0, in_negotiation_stage: 3 } }
 const SPEND = { day_usd: 0.1, cycle_usd: 2, limits: { day_usd: 5, cycle_usd: 150 } }
-const full = (o = {}) => evaluateSupervisor({ snapshot: snapshot(o.snap), health: health(), actionCenter: AC, recovery: { by_class: { research_worthy: 1 } }, runtime: RUNTIME, spend: SPEND, approvals: [], researchValuation: RV, valuationBatch: { at: at(T0 - 2 * H), queued: 5, gained_offer_ready: 2, gained_valuation: 3, mode: 'dry_run' }, now: T0, ...o })
+const full = (o = {}) => evaluateSupervisor({ snapshot: snapshot(o.snap), health: health(), actionCenter: AC, recovery: { by_class: { research_worthy: 1 } }, runtime: RUNTIME, spend: SPEND, approvals: [], researchValuation: RV, valuationBatch: { at: at(T0 - 2 * H), queued: 5, gained_offer_ready: 2, gained_valuation: 3, mode: 'dry_run' }, holds: { count: 0, by_type: {}, items: [] }, now: T0, ...o })
 
 test('supervisor: a healthy fixture is all clear — and all clear REQUIRES every check to have been read', () => {
   const ev = full()

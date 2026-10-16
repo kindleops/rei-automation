@@ -82,6 +82,7 @@ function closingRequirements({ economics, facts = {}, complexity = {} }) {
  * @param {object} [a.facts]         fact summary (closing requirements)
  * @param {object} [a.complexity]
  * @param {object|null} [a.envelope_terms] allowed terms of a live envelope (concession ladder)
+ * @param {object|null} [a.hold]  consultHold() verdict for the thread / property (owner P0)
  */
 export function buildNegotiationPathway(input = {}) {
   const { value: a, stripped } = stripProtectedAttributes(input || {})
@@ -102,7 +103,9 @@ export function buildNegotiationPathway(input = {}) {
 
   let next
   const missing = e.uncertainty?.missing || []
-  if (landFirst?.path === 'investigate_zoning_density_first') next = 'verify_zoning_and_entitled_density'
+  // owner P0: a thread / property under an automation hold is REPORTED, never worked
+  if (a.hold?.held) next = `held:${a.hold.hold_type || 'unknown'}`
+  else if (landFirst?.path === 'investigate_zoning_density_first') next = 'verify_zoning_and_entitled_density'
   else if (landFirst?.path === 'development_feasibility_review') next = 'operator_development_feasibility_review'
   else if (e.class === 'PASS') next = judgment?.path === 'nurture_realistic_price' ? 'nurture_with_realistic_band_operator_only' : 'no_offer_keep_record'
   else if (e.class === 'NURTURE') next = 'thirty_day_follow_up_inside_approved_program'
@@ -130,6 +133,7 @@ export function buildNegotiationPathway(input = {}) {
     land_zoning_first: landFirst,
     uncertainty: e.uncertainty || null,
     next_action: next,
+    hold: a.hold?.held ? { hold_type: a.hold.hold_type || null, hold_id: a.hold.hold_id || null, action: 'report_only' } : null,
     sends: 'never_from_this_view',
     ignored: { protected_attributes_stripped: stripped },
   }

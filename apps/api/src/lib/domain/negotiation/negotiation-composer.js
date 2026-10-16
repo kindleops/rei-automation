@@ -31,6 +31,7 @@ import { scopeKey } from './envelope.js'
 import { sendAuthorizationStatus } from './send-authorization.js'
 import { toSellerOfferArgs } from './ledger.js'
 import { renderTemplate } from '../templates/render-template.js'
+import { consultHold, HOLD_CAPABILITIES } from '../../agent/operations/automation-hold-gate.js'
 
 export const NEGOTIATION_COMPOSER_VERSION = 'lc.negotiation-composer.v1'
 export const NEGOTIATION_COMPOSER_FLAG = 'NEGOTIATION_COMPOSER_ENABLED'
@@ -97,8 +98,11 @@ export function forbiddenClaimViolations(text) {
  * @param {{ language?: string, template_context?: object, sends_used?: number }} [a.thread]
  * @param {object} [a.env]
  */
-export async function composeNegotiationReply({ outcome, context = {}, deps = {}, sendAuthorizations = null, templates = [], thread = {}, env = process.env } = {}) {
+export async function composeNegotiationReply({ outcome, context = {}, deps = {}, sendAuthorizations = null, templates = [], thread = {}, checkAutomationHold = null, env = process.env } = {}) {
   if (!negotiationComposerEnabled(env)) return escalate('negotiation_composer_disabled')
+  // owner P0: the automation-hold registry first (fail closed); a held thread gets no draft
+  const hold = await consultHold(checkAutomationHold, { threadKey: context.thread_key || null, propertyId: context.property_id || null, opportunityId: context.opportunity_id || null, capability: HOLD_CAPABILITIES.negotiation_compose })
+  if (hold.held) return escalate(`automation_hold:${hold.hold_type || 'unknown'}`, { hold })
   const now = typeof context.now === 'number' ? context.now : Date.parse(context.now || '') || Date.now()
   const handled = await handleDecisionOutcome(outcome, { ...context, now }, deps)
   const view = handled.composer_view || composerView(handled.position)
@@ -158,12 +162,12 @@ export async function composeNegotiationReply({ outcome, context = {}, deps = {}
  * { action, reason, template_use_case, authority_ref } — the runtime that wants the rendered text calls
  * composeNegotiationReply directly.
  */
-export function createEnvelopeNegotiationAuthority({ resolveContext, deps, sendAuthorizations, templatesFor, env = process.env }) {
+export function createEnvelopeNegotiationAuthority({ resolveContext, deps, sendAuthorizations, templatesFor, checkAutomationHold = null, env = process.env }) {
   const run = (outcome) => async (pctx) => {
     const resolved = await resolveContext(pctx).catch(() => null)
     if (!resolved?.context?.thread_key || !resolved?.context?.property_id) return { action: 'ESCALATE_TO_OPERATOR', reason: 'negotiation_context_unresolved' }
     const templates = typeof templatesFor === 'function' ? await templatesFor(resolved).catch(() => []) : []
-    const r = await composeNegotiationReply({ outcome, context: resolved.context, deps, sendAuthorizations, templates, thread: resolved.thread || {}, env })
+    const r = await composeNegotiationReply({ outcome, context: resolved.context, deps, sendAuthorizations, templates, thread: resolved.thread || {}, checkAutomationHold, env })
     return { action: r.action, reason: r.reason, template_use_case: r.template_use_case || null, authority_ref: r.authority_ref ? `${r.authority_ref.envelope_id}:${r.authority_ref.send_authorization_id}` : null }
   }
   return Object.freeze({ version: NEGOTIATION_COMPOSER_VERSION, prepareOffer: run('PREPARE_OFFER'), negotiateWithinAuthority: run('NEGOTIATE_WITHIN_AUTHORITY') })
