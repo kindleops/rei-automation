@@ -16,16 +16,20 @@ import { activeThread, ask, getAsk, newThread, openThread, stopTurn } from '../.
 import { fetchLiveHistory, liveFailureCopy, type LiveHistoryRow } from '../../agent/runtime/live-transport'
 import {
   cancelMission as cancelMissionCall, createMission as createMissionCall, decideApproval, fetchCapabilities, fetchMission, fetchMissions, fetchPlatformHealth, fetchShadow, isTerminalMission, mergeMissionDetail, getApproval, invokeCapability, listApprovals,
+  fetchActionCenter, fetchBrief, fetchSupervisor, fetchWorkItems, decideWorkItem as decideWorkItemCall,
   type CapabilityApproval, type CapabilityDescriptor, type InvokeOutcome, type PlaneFailure, type PlaneResult, type MissionCreate, type MissionDetail, type MissionPage, type ShadowPage,
+  type ActionCenterPage, type OperatingBrief, type SupervisorRun, type WorkItemPage, type WorkItemAction,
 } from '../api/ic-client'
 import { decideMessage } from '../model/act-model'
 import { EMPTY_HISTORY, PLAN_COMMAND, historyNext, historyPrev, pushHistory, type ComposerMode, type History } from '../model/composer-model'
 import { EMPTY_CHIPS, addManual, clearManual, reconcile, removeChip, toMentionChips, type ChipState, type IcChip, type PageContext } from '../model/context-model'
 import { DECIDE_CODE_LABEL } from '../../agent/approvals/approvals-transport'
 
-export type Section = 'conversations' | 'shadow' | 'missions' | 'research' | 'findings' | 'approvals' | 'activity' | 'workforce' | 'health'
+export type Section = 'conversations' | 'shadow' | 'action_center' | 'brief' | 'missions' | 'research' | 'findings' | 'approvals' | 'activity' | 'workforce' | 'health'
 export const SECTIONS: ReadonlyArray<{ id: Section; label: string }> = [
   { id: 'conversations', label: 'Conversations' },
+  { id: 'action_center', label: 'Action Center' },
+  { id: 'brief', label: 'Daily brief' },
   { id: 'missions', label: 'Missions' },
   { id: 'research', label: 'Research' },
   { id: 'findings', label: 'Findings' },
@@ -77,6 +81,13 @@ export interface IcState {
   quickScans: Load<LiveHistoryRow[]>
   health: Load<InvokeOutcome>
   missionNote: string | null
+  /** rc-8.5.20 C operations read model */
+  actionCenter: Load<ActionCenterPage>
+  actionFilter: string | null
+  workItems: Load<WorkItemPage>
+  supervisor: Load<SupervisorRun>
+  brief: Load<OperatingBrief>
+  workNote: string | null
 }
 
 const KEY = 'lc.ic.v1'
@@ -85,6 +96,7 @@ const HISTORY_KEY = 'lc.ic.history.v1'
 const INITIAL: IcState = {
   section: 'conversations', overlay: false, mode: 'ask', draft: '', chips: EMPTY_CHIPS, history: EMPTY_HISTORY, turnModes: {}, acts: [], inspector: null, expanded: {}, focusTick: 0,
   capabilities: idle(), approvals: idle(), missions: idle(), mission: idle(), shadow: idle(), quickScans: idle(), health: idle(), missionNote: null,
+  actionCenter: idle(), actionFilter: null, workItems: idle(), supervisor: idle(), brief: idle(), workNote: null,
 }
 
 let state: IcState = INITIAL
@@ -195,7 +207,7 @@ export function openConversation(id: string) { openThread(id); set({ section: 'c
 
 /* ── loads ─────────────────────────────────────────────────────────────── */
 
-type LoadKey = 'capabilities' | 'approvals' | 'missions' | 'shadow' | 'health'
+type LoadKey = 'capabilities' | 'approvals' | 'missions' | 'shadow' | 'health' | 'actionCenter' | 'workItems' | 'supervisor' | 'brief'
 const inflight = new Map<string, Promise<void>>()
 function load<K extends LoadKey>(key: K, fn: () => Promise<PlaneResult<NonNullable<IcState[K]['data']>>>): Promise<void> {
   const prior = inflight.get(key)
@@ -214,6 +226,19 @@ export const refreshApprovals = () => load('approvals', () => listApprovals('pen
 export const refreshMissions = () => load('missions', () => fetchMissions({ scope: 'mine', limit: 50 }))
 export const refreshShadow = () => load('shadow', () => fetchShadow(50))
 export const refreshHealth = () => load('health', () => fetchPlatformHealth())
+
+/* ── operations (rc-8.5.20 C): the server derives every state; the browser only reads and decides work items ── */
+export const refreshActionCenter = () => load('actionCenter', () => fetchActionCenter({ state: getIc().actionFilter, limit: 100 }))
+export const refreshWorkItems = () => load('workItems', () => fetchWorkItems(['open', 'acknowledged']))
+export const refreshSupervisor = () => load('supervisor', () => fetchSupervisor())
+export const refreshBrief = () => load('brief', () => fetchBrief())
+export function setActionFilter(state: string | null) { set({ actionFilter: state }, false); void refreshActionCenter() }
+/** Acknowledge / resolve / dismiss / reopen one work item; the note is the server's own answer. */
+export async function decideWork(id: string, action: WorkItemAction) {
+  const r = await decideWorkItemCall(id, action)
+  set({ workNote: r.ok ? `${action} → ${r.data.action} (was ${r.data.from})` : `${r.code}: ${r.message}` }, false)
+  await Promise.all([refreshWorkItems(), refreshActionCenter()])
+}
 
 export async function refreshQuickScans() {
   set((s) => ({ quickScans: { ...s.quickScans, phase: s.quickScans.data ? s.quickScans.phase : 'loading' } }), false)

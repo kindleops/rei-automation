@@ -522,3 +522,23 @@
 .ic-state:is(.is-waiting, .is-cancelling) { color: var(--lc-ink-2); box-shadow: inset 0 0 0 1px var(--ic-line-hi); }
 .ic-trace li { grid-template-columns: 76px minmax(0, 1fr); }
 .ic-trace time { white-space: nowrap; }
+
+/* ── rc-8.5.20 C · Action Center + daily brief (pane material only: lines and lift, no fills) ── */
+.ic-ops__kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px; margin: 4px 0 6px; }
+.ic-ops__kpi { all: unset; box-sizing: border-box; cursor: pointer; display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--ic-line); transition: background 0.14s var(--ic-ease); }
+.ic-ops__kpi b { font: 650 17px/1.1 var(--lc-font-ui); color: var(--lc-ink-1); font-variant-numeric: tabular-nums; }
+.ic-ops__kpi span { font: 560 11px/1.25 var(--lc-font-ui); color: var(--lc-ink-3); }
+.ic-ops__kpi em { font: 600 10.5px/1.2 var(--lc-font-ui); font-style: normal; color: rgb(var(--lc-crit-rgb)); }
+.ic-ops__kpi:hover { background: var(--ic-lift); }
+.ic-ops__kpi.is-on { background: var(--ic-lift); box-shadow: inset 0 0 0 1px var(--ic-line-hi); }
+.ic-ops__kpi.is-active-queue { box-shadow: inset 0 0 0 1px rgba(var(--lc-attn-rgb), 0.35); }
+.ic-table__h.is-ops, .ic-table__r.is-ops { grid-template-columns: minmax(120px, 0.9fr) 150px minmax(0, 1.6fr) 120px minmax(0, 1fr) minmax(0, 1.4fr); }
+.ic-table__r.is-ops code { font: 500 11.5px/1 var(--ic-mono); color: var(--lc-ink-2); }
+.ic-row.is-work { grid-template-columns: auto minmax(0, 1fr) auto; }
+.ic-ops__acts { display: inline-flex; align-items: center; gap: 10px; }
+.ic-ops__val { min-width: 74px; font: 650 12.5px/1 var(--lc-font-ui); font-variant-numeric: tabular-nums; color: var(--lc-ink-1); }
+.ic-ops__brief + .ic-ops__brief { margin-top: 4px; }
+.ic-state:is(.is-needs_attention) { color: rgb(var(--lc-attn-rgb)); box-shadow: inset 0 0 0 1px rgba(var(--lc-attn-rgb), 0.35); }
+.ic-state:is(.is-ai_handling, .is-researching, .is-negotiating) { color: var(--ic-cobalt); box-shadow: inset 0 0 0 1px rgba(var(--ic-cobalt-rgb), 0.4); }
+.ic-state:is(.is-awaiting_operator_decision, .is-scheduled_follow_up) { color: var(--ic-gold); box-shadow: inset 0 0 0 1px rgba(var(--ic-gold-rgb), 0.4); }
+.ic-state:is(.is-suppressed_ineligible, .is-unavailable) { color: var(--lc-ink-4); }
