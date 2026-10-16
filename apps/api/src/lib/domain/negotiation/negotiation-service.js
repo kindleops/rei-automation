@@ -58,7 +58,8 @@ async function loadAuthorityState(store, scope, { thread_key }) {
  * @param {object} [context.fact_ledger]   conversation-ai canonical ledger (ledger.js) or its factLedgerOf() view
  * @param {object} [context.economics]     a precomputed classifyOpportunityEconomics() result
  * @param {number|string} [context.now]
- * @param {{ store, assessEconomics?: Function }} deps
+ * @param {object} [context.offer_plan]   a precomputed property-research planOffer() result (8.5.20-b)
+ * @param {{ store, assessEconomics?: Function, planOffer?: Function }} deps
  */
 export async function preparePosition(context = {}, deps = {}) {
   const { value: ctx } = stripProtectedAttributes(context)
@@ -75,6 +76,10 @@ export async function preparePosition(context = {}, deps = {}) {
   if (!economics && typeof deps.assessEconomics === 'function') {
     economics = await deps.assessEconomics({ property_id: scope.property_id, thread_key: ctx.thread_key, ledger: ctx.fact_ledger || {}, now: new Date(now) }).catch(() => null)
   }
+  let offer_plan = ctx.offer_plan || null
+  if (!offer_plan && typeof deps.planOffer === 'function') {
+    offer_plan = await deps.planOffer({ property_id: scope.property_id, economics, envelope: latest.envelope, seller_request: ctx.seller_request || {}, fact_ledger: ctx.fact_ledger || {}, now: new Date(now) }).catch(() => null)
+  }
   const position = decidePosition({
     scope: { thread_key: ctx.thread_key, property_id: scope.property_id, opportunity_id: scope.opportunity_id },
     economics,
@@ -82,10 +87,12 @@ export async function preparePosition(context = {}, deps = {}) {
     envelope_meta: { revoked: latest.revoked, latest_version: latest.latest_version },
     ledger,
     seller_request: ctx.seller_request || {},
+    offer_plan,
     now,
   })
   return {
     ...position,
+    offer_plan_summary: offer_plan ? { available: Boolean(offer_plan.available), reason: offer_plan.reason || null, visibility: 'internal_only' } : null,
     scope: { thread_ref: scope.thread_ref, property_id: scope.property_id },
     economics: economics ? { class: economics.class, reasons: economics.reasons, uncertainty: economics.uncertainty } : null,
     ledger: { status: ledger.status, seq: ledger.seq, last_our_amount: ledger.last_our_amount, last_seller_amount: ledger.last_seller_amount, flags: ledger.flags },

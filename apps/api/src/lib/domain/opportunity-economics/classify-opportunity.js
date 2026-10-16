@@ -40,6 +40,8 @@ import { resolveTargetAssignmentMargin } from '../../acquisition/assignmentMargi
 import { resolveValuationSpendability } from '../seller-flow/valuation-offer-authority.js'
 import { assessDealEconomics, resolveReferenceValue, DEAL_ECONOMICS_VERDICTS as V } from '../inbox/deal-economics-gate.js'
 import { assessDealAmount } from '../opportunity/stage-advance-guard.js'
+import { LAND_DENSITY_RE, LAND_SINGLE_RE } from './zoning-density.js'
+import { assessImpossibleAsk, executionFriction } from './negotiation-judgment.js'
 
 export const ECONOMICS_VERSION = 'opportunity-economics.v1'
 export const ECONOMICS_CLASSES = Object.freeze(['HOT', 'NEGOTIATE', 'NURTURE', 'PASS', 'INVESTIGATE'])
@@ -83,6 +85,9 @@ export function stripProtectedAttributes(input) {
   const stripped = []
   const walk = (v, path) => {
     if (Array.isArray(v)) return v.map((x, i) => walk(x, `${path}[${i}]`))
+    // 8.5.20-b: a Date (pg returns timestamptz / date columns as Date) is a value, not a map —
+    // walking it produced {} and silently erased every timestamp (score computed_at, sale dates)
+    if (v instanceof Date) return new Date(v.getTime())
     if (v && typeof v === 'object') {
       const o = {}
       for (const [k, x] of Object.entries(v)) {
@@ -192,10 +197,7 @@ export function buyerDemandLevel({ valuation = null, market = null } = {}) {
   return { level, score, liquidity: engineFallback ? null : liquidity, investor_count: investorCount, evidence }
 }
 
-const LAND_DENSITY_RE = /\b(r-?[2-9]|rm|r-?m|mf|multi|pud|planned|c-?\d|commercial|mixed|mu-?\d?|townhome|duplex|high density|medium density)\b/i
-const LAND_SINGLE_RE = /\b(r-?1|rs-?\d*|sf-?\d*|r1|single[- ]family|rural residential|ag|a-?1|agricultur)\b/i
-
-function landAssessment({ ask, property, market }) {
+function landAssessment({ ask, property, market, flex = { score: 0 } }) {
   const finished = pos(market?.completed_home_median)
   const zoning = String(property?.zoning ?? '').trim()
   const acres = num(property?.lot_acreage) ?? (num(property?.lot_square_feet) != null ? num(property.lot_square_feet) / 43_560 : null)
@@ -208,7 +210,10 @@ function landAssessment({ ask, property, market }) {
   if (ratio >= 1) {
     if (!zoning && property?.is_development_land == null) return { cls: 'INVESTIGATE', reasons: ['land_ask_at_or_above_finished_home_value', 'zoning_unknown'], evidence, missing: ['zoning'] }
     if (devPotential) return { cls: 'INVESTIGATE', reasons: ['land_ask_at_or_above_finished_home_value', 'development_potential_needs_land_analysis'], evidence, missing: ['entitled_density_and_land_comps'] }
-    if (singleOnly) return { cls: 'PASS', reasons: ['land_ask_at_or_above_finished_home_value', 'zoning_single_family_no_development_upside'], evidence, missing: [] }
+    // 8.5.20-b (Phase 7): unworkable at this ask — PASS, unless the seller shows flexibility (then a realistic-price nurture)
+    if (singleOnly) return flex.score > 0
+      ? { cls: 'NURTURE', reasons: ['land_ask_at_or_above_finished_home_value', 'zoning_single_family_no_development_upside', 'seller_flexibility_realistic_price_path'], evidence, missing: [] }
+      : { cls: 'PASS', reasons: ['land_ask_at_or_above_finished_home_value', 'zoning_single_family_no_development_upside'], evidence, missing: [] }
     return { cls: 'INVESTIGATE', reasons: ['land_ask_at_or_above_finished_home_value', 'zoning_unclassified'], evidence, missing: ['zoning_interpretation'] }
   }
   if (ratio > ECONOMICS_RULES.land_residual_share) {
@@ -229,6 +234,8 @@ function landAssessment({ ask, property, market }) {
  * @param {object} [input.facts]      conversation-ai factSummary(ledger)
  * @param {object} [input.complexity] { owners_count, probate, multi_property, liens, foreclosure, title_issue }
  * @param {object} [input.responsiveness] accepted and IGNORED (recorded as such)
+ * @param {string[]} [input.seller_messages] the seller's (masked) inbound texts — execution friction only
+ * @param {number|null} [input.our_last_offer] our last amount on the ledger — re-trade detection only
  * @param {string|number} [input.now]
  */
 export function classifyOpportunityEconomics(input = {}) {
@@ -312,6 +319,9 @@ export function classifyOpportunityEconomics(input = {}) {
         value_range: metrics.realistic_value.low && metrics.realistic_value.high ? [metrics.realistic_value.low, metrics.realistic_value.high] : null,
       },
       ignored: { responsiveness: clean.responsiveness != null, assertiveness_not_an_input: true, protected_attributes_stripped: stripped },
+      // 8.5.20-b Phase 7 (analysis): what to do with an impossible ask, and measurable friction
+      judgment: assessImpossibleAsk({ lane, economics_class: cls, ask, property, market, flexibility: flex, mao, value_mid: ref.value }),
+      execution_friction: executionFriction({ facts, ask_history, complexity, seller_messages: Array.isArray(clean.seller_messages) ? clean.seller_messages : [], our_last_offer: clean.our_last_offer ?? null }),
     }
   }
 
@@ -323,7 +333,7 @@ export function classifyOpportunityEconomics(input = {}) {
   if (laneInfo.identity_conflict) conflicts.push('asset_identity_conflict')
   if (laneInfo.conflicts.length) conflicts.push(...laneInfo.conflicts.map((c) => `lane:${c}`))
   if (lane === 'land') {
-    const land = landAssessment({ ask, property, market })
+    const land = landAssessment({ ask, property, market, flex })
     reasons.push(...land.reasons)
     missing.push(...land.missing)
     return finish(land.cls, { evidence: { land: land.evidence } })

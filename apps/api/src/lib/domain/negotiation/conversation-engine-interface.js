@@ -31,6 +31,16 @@
 //              escalation: null | { reasons: string[], operator_action },
 //              economics: { class, reasons, uncertainty } | null, ledger: {...}, notes: string[] }
 //
+//   8.5.20-b ADDITIONS (additive; v1 contract unchanged):
+//     handleDecisionOutcome(...) also returns composer_view = composerView(position): the ONLY
+//     projection the composer may read (status, move kind + amount, allowed terms, forbidden
+//     claims). position.proposed_envelope.offer_plan (opening range, ceiling, terms, expiry,
+//     escalation conditions) and every metric stay INTERNAL — route them to the operator only.
+//     checkSellerFacingText(draft, { position, economics, envelope, plan }) MUST pass before a
+//     draft is queued: any internal number (ceiling / envelope max / target / value / margin)
+//     other than move.amount, any amount without authority, ceiling language or comp detail
+//     ⇒ hold for a human. deps.planOffer (property-research planOfferForProperty) is optional.
+//
 //   ENGINE RULES (binding on the 8.5.16 caller):
 //     • status !== 'within_authority' ⇒ the draft carries NO amount. needs_envelope ⇒ route the
 //       proposed_envelope to an operator; escalate ⇒ NEEDS_REVIEW with escalation.reasons.
@@ -58,6 +68,7 @@ import { assessOpportunityEconomics } from '../opportunity-economics/economics-s
 import { classifyOpportunityEconomics, ECONOMICS_CLASSES } from '../opportunity-economics/classify-opportunity.js'
 import { recordOperatorFeedback, createSupabaseFeedbackStore, FEEDBACK_KINDS } from '../operator-feedback/feedback.js'
 import { POSITION_STATUSES, FORBIDDEN_CLAIMS } from './position.js'
+import { composerView, checkSellerFacingText } from './seller-facing-guard.js'
 
 export const NEGOTIATION_INTERFACE_VERSION = 'lc.negotiation-interface.v1'
 export const DECISION_OUTCOMES_HANDLED = Object.freeze(['PREPARE_OFFER', 'NEGOTIATE_WITHIN_AUTHORITY'])
@@ -68,12 +79,13 @@ export const DECISION_OUTCOMES_HANDLED = Object.freeze(['PREPARE_OFFER', 'NEGOTI
  */
 export async function handleDecisionOutcome(outcome, context, deps) {
   if (!DECISION_OUTCOMES_HANDLED.includes(outcome)) {
-    return { outcome, position: { contract_version: 'negotiation.position.v1', status: 'escalate', move: null, escalation: { reasons: [`outcome_not_handled:${String(outcome).slice(0, 40)}`], operator_action: 'review_and_decide' }, forbidden_claims: [...FORBIDDEN_CLAIMS] }, next: 'escalate_to_operator' }
+    const position = { contract_version: 'negotiation.position.v1', status: 'escalate', move: null, escalation: { reasons: [`outcome_not_handled:${String(outcome).slice(0, 40)}`], operator_action: 'review_and_decide' }, forbidden_claims: [...FORBIDDEN_CLAIMS] }
+    return { outcome, position, composer_view: composerView(position), next: 'escalate_to_operator' }
   }
   const request = outcome === 'PREPARE_OFFER' ? { kind: 'asks_offer', ...(context?.seller_request || {}) } : context?.seller_request || {}
   const position = await preparePosition({ ...context, seller_request: request }, deps)
   const next = position.status === 'within_authority' ? 'compose_with_authorized_move' : position.status === 'needs_envelope' ? 'route_envelope_request_to_operator' : 'escalate_to_operator'
-  return { outcome, position, next }
+  return { outcome, position, composer_view: composerView(position), next }
 }
 
 /** Production deps: the Supabase negotiation store + read-only economics. */
@@ -99,4 +111,6 @@ export {
   FEEDBACK_KINDS,
   POSITION_STATUSES,
   FORBIDDEN_CLAIMS,
+  composerView,
+  checkSellerFacingText,
 }

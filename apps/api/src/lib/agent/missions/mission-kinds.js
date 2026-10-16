@@ -14,11 +14,13 @@ export const MISSION_SUPERVISOR_KIND = 'mission.supervisor'
 export const DISCOVERY_KIND = 'acquisition.discovery'
 export const REVIEW_DIGEST_KIND = 'conversation.review_digest'
 export const OPS_HEALTH_KIND = 'ops.health_check'
+/** 8.5.20-b: autonomous property research (event + sweep enqueue only; OFF by default). */
+export const PROPERTY_RESEARCH_KIND = 'property.research'
 
 /** Kinds the Missions API lists / creates (operator missions). */
 export const OPERATOR_MISSION_KINDS = Object.freeze([MISSION_RESEARCH_KIND, MISSION_SUPERVISOR_KIND])
 /** Every kind this release adds a handler for. */
-export const MISSION_HANDLER_KINDS = Object.freeze([MISSION_RESEARCH_KIND, MISSION_SUPERVISOR_KIND, DISCOVERY_KIND, REVIEW_DIGEST_KIND])
+export const MISSION_HANDLER_KINDS = Object.freeze([MISSION_RESEARCH_KIND, MISSION_SUPERVISOR_KIND, DISCOVERY_KIND, REVIEW_DIGEST_KIND, PROPERTY_RESEARCH_KIND])
 
 export const MISSIONS_FLAG = 'AGENT_MISSIONS_ENABLED'
 

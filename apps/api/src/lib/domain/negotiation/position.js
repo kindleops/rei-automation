@@ -16,6 +16,7 @@
 //   • no envelope ⇒ no amount;  • amount ≤ envelope.max_price, always;
 //   • scope mismatch ⇒ escalate; • expiry ⇒ needs_envelope;
 //   • protected attributes are stripped before anything is read;
+//   • an 'open' move is strictly below the envelope max and the engine MAO (8.5.20-b);
 //   • cash availability, proof of funds and closing dates are never asserted
 //     (forbidden_claims) — only the operator-granted terms may be stated.
 import { stripProtectedAttributes } from '../opportunity-economics/classify-opportunity.js'
@@ -85,7 +86,7 @@ export function decidePosition(input = {}) {
 
   const st = envelopeStatus(env, { scope_key: sk, now, revoked: meta.revoked, latest_version: meta.latest_version })
   if (!st.live) {
-    return base('needs_envelope', { reason: st.reason, ignored, proposed_envelope: buildProposedEnvelope({ economics, ...scope, now }), economics_class: economics?.class ?? null })
+    return base('needs_envelope', { reason: st.reason, ignored, proposed_envelope: buildProposedEnvelope({ economics, ...scope, now, offer_plan: a.offer_plan || null }), economics_class: economics?.class ?? null })
   }
 
   const t = envelopeTerms(env)
@@ -145,6 +146,9 @@ export function decidePosition(input = {}) {
       just.push(`seller at ${usd(sellerAmount)} ≤ opening ${usd(open)}: agree at the seller's number`)
       return within('agree_at_seller_price', sellerAmount, 'FORMAL_OFFER', 'our_offer')
     }
+    // 8.5.20-b: the ceiling is never the opening — an opening at (or above) the envelope max
+    // or the engine MAO is not opened by the engine; the operator sets one below it.
+    if (open >= max || (mao != null && open >= mao)) return escalate(['opening_not_below_ceiling'], { envelope_ref, ignored, operator_action: 'set_an_opening_price_below_the_ceiling' })
     just.push(`open at the operator-granted opening ${usd(open)} (≤ max); open below range`)
     if (sellerAmount != null) just.push(`seller asks ${usd(sellerAmount)}`)
     return within('open', open, 'FORMAL_OFFER', 'our_offer')
