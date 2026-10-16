@@ -22,7 +22,7 @@
 // EXCLUDED: any stop / opt-out / suppression, wrong number, ownership denial (those are not
 // "not interested"), a newer meaningful seller message (that is a reopen, not this plan).
 import { classifyRecoveryCandidate } from './recovery-classifier.js'
-import { STAGES } from './conversation-facts.js'
+import { STAGES, closedVerdict } from './conversation-facts.js'
 
 export const DEAD_DEAL_CORRECTION_VERSION = 'dead-deal-correction.v1'
 export const CORRECTION_NEXT_ACTION = 'not_interested_30d_follow_up'
@@ -41,6 +41,9 @@ export function buildNotInterestedCorrectionPlan(facts = [], { now = Date.now() 
   const seenOpp = new Set()
   for (const f of facts) {
     const c = classifyRecoveryCandidate(f, { now, approved_programs: [] })
+    // 8.5.21-b: a closed deal whose "No" was an OWNERSHIP denial (canonical ledger) is a property-scoped denial,
+    // never a 30-day nurture — counted, kept out of the plan
+    if (c.class === 'wrong_owner_or_number' && c.permission.blocks.includes('ownership_denied')) { const cv = closedVerdict(f); if (cv.closed && cv.after_not_interested) { skip('ownership_denied_property_scoped'); continue } }
     if (c.class !== 'previously_closed' || !c.reasons.includes('closed_after_not_interested_policy_says_30_day_follow_up')) continue
     const o = f.opportunity
     if (!o?.opportunity_id || !UUID.test(o.opportunity_id)) { skip('no_opportunity_id'); continue }
@@ -61,6 +64,7 @@ export function buildNotInterestedCorrectionPlan(facts = [], { now = Date.now() 
       policy: 'seller_policy:not_interested_is_30_day_follow_up',
       evidence_refs: c.evidence_refs.slice(0, 6),
       ownership: c.permission.ownership,
+      ownership_evidence: f.ownership_evidence || 'none_read',
       followup_send: 'none_by_this_plan:follow_up_engine_inside_approved_program_only',
     })
   }
@@ -69,6 +73,7 @@ export function buildNotInterestedCorrectionPlan(facts = [], { now = Date.now() 
   return {
     version: DEAD_DEAL_CORRECTION_VERSION,
     status: 'PROPOSED_DRY_RUN_NOT_APPLIED',
+    scope: 'historical_recovery_requires_its_own_owner_approved_scope (no bulk backfill)',
     generated_at: new Date(now).toISOString(),
     count: entries.length,
     by_before_status,

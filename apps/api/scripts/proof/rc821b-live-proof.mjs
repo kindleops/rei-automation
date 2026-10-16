@@ -23,6 +23,7 @@ import { buildValuationQueue, classifyValuationCandidate } from '../../src/lib/d
 import { createValuationSqlSource } from '../../src/lib/domain/valuation-refresh/valuation-source.js'
 import { runValuationRefresh } from '../../src/lib/domain/valuation-refresh/dry-run.js'
 import { encodePropertyRef } from '../../src/lib/agent/missions/mission-codec.js'
+import { ownershipEvidenceFromThread, nurtureIntentFor } from '../../src/lib/agent/operations/ownership-evidence.js'
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d }
 const PHASE = arg('--phase', 'valuation')
@@ -145,10 +146,26 @@ async function phaseValuation() {
 
 // ── plan ────────────────────────────────────────────────────────────────────
 async function phasePlan() {
-  const facts = await allConversationFacts()
+  const facts0 = await allConversationFacts()
+  // 8.5.21-b owner fix: canonical-ledger ownership evidence for the closed-after-not-interested candidates
+  // (bodies read in-process only, never written out; bounded to those candidates)
+  const first = ops.buildNotInterestedCorrectionPlan(facts0, { now })
+  const candIds = first.entries.map((e) => e.conversation_id)
+  const evidence = {}
+  for (let i = 0; i < candIds.length; i += 100) {
+    const part = await withRo(({ query }) => query(`select t.id::text conversation_id, coalesce(jsonb_agg(jsonb_build_object('id', m.id::text, 'direction', m.direction, 'message_body', m.message_body, 'created_at', m.created_at, 'detected_intent', m.detected_intent) order by m.created_at) filter (where m.id is not null), '[]') msgs
+      from public.inbox_thread_state t left join lateral (select id, direction, message_body, created_at, detected_intent from public.message_events me where me.thread_key = t.thread_key order by created_at desc limit 60) m on true
+      where t.id = any($1::uuid[]) group by t.id`, [candIds.slice(i, i + 100)]))
+    for (const r of part) evidence[r.conversation_id] = ownershipEvidenceFromThread(r.msgs, { now: nowIso })
+  }
+  const facts = facts0.map((f) => (evidence[f.conversation_id]?.ownership ? { ...f, ownership_evidence: evidence[f.conversation_id].ownership } : f))
+  const evidenceCounts = {}
+  for (const id of candIds) { const k = `ownership:${evidence[id]?.ownership ?? 'none'}|interest:${evidence[id]?.interest ?? 'none'}`; evidenceCounts[k] = (evidenceCounts[k] || 0) + 1 }
   const plan = ops.buildNotInterestedCorrectionPlan(facts, { now })
   const sql = ops.renderCorrectionSql(plan, { tag: nowIso.slice(0, 10).replace(/-/g, '') })
   const cands = facts.map((f) => ops.classifyRecoveryCandidate(f, { now, approved_programs: [] }))
+  const nurture = { intents: 0, by_reason: {} }
+  facts.forEach((f, i) => { const ni = nurtureIntentFor(f, cands[i], { now }); if (ni.intent) nurture.intents += 1; else if (ni.reason !== 'not_disinterest') nurture.by_reason[ni.reason] = (nurture.by_reason[ni.reason] || 0) + 1 })
   const failed = cands.filter((c) => c.detections.some((d) => d.code === 'failed_automated_response'))
   const failedSplit = { total: failed.length, provider_accepted: failed.filter((c) => c.detections.some((d) => d.code === 'failed_automated_response' && d.provider_accepted)).length, internal_only: failed.filter((c) => c.detections.some((d) => d.code === 'failed_automated_response' && d.internal_only)).length }
   // misclassified counteroffers: inbound bodies are read here and NEVER written out (ids + counts only)
@@ -169,7 +186,7 @@ async function phasePlan() {
   }
   const byFinal = {}
   for (const m of mis) byFinal[m.final_intent || 'null'] = (byFinal[m.final_intent || 'null'] || 0) + 1
-  const out = { at: nowIso, read_only: true, applied: false, conversations: facts.length, correction_plan: { status: plan.status, count: plan.count, by_before_status: plan.by_before_status, stage_changes: plan.stage_changes, due_now: plan.due_now, skipped: plan.skipped }, misclassified_counteroffers: { candidates_scanned: ids.length, flagged: mis.length, by_final_intent: byFinal, examples: mis.slice(0, 10) }, failed_automated_replies: failedSplit, prod: stats }
+  const out = { at: nowIso, read_only: true, applied: false, conversations: facts.length, correction_plan: { before_ownership_fix: first.count, ownership_evidence: evidenceCounts, status: plan.status, scope: plan.scope, count: plan.count, by_before_status: plan.by_before_status, stage_changes: plan.stage_changes, due_now: plan.due_now, skipped: plan.skipped }, misclassified_counteroffers: { candidates_scanned: ids.length, flagged: mis.length, by_final_intent: byFinal, examples: mis.slice(0, 10) }, failed_automated_replies: failedSplit, nurture_intents_recent_only: nurture, prod: stats }
   write('dead-deal-correction-plan.json', { ...plan, entries: plan.entries })
   write('dead-deal-correction-APPLY.PROPOSED.sql', sql.apply_sql)
   write('dead-deal-correction-ROLLBACK.PROPOSED.sql', sql.rollback_sql)

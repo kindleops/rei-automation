@@ -25,6 +25,7 @@ import { deriveActionState, isLostConversation, summarizeActionStates, ACTION_RU
 import { normalizeOpportunityFacts, reconcileOpportunity } from './pipeline-reconciler.js'
 import { evaluateSupervisor } from './supervisor-checks.js'
 import { recoveryNextAction, recoveryLinkRequests } from './recovery-linkage.js'
+import { nurtureIntentFor } from './ownership-evidence.js'
 import { encodePropertyRef } from '../missions/mission-codec.js'
 import { RECOVERY_SWEEP_KIND, ACTION_CENTER_KIND, PIPELINE_RECONCILE_KIND, OPS_SUPERVISOR_KIND, OPERATIONS_LIMITS } from './operations-kinds.js'
 
@@ -90,8 +91,15 @@ export function createRecoverySweepHandler({ source, store, economicsFor = null,
       const raw = await guarded(source.conversationFacts({ after_at: cur.after_at, after_id: cur.after_id, limit }), 'RECOVERY_SOURCE_UNAVAILABLE')
       const all = []
       let econ = 0
+      const nurture = { built: 0, enqueued: 0, deduped: 0, refused: {}, skipped: {} }
+      const intents = []
       for (const r of raw) {
-        const f = normalizeConversationFacts(r)
+        let f = normalizeConversationFacts(r)
+        // 8.5.21-b: canonical-ledger ownership evidence when wired (a bare "No" to OUR ownership question is a denial)
+        if (linkage?.ownershipEvidenceFor && !f.ownership_evidence) {
+          const ev = await linkage.ownershipEvidenceFor(f).catch(() => null)
+          if (ev?.ownership) f = { ...f, ownership_evidence: ev.ownership }
+        }
         let economics = null
         if (economicsFor && f.opportunity?.asking_price && f.property_id && econ < 50) {
           economics = await economicsFor(f).catch(() => null)
@@ -99,6 +107,8 @@ export function createRecoverySweepHandler({ source, store, economicsFor = null,
         }
         const c = classifyRecoveryCandidate(f, { now: t, approved_programs: approved, economics })
         const next = recoveryNextAction(c)
+        const ni = nurtureIntentFor(f, c, { now: t })
+        if (ni.intent) { nurture.built += 1; intents.push(ni.intent) } else if (ni.reason !== 'not_disinterest') nurture.skipped[ni.reason] = (nurture.skipped[ni.reason] || 0) + 1
         all.push({ conversation_id: f.conversation_id, cursor_at: f.cursor_at, class: c.class, reasons: c.reasons, detections: c.detections.map(detectionDigest), permission: { permitted: c.permission.permitted, blocks: c.permission.blocks, ownership: c.permission.ownership }, program: c.program, priority: recoveryPriority(c), economics_class: c.economics_class, evidence_refs: c.evidence_refs, property_ref: c.property_ref, property_id: f.property_id, next_action: { action: next.action, owner: next.owner, research: next.research, valuation: next.valuation } })
       }
       const by_class = Object.fromEntries(RECOVERY_CLASSES.map((k) => [k, 0]))
@@ -122,7 +132,16 @@ export function createRecoverySweepHandler({ source, store, economicsFor = null,
           else research.refused[String(r?.reason || 'REFUSED').slice(0, 40)] = (research.refused[String(r?.reason || 'REFUSED').slice(0, 40)] || 0) + 1
         }
       } else research.refused.LINKAGE_NOT_CONFIGURED = links.research.length
-      await ctx.recordFinding({ finding_type: 'recovery.linkage', key: 'batch', source_id: 'agent.recovery_sweep', value: { research, valuation_requests: links.valuation.slice(0, 200).map((v) => ({ property_ref: encodePropertyRef(v.property_id), recovery_class: v.recovery_class, conversation_id: v.conversation_id })), by_next_action: links.by_action, sends: 0 }, confidence: 1 })
+      // genuine RECENT disinterest → the 30-day nurture intent for the 8.5.21-a follow-up pipeline (it owns execution)
+      if (linkage?.enqueueFollowupIntent) {
+        for (const intent of intents.slice(0, OPERATIONS_LIMITS.research_requests_per_job)) {
+          const r = await linkage.enqueueFollowupIntent(intent).catch((e) => ({ ok: false, reason: String(e?.code || 'ENQUEUE_FAILED') }))
+          if (r?.ok && r.deduped) nurture.deduped += 1
+          else if (r?.ok) nurture.enqueued += 1
+          else nurture.refused[String(r?.reason || 'REFUSED').slice(0, 40)] = (nurture.refused[String(r?.reason || 'REFUSED').slice(0, 40)] || 0) + 1
+        }
+      } else if (intents.length) nurture.refused.FOLLOWUP_PIPELINE_NOT_CONFIGURED = intents.length
+      await ctx.recordFinding({ finding_type: 'recovery.linkage', key: 'batch', source_id: 'agent.recovery_sweep', value: { research, nurture, valuation_requests: links.valuation.slice(0, 200).map((v) => ({ property_ref: encodePropertyRef(v.property_id), recovery_class: v.recovery_class, conversation_id: v.conversation_id })), by_next_action: links.by_action, sends: 0 }, confidence: 1 })
       await ctx.recordFinding({ finding_type: 'recovery.batch', key: 'batch', source_id: 'agent.recovery_sweep', value: { scanned: raw.length, by_class, actionable: candidates.length, findings_recorded: fs.length, economics_evaluated: econ, approved_programs: approved, pass_done: Boolean(cursor.pass_done_at), research_requests: research, valuation_requests: links.valuation.length, by_next_action: links.by_action, sends: 0 }, confidence: 1 })
       await ctx.step('findings.done', { progress: { step: 'review_items', steps_done: 2, steps_total: 4, pct: 70 }, payload: { written: fs.length + 1 } })
 
@@ -138,7 +157,7 @@ export function createRecoverySweepHandler({ source, store, economicsFor = null,
 
       if (ctx.job.schedule_id != null) await ctx.setWatermark(cursor)
       await ctx.step('watermark', { progress: { step: 'watermark', steps_done: 4, steps_total: 4, pct: 99 } })
-      return { result: { mission: 'recovery_sweep', scanned: raw.length, by_class, actionable: candidates.length, review_items: synced, findings: fs.length + 2, economics_evaluated: econ, research_requests: research, valuation_requests: links.valuation.length, pass_done: Boolean(cursor.pass_done_at), sends: 0 } }
+      return { result: { mission: 'recovery_sweep', scanned: raw.length, by_class, actionable: candidates.length, review_items: synced, findings: fs.length + 2, economics_evaluated: econ, research_requests: research, nurture_intents: nurture, valuation_requests: links.valuation.length, pass_done: Boolean(cursor.pass_done_at), sends: 0 } }
     },
   })
 }
