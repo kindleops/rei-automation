@@ -38,6 +38,15 @@
  *     POST /api/cockpit/agent/missions/:id/cancel      cancel (cascades to children)
  * Missions run on the R2 runtime (agent.research_job / agent.job_event) and keep
  * running with the browser closed; the browser only creates, watches and cancels.
+ *
+ * OPERATIONS (rc-8.5.20 part C, apps/api/src/lib/agent/operations/operations-routes.js):
+ *     GET  /api/cockpit/agent/operations/action-center   ?state=&lost=1&limit=&before=   Inbound Action Center
+ *     GET  /api/cockpit/agent/operations/work-items      ?state=&scope=                  review / remediation items
+ *     POST /api/cockpit/agent/operations/work-items/:id/decide   { action }              acknowledge|resolve|dismiss|reopen
+ *     GET  /api/cockpit/agent/operations/supervisor                                       latest ops.supervisor run
+ *     GET  /api/cockpit/agent/operations/brief                                            latest daily operating brief
+ *     Gate: 404 (empty body) unless AGENT_ENABLED + AGENT_OPERATIONS_ENABLED. A read model that is
+ *     not applied / not run yet answers 200 { available: false, code } — shown as such, never as 0.
  */
 import { callBackend, type BackendResult } from '../../../lib/api/backendClient'
 import { decideApproval as decideApprovalRaw, getApproval as getApprovalRaw, listApprovals as listApprovalsRaw, type CapabilityApproval, type DecideOutcome } from '../../agent/approvals/approvals-transport'
@@ -46,7 +55,7 @@ export type { CapabilityApproval, DecideOutcome }
 
 /* ── plane availability: every failure is a named, truthful state ─────── */
 
-export type PlaneId = 'ask' | 'actions' | 'shadow' | 'missions' | 'telemetry'
+export type PlaneId = 'ask' | 'actions' | 'shadow' | 'missions' | 'operations' | 'telemetry'
 export type PlaneFailureState = 'not_enabled' | 'session' | 'denied' | 'locked' | 'unavailable' | 'error'
 export interface PlaneFailure { ok: false; state: PlaneFailureState; status: number; code: string; message: string; next: string | null }
 export type PlaneResult<T> = { ok: true; data: T } | PlaneFailure
@@ -57,6 +66,7 @@ export const PLANE_NEXT_STEP: Record<PlaneId, string> = {
   actions: 'Actions plane not enabled: AGENT_ENABLED=1 + AGENT_CAPABILITIES_ENABLED=1 and AGENT_CAPABILITY_SECRET (≥16 chars); schema PROPOSED_20261013120000_agent_capabilities. Writes also need AGENT_CAPABILITIES_WRITES_ENABLED=1 with the read-only switch lifted.',
   shadow: 'Conversation AI shadow table not applied: PROPOSED_20261013160000_conversation_ai_shadow.',
   missions: 'Missions API not enabled: needs the /api/cockpit/agent/missions routes (rc-8.5.18) with AGENT_ENABLED=1 + AGENT_MISSIONS_ENABLED=1, the R2 runtime (schema PROPOSED_20261012140000_intel_runtime, AGENT_RUNTIME_ENABLED=1, CRON_AGENT_RUNTIME_ENABLED=true, agent.runtime_limits armed) and the actions plane (missions.create).',
+  operations: 'Operations read model not enabled: needs the /api/cockpit/agent/operations routes (rc-8.5.20 C) with AGENT_ENABLED=1 + AGENT_OPERATIONS_ENABLED=1, schema PROPOSED_20261016140000_operations_action_center, and the R2 runtime jobs (inbox.action_center / recovery.sweep / pipeline.reconcile / ops.supervisor) armed by the owner.',
   telemetry: 'Shell telemetry is unreachable from this browser.',
 }
 
@@ -343,4 +353,127 @@ export async function cancelMission(id: string): Promise<PlaneResult<MissionCanc
 /** Platform health through the existing read capability (operator-initiated). */
 export async function fetchPlatformHealth(): Promise<PlaneResult<InvokeOutcome>> {
   return invokeCapability('platform.health', {})
+}
+
+/* ── Operations (rc-8.5.20 C): Action Center, work items, supervisor, daily brief ── */
+
+export type ActionStateId = 'needs_attention' | 'ai_handling' | 'researching' | 'negotiating' | 'awaiting_operator_decision' | 'scheduled_follow_up' | 'waiting_on_seller' | 'resolved' | 'suppressed_ineligible'
+export const ACTION_STATE_ORDER: ActionStateId[] = ['needs_attention', 'awaiting_operator_decision', 'ai_handling', 'researching', 'negotiating', 'scheduled_follow_up', 'waiting_on_seller', 'resolved', 'suppressed_ineligible']
+export const ACTION_STATE_LABEL: Record<ActionStateId, string> = {
+  needs_attention: 'Needs Attention', ai_handling: 'AI Handling', researching: 'Researching', negotiating: 'Negotiating', awaiting_operator_decision: 'Awaiting Operator Decision',
+  scheduled_follow_up: 'Scheduled Follow-Up', waiting_on_seller: 'Waiting on Seller', resolved: 'Resolved', suppressed_ineligible: 'Suppressed / Ineligible',
+}
+export interface SourceRef { source: string; id: string; role: string | null }
+export interface ActionStateRow {
+  conversation_id: string
+  state: ActionStateId | string
+  owner: string
+  verified_stage: string | null
+  stage_verified: boolean
+  stage_note: string | null
+  next_action: string
+  due_at: string | null
+  priority_reason: string
+  evidence_refs: SourceRef[]
+  pending_approvals: string[]
+  reasons: string[]
+  lost: boolean
+  opportunity_id: string | null
+  last_inbound_at: string | null
+  state_since: string | null
+  computed_at: string | null
+}
+export interface ActionCenterSummary { counts: Record<string, number>; lost: number; active_queue: number; total: number; computed_at: string | null }
+/** available:false ⇒ the read model is not applied / not run: no counts are shown (never 0). */
+export interface ActionCenterPage { available: boolean; code: string | null; summary: ActionCenterSummary | null; items: ActionStateRow[]; next_cursor: string | null }
+export interface WorkItem { work_item_id: string; scope: string; kind: string; state: 'open' | 'acknowledged' | 'resolved' | 'dismissed' | string; severity: 'info' | 'warning' | 'critical' | string; escalated: boolean; title: string; subject_type: string; subject_id: string | null; priority: number; due_at: string | null; last_seen_at: string | null; seen_count: number; resolved_by: string | null }
+export interface WorkItemPage { available: boolean; code: string | null; items: WorkItem[] }
+export interface BriefLink { source: string; id: string }
+export interface BriefLine { label: string; value: number | string | null; unavailable: string | null; links: BriefLink[] }
+export interface BriefSection { id: string; title: string; available: boolean; code: string | null; lines: BriefLine[] }
+export interface OperatingBrief { available: boolean; code: string | null; job_id: string | null; at: string | null; window: { since: string | null; until: string | null } | null; sections: BriefSection[] }
+export interface SupervisorRun { available: boolean; code: string | null; job_id: string | null; at: string | null; counts: Record<string, number> | null; all_clear: boolean | null; statuses: Record<string, string>; items: WorkItem[] }
+
+const refOf = (r: Record<string, unknown>): SourceRef => ({ source: String(r.source ?? ''), id: String(r.record_id ?? r.approval_id ?? r.job_id ?? r.work_item_id ?? r.opportunity_id ?? r.campaign_id ?? r.sender_id ?? ''), role: str(r.role) })
+export function normalizeActionRow(r: Record<string, unknown>): ActionStateRow {
+  return {
+    conversation_id: String(r.conversation_id ?? ''), state: String(r.state ?? ''), owner: String(r.owner ?? ''), verified_stage: str(r.verified_stage), stage_verified: r.stage_verified === true, stage_note: str(r.stage_note),
+    next_action: String(r.next_action ?? ''), due_at: str(r.due_at), priority_reason: String(r.priority_reason ?? ''), evidence_refs: arr<Record<string, unknown>>(r.evidence_refs).map(refOf).filter((x) => x.id),
+    pending_approvals: arr(r.pending_approvals).map(String), reasons: arr(r.reasons).map(String), lost: r.lost === true, opportunity_id: str(r.opportunity_id),
+    last_inbound_at: str(r.last_inbound_at), state_since: str(r.state_since), computed_at: str(r.computed_at),
+  }
+}
+export function normalizeActionCenter(b: Record<string, unknown>): ActionCenterPage {
+  if (b.available !== true) return { available: false, code: str(b.code) ?? 'UNAVAILABLE', summary: null, items: [], next_cursor: null }
+  const s = obj(b.summary)
+  const counts: Record<string, number> = {}
+  for (const [k, v] of Object.entries(obj(s.counts))) { const n = numOrNull(v); if (n != null) counts[k] = n }
+  return {
+    available: true, code: null,
+    summary: { counts, lost: Number(s.lost) || 0, active_queue: Number(s.active_queue) || 0, total: Number(s.total) || 0, computed_at: str(s.computed_at) },
+    items: arr<Record<string, unknown>>(b.items).map(normalizeActionRow).filter((x) => x.conversation_id), next_cursor: str(b.next_cursor),
+  }
+}
+export function normalizeWorkItem(w: Record<string, unknown>): WorkItem {
+  return { work_item_id: String(w.work_item_id ?? ''), scope: String(w.scope ?? ''), kind: String(w.kind ?? ''), state: String(w.state ?? ''), severity: String(w.severity ?? 'info'), escalated: w.escalated === true, title: String(w.title ?? ''), subject_type: String(w.subject_type ?? ''), subject_id: str(w.subject_id), priority: Number(w.priority) || 0, due_at: str(w.due_at), last_seen_at: str(w.last_seen_at), seen_count: Number(w.seen_count) || 1, resolved_by: str(w.resolved_by) }
+}
+export function normalizeWorkItems(b: Record<string, unknown>): WorkItemPage {
+  if (b.available === false) return { available: false, code: str(b.code) ?? 'UNAVAILABLE', items: [] }
+  return { available: true, code: null, items: arr<Record<string, unknown>>(b.items).map(normalizeWorkItem).filter((w) => w.work_item_id) }
+}
+export function normalizeBrief(b: Record<string, unknown>): OperatingBrief {
+  if (b.available !== true) return { available: false, code: str(b.code) ?? 'UNAVAILABLE', job_id: str(b.job_id), at: str(b.at), window: null, sections: [] }
+  const br = obj(b.brief)
+  const w = obj(b.window ?? br.window)
+  return {
+    available: true, code: null, job_id: str(b.job_id), at: str(b.at), window: { since: str(w.since), until: str(w.until) },
+    sections: arr<Record<string, unknown>>(br.sections).map((s) => ({
+      id: String(s.id ?? ''), title: String(s.title ?? s.id ?? ''), available: s.available === true, code: str(s.code),
+      // a missing value stays null ("unavailable"), never 0
+      lines: arr<Record<string, unknown>>(s.lines).map((l) => ({ label: String(l.label ?? ''), value: typeof l.value === 'number' || typeof l.value === 'string' ? (l.value as number | string) : null, unavailable: str(l.unavailable), links: arr<Record<string, unknown>>(l.links).map(refOf).filter((x) => x.id).map(({ source, id }) => ({ source, id })) })),
+    })).filter((s) => s.id),
+  }
+}
+export function normalizeSupervisor(b: Record<string, unknown>): SupervisorRun {
+  if (b.available !== true) return { available: false, code: str(b.code) ?? 'UNAVAILABLE', job_id: null, at: null, counts: null, all_clear: null, statuses: {}, items: [] }
+  const s = obj(b.summary)
+  const statuses: Record<string, string> = {}
+  for (const [k, v] of Object.entries(obj(s.statuses))) statuses[k] = String(v)
+  const counts: Record<string, number> = {}
+  for (const [k, v] of Object.entries(obj(s.counts))) counts[k] = Number(v) || 0
+  return { available: true, code: null, job_id: str(b.job_id), at: str(b.at), counts, all_clear: s.all_clear === true, statuses, items: arr<Record<string, unknown>>(b.items).map(normalizeWorkItem).filter((w) => w.work_item_id) }
+}
+
+const OBASE = '/api/cockpit/agent/operations'
+export const OPERATIONS_ENDPOINTS = {
+  actionCenter: (q: { state?: string | null; lost?: boolean; limit?: number; before?: string | null } = {}) => {
+    const u = new URLSearchParams()
+    if (q.state) u.set('state', q.state)
+    if (q.lost) u.set('lost', '1')
+    u.set('limit', String(q.limit ?? 100))
+    if (q.before) u.set('before', q.before)
+    return `${OBASE}/action-center?${u.toString()}`
+  },
+  workItems: (states: string[] = ['open', 'acknowledged']) => `${OBASE}/work-items?${states.map((s) => `state=${encodeURIComponent(s)}`).join('&')}&limit=100`,
+  decide: (id: string) => `${OBASE}/work-items/${encodeURIComponent(id)}/decide`,
+  supervisor: `${OBASE}/supervisor`,
+  brief: `${OBASE}/brief`,
+} as const
+
+export async function fetchActionCenter(q: Parameters<typeof OPERATIONS_ENDPOINTS.actionCenter>[0] = {}, signal?: AbortSignal): Promise<PlaneResult<ActionCenterPage>> {
+  return fromBackend('operations', await callBackend<unknown>(OPERATIONS_ENDPOINTS.actionCenter(q), { signal, timeoutMs: 12_000 }), normalizeActionCenter)
+}
+export async function fetchWorkItems(states?: string[], signal?: AbortSignal): Promise<PlaneResult<WorkItemPage>> {
+  return fromBackend('operations', await callBackend<unknown>(OPERATIONS_ENDPOINTS.workItems(states), { signal, timeoutMs: 12_000 }), normalizeWorkItems)
+}
+export async function fetchSupervisor(signal?: AbortSignal): Promise<PlaneResult<SupervisorRun>> {
+  return fromBackend('operations', await callBackend<unknown>(OPERATIONS_ENDPOINTS.supervisor, { signal, timeoutMs: 12_000 }), normalizeSupervisor)
+}
+export async function fetchBrief(signal?: AbortSignal): Promise<PlaneResult<OperatingBrief>> {
+  return fromBackend('operations', await callBackend<unknown>(OPERATIONS_ENDPOINTS.brief, { signal, timeoutMs: 12_000 }), normalizeBrief)
+}
+export type WorkItemAction = 'acknowledge' | 'resolve' | 'dismiss' | 'reopen'
+export async function decideWorkItem(id: string, action: WorkItemAction): Promise<PlaneResult<{ work_item_id: string; from: string; action: string }>> {
+  const res = await callBackend<unknown>(OPERATIONS_ENDPOINTS.decide(id), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }), timeoutMs: 15_000 })
+  return fromBackend('operations', res, (b) => ({ work_item_id: String(b.work_item_id ?? id), from: String(b.from ?? ''), action: String(b.action ?? action) }))
 }

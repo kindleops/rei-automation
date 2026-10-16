@@ -10,13 +10,14 @@ import { IcInspector } from './ui/IcInspector'
 import { IcGlyph, Kbd, Spec, ago, usd, type IcGlyphName } from './ui/primitives'
 import { ConversationCanvas } from './ui/sections/Conversations'
 import { ActivitySection, ApprovalsSection, FindingsSection, HealthSection, MissionsSection, ResearchSection, ShadowSection, WorkforceSection } from './ui/sections/Planes'
+import { ActionCenterSection, BriefSection } from './ui/sections/Operations'
 import { usePageContext } from './ui/use-page-context'
 import { usePresence } from './ui/use-presence'
 import { useIcDevFixtures } from './ui/use-dev-fixtures'
 import './ui/ic.css'
 import '../agent/ask/ui/ask.css'
 
-const NAV_GLYPH: Record<Section, IcGlyphName> = { conversations: 'chat', shadow: 'chat', missions: 'mission', research: 'research', findings: 'finding', approvals: 'approval', activity: 'activity', workforce: 'workforce', health: 'health' }
+const NAV_GLYPH: Record<Section, IcGlyphName> = { conversations: 'chat', shadow: 'chat', action_center: 'approval', brief: 'activity', missions: 'mission', research: 'research', findings: 'finding', approvals: 'approval', activity: 'activity', workforce: 'workforce', health: 'health' }
 
 /**
  * INTELLIGENCE COMMAND — the full-screen intelligence workspace.
@@ -107,6 +108,8 @@ function IntelligenceCommand({ devFixtures }: { devFixtures: boolean }) {
           {ic.section === 'conversations' ? <ConversationCanvas page={page} />
             : <div className="ic-canvas__scroll"><div className="ic-canvas__col">
                 {ic.section === 'shadow' ? <ShadowSection /> : null}
+                {ic.section === 'action_center' ? <ActionCenterSection /> : null}
+                {ic.section === 'brief' ? <BriefSection /> : null}
                 {ic.section === 'missions' ? <MissionsSection /> : null}
                 {ic.section === 'research' ? <ResearchSection /> : null}
                 {ic.section === 'findings' ? <FindingsSection /> : null}

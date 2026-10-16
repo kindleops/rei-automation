@@ -17,6 +17,7 @@ import { createDiscoverySupabaseSource } from '@/lib/agent/missions/discovery-so
 import { createShadowSupabaseSource } from '@/lib/agent/missions/review-digest-handler.js'
 import { propertyResearchEnabled, createPropertyResearchSweepSupabaseSource } from '@/lib/agent/missions/property-research-triggers.js'
 import { createResearchSupabaseSource } from '@/lib/domain/property-research/research-source.js'
+import { getOperationsServices } from '@/lib/ai/operations-runtime-wiring.js'
 
 const HANDLERS = Symbol.for('lc.agent.missions.handlers')
 const SERVICE = Symbol.for('lc.agent.missions.service')
@@ -47,6 +48,8 @@ export function missionRuntimeHandlers(env = process.env) {
     // 8.5.20-b: OFF unless PROPERTY_RESEARCH_ENABLED=1 (and the kind armed + enabled in kind_limits)
     propertyResearchSource: readDb && propertyResearchEnabled(env) ? createResearchSupabaseSource({ db: readDb }) : null,
     propertyResearchSweepSource: readDb && propertyResearchEnabled(env) ? createPropertyResearchSweepSupabaseSource({ db: readDb }) : null,
+    // 8.5.20 C: the daily operating brief (null ⇒ its operations sections read "unavailable")
+    operations: getOperationsServices(env),
     log: logLine,
   })
   return globalThis[HANDLERS]

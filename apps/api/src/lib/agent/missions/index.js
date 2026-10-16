@@ -20,10 +20,11 @@ export { enqueuePropertyResearch, sweepPropertyResearch, propertyResearchEnabled
 /**
  * @param {{ env?: object, runtimeStore: object, reads: object, provider?: object|null, resolver?: object|null,
  *           getPlane?: () => Promise<object|null>, createServices?: (() => object)|null, registry?: object,
- *           discoverySource?: object|null, shadowSource?: object|null, log?: Function|null, now?: () => number }} deps
+ *           discoverySource?: object|null, shadowSource?: object|null, operations?: { source?: object, store?: object }|null,
+ *           log?: Function|null, now?: () => number }} deps
  * @returns {Record<string, { run: Function }>}
  */
-export function buildMissionHandlers({ env = process.env, runtimeStore, reads, provider = null, resolver = null, getPlane = async () => null, createServices = null, registry = null, discoverySource = null, shadowSource = null, propertyResearchSource = null, propertyResearchSweepSource = null, zipLookup = null, log = null, now = () => Date.now(), research = {} }) {
+export function buildMissionHandlers({ env = process.env, runtimeStore, reads, provider = null, resolver = null, getPlane = async () => null, createServices = null, registry = null, discoverySource = null, shadowSource = null, propertyResearchSource = null, propertyResearchSweepSource = null, zipLookup = null, operations = null, log = null, now = () => Date.now(), research = {} }) {
   const out = {}
   let buildAsk = null
   if (provider && resolver && typeof createServices === 'function') {
@@ -36,6 +37,6 @@ export function buildMissionHandlers({ env = process.env, runtimeStore, reads, p
   if (propertyResearchSource && propertyResearchSweepSource) out[PROPERTY_RESEARCH_SWEEP.kind] = createPropertyResearchSweepHandler({ runtimeStore, sweepSource: propertyResearchSweepSource, env, now })
   out[MISSION_SUPERVISOR_KIND] = createSupervisorHandler({ runtimeStore, reads, provider, resolver, env, now })
   if (discoverySource) out[DISCOVERY_KIND] = createDiscoveryHandler({ source: discoverySource, reads, getPlane, provider, resolver, env, now })
-  out[REVIEW_DIGEST_KIND] = createReviewDigestHandler({ reads, shadowSource, now })
+  out[REVIEW_DIGEST_KIND] = createReviewDigestHandler({ reads, shadowSource, operations, now }) // 8.5.20 C: + the daily operating brief
   return out
 }

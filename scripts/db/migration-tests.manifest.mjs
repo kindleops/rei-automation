@@ -35,6 +35,8 @@ const RUNTIME_PUBLIC_FIXTURE = {
         revoke all on public.system_control, public.send_queue from agent_api;`,
 }
 const SEND_QUEUE_BASELINE = 'scripts/db/fixtures/send_queue_live_baseline.sql'
+// 8.5.20 part C: the public tables the operations read functions read (prod-shaped subset)
+const OPS_PUBLIC_BASELINE = 'scripts/db/fixtures/operations_public_baseline.sql'
 const KIND_LIMITS_FIX = M('PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql')
 const CONV_DECIDE_BUDGET = M('PROPOSED_20261013161000_conversation_decide_event_budget.sql')
 const CAPS = M('PROPOSED_20261013120000_agent_capabilities.sql')
@@ -214,6 +216,16 @@ export const MIGRATION_TESTS = Object.freeze([
     rollback: [M('PROPOSED_20261016120000_conversation_turns_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016120000_conversation_turns_rollback_posttest.sql')],
   },
+  // ── 8.5.20 part C: operations read model (recovery, action center, pipeline, supervisor) ──
+  {
+    id: 'operations_action_center',
+    setup: [SHIM, DURABILITY, S3, RESEARCH, OPS_PUBLIC_BASELINE, RUNTIME, CAPS, CONV_AI_SHADOW, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, OPS_HEALTH_DELIVERY_REF, MISSIONS],
+    pretest: M('PROPOSED_20261016140000_operations_action_center_pretest.sql'),
+    apply: [M('PROPOSED_20261016140000_operations_action_center.sql')],
+    posttest: [M('PROPOSED_20261016140000_operations_action_center_posttest.sql'), M('PROPOSED_20261016140100_operations_schedules_posttest.sql')],
+    rollback: [M('PROPOSED_20261016140000_operations_action_center_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016140000_operations_action_center_rollback_posttest.sql')],
+  },
   // ── rc-8.5.20: the WHOLE release chain on ONE database, in production apply order ──
   // Each migration's own pretest runs immediately before it (interleaved fixtures); the
   // posttests run on the final state; the rollbacks run in reverse order and must restore
@@ -223,7 +235,7 @@ export const MIGRATION_TESTS = Object.freeze([
   // body that is not the live one).
   {
     id: 'rc_8_5_20_release_chain',
-    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE],
+    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE],
     apply: [
       { fixture: M('PROPOSED_20261012140000_intel_runtime_pretest.sql') }, RUNTIME,
       { fixture: M('PROPOSED_20261013120000_agent_capabilities_pretest.sql') }, CAPS,
@@ -237,6 +249,13 @@ export const MIGRATION_TESTS = Object.freeze([
       { fixture: M('PROPOSED_20261015191000_ai_operator_feedback_pretest.sql') }, FEEDBACK,
       { fixture: M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_pretest.sql') }, ASKING_PRICE_MIRROR,
       { fixture: M('PROPOSED_20261015120000_repeat_asking_price_question_kind_pretest.sql') }, ASKING_PRICE_QUESTION_KIND,
+      // rc-8.5.20 parts A / B / C. zip_acquisition_intelligence is independent; conversation_turns
+      // needs the runtime + both event-budget fixes; operations_action_center needs the runtime,
+      // the capability plane and persistent_missions. The operations schedule seed
+      // (PROPOSED_20261016140100: psql -v owner_id, own BEGIN/COMMIT) is exercised by its posttest.
+      { fixture: M('PROPOSED_20261016100000_zip_acquisition_intelligence_pretest.sql') }, M('PROPOSED_20261016100000_zip_acquisition_intelligence.sql'),
+      { fixture: M('PROPOSED_20261016120000_conversation_turns_pretest.sql') }, M('PROPOSED_20261016120000_conversation_turns.sql'),
+      { fixture: M('PROPOSED_20261016140000_operations_action_center_pretest.sql') }, M('PROPOSED_20261016140000_operations_action_center.sql'),
     ],
     posttest: [
       M('PROPOSED_20261013120000_agent_capabilities_posttest.sql'),
@@ -250,6 +269,10 @@ export const MIGRATION_TESTS = Object.freeze([
       M('PROPOSED_20261015190000_negotiation_authority_posttest.sql'),
       M('PROPOSED_20261015191000_ai_operator_feedback_posttest.sql'),
       M('PROPOSED_20261015120000_repeat_asking_price_question_kind_posttest.sql'),
+      M('PROPOSED_20261016100000_zip_acquisition_intelligence_posttest.sql'),
+      M('PROPOSED_20261016120000_conversation_turns_posttest.sql'),
+      M('PROPOSED_20261016140000_operations_action_center_posttest.sql'),
+      M('PROPOSED_20261016140100_operations_schedules_posttest.sql'),
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body)
     rollback: [
@@ -264,6 +287,9 @@ export const MIGRATION_TESTS = Object.freeze([
       M('PROPOSED_20261015190000_negotiation_authority_rollback.sql'),
       M('PROPOSED_20261015191000_ai_operator_feedback_rollback.sql'),
       M('PROPOSED_20261015120000_repeat_asking_price_question_kind_rollback.sql'),
+      M('PROPOSED_20261016100000_zip_acquisition_intelligence_rollback.sql'),
+      M('PROPOSED_20261016120000_conversation_turns_rollback.sql'),
+      M('PROPOSED_20261016140000_operations_action_center_rollback.sql'),
     ],
   },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──

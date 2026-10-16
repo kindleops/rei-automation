@@ -14,6 +14,7 @@ import { requireScheduledMutationAuth } from '@/lib/security/cron-auth.js'
 import { runScheduledRuntimeTick, DEFAULT_RUNTIME_HANDLERS } from '@/lib/agent/runtime/runtime-service.js'
 import { conversationRuntimeHandlers } from '@/lib/ai/conversation-decide-handler.js'
 import { missionRuntimeHandlers } from '@/lib/ai/mission-runtime-wiring.js'
+import { operationsRuntimeHandlers } from '@/lib/ai/operations-runtime-wiring.js'
 import { child } from '@/lib/logging/logger.js'
 
 export const runtime = 'nodejs'
@@ -29,8 +30,10 @@ export async function POST(request) {
   try {
     // conversation.decide (R1/R2 shadow, no send) is registered only when AI_CONVERSATION_SHADOW_ENABLED=true;
     // the 8.5.18 persistent missions (mission.research / mission.supervisor / acquisition.discovery /
-    // conversation.review_digest — no send) only when AGENT_MISSIONS_ENABLED=1
-    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...missionRuntimeHandlers() } })
+    // conversation.review_digest — no send) only when AGENT_MISSIONS_ENABLED=1; the 8.5.20 C operations
+    // jobs (recovery.sweep / inbox.action_center / pipeline.reconcile / ops.supervisor — no send) only when
+    // AGENT_OPERATIONS_ENABLED=1
+    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...missionRuntimeHandlers(), ...operationsRuntimeHandlers() } })
     if (result.summary) {
       const s = result.summary
       logger.info('agent.runtime.tick', { blocked: s.blocked, claimed: s.claimed, jobs: s.jobs.map((j) => `${j.kind}:${j.outcome}`), errors: s.errors.map((e) => `${e.phase}:${e.code}`), elapsed_ms: s.elapsed_ms })

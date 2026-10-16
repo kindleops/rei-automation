@@ -9,10 +9,20 @@
 //                   'unavailable' when the PROPOSED table is not applied — never 0)
 //   approvals       agent.approval_request pending, not expired (count + capabilities)
 // Writes one finding: digest.morning, key digest.<UTC date>.
+//
+// 8.5.20 part C — the owner's DAILY OPERATING BRIEF extends this digest (it is not a
+// second digest): with `operations` ({ source, store } of lib/agent/operations) the
+// result and the finding also carry `brief` (operations/operating-brief.js) — work
+// completed, new viable opportunities, offers prepared, negotiations advanced, deals
+// awaiting approval, follow-ups completed, recovered opportunities, campaign / sender
+// changes, system incidents, recommended next actions — every line linked to its source
+// records; a source that cannot be read is "unavailable", never 0. Without `operations`
+// the brief is present with every operations section unavailable.
 import { RuntimePermanentError } from '../runtime/runtime-tick.js'
 import { REVIEW_DIGEST_KIND, missionIdentity } from './mission-kinds.js'
 import { recordFindings } from './research-mission-handler.js'
 import { DEFAULT_ORG_ID } from '../capabilities/index.js'
+import { buildOperatingBrief } from '../operations/operating-brief.js'
 
 /** Optional shadow source over the guarded GET-only read client: { summary({ since }) → { by_outcome, total } }. */
 export function createShadowSupabaseSource({ db }) {
@@ -49,9 +59,35 @@ export function buildDigest({ activity, approvals, shadow, since, at }) {
   }
 }
 
-/** @param {{ reads: object, shadowSource?: object|null, now?: () => number, org_id?: string }} deps */
-export function createReviewDigestHandler({ reads, shadowSource = null, now = () => Date.now(), org_id = DEFAULT_ORG_ID } = {}) {
+/** The operations reads the brief needs; each settles to { unavailable: code } on failure (never 0). */
+export async function collectBriefInputs({ operations = null, since, until, org_id = DEFAULT_ORG_ID } = {}) {
+  const off = (code) => Promise.resolve({ unavailable: code })
+  const settle = (p, code) => p.then((v) => v ?? { unavailable: code }, (e) => ({ unavailable: String(e?.code || code).toUpperCase().slice(0, 60) }))
+  const src = operations?.source || null
+  const st = operations?.store || null
+  const [facts, recovery, workItems, actionCenter, supervisor] = await Promise.all([
+    src ? settle(src.briefFacts({ since, until }), 'BRIEF_FACTS_UNAVAILABLE') : off('OPERATIONS_SOURCE_NOT_CONFIGURED'),
+    st ? settle(Promise.all([st.recoveryCandidatesSince({ since }), st.latestFinding({ finding_type: 'recovery.batch', since })]).then(([c, b]) => (b ? { candidates: c, scanned: b.value?.scanned ?? null } : null)), 'RECOVERY_NOT_RUN') : off('OPERATIONS_STORE_NOT_CONFIGURED'),
+    st ? settle(Promise.all([st.resolvedWorkItemsSince({ since }), st.listWorkItems({ limit: 100 })]).then(([resolved, open]) => ({ resolved, open })), 'WORK_ITEMS_UNAVAILABLE') : off('OPERATIONS_STORE_NOT_CONFIGURED'),
+    st ? settle(st.actionCenterSummary().then((x) => (x.total ? x : null)), 'ACTION_CENTER_NOT_RUN') : off('OPERATIONS_STORE_NOT_CONFIGURED'),
+    st ? settle(st.latestFinding({ finding_type: 'supervisor.summary', since }).then((f) => (f ? { ...f.value, job_id: f.job_id } : null)), 'SUPERVISOR_NOT_RUN') : off('OPERATIONS_STORE_NOT_CONFIGURED'),
+  ])
+  void org_id
+  return { facts, recovery, workItems, actionCenter, supervisor }
+}
+
+/** @param {{ reads: object, shadowSource?: object|null, operations?: { source?: object, store?: object }|null, now?: () => number, org_id?: string }} deps */
+export function createReviewDigestHandler({ reads, shadowSource = null, operations = null, now = () => Date.now(), org_id = DEFAULT_ORG_ID } = {}) {
   if (!reads) throw new Error('conversation.review_digest: reads required')
+  async function buildBrief({ ctx, since, at, digest }) {
+    const [activity, approvalsRead, ops] = await Promise.all([
+      reads.activitySince({ since }).catch(() => ({ jobs: [] })),
+      reads.pendingApprovals({ org_id, limit: 100 }).catch((e) => ({ unavailable: String(e?.code || 'APPROVALS_UNAVAILABLE') })),
+      collectBriefInputs({ operations, since, until: at, org_id }),
+    ])
+    const jobs = (activity.jobs || []).filter((j) => j.job_id !== ctx.job.job_id)
+    return buildOperatingBrief({ digest, jobs: jobs.slice(0, 50), approvals: approvalsRead, discoveryJobIds: jobs.filter((j) => j.kind === 'acquisition.discovery').map((j) => j.job_id).slice(0, 10), ...ops })
+  }
   return Object.freeze({
     kind: REVIEW_DIGEST_KIND,
     async run(ctx) {
@@ -73,10 +109,14 @@ export function createReviewDigestHandler({ reads, shadowSource = null, now = ()
         await ctx.step('collect.done', { progress: { step: 'collect', steps_done: 1, steps_total: 2, pct: 60 }, checkpoint: cp, payload: { missions: cp.digest.missions.total, approvals_waiting: cp.digest.approvals_waiting.total } })
       }
       if (!cp.findings) {
-        cp.findings = await recordFindings(ctx, [{ finding_type: 'digest.morning', key: `digest.${cp.digest.window.until.slice(0, 10)}`, source_id: 'agent.review_digest', value: cp.digest, confidence: 1 }])
+        // 8.5.20 C: the brief is built here, never checkpointed (the 16 KB checkpoint cap); its
+        // sources are re-read on a resumed attempt — the finding is the durable copy
+        const brief = await buildBrief({ ctx, since: cp.digest.window.since, at: cp.digest.window.until, digest: cp.digest })
+        cp.brief_summary = brief.sections.map((x) => ({ id: x.id, available: x.available, lines: x.lines.length, ...(x.available ? {} : { code: x.code }) }))
+        cp.findings = await recordFindings(ctx, [{ finding_type: 'digest.morning', key: `digest.${cp.digest.window.until.slice(0, 10)}`, source_id: 'agent.review_digest', value: { ...cp.digest, brief }, confidence: 1 }])
         await ctx.step('findings.done', { progress: { step: 'findings', steps_done: 2, steps_total: 2, pct: 99 }, checkpoint: cp, payload: { written: cp.findings.written } })
       }
-      return { result: { mission: 'review_digest', ...cp.digest, findings_recorded: cp.findings.written } }
+      return { result: { mission: 'review_digest', ...cp.digest, brief_sections: cp.brief_summary, findings_recorded: cp.findings.written } }
     },
   })
 }
