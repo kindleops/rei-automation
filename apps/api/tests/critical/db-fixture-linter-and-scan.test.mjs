@@ -135,7 +135,10 @@ test("linter: the repository is clean — every pretest / posttest / verify / te
     "supabase/migrations/PROPOSED_20261007170000_graph_sender_coverage_routing_v2_posttest.sql",
     "supabase/migrations/PROPOSED_20261015120000_repeat_asking_price_question_kind_posttest.sql",
     "supabase/migrations/PROPOSED_20261014120000_block_repeat_asking_price_mirror_posttest.sql",
-    "supabase/migrations/PROPOSED_20261014130000_message_origin_ai_generated_messages_posttest.sql",
+    "supabase/migrations/PROPOSED_20261015130000_message_origin_ai_generated_messages_posttest.sql",
+    "supabase/migrations/PROPOSED_20261014121000_runtime_kind_limits_event_budget_posttest.sql",
+    "supabase/migrations/PROPOSED_20261014121000_runtime_kind_limits_event_budget_rollback_posttest.sql",
+    "supabase/migrations/PROPOSED_20261014150000_ops_health_snapshot_delivery_ref_posttest.sql",
     "supabase/tests/operator_lockdown_test.sql",
     "supabase/tests/campaign_audience_completeness_test.sql",
   ]) assert.ok(fixtures.some((r) => r.file === f), f);
