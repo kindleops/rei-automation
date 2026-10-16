@@ -151,6 +151,25 @@ export const MIGRATION_TESTS = Object.freeze([
     rollback: [M('PROPOSED_20261015130000_message_origin_ai_generated_messages_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261015130000_message_origin_ai_generated_messages_rollback_posttest.sql')],
   },
+  // ── 8.5.19 negotiation authority + operator feedback ──
+  {
+    id: 'negotiation_authority',
+    setup: [SHIM],
+    pretest: M('PROPOSED_20261015190000_negotiation_authority_pretest.sql'),
+    apply: [M('PROPOSED_20261015190000_negotiation_authority.sql')],
+    posttest: [M('PROPOSED_20261015190000_negotiation_authority_posttest.sql')],
+    rollback: [M('PROPOSED_20261015190000_negotiation_authority_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261015190000_negotiation_authority_rollback_posttest.sql')],
+  },
+  {
+    id: 'ai_operator_feedback',
+    setup: [SHIM],
+    pretest: M('PROPOSED_20261015191000_ai_operator_feedback_pretest.sql'),
+    apply: [M('PROPOSED_20261015191000_ai_operator_feedback.sql')],
+    posttest: [M('PROPOSED_20261015191000_ai_operator_feedback_posttest.sql')],
+    rollback: [M('PROPOSED_20261015191000_ai_operator_feedback_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261015191000_ai_operator_feedback_rollback_posttest.sql')],
+  },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──
   {
     id: 'operator_read_policies',
