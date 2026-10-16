@@ -45,6 +45,7 @@ export type AppId =
   | 'closing-desk'
   | 'analytics'
   | 'search-intelligence'
+  | 'intelligence-command'
   | 'calendar'
   | 'notifications'
   | 'settings'
@@ -384,6 +385,29 @@ export const NEXUS_APPS: NexusApp[] = [
     description: 'Research county records, market sources and the web in context',
     icon: 'compass',
     route: '/browser',
+    group: 'intelligence',
+    desktop: true,
+    mobile: false,
+    desktopRail: true,
+    dockable: false,
+    defaultDock: false,
+    badge: null,
+    context: {},
+  },
+  {
+    /**
+     * Intelligence Command 8.5.17 — the full-screen intelligence workspace:
+     * conversations, missions, research, findings, approvals, activity, agent
+     * workforce and system health over the real agent planes (ask, actions +
+     * approvals, R2 runtime, conversation-ai shadow, shell telemetry). Desktop
+     * only; ⌘⇧E opens it full screen, ⌘' opens its composer on any page.
+     */
+    id: 'intelligence-command',
+    label: 'Intelligence Command',
+    shortLabel: 'Intelligence',
+    description: 'Ask, plan and act with the LeadCommand agent — every run, source and approval',
+    icon: 'spark',
+    route: '/intelligence-command',
     group: 'intelligence',
     desktop: true,
     mobile: false,

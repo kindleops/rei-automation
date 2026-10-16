@@ -79,6 +79,7 @@ const GEOMETRY: Record<string, AppGeometry> = {
   home: { minW: 520, minH: 380 },
   settings: { minW: 520, minH: 360 },
   properties: { minW: 500, minH: 380 },
+  'intelligence-command': { minW: 640, minH: 420 },
 }
 const FALLBACK_GEOMETRY: AppGeometry = { minW: 460, minH: 340 }
 export const geometryFor = (app: string): AppGeometry => GEOMETRY[app] ?? FALLBACK_GEOMETRY

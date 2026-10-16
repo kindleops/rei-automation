@@ -32,6 +32,8 @@ import './command-deck.css'
 
 // Global AI Agent S2 prototype indicator (flag-gated; folds to null in production)
 const AgentIndicator = (import.meta.env.DEV || import.meta.env.VITE_LC_AGENT_PROTOTYPE === '1') ? lazy(() => import('../../agent/AgentIndicator')) : null
+// Intelligence Command presence (idle / investigating / awaiting approval / problem) — same flag
+const IcPresence = (import.meta.env.DEV || import.meta.env.VITE_LC_AGENT_PROTOTYPE === '1') ? lazy(() => import('../../intelligence-command/IcPresence')) : null
 
 /**
  * THE COMMAND DECK — the horizontal command surface of the OS.
@@ -213,6 +215,7 @@ export function CommandDeck(p: CommandDeckProps) {
         </div>
 
         <div className="cd__right">
+          {IcPresence ? <Suspense fallback={null}><IcPresence /></Suspense> : null}
           {AgentIndicator ? <Suspense fallback={null}><AgentIndicator /></Suspense> : null}
           <LCPopover
             open={machineOpen}
