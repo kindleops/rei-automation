@@ -35,6 +35,8 @@ const RUNTIME_PUBLIC_FIXTURE = {
         revoke all on public.system_control, public.send_queue from agent_api;`,
 }
 const SEND_QUEUE_BASELINE = 'scripts/db/fixtures/send_queue_live_baseline.sql'
+// 8.5.20 part C: the public tables the operations read functions read (prod-shaped subset)
+const OPS_PUBLIC_BASELINE = 'scripts/db/fixtures/operations_public_baseline.sql'
 const KIND_LIMITS_FIX = M('PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql')
 const CONV_DECIDE_BUDGET = M('PROPOSED_20261013161000_conversation_decide_event_budget.sql')
 const CAPS = M('PROPOSED_20261013120000_agent_capabilities.sql')
@@ -193,6 +195,16 @@ export const MIGRATION_TESTS = Object.freeze([
     apply: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate.sql')],
     posttest: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_posttest.sql')],
     rollback: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_rollback.sql')],
+  },
+  // ── 8.5.20 part C: operations read model (recovery, action center, pipeline, supervisor) ──
+  {
+    id: 'operations_action_center',
+    setup: [SHIM, DURABILITY, S3, RESEARCH, OPS_PUBLIC_BASELINE, RUNTIME, CAPS, CONV_AI_SHADOW, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, OPS_HEALTH_DELIVERY_REF, MISSIONS],
+    pretest: M('PROPOSED_20261016140000_operations_action_center_pretest.sql'),
+    apply: [M('PROPOSED_20261016140000_operations_action_center.sql')],
+    posttest: [M('PROPOSED_20261016140000_operations_action_center_posttest.sql'), M('PROPOSED_20261016140100_operations_schedules_posttest.sql')],
+    rollback: [M('PROPOSED_20261016140000_operations_action_center_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016140000_operations_action_center_rollback_posttest.sql')],
   },
   // ── rc-8.5.20: the WHOLE release chain on ONE database, in production apply order ──
   // Each migration's own pretest runs immediately before it (interleaved fixtures); the
