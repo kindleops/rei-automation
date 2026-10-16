@@ -149,13 +149,18 @@ export function underwritingHash(economics) {
  * recommended offer floored with the V2 anchor rounding ("open below range").
  * Terms = SELLER_OFFER_POLICY_V1 exactly (no invented values); the operator edits.
  */
-export function buildProposedEnvelope({ economics = null, thread_key, property_id, opportunity_id = null, now = Date.now(), recommended_offer = null } = {}) {
+export function buildProposedEnvelope({ economics = null, thread_key, property_id, opportunity_id = null, now = Date.now(), recommended_offer = null, offer_plan = null } = {}) {
   const scope = scopeOf({ thread_key, property_id, opportunity_id })
   const nowMs = typeof now === 'number' ? now : Date.parse(now)
   const cls = economics?.class || 'INVESTIGATE'
   const mao = num(economics?.metrics?.mao)
   const rec = num(recommended_offer ?? economics?.metrics?.recommended_offer)
-  const opening = mao && rec ? Math.min(roundAnchorDown(Math.min(rec, mao)) ?? null, mao) : null
+  let opening = mao && rec ? Math.min(roundAnchorDown(Math.min(rec, mao)) ?? null, mao) : null
+  // 8.5.20-b: a strategy-based opening (property-research/offer-plan.js) replaces the plain
+  // anchor when the plan was built on the SAME engine ceiling and opens strictly below it.
+  const plan = offer_plan && offer_plan.available === true && mao && num(offer_plan.mao?.amount) === mao && num(offer_plan.opening?.recommended) > 0 && num(offer_plan.opening.recommended) < mao ? offer_plan : null
+  if (plan) opening = Math.min(num(plan.opening.recommended), opening ?? Infinity)
+  if (opening != null && mao != null && opening >= mao) opening = null // the ceiling is never the opening
   const recommendation = cls === 'PASS' ? 'do_not_grant' : !mao ? 'operator_must_price' : cls === 'HOT' || cls === 'NEGOTIATE' ? 'grant' : 'grant_not_recommended'
   const p = SELLER_OFFER_POLICY_V1
   const proposal = {
@@ -178,6 +183,21 @@ export function buildProposedEnvelope({ economics = null, thread_key, property_i
     operator_only: true,
     recommendation,
     proposal,
+    // 8.5.20-b: what the operator grants against — opening range, ceiling, terms, expiry and
+    // escalation conditions (internal; never seller-facing)
+    offer_plan: plan && recommendation !== 'do_not_grant' ? {
+      version: plan.version,
+      opening_range: plan.opening.range,
+      recommended_opening: proposal.opening_price,
+      ceiling: mao,
+      review_above: plan.escalation?.review_above ?? null,
+      counter_room_usd: proposal.opening_price != null ? mao - proposal.opening_price : null,
+      strategy_factors: (plan.opening.factors || []).map((f) => ({ factor: f.factor, effect: f.effect })),
+      terms: { closing_window_days: [proposal.closing_window_min_days, proposal.closing_window_max_days], earnest_money: [proposal.earnest_money_min, proposal.earnest_money_max], as_is: proposal.as_is, closing_costs_paid_by: proposal.closing_costs_paid_by },
+      expires_at: proposal.expires_at,
+      escalation_conditions: plan.escalation?.conditions || [],
+      visibility: 'internal_only',
+    } : null,
     underwriting: {
       basis: underwritingBasis(economics),
       hash: underwritingHash(economics),
