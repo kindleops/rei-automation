@@ -10,8 +10,10 @@
 //                            Not due yet (clock skew) ⇒ yield (no attempt burned). A newer
 //                            version exists ⇒ TURN_SUPERSEDED (that version's job decides).
 //   conversation.turn_sweep  restart recovery: re-enqueue overdue turns / expired claims.
+// rc-8.5.21: the decision is the canonical runtime; an authorised reply is dispatched through R3
+// (OFF switches). A job that dies after finalize resumes the dispatch on retry (runDueTurn).
 //
-// Results are codes / counts only (agent.payload_is_clean). Nothing is sent: R3 stays unwired.
+// Results are codes / counts only (agent.payload_is_clean). R3 is wired but OFF (its switches are absent).
 import { encodeRef } from './conversation-ai-shadow-hook.js'
 import {
   CONVERSATION_TURN_KIND, CONVERSATION_TURN_SWEEP_KIND, decodeTurnJobInput, recoverDueTurns, runDueTurn,
@@ -29,7 +31,7 @@ async function defaultTurnStore(supabase) {
 /**
  * @param {{ env?: object, store?: object, decide?: Function, trackerFor?: (ctx: object) => object, supabase?: object }} [deps]
  */
-export function createConversationTurnHandler({ env = process.env, store = null, decide = null, trackerFor = null, supabase = null } = {}) {
+export function createConversationTurnHandler({ env = process.env, store = null, decide = null, dispatch = undefined, runtimeStore = null, trackerFor = null, supabase = null } = {}) {
   return Object.freeze({
     kind: CONVERSATION_TURN_KIND,
     async run(ctx) {
@@ -38,12 +40,19 @@ export function createConversationTurnHandler({ env = process.env, store = null,
       await ctx.step('turn', { progress: { step: 'turn', steps_done: 0, steps_total: 1, pct: 0 } })
       const sb = supabase || (store && decide ? null : await defaultSupabase())
       const turnStore = store || (await defaultTurnStore(sb))
-      const decideTurn = decide || (await import('./conversation-turn-wiring.js')).createShadowTurnDecider({ supabase: sb, env, tracker: trackerFor ? trackerFor(ctx) : null, remainingMs: ctx.remainingMs, signal: ctx.signal })
+      const wiring = decide ? null : await import('./conversation-turn-wiring.js')
+      const decideTurn = decide || wiring.createCanonicalTurnDecider({ supabase: sb, env, tracker: trackerFor ? trackerFor(ctx) : null, remainingMs: ctx.remainingMs, signal: ctx.signal })
+      // rc-8.5.21: the R3 dispatcher is wired; it only ever receives a reply the decider authorised
+      // (kill switch + policy + scope), and R3 re-reads every switch before any enqueue
+      const dispatchTurn = dispatch !== undefined ? dispatch : (await import('./conversation-turn-dispatch.js')).createR3TurnDispatcher({ supabase: sb, jobId: ctx.job.job_id })
+      let rs = runtimeStore
+      const enqueueAt = async (o) => { rs ||= await (await import('@/lib/agent/runtime/runtime-service.js')).getVerifiedRuntimeStore(env); return rs.enqueueEventAt(o) }
       let r
       try {
-        r = await runDueTurn({ ...ref, store: turnStore, worker: `turn.${ctx.job.job_id}`.slice(0, 80), decideTurn })
+        r = await runDueTurn({ ...ref, store: turnStore, worker: `turn.${ctx.job.job_id}`.slice(0, 80), decideTurn, dispatch: dispatchTurn, enqueueAt })
       } catch (err) {
         if (err?.code === 'TURN_NOT_DUE') ctx.yield('turn_not_due')
+        // a transient dispatch failure: the runtime retries the job (bounded attempts, then dead letter)
         if (err?.abortJob === true && err.cause) throw err.cause
         throw err
       }

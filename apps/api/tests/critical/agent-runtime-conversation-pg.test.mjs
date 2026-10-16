@@ -129,13 +129,16 @@ test('PG shadow runtime: hook → runtime_enqueue_event → tick (max_concurrenc
     assert.equal(codes.filter((c) => c === 'SHADOW_RECORDED').length, 2)
     assert.equal(codes.filter((c) => c === 'INBOUND_VERSION_MISMATCH').length, 1)
     assert.equal(codes.filter((c) => c === 'PRIOR_VERSION_RECORDED').length, 1)
-    assert.equal(provider.calls.length, 4, 'two recorded inbound × (decision + semantic check); duplicates and stale versions never call a model')
+    // rc-8.5.21: the canonical runtime — one understanding call per recorded inbound; both inbounds
+    // ask for an offer (human-bound: the negotiation authority, never model text), so no composition
+    assert.equal(provider.calls.length, 2, 'two recorded inbound × one understanding call; duplicates and stale versions never call a model')
 
-    const rows = await sel(db.pool, `select inbound_message_id, send_status, outcome, cost_usd::float8 cost, record->>'inbound_version' v from public.conversation_ai_shadow_decisions order by inbound_message_id`)
-    assert.deepEqual(rows.map((r) => [r.inbound_message_id, r.send_status, r.outcome]), [['in-1', 'not_sent_shadow', 'REPLY_CANDIDATE'], ['in-2', 'not_sent_shadow', 'REPLY_CANDIDATE']])
+    const rows = await sel(db.pool, `select inbound_message_id, send_status, outcome, cost_usd::float8 cost, record->>'inbound_version' v, record->>'writer_version' w from public.conversation_ai_shadow_decisions order by inbound_message_id`)
+    assert.deepEqual(rows.map((r) => [r.inbound_message_id, r.send_status, r.outcome]), [['in-1', 'not_sent_shadow', 'NEEDS_REVIEW'], ['in-2', 'not_sent_shadow', 'NEEDS_REVIEW']])
+    assert.ok(rows.every((r) => r.w === 'conv-ai.pipeline.v2+playbook.v3+compose.v3'), JSON.stringify(rows))
     assert.ok(rows.every((r) => /^[a-p]{16}$/.test(r.v)))
     const ledger = await sel(db.pool, `select job_id, state, reserved_usd::float8 r, actual_usd::float8 a from agent.spend_ledger order by created_at`)
-    assert.equal(ledger.length, 4)
+    assert.equal(ledger.length, 2)
     assert.ok(ledger.every((l) => l.state === 'settled' && l.r <= 0.01))
     const perJob = Object.values(ledger.reduce((m, l) => ({ ...m, [l.job_id]: (m[l.job_id] || 0) + l.a }), {}))
     assert.ok(perJob.every((usd) => usd <= 0.01), JSON.stringify(perJob))
@@ -178,7 +181,11 @@ test('PG shadow runtime: spend — a Haiku ESCALATE is a NEEDS_REVIEW hold, Sonn
     // 8.5.15 b8e00ad1 (Sonnet only for a REPLY_CANDIDATE) + 8.5.16 (no Sonnet on a human-bound turn):
     // a Haiku ESCALATE is a human hold, Sonnet is never attempted. The $0.01 budget refusal of a
     // Sonnet attempt is covered by conversation-ai-shadow-runtime-8515.test.mjs (rc-8.5.20).
-    assert.ok(rec.record.context_summary.trace.escalation_withheld.includes('complex_negotiation'), JSON.stringify(rec.record.context_summary.trace))
+    // rc-8.5.21: the canonical record names the evidence-backed reason (the model's claim kept)
+    assert.equal(rec.record.decision.terminal.reason, 'missing_negotiation_authority', JSON.stringify(rec.record.decision.terminal))
+    // the offer request is the negotiation authority's step (the stub has no envelope)
+    assert.equal(rec.record.decision.terminal.evidence.request, 'offer_request')
+    assert.equal(rec.record.model.path, 'canonical:haiku')
     const led = await sel(db.pool, `select model, state, reserved_usd::float8 r from agent.spend_ledger`)
     assert.deepEqual(led.map((l) => [l.model, l.state]), [['claude-haiku-5-5', 'settled']])
 
@@ -253,7 +260,7 @@ test('PG shadow runtime: retry with backoff → dead_letter after 3 attempts; a 
     // a second worker / replay of the same job id finds the record: no second decision
     await store.requeue({ job_id: jid, by: OP }).catch(() => null)
     assert.equal((await sel(db.pool, 'select count(*)::int n from public.conversation_ai_shadow_decisions'))[0].n, 1)
-    assert.equal(provider.calls.length, 2)
+    assert.equal(provider.calls.length, 1, 'rc-8.5.21: one understanding call (an offer request composes nothing)')
     const ev = (await store.jobEvents(jid)).map((x) => x.type)
     assert.ok(ev.includes('job.lease_expired') && ev.includes('job.dead_letter') && ev.includes('job.requeued') && ev.at(-1) === 'job.completed', ev.join(','))
   } finally { await db.drop() }

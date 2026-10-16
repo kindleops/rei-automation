@@ -66,7 +66,7 @@ const URGENT_RE = /\b(?:asap|as\s+soon\s+as|soon|quick(?:ly)?|fast|urgent|this\s
  * (the R3 seller-day reservation stays the authoritative per-day cap at enqueue).
  * @param {{ thread: Array, inbound: { id: string, at: string, body?: string }, ledger?: object|null, queueRows?: Array, timezone?: string|null, now: string, extra?: object }} a
  */
-export function planInputsFromThread({ thread = [], inbound, ledger = null, queueRows = [], timezone = null, now, extra = {} }) {
+export function planInputsFromThread({ thread = [], inbound, ledger = null, queueRows = [], timezone = null, recipientZones = null, now, extra = {} }) {
   const msgs = [...thread].filter((m) => m && m.at).sort((a, b) => t(a) - t(b))
   if (inbound?.id && !msgs.some((m) => m.id === inbound.id)) msgs.push({ ...inbound, direction: 'inbound' })
   const latencies = []
@@ -91,6 +91,8 @@ export function planInputsFromThread({ thread = [], inbound, ledger = null, queu
   const cx = measureComplexity({ inboundText: inbound?.body || '', ledger, threadLength: msgs.length })
   return {
     lastInboundAt: inbound?.at,
+    inboundId: inbound?.id ? String(inbound.id) : null,
+    recipientZones,
     sellerReplyLatenciesMinutes: latencies,
     recentInboundAts: inbounds.map((m) => m.at),
     timezone,
@@ -185,16 +187,31 @@ export function compactPlan(p) {
 }
 
 /**
- * The due turn: claim (exact version) → decide once on the consolidated thread → finalize.
+ * The due turn: claim (exact version) → decide once on the consolidated thread → finalize →
+ * (rc-8.5.21) dispatch a send-authorised canonical reply through R3.
  * @param {object} a
  * @param {(claim: object) => Promise<{ code: string, outcome?: string|null, reply?: { text: string }|null, record?: object|null }>} a.decideTurn
- * @param {null|((x: object) => Promise<object>)} [a.dispatch]  NOT wired in this release (R3 OFF)
+ * @param {null|((x: object) => Promise<object>)} [a.dispatch]  the R3 turn dispatcher (OFF switches inside R3)
+ * @param {null|Function} [a.enqueueAt]  runtime enqueue (a window deferral re-schedules the turn)
  */
-export async function runDueTurn({ turn_id, version, store, worker, decideTurn, dispatch = null, leaseSeconds = 180 }) {
+export async function runDueTurn({ turn_id, version, store, worker, decideTurn, dispatch = null, enqueueAt = null, leaseSeconds = 180, now = null }) {
   const claim = await store.claim({ turn_id, version, worker, lease_seconds: leaseSeconds })
   if (!claim?.ok) {
     const reason = String(claim?.reason || 'claim_refused')
     if (reason === 'not_due') throw Object.assign(new Error('TURN_NOT_DUE'), { code: 'TURN_NOT_DUE', due_at: claim.due_at })
+    // crash recovery: the turn was finalized WITH its reservation but the dispatch never completed
+    // (the job died after finalize). The retried job (bounded attempts, then dead letter) resumes
+    // the dispatch with the SAME reservation token; R3 is idempotent per inbound.
+    if (reason === 'state_decided' && typeof dispatch === 'function' && typeof store.peek === 'function') {
+      const cur = await store.peek(turn_id)
+      const res = cur?.result || {}
+      if (cur?.version === version && cur?.reply_origin === 'ai_generated' && res.send_status === 'dispatch_pending' && res.reservation_token) {
+        const decision = await decideTurn({ ok: true, token: res.reservation_token, version, thread_key: cur.thread_key, inbound_ids: cur.reserved_inbound_ids || cur.inbound_ids || [], latest_inbound_id: cur.latest_inbound_id, persona_name: cur.persona_name, sender_number: cur.sender_number, turn_id, resumed: true })
+        if (!decision?.reply?.text) return { code: 'TURN_RESUME_NO_REPLY', decision_code: decision?.code || null }
+        const claimLike = { token: res.reservation_token, inbound_ids: cur.reserved_inbound_ids || cur.inbound_ids || [] }
+        return afterDispatch({ d: await dispatch({ turn_id, version, claim: claimLike, decision }), turn_id, store, enqueueAt, now, members: claimLike.inbound_ids.length, resumed: true })
+      }
+    }
     // stale_version: a newer inbound joined — the newer version's job decides; state_*: closed / claimed elsewhere
     // (a job for an OLDER version than the turn's is superseded whatever state the turn is in now)
     const superseded = reason === 'stale_version' || (Number.isInteger(claim?.version) && claim.version !== version)
@@ -203,15 +220,29 @@ export async function runDueTurn({ turn_id, version, store, worker, decideTurn, 
   const decision = await decideTurn({ ...claim, turn_id })
   const outcome = String(decision?.outcome || 'no_decision').toLowerCase().replace(/[^a-z0-9_:.-]/g, '_').slice(0, 60)
   const wantsReply = Boolean(decision?.reply?.text) && typeof dispatch === 'function'
-  const result = { code: decision?.code || null, outcome, send_status: wantsReply ? 'dispatch_pending' : 'not_sent_shadow', members: (claim.inbound_ids || []).length }
+  const result = { code: decision?.code || null, outcome, send_status: wantsReply ? 'dispatch_pending' : 'not_sent_shadow', members: (claim.inbound_ids || []).length, writer_version: decision?.writer_version || null, ...(wantsReply ? { reservation_token: claim.token } : {}) }
   const fin = await store.finalize({ turn_id, token: claim.token, version, outcome: `${wantsReply ? 'reply' : 'shadow'}:${outcome}`, result, reserve: wantsReply, reply_origin: wantsReply ? 'ai_generated' : null })
   if (!fin?.ok) return { code: 'TURN_SUPERSEDED_DURING_DECISION', reason: fin?.reason || null, decision_code: decision?.code || null }
   if (wantsReply && fin.reserved === false) return { code: 'TURN_ANSWERED_ELSEWHERE', conflict_inbound_id: fin.conflict_inbound_id || null }
-  if (wantsReply) {
-    const d = await dispatch({ turn_id, version, claim, decision })
-    return { code: 'TURN_DISPATCHED', dispatch: d?.status || null, members: result.members }
-  }
+  if (wantsReply) return afterDispatch({ d: await dispatch({ turn_id, version, claim, decision }), turn_id, store, enqueueAt, now, members: result.members })
   return { code: 'TURN_DECIDED_SHADOW', outcome, members: result.members, decision_code: decision?.code || null }
+}
+
+/** R3's verdict → the turn's next step. */
+async function afterDispatch({ d, turn_id, store, enqueueAt, now, members, resumed = false }) {
+  const status = d?.status || null
+  if (status === 'retry') throw Object.assign(new Error('TURN_DISPATCH_RETRY'), { code: 'TURN_DISPATCH_RETRY', reasons: d?.reasons || [] })
+  if (status === 'deferred' && d?.next_permitted_at) {
+    // the shared send-time function says "not now": re-plan the SAME turn at the next permitted
+    // time (reopen deletes the turn's reservations; a new version + job carries the schedule)
+    const r = await store.reopen({ turn_id, reason: 'window_deferred', due_at: d.next_permitted_at, plan: { action: 'schedule', due_at: d.next_permitted_at, reasons: ['deferred_by_send_time_check'] } })
+    if (r?.ok && typeof enqueueAt === 'function') {
+      const id = r.turn_id || r.merged_into || turn_id
+      await enqueueAt({ kind: CONVERSATION_TURN_KIND, event_key: turnEventKey(id, r.version), input: turnJobInput({ turn_id: id, version: r.version }), priority: 100, not_before: r.due_at || d.next_permitted_at })
+    }
+    return { code: 'TURN_DEFERRED_TO_WINDOW', dispatch: status, next_permitted_at: d.next_permitted_at, members, resumed }
+  }
+  return { code: 'TURN_DISPATCHED', dispatch: status, reasons: (d?.reasons || []).slice(0, 6), members, resumed }
 }
 
 /** Restart recovery: re-enqueue overdue turns and expired claims (event key per 10-min epoch). */

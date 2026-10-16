@@ -10,7 +10,8 @@ import { buildConversationContext, ContextError } from '../../src/lib/domain/con
 import { validateDraft, moneyMentions, contentReasons } from '../../src/lib/domain/conversation-ai/validator.js'
 import { buildFactLedger } from '../../src/lib/domain/conversation-ai/facts.js'
 import { questionKindOf, questionLedger, blockedQuestionKinds } from '../../src/lib/domain/conversation-ai/questions.js'
-import { runConversationAiShadow, createMemoryShadowStore } from '../../src/lib/domain/conversation-ai/engine.js'
+import { runConversationAiShadow as retiredR1Shadow, composeDraft, createMemoryShadowStore } from '../../src/lib/domain/conversation-ai/engine.js'
+import { runCanonicalShadow as runConversationAiShadow } from '../../src/lib/domain/conversation-ai/runtime/canonical-shadow.js'
 import { DEFAULT_AI_REPLY_POLICY, assertSendAllowed, shadowAllowed, normalizePolicy, SHADOW_ENV_FLAG } from '../../src/lib/domain/conversation-ai/policy.js'
 import { createConversationModelClient, createSpendTracker } from '../../src/lib/domain/conversation-ai/model-client.js'
 import { maskText } from '../../src/lib/domain/conversation-ai/pii.js'
@@ -270,6 +271,13 @@ test('model client refuses a payload with residual PII and never exceeds the spe
 })
 
 // ── engine: idempotency, kill switch, no send ──────────────────────────────
+// rc-8.5.21: the live shadow is the CANONICAL runtime (runtime/canonical-shadow.js); the R1
+// proposed_message writer (engine.js) is retired and throws.
+test('R1 composer retired: the old shadow engine and its draft normaliser throw R1_COMPOSER_RETIRED', async () => {
+  assert.throws(() => composeDraft(goodDecision()), (e) => e.code === 'R1_COMPOSER_RETIRED')
+  await assert.rejects(() => retiredR1Shadow({ input: input('hi') }), (e) => e.code === 'R1_COMPOSER_RETIRED')
+})
+
 test('parallel duplicate inbound (same message id) → exactly one decision', async () => {
   const store = createMemoryShadowStore()
   const { provider, mc } = client(goodDecision())
@@ -303,6 +311,8 @@ test('every shadow record says not sent; send permission is never granted', asyn
   assert.equal(r.record.send_status, 'not_sent_shadow')
   assert.equal(r.record.decision.send_permission_granted, false)
   assert.equal(r.record.policy_code, 'AI_REPLY_POLICY_DISABLED')
+  assert.equal(r.record.decision.contract_version, 'conv-ai.canonical-runtime.v1')
+  assert.match(r.record.writer_version, /^conv-ai\.pipeline\.v2\+playbook\.v3\+compose\.v3$/)
 })
 
 // ── follow-up re-evaluation ────────────────────────────────────────────────

@@ -34,6 +34,7 @@ function storeOver(call) {
 }
 
 const OPEN_COLUMNS = 'turn_id,version,state,due_at,inbound_ids,latest_inbound_id'
+const PEEK_COLUMNS = 'turn_id,thread_key,version,state,inbound_ids,latest_inbound_id,reply_origin,reserved_inbound_ids,result,persona_name,sender_number'
 
 export function createSupabaseTurnStore(supabase) {
   const store = storeOver(async (fn, args) => {
@@ -41,6 +42,12 @@ export function createSupabaseTurnStore(supabase) {
     if (r?.error) throw Object.assign(new Error('TURN_STORE_FAILED'), { code: 'TURN_STORE_FAILED', fn })
     return r?.data ?? null
   })
+  /** One turn's state (read-only) — the crash-resume check of runDueTurn. */
+  store.peek = async (turn_id) => {
+    const r = await supabase.from('conversation_reply_turns').select(PEEK_COLUMNS).eq('turn_id', turn_id).limit(1)
+    if (r?.error) throw Object.assign(new Error('TURN_STORE_FAILED'), { code: 'TURN_STORE_FAILED', fn: 'peek' })
+    return r?.data?.[0] || null
+  }
   /** The thread's open turn (read-only), or null. */
   store.peekOpen = async (thread_key) => {
     const r = await supabase.from('conversation_reply_turns').select(OPEN_COLUMNS).eq('thread_key', thread_key).in('state', ['pending', 'claimed']).limit(1)
@@ -61,6 +68,7 @@ export function createPgTurnStore(pool) {
     return r.rows[0].r
   })
   store.peekOpen = async (thread_key) => (await pool.query(`select ${OPEN_COLUMNS} from public.conversation_reply_turns where thread_key = $1 and state in ('pending','claimed') limit 1`, [thread_key])).rows[0] || null
+  store.peek = async (turn_id) => (await pool.query(`select ${PEEK_COLUMNS} from public.conversation_reply_turns where turn_id = $1 limit 1`, [turn_id])).rows[0] || null
   return store
 }
 
@@ -123,7 +131,7 @@ export function createMemoryTurnStore({ now = () => Date.now(), reservations = n
           Object.assign(x, { state: 'answered_elsewhere', close_reason: 'inbound_reply_reserved_by_other', outcome: 'answered_elsewhere', claim_token: null, lease_until: null })
           return { ok: true, reserved: false, state: 'answered_elsewhere', conflict_inbound_id: conflict }
         }
-        for (const id of x.inbound_ids) reservations.set(id, { status: 'processing', turn_id, origin: reply_origin })
+        for (const id of x.inbound_ids) reservations.set(id, { status: 'processing', turn_id, origin: reply_origin, token })
       }
       Object.assign(x, { state: 'decided', outcome, result, reply_origin: reserve ? reply_origin : null, reserved_inbound_ids: reserve ? [...x.inbound_ids] : null, claim_token: null, lease_until: null })
       return { ok: true, reserved: reserve, state: 'decided', inbound_ids: [...x.inbound_ids] }
@@ -156,6 +164,7 @@ export function createMemoryTurnStore({ now = () => Date.now(), reservations = n
         .map((x) => ({ turn_id: x.turn_id, version: x.version, state: x.state, due_at: x.due_at }))
     },
     get: (turn_id) => (turns.has(turn_id) ? pub(turns.get(turn_id)) : null),
+    async peek(turn_id) { return turns.has(turn_id) ? pub(turns.get(turn_id)) : null },
     async peekOpen(thread_key) { const o = open(thread_key); return o ? pub(o) : null },
   }
   return api

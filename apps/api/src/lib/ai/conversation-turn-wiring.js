@@ -14,7 +14,16 @@ import { normalizeDelayPolicy } from '@/lib/domain/conversation-ai/turns/delay-p
 import { createSupabaseTurnStore } from '@/lib/domain/conversation-ai/turns/turn-store.js'
 import { handleConversationEvent, planInputsFromThread } from '@/lib/domain/conversation-ai/turns/turn-engine.js'
 import { inboundVersionOf } from './conversation-ai-shadow-hook.js'
-import { loadPolicy, runConversationAiShadowForInbound } from './conversation-ai-shadow-wiring.js'
+import { createShadowTableStore, loadPolicy } from './conversation-ai-shadow-wiring.js'
+import { resolveRecipientZones } from '@/lib/domain/queue/reply-timing.js'
+import { decideAndCompose, WRITER_VERSION } from '@/lib/domain/conversation-ai/runtime/canonical.js'
+import { buildCanonicalShadowRecord } from '@/lib/domain/conversation-ai/runtime/canonical-shadow.js'
+import { ACTIONS } from '@/lib/domain/conversation-ai/pipeline/outcomes.js'
+import { createConversationModelClient } from '@/lib/domain/conversation-ai/model-client.js'
+import { AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, isOwnerHandledThread, normalizeSendPolicy, parseKillSwitch, threadInPolicyScope } from '@/lib/domain/conversation-ai/send-policy.js'
+import { isEmergencyStopActive } from '@/lib/domain/queue/queue-control-safety.js'
+import { getSystemValueFresh } from '@/lib/system-control.js'
+import { composeSpendFor, loadCanonicalInputs } from './conversation-canonical-inputs.js'
 
 /** system_control key holding the delay policy JSON (absent ⇒ the code defaults; caps clamp). */
 export const DELAY_POLICY_KEY = 'ai_conversation_delay_policy'
@@ -61,7 +70,9 @@ export async function routeInboundToTurn({ providerMessageSid, inboundVersion = 
   const lastOut = [...(loaded.input.thread || [])].filter((m) => m.direction === 'outbound' && (Date.parse(m.at) || 0) <= (Date.parse(inb.at) || 0)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).pop() || null
   const continuity = resolveThreadContinuity({ sentRows: queueRows, threadState: threadState[0] || null, inboundTo: loaded.row.to_phone_number })
   const delayPolicy = await readDelayPolicy(supabase)
-  const planArgs = { ...planInputsFromThread({ thread: loaded.input.thread, inbound: inb, ledger, queueRows, timezone: loaded.timezone, now, extra }), policy: delayPolicy }
+  // recipient-local zone evidence (area code + mailing state) ∩ the property zone (reply-timing.js)
+  const recipientZones = resolveRecipientZones({ recipientPhone: loaded.row.from_phone_number, propertyGeography: loaded.geography, storedTimezone: loaded.timezone })
+  const planArgs = { ...planInputsFromThread({ thread: loaded.input.thread, inbound: inb, ledger, queueRows, timezone: loaded.timezone, recipientZones, now, extra }), policy: delayPolicy }
   return handleConversationEvent({
     event: { kind: 'inbound', thread_key: tk, inbound: { id: String(inb.id), at: inb.at, body: inb.body }, deterministic, lastQuestionKind: lastOut ? questionKindOf(lastOut) : null, ledger },
     store: turnStore || createSupabaseTurnStore(supabase),
@@ -73,17 +84,67 @@ export async function routeInboundToTurn({ providerMessageSid, inboundVersion = 
 }
 
 /**
- * The decision for a due, claimed turn: the existing shadow decision for the turn's LATEST inbound
- * (its context loader reads the whole thread, so every member and the updated fact ledger are in
- * it). Records to public.conversation_ai_shadow_decisions; never sends.
+ * Is an AI SEND authorised for this thread right now? (kill switch, emergency stop, policy, scope,
+ * owner-handled). Everything absent ⇒ no: the decision is recorded (shadow) and NOTHING is reserved,
+ * so the template engine keeps the inbound exactly as today.
  */
-export function createShadowTurnDecider({ supabase = getDefaultSupabaseClient(), env = process.env, tracker = null, remainingMs = null, signal = null } = {}) {
+export async function aiSendAuthorizedFor({ threadKey, readSwitch }) {
+  try {
+    if (isOwnerHandledThread({ thread_key: threadKey })) return { ok: false, reason: 'owner_handled_thread' }
+    if (isEmergencyStopActive(await readSwitch('queue_emergency_stop_at'))) return { ok: false, reason: 'emergency_stop_active' }
+    if (!parseKillSwitch(await readSwitch(AI_SEND_KILL_SWITCH_KEY))) return { ok: false, reason: 'kill_switch_off' }
+    const policy = normalizeSendPolicy(await readSwitch(AI_SEND_POLICY_KEY))
+    if (!policy.enabled) return { ok: false, reason: 'ai_send_policy_disabled' }
+    if (!threadInPolicyScope(policy, { thread_key: threadKey })) return { ok: false, reason: 'thread_not_in_ai_scope' }
+    return { ok: true, reason: 'ai_send_authorized' }
+  } catch {
+    return { ok: false, reason: 'ai_send_switch_unreadable' }
+  }
+}
+
+/**
+ * The decision for a due, claimed turn: THE canonical runtime (decideAndCompose, caller 'turn') for
+ * the turn's LATEST inbound (the loader reads the whole thread, so every member and the updated
+ * fact ledger are in it). The decision is recorded in public.conversation_ai_shadow_decisions; a
+ * reply is handed to the R3 dispatcher ONLY when an AI send is authorised for the thread.
+ */
+export function createCanonicalTurnDecider({ supabase = getDefaultSupabaseClient(), env = process.env, tracker = null, remainingMs = null, signal = null, provider = null, readSwitch = null, shadowStore = null, now = () => new Date().toISOString() } = {}) {
+  const read = readSwitch || ((key) => getSystemValueFresh(key, { supabase }))
   return async (claim) => {
     const rows = await rowsOrThrow(supabase.from('message_events').select('id,provider_message_sid,direction').eq('id', claim.latest_inbound_id).limit(1))
     const sid = rows[0]?.provider_message_sid
-    if (!sid || String(rows[0]?.direction || '').toLowerCase() !== 'inbound') return { code: 'TURN_INBOUND_NOT_FOUND', outcome: 'needs_review' }
-    const r = await runConversationAiShadowForInbound({ providerMessageSid: sid, env, supabase, tracker, remainingMs, signal })
-    return { code: r?.code || null, outcome: r?.record?.decision?.outcome || r?.code || null, reply: null, record: r?.record ? { idempotency_key: r.record.idempotency_key, validation_status: r.record.validation?.status || null } : null }
+    if (!sid || String(rows[0]?.direction || '').toLowerCase() !== 'inbound') return { code: 'TURN_INBOUND_NOT_FOUND', outcome: 'needs_review', reply: null }
+    const policy = await loadPolicy(supabase)
+    const gate = shadowAllowed(policy, env)
+    if (!gate.allowed) return { code: gate.code, outcome: 'needs_review', reply: null }
+    const at = typeof now === 'function' ? now() : now
+    const ci = await loadCanonicalInputs({ supabase, providerMessageSid: sid, now: at, readSwitch: read })
+    if (!ci) return { code: 'TURN_INBOUND_NOT_FOUND', outcome: 'needs_review', reply: null }
+    if (isInternalTestPhone(ci.loaded.row.from_phone_number) || isInternalTestPhone(ci.loaded.row.to_phone_number)) return { code: 'INTERNAL_TEST_THREAD', outcome: 'needs_review', reply: null }
+    const modelClient = tracker ? createConversationModelClient({ provider: provider || (await import('./anthropic-provider.js')).createAnthropicProvider({ env }), tracker, env, remainingMs, signal }) : null
+    let eligibility
+    try { eligibility = await ci.eligibilityFor({ now: at }) } catch { eligibility = { blocked: true, reasons: ['send_time_guard_read_failed'], guard: { blocked: true, reason: 'send_time_guard_read_failed' } } }
+    const record = await decideAndCompose({
+      input: ci.input, eligibility, modelClient, spend: composeSpendFor(tracker),
+      establishedPersona: claim.persona_name || (ci.continuity.ok ? ci.continuity.persona_name : null), companyIdentity: ci.companyIdentity, caller: 'turn', now: at,
+    })
+    const store = shadowStore || createShadowTableStore(supabase)
+    try {
+      const sr = buildCanonicalShadowRecord(record, { inboundVersion: inboundVersionOf(sid, ci.loaded.row.message_body ?? '', 0), threadKey: ci.input.inbound.thread_key, propertyIds: (ci.input.properties || []).map((x) => x.property_id), latencyMs: null, policyCode: 'TURN_DECISION' })
+      await store.putIfAbsent(sr)
+    } catch (err) { if (err?.abortJob) throw err /* the decision stands; the record is best-effort measurement */ }
+    const reply = record.terminal?.type === ACTIONS.AI_GENERATED_REPLY && record.reply?.text && !(record.validation?.content_reasons || []).length ? record.reply : null
+    const auth = reply ? await aiSendAuthorizedFor({ threadKey: ci.input.inbound.thread_key, readSwitch: read }) : { ok: false, reason: 'no_reply' }
+    return {
+      code: record.terminal?.type || null,
+      outcome: String(record.terminal?.type || 'no_decision').toLowerCase(),
+      writer_version: WRITER_VERSION,
+      reply: reply && auth.ok ? { text: reply.text, category: reply.category } : null,
+      send_authorization: auth.reason,
+      canonical: record,
+      inbound: { id: String(ci.input.inbound.id), provider_message_sid: sid, thread_key: ci.input.inbound.thread_key, received_at: ci.input.inbound.at },
+      record: { idempotency_key: `conv-ai:v1:${ci.input.inbound.id}`, validation_status: record.validation?.status || null },
+    }
   }
 }
 

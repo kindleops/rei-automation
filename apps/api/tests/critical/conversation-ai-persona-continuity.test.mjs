@@ -12,6 +12,7 @@ import { buildComposePrompt, checkComposedText } from '../../src/lib/domain/conv
 import { decideActions } from '../../src/lib/domain/conversation-ai/pipeline/decide.js'
 import { buildCanonicalLedger } from '../../src/lib/domain/conversation-ai/fact-ledger.js'
 import { executeAiConversationReply } from '../../src/lib/ai/conversation-ai-r3-executor.js'
+import { toRecord } from '../helpers/canonical-record.mjs'
 import { resetMemoryIdempotencyLedger } from '../helpers/memory-idempotency-ledger.mjs'
 import { makeDecision } from '../../src/lib/domain/conversation-ai/contract.js'
 import { AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY } from '../../src/lib/domain/conversation-ai/send-policy.js'
@@ -97,7 +98,7 @@ test('compose: the composer is told the persona; a draft naming anyone else is r
   const p = buildComposePrompt({ ledger, inboundText: 'who is this?', category: 'identity_answer', objective: 'ownership', tone: 'skeptical', establishedPersona: 'Helen' })
   assert.match(p.user, /PERSONA: Helen/)
   assert.match(p.system, /never deny it/)
-  assert.equal(p.prompt_version, 'compose.v2')
+  assert.equal(p.prompt_version, 'compose.v3')
   const none = buildComposePrompt({ ledger, inboundText: 'who is this?', category: 'identity_answer', objective: 'ownership', tone: 'skeptical' })
   assert.match(none.user, /PERSONA: none on record: give no name/)
   const bad = checkComposedText('This is Mike, a local buyer. Do you still own it?', { ledger, objective: 'ownership', category: 'identity_answer', inboundIntent: 'who_is_this', establishedPersona: 'Helen' })
@@ -140,7 +141,7 @@ function executorDeps({ queueRows = [], threadState = null, ourPhone = OURS } = 
 }
 const identityCandidate = (text) => {
   const decision = makeDecision({ intent: 'who_is_this', seller_interest: 'unknown', outcome: 'REPLY_CANDIDATE', next_objective: 'gauge_interest', response_needed: true, proposed_message: text, confidence: 0.95, source_message_ids: ['i1'], facts_extracted: [{ fact: 'ownership', value: 'confirmed', source_message_id: 'i1', confidence: 0.95 }], stage_evidence: { stage: 'S2_interest', evidence_message_ids: ['i1'], rationale: 'ownership confirmed' } })
-  return { decision, draft_text: text, validation: { status: 'validated_draft' }, decision_id: 'conv-ai:v1:i1', model: 'claude-haiku-5-5', inbound: { id: 'i1', provider_message_sid: 'SMfixture', thread_key: SELLER } }
+  return { record: toRecord(decision, 'i1'), decision_id: 'conv-ai:v1:i1', inbound: { id: 'i1', provider_message_sid: 'SMfixture', thread_key: SELLER } }
 }
 
 test('R3: the queue row carries the thread persona and sticky number; another name, a conflict or a moved number holds', async () => {
