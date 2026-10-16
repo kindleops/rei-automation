@@ -27,8 +27,9 @@
 import { isStopRequest } from '../stop-request.js'
 import { deterministicPrecheck } from '../precheck.js'
 import { isDeflectionToOffer } from '../questions.js'
+import { ownershipDenialTerminal } from '../ownership-evidence.js'
 
-export const EVENT_ROUTER_VERSION = 'conv-ai.event-router.v1'
+export const EVENT_ROUTER_VERSION = 'conv-ai.event-router.v2'
 
 export const EVENT_TYPES = Object.freeze([
   'new_inbound', 'meaningful_update', 'offer_request', 'counteroffer', 'objection', 'acknowledgement',
@@ -89,8 +90,13 @@ export function routeConversationEvent(e = {}) {
   }
   const own = e.ledger?.facts?.ownership?.value
   if (own === 'denied' || own === 'former_owner') {
-    const fromThis = (e.ledger.facts.ownership.source_message_ids || []).includes(e.ledger?.last_message?.id)
-    if (fromThis) return out('ownership_denied', ROUTES.CLOSE_NO_REPLY, [`ledger:ownership_${own}`])
+    const lastId = e.ledger?.last_message?.id
+    const fromThis = (e.ledger.facts.ownership.source_message_ids || []).includes(lastId)
+    // rc-8.5.21 (Phase 3A): a "sold" / denial the same message takes back, or one that carries a
+    // price / answers a live negotiation, is NOT terminal — it is decided at the turn (a person)
+    const verdict = fromThis ? ownershipDenialTerminal({ ledger: e.ledger, inboundId: lastId, inboundText: text }) : null
+    if (fromThis && verdict.terminal) return out('ownership_denied', ROUTES.CLOSE_NO_REPLY, [`ledger:ownership_${own}`])
+    if (fromThis) return out('meaningful_update', ROUTES.SCHEDULE_TURN, [`ownership_signal_not_terminal:${verdict.reasons[0]}`], true)
   }
   if (ACK_ONLY_RE.test(text)) return out('acknowledgement', ROUTES.JOIN_OR_IGNORE, ['acknowledgement_only'])
   if (isDeflectionToOffer(text) || det?.intent === 'asks_offer') return out('offer_request', ROUTES.SCHEDULE_TURN, ['offer_request_human_bound'], true)

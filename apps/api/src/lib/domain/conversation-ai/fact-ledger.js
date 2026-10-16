@@ -49,7 +49,7 @@ function useCaseForKind(useCase) {
 }
 
 // ── seller-text evidence (deterministic; each rule names what it proves) ─────
-const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|i'?m\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home)))\b/i
+const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home)))\b/i
 const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong)\b/i
 const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|the|this)|^\s*(?:already\s+)?sold\b|\b(?:it|house|home|property)\s+(?:was|has\s+been|got)\s+sold|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore|gave\s+(?:the|my|that|this)\s+(?:house|home|property|place)\s+to|(?:it|the\s+house|the\s+home|the\s+property)\s+(?:is|belongs\s+to)\s+my\s+(?:son|daughter|kids?|children|brother|sister|mom|dad|mother|father)(?:'s)?\b|(?:signed|deeded|transferred)\s+(?:it|the\s+(?:house|home|property))\s+(?:over\s+)?to|ya\s+la\s+vend\w*|ya\s+no\s+es\s+m[ií]a)/im
 const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
@@ -63,6 +63,21 @@ const CALLBACK_RE = /\b(?:call\s+me|give\s+me\s+a\s+call|can\s+(?:you|u)\s+call|
 const WHICH_PROPERTY_RE = /\b(?:which\s+(?:property|house|one|address)|what\s+(?:property|address|house))\b/i
 const OBJECTION_RE = /\b(?:too\s+low|lowball|low\s*ball|scam|worth\s+(?:a\s+lot\s+)?more|not\s+(?:that|so)\s+cheap|insult(?:ing)?)\b/i
 const NEED_TIME_RE = /\b(?:let\s+me\s+think|need\s+(?:some\s+)?time|not\s+right\s+now|maybe\s+later|in\s+a\s+few\s+(?:months|weeks)|next\s+year|not\s+ready)\b/i
+
+// rc-8.5.21 (Phase 3A) mixed intent: a denial / "sold" claim the SAME message takes back
+// ("Sold.. just joking", "lol no I still own it") is a retraction, never a terminal ownership fact
+export const RETRACTION_RE = /\b(?:j\/?k|jk|just\s+(?:joking|kidding|playing|messing)|(?:i'?m\s+)?(?:only\s+)?kidding|not\s+really|no\s+i\s+(?:still\s+)?(?:own|have)\s+it|psych)\b/i
+// rc-8.5.21 (Phase 3C): "Not if it involves creative financing" is CONDITIONAL interest with a
+// terms objection (cash / conventional purchase only), never "not interested"
+export const FINANCING_OBJECTION_RE = /\b(?:not\s+if|(?:only\s+)?(?:if|when)\s+(?:it'?s|it\s+is|there'?s|there\s+is)\s+(?:not|no)|no\s+(?:to\s+)?|without|unless\s+(?:it'?s\s+)?(?:not\s+)?|as\s+long\s+as\s+(?:it'?s\s+|it\s+is\s+|there'?s\s+|there\s+is\s+)?(?:no|not)|(?:don'?t|do\s+not|won'?t|will\s+not)\s+(?:want|do|accept|take|consider)|not\s+(?:interested\s+in|doing|open\s+to))\b[^.?!]{0,40}?\b(?:creative\s+financ\w*|owner\s+financ\w*|seller\s+financ\w*|subject[\s-]?to|lease\s+option|rent[\s-]to[\s-]own|land\s+contract|payments?\s+over\s+time|(?:monthly|installment)\s+payments|terms\b|wrap(?:around)?)/i
+// "U could email me … your business card" — a request only a person can fulfil
+export const EMAIL_OR_CARD_REQUEST_RE = /\b(?:e-?mail\s+me|send\s+(?:me\s+)?(?:an?\s+|your\s+|ur\s+)?(?:e-?mail|card|business\s+card|info(?:rmation)?|details|website|link|paperwork)|(?:your|ur)\s+business\s+card|cc\s+of\s+(?:your|ur)|what'?s\s+(?:your|ur)\s+(?:e-?mail|website)|do\s+(?:you|u)\s+have\s+a\s+(?:website|card))\b/i
+// "I will contact you when I want to sell" — not now: the 30-day follow-up (owner rule)
+export const DEFERS_CONTACT_RE = /\b(?:i'?ll|i\s+will|we'?ll|we\s+will)\s+(?:contact|call|text|reach\s+out\s+to|get\s+(?:back\s+)?(?:to|with)|let)\s+(?:you|u)(?:\s+know)?\s+(?:when|if|once|whenever)\b/i
+// "Which company are you with?" — answered only from the configured identity, else a person
+export const COMPANY_QUESTION_RE = /\b(?:(?:what|which)\s+(?:company|outfit|firm|organi[sz]ation|business)|who\s+(?:are\s+(?:you|u)|r\s+u)\s+with|company\s+(?:name|are\s+(?:you|u)|r\s+u)|(?:who|what)\s+do\s+(?:you|u)\s+(?:work\s+for|represent)|(?:your|ur)\s+(?:company|website|business\s+name)|(?:are|r)\s+(?:you|u)\s+(?:with\s+)?a\s+company|what'?s\s+the\s+(?:company|website))\b/i
+// an amount WE quoted in an outbound (a live negotiation even without an offer record)
+const OUR_AMOUNT_RE = /\$\s?[0-9][0-9,]*(?:\.[0-9]+)?\s?(?:k|m)?\b|\b[0-9]{2,3}(?:,[0-9]{3})+\b|\b[0-9]{2,3}\s?k\b/i
 
 const OWNERSHIP_INTENTS = Object.freeze({
   ownership_confirmed: 'confirmed', wrong_number: 'denied', not_owner: 'denied', ownership_denied: 'denied',
@@ -112,6 +127,8 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
   const requests = []
   const objections = []
   const offerRequests = []
+  const retractions = []
+  const outboundQuotes = []
   const questions = {}
   for (const k of LEDGER_QUESTION_KINDS) questions[k] = { kind: k, asked_count: 0, asked_message_ids: [], last_asked_at: null, answered: false, answered_by: [], deflected: false, deflected_by: [] }
 
@@ -147,6 +164,7 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
   }
   for (const m of ordered) {
     if (m.direction === 'outbound') {
+      if (OUR_AMOUNT_RE.test(String(m.body || ''))) outboundQuotes.push({ message_id: m.id, at: m.at || null })
       const kind = questionKindOf({ use_case: useCaseForKind(m.use_case), body: m.body })
       if (m.queue_id) askedFromEvents.add(String(m.queue_id))
       if (questions[kind]) { ask(kind, m.id, m.at); lastAsked = kind } else if (kind !== 'none') lastAsked = kind
@@ -158,9 +176,16 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     // OWNER 2026-10-14: explicit STOP or any request to stop messaging = suppression
     if (isStopRequest(body) || intent === 'opt_out' || intent === 'stop_texting') addFact(facts, 'opt_out', 'stop_requested', m)
     // ownership / representative
-    if (OWNERSHIP_INTENTS[intent]) addFact(facts, 'ownership', OWNERSHIP_INTENTS[intent], m)
+    const denyMatch = OWN_DENY_RE.exec(body) || OWN_FORMER_RE.exec(body)
+    const retracted = denyMatch && RETRACTION_RE.test(body.slice(denyMatch.index + denyMatch[0].length))
+    if (retracted) {
+      // "Sold.. just joking": the claim is taken back in the same breath — never a terminal fact
+      retractions.push({ kind: 'ownership_claim_retracted', source_message_id: m.id })
+      if (!facts.ownership || ['denied', 'former_owner'].includes(facts.ownership.value)) addFact(facts, 'ownership', 'confirmed', m, 'retracted_denial_implies_ownership', 0.6)
+    } else if (OWNERSHIP_INTENTS[intent]) addFact(facts, 'ownership', OWNERSHIP_INTENTS[intent], m)
     else if (OWN_DENY_RE.test(body)) addFact(facts, 'ownership', 'denied', m)
-    else if (OWN_FORMER_RE.test(body)) addFact(facts, 'ownership', 'former_owner', m)
+    // a regex "sold" reading is weak evidence (0.6): mixed-intent rules may outrank it
+    else if (OWN_FORMER_RE.test(body)) addFact(facts, 'ownership', 'former_owner', m, 'seller_stated', 0.6)
     else if (OWN_CONFIRM_RE.test(body) || (lastAsked === 'ownership' && BARE_YES_RE.test(body))) addFact(facts, 'ownership', 'confirmed', m)
     // rc-8.5.20: the shared matcher ("Not really", "No!!!", "Nope"); a polite "No thanks" or an emoji reply is not a denial
     else if (lastAsked === 'ownership' && bareNoAnswer(body).ownership_denial) addFact(facts, 'ownership', 'denied', m)
@@ -175,6 +200,16 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     else if (lastAsked === 'interest' && BARE_YES_RE.test(body)) addFact(facts, 'seller_interest', 'interested', m)
     else if (lastAsked === 'interest' && bareNoAnswer(body).matched) addFact(facts, 'seller_interest', 'not_interested', m)
     else if (lastAsked === 'interest' && BARE_MAYBE_RE.test(body)) addFact(facts, 'seller_interest', 'conditional', m)
+    // rc-8.5.21: a financing-terms objection is conditional interest (latest statement wins)
+    if (FINANCING_OBJECTION_RE.test(body)) {
+      objections.push({ kind: 'financing_terms_objection', source_message_id: m.id })
+      addFact(facts, 'seller_interest', 'conditional', m, 'financing_objection_conditional')
+    } else if (DEFERS_CONTACT_RE.test(body)) {
+      // "I'll reach out when I want to sell" is NOT interest now (the extractor may read "want to sell")
+      addFact(facts, 'seller_interest', 'not_interested', m, 'defers_contact_until_ready')
+    }
+    if (EMAIL_OR_CARD_REQUEST_RE.test(body)) requests.push({ kind: 'email_or_card', source_message_id: m.id })
+    if (COMPANY_QUESTION_RE.test(body)) requests.push({ kind: 'company_identity', source_message_id: m.id })
     // timeline (beyond the extractor): "close before November", "move in 30 days", "asap"
     const tl = TIMELINE_RE.exec(body)
     if (tl && !(facts.timeline?.source_message_ids || []).includes(m.id)) addFact(facts, 'timeline', { stated: tl[0].trim().toLowerCase() }, m, 'seller_stated', 0.75)
@@ -242,6 +277,8 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     questions,
     offer_requests: offerRequests,
     existing_offers: existingOffers,
+    retractions,
+    outbound_quotes: outboundQuotes,
     requests,
     objections,
     property,

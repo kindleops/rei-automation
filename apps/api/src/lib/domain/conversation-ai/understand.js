@@ -44,7 +44,9 @@ const NEGOTIATION_RE = /\b(?:counter|lowest\s+(?:i|we)\s+(?:would|will|can)|best
 export function escalationTriggers({ inboundText = '', context }) {
   const t = String(inboundText)
   const out = []
-  if ((context?.property_ids?.length || 0) > 1 || MULTI_PROPERTY_RE.test(t)) out.push('multiple_properties')
+  // rc-8.5.21 (Phase 3D): thread events carrying several property ids are not evidence of a
+  // multi-property conversation (eval #29: single-property threads escalated); seller text is
+  if (MULTI_PROPERTY_RE.test(t) || context?.multi_property_evidence) out.push('multiple_properties')
   if (MULTI_OWNER_RE.test(t)) out.push('multiple_owners')
   if (FINANCING_RE.test(t)) out.push('financing')
   if (NEGOTIATION_RE.test(t) && (context?.offers?.length || 0) > 0) out.push('complex_negotiation')

@@ -85,6 +85,49 @@ export function questionCount(text) {
   return Math.max(marks, opens)
 }
 
+
+/**
+ * Content checks shared by validateDraft (R1-shaped, legacy records) and the canonical
+ * outbound validator (outbound-validator.js): shape, money, invented numbers, names, links,
+ * commitments, pressure, filler, distress and protected-class mentions. Pure.
+ * @param {string} text
+ * @param {{ context?: object|null, offerAmounts?: number[], knownNumbers?: string[], otherNames?: string[], firstName?: string|null, allowedLinks?: string[] }} [o]
+ */
+export function contentClaimReasons(text, { context = null, offerAmounts = null, knownNumbers = null, otherNames = null, firstName = null, allowedLinks = [] } = {}) {
+  const reasons = []
+  if (text.length > MAX_DRAFT_CHARS) reasons.push('over_length')
+  const qn = questionCount(text)
+  if (qn > 1) reasons.push('more_than_one_question')
+  let linkText = text
+  for (const l of allowedLinks || []) if (l) linkText = linkText.split(l).join(' ')
+  if (LINK_RE.test(linkText)) reasons.push('contains_link')
+  if (/\[name\]|\{\{|\}\}/.test(text)) reasons.push('placeholder_or_masked_name')
+  const first = firstName ?? context?.model?.seller_first_name ?? null
+  const others = otherNames ?? (context?.mask?.maskNames || []).flatMap((n) => String(n).split(/\s+/)).filter((w) => w.length >= 3 && (!first || w.toLowerCase() !== String(first).toLowerCase()))
+  if (others.some((w) => new RegExp(`(?<![\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}])`, 'iu').test(text))) reasons.push('names_other_than_first_name')
+  const mentions = moneyMentions(text)
+  const amounts = new Set((offerAmounts ?? (context?.offers || []).map((o) => Math.round(Number(o.amount) || 0))).filter((n) => n > 0))
+  let needsApproval = false
+  for (const m of mentions) {
+    if (m.amount && amounts.has(m.amount)) needsApproval = true
+    else reasons.push('unsupported_monetary_amount')
+  }
+  const known = new Set(knownNumbers ?? (context?.model?.messages || []).flatMap((m) => String(m.text || '').match(/[0-9]{3,}/g) || []))
+  const bare = (text.replace(MONEY_RE, ' ').match(/[0-9]{3,}/g) || []).filter((n) => !known.has(n))
+  if (bare.length) reasons.push('unsupported_number')
+  const kind = questionKindOf({ body: text })
+  // a NEGATED financing structure ("no creative financing", "not a financing deal") states what
+  // we are NOT doing; it is not a commitment (rc-8.5.21, conditional-interest clarification)
+  const negationFree = text.replace(/\b(?:no|without|not\s+(?:a|any)|never\s+(?:a|any)?)\s+(?:creative\s+|owner\s+|seller\s+)?financ\w*(?:\s+(?:involved|deal|structure|terms))?\b/gi, ' ')
+  const commitmentText = kind === 'interest' ? negationFree.replace(CASH_OFFER_IN_QUESTION_RE, 'offer') : negationFree
+  if (COMMITMENT_RE.test(commitmentText) || FOLLOWUP_COMMITMENT_RE.test(text)) reasons.push('legal_claim_or_commitment')
+  if (PRESSURE_RE.test(text)) reasons.push('pressure_language')
+  if (FILLER_RE.test(text)) reasons.push('filler')
+  if (DISTRESS_RE.test(text)) reasons.push('distress_mention')
+  if (PROTECTED_RE.test(text)) reasons.push('protected_class_reference')
+  return { reasons: [...new Set(reasons)], qn, kind, mentions, needsApproval }
+}
+
 /**
  * @param {object} a
  * @param {object} a.decision          a VALID R1 decision
@@ -107,37 +150,10 @@ export async function validateDraft({ decision, context, inboundText = '', polic
   if (!eligibility) reasons.push('eligibility_unknown')
   else if (eligibility.blocked) for (const r of (eligibility.reasons || ['blocked'])) reasons.push(`eligibility_blocked:${r}`)
 
-  // 2. shape
-  if (text.length > MAX_DRAFT_CHARS) reasons.push('over_length')
-  const qn = questionCount(text)
-  if (qn > 1) reasons.push('more_than_one_question')
-  if (LINK_RE.test(text)) reasons.push('contains_link')
-  if (/\[name\]|\{\{|\}\}/.test(text)) reasons.push('placeholder_or_masked_name')
-  const first = context?.model?.seller_first_name || null
-  const otherNames = (context?.mask?.maskNames || []).flatMap((n) => String(n).split(/\s+/)).filter((w) => w.length >= 3 && (!first || w.toLowerCase() !== first.toLowerCase()))
-  if (otherNames.some((w) => new RegExp(`(?<![\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}])`, 'iu').test(text))) reasons.push('names_other_than_first_name')
-
-  // 3. money — only an authoritative offer amount, and then only flagged for approval
-  const mentions = moneyMentions(text)
-  const offerAmounts = new Set((context?.offers || []).map((o) => Math.round(Number(o.amount) || 0)).filter((n) => n > 0))
-  let needsApproval = false
-  for (const m of mentions) {
-    if (m.amount && offerAmounts.has(m.amount)) needsApproval = true
-    else reasons.push('unsupported_monetary_amount')
-  }
-  // a non-money number (an address, a year) must already appear in the thread — never invented
-  const known = new Set((context?.model?.messages || []).flatMap((m) => String(m.text || '').match(/[0-9]{3,}/g) || []))
-  const bare = (text.replace(MONEY_RE, ' ').match(/[0-9]{3,}/g) || []).filter((n) => !known.has(n))
-  if (bare.length) reasons.push('unsupported_number')
-
-  const kind = questionKindOf({ body: text })
-  // 4. claims, commitments, tone, fair housing
-  const commitmentText = kind === 'interest' ? text.replace(CASH_OFFER_IN_QUESTION_RE, 'offer') : text
-  if (COMMITMENT_RE.test(commitmentText) || FOLLOWUP_COMMITMENT_RE.test(text)) reasons.push('legal_claim_or_commitment')
-  if (PRESSURE_RE.test(text)) reasons.push('pressure_language')
-  if (FILLER_RE.test(text)) reasons.push('filler')
-  if (DISTRESS_RE.test(text)) reasons.push('distress_mention')
-  if (PROTECTED_RE.test(text)) reasons.push('protected_class_reference')
+  // 2–4. shape, money, claims — the SAME content checks the shared outbound validator applies
+  const content = contentClaimReasons(text, { context })
+  for (const r of content.reasons) reasons.push(r)
+  const { qn, kind, mentions, needsApproval } = content
 
   // 5. duplicate / already-answered (deterministic)
   const blocked = context?.blocked instanceof Set ? context.blocked : new Set(context?.model?.do_not_ask || [])
