@@ -53,7 +53,7 @@ function createJobContext({ store, claim, deadlineAt, now }) {
     return r
   }
   const ctx = {
-    job: Object.freeze({ job_id: claim.job_id, kind: claim.kind, attempt: claim.attempt, max_attempts: claim.max_attempts, input: claim.input || {}, checkpoint: claim.checkpoint || {}, budget_cap_usd: Number(claim.budget_cap_usd || 0), schedule_id: claim.schedule_id ?? null }),
+    job: Object.freeze({ job_id: claim.job_id, kind: claim.kind, attempt: claim.attempt, max_attempts: claim.max_attempts, input: claim.input || {}, checkpoint: claim.checkpoint || {}, budget_cap_usd: Number(claim.budget_cap_usd || 0), schedule_id: claim.schedule_id ?? null, requested_by: claim.requested_by ?? null }),
     signal: ac.signal,
     remainingMs: () => Math.max(0, deadlineAt - now()),
     /** Between steps: heartbeat + progress + checkpoint; throws RuntimeStop on cancel / stop / lease loss / deadline. */
@@ -61,6 +61,10 @@ function createJobContext({ store, claim, deadlineAt, now }) {
       if (ac.signal.aborted || now() >= deadlineAt) throw new RuntimeStop('deadline')
       steps += 1
       return guard(await store.checkpoint({ ...base, progress: progress || { step: name, steps_done: steps - 1 }, checkpoint, event_type: 'job.step', event_payload: { step: name, ...payload } }))
+    },
+    /** Mid-step lease extension (no event, no progress change); throws RuntimeStop on cancel / stop / lease loss / deadline. */
+    async heartbeat() {
+      return guard(await store.checkpoint({ ...base }))
     },
     async reserve(model, reserved_usd, purpose = 'default') {
       const r = await store.reserve({ ...base, model, reserved_usd, purpose })
@@ -74,6 +78,8 @@ function createJobContext({ store, claim, deadlineAt, now }) {
       return r.finding_id
     },
     setWatermark: (watermark) => store.scheduleWatermark({ ...base, watermark }),
+    /** Hand the job back between steps (release: no attempt burned; re-claimed after backoff_base_seconds). */
+    yield(reason = 'yield') { throw new RuntimeStop(`yield:${String(reason).slice(0, 40)}`) },
     read: Object.freeze({ healthSnapshot: (o) => store.healthSnapshot(o) }),
   }
   return { ctx, abort: () => ac.abort() }
@@ -122,6 +128,7 @@ async function runJob({ store, handler, claim, deadlineAt, now }) {
       if (e.reason === 'lease_lost') return { ...out, outcome: 'lease_lost', ok: false }
       if (e.reason === 'budget_blocked') return { ...out, outcome: 'budget_blocked', state: 'budget_blocked', ok: true }
       if (e.reason === 'deadline') return finish('retry', { error: { code: 'TICK_DEADLINE' } })
+      if (e.reason === 'yield' || e.reason.startsWith('yield:')) return { ...(await finish('release')), outcome: 'yield' }
       if (e.reason.startsWith('stop:')) return finish('release', { error: { code: safeCode(`STOP_${e.reason.slice(5)}`) } })
       return finish('failed', { error: { code: safeCode(e.reason) } })
     }
@@ -133,9 +140,12 @@ async function runJob({ store, handler, claim, deadlineAt, now }) {
 
 /**
  * @param {{ store: object, handlers: Record<string, { run: (ctx: object) => Promise<any> }>, workerId: string,
- *           budgetMs?: number, now?: () => number, maxJobs?: number, minClaimMs?: number, safetyMs?: number }} o
+ *           budgetMs?: number, now?: () => number, maxJobs?: number, minClaimMs?: number, safetyMs?: number, concurrent?: boolean }} o
+ *   concurrent: run this tick's claims in parallel (each inside the same wall-clock deadline). The
+ *   number in flight is what the DB granted: ≤ tick_max_jobs, ≤ max_concurrency_global live leases,
+ *   ≤ the kind's max_concurrency. Default false (sequential, the R2 behaviour).
  */
-export async function runRuntimeTick({ store, handlers, workerId, budgetMs = DEFAULT_TICK_BUDGET_MS, now = () => Date.now(), maxJobs = null, minClaimMs = MIN_CLAIM_MS, safetyMs = SAFETY_MS }) {
+export async function runRuntimeTick({ store, handlers, workerId, budgetMs = DEFAULT_TICK_BUDGET_MS, now = () => Date.now(), maxJobs = null, minClaimMs = MIN_CLAIM_MS, safetyMs = SAFETY_MS, concurrent = false }) {
   if (!store) throw new AgentError('RUNTIME_STORE_REQUIRED', 'store required')
   if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(String(workerId || ''))) throw new AgentError('RUNTIME_WORKER_INVALID', 'workerId must match ^[A-Za-z0-9_.:-]{1,80}$')
   const started = now()
@@ -167,6 +177,10 @@ export async function runRuntimeTick({ store, handlers, workerId, budgetMs = DEF
     if (c.blocked) summary.blocked = c.blocked
     const claims = Array.isArray(c.claimed) ? c.claimed : []
     summary.claimed = claims.length
+    if (concurrent && claims.length > 1) {
+      summary.jobs.push(...(await Promise.all(claims.map((claim) => runJob({ store, handler: handlers[claim.kind], claim, deadlineAt, now })))))
+      return summary
+    }
     for (const claim of claims) {
       if (deadlineAt - now() <= 0) {
         // never started: hand it back without burning an attempt

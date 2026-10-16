@@ -37,6 +37,15 @@ const RUNTIME_PUBLIC_FIXTURE = {
 const SEND_QUEUE_BASELINE = 'scripts/db/fixtures/send_queue_live_baseline.sql'
 const KIND_LIMITS_FIX = M('PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql')
 const CONV_DECIDE_BUDGET = M('PROPOSED_20261013161000_conversation_decide_event_budget.sql')
+const CAPS = M('PROPOSED_20261013120000_agent_capabilities.sql')
+const CONV_AI_SHADOW = M('PROPOSED_20261013160000_conversation_ai_shadow.sql')
+const OPS_HEALTH_DELIVERY_REF = M('PROPOSED_20261014150000_ops_health_snapshot_delivery_ref.sql')
+const MISSIONS = M('PROPOSED_20261014120000_persistent_missions.sql')
+const MESSAGE_ORIGIN = M('PROPOSED_20261015130000_message_origin_ai_generated_messages.sql')
+const NEGOTIATION = M('PROPOSED_20261015190000_negotiation_authority.sql')
+const FEEDBACK = M('PROPOSED_20261015191000_ai_operator_feedback.sql')
+const ASKING_PRICE_MIRROR = M('PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql')
+const ASKING_PRICE_QUESTION_KIND = M('PROPOSED_20261015120000_repeat_asking_price_question_kind.sql')
 // ops_health_snapshot_delivery_ref reads max(public.send_queue.delivered_at)
 const SEND_QUEUE_DELIVERED_AT = {
   name: 'public.send_queue.delivered_at (ops health fixture)',
@@ -117,31 +126,20 @@ export const MIGRATION_TESTS = Object.freeze([
     rollback: [M('PROPOSED_20261014150000_ops_health_snapshot_delivery_ref_rollback.sql')],
   },
   {
-    id: 'unlock_stale_jobs_status_predicate',
-    // the rollback file IS the live production body: it doubles as the baseline
-    setup: [SHIM, SEND_QUEUE_BASELINE, M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_rollback.sql')],
-    pretest: M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_pretest.sql'),
-    apply: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate.sql')],
-    posttest: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_posttest.sql')],
-    rollback: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_rollback.sql')],
-  },
-  {
-    id: 'repeat_asking_price_question_kind',
-    setup: [SHIM, SEND_QUEUE_BASELINE],
-    pretest: M('PROPOSED_20261015120000_repeat_asking_price_question_kind_pretest.sql'),
-    apply: [M('PROPOSED_20261015120000_repeat_asking_price_question_kind.sql')],
-    posttest: [M('PROPOSED_20261015120000_repeat_asking_price_question_kind_posttest.sql')],
-    rollback: [M('PROPOSED_20261015120000_repeat_asking_price_question_kind_rollback.sql')],
+    id: 'persistent_missions',
+    // 8.5.18. Re-creates agent.runtime_kind_limits_valid, so it is applied AFTER the 8.5.15
+    // kind-limits fix (its body carries the event_budget_cap_usd rule; the pretest refuses
+    // otherwise) despite its 20261014120000 file stamp. The schedule seed
+    // (PROPOSED_20261014120100_persistent_missions_schedules.sql: psql -v owner_id, own
+    // BEGIN/COMMIT) is exercised statement-for-statement by its posttest.
+    setup: [SHIM, DURABILITY, S3, RESEARCH, RUNTIME_PUBLIC_FIXTURE, SEND_QUEUE_DELIVERED_AT, RUNTIME, CAPS, CONV_AI_SHADOW, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, OPS_HEALTH_DELIVERY_REF],
+    pretest: M('PROPOSED_20261014120000_persistent_missions_pretest.sql'),
+    apply: [MISSIONS],
+    posttest: [M('PROPOSED_20261014120000_persistent_missions_posttest.sql'), M('PROPOSED_20261014120100_persistent_missions_schedules_posttest.sql')],
+    rollback: [M('PROPOSED_20261014120000_persistent_missions_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261014120000_persistent_missions_rollback_posttest.sql')],
   },
   // ── 8.5.16 native AI conversation engine ──
-  {
-    id: 'block_repeat_asking_price_mirror',
-    // the baseline already carries the live trigger: the mirror must re-create it identically
-    setup: [SHIM, SEND_QUEUE_BASELINE],
-    pretest: M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_pretest.sql'),
-    apply: [M('PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql')],
-    posttest: [M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_posttest.sql')],
-  },
   {
     id: 'message_origin_ai_generated_messages',
     setup: [SHIM, SEND_QUEUE_BASELINE],
@@ -169,6 +167,84 @@ export const MIGRATION_TESTS = Object.freeze([
     posttest: [M('PROPOSED_20261015191000_ai_operator_feedback_posttest.sql')],
     rollback: [M('PROPOSED_20261015191000_ai_operator_feedback_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261015191000_ai_operator_feedback_rollback_posttest.sql')],
+  },
+  // ── asking-price guard: the 8.5.16 mirror of the live body, then the 8.5.15.1 replacement ──
+  {
+    id: 'block_repeat_asking_price_mirror',
+    // the baseline already carries the live trigger: the mirror must re-create it identically
+    setup: [SHIM, SEND_QUEUE_BASELINE],
+    pretest: M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_pretest.sql'),
+    apply: [M('PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql')],
+    posttest: [M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_posttest.sql')],
+  },
+  {
+    id: 'repeat_asking_price_question_kind',
+    setup: [SHIM, SEND_QUEUE_BASELINE],
+    pretest: M('PROPOSED_20261015120000_repeat_asking_price_question_kind_pretest.sql'),
+    apply: [M('PROPOSED_20261015120000_repeat_asking_price_question_kind.sql')],
+    posttest: [M('PROPOSED_20261015120000_repeat_asking_price_question_kind_posttest.sql')],
+    rollback: [M('PROPOSED_20261015120000_repeat_asking_price_question_kind_rollback.sql')],
+  },
+  {
+    id: 'unlock_stale_jobs_status_predicate',
+    // the rollback file IS the live production body: it doubles as the baseline
+    setup: [SHIM, SEND_QUEUE_BASELINE, M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_rollback.sql')],
+    pretest: M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_pretest.sql'),
+    apply: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate.sql')],
+    posttest: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_posttest.sql')],
+    rollback: [M('PROPOSED_20261008110000_unlock_stale_jobs_status_predicate_rollback.sql')],
+  },
+  // ── rc-8.5.20: the WHOLE release chain on ONE database, in production apply order ──
+  // Each migration's own pretest runs immediately before it (interleaved fixtures); the
+  // posttests run on the final state; the rollbacks run in reverse order and must restore
+  // the pre-chain fingerprint; then the chain is re-applied. The mirror of the live
+  // trg_block_repeat_asking_price body is applied BEFORE repeat_asking_price_question_kind:
+  // applied after it, the mirror would re-create the old body (and its pretest refuses a
+  // body that is not the live one).
+  {
+    id: 'rc_8_5_20_release_chain',
+    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE],
+    apply: [
+      { fixture: M('PROPOSED_20261012140000_intel_runtime_pretest.sql') }, RUNTIME,
+      { fixture: M('PROPOSED_20261013120000_agent_capabilities_pretest.sql') }, CAPS,
+      { fixture: M('PROPOSED_20261013160000_conversation_ai_shadow_pretest.sql') }, CONV_AI_SHADOW,
+      { fixture: M('PROPOSED_20261014121000_runtime_kind_limits_event_budget_pretest.sql') }, KIND_LIMITS_FIX,
+      { fixture: M('PROPOSED_20261013161000_conversation_decide_event_budget_pretest.sql') }, CONV_DECIDE_BUDGET,
+      { fixture: M('PROPOSED_20261014150000_ops_health_snapshot_delivery_ref_pretest.sql') }, OPS_HEALTH_DELIVERY_REF,
+      { fixture: M('PROPOSED_20261014120000_persistent_missions_pretest.sql') }, MISSIONS,
+      { fixture: M('PROPOSED_20261015130000_message_origin_ai_generated_messages_pretest.sql') }, MESSAGE_ORIGIN,
+      { fixture: M('PROPOSED_20261015190000_negotiation_authority_pretest.sql') }, NEGOTIATION,
+      { fixture: M('PROPOSED_20261015191000_ai_operator_feedback_pretest.sql') }, FEEDBACK,
+      { fixture: M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_pretest.sql') }, ASKING_PRICE_MIRROR,
+      { fixture: M('PROPOSED_20261015120000_repeat_asking_price_question_kind_pretest.sql') }, ASKING_PRICE_QUESTION_KIND,
+    ],
+    posttest: [
+      M('PROPOSED_20261013120000_agent_capabilities_posttest.sql'),
+      M('PROPOSED_20261013160000_conversation_ai_shadow_posttest.sql'),
+      M('PROPOSED_20261014121000_runtime_kind_limits_event_budget_posttest.sql'),
+      M('PROPOSED_20261013161000_conversation_decide_event_budget_posttest.sql'),
+      M('PROPOSED_20261014150000_ops_health_snapshot_delivery_ref_posttest.sql'),
+      M('PROPOSED_20261014120000_persistent_missions_posttest.sql'),
+      M('PROPOSED_20261014120100_persistent_missions_schedules_posttest.sql'),
+      M('PROPOSED_20261015130000_message_origin_ai_generated_messages_posttest.sql'),
+      M('PROPOSED_20261015190000_negotiation_authority_posttest.sql'),
+      M('PROPOSED_20261015191000_ai_operator_feedback_posttest.sql'),
+      M('PROPOSED_20261015120000_repeat_asking_price_question_kind_posttest.sql'),
+    ],
+    // applied in reverse order by the runner (the mirror has no rollback: it is the live body)
+    rollback: [
+      M('PROPOSED_20261012140000_intel_runtime_rollback.sql'),
+      M('PROPOSED_20261013120000_agent_capabilities_rollback.sql'),
+      M('PROPOSED_20261013160000_conversation_ai_shadow_rollback.sql'),
+      M('PROPOSED_20261014121000_runtime_kind_limits_event_budget_rollback.sql'),
+      M('PROPOSED_20261013161000_conversation_decide_event_budget_rollback.sql'),
+      M('PROPOSED_20261014150000_ops_health_snapshot_delivery_ref_rollback.sql'),
+      M('PROPOSED_20261014120000_persistent_missions_rollback.sql'),
+      M('PROPOSED_20261015130000_message_origin_ai_generated_messages_rollback.sql'),
+      M('PROPOSED_20261015190000_negotiation_authority_rollback.sql'),
+      M('PROPOSED_20261015191000_ai_operator_feedback_rollback.sql'),
+      M('PROPOSED_20261015120000_repeat_asking_price_question_kind_rollback.sql'),
+    ],
   },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──
   {
