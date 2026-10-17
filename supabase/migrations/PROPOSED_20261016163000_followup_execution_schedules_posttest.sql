@@ -1,5 +1,5 @@
 -- lc-fixture: posttest
--- PROPOSED ONLY — POSTTEST for PROPOSED_20261016161000_followup_execution_schedules.sql (rc-8.5.21).
+-- PROPOSED ONLY — POSTTEST for PROPOSED_20261016163000_followup_execution_schedules.sql (rc-8.5.21).
 -- The seed takes a psql variable (owner_id) and carries its own BEGIN/COMMIT, so the runner
 -- cannot apply it as written; this fixture executes the SAME upsert statements with a test
 -- operator id inside BEGIN … ROLLBACK and asserts both schedules are born disabled and that

@@ -16,6 +16,7 @@ export const BRIEF_SECTIONS = Object.freeze([
   ['recovered_opportunities', 'Recovered opportunities'],
   ['campaign_sender_changes', 'Campaign / sender changes'],
   ['system_incidents', 'System incidents'],
+  ['research_and_valuation', 'Research & valuation coverage'],
   ['recommended_next_actions', 'Recommended next actions'],
 ])
 const TITLE = Object.fromEntries(BRIEF_SECTIONS)
@@ -37,8 +38,10 @@ const missing = (id, c) => ({ id, title: TITLE[id], available: false, code: c, l
  * @param {object} [i.workItems]   { resolved: [...], open: [...] } | { unavailable }
  * @param {object} [i.actionCenter] { counts, lost, active_queue, computed_at } | { unavailable }
  * @param {object} [i.supervisor]  latest supervisor.summary value | { unavailable }
+ * @param {object} [i.researchValuation] 8.5.21-b agent.ops_research_valuation_snapshot | { unavailable }
+ * @param {object} [i.valuationBatch]    8.5.21-b latest valuation.refresh_batch finding value (+ at, job_id) | { unavailable }
  */
-export function buildOperatingBrief({ digest, jobs = [], approvals = [], facts = null, recovery = null, workItems = null, actionCenter = null, supervisor = null, discoveryJobIds = [] }) {
+export function buildOperatingBrief({ digest, jobs = [], approvals = [], facts = null, recovery = null, workItems = null, actionCenter = null, supervisor = null, researchValuation = null, valuationBatch = null, discoveryJobIds = [] }) {
   const s = []
   // 1 work completed (the 8.5.18 digest's missions); an unread runtime is unavailable, not "0 jobs"
   const runtimeRead = Array.isArray(jobs)
@@ -114,7 +117,25 @@ export function buildOperatingBrief({ digest, jobs = [], approvals = [], facts =
     ]))
   }
 
-  // 10 recommended next actions — deterministic, from what is open now
+  // 10 (8.5.21-b) research & valuation coverage — unavailable, never 0, when its read is missing
+  if (unavail(researchValuation) && !runtimeRead) s.push(missing('research_and_valuation', code(researchValuation, 'RESEARCH_VALUATION_SNAPSHOT_UNAVAILABLE')))
+  else {
+    const RV = unavail(researchValuation) ? null : researchValuation
+    const rvCode = code(researchValuation, 'RESEARCH_VALUATION_SNAPSHOT_UNAVAILABLE')
+    const v = RV?.valuation || null
+    const o = RV?.offers || null
+    const rjobs = runtimeRead ? jobs.filter((j) => j.kind === 'property.research' || j.kind === 'valuation.refresh') : null
+    const vb = unavail(valuationBatch) ? null : valuationBatch
+    s.push(section('research_and_valuation', [
+      v ? line('Live opportunities offer-ready (engine)', v.offer_ready ?? null, [], { of: v.live ?? null }) : line('Live opportunities offer-ready (engine)', null, [], { unavailable: rvCode }),
+      v ? line('Live opportunities without an engine valuation', v.missing ?? null, []) : line('Live opportunities without an engine valuation', null, [], { unavailable: rvCode }),
+      o ? line('Offers sent 72 h+ ago with no seller reply', o.overdue_no_reply_72h ?? null, (o.overdue_opportunity_ids || []).map((id) => ({ source: 'public.acquisition_opportunities', opportunity_id: id }))) : line('Offers sent 72 h+ ago with no seller reply', null, [], { unavailable: rvCode }),
+      rjobs ? line('Research / valuation jobs (24 h)', rjobs.length, rjobs.map((j) => ({ source: 'agent.research_job', job_id: j.job_id }))) : line('Research / valuation jobs (24 h)', null, [], { unavailable: code(jobs, 'RUNTIME_UNAVAILABLE') }),
+      vb ? line(`Valuation refresh ${vb.mode === 'write' ? '(write)' : 'dry run'}: offer-ready gained`, vb.gained_offer_ready ?? null, vb.job_id ? [{ source: 'agent.research_job', job_id: vb.job_id }] : [], { of: vb.queued ?? null }) : line('Valuation refresh dry run: offer-ready gained', null, [], { unavailable: code(valuationBatch, 'VALUATION_REFRESH_NOT_RUN') }),
+    ]))
+  }
+
+  // 11 recommended next actions — deterministic, from what is open now
   const rec = []
   if (!unavail(actionCenter)) {
     if (actionCenter.lost > 0) rec.push(line(`Answer or assign ${actionCenter.lost} lost conversation(s)`, actionCenter.lost, (actionCenter.lost_ids || []).map((id) => ({ source: 'public.inbox_thread_state', record_id: id }))))
@@ -128,7 +149,13 @@ export function buildOperatingBrief({ digest, jobs = [], approvals = [], facts =
     const top = (recovery.candidates || []).filter((c) => c.class === 'needs_human_review' || c.class === 'research_worthy').sort((a, b) => (b.priority || 0) - (a.priority || 0)).slice(0, 5)
     if (top.length) rec.push(line(`Review the top ${top.length} recovery candidate(s)`, top.length, top.map((c) => ({ source: 'public.inbox_thread_state', record_id: c.conversation_id }))))
   }
-  if (unavail(actionCenter) && unavail(workItems) && unavail(recovery)) s.push(missing('recommended_next_actions', 'OPERATIONS_READ_MODEL_UNAVAILABLE'))
+  if (!unavail(researchValuation)) {
+    const od = Number(researchValuation.offers?.overdue_no_reply_72h || 0)
+    if (od > 0) rec.push(line(`Follow up ${od} overdue offer(s) inside the follow-up policy`, od, (researchValuation.offers.overdue_opportunity_ids || []).slice(0, LINK_MAX).map((id) => ({ source: 'public.acquisition_opportunities', opportunity_id: id }))))
+    const mv = Number(researchValuation.valuation?.missing || 0)
+    if (mv > 0) rec.push(line(`Review the valuation refresh dry run (${mv} live without an engine valuation)`, mv, []))
+  }
+  if (unavail(actionCenter) && unavail(workItems) && unavail(recovery) && unavail(researchValuation)) s.push(missing('recommended_next_actions', 'OPERATIONS_READ_MODEL_UNAVAILABLE'))
   else s.push(section('recommended_next_actions', rec.length ? rec : [line('Nothing open in the operations read model', 0, [])]))
 
   const order = BRIEF_SECTIONS.map(([id]) => id)
@@ -148,7 +175,7 @@ export function renderBriefMarkdown(brief, { title = 'LeadCommand daily operatin
     out.push(`## ${sec.title}`)
     if (!sec.available) { out.push(`_unavailable_ (${sec.code})`, ''); continue }
     for (const l of sec.lines) {
-      out.push(`- ${l.label}: **${l.unavailable ? `unavailable (${l.unavailable})` : fmt(l.value)}**`)
+      out.push(`- ${l.label}: **${l.unavailable ? `unavailable (${l.unavailable})` : fmt(l.value)}${!l.unavailable && l.of != null ? ` of ${fmt(l.of)}` : ''}**`)
       if (l.links?.length) out.push(`  - sources: ${l.links.map(linkText).join(', ')}`)
     }
     out.push('')

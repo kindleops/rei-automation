@@ -6,7 +6,9 @@
 //                               in agent.runtime_limits.kind_limits (default: absent = off).
 // getOperationsServices()     → { source, store } for the API routes and the daily brief.
 import { getAgentPgPool } from '@/lib/agent/live/live-agent.js'
-import { runtimeGate } from '@/lib/agent/runtime/runtime-service.js'
+import { runtimeGate, getRuntimeStore } from '@/lib/agent/runtime/runtime-service.js'
+import { enqueuePropertyResearch } from '@/lib/agent/missions/property-research-triggers.js'
+import { failClosedHoldCheck } from '@/lib/agent/operations/automation-hold-gate.js'
 import { getCapabilityPlane } from '@/lib/agent/capabilities/index.js'
 import { createQuickScanReadClient } from '@/lib/agent/quick-scan/read-client.js'
 import { createMissionPgReads } from '@/lib/agent/missions/index.js'
@@ -49,6 +51,9 @@ export function operationsRuntimeHandlers(env = process.env) {
     reads: createMissionPgReads({ pool: getAgentPgPool(env) }),
     getPlane: () => getCapabilityPlane(env),
     economicsFor: createEconomicsFor(readDb),
+    // 8.5.21-b: recovery → property.research (OFF unless PROPERTY_RESEARCH_ENABLED=1 and the kind is armed)
+    // owner P0: fail closed until rc-8.5.20-holds' checkAutomationHold is integrated (replace failClosedHoldCheck then)
+    linkage: { checkAutomationHold: failClosedHoldCheck, enqueueResearch: (req) => enqueuePropertyResearch({ store: getRuntimeStore(env), env, trigger: req.trigger, property_id: req.property_id, discriminator: req.discriminator }) },
   })
   return globalThis[HANDLERS]
 }

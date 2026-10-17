@@ -51,6 +51,15 @@ const NEGOTIATION = M('PROPOSED_20261015190000_negotiation_authority.sql')
 const FEEDBACK = M('PROPOSED_20261015191000_ai_operator_feedback.sql')
 const ASKING_PRICE_MIRROR = M('PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql')
 const ASKING_PRICE_QUESTION_KIND = M('PROPOSED_20261015120000_repeat_asking_price_question_kind.sql')
+// rc-8.5.20 parts A / C, needed as setup by the 8.5.21-b entries
+const REPLY_TURNS = M('PROPOSED_20261016120000_conversation_reply_turns.sql')
+const OPS_ACTION_CENTER = M('PROPOSED_20261016140000_operations_action_center.sql')
+// rc-8.5.21 part B
+const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
+const SEND_AUTHORIZATION = M('PROPOSED_20261016161000_negotiation_send_authorization.sql')
+const OPS_RESEARCH_VALUATION = M('PROPOSED_20261016162000_ops_research_valuation_snapshot.sql')
+// the production column the 8.5.21-b supervisor read adds to the operations fixture (decision_tier)
+const RESEARCH_VALUATION_BASELINE = 'scripts/db/fixtures/research_valuation_public_baseline.sql'
 // ops_health_snapshot_delivery_ref reads max(public.send_queue.delivered_at)
 const SEND_QUEUE_DELIVERED_AT = {
   name: 'public.send_queue.delivered_at (ops health fixture)',
@@ -220,7 +229,7 @@ export const MIGRATION_TESTS = Object.freeze([
     // the turn-sweep schedule seed (PROPOSED_20261016120100: psql -v owner_id, own BEGIN/COMMIT)
     // is exercised statement-for-statement by its posttest
     // rc-8.5.21: the follow-up execution schedules (PROPOSED_20261016161000, same seed pattern) need agent.runtime_enqueue_event_at
-    posttest: [M('PROPOSED_20261016120000_conversation_reply_turns_posttest.sql'), M('PROPOSED_20261016120100_conversation_reply_turns_schedules_posttest.sql'), M('PROPOSED_20261016161000_followup_execution_schedules_posttest.sql')],
+    posttest: [M('PROPOSED_20261016120000_conversation_reply_turns_posttest.sql'), M('PROPOSED_20261016120100_conversation_reply_turns_schedules_posttest.sql'), M('PROPOSED_20261016163000_followup_execution_schedules_posttest.sql')],
     rollback: [M('PROPOSED_20261016120000_conversation_reply_turns_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016120000_conversation_reply_turns_rollback_posttest.sql')],
   },
@@ -234,6 +243,36 @@ export const MIGRATION_TESTS = Object.freeze([
     rollback: [M('PROPOSED_20261016140000_operations_action_center_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016140000_operations_action_center_rollback_posttest.sql')],
   },
+  // ── rc-8.5.21 part B: per-kind event budget ceilings (property.research up to 0.30; default unchanged) ──
+  {
+    id: 'runtime_event_budget_ceilings',
+    setup: [SHIM, DURABILITY, S3, RESEARCH, RUNTIME_PUBLIC_FIXTURE, LEGACY_CONVERSATION_TURNS, RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, REPLY_TURNS],
+    pretest: M('PROPOSED_20261016160000_runtime_event_budget_ceilings_pretest.sql'),
+    apply: [EVENT_BUDGET_CEILINGS],
+    posttest: [M('PROPOSED_20261016160000_runtime_event_budget_ceilings_posttest.sql')],
+    rollback: [M('PROPOSED_20261016160000_runtime_event_budget_ceilings_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016160000_runtime_event_budget_ceilings_rollback_posttest.sql')],
+  },
+  // ── rc-8.5.21 part B: the distinct live-negotiation SEND authorization ──
+  {
+    id: 'negotiation_send_authorization',
+    setup: [SHIM, NEGOTIATION],
+    pretest: M('PROPOSED_20261016161000_negotiation_send_authorization_pretest.sql'),
+    apply: [SEND_AUTHORIZATION],
+    posttest: [M('PROPOSED_20261016161000_negotiation_send_authorization_posttest.sql')],
+    rollback: [M('PROPOSED_20261016161000_negotiation_send_authorization_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016161000_negotiation_send_authorization_rollback_posttest.sql')],
+  },
+  // ── rc-8.5.21 part B: supervisor read of valuation coverage / overdue offers / negotiation progress ──
+  {
+    id: 'ops_research_valuation_snapshot',
+    setup: [SHIM, DURABILITY, S3, RESEARCH, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, RUNTIME, CAPS, CONV_AI_SHADOW, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, OPS_HEALTH_DELIVERY_REF, MISSIONS, OPS_ACTION_CENTER],
+    pretest: M('PROPOSED_20261016162000_ops_research_valuation_snapshot_pretest.sql'),
+    apply: [OPS_RESEARCH_VALUATION],
+    posttest: [M('PROPOSED_20261016162000_ops_research_valuation_snapshot_posttest.sql')],
+    rollback: [M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback_posttest.sql')],
+  },
   // ── rc-8.5.20: the WHOLE release chain on ONE database, in production apply order ──
   // Each migration's own pretest runs immediately before it (interleaved fixtures); the
   // posttests run on the final state; the rollbacks run in reverse order and must restore
@@ -243,7 +282,7 @@ export const MIGRATION_TESTS = Object.freeze([
   // body that is not the live one).
   {
     id: 'rc_8_5_20_release_chain',
-    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, LEGACY_CONVERSATION_TURNS],
+    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, LEGACY_CONVERSATION_TURNS],
     apply: [
       { fixture: M('PROPOSED_20261012140000_intel_runtime_pretest.sql') }, RUNTIME,
       { fixture: M('PROPOSED_20261013120000_agent_capabilities_pretest.sql') }, CAPS,
@@ -267,6 +306,11 @@ export const MIGRATION_TESTS = Object.freeze([
       { fixture: M('PROPOSED_20261016140000_operations_action_center_pretest.sql') }, M('PROPOSED_20261016140000_operations_action_center.sql'),
       // rc-8.5.21 part A: the born-empty company identity setting
       { fixture: M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_pretest.sql') }, M('PROPOSED_20261016150000_ai_conversation_company_identity_setting.sql'),
+      // rc-8.5.21 part B: event budget ceilings (after the reply-turns runtime_enqueue_event_at), the send
+      // authorization (after negotiation_authority), the supervisor read (after operations_action_center)
+      { fixture: M('PROPOSED_20261016160000_runtime_event_budget_ceilings_pretest.sql') }, EVENT_BUDGET_CEILINGS,
+      { fixture: M('PROPOSED_20261016161000_negotiation_send_authorization_pretest.sql') }, SEND_AUTHORIZATION,
+      { fixture: M('PROPOSED_20261016162000_ops_research_valuation_snapshot_pretest.sql') }, OPS_RESEARCH_VALUATION,
     ],
     posttest: [
       M('PROPOSED_20261013120000_agent_capabilities_posttest.sql'),
@@ -287,7 +331,10 @@ export const MIGRATION_TESTS = Object.freeze([
       M('PROPOSED_20261016140000_operations_action_center_posttest.sql'),
       M('PROPOSED_20261016140100_operations_schedules_posttest.sql'),
       M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_posttest.sql'),
-      M('PROPOSED_20261016161000_followup_execution_schedules_posttest.sql'),
+      M('PROPOSED_20261016163000_followup_execution_schedules_posttest.sql'),
+      M('PROPOSED_20261016160000_runtime_event_budget_ceilings_posttest.sql'),
+      M('PROPOSED_20261016161000_negotiation_send_authorization_posttest.sql'),
+      M('PROPOSED_20261016162000_ops_research_valuation_snapshot_posttest.sql'),
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body)
     rollback: [
@@ -306,6 +353,9 @@ export const MIGRATION_TESTS = Object.freeze([
       M('PROPOSED_20261016120000_conversation_reply_turns_rollback.sql'),
       M('PROPOSED_20261016140000_operations_action_center_rollback.sql'),
       M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_rollback.sql'),
+      M('PROPOSED_20261016160000_runtime_event_budget_ceilings_rollback.sql'),
+      M('PROPOSED_20261016161000_negotiation_send_authorization_rollback.sql'),
+      M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback.sql'),
     ],
   },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──
@@ -372,10 +422,10 @@ export const MIGRATION_TESTS = Object.freeze([
   {
     id: 'campaign_graph_prior_reply_not_owner',
     setup: [SHIM, 'scripts/db/fixtures/campaign_target_graph_live_functions_baseline.sql'],
-    pretest: M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner_pretest.sql'),
-    apply: [M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner.sql')],
-    posttest: [M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner_posttest.sql')],
-    rollback: [M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner_rollback.sql')],
-    rollbackPosttest: [M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner_rollback_posttest.sql')],
+    pretest: M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_pretest.sql'),
+    apply: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner.sql')],
+    posttest: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_posttest.sql')],
+    rollback: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback_posttest.sql')],
   },
 ])

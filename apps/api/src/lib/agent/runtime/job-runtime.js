@@ -185,6 +185,13 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
     return job && job.lease_token === token && ['claimed', 'running'].includes(job.state) ? job : null
   }
   const unknownOpen = (job_id) => { for (const l of ledger) if (l.job_id === job_id && l.state === 'reserved') l.state = 'unknown' }
+  // mirror of runtime_enqueue_event(_at): kind_limits.<kind>.event_budget_cap_usd (absent ⇒ 0) clamped to
+  // [0, agent.runtime_event_budget_ceiling(kind)] — 0.05 unless limits.event_budget_ceilings names the kind (hard max 0.30)
+  const eventBudgetCap = (kind) => {
+    const raw = Number(lim.kind_limits?.[kind]?.event_budget_cap_usd)
+    const ceil = Math.min(Math.max(Number(lim.event_budget_ceilings?.[kind] ?? 0.05), 0), 0.30)
+    return Math.min(Math.max(Number.isFinite(raw) ? raw : 0, 0), ceil)
+  }
 
   function enqueueCore({ kind, idempotency_key, input = {}, requested_by, trigger_kind, trigger_ref, priority = 100, max_attempts = 3, budget_cap_usd = 0, require_approval = false, schedule_id = null, schedule_slot = null, not_before = null }) {
     if (!isRuntimeKind(kind)) return { ok: false, reason: 'kind_invalid' }
@@ -216,7 +223,7 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
       if (!event_key || String(event_key).length > 200) return { ok: false, reason: 'event_key_invalid' }
       const armed = lim.kind_limits?.[kind]?.armed_by
       if (!armed) return { ok: false, reason: 'kind_not_armed' }
-      return enqueueCore({ kind, idempotency_key: crypto.createHash('sha256').update(`event:${kind}:${event_key}`).digest('hex'), input, requested_by: armed, trigger_kind: 'event', trigger_ref: `event:${kind}`, priority })
+      return enqueueCore({ kind, idempotency_key: crypto.createHash('sha256').update(`event:${kind}:${event_key}`).digest('hex'), input, requested_by: armed, trigger_kind: 'event', trigger_ref: `event:${kind}`, priority, budget_cap_usd: eventBudgetCap(kind) })
     }),
     enqueueEventAt: ({ kind, event_key, input = {}, priority = 100, not_before = null }) => serial(() => {
       if (!event_key || String(event_key).length > 200) return { ok: false, reason: 'event_key_invalid' }
@@ -224,7 +231,7 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
       if (Date.parse(not_before) > now() + 2 * 864e5) return { ok: false, reason: 'not_before_too_far' }
       const armed = lim.kind_limits?.[kind]?.armed_by
       if (!armed) return { ok: false, reason: 'kind_not_armed' }
-      return enqueueCore({ kind, idempotency_key: crypto.createHash('sha256').update(`event:${kind}:${event_key}`).digest('hex'), input, requested_by: armed, trigger_kind: 'event', trigger_ref: `event:${kind}`, priority, not_before })
+      return enqueueCore({ kind, idempotency_key: crypto.createHash('sha256').update(`event:${kind}:${event_key}`).digest('hex'), input, requested_by: armed, trigger_kind: 'event', trigger_ref: `event:${kind}`, priority, not_before, budget_cap_usd: eventBudgetCap(kind) })
     }),
     upsertSchedule: ({ name, kind, interval_seconds, created_by, input = {}, enabled = false, first_run_at = null, budget_cap_usd = 0 }) => serial(() => {
       let s = [...schedules.values()].find((x) => x.name === name)

@@ -59,7 +59,7 @@ test('PG property.research: unarmed ⇒ refused by the DB; armed ⇒ event job r
     assert.equal(job.trigger_kind, 'event')
     assert.equal(job.requested_by, OP)
     const fs = (await d.pool.query('select finding_type, value from agent.finding where job_id = $1 order by finding_type', [e.job_id])).rows
-    assert.deepEqual(fs.map((f) => f.finding_type), ['property.comps_area', 'property.dossier', 'property.economics', 'property.offer_plan', 'property.research'])
+    assert.deepEqual(fs.map((f) => f.finding_type), ['property.comps_area', 'property.dossier', 'property.economics', 'property.offer_plan', 'property.research', 'research.usage'])
     const raw = JSON.stringify(fs)
     assert.ok(!raw.includes(SECRET_PHONE) && !raw.includes('2145550147') && !raw.includes(SECRET_NAME))
     const plan = JSON.parse(decodeFromStore(fs.find((f) => f.finding_type === 'property.offer_plan').value.payload_v1))

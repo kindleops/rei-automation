@@ -65,15 +65,18 @@ export async function collectBriefInputs({ operations = null, since, until, org_
   const settle = (p, code) => p.then((v) => v ?? { unavailable: code }, (e) => ({ unavailable: String(e?.code || code).toUpperCase().slice(0, 60) }))
   const src = operations?.source || null
   const st = operations?.store || null
-  const [facts, recovery, workItems, actionCenter, supervisor] = await Promise.all([
+  const [facts, recovery, workItems, actionCenter, supervisor, researchValuation, valuationBatch] = await Promise.all([
     src ? settle(src.briefFacts({ since, until }), 'BRIEF_FACTS_UNAVAILABLE') : off('OPERATIONS_SOURCE_NOT_CONFIGURED'),
     st ? settle(Promise.all([st.recoveryCandidatesSince({ since }), st.latestFinding({ finding_type: 'recovery.batch', since })]).then(([c, b]) => (b ? { candidates: c, scanned: b.value?.scanned ?? null } : null)), 'RECOVERY_NOT_RUN') : off('OPERATIONS_STORE_NOT_CONFIGURED'),
     st ? settle(Promise.all([st.resolvedWorkItemsSince({ since }), st.listWorkItems({ limit: 100 })]).then(([resolved, open]) => ({ resolved, open })), 'WORK_ITEMS_UNAVAILABLE') : off('OPERATIONS_STORE_NOT_CONFIGURED'),
     st ? settle(st.actionCenterSummary().then((x) => (x.total ? x : null)), 'ACTION_CENTER_NOT_RUN') : off('OPERATIONS_STORE_NOT_CONFIGURED'),
     st ? settle(st.latestFinding({ finding_type: 'supervisor.summary', since }).then((f) => (f ? { ...f.value, job_id: f.job_id } : null)), 'SUPERVISOR_NOT_RUN') : off('OPERATIONS_STORE_NOT_CONFIGURED'),
+    // 8.5.21-b: valuation coverage / overdue offers / negotiation authority, and the latest valuation dry run
+    src?.researchValuationSnapshot ? settle(src.researchValuationSnapshot({ now: until }), 'RESEARCH_VALUATION_SNAPSHOT_UNAVAILABLE') : off('RESEARCH_VALUATION_SOURCE_NOT_CONFIGURED'),
+    st ? settle(st.latestFinding({ finding_type: 'valuation.refresh_batch' }).then((f) => (f ? { ...f.value, at: f.retrieved_at, job_id: f.job_id } : null)), 'VALUATION_REFRESH_NOT_RUN') : off('OPERATIONS_STORE_NOT_CONFIGURED'),
   ])
   void org_id
-  return { facts, recovery, workItems, actionCenter, supervisor }
+  return { facts, recovery, workItems, actionCenter, supervisor, researchValuation, valuationBatch }
 }
 
 /** @param {{ reads: object, shadowSource?: object|null, operations?: { source?: object, store?: object }|null, now?: () => number, org_id?: string }} deps */

@@ -24,6 +24,10 @@ import { classifyRecoveryCandidate, recoveryPriority, RECOVERY_CLASSES } from '.
 import { deriveActionState, isLostConversation, summarizeActionStates, ACTION_RULES } from './action-center.js'
 import { normalizeOpportunityFacts, reconcileOpportunity } from './pipeline-reconciler.js'
 import { evaluateSupervisor } from './supervisor-checks.js'
+import { recoveryNextAction, recoveryLinkRequests } from './recovery-linkage.js'
+import { nurtureIntentFor } from './ownership-evidence.js'
+import { consultHold, HOLD_CAPABILITIES, heldLabel } from './automation-hold-gate.js'
+import { encodePropertyRef } from '../missions/mission-codec.js'
 import { RECOVERY_SWEEP_KIND, ACTION_CENTER_KIND, PIPELINE_RECONCILE_KIND, OPS_SUPERVISOR_KIND, OPERATIONS_LIMITS } from './operations-kinds.js'
 
 const clampInt = (v, d, lo, hi) => Math.min(Math.max(Math.trunc(Number(v) || d), lo), hi)
@@ -63,9 +67,13 @@ const detectionDigest = (d) => Object.fromEntries(Object.entries(d).filter(([k, 
 const RECOVERY_ITEM_KIND = { research_worthy: 'recovery_research', eligible_for_approved_followup: 'recovery_followup', needs_human_review: 'recovery_review' }
 
 /**
- * @param {{ source: object, store: object, economicsFor?: ((facts: object) => Promise<object|null>)|null, now?: () => number }} deps
+ * @param {{ source: object, store: object, economicsFor?: ((facts: object) => Promise<object|null>)|null, now?: () => number,
+ *           linkage?: { enqueueResearch?: (req: { property_id, trigger, discriminator }) => Promise<{ ok: boolean, reason?: string, deduped?: boolean }> } | null }} deps
+ *   linkage (8.5.21-b): recovery candidates feed property.research (trigger recovery_finding) and the
+ *   valuation refresh queue (the recovery.linkage finding the valuation.refresh job reads). Both are
+ *   reads / research only; nothing here contacts a seller.
  */
-export function createRecoverySweepHandler({ source, store, economicsFor = null, now = () => Date.now() } = {}) {
+export function createRecoverySweepHandler({ source, store, economicsFor = null, now = () => Date.now(), linkage = null } = {}) {
   if (!source || !store) throw new Error('recovery.sweep: source and store required')
   return Object.freeze({
     kind: RECOVERY_SWEEP_KIND,
@@ -84,15 +92,25 @@ export function createRecoverySweepHandler({ source, store, economicsFor = null,
       const raw = await guarded(source.conversationFacts({ after_at: cur.after_at, after_id: cur.after_id, limit }), 'RECOVERY_SOURCE_UNAVAILABLE')
       const all = []
       let econ = 0
+      const nurture = { built: 0, enqueued: 0, deduped: 0, refused: {}, skipped: {} }
+      const intents = []
       for (const r of raw) {
-        const f = normalizeConversationFacts(r)
+        let f = normalizeConversationFacts(r)
+        // 8.5.21-b: canonical-ledger ownership evidence when wired (a bare "No" to OUR ownership question is a denial)
+        if (linkage?.ownershipEvidenceFor && !f.ownership_evidence) {
+          const ev = await linkage.ownershipEvidenceFor(f).catch(() => null)
+          if (ev?.ownership) f = { ...f, ownership_evidence: ev.ownership }
+        }
         let economics = null
         if (economicsFor && f.opportunity?.asking_price && f.property_id && econ < 50) {
           economics = await economicsFor(f).catch(() => null)
           if (economics) econ += 1
         }
         const c = classifyRecoveryCandidate(f, { now: t, approved_programs: approved, economics })
-        all.push({ conversation_id: f.conversation_id, cursor_at: f.cursor_at, class: c.class, reasons: c.reasons, detections: c.detections.map(detectionDigest), permission: { permitted: c.permission.permitted, blocks: c.permission.blocks, ownership: c.permission.ownership }, program: c.program, priority: recoveryPriority(c), economics_class: c.economics_class, evidence_refs: c.evidence_refs, property_ref: c.property_ref })
+        const next = recoveryNextAction(c)
+        const ni = nurtureIntentFor(f, c, { now: t })
+        if (ni.intent) { nurture.built += 1; intents.push(ni.intent) } else if (ni.reason !== 'not_disinterest') nurture.skipped[ni.reason] = (nurture.skipped[ni.reason] || 0) + 1
+        all.push({ conversation_id: f.conversation_id, cursor_at: f.cursor_at, class: c.class, reasons: c.reasons, detections: c.detections.map(detectionDigest), permission: { permitted: c.permission.permitted, blocks: c.permission.blocks, ownership: c.permission.ownership }, program: c.program, priority: recoveryPriority(c), economics_class: c.economics_class, evidence_refs: c.evidence_refs, property_ref: c.property_ref, property_id: f.property_id, next_action: { action: next.action, owner: next.owner, research: next.research, valuation: next.valuation } })
       }
       const by_class = Object.fromEntries(RECOVERY_CLASSES.map((k) => [k, 0]))
       for (const c of all) by_class[c.class] += 1
@@ -102,15 +120,47 @@ export function createRecoverySweepHandler({ source, store, economicsFor = null,
       await ctx.step('classify.done', { progress: { step: 'findings', steps_done: 1, steps_total: 4, pct: 40 }, payload: { scanned: raw.length, actionable: candidates.length } })
 
       const fs = candidates.slice(0, OPERATIONS_LIMITS.findings_per_job)
-      for (const c of fs) await ctx.recordFinding({ finding_type: 'recovery.candidate', key: `conv.${c.conversation_id}`, source_id: 'public.inbox_thread_state', citation: `inbox_thread_state:${c.conversation_id}`, value: { conversation_id: c.conversation_id, class: c.class, reasons: c.reasons, detections: c.detections, permission: c.permission, program: c.program, priority: c.priority, economics_class: c.economics_class, evidence_refs: c.evidence_refs, property_ref: c.property_ref }, confidence: 1 })
-      await ctx.recordFinding({ finding_type: 'recovery.batch', key: 'batch', source_id: 'agent.recovery_sweep', value: { scanned: raw.length, by_class, actionable: candidates.length, findings_recorded: fs.length, economics_evaluated: econ, approved_programs: approved, pass_done: Boolean(cursor.pass_done_at), sends: 0 }, confidence: 1 })
+      for (const c of fs) await ctx.recordFinding({ finding_type: 'recovery.candidate', key: `conv.${c.conversation_id}`, source_id: 'public.inbox_thread_state', citation: `inbox_thread_state:${c.conversation_id}`, value: { conversation_id: c.conversation_id, class: c.class, reasons: c.reasons, detections: c.detections, permission: c.permission, program: c.program, priority: c.priority, economics_class: c.economics_class, evidence_refs: c.evidence_refs, property_ref: c.property_ref, next_action: c.next_action }, confidence: 1 })
+
+      // 8.5.21-b linkage: research + valuation requests for the conversations worth underwriting
+      const links = recoveryLinkRequests(all)
+      const research = { requested: links.research.length, enqueued: 0, deduped: 0, refused: {} }
+      // owner P0: every act consults the automation-hold registry first (fail closed); held items are reported, never acted on
+      const held = { count: 0, by_type: {}, items: [] }
+      const factsById = new Map(all.map((c) => [c.conversation_id, c]))
+      const holdFor = async (conversation_id, property_id, capability) => {
+        const h = await consultHold(linkage?.checkAutomationHold || null, { threadId: conversation_id, propertyId: property_id || null, opportunityId: (factsById.get(conversation_id)?.evidence_refs || []).find((x) => x.source === 'public.acquisition_opportunities')?.record_id || null, capability })
+        if (h.held) { held.count += 1; held.by_type[h.hold_type || 'unknown'] = (held.by_type[h.hold_type || 'unknown'] || 0) + 1; if (held.items.length < 20) held.items.push({ conversation_id, capability, label: heldLabel(h), hold_id: h.hold_id }) }
+        return h
+      }
+      if (linkage?.enqueueResearch) {
+        for (const req of links.research.slice(0, OPERATIONS_LIMITS.research_requests_per_job)) {
+          if ((await holdFor(req.conversation_id, req.property_id, HOLD_CAPABILITIES.recovery_research)).held) { research.refused.AUTOMATION_HOLD = (research.refused.AUTOMATION_HOLD || 0) + 1; continue }
+          const r = await linkage.enqueueResearch(req).catch((e) => ({ ok: false, reason: String(e?.code || 'ENQUEUE_FAILED') }))
+          if (r?.ok && r.deduped) research.deduped += 1
+          else if (r?.ok) research.enqueued += 1
+          else research.refused[String(r?.reason || 'REFUSED').slice(0, 40)] = (research.refused[String(r?.reason || 'REFUSED').slice(0, 40)] || 0) + 1
+        }
+      } else research.refused.LINKAGE_NOT_CONFIGURED = links.research.length
+      // genuine RECENT disinterest → the 30-day nurture intent for the 8.5.21-a follow-up pipeline (it owns execution)
+      if (linkage?.enqueueFollowupIntent) {
+        for (const intent of intents.slice(0, OPERATIONS_LIMITS.research_requests_per_job)) {
+          if ((await holdFor(intent.conversation_id, null, HOLD_CAPABILITIES.recovery_nurture)).held) { nurture.refused.AUTOMATION_HOLD = (nurture.refused.AUTOMATION_HOLD || 0) + 1; continue }
+          const r = await linkage.enqueueFollowupIntent(intent).catch((e) => ({ ok: false, reason: String(e?.code || 'ENQUEUE_FAILED') }))
+          if (r?.ok && r.deduped) nurture.deduped += 1
+          else if (r?.ok) nurture.enqueued += 1
+          else nurture.refused[String(r?.reason || 'REFUSED').slice(0, 40)] = (nurture.refused[String(r?.reason || 'REFUSED').slice(0, 40)] || 0) + 1
+        }
+      } else if (intents.length) nurture.refused.FOLLOWUP_PIPELINE_NOT_CONFIGURED = intents.length
+      await ctx.recordFinding({ finding_type: 'recovery.linkage', key: 'batch', source_id: 'agent.recovery_sweep', value: { research, nurture, held, valuation_requests: links.valuation.slice(0, 200).map((v) => ({ property_ref: encodePropertyRef(v.property_id), recovery_class: v.recovery_class, conversation_id: v.conversation_id })), by_next_action: links.by_action, sends: 0 }, confidence: 1 })
+      await ctx.recordFinding({ finding_type: 'recovery.batch', key: 'batch', source_id: 'agent.recovery_sweep', value: { scanned: raw.length, by_class, actionable: candidates.length, findings_recorded: fs.length, economics_evaluated: econ, approved_programs: approved, pass_done: Boolean(cursor.pass_done_at), research_requests: research, valuation_requests: links.valuation.length, by_next_action: links.by_action, held: { count: held.count, by_type: held.by_type, items: held.items }, sends: 0 }, confidence: 1 })
       await ctx.step('findings.done', { progress: { step: 'review_items', steps_done: 2, steps_total: 4, pct: 70 }, payload: { written: fs.length + 1 } })
 
       const items = candidates.map((c) => ({
         dedupe_key: `recovery:conv:${c.conversation_id}`, kind: RECOVERY_ITEM_KIND[c.class], severity: c.class === 'needs_human_review' ? 'warning' : 'info',
         title: c.class === 'research_worthy' ? 'Recovery: research before any re-contact' : c.class === 'eligible_for_approved_followup' ? `Recovery: follow-up inside approved program ${c.program}` : `Recovery: human review (${c.reasons[c.reasons.length - 1] || 'review'})`,
         subject_type: 'conversation', subject_id: c.conversation_id, priority: Math.min(c.priority, 1000),
-        detail: { class: c.class, reasons: c.reasons, program: c.program, economics_class: c.economics_class, evidence_refs: c.evidence_refs.slice(0, 8) },
+        detail: { class: c.class, reasons: c.reasons, program: c.program, economics_class: c.economics_class, evidence_refs: c.evidence_refs.slice(0, 8), next_action: c.next_action },
       }))
       for (const id of clear) items.push({ dedupe_key: `recovery:conv:${id}`, resolve: true })
       const synced = await syncItems(ctx, store, items)
@@ -118,7 +168,7 @@ export function createRecoverySweepHandler({ source, store, economicsFor = null,
 
       if (ctx.job.schedule_id != null) await ctx.setWatermark(cursor)
       await ctx.step('watermark', { progress: { step: 'watermark', steps_done: 4, steps_total: 4, pct: 99 } })
-      return { result: { mission: 'recovery_sweep', scanned: raw.length, by_class, actionable: candidates.length, review_items: synced, findings: fs.length + 1, economics_evaluated: econ, pass_done: Boolean(cursor.pass_done_at), sends: 0 } }
+      return { result: { mission: 'recovery_sweep', scanned: raw.length, by_class, actionable: candidates.length, review_items: synced, findings: fs.length + 2, economics_evaluated: econ, research_requests: research, nurture_intents: nurture, held: { count: held.count, by_type: held.by_type }, valuation_requests: links.valuation.length, pass_done: Boolean(cursor.pass_done_at), sends: 0 } }
     },
   })
 }
@@ -235,7 +285,7 @@ export function createPipelineReconcileHandler({ source, store, getPlane = async
  * @param {{ source: object, store: object, reads: object, now?: () => number, org_id?: string }} deps
  *   reads = the 8.5.18 mission read model (activitySince, spendTotals, researchLimits, pendingApprovals)
  */
-export function createOpsSupervisorHandler({ source, store, reads, now = () => Date.now(), org_id = DEFAULT_ORG_ID } = {}) {
+export function createOpsSupervisorHandler({ source, store, reads, holdsSource = null, now = () => Date.now(), org_id = DEFAULT_ORG_ID } = {}) {
   if (!source || !store || !reads) throw new Error('ops.supervisor: source, store and reads required')
   const settle = (p, code) => p.then((v) => v ?? { unavailable: code }, (e) => ({ unavailable: String(e?.code || code).toUpperCase().slice(0, 60) }))
   return Object.freeze({
@@ -245,7 +295,7 @@ export function createOpsSupervisorHandler({ source, store, reads, now = () => D
       const t = now()
       const since24 = new Date(t - 86_400_000).toISOString()
       await ctx.step('read', { progress: { step: 'read', steps_done: 0, steps_total: 3, pct: 5 } })
-      const [snapshot, health, actionCenter, recovery, activity, spendTotals, limits, approvals] = await Promise.all([
+      const [snapshot, health, actionCenter, recovery, activity, spendTotals, limits, approvals, researchValuation, valuationBatch, holds] = await Promise.all([
         settle(source.supervisorSnapshot({ now: new Date(t).toISOString() }), 'SNAPSHOT_UNAVAILABLE'),
         settle(ctx.read.healthSnapshot({}), 'HEALTH_SNAPSHOT_UNAVAILABLE'),
         settle(store.actionCenterSummary().then((x) => (x.total ? x : null)), 'ACTION_CENTER_NOT_RUN'),
@@ -254,10 +304,15 @@ export function createOpsSupervisorHandler({ source, store, reads, now = () => D
         settle(reads.spendTotals(), 'SPEND_UNAVAILABLE'),
         settle(reads.researchLimits(), 'SPEND_UNAVAILABLE'),
         reads.pendingApprovals({ org_id, limit: 100 }).catch((e) => ({ unavailable: String(e?.code || 'APPROVALS_UNAVAILABLE') })),
+        // 8.5.21-b: valuation coverage / overdue offers / negotiation authority + the latest valuation dry run
+        typeof source.researchValuationSnapshot === 'function' ? settle(source.researchValuationSnapshot({ now: new Date(t).toISOString() }), 'RESEARCH_VALUATION_SNAPSHOT_UNAVAILABLE') : Promise.resolve({ unavailable: 'RESEARCH_VALUATION_SOURCE_NOT_CONFIGURED' }),
+        settle(store.latestFinding({ finding_type: 'valuation.refresh_batch' }).then((f) => (f ? { ...f.value, at: f.retrieved_at } : null)), 'VALUATION_REFRESH_NOT_RUN'),
+        // owner P0: the automation-hold registry (report only); absent until rc-8.5.20-holds is integrated
+        holdsSource?.summary ? settle(holdsSource.summary(), 'AUTOMATION_HOLDS_UNAVAILABLE') : Promise.resolve({ unavailable: 'AUTOMATION_HOLDS_NOT_INTEGRATED' }),
       ])
       const runtime = activity.unavailable ? activity : { jobs: activity.jobs.filter((j) => j.job_id !== ctx.job.job_id) }
       const spend = spendTotals.unavailable ? spendTotals : limits.unavailable ? limits : { ...spendTotals, limits }
-      const ev = evaluateSupervisor({ snapshot, health, actionCenter, recovery, runtime, spend, approvals, now: t, thresholds: ctx.job.input?.thresholds || {} })
+      const ev = evaluateSupervisor({ snapshot, health, actionCenter, recovery, runtime, spend, approvals, researchValuation, valuationBatch, holds, now: t, thresholds: ctx.job.input?.thresholds || {} })
       await ctx.step('evaluate.done', { progress: { step: 'record', steps_done: 1, steps_total: 3, pct: 50 }, payload: ev.counts })
 
       for (const c of ev.checks.filter((x) => x.status !== 'ok')) await ctx.recordFinding({ finding_type: 'supervisor.check', key: c.id, source_id: 'agent.ops_supervisor', value: c, confidence: 1 })
@@ -280,10 +335,10 @@ export function createOpsSupervisorHandler({ source, store, reads, now = () => D
  * @param {{ source: object|null, store: object|null, reads: object, getPlane?: Function, economicsFor?: Function|null, now?: () => number }} deps
  * @returns {Record<string, { run: Function }>}  {} when the source or store is missing
  */
-export function buildOperationsHandlers({ source, store, reads, getPlane = async () => null, economicsFor = null, now = () => Date.now() }) {
+export function buildOperationsHandlers({ source, store, reads, getPlane = async () => null, economicsFor = null, linkage = null, now = () => Date.now() }) {
   if (!source || !store) return {}
   return {
-    [RECOVERY_SWEEP_KIND]: createRecoverySweepHandler({ source, store, economicsFor, now }),
+    [RECOVERY_SWEEP_KIND]: createRecoverySweepHandler({ source, store, economicsFor, linkage, now }),
     [ACTION_CENTER_KIND]: createActionCenterHandler({ source, store, now }),
     [PIPELINE_RECONCILE_KIND]: createPipelineReconcileHandler({ source, store, getPlane, now }),
     ...(reads ? { [OPS_SUPERVISOR_KIND]: createOpsSupervisorHandler({ source, store, reads, now }) } : {}),

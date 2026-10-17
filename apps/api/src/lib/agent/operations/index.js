@@ -10,3 +10,8 @@ export { deriveActionState, isLostConversation, summarizeActionStates, verifiedS
 export { reconcileOpportunity, normalizeOpportunityFacts, projectedStage } from './pipeline-reconciler.js'
 export { evaluateSupervisor, SUPERVISOR_THRESHOLDS } from './supervisor-checks.js'
 export { buildOperatingBrief, renderBriefMarkdown, BRIEF_SECTIONS } from './operating-brief.js'
+// 8.5.21-b — recovery linkage, the dead-deal correction plan, the supervisor's research / valuation read, the MCP-safe status tool
+export { recoveryNextAction, recoveryLinkRequests, detectMisclassifiedCounteroffer, COUNTER_LOSING_INTENTS } from './recovery-linkage.js'
+export { buildNotInterestedCorrectionPlan, renderCorrectionSql, DEAD_DEAL_CORRECTION_VERSION } from './dead-deal-correction.js'
+export { RESEARCH_VALUATION_SNAPSHOT_SQL } from './research-valuation-sql.js'
+export { opsIntelTool, OPS_INTEL_TOOL_NAME, containsContactValue } from './ops-intel-capability.js'

@@ -28,8 +28,8 @@
 -- is contact-wide.
 --
 -- APPLY IN ONE TRANSACTION (no BEGIN/COMMIT here):
---   psql "$DB" --single-transaction -v ON_ERROR_STOP=1 -f PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner.sql
--- Rollback: PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner_rollback.sql (restores the five live bodies verbatim, drops the helper + index)
+--   psql "$DB" --single-transaction -v ON_ERROR_STOP=1 -f PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner.sql
+-- Rollback: PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback.sql (restores the five live bodies verbatim, drops the helper + index)
 -- Test: DISPOSABLE DATABASE ONLY —
 --   node scripts/db/run-migration-test.mjs --pg-bin <dir> --id campaign_graph_prior_reply_not_owner
 -- ════════════════════════════════════════════════════════════════════════════

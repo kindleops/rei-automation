@@ -6,7 +6,7 @@
 -- every handler does nothing until system_control.followup_execution_mode is set ('dry_run' or
 -- 'live'; absent / invalid = off), and the handlers exist only with LC_FOLLOWUP_EXECUTION=1.
 --
---   psql "$DB" -v ON_ERROR_STOP=1 -v owner_id=<owner auth uuid> -f PROPOSED_20261016161000_followup_execution_schedules.sql
+--   psql "$DB" -v ON_ERROR_STOP=1 -v owner_id=<owner auth uuid> -f PROPOSED_20261016163000_followup_execution_schedules.sql
 --
 -- Mirrors apps/api/src/lib/domain/followups/followup-execution.js.
 --   followup-execution-sweep  followup.execution_sweep  every 15 m  $0  due follow_up_at intents →

@@ -36,7 +36,7 @@
 //
 // BORN OFF: system_control `followup_execution_mode` absent / invalid ⇒ off; the handlers are
 // registered only with LC_FOLLOWUP_EXECUTION=1; the runtime kinds must be armed by the owner; the
-// schedules are created DISABLED (PROPOSED_20261016161000_followup_execution_schedules.sql).
+// schedules are created DISABLED (PROPOSED_20261016163000_followup_execution_schedules.sql).
 import crypto from 'node:crypto'
 
 import { checkAutomationHoldPort } from '../holds-port/automation-hold-port.js'

@@ -25,6 +25,12 @@ export const SUPERVISOR_THRESHOLDS = Object.freeze({
   action_center_stale_hours: 6,
   lost_warn: 1,
   lost_critical: 10,
+  // 8.5.21-b
+  valuation_offer_ready_warn_share: 0.5, // < 50 % of live opportunities offer-ready ⇒ warn
+  valuation_missing_warn: 1,
+  overdue_offers_warn: 1,
+  research_failed_warn: 1,
+  valuation_batch_stale_hours: 30,
 })
 
 const pct = (a, b) => (b > 0 ? Math.round((a / b) * 10_000) / 10_000 : null)
@@ -44,8 +50,11 @@ const unavailable = (id, code, o = {}) => check(id, 'unavailable', { code, ...o 
  * @param {object|{unavailable:string}} [i.runtime]     { jobs: [{ kind, state }] } (24 h)
  * @param {object|{unavailable:string}} [i.spend]       { day_usd, cycle_usd, limits: { day_usd, cycle_usd } }
  * @param {Array|{unavailable:string}} [i.approvals]    pending approvals
+ * @param {object|{unavailable:string}} [i.researchValuation]  8.5.21-b agent.ops_research_valuation_snapshot row
+ * @param {object|{unavailable:string}} [i.valuationBatch]     8.5.21-b latest valuation.refresh_batch finding value (+ at)
+ * @param {object|{unavailable:string}} [i.holds]              owner P0: active automation holds { count, by_type, items }
  */
-export function evaluateSupervisor({ snapshot, health = null, actionCenter = null, recovery = null, runtime = null, spend = null, approvals = null, now = Date.now(), thresholds = SUPERVISOR_THRESHOLDS } = {}) {
+export function evaluateSupervisor({ snapshot, health = null, actionCenter = null, recovery = null, runtime = null, spend = null, approvals = null, researchValuation = null, valuationBatch = null, holds = null, now = Date.now(), thresholds = SUPERVISOR_THRESHOLDS } = {}) {
   const T = { ...SUPERVISOR_THRESHOLDS, ...thresholds }
   const checks = []
   const issues = []
@@ -199,7 +208,61 @@ export function evaluateSupervisor({ snapshot, health = null, actionCenter = nul
 
   // 7 recovery candidates (latest sweep)
   if (!recovery || recovery.unavailable) add(unavailable('recovery_candidates', recovery?.unavailable || 'RECOVERY_NOT_RUN'))
-  else add(check('recovery_candidates', 'ok', { value: { by_class: recovery.by_class || {}, at: recovery.at || null, scanned: recovery.scanned ?? null }, source: 'agent.finding (recovery.batch)' }))
+  else add(check('recovery_candidates', 'ok', { value: { by_class: recovery.by_class || {}, at: recovery.at || null, scanned: recovery.scanned ?? null, held: recovery.held ? { count: recovery.held.count, by_type: recovery.held.by_type } : null }, source: 'agent.finding (recovery.batch)' }))
+  // owner P0: held items are REPORTED ("held: operator review"), never acted on — from the recovery batch and the hold registry
+  const holdsRead = holds && !holds.unavailable ? holds : null
+  if (!holdsRead && !(recovery && !recovery.unavailable && recovery.held)) add(unavailable('automation_holds', holds?.unavailable || 'AUTOMATION_HOLDS_UNAVAILABLE'))
+  else {
+    const byType = { ...(holdsRead?.by_type || {}) }
+    for (const [k, v] of Object.entries(recovery?.held?.by_type || {})) byType[k] = Math.max(byType[k] || 0, v)
+    const items = [...(holdsRead?.items || []), ...((recovery?.held?.items) || [])].slice(0, 20)
+    add(check('automation_holds', 'ok', { value: { held_items: holdsRead?.count ?? recovery?.held?.count ?? 0, by_type: byType, items, action: 'report_only_never_act' }, source: holdsRead ? 'public.automation_holds' : 'agent.finding (recovery.batch held)' }))
+  }
+
+  // ── 8.5.21-b: research status, valuation coverage, overdue offers, negotiation authority ──
+  // 18 research status (property.research + valuation.refresh runtime jobs, 24 h)
+  if (!runtime || runtime.unavailable) add(unavailable('research_status', runtime?.unavailable || 'RUNTIME_UNAVAILABLE'))
+  else {
+    const rj = runtime.jobs.filter((j) => j.kind === 'property.research' || j.kind === 'valuation.refresh')
+    const by = {}
+    for (const j of rj) by[`${j.kind}:${j.state}`] = (by[`${j.kind}:${j.state}`] || 0) + 1
+    const failed = rj.filter((j) => ['failed', 'dead_letter', 'budget_blocked'].includes(j.state)).length
+    const st = !rj.length ? 'unavailable' : failed >= T.research_failed_warn ? 'warn' : 'ok'
+    add(check('research_status', st, { value: { jobs_24h: rj.length, by_kind_state: by, failed_or_blocked: failed }, ...(st === 'unavailable' ? { code: 'NO_RESEARCH_JOBS_24H' } : {}), source: 'agent.research_job (property.research, valuation.refresh)' }),
+      st === 'warn' ? { dedupe_key: 'supervisor:research_failures', kind: 'remediation', severity: 'warning', recoverable: true, title: `${failed} research / valuation job(s) failed or budget-blocked in 24 h`, remediation: { action: 'inspect_research_jobs', note: 'A budget_blocked property.research job means its event budget is below one web call: raise the ceiling (owner) or run internal-only.' } } : null)
+  }
+  // 19 valuation coverage (live opportunities with an offer-ready engine row) + the latest dry run
+  const RV = researchValuation && !researchValuation.unavailable ? researchValuation : null
+  if (!RV?.valuation) add(unavailable('valuation_coverage', researchValuation?.unavailable || 'RESEARCH_VALUATION_SNAPSHOT_UNAVAILABLE'))
+  else {
+    const v = RV.valuation
+    const live = n(v.live) ?? 0
+    const ready = n(v.offer_ready) ?? 0
+    const missing = n(v.missing) ?? 0
+    const share = live > 0 ? Math.round((ready / live) * 1000) / 1000 : null
+    const vb = valuationBatch && !valuationBatch.unavailable ? valuationBatch : null
+    const batchAgeH = vb?.at ? Math.round(((now - Date.parse(vb.at)) / 3_600_000) * 10) / 10 : null
+    const st = live === 0 ? 'ok' : (share != null && share < T.valuation_offer_ready_warn_share) || missing >= T.valuation_missing_warn ? 'warn' : 'ok'
+    add(check('valuation_coverage', st, { value: { live, with_score: n(v.with_score), offer_ready: ready, offer_ready_share: share, missing, stale_30d: n(v.stale_30d), by_tier: v.by_tier || {}, last_dry_run: vb ? { at: vb.at || null, age_hours: batchAgeH, queued: n(vb.queued), gained_offer_ready: n(vb.gained_offer_ready), gained_valuation: n(vb.gained_valuation), mode: vb.mode || null } : null }, source: 'public.acquisition_opportunities × public.property_acquisition_scores (+ agent.finding valuation.refresh_batch)' }),
+      st === 'warn' ? { dedupe_key: 'supervisor:valuation_coverage', kind: 'remediation', severity: 'warning', recoverable: true, title: `${ready}/${live} live opportunities offer-ready; ${missing} without an engine valuation`, remediation: { action: 'run_valuation_refresh_queue_dry_run', note: 'valuation.refresh (dry run) shows the coverage gain; production valuation writes need a separate owner approval.' } } : null)
+  }
+  // 20 overdue offers (sent > 72 h, no seller reply since, deal still live)
+  if (!RV?.offers) add(unavailable('overdue_offers', researchValuation?.unavailable || 'RESEARCH_VALUATION_SNAPSHOT_UNAVAILABLE'))
+  else {
+    const od = n(RV.offers.overdue_no_reply_72h) ?? 0
+    const st = od >= T.overdue_offers_warn ? 'warn' : 'ok'
+    add(check('overdue_offers', st, { value: { sent_30d: n(RV.offers.sent_30d), overdue_no_reply_72h: od, opportunity_ids: (RV.offers.overdue_opportunity_ids || []).slice(0, 20) }, source: 'public.seller_offers × public.message_events' }),
+      st === 'warn' ? { dedupe_key: 'supervisor:overdue_offers', kind: 'remediation', severity: 'warning', recoverable: true, title: `${od} offer(s) sent 72 h+ ago with no seller reply`, remediation: { action: 'offer_follow_up_inside_policy', note: 'An offer follow-up goes out only as an approved template inside the follow-up policy; nothing is sent from here.' } } : null)
+  }
+  // 21 negotiation authority (envelopes / send authorizations) — null tables = unavailable, never 0
+  if (!RV?.negotiations) add(unavailable('negotiation_authority', researchValuation?.unavailable || 'RESEARCH_VALUATION_SNAPSHOT_UNAVAILABLE'))
+  else {
+    const ng = RV.negotiations
+    const applied = ng.envelopes != null
+    add(applied
+      ? check('negotiation_authority', 'ok', { value: { in_negotiation_stage: n(ng.in_negotiation_stage), envelopes: n(ng.envelopes), live_envelopes: n(ng.live_envelopes), ledger_events_7d: n(ng.ledger_events_7d), send_authorizations: ng.send_authorizations == null ? null : n(ng.send_authorizations) }, source: 'public.negotiation_envelopes / _offer_events / _send_authorizations' })
+      : unavailable('negotiation_authority', 'NEGOTIATION_TABLES_NOT_APPLIED', { value: { in_negotiation_stage: n(ng.in_negotiation_stage) }, source: 'public.negotiation_envelopes (PROPOSED 8.5.19)' }))
+  }
 
   const counts = { ok: 0, warn: 0, critical: 0, unavailable: 0 }
   for (const c of checks) counts[c.status] += 1

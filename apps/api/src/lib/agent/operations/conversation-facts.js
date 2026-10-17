@@ -37,6 +37,13 @@ export const OWNERSHIP_DENIAL_INTENTS = Object.freeze(['property_specific_non_ow
 export const RELATIONSHIP_REVIEW_INTENTS = Object.freeze(['executor_heir_respondent', 'agent_representative_respondent', 'family_member_respondent', 'entity_representative_respondent', 'non_owner_referral', 'llc_corporation'])
 export const HOSTILE_INTENTS = Object.freeze(['hostile_or_legal'])
 export const NOT_INTERESTED_INTENTS = Object.freeze(['not_interested'])
+/**
+ * 8.5.21-b (owner fix): seller statements that IMPLY ownership (a price, the condition, an offer request,
+ * stated interest in selling). Ownership is confirmed ONLY by an explicit yes to the ownership question
+ * (ownership_confirmed) or one of these — NEVER by pipeline stage rank (a dead deal sits at stage `closed`,
+ * the highest rank, whatever the seller said).
+ */
+export const OWNERSHIP_IMPLYING_INTENTS = Object.freeze(['ownership_confirmed', 'asking_price_provided', 'asking_price_implausible', 'condition_disclosed', 'asks_offer', 'contract_requested', 'seller_interested'])
 /** Languages the outreach programs have copy for; anything else (or unknown) needs a person. */
 export const SUPPORTED_LANGUAGES = Object.freeze(['en', 'english', 'es', 'spanish'])
 
@@ -113,6 +120,10 @@ export function normalizeConversationFacts(r = {}) {
       held_after_inbound: int0(r.held_after_inbound),
     },
     suppression_listed: bool(r.suppression_listed),
+    // 8.5.21-b: what the CANONICAL thread ledger proves (ownership-evidence.js), when the caller has it:
+    // 'confirmed' | 'denied' | 'former_owner' | null — a bare "No" to OUR ownership question is a denial
+    ownership_evidence: ['confirmed', 'denied', 'former_owner'].includes(lower(r.ownership_evidence)) ? lower(r.ownership_evidence) : null,
+    interest_evidence: str(r.interest_evidence),
     opportunity: opp,
     offers: { sent: int0(r.offers_sent), last_at: iso(r.last_offer_at) },
     live_closing_case: bool(r.live_closing_case),
@@ -141,9 +152,11 @@ export function verifyContactPermission(f) {
   if (['opted_out', 'do_not_text', 'do_not_contact'].includes(contact)) blocks.push(`contactability_${contact}`)
   const suppression = blocks.length > 0
   if (intents.has('wrong_number') || disp === 'wrong_number' || disp === 'wrong_person' || contact === 'invalid_number') blocks.push('wrong_number')
-  const denial = OWNERSHIP_DENIAL_INTENTS.some((i) => intents.has(i)) || disp === 'sold'
+  const denial = OWNERSHIP_DENIAL_INTENTS.some((i) => intents.has(i)) || disp === 'sold' || f.ownership_evidence === 'denied' || f.ownership_evidence === 'former_owner'
   if (denial) blocks.push('ownership_denied')
-  const confirmed = intents.has('ownership_confirmed') || stageRank(f.thread.seller_stage) >= stageRank('offer_interest') || (f.opportunity && stageRank(f.opportunity.stage) >= stageRank('offer_interest')) || INTEREST_INTENTS.some((i) => intents.has(i))
+  // real ownership evidence only: an explicit yes, a seller statement that implies ownership, or the canonical
+  // ledger's confirmation — never the pipeline stage rank (8.5.20 marked every closed deal "confirmed")
+  const confirmed = f.ownership_evidence === 'confirmed' || OWNERSHIP_IMPLYING_INTENTS.some((i) => intents.has(i))
   return {
     permitted: blocks.length === 0,
     blocks,

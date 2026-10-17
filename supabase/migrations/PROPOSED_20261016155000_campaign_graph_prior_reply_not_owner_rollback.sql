@@ -1,4 +1,4 @@
--- PROPOSED ONLY — ROLLBACK for PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner.sql.
+-- PROPOSED ONLY — ROLLBACK for PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner.sql.
 -- Restores the five live production bodies (pg_get_functiondef, read-only, 2026-10-16) verbatim,
 -- then drops the helper and the phone index. contact_property_resolution rows are never touched.
 CREATE OR REPLACE FUNCTION public.refresh_campaign_target_graph_seller_batch(p_run_id uuid, p_batch_limit integer DEFAULT 10000, p_batch_offset integer DEFAULT 0)

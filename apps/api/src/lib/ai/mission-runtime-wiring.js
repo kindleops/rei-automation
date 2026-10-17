@@ -18,6 +18,10 @@ import { createShadowSupabaseSource } from '@/lib/agent/missions/review-digest-h
 import { propertyResearchEnabled, createPropertyResearchSweepSupabaseSource } from '@/lib/agent/missions/property-research-triggers.js'
 import { createResearchSupabaseSource } from '@/lib/domain/property-research/research-source.js'
 import { getOperationsServices } from '@/lib/ai/operations-runtime-wiring.js'
+import { valuationRefreshEnabled, recoveryValuationCandidates } from '@/lib/agent/missions/valuation-refresh-handler.js'
+import { createValuationSupabaseSource } from '@/lib/domain/valuation-refresh/valuation-source.js'
+import { runValuationRefresh } from '@/lib/domain/valuation-refresh/dry-run.js'
+import { failClosedHoldCheck } from '@/lib/agent/operations/automation-hold-gate.js'
 
 const HANDLERS = Symbol.for('lc.agent.missions.handlers')
 const SERVICE = Symbol.for('lc.agent.missions.service')
@@ -50,6 +54,19 @@ export function missionRuntimeHandlers(env = process.env) {
     propertyResearchSweepSource: readDb && propertyResearchEnabled(env) ? createPropertyResearchSweepSupabaseSource({ db: readDb }) : null,
     // 8.5.20 C: the daily operating brief (null ⇒ its operations sections read "unavailable")
     operations: getOperationsServices(env),
+    // 8.5.21-b: valuation.refresh — OFF unless VALUATION_REFRESH_ENABLED=1; DRY RUN ONLY in this wiring
+    // (the guarded GET-only read client + get_comp_candidates_for_subject, a STABLE read): no write path exists here.
+    valuationRefresh: readDb && valuationRefreshEnabled(env) ? (() => {
+      const valDb = createQuickScanReadClient({ env, extraReadRpcs: ['get_comp_candidates_for_subject'] }).client
+      const ops = getOperationsServices(env)
+      return {
+        source: createValuationSupabaseSource({ db: readDb }),
+        runDecision: ({ property_id, now }) => runValuationRefresh({ property_id, client: valDb, now, write: false, env }),
+        extraCandidates: ops?.store ? () => recoveryValuationCandidates(ops.store) : null,
+        // owner P0: fail closed until rc-8.5.20-holds' checkAutomationHold is integrated
+        checkAutomationHold: failClosedHoldCheck,
+      }
+    })() : null,
     log: logLine,
   })
   return globalThis[HANDLERS]

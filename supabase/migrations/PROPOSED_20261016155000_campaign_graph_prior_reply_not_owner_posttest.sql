@@ -1,5 +1,5 @@
 -- lc-fixture: posttest
--- PROPOSED ONLY — POSTTEST for PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner.sql:
+-- PROPOSED ONLY — POSTTEST for PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner.sql:
 -- runs AFTER the runner applied the migration; every write rolls back.
 -- DISPOSABLE DATABASE ONLY (owner boundary 2026-10-15): never run against production.
 --   node scripts/db/run-migration-test.mjs --pg-bin <dir> --id campaign_graph_prior_reply_not_owner
