@@ -54,6 +54,15 @@ const ASKING_PRICE_QUESTION_KIND = M('PROPOSED_20261015120000_repeat_asking_pric
 // rc-8.5.20 parts A / C, needed as setup by the 8.5.21-b entries
 const REPLY_TURNS = M('PROPOSED_20261016120000_conversation_reply_turns.sql')
 const OPS_ACTION_CENTER = M('PROPOSED_20261016140000_operations_action_center.sql')
+// P0 automation-hold registry (rc-8.5.20-holds = hotfix/automation-holds). ALREADY APPLIED TO PRODUCTION
+// VIA THE HOTFIX before rc-8.5.21 deploys; it stays the FIRST link of the disposable release chain so
+// every later migration (and its rollback) is proven against a database that carries the hold triggers.
+const HOLDS_REGISTRY = M('PROPOSED_20261016200000_automation_holds_registry.sql')
+const HOLDS_PUBLIC_BASELINE = 'scripts/db/fixtures/automation_holds_public_baseline.sql'
+// rc-8.5.21 part A
+const COMPANY_IDENTITY = M('PROPOSED_20261016150000_ai_conversation_company_identity_setting.sql')
+const GRAPH_PRIOR_REPLY_NOT_OWNER = M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner.sql')
+const GRAPH_LIVE_FUNCTIONS_BASELINE = 'scripts/db/fixtures/campaign_target_graph_live_functions_baseline.sql'
 // rc-8.5.21 part B
 const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
 const SEND_AUTHORIZATION = M('PROPOSED_20261016161000_negotiation_send_authorization.sql')
@@ -66,7 +75,7 @@ const SEND_QUEUE_DELIVERED_AT = {
   sql: `alter table public.send_queue add column if not exists delivered_at timestamptz;`,
 }
 
-export const MIGRATION_TESTS = Object.freeze([
+const BASE_TESTS = [
   {
     id: 'agent_s3_persistence',
     setup: [SHIM, DURABILITY],
@@ -273,7 +282,23 @@ export const MIGRATION_TESTS = Object.freeze([
     rollback: [M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback_posttest.sql')],
   },
-  // ── rc-8.5.20: the WHOLE release chain on ONE database, in production apply order ──
+  // ── P0 automation-hold registry (rc-8.5.20-holds; production gets it via hotfix/automation-holds) ──
+  {
+    id: 'automation_holds_registry',
+    // the live send_queue surface (its guard triggers fire after the hold guard) + the registry baseline
+    // (the protected tables' columns, the lock-target index, is_ops_operator()); the release chain proves
+    // the same registry composed with every other public fixture
+    setup: [SHIM, SEND_QUEUE_BASELINE, HOLDS_PUBLIC_BASELINE],
+    pretest: M('PROPOSED_20261016200000_automation_holds_registry_pretest.sql'),
+    apply: [HOLDS_REGISTRY],
+    posttest: [M('PROPOSED_20261016200000_automation_holds_registry_posttest.sql')],
+    rollback: [M('PROPOSED_20261016200000_automation_holds_registry_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016200000_automation_holds_registry_rollback_posttest.sql')],
+  },
+  // ── rc-8.5.21: the WHOLE release chain (8.5.15 … 8.5.21 + the P0 holds registry) on ONE database ──
+  // Production apply order. The holds registry is FIRST: production receives it via the hotfix before
+  // rc-8.5.21 (it is "already applied via hotfix" when 8.5.21 deploys; its version stamp 20261016200000 is
+  // later than the 8.5.21 files on purpose — it is the hotfix's file, byte-identical).
   // Each migration's own pretest runs immediately before it (interleaved fixtures); the
   // posttests run on the final state; the rollbacks run in reverse order and must restore
   // the pre-chain fingerprint; then the chain is re-applied. The mirror of the live
@@ -281,9 +306,11 @@ export const MIGRATION_TESTS = Object.freeze([
   // applied after it, the mirror would re-create the old body (and its pretest refuses a
   // body that is not the live one).
   {
-    id: 'rc_8_5_20_release_chain',
-    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, LEGACY_CONVERSATION_TURNS],
+    id: 'rc_8_5_21_release_chain',
+    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, LEGACY_CONVERSATION_TURNS, HOLDS_PUBLIC_BASELINE, GRAPH_LIVE_FUNCTIONS_BASELINE],
     apply: [
+      // 0. the P0 holds registry (already applied via hotfix/automation-holds in production)
+      { fixture: M('PROPOSED_20261016200000_automation_holds_registry_pretest.sql') }, HOLDS_REGISTRY,
       { fixture: M('PROPOSED_20261012140000_intel_runtime_pretest.sql') }, RUNTIME,
       { fixture: M('PROPOSED_20261013120000_agent_capabilities_pretest.sql') }, CAPS,
       { fixture: M('PROPOSED_20261013160000_conversation_ai_shadow_pretest.sql') }, CONV_AI_SHADOW,
@@ -304,15 +331,20 @@ export const MIGRATION_TESTS = Object.freeze([
       { fixture: M('PROPOSED_20261016100000_zip_acquisition_intelligence_pretest.sql') }, M('PROPOSED_20261016100000_zip_acquisition_intelligence.sql'),
       { fixture: M('PROPOSED_20261016120000_conversation_reply_turns_pretest.sql') }, M('PROPOSED_20261016120000_conversation_reply_turns.sql'),
       { fixture: M('PROPOSED_20261016140000_operations_action_center_pretest.sql') }, M('PROPOSED_20261016140000_operations_action_center.sql'),
-      // rc-8.5.21 part A: the born-empty company identity setting
-      { fixture: M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_pretest.sql') }, M('PROPOSED_20261016150000_ai_conversation_company_identity_setting.sql'),
+      // rc-8.5.21 part A: the born-empty company identity setting; the graph recontact guard (the five
+      // queue_eligible writers read contact_property_resolution). The follow-up execution schedule seed
+      // (PROPOSED_20261016163000: psql -v owner_id, own BEGIN/COMMIT, born disabled) is exercised by its posttest.
+      { fixture: M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_pretest.sql') }, COMPANY_IDENTITY,
+      { fixture: M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_pretest.sql') }, GRAPH_PRIOR_REPLY_NOT_OWNER,
       // rc-8.5.21 part B: event budget ceilings (after the reply-turns runtime_enqueue_event_at), the send
       // authorization (after negotiation_authority), the supervisor read (after operations_action_center)
       { fixture: M('PROPOSED_20261016160000_runtime_event_budget_ceilings_pretest.sql') }, EVENT_BUDGET_CEILINGS,
       { fixture: M('PROPOSED_20261016161000_negotiation_send_authorization_pretest.sql') }, SEND_AUTHORIZATION,
       { fixture: M('PROPOSED_20261016162000_ops_research_valuation_snapshot_pretest.sql') }, OPS_RESEARCH_VALUATION,
     ],
+    verify: [T('rc_8_5_21_release_chain_verify.sql')],
     posttest: [
+      M('PROPOSED_20261016200000_automation_holds_registry_posttest.sql'),
       M('PROPOSED_20261013120000_agent_capabilities_posttest.sql'),
       M('PROPOSED_20261013160000_conversation_ai_shadow_posttest.sql'),
       M('PROPOSED_20261014121000_runtime_kind_limits_event_budget_posttest.sql'),
@@ -331,13 +363,17 @@ export const MIGRATION_TESTS = Object.freeze([
       M('PROPOSED_20261016140000_operations_action_center_posttest.sql'),
       M('PROPOSED_20261016140100_operations_schedules_posttest.sql'),
       M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_posttest.sql'),
+      M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_posttest.sql'),
+      // after 8.5.21-b re-created runtime_enqueue_event_at: the follow-up kinds are still refused unarmed
       M('PROPOSED_20261016163000_followup_execution_schedules_posttest.sql'),
       M('PROPOSED_20261016160000_runtime_event_budget_ceilings_posttest.sql'),
       M('PROPOSED_20261016161000_negotiation_send_authorization_posttest.sql'),
       M('PROPOSED_20261016162000_ops_research_valuation_snapshot_posttest.sql'),
     ],
-    // applied in reverse order by the runner (the mirror has no rollback: it is the live body)
+    // applied in reverse order by the runner (the mirror has no rollback: it is the live body); the
+    // holds registry is rolled back LAST (it was applied first)
     rollback: [
+      M('PROPOSED_20261016200000_automation_holds_registry_rollback.sql'),
       M('PROPOSED_20261012140000_intel_runtime_rollback.sql'),
       M('PROPOSED_20261013120000_agent_capabilities_rollback.sql'),
       M('PROPOSED_20261013160000_conversation_ai_shadow_rollback.sql'),
@@ -353,6 +389,7 @@ export const MIGRATION_TESTS = Object.freeze([
       M('PROPOSED_20261016120000_conversation_reply_turns_rollback.sql'),
       M('PROPOSED_20261016140000_operations_action_center_rollback.sql'),
       M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_rollback.sql'),
+      M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback.sql'),
       M('PROPOSED_20261016160000_runtime_event_budget_ceilings_rollback.sql'),
       M('PROPOSED_20261016161000_negotiation_send_authorization_rollback.sql'),
       M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback.sql'),
@@ -428,4 +465,34 @@ export const MIGRATION_TESTS = Object.freeze([
     rollback: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback_posttest.sql')],
   },
-])
+]
+
+// ── rc-8.5.21: the SAME release chain, started from the PRODUCTION agent-runtime state ──
+// Production already carries intel_runtime with the Fix A state (incident 2026-10-14, executed
+// 2026-10-16): runtime_enabled = false, emergency_stop = true (reason 'pretest'), kind_limits = '{}'.
+// This entry applies intel_runtime + that state as SETUP, then every later chain migration; its verify
+// proves no migration, rollback or re-apply touches runtime_enabled / emergency_stop / kind_limits.
+const FIX_A_STATE = 'scripts/db/fixtures/fix_a_runtime_state.sql'
+const CHAIN = BASE_TESTS.find((t) => t.id === 'rc_8_5_21_release_chain')
+const withoutRuntime = (list) => {
+  const out = []
+  for (let i = 0; i < list.length; i += 1) {
+    const a = list[i]
+    if (typeof a === 'object' && a.fixture === M('PROPOSED_20261012140000_intel_runtime_pretest.sql')) { i += 1; continue }
+    out.push(a)
+  }
+  return out
+}
+const FROM_PRODUCTION_STATE = {
+  id: 'rc_8_5_21_release_chain_from_production_state',
+  setup: [...CHAIN.setup, RUNTIME, FIX_A_STATE],
+  apply: withoutRuntime(CHAIN.apply),
+  verify: [...CHAIN.verify.filter((v) => v !== T('rc_8_5_21_release_chain_verify.sql')), T('rc_8_5_21_release_chain_verify.sql'), T('rc_8_5_21_fix_a_state_verify.sql')],
+  // the behavioural posttests arm / claim jobs, which the engaged emergency stop (correctly) refuses;
+  // they run in rc_8_5_21_release_chain. This entry proves the STATE: apply → rollback → re-apply
+  // never changes runtime_enabled / emergency_stop / kind_limits.
+  posttest: [],
+  rollback: CHAIN.rollback.filter((r) => r !== M('PROPOSED_20261012140000_intel_runtime_rollback.sql')),
+}
+
+export const MIGRATION_TESTS = Object.freeze([...BASE_TESTS, FROM_PRODUCTION_STATE])

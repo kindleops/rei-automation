@@ -4,7 +4,7 @@
 -- written 2026-05-12; read by apps/api/src/lib/automation/conversationMemoryService.js; listed in
 -- 20261003130000_operator_lockdown.sql). It is NOT the rc-8.5.20 turn engine table
 -- (public.conversation_reply_turns). It exists here only so the conversation_reply_turns tests
--- and the rc_8_5_20_release_chain prove the migration, its rollback and the re-apply never touch
+-- and the rc_8_5_21_release_chain prove the migration, its rollback and the re-apply never touch
 -- it: same 10 columns, same indexes / RLS / policies, three rows. No FK (conversation_threads is
 -- not part of these tests).
 -- Applied by scripts/db/run-migration-test.mjs (and the PG tests) as setup; never against Supabase.

@@ -9,7 +9,7 @@ create extension if not exists pgcrypto;
 -- Composable with the other public fixtures (scripts/db/fixtures/send_queue_live_baseline.sql,
 -- the runtime fixture): when one of them created send_queue / message_events first, the
 -- create-if-not-exists below is a no-op, so the columns the operations read functions read
--- are added right after each create (before its indexes) (no-op when already present). Needed by the rc_8_5_20_release_chain entry.
+-- are added right after each create (before its indexes) (no-op when already present). Needed by the rc_8_5_21_release_chain entry.
 
 create table if not exists public.system_control (key text primary key, value text, updated_at timestamptz default now());
 
