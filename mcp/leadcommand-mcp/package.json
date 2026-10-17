@@ -2,7 +2,7 @@
   "name": "@leadcommand/mcp-server",
   "version": "1.0.0",
   "private": true,
-  "description": "LeadCommand MCP 1.0 Intelligence Gateway: first-party, provider-neutral, READ-ONLY MCP server (stdio).",
+  "description": "LeadCommand MCP 1.0 Intelligence Gateway: first-party, provider-neutral, READ-ONLY MCP server (stdio / loopback Streamable HTTP). Live mode runs on the database-role-enforced lc_mcp_reader credential.",
   "type": "module",
   "engines": {
     "node": ">=20.11"
@@ -13,7 +13,10 @@
   "scripts": {
     "start": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON bin/leadcommand-mcp.mjs",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./src/loader/register.mjs --test --test-concurrency=1 test/*.test.mjs",
-    "smoke:protocol": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/protocol-smoke.mjs"
+    "smoke:protocol": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/protocol-smoke.mjs",
+    "test:e2e": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./src/loader/register.mjs --test --test-concurrency=1 test/postgrest-e2e.test.mjs",
+    "acceptance:live": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/live-acceptance.mjs",
+    "mint:reader-token": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mint-reader-token.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

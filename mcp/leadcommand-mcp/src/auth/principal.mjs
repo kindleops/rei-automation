@@ -5,42 +5,32 @@
 // can read the key files). It is never taken from a tool argument; a tool input
 // carrying org / user / principal keys is refused as forged context.
 //
-// Org scoping goes through agent.operator_membership (the agent plane's tenancy
-// table), read as the least-privilege agent_api login (verify-full TLS, no
-// superuser / BYPASSRLS, 5 s statement timeout). Results are cached 60 s; a
-// lookup failure fails CLOSED (unavailable), never open.
+// Org scoping reads agent.operator_membership through the SAME role-enforced
+// read-only credential as every other live read: one RPC,
+// public.lc_mcp_operator_role(org, user) (SECURITY DEFINER, STABLE, sql). The role
+// lc_mcp_reader needs no privilege in schema agent, and the old agent_api login is
+// gone: it could write agent.*. Results are cached 60 s; a lookup failure fails
+// CLOSED (unavailable), never open.
 //
 // Multi-tenancy, stated plainly: membership, scopes and the cross-org check are
 // tenant-aware, but LeadCommand's domain tables (properties, campaigns, …) carry
 // no org column today — one database is one org's data. The server therefore
 // serves exactly ONE data org (LEADCOMMAND_MCP_DATA_ORG_ID) and refuses any
 // principal whose org is not that org. Row-level tenant isolation is a 2.0 item.
-import pg from 'pg'
 import { err } from '../errors.mjs'
 import { ROLE_RANK } from '../authz/scopes.mjs'
 
 export const MEMBERSHIP_TTL_MS = 60_000
 
-/** agent_api pool: verify-full TLS against the Supabase CA; privileged roles refused at first use. */
-export function createPgMembershipStore({ url, ca }) {
-  const u = new URL(url)
-  for (const k of [...u.searchParams.keys()]) if (/^ssl/i.test(k) || /^(host|hostaddr)$/i.test(k)) u.searchParams.delete(k)
-  const user = decodeURIComponent(u.username || '')
-  if (!user || /^(postgres|supabase_admin|service_role|authenticator)(\.|$)/i.test(user)) throw new Error('membership store must connect as the least-privilege agent_api login')
-  const pool = new pg.Pool({ connectionString: u.toString(), ssl: { rejectUnauthorized: true, servername: u.hostname, ca }, max: 2, idleTimeoutMillis: 20_000, connectionTimeoutMillis: 5_000, statement_timeout: 5_000, query_timeout: 6_000, application_name: 'leadcommand-mcp' })
-  pool.on('error', () => {})
-  let roleChecked = false
+/** Membership through the live source's allowlisted RPC (lc_mcp_reader token). */
+export function createRpcMembershipStore(source) {
+  if (typeof source?.operatorRole !== 'function') throw new Error('membership store needs the live source')
   return {
     async lookup(orgId, userId) {
-      if (!roleChecked) {
-        const { rows } = await pool.query('select r.rolsuper, r.rolbypassrls from pg_roles r where r.rolname = current_user')
-        if (!rows[0] || rows[0].rolsuper || rows[0].rolbypassrls) throw new Error('membership store role is privileged')
-        roleChecked = true
-      }
-      const { rows } = await pool.query('select role from agent.operator_membership where org_id = $1::uuid and user_id = $2::uuid limit 1', [orgId, userId])
-      return rows[0] ? { role: rows[0].role } : null
+      const role = await source.operatorRole(orgId, userId)
+      return role ? { role } : null
     },
-    async close() { await pool.end().catch(() => {}) },
+    async close() {},
   }
 }
 

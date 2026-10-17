@@ -8,6 +8,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { parseScopes } from './authz/scopes.mjs'
+import { readCredentialFile, assertReaderJwt, assertPublicApiKey, ambientCredentialNames, RETIRED_LIVE_ENV, CredentialError } from './data/credential.mjs'
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
@@ -69,12 +70,8 @@ function loadHttp(env, limits) {
   return Object.freeze(http)
 }
 
-const readSecretFile = (p, what) => {
-  if (!p) return null
-  const st = fs.statSync(p)
-  if (!st.isFile()) throw new Error(`${what}: not a file`)
-  return fs.readFileSync(p, 'utf8').trim()
-}
+/** Live data service origin: https, or an http LOOPBACK literal (a local PostgREST; traffic never leaves the host). */
+const LIVE_URL = /^(https:\/\/[a-z0-9.-]+(:[0-9]+)?|http:\/\/(127\.0\.0\.1|localhost|\[::1\]):[0-9]{1,5})\/?$/i
 
 /** Env keys removed from process.env after boot (credentials and DB URLs of any kind). */
 export const SCRUB_RE = /(KEY|SECRET|TOKEN|PASSWORD|PASSWD|DATABASE_URL|DB_URL|POSTGRES|SUPABASE|PGPASSWORD|PGUSER|PGHOST|CREDENTIAL|PRIVATE)/i
@@ -101,16 +98,24 @@ export function loadConfig(env = process.env) {
     if (v && !UUID.test(v)) throw new Error(`${k} must be a UUID`)
   }
   let secrets = null
+  let credential = null
   if (dataMode === 'live') {
+    // live mode reads ONLY the LEADCOMMAND_MCP_* credential files below. A writable credential
+    // anywhere in the launch environment is refused, never used; only its NAME is reported.
+    for (const k of RETIRED_LIVE_ENV) {
+      if (String(env[k] || '').trim()) throw new CredentialError('RETIRED_CREDENTIAL', `${k} is no longer accepted: it held a writable credential. Live mode reads only LEADCOMMAND_MCP_READER_JWT_FILE (the role-enforced lc_mcp_reader token) and LEADCOMMAND_MCP_API_KEY_FILE (the public key)`)
+    }
+    const ambient = ambientCredentialNames(env)
+    if (ambient.length) throw new CredentialError('AMBIENT_CREDENTIAL', `refusing live mode: writable app credentials are present in the launch environment (${ambient.slice(0, 8).join(', ')}). Start the server with a clean environment; it never reads them`)
     const supabaseUrl = String(env.LEADCOMMAND_MCP_SUPABASE_URL || '').trim()
-    if (!/^https:\/\/[a-z0-9.-]+(:[0-9]+)?\/?$/i.test(supabaseUrl)) throw new Error('LEADCOMMAND_MCP_SUPABASE_URL must be the https origin of the app data service')
-    const serviceKey = readSecretFile(env.LEADCOMMAND_MCP_SERVICE_KEY_FILE, 'LEADCOMMAND_MCP_SERVICE_KEY_FILE')
-    const agentDbUrl = readSecretFile(env.LEADCOMMAND_MCP_AGENT_DB_URL_FILE, 'LEADCOMMAND_MCP_AGENT_DB_URL_FILE')
-    const agentDbCa = readSecretFile(env.LEADCOMMAND_MCP_AGENT_DB_CA_FILE, 'LEADCOMMAND_MCP_AGENT_DB_CA_FILE')
-    if (!serviceKey) throw new Error('LEADCOMMAND_MCP_SERVICE_KEY_FILE is required in live mode')
-    if (!agentDbUrl || !agentDbCa) throw new Error('LEADCOMMAND_MCP_AGENT_DB_URL_FILE and LEADCOMMAND_MCP_AGENT_DB_CA_FILE are required in live mode (membership is verified as agent_api)')
-    const frozen = Object.freeze({ supabaseUrl: supabaseUrl.replace(/\/$/, ''), serviceKey, agentDbUrl, agentDbCa })
+    if (!LIVE_URL.test(supabaseUrl)) throw new CredentialError('URL_INVALID', 'LEADCOMMAND_MCP_SUPABASE_URL must be the https origin of the app data service (or an http loopback origin for a local PostgREST)')
+    const apiKey = readCredentialFile(env.LEADCOMMAND_MCP_API_KEY_FILE, 'LEADCOMMAND_MCP_API_KEY_FILE')
+    const keyInfo = assertPublicApiKey(apiKey)
+    const readerJwt = readCredentialFile(env.LEADCOMMAND_MCP_READER_JWT_FILE, 'LEADCOMMAND_MCP_READER_JWT_FILE')
+    const tokenInfo = assertReaderJwt(readerJwt)
+    const frozen = Object.freeze({ supabaseUrl: supabaseUrl.replace(/\/$/, ''), apiKey, readerJwt })
     secrets = () => frozen
+    credential = Object.freeze({ kind: 'postgrest_role_token', role: tokenInfo.role, alg: tokenInfo.alg, expires_at: new Date(tokenInfo.exp * 1000).toISOString(), days_left: tokenInfo.days_left, api_key_kind: keyInfo.kind })
   }
   const limits = Object.freeze({
     rate_per_min: intIn(env.LEADCOMMAND_MCP_RATE_PER_MIN, DEFAULTS.rate_per_min, CEILINGS.rate_per_min),
@@ -126,7 +131,8 @@ export function loadConfig(env = process.env) {
     dataOrgId,
     scopes: Object.freeze(parseScopes(env.LEADCOMMAND_MCP_SCOPES)),
     limits,
-    auditFile: String(env.LEADCOMMAND_MCP_AUDIT_FILE || '').trim() || null,
+    auditFile: auditFileOf(env),
+    credential,
   }
   Object.defineProperty(cfg, 'secrets', { value: secrets, enumerable: false })
   return Object.freeze(cfg)
@@ -134,4 +140,9 @@ export function loadConfig(env = process.env) {
 
 const httpSummary = (h) => (h ? { bind: h.bind, port: h.port, path: h.path, allowed_origins: [...h.allowed_origins], session_concurrency: h.session_concurrency, max_sessions: h.max_sessions, session_idle_ms: h.session_idle_ms, max_body_bytes: h.max_body_bytes, auth: 'bearer_token_file' } : null)
 
-export const summarize = (cfg) => ({ transport: cfg.transport, http: httpSummary(cfg.http), dataMode: cfg.dataMode, principal_configured: Boolean(cfg.principal), scopes: [...cfg.scopes], limits: cfg.limits })
+export const summarize = (cfg) => ({ transport: cfg.transport, http: httpSummary(cfg.http), dataMode: cfg.dataMode, credential: cfg.credential || null, principal_configured: Boolean(cfg.principal), scopes: [...cfg.scopes], limits: cfg.limits })
+
+/** The audit file path, readable before (and even when) the rest of the config is refused, so a boot refusal is audited. */
+export function auditFileOf(env = process.env) {
+  return String(env.LEADCOMMAND_MCP_AUDIT_FILE || '').trim() || null
+}

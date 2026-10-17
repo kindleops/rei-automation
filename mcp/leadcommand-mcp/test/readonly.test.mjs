@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { TOOLS, assertCatalogReadOnly, NOT_IMPLEMENTED } from '../src/tools/catalog.mjs'
 import { createLiveSource } from '../src/data/sources.mjs'
 import { connect, call } from './helpers.mjs'
+import { createFakePostgrest, READER_TOKEN, ANON_KEY } from './support/fake-postgrest.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PKG = path.resolve(HERE, '..')
@@ -106,10 +107,9 @@ test('static import graph: external packages are only the SDK, zod, supabase-js,
   assert.deepEqual(bad, [])
 })
 
-test('live transport refuses every write before the network (PATCH / POST table / DELETE / write Prefer / foreign origin)', async () => {
-  const seen = []
-  const baseFetch = async (url, init) => { seen.push([String(init?.method || 'GET'), String(url)]); return new Response('[]', { status: 200, headers: { 'content-type': 'application/json', 'content-range': '0-0/0' } }) }
-  const src = createLiveSource({ supabaseUrl: 'https://fixture-project.supabase.test', serviceKey: 'fixture-not-a-real-key', baseFetch })
+test('live transport refuses every write before the network (PATCH / POST table / DELETE / write Prefer / foreign origin / outside the inventory)', async () => {
+  const pg = createFakePostgrest()
+  const src = createLiveSource({ supabaseUrl: 'https://fixture-project.supabase.test', apiKey: ANON_KEY, readerJwt: READER_TOKEN, baseFetch: pg.fetch })
   await src.withCall(null, async (svc) => {
     const r1 = await svc.db.from('properties').insert({ property_id: 'x' })
     assert.ok(r1.error, 'insert refused')
@@ -119,20 +119,26 @@ test('live transport refuses every write before the network (PATCH / POST table 
     assert.ok(r3.error, 'delete refused')
     const r4 = await svc.db.rpc('exec_sql', { q: 'select 1' })
     assert.ok(r4.error, 'non-allowlisted rpc refused')
+    const r6 = await svc.db.from('send_queue').select('id').limit(1)
+    assert.ok(r6.error, 'a read outside the inventory is refused')
+    const r7 = await svc.db.schema('agent').from('operator_membership').select('role').limit(1)
+    assert.ok(r7.error, 'a schema profile other than public is refused')
     const r5 = await svc.db.from('properties').select('property_id').eq('property_id', 'FX1').limit(1)
     assert.equal(r5.error, null, 'a read goes through')
   })
-  assert.deepEqual(seen.map(([m]) => m), ['GET'], 'only the read reached the network')
-  assert.match(seen[0][1], /^https:\/\/fixture-project\.supabase\.test\/rest\/v1\/properties\?/)
+  // the network saw: the boot-less first-call credential self-check, then the one read
+  assert.deepEqual(pg.requests.map((r) => `${r.method} ${r.path}`), ['POST /rest/v1/rpc/lc_mcp_reader_self_check', 'GET /rest/v1/properties'])
+  assert.ok(pg.requests.every((r) => r.role === 'lc_mcp_reader' && r.apikey_role === 'anon'), 'every request carries the reader token and the anon key, nothing else')
 })
 
 test('live transport: every live request carries the per-call abort signal and Prefer: timeout=5', async () => {
-  const headers = []
-  const baseFetch = async (url, init) => { headers.push(new Headers(init.headers).get('prefer')); assert.ok(init.signal); return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }) }
-  const src = createLiveSource({ supabaseUrl: 'https://fixture-project.supabase.test', serviceKey: 'fixture-not-a-real-key', baseFetch })
+  const pg = createFakePostgrest()
+  const src = createLiveSource({ supabaseUrl: 'https://fixture-project.supabase.test', apiKey: ANON_KEY, readerJwt: READER_TOKEN, baseFetch: pg.fetch })
   const ctl = new AbortController()
   await src.withCall(ctl.signal, (svc) => svc.db.from('campaigns').select('id').limit(1))
-  assert.match(headers[0], /timeout=5/)
+  const read = pg.requests.find((r) => r.relation === 'campaigns')
+  assert.ok(read.signal)
+  assert.match(read.prefer, /timeout=5/)
 })
 
 test('a full tool call surface leaves fixture tables unchanged (no write side effects)', async () => {
