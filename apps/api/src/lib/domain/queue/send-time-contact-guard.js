@@ -33,6 +33,10 @@
 // no sent_at is provably unsent and never a touch (requeues are safe).
 
 import { SEND_TIME_BLOCK_REASONS } from "@/lib/domain/compliance/canonical-no-contact-states.js";
+import { evaluateOwnershipRecontact } from "@/lib/domain/queue/ownership-recontact-guard.js";
+import { checkAutomationHoldPort } from "@/lib/domain/holds-port/automation-hold-port.js";
+import { resolveOutboundQuestionKind, isValidRepeatAskOverride, QUESTION_KIND_ASKING_PRICE } from "@/lib/domain/queue/outbound-question-kind.js";
+import { buildFactLedger } from "@/lib/domain/conversation-ai/facts.js";
 
 export const SEND_TIME_CONTACT_GUARD_VERSION = "send_time_contact_guard.v1.2026-10-08";
 
@@ -71,6 +75,10 @@ export const SEND_TIME_GUARD_REASONS = Object.freeze({
   OPT_OUT_REPLY: "opt_out_reply",
   WRONG_NUMBER: "wrong_number",
   PRIOR_REPLY_NOT_OWNER: "prior_reply_not_owner",
+  // rc-8.5.21: the authoritative automation-hold registry (holds-port) says held, or could not answer
+  AUTOMATION_HOLD: "automation_hold_active",
+  // rc-8.5.21 (Pittsburgh 8d03a7c4): the seller already STATED a price — a price question is never sent
+  ASKING_PRICE_ALREADY_STATED: "blocked_repeat_asking_price_already_stated",
   ALREADY_CONTACTED_PAIR: "already_contacted_person_phone",
   ALREADY_CONTACTED_PHONE: "already_contacted_phone",
   ALREADY_CONTACTED_PERSON: "already_contacted_person",
@@ -87,6 +95,8 @@ const REASON_CODE = Object.freeze({
   [R.OPT_OUT_REPLY]: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
   [R.WRONG_NUMBER]: SEND_TIME_BLOCK_REASONS.WRONG_NUMBER,
   [R.PRIOR_REPLY_NOT_OWNER]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+  [R.AUTOMATION_HOLD]: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
+  [R.ASKING_PRICE_ALREADY_STATED]: "blocked_repeat_asking_price_already_stated",
   [R.ALREADY_CONTACTED_PAIR]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.ALREADY_CONTACTED_PHONE]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.ALREADY_CONTACTED_PERSON]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
@@ -156,6 +166,20 @@ export function isPriorTouch(other = {}, row = {}) {
   return false;
 }
 
+const PRICE_STATED_INTENTS = new Set(["asking_price_provided", "price_and_condition", "asking_price_stated", "counter_or_negotiation"]);
+/** The seller's own stated asking price on the thread (classifier label or the fact extractor), or null. */
+export function statedAskingPrice(messages = []) {
+  const inbound = (messages || []).filter((m) => lower(m.direction).startsWith("in"));
+  const labelled = inbound.find((m) => PRICE_STATED_INTENTS.has(lower(m.detected_intent)));
+  if (labelled) return { source: `label:${lower(labelled.detected_intent)}`, message_id: String(labelled.id) };
+  try {
+    const ledger = buildFactLedger({ inbound: inbound.map((m) => ({ id: String(m.id), body: m.message_body ?? m.body ?? "", at: m.created_at || m.event_timestamp || null })) });
+    const cur = ledger.asking_price?.current;
+    if (cur?.value?.amount > 0) return { source: "fact_extractor", message_id: String(cur.source_message_id) };
+  } catch { /* the label check above already ran */ }
+  return null;
+}
+
 function block(reason, detail = {}) {
   return { blocked: true, reason, reason_code: REASON_CODE[reason] || SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL, detail, version: SEND_TIME_CONTACT_GUARD_VERSION };
 }
@@ -182,6 +206,12 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
   const now_ms = typeof now === "number" ? now : Date.parse(now);
   const property_id = clean(row.property_id);
   const sameProperty = (pid) => !clean(pid) || !property_id || clean(pid) === property_id;
+
+  // 0. rc-8.5.21: the automation-hold registry (fail closed: a lookup error is a hold). Only
+  //    evaluated when the loader provided it (pure callers without the fact are unchanged).
+  if (facts.automation_hold && facts.automation_hold.held === true) {
+    return block(R.AUTOMATION_HOLD, { hold_type: facts.automation_hold.hold_type || null, hold_reason: facts.automation_hold.reason || null, hold_id: facts.automation_hold.hold_id || null });
+  }
 
   // 1. sms_suppression_list
   for (const s of facts.suppressions || []) {
@@ -224,6 +254,29 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
     }
   }
 
+  // 5b. rc-8.5.21 RECONTACT GUARD: the thread's OWN messages, not labels — an ownership denial
+  //     for this property (bare "No" to our ownership question, an explicit denial, a not-owner
+  //     label) blocks every outbound about it until new valid ownership evidence; a manual send
+  //     may cross it only with an audited override (ownership-recontact-guard.js).
+  if ((Array.isArray(facts.thread_messages) && facts.thread_messages.length) || (Array.isArray(facts.contact_property_resolution) && facts.contact_property_resolution.length)) {
+    const rc = evaluateOwnershipRecontact(row, facts.thread_messages || [], { resolutions: facts.contact_property_resolution || [] });
+    if (rc.blocked && rc.detail?.scope === "phone") return block(R.THREAD_OPTED_OUT, { ...rc.detail, guard: rc.version });
+    if (rc.blocked) return block(R.PRIOR_REPLY_NOT_OWNER, { ...rc.detail, source: "message_text", guard: rc.version });
+  }
+
+  // 5c. rc-8.5.21 (owner 2026-10-13 + Pittsburgh 8d03a7c4): an asking-price question after the
+  //     seller already STATED a price ("460 k not a penny less") is never sent, whoever writes it
+  //     (the DB trigger only knows prior ASKS). A manual send may cross it with the audited
+  //     repeat-ask override (outbound-question-kind.js), never an automated path.
+  if (Array.isArray(facts.thread_messages) && facts.thread_messages.length) {
+    const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    const kind = resolveOutboundQuestionKind({ message_body: row.message_body || row.message_text || "", use_case_template: row.use_case_template, metadata: meta });
+    if (kind.question_kind === QUESTION_KIND_ASKING_PRICE && !(meta.manual_operator_send === true && isValidRepeatAskOverride(meta.repeat_ask_override))) {
+      const stated = statedAskingPrice(facts.thread_messages);
+      if (stated) return block(R.ASKING_PRICE_ALREADY_STATED, { source: stated.source, price_message_id: stated.message_id });
+    }
+  }
+
   // 6. already contacted — first-touch openers only.
   if (!isOpenerRow(row)) return { ...PASS, opener: false };
   const person = clean(row.prospect_id);
@@ -249,7 +302,7 @@ async function read(query) {
 }
 
 /** Fresh reads for one row. Throws on any read error (the caller fails closed). */
-export async function loadSendTimeContactFacts(supabase, row = {}) {
+export async function loadSendTimeContactFacts(supabase, row = {}, opts = {}) {
   if (!supabase?.from) throw new Error("send_time_guard_no_client");
   const variants = phoneVariants([row.to_phone_number, row.thread_key]);
   if (!variants.length) return {};
@@ -264,6 +317,10 @@ export async function loadSendTimeContactFacts(supabase, row = {}) {
     read(supabase.from("phones").select("phone_id,canonical_e164,phone,phone_raw,phone_contact_status,wrong_number_at,primary_prospect_id,canonical_prospect_id").in("canonical_e164", variants).limit(20)),
     read(supabase.from("message_events").select("from_phone_number,property_id,detected_intent,is_opt_out").eq("direction", "inbound").in("from_phone_number", variants).in("detected_intent", SEND_TIME_REPLY_INTENTS).limit(200)),
   ]);
+  // rc-8.5.21: the thread's own messages (recontact guard) and the automation-hold registry
+  const contact_property_resolution = await read(supabase.from("contact_property_resolution").select("property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at,rejection_reason").in("contact_phone_e164", variants).limit(50));
+  const thread_messages = await read(supabase.from("message_events").select("id,direction,message_body,created_at,event_timestamp,property_id,detected_intent").in("thread_key", variants).order("created_at", { ascending: false }).limit(60));
+  const automation_hold = await checkAutomationHoldPort({ threadKey: clean(row.thread_key) || clean(row.to_phone_number), propertyId: property_id || null, masterOwnerId: clean(row.master_owner_id) || null, capability: "send_time_dispatch" }, { checker: opts.automationHoldChecker || null });
   const facts = {
     suppressions: [...suppressions, ...suppressions_by_number],
     automation_suppressions,
@@ -273,6 +330,9 @@ export async function loadSendTimeContactFacts(supabase, row = {}) {
     prior_sends: [],
     prior_outbound_events: [],
     person_phones: [],
+    thread_messages,
+    contact_property_resolution,
+    automation_hold,
   };
   if (!opener) return facts;
 

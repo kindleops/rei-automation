@@ -58,6 +58,7 @@ import { STYLE_VALIDATOR_VERSION } from '@/lib/domain/conversation-ai/playbook/v
 import { CANONICAL_RUNTIME_VERSION, WRITER_VERSION, canonicalRoutineScope } from '@/lib/domain/conversation-ai/runtime/canonical.js'
 import { resolveThreadContinuity } from '@/lib/domain/conversation-ai/persona-continuity.js'
 import { NO_COMPANY_IDENTITY } from '@/lib/domain/conversation-ai/company-identity.js'
+import { checkAutomationHoldPort } from '@/lib/domain/holds-port/automation-hold-port.js'
 
 export const R3_EXECUTOR_VERSION = 'conv-ai.r3-executor.v2'
 export { R3_EXECUTOR_WIRED }
@@ -223,6 +224,9 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   const unsent = (state.queueRows || []).find((r) => NOT_YET_SENT_STATUSES.has(clean(r.queue_status).toLowerCase()))
   if (unsent) return held(['outbound_pending_on_thread'], { existing_queue_row_id: unsent.id })
   if (!threadInPolicyScope(policy, { thread_key: threadKey, market_id: state.market_id, campaign_id: state.campaign_id })) return held(['thread_not_in_ai_scope'])
+  // the ONE automation-hold registry (fail closed: a lookup error is a hold)
+  const hold = await checkAutomationHoldPort({ threadKey, propertyId: state.property_id, masterOwnerId: state.master_owner_id, capability: 'ai_reply_dispatch', propertyAddress: state.property_address }, { checker: deps.automationHoldChecker || null })
+  if (hold.held) return held([`automation_hold:${hold.hold_type}`], { hold_reason: hold.reason, hold_id: hold.hold_id })
 
   // 5. fresh eligibility + the SHARED outbound validator on the fresh ledger + the SHARED send time
   const row = hypotheticalReplyRow({ sellerPhone: state.seller_phone, ourPhone: state.our_phone, threadKey, propertyId: state.property_id, prospectId: state.prospect_id, inboundId, inboundAt: inboundRow.at, now })

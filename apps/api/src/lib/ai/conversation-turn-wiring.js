@@ -23,6 +23,7 @@ import { createConversationModelClient } from '@/lib/domain/conversation-ai/mode
 import { AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, isOwnerHandledThread, normalizeSendPolicy, parseKillSwitch, threadInPolicyScope } from '@/lib/domain/conversation-ai/send-policy.js'
 import { isEmergencyStopActive } from '@/lib/domain/queue/queue-control-safety.js'
 import { getSystemValueFresh } from '@/lib/system-control.js'
+import { checkAutomationHoldPort } from '@/lib/domain/holds-port/automation-hold-port.js'
 import { composeSpendFor, loadCanonicalInputs } from './conversation-canonical-inputs.js'
 
 /** system_control key holding the delay policy JSON (absent ⇒ the code defaults; caps clamp). */
@@ -88,9 +89,11 @@ export async function routeInboundToTurn({ providerMessageSid, inboundVersion = 
  * owner-handled). Everything absent ⇒ no: the decision is recorded (shadow) and NOTHING is reserved,
  * so the template engine keeps the inbound exactly as today.
  */
-export async function aiSendAuthorizedFor({ threadKey, readSwitch }) {
+export async function aiSendAuthorizedFor({ threadKey, readSwitch, propertyId = null, propertyAddress = null, automationHoldChecker = null }) {
   try {
-    if (isOwnerHandledThread({ thread_key: threadKey })) return { ok: false, reason: 'owner_handled_thread' }
+    if (isOwnerHandledThread({ thread_key: threadKey, property_address: propertyAddress })) return { ok: false, reason: 'owner_handled_thread' }
+    const hold = await checkAutomationHoldPort({ threadKey, propertyId, capability: 'ai_reply_decision', propertyAddress }, { checker: automationHoldChecker })
+    if (hold.held) return { ok: false, reason: `automation_hold:${hold.hold_type}` }
     if (isEmergencyStopActive(await readSwitch('queue_emergency_stop_at'))) return { ok: false, reason: 'emergency_stop_active' }
     if (!parseKillSwitch(await readSwitch(AI_SEND_KILL_SWITCH_KEY))) return { ok: false, reason: 'kill_switch_off' }
     const policy = normalizeSendPolicy(await readSwitch(AI_SEND_POLICY_KEY))
@@ -108,7 +111,7 @@ export async function aiSendAuthorizedFor({ threadKey, readSwitch }) {
  * fact ledger are in it). The decision is recorded in public.conversation_ai_shadow_decisions; a
  * reply is handed to the R3 dispatcher ONLY when an AI send is authorised for the thread.
  */
-export function createCanonicalTurnDecider({ supabase = getDefaultSupabaseClient(), env = process.env, tracker = null, remainingMs = null, signal = null, provider = null, readSwitch = null, shadowStore = null, now = () => new Date().toISOString() } = {}) {
+export function createCanonicalTurnDecider({ supabase = getDefaultSupabaseClient(), env = process.env, tracker = null, remainingMs = null, signal = null, provider = null, readSwitch = null, shadowStore = null, automationHoldChecker = null, now = () => new Date().toISOString() } = {}) {
   const read = readSwitch || ((key) => getSystemValueFresh(key, { supabase }))
   return async (claim) => {
     const rows = await rowsOrThrow(supabase.from('message_events').select('id,provider_message_sid,direction').eq('id', claim.latest_inbound_id).limit(1))
@@ -134,7 +137,7 @@ export function createCanonicalTurnDecider({ supabase = getDefaultSupabaseClient
       await store.putIfAbsent(sr)
     } catch (err) { if (err?.abortJob) throw err /* the decision stands; the record is best-effort measurement */ }
     const reply = record.terminal?.type === ACTIONS.AI_GENERATED_REPLY && record.reply?.text && !(record.validation?.content_reasons || []).length ? record.reply : null
-    const auth = reply ? await aiSendAuthorizedFor({ threadKey: ci.input.inbound.thread_key, readSwitch: read }) : { ok: false, reason: 'no_reply' }
+    const auth = reply ? await aiSendAuthorizedFor({ threadKey: ci.input.inbound.thread_key, readSwitch: read, propertyId: ci.loaded.row.property_id || null, propertyAddress: ci.property_address, automationHoldChecker }) : { ok: false, reason: 'no_reply' }
     return {
       code: record.terminal?.type || null,
       outcome: String(record.terminal?.type || 'no_decision').toLowerCase(),

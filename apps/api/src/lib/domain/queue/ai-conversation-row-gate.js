@@ -22,6 +22,7 @@ import { AI_CONVERSATION_SOURCE, AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, is
 import { verifyAiGeneratedRecordForRow } from '@/lib/domain/messages/ai-generated-message.js'
 import { isAiGeneratedOrigin } from '@/lib/domain/messages/message-origin.js'
 import { isStopRequest } from '@/lib/domain/conversation-ai/stop-request.js'
+import { checkAutomationHoldPort } from '@/lib/domain/holds-port/automation-hold-port.js'
 
 export const AI_ROW_GATE_VERSION = 'conv-ai.row-gate.v2'
 export const AI_ROW_DISABLED_REASON = 'ai_conversation_send_disabled'
@@ -60,12 +61,15 @@ export async function loadNewerInboundsForRow(supabase, row = {}) {
  * @param {{ readSwitch: (key: string) => Promise<string|null>, now?: string, propertyGeography?: object|null }} deps
  * @returns {Promise<{ applies: boolean, action?: 'proceed'|'cancel'|'defer', reason?: string }>}
  */
-export async function evaluateAiConversationRowGate(row = {}, { readSwitch, loadRecord = null, loadNewerInbounds = null, now = new Date().toISOString(), propertyGeography = null, windowMinutes = undefined } = {}) {
+export async function evaluateAiConversationRowGate(row = {}, { readSwitch, loadRecord = null, loadNewerInbounds = null, now = new Date().toISOString(), propertyGeography = null, windowMinutes = undefined, automationHoldChecker = null } = {}) {
   if (!isAiConversationRow(row)) return { applies: false }
   let raw = null
   try { raw = typeof readSwitch === 'function' ? await readSwitch(AI_SEND_KILL_SWITCH_KEY) : null } catch { raw = null }
   if (!parseKillSwitch(raw)) return { applies: true, action: 'cancel', reason: AI_ROW_DISABLED_REASON }
   if (isOwnerHandledThread({ thread_key: row.thread_key })) return { applies: true, action: 'cancel', reason: 'ai_conversation_owner_handled_thread' }
+  // the ONE automation-hold registry: held (or unanswerable) ⇒ defer, never send
+  const hold = await checkAutomationHoldPort({ threadKey: row.thread_key, propertyId: row.property_id || null, masterOwnerId: row.master_owner_id || null, capability: 'ai_reply_dispatch' }, { checker: automationHoldChecker })
+  if (hold.held) return { applies: true, action: 'defer', reason: `ai_conversation_automation_hold:${hold.hold_type}` }
   // the body must equal its IMMUTABLE ai_generated_messages record (owner 2026-10-15)
   let lookup = null
   try { lookup = typeof loadRecord === 'function' ? await loadRecord(row.queue_key) : null } catch { lookup = null }

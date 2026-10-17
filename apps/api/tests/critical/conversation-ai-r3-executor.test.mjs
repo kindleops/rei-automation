@@ -176,6 +176,23 @@ test('policy: limits clamp to the owner limits; malformed policy is the safe def
   assert.equal(templateDeferVerdict({ executorWired: true, killSwitchOn: true, policy: p, inScope: false }).defer, false)
 })
 
+// ── rc-8.5.21: the ONE automation-hold registry ────────────────────────────
+test('automation hold: a held thread (or an unanswerable registry) is never reserved or enqueued by R3', async () => {
+  for (const [checker, reason] of [
+    [async () => ({ held: true, hold_type: 'operator_hold', reason: 'owner_took_over', hold_id: 'h1' }), 'automation_hold:operator_hold'],
+    [async () => { throw new Error('registry down') }, 'automation_hold:lookup_error'],
+  ]) {
+    resetMemoryIdempotencyLedger()
+    const w = world({ thread: S1_THREAD() })
+    const { d, table } = deps({ w })
+    const r = await executeAiConversationReply(candidate(), { ...d, automationHoldChecker: checker })
+    assert.equal(r.status, 'held', JSON.stringify(r))
+    assert.deepEqual(r.reasons, [reason])
+    assert.equal(table.inserts.length, 0, 'nothing enqueued')
+    assert.equal(table.records.byKey.size, 0, 'no ai_generated_messages record')
+  }
+})
+
 // ── the NO-SEND EXECUTION PROOF ─────────────────────────────────────────────
 test('E2E no-send proof: an eligible routine reply passes R3 and is enqueued through the real insertion function; existing guards run at send time', async () => {
   const w = world({ thread: S1_THREAD() })

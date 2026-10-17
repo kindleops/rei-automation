@@ -14,6 +14,12 @@
 // one", "sold it") excludes that phone for that property only; a wrong-number
 // claim is about the phone, so it excludes the phone for every property.
 // Pure evaluation + one read-only loader.
+// rc-8.5.21 (owner P0 2026-10-16, e767ad0d): labels alone missed every denial whose label was
+// `unclear` / `not_interested`. The property-scoped store public.contact_property_resolution
+// (written by the live inbound waterfall) is read too, through the SAME evaluator the dispatch-time
+// send guard uses (queue/ownership-recontact-guard.js); it runs ahead of any prior-contact
+// override, so suppress_previously_contacted:false can never lift it.
+import { evaluateContactPropertyResolution } from '../queue/ownership-recontact-guard.js'
 
 const clean = (value) => String(value ?? '').trim()
 const lower = (value) => clean(value).toLowerCase()
@@ -68,8 +74,10 @@ function signalsOf(thread = {}) {
  *                 replies: [inbound message_events {detected_intent, property_id}] }.
  * Returns { excluded, reason, scope, signal } — excluded=false when nothing says not-owner.
  */
-export function evaluateOpenerReplyExclusion({ property_id = null, threads = [], replies = [] } = {}) {
+export function evaluateOpenerReplyExclusion({ property_id = null, threads = [], replies = [], resolutions = [] } = {}) {
   const target_property = clean(property_id)
+  const store = evaluateContactPropertyResolution({ property_id, resolutions })
+  if (store.excluded) return { excluded: true, reason: store.reason, scope: store.scope, signal: store.role, source: store.source }
   const sameProperty = (pid) => !clean(pid) || !target_property || clean(pid) === target_property
 
   for (const thread of threads || []) {
@@ -105,12 +113,12 @@ export async function loadOpenerReplyFacts(supabase, phones = [], { chunkSize = 
   const slot = (phone) => {
     const key = phoneKey(phone)
     if (!key) return null
-    if (!facts.has(key)) facts.set(key, { threads: [], replies: [] })
+    if (!facts.has(key)) facts.set(key, { threads: [], replies: [], resolutions: [] })
     return facts.get(key)
   }
   for (let i = 0; i < e164.length; i += chunkSize) {
     const chunk = e164.slice(i, i + chunkSize)
-    const [threads, replies] = await Promise.all([
+    const [threads, replies, resolutions] = await Promise.all([
       supabase
         .from('inbox_thread_state')
         .select('thread_key,property_id,disposition,stage,last_intent,lifecycle_stage')
@@ -123,11 +131,18 @@ export async function loadOpenerReplyFacts(supabase, phones = [], { chunkSize = 
         .in('from_phone_number', chunk)
         .in('detected_intent', NOT_OWNER_REPLY_INTENTS)
         .limit(5000),
+      supabase
+        .from('contact_property_resolution')
+        .select('property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at')
+        .in('contact_phone_e164', chunk)
+        .limit(5000),
     ])
     if (threads.error) throw threads.error
     if (replies.error) throw replies.error
+    if (resolutions.error) throw resolutions.error
     for (const row of threads.data || []) slot(row.thread_key)?.threads.push(row)
     for (const row of replies.data || []) slot(row.from_phone_number)?.replies.push(row)
+    for (const row of resolutions.data || []) if (row.rejected_at || row.suppression_scope === 'channel_compliance' || row.contact_property_role === 'suppressed') slot(row.contact_phone_e164)?.resolutions.push(row)
   }
   return facts
 }
