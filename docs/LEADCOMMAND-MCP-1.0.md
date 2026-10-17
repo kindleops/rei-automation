@@ -26,6 +26,7 @@ A first-party, provider-neutral, **read-only** MCP server over LeadCommand data,
 - **The `agent_api` login has no SELECT on any `public` domain table.** This was verified in the production catalog through the `agent_api` login itself, using `has_table_privilege`. It can read `agent.org` and `agent.operator_membership`, which hold one row: the owner. So:
   - **domain reads** use the existing agent research read path: service-role PostgREST behind the guarded read-only transport. The key stays server-side.
   - **org membership** is verified as `agent_api`, with verify-full TLS against `prod-ca-2021.crt`. The role is checked to be neither superuser nor BYPASSRLS.
+- **Superseded 2026-10-16 (§4.2):** live mode no longer uses the service-role key or the `agent_api` login. Both are writable credentials. Domain reads and membership now go through ONE database-role-enforced read-only credential, `lc_mcp_reader`.
 - The repo's migration history does not match production (known). Table schemas below were read from the live catalog (`pg_attribute`, `pg_indexes`) as `agent_api`. No row data was read that way.
 
 ### 1.2 Leads and properties
@@ -104,7 +105,7 @@ MCP host (Claude / Agntau / any client)
 protocol/server.mjs      SDK low-level Server (one per connection): initialize · tools/list · tools/call
    ▼
 gateway.mjs              ONE enforcement path per call (below)
-   ├─ auth/principal.mjs     principal from host config · agent.operator_membership (agent_api, fail-closed) · cross-org
+   ├─ auth/principal.mjs     principal from host config · agent.operator_membership via public.lc_mcp_operator_role (lc_mcp_reader, fail-closed) · cross-org
    ├─ authz/scopes.mjs       one .read scope per tool · role
    ├─ tools/catalog.mjs      9 read tools: zod input/output · limits · untrusted-field map · boot guard
    ├─ safety/limits.mjs      rate (principal + tool) · concurrency · hard deadline
@@ -240,10 +241,10 @@ Notes per tool:
 | Control | Implementation | Test |
 |---|---|---|
 | Principal | Comes from the trusted host config (`LEADCOMMAND_MCP_PRINCIPAL_USER_ID`, `LEADCOMMAND_MCP_ORG_ID`), never from tool arguments. Forged-context keys are refused (`FORGED_CONTEXT`). | security: unauthenticated ×2, forged ids ×2 |
-| Org scoping | `agent.operator_membership` is read as `agent_api` (verify-full TLS, non-privileged role check, 5 s statement timeout), cached 60 s. A failure is `unavailable` (fail closed). Cross-org is `forbidden`. | cross-org ×2, membership failure, revocation after TTL |
+| Org scoping | `agent.operator_membership` is read through `public.lc_mcp_operator_role(org, user)` (SECURITY DEFINER, STABLE, sql; EXECUTE for `lc_mcp_reader` only) with the same read-only credential. The role holds no privilege in schema `agent`. Cached 60 s. A failure is `unavailable` (fail closed). Cross-org is `forbidden`. | cross-org ×2, membership failure, revocation after TTL |
 | Multi-tenancy (honest) | Membership, scopes and the cross-org check are tenant-aware, but domain tables have no org column. One server serves exactly one data org (`LEADCOMMAND_MCP_DATA_ORG_ID`). Row-level tenancy is a 2.0 item. | cross-org |
 | Scopes | One `.read` scope per tool. Unknown or write scopes refuse to boot. Contact status is not in the default grant. | scope denial ×3 |
-| Read-only | (1) The catalog boot guard: only `leadcommand_(get\|search)_*` names and `.read` scopes, with write-shaped names refused. (2) A static import fence over the whole import graph: no write-capable LeadCommand module and no DB mutation call or SQL is reachable. (3) The transport refuses writes before the network. | readonly ×9 |
+| Read-only | (0) **The database role** (§4.2): `lc_mcp_reader` holds SELECT on the 20 inventory relations and EXECUTE on 4 read RPCs, nothing else, no BYPASSRLS. It is checked at boot and every 10 min against the database's own privilege report; any finding refuses. (1) The catalog boot guard: only `leadcommand_(get\|search)_*` names and `.read` scopes, with write-shaped names refused. (2) A static import fence over the whole import graph: no write-capable LeadCommand module and no DB mutation call or SQL is reachable. (3) The transport refuses writes, relations outside the inventory, other schema profiles and non-allowlisted RPCs before the network (`data/read-fetch.mjs`, then the app's `createGuardedReadFetch`). | readonly ×9, credential ×13, selfcheck ×6, inventory ×3, migration test, e2e ×8 |
 | PII | Projection first: no names, phones, emails, mailing data, message text, person keys or demographics. `safeFlags` drops protected-class labels. A second net masks phone and email shapes in every string. Contacts are handles. | safety: PII ×4, second net |
 | Untrusted text | Imported or human-entered strings are sanitized (control and bidi characters stripped, length capped). They appear only as data, and their paths are listed in `untrusted_fields`. The result `trust.content` is `data_only`, and server instructions say the same. No action tools exist to hijack. | prompt injection ×2 |
 | Secrets | Read from files, closure-held, environment scrubbed. A redactor (JWT, keys, `postgres://`, PEM, bearer, `password=`) runs on every audit line. A secret-shaped value in a result is refused (`SECRET_GUARD`). | secret redaction ×3 |
@@ -252,12 +253,87 @@ Notes per tool:
 | Size | Per-tool byte caps (16–96 KB, global ceiling 256 KB). Paged rows are dropped to fit; the page then says `truncated_for_size` and returns no cursor. A single oversized record fails. | size ×2 |
 | Audit | One record per call: hashed principal and org, tool, scope, outcome, error class and code, correlation id, latency, rows, bytes, truncation, input hash, data mode, upstream timeout preference. No inputs, results or PII. | secret redaction, every suite |
 
-**Known gap: the 5-second server-side statement timeout is not confirmed.**
+**Statement timeout.** Every read aborts client-side at 5 s. Server side, the migration sets `statement_timeout = '5s'` on `lc_mcp_reader`; PostgREST applies per-role settings on SET ROLE. The setting is verified in the migration posttest. That production PostgREST applies it is confirmed only once the owner's acceptance run has happened (§4.2).
 
-- Every read aborts client-side at 5 s.
-- PostgREST did not return `Preference-Applied` for `Prefer: timeout=5` in the live run (`upstream_timeout_pref: null`), so a server-side 5 s bound is **not confirmed**.
-- The service role has no statement timeout of its own.
-- Every query is index-served and bounded, and the maximum observed latency was 4.5 s. A server-side bound is a 1.1 gate: a dedicated read role with `statement_timeout = '5s'`, or STABLE RPCs with `SET statement_timeout`.
+### 4.2 Live credential: `lc_mcp_reader` (database-role-enforced, read-only)
+
+**Why.** Live mode used to read PostgREST with the SERVICE-ROLE key, which can write everything and bypasses RLS. Writes were refused only client-side. Membership used the `agent_api` login, which can INSERT/UPDATE `agent.*`. Both are gone. A client-side read-only setting is not a substitute for a least-privilege credential.
+
+**Design (PostgREST + a role-claim JWT; option (a)).**
+
+- `supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql` creates role `lc_mcp_reader`:
+  - NOLOGIN NOINHERIT, no SUPERUSER / CREATEDB / CREATEROLE / REPLICATION / **BYPASSRLS**, a member of **no** role;
+  - `statement_timeout 5s`; granted to `authenticator`;
+  - USAGE on `public` only;
+  - SELECT on exactly the 20 relations of `src/data/inventory.mjs`;
+  - a `FOR SELECT TO lc_mcp_reader USING (true)` policy on each inventory table. RLS is on for every postgres-owned table since the lockdown; without a policy the role would read zero rows silently;
+  - EXECUTE on 4 read RPCs: `entity_graph_property_records(text)` and `campaign_entity_contact_review_flags(text[])`, both existing STABLE SECURITY DEFINER; plus the new `lc_mcp_reader_self_check(text[],text[],name)` (INVOKER, privilege introspection) and `lc_mcp_operator_role(uuid,uuid)` (DEFINER, one membership row).
+- The owner mints an HS256 JWT `{ role: "lc_mcp_reader", iss, iat, exp }` with the project's legacy JWT secret. The project issues HS256 and publishes no JWKS (`infra/cloudflare/worker/index.ts`). PostgREST verifies it and runs `SET ROLE lc_mcp_reader`, so every request has exactly those grants. The `apikey` header carries the public anon / publishable key, which the gateway requires; it confers nothing here.
+- Why not (b), a direct pg LOGIN role: a login is a raw-SQL surface. Its holder can run arbitrary SELECTs, hold locks, and call PUBLIC pg_catalog side-effect functions (`lo_create`, `pg_notify`, `pg_logical_emit_message`, advisory locks). Through PostgREST, a NOLOGIN role reaches only relations and functions in the exposed schemas. (a) also keeps the reused supabase-js services unchanged.
+- **Never** make a direct-login role a member of `authenticated` or `anon`: `ops_read_allowed()` trusts `request.jwt.claims`, which a direct login can set. `lc_mcp_reader` is NOLOGIN and in no role, and both the migration gate and the boot check refuse any membership.
+
+**The apply aborts atomically** on any finding of the self-check for the role:
+
+- a write privilege anywhere it can use (table or column level, incl. MAINTAIN);
+- sequence USAGE / UPDATE;
+- CREATE on a schema or the database;
+- a membership;
+- LOGIN;
+- a reachable SECURITY DEFINER function outside the allowlist. PUBLIC gets EXECUTE on every new function and the lockdown did not change default privileges; PostGIS `st_estimatedextent` is accepted when non-volatile;
+- a reachable **network-egress** function: schema `net`, pg_net / http / dblink / postgres_fdw members, `http*` / `dblink*`, untrusted languages, or a wrapper calling them or `lo_*` / `pg_notify`;
+- SELECT outside the inventory in an exposed schema, e.g. a PUBLIC-readable owner-rights view;
+- an inventory table with RLS but no policy, or with a restrictive policy;
+- an inventory `security_invoker` view;
+- a VOLATILE allowlisted RPC;
+- a missing relation / RPC.
+
+**The server enforces the same rules at boot and every 10 min** (`data/credential.mjs#evaluateSelfCheck`, independently of the DB's own `ok`). It reads the report AS the token (`current_user` must be `lc_mcp_reader`). On a refusal it does not start, or refuses every call, and audits `credential_self_check` / `server_boot_refused`.
+
+**Credential sources.** Live mode reads ONLY `LEADCOMMAND_MCP_READER_JWT_FILE` and `LEADCOMMAND_MCP_API_KEY_FILE`. Each must be:
+
+- a 0600 file, owned by the server user, not a symlink, a single value;
+- not an env file, not under `apps/api`.
+
+It refuses:
+
+- a token whose role claim is not `lc_mcp_reader`; the service-role key is refused by decoding the claim locally, before any request;
+- no / past / > 366-day expiry; `alg: none`;
+- a "public key" that is the service-role or an `sb_secret_` key;
+- the retired `LEADCOMMAND_MCP_SERVICE_KEY_FILE` / `AGENT_DB_*`;
+- live mode while `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, `DATABASE_URL`, … are in the environment. These are reported by NAME; their values are never read.
+
+The loader fences `@/lib/supabase/client.js` (it reads the service key on import), `@/lib/postgres/client.js`, `resolve-database-url.js` and `dotenv` to refusing stubs. A real server subprocess, traced at the fs and `process.env` level, never opens `apps/api/.env*` and never reads those variables (`test/credential.test.mjs`).
+
+**PRODUCTION BLOCKER: pg_net.** The 2026-10-16 role audit (`tmp/ro-roles-v2`) found that PUBLIC holds:
+
+- USAGE on schema `net`;
+- EXECUTE on `net.http_get` / `http_post` / `http_delete`;
+- ALL on `net.http_request_queue` / `net._http_response`.
+
+These are pg_net 0.20.0 objects owned by `supabase_admin`, which postgres cannot revoke. Any role, `lc_mcp_reader` included, could make the database send HTTP requests. **So the role migration will refuse to apply, and the server would refuse to boot, until the owner resolves pg_net.** Either drop the extension (H1 of the separate `PROPOSED_public_execute_hardening.sql`: unused, its only trigger disabled), or ask Supabase support to revoke PUBLIC on schema `net`, its functions and tables. That is intended.
+
+**Owner steps to go live (in order; each one separately approved):**
+
+1. Resolve pg_net: drop it or have Supabase revoke PUBLIC on schema `net`. Optionally apply the rest of `PROPOSED_public_execute_hardening.sql`.
+2. Apply `supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql`, alone. Expect `NOTICE: lc_mcp_reader: self-check ok (20 relations, 4 functions)`. Any `ERROR: lc_mcp_reader: refused …` names the blockers, and nothing is applied.
+3. Mint the token outside the repo. Put the dashboard's legacy JWT secret in a 0600 file such as `~/.leadcommand/jwt-secret`, then run `node scripts/mint-reader-token.mjs --secret-file ~/.leadcommand/jwt-secret --out ~/.leadcommand/lc_mcp_reader.jwt --days 30` and delete the secret file. Put the anon key in `~/.leadcommand/anon.key` (0600).
+4. From a clean shell (`env -i PATH="$PATH" HOME="$HOME" …`), set `LEADCOMMAND_MCP_SUPABASE_URL`, `_READER_JWT_FILE`, `_API_KEY_FILE`, `_PRINCIPAL_USER_ID`, `_ORG_ID`. Then run `node scripts/live-acceptance.mjs --zip <a ZIP with properties>`.
+   - Expected: `"result": "PASS"`, and stage `database` shows **15** write probes at HTTP 403 / `42501`: INSERT / UPDATE / DELETE × send_queue, sms_templates, system_control, properties, campaigns. Each is zero-row even if permitted; the control test proves it.
+   - SELECT send_queue → 42501; agent → 406 `PGRST106` (or 42501).
+   - The privilege report shows `running_as: lc_mcp_reader`, `ok: true`.
+   - Stage `capability`: 9 tools / ≤ 12 calls, all `data_mode: live` with provenance.
+   - Stage `audit`: boot self-check ok, one `tool_call` per call.
+   - Exit 0.
+5. Only then point MCP hosts at live mode. Kill switch: `revoke lc_mcp_reader from authenticator;`. Rollback: `PROPOSED_20261016120000_lc_mcp_reader_rollback.sql`.
+
+**Residual (stated plainly).**
+
+- The token is a bearer secret until `exp`. Revoke it via the kill switch; rotating the JWT secret would also rotate the anon / service keys.
+- The role can read PII tables (phones, emails, prospects, master_owners, inbox_thread_state incl. `latest_message_body`). The reused dossier and outreach services select those columns, so column-level grants are impossible without changing apps/api. The MCP projections never return them.
+- Owner-rights inventory views read their base tables as the owner.
+- The probes' zero-row writes could fire statement-level triggers only if a write were permitted, and the self-check proves it is not.
+- `TEMP` via PUBLIC is unreachable without a SQL session (H2 removes it).
+- `campaign_entity_contact_review_flags` has no definition in the repo. The migration requires it to be STABLE; review its body before apply.
 
 ---
 
@@ -279,9 +355,10 @@ stdout carries only the protocol. Audit lines go to stderr, or to `LEADCOMMAND_M
 | `LEADCOMMAND_MCP_PRINCIPAL_USER_ID` | The operator's Supabase auth uid (host-established principal) |
 | `LEADCOMMAND_MCP_ORG_ID` / `LEADCOMMAND_MCP_DATA_ORG_ID` | The principal's org / the org this server serves (defaults to the principal's org) |
 | `LEADCOMMAND_MCP_SCOPES` | Space- or comma-separated `.read` scopes. Default: every scope except `leadcommand.contact_status.read` |
-| `LEADCOMMAND_MCP_SUPABASE_URL` | Live only: the https origin of the app data service |
-| `LEADCOMMAND_MCP_SERVICE_KEY_FILE` | Live only: **path** to a 0600 file holding the service key (never the key itself) |
-| `LEADCOMMAND_MCP_AGENT_DB_URL_FILE` / `LEADCOMMAND_MCP_AGENT_DB_CA_FILE` | Live only: paths to the `agent_api` URL and the Supabase CA |
+| `LEADCOMMAND_MCP_SUPABASE_URL` | Live only: the https origin of the app data service (or an http loopback PostgREST) |
+| `LEADCOMMAND_MCP_READER_JWT_FILE` | Live only: **path** to a 0600 file holding the `lc_mcp_reader` token (§4.2). Any other role claim, service-role included, refuses to boot |
+| `LEADCOMMAND_MCP_API_KEY_FILE` | Live only: path to a 0600 file holding the anon / publishable key (the service-role and `sb_secret_` keys are refused) |
+| ~~`LEADCOMMAND_MCP_SERVICE_KEY_FILE`~~, ~~`LEADCOMMAND_MCP_AGENT_DB_URL_FILE` / `_CA_FILE`~~ | **Retired** (writable credentials). Setting any of them refuses live mode |
 | `LEADCOMMAND_MCP_RATE_PER_MIN`, `_MAX_CONCURRENCY`, `_CALL_TIMEOUT_MS`, `_MAX_RESPONSE_BYTES` | Can only **lower** the budgets (hard ceilings in `config.mjs`) |
 | `LEADCOMMAND_MCP_TRANSPORT` | `stdio` (default) or `streamable-http` (§5.3). Anything else refuses to boot. |
 
@@ -299,9 +376,8 @@ stdout carries only the protocol. Audit lines go to stderr, or to `LEADCOMMAND_M
         "LEADCOMMAND_MCP_ORG_ID": "<org uuid>",
         "LEADCOMMAND_MCP_SCOPES": "leadcommand.leads.read leadcommand.properties.read leadcommand.scores.read leadcommand.market.read leadcommand.comps.read leadcommand.campaigns.read",
         "LEADCOMMAND_MCP_SUPABASE_URL": "https://<project>.supabase.co",
-        "LEADCOMMAND_MCP_SERVICE_KEY_FILE": "<path, 0600>",
-        "LEADCOMMAND_MCP_AGENT_DB_URL_FILE": "<path, 0600>",
-        "LEADCOMMAND_MCP_AGENT_DB_CA_FILE": "<path>/prod-ca-2021.crt",
+        "LEADCOMMAND_MCP_READER_JWT_FILE": "<path, 0600: the lc_mcp_reader token>",
+        "LEADCOMMAND_MCP_API_KEY_FILE": "<path, 0600: the anon / publishable key>",
         "LEADCOMMAND_MCP_AUDIT_FILE": "<path>/leadcommand-mcp-audit.jsonl"
       }
     }
@@ -393,7 +469,7 @@ Agntau = `kindleops/agntau` `main @0217a12`, cloned **read-only** to `tmp/agntau
 
 ## 7. Testing
 
-### 7.1 MCP suite: 80 tests, 80 pass
+### 7.1 MCP suite: 103 tests, 102 pass, 1 skipped (opt-in e2e)
 
 The suite uses FIXTURE data, labelled synthetic. Run it with `cd mcp/leadcommand-mcp && npm test`.
 
@@ -405,6 +481,10 @@ The suite uses FIXTURE data, labelled synthetic. Run it with `cd mcp/leadcommand
 | `security.test.mjs` | 15 | unauthenticated (no principal, non-member), cross-org ×2, forged-context keys, injection-shaped ids, scope denial ×3, role, membership fail-closed, TTL revocation, cursor forgery (tampered, cross-filter, cross-tool, cross-principal), unsupported filters, transport allowlist (only stdio / streamable-http; HTTP without a token file refuses to boot) |
 | `limits.test.mjs` | 12 | full keyset traversal (no duplicates or gaps), max-result limits, size cap (truncation and oversize failure), timeout at the deadline, rate limit (principal and tool), DB failure (fault, missing relation), concurrency (bounded, refuse the excess), disconnect / recover in memory **and as a real stdio subprocess** (kill, the process exits, relaunch) |
 | `safety.test.mjs` | 11 | provenance kinds and missing ≠ 0, no fixture phone, name, email or person key anywhere, protected flags dropped, contact handles only, second-net masking, redactor and audit hygiene, secret guard, environment scrub, prompt injection (seller preview never leaves; injected text only at declared untrusted paths; tool surface unchanged), control and bidi stripping, suppression (active, inactive and lookup-failure cases) |
+| `credential.test.mjs` | 13 | service-role token refused by its role claim before any request (audited); only `lc_mcp_reader` tokens (other roles, alg none, no / past / over-long exp refused); public key anon / publishable only; retired inputs refused; ambient credentials refused by name, values never read; credential-file rules (mode, symlink, env file, inside apps/api, one value); config summary carries no secret; module fence (default client, direct pg, URL resolver, dotenv); **real subprocess trace**, fixture and live: no env file opened, no forbidden env read, only the two credential files, only the reader token sent, boot self-check audited; trace canary; mint-reader-token |
+| `selfcheck.test.mjs` | 6 | every self-check finding named (writes, sequences, CREATE, membership incl. anon, BYPASSRLS, LOGIN, definer, egress, pg_net hint, exposed reads, RLS without policy, restrictive, invoker view, missing / extra relations, RPC execute / volatility, DB disagreement); boot refusal audited to the file; PostgREST-rejected token, missing function, no EXECUTE, unreachable; TTL re-check fail-closed and recovery; audit file: ok / refused / failed / unknown-tool lines, no credential, 0600 |
+| `inventory.test.mjs` | 3 | migration SQL lists == `src/data/inventory.mjs` (apply, rollback, pretest, posttest); the 9 tools over the live transport read EXACTLY the 20 relations and call EXACTLY the 4 RPCs, all as `lc_mcp_reader` |
+| `postgrest-e2e.test.mjs` | 1 (8 subtests, opt-in) | real PostgREST 16.4 + disposable PG17: role switch, DB refusals, side-effect-free probes, server boot, all tools live, wrong-signature refusal, `live-acceptance.mjs` PASS |
 | `readonly.test.mjs` | 9 | 9 read tools only, the boot guard refuses write-shaped tools, the static import graph reaches no write-capable module, no mutation call or SQL in reachable code, allowed external packages only, the live transport refuses insert / update / delete / non-allowlisted RPC before the network, the abort signal and `Prefer: timeout=5` on every request, fixture tables unchanged after calls |
 
 ### 7.2 Existing critical suite
@@ -425,7 +505,7 @@ The suite uses FIXTURE data, labelled synthetic. Run it with `cd mcp/leadcommand
 **Live run (bounded).** The owner permitted read-only, tiny calls. Settings and results:
 
 - 10 tool calls in total, over two runs (9, then 1).
-- Data paths: membership as `agent_api` (verify-full TLS); domain reads through the guarded read-only transport.
+- Data paths (2026-10-14, superseded by §4.2): membership as `agent_api` (verify-full TLS); domain reads through the guarded read-only transport.
 - All 10 calls returned `ok`, and the audit outcomes were all `ok`.
 
 Redacted evidence (identifiers only, ≤ 5):
@@ -464,6 +544,27 @@ Server: `streamable-http` on `127.0.0.1:8765`, FIXTURE mode, default scope grant
 
 Claude Code 2.1.281 opens each run with a `server/discover` POST and no session (audited 400 `no_session`), then falls back to `initialize`. It does not DELETE its session on exit, which is why idle sessions are LRU-evicted at the cap.
 
+### 7.5 Live credential proofs (2026-10-16; disposable / local only, never production)
+
+- **Migration runner.** `node scripts/db/run-migration-test.mjs --pg-bin <pg17> --id lc_mcp_reader` → **1 / 1 PASS**. The full cycle runs on a fresh unix-socket cluster with the Supabase shim plus an emulation of the touched production objects: pretest leaves no trace → APPLY → posttest → ROLLBACK → the pre-apply fingerprint is restored exactly → re-apply → posttest.
+  - The posttest runs **128** INSERT / UPDATE / DELETE / TRUNCATE / FOR UPDATE / nextval / CREATE / REFRESH / RPC probes AS the role, every one refused by the database. They cover the 20 inventory relations plus send_queue, sms_templates, system_control, message_events, agent.operator_membership / run / org.
+  - TRUNCATE on views and materialized views fails with 42809 (not a table) before privileges are consulted.
+  - All 20 relations are readable, with RLS policies effective.
+  - Each break scenario is named, including pg_net exactly as in production and a real `dblink` install.
+  - Mutation checks: an injected INSERT grant fails the posttest. A pre-existing PUBLIC definer writer, and a production-shaped pg_net, each make the apply refuse atomically.
+- **Real PostgREST e2e** (`LC_PG_BIN=… LC_POSTGREST_BIN=… npm run test:e2e`) → **8 / 8**. The stack is PostgREST 16.4 on 127.0.0.1 behind a loopback `/rest/v1` gateway shim; the recorded acceptance run used `http://127.0.0.1:56601`. It shows:
+  - the reader token runs as `lc_mcp_reader` (session `authenticator`);
+  - 15 write probes give 403 / 42501, SELECT send_queue gives 42501, the agent schema gives 406 PGRST106;
+  - a service_role control proves the probes change zero rows;
+  - the server boots on the real self-check and all 11 coverage calls return `live` data;
+  - a forged signature is refused at boot;
+  - `live-acceptance.mjs` passes all four stages.
+- **Agntau, fixture mode, unchanged** (`tmp/agntau` @0217a12, untouched):
+  - `Connections.add` → `connected`, 9 tools, all `readOnly` / risk `read`;
+  - `verifyMcpServer` ok; a wrong or missing token gets 401; the token is not in the connection rows;
+  - all 9 tools through Agntau's `callMcpTool`: 8 ok, contact status `forbidden / SCOPE_NOT_GRANTED` by the default grant (as §7.4 turn 3);
+  - `vitest run test/connections.test.ts` 12 / 12.
+
 ---
 
 ## 8. Git
@@ -491,7 +592,7 @@ Claude Code 2.1.281 opens each run with a `server/discover` POST and no session 
 | G05 | Streamable HTTP: loopback only (non-loopback refuses to boot), bearer token from a 0600 file (constant-time), Host / Origin validation, per-connection concurrency cap, shared limits; principal from host config | PASS |
 | G06 | Layered package (protocol, auth, authz, adapters, audit, errors / validation, config) | PASS |
 | G07 | Principal from host config only; forged ids and context refused | PASS |
-| G08 | Org scoping through `agent.operator_membership` as `agent_api`, fail-closed; cross-org refused | PASS |
+| G08 | Org scoping through `agent.operator_membership` (now via `lc_mcp_operator_role` on the read-only credential), fail-closed; cross-org refused | PASS |
 | G09 | One read scope per tool; scope denial; sensitive scope not granted by default | PASS |
 | G10 | 9 tools with input / output schemas, scope, limits, cursor (where supported), size cap, typed errors and provenance | PASS |
 | G11 | Read-only: no write tool registered; static import fence (no write module or mutation reachable) | PASS |
@@ -499,24 +600,27 @@ Claude Code 2.1.281 opens each run with a `server/discover` POST and no session 
 | G13 | PII minimization (no phones, names, emails, mailing data, message text, demographics; handles only for contacts) | PASS |
 | G14 | Untrusted text confined to declared data fields; prompt-injection tests | PASS |
 | G15 | Rate limit and concurrency limit | PASS |
-| G16 | Per-call timeout and 5 s statement bound | **FAIL (partial)**. The client-side 5 s abort and the call deadline PASS. The server-side `statement_timeout ≤ 5 s` is NOT confirmed (`Preference-Applied` absent). Fix in 1.1. |
+| G16 | Per-call timeout and 5 s statement bound | Client-side PASS. Server-side: `statement_timeout = 5s` on `lc_mcp_reader` (migration, posttest-verified); production confirmation pending the owner's acceptance run |
 | G17 | Response size caps (truncation and oversize refusal) | PASS |
 | G18 | Audit record per call (no PII) and secret redaction | PASS |
 | G19 | Provenance on every value group; missing ≠ 0; stale and inferred labelled | PASS |
 | G20 | Suppression correctness (inactive ≠ suppressed; lookup failure = unknown) | PASS |
-| G21 | MCP test suite (fixtures): 80 / 80 | PASS |
+| G21 | MCP test suite: 103 tests, 102 pass, 0 fail, 1 skipped (the opt-in real-PostgREST e2e, which passes 8 / 8 when run) | PASS |
 | G22 | Existing chunked critical suite, no regressions (`CRITICAL_CHUNKS=8`): 834 files, 11,455 tests, 11,399 pass, **0 fail**, 56 skipped — SUITE PASSED; `npm run lint` (2,954 files) passed | PASS |
 | G23 | Local protocol validation: fixture and bounded live (10 calls, ≤ 5 identifiers per call) | PASS |
 | G24 | Agntau connection: Agntau's own `Connections.add` / `verifyMcpServer` connect (9 read tools); real Claude Code turns through Agntau's generated config (search, follow-up, scope denial, disconnect / recover); Agntau connection tests 12 / 12 | PASS on FIXTURE data. Live-data agent turns **BLOCKED** (permission). Multi-agent Mission **NOT RUN**. |
 | G25 | No push / merge / deploy / production migration / remote mutation / credential rotation; no paid enrichment | PASS |
+| G26 | Live credential is database-role-enforced: role migration (PROPOSED) passes the disposable-PG17 runner (pretest, apply, 128+ DB-refused probes, every break scenario named, rollback restores the fingerprint, re-apply); service-role and retired inputs refused locally; ambient credentials refused; loader fence; subprocess trace clean | PASS (disposable) |
+| G27 | Real PostgREST + PG17 e2e: role switch, DB refusals (42501), side-effect-free probes (service_role control), server boot on the real self-check, all tools live, `live-acceptance.mjs` PASS (local stack only) | PASS (local) |
+| G28 | Production go-live: pg_net resolved, role applied, token minted, owner's `live-acceptance.mjs` PASS | **OPEN (owner)** |
 
-Summary: 24 PASS · 1 FAIL (G16, partial) · G24 live-data part BLOCKED · multi-agent Mission NOT RUN.
+Summary: 26 PASS (G26–G27 on disposable / local stacks) · G16 server-side pending production confirmation · G28 OPEN (owner: pg_net, apply, mint, acceptance) · G24 live-data part BLOCKED · multi-agent Mission NOT RUN.
 
 ---
 
 ## 10. MCP 1.1 plan (hardening, still read-only)
 
-1. Bound statements server-side. Options: a dedicated `mcp_read` login with `statement_timeout = '5s'`, SELECT on exactly the projected columns, and no service role in the path; or STABLE `SECURITY DEFINER` RPCs with `SET statement_timeout`. Either one closes G16 and removes the service key from the gateway.
+1. DONE in 1.0 (§4.2): the service key is out of the gateway; `lc_mcp_reader` carries `statement_timeout 5s`. Left: column-level narrowing of the PII tables, which needs the reused dossier / outreach services to stop selecting message text and contact columns.
 2. Remote Streamable HTTP behind OAuth 2.1 (RFC 9728 protected-resource metadata, audience-bound tokens, no passthrough), with a durable rate and session store and per-request principal verification. The 1.x loopback transport (§5.3) stays loopback-only.
 3. A pure campaign readiness core extracted from `campaign-launch-readiness.js`, exposed as `leadcommand_get_campaign_readiness`.
 4. Truthful reply metrics: a STABLE, indexed RPC for `message_events` pairing.
