@@ -56,6 +56,8 @@ export const NURTURE_TEMPLATE_CANDIDATES = Object.freeze({
   conditional_interest: ["consider_selling_follow_up", "not_ready", "consider_selling"],
   maybe_depends_on_price: ["consider_selling_follow_up", "not_ready", "seller_asking_price"],
   need_time: ["not_ready", "consider_selling_follow_up", "consider_selling"],
+  // rc-8.5.21: a seller-requested check-back — the re-engagement family only, never the S1 pool
+  seller_callback: ["not_ready", "consider_selling_follow_up"],
   unclear: ["soft_followup", "consider_selling_follow_up", "consider_selling"],
 });
 

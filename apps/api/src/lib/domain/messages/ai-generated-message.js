@@ -175,3 +175,22 @@ export async function recordAiGeneratedMessageEvent(supabase, { aiMessageId, eve
   const { error } = await supabase.from(AI_GENERATED_MESSAGE_EVENTS_TABLE).insert({ ai_message_id: aiMessageId, event_type: eventType, queue_row_id: queueRowId, provider_result: providerResult, delivery_state: deliveryState, detail })
   return error ? { ok: false, reason: 'event_insert_failed' } : { ok: true }
 }
+
+/**
+ * rc-8.5.21: the provider outcome of an AI row, appended to its immutable record's lifecycle
+ * (provider_accepted / provider_failed). Never throws, never blocks the send path; a non-AI row
+ * (no metadata.ai_message_id) is a no-op.
+ */
+export async function recordAiRowProviderOutcome(supabase, row = {}, { eventType, providerResult = null, detail = {} } = {}) {
+  try {
+    const m = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+    const aiMessageId = clean(m.ai_message_id)
+    if (!aiMessageId || clean(row?.message_origin || m.message_origin) !== AI_ORIGIN) return { ok: false, reason: 'not_an_ai_row' }
+    const pr = providerResult && typeof providerResult === 'object'
+      ? { ok: providerResult.ok !== false, provider_message_id: clean(providerResult.provider_message_id || providerResult.sid || providerResult.message_id) || null, status: clean(providerResult.status || providerResult.error_status) || null }
+      : null
+    return await recordAiGeneratedMessageEvent(supabase, { aiMessageId, eventType, queueRowId: row?.id || null, providerResult: pr, detail })
+  } catch {
+    return { ok: false, reason: 'event_record_threw' }
+  }
+}

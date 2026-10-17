@@ -1,6 +1,6 @@
 // DECISION OUTCOMES (8.5.16 native engine). A decision is a PLAN: zero or more compatible
 // internal actions plus AT MOST ONE terminal / outbound action.
-export const PIPELINE_VERSION = 'conv-ai.pipeline.v1'
+export const PIPELINE_VERSION = 'conv-ai.pipeline.v2'
 
 export const ACTIONS = Object.freeze({
   NO_RESPONSE: 'NO_RESPONSE',

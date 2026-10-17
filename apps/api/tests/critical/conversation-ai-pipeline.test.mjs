@@ -184,7 +184,7 @@ test('compose: Haiku writes original text; a draft with an em dash is regenerate
   assert.equal(ok.calls.length, 2)
   assert.match(ok.calls[1].user, /style:em_dash/)
   assert.equal(r.route, 'default')
-  assert.equal(r.playbook_version, 'playbook.v2') // rc-8.5.20: compose runs playbook v2 (v1 rules + the owner persona rule)
+  assert.equal(r.playbook_version, 'playbook.v3') // rc-8.5.21: compose runs playbook v3 (v2 + configured identity + forbidden claims)
   const bad = fakeModel(['Thanks — would you sell?'])
   const held = await composeReply({ ledger: L, inboundText: 'yes', category: 'next_missing_fact', objective: 'interest', modelClient: bad, spend: spend() })
   assert.deepEqual([held.ok, held.reason, bad.calls.length], [false, 'composition_rejected', 2])
@@ -216,7 +216,7 @@ test('pipeline end to end (no send): ownership confirmed → AI-generated intere
 
 test('STOP plan through the executor: queued / scheduled sends are cancelled even with the AI switch OFF (no AI override)', async () => {
   const cancelled = []
-  const r = await executeAiConversationReply({ plan: { actions: [{ type: 'UPDATE_SELLER_FACTS', facts: { opt_out: 'stop_requested' } }, { type: 'SUPPRESS', cancel_pending: true }] }, inbound: { id: 'i1', thread_key: TK } }, {
+  const r = await executeAiConversationReply({ record: { plan: { actions: [{ type: 'UPDATE_SELLER_FACTS', facts: { opt_out: 'stop_requested' } }, { type: 'SUPPRESS', cancel_pending: true }] } }, inbound: { id: 'i1', thread_key: TK } }, {
     now: NOW, readSwitch: async () => null, cancelPending: async (a) => { cancelled.push(a); return { ok: true, cancelled_count: 2 } },
     insertQueueRow: async () => { throw new Error('must not enqueue') }, insertRecord: async () => { throw new Error('must not write a record') },
   })

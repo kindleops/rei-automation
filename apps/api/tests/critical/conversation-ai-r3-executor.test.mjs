@@ -1,5 +1,7 @@
 // 8.5.16 — R3 AI conversation execution module: OFF by default, one allowlisted path
 // into the EXISTING send_queue insertion function, every existing guard at send time.
+// rc-8.5.21: R3 takes a CANONICAL decision record (runtime/canonical.js#decideAndCompose); the
+// R1-shaped decisions below are converted by toRecord() into exactly that record shape.
 //
 // NO-SEND EXECUTION PROOF: the full path runs with a FAKE queue insert (the real
 // insertSupabaseSendQueueRow normalisation, its DB write replaced by an in-memory
@@ -17,6 +19,8 @@ import { beginIdempotentProcessing } from '../../src/lib/domain/events/idempoten
 import { resetMemoryIdempotencyLedger } from '../helpers/memory-idempotency-ledger.mjs'
 import { dryRunEligibility } from '../../src/lib/domain/conversation-ai/eligibility-bridge.js'
 import { makeDecision } from '../../src/lib/domain/conversation-ai/contract.js'
+import { CANONICAL_VERSIONS } from '../../src/lib/domain/conversation-ai/runtime/canonical.js'
+import { toRecord } from '../helpers/canonical-record.mjs'
 import { DEFAULT_AI_SEND_POLICY, isOwnerHandledThread, OWNER_HANDLED_THREAD_SHA256, normalizeSendPolicy, AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, templateDeferVerdict } from '../../src/lib/domain/conversation-ai/send-policy.js'
 import { evaluateSendTimeContactGuard } from '../../src/lib/domain/queue/send-time-contact-guard.js'
 import { evaluateTemplateAuthority } from '../../src/lib/domain/templates/template-authority.js'
@@ -108,6 +112,7 @@ function deps({ w, table = makeTable(), sw = switches(), now = NOW, loadState = 
       eligibility: ({ row, state }) => dryRunEligibility({ row, facts: w.guardFacts, timezone: state.timezone, geography: state.geography, now }),
       insertQueueRow: table.insertQueueRow,
       insertRecord: table.records.insert,
+      lookupRecord: table.records.load,
       recordEvent: table.records.event,
       cancelPending: async () => { throw new Error('cancelPending must not run for a reply') },
     },
@@ -125,32 +130,38 @@ const interestDecision = (over = {}) => makeDecision({
   stage_evidence: { stage: 'S2_interest', evidence_message_ids: ['i1'], rationale: 'ownership confirmed' }, ...over,
 })
 const sw_on = (policy = { enabled: true, scope: { thread_keys: [TK] } }) => async (k) => (k === AI_SEND_KILL_SWITCH_KEY ? 'true' : k === AI_SEND_POLICY_KEY ? JSON.stringify(policy) : null)
-const candidate = (decision = interestDecision(), over = {}) => ({
-  decision, draft_text: decision.proposed_message, validation: { status: 'validated_draft' }, decision_id: 'conv-ai:v1:i1', model: 'claude-haiku-5-5',
-  inbound: { id: 'i1', provider_message_sid: 'SMfixture', thread_key: TK }, ...over,
-})
+const candidate = (decision = interestDecision(), over = {}) => {
+  const inbound = over.inbound || { id: 'i1', provider_message_sid: 'SMfixture', thread_key: TK }
+  const rejected = over.validation && over.validation.status !== 'validated_draft'
+  return { record: toRecord(decision, inbound.id, { contentReasons: rejected ? ['test_rejected'] : [] }), decision_id: over.decision_id || 'conv-ai:v1:i1', inbound }
+}
 
 test.beforeEach(() => resetMemoryIdempotencyLedger())
 
 // ── defaults ────────────────────────────────────────────────────────────────
-test('defaults: everything OFF — no switch, no policy, executor unwired, template never defers', async () => {
-  assert.equal(R3_EXECUTOR_WIRED, false)
+test('defaults: everything OFF — no switch, no policy; R3 is wired but held; the template never defers', async () => {
+  assert.equal(R3_EXECUTOR_WIRED, true, 'rc-8.5.21: a real code path behind the OFF switches')
   assert.equal(DEFAULT_AI_SEND_POLICY.enabled, false)
   assert.deepEqual(DEFAULT_AI_SEND_POLICY.scope.thread_keys, [])
   const w = world({ thread: S1_THREAD() })
   const { d, table } = deps({ w, sw: { readSwitch: async () => null } })
   const r = await executeAiConversationReply(candidate(), d)
-  assert.equal(r.status, 'refused')
+  assert.equal(r.status, 'held')
   assert.deepEqual(r.reasons, ['kill_switch_off'])
   assert.equal(table.inserts.length, 0)
+  // switches absent (production): the template path runs exactly as today, nothing reserved
   let reads = 0
-  const c = await evaluateTemplateCoexistence({ inbound_message_event_id: 'i1', thread_key: TK, getSystemValue: async () => { reads += 1; return 'true' } })
-  assert.deepEqual(c, { defer: false, reason: 'r3_executor_not_wired' })
-  assert.equal(reads, 0, 'the template path reads nothing while R3 is unwired')
-  // switch on but policy absent ⇒ still refused
+  const c = await evaluateTemplateCoexistence({ inbound_message_event_id: 'i1', thread_key: TK, getSystemValue: async () => { reads += 1; return null } })
+  assert.deepEqual(c, { defer: false, reason: 'ai_send_switch_off' })
+  assert.equal((await beginIdempotentProcessing({ scope: 'inbound_reply', key: 'i1' })).duplicate, false, 'no reservation taken by the template path while AI is off')
+  // switch on but policy absent ⇒ still held
   const sw = switches({ [AI_SEND_POLICY_KEY]: null })
+  resetMemoryIdempotencyLedger()
   const r2 = await executeAiConversationReply(candidate(), deps({ w, sw }).d)
   assert.deepEqual(r2.reasons, ['ai_send_policy_disabled'])
+  // the emergency stop holds whatever the AI switch says
+  const r3 = await executeAiConversationReply(candidate(), deps({ w, sw: switches({ queue_emergency_stop_at: '2026-10-14T16:00:00Z' }) }).d)
+  assert.deepEqual(r3.reasons, ['emergency_stop_active'])
 })
 
 test('policy: limits clamp to the owner limits; malformed policy is the safe default; empty scope = nothing', () => {
@@ -163,6 +174,23 @@ test('policy: limits clamp to the owner limits; malformed policy is the safe def
   assert.equal(normalizeSendPolicy('{not json').enabled, false)
   assert.equal(normalizeSendPolicy({ enabled: 'true' }).enabled, false, 'a truthy string never enables')
   assert.equal(templateDeferVerdict({ executorWired: true, killSwitchOn: true, policy: p, inScope: false }).defer, false)
+})
+
+// ── rc-8.5.21: the ONE automation-hold registry ────────────────────────────
+test('automation hold: a held thread (or an unanswerable registry) is never reserved or enqueued by R3', async () => {
+  for (const [checker, reason] of [
+    [async () => ({ held: true, hold_type: 'operator_hold', reason: 'owner_took_over', hold_id: 'h1' }), 'automation_hold:operator_hold'],
+    [async () => { throw new Error('registry down') }, 'automation_hold:lookup_error'],
+  ]) {
+    resetMemoryIdempotencyLedger()
+    const w = world({ thread: S1_THREAD() })
+    const { d, table } = deps({ w })
+    const r = await executeAiConversationReply(candidate(), { ...d, automationHoldChecker: checker })
+    assert.equal(r.status, 'held', JSON.stringify(r))
+    assert.deepEqual(r.reasons, [reason])
+    assert.equal(table.inserts.length, 0, 'nothing enqueued')
+    assert.equal(table.records.byKey.size, 0, 'no ai_generated_messages record')
+  }
 })
 
 // ── the NO-SEND EXECUTION PROOF ─────────────────────────────────────────────
@@ -215,8 +243,10 @@ test('E2E no-send proof: an eligible routine reply passes R3 and is enqueued thr
   assert.equal(rec.decision_id, 'conv-ai:v1:i1')
   assert.equal(rec.decision_outcome, 'AI_GENERATED_REPLY')
   assert.equal(rec.model, 'claude-haiku-5-5')
-  assert.equal(rec.playbook_version, 'playbook.v2')
-  assert.equal(rec.prompt_version, 'compose.v2')
+  assert.equal(rec.playbook_version, 'playbook.v3')
+  assert.equal(rec.prompt_version, 'compose.v3')
+  assert.equal(rec.audit_refs.writer_version, CANONICAL_VERSIONS.writer)
+  assert.equal(rec.audit_refs.runtime_version, CANONICAL_VERSIONS.runtime)
   assert.equal(rec.context_version, 'conv-ai.context.v1')
   assert.equal(rec.validation.status, 'validated')
   assert.match(rec.ledger_snapshot_hash, /^[0-9a-f]{64}$/)
@@ -276,7 +306,7 @@ test('E2E: the real queue runner with an AI row — switch off cancels, night de
   assert.equal(r1.reason, 'ai_conversation_send_disabled', JSON.stringify(r1))
   assert.equal(off.updates[0].payload.queue_status, 'cancelled')
   assert.equal(off.updates[0].payload.paused_reason, 'ai_conversation_send_disabled')
-  // switch on, 23:30 recipient-local ⇒ deferred (no in-session bypass for AI rows)
+  // switch on, 23:30 recipient-local, the session long over ⇒ deferred (the shared send-time function)
   const night = runnerDeps({ now: NIGHT, readAiConversationSwitch: on_sw })
   const r2 = await processSendQueueItem({ ...base }, night.deps)
   assert.equal(r2.reason, 'ai_conversation_outside_contact_window', JSON.stringify(r2))
@@ -299,7 +329,7 @@ test('kill switch: blocks at enqueue, at the pre-insert re-read, and the sweep c
   const w = world({ thread: S1_THREAD() })
   // flips off between the first read and the insert
   let n = 0
-  const sw = { readSwitch: async (k) => (k === AI_SEND_KILL_SWITCH_KEY ? ((n += 1) === 1 ? 'true' : 'false') : JSON.stringify({ enabled: true, scope: { thread_keys: [TK] } })) }
+  const sw = { readSwitch: async (k) => (k === AI_SEND_KILL_SWITCH_KEY ? ((n += 1) === 1 ? 'true' : 'false') : k === AI_SEND_POLICY_KEY ? JSON.stringify({ enabled: true, scope: { thread_keys: [TK] } }) : null) }
   const { d, table } = deps({ w, sw })
   const r = await executeAiConversationReply(candidate(), d)
   assert.equal(r.status, 'held')
@@ -403,7 +433,7 @@ test('held: out of scope, money, offers, Spanish, unknown language, multi-proper
   const offerThread = [msg('o1', 'outbound', 'Would you consider selling it?', 30, { use_case: 'consider_selling' }), msg('i1', 'inbound', "What's your offer?", 5)]
   const offer = await run(world({ thread: offerThread }), candidate(interestDecision({ intent: 'asks_offer', seller_interest: 'interested', next_objective: 'get_asking_price', proposed_message: 'Happy to. What price did you have in mind?', facts_extracted: [] })))
   assert.equal(offer.status, 'held')
-  assert.ok(offer.reasons.includes('excluded_money_or_offer') && offer.reasons.includes('excluded_offer_on_thread'), JSON.stringify(offer.reasons))
+  assert.ok(offer.reasons.includes('excluded_offer_on_thread'), JSON.stringify(offer.reasons))
   // Spanish
   const esThread = [msg('o1', 'outbound', '¿Todavía es el dueño de la casa?', 30, { use_case: 'ownership_check' }), msg('i1', 'inbound', 'Sí, soy el dueño', 5)]
   const es = await run(world({ thread: esThread, language: 'es' }), candidate(interestDecision({ proposed_message: 'Gracias. ¿Consideraría vender?' })))
@@ -416,9 +446,14 @@ test('held: out of scope, money, offers, Spanish, unknown language, multi-proper
   const unkThread = [S1_THREAD()[0], msg('i1', 'inbound', 'Ja, das gehört mir', 5)]
   const unk = await run(world({ thread: unkThread, language: null }), candidate())
   assert.ok(unk.reasons.includes('excluded_language:language_unknown'), JSON.stringify(unk.reasons))
-  // multi-property
-  const multi = await run(world({ thread: S1_THREAD(), properties: [{ property_id: 'p1', state: 'TX' }, { property_id: 'p2', state: 'TX' }] }), candidate())
+  // multi-property: seller-text evidence holds it (rc-8.5.21: two property ids on the thread are NOT evidence)
+  const multiThread = [S1_THREAD()[0], msg('i1', 'inbound', 'Yes I still own it, and both of the houses on that street', 5)]
+  const multi = await run(world({ thread: multiThread }), candidate())
   assert.ok(multi.reasons.includes('excluded_multi_property'), JSON.stringify(multi.reasons))
+  resetMemoryIdempotencyLedger()
+  const twoIds = await run(world({ thread: S1_THREAD(), properties: [{ property_id: 'p1', state: 'TX' }, { property_id: 'p2', state: 'TX' }] }), candidate())
+  assert.ok(!twoIds.reasons.includes('excluded_multi_property'), JSON.stringify(twoIds.reasons))
+  resetMemoryIdempotencyLedger()
   // legal / contract
   const legalThread = [S1_THREAD()[0], msg('i1', 'inbound', 'Yes I own it, send me the contract', 5)]
   const legal = await run(world({ thread: legalThread }), candidate())
@@ -426,7 +461,12 @@ test('held: out of scope, money, offers, Spanish, unknown language, multi-proper
   // negotiation
   const negThread = [S1_THREAD()[0], msg('i1', 'inbound', 'Yes I own it, what is the best price you can do', 5)]
   const neg = await run(world({ thread: negThread }), candidate())
-  assert.ok(neg.reasons.includes('excluded_negotiation'), JSON.stringify(neg.reasons))
+  // the fresh ledger already reads the offer request (interest shown): the content check holds it first
+  assert.equal(neg.status, 'held')
+  assert.ok(neg.reasons.includes('excluded_negotiation') || neg.reasons.includes('ledger:already_answered:interest'), JSON.stringify(neg.reasons))
+  resetMemoryIdempotencyLedger()
+  const neg2 = await run(world({ thread: [S1_THREAD()[0], msg('i1', 'inbound', 'Yes I own it but my price is firm', 5)] }), candidate())
+  assert.ok(neg2.reasons.includes('excluded_negotiation'), JSON.stringify(neg2.reasons))
 })
 
 test('routine categories: identity answer and the not-interested close (no question) are in scope; NO_RESPONSE enqueues nothing', async () => {
@@ -452,15 +492,17 @@ test('routine categories: identity answer and the not-interested close (no quest
   assert.equal(t3.inserts.length, 0)
 })
 
-test('candidate must be a strictly valid decision with a validated draft', async () => {
+test('candidate must be a canonical decision record of THIS writer, with validated text, for the same inbound', async () => {
   const w = world({ thread: S1_THREAD() })
-  const bad = await executeAiConversationReply(candidate({ ...interestDecision(), extra_key: 1 }), deps({ w }).d)
-  assert.equal(bad.status, 'refused')
-  assert.ok(bad.reasons.includes('decision_invalid'))
+  const legacy = await executeAiConversationReply({ decision: interestDecision(), draft_text: 'Would you sell?', validation: { status: 'validated_draft' }, inbound: { id: 'i1', thread_key: TK } }, deps({ w }).d)
+  assert.deepEqual([legacy.status, legacy.reasons], ['refused', ['not_a_canonical_decision']], 'an R1-shaped candidate is refused: the R1 composer is retired')
+  const c = candidate()
+  const other = await executeAiConversationReply({ ...c, record: { ...c.record, versions: { ...c.record.versions, writer: 'conv-ai.pipeline.v1+playbook.v2+compose.v2' } } }, deps({ w }).d)
+  assert.deepEqual([other.status, other.reasons], ['refused', ['writer_version_mismatch']])
   const notVal = await executeAiConversationReply(candidate(interestDecision(), { validation: { status: 'rejected_with_reasons' } }), deps({ w }).d)
   assert.deepEqual(notVal.reasons, ['draft_not_validated'])
-  const foreign = await executeAiConversationReply(candidate(interestDecision({ source_message_ids: ['not-in-thread'] })), deps({ w }).d)
-  assert.deepEqual(foreign.reasons, ['decision_ids_not_in_latest_context'])
+  const foreign = await executeAiConversationReply({ ...c, record: { ...c.record, inbound_message_id: 'not-in-thread' } }, deps({ w }).d)
+  assert.deepEqual([foreign.status, foreign.reasons], ['refused', ['inbound_identity_missing']])
 })
 
 // ── STOP / ownership denial ─────────────────────────────────────────────────
@@ -468,7 +510,7 @@ test('STOP between decision and send: blocked at enqueue (guard) and, when it la
   const w = world({ thread: S1_THREAD(), guardFacts: { suppressions: [{ phone_e164: SELLER, is_active: true, suppression_type: 'opt_out' }] } })
   const r = await executeAiConversationReply(candidate(), deps({ w }).d)
   assert.equal(r.status, 'held')
-  assert.ok(r.reasons.some((x) => x.startsWith('eligibility_blocked:sms_suppression')), JSON.stringify(r.reasons))
+  assert.ok(r.reasons.some((x) => x.startsWith('ineligible:sms_suppression')), JSON.stringify(r.reasons))
   // STOP after the decision but before enqueue arrives as a NEWER inbound ⇒ re-decide (the pre-check suppresses)
   const w2 = world({ thread: [...S1_THREAD(), msg('i2', 'inbound', 'STOP', 1)] })
   const r2 = await executeAiConversationReply(candidate(), deps({ w: w2 }).d)
@@ -488,7 +530,7 @@ test('ownership-denial / wrong-number holds are respected (thread state + ledger
   const w = world({ thread: S1_THREAD(), guardFacts: { threads: [{ thread_key: TK, last_intent: 'wrong_number' }] } })
   const r = await executeAiConversationReply(candidate(), deps({ w }).d)
   assert.equal(r.status, 'held')
-  assert.ok(r.reasons.some((x) => x.startsWith('eligibility_blocked:')), JSON.stringify(r.reasons))
+  assert.ok(r.reasons.some((x) => x.startsWith('ineligible:')), JSON.stringify(r.reasons))
   const denied = [S1_THREAD()[0], msg('i1', 'inbound', 'wrong number, I do not own that', 5)]
   const dec = interestDecision({ intent: 'ownership_denied', facts_extracted: [{ fact: 'ownership', value: 'denied', source_message_id: 'i1', confidence: 0.95 }], proposed_message: 'Sorry about that. Would you consider selling it?' })
   const r2 = await executeAiConversationReply(candidate(dec), deps({ w: world({ thread: denied }) }).d)

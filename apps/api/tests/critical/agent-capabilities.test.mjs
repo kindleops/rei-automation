@@ -48,6 +48,8 @@ test('matrix: the first capabilities, typed + versioned, with tier, side effect 
     'inbox.find_conversations': ['read', 'autonomous_internal'],
     'inbox.read_thread': ['read', 'autonomous_internal'],
     'inbox.prepare_reply': ['outbound_prepare', 'requires_explicit_approval'],
+    // rc-8.5.21: the canonical runtime's review draft (read, never sends)
+    'inbox.draft_ai_reply': ['read', 'autonomous_internal'],
     'pipeline.inspect_stage_evidence': ['read', 'autonomous_internal'],
     'pipeline.propose_stage_change': ['internal_write', 'requires_explicit_approval'],
     'platform.health': ['read', 'autonomous_internal'],
@@ -533,7 +535,7 @@ test('routes: gate 404 → ops auth → verified named user → rate limit → m
   assert.equal((await handleActionsCatalog(req('/a', { headers: { authorization: 'Bearer bad' } }), opts)).status, 401)
   assert.equal((await handleActionsCatalog(req('/a'), { ...opts, limiter: { check: () => ({ ok: false, code: 'RATE_LIMITED', retry_after_s: 5 }) } })).status, 429)
   const cat = await (await handleActionsCatalog(req('/a'), opts)).json()
-  assert.equal(cat.capabilities.length, 12)
+  assert.equal(cat.capabilities.length, 13)
   const inv1 = await handleActionsInvoke(req('/a/invoke', { method: 'POST', body: JSON.stringify({ capability_id: 'campaigns.prepare_launch_approval', input: { campaign_id: CAMPAIGN_ID, start: 'now' } }) }), opts)
   const out = await inv1.json()
   assert.equal(out.status, 'approval_pending')

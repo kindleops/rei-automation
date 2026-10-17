@@ -226,7 +226,8 @@ export async function evaluateAndBlockSendAtCompliance(queue_row = {}, deps = {}
 
   // A transient read failure must not permanently cancel a legitimate send:
   // release the claim and defer; the row is re-evaluated on a later run.
-  if (guard.reason === SEND_TIME_GUARD_REASONS.READ_FAILED) {
+  // rc-8.5.21: an automation hold is temporary by nature (a person releases it): defer, never cancel
+  if (guard.reason === SEND_TIME_GUARD_REASONS.READ_FAILED || guard.reason === SEND_TIME_GUARD_REASONS.AUTOMATION_HOLD) {
     const result = await deferSendAtGuard(queue_row, guard, deps);
     return { blocked: true, compliance: guard_compliance, guard, result };
   }

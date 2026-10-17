@@ -29,13 +29,16 @@
 //      the seller's inbound: owner rule 2026-10-10, a reply to a live conversation may go at
 //      any hour). Not lawful ⇒ pull it into the session when ≥ 3 min is still possible
 //      (pull_into_session), else defer to the NEXT LAWFUL TIME: the next local open plus a
-//      seeded 2–24 min offset. Unknown recipient timezone ⇒ only the session is lawful; past
-//      the session ⇒ HOLD (recipient_timezone_unresolved).
+//      seeded 2–24 min offset. rc-8.5.21: the verdict is queue/reply-timing.js#evaluateReplyTiming
+//      (the ONE function the dispatcher and the row gate also call). Recipient zones come from
+//      recipient-local evidence (area code, mailing state) intersected with the property zone; an
+//      unknown zone uses the conservative lower-48 intersection instead of a hold.
 //   6. RECOVERY. A plan made late (restart, outage): a target already in the past ⇒ due now +
 //      a seeded 0.5–2 min (still window-checked), reason overdue_recovery.
 import crypto from 'node:crypto'
+import { evaluateReplyTiming, normalizeZones, resolveRecipientZones } from '../../queue/reply-timing.js'
 
-export const DELAY_PLANNER_VERSION = 'conv-ai.delay-planner.v1'
+export const DELAY_PLANNER_VERSION = 'conv-ai.delay-planner.v2'
 export const DELAY_BOUNDS = Object.freeze({ min_minutes: 3, max_minutes: 40 })
 
 export const DEFAULT_DELAY_POLICY = Object.freeze({
@@ -165,6 +168,14 @@ const median = (xs) => {
   return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null
 }
 
+/** The recipient zones a plan uses: the resolved evidence, else a legacy single zone, else unknown. */
+export function recipientZonesFor(a = {}) {
+  const rz = a.recipientZones
+  if (rz && normalizeZones(rz.zones).length) return { zones: normalizeZones(rz.zones), certainty: rz.certainty || 'single', recipient_local: rz.recipient_local === true }
+  if (validTimezone(a.timezone)) return { zones: [a.timezone], certainty: 'stored_only', recipient_local: false }
+  return resolveRecipientZones({})
+}
+
 /**
  * @param {object} a
  * @param {string} a.seed                 turn key + version (deterministic draw)
@@ -172,7 +183,9 @@ const median = (xs) => {
  * @param {string} a.lastInboundAt        ISO: the turn's LATEST seller inbound
  * @param {number[]} [a.sellerReplyLatenciesMinutes] the seller's observed reply latencies to our texts
  * @param {string[]} [a.recentInboundAts] the seller's inbound times (burst detection)
- * @param {string|null} [a.timezone]      recipient IANA zone
+ * @param {string|null} [a.timezone]      a single recipient IANA zone (legacy input; used when no zones evidence)
+ * @param {{ zones: string[], certainty: string, recipient_local?: boolean }|null} [a.recipientZones]  resolveRecipientZones()
+ * @param {string|null} [a.inboundId]     the turn's latest inbound id (the in-session linkage)
  * @param {number|null} [a.engagement]    0..1
  * @param {string|null} [a.stage]         S1_ownership … S5_offer
  * @param {number|null} [a.urgency]       0..1
@@ -246,30 +259,35 @@ export function planReplyDelay(a = {}) {
     reasons.push('min_spacing_after_last_outbound')
   }
 
-  // 5. the contact window
-  const tzOk = validTimezone(a.timezone)
-  const sessionEnd = inMs + Math.max(0, policy.in_session_minutes - policy.session_margin_minutes) * MIN
-  const inSession = (t) => policy.in_session_minutes > 0 && t <= sessionEnd
-  const lawful = (t) => inSession(t) || (tzOk && inLocalWindow(t, a.timezone, policy.contact_window))
-  let window = { lawful_basis: null, deferred: false, timezone_known: tzOk }
-  if (lawful(due)) {
-    window.lawful_basis = tzOk && inLocalWindow(due, a.timezone, policy.contact_window) ? 'local_hours' : 'in_session'
+  // 5. the contact window — THE shared eligibility function (queue/reply-timing.js), the same one
+  //    the R3 enqueue check and the dispatch-time row gate call, so they can never disagree
+  const zones = recipientZonesFor(a)
+  const sessionMinutes = Math.max(0, policy.in_session_minutes - policy.session_margin_minutes)
+  const judge = (t) => evaluateReplyTiming({ at: iso(t), queuedAt: iso(t), inboundId: a.inboundId || 'turn', inboundAt: iso(inMs), zones: zones.zones, sessionMinutes, hours: { start_hour: policy.contact_window.start_hour, end_hour: policy.contact_window.end_hour } })
+  const sessionEnd = inMs + sessionMinutes * MIN
+  const inSession = (t) => sessionMinutes > 0 && t <= sessionEnd
+  const zoneInfo = { certainty: zones.certainty, zones: zones.zones, recipient_local: zones.recipient_local }
+  let window = { lawful_basis: null, deferred: false, timezone_known: zones.certainty !== 'unknown', ...zoneInfo }
+  const verdict = judge(due)
+  if (verdict.lawful) {
+    window.lawful_basis = verdict.basis
   } else {
     const earliest = Math.max(inMs + DELAY_BOUNDS.min_minutes * MIN, nowMs, Number.isFinite(lastOut) ? lastOut + policy.min_spacing_minutes * MIN : 0)
-    if (policy.pull_into_session && inSession(earliest)) {
+    if (policy.pull_into_session && inSession(earliest) && judge(earliest).lawful) {
       due = earliest + Math.round(u3 * Math.max(0, sessionEnd - earliest) / 1000) * 1000
-      window = { lawful_basis: 'in_session', deferred: false, pulled_into_session: true, timezone_known: tzOk }
+      window = { ...window, lawful_basis: 'in_session', deferred: false, pulled_into_session: true }
       reasons.push('pulled_into_session_window')
-    } else if (tzOk) {
-      const open = nextLocalOpen(due, a.timezone, policy.contact_window)
-      if (open == null) return { ...base, action: 'hold', due_at: null, delay_minutes: null, reasons: [...reasons, 'contact_window_unresolvable'] }
-      due = open + Math.round((2 + 22 * u3) * 60) * 1000
-      window = { lawful_basis: 'local_hours', deferred: true, timezone_known: true }
-      reasons.push('deferred_to_contact_window')
     } else {
-      return { ...base, action: 'hold', due_at: null, delay_minutes: null, reasons: [...reasons, 'recipient_timezone_unresolved'] }
+      const open = verdict.next_permitted_at ? Date.parse(verdict.next_permitted_at) : null
+      if (open == null) return { ...base, action: 'hold', due_at: null, delay_minutes: null, reasons: [...reasons, 'contact_window_unresolvable'] }
+      // natural jitter after the open (seeded 2–24 min), re-checked against the same function
+      due = open + Math.round((2 + 22 * u3) * 60) * 1000
+      if (!judge(due).lawful) due = open
+      window = { ...window, lawful_basis: 'local_hours', deferred: true }
+      reasons.push('deferred_to_contact_window')
     }
   }
+  if (zones.certainty === 'unknown') reasons.push('recipient_timezone_unknown_conservative_window')
 
   return {
     ...base,

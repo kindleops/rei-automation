@@ -56,7 +56,7 @@ import {
 } from "@/lib/supabase/client.js";
 import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
 import { evaluateAiConversationRowGate, aiRowCancelPayload, loadNewerInboundsForRow } from "@/lib/domain/queue/ai-conversation-row-gate.js";
-import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey } from "@/lib/domain/messages/ai-generated-message.js";
+import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey, recordAiRowProviderOutcome } from "@/lib/domain/messages/ai-generated-message.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import {
@@ -1668,6 +1668,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       loadNewerInbounds: deps.loadNewerInbounds || ((r) => loadNewerInboundsForRow(getSupabase(deps), r)),
       now,
       propertyGeography: property_geography,
+      windowMinutes: conversational_reply_window_minutes,
     });
     if (ai_gate.applies && ai_gate.action !== "proceed") {
       if (ai_gate.action === "cancel") {
@@ -2713,6 +2714,11 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       }
     );
 
+    // rc-8.5.21: an AI row's immutable record learns the provider outcome (no-op for every other row)
+    if (queue_row?.metadata?.ai_message_id) {
+      try { await (deps.recordAiRowProviderOutcome || recordAiRowProviderOutcome)(getSupabase(deps), queue_row, { eventType: "provider_accepted", providerResult: send_result, detail: { queue_status: "sent" } }); } catch { /* bookkeeping only */ }
+    }
+
     /**
      * §1 — the outreach target learns what the queue just recorded.
      *
@@ -2963,6 +2969,9 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
             now,
           })
         : null;
+      if (queue_row?.metadata?.ai_message_id) {
+        try { await (deps.recordAiRowProviderOutcome || recordAiRowProviderOutcome)(getSupabase(deps), queue_row, { eventType: "provider_failed", providerResult: { ok: false, status: error?.status || null }, detail: { reason: String(error?.message || "send_failed").slice(0, 120) } }); } catch { /* bookkeeping only */ }
+      }
 
       try {
         await writeOutboundFailureMessageEvent(queue_row, error, {

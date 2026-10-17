@@ -25,6 +25,7 @@
 //   platform.health                 system-control#getSystemValue, ops/system-watchdog#collectWatchdogSnapshot+evaluateWatchdog,
 //                                   agent/runtime/handlers/ops-health-check#evaluateHealthSnapshot
 //   missions.create                 agent/runtime/job-runtime (agent.runtime_enqueue, PROPOSED R2 schema)
+//   inbox.draft_ai_reply            ai/conversation-ai-draft-service#draftReplyForInbound → runtime/canonical#decideAndCompose (read, never sends)
 
 // Static import specifiers (bundler-analysable); resolved on first use only.
 const lazy = (load, name) => async (...args) => {
@@ -96,6 +97,11 @@ export function createDomainServices({ runtimeStore = null } = {}) {
         const { runInboxAction } = await import('@/lib/cockpit/cockpit-service.js')
         return runInboxAction({ action: 'send-now', payload: { ...payload, dry_run: false } })
       },
+    }),
+    // rc-8.5.21: the canonical conversation runtime's review draft (never sends, writes nothing)
+    conversation: Object.freeze({
+      draft: lazy(() => import('@/lib/ai/conversation-ai-draft-service.js'), 'draftReplyForInbound'),
+      latestInboundId: lazy(() => import('@/lib/ai/conversation-ai-draft-service.js'), 'latestInboundIdForThread'),
     }),
     pipeline: Object.freeze({
       story: lazy(() => import('@/lib/domain/opportunity/pipeline-command-service.js'), 'getPipelineDealStory'),

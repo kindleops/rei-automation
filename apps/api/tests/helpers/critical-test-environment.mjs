@@ -157,7 +157,13 @@ before(() => {
   setNotificationIntelligenceDeps({ supabase_override: makeInertNotificationClient() })
 })
 
+// rc-8.5.21: the automation-hold port (lib/domain/holds-port) FAILS CLOSED when no registry is
+// bound. Tests that do not exercise holds get a bound "no hold" registry before every test; the
+// hold tests reset it (__resetAutomationHoldChecker) to prove the fail-closed default.
+const HOLD_CHECKER = Symbol.for('lc.automation_hold.checker')
+export const TEST_NO_HOLD_CHECKER = async () => ({ held: false, hold_type: null, reason: null, hold_id: null })
 beforeEach(() => {
+  globalThis[HOLD_CHECKER] = TEST_NO_HOLD_CHECKER
   resetCriticalProcessEnv()
   delete process.env.SUPABASE_URL
   delete process.env.SUPABASE_SERVICE_ROLE_KEY

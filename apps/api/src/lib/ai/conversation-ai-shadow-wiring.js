@@ -2,17 +2,19 @@
 // Composition root: the ONLY place a provider client, a DB client and the
 // conversation-ai engine meet. Writes go to public.conversation_ai_shadow_decisions
 // (PROPOSED table) and nowhere else.
+// rc-8.5.21: the shadow decides with the CANONICAL runtime (runtime/canonical.js#decideAndCompose
+// via runtime/canonical-shadow.js) — the exact code a canary would run. The R1 proposed_message
+// writer (engine.js) is retired.
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
 import { createAnthropicProvider } from './anthropic-provider.js'
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js'
-import { loadInboundRow, loadShadowContext } from '@/lib/domain/conversation-ai/context-loader.js'
+import { loadInboundRow } from '@/lib/domain/conversation-ai/context-loader.js'
 import { idempotencyKeyFor } from '@/lib/domain/conversation-ai/shadow-record.js'
 import { inboundVersionOf } from './conversation-ai-shadow-hook.js'
-import { dryRunEligibility, hypotheticalReplyRow } from '@/lib/domain/conversation-ai/eligibility-bridge.js'
 import { createConversationModelClient } from '@/lib/domain/conversation-ai/model-client.js'
 import { normalizePolicy, shadowAllowed } from '@/lib/domain/conversation-ai/policy.js'
-import { runConversationAiShadow } from '@/lib/domain/conversation-ai/engine.js'
-import { createSemanticCheck } from '@/lib/domain/conversation-ai/semantic-check.js'
+import { runCanonicalShadow } from '@/lib/domain/conversation-ai/runtime/canonical-shadow.js'
+import { composeSpendFor, loadCanonicalInputs } from './conversation-canonical-inputs.js'
 import { HOLD_CAPABILITIES, resolveAutomationHold } from '@/lib/domain/holds/automation-hold.js'
 
 export const SHADOW_TABLE = 'conversation_ai_shadow_decisions'
@@ -87,13 +89,13 @@ export async function runConversationAiShadowForInbound({ providerMessageSid, in
     const same = !inboundVersion || !existing.inbound_version || existing.inbound_version === inboundVersion
     return { ran: false, code: same ? 'DUPLICATE_INBOUND' : 'PRIOR_VERSION_RECORDED', record: existing }
   }
-  const loaded = await loadShadowContext({ supabase, providerMessageSid, inbound })
-  if (!loaded) return { ran: false, code: 'INBOUND_NOT_FOUND' }
+  const ci = await loadCanonicalInputs({ supabase, providerMessageSid, inbound })
+  if (!ci) return { ran: false, code: 'INBOUND_NOT_FOUND' }
+  const loaded = ci.loaded
   // RC 8.5.15 (eval #128 drafted "Hi Internal..."): internal / test numbers are
   // never decided -- no model call, no record.
   if (isInternalTestPhone(loaded.row.from_phone_number) || isInternalTestPhone(loaded.row.to_phone_number)) return { ran: false, code: 'INTERNAL_TEST_THREAD' }
   const modelClient = tracker ? createConversationModelClient({ provider: provider || createAnthropicProvider({ env }), tracker, env, remainingMs, signal }) : null
-  const row = hypotheticalReplyRow({ sellerPhone: loaded.row.from_phone_number, ourPhone: loaded.row.to_phone_number, threadKey: loaded.row.thread_key, propertyId: loaded.row.property_id, prospectId: loaded.row.prospect_id, inboundId: loaded.row.id, inboundAt: loaded.input.inbound.at, now: loaded.input.now })
   // AUTOMATION HOLD (P0 2026-10-16): a held thread's shadow decision is still
   // RECORDED (evidence), never acted on. R1/R2 has no act path at all; the
   // verdict is returned so any future executor must read it, and every send
@@ -102,16 +104,20 @@ export async function runConversationAiShadowForInbound({ providerMessageSid, in
     { thread_key: loaded.row.thread_key, property_id: loaded.row.property_id },
     { capability: HOLD_CAPABILITIES.AI_ACTION, supabase }
   )
-  const shadow = await runConversationAiShadow({
+  // rc-8.5.21 integration: the canonical shadow runtime (8.5.21-a) is the writer; the hold verdict
+  // (rc-8.5.20-holds) still annotates its result exactly as before.
+  const shadow = await runCanonicalShadow({
     input: loaded.input,
     deterministic,
-    eligibilityFor: ({ now }) => dryRunEligibility({ row, supabase, timezone: loaded.timezone, geography: loaded.geography, now }),
+    eligibilityFor: ({ now }) => ci.eligibilityFor({ now }),
     modelClient,
+    spend: composeSpendFor(tracker),
     policy,
     env,
     store,
-    semanticCheck: modelClient ? createSemanticCheck(modelClient) : null,
     inboundVersion: version,
+    establishedPersona: ci.continuity.ok ? ci.continuity.persona_name : null,
+    companyIdentity: ci.companyIdentity,
   })
   return automation_hold.held
     ? { ...shadow, act_allowed: false, automation_hold: { hold_ids: automation_hold.hold_ids, fail_closed: automation_hold.fail_closed === true } }

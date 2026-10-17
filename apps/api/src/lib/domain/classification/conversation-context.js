@@ -300,6 +300,7 @@ const EXPLICIT_DISOWN_RE =
   /^(?:wrong number|wrong house|wrong property|not mine|not my house|never owned(?: it)?|do not own it|sold it|i sold it|already sold|sold already)$/u;
 // round 9: "No I never did sorry" to "Are you still the owner?" -- they never
 // owned it: a non-owner, closed (owner rule). "Sold 💯" -- a former owner.
+export const NEVER_OWNED_LONG_RE = /^(?:no+[\s,.!]*)?(?:i\s+)?(?:have\s+)?never\s+(?:have|did|owned(?:\s+(?:it|that|this|that\s+(?:house|property|home|place)|the\s+(?:house|property|home|place)))?|have\s+owned(?:\s+(?:it|that|this))?)(?:\s+(?:sorry|lol|bro|sir|ma'?am))?[\s.!]*$/iu;
 const NEVER_OWNED_RE = /^(?:no i never did|i never did|never did|no never|no i never owned it|no i never have|never have)$/u;
 const BARE_SOLD_RE = /^(?:sold|it is sold|it sold)$/u;
 
@@ -402,6 +403,24 @@ function ownershipUnverifiedResult(messageText, validated, rule_id) {
   };
 }
 
+
+// rc-8.5.21: engaged replies to the proposal question, and a greeting in front of a short answer
+const LISTENING_RE = /^(?:(?:ok(?:ay)?|sure|yes|yeah|go\s+ahead)[\s,.!]+)?(?:i'?m\s+(?:listening|all\s+ears)|im\s+(?:listening|all\s+ears)|listening|all\s+ears|go\s+ahead|tell\s+me\s+more|let'?s\s+hear\s+it|i'?m\s+open|im\s+open|open\s+to\s+it)[\s.!?]*$/iu;
+const AMOUNT_QUESTION_RE = /^(?:(?:ok(?:ay)?|sure|yes|yeah|maybe|well)[\s,.!]+)?(?:what\s+(?:amount|number|figure|price|offer)(?:\s+(?:are\s+you|r\s+u|would\s+you|you)\s+(?:thinking|offering|willing\s+to\s+pay))?|what'?s\s+(?:the|your)\s+(?:amount|number|figure|offer)|what\s+(?:are|r)\s+(?:you|u)\s+(?:offering|thinking)|how\s+much\s+(?:are\s+you|r\s+u|would\s+you)\s+(?:offering|thinking|pay|give))[\s.!?]*$/iu;
+const GREETING_PREFIX_RE = /^\s*(?:hi|hey|hello|hiya|howdy|good\s+(?:morning|afternoon|evening)|hola|buenos\s+d[ií]as|buenas(?:\s+tardes)?)\b[\s,.!-]*/iu;
+export function stripGreetingPrefix(text, names = []) {
+  let t = String(text ?? '').trim();
+  if (!GREETING_PREFIX_RE.test(t)) return t;
+  t = t.replace(GREETING_PREFIX_RE, '');
+  for (const n of names) {
+    const first = String(n || '').trim().split(/\s+/)[0];
+    if (first && first.length >= 2) t = t.replace(new RegExp(`^${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b[\\s,.!-]*`, 'iu'), '');
+  }
+  // any single capitalised token right after the greeting is an addressee ("Hi Jake. Yes")
+  t = t.replace(/^(?!(?:Yes|Yeah|Yep|Yup|No|Nope|Nah|Not|Never|Sure|Si|Correct|Ok|Okay|I|Im|It|Its|That|This|We|Maybe)\b)[A-Z][a-z]{1,15}\b[\s,.!-]+(?=\S)/u, '');
+  return t.trim();
+}
+
 export function isShortContextualReply(text) {
   const t = normalizeShortReply(text);
   if (!t || t.length > 48) return false;
@@ -432,10 +451,15 @@ export function applyContextualShortReply(messageText, validated) {
       const bare = matchBareNegative(messageText, {
         names: [validated.context.last_outbound_agent, validated.context.last_outbound_addressee].filter(Boolean),
       });
-      // A thumbs-down / emoji carries sentiment ("No 👎"): a decline, not a denial.
-      const polite = Boolean(bare && (POLITE_DECLINE_TAIL_RE.test(bare.canonical) || EMOJI_SENTIMENT_RE.test(String(messageText))));
+      // A polite tail ("No thanks", "No gracias Carlos!") answers a sales approach: the 30-day
+      // decline (RC 8.5.15; the 2026-10-16 investigation counts "No thank you" as disinterest).
+      const polite = Boolean(bare && POLITE_DECLINE_TAIL_RE.test(bare.canonical));
+      // rc-8.5.21 (owner P0 2026-10-16, investigator spec d): a bare negative to OUR ownership
+      // question — with or without an emoji ("No 👎" is in the 103-thread denial cohort) — is the
+      // PROPERTY-SCOPED ownership denial; not_interested only after S2 or later.
+      const emoji = Boolean(bare && EMOJI_SENTIMENT_RE.test(String(messageText)));
       if (bare && mode === 'ownership_unverified' && !polite) {
-        return ownershipUnverifiedResult(messageText, validated, 'ctx_bare_no_after_ownership_check_ownership_unverified');
+        return ownershipUnverifiedResult(messageText, validated, emoji ? 'ctx_emoji_no_after_ownership_check_ownership_unverified' : 'ctx_bare_no_after_ownership_check_ownership_unverified');
       }
       // "Nope should be the city of Jennings" (eval #131): a "No" that names
       // someone else as the owner. A phone number in it is a referral -- not here.
@@ -525,6 +549,42 @@ export function applyContextualShortReply(messageText, validated) {
         context_use_case: uc,
         context_age_ms: validated.context.context_age_ms,
       };
+    }
+  }
+  // rc-8.5.21 (opportunity desk 2026-10-16): engaged replies to OUR interest question were tagged
+  // `unclear` ("I'm listening", "What amount ?"): read against the question they answer.
+  {
+    const uc = validated.context.last_outbound_use_case;
+    const qt = validated.context.last_outbound_question_type;
+    if (uc === 'proposal_interest' || uc === 'proposal_request' || qt === 'proposal_interest') {
+      const body = String(messageText).trim()
+      const ctxBase = { evidence_span: body, context_message_id: validated.context.last_outbound_message_id, context_use_case: uc, context_age_ms: validated.context.context_age_ms }
+      if (AMOUNT_QUESTION_RE.test(body)) {
+        return { applied: true, primary_intent: 'asks_offer', labels: ['asks_offer', 'amount_question_after_proposal_interest'], rule_id: 'ctx_amount_question_after_proposal_interest', confidence: 0.86, rationale: 'seller_asks_our_number_in_answer_to_the_proposal_question', ...ctxBase }
+      }
+      if (LISTENING_RE.test(body)) {
+        return { applied: true, primary_intent: 'interested', labels: ['interested', 'listening_after_proposal_interest'], rule_id: 'ctx_listening_after_proposal_interest', confidence: 0.86, rationale: 'seller_invites_the_proposal_in_answer_to_the_proposal_question', ...ctxBase }
+      }
+    }
+  }
+  // rc-8.5.21: "No never have" / "never owned it" / "I have never owned that" to OUR ownership
+  // question: never owned — the property-scoped denial (never `unclear`, never a phone suppression)
+  {
+    const uc = validated.context.last_outbound_use_case;
+    const qt = validated.context.last_outbound_question_type;
+    if ((uc === 'ownership_check' || qt === 'ownership') && NEVER_OWNED_LONG_RE.test(String(messageText).trim())) {
+      const r = ownershipUnverifiedResult(messageText, validated, 'ctx_never_owned_after_ownership_check');
+      return { ...r, labels: [...r.labels, 'never_owned'], confidence: 0.9 };
+    }
+  }
+  // rc-8.5.21: a greeting / our persona's name in front of a short answer ("Hi Jake. Yes",
+  // "Hello, no") answers the same question as the bare answer: strip it and read the rest.
+  {
+    const names = [validated.context.last_outbound_agent, validated.context.last_outbound_addressee].filter(Boolean)
+    const stripped = stripGreetingPrefix(messageText, names)
+    if (stripped && stripped !== String(messageText).trim()) {
+      const r = applyContextualShortReply(stripped, validated)
+      if (r?.applied) return { ...r, rule_id: `${r.rule_id}_after_greeting`, evidence_span: String(messageText).trim() }
     }
   }
   if (!isShortContextualReply(messageText)) {

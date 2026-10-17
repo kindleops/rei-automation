@@ -152,6 +152,17 @@ test("S1 polite declines ('No thanks', 'No gracias Carlos!') answer a sales appr
   }
 });
 
+test("rc-8.5.21 (owner P0 2026-10-16): an emoji negative ('No 👎', 'Nope 🙅') to the OWNERSHIP question is the property-scoped denial (the 103-thread cohort), no nurture; to S2 it stays the decline", async () => {
+  for (const [message, q] of [["No 👎", "s1_yours"], ["Nope 🙅", "s1_still_own"]]) {
+    const r = await replay(message, q);
+    assert.equal(r.classification.primary_intent, "property_specific_non_owner", message);
+    assert.ok(r.classification.matched_rule_ids.includes("ctx_emoji_no_after_ownership_check_ownership_unverified"), r.classification.matched_rule_ids.join(","));
+    assertNoFollowupDecline(r, "s1_ownership_denied_unverified_no_followup");
+  }
+  const s2 = await replay("No 👎", "s2");
+  assert.equal(s2.classification.primary_intent, "not_interested");
+});
+
 test("written ownership denials are the property-scoped denial, never wrong_number + suppression; explicit wrong number / sold keep their lanes", async () => {
   for (const message of ["not mine", "I don't own it", "Never owned it", "Not my house", "No soy el dueño"]) {
     const r = await replay(message, "s1_still_own");

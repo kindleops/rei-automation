@@ -5,18 +5,25 @@
 // The output is never trusted: playbook style + ledger + objective checks, one regeneration
 // with the reasons, then HOLD. Nothing here sends; the model never sees a transport.
 // rc-8.5.20: playbook v2 (owner persona rule: the thread's established persona, no invented
-// backstory / credentials, never deny automation); v1 stays intact for its own records
-import { COMPOSE_PROMPT_VERSION, PLAYBOOK_RULES, PLAYBOOK_VERSION } from '../playbook/v2/index.js'
-import { validatePlaybookStyle, sentenceCount } from '../playbook/v2/style-validator.js'
+// backstory / credentials, never deny automation); v1 stays intact for its own records.
+// rc-8.5.21: playbook v3 (configured company identity only; no inspected / funds / sent-email /
+// unverified-website / no-contact claims). Every attempt is judged by the SHARED outbound
+// validator (outbound-validator.js) — the same function the decision and R3 re-validation use.
+import { COMPOSE_PROMPT_VERSION, PLAYBOOK_RULES, PLAYBOOK_VERSION } from '../playbook/v3/index.js'
 import { detectSellerTone } from '../playbook/v1/tone.js'
-import { validateProposedMessage } from '../fact-ledger.js'
-import { questionKindOf } from '../questions.js'
 import { maskText } from '../pii.js'
+import { validateOutbound } from '../outbound-validator.js'
+import { NO_COMPANY_IDENTITY } from '../company-identity.js'
 import { checkSpend, measureComplexity } from './complexity.js'
 
 export const COMPOSE_SCHEMA = Object.freeze({
   type: 'object', additionalProperties: false, required: ['message'],
   properties: { message: { type: 'string', maxLength: 320 } },
+})
+
+const CATEGORY_TEXT = Object.freeze({
+  conditional_interest_clarify: 'They said they will not do creative financing (or similar terms). Say plainly that this would be a straightforward purchase with no creative financing. Do not mention cash, funds, speed or any amount.',
+  identity_answer: 'They asked who we are. Answer truthfully and briefly from PERSONA and COMPANY only.',
 })
 
 const OBJECTIVE_TEXT = Object.freeze({
@@ -50,7 +57,7 @@ export function openingHintFor(seed) {
   return OPENING_HINTS[h % OPENING_HINTS.length]
 }
 
-export function buildComposePrompt({ ledger, inboundText, category, objective, tone, maskOpts = {}, messages = [], followupScheduled = null, avoidOpening = null, establishedPersona = null }) {
+export function buildComposePrompt({ ledger, inboundText, category, objective, tone, maskOpts = {}, messages = [], followupScheduled = null, avoidOpening = null, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY }) {
   const system = [
     'You write ONE outbound SMS reply for a local home buyer texting a property owner. Call the tool exactly once with {"message": "..."}.',
     'RULES (code enforces every one; a violation is discarded):',
@@ -61,12 +68,14 @@ export function buildComposePrompt({ ledger, inboundText, category, objective, t
     `SELLER'S LATEST MESSAGE: ${maskText(inboundText, maskOpts)}`,
     `SELLER REGISTER: ${tone}`,
     `PERSONA: ${establishedPersona ? `${establishedPersona} (the name this seller already knows; use it only if a name is needed)` : 'none on record: give no name'}`,
+    `COMPANY: ${companyIdentity?.configured ? `${companyIdentity.name}${companyIdentity.website ? ` (website ${companyIdentity.website})` : ' (no website: never give one)'}` : 'none: name no company, give no website, never say you are or are not with a company'}`,
     'RECENT THREAD (oldest first):',
     ...messages.slice(-6).map((m) => `${m.from}: ${maskText(m.text, maskOpts)}`),
     'FACTS ALREADY KNOWN (never ask for these again; inferred is not confirmed):',
     ...(factLines(ledger).length ? factLines(ledger) : ['- none']),
     `QUESTIONS SO FAR: ${asked.join('; ') || 'none'}`,
     `REPLY TYPE: ${category}. OBJECTIVE: ${OBJECTIVE_TEXT[objective] || OBJECTIVE_TEXT.none}.`,
+    ...(CATEGORY_TEXT[category] ? [CATEGORY_TEXT[category]] : []),
     'First acknowledge what they said in plain words. At most one question, and only for the objective (one thing per question, never "X, and Y?"). Keep it to 1 or 2 sentences. Never invent a next step such as a visit or viewing.',
     ...(followupScheduled ? [`FOLLOW-UP: a check-in is scheduled in about ${followupScheduled.days || 30} days. You do not have to mention it (usually don't), but NEVER promise to stop contacting them ("won't bother you again", "leave you be", "take you off our list", "won't reach out again" are all false).`] : []),
     'Never claim anything about our inventory, other properties, buyers or plans.',
@@ -77,58 +86,16 @@ export function buildComposePrompt({ ledger, inboundText, category, objective, t
   return { system, user, prompt_version: COMPOSE_PROMPT_VERSION }
 }
 
-// a promise of no further contact is false whenever a follow-up is scheduled (disinterest = 30-day follow-up)
-const FALSE_NO_CONTACT_RE = /\b(?:(?:won'?t|wont|will\s+not|never|not\s+going\s+to)\s+(?:bother|contact|text|message|call|trouble|reach\s+out(?:\s+to)?|be\s+(?:bothering|contacting|texting|reaching\s+out))(?:\s+you)?(?:\s+(?:again|anymore|any\s+more|further))?|leave\s+you\s+(?:be|alone)|leave\s+it\s+(?:alone|there)|take\s+you\s+off\s+(?:our|my|the)\s+list|(?:remove|removing)\s+(?:you|your\s+number)|last\s+(?:time|message|text)\s+(?:you'?ll|we|i)|won'?t\s+(?:take|waste)\s+(?:up\s+)?(?:any\s+)?more\s+of\s+your\s+time|won'?t\s+hear\s+from\s+(?:us|me)\s+again|close\s+(?:this|it)\s+out|close\s+the\s+loop|done\s+(?:reaching|texting)\s+out|leave\s+it\s+(?:with|to)\s+(?:them|your\s+(?:agent|realtor)|the\s+(?:agent|realtor))|won'?t\s+(?:push|pursue|follow\s+up))\b/i
-// "since you're confident you own it" after "I don't know": an attribution must be a STATED fact
-const ATTRIBUTION_RE = /\b(?:since\s+you(?:'re|\s+are|'ve|\s+have)?|you\s+(?:said|mentioned|told\s+(?:me|us)|confirmed|noted|indicated)|as\s+you\s+(?:said|mentioned|noted)|you(?:'re|\s+are)\s+(?:confident|sure|certain))\b([^.?!,;]{0,80})/i
-const ATTRIBUTION_TOPICS = [
-  ['ownership', /\b(?:own|owner|yours|title)\b/i, (v) => ['confirmed', 'representative'].includes(v)],
-  ['asking_price', /\b(?:price|number|asking|\$|[0-9]+k)\b/i, (v) => v != null],
-  ['condition', /\b(?:repair|roof|condition|work|fix|hvac|foundation|update)\w*/i, (v) => v != null],
-  ['timeline', /\b(?:close|closing|timeline|move|soon|month|week|november|december|spring|summer|fall|winter)\b/i, (v) => v != null],
-  ['seller_interest', /\b(?:sell|selling|interested|open\s+to)\b/i, (v) => v != null],
-]
-export function unsupportedAttribution(text, ledger) {
-  const m = ATTRIBUTION_RE.exec(String(text || ''))
-  if (!m) return null
-  const clause = `${m[0]}`
-  const topics = ATTRIBUTION_TOPICS.filter(([, re]) => re.test(clause))
-  if (!topics.length) return 'unsupported_attribution'
-  for (const [key, , ok] of topics) {
-    const f = ledger?.facts?.[key]
-    if (!f || f.basis === 'inferred' || !ok(f.value)) return `unsupported_attribution:${key}`
-  }
-  return null
-}
+export { unsupportedAttribution, closeAndAttributionReasons } from '../outbound-validator.js'
 
-/** The send-side subset (R3 re-checks it on the final text): false no-contact promise, close length, attribution. */
-export function closeAndAttributionReasons(text, { ledger, category, followupScheduled = null }) {
-  const r = []
-  if ((followupScheduled || category === 'not_interested_close') && FALSE_NO_CONTACT_RE.test(text)) r.push('close:false_no_contact_promise_with_followup_scheduled')
-  if (category === 'not_interested_close' && sentenceCount(text) > 2) r.push('close:more_than_two_sentences')
-  const attr = unsupportedAttribution(text, ledger)
-  if (attr) r.push(`ledger:${attr}`)
-  return r
-}
 
-const openingOf = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').trim().split(/\s+/).slice(0, 3).join(' ')
-
-/** Every check a composed draft must pass (pure). */
-export function checkComposedText(text, { ledger, objective, category, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null, previousOutbound = null }) {
-  const reasons = [...validatePlaybookStyle(text, { personaPolicy, establishedPersona }).reasons]
-  if ((followupScheduled || category === 'not_interested_close') && FALSE_NO_CONTACT_RE.test(text)) reasons.push('close:false_no_contact_promise_with_followup_scheduled')
-  if (category === 'not_interested_close' && sentenceCount(text) > 2) reasons.push('close:more_than_two_sentences')
-  const attr = unsupportedAttribution(text, ledger)
-  if (attr) reasons.push(`ledger:${attr}`)
-  if (previousOutbound && openingOf(previousOutbound) && openingOf(previousOutbound) === openingOf(text)) reasons.push('style:repeated_opening')
-  const qn = (String(text).match(/\?/g) || []).length
-  if (qn) {
-    for (const r of validateProposedMessage(ledger, { text, inboundIntent }).reasons) reasons.push(`ledger:${r}`)
-    const kind = questionKindOf({ body: text })
-    if (objective && ['ownership', 'interest', 'asking_price', 'condition'].includes(objective) && kind !== objective) reasons.push(`off_objective:${kind}`)
-    if (['close_no_question', 'none'].includes(objective) || category === 'not_interested_close') reasons.push('question_not_allowed_for_objective')
-  }
-  return [...new Set(reasons)]
+/**
+ * Every CONTENT check a composed draft must pass: the shared outbound validator
+ * (outbound-validator.js#validateOutbound), the one function every caller uses. Pure.
+ * @returns {string[]} reasons (empty = passes)
+ */
+export function checkComposedText(text, { ledger, objective, category, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null, previousOutbound = null, companyIdentity = NO_COMPANY_IDENTITY, knownNumbers = null, firstName = null, otherNames = [] }) {
+  return validateOutbound(text, { ledger, objective, category, inboundIntent, personaPolicy, establishedPersona, followupScheduled, previousOutbound, companyIdentity, knownNumbers: knownNumbers ?? [], firstName, otherNames }).content_reasons
 }
 
 /**
@@ -136,7 +103,8 @@ export function checkComposedText(text, { ledger, objective, category, inboundIn
  * @param {{ decide: Function }} a.modelClient   createConversationModelClient()
  * @param {{ spentTodayUsd: () => number, perMessageMaxUsd: number, dailyMaxUsd: number, estimateUsd: (route: string) => number }} a.spend
  */
-export async function composeReply({ ledger, inboundText, category, objective, modelClient, spend, messages = [], maskOpts = {}, threadLength = 0, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null }) {
+export async function composeReply({ ledger, inboundText, category, objective, modelClient, spend, messages = [], maskOpts = {}, threadLength = 0, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null, companyIdentity = NO_COMPANY_IDENTITY, firstName = null, otherNames = [] }) {
+  const knownNumbers = [...new Set(messages.flatMap((m) => String(m.text || '').match(/[0-9]{3,}/g) || []))]
   const previousOutbound = [...messages].reverse().find((x) => x.from === 'us')?.text || null
   if (!modelClient?.decide) return { ok: false, reason: 'model_unavailable', attempts: [] }
   const { tone, abusive } = detectSellerTone(inboundText)
@@ -148,7 +116,7 @@ export async function composeReply({ ledger, inboundText, category, objective, m
     const est = spend?.estimateUsd ? spend.estimateUsd(route) : null
     const cap = checkSpend({ estimateUsd: est, spentTodayUsd: spend?.spentTodayUsd ? spend.spentTodayUsd() : null, perMessageMaxUsd: spend?.perMessageMaxUsd, dailyMaxUsd: spend?.dailyMaxUsd })
     if (!cap.allowed) return { ok: false, reason: cap.reason, attempts, complexity }
-    const p = buildComposePrompt({ ledger, inboundText, category, objective, tone: abusive ? 'frustrated (do not mirror any insult)' : tone, maskOpts, messages, followupScheduled, establishedPersona, avoidOpening: previousOutbound ? maskText(previousOutbound, maskOpts).split(/\s+/).slice(0, 3).join(' ') : null })
+    const p = buildComposePrompt({ ledger, inboundText, category, objective, tone: abusive ? 'frustrated (do not mirror any insult)' : tone, maskOpts, messages, followupScheduled, establishedPersona, companyIdentity, avoidOpening: previousOutbound ? maskText(previousOutbound, maskOpts).split(/\s+/).slice(0, 3).join(' ') : null })
     const user = feedback ? `${p.user}\nYOUR PREVIOUS DRAFT WAS REJECTED FOR: ${feedback.join(', ')}. Write a new one that fixes every point.` : p.user
     let r
     try {
@@ -159,7 +127,7 @@ export async function composeReply({ ledger, inboundText, category, objective, m
       return { ok: false, reason: err?.code || 'model_call_failed', attempts, complexity }
     }
     const text = typeof r?.input?.message === 'string' ? r.input.message.replace(/\s+/g, ' ').trim() : ''
-    const reasons = text ? checkComposedText(text, { ledger, objective, category, inboundIntent, personaPolicy, establishedPersona, followupScheduled, previousOutbound }) : ['empty_composition']
+    const reasons = text ? checkComposedText(text, { ledger, objective, category, inboundIntent, personaPolicy, establishedPersona, followupScheduled, previousOutbound, companyIdentity, knownNumbers, firstName, otherNames }) : ['empty_composition']
     attempts.push({ route, model: r?.model || null, usd: r?.usd ?? null, usage: r?.usage || null, reasons })
     if (!reasons.length) {
       const usd = attempts.reduce((s, a) => s + (Number(a.usd) || 0), 0)

@@ -26,10 +26,12 @@ export const AI_SEND_POLICY_KEY = 'ai_conversation_send_policy'
 export const AI_CONVERSATION_SOURCE = 'ai_conversation'
 export const INBOUND_REPLY_RESERVATION_SCOPE = 'inbound_reply'
 
-// The R3 executor is BUILT but NOT WIRED to any runtime in 8.5.16. While this is
-// false the template engine never defers (it cannot hand an inbound to an executor
-// that nothing calls), whatever the switch or the policy say.
-export const R3_EXECUTOR_WIRED = false
+// rc-8.5.21 (Phase 6): the R3 executor is WIRED — the conversation.turn job dispatches a
+// send-ready canonical reply through it (ai/conversation-turn-wiring.js). It remains OFF behind
+// the existing switches: the kill switch (absent ⇒ off), the AI send policy (absent ⇒ disabled,
+// empty scope ⇒ nothing in scope), the env gates of the runtime kinds, and the DB arming. With
+// the switch absent the template engine runs exactly as today (coexistence: ai_send_switch_off).
+export const R3_EXECUTOR_WIRED = true
 
 // owner limits (8.5.15 spec): a policy row can tighten them, never loosen them
 export const AI_SEND_HARD_LIMITS = Object.freeze({ max_per_day_global: 25, max_per_seller_per_day: 1 })
@@ -50,6 +52,10 @@ export { STOP_REQUEST_RE, isStopRequest } from './stop-request.js'
 import { isStopRequest } from './stop-request.js'
 
 export const ROUTINE_CATEGORIES = Object.freeze(['next_missing_fact', 'identity_answer', 'not_interested_close', 'no_response'])
+// rc-8.5.21: categories the canonical writer can produce that a policy must list EXPLICITLY (they
+// are never part of the default category set)
+export const OPT_IN_CATEGORIES = Object.freeze(['conditional_interest_clarify', 'clarification'])
+const ALLOWED_POLICY_CATEGORIES = [...ROUTINE_CATEGORIES, ...OPT_IN_CATEGORIES]
 
 export const DEFAULT_AI_SEND_POLICY = Object.freeze({
   policy_version: AI_SEND_POLICY_VERSION,
@@ -93,7 +99,7 @@ export function normalizeSendPolicy(raw = null) {
     scope: Object.freeze({ thread_keys: arr(scope.thread_keys), market_ids: arr(scope.market_ids), campaign_ids: arr(scope.campaign_ids) }),
     // Spanish (and every other language) is excluded in 8.5.16 whatever the row says
     languages: Object.freeze(['en']),
-    categories: Object.freeze(arr(row.categories).filter((c) => ROUTINE_CATEGORIES.includes(c)).length ? arr(row.categories).filter((c) => ROUTINE_CATEGORIES.includes(c)) : ROUTINE_CATEGORIES),
+    categories: Object.freeze(arr(row.categories).filter((c) => ALLOWED_POLICY_CATEGORIES.includes(c)).length ? arr(row.categories).filter((c) => ALLOWED_POLICY_CATEGORIES.includes(c)) : ROUTINE_CATEGORIES),
     limits: Object.freeze({
       max_per_day_global: clampInt(limits.max_per_day_global ?? AI_SEND_HARD_LIMITS.max_per_day_global, AI_SEND_HARD_LIMITS.max_per_day_global),
       max_per_seller_per_day: clampInt(limits.max_per_seller_per_day ?? AI_SEND_HARD_LIMITS.max_per_seller_per_day, AI_SEND_HARD_LIMITS.max_per_seller_per_day),

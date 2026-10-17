@@ -16,8 +16,9 @@ import { matchMultilingualOptOut } from '../classification/multilingual-opt-out.
 import { classifyStopScope, STOP_SCOPE } from '../classification/stop-scope.js'
 import { bareNoAnswer } from './answers.js'
 import { makeDecision } from './contract.js'
+import { ABSOLUTE_SUPPRESSION_REASONS } from './ownership-evidence.js'
 
-export const PRECHECK_VERSION = 'conv-ai.precheck.v2'
+export const PRECHECK_VERSION = 'conv-ai.precheck.v3'
 
 const BARE_STOP_RE = /^\s*(?:stop|stopall|stop\s*all|unsubscribe|cancel|end|quit|remove\s+me|opt\s*out|parar|alto|basta)\s*[.!]*\s*$/i
 // classifyStopScope only judges the SCOPE of a stop; it is not a stop detector
@@ -65,7 +66,17 @@ export function deterministicPrecheck({ text, inboundId, deterministic = null, e
   if (signals.compliance_flag === 'stop_texting' && !otherAction) return suppress('classifier_stop_texting')
   if (SUPPRESS_INTENTS.has(String(signals.deterministic_intent)) && !otherAction) return suppress(`classifier_${signals.deterministic_intent}`)
   if (signals.legal) return suppress('legal_language', 'hostile_or_legal')
-  if (eligibility?.blocked) return suppress(`eligibility:${(eligibility.reasons || ['blocked'])[0]}`, 'unclear')
+  // rc-8.5.21 (Phase 3B, eval #41): only a VALID suppression state suppresses. A stored not-owner
+  // label (prior_reply_not_owner) or an unreadable guard is resolved against the thread's own
+  // evidence (ownership-evidence.js) — never a global SUPPRESS, never a cancel of pending sends.
+  if (eligibility?.blocked) {
+    const r = String(eligibility.guard?.reason || (eligibility.reasons || ['blocked'])[0])
+    if (ABSOLUTE_SUPPRESSION_REASONS.has(r)) return suppress(`eligibility:${r}`, 'unclear')
+    if (r === 'wrong_number') {
+      return { decided: true, reason: 'eligibility:wrong_number', signals, decision: makeDecision({ intent: 'wrong_number', seller_interest: 'unknown', outcome: 'UPDATE_ONLY', next_objective: 'none', response_needed: false, confidence: 1, source_message_ids: src, stage_evidence: { stage: 'closed', evidence_message_ids: src, rationale: 'deterministic pre-check: wrong number on record (no owner outreach)' } }) }
+    }
+    return { decided: true, reason: `eligibility:${r}`, signals, decision: makeDecision({ outcome: 'NEEDS_REVIEW', confidence: 1, source_message_ids: src, stage_evidence: { stage: 'unknown', evidence_message_ids: src, rationale: `deterministic pre-check: eligibility ${r} is resolved by ownership evidence, not by the model` } }) }
+  }
   if (NO_RESPONSE_INTENTS.has(String(signals.deterministic_intent))) {
     return {
       decided: true, reason: 'hostile_no_reply', signals,

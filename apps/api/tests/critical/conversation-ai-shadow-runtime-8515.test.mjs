@@ -127,15 +127,19 @@ test('context retrieval: bounded (≤ 40 events of a 500-message thread, ≤ 60 
 // ── 3. spend: $0.01 per routine reply; hold (NEEDS_REVIEW) when it does not fit ──
 test('spend: a routine reply (Haiku decision + semantic check) fits the $0.01 job reserve; the Sonnet escalation does not ⇒ not attempted, recorded NEEDS_REVIEW hold, no draft', async () => {
   // routine
-  const t = threadTables()
+  // rc-8.5.21: the canonical runtime — R1 understanding (input stage) + ONE playbook-v3 composition
+  const t = threadTables({ body: 'Yes I would consider selling it' })
+  for (const e of t.message_events) if (e.id === 'in-1') e.detected_intent = 'seller_interested'
   const ctx = jobCtx()
-  const provider = fakeProvider((p) => (p.max_tokens === 200 ? semanticOk : routineDecision()))
+  const provider = fakeProvider((p) => (p.tools[0].input_schema?.properties?.message ? { message: 'Good to hear. What price did you have in mind for it?' } : routineDecision()))
   const r = await runConversationAiShadowForInbound({ providerMessageSid: SID, env: ON, supabase: fakeSupabase(t, { shadowStoreRows: new Map() }), provider, tracker: runtimeJobTracker(ctx), remainingMs: ctx.remainingMs, signal: ctx.signal })
-  assert.equal(r.record.decision.outcome, 'REPLY_CANDIDATE')
+  assert.equal(r.record.decision.outcome, 'REPLY_CANDIDATE', JSON.stringify(r.record.decision.terminal))
+  assert.equal(r.record.draft.text, 'Good to hear. What price did you have in mind for it?')
   const reserves = ctx.ledger.filter((x) => x.op === 'reserve')
-  assert.equal(reserves.length, 2, 'decision + semantic check')
+  assert.equal(reserves.length, 2, 'understanding + composition')
   assert.ok(reserves.every((x) => x.usd > 0 && x.usd <= ROUTINE_REPLY_RESERVE_USD), JSON.stringify(reserves))
   assert.ok(reserves[0].usd + reserves[1].usd <= ROUTINE_REPLY_RESERVE_USD, 'both worst cases together fit $0.01')
+  // the offer request ("What would you offer me for it?") is human-bound: no composition at all
 
   // human-bound (8.5.16 + 8.5.15, merged in 8.5.20): a Haiku reply candidate that flags
   // complex_negotiation goes to a human — Sonnet is not consulted, no draft, one reservation

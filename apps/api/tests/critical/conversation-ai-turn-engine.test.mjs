@@ -95,9 +95,13 @@ test('planner window: night inbound stays in session (owner rule 10-10); outside
     const ok = inLocalWindow(due, TZ, { start_hour: 8, end_hour: 21 }) || due - Date.parse(evening) <= 28 * MIN
     assert.ok(ok && p.since_inbound_minutes >= 3, JSON.stringify(p))
   }
-  // unknown recipient zone: only the session is lawful; past it ⇒ hold
+  // rc-8.5.21: unknown recipient zone ⇒ the CONSERVATIVE window (lower-48 intersection, ≈ 11:00–21:00
+  // Eastern), never a guess and never a blanket hold
   assert.equal(plan({ timezone: null }).action, 'schedule')
-  assert.deepEqual(plan({ timezone: null, policy: { in_session_minutes: 0 } }).reasons, ['recipient_timezone_unresolved'])
+  const unk = plan({ timezone: null, now: night, lastInboundAt: night, policy: { in_session_minutes: 0 } })
+  assert.equal(unk.action, 'schedule')
+  assert.ok(unk.reasons.includes('recipient_timezone_unknown_conservative_window') && unk.reasons.includes('deferred_to_contact_window'), JSON.stringify(unk.reasons))
+  for (const z of ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles']) assert.ok(inLocalWindow(Date.parse(unk.due_at), z, { start_hour: 8, end_hour: 21 }), `${z} ${unk.due_at}`)
   assert.equal(nextLocalOpen(Date.parse(night), TZ, { start_hour: 8, end_hour: 21 }), Date.parse('2026-10-15T13:00:00.000Z'))
   // a caller cannot widen the window or the bounds
   const n = normalizeDelayPolicy({ contact_window: { start_hour: 0, end_hour: 24 }, in_session_minutes: 999 })
@@ -375,14 +379,18 @@ test('runtime: turn kinds register only with BOTH flags; payload refs round-trip
   assert.ok(!/[0-9]/.test(JSON.stringify(enq.input)))
 })
 
-test('static: the turn engine and its handlers never reach the R3 executor, the queue writer or a transport', () => {
+test('static: the turn engine never reaches the R3 executor, the queue writer or a transport; the handler reaches R3 ONLY through the one dispatcher', () => {
   const SRC = path.resolve(import.meta.dirname, '../../src')
-  const files = ['lib/domain/conversation-ai/turns/turn-engine.js', 'lib/domain/conversation-ai/turns/delay-planner.js', 'lib/domain/conversation-ai/turns/events.js', 'lib/domain/conversation-ai/turns/turn-store.js', 'lib/ai/conversation-turn-handler.js', 'lib/ai/conversation-turn-wiring.js'].map((f) => path.join(SRC, f))
+  const files = ['lib/domain/conversation-ai/turns/turn-engine.js', 'lib/domain/conversation-ai/turns/delay-planner.js', 'lib/domain/conversation-ai/turns/events.js', 'lib/domain/conversation-ai/turns/turn-store.js', 'lib/ai/conversation-turn-wiring.js'].map((f) => path.join(SRC, f))
   const g = importClosure(files)
   const reached = [...g.parents.keys()].map((f) => path.relative(SRC, f))
   for (const bad of ['lib/ai/conversation-ai-r3-executor.js', 'lib/supabase/sms-engine.js', 'lib/providers/textgrid.js', 'lib/domain/queue/process-send-queue.js']) {
     assert.ok(!reached.includes(bad), `${bad} reached`)
   }
+  const h = importClosure([path.join(SRC, 'lib/ai/conversation-turn-handler.js')])
+  const r3 = path.join(SRC, 'lib/ai/conversation-ai-r3-executor.js')
+  assert.ok(h.files.has(r3), 'rc-8.5.21: the turn handler can dispatch')
+  assert.equal(path.relative(SRC, h.parents.get(r3)), 'lib/ai/conversation-turn-dispatch.js')
 })
 
 test('drift: the conversation-turn-sweep seed mirrors CONVERSATION_TURN_SWEEP_SCHEDULE, born disabled, $0; its posttest runs the same statement', async () => {
