@@ -35,6 +35,7 @@
 import crypto from 'node:crypto'
 
 import { insertSupabaseSendQueueRow } from '@/lib/supabase/sms-engine.js'
+import { HOLD_CAPABILITIES, resolveAutomationHold } from '@/lib/domain/holds/automation-hold.js'
 import { getSystemValueFresh } from '@/lib/system-control.js'
 import { beginIdempotentProcessing, completeIdempotentProcessing, failIdempotentProcessing } from '@/lib/domain/events/idempotency-ledger.js'
 import { resolveRecipientTimezone } from '@/lib/domain/queue/recipient-timezone.js'
@@ -207,6 +208,12 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   if (!state?.input?.inbound) return out('held', ['state_unavailable'])
   if (clean(state.input.inbound.thread_key) !== threadKey) return out('held', ['thread_mismatch'])
   if (isOwnerHandledThread({ thread_key: threadKey, property_address: state.property_address })) return out('refused', ['owner_handled_thread'])
+  // AUTOMATION HOLD registry (P0 2026-10-16), read fresh immediately before enqueue. Fail closed.
+  const aiHold = await (deps.resolveHold || resolveAutomationHold)(
+    { thread_key: threadKey, property_id: clean(candidate.inbound?.property_id) || null },
+    { capability: HOLD_CAPABILITIES.AI_ACTION, supabase: deps.supabase || null }
+  )
+  if (aiHold?.held) return out('refused', [aiHold.fail_closed ? 'automation_hold_lookup_failed' : 'automation_hold'])
   const thread = [...(state.input.thread || [])]
   if (!thread.some((m) => m.id === state.input.inbound.id)) thread.push({ ...state.input.inbound, direction: 'inbound' })
   const inboundRow = thread.find((m) => m.id === inboundId)

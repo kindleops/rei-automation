@@ -100,6 +100,7 @@ import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stag
 import { resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
 import { resolvePropertyTypeScope } from '@/lib/sms/property_scope.js'
 import { CAMPAIGN_CAP_COLUMNS, isValidCampaignCapInput, parseCampaignCap, zeroCampaignCaps } from '@/lib/domain/campaigns/campaign-caps.js'
+import { HOLD_CAPABILITIES, loadActiveAutomationHolds, matchAutomationHolds } from '@/lib/domain/holds/automation-hold.js'
 import {
   acquireCampaignExecutionLock,
   checkpointCampaignHydration,
@@ -9099,6 +9100,22 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       // metadata.question_kind itself (the repeat-asking-price guard keys on it).
       for (const queueRow of queueRows) {
         queueRow.metadata = stampOutboundQuestionKind(queueRow)
+      }
+
+      // AUTOMATION HOLD (P0 2026-10-16): this batch bypasses the canonical
+      // writer, so the hold is applied here: held threads / properties / owners
+      // never get a campaign row. One read of the (tiny) active hold set; a
+      // failed read aborts the hydration (fail closed) rather than enqueueing
+      // around it. The send_queue trigger backs this up.
+      {
+        const holdSet = await loadActiveAutomationHolds({ supabase })
+        if (!holdSet.ok) throw new Error(`automation_hold_lookup_failed: ${holdSet.error || 'unknown'}`)
+        // Always matched: matchAutomationHolds also applies the static permanent exclusions.
+        const kept = queueRows.filter((r) => !matchAutomationHolds(holdSet.holds, { thread_key: r?.thread_key || r?.to_phone_number, property_id: r?.property_id, master_owner_id: r?.master_owner_id }, HOLD_CAPABILITIES.CAMPAIGN).length)
+        if (kept.length !== queueRows.length) {
+          console.warn('[CAMPAIGN_ROWS_EXCLUDED_BY_AUTOMATION_HOLD]', { campaign_id: campaignId, excluded: queueRows.length - kept.length })
+          queueRows.splice(0, queueRows.length, ...kept)
+        }
       }
 
       const hydrationTotal = queueRows.length

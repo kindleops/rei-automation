@@ -19,6 +19,7 @@ import {
 } from "@/lib/domain/seller-flow/persist-inbound-intelligence.js";
 import { executeReferralAutomation } from "@/lib/domain/seller-flow/execute-referral-automation.js";
 import { resolveSellerAutoReplyPlan } from "@/lib/domain/seller-flow/resolve-seller-auto-reply-plan.js";
+import { HOLD_CAPABILITIES, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
 import {
   scheduleFollowUp,
   cancelPendingFollowUpsForThread,
@@ -864,8 +865,30 @@ export async function processSellerInboundMessage({
     threadAllowlist: auto_reply_scope_config.threadAllowlist,
   });
 
-  const execution_allowed =
-    explicitExecutionAllowed != null
+  // ── AUTOMATION HOLD (P0 containment 2026-10-16) ──────────────────────
+  // A held thread / property / owner gets NO automated outbound from this turn:
+  // no template auto-reply, clarifier, referral send, offer send or scheduled
+  // follow-up. The inbound is still recorded, classified and shadowed, and
+  // compliance (opt-out suppression) still applies. Advancement is refused
+  // separately inside persistSellerTransitionArtifacts / finalizeSellerAcceptance.
+  // Fail closed: an unreadable hold is a hold. Not consulted for dry runs.
+  const automation_hold =
+    dryRun || proofRun
+      ? { held: false, fail_closed: false, hold_ids: [], reason: "not_evaluated_dry_run" }
+      : await resolveAutomationHold(
+          { thread_key: clean(threadKey) || clean(inboundFrom), property_id: propertyId, master_owner_id: ownerId },
+          { capability: HOLD_CAPABILITIES.AUTO_REPLY, supabase }
+        );
+  if (automation_hold.held) {
+    runtimeDeps.warn?.("[SELLER_INBOUND_AUTOMATION_HELD]", {
+      thread_key: clean(threadKey) || clean(inboundFrom) || null,
+      hold_ids: automation_hold.hold_ids,
+      fail_closed: automation_hold.fail_closed === true,
+    });
+  }
+  const execution_allowed = automation_hold.held
+    ? false
+    : explicitExecutionAllowed != null
       ? Boolean(explicitExecutionAllowed)
       : Boolean(queue_permission.allowed);
   const writes_suppressed = Boolean(dryRun || proofRun);
@@ -1211,6 +1234,7 @@ export async function processSellerInboundMessage({
     recent_outbound: recentOutbound,
     underwriting_signals: underwritingSignals,
     auto_reply_enabled: execution_allowed,
+    automation_hold,
     force_queue_reply: false,
     now: new Date().toISOString(),
   });
@@ -2898,6 +2922,7 @@ export async function processSellerInboundMessage({
     side_effects,
     auto_reply_mode: effective_auto_reply_mode,
     execution_allowed,
+    automation_hold: automation_hold.held ? { hold_ids: automation_hold.hold_ids || [], fail_closed: automation_hold.fail_closed === true } : null,
     queue_permission,
     intelligence_message_event_patch,
     proof_run: Boolean(proofRun),

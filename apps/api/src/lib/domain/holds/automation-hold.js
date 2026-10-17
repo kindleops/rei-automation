@@ -1,0 +1,315 @@
+// ─── automation-hold.js ─────────────────────────────────────────────────────
+// THE single hold authority (P0 containment, owner directive 2026-10-16).
+//
+// An automation hold is an internal, audited operator decision that a thread /
+// property / opportunity / owner must not be advanced or contacted by any
+// automated path. It is NOT an external offer withdrawal: nothing is sent to the
+// seller, no offer row is modified, and every inbound is still recorded.
+//
+// Authority: public.automation_holds (append-only; released by an audited
+// update, never deleted), read through public.automation_hold_for(...). The
+// database also enforces the hold with BEFORE triggers on seller_offers,
+// closing_cases, acquisition_opportunities and send_queue, so a code path this
+// module does not reach is still refused at the row.
+//
+// FAIL-CLOSED. A lookup error, a missing client, or a missing RPC is reported as
+// HELD (fail_closed: true). Callers on advancement / outbound paths must treat
+// held === true as "do nothing automated".
+//
+// Matching: a hold covers an action when ANY of the hold's non-null scope keys
+// equals the corresponding key of the action AND the capability is in the
+// hold's blocked_capabilities. (Same predicate as automation_hold_for in SQL;
+// matchAutomationHolds below is the in-memory twin for batch paths.)
+//
+// This module also carries the RULE-BASED ACCEPTANCE GUARD (exposure audit
+// 2026-10-16): an acceptance is never automated when the active offer is
+// operator-originated, its price exceeds the MAO or the authorized ceiling, the
+// valuation is missing, the opportunity is archived / dead / suppressed /
+// cancelled, or a hold applies. The acceptance is routed to human review with
+// its evidence recorded; nothing is accepted and no closing case is created.
+
+import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { info, warn } from "@/lib/logging/logger.js";
+import {
+  ACCEPTANCE_REVIEW_OUTCOME,
+  ACCEPTANCE_REVIEW_REASONS,
+  ALL_HOLD_CAPABILITIES,
+  AUTOMATION_HOLD_VERSION,
+  HOLD_CAPABILITIES,
+  evaluateAcceptanceRules,
+  hasAnyKey,
+  normalizeHoldScope,
+  staticExclusionFor,
+  staticHoldRow,
+} from "@/lib/domain/holds/automation-hold-core.js";
+
+export * from "@/lib/domain/holds/automation-hold-core.js";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TEST_RESOLVER_KEY = "__lcAutomationHoldTestResolver";
+
+function clean(value) {
+  return String(value ?? "").trim();
+}
+function lower(value) {
+  return clean(value).toLowerCase();
+}
+function num(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+function uuidOrNull(value) {
+  const v = clean(value);
+  return UUID_RE.test(v) ? v : null;
+}
+function obj(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+
+function summarize(holds = []) {
+  return holds.map((h) => ({ id: h.id || null, hold_key: h.hold_key || null, hold_type: h.hold_type || null, reason: h.reason || null }));
+}
+
+function heldResult(capability, holds, extra = {}) {
+  return { held: true, fail_closed: false, capability, holds: summarize(holds), hold_ids: holds.map((h) => h.id).filter(Boolean), reason: "automation_hold", version: AUTOMATION_HOLD_VERSION, ...extra };
+}
+function failClosed(capability, error) {
+  return { held: true, fail_closed: true, capability, holds: [], hold_ids: [], reason: "automation_hold_lookup_failed", error: clean(error) || "lookup_failed", version: AUTOMATION_HOLD_VERSION };
+}
+function clear(capability, extra = {}) {
+  return { held: false, fail_closed: false, capability, holds: [], hold_ids: [], reason: null, version: AUTOMATION_HOLD_VERSION, ...extra };
+}
+
+/** Test seam: install a resolver (scope, opts) => result. null restores production behaviour. */
+export function __setAutomationHoldResolverForTests(fn = null) {
+  if (typeof fn === "function") globalThis[TEST_RESOLVER_KEY] = fn;
+  else delete globalThis[TEST_RESOLVER_KEY];
+}
+
+/**
+ * Is this action held? Never throws.
+ * @returns {Promise<{held:boolean, fail_closed:boolean, capability, holds, hold_ids, reason}>}
+ */
+export async function resolveAutomationHold(scope = {}, { capability = null, supabase: injected = null } = {}) {
+  const cap = clean(capability) || null;
+  const s = normalizeHoldScope(scope);
+  const testResolver = globalThis[TEST_RESOLVER_KEY];
+  if (typeof testResolver === "function") {
+    try {
+      const r = await testResolver(s, { capability: cap, supabase: injected });
+      return r && typeof r === "object" ? { holds: [], hold_ids: [], fail_closed: false, capability: cap, ...r } : clear(cap);
+    } catch (error) {
+      return failClosed(cap, error?.message);
+    }
+  }
+  if (!hasAnyKey(s)) return clear(cap, { reason: "no_scope_keys" });
+  const statically = staticExclusionFor({ thread_key: s.thread_key, property_id: s.property_id });
+  if (statically && !(cap && !ALL_HOLD_CAPABILITIES.includes(cap))) return heldResult(cap, [staticHoldRow(statically)], { static_exclusion: statically.key });
+  let supabase = injected;
+  try {
+    supabase = supabase || getDefaultSupabaseClient();
+  } catch {
+    supabase = null;
+  }
+  if (!supabase || typeof supabase.rpc !== "function") return failClosed(cap, "missing_supabase_rpc");
+  try {
+    const { data, error } = await supabase.rpc("automation_hold_for", {
+      p_thread_key: s.thread_key,
+      p_inbox_thread_id: s.inbox_thread_id,
+      p_property_id: s.property_id,
+      p_opportunity_id: s.opportunity_id,
+      p_master_owner_id: s.master_owner_id,
+      p_capability: cap,
+    });
+    if (error) return failClosed(cap, error.message || error.code);
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    // Re-apply the predicate locally: a widened server answer can only add holds.
+    const holds = rows.length ? rows.filter((h) => !h?.released_at) : [];
+    return holds.length ? heldResult(cap, holds) : clear(cap);
+  } catch (error) {
+    return failClosed(cap, error?.message);
+  }
+}
+
+/** Load every active hold (the table is tiny) for batch paths. Never throws. */
+export async function loadActiveAutomationHolds({ supabase: injected = null } = {}) {
+  const testResolver = globalThis[TEST_RESOLVER_KEY];
+  if (typeof testResolver === "function" && typeof testResolver.loadAll === "function") {
+    try {
+      return { ok: true, holds: await testResolver.loadAll() };
+    } catch (error) {
+      return { ok: false, holds: [], error: error?.message || "load_failed" };
+    }
+  }
+  if (typeof testResolver === "function") return { ok: true, holds: [] };
+  let supabase = injected;
+  try {
+    supabase = supabase || getDefaultSupabaseClient();
+  } catch {
+    supabase = null;
+  }
+  if (!supabase || typeof supabase.from !== "function") return { ok: false, holds: [], error: "missing_supabase" };
+  try {
+    const { data, error } = await supabase
+      .from("automation_holds")
+      .select("id,hold_key,hold_type,thread_key,inbox_thread_id,property_id,opportunity_id,master_owner_id,blocked_capabilities,reason,released_at")
+      .is("released_at", null)
+      .limit(5000);
+    if (error) return { ok: false, holds: [], error: error.message || error.code || "load_failed" };
+    return { ok: true, holds: Array.isArray(data) ? data : [] };
+  } catch (error) {
+    return { ok: false, holds: [], error: error?.message || "load_failed" };
+  }
+}
+
+/** Append one audit row to automation_hold_events. Never throws; returns ok. */
+export async function recordAutomationHoldEvent({ event_type, scope = {}, capability = null, hold_ids = [], actor = null, approval_ref = null, evidence = {}, supabase: injected = null } = {}) {
+  const s = normalizeHoldScope(scope);
+  const row = {
+    event_type: clean(event_type) || "advancement_blocked",
+    capability: clean(capability) || null,
+    hold_ids: (Array.isArray(hold_ids) ? hold_ids : []).filter((id) => UUID_RE.test(clean(id))),
+    thread_key: s.thread_key,
+    inbox_thread_id: s.inbox_thread_id,
+    property_id: s.property_id,
+    opportunity_id: s.opportunity_id,
+    master_owner_id: s.master_owner_id,
+    actor: clean(actor) || "automation",
+    approval_ref: clean(approval_ref) || null,
+    evidence: obj(evidence),
+  };
+  info("[AUTOMATION_HOLD_EVENT]", { event_type: row.event_type, capability: row.capability, hold_ids: row.hold_ids, opportunity_id: row.opportunity_id, property_id: row.property_id });
+  let supabase = injected;
+  try {
+    supabase = supabase || getDefaultSupabaseClient();
+    if (!supabase || typeof supabase.from !== "function") return { ok: false, reason: "missing_supabase" };
+    const { error } = await supabase.from("automation_hold_events").insert(row);
+    if (error) {
+      warn("[AUTOMATION_HOLD_EVENT_WRITE_FAILED]", { event_type: row.event_type, error: error.message || error.code });
+      return { ok: false, reason: error.message || "insert_failed" };
+    }
+    return { ok: true };
+  } catch (error) {
+    warn("[AUTOMATION_HOLD_EVENT_WRITE_FAILED]", { event_type: row.event_type, error: error?.message });
+    return { ok: false, reason: error?.message || "insert_failed" };
+  }
+}
+
+
+/**
+ * Load everything the acceptance guard needs and evaluate it. Never throws; any
+ * read failure is a review verdict (fail closed).
+ */
+export async function evaluateAutonomousAcceptance({
+  opportunity_id = null,
+  thread_key = null,
+  property_id = null,
+  master_owner_id = null,
+  accepted_price = null,
+  acceptance_basis = null,
+  offer = undefined,
+  supabase: injected = null,
+} = {}) {
+  const supabase = injected || getDefaultSupabaseClient();
+  const failed = (detail) => ({ allowed: false, reasons: [ACCEPTANCE_REVIEW_REASONS.GUARD_LOOKUP_FAILED], detail, price: num(accepted_price), economics: null, hold: null, offer: offer || null, opportunity: null });
+  if (!supabase || typeof supabase.from !== "function") return failed("missing_supabase");
+  let opportunity = null;
+  let activeOffer = offer;
+  let score = null;
+  try {
+    const { data, error } = await supabase.from("acquisition_opportunities").select("*").eq("id", clean(opportunity_id)).maybeSingle();
+    if (error) return failed(`opportunity:${error.message || error.code}`);
+    opportunity = data || null;
+    if (activeOffer === undefined) {
+      const r = await supabase.from("seller_offers").select("*").eq("opportunity_id", clean(opportunity_id)).eq("status", "active").maybeSingle();
+      if (r.error) return failed(`offer:${r.error.message || r.error.code}`);
+      activeOffer = r.data || null;
+    }
+    const pid = clean(property_id) || clean(activeOffer?.property_id) || clean(opportunity?.primary_property_id);
+    if (pid) {
+      let q = supabase.from("property_acquisition_scores").select("*").eq("property_id", pid);
+      if (typeof q.order === "function") q = q.order("computed_at", { ascending: false });
+      if (typeof q.limit === "function") q = q.limit(1);
+      const r = await q;
+      if (r?.error) return failed(`score:${r.error.message || r.error.code}`);
+      score = Array.isArray(r?.data) ? r.data[0] || null : r?.data || null;
+    }
+  } catch (error) {
+    return failed(error?.message || "lookup_failed");
+  }
+  const hold = await resolveAutomationHold(
+    {
+      thread_key: clean(thread_key) || clean(activeOffer?.thread_key) || clean(opportunity?.primary_thread_key),
+      property_id: clean(property_id) || clean(activeOffer?.property_id) || clean(opportunity?.primary_property_id),
+      opportunity_id,
+      master_owner_id: clean(master_owner_id) || clean(opportunity?.master_owner_id),
+    },
+    { capability: HOLD_CAPABILITIES.OFFER_ACCEPTANCE, supabase }
+  );
+  const verdict = evaluateAcceptanceRules({ offer: activeOffer, opportunity, score, hold, accepted_price, acceptance_basis });
+  return { ...verdict, hold, offer: activeOffer || null, opportunity };
+}
+
+/**
+ * Route a refused acceptance to human review: record the evidence, never
+ * advance. Under a hold the opportunity row is not touched (the hold already
+ * carries next_action human_review); the evidence goes to the audit table only.
+ * Otherwise the opportunity gets next_action human_review and an
+ * acceptance_review record, and negotiation_state.terms_accepted is reset so
+ * the state never claims an acceptance nobody bound. Never throws.
+ */
+export async function routeAcceptanceToHumanReview({ verdict = {}, opportunity_id = null, thread_key = null, property_id = null, master_owner_id = null, acceptance_event_id = null, acceptance_at = null, source = null, supabase: injected = null } = {}) {
+  const supabase = injected || getDefaultSupabaseClient();
+  const evidence = {
+    outcome: ACCEPTANCE_REVIEW_OUTCOME,
+    reasons: verdict.reasons || [],
+    offer_id: verdict.offer?.offer_id || null,
+    offer_price: num(verdict.offer?.purchase_price),
+    evaluated_price: verdict.price ?? null,
+    mao: verdict.economics?.mao ?? null,
+    authorized_ceiling: verdict.economics?.ceiling ?? null,
+    valuation_mid: verdict.economics?.valuation_mid ?? null,
+    opportunity_status: verdict.opportunity?.opportunity_status || null,
+    opportunity_automation_state: verdict.opportunity?.automation_state || null,
+    acceptance_event_id: clean(acceptance_event_id) || null,
+    acceptance_at: clean(acceptance_at) || null,
+    source: clean(source) || null,
+    recorded_at: new Date().toISOString(),
+    guard_version: AUTOMATION_HOLD_VERSION,
+  };
+  const scope = { opportunity_id, thread_key, property_id, master_owner_id };
+  const event = await recordAutomationHoldEvent({
+    event_type: "acceptance_routed_to_human_review",
+    scope,
+    capability: HOLD_CAPABILITIES.OFFER_ACCEPTANCE,
+    hold_ids: verdict.hold?.hold_ids || [],
+    evidence,
+    supabase,
+  });
+  let opportunity_flagged = false;
+  if (!verdict.hold?.held && verdict.opportunity && supabase?.from) {
+    try {
+      const md = obj(verdict.opportunity.metadata);
+      const ns = obj(md.negotiation_state);
+      const metadata = {
+        ...md,
+        negotiation_state: Object.keys(ns).length ? { ...ns, terms_accepted: false, acceptance_pending_review: evidence } : ns,
+        acceptance_review: evidence,
+      };
+      const { error } = await supabase
+        .from("acquisition_opportunities")
+        .update({ next_action: "human_review", metadata, updated_at: new Date().toISOString() })
+        .eq("id", clean(opportunity_id));
+      opportunity_flagged = !error;
+      if (error) warn("[ACCEPTANCE_REVIEW_FLAG_FAILED]", { opportunity_id, error: error.message || error.code });
+    } catch (error) {
+      warn("[ACCEPTANCE_REVIEW_FLAG_FAILED]", { opportunity_id, error: error?.message });
+    }
+  }
+  warn("[ACCEPTANCE_ROUTED_TO_HUMAN_REVIEW]", { opportunity_id, reasons: evidence.reasons, offer_id: evidence.offer_id });
+  return { evidence, event_recorded: event.ok === true, opportunity_flagged };
+}
+
+export default resolveAutomationHold;

@@ -56,6 +56,7 @@ import { normalizeCampaignStatus } from "@/lib/domain/campaigns/campaign-state-m
 import { attachOutboundProvenance } from "@/lib/domain/automation/outbound-provenance.js";
 import { observeSendQueueInsert } from "@/lib/domain/intelligence/runtime/observation.js";
 import { isAmbiguousSendRow } from "@/lib/domain/messaging/ambiguous-send-evidence.js";
+import { HOLD_CAPABILITIES, SENDABLE_QUEUE_STATUSES, holdOverrideOf, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -5374,6 +5375,47 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
         queue_key: paused_row.queue_key,
         raw: data || paused_row,
       };
+    }
+  }
+
+  // ── AUTOMATION HOLD (P0 containment 2026-10-16) ─────────────────────
+  // The single enqueue chokepoint for every surface (auto-reply, follow-ups,
+  // nurture, campaigns, workflows, referral, bulk tools, manual send-now): a
+  // SENDABLE row is never created for a held thread / property / owner. A
+  // manual operator send passes only with an explicit, audited override
+  // { approval_ref, reason, operator_id } carried on the row
+  // (metadata.automation_hold_override); the DB trigger enforces the same.
+  // Fail closed: an unreadable hold is a hold. Non-sendable (paused/audit)
+  // rows are not gated.
+  if (SENDABLE_QUEUE_STATUSES.includes(normalizeQueueStatusValue(row.queue_status))) {
+    const hold_override = holdOverrideOf(row.metadata?.automation_hold_override);
+    const is_manual_send = is_inbox_send_now || row.metadata?.manual_operator_send === true;
+    // Both the caller's thread key and the normalized one (normalizeSendQueueRow
+    // canonicalizes thread_key to the destination phone) are checked.
+    const hold_capability = is_manual_send ? HOLD_CAPABILITIES.MANUAL_SEND : HOLD_CAPABILITIES.OUTBOUND_SEND;
+    const hold_thread_keys = [...new Set([clean(payload.thread_key), clean(row.thread_key)].filter(Boolean))];
+    let enqueue_hold = null;
+    for (const thread_key of hold_thread_keys.length ? hold_thread_keys : [null]) {
+      enqueue_hold = await resolveAutomationHold(
+        { thread_key, property_id: row.property_id || payload.property_id, master_owner_id: row.master_owner_id || payload.master_owner_id },
+        { capability: hold_capability, supabase: deps.supabase || deps.supabaseClient || null }
+      );
+      if (enqueue_hold.held) break;
+    }
+    if (enqueue_hold.held && !(is_manual_send && hold_override && !enqueue_hold.fail_closed)) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: enqueue_hold.fail_closed ? "automation_hold_lookup_failed" : is_manual_send ? "automation_hold_requires_override" : "automation_hold",
+        automation_hold: { hold_ids: enqueue_hold.hold_ids, fail_closed: enqueue_hold.fail_closed === true },
+        item_id: null,
+        queue_row_id: null,
+        queue_item_id: null,
+        queue_key: clean(row.queue_key) || null,
+      };
+    }
+    if (enqueue_hold.held && hold_override) {
+      row.metadata = { ...(row.metadata || {}), automation_hold_override: { ...hold_override, hold_ids: enqueue_hold.hold_ids, used_at: now } };
     }
   }
 
