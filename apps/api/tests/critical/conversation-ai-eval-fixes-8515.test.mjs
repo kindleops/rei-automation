@@ -58,13 +58,14 @@ test('pre-check: a bare "No" to OUR ownership question is ownership_denied / UPD
   }
 })
 
-test('pre-check: the classifier verdict property_specific_non_owner (written denial, read against the question) is ownership_denied; a polite "No thanks" is not', () => {
+test('pre-check: the classifier verdict property_specific_non_owner (written denial, read against the question) is ownership_denied; rc-8.5.21: a polite "No thanks" to the ownership question is too', () => {
   const d = deterministicPrecheck({ text: 'not mine', inboundId: 'x', deterministic: { intent: 'property_specific_non_owner' }, eligibility: OPEN })
   assert.equal(d.decided, true)
   assert.equal(d.decision.outcome, 'UPDATE_ONLY')
   assert.equal(d.decision.intent, 'ownership_denied')
   const polite = deterministicPrecheck({ text: 'No thanks', inboundId: 'x', deterministic: { intent: 'not_interested' }, eligibility: OPEN, lastQuestionKind: 'ownership' })
-  assert.equal(polite.decided, false, 'a decline goes to the model (30-day nurture), not the denial lane')
+  assert.equal(polite.decided, true, 'rc-8.5.21 (owner P0 2026-10-16): any bare negative to OUR ownership question is the property-scoped denial')
+  assert.equal(polite.decision.outcome, 'UPDATE_ONLY')
   const s2 = deterministicPrecheck({ text: 'No', inboundId: 'x', deterministic: { intent: 'not_interested' }, eligibility: OPEN, lastQuestionKind: 'interest' })
   assert.equal(s2.decided, false, 'a "No" to S2 is not an ownership denial')
 })

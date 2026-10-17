@@ -546,6 +546,9 @@ export function detectMessageLanguage(message) {
   // 2026-10-13: "Mandamela por texto...cual es el nombre de tu compañia?" and
   // "Que nesesitas" were answered in English (no keyword below matched).
   if (/\b(?:hola|soy|eres|dueno|duena|propiedad|todavia|sigues|estaria|estas|usted|venta|vender|aqui|gracias|cual|nombre|compania|empresa|mandame|mandamela|necesitas?|nesesitas?|quieres|tienes|estamos)\b/.test(folded) || /[¿¡]/.test(message)) return "Spanish";
+  // rc-8.5.21 (El Paso 7a17fd6c): everyday Spanish with none of the words above ("Si cabron y que
+  // pedo", "Ya te dije", "pues si", "que onda") — two or more such words, and no English word
+  if ((folded.match(/\b(?:si|que|pedo|cabron|ya|dije|pues|onda|pero|porque|tengo|nada|mucho|mande|dime|digame|oye|eso|esto|mi|tu|te|lo|la|el|los|las|y|o|del|con|para|por|como|cuando|donde|quien|vale|bien)\b/g) || []).length >= 2 && !/\b(?:the|this|is|are|you|your|i|do|own|still|hello|hi|hey|yours|yes|no thanks|my|me|it|we|and|but|not|have|what|how)\b/.test(folded)) return "Spanish";
   if (/\b(?:the|this|is|are|you|your|i|do|own|still|hello|hi|hey|yours|understand|speak|english)\b/.test(folded)) return "English";
   return null;
 }

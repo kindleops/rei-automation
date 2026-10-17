@@ -97,17 +97,12 @@ for (const [message, q] of BARE_NEGATIVES_AFTER_S1) {
   });
 }
 
-test("a polite decline after S1 ('No gracias Carlos!') is the 30-day decline, exactly like an explicit 'not interested'", async () => {
+test("rc-8.5.21 (owner P0 2026-10-16): a polite negative after S1 ('No gracias Carlos!') denies ownership of THAT property (never not_interested, no nurture)", async () => {
   const polite = await replay("No gracias Carlos!", "s1_es");
-  const explicit = await replay("Not interested");
-  assert.equal(polite.classification.primary_intent, "not_interested");
-  assert.ok(polite.classification.matched_rule_ids.includes("ctx_polite_no_after_ownership_check_not_interested"));
-  assert.equal(explicit.classification.primary_intent, "not_interested");
-  for (const key of ["audit_reason", "next_action", "should_suppress_contact", "should_queue_reply", "should_mark_human_review", "route_hint"]) {
-    assert.deepEqual(polite.decision[key], explicit.decision[key], key);
-  }
-  const due = Date.parse(polite.decision.follow_up_at) - Date.now();
-  assert.ok(due > 29 * DAY_MS && due < 31 * DAY_MS, `follow-up in ~30 days, got ${polite.decision.follow_up_at}`);
+  assert.equal(polite.classification.primary_intent, "property_specific_non_owner");
+  assert.ok(polite.classification.matched_rule_ids.includes("ctx_polite_no_after_ownership_check_ownership_unverified"));
+  assert.equal(polite.decision.follow_up_at ?? null, null, "no nurture after an ownership denial");
+  assert.equal(polite.decision.should_suppress_contact, false, "never a phone suppression");
 });
 
 test("the not_interested nurture is a 30-day follow-up whose copy comes only from sms_templates use cases", () => {

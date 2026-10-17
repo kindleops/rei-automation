@@ -4262,7 +4262,7 @@ export { resolveCampaignTargetReadiness }
 // resolveCampaignTargetReadiness lives in campaign-target-readiness.js (one
 // per-row readiness truth, shared with Entity Graph's eligibility column).
 
-function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options = {}) {
+export function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options = {}) {
   const campaignId = campaign?.id || null
   /**
    * The person the target refers to, in canonical terms first.
@@ -4362,7 +4362,14 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
         to_phone_number: row.canonical_e164,
         market: row.market,
         state: row.state,
-        language: row.language,
+        // rc-8.5.21 (row 8992ba40): ONE language truth. The snapshot carries the SAME resolved
+        // language as the target (prospect / master_owner first, then the graph), plus the graph's
+        // own value and a conflict flag, so no reader can pick a different language than the
+        // template assignment did.
+        language: clean(row.resolved_language || row.language) || null,
+        graph_language: clean(row.language) || null,
+        language_source: clean(row.resolved_language_source) || (clean(row.language) ? 'graph' : 'unknown'),
+        language_conflict: Boolean(clean(row.resolved_language) && clean(row.language) && clean(row.resolved_language).toLowerCase() !== clean(row.language).toLowerCase()),
         timezone: row.timezone,
         contact_window: row.contact_window,
         owner_name: row.owner_name,

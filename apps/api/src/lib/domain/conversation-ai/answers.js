@@ -13,13 +13,16 @@
 //   emoji    the message carries an emoji / pictograph: tone the regex cannot read, so it
 //            is never an ownership denial either (the model / a human decides)
 //
+// rc-8.5.21 (owner P0 2026-10-16): polite and emoji negatives answering OUR ownership question
+// are ownership denials too (103 of 205 "dead" deals were a bare "No" to S1 stored as
+// not_interested). `polite` / `emoji` are still reported; only the S2+ reading uses them.
 // What each caller does with a match is policy, applied against OUR last question:
-//   after the ownership question: ownership_denial (non-polite, no emoji) → ownership denied
+//   after the ownership question: ownership_denial (any bare negative)   → ownership denied
 //                                 (property-scoped; no nurture, no further ownership ask)
 //   after the interest question:  any bare negative → not interested (30-day follow-up)
 import { matchBareNegative } from '../classification/seller-reply-families.js'
 
-export const ANSWERS_VERSION = 'conv-ai.answers.v1'
+export const ANSWERS_VERSION = 'conv-ai.answers.v2'
 
 const POLITE_TAIL_RE = /(?:^|\s)(?:thanks|thank\s+you|thank\s+u|thx|ty|gracias)$/u
 const PICTOGRAPH_RE = /\p{Extended_Pictographic}/u
@@ -35,7 +38,7 @@ export function bareNoAnswer(text, { names = [] } = {}) {
   if (!m) return { matched: false, canonical: null, polite: false, emoji: false, ownership_denial: false }
   const polite = POLITE_TAIL_RE.test(m.canonical)
   const emoji = PICTOGRAPH_RE.test(body)
-  return { matched: true, canonical: m.canonical, polite, emoji, ownership_denial: !polite && !emoji }
+  return { matched: true, canonical: m.canonical, polite, emoji, ownership_denial: true }
 }
 
 /** A bare negative of any kind ("No", "Not really", "No thanks"). */
