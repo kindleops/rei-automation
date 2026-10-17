@@ -45,6 +45,9 @@ const SUPPRESSED_INTENTS = new Set([
 
 const NURTURE_DAYS = {
   not_interested: 30,
+  // rc-8.5.21: a seller who asked us to check back ("call me next month") — written only by the
+  // follow-up execution pipeline, which pins the seller's own date (scheduled_for_at)
+  seller_callback: 30,
   listed_or_unavailable: 45,
   tenant_or_occupancy: 21,
   condition_signal: 14,
@@ -369,7 +372,11 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
   const base_dedupe_key = dedupe_scope
     ? `${buildFollowupDedupeKey(normalized_thread_key, intent)}:${dedupe_scope}`
     : buildFollowupDedupeKey(normalized_thread_key, intent);
-  const scheduled_for = plan.scheduled_for;
+  // rc-8.5.21 follow-up execution pipeline (domain/followups/followup-execution.js): the pipeline
+  // dispatches a follow-up at its DUE time, so it pins the send instant it already re-checked
+  // (contact window included). Only a valid ISO instant is honoured; every other caller is unchanged.
+  const pinned_ms = Date.parse(clean(context.scheduled_for_at));
+  const scheduled_for = Number.isFinite(pinned_ms) ? new Date(pinned_ms).toISOString() : plan.scheduled_for;
 
   // RENDER CONTEXT (2026-10-08). A nurture row is rendered 30 days from now by
   // the deferred resolver from the row's own fields. Callers that only knew ids

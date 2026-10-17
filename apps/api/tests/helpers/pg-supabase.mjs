@@ -42,7 +42,8 @@ export function pgSupabase(pool, { schema = 'public' } = {}) {
         if (!types.size) return { data: null, error: { message: `relation ${table} does not exist`, code: '42P01' } }
         const params = []
         const p = (v) => { params.push(v); return `$${params.length}` }
-        const one = ([c, op, v]) => (op === 'in' ? `${ident(c)} = any(${p(v)})` : `${ident(c)} ${op} ${p(encode(types, c, v))}`)
+        const colExpr = (c, key) => (key ? `(${ident(c)} ->> '${String(key).replace(/[^a-z0-9_]/g, '')}')` : ident(c))
+        const one = ([c, op, v, key]) => (op === 'in' ? `${ident(c)} = any(${p(v)})` : `${colExpr(c, key)} ${op} ${p(key ? v : encode(types, c, v))}`)
         const where = st.filters.length ? ` where ${st.filters.map((f) => (f[1] === 'or' ? `(${f[2].map(one).join(' or ')})` : one(f))).join(' and ')}` : ''
         const colsSql = (cols) => (!cols || cols === '*' ? '*' : cols.split(',').map((c) => ident(c.trim())).join(', '))
         let sql
@@ -76,15 +77,16 @@ export function pgSupabase(pool, { schema = 'public' } = {}) {
       lt(c, v) { st.filters.push([c, '<', v]); return b },
       in(c, v) { st.filters.push([c, 'in', Array.isArray(v) ? v : [v]]); return b },
       order(c, o = {}) { st.order.push([c, o.ascending !== false]); return b },
-      // PostgREST or(): only "col.<eq|neq|gt|gte|lt|lte>.<value>" terms (quoted values allowed)
+      // PostgREST or(): only "col[->>key].<eq|neq|gt|gte|lt|lte|ilike>.<value>" terms (quoted values allowed)
       or(expr) {
-        const OPS = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' }
+        const OPS = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=', ilike: 'ilike' }
         const terms = String(expr).match(/(?:[^,"]|"(?:[^"]|"")*")+/g) || []
         st.filters.push([null, 'or', terms.map((t) => {
-          const m = /^([a-z_][a-z0-9_]*)\.(eq|neq|gt|gte|lt|lte)\.(.*)$/.exec(t.trim())
+          const m = /^([a-z_][a-z0-9_]*)(?:->>([a-z_][a-z0-9_]*))?\.(eq|neq|gt|gte|lt|lte|ilike)\.(.*)$/.exec(t.trim())
           if (!m) { if (process.env.PG_SUPABASE_DEBUG) console.error('PG_SUPABASE_UNSUPPORTED', table, 'or', t); throw new Error(`pg-supabase: or term ${t} is not implemented`) }
-          const raw = m[3]
-          return [m[1], OPS[m[2]], /^".*"$/.test(raw) ? raw.slice(1, -1).replace(/""/g, '"') : raw]
+          const raw = m[4]
+          const v = /^".*"$/.test(raw) ? raw.slice(1, -1).replace(/""/g, '"') : raw
+          return [m[1], OPS[m[3]], m[3] === 'ilike' ? v.replace(/\*/g, '%') : v, m[2] || null]
         })])
         return b
       },
