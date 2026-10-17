@@ -210,9 +210,7 @@ returns void
 language plpgsql volatile set search_path = public, pg_temp as $fn$
 declare
   v_ids uuid[];
-  v_ref text := nullif(btrim(coalesce(current_setting('lc.automation_hold_override_ref', true), '')), '');
-  v_why text := nullif(btrim(coalesce(current_setting('lc.automation_hold_override_reason', true), '')), '');
-  v_who text := nullif(btrim(coalesce(current_setting('lc.automation_hold_override_actor', true), '')), '');
+  v_ref text; v_why text; v_who text;
   v_via text := 'transaction_setting';
 begin
   -- Same predicate as automation_hold_for, inlined: a plpgsql call into the (non-inlinable, SET search_path)
@@ -228,6 +226,10 @@ begin
           or (p_opportunity_id  is not null and h.opportunity_id  = p_opportunity_id)
           or (p_master_owner_id is not null and h.master_owner_id = p_master_owner_id));
   if cardinality(v_ids) = 0 then return; end if;
+  -- override settings are read only when a hold actually covers the row (hot path stays cheap)
+  v_ref := nullif(btrim(coalesce(current_setting('lc.automation_hold_override_ref', true), '')), '');
+  v_why := nullif(btrim(coalesce(current_setting('lc.automation_hold_override_reason', true), '')), '');
+  v_who := nullif(btrim(coalesce(current_setting('lc.automation_hold_override_actor', true), '')), '');
   if (v_ref is null or v_why is null or v_who is null) and p_row_override is not null then
     v_ref := nullif(btrim(coalesce(p_row_override->>'approval_ref', '')), '');
     v_why := nullif(btrim(coalesce(p_row_override->>'reason', '')), '');
@@ -305,6 +307,19 @@ begin
   -- destination is checked under BOTH keys (and locks both thread rows, when they exist).
   perform 1 from public.inbox_thread_state t
    where t.thread_key in (new.thread_key, new.to_phone_number::text) order by t.thread_key for key share;
+  -- HOT PATH (every enqueue and every claim): one inline probe, taken AFTER the lock so it sees any hold
+  -- committed by a transaction we waited on. Same predicate as automation_hold_for for this row's keys;
+  -- only a covered row pays for the full check (override + audit + error). Parity: posttest T6/T7/T13/T14.
+  if not exists (
+    select 1 from public.automation_holds h
+     where h.released_at is null
+       and (case when v_manual then 'manual_send' else 'outbound_send' end) = any (h.blocked_capabilities)
+       and (   (new.thread_key is not null and h.thread_key = new.thread_key)
+            or (new.to_phone_number is not null and h.thread_key = new.to_phone_number::text)
+            or (new.property_id is not null and h.property_id = new.property_id)
+            or (new.master_owner_id is not null and h.master_owner_id = new.master_owner_id))) then
+    return new;
+  end if;
   if v_manual and jsonb_typeof(v_md->'automation_hold_override') = 'object' then
     v_ovr := v_md->'automation_hold_override';
   end if;
