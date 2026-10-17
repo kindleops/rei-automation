@@ -307,8 +307,8 @@ export function createOpsSupervisorHandler({ source, store, reads, holdsSource =
         // 8.5.21-b: valuation coverage / overdue offers / negotiation authority + the latest valuation dry run
         typeof source.researchValuationSnapshot === 'function' ? settle(source.researchValuationSnapshot({ now: new Date(t).toISOString() }), 'RESEARCH_VALUATION_SNAPSHOT_UNAVAILABLE') : Promise.resolve({ unavailable: 'RESEARCH_VALUATION_SOURCE_NOT_CONFIGURED' }),
         settle(store.latestFinding({ finding_type: 'valuation.refresh_batch' }).then((f) => (f ? { ...f.value, at: f.retrieved_at } : null)), 'VALUATION_REFRESH_NOT_RUN'),
-        // owner P0: the automation-hold registry (report only); absent until rc-8.5.20-holds is integrated
-        holdsSource?.summary ? settle(holdsSource.summary(), 'AUTOMATION_HOLDS_UNAVAILABLE') : Promise.resolve({ unavailable: 'AUTOMATION_HOLDS_NOT_INTEGRATED' }),
+        // owner P0: the automation-hold registry (report only; rc-8.5.21: the runtime wiring passes the registry summary)
+        holdsSource?.summary ? settle(holdsSource.summary(), 'AUTOMATION_HOLDS_UNAVAILABLE') : Promise.resolve({ unavailable: 'AUTOMATION_HOLDS_SOURCE_NOT_CONFIGURED' }),
       ])
       const runtime = activity.unavailable ? activity : { jobs: activity.jobs.filter((j) => j.job_id !== ctx.job.job_id) }
       const spend = spendTotals.unavailable ? spendTotals : limits.unavailable ? limits : { ...spendTotals, limits }
@@ -335,12 +335,12 @@ export function createOpsSupervisorHandler({ source, store, reads, holdsSource =
  * @param {{ source: object|null, store: object|null, reads: object, getPlane?: Function, economicsFor?: Function|null, now?: () => number }} deps
  * @returns {Record<string, { run: Function }>}  {} when the source or store is missing
  */
-export function buildOperationsHandlers({ source, store, reads, getPlane = async () => null, economicsFor = null, linkage = null, now = () => Date.now() }) {
+export function buildOperationsHandlers({ source, store, reads, getPlane = async () => null, economicsFor = null, linkage = null, holdsSource = null, now = () => Date.now() }) {
   if (!source || !store) return {}
   return {
     [RECOVERY_SWEEP_KIND]: createRecoverySweepHandler({ source, store, economicsFor, linkage, now }),
     [ACTION_CENTER_KIND]: createActionCenterHandler({ source, store, now }),
     [PIPELINE_RECONCILE_KIND]: createPipelineReconcileHandler({ source, store, getPlane, now }),
-    ...(reads ? { [OPS_SUPERVISOR_KIND]: createOpsSupervisorHandler({ source, store, reads, now }) } : {}),
+    ...(reads ? { [OPS_SUPERVISOR_KIND]: createOpsSupervisorHandler({ source, store, reads, holdsSource, now }) } : {}),
   }
 }

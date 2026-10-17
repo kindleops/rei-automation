@@ -10,7 +10,7 @@
 process.env.RUNTIME_STATE_ROOT = `/tmp/rea-runtime-state-test-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 import { after, before, beforeEach } from 'node:test'
-import { __setAutomationHoldResolverForTests } from '../../src/lib/domain/holds/automation-hold.js'
+import { __setAutomationHoldResolverForTests, checkAutomationHold as REGISTRY_AUTOMATION_HOLD_CHECKER } from '../../src/lib/domain/holds/automation-hold.js'
 import { __setDeps as setNotificationIntelligenceDeps } from '../../src/lib/domain/notifications/notification-intelligence-service.js'
 import {
   clearSystemControlCache,
@@ -158,12 +158,14 @@ before(() => {
 })
 
 // rc-8.5.21: the automation-hold port (lib/domain/holds-port) FAILS CLOSED when no registry is
-// bound. Tests that do not exercise holds get a bound "no hold" registry before every test; the
-// hold tests reset it (__resetAutomationHoldChecker) to prove the fail-closed default.
+// bound. INTEGRATED: before every test the port is re-bound to the REAL registry checker
+// (automation-hold.js checkAutomationHold), so every suite goes port -> registry -> the hotfix's
+// resolver test seam above (default: no holds). The hold tests reset it (__resetAutomationHoldChecker)
+// to prove the fail-closed default; TEST_NO_HOLD_CHECKER stays a pure "no hold" fake for injection.
 const HOLD_CHECKER = Symbol.for('lc.automation_hold.checker')
 export const TEST_NO_HOLD_CHECKER = async () => ({ held: false, hold_type: null, reason: null, hold_id: null })
 beforeEach(() => {
-  globalThis[HOLD_CHECKER] = TEST_NO_HOLD_CHECKER
+  globalThis[HOLD_CHECKER] = REGISTRY_AUTOMATION_HOLD_CHECKER
   resetCriticalProcessEnv()
   delete process.env.SUPABASE_URL
   delete process.env.SUPABASE_SERVICE_ROLE_KEY

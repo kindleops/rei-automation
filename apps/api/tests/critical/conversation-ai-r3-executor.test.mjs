@@ -31,6 +31,7 @@ import { applyBlockRepeatAskingPrice, MIRROR } from '../helpers/block-repeat-ask
 import { sha256Hex, sealedThreadRef, sealedRef, isVerifiedAiGeneratedRow, AI_GENERATED_MESSAGES_TABLE } from '../../src/lib/domain/messages/ai-generated-message.js'
 import { makeSendQueueRowsSupabase } from '../helpers/queue-run-test-harness.js'
 import { loadRunnableSendQueueRows } from '../../src/lib/supabase/sms-engine.js'
+import { __setAutomationHoldResolverForTests } from '../../src/lib/domain/holds/automation-hold.js'
 
 // fictional 555-01xx numbers only
 const SELLER = '+15555550101'
@@ -637,17 +638,24 @@ test('coexistence: AI on + in scope ⇒ template defers; out of scope ⇒ templa
 
 
 // ── P0 2026-10-16: the ONE hold authority ─────────────────────────────────────
+// rc-8.5.21 integration: the executor asks the registry ONCE, through the 8.5.21-a hold port, which is
+// bound to automation-hold.js checkAutomationHold. This drives the REAL chain (no injected checker):
+// port -> checkAutomationHold -> resolveAutomationHold (the hotfix's resolver seam stands in for the RPC).
 test('automation hold (registry): an otherwise eligible AI reply on a held thread is refused before enqueue; a lookup failure refuses too', async () => {
-  for (const [hold, reason] of [[{ held: true, fail_closed: false, hold_ids: ['h1'] }, 'automation_hold'], [{ held: true, fail_closed: true, hold_ids: [] }, 'automation_hold_lookup_failed']]) {
+  for (const [hold, reason] of [[{ held: true, fail_closed: false, hold_ids: ['h1'], holds: [{ id: 'h1', hold_key: 'k', hold_type: 'operator_hold' }] }, 'automation_hold:operator_hold'], [{ held: true, fail_closed: true, hold_ids: [] }, 'automation_hold:lookup_error']]) {
     resetMemoryIdempotencyLedger()
     const w = world({ thread: S1_THREAD() })
     const { d, table } = deps({ w })
-    let asked = null
-    d.resolveHold = async (scope, opts) => { asked = { scope, opts }; return hold }
-    const r = await executeAiConversationReply(candidate(), d)
-    assert.equal(r.status, 'refused', JSON.stringify(r))
-    assert.ok(r.reasons.includes(reason), JSON.stringify(r.reasons))
-    assert.equal(table.inserts.length, 0)
-    assert.equal(asked.scope.thread_key, TK); assert.equal(asked.opts.capability, 'ai_action')
+    const asked = []
+    __setAutomationHoldResolverForTests(async (scope, opts) => { asked.push({ scope, opts }); return hold })
+    try {
+      const r = await executeAiConversationReply(candidate(), d)
+      assert.equal(r.status, 'held', JSON.stringify(r))
+      assert.ok(r.reasons.includes(reason), JSON.stringify(r.reasons))
+      assert.equal(table.inserts.length, 0)
+      assert.equal(asked[0].scope.thread_key, TK); assert.equal(asked[0].opts.capability, 'ai_action')
+    } finally {
+      __setAutomationHoldResolverForTests(() => ({ held: false, fail_closed: false, holds: [], hold_ids: [], reason: null, source: 'test_default_no_holds' }))
+    }
   }
 })

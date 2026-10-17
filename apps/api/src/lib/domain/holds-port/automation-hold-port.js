@@ -11,10 +11,14 @@
 // Interface (the hotfix's): checkAutomationHold({ threadKey, threadId, propertyId, opportunityId,
 // masterOwnerId, capability }) → { held: boolean, hold_type, reason, hold_id }.
 //
-// INTEGRATION (one line): registerAutomationHoldChecker(checkAutomationHold) where the hotfix module
-// is imported (or replace DEFAULT_CHECKER below with that import). Until then the port FAILS
-// CLOSED: no registered checker = a lookup error = HELD. The owner-handled thread (send-policy
-// isOwnerHandledThread, 3746 Baltimore) is folded in here as a hold of type 'owner_handled'.
+// INTEGRATED (rc-8.5.21): the registry module (lib/domain/holds/automation-hold.js) binds its
+// checkAutomationHold here at load (registerAutomationHoldChecker), so every process that loads the
+// I/O authority binds the port to it. This module stays PURE (no Supabase import: it is reachable from
+// lib/domain/conversation-ai via the send-time contact guard). The port still FAILS CLOSED: with no
+// registered checker (the registry module not loaded, or __resetAutomationHoldChecker in tests) a
+// check is a lookup error = HELD. The owner-handled
+// thread (send-policy isOwnerHandledThread = automation-hold-core STATIC_PERMANENT_EXCLUSIONS,
+// 3746 Baltimore) is folded in here as a hold of type 'owner_handled'.
 import { isOwnerHandledThread } from '../conversation-ai/send-policy.js'
 
 export const AUTOMATION_HOLD_PORT_VERSION = 'automation-hold-port.v1'

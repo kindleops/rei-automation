@@ -312,4 +312,80 @@ export async function routeAcceptanceToHumanReview({ verdict = {}, opportunity_i
   return { evidence, event_recorded: event.ok === true, opportunity_flagged };
 }
 
+// ── rc-8.5.21 integration: checkAutomationHold — the port interface over THIS authority ──────────
+// ADDITIVE ONLY: nothing above this block differs from hotfix/automation-holds. 8.5.21-a's hold port
+// (lib/domain/holds-port/automation-hold-port.js) and 8.5.21-b's hold gate
+// (lib/agent/operations/automation-hold-gate.js) were coded against
+//   checkAutomationHold({ threadKey, threadId, propertyId, opportunityId, masterOwnerId, capability })
+//     → { held, hold_type, reason, hold_id }
+// This adapter is that function. It decides NOTHING itself: every verdict is resolveAutomationHold's
+// (the registry RPC + the static permanent exclusions, fail closed). It only translates the callers'
+// capability names onto the registry's HOLD_CAPABILITIES vocabulary — an action is held when ANY of
+// the registry capabilities it exercises is blocked (union; never narrower than the action). An
+// UNMAPPED capability is HELD (fail closed): a name the registry does not know would otherwise match
+// no hold's blocked_capabilities and skip the static exclusions.
+// the 8.5.21-a port is pure; THIS module binds it (ESM imports are hoisted, so this import may live here)
+import { registerAutomationHoldChecker } from "@/lib/domain/holds-port/automation-hold-port.js";
+const C = HOLD_CAPABILITIES;
+export const AUTOMATION_HOLD_PORT_CAPABILITY_MAP = Object.freeze({
+  // 8.5.21-a port callers
+  send_time_dispatch: Object.freeze([C.OUTBOUND_SEND]),
+  ai_reply_decision: Object.freeze([C.AI_ACTION, C.AUTO_REPLY]),
+  ai_reply_dispatch: Object.freeze([C.AI_ACTION, C.AUTO_REPLY, C.OUTBOUND_SEND]),
+  followup_enqueue: Object.freeze([C.FOLLOW_UP]),
+  followup_dispatch: Object.freeze([C.FOLLOW_UP, C.OUTBOUND_SEND]),
+  // 8.5.21-b gate callers
+  "recovery.research_enqueue": Object.freeze([C.RECOVERY, C.AI_ACTION]),
+  "recovery.nurture_intent": Object.freeze([C.RECOVERY, C.FOLLOW_UP]),
+  "valuation.refresh": Object.freeze([C.AI_ACTION, C.OFFER_WRITE]),
+  "negotiation.compose": Object.freeze([C.AI_ACTION, C.AUTO_REPLY, C.OFFER_WRITE]),
+  "property.research_enqueue": Object.freeze([C.AI_ACTION, C.RECOVERY]),
+  // the registry's own names map to themselves
+  ...Object.fromEntries(ALL_HOLD_CAPABILITIES.map((c) => [c, Object.freeze([c])])),
+});
+
+/** Registry capabilities an action name exercises; [] = unmapped (callers must treat as held). */
+export function registryCapabilitiesFor(capability) {
+  return AUTOMATION_HOLD_PORT_CAPABILITY_MAP[clean(capability)] || [];
+}
+
+/**
+ * The port interface. Never throws. Fail closed: an unmapped capability, a lookup failure or any
+ * resolver error is { held: true, hold_type: "lookup_error" }.
+ * @returns {Promise<{held:boolean, hold_type:string|null, reason:string|null, hold_id:string|null, fail_closed:boolean, capability:string|null, registry_capabilities:string[], hold_ids:string[]}>}
+ */
+export async function checkAutomationHold({ threadKey = null, threadId = null, propertyId = null, opportunityId = null, masterOwnerId = null, capability = null } = {}, { supabase = null } = {}) {
+  const cap = clean(capability) || null;
+  const caps = registryCapabilitiesFor(cap);
+  const base = { capability: cap, registry_capabilities: [...caps] };
+  if (!caps.length) return { held: true, hold_type: "lookup_error", reason: "automation_hold_capability_unmapped", hold_id: null, fail_closed: true, hold_ids: [], ...base };
+  const scope = { thread_key: threadKey, inbox_thread_id: threadId, property_id: propertyId, opportunity_id: opportunityId, master_owner_id: masterOwnerId };
+  for (const c of caps) {
+    let r;
+    try {
+      r = await resolveAutomationHold(scope, { capability: c, supabase });
+    } catch (error) {
+      r = failClosed(c, error?.message);
+    }
+    if (!r || r.held !== false) {
+      const first = Array.isArray(r?.holds) ? r.holds[0] || null : null;
+      const fail = !r || r.fail_closed === true;
+      return {
+        held: true,
+        hold_type: fail ? "lookup_error" : first?.hold_type || "automation_hold",
+        reason: fail ? r?.reason || "automation_hold_lookup_failed" : first?.reason || r.reason || "automation_hold",
+        hold_id: (Array.isArray(r?.hold_ids) && r.hold_ids[0]) || first?.hold_key || null,
+        fail_closed: fail,
+        hold_ids: Array.isArray(r?.hold_ids) ? r.hold_ids : [],
+        blocked_capability: c,
+        ...base,
+      };
+    }
+  }
+  return { held: false, hold_type: null, reason: null, hold_id: null, fail_closed: false, hold_ids: [], ...base };
+}
+
+// bind the ONE authority into the port at load: any process that loads this module answers port checks
+registerAutomationHoldChecker(checkAutomationHold);
+
 export default resolveAutomationHold;

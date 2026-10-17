@@ -21,7 +21,7 @@ import { getOperationsServices } from '@/lib/ai/operations-runtime-wiring.js'
 import { valuationRefreshEnabled, recoveryValuationCandidates } from '@/lib/agent/missions/valuation-refresh-handler.js'
 import { createValuationSupabaseSource } from '@/lib/domain/valuation-refresh/valuation-source.js'
 import { runValuationRefresh } from '@/lib/domain/valuation-refresh/dry-run.js'
-import { failClosedHoldCheck } from '@/lib/agent/operations/automation-hold-gate.js'
+import { checkAutomationHold } from '@/lib/domain/holds/automation-hold.js'
 
 const HANDLERS = Symbol.for('lc.agent.missions.handlers')
 const SERVICE = Symbol.for('lc.agent.missions.service')
@@ -63,8 +63,8 @@ export function missionRuntimeHandlers(env = process.env) {
         source: createValuationSupabaseSource({ db: readDb }),
         runDecision: ({ property_id, now }) => runValuationRefresh({ property_id, client: valDb, now, write: false, env }),
         extraCandidates: ops?.store ? () => recoveryValuationCandidates(ops.store) : null,
-        // owner P0: fail closed until rc-8.5.20-holds' checkAutomationHold is integrated
-        checkAutomationHold: failClosedHoldCheck,
+        // owner P0: the ONE hold authority (registry + static exclusions, fail closed)
+        checkAutomationHold,
       }
     })() : null,
     log: logLine,

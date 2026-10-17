@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { consultHold, failClosedHoldCheck, heldLabel, HOLD_CAPABILITIES } from '../../src/lib/agent/operations/automation-hold-gate.js'
+import { consultHold, heldLabel, HOLD_CAPABILITIES } from '../../src/lib/agent/operations/automation-hold-gate.js'
 import { createRecoverySweepHandler } from '../../src/lib/agent/operations/operations-handlers.js'
 import { createOperationsMemorySource } from '../../src/lib/agent/operations/operations-source.js'
 import { createOperationsMemoryStore } from '../../src/lib/agent/operations/operations-store.js'
@@ -23,15 +23,17 @@ const OP = '11111111-1111-4111-8111-111111111111'
 const HELD = async () => ({ held: true, hold_type: 'operator_review', reason: 'operator review', hold_id: 'hold-1' })
 const FREE = async () => ({ held: false, hold_type: null, reason: null, hold_id: null })
 
-test('fail closed: a lookup error or a verdict without held:boolean is a hold; the integration placeholder holds everything', async () => {
-  assert.deepEqual((await consultHold(async () => { throw Object.assign(new Error('x'), { code: 'HOLDS_DB_DOWN' }) }, { capability: 'x' })).hold_type, 'hold_lookup_error')
+test('fail closed: a lookup error or a verdict without held:boolean is a hold (the hold port\'s rules — ONE mechanism)', async () => {
+  // rc-8.5.21: consultHold delegates to the 8.5.21-a hold port; the hold-everything placeholder is gone
+  const thrown = await consultHold(async () => { throw Object.assign(new Error('x'), { code: 'HOLDS_DB_DOWN' }) }, { capability: 'x' })
+  assert.deepEqual([thrown.held, thrown.hold_type, thrown.consulted], [true, 'lookup_error', true])
   assert.equal((await consultHold(async () => ({}), { capability: 'x' })).held, true)
-  assert.equal((await consultHold(failClosedHoldCheck, { capability: 'x' })).held, true)
+  assert.equal((await consultHold(FREE, {})).held, true, 'no capability = held')
   assert.equal((await consultHold(FREE, { capability: 'x' })).held, false)
   assert.equal(heldLabel({ hold_type: 'operator_review' }), 'held: operator review')
   let args = null
   await consultHold(async (a) => { args = a; return { held: false } }, { threadId: 't', propertyId: 'p', capability: HOLD_CAPABILITIES.recovery_research })
-  assert.deepEqual(args, { threadId: 't', propertyId: 'p', capability: 'recovery.research_enqueue' })
+  assert.deepEqual(args, { threadKey: null, threadId: 't', propertyId: 'p', opportunityId: null, masterOwnerId: null, capability: 'recovery.research_enqueue' })
 })
 
 test('recovery.sweep: a held thread gets NO research enqueue and NO nurture intent; the hold is reported in the batch', async () => {
@@ -77,7 +79,7 @@ test('research hook, negotiation composer, pathway: held ⇒ no enqueue, no draf
   assert.deepEqual([r.ok, r.reason, r.hold_type], [false, 'AUTOMATION_HOLD', 'operator_review'])
   assert.equal(rs._state.jobs.size, 0)
   const c = await composeNegotiationReply({ outcome: 'PREPARE_OFFER', context: { thread_key: '+15555550123', property_id: '227876842', now: T0 }, deps: { store: createMemoryNegotiationStore() }, env: { NEGOTIATION_COMPOSER_ENABLED: '1' }, checkAutomationHold: async () => { throw new Error('down') } })
-  assert.deepEqual([c.action, c.reason, c.rendered_text], ['ESCALATE_TO_OPERATOR', 'automation_hold:hold_lookup_error', null])
+  assert.deepEqual([c.action, c.reason, c.rendered_text], ['ESCALATE_TO_OPERATOR', 'automation_hold:lookup_error', null])
   const p = buildNegotiationPathway({ economics: { class: 'NEGOTIATE', reasons: [], metrics: {}, uncertainty: { missing: [] } }, hold: { held: true, hold_type: 'operator_review', hold_id: 'h' } })
   assert.deepEqual([p.next_action, p.hold.action], ['held:operator_review', 'report_only'])
 })

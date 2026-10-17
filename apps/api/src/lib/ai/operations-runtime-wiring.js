@@ -8,7 +8,7 @@
 import { getAgentPgPool } from '@/lib/agent/live/live-agent.js'
 import { runtimeGate, getRuntimeStore } from '@/lib/agent/runtime/runtime-service.js'
 import { enqueuePropertyResearch } from '@/lib/agent/missions/property-research-triggers.js'
-import { failClosedHoldCheck } from '@/lib/agent/operations/automation-hold-gate.js'
+import { checkAutomationHold, loadActiveAutomationHolds } from '@/lib/domain/holds/automation-hold.js'
 import { getCapabilityPlane } from '@/lib/agent/capabilities/index.js'
 import { createQuickScanReadClient } from '@/lib/agent/quick-scan/read-client.js'
 import { createMissionPgReads } from '@/lib/agent/missions/index.js'
@@ -39,6 +39,15 @@ export function createEconomicsFor(db) {
   }
 }
 
+/** Report-only read of the hold registry for the supervisor. Throws on a failed read (the supervisor reports it unavailable). */
+export async function summarizeActiveAutomationHolds({ load = loadActiveAutomationHolds } = {}) {
+  const r = await load()
+  if (!r?.ok) throw Object.assign(new Error('AUTOMATION_HOLDS_UNAVAILABLE'), { code: 'AUTOMATION_HOLDS_UNAVAILABLE' })
+  const by_type = {}
+  for (const h of r.holds) by_type[h.hold_type || 'unknown'] = (by_type[h.hold_type || 'unknown'] || 0) + 1
+  return { count: r.holds.length, by_type, items: r.holds.slice(0, 20).map((h) => ({ hold_key: h.hold_key || null, hold_type: h.hold_type || null, label: `held: ${String(h.hold_type || 'unknown').replace(/_/g, ' ')}` })) }
+}
+
 export function operationsRuntimeHandlers(env = process.env) {
   if (!operationsEnabled(env) || !runtimeGate(env).enabled) return {}
   if (globalThis[HANDLERS]) return globalThis[HANDLERS]
@@ -52,8 +61,10 @@ export function operationsRuntimeHandlers(env = process.env) {
     getPlane: () => getCapabilityPlane(env),
     economicsFor: createEconomicsFor(readDb),
     // 8.5.21-b: recovery → property.research (OFF unless PROPERTY_RESEARCH_ENABLED=1 and the kind is armed)
-    // owner P0: fail closed until rc-8.5.20-holds' checkAutomationHold is integrated (replace failClosedHoldCheck then)
-    linkage: { checkAutomationHold: failClosedHoldCheck, enqueueResearch: (req) => enqueuePropertyResearch({ store: getRuntimeStore(env), env, trigger: req.trigger, property_id: req.property_id, discriminator: req.discriminator }) },
+    // owner P0: every act consults the ONE hold authority (registry + static exclusions, fail closed)
+    linkage: { checkAutomationHold, enqueueResearch: (req) => enqueuePropertyResearch({ store: getRuntimeStore(env), env, trigger: req.trigger, property_id: req.property_id, discriminator: req.discriminator }) },
+    // owner P0: the supervisor REPORTS active holds (never acts): type counts + hold keys only, no thread keys / phones
+    holdsSource: { summary: () => summarizeActiveAutomationHolds() },
   })
   return globalThis[HANDLERS]
 }
