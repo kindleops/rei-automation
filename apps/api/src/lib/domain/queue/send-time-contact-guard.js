@@ -77,6 +77,10 @@ export const SEND_TIME_GUARD_REASONS = Object.freeze({
   PRIOR_REPLY_NOT_OWNER: "prior_reply_not_owner",
   // rc-8.5.21: the authoritative automation-hold registry (holds-port) says held, or could not answer
   AUTOMATION_HOLD: "automation_hold_active",
+  // OWNER RULES 2026-10-17: an ownership denial whose property is not reliably identified, or ownership
+  // evidence that conflicts (a newer, less confident label against explicit text), HOLDS the thread for
+  // operator resolution — deferred like an automation hold, never a terminal denial of every property
+  OWNERSHIP_UNRESOLVED_HOLD: "ownership_denial_property_unresolved",
   // rc-8.5.21 (Pittsburgh 8d03a7c4): the seller already STATED a price — a price question is never sent
   ASKING_PRICE_ALREADY_STATED: "blocked_repeat_asking_price_already_stated",
   ALREADY_CONTACTED_PAIR: "already_contacted_person_phone",
@@ -96,6 +100,7 @@ const REASON_CODE = Object.freeze({
   [R.WRONG_NUMBER]: SEND_TIME_BLOCK_REASONS.WRONG_NUMBER,
   [R.PRIOR_REPLY_NOT_OWNER]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.AUTOMATION_HOLD]: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
+  [R.OWNERSHIP_UNRESOLVED_HOLD]: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
   [R.ASKING_PRICE_ALREADY_STATED]: "blocked_repeat_asking_price_already_stated",
   [R.ALREADY_CONTACTED_PAIR]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.ALREADY_CONTACTED_PHONE]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
@@ -205,7 +210,20 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
   const same = (v) => phoneKey(v) === key;
   const now_ms = typeof now === "number" ? now : Date.parse(now);
   const property_id = clean(row.property_id);
-  const sameProperty = (pid) => !clean(pid) || !property_id || clean(pid) === property_id;
+  // rc-8.5.21 recontact guard over the thread's OWN messages + the resolution store (owner rules 1-3)
+  const has_thread_facts = (Array.isArray(facts.thread_messages) && facts.thread_messages.length) || (Array.isArray(facts.contact_property_resolution) && facts.contact_property_resolution.length);
+  const rc = has_thread_facts ? evaluateOwnershipRecontact(row, facts.thread_messages || [], { resolutions: facts.contact_property_resolution || [] }) : null;
+  const text_confirmed = Boolean(rc && !rc.blocked && rc.detail?.resolved?.state === "confirmed");
+  // A property-scoped not-owner LABEL (thread state / an inbound's detected_intent: low confidence):
+  //   its property or the row's property unknown → thread HOLD (owner rule 2), never every property;
+  //   another property → not this row; the thread text CONFIRMS this property → conflict HOLD (rule 3);
+  //   otherwise the property-scoped terminal block.
+  const propertyLabelBlock = (signal, pid, source) => {
+    if (!clean(pid) || !property_id) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { scope: "thread_hold", signal, source, action: "operator_review" });
+    if (clean(pid) !== property_id) return null;
+    if (text_confirmed) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { scope: "thread_hold", conflict: true, signal, source, action: "operator_review" });
+    return block(R.PRIOR_REPLY_NOT_OWNER, { scope: "person_property", signal, source });
+  };
 
   // 0. rc-8.5.21: the automation-hold registry (fail closed: a lookup error is a hold). Only
   //    evaluated when the loader provided it (pure callers without the fact are unchanged).
@@ -236,7 +254,10 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
     }
     if (signals.some((s) => PHONE_SCOPED_NOT_OWNER.has(s))) return block(R.WRONG_NUMBER, { source: "thread_state" });
     const prop_signal = signals.find((s) => PROPERTY_SCOPED_NOT_OWNER.has(s));
-    if (prop_signal && sameProperty(t.property_id)) return block(R.PRIOR_REPLY_NOT_OWNER, { scope: "person_property", signal: prop_signal, source: "thread_state" });
+    if (prop_signal) {
+      const b = propertyLabelBlock(prop_signal, t.property_id, "thread_state");
+      if (b) return b;
+    }
   }
   // 4. public.phones wrong-number evidence
   for (const p of facts.phones || []) {
@@ -249,8 +270,9 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
     const intent = lower(m.detected_intent);
     if (m.is_opt_out === true || OPT_OUT_SIGNALS.has(intent)) return block(R.OPT_OUT_REPLY);
     if (PHONE_SCOPED_NOT_OWNER.has(intent)) return block(R.WRONG_NUMBER, { source: "inbound_reply" });
-    if (PROPERTY_SCOPED_NOT_OWNER.has(intent) && sameProperty(m.property_id)) {
-      return block(R.PRIOR_REPLY_NOT_OWNER, { scope: "person_property", signal: intent, source: "inbound_reply" });
+    if (PROPERTY_SCOPED_NOT_OWNER.has(intent)) {
+      const b = propertyLabelBlock(intent, m.property_id, "inbound_reply");
+      if (b) return b;
     }
   }
 
@@ -258,10 +280,10 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
   //     for this property (bare "No" to our ownership question, an explicit denial, a not-owner
   //     label) blocks every outbound about it until new valid ownership evidence; a manual send
   //     may cross it only with an audited override (ownership-recontact-guard.js).
-  if ((Array.isArray(facts.thread_messages) && facts.thread_messages.length) || (Array.isArray(facts.contact_property_resolution) && facts.contact_property_resolution.length)) {
-    const rc = evaluateOwnershipRecontact(row, facts.thread_messages || [], { resolutions: facts.contact_property_resolution || [] });
-    if (rc.blocked && rc.detail?.scope === "phone") return block(R.THREAD_OPTED_OUT, { ...rc.detail, guard: rc.version });
-    if (rc.blocked) return block(R.PRIOR_REPLY_NOT_OWNER, { ...rc.detail, source: "message_text", guard: rc.version });
+  if (rc?.blocked) {
+    if (rc.detail?.scope === "phone") return block(R.THREAD_OPTED_OUT, { ...rc.detail, guard: rc.version });
+    if (rc.hold) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { ...rc.detail, guard: rc.version });
+    return block(R.PRIOR_REPLY_NOT_OWNER, { source: "message_text", ...rc.detail, guard: rc.version });
   }
 
   // 5c. rc-8.5.21 (owner 2026-10-13 + Pittsburgh 8d03a7c4): an asking-price question after the

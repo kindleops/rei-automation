@@ -19,7 +19,7 @@
 // (written by the live inbound waterfall) is read too, through the SAME evaluator the dispatch-time
 // send guard uses (queue/ownership-recontact-guard.js); it runs ahead of any prior-contact
 // override, so suppress_previously_contacted:false can never lift it.
-import { evaluateContactPropertyResolution } from '../queue/ownership-recontact-guard.js'
+import { evaluateContactPropertyResolution, OWNERSHIP_UNRESOLVED_REASON } from '../queue/ownership-recontact-guard.js'
 
 const clean = (value) => String(value ?? '').trim()
 const lower = (value) => clean(value).toLowerCase()
@@ -77,16 +77,23 @@ function signalsOf(thread = {}) {
 export function evaluateOpenerReplyExclusion({ property_id = null, threads = [], replies = [], resolutions = [] } = {}) {
   const target_property = clean(property_id)
   const store = evaluateContactPropertyResolution({ property_id, resolutions })
-  if (store.excluded) return { excluded: true, reason: store.reason, scope: store.scope, signal: store.role, source: store.source }
-  const sameProperty = (pid) => !clean(pid) || !target_property || clean(pid) === target_property
+  if (store.excluded) return { excluded: true, ...(store.hold ? { hold: true } : {}), reason: store.reason, scope: store.scope, signal: store.role, source: store.source }
+  // OWNER RULE 2 (2026-10-17): a property-scoped not-owner signal whose property (or the target's) is
+  // not identified HOLDS the target for operator resolution; it never labels every property denied
+  const propertyVerdict = (pid, signal, source) => {
+    if (!clean(pid) || !target_property) return { excluded: true, hold: true, reason: OWNERSHIP_UNRESOLVED_REASON, scope: 'thread_hold', signal, source }
+    if (clean(pid) === target_property) return { excluded: true, reason: 'prior_reply_not_owner', scope: 'person_property', signal, source }
+    return null
+  }
 
   for (const thread of threads || []) {
     for (const signal of signalsOf(thread)) {
       if (PHONE_SCOPED_NOT_OWNER.has(signal)) {
         return { excluded: true, reason: 'prior_reply_not_owner', scope: 'phone', signal, source: 'thread_state' }
       }
-      if (PROPERTY_SCOPED_NOT_OWNER.has(signal) && sameProperty(thread.property_id)) {
-        return { excluded: true, reason: 'prior_reply_not_owner', scope: 'person_property', signal, source: 'thread_state' }
+      if (PROPERTY_SCOPED_NOT_OWNER.has(signal)) {
+        const v = propertyVerdict(thread.property_id, signal, 'thread_state')
+        if (v) return v
       }
     }
   }
@@ -95,8 +102,9 @@ export function evaluateOpenerReplyExclusion({ property_id = null, threads = [],
     if (PHONE_SCOPED_NOT_OWNER.has(intent)) {
       return { excluded: true, reason: 'prior_reply_not_owner', scope: 'phone', signal: intent, source: 'inbound_reply' }
     }
-    if (PROPERTY_SCOPED_NOT_OWNER.has(intent) && sameProperty(reply.property_id)) {
-      return { excluded: true, reason: 'prior_reply_not_owner', scope: 'person_property', signal: intent, source: 'inbound_reply' }
+    if (PROPERTY_SCOPED_NOT_OWNER.has(intent)) {
+      const v = propertyVerdict(reply.property_id, intent, 'inbound_reply')
+      if (v) return v
     }
   }
   return { excluded: false, reason: null }

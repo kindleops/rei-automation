@@ -15,107 +15,172 @@
 //             channel_compliance / suppressed row excludes the phone everywhere (opt-out stays
 //             contact-wide). evaluateContactPropertyResolution() is shared with the campaign
 //             opener exclusion (campaigns/opener-reply-exclusion.js), so planner and dispatch agree.
-//   cleared   only by NEW valid ownership evidence for that property, later than the denial
-//             (an explicit confirmation, a "yes" to a later ownership question, a confirming label)
 //   override  a MANUAL operator send may cross it with an audited override
 //             metadata.ownership_recontact_override = { actor, reason (≥ 10 chars), at }; no
 //             automated path can
 // Explicit opt-out / STOP stays CONTACT-WIDE suppression (checked separately, never here).
+//
+// OWNER RULES 2026-10-17 (binding):
+//   1. a property-specific denial never becomes a phone-level suppression: every denial verdict here
+//      is scope person_property (or a thread hold); only channel_compliance / suppressed store rows,
+//      written exclusively for an explicit opt-out (resolve-contact-outcome-phase.js), are phone-wide.
+//   2. an AMBIGUOUS denial (no reliably identified property: the inbound has no property, it answers no
+//      ownership question about a known property, the store row carries no property, or the outbound
+//      row itself has no property) HOLDS the thread pending operator resolution
+//      (reason ownership_denial_property_unresolved, scope thread_hold: deferred, never terminal); it
+//      never labels every property on the thread as denied.
+//   3. evidence is ordered by RECENCY and CONFIDENCE (EVIDENCE_RANK): a later item replaces the current
+//      one only when it is at least as confident. A later explicit confirmation or seller engagement on
+//      the property supersedes an earlier low-confidence denial label, and a later explicit denial
+//      supersedes an earlier low-confidence confirmation label; a stale low-confidence label never
+//      defeats newer explicit evidence.
 import { bareNoAnswer } from '../conversation-ai/answers.js'
 import { questionKindOf } from '../conversation-ai/questions.js'
+import { moneyMentions } from '../conversation-ai/validator.js'
 import { BARE_YES_RE, OWN_CONFIRM_RE, OWN_DENY_RE, OWN_FORMER_RE, RETRACTION_RE } from '../conversation-ai/fact-ledger.js'
 import { isManualInboxSend } from './is-manual-inbox-send.js'
 import { NEVER_OWNED_LONG_RE } from '../classification/conversation-context.js'
 
-export const RECONTACT_GUARD_VERSION = 'ownership-recontact-guard.v1'
+export const RECONTACT_GUARD_VERSION = 'ownership-recontact-guard.v2'
 const NOT_OWNER_LABELS = new Set(['property_specific_non_owner', 'former_owner_respondent', 'sold_property', 'sold', 'tenant_respondent', 'non_owner_referral', 'not_owner', 'ownership_denied'])
 const CONFIRM_LABELS = new Set(['ownership_confirmed'])
+const ENGAGEMENT_LABELS = new Set(['seller_interested', 'interested', 'asks_offer', 'asking_price_provided', 'counter_offer', 'condition_disclosed', 'latent_interest'])
+const OFFER_REQUEST_RE = /\b(?:what(?:'?s|\s+is|\s+would\s+be)?\s+(?:your|ur|the)\s+(?:offer|number|best\s+(?:offer|price))|make\s+(?:me\s+)?an?\s+offer|send\s+(?:me\s+)?(?:your|an?|the)\s+(?:offer|number)|how\s+much\s+(?:would|will|can|could)\s+you\s+(?:offer|pay|give))\b/i
+/** Confidence of an evidence item (owner rule 3). Labels are the weakest; explicit text the strongest. */
+export const EVIDENCE_RANK = Object.freeze({ label: 1, store: 2, engagement: 2, answer: 3, explicit: 3 })
+export const OWNERSHIP_UNRESOLVED_REASON = 'ownership_denial_property_unresolved'
 const clean = (v) => String(v ?? '').trim()
 const t = (m) => Date.parse(m?.at || m?.event_timestamp || m?.created_at || 0) || 0
 
 /**
- * @param {{ messages: Array<{ id: string, direction: string, body?: string, message_body?: string, at?: string, created_at?: string, property_id?: string|null, detected_intent?: string|null }> }} a
- * @returns {Map<string, { state: 'denied'|'confirmed', message_id: string, at: number, basis: string }>} property key → latest ownership evidence
+ * Every ownership evidence item in the thread, in time order (pure).
+ * @returns {Array<{ property: string, state: 'denied'|'confirmed', message_id: string, at: number, basis: string, kind: keyof EVIDENCE_RANK, rank: number }>}
+ *          property '' = not reliably identified
  */
-export function ownershipEvidenceByProperty({ messages = [] } = {}) {
-  const out = new Map()
-  let lastQ = null // { property_id }
+export function ownershipEvidenceItems({ messages = [] } = {}) {
+  const items = []
+  let lastQ = null // our last question: { kind, property_id }
   for (const m of [...messages].sort((a, b) => t(a) - t(b))) {
     const body = clean(m.body ?? m.message_body)
     const dir = String(m.direction || '').toLowerCase()
     if (dir.startsWith('out')) {
       const kind = questionKindOf({ use_case: m.use_case || null, body })
-      lastQ = kind === 'ownership' ? { property_id: clean(m.property_id) || null } : kind !== 'none' ? null : lastQ
+      if (kind !== 'none') lastQ = { kind, property_id: clean(m.property_id) || null }
       continue
     }
     if (!dir.startsWith('in')) continue
-    const prop = clean(m.property_id) || lastQ?.property_id || ''
+    const ownQ = lastQ?.kind === 'ownership' ? lastQ : null
+    const prop = clean(m.property_id) || clean(lastQ?.property_id) || ''
     const label = String(m.detected_intent || '')
     const denyMatch = OWN_DENY_RE.exec(body) || OWN_FORMER_RE.exec(body)
     const retracted = denyMatch && RETRACTION_RE.test(body.slice(denyMatch.index + denyMatch[0].length))
-    const set = (state, basis) => out.set(prop, { state, message_id: String(m.id), at: t(m), basis })
-    if (denyMatch && !retracted) set('denied', 'explicit_denial')
-    else if (lastQ && bareNoAnswer(body).ownership_denial) set('denied', 'bare_no_to_ownership_question')
-    else if (lastQ && NEVER_OWNED_LONG_RE.test(body)) set('denied', 'never_owned_to_ownership_question')
-    else if (NOT_OWNER_LABELS.has(label)) set('denied', `label:${label}`)
-    else if (retracted || OWN_CONFIRM_RE.test(body) || (lastQ && BARE_YES_RE.test(body)) || CONFIRM_LABELS.has(label)) set('confirmed', retracted ? 'retracted_denial' : 'confirmation')
+    const push = (state, basis, kind) => items.push({ property: prop, state, message_id: String(m.id), at: t(m), basis, kind, rank: EVIDENCE_RANK[kind] })
+    if (denyMatch && !retracted) push('denied', 'explicit_denial', 'explicit')
+    else if (ownQ && bareNoAnswer(body).ownership_denial) push('denied', 'bare_no_to_ownership_question', 'answer')
+    else if (ownQ && NEVER_OWNED_LONG_RE.test(body)) push('denied', 'never_owned_to_ownership_question', 'answer')
+    else if (retracted || OWN_CONFIRM_RE.test(body)) push('confirmed', retracted ? 'retracted_denial' : 'explicit_confirmation', 'explicit')
+    else if (ownQ && BARE_YES_RE.test(body)) push('confirmed', 'yes_to_ownership_question', 'answer')
+    else if (lastQ && lastQ.kind !== 'ownership' && !bareNoAnswer(body).matched && (moneyMentions(body).length || OFFER_REQUEST_RE.test(body) || (lastQ.kind === 'interest' && BARE_YES_RE.test(body)))) push('confirmed', `seller_engagement:${lastQ.kind}`, 'engagement')
+    else if (!lastQ && (moneyMentions(body).length || OFFER_REQUEST_RE.test(body)) && prop) push('confirmed', 'seller_engagement:unprompted', 'engagement')
+    else if (NOT_OWNER_LABELS.has(label)) push('denied', `label:${label}`, 'label')
+    else if (CONFIRM_LABELS.has(label)) push('confirmed', `label:${label}`, 'label')
+    else if (ENGAGEMENT_LABELS.has(label)) push('confirmed', `label:${label}`, 'label')
+    // an inbound answers (consumes) the question it follows
     lastQ = null
   }
-  return out
+  return items
+}
+
+/**
+ * Owner rule 3: walk the items in time order; a later item replaces the current one only when it is
+ * at least as confident. A LATER but LESS confident item that contradicts the current one neither
+ * wins nor is ignored: it is recorded as a conflict (the guard holds the thread for an operator).
+ * An OLDER low-confidence item never defeats newer evidence. Pure.
+ * @returns {null | (item & { conflict: null | item })}
+ */
+export function resolveOwnershipEvidence(items = []) {
+  let current = null
+  let conflict = null
+  for (const e of [...items].sort((a, b) => a.at - b.at)) {
+    if (!current || e.rank >= current.rank) { current = e; conflict = null; continue }
+    if (e.state !== current.state) conflict = e
+  }
+  return current ? { ...current, conflict } : null
+}
+
+/**
+ * @returns {Map<string, { state: 'denied'|'confirmed', message_id: string, at: number, basis: string, kind: string, rank: number }>}
+ *          property key ('' = not identified) → the resolved ownership evidence (rule 3)
+ */
+export function ownershipEvidenceByProperty({ messages = [] } = {}) {
+  const by = new Map()
+  for (const e of ownershipEvidenceItems({ messages })) by.set(e.property, [...(by.get(e.property) || []), e])
+  return new Map([...by.entries()].map(([p, list]) => [p, resolveOwnershipEvidence(list)]))
 }
 
 const PAIR_DENIAL_ROLES = new Set(['not_owner', 'former_owner', 'referral_source'])
+const isStoreDenial = (r) => clean(r.rejected_at) && PAIR_DENIAL_ROLES.has(clean(r.contact_property_role)) && (!clean(r.suppression_scope) || clean(r.suppression_scope) === 'contact_property_pair')
 
 /**
  * The property-scoped resolution store verdict (pure).
  * @param {{ property_id?: string|null, resolutions?: Array<{ property_id?: string, contact_property_role?: string, suppression_scope?: string, rejected_at?: string|null, rejection_reason?: string|null }> }} a
- * @returns {{ excluded: boolean, reason: string|null, scope: 'phone'|'person_property'|null, role: string|null, source: 'contact_property_resolution'|null }}
+ * @returns {{ excluded: boolean, hold?: boolean, reason: string|null, scope: 'phone'|'person_property'|'thread_hold'|null, role: string|null, source: 'contact_property_resolution'|null, rejected_at?: string }}
  */
 export function evaluateContactPropertyResolution({ property_id = null, resolutions = [] } = {}) {
   const target = clean(property_id)
   for (const r of resolutions || []) {
     const scope = clean(r.suppression_scope)
     const role = clean(r.contact_property_role)
+    // owner rule 4: contact-wide restrictions stay absolute (written only for an explicit opt-out)
     if (scope === 'channel_compliance' || role === 'suppressed') return { excluded: true, reason: 'contact_channel_suppressed', scope: 'phone', role: role || null, source: 'contact_property_resolution' }
   }
-  for (const r of resolutions || []) {
-    const role = clean(r.contact_property_role)
-    if (!clean(r.rejected_at) || !PAIR_DENIAL_ROLES.has(role)) continue
-    if (clean(r.suppression_scope) && clean(r.suppression_scope) !== 'contact_property_pair') continue
-    if (!target || !clean(r.property_id) || clean(r.property_id) === target) return { excluded: true, reason: 'prior_reply_not_owner', scope: 'person_property', role, source: 'contact_property_resolution', rejected_at: clean(r.rejected_at) }
-  }
+  const denials = (resolutions || []).filter(isStoreDenial)
+  const exact = target ? denials.find((r) => clean(r.property_id) === target) : null
+  if (exact) return { excluded: true, reason: 'prior_reply_not_owner', scope: 'person_property', role: clean(exact.contact_property_role), source: 'contact_property_resolution', rejected_at: clean(exact.rejected_at) }
+  // owner rule 2: a denial whose property is not identified, or an outbound whose property is not
+  // identified while the phone carries a denial, is a thread HOLD (operator resolution), never a
+  // denial of every property
+  const ambiguous = denials.find((r) => !clean(r.property_id)) || (!target ? denials[0] : null)
+  if (ambiguous) return { excluded: true, hold: true, reason: OWNERSHIP_UNRESOLVED_REASON, scope: 'thread_hold', role: clean(ambiguous.contact_property_role), source: 'contact_property_resolution', rejected_at: clean(ambiguous.rejected_at) }
   return { excluded: false, reason: null, scope: null, role: null, source: null }
 }
+
+const validOverride = (row, ov) => ov && isManualInboxSend(row) && clean(ov.actor) && clean(ov.reason).length >= 10 && Number.isFinite(Date.parse(clean(ov.at)))
 
 /**
  * @param {object} row       the send_queue row about to go out
  * @param {Array} messages   the thread's message_events (both directions), any order
- * @returns {{ blocked: boolean, reason: string|null, detail: object, version: string }}
+ * @returns {{ blocked: boolean, hold?: boolean, reason: string|null, detail: object, version: string }}
  */
 export function evaluateOwnershipRecontact(row = {}, messages = [], { resolutions = [] } = {}) {
-  const meta0 = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+  const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
   const store = evaluateContactPropertyResolution({ property_id: row.property_id, resolutions })
   if (store.excluded && store.scope === 'phone') return { blocked: true, reason: store.reason, detail: { scope: 'phone', role: store.role, source: store.source }, version: RECONTACT_GUARD_VERSION }
-  const ev = ownershipEvidenceByProperty({ messages })
   const prop = clean(row.property_id)
-  if (store.excluded) {
-    // the store says "denied for this property"; only a confirmation in the thread LATER than the
-    // recorded rejection clears it
-    const latest = ev.get(prop) || ev.get('')
-    const rejectedAt = Date.parse(store.rejected_at || '') || 0
-    const later = latest && latest.at > rejectedAt ? latest : null
-    const ov0 = meta0.ownership_recontact_override
-    const overridden = ov0 && isManualInboxSend(row) && clean(ov0.actor) && clean(ov0.reason).length >= 10 && Number.isFinite(Date.parse(clean(ov0.at)))
-    if (!(later && later.state === 'confirmed') && !overridden) return { blocked: true, reason: 'property_ownership_denied_no_recontact', detail: { scope: 'person_property', role: store.role, source: store.source }, version: RECONTACT_GUARD_VERSION }
+  const items = ownershipEvidenceItems({ messages })
+  // the evidence about THIS property: the store denial (if any) + the thread's own items for it
+  const own = items.filter((e) => prop && e.property === prop)
+  if (store.excluded && !store.hold) own.push({ property: prop, state: 'denied', message_id: null, at: Date.parse(store.rejected_at || '') || 0, basis: `store:${store.role}`, kind: 'store', rank: EVIDENCE_RANK.store })
+  const resolved = resolveOwnershipEvidence(own)
+  const overridden = validOverride(row, meta.ownership_recontact_override)
+  const overrideDetail = overridden ? { overridden: true, override: { actor: clean(meta.ownership_recontact_override.actor), reason: clean(meta.ownership_recontact_override.reason).slice(0, 200), at: clean(meta.ownership_recontact_override.at) } } : null
+  if (resolved?.conflict) {
+    if (overridden) return { blocked: false, reason: null, detail: { ...overrideDetail, conflict_message_id: resolved.conflict.message_id }, version: RECONTACT_GUARD_VERSION }
+    return { blocked: true, hold: true, reason: OWNERSHIP_UNRESOLVED_REASON, detail: { scope: 'thread_hold', property_scoped: true, conflict: true, basis: `${resolved.basis} vs later ${resolved.conflict.basis}`, evidence_message_id: resolved.message_id, conflict_message_id: resolved.conflict.message_id, action: 'operator_review' }, version: RECONTACT_GUARD_VERSION }
   }
-  // the row's property, plus a denial whose property is unknown (it answered a question about this thread)
-  const hits = [...ev.entries()].filter(([p, e]) => e.state === 'denied' && (!p || !prop || p === prop))
-  if (!hits.length) return { blocked: false, reason: null, detail: { checked: ev.size }, version: RECONTACT_GUARD_VERSION }
-  const [p, e] = hits.sort((a, b) => b[1].at - a[1].at)[0]
-  const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
-  const ov = meta.ownership_recontact_override
-  if (ov && isManualInboxSend(row) && clean(ov.actor) && clean(ov.reason).length >= 10 && Number.isFinite(Date.parse(clean(ov.at)))) {
-    return { blocked: false, reason: null, detail: { overridden: true, override: { actor: clean(ov.actor), reason: clean(ov.reason).slice(0, 200), at: clean(ov.at) }, denial_message_id: e.message_id }, version: RECONTACT_GUARD_VERSION }
+  if (resolved?.state === 'denied') {
+    if (overridden) return { blocked: false, reason: null, detail: { ...overrideDetail, denial_message_id: resolved.message_id }, version: RECONTACT_GUARD_VERSION }
+    return { blocked: true, reason: 'property_ownership_denied_no_recontact', detail: { scope: 'person_property', property_scoped: true, basis: resolved.basis, denial_message_id: resolved.message_id, source: resolved.kind === 'store' ? store.source : 'message_text' }, version: RECONTACT_GUARD_VERSION }
   }
-  return { blocked: true, reason: 'property_ownership_denied_no_recontact', detail: { scope: 'person_property', property_scoped: Boolean(p), basis: e.basis, denial_message_id: e.message_id }, version: RECONTACT_GUARD_VERSION }
+  // owner rule 2: an unidentified-property denial (thread text with no property, a store row with no
+  // property, or an outbound with no property while denials exist) holds the thread unless newer,
+  // at-least-as-confident evidence for THIS property has resolved it
+  const unresolvedText = resolveOwnershipEvidence(items.filter((e) => !e.property))
+  const anyDenialWithoutRowProperty = !prop ? resolveOwnershipEvidence(items.filter((e) => e.state === 'denied')) : null
+  const ambiguousDenial = [unresolvedText?.state === 'denied' ? unresolvedText : null, anyDenialWithoutRowProperty, store.hold ? { at: Date.parse(store.rejected_at || '') || 0, rank: EVIDENCE_RANK.store, basis: `store:${store.role}`, message_id: null } : null].filter(Boolean).sort((a, b) => b.at - a.at)[0] || null
+  if (ambiguousDenial && !(resolved && resolved.state === 'confirmed' && resolved.at > ambiguousDenial.at && resolved.rank >= ambiguousDenial.rank)) {
+    if (overridden) return { blocked: false, reason: null, detail: { ...overrideDetail, unresolved_denial_message_id: ambiguousDenial.message_id }, version: RECONTACT_GUARD_VERSION }
+    return { blocked: true, hold: true, reason: OWNERSHIP_UNRESOLVED_REASON, detail: { scope: 'thread_hold', property_scoped: false, basis: ambiguousDenial.basis, denial_message_id: ambiguousDenial.message_id, action: 'operator_review' }, version: RECONTACT_GUARD_VERSION }
+  }
+  return { blocked: false, reason: null, detail: { checked: items.length, resolved: resolved ? { state: resolved.state, basis: resolved.basis } : null }, version: RECONTACT_GUARD_VERSION }
 }

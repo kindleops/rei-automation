@@ -4195,6 +4195,14 @@ export const INTENT_PRIORITY = Object.freeze([
 ]);
 
 /** True wrong-number / wrong-person at this phone (not sold/never-owned identity). */
+/** Phone-IDENTITY statements (the number / the person is wrong): contact-wide wrong_number. */
+const PHONE_IDENTITY_PHRASES = Object.freeze([
+  "wrong number", "wrong #", "wrng number", "rong number", "incorrect number", "wrong nbr", "error number",
+  "no longer my number", "not my number", "new number", "don't know this person", "dont know this person",
+  "not associated with", "not this person", "wrong person",
+  "número equivocado", "numero equivocado", "numero incorrecto", "número incorrecto",
+]);
+
 function matchesTrueWrongNumber(text = "") {
   const normalized = lower(text);
   return includesAny(normalized, [
@@ -5258,11 +5266,31 @@ function resolveIntents(
   const is_sold_transfer = legacy_sold_transfer || reply_signals?.sold === true;
   if (!legacy_sold_transfer && reply_signals?.sold === true) reply_rule_ids.push("sold_short_multilingual");
   const is_wrong_person_claim = reply_signals?.wrong_person?.matched === true;
+  // OWNER RULE 2026-10-17 (rc-8.5.21): a PROPERTY-specific ownership denial ("never owned it", "not
+  // the owner", "I don't own that", "Never have" to our ownership question, "you're misinformed")
+  // must NEVER become a phone-level wrong-number suppression (archive_wrong_number marks the phone
+  // wrong for the owner's EVERY property). Only a PHONE-IDENTITY statement (wrong number, wrong
+  // person / a named non-addressee, "no longer my number", "don't know this person") is a
+  // contact-wide wrong_number; an ownership denial is the property-scoped property_specific_non_owner
+  // lane (no phone suppression; the contact x property pair is recorded by contact resolution).
+  const wrong_person_rule = is_wrong_person_claim ? reply_signals?.wrong_person?.rule_id || null : null;
+  // "Never have" to our ownership question = never the owner (property-scoped). A denied PREMISE
+  // ("you're misinformed") keeps its wrong_number + human-review route (no suppression is written).
+  const wrong_person_is_ownership_denial = wrong_person_rule === "wrong_person_never_owned";
+  const is_phone_identity_claim =
+    is_true_wrong ||
+    (is_wrong_person_claim && !wrong_person_is_ownership_denial) ||
+    PHONE_IDENTITY_PHRASES.some((p) => text.includes(p));
+  const is_property_ownership_denial =
+    !is_phone_identity_claim && (is_ownership_disconnect || wrong_person_is_ownership_denial || normalized_objection === "wrong_number");
   if (is_sold_transfer && !is_true_wrong && !is_wrong_person_claim) {
     intents.push("sold_property");
+  } else if (is_property_ownership_denial) {
+    intents.push("property_specific_non_owner");
+    matched_rule_ids.push("ownership_denial_property_scoped");
+    if (wrong_person_rule) reply_rule_ids.push(wrong_person_rule);
   } else if (normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect || is_wrong_person_claim) {
-    // WRONG NUMBER / WRONG PERSON / NOT OWNER / DISCONNECTED CONTACT
-    // (never-owned / not-owner identity disconnects stay phone-scoped).
+    // WRONG NUMBER / WRONG PERSON / DISCONNECTED CONTACT (phone identity: contact-wide).
     intents.push("wrong_number");
     if (is_wrong_person_claim && !(normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect)) {
       reply_rule_ids.push(reply_signals.wrong_person.rule_id);
@@ -6001,9 +6029,10 @@ function resolveIntents(
       OWNERSHIP_TRANSFER_YEARS_AGO_RE.test(text)) &&
     !/\bstill\b/i.test(text)
   ) {
-    // A SOLD transfer is the property-scoped sold_property lane; other
-    // disconnects (moved out, lost it, was mine) keep the wrong_number fold.
-    const former_owner_intent = matchesSoldTransfer(text) ? "sold_property" : "wrong_number";
+    // A SOLD transfer is the property-scoped sold_property lane. OWNER RULE 2026-10-17: the other
+    // former-owner disconnects (moved out, lost it, was mine, used to own) are ALSO about THIS
+    // property: former_owner_respondent (property-scoped), never the phone-level wrong_number fold.
+    const former_owner_intent = matchesSoldTransfer(text) ? "sold_property" : "former_owner_respondent";
     if (!intents.includes(former_owner_intent)) intents.push(former_owner_intent);
     matched_rule_ids.push("former_owner_disconnect");
   }
@@ -7990,8 +8019,18 @@ export function rescopeOwnerButNotSelling(text, result) {
 export function rescopeWrittenOwnershipDenial(text, result) {
   if (!result || typeof result !== "object") return result;
   if (result.compliance_flag === "stop_texting") return result;
-  if (result.primary_intent !== "wrong_number") return result;
   const ids = Array.isArray(result.matched_rule_ids) ? result.matched_rule_ids : [];
+  // owner rule 2026-10-17: the property-scoped ownership denial resolveIntents now routes directly
+  // (ownership_denial_property_scoped) carries the same written-denial markers as the rescope below
+  if (result.primary_intent === "property_specific_non_owner" && ids.includes("ownership_denial_property_scoped")) {
+    return {
+      ...result,
+      objection: result.objection === "wrong_number" ? null : result.objection,
+      secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "ownership_denied", "ownership_unverified", "written_ownership_denial"])],
+      matched_rule_ids: ids.includes("written_ownership_denial_property_scoped") ? ids : [...ids, "written_ownership_denial_property_scoped"],
+    };
+  }
+  if (result.primary_intent !== "wrong_number") return result;
   if (ids.includes("wrong_person_premise_denied")) return result;
   const t = String(text ?? "");
   if (matchesTrueWrongNumber(t) || matchesSoldTransfer(t)) return result;
