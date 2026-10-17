@@ -1,4 +1,5 @@
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
+import { HOLD_CAPABILITIES, holdOverrideOf, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
 import {
   CAMPAIGN_PAUSED_REASON,
   evaluateCampaignDispatchAuthority,
@@ -3099,6 +3100,58 @@ export async function processSendQueueItem(queue_row, deps = {}) {
         error: runtime_brake.error,
         message: runtime_brake.message,
         diagnostics: runtime_brake.diagnostics,
+        queue_row_id: getQueueRowId(resolved_queue_row),
+        queue_item_id: getQueueRowId(resolved_queue_row),
+      };
+    }
+  }
+
+  /**
+   * AUTOMATION HOLD (P0 containment 2026-10-16) — the single dispatch check.
+   *
+   * Every queue send (auto-reply, follow-up, nurture, campaign, workflow,
+   * retry, released review rows, manual send-now through the queue) passes
+   * here before any claim or provider call. A held thread / property / owner
+   * DEFERS: skipped, no retry consumed, row untouched (a hold is reversible).
+   * A manual operator row passes only with an explicit override carried on
+   * the row (metadata.automation_hold_override: approval_ref, reason,
+   * operator_id). Fail closed: an unreadable hold defers the send.
+   */
+  {
+    const row_metadata =
+      resolved_queue_row?.metadata && typeof resolved_queue_row.metadata === "object" ? resolved_queue_row.metadata : {};
+    const is_manual_row = row_metadata.manual_operator_send === true;
+    const hold_override = is_manual_row ? holdOverrideOf(row_metadata.automation_hold_override) : null;
+    // thread_key is the seller phone; a row whose thread_key is missing or differs from its destination is
+    // checked under both keys.
+    const dispatch_keys = [...new Set([clean(resolved_queue_row.thread_key), clean(resolved_queue_row.to_phone_number)].filter(Boolean))];
+    let dispatch_hold = null;
+    for (const thread_key of dispatch_keys.length ? dispatch_keys : [null]) {
+      dispatch_hold = await resolveAutomationHold(
+        {
+          thread_key,
+          property_id: clean(resolved_queue_row.property_id) || null,
+          master_owner_id: clean(resolved_queue_row.master_owner_id) || null,
+        },
+        { capability: is_manual_row ? HOLD_CAPABILITIES.MANUAL_SEND : HOLD_CAPABILITIES.OUTBOUND_SEND, supabase: deps.supabase || null }
+      );
+      if (dispatch_hold.held) break;
+    }
+    if (dispatch_hold.held && !(hold_override && !dispatch_hold.fail_closed)) {
+      warn("queue.dispatch_deferred_by_automation_hold", {
+        queue_row_id: getQueueRowId(resolved_queue_row),
+        hold_ids: dispatch_hold.hold_ids,
+        fail_closed: dispatch_hold.fail_closed === true,
+      });
+      return {
+        ok: false,
+        status: 423,
+        sent: false,
+        skipped: true,
+        reason: dispatch_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold",
+        error: "automation_hold",
+        message: "This conversation is under an automation hold; the send is deferred, not attempted.",
+        diagnostics: { hold_ids: dispatch_hold.hold_ids, fail_closed: dispatch_hold.fail_closed === true },
         queue_row_id: getQueueRowId(resolved_queue_row),
         queue_item_id: getQueueRowId(resolved_queue_row),
       };

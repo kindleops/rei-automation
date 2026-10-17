@@ -34,6 +34,7 @@ import {
   assertContractComplete,
 } from "@/lib/domain/seller-flow/seller-offer-policy.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { HOLD_CAPABILITIES, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -170,6 +171,18 @@ export async function persistActiveOffer({
   if (!price) return { ok: false, reason: "missing_offer_price" };
   if (!clean(thread_key)) return { ok: false, reason: "missing_thread_key" };
   if (!clean(opportunity_id)) return { ok: false, reason: "missing_opportunity_id" };
+
+  // AUTOMATION HOLD (P0 2026-10-16): a held deal's offers are frozen. A new
+  // version would supersede the preserved active offer, so nothing is written.
+  // Fail closed: an unreadable hold is a hold. (DB trigger backs this up.)
+  const offer_hold = await resolveAutomationHold(
+    { thread_key, property_id, opportunity_id, master_owner_id },
+    { capability: HOLD_CAPABILITIES.OFFER_WRITE, supabase }
+  );
+  if (offer_hold.held) {
+    warn("[OFFER_WRITE_BLOCKED_BY_AUTOMATION_HOLD]", { opportunity_id, hold_ids: offer_hold.hold_ids, fail_closed: offer_hold.fail_closed });
+    return { ok: false, reason: offer_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold", automation_hold: offer_hold };
+  }
 
   let version;
   try {
@@ -411,6 +424,17 @@ export async function acceptActiveOffer({
   if (!supabase) return { ok: false, accepted: false, reason: "missing_supabase" };
   if (!clean(acceptance_event_id)) {
     return { ok: false, accepted: false, reason: "missing_acceptance_event_id" };
+  }
+
+  // AUTOMATION HOLD (P0 2026-10-16): no acceptance binds on a held deal, from
+  // any caller. Fail closed. (DB trigger on seller_offers backs this up.)
+  const accept_hold = await resolveAutomationHold(
+    { opportunity_id },
+    { capability: HOLD_CAPABILITIES.OFFER_ACCEPTANCE, supabase }
+  );
+  if (accept_hold.held) {
+    warn("[OFFER_ACCEPT_BLOCKED_BY_AUTOMATION_HOLD]", { opportunity_id, hold_ids: accept_hold.hold_ids, fail_closed: accept_hold.fail_closed });
+    return { ok: false, accepted: false, reason: accept_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold", automation_hold: accept_hold };
   }
 
   // Replay: this exact inbound already accepted something.

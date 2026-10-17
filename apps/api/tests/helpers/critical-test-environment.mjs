@@ -10,12 +10,21 @@
 process.env.RUNTIME_STATE_ROOT = `/tmp/rea-runtime-state-test-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 import { after, before, beforeEach } from 'node:test'
+import { __setAutomationHoldResolverForTests } from '../../src/lib/domain/holds/automation-hold.js'
 import { __setDeps as setNotificationIntelligenceDeps } from '../../src/lib/domain/notifications/notification-intelligence-service.js'
 import {
   clearSystemControlCache,
   primeSystemControlCache,
   primeSystemControlValue,
 } from '../../src/lib/system-control.js'
+
+// AUTOMATION HOLD test seam (P0 2026-10-16). Production resolves holds through
+// the automation_hold_for RPC and FAILS CLOSED when it cannot (no client / no
+// rpc / error). The ~800 legacy suites use bespoke Supabase fakes with no rpc,
+// so without this seam every one of them would read "held". Default: no holds.
+// The hold suites (automation-hold-*.test.mjs) clear this seam and exercise the
+// real fail-closed resolver against fakes that implement the RPC.
+__setAutomationHoldResolverForTests(() => ({ held: false, fail_closed: false, holds: [], hold_ids: [], reason: null, source: 'test_default_no_holds' }))
 
 const ALLOWED_HOSTS = new Set([
   'localhost',

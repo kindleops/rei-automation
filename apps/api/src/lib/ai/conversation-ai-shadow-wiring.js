@@ -13,6 +13,7 @@ import { createConversationModelClient } from '@/lib/domain/conversation-ai/mode
 import { normalizePolicy, shadowAllowed } from '@/lib/domain/conversation-ai/policy.js'
 import { runConversationAiShadow } from '@/lib/domain/conversation-ai/engine.js'
 import { createSemanticCheck } from '@/lib/domain/conversation-ai/semantic-check.js'
+import { HOLD_CAPABILITIES, resolveAutomationHold } from '@/lib/domain/holds/automation-hold.js'
 
 export const SHADOW_TABLE = 'conversation_ai_shadow_decisions'
 export const POLICY_TABLE = 'conversation_ai_reply_policy'
@@ -93,7 +94,15 @@ export async function runConversationAiShadowForInbound({ providerMessageSid, in
   if (isInternalTestPhone(loaded.row.from_phone_number) || isInternalTestPhone(loaded.row.to_phone_number)) return { ran: false, code: 'INTERNAL_TEST_THREAD' }
   const modelClient = tracker ? createConversationModelClient({ provider: provider || createAnthropicProvider({ env }), tracker, env, remainingMs, signal }) : null
   const row = hypotheticalReplyRow({ sellerPhone: loaded.row.from_phone_number, ourPhone: loaded.row.to_phone_number, threadKey: loaded.row.thread_key, propertyId: loaded.row.property_id, prospectId: loaded.row.prospect_id, inboundId: loaded.row.id, inboundAt: loaded.input.inbound.at, now: loaded.input.now })
-  return runConversationAiShadow({
+  // AUTOMATION HOLD (P0 2026-10-16): a held thread's shadow decision is still
+  // RECORDED (evidence), never acted on. R1/R2 has no act path at all; the
+  // verdict is returned so any future executor must read it, and every send
+  // would still meet the enqueue / dispatch chokepoints and the DB trigger.
+  const automation_hold = await resolveAutomationHold(
+    { thread_key: loaded.row.thread_key, property_id: loaded.row.property_id },
+    { capability: HOLD_CAPABILITIES.AI_ACTION, supabase }
+  )
+  const shadow = await runConversationAiShadow({
     input: loaded.input,
     deterministic,
     eligibilityFor: ({ now }) => dryRunEligibility({ row, supabase, timezone: loaded.timezone, geography: loaded.geography, now }),
@@ -104,4 +113,7 @@ export async function runConversationAiShadowForInbound({ providerMessageSid, in
     semanticCheck: modelClient ? createSemanticCheck(modelClient) : null,
     inboundVersion: version,
   })
+  return automation_hold.held
+    ? { ...shadow, act_allowed: false, automation_hold: { hold_ids: automation_hold.hold_ids, fail_closed: automation_hold.fail_closed === true } }
+    : shadow
 }

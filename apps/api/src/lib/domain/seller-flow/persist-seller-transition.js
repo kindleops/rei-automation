@@ -26,6 +26,7 @@ import {
 import { ADE_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
 import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
 import { finalizeSellerAcceptance, isAcceptanceEdge } from "@/lib/domain/seller-flow/finalize-seller-acceptance.js";
+import { HOLD_CAPABILITIES, recordAutomationHoldEvent, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { resolveValuationSpendability } from "@/lib/domain/seller-flow/valuation-offer-authority.js";
 import { evaluateAskingPrice, STAGE3_OFFER_BANDS } from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
@@ -674,6 +675,46 @@ export async function persistSellerTransitionArtifacts({
   try {
     let opportunity = await findExistingOpportunity(supabase, { ownerId, propertyId, threadKey });
 
+    // ── AUTOMATION HOLD (P0 containment 2026-10-16) ──────────────────────
+    // A held thread / property / opportunity is NOT advanced by any inbound:
+    // no opportunity promotion or reopen, no status / offer / next-action
+    // write, no stage move, no negotiation-state flip, no acceptance, no
+    // closing case, no workflow event. The inbound itself is already recorded
+    // upstream (message_events / ledger); here only the evidence of what the
+    // automation WOULD have done is appended to automation_hold_events.
+    // Fail closed: an unreadable hold is a hold.
+    const transition_hold = await resolveAutomationHold(
+      {
+        thread_key: threadKey,
+        property_id: propertyId || opportunity?.primary_property_id || null,
+        opportunity_id: opportunity?.id || null,
+        master_owner_id: ownerId || opportunity?.master_owner_id || null,
+      },
+      { capability: HOLD_CAPABILITIES.STAGE_ADVANCE, supabase }
+    );
+    if (transition_hold.held) {
+      summary.opportunity_id = opportunity?.id || null;
+      summary.automation_hold = { hold_ids: transition_hold.hold_ids, fail_closed: transition_hold.fail_closed };
+      await recordAutomationHoldEvent({
+        event_type: "advancement_blocked",
+        scope: { thread_key: threadKey, property_id: propertyId || opportunity?.primary_property_id || null, opportunity_id: opportunity?.id || null, master_owner_id: ownerId || null },
+        capability: HOLD_CAPABILITIES.STAGE_ADVANCE,
+        hold_ids: transition_hold.hold_ids,
+        evidence: {
+          source: SOURCE,
+          inbound_event_id: clean(inboundEventId) || null,
+          intent: clean(intent) || null,
+          stage_after: transition.stage_after || null,
+          reasoning_code: transition.reasoning_code || null,
+          would_flag_acceptance: ["SELLER_ACCEPTED_OFFER", "seller_accepted_offer"].includes(clean(transition.workflow_event || transition.event)) || null,
+          fail_closed: transition_hold.fail_closed === true,
+        },
+        supabase,
+      });
+      warn("[SELLER_TRANSITION_BLOCKED_BY_AUTOMATION_HOLD]", { thread_key: threadKey, opportunity_id: opportunity?.id || null, hold_ids: transition_hold.hold_ids, fail_closed: transition_hold.fail_closed });
+      return { ...summary, skipped: true, reason: transition_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold" };
+    }
+
     if (!opportunity && transitionQualifiesForOpportunity(transition)) {
       const promotion = await promoteThreadToOpportunity(
         {
@@ -1012,6 +1053,8 @@ export async function persistSellerTransitionArtifacts({
           },
           supabase,
         });
+        summary.acceptance.routed_to_human_review = finalized?.routed_to_human_review === true;
+        summary.acceptance.review_reasons = finalized?.review_reasons || null;
         summary.acceptance.converged = Boolean(finalized?.closing_case_id);
         summary.acceptance.offer_id = finalized?.offer_id || null;
         summary.acceptance.offer_version = finalized?.offer_version ?? null;

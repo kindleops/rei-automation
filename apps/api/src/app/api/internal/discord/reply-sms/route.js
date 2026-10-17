@@ -37,6 +37,7 @@ import { mapNextAction, ACTIONS } from "@/lib/sms/flow_map.js";
 import { loadTemplate } from "@/lib/domain/templates/load-template.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
 import { prepareRenderedSmsForQueue } from "@/lib/sms/sanitize.js";
+import { HOLD_CAPABILITIES, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
 
 const logger = child({ module: "api.internal.discord.reply_sms" });
 const SEND_QUEUE_TABLE = "send_queue";
@@ -618,6 +619,17 @@ async function queueReplyWhenSmsSendQueue(
   // rc-8.5.15.1: this route inserts directly (not via the canonical writer), so it
   // stamps metadata.question_kind itself — the repeat-asking-price guard keys on it.
   payload.metadata = stampOutboundQuestionKind(payload);
+
+  // AUTOMATION HOLD (P0 2026-10-16): a Discord approval is not an audited
+  // hold override. A held thread is refused here (fail closed); the send_queue
+  // trigger enforces the same at the row.
+  const discord_hold = await resolveAutomationHold(
+    { thread_key: payload.thread_key, property_id: payload.property_id, master_owner_id: payload.master_owner_id },
+    { capability: HOLD_CAPABILITIES.MANUAL_SEND, supabase }
+  );
+  if (discord_hold.held) {
+    throw new Error(discord_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold_requires_override");
+  }
 
   const { data: queue_row, error: queue_error } = await supabase
     .from(SEND_QUEUE_TABLE)

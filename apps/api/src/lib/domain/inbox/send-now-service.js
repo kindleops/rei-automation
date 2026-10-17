@@ -10,6 +10,7 @@ import { normalizePhone } from "@/lib/utils/phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
+import { HOLD_CAPABILITIES, holdOverrideOf, recordAutomationHoldEvent, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
 import { dispatchManualOperatorSend } from "@/lib/domain/communications/dispatch-manual-operator-send.js";
 import { resolveOperatorAction } from "@/lib/domain/communications/operator-action-store.js";
 import { getSystemValue } from "@/lib/system-control.js";
@@ -1917,6 +1918,63 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       authority_version: send_authority.authority_version,
     };
   }
+  // ── AUTOMATION HOLD (P0 containment 2026-10-16) ──────────────────────────
+  // A held conversation takes a manual send ONLY with an explicit, audited
+  // override: input.automation_hold_override = { approval_ref, reason,
+  // operator_id }. Without it the send is refused before any queue row, claim
+  // or provider call. The override travels on the queue row
+  // (metadata.automation_hold_override), where the enqueue chokepoint, the
+  // dispatcher and the send_queue trigger all re-check it, and an
+  // override_used audit event is recorded. Fail closed on an unreadable hold.
+  const manual_hold_override = holdOverrideOf(input.automation_hold_override);
+  const manual_hold = await resolveAutomationHold(
+    {
+      thread_key: clean(input.thread_key) || null,
+      property_id: clean(input.property_id || objectMetadata(input.metadata).property_id) || null,
+      master_owner_id: clean(input.master_owner_id || objectMetadata(input.metadata).master_owner_id) || null,
+    },
+    { capability: HOLD_CAPABILITIES.MANUAL_SEND, supabase }
+  );
+  if (manual_hold.held && (manual_hold.fail_closed || !manual_hold_override)) {
+    logger.warn("inbox_send_now.denied_by_automation_hold", {
+      hold_ids: manual_hold.hold_ids,
+      fail_closed: manual_hold.fail_closed === true,
+      override_supplied: Boolean(manual_hold_override),
+    });
+    return {
+      ok: false,
+      sent: false,
+      queue_created: false,
+      status: 423,
+      error: manual_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold_requires_override",
+      reason: manual_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold_requires_override",
+      message: "This conversation is under an automation hold. A manual send needs an override with a reason, an approval reference and your operator id.",
+      provider_attempted: false,
+      provider_message_id: null,
+      provider_message_sid: null,
+      automation_hold: { hold_ids: manual_hold.hold_ids, fail_closed: manual_hold.fail_closed === true },
+    };
+  }
+  if (manual_hold.held && manual_hold_override) {
+    await recordAutomationHoldEvent({
+      event_type: "override_used",
+      scope: { thread_key: clean(input.thread_key) || null, property_id: clean(input.property_id) || null },
+      capability: HOLD_CAPABILITIES.MANUAL_SEND,
+      hold_ids: manual_hold.hold_ids,
+      actor: manual_hold_override.operator_id,
+      approval_ref: manual_hold_override.approval_ref,
+      evidence: { reason: manual_hold_override.reason, surface: "manual_inbox_send_now" },
+      supabase,
+    });
+    input = {
+      ...input,
+      metadata: {
+        ...objectMetadata(input.metadata),
+        automation_hold_override: { ...manual_hold_override, hold_ids: manual_hold.hold_ids },
+      },
+    };
+  }
+
   // Reaching here means the canonical authority AUTHORIZED the send, so no
   // bypass ever occurred. The flags are retained (always false) because
   // downstream metadata consumers read them.
