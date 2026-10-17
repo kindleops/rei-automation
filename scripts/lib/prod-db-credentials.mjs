@@ -28,6 +28,11 @@
 //         agent.runtime_limits when present); a required sentinel that is missing means
 //         the role cannot be verified, which is a refusal too
 //       - no CREATE on schema public
+//       - no network egress: no EXECUTE (directly, by membership or through PUBLIC) on
+//         net.http_get / http_post / http_delete or any function of the pg_net, http or
+//         dblink extensions, and no USAGE on a foreign server. In production PUBLIC holds
+//         EXECUTE on pg_net, so this refuses EVERY role until the owner revokes it — the
+//         intended fail-closed behavior.
 //     A writable credential is refused even if the caller would have run BEGIN READ ONLY.
 //     default_transaction_read_only=on is applied AFTER verification as defense in depth.
 //
@@ -189,6 +194,20 @@ with reach as (
 sentinel as (
   select s.name, s.required, to_regclass(s.name) as rel
     from unnest($1::text[], $2::boolean[]) as s(name, required)
+),
+-- network egress: pg_net's net.http_get / http_post / http_delete by name, and every function
+-- that belongs to a network-capable extension (pg_net, http, dblink)
+egress as (
+  select p.oid, p.oid::regprocedure::text as fn
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+   where (n.nspname = 'net' and p.proname in ('http_get', 'http_post', 'http_delete'))
+      or exists (select 1
+                   from pg_depend d
+                   join pg_extension e on e.oid = d.refobjid
+                  where d.classid = 'pg_proc'::regclass and d.objid = p.oid
+                    and d.refclassid = 'pg_extension'::regclass and d.deptype = 'e'
+                    and e.extname = any($3::text[]))
 )
 select current_user::text as current_user,
        session_user::text as session_user,
@@ -203,8 +222,21 @@ select current_user::text as current_user,
                                  order by s.name), '[]'::json) from sentinel s) as sentinels,
        (select coalesce(json_agg(r.rolname order by r.rolname), '[]'::json)
           from reach r
-         where has_schema_privilege(r.oid, 'public', 'CREATE')) as public_create_by
+         where has_schema_privilege(r.oid, 'public', 'CREATE')) as public_create_by,
+       (select coalesce(json_agg(json_build_object('fn', g.fn, 'roles', g.roles) order by g.fn), '[]'::json)
+          from (select g.fn, json_agg(r.rolname order by r.rolname) as roles
+                  from egress g
+                  cross join reach r
+                 where has_function_privilege(r.oid, g.oid, 'EXECUTE')
+                 group by g.fn) g) as egress_exec,
+       (select coalesce(json_agg(format('%s via %s', fs.srvname, r.rolname) order by fs.srvname, r.rolname), '[]'::json)
+          from pg_foreign_server fs
+          cross join reach r
+         where has_server_privilege(r.oid, fs.oid, 'USAGE')) as foreign_server_usage
 `
+
+/** Extensions whose functions reach the network (checked by membership, any schema). */
+export const EGRESS_EXTENSIONS = Object.freeze(['pg_net', 'http', 'dblink'])
 
 /**
  * Pure: turn the verification row into { ok, reasons }. `allowBypassRls` (from the purpose)
@@ -229,13 +261,23 @@ export function judgeReadOnly(row, { allowBypassRls = false, purpose = null } = 
     if (s.writable_by?.length) reasons.push(`${s.table} is writable (INSERT/UPDATE/DELETE/TRUNCATE) by ${s.writable_by.join(', ')}`)
   }
   if (row.public_create_by?.length) reasons.push(`schema public grants CREATE to ${row.public_create_by.join(', ')}`)
+  // network egress: a read-only role that can make the database call out can exfiltrate what
+  // it reads (or trigger side effects through an HTTP endpoint). EXECUTE reached through
+  // PUBLIC counts — in production PUBLIC holds it on pg_net, so EVERY role is refused until
+  // the owner revokes it (intended; see docs/CREDENTIAL-SAFETY.md).
+  const egress = row.egress_exec || []
+  if (egress.length) {
+    const shown = egress.slice(0, 5).map((e) => `${e.fn} (EXECUTE held by ${e.roles.join(', ')}, directly or through PUBLIC)`)
+    reasons.push(`the role can reach network-egress functions: ${shown.join('; ')}${egress.length > 5 ? `; … ${egress.length - 5} more` : ''}`)
+  }
+  if (row.foreign_server_usage?.length) reasons.push(`the role has USAGE on foreign servers (network egress): ${row.foreign_server_usage.join(', ')}`)
   return { ok: reasons.length === 0, role: row.current_user, reasons }
 }
 
 /** Run the verification on an open client. Throws CredentialRefusedError unless read-only. */
 export async function verifyRoleEnforcedReadOnly(client, { sentinels = READONLY_SENTINELS, purpose = null } = {}) {
   const spec = purpose ? READONLY_PURPOSES[purpose] : null
-  const { rows } = await client.query(VERIFY_READONLY_SQL, [sentinels.map((s) => s.table), sentinels.map((s) => Boolean(s.required))])
+  const { rows } = await client.query(VERIFY_READONLY_SQL, [sentinels.map((s) => s.table), sentinels.map((s) => Boolean(s.required)), EGRESS_EXTENSIONS])
   const verdict = { ...judgeReadOnly(rows[0], { allowBypassRls: Boolean(spec?.allowBypassRls), purpose }), purpose }
   if (!verdict.ok) refuse(`refused: the ${purpose ? `${purpose} ` : ''}diagnostics credential (role ${verdict.role}) is not role-enforced read-only — ${verdict.reasons.join('; ')}. BEGIN READ ONLY does not make a writable credential acceptable; use a least-privilege read-only role.`, verdict)
   return verdict

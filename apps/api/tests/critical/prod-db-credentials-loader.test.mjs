@@ -153,6 +153,13 @@ test("judgeReadOnly: superuser, BYPASSRLS, SET ROLE escalation, sentinel writes,
   assert.match(bad({ sentinels: [{ table: "public.sms_templates", required: true, present: false }] }).reasons[0], /missing/);
   assert.equal(bad({ sentinels: [{ table: "agent.runtime_limits", required: false, present: false }] }).ok, true);
   assert.match(bad({ public_create_by: ["ro"] }).reasons[0], /CREATE/);
+  // network egress — EXECUTE through PUBLIC counts; nothing (not even a BYPASSRLS allowlist) excuses it
+  const egress = { egress_exec: [{ fn: "net.http_post(url text,body jsonb)", roles: ["ro"] }] };
+  assert.match(bad(egress).reasons[0], /network-egress functions: net\.http_post\(url text,body jsonb\) \(EXECUTE held by ro, directly or through PUBLIC\)/);
+  assert.equal(judgeReadOnly({ ...base, ...egress }, { allowBypassRls: true }).ok, false);
+  const many = { egress_exec: Array.from({ length: 8 }, (_, i) => ({ fn: `dblink_fn_${i}()`, roles: ["ro"] })) };
+  assert.match(bad(many).reasons[0], /… 3 more/);
+  assert.match(bad({ foreign_server_usage: ["prod_srv via ro"] }).reasons[0], /USAGE on foreign servers/);
   assert.deepEqual(READONLY_SENTINELS.map((s) => `${s.table}:${s.required}`), ["public.send_queue:true", "public.sms_templates:true", "public.system_control:true", "agent.runtime_limits:false"]);
 });
 
@@ -354,6 +361,37 @@ test("disposable PG17: the loader refuses every writable role, accepts the read-
       } finally {
         await admin.query(`drop database if exists ${db}_bare with (force)`);
       }
+    });
+
+    await t.test("network egress: EXECUTE on net.http_* (even through PUBLIC), a dblink install or foreign-server USAGE is a refusal", async () => {
+      const egressRefused = refused(/network-egress functions|USAGE on foreign servers/);
+      // pg_net's shape: net.http_get / http_post / http_delete, EXECUTE granted to PUBLIC by default
+      await adminDb.query(`create schema net; grant usage on schema net to public;
+        create function net.http_get(url text) returns bigint language sql as 'select 1::bigint';
+        create function net.http_post(url text, body jsonb) returns bigint language sql as 'select 1::bigint';
+        create function net.http_delete(url text) returns bigint language sql as 'select 1::bigint';`);
+      await assert.rejects(connectReadOnlyDiagnostics({ purpose: "ops_diag", env: envFor(R.ro), pg }), refused(/net\.http_get\(text\) \(EXECUTE held by lc_t_ro_\w+, directly or through PUBLIC\)/));
+      // revoking PUBLIC (the owner's fix) makes the same role acceptable again
+      await adminDb.query("revoke execute on function net.http_get(text), net.http_post(text, jsonb), net.http_delete(text) from public");
+      const ok = await connectReadOnlyDiagnostics({ purpose: "ops_diag", env: envFor(R.ro), pg });
+      await ok.end();
+      // …and a direct grant to the role is refused again
+      await adminDb.query(`grant execute on function net.http_post(text, jsonb) to ${R.ro}`);
+      await assert.rejects(connectReadOnlyDiagnostics({ purpose: "ops_diag", env: envFor(R.ro), pg }), refused(/net\.http_post/));
+      await adminDb.query("drop schema net cascade");
+      // a network-capable extension, by membership (dblink grants EXECUTE to PUBLIC)
+      const hasDblink = (await adminDb.query("select 1 from pg_available_extensions where name = 'dblink'")).rowCount > 0;
+      if (hasDblink) {
+        await adminDb.query("create extension dblink");
+        await assert.rejects(connectReadOnlyDiagnostics({ purpose: "ops_diag", env: envFor(R.ro), pg }), refused(/network-egress functions: dblink/));
+        await adminDb.query("drop extension dblink");
+      }
+      // USAGE on a foreign server
+      await adminDb.query(`create foreign data wrapper lc_t_fdw_${sfx}; create server lc_t_srv_${sfx} foreign data wrapper lc_t_fdw_${sfx}; grant usage on foreign server lc_t_srv_${sfx} to ${R.ro}`);
+      await assert.rejects(connectReadOnlyDiagnostics({ purpose: "ops_diag", env: envFor(R.ro), pg }), egressRefused);
+      await adminDb.query(`drop server lc_t_srv_${sfx}; drop foreign data wrapper lc_t_fdw_${sfx}`);
+      const back = await connectReadOnlyDiagnostics({ purpose: "ops_diag", env: envFor(R.ro), pg });
+      await back.end();
     });
 
     await t.test("writes as the read-only role fail AT THE DATABASE (permission denied, not a read-only transaction)", async () => {

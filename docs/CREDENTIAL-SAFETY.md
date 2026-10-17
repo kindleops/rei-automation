@@ -51,6 +51,11 @@ It never reads `apps/api/.env*`, `SUPABASE_DB_URL`, `DATABASE_URL`, `SUPABASE_UR
 - None of those roles may hold `BYPASSRLS`. The one exception is the login role itself, and only when its purpose is allowlisted for BYPASSRLS (none is today). A role reachable through `SET ROLE` may never hold it.
 - `has_table_privilege(role, t, 'INSERT,UPDATE,DELETE,TRUNCATE')` must be false for every sentinel: `public.send_queue`, `public.sms_templates`, `public.system_control`, and `agent.runtime_limits` when it exists. If a required sentinel is missing, the role cannot be verified, and that also counts as a refusal.
 - No reachable role may have `CREATE` on schema `public`.
+- **No network egress.** No reachable role may hold `EXECUTE` on `net.http_get`, `net.http_post` or `net.http_delete`, or on any function belonging to the `pg_net`, `http` or `dblink` extensions. This counts EXECUTE held directly, through role membership, or through `PUBLIC`. No reachable role may have `USAGE` on a foreign server either. A role that can make the database call out could send what it reads to the outside, or trigger side effects through an HTTP endpoint, so it is not read-only in any useful sense.
+
+> **This check refuses every role in production today, and that is intended.** In this project `PUBLIC` holds `EXECUTE` on the pg_net functions, so every role inherits network egress, including any new purpose role. The loader will refuse every diagnostics credential with *"the role can reach network-egress functions: net.http_get(…) (EXECUTE held by …, directly or through PUBLIC)"* until the owner resolves it. One way is to revoke `EXECUTE` on the pg_net functions from `PUBLIC` and grant it only to the roles that really make outbound calls. Nothing in this build changes production grants. The check fails closed, by design.
+
+Limitation: the check finds egress by function name (`net.http_*`) and by extension membership. A custom `SECURITY DEFINER` wrapper around those functions is not detected. Purpose roles should be granted `EXECUTE` on no functions beyond what they need.
 
 A writable credential is refused even if the caller would have used `BEGIN READ ONLY`. After verification the loader also sets `default_transaction_read_only = on` and a `statement_timeout`, as defense in depth.
 
@@ -99,7 +104,7 @@ Migration, rollback and pretest SQL runs only on a disposable database (`scripts
 
 The per-purpose least-privilege roles are being designed separately. This build creates no role. For each approved purpose:
 
-1. Create the role per the approved migration (login, no BYPASSRLS unless that purpose is allowlisted in code, no write grants, no CREATE on public).
+1. Resolve network egress first. While `PUBLIC` can EXECUTE `net.http_get/http_post/http_delete` (pg_net), every role is refused (see above). Then create the role per the approved migration: login; no BYPASSRLS unless that purpose is allowlisted in code; no write grants; no CREATE on public; no EXECUTE on egress functions; no foreign-server USAGE.
 2. Store its URL in a file only you can read:
    ```sh
    umask 077
