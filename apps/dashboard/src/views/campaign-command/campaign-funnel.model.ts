@@ -78,7 +78,8 @@ export function funnelCountsFromPreview(preview: CampaignPreviewResult | null): 
     ? (() => {
         const resolved = matched - n(b.missing_phone)
         const sms = resolved - n(b.wrong_number) - n(b.non_sms_capable)
-        const routed = sms - n(b.suppressed) - n(b.pending_prior_touch) - n(b.active_queue_item)
+        // prior_reply_not_owner: a recorded ownership denial for this property × phone (8.5.21)
+        const routed = sms - n(b.suppressed) - n(b.prior_reply_not_owner) - n(b.pending_prior_touch) - n(b.active_queue_item)
         const readyRows = routed - n(b.no_sender_coverage)
         return { resolved, sms, routed, ready: readyRows }
       })()
@@ -99,6 +100,7 @@ export function funnelCountsFromPreview(preview: CampaignPreviewResult | null): 
       wrong_number: n(blocks.wrong_number),
       non_sms_capable: n(blocks.non_sms_capable),
       suppressed: n(blocks.suppressed),
+      prior_reply_not_owner: n(blocks.prior_reply_not_owner),
       pending_prior_touch: n(blocks.pending_prior_touch),
       active_queue_item: n(blocks.active_queue_item),
       no_sender_coverage: n(blocks.no_sender_coverage),

@@ -183,6 +183,7 @@ export const SMS_BLOCK_LABEL: Record<string, string> = {
   suppressed: 'Suppressed',
   suppression_blocked: 'Suppressed',
   wrong_number: 'Wrong number',
+  prior_reply_not_owner: 'Said not the owner',
   active_queue_item: 'Already queued',
   routing_blocked: 'No sender coverage',
   graph_not_queue_eligible: 'Not queue-eligible',

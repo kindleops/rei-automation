@@ -219,7 +219,8 @@ export const MIGRATION_TESTS = Object.freeze([
     apply: [M('PROPOSED_20261016120000_conversation_reply_turns.sql')],
     // the turn-sweep schedule seed (PROPOSED_20261016120100: psql -v owner_id, own BEGIN/COMMIT)
     // is exercised statement-for-statement by its posttest
-    posttest: [M('PROPOSED_20261016120000_conversation_reply_turns_posttest.sql'), M('PROPOSED_20261016120100_conversation_reply_turns_schedules_posttest.sql')],
+    // rc-8.5.21: the follow-up execution schedules (PROPOSED_20261016161000, same seed pattern) need agent.runtime_enqueue_event_at
+    posttest: [M('PROPOSED_20261016120000_conversation_reply_turns_posttest.sql'), M('PROPOSED_20261016120100_conversation_reply_turns_schedules_posttest.sql'), M('PROPOSED_20261016161000_followup_execution_schedules_posttest.sql')],
     rollback: [M('PROPOSED_20261016120000_conversation_reply_turns_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016120000_conversation_reply_turns_rollback_posttest.sql')],
   },
@@ -286,6 +287,7 @@ export const MIGRATION_TESTS = Object.freeze([
       M('PROPOSED_20261016140000_operations_action_center_posttest.sql'),
       M('PROPOSED_20261016140100_operations_schedules_posttest.sql'),
       M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_posttest.sql'),
+      M('PROPOSED_20261016161000_followup_execution_schedules_posttest.sql'),
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body)
     rollback: [
@@ -365,5 +367,15 @@ export const MIGRATION_TESTS = Object.freeze([
     posttest: [M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_posttest.sql')],
     rollback: [M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016150000_ai_conversation_company_identity_setting_rollback_posttest.sql')],
+  },
+  // rc-8.5.21: recontact guard, graph side — every queue_eligible writer reads contact_property_resolution
+  {
+    id: 'campaign_graph_prior_reply_not_owner',
+    setup: [SHIM, 'scripts/db/fixtures/campaign_target_graph_live_functions_baseline.sql'],
+    pretest: M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner_pretest.sql'),
+    apply: [M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner.sql')],
+    posttest: [M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner_posttest.sql')],
+    rollback: [M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016160000_campaign_graph_prior_reply_not_owner_rollback_posttest.sql')],
   },
 ])

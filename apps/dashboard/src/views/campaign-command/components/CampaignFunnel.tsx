@@ -39,6 +39,7 @@ export interface CampaignFunnelCounts {
     wrong_number?: number
     non_sms_capable?: number
     suppressed?: number
+    prior_reply_not_owner?: number
     pending_prior_touch?: number
     active_queue_item?: number
     no_sender_coverage?: number
@@ -89,6 +90,11 @@ const BLOCK_META: Record<string, { label: string; why: string; tone: 'hard' | 's
     label: 'Opted out / suppressed',
     why: 'Our own opt-out or an operational exclusion. Not vendor DNC.',
     tone: 'soft',
+  },
+  prior_reply_not_owner: {
+    label: 'Said not the owner',
+    why: 'This contact told us they do not own this property. Other contacts and properties stay eligible.',
+    tone: 'hard',
   },
   pending_prior_touch: {
     label: 'Contacted recently',
