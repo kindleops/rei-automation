@@ -17,8 +17,8 @@
 //   no_response           NO_RESPONSE (nothing is enqueued)
 // Excluded (held for a human): money / offers, financial claims, legal / contract,
 // negotiation, multi-property, Spanish (and any language not positively English).
-import crypto from 'node:crypto'
 import { questionCount, moneyMentions } from './validator.js'
+import { STATIC_PERMANENT_EXCLUSIONS, isOwnerHandledThread as staticIsOwnerHandledThread } from '@/lib/domain/holds/automation-hold-core.js'
 
 export const AI_SEND_POLICY_VERSION = 'conv-ai.send-policy.v1'
 export const AI_SEND_KILL_SWITCH_KEY = 'ai_conversation_send_enabled'
@@ -35,15 +35,15 @@ export const R3_EXECUTOR_WIRED = false
 export const AI_SEND_HARD_LIMITS = Object.freeze({ max_per_day_global: 25, max_per_seller_per_day: 1 })
 
 // OWNER DECISION 2026-10-14 (permanent): the thread at 3746 Baltimore Ave is owner-handled —
-// R3 never touches it. Matched by the sha256 of its thread_key (read 2026-10-14, BEGIN READ
-// ONLY; the key itself is never stored in code) and by the property address.
-export const OWNER_HANDLED_THREAD_SHA256 = Object.freeze(['a4d8943f54734c853e4ef6450db73a0fe8adae6c7351aeff6732c64a8c6effd6'])
-export const OWNER_HANDLED_ADDRESS_PREFIXES = Object.freeze(['3746 baltimore'])
+// R3 never touches it. ONE HOLD AUTHORITY (P0 2026-10-16): the list now lives in
+// lib/domain/holds/automation-hold.js (STATIC_PERMANENT_EXCLUSIONS), where it applies to EVERY
+// capability (template auto-reply, follow-ups, campaigns, acceptance, closing, manual sends), not only
+// the AI paths. These names stay exported for the existing AI callers; reversible holds (Hartford) are
+// read from public.automation_holds by resolveAutomationHold, which the AI executor also consults.
+export const OWNER_HANDLED_THREAD_SHA256 = Object.freeze(STATIC_PERMANENT_EXCLUSIONS.map((x) => x.thread_key_sha256))
+export const OWNER_HANDLED_ADDRESS_PREFIXES = Object.freeze(STATIC_PERMANENT_EXCLUSIONS.map((x) => x.address_prefix))
 export function isOwnerHandledThread({ thread_key = null, property_address = null } = {}) {
-  const tk = String(thread_key ?? '').trim()
-  if (tk && OWNER_HANDLED_THREAD_SHA256.includes(crypto.createHash('sha256').update(tk, 'utf8').digest('hex'))) return true
-  const addr = String(property_address ?? '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
-  return Boolean(addr) && OWNER_HANDLED_ADDRESS_PREFIXES.some((a) => addr.startsWith(a))
+  return staticIsOwnerHandledThread({ thread_key, property_address })
 }
 
 export { STOP_REQUEST_RE, isStopRequest } from './stop-request.js'

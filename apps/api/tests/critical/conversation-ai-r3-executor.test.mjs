@@ -593,3 +593,19 @@ test('coexistence: AI on + in scope ⇒ template defers; out of scope ⇒ templa
   assert.deepEqual(t, { defer: true, reason: 'inbound_reply_reserved_by_other_engine' })
 })
 
+
+// ── P0 2026-10-16: the ONE hold authority ─────────────────────────────────────
+test('automation hold (registry): an otherwise eligible AI reply on a held thread is refused before enqueue; a lookup failure refuses too', async () => {
+  for (const [hold, reason] of [[{ held: true, fail_closed: false, hold_ids: ['h1'] }, 'automation_hold'], [{ held: true, fail_closed: true, hold_ids: [] }, 'automation_hold_lookup_failed']]) {
+    resetMemoryIdempotencyLedger()
+    const w = world({ thread: S1_THREAD() })
+    const { d, table } = deps({ w })
+    let asked = null
+    d.resolveHold = async (scope, opts) => { asked = { scope, opts }; return hold }
+    const r = await executeAiConversationReply(candidate(), d)
+    assert.equal(r.status, 'refused', JSON.stringify(r))
+    assert.ok(r.reasons.includes(reason), JSON.stringify(r.reasons))
+    assert.equal(table.inserts.length, 0)
+    assert.equal(asked.scope.thread_key, TK); assert.equal(asked.opts.capability, 'ai_action')
+  }
+})

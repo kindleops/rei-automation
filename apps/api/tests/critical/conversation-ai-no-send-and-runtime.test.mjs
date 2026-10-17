@@ -156,6 +156,8 @@ const R3_DIRECT_IMPORTS = [
   'lib/domain/messages/ai-generated-message.js', 'lib/domain/queue/cancel-supabase-pending-outbound.js',
   'lib/domain/conversation-ai/playbook/v2/index.js', 'lib/domain/conversation-ai/playbook/v2/style-validator.js', 'lib/domain/conversation-ai/pipeline/outcomes.js',
   'lib/domain/conversation-ai/pipeline/compose.js', 'lib/domain/conversation-ai/persona-continuity.js',
+  // P0 2026-10-16: the executor reads the ONE hold authority (registry + static exclusions) before enqueue.
+  'lib/domain/holds/automation-hold.js',
 ].sort()
 
 function directImports(file) {
