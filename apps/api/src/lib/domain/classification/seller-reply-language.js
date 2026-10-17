@@ -97,10 +97,7 @@ export function identifyReplyLanguage(message, { detected_language = null, expli
 
   // Three or more words is real text (resolve-thread-language.js uses the same
   // threshold for trusting an English detection).
-  // rc-8.5.21 (El Paso 7a17fd6c, "Si cabron y que pedo" on a Spanish thread → an English S2): the
-  // classifier's "English" is its DEFAULT, not evidence. With no English word in the text it decides
-  // nothing — the seller's history / the thread language does.
-  if (words.length >= 3 && detected && detected !== "English") return detected;
+  if (words.length >= 3 && detected) return detected;
   return null;
 }
 

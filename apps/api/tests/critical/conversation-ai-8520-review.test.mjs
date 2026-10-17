@@ -23,12 +23,12 @@ const BARE_NO_CASES = [
   // text, matched, ownership_denial
   ['No', true, true], ['Nope', true, true], ['nah', true, true], ['No!!!!!', true, true],
   ['Not really', true, true], ['no not really', true, true], ['Absolutely not', true, true], ['No sir', true, true],
-  // rc-8.5.21 (owner P0 2026-10-16): polite / emoji negatives to OUR ownership question deny ownership too
-  ['No thanks', true, true], ['No gracias Carlos!', true, true], ['No 🙂', true, true],
+  // rc-8.5.21 (owner P0 2026-10-16): an emoji negative to OUR ownership question denies ownership; a polite one stays a decline
+  ['No thanks', true, false], ['No gracias Carlos!', true, false], ['No 🙂', true, true],
   ['No, I sold it', false, false], ['wrong number', false, false], ['STOP', false, false], ['No stop texting me', false, false], ['Yes', false, false],
 ]
 
-test('(b) the shared matcher: bare negatives incl. "Not really"; polite and emoji replies are ownership denials too (rc-8.5.21); stop words never match', () => {
+test('(b) the shared matcher: bare negatives incl. "Not really"; polite replies are never ownership denials, emoji ones are (rc-8.5.21); stop words never match', () => {
   for (const [text, matched, denial] of BARE_NO_CASES) {
     const r = bareNoAnswer(text, { names: ['Carlos'] })
     assert.equal(r.matched, matched, `matched: ${text}`)

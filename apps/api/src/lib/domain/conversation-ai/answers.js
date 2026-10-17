@@ -10,14 +10,15 @@
 // pre-check applied on top of it:
 //   polite   the refusal carries a polite tail ("No thanks", "no gracias"): a polite
 //            close reads as NOT INTERESTED, never as an ownership denial
-//   emoji    the message carries an emoji / pictograph: tone the regex cannot read, so it
-//            is never an ownership denial either (the model / a human decides)
+//   emoji    the message carries an emoji / pictograph (reported; since rc-8.5.21 an emoji
+//            negative to the ownership question IS an ownership denial — see below)
 //
-// rc-8.5.21 (owner P0 2026-10-16): polite and emoji negatives answering OUR ownership question
-// are ownership denials too (103 of 205 "dead" deals were a bare "No" to S1 stored as
-// not_interested). `polite` / `emoji` are still reported; only the S2+ reading uses them.
+// rc-8.5.21 (owner P0 2026-10-16): an emoji negative ("No 👎") answering OUR ownership question is
+// an ownership denial too (it is in the 103-thread denial cohort: a bare "No" to S1 stored as
+// not_interested). A POLITE tail ("No thanks") stays a decline (RC 8.5.15; the investigation counts
+// "No thank you" as disinterest).
 // What each caller does with a match is policy, applied against OUR last question:
-//   after the ownership question: ownership_denial (any bare negative)   → ownership denied
+//   after the ownership question: ownership_denial (not polite)         → ownership denied
 //                                 (property-scoped; no nurture, no further ownership ask)
 //   after the interest question:  any bare negative → not interested (30-day follow-up)
 import { matchBareNegative } from '../classification/seller-reply-families.js'
@@ -38,7 +39,7 @@ export function bareNoAnswer(text, { names = [] } = {}) {
   if (!m) return { matched: false, canonical: null, polite: false, emoji: false, ownership_denial: false }
   const polite = POLITE_TAIL_RE.test(m.canonical)
   const emoji = PICTOGRAPH_RE.test(body)
-  return { matched: true, canonical: m.canonical, polite, emoji, ownership_denial: true }
+  return { matched: true, canonical: m.canonical, polite, emoji, ownership_denial: !polite }
 }
 
 /** A bare negative of any kind ("No", "Not really", "No thanks"). */

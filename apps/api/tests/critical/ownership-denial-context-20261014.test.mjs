@@ -141,16 +141,25 @@ test("S1 'Not anymore' is a former owner (sold lane): property pairing closed, p
   assert.equal(r.decision.next_action, "disposition_property_sold");
 });
 
-test("rc-8.5.21 (owner P0 2026-10-16): S1 polite negatives ('No thanks', 'No gracias Carlos!', 'No 👎') answer the OWNERSHIP question: property-scoped denial, no nurture", async () => {
-  for (const [message, q] of [["No thanks", "s1_still_own"], ["No gracias Carlos!", "s1_es"], ["No 👎", "s1_yours"]]) {
+test("S1 polite declines ('No thanks', 'No gracias Carlos!') answer a sales approach: decline, 30-day nurture (unchanged)", async () => {
+  for (const [message, q] of [["No thanks", "s1_still_own"], ["No gracias Carlos!", "s1_es"]]) {
+    const r = await replay(message, q);
+    assert.equal(r.classification.primary_intent, "not_interested", message);
+    assert.ok(r.classification.matched_rule_ids.includes("ctx_polite_no_after_ownership_check_not_interested"));
+    assert.equal(r.decision.audit_reason, "s1_not_for_sale_advance_with_followup");
+    assert.equal(r.decision.should_suppress_contact, false);
+    assert.ok(r.decision.follow_up_at, "keeps the 30-day nurture");
+  }
+});
+
+test("rc-8.5.21 (owner P0 2026-10-16): an emoji negative ('No 👎', 'Nope 🙅') to the OWNERSHIP question is the property-scoped denial (the 103-thread cohort), no nurture; to S2 it stays the decline", async () => {
+  for (const [message, q] of [["No 👎", "s1_yours"], ["Nope 🙅", "s1_still_own"]]) {
     const r = await replay(message, q);
     assert.equal(r.classification.primary_intent, "property_specific_non_owner", message);
-    assert.ok(r.classification.matched_rule_ids.includes("ctx_polite_no_after_ownership_check_ownership_unverified"), r.classification.matched_rule_ids.join(","));
-    assert.ok(!r.classification.matched_rule_ids.includes("ctx_polite_no_after_ownership_check_not_interested"));
+    assert.ok(r.classification.matched_rule_ids.includes("ctx_emoji_no_after_ownership_check_ownership_unverified"), r.classification.matched_rule_ids.join(","));
     assertNoFollowupDecline(r, "s1_ownership_denied_unverified_no_followup");
   }
-  // the same words to S2 stay the 30-day decline
-  const s2 = await replay("No thanks", "s2");
+  const s2 = await replay("No 👎", "s2");
   assert.equal(s2.classification.primary_intent, "not_interested");
 });
 

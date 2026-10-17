@@ -6,7 +6,7 @@
 //   recontact a property-scoped ownership denial (contact_property_resolution, or the thread's
 //             own text) blocks every outbound about THAT property; opt-out stays contact-wide;
 //             only later ownership evidence or an audited MANUAL override crosses it
-//   defects   "I'm listening" / "What amount ?" / "Hi Jake. Yes" / "No never have" / polite S1 "No";
+//   defects   "I'm listening" / "What amount ?" / "Hi Jake. Yes" / "No never have" / emoji S1 "No 👎";
 //             Pittsburgh 8d03a7c4 (no price question after a stated price); El Paso 7a17fd6c
 //             (Spanish continuity); row 8992ba40 (one language truth in the target snapshot)
 import test from 'node:test'
@@ -127,12 +127,13 @@ test('store: a rejected pair excludes THAT property only; channel compliance exc
 const ownershipQ = (id, min, property_id = 'p1') => ({ id, direction: 'outbound', message_body: 'Hey Pat, this is Jake. Do you still own 1 Main St?', created_at: at(min), property_id })
 const inbound = (id, body, min, extra = {}) => ({ id, direction: 'inbound', message_body: body, created_at: at(min), ...extra })
 
-test('text evidence: a bare / polite "No" or "never have" to our ownership question denies THAT property', () => {
-  for (const body of ['No', 'No thanks', 'Nope 🙅', 'No never have', 'Never owned it']) {
+test('text evidence: a bare / emoji "No" or "never have" to our ownership question denies THAT property; a polite "No thanks" is a decline', () => {
+  for (const body of ['No', 'Nope 🙅', 'No 👎', 'No never have', 'Never owned it']) {
     const ev = ownershipEvidenceByProperty({ messages: [ownershipQ('o1', 0), inbound('i1', body, 5)] })
     assert.equal(ev.get('p1')?.state, 'denied', body)
   }
-  assert.equal(bareNoAnswer('No thanks').ownership_denial, true)
+  assert.equal(bareNoAnswer('No thanks').ownership_denial, false)
+  assert.notEqual(ownershipEvidenceByProperty({ messages: [ownershipQ('o1', 0), inbound('i1', 'No thanks', 5)] }).get('p1')?.state, 'denied', 'polite = decline (30-day nurture)')
   // the same "No" to an INTEREST question is disinterest (30-day nurture), never a denial
   const s2 = ownershipEvidenceByProperty({ messages: [{ id: 'o1', direction: 'outbound', message_body: 'Would you consider an offer on 1 Main St if the number made sense?', created_at: at(0), property_id: 'p1' }, inbound('i1', 'No', 5)] })
   assert.notEqual(s2.get('p1')?.state, 'denied')
@@ -217,7 +218,8 @@ for (const [message, q, intent, rule] of [
   ['Hi Jake. Yes', 's1', 'ownership_confirmed', 'ctx_yes_after_ownership_check_after_greeting'],
   ['No never have', 's1', 'property_specific_non_owner', 'ctx_never_owned_after_ownership_check'],
   ['Never have', 's1', 'property_specific_non_owner', 'ctx_never_owned_after_ownership_check'],
-  ['No thanks', 's1', 'property_specific_non_owner', 'ctx_polite_no_after_ownership_check_ownership_unverified'],
+  ['No 👎', 's1', 'property_specific_non_owner', 'ctx_emoji_no_after_ownership_check_ownership_unverified'],
+  ['No thanks', 's1', 'not_interested', 'ctx_polite_no_after_ownership_check_not_interested'],
 ]) {
   test(`classifier reads the previous question: ${JSON.stringify(message)} after ${q} → ${intent} (never unclear / not_interested)`, async () => {
     const r = await replay(message, q)
@@ -256,8 +258,8 @@ test('El Paso 7a17fd6c: everyday Spanish replies keep the Spanish thread languag
     const r = resolveSellerReplyLanguage({ message: body, detected_language: 'English', thread_language: 'Spanish' })
     assert.equal(r.language, 'Spanish', body)
   }
-  // the classifier's English DEFAULT decides nothing; the thread does
-  assert.equal(identifyReplyLanguage('ok ok 300k', { detected_language: 'English' }), null)
+  // the word evidence decides before the classifier's English default ("no speako aspanish" stays English)
+  assert.equal(identifyReplyLanguage('Si cabron y que pedo', { detected_language: 'English' }), 'Spanish')
   // real English stays English
   assert.equal(resolveSellerReplyLanguage({ message: 'Yes I still own it', detected_language: 'English', thread_language: 'Spanish' }).language, 'English')
 })

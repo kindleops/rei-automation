@@ -451,13 +451,15 @@ export function applyContextualShortReply(messageText, validated) {
       const bare = matchBareNegative(messageText, {
         names: [validated.context.last_outbound_agent, validated.context.last_outbound_addressee].filter(Boolean),
       });
-      // A thumbs-down / emoji carries sentiment ("No 👎"): a decline, not a denial.
-      const polite = Boolean(bare && (POLITE_DECLINE_TAIL_RE.test(bare.canonical) || EMOJI_SENTIMENT_RE.test(String(messageText))));
-      // rc-8.5.21 (owner P0 2026-10-16, investigator spec d): ANY bare negative answering OUR
-      // ownership question — polite ("No thanks") or with an emoji — is a PROPERTY-SCOPED ownership
-      // denial; not_interested only when the previous question was S2 or later.
-      if (bare && mode === 'ownership_unverified') {
-        return ownershipUnverifiedResult(messageText, validated, polite ? 'ctx_polite_no_after_ownership_check_ownership_unverified' : 'ctx_bare_no_after_ownership_check_ownership_unverified');
+      // A polite tail ("No thanks", "No gracias Carlos!") answers a sales approach: the 30-day
+      // decline (RC 8.5.15; the 2026-10-16 investigation counts "No thank you" as disinterest).
+      const polite = Boolean(bare && POLITE_DECLINE_TAIL_RE.test(bare.canonical));
+      // rc-8.5.21 (owner P0 2026-10-16, investigator spec d): a bare negative to OUR ownership
+      // question — with or without an emoji ("No 👎" is in the 103-thread denial cohort) — is the
+      // PROPERTY-SCOPED ownership denial; not_interested only after S2 or later.
+      const emoji = Boolean(bare && EMOJI_SENTIMENT_RE.test(String(messageText)));
+      if (bare && mode === 'ownership_unverified' && !polite) {
+        return ownershipUnverifiedResult(messageText, validated, emoji ? 'ctx_emoji_no_after_ownership_check_ownership_unverified' : 'ctx_bare_no_after_ownership_check_ownership_unverified');
       }
       // "Nope should be the city of Jennings" (eval #131): a "No" that names
       // someone else as the owner. A phone number in it is a referral -- not here.
