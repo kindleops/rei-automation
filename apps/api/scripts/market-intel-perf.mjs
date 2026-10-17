@@ -1,12 +1,9 @@
 // Read-only perf harness: runs the real Market Intelligence service against prod with its own
 // read-only pool (BEGIN READ ONLY + SET LOCAL statement_timeout; one connection). Run only in a quiet
-// window. Usage (from apps/api): node --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("./tests/alias-loader.mjs", pathToFileURL("./"));' scripts/market-intel-perf.mjs
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-const pg = createRequire(import.meta.url)('pg')
-const url = readFileSync('/tmp/.dburl', 'utf8').trim()
-const pool = new pg.Pool({ connectionString: url, ssl: url.includes('localhost') ? false : { rejectUnauthorized: false }, max: 1 })
-pool.on('connect', (c) => { c.query('SET default_transaction_read_only = on').catch(() => {}) })
+// window. Credential (rc-8.5.21-c): the role-enforced read-only diagnostics role,
+// LC_RO_MARKET_INTEL_DB_URL_FILE (scripts/lib/prod-db-credentials.mjs). Usage (from apps/api): node --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("./tests/alias-loader.mjs", pathToFileURL("./"));' scripts/market-intel-perf.mjs
+import { openReadOnlyPool } from '../../../scripts/lib/prod-db-credentials.mjs'
+const pool = await openReadOnlyPool({ purpose: 'market_intel', applicationName: 'lc-market-intel-perf', max: 1 })
 const query = async (sql, params = [], timeoutMs = 30_000) => {
   const c = await pool.connect()
   try { await c.query('BEGIN READ ONLY'); await c.query(`SET LOCAL statement_timeout = ${Math.trunc(timeoutMs)}`); const r = await c.query(sql, params); await c.query('COMMIT'); return r }

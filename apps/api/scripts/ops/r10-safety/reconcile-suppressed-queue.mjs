@@ -18,7 +18,7 @@
 // the owner; rows in statuses the canonical path does not cancel (paused_*,
 // retry, blocked_*) are listed separately because they can resume.
 //
-//   DATABASE_URL=... node --import ./tests/register-aliases.mjs \
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --import ./tests/register-aliases.mjs \
 //     scripts/ops/r10-safety/reconcile-suppressed-queue.mjs --since=2026-10-01 --out=<dir>
 import { connectReadOnly, phoneRef, e164, arg, writeOut, csv, roSupabase } from "./_ro-db.mjs";
 import { CANCELLABLE_QUEUE_STATUSES, TERMINAL_QUEUE_OUTCOMES } from "@/lib/domain/compliance/canonical-no-contact-states.js";

@@ -57,6 +57,11 @@ export const ALLOWLIST = Object.freeze({
   'apps/api/tests/critical/offerr-staging-guard.test.mjs': { rules: ['prod-ref', 'pooler-host'], reason: 'proves the Offerr staging guard REFUSES the production ref; never connects' },
   'apps/api/tests/critical/map-ownership-production-lookup.test.mjs': { rules: ['prod-ref'], reason: 'asserts the dashboard production config string; stubbed fetch, never connects' },
   'apps/api/tests/critical/inbound-recovery-signature-gate.test.mjs': { rules: ['prod-secret-env'], reason: 'saves and restores the variable around a placeholder value; never connects' },
+  // rc-8.5.21-c credential safety: the derivation scanner, its inventory and the loader tests NAME these sources to refuse them
+  'scripts/db/scan-credential-derivation.mjs': { rules: ['dburl-file', 'prod-secret-env'], reason: 'the credential-derivation scanner\'s own patterns and documentation' },
+  'scripts/db/credential-inventory.mjs': { rules: ['dburl-file', 'prod-secret-env'], reason: 'the inventory describes in prose what each legacy script used to read' },
+  'apps/api/tests/critical/prod-db-credentials-loader.test.mjs': { rules: ['dburl-file'], reason: 'proves the loader REFUSES /tmp/.dburl by name; never opens it; disposable PG17 only' },
+  'apps/api/tests/critical/credential-derivation-scan.test.mjs': { rules: ['dburl-file', 'prod-secret-env'], reason: 'feeds forbidden strings to the derivation scanner to prove it catches them; never connects' },
 })
 
 const TEST_FILE = /(^|\/)(tests?|__tests__|e2e)\/|\.(test|spec)\.[cm]?[jt]sx?$/

@@ -85,6 +85,14 @@ jobs:
       - name: no production target in test harnesses
         run: node scripts/db/scan-test-prod-targets.mjs
 
+      # CREDENTIAL SAFETY (rc-8.5.21-c, owner directive 2026-10-16): no test, fixture,
+      # migration harness, script or package.json entry may derive DB / service
+      # credentials from env files or SUPABASE_DB_URL / DATABASE_URL / service-role env
+      # vars, except the FROZEN inventory allowlist (scripts/db/credential-inventory.mjs).
+      # New tooling goes through scripts/lib/prod-db-credentials.mjs. Pure file check.
+      - name: no silent credential derivation in tooling (frozen allowlist)
+        run: node scripts/db/scan-credential-derivation.mjs
+
       # Chunked: as one process this suite has been killed mid-run three times
       # (twice locally, once on a runner), each time exiting with NO summary --
       # which looks identical to success unless you check for it. The chunked
@@ -116,6 +124,15 @@ jobs:
       # production-like or non-loopback target before connecting.
       - name: migration round-trips on the ephemeral Postgres (scripts/db/run-migration-test.mjs --all)
         run: node scripts/db/run-migration-test.mjs --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres --all
+
+      # The production credential loader against THIS ephemeral Postgres only: writable
+      # role shapes are refused, the read-only role is accepted, its writes fail at the
+      # database. LC_MIGRATION_TEST_ADMIN_URL is loopback (assertDisposableTarget).
+      - name: credential loader on the ephemeral Postgres (role-enforced read-only)
+        working-directory: apps/api
+        env:
+          LC_MIGRATION_TEST_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: node --test --test-concurrency=1 tests/critical/prod-db-credentials-loader.test.mjs
 
       - name: dashboard typecheck (784 source files)
         run: npm --prefix apps/dashboard run typecheck

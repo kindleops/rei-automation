@@ -35,12 +35,15 @@
  * ONE statement in ONE transaction through a direct Postgres connection
  * (applyStatusTransitionAtomic), so a partial failure can never leave a status
  * change without its audit row or an audit row without the change. --apply
- * therefore needs SUPABASE_DB_URL / DATABASE_URL; the dry run does not.
+ * therefore needs that connection; since rc-8.5.21-c it comes ONLY from the explicit
+ * production-write path (scripts/lib/prod-db-credentials.mjs: --prod-write=<approval-ref>,
+ * LC_PROD_WRITE_DB_URL_FILE, interactive TTY confirmation), never from env files or
+ * SUPABASE_DB_URL / DATABASE_URL. The dry run does not open it.
  *
  * Usage (from apps/api):
  *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repair-not-interested-nurture.mjs
  *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repair-not-interested-nurture.mjs --json
- *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repair-not-interested-nurture.mjs --apply [--include-legacy] [--limit=N]
+ *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repair-not-interested-nurture.mjs --apply --prod-write=<approval-ref> [--include-legacy] [--limit=N]
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -273,13 +276,8 @@ export async function applyStatusTransitionAtomic(pgClient, t) {
 }
 
 export async function openRepairPgClient() {
-  const { default: pg } = await import("pg");
-  const { resolveDatabaseUrl } = await import("../src/lib/postgres/resolve-database-url.js");
-  const url = resolveDatabaseUrl();
-  if (!url) throw new Error("--apply needs a database URL (SUPABASE_DB_URL / DATABASE_URL) for the atomic status+audit write");
-  const client = new pg.Client({ connectionString: url, ssl: url.includes("localhost") ? false : { rejectUnauthorized: false } });
-  await client.connect();
-  return client;
+  const { connectProdWrite } = await import("../../../scripts/lib/prod-db-credentials.mjs");
+  return connectProdWrite({ purpose: "not-interested nurture repair: atomic opportunity status + audit writes", applicationName: "lc-nurture-repair" });
 }
 
 async function applyRepair(db, s, decision, scheduleFollowUp, pgClient) {

@@ -29,6 +29,12 @@ on:
       - 'apps/api/tests/**'
       - 'apps/api/scripts/**'
       - 'apps/dashboard/**/*.test.*'
+      # rc-8.5.21-c credential safety: the loader, every script the scan covers, package.json entries
+      - 'scripts/**'
+      - 'apps/dashboard/scripts/**'
+      - 'apps/*/package.json'
+      - 'package.json'
+      - 'docs/CREDENTIAL-SAFETY.md'
       - '.github/workflows/cloudflare-staging.yml'
 
 permissions:
@@ -59,6 +65,8 @@ jobs:
         run: node scripts/db/lint-migration-fixtures.mjs
       - name: no production target in test harnesses
         run: node scripts/db/scan-test-prod-targets.mjs
+      - name: no silent credential derivation in tooling (frozen allowlist, rc-8.5.21-c)
+        run: node scripts/db/scan-credential-derivation.mjs
       - name: migration round-trips on the disposable Postgres (runner)
         run: node scripts/db/run-migration-test.mjs --admin-url postgres://postgres:postgres@127.0.0.1:5432/postgres --all
 
@@ -135,6 +143,12 @@ jobs:
           INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000
           node --experimental-strip-types --no-warnings=ExperimentalWarning --import ./tests/register-aliases.mjs
           --test --test-concurrency=1 tests/critical/agent-*.test.mjs
+
+      - name: credential loader on the disposable Postgres (role-enforced read-only, rc-8.5.21-c)
+        working-directory: apps/api
+        env:
+          LC_MIGRATION_TEST_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: node --test --test-concurrency=1 tests/critical/prod-db-credentials-loader.test.mjs
 
       - name: multi-process concurrency proof (24-way, as the least-privilege agent_api role)
         run: |

@@ -4,12 +4,16 @@
 // (no-response-followup.js evaluateNoResponseCandidate).
 //
 //   cd apps/api && nice -n 15 node --import ./tests/register-aliases.mjs \
-//     scripts/ops/no-response-followup-dry-run.mjs --db-url-file /tmp/.dburl \
+//     scripts/ops/no-response-followup-dry-run.mjs \
 //     --out ../../tmp/followup-s2/DRY_RUN.json
 //
-// Safety: BEGIN READ ONLY + statement_timeout 30s; the URL is never printed.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+// Credential (rc-8.5.21-c): the role-enforced read-only diagnostics role from
+// scripts/lib/prod-db-credentials.mjs (LC_RO_OPS_DIAG_DB_URL_FILE, verified before the
+// first query). Safety on top: BEGIN READ ONLY + statement_timeout 30s; the URL is
+// never printed.
+import { writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { connectReadOnlyDiagnostics } from "../../../../scripts/lib/prod-db-credentials.mjs";
 import {
   evaluateNoResponseCandidate,
   resolveNoResponseConfig,
@@ -71,10 +75,7 @@ select me.id, me.thread_key, coalesce(me.sent_at, me.event_timestamp, me.created
 `;
 
 async function main() {
-  const url = String(readFileSync(arg("db-url-file", "/tmp/.dburl"), "utf8")).trim();
-  const { default: pg } = await import("pg");
-  const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
-  await client.connect();
+  const client = await connectReadOnlyDiagnostics({ purpose: "ops_diag", applicationName: "lc-followup-dry-run" });
   let rows;
   let offer_bodies;
   try {

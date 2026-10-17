@@ -1,5 +1,6 @@
 -- DB-side emergency cleanup for queue safety and global lock enforcement.
--- Run with: psql "$DATABASE_URL" -f scripts/cleanup-send-queue-system-control.sql
+-- WRITES PRODUCTION. Run with (from apps/api; explicit production-write path, interactive TTY):
+--   node ../../scripts/lib/prod-db-credentials.mjs psql-write --prod-write=<approval-ref> -f scripts/cleanup-send-queue-system-control.sql
 
 -- 1) Pause rows with missing seller name patterns.
 update public.send_queue

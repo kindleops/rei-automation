@@ -1,6 +1,7 @@
 -- RC 8.5.5 · eg_property_facts VERIFICATION (read-only; every statement inside BEGIN READ ONLY … ROLLBACK).
 -- Run after the backfill logs 'ok':
---   psql "$(cat /tmp/.dburl)" -X -v ON_ERROR_STOP=1 -f scripts/entity-graph/eg-property-facts-verify.sql
+--   node scripts/lib/prod-db-credentials.mjs psql entity_graph -v ON_ERROR_STOP=1 -f scripts/entity-graph/eg-property-facts-verify.sql
+--   (the role-enforced read-only diagnostics credential, LC_RO_ENTITY_GRAPH_DB_URL_FILE)
 -- Prints counts, null rates, plans and timings only (no names / phones / addresses).
 \timing on
 begin read only;

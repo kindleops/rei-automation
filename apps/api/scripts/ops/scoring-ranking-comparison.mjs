@@ -11,13 +11,14 @@
  * this shows complete coverage and an understood ranking difference.
  *
  *   cd apps/api
- *   node --env-file=.env.local scripts/ops/scoring-ranking-comparison.mjs [--backfill-only] [--min-n=30] [--json]
+ *   LC_RO_SELLER_INTEL_DB_URL_FILE=<0600 file> node scripts/ops/scoring-ranking-comparison.mjs [--backfill-only] [--min-n=30] [--json]
+ *   (the role-enforced read-only diagnostics credential; scripts/lib/prod-db-credentials.mjs)
  *
  * Load safety: read-only transaction, statement_timeout 30 s, keyset pages of
  * 5,000 over property_acquisition_scores (driven by the score table, joined to
  * properties by its unique property_id index).
  */
-import pg from 'pg';
+import { connectReadOnlyDiagnostics } from '../../../../scripts/lib/prod-db-credentials.mjs';
 
 import { buildRankComparison } from '../../src/lib/acquisition/scoringRankComparison.js';
 
@@ -30,11 +31,8 @@ const arg = (name, fallback = null) => {
 const PAGE = 5_000;
 
 async function main() {
-  const url = String(process.env.SUPABASE_DB_URL || '').trim();
-  if (!url) throw new Error('SUPABASE_DB_URL is required');
   const backfillOnly = Boolean(arg('backfill-only', false));
-  const client = new pg.Client({ connectionString: url, statement_timeout: 30_000 });
-  await client.connect();
+  const client = await connectReadOnlyDiagnostics({ purpose: 'seller_intel', applicationName: 'lc-scoring-ranking-comparison', statementTimeoutMs: 30_000 });
   const rows = [];
   try {
     await client.query('BEGIN READ ONLY');

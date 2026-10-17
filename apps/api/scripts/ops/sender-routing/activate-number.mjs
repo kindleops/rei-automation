@@ -68,6 +68,7 @@ check("inbound_verified", proofOk, (inbound || []).length ? `last inbound ${inbo
 const { data: sc } = await sb.from("system_control").select("value").eq("key", "sms_blocked_sender_numbers").maybeSingle();
 const blocked = new Set(String(sc?.value || "").split(",").map(normalizeE164).filter(Boolean));
 check("not_operator_blocked", !blocked.has(number), blocked.has(number) ? "on the operator blocklist; routing never overrides a block" : "not blocked");
+await sb.close();
 
 for (const c of checks) console.log(`${c.pass ? "PASS" : "FAIL"} ${c.name.padEnd(22)} ${c.detail}`);
 const pass = checks.every((c) => c.pass);
