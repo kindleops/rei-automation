@@ -46,6 +46,10 @@ import {
   resolvePostSendBudgetMs,
   runPostSendProjection,
 } from "@/lib/domain/inbox/post-send-projection.js";
+import {
+  runManualOfferGuard,
+  MANUAL_OFFER_REFUSAL_REASON,
+} from "@/lib/domain/inbox/manual-offer-guard.js";
 
 // Final safety rail before provider dispatch: never let an SMS go out addressed to
 // an entity/LLC/trust name (e.g. "Hey West 7th Apartments LLC,"). Checks only the
@@ -1348,6 +1352,53 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     });
   }
 
+  // ── Step 3c: MANUAL OFFER AUTHORITY (P0 2026-10-16, off by default) ──
+  // A dollar amount in a manual body is judged against the property's Decision
+  // Engine ceiling / valuation. Mode lives in system_control
+  // manual_offer_guard_mode (off | shadow | enforce); absent or unreadable is
+  // OFF and changes nothing. Under enforce a violation is refused unless the
+  // request carries a complete offer_override {reason, approval_ref,
+  // operator_id}; the generic operator_override / force booleans never satisfy
+  // it. Historical rows are never touched: this runs only before a new insert.
+  const offer_guard = await (deps.manualOfferGuardImpl || runManualOfferGuard)({
+    input,
+    normalized,
+    supabase,
+    getSystemValue: deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null),
+  });
+  if (offer_guard?.decision === "refused") {
+    const proof = buildManualSendProof({
+      input,
+      normalized,
+      queue_inserted: false,
+      detail_reason: offer_guard.override_rejection || "override_missing",
+      warning_codes,
+    });
+    logger.warn("inbox_send_now.early_exit", {
+      ...request_log,
+      reason: MANUAL_OFFER_REFUSAL_REASON,
+      detail_reason: offer_guard.override_rejection || "override_missing",
+      max_amount: offer_guard.record?.max_amount ?? null,
+      violations: offer_guard.record?.violations || [],
+      queue_inserted: false,
+    });
+    return {
+      ok: false,
+      status: 423,
+      error: MANUAL_OFFER_REFUSAL_REASON,
+      reason: MANUAL_OFFER_REFUSAL_REASON,
+      detail_reason: offer_guard.override_rejection || "override_missing",
+      override_required: true,
+      override_missing_fields: offer_guard.override_missing_fields || [],
+      manual_offer_guard: offer_guard.record,
+      queue_created: false,
+      queue_inserted: false,
+      proof,
+    };
+  }
+  if (offer_guard?.warning_code) warning_codes.push(offer_guard.warning_code);
+  const offer_override = offer_guard?.decision === "overridden" ? offer_guard.override : null;
+
   // ── Step 4: Insert queue row ────────────────────────────────────────
   const now = nowIso();
   const queue_id = clean(input.queue_id) || normalized.queue_key;
@@ -1462,6 +1513,13 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
           thread_key: normalized.thread_key,
           to_phone_number: normalized.to_phone_number,
           operator_email: clean(input.operator_email) || null,
+          // An offer above the engine's authority goes out only under an
+          // explicit override; the action row is its durable audit record.
+          ...(offer_override
+            ? {
+                operator_note: `manual_offer_override approval_ref=${offer_override.approval_ref} operator_id=${offer_override.operator_id} max_amount=${offer_guard.record?.max_amount ?? ""} violations=${(offer_guard.record?.violations || []).join(",")} reason=${offer_override.reason}`.slice(0, 1000),
+              }
+            : {}),
         },
         { supabase }
       );
@@ -1474,6 +1532,21 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
 
     if (resolved?.ok) {
       operator_action_id = resolved.operator_action_id;
+    } else if (offer_override) {
+      // An override that cannot be audited is not an override.
+      logger.error("inbox_send_now.offer_override_not_audited", {
+        ...request_log,
+        reason: resolved?.reason || "operator_action_store_error",
+      });
+      return {
+        ok: false,
+        status: 503,
+        error: "manual_offer_override_not_audited",
+        reason: "manual_offer_override_not_audited",
+        detail_reason: resolved?.reason || "operator_action_store_error",
+        queue_created: false,
+        queue_inserted: false,
+      };
     } else if (dispatches_later) {
       logger.error("inbox_send_now.operator_action_not_durable", {
         ...request_log,
@@ -1562,6 +1635,7 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
           operator_override: operator_override ? true : false,
           ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
           ...(repeat_ask.ok ? { repeat_ask_override: repeat_ask.override } : {}),
+          ...(offer_guard?.record ? { manual_offer_guard: offer_guard.record } : {}),
         },
       },
       insert_deps
