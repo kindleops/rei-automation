@@ -69,9 +69,12 @@ const OWNERSHIP_DENIAL_RELABEL_8515 = {
 };
 for (const [id, patch] of Object.entries(OWNERSHIP_DENIAL_RELABEL_8515)) LABELS[id] = { ...LABELS[id], ...patch };
 // OWNER P0 2026-10-16 (rc-8.5.21): an emoji negative ("No 👎") to the ownership question is in the
-// 103-thread ownership-denial cohort: the property-scoped denial (no reply, no nurture). A polite
-// "No thanks" (#337) stays the decline.
+// 103-thread ownership-denial cohort: the property-scoped denial (no reply, no nurture).
 for (const id of ["292", "022"]) LABELS[id] = { ...LABELS[id], intent: "property_specific_non_owner" };
+// OWNER DECISION LOCKED 2026-10-17 (supersedes 831df6cd): a polite "No thanks" (#337) to the ownership
+// question is ownership_declined_unverified — declined engagement, ownership unverified, a property ×
+// contact hold; never the 30-day nurture, never a denial. Sentiment / outcome labels unchanged.
+LABELS["337"] = { ...LABELS["337"], intent: "ownership_declined_unverified" };
 // RC 8.5.15 (blind-eval fixes, coordinator 2026-10-14): #228 "Si pero no estoy
 // vendiéndola" = owner but not selling -> the 30-day decline; #234 "I work for
 // an investor" = counterparty -> a person; #371 "No but market value" to the

@@ -127,8 +127,8 @@ test("'No not at all' to the consider-selling question is a decline (nurture), n
   assert.equal(r.classification.primary_intent, "not_interested");
 });
 
-test("'No thanks' keeps its decline meaning; rc-8.5.21 (owner P0 2026-10-16): 'No 👎' to the ownership question is the property-scoped denial", async () => {
-  assert.equal((await replay("No thanks")).classification.primary_intent, "not_interested");
+test("OWNER DECISION 2026-10-17: 'No thanks' to the ownership question is ownership_declined_unverified (no nurture, never a denial); 'No 👎' to it is the property-scoped denial", async () => {
+  assert.equal((await replay("No thanks")).classification.primary_intent, "ownership_declined_unverified");
   assert.equal((await replay("No 👎")).classification.primary_intent, "property_specific_non_owner");
 });
 
