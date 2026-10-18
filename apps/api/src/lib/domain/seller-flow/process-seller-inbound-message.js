@@ -30,6 +30,7 @@ import {
   decisionToUniversalLeadStatePatch,
 } from "@/lib/domain/seller-flow/seller-flow-decision-contract.js";
 import { resolveSellerStageTransition, NEXT_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
+import { lifecycleLive as followUpLifecycleLive, recordNonExecutableFollowUp } from "@/lib/domain/followups/followup-lifecycle.js";
 import {
   persistSellerTransitionArtifacts,
   loadSellerDealState,
@@ -108,6 +109,22 @@ import { getDealContextByThread } from "@/lib/domain/deal-context/deal-context-s
 import { info, warn } from "@/lib/logging/logger.js";
 import { cancelPendingSellerEmails } from "@/lib/domain/email/email-seller-cancel.js";
 import { observeSellerTurn } from "@/lib/domain/intelligence/runtime/observation.js";
+
+
+/**
+ * W2 (P0 2026-10-17): the scheduler intent of a deal-nurture transition (reasoning code
+ * `<stage>_<INTENT>_NURTURE_<n>D`). null ⇒ unmapped (recorded as non-executable, never a bare date).
+ */
+const TRANSITION_NURTURE_INTENTS = Object.freeze({
+  NOT_INTERESTED: "not_interested",
+  NEED_TIME: "seller_callback",
+  TENANT_OCCUPIED: "tenant_or_occupancy",
+  LISTED_OR_UNAVAILABLE: "listed_or_unavailable",
+});
+export function transitionNurtureFollowUpIntent(transition = null) {
+  const m = /_([A-Z_]+?)_NURTURE_\d+D$/.exec(String(transition?.reasoning_code || ""));
+  return (m && TRANSITION_NURTURE_INTENTS[m[1]]) || null;
+}
 
 const defaultDeps = {
   classify,
@@ -2180,6 +2197,19 @@ export async function processSellerInboundMessage({
     reason: "not_attempted",
   };
 
+  // FOLLOW-UP LIFECYCLE (owner P0 2026-10-17): while system_control.followup_execution_mode = live every
+  // follow-up is a durable intent (domain/followups/followup-lifecycle.js) and inbox_thread_state.follow_up_at
+  // is its projection — this flow never writes the date itself (W1), and a deal-nurture transition whose
+  // follow-up the deferred scheduler skipped because an immediate reply was queued gets its intent (W2).
+  let followup_lifecycle_live = false;
+  if (systemFollowupEnabled) {
+    try {
+      followup_lifecycle_live = await (runtimeDeps.followUpLifecycleLive || followUpLifecycleLive)({ supabase });
+    } catch {
+      followup_lifecycle_live = false;
+    }
+  }
+
   if (systemFollowupEnabled) {
     const follow_up_intent =
       contract.ownership_probe_transition
@@ -2252,6 +2282,45 @@ export async function processSellerInboundMessage({
         reason: "followup_preview_writes_suppressed",
       };
     }
+
+    // W2 (P0 2026-10-17): a deal-nurture transition (NEED_TIME 30D, TENANT_OCCUPIED 21D, LISTED 45D,
+    // NOT_INTERESTED 30D) whose deferred follow-up was skipped because an immediate reply was queued used
+    // to leave only a bare follow_up_at (e.g. 7ff5b635, 31 days overdue). In lifecycle mode it becomes an
+    // intent, pinned to the transition's own due date; an unmapped kind is a documented non-executable.
+    const transition_follow_up = transition?.follow_up || null;
+    if (
+      followup_lifecycle_live &&
+      !should_schedule_followup &&
+      !decline_no_followup &&
+      transition_follow_up?.create === true &&
+      clean(transition_follow_up.due_at) &&
+      execution_allowed &&
+      !writes_suppressed &&
+      channel !== "email"
+    ) {
+      const transition_intent = transitionNurtureFollowUpIntent(transition);
+      try {
+        follow_up_result = transition_intent
+          ? await runtimeDeps.scheduleFollowUp(transition_intent, threadKey || inboundFrom, {
+              is_suppressed: Boolean(canonical_decision?.should_suppress_contact),
+              source: "seller_inbound_orchestrator:transition_nurture",
+              inbound_message_event_id: inboundEventId,
+              master_owner_id: ownerId,
+              property_id: propertyId,
+              scheduled_for_at: transition_follow_up.due_at,
+              inbound_to: inboundTo || null,
+              reply_text: typeof message === "string" ? message : null,
+            }, supabase)
+          : await recordNonExecutableFollowUp({
+              thread_key: threadKey || inboundFrom, property_id: propertyId, master_owner_id: ownerId,
+              kind: "transition_nurture", intent: clean(transition?.reasoning_code) || "transition_nurture",
+              due_at: transition_follow_up.due_at, writer: "seller_inbound_orchestrator:transition_nurture",
+              cause: inboundEventId || null, reason: `transition_nurture_kind_unmapped:${clean(transition?.reasoning_code) || "unknown"}`,
+            }, { supabase });
+      } catch (transition_followup_error) {
+        follow_up_result = { ok: false, skipped: true, reason: transition_followup_error?.message || "transition_followup_failed" };
+      }
+    }
   }
 
   const decision = buildSellerFlowDecision({
@@ -2266,6 +2335,7 @@ export async function processSellerInboundMessage({
     selected_participant_id: prospectId,
     selected_sender_number: inboundTo,
     transition,
+    follow_up_lifecycle: followup_lifecycle_live,
   });
 
   let universal_state_patch = null;
@@ -2276,7 +2346,8 @@ export async function processSellerInboundMessage({
       patch.operational_status = contract.ownership_probe_transition.operational_status || "scheduled";
       patch.lead_temperature = contract.ownership_probe_transition.lead_temperature || "cold";
       patch.disposition = contract.ownership_probe_transition.disposition || "not_interested";
-      patch.follow_up_at = contract.ownership_probe_transition.follow_up_at || null;
+      // W1: in lifecycle mode follow_up_at is the intent projection, never written here
+      if (!followup_lifecycle_live) patch.follow_up_at = contract.ownership_probe_transition.follow_up_at || null;
     }
 
     // Latest-intent precedence: a superseding re-engagement reopens the

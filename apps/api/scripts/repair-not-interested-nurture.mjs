@@ -306,6 +306,13 @@ async function applyRepair(db, s, decision, scheduleFollowUp, pgClient) {
       },
       db
     );
+    // W6 (P0 2026-10-17): the re-armed row and the thread's follow_up_at never drift apart. Lifecycle mode
+    // (followup_execution_mode = live): scheduleFollowUp planned a durable intent and follow_up_at is its
+    // projection (written in the same transaction). Legacy mode: the date moves WITH the row it re-armed.
+    if (out.follow_up?.ok && !out.follow_up.lifecycle && out.follow_up.scheduled_for) {
+      const moved = await db.from("inbox_thread_state").update({ follow_up_at: out.follow_up.scheduled_for, updated_by: REPAIR_SOURCE }).eq("thread_key", s.phone);
+      out.follow_up_at_moved = !moved?.error;
+    }
   }
   return out;
 }

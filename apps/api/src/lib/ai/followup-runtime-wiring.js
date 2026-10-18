@@ -1,9 +1,9 @@
-// Composition root for the rc-8.5.21 FOLLOW-UP EXECUTION PIPELINE
-// (lib/domain/followups/followup-execution.js): the three runtime kinds
+// Composition root for the FOLLOW-UP EXECUTION LIFECYCLE on the agent runtime
+// (lib/domain/followups/followup-execution.js → followup-lifecycle.js): the three runtime kinds
 //
-//   followup.execution_sweep   due follow_up_at intents → one followup.dispatch job each (or adopt)
-//   followup.dispatch          fresh re-check → ONE claimed canonical follow-up write (send_queue)
-//   followup.reconcile         dates with no job · jobs with no outcome · duplicates · retries
+//   followup.execution_sweep   one materialization pass (due − lead intents → ONE nonempty send-ready row each, or a reason)
+//   followup.dispatch          materialize one named intent now
+//   followup.reconcile         two-way reconciliation; report-only unless the job input says { apply: true }
 //
 // followupRuntimeHandlers() → {} unless LC_FOLLOWUP_EXECUTION=1 and the runtime gate; the DB then
 // still claims a kind only when the owner armed + enabled it in agent.runtime_limits.kind_limits,
@@ -20,22 +20,23 @@ async function defaultSupabase() {
 }
 
 /**
- * @param {{ env?: object, supabase?: object, runtimeStore?: object, deps?: object }} [o] tests inject deps
+ * @param {{ env?: object, supabase?: object, deps?: object }} [o] tests inject deps
  */
-export function buildFollowUpHandlers({ env = process.env, supabase = null, runtimeStore = null, deps = null } = {}) {
+export function buildFollowUpHandlers({ env = process.env, supabase = null, deps = null } = {}) {
+  void env
   const depsFor = async () => {
     if (deps) return deps
     const sb = supabase || (await defaultSupabase())
-    let rs = runtimeStore
-    const enqueueAt = async (o) => { rs ||= await (await import('@/lib/agent/runtime/runtime-service.js')).getVerifiedRuntimeStore(env); return rs.enqueueEventAt(o) }
-    return createFollowUpDeps({ supabase: sb, readSwitch: (key) => getSystemValueFresh(key, { supabase: sb }), enqueueAt })
+    return createFollowUpDeps({ supabase: sb, readSwitch: (key) => getSystemValueFresh(key, { supabase: sb }) })
   }
   return {
     [FOLLOWUP_SWEEP_KIND]: Object.freeze({
       kind: FOLLOWUP_SWEEP_KIND,
       async run(ctx) {
-        await ctx.step('sweep', { progress: { step: 'sweep', steps_done: 0, steps_total: 1, pct: 0 } })
-        return { result: await runFollowUpSweep(await depsFor()) }
+        await ctx.step('materialize', { progress: { step: 'materialize', steps_done: 0, steps_total: 1, pct: 0 } })
+        // a thrown claim / read error is retried by the runtime (bounded, then dead letter); each
+        // intent's own lease makes a replayed pass exactly-once
+        return { result: await runFollowUpSweep({ ...(await depsFor()), worker: `runtime:${ctx.job?.job_id || 'sweep'}` }) }
       },
     }),
     [FOLLOWUP_DISPATCH_KIND]: Object.freeze({
@@ -43,18 +44,16 @@ export function buildFollowUpHandlers({ env = process.env, supabase = null, runt
       async run(ctx) {
         const job = decodeDispatchInput(ctx.job.input || {})
         if (!job) return { result: { code: 'FOLLOWUP_INPUT_INVALID' } }
-        await ctx.step('dispatch', { progress: { step: 'dispatch', steps_done: 0, steps_total: 1, pct: 0 } })
-        // a thrown error (read failure, another worker holding the claim) is retried by the runtime:
-        // bounded attempts, then dead letter — the claimed write itself is idempotent
-        const r = await runFollowUpDispatch(job, await depsFor())
-        return { result: { code: r.code, reason: r.reason || null, followup_kind: job.kind, attempt: job.attempt, send_at: r.send_at || null } }
+        await ctx.step('materialize_one', { progress: { step: 'materialize_one', steps_done: 0, steps_total: 1, pct: 0 } })
+        const r = await runFollowUpDispatch(job, { ...(await depsFor()), worker: `runtime:${ctx.job?.job_id || 'dispatch'}` })
+        return { result: { code: r.code, reason: r.reason || null } }
       },
     }),
     [FOLLOWUP_RECONCILE_KIND]: Object.freeze({
       kind: FOLLOWUP_RECONCILE_KIND,
       async run(ctx) {
         await ctx.step('reconcile', { progress: { step: 'reconcile', steps_done: 0, steps_total: 1, pct: 0 } })
-        return { result: await runFollowUpReconcile(await depsFor()) }
+        return { result: await runFollowUpReconcile(await depsFor(), { apply: ctx.job?.input?.apply === true }) }
       },
     }),
   }

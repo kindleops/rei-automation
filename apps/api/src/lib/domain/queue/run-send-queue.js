@@ -215,6 +215,25 @@ export async function runSendQueue(
     };
   }
 
+  // FOLLOW-UP LIFECYCLE (owner P0 2026-10-17): materialize due follow-ups (rendered from the approved
+  // template, validated, eligibility re-checked) into NONEMPTY send-ready rows BEFORE this run selects
+  // claimable rows. Only while system_control.followup_execution_mode = live (absent = off); bounded
+  // (one pass, ≤ 25 intents); every intent is claimed under its own lease, so a concurrent runtime pass is
+  // exactly-once too (no global lock needed: materialization never sends). Never blocks or fails the run.
+  if (!dry_run && deps.followUpMaterialization !== false) {
+    try {
+      const lifecycle = await import("@/lib/domain/followups/followup-lifecycle.js");
+      if (await lifecycle.lifecycleLive({ readSwitch: deps.readFollowUpLifecycleSwitch || null, supabase })) {
+        const pass = await (deps.runFollowUpMaterialization || lifecycle.runFollowUpMaterialization)(
+          await lifecycle.withLifecycleHelpers(lifecycle.createFollowUpLifecycleDeps({ supabase, worker: `queue_runner:${processing_run_id}` }))
+        );
+        log_info("followup_lifecycle.materialization_pass", { code: pass?.code || null, ...(pass?.counts || {}) });
+      }
+    } catch (materialize_error) {
+      log_warn("followup_lifecycle.materialization_pass_failed", { message: materialize_error?.message || "unknown" });
+    }
+  }
+
   const lock = await acquireGlobalExecutionLock(supabase, {
     owner_type: GLOBAL_LOCK_OWNER.UNRESTRICTED,
   });

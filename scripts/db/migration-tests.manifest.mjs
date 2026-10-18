@@ -493,6 +493,20 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback_posttest.sql')],
   },
+  // ── P0 2026-10-17: the ONE follow-up execution lifecycle (intent record, materialize-before-claimable,
+  // send_queue ⇄ intent sync, follow_up_at projection). Composes on the live send_queue surface, the
+  // operations + holds public baselines and the P0 holds registry (applied first in production). S3
+  // provides the agent_api role the operations baseline revokes from. The release-chain entry should
+  // append it after the holds registry (owned by the integration; see the follow-up P0 report).
+  {
+    id: 'followup_intent_lifecycle',
+    setup: [SHIM, DURABILITY, S3, SEND_QUEUE_BASELINE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE, HOLDS_REGISTRY],
+    pretest: M('PROPOSED_20261017120000_followup_intent_lifecycle_pretest.sql'),
+    apply: [M('PROPOSED_20261017120000_followup_intent_lifecycle.sql')],
+    posttest: [M('PROPOSED_20261017120000_followup_intent_lifecycle_posttest.sql')],
+    rollback: [M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback_posttest.sql')],
+  },
 ]
 
 // ── rc-8.5.21: the SAME release chain, started from the PRODUCTION agent-runtime state ──

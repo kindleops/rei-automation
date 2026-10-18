@@ -100,6 +100,18 @@ const GUARD_MESSAGES = {
 
 async function runItem(ports, id, parsed, ctx) {
   if (!CANONICAL_E164.test(id)) return failed(id, 'invalid_thread_key', 'Not a canonical thread key (+1XXXXXXXXXX).')
+  // W7 (P0 2026-10-17): in lifecycle mode an operator follow-up date is a documented, durable record of
+  // its own (kind operator_reminder, HELD for the operator: no automated message is ever sent from it),
+  // never a bare follow_up_at that reads as a scheduled send.
+  if (parsed.action === 'follow_up' && typeof ports.followUpLifecycleLive === 'function' && (await ports.followUpLifecycleLive()) === true) {
+    const r = await ports.planFollowUpIntent({
+      thread_key: id, kind: 'operator_reminder', intent: 'operator_reminder', due_at: parsed.patch.follow_up_at,
+      writer: 'bulk_lead_state', actor: ctx.operatorId, state: 'held', reason: 'operator_reminder_no_automated_message',
+      cause: `bulk_lead_state:${ctx.operatorId}:${parsed.patch.follow_up_at}`,
+    })
+    if (!r?.ok) return failed(id, clean(r?.reason) || 'followup_intent_plan_failed', 'The reminder was not recorded.')
+    return done(id, 'changed', { note: 'Recorded as an operator reminder (no message is sent).', followup_intent_id: r.intent?.id || null })
+  }
   const result = await ports.patchLeadState({
     threadKey: id,
     patch: parsed.patch,
@@ -182,5 +194,10 @@ export async function createDefaultBulkLeadStatePorts() {
     import('@/lib/supabase/client.js'),
     import('@/lib/domain/lead-state/patch-universal-lead-state.js'),
   ])
-  return { patchLeadState: (args) => patchUniversalLeadState({ ...args, supabase }) }
+  const { lifecycleLive, planFollowUpIntent } = await import('@/lib/domain/followups/followup-lifecycle.js')
+  return {
+    patchLeadState: (args) => patchUniversalLeadState({ ...args, supabase }),
+    followUpLifecycleLive: () => lifecycleLive({ supabase }),
+    planFollowUpIntent: (input) => planFollowUpIntent(input, { supabase }),
+  }
 }

@@ -65,6 +65,8 @@ export function operationsRuntimeHandlers(env = process.env) {
     linkage: { checkAutomationHold, enqueueResearch: (req) => enqueuePropertyResearch({ store: getRuntimeStore(env), env, trigger: req.trigger, property_id: req.property_id, discriminator: req.discriminator }) },
     // owner P0: the supervisor REPORTS active holds (never acts): type counts + hold keys only, no thread keys / phones
     holdsSource: { summary: () => summarizeActiveAutomationHolds() },
+    // P0 2026-10-17: the supervisor REPORTS the follow-up lifecycle health (counts + reason codes; no thread keys)
+    followupSource: { health: async () => (await import('@/lib/domain/followups/followup-lifecycle.js')).loadFollowUpLifecycleHealth() },
   })
   return globalThis[HANDLERS]
 }

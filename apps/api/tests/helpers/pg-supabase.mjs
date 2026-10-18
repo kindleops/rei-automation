@@ -43,7 +43,10 @@ export function pgSupabase(pool, { schema = 'public' } = {}) {
         const params = []
         const p = (v) => { params.push(v); return `$${params.length}` }
         const colExpr = (c, key) => (key ? `(${ident(c)} ->> '${String(key).replace(/[^a-z0-9_]/g, '')}')` : ident(c))
-        const one = ([c, op, v, key]) => (op === 'in' ? `${ident(c)} = any(${p(v)})` : `${colExpr(c, key)} ${op} ${p(key ? v : encode(types, c, v))}`)
+        const IS_LIT = { null: 'null', true: 'true', false: 'false' }
+        const one = ([c, op, v, key]) => (op === 'in' ? `${ident(c)} = any(${p(v)})`
+          : op === 'is' || op === 'is not' ? `${colExpr(c, key)} ${op} ${IS_LIT[String(v)]}`
+          : `${colExpr(c, key)} ${op} ${p(key ? v : encode(types, c, v))}`)
         const where = st.filters.length ? ` where ${st.filters.map((f) => (f[1] === 'or' ? `(${f[2].map(one).join(' or ')})` : one(f))).join(' and ')}` : ''
         const colsSql = (cols) => (!cols || cols === '*' ? '*' : cols.split(',').map((c) => ident(c.trim())).join(', '))
         let sql
@@ -75,7 +78,12 @@ export function pgSupabase(pool, { schema = 'public' } = {}) {
       gt(c, v) { st.filters.push([c, '>', v]); return b },
       lte(c, v) { st.filters.push([c, '<=', v]); return b },
       lt(c, v) { st.filters.push([c, '<', v]); return b },
+      ilike(c, v) { st.filters.push([c, 'ilike', String(v).replace(/\*/g, '%')]); return b },
+      like(c, v) { st.filters.push([c, 'like', String(v).replace(/\*/g, '%')]); return b },
       in(c, v) { st.filters.push([c, 'in', Array.isArray(v) ? v : [v]]); return b },
+      // PostgREST is() / not(col, 'is', v): only null / true / false (real SQL IS [NOT] semantics)
+      is(c, v) { if (!(String(v) in { null: 1, true: 1, false: 1 })) throw new Error(`pg-supabase: is ${v} is not implemented`); st.filters.push([c, 'is', v]); return b },
+      not(c, op, v) { if (op !== 'is' || !(String(v) in { null: 1, true: 1, false: 1 })) throw new Error(`pg-supabase: not ${op} is not implemented`); st.filters.push([c, 'is not', v]); return b },
       order(c, o = {}) { st.order.push([c, o.ascending !== false]); return b },
       // PostgREST or(): only "col[->>key].<eq|neq|gt|gte|lt|lte|ilike>.<value>" terms (quoted values allowed)
       or(expr) {
@@ -98,13 +106,18 @@ export function pgSupabase(pool, { schema = 'public' } = {}) {
       update(payload) { st.op = 'update'; st.payload = payload; return b },
       then(res, rej) { return exec().then(res, rej) },
     }
-    for (const k of ['contains', 'range', 'delete', 'is', 'like', 'ilike', 'not', 'match', 'filter', 'textSearch']) b[k] = () => { if (process.env.PG_SUPABASE_DEBUG) console.error('PG_SUPABASE_UNSUPPORTED', table, k); throw new Error(`pg-supabase: ${k} is not implemented (no silent no-ops)`) }
+    for (const k of ['contains', 'range', 'delete', 'match', 'filter', 'textSearch']) b[k] = () => { if (process.env.PG_SUPABASE_DEBUG) console.error('PG_SUPABASE_UNSUPPORTED', table, k); throw new Error(`pg-supabase: ${k} is not implemented (no silent no-ops)`) }
     return b
   }
   async function rpc(fn, args = {}) {
     try {
       const keys = Object.keys(args)
-      const r = await pool.query(`select ${schema}.${ident(fn)}(${keys.map((k, i) => `${ident(k)} => $${i + 1}`).join(', ')}) as r`, keys.map((k) => { const v = args[k]; return v != null && typeof v === 'object' && !(v instanceof Date) && !Array.isArray(v) ? JSON.stringify(v) : v }))
+      const call = `${schema}.${ident(fn)}(${keys.map((k, i) => `${ident(k)} => $${i + 1}`).join(', ')})`
+      const values = keys.map((k) => { const v = args[k]; return v != null && typeof v === 'object' && !(v instanceof Date) && !Array.isArray(v) ? JSON.stringify(v) : v })
+      // PostgREST: a set-returning function answers an ARRAY of rows; anything else a single value
+      const retset = (await pool.query(`select bool_or(p.proretset) s from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = $1 and p.proname = $2`, [schema, fn])).rows[0]?.s === true
+      if (retset) return { data: (await pool.query(`select * from ${call}`, values)).rows, error: null }
+      const r = await pool.query(`select ${call} as r`, values)
       return { data: r.rows[0]?.r ?? null, error: null }
     } catch (e) {
       return { data: null, error: { message: e.message, code: e.code || null } }

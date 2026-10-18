@@ -57,6 +57,15 @@
 --   pipeline stage  asking_price->offer_interest (asking_price_stage_without_ask) 13
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- W5 (P0 2026-10-17, follow-up lifecycle): this file wrote follow_up_at (step 2b) with NO execution
+-- record — a date that could never send. It was applied once (updated_by = 'hygiene_20261010'); it must
+-- never run again once the lifecycle exists: a nurture date is a public.followup_intent_plan() intent.
+-- The 4 threads it dated are surfaced by the follow-up reconciliation (unbacked_follow_up_at).
+DO $w5$ BEGIN
+  IF to_regclass('public.followup_intents') IS NOT NULL THEN
+    RAISE EXCEPTION 'W5: superseded by the follow-up lifecycle; nurture dates are written through followup_intent_plan(), never as a bare follow_up_at';
+  END IF;
+END $w5$;
 BEGIN;
 SET LOCAL statement_timeout = '30s';
 SET LOCAL lock_timeout = '5s';

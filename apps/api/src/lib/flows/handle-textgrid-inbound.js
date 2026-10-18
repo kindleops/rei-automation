@@ -3312,6 +3312,11 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
           provider: "textgrid",
           provider_message_sid: extracted.message_id || null,
           message_id: extracted.message_id || null,
+          // W3 (P0 2026-10-17): the receipt instant of THIS inbound. An event-driven cancel
+          // (stage.not_interested_cold → cancel_pending_queue) only touches rows pending before it,
+          // never the follow-up / reply this inbound's own seller flow just wrote.
+          inbound_received_at: extracted.received_at || payload?.http_received_at || null,
+          inbound_event_id: inbound_message_event_id || null,
           message_body,
           inbound_from,
           inbound_to,

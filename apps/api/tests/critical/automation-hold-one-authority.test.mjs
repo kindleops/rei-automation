@@ -62,7 +62,10 @@ test('static: every capability a port / gate caller uses is mapped onto the regi
   const callers = ['lib/ai/conversation-ai-r3-executor.js', 'lib/ai/conversation-turn-wiring.js', 'lib/domain/followups/followup-execution.js', 'lib/domain/queue/ai-conversation-row-gate.js', 'lib/domain/queue/send-time-contact-guard.js']
   const used = new Set(Object.values(gate.HOLD_CAPABILITIES))
   for (const f of callers) for (const m of code(path.join(SRC, f)).matchAll(/checkAutomationHoldPort\(\{[^}]*capability:\s*['"]([^'"]+)['"]/g)) used.add(m[1])
-  assert.ok(used.size >= 10, [...used].join(','))
+  // P0 2026-10-17: the follow-up lifecycle retired the enqueue-time hold call (followup_enqueue): an intent is
+  // checked at materialization and again at dispatch (followup_dispatch), with the registry
+  assert.ok(used.size >= 9, [...used].join(','))
+  assert.ok(used.has('followup_dispatch'), 'the follow-up lifecycle consults the port')
   for (const c of used) {
     const caps = registryCapabilitiesFor(c)
     assert.ok(caps.length >= 1, `capability ${c} is mapped`)

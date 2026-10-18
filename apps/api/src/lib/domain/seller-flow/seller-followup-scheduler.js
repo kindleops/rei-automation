@@ -17,6 +17,7 @@ import crypto from "node:crypto";
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { enqueueSendQueueItem } from "@/lib/supabase/sms-engine.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
+import { lifecycleLive as followUpLifecycleLive, planFollowUpFromScheduler } from "@/lib/domain/followups/followup-lifecycle.js";
 import {
   isNurtureIntent,
   loadNurtureRenderContext,
@@ -431,7 +432,7 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     }
   }
   // Never persisted as metadata: the reply text and the loader hook.
-  const { reply_text: _reply_text, render_context_loader: _loader, inbound_to: _inbound_to, ...persisted_context } = context;
+  const { reply_text: _reply_text, render_context_loader: _loader, inbound_to: _inbound_to, lifecycle_read_switch: _lifecycle_rs, lifecycle_bypass: _lifecycle_bypass, ...persisted_context } = context;
 
   const use_case_template =
     intent === STAGE_NO_REPLY_FOLLOWUP_INTENT
@@ -474,9 +475,9 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     }
   }
 
-  const enqueueWithKey = (dedupe_key) => {
+  const buildPayload = (dedupe_key) => {
     const queue_key = buildFollowupQueueKey(dedupe_key);
-    return enqueueSendQueueItem(
+    return (
     {
       queue_key,
       queue_id: queue_key,
@@ -518,10 +519,19 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
         days_until_followup: plan.days,
         ...persisted_context,
       },
-    },
-    { supabase }
+    }
     );
   };
+  const enqueueWithKey = (dedupe_key) => enqueueSendQueueItem(buildPayload(dedupe_key), { supabase });
+
+  // FOLLOW-UP LIFECYCLE (owner P0 2026-10-17, domain/followups/followup-lifecycle.js). While
+  // system_control.followup_execution_mode = live, a deferred follow-up is NEVER written as a body-less
+  // send_queue row (the loader pauses those before any claim: 0 delivered in 120 days). The row this
+  // writer would have inserted becomes the durable intent's row_spec; materialization renders,
+  // validates and re-checks it, then writes ONE nonempty send-ready row. Absent / off: unchanged.
+  if (context.lifecycle_bypass !== true && (await followUpLifecycleLive({ readSwitch: context.lifecycle_read_switch || null, supabase }))) {
+    return planFollowUpFromScheduler({ intent, plan, payload: buildPayload(base_dedupe_key), context: persisted_context, supabase });
+  }
 
   let dedupe_key = base_dedupe_key;
   let queue_key = buildFollowupQueueKey(dedupe_key);

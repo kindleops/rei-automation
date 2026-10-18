@@ -56,6 +56,7 @@ import {
 } from "@/lib/supabase/client.js";
 import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
 import { evaluateAiConversationRowGate, aiRowCancelPayload, loadNewerInboundsForRow } from "@/lib/domain/queue/ai-conversation-row-gate.js";
+import { createFollowUpLifecycleDeps, evaluateFollowUpIntentRowGate, isLifecycleRow } from "@/lib/domain/followups/followup-lifecycle.js";
 import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey, recordAiRowProviderOutcome } from "@/lib/domain/messages/ai-generated-message.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
@@ -1688,6 +1689,57 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       };
     }
 
+    // ── P0 2026-10-17: follow-up LIFECYCLE rows only (metadata.followup_intent_id); no-op for every other row ──
+    // The row was materialized (rendered, validated, re-checked) before it became claimable. At dispatch the
+    // intent must still be `ready` and bound to THIS row, its template still approved (revoked ⇒ cancel +
+    // rematerialize, audited), no newer inbound (⇒ superseded), ≤ 2 texts per rolling 24 h (⇒ defer).
+    // The body is never re-rendered here. Every later gate still runs.
+    if (isLifecycleRow(queue_row)) {
+      const fu_gate = await evaluateFollowUpIntentRowGate(queue_row, deps.followUpLifecycleDeps || createFollowUpLifecycleDeps({ supabase: getSupabase(deps), now: () => now, ...(deps.followUpHoldCheck ? { holdCheck: deps.followUpHoldCheck } : {}) }));
+      if (fu_gate.applies && fu_gate.action !== "proceed") {
+        if (fu_gate.action === "hold") {
+          await updateQueueRow(queue_row_id, {
+            queue_status: "paused_automation_hold",
+            paused_reason: fu_gate.reason,
+            guard_status: "held",
+            guard_reason: fu_gate.reason,
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: { ...(queue_row.metadata ?? {}), skip_reason: fu_gate.reason, final_queue_status: "paused_automation_hold", held_by: "followup_intent_gate", finalized_at: now },
+          }, deps);
+        } else if (fu_gate.action === "cancel") {
+          await updateQueueRow(queue_row_id, {
+            queue_status: "cancelled",
+            guard_status: "blocked",
+            guard_reason: fu_gate.reason,
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: { ...(queue_row.metadata ?? {}), skip_reason: fu_gate.reason, cancellation_reason: fu_gate.reason, final_queue_status: "cancelled", cancelled_by: "followup_intent_gate", finalized_at: now },
+          }, deps);
+        } else {
+          await releaseSkippedQueueRow(queue_row, lock_token, fu_gate.reason, {
+            ...deps,
+            now,
+            metadata_patch: fu_gate.defer_until ? { next_eligible_at: fu_gate.defer_until, followup_gate_deferred: fu_gate.reason } : { followup_gate_deferred: fu_gate.reason },
+          });
+        }
+        return {
+          ok: false,
+          skipped: true,
+          sent: false,
+          reason: fu_gate.reason,
+          queue_status: fu_gate.action === "cancel" ? "cancelled" : fu_gate.action === "hold" ? "paused_automation_hold" : "queued",
+          final_queue_status: fu_gate.action === "cancel" ? "cancelled" : fu_gate.action === "hold" ? "paused_automation_hold" : "queued",
+          queue_row_id,
+          queue_item_id: queue_row_id,
+        };
+      }
+    }
+
     const contact_window = evaluate_contact_window(queue_row, {
       ...deps,
       now,
@@ -2011,6 +2063,35 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
           queue_row_id,
           reason: deferred.reason || "deferred_message_unresolved",
         };
+      }
+    }
+
+    // P0 (rc-8.5.21): an empty or unrendered body is NEVER sent — whatever wrote the row, after the
+    // deferred render above. A template-backed deferred row reaches this point only rendered.
+    {
+      const final_body = clean(queue_row.message_body || queue_row.message_text);
+      // an operator's manual text is sent exactly as typed (its braces are the operator's); template-
+      // rendered rows (follow-ups, auto-replies, campaigns) must never carry an unfilled placeholder
+      const unrendered = !manual_inbox_send && /\{\{[^}]*\}\}|\[\[[^\]]*\]\]/.test(final_body);
+      if (!final_body || unrendered || isDeferredQueueRow(queue_row)) {
+        const reason = !final_body ? "empty_message_body_after_render" : unrendered ? "unrendered_placeholder_after_render" : "deferred_message_unresolved";
+        await getSupabase(deps)
+          .from(QUEUE_TABLE)
+          .update({
+            queue_status: "paused_deferred_unresolved",
+            guard_status: "blocked",
+            guard_reason: reason,
+            last_guard_checked_at: now,
+            paused_reason: reason,
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: { ...(queue_row.metadata ?? {}), skip_reason: reason, final_queue_status: "paused_deferred_unresolved", finalized_at: now },
+          })
+          .eq("id", queue_row_id);
+        info("send.blocked_body_not_sendable", { queue_row_id, reason });
+        return { ok: false, skipped: true, reason, queue_row_id, sent: false };
       }
     }
 
