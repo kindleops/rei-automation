@@ -1,4 +1,5 @@
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { isRetiredRule } from "./rules/retired-rules.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
 import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
@@ -758,9 +759,16 @@ async function patchThreadState({ db, event, params, dry_run } = {}) {
   };
 }
 
+// Phone-wide bad_contact is ONLY for a wrong number / not this person / an explicit stop (owner
+// 2026-10-17: a property-specific non-owner is a contact × property fact, never the whole phone).
+export const PHONE_WIDE_BAD_CONTACT_REASONS = Object.freeze(new Set(["wrong_number", "wrong_number_keyword", "wrong_person", "not_this_person", "stop", "opt_out", "stop_or_dnc_keyword"]));
+
 async function markBadContact({ db, event, params, dry_run } = {}) {
   const phone_e164 = resolvePhoneE164(event, params);
   const reason = clean(params.reason) || "bad_contact";
+  if (!PHONE_WIDE_BAD_CONTACT_REASONS.has(reason)) {
+    return { ok: true, skipped: true, reason: "property_scoped_reason_never_phone_wide", requested_reason: reason, phone_e164 };
+  }
   if (!phone_e164 && !clean(event.phone_number_id)) {
     return { ok: false, skipped: true, reason: "missing_phone" };
   }
@@ -1063,6 +1071,8 @@ export async function executeAutomationAction({
   dry_run = null,
   options = {},
 } = {}) {
+  // a RETIRED rule never acts, even when invoked with a stored row (owner 2026-10-17)
+  if (isRetiredRule(rule)) return { ok: true, skipped: true, reason: "rule_retired:property_denial_never_global", action_type: action?.action_type || null };
   const db = supabaseClient || getDefaultSupabaseClient();
   const params = {
     ...ensureObject(action.params),

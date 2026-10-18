@@ -1427,7 +1427,10 @@ export function resolveSellerStageTransition({
     workflow_event_types: advancementEvents(beforeIdx, afterIdx, facts, intentKey),
     follow_up: {
       create: false,
-      cancel: true, // a reply always cancels stale reply-pending follow-ups
+      // a reply always cancels stale reply-pending follow-ups — except an insult / profanity
+      // (hostile_or_troll): owner 2026-10-06, an insult never suppresses and leaves nurture
+      // eligibility UNCHANGED (no reply, quiet archive)
+      cancel: intentKey !== "hostile_or_troll",
       replace: afterIdx > beforeIdx,
       days: null,
       due_at: null,

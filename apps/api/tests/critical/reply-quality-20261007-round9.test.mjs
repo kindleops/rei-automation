@@ -68,7 +68,8 @@ for (const message of ["Ya quita mi número de tus contactos", "Mejor te blokeo.
 for (const message of ["Suck a dick", "FU!", "👹"]) {
   test(`hostile: ${JSON.stringify(message)} -> no reply, no review, nothing suppressed`, async () => {
     const r = await replay(message);
-    assert.equal(r.classification.primary_intent, "hostile_or_legal");
+    // owner 2026-10-06 (locked, re-asserted 10-18): an insult is hostile_or_troll (quiet archive, never suppressed)
+    assert.equal(r.classification.primary_intent, "hostile_or_troll");
     assert.equal(r.classification.automation_decision.quiet_archive, true);
     assert.equal(r.classification.automation_decision.suppression_action, "none");
     assert.equal(r.outcome, "no_reply_by_design");

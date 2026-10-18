@@ -1,4 +1,5 @@
 import { suppressionRules } from "@/lib/domain/automation/rules/suppression-rules.js";
+import { RETIRED_RULE_KEYS, isRetiredRule } from "./rules/retired-rules.js";
 import { followUpRules } from "@/lib/domain/automation/rules/follow-up-rules.js";
 import { stageTemperatureRules } from "@/lib/domain/automation/rules/stage-temperature-rules.js";
 import { queueEscalationRules } from "@/lib/domain/automation/rules/queue-escalation-rules.js";
@@ -315,7 +316,12 @@ export async function loadActiveAutomationRules(options = {}) {
   }
 }
 
+export { RETIRED_RULE_KEYS };
+
 export function matchAutomationRule(rule = {}, event = {}) {
+  if (isRetiredRule(rule)) {
+    return { matched: false, reason: "rule_retired:property_denial_never_global" };
+  }
   if (!matchEventType(rule, event)) {
     return { matched: false, reason: "event_type_mismatch" };
   }

@@ -15,7 +15,7 @@ import {
   renderSafeTemplate as defaultRender,
 } from "./templateSelector.js";
 import { ACTIONS, getIntentRoute } from "./intentMap.js";
-import { evaluateContactWindow as defaultWindowCheck } from "@/lib/supabase/sms-engine.js";
+import { evaluateRecipientWindowForEntry as defaultWindowCheck } from "@/lib/supabase/sms-engine.js";
 import { enqueueCanonicalOutboundSms } from "@/lib/domain/queue/canonical-queue-writer.js";
 
 import {
@@ -248,8 +248,15 @@ export async function queueAutoReply(thread_key, inbound_message_id, { dry_run =
 
 
   // 8. Contact Window Check
+  // rc-8.5.21 (criterion 14): the SAME recipient-window functions as the dispatcher — the reply to
+  // THIS inbound, placed by the seller's phone (never a bare default zone)
   const windowCheck = deps.evaluateContactWindow({
-    timezone: inbound.metadata?.timezone || "America/New_York",
+    entry: "reply",
+    recipient_phone: inbound.from_phone_number || inbound.from || null,
+    timezone: inbound.metadata?.timezone || null,
+    property_geography: inbound.metadata?.property_address_state ? { state: inbound.metadata.property_address_state, zip: inbound.metadata.property_address_zip || null } : null,
+    inbound_message_event_id: inbound.id || inbound.message_event_id || null,
+    inbound_received_at: inbound.received_at || inbound.created_at || inbound.event_timestamp || null,
     contact_window: inbound.metadata?.contact_window,
   });
 

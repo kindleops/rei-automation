@@ -669,9 +669,9 @@
    "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "211": {
-   "intent": "hostile_or_legal",
+   "intent": "hostile_or_troll",
    "outcome": "no_reply_by_design",
-   "sentiment": "negative",
+   "sentiment": "sarcastic",
    "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "212": {
@@ -1053,7 +1053,7 @@
    "outcome_with_en_es_drafts": "auto_reply"
   },
   "275": {
-   "intent": "hostile_or_legal",
+   "intent": "hostile_or_troll",
    "outcome": "no_reply_by_design",
    "sentiment": "sarcastic",
    "outcome_with_en_es_drafts": "no_reply_by_design"
@@ -1503,7 +1503,7 @@
    "outcome_with_en_es_drafts": "auto_reply"
   },
   "350": {
-   "intent": "hostile_or_legal",
+   "intent": "hostile_or_troll",
    "outcome": "no_reply_by_design",
    "sentiment": "sarcastic",
    "outcome_with_en_es_drafts": "no_reply_by_design"
@@ -2007,7 +2007,7 @@
    "outcome_with_en_es_drafts": "review"
   },
   "040": {
-   "intent": "hostile_or_legal",
+   "intent": "hostile_or_troll",
    "outcome": "no_reply_by_design",
    "sentiment": "sarcastic",
    "outcome_with_en_es_drafts": "no_reply_by_design"
@@ -2163,9 +2163,9 @@
    "outcome_with_en_es_drafts": "suppressed"
   },
   "066": {
-   "intent": "hostile_or_legal",
+   "intent": "hostile_or_troll",
    "outcome": "no_reply_by_design",
-   "sentiment": "negative",
+   "sentiment": "sarcastic",
    "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "067": {
@@ -2289,9 +2289,9 @@
    "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "087": {
-   "intent": "hostile_or_legal",
+   "intent": "hostile_or_troll",
    "outcome": "no_reply_by_design",
-   "sentiment": "negative",
+   "sentiment": "sarcastic",
    "outcome_with_en_es_drafts": "no_reply_by_design"
   },
   "088": {
@@ -2367,7 +2367,8 @@
    "outcome_with_en_es_drafts": "no_reply_by_design"
   }
  },
- "relabels_round11_20261009": {
+ "relabels_insults_20261018": "owner 2026-10-06 (locked, re-asserted after the rc-8.5.21 blind evaluation): an insult / profanity with no stop request and no legal threat is hostile_or_troll (no reply, quiet archive, never suppressed); #211 #275 #350 #040 #066 #087 relabelled from hostile_or_legal (outcome unchanged: no_reply_by_design)",
+  "relabels_round11_20261009": {
   "143": "\"I've been offered 175 but my goal is 200\" is a price counter (asking_price_provided), a person answers it (0.80 < autonomy gate)",
   "153": "investor/wholesaler counterparty pitch -> Needs Review, no auto-reply (owner P0 2026-10-09)",
   "295": "\"this is his son ... he doesn't have any plans to sell\" is a decline (not_interested -> nurture); the decline outranks who declines (inbox rulebook 2026-10-08)",

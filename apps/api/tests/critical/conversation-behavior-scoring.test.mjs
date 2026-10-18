@@ -60,11 +60,12 @@ test("hostile/legal message scores high hostility with intent evidence", async (
   const hostility = result.scores.hostility;
   const intents = [classification.primary_intent, ...(classification.secondary_intents || [])];
   assert.ok(
-    intents.includes("hostile_or_legal"),
-    `fixture must classify hostile_or_legal, got ${JSON.stringify(intents)}`
+    // owner 2026-10-06 (locked, re-asserted 10-18): an insult is hostile_or_troll (quiet archive, never suppressed)
+    intents.includes("hostile_or_troll"),
+    `fixture must classify hostile_or_troll, got ${JSON.stringify(intents)}`
   );
   assert.ok(hostility.value >= 0.7, `hostility=${hostility.value}`);
-  assert.ok(evidenceDetails(hostility).includes("intent:hostile_or_legal"));
+  assert.ok(evidenceDetails(hostility).includes("intent:hostile_or_troll"));
   assert.ok(hostility.confidence >= 0.7);
 });
 

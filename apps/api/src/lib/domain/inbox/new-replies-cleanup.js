@@ -205,7 +205,8 @@ export function categorizeReply({ classification = {}, body = "", open_engagemen
   // RC 8.5.15: an ownership denial (property-scoped) is the not-the-owner lane.
   if (intent === "wrong_number" || intent === "property_specific_non_owner") return CLEANUP_CATEGORY.WRONG_PERSON;
   if (intent === "sold_property") return CLEANUP_CATEGORY.SOLD;
-  if (intent === "hostile_or_legal") return CLEANUP_CATEGORY.HOSTILE;
+  // owner 2026-10-06: an insult (hostile_or_troll) is the same HOSTILE quiet archive (no DNC)
+  if (intent === "hostile_or_legal" || intent === "hostile_or_troll") return CLEANUP_CATEGORY.HOSTILE;
   if (emojiTurn) {
     if (emoji.semantic_signal === "acknowledgement" && !emoji.needs_review) {
       return open_engagement ? CLEANUP_CATEGORY.KEEP : CLEANUP_CATEGORY.EMOJI_ACK;

@@ -2,7 +2,7 @@
 // Evaluates condition nodes against enrollment context and extracted facts.
 
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
-import { evaluateContactWindow } from '@/lib/supabase/sms-engine.js';
+import { evaluateRecipientWindowForEntry } from '@/lib/supabase/sms-engine.js';
 import { getMissingFacts } from '@/lib/domain/workflow-v2/underwriting-playbooks.js';
 import { calculateOfferAskGap } from '@/lib/domain/workflow-v2/offer-gap-analysis.js';
 import {
@@ -396,9 +396,13 @@ function evaluateContactMethodAvailable(context, config) {
 }
 
 function evaluateContactWindowOpen(context) {
-  const windowCheck = evaluateContactWindow({
-    timezone: context.timezone ?? context.market_timezone ?? 'America/Chicago',
-    contact_window: context.contact_window ?? null,
+  // rc-8.5.21 (criterion 14): the dispatcher's recipient-window functions, recipient phone first
+  const windowCheck = evaluateRecipientWindowForEntry({
+    entry: 'followup',
+    recipient_phone: context.to_phone_number ?? context.phone ?? context.to_phone ?? null,
+    timezone: context.timezone ?? context.market_timezone ?? null,
+    property_geography: context.property_address_state ?? context.property_state ? { state: context.property_address_state ?? context.property_state, zip: context.property_address_zip ?? context.property_zip ?? null } : null,
+    mailing_geography: context.owner_address_state ?? context.mailing_state ? { state: context.owner_address_state ?? context.mailing_state, zip: null } : null,
   });
   return conditionResult(
     windowCheck.allowed,

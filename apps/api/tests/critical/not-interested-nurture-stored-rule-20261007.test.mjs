@@ -192,7 +192,6 @@ test("prod sequence: stored not_interested rule (no keep flag) no longer cancels
 for (const [rule_key, reason] of [
   ["suppression.stop_dnc", "stop_or_dnc_keyword"],
   ["suppression.wrong_number", "wrong_number_keyword"],
-  ["suppression.not_owner_bad_contact", "not_owner_or_tenant"],
 ]) {
   test(`${rule_key} after "not interested" still cancels the nurture`, async () => {
     const db = createDb({ automation_rules: PROD_RULES, send_queue: [nurtureRow()] });
@@ -279,3 +278,12 @@ test("W3: handle-textgrid-inbound emits inbound_message_received AFTER the selle
   assert.match(payload, /inbound_received_at: extracted\.received_at/);
   assert.match(payload, /inbound_event_id: inbound_message_event_id/);
 });
+
+// owner 2026-10-17 (locked): a property denial is NEVER global — the legacy not-owner rule is retired,
+// even when a stored automation_rules row still carries it; the nurture is untouched by it
+test('suppression.not_owner_bad_contact is RETIRED: a stored row never marks the phone, never cancels the nurture', async () => {
+  const db = createDb({ automation_rules: PROD_RULES, send_queue: [nurtureRow()] })
+  await runStoredRule(db, "stage.not_interested_cold", "ev_1")
+  const r = await runStoredRule(db, "suppression.not_owner_bad_contact", "ev_2")
+  assert.equal(row(db, nurtureRow().id).queue_status, "scheduled", JSON.stringify(r).slice(0, 300))
+})

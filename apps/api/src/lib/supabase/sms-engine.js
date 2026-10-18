@@ -1368,7 +1368,7 @@ export function evaluateContactWindow(row, deps = {}) {
   // never becomes America/Chicago (rc-7.1 D10). Nothing at all places the recipient, or no lawful
   // instant exists ⇒ HOLD.
   const resolution = resolveRecipientWindowZones(
-    recipientEvidenceFromRow({ ...normalized, metadata: row?.metadata ?? normalized.metadata }, { propertyGeography: deps.propertyGeography || null })
+    recipientEvidenceFromRow({ ...normalized, metadata: row?.metadata ?? normalized.metadata }, { propertyGeography: deps.propertyGeography || null, mailingGeography: deps.mailingGeography || null })
   );
   const zones = resolution.zones;
   const stored_iana = storedTimezoneToIana(normalized.timezone);
@@ -1488,6 +1488,45 @@ export function evaluateContactWindow(row, deps = {}) {
  * category 1. Operator (manual inbox) exemptions stay with the caller.
  * @returns {{ allowed: boolean, category: string, active_conversation_lawful: boolean, in_session: object, contact_window: object }}
  */
+/**
+ * rc-8.5.21 (owner acceptance criterion 14): the plan-time window check of an entry point that has no
+ * queue row yet — the campaign feeder, queueAutoReply, the workflow guard / condition, the canonical
+ * queue writer. It builds the row-shaped evidence (the RECIPIENT PHONE first, then mailing, property and
+ * any stored zone, which only narrows) and asks the SAME functions the dispatcher uses at send time:
+ * evaluateContactWindow for a campaign touch / scheduled follow-up, evaluateDispatchWindow for a reply
+ * (an in-session reply to the seller's inbound is category 1). Never a bare zone.
+ * @param {{ entry: 'campaign'|'followup'|'reply', recipient_phone?: string|null, timezone?: string|null,
+ *           property_geography?: {state?: string|null, zip?: string|null}|null, mailing_geography?: {state?: string|null, zip?: string|null}|null,
+ *           metadata?: object, scheduled_for?: string|null, inbound_message_event_id?: string|null, inbound_received_at?: string|null, now?: string|null }} e
+ */
+export function evaluateRecipientWindowForEntry(e = {}, deps = {}) {
+  const now = e.now || deps.now || nowIso();
+  const entry = e.entry === "campaign" || e.entry === "reply" ? e.entry : "followup";
+  const metadata = {
+    ...(e.metadata && typeof e.metadata === "object" ? e.metadata : {}),
+    ...(entry === "reply"
+      ? { type: "reply", inbound_message_event_id: e.inbound_message_event_id || null, inbound_received_at: e.inbound_received_at || null, conversational_reply: { queued_at: now } }
+      : { send_kind: entry === "campaign" ? "campaign" : "followup" }),
+  };
+  const row = {
+    to_phone_number: e.recipient_phone || null,
+    timezone: e.timezone || null,
+    scheduled_for: e.scheduled_for || now,
+    scheduled_for_utc: e.scheduled_for || now,
+    created_at: now,
+    type: entry === "campaign" ? "campaign" : entry === "reply" ? "auto_reply" : "followup",
+    property_address_state: e.property_geography?.state || null,
+    property_address_zip: e.property_geography?.zip || null,
+    metadata,
+  };
+  const d = { ...deps, now, mailingGeography: e.mailing_geography || deps.mailingGeography || null };
+  if (entry === "reply") {
+    const v = evaluateDispatchWindow(row, d);
+    return { ...v.contact_window, allowed: v.allowed, messaging_category: v.category, in_session: v.in_session?.in_session === true, entry };
+  }
+  return { ...evaluateContactWindow(row, d), entry };
+}
+
 export function evaluateDispatchWindow(row, deps = {}) {
   const now = deps.now || nowIso();
   const contact_window = (deps.evaluateContactWindow || evaluateContactWindow)(row, deps);

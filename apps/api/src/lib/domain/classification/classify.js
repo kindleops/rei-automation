@@ -4955,7 +4955,7 @@ function resolveIntents(
     const signal = emoji_interpretation.semantic_signal;
     const emoji_primary =
       signal === "hostile"
-        ? "hostile_or_legal"
+        ? "hostile_or_troll" // owner 2026-10-06: an insult (incl. a hostile emoji) never suppresses
         : signal === "acknowledgement" && !emoji_interpretation.needs_review
           ? "acknowledgement"
           : "unclear";
@@ -5389,11 +5389,18 @@ function resolveIntents(
     intents.push("condition_disclosed");
     reply_rule_ids.push("condition_gross_disclosure");
   }
-  if (hostile_legal_threat || hostile_profanity || hostile_bare_fu || hostile_insult || hostile_emoji) {
+  // OWNER RULE (2026-10-06, locked): an insult NEVER suppresses — no reply plus a quiet archive,
+  // nurture eligibility unchanged. Only a genuine legal threat or a stop-type demand ("stop
+  // harassing me", "don't ever text me") is hostile_or_legal (suppression + review, as today); an
+  // insult, profanity, a bare "FU" or a hostile emoji WITHOUT one is hostile_or_troll (blind-eval
+  // REAL-117 / SCONV-27 / SYN-48: they were labelled hostile_or_legal and the phone suppressed).
+  if (hostile_legal_threat) {
     intents.push("hostile_or_legal");
-    if (hostile_legal_threat) rule_tags.push("hostile_legal_threat");
-    else if (hostile_profanity || hostile_bare_fu) rule_tags.push("hostile_profanity");
-    else reply_rule_ids.push(hostile_insult ? reply_signals.hostile.rule_id : "emoji_hostile_with_text");
+    rule_tags.push("hostile_legal_threat");
+  } else if (hostile_profanity || hostile_bare_fu || hostile_insult || hostile_emoji) {
+    if (!intents.includes("hostile_or_troll")) intents.push("hostile_or_troll");
+    if (hostile_profanity || hostile_bare_fu) rule_tags.push("hostile_profanity");
+    reply_rule_ids.push(hostile_insult ? reply_signals.hostile.rule_id : hostile_emoji && !(hostile_profanity || hostile_bare_fu) ? "emoji_hostile_with_text" : "insult_quiet_archive");
   }
 
   // 4. NOT INTERESTED / SOFT OBJECTIONS (Capture negations before positive keywords)

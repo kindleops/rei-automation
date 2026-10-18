@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
-import { evaluateContactWindow, enqueueSendQueueItem, buildSendQueueDedupeKey,
+import { evaluateContactWindow, evaluateRecipientWindowForEntry, enqueueSendQueueItem, buildSendQueueDedupeKey,
   evaluateOutboundNumberEligibility,
 } from "@/lib/supabase/sms-engine.js";
 import { normalizeTimestamp } from "@/lib/utils/normalize-timestamp.js";
@@ -2849,11 +2849,19 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
     return { ok: false, reason_code: REASON_CODES.PENDING_PRIOR_TOUCH, reason: "next_eligible_at_future", next_eligible_at: candidate.next_eligible_at };
   }
 
-  const window_check = evaluateContactWindow(
+  // rc-8.5.21 (criterion 14): the plan-time check asks the SAME recipient-window functions as the
+  // dispatcher — the recipient phone first, mailing then property evidence, the candidate's stored
+  // zone only narrowing (never the bare "America/Chicago" default)
+  const property_state = clean(candidate.property_state || candidate.property_address_state || candidate.raw?.property_address_state || "") || null;
+  const window_check = evaluateRecipientWindowForEntry(
     {
-      contact_window: candidate.contact_window || null,
-      timezone: candidate.timezone || "America/Chicago",
+      entry: "campaign",
+      recipient_phone: candidate.canonical_e164 || null,
+      timezone: candidate.timezone || null,
+      property_geography: property_state ? { state: property_state, zip: clean(candidate.property_zip || candidate.property_address_zip || candidate.raw?.property_address_zip || "") || null } : null,
+      mailing_geography: clean(candidate.owner_address_state || candidate.raw?.owner_address_state || "") ? { state: clean(candidate.owner_address_state || candidate.raw?.owner_address_state), zip: null } : null,
       scheduled_for: options.now || new Date().toISOString(),
+      now: options.now,
     },
     { now: options.now }
   );

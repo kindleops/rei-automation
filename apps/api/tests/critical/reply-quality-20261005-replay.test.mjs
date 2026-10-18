@@ -109,7 +109,7 @@ const LABELS = {
   "047": { intent: "not_interested", lang: "Spanish", suppress: "none" },
   "034": { intent: "property_specific_non_owner", lang: "Spanish" }, // RC 8.5.15 written denial
   "052": { intent: "property_specific_non_owner", lang: "Spanish" }, // RC 8.5.15 written denial
-  "036": { intent: "hostile_or_legal", lang: "Spanish", auto: false },
+  "036": { intent: "hostile_or_troll", lang: "Spanish", auto: false }, // owner 2026-10-06 (locked, re-asserted 10-18): an insult is hostile_or_troll (quiet archive, never suppressed)
   "040": { intent: "who_is_this", lang: "Spanish" },
   "041": { intent: "who_is_this", lang: "Spanish" },
   "051": { intent: "who_is_this", auto: true },
@@ -131,7 +131,7 @@ const LABELS = {
   // Round 8 owner rule: a bare "?" gets the who_is_this reply.
   "030": { intent: "who_is_this", auto: true },
   "039": { intent: "unclear", review: true },
-  "012": { intent: "hostile_or_legal", auto: false },
+  "012": { intent: "hostile_or_troll", auto: false }, // owner 2026-10-06 (locked, re-asserted 10-18): an insult is hostile_or_troll (quiet archive, never suppressed)
   // ── bare "No" to the ownership question DENIES ownership: property-scoped,
   // no nurture, never suppressed (owner decision 2026-10-14, RC 8.5.15;
   // supersedes the 2026-10-13 decline and the 2026-10-06 clarifier) ──
