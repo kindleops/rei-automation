@@ -63,6 +63,9 @@ const HOLDS_PUBLIC_BASELINE = 'scripts/db/fixtures/automation_holds_public_basel
 const COMPANY_IDENTITY = M('PROPOSED_20261016150000_ai_conversation_company_identity_setting.sql')
 const GRAPH_PRIOR_REPLY_NOT_OWNER = M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner.sql')
 const GRAPH_LIVE_FUNCTIONS_BASELINE = 'scripts/db/fixtures/campaign_target_graph_live_functions_baseline.sql'
+// OWNER DECISION 2026-10-17: the declined-unverified role (property × contact hold)
+const CPR_DECLINED = M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified.sql')
+const CPR_LIVE_CONSTRAINTS = 'scripts/db/fixtures/contact_property_resolution_live_constraints.sql'
 // rc-8.5.21 part B
 const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
 const SEND_AUTHORIZATION = M('PROPOSED_20261016161000_negotiation_send_authorization.sql')
@@ -282,6 +285,16 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback_posttest.sql')],
   },
+  // ── owner 2026-10-17: contact_property_resolution role ownership_declined_unverified ──
+  {
+    id: 'contact_property_resolution_declined_unverified',
+    setup: [SHIM, GRAPH_LIVE_FUNCTIONS_BASELINE, CPR_LIVE_CONSTRAINTS],
+    pretest: M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_pretest.sql'),
+    apply: [CPR_DECLINED],
+    posttest: [M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_posttest.sql')],
+    rollback: [M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_rollback_posttest.sql')],
+  },
   // ── P0 automation-hold registry (rc-8.5.20-holds; production gets it via hotfix/automation-holds) ──
   {
     id: 'automation_holds_registry',
@@ -307,7 +320,7 @@ const BASE_TESTS = [
   // body that is not the live one).
   {
     id: 'rc_8_5_21_release_chain',
-    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, LEGACY_CONVERSATION_TURNS, HOLDS_PUBLIC_BASELINE, GRAPH_LIVE_FUNCTIONS_BASELINE],
+    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, LEGACY_CONVERSATION_TURNS, HOLDS_PUBLIC_BASELINE, GRAPH_LIVE_FUNCTIONS_BASELINE, CPR_LIVE_CONSTRAINTS],
     apply: [
       // 0. the P0 holds registry (already applied via hotfix/automation-holds in production)
       { fixture: M('PROPOSED_20261016200000_automation_holds_registry_pretest.sql') }, HOLDS_REGISTRY,
@@ -341,6 +354,8 @@ const BASE_TESTS = [
       { fixture: M('PROPOSED_20261016160000_runtime_event_budget_ceilings_pretest.sql') }, EVENT_BUDGET_CEILINGS,
       { fixture: M('PROPOSED_20261016161000_negotiation_send_authorization_pretest.sql') }, SEND_AUTHORIZATION,
       { fixture: M('PROPOSED_20261016162000_ops_research_valuation_snapshot_pretest.sql') }, OPS_RESEARCH_VALUATION,
+      // owner 2026-10-17: the declined-unverified role (before the historical ownership correction)
+      { fixture: M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_pretest.sql') }, CPR_DECLINED,
     ],
     verify: [T('rc_8_5_21_release_chain_verify.sql')],
     posttest: [
@@ -369,6 +384,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261016160000_runtime_event_budget_ceilings_posttest.sql'),
       M('PROPOSED_20261016161000_negotiation_send_authorization_posttest.sql'),
       M('PROPOSED_20261016162000_ops_research_valuation_snapshot_posttest.sql'),
+      M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_posttest.sql'),
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body); the
     // holds registry is rolled back LAST (it was applied first)
@@ -393,6 +409,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261016160000_runtime_event_budget_ceilings_rollback.sql'),
       M('PROPOSED_20261016161000_negotiation_send_authorization_rollback.sql'),
       M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback.sql'),
+      M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_rollback.sql'),
     ],
   },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──

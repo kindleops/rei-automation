@@ -127,13 +127,13 @@ test('store: a rejected pair excludes THAT property only; channel compliance exc
 const ownershipQ = (id, min, property_id = 'p1') => ({ id, direction: 'outbound', message_body: 'Hey Pat, this is Jake. Do you still own 1 Main St?', created_at: at(min), property_id })
 const inbound = (id, body, min, extra = {}) => ({ id, direction: 'inbound', message_body: body, created_at: at(min), ...extra })
 
-test('text evidence: a bare / emoji "No" or "never have" to our ownership question denies THAT property; a polite "No thanks" is a decline', () => {
+test('text evidence: a bare / emoji "No" or "never have" to our ownership question denies THAT property; a polite "No thanks" is declined-unverified', () => {
   for (const body of ['No', 'Nope 🙅', 'No 👎', 'No never have', 'Never owned it']) {
     const ev = ownershipEvidenceByProperty({ messages: [ownershipQ('o1', 0), inbound('i1', body, 5)] })
     assert.equal(ev.get('p1')?.state, 'denied', body)
   }
   assert.equal(bareNoAnswer('No thanks').ownership_denial, false)
-  assert.notEqual(ownershipEvidenceByProperty({ messages: [ownershipQ('o1', 0), inbound('i1', 'No thanks', 5)] }).get('p1')?.state, 'denied', 'polite = decline (30-day nurture)')
+  assert.equal(ownershipEvidenceByProperty({ messages: [ownershipQ('o1', 0), inbound('i1', 'No thanks', 5)] }).get('p1')?.state, 'declined', 'polite = declined engagement, ownership unverified (owner 2026-10-17) — never denied')
   // the same "No" to an INTEREST question is disinterest (30-day nurture), never a denial
   const s2 = ownershipEvidenceByProperty({ messages: [{ id: 'o1', direction: 'outbound', message_body: 'Would you consider an offer on 1 Main St if the number made sense?', created_at: at(0), property_id: 'p1' }, inbound('i1', 'No', 5)] })
   assert.notEqual(s2.get('p1')?.state, 'denied')
@@ -219,7 +219,8 @@ for (const [message, q, intent, rule] of [
   ['No never have', 's1', 'property_specific_non_owner', 'ctx_never_owned_after_ownership_check'],
   ['Never have', 's1', 'property_specific_non_owner', 'ctx_never_owned_after_ownership_check'],
   ['No 👎', 's1', 'property_specific_non_owner', 'ctx_emoji_no_after_ownership_check_ownership_unverified'],
-  ['No thanks', 's1', 'not_interested', 'ctx_polite_no_after_ownership_check_not_interested'],
+  // OWNER DECISION 2026-10-17 (supersedes 831df6cd): declined engagement, ownership UNVERIFIED
+  ['No thanks', 's1', 'ownership_declined_unverified', 'ctx_polite_no_after_ownership_check_declined_unverified'],
 ]) {
   test(`classifier reads the previous question: ${JSON.stringify(message)} after ${q} → ${intent} (never unclear / not_interested)`, async () => {
     const r = await replay(message, q)

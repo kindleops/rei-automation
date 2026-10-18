@@ -118,7 +118,7 @@ test('rule 2: a property-scoped not-owner LABEL without a property holds (send-t
   assert.equal(evaluateSendTimeContactGuard(row('p7'), { threads: [{ ...threads[0], property_id: 'p1' }] }).blocked, false)
   // the campaign planner records the hold under its own skip reason
   const src = fs.readFileSync(path.join(SRC, 'lib/domain/campaigns/campaign-automation-service.js'), 'utf8')
-  assert.match(src, /recordSkip\(notOwner\.hold \? 'ownership_property_unresolved_hold' : 'prior_reply_not_owner'/)
+  assert.match(src, /recordSkip\(notOwner\.hold \? 'ownership_property_unresolved_hold' : notOwner\.declined \? 'ownership_declined_unverified_hold' : 'prior_reply_not_owner'/)
 })
 
 // ── 3. recency AND confidence, both directions ──────────────────────────────

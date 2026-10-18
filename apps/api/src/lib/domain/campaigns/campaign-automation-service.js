@@ -8210,6 +8210,7 @@ const PLAN_SKIP_LABELS = Object.freeze({
   prior_contacted_suppression: 'already contacted',
   prior_reply_not_owner: 'replied not the owner',
   ownership_property_unresolved_hold: 'ownership denial, property unresolved (held for review)',
+  ownership_declined_unverified_hold: 'declined, ownership unverified (held for this property)',
   graph_suppression_or_queue_block: 'suppressed',
   duplicate_phone_in_launch_batch: 'duplicate phone',
   per_sender_cap_reached: 'sender daily cap reached',
@@ -8800,7 +8801,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     if (notOwner.excluded) {
       // owner rule 2 (2026-10-17): an unidentified-property denial HOLDS the target for operator
       // resolution — skipped under its own reason, never counted as "replied not the owner"
-      recordSkip(notOwner.hold ? 'ownership_property_unresolved_hold' : 'prior_reply_not_owner', target, { scope: notOwner.scope, signal: notOwner.signal, source: notOwner.source })
+      recordSkip(notOwner.hold ? 'ownership_property_unresolved_hold' : notOwner.declined ? 'ownership_declined_unverified_hold' : 'prior_reply_not_owner', target, { scope: notOwner.scope, signal: notOwner.signal, source: notOwner.source })
       continue
     }
     if (candidate.true_post_contact_suppression || candidate.wrong_number || candidate.pending_prior_touch || candidate.active_queue_item) {

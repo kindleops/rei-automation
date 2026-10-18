@@ -439,7 +439,7 @@ const POSITIVE_SENTIMENT_INTENTS = new Set([
 ]);
 const NEGATIVE_SENTIMENT_INTENTS = new Set([
   "opt_out", "wrong_number", "not_interested", "hostile_or_legal", "sold_property", "need_time",
-  "property_specific_non_owner", "former_owner_respondent",
+  "property_specific_non_owner", "former_owner_respondent", "ownership_declined_unverified",
 ]);
 const SARCASM_RULE_RE = /^(?:sarcasm_not_interest|non_literal_laughter|asking_price_implausible_|troll_after_implausible_ask|profanity_in_reply)/;
 
@@ -7745,6 +7745,19 @@ function deriveAutomationDecision({
   // property -- a deterministic property-scoped stop: no reply, no suppression,
   // no review item.
   if (intent === "property_specific_non_owner") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "medium",
+    };
+  }
+
+  // OWNER DECISION 2026-10-17: a polite decline to the ownership question — declined engagement,
+  // ownership UNVERIFIED. No reply, no suppression, no nurture; a property × contact hold (recorded by
+  // contact resolution as role ownership_declined_unverified, never not_owner).
+  if (intent === "ownership_declined_unverified") {
     return {
       auto_reply_allowed: false,
       queue_action: "none",

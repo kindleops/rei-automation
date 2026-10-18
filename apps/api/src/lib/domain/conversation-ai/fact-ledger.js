@@ -81,7 +81,7 @@ const OUR_AMOUNT_RE = /\$\s?[0-9][0-9,]*(?:\.[0-9]+)?\s?(?:k|m)?\b|\b[0-9]{2,3}(
 
 const OWNERSHIP_INTENTS = Object.freeze({
   ownership_confirmed: 'confirmed', wrong_number: 'denied', not_owner: 'denied', ownership_denied: 'denied',
-  property_specific_non_owner: 'denied', former_owner_respondent: 'former_owner',
+  property_specific_non_owner: 'denied', former_owner_respondent: 'former_owner', ownership_declined_unverified: 'declined_unverified',
 })
 const REPRESENTATIVE_INTENTS = new Set(['executor_heir_respondent', 'family_member_respondent', 'agent_representative_respondent', 'non_owner_referral'])
 const INTEREST_INTENTS = Object.freeze({ not_interested: 'not_interested', seller_interested: 'interested', interested: 'interested', latent_interest: 'conditional', conditional_interest: 'conditional' })
@@ -189,6 +189,9 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     else if (OWN_CONFIRM_RE.test(body) || (lastAsked === 'ownership' && BARE_YES_RE.test(body))) addFact(facts, 'ownership', 'confirmed', m)
     // rc-8.5.20: the shared matcher ("Not really", "No!!!", "Nope"); a polite "No thanks" or an emoji reply is not a denial
     else if (lastAsked === 'ownership' && bareNoAnswer(body).ownership_denial) addFact(facts, 'ownership', 'denied', m)
+    // OWNER DECISION 2026-10-17 (supersedes 831df6cd): a polite "No thanks" to the ownership question is
+    // declined engagement, ownership UNVERIFIED — its own value, never 'denied', never a selling decline
+    else if (lastAsked === 'ownership' && bareNoAnswer(body).ownership_declined) addFact(facts, 'ownership', 'declined_unverified', m)
     if (REPRESENTATIVE_INTENTS.has(intent) || REPRESENTATIVE_RE.test(body)) {
       addFact(facts, 'representative', intent || 'representative', m)
       // a representative answers the ownership question for the owner (never "denied")

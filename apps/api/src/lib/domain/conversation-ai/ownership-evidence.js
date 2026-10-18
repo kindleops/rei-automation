@@ -22,7 +22,7 @@
 import { isStopRequest } from './stop-request.js'
 
 export const OWNERSHIP_EVIDENCE_VERSION = 'conv-ai.ownership-evidence.v1'
-export const OWNERSHIP_CLASSES = Object.freeze(['opt_out', 'wrong_number', 'property_non_owner', 'tenant', 'former_owner', 'confirmed_owner', 'authorized_rep', 'uncertain'])
+export const OWNERSHIP_CLASSES = Object.freeze(['opt_out', 'wrong_number', 'property_non_owner', 'tenant', 'former_owner', 'ownership_declined_unverified', 'confirmed_owner', 'authorized_rep', 'uncertain'])
 
 // send-time-contact-guard.js reasons (SEND_TIME_GUARD_REASONS) that are suppression states
 export const ABSOLUTE_SUPPRESSION_REASONS = Object.freeze(new Set(['sms_suppression_list_active', 'automation_suppression_active', 'thread_suppressed', 'thread_opted_out', 'opt_out_reply']))
@@ -41,7 +41,7 @@ function latestStated(ledger) {
 
 /**
  * @param {{ ledger: object, eligibility?: object|null, inboundId?: string|null, inboundText?: string, deterministic?: object|null }} a
- * @returns {{ version: string, class: string, action: 'suppress_stop'|'suppressed_existing'|'no_owner_outreach'|'property_denial_no_reply'|'hold_conflict'|'hold_unreadable'|'proceed', absolute: boolean, conflict: boolean, reasons: string[], evidence: object }}
+ * @returns {{ version: string, class: string, action: 'suppress_stop'|'suppressed_existing'|'no_owner_outreach'|'property_denial_no_reply'|'ownership_declined_no_reply'|'hold_conflict'|'hold_unreadable'|'proceed', absolute: boolean, conflict: boolean, reasons: string[], evidence: object }}
  */
 export function resolveOwnershipEvidence({ ledger = null, eligibility = null, inboundId = null, inboundText = '', deterministic = null } = {}) {
   const out = (cls, action, reasons = [], extra = {}) => ({ version: OWNERSHIP_EVIDENCE_VERSION, class: cls, action, absolute: ['suppress_stop', 'suppressed_existing', 'no_owner_outreach'].includes(action), conflict: action === 'hold_conflict', reasons, evidence: extra })
@@ -72,12 +72,18 @@ export function resolveOwnershipEvidence({ ledger = null, eligibility = null, in
     }
     return out(classOfSignal(thisMessage ? detIntent : signal), 'property_denial_no_reply', ['prior_reply_not_owner'], { guard_signal: signal || null, guard_source: guard.source || null, from_this_message: thisMessage })
   }
+  // 5b. OWNER DECISION 2026-10-17: a recorded / thread-evident polite decline to the ownership question
+  //     (ownership UNVERIFIED) — no reply, no nurture, no selling question; NOT a denial fact
+  if (eligibility?.blocked && reason === 'ownership_declined_unverified_hold') return out('ownership_declined_unverified', 'ownership_declined_no_reply', ['ownership_declined_unverified_hold'], { guard_source: guard.source || null })
   if (eligibility?.blocked) return out('uncertain', 'hold_unreadable', [`eligibility_blocked:${reason || 'blocked'}`])
 
   // 6. the ledger itself (this thread's explicit statements, latest wins); a tenant reading of THIS
   //    message (classifier) is the property-scoped non-owner class
   if (TENANT_SIGNALS.has(detIntent)) return out('tenant', 'property_denial_no_reply', ['classifier:tenant'])
   const v = own?.value || null
+  if (detIntent === 'ownership_declined_unverified' || (v === 'declined_unverified' && (own.source_message_ids || []).includes(inboundId))) {
+    return out('ownership_declined_unverified', 'ownership_declined_no_reply', [detIntent === 'ownership_declined_unverified' ? 'classifier:ownership_declined_unverified' : 'ledger:ownership_declined_unverified'])
+  }
   if (v === 'denied') return out('property_non_owner', statedHere || (own.source_message_ids || []).includes(inboundId) ? 'property_denial_no_reply' : 'proceed', ['ledger:ownership_denied'])
   if (v === 'former_owner') return out('former_owner', 'proceed', ['ledger:former_owner'], { confidence: own.confidence ?? null })
   if (v === 'representative') return out('authorized_rep', 'proceed', [])

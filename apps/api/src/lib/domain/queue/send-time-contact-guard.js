@@ -81,6 +81,9 @@ export const SEND_TIME_GUARD_REASONS = Object.freeze({
   // evidence that conflicts (a newer, less confident label against explicit text), HOLDS the thread for
   // operator resolution — deferred like an automation hold, never a terminal denial of every property
   OWNERSHIP_UNRESOLVED_HOLD: "ownership_denial_property_unresolved",
+  // OWNER DECISION 2026-10-17: a polite decline to the ownership question — ownership UNVERIFIED; a
+  // property × contact hold (deferred, never terminal, never a denial)
+  OWNERSHIP_DECLINED_HOLD: "ownership_declined_unverified_hold",
   // rc-8.5.21 (Pittsburgh 8d03a7c4): the seller already STATED a price — a price question is never sent
   ASKING_PRICE_ALREADY_STATED: "blocked_repeat_asking_price_already_stated",
   ALREADY_CONTACTED_PAIR: "already_contacted_person_phone",
@@ -101,6 +104,7 @@ const REASON_CODE = Object.freeze({
   [R.PRIOR_REPLY_NOT_OWNER]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.AUTOMATION_HOLD]: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
   [R.OWNERSHIP_UNRESOLVED_HOLD]: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
+  [R.OWNERSHIP_DECLINED_HOLD]: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
   [R.ASKING_PRICE_ALREADY_STATED]: "blocked_repeat_asking_price_already_stated",
   [R.ALREADY_CONTACTED_PAIR]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.ALREADY_CONTACTED_PHONE]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
@@ -114,9 +118,11 @@ export const PROPERTY_SCOPED_NOT_OWNER = Object.freeze(new Set([
   "tenant_respondent", "non_owner_referral", "not_owner",
 ]));
 export const PHONE_SCOPED_NOT_OWNER = Object.freeze(new Set(["wrong_number", "wrong_person"]));
+/** OWNER DECISION 2026-10-17 — same set as opener-reply-exclusion.js PROPERTY_SCOPED_DECLINED. */
+export const PROPERTY_SCOPED_DECLINED = Object.freeze(new Set(["ownership_declined_unverified"]));
 const OPT_OUT_SIGNALS = new Set(["opt_out", "opted_out", "stop", "dnc", "do_not_contact", "suppressed", "unsubscribed"]);
 const BLOCKING_CONTACTABILITY = new Set(["opt_out", "opted_out", "suppressed", "do_not_contact", "dnc", "invalid", "blocked"]);
-export const SEND_TIME_REPLY_INTENTS = Object.freeze([...PROPERTY_SCOPED_NOT_OWNER, ...PHONE_SCOPED_NOT_OWNER, ...OPT_OUT_SIGNALS]);
+export const SEND_TIME_REPLY_INTENTS = Object.freeze([...PROPERTY_SCOPED_NOT_OWNER, ...PHONE_SCOPED_NOT_OWNER, ...PROPERTY_SCOPED_DECLINED, ...OPT_OUT_SIGNALS]);
 
 /** automation_suppressions statuses that mean the hold no longer applies. */
 const INACTIVE_SUPPRESSION_STATUSES = new Set(["released", "inactive", "lifted", "cleared", "expired", "revoked", "resolved", "cancelled", "canceled", "superseded"]);
@@ -222,6 +228,7 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
     if (!clean(pid) || !property_id) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { scope: "thread_hold", signal, source, action: "operator_review" });
     if (clean(pid) !== property_id) return null;
     if (text_confirmed) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { scope: "thread_hold", conflict: true, signal, source, action: "operator_review" });
+    if (PROPERTY_SCOPED_DECLINED.has(signal)) return block(R.OWNERSHIP_DECLINED_HOLD, { scope: "person_property", ownership: "unverified", signal, source });
     return block(R.PRIOR_REPLY_NOT_OWNER, { scope: "person_property", signal, source });
   };
 
@@ -253,7 +260,7 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
       return block(R.THREAD_OPTED_OUT, { signal: signals.find((s) => OPT_OUT_SIGNALS.has(s) || BLOCKING_CONTACTABILITY.has(s)) || null });
     }
     if (signals.some((s) => PHONE_SCOPED_NOT_OWNER.has(s))) return block(R.WRONG_NUMBER, { source: "thread_state" });
-    const prop_signal = signals.find((s) => PROPERTY_SCOPED_NOT_OWNER.has(s));
+    const prop_signal = signals.find((s) => PROPERTY_SCOPED_NOT_OWNER.has(s) || PROPERTY_SCOPED_DECLINED.has(s));
     if (prop_signal) {
       const b = propertyLabelBlock(prop_signal, t.property_id, "thread_state");
       if (b) return b;
@@ -270,7 +277,7 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
     const intent = lower(m.detected_intent);
     if (m.is_opt_out === true || OPT_OUT_SIGNALS.has(intent)) return block(R.OPT_OUT_REPLY);
     if (PHONE_SCOPED_NOT_OWNER.has(intent)) return block(R.WRONG_NUMBER, { source: "inbound_reply" });
-    if (PROPERTY_SCOPED_NOT_OWNER.has(intent)) {
+    if (PROPERTY_SCOPED_NOT_OWNER.has(intent) || PROPERTY_SCOPED_DECLINED.has(intent)) {
       const b = propertyLabelBlock(intent, m.property_id, "inbound_reply");
       if (b) return b;
     }
@@ -283,6 +290,7 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
   if (rc?.blocked) {
     if (rc.detail?.scope === "phone") return block(R.THREAD_OPTED_OUT, { ...rc.detail, guard: rc.version });
     if (rc.hold) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { ...rc.detail, guard: rc.version });
+    if (rc.reason === "ownership_declined_unverified_hold") return block(R.OWNERSHIP_DECLINED_HOLD, { ...rc.detail, guard: rc.version });
     return block(R.PRIOR_REPLY_NOT_OWNER, { source: "message_text", ...rc.detail, guard: rc.version });
   }
 
@@ -340,7 +348,7 @@ export async function loadSendTimeContactFacts(supabase, row = {}, opts = {}) {
     read(supabase.from("message_events").select("from_phone_number,property_id,detected_intent,is_opt_out").eq("direction", "inbound").in("from_phone_number", variants).in("detected_intent", SEND_TIME_REPLY_INTENTS).limit(200)),
   ]);
   // rc-8.5.21: the thread's own messages (recontact guard) and the automation-hold registry
-  const contact_property_resolution = await read(supabase.from("contact_property_resolution").select("property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at,rejection_reason").in("contact_phone_e164", variants).limit(50));
+  const contact_property_resolution = await read(supabase.from("contact_property_resolution").select("property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at,rejection_reason,updated_at").in("contact_phone_e164", variants).limit(50));
   const thread_messages = await read(supabase.from("message_events").select("id,direction,message_body,created_at,event_timestamp,property_id,detected_intent").in("thread_key", variants).order("created_at", { ascending: false }).limit(60));
   const automation_hold = await checkAutomationHoldPort({ threadKey: clean(row.thread_key) || clean(row.to_phone_number), propertyId: property_id || null, masterOwnerId: clean(row.master_owner_id) || null, capability: "send_time_dispatch" }, { checker: opts.automationHoldChecker || null });
   const facts = {

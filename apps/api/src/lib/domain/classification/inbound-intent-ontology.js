@@ -191,6 +191,15 @@ const RAW = {
     classifier_aliases: ["ownership_confirmed", "ownership confirmed", "ownership confirmation", "owner_confirmed"],
     compliance: NO_COMPLIANCE,
   },
+  ownership_declined_unverified: {
+    category: "ownership_authority",
+    description: "OWNER DECISION 2026-10-17: a polite decline (\"No thanks\") to the ownership question. Declined engagement, ownership UNVERIFIED. A property × contact no-recontact hold; never the 30-day selling nurture, never verified non-ownership.",
+    terminal_hint: "no_reply_required",
+    reply_policy: { reply_required: false, reply_permitted: false, escalate_to_human: false, objective: "Hold this contact for this property; do not nurture, do not re-ask ownership." },
+    state_hints: { lifecycle_stage: null, operational_status: "paused", lead_temperature: "cold", disposition: "none", automation: "stop" },
+    classifier_aliases: ["ownership_declined_unverified", "ownership_declined"],
+    compliance: NO_COMPLIANCE,
+  },
   not_owner: {
     category: "ownership_authority",
     description: "Respondent states they are not (and never were) the owner of this property. Phone-level suppression for this property; no lifecycle advance.",

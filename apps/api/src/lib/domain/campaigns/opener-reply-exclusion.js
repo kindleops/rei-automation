@@ -19,7 +19,7 @@
 // (written by the live inbound waterfall) is read too, through the SAME evaluator the dispatch-time
 // send guard uses (queue/ownership-recontact-guard.js); it runs ahead of any prior-contact
 // override, so suppress_previously_contacted:false can never lift it.
-import { evaluateContactPropertyResolution, OWNERSHIP_UNRESOLVED_REASON } from '../queue/ownership-recontact-guard.js'
+import { evaluateContactPropertyResolution, OWNERSHIP_UNRESOLVED_REASON, OWNERSHIP_DECLINED_REASON, OWNERSHIP_DECLINED_ROLE } from '../queue/ownership-recontact-guard.js'
 
 const clean = (value) => String(value ?? '').trim()
 const lower = (value) => clean(value).toLowerCase()
@@ -60,7 +60,10 @@ export const PROPERTY_SCOPED_NOT_OWNER = Object.freeze(new Set([
 /** The phone does not belong to the person we meant: excluded for every property. */
 export const PHONE_SCOPED_NOT_OWNER = Object.freeze(new Set(['wrong_number', 'wrong_person']))
 
-const ALL_NOT_OWNER = new Set([...PROPERTY_SCOPED_NOT_OWNER, ...PHONE_SCOPED_NOT_OWNER])
+/** OWNER DECISION 2026-10-17: declined engagement, ownership UNVERIFIED — a property × contact hold (not a denial). */
+export const PROPERTY_SCOPED_DECLINED = Object.freeze(new Set(['ownership_declined_unverified']))
+
+const ALL_NOT_OWNER = new Set([...PROPERTY_SCOPED_NOT_OWNER, ...PHONE_SCOPED_NOT_OWNER, ...PROPERTY_SCOPED_DECLINED])
 
 /** The intents worth fetching from message_events. */
 export const NOT_OWNER_REPLY_INTENTS = Object.freeze([...ALL_NOT_OWNER])
@@ -77,12 +80,16 @@ function signalsOf(thread = {}) {
 export function evaluateOpenerReplyExclusion({ property_id = null, threads = [], replies = [], resolutions = [] } = {}) {
   const target_property = clean(property_id)
   const store = evaluateContactPropertyResolution({ property_id, resolutions })
-  if (store.excluded) return { excluded: true, ...(store.hold ? { hold: true } : {}), reason: store.reason, scope: store.scope, signal: store.role, source: store.source }
+  if (store.excluded) return { excluded: true, ...(store.hold ? { hold: true } : {}), ...(store.declined ? { declined: true } : {}), reason: store.reason, scope: store.scope, signal: store.role, source: store.source }
   // OWNER RULE 2 (2026-10-17): a property-scoped not-owner signal whose property (or the target's) is
   // not identified HOLDS the target for operator resolution; it never labels every property denied
   const propertyVerdict = (pid, signal, source) => {
     if (!clean(pid) || !target_property) return { excluded: true, hold: true, reason: OWNERSHIP_UNRESOLVED_REASON, scope: 'thread_hold', signal, source }
-    if (clean(pid) === target_property) return { excluded: true, reason: 'prior_reply_not_owner', scope: 'person_property', signal, source }
+    if (clean(pid) === target_property) {
+      return PROPERTY_SCOPED_DECLINED.has(signal)
+        ? { excluded: true, declined: true, reason: OWNERSHIP_DECLINED_REASON, scope: 'person_property', signal, source }
+        : { excluded: true, reason: 'prior_reply_not_owner', scope: 'person_property', signal, source }
+    }
     return null
   }
 
@@ -91,7 +98,7 @@ export function evaluateOpenerReplyExclusion({ property_id = null, threads = [],
       if (PHONE_SCOPED_NOT_OWNER.has(signal)) {
         return { excluded: true, reason: 'prior_reply_not_owner', scope: 'phone', signal, source: 'thread_state' }
       }
-      if (PROPERTY_SCOPED_NOT_OWNER.has(signal)) {
+      if (PROPERTY_SCOPED_NOT_OWNER.has(signal) || PROPERTY_SCOPED_DECLINED.has(signal)) {
         const v = propertyVerdict(thread.property_id, signal, 'thread_state')
         if (v) return v
       }
@@ -102,7 +109,7 @@ export function evaluateOpenerReplyExclusion({ property_id = null, threads = [],
     if (PHONE_SCOPED_NOT_OWNER.has(intent)) {
       return { excluded: true, reason: 'prior_reply_not_owner', scope: 'phone', signal: intent, source: 'inbound_reply' }
     }
-    if (PROPERTY_SCOPED_NOT_OWNER.has(intent)) {
+    if (PROPERTY_SCOPED_NOT_OWNER.has(intent) || PROPERTY_SCOPED_DECLINED.has(intent)) {
       const v = propertyVerdict(reply.property_id, intent, 'inbound_reply')
       if (v) return v
     }
@@ -141,7 +148,7 @@ export async function loadOpenerReplyFacts(supabase, phones = [], { chunkSize = 
         .limit(5000),
       supabase
         .from('contact_property_resolution')
-        .select('property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at')
+        .select('property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at,updated_at')
         .in('contact_phone_e164', chunk)
         .limit(5000),
     ])
@@ -150,7 +157,7 @@ export async function loadOpenerReplyFacts(supabase, phones = [], { chunkSize = 
     if (resolutions.error) throw resolutions.error
     for (const row of threads.data || []) slot(row.thread_key)?.threads.push(row)
     for (const row of replies.data || []) slot(row.from_phone_number)?.replies.push(row)
-    for (const row of resolutions.data || []) if (row.rejected_at || row.suppression_scope === 'channel_compliance' || row.contact_property_role === 'suppressed') slot(row.contact_phone_e164)?.resolutions.push(row)
+    for (const row of resolutions.data || []) if (row.rejected_at || row.suppression_scope === 'channel_compliance' || row.contact_property_role === 'suppressed' || row.contact_property_role === OWNERSHIP_DECLINED_ROLE) slot(row.contact_phone_e164)?.resolutions.push(row)
   }
   return facts
 }

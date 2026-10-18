@@ -67,6 +67,11 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   if (own.action === 'no_owner_outreach') return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: 'wrong_number' }, source_message_id: inboundId }, { type: ACTIONS.NO_RESPONSE, reason: 'wrong_number_no_owner_outreach' }], 'wrong_number_no_owner_outreach', { ownership })
   if (own.action === 'hold_conflict') return plan([{ type: ACTIONS.HOLD, reason: 'ownership_evidence_conflict', evidence: own.evidence }], 'ownership_evidence_conflict', { ownership })
   if (own.action === 'hold_unreadable') return plan([{ type: ACTIONS.HOLD, reason: own.reasons[0] || 'eligibility_unreadable' }], 'eligibility_unreadable', { ownership })
+  // OWNER DECISION 2026-10-17: the polite decline to the ownership question — never a nurture, never a
+  // selling question, never composed; the property × contact hold is the guard's / contact resolution's
+  if (own.action === 'ownership_declined_no_reply') {
+    return plan([{ type: ACTIONS.NO_RESPONSE, reason: 'ownership_declined_unverified_hold' }], 'ownership_declined_unverified_no_nurture', { ownership })
+  }
   if (own.action === 'property_denial_no_reply' && (eligibility?.blocked || own.class === 'tenant')) {
     return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: own.class }, source_message_id: inboundId }, { type: ACTIONS.NO_RESPONSE, reason: 'property_scoped_denial' }], 'ownership_denied_no_nurture', { ownership })
   }

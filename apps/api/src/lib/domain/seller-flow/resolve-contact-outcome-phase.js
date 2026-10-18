@@ -65,6 +65,10 @@ export function deriveS1Outcome({ canonical_intent = null, relationship_outcome 
   if (intent === 'opt_out' || intent === 'unsubscribe' || intent === 'stop') {
     return S1_CONTACT_OUTCOME.OPT_OUT
   }
+  // OWNER DECISION 2026-10-17: the polite decline to the ownership question (ownership unverified)
+  if (intent === 'ownership_declined_unverified' || intent === 'ownership_declined') {
+    return S1_CONTACT_OUTCOME.OWNERSHIP_DECLINED
+  }
 
   const outcome = RELATIONSHIP_TO_S1_OUTCOME[clean(relationship_outcome)] || null
   if (outcome === S1_CONTACT_OUTCOME.NOT_OWNER && referral_detected) {
@@ -162,6 +166,11 @@ export async function runContactResolutionPhase({
     // Fail closed. Without a durable rejection we cannot guarantee the
     // waterfall will not loop, so we do not select a next contact at all.
     return { ...base, ran: true, reason: 'persist_failed', persist_error: persisted.reason, requires_review: true }
+  }
+
+  // ── 2a. Ownership declined (unverified): a property × contact HOLD — no waterfall, no rejection ──
+  if (outcome === S1_CONTACT_OUTCOME.OWNERSHIP_DECLINED) {
+    return { ...base, ran: true, persisted: true, action: RESOLUTION_ACTION.NONE, waterfall_invoked: false, hold: 'ownership_declined_unverified', suppression_scope: 'contact_property_pair', contact_property_role: persisted.contact_property_role }
   }
 
   // ── 2. Owner confirmed / opt-out: no waterfall ───────────────────────────

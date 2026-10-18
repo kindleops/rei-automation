@@ -20,10 +20,14 @@
 // What each caller does with a match is policy, applied against OUR last question:
 //   after the ownership question: ownership_denial (not polite)         → ownership denied
 //                                 (property-scoped; no nurture, no further ownership ask)
+//                                 ownership_declined (polite: "No thanks") → OWNER DECISION 2026-10-17
+//                                 (supersedes 831df6cd): declined engagement, ownership UNVERIFIED —
+//                                 a property × contact no-recontact hold; NEVER the 30-day selling
+//                                 nurture and NEVER recorded as verified non-ownership
 //   after the interest question:  any bare negative → not interested (30-day follow-up)
 import { matchBareNegative } from '../classification/seller-reply-families.js'
 
-export const ANSWERS_VERSION = 'conv-ai.answers.v2'
+export const ANSWERS_VERSION = 'conv-ai.answers.v3'
 
 const POLITE_TAIL_RE = /(?:^|\s)(?:thanks|thank\s+you|thank\s+u|thx|ty|gracias)$/u
 const PICTOGRAPH_RE = /\p{Extended_Pictographic}/u
@@ -31,15 +35,15 @@ const PICTOGRAPH_RE = /\p{Extended_Pictographic}/u
 /**
  * @param {string} text the seller's whole message
  * @param {{ names?: string[] }} [opts] our persona / the addressee (sign-off stripping)
- * @returns {{ matched: boolean, canonical: string|null, polite: boolean, emoji: boolean, ownership_denial: boolean }}
+ * @returns {{ matched: boolean, canonical: string|null, polite: boolean, emoji: boolean, ownership_denial: boolean, ownership_declined: boolean }}
  */
 export function bareNoAnswer(text, { names = [] } = {}) {
   const body = String(text ?? '')
   const m = matchBareNegative(body, { names })
-  if (!m) return { matched: false, canonical: null, polite: false, emoji: false, ownership_denial: false }
+  if (!m) return { matched: false, canonical: null, polite: false, emoji: false, ownership_denial: false, ownership_declined: false }
   const polite = POLITE_TAIL_RE.test(m.canonical)
   const emoji = PICTOGRAPH_RE.test(body)
-  return { matched: true, canonical: m.canonical, polite, emoji, ownership_denial: !polite }
+  return { matched: true, canonical: m.canonical, polite, emoji, ownership_denial: !polite, ownership_declined: polite }
 }
 
 /** A bare negative of any kind ("No", "Not really", "No thanks"). */
@@ -50,4 +54,9 @@ export function isBareNo(text, opts) {
 /** A bare negative that, read against our ownership question, denies ownership. */
 export function isBareOwnershipDenial(text, opts) {
   return bareNoAnswer(text, opts).ownership_denial
+}
+
+/** A POLITE negative ("No thanks") that, read against our ownership question, declines (ownership unverified). */
+export function isOwnershipDecline(text, opts) {
+  return bareNoAnswer(text, opts).ownership_declined
 }

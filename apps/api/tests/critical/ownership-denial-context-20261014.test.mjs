@@ -141,14 +141,13 @@ test("S1 'Not anymore' is a former owner (sold lane): property pairing closed, p
   assert.equal(r.decision.next_action, "disposition_property_sold");
 });
 
-test("S1 polite declines ('No thanks', 'No gracias Carlos!') answer a sales approach: decline, 30-day nurture (unchanged)", async () => {
+test("OWNER DECISION 2026-10-17 (supersedes 831df6cd): S1 polite declines ('No thanks', 'No gracias Carlos!') are ownership_declined_unverified — NO 30-day nurture, no suppression, never a denial", async () => {
   for (const [message, q] of [["No thanks", "s1_still_own"], ["No gracias Carlos!", "s1_es"]]) {
     const r = await replay(message, q);
-    assert.equal(r.classification.primary_intent, "not_interested", message);
-    assert.ok(r.classification.matched_rule_ids.includes("ctx_polite_no_after_ownership_check_not_interested"));
-    assert.equal(r.decision.audit_reason, "s1_not_for_sale_advance_with_followup");
-    assert.equal(r.decision.should_suppress_contact, false);
-    assert.ok(r.decision.follow_up_at, "keeps the 30-day nurture");
+    assert.equal(r.classification.primary_intent, "ownership_declined_unverified", message);
+    assert.ok(r.classification.matched_rule_ids.includes("ctx_polite_no_after_ownership_check_declined_unverified"), r.classification.matched_rule_ids.join(","));
+    assertNoFollowupDecline(r, "s1_ownership_declined_unverified_no_followup");
+    assert.notEqual(r.classification.primary_intent, "property_specific_non_owner", "never recorded as verified non-ownership");
   }
 });
 

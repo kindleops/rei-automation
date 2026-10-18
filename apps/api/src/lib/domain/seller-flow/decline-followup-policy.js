@@ -55,7 +55,7 @@ export function isOwnershipUnverified(classification = {}) {
 
 /**
  * Which no-follow-up decline (if any) this classification is.
- * @returns {null | { kind: 'ownership_unverified'|'contact_permission_declined', audit_reason: string, policy: string }}
+ * @returns {null | { kind: 'ownership_unverified'|'ownership_declined_unverified'|'contact_permission_declined', audit_reason: string, policy: string }}
  */
 export function resolveDeclineFollowupPolicy(classification = {}) {
   if (!classification || typeof classification !== "object") return null;
@@ -64,6 +64,14 @@ export function resolveDeclineFollowupPolicy(classification = {}) {
   const primary = clean(classification.primary_intent);
   if (primary === "opt_out" || primary === "wrong_number") return null;
 
+  // OWNER DECISION 2026-10-17: the polite decline to the ownership question (ownership UNVERIFIED)
+  if (primary === "ownership_declined_unverified") {
+    return {
+      kind: "ownership_declined_unverified",
+      audit_reason: "s1_ownership_declined_unverified_no_followup",
+      policy: "property_contact_hold_ownership_unverified",
+    };
+  }
   if (isOwnershipUnverified(classification)) {
     return {
       kind: "ownership_unverified",

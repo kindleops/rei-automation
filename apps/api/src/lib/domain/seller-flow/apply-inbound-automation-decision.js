@@ -575,6 +575,22 @@ function computeInboundAutomationDecisionRaw({
     });
   }
 
+  // OWNER DECISION 2026-10-17 (supersedes 831df6cd): a polite "No thanks" to the ownership question is
+  // declined engagement with ownership UNVERIFIED. No reply, no nurture (next_action is never a
+  // follow-up action, so the deferred scheduler is never called), no phone suppression, no review. The
+  // property × contact hold is recorded by contact resolution (role ownership_declined_unverified).
+  if (primary_intent === "ownership_declined_unverified") {
+    return buildDecisionResult({
+      should_suppress_contact: false,
+      should_mark_human_review: false,
+      reply_mode: "none",
+      route_hint: null,
+      stage_hint,
+      next_action: NO_FOLLOWUP_NEXT_ACTION,
+      audit_reason: "s1_ownership_declined_unverified_no_followup",
+    });
+  }
+
   // RC 8.5.15: a bare "No" to the S1 ownership question DENIES ownership
   // (conversation-context.js ownershipUnverifiedResult). Property-scoped
   // non-owner lane: no reply, no nurture, no further ownership question, no

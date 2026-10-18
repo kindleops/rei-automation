@@ -33,6 +33,8 @@ export const OFFER_REQUEST_INTENTS = Object.freeze(['asks_offer', 'contract_requ
 export const PRICE_INTENTS = Object.freeze(['asking_price_provided', 'asking_price_implausible'])
 /** "No" to ownership — a PROPERTY-SCOPED denial (seller policy, locked). */
 export const OWNERSHIP_DENIAL_INTENTS = Object.freeze(['property_specific_non_owner', 'property_correction', 'sold_property', 'former_owner_respondent', 'tenant_respondent'])
+/** OWNER DECISION 2026-10-17: declined engagement, ownership UNVERIFIED (NOT a denial, NOT a confirmation). */
+export const OWNERSHIP_DECLINED_INTENTS = Object.freeze(['ownership_declined_unverified'])
 /** A third party answered (heir, agent, family, entity rep, referral): a person decides who to talk to. */
 export const RELATIONSHIP_REVIEW_INTENTS = Object.freeze(['executor_heir_respondent', 'agent_representative_respondent', 'family_member_respondent', 'entity_representative_respondent', 'non_owner_referral', 'llc_corporation'])
 export const HOSTILE_INTENTS = Object.freeze(['hostile_or_legal'])
@@ -154,15 +156,19 @@ export function verifyContactPermission(f) {
   if (intents.has('wrong_number') || disp === 'wrong_number' || disp === 'wrong_person' || contact === 'invalid_number') blocks.push('wrong_number')
   const denial = OWNERSHIP_DENIAL_INTENTS.some((i) => intents.has(i)) || disp === 'sold' || f.ownership_evidence === 'denied' || f.ownership_evidence === 'former_owner'
   if (denial) blocks.push('ownership_denied')
+  // OWNER DECISION 2026-10-17: a polite decline to the ownership question is a property × contact HOLD
+  // with ownership UNVERIFIED — never "confirmed", never a denial fact
+  const declined = !denial && (OWNERSHIP_DECLINED_INTENTS.some((i) => intents.has(i)) || f.ownership_evidence === 'declined_unverified')
+  if (declined) blocks.push('ownership_declined_unverified')
   // real ownership evidence only: an explicit yes, a seller statement that implies ownership, or the canonical
   // ledger's confirmation — never the pipeline stage rank (8.5.20 marked every closed deal "confirmed")
-  const confirmed = f.ownership_evidence === 'confirmed' || OWNERSHIP_IMPLYING_INTENTS.some((i) => intents.has(i))
+  const confirmed = !declined && (f.ownership_evidence === 'confirmed' || OWNERSHIP_IMPLYING_INTENTS.some((i) => intents.has(i)))
   return {
     permitted: blocks.length === 0,
     blocks,
     suppression,
     wrong_owner_or_number: blocks.includes('wrong_number') || denial,
-    ownership: denial ? 'denied' : confirmed ? 'confirmed' : 'unverified',
+    ownership: denial ? 'denied' : declined ? 'declined_unverified' : confirmed ? 'confirmed' : 'unverified',
   }
 }
 
@@ -189,7 +195,7 @@ export function sellerWaiting(f) {
 }
 
 /** A seller message that does not reopen a closed deal ("no", stop, wrong number, denial, insults). */
-export const NON_REOPENING_INTENTS = Object.freeze(['not_interested', 'opt_out', 'wrong_number', 'hostile_or_troll', 'reaction_only', 'acknowledgement', ...OWNERSHIP_DENIAL_INTENTS])
+export const NON_REOPENING_INTENTS = Object.freeze(['not_interested', 'opt_out', 'wrong_number', 'hostile_or_troll', 'reaction_only', 'acknowledgement', ...OWNERSHIP_DENIAL_INTENTS, ...OWNERSHIP_DECLINED_INTENTS])
 
 /**
  * The closed-deal verdict: closed, unless the seller wrote something meaningful and

@@ -10,6 +10,7 @@
 -- migration makes every graph writer read it through ONE helper:
 --
 --   public.campaign_target_graph_reply_block(property_id, phone) → NULL | 'suppressed' | 'prior_reply_not_owner'
+--                                                                  | 'ownership_declined_unverified' (owner 2026-10-17)
 --
 -- and redefines the five functions that compute queue_eligible / queue_block_reason:
 --   refresh_campaign_target_graph_seller_batch     (precedence + queue_eligible + blocker flag)
@@ -37,7 +38,11 @@
 -- The ONE graph-side reading of contact_property_resolution. NULL = no recorded reply blocks a
 -- fresh opener. 'suppressed' = a channel-compliance opt-out recorded for this phone on ANY property
 -- (opt-out is contact-wide). 'prior_reply_not_owner' = this phone denied ownership of THIS property
--- (not_owner / former_owner / referral_source, rejected_at set). Phone formats: 10-digit graph
+-- (not_owner / former_owner / referral_source, rejected_at set). 'ownership_declined_unverified' = OWNER
+-- DECISION 2026-10-17: a polite decline to the ownership question, ownership UNVERIFIED — a property ×
+-- contact hold (role ownership_declined_unverified, rejected_at NULL, never a denial fact) that blocks
+-- THIS property for this phone exactly like a denial. Every writer treats any non-NULL value as a block
+-- and records the value as the reason. Phone formats: 10-digit graph
 -- phones and E.164 both match. Plain SQL, STABLE, no SET clause, so the planner can inline it.
 create or replace function public.campaign_target_graph_reply_block(p_property_id text, p_phone text)
 returns text
@@ -61,6 +66,14 @@ as $fn$
          and coalesce(c.suppression_scope, 'contact_property_pair') = 'contact_property_pair'
          and c.contact_property_role in ('not_owner', 'former_owner', 'referral_source')
     ) then 'prior_reply_not_owner'
+    when nullif(p_property_id, '') is not null and exists (
+      select 1 from public.contact_property_resolution c
+       where c.property_id = p_property_id
+         and c.contact_phone_e164 in ('+1' || right(regexp_replace(p_phone, '\D', '', 'g'), 10),
+                                      right(regexp_replace(p_phone, '\D', '', 'g'), 10))
+         and coalesce(c.suppression_scope, 'contact_property_pair') = 'contact_property_pair'
+         and c.contact_property_role = 'ownership_declined_unverified'
+    ) then 'ownership_declined_unverified'
     else null
   end
 $fn$;

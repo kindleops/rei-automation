@@ -451,13 +451,29 @@ export function applyContextualShortReply(messageText, validated) {
       const bare = matchBareNegative(messageText, {
         names: [validated.context.last_outbound_agent, validated.context.last_outbound_addressee].filter(Boolean),
       });
-      // A polite tail ("No thanks", "No gracias Carlos!") answers a sales approach: the 30-day
-      // decline (RC 8.5.15; the 2026-10-16 investigation counts "No thank you" as disinterest).
+      // OWNER DECISION 2026-10-17 (supersedes 831df6cd / RC 8.5.15): a polite tail ("No thanks",
+      // "No gracias Carlos!") to OUR ownership question is DECLINED ENGAGEMENT with ownership
+      // UNVERIFIED (ownership_declined_unverified): a property × contact no-recontact hold — never the
+      // 30-day selling nurture, never verified non-ownership.
       const polite = Boolean(bare && POLITE_DECLINE_TAIL_RE.test(bare.canonical));
       // rc-8.5.21 (owner P0 2026-10-16, investigator spec d): a bare negative to OUR ownership
       // question — with or without an emoji ("No 👎" is in the 103-thread denial cohort) — is the
       // PROPERTY-SCOPED ownership denial; not_interested only after S2 or later.
       const emoji = Boolean(bare && EMOJI_SENTIMENT_RE.test(String(messageText)));
+      if (bare && mode === 'ownership_unverified' && polite) {
+        return {
+          applied: true,
+          primary_intent: 'ownership_declined_unverified',
+          labels: ['ownership_declined_unverified', 'ownership_unverified', 'polite_decline_to_ownership_question'],
+          rule_id: 'ctx_polite_no_after_ownership_check_declined_unverified',
+          confidence: 0.86,
+          rationale: 'polite_negative_to_ownership_question_declines_engagement_ownership_unverified',
+          evidence_span: String(messageText).trim(),
+          context_message_id: validated.context.last_outbound_message_id,
+          context_use_case: uc,
+          context_age_ms: validated.context.context_age_ms,
+        };
+      }
       if (bare && mode === 'ownership_unverified' && !polite) {
         return ownershipUnverifiedResult(messageText, validated, emoji ? 'ctx_emoji_no_after_ownership_check_ownership_unverified' : 'ctx_bare_no_after_ownership_check_ownership_unverified');
       }

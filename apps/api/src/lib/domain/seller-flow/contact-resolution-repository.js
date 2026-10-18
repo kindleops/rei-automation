@@ -40,6 +40,8 @@ export const OUTCOME_TO_ROLE = Object.freeze({
   former_owner: CONTACT_PROPERTY_ROLE.FORMER_OWNER,
   referral: CONTACT_PROPERTY_ROLE.REFERRAL_SOURCE,
   opt_out: CONTACT_PROPERTY_ROLE.SUPPRESSED,
+  // a hold, not a rejection: NOT in REJECTING_ROLES ⇒ rejected_at stays NULL (never a denial fact)
+  ownership_declined_unverified: CONTACT_PROPERTY_ROLE.OWNERSHIP_DECLINED_UNVERIFIED,
 })
 
 /** Roles that disqualify a pairing from further ownership outreach. */
