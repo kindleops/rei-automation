@@ -405,7 +405,7 @@ async function upsertAutomationSuppression({ db, event, action, params, dry_run 
   };
 }
 
-const CANCEL_SELECT_COLUMNS = "id,queue_status,type,use_case_template";
+const CANCEL_SELECT_COLUMNS = "id,queue_status,type,use_case_template,created_at,metadata";
 
 /**
  * A nurture follow-up is the seller flow's own answer to the reply that just
@@ -439,6 +439,21 @@ export function shouldKeepNurtureFollowUps(params = {}) {
   const reason = clean(params?.reason);
   if (NURTURE_TERMINAL_CANCEL_REASON.test(reason)) return false;
   return params?.keep_nurture_follow_ups !== false;
+}
+
+/**
+ * The triggering inbound of an event-driven cancel: its receipt instant (rows written at or after it were
+ * written in response to it) and its identifiers. cutoff_ms null ⇒ unknown (no time-bounded cancel).
+ */
+export function eventCancellationScope(event = {}) {
+  const payload = payloadOf(event);
+  const candidates = [payload.inbound_received_at, payload.received_at, payload.http_received_at, event.inbound_received_at, event.occurred_at];
+  const cutoff_ms = candidates.map((v) => Date.parse(clean(v))).find((v) => Number.isFinite(v)) ?? null;
+  const inbound_ids = new Set(
+    [payload.inbound_event_id, payload.inbound_message_event_id, payload.message_event_id, payload.message_id, payload.provider_message_sid, event.source_event_id]
+      .map(clean).filter(Boolean)
+  );
+  return { cutoff_ms, inbound_ids };
 }
 
 async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
@@ -485,7 +500,30 @@ async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
     return { ok: false, reason: "queue_select_failed", error: error.message };
   }
 
-  const rows = Array.isArray(data) ? data : [];
+  const all_rows = Array.isArray(data) ? data : [];
+  // W3 ROOT CAUSE (P0 2026-10-17): this action ran on the SAME inbound that the seller flow had just
+  // answered. handle-textgrid-inbound runs processSellerInboundMessage (which writes the 30-day nurture /
+  // the reply) and only THEN emits inbound_message_received; stage.not_interested_cold's
+  // cancel_pending_queue then selected every pending row of the phone with no time bound, so the
+  // follow-up created BY this inbound was cancelled ~5-7 s after it was written (53 nurtures,
+  // 2026-10-05..07). An event-driven, non-terminal cancel may only touch rows that were pending BEFORE
+  // the triggering inbound, and never a row that the triggering inbound itself created. With no known
+  // cutoff it touches nothing (the inbound takeover at receipt already cancelled the stale rows).
+  // A terminal reason (STOP / DNC / wrong number / not owner / suppression) still cancels everything.
+  const terminal_cancel = NURTURE_TERMINAL_CANCEL_REASON.test(reason);
+  const event_scope = queue_item_id ? null : eventCancellationScope(event);
+  const time_excluded = [];
+  const rows = all_rows.filter((row) => {
+    if (queue_item_id || terminal_cancel) return true;
+    if (!event_scope?.cutoff_ms) { time_excluded.push(row); return false; }
+    const created_ms = Date.parse(clean(row?.created_at));
+    const meta = ensureObject(row?.metadata);
+    const row_inbound = [meta.inbound_message_event_id, meta.source_inbound_event_id, meta.inbound_event_id, meta.provider_message_sid, meta.inbound_message_sid]
+      .map(clean).filter(Boolean);
+    if (row_inbound.some((id) => event_scope.inbound_ids.has(id))) { time_excluded.push(row); return false; }
+    if (!Number.isFinite(created_ms) || created_ms >= event_scope.cutoff_ms) { time_excluded.push(row); return false; }
+    return true;
+  });
   const kept = shouldKeepNurtureFollowUps({ ...params, reason }) ? rows.filter(isNurtureFollowUpRow) : [];
   const ids = rows
     .filter((row) => !kept.includes(row))
@@ -497,6 +535,8 @@ async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
       ok: true,
       canceled_count: 0,
       kept_nurture_follow_up_ids: kept.map((row) => row.id),
+      kept_created_by_or_after_trigger_ids: time_excluded.map((row) => row.id),
+      event_cutoff_known: Boolean(event_scope?.cutoff_ms) || Boolean(queue_item_id) || terminal_cancel,
       reason: "no_cancelable_queue_items",
     };
   }
@@ -523,6 +563,7 @@ async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
     canceled_count: update_result?.error ? 0 : ids.length,
     queue_item_ids: ids,
     kept_nurture_follow_up_ids: kept.map((row) => row.id),
+    kept_created_by_or_after_trigger_ids: time_excluded.map((row) => row.id),
     reason,
     error: update_result?.error?.message || null,
   };

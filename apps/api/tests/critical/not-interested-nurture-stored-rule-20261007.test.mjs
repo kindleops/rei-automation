@@ -69,10 +69,16 @@ const PROD_RULES = [
   },
 ];
 
+// The triggering inbound arrives at T; the seller flow answers it (the nurture, the reply) a few seconds
+// later; the automation engine processes inbound_message_received ~5-7 s after the nurture was written.
+const T = Date.parse("2026-10-07T13:00:00.000Z");
+const INBOUND_ID = "me-inbound-not-for-sale";
+
 function nurtureRow() {
   const now = Date.now();
   return {
     id: "e8c76c4b-0000-4000-8000-000000000001",
+    created_at: new Date(T + 2_000).toISOString(),
     type: "followup",
     message_type: "followup",
     source: "seller_inbound_orchestrator",
@@ -93,6 +99,7 @@ function nurtureRow() {
 function stageRow() {
   return {
     id: "stage-fu-1",
+    created_at: new Date(T - 3_600_000).toISOString(), // pending BEFORE the inbound (stale outreach)
     type: "followup",
     message_type: "followup",
     use_case_template: "ownership_check",
@@ -150,16 +157,19 @@ function createDb(seed = {}) {
   return { from: (t) => builder(t), rows: rowsOf };
 }
 
-async function runStoredRule(db, rule_key, event_id) {
+async function runStoredRule(db, rule_key, event_id, { payload = {}, params = null } = {}) {
   const rules = await loadActiveAutomationRules({ supabaseClient: db });
   const rule = rules.find((r) => r.rule_key === rule_key);
   assert.ok(rule, `stored rule ${rule_key} loaded`);
-  const action = rule.actions.find((a) => a.action_type === "cancel_pending_queue");
+  const stored = rule.actions.find((a) => a.action_type === "cancel_pending_queue");
+  const action = params ? { ...stored, params: { ...stored.params, ...params } } : stored;
+  // the event handle-textgrid-inbound emits AFTER processSellerInboundMessage (W3 fix: it carries the
+  // inbound's receipt instant and id)
   const event = {
     id: event_id,
     event_type: "inbound_message_received",
     phone_e164: PHONE,
-    payload: { canonical_e164: PHONE, message_body: "NOT FOR SALE" },
+    payload: { canonical_e164: PHONE, message_body: "NOT FOR SALE", inbound_received_at: new Date(T).toISOString(), inbound_event_id: INBOUND_ID, ...payload },
   };
   return executeAutomationAction({ event, run: { id: `run_${event_id}` }, rule, action, supabaseClient: db });
 }
@@ -206,4 +216,66 @@ test("shouldKeepNurtureFollowUps: terminal reasons always cancel; business reaso
   assert.equal(shouldKeepNurtureFollowUps({ reason: "not_interested", keep_nurture_follow_ups: true }), true);
   assert.equal(shouldKeepNurtureFollowUps({}), true);
   assert.equal(shouldKeepNurtureFollowUps({ reason: "not_interested", keep_nurture_follow_ups: false }), false);
+});
+
+// ── W3 ROOT CAUSE (P0 2026-10-17): the 53 nurtures cancelled ~7 s after they were created ─────────────
+// handle-textgrid-inbound runs processSellerInboundMessage FIRST (it writes the 30-day nurture and the
+// reply to THIS inbound) and only THEN emits inbound_message_received; stage.not_interested_cold's
+// cancel_pending_queue then selected every pending row of the phone with no time bound. 3968634f only
+// filtered nurture-shaped rows; the race itself stayed: anything else the inbound wrote (a reply, a
+// differently-shaped follow-up) was still cancelled by the event of the very inbound it answered.
+
+function autoReplyRow() {
+  return {
+    id: "reply-to-this-inbound", type: "auto_reply", message_type: "auto_reply", use_case_template: "not_interested_ack",
+    queue_status: "queued", to_phone_number: PHONE, thread_key: PHONE, created_at: new Date(T + 1_000).toISOString(),
+    metadata: { inbound_message_event_id: INBOUND_ID },
+  };
+}
+function laterDifferentKindFollowUp() {
+  // written by THIS inbound's flow with a shape the old keep-filter does not recognise (e.g. a lifecycle row)
+  return {
+    id: "fu-new-kind", type: "followup", message_type: "followup", use_case_template: "consider_selling_follow_up",
+    queue_status: "scheduled", to_phone_number: PHONE, thread_key: PHONE, created_at: new Date(T + 3_000).toISOString(), metadata: {},
+  };
+}
+
+test("W3 race regression: the event of an inbound never cancels what that inbound's own flow just wrote — even with the old keep-filter disabled", async () => {
+  const db = createDb({ automation_rules: PROD_RULES, send_queue: [nurtureRow(), stageRow(), autoReplyRow(), laterDifferentKindFollowUp()] });
+  // keep_nurture_follow_ups:false = the pre-3968634f behaviour of the filter: the TIME BOUND alone must hold
+  const res = await runStoredRule(db, "stage.not_interested_cold", "ev_race", { params: { keep_nurture_follow_ups: false } });
+  assert.equal(res.ok, true);
+  assert.equal(row(db, nurtureRow().id).queue_status, "scheduled", "the 30-day nurture written by this inbound survives");
+  assert.equal(row(db, "reply-to-this-inbound").queue_status, "queued", "the reply to this inbound survives");
+  assert.equal(row(db, "fu-new-kind").queue_status, "scheduled", "a follow-up of any shape written after the inbound survives");
+  assert.equal(row(db, "stage-fu-1").queue_status, "cancelled", "outreach pending BEFORE the inbound is still withdrawn");
+  assert.deepEqual(res.result.kept_created_by_or_after_trigger_ids.sort(), [nurtureRow().id, "fu-new-kind", "reply-to-this-inbound"].sort());
+});
+
+test("W3: an event with no known inbound cutoff (a replayed legacy event) cancels NOTHING non-terminal; STOP still cancels everything", async () => {
+  const db = createDb({ automation_rules: PROD_RULES, send_queue: [nurtureRow(), stageRow(), laterDifferentKindFollowUp()] });
+  const res = await runStoredRule(db, "stage.not_interested_cold", "ev_legacy", { payload: { inbound_received_at: null, inbound_event_id: null } });
+  assert.equal(res.result.canceled_count, 0);
+  assert.equal(res.result.event_cutoff_known, false);
+  for (const id of [nurtureRow().id, "stage-fu-1", "fu-new-kind"]) assert.notEqual(row(db, id).queue_status, "cancelled", id);
+  await runStoredRule(db, "suppression.stop_dnc", "ev_stop", { payload: { inbound_received_at: null } });
+  for (const id of [nurtureRow().id, "stage-fu-1", "fu-new-kind"]) assert.equal(row(db, id).queue_status, "cancelled", `STOP is absolute: ${id}`);
+});
+
+test("W3: the inbound's own id protects its rows even if the clock is skewed", async () => {
+  const skewed = { ...autoReplyRow(), created_at: new Date(T - 60_000).toISOString() };
+  const db = createDb({ automation_rules: PROD_RULES, send_queue: [skewed] });
+  await runStoredRule(db, "stage.not_interested_cold", "ev_skew");
+  assert.equal(row(db, skewed.id).queue_status, "queued");
+});
+
+test("W3: handle-textgrid-inbound emits inbound_message_received AFTER the seller flow and now carries the receipt instant + inbound id", async () => {
+  const fs = await import("node:fs");
+  const src = fs.readFileSync(new URL("../../src/lib/flows/handle-textgrid-inbound.js", import.meta.url), "utf8");
+  const flow = src.indexOf("runtimeDeps.processSellerInboundMessage(");
+  const emit = src.indexOf('event_type: "inbound_message_received"');
+  assert.ok(flow > 0 && emit > flow, "the ordering that created the race (flow first, event second) is what the cutoff is for");
+  const payload = src.slice(emit, emit + 1500);
+  assert.match(payload, /inbound_received_at: extracted\.received_at/);
+  assert.match(payload, /inbound_event_id: inbound_message_event_id/);
 });

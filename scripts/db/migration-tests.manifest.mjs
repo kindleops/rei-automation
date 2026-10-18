@@ -65,6 +65,7 @@ const GRAPH_PRIOR_REPLY_NOT_OWNER = M('PROPOSED_20261016155000_campaign_graph_pr
 const GRAPH_LIVE_FUNCTIONS_BASELINE = 'scripts/db/fixtures/campaign_target_graph_live_functions_baseline.sql'
 // OWNER DECISION 2026-10-17: the declined-unverified role (property × contact hold)
 const CPR_DECLINED = M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified.sql')
+const FOLLOWUP_LIFECYCLE = M('PROPOSED_20261017120000_followup_intent_lifecycle.sql')
 const CPR_LIVE_CONSTRAINTS = 'scripts/db/fixtures/contact_property_resolution_live_constraints.sql'
 // OWNER DIRECTIVE 2026-10-17: no duplicate response to the same inbound turn (dispatch lease + send_queue backstop)
 const DISPATCH_LEASE = M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql')
@@ -379,6 +380,8 @@ const BASE_TESTS = [
       { fixture: M('PROPOSED_20261016162000_ops_research_valuation_snapshot_pretest.sql') }, OPS_RESEARCH_VALUATION,
       // owner 2026-10-17: the declined-unverified role (before the historical ownership correction)
       { fixture: M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_pretest.sql') }, CPR_DECLINED,
+      // owner P0 2026-10-17: the ONE follow-up execution lifecycle (needs the holds registry, send_queue, inbox_thread_state)
+      { fixture: M('PROPOSED_20261017120000_followup_intent_lifecycle_pretest.sql') }, FOLLOWUP_LIFECYCLE,
       // owner directive 2026-10-17: the turn dispatch lease (after reply_turns, message_origin and the runtime)
       { fixture: M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_pretest.sql') }, DISPATCH_LEASE,
     ],
@@ -410,6 +413,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261016161000_negotiation_send_authorization_posttest.sql'),
       M('PROPOSED_20261016162000_ops_research_valuation_snapshot_posttest.sql'),
       M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_posttest.sql'),
+      M('PROPOSED_20261017120000_followup_intent_lifecycle_posttest.sql'),
       M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_posttest.sql'),
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body); the
@@ -436,6 +440,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261016161000_negotiation_send_authorization_rollback.sql'),
       M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback.sql'),
       M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_rollback.sql'),
+      M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback.sql'),
       M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_rollback.sql'),
     ],
   },
@@ -508,6 +513,20 @@ const BASE_TESTS = [
     posttest: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_posttest.sql')],
     rollback: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner_rollback_posttest.sql')],
+  },
+  // ── P0 2026-10-17: the ONE follow-up execution lifecycle (intent record, materialize-before-claimable,
+  // send_queue ⇄ intent sync, follow_up_at projection). Composes on the live send_queue surface, the
+  // operations + holds public baselines and the P0 holds registry (applied first in production). S3
+  // provides the agent_api role the operations baseline revokes from. Also the LAST link of the
+  // rc_8_5_21_release_chain entry.
+  {
+    id: 'followup_intent_lifecycle',
+    setup: [SHIM, DURABILITY, S3, SEND_QUEUE_BASELINE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE, HOLDS_REGISTRY],
+    pretest: M('PROPOSED_20261017120000_followup_intent_lifecycle_pretest.sql'),
+    apply: [FOLLOWUP_LIFECYCLE],
+    posttest: [M('PROPOSED_20261017120000_followup_intent_lifecycle_posttest.sql')],
+    rollback: [M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback_posttest.sql')],
   },
 ]
 

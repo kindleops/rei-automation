@@ -53,8 +53,9 @@ const unavailable = (id, code, o = {}) => check(id, 'unavailable', { code, ...o 
  * @param {object|{unavailable:string}} [i.researchValuation]  8.5.21-b agent.ops_research_valuation_snapshot row
  * @param {object|{unavailable:string}} [i.valuationBatch]     8.5.21-b latest valuation.refresh_batch finding value (+ at)
  * @param {object|{unavailable:string}} [i.holds]              owner P0: active automation holds { count, by_type, items }
+ * @param {object|{unavailable:string}} [i.followups]          P0 2026-10-17: public.v_followup_intent_health row (+ reasons)
  */
-export function evaluateSupervisor({ snapshot, health = null, actionCenter = null, recovery = null, runtime = null, spend = null, approvals = null, researchValuation = null, valuationBatch = null, holds = null, now = Date.now(), thresholds = SUPERVISOR_THRESHOLDS } = {}) {
+export function evaluateSupervisor({ snapshot, health = null, actionCenter = null, recovery = null, runtime = null, spend = null, approvals = null, researchValuation = null, valuationBatch = null, holds = null, followups = null, now = Date.now(), thresholds = SUPERVISOR_THRESHOLDS } = {}) {
   const T = { ...SUPERVISOR_THRESHOLDS, ...thresholds }
   const checks = []
   const issues = []
@@ -217,6 +218,26 @@ export function evaluateSupervisor({ snapshot, health = null, actionCenter = nul
     for (const [k, v] of Object.entries(recovery?.held?.by_type || {})) byType[k] = Math.max(byType[k] || 0, v)
     const items = [...(holdsRead?.items || []), ...((recovery?.held?.items) || [])].slice(0, 20)
     add(check('automation_holds', 'ok', { value: { held_items: holdsRead?.count ?? recovery?.held?.count ?? 0, by_type: byType, items, action: 'report_only_never_act' }, source: holdsRead ? 'public.automation_holds' : 'agent.finding (recovery.batch held)' }))
+  }
+
+  // P0 2026-10-17: the follow-up execution lifecycle. A follow-up that cannot run is never "scheduled": stuck
+  // intents (overdue planned, stale lease, ready rows past due, dispatch with no outcome) are remediation;
+  // a failure the provider may have seen (after accept / ambiguous) is a person's decision (never re-sent).
+  if (!followups || followups.unavailable) add(unavailable('followup_lifecycle', followups?.unavailable || 'FOLLOWUP_LIFECYCLE_UNAVAILABLE'))
+  else {
+    const f = (k) => Number(followups[k] || 0)
+    const stuck = f('planned_overdue') + f('materializing_stale') + f('ready_overdue') + f('dispatched_stale')
+    const review = f('failed_after_accept') + f('failed_ambiguous')
+    const st = review > 0 ? 'critical' : stuck + f('accepted_unconfirmed') > 0 || f('failed') > review ? 'warn' : 'ok'
+    const value = {
+      scheduled_executable: f('scheduled_executable'), planned_overdue: f('planned_overdue'), materializing_stale: f('materializing_stale'), ready_overdue: f('ready_overdue'),
+      dispatched_stale: f('dispatched_stale'), accepted_unconfirmed: f('accepted_unconfirmed'), delivered: f('delivered'), failed: f('failed'), failed_after_accept: f('failed_after_accept'),
+      failed_ambiguous: f('failed_ambiguous'), held: f('held'), not_executable: f('not_executable'), not_executable_24h: f('not_executable_24h'), top_reasons: (followups.reasons || []).slice(0, 10),
+    }
+    add(check('followup_lifecycle', st, { value, source: 'public.v_followup_intent_health' }),
+      st === 'ok' ? null : review > 0
+        ? { dedupe_key: 'supervisor:followup_review', kind: 'escalation', severity: 'critical', escalate: true, recoverable: false, title: `${review} follow-up(s) may have reached the seller and failed: review, never re-send automatically`, remediation: { action: 'human_review', retry_safe: false } }
+        : { dedupe_key: 'supervisor:followup_stuck', kind: 'remediation', severity: 'warning', recoverable: true, title: `${stuck + f('accepted_unconfirmed')} follow-up(s) stuck (overdue / stale lease / no outcome); ${f('held')} held, ${f('not_executable_24h')} not executable in 24 h`, remediation: { action: 'run_followup_reconcile_report_then_review', where: 'public.v_followup_intent_reasons' } })
   }
 
   // ── 8.5.21-b: research status, valuation coverage, overdue offers, negotiation authority ──
