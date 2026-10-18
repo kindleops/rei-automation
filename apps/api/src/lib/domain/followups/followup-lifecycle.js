@@ -430,6 +430,18 @@ async function settle(intent, deps, { to, reason, transient = false, retry_at = 
   return { code, reason, transient, retry_at: retryAt }
 }
 
+/**
+ * The recipient zone resolution for a would-be row: deps.recipientZones (bound by withLifecycleHelpers to
+ * recipient-window-policy.js#resolveRecipientWindowZones over recipientEvidenceFromRow) — a legacy test
+ * seam returning a bare zone list is accepted as an already-resolved, known zone set.
+ */
+function recipientWindowFor(deps, row, geo) {
+  const g = obj(geo)
+  const r = deps.recipientZones({ row, propertyGeography: Object.keys(g).length ? { state: g.state ?? null, zip: g.zip ?? null } : null, mailingGeography: g.mailing || null })
+  if (Array.isArray(r)) return { version: 'recipient-window.seam', zones: r, certainty: r.length > 1 ? 'multiple' : 'single', primary_zone: r[0] || null }
+  return r && Array.isArray(r.zones) ? r : { zones: [], certainty: 'unknown', primary_zone: null }
+}
+
 /** Materialize ONE claimed intent (state materializing, lease_token held by this worker). */
 export async function materializeClaimedIntent(intent, deps = {}) {
   const now = deps.now ? toMs(deps.now()) : Date.now()
@@ -519,15 +531,19 @@ export async function materializeClaimedIntent(intent, deps = {}) {
     try { sender_health = lower(await deps.senderStatus(from)) || 'unknown_sender' } catch { return settle(intent, deps, { to: S.PLANNED, reason: 'sender_lookup_failed', transient: true }) }
   }
 
-  // 8. contact window (recipient-local; property zone must be derivable like the dispatcher requires,
-  //    the plausible-zone intersection is the conservative policy) + ≤ 2 texts per rolling 24 h
+  // 8. contact window (category 3, scheduled follow-up: never an active-conversation exemption, even
+  //    inside a live session): THE recipient-timezone policy (queue/recipient-window-policy.js), the same
+  //    resolver + verdict the dispatcher (sms-engine#evaluateContactWindow) runs on this row. Recipient
+  //    evidence first (area code, mailing); the property zone only narrows; property-only / no evidence
+  //    ⇒ unknown ⇒ the conservative continental intersection (11:00–21:00 ET); nothing at all places the
+  //    recipient ⇒ held (the dispatcher holds the same row). + ≤ 2 texts per rolling 24 h
   const geo = await deps.propertyGeography(intent.property_id || spec.property_id || null)
-  const tz = deps.resolveRecipientTimezone({ ...spec, to_phone_number: to_phone }, { propertyGeography: geo })
-  if (!tz?.ok) return settle(intent, deps, { to: S.HELD, reason: 'recipient_timezone_unresolved' })
-  const zones = deps.recipientZones({ recipientPhone: to_phone, propertyGeography: geo, storedTimezone: tz.iana })
+  const resolution = recipientWindowFor(deps, { ...spec, to_phone_number: to_phone }, geo)
+  if (!resolution.zones.length || resolution.has_evidence === false) return settle(intent, deps, { to: S.HELD, reason: 'recipient_timezone_unresolved' })
+  const zones = resolution.zones
   let others
   try { others = await deps.otherTexts({ thread_key, to_phone, intent_id: intent.id, around: Math.max(toMs(intent.due_at), now) }) } catch { return settle(intent, deps, { to: S.PLANNED, reason: 'collision_lookup_failed', transient: true }) }
-  const when = planSendInstant({ due: toMs(intent.due_at), now, zones: [...new Set([tz.iana, ...zones])], others, lawful: deps.lawful })
+  const when = planSendInstant({ due: toMs(intent.due_at), now, zones, others, lawful: (at, z) => deps.lawful(at, z, { jurisdictions: resolution.jurisdictions || [] }) })
   if (!when.ok) return settle(intent, deps, { to: S.HELD, reason: when.reason })
 
   // 9. ONE idempotent, nonempty, send-ready row through the canonical writer; the DB binds the intent
@@ -549,6 +565,8 @@ export async function materializeClaimedIntent(intent, deps = {}) {
     idempotency_key: queue_key,
     template_source: 'sms_templates',
     recipient_zones: zones,
+    recipient_zone_certainty: resolution.certainty,
+    recipient_zone_policy: resolution.version,
     language: rendered.language || language,
     ...(sender_health ? { followup_sender_health: sender_health, ...(UNHEALTHY_SENDER.has(sender_health) ? { followup_sender_needs_reroute: true } : {}) } : {}),
     ...(when.deferred ? { followup_send_deferred: true } : {}),
@@ -564,7 +582,7 @@ export async function materializeClaimedIntent(intent, deps = {}) {
     message_body: body, message_text: body, rendered_message: body, character_count: body.length,
     template_id: rendered.template_id || null, selected_template_id: rendered.template_id || null, template_source: 'sms_templates',
     use_case_template: rendered.use_case || spec.use_case_template, language: rendered.language || language,
-    ...(tz.iana && !clean(spec.timezone) ? { timezone: tz.iana } : {}),
+    ...(resolution.primary_zone && !clean(spec.timezone) ? { timezone: resolution.primary_zone } : {}),
     metadata,
   }
   const validation = deps.validate(row)
@@ -816,9 +834,16 @@ export function createFollowUpLifecycleDeps({ supabase, readSwitch = null, holdC
     async propertyGeography(property_id) {
       if (!clean(property_id)) return null
       const { loadPropertyGeography } = await import('../queue/recipient-timezone.js')
-      return (await loadPropertyGeography(supabase, [property_id])).get(clean(property_id)) || null
+      const geo = (await loadPropertyGeography(supabase, [property_id])).get(clean(property_id)) || null
+      // the owner's mailing state (recipient evidence); unreadable ⇒ absent (never a guess: the window narrows)
+      let mailing = null
+      try {
+        const m = await supabase.from('properties').select('property_id,owner_address_state').in('property_id', [clean(property_id)]).limit(1)
+        const st = clean(m?.error ? null : (m?.data || [])[0]?.owner_address_state)
+        mailing = st ? { state: st, zip: null } : null
+      } catch { mailing = null }
+      return geo || mailing ? { ...(geo || { state: null, zip: null }), ...(mailing ? { mailing } : {}) } : null
     },
-    resolveRecipientTimezone: null, // bound below (sync import)
     recipientZones: null,
     lawful: null,
     async otherTexts({ thread_key, to_phone, intent_id, around }) {
@@ -864,18 +889,16 @@ export function createFollowUpLifecycleDeps({ supabase, readSwitch = null, holdC
 
 /** Bind the synchronous helpers (kept out of the factory's import graph until first use). */
 export async function withLifecycleHelpers(deps) {
-  const [{ resolveRecipientTimezone }, { resolveRecipientZones, evaluateReplyTiming }, { validateOutboundSmsPayload }, { NURTURE_TEMPLATE_CANDIDATES }] = await Promise.all([
-    import('../queue/recipient-timezone.js'), import('../queue/reply-timing.js'), import('../messaging/MessageValidationService.js'), import('../queue/resolve-deferred-queue-message.js'),
+  const [{ resolveRecipientWindowZones, recipientEvidenceFromRow, evaluateMessagingWindow, MESSAGING_CATEGORIES }, { validateOutboundSmsPayload }, { NURTURE_TEMPLATE_CANDIDATES }] = await Promise.all([
+    import('../queue/recipient-window-policy.js'), import('../messaging/MessageValidationService.js'), import('../queue/resolve-deferred-queue-message.js'),
   ])
   const baseCandidates = deps.templateCandidates
   return {
     ...deps,
-    resolveRecipientTimezone: deps.resolveRecipientTimezone || resolveRecipientTimezone,
-    recipientZones: deps.recipientZones || ((a) => {
-      const z = resolveRecipientZones(a)
-      return z.certainty === 'unknown' ? [] : z.zones
-    }),
-    lawful: deps.lawful || ((at, zones) => evaluateReplyTiming({ purpose: 'outreach', at, zones })),
+    // THE recipient-timezone policy: the dispatcher resolves the same evidence from the materialized row
+    recipientZones: deps.recipientZones || (({ row, propertyGeography, mailingGeography }) => resolveRecipientWindowZones(recipientEvidenceFromRow(row, { propertyGeography, mailingGeography }))),
+    // category 3 (scheduled follow-up / nurture): the recipient-local window ∩ the restriction table
+    lawful: deps.lawful || ((at, zones, ctx = {}) => evaluateMessagingWindow({ category: MESSAGING_CATEGORIES.SCHEDULED_FOLLOWUP, at, zones, jurisdictions: ctx.jurisdictions || [] })),
     validate: deps.validate || validateOutboundSmsPayload,
     templateCandidates: (virtual) => {
       const own = baseCandidates ? baseCandidates(virtual) : null

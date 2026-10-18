@@ -6,7 +6,7 @@
 //   rc-8.5.21: THE shared send-time eligibility function (reply-timing.js#evaluateRowReplyTiming):
 //       in session (the owner rule 2026-10-10, the same evaluateInSessionReply the runner uses
 //       for template replies) or 08–21 in EVERY recipient zone stamped on the row at enqueue
-//       (metadata.recipient_zones; else resolved from the row's phone + property). Not lawful
+//       resolved by recipient-window-policy.js (stamp, area code; property only narrows). Not lawful
 //       → DEFER (release). The scheduler, R3 and this gate cannot disagree.
 //   the immutable ai_generated_messages record missing / not bound / body hash mismatch
 //       → CANCEL; record unreadable → DEFER
@@ -17,7 +17,7 @@
 //
 // cancelPendingAiConversationRows() is the sweep the operator (or a cron) can run when
 // the switch is turned off: every not-yet-sent ai_conversation row → cancelled.
-import { evaluateRowReplyTiming, resolveRecipientZones } from '@/lib/domain/queue/reply-timing.js'
+import { evaluateRowReplyTiming } from '@/lib/domain/queue/reply-timing.js'
 import { AI_CONVERSATION_SOURCE, AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, isOwnerHandledThread, normalizeSendPolicy, parseKillSwitch, threadInPolicyScope } from '@/lib/domain/conversation-ai/send-policy.js'
 import { verifyAiGeneratedRecordForRow } from '@/lib/domain/messages/ai-generated-message.js'
 import { isAiGeneratedOrigin } from '@/lib/domain/messages/message-origin.js'
@@ -89,8 +89,8 @@ export async function evaluateAiConversationRowGate(row = {}, { readSwitch, load
   try { newer = typeof loadNewerInbounds === 'function' ? await loadNewerInbounds(row) : null } catch { newer = null }
   if (!newer || newer.read_failed) return { applies: true, action: 'defer', reason: 'ai_latest_inbound_unreadable' }
   if ((newer.rows || []).some((m) => isMaterialInbound(m.message_body))) return { applies: true, action: 'cancel', reason: 'ai_reply_stale_new_inbound' }
-  const fallback = resolveRecipientZones({ recipientPhone: row.to_phone_number, propertyGeography: propertyGeography || { state: row.property_address_state || null, zip: row.property_address_zip || null }, storedTimezone: row.timezone || null })
-  const timing = evaluateRowReplyTiming(row, { now, windowMinutes, fallbackZones: fallback.zones })
+  // the row's zones through THE policy (stamp, area code, property narrowing) — the dispatcher's own resolution
+  const timing = evaluateRowReplyTiming(row, { now, windowMinutes, propertyGeography })
   if (!timing.lawful) return { applies: true, action: 'defer', reason: 'ai_conversation_outside_contact_window', timing }
   return { applies: true, action: 'proceed', reason: 'ai_conversation_gate_open', timing }
 }

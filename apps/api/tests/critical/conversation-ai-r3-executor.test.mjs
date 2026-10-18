@@ -212,7 +212,10 @@ test('E2E no-send proof: an eligible routine reply passes R3 and is enqueued thr
   assert.equal(row.use_case_template, 'ai_consider_selling')
   assert.equal(row.queue_key, 'ai_conversation:i1')
   assert.equal(row.inbound_message_id, 'i1')
-  assert.equal(row.timezone, 'America/Chicago')
+  // rc-8.5.21 S3: a 555 seller with only a TX property / stored Central zone is UNKNOWN: no zone is shown
+  assert.equal(row.timezone, null)
+  assert.equal(row.metadata.recipient_zone_certainty, 'unknown')
+  assert.equal(row.metadata.recipient_zone_policy, 'recipient-window.v1')
   // ORIGIN ai_generated: not a template, no template id of any kind
   assert.equal(row.message_origin, 'ai_generated')
   assert.equal(row.metadata.message_origin, 'ai_generated')
