@@ -20,7 +20,7 @@ const OP = 'a2ee0ffe-6f27-475b-a795-ee617c9472c6'
 const MIG = (f) => path.join(REPO_DIR, 'supabase/migrations', f)
 const PUBLIC_FIXTURE = `
   create table if not exists public.system_control (key text primary key, value text, updated_at timestamptz default now());
-  create table if not exists public.send_queue (id bigserial primary key, queue_status text, scheduled_for timestamptz, delivered_at timestamptz);
+  create table if not exists public.send_queue (id bigserial primary key, queue_status text, scheduled_for timestamptz, delivered_at timestamptz, queue_key text, metadata jsonb default '{}'::jsonb);
   revoke all on public.system_control, public.send_queue from agent_api;`
 const TZ = 'America/Chicago'
 const LEGACY_TURNS_FIXTURE = path.join(REPO_DIR, 'scripts/db/fixtures/legacy_conversation_turns_baseline.sql')
@@ -38,6 +38,8 @@ async function turnsDb() {
   await applyInTransaction(db.pool, MIG('PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql'))
   await applyInTransaction(db.pool, MIG('PROPOSED_20261013161000_conversation_decide_event_budget.sql'))
   await applyInTransaction(db.pool, MIG('PROPOSED_20261016120000_conversation_reply_turns.sql'))
+  // rc-8.5.21 owner directive: the dispatch lease + the one-ai-row-per-turn send_queue backstop
+  await applyInTransaction(db.pool, MIG('PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease.sql'))
   await db.pool.query(`update agent.runtime_limits set runtime_enabled = true, max_concurrency_global = 2, tick_max_jobs = 2, kind_limits = $1::jsonb where id = 1`,
     [JSON.stringify({ [CONVERSATION_TURN_KIND]: { enabled: true, max_concurrency: 2, armed_by: OP } })])
   return db
@@ -60,7 +62,7 @@ test('PG turns: the engine writes public.conversation_reply_turns only — the l
   } finally { await db.drop() }
 })
 
-test('PG turns: one reply per turn under 8 parallel workers — one claim, one finalize, every member reserved exactly once', { skip }, async () => {
+test('PG turns: one reply per turn under 8 parallel workers — one claim, one finalize, ONE dispatch, every member reserved exactly once', { skip }, async () => {
   const db = await turnsDb()
   try {
     const backend = createPgTurnStore(db.pool)
@@ -69,13 +71,16 @@ test('PG turns: one reply per turn under 8 parallel workers — one claim, one f
     const r = await backend.open({ thread_key: '+15555550101', inbound_id: 'm2', inbound_at: iso(Date.now() - 90_000), due_at: past })
     const workers = Array.from({ length: 8 }, () => db.trackPool(new pg.Pool({ connectionString: db.url, max: 1 })))
     const decided = []
-    const outs = await Promise.all(workers.map((pool, i) => runDueTurn({
+    const dispatched = []
+    const settled = await Promise.allSettled(workers.map((pool, i) => runDueTurn({
       turn_id: r.turn_id, version: 2, store: createPgTurnStore(pool), worker: `w${i}`,
       decideTurn: async () => { decided.push(i); await new Promise((res) => setTimeout(res, 20)); return { outcome: 'REPLY_CANDIDATE', reply: { text: 'Thanks. Would you consider selling it?' } } },
-      dispatch: async () => ({ status: 'enqueued' }),
+      dispatch: async () => { dispatched.push(i); await new Promise((res) => setTimeout(res, 20)); return { status: 'enqueued' } },
     })))
-    const codes = outs.map((o) => o.code)
+    const codes = settled.map((o) => (o.status === 'fulfilled' ? o.value.code : o.reason?.code))
     assert.equal(codes.filter((c) => c === 'TURN_DISPATCHED').length, 1, JSON.stringify(codes))
+    assert.equal(dispatched.length, 1, `exactly ONE dispatch: ${JSON.stringify(codes)}`)
+    assert.ok(codes.every((c) => ['TURN_DISPATCHED', 'TURN_STATE_CLAIMED', 'TURN_ALREADY_DISPATCHED', 'DEFERRED_LIVE_DISPATCH'].includes(c)), JSON.stringify(codes))
     assert.equal(decided.length, 1, 'exactly one worker decided')
     const res = await sel(db.pool, `select key, metadata->>'turn_id' t from public.idempotency_ledger where scope = 'inbound_reply' order by key`)
     assert.deepEqual(res.map((x) => [x.key, x.t]), [['m1', r.turn_id], ['m2', r.turn_id]])

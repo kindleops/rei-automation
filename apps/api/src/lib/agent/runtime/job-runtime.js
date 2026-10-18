@@ -117,7 +117,10 @@ export function createRuntimePgStore({ pool, statementTimeoutMs = 5000, lockTime
     claim: ({ worker, limit = 1, kinds = null }) => call('select agent.runtime_claim($1, $2, $3::text[]) r', [worker, limit, kinds]),
     start: ({ job_id, token }) => call('select agent.runtime_start($1, $2::uuid) r', [job_id, token]),
     checkpoint: (o) => call('select agent.runtime_checkpoint($1, $2::uuid, $3::jsonb, $4::jsonb, $5, $6::jsonb) r', [o.job_id, o.token, j(o.progress), j(o.checkpoint), o.event_type ?? null, j(o.event_payload)]),
-    finish: (o) => call('select agent.runtime_finish($1, $2::uuid, $3, $4::jsonb, $5::jsonb) r', [o.job_id, o.token, o.outcome, j(o.result), j(o.error)]),
+    finish: (o) => (o.retry_after_ms != null
+      // rc-8.5.21 (PROPOSED_20261017120000): a retry with a caller-chosen delay
+      ? call('select agent.runtime_finish($1, $2::uuid, $3, $4::jsonb, $5::jsonb, $6::integer) r', [o.job_id, o.token, o.outcome, j(o.result), j(o.error), Math.max(1, Math.ceil(Number(o.retry_after_ms) / 1000))])
+      : call('select agent.runtime_finish($1, $2::uuid, $3, $4::jsonb, $5::jsonb) r', [o.job_id, o.token, o.outcome, j(o.result), j(o.error)])),
     reap: ({ limit = 20 } = {}) => call('select agent.runtime_reap($1) r', [limit]),
     reserve: (o) => call('select agent.runtime_reserve($1, $2::uuid, $3, $4, $5) r', [o.job_id, o.token, o.model, o.reserved_usd, o.purpose || 'default']),
     settle: (o) => call('select agent.runtime_settle($1, $2::uuid, $3::uuid, $4, $5::jsonb) r', [o.job_id, o.token, o.reserve_id, o.actual_usd ?? null, j(o.usage)]),
@@ -302,7 +305,7 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
       if (event_type) emit(j, event_type, j.lease_owner, event_payload || {})
       return { ok: true, cancel_requested: false, stop: null, lease_until: j.lease_until }
     }),
-    finish: ({ job_id, token, outcome, result = null, error = null }) => serial(() => {
+    finish: ({ job_id, token, outcome, result = null, error = null, retry_after_ms = null }) => serial(() => {
       const j = jobs.get(job_id)
       if (!j) return { ok: false, reason: 'job_not_found' }
       if (j.finished_token === token && !j.lease_token) return { ok: true, idempotent: true, state: j.state }
@@ -310,7 +313,11 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
       const to = { completed: 'completed', failed: 'failed', cancelled: 'cancelled', waiting_for_approval: 'waiting_for_approval', paused: 'paused', retry: j.attempt >= j.max_attempts ? 'dead_letter' : 'retrying', release: 'retrying' }[outcome]
       if (!to) return { ok: false, reason: 'outcome_invalid' }
       let next = null
-      if (outcome === 'retry' && to === 'retrying') next = iso(now() + backoffSeconds(j.attempt, lim.backoff_base_seconds, lim.backoff_max_seconds) * 1000)
+      if (outcome === 'retry' && to === 'retrying') {
+        next = retry_after_ms != null
+          ? iso(now() + Math.min(Math.max(Math.ceil(Number(retry_after_ms) / 1000), 1), 3600) * 1000)
+          : iso(now() + backoffSeconds(j.attempt, lim.backoff_base_seconds, lim.backoff_max_seconds) * 1000)
+      }
       if (outcome === 'release') { j.attempt = Math.max(j.attempt - 1, 0); next = iso(now() + lim.backoff_base_seconds * 1000) }
       transition(j, to)
       unknownOpen(job_id)

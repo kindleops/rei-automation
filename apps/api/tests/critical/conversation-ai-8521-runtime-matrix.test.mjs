@@ -182,7 +182,8 @@ test('worker crash after finalize: the retried job RESUMES the dispatch with the
   assert.deepEqual([retry.code, retry.dispatch, retry.resumed], ['TURN_DISPATCHED', 'enqueued', true], JSON.stringify(retry))
   assert.equal(w.queueRows.length, 1)
   const again = await w.runLatest({ dispatch: crashing })
-  assert.deepEqual([again.code, again.dispatch], ['TURN_DISPATCHED', 'already_enqueued'])
+  // rc-8.5.21 dispatch lease: the dispatch is recorded terminal, so a third attempt never reaches R3 at all
+  assert.deepEqual([again.code, again.dispatch_state], ['TURN_ALREADY_DISPATCHED', 'dispatched'])
   assert.equal(w.queueRows.length, 1, 'a third attempt never duplicates')
 })
 

@@ -35,6 +35,8 @@ exact pre-chain schema fingerprint. Then the whole chain is re-applied and re-ve
 | 18 | `PROPOSED_20261016160000_runtime_event_budget_ceilings.sql` | 8.5.21-b: **re-creates** `runtime_enqueue_event` + `runtime_enqueue_event_at` | new |
 | 19 | `PROPOSED_20261016161000_negotiation_send_authorization.sql` | 8.5.21-b | new |
 | 20 | `PROPOSED_20261016162000_ops_research_valuation_snapshot.sql` | 8.5.21-b | new |
+| 21 | `PROPOSED_20261017100000_contact_property_resolution_declined_unverified.sql` | owner decision 2026-10-17: the `ownership_declined_unverified` role | new |
+| 22 | `PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease.sql` | owner directive 2026-10-17 ("no duplicate response to the same inbound turn"): the turn dispatch lease (`dispatch_*` columns, finalize re-created to hand the claimant the lease, `conversation_reply_turn_dispatch_claim` / `_dispatch_done`), the `send_queue_ai_turn_uq` backstop (one `ai_generated` row per `metadata.turn.turn_id`), and `agent.runtime_finish(…, p_retry_after_seconds)` | new; after #14 and #8. Precondition RAISEs if production already has two ai_generated rows for one turn. Rollback restores the rc-8.5.20 finalize body exactly (fingerprint-proven) and refuses while a dispatch lease is live. |
 | seed | `PROPOSED_20261016163000_followup_execution_schedules.sql` | 8.5.21-a follow-up pipeline schedules (born DISABLED; `psql -v owner_id=…`) | new; **renumbered** from 20261016161000. Exercised by its posttest after #18. |
 
 The schedule seeds take `psql -v owner_id=<owner auth uuid>` and carry their own BEGIN/COMMIT. Every

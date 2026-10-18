@@ -11,7 +11,8 @@
 //                            version exists ⇒ TURN_SUPERSEDED (that version's job decides).
 //   conversation.turn_sweep  restart recovery: re-enqueue overdue turns / expired claims.
 // rc-8.5.21: the decision is the canonical runtime; an authorised reply is dispatched through R3
-// (OFF switches). A job that dies after finalize resumes the dispatch on retry (runDueTurn).
+// (OFF switches). A job that dies after finalize resumes the dispatch on retry (runDueTurn), but ONLY once
+// its dispatch lease has expired; a live lease defers the retry (DEFERRED_LIVE_DISPATCH, retry-after).
 //
 // Results are codes / counts only (agent.payload_is_clean). R3 is wired but OFF (its switches are absent).
 import { encodeRef } from './conversation-ai-shadow-hook.js'

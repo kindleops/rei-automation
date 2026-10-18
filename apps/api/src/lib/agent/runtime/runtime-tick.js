@@ -134,8 +134,11 @@ async function runJob({ store, handler, claim, deadlineAt, now }) {
       if (e.reason.startsWith('stop:')) return finish('release', { error: { code: safeCode(`STOP_${e.reason.slice(5)}`) } })
       return finish('failed', { error: { code: safeCode(e.reason) } })
     }
-    if (e instanceof RuntimePermanentError) return finish('failed', { error: { code: safeCode(e.code) } })
-    return finish('retry', { error: { code: safeCode(e?.code, 'HANDLER_ERROR') } })
+    if (e instanceof RuntimePermanentError || e?.permanent === true) return finish('failed', { error: { code: safeCode(e.code) } })
+    // rc-8.5.21: a handler may name its own retry delay (e.g. a turn whose dispatch lease is live:
+    // "lease remaining + jitter"); the attempt is still burned, so the budget stays bounded
+    const ms = Number(e?.retry_after_ms)
+    return finish('retry', { error: { code: safeCode(e?.code, 'HANDLER_ERROR'), ...(e?.outcome ? { outcome: safeCode(e.outcome).toLowerCase() } : {}) }, ...(Number.isFinite(ms) && ms > 0 ? { retry_after_ms: Math.min(ms, 3_600_000) } : {}) })
   }
   return finish('completed', { result: res.value?.result ?? res.value ?? null })
 }
