@@ -35,6 +35,21 @@ const OBJECTIVE_TEXT = Object.freeze({
   none: 'respond without a question',
 })
 
+// blind-eval S1: what the writer may say about each property (the validator HARD-blocks the rest)
+export function propertyRuleLines(ledger) {
+  const po = ledger?.property?.ownership
+  if (!po) return []
+  const label = (pid) => po.labels?.[pid] || null
+  const by = Object.entries(po.by_property || {})
+  const confirmed = by.filter(([, v]) => v.state === 'confirmed').map(([pid]) => label(pid)).filter(Boolean)
+  const never = by.filter(([, v]) => ['denied', 'declined', 'conflict'].includes(v.state)).map(([pid]) => label(pid)).filter(Boolean)
+  const lines = ['PROPERTY RULE: name a property only if they CONFIRMED they own it; never thank them for confirming anything they did not confirm in a message.']
+  lines.push(`- confirmed (you may name it): ${confirmed.length ? confirmed.join('; ') : 'none'}`)
+  if (never.length) lines.push(`- NEVER mention or ask about: ${never.join('; ')}`)
+  if (po.thread_hold) lines.push('- their last ownership answer did not say which property it was about: name no property')
+  return lines
+}
+
 function factLines(ledger) {
   return Object.entries(ledger?.facts || {}).map(([k, f]) => {
     const v = k === 'asking_price' && f.value?.amount ? `stated a price (amount on record, never repeat it)` : typeof f.value === 'object' ? JSON.stringify(f.value) : String(f.value)
@@ -74,6 +89,7 @@ export function buildComposePrompt({ ledger, inboundText, category, objective, t
     'FACTS ALREADY KNOWN (never ask for these again; inferred is not confirmed):',
     ...(factLines(ledger).length ? factLines(ledger) : ['- none']),
     `QUESTIONS SO FAR: ${asked.join('; ') || 'none'}`,
+    ...propertyRuleLines(ledger),
     `REPLY TYPE: ${category}. OBJECTIVE: ${OBJECTIVE_TEXT[objective] || OBJECTIVE_TEXT.none}.`,
     ...(CATEGORY_TEXT[category] ? [CATEGORY_TEXT[category]] : []),
     'First acknowledge what they said in plain words. At most one question, and only for the objective (one thing per question, never "X, and Y?"). Keep it to 1 or 2 sentences. Never invent a next step such as a visit or viewing.',

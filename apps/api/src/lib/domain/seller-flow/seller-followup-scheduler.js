@@ -624,6 +624,7 @@ export async function cancelPendingFollowUpsForThread({
   reason = "cancelled_followup_on_inbound_reply",
   now = new Date().toISOString(),
   keep_nurture_follow_ups = false,
+  only_property_id = null,
   supabase = defaultSupabase,
 } = {}) {
   const normalized_thread_key = normalizePhone(thread_key) || clean(thread_key);
@@ -645,6 +646,7 @@ export async function cancelPendingFollowUpsForThread({
       cancelled_by: "inbound_takeover",
       now,
       keep_nurture_follow_ups: keep_nurture_follow_ups === true,
+      only_property_id: only_property_id || null,
     },
     { supabase }
   );

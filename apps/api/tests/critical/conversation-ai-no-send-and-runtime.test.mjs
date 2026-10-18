@@ -159,6 +159,8 @@ const R3_DIRECT_IMPORTS = [
   'lib/domain/messages/ai-generated-message.js', 'lib/domain/queue/cancel-supabase-pending-outbound.js', 'lib/domain/conversation-ai/company-identity.js',
   'lib/domain/conversation-ai/playbook/v3/style-validator.js', 'lib/domain/conversation-ai/pipeline/outcomes.js', 'lib/domain/conversation-ai/runtime/canonical.js',
   'lib/domain/conversation-ai/persona-continuity.js', 'lib/ai/conversation-canonical-inputs.js', 'lib/domain/holds-port/automation-hold-port.js',
+  // blind-eval S1: the per-property ownership facts (pure; the recontact guard's evidence)
+  'lib/domain/conversation-ai/property-ownership.js',
 ].sort()
 
 function directImports(file) {

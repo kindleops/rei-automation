@@ -49,8 +49,8 @@ function useCaseForKind(useCase) {
 }
 
 // ── seller-text evidence (deterministic; each rule names what it proves) ─────
-export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home)))\b/i
-export const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong)\b/i
+export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours))\b/i
+export const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|dont|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong|(?:that'?s\s+|it'?s\s+|that\s+is\s+|it\s+is\s+)?(?:not|isn'?t|aint|ain'?t)\s+(?:mine|ours)\b(?!\s+any\s*more))\b/i
 export const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|the|this)|^\s*(?:already\s+)?sold\b|\b(?:it|house|home|property)\s+(?:was|has\s+been|got)\s+sold|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore|gave\s+(?:the|my|that|this)\s+(?:house|home|property|place)\s+to|(?:it|the\s+house|the\s+home|the\s+property)\s+(?:is|belongs\s+to)\s+my\s+(?:son|daughter|kids?|children|brother|sister|mom|dad|mother|father)(?:'s)?\b|(?:signed|deeded|transferred)\s+(?:it|the\s+(?:house|home|property))\s+(?:over\s+)?to|ya\s+la\s+vend\w*|ya\s+no\s+es\s+m[ií]a)/im
 const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
 const NOT_INTERESTED_RE = /\b(?:not\s+interested|no\s+thanks?|no\s+thank\s+you|not\s+(?:selling|for\s+sale)|(?:don'?t|do\s+not)\s+want\s+to\s+sell|not\s+looking\s+to\s+sell|never\s+selling)\b/i
@@ -69,13 +69,14 @@ const NEED_TIME_RE = /\b(?:let\s+me\s+think|need\s+(?:some\s+)?time|not\s+right\
 export const RETRACTION_RE = /\b(?:j\/?k|jk|just\s+(?:joking|kidding|playing|messing)|(?:i'?m\s+)?(?:only\s+)?kidding|not\s+really|no\s+i\s+(?:still\s+)?(?:own|have)\s+it|psych)\b/i
 // rc-8.5.21 (Phase 3C): "Not if it involves creative financing" is CONDITIONAL interest with a
 // terms objection (cash / conventional purchase only), never "not interested"
-export const FINANCING_OBJECTION_RE = /\b(?:not\s+if|(?:only\s+)?(?:if|when)\s+(?:it'?s|it\s+is|there'?s|there\s+is)\s+(?:not|no)|no\s+(?:to\s+)?|without|unless\s+(?:it'?s\s+)?(?:not\s+)?|as\s+long\s+as\s+(?:it'?s\s+|it\s+is\s+|there'?s\s+|there\s+is\s+)?(?:no|not)|(?:don'?t|do\s+not|won'?t|will\s+not)\s+(?:want|do|accept|take|consider)|not\s+(?:interested\s+in|doing|open\s+to))\b[^.?!]{0,40}?\b(?:creative\s+financ\w*|owner\s+financ\w*|seller\s+financ\w*|subject[\s-]?to|lease\s+option|rent[\s-]to[\s-]own|land\s+contract|payments?\s+over\s+time|(?:monthly|installment)\s+payments|terms\b|wrap(?:around)?)/i
+export const FINANCING_OBJECTION_RE = /\b(?:not\s+if|(?:only\s+)?if\s+it\s+(?:does\s*n[o']?t|doesn'?t|won'?t|will\s+not|isn'?t|is\s+not)\s+(?:involve|include|require|mean|use)|(?:only\s+)?(?:if|when)\s+(?:it'?s|it\s+is|there'?s|there\s+is)\s+(?:not|no)|no\s+(?:to\s+)?|without|unless\s+(?:it'?s\s+)?(?:not\s+)?|as\s+long\s+as\s+(?:it'?s\s+|it\s+is\s+|there'?s\s+|there\s+is\s+)?(?:no|not)|(?:don'?t|do\s+not|won'?t|will\s+not)\s+(?:want|do|accept|take|consider)|not\s+(?:interested\s+in|doing|open\s+to))\b[^.?!]{0,40}?\b(?:creative\s+financ\w*|owner\s+financ\w*|seller\s+financ\w*|subject[\s-]?to|lease\s+option|rent[\s-]to[\s-]own|land\s+contract|payments?\s+over\s+time|(?:monthly|installment)\s+payments|terms\b|wrap(?:around)?)/i
 // "U could email me … your business card" — a request only a person can fulfil
 export const EMAIL_OR_CARD_REQUEST_RE = /\b(?:e-?mail\s+me|send\s+(?:me\s+)?(?:an?\s+|your\s+|ur\s+)?(?:e-?mail|card|business\s+card|info(?:rmation)?|details|website|link|paperwork)|(?:your|ur)\s+business\s+card|cc\s+of\s+(?:your|ur)|what'?s\s+(?:your|ur)\s+(?:e-?mail|website)|do\s+(?:you|u)\s+have\s+a\s+(?:website|card))\b/i
 // "I will contact you when I want to sell" — not now: the 30-day follow-up (owner rule)
 export const DEFERS_CONTACT_RE = /\b(?:i'?ll|i\s+will|we'?ll|we\s+will)\s+(?:contact|call|text|reach\s+out\s+to|get\s+(?:back\s+)?(?:to|with)|let)\s+(?:you|u)(?:\s+know)?\s+(?:when|if|once|whenever)\b/i
 // "Which company are you with?" — answered only from the configured identity, else a person
 export const COMPANY_QUESTION_RE = /\b(?:(?:what|which)\s+(?:company|outfit|firm|organi[sz]ation|business)|who\s+(?:are\s+(?:you|u)|r\s+u)\s+with|company\s+(?:name|are\s+(?:you|u)|r\s+u)|(?:who|what)\s+do\s+(?:you|u)\s+(?:work\s+for|represent)|(?:your|ur)\s+(?:company|website|business\s+name)|(?:are|r)\s+(?:you|u)\s+(?:with\s+)?a\s+company|what'?s\s+the\s+(?:company|website))\b/i
+export const AUTOMATION_QUESTION_RE = /\b(?:(?:are|r)\s+(?:you|u|this)\s+(?:a\s+)?(?:bot|robot|real|human|person|automated|ai\b|machine|computer)|is\s+this\s+(?:a\s+)?(?:bot|robot|automated|real\s+person|human|ai\b|computer|machine|recording)|(?:bot|robot|automated|ai)\s*\?)/i
 // an amount WE quoted in an outbound (a live negotiation even without an offer record)
 const OUR_AMOUNT_RE = /\$\s?[0-9][0-9,]*(?:\.[0-9]+)?\s?(?:k|m)?\b|\b[0-9]{2,3}(?:,[0-9]{3})+\b|\b[0-9]{2,3}\s?k\b/i
 
@@ -213,6 +214,8 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     }
     if (EMAIL_OR_CARD_REQUEST_RE.test(body)) requests.push({ kind: 'email_or_card', source_message_id: m.id })
     if (COMPANY_QUESTION_RE.test(body)) requests.push({ kind: 'company_identity', source_message_id: m.id })
+    // blind-eval S2: a DIRECT question about automation (the only case a text may speak about it)
+    if (AUTOMATION_QUESTION_RE.test(body)) requests.push({ kind: 'automation_question', source_message_id: m.id })
     // timeline (beyond the extractor): "close before November", "move in 30 days", "asap"
     const tl = TIMELINE_RE.exec(body)
     if (tl && !(facts.timeline?.source_message_ids || []).includes(m.id)) addFact(facts, 'timeline', { stated: tl[0].trim().toLowerCase() }, m, 'seller_stated', 0.75)

@@ -94,7 +94,7 @@ test('contact resolution records role ownership_declined_unverified with rejecte
       const b = {
         upsert: (r) => { writes.push({ table, r }); return b },
         select: () => b,
-        eq: () => b, range: () => b,
+        eq: () => b, range: () => b, order: () => b, limit: () => b,
         maybeSingle: async () => ({ data: { id: 'cpr-1', contact_property_role: writes.at(-1)?.r?.contact_property_role, rejected_at: writes.at(-1)?.r?.rejected_at }, error: null }),
         then: (res) => res({ data: [], error: null }),
       }

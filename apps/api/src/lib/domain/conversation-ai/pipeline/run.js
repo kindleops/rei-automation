@@ -11,6 +11,7 @@
 // Pure apart from the injected model client / negotiation authority. Writes nothing and imports
 // no queue / transport module (static test).
 import { ledgerFromContextInput, ledgerSummary } from '../fact-ledger.js'
+import { attachPropertyFactsFromInput } from '../property-ownership.js'
 import { ACTIONS, PIPELINE_VERSION } from './outcomes.js'
 import { decideActions } from './decide.js'
 import { composeReply } from './compose.js'
@@ -24,7 +25,8 @@ export async function runConversationPipeline({
   personaPolicy, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY, maskOpts = {}, now = new Date().toISOString(),
 }) {
   const authority = assertNegotiationAuthority(negotiationAuthority)
-  const ledger = ledgerFromContextInput(input, { modelFacts: judgment?.facts_extracted || [], now })
+  // blind-eval S1: canonical per-property ownership facts (the same evidence the recontact guard ranks)
+  const ledger = attachPropertyFactsFromInput(ledgerFromContextInput(input, { modelFacts: judgment?.facts_extracted || [], now }), input)
   let plan = decideActions({
     ledger, inboundText: input.inbound.body, inboundId: input.inbound.id, deterministic, eligibility, judgment, deterministicTemplate,
     ownerHandled, language: input.language, propertyCount: (input.properties || []).length || 1,

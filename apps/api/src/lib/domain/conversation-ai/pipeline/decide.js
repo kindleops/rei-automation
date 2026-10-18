@@ -67,6 +67,10 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   if (own.action === 'no_owner_outreach') return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: 'wrong_number' }, source_message_id: inboundId }, { type: ACTIONS.NO_RESPONSE, reason: 'wrong_number_no_owner_outreach' }], 'wrong_number_no_owner_outreach', { ownership })
   if (own.action === 'hold_conflict') return plan([{ type: ACTIONS.HOLD, reason: 'ownership_evidence_conflict', evidence: own.evidence }], 'ownership_evidence_conflict', { ownership })
   if (own.action === 'hold_unreadable') return plan([{ type: ACTIONS.HOLD, reason: own.reasons[0] || 'eligibility_unreadable' }], 'eligibility_unreadable', { ownership })
+  // blind-eval S1 (SCONV-03): one bare answer to ownership questions about SEVERAL properties says
+  // nothing about which one — a thread HOLD for a person (owner 10-17 rule), never a denial of the latest
+  const pOwn = ledger?.property?.ownership
+  if (pOwn?.inbound?.ambiguous && pOwn.thread_hold) return plan([{ type: ACTIONS.HOLD, reason: 'ownership_denial_property_unresolved', evidence: { basis: pOwn.inbound.basis } }], 'ownership_denial_property_unresolved', { ownership })
   // OWNER DECISION 2026-10-17: the polite decline to the ownership question — never a nurture, never a
   // selling question, never composed; the property × contact hold is the guard's / contact resolution's
   if (own.action === 'ownership_declined_no_reply') {

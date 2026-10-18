@@ -141,9 +141,20 @@ const MATCHERS = {
   },
 
   not_owner_or_tenant(event) {
+    // blind-eval SCONV-09: "Yes I own it, bought it in 2019. Tenant moved out last month" confirms
+    // ownership; the word "tenant" ABOUT a tenant never makes the owner a bad contact. The respondent
+    // must say THEY are the tenant / renter / not the owner, and a confirmation in the same message
+    // (or the classifier's ownership_confirmed) wins.
+    const intent = lower(classificationOf(event).primary_intent || classificationOf(event).detected_intent);
+    if (["ownership_confirmed", "seller_interested", "asks_offer", "asking_price_provided"].includes(intent)) {
+      return { matched: false, reason: "ownership_confirmed_not_bad_contact" };
+    }
+    if (hasText(event, /\b(i own|we own|i still own|i'?m the owner|i am the owner|it'?s mine|that'?s mine|yes,? i do|owner here)\b/i)) {
+      return { matched: false, reason: "ownership_confirmed_not_bad_contact" };
+    }
     const matched = hasText(
       event,
-      /\b(not (the )?owner|do not own|don't own|does not own|doesn't own|tenant|renter|i rent|not mine|wrong owner)\b/i
+      /\b(not (the )?owner|do not own|don't own|dont own|does not own|doesn't own|not mine|wrong owner|i'?m (the|a) (tenant|renter)|i am (the|a) (tenant|renter)|i rent (it|here|this|the)|i'?m renting|we'?re renting|renter here|tenant here)\b/i
     );
     return { matched, reason: "bad_contact_language" };
   },

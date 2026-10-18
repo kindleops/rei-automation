@@ -45,6 +45,7 @@ import { moneyMentions } from '../conversation-ai/validator.js'
 import { BARE_YES_RE, OWN_CONFIRM_RE, OWN_DENY_RE, OWN_FORMER_RE, RETRACTION_RE } from '../conversation-ai/fact-ledger.js'
 import { isManualInboxSend } from './is-manual-inbox-send.js'
 import { NEVER_OWNED_LONG_RE } from '../classification/conversation-context.js'
+import { attributeInbounds } from '../conversation-ai/property-facts.js'
 
 export const RECONTACT_GUARD_VERSION = 'ownership-recontact-guard.v3'
 const NOT_OWNER_LABELS = new Set(['property_specific_non_owner', 'former_owner_respondent', 'sold_property', 'sold', 'tenant_respondent', 'non_owner_referral', 'not_owner', 'ownership_denied'])
@@ -65,9 +66,13 @@ const t = (m) => Date.parse(m?.at || m?.event_timestamp || m?.created_at || 0) |
  * @returns {Array<{ property: string, state: 'denied'|'confirmed', message_id: string, at: number, basis: string, kind: keyof EVIDENCE_RANK, rank: number }>}
  *          property '' = not reliably identified
  */
-export function ownershipEvidenceItems({ messages = [] } = {}) {
+export function ownershipEvidenceItems({ messages = [], properties = [] } = {}) {
   const items = []
   let lastQ = null // our last question: { kind, property_id }
+  // blind-eval S1 (rc-8.5.21): ONE attribution rule (property-facts.js) — a reply naming a property
+  // answers THAT property; one bare answer to ownership questions about several properties is
+  // unattributed ('') ⇒ a thread hold, never a denial of the latest property
+  const attribution = attributeInbounds({ messages, properties, questionKindOf })
   for (const m of [...messages].sort((a, b) => t(a) - t(b))) {
     const body = clean(m.body ?? m.message_body)
     const dir = String(m.direction || '').toLowerCase()
@@ -78,7 +83,8 @@ export function ownershipEvidenceItems({ messages = [] } = {}) {
     }
     if (!dir.startsWith('in')) continue
     const ownQ = lastQ?.kind === 'ownership' ? lastQ : null
-    const prop = clean(m.property_id) || clean(lastQ?.property_id) || ''
+    const att = attribution.get(String(m.id))
+    const prop = att ? att.property : clean(m.property_id) || clean(lastQ?.property_id) || ''
     const label = String(m.detected_intent || '')
     const denyMatch = OWN_DENY_RE.exec(body) || OWN_FORMER_RE.exec(body)
     const retracted = denyMatch && RETRACTION_RE.test(body.slice(denyMatch.index + denyMatch[0].length))
@@ -122,9 +128,9 @@ export function resolveOwnershipEvidence(items = []) {
  * @returns {Map<string, { state: 'denied'|'confirmed', message_id: string, at: number, basis: string, kind: string, rank: number }>}
  *          property key ('' = not identified) → the resolved ownership evidence (rule 3)
  */
-export function ownershipEvidenceByProperty({ messages = [] } = {}) {
+export function ownershipEvidenceByProperty({ messages = [], properties = [] } = {}) {
   const by = new Map()
-  for (const e of ownershipEvidenceItems({ messages })) by.set(e.property, [...(by.get(e.property) || []), e])
+  for (const e of ownershipEvidenceItems({ messages, properties })) by.set(e.property, [...(by.get(e.property) || []), e])
   return new Map([...by.entries()].map(([p, list]) => [p, resolveOwnershipEvidence(list)]))
 }
 

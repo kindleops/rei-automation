@@ -34,8 +34,43 @@ import {
   recordReferralExecution,
 } from './contact-resolution-repository.js'
 import { planReferralExecution } from './referral-proposal-executor.js'
+import { attributeInbounds } from '../conversation-ai/property-facts.js'
+import { questionKindOf } from '../conversation-ai/questions.js'
 
 const clean = (value) => String(value ?? '').trim()
+
+export const OWNERSHIP_UNRESOLVED_HOLD = 'ownership_denial_property_unresolved'
+
+/** The thread's recent messages (both directions, with property ids), read-only. */
+async function loadThreadMessages(supabaseClient, thread_key) {
+  if (!supabaseClient?.from || !clean(thread_key)) return []
+  const { data, error } = await supabaseClient
+    .from('message_events')
+    .select('id,direction,message_body,property_id,created_at,event_timestamp')
+    .eq('thread_key', clean(thread_key))
+    .order('created_at', { ascending: false })
+    .limit(40)
+  if (error) throw Object.assign(new Error('thread_messages_unreadable'), { code: 'THREAD_MESSAGES_UNREADABLE' })
+  return (Array.isArray(data) ? data : []).map((m) => ({ id: m.id, direction: m.direction, body: m.message_body || '', property_id: m.property_id || null, at: m.event_timestamp || m.created_at }))
+}
+
+/**
+ * blind-eval S1 (SYN-34 / SCONV-03): WHICH property an ownership answer is about — the one
+ * attribution rule (property-facts.js), never simply the inbound row's property. A reply naming a
+ * property address answers that property; one bare answer to ownership questions about several
+ * properties is UNATTRIBUTED (a thread hold, owner 10-17 rule).
+ * @returns {Promise<{ property: string, ambiguous: boolean, basis: string }>}
+ */
+export async function attributeOwnershipAnswer({ supabaseClient = null, thread_key = null, property_id = null, source_message_id = null, loadMessages = loadThreadMessages } = {}) {
+  const fallback = { property: clean(property_id), ambiguous: false, basis: 'inbound_row_property' }
+  if (!clean(source_message_id) || !clean(thread_key)) return fallback
+  const messages = await loadMessages(supabaseClient, thread_key)
+  if (!messages.some((m) => String(m.id) === clean(source_message_id))) return fallback
+  const att = attributeInbounds({ messages, questionKindOf }).get(clean(source_message_id))
+  if (!att) return fallback
+  if (att.ambiguous) return { property: '', ambiguous: true, basis: att.basis }
+  return { property: att.property || clean(property_id), ambiguous: false, basis: att.property ? att.basis : 'inbound_row_property' }
+}
 
 /**
  * Canonical relationship outcomes → S1 contact outcomes.
@@ -128,6 +163,7 @@ export async function runContactResolutionPhase({
   source_message_id = null,
   source_thread_key = null,
   now = null,
+  loadThreadMessages: loadMessages = loadThreadMessages,
 } = {}) {
   const outcome = deriveS1Outcome({
     canonical_intent,
@@ -140,8 +176,23 @@ export async function runContactResolutionPhase({
   if (!outcome) return { ...base, reason: 'no_s1_contact_outcome' }
   if (!supabaseClient) return { ...base, reason: 'no_supabase_client' }
 
-  const property = clean(property_id)
   const phone = normalizePhoneKey(inbound_from)
+  // the property this answer is ABOUT (an opt-out is channel-wide: no attribution needed)
+  let property = clean(property_id)
+  let attribution = null
+  if (outcome !== S1_CONTACT_OUTCOME.OPT_OUT) {
+    try {
+      attribution = await attributeOwnershipAnswer({ supabaseClient, thread_key: source_thread_key, property_id, source_message_id, loadMessages })
+    } catch {
+      // unreadable thread: never guess a property for a denial — a person resolves it
+      return { ...base, ran: true, reason: 'thread_unreadable_for_attribution', requires_review: true, hold: OWNERSHIP_UNRESOLVED_HOLD }
+    }
+    if (attribution.ambiguous) {
+      // nothing is written to ANY property: the recontact guard holds the thread on the same evidence
+      return { ...base, ran: true, persisted: false, action: RESOLUTION_ACTION.NONE, hold: OWNERSHIP_UNRESOLVED_HOLD, attribution, requires_review: true }
+    }
+    property = attribution.property
+  }
   if (!property || !phone) return { ...base, reason: 'missing_property_or_phone' }
 
   // ── 1. Persist the contact×property outcome FIRST ────────────────────────
@@ -170,7 +221,7 @@ export async function runContactResolutionPhase({
 
   // ── 2a. Ownership declined (unverified): a property × contact HOLD — no waterfall, no rejection ──
   if (outcome === S1_CONTACT_OUTCOME.OWNERSHIP_DECLINED) {
-    return { ...base, ran: true, persisted: true, action: RESOLUTION_ACTION.NONE, waterfall_invoked: false, hold: 'ownership_declined_unverified', suppression_scope: 'contact_property_pair', contact_property_role: persisted.contact_property_role }
+    return { ...base, ran: true, persisted: true, action: RESOLUTION_ACTION.NONE, waterfall_invoked: false, hold: 'ownership_declined_unverified', suppression_scope: 'contact_property_pair', contact_property_role: persisted.contact_property_role, property_id: property, attribution }
   }
 
   // ── 2. Owner confirmed / opt-out: no waterfall ───────────────────────────
@@ -266,6 +317,8 @@ export async function runContactResolutionPhase({
     ran: true,
     persisted: true,
     outcome,
+    property_id: property,
+    attribution,
     action: decision.action,
     contact_property_role: decision.contact_property_role,
     property_contact_state: decision.property_contact_state,

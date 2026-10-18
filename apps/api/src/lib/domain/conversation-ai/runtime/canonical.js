@@ -119,7 +119,9 @@ export async function decideAndCompose({
     judgment: judgment ? { intent: judgment.intent, seller_interest: judgment.seller_interest, outcome: judgment.outcome, next_objective: judgment.next_objective, confidence: judgment.confidence, escalation_reason: judgment.escalation_reason || null, facts_extracted: judgment.facts_extracted || [], source_message_ids: judgment.source_message_ids || [], contract_version: judgment.contract_version } : null,
     understand_path: r1.trace?.path || null,
     model_calls: calls.map((c) => ({ stage: c.stage, route: c.route || null, model: c.model || null, usd: Number(c.usd) || 0, valid: c.valid ?? null, errors: (c.errors || (c.error ? [c.error] : [])).slice(0, 4), input_tokens: c.usage?.input_tokens ?? null, output_tokens: c.usage?.output_tokens ?? null })),
-    composition: out.composition ? { ok: out.composition.ok, reason: out.composition.reason || null, model: out.composition.model || null, route: out.composition.route || null, usd: out.composition.usd ?? 0, usage: out.composition.usage || null, attempts: (out.composition.attempts || []).length, playbook_version: out.composition.playbook_version || PLAYBOOK_VERSION, prompt_version: out.composition.prompt_version || COMPOSE_PROMPT_VERSION } : null,
+    composition: out.composition ? { ok: out.composition.ok, reason: out.composition.reason || null, model: out.composition.model || null, route: out.composition.route || null, usd: out.composition.usd ?? 0, usage: out.composition.usage || null, attempts: (out.composition.attempts || []).length,
+      // blind-eval reply-rate diagnosis: WHY each attempt was rejected (codes only; never the text)
+      attempt_reasons: (out.composition.attempts || []).map((x) => (x.reasons || (x.error ? [String(x.error)] : [])).slice(0, 8)), playbook_version: out.composition.playbook_version || PLAYBOOK_VERSION, prompt_version: out.composition.prompt_version || COMPOSE_PROMPT_VERSION } : null,
     ledger_summary: ledgerSummary(out.ledger),
     eligibility: summarizeEligibility(eligibility),
     company_identity: { configured: Boolean(companyIdentity?.configured), version: companyIdentity?.version || null },

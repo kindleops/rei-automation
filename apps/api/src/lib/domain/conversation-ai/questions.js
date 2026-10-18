@@ -66,7 +66,7 @@ export function questionKindOf({ use_case = null, body = '' } = {}) {
 }
 
 // a seller reply that turns the question back on us instead of answering it
-const DEFLECT_TO_OFFER_RE = /\b(?:what(?:'?s|\s+is|\s+are|\s+would\s+be)?\s+(?:your|ur|the)\s+(?:offer|proposal|number|price|best)|make\s+(?:me\s+)?an?\s+offer|you\s+tell\s+me|send\s+(?:me\s+)?(?:your|an?|the)\s+(?:offer|proposal|number)|what\s+(?:would|will|can|could)\s+you\s+(?:offer|pay|give)|how\s+much\s+(?:would|will|can|could|are)\s+you\s+(?:offer|pay|give|willing)|depends\s+on\s+(?:the|your)\s+(?:offer|price|number)|cu[aá]l\s+es\s+su\s+oferta|haga\s+una\s+oferta)\b/i
+const DEFLECT_TO_OFFER_RE = /\b(?:what(?:'?s|\s+is|\s+are|\s+would\s+be)?\s+(?:your|ur|the)\s+(?:offer|proposal|number|price|best)|make\s+(?:me\s+)?an?\s+offer|you\s+tell\s+me|send\s+(?:me\s+)?(?:your|an?|the)\s+(?:offer|proposal|number)|what\s+(?:would|will|can|could)\s+you\s+(?:offer|pay|give|do)|what\s+(?:are\s+you|r\s+u)\s+(?:thinking|offering)|how\s+much\s+(?:would|will|can|could|are)\s+you\s+(?:offer|pay|give|willing)|depends\s+on\s+(?:the|your)\s+(?:offer|price|number)|cu[aá]l\s+es\s+su\s+oferta|haga\s+una\s+oferta)\b/i
 const DECLINE_PRICE_RE = /\b(?:not\s+sure\s+(?:yet|of\s+a\s+number)|no\s+idea|don'?t\s+(?:know|have\s+a\s+number)|market\s+value|fair\s+(?:market\s+)?(?:value|price)|whatever\s+it'?s\s+worth|what\s+it'?s\s+worth)\b/i
 
 export function isDeflectionToOffer(text) {

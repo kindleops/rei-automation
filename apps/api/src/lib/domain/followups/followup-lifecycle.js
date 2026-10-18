@@ -40,6 +40,7 @@ import crypto from 'node:crypto'
 import { OWNERSHIP_DECLINED_ROLE, OWNERSHIP_DECLINED_REASON } from '../queue/ownership-recontact-guard.js'
 import { questionKindOf } from '../conversation-ai/questions.js'
 import { bareNoAnswer } from '../conversation-ai/answers.js'
+import { isBareNotInterested, isOwnershipConfirmation } from '../classification/ownership-answer-forms.js'
 
 export const FOLLOWUP_LIFECYCLE_VERSION = 'followup-lifecycle.v1'
 export const LIFECYCLE_MODE_KEY = 'followup_execution_mode' // the same switch as 8.5.21-A (no new key)
@@ -137,9 +138,16 @@ export function propertyContactBlock({ property_id = null, phone = null, thread 
   // interested" to it is declined-unverified, held, never non-ownership)
   const burst = NURTURE_ON_DISINTEREST_KINDS.has(clean(kind)) && Array.isArray(messages) ? ownershipQuestionReply(messages) : null
   if (burst && burst.length) {
+    // blind-eval (REAL-020 / REAL-035): an explicit ownership CONFIRMATION in the reply ("Yes I do, but
+    // no plans to sell") answers the sale too: the 30-day nurture stands, never declined-unverified
+    if (burst.some((m) => isOwnershipConfirmation(m.message_body || ''))) return { blocked: false, reason: null, kind: null }
     const bare = burst.map((m) => bareNoAnswer(m.message_body || ''))
     if (bare.some((b) => b.matched && b.ownership_denial)) return { blocked: true, reason: 'property_denial:bare_no_to_ownership_question', kind: 'property_denial', state: 'not_executable' }
-    return { blocked: true, reason: `${OWNERSHIP_DECLINED_UNVERIFIED}:reply_to_ownership_question`, kind: OWNERSHIP_DECLINED_UNVERIFIED, state: 'held' }
+    // only the BARE decline forms ("No thanks", "Not interested") are declined-unverified; a substantive
+    // sale answer ("not selling, it's a rental") keeps the nurture
+    if (burst.every((m) => { const b = bareNoAnswer(m.message_body || ''); return (b.matched && b.ownership_declined) || isBareNotInterested(m.message_body || '') || !String(m.message_body || '').trim() })) {
+      return { blocked: true, reason: `${OWNERSHIP_DECLINED_UNVERIFIED}:reply_to_ownership_question`, kind: OWNERSHIP_DECLINED_UNVERIFIED, state: 'held' }
+    }
   }
   return { blocked: false, reason: null, kind: null }
 }

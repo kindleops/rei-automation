@@ -40,11 +40,14 @@ export async function loadCanonicalInputs({ supabase, providerMessageSid, inboun
   if (!loaded) return null
   const tk = loaded.input.inbound.thread_key
   const since = new Date(Date.parse(now) - 75 * 864e5).toISOString()
-  const [queueRows, threadState, propRows] = await Promise.all([
+  const [queueRows, threadState, propRows, resolutions] = await Promise.all([
     rowsOrThrow(supabase.from('send_queue').select(QUEUE_COLS).eq('thread_key', tk).gte('created_at', since).order('created_at', { ascending: false }).limit(60)),
     rowsOrThrow(supabase.from('inbox_thread_state').select('our_number').eq('thread_key', tk).limit(1)),
     loaded.row.property_id ? rowsOrThrow(supabase.from('properties').select('property_address,property_address_full,owner_address_state').eq('property_id', loaded.row.property_id).limit(1)) : Promise.resolve([]),
+    // blind-eval S1: the persisted contact × property resolutions of this phone (denials / declines per property)
+    loaded.row.from_phone_number ? rowsOrThrow(supabase.from('contact_property_resolution').select('property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at,rejection_reason,updated_at').eq('contact_phone_e164', loaded.row.from_phone_number).limit(50)) : Promise.resolve([]),
   ])
+  loaded.input.contact_property_resolutions = resolutions
   const continuity = resolveThreadContinuity({ sentRows: queueRows, threadState: threadState[0] || null, inboundTo: loaded.row.to_phone_number })
   const read = readSwitch || ((key) => getSystemValueFresh(key, { supabase }))
   const companyIdentity = await loadCompanyIdentity({ readSwitch: read })

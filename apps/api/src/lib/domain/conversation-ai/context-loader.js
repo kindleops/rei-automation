@@ -56,7 +56,7 @@ export async function loadShadowContext({ supabase, providerMessageSid, now = ne
   ])
   const propertyIds = [...new Set([inbound.property_id, ...events.map((e) => e.property_id)].filter(Boolean))].slice(0, L.properties)
   const [props, prospects] = await Promise.all([
-    propertyIds.length ? rows(supabase.from('properties').select('property_id,property_type,property_address_city,property_address_state,property_address_zip,timezone,owner_1_name,owner_2_name,owner_name').in('property_id', propertyIds).limit(L.properties)) : [],
+    propertyIds.length ? rows(supabase.from('properties').select('property_id,property_type,property_address_city,property_address_state,property_address_zip,timezone,owner_1_name,owner_2_name,owner_name,property_address').in('property_id', propertyIds).limit(L.properties)) : [],
     inbound.prospect_id ? rows(supabase.from('prospects').select('prospect_id,first_name,full_name,timezone').eq('prospect_id', inbound.prospect_id).limit(1)) : [],
   ])
   const useCaseByQueue = new Map(queue.map((q) => [q.id, q.use_case_template]))
@@ -77,7 +77,8 @@ export async function loadShadowContext({ supabase, providerMessageSid, now = ne
       now,
       inbound: { id: inbound.id, body: inbound.message_body || '', at: at(inbound), thread_key: inbound.thread_key, from_phone: sellerPhone, property_id: inbound.property_id },
       thread,
-      properties: props.map((x) => ({ property_id: x.property_id, property_type: x.property_type, city: x.property_address_city, state: x.property_address_state })),
+      // address: the attribution key of property-facts.js (never sent to the model by itself)
+      properties: props.map((x) => ({ property_id: x.property_id, property_type: x.property_type, city: x.property_address_city, state: x.property_address_state, address: x.property_address || null })),
       offers: offers.map((o) => ({ id: o.id, property_id: o.property_id, amount: o.purchase_price != null ? Number(o.purchase_price) : null, status: o.status, created_at: o.created_at, source_table: 'seller_offers' })),
       followups: queue.filter((q) => SCHEDULED.has(String(q.queue_status || '').toLowerCase())).map((q) => ({ use_case: q.use_case_template, due_at: q.scheduled_for_utc, status: q.queue_status })),
       names: { full_names: names, first_name: firstNameOnly(p?.first_name || p?.full_name || null) },

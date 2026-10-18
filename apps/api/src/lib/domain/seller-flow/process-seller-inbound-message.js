@@ -2,7 +2,7 @@ import { suppressesAutomaticFollowup } from "@/lib/domain/seller-flow/decline-fo
 import { buildContextResolutionResult } from "@/lib/domain/context/context-resolution-result.js";
 // V2-1B: durable contact×property resolution. Decides the next contact after
 // an S1 ownership outcome; has no path to a send.
-import { runContactResolutionPhase } from "@/lib/domain/seller-flow/resolve-contact-outcome-phase.js";
+import { attributeOwnershipAnswer, runContactResolutionPhase } from "@/lib/domain/seller-flow/resolve-contact-outcome-phase.js";
 import { probeDealContextAmbiguity as probeDealContextAmbiguityDefault } from "@/lib/domain/deal-context/deal-context-service.js";
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
 import { canonicalizeAffirmativeSlang } from "@/lib/domain/classification/affirmative-slang.js";
@@ -920,7 +920,17 @@ export async function processSellerInboundMessage({
     try {
       // Cancel pending follow-ups and auto-replies superseded by this inbound.
       // Auto-reply rows get reason superseded_by_newer_inbound (per-row in canceler).
+      // blind-eval S1 (SYN-34): a reply that NAMES exactly one of the thread's properties ("I dont own
+      // 5787 Elm St") supersedes only that property's follow-ups; the other property's survives
+      let only_property_id = null;
+      try {
+        const att = await attributeOwnershipAnswer({ supabaseClient: supabase, thread_key: threadKey || inboundFrom, property_id: propertyId, source_message_id: inboundEventId });
+        if (att?.basis === "named_in_reply" && att.property) only_property_id = att.property;
+      } catch {
+        only_property_id = null; // unreadable: the whole-thread takeover (the historical behaviour)
+      }
       followup_cancellation = await runtimeDeps.cancelPendingFollowUpsForThread({
+        only_property_id,
         thread_key: threadKey || inboundFrom,
         inbound_event_id: inboundEventId,
         inbound_received_at:
@@ -2211,10 +2221,14 @@ export async function processSellerInboundMessage({
   }
 
   if (systemFollowupEnabled) {
-    const follow_up_intent =
+    const raw_follow_up_intent =
       contract.ownership_probe_transition
         ? "not_interested"
         : intelligence_snapshot?.canonical_intent || contract.normalized_intent;
+    // blind-eval SCONV-06: "Not right now, maybe next year" (need_time) is the owner's 30-day
+    // nurture; the scheduler has no need_time rule (no_followup_rule_for_intent:need_time), so the
+    // turn silently got NO follow-up. It is scheduled as the approved 30-day nurture.
+    const follow_up_intent = raw_follow_up_intent === "need_time" ? "not_interested" : raw_follow_up_intent;
 
     // RC 8.5.15 (decline-followup-policy.js): an S1 ownership denial, an S2
     // "No" and a "No" to "can we check back?" never schedule a follow-up,

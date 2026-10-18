@@ -241,6 +241,7 @@ const OFFER_CUE = /\b(offer|move forward at|good to go at|i'?d be at|i’d be at
 const PRICE_TOKEN_RE = /\$\s?\d[\d,.]*\s*(?:k|m|mil)?\b|\b\d{1,3}(?:,\d{3})+\b|\b\d{2,4}(?:\.\d)?\s?k\b/gi;
 const PER_QUALIFIER_AFTER_RE = /^\s*(?:cash\s*)?(?:per|a|\/|each|por)\s*(?:unit|door|month|mo\b|year|sq|unidad|puerta|mes)|^\s*(?:each|monthly|in repairs|of repairs|repairs|en reparaciones|al mes|mensual)/i;
 const QUALIFIER_BEFORE_RE = /(repairs?|reparaci[oó]n(?:es)?|arv|assessed|taxes|rent|renta|payoff|owe|debe)[^$\d]{0,14}$/i;
+const RANGE_OFFER_RE = /\b(?:somewhere\s+)?(?:between|around|about|roughly|in\s+the\s+(?:range|ballpark)\s+of|anywhere\s+from|from)\s+\$?\s?\d{2,3}(?:[.,]\d{1,3})?\s?(?:k|thousand|grand)?\s*(?:and|to|-|–)\s*\$?\s?\d{2,3}(?:[.,]\d{1,3})?\s?(?:k|thousand|grand)?\b(?=[^?]*(?:depend|inspect|condition|repair|walk|offer|pay|cash|close|price|range|ballpark|$))/i
 const RANGE_RE = /\b(between|to|or|entre|y|o)\b|[-–]/i;
 const MIN_OFFER_AMOUNT = 10_000;
 
@@ -256,6 +257,9 @@ export function detectOutboundOffer({ message_body = "", use_case = null } = {})
   const body = clean(message_body);
   if (!body) return { is_offer: false };
   const templated_offer = OFFER_USE_CASES.has(lower(use_case));
+  // blind-eval SYN-37: a typed RANGE ("Somewhere between 80 and 90 depending on the inspection") is an
+  // offer whose number is not fixed: the NO-NUMBER offer follow-up (it never picks 80 or 90)
+  if (RANGE_OFFER_RE.test(body) && !(/\?/.test(body) && PRICE_QUESTION.test(body))) return { is_offer: true, mode: "no_number", reason: "offer_range_or_multiple_numbers" };
   const cue = OFFER_CUE.test(body);
   if (!templated_offer && !cue) return { is_offer: false };
   // A question about THEIR price is not our offer.

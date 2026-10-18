@@ -45,6 +45,7 @@ import { beginIdempotentProcessing, completeIdempotentProcessing, failIdempotent
 import { isEmergencyStopActive } from '@/lib/domain/queue/queue-control-safety.js'
 import { evaluateReplyTiming, resolveRecipientZones } from '@/lib/domain/queue/reply-timing.js'
 import { ledgerFromContextInput, ledgerSummary } from '@/lib/domain/conversation-ai/fact-ledger.js'
+import { attachPropertyFactsFromInput } from '@/lib/domain/conversation-ai/property-ownership.js'
 import { hypotheticalReplyRow, dryRunEligibility } from '@/lib/domain/conversation-ai/eligibility-bridge.js'
 import { questionKindOf } from '@/lib/domain/conversation-ai/questions.js'
 import {
@@ -264,7 +265,9 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     eligibility = deps.eligibility ? await deps.eligibility({ row, state, now }) : state.eligibilityFor ? await state.eligibilityFor({ now }) : await dryRunEligibility({ row, supabase: deps.supabase, timezone: state.timezone, geography: state.geography, recipientZones: zones, now })
   } catch { eligibility = { blocked: true, reasons: ['send_time_guard_read_failed'], guard: { blocked: true, reason: 'send_time_guard_read_failed' } } }
   if (eligibility?.blocked) return held((eligibility.reasons?.length ? eligibility.reasons : ['blocked']).map((r) => `ineligible:${r}`))
-  const ledger = ledgerFromContextInput({ ...state.input, inbound: { ...state.input.inbound, ...(inboundRow.body != null ? { body: inboundRow.body } : {}) } }, { modelFacts: record.judgment?.facts_extracted || [], queueRows: state.queueRows || [], now })
+  const freshInput = { ...state.input, inbound: { ...state.input.inbound, ...(inboundRow.body != null ? { body: inboundRow.body } : {}) } }
+  // blind-eval S1: the per-property facts on FRESH state (incl. persisted contact × property resolutions)
+  const ledger = attachPropertyFactsFromInput(ledgerFromContextInput(freshInput, { modelFacts: record.judgment?.facts_extracted || [], queueRows: state.queueRows || [], now }), freshInput)
   const followup = planActions.find((a) => a?.type === ACTIONS.SCHEDULE_FOLLOWUP) || null
   const companyIdentity = state.company_identity || NO_COMPANY_IDENTITY
   const timing = evaluateReplyTiming({ at: now, queuedAt: now, inboundId, inboundAt: inboundRow.at, zones: zones.zones })
