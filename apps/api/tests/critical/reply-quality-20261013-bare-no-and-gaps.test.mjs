@@ -99,13 +99,15 @@ for (const [message, q] of BARE_NEGATIVES_AFTER_S1) {
 
 test("OWNER DECISION 2026-10-17 (supersedes 831df6cd): a polite decline after S1 ('No gracias Carlos!') is ownership_declined_unverified — NOT the 30-day decline of an explicit 'not interested'", async () => {
   const polite = await replay("No gracias Carlos!", "s1_es");
-  const explicit = await replay("Not interested");
+  // owner 2026-10-17 (round 2): a bare "Not interested" to the OWNERSHIP question is declined_unverified
+  // as well; the 30-day decline it is compared with is "Not interested" to the SELLING question
+  const explicit = await replay("Not interested", "s2");
   assert.equal(polite.classification.primary_intent, "ownership_declined_unverified");
   assert.ok(polite.classification.matched_rule_ids.includes("ctx_polite_no_after_ownership_check_declined_unverified"));
   assert.equal(polite.decision.follow_up_at ?? null, null, "no 30-day selling nurture");
   assert.equal(polite.decision.next_action, "end_outreach_in_scope");
   assert.equal(polite.decision.should_suppress_contact, false);
-  assert.equal(explicit.classification.primary_intent, "not_interested", "an explicit 'not interested' keeps the 30-day nurture");
+  assert.equal(explicit.classification.primary_intent, "not_interested", "'not interested' to the selling question keeps the 30-day nurture");
 });
 
 test("the not_interested nurture is a 30-day follow-up whose copy comes only from sms_templates use cases", () => {

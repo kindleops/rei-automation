@@ -75,6 +75,9 @@ for (const id of ["292", "022"]) LABELS[id] = { ...LABELS[id], intent: "property
 // question is ownership_declined_unverified — declined engagement, ownership unverified, a property ×
 // contact hold; never the 30-day nurture, never a denial. Sentiment / outcome labels unchanged.
 LABELS["337"] = { ...LABELS["337"], intent: "ownership_declined_unverified" };
+// OWNER DECISION LOCKED 2026-10-17 (round 2): a bare "Not interested" (#164) to the ownership question
+// ("Is <address> yours?") is ownership_declined_unverified too (no nurture); outcome unchanged.
+LABELS["164"] = { ...LABELS["164"], intent: "ownership_declined_unverified" };
 // RC 8.5.15 (blind-eval fixes, coordinator 2026-10-14): #228 "Si pero no estoy
 // vendiéndola" = owner but not selling -> the 30-day decline; #234 "I work for
 // an investor" = counterparty -> a person; #371 "No but market value" to the

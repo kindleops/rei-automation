@@ -36,7 +36,10 @@ const TEST_CASES = [
   { text: "No thanks", expected: "not_interested" },
   { text: "I'm not interested in selling.", expected: "not_interested" },
   { text: "Yes but not for sale.", expected: "not_interested" },
-  { text: "Answer is no", expected: "not_interested" },
+  // OWNER DECISION LOCKED 2026-10-17: a direct no with NO established question answers nothing we know —
+  // a contextual-review hold (unclear), never certainty. With the ownership question it is the denial;
+  // with the selling question it is that decline (ownership-answer-forms-20261017.test.mjs).
+  { text: "Answer is no", expected: "unclear" },
   { text: "I'm not looking to sell.", expected: "not_interested" },
   { text: "It is mine. I am not selling it.", expected: "not_interested" },
   { text: "Not selling", expected: "not_interested" },

@@ -334,11 +334,18 @@ test("the S1 ownership-probe nurture overlay never fires for an S1 denial or a d
     });
     assert.equal(probe, null, `${q}: ${message}`);
   }
-  // An explicit decline at S1 keeps it.
-  const explicit = await replay("Not interested", "s1_still_own");
+  // OWNER DECISION LOCKED 2026-10-17: a bare "Not interested" to the ownership question is
+  // declined_unverified — the overlay never fires; an explicit decline of the SALE at S1 keeps it.
+  const declined = await replay("Not interested", "s1_still_own");
+  assert.equal(resolveOwnershipProbeDisinterestTransition({
+    classification: declined.classification,
+    messageEvent: { message_body: "Not interested", direction: "inbound" },
+    existingState: { conversation_stage: "ownership_confirmation" },
+  }), null);
+  const explicit = await replay("Not interested in selling", "s1_still_own");
   const probe = resolveOwnershipProbeDisinterestTransition({
     classification: explicit.classification,
-    messageEvent: { message_body: "Not interested", direction: "inbound" },
+    messageEvent: { message_body: "Not interested in selling", direction: "inbound" },
     existingState: { conversation_stage: "ownership_confirmation" },
   });
   assert.ok(probe?.follow_up_at);
@@ -540,10 +547,13 @@ test("orchestrator: S2 'No' keeps the existing 30-day nurture (owner decision), 
   assert.equal(r.suppressionWrites.length, 0);
 });
 
-test("orchestrator: an explicit 'Not interested' at S1 still schedules the 30-day nurture (unchanged)", async () => {
+test("OWNER DECISION LOCKED 2026-10-17: a bare 'Not interested' at S1 is ownership_declined_unverified — schedules NO nurture; 'not interested in selling' at S1 keeps the 30-day nurture", async () => {
   const r = await runInbound({ message: "Not interested", priorBody: S1_BODY });
-  assert.equal(r.classification.primary_intent, "not_interested");
-  assert.deepEqual(r.followups, ["not_interested"]);
+  assert.equal(r.classification.primary_intent, "ownership_declined_unverified");
+  assert.deepEqual(r.followups, [], "no nurture");
+  const sale = await runInbound({ message: "Not interested in selling", priorBody: S1_BODY });
+  assert.equal(sale.classification.primary_intent, "not_interested");
+  assert.deepEqual(sale.followups, ["not_interested"], "a decline of the SALE keeps the 30-day nurture");
 });
 
 test("orchestrator: STOP after S1 suppresses and schedules nothing", async () => {
