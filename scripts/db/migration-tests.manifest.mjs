@@ -69,6 +69,8 @@ const FOLLOWUP_LIFECYCLE = M('PROPOSED_20261017120000_followup_intent_lifecycle.
 const CPR_LIVE_CONSTRAINTS = 'scripts/db/fixtures/contact_property_resolution_live_constraints.sql'
 // OWNER DIRECTIVE 2026-10-17: no duplicate response to the same inbound turn (dispatch lease + send_queue backstop)
 const DISPATCH_LEASE = M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql')
+// blind-eval D3: an R3 hold raises one operator work item per turn (scope 'conversation')
+const TURN_OPERATOR_ITEMS = M('PROPOSED_20261017122000_conversation_turn_operator_items.sql')
 // rc-8.5.21 part B
 const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
 const SEND_AUTHORIZATION = M('PROPOSED_20261016161000_negotiation_send_authorization.sql')
@@ -298,6 +300,15 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_rollback_posttest.sql')],
   },
+  {
+    id: 'conversation_turn_operator_items',
+    setup: [SHIM, DURABILITY, S3, RESEARCH, OPS_PUBLIC_BASELINE, RUNTIME, CAPS, CONV_AI_SHADOW, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, OPS_HEALTH_DELIVERY_REF, MISSIONS, OPS_ACTION_CENTER],
+    pretest: M('PROPOSED_20261017122000_conversation_turn_operator_items_pretest.sql'),
+    apply: [TURN_OPERATOR_ITEMS],
+    posttest: [M('PROPOSED_20261017122000_conversation_turn_operator_items_posttest.sql')],
+    rollback: [M('PROPOSED_20261017122000_conversation_turn_operator_items_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261017122000_conversation_turn_operator_items_rollback_posttest.sql')],
+  },
   // ── owner 2026-10-17: contact_property_resolution role ownership_declined_unverified ──
   {
     id: 'contact_property_resolution_declined_unverified',
@@ -384,6 +395,7 @@ const BASE_TESTS = [
       { fixture: M('PROPOSED_20261017120000_followup_intent_lifecycle_pretest.sql') }, FOLLOWUP_LIFECYCLE,
       // owner directive 2026-10-17: the turn dispatch lease (after reply_turns, message_origin and the runtime)
       { fixture: M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_pretest.sql') }, DISPATCH_LEASE,
+      { fixture: M('PROPOSED_20261017122000_conversation_turn_operator_items_pretest.sql') }, TURN_OPERATOR_ITEMS,
     ],
     verify: [T('rc_8_5_21_release_chain_verify.sql')],
     posttest: [
@@ -415,6 +427,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_posttest.sql'),
       M('PROPOSED_20261017120000_followup_intent_lifecycle_posttest.sql'),
       M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_posttest.sql'),
+      M('PROPOSED_20261017122000_conversation_turn_operator_items_posttest.sql'),
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body); the
     // holds registry is rolled back LAST (it was applied first)
@@ -442,6 +455,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_rollback.sql'),
       M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback.sql'),
       M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_rollback.sql'),
+      M('PROPOSED_20261017122000_conversation_turn_operator_items_rollback.sql'),
     ],
   },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──

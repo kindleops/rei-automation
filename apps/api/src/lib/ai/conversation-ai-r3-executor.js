@@ -34,7 +34,9 @@
 //      exact text, context ref, validation, authorization, approval, schedule, cost), then the queue
 //      row through insertSupabaseSendQueueRow: message_origin 'ai_generated', source 'ai_conversation',
 //      NO template id, metadata.ai_message_id + body hash + recipient zones + in-session linkage,
-//      max_retries 0; then a 'queued' lifecycle event. Provider outcomes are appended by the runner.
+//      max_retries 1 (dispatchable exactly once; no retry after any failure or ambiguous accept);
+//      then a 'queued' lifecycle event. Provider outcomes are appended by the runner. A crash between
+//      the record and the queue insert is finished by the retry (the record's exact text).
 import crypto from 'node:crypto'
 
 import { insertSupabaseSendQueueRow } from '@/lib/supabase/sms-engine.js'
@@ -107,6 +109,18 @@ export async function loadR3State({ supabase, candidate, now }) {
 
 const reservationId = (scope, key) => `idempotency:${scope}:${key}`
 
+/** The send_queue row of an AI reply by its queue key (read-only). */
+export async function lookupQueueRowByKey(supabase, queueKey) {
+  const k = clean(queueKey)
+  if (!k || !supabase?.from) return { found: false, read_failed: true, row: null }
+  try {
+    const r = await supabase.from('send_queue').select('id,queue_status').eq('queue_key', k).limit(1)
+    if (r?.error) return { found: false, read_failed: true, row: null }
+    const row = Array.isArray(r?.data) ? r.data[0] || null : r?.data || null
+    return { found: Boolean(row), read_failed: false, row }
+  } catch { return { found: false, read_failed: true, row: null } }
+}
+
 /** The turn's finalize holds inbound_reply for every member under its token (read-only check). */
 async function defaultVerifyTurnHold({ supabase, keys, token }) {
   if (!supabase?.from) return false
@@ -138,6 +152,7 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   const insertQueueRow = deps.insertQueueRow || ((payload) => insertSupabaseSendQueueRow(payload, deps.supabase ? { supabase: deps.supabase } : {}))
   const insertRecord = deps.insertRecord || ((record) => insertAiGeneratedMessage(deps.supabase, record))
   const lookupRecord = deps.lookupRecord || ((key) => lookupAiGeneratedMessageByQueueKey(deps.supabase, key))
+  const lookupQueueRow = deps.lookupQueueRow || ((key) => lookupQueueRowByKey(deps.supabase, key))
   const recordEvent = deps.recordEvent || ((e) => recordAiGeneratedMessageEvent(deps.supabase, e))
   const cancelPending = deps.cancelPending || ((a) => cancelSupabasePendingOutbound(a, { supabase: deps.supabase }))
   const loadState = deps.loadState || ((a) => loadR3State({ supabase: deps.supabase, ...a }))
@@ -193,7 +208,7 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   if (isOwnerHandledThread({ thread_key: threadKey })) return held(['owner_handled_thread'])
   if (record.terminal?.type === ACTIONS.NO_RESPONSE) return out('no_response', [], { category: 'no_response' })
   if (record.terminal?.type !== ACTIONS.AI_GENERATED_REPLY) return held([`terminal_${String(record.terminal?.type || 'none').toLowerCase()}`])
-  const draft = clean(record.reply?.text)
+  let draft = clean(record.reply?.text)
   if (!draft) return out('refused', ['empty_draft'])
   if (record.validation?.content_reasons?.length) return held(['draft_not_validated'])
 
@@ -210,12 +225,25 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   const inbounds = thread.filter((m) => m.direction === 'inbound').sort((a, b) => t(a) - t(b))
   const latest = inbounds[inbounds.length - 1]
   if (latest && latest.id !== inboundId) return out('stale_inbound', ['newer_inbound_arrived'], { action: 're_decide', latest_inbound_id: latest.id })
-  // idempotent resume (a retried job after a crash between insert and reply): the record exists
+  // idempotent resume (a retried job after a crash): the record exists.
+  // blind-eval D2: a record WITHOUT its queue row (the crash hit between the two inserts) is NOT
+  // "already enqueued" — the retry FINISHES the enqueue with the record's exact, hashed text; only a
+  // record whose queue row exists is already_enqueued. An unreadable record / row is a retry.
   const key = `ai_conversation:${inboundId}`
-  try {
-    const existing = await lookupRecord(key)
-    if (existing?.found) return out('already_enqueued', ['ai_generated_record_exists'], { ai_message_id: existing.record?.id || null })
-  } catch { /* the insert below refuses a duplicate anyway */ }
+  let resumeRecord = null
+  let existing = null
+  try { existing = await lookupRecord(key) } catch { existing = { found: false, read_failed: true } }
+  if (existing?.read_failed) return out('retry', ['ai_generated_record_unreadable'])
+  if (existing?.found) {
+    let q = null
+    try { q = await lookupQueueRow(key) } catch { q = { found: false, read_failed: true } }
+    if (!q || q.read_failed) return out('retry', ['queue_row_unreadable'])
+    if (q.found) return out('already_enqueued', ['ai_generated_record_exists', 'queue_row_exists'], { ai_message_id: existing.record?.id || null, queue_row_id: q.row?.id || null })
+    resumeRecord = existing.record || null
+    const body = clean(resumeRecord?.message_body)
+    if (!resumeRecord?.id || !body || draftHash(body) !== clean(resumeRecord.body_sha256)) return held(['ai_generated_record_unusable'])
+    draft = body
+  }
   if (thread.some((m) => m.direction === 'outbound' && t(m) > t(inboundRow))) return held(['already_answered_by_outbound'])
   const pending = (state.queueRows || []).find((r) => ACTIVE_REPLY_STATUSES.has(clean(r.queue_status).toLowerCase()) && (clean(r.inbound_message_id) === inboundId || t(r) >= t(inboundRow)))
   if (pending) return held(['reply_already_queued'], { existing_queue_row_id: pending.id })
@@ -282,18 +310,29 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     // a transient failure frees the inbound for a retry (a turn-held reservation stays with the turn: the job retries)
     for (const c of inboundClaims) if (!c.turn_held) { try { await reservations.release({ record_item_id: c.record_item_id, scope: c.scope, key: c.key, error: why }) } catch { /* lease */ } }
   }
-  if (policy.limits.max_per_seller_per_day < 1) return holdConsumed(['seller_daily_cap'])
-  const sellerKey = `${sealedThreadRef(threadKey)}:${day}`
-  const r2 = await reservations.begin({ scope: SELLER_DAY_SCOPE, key: sellerKey, summary: 'ai_conversation_seller_day', metadata: meta, lease_ms: RESERVATION_LEASE_MS })
-  if (!r2?.ok || r2.duplicate) return holdConsumed(['seller_daily_cap'])
-  taken.push({ ...r2, scope: SELLER_DAY_SCOPE, key: sellerKey })
+  let sellerKey = `${sealedThreadRef(threadKey)}:${day}`
   let slot = null
-  for (let n = 1; n <= policy.limits.max_per_day_global; n += 1) {
-    const r = await reservations.begin({ scope: GLOBAL_DAY_SCOPE, key: `${day}:${n}`, summary: 'ai_conversation_global_slot', metadata: meta, lease_ms: RESERVATION_LEASE_MS })
-    if (r?.ok && !r.duplicate) { slot = { ...r, scope: GLOBAL_DAY_SCOPE, key: `${day}:${n}`, n }; break }
+  if (resumeRecord) {
+    // D2 resume: the crashed attempt already holds this reply's seller-day + global slot (recorded on
+    // the immutable record); they are completed with the enqueue below, never taken twice
+    const rr = resumeRecord.audit_refs?.reservations || {}
+    const rday = String(resumeRecord.audit_refs?.schedule?.queued_at || resumeRecord.generated_at || now).slice(0, 10)
+    if (!clean(rr.seller_day) || !Number.isInteger(Number(rr.global_slot))) return held(['ai_generated_record_reservations_missing'])
+    sellerKey = clean(rr.seller_day)
+    slot = { scope: GLOBAL_DAY_SCOPE, key: `${rday}:${Number(rr.global_slot)}`, n: Number(rr.global_slot), record_item_id: reservationId(GLOBAL_DAY_SCOPE, `${rday}:${Number(rr.global_slot)}`) }
+    taken.push({ scope: SELLER_DAY_SCOPE, key: sellerKey, record_item_id: reservationId(SELLER_DAY_SCOPE, sellerKey) }, slot)
+  } else {
+    if (policy.limits.max_per_seller_per_day < 1) return holdConsumed(['seller_daily_cap'])
+    const r2 = await reservations.begin({ scope: SELLER_DAY_SCOPE, key: sellerKey, summary: 'ai_conversation_seller_day', metadata: meta, lease_ms: RESERVATION_LEASE_MS })
+    if (!r2?.ok || r2.duplicate) return holdConsumed(['seller_daily_cap'])
+    taken.push({ ...r2, scope: SELLER_DAY_SCOPE, key: sellerKey })
+    for (let n = 1; n <= policy.limits.max_per_day_global; n += 1) {
+      const r = await reservations.begin({ scope: GLOBAL_DAY_SCOPE, key: `${day}:${n}`, summary: 'ai_conversation_global_slot', metadata: meta, lease_ms: RESERVATION_LEASE_MS })
+      if (r?.ok && !r.duplicate) { slot = { ...r, scope: GLOBAL_DAY_SCOPE, key: `${day}:${n}`, n }; break }
+    }
+    if (!slot) return holdConsumed(['global_daily_cap'])
+    taken.push(slot)
   }
-  if (!slot) return holdConsumed(['global_daily_cap'])
-  taken.push(slot)
 
   // 8. brakes again, immediately before the insert
   const brake2 = await brakes()
@@ -323,10 +362,14 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     },
   })
   let rec = null
-  try { rec = await insertRecord(aiRecord) } catch { rec = { ok: false, reason: 'ai_generated_record_insert_threw' } }
+  if (resumeRecord) rec = { ok: true, id: resumeRecord.id, resumed: true }
+  else {
+    try { rec = await insertRecord(aiRecord) } catch { rec = { ok: false, reason: 'ai_generated_record_insert_threw' } }
+  }
   if (!rec?.ok || !rec.id) {
-    if (rec?.reason === 'ai_generated_record_exists') return out('already_enqueued', ['ai_generated_record_exists'])
-    await releaseInbound('ai_generated_record_insert_failed')
+    // a record that appeared since the lookup is re-examined by the retry (row present ⇒ already
+    // enqueued; row absent ⇒ the enqueue is finished) — never assumed enqueued here
+    await releaseInbound(rec?.reason || 'ai_generated_record_insert_failed')
     return out('retry', [rec?.reason || 'ai_generated_record_insert_failed'])
   }
 
@@ -336,8 +379,10 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     scheduled_for: now, scheduled_for_utc: now, scheduled_for_local: now,
     timezone: zones.zones?.length === 1 ? zones.zones[0] : null,
     send_priority: 5, retry_count: 0,
-    // no automatic retry for AI text: a failure goes to a human, never a second attempt
-    max_retries: 0,
+    // blind-eval D1: max_retries 0 made the runner's pre-claim gate (retry_count >= max_retries)
+    // pause EVERY AI row as paused_max_retries. 1 = dispatchable EXACTLY ONCE: any failure (and an
+    // ambiguous accept, which the runner never retries) is final and goes to a human
+    max_retries: 1,
     message_body: draft, message_text: draft,
     seller_first_name: clean(state.input?.names?.first_name) || null,
     to_phone_number: state.seller_phone, from_phone_number: continuity.sender_number, agent_name: continuity.persona_name,

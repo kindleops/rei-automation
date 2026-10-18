@@ -93,8 +93,8 @@ async function race(workersN) {
       const codes = settled.map((x) => (x.status === 'fulfilled' ? x.value.code : x.reason?.code))
       for (const x of settled) {
         if (x.status === 'rejected') {
-          assert.equal(x.reason?.code, 'DEFERRED_LIVE_DISPATCH', `iteration ${it}: unexpected rejection ${x.reason?.stack}`)
-          assert.equal(x.reason.outcome, DEFERRED_LIVE_DISPATCH)
+          assert.ok(['DEFERRED_LIVE_DISPATCH', 'DEFERRED_LIVE_CLAIM'].includes(x.reason?.code), `iteration ${it}: unexpected rejection ${x.reason?.stack}`)
+          if (x.reason.code === 'DEFERRED_LIVE_DISPATCH') assert.equal(x.reason.outcome, DEFERRED_LIVE_DISPATCH)
           assert.ok(x.reason.retry_after_ms >= 1000, 'retry-after = lease remaining + jitter')
         }
       }
@@ -104,7 +104,8 @@ async function race(workersN) {
       dispatchesTotal += calls.length
       deferred += codes.filter((c) => c === 'DEFERRED_LIVE_DISPATCH').length
       alreadyDone += codes.filter((c) => c === 'TURN_ALREADY_DISPATCHED').length
-      claimedElsewhere += codes.filter((c) => c === 'TURN_STATE_CLAIMED').length
+      // D4: a loser under a live CLAIM is rescheduled (never completed): DEFERRED_LIVE_CLAIM
+      claimedElsewhere += codes.filter((c) => c === 'DEFERRED_LIVE_CLAIM').length
     }
     const states = await sel(db.pool, `select dispatch_state, count(*)::int n from public.conversation_reply_turns group by 1`)
     assert.deepEqual(states, [{ dispatch_state: 'dispatched', n: ITERATIONS }])
@@ -183,7 +184,9 @@ test('PG dispatch lease: leader crash AFTER dispatch, BEFORE the outcome ⇒ the
     const settled = await Promise.allSettled(pools.map((p, i) => runDueTurn({ turn_id, version: 1, store: createPgTurnStore(p), worker: `rec${i}`, decideTurn: async () => REPLY, dispatch: queueDispatcher(p, calls) })))
     const values = settled.filter((x) => x.status === 'fulfilled').map((x) => x.value)
     assert.equal(calls.length, 1, 'one lease-holding recoverer attempted the dispatch')
-    assert.deepEqual(values.filter((v) => v.code === 'TURN_DISPATCHED').map((v) => [v.dispatch, v.reasons]), [['held', ['send_queue_ai_turn_uq']]])
+    // the backstop's refusal is a HOLD (D3: never recorded as dispatched)
+    assert.deepEqual(values.filter((v) => v.code === 'TURN_DISPATCH_HELD').map((v) => [v.dispatch, v.reasons]), [['held', ['send_queue_ai_turn_uq']]])
+    assert.equal((await sel(db.pool, `select dispatch_state from public.conversation_reply_turns where turn_id = $1`, [turn_id]))[0].dispatch_state, 'held')
     assert.equal(await rowsFor(db.pool, turn_id), 1, 'still exactly ONE send_queue row for the turn')
     // and at the database itself, whatever the code does:
     await assert.rejects(
@@ -239,5 +242,40 @@ test('PG dispatch lease: the loser\'s runtime job is rescheduled at lease remain
     // visible: the supervisor's runtime read counts failed + dead_letter jobs
     const visible = await sel(db.pool, `select count(*)::int n from agent.research_job where kind = $1 and state in ('failed','dead_letter')`, [CONVERSATION_TURN_KIND])
     assert.equal(visible[0].n, 2)
+  } finally { await db.drop() }
+})
+
+test('PG (blind-eval D4): a worker frozen while holding the turn claim never orphans the turn — the job is rescheduled at the claim lease end (DB clock), then decides and dispatches ONCE, with the turn sweep never enabled', { skip }, async () => {
+  const db = await leaseDb()
+  try {
+    const store = createPgTurnStore(db.pool)
+    const runtime = createRuntimePgStore({ pool: db.api })
+    const calls = []
+    const handlers = { [CONVERSATION_TURN_KIND]: createConversationTurnHandler({ store, decide: async () => REPLY, dispatch: queueDispatcher(db.pool, calls), runtimeStore: runtime, operatorItems: { syncWorkItems: async () => ({ ok: true }) } }) }
+    const o = await openDueTurn(store, '+15555550405', 'fz1')
+    // worker A claims the turn and freezes (SIGSTOP-like: it never renews, never finalizes)
+    const a = await store.claim({ turn_id: o.turn_id, version: 1, worker: 'A', lease_seconds: 120 })
+    assert.ok(a.ok)
+    const j = await runtime.enqueueEventAt({ kind: CONVERSATION_TURN_KIND, event_key: turnEventKey(o.turn_id, 1), input: turnJobInput({ turn_id: o.turn_id, version: 1 }), priority: 100, not_before: iso(Date.now() - 1000) })
+    const t1 = await runRuntimeTick({ store: runtime, handlers, workerId: 'B', budgetMs: 5000 })
+    assert.equal(t1.claimed, 1)
+    const job = (await sel(db.pool, `select state, next_attempt_at, last_error from agent.research_job where job_id = $1`, [j.job_id]))[0]
+    assert.deepEqual([job.state, job.last_error?.code], ['retrying', 'DEFERRED_LIVE_CLAIM'], 'the job is rescheduled, NOT completed')
+    const lease = (await sel(db.pool, `select lease_until from public.conversation_reply_turns where turn_id = $1`, [o.turn_id]))[0].lease_until
+    const delta = Date.parse(job.next_attempt_at) - Date.parse(lease)
+    assert.ok(delta >= -1500 && delta <= 7000, `next attempt ≈ claim lease end + jitter (Δ ${delta} ms)`)
+    assert.equal(calls.length, 0)
+    // the frozen claim expires; the sweep schedule is never enabled; the rescheduled job decides
+    await db.pool.query(`update public.conversation_reply_turns set lease_until = clock_timestamp() - interval '1 second' where turn_id = $1`, [o.turn_id])
+    await db.pool.query(`update agent.research_job set next_attempt_at = clock_timestamp() - interval '1 second' where job_id = $1`, [j.job_id])
+    const t2 = await runRuntimeTick({ store: runtime, handlers, workerId: 'B', budgetMs: 5000 })
+    assert.equal(t2.jobs?.[0]?.outcome, 'completed', JSON.stringify(t2))
+    assert.equal(calls.length, 1)
+    assert.equal(await rowsFor(db.pool, o.turn_id), 1)
+    // A wakes: its stale claim token is fenced at finalize
+    const late = await store.finalize({ turn_id: o.turn_id, token: a.token, version: 1, outcome: 'reply:x', result: { send_status: 'dispatch_pending', reservation_token: a.token }, reserve: true, reply_origin: 'ai_generated' })
+    assert.equal(late.ok, false)
+    assert.equal(await rowsFor(db.pool, o.turn_id), 1)
+    assert.equal((await sel(db.pool, `select count(*)::int n from agent.schedule where name = 'conversation-turn-sweep' and enabled`).catch(() => [{ n: 0 }]))[0].n, 0, 'the sweep was never enabled')
   } finally { await db.drop() }
 })

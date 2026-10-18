@@ -135,6 +135,7 @@ function executorDeps({ queueRows = [], threadState = null, ourPhone = OURS } = 
       eligibility: async () => ({ blocked: false, reasons: [], outside_window: false }),
       insertQueueRow: (payload) => insertSupabaseSendQueueRow(payload, { now: NOW, insertSupabaseSendQueueRow: (row) => { const stored = { ...row, id: `q${inserts.length + 1}` }; inserts.push(stored); return { ok: true, queue_row_id: stored.id, raw: stored } } }),
       insertRecord: async () => ({ ok: true, id: 'aim-1' }),
+      lookupRecord: async () => ({ found: false, read_failed: false, record: null }),
       recordEvent: async () => ({ ok: true }),
     },
   }

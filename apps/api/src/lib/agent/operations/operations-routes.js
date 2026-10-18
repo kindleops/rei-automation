@@ -29,7 +29,7 @@ function defaults(env) {
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const WORK_STATES = ['open', 'acknowledged', 'resolved', 'dismissed']
-const SCOPES = ['recovery', 'action_center', 'pipeline', 'supervisor']
+const SCOPES = ['recovery', 'action_center', 'pipeline', 'supervisor', 'conversation']
 const DECISIONS = ['acknowledge', 'resolve', 'dismiss', 'reopen']
 
 function json(payload, status = 200, headers = {}) {

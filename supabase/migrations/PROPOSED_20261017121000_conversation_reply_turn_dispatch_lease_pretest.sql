@@ -23,7 +23,7 @@ begin
   end if;
   if to_regprocedure('agent.runtime_finish(text,uuid,text,jsonb,jsonb,integer)') is not null
      or to_regprocedure('public.conversation_reply_turn_dispatch_claim(uuid,integer,text,integer,integer)') is not null
-     or to_regprocedure('public.conversation_reply_turn_dispatch_done(uuid,integer,text,text)') is not null
+     or to_regprocedure('public.conversation_reply_turn_dispatch_done(uuid,integer,text,text,jsonb)') is not null
      or to_regclass('public.send_queue_ai_turn_uq') is not null then
     raise exception 'pretest(conversation_reply_turn_dispatch_lease): an object of this migration already exists';
   end if;

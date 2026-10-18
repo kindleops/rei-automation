@@ -14,7 +14,12 @@
 --      live_dispatch + retry_after_ms (the caller reschedules, never dispatches); bounded attempts,
 --      then dispatch_state dead_letter.
 --   3. conversation_reply_turn_dispatch_done: the lease holder records dispatched / deferred /
---      released (a transient failure: the lease is expired at once so a retry may recover).
+--      held (R3 held it: an operator item is raised) / not_sent (superseded, no response,
+--      suppression) / released (a transient failure: the lease is expired at once so a retry may
+--      recover).
+--   3b. conversation_reply_turn_claim re-created: a refusal under a LIVE claim lease reports
+--      retry_after_ms (DB clock), so a waiting job is rescheduled, never completed (recovery does not
+--      depend on the born-disabled turn sweep).
 --   4. DB BACKSTOP: unique index send_queue_ai_turn_uq — at most ONE ai_generated send_queue row per
 --      conversation turn (metadata.turn.turn_id, stamped by the R3 executor). A second enqueue
 --      fails at the database whatever the code does. (Per inbound: ai_generated_messages
@@ -50,13 +55,50 @@ begin
 end $$;
 
 alter table public.conversation_reply_turns
-  add column dispatch_state text check (dispatch_state is null or dispatch_state in ('in_flight', 'dispatched', 'deferred', 'dead_letter')),
+  add column dispatch_state text check (dispatch_state is null or dispatch_state in ('in_flight', 'dispatched', 'deferred', 'held', 'not_sent', 'dead_letter')),
   add column dispatch_worker text check (dispatch_worker is null or dispatch_worker ~ '^[A-Za-z0-9_.:-]{1,80}$'),
   add column dispatch_lease_until timestamptz,
   add column dispatch_attempts integer not null default 0 check (dispatch_attempts between 0 and 100),
   add column dispatched_at timestamptz;
 comment on column public.conversation_reply_turns.dispatch_lease_until is
   'rc-8.5.21: the dispatch lease. While it is in the future only dispatch_worker may dispatch; recovery (conversation_reply_turn_dispatch_claim) requires it expired.';
+
+-- rc-8.5.21 (D4): a refused claim under a LIVE lease reports the lease remaining, so the runtime
+-- reschedules the job (bounded attempts) and recovery never depends on the optional turn sweep.
+create or replace function public.conversation_reply_turn_claim(p_turn_id uuid, p_version integer, p_worker text, p_lease_seconds integer default 120)
+returns jsonb
+language plpgsql
+set search_path = pg_catalog, public
+as $$
+declare t public.conversation_reply_turns%rowtype;
+begin
+  if p_worker is null or p_worker !~ '^[A-Za-z0-9_.:-]{1,80}$' then return jsonb_build_object('ok', false, 'reason', 'worker_invalid'); end if;
+  select * into t from public.conversation_reply_turns where turn_id = p_turn_id for update;
+  if not found then return jsonb_build_object('ok', false, 'reason', 'turn_not_found'); end if;
+  if t.state = 'claimed' and t.lease_until < now() then
+    -- an expired claim (worker died): the turn is due again, at the same version
+    update public.conversation_reply_turns
+       set state = 'pending', claim_token = null, claimed_by = null, claimed_version = null, claimed_at = null, lease_until = null, updated_at = now()
+     where turn_id = p_turn_id returning * into t;
+  end if;
+  if t.state = 'claimed' then
+    -- rc-8.5.21: a LIVE claim elsewhere — the caller reschedules its job at the lease's end (DB clock)
+    return jsonb_build_object('ok', false, 'reason', 'state_claimed', 'version', t.version,
+                              'retry_after_ms', greatest(ceil(extract(epoch from (t.lease_until - clock_timestamp())) * 1000), 0)::bigint);
+  end if;
+  if t.state <> 'pending' then return jsonb_build_object('ok', false, 'reason', 'state_' || t.state, 'version', t.version); end if;
+  if t.version <> p_version then return jsonb_build_object('ok', false, 'reason', 'stale_version', 'version', t.version, 'due_at', t.due_at); end if;
+  if t.due_at > now() then return jsonb_build_object('ok', false, 'reason', 'not_due', 'version', t.version, 'due_at', t.due_at); end if;
+  update public.conversation_reply_turns
+     set state = 'claimed', claim_token = gen_random_uuid(), claimed_by = p_worker, claimed_version = version, claimed_at = now(),
+         lease_until = now() + make_interval(secs => least(greatest(coalesce(p_lease_seconds, 120), 10), 900)), updated_at = now()
+   where turn_id = p_turn_id
+   returning * into t;
+  return jsonb_build_object('ok', true, 'token', t.claim_token, 'version', t.version, 'thread_key', t.thread_key,
+                            'inbound_ids', to_jsonb(t.inbound_ids), 'latest_inbound_id', t.latest_inbound_id, 'lease_until', t.lease_until,
+                            'persona_name', t.persona_name, 'sender_number', t.sender_number);
+end
+$$;
 
 create or replace function public.conversation_reply_turn_finalize(
   p_turn_id uuid, p_token uuid, p_version integer, p_outcome text, p_result jsonb default null,
@@ -138,7 +180,7 @@ begin
   if p_worker is null or p_worker !~ '^[A-Za-z0-9_.:-]{1,80}$' then return jsonb_build_object('ok', false, 'reason', 'worker_invalid'); end if;
   select * into t from public.conversation_reply_turns where turn_id = p_turn_id for update;
   if not found then return jsonb_build_object('ok', false, 'reason', 'turn_not_found'); end if;
-  if t.version = p_version and t.dispatch_state in ('dispatched', 'deferred') then return jsonb_build_object('ok', false, 'reason', 'dispatch_done', 'dispatch_state', t.dispatch_state); end if;
+  if t.version = p_version and t.dispatch_state in ('dispatched', 'deferred', 'held', 'not_sent') then return jsonb_build_object('ok', false, 'reason', 'dispatch_done', 'dispatch_state', t.dispatch_state); end if;
   if t.version = p_version and t.dispatch_state = 'dead_letter' then return jsonb_build_object('ok', false, 'reason', 'dead_letter'); end if;
   if t.state <> 'decided' or t.reply_origin is distinct from 'ai_generated' or t.version <> p_version
      or coalesce(t.result ->> 'send_status', '') <> 'dispatch_pending' then
@@ -163,14 +205,15 @@ begin
 end
 $fn$;
 
-create or replace function public.conversation_reply_turn_dispatch_done(p_turn_id uuid, p_version integer, p_worker text, p_outcome text)
+create or replace function public.conversation_reply_turn_dispatch_done(p_turn_id uuid, p_version integer, p_worker text, p_outcome text, p_detail jsonb default null)
 returns jsonb
 language plpgsql
 set search_path = pg_catalog, public
 as $fn$
 declare t public.conversation_reply_turns%rowtype;
 begin
-  if p_outcome is null or p_outcome not in ('dispatched', 'deferred', 'released') then return jsonb_build_object('ok', false, 'reason', 'outcome_invalid'); end if;
+  if p_outcome is null or p_outcome not in ('dispatched', 'deferred', 'held', 'not_sent', 'released') then return jsonb_build_object('ok', false, 'reason', 'outcome_invalid'); end if;
+  if p_detail is not null and (jsonb_typeof(p_detail) <> 'object' or octet_length(p_detail::text) > 2000) then return jsonb_build_object('ok', false, 'reason', 'detail_invalid'); end if;
   select * into t from public.conversation_reply_turns where turn_id = p_turn_id for update;
   if not found then return jsonb_build_object('ok', false, 'reason', 'turn_not_found'); end if;
   if t.version <> p_version or t.dispatch_worker is distinct from p_worker or t.dispatch_state is distinct from 'in_flight' then
@@ -180,6 +223,14 @@ begin
     update public.conversation_reply_turns
        set dispatch_state = 'dispatched', dispatched_at = clock_timestamp(), dispatch_lease_until = null,
            result = coalesce(result, '{}'::jsonb) || jsonb_build_object('send_status', 'dispatched'), updated_at = now()
+     where turn_id = p_turn_id;
+  elsif p_outcome in ('held', 'not_sent') then
+    -- rc-8.5.21 (D3): R3 did NOT enqueue. A hold is recorded as a hold (an operator item is raised by
+    -- the caller), never as "dispatched"; not_sent = superseded / no response / suppression.
+    update public.conversation_reply_turns
+       set dispatch_state = p_outcome, dispatch_lease_until = null,
+           result = coalesce(result, '{}'::jsonb) || jsonb_build_object('send_status', p_outcome) || case when p_detail is null then '{}'::jsonb else jsonb_build_object('dispatch_detail', p_detail) end,
+           updated_at = now()
      where turn_id = p_turn_id;
   elsif p_outcome = 'deferred' then
     update public.conversation_reply_turns set dispatch_state = 'deferred', dispatch_lease_until = null, updated_at = now() where turn_id = p_turn_id;
@@ -192,9 +243,9 @@ end
 $fn$;
 
 revoke all on function public.conversation_reply_turn_dispatch_claim(uuid, integer, text, integer, integer) from public, anon, authenticated;
-revoke all on function public.conversation_reply_turn_dispatch_done(uuid, integer, text, text) from public, anon, authenticated;
+revoke all on function public.conversation_reply_turn_dispatch_done(uuid, integer, text, text, jsonb) from public, anon, authenticated;
 grant execute on function public.conversation_reply_turn_dispatch_claim(uuid, integer, text, integer, integer) to service_role;
-grant execute on function public.conversation_reply_turn_dispatch_done(uuid, integer, text, text) to service_role;
+grant execute on function public.conversation_reply_turn_dispatch_done(uuid, integer, text, text, jsonb) to service_role;
 
 -- the DB backstop: one ai_generated send_queue row per conversation turn
 create unique index send_queue_ai_turn_uq on public.send_queue ((metadata -> 'turn' ->> 'turn_id'))
@@ -225,10 +276,13 @@ grant execute on function agent.runtime_finish(text, uuid, text, jsonb, jsonb, i
 do $$
 begin
   if to_regprocedure('public.conversation_reply_turn_dispatch_claim(uuid,integer,text,integer,integer)') is null
-     or to_regprocedure('public.conversation_reply_turn_dispatch_done(uuid,integer,text,text)') is null
+     or to_regprocedure('public.conversation_reply_turn_dispatch_done(uuid,integer,text,text,jsonb)') is null
      or to_regprocedure('agent.runtime_finish(text,uuid,text,jsonb,jsonb,integer)') is null
      or to_regclass('public.send_queue_ai_turn_uq') is null then
     raise exception 'postcondition: dispatch lease objects missing';
+  end if;
+  if position('retry_after_ms' in pg_get_functiondef('public.conversation_reply_turn_claim(uuid,integer,text,integer)'::regprocedure)) = 0 then
+    raise exception 'postcondition: claim must report the live lease remaining';
   end if;
   if position('dispatch_lease_until' in pg_get_functiondef('public.conversation_reply_turn_finalize(uuid,uuid,integer,text,jsonb,boolean,text)'::regprocedure)) = 0 then
     raise exception 'postcondition: finalize must hand out the dispatch lease';

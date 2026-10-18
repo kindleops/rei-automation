@@ -221,7 +221,9 @@ test('E2E no-send proof: an eligible routine reply passes R3 and is enqueued thr
   assert.equal(row.template_key ?? null, null)
   assert.ok(!JSON.stringify(row).includes('ai-msg:'), 'no template masquerade anywhere on the row')
   assert.equal(row.template_source, 'ai_generated')
-  assert.equal(row.max_retries, 0, 'no automatic retry of AI text')
+  // blind-eval D1: dispatchable EXACTLY once (0 paused every AI row before claim); any failure is final
+  assert.equal(row.max_retries, 1, 'one attempt, never an automatic retry of AI text')
+  assert.equal(row.retry_count, 0)
   assert.equal(r.ai_message_id, row.metadata.ai_message_id)
   assert.equal(row.metadata.ai_message_body_sha256, sha256Hex(row.message_body))
   assert.equal(row.metadata.no_direct_provider_send, true)

@@ -19,7 +19,7 @@ const ARGS = Object.freeze({
   conversation_reply_turn_due: ['p_limit', 'p_grace_seconds'],
   // rc-8.5.21 dispatch lease (PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql)
   conversation_reply_turn_dispatch_claim: ['p_turn_id', 'p_version', 'p_worker', 'p_lease_seconds', 'p_max_attempts'],
-  conversation_reply_turn_dispatch_done: ['p_turn_id', 'p_version', 'p_worker', 'p_outcome'],
+  conversation_reply_turn_dispatch_done: ['p_turn_id', 'p_version', 'p_worker', 'p_outcome', 'p_detail'],
 })
 
 function storeOver(call) {
@@ -36,8 +36,8 @@ function storeOver(call) {
     /** Recovery of a decided turn's dispatch: ONLY under an expired dispatch lease with no terminal outcome. */
     dispatchClaim: ({ turn_id, version, worker, lease_seconds = 120, max_attempts = 3 }) =>
       call('conversation_reply_turn_dispatch_claim', { p_turn_id: turn_id, p_version: version, p_worker: worker, p_lease_seconds: lease_seconds, p_max_attempts: max_attempts }),
-    /** The lease holder records the dispatch outcome: dispatched | deferred | released (transient failure). */
-    dispatchDone: ({ turn_id, version, worker, outcome }) => call('conversation_reply_turn_dispatch_done', { p_turn_id: turn_id, p_version: version, p_worker: worker, p_outcome: outcome }),
+    /** The lease holder records the dispatch outcome: dispatched | deferred | held | not_sent | released (transient failure). */
+    dispatchDone: ({ turn_id, version, worker, outcome, detail = null }) => call('conversation_reply_turn_dispatch_done', { p_turn_id: turn_id, p_version: version, p_worker: worker, p_outcome: outcome, p_detail: detail }),
   }
 }
 
@@ -119,6 +119,7 @@ export function createMemoryTurnStore({ now = () => Date.now(), reservations = n
       const x = turns.get(turn_id)
       if (!x) return { ok: false, reason: 'turn_not_found' }
       if (x.state === 'claimed' && t(x.lease_until) < nowMs()) Object.assign(x, { state: 'pending', claim_token: null, claimed_by: null, lease_until: null })
+      if (x.state === 'claimed') return { ok: false, reason: 'state_claimed', version: x.version, retry_after_ms: Math.max(Math.ceil(t(x.lease_until) - nowMs()), 0) }
       if (x.state !== 'pending') return { ok: false, reason: `state_${x.state}`, version: x.version }
       if (x.version !== version) return { ok: false, reason: 'stale_version', version: x.version, due_at: x.due_at }
       if (t(x.due_at) > nowMs()) return { ok: false, reason: 'not_due', version: x.version, due_at: x.due_at }
@@ -181,7 +182,7 @@ export function createMemoryTurnStore({ now = () => Date.now(), reservations = n
     async dispatchClaim({ turn_id, version, worker, lease_seconds = 120, max_attempts = 3 }) {
       const x = turns.get(turn_id)
       if (!x) return { ok: false, reason: 'turn_not_found' }
-      if (x.version === version && ['dispatched', 'deferred'].includes(x.dispatch_state)) return { ok: false, reason: 'dispatch_done', dispatch_state: x.dispatch_state }
+      if (x.version === version && ['dispatched', 'deferred', 'held', 'not_sent'].includes(x.dispatch_state)) return { ok: false, reason: 'dispatch_done', dispatch_state: x.dispatch_state }
       if (x.version === version && x.dispatch_state === 'dead_letter') return { ok: false, reason: 'dead_letter' }
       if (x.state !== 'decided' || x.reply_origin !== 'ai_generated' || x.version !== version || x.result?.send_status !== 'dispatch_pending') return { ok: false, reason: 'not_dispatchable', state: x.state, version: x.version }
       if (x.dispatch_lease_until && t(x.dispatch_lease_until) > nowMs()) return { ok: false, reason: 'live_dispatch', dispatch_worker: x.dispatch_worker, retry_after_ms: Math.ceil(t(x.dispatch_lease_until) - nowMs()) }
@@ -192,12 +193,14 @@ export function createMemoryTurnStore({ now = () => Date.now(), reservations = n
       Object.assign(x, { dispatch_state: 'in_flight', dispatch_worker: worker, dispatch_lease_until: new Date(nowMs() + Math.min(Math.max(lease_seconds, 10), 900) * 1000).toISOString(), dispatch_attempts: (x.dispatch_attempts || 0) + 1 })
       return { ok: true, token: x.result?.reservation_token, version: x.version, attempt: x.dispatch_attempts, thread_key: x.thread_key, inbound_ids: [...(x.reserved_inbound_ids || x.inbound_ids)], latest_inbound_id: x.latest_inbound_id, persona_name: x.persona_name, sender_number: x.sender_number, lease_until: x.dispatch_lease_until }
     },
-    async dispatchDone({ turn_id, version, worker, outcome }) {
-      if (!['dispatched', 'deferred', 'released'].includes(outcome)) return { ok: false, reason: 'outcome_invalid' }
+    async dispatchDone({ turn_id, version, worker, outcome, detail = null }) {
+      if (!['dispatched', 'deferred', 'held', 'not_sent', 'released'].includes(outcome)) return { ok: false, reason: 'outcome_invalid' }
+      if (detail != null && (typeof detail !== 'object' || Array.isArray(detail))) return { ok: false, reason: 'detail_invalid' }
       const x = turns.get(turn_id)
       if (!x) return { ok: false, reason: 'turn_not_found' }
       if (x.version !== version || x.dispatch_worker !== worker || x.dispatch_state !== 'in_flight') return { ok: false, reason: 'lease_lost', dispatch_state: x.dispatch_state ?? null, version: x.version }
       if (outcome === 'dispatched') Object.assign(x, { dispatch_state: 'dispatched', dispatched_at: new Date(nowMs()).toISOString(), dispatch_lease_until: null, result: { ...(x.result || {}), send_status: 'dispatched' } })
+      else if (outcome === 'held' || outcome === 'not_sent') Object.assign(x, { dispatch_state: outcome, dispatch_lease_until: null, result: { ...(x.result || {}), send_status: outcome, ...(detail ? { dispatch_detail: detail } : {}) } })
       else if (outcome === 'deferred') Object.assign(x, { dispatch_state: 'deferred', dispatch_lease_until: null })
       else x.dispatch_lease_until = new Date(nowMs()).toISOString()
       return { ok: true, outcome }

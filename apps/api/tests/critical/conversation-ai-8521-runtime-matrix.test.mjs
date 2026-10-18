@@ -18,7 +18,7 @@ import { createSpendTracker } from '../../src/lib/domain/conversation-ai/model-c
 import { makeDecision } from '../../src/lib/domain/conversation-ai/contract.js'
 import { decideAndCompose, CANONICAL_VERSIONS } from '../../src/lib/domain/conversation-ai/runtime/canonical.js'
 import { completeIdempotentProcessing } from '../../src/lib/domain/events/idempotency-ledger.js'
-import { insertSupabaseSendQueueRow } from '../../src/lib/supabase/sms-engine.js'
+import { insertSupabaseSendQueueRow, shouldRunSendQueueRow } from '../../src/lib/supabase/sms-engine.js'
 import { resetMemoryIdempotencyLedger } from '../helpers/memory-idempotency-ledger.mjs'
 import { makeAiRecords } from '../helpers/canonical-record.mjs'
 import { fakeSupabase, fakeProvider } from '../helpers/conversation-ai-runtime-fakes.mjs'
@@ -74,7 +74,8 @@ function world({ messages, queue = [], threadState = { thread_key: TK, our_numbe
     },
   }
   const r3deps = {
-    now: () => clock.iso(), readSwitch, reservations, insertRecord: records.insert, lookupRecord: records.load, recordEvent: records.event,
+    now: () => clock.iso(), readSwitch, reservations, insertRecord: (rec) => records.insert(rec), lookupRecord: records.load,
+    lookupQueueRow: async (k) => { const row = queueRows.find((r) => r.queue_key === k); return { found: Boolean(row), read_failed: false, row: row || null } }, recordEvent: records.event,
     insertQueueRow: (payload) => insertSupabaseSendQueueRow(payload, { now: clock.iso(), insertSupabaseSendQueueRow: (row) => { if (queueRows.some((r) => r.queue_key === row.queue_key)) return { ok: false, reason: 'duplicate_queue_key' }; const stored = { ...row, id: crypto.randomUUID() }; queueRows.push(stored); return { ok: true, queue_row_id: stored.id, raw: stored } } }),
     cancelPending: async () => ({ ok: true, cancelled_count: 0 }),
   }
@@ -165,8 +166,9 @@ test('two racing workers on the same due turn ⇒ one claim, one decision, ONE q
   await w.route('SMi1')
   const ref = decodeTurnJobInput(w.jobs[0].input)
   w.clock.set(Date.parse(w.jobs[0].not_before) + 1000)
-  const rs = await Promise.all([1, 2].map((n) => runDueTurn({ ...ref, store: w.store, worker: `w${n}`, decideTurn: w.decider(), dispatch: w.dispatcher() })))
-  assert.equal(rs.filter((r) => r.code === 'TURN_DISPATCHED').length, 1, JSON.stringify(rs))
+  const settled = await Promise.allSettled([1, 2].map((n) => runDueTurn({ ...ref, store: w.store, worker: `w${n}`, decideTurn: w.decider(), dispatch: w.dispatcher() })))
+  const codes = settled.map((x) => (x.status === 'fulfilled' ? x.value.code : x.reason.code))
+  assert.deepEqual(codes.sort(), ['DEFERRED_LIVE_CLAIM', 'TURN_DISPATCHED'], JSON.stringify(codes))
   assert.equal(w.queueRows.length, 1)
 })
 
@@ -341,4 +343,112 @@ test('outside the window at dispatch (a late night due past the session) ⇒ R3 
   const local = new Date(Date.parse(w.jobs[1].not_before) - 5 * 3600_000).toISOString().slice(11, 16)
   assert.ok(local >= '08:00' && local < '21:00', local)
   assert.equal(w.store.reservations.size, 0, 'the reopen released the reservation')
+})
+
+// ── blind-eval canary blockers D1–D4 (rc-8.5.21), from the described behaviour ──
+
+test('D1: an authorized AI reply row is dispatchable EXACTLY once — the runner pre-claim gate admits it (max_retries 1), a second attempt never', async () => {
+  const w = world({ messages: [OWN_Q(T0 - 90 * MIN), ev('i1', 'inbound', 'Yes I still own it', T0 - 1 * MIN)] })
+  await w.route('SMi1')
+  const r = await w.runLatest()
+  assert.equal(r.code, 'TURN_DISPATCHED', JSON.stringify(r))
+  const row = w.queueRows[0]
+  assert.equal(row.max_retries, 1)
+  const gate = shouldRunSendQueueRow({ ...row, queue_status: 'queued', retry_count: 0, scheduled_for: iso(T0 - 1000) }, iso(w.clock.now() + 1000))
+  assert.notEqual(gate.reason, 'max_retries_reached', JSON.stringify(gate.reason))
+  // after one attempt (any failure, incl. an ambiguous accept) the row is never claimable again
+  const again = shouldRunSendQueueRow({ ...row, queue_status: 'queued', retry_count: 1, scheduled_for: iso(T0 - 1000) }, iso(w.clock.now() + 1000))
+  assert.equal(again.ok, false)
+  assert.equal(again.reason, 'max_retries_reached')
+})
+
+test('D2: a crash BETWEEN the provenance record and the queue insert is finished by the retry — the record\'s exact text, ONE row, never a silent "dispatched"', async () => {
+  const w = world({ messages: [OWN_Q(T0 - 90 * MIN), ev('i1', 'inbound', 'Yes I still own it', T0 - 1 * MIN)] })
+  await w.route('SMi1')
+  // the first attempt's process dies right after the immutable record is written, before the queue
+  // insert (in memory: the call never returns; the PG test does it with a real SIGKILL)
+  let killed = false
+  const realInsert = w.records.insert
+  w.records.insert = async (rec) => { await realInsert(rec); killed = true; return new Promise(() => {}) }
+  const job = w.jobs[0]
+  const ref = decodeTurnJobInput(job.input)
+  w.clock.set(Date.parse(job.not_before) + 1000)
+  void runDueTurn({ ...ref, store: w.store, worker: 'w1', decideTurn: w.decider(), dispatch: w.dispatcher() })
+  for (let i = 0; i < 50 && !killed; i += 1) await new Promise((res) => setTimeout(res, 10))
+  w.records.insert = realInsert
+  assert.ok(killed)
+  assert.equal(w.records.byKey.size, 1, 'the record was written')
+  assert.equal(w.queueRows.length, 0, 'the queue row was not')
+  // the dead worker's dispatch lease expires (no live process renews it)
+  w.clock.set(w.clock.now() + 181_000)
+  const turn = [...w.store.turns.values()][0]
+  assert.notEqual(turn.dispatch_state, 'dispatched', 'a lost reply is never recorded as dispatched')
+  // the retried job finds the record WITHOUT a row and finishes the enqueue with the record's text
+  const retry = await runDueTurn({ ...ref, store: w.store, worker: 'w1', decideTurn: w.decider(), dispatch: w.dispatcher() })
+  assert.deepEqual([retry.code, retry.dispatch], ['TURN_DISPATCHED', 'enqueued'], JSON.stringify(retry))
+  assert.equal(w.queueRows.length, 1)
+  const rec = [...w.records.byKey.values()][0]
+  assert.equal(w.queueRows[0].message_body, rec.message_body)
+  assert.equal(w.queueRows[0].metadata.ai_message_id, rec.id)
+  assert.equal(w.records.byKey.size, 1, 'no second record')
+  assert.equal([...w.store.turns.values()][0].dispatch_state, 'dispatched')
+  // and once the row exists, a further retry is already_enqueued (never a second row)
+  const r3 = await w.dispatcher()({ turn_id: turn.turn_id, version: turn.version, claim: { token: turn.result.reservation_token, inbound_ids: ['i1'] }, decision: await w.decider()({ ok: true, token: turn.result.reservation_token, version: turn.version, thread_key: TK, inbound_ids: ['i1'], latest_inbound_id: 'i1', turn_id: turn.turn_id, resumed: true }) })
+  assert.ok(['already_enqueued', 'held', 'duplicate'].includes(r3.status), JSON.stringify(r3))
+  assert.equal(w.queueRows.length, 1)
+})
+
+test('D3: an R3 hold is recorded as HELD (never "dispatched") and raises ONE operator item; a failed item write retries, never a silent hold', async () => {
+  const w = world({ messages: [OWN_Q(T0 - 90 * MIN), ev('i1', 'inbound', 'Yes I still own it', T0 - 1 * MIN)] })
+  await w.route('SMi1')
+  const holding = async () => ({ status: 'held', reasons: ['category_not_enabled:clarification'] })
+  const job = w.jobs[0]
+  const ref = decodeTurnJobInput(job.input)
+  w.clock.set(Date.parse(job.not_before) + 1000)
+  // the operator-item writer fails first: the job retries (the lease is released), the hold is not recorded
+  await assert.rejects(() => runDueTurn({ ...ref, store: w.store, worker: 'w1', decideTurn: w.decider(), dispatch: holding, raiseOperatorItem: async () => { throw new Error('ops store down') } }), (e) => e.code === 'TURN_HELD_OPERATOR_ITEM_FAILED')
+  assert.equal([...w.store.turns.values()][0].dispatch_state, 'in_flight')
+  const items = []
+  const r = await runDueTurn({ ...ref, store: w.store, worker: 'w1', decideTurn: w.decider(), dispatch: holding, raiseOperatorItem: async (h) => { items.push(h); return { ok: true } } })
+  assert.equal(r.code, 'TURN_DISPATCH_HELD', JSON.stringify(r))
+  assert.equal(r.operator_item, true)
+  assert.deepEqual(items.map((i) => [i.r3_status, i.reasons]), [['held', ['category_not_enabled:clarification']]])
+  const t = [...w.store.turns.values()][0]
+  assert.deepEqual([t.dispatch_state, t.result.send_status, t.dispatched_at ?? null], ['held', 'held', null])
+  assert.equal(w.queueRows.length, 0)
+  // the real R3 hold path through the dispatcher: same classification
+  const w2 = world({ messages: [OWN_Q(T0 - 90 * MIN), ev('i1', 'inbound', 'Yes I still own it', T0 - 1 * MIN)], switches: { ...ON, [AI_SEND_POLICY_KEY]: JSON.stringify({ enabled: true, scope: { thread_keys: ['+19999999999'] } }) } })
+  await w2.route('SMi1')
+  const ref2 = decodeTurnJobInput(w2.jobs[0].input)
+  w2.clock.set(Date.parse(w2.jobs[0].not_before) + 1000)
+  const items2 = []
+  const r2 = await runDueTurn({ ...ref2, store: w2.store, worker: 'w1', decideTurn: w2.decider(), dispatch: w2.dispatcher(), raiseOperatorItem: async (h) => { items2.push(h); return { ok: true } } })
+  if (r2.code !== 'TURN_DECIDED_SHADOW') {
+    assert.equal(r2.code, 'TURN_DISPATCH_HELD', JSON.stringify(r2))
+    assert.equal(items2.length, 1)
+  }
+})
+
+test('D4: a frozen worker holding the claim never orphans the turn — the other job is RESCHEDULED at the lease end (not completed) and decides once after expiry, without the sweep', async () => {
+  const w = world({ messages: [OWN_Q(T0 - 90 * MIN), ev('i1', 'inbound', 'Yes I still own it', T0 - 1 * MIN)] })
+  await w.route('SMi1')
+  const ref = decodeTurnJobInput(w.jobs[0].input)
+  w.clock.set(Date.parse(w.jobs[0].not_before) + 1000)
+  // worker A claims and freezes (never returns)
+  const a = await w.store.claim({ turn_id: ref.turn_id, version: ref.version, worker: 'A', lease_seconds: 180 })
+  assert.ok(a.ok)
+  // worker B (the reaped job's retry) under A's live claim: rescheduled at the lease end + jitter
+  const e = await runDueTurn({ ...ref, store: w.store, worker: 'B', decideTurn: w.decider(), dispatch: w.dispatcher() }).catch((x) => x)
+  assert.equal(e.code, 'DEFERRED_LIVE_CLAIM')
+  assert.ok(e.retry_after_ms >= 179_000 && e.retry_after_ms <= 186_000, String(e.retry_after_ms))
+  assert.equal(w.queueRows.length, 0)
+  // after the claim lease expires the rescheduled job claims and decides ONCE
+  w.clock.set(w.clock.now() + e.retry_after_ms)
+  const r = await runDueTurn({ ...ref, store: w.store, worker: 'B', decideTurn: w.decider(), dispatch: w.dispatcher() })
+  assert.equal(r.code, 'TURN_DISPATCHED', JSON.stringify(r))
+  assert.equal(w.queueRows.length, 1)
+  // A wakes and is fenced: its finalize is refused
+  const late = await w.store.finalize({ turn_id: ref.turn_id, token: a.token, version: ref.version, outcome: 'reply:x', result: {}, reserve: true, reply_origin: 'ai_generated' })
+  assert.equal(late.ok, false)
+  assert.equal(w.queueRows.length, 1)
 })

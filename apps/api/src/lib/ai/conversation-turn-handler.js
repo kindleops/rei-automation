@@ -32,7 +32,22 @@ async function defaultTurnStore(supabase) {
 /**
  * @param {{ env?: object, store?: object, decide?: Function, trackerFor?: (ctx: object) => object, supabase?: object }} [deps]
  */
-export function createConversationTurnHandler({ env = process.env, store = null, decide = null, dispatch = undefined, runtimeStore = null, trackerFor = null, supabase = null } = {}) {
+/** The operator work item for a turn whose AI reply R3 HELD (blind-eval D3). Codes only (payload_is_clean). */
+export function heldTurnWorkItem({ turn_id, version, r3_status, reasons = [] }) {
+  return {
+    dedupe_key: `conversation:turn_held:${turn_id}`, kind: 'escalation', severity: 'warning', escalated: true,
+    title: 'AI reply held for operator review', subject_type: 'conversation', subject_id: turn_id,
+    detail: { r3_status: String(r3_status || 'unknown').slice(0, 40), reasons: reasons.slice(0, 6), turn_version: version },
+  }
+}
+
+async function defaultOperatorItems(env) {
+  const { getAgentPgPool } = await import('@/lib/agent/live/live-agent.js')
+  const { createOperationsPgStore } = await import('@/lib/agent/operations/operations-store.js')
+  return createOperationsPgStore({ pool: getAgentPgPool(env) })
+}
+
+export function createConversationTurnHandler({ env = process.env, store = null, decide = null, dispatch = undefined, runtimeStore = null, trackerFor = null, supabase = null, operatorItems = null } = {}) {
   return Object.freeze({
     kind: CONVERSATION_TURN_KIND,
     async run(ctx) {
@@ -50,7 +65,15 @@ export function createConversationTurnHandler({ env = process.env, store = null,
       const enqueueAt = async (o) => { rs ||= await (await import('@/lib/agent/runtime/runtime-service.js')).getVerifiedRuntimeStore(env); return rs.enqueueEventAt(o) }
       let r
       try {
-        r = await runDueTurn({ ...ref, store: turnStore, worker: `turn.${ctx.job.job_id}`.slice(0, 80), decideTurn, dispatch: dispatchTurn, enqueueAt })
+        // a held reply raises ONE operator work item per turn through the lease-bound writer (scope
+        // 'conversation'); a failed write throws, so the job retries and a hold is never silent
+        const raiseOperatorItem = async (h) => {
+          const items = operatorItems || (await defaultOperatorItems(env))
+          const res = await items.syncWorkItems({ ...ctx.lease, items: [heldTurnWorkItem(h)], close_missing: false })
+          if (!res?.ok) throw Object.assign(new Error('OPERATOR_ITEM_REFUSED'), { code: 'OPERATOR_ITEM_REFUSED', reason: res?.reason || null })
+          return res
+        }
+        r = await runDueTurn({ ...ref, store: turnStore, worker: `turn.${ctx.job.job_id}`.slice(0, 80), decideTurn, dispatch: dispatchTurn, enqueueAt, raiseOperatorItem })
       } catch (err) {
         if (err?.code === 'TURN_NOT_DUE') ctx.yield('turn_not_due')
         // a transient dispatch failure: the runtime retries the job (bounded attempts, then dead letter)

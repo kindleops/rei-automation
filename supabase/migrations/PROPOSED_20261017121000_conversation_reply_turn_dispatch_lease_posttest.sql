@@ -82,6 +82,25 @@ begin
   perform public.conversation_reply_turn_finalize((r ->> 'turn_id')::uuid, (c ->> 'token')::uuid, 1, 'shadow:x', '{"send_status":"not_sent_shadow"}'::jsonb, false, null);
   assert (select dispatch_state is null and dispatch_lease_until is null from public.conversation_reply_turns where turn_id = (r ->> 'turn_id')::uuid), 'shadow decisions hold no lease';
 
+  -- ── D3: a hold is recorded as held (terminal), never as dispatched ──
+  r := public.conversation_reply_turn_open('+15555550304', 'dl4', now() - interval '5 minutes', past);
+  ta := (r ->> 'turn_id')::uuid;
+  c := public.conversation_reply_turn_claim(ta, 1, 'leader', 60);
+  -- D4: a second worker under the LIVE claim lease learns the lease remaining (DB clock)
+  r := public.conversation_reply_turn_claim(ta, 1, 'other', 60);
+  assert r ->> 'reason' = 'state_claimed' and (r ->> 'retry_after_ms')::bigint between 50000 and 60000, 'live claim reports retry_after_ms: ' || r::text;
+  tok := (c ->> 'token')::uuid;
+  perform public.conversation_reply_turn_finalize(ta, tok, 1, 'reply:x', jsonb_build_object('send_status', 'dispatch_pending', 'reservation_token', tok), true, 'ai_generated');
+  r := public.conversation_reply_turn_dispatch_done(ta, 1, 'leader', 'held', '{"status":"held","reasons":["category_not_enabled"]}'::jsonb);
+  assert (r ->> 'ok')::boolean, 'held recorded: ' || r::text;
+  assert (select dispatch_state = 'held' and result ->> 'send_status' = 'held' and result -> 'dispatch_detail' ->> 'status' = 'held' and dispatched_at is null
+            from public.conversation_reply_turns where turn_id = ta), 'held is held, not dispatched';
+  update public.conversation_reply_turns set dispatch_lease_until = now() - interval '1 hour' where turn_id = ta;
+  r := public.conversation_reply_turn_dispatch_claim(ta, 1, 'rec', 60, 3);
+  assert r ->> 'reason' = 'dispatch_done', 'a held dispatch is terminal: ' || r::text;
+  r := public.conversation_reply_turn_dispatch_done(ta, 1, 'leader', 'held', '[1]'::jsonb);
+  assert r ->> 'reason' in ('detail_invalid', 'lease_lost'), 'detail must be an object: ' || r::text;
+
   -- ── the DB backstop: one ai_generated send_queue row per turn ──
   insert into public.send_queue (queue_key, queue_status, message_body, to_phone_number, metadata) values ('dl-a', 'queued', 'dispatch lease posttest', '+15555550399', jsonb_build_object('message_origin', 'ai_generated', 'turn', jsonb_build_object('turn_id', tid, 'version', 1)));
   begin
@@ -117,9 +136,9 @@ begin
 
   -- ── grants ──
   assert has_function_privilege('service_role', 'public.conversation_reply_turn_dispatch_claim(uuid,integer,text,integer,integer)', 'execute');
-  assert has_function_privilege('service_role', 'public.conversation_reply_turn_dispatch_done(uuid,integer,text,text)', 'execute');
+  assert has_function_privilege('service_role', 'public.conversation_reply_turn_dispatch_done(uuid,integer,text,text,jsonb)', 'execute');
   assert not has_function_privilege('anon', 'public.conversation_reply_turn_dispatch_claim(uuid,integer,text,integer,integer)', 'execute');
-  assert not has_function_privilege('authenticated', 'public.conversation_reply_turn_dispatch_done(uuid,integer,text,text)', 'execute');
+  assert not has_function_privilege('authenticated', 'public.conversation_reply_turn_dispatch_done(uuid,integer,text,text,jsonb)', 'execute');
   assert has_function_privilege('agent_api', 'agent.runtime_finish(text,uuid,text,jsonb,jsonb,integer)', 'execute');
   assert not has_function_privilege('anon', 'agent.runtime_finish(text,uuid,text,jsonb,jsonb,integer)', 'execute');
   raise notice 'posttest(conversation_reply_turn_dispatch_lease): all assertions OK';

@@ -80,7 +80,7 @@ test('PG turns: one reply per turn under 8 parallel workers — one claim, one f
     const codes = settled.map((o) => (o.status === 'fulfilled' ? o.value.code : o.reason?.code))
     assert.equal(codes.filter((c) => c === 'TURN_DISPATCHED').length, 1, JSON.stringify(codes))
     assert.equal(dispatched.length, 1, `exactly ONE dispatch: ${JSON.stringify(codes)}`)
-    assert.ok(codes.every((c) => ['TURN_DISPATCHED', 'TURN_STATE_CLAIMED', 'TURN_ALREADY_DISPATCHED', 'DEFERRED_LIVE_DISPATCH'].includes(c)), JSON.stringify(codes))
+    assert.ok(codes.every((c) => ['TURN_DISPATCHED', 'DEFERRED_LIVE_CLAIM', 'TURN_ALREADY_DISPATCHED', 'DEFERRED_LIVE_DISPATCH'].includes(c)), JSON.stringify(codes))
     assert.equal(decided.length, 1, 'exactly one worker decided')
     const res = await sel(db.pool, `select key, metadata->>'turn_id' t from public.idempotency_ledger where scope = 'inbound_reply' order by key`)
     assert.deepEqual(res.map((x) => [x.key, x.t]), [['m1', r.turn_id], ['m2', r.turn_id]])

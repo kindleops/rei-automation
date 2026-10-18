@@ -14,8 +14,11 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import pg from 'pg'
+import { spawnSync } from 'node:child_process'
+import { API_DIR } from '../pg/agent-pg-harness.mjs'
 
-import { pgAvailable, skipReason, freshDb, runSqlFile, applyInTransaction, SQL, REPO_DIR } from '../pg/agent-pg-harness.mjs'
+import { pgAvailable, skipReason } from '../pg/agent-pg-harness.mjs'
+import { e2eDb, seed, harness, sel, SELLER, OURS } from '../helpers/conversation-e2e-pg.mjs'
 import { isoPool, pgSupabase } from '../helpers/pg-supabase.mjs'
 import { createRuntimePgStore } from '../../src/lib/agent/runtime/job-runtime.js'
 import { runRuntimeTick } from '../../src/lib/agent/runtime/runtime-tick.js'
@@ -35,119 +38,6 @@ import { fakeProvider } from '../helpers/conversation-ai-runtime-fakes.mjs'
 import { createMemoryS11Store } from '../helpers/s11-memory-store.mjs'
 
 const skip = pgAvailable() ? false : skipReason
-const OP = 'a2ee0ffe-6f27-475b-a795-ee617c9472c6'
-const MIG = (f) => path.join(REPO_DIR, 'supabase/migrations', f)
-const FIX = (f) => path.join(REPO_DIR, 'scripts/db/fixtures', f)
-const SELLER = '+13125550101'
-const OURS = '+13125550199'
-const ENV = { AI_CONVERSATION_SHADOW_ENABLED: 'true', AI_CONVERSATION_TURNS_ENABLED: 'true' }
-const SWITCHES = { ai_conversation_send_enabled: 'true', ai_conversation_send_policy: JSON.stringify({ enabled: true, scope: { thread_keys: [SELLER] } }) }
-
-// the public read surface the canonical loaders select (prod-shaped subset; message_events and
-// send_queue come from the live baseline fixture)
-const PUBLIC_FIXTURE = `
-  create table if not exists public.system_control (key text primary key, value text, updated_at timestamptz default now());
-  alter table public.message_events add column if not exists provider_message_sid text, add column if not exists from_phone_number text,
-    add column if not exists to_phone_number text, add column if not exists property_id text, add column if not exists prospect_id text,
-    add column if not exists detected_intent text, add column if not exists language text, add column if not exists is_opt_out boolean;
-  create table if not exists public.seller_offers (id uuid primary key default gen_random_uuid(), thread_key text, property_id text, purchase_price numeric, status text, created_at timestamptz default now());
-  create table if not exists public.properties (property_id text primary key, property_type text, property_address_city text, property_address_state text, property_address_zip text, timezone text,
-    owner_1_name text, owner_2_name text, owner_name text, property_address text, property_address_full text, owner_address_state text, property_class text, units_count integer);
-  create table if not exists public.prospects (prospect_id text primary key, first_name text, full_name text, timezone text);
-  create table if not exists public.inbox_thread_state (thread_key text primary key, canonical_e164 text, property_id text, is_suppressed boolean, disposition text, last_intent text, stage text, lifecycle_stage text, contactability_status text, our_number text, status text, metadata jsonb, last_inbound_at timestamptz);
-  create table if not exists public.sms_suppression_list (id uuid primary key default gen_random_uuid(), suppression_reason text, phone_e164 text, phone_number text, sender_phone_e164 text, is_active boolean, suppression_type text);
-  create table if not exists public.automation_suppressions (id uuid primary key default gen_random_uuid(), phone_e164 text, status text, suppression_type text, suppression_reason text, expires_at timestamptz);
-  create table if not exists public.deal_thread_state (thread_key text primary key, universal_status text, inbox_bucket text, universal_stage text, opt_out boolean);
-  create table if not exists public.phones (phone_id text, canonical_e164 text, phone text, phone_raw text, phone_contact_status text, wrong_number_at timestamptz, primary_prospect_id text, canonical_prospect_id text, activity_status text);
-  -- rc-8.5.21: the send-time contact guard reads the property-scoped resolution store (recontact guard)
-  create table if not exists public.contact_property_resolution (id uuid primary key default gen_random_uuid(), property_id text not null, contact_phone_e164 text not null,
-    contact_property_role text, rejected_at timestamptz, rejection_reason text, suppression_scope text, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
-    unique (property_id, contact_phone_e164));
-  revoke all on public.system_control, public.send_queue from agent_api;`
-
-async function e2eDb() {
-  const db = await freshDb()
-  await runSqlFile(db.pool, SQL.researchPretest)
-  await runSqlFile(db.pool, SQL.research)
-  await runSqlFile(db.pool, FIX('send_queue_live_baseline.sql'))
-  await db.pool.query(PUBLIC_FIXTURE)
-  await runSqlFile(db.pool, FIX('legacy_conversation_turns_baseline.sql'))
-  await applyInTransaction(db.pool, SQL.runtime)
-  await applyInTransaction(db.pool, MIG('PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql'))
-  await applyInTransaction(db.pool, MIG('PROPOSED_20261013161000_conversation_decide_event_budget.sql'))
-  await applyInTransaction(db.pool, MIG('PROPOSED_20261016120000_conversation_reply_turns.sql'))
-  await applyInTransaction(db.pool, MIG('PROPOSED_20261013160000_conversation_ai_shadow.sql'))
-  await applyInTransaction(db.pool, MIG('PROPOSED_20261015130000_message_origin_ai_generated_messages.sql'))
-  // rc-8.5.21 owner directive: the dispatch lease + the one-ai-row-per-turn send_queue backstop
-  await applyInTransaction(db.pool, MIG('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql'))
-  await db.pool.query(`update agent.runtime_limits set runtime_enabled = true, max_concurrency_global = 2, tick_max_jobs = 2, kind_limits = $1::jsonb where id = 1`,
-    [JSON.stringify({ [CONVERSATION_TURN_KIND]: { enabled: true, max_concurrency: 2, armed_by: OP } })])
-  await db.pool.query(`insert into public.conversation_ai_reply_policy (id, shadow_enabled, kill_switch_engaged, enabled) values (1, true, false, false)
-                       on conflict (id) do update set shadow_enabled = true, kill_switch_engaged = false`)
-  const pool = db.trackPool(isoPool(db.url, 6))
-  return { db, pool, sb: pgSupabase(pool) }
-}
-const sel = async (pool, sql, params = []) => (await pool.query(sql, params)).rows
-
-async function seed(pool, { inboundBody = 'Yes I still own it', minutesAgo = 2, switches = SWITCHES } = {}) {
-  const ids = { o1: crypto.randomUUID(), i1: crypto.randomUUID() }
-  await pool.query(`insert into public.message_events (id, provider_message_sid, direction, thread_key, from_phone_number, to_phone_number, message_body, event_timestamp, created_at, property_id, prospect_id, language)
-                    values ($1, 'SMo1', 'outbound', $3::text, $4::text, $5::text, 'Hi Dana, this is Helen. Do you still own the house on Oak St?', now() - interval '90 minutes', now() - interval '90 minutes', 'p1', 'pr1', 'en'),
-                           ($2, 'SMi1', 'inbound', $3::text, $5::text, $4::text, $6::text, now() - make_interval(mins => $7::int), now() - make_interval(mins => $7::int), 'p1', 'pr1', 'en')`,
-  [ids.o1, ids.i1, SELLER, OURS, SELLER, inboundBody, minutesAgo])
-  await pool.query(`insert into public.send_queue (queue_key, queue_status, message_body, to_phone_number, from_phone_number, thread_key, use_case_template, agent_name, created_at, sent_at, metadata)
-                    values ('seed:o1', 'sent', 'Hi Dana, this is Helen. Do you still own the house on Oak St?', $1::text, $2::text, $1::text, 'ownership_check', 'Helen', now() - interval '90 minutes', now() - interval '90 minutes', '{}'::jsonb)`, [SELLER, OURS])
-  await pool.query(`insert into public.properties (property_id, property_type, property_address_city, property_address_state, property_address_zip, owner_1_name, property_address) values ('p1', 'SFR', 'Chicago', 'IL', '60601', 'Dana Q', '12 Oak St')`)
-  await pool.query(`insert into public.prospects (prospect_id, first_name, full_name) values ('pr1', 'Dana', 'Dana Q')`)
-  await pool.query(`insert into public.inbox_thread_state (thread_key, our_number) values ($1, $2)`, [SELLER, OURS])
-  for (const [k, v] of Object.entries(switches)) await pool.query(`insert into public.system_control (key, value) values ($1, $2) on conflict (key) do update set value = excluded.value`, [k, v])
-  return ids
-}
-
-const provider = () => fakeProvider((p) => (p.tools[0].input_schema?.properties?.message ? { message: 'Good to know. Would you consider an offer on it?' }
-  : makeDecision({ intent: 'ownership_confirmed', seller_interest: 'unknown', outcome: 'REPLY_CANDIDATE', next_objective: 'gauge_interest', response_needed: true, proposed_message: 'R1 TEXT NEVER SENT. Would you sell?', confidence: 0.93, source_message_ids: [], facts_extracted: [], stage_evidence: { stage: 'S2_interest', evidence_message_ids: [], rationale: 'x' } })))
-
-/** PG-backed reservations for the seller-day / global scopes (the turn holds inbound_reply itself). */
-function pgReservations(pool) {
-  return {
-    async begin({ scope, key, summary = null, metadata = {} }) {
-      const r = await pool.query(`insert into public.idempotency_ledger (scope, key, claim_token, status, summary, metadata) values ($1, $2, gen_random_uuid(), 'processing', $3, $4::jsonb) on conflict (scope, key) do nothing returning key`, [scope, key, summary, JSON.stringify(metadata)])
-      return { ok: true, duplicate: r.rowCount === 0, record_item_id: `idempotency:${scope}:${key}`, scope, key }
-    },
-    async complete({ scope, key, metadata = {} }) { await pool.query(`update public.idempotency_ledger set status = 'completed', completed_at = now(), metadata = metadata || $3::jsonb where scope = $1 and key = $2`, [scope, key, JSON.stringify(metadata)]); return { ok: true } },
-    async release({ scope, key, error = null }) { await pool.query(`update public.idempotency_ledger set status = 'failed', failed_at = now(), last_error = $3 where scope = $1 and key = $2`, [scope, key, error]); return { ok: true } },
-  }
-}
-
-function harness({ db, pool, sb }, { dispatchWrap = null } = {}) {
-  const store = createRuntimePgStore({ pool: db.api })
-  const turnStore = createPgTurnStore(pool)
-  const readSwitch = async (k) => (await sel(pool, 'select value from public.system_control where key = $1', [k]))[0]?.value ?? null
-  const r3deps = {
-    readSwitch, reservations: pgReservations(pool),
-    insertQueueRow: (payload) => insertSupabaseSendQueueRow(payload, {
-      insertSupabaseSendQueueRow: async (row) => {
-        const r = await sb.from('send_queue').insert(row).select('id,queue_status,paused_reason,queue_key').single()
-        if (r.error) return { ok: false, reason: r.error.message }
-        return { ok: true, queue_row_id: r.data.id, raw: r.data }
-      },
-    }),
-  }
-  const dispatcher = createR3TurnDispatcher({ supabase: sb, jobId: 'e2e', deps: r3deps })
-  const handler = createConversationTurnHandler({
-    env: ENV, store: turnStore, supabase: sb, runtimeStore: store,
-    decide: createCanonicalTurnDecider({ supabase: sb, env: ENV, tracker: createSpendTracker({ capUsd: 0.05 }), provider: provider(), readSwitch }),
-    dispatch: dispatchWrap ? dispatchWrap(dispatcher) : dispatcher,
-  })
-  const makeDue = async () => {
-    await pool.query(`update public.conversation_reply_turns set due_at = clock_timestamp() - interval '1 second' where state = 'pending'`)
-    await pool.query(`update agent.research_job set next_attempt_at = clock_timestamp() where kind = $1 and state in ('queued','retrying')`, [CONVERSATION_TURN_KIND])
-  }
-  const tick = (workerId = 'agent-runtime-tick') => runRuntimeTick({ store, handlers: { [CONVERSATION_TURN_KIND]: handler }, workerId, budgetMs: 20_000 })
-  const route = (sid = 'SMi1') => routeInboundToTurn({ providerMessageSid: sid, env: ENV, supabase: sb, runtimeStore: store, turnStore })
-  return { store, turnStore, readSwitch, route, makeDue, tick, handler, r3deps }
-}
-
 function trapFetch() {
   const real = globalThis.fetch
   const hits = []
@@ -295,4 +185,64 @@ test('E2E PG: STOP during the delay cancels the turn (no model); the kill switch
     assert.equal((await sel(off.pool, `select count(*)::int n from public.send_queue where message_origin = 'ai_generated'`))[0].n, 0)
     assert.equal((await sel(off.pool, `select count(*)::int n from public.ai_generated_messages`))[0].n, 0)
   } finally { await off.db.drop() }
+})
+
+test('E2E PG (blind-eval D2, REAL SIGKILL): the worker is killed between the provenance record and the queue insert ⇒ the turn is NOT dispatched; the retried job finishes the enqueue — ONE row with the record\'s exact text', { skip }, async () => {
+  const env = await e2eDb()
+  const net = trapFetch()
+  try {
+    const ids = await seed(env.pool)
+    const h = harness(env)
+    await h.route()
+    await h.makeDue()
+    const child = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings=ExperimentalWarning', '--import', './tests/register-aliases.mjs', 'tests/helpers/r3-sigkill-child.mjs', env.db.url, env.db.apiUrl],
+      { cwd: API_DIR, env: process.env, encoding: 'utf8', timeout: 120_000 })
+    assert.equal(child.signal, 'SIGKILL', `child: ${child.status} ${child.stdout} ${String(child.stderr).slice(0, 800)}`)
+    assert.match(child.stdout, /KILL_AT_QUEUE_INSERT/)
+    const recs = await sel(env.pool, `select id, message_body from public.ai_generated_messages`)
+    assert.equal(recs.length, 1, 'the record was committed before the kill')
+    assert.equal((await sel(env.pool, `select count(*)::int n from public.send_queue where message_origin = 'ai_generated'`))[0].n, 0, 'the queue row was not')
+    const t0 = (await sel(env.pool, `select dispatch_state, result->>'send_status' s from public.conversation_reply_turns`))[0]
+    assert.deepEqual([t0.dispatch_state, t0.s], ['in_flight', 'dispatch_pending'], 'a killed dispatch is never recorded as dispatched')
+    // the dead process renews nothing: its runtime lease and its dispatch lease expire (DB clock)
+    await env.pool.query(`update agent.research_job set lease_until = clock_timestamp() - interval '1 second' where state in ('claimed','running')`)
+    await env.pool.query(`update public.conversation_reply_turns set dispatch_lease_until = clock_timestamp() - interval '1 second'`)
+    await h.tick() // the reaper moves the dead attempt to retrying
+    await h.makeDue()
+    const t = await h.tick()
+    assert.equal(t.jobs?.[0]?.outcome, 'completed', JSON.stringify(t))
+    const rows = await sel(env.pool, `select queue_key, message_body, metadata->>'ai_message_id' rid, max_retries from public.send_queue where message_origin = 'ai_generated'`)
+    assert.equal(rows.length, 1, 'exactly ONE queued reply')
+    assert.deepEqual([rows[0].queue_key, rows[0].message_body, rows[0].rid, rows[0].max_retries], [`ai_conversation:${ids.i1}`, recs[0].message_body, recs[0].id, 1])
+    assert.equal((await sel(env.pool, `select count(*)::int n from public.ai_generated_messages`))[0].n, 1, 'no second record')
+    const t1 = (await sel(env.pool, `select dispatch_state, dispatch_attempts from public.conversation_reply_turns`))[0]
+    assert.deepEqual([t1.dispatch_state, t1.dispatch_attempts], ['dispatched', 2])
+    assert.deepEqual((await sel(env.pool, `select scope, status from public.idempotency_ledger order by scope`)).map((x) => [x.scope, x.status]),
+      [['ai_conv_global_day', 'completed'], ['ai_conv_seller_day', 'completed'], ['inbound_reply', 'completed']])
+    assert.equal(net.hits.length, 0)
+  } finally { net.restore(); await env.db.drop() }
+})
+
+test('E2E PG (blind-eval D3): an R3 hold is recorded as held (not dispatched) and the job raises the operator item under its lease', { skip }, async () => {
+  const env = await e2eDb()
+  try {
+    // the thread is outside the AI send scope ⇒ R3 holds (thread_not_in_ai_scope)
+    await seed(env.pool, { switches: { ai_conversation_send_enabled: 'true', ai_conversation_send_policy: JSON.stringify({ enabled: true, scope: { thread_keys: [SELLER] } }) } })
+    const items = []
+    const h = harness(env, {
+      operatorItems: { syncWorkItems: async (a) => { items.push(a); return { ok: true, inserted: 1 } } },
+      dispatchWrap: (d) => async (x) => { await env.pool.query(`update public.system_control set value = $1 where key = 'ai_conversation_send_policy'`, [JSON.stringify({ enabled: true, scope: { thread_keys: ['+19995550000'] } })]); return d(x) },
+    })
+    await h.route()
+    await h.makeDue()
+    const t = await h.tick()
+    assert.equal(t.jobs?.[0]?.outcome, 'completed', JSON.stringify(t))
+    const turn = (await sel(env.pool, `select turn_id, dispatch_state, result->>'send_status' s, result->'dispatch_detail' d from public.conversation_reply_turns`))[0]
+    assert.deepEqual([turn.dispatch_state, turn.s], ['held', 'held'])
+    assert.ok(turn.d.reasons.includes('thread_not_in_ai_scope'), JSON.stringify(turn.d))
+    assert.equal(items.length, 1)
+    assert.ok(items[0].job_id && items[0].token, 'written under the job lease')
+    assert.deepEqual([items[0].items[0].dedupe_key, items[0].items[0].kind, items[0].items[0].subject_id], [`conversation:turn_held:${turn.turn_id}`, 'escalation', turn.turn_id])
+    assert.equal((await sel(env.pool, `select count(*)::int n from public.send_queue where message_origin = 'ai_generated'`))[0].n, 0)
+  } finally { await env.db.drop() }
 })

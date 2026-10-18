@@ -187,6 +187,17 @@ export function compactPlan(p) {
 }
 
 export const DEFERRED_LIVE_DISPATCH = 'deferred_live_dispatch'
+export const DEFERRED_LIVE_CLAIM = 'deferred_live_claim'
+/** R3 statuses → the turn's terminal dispatch outcome (blind-eval D3: a hold is never "dispatched"). */
+export const R3_DISPATCHED_STATUSES = Object.freeze(['enqueued', 'already_enqueued'])
+export const R3_NOT_SENT_STATUSES = Object.freeze(['no_response', 'suppressed', 'stale_inbound'])
+export function dispatchOutcomeOf(d) {
+  const status = String(d?.status || '')
+  if (R3_DISPATCHED_STATUSES.includes(status)) return 'dispatched'
+  if (status === 'deferred' && d?.next_permitted_at) return 'deferred'
+  if (R3_NOT_SENT_STATUSES.includes(status)) return 'not_sent'
+  return 'held'   // held, refused, duplicate, blocked_at_insert, anything unknown: a person decides
+}
 export const DISPATCH_MAX_ATTEMPTS = 3
 const RETRY_JITTER_MS = 5_000
 
@@ -214,15 +225,23 @@ function jitterMs(seed) {
  * @param {null|((x: object) => Promise<object>)} [a.dispatch]  the R3 turn dispatcher (OFF switches inside R3)
  * @param {null|Function} [a.enqueueAt]  runtime enqueue (a window deferral re-schedules the turn)
  */
-export async function runDueTurn({ turn_id, version, store, worker, decideTurn, dispatch = null, enqueueAt = null, leaseSeconds = 180, maxDispatchAttempts = DISPATCH_MAX_ATTEMPTS, now = null }) {
+export async function runDueTurn({ turn_id, version, store, worker, decideTurn, dispatch = null, enqueueAt = null, raiseOperatorItem = null, leaseSeconds = 180, maxDispatchAttempts = DISPATCH_MAX_ATTEMPTS, now = null }) {
   const claim = await store.claim({ turn_id, version, worker, lease_seconds: leaseSeconds })
   if (!claim?.ok) {
     const reason = String(claim?.reason || 'claim_refused')
     if (reason === 'not_due') throw Object.assign(new Error('TURN_NOT_DUE'), { code: 'TURN_NOT_DUE', due_at: claim.due_at })
     // a job for an OLDER version than the turn's is superseded whatever state the turn is in now
     const older = Number.isInteger(claim?.version) && claim.version !== version
+    // blind-eval D4: another worker holds a LIVE claim. This job must not complete (if that worker
+    // froze or died, nothing else would decide the turn): it is rescheduled at the claim lease's
+    // end + jitter (DB clock), bounded by the job's max_attempts; after expiry it claims the turn.
+    // Recovery therefore never depends on the optional turn sweep.
+    if (reason === 'state_claimed' && !older && claim?.retry_after_ms != null) {
+      const retry_after_ms = Math.max(1_000, Number(claim.retry_after_ms) || 0) + jitterMs(`${turn_id}|${worker}|claim`)
+      throw Object.assign(new Error('DEFERRED_LIVE_CLAIM'), { code: 'DEFERRED_LIVE_CLAIM', outcome: DEFERRED_LIVE_CLAIM, retry_after_ms })
+    }
     if (reason === 'state_decided' && typeof dispatch === 'function' && !older) {
-      return recoverDispatch({ turn_id, version, store, worker, decideTurn, dispatch, enqueueAt, now, leaseSeconds, maxDispatchAttempts })
+      return recoverDispatch({ turn_id, version, store, worker, decideTurn, dispatch, enqueueAt, raiseOperatorItem, now, leaseSeconds, maxDispatchAttempts })
     }
     // stale_version: a newer inbound joined — the newer version's job decides; state_*: closed / claimed elsewhere
     const superseded = reason === 'stale_version' || older
@@ -236,12 +255,12 @@ export async function runDueTurn({ turn_id, version, store, worker, decideTurn, 
   if (!fin?.ok) return { code: 'TURN_SUPERSEDED_DURING_DECISION', reason: fin?.reason || null, decision_code: decision?.code || null }
   if (wantsReply && fin.reserved === false) return { code: 'TURN_ANSWERED_ELSEWHERE', conflict_inbound_id: fin.conflict_inbound_id || null }
   // the finalize handed THIS worker the dispatch lease
-  if (wantsReply) return dispatchUnderLease({ turn_id, version, worker, claim, decision, dispatch, store, enqueueAt, now, members: result.members })
+  if (wantsReply) return dispatchUnderLease({ turn_id, version, worker, claim, decision, dispatch, store, enqueueAt, raiseOperatorItem, now, members: result.members })
   return { code: 'TURN_DECIDED_SHADOW', outcome, members: result.members, decision_code: decision?.code || null }
 }
 
 /** A decided turn found by a worker that did not decide it: lease-gated recovery, never a blind re-dispatch. */
-async function recoverDispatch({ turn_id, version, store, worker, decideTurn, dispatch, enqueueAt, now, leaseSeconds, maxDispatchAttempts }) {
+async function recoverDispatch({ turn_id, version, store, worker, decideTurn, dispatch, enqueueAt, raiseOperatorItem, now, leaseSeconds, maxDispatchAttempts }) {
   // fail closed: a store without the lease contract never recovers a dispatch
   if (typeof store.dispatchClaim !== 'function') return { code: 'TURN_STATE_DECIDED', reason: 'state_decided', recovery: 'no_dispatch_lease_contract' }
   const dc = await store.dispatchClaim({ turn_id, version, worker, lease_seconds: leaseSeconds, max_attempts: maxDispatchAttempts })
@@ -274,7 +293,7 @@ async function recoverDispatch({ turn_id, version, store, worker, decideTurn, di
     await releaseQuietly(store, { turn_id, version, worker })
     return { code: 'TURN_RESUME_NO_REPLY', decision_code: decision?.code || null }
   }
-  return dispatchUnderLease({ turn_id, version, worker, claim: { token: dc.token, inbound_ids }, decision, dispatch, store, enqueueAt, now, members: inbound_ids.length, resumed: true })
+  return dispatchUnderLease({ turn_id, version, worker, claim: { token: dc.token, inbound_ids }, decision, dispatch, store, enqueueAt, raiseOperatorItem, now, members: inbound_ids.length, resumed: true })
 }
 
 async function releaseQuietly(store, { turn_id, version, worker }) {
@@ -282,7 +301,7 @@ async function releaseQuietly(store, { turn_id, version, worker }) {
 }
 
 /** Dispatch while holding the lease, then record the outcome (a transient failure releases it). */
-async function dispatchUnderLease({ turn_id, version, worker, claim, decision, dispatch, store, enqueueAt, now, members, resumed = false }) {
+async function dispatchUnderLease({ turn_id, version, worker, claim, decision, dispatch, store, enqueueAt, raiseOperatorItem, now, members, resumed = false }) {
   let d
   try {
     d = await dispatch({ turn_id, version, claim, decision })
@@ -295,11 +314,26 @@ async function dispatchUnderLease({ turn_id, version, worker, claim, decision, d
     await releaseQuietly(store, { turn_id, version, worker })
     throw Object.assign(new Error('TURN_DISPATCH_RETRY'), { code: 'TURN_DISPATCH_RETRY', reasons: d?.reasons || [] })
   }
-  const deferred = status === 'deferred' && d?.next_permitted_at
+  const outcome = dispatchOutcomeOf(d)
+  const reasons = (d?.reasons || []).map((r) => String(r).toLowerCase().replace(/[^a-z0-9_:.-]/g, '_').slice(0, 60)).slice(0, 6)
+  let operatorItem = null
+  if (outcome === 'held' && typeof raiseOperatorItem === 'function') {
+    // the operator item is raised BEFORE the hold is recorded: if it cannot be written the lease is
+    // released and the job retries (bounded), so a hold is never silent
+    try {
+      operatorItem = await raiseOperatorItem({ turn_id, version, r3_status: status || 'unknown', reasons })
+    } catch (e) {
+      await releaseQuietly(store, { turn_id, version, worker })
+      throw Object.assign(new Error('TURN_HELD_OPERATOR_ITEM_FAILED'), { code: 'TURN_HELD_OPERATOR_ITEM_FAILED', cause: e })
+    }
+  }
   if (typeof store.dispatchDone === 'function') {
-    const done = await store.dispatchDone({ turn_id, version, worker, outcome: deferred ? 'deferred' : 'dispatched' })
+    const detail = outcome === 'held' || outcome === 'not_sent' ? { r3_status: status || 'unknown', reasons, operator_item: operatorItem?.ok === true } : null
+    const done = await store.dispatchDone({ turn_id, version, worker, outcome, detail })
     if (!done?.ok) return { code: 'TURN_DISPATCH_LEASE_LOST', dispatch: status, reason: done?.reason || null, members, resumed }
   }
+  if (outcome === 'held') return { code: 'TURN_DISPATCH_HELD', dispatch: status, reasons, operator_item: operatorItem?.ok === true, members, resumed }
+  if (outcome === 'not_sent') return { code: 'TURN_NOT_SENT', dispatch: status, reasons, members, resumed }
   return afterDispatch({ d, turn_id, store, enqueueAt, now, members, resumed })
 }
 

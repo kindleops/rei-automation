@@ -9,7 +9,7 @@ begin
   if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'conversation_reply_turns' and column_name like 'dispatch%')
      or to_regprocedure('agent.runtime_finish(text,uuid,text,jsonb,jsonb,integer)') is not null
      or to_regprocedure('public.conversation_reply_turn_dispatch_claim(uuid,integer,text,integer,integer)') is not null
-     or to_regprocedure('public.conversation_reply_turn_dispatch_done(uuid,integer,text,text)') is not null
+     or to_regprocedure('public.conversation_reply_turn_dispatch_done(uuid,integer,text,text,jsonb)') is not null
      or to_regclass('public.send_queue_ai_turn_uq') is not null then
     raise exception 'rollback posttest(conversation_reply_turn_dispatch_lease): an object survived the rollback';
   end if;
@@ -18,6 +18,9 @@ begin
   end if;
   if position('dispatch' in pg_get_functiondef('public.conversation_reply_turn_finalize(uuid,uuid,integer,text,jsonb,boolean,text)'::regprocedure)) > 0 then
     raise exception 'rollback posttest(conversation_reply_turn_dispatch_lease): finalize still carries the dispatch lease';
+  end if;
+  if position('retry_after_ms' in pg_get_functiondef('public.conversation_reply_turn_claim(uuid,integer,text,integer)'::regprocedure)) > 0 then
+    raise exception 'rollback posttest(conversation_reply_turn_dispatch_lease): claim still reports retry_after_ms';
   end if;
   if not has_function_privilege('service_role', 'public.conversation_reply_turn_finalize(uuid,uuid,integer,text,jsonb,boolean,text)', 'execute')
      or has_function_privilege('anon', 'public.conversation_reply_turn_finalize(uuid,uuid,integer,text,jsonb,boolean,text)', 'execute') then

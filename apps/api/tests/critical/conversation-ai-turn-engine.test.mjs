@@ -257,11 +257,13 @@ test('one reply per turn: two workers race for the same due turn — one claims,
   const dispatched = []
   const decideReply = async () => ({ code: 'SHADOW_RECORDED', outcome: 'REPLY_CANDIDATE', reply: { text: 'Thanks. Would you consider selling it?' } })
   const dispatch = async (x) => { dispatched.push(x.turn_id); return { status: 'enqueued' } }
-  const [r1, r2] = await Promise.all([
+  const settled = await Promise.allSettled([
     runDueTurn({ turn_id: a.turn_id, version: 2, store: h.turns, worker: 'w1', decideTurn: decideReply, dispatch }),
     runDueTurn({ turn_id: a.turn_id, version: 2, store: h.turns, worker: 'w2', decideTurn: decideReply, dispatch }),
   ])
-  assert.deepEqual([r1.code, r2.code].sort(), ['TURN_DISPATCHED', 'TURN_STATE_CLAIMED'])
+  // the loser never completes its job under the winner's live claim: it is rescheduled (blind-eval D4)
+  assert.deepEqual(settled.map((x) => (x.status === 'fulfilled' ? x.value.code : x.reason.code)).sort(), ['DEFERRED_LIVE_CLAIM', 'TURN_DISPATCHED'])
+  assert.ok(settled.find((x) => x.status === 'rejected').reason.retry_after_ms >= 1000)
   assert.equal(dispatched.length, 1)
   assert.deepEqual([...h.turns.reservations.keys()].sort(), ['m1', 'm2'])
   // the template engine already holds one member ⇒ the AI turn stands down (all or none)
