@@ -207,13 +207,14 @@
     "id": "dev-from-ic2-adv-own-02",
     "source_calibration_example_id": "ic2-adv-own-02",
     "text": "Yeah that was mine years ago",
-    "expected_primary_intent": "wrong_number",
+    "expected_primary_intent": "property_specific_non_owner",
     "language": "en",
     "development_after_blind_evaluation": true,
     "context_required": false,
     "conversation_context": null,
     "price_semantic_role_expected": null,
-    "family": "dev_ic2_adv_years_ago"
+    "family": "dev_ic2_adv_years_ago",
+    "owner_rule_20261017": "a former-owner statement is about THIS property: property-scoped, never a phone-level wrong_number (owner rule 1)"
   },
   {
     "id": "dev-from-ic2-adv-own-03",

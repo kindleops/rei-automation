@@ -5286,7 +5286,10 @@ function resolveIntents(
   if (is_sold_transfer && !is_true_wrong && !is_wrong_person_claim) {
     intents.push("sold_property");
   } else if (is_property_ownership_denial) {
-    intents.push("property_specific_non_owner");
+    // pushed as wrong_number so intent PRECEDENCE is unchanged (it outranks a bare "Nope" decline and a
+    // trust frame); the marker makes rescopeWrittenOwnershipDenial re-scope the final result to the
+    // property-scoped property_specific_non_owner lane — never archive_wrong_number
+    intents.push("wrong_number");
     matched_rule_ids.push("ownership_denial_property_scoped");
     if (wrong_person_rule) reply_rule_ids.push(wrong_person_rule);
   } else if (normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect || is_wrong_person_claim) {
@@ -6031,8 +6034,8 @@ function resolveIntents(
   ) {
     // A SOLD transfer is the property-scoped sold_property lane. OWNER RULE 2026-10-17: the other
     // former-owner disconnects (moved out, lost it, was mine, used to own) are ALSO about THIS
-    // property: former_owner_respondent (property-scoped), never the phone-level wrong_number fold.
-    const former_owner_intent = matchesSoldTransfer(text) ? "sold_property" : "former_owner_respondent";
+    // property: property_specific_non_owner (property-scoped), never the phone-level wrong_number fold.
+    const former_owner_intent = matchesSoldTransfer(text) ? "sold_property" : "property_specific_non_owner";
     if (!intents.includes(former_owner_intent)) intents.push(former_owner_intent);
     matched_rule_ids.push("former_owner_disconnect");
   }
@@ -8020,12 +8023,15 @@ export function rescopeWrittenOwnershipDenial(text, result) {
   if (!result || typeof result !== "object") return result;
   if (result.compliance_flag === "stop_texting") return result;
   const ids = Array.isArray(result.matched_rule_ids) ? result.matched_rule_ids : [];
-  // owner rule 2026-10-17: the property-scoped ownership denial resolveIntents now routes directly
-  // (ownership_denial_property_scoped) carries the same written-denial markers as the rescope below
-  if (result.primary_intent === "property_specific_non_owner" && ids.includes("ownership_denial_property_scoped")) {
+  // owner rule 2026-10-17: resolveIntents marks a PROPERTY ownership denial (never a phone-identity
+  // statement) with ownership_denial_property_scoped; that result is always the property-scoped lane
+  if ((result.primary_intent === "property_specific_non_owner" || result.primary_intent === "wrong_number") && ids.includes("ownership_denial_property_scoped") && !ids.includes("wrong_person_premise_denied")) {
+    const matched = (Array.isArray(result.matched_intents) ? result.matched_intents : []).map((i) => (i === "wrong_number" ? "property_specific_non_owner" : i));
     return {
       ...result,
+      primary_intent: "property_specific_non_owner",
       objection: result.objection === "wrong_number" ? null : result.objection,
+      matched_intents: matched.length ? [...new Set(matched)] : ["property_specific_non_owner"],
       secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "ownership_denied", "ownership_unverified", "written_ownership_denial"])],
       matched_rule_ids: ids.includes("written_ownership_denial_property_scoped") ? ids : [...ids, "written_ownership_denial_property_scoped"],
     };
