@@ -75,7 +75,12 @@ async function modeOf(readSwitch) {
 const TERMINAL_DISPOSITIONS = new Set([
   'suppressed', 'opt_out', 'opted_out', 'stop', 'dnc', 'do_not_contact', 'wrong_number', 'wrong_person',
   'not_owner', 'property_specific_non_owner', 'former_owner_respondent', 'sold', 'sold_property', 'hostile_or_legal', 'dead', 'closed',
+  // owner 2026-10-17: "No thanks" to the ownership question — a property × contact hold, never a follow-up
+  'declined_unverified', 'ownership_declined_unverified',
 ])
+// a stage-silence follow-up only for a thread with NO disposition or a neutral / engaged one; any other
+// (unknown) disposition fails CLOSED — it must never fall through to a stage question (it could re-ask ownership)
+const STAGE_SILENCE_DISPOSITIONS = new Set(['', 'none', 'open', 'active', 'engaged', 'interested', 'positive', 'neutral'])
 const NOT_INTERESTED_DISPOSITIONS = new Set(['not_interested', 'disinterest', 'not_interested_nurture'])
 const CALLBACK_DISPOSITIONS = new Set(['callback', 'call_back', 'check_back', 'need_time', 'not_ready', 'future_nurture', 'requested_followup', 'follow_up_requested', 'seller_callback'])
 export const STAGE_SILENCE_USE_CASE = Object.freeze({
@@ -93,9 +98,12 @@ export function followUpIntentOf(state = {}) {
   if (state.is_suppressed === true) return { kind: null, intent: null, use_case: null, stage: null, skip: 'thread_suppressed' }
   const d = lower(state.disposition)
   const stage = lower(state.lifecycle_stage) || lower(state.stage) || null
+  if (d === 'declined_unverified' || d === 'ownership_declined_unverified') return { kind: null, intent: null, use_case: null, stage, skip: 'ownership_declined_unverified_hold' }
   if (TERMINAL_DISPOSITIONS.has(d)) return { kind: null, intent: null, use_case: null, stage, skip: 'terminal_disposition' }
   if (NOT_INTERESTED_DISPOSITIONS.has(d)) return { kind: K.NOT_INTERESTED_NURTURE, intent: 'not_interested', use_case: 'nurture_not_interested', stage, skip: null }
   if (CALLBACK_DISPOSITIONS.has(d)) return { kind: K.SELLER_CALLBACK, intent: 'seller_callback', use_case: 'nurture_seller_callback', stage, skip: null }
+  if (d === 'declined_unverified' || d === 'ownership_declined_unverified') return { kind: null, intent: null, use_case: null, stage, skip: 'ownership_declined_unverified_hold' }
+  if (!STAGE_SILENCE_DISPOSITIONS.has(d)) return { kind: null, intent: null, use_case: null, stage, skip: `disposition_not_followup_eligible:${d.replace(/[^a-z_]/g, '').slice(0, 40)}` }
   const use_case = STAGE_SILENCE_USE_CASE[stage] || null
   return { kind: K.STAGE_SILENCE, intent: 'stage_no_reply', use_case, stage, skip: use_case ? null : 'stage_use_case_unknown' }
 }
@@ -148,7 +156,7 @@ export async function runFollowUpReconcile(deps = {}, { apply = false } = {}) {
   const now = deps.now ? toMs(deps.now()) : Date.now()
   const snapshot = await deps.loadReconcileSnapshot()
   const r = reconcileFollowUpLifecycle({ ...snapshot, now })
-  const applied = { adopted_rows: 0, adopted_dates: 0, retried: 0, refused: 0 }
+  const applied = { adopted_rows: 0, adopted_dates: 0, recorded_not_executable: 0, retried: 0, refused: 0 }
   if (apply === true && mode === 'live') {
     for (const id of r.legacy_deferred_rows.slice(0, 100)) {
       const row = snapshot.rows.find((x) => clean(x.id) === clean(id))
@@ -157,8 +165,14 @@ export async function runFollowUpReconcile(deps = {}, { apply = false } = {}) {
     }
     for (const thread_key of r.unbacked_follow_up_at.slice(0, 100)) {
       const t = snapshot.threads.find((x) => clean(x.thread_key) === clean(thread_key))
-      const i = t ? followUpIntentOf(t) : { kind: null }
-      const ok = i.kind ? await deps.adoptBareDate(t, i) : false
+      const i = t ? followUpIntentOf(t) : { kind: null, skip: 'thread_missing' }
+      if (!i.kind) {
+        // fail closed AND visible: the bare date becomes a documented non-executable / held record
+        const rec = t && typeof deps.recordUnadoptableDate === 'function' ? await deps.recordUnadoptableDate(t, i.skip) : false
+        if (rec) applied.recorded_not_executable += 1; else applied.refused += 1
+        continue
+      }
+      const ok = await deps.adoptBareDate(t, i)
       if (ok) applied.adopted_dates += 1; else applied.refused += 1
     }
     for (const intent of snapshot.intents.filter((x) => x.state === 'failed' && x.outcome === 'failed_before_accept' && (Number(x.row_spec?.reconcile_retries) || 0) < FOLLOWUP_RECONCILE_MAX_RETRIES).slice(0, 50)) {
@@ -241,6 +255,14 @@ export async function createFollowUpDeps({ supabase, readSwitch, now = null, aut
         skip_email_lane: true,
       }, supabase)
       return r?.ok === true && r.lifecycle === true
+    },
+    async recordUnadoptableDate(thread, skip) {
+      const { recordNonExecutableFollowUp, planFollowUpIntent } = await import('./followup-lifecycle.js')
+      const held = /declined_unverified/.test(clean(skip))
+      const input = { thread_key: thread.thread_key, property_id: thread.property_id || null, master_owner_id: thread.master_owner_id || null, kind: 'bare_date', intent: 'unknown',
+        due_at: thread.follow_up_at, writer: 'reconcile:bare_follow_up_at', cause: `bare_date:${thread.follow_up_at}`, reason: `not_followup_eligible:${clean(skip) || 'unknown'}` }
+      const r = held ? await planFollowUpIntent({ ...input, state: 'held' }, { supabase }) : await recordNonExecutableFollowUp(input, { supabase })
+      return r?.ok === true
     },
     async requeueFailed(intent) {
       const { data, error } = await supabase.rpc('followup_intent_requeue_failed', { p_id: intent.id, p_reason: 'reconcile_retry_failed_before_accept', p_actor: 'reconcile' })

@@ -349,3 +349,27 @@ test('owner 2026-10-17: the previous question decides — "No" / "Not interested
   assert.equal(propertyContactBlock({ property_id: 'p1', thread: { disposition: 'declined_unverified', property_id: 'p1' } }).state, 'held', 'the distinct disposition')
   assert.equal(latestReplyAnsweredOwnershipQuestion([r('No')]), false)
 })
+
+test('legacy adoption fails CLOSED: declined_unverified (either spelling) and any UNKNOWN disposition never fall through to a stage-silence follow-up (no ownership re-ask); the reconcile records them visibly', async () => {
+  const at = NOON_CHI
+  for (const d of ['declined_unverified', 'ownership_declined_unverified']) {
+    const i = followUpIntentOf({ follow_up_at: at, disposition: d, stage: 'ownership_confirmation' })
+    assert.deepEqual([i.kind, i.skip], [null, 'ownership_declined_unverified_hold'], d)
+  }
+  const u = followUpIntentOf({ follow_up_at: at, disposition: 'some_new_label', stage: 'ownership_confirmation' })
+  assert.equal(u.kind, null)
+  assert.match(u.skip, /^disposition_not_followup_eligible:/)
+  assert.equal(followUpIntentOf({ follow_up_at: at, disposition: null, stage: 'ownership_confirmation' }).kind, 'stage_silence', 'no disposition: the stage follow-up as before')
+  assert.equal(followUpIntentOf({ follow_up_at: at, disposition: 'interested', stage: 'offer_interest' }).use_case, 'consider_selling_follow_up')
+  const recorded = []
+  const deps = {
+    readSwitch: async () => 'live', now: () => NOON_CHI,
+    loadReconcileSnapshot: async () => ({ intents: [], rows: [], threads: [{ thread_key: 't1', follow_up_at: at, disposition: 'declined_unverified' }, { thread_key: 't2', follow_up_at: at, disposition: 'mystery' }] }),
+    adoptBareDate: async () => { throw new Error('must never adopt') }, adoptLegacyRow: async () => false, requeueFailed: async () => false,
+    recordUnadoptableDate: async (t, skip) => { recorded.push([t.thread_key, skip]); return true },
+  }
+  const r = await runFollowUpReconcile(deps, { apply: true })
+  assert.equal(r.counts.recorded_not_executable, 2)
+  assert.deepEqual(recorded.map((x) => x[0]), ['t1', 't2'])
+  assert.equal(recorded[0][1], 'ownership_declined_unverified_hold')
+})
