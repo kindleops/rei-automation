@@ -37,6 +37,8 @@
 // writer behaves exactly as before and nothing here runs.
 import crypto from 'node:crypto'
 
+import { OWNERSHIP_DECLINED_ROLE, OWNERSHIP_DECLINED_REASON } from '../queue/ownership-recontact-guard.js'
+
 export const FOLLOWUP_LIFECYCLE_VERSION = 'followup-lifecycle.v1'
 export const LIFECYCLE_MODE_KEY = 'followup_execution_mode' // the same switch as 8.5.21-A (no new key)
 export const MATERIALIZE_LEAD_MS = 30 * 60_000
@@ -75,10 +77,10 @@ const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {})
 /**
  * "No thanks" to the ownership question: declined engagement, ownership UNVERIFIED. A PROPERTY-SCOPED
  * no-recontact hold — never a nurture / follow-up for that property × contact, blocking exactly like a
- * property denial, and never recorded as non-ownership. The state constant lands on rc-8.5.21 with the
- * integration (owner decision 2026-10-17); this is its exact name until then.
+ * property denial, and never recorded as non-ownership. The rc-8.5.21 state constants (owner decision
+ * 2026-10-17): the contact_property_resolution role and the send-time guard's deferral reason.
  */
-export const OWNERSHIP_DECLINED_UNVERIFIED = 'ownership_declined_unverified'
+export const OWNERSHIP_DECLINED_UNVERIFIED = OWNERSHIP_DECLINED_ROLE
 const PAIR_DENIAL_ROLES = new Set(['not_owner', 'non_owner', 'property_specific_non_owner', 'former_owner', 'former_owner_respondent', 'wrong_person', 'never_owned'])
 const phoneTail = (v) => { const d = clean(v).replace(/\D/g, ''); return d.length >= 10 ? d.slice(-10) : '' }
 /**
@@ -231,7 +233,7 @@ export async function planFollowUpFromScheduler({ intent, plan = {}, payload = {
 // ── materialization helpers (pure) ───────────────────────────────────────────
 const TRANSIENT_GUARD = new Set(['send_time_guard_read_failed'])
 // rc-8.5.21 integration contract: the send-time guard's deferral for "No thanks" to ownership
-export const OWNERSHIP_DECLINED_UNVERIFIED_GUARD_REASON = 'ownership_declined_unverified_hold'
+export const OWNERSHIP_DECLINED_UNVERIFIED_GUARD_REASON = OWNERSHIP_DECLINED_REASON
 const HOLD_GUARD = new Set(['automation_hold_active', 'ownership_denial_property_unresolved', OWNERSHIP_DECLINED_UNVERIFIED_GUARD_REASON])
 /** A send-time contact guard verdict → lifecycle state. */
 export function classifyGuardBlock(reason) {

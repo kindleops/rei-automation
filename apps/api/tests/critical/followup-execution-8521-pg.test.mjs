@@ -16,7 +16,7 @@ import { runRuntimeTick } from '../../src/lib/agent/runtime/runtime-tick.js'
 import { FOLLOWUP_SWEEP_KIND, FOLLOWUP_RECONCILE_KIND, FOLLOWUP_DISPATCH_KIND, createFollowUpDeps } from '../../src/lib/domain/followups/followup-execution.js'
 import { buildFollowUpHandlers } from '../../src/lib/ai/followup-runtime-wiring.js'
 import { __setAutomationHoldResolverForTests } from '../../src/lib/domain/holds/automation-hold.js'
-import { lifecycleDb, seedWorld, seedThread, planNurture, trapTransport, simProvider, claimRow, dispatchRow, intentsOf, rowsOf, sel, setSwitches, registryHoldCheck, OP } from '../helpers/followup-lifecycle-pg.mjs'
+import { lawfulNowIso, lifecycleDb, seedWorld, seedThread, planNurture, trapTransport, simProvider, claimRow, dispatchRow, intentsOf, rowsOf, sel, setSwitches, registryHoldCheck, OP } from '../helpers/followup-lifecycle-pg.mjs'
 
 __setAutomationHoldResolverForTests(null)
 const skip = pgAvailable() ? false : skipReason
@@ -39,7 +39,8 @@ async function runtimeDb() {
 async function harness(env) {
   const store = createRuntimePgStore({ pool: env.db.api })
   const readSwitch = async (k) => (await sel(env.pool, 'select value from public.system_control where key = $1', [k]))[0]?.value ?? null
-  const deps = await createFollowUpDeps({ supabase: env.sb, readSwitch })
+  const clock = lawfulNowIso()
+  const deps = await createFollowUpDeps({ supabase: env.sb, readSwitch, now: () => clock })
   const handlers = buildFollowUpHandlers({ deps: { ...deps, holdCheck: registryHoldCheck(env.sb) } })
   const tick = (workerId = 'followup-tick') => runRuntimeTick({ store, handlers, workerId, budgetMs: 20_000 })
   const enqueue = (kind, input = {}) => store.enqueueEventAt({ kind, event_key: `${kind}:${crypto.randomUUID()}`, input, priority: 60, not_before: new Date().toISOString() })

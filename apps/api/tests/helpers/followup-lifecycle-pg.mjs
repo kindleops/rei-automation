@@ -124,8 +124,22 @@ export function registryHoldCheck(sb) {
   }
 }
 
+/**
+ * The wall clock, or — when Chicago is outside 09:00–19:00 local — the next 12:00 Chicago. Materialization
+ * and dispatch take this as their clock so a scenario never depends on the hour the suite runs (the DB's
+ * own now() still drives due / lease / lead times, which only move forward).
+ */
+export function lawfulNowIso(real = Date.now()) {
+  const hourIn = (ms) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hourCycle: 'h23' }).format(new Date(ms)))
+  if (hourIn(real) >= 9 && hourIn(real) < 19) return new Date(real).toISOString()
+  let t = real
+  for (let i = 0; i < 48 && hourIn(t) !== 12; i += 1) t += 3_600_000
+  return new Date(t).toISOString()
+}
+const CLOCK = lawfulNowIso()
+
 export async function materializerDeps(env, overrides = {}) {
-  const base = createFollowUpLifecycleDeps({ supabase: env.sb, holdCheck: registryHoldCheck(env.sb), ...overrides })
+  const base = createFollowUpLifecycleDeps({ supabase: env.sb, holdCheck: registryHoldCheck(env.sb), now: () => CLOCK, ...overrides })
   return withLifecycleHelpers({ ...base, ...overrides })
 }
 export async function materialize(env, overrides = {}) {
@@ -174,7 +188,7 @@ export async function claimRow(pool, id, token = crypto.randomUUID()) {
 }
 
 /** The REAL queue runner item path over the disposable DB, a simulated provider, persisted updates. */
-export async function dispatchRow(env, claimed, { provider, now = new Date().toISOString(), store = createMemoryS11Store(), extraDeps = {} } = {}) {
+export async function dispatchRow(env, claimed, { provider, now = CLOCK, store = createMemoryS11Store(), extraDeps = {} } = {}) {
   const { pool, sb } = env
   const persist = async (id, payload, lock = null) => {
     const cols = Object.keys(payload)
