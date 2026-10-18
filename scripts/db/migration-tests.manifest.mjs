@@ -65,6 +65,7 @@ const GRAPH_PRIOR_REPLY_NOT_OWNER = M('PROPOSED_20261016155000_campaign_graph_pr
 const GRAPH_LIVE_FUNCTIONS_BASELINE = 'scripts/db/fixtures/campaign_target_graph_live_functions_baseline.sql'
 // OWNER DECISION 2026-10-17: the declined-unverified role (property × contact hold)
 const CPR_DECLINED = M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified.sql')
+const FOLLOWUP_LIFECYCLE = M('PROPOSED_20261017120000_followup_intent_lifecycle.sql')
 const CPR_LIVE_CONSTRAINTS = 'scripts/db/fixtures/contact_property_resolution_live_constraints.sql'
 // rc-8.5.21 part B
 const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
@@ -367,6 +368,8 @@ const BASE_TESTS = [
       { fixture: M('PROPOSED_20261016162000_ops_research_valuation_snapshot_pretest.sql') }, OPS_RESEARCH_VALUATION,
       // owner 2026-10-17: the declined-unverified role (before the historical ownership correction)
       { fixture: M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_pretest.sql') }, CPR_DECLINED,
+      // owner P0 2026-10-17: the ONE follow-up execution lifecycle (needs the holds registry, send_queue, inbox_thread_state)
+      { fixture: M('PROPOSED_20261017120000_followup_intent_lifecycle_pretest.sql') }, FOLLOWUP_LIFECYCLE,
     ],
     verify: [T('rc_8_5_21_release_chain_verify.sql')],
     posttest: [
@@ -396,6 +399,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261016161000_negotiation_send_authorization_posttest.sql'),
       M('PROPOSED_20261016162000_ops_research_valuation_snapshot_posttest.sql'),
       M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_posttest.sql'),
+      M('PROPOSED_20261017120000_followup_intent_lifecycle_posttest.sql'),
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body); the
     // holds registry is rolled back LAST (it was applied first)
@@ -421,6 +425,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261016161000_negotiation_send_authorization_rollback.sql'),
       M('PROPOSED_20261016162000_ops_research_valuation_snapshot_rollback.sql'),
       M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_rollback.sql'),
+      M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback.sql'),
     ],
   },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──
@@ -496,13 +501,13 @@ const BASE_TESTS = [
   // ── P0 2026-10-17: the ONE follow-up execution lifecycle (intent record, materialize-before-claimable,
   // send_queue ⇄ intent sync, follow_up_at projection). Composes on the live send_queue surface, the
   // operations + holds public baselines and the P0 holds registry (applied first in production). S3
-  // provides the agent_api role the operations baseline revokes from. The release-chain entry should
-  // append it after the holds registry (owned by the integration; see the follow-up P0 report).
+  // provides the agent_api role the operations baseline revokes from. Also the LAST link of the
+  // rc_8_5_21_release_chain entry.
   {
     id: 'followup_intent_lifecycle',
     setup: [SHIM, DURABILITY, S3, SEND_QUEUE_BASELINE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE, HOLDS_REGISTRY],
     pretest: M('PROPOSED_20261017120000_followup_intent_lifecycle_pretest.sql'),
-    apply: [M('PROPOSED_20261017120000_followup_intent_lifecycle.sql')],
+    apply: [FOLLOWUP_LIFECYCLE],
     posttest: [M('PROPOSED_20261017120000_followup_intent_lifecycle_posttest.sql')],
     rollback: [M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback_posttest.sql')],

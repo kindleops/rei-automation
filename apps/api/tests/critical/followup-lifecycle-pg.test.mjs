@@ -284,11 +284,12 @@ test('PG lifecycle: STOP between materialize and dispatch ⇒ the real complianc
     assert.equal((await sel(env.pool, 'select queue_status from public.send_queue where id = $1', [row.id]))[0].queue_status, 'cancelled')
     assert.equal(await claimRow(env.pool, row.id), null)
     assert.equal(await followUpAt(env.pool, phone), null)
-    // a NEW plan for this phone is refused at materialization (STOP is contact-wide)
-    assert.equal((await planNurture(env.sb, phone, { inboundId: crypto.randomUUID() })).ok, true)
-    const m = await materialize(env)
-    assert.equal(m.counts.not_executable, 1, JSON.stringify(m))
+    // a NEW plan for this phone is refused at PLAN time (STOP is contact-wide): a documented non-executable
+    const again = await planNurture(env.sb, phone, { inboundId: crypto.randomUUID() })
+    assert.equal(again.ok, false)
     assert.match((await intentsOf(env.pool, phone)).at(-1).reason, /send_time_guard:(sms_suppression_list_active|opt_out_reply|thread_opted_out)/)
+    assert.equal((await intentsOf(env.pool, phone)).at(-1).state, 'not_executable')
+    assert.equal((await materialize(env)).counts.claimed, 0)
   } finally { net.restore(); await env.db.drop() }
   const env2 = await lifecycleDb()
   const net2 = trapTransport()
@@ -689,3 +690,32 @@ test('PG lifecycle: the QUEUE RUNNER drives materialization before it selects ro
   } finally { await env.db.drop() }
 })
 async function setSwitchesOff(pool) { await pool.query(`delete from public.system_control where key = 'followup_execution_mode'`) }
+
+test('PG lifecycle (rc-8.5.21 defect): a burst whose first bare "No" answered the OWNERSHIP question and whose second "No" reads as not-interested ⇒ the lifecycle NEVER plans the nurture (the send-time guard verdict is taken at plan time)', { skip }, async () => {
+  const env = await lifecycleDb()
+  try {
+    await seedWorld(env.pool)
+    const phone = '+13125550601'
+    await env.pool.query(`insert into public.inbox_thread_state (thread_key, canonical_e164, property_id, master_owner_id, prospect_id, disposition, last_inbound_at, our_number) values ($1, $1, 'p1', 'm1', 'pr1', 'not_interested', now() - interval '1 minute', $2)`, [phone, OURS])
+    await env.pool.query(`insert into public.message_events (direction, thread_key, from_phone_number, to_phone_number, message_body, event_timestamp, created_at, property_id, language) values
+      ('outbound', $1::text, $2::text, $1::text, 'Hi Dana, this is Helen. Do you still own the house on 12 Oak St?', now() - interval '10 minutes', now() - interval '10 minutes', 'p1', 'en'),
+      ('inbound', $1::text, $1::text, $2::text, 'No', now() - interval '2 minutes', now() - interval '2 minutes', 'p1', 'en'),
+      ('inbound', $1::text, $1::text, $2::text, 'No', now() - interval '1 minute', now() - interval '1 minute', 'p1', 'en')`, [phone, OURS])
+    const r = await planNurture(env.sb, phone, { inboundId: crypto.randomUUID() })
+    assert.equal(r.ok, false, JSON.stringify(r))
+    assert.match(r.reason, /^send_time_guard:/)
+    const intents = await intentsOf(env.pool, phone)
+    assert.equal(intents.filter((i) => ['planned', 'materializing', 'ready', 'dispatched'].includes(i.state)).length, 0, 'no executable nurture intent')
+    assert.ok(intents.every((i) => i.reason && !/^bare_/.test(i.reason)))
+    assert.equal(await followUpAt(env.pool, phone), null)
+    assert.equal((await materialize(env)).counts.claimed, 0)
+    // control: a "No" to the SELLING question still plans the 30-day nurture
+    const p2 = '+13125550602'
+    await env.pool.query(`insert into public.inbox_thread_state (thread_key, canonical_e164, property_id, master_owner_id, prospect_id, disposition, last_inbound_at, our_number) values ($1, $1, 'p1', 'm1', 'pr1', 'not_interested', now() - interval '1 minute', $2)`, [p2, OURS])
+    await env.pool.query(`insert into public.message_events (direction, thread_key, from_phone_number, to_phone_number, message_body, event_timestamp, created_at, property_id, language) values
+      ('outbound', $1::text, $2::text, $1::text, 'Thanks Dana. Would you consider selling 12 Oak St if the offer made sense?', now() - interval '10 minutes', now() - interval '10 minutes', 'p1', 'en'),
+      ('inbound', $1::text, $1::text, $2::text, 'No', now() - interval '1 minute', now() - interval '1 minute', 'p1', 'en')`, [p2, OURS])
+    const ok = await planNurture(env.sb, p2, { inboundId: crypto.randomUUID() })
+    assert.equal(ok.ok, true, JSON.stringify(ok))
+  } finally { await env.db.drop() }
+})

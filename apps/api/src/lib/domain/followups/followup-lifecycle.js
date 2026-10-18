@@ -215,6 +215,21 @@ export async function planFollowUpFromScheduler({ intent, plan = {}, payload = {
   // materializer re-checks the same facts before anything becomes claimable.
   let block = { blocked: false }
   try { block = await loadPropertyContactBlock({ supabase, thread_key: payload.thread_key, phone: payload.to_phone_number, property_id: payload.property_id }) } catch { block = { blocked: false } }
+  // the SAME send-time contact guard the materializer and the dispatcher run, on the would-be row, at plan
+  // time: a follow-up its own thread already forbids (e.g. a burst whose first bare "No" answered the
+  // ownership question, then a second "No" read as not-interested) is never planned as an executable
+  // intent. Holds are not judged here (a hold is temporary: the materializer holds); read failures plan.
+  if (!block.blocked && c.skip_plan_guard !== true) {
+    try {
+      const g = await planTimeGuardVerdict(supabase, payload)
+      if (g?.blocked) {
+        const reason = clean(g.reason)
+        const cls = classifyGuardBlock(reason)
+        if (reason === OWNERSHIP_DECLINED_REASON) block = { blocked: true, reason: `send_time_guard:${reason}`, state: S.HELD }
+        else if (cls.to === S.NOT_EXECUTABLE) block = { blocked: true, reason: `send_time_guard:${reason}`, state: S.NOT_EXECUTABLE }
+      }
+    } catch { /* plan normally: the materializer re-checks before anything is claimable */ }
+  }
   const r = await planFollowUpIntent({
     thread_key: payload.thread_key, property_id: payload.property_id, master_owner_id: payload.master_owner_id, prospect_id: c.prospect_id || null,
     kind, intent, use_case: payload.use_case_template, due_at, writer: clean(c.writer) || clean(payload.metadata?.source) || 'seller_followup_scheduler', cause,
@@ -300,6 +315,15 @@ export function planSendInstant({ due, now, zones, others = [], lawful }) {
     t = Math.min(...later)
   }
   return { ok: false, reason: 'collision_unresolvable' }
+}
+
+/** The send-time contact guard over fresh reads for a would-be row, holds excluded (plan time). */
+async function planTimeGuardVerdict(supabase, row) {
+  if (!supabase?.from) return null
+  const m = await import('../queue/send-time-contact-guard.js')
+  const noHold = async () => ({ held: false, hold_type: null, reason: null, hold_id: null })
+  const facts = await m.loadSendTimeContactFacts(supabase, row, { automationHoldChecker: noHold })
+  return m.evaluateSendTimeContactGuard(row, { ...facts, automation_hold: null })
 }
 
 /** Fresh reads for propertyContactBlock (contact_property_resolution + the thread). Throws on a read error. */

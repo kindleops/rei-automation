@@ -36,6 +36,7 @@ exact pre-chain schema fingerprint. Then the whole chain is re-applied and re-ve
 | 19 | `PROPOSED_20261016161000_negotiation_send_authorization.sql` | 8.5.21-b | new |
 | 20 | `PROPOSED_20261016162000_ops_research_valuation_snapshot.sql` | 8.5.21-b | new |
 | seed | `PROPOSED_20261016163000_followup_execution_schedules.sql` | 8.5.21-a follow-up pipeline schedules (born DISABLED; `psql -v owner_id=…`) | new; **renumbered** from 20261016161000. Exercised by its posttest after #18. |
+| 22 | `PROPOSED_20261017120000_followup_intent_lifecycle.sql` | P0 2026-10-17 follow-up execution lifecycle: `followup_intents` + audit, materialize-before-claimable, send_queue ⇄ intent sync, `follow_up_at` projection (live-only guards, born OFF) | new; LAST link, after `PROPOSED_20261017100000_contact_property_resolution_declined_unverified.sql` (needs #0, send_queue, inbox_thread_state). Also a standalone entry `followup_intent_lifecycle`. Also on `hotfix/followup-materialization` (byte-identical). |
 
 The schedule seeds take `psql -v owner_id=<owner auth uuid>` and carry their own BEGIN/COMMIT. Every
 schedule is created with `enabled = false`. Their posttests run the same statements inside
