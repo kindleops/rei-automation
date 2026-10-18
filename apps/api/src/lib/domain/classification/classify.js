@@ -1,4 +1,5 @@
 // ─── classify.js ──────────────────────────────────────────────────────────
+import { isDirectNo } from "./ownership-answer-forms.js";
 import { ai } from "@/lib/providers/ai.js";
 import {
   getCategoryValue,
@@ -8032,6 +8033,31 @@ export function rescopeOwnerButNotSelling(text, result) {
   };
 }
 
+/**
+ * OWNER DECISION LOCKED 2026-10-17: a direct no ("Answer is no") answers a QUESTION. With no validated
+ * question context it answers nothing we know: never invent certainty (no nurture, no denial) — a
+ * contextual-review hold (unclear ⇒ human review).
+ */
+export function rescopeDirectNoWithoutContext(text, result, conversation_context = null) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting") return result;
+  if (!isDirectNo(text)) return result;
+  if (result.precedence_result === "contextual_short_reply_override" || result.contextual_override) return result;
+  // an ESTABLISHED question (a valid context: e.g. "Answer is no" to the selling question = that decline)
+  let established = false;
+  try { established = validateConversationContext(conversation_context)?.context_status === "valid"; } catch { established = false; }
+  if (established) return result;
+  return {
+    ...result,
+    primary_intent: "unclear",
+    matched_intents: ["unclear"],
+    secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "question_context_unknown"])],
+    matched_rule_ids: [...(Array.isArray(result.matched_rule_ids) ? result.matched_rule_ids : []), "direct_no_without_question_context"],
+    ambiguity_flags: [...new Set([...(Array.isArray(result.ambiguity_flags) ? result.ambiguity_flags : []), "needs_question_context"])],
+    automation_decision: { auto_reply_allowed: false, queue_action: "none", suppression_action: "none", human_review_required: true, risk_level: "medium" },
+  };
+}
+
 export function rescopeWrittenOwnershipDenial(text, result) {
   if (!result || typeof result !== "object") return result;
   if (result.compliance_flag === "stop_texting") return result;
@@ -8106,9 +8132,9 @@ export async function classify(message, brain_item = null, options = {}) {
     };
   }
 
-  const heuristic = rescopeOwnerButNotSelling(text, rescopeWrittenOwnershipDenial(text, classifyHeuristic(text, brain_item, {
+  const heuristic = rescopeDirectNoWithoutContext(text, rescopeOwnerButNotSelling(text, rescopeWrittenOwnershipDenial(text, classifyHeuristic(text, brain_item, {
     conversation_context,
-  })));
+  }))), conversation_context);
 
   if (heuristicOnly) {
     const final_motivation = estimateMotivationScore(heuristic);

@@ -26,6 +26,7 @@
 //                                 nurture and NEVER recorded as verified non-ownership
 //   after the interest question:  any bare negative → not interested (30-day follow-up)
 import { matchBareNegative } from '../classification/seller-reply-families.js'
+import { isDirectNo, isBareNotInterested } from '../classification/ownership-answer-forms.js'
 
 export const ANSWERS_VERSION = 'conv-ai.answers.v3'
 
@@ -40,6 +41,10 @@ const PICTOGRAPH_RE = /\p{Extended_Pictographic}/u
 export function bareNoAnswer(text, { names = [] } = {}) {
   const body = String(text ?? '')
   const m = matchBareNegative(body, { names })
+  // OWNER DECISIONS LOCKED 2026-10-17: "Answer is no" (a direct no ⇒ denial) and a bare "Not
+  // interested" (declined, ownership unverified) — read against the ownership question by the caller
+  if (!m && isDirectNo(body)) return { matched: true, canonical: 'answer is no', polite: false, emoji: false, ownership_denial: true, ownership_declined: false }
+  if (!m && isBareNotInterested(body)) return { matched: true, canonical: 'not interested', polite: false, emoji: false, ownership_denial: false, ownership_declined: true }
   if (!m) return { matched: false, canonical: null, polite: false, emoji: false, ownership_denial: false, ownership_declined: false }
   const polite = POLITE_TAIL_RE.test(m.canonical)
   const emoji = PICTOGRAPH_RE.test(body)

@@ -4,6 +4,7 @@
  * Invalid / missing / stale / conflicting context → status only; no override.
  */
 
+import { isDirectNo, isBareNotInterested } from './ownership-answer-forms.js';
 import { matchBareNegative, matchOfferDeflection } from "@/lib/domain/classification/seller-reply-families.js";
 
 /** Strict E.164 for conversation-context binding (matches Brain identity rules). */
@@ -460,6 +461,26 @@ export function applyContextualShortReply(messageText, validated) {
       // question — with or without an emoji ("No 👎" is in the 103-thread denial cohort) — is the
       // PROPERTY-SCOPED ownership denial; not_interested only after S2 or later.
       const emoji = Boolean(bare && EMOJI_SENTIMENT_RE.test(String(messageText)));
+      // OWNER DECISIONS LOCKED 2026-10-17: "Answer is no" / "No it is not" to OUR ownership question is
+      // the property-scoped denial; a bare "Not interested" (no yes, no sale words) is declined
+      // engagement with ownership UNVERIFIED (no nurture; property × contact hold).
+      if (mode === 'ownership_unverified' && isDirectNo(messageText)) {
+        return ownershipUnverifiedResult(messageText, validated, 'ctx_direct_no_after_ownership_check_ownership_unverified');
+      }
+      if (mode === 'ownership_unverified' && isBareNotInterested(messageText)) {
+        return {
+          applied: true,
+          primary_intent: 'ownership_declined_unverified',
+          labels: ['ownership_declined_unverified', 'ownership_unverified', 'not_interested_to_ownership_question'],
+          rule_id: 'ctx_not_interested_after_ownership_check_declined_unverified',
+          confidence: 0.86,
+          rationale: 'bare_not_interested_to_ownership_question_declines_engagement_ownership_unverified',
+          evidence_span: String(messageText).trim(),
+          context_message_id: validated.context.last_outbound_message_id,
+          context_use_case: uc,
+          context_age_ms: validated.context.context_age_ms,
+        };
+      }
       if (bare && mode === 'ownership_unverified' && polite) {
         return {
           applied: true,
