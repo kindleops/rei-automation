@@ -38,6 +38,8 @@
 import crypto from 'node:crypto'
 
 import { OWNERSHIP_DECLINED_ROLE, OWNERSHIP_DECLINED_REASON } from '../queue/ownership-recontact-guard.js'
+import { questionKindOf } from '../conversation-ai/questions.js'
+import { bareNoAnswer } from '../conversation-ai/answers.js'
 
 export const FOLLOWUP_LIFECYCLE_VERSION = 'followup-lifecycle.v1'
 export const LIFECYCLE_MODE_KEY = 'followup_execution_mode' // the same switch as 8.5.21-A (no new key)
@@ -89,19 +91,55 @@ const phoneTail = (v) => { const d = clean(v).replace(/\D/g, ''); return d.lengt
  * @returns {{ blocked: boolean, reason: string|null, kind: 'property_denial'|'ownership_declined_unverified'|null, state?: 'not_executable'|'held' }}
  *   a denial is not_executable; "No thanks" (declined, unverified) is HELD (deferred: an operator may release it)
  */
-export function propertyContactBlock({ property_id = null, phone = null, thread = null, resolutions = [] } = {}) {
+// owner 2026-10-17: the distinct disposition (never not_interested); both spellings are the same state
+const DECLINED_STATES = new Set([OWNERSHIP_DECLINED_UNVERIFIED, 'declined_unverified'])
+const NURTURE_ON_DISINTEREST_KINDS = new Set(['not_interested_nurture'])
+/**
+ * Pure. Did the seller's LATEST reply answer an OWNERSHIP question? (Then a "No" / "Not interested" is
+ * declined-unverified engagement, never selling disinterest: owner 2026-10-17.)
+ * @param {Array<{direction:string, message_body?:string, use_case?:string, created_at?:string, event_timestamp?:string}>} messages
+ */
+export function latestReplyAnsweredOwnershipQuestion(messages = []) {
+  return Boolean(ownershipQuestionReply(messages))
+}
+/** The burst of inbounds that answered our latest OWNERSHIP question (oldest first), or null. */
+export function ownershipQuestionReply(messages = []) {
+  const at = (m) => toMs(m.event_timestamp) ?? toMs(m.created_at) ?? 0
+  const sorted = [...(messages || [])].sort((a, b) => at(a) - at(b))
+  let lastIn = -1
+  for (let i = sorted.length - 1; i >= 0; i -= 1) if (lower(sorted[i].direction) === 'inbound') { lastIn = i; break }
+  if (lastIn < 0) return null
+  // a burst: walk back over the consecutive inbounds to the outbound they answer
+  let j = lastIn
+  while (j >= 0 && lower(sorted[j].direction) === 'inbound') j -= 1
+  if (j < 0) return null
+  if (questionKindOf({ use_case: sorted[j].use_case || sorted[j].use_case_template || null, body: sorted[j].message_body || '' }) !== 'ownership') return null
+  return sorted.slice(j + 1, lastIn + 1)
+}
+
+export function propertyContactBlock({ property_id = null, phone = null, thread = null, resolutions = [], kind = null, messages = null } = {}) {
   const pid = clean(property_id)
   const tail = phoneTail(phone)
   const mine = (resolutions || []).filter((r) => (!tail || phoneTail(r.contact_phone_e164) === tail) && pid && clean(r.property_id) === pid)
-  const declined = (r) => [r.contact_property_role, r.rejection_reason, r.suppression_scope, r.ownership_state].map(lower).includes(OWNERSHIP_DECLINED_UNVERIFIED)
+  const declined = (r) => [r.contact_property_role, r.rejection_reason, r.suppression_scope, r.ownership_state].map(lower).some((v) => DECLINED_STATES.has(v))
   if (mine.some(declined)) return { blocked: true, reason: `${OWNERSHIP_DECLINED_UNVERIFIED}:no_recontact_hold`, kind: OWNERSHIP_DECLINED_UNVERIFIED, state: 'held' }
   const denial = mine.find((r) => clean(r.rejected_at) && PAIR_DENIAL_ROLES.has(lower(r.contact_property_role)) && (!clean(r.suppression_scope) || lower(r.suppression_scope) === 'contact_property_pair'))
   if (denial) return { blocked: true, reason: 'property_denial:contact_property_resolution', kind: 'property_denial', state: 'not_executable' }
   const t = thread || {}
   const tstates = [t.disposition, t.last_intent, t.contactability_status, t.ownership_status, t.operational_status].map(lower)
   // the thread's own state: its property, or (property unknown) conservatively this one
-  if (tstates.includes(OWNERSHIP_DECLINED_UNVERIFIED) && (!clean(t.property_id) || !pid || clean(t.property_id) === pid)) {
+  if (tstates.some((v) => DECLINED_STATES.has(v)) && (!clean(t.property_id) || !pid || clean(t.property_id) === pid)) {
     return { blocked: true, reason: `${OWNERSHIP_DECLINED_UNVERIFIED}:no_recontact_hold`, kind: OWNERSHIP_DECLINED_UNVERIFIED, state: 'held' }
+  }
+  // "not_interested" alone never means selling disinterest: a disinterest nurture whose latest reply answered
+  // the OWNERSHIP question is declined-unverified (held), whatever the stored label says
+  // (owner rules: a BARE "No" to the ownership question is the property denial; "No thanks" / "Not
+  // interested" to it is declined-unverified, held, never non-ownership)
+  const burst = NURTURE_ON_DISINTEREST_KINDS.has(clean(kind)) && Array.isArray(messages) ? ownershipQuestionReply(messages) : null
+  if (burst && burst.length) {
+    const bare = burst.map((m) => bareNoAnswer(m.message_body || ''))
+    if (bare.some((b) => b.matched && b.ownership_denial)) return { blocked: true, reason: 'property_denial:bare_no_to_ownership_question', kind: 'property_denial', state: 'not_executable' }
+    return { blocked: true, reason: `${OWNERSHIP_DECLINED_UNVERIFIED}:reply_to_ownership_question`, kind: OWNERSHIP_DECLINED_UNVERIFIED, state: 'held' }
   }
   return { blocked: false, reason: null, kind: null }
 }
@@ -214,7 +252,7 @@ export async function planFollowUpFromScheduler({ intent, plan = {}, payload = {
   // non-executable outcome — never a nurture / follow-up intent. A failed read plans normally: the
   // materializer re-checks the same facts before anything becomes claimable.
   let block = { blocked: false }
-  try { block = await loadPropertyContactBlock({ supabase, thread_key: payload.thread_key, phone: payload.to_phone_number, property_id: payload.property_id }) } catch { block = { blocked: false } }
+  try { block = await loadPropertyContactBlock({ supabase, thread_key: payload.thread_key, phone: payload.to_phone_number, property_id: payload.property_id, kind }) } catch { block = { blocked: false } }
   // the SAME send-time contact guard the materializer and the dispatcher run, on the would-be row, at plan
   // time: a follow-up its own thread already forbids (e.g. a burst whose first bare "No" answered the
   // ownership question, then a second "No" read as not-interested) is never planned as an executable
@@ -327,7 +365,7 @@ async function planTimeGuardVerdict(supabase, row) {
 }
 
 /** Fresh reads for propertyContactBlock (contact_property_resolution + the thread). Throws on a read error. */
-export async function loadPropertyContactBlock({ supabase, thread_key, phone = null, property_id = null } = {}) {
+export async function loadPropertyContactBlock({ supabase, thread_key, phone = null, property_id = null, kind = null } = {}) {
   if (!supabase?.from) throw new Error('no_client')
   const tail = phoneTail(phone || thread_key)
   const variants = tail ? [`+1${tail}`, `1${tail}`, tail] : []
@@ -335,7 +373,13 @@ export async function loadPropertyContactBlock({ supabase, thread_key, phone = n
   if (q1?.error) throw q1.error
   const q2 = await supabase.from('inbox_thread_state').select('*').eq('thread_key', clean(thread_key)).limit(1)
   if (q2?.error) throw q2.error
-  return propertyContactBlock({ property_id, phone: phone || thread_key, thread: (q2.data || [])[0] || null, resolutions: q1.data || [] })
+  let messages = null
+  if (NURTURE_ON_DISINTEREST_KINDS.has(clean(kind))) {
+    const q3 = await supabase.from('message_events').select('direction,message_body,created_at,event_timestamp').eq('thread_key', clean(thread_key)).order('created_at', { ascending: false }).limit(20)
+    if (q3?.error) throw q3.error
+    messages = q3.data || []
+  }
+  return propertyContactBlock({ property_id, phone: phone || thread_key, thread: (q2.data || [])[0] || null, resolutions: q1.data || [], kind, messages })
 }
 
 /** The would-be deferred row the canonical resolver renders (exactly what the scheduler used to insert). */
@@ -735,7 +779,7 @@ export function createFollowUpLifecycleDeps({ supabase, readSwitch = null, holdC
     }),
     async propertyBlock(intent) {
       const spec = obj(intent.row_spec)
-      return loadPropertyContactBlock({ supabase, thread_key: intent.thread_key, phone: spec.to_phone_number || intent.thread_key, property_id: intent.property_id || spec.property_id || null })
+      return loadPropertyContactBlock({ supabase, thread_key: intent.thread_key, phone: spec.to_phone_number || intent.thread_key, property_id: intent.property_id || spec.property_id || null, kind: intent.kind })
     },
     async alreadySent(intent) {
       const spec = obj(intent.row_spec)

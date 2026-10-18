@@ -703,7 +703,8 @@ test('PG lifecycle (rc-8.5.21 defect): a burst whose first bare "No" answered th
       ('inbound', $1::text, $1::text, $2::text, 'No', now() - interval '1 minute', now() - interval '1 minute', 'p1', 'en')`, [phone, OURS])
     const r = await planNurture(env.sb, phone, { inboundId: crypto.randomUUID() })
     assert.equal(r.ok, false, JSON.stringify(r))
-    assert.match(r.reason, /^send_time_guard:/)
+    // a bare "No" to the ownership question is the property denial (owner rule), never a nurture
+    assert.match(r.reason, /^(property_denial:bare_no_to_ownership_question|send_time_guard:)/)
     const intents = await intentsOf(env.pool, phone)
     assert.equal(intents.filter((i) => ['planned', 'materializing', 'ready', 'dispatched'].includes(i.state)).length, 0, 'no executable nurture intent')
     assert.ok(intents.every((i) => i.reason && !/^bare_/.test(i.reason)))
@@ -717,5 +718,38 @@ test('PG lifecycle (rc-8.5.21 defect): a burst whose first bare "No" answered th
       ('inbound', $1::text, $1::text, $2::text, 'No', now() - interval '1 minute', now() - interval '1 minute', 'p1', 'en')`, [p2, OURS])
     const ok = await planNurture(env.sb, p2, { inboundId: crypto.randomUUID() })
     assert.equal(ok.ok, true, JSON.stringify(ok))
+  } finally { await env.db.drop() }
+})
+
+test('PG lifecycle (owner 2026-10-17): "not_interested" alone never means selling disinterest — a "Not interested" / "No thanks" that answered the OWNERSHIP question, or the distinct declined_unverified disposition, is HELD (declined, unverified), never a nurture, never not_owner', { skip }, async () => {
+  const env = await lifecycleDb()
+  try {
+    await seedWorld(env.pool)
+    const seed = async (phone, { outbound, inbound, disposition = 'not_interested' }) => {
+      await env.pool.query(`insert into public.inbox_thread_state (thread_key, canonical_e164, property_id, master_owner_id, prospect_id, disposition, last_inbound_at, our_number) values ($1, $1, 'p1', 'm1', 'pr1', $3, now() - interval '1 minute', $2)`, [phone, OURS, disposition])
+      await env.pool.query(`insert into public.message_events (direction, thread_key, from_phone_number, to_phone_number, message_body, event_timestamp, created_at, property_id, language) values
+        ('outbound', $1::text, $2::text, $1::text, $3::text, now() - interval '10 minutes', now() - interval '10 minutes', 'p1', 'en'),
+        ('inbound', $1::text, $1::text, $2::text, $4::text, now() - interval '1 minute', now() - interval '1 minute', 'p1', 'en')`, [phone, OURS, outbound, inbound])
+    }
+    const OWN_Q = 'Hi Dana, this is Helen. Do you still own the house on 12 Oak St?'
+    const SELL_Q = 'Thanks Dana. Would you consider selling 12 Oak St if the offer made sense?'
+    for (const [phone, inbound] of [['+13125550701', 'Not interested'], ['+13125550702', 'No thanks']]) {
+      await seed(phone, { outbound: OWN_Q, inbound })
+      const r = await planNurture(env.sb, phone, { inboundId: crypto.randomUUID() })
+      assert.equal(r.ok, false, `${inbound}: ${JSON.stringify(r)}`)
+      const [i] = await intentsOf(env.pool, phone)
+      assert.equal(i.state, 'held', inbound)
+      assert.match(i.reason, /ownership_declined_unverified/)
+      assert.ok(!/not_owner|denial/.test(i.reason), 'never recorded as non-ownership')
+    }
+    // the distinct disposition itself (whatever the last question was)
+    await seed('+13125550703', { outbound: SELL_Q, inbound: 'hmm', disposition: 'declined_unverified' })
+    const d = await planNurture(env.sb, '+13125550703', { inboundId: crypto.randomUUID() })
+    assert.equal(d.ok, false)
+    assert.equal((await intentsOf(env.pool, '+13125550703'))[0].state, 'held')
+    // control: "Not interested" to the SELLING question IS the 30-day nurture
+    await seed('+13125550704', { outbound: SELL_Q, inbound: 'Not interested' })
+    assert.equal((await planNurture(env.sb, '+13125550704', { inboundId: crypto.randomUUID() })).ok, true)
+    assert.equal((await intentsOf(env.pool, '+13125550704'))[0].state, 'planned', 'an executable nurture intent')
   } finally { await env.db.drop() }
 })

@@ -331,3 +331,21 @@ test('owner rules 2026-10-17: propertyContactBlock — declined-unverified and a
   await materializeClaimedIntent(intent(), g.deps)
   assert.deepEqual([g.calls.transitions[0].to, g.calls.transitions[0].reason], ['held', 'send_time_guard:ownership_declined_unverified_hold'])
 })
+
+test('owner 2026-10-17: the previous question decides — "No" / "Not interested" to OWNERSHIP is never a disinterest nurture (bare No ⇒ property denial; polite / not interested ⇒ declined-unverified HELD); to SELLING it is the nurture', async () => {
+  const { propertyContactBlock, latestReplyAnsweredOwnershipQuestion } = await import('../../src/lib/domain/followups/followup-lifecycle.js')
+  const OWN = { direction: 'outbound', message_body: 'Hi Dana, do you still own 12 Oak St?', created_at: '2026-10-01T00:00:00Z' }
+  const SELL = { direction: 'outbound', message_body: 'Would you consider selling 12 Oak St?', created_at: '2026-10-01T00:00:00Z' }
+  const r = (b, t = '2026-10-01T00:01:00Z') => ({ direction: 'inbound', message_body: b, created_at: t })
+  const k = 'not_interested_nurture'
+  assert.deepEqual(propertyContactBlock({ property_id: 'p1', kind: k, messages: [OWN, r('No')] }).state, 'not_executable')
+  assert.equal(propertyContactBlock({ property_id: 'p1', kind: k, messages: [OWN, r('No'), r('No', '2026-10-01T00:02:00Z')] }).reason, 'property_denial:bare_no_to_ownership_question', 'the burst')
+  for (const b of ['No thanks', 'Not interested']) {
+    const v = propertyContactBlock({ property_id: 'p1', kind: k, messages: [OWN, r(b)] })
+    assert.deepEqual([v.state, v.kind], ['held', 'ownership_declined_unverified'], b)
+  }
+  for (const b of ['No', 'Not interested', 'No thanks']) assert.equal(propertyContactBlock({ property_id: 'p1', kind: k, messages: [SELL, r(b)] }).blocked, false, `selling: ${b}`)
+  assert.equal(propertyContactBlock({ property_id: 'p1', kind: 'seller_requested_callback', messages: [OWN, r('Not interested')] }).blocked, false, 'only a disinterest nurture is re-read')
+  assert.equal(propertyContactBlock({ property_id: 'p1', thread: { disposition: 'declined_unverified', property_id: 'p1' } }).state, 'held', 'the distinct disposition')
+  assert.equal(latestReplyAnsweredOwnershipQuestion([r('No')]), false)
+})
