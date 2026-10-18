@@ -1,5 +1,5 @@
 -- lc-fixture: pretest
--- PROPOSED ONLY — PRETEST for PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease.sql. Changes NOTHING.
+-- PROPOSED ONLY — PRETEST for PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql. Changes NOTHING.
 -- DISPOSABLE DATABASE ONLY: never run against production.
 -- No transaction control, no includes: read-only prerequisite checks.
 --   node scripts/db/run-migration-test.mjs --pg-bin <dir> --id conversation_reply_turn_dispatch_lease

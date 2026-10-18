@@ -1,5 +1,5 @@
 -- lc-fixture: posttest
--- PROPOSED ONLY — ROLLBACK POSTTEST for PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease_rollback.sql.
+-- PROPOSED ONLY — ROLLBACK POSTTEST for PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_rollback.sql.
 -- DISPOSABLE DATABASE ONLY. Read-only: every object of the migration is gone, finalize is the
 -- rc-8.5.20 body again and the 5-arg agent.runtime_finish is intact.
 \set ON_ERROR_STOP on

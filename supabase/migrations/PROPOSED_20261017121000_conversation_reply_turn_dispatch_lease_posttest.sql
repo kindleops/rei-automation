@@ -1,5 +1,5 @@
 -- lc-fixture: posttest
--- PROPOSED ONLY — POSTTEST for PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease.sql:
+-- PROPOSED ONLY — POSTTEST for PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql:
 -- the finalize hands out the dispatch lease; recovery is refused under a live lease (with a DB-clock
 -- retry_after_ms), refused after a terminal outcome, allowed only after expiry; the attempts budget
 -- dead-letters; the send_queue backstop refuses a second ai_generated row for one turn; the 6-arg

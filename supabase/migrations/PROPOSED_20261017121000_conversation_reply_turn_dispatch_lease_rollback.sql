@@ -1,4 +1,4 @@
--- PROPOSED ONLY — ROLLBACK for PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease.sql.
+-- PROPOSED ONLY — ROLLBACK for PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql.
 -- Restores conversation_reply_turn_finalize to the exact rc-8.5.20 body, drops the dispatch functions,
 -- the backstop index, the runtime_finish 6-arg wrapper and the dispatch columns. REFUSES while a
 -- dispatch is in flight under a live lease (finish or let it expire first).

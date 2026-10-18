@@ -118,7 +118,7 @@ export function createRuntimePgStore({ pool, statementTimeoutMs = 5000, lockTime
     start: ({ job_id, token }) => call('select agent.runtime_start($1, $2::uuid) r', [job_id, token]),
     checkpoint: (o) => call('select agent.runtime_checkpoint($1, $2::uuid, $3::jsonb, $4::jsonb, $5, $6::jsonb) r', [o.job_id, o.token, j(o.progress), j(o.checkpoint), o.event_type ?? null, j(o.event_payload)]),
     finish: (o) => (o.retry_after_ms != null
-      // rc-8.5.21 (PROPOSED_20261017120000): a retry with a caller-chosen delay
+      // rc-8.5.21 (PROPOSED_20261017121000): a retry with a caller-chosen delay
       ? call('select agent.runtime_finish($1, $2::uuid, $3, $4::jsonb, $5::jsonb, $6::integer) r', [o.job_id, o.token, o.outcome, j(o.result), j(o.error), Math.max(1, Math.ceil(Number(o.retry_after_ms) / 1000))])
       : call('select agent.runtime_finish($1, $2::uuid, $3, $4::jsonb, $5::jsonb) r', [o.job_id, o.token, o.outcome, j(o.result), j(o.error)])),
     reap: ({ limit = 20 } = {}) => call('select agent.runtime_reap($1) r', [limit]),

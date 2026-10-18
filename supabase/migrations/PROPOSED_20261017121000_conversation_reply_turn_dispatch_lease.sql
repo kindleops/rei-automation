@@ -26,8 +26,8 @@
 -- 5-arg: agent_api + service_role).
 -- ORDER: after PROPOSED_20261016120000_conversation_reply_turns.sql, PROPOSED_20261015130000
 -- (message_origin) and PROPOSED_20261012140000_intel_runtime.sql.
---   psql "$DB" -v ON_ERROR_STOP=1 -f PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease.sql
--- Rollback: PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease_rollback.sql
+--   psql "$DB" -v ON_ERROR_STOP=1 -f PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql
+-- Rollback: PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_rollback.sql
 -- ════════════════════════════════════════════════════════════════════════════
 begin;
 set local lock_timeout = '5s';

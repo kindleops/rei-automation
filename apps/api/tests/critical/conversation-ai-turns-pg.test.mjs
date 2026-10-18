@@ -39,7 +39,7 @@ async function turnsDb() {
   await applyInTransaction(db.pool, MIG('PROPOSED_20261013161000_conversation_decide_event_budget.sql'))
   await applyInTransaction(db.pool, MIG('PROPOSED_20261016120000_conversation_reply_turns.sql'))
   // rc-8.5.21 owner directive: the dispatch lease + the one-ai-row-per-turn send_queue backstop
-  await applyInTransaction(db.pool, MIG('PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease.sql'))
+  await applyInTransaction(db.pool, MIG('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql'))
   await db.pool.query(`update agent.runtime_limits set runtime_enabled = true, max_concurrency_global = 2, tick_max_jobs = 2, kind_limits = $1::jsonb where id = 1`,
     [JSON.stringify({ [CONVERSATION_TURN_KIND]: { enabled: true, max_concurrency: 2, armed_by: OP } })])
   return db

@@ -17,7 +17,7 @@ const ARGS = Object.freeze({
   conversation_reply_turn_cancel: ['p_thread_key', 'p_reason'],
   conversation_reply_turn_reopen: ['p_turn_id', 'p_reason', 'p_due_at', 'p_plan'],
   conversation_reply_turn_due: ['p_limit', 'p_grace_seconds'],
-  // rc-8.5.21 dispatch lease (PROPOSED_20261017120000_conversation_reply_turn_dispatch_lease.sql)
+  // rc-8.5.21 dispatch lease (PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql)
   conversation_reply_turn_dispatch_claim: ['p_turn_id', 'p_version', 'p_worker', 'p_lease_seconds', 'p_max_attempts'],
   conversation_reply_turn_dispatch_done: ['p_turn_id', 'p_version', 'p_worker', 'p_outcome'],
 })
