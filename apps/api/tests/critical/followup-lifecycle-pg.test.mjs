@@ -398,7 +398,7 @@ test('PG lifecycle: the thread sender is COOLING ⇒ materialized with its healt
   } finally { net.restore(); await env.db.drop() }
 })
 
-test('PG lifecycle: OUTSIDE the contact window ⇒ scheduled at the next lawful local instant (not runnable before it, sent once after); UNKNOWN timezone ⇒ held', { skip }, async () => {
+test('PG lifecycle: OUTSIDE the contact window ⇒ scheduled at the next lawful local instant (not runnable before it, sent once after); UNPLACEABLE recipient ⇒ held; UNKNOWN zone (property only) ⇒ inside 11:00–21:00 ET', { skip }, async () => {
   const env = await lifecycleDb()
   const net = trapTransport()
   try {
@@ -415,13 +415,32 @@ test('PG lifecycle: OUTSIDE the contact window ⇒ scheduled at the next lawful 
     const sendAt = new Date(lawful + 5 * 60_000).toISOString()
     await dispatchRow(env, await claimRow(env.pool, row.id), { provider, now: sendAt })
     assert.equal(provider.accepted(), 1)
-    // unknown timezone: no property geography, no stored zone
-    const p2 = '+13125550212'
+    // nothing places the recipient: a non-geographic number (rc-8.5.21 S3: an area code IS recipient
+    // evidence), no property geography, no stored zone ⇒ held
+    const p2 = '+15005550212'
     const { inboundId } = await seedThread(env.pool, { phone: p2, property: 'p-nogeo' })
     await planNurture(env.sb, p2, { inboundId, property: 'p-nogeo' })
     const m = await materialize(env)
     assert.equal(m.counts.held, 1, JSON.stringify(m))
     assert.deepEqual([(await one(env.pool, p2)).state, (await one(env.pool, p2)).reason], ['held', 'recipient_timezone_unresolved'])
+    // UNKNOWN zone (S3a): a non-geographic number + only the property's zone (Chicago) ⇒ the property is NOT
+    // the recipient's zone ⇒ the conservative continental intersection: scheduled inside 11:00–21:00 ET
+    const p3 = '+15005550213'
+    const t3 = await seedThread(env.pool, { phone: p3, property: 'p1' })
+    await planNurture(env.sb, p3, { inboundId: t3.inboundId, property: 'p1' })
+    const m3 = await materialize(env, { now: () => at3 })
+    assert.equal(m3.counts.materialized, 1, JSON.stringify(m3))
+    const [r3] = await rowsOf(env.pool, p3)
+    const etParts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(r3.scheduled_for))
+    const etMin = (Number(etParts.find((x) => x.type === 'hour').value) % 24) * 60 + Number(etParts.find((x) => x.type === 'minute').value)
+    assert.ok(etMin >= 11 * 60 && etMin < 21 * 60, `inside 11:00–21:00 ET: ${new Date(r3.scheduled_for).toISOString()}`)
+    assert.ok(Date.parse(r3.scheduled_for) >= Date.parse(`${day}T15:00:00.000Z`), 'not before 11:00 ET / 08:00 PT (the property zone alone would have allowed 08:00 CT)')
+    assert.equal(r3.metadata.recipient_zone_certainty, 'unknown')
+    assert.equal(r3.metadata.recipient_zone_policy, 'recipient-window.v1')
+    // the dispatcher reads the SAME verdict off the materialized row: closed at 08:00 CT, open at the scheduled instant
+    const { evaluateContactWindow } = await import('../../src/lib/supabase/sms-engine.js')
+    assert.equal(evaluateContactWindow(r3, { now: `${day}T13:00:00.000Z`, propertyGeography: { state: 'IL', zip: '60601' } }).allowed, false)
+    assert.equal(evaluateContactWindow(r3, { now: new Date(r3.scheduled_for).toISOString(), propertyGeography: { state: 'IL', zip: '60601' } }).allowed, true)
     assert.deepEqual(net.hits, [])
   } finally { net.restore(); await env.db.drop() }
 })

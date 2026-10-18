@@ -43,7 +43,7 @@ import { insertSupabaseSendQueueRow } from '@/lib/supabase/sms-engine.js'
 import { getSystemValueFresh } from '@/lib/system-control.js'
 import { beginIdempotentProcessing, completeIdempotentProcessing, failIdempotentProcessing } from '@/lib/domain/events/idempotency-ledger.js'
 import { isEmergencyStopActive } from '@/lib/domain/queue/queue-control-safety.js'
-import { evaluateReplyTiming, resolveRecipientZones } from '@/lib/domain/queue/reply-timing.js'
+import { evaluateReplyTiming, resolveRecipientZones, RECIPIENT_WINDOW_POLICY_VERSION } from '@/lib/domain/queue/reply-timing.js'
 import { ledgerFromContextInput, ledgerSummary } from '@/lib/domain/conversation-ai/fact-ledger.js'
 import { attachPropertyFactsFromInput } from '@/lib/domain/conversation-ai/property-ownership.js'
 import { hypotheticalReplyRow, dryRunEligibility } from '@/lib/domain/conversation-ai/eligibility-bridge.js'
@@ -415,6 +415,7 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
       conversational_reply: { stage: 'queued', at: now, queued_at: now, inbound_message_event_id: inboundId, inbound_received_at: inboundRow.at || null, in_session: timing.in_session },
       recipient_zones: timing.zones,
       recipient_zone_certainty: zones.certainty || null,
+      recipient_zone_policy: RECIPIENT_WINDOW_POLICY_VERSION,
       validator_version: OUTBOUND_VALIDATOR_VERSION,
       executor_version: R3_EXECUTOR_VERSION,
       send_policy_version: AI_SEND_POLICY_VERSION,

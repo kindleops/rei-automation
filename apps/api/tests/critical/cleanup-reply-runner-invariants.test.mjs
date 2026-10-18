@@ -84,7 +84,8 @@ test("a cleanup reply row passes the runner's own preclaim validity check and wi
   assert.equal(isManualInboxSend(row), false, "never rides the operator exemption (it waives the window)");
   const window = evaluateContactWindow(row, { now: NOW });
   assert.equal(window.allowed, true);
-  assert.equal(window.timezone, "America/New_York");
+  // rc-8.5.21 S3: the NY property narrows the window; the recipient zone itself is not invented
+  assert.ok(window.zones.includes("America/New_York"));
   // Unchanged: repair tag, template, sender engine number, per-thread dedupe key.
   assert.equal(row.metadata.source, SOURCE);
   assert.equal(row.metadata.repair_tag, SOURCE);

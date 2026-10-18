@@ -24,7 +24,15 @@ import { isUuid } from "@/lib/utils/is-uuid.js";
 import { resolveConversationalCeiling, withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import { SEND_CLASS, isConversationalSendClass, resolveSendClass, sourceSendClass } from "@/lib/domain/delivery/send-class.js";
 import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
-import { loadPropertyGeography, resolveRecipientTimezone, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
+import { loadPropertyGeography, rowNeedsPropertyGeography, storedTimezoneToIana } from "@/lib/domain/queue/recipient-timezone.js";
+import {
+  CONTACT_HOURS,
+  MESSAGING_CATEGORIES,
+  classifyMessagingCategory,
+  evaluateMessagingWindow,
+  recipientEvidenceFromRow,
+  resolveRecipientWindowZones,
+} from "@/lib/domain/queue/recipient-window-policy.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
 import {
   classifyThreadFromChronology,
@@ -1099,18 +1107,22 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
       continue;
     }
 
-    const contact_window = evaluate_contact_window(decision.row, {
+    // rc-8.5.21 S3 / owner ruling 2026-10-18: ONE dispatch decision (category + its window verdict)
+    const dispatch_window = evaluateDispatchWindow(decision.row, {
       ...deps,
       now,
+      windowMinutes: conversational_reply_window_minutes,
+      evaluateContactWindow: evaluate_contact_window,
       propertyGeography: property_geography.get(clean(decision.row?.property_id)) || null,
     });
+    const contact_window = dispatch_window.contact_window;
     const manual_inbox_send = isManualInboxSend(decision.row);
     // A reply to a seller who just texted us (IN SESSION: inbound-linked,
     // queued within conversational_reply_window_minutes of the inbound, session
     // still open, not a follow-up / nurture / campaign touch) is exempt from
     // the contact window. An aged/backlogged reply must respect the window.
-    const inbound_auto_reply =
-      evaluateInSessionReply(decision.row, { now, window_minutes: conversational_reply_window_minutes }).in_session === true;
+    // category 1 (active seller conversation): eligible at any hour unless the restriction table binds it
+    const inbound_auto_reply = dispatch_window.active_conversation_lawful === true;
     // rc-7.1 D10: no recipient zone → HOLD (never a Chicago guess). Exempt
     // traffic (a reply to a seller who just texted, an operator's send) does
     // not need a window, so it is not held here.
@@ -1348,63 +1360,63 @@ export function evaluateContactWindow(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
   const current_time = deps.now ? new Date(deps.now) : new Date();
 
-  // rc-7.1 D10 — the RECIPIENT's zone: the property's geography first, then
-  // the zone stored on the row; neither → HOLD. A blank or unrecognised zone
-  // used to become America/Chicago here (a 06:00 text to a Pacific seller).
-  const recipient = resolveRecipientTimezone(normalized, { propertyGeography: deps.propertyGeography || null });
-  if (!recipient.ok) {
+  // rc-8.5.21 S3 — THE recipient-timezone policy (recipient-window-policy.js), the same resolver +
+  // verdict the follow-up lifecycle schedules with: zones stamped by the policy, then the recipient
+  // phone's area code (then mailing evidence); the property's geography and the stored row zone only
+  // NARROW (never the sole basis for "known"); no recipient evidence ⇒ the conservative continental
+  // intersection (11:00–21:00 ET). Several zones ⇒ the window must be open in EVERY one. A blank zone
+  // never becomes America/Chicago (rc-7.1 D10). Nothing at all places the recipient, or no lawful
+  // instant exists ⇒ HOLD.
+  const resolution = resolveRecipientWindowZones(
+    recipientEvidenceFromRow({ ...normalized, metadata: row?.metadata ?? normalized.metadata }, { propertyGeography: deps.propertyGeography || null })
+  );
+  const zones = resolution.zones;
+  const stored_iana = storedTimezoneToIana(normalized.timezone);
+  const resolved_timezone = resolution.primary_zone;
+  const timezone_basis = resolution.basis;
+  const stored_timezone_corrected = Boolean(stored_iana) && zones.some((zone) => zone !== stored_iana);
+  const zone_fields = {
+    zones,
+    timezone_certainty: resolution.certainty,
+    timezone_known: resolution.timezone_known,
+    recipient_local: resolution.recipient_local,
+    recipient_window_policy: resolution.version,
+  };
+  // The window of a category-2 / category-3 row (campaign touch / scheduled follow-up). A category-1
+  // reply (active seller conversation) is judged by evaluateDispatchWindow on top of this verdict.
+  const window_category = classifyMessagingCategory({ row: { ...normalized, metadata: row?.metadata ?? normalized.metadata }, session: { in_session: false } }).category;
+  const verdict = evaluateMessagingWindow({ category: window_category, at: current_time.getTime(), zones, jurisdictions: resolution.jurisdictions });
+  zone_fields.messaging_category = window_category;
+  zone_fields.jurisdictions = resolution.jurisdictions;
+
+  const LOCAL_SEND_START = CONTACT_HOURS.start_hour * 60;
+  const LOCAL_SEND_END = CONTACT_HOURS.end_hour * 60;
+  const current_minutes = resolved_timezone ? buildDateParts(current_time, resolved_timezone).minutes_of_day : null;
+
+  if (!resolution.has_evidence || verdict.hold) {
     return {
       allowed: false,
       hold: true,
       reason: "recipient_timezone_unresolved",
-      detail: recipient.detail,
-      timezone: null,
+      detail: resolution.has_evidence ? "no_lawful_instant_in_zone_intersection" : "no_geography",
+      timezone: resolved_timezone,
+      timezone_basis,
+      ...zone_fields,
       valid_window: false,
       next_open_at: null,
       next_eligible_at: null,
     };
   }
-  const resolved_timezone = recipient.iana;
-  const timezone_basis = recipient.basis;
-  const stored_timezone_corrected = recipient.corrected;
 
-  // Hard local-time window: 08:00 ≤ local < 21:00 (8 AM – 9 PM).
-  const LOCAL_SEND_START = 8 * 60;   // 480
-  const LOCAL_SEND_END   = 21 * 60;  // 1260 (exclusive)
-
-  const local_parts = buildDateParts(current_time, resolved_timezone);
-  const current_minutes = local_parts.minutes_of_day;
-
-  if (current_minutes < LOCAL_SEND_START || current_minutes >= LOCAL_SEND_END) {
-    // Next eligible: next local 08:00 (today if before open, else tomorrow).
-    let next_open_at = null;
-    try {
-      const probe = new Date(current_time.getTime());
-      // Walk forward in 15-minute steps until local time hits the open minute.
-      for (let i = 0; i < 96 * 2; i += 1) {
-        probe.setUTCMinutes(probe.getUTCMinutes() + 15);
-        const p = buildDateParts(probe, resolved_timezone);
-        if (p.minutes_of_day === LOCAL_SEND_START ||
-            (p.minutes_of_day > LOCAL_SEND_START && p.minutes_of_day < LOCAL_SEND_START + 15)) {
-          // Snap to start of that local hour block approximately via ISO
-          next_open_at = new Date(probe.getTime());
-          // refine: back up to nearest start boundary
-          const overshoot = p.minutes_of_day - LOCAL_SEND_START;
-          if (overshoot > 0) next_open_at = new Date(next_open_at.getTime() - overshoot * 60_000);
-          next_open_at = next_open_at.toISOString();
-          break;
-        }
-      }
-    } catch {
-      next_open_at = null;
-    }
-
+  if (!verdict.lawful) {
+    const next_open_at = verdict.next_permitted_at;
     return {
       allowed: false,
       reason: "outside_local_send_window",
       timezone: resolved_timezone,
       timezone_basis,
       stored_timezone_corrected,
+      ...zone_fields,
       valid_window: true,
       current_minutes,
       start_minutes: LOCAL_SEND_START,
@@ -1422,6 +1434,7 @@ export function evaluateContactWindow(row, deps = {}) {
       timezone: resolved_timezone,
       timezone_basis,
       stored_timezone_corrected,
+      ...zone_fields,
       valid_window: true,
       current_minutes,
       start_minutes: LOCAL_SEND_START,
@@ -1437,6 +1450,7 @@ export function evaluateContactWindow(row, deps = {}) {
       timezone: resolved_timezone,
       timezone_basis,
       stored_timezone_corrected,
+      ...zone_fields,
       valid_window: false,
       current_minutes,
     };
@@ -1445,21 +1459,49 @@ export function evaluateContactWindow(row, deps = {}) {
   const start_minutes = parsed_window.start_minutes;
   const end_minutes = parsed_window.end_minutes;
 
-  let within_window = false;
-  if (start_minutes <= end_minutes) {
-    within_window = current_minutes >= start_minutes && current_minutes <= end_minutes;
-  } else {
-    within_window = current_minutes >= start_minutes || current_minutes <= end_minutes;
-  }
+  // the finer window holds in EVERY plausible recipient zone (the same intersection rule)
+  const insideFiner = (minutes) =>
+    start_minutes <= end_minutes
+      ? minutes >= start_minutes && minutes <= end_minutes
+      : minutes >= start_minutes || minutes <= end_minutes;
+  const within_window = zones.every((zone) => insideFiner(buildDateParts(current_time, zone).minutes_of_day));
 
   return {
     allowed: within_window,
     reason: within_window ? "inside_contact_window" : "outside_contact_window",
     timezone: resolved_timezone,
+    timezone_basis,
+    ...zone_fields,
     valid_window: true,
     current_minutes,
     start_minutes,
     end_minutes,
+  };
+}
+
+/**
+ * THE dispatcher's window decision for one queue row (pre-claim and pre-send): the messaging category
+ * (recipient-window-policy.js#classifyMessagingCategory) and its verdict. Category 1 (an in-session
+ * reply to the seller's inbound) is judged by evaluateMessagingWindow (no universal after-hours block;
+ * the jurisdiction × category restriction table) — categories 2 / 3 by the recipient-local window
+ * (evaluateContactWindow). The session decides continuity only: a nurture / campaign touch is never
+ * category 1. Operator (manual inbox) exemptions stay with the caller.
+ * @returns {{ allowed: boolean, category: string, active_conversation_lawful: boolean, in_session: object, contact_window: object }}
+ */
+export function evaluateDispatchWindow(row, deps = {}) {
+  const now = deps.now || nowIso();
+  const contact_window = (deps.evaluateContactWindow || evaluateContactWindow)(row, deps);
+  const in_session = evaluateInSessionReply(row, { now, window_minutes: deps.windowMinutes ?? deps.conversational_reply_window_minutes ?? undefined });
+  const { category } = classifyMessagingCategory({ row, session: in_session });
+  const active_conversation_lawful =
+    category === MESSAGING_CATEGORIES.ACTIVE_CONVERSATION &&
+    evaluateMessagingWindow({ category, at: new Date(now).getTime(), zones: contact_window?.zones || [], jurisdictions: contact_window?.jurisdictions || [] }).lawful;
+  return {
+    allowed: active_conversation_lawful || (contact_window?.allowed === true && contact_window?.hold !== true),
+    category,
+    active_conversation_lawful,
+    in_session,
+    contact_window,
   };
 }
 

@@ -63,6 +63,7 @@ import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-c
 import {
   claimSendQueueRow,
   evaluateContactWindow,
+  evaluateDispatchWindow,
   finalizeSendQueueFailure,
   finalizeSendQueueSuccess,
   incrementTextgridNumberUsage,
@@ -1536,7 +1537,6 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     now,
     window_minutes: conversational_reply_window_minutes,
   });
-  const inbound_auto_reply = in_session_reply.in_session === true;
   let lock_token = clean(deps.claimedLockToken || queue_row?.lock_token) || null;
   let authorization_consumed_at = null;
 
@@ -1740,11 +1740,19 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       }
     }
 
-    const contact_window = evaluate_contact_window(queue_row, {
+    // rc-8.5.21 S3 / owner ruling 2026-10-18: ONE dispatch decision (sms-engine#evaluateDispatchWindow):
+    // the messaging category + its window verdict. Category 1 (an in-session reply to the seller's
+    // inbound) is eligible at any hour unless the jurisdiction × category restriction table binds it;
+    // a nurture / campaign touch is never category 1, even inside an active session.
+    const dispatch_window = evaluateDispatchWindow(queue_row, {
       ...deps,
       now,
+      windowMinutes: conversational_reply_window_minutes,
+      evaluateContactWindow: evaluate_contact_window,
       propertyGeography: property_geography,
     });
+    const contact_window = dispatch_window.contact_window;
+    const inbound_auto_reply = in_session_reply.in_session === true && dispatch_window.active_conversation_lawful === true;
 
     console.log("CONTACT WINDOW CHECK", {
       row_id: queue_row_id,

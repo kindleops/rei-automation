@@ -165,7 +165,10 @@ test("window: a due follow-up row only sends 8am–9pm recipient-local (processo
   assert.equal(evaluateContactWindow(row, { now: "2026-10-06T15:00:00.000Z" }).allowed, true, "10:00 CDT");
   assert.equal(evaluateContactWindow(row, { now: "2026-10-07T02:30:00.000Z" }).allowed, false, "21:30 CDT");
   assert.equal(evaluateContactWindow(row, { now: "2026-10-06T12:30:00.000Z" }).allowed, false, "07:30 CDT");
-  assert.equal(evaluateContactWindow({ ...row, timezone: null }, { now: "2026-10-06T15:00:00.000Z" }).hold, true, "unknown zone holds");
+  // rc-8.5.21 S3: the recipient's area code (612, Central) places the seller even with no stored zone;
+  // nothing at all (a non-geographic number, no zone, no property) holds
+  assert.equal(evaluateContactWindow({ ...row, timezone: null }, { now: "2026-10-07T02:30:00.000Z" }).allowed, false, "21:30 CDT by area code");
+  assert.equal(evaluateContactWindow({ ...row, timezone: null, to_phone_number: "+15005550100" }, { now: "2026-10-06T15:00:00.000Z" }).hold, true, "unknown zone holds");
 });
 
 // ── Gates ───────────────────────────────────────────────────────────────────

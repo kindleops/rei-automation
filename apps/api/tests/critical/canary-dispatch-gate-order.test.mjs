@@ -30,7 +30,9 @@ test("the contact window REFUSES outside local hours", () => {
   const verdict = evaluateContactWindow(canaryRow, { now: new Date("2026-09-19T07:15:00Z") });
   assert.equal(verdict.allowed, false);
   assert.equal(verdict.reason, "outside_local_send_window");
-  assert.equal(verdict.timezone, "America/Chicago");
+  // rc-8.5.21 S3: the recipient's area code (305, Eastern) is the basis; the stored Central zone narrows
+  assert.equal(verdict.timezone, "America/New_York");
+  assert.deepEqual([...verdict.zones].sort(), ["America/Chicago", "America/New_York"]);
 });
 
 test("the contact window ALLOWS inside local hours", () => {
@@ -78,7 +80,8 @@ test("THE CONTACT WINDOW IS EVALUATED FIRST, SO IT CANNOT BE MASKED", async () =
     new URL("../../src/lib/domain/queue/process-send-queue.js", import.meta.url), "utf8");
 
   const authorityAt = source.indexOf("evaluateCanonicalSendAuthority(");
-  const windowAt = source.indexOf("evaluate_contact_window(");
+  // rc-8.5.21 S3: the window runs inside the ONE dispatch decision (sms-engine#evaluateDispatchWindow)
+  const windowAt = source.indexOf("evaluateDispatchWindow(queue_row");
   assert.ok(authorityAt > 0 && windowAt > 0);
   assert.ok(windowAt < authorityAt, "the contact window must not sit behind the send authority");
 

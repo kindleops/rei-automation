@@ -29,7 +29,11 @@
 //      the seller's inbound: owner rule 2026-10-10, a reply to a live conversation may go at
 //      any hour). Not lawful ⇒ pull it into the session when ≥ 3 min is still possible
 //      (pull_into_session), else defer to the NEXT LAWFUL TIME: the next local open plus a
-//      seeded 2–24 min offset. rc-8.5.21: the verdict is queue/reply-timing.js#evaluateReplyTiming
+//      seeded 2–24 min offset. Owner ruling 2026-10-18: an in-session reply is category 1 (active
+//      seller conversation, queue/recipient-window-policy.js#classifyMessagingCategory): answered at any
+//      hour (a seller who texts at 23:30 is answered that night) unless the jurisdiction × category
+//      restriction table (queue/messaging-restrictions.js, empty by default) says otherwise; the
+//      session decides continuity only. rc-8.5.21: the verdict is queue/reply-timing.js#evaluateReplyTiming
 //      (the ONE function the dispatcher and the row gate also call). Recipient zones come from
 //      recipient-local evidence (area code, mailing state) intersected with the property zone; an
 //      unknown zone uses the conservative lower-48 intersection instead of a hold.
@@ -171,7 +175,7 @@ const median = (xs) => {
 /** The recipient zones a plan uses: the resolved evidence, else a legacy single zone, else unknown. */
 export function recipientZonesFor(a = {}) {
   const rz = a.recipientZones
-  if (rz && normalizeZones(rz.zones).length) return { zones: normalizeZones(rz.zones), certainty: rz.certainty || 'single', recipient_local: rz.recipient_local === true }
+  if (rz && normalizeZones(rz.zones).length) return { zones: normalizeZones(rz.zones), certainty: rz.certainty || 'single', recipient_local: rz.recipient_local === true, jurisdictions: Array.isArray(rz.jurisdictions) ? rz.jurisdictions : [] }
   if (validTimezone(a.timezone)) return { zones: [a.timezone], certainty: 'stored_only', recipient_local: false }
   return resolveRecipientZones({})
 }
@@ -263,7 +267,7 @@ export function planReplyDelay(a = {}) {
   //    the R3 enqueue check and the dispatch-time row gate call, so they can never disagree
   const zones = recipientZonesFor(a)
   const sessionMinutes = Math.max(0, policy.in_session_minutes - policy.session_margin_minutes)
-  const judge = (t) => evaluateReplyTiming({ at: iso(t), queuedAt: iso(t), inboundId: a.inboundId || 'turn', inboundAt: iso(inMs), zones: zones.zones, sessionMinutes, hours: { start_hour: policy.contact_window.start_hour, end_hour: policy.contact_window.end_hour } })
+  const judge = (t) => evaluateReplyTiming({ at: iso(t), queuedAt: iso(t), inboundId: a.inboundId || 'turn', inboundAt: iso(inMs), zones: zones.zones, sessionMinutes, jurisdictions: zones.jurisdictions || [], hours: { start_hour: policy.contact_window.start_hour, end_hour: policy.contact_window.end_hour } })
   const sessionEnd = inMs + sessionMinutes * MIN
   const inSession = (t) => sessionMinutes > 0 && t <= sessionEnd
   const zoneInfo = { certainty: zones.certainty, zones: zones.zones, recipient_local: zones.recipient_local }
@@ -273,9 +277,11 @@ export function planReplyDelay(a = {}) {
     window.lawful_basis = verdict.basis
   } else {
     const earliest = Math.max(inMs + DELAY_BOUNDS.min_minutes * MIN, nowMs, Number.isFinite(lastOut) ? lastOut + policy.min_spacing_minutes * MIN : 0)
-    if (policy.pull_into_session && inSession(earliest) && judge(earliest).lawful) {
+    const early = judge(earliest)
+    if (policy.pull_into_session && inSession(earliest) && early.lawful) {
       due = earliest + Math.round(u3 * Math.max(0, sessionEnd - earliest) / 1000) * 1000
-      window = { ...window, lawful_basis: 'in_session', deferred: false, pulled_into_session: true }
+      if (!judge(due).lawful) due = earliest
+      window = { ...window, lawful_basis: early.basis || 'in_session', deferred: false, pulled_into_session: true }
       reasons.push('pulled_into_session_window')
     } else {
       const open = verdict.next_permitted_at ? Date.parse(verdict.next_permitted_at) : null

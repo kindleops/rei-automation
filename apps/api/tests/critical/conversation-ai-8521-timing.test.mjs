@@ -43,12 +43,13 @@ test('recipient zones: absentee owner ⇒ the recipient zone AND the property zo
   assert.equal(localHoursOpen(Date.parse(`${day}T00:30:00Z`), absentee.zones), true)
   const local = resolveRecipientZones({ recipientPhone: '+12125550100', propertyGeography: { state: 'NY', zip: '10001' } })
   assert.deepEqual([local.zones, local.certainty], [[ET], 'single'])
+  // rc-8.5.21 S3: the property alone is never the recipient's zone ⇒ unknown ⇒ the continental intersection
   const propOnly = resolveRecipientZones({ recipientPhone: '+15555550101', propertyGeography: { state: 'TX', zip: '75201' } })
-  assert.deepEqual([propOnly.zones, propOnly.certainty], [[CT], 'property_only'])
+  assert.deepEqual([propOnly.zones, propOnly.certainty, propOnly.recipient_local], [[...UNKNOWN_ZONE_FALLBACK], 'unknown', false])
   const mailing = resolveRecipientZones({ recipientPhone: '+15555550101', mailingGeography: { state: 'CA' }, propertyGeography: { state: 'TX', zip: '75201' } })
   assert.deepEqual([[...mailing.zones].sort(), mailing.recipient_local], [[CT, PT].sort(), true])
   const stored = resolveRecipientZones({ recipientPhone: '+15555550101', storedTimezone: 'Central' })
-  assert.deepEqual([stored.zones, stored.certainty], [[CT], 'stored_only'])
+  assert.deepEqual([stored.zones, stored.certainty], [[...UNKNOWN_ZONE_FALLBACK], 'unknown'])
   const unknown = resolveRecipientZones({ recipientPhone: null })
   assert.deepEqual([unknown.zones, unknown.certainty], [[...UNKNOWN_ZONE_FALLBACK], 'unknown'])
   // the unknown window is the intersection: open late morning Eastern, closed at 08:30 Eastern
