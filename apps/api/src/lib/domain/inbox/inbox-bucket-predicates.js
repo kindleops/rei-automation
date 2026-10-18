@@ -56,7 +56,8 @@ export const RESOLVED_REPLY_INTENTS = NON_ACTIONABLE_REPLY_INTENTS;
 // Replies that carry no engagement: they leave the thread where it was.
 export const NON_ENGAGEMENT_REPLY_INTENTS = Object.freeze(["reaction_only", "acknowledgement"]);
 // Dispositions that close the thread for this property (derived "dead").
-export const CLOSED_DISPOSITIONS = Object.freeze(["sold", "unqualified"]);
+// owner 2026-10-17: declined_unverified closes the thread for THIS property (Dead), never follow_up
+export const CLOSED_DISPOSITIONS = Object.freeze(["sold", "unqualified", "declined_unverified"]);
 
 function latestInboundIntent(row = {}) {
   const direction = normalizeDirection(row.latest_message_direction || row.latest_direction || row.direction);

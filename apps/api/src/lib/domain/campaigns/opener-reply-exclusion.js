@@ -61,7 +61,7 @@ export const PROPERTY_SCOPED_NOT_OWNER = Object.freeze(new Set([
 export const PHONE_SCOPED_NOT_OWNER = Object.freeze(new Set(['wrong_number', 'wrong_person']))
 
 /** OWNER DECISION 2026-10-17: declined engagement, ownership UNVERIFIED — a property × contact hold (not a denial). */
-export const PROPERTY_SCOPED_DECLINED = Object.freeze(new Set(['ownership_declined_unverified']))
+export const PROPERTY_SCOPED_DECLINED = Object.freeze(new Set(['ownership_declined_unverified', 'declined_unverified']))
 
 const ALL_NOT_OWNER = new Set([...PROPERTY_SCOPED_NOT_OWNER, ...PHONE_SCOPED_NOT_OWNER, ...PROPERTY_SCOPED_DECLINED])
 

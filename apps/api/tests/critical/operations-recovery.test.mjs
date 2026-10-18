@@ -21,7 +21,7 @@ const OP = '11111111-1111-4111-8111-111111111111'
 const cls = (row, o = {}) => classifyRecoveryCandidate(normalizeConversationFacts(row), { now: T0, ...o })
 
 test('classes: exactly the seven, one per candidate', () => {
-  assert.deepEqual(RECOVERY_CLASSES, ['research_worthy', 'eligible_for_approved_followup', 'needs_human_review', 'currently_unworkable', 'suppressed', 'wrong_owner_or_number', 'previously_closed'])
+  assert.deepEqual(RECOVERY_CLASSES, ['research_worthy', 'eligible_for_approved_followup', 'needs_human_review', 'currently_unworkable', 'suppressed', 'wrong_owner_or_number', 'ownership_declined_hold', 'previously_closed'])
 })
 
 test('suppressed: opt-out, suppression list, do-not-contact and the thread flag all exclude — before any signal is weighed', () => {

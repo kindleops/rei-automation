@@ -158,7 +158,7 @@ export function verifyContactPermission(f) {
   if (denial) blocks.push('ownership_denied')
   // OWNER DECISION 2026-10-17: a polite decline to the ownership question is a property × contact HOLD
   // with ownership UNVERIFIED — never "confirmed", never a denial fact
-  const declined = !denial && (OWNERSHIP_DECLINED_INTENTS.some((i) => intents.has(i)) || f.ownership_evidence === 'declined_unverified')
+  const declined = !denial && (OWNERSHIP_DECLINED_INTENTS.some((i) => intents.has(i)) || f.ownership_evidence === 'declined_unverified' || disp === 'declined_unverified')
   if (declined) blocks.push('ownership_declined_unverified')
   // real ownership evidence only: an explicit yes, a seller statement that implies ownership, or the canonical
   // ledger's confirmation — never the pipeline stage rank (8.5.20 marked every closed deal "confirmed")

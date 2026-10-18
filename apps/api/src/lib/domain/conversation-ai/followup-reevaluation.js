@@ -18,7 +18,7 @@ export const MAX_OVERDUE_MS = 6 * 60 * 60 * 1000
 
 const STAGE_OF_KIND = Object.freeze({ ownership: 0, interest: 1, asking_price: 2, condition: 3 })
 const STAGES = ['S1_ownership', 'S2_interest', 'S3_asking_price', 'S4_condition', 'S5_offer']
-const DISINTEREST = new Set(['not_interested', 'opt_out', 'stop_texting', 'wrong_number', 'hostile_or_legal', 'property_specific_non_owner', 'former_owner_respondent', 'not_owner'])
+const DISINTEREST = new Set(['not_interested', 'opt_out', 'stop_texting', 'wrong_number', 'hostile_or_legal', 'property_specific_non_owner', 'former_owner_respondent', 'not_owner', 'ownership_declined_unverified'])
 
 /**
  * @param {object} a

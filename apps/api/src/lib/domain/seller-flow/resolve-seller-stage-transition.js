@@ -616,6 +616,20 @@ const BLOCKING_INTENTS = Object.freeze({
     reasoning_code: "HOLD_NOT_OWNER_PROPERTY_SCOPED_REVIEW",
     workflow_event: "AUTOMATION_NEEDS_REVIEW",
   },
+  // OWNER DECISION LOCKED 2026-10-17: a polite decline / bare "Not interested" to the OWNERSHIP
+  // question — declined engagement, ownership UNVERIFIED. The DISTINCT disposition declined_unverified
+  // (never not_interested: that is the 30-day nurture). Property-scoped: no contactability write, no
+  // ownership_patch (never recorded as not_owner), follow-ups cancelled, no review item.
+  ownership_declined_unverified: {
+    contactability: null,
+    disposition: DISPOSITION_CODES.DECLINED_UNVERIFIED,
+    operational_status: OPERATIONAL_STATUS_CODES.PAUSED,
+    next_action: NEXT_ACTIONS.NO_ACTION_CONTACT_BLOCKED,
+    cancel_followups: true,
+    review_required: false,
+    reasoning_code: "HOLD_OWNERSHIP_DECLINED_UNVERIFIED_PROPERTY_SCOPED",
+    workflow_event: "AUTOMATION_BLOCKED",
+  },
   // Canonical intent for a "former_owner" relationship claim (sold the
   // property, no longer owns it). Distinct disposition from a bare not-owner
   // claim for accurate telemetry/dashboard reporting.

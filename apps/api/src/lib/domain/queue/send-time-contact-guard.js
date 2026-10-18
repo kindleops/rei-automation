@@ -119,7 +119,7 @@ export const PROPERTY_SCOPED_NOT_OWNER = Object.freeze(new Set([
 ]));
 export const PHONE_SCOPED_NOT_OWNER = Object.freeze(new Set(["wrong_number", "wrong_person"]));
 /** OWNER DECISION 2026-10-17 — same set as opener-reply-exclusion.js PROPERTY_SCOPED_DECLINED. */
-export const PROPERTY_SCOPED_DECLINED = Object.freeze(new Set(["ownership_declined_unverified"]));
+export const PROPERTY_SCOPED_DECLINED = Object.freeze(new Set(["ownership_declined_unverified", "declined_unverified"]));
 const OPT_OUT_SIGNALS = new Set(["opt_out", "opted_out", "stop", "dnc", "do_not_contact", "suppressed", "unsubscribed"]);
 const BLOCKING_CONTACTABILITY = new Set(["opt_out", "opted_out", "suppressed", "do_not_contact", "dnc", "invalid", "blocked"]);
 export const SEND_TIME_REPLY_INTENTS = Object.freeze([...PROPERTY_SCOPED_NOT_OWNER, ...PHONE_SCOPED_NOT_OWNER, ...PROPERTY_SCOPED_DECLINED, ...OPT_OUT_SIGNALS]);

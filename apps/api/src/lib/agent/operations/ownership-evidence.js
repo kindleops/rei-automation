@@ -37,6 +37,7 @@ export function nurtureIntentFor(f, c, { now = Date.now(), rules = NURTURE_INTEN
   if (lm?.intent !== 'not_interested' && f.thread?.disposition !== 'not_interested') return { intent: null, reason: 'not_disinterest' }
   if (c.permission?.suppression) return { intent: null, reason: 'suppressed' }
   if (c.permission?.wrong_owner_or_number) return { intent: null, reason: 'ownership_denied_or_wrong_number_property_scoped' }
+  if (c.permission?.blocks?.includes('ownership_declined_unverified') || f.thread?.disposition === 'declined_unverified') return { intent: null, reason: 'ownership_declined_unverified_hold' }
   if (f.queue?.pending > 0 || f.followup_state?.active > 0) return { intent: null, reason: 'already_scheduled' }
   const at = Date.parse(lm?.at || f.inbound?.last?.at || '')
   if (!Number.isFinite(at)) return { intent: null, reason: 'reply_time_unknown' }

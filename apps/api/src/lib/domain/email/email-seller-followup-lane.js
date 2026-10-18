@@ -29,7 +29,8 @@ import { BLOCKING_CONTACTABILITY } from './email-revalidators.js'
 const clean = (v) => String(v ?? '').trim()
 const lower = (v) => clean(v).toLowerCase()
 
-const NEVER_INTENTS = new Set(['opt_out', 'stop', 'dnc', 'do_not_contact', 'wrong_number', 'wrong_person', 'hostile_or_legal'])
+// owner 2026-10-17: a declined-unverified contact gets no follow-up on any channel for that property
+const NEVER_INTENTS = new Set(['opt_out', 'stop', 'dnc', 'do_not_contact', 'wrong_number', 'wrong_person', 'hostile_or_legal', 'ownership_declined_unverified'])
 const NURTURE_INTENTS = new Set(['not_interested', 'need_time', 'not_now', 'not_ready'])
 
 export function followUpTemplateKey(intent, useCase) {

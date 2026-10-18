@@ -22,7 +22,7 @@ import {
   verifyContactPermission, sellerWaiting, closedVerdict, languageSupported, stageRank, ms, latest,
 } from './conversation-facts.js'
 
-export const RECOVERY_CLASSES = Object.freeze(['research_worthy', 'eligible_for_approved_followup', 'needs_human_review', 'currently_unworkable', 'suppressed', 'wrong_owner_or_number', 'previously_closed'])
+export const RECOVERY_CLASSES = Object.freeze(['research_worthy', 'eligible_for_approved_followup', 'needs_human_review', 'currently_unworkable', 'suppressed', 'wrong_owner_or_number', 'ownership_declined_hold', 'previously_closed'])
 export const RECOVERY_CLASSIFIER_VERSION = 'recovery-classifier.v1'
 
 /** Re-engagement programs a follow-up can belong to. Only those in `approved_programs` ever make a candidate eligible. */
@@ -122,6 +122,9 @@ export function classifyRecoveryCandidate(f, { now = Date.now(), approved_progra
   // 1–2 contact permission first: nothing below may label a blocked conversation workable
   if (permission.suppression) return done('suppressed', permission.blocks.filter((b) => !['wrong_number', 'ownership_denied'].includes(b)))
   if (permission.wrong_owner_or_number) return done('wrong_owner_or_number', permission.blocks)
+  // owner 2026-10-17: declined the ownership question, ownership UNVERIFIED — a property hold, never a
+  // nurture program, never "workable"
+  if (permission.blocks.includes('ownership_declined_unverified')) return done('ownership_declined_hold', ['ownership_declined_unverified'])
   // 3 closed deals (a seller message after the close reopens the evaluation)
   const closed = closedVerdict(f)
   if (closed.closed) return done('previously_closed', ['closed_without_newer_seller_message', ...(closed.after_not_interested ? ['closed_after_not_interested_policy_says_30_day_follow_up'] : [])])

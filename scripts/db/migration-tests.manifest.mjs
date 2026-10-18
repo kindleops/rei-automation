@@ -295,6 +295,17 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261017100000_contact_property_resolution_declined_unverified_rollback_posttest.sql')],
   },
+  // ── owner 2026-10-17: legacy disposition backfill not_interested → declined_unverified (DISPOSITION ONLY) ──
+  {
+    id: 'inbox_disposition_declined_unverified_backfill',
+    setup: [SHIM, DURABILITY, S3, OPS_PUBLIC_BASELINE, GRAPH_LIVE_FUNCTIONS_BASELINE, CPR_LIVE_CONSTRAINTS, CPR_DECLINED, 'scripts/db/fixtures/disposition_backfill_seed.sql'],
+    pretest: M('PROPOSED_20261017110000_inbox_disposition_declined_unverified_backfill_pretest.sql'),
+    // the dry run (selects only) runs right before the apply, exactly as an operator would
+    apply: [{ fixture: M('PROPOSED_20261017110000_inbox_disposition_declined_unverified_backfill_dryrun.sql') }, M('PROPOSED_20261017110000_inbox_disposition_declined_unverified_backfill.sql')],
+    posttest: [M('PROPOSED_20261017110000_inbox_disposition_declined_unverified_backfill_posttest.sql')],
+    rollback: [M('PROPOSED_20261017110000_inbox_disposition_declined_unverified_backfill_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261017110000_inbox_disposition_declined_unverified_backfill_rollback_posttest.sql')],
+  },
   // ── P0 automation-hold registry (rc-8.5.20-holds; production gets it via hotfix/automation-holds) ──
   {
     id: 'automation_holds_registry',

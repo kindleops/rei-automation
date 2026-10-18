@@ -79,7 +79,8 @@ export function threadAdvancedPastKind(kind, lifecycle_stage) {
   return anchor >= 0 && current >= 0 && current > anchor;
 }
 /** Identity: dispositions that mean this phone is not (or no longer) the owner. */
-const NON_OWNER_DISPOSITIONS = new Set(["wrong_number", "wrong_person", "not_owner", "non_owner", "former_owner", "sold", "suppressed", "unqualified"]);
+// owner 2026-10-17: declined_unverified (ownership UNVERIFIED) is never nudged either
+const NON_OWNER_DISPOSITIONS = new Set(["wrong_number", "wrong_person", "not_owner", "non_owner", "former_owner", "sold", "suppressed", "unqualified", "declined_unverified"]);
 
 // S3_ASKING_PRICE (owner, 2026-10-10): silence after our "do you have an
 // asking price in mind?" question re-asks the price at 24h, same chain shape.
@@ -147,7 +148,7 @@ export const OFFER_USE_CASES = Object.freeze(
 const DISQUALIFYING_INTENTS = new Set([
   "opt_out", "wrong_number", "wrong_person", "hostile_or_legal", "timing_complaint",
   "not_interested", "need_time", "listed_or_unavailable", "property_specific_non_owner",
-  "former_owner_respondent", "non_owner_referral",
+  "former_owner_respondent", "non_owner_referral", "ownership_declined_unverified",
 ]);
 /** "please don't call", "stop texting me", "no me escriba" — never nudge them. */
 const NO_CONTACT_REQUEST_RE =

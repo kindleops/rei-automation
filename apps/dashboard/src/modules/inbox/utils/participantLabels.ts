@@ -176,6 +176,8 @@ const SELLER_AUTHORITY_INTENTS = new Set([
 
 const OWNERSHIP_CONTRADICTION_FLAGS = new Set([
   'wrong_person', 'likely_renter', 'tenant', 'property_manager',
+  // owner 2026-10-17: declined the ownership question — ownership UNVERIFIED, never shown as seller authority
+  'declined_unverified',
 ])
 
 export function hasSellerAuthorityEvidence(

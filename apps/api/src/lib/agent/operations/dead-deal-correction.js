@@ -49,6 +49,7 @@ export function buildNotInterestedCorrectionPlan(facts = [], { now = Date.now() 
     if (!o?.opportunity_id || !UUID.test(o.opportunity_id)) { skip('no_opportunity_id'); continue }
     if (seenOpp.has(o.opportunity_id)) { skip('duplicate_opportunity'); continue }
     if (!c.permission.permitted && (c.permission.suppression || c.permission.wrong_owner_or_number)) { skip('permission_block'); continue }
+    if (c.permission.blocks.includes('ownership_declined_unverified')) { skip('ownership_declined_unverified_hold'); continue }
     seenOpp.add(o.opportunity_id)
     const niAt = ms(f.inbound.last_meaningful?.at) ?? ms(f.inbound.last?.at)
     const due = Math.max((niAt ?? now) + 30 * DAY, now)

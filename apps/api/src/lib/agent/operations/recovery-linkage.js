@@ -50,6 +50,8 @@ export function recoveryNextAction(c = {}) {
   const out = (action, owner, extra = {}) => ({ version: RECOVERY_LINKAGE_VERSION, action, owner, research: false, valuation: false, sends: 0, evidence_refs: (c.evidence_refs || []).slice(0, 8), ...extra })
   switch (c.class) {
     case 'suppressed': return out('none_suppressed_no_contact', 'none')
+    // owner 2026-10-17: declined the ownership question, ownership unverified — hold; no outreach, no nurture
+    case 'ownership_declined_hold': return out('none_ownership_declined_unverified_hold', 'none')
     case 'wrong_owner_or_number': return out(reasons.includes('ownership_denied') ? 'none_ownership_denied_for_this_property' : 'none_wrong_number_no_owner_outreach', 'none')
     case 'previously_closed':
       return reasons.includes('closed_after_not_interested_policy_says_30_day_follow_up')

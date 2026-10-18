@@ -196,7 +196,7 @@ const RAW = {
     description: "OWNER DECISION 2026-10-17: a polite decline (\"No thanks\") to the ownership question. Declined engagement, ownership UNVERIFIED. A property × contact no-recontact hold; never the 30-day selling nurture, never verified non-ownership.",
     terminal_hint: "no_reply_required",
     reply_policy: { reply_required: false, reply_permitted: false, escalate_to_human: false, objective: "Hold this contact for this property; do not nurture, do not re-ask ownership." },
-    state_hints: { lifecycle_stage: null, operational_status: "paused", lead_temperature: "cold", disposition: "none", automation: "stop" },
+    state_hints: { lifecycle_stage: null, operational_status: "paused", lead_temperature: "cold", disposition: "declined_unverified", automation: "stop" },
     classifier_aliases: ["ownership_declined_unverified", "ownership_declined"],
     compliance: NO_COMPLIANCE,
   },
