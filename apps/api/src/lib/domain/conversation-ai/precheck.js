@@ -42,7 +42,7 @@ const UPDATE_ONLY_INTENTS = new Set(['wrong_number'])
 // pre-check also reads a bare "No" against our last question itself.
 const OWNERSHIP_DENIED_INTENTS = new Set(['property_specific_non_owner', 'ownership_denied'])
 
-export function deterministicPrecheck({ text, inboundId, deterministic = null, eligibility = null, lastQuestionKind = null }) {
+export function deterministicPrecheck({ text, inboundId, deterministic = null, eligibility = null, lastQuestionKind = null, ownershipAmbiguous = false }) {
   const body = String(text ?? '')
   const scope = classifyStopScope(body)
   const signals = {
@@ -85,6 +85,14 @@ export function deterministicPrecheck({ text, inboundId, deterministic = null, e
   }
   // rc-8.5.20: the ONE shared bare-No matcher (answers.js), also used by the fact ledger
   const bareOwnershipDenial = lastQuestionKind === 'ownership' && bareNoAnswer(body).ownership_denial
+  // rc-8.5.21 P0: a denial after ownership questions about SEVERAL properties (separate messages and
+  // follow-up fragments included) is never a property denial: it is resolved by a person (the thread hold)
+  if (ownershipAmbiguous === true && (OWNERSHIP_DENIED_INTENTS.has(String(signals.deterministic_intent)) || bareOwnershipDenial || bareNoAnswer(body).matched)) {
+    return {
+      decided: true, reason: 'ownership_attribution_unresolved', signals: { ...signals, last_question_kind: lastQuestionKind, ownership_ambiguous: true },
+      decision: makeDecision({ outcome: 'NEEDS_REVIEW', confidence: 1, source_message_ids: src, stage_evidence: { stage: 'unknown', evidence_message_ids: src, rationale: 'deterministic pre-check: one answer to ownership questions about several properties — which property is unresolved (thread hold, a person decides)' } }),
+    }
+  }
   if (OWNERSHIP_DENIED_INTENTS.has(String(signals.deterministic_intent)) || bareOwnershipDenial) {
     return {
       decided: true, reason: 'ownership_denied', signals: { ...signals, last_question_kind: lastQuestionKind, bare_no_after_ownership: bareOwnershipDenial },

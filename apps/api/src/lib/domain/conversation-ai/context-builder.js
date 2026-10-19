@@ -11,6 +11,7 @@
 import { factSummary } from './facts.js'
 import { buildThreadLedger, factLedgerOf } from './ledger.js'
 import { blockedQuestionKinds, isDeflectionToOffer, questionKindOf, questionLedger } from './questions.js'
+import { attributeInbounds } from './property-facts.js'
 import { firstNameOnly, maskText, threadRef } from './pii.js'
 
 export const CONTEXT_VERSION = 'conv-ai.context.v1'
@@ -91,7 +92,11 @@ export function buildConversationContext({
   const firstName = rawFirst && PLACEHOLDER_FIRST_NAME_RE.test(rawFirst) ? null : rawFirst
   // OUR last question before this inbound -- every reply is read against it.
   const lastOutbound = [...ordered].reverse().find((m) => m.direction === 'outbound' && m.id !== inbound.id) || null
-  const lastQuestionKind = lastOutbound ? questionKindOf(lastOutbound) : 'none'
+  // rc-8.5.21 P0: read against ALL our questions since the seller's previous reply (a follow-up fragment
+  // "And how about <B>?" continues the question before it), never the last outbound alone
+  const openAtt = attributeInbounds({ messages: ordered.map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.at, use_case: m.use_case || null, property_id: m.property_id || null })), properties: properties.map((p) => ({ property_id: p.property_id, address: p.address || p.property_address || null })), questionKindOf }).get(String(inbound.id)) || null
+  const lastQuestionKind = openAtt?.last_question_kind || (lastOutbound ? questionKindOf(lastOutbound) : 'none')
+  const ownershipAmbiguous = openAtt?.ambiguous === true && !openAtt?.clauses?.length
   const requiredNextObjective = requiredObjectiveFor({ inboundText: inbound.body, ledger, facts, deterministic })
   const maskOpts = { maskNames: names.full_names || [], keepFirstName: firstName }
   const recent = ordered.slice(-MAX_THREAD_MESSAGES)
@@ -141,6 +146,7 @@ export function buildConversationContext({
     at_by_id: Object.fromEntries(recent.map((m) => [m.id, m.at])),
     mask: maskOpts,
     last_question_kind: lastQuestionKind,
+    ownership_ambiguous: ownershipAmbiguous,
     required_next_objective: requiredNextObjective,
   }
 }

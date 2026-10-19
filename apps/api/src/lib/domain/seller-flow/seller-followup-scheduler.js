@@ -17,7 +17,7 @@ import crypto from "node:crypto";
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { enqueueSendQueueItem } from "@/lib/supabase/sms-engine.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
-import { lifecycleLive as followUpLifecycleLive, planFollowUpFromScheduler } from "@/lib/domain/followups/followup-lifecycle.js";
+import { lifecycleLive as followUpLifecycleLive, planFollowUpFromScheduler, followUpKindFor, loadPropertyContactBlock, SELLING_NURTURE_KINDS } from "@/lib/domain/followups/followup-lifecycle.js";
 import {
   isNurtureIntent,
   loadNurtureRenderContext,
@@ -531,6 +531,23 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
   // validates and re-checks it, then writes ONE nonempty send-ready row. Absent / off: unchanged.
   if (context.lifecycle_bypass !== true && (await followUpLifecycleLive({ readSwitch: context.lifecycle_read_switch || null, supabase }))) {
     return planFollowUpFromScheduler({ intent, plan, payload: buildPayload(base_dedupe_key), context: persisted_context, supabase });
+  }
+
+  // rc-8.5.21 P0 HARD INVARIANT (the legacy writer too): a SELLING nurture requires a selling-intent
+  // answer. When the seller's latest reply answered an ownership question (one or several, separate
+  // messages included) the nurture is never written: the same verdict the lifecycle planner and the
+  // materializer return (followup-lifecycle.js#propertyContactBlock). A failed read writes as before:
+  // the send-time contact guard re-reads the same evidence before anything can send.
+  if (SELLING_NURTURE_KINDS.has(followUpKindFor(intent, persisted_context))) {
+    let block = null;
+    try {
+      block = await loadPropertyContactBlock({ supabase, thread_key: normalized_thread_key, phone: to_phone_number, property_id: clean(context.property_id) || null, kind: followUpKindFor(intent, persisted_context) });
+    } catch {
+      block = null;
+    }
+    if (block?.blocked) {
+      return { ok: false, skipped: true, followup_created: false, reason: block.reason, thread_key: normalized_thread_key };
+    }
   }
 
   let dedupe_key = base_dedupe_key;

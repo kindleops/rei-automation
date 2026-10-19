@@ -8,6 +8,8 @@ import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js'
 import { loadInboundRow, loadShadowContext } from '@/lib/domain/conversation-ai/context-loader.js'
 import { ledgerFromContextInput } from '@/lib/domain/conversation-ai/fact-ledger.js'
 import { questionKindOf } from '@/lib/domain/conversation-ai/questions.js'
+import { attributeInbounds } from '@/lib/domain/conversation-ai/property-facts.js'
+import { messagesOfInput } from '@/lib/domain/conversation-ai/property-ownership.js'
 import { shadowAllowed } from '@/lib/domain/conversation-ai/policy.js'
 import { resolveThreadContinuity } from '@/lib/domain/conversation-ai/persona-continuity.js'
 import { normalizeDelayPolicy } from '@/lib/domain/conversation-ai/turns/delay-planner.js'
@@ -69,13 +71,16 @@ export async function routeInboundToTurn({ providerMessageSid, inboundVersion = 
   const ledger = ledgerFromContextInput(loaded.input, { queueRows, now })
   const inb = loaded.input.inbound
   const lastOut = [...(loaded.input.thread || [])].filter((m) => m.direction === 'outbound' && (Date.parse(m.at) || 0) <= (Date.parse(inb.at) || 0)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).pop() || null
+  // rc-8.5.21 P0: the question this inbound answers is read from ALL our questions since the seller's
+  // previous reply (follow-up fragments included), never the last outbound alone
+  const openAtt = attributeInbounds({ messages: messagesOfInput(loaded.input), properties: loaded.input.properties || [], questionKindOf }).get(String(inb.id)) || null
   const continuity = resolveThreadContinuity({ sentRows: queueRows, threadState: threadState[0] || null, inboundTo: loaded.row.to_phone_number })
   const delayPolicy = await readDelayPolicy(supabase)
   // recipient-local zone evidence (area code + mailing state) ∩ the property zone (reply-timing.js)
   const recipientZones = resolveRecipientZones({ recipientPhone: loaded.row.from_phone_number, propertyGeography: loaded.geography, storedTimezone: loaded.timezone })
   const planArgs = { ...planInputsFromThread({ thread: loaded.input.thread, inbound: inb, ledger, queueRows, timezone: loaded.timezone, recipientZones, now, extra }), policy: delayPolicy }
   return handleConversationEvent({
-    event: { kind: 'inbound', thread_key: tk, inbound: { id: String(inb.id), at: inb.at, body: inb.body }, deterministic, lastQuestionKind: lastOut ? questionKindOf(lastOut) : null, ledger },
+    event: { kind: 'inbound', thread_key: tk, inbound: { id: String(inb.id), at: inb.at, body: inb.body }, deterministic, lastQuestionKind: openAtt ? openAtt.last_question_kind : lastOut ? questionKindOf(lastOut) : null, ownershipAmbiguous: openAtt?.ambiguous === true && !openAtt?.clauses?.length, ledger },
     store: turnStore || createSupabaseTurnStore(supabase),
     enqueueAt: (o) => runtimeStore.enqueueEventAt(o),
     planArgs,

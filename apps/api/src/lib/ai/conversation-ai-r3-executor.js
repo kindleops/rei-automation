@@ -278,6 +278,15 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   const freshInput = { ...state.input, inbound: { ...state.input.inbound, ...(inboundRow.body != null ? { body: inboundRow.body } : {}) } }
   // blind-eval S1: the per-property facts on FRESH state (incl. persisted contact × property resolutions)
   const ledger = attachPropertyFactsFromInput(ledgerFromContextInput(freshInput, { modelFacts: record.judgment?.facts_extracted || [], queueRows: state.queueRows || [], now }), freshInput)
+  // rc-8.5.21 P0: no autonomous action — above all no close — when the turn's ownership attribution is
+  // unresolved (one reply after ownership questions about several properties, separate messages
+  // included): the recorded thread hold's reason, a person decides which property it was about
+  {
+    const po = ledger?.property?.ownership
+    if (po?.inbound?.ambiguous && (po.thread_hold || record.reply?.category === 'not_interested_close' || /^(?:no|nope|nah|not\s+interested|no\s+thanks?)\b/i.test(String(inboundRow.body || '').trim()))) {
+      return held(['ownership_attribution_unresolved'], { ledger: ledgerSummary(ledger) })
+    }
+  }
   const followup = planActions.find((a) => a?.type === ACTIONS.SCHEDULE_FOLLOWUP) || null
   const companyIdentity = state.company_identity || NO_COMPANY_IDENTITY
   const timing = evaluateReplyTiming({ at: now, queuedAt: now, inboundId, inboundAt: inboundRow.at, zones: zones.zones })

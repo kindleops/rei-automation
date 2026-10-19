@@ -67,12 +67,16 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   const ownership = { class: own.class, action: own.action, reasons: own.reasons, version: own.version }
   if (own.action === 'suppressed_existing') return plan([{ type: ACTIONS.SUPPRESS, cancel_pending: false, reason: own.reasons[0] }], 'existing_suppression', { ownership })
   if (own.action === 'no_owner_outreach') return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: 'wrong_number' }, source_message_id: inboundId }, { type: ACTIONS.NO_RESPONSE, reason: 'wrong_number_no_owner_outreach' }], 'wrong_number_no_owner_outreach', { ownership })
+  // blind-eval S1 (SCONV-03) + rc-8.5.21 P0: one bare answer to ownership questions about SEVERAL properties
+  // (one message naming both, or SEPARATE questions / follow-up fragments) says nothing about which one —
+  // a thread HOLD for a person (owner 10-17 rule), never a denial of the latest, never a nurture or a close.
+  // Decided before the generic eligibility holds so the reason stays precise (the recorded thread hold).
+  if (ledger?.property?.ownership?.inbound?.ambiguous && ledger.property.ownership.thread_hold) {
+    return plan([{ type: ACTIONS.HOLD, reason: 'ownership_denial_property_unresolved', evidence: { basis: ledger.property.ownership.inbound.basis } }], 'ownership_denial_property_unresolved', { ownership })
+  }
   if (own.action === 'hold_conflict') return plan([{ type: ACTIONS.HOLD, reason: 'ownership_evidence_conflict', evidence: own.evidence }], 'ownership_evidence_conflict', { ownership })
   if (own.action === 'hold_unreadable') return plan([{ type: ACTIONS.HOLD, reason: own.reasons[0] || 'eligibility_unreadable' }], 'eligibility_unreadable', { ownership })
-  // blind-eval S1 (SCONV-03): one bare answer to ownership questions about SEVERAL properties says
-  // nothing about which one — a thread HOLD for a person (owner 10-17 rule), never a denial of the latest
   const pOwn = ledger?.property?.ownership
-  if (pOwn?.inbound?.ambiguous && pOwn.thread_hold) return plan([{ type: ACTIONS.HOLD, reason: 'ownership_denial_property_unresolved', evidence: { basis: pOwn.inbound.basis } }], 'ownership_denial_property_unresolved', { ownership })
   // blind-eval v2 (MUL-02/05/14): a mixed per-property answer records each property's answer and
   // CONTINUES the conversation on the one property they own / would sell (its next stage question);
   // the denied / not-for-sale property is closed for it (its denial / nurture is the inbound path's)

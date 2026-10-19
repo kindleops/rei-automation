@@ -80,16 +80,18 @@ export function routeConversationEvent(e = {}) {
   const det = e.deterministic || null
   // 1. stop: deterministic, immediate, no model — beats everything
   if (isStopRequest(text) || ['opt_out', 'stop_texting'].includes(String(det?.intent)) || det?.compliance_flag === 'stop_texting') return out('opt_out', ROUTES.SUPPRESS_NOW, ['stop_request'])
-  const pre = deterministicPrecheck({ text, inboundId: 'event', deterministic: det, lastQuestionKind: e.lastQuestionKind ?? null })
+  const pre = deterministicPrecheck({ text, inboundId: 'event', deterministic: det, lastQuestionKind: e.lastQuestionKind ?? null, ownershipAmbiguous: e.ownershipAmbiguous === true })
   if (pre.decided) {
     const o = pre.decision.outcome
     if (o === 'SUPPRESS') return out('opt_out', ROUTES.SUPPRESS_NOW, [`precheck:${pre.reason}`])
     if (o === 'UPDATE_ONLY') return out('ownership_denied', ROUTES.CLOSE_NO_REPLY, [`precheck:${pre.reason}`])
     if (o === 'NO_RESPONSE') return out('hostile', ROUTES.NO_REPLY, [`precheck:${pre.reason}`])
+    // rc-8.5.21 P0: an unresolved ownership attribution is decided at the turn (HOLD + one operator item)
+    if (pre.reason === 'ownership_attribution_unresolved') return out('meaningful_update', ROUTES.SCHEDULE_TURN, ['precheck:ownership_attribution_unresolved'], true)
     return out('new_inbound', e.openTurn ? ROUTES.SCHEDULE_TURN : ROUTES.JOIN_OR_IGNORE, [`precheck:${pre.reason}`]) // empty body / media
   }
   const own = e.ledger?.facts?.ownership?.value
-  if (own === 'denied' || own === 'former_owner') {
+  if ((own === 'denied' || own === 'former_owner') && e.ownershipAmbiguous !== true) {
     const lastId = e.ledger?.last_message?.id
     const fromThis = (e.ledger.facts.ownership.source_message_ids || []).includes(lastId)
     // rc-8.5.21 (Phase 3A): a "sold" / denial the same message takes back, or one that carries a
