@@ -16,7 +16,7 @@
 // "stop calling, text me" (stop_other_action scope) is NOT an opt-out: it passes
 // to the model, and the AI policy lists it as a never-auto category anyway.
 import { matchMultilingualOptOut } from '../classification/multilingual-opt-out.js'
-import { analyzeContactRevocation } from '../classification/multilingual-contact-revocation.js'
+import { analyzeContactRevocation, isChannelPreferenceOnly } from '../classification/multilingual-contact-revocation.js'
 import { classifyStopScope, STOP_SCOPE } from '../classification/stop-scope.js'
 import { bareNoAnswer } from './answers.js'
 import { makeDecision } from './contract.js'
@@ -57,6 +57,8 @@ export function deterministicPrecheck({ text, inboundId, deterministic = null, e
     multilingual_opt_out: matchMultilingualOptOut(body)?.rule_id || null,
     possible_opt_out: revocation.possible_opt_out?.rule_id || null,
     multilingual_wrong_number: revocation.wrong_number?.rule_id || null,
+    // "Don't call, text is fine": a channel preference in any language, never an SMS opt-out
+    channel_preference_only: isChannelPreferenceOnly(body),
     stop_verb: STOP_VERB_RE.test(body),
     stop_scope: scope,
     legal: LEGAL_RE.test(body),
@@ -72,7 +74,8 @@ export function deterministicPrecheck({ text, inboundId, deterministic = null, e
   const otherAction = scope === STOP_SCOPE.OTHER_ACTION
   // a multilingual revocation names a communication / list / our-outreach object, so it wins over
   // an other-action stop scope exactly as in classify() ("Dejen de preguntarme por la casa")
-  if (signals.multilingual_opt_out || (!otherAction && (signals.bare_stop || (signals.stop_verb && scope === STOP_SCOPE.COMMUNICATION)))) return suppress('stop_or_opt_out')
+  const channelOnly = signals.channel_preference_only && !signals.bare_stop
+  if (signals.multilingual_opt_out || (!otherAction && !channelOnly && (signals.bare_stop || (signals.stop_verb && scope === STOP_SCOPE.COMMUNICATION)))) return suppress('stop_or_opt_out')
   if (signals.compliance_flag === 'stop_texting' && !otherAction) return suppress('classifier_stop_texting')
   if (SUPPRESS_INTENTS.has(String(signals.deterministic_intent)) && !otherAction) return suppress(`classifier_${signals.deterministic_intent}`)
   if (signals.legal) return suppress('legal_language', 'hostile_or_legal')

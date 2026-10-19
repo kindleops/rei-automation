@@ -27,7 +27,7 @@ import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multi
 import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
 import { assessDealEconomics, isPriceFarAboveValue, PRICE_GAP_REASON_CODE } from "@/lib/domain/inbox/deal-economics-gate.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
-import { analyzeContactRevocation } from "@/lib/domain/classification/multilingual-contact-revocation.js";
+import { analyzeContactRevocation, isChannelPreferenceOnly } from "@/lib/domain/classification/multilingual-contact-revocation.js";
 import { applyRound11CounterpartyRule, applyRound11UnclearRules, matchRound11OptOut } from "@/lib/domain/classification/round11-unclear-rules.js";
 import { classifyStopScope, matchesOutreachStop, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
 import {
@@ -873,6 +873,8 @@ const TEXT_OR_CONTACT_PROHIBITIONS = [
   "don't call or text", "dont call or text", "do not call or text",
   "don't text or call", "dont text or call", "do not text or call",
   "no calls or texts", "no texts or calls",
+  // P0 2026-10-19: "Don't call me or text me" prohibits both channels — never a channel preference
+  "call me or text", "call or text me", "call me nor text", "call or message", "call me or message",
 ];
 const CALL_ONLY_PROHIBITIONS = [
   "do not call", "do not call me", "don't call me", "dont call me",
@@ -7053,7 +7055,12 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   // "Хватит", "रुको" stop something other than communication — never an opt-out,
   // and never canonicalized to a bare "stop".
   const stop_other_action = classifyStopScope(original_message) === STOP_SCOPE.OTHER_ACTION;
-  let message = multilingual && !(stop_other_action && /^stop\b/i.test(String(multilingual.canonical_text || "")))
+  // P0 2026-10-19: a call-only prohibition with a text affirmative ("Don't call, text is fine",
+  // "No me llames, mándame un mensaje", "لا تتصل بي، راسلني") is a CHANNEL PREFERENCE in every
+  // language — never an SMS opt-out, never canonicalized to "stop"; any text / contact
+  // prohibition keeps the opt-out (isChannelPreferenceOnly).
+  const channel_preference_only = !matchRound11OptOut(original_message).matched && isChannelPreferenceOnly(original_message);
+  let message = multilingual && !(channel_preference_only && multilingual.category === "opt_out") && !(stop_other_action && /^stop\b/i.test(String(multilingual.canonical_text || "")))
     ? multilingual.canonical_text
     : correctKeyMisspellings(original_message);
   // A bare "?" / "???" to our message is the who-are-you question (round 8).
@@ -7065,7 +7072,7 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   // AGAIN", "I'm blocking you", "sued ... if you ask again" are opt-outs and
   // override every ordinary intent -- read from the ORIGINAL words.
   const round11_opt_out = matchRound11OptOut(original_message);
-  const compliance_flag  = (stop_other_action
+  const compliance_flag  = channel_preference_only ? null : (stop_other_action
     ? (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
     : detectComplianceFlag(message) || (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
       // round 9: a stop aimed at our outreach ("Stop looking up properties to buy").
@@ -8318,7 +8325,10 @@ async function classifyCore(message, brain_item = null, options = {}) {
     };
   }
 
-  const final_compliance = heuristic.compliance_flag ?? ai_result.compliance_flag;
+  // Deterministic rules run BEFORE and REGARDLESS of the model: an explicit opt-out returned above
+  // (and is re-asserted by applyContactRevocationSafety); a deterministic channel preference can
+  // never be turned into a suppression by the model.
+  const final_compliance = heuristic.compliance_flag ?? (isChannelPreferenceOnly(text) ? null : ai_result.compliance_flag);
   const final_intents = resolveIntents(text, {
     compliance_flag: final_compliance,
     stop_other_action: classifyStopScope(text) === STOP_SCOPE.OTHER_ACTION,

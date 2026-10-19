@@ -21,7 +21,7 @@
 // accent folding, clitic imperatives, negation and the channel / language /
 // other-action carves) runs after them. Wrong-number and the uncertain
 // fail-safe are returned by analyzeContactRevocation, never by this matcher.
-import { analyzeContactRevocation } from "./multilingual-contact-revocation.js";
+import { analyzeContactRevocation, isChannelPreferenceOnly } from "./multilingual-contact-revocation.js";
 
 export { analyzeContactRevocation };
 
@@ -108,6 +108,8 @@ export function matchMultilingualOptOut(message = "") {
   const glued = matchGluedStop(raw);
   if (glued) return glued;
   const bare = bareOf(raw);
+  // a call-only prohibition with a text affirmative is a channel preference, never an opt-out
+  if (!EXACT_INDEX.has(bare) && isChannelPreferenceOnly(raw)) return null;
   if (EXACT_INDEX.has(bare)) {
     const language = EXACT_INDEX.get(bare);
     return { language, rule_id: `ml_opt_out_keyword_${language.split(" ")[0].toLowerCase()}`, kind: "keyword", version: MULTILINGUAL_OPT_OUT_VERSION };
