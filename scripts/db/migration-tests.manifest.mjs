@@ -71,6 +71,8 @@ const CPR_LIVE_CONSTRAINTS = 'scripts/db/fixtures/contact_property_resolution_li
 const DISPATCH_LEASE = M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql')
 // blind-eval D3: an R3 hold raises one operator work item per turn (scope 'conversation')
 const TURN_OPERATOR_ITEMS = M('PROPOSED_20261017122000_conversation_turn_operator_items.sql')
+// rc-8.5.21: agent.payload_is_clean never rejects a random UUID / opaque hex id token (finding_doc_check defect)
+const PAYLOAD_OPAQUE_IDS = M('PROPOSED_20261019120000_payload_clean_opaque_ids.sql')
 // rc-8.5.21 part B
 const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
 const SEND_AUTHORIZATION = M('PROPOSED_20261016161000_negotiation_send_authorization.sql')
@@ -309,6 +311,16 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261017122000_conversation_turn_operator_items_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261017122000_conversation_turn_operator_items_rollback_posttest.sql')],
   },
+  // ── rc-8.5.21: agent.payload_is_clean never rejects a random UUID / opaque hex id token ──
+  {
+    id: 'payload_clean_opaque_ids',
+    setup: [SHIM, DURABILITY, S3],
+    pretest: M('PROPOSED_20261019120000_payload_clean_opaque_ids_pretest.sql'),
+    apply: [PAYLOAD_OPAQUE_IDS],
+    posttest: [M('PROPOSED_20261019120000_payload_clean_opaque_ids_posttest.sql')],
+    rollback: [M('PROPOSED_20261019120000_payload_clean_opaque_ids_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261019120000_payload_clean_opaque_ids_rollback_posttest.sql')],
+  },
   // ── owner 2026-10-17: contact_property_resolution role ownership_declined_unverified ──
   {
     id: 'contact_property_resolution_declined_unverified',
@@ -396,6 +408,8 @@ const BASE_TESTS = [
       // owner directive 2026-10-17: the turn dispatch lease (after reply_turns, message_origin and the runtime)
       { fixture: M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_pretest.sql') }, DISPATCH_LEASE,
       { fixture: M('PROPOSED_20261017122000_conversation_turn_operator_items_pretest.sql') }, TURN_OPERATOR_ITEMS,
+      // rc-8.5.21: the payload CHECK no longer rejects random ids (needs only S3, applied in production)
+      { fixture: M('PROPOSED_20261019120000_payload_clean_opaque_ids_pretest.sql') }, PAYLOAD_OPAQUE_IDS,
     ],
     verify: [T('rc_8_5_21_release_chain_verify.sql')],
     posttest: [
@@ -428,6 +442,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261017120000_followup_intent_lifecycle_posttest.sql'),
       M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_posttest.sql'),
       M('PROPOSED_20261017122000_conversation_turn_operator_items_posttest.sql'),
+      M('PROPOSED_20261019120000_payload_clean_opaque_ids_posttest.sql'),
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body); the
     // holds registry is rolled back LAST (it was applied first)
@@ -456,6 +471,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback.sql'),
       M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_rollback.sql'),
       M('PROPOSED_20261017122000_conversation_turn_operator_items_rollback.sql'),
+      M('PROPOSED_20261019120000_payload_clean_opaque_ids_rollback.sql'),
     ],
   },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──
