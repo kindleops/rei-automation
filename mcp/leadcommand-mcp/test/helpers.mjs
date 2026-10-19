@@ -3,9 +3,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { buildApp } from '../src/app.mjs'
-import { FIXTURE, FIXTURE_ORG, FIXTURE_OWNER, FIXTURE_NOW, FIXTURE_CAMPAIGN } from '../fixtures/dataset.mjs'
+import { FIXTURE, FIXTURE_ORG, FIXTURE_OWNER, FIXTURE_NOW, FIXTURE_CAMPAIGN, FIXTURE_THREADS } from '../fixtures/dataset.mjs'
+import { SCOPE_NAMES } from '../src/authz/scopes.mjs'
 
-export const ALL_SCOPES = 'leadcommand.leads.read leadcommand.properties.read leadcommand.scores.read leadcommand.market.read leadcommand.comps.read leadcommand.campaigns.read leadcommand.contact_status.read'
+/** Every scope, the opt-in ones included (contact status + the four rc-8.5.21 operations reads). */
+export const ALL_SCOPES = SCOPE_NAMES.join(' ')
 
 export function fixtureEnv(over = {}) {
   return { LEADCOMMAND_MCP_DATA: 'fixture', LEADCOMMAND_MCP_PRINCIPAL_USER_ID: FIXTURE_OWNER, LEADCOMMAND_MCP_ORG_ID: FIXTURE_ORG, LEADCOMMAND_MCP_SCOPES: ALL_SCOPES, ...over }
@@ -34,4 +36,8 @@ export const HAPPY = {
   leadcommand_search_comps: { property_id: 'FX1001' },
   leadcommand_get_campaign_metrics: { campaign_id: FIXTURE_CAMPAIGN },
   leadcommand_get_lead_contact_status: { property_id: 'FX1001' },
+  leadcommand_get_ops_supervisor_status: {},
+  leadcommand_search_action_center: { limit: 5 },
+  leadcommand_get_thread_hold_status: { thread_id: FIXTURE_THREADS.held },
+  leadcommand_get_followup_intent_health: {},
 }

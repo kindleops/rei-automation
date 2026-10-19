@@ -39,6 +39,14 @@ export const COVERAGE_CALLS = Object.freeze([
   ['leadcommand_get_campaign_metrics', { limit: 5 }],
   ['leadcommand_get_campaign_metrics', { campaign_id: '00000000-0000-4000-8000-0000000000c1' }],
   ['leadcommand_get_lead_contact_status', { property_id: 'P1' }],
+  // rc-8.5.21 operations reads (the emulation seeds org a1, threads …101-103)
+  ['leadcommand_get_ops_supervisor_status', {}],
+  ['leadcommand_search_action_center', { limit: 5 }],
+  ['leadcommand_search_action_center', { lost_only: false, limit: 1 }],
+  ['leadcommand_get_thread_hold_status', { thread_id: '00000000-0000-4000-8000-000000000101' }],
+  ['leadcommand_get_thread_hold_status', { thread_id: '00000000-0000-4000-8000-000000000102' }],
+  ['leadcommand_get_thread_hold_status', { thread_id: '00000000-0000-4000-8000-000000000103' }],
+  ['leadcommand_get_followup_intent_health', {}],
 ])
 
 /** The columns the real services select / filter / order on, per relation (run over the fake PostgREST). */

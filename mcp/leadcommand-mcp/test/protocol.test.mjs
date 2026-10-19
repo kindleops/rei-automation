@@ -5,7 +5,9 @@ import Ajv from 'ajv'
 import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js'
 import { connect, call, HAPPY, fixtureEnv } from './helpers.mjs'
 
-const EXPECTED = ['leadcommand_search_leads', 'leadcommand_get_lead', 'leadcommand_search_properties', 'leadcommand_get_property', 'leadcommand_get_acquisition_score', 'leadcommand_get_market_intelligence', 'leadcommand_search_comps', 'leadcommand_get_campaign_metrics', 'leadcommand_get_lead_contact_status']
+const EXPECTED = ['leadcommand_search_leads', 'leadcommand_get_lead', 'leadcommand_search_properties', 'leadcommand_get_property', 'leadcommand_get_acquisition_score', 'leadcommand_get_market_intelligence', 'leadcommand_search_comps', 'leadcommand_get_campaign_metrics', 'leadcommand_get_lead_contact_status',
+  // rc-8.5.21 operations reads (opt-in scopes)
+  'leadcommand_get_ops_supervisor_status', 'leadcommand_search_action_center', 'leadcommand_get_thread_hold_status', 'leadcommand_get_followup_intent_health']
 
 
 test('initialize: server info, negotiated protocol version, tools-only capabilities, instructions', async () => {
@@ -22,7 +24,7 @@ test('initialize: server info, negotiated protocol version, tools-only capabilit
   } finally { await c.close() }
 })
 
-test('discovery: exactly the 9 read tools, read-only annotations, scope + limits metadata', async () => {
+test('discovery: exactly the 13 read tools, read-only annotations, scope + limits metadata', async () => {
   const c = await connect()
   try {
     const { tools } = await c.client.listTools()

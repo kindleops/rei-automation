@@ -11,7 +11,9 @@
 //   * the acceptance probes are side-effect free even where a write IS permitted (a
 //     service_role control: zero rows change);
 //   * the MCP server boots against it (real self-check, real membership RPC) and every
-//     tool returns live data; a token signed with the wrong secret is refused at boot;
+//     tool returns live data (the four rc-8.5.21 operations reads included, through their
+//     definer projections; their sources are unreadable to the role directly); a token
+//     signed with the wrong secret is refused at boot;
 //   * scripts/live-acceptance.mjs PASSES against this stack (the owner's script, validated
 //     here so its first production run is not its first run).
 import test from 'node:test'
@@ -66,6 +68,36 @@ test('real PostgREST + PG17: the lc_mcp_reader token is read-only at the DATABAS
       }
       const agent = await req('GET', '/rest/v1/operator_membership?select=role', reader, undefined, { 'accept-profile': 'agent' })
       assert.ok(agent.status === 406 || agent.code === '42501', JSON.stringify(agent.body))
+      // the operations sources: only through the lc_mcp_* definer projections
+      for (const rel of ['automation_holds', 'followup_intents', 'v_followup_intent_health', 'v_followup_intent_reasons']) {
+        const r = await req('GET', `/rest/v1/${rel}?select=*&limit=1`, reader)
+        assert.equal(r.code, '42501', `${rel}: ${JSON.stringify(r.body)}`)
+      }
+      for (const [rel, profile] of [['finding', 'agent'], ['conversation_action_state', 'agent']]) {
+        const r = await req('GET', `/rest/v1/${rel}?select=*&limit=1`, reader, undefined, { 'accept-profile': profile })
+        assert.ok(r.status === 406 || r.code === '42501', `${profile}.${rel}: ${JSON.stringify(r.body)}`)
+      }
+      const hf = await req('POST', '/rest/v1/rpc/automation_hold_for', reader, { p_thread_key: '+15550100001' })
+      assert.equal(hf.code, '42501', `automation_hold_for: ${JSON.stringify(hf.body)}`)
+    })
+
+    await t.test('the operations read functions answer AS the role with their projection only (no keys, ids or reason text)', async () => {
+      const held = await req('POST', '/rest/v1/rpc/lc_mcp_thread_hold_status', reader, { p_thread_id: '00000000-0000-4000-8000-000000000101' })
+      assert.equal(held.status, 200, JSON.stringify(held.body))
+      assert.deepEqual(held.body.holds.map((h) => [h.reason_category, h.matched_on]), [['ownership_attribution_unresolved', 'thread']])
+      const opp = await req('POST', '/rest/v1/rpc/lc_mcp_thread_hold_status', reader, { p_thread_id: '00000000-0000-4000-8000-000000000102' })
+      assert.deepEqual(opp.body.holds.map((h) => h.matched_on), ['opportunity'])
+      assert.doesNotMatch(JSON.stringify([held.body.holds, opp.body.holds]), /\+1555|Fixture Person|fixture_operator_hold|ownership_unresolved:/)
+      const ac = await req('POST', '/rest/v1/rpc/lc_mcp_action_center', reader, { p_org_id: FIXTURE_ORG, p_state: null, p_lost_only: true, p_after: null, p_limit: 5 })
+      assert.equal(ac.status, 200, JSON.stringify(ac.body))
+      assert.equal(ac.body.items.length, 1)
+      const other = await req('POST', '/rest/v1/rpc/lc_mcp_action_center', reader, { p_org_id: '00000000-0000-4000-8000-0000000000a9', p_state: null, p_lost_only: false, p_after: null, p_limit: 5 })
+      assert.equal(other.body.items.length, 0, 'another org reads nothing')
+      const bad = await req('POST', '/rest/v1/rpc/lc_mcp_ops_finding', reader, { p_org_id: FIXTURE_ORG, p_finding_type: 'recovery.candidate' })
+      assert.equal(bad.code, '22023', JSON.stringify(bad.body))
+      const fu = await req('POST', '/rest/v1/rpc/lc_mcp_followup_intent_health', reader, {})
+      assert.equal(fu.status, 200)
+      assert.equal(fu.body.health.planned, 2)
     })
 
     await t.test('INSERT / UPDATE / DELETE are refused with 42501 by the database (inventory + sentinels)', async () => {
@@ -143,8 +175,9 @@ test('real PostgREST + PG17: the lc_mcp_reader token is read-only at the DATABAS
       const summary = JSON.parse(r.stdout)
       assert.equal(summary.result, 'PASS', `${summary.error}\n${r.stderr.slice(-500)}`)
       assert.equal(r.status, 0)
-      assert.equal(summary.stages.database.probes.filter((p) => p.refused_by_database).length >= 16, true)
-      assert.equal(new Set(summary.stages.capability.results.map((x) => x.tool)).size, 9)
+      assert.equal(summary.stages.database.probes.filter((p) => p.refused_by_database).length >= 18, true)
+      assert.equal(new Set(summary.stages.capability.results.map((x) => x.tool)).size, 13)
+      assert.deepEqual(summary.stages.capability.skipped_not_granted, [])
       assert.equal(summary.stages.audit.self_check.running_as, 'lc_mcp_reader')
       if (process.env.LC_E2E_SUMMARY_OUT) fs.writeFileSync(process.env.LC_E2E_SUMMARY_OUT, JSON.stringify(summary, null, 2))
     })

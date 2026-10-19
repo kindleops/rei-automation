@@ -168,6 +168,66 @@ function outreachFor(id) {
   }
 }
 
+// ── rc-8.5.21 operations read functions (the projections lc_mcp_* return; SYNTHETIC) ──
+export const FIXTURE_THREADS = Object.freeze({
+  held: '00000000-0000-4000-8000-0000000001a1',      // the ambiguous-property ownership hold (thread scope)
+  opp_held: '00000000-0000-4000-8000-0000000001a2',  // an operator hold on the thread's opportunity
+  static_excluded: '00000000-0000-4000-8000-0000000001a3', // the code-level permanent exclusion (by property id)
+  clear: '00000000-0000-4000-8000-0000000001a4',     // no active hold (a released one only)
+})
+const OPS_FINDINGS = {
+  'supervisor.summary': { job_id: 'job_fx_sup_2', retrieved_at: daysAgo(0.1), value: { counts: { ok: 18, warn: 2, critical: 0, unavailable: 1 }, all_clear: false, escalations: 0, statuses: { unhandled_inbounds: 'warn', followup_lifecycle: 'warn', automation_holds: 'ok', research_status: 'unavailable' } } },
+  'recovery.batch': { job_id: 'job_fx_rec_1', retrieved_at: daysAgo(0.2), value: { scanned: 40, by_class: { research_worthy: 3, viable_human_review: 1 }, actionable: 4, findings_recorded: 4 } },
+  'recovery.linkage': { job_id: 'job_fx_rec_1', retrieved_at: daysAgo(0.2), value: { research: { requested: 2, refused: 0 }, nurture: 1, held: 1, valuation_requests: [{ property_ref: 'pr_fx_1' }, { property_ref: 'pr_fx_2' }], by_next_action: { research: 2, nurture_follow_up: 1 } } },
+  // valuation.refresh_batch: NOT RUN (the section must be unavailable, never 0)
+}
+const actionStates = [
+  { conversation_id: '00000000-0000-4000-8000-0000000001a1', state: 'needs_attention', owner: 'unassigned', lost: true, verified_stage: 'ownership_confirmation', stage_verified: false, stage_note: null, next_action: 'reply_to_seller', due_at: null, priority_reason: `unowned_conversation, selling_interest_on_record`, reasons: ['seller_spoke_last', 'no_queued_reply'], pending_approvals: 0, has_opportunity: true, last_inbound_at: daysAgo(0.5), last_outbound_at: daysAgo(2), state_since: daysAgo(0.5), computed_at: daysAgo(0.05), version: 'action-center.v1' },
+  { conversation_id: '00000000-0000-4000-8000-0000000001a2', state: 'needs_attention', owner: 'unassigned', lost: true, verified_stage: 'asking_price', stage_verified: true, stage_note: null, next_action: `review ${INJECTION}`, due_at: null, priority_reason: 'hot', reasons: [], pending_approvals: 1, has_opportunity: true, last_inbound_at: daysAgo(1), last_outbound_at: daysAgo(3), state_since: daysAgo(1), computed_at: daysAgo(0.05), version: 'action-center.v1' },
+  { conversation_id: '00000000-0000-4000-8000-0000000001a3', state: 'waiting_on_seller', owner: 'ai', lost: false, verified_stage: 'asking_price', stage_verified: true, stage_note: null, next_action: 'await_seller_reply', due_at: null, priority_reason: 'routine', reasons: [], pending_approvals: 0, has_opportunity: false, last_inbound_at: daysAgo(4), last_outbound_at: daysAgo(1), state_since: daysAgo(1), computed_at: daysAgo(0.05), version: 'action-center.v1' },
+  { conversation_id: '00000000-0000-4000-8000-0000000001a4', state: 'scheduled_follow_up', owner: 'ai', lost: false, verified_stage: null, stage_verified: false, stage_note: null, next_action: 'follow_up_scheduled', due_at: daysAgo(-2), priority_reason: 'routine', reasons: [], pending_approvals: 0, has_opportunity: false, last_inbound_at: null, last_outbound_at: daysAgo(5), state_since: daysAgo(5), computed_at: daysAgo(0.05), version: 'action-center.v1' },
+]
+const refuse22023 = () => { throw Object.assign(new Error('invalid parameter'), { code: '22023' }) }
+const fixtureRpc = {
+  lc_mcp_ops_finding: ({ p_org_id, p_finding_type }) => {
+    if (!p_org_id || !['supervisor.summary', 'valuation.refresh_batch', 'recovery.batch', 'recovery.linkage'].includes(p_finding_type)) refuse22023()
+    return p_org_id === FIXTURE_ORG ? OPS_FINDINGS[p_finding_type] ?? null : null
+  },
+  lc_mcp_ops_research_valuation_snapshot: () => ({
+    at: daysAgo(0),
+    valuation: { live: 12, with_score: 7, offer_ready: 5, missing: 5, stale_30d: 1, by_tier: { A: 2, B: 3 } },
+    offers: { sent_30d: 4, overdue_no_reply_72h: 2, overdue_opportunity_ids: ['00000000-0000-4000-8000-0000000002b1', '00000000-0000-4000-8000-0000000002b2'] },
+    negotiations: { envelopes: null, live_envelopes: null, ledger_events_7d: null, send_authorizations: null, in_negotiation_stage: 3 },
+  }),
+  lc_mcp_action_center: ({ p_org_id, p_state = null, p_lost_only = false, p_after = null, p_limit = 10 }) => {
+    if (!p_org_id) refuse22023()
+    const rows = p_org_id === FIXTURE_ORG ? actionStates : []
+    const by = {}
+    for (const r of rows) { const b = (by[r.state] ||= { state: r.state, n: 0, lost: 0, computed_at: r.computed_at }); b.n += 1; if (r.lost) b.lost += 1 }
+    const lim = Math.min(Math.max(Number(p_limit) || 10, 1), 50)
+    const items = rows.filter((r) => (!p_state || r.state === p_state) && (!p_lost_only || r.lost) && (!p_after || r.conversation_id > p_after)).sort((a, b) => (a.conversation_id < b.conversation_id ? -1 : 1)).slice(0, lim + 1)
+    return { summary: Object.values(by), items: items.map((r) => ({ ...r })), limit: lim }
+  },
+  lc_mcp_thread_hold_status: ({ p_thread_id }) => {
+    if (!p_thread_id) refuse22023()
+    const T = FIXTURE_THREADS
+    const sha = (n) => `fx${String(n).repeat(62)}`.slice(0, 64)
+    if (p_thread_id === T.held) return { thread_found: true, holds: [{ hold_type: 'operator_hold', reason_category: 'ownership_attribution_unresolved', matched_on: 'thread', blocked_capabilities: ['auto_reply', 'ai_action', 'follow_up', 'outbound_send'], set_at: daysAgo(1) }], static_keys: { thread_key_sha256: sha(1), property_id: 'FX1001' } }
+    if (p_thread_id === T.opp_held) return { thread_found: true, holds: [{ hold_type: 'operator_hold', reason_category: 'operator_hold', matched_on: 'opportunity', blocked_capabilities: ['offer_acceptance', 'stage_advance', 'not_a_capability'], set_at: daysAgo(2) }], static_keys: { thread_key_sha256: sha(2), property_id: 'FX1002' } }
+    if (p_thread_id === T.static_excluded) return { thread_found: true, holds: [], static_keys: { thread_key_sha256: sha(3), property_id: '251027062' } }
+    if (p_thread_id === T.clear) return { thread_found: true, holds: [], static_keys: { thread_key_sha256: sha(4), property_id: 'FX1003' } }
+    return { thread_found: false }
+  },
+  lc_mcp_followup_intent_health: () => ({
+    health: { scheduled_executable: 9, planned: 6, planned_overdue: 2, retrying: 1, materializing: 1, materializing_stale: 0, ready: 1, ready_overdue: 0, dispatched: 1, dispatched_stale: 0, provider_accepted: 0, accepted_unconfirmed: 0, delivered: 14, failed: 1, failed_after_accept: 0, failed_ambiguous: 0, not_executable: 3, not_executable_24h: 1, held: 2, cancelled: 4, superseded: 1, computed_at: daysAgo(0) },
+    reasons: [
+      { state: 'not_executable', kind: 's2_silence', reason: 'template_missing', writer: 'followup_planner', n: 3 },
+      { state: 'held', kind: 'not_interested_30d', reason: 'automation_hold', writer: 'followup_planner', n: 2 },
+      { state: 'planned', kind: 'offer_silence', reason: `render_failed ${INJECTION}`, writer: 'followup_planner', n: 1 },
+    ],
+  }),
+}
+
 const zipRollup = { '75001': { zip: '75001', sales90d: 14, sales1y: 61, investorShare1y: 38, cashShare1y: 41, medianPrice1y: 176000, medianPpsf1y: 128, medianInvestorPrice1y: 141000, latestSale: daysAgo(6).slice(0, 10), buyers: 22, activeBuyers: 9, demographics: { medianIncome: 1 } } }
 
 export const FIXTURE = Object.freeze({
@@ -182,7 +242,7 @@ export const FIXTURE = Object.freeze({
     campaigns, campaign_targets: campaignTargets, campaign_target_graph: graph, sms_suppression_list: suppression,
     probate_status: probate, preforeclosure_status_v2: preforeclosure,
   },
-  rpc: {},
+  rpc: fixtureRpc,
   services: {
     dossier: async (id) => dossierFor(id),
     outreach: async (id) => outreachFor(id),

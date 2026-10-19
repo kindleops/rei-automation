@@ -15,7 +15,7 @@ const toNum = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? v :
 const likeRe = (pat) => new RegExp(`^${String(pat).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.')}$`, 'i')
 
 /**
- * @param {{ tables: Record<string, object[]>, rpc?: Record<string, Function>, faults?: { failTables?: string[], delayMs?: number, errorCode?: string }, onRequest?: Function }} opts
+ * @param {{ tables: Record<string, object[]>, rpc?: Record<string, Function>, faults?: { failTables?: string[], failRpcs?: string[], delayMs?: number, errorCode?: string, rpcErrorCode?: string }, onRequest?: Function }} opts
  */
 export function createFixtureDb({ tables = {}, rpc = {}, faults = {}, onRequest = null } = {}) {
   const requests = []
@@ -81,7 +81,9 @@ export function createFixtureDb({ tables = {}, rpc = {}, faults = {}, onRequest 
     async rpc(fn, args) {
       requests.push({ method: 'POST', rpc: fn })
       if (!rpc[fn]) return { data: null, error: { code: 'RPC_NOT_ALLOWLISTED', message: 'not allowlisted' } }
-      return { data: await rpc[fn](args), error: null }
+      if (faults.failRpcs?.includes(fn) || faults.failRpcs?.includes('*')) return { data: null, error: { code: faults.rpcErrorCode || 'PGRST000', message: 'fixture fault' } }
+      // a fixture function refuses like the database does: a thrown { code } becomes PostgREST's { error }
+      try { return { data: await rpc[fn](args), error: null } } catch (e) { if (e?.code) return { data: null, error: { code: String(e.code), message: 'fixture function refused' } }; throw e }
     },
     requests,
   }

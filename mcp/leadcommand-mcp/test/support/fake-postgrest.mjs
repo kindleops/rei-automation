@@ -6,7 +6,9 @@
 //   * any non-read on a table → 403 / 42501, as the database refuses it for lc_mcp_reader;
 //   * GET / HEAD with eq. / in. filters, limit, Prefer count=exact → Content-Range;
 //   * RPCs: lc_mcp_reader_self_check (a configurable report), lc_mcp_operator_role,
-//     entity_graph_property_records, campaign_entity_contact_review_flags.
+//     entity_graph_property_records, campaign_entity_contact_review_flags, and the five
+//     rc-8.5.21 operations read functions (lc_mcp_ops_finding, _ops_research_valuation_snapshot,
+//     _action_center, _thread_hold_status, _followup_intent_health).
 // Every request is recorded: tests assert exactly which relations / RPCs were reached
 // and with which credentials.
 import { RELATION_NAMES, RPC_SIGNATURES, READER_ROLE } from '../../src/data/inventory.mjs'
@@ -84,6 +86,13 @@ export function createFakePostgrest({ rows = LIVE_ROWS, report = passingReport()
       if (rpc[1] === 'lc_mcp_operator_role') return json(200, membership.find((m) => m.org_id === args.p_org_id && m.user_id === args.p_user_id)?.role ?? null)
       if (rpc[1] === 'entity_graph_property_records') return json(200, { mortgages: [], liens: [], sales: [], foreclosures: [], parcel: null })
       if (rpc[1] === 'campaign_entity_contact_review_flags') return json(200, (args.p_property_ids || []).map((id) => ({ property_id: id, requires_review: false, exclusion_reasons: [] })))
+      // rc-8.5.21 operations read functions (the projections the lc_mcp_* definers return)
+      const at = new Date().toISOString()
+      if (rpc[1] === 'lc_mcp_ops_finding') return json(200, args.p_finding_type === 'supervisor.summary' ? { job_id: 'job_live_sup', value: { counts: { ok: 1, warn: 0, critical: 0, unavailable: 0 }, all_clear: true, escalations: 0, statuses: {} }, retrieved_at: at } : null)
+      if (rpc[1] === 'lc_mcp_ops_research_valuation_snapshot') return json(200, { at, valuation: { live: 1, with_score: 1, offer_ready: 1, missing: 0 }, offers: { sent_30d: 0, overdue_no_reply_72h: 0, overdue_opportunity_ids: [] }, negotiations: { envelopes: null, in_negotiation_stage: 0 } })
+      if (rpc[1] === 'lc_mcp_action_center') return json(200, { summary: [{ state: 'needs_attention', n: 1, lost: 1, computed_at: at }], items: [{ conversation_id: '00000000-0000-4000-8000-0000000001a1', state: 'needs_attention', owner: 'unassigned', lost: true, stage_verified: false, next_action: 'reply_to_seller', priority_reason: 'unowned_conversation', reasons: [], pending_approvals: 0, has_opportunity: false, state_since: at, computed_at: at }], limit: args.p_limit })
+      if (rpc[1] === 'lc_mcp_thread_hold_status') return json(200, { thread_found: true, holds: [], static_keys: { thread_key_sha256: null, property_id: 'P1' } })
+      if (rpc[1] === 'lc_mcp_followup_intent_health') return json(200, { health: { scheduled_executable: 0, planned: 0, delivered: 0, failed: 0, held: 0, computed_at: at }, reasons: [] })
       return json(404, { code: 'PGRST202', message: 'function not found' })
     }
     const tbl = /^\/rest\/v1\/([A-Za-z0-9_]+)$/.exec(url.pathname)

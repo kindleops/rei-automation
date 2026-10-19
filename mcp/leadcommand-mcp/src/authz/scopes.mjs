@@ -8,10 +8,18 @@ export const SCOPES = Object.freeze({
   'leadcommand.comps.read': 'Recorded market sales near a subject property, with buyer-evidence basis. No buyer names.',
   'leadcommand.campaigns.read': 'Campaign status, lifecycle, counters and target status counts. No recipients.',
   'leadcommand.contact_status.read': 'SMS eligibility + suppression STATE for a lead. Never phone numbers. Sensitive: not in the default grant.',
+  // rc-8.5.21 operations reads (owner directive: operations results through authenticated, scoped MCP reads).
+  // Each is OPT-IN: none is in the default grant; the host must name it in LEADCOMMAND_MCP_SCOPES.
+  'leadcommand.ops_supervisor.read': 'Operations supervisor status: check statuses / counts, valuation coverage, overdue offers, negotiation authority, the latest valuation dry run and recovery linkage. Counts and record ids only. Not in the default grant.',
+  'leadcommand.action_center.read': 'Inbound Action Center: counts per operational state and lost (unanswered) conversations, by conversation id with state / next-action codes and dates. Never message text, phones or names. Not in the default grant.',
+  'leadcommand.holds.read': 'Automation hold status for ONE inbox thread: held or not, the reason CATEGORY, the matched scope and the blocked capabilities. Never a hold id, hold key, reason text or phone. Not in the default grant.',
+  'leadcommand.followups.read': 'Follow-up intent lifecycle health: counts by state, stuck / review counts, the top non-success reason codes, and the supervisor\'s verdict. Never thread keys. Not in the default grant.',
 })
 
 export const SCOPE_NAMES = Object.freeze(Object.keys(SCOPES))
-export const DEFAULT_SCOPES = Object.freeze(SCOPE_NAMES.filter((s) => s !== 'leadcommand.contact_status.read'))
+/** Scopes a host must name explicitly (never in the default grant). */
+export const OPT_IN_SCOPES = Object.freeze(['leadcommand.contact_status.read', 'leadcommand.ops_supervisor.read', 'leadcommand.action_center.read', 'leadcommand.holds.read', 'leadcommand.followups.read'])
+export const DEFAULT_SCOPES = Object.freeze(SCOPE_NAMES.filter((s) => !OPT_IN_SCOPES.includes(s)))
 
 /** Roles from agent.operator_membership; owner ⊇ operator. */
 export const ROLE_RANK = Object.freeze({ operator: 1, owner: 2 })

@@ -8,8 +8,11 @@
 --   * policy lc_mcp_reader_select on each inventory table;
 --   * the role's SELECT on the 20 inventory relations, its EXECUTE on the 2 existing
 --     RPCs and its USAGE on schema public;
---   * functions public.lc_mcp_reader_self_check(text[], text[], name) and
---     public.lc_mcp_operator_role(uuid, uuid);
+--   * functions public.lc_mcp_reader_self_check(text[], text[], name),
+--     public.lc_mcp_operator_role(uuid, uuid) and the five operations read functions
+--     (lc_mcp_ops_finding, lc_mcp_ops_research_valuation_snapshot, lc_mcp_action_center,
+--     lc_mcp_thread_hold_status, lc_mcp_followup_intent_health). Their sources (schema
+--     agent, the holds registry, the follow-up lifecycle) are not touched;
 --   * the membership lc_mcp_reader → authenticator, then role lc_mcp_reader itself.
 -- Idempotent: every step is skipped when its object is absent.
 -- It does NOT use DROP OWNED. If someone granted lc_mcp_reader anything else by hand,
@@ -48,6 +51,11 @@ end $$;
 
 drop function if exists public.lc_mcp_reader_self_check(text[], text[], name);
 drop function if exists public.lc_mcp_operator_role(uuid, uuid);
+drop function if exists public.lc_mcp_ops_finding(uuid, text);
+drop function if exists public.lc_mcp_ops_research_valuation_snapshot();
+drop function if exists public.lc_mcp_action_center(uuid, text, boolean, uuid, integer);
+drop function if exists public.lc_mcp_thread_hold_status(uuid);
+drop function if exists public.lc_mcp_followup_intent_health();
 
 do $$ begin
   if exists (select 1 from pg_roles where rolname = 'lc_mcp_reader') then drop role lc_mcp_reader; end if;

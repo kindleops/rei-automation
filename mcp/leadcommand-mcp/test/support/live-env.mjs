@@ -5,8 +5,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { READER_TOKEN, ANON_KEY } from './fake-postgrest.mjs'
 import { FIXTURE_OWNER, FIXTURE_ORG } from '../../fixtures/dataset.mjs'
+import { SCOPE_NAMES } from '../../src/authz/scopes.mjs'
 
-export const ALL_SCOPES = 'leadcommand.leads.read leadcommand.properties.read leadcommand.scores.read leadcommand.market.read leadcommand.comps.read leadcommand.campaigns.read leadcommand.contact_status.read'
+export const ALL_SCOPES = SCOPE_NAMES.join(' ')
 
 export function tmpDir(prefix = 'lcmcp-live-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix))

@@ -49,3 +49,30 @@ export async function read(query, what) {
 }
 
 export const PROPERTY_ID_RE = /^[A-Za-z0-9_.:-]{1,64}$/
+
+const RPC_NOT_APPLIED = new Set(['PGRST202', '42883', '42P01', '42703', '3F000'])
+/**
+ * A read RPC through PostgREST (supabase-js rpc): error → typed gateway error, no upstream text.
+ * A source the database does not have yet (function / table / column / schema missing) is
+ * SOURCE_NOT_APPLIED; 22023 is the function refusing an out-of-bound input.
+ */
+export async function readRpc(query, what) {
+  let res
+  try {
+    res = await query
+  } catch (e) {
+    if (e?.errorClass) throw e
+    if (e?.name === 'AbortError' || /abort/i.test(String(e?.message || ''))) throw err('timeout', `${what}: read aborted at the time budget`, { code: 'SOURCE_TIMEOUT' })
+    throw err('data_unavailable', `${what}: read failed`, { code: 'SOURCE_UNAVAILABLE' })
+  }
+  const { data, error } = res || {}
+  if (error) {
+    const code = String(error.code || '')
+    if (RPC_NOT_APPLIED.has(code)) throw err('data_unavailable', `${what} is not available in this database`, { code: 'SOURCE_NOT_APPLIED' })
+    if (code === '57014') throw err('timeout', `${what}: statement timeout`, { code: 'SOURCE_TIMEOUT' })
+    if (code === '22023') throw err('invalid_input', `${what}: input refused by the read function`, { code: 'SOURCE_INPUT_REFUSED' })
+    if (code === '42501') throw err('data_unavailable', `${what}: the read credential may not call it`, { code: 'SOURCE_NOT_PERMITTED' })
+    throw err('data_unavailable', `${what}: read failed`, { code: 'SOURCE_UNAVAILABLE' })
+  }
+  return data ?? null
+}

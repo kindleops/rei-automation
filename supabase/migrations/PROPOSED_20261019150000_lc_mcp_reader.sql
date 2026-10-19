@@ -26,13 +26,33 @@
 --     of them that is a table. Since the operator lockdown, RLS is on for every
 --     postgres-owned public table. Without a policy the role would read ZERO rows: a
 --     silent wrong answer, not a denial.
---   EXECUTE on 2 existing read RPCs (SECURITY DEFINER, STABLE) and 2 new ones:
+--   EXECUTE on 2 existing read RPCs (SECURITY DEFINER, STABLE) and 7 new ones:
 --     public.lc_mcp_reader_self_check(text[], text[], name). SECURITY INVOKER, STABLE.
 --       Privilege introspection of the CALLING role. The server's boot self-check and
 --       the final block of this file both read it.
 --     public.lc_mcp_operator_role(uuid, uuid). SECURITY DEFINER, STABLE, sql. It returns
 --       the role of ONE agent.operator_membership row, so the role needs no privilege in
 --       schema agent. It replaces the agent_api login, which can write agent.*.
+--     The five OPERATIONS read functions (rc-8.5.21 owner directive: operations results
+--     through authenticated, scoped MCP reads). SECURITY DEFINER, STABLE, plpgsql, pinned
+--     search_path, fully qualified, bounded inputs; each returns ONE PII-free jsonb
+--     projection of an EXISTING domain read, so lc_mcp_reader holds NO privilege on schema
+--     agent, the holds registry or the follow-up lifecycle tables:
+--       lc_mcp_ops_finding(uuid, text)            the latest supervisor.summary /
+--         valuation.refresh_batch / recovery.batch / recovery.linkage finding of the org
+--         (operations-store#latestFinding; any other finding type is refused, 22023);
+--       lc_mcp_ops_research_valuation_snapshot()  agent.ops_research_valuation_snapshot(now);
+--       lc_mcp_action_center(uuid, text, boolean, uuid, integer)  the Inbound Action Center
+--         counts + a keyset page of agent.conversation_action_state (operations-store
+--         #actionCenterSummary / #listActionStates); conversation ids, codes and dates only;
+--       lc_mcp_thread_hold_status(uuid)            the active holds covering ONE inbox thread,
+--         through THE hold lookup public.automation_hold_for (thread keys + the thread's
+--         opportunities): hold type, reason CATEGORY, matched scope, blocked capabilities,
+--         set_at. Never a hold id, hold key, reason text or phone;
+--       lc_mcp_followup_intent_health()            public.v_followup_intent_health + the top
+--         20 v_followup_intent_reasons rows (followup-lifecycle#loadFollowUpLifecycleHealth).
+--     Their SOURCES are not prerequisites: a source the rc-8.5.21 chain has not created yet
+--     makes the CALL fail (42P01 / 42883: the MCP tool answers unavailable), never this apply.
 --
 -- WHAT MAKES THE APPLY ABORT (atomically: nothing is created):
 --   * authenticator, a required relation, an allowlisted RPC or agent.operator_membership
@@ -305,13 +325,166 @@ $fn$;
 comment on function public.lc_mcp_operator_role(uuid, uuid) is 'LeadCommand MCP: the role of ONE operator membership row (read-only). Executable by lc_mcp_reader only.';
 revoke all on function public.lc_mcp_operator_role(uuid, uuid) from public, anon, authenticated, service_role;
 
+-- ------------------------------------- 2b. operations read functions (scoped MCP tools) ----
+-- Each REUSES an existing domain read (named per function). None writes; each is STABLE, so
+-- PostgREST runs it in a READ ONLY transaction, and every SQL statement in it is a SELECT.
+create or replace function public.lc_mcp_ops_finding(p_org_id uuid, p_finding_type text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare r jsonb;
+begin
+  -- the four finding types opsIntelTool (agent/operations/ops-intel-capability.js) reads; nothing else
+  if p_org_id is null or p_finding_type is null
+     or p_finding_type not in ('supervisor.summary', 'valuation.refresh_batch', 'recovery.batch', 'recovery.linkage') then
+    raise exception using errcode = '22023', message = 'lc_mcp_ops_finding: finding type not allowed';
+  end if;
+  -- operations-store#latestFinding (index agent.finding_job_recent_idx)
+  select jsonb_build_object('job_id', f.job_id, 'value', f.value, 'retrieved_at', f.retrieved_at) into r
+    from agent.finding f
+   where f.job_id is not null and f.finding_type = p_finding_type and f.org_id = p_org_id
+   order by f.retrieved_at desc
+   limit 1;
+  return r;
+end
+$fn$;
+comment on function public.lc_mcp_ops_finding(uuid, text) is 'LeadCommand MCP: the latest operations finding of an allowlisted type (supervisor / valuation dry run / recovery). Read-only. Executable by lc_mcp_reader only.';
+
+create or replace function public.lc_mcp_ops_research_valuation_snapshot()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+begin
+  -- the 8.5.21-b supervisor read (ids and counts only), at now()
+  return agent.ops_research_valuation_snapshot(null::timestamptz);
+end
+$fn$;
+comment on function public.lc_mcp_ops_research_valuation_snapshot() is 'LeadCommand MCP: agent.ops_research_valuation_snapshot at now() (valuation coverage, overdue offers, negotiation authority). Read-only. Executable by lc_mcp_reader only.';
+
+create or replace function public.lc_mcp_action_center(p_org_id uuid, p_state text default null, p_lost_only boolean default false, p_after uuid default null, p_limit integer default 10)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare
+  lim integer := least(greatest(coalesce(p_limit, 10), 1), 50);
+  summary jsonb;
+  items jsonb;
+begin
+  if p_org_id is null then raise exception using errcode = '22023', message = 'lc_mcp_action_center: org required'; end if;
+  if p_state is not null and p_state not in ('needs_attention', 'ai_handling', 'researching', 'negotiating', 'awaiting_operator_decision',
+                                             'scheduled_follow_up', 'waiting_on_seller', 'resolved', 'suppressed_ineligible') then
+    raise exception using errcode = '22023', message = 'lc_mcp_action_center: unknown state';
+  end if;
+  -- operations-store#actionCenterSummary
+  select coalesce(jsonb_agg(jsonb_build_object('state', x.state, 'n', x.n, 'lost', x.lost, 'computed_at', x.computed_at) order by x.state), '[]'::jsonb) into summary
+    from (select a.state, count(*)::int n, (count(*) filter (where a.lost))::int lost, max(a.computed_at) computed_at
+            from agent.conversation_action_state a where a.org_id = p_org_id group by a.state) x;
+  -- operations-store#listActionStates (keyset on conversation_id; one extra row = has_more).
+  -- Codes, flags and dates only: no evidence refs, approval ids, opportunity id or property ref.
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'conversation_id', a.conversation_id, 'state', a.state, 'owner', a.owner, 'lost', a.lost,
+      'verified_stage', a.verified_stage, 'stage_verified', a.stage_verified, 'stage_note', a.stage_note,
+      'next_action', a.next_action, 'due_at', a.due_at, 'priority_reason', a.priority_reason, 'reasons', a.reasons,
+      'pending_approvals', jsonb_array_length(a.pending_approvals), 'has_opportunity', a.opportunity_id is not null,
+      'last_inbound_at', a.last_inbound_at, 'last_outbound_at', a.last_outbound_at, 'state_since', a.state_since,
+      'computed_at', a.computed_at, 'version', a.version) order by a.conversation_id), '[]'::jsonb) into items
+    from (select c.* from agent.conversation_action_state c
+           where c.org_id = p_org_id and (p_state is null or c.state = p_state) and (not coalesce(p_lost_only, false) or c.lost)
+             and (p_after is null or c.conversation_id > p_after)
+           order by c.conversation_id
+           limit lim + 1) a;
+  return jsonb_build_object('summary', summary, 'items', items, 'limit', lim);
+end
+$fn$;
+comment on function public.lc_mcp_action_center(uuid, text, boolean, uuid, integer) is 'LeadCommand MCP: Inbound Action Center counts + a keyset page (conversation ids, state codes, dates). Read-only. Executable by lc_mcp_reader only.';
+
+create or replace function public.lc_mcp_thread_hold_status(p_thread_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare
+  t record;
+  holds jsonb;
+begin
+  if p_thread_id is null then raise exception using errcode = '22023', message = 'lc_mcp_thread_hold_status: thread id required'; end if;
+  select s.id, s.thread_key, s.property_id, s.master_owner_id into t from public.inbox_thread_state s where s.id = p_thread_id;
+  if not found then return jsonb_build_object('thread_found', false); end if;
+  -- THE hold lookup (public.automation_hold_for: any non-null scope key matches), for the thread's own keys
+  -- and for each opportunity whose primary thread it is. A category, never the reason text; no ids, no keys.
+  with covering as (
+    select h.*, 'thread_keys'::text via from public.automation_hold_for(t.thread_key, t.id, t.property_id, null::uuid, t.master_owner_id, null::text) h
+    union all
+    select h.*, 'opportunity'::text via
+      from (select o.id from public.acquisition_opportunities o where t.thread_key is not null and o.primary_thread_key = t.thread_key order by o.id limit 10) o
+      cross join lateral public.automation_hold_for(null::text, null::uuid, null::text, o.id, null::text, null::text) h
+  ), one as (
+    select distinct on (c.id) c.* from covering c order by c.id, c.via desc
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'hold_type', u.hold_type,
+      'reason_category', case when u.hold_type = 'permanent_exclusion' then 'permanent_exclusion'
+                              when u.reason = 'ownership_denial_property_unresolved' or u.hold_key like 'ownership_unresolved:%' then 'ownership_attribution_unresolved'
+                              else 'operator_hold' end,
+      'matched_on', case when (t.thread_key is not null and u.thread_key = t.thread_key) or u.inbox_thread_id = t.id then 'thread'
+                         when t.property_id is not null and u.property_id = t.property_id then 'property'
+                         when t.master_owner_id is not null and u.master_owner_id = t.master_owner_id then 'owner'
+                         when u.via = 'opportunity' then 'opportunity'
+                         else 'other' end,
+      'blocked_capabilities', to_jsonb(u.blocked_capabilities),
+      'set_at', u.set_at) order by u.set_at, u.id), '[]'::jsonb) into holds
+    from one u;
+  -- static_keys feed the code-level permanent exclusions (automation-hold-core#STATIC_PERMANENT_EXCLUSIONS)
+  -- inside the MCP process; they are never returned by the tool
+  return jsonb_build_object('thread_found', true, 'holds', holds,
+    'static_keys', jsonb_build_object('thread_key_sha256', case when t.thread_key is null then null else encode(sha256(convert_to(t.thread_key, 'UTF8')), 'hex') end,
+                                      'property_id', t.property_id));
+end
+$fn$;
+comment on function public.lc_mcp_thread_hold_status(uuid) is 'LeadCommand MCP: active automation holds covering one inbox thread (via automation_hold_for): type, reason category, matched scope, capabilities. No hold ids, keys or reason text. Read-only. Executable by lc_mcp_reader only.';
+
+create or replace function public.lc_mcp_followup_intent_health()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare h jsonb; r jsonb;
+begin
+  -- followup-lifecycle#loadFollowUpLifecycleHealth: the health row + the top 20 non-success reasons (codes and counts)
+  select to_jsonb(v) into h from public.v_followup_intent_health v limit 1;
+  select coalesce(jsonb_agg(jsonb_build_object('state', x.state, 'kind', x.kind, 'reason', x.reason, 'writer', x.writer, 'n', x.n)
+                            order by x.n desc, x.state, x.kind, x.reason, x.writer), '[]'::jsonb) into r
+    from (select v.state, v.kind, v.reason, v.writer, v.n from public.v_followup_intent_reasons v
+           order by v.n desc, v.state, v.kind, v.reason, v.writer limit 20) x;
+  return jsonb_build_object('health', h, 'reasons', r);
+end
+$fn$;
+comment on function public.lc_mcp_followup_intent_health() is 'LeadCommand MCP: follow-up intent lifecycle health counts + the top 20 non-success reasons (codes and counts only). Read-only. Executable by lc_mcp_reader only.';
+
+revoke all on function public.lc_mcp_ops_finding(uuid, text), public.lc_mcp_ops_research_valuation_snapshot(),
+  public.lc_mcp_action_center(uuid, text, boolean, uuid, integer), public.lc_mcp_thread_hold_status(uuid),
+  public.lc_mcp_followup_intent_health() from public, anon, authenticated, service_role;
+
 -- --------------------------------------------- 3. grants + policies + verification ----
 do $$
 declare
   -- lc-inventory:relations
   rels text[] := array['acquisition_opportunities','campaign_target_graph','campaign_targets','campaigns','census_geo_metrics','eg_buyer_index','eg_property_facts','emails','inbox_thread_state','master_owners','mi_geo_period_rollup','mi_rollup_builds','mv_map_market_sales','phones','preforeclosure_status_v2','probate_status','properties','property_acquisition_scores','prospects','sms_suppression_list'];
   -- lc-inventory:functions
-  fns text[] := array['public.campaign_entity_contact_review_flags(text[])','public.entity_graph_property_records(text)','public.lc_mcp_operator_role(uuid,uuid)','public.lc_mcp_reader_self_check(text[],text[],name)'];
+  fns text[] := array['public.campaign_entity_contact_review_flags(text[])','public.entity_graph_property_records(text)','public.lc_mcp_action_center(uuid,text,boolean,uuid,integer)','public.lc_mcp_followup_intent_health()','public.lc_mcp_operator_role(uuid,uuid)','public.lc_mcp_ops_finding(uuid,text)','public.lc_mcp_ops_research_valuation_snapshot()','public.lc_mcp_reader_self_check(text[],text[],name)','public.lc_mcp_thread_hold_status(uuid)'];
   t text; k "char"; rep jsonb;
 begin
   grant usage on schema public to lc_mcp_reader;

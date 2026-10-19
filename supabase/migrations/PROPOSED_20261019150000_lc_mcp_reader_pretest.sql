@@ -6,7 +6,8 @@
 --   * PostgREST's authenticator role exists;
 --   * lc_mcp_reader does not exist yet;
 --   * every required inventory relation, both allowlisted RPCs (STABLE) and
---     agent.operator_membership exist.
+--     agent.operator_membership exist;
+--   * (NOTICE only) which sources of the five operations read functions exist.
 begin;
 do $$
 declare
@@ -23,5 +24,13 @@ begin
   if (select provolatile from pg_proc where oid = to_regprocedure('public.campaign_entity_contact_review_flags(text[])')) is distinct from 's' then problems := problems || 'campaign_entity_contact_review_flags not STABLE'::text; end if;
   if array_length(problems, 1) > 0 then raise exception 'pretest: %', array_to_string(problems, '; '); end if;
   raise notice 'pretest: prerequisites present';
+  -- informational, never a refusal: the sources of the five operations read functions (rc-8.5.21 chain).
+  -- A missing one makes only its MCP tool answer unavailable.
+  raise notice 'pretest: operations sources: automation_hold_for=% acquisition_opportunities.primary_thread_key=% v_followup_intent_health=% v_followup_intent_reasons=% agent.finding=% agent.conversation_action_state=% agent.ops_research_valuation_snapshot=%',
+    to_regprocedure('public.automation_hold_for(text,uuid,text,uuid,text,text)') is not null,
+    exists (select 1 from pg_attribute where attrelid = to_regclass('public.acquisition_opportunities') and attname = 'primary_thread_key' and not attisdropped),
+    to_regclass('public.v_followup_intent_health') is not null, to_regclass('public.v_followup_intent_reasons') is not null,
+    to_regclass('agent.finding') is not null, to_regclass('agent.conversation_action_state') is not null,
+    to_regprocedure('agent.ops_research_valuation_snapshot(timestamptz)') is not null;
 end $$;
 rollback;

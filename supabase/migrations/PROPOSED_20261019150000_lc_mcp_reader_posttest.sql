@@ -15,6 +15,12 @@
 --      function and definer writers are refused (42501). An invoker raw-SQL function
 --      that PUBLIC can execute still cannot write or read outside the inventory. The
 --      allowlisted RPCs work;
+--   D2. the five operations read functions return their projection (and only it): the org's
+--      newest allowlisted finding, the research / valuation snapshot, an Action Center page
+--      (limit + 1, no refs beyond the conversation), the holds covering a thread (category +
+--      matched scope; released holds excluded; never a key, id or reason text), the follow-up
+--      health counts; out-of-bound inputs are refused with 22023. The role cannot call the
+--      underlying automation_hold_for / agent functions nor read their tables directly;
 --   E. the self-check function, which the migration and the server's boot check share,
 --      reports ok for the applied state and a NAMED finding for each way the credential
 --      could become write-capable or incomplete.
@@ -23,8 +29,13 @@ begin;
 do $$
 declare
   rels text[] := array['acquisition_opportunities','campaign_target_graph','campaign_targets','campaigns','census_geo_metrics','eg_buyer_index','eg_property_facts','emails','inbox_thread_state','master_owners','mi_geo_period_rollup','mi_rollup_builds','mv_map_market_sales','phones','preforeclosure_status_v2','probate_status','properties','property_acquisition_scores','prospects','sms_suppression_list'];
-  sentinels text[] := array['public.send_queue','public.sms_templates','public.system_control','public.message_events','agent.operator_membership','agent.run','agent.org'];
-  fns text[] := array['public.campaign_entity_contact_review_flags(text[])','public.entity_graph_property_records(text)','public.lc_mcp_operator_role(uuid,uuid)','public.lc_mcp_reader_self_check(text[],text[],name)'];
+  -- write sentinels + the sources the operations read functions read AS THE OWNER (the role holds nothing on them)
+  sentinels text[] := array['public.send_queue','public.sms_templates','public.system_control','public.message_events','agent.operator_membership','agent.run','agent.org',
+                            'public.automation_holds','public.followup_intents','public.v_followup_intent_health','public.v_followup_intent_reasons',
+                            'agent.finding','agent.conversation_action_state'];
+  fns text[] := array['public.campaign_entity_contact_review_flags(text[])','public.entity_graph_property_records(text)','public.lc_mcp_action_center(uuid,text,boolean,uuid,integer)','public.lc_mcp_followup_intent_health()','public.lc_mcp_operator_role(uuid,uuid)','public.lc_mcp_ops_finding(uuid,text)','public.lc_mcp_ops_research_valuation_snapshot()','public.lc_mcp_reader_self_check(text[],text[],name)','public.lc_mcp_thread_hold_status(uuid)'];
+  org uuid := '00000000-0000-4000-8000-0000000000a1';
+  h1 jsonb; h2 jsonb; h3 jsonb; h4 jsonb; ac jsonb; ac2 jsonb; fu jsonb; rv jsonb; sup jsonb; nov jsonb;
   t text; q text; col text; k "char"; n bigint; v text; j jsonb; rep jsonb;
   fails text[] := '{}';
   probes int := 0;
@@ -88,7 +99,7 @@ begin
   end loop;
   foreach q in array array[
     'select 1 from public.properties for update',
-    'select nextval(''public.acquisition_opportunities_id_seq'')',
+    'select nextval(''public.send_queue_id_seq'')',
     'create table public.lc_probe_table (x int)',
     'create schema lc_probe_schema',
     'create function public.lc_probe_fn() returns int language sql as ''select 1''',
@@ -111,7 +122,10 @@ begin
     'select public.log_message_event(''x'')',                                           -- invoker writer PUBLIC can call: its INSERT is refused
     'select public.run_sql(''insert into public.send_queue (body) values (''''x'''')'')', -- invoker raw SQL: cannot write
     'select public.run_sql(''update public.system_control set value = ''''on'''''')',  -- invoker raw SQL: cannot write
-    'select public.run_sql(''select count(*) from public.sms_templates'')'] loop        -- invoker raw SQL: cannot read outside the inventory
+    'select public.run_sql(''select count(*) from public.sms_templates'')',           -- invoker raw SQL: cannot read outside the inventory
+    'select count(*) from public.automation_hold_for(''+15550100001'')',               -- the hold lookup itself: authenticated / service_role only
+    'select agent.ops_research_valuation_snapshot(null)',                              -- the operations read: no USAGE on schema agent
+    'select public.run_sql(''select count(*) from public.automation_holds'')'] loop     -- invoker raw SQL: the registry is not readable
     probes := probes + 1;
     begin
       execute 'set local role lc_mcp_reader';
@@ -135,6 +149,55 @@ begin
     if not (rep->>'ok')::boolean then fails := fails || format('D: self-check (as the role) not ok: %s', rep->>'findings'); end if;
   exception when others then fails := fails || format('D: allowlisted RPC failed %s %s', sqlstate, sqlerrm);
   end;
+
+  -- ------------------- D2. the operations read functions: shapes, bounds, and NOTHING beyond the projection
+  begin
+    execute 'set local role lc_mcp_reader';
+    sup := public.lc_mcp_ops_finding(org, 'supervisor.summary');
+    nov := public.lc_mcp_ops_finding(org, 'valuation.refresh_batch');
+    rv := public.lc_mcp_ops_research_valuation_snapshot();
+    ac := public.lc_mcp_action_center(org, null, true, null, 10);
+    ac2 := public.lc_mcp_action_center(org, null, false, null, 1);
+    h1 := public.lc_mcp_thread_hold_status('00000000-0000-4000-8000-000000000101');
+    h2 := public.lc_mcp_thread_hold_status('00000000-0000-4000-8000-000000000102');
+    h3 := public.lc_mcp_thread_hold_status('00000000-0000-4000-8000-000000000103');
+    h4 := public.lc_mcp_thread_hold_status('00000000-0000-4000-8000-0000000009ff');
+    fu := public.lc_mcp_followup_intent_health();
+    execute 'reset role';
+    -- the newest supervisor.summary of THIS org (a later finding of another org is not read)
+    if sup->>'job_id' is distinct from 'job_sup_1' or (sup->'value'->>'all_clear')::boolean is distinct from false then fails := fails || format('D2: ops finding = %s', sup); end if;
+    if nov is not null then fails := fails || 'D2: a finding type with no row must be null (never zero)'::text; end if;
+    if rv->'offers'->>'overdue_no_reply_72h' is distinct from '1' then fails := fails || format('D2: research valuation snapshot = %s', rv); end if;
+    if jsonb_array_length(ac->'items') <> 1 or ac->'items'->0->>'state' <> 'needs_attention' or (ac->'items'->0->>'lost')::boolean is not true then fails := fails || format('D2: lost-only page = %s', ac->'items'); end if;
+    if jsonb_array_length(ac->'summary') <> 3 then fails := fails || format('D2: action center summary = %s', ac->'summary'); end if;
+    if jsonb_array_length(ac2->'items') <> 2 or (ac2->>'limit')::int <> 1 then fails := fails || 'D2: the page must carry limit + 1 rows (has_more)'::text; end if;
+    if (ac->'items'->0) ?| array['evidence_refs', 'opportunity_id', 'property_ref', 'org_id', 'job_id', 'derived_from'] then fails := fails || 'D2: action center returned an id / ref beyond the conversation'::text; end if;
+    if (h1->>'thread_found')::boolean is not true or jsonb_array_length(h1->'holds') <> 1
+       or h1->'holds'->0->>'reason_category' <> 'ownership_attribution_unresolved' or h1->'holds'->0->>'matched_on' <> 'thread' then fails := fails || format('D2: thread 1 hold = %s', h1); end if;
+    if jsonb_array_length(h2->'holds') <> 1 or h2->'holds'->0->>'matched_on' <> 'opportunity' or h2->'holds'->0->>'reason_category' <> 'operator_hold'
+       or jsonb_array_length(h2->'holds'->0->'blocked_capabilities') <> 2 then fails := fails || format('D2: thread 2 (opportunity) hold = %s', h2); end if;
+    if jsonb_array_length(h3->'holds') <> 0 then fails := fails || 'D2: a RELEASED hold was reported'::text; end if;
+    if (h4->>'thread_found')::boolean is not false then fails := fails || 'D2: an unknown thread must be thread_found = false'::text; end if;
+    if ((h1->'holds') || (h2->'holds'))::text ~ '(\+1555|Fixture Person|fixture_operator_hold|ownership_unresolved:|owner_rule_|[0-9a-f]{8}-[0-9a-f]{4}-)' then fails := fails || format('D2: a hold leaked a key / id / reason text: %s', (h1->'holds') || (h2->'holds')); end if;
+    if (fu->'health'->>'planned')::int <> 2 or (fu->'health'->>'held')::int <> 1 or (fu->'health'->>'retrying')::int <> 1 or jsonb_array_length(fu->'reasons') <> 2 then fails := fails || format('D2: follow-up health = %s', fu); end if;
+    if (fu->'reasons')::text ~ '\+1555' then fails := fails || 'D2: follow-up reasons leaked a thread key'::text; end if;
+  exception when others then fails := fails || format('D2: operations read failed %s %s', sqlstate, sqlerrm);
+  end;
+  -- bounded inputs: a finding type outside the four, an unknown state, a null thread → 22023 (invalid_parameter_value)
+  foreach q in array array[
+    'select public.lc_mcp_ops_finding(''00000000-0000-4000-8000-0000000000a1'', ''recovery.candidate'')',
+    'select public.lc_mcp_ops_finding(null, ''supervisor.summary'')',
+    'select public.lc_mcp_action_center(''00000000-0000-4000-8000-0000000000a1'', ''lost'', false, null, 10)',
+    'select public.lc_mcp_thread_hold_status(null)'] loop
+    probes := probes + 1;
+    begin
+      execute 'set local role lc_mcp_reader';
+      execute q;
+      execute 'reset role';
+      fails := fails || format('D2: NOT REFUSED: %s', q);
+    exception when invalid_parameter_value then null; when others then fails := fails || format('D2: %s → %s (want 22023)', q, sqlstate);
+    end;
+  end loop;
 
   -- ------------------------------ E. the self-check names every way to break the role
   rep := public.lc_mcp_reader_self_check(rels, fns, 'lc_mcp_reader');
@@ -212,10 +275,10 @@ begin
   if (rep->>'ok')::boolean or not (rep->>'findings') like '%attr_canlogin%' then fails := fails || 'E: LOGIN (a raw SQL session) not reported'::text; end if;
   alter role lc_mcp_reader nologin;
 
-  grant usage on sequence public.acquisition_opportunities_id_seq to lc_mcp_reader;
+  grant usage on sequence public.send_queue_id_seq to lc_mcp_reader;
   rep := public.lc_mcp_reader_self_check(rels, fns, 'lc_mcp_reader');
   if (rep->>'ok')::boolean or not (rep->>'findings') like '%sequence_privileges:%' then fails := fails || 'E: sequence USAGE not reported'::text; end if;
-  revoke usage on sequence public.acquisition_opportunities_id_seq from lc_mcp_reader;
+  revoke usage on sequence public.send_queue_id_seq from lc_mcp_reader;
 
   grant create on schema public to lc_mcp_reader;
   rep := public.lc_mcp_reader_self_check(rels, fns, 'lc_mcp_reader');
@@ -226,6 +289,17 @@ begin
   rep := public.lc_mcp_reader_self_check(rels, fns, 'lc_mcp_reader');
   if (rep->>'ok')::boolean or not (rep->>'findings') like '%restrictive_policy:properties%' then fails := fails || 'E: restrictive policy not reported'::text; end if;
   drop policy lc_probe_restrict on public.properties;
+
+  -- an operations read function made VOLATILE (PostgREST would run it in a read-write transaction)
+  alter function public.lc_mcp_action_center(uuid, text, boolean, uuid, integer) volatile;
+  rep := public.lc_mcp_reader_self_check(rels, fns, 'lc_mcp_reader');
+  if (rep->>'ok')::boolean or not (rep->>'findings') like '%volatile_function:public.lc_mcp_action_center%' then fails := fails || 'E: a VOLATILE operations read function not reported'::text; end if;
+  alter function public.lc_mcp_action_center(uuid, text, boolean, uuid, integer) stable;
+  -- direct SELECT on a source the definer reads (the role must reach it ONLY through the projection)
+  grant select on public.automation_holds to lc_mcp_reader;
+  rep := public.lc_mcp_reader_self_check(rels, fns, 'lc_mcp_reader');
+  if (rep->>'ok')::boolean or not (rep->>'findings') like '%exposed_select_outside_inventory:%public.automation_holds%' then fails := fails || 'E: direct SELECT on automation_holds not reported'::text; end if;
+  revoke select on public.automation_holds from lc_mcp_reader;
 
   revoke execute on function public.lc_mcp_operator_role(uuid, uuid) from lc_mcp_reader;
   rep := public.lc_mcp_reader_self_check(rels, fns, 'lc_mcp_reader');

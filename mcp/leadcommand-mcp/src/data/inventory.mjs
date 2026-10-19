@@ -12,7 +12,8 @@
 // It is enforced three times:
 //
 //   1. the database role lc_mcp_reader holds SELECT on exactly RELATIONS and
-//      EXECUTE on exactly RPCS + MCP_RPCS
+//      EXECUTE on exactly RPCS + MCP_RPCS (DEFINER_READS lists what the MCP's own
+//      definer functions read as their owner; none of it is granted to the role)
 //      (supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql; a test
 //      asserts the migration's lists equal these);
 //   2. the MCP's own transport guard (data/read-fetch.mjs) refuses any request
@@ -61,7 +62,37 @@ export const RPCS = Object.freeze({
 export const MCP_RPCS = Object.freeze({
   'public.lc_mcp_reader_self_check(text[],text[],name)': ['data/credential#bootSelfCheck (privilege introspection, SECURITY INVOKER)'],
   'public.lc_mcp_operator_role(uuid,uuid)': ['auth/principal#createRpcMembershipStore (one membership lookup, SECURITY DEFINER)'],
+  // rc-8.5.21 operations reads (each tool behind its own scope, none in the default grant)
+  'public.lc_mcp_ops_finding(uuid,text)': ['adapters/operations#getOpsSupervisorStatus → ops-intel-capability#opsIntelTool (store.latestFinding)'],
+  'public.lc_mcp_ops_research_valuation_snapshot()': ['adapters/operations#getOpsSupervisorStatus → ops-intel-capability#opsIntelTool (source.researchValuationSnapshot)'],
+  'public.lc_mcp_action_center(uuid,text,boolean,uuid,integer)': ['adapters/operations#searchActionCenter (operations-store#actionCenterSummary / #listActionStates SQL)'],
+  'public.lc_mcp_thread_hold_status(uuid)': ['adapters/operations#getThreadHoldStatus (public.automation_hold_for + automation-hold-core#STATIC_PERMANENT_EXCLUSIONS)'],
+  'public.lc_mcp_followup_intent_health()': ['adapters/operations#getFollowupIntentHealth (followup-lifecycle#loadFollowUpLifecycleHealth reads; supervisor-checks#evaluateSupervisor followup_lifecycle rule)'],
 })
+
+/**
+ * What each MCP SECURITY DEFINER function reads AS ITS OWNER. lc_mcp_reader holds NO privilege on
+ * any of these (the posttest proves SELECT / EXECUTE on them is refused, and the boot self-check
+ * reports any direct SELECT in an exposed schema): the role sees only the function's projection.
+ * Why definer projections and not table grants: schema agent is not exposed through PostgREST;
+ * automation_holds / followup_intents carry thread keys (phones) and free-text reasons; the
+ * follow-up views are security_invoker (a grant on them needs a grant on followup_intents).
+ */
+export const DEFINER_READS = Object.freeze({
+  'public.lc_mcp_operator_role(uuid,uuid)': ['agent.operator_membership'],
+  'public.lc_mcp_ops_finding(uuid,text)': ['agent.finding (types supervisor.summary, valuation.refresh_batch, recovery.batch, recovery.linkage only)'],
+  'public.lc_mcp_ops_research_valuation_snapshot()': ['agent.ops_research_valuation_snapshot(timestamptz) → public.acquisition_opportunities, public.property_acquisition_scores, public.seller_offers, public.message_events, public.negotiation_* (counts and ids)'],
+  'public.lc_mcp_action_center(uuid,text,boolean,uuid,integer)': ['agent.conversation_action_state'],
+  'public.lc_mcp_thread_hold_status(uuid)': ['public.inbox_thread_state (one row by id)', 'public.acquisition_opportunities (primary_thread_key → id, ≤ 10)', 'public.automation_hold_for(text,uuid,text,uuid,text,text) → public.automation_holds'],
+  'public.lc_mcp_followup_intent_health()': ['public.v_followup_intent_health → public.followup_intents', 'public.v_followup_intent_reasons → public.followup_intents'],
+})
+
+/** Relations / functions the MCP reaches ONLY through a definer projection (never granted to the role). */
+export const DEFINER_ONLY_SOURCES = Object.freeze([
+  'agent.finding', 'agent.conversation_action_state', 'agent.ops_research_valuation_snapshot(timestamptz)',
+  'public.automation_holds', 'public.automation_hold_for(text,uuid,text,uuid,text,text)',
+  'public.followup_intents', 'public.v_followup_intent_health', 'public.v_followup_intent_reasons',
+])
 
 export const RPC_SIGNATURES = Object.freeze([...Object.keys(RPCS), ...Object.keys(MCP_RPCS)].sort())
 export const rpcName = (sig) => sig.replace(/^public\./, '').replace(/\(.*$/, '')

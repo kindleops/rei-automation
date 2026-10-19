@@ -13,6 +13,7 @@ import { getMarketIntelligence } from '../adapters/market.mjs'
 import { searchComps } from '../adapters/comps.mjs'
 import { getCampaignMetrics } from '../adapters/campaigns.mjs'
 import { getLeadContactStatus } from '../adapters/contact-status.mjs'
+import { getOpsSupervisorStatus, searchActionCenter, getThreadHoldStatus, getFollowupIntentHealth, OPS_INTEL_SECTIONS, ACTION_STATES, HOLD_REASON_CATEGORIES, HOLD_MATCHED_ON, FOLLOWUP_COUNT_FIELDS } from '../adapters/operations.mjs'
 
 const READ_ANNOTATIONS = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false })
 
@@ -92,6 +93,29 @@ const CampaignShape = z.object({
   campaign_id: z.string(), name: S, status: S, objective: S, candidate_source: S, market: S, state: S, created_at: S, updated_at: S,
   lifecycle: loose, counters: loose, caps: loose, audience: loose,
 }).strict()
+
+// ── rc-8.5.21 operations reads (each behind its own OPT-IN scope) ──
+const OpsSection = z.object({ available: z.boolean(), code: z.string().optional(), at: S.optional(), job_id: S.optional(), value: z.any().optional(), linkage: z.any().optional(), provenance: Prov }).passthrough()
+const OpsSupervisorInput = z.object({
+  sections: z.array(z.enum(OPS_INTEL_SECTIONS)).min(1).max(OPS_INTEL_SECTIONS.length).optional().describe(`subset of ${OPS_INTEL_SECTIONS.join(', ')} (default: all)`),
+}).strict()
+const ActionCenterInput = z.object({
+  state: z.enum(ACTION_STATES).optional().describe('one operational state (default: every state)'),
+  lost_only: z.boolean().default(true).describe('only LOST conversations (an unanswered seller message nobody picked up); false = every conversation in the state'),
+  limit: Limit(25, 10),
+  cursor: Cursor.optional(),
+}).strict()
+const ActionRow = z.object({
+  conversation_id: z.string(), state: S, state_label: S, active_queue: B, owner: S, lost: z.boolean(), verified_stage: S, stage_verified: z.boolean(), stage_note: S,
+  next_action: S, due_at: S, priority_reason: S, reasons: z.array(z.string()), pending_approvals: N, has_opportunity: z.boolean(),
+  last_inbound_at: S, last_outbound_at: S, state_since: S, computed_at: S,
+}).strict()
+const StateRef = z.object({ id: z.string(), label: z.string(), active: z.boolean() }).strict()
+const HoldRow = z.object({
+  source: z.enum(['registry', 'static']), hold_type: z.string(), reason_category: z.enum(HOLD_REASON_CATEGORIES), matched_on: z.enum(HOLD_MATCHED_ON),
+  blocked_capabilities: z.array(z.string()), set_at: S,
+}).strict()
+const FollowupCounts = z.object(Object.fromEntries(FOLLOWUP_COUNT_FIELDS.map((k) => [k, N]))).strict()
 
 /**
  * Tool spec: { name, title, description, scope, min_role, input, output, limits, paged, untrusted, handler }
@@ -197,6 +221,70 @@ export const TOOLS = Object.freeze([
     untrusted: ['result.eligibility.reason', 'result.contacts[].block_reason', 'result.readiness.*'],
     handler: getLeadContactStatus,
   },
+  {
+    name: 'leadcommand_get_ops_supervisor_status',
+    title: 'Get the operations supervisor status',
+    description: 'The latest operations supervisor run (check statuses and counts, all-clear, escalations), valuation coverage / overdue offers / negotiation authority, the latest valuation dry run and recovery linkage — the read-only operations intelligence the supervisor and the brief already produced. Counts and record ids only, never contact values. A source that has not run is available=false with a code, never 0. Read-only: nothing here runs a job, decides a work item or sends.',
+    scope: 'leadcommand.ops_supervisor.read', min_role: 'operator',
+    input: OpsSupervisorInput,
+    output: z.object({
+      at: z.string(),
+      sections: z.object({ supervisor: OpsSection.optional(), research_valuation: OpsSection.optional(), valuation_dry_run: OpsSection.optional(), recovery: OpsSection.optional() }).strict(),
+      provenance: z.array(z.object({ section: z.string(), source: z.string() }).strict()),
+      read_only: z.literal(true),
+      sections_requested: z.array(z.string()),
+    }).strict(),
+    limits: { per_min: 30, timeout_ms: 8000, max_rows: 1, max_response_bytes: 32768 },
+    untrusted: ['result.sections.*.value'],
+    handler: getOpsSupervisorStatus,
+  },
+  {
+    name: 'leadcommand_search_action_center',
+    title: 'Search the Inbound Action Center (lost conversations)',
+    description: 'The Inbound Action Center: conversation counts per operational state (needs attention, AI handling, negotiating, scheduled follow-up …) and a page of conversations — by default the LOST ones (an unanswered seller message nobody picked up). Conversation ids (inbox thread ids), state / next-action codes and dates only: never message text, phones, names, evidence refs or opportunity ids. Keyset pagination via next_cursor. Read-only: acknowledging or resolving a work item is not possible here.',
+    scope: 'leadcommand.action_center.read', min_role: 'operator', paged: true,
+    input: ActionCenterInput,
+    output: z.object({
+      rows: z.array(ActionRow), available: z.boolean(), code: z.string().optional(),
+      summary: z.object({ counts: z.record(z.string(), z.number()), lost: z.number(), active_queue: z.number(), total: z.number(), computed_at: S }).strict().nullable(),
+      filters: z.object({ state: S, lost_only: z.boolean() }).strict().optional(),
+      states: z.array(StateRef), provenance: Prov,
+    }).strict(),
+    limits: { per_min: 30, timeout_ms: 8000, max_rows: 25, max_response_bytes: 65536 },
+    untrusted: ['result.rows[].next_action', 'result.rows[].priority_reason', 'result.rows[].reasons[]'],
+    handler: searchActionCenter,
+  },
+  {
+    name: 'leadcommand_get_thread_hold_status',
+    title: 'Get the automation hold status of one inbox thread',
+    description: 'Is this inbox thread under an automation hold? Held / not held / unknown, the reason CATEGORY (operator_hold, ownership_attribution_unresolved, permanent_exclusion), what the hold matched (thread, property, owner, opportunity) and the blocked capabilities — from THE hold authority (public.automation_hold_for) plus the code-level permanent exclusions. Never a hold id, hold key, reason text or phone. A lookup that fails is unknown, never "not held". Read-only: nothing here sets or releases a hold.',
+    scope: 'leadcommand.holds.read', min_role: 'operator',
+    input: z.object({ thread_id: Uuid.describe('inbox thread id (the conversation_id of the Action Center)') }).strict(),
+    output: z.object({
+      thread_id: z.string(), thread_found: z.boolean().nullable(), status: z.enum(['held', 'not_held', 'unknown']), held: z.boolean().nullable(),
+      reason_categories: z.array(z.enum(HOLD_REASON_CATEGORIES)), holds: z.array(HoldRow), blocked_capabilities: z.array(z.string()),
+      provenance: Prov, policy_notes: z.array(z.string()),
+    }).strict(),
+    limits: { per_min: 60, timeout_ms: 8000, max_rows: 1, max_response_bytes: 16384 },
+    untrusted: [],
+    handler: getThreadHoldStatus,
+  },
+  {
+    name: 'leadcommand_get_followup_intent_health',
+    title: 'Get follow-up intent lifecycle health',
+    description: 'Follow-up execution health: intent counts by lifecycle state (scheduled, overdue, stale leases, dispatched without outcome, delivered, failed after provider accept, held, not executable …), the top 20 non-success reason codes with counts, and the ops supervisor\'s own verdict (ok / warn / critical, stuck and needs-review counts). Never thread keys, phones or message text. Read-only: nothing here plans, re-queues or cancels a follow-up.',
+    scope: 'leadcommand.followups.read', min_role: 'operator',
+    input: z.object({}).strict(),
+    output: z.object({
+      available: z.boolean(), code: z.string().optional(), counts: FollowupCounts.nullable(), computed_at: S,
+      reasons: z.array(z.object({ state: S, kind: S, reason: S, writer: S, n: z.number() }).strict()),
+      verdict: z.object({ status: z.string(), stuck: z.number(), needs_review: z.number(), issue: z.object({ severity: S, escalate: z.boolean(), title: S, action: S }).strict().nullable(), rule: z.string() }).strict().nullable(),
+      provenance: Prov,
+    }).strict(),
+    limits: { per_min: 30, timeout_ms: 8000, max_rows: 1, max_response_bytes: 16384 },
+    untrusted: ['result.reasons[].kind', 'result.reasons[].reason', 'result.reasons[].writer', 'result.verdict.issue.title'],
+    handler: getFollowupIntentHealth,
+  },
 ])
 
 export const NOT_IMPLEMENTED = Object.freeze([
@@ -204,6 +292,7 @@ export const NOT_IMPLEMENTED = Object.freeze([
   { name: 'seller message text / thread read', reason: 'PII minimization + untrusted content: 1.0 returns conversation metadata only.' },
   { name: 'truthful campaign reply counts', reason: 'needs message_events pairing (seller → sender after send); no bounded, indexed read path in the guarded transport yet.' },
   { name: 'engine-qualified comps / valuations', reason: 'evaluateCompEligibility lives in acquisitionDecisionEngine.js (the engine write path); 1.0 exposes recorded sales as evidence and the persisted engine result separately.' },
+  { name: 'operations mutations (work item acknowledge / resolve / dismiss / reopen, setting or releasing a hold, planning / re-queueing / cancelling a follow-up, running a supervisor / recovery job)', reason: 'The operations tools are reads of what the jobs already produced; every mutation stays in the authenticated operations API and the lease-bound database writers.' },
   { name: 'any write (SMS, campaign, routing, suppression, enrollment, record edits, SQL/shell/HTTP/RPC)', reason: 'Phase One is READ-ONLY by owner directive.' },
 ])
 

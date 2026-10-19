@@ -22,7 +22,8 @@
 //        DELETE  DELETE /<t>?<pk>=is.null                  (zero rows)
 //      on send_queue, sms_templates, system_control, properties and campaigns. Each must
 //      fail with SQLSTATE 42501 (401/403). It also checks: SELECT on send_queue (outside
-//      the inventory) → 42501; schema agent → refused (42501, or PGRST106 when the schema
+//      the inventory) → 42501; SELECT on automation_holds and followup_intents (read ONLY
+//      through the definer projections) → 42501; schema agent → refused (42501, or PGRST106 when the schema
 //      is not exposed); and the database's own privilege report for the role
 //      (lc_mcp_reader_self_check, read AS the role) → ok, running_as lc_mcp_reader, no
 //      reachable write / egress function, no BYPASSRLS. TRUNCATE has no PostgREST
@@ -30,8 +31,13 @@
 //   2. EVERY CAPABILITY, live. The real server (bin/leadcommand-mcp.mjs) starts as a
 //      subprocess over loopback Streamable HTTP, with a CLEAN environment (only
 //      LEADCOMMAND_MCP_*), a fresh bearer token and an audit file. An SDK client connects
-//      the way Agntau does (Authorization: Bearer) and calls all 9 tools with bounded
+//      the way Agntau does (Authorization: Bearer) and calls all 13 tools with bounded
 //      reads: anchors from --zip / --market, limit ≤ 5, radius 0.5 mi, ≤ MAX_CALLS calls.
+//      The four operations tools (supervisor status, action center, thread hold status,
+//      follow-up health) run when their opt-in scope is granted (the acceptance grants
+//      every scope unless LEADCOMMAND_MCP_SCOPES narrows it; a narrowed run reports the
+//      skipped tools by name). The hold status uses a thread id from the action center
+//      page; with no conversation there it probes a nil id and expects not_found.
 //      Every result must: validate against the tool's outputSchema (the SDK Client checks
 //      it); be data_mode=live with no fixture notice; carry provenance (kind ∈ fact |
 //      derived | inferred | stale | missing); and contain no phone or email shape.
@@ -52,7 +58,18 @@ import { RELATION_NAMES, RPC_SIGNATURES } from '../src/data/inventory.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PKG = path.resolve(HERE, '..')
-export const MAX_CALLS = 12
+export const MAX_CALLS = 18
+/** Every tool of the catalog, with its scope (the script runs without the @/ loader, so it cannot import the catalog). */
+export const TOOL_SCOPES = Object.freeze({
+  leadcommand_search_leads: 'leadcommand.leads.read', leadcommand_get_lead: 'leadcommand.leads.read',
+  leadcommand_search_properties: 'leadcommand.properties.read', leadcommand_get_property: 'leadcommand.properties.read',
+  leadcommand_get_acquisition_score: 'leadcommand.scores.read', leadcommand_get_market_intelligence: 'leadcommand.market.read',
+  leadcommand_search_comps: 'leadcommand.comps.read', leadcommand_get_campaign_metrics: 'leadcommand.campaigns.read',
+  leadcommand_get_lead_contact_status: 'leadcommand.contact_status.read',
+  leadcommand_get_ops_supervisor_status: 'leadcommand.ops_supervisor.read', leadcommand_search_action_center: 'leadcommand.action_center.read',
+  leadcommand_get_thread_hold_status: 'leadcommand.holds.read', leadcommand_get_followup_intent_health: 'leadcommand.followups.read',
+})
+export const ACCEPTANCE_SCOPES = [...new Set(Object.values(TOOL_SCOPES))].join(' ')
 const PROVENANCE_KINDS = new Set(['fact', 'derived', 'inferred', 'stale', 'missing'])
 const PHONE = /(?<![0-9A-Za-z])\+?1?[-. (]*[2-9][0-9]{2}[-. )]*[0-9]{3}[-. ]*[0-9]{4}(?![0-9])/
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/
@@ -100,6 +117,9 @@ export async function databaseRefusesWrites({ url, reader, apiKey, fetchImpl = g
     await expect42501(`DELETE ${t}`, () => fetchImpl(`${url}/rest/v1/${t}?${pk}=is.null`, { method: 'DELETE', headers: h() }))
   }
   await expect42501('SELECT send_queue (outside the inventory)', () => fetchImpl(`${url}/rest/v1/send_queue?select=id&limit=1`, { headers: h({ prefer: 'count=none' }) }))
+  // the operations sources are reachable ONLY through the lc_mcp_* definer projections
+  await expect42501('SELECT automation_holds (definer projection only)', () => fetchImpl(`${url}/rest/v1/automation_holds?select=id&limit=1`, { headers: h({ prefer: 'count=none' }) }))
+  await expect42501('SELECT followup_intents (definer projection only)', () => fetchImpl(`${url}/rest/v1/followup_intents?select=id&limit=1`, { headers: h({ prefer: 'count=none' }) }))
   {
     const r = await fetchImpl(`${url}/rest/v1/operator_membership?columns=user_id`, { method: 'POST', headers: h({ 'content-profile': 'agent' }), body: '[]' })
     const b = await body(r)
@@ -140,7 +160,9 @@ function inspect(name, structured, text) {
   }
   walk(structured.result)
   if (!kinds.size) fail('capability', `${name}: no provenance anywhere in the result`)
-  const scrubbed = text.replace(/"(property_id|lead_id|comp_id|campaign_id|correlation_id|build_id|[a-z_]*_at|generated_at|as_of|sold_on|sold_on_or_after|last_sale_on)":"[^"]*"/g, '')
+  const scrubbed = text.replace(/"(property_id|lead_id|comp_id|campaign_id|correlation_id|build_id|[a-z_]*_at|generated_at|as_of|sold_on|sold_on_or_after|last_sale_on|job_id)":"[^"]*"/g, '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '') // record ids (conversation / thread / opportunity uuids)
+    .replace(/"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9:]+)?"/g, '""')
   if (PHONE.test(scrubbed)) fail('capability', `${name}: a phone-shaped value in the result`)
   if (EMAIL.test(scrubbed)) fail('capability', `${name}: an email-shaped value in the result`)
   return [...kinds].sort()
@@ -159,7 +181,7 @@ async function startServer(env, work) {
     LEADCOMMAND_MCP_AUDIT_FILE: audit, LEADCOMMAND_MCP_DATA: 'live',
     ...Object.fromEntries(Object.entries(env).filter(([k]) => /^LEADCOMMAND_MCP_(SUPABASE_URL|READER_JWT_FILE|API_KEY_FILE|PRINCIPAL_USER_ID|ORG_ID|DATA_ORG_ID|SCOPES)$/.test(k))),
   }
-  if (!clean.LEADCOMMAND_MCP_SCOPES) clean.LEADCOMMAND_MCP_SCOPES = 'leadcommand.leads.read leadcommand.properties.read leadcommand.scores.read leadcommand.market.read leadcommand.comps.read leadcommand.campaigns.read leadcommand.contact_status.read'
+  if (!clean.LEADCOMMAND_MCP_SCOPES) clean.LEADCOMMAND_MCP_SCOPES = ACCEPTANCE_SCOPES
   const child = spawn(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', path.join(PKG, 'bin/leadcommand-mcp.mjs')], { cwd: PKG, env: clean, stdio: ['ignore', 'ignore', 'pipe'] })
   let stderr = ''
   child.stderr.on('data', (d) => { stderr = (stderr + d).slice(-2000) })
@@ -169,10 +191,10 @@ async function startServer(env, work) {
     const done = await Promise.race([exited.then((c) => ({ c })), new Promise((r) => setTimeout(() => r(null), 100))])
     if (done) fail('server', `the server exited (${done.c}) during boot: ${(stderr.match(/"message":"([^"]{0,300})/) || [])[1] || stderr.slice(-300)}`)
   }
-  return { url: `http://127.0.0.1:${port}/mcp`, token, audit, stop: async () => { child.kill('SIGTERM'); await exited } }
+  return { url: `http://127.0.0.1:${port}/mcp`, token, audit, scopes: clean.LEADCOMMAND_MCP_SCOPES.split(/[\s,]+/).filter(Boolean), stop: async () => { child.kill('SIGTERM'); await exited } }
 }
 
-/** Stage 2: all 9 tools, bounded, through the real server over Streamable HTTP. */
+/** Stage 2: every granted tool (all 13 by default), bounded, through the real server over Streamable HTTP. */
 export async function everyCapability(env, { zip = null, market = null, work }) {
   if (!zip && !market) fail('capability', 'give an anchor: --zip <5 digits> or --market "<label>"')
   const srv = await startServer(env, work)
@@ -180,11 +202,15 @@ export async function everyCapability(env, { zip = null, market = null, work }) 
   const transport = new StreamableHTTPClientTransport(new URL(srv.url), { requestInit: { headers: { Authorization: `Bearer ${srv.token}` } } })
   const results = []
   let calls = 0
-  const call = async (name, args) => {
+  const call = async (name, args, { expectError = null } = {}) => {
     if (++calls > MAX_CALLS) fail('capability', `call budget (${MAX_CALLS}) exceeded`)
     const t0 = Date.now()
     const r = await client.callTool({ name, arguments: args })
     const text = JSON.stringify(r.structuredContent ?? null)
+    if (r.isError && expectError && r.structuredContent?.error?.code === expectError) {
+      results.push({ tool: name, ms: Date.now() - t0, rows: null, provenance: [], bytes: Buffer.byteLength(text), expected_error: expectError })
+      return null
+    }
     if (r.isError) fail('capability', `${name} failed: ${r.structuredContent?.error?.class}/${r.structuredContent?.error?.code}`)
     const kinds = inspect(name, r.structuredContent, text)
     const rows = Array.isArray(r.structuredContent?.result?.rows) ? r.structuredContent.result.rows.length : null
@@ -194,7 +220,9 @@ export async function everyCapability(env, { zip = null, market = null, work }) 
   try {
     await client.connect(transport)
     const { tools } = await client.listTools()
-    if (tools.length !== 9 || !tools.every((t) => t.annotations?.readOnlyHint === true && t.annotations?.destructiveHint === false)) fail('capability', `expected 9 read-only tools, got ${tools.length}`)
+    const expected = Object.keys(TOOL_SCOPES).length
+    if (tools.length !== expected || !tools.every((t) => t.annotations?.readOnlyHint === true && t.annotations?.destructiveHint === false)) fail('capability', `expected ${expected} read-only tools, got ${tools.length}`)
+    const granted = (tool) => srv.scopes.includes(TOOL_SCOPES[tool])
     const anchor = zip ? { zip } : { market }
     const props = await call('leadcommand_search_properties', { ...anchor, limit: 3 })
     const pid = props.rows?.[0]?.property_id
@@ -208,10 +236,24 @@ export async function everyCapability(env, { zip = null, market = null, work }) 
     const camps = await call('leadcommand_get_campaign_metrics', { limit: 3 })
     const cid = camps.campaigns?.[0]?.campaign_id
     if (cid) await call('leadcommand_get_campaign_metrics', { campaign_id: cid })
-    await call('leadcommand_get_lead_contact_status', { property_id: pid })
+    if (granted('leadcommand_get_lead_contact_status')) await call('leadcommand_get_lead_contact_status', { property_id: pid })
+    // rc-8.5.21 operations reads (opt-in scopes)
+    if (granted('leadcommand_get_ops_supervisor_status')) await call('leadcommand_get_ops_supervisor_status', {})
+    let threadId = null
+    if (granted('leadcommand_search_action_center')) {
+      const ac = await call('leadcommand_search_action_center', { lost_only: false, limit: 3 })
+      threadId = ac?.rows?.[0]?.conversation_id || null
+    }
+    if (granted('leadcommand_get_thread_hold_status')) {
+      if (threadId) await call('leadcommand_get_thread_hold_status', { thread_id: threadId })
+      else await call('leadcommand_get_thread_hold_status', { thread_id: '00000000-0000-0000-0000-000000000000' }, { expectError: 'NOT_FOUND' })
+    }
+    if (granted('leadcommand_get_followup_intent_health')) await call('leadcommand_get_followup_intent_health', {})
     const covered = new Set(results.map((x) => x.tool))
-    if (covered.size !== 9) fail('capability', `only ${covered.size} of 9 tools ran`)
-    return { property_id: pid, campaign_id: cid || null, calls, results, audit: srv.audit, tokenForCheck: srv.token }
+    const want = Object.keys(TOOL_SCOPES).filter(granted)
+    const skipped = Object.keys(TOOL_SCOPES).filter((t) => !granted(t))
+    if (want.some((t) => !covered.has(t))) fail('capability', `granted tools that did not run: ${want.filter((t) => !covered.has(t)).join(', ')}`)
+    return { property_id: pid, campaign_id: cid || null, calls, results, skipped_not_granted: skipped, audit: srv.audit, tokenForCheck: srv.token }
   } finally {
     await client.close().catch(() => {})
     await srv.stop()
@@ -227,7 +269,8 @@ export function auditMatches(file, { calls, secrets }) {
   if (!check || check.stage !== 'boot' || check.outcome !== 'ok' || check.running_as !== 'lc_mcp_reader') fail('audit', `boot self-check not audited as ok (${JSON.stringify(check)?.slice(0, 200)})`)
   const tc = lines.filter((l) => l.event === 'tool_call')
   if (tc.length !== calls) fail('audit', `${tc.length} tool_call records for ${calls} calls`)
-  if (!tc.every((l) => l.outcome === 'ok' && l.data_mode === 'live' && /^#[0-9a-f]{12}$/.test(l.principal))) fail('audit', 'a tool_call record is not ok / live / hashed')
+  // a nil-id hold probe is the one expected refusal (not_found): it is audited as failed / not_found
+  if (!tc.every((l) => (l.outcome === 'ok' || (l.tool === 'leadcommand_get_thread_hold_status' && l.error_code === 'NOT_FOUND')) && l.data_mode === 'live' && /^#[0-9a-f]{12}$/.test(l.principal))) fail('audit', 'a tool_call record is not ok / live / hashed')
   return { self_check: { stage: check.stage, outcome: check.outcome, running_as: check.running_as, expires_at: check.expires_at }, tool_calls: tc.length }
 }
 
@@ -239,7 +282,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     summary.stages.preflight = { ok: true, role: pf.token.role, token_days_left: pf.token.days_left, api_key: pf.key.kind, data_service: new URL(pf.url).host }
     summary.stages.database = { ok: true, ...(await databaseRefusesWrites(pf)) }
     const cap = await everyCapability(env, { zip: arg(argv, '--zip'), market: arg(argv, '--market'), work })
-    summary.stages.capability = { ok: true, property_id: cap.property_id, campaign_id: cap.campaign_id, calls: cap.calls, results: cap.results }
+    summary.stages.capability = { ok: true, property_id: cap.property_id, campaign_id: cap.campaign_id, calls: cap.calls, results: cap.results, skipped_not_granted: cap.skipped_not_granted }
     summary.stages.audit = { ok: true, ...auditMatches(cap.audit, { calls: cap.calls, secrets: [pf.reader, pf.apiKey, cap.tokenForCheck] }) }
     summary.result = 'PASS'
   } catch (e) {
