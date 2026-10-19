@@ -92,7 +92,9 @@ test("P3: retry counters alone cannot authorise a recycle of an ambiguous row", 
 
 test("P4: stale-lock recovery moves stuck rows to a NON-DISPATCHABLE hold", async () => {
   const src = await readFile(SRC("src/lib/domain/queue/run-send-queue.js"), "utf8");
-  const block = src.slice(src.indexOf("Stale-lock recovery"), src.indexOf("Stale-lock recovery") + 2200);
+  // rc-8.5.21 RUN-09 grew the block (the provable-no-send re-dispatch is delegated to
+  // processing-lease-recovery.js): the window covers the whole recovery step
+  const block = src.slice(src.indexOf("Stale-lock recovery"), src.indexOf("Stale-lock recovery") + 4200);
 
   assert.ok(
     !/queue_status:\s*'queued'/.test(block),
@@ -104,6 +106,19 @@ test("P4: stale-lock recovery moves stuck rows to a NON-DISPATCHABLE hold", asyn
   // The hold must be outside the processor's claim set.
   const CLAIMABLE = ["queued", "scheduled", "pending", "approved", "ready"];
   assert.ok(!CLAIMABLE.includes("expired"), "the hold status must not be claimable");
+});
+
+test("P4 / rc-8.5.21 RUN-09: the ONLY way back to queued is a provable-no-send verdict, once (processing-lease-recovery.js)", async () => {
+  const src = await readFile(SRC("src/lib/domain/queue/processing-lease-recovery.js"), "utf8");
+  const queuedAt = [...src.matchAll(/queue_status:\s*'queued'/g)].map((m) => m.index);
+  assert.equal(queuedAt.length, 1, "exactly one requeue patch");
+  const guard = src.lastIndexOf("if (verdict.action === 'redispatch')", queuedAt[0]);
+  assert.ok(guard > 0 && queuedAt[0] - guard < 400, "the requeue patch is built only for a redispatch verdict");
+  assert.match(src, /MAX_LEASE_REDISPATCHES = 1\b/, "at most one re-dispatch");
+  assert.match(src, /attempt_ledger_unreadable/, "an unreadable attempt ledger is ambiguous");
+  assert.match(src, /\.eq\('queue_status', 'processing'\)/, "compare-and-set on the stuck state");
+  const runner = await readFile(SRC("src/lib/domain/queue/run-send-queue.js"), "utf8");
+  assert.ok(!/queue_status:\s*'queued'/.test(runner.slice(runner.indexOf("Stale-lock recovery"), runner.indexOf("Stale-lock recovery") + 4200)), "the runner itself never requeues inline");
 });
 
 test("P4: the fix does not depend on forgetting to clear lock_token", async () => {

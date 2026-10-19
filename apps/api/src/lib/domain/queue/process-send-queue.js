@@ -39,7 +39,7 @@ import {
 import { recordLaunchCriticalAlert } from "@/lib/domain/alerts/launch-critical-alerts.js";
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
-import { loadPropertyGeography, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
+import { loadPropertyGeography, loadMailingGeography, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
 import {
   governanceApplies,
   governanceExcludedTemplateIds,
@@ -1659,6 +1659,17 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         warn("queue.property_geography_unavailable", { queue_row_id, message: geography_error?.message || String(geography_error) });
       }
     }
+    // rc-8.5.21 RUN-06: the owner's MAILING state (recipient evidence), the same evidence the
+    // recipient-window scheduler plans with; a failed read is absent evidence, as at plan time
+    let mailing_geography = null;
+    if (!deps.evaluateContactWindow && clean(queue_row.property_id)) {
+      try {
+        const mailing = await (deps.loadMailingGeography || loadMailingGeography)(getSupabase(deps), [queue_row.property_id]);
+        mailing_geography = mailing.get(clean(queue_row.property_id)) || null;
+      } catch (mailing_error) {
+        warn("queue.mailing_geography_unavailable", { queue_row_id, message: mailing_error?.message || String(mailing_error) });
+      }
+    }
 
     // ── 8.5.16 R3: AI conversation rows only (source 'ai_conversation'); no-op for every other row ──
     // Kill switch system_control[ai_conversation_send_enabled] off ⇒ cancel; recipient-local
@@ -1750,6 +1761,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       windowMinutes: conversational_reply_window_minutes,
       evaluateContactWindow: evaluate_contact_window,
       propertyGeography: property_geography,
+      mailingGeography: mailing_geography || deps.mailingGeography || null,
     });
     const contact_window = dispatch_window.contact_window;
     const inbound_auto_reply = in_session_reply.in_session === true && dispatch_window.active_conversation_lawful === true;

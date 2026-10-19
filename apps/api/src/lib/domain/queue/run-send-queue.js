@@ -356,25 +356,58 @@ export async function runSendQueue(
   // (queued/scheduled/pending/approved/ready), keeps every piece of provider
   // evidence, and stays recognisable to the coming §11 attempt ledger. A false
   // hold is acceptable; a duplicate seller message is not.
+  //
+  // rc-8.5.21 RUN-09: a row whose durable evidence PROVES no provider call happened (no provider evidence
+  // on the row, a readable §11 attempt ledger with no attempt for it, never re-dispatched before) is
+  // returned to `queued` EXACTLY ONCE instead (processing-lease-recovery.js); everything else is held
+  // exactly as before. If the stuck rows cannot be read row by row, the old bulk hold runs unchanged.
+  const lease_cutoff = new Date(Date.now() - 10 * 60000).toISOString();
+  let lease_rows = null;
   try {
-    const { data: recycled, error: recycle_error } = await supabase
+    const { data: stuck, error: stuck_error } = await supabase
         .from('send_queue')
-        .update({
-            queue_status: 'expired',
-            failed_reason: 'processing_lease_expired_manual_review',
-            is_locked: false,
-            locked_at: null,
-            processing_run_id: null,
-        })
+        .select('id,queue_status,lock_token,locked_at,provider_message_id,textgrid_message_id,sent_at,delivered_at,metadata')
         .eq('queue_status', 'processing')
-        .lt('locked_at', new Date(Date.now() - 10 * 60000).toISOString())
-        .select('id');
-    
-    if (recycled?.length) {
-        log_info("queue_stuck_rows_recycled", { count: recycled.length });
+        .lt('locked_at', lease_cutoff)
+        .limit(200);
+    if (!stuck_error && Array.isArray(stuck)) {
+      const cutoff_ms = Date.parse(lease_cutoff);
+      lease_rows = stuck.filter((r) => String(r?.queue_status || '').toLowerCase() === 'processing' && Date.parse(r?.locked_at || '') < cutoff_ms);
     }
-  } catch (err) {
-    log_warn("queue.stuck_row_recovery_failed", { error: err.message });
+  } catch {
+    lease_rows = null;
+  }
+  if (lease_rows) {
+    if (lease_rows.length) {
+      try {
+        const { recoverExpiredProcessingLeases } = await import('@/lib/domain/queue/processing-lease-recovery.js');
+        const recovered = await recoverExpiredProcessingLeases(supabase, lease_rows, { now: new Date().toISOString(), log: log_info });
+        log_info("queue_stuck_rows_recycled", { count: recovered.manual_review.length + recovered.redispatched.length, redispatched: recovered.redispatched.length, manual_review: recovered.manual_review.length, evidence_readable: recovered.evidence_readable });
+      } catch (err) {
+        log_warn("queue.stuck_row_recovery_failed", { error: err.message });
+      }
+    }
+  } else {
+    try {
+      const { data: recycled } = await supabase
+          .from('send_queue')
+          .update({
+              queue_status: 'expired',
+              failed_reason: 'processing_lease_expired_manual_review',
+              is_locked: false,
+              locked_at: null,
+              processing_run_id: null,
+          })
+          .eq('queue_status', 'processing')
+          .lt('locked_at', lease_cutoff)
+          .select('id');
+
+      if (recycled?.length) {
+          log_info("queue_stuck_rows_recycled", { count: recycled.length });
+      }
+    } catch (err) {
+      log_warn("queue.stuck_row_recovery_failed", { error: err.message });
+    }
   }
 
   // 1c. Resume drain (P0 2026-10-08): overdue rows are re-planned into the

@@ -79,7 +79,7 @@ test('happy path: ONE nonempty, validated, send-ready row with template + intent
   assert.equal(row.template_id, 't1')
   assert.equal(row.queue_key, `fui:${intent().id}:m1`)
   assert.deepEqual([row.metadata.followup_intent_id, row.metadata.followup_materialize_token, row.metadata.deferred_message_resolution, row.metadata.follow_up_id],
-    [intent().id, 'tok', false, `followup_intent:${intent().id}`])
+    [intent().id, 'tok', false, intent().id])
   assert.equal(row.scheduled_for, NOON_CHI)
 })
 
