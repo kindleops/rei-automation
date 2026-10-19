@@ -63,15 +63,20 @@ function callScopedFetch(inner, stats) {
 }
 
 /**
- * @param {{ supabaseUrl: string, apiKey: string, readerJwt: string, baseFetch?: typeof fetch, onRequest?: Function, onSelfCheck?: Function, now?: () => number }} opts
+ * @param {{ supabaseUrl: string, apiKey: string, readerJwt: string, baseFetch?: typeof fetch, onRequest?: Function, onSelfCheck?: Function, onRefused?: Function, now?: () => number }} opts
  *   onSelfCheck(verdict, stage) — called after every credential self-check (boot and re-checks), for the audit
+ *   onRefused(info) — every transport refusal ({ code, method, kind, target }), for the audit; also kept
+ *   (bounded) in source.refusals so a test can prove the reused services never asked for a read outside
+ *   the inventory (a service that swallows the error would otherwise hide it)
  */
-export function createLiveSource({ supabaseUrl, apiKey, readerJwt, baseFetch = globalThis.fetch, onRequest = null, onSelfCheck = null, now = () => Date.now() }) {
+export function createLiveSource({ supabaseUrl, apiKey, readerJwt, baseFetch = globalThis.fetch, onRequest = null, onSelfCheck = null, onRefused = null, now = () => Date.now() }) {
   if (!supabaseUrl || !apiKey || !readerJwt) throw err('unavailable', 'live data source is not configured', { code: 'READ_CLIENT_UNCONFIGURED' })
   const origin = new URL(supabaseUrl).origin
   if (!/^https:\/\//.test(origin) && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(origin)) throw err('unavailable', 'live data source must be https', { code: 'READ_CLIENT_UNCONFIGURED' })
-  const stats = { requests: 0, preference_applied: null }
+  const stats = { requests: 0, preference_applied: null, refused: 0 }
   const count = (info) => { stats.requests += 1; onRequest?.(info) }
+  const refusals = []
+  const refused = (info) => { stats.refused += 1; if (refusals.length < 50) refusals.push({ ...info }); onRefused?.(info) }
   const appGuard = createGuardedReadFetch({ allowedOrigin: origin, baseFetch, timeoutMs: REQUEST_TIMEOUT_MS })
   const direct = async (url, init) => {
     const ctl = new AbortController()
@@ -79,7 +84,7 @@ export function createLiveSource({ supabaseUrl, apiKey, readerJwt, baseFetch = g
     init?.signal?.addEventListener?.('abort', () => ctl.abort(init.signal.reason), { once: true })
     try { return await baseFetch(url, { ...init, signal: ctl.signal }) } finally { clearTimeout(t) }
   }
-  const guarded = createInventoryGuardedFetch({ origin, apiKey, readerJwt, inner: appGuard, base: direct, onRequest: count })
+  const guarded = createInventoryGuardedFetch({ origin, apiKey, readerJwt, inner: appGuard, base: direct, onRequest: count, onRefused: refused })
   const client = createClient(supabaseUrl, apiKey, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
     global: { fetch: callScopedFetch(guarded, stats), headers: { 'x-client-info': 'leadcommand-mcp/1.0' } },
@@ -120,7 +125,7 @@ export function createLiveSource({ supabaseUrl, apiKey, readerJwt, baseFetch = g
     if (error) throw Object.assign(new Error('membership lookup failed'), { code: String(error.code || 'MEMBERSHIP_LOOKUP_FAILED') })
     return typeof data === 'string' && data ? data : null
   }
-  return makeSource({ mode: 'live', db: client, stats, gate: ensureCredential, extra: { selfCheck, operatorRole, get lastSelfCheck() { return checked } } })
+  return makeSource({ mode: 'live', db: client, stats, gate: ensureCredential, extra: { selfCheck, operatorRole, get lastSelfCheck() { return checked }, get refusals() { return [...refusals] } } })
 }
 
 /** @param {{ tables, rpc?, faults?, services?: object }} fixture */
@@ -131,10 +136,10 @@ export function createFixtureSource(fixture, { faults = {} } = {}) {
 }
 
 function makeSource({ mode, db, stats, overrides = null, gate = null, extra = {} }) {
-  return {
+  // extra is attached by DESCRIPTOR: a spread would evaluate its getters once (lastSelfCheck / refusals frozen at boot)
+  return Object.defineProperties({
     mode,
     stats,
-    ...extra,
     /** Run fn(services) inside one call scope (fresh memo, the call's signal, a request budget). Live: the credential gate first. */
     async withCall(signal, fn) {
       if (gate) await gate()
@@ -160,5 +165,5 @@ function makeSource({ mode, db, stats, overrides = null, gate = null, extra = {}
         return fn(services)
       })
     },
-  }
+  }, Object.getOwnPropertyDescriptors(extra))
 }

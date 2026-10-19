@@ -57,7 +57,8 @@ test('every inventory entry names the code that reads it; the app guard allowlis
 
 test('live coverage: all 9 tools over the live transport read EXACTLY the inventory and call EXACTLY the 4 RPCs', async () => {
   const pg = createFakePostgrest({ membership: LIVE_MEMBERSHIP })
-  const app = await buildApp({ env: liveEnv(), baseFetch: pg.fetch, scrub: false, auditSink: () => {} })
+  const audit = []
+  const app = await buildApp({ env: liveEnv(), baseFetch: pg.fetch, scrub: false, auditSink: (r) => audit.push(r) })
   const outcomes = {}
   try {
     const calls = [
@@ -79,8 +80,30 @@ test('live coverage: all 9 tools over the live transport read EXACTLY the invent
     }
   } finally { await app.close() }
   assert.deepEqual(Object.values(outcomes).filter((x) => x !== 'ok'), [], JSON.stringify(outcomes, null, 1))
+  // a reused service that swallows a refused read would hide an inventory gap: nothing may be refused
+  assert.deepEqual(app.source.refusals, [], `reads refused by the inventory guard: ${JSON.stringify(app.source.refusals)}`)
+  assert.deepEqual(audit.filter((a) => a.event === 'transport_refused'), [], 'no transport_refused audit line')
   assert.deepEqual(pg.relationsRead(), RELATION_NAMES, 'relations read == the inventory')
   assert.deepEqual(pg.rpcsCalled(), [...RPC_NAMES].sort(), 'RPCs called == the 4 allowlisted')
   assert.ok(pg.requests.every((r) => r.method === 'GET' || r.method === 'HEAD' || (r.method === 'POST' && r.rpc)), 'only reads and read RPCs reached the network')
   assert.ok(pg.requests.every((r) => r.role === 'lc_mcp_reader'), 'every request ran as lc_mcp_reader')
+})
+
+test('a read outside the inventory is refused before the network, recorded and audited (by name only)', async () => {
+  const pg = createFakePostgrest({ membership: LIVE_MEMBERSHIP })
+  const audit = []
+  const app = await buildApp({ env: liveEnv(), baseFetch: pg.fetch, scrub: false, auditSink: (r) => audit.push(r) })
+  try {
+    const before = pg.requests.length
+    const r = await app.source.withCall(undefined, (svc) => svc.db.from('send_queue').select('id').limit(1).retry(false))
+    assert.ok(r.error, 'the read failed')
+    assert.equal(pg.requests.length, before, 'nothing reached the network')
+    // (supabase-js may retry a GET whose fetch threw: every attempt is refused the same way)
+    assert.ok(app.source.refusals.length >= 1)
+    assert.deepEqual([...new Set(app.source.refusals.map((x) => [x.code, x.kind, x.target].join(' ')))], ['RELATION_NOT_IN_INVENTORY table_read send_queue'])
+    const line = audit.find((a) => a.event === 'transport_refused')
+    assert.ok(line, 'audited')
+    assert.equal(line.target, 'send_queue')
+    assert.doesNotMatch(JSON.stringify(line), /select=|limit=/, 'no query string in the audit')
+  } finally { await app.close() }
 })

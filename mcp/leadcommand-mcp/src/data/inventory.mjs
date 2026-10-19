@@ -1,6 +1,15 @@
 // THE read inventory of LeadCommand MCP live mode: every relation and RPC any
 // adapter or reused domain service reads, derived from the code (2026-10-16),
-// never from a guess. It is enforced three times:
+// never from a guess. RE-DERIVED 2026-10-19 against rc-8.5.21 (9bf2e399): the
+// static import closure of src/ reaches 64 apps/api modules; since 43650af3 only
+// quick-scan/read-client.js changed (an optional rpcAllowlist parameter, default
+// unchanged) plus the decisionFreshness extraction, so the 9 tools read the
+// same 20 relations and 2 app RPCs. None of them reads the holds registry,
+// followup_intents, the ops work items, contact_property_resolution or the
+// inbox disposition (declined_unverified is not interpreted by any reused
+// projection). The live coverage test proves it, including that NOTHING was
+// refused by the guard (a swallowed refusal would hide a gap).
+// It is enforced three times:
 //
 //   1. the database role lc_mcp_reader holds SELECT on exactly RELATIONS and
 //      EXECUTE on exactly RPCS + MCP_RPCS

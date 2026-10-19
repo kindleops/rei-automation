@@ -54,7 +54,11 @@ export async function buildApp(opts = {}) {
   let store = opts.membershipStore || null
   if (cfg.dataMode === 'live') {
     const s = cfg.secrets()
-    source = createLiveSource({ supabaseUrl: s.supabaseUrl, apiKey: s.apiKey, readerJwt: s.readerJwt, baseFetch: opts.baseFetch, onSelfCheck: auditSelfCheck(auditor, cfg.credential) })
+    source = createLiveSource({
+      supabaseUrl: s.supabaseUrl, apiKey: s.apiKey, readerJwt: s.readerJwt, baseFetch: opts.baseFetch, onSelfCheck: auditSelfCheck(auditor, cfg.credential),
+      // a refused read is audited by its code and the relation / function NAME only (no query, no value)
+      onRefused: (r) => auditor.event('transport_refused', { code: String(r.code || '').slice(0, 40), method: r.method || null, kind: r.kind || null, target: String(r.target || '').slice(0, 64) || null }),
+    })
     // BOOT SELF-CHECK: the database's privilege report for the role this token runs as.
     // Any write privilege, reachable write / egress function, membership, BYPASSRLS, or
     // missing read → the server does not start (and the refusal is audited above).
