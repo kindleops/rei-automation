@@ -335,6 +335,33 @@ export async function runSendQueue(
     }
   }
 
+  // 0c. SENDER-CONTINUITY holds (owner P0, rc-8.5.21): a conversation row held because its thread's
+  // sender could not send is released ONLY after the conversation is revalidated (newer seller
+  // activity ⇒ superseded, never sent; suppression / holds / eligibility / duplicates re-checked).
+  // BORN OFF: system_control sender_continuity_release_mode must be 'live' to write; anything else
+  // is a dry run (decisions logged, nothing changes). Never throws into the run.
+  if (!dry_run && (deps.releaseSenderContinuityHolds || (!deps.supabaseClient && hasSupabaseConfig()))) {
+    try {
+      const mode = String((await Promise.resolve().then(() => get_system_value("sender_continuity_release_mode")).catch(() => null)) ?? "").trim().toLowerCase();
+      const release = deps.releaseSenderContinuityHolds
+        || (await import("@/lib/domain/queue/release-sender-continuity-holds.js")).releaseSenderContinuityHolds;
+      const released = await release({ dry_run: mode !== "live" }, { supabase, now, getSystemValue: get_system_value });
+      if (released?.examined) {
+        log_info("queue.sender_continuity_release", {
+          mode: mode || "off",
+          examined: released.examined,
+          released: released.released,
+          superseded: released.superseded,
+          blocked: released.blocked,
+          review: released.review,
+          still_held: released.still_held,
+        });
+      }
+    } catch (release_error) {
+      log_warn("queue.sender_continuity_release_failed", { error: release_error?.message || "unknown_error" });
+    }
+  }
+
   // 1. Stale-lock recovery for stuck "processing" rows.
   //
   // LEASE EXPIRY DOES NOT PROVE THE PROVIDER REQUEST NEVER STARTED.

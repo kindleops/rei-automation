@@ -373,7 +373,7 @@ test('PG lifecycle: an OPERATOR HOLD, HARTFORD (registry hold) and MAXWELL (stat
   } finally { net.restore(); await env.db.drop() }
 })
 
-test('PG lifecycle (owner rule: thread continuity): the thread sender is COOLING or BLOCKED at materialization ⇒ the intent is HELD visibly (sender_unhealthy), no row is written, nothing is sent and no other number is ever used', { skip }, async () => {
+test('PG lifecycle (owner rule: thread continuity): the thread sender is COOLING or BLOCKED at materialization ⇒ the intent is HELD visibly (sender_unavailable), no row is written, nothing is sent and no other number is ever used', { skip }, async () => {
   for (const [status, health] of [['cooling', 'cooling'], ['active', 'blocked'], ['disabled', 'healthy']]) {
     const env = await lifecycleDb()
     const net = trapTransport()
@@ -387,8 +387,8 @@ test('PG lifecycle (owner rule: thread continuity): the thread sender is COOLING
       assert.equal(m.counts.materialized || 0, 0, JSON.stringify(m))
       const i = await one(env.pool, phone)
       assert.equal(i.state, 'held', `${status}/${health}: ${JSON.stringify(i)}`)
-      assert.equal(i.reason, 'sender_unhealthy')
-      assert.ok((await eventsOf(env.pool, i.id)).some((e) => e.to_state === 'held' && e.reason === 'sender_unhealthy'), 'the hold is audited')
+      assert.equal(i.reason, 'sender_unavailable')
+      assert.ok((await eventsOf(env.pool, i.id)).some((e) => e.to_state === 'held' && e.reason === 'sender_unavailable'), 'the hold is audited')
       assert.equal((await rowsOf(env.pool, phone)).length, 0, 'never a row the dispatcher could reroute')
       assert.deepEqual(net.hits, [])
     } finally { net.restore(); await env.db.drop() }

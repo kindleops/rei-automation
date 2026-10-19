@@ -57,6 +57,7 @@ import {
 } from "@/lib/domain/delivery/delivery-receipt-reconcile.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { evaluateSenderDispatchEligibility, loadDispatchBlockedSenders } from "@/lib/domain/delivery/sender-dispatch-eligibility.js";
+import { SENDER_CONTINUITY_MISMATCH, SENDER_CONTINUITY_UNREADABLE, SENDER_UNAVAILABLE, checkContinuityStamp, continuityStamp, evaluateSenderContinuity, isContinuityBoundRow } from "@/lib/domain/delivery/sender-continuity.js";
 import {
   evaluateGlobalSendBrakeState,
   rowCampaignId,
@@ -864,6 +865,10 @@ function preclaimInvalidQueueRowReason(row = null) {
 
   // paused_review rows must never be runnable — they require human intervention.
   if (lower(normalized.queue_status) === "paused_review") return "paused_review_not_runnable";
+
+  // SENDER CONTINUITY at claim (owner P0, rc-8.5.21): a bound row's from number must still be the
+  // established sender the canonical writer stamped on it — a rewrite after insertion is refused here.
+  if (!checkContinuityStamp(normalized).ok) return SENDER_CONTINUITY_MISMATCH;
 
   // Enforce canonical thread_key: outbound thread_key must match to_phone_number.
   const to_phone = normalizePhone(resolveQueueDestinationPhone(normalized).phone) || null;
@@ -1737,11 +1742,13 @@ async function stickyThreadSelection(normalized, deps = {}, { thread_sender = nu
     return {
       ok: false,
       reason: sticky.reason,
+      ...(sticky.sender_reason ? { sender_reason: sticky.sender_reason } : {}),
       deferred: sticky.reason === "sender_blocklist_unreadable",
       ineligible_sender: true,
       terminal: false,
       selected: null,
-      from_phone_number: thread_sender,
+      // a held thread row stays bound to the thread's own sender (owner P0, sender continuity)
+      from_phone_number: thread_sender || normalizePhone(sticky.thread_sender) || null,
     };
   }
   const row = await loadOutboundNumberByPhone(sticky.phone, deps).catch(() => null);
@@ -1783,11 +1790,69 @@ async function resolveRowSendClass(row, normalized, deps = {}) {
   }
 }
 
+/**
+ * SENDER CONTINUITY at dispatch (owner P0, rc-8.5.21; delivery/sender-continuity.js). A bound row on a
+ * thread with an ESTABLISHED sender is never routed: no routing-graph pick, no sticky fallback, no
+ * rotation. It sends from the established sender while that number can send; otherwise it is a
+ * VISIBLE HOLD (sender_unavailable) bound to that sender. A row naming any other number is refused
+ * (sender_continuity_mismatch), never "corrected". Unreadable thread state defers (fail closed).
+ * Returns a selection / hold, or null when the rule does not decide (not bound / new conversation).
+ * With injected fleet fakes and no client, a unit test never reaches a real database (not established).
+ */
+async function senderContinuitySelection(row, normalized, deps = {}, { send_class = null, send_class_basis = null } = {}) {
+  const subject = { ...(normalized || {}), ...(row && typeof row === "object" ? row : {}) };
+  if (!isContinuityBoundRow(subject)) return null;
+  const injected =
+    typeof deps.loadOutboundNumberByPhone === "function" ||
+    typeof deps.loadTextgridFleet === "function" ||
+    typeof deps.selectAvailableTextgridNumber === "function";
+  const verdict = await evaluateSenderContinuity(subject, {}, { ...deps, noDefaultDb: injected });
+  const intended = normalizePhone(subject.from_phone_number) || null;
+  if (!verdict.ok && verdict.reason === SENDER_CONTINUITY_UNREADABLE) {
+    return { ok: false, reason: SENDER_CONTINUITY_UNREADABLE, deferred: true, ineligible_sender: true, terminal: false, selected: null, from_phone_number: intended, sender_continuity: verdict };
+  }
+  if (!verdict.applies || !verdict.established) return null;
+  if (!verdict.ok) {
+    // a row naming another number on an established thread (forged / stale): refused, held visibly
+    return { ok: false, reason: SENDER_CONTINUITY_MISMATCH, ineligible_sender: true, terminal: false, selected: null, from_phone_number: intended, established_sender: verdict.established_sender, sender_continuity: verdict, send_class, send_class_basis };
+  }
+  const sender = verdict.established_sender;
+  let fleet_row = null;
+  try {
+    fleet_row = await loadOutboundNumberByPhone(sender, deps);
+  } catch (error) {
+    return { ok: false, reason: "outbound_number_eligibility_unavailable", deferred: true, ineligible_sender: true, selected: null, from_phone_number: sender, sender_continuity: verdict, error: error?.message || "outbound_number_lookup_failed" };
+  }
+  const blocked_senders = await loadDispatchBlockedSendersFor(deps);
+  if (!blocked_senders) {
+    return { ok: false, reason: "sender_blocklist_unreadable", deferred: true, ineligible_sender: true, selected: null, from_phone_number: sender, sender_continuity: verdict };
+  }
+  const eligibility = evaluateSenderDispatchEligibility(fleet_row, { blocked: blocked_senders, phone: sender, now: deps.now ? new Date(deps.now) : new Date(), send_class });
+  if (!eligibility.ok) {
+    // the thread's number cannot send right now: a VISIBLE HOLD bound to it (never a fallback number)
+    return { ok: false, reason: SENDER_UNAVAILABLE, sender_reason: eligibility.reason, ineligible_sender: true, terminal: false, selected: null, from_phone_number: sender, sender_continuity: verdict, send_class, send_class_basis };
+  }
+  return {
+    ok: true,
+    selected: { id: (intended === sender ? normalized.textgrid_number_id : null) || fleet_row?.id || null, phone_number: sender, metadata: {} },
+    from_phone_number: sender,
+    reason: intended ? "sender_continuity_thread_sender_revalidated" : "sender_continuity_thread_sender_bound",
+    send_class,
+    send_class_basis,
+    sender_continuity: verdict,
+  };
+}
+
 export async function selectAvailableTextgridNumber(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
   // COLD sends are capped by daily_limit; CONVERSATIONAL sends (replies to
   // engaged sellers, operator sends) only by the total safety ceiling.
   const { send_class, basis: send_class_basis } = await resolveRowSendClass(row, normalized, deps);
+  // OWNER P0 (rc-8.5.21): an established thread's sender is decided HERE, before any router.
+  {
+    const continuity = await senderContinuitySelection(row, normalized, deps, { send_class, send_class_basis });
+    if (continuity) return continuity;
+  }
   // LOCKED OWNER RULE (thread continuity), rc-8.5.21: a lifecycle follow-up (metadata.followup_intent_id)
   // is PINNED to the thread's established sender it was materialized with. It is never rerouted (no
   // routing-graph pick, no sticky-thread fallback, no rotation): an ineligible pinned sender BLOCKS the
@@ -5584,6 +5649,42 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     }
     if (enqueue_hold.held && hold_override) {
       row.metadata = { ...(row.metadata || {}), automation_hold_override: { ...hold_override, hold_ids: enqueue_hold.hold_ids, used_at: now } };
+    }
+  }
+
+  // ── SENDER CONTINUITY at queue insertion (owner P0, rc-8.5.21) ──────
+  // A sendable conversation row on a thread with an ESTABLISHED sender must name that sender: a row
+  // naming another number is refused here (never written, never "corrected"). A matching row is
+  // stamped with the established sender (metadata.sender_continuity) so the claim-time check can
+  // tell a later rewrite of from_phone_number. Unreadable thread state never blocks the write: the
+  // dispatcher and the final check inside the transport seam fail closed on the same read.
+  if (SENDABLE_QUEUE_STATUSES.includes(normalizeQueueStatusValue(row.queue_status)) && clean(row.from_phone_number)) {
+    const subject = { ...row, thread_key: clean(payload.thread_key) || row.thread_key };
+    if (isContinuityBoundRow(subject)) {
+      const continuity = await evaluateSenderContinuity(subject, {}, {
+        ...deps,
+        noDefaultDb: typeof deps.insertSupabaseSendQueueRow === "function" && !deps.supabase && !deps.supabaseClient,
+      });
+      if (continuity.applies && continuity.established && !continuity.ok) {
+        warn("queue.sender_continuity_insert_refused", {
+          queue_key: clean(row.queue_key) || null,
+          thread_key: clean(subject.thread_key) || null,
+          from: clean(row.from_phone_number) || null,
+          established_sender: continuity.established_sender,
+        });
+        return {
+          ok: false,
+          blocked: true,
+          reason: SENDER_CONTINUITY_MISMATCH,
+          sender_continuity: { established_sender: continuity.established_sender, from_phone_number: normalizePhone(row.from_phone_number) || null },
+          item_id: null,
+          queue_row_id: null,
+          queue_item_id: null,
+          queue_key: clean(row.queue_key) || null,
+        };
+      }
+      const stamp = continuityStamp(continuity, now);
+      if (stamp) row.metadata = { ...(row.metadata || {}), sender_continuity: stamp };
     }
   }
 

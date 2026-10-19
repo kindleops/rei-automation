@@ -28,6 +28,7 @@ import {
   sendTextgridSMS,
 } from "@/lib/providers/textgrid.js";
 import { dispatchSellerQueueRow } from "@/lib/domain/communications/dispatch-seller-queue-row.js";
+import { SENDER_CONTINUITY_REASONS, SENDER_CONTINUITY_UNREADABLE } from "@/lib/domain/delivery/sender-continuity.js";
 import {
   buildDispatchRefusalBackoff,
   buildTerminalRefusalUpdate,
@@ -662,6 +663,22 @@ async function blockQueueRowByIneligibleSender(queue_row = {}, selection = {}, d
       // Sender Routing 2.0 hold context (market, pools checked, why each
       // failed). Only present when the gated policy parked the row.
       ...(selection.sender_routing ? { sender_route_hold: selection.sender_routing } : {}),
+      // SENDER CONTINUITY (owner P0, rc-8.5.21): the row stays bound to the thread's established
+      // sender; the hold is visible and is released only by releaseSenderContinuityHolds (which
+      // revalidates the conversation first) or resolved by an audited operator reassignment.
+      ...(selection.sender_continuity
+        ? {
+          sender_continuity_hold: {
+            reason,
+            sender_reason: selection.sender_reason || null,
+            established_sender: selection.sender_continuity.established_sender || selection.established_sender || null,
+            established_source: selection.sender_continuity.established_source || null,
+            row_from_phone_number: queue_row.from_phone_number || null,
+            stage: selection.continuity_stage || "dispatch_selection",
+            held_at: now,
+          },
+        }
+        : {}),
     },
   };
 
@@ -2630,8 +2647,31 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         getSystemValue: deps.getSystemValue || getSystemValue,
         scoped_canary: deps.scoped_canary === true,
         now,
+        // the final sender-continuity check reads the same fleet / blocklist seams the selection used
+        ...(typeof deps.loadOutboundNumberByPhone === "function" ? { loadOutboundNumberByPhone: deps.loadOutboundNumberByPhone } : {}),
+        ...(typeof deps.loadDispatchBlockedSenders === "function" ? { loadDispatchBlockedSenders: deps.loadDispatchBlockedSenders } : {}),
+        ...(typeof deps.loadEstablishedSender === "function" ? { loadEstablishedSender: deps.loadEstablishedSender } : {}),
+        ...(typeof deps.finalSenderContinuityCheck === "function" ? { finalSenderContinuityCheck: deps.finalSenderContinuityCheck } : {}),
       }
     );
+
+    // SENDER CONTINUITY — the FINAL check inside the seam refused this attempt (the row's number is not
+    // the thread's established sender, or that sender can no longer send): a VISIBLE HOLD bound to the
+    // thread's sender, never a retry from another number and never a transport failure.
+    if (dispatch.provider_invoked === false && dispatch.stage === "runtime_authority" && SENDER_CONTINUITY_REASONS.has(clean(dispatch.reason))) {
+      const held = await blockQueueRowByIneligibleSender(queue_row, {
+        reason: clean(dispatch.reason),
+        deferred: clean(dispatch.reason) === SENDER_CONTINUITY_UNREADABLE,
+        ineligible_sender: true,
+        terminal: false,
+        from_phone_number: queue_row.from_phone_number || null,
+        sender_reason: dispatch.sender_continuity?.sender_reason || null,
+        sender_continuity: dispatch.sender_continuity || { established_sender: null },
+        continuity_stage: "final_transport_check",
+      }, deps);
+      await reconcileBuyerOutreachFromQueueRow({ ...queue_row, queue_status: held.queue_status }, deps);
+      return { ...held, logical_communication_id: dispatch.logical_communication_id || null, final_check: true };
+    }
 
     // A refusal BEFORE the wire is not a provider failure: it must not consume
     // a retry or be recorded as a delivery attempt. Release the row and say why,

@@ -533,7 +533,7 @@ export async function materializeClaimedIntent(intent, deps = {}) {
 
   // 7. sender health: the thread's sticky sender is kept (persona + number continuity). LOCKED OWNER RULE
   //    (thread continuity): a follow-up NEVER changes the thread's number. A sender that is cooling /
-  //    blocked / disabled / not in the fleet is therefore HELD here, visibly (reason sender_unhealthy), and
+  //    blocked / disabled / not in the fleet is therefore HELD here, visibly (reason sender_unavailable — the one continuity hold reason), and
   //    never materialized for the dispatcher to reroute; the dispatcher re-validates the pinned sender at
   //    send time and, for a follow-up, blocks the row (never a fallback number) if it went bad since.
   //    rc-8.5.21 F1: a writer that knew no sender (the S2 / S3 / offer silence follow-ups: the delivery
@@ -550,7 +550,7 @@ export async function materializeClaimedIntent(intent, deps = {}) {
   if (from) {
     try { sender_health = lower(await deps.senderStatus(from)) || 'unknown_sender' } catch { return settle(intent, deps, { to: S.PLANNED, reason: 'sender_lookup_failed', transient: true }) }
     if (UNHEALTHY_SENDER.has(sender_health) || sender_health === 'unknown_sender') {
-      return settle(intent, deps, { to: S.HELD, reason: 'sender_unhealthy', detail: { sender_health, sender_source: sender.source || null } })
+      return settle(intent, deps, { to: S.HELD, reason: 'sender_unavailable', detail: { sender_health, sender_source: sender.source || null } })
     }
   }
 
