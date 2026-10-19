@@ -230,7 +230,7 @@ export const SUITE = {
     ],
     WRONG: [],
     HOLD: [],
-    NEG: ["stop by anytime", "We can stop by the property tomorrow", "Ok gracias, let me think", "Llámame later, I'm at work", "Yes I own it, quanto?"],
+    NEG: ["stop by anytime", "We can stop by the property tomorrow", "bus stop", "the pit stop", "dont stop", "I get off at the bus stop", "Ok gracias, let me think", "Llámame later, I'm at work", "Yes I own it, quanto?"],
   },
 };
 

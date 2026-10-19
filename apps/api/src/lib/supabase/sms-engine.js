@@ -591,6 +591,15 @@ export function normalizeSendQueueRow(row) {
     current_stage: safe_row.current_stage || null,
     message_type: safe_row.message_type || null,
     use_case_template: safe_row.use_case_template || null,
+    // P0 2026-10-19: the row's language survives normalization. It was dropped here, so a
+    // content-filter rotation read every row as English (owner rule: never English by default).
+    language:
+      clean(
+        safe_row.language ||
+          safe_row.metadata?.language ||
+          safe_row.metadata?.selected_template_language ||
+          safe_row.metadata?.template_language
+      ) || null,
     personalization_tags_used: safe_row.personalization_tags_used || null,
     character_count: Number(safe_row.character_count ?? body.length),
     metadata: ensureObject(safe_row.metadata),
@@ -2730,6 +2739,9 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
     rotation_failure_class === "content_filter_blocked" &&
     Boolean(originating_template_id);
   let rotation = null;
+  // P0 2026-10-19: a row whose language is unknown is HELD for a person — never rotated onto
+  // English copy, never re-dispatched by the retry path.
+  let rotation_hold = null;
   if (rotation_eligible) {
     try {
       const { resolveRotationTemplate } = await import(
@@ -2740,6 +2752,7 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
         supabase: options.supabase || options.supabaseClient,
       });
       if (result?.resolved) rotation = result;
+      else if (result?.hold) rotation_hold = clean(result.reason) || "rotation_language_unknown";
     } catch (rotation_error) {
       info("queue_failover_rotation_error", {
         queue_id: normalized.id,
@@ -2759,7 +2772,9 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   const retry_permitted = classified.retryable === true;
   const terminal_queue_status = rotation
     ? "queued"
-    : !retry_permitted
+    : rotation_hold
+      ? "held"
+      : !retry_permitted
       ? (classified.queue_disposition && classified.queue_disposition !== "queued"
           ? classified.queue_disposition
           : "failed")
@@ -2774,7 +2789,8 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
     // A scheduled retry time on a non-retry-safe outcome is a loaded gun: any
     // scanner reading next_retry_at would treat the row as due.
     next_retry_at:
-      rotation || (retry_permitted && !is_final_failure) ? addMinutesIso(now, 5) : null,
+      rotation || (retry_permitted && !is_final_failure && !rotation_hold) ? addMinutesIso(now, 5) : null,
+    ...(rotation_hold ? { held_at: now } : {}),
     is_locked: false,
     locked_at: null,
     lock_token: null,
@@ -2796,6 +2812,7 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
       : {}),
     metadata: {
       ...normalized.metadata,
+      ...(rotation_hold ? { dispatch_hold: rotation_hold, requires_human_review: true } : {}),
       ...(rotation
         ? {
             tried_template_ids,

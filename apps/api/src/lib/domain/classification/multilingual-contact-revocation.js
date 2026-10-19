@@ -194,7 +194,7 @@ const add = (language, family, view, source, opts = {}) => {
   const COMM = "(?:ecrire|envoyer|contacter|appeler|harceler|texter|textoter|deranger|relancer|spammer|solliciter|importuner|embeter|emmerder|joindre|recontacter|telephoner)";
   const NOT_AUX = "(?<!(?:ai|as|a|avons|avez|ont|avais|avait|j'ai|suis|est|sont)\\s)";
   add(L, F.STOP_SENDING, "latin", `${B}${NOT_AUX}(?:arret(?:e|es|ez|er)|cess(?:e|es|ez|er)|stop(?:pez|pe)?)\\s+(?:donc\\s+|tout\\s+de\\s+suite\\s+|svp\\s+|s'il\\s+vous\\s+plait\\s+)?(?:de\\s+|d'|d\\s)(?:me\\s+|m'\\s*|m\\s+|nous\\s+)?${COMM}${E}`, { callVerb: /appeler|telephoner/ });
-  add(L, F.STOP_SENDING, "latin", `(?:^|[,.!;:]\\s*|\\s)(?:arretez|arrete[sz]?|stop)(?:\\s+(?:svp|stp|s'il\\s+vous\\s+plait|merci|maintenant|tout\\s+de\\s+suite))?\\s*[.!]*\\s*$`);
+  add(L, F.STOP_SENDING, "latin", `(?:^|[,.!;:]\\s*|\\s)(?:arretez|arrete[sz]?)(?:\\s+(?:svp|stp|s'il\\s+vous\\s+plait|merci|maintenant|tout\\s+de\\s+suite))?\\s*[.!]*\\s*$`);
   add(L, F.STOP_SENDING, "latin", `${B}(?:assez|marre)\\s+de\\s+(?:vos\\s+|ces\\s+|tes\\s+|tous\\s+ces\\s+)?(?:messages|textos|sms|appels)${E}`);
   const V = "(?:ecri|envoi|envoy|contact|appel|appell|text|derang|relanc|recontact|harcel|sollicit|telephon|joign)";
   add(L, F.NO_CONTACT, "latin", `(?:${B}ne\\s+|${B}n'\\s*|${B}n\\s+)(?:me\\s+|m'\\s*|m\\s+|nous\\s+)?${V}[a-z]*\\s+(?:[a-z']+\\s+){0,3}?plus${E}(?!\\s+(?:tard|tot|souvent|vite))`, { callVerb: /appel|telephon/ });
