@@ -250,8 +250,18 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   if (pending) return held(['reply_already_queued'], { existing_queue_row_id: pending.id })
   const continuity = state.continuity || resolveThreadContinuity({ sentRows: state.queueRows || [], threadState: state.thread_state || null, inboundTo: state.our_phone })
   if (!continuity.ok || !continuity.sender_number) return held([...(continuity.reasons || []).map((r) => `continuity:${r}`), ...(continuity.sender_number || (continuity.reasons || []).length ? [] : ['sender_unavailable'])])
-  const unsent = (state.queueRows || []).find((r) => NOT_YET_SENT_STATUSES.has(clean(r.queue_status).toLowerCase()))
-  if (unsent) return held(['outbound_pending_on_thread'], { existing_queue_row_id: unsent.id })
+  const unsent = (state.queueRows || []).filter((r) => NOT_YET_SENT_STATUSES.has(clean(r.queue_status).toLowerCase()))
+  // rc-8.5.21 phase 4 (competing sources): an automated row that is IN FLIGHT right now (claimed by the
+  // runner: processing / sending) and was planned BEFORE this inbound is resolving within the runner's
+  // lease — the follow-up dispatch gate supersedes it (newer inbound) or it was already on the wire. The
+  // reply WAITS (bounded job retry) instead of being held for a person: the next attempt either finds the
+  // row superseded (the reply proceeds — exactly one text) or sent after the inbound
+  // (already_answered_by_outbound — still exactly one text). Anything else pending stays a hold.
+  const IN_FLIGHT = new Set(['processing', 'sending'])
+  if (unsent.length && unsent.every((r) => IN_FLIGHT.has(clean(r.queue_status).toLowerCase()) && t(r) <= t(inboundRow) && clean(r.inbound_message_id) !== inboundId)) {
+    return out('retry', ['outbound_in_flight_on_thread'], { existing_queue_row_id: unsent[0].id })
+  }
+  if (unsent.length) return held(['outbound_pending_on_thread'], { existing_queue_row_id: unsent[0].id })
   if (!threadInPolicyScope(policy, { thread_key: threadKey, market_id: state.market_id, campaign_id: state.campaign_id })) return held(['thread_not_in_ai_scope'])
   // the ONE automation-hold registry (fail closed: a lookup error is a hold)
   const hold = await checkAutomationHoldPort({ threadKey, propertyId: state.property_id, masterOwnerId: state.master_owner_id, capability: 'ai_reply_dispatch', propertyAddress: state.property_address }, { checker: deps.automationHoldChecker || null })
