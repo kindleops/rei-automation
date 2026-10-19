@@ -101,7 +101,7 @@ export function pgReservations(pool) {
   }
 }
 
-export function harness({ db, pool, sb }, { dispatchWrap = null, beforeQueueInsert = null, operatorItems = null } = {}) {
+export function harness({ db, pool, sb }, { dispatchWrap = null, beforeQueueInsert = null, afterQueueInsert = null, operatorItems = null } = {}) {
   const store = createRuntimePgStore({ pool: db.api })
   const turnStore = createPgTurnStore(pool)
   const readSwitch = async (k) => (await sel(pool, 'select value from public.system_control where key = $1', [k]))[0]?.value ?? null
@@ -112,6 +112,7 @@ export function harness({ db, pool, sb }, { dispatchWrap = null, beforeQueueInse
         if (beforeQueueInsert) await beforeQueueInsert(row)
         const r = await sb.from('send_queue').insert(row).select('id,queue_status,paused_reason,queue_key').single()
         if (r.error) return { ok: false, reason: r.error.message }
+        if (afterQueueInsert) await afterQueueInsert(r.data)
         return { ok: true, queue_row_id: r.data.id, raw: r.data }
       },
     }),
