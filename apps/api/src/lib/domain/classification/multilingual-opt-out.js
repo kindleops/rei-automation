@@ -14,6 +14,16 @@
 //     carry a revocation phrase.
 // Rules only, no AI. English and Spanish keep their existing classifier lists;
 // the Spanish entries here fill colloquial forms those lists miss.
+//
+// P0 2026-10-19: the phrase lists below are kept, and the general per-language
+// GRAMMAR (multilingual-contact-revocation.js — stop / remove / no-contact /
+// unsubscribe / leave-me-alone / stop-asking-about-the-property families, with
+// accent folding, clitic imperatives, negation and the channel / language /
+// other-action carves) runs after them. Wrong-number and the uncertain
+// fail-safe are returned by analyzeContactRevocation, never by this matcher.
+import { analyzeContactRevocation } from "./multilingual-contact-revocation.js";
+
+export { analyzeContactRevocation };
 
 export const MULTILINGUAL_OPT_OUT_VERSION = "multilingual_opt_out_v1_2026_10_07";
 
@@ -105,6 +115,8 @@ export function matchMultilingualOptOut(message = "") {
   for (const [language, re] of PHRASES) {
     if (re.test(raw)) return { language, rule_id: `ml_opt_out_phrase_${language.split(" ")[0].toLowerCase()}`, kind: "phrase", version: MULTILINGUAL_OPT_OUT_VERSION };
   }
+  const grammar = analyzeContactRevocation(raw).opt_out;
+  if (grammar) return { language: grammar.language, rule_id: grammar.rule_id, kind: grammar.kind, family: grammar.family, version: grammar.version };
   return null;
 }
 
