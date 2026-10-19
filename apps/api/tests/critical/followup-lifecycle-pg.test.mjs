@@ -373,27 +373,70 @@ test('PG lifecycle: an OPERATOR HOLD, HARTFORD (registry hold) and MAXWELL (stat
   } finally { net.restore(); await env.db.drop() }
 })
 
-test('PG lifecycle: the thread sender is COOLING ⇒ materialized with its health recorded; the dispatcher never sends from the cooling number', { skip }, async () => {
+test('PG lifecycle (owner rule: thread continuity): the thread sender is COOLING or BLOCKED at materialization ⇒ the intent is HELD visibly (sender_unhealthy), no row is written, nothing is sent and no other number is ever used', { skip }, async () => {
+  for (const [status, health] of [['cooling', 'cooling'], ['active', 'blocked'], ['disabled', 'healthy']]) {
+    const env = await lifecycleDb()
+    const net = trapTransport()
+    try {
+      await seedWorld(env.pool)
+      await env.pool.query(`update public.textgrid_numbers set status = $2, health_state = $3 where phone_number = $1`, [OURS, status, health])
+      const phone = '+13125550201'
+      const { inboundId } = await seedThread(env.pool, { phone })
+      assert.equal((await planNurture(env.sb, phone, { inboundId })).ok, true)
+      const m = await materialize(env)
+      assert.equal(m.counts.materialized || 0, 0, JSON.stringify(m))
+      const i = await one(env.pool, phone)
+      assert.equal(i.state, 'held', `${status}/${health}: ${JSON.stringify(i)}`)
+      assert.equal(i.reason, 'sender_unhealthy')
+      assert.ok((await eventsOf(env.pool, i.id)).some((e) => e.to_state === 'held' && e.reason === 'sender_unhealthy'), 'the hold is audited')
+      assert.equal((await rowsOf(env.pool, phone)).length, 0, 'never a row the dispatcher could reroute')
+      assert.deepEqual(net.hits, [])
+    } finally { net.restore(); await env.db.drop() }
+  }
+})
+
+test('PG lifecycle (owner rule: thread continuity): the sender turns COOLING after materialization ⇒ the dispatcher BLOCKS the follow-up (never the healthy fallback number); zero sends', { skip }, async () => {
   const env = await lifecycleDb()
   const net = trapTransport()
   try {
     await seedWorld(env.pool)
-    await env.pool.query(`update public.textgrid_numbers set status = 'cooling', health_state = 'cooling' where phone_number = $1`, [OURS])
-    const phone = '+13125550201'
+    const phone = '+13125550202'
     const row = await readyRow(env, phone)
-    assert.equal(row.metadata.followup_sender_health, 'cooling')
-    assert.equal(row.metadata.followup_sender_needs_reroute, true)
+    assert.equal(row.from_phone_number, OURS)
+    assert.equal(row.metadata.followup_sender_pinned, true)
+    assert.equal(row.metadata.followup_sender_needs_reroute, undefined)
+    // the thread's sender goes bad AFTER the row exists; a healthy fallback number is available in the market
+    await env.pool.query(`update public.textgrid_numbers set status = 'cooling', health_state = 'cooling' where phone_number = $1`, [OURS])
     const provider = simProvider()
-    const out = await dispatchRow(env, await claimRow(env.pool, row.id), { provider })
-    assert.ok(provider.sent.every((s) => !JSON.stringify(s).includes(OURS.slice(-10))), 'never from the cooling sender')
-    if (provider.accepted() === 1) assert.ok(JSON.stringify(provider.sent[0]).includes(FALLBACK_SENDER.slice(-10)))
-    else {
-      // no eligible sender for the thread: a VISIBLE hold on the intent (a routing fix), zero sends
-      const i = await one(env.pool, phone)
-      assert.equal(provider.sent.length, 0)
-      assert.deepEqual([i.state, i.next_action], ['held', 'operator_review'], JSON.stringify({ i, out: JSON.stringify(out).slice(0, 200) }))
-      assert.ok(i.reason)
-    }
+    let out = null
+    try { out = await dispatchRow(env, await claimRow(env.pool, row.id), { provider }) } catch (e) { out = { error: e.message } }
+    assert.equal(provider.sent.length, 0, `never sent (${JSON.stringify(out).slice(0, 300)})`)
+    const after = (await rowsOf(env.pool, phone))[0]
+    assert.equal(after.from_phone_number, OURS, 'the row keeps the thread sender: never rerouted to the fallback')
+    assert.ok(!JSON.stringify(after).includes(FALLBACK_SENDER.slice(-10)), 'the fallback number appears nowhere on the row')
+    assert.match(String(after.queue_status), /^blocked/, `blocked visibly, never sent from another number: ${after.queue_status}`)
+    const t = (await sel(env.pool, 'select our_number from public.inbox_thread_state where thread_key = $1', [phone]))[0]
+    assert.equal(t.our_number, OURS, 'the thread sender is not switched either')
+    assert.deepEqual(net.hits, [])
+  } finally { net.restore(); await env.db.drop() }
+})
+
+test('PG lifecycle (RUN-06): the owner\'s MAILING state (properties.owner_address_state) is recipient evidence ⇒ a 312 seller mailing from WA is scheduled at the CT ∩ PT open (08:00 PT), and the runner\'s pre-send check agrees', { skip }, async () => {
+  const env = await lifecycleDb()
+  const net = trapTransport()
+  try {
+    await seedWorld(env.pool)
+    await env.pool.query(`update public.properties set owner_address_state = 'WA' where property_id = 'p1'`)
+    const phone = '+13125550231'
+    const day = new Date().toISOString().slice(0, 10)
+    const at = `${day}T13:30:00.000Z` // 08:30 CDT, 06:30 PDT
+    const row = await readyRow(env, phone, { materialize: { now: () => at } })
+    assert.ok(Date.parse(row.scheduled_for) >= Date.parse(`${day}T15:00:00.000Z`), `not before 08:00 PT: ${row.scheduled_for}`)
+    assert.ok((row.metadata.recipient_zones || []).includes('America/Los_Angeles'), JSON.stringify(row.metadata.recipient_zones))
+    // the runner at the planned instant sends it once (its own mailing read agrees with the plan)
+    const provider = simProvider()
+    await dispatchRow(env, await claimRow(env.pool, row.id), { provider, now: new Date(Date.parse(row.scheduled_for) + 60_000).toISOString() })
+    assert.equal(provider.accepted(), 1)
     assert.deepEqual(net.hits, [])
   } finally { net.restore(); await env.db.drop() }
 })

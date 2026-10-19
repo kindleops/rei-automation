@@ -47,7 +47,11 @@ const PUBLIC_FIXTURE = `
   create table if not exists public.automation_suppressions (id uuid primary key default gen_random_uuid(), phone_e164 text, status text, suppression_type text, suppression_reason text, expires_at timestamptz);
   create table if not exists public.phones (phone_id text, canonical_e164 text, phone text, phone_raw text, phone_contact_status text, wrong_number_at timestamptz, primary_prospect_id text, canonical_prospect_id text, activity_status text);
   create table if not exists public.properties (property_id text primary key, property_type text, property_class text, units_count integer, property_address_city text, property_address_state text,
-    property_address_zip text, property_address text, property_address_full text, owner_1_name text, owner_name text, timezone text);
+    property_address_zip text, property_address text, property_address_full text, owner_1_name text, owner_name text, timezone text, owner_address_state text);
+  -- the owner's MAILING state (recipient evidence the lifecycle, the feeder and the runner read; prod:
+  -- properties.owner_address_state). Seeded NULL (no mailing on file) so the property-only / unknown-zone
+  -- cases stay what they say; a test sets it to exercise mailing evidence.
+  alter table public.properties add column if not exists owner_address_state text;
   create table if not exists public.prospects (prospect_id text primary key, first_name text, full_name text, timezone text);
   create table if not exists public.v_template_performance (template_id text);`
 
@@ -111,9 +115,9 @@ export async function seedWorld(pool, { mode = 'live', templates = true, propert
       ('t-own-en-1', 'ownership_check', 'English', true, true, 'Hi {{seller_first_name}}, {{agent_name}} here. Do you still own {{property_address}}?')`)
   }
   await pool.query(`insert into public.textgrid_numbers (phone_number, status, market, health_state) values ($1, 'active', 'Chicago', 'healthy'), ($2, 'active', 'Chicago', 'healthy')`, [OURS, FALLBACK_SENDER])
-  await pool.query(`insert into public.properties (property_id, property_type, property_address_city, property_address_state, property_address_zip, property_address, owner_1_name)
-                    values ('p1', 'SFR', 'Chicago', 'IL', '60601', '12 Oak St', 'Dana Q'), ('p-nogeo', 'SFR', null, null, null, '9 Elm St', 'Dana Q'),
-                           ('251027062', 'SFR', 'Philadelphia', 'PA', '19104', '3746 Baltimore Ave', 'M Owner') on conflict do nothing`)
+  await pool.query(`insert into public.properties (property_id, property_type, property_address_city, property_address_state, property_address_zip, property_address, owner_1_name, owner_address_state)
+                    values ('p1', 'SFR', 'Chicago', 'IL', '60601', '12 Oak St', 'Dana Q', null), ('p-nogeo', 'SFR', null, null, null, '9 Elm St', 'Dana Q', null),
+                           ('251027062', 'SFR', 'Philadelphia', 'PA', '19104', '3746 Baltimore Ave', 'M Owner', null) on conflict do nothing`)
   await pool.query(`insert into public.prospects (prospect_id, first_name, full_name) values ('pr1', 'Dana', 'Dana Q') on conflict do nothing`)
   void propertyGeo
 }
