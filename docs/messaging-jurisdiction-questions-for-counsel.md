@@ -100,3 +100,9 @@ Area codes are mapped to time zones, not to states. Question A3 below asks which
 3. The tests in `apps/api/tests/critical/recipient-window-policy-8521.test.mjs` must still pass. The test that
    pins an empty table will need to be updated in the same reviewed change.
 4. No other code changes are needed. Every scheduler and the dispatcher read the same table.
+
+## Configuration surface (blind-eval v2 RUN-38: acceptable by design)
+
+The restriction table (`apps/api/src/lib/domain/queue/messaging-restrictions.js`, `MESSAGING_RESTRICTIONS`)
+is code-static on purpose: every entry needs a citation and an approver. Changing it is a reviewed
+code change, not a runtime setting. The table ships empty. It was proven with an injected entry only.
