@@ -1,4 +1,4 @@
--- PRETEST for PROPOSED_20261016120000_lc_mcp_reader.sql. DISPOSABLE DATABASE ONLY:
+-- PRETEST for PROPOSED_20261019150000_lc_mcp_reader.sql. DISPOSABLE DATABASE ONLY:
 -- run by scripts/db/run-migration-test.mjs, never against production.
 -- It is read-only and ends in ROLLBACK. The runner proves it leaves no trace (same
 -- catalog fingerprint, same row counts).

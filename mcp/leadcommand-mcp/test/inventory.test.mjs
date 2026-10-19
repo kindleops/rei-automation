@@ -31,8 +31,8 @@ function labelled(src) {
 const named = (src, name) => [...src.matchAll(new RegExp(`\\b${name} text\\[\\] := array\\[(.*)\\];\\s*$`, 'gm'))].map((m) => arr(m[1]))
 
 test('the role migration grants exactly the code inventory (apply, rollback, pretest, posttest)', () => {
-  const apply = labelled(read('PROPOSED_20261016120000_lc_mcp_reader.sql'))
-  const rollback = labelled(read('PROPOSED_20261016120000_lc_mcp_reader_rollback.sql'))
+  const apply = labelled(read('PROPOSED_20261019150000_lc_mcp_reader.sql'))
+  const rollback = labelled(read('PROPOSED_20261019150000_lc_mcp_reader_rollback.sql'))
   const existing = Object.keys(RPCS).map((s) => s.replace(/\s+/g, '')).sort()
   const all = RPC_SIGNATURES.map((s) => s.replace(/\s+/g, '')).sort()
   assert.deepEqual(apply.map(([l]) => l), ['relations', 'optional', 'existing-rpcs', 'relations', 'functions'])
@@ -41,10 +41,10 @@ test('the role migration grants exactly the code inventory (apply, rollback, pre
     assert.deepEqual([...list].sort(), [...want].sort(), `${label} list drifted from src/data/inventory.mjs`)
   }
   assert.deepEqual(rollback.map(([l]) => l), ['relations', 'existing-rpcs'])
-  const post = read('PROPOSED_20261016120000_lc_mcp_reader_posttest.sql')
+  const post = read('PROPOSED_20261019150000_lc_mcp_reader_posttest.sql')
   assert.deepEqual(named(post, 'rels')[0].sort(), RELATION_NAMES)
   assert.deepEqual(named(post, 'fns')[0].sort(), all)
-  const pre = read('PROPOSED_20261016120000_lc_mcp_reader_pretest.sql')
+  const pre = read('PROPOSED_20261019150000_lc_mcp_reader_pretest.sql')
   assert.deepEqual(named(pre, 'rels')[0].sort(), RELATION_NAMES.filter((r) => !OPTIONAL_RELATIONS.includes(r)))
 })
 

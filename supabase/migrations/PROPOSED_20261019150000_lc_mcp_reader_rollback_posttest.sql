@@ -1,4 +1,4 @@
--- POSTTEST of the rollback of PROPOSED_20261016120000_lc_mcp_reader.sql. DISPOSABLE
+-- POSTTEST of the rollback of PROPOSED_20261019150000_lc_mcp_reader.sql. DISPOSABLE
 -- DATABASE ONLY: run by scripts/db/run-migration-test.mjs, never against production.
 -- It is read-only and ends in ROLLBACK. Together with the runner's fingerprint
 -- comparison, it proves the rollback removed exactly the migration's objects and left

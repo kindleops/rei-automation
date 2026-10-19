@@ -542,6 +542,19 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback_posttest.sql')],
   },
+  // ── LeadCommand MCP 1.0 live mode: the database-role-enforced read-only credential lc_mcp_reader ──
+  // OPTIONAL, separately approved (docs/LEADCOMMAND-MCP-1.0.md §4.2). Renumbered from 20261016120000
+  // (collided with conversation_reply_turns); bodies unchanged except their own self-references.
+  // Setup = the shim + an emulation of the production objects it touches (disposable only).
+  {
+    id: 'lc_mcp_reader',
+    setup: [SHIM, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql'],
+    pretest: M('PROPOSED_20261019150000_lc_mcp_reader_pretest.sql'),
+    apply: [M('PROPOSED_20261019150000_lc_mcp_reader.sql')],
+    posttest: [M('PROPOSED_20261019150000_lc_mcp_reader_posttest.sql')],
+    rollback: [M('PROPOSED_20261019150000_lc_mcp_reader_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261019150000_lc_mcp_reader_rollback_posttest.sql')],
+  },
 ]
 
 // ── rc-8.5.21: the SAME release chain, started from the PRODUCTION agent-runtime state ──

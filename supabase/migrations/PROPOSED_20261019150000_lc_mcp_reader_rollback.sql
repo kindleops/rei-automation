@@ -1,5 +1,5 @@
 -- =============================================================================
--- ROLLBACK of PROPOSED_20261016120000_lc_mcp_reader.sql
+-- ROLLBACK of PROPOSED_20261019150000_lc_mcp_reader.sql
 -- STATUS: PROPOSED. Run only with the owner's approval, like the apply.
 -- Tested on disposable PostgreSQL 17 only: the runner proves that apply → rollback
 -- restores the pre-apply catalog fingerprint exactly (ACLs, policies, functions, roles).

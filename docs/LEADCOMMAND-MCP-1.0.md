@@ -261,7 +261,7 @@ Notes per tool:
 
 **Design (PostgREST + a role-claim JWT; option (a)).**
 
-- `supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql` creates role `lc_mcp_reader`:
+- `supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql` creates role `lc_mcp_reader`:
   - NOLOGIN NOINHERIT, no SUPERUSER / CREATEDB / CREATEROLE / REPLICATION / **BYPASSRLS**, a member of **no** role;
   - `statement_timeout 5s`; granted to `authenticator`;
   - USAGE on `public` only;
@@ -315,7 +315,7 @@ These are pg_net 0.20.0 objects owned by `supabase_admin`, which postgres cannot
 **Owner steps to go live (in order; each one separately approved):**
 
 1. Resolve pg_net: drop it or have Supabase revoke PUBLIC on schema `net`. Optionally apply the rest of `PROPOSED_public_execute_hardening.sql`.
-2. Apply `supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql`, alone. Expect `NOTICE: lc_mcp_reader: self-check ok (20 relations, 4 functions)`. Any `ERROR: lc_mcp_reader: refused …` names the blockers, and nothing is applied.
+2. Apply `supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql`, alone. Expect `NOTICE: lc_mcp_reader: self-check ok (20 relations, 4 functions)`. Any `ERROR: lc_mcp_reader: refused …` names the blockers, and nothing is applied.
 3. Mint the token outside the repo. Put the dashboard's legacy JWT secret in a 0600 file such as `~/.leadcommand/jwt-secret`, then run `node scripts/mint-reader-token.mjs --secret-file ~/.leadcommand/jwt-secret --out ~/.leadcommand/lc_mcp_reader.jwt --days 30` and delete the secret file. Put the anon key in `~/.leadcommand/anon.key` (0600).
 4. From a clean shell (`env -i PATH="$PATH" HOME="$HOME" …`), set `LEADCOMMAND_MCP_SUPABASE_URL`, `_READER_JWT_FILE`, `_API_KEY_FILE`, `_PRINCIPAL_USER_ID`, `_ORG_ID`. Then run `node scripts/live-acceptance.mjs --zip <a ZIP with properties>`.
    - Expected: `"result": "PASS"`, and stage `database` shows **15** write probes at HTTP 403 / `42501`: INSERT / UPDATE / DELETE × send_queue, sms_templates, system_control, properties, campaigns. Each is zero-row even if permitted; the control test proves it.
@@ -324,7 +324,7 @@ These are pg_net 0.20.0 objects owned by `supabase_admin`, which postgres cannot
    - Stage `capability`: 9 tools / ≤ 12 calls, all `data_mode: live` with provenance.
    - Stage `audit`: boot self-check ok, one `tool_call` per call.
    - Exit 0.
-5. Only then point MCP hosts at live mode. Kill switch: `revoke lc_mcp_reader from authenticator;`. Rollback: `PROPOSED_20261016120000_lc_mcp_reader_rollback.sql`.
+5. Only then point MCP hosts at live mode. Kill switch: `revoke lc_mcp_reader from authenticator;`. Rollback: `PROPOSED_20261019150000_lc_mcp_reader_rollback.sql`.
 
 **Residual (stated plainly).**
 

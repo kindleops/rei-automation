@@ -3,7 +3,7 @@
 -- STATUS: PROPOSED. NOT APPLIED. Owner approval required; applied on its own.
 -- Test (disposable PostgreSQL 17 ONLY, never production):
 --   node scripts/db/run-migration-test.mjs --pg-bin <pg17 bin dir> --id lc_mcp_reader
--- Rollback: PROPOSED_20261016120000_lc_mcp_reader_rollback.sql (drops exactly what this creates)
+-- Rollback: PROPOSED_20261019150000_lc_mcp_reader_rollback.sql (drops exactly what this creates)
 -- Design:   docs/LEADCOMMAND-MCP-1.0.md §4.2
 -- =============================================================================
 --
@@ -123,7 +123,7 @@ begin
   end if;
 end $$;
 
-comment on role lc_mcp_reader is 'LeadCommand MCP live mode: read-only, PostgREST-only (JWT role claim). See supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql';
+comment on role lc_mcp_reader is 'LeadCommand MCP live mode: read-only, PostgREST-only (JWT role claim). See supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql';
 alter role lc_mcp_reader set statement_timeout = '5s';
 grant lc_mcp_reader to authenticator;
 

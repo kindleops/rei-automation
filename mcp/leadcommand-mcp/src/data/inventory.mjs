@@ -4,7 +4,7 @@
 //
 //   1. the database role lc_mcp_reader holds SELECT on exactly RELATIONS and
 //      EXECUTE on exactly RPCS + MCP_RPCS
-//      (supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql; a test
+//      (supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql; a test
 //      asserts the migration's lists equal these);
 //   2. the MCP's own transport guard (data/read-fetch.mjs) refuses any request
 //      for a relation or function outside it, before the network;

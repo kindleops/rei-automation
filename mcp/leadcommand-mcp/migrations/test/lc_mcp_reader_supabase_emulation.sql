@@ -1,4 +1,4 @@
--- DISPOSABLE DATABASE ONLY: test setup for PROPOSED_20261016120000_lc_mcp_reader.sql.
+-- DISPOSABLE DATABASE ONLY: test setup for PROPOSED_20261019150000_lc_mcp_reader.sql.
 -- NEVER run against Supabase. Every object here already exists in production, or stands
 -- in for one. The runner (scripts/db/run-migration-test.mjs) applies it after
 -- apps/api/tests/pg/supabase-shim.sql. The shim provides anon, authenticated,

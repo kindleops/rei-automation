@@ -1,4 +1,4 @@
--- POSTTEST for PROPOSED_20261016120000_lc_mcp_reader.sql. DISPOSABLE DATABASE ONLY:
+-- POSTTEST for PROPOSED_20261019150000_lc_mcp_reader.sql. DISPOSABLE DATABASE ONLY:
 -- run by scripts/db/run-migration-test.mjs, never against production.
 -- It runs in one transaction and ends in ROLLBACK. The runner proves the schema is unchanged afterwards.
 --

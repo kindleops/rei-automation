@@ -4,7 +4,7 @@
 //            minted lc_mcp_reader token (data/credential.mjs). The database refuses
 //            every write: no INSERT / UPDATE / DELETE / TRUNCATE grant, no reachable
 //            write or egress function, no BYPASSRLS
-//            (supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql). In front of
+//            (supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql). In front of
 //            it, the transport is narrowed twice: the inventory guard (read-fetch.mjs: the
 //            inventory relations / 4 RPCs only, credentials attached here) and the app's
 //            guarded read fetch (createGuardedReadFetch). The SAME domain services the

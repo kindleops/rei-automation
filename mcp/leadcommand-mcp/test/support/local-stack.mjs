@@ -142,7 +142,7 @@ export async function startLocalStack({ pgBin, postgrestBin, psql = process.env.
     if (roles) throw new Error(`refused: the server carries Supabase platform roles (${roles})`)
     run(cluster.url, ['-c', 'create database lc_mcp_e2e'])
     const dbUrl = cluster.url.replace('/postgres?', '/lc_mcp_e2e?')
-    for (const f of [path.join(REPO, 'apps/api/tests/pg/supabase-shim.sql'), path.join(REPO, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql'), widen, MIG('PROPOSED_20261016120000_lc_mcp_reader.sql')]) {
+    for (const f of [path.join(REPO, 'apps/api/tests/pg/supabase-shim.sql'), path.join(REPO, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql'), widen, MIG('PROPOSED_20261019150000_lc_mcp_reader.sql')]) {
       run(dbUrl, ['--single-transaction', '-f', f])
       log(`applied ${path.basename(f)}`)
     }

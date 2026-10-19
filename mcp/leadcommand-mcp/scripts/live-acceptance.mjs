@@ -2,7 +2,7 @@
 // LIVE ACCEPTANCE: LeadCommand MCP 1.0 on the role-enforced read-only credential.
 //
 // THE OWNER RUNS THIS, after approving and applying
-// supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql and minting the token
+// supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql and minting the token
 // (docs/LEADCOMMAND-MCP-1.0.md §4.2). It is never run by automation against production.
 //
 //   LEADCOMMAND_MCP_SUPABASE_URL=https://<ref>.supabase.co \
