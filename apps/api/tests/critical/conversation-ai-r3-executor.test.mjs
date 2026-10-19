@@ -170,7 +170,11 @@ test('policy: limits clamp to the owner limits; malformed policy is the safe def
   assert.equal(p.limits.max_per_day_global, 25)
   assert.equal(p.limits.max_per_seller_per_day, 1)
   assert.deepEqual(p.hours, { start_local_hour: 8, end_local_hour: 21 })
-  assert.deepEqual(p.languages, ['en'])
+  // OWNER DECISION 2026-10-18: Spanish is enabled through THIS setting (English always stays); any
+  // other language is never enabled, and the default (no row / no languages) is English only
+  assert.deepEqual(p.languages, ['en', 'es'])
+  assert.deepEqual(normalizeSendPolicy(JSON.stringify({ enabled: true, languages: ['ht', 'fr', 'pt'] })).languages, ['en'])
+  assert.deepEqual(normalizeSendPolicy(JSON.stringify({ enabled: true })).languages, ['en'])
   assert.equal(p.min_confidence, 0.85)
   assert.equal(normalizeSendPolicy('{not json').enabled, false)
   assert.equal(normalizeSendPolicy({ enabled: 'true' }).enabled, false, 'a truthy string never enables')
@@ -436,10 +440,13 @@ test('held: out of scope, money, offers, Spanish, unknown language, multi-proper
   assert.equal(money.status, 'held')
   assert.ok(money.reasons.some((x) => /money|dollar/.test(x)), JSON.stringify(money.reasons))
   // offer request
-  const offerThread = [msg('o1', 'outbound', 'Would you consider selling it?', 30, { use_case: 'consider_selling' }), msg('i1', 'inbound', "What's your offer?", 5)]
-  const offer = await run(world({ thread: offerThread }), candidate(interestDecision({ intent: 'asks_offer', seller_interest: 'interested', next_objective: 'get_asking_price', proposed_message: 'Happy to. What price did you have in mind?', facts_extracted: [] })))
+  // OWNER DECISION 2026-10-18 (offer before price): the FIRST offer request, with no price asked yet,
+  // is answered ONCE with the price question (no amount) — the one in-scope offer turn; once we have
+  // asked, an offer request is the authority's (no price without an envelope), held here
+  const offerThreadAsked = [msg('o1', 'outbound', 'Would you consider selling it?', 40, { use_case: 'consider_selling' }), msg('i0', 'inbound', 'maybe', 35), msg('o2', 'outbound', 'Do you have a price in mind?', 30, { use_case: 'seller_asking_price' }), msg('i1', 'inbound', "What's your offer?", 5)]
+  const offer = await run(world({ thread: offerThreadAsked }), candidate(interestDecision({ intent: 'asks_offer', seller_interest: 'interested', next_objective: 'get_asking_price', proposed_message: 'Happy to. What price did you have in mind?', facts_extracted: [] })))
   assert.equal(offer.status, 'held')
-  assert.ok(offer.reasons.includes('excluded_offer_on_thread'), JSON.stringify(offer.reasons))
+  assert.ok(offer.reasons.includes('excluded_offer_on_thread') || offer.reasons.some((x) => /already_asked:asking_price|never_reask/.test(x)), JSON.stringify(offer.reasons))
   // Spanish
   const esThread = [msg('o1', 'outbound', '¿Todavía es el dueño de la casa?', 30, { use_case: 'ownership_check' }), msg('i1', 'inbound', 'Sí, soy el dueño', 5)]
   const es = await run(world({ thread: esThread, language: 'es' }), candidate(interestDecision({ proposed_message: 'Gracias. ¿Consideraría vender?' })))

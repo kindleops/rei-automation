@@ -127,8 +127,11 @@ export function createCanonicalTurnDecider({ supabase = getDefaultSupabaseClient
     const modelClient = tracker ? createConversationModelClient({ provider: provider || (await import('./anthropic-provider.js')).createAnthropicProvider({ env }), tracker, env, remainingMs, signal }) : null
     let eligibility
     try { eligibility = await ci.eligibilityFor({ now: at }) } catch { eligibility = { blocked: true, reasons: ['send_time_guard_read_failed'], guard: { blocked: true, reason: 'send_time_guard_read_failed' } } }
+    // OWNER DECISION 2026-10-18: the enabled reply languages come from THE send policy setting
+    let enabledLanguages = ['en']
+    try { enabledLanguages = normalizeSendPolicy(await read(AI_SEND_POLICY_KEY)).languages } catch { enabledLanguages = ['en'] }
     const record = await decideAndCompose({
-      input: ci.input, eligibility, modelClient, spend: composeSpendFor(tracker),
+      input: ci.input, eligibility, modelClient, spend: composeSpendFor(tracker), enabledLanguages,
       establishedPersona: claim.persona_name || (ci.continuity.ok ? ci.continuity.persona_name : null), companyIdentity: ci.companyIdentity, caller: 'turn', now: at,
     })
     const store = shadowStore || createShadowTableStore(supabase)
@@ -140,6 +143,7 @@ export function createCanonicalTurnDecider({ supabase = getDefaultSupabaseClient
     const auth = reply ? await aiSendAuthorizedFor({ threadKey: ci.input.inbound.thread_key, readSwitch: read, propertyId: ci.loaded.row.property_id || null, propertyAddress: ci.property_address, automationHoldChecker }) : { ok: false, reason: 'no_reply' }
     return {
       code: record.terminal?.type || null,
+      reason: record.terminal?.reason || null,
       outcome: String(record.terminal?.type || 'no_decision').toLowerCase(),
       writer_version: WRITER_VERSION,
       reply: reply && auth.ok ? { text: reply.text, category: reply.category } : null,

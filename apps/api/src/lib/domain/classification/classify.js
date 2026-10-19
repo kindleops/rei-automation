@@ -879,6 +879,18 @@ const CALL_ONLY_PROHIBITIONS = [
   "quit calling me", "quit calling", "never call me", "never call",
   "no calls", "no phone calls",
 ];
+// blind-eval v2 IDN-10: "Yes. I don't text much, can someone call me?" describes the SELLER's habit
+// and asks for a call — a channel preference (a human callback), never an opt-out. Only a statement
+// about the seller ("I don't text (much)") WITH a call request and NO directive at us ("don't text
+// me", stop, remove, don't contact) qualifies; STOP stays absolute.
+export function matchesVoiceChannelPreference(text) {
+  const t = String(text || "").toLowerCase();
+  const habit = /\b(?:i|we)\s+(?:don'?t|dont|do\s+not)\s+(?:really\s+|usually\s+)?text(?:\s+(?:much|often|a\s+lot|very\s+much|well|that\s+much))?\b(?!\s+(?:me|us)\b)|\bnot\s+(?:much\s+of\s+)?a\s+texter\b/.test(t);
+  const call = /\b(?:call\s+me|give\s+me\s+a\s+(?:call|ring)|can\s+(?:someone|somebody|you|u|anyone)\s+(?:please\s+)?call|please\s+call|rather\s+(?:talk|speak)|prefer\s+(?:a\s+)?(?:call|phone)|phone\s+call)\b/.test(t);
+  const directive = /\b(?:stop|unsubscribe|remove|take\s+me\s+off|opt[\s-]?out|don'?t\s+(?:text|contact|message)\s+(?:me|us)|dont\s+(?:text|contact|message)\s+(?:me|us)|leave\s+me\s+alone|no\s+more\s+(?:texts|messages))\b/.test(t);
+  return habit && call && !directive;
+}
+
 function matchesTextChannelPreference(text) {
   return (
     includesAny(text, TEXT_CHANNEL_AFFIRMATIVES) &&
@@ -5142,7 +5154,8 @@ function resolveIntents(
   // (e.g. "wrong number stop calling") over generic opt_out from "stop".
   const is_true_wrong = matchesTrueWrongNumber(text);
   const is_ownership_disconnect = matchesOwnershipDisconnect(text);
-  const is_opt_out =
+  // IDN-10: a voice-channel preference ("I don't text much, call me") is never an opt-out
+  const is_opt_out = !matchesVoiceChannelPreference(text) && (
     compliance_flag === "stop_texting" ||
     (!stop_other_action && includesAny(text, [
       "unsubscribe",
@@ -5198,7 +5211,7 @@ function resolveIntents(
       // "Stop calling me, text me instead" is a channel preference, not an
       // opt-out (see matchesTextChannelPreference — text prohibitions never
       // pass the guard, so real opt-outs are unaffected).
-      !matchesTextChannelPreference(text));
+      !matchesTextChannelPreference(text)));
 
   if (is_opt_out && !is_true_wrong && !is_ownership_disconnect) {
     matched_rule_ids.push("opt_out_terminal");
@@ -5404,7 +5417,11 @@ function resolveIntents(
   }
 
   // 4. NOT INTERESTED / SOFT OBJECTIONS (Capture negations before positive keywords)
+  // blind-eval v2 RUN-18: "My husband wants to keep it" is selling disinterest (the 30-day nurture);
+  // WHO decides is never a pricing input (marital / family status is never priced)
+  const keep_it_disinterest = /\b(?:my|our)\s+(?:husband|wife|spouse|partner|family|kids|children|son|daughter|mom|mother|dad|father|parents)\s+(?:wants?|would\s+(?:like|rather)|prefers?|decided|wishes)(?:\s+to)?\s+(?:keep|hold\s+on\s+to|hang\s+on\s+to)\s+(?:it|the\s+(?:house|home|property|place))\b|\b(?:we|i)(?:'?re|\s+are|\s+am|'?m)?\s+(?:going\s+to\s+|gonna\s+)?(?:want\s+to\s+)?keep(?:ing)?\s+(?:it|the\s+(?:house|home|property|place))\b/i.test(text);
   const legacy_not_interested_match =
+    keep_it_disinterest ||
     normalized_objection === "not_interested" ||
     includesAny(text, [
       "not interested", "no interest", "no thanks", "no thank you",

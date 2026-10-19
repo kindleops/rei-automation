@@ -24,7 +24,7 @@
 export const ESCALATION_EVIDENCE_VERSION = 'conv-ai.escalation-evidence.v1'
 export const ESCALATION_REASON_CODES = Object.freeze([
   'missing_negotiation_authority', 'missing_comps', 'incompatible_term', 'failed_tool', 'insufficient_context',
-  'multiple_properties', 'multiple_owners', 'company_identity_not_configured', 'requested_email_or_card',
+  'multiple_properties', 'multiple_owners', 'company_identity_not_configured', 'requested_email_or_card', 'requested_visit',
   'asked_if_automated', 'ownership_evidence_conflict', 'language_not_enabled', 'price_contradiction',
 ])
 

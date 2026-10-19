@@ -18,6 +18,7 @@
 // Excluded (held for a human): money / offers, financial claims, legal / contract,
 // negotiation, multi-property, Spanish (and any language not positively English).
 import { questionCount, moneyMentions } from './validator.js'
+import { identifyReplyLanguage } from '../classification/seller-reply-language.js'
 import { STATIC_PERMANENT_EXCLUSIONS, isOwnerHandledThread as staticIsOwnerHandledThread } from '@/lib/domain/holds/automation-hold-core.js'
 
 export const AI_SEND_POLICY_VERSION = 'conv-ai.send-policy.v1'
@@ -97,8 +98,10 @@ export function normalizeSendPolicy(raw = null) {
     policy_version: AI_SEND_POLICY_VERSION,
     enabled: row.enabled === true,
     scope: Object.freeze({ thread_keys: arr(scope.thread_keys), market_ids: arr(scope.market_ids), campaign_ids: arr(scope.campaign_ids) }),
-    // Spanish (and every other language) is excluded in 8.5.16 whatever the row says
-    languages: Object.freeze(['en']),
+    // OWNER DECISION 2026-10-18: native Spanish is approved through THIS setting (born ['en']:
+    // production sending stays English-only until the row lists 'es'). Any other language is never
+    // enabled here, and there is no automatic English fallback.
+    languages: Object.freeze([...new Set(['en', ...arr(row.languages).map((l) => String(l).trim().toLowerCase()).filter((l) => ALLOWED_POLICY_LANGUAGES.includes(l))])]),
     categories: Object.freeze(arr(row.categories).filter((c) => ALLOWED_POLICY_CATEGORIES.includes(c)).length ? arr(row.categories).filter((c) => ALLOWED_POLICY_CATEGORIES.includes(c)) : ROUTINE_CATEGORIES),
     limits: Object.freeze({
       max_per_day_global: clampInt(limits.max_per_day_global ?? AI_SEND_HARD_LIMITS.max_per_day_global, AI_SEND_HARD_LIMITS.max_per_day_global),
@@ -120,7 +123,7 @@ export function threadInPolicyScope(policy, { thread_key = null, market_id = nul
 }
 
 // words that are English and NOT also Spanish ("no", "a", "ok" are shared and prove nothing)
-const ENGLISH_WORD_RE = /\b(?:the|you|it|is|are|not|yes|yeah|yep|nope|my|me|we|this|that|who|what|why|how|sell|selling|own|owner|house|home|property|interested|thanks|thank|please|stop|sorry|okay|sure|wrong|number|maybe|later|call|text|have|don'?t|i'?m|it'?s|thats|already)\b/i
+const ENGLISH_WORD_RE = /\b(?:the|you|u|ur|your|it|is|are|r|not|yes|yeah|yep|yup|nope|my|me|we|us|our|this|that|these|those|who|what|which|when|where|why|how|with|for|from|of|and|or|but|if|so|just|still|also|actually|really|about|any|some|all|do|does|did|can|could|would|will|should|was|were|been|be|am|has|had|get|got|want|need|know|think|sell|selling|sold|own|owner|owned|house|home|property|place|rental|rent|tenant|company|price|offer|cash|much|many|more|less|interested|thanks|thank|please|stop|sorry|okay|sure|wrong|number|maybe|later|now|today|tomorrow|week|month|year|call|text|have|don'?t|doesn'?t|didn'?t|can'?t|won'?t|i'?m|i'?ll|i'?d|it'?s|thats|already|here|there|again|right|good|great|fine|well|ok)\b/i
 const SPANISH_STOPWORD_RE = /\b(?:el|la|los|las|del|que|por|para|con|mi|tengo|pero|esta|muy|bien|estoy|tiene|usted|vendo|vender|ahora|gracias|hola|casa|propiedad|soy|somos|quiero|puedo|tambi[eé]n|todav[ií]a|seguro|claro|bueno|nada|algo)\b/i
 const SPANISH_RE = /[¿¡ñ]|\b(?:hola|gracias|vender|casa|propiedad|cu[aá]nto|usted|s[ií]\s+(?:soy|es)|no\s+estoy|due[nñ]o|oferta|precio|quien\s+es|qui[eé]n)\b/i
 const FINANCIAL_RE = /\b(?:mortgage|loan|lien|equity|owe|payoff|refinanc\w*|bank|credit|financ\w*|interest\s+rate|taxes?|appraisal|cash\s+offer|proof\s+of\s+funds|closing\s+costs?|commission)\b/i
@@ -135,14 +138,56 @@ const NEVER_INTENTS = new Set(['opt_out', 'hostile_or_legal', 'wrong_number', 'o
 const STAGE_OBJECTIVES = Object.freeze({ confirm_ownership: 'ownership', gauge_interest: 'interest', get_asking_price: 'asking_price', get_condition: 'condition' })
 
 /** Is the language POSITIVELY English? Unknown is unknown (held), never assumed English. */
+// blind-eval v2 (SPA-01 "Sí, es mía", LNG-04 Haitian Creole): a stored "English" label sent both an
+// English reply. Owner rule: an unknown language is UNKNOWN, never English. The INBOUND TEXT decides:
+//   1. the shared reply-language identifier names a language ⇒ that language
+//   2. any non-English marker in the text (accented / non-Latin letters, Spanish words) ⇒ not English
+//   3. English words in the text ⇒ English (a stored English label then only confirms it)
+//   4. a bare universal token ("ok", "no", "k") counts as English ONLY with a stored English label
+//   5. otherwise unknown (held), whatever the stored label says
+const UNIVERSAL_TOKEN_RE = /^\s*(?:ok(?:ay)?|k|no|nah|yes|ya|y|n|\?+|!+)\s*[.!?]*\s*$/i
+const NON_ENGLISH_LETTER_RE = /[\u00C0-\u024F\u0370-\uFFFF]/
+const stripSymbols = (t) => String(t || '').replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\uFE0F\u200D\u2019\u2018\u201C\u201D]/gu, '')
+export const ALLOWED_POLICY_LANGUAGES = Object.freeze(['en', 'es'])
+const SPANISH_LETTER_RE = /[áéíóúñü¿¡]/i
+const OTHER_ROMANCE_LETTER_RE = /[àèìòùâêîôûçãõë]/i
+const PORTUGUESE_RE = /\b(?:sim|n[aã]o|obrigad[oa]|voc[eê]|minha|meu|propriedade|vender\s+a)\b/i
+
+/**
+ * OWNER DECISION 2026-10-18: the seller's language from the INBOUND evidence — 'en', 'es', another
+ * identified language, or 'unknown'. Never English by default; the stored label never overrides the text.
+ */
+export function replyLanguageOf({ language = null, inboundText = '' } = {}) {
+  const v = languageVerdict({ language, inboundText })
+  if (v.english) return 'en'
+  const identified = identifyReplyLanguage(inboundText)
+  if (identified) return /^spanish$/i.test(identified) ? 'es' : /^english$/i.test(identified) ? 'en' : String(identified).toLowerCase()
+  const text = String(inboundText || '')
+  if (OTHER_ROMANCE_LETTER_RE.test(text) || PORTUGUESE_RE.test(text)) return 'unknown'
+  if (SPANISH_RE.test(text) || SPANISH_LETTER_RE.test(text) || SPANISH_STOPWORD_RE.test(text) || /^\s*s[ií][\s,.!]*$/i.test(text)) return 'es'
+  const l = String(language || '').trim().toLowerCase()
+  if (['es', 'spanish', 'español', 'espanol'].includes(l) || l.startsWith('es-')) return 'es'
+  return 'unknown'
+}
+
+/** Is the seller's language one the policy enables? (unknown / any other language: never) */
+export function languageEnabledFor({ language = null, inboundText = '', languages = ['en'] } = {}) {
+  const lang = replyLanguageOf({ language, inboundText })
+  return { language: lang, enabled: lang !== 'unknown' && (languages || ['en']).includes(lang), reason: lang === 'unknown' ? 'language_unknown' : `language_${lang}` }
+}
+
 export function languageVerdict({ language = null, inboundText = '', draftText = '' } = {}) {
   const l = String(language || '').trim().toLowerCase()
+  const storedEnglish = l === 'en' || l === 'english' || l.startsWith('en-')
   if (SPANISH_RE.test(inboundText) || SPANISH_RE.test(draftText)) return { english: false, reason: 'spanish_detected' }
-  if (l === 'en' || l === 'english' || l.startsWith('en-')) return { english: true, reason: 'english' }
-  // no stored language: English TEXT (Latin-only, no accented letters, no Spanish markers, at
-  // least one English word) is English (8.5.16 eval); anything else stays unknown and is held
-  if (!l) return ENGLISH_WORD_RE.test(inboundText) && !SPANISH_STOPWORD_RE.test(inboundText) && !/[\u00C0-\u024F\u0370-\uFFFF]/.test(String(inboundText).replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\uFE0F\u200D\u2019\u2018\u201C\u201D]/gu, '')) ? { english: true, reason: 'english_inferred_from_text' } : { english: false, reason: 'language_unknown' }
-  return { english: false, reason: `language_${l}` }
+  const identified = identifyReplyLanguage(inboundText)
+  if (identified) return /^english$/i.test(identified) ? { english: true, reason: 'english' } : { english: false, reason: `language_${String(identified).toLowerCase()}` }
+  const text = stripSymbols(inboundText)
+  if (NON_ENGLISH_LETTER_RE.test(text) || SPANISH_STOPWORD_RE.test(text)) return { english: false, reason: 'language_unknown' }
+  if (l && !storedEnglish) return { english: false, reason: `language_${l}` }
+  if (ENGLISH_WORD_RE.test(text)) return { english: true, reason: storedEnglish ? 'english' : 'english_inferred_from_text' }
+  if (storedEnglish && UNIVERSAL_TOKEN_RE.test(text)) return { english: true, reason: 'english_short_token' }
+  return { english: false, reason: 'language_unknown' }
 }
 
 /**

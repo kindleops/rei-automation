@@ -106,7 +106,15 @@ export async function runConversationAiShadowForInbound({ providerMessageSid, in
   )
   // rc-8.5.21 integration: the canonical shadow runtime (8.5.21-a) is the writer; the hold verdict
   // (rc-8.5.20-holds) still annotates its result exactly as before.
+  // OWNER DECISION 2026-10-18: the enabled reply languages come from THE send-policy setting
+  let enabledLanguages = ['en']
+  try {
+    const { getSystemValueFresh } = await import('@/lib/system-control.js')
+    const { AI_SEND_POLICY_KEY, normalizeSendPolicy } = await import('@/lib/domain/conversation-ai/send-policy.js')
+    enabledLanguages = normalizeSendPolicy(await getSystemValueFresh(AI_SEND_POLICY_KEY, { supabase })).languages
+  } catch { enabledLanguages = ['en'] }
   const shadow = await runCanonicalShadow({
+    enabledLanguages,
     input: loaded.input,
     deterministic,
     eligibilityFor: ({ now }) => ci.eligibilityFor({ now }),

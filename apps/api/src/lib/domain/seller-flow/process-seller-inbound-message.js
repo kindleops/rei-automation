@@ -3,6 +3,7 @@ import { buildContextResolutionResult } from "@/lib/domain/context/context-resol
 // V2-1B: durable contact×property resolution. Decides the next contact after
 // an S1 ownership outcome; has no path to a send.
 import { attributeOwnershipAnswer, runContactResolutionPhase } from "@/lib/domain/seller-flow/resolve-contact-outcome-phase.js";
+import { isBareOwnershipAnswer, recordOwnershipAttributionHold, OWNERSHIP_UNRESOLVED_HOLD_REASON } from "@/lib/domain/holds/ownership-attribution-hold.js";
 import { probeDealContextAmbiguity as probeDealContextAmbiguityDefault } from "@/lib/domain/deal-context/deal-context-service.js";
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
 import { canonicalizeAffirmativeSlang } from "@/lib/domain/classification/affirmative-slang.js";
@@ -889,6 +890,22 @@ export async function processSellerInboundMessage({
   // compliance (opt-out suppression) still applies. Advancement is refused
   // separately inside persistSellerTransitionArtifacts / finalizeSellerAcceptance.
   // Fail closed: an unreadable hold is a hold. Not consulted for dry runs.
+  // blind-eval v2 MUL-01 (owner rule 2026-10-17): ONE bare answer to ownership questions about SEVERAL
+  // properties is a THREAD HOLD, RECORDED in the hold authority BEFORE anything consults it — so the
+  // reply, the AI turn, the follow-up lifecycle and the queue trigger all refuse automation; never a
+  // denial of the latest property, never a nurture, never a close.
+  let ownership_attribution_hold = null;
+  if (!(dryRun || proofRun) && (threadKey || inboundFrom) && inboundEventId && isBareOwnershipAnswer(message)) {
+    try {
+      const att = await attributeOwnershipAnswer({ supabaseClient: supabase, thread_key: threadKey || inboundFrom, property_id: propertyId, source_message_id: inboundEventId, inbound_body: message });
+      if (att?.ambiguous) {
+        const rec = await recordOwnershipAttributionHold({ supabase, thread_key: clean(threadKey) || clean(inboundFrom), property_ids: [propertyId].filter(Boolean), source_message_id: inboundEventId, basis: att.basis });
+        ownership_attribution_hold = { ...rec, basis: att.basis };
+      }
+    } catch (attribution_error) {
+      ownership_attribution_hold = { ok: false, recorded: false, reason: attribution_error?.message || "attribution_failed" };
+    }
+  }
   const automation_hold =
     dryRun || proofRun
       ? { held: false, fail_closed: false, hold_ids: [], reason: "not_evaluated_dry_run" }
@@ -902,6 +919,12 @@ export async function processSellerInboundMessage({
       hold_ids: automation_hold.hold_ids,
       fail_closed: automation_hold.fail_closed === true,
     });
+  }
+  // an attribution hold that could not be written still stops automation for THIS inbound (fail closed)
+  if (ownership_attribution_hold && !automation_hold.held) {
+    automation_hold.held = true;
+    automation_hold.hold_ids = [...(automation_hold.hold_ids || []), ownership_attribution_hold.hold_key || "ownership_unresolved"];
+    automation_hold.reason = OWNERSHIP_UNRESOLVED_HOLD_REASON;
   }
   const execution_allowed = automation_hold.held
     ? false
@@ -1066,6 +1089,20 @@ export async function processSellerInboundMessage({
         error: overlay_error?.message || "overlay_failed",
       });
     }
+  }
+
+  // blind-eval v2 MUL-01 (owner rule 2026-10-17): every layer agrees with the recorded thread hold —
+  // the classifier verdict of a bare answer to SEVERAL ownership questions is an unresolved-property
+  // review (never a denial of the latest property, never a disinterest that would earn a nurture)
+  if (ownership_attribution_hold && classification && typeof classification === "object") {
+    classification = {
+      ...classification,
+      primary_intent: "unclear",
+      detected_intent: "unclear",
+      secondary_intents: [...new Set([...(classification.secondary_intents || []), OWNERSHIP_UNRESOLVED_HOLD_REASON])],
+      matched_rule_ids: [...new Set([...(classification.matched_rule_ids || []), "ownership_attribution_thread_hold"])],
+      automation_decision: { ...(classification.automation_decision || {}), auto_reply_allowed: false, human_review_required: true, suppression_action: "none", queue_action: "none", review_reason: OWNERSHIP_UNRESOLVED_HOLD_REASON },
+    };
   }
 
   const contractResult = normalizeClassificationContract({
@@ -2229,11 +2266,29 @@ export async function processSellerInboundMessage({
     // nurture; the scheduler has no need_time rule (no_followup_rule_for_intent:need_time), so the
     // turn silently got NO follow-up. It is scheduled as the approved 30-day nurture.
     const follow_up_intent = raw_follow_up_intent === "need_time" ? "not_interested" : raw_follow_up_intent;
+    // blind-eval v2 MUL-14: a reply that answers several properties clause by clause ("X is my rental,
+    // I'd sell that one. Y is where I live, not selling") nurtures the property they will NOT sell — never
+    // the one they want to sell (that conversation continues)
+    let follow_up_property_id = propertyId;
+    let follow_up_blocked_by_clause = false;
+    if (follow_up_intent === "not_interested" && (threadKey || inboundFrom) && inboundEventId) {
+      try {
+        const att = await attributeOwnershipAnswer({ supabaseClient: supabase, thread_key: threadKey || inboundFrom, property_id: propertyId, source_message_id: inboundEventId, inbound_body: message });
+        const clauses = att?.clauses || [];
+        if (clauses.length) {
+          const notSelling = clauses.find((c) => c.interest === "not_interested");
+          if (notSelling) follow_up_property_id = notSelling.property;
+          else follow_up_blocked_by_clause = clauses.some((c) => c.interest === "interested");
+        }
+      } catch {
+        // unreadable thread: the inbound's own property (historical behaviour)
+      }
+    }
 
     // RC 8.5.15 (decline-followup-policy.js): an S1 ownership denial, an S2
     // "No" and a "No" to "can we check back?" never schedule a follow-up,
     // whatever any upstream overlay recommended.
-    const decline_no_followup = suppressesAutomaticFollowup(classification);
+    const decline_no_followup = suppressesAutomaticFollowup(classification) || follow_up_blocked_by_clause;
     const should_schedule_followup = !decline_no_followup && Boolean(
       contract.ownership_probe_transition ||
         (!execution?.queued &&
@@ -2248,7 +2303,7 @@ export async function processSellerInboundMessage({
               intent: follow_up_intent,
               follow_up_at: canonical_decision?.follow_up_at || null,
               master_owner_id: ownerId,
-              property_id: propertyId,
+              property_id: follow_up_property_id,
               is_suppressed: Boolean(canonical_decision?.should_suppress_contact),
               inbound_event_id: inboundEventId,
             })
@@ -2257,7 +2312,7 @@ export async function processSellerInboundMessage({
           source: "seller_inbound_orchestrator",
           inbound_message_event_id: inboundEventId,
           master_owner_id: ownerId,
-          property_id: propertyId,
+          property_id: follow_up_property_id,
           classification_confidence: classification?.confidence ?? null,
           // Render context for the deferred nurture (name / address / sticky
           // sender / reply language / agent): the scheduler resolves what is

@@ -13,6 +13,7 @@ import { COMPOSE_PROMPT_VERSION, PLAYBOOK_RULES, PLAYBOOK_VERSION } from '../pla
 import { detectSellerTone } from '../playbook/v1/tone.js'
 import { maskText } from '../pii.js'
 import { validateOutbound } from '../outbound-validator.js'
+import { mixedAnswerTarget } from '../property-facts.js'
 import { NO_COMPANY_IDENTITY } from '../company-identity.js'
 import { checkSpend, measureComplexity } from './complexity.js'
 
@@ -47,6 +48,9 @@ export function propertyRuleLines(ledger) {
   lines.push(`- confirmed (you may name it): ${confirmed.length ? confirmed.join('; ') : 'none'}`)
   if (never.length) lines.push(`- NEVER mention or ask about: ${never.join('; ')}`)
   if (po.thread_hold) lines.push('- their last ownership answer did not say which property it was about: name no property')
+  if (po.reply_target && !mixedAnswerTarget(po)) lines.push(`- this reply is ONLY about ${label(po.reply_target) || 'the property in our last question'}: ask whether they own it; say nothing about any other property`)
+  const target = mixedAnswerTarget(po)
+  if (target) lines.push(`- this reply is ONLY about ${label(target.property) || 'the property they confirmed'}: ask its next question; say nothing about the other property`)
   return lines
 }
 
@@ -72,7 +76,7 @@ export function openingHintFor(seed) {
   return OPENING_HINTS[h % OPENING_HINTS.length]
 }
 
-export function buildComposePrompt({ ledger, inboundText, category, objective, tone, maskOpts = {}, messages = [], followupScheduled = null, avoidOpening = null, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY }) {
+export function buildComposePrompt({ ledger, inboundText, category, objective, tone, maskOpts = {}, messages = [], followupScheduled = null, avoidOpening = null, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY, replyLanguage = 'en' }) {
   const system = [
     'You write ONE outbound SMS reply for a local home buyer texting a property owner. Call the tool exactly once with {"message": "..."}.',
     'RULES (code enforces every one; a violation is discarded):',
@@ -97,7 +101,9 @@ export function buildComposePrompt({ ledger, inboundText, category, objective, t
     'Never claim anything about our inventory, other properties, buyers or plans.',
     'Only repeat what the seller actually said. Never claim they were specially chosen or that this is not a mass message.',
     `OPENING: ${openingHintFor(inboundText)}. Start differently from our previous text${avoidOpening ? ` (it began "${avoidOpening}")` : ''}; do not open with a stock phrase ("Got it, thanks", "Makes sense, thanks", "Understood, thanks for letting me know", "Fair question", "Quick question"), and do not say "feel free to reach out".`,
-    'Write in English only.',
+    replyLanguage === 'es'
+      ? 'Write in natural, everyday Spanish only (the seller wrote in Spanish): never English, no em dash, the same rules as above.'
+      : 'Write in English only.',
   ].join('\n')
   return { system, user, prompt_version: COMPOSE_PROMPT_VERSION }
 }
@@ -110,8 +116,8 @@ export { unsupportedAttribution, closeAndAttributionReasons } from '../outbound-
  * (outbound-validator.js#validateOutbound), the one function every caller uses. Pure.
  * @returns {string[]} reasons (empty = passes)
  */
-export function checkComposedText(text, { ledger, objective, category, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null, previousOutbound = null, companyIdentity = NO_COMPANY_IDENTITY, knownNumbers = null, firstName = null, otherNames = [] }) {
-  return validateOutbound(text, { ledger, objective, category, inboundIntent, personaPolicy, establishedPersona, followupScheduled, previousOutbound, companyIdentity, knownNumbers: knownNumbers ?? [], firstName, otherNames }).content_reasons
+export function checkComposedText(text, { ledger, objective, category, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null, previousOutbound = null, companyIdentity = NO_COMPANY_IDENTITY, knownNumbers = null, firstName = null, otherNames = [], replyLanguage = 'en' }) {
+  return validateOutbound(text, { ledger, objective, category, inboundIntent, personaPolicy, establishedPersona, followupScheduled, previousOutbound, companyIdentity, knownNumbers: knownNumbers ?? [], firstName, otherNames, replyLanguage }).content_reasons
 }
 
 /**
@@ -119,7 +125,7 @@ export function checkComposedText(text, { ledger, objective, category, inboundIn
  * @param {{ decide: Function }} a.modelClient   createConversationModelClient()
  * @param {{ spentTodayUsd: () => number, perMessageMaxUsd: number, dailyMaxUsd: number, estimateUsd: (route: string) => number }} a.spend
  */
-export async function composeReply({ ledger, inboundText, category, objective, modelClient, spend, messages = [], maskOpts = {}, threadLength = 0, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null, companyIdentity = NO_COMPANY_IDENTITY, firstName = null, otherNames = [] }) {
+export async function composeReply({ ledger, inboundText, category, objective, modelClient, spend, messages = [], maskOpts = {}, threadLength = 0, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null, companyIdentity = NO_COMPANY_IDENTITY, firstName = null, otherNames = [], replyLanguage = 'en' }) {
   const knownNumbers = [...new Set(messages.flatMap((m) => String(m.text || '').match(/[0-9]{3,}/g) || []))]
   const previousOutbound = [...messages].reverse().find((x) => x.from === 'us')?.text || null
   if (!modelClient?.decide) return { ok: false, reason: 'model_unavailable', attempts: [] }
@@ -132,7 +138,7 @@ export async function composeReply({ ledger, inboundText, category, objective, m
     const est = spend?.estimateUsd ? spend.estimateUsd(route) : null
     const cap = checkSpend({ estimateUsd: est, spentTodayUsd: spend?.spentTodayUsd ? spend.spentTodayUsd() : null, perMessageMaxUsd: spend?.perMessageMaxUsd, dailyMaxUsd: spend?.dailyMaxUsd })
     if (!cap.allowed) return { ok: false, reason: cap.reason, attempts, complexity }
-    const p = buildComposePrompt({ ledger, inboundText, category, objective, tone: abusive ? 'frustrated (do not mirror any insult)' : tone, maskOpts, messages, followupScheduled, establishedPersona, companyIdentity, avoidOpening: previousOutbound ? maskText(previousOutbound, maskOpts).split(/\s+/).slice(0, 3).join(' ') : null })
+    const p = buildComposePrompt({ ledger, inboundText, category, objective, tone: abusive ? 'frustrated (do not mirror any insult)' : tone, maskOpts, messages, followupScheduled, establishedPersona, companyIdentity, replyLanguage, avoidOpening: previousOutbound ? maskText(previousOutbound, maskOpts).split(/\s+/).slice(0, 3).join(' ') : null })
     const user = feedback ? `${p.user}\nYOUR PREVIOUS DRAFT WAS REJECTED FOR: ${feedback.join(', ')}. Write a new one that fixes every point.` : p.user
     let r
     try {
@@ -143,7 +149,7 @@ export async function composeReply({ ledger, inboundText, category, objective, m
       return { ok: false, reason: err?.code || 'model_call_failed', attempts, complexity }
     }
     const text = typeof r?.input?.message === 'string' ? r.input.message.replace(/\s+/g, ' ').trim() : ''
-    const reasons = text ? checkComposedText(text, { ledger, objective, category, inboundIntent, personaPolicy, establishedPersona, followupScheduled, previousOutbound, companyIdentity, knownNumbers, firstName, otherNames }) : ['empty_composition']
+    const reasons = text ? checkComposedText(text, { ledger, objective, category, inboundIntent, personaPolicy, establishedPersona, followupScheduled, previousOutbound, companyIdentity, knownNumbers, firstName, otherNames, replyLanguage }) : ['empty_composition']
     attempts.push({ route, model: r?.model || null, usd: r?.usd ?? null, usage: r?.usage || null, reasons })
     if (!reasons.length) {
       const usd = attempts.reduce((s, a) => s + (Number(a.usd) || 0), 0)

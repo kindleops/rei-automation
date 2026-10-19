@@ -289,8 +289,18 @@ test('emergency stop: the decider never authorises a send (nothing reserved); R3
   assert.equal(w.store.reservations.size, 0)
 })
 
-test('missing negotiation authority: an offer request ⇒ PREPARE_OFFER → the stub authority escalates (missing_negotiation_authority); no model number, nothing queued', async () => {
+test('OWNER DECISION 2026-10-18: the FIRST offer request with no price asked is answered ONCE with the number question (no amount, no fabricated offer)', async () => {
   const msgs = [OWN_Q(T0 - 90 * MIN), ev('i0', 'inbound', 'yes', T0 - 80 * MIN), ev('o2', 'outbound', 'Would you consider selling it?', T0 - 70 * MIN), ev('i1', 'inbound', 'Maybe. What would you pay for it?', T0 - 1 * MIN)]
+  const w = world({ messages: msgs, text: 'Happy to look at it with you. Do you have a number in mind for it?', judgment: (latest) => makeDecision({ intent: 'asks_offer', seller_interest: 'interested', outcome: 'REPLY_CANDIDATE', next_objective: 'get_asking_price', response_needed: true, proposed_message: 'x', confidence: 0.93, source_message_ids: [latest.id], facts_extracted: [], stage_evidence: { stage: 'S3_asking_price', evidence_message_ids: [latest.id], rationale: 'offer request' } }) })
+  await w.route('SMi1')
+  const r = await w.runLatest()
+  assert.equal(r.code, 'TURN_DISPATCHED', JSON.stringify(r) + JSON.stringify([...w.shadowRows.values()][0]?.record?.composition))
+  assert.equal(w.queueRows.length, 1)
+  assert.ok(!/[0-9$]/.test(w.queueRows[0].message_body), 'no amount in the text')
+})
+
+test('missing negotiation authority: an offer request AFTER we asked their price ⇒ research + PREPARE_OFFER → the stub authority escalates at the number (no price without an envelope); nothing queued', async () => {
+  const msgs = [OWN_Q(T0 - 90 * MIN), ev('i0', 'inbound', 'yes', T0 - 80 * MIN), ev('o2', 'outbound', 'Would you consider selling it?', T0 - 70 * MIN), ev('i2', 'inbound', 'maybe', T0 - 60 * MIN), ev('o3', 'outbound', 'Do you have a price in mind?', T0 - 50 * MIN), ev('i1', 'inbound', 'Not sure. What would you pay for it?', T0 - 1 * MIN)]
   const w = world({ messages: msgs })
   await w.route('SMi1')
   const r = await w.runLatest()
@@ -301,7 +311,7 @@ test('missing negotiation authority: an offer request ⇒ PREPARE_OFFER → the 
 })
 
 test('invalid offer range: an authority answer outside the contract (an AI money reply / an amount) escalates; it never becomes AI text', async () => {
-  const msgs = [OWN_Q(T0 - 90 * MIN), ev('i0', 'inbound', 'yes', T0 - 80 * MIN), ev('o2', 'outbound', 'Would you consider selling it?', T0 - 70 * MIN), ev('i1', 'inbound', 'Sure, make me an offer', T0 - 1 * MIN)]
+  const msgs = [OWN_Q(T0 - 90 * MIN), ev('i0', 'inbound', 'yes', T0 - 80 * MIN), ev('o2', 'outbound', 'Do you have a price in mind?', T0 - 70 * MIN), ev('i1', 'inbound', 'Sure, make me an offer', T0 - 1 * MIN)]
   const thread = msgs.map((m) => ({ id: m.id, direction: m.direction, body: m.message_body, at: m.created_at, thread_key: TK, seller_phone: SELLER, property_id: 'p1' }))
   const input = { now: iso(T0), inbound: { id: 'i1', body: 'Sure, make me an offer', at: msgs[3].created_at, thread_key: TK, from_phone: SELLER, property_id: 'p1' }, thread, properties: [{ property_id: 'p1', state: 'IL' }], offers: [], followups: [], names: { full_names: [], first_name: 'Dana' }, language: 'en' }
   const bad = { version: 'bad-authority', prepareOffer: async () => ({ action: 'AI_GENERATED_REPLY', amount: -5, text: 'I can pay $1' }), negotiateWithinAuthority: async () => ({ action: 'AI_GENERATED_REPLY' }) }

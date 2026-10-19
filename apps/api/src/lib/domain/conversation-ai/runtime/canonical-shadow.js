@@ -80,7 +80,7 @@ const inflight = new Map()
  * @param {object} a.input             context rows (context-loader.js)
  * @param {Function|null} [a.eligibilityFor]  ({ now }) => dryRunEligibility(...)
  */
-export async function runCanonicalShadow({ input, deterministic = null, eligibilityFor = null, modelClient = null, spend = null, policy = DEFAULT_AI_REPLY_POLICY, env = process.env, store = null, clock = () => Date.now(), inboundVersion = null, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY, negotiationAuthority = undefined }) {
+export async function runCanonicalShadow({ input, deterministic = null, eligibilityFor = null, modelClient = null, spend = null, policy = DEFAULT_AI_REPLY_POLICY, env = process.env, store = null, clock = () => Date.now(), inboundVersion = null, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY, negotiationAuthority = undefined, enabledLanguages = ['en'] }) {
   const p = normalizePolicy(policy)
   const gate = shadowAllowed(p, env)
   if (!gate.allowed) return { ran: false, code: gate.code }
@@ -97,7 +97,7 @@ export async function runCanonicalShadow({ input, deterministic = null, eligibil
     if (!eligibility && eligibilityFor) {
       try { eligibility = await eligibilityFor({ now }) } catch { eligibility = { blocked: true, reasons: ['send_time_guard_read_failed'], guard: { blocked: true, reason: 'send_time_guard_read_failed' } } }
     }
-    const decision = await decideAndCompose({ input, deterministic, eligibility, modelClient, spend, establishedPersona, companyIdentity, ...(negotiationAuthority ? { negotiationAuthority } : {}), caller: 'shadow', now })
+    const decision = await decideAndCompose({ input, deterministic, eligibility, modelClient, spend, establishedPersona, companyIdentity, ...(negotiationAuthority ? { negotiationAuthority } : {}), caller: 'shadow', now, enabledLanguages })
     return { decision, record: buildCanonicalShadowRecord(decision, { inboundVersion, threadKey: input.inbound.thread_key, propertyIds: (input.properties || []).map((x) => x.property_id), deterministic, latencyMs: clock() - t0, policyCode: assertSendAllowed(p).code }) }
   })()
   inflight.set(key, job)

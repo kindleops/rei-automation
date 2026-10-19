@@ -12,6 +12,7 @@
 // no queue / transport module (static test).
 import { ledgerFromContextInput, ledgerSummary } from '../fact-ledger.js'
 import { attachPropertyFactsFromInput } from '../property-ownership.js'
+import { perPropertyObjective } from '../property-facts.js'
 import { ACTIONS, PIPELINE_VERSION } from './outcomes.js'
 import { decideActions } from './decide.js'
 import { composeReply } from './compose.js'
@@ -22,7 +23,7 @@ import { NO_COMPANY_IDENTITY } from '../company-identity.js'
 export async function runConversationPipeline({
   input, deterministic = null, eligibility = null, judgment = null, deterministicTemplate = { available: false },
   modelClient = null, spend = null, negotiationAuthority = createEscalatingNegotiationAuthority(), ownerHandled = false,
-  personaPolicy, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY, maskOpts = {}, now = new Date().toISOString(),
+  personaPolicy, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY, maskOpts = {}, now = new Date().toISOString(), enabledLanguages = ['en'],
 }) {
   const authority = assertNegotiationAuthority(negotiationAuthority)
   // blind-eval S1: canonical per-property ownership facts (the same evidence the recontact guard ranks)
@@ -30,7 +31,7 @@ export async function runConversationPipeline({
   let plan = decideActions({
     ledger, inboundText: input.inbound.body, inboundId: input.inbound.id, deterministic, eligibility, judgment, deterministicTemplate,
     ownerHandled, language: input.language, propertyCount: (input.properties || []).length || 1,
-    thread: input.thread || [], inbound: input.inbound, companyIdentity,
+    thread: input.thread || [], inbound: input.inbound, companyIdentity, enabledLanguages,
   })
   const terminal = plan.actions.find((a) => [ACTIONS.PREPARE_OFFER, ACTIONS.NEGOTIATE_WITHIN_AUTHORITY].includes(a.type))
   if (terminal) {
@@ -42,14 +43,18 @@ export async function runConversationPipeline({
         : { type: r.action, reason: r.reason }
     plan = { ...plan, actions: plan.actions.map((a) => (a === terminal ? resolved : a)), negotiation: { requested: terminal.type, result: r, authority_version: authority.version } }
   }
+  // blind-eval v2 (MUL-08/13): never skip S1 for an unconfirmed property in a multi-property thread
+  const s1First = (() => { const r = plan.actions.find((a) => a.type === ACTIONS.AI_GENERATED_REPLY); return r && !r.target_property ? perPropertyObjective(ledger.property?.ownership, r.objective) : null })()
+  if (s1First) plan = { ...plan, actions: plan.actions.map((a) => (a.type === ACTIONS.AI_GENERATED_REPLY ? { ...a, objective: 'ownership', target_property: s1First.property, s1_first: true } : a)), reasons: [...(plan.reasons || []), 'unconfirmed_property_ownership_first'] }
   const reply = plan.actions.find((a) => a.type === ACTIONS.AI_GENERATED_REPLY)
+  if (reply?.target_property && ledger.property?.ownership) ledger.property.ownership.reply_target = reply.target_property
   let composition = null
   if (reply) {
     const messages = (input.thread || []).map((m) => ({ from: m.direction === 'inbound' ? 'seller' : 'us', text: String(m.body || '').slice(0, 300) }))
     composition = await composeReply({
       ledger, inboundText: input.inbound.body, category: reply.category, objective: reply.objective, modelClient, spend, messages, maskOpts,
       threadLength: (input.thread || []).length, inboundIntent: judgment?.intent || null, personaPolicy, establishedPersona, companyIdentity,
-      firstName: input.names?.first_name || null, otherNames: otherNamesOf(input),
+      firstName: input.names?.first_name || null, otherNames: otherNamesOf(input), replyLanguage: plan.reply_language === 'es' ? 'es' : 'en',
       followupScheduled: plan.actions.find((a) => a.type === ACTIONS.SCHEDULE_FOLLOWUP) || reply.followup_scheduled || null,
     })
     // a disinterest close is optional (the 30-day follow-up is the owner rule): a rejected close

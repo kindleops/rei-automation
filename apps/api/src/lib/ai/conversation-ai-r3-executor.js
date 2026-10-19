@@ -50,7 +50,7 @@ import { hypotheticalReplyRow, dryRunEligibility } from '@/lib/domain/conversati
 import { questionKindOf } from '@/lib/domain/conversation-ai/questions.js'
 import {
   AI_CONVERSATION_SOURCE, AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, AI_SEND_POLICY_VERSION, INBOUND_REPLY_RESERVATION_SCOPE,
-  R3_EXECUTOR_WIRED, isOwnerHandledThread, languageVerdict, normalizeSendPolicy, parseKillSwitch, threadInPolicyScope,
+  R3_EXECUTOR_WIRED, isOwnerHandledThread, languageEnabledFor, normalizeSendPolicy, parseKillSwitch, threadInPolicyScope,
 } from '@/lib/domain/conversation-ai/send-policy.js'
 import { buildAiGeneratedMessage, insertAiGeneratedMessage, lookupAiGeneratedMessageByQueueKey, recordAiGeneratedMessageEvent, sealedThreadRef } from '@/lib/domain/messages/ai-generated-message.js'
 import { cancelSupabasePendingOutbound, CANCELLATION_POLICIES } from '@/lib/domain/queue/cancel-supabase-pending-outbound.js'
@@ -276,11 +276,15 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     establishedPersona: continuity.persona_name, companyIdentity, followupScheduled: followup, eligibility, timing,
     knownNumbers: [...new Set(thread.flatMap((m) => String(m.body || '').match(/[0-9]{3,}/g) || []))], firstName: state.input?.names?.first_name || null,
     previousOutbound: [...thread].filter((m) => m.direction === 'outbound' && t(m) <= t(inboundRow)).sort((a, b) => t(a) - t(b)).pop()?.body || null,
+    replyLanguage: (() => { const v = languageEnabledFor({ language: state.language, inboundText: inboundRow.body || '', languages: policy.languages }); return v.enabled && v.language === 'es' ? 'es' : 'en' })(),
   })
   if (val.content_reasons.length || val.eligibility_reasons.length) return held([...val.content_reasons, ...val.eligibility_reasons], { ledger: ledgerSummary(ledger) })
   if (!timing.lawful) return out('deferred', ['outside_sending_window'], { next_permitted_at: timing.next_permitted_at, timing })
   // 6. canonical routine scope (the decided category; deterministic exclusions first)
-  const lang = languageVerdict({ language: state.language, inboundText: inboundRow.body || '', draftText: draft })
+  // OWNER DECISION 2026-10-18: the seller's language from the inbound text; enabled only through the
+  // policy's languages (Spanish), never an English fallback (the validator refused a mismatched draft)
+  const langE = languageEnabledFor({ language: state.language, inboundText: inboundRow.body || '', languages: policy.languages })
+  const lang = { english: langE.enabled, reason: langE.reason }
   const scope = canonicalRoutineScope(record, { languageEnglish: lang.english, languageReason: lang.reason, policy, inboundText: inboundRow.body || '', ledger, thread, inbound: inboundRow })
   if (!scope.in_scope) return held(scope.reasons, { category: scope.category, ledger: ledgerSummary(ledger) })
 

@@ -33,10 +33,10 @@ async function defaultTurnStore(supabase) {
  * @param {{ env?: object, store?: object, decide?: Function, trackerFor?: (ctx: object) => object, supabase?: object }} [deps]
  */
 /** The operator work item for a turn whose AI reply R3 HELD (blind-eval D3). Codes only (payload_is_clean). */
-export function heldTurnWorkItem({ turn_id, version, r3_status, reasons = [] }) {
+export function heldTurnWorkItem({ turn_id, version, r3_status, reasons = [], escalated_by_decision = false }) {
   return {
-    dedupe_key: `conversation:turn_held:${turn_id}`, kind: 'escalation', severity: 'warning', escalated: true,
-    title: 'AI reply held for operator review', subject_type: 'conversation', subject_id: turn_id,
+    dedupe_key: `conversation:${escalated_by_decision ? 'turn_escalated' : 'turn_held'}:${turn_id}`, kind: 'escalation', severity: 'warning', escalated: true,
+    title: escalated_by_decision ? 'Seller message needs an operator' : 'AI reply held for operator review', subject_type: 'conversation', subject_id: turn_id,
     detail: { r3_status: String(r3_status || 'unknown').slice(0, 40), reasons: reasons.slice(0, 6), turn_version: version },
   }
 }

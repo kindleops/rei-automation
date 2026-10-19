@@ -61,14 +61,25 @@ async function loadThreadMessages(supabaseClient, thread_key) {
  * properties is UNATTRIBUTED (a thread hold, owner 10-17 rule).
  * @returns {Promise<{ property: string, ambiguous: boolean, basis: string }>}
  */
-export async function attributeOwnershipAnswer({ supabaseClient = null, thread_key = null, property_id = null, source_message_id = null, loadMessages = loadThreadMessages } = {}) {
+export async function attributeOwnershipAnswer({ supabaseClient = null, thread_key = null, property_id = null, source_message_id = null, inbound_body = null, want = null, loadMessages = loadThreadMessages } = {}) {
   const fallback = { property: clean(property_id), ambiguous: false, basis: 'inbound_row_property' }
   if (!clean(source_message_id) || !clean(thread_key)) return fallback
-  const messages = await loadMessages(supabaseClient, thread_key)
-  if (!messages.some((m) => String(m.id) === clean(source_message_id))) return fallback
+  let messages = await loadMessages(supabaseClient, thread_key)
+  if (!messages.some((m) => String(m.id) === clean(source_message_id))) {
+    // the inbound is not persisted yet: it is the thread's LATEST message (appended after every row)
+    if (inbound_body == null) return fallback
+    const last = Math.max(0, ...messages.map((m) => Date.parse(m.at || 0) || 0))
+    messages = [...messages, { id: clean(source_message_id), direction: 'inbound', body: String(inbound_body), property_id: clean(property_id) || null, at: new Date(last + 1000).toISOString() }]
+  }
   const att = attributeInbounds({ messages, questionKindOf }).get(clean(source_message_id))
   if (!att) return fallback
   if (att.ambiguous) return { property: '', ambiguous: true, basis: att.basis }
+  // blind-eval v2 (MUL-03/04/10): several properties named, read clause by clause — a denial goes on
+  // the property the DENYING clause names, a confirmation on the confirming one
+  if (att.clauses?.length) {
+    const pick = want ? att.clauses.find((c) => c.ownership === want) : null
+    return { property: pick?.property || '', ambiguous: !pick && Boolean(want), basis: pick ? `clause_${want}` : 'per_clause', clauses: att.clauses }
+  }
   return { property: att.property || clean(property_id), ambiguous: false, basis: att.property ? att.basis : 'inbound_row_property' }
 }
 
@@ -182,7 +193,8 @@ export async function runContactResolutionPhase({
   let attribution = null
   if (outcome !== S1_CONTACT_OUTCOME.OPT_OUT) {
     try {
-      attribution = await attributeOwnershipAnswer({ supabaseClient, thread_key: source_thread_key, property_id, source_message_id, loadMessages })
+      const want = outcome === S1_CONTACT_OUTCOME.OWNER_CONFIRMED ? 'confirmed' : [S1_CONTACT_OUTCOME.NOT_OWNER, S1_CONTACT_OUTCOME.FORMER_OWNER, S1_CONTACT_OUTCOME.OWNERSHIP_DECLINED].includes(outcome) ? 'denied' : null
+      attribution = await attributeOwnershipAnswer({ supabaseClient, thread_key: source_thread_key, property_id, source_message_id, want, loadMessages })
     } catch {
       // unreadable thread: never guess a property for a denial — a person resolves it
       return { ...base, ran: true, reason: 'thread_unreadable_for_attribution', requires_review: true, hold: OWNERSHIP_UNRESOLVED_HOLD }

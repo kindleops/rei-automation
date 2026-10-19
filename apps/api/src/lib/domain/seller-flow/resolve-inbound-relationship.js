@@ -324,8 +324,15 @@ function detectOwnershipConfirmation(message = "", classifier_intent = null) {
   return includesAny(text, OWNERSHIP_CONFIRM_PHRASES);
 }
 
+// blind-eval v2 IDN-04: "Are you a realtor? I'm not paying commission" is a QUESTION about us, not a
+// statement of the respondent's role — a question sentence aimed at us is never a role claim.
+const QUESTION_ABOUT_US_RE = /[^.!?]*\b(?:are|r)\s+(?:you|u|y'?all)\b[^.!?]*\?|[^.!?]*\b(?:is\s+this|you\s+(?:a|an)|is\s+that\s+you)\b[^.!?]*\?/g;
+function withoutQuestionsAboutUs(text = "") {
+  return String(text || "").replace(QUESTION_ABOUT_US_RE, " ").replace(/\s+/g, " ").trim();
+}
+
 function detectRelationshipClaim(message = "") {
-  const text = lower(message);
+  const text = withoutQuestionsAboutUs(lower(message));
   if (includesAny(text, ACTUAL_WRONG_NUMBER_PHRASES) && !includesAny(text, NEVER_OWNER_PHRASES)) {
     return "actual_wrong_number";
   }

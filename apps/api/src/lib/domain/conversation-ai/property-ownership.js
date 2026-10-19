@@ -46,7 +46,7 @@ export function propertyOwnershipFacts({ messages = [], properties = [], resolut
     by_property,
     thread_hold: Boolean(looseNegative && !resolvedAfter),
     thread_hold_basis: looseNegative && !resolvedAfter ? looseNegative.basis : null,
-    inbound: att ? { property: att.property, basis: att.basis, ambiguous: att.ambiguous } : null,
+    inbound: att ? { property: att.property, basis: att.basis, ambiguous: att.ambiguous, clauses: att.clauses || null } : null,
     address_keys,
     labels,
   }
@@ -72,4 +72,5 @@ export function attachPropertyFactsFromInput(ledger, input = {}) {
   return attachPropertyFacts(ledger, { messages: messagesOfInput(input), properties: input.properties || [], resolutions: input.contact_property_resolutions || [], inboundId: input.inbound?.id || null, inboundPropertyId: input.inbound?.property_id || null })
 }
 
+export { mixedAnswerTarget } from './property-facts.js'
 export { addressKeysIn }

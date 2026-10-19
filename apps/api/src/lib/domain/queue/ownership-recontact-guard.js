@@ -84,6 +84,12 @@ export function ownershipEvidenceItems({ messages = [], properties = [] } = {}) 
     if (!dir.startsWith('in')) continue
     const ownQ = lastQ?.kind === 'ownership' ? lastQ : null
     const att = attribution.get(String(m.id))
+    // blind-eval v2: a reply naming several properties is read clause by clause (one item per property)
+    if (att?.clauses?.length) {
+      for (const c of att.clauses) if (c.ownership) items.push({ property: c.property, state: c.ownership, message_id: String(m.id), at: t(m), basis: `clause_${c.ownership}`, kind: 'explicit', rank: EVIDENCE_RANK.explicit })
+      lastQ = null
+      continue
+    }
     const prop = att ? att.property : clean(m.property_id) || clean(lastQ?.property_id) || ''
     const label = String(m.detected_intent || '')
     const denyMatch = OWN_DENY_RE.exec(body) || OWN_FORMER_RE.exec(body)

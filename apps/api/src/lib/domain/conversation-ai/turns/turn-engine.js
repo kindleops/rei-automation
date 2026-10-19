@@ -248,6 +248,11 @@ export async function runDueTurn({ turn_id, version, store, worker, decideTurn, 
     return { code: superseded ? 'TURN_SUPERSEDED' : `TURN_${reason.toUpperCase()}`, reason }
   }
   const decision = await decideTurn({ ...claim, turn_id })
+  // blind-eval v2 (STP-09 and every decision that hands the turn to a person): the escalation raises
+  // ONE operator work item BEFORE the decision is recorded (a failed write retries: never silent)
+  if (decision?.code === 'ESCALATE_TO_OPERATOR' && typeof raiseOperatorItem === 'function') {
+    await raiseOperatorItem({ turn_id, version, r3_status: 'escalated', reasons: [String(decision.reason || 'escalated').slice(0, 60)], escalated_by_decision: true })
+  }
   const outcome = String(decision?.outcome || 'no_decision').toLowerCase().replace(/[^a-z0-9_:.-]/g, '_').slice(0, 60)
   const wantsReply = Boolean(decision?.reply?.text) && typeof dispatch === 'function'
   const result = { code: decision?.code || null, outcome, send_status: wantsReply ? 'dispatch_pending' : 'not_sent_shadow', members: (claim.inbound_ids || []).length, writer_version: decision?.writer_version || null, ...(wantsReply ? { reservation_token: claim.token } : {}) }

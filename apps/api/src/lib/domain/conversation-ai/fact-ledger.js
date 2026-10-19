@@ -49,11 +49,11 @@ function useCaseForKind(useCase) {
 }
 
 // ── seller-text evidence (deterministic; each rule names what it proves) ─────
-export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours))\b/i
+export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours)|(?:todav[ií]a\s+|a[uú]n\s+)?es\s+m[ií]a|sigue\s+siendo\s+m[ií]a|soy\s+(?:el|la)\s+(?:due[nñ][oa]|propietari[oa]))(?![\p{L}])/iu
 export const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|dont|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong|(?:that'?s\s+|it'?s\s+|that\s+is\s+|it\s+is\s+)?(?:not|isn'?t|aint|ain'?t)\s+(?:mine|ours)\b(?!\s+any\s*more))\b/i
 export const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|the|this)|^\s*(?:already\s+)?sold\b|\b(?:it|house|home|property)\s+(?:was|has\s+been|got)\s+sold|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore|gave\s+(?:the|my|that|this)\s+(?:house|home|property|place)\s+to|(?:it|the\s+house|the\s+home|the\s+property)\s+(?:is|belongs\s+to)\s+my\s+(?:son|daughter|kids?|children|brother|sister|mom|dad|mother|father)(?:'s)?\b|(?:signed|deeded|transferred)\s+(?:it|the\s+(?:house|home|property))\s+(?:over\s+)?to|ya\s+la\s+vend\w*|ya\s+no\s+es\s+m[ií]a)/im
 const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
-const NOT_INTERESTED_RE = /\b(?:not\s+interested|no\s+thanks?|no\s+thank\s+you|not\s+(?:selling|for\s+sale)|(?:don'?t|do\s+not)\s+want\s+to\s+sell|not\s+looking\s+to\s+sell|never\s+selling)\b/i
+export const NOT_INTERESTED_RE = /\b(?:not\s+interested|no\s+thanks?|no\s+thank\s+you|not\s+(?:selling|for\s+sale)|(?:don'?t|do\s+not)\s+want\s+to\s+sell|not\s+looking\s+to\s+sell|never\s+selling)\b/i
 export const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|correct|i\s+do|ok(?:ay)?|si|sí)\s*[.!]*\s*$/i
 const BARE_MAYBE_RE = /^\s*(?:maybe|possibly|perhaps|depends|it\s+depends|could\s+be|might\s+be|not\s+sure)\s*[.!?]*\s*$/i
 const CONDITION_RE = /\b(?:roof|hvac|a\/?c\b|furnace|foundation|plumbing|electrical|needs?\s+(?:some\s+|a\s+lot\s+of\s+)?(?:work|repairs?|updating|tlc)|repairs?|fixer(?:[\s-]upper)?|(?:good|great|fair|rough|bad|poor|decent|excellent)\s+(?:shape|condition)|move[\s-]?in\s+ready|(?:fully\s+)?(?:updated|remodeled|renovated)|as[\s-]is|turnkey)\b/i
@@ -76,6 +76,7 @@ export const EMAIL_OR_CARD_REQUEST_RE = /\b(?:e-?mail\s+me|send\s+(?:me\s+)?(?:a
 export const DEFERS_CONTACT_RE = /\b(?:i'?ll|i\s+will|we'?ll|we\s+will)\s+(?:contact|call|text|reach\s+out\s+to|get\s+(?:back\s+)?(?:to|with)|let)\s+(?:you|u)(?:\s+know)?\s+(?:when|if|once|whenever)\b/i
 // "Which company are you with?" — answered only from the configured identity, else a person
 export const COMPANY_QUESTION_RE = /\b(?:(?:what|which)\s+(?:company|outfit|firm|organi[sz]ation|business)|who\s+(?:are\s+(?:you|u)|r\s+u)\s+with|company\s+(?:name|are\s+(?:you|u)|r\s+u)|(?:who|what)\s+do\s+(?:you|u)\s+(?:work\s+for|represent)|(?:your|ur)\s+(?:company|website|business\s+name)|(?:are|r)\s+(?:you|u)\s+(?:with\s+)?a\s+company|what'?s\s+the\s+(?:company|website))\b/i
+export const VISIT_REQUEST_RE = /\b(?:(?:can|could|would|will)\s+(?:you|u|someone|somebody)\s+(?:stop|come|swing|drop)\s+(?:by|over|out)|(?:stop|come|swing|drop)\s+by\s+(?:on|at|this|next|tomorrow|today|mon|tue|wed|thu|fri|sat|sun)|come\s+(?:see|look\s+at|take\s+a\s+look\s+at)\s+(?:it|the\s+(?:house|place|property))|walk[\s-]?through|(?:schedule|set\s+up)\s+(?:a\s+)?(?:visit|showing|walkthrough|time\s+to\s+(?:see|look))|meet\s+(?:me|us)\s+(?:at|there))\b/i
 export const AUTOMATION_QUESTION_RE = /\b(?:(?:are|r)\s+(?:you|u|this)\s+(?:a\s+)?(?:bot|robot|real|human|person|automated|ai\b|machine|computer)|is\s+this\s+(?:a\s+)?(?:bot|robot|automated|real\s+person|human|ai\b|computer|machine|recording)|(?:bot|robot|automated|ai)\s*\?)/i
 // an amount WE quoted in an outbound (a live negotiation even without an offer record)
 const OUR_AMOUNT_RE = /\$\s?[0-9][0-9,]*(?:\.[0-9]+)?\s?(?:k|m)?\b|\b[0-9]{2,3}(?:,[0-9]{3})+\b|\b[0-9]{2,3}\s?k\b/i
@@ -213,6 +214,8 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
       addFact(facts, 'seller_interest', 'not_interested', m, 'defers_contact_until_ready')
     }
     if (EMAIL_OR_CARD_REQUEST_RE.test(body)) requests.push({ kind: 'email_or_card', source_message_id: m.id })
+    // blind-eval v2 STP-09: an in-person visit request ("can you stop by Thursday at 3") is an operator task
+    if (VISIT_REQUEST_RE.test(body)) requests.push({ kind: 'visit_request', source_message_id: m.id })
     if (COMPANY_QUESTION_RE.test(body)) requests.push({ kind: 'company_identity', source_message_id: m.id })
     // blind-eval S2: a DIRECT question about automation (the only case a text may speak about it)
     if (AUTOMATION_QUESTION_RE.test(body)) requests.push({ kind: 'automation_question', source_message_id: m.id })

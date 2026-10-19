@@ -13,9 +13,10 @@
 // disinterest when the deterministic pre-check does not contradict it.
 import { deterministicPrecheck } from '../precheck.js'
 import { isStopRequest } from '../stop-request.js'
-import { languageVerdict } from '../send-policy.js'
+import { languageEnabledFor, languageVerdict } from '../send-policy.js'
 import { ACTIONS, PIPELINE_VERSION, validatePlan } from './outcomes.js'
 import { ownershipDenialTerminal, resolveOwnershipEvidence } from '../ownership-evidence.js'
+import { mixedAnswerTarget } from '../property-ownership.js'
 import { escalation, mapModelEscalation, multiOwnerEvidence, multiPropertyEvidence } from '../escalation-evidence.js'
 import { FINANCING_OBJECTION_RE } from '../fact-ledger.js'
 import { NO_COMPANY_IDENTITY } from '../company-identity.js'
@@ -45,11 +46,12 @@ const newFactsFrom = (ledger, inboundId) => Object.entries(ledger?.facts || {}).
  * @param {object|null} [a.inbound]    the inbound row { id, property_id }
  * @param {object} [a.companyIdentity] company-identity.js (absent ⇒ not configured)
  */
-export function decideActions({ ledger, inboundText = '', inboundId, deterministic = null, eligibility = null, judgment = null, deterministicTemplate = { available: false }, ownerHandled = false, language = null, propertyCount = 1, thread = [], inbound = null, companyIdentity = NO_COMPANY_IDENTITY }) {
+export function decideActions({ ledger, inboundText = '', inboundId, deterministic = null, eligibility = null, judgment = null, deterministicTemplate = { available: false }, ownerHandled = false, language = null, propertyCount = 1, thread = [], inbound = null, companyIdentity = NO_COMPANY_IDENTITY, enabledLanguages = ['en'] }) {
+  const replyLangFor = () => languageEnabledFor({ language, inboundText, languages: enabledLanguages }).language
   const plan = (actions, reason, extra = {}) => {
     const v = validatePlan(actions)
     if (!v.ok) return { version: PIPELINE_VERSION, actions: [{ type: ACTIONS.HOLD, reason: 'plan_conflict' }], reasons: ['plan_conflict', ...v.reasons], conflict_from: actions.map((a) => a.type) }
-    return { version: PIPELINE_VERSION, actions, reasons: [reason], ...extra }
+    return { version: PIPELINE_VERSION, actions, reasons: [reason], reply_language: replyLangFor(), ...extra }
   }
   const facts = newFactsFrom(ledger, inboundId)
   const update = facts.length ? [{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: Object.fromEntries(facts.map((k) => [k, ledger.facts[k].value])), source_message_id: inboundId }] : []
@@ -71,6 +73,14 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   // nothing about which one — a thread HOLD for a person (owner 10-17 rule), never a denial of the latest
   const pOwn = ledger?.property?.ownership
   if (pOwn?.inbound?.ambiguous && pOwn.thread_hold) return plan([{ type: ACTIONS.HOLD, reason: 'ownership_denial_property_unresolved', evidence: { basis: pOwn.inbound.basis } }], 'ownership_denial_property_unresolved', { ownership })
+  // blind-eval v2 (MUL-02/05/14): a mixed per-property answer records each property's answer and
+  // CONTINUES the conversation on the one property they own / would sell (its next stage question);
+  // the denied / not-for-sale property is closed for it (its denial / nurture is the inbound path's)
+  const mixed = mixedAnswerTarget(pOwn)
+  if (mixed && languageEnabledFor({ language, inboundText, languages: enabledLanguages }).enabled) {
+    const byProperty = Object.fromEntries((pOwn.inbound.clauses || []).map((c) => [c.property, { ownership: c.ownership, interest: c.interest }]))
+    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership_by_property: byProperty }, source_message_id: inboundId }, { type: ACTIONS.AI_GENERATED_REPLY, category: 'next_missing_fact', objective: mixed.objective, target_property: mixed.property }], 'mixed_property_answer_continue_on_confirmed', { ownership })
+  }
   // OWNER DECISION 2026-10-17: the polite decline to the ownership question — never a nurture, never a
   // selling question, never composed; the property × contact hold is the guard's / contact resolution's
   if (own.action === 'ownership_declined_no_reply') {
@@ -95,7 +105,10 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   //    the model's validated denial — terminal ONLY when the same message does not take it back,
   //    carry a price, answer a live negotiation or contradict recent statements (Phase 3A)
   const ownFact = ledger?.facts?.ownership
-  const lang = languageVerdict({ language, inboundText })
+  // OWNER DECISION 2026-10-18: the seller's language from the INBOUND evidence; the reply is composed
+  // in it ONLY when the language policy enables it (Spanish), never an English fallback
+  const replyLang = languageEnabledFor({ language, inboundText, languages: enabledLanguages })
+  const lang = { english: replyLang.enabled, reason: replyLang.reason, language: replyLang.language }
   const confident = (j) => j && Number(j.confidence) >= 0.85
   const detPositive = ['ownership_confirmed', 'seller_interested', 'interested', 'latent_interest', 'asks_offer'].includes(String(deterministic?.intent))
   const denial = ownershipDenialTerminal({ ledger, inboundId, inboundText })
@@ -133,7 +146,7 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   }
 
   // 5. language: only English threads get engine text (a missing language with English text is English)
-  if (!lang.english) return plan([...update, escalation('language_not_enabled', { reason: lang.reason })], 'language_not_enabled', { ownership })
+  if (!lang.english) return plan([...update, escalation('language_not_enabled', { reason: lang.reason })], 'language_not_enabled', { ownership, reply_language: lang.language })
 
   // 5b. two stated asking prices far apart: a plain HOLD (no model escalation)
   if (judgment?.escalation_reason === 'contradiction' || judgment?._hold === 'price_contradiction') return plan([...update, { type: ACTIONS.HOLD, reason: 'price_contradiction' }], 'price_contradiction', { ownership })
@@ -160,7 +173,17 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   const numberHere = /\b[0-9]{2,3}(?:k|,[0-9]{3})?\b|\$\s?[0-9]/i.test(String(inboundText || ''))
   const quoted = (ledger?.outbound_quotes || []).length > 0
   if (counter && (ledger?.existing_offers || []).length) return plan([...update, { type: ACTIONS.NEGOTIATE_WITHIN_AUTHORITY, request: 'counter' }], 'counter_to_offer', { ownership })
-  if (offerRequested) return plan([...update, { type: ACTIONS.PREPARE_OFFER, request: 'offer_request' }], 'offer_request_no_fabricated_offer', { ownership })
+  // OWNER DECISION 2026-10-18 (offer before price): "What would you pay?" is an explicit offer request.
+  //  - no asking price yet and we have not asked it: ask ONCE, naturally, whether they have a number
+  //    in mind (no amount, no fabricated offer)
+  //  - otherwise (asked / deflected / given): an asking price is NOT required — property research,
+  //    comps and valuation, then the authorization-gated offer recommendation (the envelope system).
+  //    The authority escalates only at the point a NUMBER would be sent; no price without an envelope.
+  const askedPrice = (ledger?.questions?.asking_price?.asked_count || 0) > 0
+  if (offerRequested && judgment?.outcome === 'REPLY_CANDIDATE' && !judgment.escalation_required && !judgment.escalation_reason && !(ledger?.existing_offers || []).length && !quoted && ledger?.facts?.asking_price?.value == null && !askedPrice && ['asking_price', 'interest'].includes(ledger?.next_missing)) {
+    return plan([...update, { type: ACTIONS.AI_GENERATED_REPLY, category: 'next_missing_fact', objective: 'asking_price', offer_request: true }], 'offer_request_ask_number_once', { ownership })
+  }
+  if (offerRequested) return plan([...update, { type: ACTIONS.RESEARCH_PROPERTY, reason: 'offer_request_valuation' }, { type: ACTIONS.PREPARE_OFFER, request: 'offer_request' }], 'offer_request_research_then_authorized_offer', { ownership })
   if (counter || (quoted && numberHere)) return plan([...update, escalation('missing_negotiation_authority', { kind: counter ? 'counter_without_offer_record' : 'number_answering_our_quoted_amount', outbound_quotes: (ledger?.outbound_quotes || []).length })], 'negotiation_needs_authority', { ownership })
   // the model's own escalation, evidence-checked (after the deterministic money rules: a live
   // negotiation is named as such, never as the model's generic claim)
@@ -176,6 +199,8 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
 
   // 8a. an e-mail / card / website request: a person sends it (the AI never promises it)
   if (requestHere('email_or_card')) return plan([...update, escalation('requested_email_or_card', { source_message_id: inboundId })], 'email_or_card_request_human', { ownership })
+  // 8a'. a visit request ("can you stop by Thursday at 3"): an operator task — the AI never promises a visit
+  if (requestHere('visit_request')) return plan([...update, escalation('requested_visit', { source_message_id: inboundId })], 'visit_request_operator_task', { ownership })
 
   // 8b. "is this a bot / a real person?": a person answers it, truthfully (never a denial)
   if (AUTOMATION_QUESTION_RE.test(String(inboundText || ''))) return plan([...update, escalation('asked_if_automated', { source_message_id: inboundId })], 'automation_question_human_answers', { ownership })

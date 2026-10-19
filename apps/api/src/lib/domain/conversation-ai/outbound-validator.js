@@ -15,7 +15,8 @@ import { NO_COMPANY_IDENTITY } from './company-identity.js'
 import { validateProposedMessage } from './fact-ledger.js'
 import { questionKindOf } from './questions.js'
 import { contentClaimReasons } from './validator.js'
-import { addressKeysIn, propertiesNamedIn } from './property-facts.js'
+import { addressKeysIn, mixedAnswerTarget, propertiesNamedIn } from './property-facts.js'
+import { replyLanguageOf } from './send-policy.js'
 
 export const OUTBOUND_VALIDATOR_VERSION = 'conv-ai.outbound-validator.v2'
 
@@ -88,7 +89,11 @@ export function propertyMentionReasons(text, ledger, { questionKind = null } = {
     else if (s !== 'confirmed' && questionKind !== 'ownership') r.push('property:names_unconfirmed_property')
     if (po.thread_hold && s !== 'confirmed') r.push('property:names_property_under_thread_hold')
   }
-  const numbered = addressKeysIn(t).filter((k) => !k.startsWith('street:'))
+  // an address-like mention (≥ 2-digit house number) the thread does not know
+  // a mixed per-property answer: this reply is about the ONE property the conversation continues on
+  const target = mixedAnswerTarget(po)
+  if (target && named.some((pid) => pid !== target.property)) r.push('property:names_property_outside_this_reply')
+  const numbered = addressKeysIn(t).filter((k) => !k.startsWith('street:') && /^[0-9]{2,}\s/.test(k))
   if (numbered.some((k) => !index.has(k))) r.push('property:names_unknown_address')
   if (CONFIRM_CLAIM_RE.test(t)) {
     const confirmed = Object.entries(po.by_property || {}).filter(([, v]) => v.state === 'confirmed' && v.source === 'message').map(([pid]) => pid)
@@ -131,6 +136,38 @@ export function priceApprovalReasons(text, ledger) {
   return priced && PRICE_APPROVAL_RE.test(String(text || '')) ? ['content:implies_acceptance_of_stated_price'] : []
 }
 
+// OWNER DECISION 2026-10-18 — native Spanish: the SAME must-not checks in Spanish (company /
+// automation statements, false confirmations, price approval, false no-contact promises, persona
+// name claims, invented backstory), and a reply is never in a different language than the seller's.
+const ES_COMPANY_RE = /\b(?:empresa|compa[nñ][ií]a|negocio|firma|corporaci[oó]n|agencia|nombre\s+de\s+(?:la\s+)?empresa|represento\s+a)\b/i
+const ES_AUTOMATION_RE = /\b(?:bot|robot|automatizad[oa]s?|autom[aá]tic[oa]|inteligencia\s+artificial|persona\s+real|ser\s+humano|humano)\b/i
+const ES_CONFIRM_CLAIM_RE = /\bgracias\s+por\s+(?:confirmar|confirmarlo|confirmarme|aclarar|verificar)|\b(?:usted|t[uú])\s+(?:confirm[oó]|dijo|mencion[oó])\b/i
+const ES_PRICE_APPROVAL_RE = /\b(?:suena\s+(?:bien|genial|justo|razonable)|me\s+parece\s+(?:bien|justo|razonable|perfecto)|perfecto|de\s+acuerdo|trato\s+hecho|es\s+un\s+buen\s+precio|podemos\s+hacer\s+eso)\b/i
+const ES_FALSE_NO_CONTACT_RE = /\bno\s+(?:le|te|los|las)\s+(?:volver[eé]\s+a\s+)?(?:escribir|molestar|contactar|mandar)|no\s+(?:le|te)\s+molestar[eé]\s+m[aá]s|(?:lo|la|los)\s+(?:quito|quitamos|elimino|eliminamos|saco|sacamos)\s+de\s+(?:la|nuestra|mi)\s+lista|no\s+volver[aá]\s+a\s+saber\s+de\s+(?:nosotros|m[ií])\b/i
+const ES_NAME_CLAIM_RE = /\b(?:[Ss]oy|[Hh]abla|[Ll]e\s+escribe|[Tt]e\s+escribe|[Mm]e\s+llamo|[Mm]i\s+nombre\s+es)\s+([A-Z][a-záéíóúñ]+)\b/g
+const ES_NON_NAMES = new Set(['Un', 'Una', 'El', 'La', 'De', 'Del', 'Inversionista', 'Comprador', 'Compradora', 'Local', 'Yo'])
+const ES_BACKSTORY_RE = /\b(?:crec[ií]|nac[ií]|me\s+cri[eé]|vivo\s+(?:cerca|en\s+(?:el|la)\s+(?:zona|barrio))|tengo\s+[0-9]+\s+a[nñ]os\s+(?:de\s+experiencia|en\s+el\s+negocio)|soy\s+(?:un[ao]?\s+)?(?:agente|corredor[a]?|realtor|abogad[oa]|contratista|licenciad[oa]))\b/i
+export function spanishMustNotReasons(text, { ledger = null, companyIdentity = NO_COMPANY_IDENTITY, establishedPersona = null, followupScheduled = null, category = null } = {}) {
+  const t = String(text || '')
+  const r = []
+  const latest = ledger?.last_message?.direction === 'inbound' ? ledger.last_message.id : null
+  const asked = (kinds) => (ledger?.requests || []).some((q) => kinds.includes(q.kind) && (!latest || q.source_message_id === latest))
+  if (ES_COMPANY_RE.test(t)) {
+    if (!companyIdentity?.configured) r.push('identity:company_statement_without_configured_identity')
+    else if (!asked(['company_identity', 'identity'])) r.push('identity:company_statement_not_asked')
+  }
+  if (ES_AUTOMATION_RE.test(t) && !asked(['automation_question'])) r.push('identity:automation_statement_not_asked')
+  if (/\bno\s+soy\s+(?:un[ao]?\s+)?(?:bot|robot|m[aá]quina)|\bsoy\s+(?:una\s+persona\s+real|humano|humana)\b/i.test(t)) r.push('persona:denies_automation')
+  if (ES_CONFIRM_CLAIM_RE.test(t) && !['confirmed', 'representative'].includes(ledger?.facts?.ownership?.value)) r.push('property:unsupported_confirmation_claim')
+  const priced = latest && (ledger?.facts?.asking_price?.source_message_ids || []).includes(latest)
+  if (priced && ES_PRICE_APPROVAL_RE.test(t)) r.push('content:implies_acceptance_of_stated_price')
+  if ((followupScheduled || category === 'not_interested_close') && ES_FALSE_NO_CONTACT_RE.test(t)) r.push('close:false_no_contact_promise_with_followup_scheduled')
+  const persona = String(establishedPersona || '').trim().toLowerCase()
+  for (const m of t.matchAll(ES_NAME_CLAIM_RE)) if (!ES_NON_NAMES.has(m[1]) && m[1].toLowerCase() !== persona) r.push('persona:name_not_established')
+  if (ES_BACKSTORY_RE.test(t)) r.push('persona:invented_backstory_or_credentials')
+  return [...new Set(r)]
+}
+
 /** The send-side subset (R3 re-checks it on the final text): false no-contact promise, close length, attribution. */
 export function closeAndAttributionReasons(text, { ledger, category, followupScheduled = null }) {
   const r = []
@@ -165,11 +202,16 @@ const STAGE_OBJECTIVES = new Set(['ownership', 'interest', 'asking_price', 'cond
  * @param {object|null} [o.timing]          evaluateReplyTiming() result (overrides eligibility.timing)
  * @returns {{ ok: boolean, status: 'validated'|'rejected', reasons: string[], content_reasons: string[], eligibility_reasons: string[], timing_reasons: string[], question_kind: string, version: string, style_version: string }}
  */
-export function validateOutbound(text, { ledger = null, objective = null, category = null, inboundIntent = null, personaPolicy = { allow_established_persona: true }, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY, followupScheduled = null, previousOutbound = null, offerAmounts = [], knownNumbers = [], firstName = null, otherNames = [], eligibility = undefined, timing = undefined } = {}) {
+export function validateOutbound(text, { ledger = null, objective = null, category = null, inboundIntent = null, personaPolicy = { allow_established_persona: true }, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY, followupScheduled = null, previousOutbound = null, offerAmounts = [], knownNumbers = [], firstName = null, otherNames = [], eligibility = undefined, timing = undefined, replyLanguage = 'en' } = {}) {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim()
   const content = []
   if (!t) content.push('empty_composition')
-  for (const r of validatePlaybookStyle(t, { personaPolicy, establishedPersona, companyIdentity }).reasons) content.push(r)
+  for (const r of validatePlaybookStyle(t, { personaPolicy, establishedPersona, companyIdentity }).reasons) if (!(replyLanguage === 'es' && (r === 'style:non_english_characters' || r === 'style:non_english'))) content.push(r)
+  for (const r of spanishMustNotReasons(t, { ledger, companyIdentity, establishedPersona, followupScheduled, category })) content.push(r)
+  // the reply is in the seller's language: never an English reply to a Spanish seller (no fallback), never the reverse
+  const draftLang = t ? replyLanguageOf({ inboundText: t }) : null
+  if (replyLanguage === 'es' && draftLang === 'en') content.push('language:reply_not_in_seller_language')
+  if (replyLanguage === 'en' && draftLang === 'es') content.push('language:reply_not_in_seller_language')
   if ((followupScheduled || category === 'not_interested_close') && FALSE_NO_CONTACT_RE.test(t)) content.push('close:false_no_contact_promise_with_followup_scheduled')
   if (category === 'not_interested_close' && sentenceCount(t) > 2) content.push('close:more_than_two_sentences')
   const attr = unsupportedAttribution(t, ledger)

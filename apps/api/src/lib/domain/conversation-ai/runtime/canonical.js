@@ -30,6 +30,8 @@ import { OUTBOUND_VALIDATOR_VERSION, validateOutbound } from '../outbound-valida
 import { FACT_LEDGER_VERSION, ledgerSummary } from '../fact-ledger.js'
 import { NO_COMPANY_IDENTITY } from '../company-identity.js'
 import { multiPropertyEvidence } from '../escalation-evidence.js'
+import { mixedAnswerTarget } from '../property-ownership.js'
+import { perPropertyObjective } from '../property-facts.js'
 import { createEscalatingNegotiationAuthority } from '../pipeline/negotiation-authority.js'
 import { maskText } from '../pii.js'
 
@@ -69,7 +71,7 @@ export async function decideAndCompose({
   input, deterministic = null, eligibility = null, modelClient = null, spend = null,
   negotiationAuthority = createEscalatingNegotiationAuthority(), ownerHandled = false, establishedPersona = null,
   companyIdentity = NO_COMPANY_IDENTITY, deterministicTemplate = { available: false }, personaPolicy = { allow_established_persona: true },
-  caller, now = null, maskOpts = null,
+  caller, now = null, maskOpts = null, enabledLanguages = ['en'],
 } = {}) {
   if (!CANONICAL_CALLERS.includes(caller)) throw Object.assign(new Error('CANONICAL_CALLER_REQUIRED'), { code: 'CANONICAL_CALLER_REQUIRED' })
   const at = now || input?.now || new Date().toISOString()
@@ -88,7 +90,7 @@ export async function decideAndCompose({
   const judgment = r1.decision ? { ...r1.decision, proposed_message: null } : null
   const out = await runConversationPipeline({
     input, deterministic, eligibility, judgment, deterministicTemplate, modelClient, spend, negotiationAuthority, ownerHandled,
-    personaPolicy, establishedPersona, companyIdentity, maskOpts: maskOpts || context?.mask || {}, now: at,
+    personaPolicy, establishedPersona, companyIdentity, maskOpts: maskOpts || context?.mask || {}, now: at, enabledLanguages,
   })
   let plan = out.plan
   const replyAction = plan.actions.find((a) => a.type === ACTIONS.AI_GENERATED_REPLY) || null
@@ -100,12 +102,13 @@ export async function decideAndCompose({
       ledger: out.ledger, objective: replyAction.objective, category: replyAction.category, inboundIntent: judgment?.intent || null, personaPolicy, establishedPersona,
       companyIdentity, followupScheduled: plan.actions.find((a) => a.type === ACTIONS.SCHEDULE_FOLLOWUP) || replyAction.followup_scheduled || null,
       previousOutbound, knownNumbers: knownNumbersOf(input), firstName: input.names?.first_name || null, eligibility,
+      replyLanguage: plan.reply_language === 'es' ? 'es' : 'en',
     })
     if (validation.content_reasons.length) {
       // the composition loop and this check are the same function: a difference is a defect, held
       plan = { ...plan, actions: plan.actions.map((a) => (a === replyAction ? { type: ACTIONS.HOLD, reason: 'final_validation_rejected', evidence: { reasons: validation.content_reasons.slice(0, 8) } } : a)) }
     } else {
-      reply = { text: out.composition.text, category: replyAction.category, objective: replyAction.objective, question_kind: validation.question_kind, send_ready: validation.ok, blocked_by: [...validation.eligibility_reasons, ...validation.timing_reasons] }
+      reply = { text: out.composition.text, category: replyAction.category, objective: replyAction.objective, target_property: replyAction.target_property || null, question_kind: validation.question_kind, send_ready: validation.ok, blocked_by: [...validation.eligibility_reasons, ...validation.timing_reasons] }
     }
   }
   const calls = [...(r1.calls || []).map((c) => ({ ...c, stage: 'understand' })), ...((out.composition?.attempts || []).map((c) => ({ ...c, stage: 'compose' })))]
@@ -167,15 +170,25 @@ export function canonicalRoutineScope(record, { languageEnglish = false, languag
   if (!ROUTINE_REPLY_CATEGORIES.includes(category)) reasons.push('not_a_routine_category')
   else if (!(policy?.categories || []).includes(category)) reasons.push(`category_not_enabled:${category}`)
   if (!languageEnglish) reasons.push(`excluded_language:${languageReason || 'not_english'}`)
-  if (multiPropertyEvidence({ inboundText: inboundBody, ledger, thread, inbound })) reasons.push('excluded_multi_property')
-  if ((ledger?.offer_requests || []).length || (ledger?.existing_offers || []).length) reasons.push('excluded_offer_on_thread')
+  // a clause-resolved mixed answer targets ONE confirmed property (the validator forbids naming any
+  // other): not an unresolved multi-property thread
+  const mixed = mixedAnswerTarget(ledger?.property?.ownership)
+  const s1First = perPropertyObjective(ledger?.property?.ownership, ledger?.next_missing)
+  const mixedTarget = (mixed && record.reply.target_property === mixed.property && record.reply.objective === mixed.objective) ||
+    (s1First && record.reply.target_property === s1First.property && record.reply.objective === 'ownership')
+  if (!mixedTarget && multiPropertyEvidence({ inboundText: inboundBody, ledger, thread, inbound })) reasons.push('excluded_multi_property')
+  // OWNER DECISION 2026-10-18: the one in-scope offer turn — THIS inbound asked what we would pay,
+  // nothing is on the table, and the reply only asks their number (no amount)
+  const askNumberOnce = category === 'next_missing_fact' && record.reply.objective === 'asking_price' && !/[0-9]/.test(draft) &&
+    (ledger?.offer_requests || []).every((id) => id === (inbound?.id ?? record.inbound_message_id)) && !(ledger?.existing_offers || []).length && !(ledger?.outbound_quotes || []).length
+  if (((ledger?.offer_requests || []).length && !askNumberOnce) || (ledger?.existing_offers || []).length) reasons.push('excluded_offer_on_thread')
   if ((ledger?.outbound_quotes || []).length) reasons.push('excluded_live_negotiation')
   const draftMoneyFree = draft.replace(NEGATED_FINANCING_RE, ' ')
   if (FINANCIAL_RE.test(draftMoneyFree)) reasons.push('excluded_financial')
   if (category !== 'conditional_interest_clarify' && FINANCIAL_RE.test(inboundBody)) reasons.push('excluded_financial')
   if (LEGAL_CONTRACT_RE.test(draft) || LEGAL_CONTRACT_RE.test(inboundBody)) reasons.push('excluded_legal_or_contract')
   if (NEGOTIATION_RE.test(draft) || NEGOTIATION_RE.test(inboundBody) || (ledger?.objections || []).some((o) => o.kind === 'price_objection')) reasons.push('excluded_negotiation')
-  if (category === 'next_missing_fact' && ledger && ledger.next_missing && record.reply.objective !== ledger.next_missing) reasons.push(`not_next_missing_fact:${record.reply.objective}`)
+  if (category === 'next_missing_fact' && ledger && ledger.next_missing && record.reply.objective !== ledger.next_missing && !mixedTarget && !askNumberOnce) reasons.push(`not_next_missing_fact:${record.reply.objective}`)
   if (category === 'not_interested_close' && /\?/.test(draft)) reasons.push('not_interested_close_must_not_ask')
   // model-decided replies only: the judgment's confidence must clear the policy floor
   if (category === 'clarification' && !(Number(record.judgment?.confidence) >= (policy?.min_confidence ?? 0.85))) reasons.push('low_confidence_model_decided_reply')

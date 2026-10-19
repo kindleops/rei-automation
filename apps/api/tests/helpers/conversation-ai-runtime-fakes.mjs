@@ -61,6 +61,13 @@ export function threadTables({ body = 'What would you offer me for it?', events 
     const out = i % 2 === 0
     thread.push({ id: `m${i}`, direction: out ? 'outbound' : 'inbound', thread_key: 'tk1', from_phone_number: out ? '+15555550100' : '+15555550123', to_phone_number: out ? '+15555550123' : '+15555550100', message_body: out ? 'Hi Jane, are you still the owner of the house on Elm?' : 'Yes I am', event_timestamp: new Date(Date.parse(NOW) - (events - i + 5) * 60_000).toISOString(), created_at: new Date(Date.parse(NOW) - (events - i + 5) * 60_000).toISOString(), property_id: 'p1', detected_intent: null, queue_id: null })
   }
+  // OWNER DECISION 2026-10-18 (offer before price): an offer request we have NOT asked a price for is
+  // answered with the price question; this fixture's offer request is the authority-bound turn, so the
+  // thread has already asked for their number
+  if (/\b(?:offer|pay)\b/i.test(body)) {
+    const lastOut = [...thread].reverse().find((m) => m.direction === 'outbound')
+    if (lastOut) lastOut.message_body = 'Thanks Jane. Do you have a price in mind for it?'
+  }
   const inbound = { id: 'in-1', provider_message_sid: SID, direction: 'inbound', thread_key: 'tk1', from_phone_number: '+15555550123', to_phone_number: '+15555550100', message_body: body, event_timestamp: new Date(Date.parse(NOW) - 60_000).toISOString(), received_at: null, created_at: new Date(Date.parse(NOW) - 60_000).toISOString(), property_id: 'p1', prospect_id: 'pr1', detected_intent: 'asks_offer', language: 'en', queue_id: null }
   return {
     message_events: [...thread, inbound],
