@@ -206,7 +206,7 @@ The human decides through the EXISTING operator path: `POST /api/cockpit/agent/a
   - Steps: apply → posttest → rollback, restoring the exact fingerprint → re-apply.
   - The posttest proves: role shape; raw writes refused; tenant isolation; forged digests; a hold blocking a queued row; the emergency stop; approval binding / replay / expiry; resource exclusivity; the self-check.
   - Also the last link of both `rc_8_5_21_release_chain*` entries (4/4 PASS).
-- **`apps/api/tests/critical/action-gateway-{tools,adversarial,crash,standing-grants}-pg.test.mjs`** (30 tests, `AGENT_PG_TEST_DB_URL` = a loopback scratch server):
+- **`apps/api/tests/critical/action-gateway-{tools,adversarial,crash,standing-grants}-pg.test.mjs`** (31 tests, `AGENT_PG_TEST_DB_URL` = a loopback scratch server; green 5× in one run under default file concurrency, and alone; bootstrap serialized by a cluster-wide advisory lock because roles are cluster-global):
   - every T1 tool end to end;
   - unauthorized capability; tier ceiling; cross-tenant; forged identity;
   - approval replay / denial / expiry / lapsed grant;
@@ -217,6 +217,8 @@ The human decides through the EXISTING operator path: `POST /api/cockpit/agent/a
   - STOP arriving during the draft (discarded + recorded);
   - REAL SIGKILL recovery: before the domain write, and inside the in-flight write;
   - outcome_unknown;
+  - a regression: an approval for a resource whose UUID contains a phone-shaped digit run (UUIDs in CHECKed payloads always sit under id-named keys);
+  - the context read checked with a phone-precise NANP / E.164 detector plus a negative control that the seeded real number is caught;
   - standing grants: exhaustion, spend cap, expiry, not-yet-valid, revocation mid-run (domain write + read-only service), out-of-scope resource, argument outside the envelope, concurrent cap races, anomaly suspension (cap hits, error rate), versioning, T3 / T4 / irreversible T2 never by grant alone, default OFF.
 - **`apps/api/tests/critical/action-gateway-unit.test.mjs`**: catalog invariants; scope / envelope mirrors; approval judging; text cleaning; credentials; and a STATIC proof that the gateway module has no import path to the send stack.
 - **`mcp/leadcommand-action-mcp` `npm test`** (19 tests):

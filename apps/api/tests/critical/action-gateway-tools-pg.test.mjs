@@ -6,7 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { pgAvailable, skipReason } from '../pg/agent-pg-harness.mjs'
-import { gatewayDb, seedWorld, registerAgent, seedThread, makeGateway, sel, audits, intentRow, outcomeRow, trapTransport, setControls, ORG, OPERATOR, SELLER, SELLER_2 } from '../helpers/action-gateway-pg.mjs'
+import { gatewayDb, seedWorld, registerAgent, seedThread, makeGateway, sel, audits, intentRow, outcomeRow, trapTransport, setControls, findPhoneLike, ORG, OPERATOR, SELLER, SELLER_2 } from '../helpers/action-gateway-pg.mjs'
 import { pgSupabase } from '../helpers/pg-supabase.mjs'
 import { claimRow, dispatchRow, simProvider } from '../helpers/followup-lifecycle-pg.mjs'
 import { fakeProvider } from '../helpers/conversation-ai-runtime-fakes.mjs'
@@ -18,7 +18,6 @@ const skip = pgAvailable() ? false : skipReason
 __setAutomationHoldResolverForTests(null) // the REAL registry answers every hold check
 
 const ALL_T1 = [['research.create_job', 1], ['valuation.request', 1], ['tasks.create_operator_task', 1], ['tasks.update_operator_task', 1], ['conversation.draft_reply', 1], ['ops.reconciliation_report', 1], ['conversation.read_context', 1]]
-const PHONE_SHAPE = /\+?1?[\s().-]*[2-9][0-9]{2}[\s().-]*[0-9]{3}[\s().-]*[0-9]{4}/
 
 async function world({ grants = ALL_T1, tier_ceiling = 2, read_scopes = [] } = {}) {
   const env = await gatewayDb()
@@ -44,7 +43,7 @@ test('PG gateway: create_research_job enqueues ONE mission.research job accounta
     assert.equal(jobs[0].input.action_intent_id, r.intent_id)
     assert.equal(jobs[0].input.context.property_ids[0], encodePropertyRef('2128263281'), 'property ids are stored encoded')
     assert.match(jobs[0].input.context.property_ids[0], /^pid_[g-p]+$/)
-    assert.ok(!PHONE_SHAPE.test(JSON.stringify(jobs[0].input)), 'no phone shape reaches the job input')
+    assert.equal(findPhoneLike(JSON.stringify(jobs[0].input)), null, 'no phone shape reaches the job input')
     assert.equal(r.result.job_id, jobs[0].job_id)
     // replay: same client key → the recorded outcome, no second job
     const again = await gateway.call({ credential: cred, tool: 'create_research_job', args })
@@ -248,7 +247,12 @@ test('PG gateway: read_conversation_context needs its own scope; it returns bodi
     assert.equal(r.ok, true, JSON.stringify(r))
     const text = JSON.stringify(r.result)
     assert.ok(!text.includes(SELLER) && !text.includes('13125550161') && !text.includes('3125550161'), 'no thread key / phone')
-    assert.ok(!PHONE_SHAPE.test(text), `no phone shape: ${text.slice(0, 400)}`)
+    assert.equal(findPhoneLike(text), null, `a phone number in the context payload: ${findPhoneLike(text)}`)
+    // NEGATIVE CONTROL: the detector catches the seller's REAL number as it sits unmasked in the database row the
+    // projection reads, in every common rendering, so a regression that leaked it would fail the assertion above
+    const rawBody = (await sel(env.owner, `select message_body from public.message_events where id = $1`, [t.inbound_id]))[0].message_body
+    assert.equal(findPhoneLike(rawBody), '312-555-0161')
+    for (const leak of [SELLER, SELLER.slice(2), '(312) 555-0161', '312.555.0161', '1 312 555 0161']) assert.ok(findPhoneLike(JSON.stringify({ ...r.result, leaked: leak })), `the detector misses ${leak}`)
     assert.ok(!text.includes('dana@example.com'))
     assert.ok(r.result.messages.length >= 2)
     assert.ok(r.result.messages.some((m) => /still own/i.test(m.body)))

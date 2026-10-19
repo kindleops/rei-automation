@@ -31,7 +31,9 @@ export function buildApprovalRequest({ intent, principal, summary = [], now = Da
   const target = JSON.parse(canonicalJson({ intent_id: intent.intent_id }))
   const intended_change = JSON.parse(canonicalJson({
     intent_id: intent.intent_id, action: intent.action, agent_id: intent.agent_id, capability: intent.capability, tier: TIER_LABEL[intent.tier],
-    resource_type: intent.resource_type, resource_ref: resourceRef(intent), params_hash: intent.params_hash,
+    // resource_id (an id-named key): agent.payload_is_clean exempts a UUID from its phone-run check ONLY under
+    // id keys, and a random UUID can contain a phone-shaped digit run (e.g. …a895-58797158f778)
+    resource_type: intent.resource_type, resource_id: resourceRef(intent), params_hash: intent.params_hash,
     grant_expires_at: new Date(now + grantTtlMs).toISOString(),
   }))
   const org_id = principal.org_id

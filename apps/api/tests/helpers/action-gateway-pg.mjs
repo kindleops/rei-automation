@@ -57,8 +57,40 @@ const CONVERSATION_FIXTURE = `
     add column if not exists from_phone_number text, add column if not exists sent_at timestamptz;
   create table if not exists public.deal_thread_state (thread_key text primary key, universal_status text, inbox_bucket text, universal_stage text, opt_out boolean);`
 
-export async function gatewayDb({ apply = true } = {}) {
+// Roles are CLUSTER-global and the setup creates them (the shim's anon / authenticated / service_role /
+// authenticator, S3's agent_api, link #26's lc_action_gateway), each guarded by "if not exists" — which RACES when
+// test files run in parallel against one cluster (two CREATE ROLE of the same name: pg_authid_rolname_index). Every
+// database bootstrap therefore runs under ONE advisory lock taken in the ADMIN database (advisory locks are scoped to
+// a database, so all test processes must lock in the same one). Idempotent and race-safe; alone it costs nothing.
+const BOOTSTRAP_LOCK = 0x4c43_4147 // 'LCAG'
+async function underBootstrapLock(fn) {
+  const admin = new pg.Client({ connectionString: process.env.AGENT_PG_TEST_DB_URL })
+  await admin.connect()
+  try {
+    await admin.query('select pg_advisory_lock($1)', [BOOTSTRAP_LOCK])
+    return await fn()
+  } finally {
+    await admin.query('select pg_advisory_unlock($1)', [BOOTSTRAP_LOCK]).catch(() => {})
+    await admin.end().catch(() => {})
+  }
+}
+
+export async function gatewayDb(opts = {}) {
+  return underBootstrapLock(() => bootstrapGatewayDb(opts))
+}
+
+async function bootstrapGatewayDb(opts) {
   const db = await freshDb()
+  try {
+    return await bootstrapInto(db, opts)
+  } catch (e) {
+    // a failed bootstrap never leaks its database or its open connections into the rest of the run
+    await db.drop().catch(() => {})
+    throw e
+  }
+}
+
+async function bootstrapInto(db, { apply = true } = {}) {
   const run = (f) => runSqlFile(db.pool, f)
   const tx = (f) => applyInTransaction(db.pool, f)
   await run(SQL.researchPretest); await run(SQL.research)
@@ -83,6 +115,22 @@ export async function gatewayDb({ apply = true } = {}) {
 }
 
 export const sel = async (pool, sql, params = []) => (await pool.query(sql, params)).rows
+
+/**
+ * PHONE-PRECISE detector for test assertions (no false positives on ids). Removes what is provably not a phone first
+ * (UUIDs, 32+ char hex hashes, ISO timestamps, pid_ codes), then matches NANP numbers (area code and exchange 2-9,
+ * optional +1 / 1, separators space . - ( )) and E.164 (+ and 8-15 digits), each bounded by NON-alphanumerics, so a
+ * digit run inside a longer token never counts and every real number shape does. Returns the first match or null.
+ */
+export const NANP_OR_E164 = /(?<![0-9A-Za-z])(?:(?:\+?1[\s.-]?)?\(?[2-9][0-9]{2}\)?[\s.-]?[2-9][0-9]{2}[\s.-]?[0-9]{4}|\+[1-9][0-9]{7,14})(?![0-9A-Za-z])/
+export function findPhoneLike(text) {
+  const t = String(text ?? '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')
+    .replace(/\b[0-9a-f]{32,128}\b/gi, '<hash>')
+    .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?/g, '<ts>')
+    .replace(/\bpid_[g-p]+\b/g, '<pid>')
+  return t.match(NANP_OR_E164)?.[0] ?? null
+}
 
 export async function setControls(pool, values) {
   for (const [k, v] of Object.entries(values)) {
@@ -122,8 +170,7 @@ export async function grantStanding(owner, { org = ORG, agent_id = 'agt_alpha', 
 }
 
 /** A thread (inbox_thread_state.id is the agent-facing reference), its property, an inbound. */
-export async function seedThread(owner, { phone = SELLER, property = 'p100', inboundBody = 'Yes I still own it, what would you offer?', minutesAgo = 3 } = {}) {
-  const id = crypto.randomUUID()
+export async function seedThread(owner, { phone = SELLER, property = 'p100', inboundBody = 'Yes I still own it, what would you offer?', minutesAgo = 3, id = crypto.randomUUID() } = {}) {
   await owner.query(`insert into public.properties (property_id, property_type, property_address_city, property_address_state, property_address_zip, property_address) values ($1, 'SFR', 'Chicago', 'IL', '60601', '12 Oak St') on conflict do nothing`, [property])
   await owner.query(`insert into public.inbox_thread_state (id, thread_key, canonical_e164, property_id, our_number) values ($1, $2, $2, $3, $4)`, [id, phone, property, OURS])
   const out = crypto.randomUUID()

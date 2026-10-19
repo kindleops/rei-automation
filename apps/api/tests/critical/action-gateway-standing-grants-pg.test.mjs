@@ -162,13 +162,29 @@ test('PG standing grant: an argument OUTSIDE the envelope needs a per-use human 
     const inside = await hold(gateway, cred, t.thread_id, 'env-hold-inside', 'operator_review')
     assert.equal(inside.ok, true)
     const out = await hold(gateway, cred, t.thread_id, 'env-hold-outsid', 'other')
-    assert.deepEqual([out.status, out.code], ['approval_pending', 'ARGUMENT_OUTSIDE_ENVELOPE'])
+    assert.deepEqual([out.status, out.code], ['approval_pending', 'ARGUMENT_OUTSIDE_ENVELOPE'], JSON.stringify(out))
     assert.equal((await humans.decide(out.approval.approval_id)).ok, true)
     const ran = await hold(gateway, cred, t.thread_id, 'env-hold-outsid', 'other')
     assert.deepEqual([ran.ok, ran.code], [true, 'ALREADY_HELD'])
     const id = await bypassIntent(store, { resource_id: t.thread_id, params: { thread_id: t.thread_id, reason_code: 'data_quality' }, key: 'env-bypass-0001' })
     const a = await store.authorize(id, digest, { grant_id: g, policy_id: 'set_thread_hold.policy', policy_version: 'v1' })
     assert.deepEqual([a.ok, a.code], [false, 'ARGUMENT_OUTSIDE_ENVELOPE'])
+  } finally { await env.db.drop() }
+})
+
+test('PG gateway REGRESSION: an approval for a resource whose UUID contains a phone-shaped digit run is filed (payload_is_clean exempts UUIDs only under id keys) — deterministic, formerly a ~1-in-16 INTERNAL', { skip }, async () => {
+  const { env, cred } = await world()
+  try {
+    // the exact id that failed under concurrency: "a895-58797158f778" is a 10+ digit run with a separator
+    const t = await seedThread(env.owner, { id: '700474ee-bd20-4d2a-a895-58797158f778' })
+    await grantStanding(env.owner, { capability: 'holds.set_thread_hold', tier: 2, envelope: { allow: { reason_code: ['operator_review'] } } })
+    const { gateway } = makeGateway(env)
+    const out = await hold(gateway, cred, t.thread_id, 'uuid-run-hold-1', 'other')
+    assert.deepEqual([out.status, out.code], ['approval_pending', 'ARGUMENT_OUTSIDE_ENVELOPE'], JSON.stringify(out))
+    const row = (await sel(env.owner, `select intended_change from agent.approval_request where approval_id = $1`, [out.approval.approval_id]))[0]
+    assert.equal(row.intended_change.resource_id, t.thread_id)
+    assert.equal((await humanApprovals(env).decide(out.approval.approval_id)).ok, true)
+    assert.equal((await hold(gateway, cred, t.thread_id, 'uuid-run-hold-1', 'other')).code, 'HOLD_SET')
   } finally { await env.db.drop() }
 })
 

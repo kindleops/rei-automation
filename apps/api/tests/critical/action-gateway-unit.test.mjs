@@ -62,7 +62,10 @@ test('approvals: the decide-path capability is registrable; a gateway approval b
   const principal = { org_id: '00000000-0000-4000-8000-0000000000c1', sponsor_user_id: '22222222-2222-4222-8222-222222222222' }
   const now = Date.parse('2026-10-19T12:00:00Z')
   const row = buildApprovalRequest({ intent, principal, now })
-  assert.match(row.intended_change.resource_ref, /^pid_[g-p]+$/, 'property ids are never raw in the approval payload')
+  assert.match(row.intended_change.resource_id, /^pid_[g-p]+$/, 'property ids are never raw in the approval payload')
+  // every UUID in the payload sits under an id-named key (payload_is_clean exempts UUIDs from the phone-run rule only there)
+  const walk = (o, k = '') => Object.entries(o || {}).forEach(([kk, v]) => { if (v && typeof v === 'object') walk(v, kk); else if (/[0-9a-f]{8}-[0-9a-f]{4}-/.test(String(v))) assert.match(kk, /(^id$|_id$|_ids$|^requested_by$)/, `uuid under ${kk}`) })
+  walk(buildApprovalRequest({ intent: { ...intent, resource_type: 'thread', resource_id: '700474ee-bd20-4d2a-a895-58797158f778' }, principal, now }))
   assert.equal(row.requested_by, principal.sponsor_user_id)
   assert.deepEqual(approvalSnapshotOf({ ...intent, state: 'awaiting_approval' }), approvalSnapshotOf(intent), 'the snapshot does not drift when the intent starts waiting')
   const executed = { ...row, state: 'executed', decision: 'approve', decided_by: '33333333-3333-4333-8333-333333333333' }
@@ -99,4 +102,13 @@ test('STATIC: the gateway module has no import path to the send stack (queue wri
     for (const i of imports) assert.ok(!FORBIDDEN.test(i), `${f} imports ${i}`)
     assert.ok(!/\bfrom\(['"][a-z_]+['"]\)\.(insert|update|upsert|delete)\(/.test(src), `${f} writes a table directly`)
   }
+})
+
+test('test detector findPhoneLike: catches every real NANP / E.164 rendering, never a UUID / hash / timestamp / pid digit run', async () => {
+  const { findPhoneLike } = await import('../helpers/action-gateway-pg.mjs')
+  for (const p of ['+13125550161', '13125550161', '3125550161', '312-555-0161', '(312) 555-0161', '312.555.0161', '+1 312 555 0161', '1-312-555-0161', '+442071838750', 'call 312 555 0161 today'])
+    assert.ok(findPhoneLike(`{"body":"${p}"}`), p)
+  for (const n of ['700474ee-bd20-4d2a-a895-58797158f778', '1a2ee0ff-0000-4000-8000-0000000000a1', 'a'.repeat(32).replace(/a/g, '7') + 'ff', '2026-10-19T12:34:56.789Z',
+    'pid_ihioimjioh', '•••-••61', '$250,000', '12 Oak St 60601', 'mjob_9f1c2e3a-4567-4890-abcd-ef0123456789'])
+    assert.equal(findPhoneLike(`{"x":"${n}"}`), null, n)
 })
