@@ -44,6 +44,8 @@ const COMMUNICATION_RE = new RegExp(
 const STOP_WITH_COMPLEMENT = [
   // "stop asking" alone stays communication; "stop asking that / about …" is another action.
   /\bstop\s+(?:(?!asking\b)\w+ing\b|asking\s+(?:that|this|about|for|so|such|the|me\s+(?:that|about|the|for))\b|with\b|it\s+with\b|being\b|the\b|that\b|this\b|your\b|these\b|those\b|lying\b)/i,
+  // P0 2026-10-19 control: "stop by (anytime)", "stop in", "stop over" = visit — never a revocation.
+  /\bstop\s+(?:by|in|over)\b/i,
   /\benough\s+(?:with|of)\b/i,
   /\b(?:pare|para|par[eé]|deja|deje|dejen|basta|ya\s+basta)\s+(?:de|con|ya\s+de)\s+\S+/i,
   /\bpar[ea]\s+(?:de|com)\s+\S+/i,

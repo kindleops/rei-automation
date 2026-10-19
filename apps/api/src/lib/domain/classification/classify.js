@@ -27,6 +27,7 @@ import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multi
 import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
 import { assessDealEconomics, isPriceFarAboveValue, PRICE_GAP_REASON_CODE } from "@/lib/domain/inbox/deal-economics-gate.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
+import { analyzeContactRevocation } from "@/lib/domain/classification/multilingual-contact-revocation.js";
 import { applyRound11CounterpartyRule, applyRound11UnclearRules, matchRound11OptOut } from "@/lib/domain/classification/round11-unclear-rules.js";
 import { classifyStopScope, matchesOutreachStop, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
 import {
@@ -8116,7 +8117,100 @@ export function rescopeWrittenOwnershipDenial(text, result) {
   };
 }
 
+// ── MULTILINGUAL CONTACT-REVOCATION SAFETY (P0 2026-10-19) ──────────────────
+// Applied to EVERY classify() result (heuristic, high-confidence, AI-merged):
+//   • an explicit revocation in any language is an opt-out (it already reaches
+//     compliance_flag through matchMultilingualOptOut; re-asserted here so the
+//     AI-merge path can never lose it);
+//   • a phone-IDENTITY wrong number in another language ("número equivocado",
+//     "move nimewo", "打错了") takes the EXISTING wrong-number route when the
+//     classifier had nothing stronger (never an opt-out, never global);
+//   • FAIL-SAFE: a stop / remove / contact-negation family token in a
+//     non-English message with no confident family is a PRECAUTIONARY HOLD —
+//     no reply, every pending send held, a contact-wide
+//     automation_suppressions precautionary_no_contact row written by the
+//     inbound path, and the operator lane (suppression candidate) until a
+//     person decides. Never "unclear and contactable".
+// A stop of something that is not communication ("pare de llorar") vetoes the
+// fail-safe; insults stay insults (only revocation language is read here).
+const WRONG_NUMBER_OVERRIDABLE_INTENTS = new Set(["unclear", "not_interested", "acknowledgement", "reaction_only", "who_is_this"]);
+const PRECAUTION_EXEMPT_INTENTS = new Set(["opt_out", "wrong_number"]);
+
+export const PRECAUTIONARY_HOLD_DECISION = Object.freeze({
+  auto_reply_allowed: false,
+  queue_action: "hold_pending_sends",
+  suppression_action: "suppression_candidate",
+  suppression_candidate: true,
+  precautionary_hold: true,
+  precautionary_hold_type: "precautionary_no_contact",
+  human_review_required: true,
+  operator_escalation: true,
+  escalation_policy: "operator_exception",
+  review_reason: "possible_opt_out_unconfirmed",
+  risk_level: "high",
+});
+
+const uniqStrings = (values = []) => [...new Set(values.filter(Boolean))];
+
+export function applyContactRevocationSafety(result, text) {
+  if (!result || typeof result !== "object") return result;
+  const body = cleanMessage(text);
+  if (!body) return result;
+  if (result.compliance_flag === "stop_texting" || result.primary_intent === "opt_out") return result;
+  const analysis = analyzeContactRevocation(body);
+  const other_action = classifyStopScope(body) === STOP_SCOPE.OTHER_ACTION;
+  const audit = (hit) => ({ family: hit.family, language: hit.language, rule_id: hit.rule_id, version: hit.version });
+
+  if (analysis.opt_out) {
+    const next = {
+      ...result,
+      primary_intent: "opt_out",
+      detected_intent: "opt_out",
+      compliance_flag: "stop_texting",
+      objection: null,
+      confidence: 0.99,
+      matched_rule_ids: uniqStrings([...(result.matched_rule_ids || []), analysis.opt_out.rule_id]),
+      multilingual_contact_revocation: audit(analysis.opt_out),
+    };
+    next.automation_decision = deriveAutomationDecision(next);
+    if (next.seller_state) next.seller_state = { ...next.seller_state, next_best_action: "stop_all_outreach" };
+    return next;
+  }
+
+  if (analysis.wrong_number && WRONG_NUMBER_OVERRIDABLE_INTENTS.has(String(result.primary_intent || "unclear"))) {
+    const next = {
+      ...result,
+      primary_intent: "wrong_number",
+      detected_intent: "wrong_number",
+      secondary_intent: result.primary_intent && result.primary_intent !== "unclear" ? result.primary_intent : result.secondary_intent ?? null,
+      confidence: Math.max(Number(result.confidence) || 0, 0.9),
+      matched_rule_ids: uniqStrings([...(result.matched_rule_ids || []), analysis.wrong_number.rule_id]),
+      multilingual_contact_revocation: audit(analysis.wrong_number),
+    };
+    next.automation_decision = deriveAutomationDecision(next);
+    if (next.seller_state) next.seller_state = { ...next.seller_state, next_best_action: "update_contact_and_archive" };
+    return next;
+  }
+
+  if (analysis.possible_opt_out && !other_action && !PRECAUTION_EXEMPT_INTENTS.has(String(result.primary_intent || ""))) {
+    return {
+      ...result,
+      matched_rule_ids: uniqStrings([...(result.matched_rule_ids || []), analysis.possible_opt_out.rule_id]),
+      ambiguity_flags: uniqStrings([...(result.ambiguity_flags || []), "possible_opt_out_unconfirmed"]),
+      possible_opt_out: { ...audit(analysis.possible_opt_out), token: analysis.possible_opt_out.token },
+      multilingual_contact_revocation: audit(analysis.possible_opt_out),
+      automation_decision: { ...PRECAUTIONARY_HOLD_DECISION },
+    };
+  }
+  return result;
+}
+
 export async function classify(message, brain_item = null, options = {}) {
+  const result = await classifyCore(message, brain_item, options);
+  return applyContactRevocationSafety(result, message);
+}
+
+async function classifyCore(message, brain_item = null, options = {}) {
   // A whole-message slang yes ("Yeppers", "yessir!", "Yuppers 👍") is
   // classified as "yes" (affirmative-slang.js); every other text is unchanged.
   const text = canonicalizeAffirmativeSlang(cleanMessage(message));
