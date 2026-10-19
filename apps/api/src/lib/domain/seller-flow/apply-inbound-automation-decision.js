@@ -3261,6 +3261,26 @@ export async function executeInboundAutomationDecision({
         });
       }
     }
+    // P0 2026-10-19 FAIL-SAFE: a POSSIBLE opt-out (classify.js PRECAUTIONARY_HOLD_DECISION)
+    // also blocks every FUTURE outbound to the phone — campaigns, follow-ups, replies — with a
+    // contact-wide precautionary_no_contact automation_suppressions row until a person decides.
+    let precautionary_hold = null;
+    if (classification?.automation_decision?.precautionary_hold === true) {
+      precautionary_hold = { ok: true, held: false, reason: "compliance_dry_run" };
+      if (!compliance_dry_run && supabase) {
+        const { recordPrecautionaryNoContactHold } = await import("@/lib/domain/compliance/record-precautionary-hold.js");
+        precautionary_hold = await recordPrecautionaryNoContactHold({
+          supabase,
+          phone: inboundFrom || threadKey,
+          threadKey,
+          inboundEventId,
+          evidence: classification?.possible_opt_out || null,
+        });
+        if (!precautionary_hold.ok) {
+          warn("inbound.precautionary_hold_failed_closed", { thread_key: threadKey || inboundFrom, error: precautionary_hold.error || precautionary_hold.reason });
+        }
+      }
+    }
     return {
       ok: true,
       automation_decision: base_decision,
@@ -3272,6 +3292,7 @@ export async function executeInboundAutomationDecision({
       queue_result: null,
       suppression_applied: false,
       suppression_candidate: true,
+      precautionary_hold,
       queue_cancellation,
       duplicate_suppressed: false,
       dry_run: Boolean(dryRun),
