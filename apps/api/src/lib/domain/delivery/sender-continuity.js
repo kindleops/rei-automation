@@ -81,11 +81,24 @@ export function isConversationContinuationRow(row = {}) {
   return isInboundAutoReply(row) || isUnknownAutoReply(row) || isManualInboxSend(row);
 }
 
+/** Campaign-touch markers a feeder / launch row carries even without a campaign id (the recipient-window
+ *  policy's own touch predicate): a campaign target, a first touch, a snapshot touch number, a campaign
+ *  queue key, a campaign / opener / first-touch type, send kind or source. Pure. */
+function carriesCampaignTouchMarkers(row = {}) {
+  const m = meta(row);
+  const qc = m.queue_context && typeof m.queue_context === "object" ? m.queue_context : {};
+  if (clean(row.campaign_target_id) || clean(m.campaign_target_id)) return true;
+  if (row.is_first_touch === true || m.is_first_touch === true || qc.is_first_touch === true) return true;
+  if (Number(m.candidate_snapshot?.touch_number) >= 1) return true;
+  if (/^campaign[:_-]/.test(lower(row.queue_key || row.queue_id || m.queue_key))) return true;
+  if (CAMPAIGN_TOUCH_TYPES.has(lower(row.type))) return true;
+  return [row.type, row.send_kind, m.type, m.send_kind, m.source, m.action_type, row.source].map(lower).some((k) => /campaign|opener|first_touch|candidate_window/.test(k));
+}
+
 /** A campaign's own proactive outreach (first touch / sequence touch / recovery). Pure. */
 export function isProactiveCampaignTouch(row = {}) {
-  if (!clean(row.campaign_id || meta(row).campaign_id)) return false;
   if (isConversationContinuationRow(row)) return false;
-  return true;
+  return Boolean(clean(row.campaign_id || meta(row).campaign_id)) || carriesCampaignTouchMarkers(row);
 }
 
 /** Is this row bound by the continuity rule (when its thread has an established sender)? Pure. */
