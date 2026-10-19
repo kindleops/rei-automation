@@ -1969,6 +1969,12 @@ function candidateWindowEntry(candidate = {}, at) {
     timezone: candidate.timezone || null,
     property_geography: property_state ? { state: property_state, zip: clean(candidate.property_zip || candidate.property_address_zip || candidate.raw?.property_address_zip || "") || null } : null,
     mailing_geography: mailing_state ? { state: mailing_state, zip: null } : null,
+    // recipient evidence beyond phone / mailing, when the candidate carries it (rc-8.5.21): the same
+    // row metadata the canonical writer stamps and the dispatcher re-reads
+    metadata: {
+      ...(clean(candidate.recipient_verified_timezone || candidate.raw?.recipient_verified_timezone || "") ? { recipient_verified_timezone: clean(candidate.recipient_verified_timezone || candidate.raw?.recipient_verified_timezone) } : {}),
+      ...(Array.isArray(candidate.recipient_location_history_zones || candidate.raw?.recipient_location_history_zones) ? { recipient_location_history_zones: candidate.recipient_location_history_zones || candidate.raw?.recipient_location_history_zones } : {}),
+    },
     scheduled_for: at,
     now: at,
   };

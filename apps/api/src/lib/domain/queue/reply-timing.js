@@ -42,8 +42,8 @@ const clean = (v) => String(v ?? '').trim()
  * @param {{ recipientPhone?: string|null, propertyGeography?: {state?: string|null, zip?: string|null}|null,
  *           mailingGeography?: {state?: string|null, zip?: string|null}|null, storedTimezone?: string|null }} a
  */
-export function resolveRecipientZones({ recipientPhone = null, propertyGeography = null, mailingGeography = null, storedTimezone = null } = {}) {
-  return resolveRecipientWindowZones({ recipientPhone, propertyGeography, mailingGeography, storedTimezone })
+export function resolveRecipientZones({ recipientPhone = null, propertyGeography = null, mailingGeography = null, storedTimezone = null, verifiedTimezone = null, locationHistory = null } = {}) {
+  return resolveRecipientWindowZones({ recipientPhone, propertyGeography, mailingGeography, storedTimezone, verifiedTimezone, locationHistory })
 }
 
 /**
