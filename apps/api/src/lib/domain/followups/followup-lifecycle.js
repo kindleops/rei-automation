@@ -41,6 +41,7 @@ import { OWNERSHIP_DECLINED_ROLE, OWNERSHIP_DECLINED_REASON } from '../queue/own
 import { questionKindOf } from '../conversation-ai/questions.js'
 import { bareNoAnswer } from '../conversation-ai/answers.js'
 import { isBareNotInterested, isOwnershipConfirmation } from '../classification/ownership-answer-forms.js'
+import { resolveThreadContinuity } from '../conversation-ai/persona-continuity.js'
 
 export const FOLLOWUP_LIFECYCLE_VERSION = 'followup-lifecycle.v1'
 export const LIFECYCLE_MODE_KEY = 'followup_execution_mode' // the same switch as 8.5.21-A (no new key)
@@ -533,7 +534,16 @@ export async function materializeClaimedIntent(intent, deps = {}) {
   // 7. sender health: the thread's sticky sender is kept (persona + number continuity) and its health is
   //    recorded; the dispatcher's canonical sender authority re-validates it at send time and reroutes a
   //    cooling / blocked sender to the thread's eligible fallback, or blocks the row visibly.
-  const from = clean(spec.from_phone_number) || null
+  //    rc-8.5.21 F1: a writer that knew no sender (the S2 / S3 / offer silence follow-ups: the delivery
+  //    trigger passes none) never yields a sender-less row the loader pauses before any claim. The
+  //    thread's ESTABLISHED sender is resolved here through THE persona + sender continuity resolver
+  //    (sticky inbox_thread_state.our_number, else the last seller-visible outbound's number) — the
+  //    same authority AI replies use. A spec sender that DISAGREES with the thread's established
+  //    sender is never silently kept nor silently switched: held for a person. Nothing establishes a
+  //    sender ⇒ held with a durable reason (visible), never a paused row.
+  const sender = await resolveFollowUpSender(intent, deps, { spec, thread_key, thread })
+  if (!sender.ok) return settle(intent, deps, { to: sender.transient ? S.PLANNED : S.HELD, reason: sender.reason, transient: sender.transient === true, detail: sender.detail || {} })
+  const from = sender.from
   let sender_health = null
   if (from) {
     try { sender_health = lower(await deps.senderStatus(from)) || 'unknown_sender' } catch { return settle(intent, deps, { to: S.PLANNED, reason: 'sender_lookup_failed', transient: true }) }
@@ -568,24 +578,49 @@ export async function materializeClaimedIntent(intent, deps = {}) {
     followup_materialize_seq: seq,
     followup_materialized_at: iso(now),
     followup_due_at: intent.due_at,
-    // the §11 dispatcher's derivable identity for this follow-up (queue_key is never identity)
-    follow_up_id: `followup_intent:${intent.id}`,
+    // the §11 dispatcher's derivable identity for this follow-up (queue_key is never identity). The §11
+    // ledger stores follow_up_id as a UUID (seller_logical_communications.follow_up_id uuid): the intent's
+    // own id, never a prefixed string — a non-UUID anchor made the seam's get-or-create RPC fail
+    // (logical_communication_store_error) and every materialized follow-up was refused before the wire.
+    // One intent = one logical communication (a re-materialization reuses it; an ambiguous outcome on an
+    // earlier row of the same intent therefore still forbids a resend).
+    follow_up_id: intent.id,
     idempotency_key: queue_key,
     template_source: 'sms_templates',
     recipient_zones: zones,
     recipient_zone_certainty: resolution.certainty,
     recipient_zone_policy: resolution.version,
     language: rendered.language || language,
+    followup_sender_source: sender.source,
     ...(sender_health ? { followup_sender_health: sender_health, ...(UNHEALTHY_SENDER.has(sender_health) ? { followup_sender_needs_reroute: true } : {}) } : {}),
     ...(when.deferred ? { followup_send_deferred: true } : {}),
     ...(rendered.render_context ? { deferred_render_context_resolved: Object.keys(rendered.render_context) } : {}),
   }
   const ctxFields = Object.fromEntries(['seller_first_name', 'property_address', 'agent_name'].filter((k) => clean(rendered.render_context?.[k])).map((k) => [k, rendered.render_context[k]]))
+  // rc-8.5.21 F1: the loader's preclaim validity check requires a candidate snapshot on every templated
+  // row (missing_candidate_snapshot ⇒ paused_invalid_queue_row before any claim). A materialized
+  // follow-up carries its own provenance snapshot — an existing conversation, never a first touch, and
+  // deliberately NO touch_number (a touch_number ≥ 1 classifies a row as a campaign touch).
+  if (!obj(metadata.candidate_snapshot) || !Object.keys(obj(metadata.candidate_snapshot)).length) {
+    metadata.candidate_snapshot = {
+      source: LIFECYCLE_SOURCE,
+      followup_intent_id: intent.id,
+      followup_kind: intent.kind,
+      property_id: clean(intent.property_id || spec.property_id) || null,
+      master_owner_id: clean(intent.master_owner_id || spec.master_owner_id) || null,
+      prospect_id: clean(spec.prospect_id || obj(spec.metadata).prospect_id) || null,
+      is_first_touch: false,
+      seller_first_name: clean(ctxFields.seller_first_name || spec.seller_first_name) || null,
+      template_use_case: clean(rendered.use_case || spec.use_case_template) || null,
+      template_key: rendered.template_id || null,
+    }
+  }
   const row = {
     ...spec,
     ...ctxFields,
     queue_key, queue_id: queue_key, dedupe_key: `followup_intent:${intent.id}:m${seq}`,
-    thread_key, to_phone_number: to_phone, queue_status: 'scheduled',
+    thread_key, to_phone_number: to_phone, from_phone_number: from, queue_status: 'scheduled',
+    ...(!clean(spec.agent_name) && !ctxFields.agent_name && sender.persona_name ? { agent_name: sender.persona_name } : {}),
     scheduled_for: when.at, scheduled_for_utc: when.at, scheduled_for_local: when.at,
     message_body: body, message_text: body, rendered_message: body, character_count: body.length,
     template_id: rendered.template_id || null, selected_template_id: rendered.template_id || null, template_source: 'sms_templates',
@@ -614,6 +649,35 @@ export async function materializeClaimedIntent(intent, deps = {}) {
   if (/AUTOMATION_HOLD/.test(reason)) return settle(intent, deps, { to: S.HELD, reason: 'automation_hold:db_trigger' })
   if (/^(missing_|message_too_short|blank_greeting|entity_name|html_content|contradictory|live_execution)/.test(reason)) return settle(intent, deps, { to: S.NOT_EXECUTABLE, reason: `outbound_validator:${reason}` })
   return settle(intent, deps, { to: S.PLANNED, reason: `enqueue_refused:${reason.slice(0, 60)}`, transient: true })
+}
+
+const SENDER_CONTINUITY_REASONS = new Set(['sender_number_unresolved', 'sender_number_mismatch'])
+const e164 = (p) => { const d = clean(p).replace(/\D/g, '').slice(-10); return d.length === 10 ? `+1${d}` : null }
+/**
+ * The sender a materialized follow-up row is written with (rc-8.5.21 F1). Pure over its reads.
+ *   spec sender + no established thread sender ⇒ the spec's (caller-known) number
+ *   spec sender = the thread's established sender ⇒ kept
+ *   spec sender ≠ the thread's established sender ⇒ held `sender_continuity_conflict` (never switched)
+ *   no spec sender ⇒ the thread's established sender (sticky, else last shown outbound)
+ *   nothing ⇒ held `sender_unresolved:<reason>` (a durable, visible reason; never a paused row)
+ * @returns {Promise<{ ok: boolean, from?: string, source?: string, persona_name?: string|null, reason?: string, transient?: boolean, detail?: object }>}
+ */
+export async function resolveFollowUpSender(intent, deps = {}, { spec = obj(intent?.row_spec), thread_key = clean(intent?.thread_key), thread = null } = {}) {
+  let sentRows = []
+  if (typeof deps.threadSentRows === 'function') {
+    try { sentRows = (await deps.threadSentRows(thread_key)) || [] } catch { return { ok: false, transient: true, reason: 'sender_lookup_failed' } }
+  }
+  const continuity = resolveThreadContinuity({ sentRows, threadState: thread || null, inboundTo: null })
+  const established = continuity.sender_number || null
+  const persona_name = continuity.persona_name || null
+  const own = e164(spec.from_phone_number)
+  if (own && established && own !== established) {
+    return { ok: false, reason: 'sender_continuity_conflict', detail: { spec_sender: own, thread_sender: established, thread_sender_source: continuity.sender_source } }
+  }
+  if (own) return { ok: true, from: own, source: established ? continuity.sender_source : 'row_spec', persona_name }
+  if (established) return { ok: true, from: established, source: continuity.sender_source, persona_name }
+  const why = continuity.reasons.find((r) => SENDER_CONTINUITY_REASONS.has(r)) || 'sender_number_unresolved'
+  return { ok: false, reason: `sender_unresolved:${why}` }
 }
 
 const UNHEALTHY_SENDER = new Set(['disabled', 'inactive', 'failed', 'blocked', 'retired', 'paused', 'suspended', 'cooling', 'cooldown', 'quarantined'])
@@ -775,6 +839,11 @@ export function createFollowUpLifecycleDeps({ supabase, readSwitch = null, holdC
     },
     async loadThread(thread_key) {
       return (await rowsOf(supabase.from('inbox_thread_state').select('thread_key,is_suppressed,last_inbound_at,our_number,property_id').eq('thread_key', thread_key).limit(1)))[0] || null
+    },
+    // the thread's seller-visible outbound history (persona + sender continuity); a read error is thrown
+    // (⇒ transient retry), never read as "no history"
+    async threadSentRows(thread_key) {
+      return rowsOf(supabase.from('send_queue').select('queue_status,agent_name,metadata,message_body,from_phone_number,created_at').eq('thread_key', thread_key).in('queue_status', ['sent', 'delivered']).order('created_at', { ascending: false }).limit(60))
     },
     holdCheck: holdCheck || (async (scope) => {
       const { resolveAutomationHold, HOLD_CAPABILITIES } = await import('../holds/automation-hold.js')

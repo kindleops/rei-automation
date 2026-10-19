@@ -1,0 +1,32 @@
+// Child process for the RUN-09 real-SIGKILL tests (processing-lease-recovery-8521-pg.test.mjs): the REAL
+// queue runner item path (processSendQueueItem, via the lifecycle harness's dispatchRow) over the
+// disposable DB with the REAL §11 store (seller_communication_attempts in PG). The process SIGKILLs
+// ITSELF at the requested point:
+//   before_seam  inside the send-time contact guard: after the claim, before the §11 seam (no attempt
+//                allocated, no provider call)
+//   in_provider  inside the provider call: the §11 attempt and its provider_request_started marker are
+//                committed, the request has begun (ambiguous)
+// The provider is never real: the only "send" this process can reach kills it.
+import { isoPool, pgSupabase } from './pg-supabase.mjs'
+import { dispatchRow } from './followup-lifecycle-pg.mjs'
+import { createSellerCommunicationStore } from '../../src/lib/domain/communications/seller-communication-store.js'
+import { __setAutomationHoldResolverForTests } from '../../src/lib/domain/holds/automation-hold.js'
+
+__setAutomationHoldResolverForTests(null)
+const [url, rowId, token, point, now] = process.argv.slice(2)
+globalThis.fetch = async (u) => { throw new Error(`LIVE_TRANSPORT_TOUCHED ${String(u).slice(0, 40)}`) }
+const pool = isoPool(url, 4)
+const sb = pgSupabase(pool)
+const row = (await pool.query('select * from public.send_queue where id = $1', [rowId])).rows[0]
+const die = async (label) => {
+  process.stdout.write(`${label}\n`)
+  process.kill(process.pid, 'SIGKILL')
+  await new Promise(() => {})
+}
+const provider = { send: async () => { if (point === 'in_provider') await die('KILL_IN_PROVIDER'); return { ok: true, sid: 'SMchild', provider_message_id: 'SMchild', status: 'queued' } } }
+const extraDeps = point === 'before_seam'
+  ? { runSendTimeContactGuard: async () => die('KILL_BEFORE_SEAM') }
+  : {}
+await dispatchRow({ pool, sb }, { row, token }, { provider, now, store: createSellerCommunicationStore({ supabase: sb }), extraDeps })
+process.stdout.write('NOT_KILLED\n')
+process.exit(3)

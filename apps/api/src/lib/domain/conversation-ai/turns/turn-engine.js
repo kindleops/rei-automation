@@ -48,12 +48,74 @@ export const decodeRef = (s) => {
 }
 
 export const turnEventKey = (turnId, version, epoch = null) => `turn:${turnId}#v${version}${epoch != null ? `#r${epoch}` : ''}`
-export const turnJobInput = ({ turn_id, version }) => ({ turn_ref: encodeRef(String(turn_id)), turn_version: encodeRef(String(version)) })
+export const turnJobInput = ({ turn_id, version, budget_blocks = 0 }) => ({
+  turn_ref: encodeRef(String(turn_id)), turn_version: encodeRef(String(version)),
+  // rc-8.5.21 RUN-13: how many times this turn was already re-scheduled after a budget block (letter-encoded)
+  ...(Number(budget_blocks) > 0 ? { budget_blocks: encodeRef(String(Math.trunc(Number(budget_blocks)))) } : {}),
+})
 export function decodeTurnJobInput(input = {}) {
   const id = typeof input?.turn_ref === 'string' && input.turn_ref.length <= 160 ? decodeRef(input.turn_ref) : null
   const v = typeof input?.turn_version === 'string' ? Number(decodeRef(input.turn_version)) : NaN
   if (!id || !/^[0-9a-f-]{36}$/i.test(id) || !Number.isInteger(v) || v < 1 || v > 1000) return null
-  return { turn_id: id, version: v }
+  const b = typeof input?.budget_blocks === 'string' && input.budget_blocks.length <= 8 ? Number(decodeRef(input.budget_blocks)) : 0
+  const notice = typeof input?.budget_notice === 'string' && input.budget_notice.length <= 40 ? decodeRef(input.budget_notice) : null
+  return { turn_id: id, version: v, ...(Number.isInteger(b) && b > 0 && b <= 100 ? { budget_blocks: b } : {}), ...(notice === 'rescheduled' || notice === 'closed' ? { budget_notice: notice } : {}) }
+}
+
+// ── rc-8.5.21 RUN-13: a budget-blocked decision ─────────────────────────────
+// The AI spend guard (agent.runtime_reserve) refused the model call and PARKED the job budget_blocked
+// (its lease cleared atomically: no further lease-bound write is possible from THAT job). The turn must
+// not stay claimed with nothing coming back for it, and the stop must not be invisible:
+//   1. the claimant finalizes the turn (no reply, no reservation) with the durable reason BUDGET_EXHAUSTED;
+//   2. it re-opens it (state pending, version + 1, close_reason 'budget_exhausted') and schedules ONE new
+//      conversation.turn job after BUDGET_RESCHEDULE_MS — bounded by MAX_BUDGET_RESCHEDULES; after that
+//      the turn stays decided with that reason (an owner raises the budget and requeues the parked job,
+//      or a new inbound opens a new turn);
+//   3. it enqueues ONE immediate budget-NOTICE job (same kind, its own event key): that job holds a lease
+//      of its own and raises the operator work item `conversation:turn_budget_exhausted:<turn>` (reason
+//      budget_exhausted) through THE lease-bound writer (agent.ops_work_item_sync) — it never claims the
+//      turn, never decides, never spends. The supervisor's conversation_turn_budget check is the backstop.
+// Never a reply, never a fallback, never a send.
+export const BUDGET_EXHAUSTED_REASON = 'budget_exhausted'
+export const BUDGET_RESCHEDULE_MS = 3_600_000
+export const MAX_BUDGET_RESCHEDULES = 3
+const BUDGET_NOTICE_STATES = new Set(['rescheduled', 'closed'])
+/** The input of the budget-notice job (letter-encoded, digit-free for payload_is_clean). */
+export const turnBudgetNoticeInput = ({ turn_id, version, budget_blocks = 0, state = 'rescheduled' }) => ({
+  ...turnJobInput({ turn_id, version, budget_blocks }),
+  budget_notice: encodeRef(BUDGET_NOTICE_STATES.has(state) ? state : 'rescheduled'),
+})
+export const turnBudgetNoticeEventKey = (turnId, version) => `${turnEventKey(turnId, version)}#budget`
+/** Did the decision stop because the AI budget refused the spend? */
+export function isBudgetBlock(err) {
+  const e = err?.abortJob === true && err.cause ? err.cause : err
+  return e?.reason === 'budget_blocked' || e?.code === 'AGENT_SPEND_JOB_BLOCKED' || e?.state === 'budget_blocked'
+}
+async function enqueueBudgetNotice({ enqueueAt, turn_id, version, budget_blocks, state, now }) {
+  if (typeof enqueueAt !== 'function') return { ok: false, reason: 'no_enqueue' }
+  try {
+    const at = new Date(Date.parse(now || '') || Date.now()).toISOString()
+    const r = await enqueueAt({ kind: CONVERSATION_TURN_KIND, event_key: turnBudgetNoticeEventKey(turn_id, version), input: turnBudgetNoticeInput({ turn_id, version, budget_blocks, state }), priority: 70, not_before: at })
+    return { ok: r?.ok !== false, reason: r?.ok === false ? String(r?.reason || 'refused').slice(0, 40) : null }
+  } catch (e) {
+    // the supervisor's conversation_turn_budget check still surfaces the parked job
+    return { ok: false, reason: String(e?.code || e?.message || 'error').slice(0, 40) }
+  }
+}
+async function onBudgetBlocked({ turn_id, version, claim, store, enqueueAt, now, budget_blocks = 0 }) {
+  const fin = await store.finalize({ turn_id, token: claim.token, version, outcome: `shadow:${BUDGET_EXHAUSTED_REASON}`, result: { code: 'BUDGET_EXHAUSTED', outcome: BUDGET_EXHAUSTED_REASON, send_status: 'not_sent_budget_exhausted', members: (claim.inbound_ids || []).length, budget_blocks }, reserve: false })
+  // a newer inbound revoked the claim meanwhile: that version's job decides
+  if (!fin?.ok) return { code: 'TURN_SUPERSEDED_DURING_DECISION', reason: fin?.reason || null }
+  const closed = async (extra = {}) => ({ code: 'TURN_BUDGET_EXHAUSTED_CLOSED', budget_blocks, ...extra, notice: await enqueueBudgetNotice({ enqueueAt, turn_id, version, budget_blocks, state: 'closed', now }) })
+  if (budget_blocks >= MAX_BUDGET_RESCHEDULES || typeof enqueueAt !== 'function') return closed()
+  const at = Date.parse(now || '') || Date.now()
+  const due_at = new Date(at + BUDGET_RESCHEDULE_MS + jitterMs(`${turn_id}|budget|${budget_blocks}`)).toISOString()
+  const r = await store.reopen({ turn_id, reason: BUDGET_EXHAUSTED_REASON, due_at, plan: { action: 'schedule', due_at, reasons: [BUDGET_EXHAUSTED_REASON] } })
+  if (!r?.ok) return closed({ reopen: r?.reason || null })
+  const id = r.turn_id || r.merged_into || turn_id
+  await enqueueAt({ kind: CONVERSATION_TURN_KIND, event_key: turnEventKey(id, r.version), input: turnJobInput({ turn_id: id, version: r.version, budget_blocks: budget_blocks + 1 }), priority: 80, not_before: r.due_at || due_at })
+  const notice = await enqueueBudgetNotice({ enqueueAt, turn_id, version, budget_blocks: budget_blocks + 1, state: 'rescheduled', now })
+  return { code: 'TURN_BUDGET_RESCHEDULED', due_at: r.due_at || due_at, version: r.version, budget_blocks: budget_blocks + 1, notice }
 }
 
 const MIN = 60_000
@@ -225,7 +287,7 @@ function jitterMs(seed) {
  * @param {null|((x: object) => Promise<object>)} [a.dispatch]  the R3 turn dispatcher (OFF switches inside R3)
  * @param {null|Function} [a.enqueueAt]  runtime enqueue (a window deferral re-schedules the turn)
  */
-export async function runDueTurn({ turn_id, version, store, worker, decideTurn, dispatch = null, enqueueAt = null, raiseOperatorItem = null, leaseSeconds = 180, maxDispatchAttempts = DISPATCH_MAX_ATTEMPTS, now = null }) {
+export async function runDueTurn({ turn_id, version, store, worker, decideTurn, dispatch = null, enqueueAt = null, raiseOperatorItem = null, leaseSeconds = 180, maxDispatchAttempts = DISPATCH_MAX_ATTEMPTS, now = null, budget_blocks = 0 }) {
   const claim = await store.claim({ turn_id, version, worker, lease_seconds: leaseSeconds })
   if (!claim?.ok) {
     const reason = String(claim?.reason || 'claim_refused')
@@ -247,7 +309,21 @@ export async function runDueTurn({ turn_id, version, store, worker, decideTurn, 
     const superseded = reason === 'stale_version' || older
     return { code: superseded ? 'TURN_SUPERSEDED' : `TURN_${reason.toUpperCase()}`, reason }
   }
-  const decision = await decideTurn({ ...claim, turn_id })
+  // rc-8.5.21 RUN-13 (merge: keeps both intents): a budget stop during the decision releases and
+  // re-schedules the turn (bounded) and raises its notice; THEN the head's STP-09 escalation work item
+  // for a decision that hands the turn to a person
+  let decision
+  try {
+    decision = await decideTurn({ ...claim, turn_id })
+  } catch (err) {
+    if (isBudgetBlock(err)) {
+      // release + reschedule the turn (bounded), then let the runtime report the parked job as before
+      let budget = null
+      try { budget = await onBudgetBlocked({ turn_id, version, claim, store, enqueueAt, now, budget_blocks }) } catch (e) { budget = { code: 'TURN_BUDGET_RELEASE_FAILED', error: String(e?.code || e?.message || 'error').slice(0, 60) } }
+      throw Object.assign(err, { budget_turn: budget })
+    }
+    throw err
+  }
   // blind-eval v2 (STP-09 and every decision that hands the turn to a person): the escalation raises
   // ONE operator work item BEFORE the decision is recorded (a failed write retries: never silent)
   if (decision?.code === 'ESCALATE_TO_OPERATOR' && typeof raiseOperatorItem === 'function') {

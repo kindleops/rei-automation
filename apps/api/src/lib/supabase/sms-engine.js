@@ -24,13 +24,15 @@ import { isUuid } from "@/lib/utils/is-uuid.js";
 import { resolveConversationalCeiling, withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import { SEND_CLASS, isConversationalSendClass, resolveSendClass, sourceSendClass } from "@/lib/domain/delivery/send-class.js";
 import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
-import { loadPropertyGeography, rowNeedsPropertyGeography, storedTimezoneToIana } from "@/lib/domain/queue/recipient-timezone.js";
+import { buildLeaseRecoveryPatch, evaluateExpiredProcessingLease, loadLeaseDispatchEvidence } from "@/lib/domain/queue/processing-lease-recovery.js";
+import { loadPropertyGeography, loadMailingGeography, rowMailingGeography, rowNeedsPropertyGeography, storedTimezoneToIana } from "@/lib/domain/queue/recipient-timezone.js";
 import {
   CONTACT_HOURS,
   MESSAGING_CATEGORIES,
   classifyMessagingCategory,
   evaluateMessagingWindow,
   recipientEvidenceFromRow,
+  recipientZoneStamp,
   resolveRecipientWindowZones,
 } from "@/lib/domain/queue/recipient-window-policy.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
@@ -387,7 +389,17 @@ function emitFutureRowExpirationBlocked(row = {}, context = {}) {
   });
 }
 
-async function applySendQueueLifecyclePatch(supabase, { id, patch, context = {} }) {
+async function applySendQueueLifecyclePatch(supabase, { id, patch, expect = null, context = {} }) {
+  // a compare-and-set patch (rc-8.5.21 RUN-09 lease re-dispatch): applied only while the row is still in
+  // the expected state; zero rows ⇒ not applied (the row moved on)
+  if (expect && typeof expect === "object") {
+    let query = supabase.from(SEND_QUEUE_TABLE).update(patch).eq("id", id);
+    if (expect.queue_status) query = query.eq("queue_status", expect.queue_status);
+    if (expect.lock_token) query = query.eq("lock_token", expect.lock_token);
+    const { data, error } = await query.select("id");
+    if (error) throw error;
+    return { applied: Array.isArray(data) && data.length === 1, blocked: false };
+  }
   const is_stale_runnable_expire =
     lowerStatus(patch.queue_status) === "expired" &&
     clean(patch.failed_reason) === STALE_RUNNABLE_FAILED_REASON;
@@ -1006,6 +1018,7 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
   // property geography (auto-replies, follow-ups, inbox rows carry only a
   // property_id). A failed read leaves the row to its stored zone — or a hold.
   let property_geography = new Map();
+  let mailing_geography = new Map();
   if (typeof deps.evaluateContactWindow !== "function") {
     const ids = raw_rows.filter((row) => rowNeedsPropertyGeography(row)).map((row) => row.property_id);
     if (ids.length) {
@@ -1013,6 +1026,17 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
         property_geography = await (deps.loadPropertyGeography || loadPropertyGeography)(supabase, ids);
       } catch (geography_error) {
         log_warn("queue.property_geography_unavailable", { message: geography_error?.message || String(geography_error) });
+      }
+    }
+    // rc-8.5.21 RUN-06: the owner's MAILING state is recipient evidence (the scheduler already uses it):
+    // one read for every candidate with a property, so an unstamped legacy row is judged on the same
+    // evidence the recipient-window scheduler planned it with
+    const mailing_ids = raw_rows.map((row) => clean(row?.property_id)).filter(Boolean);
+    if (mailing_ids.length) {
+      try {
+        mailing_geography = await (deps.loadMailingGeography || loadMailingGeography)(supabase, mailing_ids);
+      } catch (mailing_error) {
+        log_warn("queue.mailing_geography_unavailable", { message: mailing_error?.message || String(mailing_error) });
       }
     }
   }
@@ -1114,6 +1138,7 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
       windowMinutes: conversational_reply_window_minutes,
       evaluateContactWindow: evaluate_contact_window,
       propertyGeography: property_geography.get(clean(decision.row?.property_id)) || null,
+      mailingGeography: mailing_geography.get(clean(decision.row?.property_id)) || deps.mailingGeography || null,
     });
     const contact_window = dispatch_window.contact_window;
     const manual_inbox_send = isManualInboxSend(decision.row);
@@ -1368,7 +1393,13 @@ export function evaluateContactWindow(row, deps = {}) {
   // never becomes America/Chicago (rc-7.1 D10). Nothing at all places the recipient, or no lawful
   // instant exists ⇒ HOLD.
   const resolution = resolveRecipientWindowZones(
-    recipientEvidenceFromRow({ ...normalized, metadata: row?.metadata ?? normalized.metadata }, { propertyGeography: deps.propertyGeography || null, mailingGeography: deps.mailingGeography || null })
+    recipientEvidenceFromRow({ ...normalized, metadata: row?.metadata ?? normalized.metadata }, {
+      propertyGeography: deps.propertyGeography || null,
+      // rc-8.5.21 RUN-06: the owner's mailing state is recipient evidence — the runner loads it from the
+      // property (properties.owner_address_state); a row that carries it (writer / candidate snapshot)
+      // supplies it when the caller did not
+      mailingGeography: deps.mailingGeography || rowMailingGeography({ ...normalized, ...(row || {}), metadata: row?.metadata ?? normalized.metadata }) || null,
+    })
   );
   const zones = resolution.zones;
   const stored_iana = storedTimezoneToIana(normalized.timezone);
@@ -3187,6 +3218,12 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     });
   }
 
+  // rc-8.5.21 RUN-09: a lease-expired row whose durable evidence PROVES no provider call happened is
+  // re-dispatched EXACTLY ONCE (processing-lease-recovery.js); anything ambiguous keeps the manual-review
+  // hold below. One read of the §11 attempt ledger for every expired lease; unreadable ⇒ all held.
+  const lease_evidence = expired_leases.length
+    ? await loadLeaseDispatchEvidence(supabase, expired_leases.map((row) => row.id))
+    : { ok: true, byRow: new Map() };
   for (const row of expired_leases) {
     // Closure-pass certification fixes (2026-08-26):
     // P2 — a processing row that ALREADY SENT (provider id / sent_at) must
@@ -3202,6 +3239,16 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
         campaignStatus: campaignStatusById.get(rowCampaignId(row)) || null,
       })
     ) {
+      continue;
+    }
+    const lease_verdict = evaluateExpiredProcessingLease(row, {
+      attempts_readable: lease_evidence.ok,
+      attempts: lease_evidence.byRow.get(clean(row.id)) || [],
+    });
+    if (lease_verdict.action === "redispatch") {
+      const { processing_run_id: _run, ...redispatch_patch } = buildLeaseRecoveryPatch(row, lease_verdict, { now });
+      // compare-and-set: only a row still `processing` under the SAME lock is returned to the queue
+      updates.push({ id: row.id, patch: redispatch_patch, expect: { queue_status: "processing", lock_token: clean(row.lock_token) || null } });
       continue;
     }
     updates.push({
@@ -3237,10 +3284,11 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
   let applied_patch_count = 0;
 
   if (!dry_run) {
-    for (const { id, patch } of deduped_updates) {
+    for (const { id, patch, expect } of deduped_updates) {
       const patch_result = await applySendQueueLifecyclePatch(supabase, {
         id,
         patch,
+        expect,
         context: lifecycle_context,
       });
       if (patch_result.blocked) {
@@ -5351,6 +5399,23 @@ export async function enqueueSendQueueItem(payload = {}, deps = {}) {
   return insertSupabaseSendQueueRow(payload, deps);
 }
 
+/**
+ * rc-8.5.21 RUN-06: the row's metadata with metadata.recipient_zones / recipient_zone_certainty /
+ * recipient_zone_policy stamped through recipientZoneStamp(resolveRecipientWindowZones(...)). Pure.
+ * A row with no recipient phone is returned unchanged.
+ */
+export function stampRecipientWindowEvidence(row = {}, { mailingGeography = null } = {}) {
+  const metadata = row?.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata) ? row.metadata : {};
+  if (!clean(resolveQueueDestinationPhone(row || {}).phone)) return row?.metadata ?? metadata;
+  const resolution = resolveRecipientWindowZones(
+    recipientEvidenceFromRow({ ...row, metadata }, { mailingGeography: mailingGeography || rowMailingGeography({ ...row, metadata }) || null })
+  );
+  // nothing places the recipient ⇒ NO stamp: a stamp is evidence, and the dispatcher must still HOLD a row
+  // nothing places (rc-7.1 D10) rather than read an "unknown" stamp as the conservative intersection
+  if (!resolution.has_evidence || !resolution.zones.length) return metadata;
+  return { ...metadata, ...recipientZoneStamp(resolution) };
+}
+
 export async function insertSupabaseSendQueueRow(payload, deps = {}) {
   const now = deps.now || nowIso();
   const sanitized = sanitizeSendQueuePayload({
@@ -5371,6 +5436,17 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     row.metadata = attachOutboundProvenance(row);
   } catch {
     // Provenance stamping must never block a send.
+  }
+
+  // rc-8.5.21 RUN-06: EVERY row leaves the canonical writer stamped with its recipient evidence, resolved
+  // by THE recipient-window policy (the recipient phone's area code, the owner's mailing state when the
+  // row carries it, any earlier stamp; the property only narrows), so the dispatcher re-reads the
+  // resolution the scheduler planned with. Re-resolving over an existing stamp only ever ADDS zones (a
+  // stamp is itself recipient evidence), never widens the window. Stamping never blocks a write.
+  try {
+    row.metadata = stampRecipientWindowEvidence(row);
+  } catch {
+    // the dispatcher re-resolves the same evidence at send time
   }
 
   // Internal test-phone quarantine: any outbound to a registered internal

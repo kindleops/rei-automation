@@ -48,7 +48,7 @@ test('PG lifecycle: happy path — plan (real writer) → materialize (rendered,
     assert.ok(row.template_id)
     assert.equal(row.metadata.followup_intent_id, intent.id)
     assert.equal(row.metadata.deferred_message_resolution, false)
-    assert.equal(row.metadata.follow_up_id, `followup_intent:${intent.id}`)
+    assert.equal(row.metadata.follow_up_id, intent.id, 'the §11 follow_up_id anchor is the intent UUID (seller_logical_communications.follow_up_id is uuid)')
     assert.equal(intent.send_queue_id, row.id)
     assert.deepEqual(await claimableEmptyBodies(env.pool), [])
 

@@ -65,6 +65,35 @@ export async function lifecycleDb({ applyLifecycle = true } = {}) {
 
 export const sel = async (pool, sql, params = []) => (await pool.query(sql, params)).rows
 
+/**
+ * The REAL §11 logical-communication ledger (apps/api/supabase/migrations 20260904090000 + 20260904190000:
+ * seller_logical_communications, seller_communication_attempts, the get-or-create / allocate RPCs) on the
+ * disposable DB, for tests that dispatch through createSellerCommunicationStore instead of the memory mirror.
+ */
+export async function applyS11Ledger(pool) {
+  const S11 = (f) => path.join(REPO_DIR, 'apps/api/supabase/migrations', f)
+  await pool.query('create table if not exists public.acquisition_opportunities (id uuid primary key default gen_random_uuid())')
+  await runSqlFile(pool, S11('20260904090000_seller_logical_communications_and_attempts.sql'))
+  await runSqlFile(pool, S11('20260904190000_send_queue_logical_binding_and_operator_actions.sql'))
+}
+
+/**
+ * The REAL queue global execution lock (apps/api/supabase/migrations 20260625180000: the singleton lock
+ * table + queue_acquire / queue_release_global_execution_lock) and the REAL atomic row claim
+ * (20260625200000 + 20260731231500), so a test can drive the WHOLE runner (runSendQueue fails closed
+ * with lock_function_unavailable / atomic_claim_function_unavailable without them). The migration seeds
+ * queue_execution_mode 'stopped' when absent; the test world runs 'normal'.
+ */
+export async function applyQueueExecutionLock(pool) {
+  const Q = (f) => path.join(REPO_DIR, 'apps/api/supabase/migrations', f)
+  await runSqlFile(pool, Q('20260625180000_queue_execution_mode_lockdown.sql'))
+  // the REAL atomic row claim (queue_atomic_claim_send_row), latest definition last
+  await runSqlFile(pool, Q('20260625200000_queue_atomic_claim_containment.sql'))
+  await runSqlFile(pool, Q('20260625203000_queue_verify_dispatch_token_cast.sql'))
+  await runSqlFile(pool, Q('20260731231500_scoped_canary_authorization_atomic_consume.sql'))
+  await pool.query(`insert into public.system_control (key, value) values ('queue_execution_mode', 'normal') on conflict (key) do update set value = excluded.value`)
+}
+
 export async function setSwitches(pool, values = {}) {
   for (const [k, v] of Object.entries(values)) {
     if (v == null) await pool.query('delete from public.system_control where key = $1', [k])
@@ -189,6 +218,15 @@ export async function claimRow(pool, id, token = crypto.randomUUID()) {
 
 /** The REAL queue runner item path over the disposable DB, a simulated provider, persisted updates. */
 export async function dispatchRow(env, claimed, { provider, now = CLOCK, store = createMemoryS11Store(), extraDeps = {} } = {}) {
+  return processSendQueueItem(normalizeSendQueueRow({ ...claimed.row }), { ...itemDeps(env, { provider, now, store }), claimedLockToken: claimed.token, ...extraDeps })
+}
+
+/**
+ * The item-path deps (disposable DB, simulated provider, persisted updates) — shared by dispatchRow (one
+ * pre-claimed row) and by tests that drive the WHOLE runner (runSendQueue: materialization → loader →
+ * preclaim → claim → item path), which passes these deps through to processSendQueueItem.
+ */
+export function itemDeps(env, { provider, now = CLOCK, store = createMemoryS11Store() } = {}) {
   const { pool, sb } = env
   const persist = async (id, payload, lock = null) => {
     const cols = Object.keys(payload)
@@ -200,8 +238,8 @@ export async function dispatchRow(env, claimed, { provider, now = CLOCK, store =
     const r = await pool.query(sql, lock ? [id, ...vals, lock] : [id, ...vals])
     return r.rows[0] || null
   }
-  return processSendQueueItem(normalizeSendQueueRow({ ...claimed.row }), {
-    now, claimedLockToken: claimed.token, supabase: sb,
+  return {
+    now, supabase: sb,
     getSystemValue: async (k) => (await sel(pool, 'select value from public.system_control where key = $1', [k]))[0]?.value ?? (k === 'queue_execution_mode' ? 'normal' : null),
     readAiConversationSwitch: async () => null,
     loadOutboundNumberByPhone: async (p) => {
@@ -222,8 +260,7 @@ export async function dispatchRow(env, claimed, { provider, now = CLOCK, store =
     verifyDispatchAuthorization: async () => ({ ok: true, reason: 'dispatch_authorized', claim_mode: 'lifecycle_claim_stand_in' }),
     store,
     info: () => {}, warn: () => {},
-    ...extraDeps,
-  })
+  }
 }
 
 export const intentsOf = (pool, phone) => sel(pool, `select * from public.followup_intents where thread_key = $1 order by created_at`, [phone])

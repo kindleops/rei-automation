@@ -41,23 +41,45 @@ export function heldTurnWorkItem({ turn_id, version, r3_status, reasons = [], es
   }
 }
 
+/** rc-8.5.21 RUN-13: the operator work item for a turn the AI budget stopped (no reply composed, nothing
+ *  sent). ONE item per turn (re-raised blocks update it). Codes only (payload_is_clean). */
+export function budgetExhaustedTurnWorkItem({ turn_id, version, budget_blocks = 0, state = 'rescheduled' }) {
+  const closed = state === 'closed'
+  return {
+    dedupe_key: `conversation:turn_budget_exhausted:${turn_id}`, kind: 'escalation', severity: 'warning', escalated: true,
+    title: closed ? 'AI budget exhausted: seller message needs an operator (no reply sent)' : 'AI budget exhausted: AI reply postponed (no reply sent)',
+    subject_type: 'conversation', subject_id: turn_id,
+    detail: { reason: 'budget_exhausted', turn_state: closed ? 'decided_budget_exhausted' : 'rescheduled', budget_blocks: Math.max(0, Math.trunc(Number(budget_blocks) || 0)), turn_version: version, remediation: 'raise_ai_budget_then_requeue_budget_blocked_turn_job' },
+  }
+}
+
 async function defaultOperatorItems(env) {
   const { getAgentPgPool } = await import('@/lib/agent/live/live-agent.js')
   const { createOperationsPgStore } = await import('@/lib/agent/operations/operations-store.js')
   return createOperationsPgStore({ pool: getAgentPgPool(env) })
 }
 
-export function createConversationTurnHandler({ env = process.env, store = null, decide = null, dispatch = undefined, runtimeStore = null, trackerFor = null, supabase = null, operatorItems = null } = {}) {
+export function createConversationTurnHandler({ env = process.env, store = null, decide = null, dispatch = undefined, runtimeStore = null, trackerFor = null, supabase = null, operatorItems = null, provider = null } = {}) {
   return Object.freeze({
     kind: CONVERSATION_TURN_KIND,
     async run(ctx) {
       const ref = decodeTurnJobInput(ctx.job.input || {})
       if (!ref) return { result: { code: 'TURN_REF_INVALID' } }
+      // rc-8.5.21 RUN-13: a budget NOTICE job (enqueued by the budget-blocked turn job, whose own lease the
+      // spend guard cleared) raises the operator work item under ITS lease through the lease-bound writer.
+      // It never claims the turn, never decides, never spends; a refused write throws (the job retries).
+      if (ref.budget_notice) {
+        await ctx.step('turn_budget_notice', { progress: { step: 'turn_budget_notice', steps_done: 0, steps_total: 1, pct: 0 } })
+        const items = operatorItems || (await defaultOperatorItems(env))
+        const res = await items.syncWorkItems({ ...ctx.lease, items: [budgetExhaustedTurnWorkItem({ turn_id: ref.turn_id, version: ref.version, budget_blocks: ref.budget_blocks || 0, state: ref.budget_notice })], close_missing: false })
+        if (!res?.ok) throw Object.assign(new Error('OPERATOR_ITEM_REFUSED'), { code: 'OPERATOR_ITEM_REFUSED', reason: res?.reason || null })
+        return { result: { code: 'TURN_BUDGET_NOTICE_RAISED', reason: 'budget_exhausted', turn_ref: encodeRef(ref.turn_id), turn_version: ref.version } }
+      }
       await ctx.step('turn', { progress: { step: 'turn', steps_done: 0, steps_total: 1, pct: 0 } })
       const sb = supabase || (store && decide ? null : await defaultSupabase())
       const turnStore = store || (await defaultTurnStore(sb))
       const wiring = decide ? null : await import('./conversation-turn-wiring.js')
-      const decideTurn = decide || wiring.createCanonicalTurnDecider({ supabase: sb, env, tracker: trackerFor ? trackerFor(ctx) : null, remainingMs: ctx.remainingMs, signal: ctx.signal })
+      const decideTurn = decide || wiring.createCanonicalTurnDecider({ supabase: sb, env, tracker: trackerFor ? trackerFor(ctx) : null, remainingMs: ctx.remainingMs, signal: ctx.signal, ...(provider ? { provider } : {}) })
       // rc-8.5.21: the R3 dispatcher is wired; it only ever receives a reply the decider authorised
       // (kill switch + policy + scope), and R3 re-reads every switch before any enqueue
       const dispatchTurn = dispatch !== undefined ? dispatch : (await import('./conversation-turn-dispatch.js')).createR3TurnDispatcher({ supabase: sb, jobId: ctx.job.job_id })

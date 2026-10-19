@@ -184,6 +184,20 @@ export function evaluateSupervisor({ snapshot, health = null, actionCenter = nul
     add(check('runtime_jobs', failed.length ? 'warn' : 'ok', { value: { jobs_24h: runtime.jobs.length, failed_24h: failed.length, failed_by_kind: byKind }, source: 'agent.research_job' }),
       failed.length ? { dedupe_key: 'supervisor:runtime_failures', kind: 'remediation', severity: 'warning', recoverable: true, title: `${failed.length} runtime job(s) failed in 24 h`, remediation: { action: 'inspect_missions' } } : null)
   }
+  // 15b rc-8.5.21 RUN-13: AI conversation turns stopped by the spend guard. The job is parked
+  // budget_blocked (no composition, no fallback, no send) and its lease is gone, so no operator item can
+  // be written under IT: the per-turn item (conversation:turn_budget_exhausted:<turn>) is raised by the
+  // immediate budget-notice job under its own lease; THIS check is the aggregate backstop (reason
+  // budget_exhausted) should a notice fail. The turn itself is finalized with BUDGET_EXHAUSTED and
+  // re-scheduled, bounded (turn-engine.js onBudgetBlocked).
+  if (!runtime || runtime.unavailable) add(unavailable('conversation_turn_budget', runtime?.unavailable || 'RUNTIME_UNAVAILABLE'))
+  else {
+    const blocked = runtime.jobs.filter((j) => j.kind === 'conversation.turn' && j.state === 'budget_blocked')
+    const codes = {}
+    for (const j of blocked) { const c = String(j.last_error?.code || j.error_code || 'budget_blocked'); codes[c] = (codes[c] || 0) + 1 }
+    add(check('conversation_turn_budget', blocked.length ? 'warn' : 'ok', { value: { budget_blocked_24h: blocked.length, reason: blocked.length ? 'budget_exhausted' : null, by_code: codes }, source: 'agent.research_job (conversation.turn)' }),
+      blocked.length ? { dedupe_key: 'supervisor:conversation_turn_budget_exhausted', kind: 'escalation', severity: 'warning', escalate: true, recoverable: true, title: `${blocked.length} AI conversation turn(s) blocked by the AI budget in 24 h (budget_exhausted): no reply composed, nothing sent`, remediation: { action: 'raise_ai_budget_then_requeue_budget_blocked_turn_jobs', reason: 'budget_exhausted', note: 'The turn is re-scheduled at most 3 times, an hour apart; an owner may raise the AI spend ceiling and requeue the parked conversation.turn jobs. Nothing is sent from here.' } } : null)
+  }
 
   // 16 AI spend
   if (!spend || spend.unavailable) add(unavailable('ai_spend', spend?.unavailable || 'SPEND_UNAVAILABLE'))

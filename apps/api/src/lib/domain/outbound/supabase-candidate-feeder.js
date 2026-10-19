@@ -4655,6 +4655,9 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
         template_key: clean(options.template_id) || null,
         property_address_city: clean(pick(candidate.property_city, candidate.raw?.property_address_city)) || null,
         property_address_zip: clean(pick(candidate.property_zip, candidate.raw?.property_address_zip)) || null,
+        // rc-8.5.21 RUN-06: the owner's mailing state (recipient evidence) rides the row, so the canonical
+        // writer's recipient-zone stamp and the dispatcher judge the touch on the evidence it was planned with
+        owner_address_state: clean(pick(candidate.owner_address_state, candidate.raw?.owner_address_state)) || null,
         property_type: clean(pick(candidate.property_type, candidate.raw?.property_type)) || null,
         seller_status: clean(pick(candidate.seller_status, candidate.contact_status, candidate.activity_status)) || null,
         pipeline_stage: clean(pick(candidate.pipeline_stage, candidate.conversation_stage, candidate.stage_code)) || null,
