@@ -1788,12 +1788,17 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
   // COLD sends are capped by daily_limit; CONVERSATIONAL sends (replies to
   // engaged sellers, operator sends) only by the total safety ceiling.
   const { send_class, basis: send_class_basis } = await resolveRowSendClass(row, normalized, deps);
+  // LOCKED OWNER RULE (thread continuity), rc-8.5.21: a lifecycle follow-up (metadata.followup_intent_id)
+  // is PINNED to the thread's established sender it was materialized with. It is never rerouted (no
+  // routing-graph pick, no sticky-thread fallback, no rotation): an ineligible pinned sender BLOCKS the
+  // row visibly and the follow-up lifecycle holds the intent for an operator.
+  const followup_pinned = Boolean(clean((row?.metadata ?? normalized.metadata ?? {})?.followup_intent_id));
 
   // SENDER ROUTING 2.0 (double-gated). Thread continuity, the routing graph and
   // a PARK (no retry burn) when nothing in the market's graph can send. null =
   // not deciding (gate off / graph absent) -> both branches below, unchanged.
   // With the env ceiling off this is one synchronous read: no import, no await.
-  if (senderRoutingCeiling(deps.env || process.env)) {
+  if (!followup_pinned && senderRoutingCeiling(deps.env || process.env)) {
     const { routeQueueRowViaPolicy } = await import("@/lib/domain/routing/sender-routing/sender-routing-runtime.js");
     const routed = await routeQueueRowViaPolicy(normalized, {
       ...deps,
@@ -1851,7 +1856,7 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
       now: deps.now ? new Date(deps.now) : new Date(),
       send_class,
     });
-    if (!eligibility.ok && eligibility.reason !== "sender_blocklist_unreadable") {
+    if (!eligibility.ok && eligibility.reason !== "sender_blocklist_unreadable" && !followup_pinned) {
       // A REPLY on a seller conversation (not a campaign touch) whose pinned
       // sender can no longer send: the sticky thread sender rule picks the
       // highest-priority eligible fallback and persists it (never silent:
@@ -1873,6 +1878,7 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
         from_phone_number: intended,
         send_class,
         send_class_basis,
+        ...(followup_pinned ? { followup_sender_pinned: true } : {}),
       };
     }
 
@@ -1888,6 +1894,11 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
       send_class,
       send_class_basis,
     };
+  }
+
+  // a pinned follow-up with no sender is never given one here (never a rotation pick): blocked visibly
+  if (followup_pinned) {
+    return { ok: false, reason: "followup_sender_missing", ineligible_sender: true, terminal: true, selected: null, from_phone_number: null, send_class, send_class_basis, followup_sender_pinned: true };
   }
 
   if (typeof deps.selectAvailableTextgridNumber === "function") {

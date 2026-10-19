@@ -531,9 +531,11 @@ export async function materializeClaimedIntent(intent, deps = {}) {
     if (sp && sp.ok === false) return settle(intent, deps, { to: S.NOT_EXECUTABLE, reason: `stage_policy:${clean(sp.reason)}` })
   }
 
-  // 7. sender health: the thread's sticky sender is kept (persona + number continuity) and its health is
-  //    recorded; the dispatcher's canonical sender authority re-validates it at send time and reroutes a
-  //    cooling / blocked sender to the thread's eligible fallback, or blocks the row visibly.
+  // 7. sender health: the thread's sticky sender is kept (persona + number continuity). LOCKED OWNER RULE
+  //    (thread continuity): a follow-up NEVER changes the thread's number. A sender that is cooling /
+  //    blocked / disabled / not in the fleet is therefore HELD here, visibly (reason sender_unhealthy), and
+  //    never materialized for the dispatcher to reroute; the dispatcher re-validates the pinned sender at
+  //    send time and, for a follow-up, blocks the row (never a fallback number) if it went bad since.
   //    rc-8.5.21 F1: a writer that knew no sender (the S2 / S3 / offer silence follow-ups: the delivery
   //    trigger passes none) never yields a sender-less row the loader pauses before any claim. The
   //    thread's ESTABLISHED sender is resolved here through THE persona + sender continuity resolver
@@ -547,6 +549,9 @@ export async function materializeClaimedIntent(intent, deps = {}) {
   let sender_health = null
   if (from) {
     try { sender_health = lower(await deps.senderStatus(from)) || 'unknown_sender' } catch { return settle(intent, deps, { to: S.PLANNED, reason: 'sender_lookup_failed', transient: true }) }
+    if (UNHEALTHY_SENDER.has(sender_health) || sender_health === 'unknown_sender') {
+      return settle(intent, deps, { to: S.HELD, reason: 'sender_unhealthy', detail: { sender_health, sender_source: sender.source || null } })
+    }
   }
 
   // 8. contact window (category 3, scheduled follow-up: never an active-conversation exemption, even
@@ -592,7 +597,9 @@ export async function materializeClaimedIntent(intent, deps = {}) {
     recipient_zone_policy: resolution.version,
     language: rendered.language || language,
     followup_sender_source: sender.source,
-    ...(sender_health ? { followup_sender_health: sender_health, ...(UNHEALTHY_SENDER.has(sender_health) ? { followup_sender_needs_reroute: true } : {}) } : {}),
+    // the sender is pinned (thread continuity): the dispatcher never reroutes a follow-up
+    ...(sender_health ? { followup_sender_health: sender_health } : {}),
+    followup_sender_pinned: true,
     ...(when.deferred ? { followup_send_deferred: true } : {}),
     ...(rendered.render_context ? { deferred_render_context_resolved: Object.keys(rendered.render_context) } : {}),
   }
@@ -904,9 +911,14 @@ export function createFollowUpLifecycleDeps({ supabase, readSwitch = null, holdC
       const { resolveDeferredQueueMessage } = await import('../queue/resolve-deferred-queue-message.js')
       return resolveDeferredQueueMessage(virtual, { supabase })
     }),
+    // the worse of the number's status and its health state (a number can be status active while its
+    // health is cooling / blocked); not in the fleet ⇒ null (unknown_sender ⇒ held)
     async senderStatus(phone) {
-      const t = await rowsOf(supabase.from('textgrid_numbers').select('status,phone_number').in('phone_number', [phone]).limit(1))
-      return t[0] ? (clean(t[0].status) || 'active') : null
+      const t = await rowsOf(supabase.from('textgrid_numbers').select('status,health_state,phone_number').in('phone_number', [phone]).limit(1))
+      if (!t[0]) return null
+      const status = lower(t[0].status) || 'active'
+      const health = lower(t[0].health_state)
+      return UNHEALTHY_SENDER.has(status) ? status : UNHEALTHY_SENDER.has(health) ? health : status
     },
     async propertyGeography(property_id) {
       if (!clean(property_id)) return null
