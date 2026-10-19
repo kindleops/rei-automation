@@ -1,0 +1,87 @@
+// END TO END on a DISPOSABLE PostgreSQL 17 (AGENT_PG_TEST_DB_URL, loopback only): the REAL Action MCP app — boot
+// self-check, the real gateway, its database entry points AS lc_action_gateway with the tenant claim — behind
+// the loopback HTTP transport, driven by the official SDK client as two different agents.
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { buildApp } from '../src/app.mjs'
+import { startHttp } from '../src/protocol/http.mjs'
+import { baseEnv, DIR } from './helpers.mjs'
+import { pgAvailable, skipReason } from '../../../apps/api/tests/pg/agent-pg-harness.mjs'
+import { pgSupabase, isoPool } from '../../../apps/api/tests/helpers/pg-supabase.mjs'
+import { gatewayDb, seedWorld, registerAgent, seedThread, gatewayPool, setControls, sel, ORG, SELLER } from '../../../apps/api/tests/helpers/action-gateway-pg.mjs'
+
+const skip = pgAvailable() ? false : skipReason
+const httpEnv = (over = {}) => baseEnv({ LEADCOMMAND_ACTION_MCP_TRANSPORT: 'streamable-http', LEADCOMMAND_ACTION_MCP_HTTP_BIND: '127.0.0.1', LEADCOMMAND_ACTION_MCP_HTTP_PORT: '0', LEADCOMMAND_ACTION_MCP_AGENT_CREDENTIAL_FILE: '', ...over })
+async function client(url, token) {
+  const c = new Client({ name: 'e2e', version: '1.0.0' })
+  await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }))
+  return c
+}
+const json = (r) => r.structuredContent
+
+test('E2E (PG): the Action MCP boots only after the database self-check of lc_action_gateway; two agents act ONLY within their own grants; the hold lands in the ONE registry; stubs never succeed; the emergency stop stops everything; the audit file carries no credential or phone', { skip }, async () => {
+  const env = await gatewayDb()
+  const auditFile = path.join(DIR, `audit-${Date.now()}.jsonl`)
+  let listener
+  let app
+  try {
+    await seedWorld(env.owner)
+    const credA = await registerAgent(env.owner, { agent_id: 'agt_ops', grants: [['holds.set_thread_hold', 2], ['research.create_job', 1, { spendPerDay: 5 }], ['tasks.create_operator_task', 1]] })
+    const credB = await registerAgent(env.owner, { agent_id: 'agt_research', grants: [['research.create_job', 1, { spendPerDay: 5 }]] })
+    const t = await seedThread(env.owner)
+    const db = pgSupabase(env.db.trackPool(gatewayPool(env.url, ORG)))
+    app = await buildApp({ env: httpEnv({ LEADCOMMAND_ACTION_MCP_AUDIT_FILE: auditFile }), db, scrub: false })
+    listener = await startHttp({ app })
+    const a = await client(listener.url, credA)
+    const b = await client(listener.url, credB)
+
+    const h = await a.callTool({ name: 'set_thread_hold', arguments: { client_request_id: 'e2e-hold-0001', thread_id: t.thread_id, reason_code: 'seller_requested_pause' } })
+    assert.equal(h.isError, false, JSON.stringify(json(h)))
+    assert.equal(json(h).code, 'HOLD_SET')
+    assert.equal((await sel(env.owner, `select set_by from public.automation_holds where thread_key = $1 and released_at is null`, [SELLER]))[0].set_by, 'agent:agt_ops')
+    const again = await a.callTool({ name: 'set_thread_hold', arguments: { client_request_id: 'e2e-hold-0001', thread_id: t.thread_id, reason_code: 'seller_requested_pause' } })
+    assert.equal(json(again).status, 'replayed')
+
+    const denied = await b.callTool({ name: 'set_thread_hold', arguments: { client_request_id: 'e2e-hold-0002', thread_id: t.thread_id, reason_code: 'other' } })
+    assert.equal(denied.isError, true)
+    assert.equal(json(denied).error.code, 'CAPABILITY_NOT_GRANTED')
+    const rj = await b.callTool({ name: 'create_research_job', arguments: { client_request_id: 'e2e-research-1', question: 'Market check for the Oak St area' } })
+    assert.equal(json(rj).code, 'JOB_ENQUEUED', JSON.stringify(json(rj)))
+    assert.equal((await sel(env.owner, `select i.agent_id from action_gateway.action_intents i where i.client_key = 'e2e-research-1'`))[0].agent_id, 'agt_research')
+
+    const stub = await a.callTool({ name: 'pause_campaign', arguments: { client_request_id: 'e2e-stub-0001' } })
+    assert.equal(json(await a.callTool({ name: 'queue_authorized_reply', arguments: { client_request_id: 'e2e-stub-0002' } })).error.code, 'TIER_DISABLED', 'T3 is not enabled at all')
+    assert.equal(stub.isError, true)
+    assert.equal(json(stub).error.code, 'capability_not_implemented')
+    const forged = await a.callTool({ name: 'create_operator_task', arguments: { client_request_id: 'e2e-forged-01', title: 'x', agent_id: 'agt_research' } })
+    assert.equal(json(forged).error.code, 'FORGED_CONTEXT')
+
+    await setControls(env.owner, { action_gateway_enabled: null })
+    const stopped = await a.callTool({ name: 'create_operator_task', arguments: { client_request_id: 'e2e-stop-0001', title: 'after the stop' } })
+    assert.equal(json(stopped).error.code, 'ACTION_GATEWAY_STOPPED')
+    assert.equal((await sel(env.owner, `select count(*)::int n from agent.ops_work_item`))[0].n, 0)
+
+    await a.close()
+    await b.close()
+    const lines = fs.readFileSync(auditFile, 'utf8')
+    assert.ok(lines.includes('"credential_self_check"') && lines.includes('"outcome":"ok"'))
+    assert.ok(!lines.includes(credA) && !lines.includes(credB), 'no credential in the audit file')
+    assert.ok(!lines.includes('13125550161') && !lines.includes('3125550161'), 'no phone in the audit file')
+  } finally {
+    await listener?.close().catch(() => {})
+    await app?.close().catch(() => {})
+    await env.db.drop()
+  }
+})
+
+test('E2E (PG): the server REFUSES to boot when its database credential is not exactly lc_action_gateway (a superuser / owner connection fails the self-check)', { skip }, async () => {
+  const env = await gatewayDb()
+  try {
+    const ownerDb = pgSupabase(env.db.trackPool(isoPool(env.url, 2)))
+    await assert.rejects(buildApp({ env: baseEnv(), db: ownerDb, scrub: false }), (e) => e.code === 'CREDENTIAL_SELF_CHECK_FAILED')
+  } finally { await env.db.drop() }
+})
