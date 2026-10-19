@@ -26,7 +26,7 @@ export const LIFECYCLE_MIGRATION = MIG('PROPOSED_20261017120000_followup_intent_
 
 // the read surface the send-time guard, the nurture render context, the resolver and the dispatcher read
 // (prod-shaped subset; send_queue / message_events / inbox_thread_state come from the baselines)
-const PUBLIC_FIXTURE = `
+export const LIFECYCLE_PUBLIC_FIXTURE = `
   alter table public.message_events add column if not exists provider_message_sid text, add column if not exists from_phone_number text,
     add column if not exists to_phone_number text, add column if not exists property_id text, add column if not exists prospect_id text,
     add column if not exists failure_bucket text, add column if not exists master_owner_id text;
@@ -60,7 +60,7 @@ export async function lifecycleDb({ applyLifecycle = true } = {}) {
   await runSqlFile(db.pool, FIX('send_queue_live_baseline.sql'))
   await runSqlFile(db.pool, FIX('operations_public_baseline.sql'))
   await runSqlFile(db.pool, FIX('automation_holds_public_baseline.sql'))
-  await db.pool.query(PUBLIC_FIXTURE)
+  await db.pool.query(LIFECYCLE_PUBLIC_FIXTURE)
   await runSqlFile(db.pool, MIG('PROPOSED_20261016200000_automation_holds_registry.sql'))
   if (applyLifecycle) await runSqlFile(db.pool, LIFECYCLE_MIGRATION)
   const pool = db.trackPool(isoPool(db.url, 8))

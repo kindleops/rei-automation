@@ -22,6 +22,7 @@ import {
 } from "./conversation-context.js";
 import { extractAddresseeName, extractSenderName, detectMessageLanguage } from "./reply-disposition-signals.js";
 import { describeLastQuestion } from "./last-question.js";
+import { isContinuationQuestion } from "@/lib/domain/conversation-ai/property-facts.js";
 import { parsePlatformReaction } from "./emoji-interpretation.js";
 import { latestIdentifiableSellerLanguage } from "./seller-reply-language.js";
 import { isSellerAutopilotV2Enabled, V2_CONTEXT_ALIASES } from "@/lib/domain/seller-flow/seller-autopilot-v2.js";
@@ -307,10 +308,29 @@ export async function buildConversationContext({
       : null;
   const body_use_case =
     message_type_use_case || template_use_case ? null : deriveUseCaseFromBody(last_outbound.message_body);
-  const use_case =
+  let use_case =
     message_type_use_case || template_use_case || body_use_case || raw_message_type_use_case;
+  // rc-8.5.21 P0 (independent evaluation): a FOLLOW-UP FRAGMENT that continues our previous question
+  // ("And how about 456 Pine St?", "What about the one on Elm?") asks the SAME question about another
+  // property. Read alone its body names no question, so a bare "No" lost the ownership context: it is
+  // read with the question it continues (the downstream attribution then sees BOTH ownership questions
+  // and holds the thread, exactly as when one message named both properties).
+  let continued_question = false;
+  if (USE_CASE_QUESTION_TYPE[use_case] !== "ownership" && isContinuationQuestion(last_outbound.message_body) && Array.isArray(rows) && rows[1]) {
+    const prev = rows[1];
+    const prev_use_case =
+      mapMessageTypeToUseCase(prev.message_type) && !GENERIC_USE_CASES.has(mapMessageTypeToUseCase(prev.message_type))
+        ? mapMessageTypeToUseCase(prev.message_type)
+        : deriveUseCaseFromBody(prev.message_body);
+    if (USE_CASE_QUESTION_TYPE[prev_use_case] === "ownership") {
+      use_case = prev_use_case;
+      continued_question = true;
+    }
+  }
   if (!use_case) return null;
-  const use_case_source = message_type_use_case
+  const use_case_source = continued_question
+    ? "continued_previous_question"
+    : message_type_use_case
     ? "message_type"
     : template_use_case
       ? "template_use_case"

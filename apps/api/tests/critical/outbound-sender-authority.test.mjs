@@ -165,6 +165,8 @@ test("rotation applies the same eligibility rules as revalidation", async () => 
   const selection = await selectAvailableTextgridNumber(rowWith(null), {
     supabase,
     loadSenderSentToday: async () => new Map(),
+    // a new conversation (nothing established): rotation may choose (sender-continuity.js)
+    loadEstablishedSender: async () => null,
   });
   assert.equal(selection.ok, true);
   assert.equal(selection.from_phone_number, "+13055376611");

@@ -30,6 +30,7 @@ import { evaluateCanonicalSendAuthority } from '@/lib/domain/queue/canonical-sen
 import { bindScopedCanaryTransportAuthority } from '@/lib/domain/queue/scoped-canary-transport-authority.js';
 import { classifyTextGridProviderError } from '@/lib/domain/messaging/textgrid-provider-error-classifier.js';
 import { assertNoEmDash } from '@/lib/domain/messaging/outbound-content-guard.js';
+import { finalSenderContinuityCheck } from '@/lib/domain/delivery/sender-continuity.js';
 
 const logger = child({ module: 'domain.communications.queue_dispatch' });
 
@@ -154,6 +155,9 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
   // runs AFTER that check, so by the time transport asks, this holds the verdict
   // that actually authorised this attempt rather than an earlier, staler one.
   let canonical_authority_verdict = null;
+  // The FINAL sender-continuity verdict of the attempt (owner P0, rc-8.5.21), returned to the caller
+  // so a refusal becomes a visible hold bound to the thread's sender.
+  let sender_continuity = null;
   const sendProviderImpl = deps.sendProvider;
   const sendProvider = async (args) => {
     // Bind the scoped-canary transport authority to the communication the seam
@@ -210,7 +214,32 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
         // only because the seam refuses the attempt outright on !ok, so no
         // provider call can follow a denial.
         canonical_authority_verdict = authority.ok ? authority : null;
-        return authority.ok ? { ok: true } : { ok: false, reason: authority.reason };
+        if (!authority.ok) return { ok: false, reason: authority.reason };
+        // SENDER CONTINUITY — the FINAL authoritative check (owner P0, rc-8.5.21), on EVERY attempt
+        // (a retry after a crash included), immediately before the attempt is allocated and the
+        // provider is called: the number about to be used must be the thread's established sender,
+        // read fresh, and that sender must still be able to send. Refused ⇒ no attempt, no provider
+        // call; the runner holds the row visibly (never another number).
+        const check = deps.finalSenderContinuityCheck || finalSenderContinuityCheck;
+        let continuity;
+        try {
+          continuity = await check(queue_row, { from: message_fields.from }, {
+            supabase: deps.supabase,
+            getSystemValue: deps.getSystemValue,
+            now: deps.now,
+            ...(typeof deps.loadEstablishedSender === 'function' ? { loadEstablishedSender: deps.loadEstablishedSender } : {}),
+            ...(typeof deps.loadOutboundNumberByPhone === 'function' ? { loadOutboundNumberByPhone: deps.loadOutboundNumberByPhone } : {}),
+            ...(typeof deps.loadDispatchBlockedSenders === 'function' ? { loadDispatchBlockedSenders: deps.loadDispatchBlockedSenders } : {}),
+          });
+        } catch {
+          continuity = { ok: false, reason: 'sender_continuity_unreadable', verdict: null };
+        }
+        sender_continuity = { ok: continuity?.ok === true, reason: continuity?.reason || null, sender_reason: continuity?.sender_reason || null, established_sender: continuity?.verdict?.established_sender || null, established_source: continuity?.verdict?.established_source || null };
+        if (!continuity?.ok) {
+          logger.warn('queue_dispatch.sender_continuity_refused', { queue_row_id, reason: continuity?.reason, sender_reason: continuity?.sender_reason || null });
+          return { ok: false, reason: continuity?.reason || 'sender_continuity_unreadable' };
+        }
+        return { ok: true };
       },
       assertOutboundContent: async (message) => {
         const verdict = assertNoEmDash(message?.body);
@@ -219,7 +248,7 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
     }
   );
 
-  return { ...outcome, raw_provider_result };
+  return { ...outcome, raw_provider_result, ...(sender_continuity ? { sender_continuity } : {}) };
 }
 
 export default dispatchSellerQueueRow;

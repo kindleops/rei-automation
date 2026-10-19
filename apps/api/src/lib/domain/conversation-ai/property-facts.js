@@ -114,31 +114,90 @@ export function clauseFacts(text, index) {
   return out.filter((x) => x.ownership || x.interest)
 }
 
+// rc-8.5.21 P0 (independent evaluation): a FOLLOW-UP FRAGMENT that continues the question before it
+// ("And how about 456 Pine St?", "What about the one on Elm?", "Same question for the Pine house?",
+// "And 456 Pine?") asks THE SAME KIND of question about another property. It is read with the kind of
+// the open question it continues; before this, its kind was 'other' and an ownership question about
+// property B sent as a separate message was invisible: one bare "No" was read as answering A alone.
+const CONTINUATION_RE = /^\s*(?:(?:and|also|plus|oh|ok(?:ay)?|sorry|or)\b[,\s]*)*(?:(?:how|what)\s+about\b|same\s+(?:question|for|with)\b|the\s+(?:one|house|place|property)\s+(?:on|at)\b|(?:and|also)\s+(?:the\s+)?[0-9]{1,6}\s+[a-z])|^\s*(?:and|also|or)\s+[^?]{0,80}\?\s*$/i
+
+/** A follow-up fragment that continues the previous question (pure). */
+export function isContinuationQuestion(text) {
+  const s = clean(text)
+  return s.includes('?') && s.length <= 140 && CONTINUATION_RE.test(s)
+}
+
+/**
+ * The properties ONE of our questions is about: the thread properties its text names, else the address
+ * keys it names (an address no record knows still distinguishes one question from another), else the
+ * row's property, else '?' (unknown).
+ */
+export function questionIdentities(body, index, rowPropertyId = null) {
+  const named = propertiesNamedIn(body, index)
+  if (named.length) return named
+  const keys = addressKeysIn(body).filter((k) => !k.startsWith('street:'))
+  if (keys.length) return keys.map((k) => `addr:${k}`)
+  return [clean(rowPropertyId) || '?']
+}
+
+/**
+ * The questions WE asked, in order, with their effective kind (a continuation fragment inherits the kind
+ * of the question it continues) and the properties each is about. Pure.
+ * @returns {Array<{ id: string|null, kind: string, properties: string[], at: number }>}
+ */
+export function questionsOf(messages = [], { index = null, questionKindOf } = {}) {
+  const out = []
+  let prev = null
+  for (const m of [...messages].sort((a, b) => t(a) - t(b))) {
+    const dir = String(m?.direction || '').toLowerCase()
+    if (dir.startsWith('in')) { prev = null; continue }
+    if (!dir.startsWith('out')) continue
+    const body = clean(m.body ?? m.message_body)
+    let kind = typeof questionKindOf === 'function' ? questionKindOf({ use_case: m.use_case || m.use_case_template || null, body }) : 'none'
+    if ((kind === 'other' || kind === 'none') && prev && isContinuationQuestion(body)) kind = prev.kind
+    if (kind === 'none') continue
+    const q = { id: m.id != null ? String(m.id) : null, kind, properties: questionIdentities(body, index, m.property_id), at: t(m) }
+    out.push(q)
+    prev = q
+  }
+  return out
+}
+
 /**
  * Attribution of every inbound message in the thread (time order). `questionKindOf` is injected
  * (questions.js) so this module stays dependency-free.
- * @returns {Map<string, { property: string, basis: string, ambiguous: boolean, open_ownership_properties: string[] }>}
+ *
+ * rc-8.5.21 P0: the open questions are ALL of our questions since the seller's previous reply — across
+ * separate messages, follow-up fragments included — never the last outbound alone. One bare answer
+ * after ownership questions about more than one property is UNATTRIBUTED (a thread hold), exactly as
+ * when one message named both properties.
+ * @returns {Map<string, { property: string, basis: string, ambiguous: boolean, open_ownership_properties: string[], last_question_kind: string|null, open_question_kinds: string[] }>}
  *          inbound message id → attribution ('' = not reliably identified)
  */
 export function attributeInbounds({ messages = [], properties = [], questionKindOf }) {
   const index = propertyAddressIndex({ properties, messages })
   const out = new Map()
-  let open = [] // our unanswered questions since the last inbound: [{ kind, property_id }]
+  let open = [] // our unanswered questions since the last inbound: [{ kind, properties }]
+  let prev = null
   for (const m of [...messages].sort((a, b) => t(a) - t(b))) {
     const dir = String(m?.direction || '').toLowerCase()
     const body = clean(m.body ?? m.message_body)
     if (dir.startsWith('out')) {
-      const kind = typeof questionKindOf === 'function' ? questionKindOf({ use_case: m.use_case || null, body }) : 'none'
-      if (kind !== 'none') open.push({ kind, property_id: clean(m.property_id) || null })
+      let kind = typeof questionKindOf === 'function' ? questionKindOf({ use_case: m.use_case || null, body }) : 'none'
+      if ((kind === 'other' || kind === 'none') && prev && isContinuationQuestion(body)) kind = prev.kind
+      if (kind !== 'none') { const q = { kind, properties: questionIdentities(body, index, m.property_id), property_id: clean(m.property_id) || null }; open.push(q); prev = q }
       continue
     }
     if (!dir.startsWith('in')) continue
+    prev = null
     const named = propertiesNamedIn(body, index)
-    const ownOpen = [...new Set(open.filter((q) => q.kind === 'ownership').map((q) => q.property_id || '?'))]
+    const ownOpen = [...new Set(open.filter((q) => q.kind === 'ownership').flatMap((q) => q.properties))]
+    const lastQ = open.length ? open[open.length - 1] : null
     let property = ''
     let basis = 'unattributed'
     let ambiguous = false
     let clauses = null
+    const realPid = (p) => (p && p !== '?' && !p.startsWith('addr:') ? p : '')
     if (named.length === 1) { property = named[0]; basis = 'named_in_reply' }
     else if (named.length > 1) {
       // several properties named: read clause by clause; a clause naming one property answers it
@@ -147,13 +206,18 @@ export function attributeInbounds({ messages = [], properties = [], questionKind
       else { ambiguous = true; basis = 'several_properties_named' }
     }
     else if (ownOpen.length > 1) { ambiguous = true; basis = 'several_open_ownership_questions' }
-    else if (ownOpen.length === 1 && ownOpen[0] !== '?') { property = ownOpen[0]; basis = 'answers_open_ownership_question' }
+    else if (ownOpen.length === 1 && realPid(ownOpen[0])) { property = ownOpen[0]; basis = 'answers_open_ownership_question' }
     else {
-      const lastQ = open.length ? open[open.length - 1] : null
-      if (lastQ?.property_id) { property = lastQ.property_id; basis = 'answers_open_question' }
+      const lastPid = lastQ ? realPid(lastQ.properties.length === 1 ? lastQ.properties[0] : '') || lastQ.property_id : null
+      if (lastPid) { property = lastPid; basis = 'answers_open_question' }
       else if (clean(m.property_id)) { property = clean(m.property_id); basis = 'inbound_row_property' }
     }
-    out.set(String(m.id), { property, basis, ambiguous, clauses, open_ownership_properties: ownOpen.filter((p) => p !== '?') })
+    out.set(String(m.id), {
+      property, basis, ambiguous, clauses,
+      open_ownership_properties: ownOpen.map(realPid).filter(Boolean),
+      last_question_kind: lastQ?.kind || null,
+      open_question_kinds: [...new Set(open.map((q) => q.kind))],
+    })
     // an inbound answers (consumes) the questions it follows
     open = []
   }

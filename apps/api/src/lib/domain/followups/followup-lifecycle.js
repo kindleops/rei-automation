@@ -39,6 +39,7 @@ import crypto from 'node:crypto'
 
 import { OWNERSHIP_DECLINED_ROLE, OWNERSHIP_DECLINED_REASON } from '../queue/ownership-recontact-guard.js'
 import { questionKindOf } from '../conversation-ai/questions.js'
+import { propertyAddressIndex, questionsOf } from '../conversation-ai/property-facts.js'
 import { bareNoAnswer } from '../conversation-ai/answers.js'
 import { isBareNotInterested, isOwnershipConfirmation } from '../classification/ownership-answer-forms.js'
 import { resolveThreadContinuity } from '../conversation-ai/persona-continuity.js'
@@ -95,28 +96,75 @@ const phoneTail = (v) => { const d = clean(v).replace(/\D/g, ''); return d.lengt
  */
 // owner 2026-10-17: the distinct disposition (never not_interested); both spellings are the same state
 const DECLINED_STATES = new Set([OWNERSHIP_DECLINED_UNVERIFIED, 'declined_unverified'])
-const NURTURE_ON_DISINTEREST_KINDS = new Set(['not_interested_nurture'])
+// rc-8.5.21 P0 (hard invariant): a SELLING nurture requires a selling-intent answer. These kinds are
+// planned from a reply whose label may be wrong (a bare "No" to the ownership question labelled
+// not_interested / unclear); every one of them is refused when the latest seller reply answers an
+// ownership question without a selling-intent statement (plan time, materialization, dispatch gate).
+const NURTURE_ON_DISINTEREST_KINDS = new Set(['not_interested_nurture', 'nurture_not_interested', 'nurture_unclear'])
+export const SELLING_NURTURE_KINDS = NURTURE_ON_DISINTEREST_KINDS
+export const SELLING_NURTURE_REQUIRES_SELLING_ANSWER = 'selling_nurture_requires_selling_intent_answer'
+export const OWNERSHIP_ATTRIBUTION_UNRESOLVED = 'ownership_denial_property_unresolved'
+// an explicit statement about SELLING / KEEPING the property (EN + ES), the answer a selling nurture needs
+const SELLING_ANSWER_RE = /\b(?:not\s+(?:selling|for\s+sale|looking\s+to\s+sell|planning\s+(?:on|to)\s+sell(?:ing)?|ready\s+to\s+sell|interested\s+in\s+selling)|no\s+(?:plans?|intention|interest)\s+(?:to|of|in)\s+sell(?:ing)?|(?:won'?t|will\s+not|don'?t\s+want\s+to|do\s+not\s+want\s+to|never\s+going\s+to|not\s+going\s+to)\s+sell|(?:keep|keeping)\s+(?:it|the\s+(?:house|home|property|place))|wants?\s+to\s+keep|maybe\s+(?:later|next\s+year|in\s+a\s+(?:few|couple))|not\s+(?:right\s+)?now\s+(?:but|maybe)|no\s+(?:la\s+)?(?:vendo|vender[eé]|quiero\s+vender|est[aá]\s+a\s+la\s+venta)|no\s+me\s+interesa\s+vender)\b/i
+/** Does the reply burst carry a SELLING-intent answer (not merely an ownership answer)? Pure. */
+export function burstHasSellingAnswer(burst = []) {
+  const texts = (burst || []).map((m) => String(m?.message_body ?? m?.body ?? ''))
+  if (texts.some((x) => SELLING_ANSWER_RE.test(x))) return true
+  // "Yes I do. Not interested" / "Yes, no thanks": a CONFIRMED owner's decline is about the sale
+  const confirmed = texts.some((x) => isOwnershipConfirmation(x))
+  return confirmed && texts.some((x) => isBareNotInterested(x) || /\bnot\s+interested\b|\bno\s+thanks?\b/i.test(x))
+}
+
 /**
  * Pure. Did the seller's LATEST reply answer an OWNERSHIP question? (Then a "No" / "Not interested" is
  * declined-unverified engagement, never selling disinterest: owner 2026-10-17.)
- * @param {Array<{direction:string, message_body?:string, use_case?:string, created_at?:string, event_timestamp?:string}>} messages
+ * @param {Array<{direction:string, message_body?:string, use_case?:string, created_at?:string, event_timestamp?:string, property_id?:string|null}>} messages
  */
 export function latestReplyAnsweredOwnershipQuestion(messages = []) {
   return Boolean(ownershipQuestionReply(messages))
 }
-/** The burst of inbounds that answered our latest OWNERSHIP question (oldest first), or null. */
-export function ownershipQuestionReply(messages = []) {
-  const at = (m) => toMs(m.event_timestamp) ?? toMs(m.created_at) ?? 0
+
+/**
+ * rc-8.5.21 P0: the OWNERSHIP-QUESTION CONTEXT of the seller's latest reply — ALL of our questions since
+ * the seller's previous reply (separate messages and follow-up fragments like "And how about <B>?"
+ * included), never the last outbound alone. Pure.
+ * @returns {{ burst: object[], answers_ownership: boolean, ambiguous: boolean, ownership_properties: string[], last_kind: string|null }|null}
+ *   null when there is no latest reply or no question before it.
+ */
+export function ownershipQuestionContext(messages = []) {
+  const at = (m) => toMs(m.event_timestamp) ?? toMs(m.created_at) ?? toMs(m.at) ?? 0
   const sorted = [...(messages || [])].sort((a, b) => at(a) - at(b))
   let lastIn = -1
   for (let i = sorted.length - 1; i >= 0; i -= 1) if (lower(sorted[i].direction) === 'inbound') { lastIn = i; break }
   if (lastIn < 0) return null
-  // a burst: walk back over the consecutive inbounds to the outbound they answer
+  // a burst: walk back over the consecutive inbounds; then over OUR messages to the previous reply
   let j = lastIn
   while (j >= 0 && lower(sorted[j].direction) === 'inbound') j -= 1
   if (j < 0) return null
-  if (questionKindOf({ use_case: sorted[j].use_case || sorted[j].use_case_template || null, body: sorted[j].message_body || '' }) !== 'ownership') return null
-  return sorted.slice(j + 1, lastIn + 1)
+  let k = j
+  while (k >= 0 && lower(sorted[k].direction) !== 'inbound') k -= 1
+  const ours = sorted.slice(k + 1, j + 1).map((m) => ({ ...m, body: m.message_body ?? m.body ?? '' }))
+  const index = propertyAddressIndex({ messages: sorted.map((m) => ({ ...m, body: m.message_body ?? m.body ?? '' })) })
+  const qs = questionsOf(ours, { index, questionKindOf })
+  if (!qs.length) return null
+  const own = qs.filter((q) => q.kind === 'ownership')
+  const ownership_properties = [...new Set(own.flatMap((q) => q.properties))]
+  const last_kind = qs[qs.length - 1].kind
+  return {
+    burst: sorted.slice(j + 1, lastIn + 1),
+    // the reply answers an ownership question when OUR LAST question was one (a later question of
+    // another kind is what a reply answers), or when several ownership questions are open
+    answers_ownership: last_kind === 'ownership' || ownership_properties.length > 1,
+    ambiguous: ownership_properties.length > 1,
+    ownership_properties,
+    last_kind,
+  }
+}
+
+/** The burst of inbounds that answered our OWNERSHIP question(s) (oldest first), or null. */
+export function ownershipQuestionReply(messages = []) {
+  const ctx = ownershipQuestionContext(messages)
+  return ctx && ctx.answers_ownership ? ctx.burst : null
 }
 
 export function propertyContactBlock({ property_id = null, phone = null, thread = null, resolutions = [], kind = null, messages = null } = {}) {
@@ -137,18 +185,23 @@ export function propertyContactBlock({ property_id = null, phone = null, thread 
   // the OWNERSHIP question is declined-unverified (held), whatever the stored label says
   // (owner rules: a BARE "No" to the ownership question is the property denial; "No thanks" / "Not
   // interested" to it is declined-unverified, held, never non-ownership)
-  const burst = NURTURE_ON_DISINTEREST_KINDS.has(clean(kind)) && Array.isArray(messages) ? ownershipQuestionReply(messages) : null
+  const ctx = NURTURE_ON_DISINTEREST_KINDS.has(clean(kind)) && Array.isArray(messages) ? ownershipQuestionContext(messages) : null
+  const burst = ctx && ctx.answers_ownership ? ctx.burst : null
   if (burst && burst.length) {
-    // blind-eval (REAL-020 / REAL-035): an explicit ownership CONFIRMATION in the reply ("Yes I do, but
-    // no plans to sell") answers the sale too: the 30-day nurture stands, never declined-unverified
-    if (burst.some((m) => isOwnershipConfirmation(m.message_body || ''))) return { blocked: false, reason: null, kind: null }
+    // rc-8.5.21 P0: one reply after ownership questions about SEVERAL properties (separate messages
+    // included) says nothing about which one: the recorded thread hold's reason, held for a person
+    if (ctx.ambiguous) return { blocked: true, reason: OWNERSHIP_ATTRIBUTION_UNRESOLVED, kind: 'ownership_unresolved', state: 'held' }
+    // blind-eval (REAL-020 / REAL-035): an explicit statement about the SALE in the reply ("Yes I do, but
+    // no plans to sell", "Yes. Not interested") answers the sale: the 30-day nurture stands
+    if (burstHasSellingAnswer(burst)) return { blocked: false, reason: null, kind: null }
     const bare = burst.map((m) => bareNoAnswer(m.message_body || ''))
     if (bare.some((b) => b.matched && b.ownership_denial)) return { blocked: true, reason: 'property_denial:bare_no_to_ownership_question', kind: 'property_denial', state: 'not_executable' }
-    // only the BARE decline forms ("No thanks", "Not interested") are declined-unverified; a substantive
-    // sale answer ("not selling, it's a rental") keeps the nurture
+    // only the BARE decline forms ("No thanks", "Not interested") are declined-unverified
     if (burst.every((m) => { const b = bareNoAnswer(m.message_body || ''); return (b.matched && b.ownership_declined) || isBareNotInterested(m.message_body || '') || !String(m.message_body || '').trim() })) {
       return { blocked: true, reason: `${OWNERSHIP_DECLINED_UNVERIFIED}:reply_to_ownership_question`, kind: OWNERSHIP_DECLINED_UNVERIFIED, state: 'held' }
     }
+    // the hard invariant: any other answer to an ownership question is not a selling answer
+    return { blocked: true, reason: SELLING_NURTURE_REQUIRES_SELLING_ANSWER, kind: 'no_selling_answer', state: 'not_executable' }
   }
   return { blocked: false, reason: null, kind: null }
 }
@@ -384,7 +437,7 @@ export async function loadPropertyContactBlock({ supabase, thread_key, phone = n
   if (q2?.error) throw q2.error
   let messages = null
   if (NURTURE_ON_DISINTEREST_KINDS.has(clean(kind))) {
-    const q3 = await supabase.from('message_events').select('direction,message_body,created_at,event_timestamp').eq('thread_key', clean(thread_key)).order('created_at', { ascending: false }).limit(20)
+    const q3 = await supabase.from('message_events').select('id,direction,message_body,created_at,event_timestamp,property_id').eq('thread_key', clean(thread_key)).order('created_at', { ascending: false }).limit(40)
     if (q3?.error) throw q3.error
     messages = q3.data || []
   }
@@ -533,7 +586,7 @@ export async function materializeClaimedIntent(intent, deps = {}) {
 
   // 7. sender health: the thread's sticky sender is kept (persona + number continuity). LOCKED OWNER RULE
   //    (thread continuity): a follow-up NEVER changes the thread's number. A sender that is cooling /
-  //    blocked / disabled / not in the fleet is therefore HELD here, visibly (reason sender_unhealthy), and
+  //    blocked / disabled / not in the fleet is therefore HELD here, visibly (reason sender_unavailable — the one continuity hold reason), and
   //    never materialized for the dispatcher to reroute; the dispatcher re-validates the pinned sender at
   //    send time and, for a follow-up, blocks the row (never a fallback number) if it went bad since.
   //    rc-8.5.21 F1: a writer that knew no sender (the S2 / S3 / offer silence follow-ups: the delivery
@@ -550,7 +603,7 @@ export async function materializeClaimedIntent(intent, deps = {}) {
   if (from) {
     try { sender_health = lower(await deps.senderStatus(from)) || 'unknown_sender' } catch { return settle(intent, deps, { to: S.PLANNED, reason: 'sender_lookup_failed', transient: true }) }
     if (UNHEALTHY_SENDER.has(sender_health) || sender_health === 'unknown_sender') {
-      return settle(intent, deps, { to: S.HELD, reason: 'sender_unhealthy', detail: { sender_health, sender_source: sender.source || null } })
+      return settle(intent, deps, { to: S.HELD, reason: 'sender_unavailable', detail: { sender_health, sender_source: sender.source || null } })
     }
   }
 

@@ -46,7 +46,8 @@ const operatorRow = { id: "q-o", source: "inbox", type: "outbound", message_type
 // No thread fallback in these tests: a thread row whose sender is refused is refused.
 const noBlocks = { loadDispatchBlockedSenders: async () => new Set(), loadThreadSender: async () => null, routeThreadFallback: async () => null };
 // Thread rows outside a campaign (operator sends) go through the sticky-sender
-// rule, which reports a refused sender as no_eligible_sender_for_thread.
+// rule, which (owner P0 sender continuity, rc-8.5.21) holds a refused thread
+// sender as sender_unavailable — never a reroute.
 const select = (row, number, extra = {}) =>
   selectAvailableTextgridNumber(row, { ...noBlocks, now: NOW, loadOutboundNumberByPhone: async () => number, ...extra });
 
@@ -101,7 +102,7 @@ test("the total ceiling blocks a runaway — every class, default 2000, per-numb
   for (const row of [autoReplyRow, operatorRow, campaignRow]) {
     const out = await select(row, runaway);
     assert.equal(out.ok, false);
-    if (row === operatorRow) assert.equal(out.reason, "no_eligible_sender_for_thread");
+    if (row === operatorRow) assert.equal(out.reason, "sender_unavailable", "owner P0: an operator thread row is held on its own number, never rerouted");
     else assert.equal(out.reason, "outbound_number_total_ceiling_reached");
   }
   assert.equal((await select(autoReplyRow, fleetRow({ messages_sent_today_total: 1999 }))).ok, true);
@@ -131,7 +132,7 @@ test("a cooling, spam-flagged or paused number blocks everything, replies includ
     for (const row of [autoReplyRow, operatorRow, campaignRow]) {
       const out = await select(row, number);
       assert.equal(out.ok, false, `${reason} must block ${row.source}`);
-      if (row === operatorRow) assert.equal(out.reason, "no_eligible_sender_for_thread");
+      if (row === operatorRow) assert.equal(out.reason, "sender_unavailable", "owner P0: an operator thread row is held on its own number, never rerouted");
       else assert.equal(out.reason, reason);
     }
   }

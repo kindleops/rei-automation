@@ -23,7 +23,9 @@
 //   touch category 1, even inside an active session. STOP, suppression, holds, duplicate prevention,
 //   authorization and persona continuity are unchanged and absolute (they are separate gates).
 //
-// resolveRecipientWindowZones() — ZONE PRECEDENCE (recipient evidence first):
+// resolveRecipientWindowZones() — ZONE PRECEDENCE (recipient evidence first; rc-8.5.21 final directive:
+// verified timezone > current mailing / residential > location history > area code > property, which
+// only narrows — every recipient source is unioned, so a conflict is always the conservative window):
 //   1. zones STAMPED on the row by this policy (metadata.recipient_zones + recipient_zone_policy)
 //   2. the recipient phone's area code (nanp-area-zones.js; a straddling code lists every zone)
 //   3. mailing / other recipient evidence (owner mailing state / ZIP)
@@ -126,6 +128,11 @@ export function resolveRecipientWindowZones(e = {}) {
   // 3. mailing / other recipient evidence
   const mail = geoZone(e.mailingGeography)
   if (mail) add('mailing_geography', 'recipient', [mail])
+  // 3b. (rc-8.5.21 final directive) a VERIFIED recipient timezone and the recipient's LOCATION HISTORY are
+  //     recipient evidence too, when present. Like every recipient source they are UNIONED (the window is
+  //     the intersection): a conflict is always the conservative window, never the earlier send.
+  if (clean(e.verifiedTimezone)) add('verified_timezone', 'recipient', [storedTimezoneToIana(e.verifiedTimezone) || clean(e.verifiedTimezone)])
+  if (Array.isArray(e.locationHistory) && e.locationHistory.length) add('location_history', 'recipient', e.locationHistory.map((z) => storedTimezoneToIana(z) || clean(z)))
   // 4. property + stored: narrowing only
   const props = Array.isArray(e.propertyGeography) ? e.propertyGeography : [e.propertyGeography]
   for (const g of props) { const z = geoZone(g); if (z) add('property_geography', 'narrowing', [z]) }
@@ -137,7 +144,11 @@ export function resolveRecipientWindowZones(e = {}) {
   const stored = storedTimezoneToIana(e.storedTimezone)
   if (stored) add(clean(e.recipientPhone) ? 'stored_timezone' : 'asserted_timezone', clean(e.recipientPhone) ? 'narrowing' : 'recipient', [stored])
 
-  const recipient = sources.filter((s) => s.role === 'recipient')
+  // EVIDENCE PRECEDENCE (names the primary zone; the window is still the intersection of ALL of them):
+  // verified timezone > current mailing / residential > location history > a policy stamp > area code;
+  // the property and a stored row zone only narrow.
+  const RANK = { verified_timezone: 0, mailing_geography: 1, location_history: 2, stamped_recipient_zones: 3, recipient_area_code: 4, asserted_timezone: 5 }
+  const recipient = sources.filter((s) => s.role === 'recipient').sort((a, b) => (RANK[a.source] ?? 9) - (RANK[b.source] ?? 9))
   const known = recipient.length > 0
   const recipientZones = normalizeZones(recipient.flatMap((s) => s.zones))
   const base = known ? recipientZones : [...UNKNOWN_ZONE_FALLBACK]
@@ -169,6 +180,9 @@ export function recipientEvidenceFromRow(row = {}, { propertyGeography = null, m
     mailingGeography: mailingGeography || null,
     propertyGeography: [rowPropertyGeography(row || {}), propertyGeography].filter(Boolean),
     storedTimezone: row?.timezone || null,
+    // recipient evidence a writer may carry on the row (rc-8.5.21): a verified zone, location history
+    verifiedTimezone: meta.recipient_verified_timezone || null,
+    locationHistory: Array.isArray(meta.recipient_location_history_zones) ? meta.recipient_location_history_zones : null,
   }
 }
 

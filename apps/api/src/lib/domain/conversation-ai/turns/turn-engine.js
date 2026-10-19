@@ -326,8 +326,11 @@ export async function runDueTurn({ turn_id, version, store, worker, decideTurn, 
   }
   // blind-eval v2 (STP-09 and every decision that hands the turn to a person): the escalation raises
   // ONE operator work item BEFORE the decision is recorded (a failed write retries: never silent)
-  if (decision?.code === 'ESCALATE_TO_OPERATOR' && typeof raiseOperatorItem === 'function') {
-    await raiseOperatorItem({ turn_id, version, r3_status: 'escalated', reasons: [String(decision.reason || 'escalated').slice(0, 60)], escalated_by_decision: true })
+  // rc-8.5.21 P0: an unresolved ownership attribution (one reply after ownership questions about several
+  // properties) is a HOLD that a person must resolve: ONE operator item per turn, like an escalation
+  const operatorHold = decision?.code === 'HOLD' && String(decision?.reason || '') === 'ownership_denial_property_unresolved'
+  if ((decision?.code === 'ESCALATE_TO_OPERATOR' || operatorHold) && typeof raiseOperatorItem === 'function') {
+    await raiseOperatorItem({ turn_id, version, r3_status: operatorHold ? 'held' : 'escalated', reasons: [String(decision.reason || 'escalated').slice(0, 60)], escalated_by_decision: !operatorHold })
   }
   const outcome = String(decision?.outcome || 'no_decision').toLowerCase().replace(/[^a-z0-9_:.-]/g, '_').slice(0, 60)
   const wantsReply = Boolean(decision?.reply?.text) && typeof dispatch === 'function'

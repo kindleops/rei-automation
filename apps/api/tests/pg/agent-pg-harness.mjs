@@ -7,6 +7,7 @@
 //   apps/api/supabase/migrations/20260831000000_durable_run_locks_and_idempotency_ledger.sql
 //   supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence_pretest.sql
 //   supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence.sql
+//   supabase/migrations/PROPOSED_20261019120000_payload_clean_opaque_ids.sql (unless { opaqueIds: false })
 // and returns a pool + a drop() that removes the database.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -23,6 +24,8 @@ export const SQL = {
   pretest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence_pretest.sql'),
   migration: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence.sql'),
   rollback: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence_rollback.sql'),
+  // rc-8.5.21: the payload CHECK never rejects random UUID / opaque hex id tokens (applied after S3, as in production)
+  payloadOpaqueIds: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261019120000_payload_clean_opaque_ids.sql'),
   // read-only research agent (companion; applied after the S3 migration)
   researchPretest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro_pretest.sql'),
   research: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro.sql'),
@@ -75,7 +78,7 @@ export async function runSqlFile(pool, file) {
 }
 
 /** Fresh database with the S3 schema applied (unless { apply: false }). */
-export async function freshDb({ apply = true } = {}) {
+export async function freshDb({ apply = true, opaqueIds = true } = {}) {
   const name = `agent_s3_${crypto.randomBytes(5).toString('hex')}`
   const admin = new pg.Pool({ connectionString: ADMIN_URL, max: 1 })
   await admin.query(`create database ${name}`)
@@ -87,6 +90,7 @@ export async function freshDb({ apply = true } = {}) {
   if (apply) {
     await runSqlFile(pool, SQL.pretest)
     await runSqlFile(pool, SQL.migration)
+    if (opaqueIds) await runSqlFile(pool, SQL.payloadOpaqueIds)
   }
   const extraPools = []
   // the API's least-privilege role (the companion *_api_login.sql enables LOGIN in prod)

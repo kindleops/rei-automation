@@ -82,15 +82,19 @@ export function ownershipEvidenceItems({ messages = [], properties = [] } = {}) 
       continue
     }
     if (!dir.startsWith('in')) continue
-    const ownQ = lastQ?.kind === 'ownership' ? lastQ : null
     const att = attribution.get(String(m.id))
+    // rc-8.5.21 P0: the question a reply answers is the attribution's EFFECTIVE last open question (a
+    // follow-up fragment "And how about <B>?" continues the ownership question before it), never only
+    // the raw text kind of the last outbound
+    const q = att ? (att.last_question_kind ? { kind: att.last_question_kind, property_id: lastQ?.property_id || null } : null) : lastQ
+    const ownQ = q?.kind === 'ownership' ? q : null
     // blind-eval v2: a reply naming several properties is read clause by clause (one item per property)
     if (att?.clauses?.length) {
       for (const c of att.clauses) if (c.ownership) items.push({ property: c.property, state: c.ownership, message_id: String(m.id), at: t(m), basis: `clause_${c.ownership}`, kind: 'explicit', rank: EVIDENCE_RANK.explicit })
       lastQ = null
       continue
     }
-    const prop = att ? att.property : clean(m.property_id) || clean(lastQ?.property_id) || ''
+    const prop = att ? att.property : clean(m.property_id) || clean(q?.property_id) || ''
     const label = String(m.detected_intent || '')
     const denyMatch = OWN_DENY_RE.exec(body) || OWN_FORMER_RE.exec(body)
     const retracted = denyMatch && RETRACTION_RE.test(body.slice(denyMatch.index + denyMatch[0].length))
@@ -101,8 +105,8 @@ export function ownershipEvidenceItems({ messages = [], properties = [] } = {}) 
     else if (ownQ && NEVER_OWNED_LONG_RE.test(body)) push('denied', 'never_owned_to_ownership_question', 'answer')
     else if (retracted || OWN_CONFIRM_RE.test(body)) push('confirmed', retracted ? 'retracted_denial' : 'explicit_confirmation', 'explicit')
     else if (ownQ && BARE_YES_RE.test(body)) push('confirmed', 'yes_to_ownership_question', 'answer')
-    else if (lastQ && lastQ.kind !== 'ownership' && !bareNoAnswer(body).matched && (moneyMentions(body).length || OFFER_REQUEST_RE.test(body) || (lastQ.kind === 'interest' && BARE_YES_RE.test(body)))) push('confirmed', `seller_engagement:${lastQ.kind}`, 'engagement')
-    else if (!lastQ && (moneyMentions(body).length || OFFER_REQUEST_RE.test(body)) && prop) push('confirmed', 'seller_engagement:unprompted', 'engagement')
+    else if (q && q.kind !== 'ownership' && !bareNoAnswer(body).matched && (moneyMentions(body).length || OFFER_REQUEST_RE.test(body) || (q.kind === 'interest' && BARE_YES_RE.test(body)))) push('confirmed', `seller_engagement:${q.kind}`, 'engagement')
+    else if (!q && (moneyMentions(body).length || OFFER_REQUEST_RE.test(body)) && prop) push('confirmed', 'seller_engagement:unprompted', 'engagement')
     else if (NOT_OWNER_LABELS.has(label)) push('denied', `label:${label}`, 'label')
     else if (DECLINED_LABELS.has(label)) push('declined', `label:${label}`, 'label')
     else if (CONFIRM_LABELS.has(label)) push('confirmed', `label:${label}`, 'label')

@@ -83,7 +83,7 @@ export function contradictsLedger(decision, context) {
 export async function understandInbound({ context, inboundText, inboundId, deterministic = null, eligibility = null, modelClient = null, options = {} }) {
   const calls = []
   const trace = { version: UNDERSTAND_VERSION, path: null, escalation_triggers: [], contradictions: [], errors: [] }
-  const pre = deterministicPrecheck({ text: inboundText, inboundId, deterministic, eligibility, lastQuestionKind: context?.last_question_kind ?? context?.model?.last_question_kind ?? null })
+  const pre = deterministicPrecheck({ text: inboundText, inboundId, deterministic, eligibility, lastQuestionKind: context?.last_question_kind ?? context?.model?.last_question_kind ?? null, ownershipAmbiguous: context?.ownership_ambiguous === true })
   trace.precheck = pre.signals
   if (pre.decided) {
     trace.path = 'deterministic_precheck'
