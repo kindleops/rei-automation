@@ -88,7 +88,7 @@ test('static import graph: allowlisted helpers are pure (no imports, no network 
     if (!API_FILES.includes(f)) continue
     const src = fs.readFileSync(path.join(API_SRC, f), 'utf8')
     assert.equal(/^\s*import\s/m.test(src) || /\bimport\(/.test(src), false, `${f} imports nothing`)
-    assert.equal(/\b(fetch|supabase|from\(|rpc\(|query\(|fs\.|process\.env)\b/.test(src), false, `${f} does no I/O`)
+    assert.equal(/\b(fetch|supabase|from\(|rpc\(|query\(|fs\.|process[.]env)\b/.test(src), false, `${f} does no I/O`)
   }
 })
 

@@ -71,6 +71,16 @@ const CPR_LIVE_CONSTRAINTS = 'scripts/db/fixtures/contact_property_resolution_li
 const DISPATCH_LEASE = M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql')
 // blind-eval D3: an R3 hold raises one operator work item per turn (scope 'conversation')
 const TURN_OPERATOR_ITEMS = M('PROPOSED_20261017122000_conversation_turn_operator_items.sql')
+// OPTIONAL link #25 (separately approved): LeadCommand MCP 1.0 live-mode credential lc_mcp_reader. The chain
+// baseline adds ONLY the MCP read-inventory relations the chain fixtures lack; the chain posttest calls the five
+// operations read functions AS the role against the REAL chain objects (they are plpgsql: they bind when called).
+const LC_MCP_READER = M('PROPOSED_20261019150000_lc_mcp_reader.sql')
+const LC_MCP_CHAIN_BASELINE = 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_chain_baseline.sql'
+// Roles are CLUSTER-global: a test database is dropped at the end of its run, but the lc_mcp_reader role it left
+// (cycle 2 re-applies) survives into the next test on the same cluster (--all). Drop that leftover before the
+// setup so each entry starts from "the role does not exist" (DROP ROLE also drops its authenticator membership;
+// the databases that held its grants are already gone).
+const LC_MCP_ROLE_RESET = { name: 'drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only)', sql: 'drop role if exists lc_mcp_reader;' }
 // rc-8.5.21 part B
 const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
 const SEND_AUTHORIZATION = M('PROPOSED_20261016161000_negotiation_send_authorization.sql')
@@ -355,7 +365,7 @@ const BASE_TESTS = [
   // body that is not the live one).
   {
     id: 'rc_8_5_21_release_chain',
-    setup: [SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, LEGACY_CONVERSATION_TURNS, HOLDS_PUBLIC_BASELINE, GRAPH_LIVE_FUNCTIONS_BASELINE, CPR_LIVE_CONSTRAINTS],
+    setup: [LC_MCP_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, LEGACY_CONVERSATION_TURNS, HOLDS_PUBLIC_BASELINE, GRAPH_LIVE_FUNCTIONS_BASELINE, CPR_LIVE_CONSTRAINTS, LC_MCP_CHAIN_BASELINE],
     apply: [
       // 0. the P0 holds registry (already applied via hotfix/automation-holds in production)
       { fixture: M('PROPOSED_20261016200000_automation_holds_registry_pretest.sql') }, HOLDS_REGISTRY,
@@ -396,6 +406,8 @@ const BASE_TESTS = [
       // owner directive 2026-10-17: the turn dispatch lease (after reply_turns, message_origin and the runtime)
       { fixture: M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_pretest.sql') }, DISPATCH_LEASE,
       { fixture: M('PROPOSED_20261017122000_conversation_turn_operator_items_pretest.sql') }, TURN_OPERATOR_ITEMS,
+      // #25 OPTIONAL (separately approved; production: after pg_net is resolved): the MCP read-only credential
+      { fixture: M('PROPOSED_20261019150000_lc_mcp_reader_pretest.sql') }, LC_MCP_READER,
     ],
     verify: [T('rc_8_5_21_release_chain_verify.sql')],
     posttest: [
@@ -428,6 +440,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261017120000_followup_intent_lifecycle_posttest.sql'),
       M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_posttest.sql'),
       M('PROPOSED_20261017122000_conversation_turn_operator_items_posttest.sql'),
+      'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_chain_posttest.sql',
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body); the
     // holds registry is rolled back LAST (it was applied first)
@@ -456,6 +469,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261017120000_followup_intent_lifecycle_rollback.sql'),
       M('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease_rollback.sql'),
       M('PROPOSED_20261017122000_conversation_turn_operator_items_rollback.sql'),
+      M('PROPOSED_20261019150000_lc_mcp_reader_rollback.sql'),
     ],
   },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──
@@ -548,7 +562,7 @@ const BASE_TESTS = [
   // Setup = the shim + an emulation of the production objects it touches (disposable only).
   {
     id: 'lc_mcp_reader',
-    setup: [SHIM, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql'],
+    setup: [LC_MCP_ROLE_RESET, SHIM, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql'],
     pretest: M('PROPOSED_20261019150000_lc_mcp_reader_pretest.sql'),
     apply: [M('PROPOSED_20261019150000_lc_mcp_reader.sql')],
     posttest: [M('PROPOSED_20261019150000_lc_mcp_reader_posttest.sql')],

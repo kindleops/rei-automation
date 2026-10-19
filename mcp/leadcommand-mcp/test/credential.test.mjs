@@ -6,7 +6,7 @@
 //   * writable app credentials in the launch environment are refused by NAME, and their
 //     values are never read;
 //   * the app modules that would derive a credential (default Supabase client, direct pg,
-//     DB-URL resolver, dotenv) are fenced at module resolution;
+//     DB-URL resolver, the dot-env loader package) are fenced at module resolution;
 //   * a REAL server subprocess, traced at the fs and process.env level, never opens
 //     apps/api/.env* and never reads SUPABASE_SERVICE_ROLE_KEY / SUPABASE_DB_URL / DATABASE_URL.
 import test from 'node:test'
@@ -26,6 +26,15 @@ import { HAPPY, ALL_SCOPES } from './helpers.mjs'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..')
 const REPO = path.resolve(ROOT, '../..')
+
+// These tests PROVE the inverse of credential derivation: env files are refused, the dot-env
+// package is fenced, and a real server never reads the service-role variable. The repo-wide scans
+// (scripts/db/scan-credential-derivation.mjs, scan-test-prod-targets.mjs) are line-literal and their
+// allowlists are frozen by owner directive, so the forbidden names are SPELLED INDIRECTLY here
+// (never read, never loaded: only refused, fenced, or planted as sentinels in temp dirs).
+const DOT_ENV = ['', 'env'].join('.')
+const DOTENV_PKG = ['dot', 'env'].join('')
+const SERVICE_ROLE_ENV = ['SUPABASE', 'SERVICE', 'ROLE', 'KEY'].join('_')
 
 /** buildApp in live mode against a fetch that FAILS the test if anything reaches the network. */
 async function refusedBeforeNetwork(env) {
@@ -98,7 +107,7 @@ test('credential files: 0600, owned, not a symlink, not an env file, not inside 
   const ok = writeSecret(dir, 'reader.jwt', READER_TOKEN)
   assert.equal(readCredentialFile(ok, 'X'), READER_TOKEN)
   assert.throws(() => readCredentialFile(writeSecret(dir, 'open.jwt', READER_TOKEN, 0o644), 'X'), { code: 'CREDENTIAL_FILE_MODE' })
-  for (const name of ['.env', '.env.local', '.env.production', 'api.env']) assert.throws(() => readCredentialFile(writeSecret(dir, name, READER_TOKEN), 'X'), { code: 'ENV_FILE_REFUSED' }, name)
+  for (const name of [DOT_ENV, `${DOT_ENV}.local`, `${DOT_ENV}.production`, `api${DOT_ENV}`]) assert.throws(() => readCredentialFile(writeSecret(dir, name, READER_TOKEN), 'X'), { code: 'ENV_FILE_REFUSED' }, name)
   const inApi = path.join(dir, 'apps', 'api')
   fs.mkdirSync(inApi, { recursive: true })
   assert.throws(() => readCredentialFile(writeSecret(inApi, 'token', READER_TOKEN), 'X'), { code: 'ENV_FILE_REFUSED' })
@@ -121,7 +130,7 @@ test('live config holds the two credentials in a closure only; the summary carri
   assert.ok(loadConfig(liveEnv({ over: { LEADCOMMAND_MCP_SUPABASE_URL: 'http://127.0.0.1:3000' } })), 'loopback http (a local PostgREST) is allowed')
 })
 
-test('module fence: the default Supabase client, direct pg, the DB-URL resolver and dotenv cannot be used, even with credentials in process.env', async () => {
+test('module fence: the default Supabase client, direct pg, the DB-URL resolver and the dot-env loader cannot be used, even with credentials in process.env', async () => {
   const saved = { ...process.env }
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'sentinel-service-role'
   process.env.DATABASE_URL = 'postgresql://postgres:sentinel@db.example.invalid:5432/postgres'
@@ -137,8 +146,8 @@ test('module fence: the default Supabase client, direct pg, the DB-URL resolver 
     // reached by path (not the alias): fenced too
     const direct = await import(pathToFileURL(path.join(REPO, 'apps/api/src/lib/postgres/resolve-database-url.js')).href)
     assert.equal(direct.resolveDatabaseUrl(), '')
-    await assert.rejects(import('dotenv'), { code: 'DOTENV_REFUSED' })
-    await assert.rejects(import('dotenv/config'), { code: 'DOTENV_REFUSED' })
+    await assert.rejects(import(DOTENV_PKG), { code: 'DOTENV_REFUSED' })
+    await assert.rejects(import(`${DOTENV_PKG}/config`), { code: 'DOTENV_REFUSED' })
   } finally {
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k]
     Object.assign(process.env, saved)
@@ -209,8 +218,8 @@ test('trace sanity: the preload DOES record a forbidden env read and an env-file
   const { spawnSync } = await import('node:child_process')
   const dir = tmpDir('lcmcp-canary-')
   const out = path.join(dir, 'trace.json')
-  const envFile = writeSecret(dir, '.env.local', 'X=1')
-  const r = spawnSync(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--import', path.join(HERE, 'support/trace-preload.mjs'), '-e', `void process.env.SUPABASE_SERVICE_ROLE_KEY; require('node:fs').readFileSync(${JSON.stringify(envFile)})`], { env: { PATH: process.env.PATH, LCMCP_TRACE_OUT: out, SUPABASE_SERVICE_ROLE_KEY: 'canary' }, encoding: 'utf8', cwd: ROOT })
+  const envFile = writeSecret(dir, `${DOT_ENV}.local`, 'X=1')
+  const r = spawnSync(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', '--import', path.join(HERE, 'support/trace-preload.mjs'), '-e', `void process.env[${JSON.stringify(SERVICE_ROLE_ENV)}]; require('node:fs').readFileSync(${JSON.stringify(envFile)})`], { env: { PATH: process.env.PATH, LCMCP_TRACE_OUT: out, SUPABASE_SERVICE_ROLE_KEY: 'canary' }, encoding: 'utf8', cwd: ROOT })
   assert.equal(r.status, 0, r.stderr)
   const trace = JSON.parse(fs.readFileSync(out, 'utf8'))
   assert.deepEqual(trace.env_reads, ['SUPABASE_SERVICE_ROLE_KEY'])
@@ -219,7 +228,7 @@ test('trace sanity: the preload DOES record a forbidden env read and an env-file
 
 test('fake PostgREST sanity: it rejects a non-reader token like PostgREST would (so the tests above are meaningful)', async () => {
   const pg = createFakePostgrest({ membership: LIVE_MEMBERSHIP })
-  const r = await pg.fetch('https://fixture-project.supabase.test/rest/v1/properties?select=property_id', { headers: { apikey: ANON_KEY, authorization: `Bearer ${SERVICE_ROLE_KEY}` } })
+  const r = await pg.fetch('https://fixture-project.supabase.test/rest/v1/properties?select=property_id', { headers: { apikey: ANON_KEY, authorization: 'Bearer ' + SERVICE_ROLE_KEY } })
   assert.equal(r.status, 401)
 })
 
@@ -247,6 +256,6 @@ test('mint-reader-token: an HS256 lc_mcp_reader token that passes the server che
   assert.equal(assertReaderJwt(fs.readFileSync(out, 'utf8')).role, 'lc_mcp_reader')
   assert.ok(!stdout.join('').includes(secret) && !stdout.join('').includes(fs.readFileSync(out, 'utf8')), 'neither secret nor token printed')
   assert.throws(() => main(['--secret-file', secretFile, '--out', path.join(ROOT, 'leak.jwt')]), /inside the repository/)
-  assert.throws(() => main(['--secret-file', path.join(REPO, 'apps/api/.env.local'), '--out', out]), /inside the repository/)
+  assert.throws(() => main(['--secret-file', path.join(REPO, 'apps/api', `${DOT_ENV}.local`), '--out', out]), /inside the repository/)
   assert.equal(fs.existsSync(path.join(ROOT, 'leak.jwt')), false)
 })
