@@ -21,6 +21,7 @@
  * Unreadable facts never release (fail closed). Kill switch: env SENDER_CONTINUITY_RELEASE=off.
  */
 
+import { loadQueueRowAttemptEvidence } from "@/lib/domain/communications/queue-row-attempt-evidence.js";
 import { SENDER_CONTINUITY_HOLD_REASONS, SENDER_CONTINUITY_HOLD_STATUS, SENDER_CONTINUITY_VERSION, evaluateSenderContinuity, normalizePhone, rowThreadKey } from "@/lib/domain/delivery/sender-continuity.js";
 
 export const SENDER_HOLD_STALE_REVIEW_REASON = "sender_unavailable_stale_needs_review";
@@ -96,9 +97,11 @@ async function loadFacts(db, row, deps) {
   const out = await db.from("send_queue").select("id,queue_status,created_at,sent_at").eq("thread_key", thread_key).in("queue_status", ["sent", "delivered"]).gt("sent_at", since).limit(5);
   if (out?.error) throw new Error("thread_outbound_unreadable");
   facts.newer_outbound = rowsOf(out).some((r) => clean(r.id) !== clean(row.id));
-  const att = await db.from("seller_communication_attempts").select("id,provider_message_id,provider_request_started_at").eq("queue_row_id", String(row.id)).limit(5);
-  // the attempt ledger is the duplicate authority when present; absent table = no attempts recorded
-  facts.attempt_dispatched = att?.error ? false : rowsOf(att).some((a) => clean(a.provider_message_id) || clean(a.provider_request_started_at));
+  // the §11 attempt ledger is the duplicate authority (read through its own domain's read-only reader);
+  // unreadable ⇒ the row stays held (fail closed)
+  const att = await loadQueueRowAttemptEvidence(db, [String(row.id)]);
+  if (!att.ok) throw new Error("attempt_ledger_unreadable");
+  facts.attempt_dispatched = (att.byRow.get(String(row.id)) || []).some((a) => clean(a.provider_message_id) || clean(a.provider_request_started_at));
   facts.continuity = await evaluateSenderContinuity(row, {}, { ...deps, supabase: db });
   const sender = facts.continuity?.established_sender || normalizePhone(row.from_phone_number);
   const { evaluateSenderDispatchEligibility, loadDispatchBlockedSenders } = await import("@/lib/domain/delivery/sender-dispatch-eligibility.js");
