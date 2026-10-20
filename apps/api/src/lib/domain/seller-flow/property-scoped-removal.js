@@ -72,11 +72,9 @@ export async function recordPropertyDoNotContact({ supabase, phone, property_id,
   const tail = clean(phone).replace(/\D/g, '').slice(-10)
   const variants = [clean(phone), tail, `1${tail}`, `+1${tail}`]
   try {
-    const up = await supabase.from('contact_property_resolution').upsert({
-      property_id: clean(property_id), contact_phone_e164: clean(phone), contact_property_role: PROPERTY_DNC_ROLE,
-      rejected_at: now, rejection_reason: `seller_requested_property_removal${clean(inbound_event_id) ? `:${clean(inbound_event_id)}` : ''}`, suppression_scope: 'contact_property_pair', updated_at: now,
-    }, { onConflict: 'property_id,contact_phone_e164' })
-    if (up?.error) return { ok: false, reason: clean(up.error.message) || 'upsert_failed' }
+    const { recordPropertyDoNotContactRow } = await import('./contact-resolution-repository.js')
+    const up = await recordPropertyDoNotContactRow(supabase, { property_id, contact_phone_e164: phone, source_message_id: inbound_event_id, now })
+    if (!up?.ok) return { ok: false, reason: up?.reason || 'upsert_failed' }
     const [sup, auto] = await Promise.all([
       supabase.from('sms_suppression_list').select('is_active').in('phone_e164', variants).limit(5),
       supabase.from('automation_suppressions').select('status,expires_at').in('phone_e164', variants).limit(5),

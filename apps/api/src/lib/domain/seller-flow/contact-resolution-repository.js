@@ -176,6 +176,27 @@ export async function recordContactOutcome(supabase, {
  * execution collides rather than forking a second identity. A conflict is a
  * SUCCESS with `reused: true` — the desired end state already exists.
  */
+/**
+ * rc-8.5.21 v3 (owner rule): a PROPERTY-SCOPED do-not-contact ("take me off that one") for one property ×
+ * contact — the restriction role property_do_not_contact (never a not-owner role, never contact-wide).
+ * This module stays the ONE writer of contact_property_resolution.
+ */
+export async function recordPropertyDoNotContactRow(supabase, { property_id, contact_phone_e164, source_message_id = null, now = null } = {}) {
+  const property = clean(property_id)
+  const phone = normalizePhoneKey(contact_phone_e164)
+  if (!supabase?.from || !property || !phone) return { ok: false, reason: 'missing_identity' }
+  const at = now || new Date().toISOString()
+  try {
+    const { error } = await supabase.from(TABLE).upsert({
+      property_id: property, contact_phone_e164: phone, contact_property_role: 'property_do_not_contact', rejected_at: at,
+      rejection_reason: `seller_requested_property_removal${clean(source_message_id) ? `:${clean(source_message_id)}` : ''}`, suppression_scope: 'contact_property_pair', updated_at: at,
+    }, { onConflict: 'property_id,contact_phone_e164' })
+    return error ? { ok: false, reason: clean(error.message) || 'upsert_failed' } : { ok: true }
+  } catch (error) {
+    return { ok: false, reason: clean(error?.message) || 'upsert_failed' }
+  }
+}
+
 export async function recordReferralExecution(supabase, plan, {
   property_id,
   master_owner_id = null,

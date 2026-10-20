@@ -276,7 +276,9 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
   const propertyLabelBlock = (signal, pid, source, weighed = false) => {
     if (!clean(pid) || !property_id) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { scope: "thread_hold", signal, source, action: "operator_review" });
     if (clean(pid) !== property_id) return null;
-    if (strong_confirmation && (source === "thread_state" || weighed)) return null;
+    // only a label the recontact guard already WEIGHED (an inbound in the thread with its time); a thread-state
+    // label carries no time, so against text it stays the conflict hold (owner rule 3)
+    if (strong_confirmation && weighed) return null;
     if (text_confirmed) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { scope: "thread_hold", conflict: true, signal, source, action: "operator_review" });
     if (PROPERTY_SCOPED_DECLINED.has(signal)) return block(R.OWNERSHIP_DECLINED_HOLD, { scope: "person_property", ownership: "unverified", signal, source });
     return block(R.PRIOR_REPLY_NOT_OWNER, { scope: "person_property", signal, source });
