@@ -125,8 +125,9 @@ export function checkComposedText(text, { ledger, objective, category, inboundIn
  * @param {{ decide: Function }} a.modelClient   createConversationModelClient()
  * @param {{ spentTodayUsd: () => number, perMessageMaxUsd: number, dailyMaxUsd: number, estimateUsd: (route: string) => number }} a.spend
  */
-export async function composeReply({ ledger, inboundText, category, objective, modelClient, spend, messages = [], maskOpts = {}, threadLength = 0, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null, companyIdentity = NO_COMPANY_IDENTITY, firstName = null, otherNames = [], replyLanguage = 'en' }) {
-  const knownNumbers = [...new Set(messages.flatMap((m) => String(m.text || '').match(/[0-9]{3,}/g) || []))]
+export async function composeReply({ ledger, inboundText, category, objective, modelClient, spend, messages = [], maskOpts = {}, threadLength = 0, inboundIntent = null, personaPolicy, establishedPersona = null, followupScheduled = null, companyIdentity = NO_COMPANY_IDENTITY, firstName = null, otherNames = [], replyLanguage = 'en', propertyAddresses = [] }) {
+  // rc-8.5.21 v4 (coverage): the property's address numbers are known (the composer names the property)
+  const knownNumbers = [...new Set([...messages.map((m) => m.text), ...(propertyAddresses || [])].flatMap((b) => String(b || '').match(/[0-9]{3,}/g) || []))]
   const previousOutbound = [...messages].reverse().find((x) => x.from === 'us')?.text || null
   if (!modelClient?.decide) return { ok: false, reason: 'model_unavailable', attempts: [] }
   const { tone, abusive } = detectSellerTone(inboundText)

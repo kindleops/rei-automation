@@ -153,6 +153,45 @@ const SPANISH_LETTER_RE = /[áéíóúñü¿¡]/i
 const OTHER_ROMANCE_LETTER_RE = /[àèìòùâêîôûçãõë]/i
 const PORTUGUESE_RE = /\b(?:sim|n[aã]o|obrigad[oa]|voc[eê]|minha|meu|propriedade|vender\s+a)\b/i
 
+// rc-8.5.21 v4 (S4, code-switch): words of languages the policy can NEVER enable. A message that carries
+// them is that language (mixed with English or not): "Pwede po ba tawagan nyo na lang ako? … mag text"
+// was read as English from its English words and got an autonomous English reply. STRONG = one token
+// names the language; WEAK = two are needed (short words other languages share).
+const W = (words) => new RegExp(`(?<![\\p{L}'])(?:${words})(?![\\p{L}])`, 'giu')
+const OTHER_LANGUAGE_LEXICON = Object.freeze([
+  { code: 'tl', strong: W('po(?!\\s*box)|opo|nyo|niyo|ninyo|naman|nalang|na\\s+lang|pwede|puwede|pwd|salamat|yung|iyong|tawag(?:an|in)|ibenta|ibebenta|benta(?:han)?|bahay|kayo|talaga|ngayon|ngayong|ako|akong|sige|kasi|lang|wag|huwag|bakit|sino|magkano|kailan|paano'), weak: W('ko|mo|na|ba|oo|ano|mga|baka|wala|meron|sila|siya|kami|nga|eh|mag|hirap|hindi|gusto|din|rin|ang|ng') },
+  { code: 'ht', strong: W('mwen|konnen|poukisa|kounye\\s?a|bezwen|mesi|ank[oò]|kisa|pitit|tanpri'), weak: W('nou|vle|vann|kay|pa|se|sa|men|m') },
+  { code: 'pt', strong: W('obrigad[oa]|voc[eê]|n[aã]o|minha|tamb[eé]m|im[oó]vel|vend[eê]-?la|vender\\s+a\\s+casa'), weak: W('sim|meu|casa|ela|ele|isso|t[aá]') },
+  { code: 'fr', strong: W("merci|oui|je|j'ai|j'|vous|maison|c'est|bonjour|d'accord|monsieur|madame"), weak: W('pas|est|une|mais|avec|pour|moi') },
+  { code: 'it', strong: W('grazie|ciao|voglio|vendere|buongiorno|perch[eé]'), weak: W('sono|casa|non|ho') },
+  { code: 'pl', strong: W('dzi[eę]kuj[eę]|dzieki|dzięki|prosz[eę]|dzien\\s+dobry|dzień\\s+dobry'), weak: W('tak|nie|dom|jest') },
+  { code: 'vi', strong: W('khong|kh[oô]ng|duoc|đ[uư]ợc|cam\\s+on|c[aả]m\\s+[oơ]n|v[aâ]ng|nh[aà]'), weak: W('toi|anh|chi|em|ban') },
+])
+const countOf = (re, text) => (String(text || '').match(re) || []).length
+/** The non-enabled language a message carries (code-switched or not), or null. */
+export function otherLanguageMarker(text = '') {
+  const t = stripSymbols(text)
+  for (const L of OTHER_LANGUAGE_LEXICON) {
+    const strong = countOf(L.strong, t)
+    const weak = countOf(L.weak, t)
+    if (strong >= 1) return L.code
+    if (weak >= 3) return L.code
+  }
+  return null
+}
+const LETTER_WORD_RE = /\p{L}[\p{L}'-]*/gu
+/** No language signal of its own: no letters, or one / two words no lexicon recognises ("185k", "ballpark?", "pine"). */
+export function isSignalLessText(text = '') {
+  const t = stripSymbols(text)
+  if (NON_ENGLISH_LETTER_RE.test(t)) return false
+  const words = t.match(LETTER_WORD_RE) || []
+  if (!words.length) return true
+  if (words.length > 2) return false
+  if (SPANISH_RE.test(t) || SPANISH_STOPWORD_RE.test(t) || otherLanguageMarker(t)) return false
+  if (ENGLISH_WORD_RE.test(t) && !UNIVERSAL_TOKEN_RE.test(t)) return false
+  return !identifyReplyLanguage(t) || UNIVERSAL_TOKEN_RE.test(t)
+}
+
 /**
  * OWNER DECISION 2026-10-18: the seller's language from the INBOUND evidence — 'en', 'es', another
  * identified language, or 'unknown'. Never English by default; the stored label never overrides the text.
@@ -160,9 +199,14 @@ const PORTUGUESE_RE = /\b(?:sim|n[aã]o|obrigad[oa]|voc[eê]|minha|meu|proprieda
 export function replyLanguageOf({ language = null, inboundText = '' } = {}) {
   const v = languageVerdict({ language, inboundText })
   if (v.english) return 'en'
+  const text = String(inboundText || '')
+  if (SPANISH_RE.test(text)) return 'es'
+  // a CODE-SWITCHED message (English words + a non-enabled language's words) is that language; a
+  // message wholly in another language keeps the identifier's reading (unknown unless identified)
+  const other = otherLanguageMarker(text)
+  if (other && ENGLISH_WORD_RE.test(stripSymbols(text))) return other
   const identified = identifyReplyLanguage(inboundText)
   if (identified) return /^spanish$/i.test(identified) ? 'es' : /^english$/i.test(identified) ? 'en' : String(identified).toLowerCase()
-  const text = String(inboundText || '')
   if (OTHER_ROMANCE_LETTER_RE.test(text) || PORTUGUESE_RE.test(text)) return 'unknown'
   if (SPANISH_RE.test(text) || SPANISH_LETTER_RE.test(text) || SPANISH_STOPWORD_RE.test(text) || /^\s*s[ií][\s,.!]*$/i.test(text)) return 'es'
   const l = String(language || '').trim().toLowerCase()
@@ -170,16 +214,55 @@ export function replyLanguageOf({ language = null, inboundText = '' } = {}) {
   return 'unknown'
 }
 
+/**
+ * rc-8.5.21 v4 (S4): the seller's DOMINANT language. The current inbound decides when it carries any
+ * language evidence (a non-enabled-language segment anywhere ⇒ that language: English is never inferred
+ * from partial English). An inbound with NO signal of its own ("185k", "ballpark?", "pine") takes the
+ * language the seller has written in on this thread (the mode of the prior inbounds; a tie is unknown).
+ * A positively English inbound from a seller who has mostly written a non-enabled language is that language.
+ * @param {{ language?: string|null, inboundText?: string, priorInbounds?: string[] }} a
+ * @returns {{ language: string, basis: string }}
+ */
+export function dominantLanguageOf({ language = null, inboundText = '', priorInbounds = [] } = {}) {
+  // a prior bare "yes" / "yeah" / "nope" is the seller writing English ("ok", "no", "k" prove nothing)
+  const priors = (priorInbounds || []).map((b) => String(b ?? '')).filter((b) => b.trim() && (!isSignalLessText(b) || /^\s*(?:yes|yeah|yep|yup|nope)\b/i.test(b)))
+  const counts = {}
+  for (const b of priors) { const v = languageVerdict({ inboundText: b }); const l = v.english ? 'en' : (SPANISH_RE.test(b) ? 'es' : otherLanguageMarker(b) || replyLanguageOf({ inboundText: b })); if (l !== 'unknown') counts[l] = (counts[l] || 0) + 1 }
+  const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  const mode = ranked.length && (ranked.length === 1 || ranked[0][1] > ranked[1][1]) ? ranked[0][0] : null
+  if (isSignalLessText(inboundText)) {
+    if (mode) return { language: mode, basis: 'thread' }
+    const l = String(language || '').trim().toLowerCase()
+    if (UNIVERSAL_TOKEN_RE.test(stripSymbols(inboundText)) && (l === 'en' || l === 'english' || l.startsWith('en-'))) return { language: 'en', basis: 'stored_label_short_token' }
+    return { language: 'unknown', basis: 'no_signal' }
+  }
+  const current = replyLanguageOf({ language, inboundText })
+  if (current === 'en' && mode && mode !== 'en' && mode !== 'es' && counts[mode] * 2 >= priors.length) return { language: mode, basis: 'thread_dominant_non_enabled' }
+  return { language: current, basis: 'inbound' }
+}
+
 /** Is the seller's language one the policy enables? (unknown / any other language: never) */
-export function languageEnabledFor({ language = null, inboundText = '', languages = ['en'] } = {}) {
-  const lang = replyLanguageOf({ language, inboundText })
-  return { language: lang, enabled: lang !== 'unknown' && (languages || ['en']).includes(lang), reason: lang === 'unknown' ? 'language_unknown' : `language_${lang}` }
+export function languageEnabledFor({ language = null, inboundText = '', languages = ['en'], priorInbounds = null } = {}) {
+  const { language: lang, basis } = priorInbounds ? dominantLanguageOf({ language, inboundText, priorInbounds }) : { language: replyLanguageOf({ language, inboundText }), basis: 'inbound' }
+  const mixed = lang !== 'en' && lang !== 'es' && lang !== 'unknown' && ENGLISH_WORD_RE.test(stripSymbols(inboundText))
+  return { language: lang, basis, enabled: lang !== 'unknown' && (languages || ['en']).includes(lang), reason: lang === 'unknown' ? 'language_unknown' : mixed ? `language_mixed_${lang}` : `language_${lang}` }
+}
+
+/** The seller's earlier inbound bodies (before the given inbound), oldest first — the dominant-language evidence. */
+export function priorInboundBodies(thread = [], inbound = null) {
+  const at = Date.parse(inbound?.at || 0) || Infinity
+  const id = inbound?.id != null ? String(inbound.id) : null
+  return [...(thread || [])].filter((m) => String(m?.direction || '').startsWith('in') && String(m.id) !== id && (Date.parse(m.at || 0) || 0) <= at)
+    .sort((a, b) => (Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0)).map((m) => m.body ?? m.message_body ?? '')
 }
 
 export function languageVerdict({ language = null, inboundText = '', draftText = '' } = {}) {
   const l = String(language || '').trim().toLowerCase()
   const storedEnglish = l === 'en' || l === 'english' || l.startsWith('en-')
   if (SPANISH_RE.test(inboundText) || SPANISH_RE.test(draftText)) return { english: false, reason: 'spanish_detected' }
+  // rc-8.5.21 v4 (S4): a code-switched message is never English because some of its words are
+  const other = otherLanguageMarker(inboundText)
+  if (other) return { english: false, reason: ENGLISH_WORD_RE.test(stripSymbols(inboundText)) ? `language_mixed_${other}` : `language_${other}` }
   const identified = identifyReplyLanguage(inboundText)
   if (identified) return /^english$/i.test(identified) ? { english: true, reason: 'english' } : { english: false, reason: `language_${String(identified).toLowerCase()}` }
   const text = stripSymbols(inboundText)

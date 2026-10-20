@@ -34,6 +34,9 @@ import { mixedAnswerTarget } from '../property-ownership.js'
 import { perPropertyObjective } from '../property-facts.js'
 import { createEscalatingNegotiationAuthority } from '../pipeline/negotiation-authority.js'
 import { maskText } from '../pii.js'
+import { moneyMentions } from '../validator.js'
+// any amount in OUR text (dollar sign, thousands separators, 'k' suffix) — the ledger's own quote detector
+const OUR_AMOUNT_RE = /\$\s?[0-9]|\b[0-9]{1,3}(?:,[0-9]{3})+\b|\b[0-9]+(?:\.[0-9]+)?\s?(?:k|grand|mil|thousand|million)\b/i
 
 export const CANONICAL_RUNTIME_VERSION = 'conv-ai.canonical-runtime.v1'
 /** The writer identity recorded on every decision: pipeline + playbook + compose prompt. */
@@ -134,7 +137,9 @@ export async function decideAndCompose({
 }
 
 function knownNumbersOf(input = {}) {
-  return [...new Set((input.thread || []).flatMap((m) => String(m.body || '').match(/[0-9]{3,}/g) || []))]
+  // rc-8.5.21 v4 (coverage): the property's own address numbers are known facts (the composer names the
+  // property from the context even when our earlier template text did not spell the address the same way)
+  return [...new Set([...(input.thread || []).map((m) => m.body), ...(input.properties || []).map((p) => p?.address)].flatMap((b) => String(b || '').match(/[0-9]{3,}/g) || []))]
 }
 
 function summarizeEligibility(e) {
@@ -179,7 +184,9 @@ export function canonicalRoutineScope(record, { languageEnglish = false, languag
   if (!mixedTarget && multiPropertyEvidence({ inboundText: inboundBody, ledger, thread, inbound })) reasons.push('excluded_multi_property')
   // OWNER DECISION 2026-10-18: the one in-scope offer turn — THIS inbound asked what we would pay,
   // nothing is on the table, and the reply only asks their number (no amount)
-  const askNumberOnce = category === 'next_missing_fact' && record.reply.objective === 'asking_price' && !/[0-9]/.test(draft) &&
+  // rc-8.5.21 v4 (coverage): "no amount" means no MONEY in our text. The old any-digit test held every
+  // ask-once draft that named the property ("…for 2730 Riverbend Dr?"): an address is never a price.
+  const askNumberOnce = category === 'next_missing_fact' && record.reply.objective === 'asking_price' && !moneyMentions(draft).length && !OUR_AMOUNT_RE.test(draft) &&
     // rc-8.5.21 v3 (RT-11 / RT-05): an offer request in an earlier fragment of THIS burst is this turn's
     (ledger?.offer_requests || []).every((id) => id === (inbound?.id ?? record.inbound_message_id) || (ledger?.open_inbound_ids || []).includes(id)) && !(ledger?.existing_offers || []).length && !(ledger?.outbound_quotes || []).length
   if (((ledger?.offer_requests || []).length && !askNumberOnce) || (ledger?.existing_offers || []).length) reasons.push('excluded_offer_on_thread')

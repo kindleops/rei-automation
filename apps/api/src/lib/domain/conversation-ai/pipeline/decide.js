@@ -14,7 +14,7 @@
 import { acceptsOurProposal } from '../acceptance.js'
 import { deterministicPrecheck } from '../precheck.js'
 import { isStopRequest } from '../stop-request.js'
-import { languageEnabledFor, languageVerdict } from '../send-policy.js'
+import { languageEnabledFor, languageVerdict, priorInboundBodies } from '../send-policy.js'
 import { ACTIONS, PIPELINE_VERSION, validatePlan } from './outcomes.js'
 import { ownershipDenialTerminal, resolveOwnershipEvidence } from '../ownership-evidence.js'
 import { mixedAnswerTarget } from '../property-ownership.js'
@@ -57,7 +57,10 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   const burstText = turnIds.size > 1
     ? [...(thread || []).filter((m) => String(m?.direction || '').startsWith('in') && turnIds.has(String(m.id))).map((m) => m.body ?? m.message_body ?? ''), inboundText].filter(Boolean).join('\n')
     : inboundText
-  const replyLangFor = () => languageEnabledFor({ language, inboundText: burstText, languages: enabledLanguages }).language
+  // rc-8.5.21 v4 (S4): the seller's DOMINANT language — this turn's text first; a turn with no language
+  // signal of its own ("185k", "ballpark?") takes the language the seller writes on this thread
+  const priorInbounds = priorInboundBodies((thread || []).filter((m) => !turnIds.has(String(m?.id))), inbound || { id: inboundId })
+  const replyLangFor = () => languageEnabledFor({ language, inboundText: burstText, languages: enabledLanguages, priorInbounds }).language
   const plan = (actions, reason, extra = {}) => {
     const v = validatePlan(actions)
     if (!v.ok) return { version: PIPELINE_VERSION, actions: [{ type: ACTIONS.HOLD, reason: 'plan_conflict' }], reasons: ['plan_conflict', ...v.reasons], conflict_from: actions.map((a) => a.type) }
@@ -91,7 +94,7 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   // CONTINUES the conversation on the one property they own / would sell (its next stage question);
   // the denied / not-for-sale property is closed for it (its denial / nurture is the inbound path's)
   const mixed = mixedAnswerTarget(pOwn)
-  if (mixed && languageEnabledFor({ language, inboundText, languages: enabledLanguages }).enabled) {
+  if (mixed && languageEnabledFor({ language, inboundText, languages: enabledLanguages, priorInbounds }).enabled) {
     const byProperty = Object.fromEntries((pOwn.inbound.clauses || []).map((c) => [c.property, { ownership: c.ownership, interest: c.interest }]))
     return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership_by_property: byProperty }, source_message_id: inboundId }, { type: ACTIONS.AI_GENERATED_REPLY, category: 'next_missing_fact', objective: mixed.objective, target_property: mixed.property }], 'mixed_property_answer_continue_on_confirmed', { ownership })
   }
@@ -121,7 +124,7 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   const ownFact = ledger?.facts?.ownership
   // OWNER DECISION 2026-10-18: the seller's language from the INBOUND evidence; the reply is composed
   // in it ONLY when the language policy enables it (Spanish), never an English fallback
-  const replyLang = languageEnabledFor({ language, inboundText: burstText, languages: enabledLanguages })
+  const replyLang = languageEnabledFor({ language, inboundText: burstText, languages: enabledLanguages, priorInbounds })
   const lang = { english: replyLang.enabled, reason: replyLang.reason, language: replyLang.language }
   const confident = (j) => j && Number(j.confidence) >= 0.85
   const detPositive = ['ownership_confirmed', 'seller_interested', 'interested', 'latent_interest', 'asks_offer'].includes(String(deterministic?.intent))
@@ -169,8 +172,16 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
     return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: f, source_message_id: inboundId }, follow, close], ledgerNotInterested ? 'disinterest_30_day_followup' : 'disinterest_30_day_followup:model', { ownership })
   }
 
-  // 5. language: only English threads get engine text (a missing language with English text is English)
-  if (!lang.english) return plan([...update, escalation('language_not_enabled', { reason: lang.reason })], 'language_not_enabled', { ownership, reply_language: lang.language })
+  // 4b. rc-8.5.21 v4 (S4): a CALLBACK / VISIT request is an OPERATOR TASK in every language — decided before
+  //     the language gate so a non-enabled-language request ("tawagan nyo na lang ako") is named as what it
+  //     is; the AI never texts a promise of a call or a visit (the validator rejects one)
+  const requestEarly = (kind) => (ledger?.requests || []).some((r) => r.kind === kind && turnIds.has(String(r.source_message_id)))
+  if (requestEarly('callback')) return plan([...update, escalation('requested_callback', { source_message_id: inboundId, reply_language: lang.language, language_enabled: lang.english })], 'callback_request_operator_task', { ownership, reply_language: lang.language })
+  if (requestEarly('visit_request')) return plan([...update, escalation('requested_visit', { source_message_id: inboundId, reply_language: lang.language, language_enabled: lang.english })], 'visit_request_operator_task', { ownership, reply_language: lang.language })
+
+  // 5. language: only the seller's DOMINANT language, when the policy enables it, gets engine text; a
+  //    code-switched turn with a non-enabled-language segment is held (rc-8.5.21 v4 S4)
+  if (!lang.english) return plan([...update, escalation('language_not_enabled', { reason: lang.reason, basis: replyLang.basis || null })], 'language_not_enabled', { ownership, reply_language: lang.language })
 
   // 5b. two stated asking prices far apart: a plain HOLD (no model escalation)
   if (judgment?.escalation_reason === 'contradiction' || judgment?._hold === 'price_contradiction') return plan([...update, { type: ACTIONS.HOLD, reason: 'price_contradiction' }], 'price_contradiction', { ownership })
