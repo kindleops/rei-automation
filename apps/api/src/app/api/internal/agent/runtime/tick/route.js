@@ -37,7 +37,7 @@ export async function POST(request) {
     // AGENT_OPERATIONS_ENABLED=1; the 8.5.21 follow-up execution pipeline (followup.execution_sweep /
     // followup.dispatch / followup.reconcile — writes follow-up send_queue rows) only when
     // LC_FOLLOWUP_EXECUTION=1, and it does nothing until system_control.followup_execution_mode is set; the Action
-    // Gateway T3 / T4 execution kinds (action.* — the canonical send paths) only when LC_ACTION_GATEWAY_EXECUTION=1
+    // Gateway executor kind (action_gateway.execute — the canonical send paths) only when LC_ACTION_GATEWAY_EXECUTION=1
     const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...missionRuntimeHandlers(), ...operationsRuntimeHandlers(), ...followupRuntimeHandlers(), ...actionGatewayExecutionHandlers() } })
     if (result.summary) {
       const s = result.summary

@@ -179,7 +179,7 @@ test('PG T4 database backstop: an envelope ref for ANOTHER thread + property, pr
     const grant = p.grants.find((x) => x.capability === 'offers.execute_authorized')
     const { encodePropertyRef } = await import('../../src/lib/agent/missions/mission-codec.js')
     const opened = await store.openIntent({ agent_id: p.agent_id, action: 'execute_authorized_offer', capability: 'offers.execute_authorized', tier: 4, resource_type: 'thread', resource_id: o2.t.thread_id,
-      client_key: 'bypass-0001', idempotency_key: crypto.createHash('sha256').update('bypass').digest('hex'), params: { thread_id: o2.t.thread_id, property_ref: encodePropertyRef(o2.pid), amount: g.prep.opening.recommended, send_permit_id: sa.send_authorization_id, runtime_kind: 'action.offer_send' },
+      client_key: 'bypass-0001', idempotency_key: crypto.createHash('sha256').update('bypass').digest('hex'), params: { thread_id: o2.t.thread_id, property_ref: encodePropertyRef(o2.pid), amount: g.prep.opening.recommended, send_permit_id: sa.send_authorization_id, runtime_kind: 'action_gateway.execute' },
       params_hash: 'a'.repeat(64), correlation_id: crypto.randomUUID(), recovery: 'reexecute', max_attempts: 3 })
     await assert.rejects(store.authorizeEnvelope(opened.intent.intent_id, digest, { grant_id: grant.grant_id, policy_id: 'execute_authorized_offer.policy', policy_version: 'v1', envelope_ref: `send_authorization:${sa.send_authorization_id}` }), /ENVELOPE_SCOPE_MISMATCH/)
     // and an envelope ref on an action that is not envelope-authorized
@@ -223,7 +223,7 @@ test('PG T4 (REAL SIGKILL): the worker dies after the offer + ledger writes and 
     const ex = await gateway.call({ credential: cred, tool: 'execute_authorized_offer', args: execArgs(o, g.prep) })
     assert.equal(ex.code, 'HANDOFF_QUEUED')
     await env.owner.query(`update agent.runtime_limits set runtime_enabled = true, emergency_stop = false, max_concurrency_global = 2, tick_max_jobs = 4, kind_limits = $1::jsonb where id = 1`,
-      [JSON.stringify({ 'action.offer_send': { enabled: true, max_concurrency: 2, armed_by: OPERATOR } })])
+      [JSON.stringify({ 'action_gateway.execute': { enabled: true, max_concurrency: 2, armed_by: OPERATOR } })])
     const child = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings=ExperimentalWarning', '--import', './tests/register-aliases.mjs', 'tests/helpers/action-gateway-t34-crash-child.mjs', env.db.url, env.db.apiUrl, 'offer'],
       { cwd: API_DIR, env: process.env, encoding: 'utf8', timeout: 120_000 })
     assert.equal(child.signal, 'SIGKILL', `child: ${child.status} ${child.stdout} ${String(child.stderr).slice(-800)}`)

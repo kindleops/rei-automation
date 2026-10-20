@@ -217,10 +217,10 @@ Everything else is reused:
 
 ## 13. Dependencies on code owned elsewhere (written up, not changed)
 
-- **D1:** register `agentActionApprovalCapability` (`domain/action-gateway/approvals.js`) in `agent/capabilities/index.js` `FIRST_CAPABILITIES`, and add `services.actionGateway = createIntentApprovalReader({ query })` over the agent_api pool. Without it, gateway approvals can be filed but not decided in production.
+- **D1 (done on `feat/action-mcp-t2`, docs/ACTION-MCP.md §8.4):** register `agentActionApprovalCapability` (`domain/action-gateway/approvals.js`) in `agent/capabilities/index.js` `FIRST_CAPABILITIES`, and add `services.actionGateway = createIntentApprovalReader({ query })` over the agent_api pool. Without it, gateway approvals can be filed but not decided in production.
 - **D2:** the Inbound Action Center UI should render `agent.ops_work_item` scope `agent` / kind `agent_task` (it reads every scope today; the label set is UI-side).
 - **D3:** `queue/send-time-contact-guard.js#loadSendTimeContactFacts` should use the injected client for its hold fact when no checker is passed (finding 5).
 - **D4:** add `action_gateway_enabled`, `action_gateway_tiers` and `action_gateway_killed_capabilities` (and the AI send keys, finding 6) to `OPERATOR_OWNED_SYSTEM_KEYS` (`domain/queue/operator-brake-authority.js:27-37`).
 - **D5:** `valuation.refresh` handler: accept `input.property_refs` so one property can be dry-run valued on request (today it builds its own queue).
-- **D6:** make envelope / send-authorization approvals decidable through the one decide route (finding 3) before any T4 tool.
-- **D7:** fix R1 (server-set stage source), R4 (amount ≤ ceiling inside `persistActiveOffer`) and R5 (durable sends-used) before the corresponding T2 / T4 tools are built.
+- **D6:** make envelope / send-authorization approvals decidable through the one decide route (finding 3) before any T4 tool. **Done on `feat/action-mcp-t34`** (`agent/capabilities/decision-registry.js`; docs/ACTION-MCP.md §9.3).
+- **D7:** fix R1 (server-set stage source; done on `feat/action-mcp-t2`), R4 (amount ≤ ceiling inside `persistActiveOffer`) and R5 (durable sends-used) before the corresponding T2 / T4 tools are built. **R4 and R5 done on `feat/action-mcp-t34`** (docs/ACTION-MCP.md §9.3).

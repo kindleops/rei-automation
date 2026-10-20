@@ -1,7 +1,7 @@
 // Disposable-PostgreSQL world for the Action Gateway T3 / T4 proofs (queue_authorized_reply, prepare / submit /
 // execute offers, record_seller_counteroffer, R4, R5, D6). AGENT_PG_TEST_DB_URL must name a LOCAL scratch server.
 //
-// One brand-new database per world: the Action Gateway world (#26 and its prerequisites), the R3 / turn world
+// One brand-new database per world: the Action Gateway world (#26, #27 and their prerequisites), the R3 / turn world
 // (reply turns, message origin + ai_generated_messages, the dispatch lease), the negotiation authority + send
 // authorization tables, the T3 / T4 baseline and the PROPOSED T3 / T4 link. Connections:
 //   owner   postgres (seeds; also stands in for LeadCommand's backend client in the execution handlers)
@@ -18,6 +18,8 @@ import { MIG, FIX, GATEWAY_MIGRATION, GATEWAY_BASELINE, ORG, OWNER, OPERATOR, OU
 
 export const T34_MIGRATION = MIG('PROPOSED_20261020110000_action_gateway_t34.sql')
 export const T34_BASELINE = path.join(REPO_DIR, 'mcp/leadcommand-action-mcp/migrations/test/action_gateway_t34_baseline.sql')
+export const T2_MIGRATION = MIG('PROPOSED_20261020100000_action_gateway_t2.sql')
+export const T2_BASELINE = path.join(REPO_DIR, 'mcp/leadcommand-action-mcp/migrations/test/action_gateway_t2_baseline.sql')
 
 // the same fixtures as tests/helpers/action-gateway-pg.mjs (kept identical; not exported there)
 const RUNTIME_PUBLIC_FIXTURE = `create table if not exists public.system_control (key text primary key, value text, updated_at timestamptz default now());
@@ -71,8 +73,11 @@ export async function t34Db({ applyT34 = true } = {}) {
       await tx(MIG('PROPOSED_20261016161000_negotiation_send_authorization.sql'))
       await run(GATEWAY_BASELINE)
       await db.pool.query(CONVERSATION_FIXTURE)
+      await run(MIG('PROPOSED_20261017120000_followup_intent_lifecycle.sql'))
+      await run(T2_BASELINE)
       await run(T34_BASELINE)
       await tx(GATEWAY_MIGRATION)
+      await tx(T2_MIGRATION) // link #27: the extension registry this link adds rows to
       if (applyT34) await tx(T34_MIGRATION)
       const owner = db.trackPool(isoPool(db.url, 8))
       return { db, owner, url: db.url, sb: pgSupabase(owner) }

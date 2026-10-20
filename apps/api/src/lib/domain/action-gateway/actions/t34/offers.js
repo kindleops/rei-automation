@@ -141,7 +141,7 @@ export const EXECUTE_SPEC = Object.freeze({
   executor: { kind: 'domain_write', fn: DOMAIN_WRITES.handoff },
   recovery: 'reexecute',
   limits: { per_min: 6 },
-  wraps: { service: 'handoff → LeadCommand worker action.offer_send: negotiation-composer#composeNegotiationReply + seller-offer-authority#persistActiveOffer + negotiation-service#recordNegotiationEvent + the canonical queue writer', module: 'apps/api/src/lib/domain/negotiation/negotiation-send.js' },
+  wraps: { service: 'handoff → LeadCommand worker action_gateway.execute: negotiation-composer#composeNegotiationReply + seller-offer-authority#persistActiveOffer + negotiation-service#recordNegotiationEvent + the canonical queue writer', module: 'apps/api/src/lib/domain/negotiation/negotiation-send.js' },
   touches: ['agent_runtime_job', 'negotiation_send_authorization_use'],
 })
 
@@ -155,7 +155,7 @@ export const EXECUTE_LOGIC = Object.freeze({
     const state = await store.negotiationState(resource.id, input.property_id)
     const sa = state?.send_authorization || null
     return { thread_id: resource.id, property_ref: pref(input.property_id), amount: input.amount, send_permit_id: sa?.send_authorization_id || null,
-      envelope_id: state?.envelope?.envelope_id || null, envelope_version: num(state?.envelope?.version), runtime_kind: 'action.offer_send' }
+      envelope_id: state?.envelope?.envelope_id || null, envelope_version: num(state?.envelope?.version), runtime_kind: 'action_gateway.execute' }
   },
   async policy({ input, resource, params, reads, store, services, now }) {
     const act = await negotiationActivation(reads).catch(() => ({ available: false, code: 'CAPABILITY_STATE_UNREADABLE' }))

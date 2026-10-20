@@ -45,6 +45,7 @@ alter table public.seller_offers add column if not exists offer_version integer;
 alter table public.seller_offers add column if not exists offer_type text;
 alter table public.seller_offers add column if not exists direction text;
 alter table public.seller_offers add column if not exists purchase_price numeric;
+alter table public.seller_offers add column if not exists authorized_ceiling numeric;
 alter table public.seller_offers add column if not exists status text;
 alter table public.seller_offers add column if not exists accepted_at timestamptz;
 alter table public.seller_offers add column if not exists acceptance_event_id text;

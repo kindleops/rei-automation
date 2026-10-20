@@ -10,7 +10,7 @@ import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js'
 export const TURN_DISPATCH_VERSION = 'conv-ai.turn-dispatch.v1'
 
 export function createR3TurnDispatcher({ supabase = getDefaultSupabaseClient(), jobId = null, execute = null, deps = {} } = {}) {
-  // decisionId: a caller that is not a turn (the Action Gateway's action.seller_reply job) names its own decision;
+  // decisionId: a caller that is not a turn (the Action Gateway's action_gateway.execute job for queue_authorized_reply) names its own decision;
   // without a claim token R3 takes the per-inbound reservation itself (exactly one reply per inbound, shared scope)
   return async ({ turn_id, version, claim, decision, decisionId = null }) => {
     const run = execute || (await import('./conversation-ai-r3-executor.js')).executeAiConversationReply

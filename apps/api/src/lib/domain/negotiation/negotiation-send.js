@@ -1,6 +1,6 @@
 // THE SEND PATH for an envelope-authorized negotiation move (Action Gateway execute_authorized_offer, run by
-// LeadCommand's worker: runtime kind action.offer_send) and the recording of a seller counter (record_seller_counteroffer,
-// action.record_counter). It owns exactly the writes negotiation-composer.js describes and never does itself:
+// LeadCommand's worker: runtime kind action_gateway.execute) and the recording of a seller counter (record_seller_counteroffer,
+// action_gateway.execute). It owns exactly the writes negotiation-composer.js describes and never does itself:
 //
 //   composeNegotiationReply (envelope + DISTINCT live send authorization + the DURABLE send budget this send already
 //     holds (R5: send_use_key) + an approved sms_templates row + the seller-facing guard)  → DETERMINISTIC_REPLY

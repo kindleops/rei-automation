@@ -1,28 +1,32 @@
-// LEADCOMMAND EXECUTES: the worker half of the Action Gateway's T3 / T4 family (docs/ACTION-MCP.md §8).
+// LEADCOMMAND EXECUTES: the worker half of the Action Gateway's handed-off actions (docs/ACTION-MCP.md §9).
 // The gateway (lc_action_gateway; it writes no business table) authorizes an intent and hands it off: ONE runtime
-// job per intent (agent.runtime_enqueue, accountable to the agent's human sponsor). These handlers run that job with
-// LeadCommand's own backend client through the CANONICAL services, and record a receipt
-// (public.lc_seller_action_receipt_record: a hold / failure / unknown outcome raises ONE operator work item):
+// job per intent of the ONE executor kind `action_gateway.execute` (agent.runtime_enqueue, accountable to the agent's
+// human sponsor). The handler loads the intent, dispatches by its ACTION to the executor registered for it, runs the
+// CANONICAL service with LeadCommand's own backend client and records a receipt (public.lc_seller_action_receipt_record:
+// a hold / failure / unknown outcome raises ONE operator work item):
 //
-//   action.seller_reply        createCanonicalTurnDecider (decideAndCompose + the shadow record + aiSendAuthorizedFor)
-//                              → the ONE R3 dispatcher module (conversation-turn-dispatch.js) → insertSupabaseSendQueueRow
-//                              → the queue runner. A STOP / newer inbound arriving while the reply is prepared refuses it.
-//   action.offer_send          negotiation/negotiation-send#sendAuthorizedOffer (composer, R4 persistence, ledger,
-//                              canonical queue writer) — only with system_control negotiation_send_enabled AND
-//                              NEGOTIATION_COMPOSER_ENABLED=1 in this process.
-//   action.record_counter      negotiation/negotiation-send#recordAgentCounter (recordSellerCounter; never accepts).
-//   action.receipts_reconcile  follows enqueued rows to their dispatch outcome: sent / failed / held, and an ambiguous
-//                              provider accept ⇒ outcome_unknown + a critical operator item (NEVER a resend).
+//   queue_authorized_reply      createCanonicalTurnDecider (decideAndCompose + the shadow record + aiSendAuthorizedFor)
+//                               → the ONE R3 dispatcher module (conversation-turn-dispatch.js) → insertSupabaseSendQueueRow
+//                               → the queue runner. A STOP / newer inbound arriving while the reply is prepared refuses it.
+//   execute_authorized_offer    negotiation/negotiation-send#sendAuthorizedOffer (composer, R4 persistence, ledger,
+//                               canonical queue writer) — only with system_control negotiation_send_enabled AND
+//                               NEGOTIATION_COMPOSER_ENABLED=1 in this process.
+//   record_seller_counteroffer  negotiation/negotiation-send#recordAgentCounter (recordSellerCounter; never accepts).
+//   input { sweep: 'receipts' } follows enqueued rows to their dispatch outcome: sent / failed / held, and an ambiguous
+//                               provider accept ⇒ outcome_unknown + a critical operator item (NEVER a resend).
+// The T2 executor (link #27's `action_gateway.execute` actions) registers its actions in the SAME dispatch table
+// (ACTION_EXECUTORS) — one kind, one pattern, never a second executor kind.
 //
 // BORN OFF: actionGatewayExecutionHandlers() → {} unless LC_ACTION_GATEWAY_EXECUTION=1 (and the runtime gate); the
-// database claims a kind only when an operator arms + enables it in agent.runtime_limits.kind_limits.
+// database claims the kind only when an operator arms + enables it in agent.runtime_limits.kind_limits.
 import { runtimeGate } from '@/lib/agent/runtime/runtime-service.js'
 import { getSystemValueFresh } from '@/lib/system-control.js'
 import { isStopRequest } from '@/lib/domain/conversation-ai/stop-request.js'
 
 export const ACTION_EXECUTION_VERSION = 'lc.action-gateway-execution.v1'
-export const ACTION_KINDS = Object.freeze({ seller_reply: 'action.seller_reply', offer_send: 'action.offer_send', record_counter: 'action.record_counter', receipts_reconcile: 'action.receipts_reconcile' })
-const KIND_OF_ACTION = Object.freeze({ queue_authorized_reply: ACTION_KINDS.seller_reply, execute_authorized_offer: ACTION_KINDS.offer_send, record_seller_counteroffer: ACTION_KINDS.record_counter })
+export const ACTION_GATEWAY_EXECUTE_KIND = 'action_gateway.execute'
+/** The actions this module executes under the one kind (T2 adds its own to the same table). */
+export const ACTION_EXECUTORS = Object.freeze({ queue_authorized_reply: 'sellerReply', execute_authorized_offer: 'offerSend', record_seller_counteroffer: 'recordCounter' })
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const clean = (v) => String(v ?? '').trim()
 const code = (v, n = 80) => clean(v).replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, n) || null
@@ -45,12 +49,12 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
     rpc(supabase, 'lc_seller_action_receipt_record', { p_intent_id: intent_id, p_job_id: job_id, p_state: state, p_code: code(c), p_detail: detail, p_queue_row_id: queue_row_id ? String(queue_row_id) : null })
 
   /** The handed-off intent, verified: handed off, this action's kind, this job, receipt not final. */
-  async function prologue(kind, job) {
+  async function prologue(action, job) {
     const id = clean(job?.input?.action_intent_id)
     if (!UUID_RE.test(id)) return { stop: { code: 'ACTION_INPUT_INVALID' } }
     const l = await rpc(supabase, 'lc_seller_action_load', { p_intent_id: id })
     const i = l?.intent
-    if (!i || i.state !== 'succeeded' || i.result_code !== 'HANDOFF_QUEUED' || KIND_OF_ACTION[i.action] !== kind) return { stop: { code: 'INTENT_NOT_HANDED_OFF' } }
+    if (!i || i.state !== 'succeeded' || i.result_code !== 'HANDOFF_QUEUED' || i.action !== action) return { stop: { code: 'INTENT_NOT_HANDED_OFF' } }
     const r = l.receipt
     if (!r || r.job_id !== job.job_id) return { stop: { code: 'RECEIPT_JOB_MISMATCH' } }
     if (!['requested', 'executing'].includes(r.state)) return { stop: { code: 'RECEIPT_FINAL', state: r.state } }
@@ -90,7 +94,7 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
   }
 
   async function sellerReply(job, ctx = {}) {
-    const p = await prologue(ACTION_KINDS.seller_reply, job)
+    const p = await prologue('queue_authorized_reply', job)
     if (p.stop) return p.stop
     const { intent, thread, id, job_id } = p
     const inboundId = clean(intent.params.inbound_message_id)
@@ -136,7 +140,7 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
 
   async function offerSend(job, ctx = {}) {
     void ctx
-    const p = await prologue(ACTION_KINDS.offer_send, job)
+    const p = await prologue('execute_authorized_offer', job)
     if (p.stop) return p.stop
     const { intent, auth, thread, id, job_id } = p
     // the production negotiation capability, re-read at execution, in THIS process too
@@ -157,7 +161,7 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
   }
 
   async function recordCounter(job) {
-    const p = await prologue(ACTION_KINDS.record_counter, job)
+    const p = await prologue('record_seller_counteroffer', job)
     if (p.stop) return p.stop
     const { intent, thread, id, job_id } = p
     const { recordAgentCounter } = await import('@/lib/domain/negotiation/negotiation-send.js')
@@ -192,17 +196,27 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
     return { scanned: open.length, recorded: out }
   }
 
-  return Object.freeze({ sellerReply, offerSend, recordCounter, reconcileReceipts, version: ACTION_EXECUTION_VERSION })
+  /** THE handler body of action_gateway.execute: dispatch by the handed-off intent's action. */
+  async function execute(job, ctx = {}) {
+    if (job?.input?.sweep === 'receipts') return reconcileReceipts({})
+    const id = clean(job?.input?.action_intent_id)
+    if (!UUID_RE.test(id)) return { code: 'ACTION_INPUT_INVALID' }
+    const l = await rpc(supabase, 'lc_seller_action_load', { p_intent_id: id })
+    const fn = { sellerReply, offerSend, recordCounter }[ACTION_EXECUTORS[l?.intent?.action]]
+    if (!fn) return { code: 'ACTION_NOT_EXECUTED_HERE' }
+    return fn(job, ctx)
+  }
+
+  return Object.freeze({ execute, sellerReply, offerSend, recordCounter, reconcileReceipts, version: ACTION_EXECUTION_VERSION })
 }
 
-/** The runtime handlers (the tick route registers them). */
+/** The runtime handler of the ONE executor kind (the tick route registers it). */
 export function buildActionGatewayHandlers({ execution }) {
-  const h = (kind, fn) => Object.freeze({ kind, async run(ctx) { await ctx.step?.(kind, { progress: { step: kind, steps_done: 0, steps_total: 1, pct: 0 } }); return { result: await fn(ctx.job, ctx) } } })
   return {
-    [ACTION_KINDS.seller_reply]: h(ACTION_KINDS.seller_reply, (j, c) => execution.sellerReply(j, c)),
-    [ACTION_KINDS.offer_send]: h(ACTION_KINDS.offer_send, (j, c) => execution.offerSend(j, c)),
-    [ACTION_KINDS.record_counter]: h(ACTION_KINDS.record_counter, (j) => execution.recordCounter(j)),
-    [ACTION_KINDS.receipts_reconcile]: h(ACTION_KINDS.receipts_reconcile, () => execution.reconcileReceipts({})),
+    [ACTION_GATEWAY_EXECUTE_KIND]: Object.freeze({ kind: ACTION_GATEWAY_EXECUTE_KIND, async run(ctx) {
+      await ctx.step?.('execute', { progress: { step: 'execute', steps_done: 0, steps_total: 1, pct: 0 } })
+      return { result: await execution.execute(ctx.job, ctx) }
+    } }),
   }
 }
 
@@ -211,11 +225,7 @@ export function actionGatewayExecutionHandlers(env = process.env) {
   if (clean(env?.LC_ACTION_GATEWAY_EXECUTION) !== '1' || !runtimeGate(env)?.enabled) return {}
   let execution = null
   const lazy = async () => execution || (execution = createGatewayExecution({ supabase: (await import('@/lib/supabase/default-client.js')).getDefaultSupabaseClient(), env }))
-  const wrap = (kind, fn) => Object.freeze({ kind, async run(ctx) { const e = await lazy(); return { result: await fn(e, ctx) } } })
   return {
-    [ACTION_KINDS.seller_reply]: wrap(ACTION_KINDS.seller_reply, (e, c) => e.sellerReply(c.job, c)),
-    [ACTION_KINDS.offer_send]: wrap(ACTION_KINDS.offer_send, (e, c) => e.offerSend(c.job, c)),
-    [ACTION_KINDS.record_counter]: wrap(ACTION_KINDS.record_counter, (e, c) => e.recordCounter(c.job)),
-    [ACTION_KINDS.receipts_reconcile]: wrap(ACTION_KINDS.receipts_reconcile, (e) => e.reconcileReceipts({})),
+    [ACTION_GATEWAY_EXECUTE_KIND]: Object.freeze({ kind: ACTION_GATEWAY_EXECUTE_KIND, async run(ctx) { const e = await lazy(); return { result: await e.execute(ctx.job, ctx) } } }),
   }
 }

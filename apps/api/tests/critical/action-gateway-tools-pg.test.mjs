@@ -272,7 +272,7 @@ test('PG gateway: every registered-but-unimplemented tool answers capability_not
     await seedWorld(env.owner, { tiers: 'T1,T2,T3,T4' })
     const { ACTIONS } = await import('../../src/lib/domain/action-gateway/catalog.js')
     const stubs = ACTIONS.filter((a) => a.implemented === false)
-    assert.ok(stubs.length >= 1, 'the remaining phase stubs (the T3 / T4 family is implemented: actions/t34)')
+    assert.ok(stubs.length >= 0, stubs.map((x) => x.name).join(',')) // T2 (actions/t2) and T3 / T4 (actions/t34) are implemented
     const cred = await registerAgent(env.owner, { tier_ceiling: 4, grants: stubs.map((s) => [s.capability, 4]) })
     const { gateway } = makeGateway(env)
     for (const s of stubs) {

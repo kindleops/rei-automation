@@ -8,8 +8,8 @@
 --   * any T3 / T4 intent is pending (received / awaiting_approval / authorized / executing);
 --   * any receipt is still open (requested / executing / enqueued): LeadCommand's worker / an operator finishes it;
 --   * any durable send-budget use exists (it is the evidence of a priced send; export it first).
--- Then drops exactly what the apply created, restores #26's action_gateway.authorization_guard body verbatim and
--- renames action_gateway.self_check_pre_t34 back to action_gateway.self_check. Business rows (seller_offers,
+-- Then deletes this link's rows of #27's extension registry, drops exactly what the apply created and restores
+-- #26's action_gateway.authorization_guard body verbatim. Business rows (seller_offers,
 -- negotiation_envelopes granted through submit_offer_for_approval, send_queue rows, operator work items) STAY.
 
 set local lock_timeout = '5s';
@@ -111,9 +111,7 @@ end
 $fn$;
 
 
-drop function action_gateway.self_check(name);
-alter function action_gateway.self_check_pre_t34(name) rename to self_check;
-drop function action_gateway.t34_self_check_allow();
+delete from action_gateway.extensions where link = 'PROPOSED_20261020110000_action_gateway_t34';
 
 drop function public.action_gateway_dw_handoff(uuid, uuid);
 drop function public.action_gateway_dw_offer_envelope(uuid, uuid);
@@ -141,7 +139,7 @@ drop function action_gateway.decode_property_ref(text);
 do $$
 begin
   if not coalesce((action_gateway.self_check('lc_action_gateway') ->> 'ok')::boolean, false) then
-    raise exception 'rollback postcondition: #26 self-check is not ok: %', action_gateway.self_check('lc_action_gateway') -> 'findings';
+    raise exception 'rollback postcondition: the self-check is not ok: %', action_gateway.self_check('lc_action_gateway') -> 'findings';
   end if;
 end $$;
 

@@ -1,9 +1,11 @@
 -- POSTTEST for PROPOSED_20261020110000_action_gateway_t34.sql. DISPOSABLE DATABASE ONLY:
 -- run by scripts/db/run-migration-test.mjs, never against production.
 -- It runs in one transaction and ends in ROLLBACK. The runner proves the schema is unchanged afterwards.
---   A. the COMPOSED self-check is ok and names this link; the previous self-check is preserved (renamed);
+--   A. the self-check (#27's registry-reading body) is ok; this link's registry rows exist; no T3 / T4 action is a
+--      standing T2 action;
 --   B. lc_action_gateway executes exactly its new entry points / definer reads / domain writes and reaches NONE of
---      LeadCommand's writers (the receipt writer, the budget consumer, the worker reads) nor the receipts / uses tables;
+--      LeadCommand's writers (the receipt writer, the budget consumer, the worker reads) nor the receipts / uses tables
+--      (its own receipts only through the definer read);
 --   C. R4: an outbound active offer with no ceiling, or above the lowest ceiling (frozen ceiling, the LIVE envelope
 --      max of its scope), is refused by the database; an agent "override" is refused; a complete human override
 --      passes; a seller counter (inbound) is never capped;
@@ -18,8 +20,8 @@ declare v jsonb;
 begin
   v := action_gateway.self_check('lc_action_gateway');
   if not coalesce((v ->> 'ok')::boolean, false) then raise exception 'A: composed self-check not ok: %', v -> 'findings'; end if;
-  if not (v -> 'links') ? 'action_gateway_t34' then raise exception 'A: the composed self-check does not name this link: %', v -> 'links'; end if;
-  if to_regprocedure('action_gateway.self_check_pre_t34(name)') is null then raise exception 'A: the previous self-check was not preserved'; end if;
+  if (select count(*) from action_gateway.extensions where link = 'PROPOSED_20261020110000_action_gateway_t34') <> 10 then raise exception 'A: this link''s extension rows'; end if;
+  if action_gateway.standing_t2_actions() && array['queue_authorized_reply', 'submit_offer_for_approval', 'execute_authorized_offer', 'record_seller_counteroffer'] then raise exception 'A: a T3 / T4 action is standing'; end if;
 end $$;
 
 -- B
@@ -35,7 +37,7 @@ begin
     if has_function_privilege('lc_action_gateway', f, 'EXECUTE') then raise exception 'B: the role can execute LeadCommand-side %', f; end if;
     if has_function_privilege('anon', f, 'EXECUTE') or has_function_privilege('authenticated', f, 'EXECUTE') then raise exception 'B: anon / authenticated can execute %', f; end if;
   end loop;
-  if has_table_privilege('lc_action_gateway', 'action_gateway.seller_action_receipts', 'INSERT') or has_table_privilege('lc_action_gateway', 'action_gateway.seller_action_receipts', 'UPDATE') then raise exception 'B: the role can write receipts'; end if;
+  if has_table_privilege('lc_action_gateway', 'action_gateway.seller_action_receipts', 'SELECT') or has_table_privilege('lc_action_gateway', 'action_gateway.seller_action_receipts', 'INSERT') or has_table_privilege('lc_action_gateway', 'action_gateway.seller_action_receipts', 'UPDATE') then raise exception 'B: the role reaches the receipts table'; end if;
   if has_table_privilege('lc_action_gateway', 'public.negotiation_send_authorization_uses', 'SELECT') or has_table_privilege('lc_action_gateway', 'public.negotiation_send_authorization_uses', 'INSERT') then raise exception 'B: the role reaches the uses table'; end if;
   begin
     set local role lc_action_gateway;

@@ -37,10 +37,10 @@ test('R4 (pure): an outbound price needs an independent ceiling and must be ≤ 
 })
 
 test('D6: the decide-only specs (envelope grant, send authorization, gateway intent) are decidable, and NEVER in the model registry or tool list', () => {
-  for (const id of [ENVELOPE_CAPABILITY_ID, SEND_AUTHORIZATION_CAPABILITY_ID, 'agent_actions.authorize_action']) {
-    assert.ok(DECIDE_ONLY_IDS.includes(id), id)
-    assert.ok(!FIRST_CAPABILITIES.some((c) => c.id === id), `${id} is not model-facing`)
-  }
+  for (const id of [ENVELOPE_CAPABILITY_ID, SEND_AUTHORIZATION_CAPABILITY_ID, 'agent_actions.authorize_action']) assert.ok(DECIDE_ONLY_IDS.includes(id), id)
+  // the operator-only negotiation specs are not in the model registry at all (the gateway intent spec is, D1 / #27,
+  // but filtered out of the tool list)
+  for (const id of [ENVELOPE_CAPABILITY_ID, SEND_AUTHORIZATION_CAPABILITY_ID]) assert.ok(!FIRST_CAPABILITIES.some((c) => c.id === id), `${id} is not model-facing`)
   const reg = createDecisionRegistry(FIRST_CAPABILITIES)
   for (const id of DECIDE_ONLY_IDS) assert.ok(reg.get(id), id)
   const plane = createCapabilityPlane({ env: {}, store: createMemoryCapabilityStore(), services: {}, secret: 'x'.repeat(32) })

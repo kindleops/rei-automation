@@ -5,7 +5,7 @@ import { registerAgent, seedThread, makeGateway, humanApprovals, sel, setControl
 import { pgSupabase } from './pg-supabase.mjs'
 import { createRuntimePgStore } from '../../src/lib/agent/runtime/job-runtime.js'
 import { runRuntimeTick } from '../../src/lib/agent/runtime/runtime-tick.js'
-import { createGatewayExecution, buildActionGatewayHandlers, ACTION_KINDS } from '../../src/lib/ai/action-gateway-execution.js'
+import { createGatewayExecution, buildActionGatewayHandlers, ACTION_GATEWAY_EXECUTE_KIND } from '../../src/lib/ai/action-gateway-execution.js'
 import { createSpendTracker } from '../../src/lib/domain/conversation-ai/model-client.js'
 import { insertSupabaseSendQueueRow } from '../../src/lib/supabase/sms-engine.js'
 import { makeDecision } from '../../src/lib/domain/conversation-ai/contract.js'
@@ -72,7 +72,7 @@ export function worker(env, { beforeQueueInsert = null, offerSendDeps = {}, prov
   const store = createRuntimePgStore({ pool: env.db.api })
   const handlers = buildActionGatewayHandlers({ execution })
   const arm = async () => env.owner.query(`update agent.runtime_limits set runtime_enabled = true, emergency_stop = false, max_concurrency_global = 2, tick_max_jobs = 4, kind_limits = $1::jsonb where id = 1`,
-    [JSON.stringify(Object.fromEntries(Object.values(ACTION_KINDS).map((k) => [k, { enabled: true, max_concurrency: 2, armed_by: OPERATOR }])))])
+    [JSON.stringify({ [ACTION_GATEWAY_EXECUTE_KIND]: { enabled: true, max_concurrency: 2, armed_by: OPERATOR } })])
   const tick = async (workerId = 'lc-worker') => { await arm(); return runRuntimeTick({ store, handlers, workerId, budgetMs: 30_000 }) }
   return { execution, tick, sb, readSwitch }
 }

@@ -221,7 +221,7 @@ test('PG T3 (REAL SIGKILL): the worker is killed between R3\'s immutable record 
   try {
     const id = await handOff(env, cred, t)
     await env.owner.query(`update agent.runtime_limits set runtime_enabled = true, emergency_stop = false, max_concurrency_global = 2, tick_max_jobs = 4, kind_limits = $1::jsonb where id = 1`,
-      [JSON.stringify({ 'action.seller_reply': { enabled: true, max_concurrency: 2, armed_by: (await import('../helpers/action-gateway-pg.mjs')).OPERATOR } })])
+      [JSON.stringify({ 'action_gateway.execute': { enabled: true, max_concurrency: 2, armed_by: (await import('../helpers/action-gateway-pg.mjs')).OPERATOR } })])
     const child = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings=ExperimentalWarning', '--import', './tests/register-aliases.mjs', 'tests/helpers/action-gateway-t34-crash-child.mjs', env.db.url, env.db.apiUrl, 'reply'],
       { cwd: API_DIR, env: process.env, encoding: 'utf8', timeout: 120_000 })
     assert.equal(child.signal, 'SIGKILL', `child: ${child.status} ${child.stdout} ${String(child.stderr).slice(-800)}`)

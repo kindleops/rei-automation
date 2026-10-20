@@ -4,8 +4,8 @@
 --   execute_authorized_offer · record_seller_counteroffer
 -- plus the R4 (persistence-layer ceiling) and R5 (durable send budget) fixes.
 -- STATUS: PROPOSED. NOT APPLIED. Owner approval required; applied on its own.
--- OPTIONAL chain link AFTER #26 (action_gateway) and after the T2 link (feat/action-mcp-t2) when both
--- are merged; it needs nothing from the T2 link (see "SELF-CHECK COMPOSITION" below).
+-- OPTIONAL chain link #28, AFTER #26 (action_gateway) and #27 (action_gateway_t2): it extends #27's composable
+-- extension registry by ROW (see "SELF-CHECK COMPOSITION" below) and never re-edits a body #27 owns.
 -- Test (disposable PostgreSQL 17 ONLY, never production):
 --   node scripts/db/run-migration-test.mjs --pg-bin <pg17 bin dir> --id action_gateway_t34
 -- Rollback: PROPOSED_20261020110000_action_gateway_t34_rollback.sql
@@ -23,8 +23,9 @@
 --     (decideAndCompose → validator → R3 / send policy → the canonical queue writer → the dispatcher for
 --     replies; composeNegotiationReply → persistActiveOffer → the ledger → the canonical queue writer for
 --     offers; recordSellerCounter for counters) and records the receipt. The job kinds
---     (action.seller_reply / action.offer_send / action.record_counter / action.receipts_reconcile) claim
---     NOTHING until an operator arms + enables them in agent.runtime_limits.kind_limits (born OFF).
+--     ONE kind, action_gateway.execute (the worker dispatches by the intent's action; the receipts sweep is the same
+--     kind with input {sweep:'receipts'}), claims NOTHING until an operator arms + enables it in
+--     agent.runtime_limits.kind_limits (born OFF).
 --
 -- WHAT IT CREATES
 --   public.negotiation_send_authorization_uses   R5: the DURABLE send budget. One immutable row per priced
@@ -61,16 +62,15 @@
 --   a key-allowlist policy on public.system_control for 'negotiation_send_enabled' (the negotiation
 --   production activation; absent ⇒ OFF).
 --
--- SELF-CHECK COMPOSITION (with #26 and with any other gateway link, e.g. the T2 link):
---   #26's action_gateway.self_check(name) hard-codes its allowlists. A later link never edits them: it
---   RENAMES the current function to action_gateway.self_check_pre_<link> and installs a WRAPPER under the
---   original name that (1) calls the renamed function, (2) removes ONLY the findings its own objects
---   produce (an exact allowlist, action_gateway.t34_self_check_allow()), (3) adds its own checks. Whatever
---   ran before (the #26 base or another link's wrapper) is preserved verbatim, so links compose in apply
---   order; each rollback renames its predecessor back. public.action_gateway_self_check() resolves the name
---   at call time and so always reports the outermost wrapper.
+-- SELF-CHECK COMPOSITION (docs/ACTION-MCP.md §8.3, link #27): this link ADDS ROWS (link = its file name) to
+--   action_gateway.extensions — its definer functions (kind definer_function), its invoker entry point
+--   (entry_point) and its domain-write actions (domain_write_action: action_gateway_complete refuses a JS completion
+--   for them). It never re-edits self_check / standing_t2_actions / action_gateway_complete. No T3 / T4 action is a
+--   standing_t2_action (a standing grant alone never authorizes them). Its rollback deletes only its rows.
+--   It DOES replace one #26 body, action_gateway.authorization_guard (the envelope-ref branch); #27 does not touch it
+--   and this link's rollback restores #26's body verbatim.
 --
--- WHAT MAKES THE APPLY ABORT (atomically): #26 absent; this link already applied; a negotiation table
+-- WHAT MAKES THE APPLY ABORT (atomically): #26 or #27 (the extension registry) absent; this link already applied; a negotiation table
 --   (PROPOSED_20261015190000 / _20261016161000), public.seller_offers (its price / ceiling / status /
 --   direction / metadata / scope columns) or public.property_acquisition_scores missing; and ANY finding
 --   of the composed self-check.
@@ -85,7 +85,10 @@ begin
   if to_regnamespace('action_gateway') is null or to_regprocedure('action_gateway.self_check(name)') is null or to_regprocedure('action_gateway.authorization_guard()') is null then
     raise exception 'action_gateway_t34: link #26 (PROPOSED_20261019160000_action_gateway.sql) must be applied first';
   end if;
-  if to_regclass('action_gateway.seller_action_receipts') is not null or to_regprocedure('action_gateway.self_check_pre_t34(name)') is not null then
+  if to_regclass('action_gateway.extensions') is null or to_regprocedure('action_gateway.extension_names(text)') is null then
+    raise exception 'action_gateway_t34: link #27 (PROPOSED_20261020100000_action_gateway_t2.sql, the extension registry) must be applied first';
+  end if;
+  if to_regclass('action_gateway.seller_action_receipts') is not null or exists (select 1 from action_gateway.extensions where link = 'PROPOSED_20261020110000_action_gateway_t34') then
     raise exception 'action_gateway_t34: already applied';
   end if;
   foreach t in array array['public.negotiation_envelopes','public.negotiation_envelope_revocations','public.negotiation_offer_events',
@@ -124,8 +127,9 @@ as $fn$ select 'thr_' || translate(left(encode(sha256(convert_to(coalesce(p_thre
 -- the actions this link hands off, and the T4 action authorized by an envelope ref
 create function action_gateway.t34_handoff_kind(p_action text)
 returns text language sql immutable parallel safe set search_path = pg_catalog
-as $fn$ select case p_action when 'queue_authorized_reply' then 'action.seller_reply' when 'execute_authorized_offer' then 'action.offer_send'
-                             when 'record_seller_counteroffer' then 'action.record_counter' else null end $fn$;
+-- ONE LeadCommand-side executor kind for every handed-off gateway action (shared with the T2 executor pattern;
+-- the worker dispatches by the intent's action): never a second kind per tool
+as $fn$ select case when p_action in ('queue_authorized_reply', 'execute_authorized_offer', 'record_seller_counteroffer') then 'action_gateway.execute' else null end $fn$;
 create function action_gateway.envelope_actions()
 returns text[] language sql immutable parallel safe set search_path = pg_catalog
 as $fn$ select array['execute_authorized_offer']::text[] $fn$;
@@ -287,7 +291,7 @@ create table action_gateway.seller_action_receipts (
   intent_id             uuid primary key references action_gateway.action_intents (intent_id),
   org_id                uuid not null references agent.org (org_id),
   action                text not null check (action in ('queue_authorized_reply', 'execute_authorized_offer', 'record_seller_counteroffer')),
-  runtime_kind          text not null check (runtime_kind in ('action.seller_reply', 'action.offer_send', 'action.record_counter')),
+  runtime_kind          text not null check (runtime_kind = 'action_gateway.execute'),
   job_id                text check (job_id is null or job_id ~ '^mjob_[0-9a-f-]{36}$'),
   state                 text not null default 'requested' check (state in ('requested', 'executing', 'enqueued', 'recorded', 'held', 'refused', 'deferred', 'failed', 'sent', 'outcome_unknown')),
   code                  text check (code is null or code ~ '^[A-Za-z0-9_.:-]{1,80}$'),
@@ -594,16 +598,18 @@ begin
   perform set_config('action_gateway.presented_digest', '', true);
   update action_gateway.action_intents set state = 'authorized' where intent_id = i.intent_id returning * into i;
   perform action_gateway.audit(i.org_id, 'authorized', i.agent_id, i.intent_id, i.action, i.capability, i.tier, null, i.correlation_id,
-                               jsonb_build_object('policy_id', p ->> 'policy_id', 'policy_version', p ->> 'policy_version', 'envelope_ref', v_ref));
+                               -- the ref's uuid under an id-named key (agent.payload_is_clean exempts a UUID from its phone-run rule only there)
+                               jsonb_build_object('policy_id', p ->> 'policy_id', 'policy_version', p ->> 'policy_version', 'envelope_kind', split_part(v_ref, ':', 1), 'send_permit_id', split_part(v_ref, ':', 2)));
   return jsonb_build_object('ok', true, 'replayed', false, 'intent', action_gateway.intent_json(i));
 end
 $fn$;
 
+-- (definer: the role holds no SELECT on the receipts table; the tenant claim scopes the one row)
 create function public.action_gateway_receipt_get(p_intent_id uuid)
 returns jsonb
 language sql
 stable
-security invoker
+security definer
 set search_path = pg_catalog
 as $fn$
   select jsonb_build_object('intent_id', r.intent_id, 'action', r.action, 'runtime_kind', r.runtime_kind, 'job_id', r.job_id, 'state', r.state, 'code', r.code,
@@ -794,67 +800,20 @@ begin
 end
 $fn$;
 
--- ───────────────────────────────────────────── 10. self-check composition ───
--- the EXACT findings the previous self-check reports for this link's own objects (nothing else is filtered)
-create function action_gateway.t34_self_check_allow()
-returns text[] language sql immutable parallel safe set search_path = pg_catalog
-as $fn$
+-- ───────────────────────────────────────────── 10. the extension registry rows (#27) ──
+insert into action_gateway.extensions (kind, name, link, basis) values
   -- lc-action-inventory:t34-definer-functions
-  select array['reachable_definer_function:public.action_gateway_dw_handoff(uuid,uuid)',
-               'reachable_definer_function:public.action_gateway_dw_offer_envelope(uuid,uuid)',
-               'reachable_definer_function:public.action_gateway_negotiation_state(uuid,text)',
-               'reachable_definer_function:public.action_gateway_offer_authority(text)',
-               'select_outside_inventory:action_gateway.seller_action_receipts']::text[]
-$fn$;
-
-alter function action_gateway.self_check(name) rename to self_check_pre_t34;
-
-create function action_gateway.self_check(p_role name default 'lc_action_gateway')
-returns jsonb
-language plpgsql
-stable
-security invoker
-set search_path = pg_catalog
-as $fn$
-declare
-  base jsonb := action_gateway.self_check_pre_t34(p_role);
-  allowed text[] := action_gateway.t34_self_check_allow();
-  findings text[];
-  r oid;
-  x record;
+  ('definer_function', 'public.action_gateway_dw_handoff(uuid,uuid)', 'PROPOSED_20261020110000_action_gateway_t34', null),
+  ('definer_function', 'public.action_gateway_dw_offer_envelope(uuid,uuid)', 'PROPOSED_20261020110000_action_gateway_t34', null),
+  ('definer_function', 'public.action_gateway_negotiation_state(uuid,text)', 'PROPOSED_20261020110000_action_gateway_t34', null),
+  ('definer_function', 'public.action_gateway_offer_authority(text)', 'PROPOSED_20261020110000_action_gateway_t34', null),
+  ('definer_function', 'public.action_gateway_receipt_get(uuid)', 'PROPOSED_20261020110000_action_gateway_t34', null),
   -- lc-action-inventory:t34-entry-points (SECURITY INVOKER)
-  entry text[] := array['public.action_gateway_authorize_envelope(uuid,text,jsonb)', 'public.action_gateway_receipt_get(uuid)'];
-  definers text[] := array['public.action_gateway_dw_handoff(uuid,uuid)', 'public.action_gateway_dw_offer_envelope(uuid,uuid)',
-                           'public.action_gateway_negotiation_state(uuid,text)', 'public.action_gateway_offer_authority(text)'];
-  -- LeadCommand-side writers the gateway role may NEVER reach
-  forbidden text[] := array['public.lc_seller_action_receipt_record(uuid,text,text,text,jsonb,text)', 'public.negotiation_send_authorization_consume(uuid,text,numeric)',
-                            'public.lc_seller_action_load(uuid)', 'public.lc_seller_action_open_receipts(integer)',
-                            'action_gateway.envelope_ref_refusal(uuid,text)', 'action_gateway.t34_capability_refusal(text)'];
-begin
-  select coalesce(array_agg(f), '{}') into findings from jsonb_array_elements_text(coalesce(base -> 'findings', '[]'::jsonb)) f where not (f = any (allowed));
-  select oid into r from pg_roles where rolname = p_role;
-  if r is not null then
-    for x in select unnest(entry || definers) s loop
-      if to_regprocedure(x.s) is null then findings := findings || ('t34_function_missing:' || x.s);
-      elsif not has_function_privilege(r, to_regprocedure(x.s), 'EXECUTE') then findings := findings || ('t34_no_execute:' || x.s);
-      end if;
-    end loop;
-    for x in select unnest(entry) s loop
-      if (select p.prosecdef from pg_proc p where p.oid = to_regprocedure(x.s)) then findings := findings || ('t34_entry_point_is_definer:' || x.s); end if;
-    end loop;
-    for x in select unnest(forbidden) s loop
-      if to_regprocedure(x.s) is not null and has_function_privilege(r, to_regprocedure(x.s), 'EXECUTE') then findings := findings || ('t34_forbidden_execute:' || x.s); end if;
-    end loop;
-    if has_table_privilege(r, 'action_gateway.seller_action_receipts', 'INSERT') or has_table_privilege(r, 'action_gateway.seller_action_receipts', 'UPDATE')
-       or has_table_privilege(r, 'public.negotiation_send_authorization_uses', 'SELECT') or has_table_privilege(r, 'public.negotiation_send_authorization_uses', 'INSERT') then
-      findings := findings || 't34_write_or_read_beyond_receipts'::text;
-    end if;
-  end if;
-  return base || jsonb_build_object('findings', to_jsonb(findings), 'ok', coalesce(array_length(findings, 1), 0) = 0,
-                                    'links', coalesce(base -> 'links', '["action_gateway"]'::jsonb) || '["action_gateway_t34"]'::jsonb, 'generated_at', clock_timestamp());
-end
-$fn$;
-comment on function action_gateway.self_check(name) is 'Action Gateway self-check, composed: the previous self-check (action_gateway.self_check_pre_t34: #26 or an earlier link''s wrapper) minus the exact findings of the T3 / T4 link''s own objects (t34_self_check_allow), plus its own checks. PROPOSED_20261020110000_action_gateway_t34.sql';
+  ('entry_point', 'public.action_gateway_authorize_envelope(uuid,text,jsonb)', 'PROPOSED_20261020110000_action_gateway_t34', null),
+  ('domain_write_action', 'queue_authorized_reply', 'PROPOSED_20261020110000_action_gateway_t34', null),
+  ('domain_write_action', 'submit_offer_for_approval', 'PROPOSED_20261020110000_action_gateway_t34', null),
+  ('domain_write_action', 'execute_authorized_offer', 'PROPOSED_20261020110000_action_gateway_t34', null),
+  ('domain_write_action', 'record_seller_counteroffer', 'PROPOSED_20261020110000_action_gateway_t34', null);
 
 -- ───────────────────────────────────────────── 11. privileges + RLS ─────────
 do $$
@@ -866,8 +825,7 @@ begin
       'action_gateway.receipt_guard()', 'public.lc_seller_action_receipt_record(uuid,text,text,text,jsonb,text)', 'action_gateway.envelope_ref_refusal(uuid,text)',
       'public.lc_seller_action_load(uuid)', 'public.lc_seller_action_open_receipts(integer)',
       'public.action_gateway_authorize_envelope(uuid,text,jsonb)', 'public.action_gateway_receipt_get(uuid)', 'public.action_gateway_negotiation_state(uuid,text)',
-      'public.action_gateway_offer_authority(text)', 'public.action_gateway_dw_handoff(uuid,uuid)', 'public.action_gateway_dw_offer_envelope(uuid,uuid)',
-      'action_gateway.t34_self_check_allow()', 'action_gateway.self_check(name)'] loop
+      'public.action_gateway_offer_authority(text)', 'public.action_gateway_dw_handoff(uuid,uuid)', 'public.action_gateway_dw_offer_envelope(uuid,uuid)'] loop
     execute format('revoke all on function %s from public, anon, authenticated, service_role', f);
   end loop;
 end $$;
@@ -878,11 +836,10 @@ revoke all on action_gateway.seller_action_receipts from public, anon, authentic
 grant execute on function public.action_gateway_authorize_envelope(uuid, text, jsonb), public.action_gateway_receipt_get(uuid),
   public.action_gateway_negotiation_state(uuid, text), public.action_gateway_offer_authority(text),
   public.action_gateway_dw_handoff(uuid, uuid), public.action_gateway_dw_offer_envelope(uuid, uuid),
-  action_gateway.envelope_actions(), action_gateway.self_check(name), action_gateway.t34_self_check_allow() to lc_action_gateway;
-grant select on action_gateway.seller_action_receipts to lc_action_gateway;
+  action_gateway.envelope_actions() to lc_action_gateway;
+-- the receipts: no grant to the gateway role (it reads its own through action_gateway_receipt_get)
 alter table action_gateway.seller_action_receipts enable row level security;
 alter table action_gateway.seller_action_receipts force row level security;
-create policy lc_action_gateway_tenant on action_gateway.seller_action_receipts for select to lc_action_gateway using (org_id = action_gateway.request_org());
 -- LeadCommand's worker (backend): records receipts, consumes the budget, reads both
 grant execute on function public.lc_seller_action_receipt_record(uuid, text, text, text, jsonb, text), public.negotiation_send_authorization_consume(uuid, text, numeric),
   public.lc_seller_action_load(uuid), public.lc_seller_action_open_receipts(integer) to service_role;
@@ -900,6 +857,9 @@ begin
   v := action_gateway.self_check('lc_action_gateway');
   if not coalesce((v ->> 'ok')::boolean, false) then
     raise exception 'action_gateway_t34: self-check refused the role: %', v -> 'findings';
+  end if;
+  if not ('execute_authorized_offer' = any (action_gateway.extension_names('domain_write_action'))) or 'execute_authorized_offer' = any (action_gateway.standing_t2_actions()) then
+    raise exception 'postcondition: the extension rows';
   end if;
   if action_gateway.scope_key_of('+15555550123', '227876842') !~ '^nscope_[0-9a-f]{64}$' or action_gateway.thread_ref_of('+15555550123') !~ '^thr_[a-p]{12}$' then
     raise exception 'postcondition: scope / thread ref helpers';

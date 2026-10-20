@@ -4,6 +4,7 @@
 import { checkAutomationHold } from '../holds/automation-hold.js'
 import { registerAutomationHoldChecker } from '../holds-port/automation-hold-port.js'
 import { isStopRequest } from '../conversation-ai/stop-request.js'
+import { createT2Services } from './actions/t2/services.js'
 import { normalizeOpportunityFacts, reconcileOpportunity, PIPELINE_RECONCILER_VERSION } from '../../agent/operations/pipeline-reconciler.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -107,6 +108,8 @@ export function createGatewayServices({ db, store, env = {}, provider = null, dr
   if (bindHoldPort) registerAutomationHoldChecker((args) => checkAutomationHold(args, { supabase: db }))
   return Object.freeze({
     env,
+    /** Tier-2 reads + the human-request writer call (actions/t2/services.js), on the gateway's own client. */
+    t2: createT2Services({ db }),
     /** THE hold authority (holds/automation-hold.js#checkAutomationHold), fail closed. */
     holdCheck: (args) => checkAutomationHold(args, { supabase: db }),
     /** ai/conversation-ai-draft-service#draftReplyForInbound → decideAndCompose (never queues, writes nothing). */

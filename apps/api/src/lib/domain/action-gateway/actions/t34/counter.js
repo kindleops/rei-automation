@@ -1,6 +1,6 @@
 // record_seller_counteroffer (T2, NOT reversible ⇒ a per-use human approval). Records a seller's counter as an
 // immutable offer-history version through the EXISTING writer (seller-flow/seller-offer-authority#recordSellerCounter,
-// run by LeadCommand's worker: action.record_counter) plus the negotiation ledger event (seller_counter / seller_ask).
+// run by LeadCommand's worker: action_gateway.execute) plus the negotiation ledger event (seller_counter / seller_ask).
 // The price is bound to ONE inbound message of the thread and must be a dollar amount that message actually states
 // (never a model-asserted number). NO AUTO-ACCEPTANCE: after recording, the worker runs the existing acceptance
 // guard (holds/automation-hold-core#evaluateAcceptanceRules: operator-origin / above-MAO / above-ceiling / archived /
@@ -22,7 +22,7 @@ export const COUNTER_SPEC = Object.freeze({
   executor: { kind: 'domain_write', fn: DOMAIN_WRITES.handoff },
   recovery: 'reexecute',
   limits: { per_min: 10 },
-  wraps: { service: 'handoff → LeadCommand worker action.record_counter: seller-offer-authority#recordSellerCounter + negotiation-service#recordNegotiationEvent + automation-hold-core#evaluateAcceptanceRules (report only)', module: 'apps/api/src/lib/domain/negotiation/negotiation-send.js' },
+  wraps: { service: 'handoff → LeadCommand worker action_gateway.execute: seller-offer-authority#recordSellerCounter + negotiation-service#recordNegotiationEvent + automation-hold-core#evaluateAcceptanceRules (report only)', module: 'apps/api/src/lib/domain/negotiation/negotiation-send.js' },
   touches: ['agent_runtime_job'],
 })
 
@@ -35,7 +35,7 @@ export const COUNTER_LOGIC = Object.freeze({
     if (!property_id) throw gwErr('refused', 'PROPERTY_UNRESOLVED', 'the message is not tied to a property')
     const opp = await reads.opportunityFor(resource.refs.thread_key, property_id)
     if (!opp?.id) throw gwErr('refused', 'OPPORTUNITY_NOT_FOUND', 'no acquisition opportunity for this thread and property')
-    return { thread_id: resource.id, inbound_message_id: String(m.id), property_ref: pref(property_id), opportunity_id: String(opp.id), counter_price: input.counter_price, runtime_kind: 'action.record_counter' }
+    return { thread_id: resource.id, inbound_message_id: String(m.id), property_ref: pref(property_id), opportunity_id: String(opp.id), counter_price: input.counter_price, runtime_kind: 'action_gateway.execute' }
   },
   async policy({ input, resource, params, reads, services }) {
     const m = await reads.message(params.inbound_message_id)

@@ -25,6 +25,10 @@
 //   platform.health                 system-control#getSystemValue, ops/system-watchdog#collectWatchdogSnapshot+evaluateWatchdog,
 //                                   agent/runtime/handlers/ops-health-check#evaluateHealthSnapshot
 //   missions.create                 agent/runtime/job-runtime (agent.runtime_enqueue, PROPOSED R2 schema)
+//   inbox.prepare_disposition_change / holds.prepare_release_approval / campaigns.prepare_resume_approval /
+//   campaigns.prepare_plan_adjustment_approval   (Action Gateway T2 requests, human decision only):
+//                                   lead-state#patchUniversalLeadState, holds/automation-hold-release, campaign-automation-service
+//   agent_actions.authorize_action  action-gateway/approvals (records the human grant; executes nothing)
 //   inbox.draft_ai_reply            ai/conversation-ai-draft-service#draftReplyForInbound → runtime/canonical#decideAndCompose (read, never sends)
 
 // Static import specifiers (bundler-analysable); resolved on first use only.
@@ -43,6 +47,7 @@ const OPP = () => import('@/lib/domain/opportunity/opportunity-service.js')
 // the shared server client; the old self-call (`() => SUPABASE()`) recursed forever, so every
 // inbox capability binding that needs the database would have thrown on first use
 const SUPABASE = () => import('@/lib/supabase/client.js')
+const REQ = () => import('@/lib/domain/action-gateway/actions/t2/requests.js')
 
 export const HEARTBEAT_KEYS = Object.freeze(['queue_processor_heartbeat_at', 'campaign_feeder_heartbeat_at', 'followup_no_response_heartbeat_at', 'seller_state_reconcile_heartbeat_at', 'webhook_delivery_recovery_last_at', 'queue_processor_mode', 'queue_execution_mode'])
 export const FEEDER_KEYS = Object.freeze(['campaign_feeder_last_batch_at', 'campaign_feeder_last_inserted_count', 'campaign_feeder_last_blocked_count', 'campaign_feeder_last_campaign_count', 'campaign_feeder_last_stalled_count', 'campaign_feeder_last_reason'])
@@ -59,6 +64,9 @@ export function createDomainServices({ runtimeStore = null } = {}) {
       cohort: lazy(COMPOSER, 'readComposerCohort'),
       prepare: lazy(COMPOSER, 'prepareComposerLaunch'),
       launch: lazy(COMPOSER, 'launchComposedCampaign'),
+      async row(id) { const [{ loadCampaignRow }, { supabase }] = await Promise.all([REQ(), SUPABASE()]); return loadCampaignRow(supabase, id) },
+      lifecycle: lazy(CAMPAIGNS, 'applyCampaignLifecycleAction'),
+      update: lazy(CAMPAIGNS, 'updateCampaign'),
     }),
     inbox: Object.freeze({
       threads: lazy(INBOX, 'getLiveInbox'),
@@ -122,6 +130,19 @@ export function createDomainServices({ runtimeStore = null } = {}) {
         return { snapshot: snap, evaluation: w.evaluateWatchdog(snap, w.DEFAULT_THRESHOLDS) }
       },
     }),
+    // Action Gateway T2 request capabilities (defs/action-gateway-requests.js): the loaders are the shared,
+    // read-only ones (domain/action-gateway/actions/t2/requests.js); the writers are the existing services
+    leadState: Object.freeze({
+      async threadRow(id) { const [{ loadThreadRow }, { supabase }] = await Promise.all([REQ(), SUPABASE()]); return loadThreadRow(supabase, id) },
+      async messages(thread_key) { const [{ loadThreadMessages }, { supabase }] = await Promise.all([REQ(), SUPABASE()]); return loadThreadMessages(supabase, thread_key) },
+      async contactBlock(args) { const [{ loadPropertyContactBlock }, { supabase }] = await Promise.all([import('@/lib/domain/followups/followup-lifecycle.js'), SUPABASE()]); return loadPropertyContactBlock({ supabase, ...args }) },
+      async patch(args) { const [{ patchUniversalLeadState }, { supabase }] = await Promise.all([import('@/lib/domain/lead-state/patch-universal-lead-state.js'), SUPABASE()]); return patchUniversalLeadState({ ...args, supabase }) },
+    }),
+    holds: Object.freeze({
+      async row(id) { const [{ loadHoldRow }, { supabase }] = await Promise.all([REQ(), SUPABASE()]); return loadHoldRow(supabase, id) },
+      async check(args) { const [{ checkAutomationHold }, { supabase }] = await Promise.all([import('@/lib/domain/holds/automation-hold.js'), SUPABASE()]); return checkAutomationHold(args, { supabase }) },
+      async release(args) { const [{ releaseAutomationHoldByOperator }, { supabase }] = await Promise.all([import('@/lib/domain/holds/automation-hold-release.js'), SUPABASE()]); return releaseAutomationHoldByOperator(args, { supabase }) },
+    }),
     missions: Object.freeze({
       async enqueue(o) {
         if (typeof runtimeStore !== 'function') throw Object.assign(new Error('runtime store not configured'), { code: 'RUNTIME_STORE_UNAVAILABLE' })
@@ -143,4 +164,25 @@ export async function loadProductionDeps() {
     import('@/lib/system-control.js'),
   ])
   return { getAgentPgPool, assertAgentPoolTls, getVerifiedRuntimeStore, getSystemValue }
+}
+
+/**
+ * The services the DECIDE-ONLY capabilities read on decide (D6 / D1): the negotiation envelope + send
+ * authorization services (the backend client; the tables are service-role only; static specifiers, lazy). The Action Gateway intent reader is
+ * withActionGatewayServices (D1, link #27). Lazy; nothing loads until the plane is built.
+ */
+export async function decideOnlyServices() {
+  const [{ getDefaultSupabaseClient }, { createNegotiationServices }, { createSupabaseSendAuthorizationStore, grantSendAuthorization }] = await Promise.all([
+    import('@/lib/supabase/default-client.js'),
+    import('@/lib/domain/negotiation/services.js'),
+    import('@/lib/domain/negotiation/send-authorization.js'),
+  ])
+  const supabase = getDefaultSupabaseClient()
+  const sends = createSupabaseSendAuthorizationStore({ supabase })
+  return {
+    negotiationFor: ({ refs }) => {
+      const n = createNegotiationServices({ supabase, refs })
+      return Object.freeze({ ...n, grantSendAuthorization: (args) => grantSendAuthorization(args, { store: sends }) })
+    },
+  }
 }

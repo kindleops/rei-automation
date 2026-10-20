@@ -4,7 +4,7 @@
 //
 // The agent references a THREAD; it never supplies a phone number, a sender, a persona or text. LeadCommand resolves
 // the routing. The gateway authorizes (policy + a per-use HUMAN approval: T3 never runs on a standing grant alone),
-// then its handoff domain write enqueues ONE action.seller_reply job; LeadCommand's worker runs the CANONICAL path:
+// then its handoff domain write enqueues ONE action_gateway.execute job; LeadCommand's worker runs the CANONICAL path:
 // decideAndCompose (conversation-turn-wiring#createCanonicalTurnDecider) → the shared outbound validator → R3 (send
 // policy, scope, holds, eligibility, timing, language, reservations, the immutable ai_generated_messages record) →
 // insertSupabaseSendQueueRow → the queue runner (every dispatch guard; one dispatch; an ambiguous accept is never
@@ -34,7 +34,7 @@ export const QUEUE_REPLY_SPEC = Object.freeze({
   executor: { kind: 'domain_write', fn: DOMAIN_WRITES.handoff },
   recovery: 'reexecute',
   limits: { per_min: 6 },
-  wraps: { service: 'handoff → LeadCommand worker action.seller_reply: conversation-turn-wiring#createCanonicalTurnDecider + conversation-turn-dispatch#createR3TurnDispatcher', module: 'apps/api/src/lib/ai/action-gateway-execution.js' },
+  wraps: { service: 'handoff → LeadCommand worker action_gateway.execute: conversation-turn-wiring#createCanonicalTurnDecider + conversation-turn-dispatch#createR3TurnDispatcher', module: 'apps/api/src/lib/ai/action-gateway-execution.js' },
   touches: ['agent_runtime_job'],
 })
 
@@ -44,7 +44,7 @@ export const QUEUE_REPLY_LOGIC = Object.freeze({
   async params(input, resource, { reads }) {
     const latest = await reads.latestInbound(resource.refs.thread_key)
     if (!latest?.id) throw gwErr('refused', 'NO_INBOUND', 'the thread has no seller message to answer')
-    return { thread_id: resource.id, inbound_message_id: String(latest.id), runtime_kind: 'action.seller_reply' }
+    return { thread_id: resource.id, inbound_message_id: String(latest.id), runtime_kind: 'action_gateway.execute' }
   },
   async policy({ resource, params, reads, services, now }) {
     const act = await replyActivation(reads).catch(() => ({ available: false, code: 'CAPABILITY_STATE_UNREADABLE' }))
