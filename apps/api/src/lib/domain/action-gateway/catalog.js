@@ -127,7 +127,7 @@ const STUBS = [
   stub('request_thread_hold_release', 'holds.request_release', TIERS.T2, 'Request a hold release', 'an operator approval / work item; agents never release holds'),
   stub('schedule_followup', 'followups.schedule', TIERS.T2, 'Schedule a follow-up', 'WRAP followups/followup-lifecycle#planFollowUpIntent (eligible intents only; hold + send-time guard at plan)'),
   stub('cancel_followup', 'followups.cancel', TIERS.T2, 'Cancel a follow-up', 'WRAP followups/followup-lifecycle#closeFollowUpIntentsForThread (reason required)'),
-  stub('queue_authorized_reply', 'conversation.queue_reply', TIERS.T3, 'Queue an authorized seller reply', 'WRAP the R3 executor (ai/conversation-ai-r3-executor) only when ai_conversation_send_enabled + the send policy are active and every dispatch guard passes'),
+  stub('queue_authorized_reply', 'conversation.queue_reply', TIERS.T3, 'Queue an authorized seller reply', 'implemented by actions/t34 (queue-reply.js): the canonical R3 path through the one turn dispatcher, only when the production AI send capability is active'),
   stub('prepare_acquisition_offer', 'offers.prepare', TIERS.T4, 'Prepare an acquisition offer position', 'REUSE negotiation/negotiation-service#preparePosition (composer view only)'),
   stub('submit_offer_for_approval', 'offers.submit_for_approval', TIERS.T4, 'Submit an offer for approval', 'WRAP an approval capability modelled on negotiation/envelope-approval (MAO cap, envelope validation, drift snapshot)'),
   stub('execute_authorized_offer', 'offers.execute_authorized', TIERS.T4, 'Communicate an authorized offer', 'MISSING: composeNegotiationReply + persistActiveOffer inside a live envelope + send authorization (durable sends-used, amount ≤ ceiling)'),
