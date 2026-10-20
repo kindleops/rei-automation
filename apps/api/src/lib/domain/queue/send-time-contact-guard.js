@@ -90,6 +90,12 @@ export const SEND_TIME_GUARD_REASONS = Object.freeze({
   ALREADY_CONTACTED_PHONE: "already_contacted_phone",
   ALREADY_CONTACTED_PERSON: "already_contacted_person",
   ALREADY_CONTACTED_PROPERTY: "already_contacted_property",
+  // rc-8.5.21 v3 (owner rule 2026-10-19): hostile language alone is not a formal opt-out, but an
+  // UNSOLICITED follow-up / nurture never continues on a hostile thread (replies to the seller are not
+  // nurture and are judged by the reply path)
+  HOSTILE_THREAD_NO_NURTURE: "hostile_thread_no_nurture",
+  // rc-8.5.21 v3: "take me off that one" about an identified property = a PROPERTY-SCOPED do-not-contact
+  PROPERTY_DO_NOT_CONTACT: "property_do_not_contact",
 });
 const R = SEND_TIME_GUARD_REASONS;
 
@@ -110,6 +116,8 @@ const REASON_CODE = Object.freeze({
   [R.ALREADY_CONTACTED_PHONE]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.ALREADY_CONTACTED_PERSON]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.ALREADY_CONTACTED_PROPERTY]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+  [R.HOSTILE_THREAD_NO_NURTURE]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+  [R.PROPERTY_DO_NOT_CONTACT]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
 });
 
 /** Same sets as opener-reply-exclusion.js (a372ae53). Change both or neither. */
@@ -191,6 +199,41 @@ export function statedAskingPrice(messages = []) {
   return null;
 }
 
+/** Hostile / insult labels (never an opt-out on their own; owner 2026-10-06 + 2026-10-19). */
+export const HOSTILE_LABELS = Object.freeze(new Set(["hostile_or_troll", "hostile_or_legal", "hostile", "hostile_insult_no_opt_out", "hostile_profanity", "emoji_hostile"]));
+const RE_ENGAGEMENT_LABELS = new Set(["asking_price_provided", "asks_offer", "seller_interested", "interested", "callback_requested", "seller_callback", "counter_offer", "price_and_condition", "ownership_confirmed", "latent_interest"]);
+const FOLLOW_UP_KIND_RE = /follow|nurture|no_response|stage_silence|re_?engage|drip/;
+
+/**
+ * An UNSOLICITED automated follow-up (nurture, no-response chain, stage silence, re-engagement drip):
+ * not a reply to the seller, not a manual operator send, not a first-touch opener.
+ */
+export function isUnsolicitedFollowUpRow(row = {}) {
+  const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  if (meta.manual_operator_send === true) return false;
+  const kinds = [row.type, row.message_type, meta.type, meta.message_type, meta.send_kind, meta.followup_kind, row.use_case_template, meta.source].map(lower).filter(Boolean);
+  if (kinds.some((k) => k.includes("reply") || k === "manual" || k === "send_now")) return false;
+  if (lower(meta.followup_kind) === "seller_requested_callback") return false;
+  if (clean(meta.followup_intent_id) || clean(meta.followup_reason) || clean(meta.followup_kind)) return true;
+  return kinds.some((k) => FOLLOW_UP_KIND_RE.test(k));
+}
+
+/**
+ * The thread's latest hostile inbound that no LATER seller re-engagement superseded, or null (pure).
+ * @param {Array<{ id?: string, direction?: string, detected_intent?: string, created_at?: string, event_timestamp?: string }>} messages
+ */
+export function unresolvedHostileInbound(messages = []) {
+  const at = (m) => Date.parse(m?.event_timestamp || m?.created_at || "") || 0;
+  const inbound = (messages || []).filter((m) => lower(m?.direction).startsWith("in")).sort((a, b) => at(a) - at(b));
+  let hostile = null;
+  for (const m of inbound) {
+    const label = lower(m.detected_intent);
+    if (HOSTILE_LABELS.has(label)) hostile = m;
+    else if (hostile && RE_ENGAGEMENT_LABELS.has(label)) hostile = null;
+  }
+  return hostile;
+}
+
 function block(reason, detail = {}) {
   return { blocked: true, reason, reason_code: REASON_CODE[reason] || SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL, detail, version: SEND_TIME_CONTACT_GUARD_VERSION };
 }
@@ -209,7 +252,7 @@ const isActiveAutomationSuppression = (r, now_ms) => {
  * Pure. facts = { suppressions, automation_suppressions, threads, phones,
  * inbound_replies, prior_sends, prior_outbound_events, person_phones }.
  */
-export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.now() } = {}) {
+export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.now(), restrictionsOnly = false } = {}) {
   const key = phoneKey(row.to_phone_number || row.thread_key);
   if (!key) return block(R.WRONG_NUMBER, { why: "recipient_phone_unparseable" });
   const from_key = phoneKey(row.from_phone_number);
@@ -289,10 +332,22 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
   //     may cross it only with an audited override (ownership-recontact-guard.js).
   if (rc?.blocked) {
     if (rc.detail?.scope === "phone") return block(R.THREAD_OPTED_OUT, { ...rc.detail, guard: rc.version });
+    if (rc.reason === R.PROPERTY_DO_NOT_CONTACT) return block(R.PROPERTY_DO_NOT_CONTACT, { ...rc.detail, guard: rc.version });
     if (rc.hold) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { ...rc.detail, guard: rc.version });
     if (rc.reason === "ownership_declined_unverified_hold") return block(R.OWNERSHIP_DECLINED_HOLD, { ...rc.detail, guard: rc.version });
     return block(R.PRIOR_REPLY_NOT_OWNER, { source: "message_text", ...rc.detail, guard: rc.version });
   }
+
+  // 5b'. rc-8.5.21 v3 (owner 2026-10-19): no unsolicited follow-up / nurture on a hostile thread.
+  if (isUnsolicitedFollowUpRow(row)) {
+    const hostileThread = (facts.threads || []).find((t) => (same(t.thread_key) || same(t.canonical_e164)) && HOSTILE_LABELS.has(lower(t.last_intent)));
+    const hostileMsg = unresolvedHostileInbound(facts.thread_messages || []);
+    if (hostileMsg || hostileThread) return block(R.HOSTILE_THREAD_NO_NURTURE, { scope: "thread", source: hostileMsg ? "message_text" : "thread_state", hostile_message_id: hostileMsg?.id ? String(hostileMsg.id) : null, action: "cancel_nurture" });
+  }
+
+  // the canonical queue writer (enqueue) judges the RESTRICTIONS only: contact-history (already
+  // contacted) and content checks stay with the dispatcher
+  if (restrictionsOnly) return { ...PASS, restrictions_only: true };
 
   // 5c. rc-8.5.21 (owner 2026-10-13 + Pittsburgh 8d03a7c4): an asking-price question after the
   //     seller already STATED a price ("460 k not a penny less") is never sent, whoever writes it
@@ -364,7 +419,7 @@ export async function loadSendTimeContactFacts(supabase, row = {}, opts = {}) {
     contact_property_resolution,
     automation_hold,
   };
-  if (!opener) return facts;
+  if (!opener || opts.restrictionsOnly === true) return facts;
 
   const person = clean(row.prospect_id);
   const person_phones = person

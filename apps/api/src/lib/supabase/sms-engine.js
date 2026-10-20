@@ -68,6 +68,7 @@ import { attachOutboundProvenance } from "@/lib/domain/automation/outbound-prove
 import { observeSendQueueInsert } from "@/lib/domain/intelligence/runtime/observation.js";
 import { isAmbiguousSendRow } from "@/lib/domain/messaging/ambiguous-send-evidence.js";
 import { HOLD_CAPABILITIES, SENDABLE_QUEUE_STATUSES, holdOverrideOf, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
+import { evaluateEnqueueContactRestrictions } from "@/lib/domain/queue/enqueue-contact-restrictions.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -5666,6 +5667,35 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     }
     if (enqueue_hold.held && hold_override) {
       row.metadata = { ...(row.metadata || {}), automation_hold_override: { ...hold_override, hold_ids: enqueue_hold.hold_ids, used_at: now } };
+    }
+  }
+
+  // ── CONTACT RESTRICTIONS at queue insertion (rc-8.5.21 v3 P0-C, RT-47) ──
+  // The writer itself refuses a SENDABLE row for a suppressed / opted-out / precautionary-held phone,
+  // a property-denied / declined-unverified / do-not-contact property × contact, an ownership thread
+  // hold, or an unsolicited follow-up on a hostile thread — the dispatcher's own evaluator in its
+  // restrictions scope (enqueue-contact-restrictions.js). FAIL CLOSED: an unreadable fact refuses.
+  if (SENDABLE_QUEUE_STATUSES.includes(normalizeQueueStatusValue(row.queue_status))) {
+    let restriction_client = deps.supabase || deps.supabaseClient || null;
+    if (!restriction_client && typeof deps.insertSupabaseSendQueueRow !== "function") {
+      try { restriction_client = getSupabase(deps); } catch { restriction_client = null; }
+    }
+    const restriction = await evaluateEnqueueContactRestrictions(
+      { ...row, thread_key: clean(payload.thread_key) || row.thread_key },
+      { supabase: restriction_client, now: Date.parse(now) || Date.now() }
+    );
+    if (restriction.refused) {
+      warn("queue.enqueue_contact_restricted", { queue_key: clean(row.queue_key) || null, reason: restriction.reason });
+      return {
+        ok: false,
+        blocked: true,
+        reason: restriction.reason,
+        contact_restriction: { guard_reason: restriction.guard_reason || null, detail: restriction.detail || {} },
+        item_id: null,
+        queue_row_id: null,
+        queue_item_id: null,
+        queue_key: clean(row.queue_key) || null,
+      };
     }
   }
 

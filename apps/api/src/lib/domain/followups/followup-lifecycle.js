@@ -172,6 +172,8 @@ export function propertyContactBlock({ property_id = null, phone = null, thread 
   const tail = phoneTail(phone)
   const mine = (resolutions || []).filter((r) => (!tail || phoneTail(r.contact_phone_e164) === tail) && pid && clean(r.property_id) === pid)
   const declined = (r) => [r.contact_property_role, r.rejection_reason, r.suppression_scope, r.ownership_state].map(lower).some((v) => DECLINED_STATES.has(v))
+  // rc-8.5.21 v3: a property-scoped do-not-contact ("take me off that one") — never a follow-up for it
+  if (mine.some((r) => lower(r.contact_property_role) === 'property_do_not_contact')) return { blocked: true, reason: 'property_do_not_contact:contact_property_resolution', kind: 'property_do_not_contact', state: 'not_executable' }
   if (mine.some(declined)) return { blocked: true, reason: `${OWNERSHIP_DECLINED_UNVERIFIED}:no_recontact_hold`, kind: OWNERSHIP_DECLINED_UNVERIFIED, state: 'held' }
   const denial = mine.find((r) => clean(r.rejected_at) && PAIR_DENIAL_ROLES.has(lower(r.contact_property_role)) && (!clean(r.suppression_scope) || lower(r.suppression_scope) === 'contact_property_pair'))
   if (denial) return { blocked: true, reason: 'property_denial:contact_property_resolution', kind: 'property_denial', state: 'not_executable' }

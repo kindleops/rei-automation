@@ -1427,10 +1427,12 @@ export function resolveSellerStageTransition({
     workflow_event_types: advancementEvents(beforeIdx, afterIdx, facts, intentKey),
     follow_up: {
       create: false,
-      // a reply always cancels stale reply-pending follow-ups — except an insult / profanity
-      // (hostile_or_troll): owner 2026-10-06, an insult never suppresses and leaves nurture
-      // eligibility UNCHANGED (no reply, quiet archive)
-      cancel: intentKey !== "hostile_or_troll",
+      // a reply always cancels stale reply-pending follow-ups. An insult / profanity
+      // (hostile_or_troll) never suppresses (owner 2026-10-06: no reply, quiet archive, no DNC) —
+      // and owner rule 2026-10-19: unsolicited NURTURE never continues on a hostile thread, so the
+      // pending follow-ups are cancelled too (the send-time guard refuses any new one:
+      // hostile_thread_no_nurture)
+      cancel: true,
       replace: afterIdx > beforeIdx,
       days: null,
       due_at: null,

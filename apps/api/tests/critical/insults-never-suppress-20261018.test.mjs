@@ -38,10 +38,10 @@ test('a genuine legal threat stays hostile_or_legal (review + suppression path a
   assert.equal(stop.compliance_flag, 'stop_texting')
 })
 
-test('the stage transition for an insult writes NO contactability (no DNC) and leaves follow-up eligibility unchanged', () => {
+test('the stage transition for an insult writes NO contactability (no DNC); owner rule 2026-10-19: its pending nurtures are cancelled (no unsolicited nurture on a hostile thread)', () => {
   const t = resolveSellerStageTransition({ intent: 'hostile_or_troll', classification_confidence: 0.9, classification: { primary_intent: 'hostile_or_troll' }, stage_before: 'offer_interest' })
   assert.equal(t.contactability_patch ?? t.contactability ?? null, null)
-  assert.equal(t.follow_up.cancel, false)
+  assert.equal(t.follow_up.cancel, true, 'owner rule 2026-10-19: hostile language cancels pending nurture (still no DNC)')
   assert.equal(t.follow_up.create, false)
   // the follow-up scheduler never treats an insult as a permanent suppression
   const plan = resolveFollowUpPlan('hostile_or_troll', { thread_key: '+15555550100' })

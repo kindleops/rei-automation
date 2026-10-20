@@ -57,6 +57,10 @@ export const EVIDENCE_RANK = Object.freeze({ label: 1, store: 2, engagement: 2, 
 export const OWNERSHIP_UNRESOLVED_REASON = 'ownership_denial_property_unresolved'
 export const OWNERSHIP_DECLINED_REASON = 'ownership_declined_unverified_hold'
 export const OWNERSHIP_DECLINED_ROLE = 'ownership_declined_unverified'
+// rc-8.5.21 v3: "take me off that one" about an IDENTIFIED property — a property × contact
+// do-not-contact. Not ownership evidence (never superseded by a later confirmation), never phone-wide.
+export const PROPERTY_DNC_ROLE = 'property_do_not_contact'
+export const PROPERTY_DNC_REASON = 'property_do_not_contact'
 const DECLINED_LABELS = new Set(['ownership_declined_unverified'])
 const clean = (v) => String(v ?? '').trim()
 const t = (m) => Date.parse(m?.at || m?.event_timestamp || m?.created_at || 0) || 0
@@ -160,6 +164,8 @@ export function evaluateContactPropertyResolution({ property_id = null, resoluti
     // owner rule 4: contact-wide restrictions stay absolute (written only for an explicit opt-out)
     if (scope === 'channel_compliance' || role === 'suppressed') return { excluded: true, reason: 'contact_channel_suppressed', scope: 'phone', role: role || null, source: 'contact_property_resolution' }
   }
+  const dnc = target ? (resolutions || []).find((r) => clean(r.contact_property_role) === PROPERTY_DNC_ROLE && clean(r.property_id) === target) : null
+  if (dnc) return { excluded: true, dnc: true, reason: PROPERTY_DNC_REASON, scope: 'person_property', role: PROPERTY_DNC_ROLE, source: 'contact_property_resolution', rejected_at: clean(dnc.rejected_at || dnc.updated_at) }
   const denials = (resolutions || []).filter(isStoreDenial)
   const exact = target ? denials.find((r) => clean(r.property_id) === target) : null
   if (exact) return { excluded: true, reason: 'prior_reply_not_owner', scope: 'person_property', role: clean(exact.contact_property_role), source: 'contact_property_resolution', rejected_at: clean(exact.rejected_at) }
@@ -187,6 +193,8 @@ export function evaluateOwnershipRecontact(row = {}, messages = [], { resolution
   const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
   const store = evaluateContactPropertyResolution({ property_id: row.property_id, resolutions })
   if (store.excluded && store.scope === 'phone') return { blocked: true, reason: store.reason, detail: { scope: 'phone', role: store.role, source: store.source }, version: RECONTACT_GUARD_VERSION }
+  // a property do-not-contact is a permission state, not ownership evidence: absolute for THIS property
+  if (store.excluded && store.dnc) return { blocked: true, reason: PROPERTY_DNC_REASON, detail: { scope: 'person_property', property_scoped: true, role: store.role, source: store.source }, version: RECONTACT_GUARD_VERSION }
   const prop = clean(row.property_id)
   const items = ownershipEvidenceItems({ messages })
   // the evidence about THIS property: the store denial (if any) + the thread's own items for it

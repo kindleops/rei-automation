@@ -7954,6 +7954,11 @@ function sanitizeAiResult(raw, heuristic) {
   return { language, objection, emotion, stage_hint, compliance_flag, positive_signals, confidence, notes };
 }
 
+// rc-8.5.21 v3: test seam for the legacy OpenAI assist (a stub model proves the deterministic opt-out
+// precedence on the AI path without a network call). null = the real provider.
+let AI_ASSIST_IMPL = null;
+export function __setClassifierAiForTests(fn = null) { AI_ASSIST_IMPL = typeof fn === "function" ? fn : null; }
+
 async function aiAssistClassification({ message, heuristic_result }) {
   const safe_message = sanitizeForPrompt(message);
 
@@ -7989,7 +7994,7 @@ Rules:
 6. Never invent fields.`;
 
   try {
-    const response = await ai({
+    const response = await (AI_ASSIST_IMPL || ai)({
       model:       "gpt-4o-mini",
       temperature: 0,
       max_tokens:  400,
@@ -8268,8 +8273,9 @@ async function classifyCore(message, brain_item = null, options = {}) {
     };
   }
 
-  // Compliance is absolute
-  if (heuristic.compliance_flag === "stop_texting") {
+  // Compliance is absolute: a deterministic opt-out (the compliance flag OR the terminal opt-out intent)
+  // is final — the model is never consulted, so it can never re-label it (rc-8.5.21 v3)
+  if (heuristic.compliance_flag === "stop_texting" || heuristic.primary_intent === "opt_out") {
     const final_motivation = estimateMotivationScore(heuristic);
     const automation_decision = deriveAutomationDecision(heuristic);
     return {
@@ -8318,7 +8324,8 @@ async function classifyCore(message, brain_item = null, options = {}) {
     };
   }
 
-  const final_compliance = heuristic.compliance_flag ?? ai_result.compliance_flag;
+  // the model may ADD a stop, never clear one
+  const final_compliance = heuristic.compliance_flag ?? (ai_result.compliance_flag === "stop_texting" ? "stop_texting" : null);
   const final_intents = resolveIntents(text, {
     compliance_flag: final_compliance,
     stop_other_action: classifyStopScope(text) === STOP_SCOPE.OTHER_ACTION,

@@ -9129,6 +9129,19 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
         }
       }
 
+      // CONTACT RESTRICTIONS (rc-8.5.21 v3 P0-C, RT-47): this batch bypasses the canonical writer, so
+      // it applies the writer's restriction check itself — a suppressed / opted-out / precautionary-held
+      // phone, a property-denied / declined / do-not-contact property × contact, an ownership thread
+      // hold never gets a campaign row. A failed read throws (fail closed).
+      {
+        const { filterBulkRowsByContactRestrictions } = await import('@/lib/domain/queue/enqueue-contact-restrictions.js')
+        const verdict = await filterBulkRowsByContactRestrictions(queueRows, { supabase })
+        if (verdict.refused.length) {
+          console.warn('[CAMPAIGN_ROWS_REFUSED_BY_CONTACT_RESTRICTIONS]', { campaign_id: campaignId, refused: verdict.refused.length, reasons: [...new Set(verdict.refused.map((r) => r.guard_reason))] })
+          queueRows.splice(0, queueRows.length, ...verdict.kept)
+        }
+      }
+
       const hydrationTotal = queueRows.length
       for (let i = 0; i < queueRows.length; i += 500) {
         const rowChunk = queueRows.slice(i, i + 500)

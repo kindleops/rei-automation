@@ -631,6 +631,11 @@ async function queueReplyWhenSmsSendQueue(
     throw new Error(discord_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold_requires_override");
   }
 
+  // CONTACT RESTRICTIONS (rc-8.5.21 v3 P0-C): the canonical writer's restriction check (fail closed).
+  const { evaluateEnqueueContactRestrictions } = await import("@/lib/domain/queue/enqueue-contact-restrictions.js");
+  const restriction = await evaluateEnqueueContactRestrictions(payload, { supabase });
+  if (restriction.refused) throw new Error(restriction.reason);
+
   const { data: queue_row, error: queue_error } = await supabase
     .from(SEND_QUEUE_TABLE)
     .insert(payload)
