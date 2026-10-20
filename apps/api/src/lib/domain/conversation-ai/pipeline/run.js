@@ -32,6 +32,8 @@ export async function runConversationPipeline({
     ledger, inboundText: input.inbound.body, inboundId: input.inbound.id, deterministic, eligibility, judgment, deterministicTemplate,
     ownerHandled, language: input.language, propertyCount: (input.properties || []).length || 1,
     thread: input.thread || [], inbound: input.inbound, companyIdentity, enabledLanguages,
+    // rc-8.5.21 v3 (RT-11 / RT-05): the consolidated turn's member inbounds
+    memberIds: Array.isArray(input.turn_member_ids) ? input.turn_member_ids : [],
   })
   const terminal = plan.actions.find((a) => [ACTIONS.PREPARE_OFFER, ACTIONS.NEGOTIATE_WITHIN_AUTHORITY].includes(a.type))
   if (terminal) {

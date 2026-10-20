@@ -122,6 +122,13 @@ const TRANSITION_NURTURE_INTENTS = Object.freeze({
   TENANT_OCCUPIED: "tenant_or_occupancy",
   LISTED_OR_UNAVAILABLE: "listed_or_unavailable",
 });
+// rc-8.5.21 v3 (MUL-02): the attribution bases that identify ONE property for an inbound takeover
+const SCOPED_SUPERSESSION_BASES = new Set(["named_in_reply", "answers_open_ownership_question", "answers_open_question"]);
+/** The ONE property an inbound takeover supersedes, or null (the whole thread). Pure. */
+export function scopedSupersessionProperty(att = null) {
+  return !att?.ambiguous && att?.property && SCOPED_SUPERSESSION_BASES.has(att.basis) ? String(att.property) : null;
+}
+
 export function transitionNurtureFollowUpIntent(transition = null) {
   const m = /_([A-Z_]+?)_NURTURE_\d+D$/.exec(String(transition?.reasoning_code || ""));
   return (m && TRANSITION_NURTURE_INTENTS[m[1]]) || null;
@@ -948,7 +955,10 @@ export async function processSellerInboundMessage({
       let only_property_id = null;
       try {
         const att = await attributeOwnershipAnswer({ supabaseClient: supabase, thread_key: threadKey || inboundFrom, property_id: propertyId, source_message_id: inboundEventId });
-        if (att?.basis === "named_in_reply" && att.property) only_property_id = att.property;
+        // rc-8.5.21 v3 (MUL-02): supersession is PROPERTY-scoped whenever the reply is reliably about ONE
+        // property — named in it, or answering our open (ownership) question about it — so a denial on
+        // A never cancels or supersedes the nurture on unrelated property B
+        only_property_id = scopedSupersessionProperty(att);
       } catch {
         only_property_id = null; // unreadable: the whole-thread takeover (the historical behaviour)
       }

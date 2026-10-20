@@ -3293,6 +3293,20 @@ export async function processSendQueueItem(queue_row, deps = {}) {
         hold_ids: dispatch_hold.hold_ids,
         fail_closed: dispatch_hold.fail_closed === true,
       });
+      // rc-8.5.21 v3 (RT-44): the deferral is RECORDED on the row (reason, originating event, resource,
+      // next eligible action, review requirement) with one audited transition per new hold set
+      let held_record = null;
+      try {
+        const { recordHeldAction } = await import("@/lib/domain/queue/held-action-record.js");
+        held_record = await recordHeldAction(resolved_queue_row, dispatch_hold, {
+          supabase: deps.supabase || deps.supabaseClient || null,
+          capability: is_manual_row ? HOLD_CAPABILITIES.MANUAL_SEND : HOLD_CAPABILITIES.OUTBOUND_SEND,
+          now: deps.now || new Date().toISOString(),
+          ...(typeof deps.recordAutomationHoldEvent === "function" ? { recordEvent: deps.recordAutomationHoldEvent } : {}),
+        });
+      } catch {
+        held_record = { ok: false };
+      }
       return {
         ok: false,
         status: 423,
@@ -3301,7 +3315,7 @@ export async function processSendQueueItem(queue_row, deps = {}) {
         reason: dispatch_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold",
         error: "automation_hold",
         message: "This conversation is under an automation hold; the send is deferred, not attempted.",
-        diagnostics: { hold_ids: dispatch_hold.hold_ids, fail_closed: dispatch_hold.fail_closed === true },
+        diagnostics: { hold_ids: dispatch_hold.hold_ids, fail_closed: dispatch_hold.fail_closed === true, held_recorded: held_record?.ok === true },
         queue_row_id: getQueueRowId(resolved_queue_row),
         queue_item_id: getQueueRowId(resolved_queue_row),
       };

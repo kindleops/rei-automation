@@ -1,5 +1,6 @@
 // ─── classify.js ──────────────────────────────────────────────────────────
 import { isDirectNo } from "./ownership-answer-forms.js";
+import { acceptsOurProposal } from "@/lib/domain/conversation-ai/acceptance.js";
 import { ai } from "@/lib/providers/ai.js";
 import {
   getCategoryValue,
@@ -4219,6 +4220,11 @@ const PHONE_IDENTITY_PHRASES = Object.freeze([
   "número equivocado", "numero equivocado", "numero incorrecto", "número incorrecto",
 ]);
 
+// rc-8.5.21 v3: a wrong-person statement SCOPED to one property ("wrong person for Garnet St") and a
+// claim of owning another ("I own Opal", "but I do own the one on Opal")
+const WRONG_FOR_PROPERTY_RE = /\bwrong\s+(?:person|guy|owner|one|house|home|property|address)\s+(?:for|on|about|regarding|with)\s+(?:the\s+)?(?:\d{1,6}\s+)?[a-z][\w.]*(?:\s+(?:st|street|ave|avenue|rd|road|dr|drive|ln|lane|ct|court|blvd|way|pl|place)\b\.?)?/i;
+const OWNS_ANOTHER_RE = /\b(?:i|we)\s+(?:do\s+|still\s+|actually\s+|only\s+)?(?:own|have|got)\s+(?!no\b|nothing\b|none\b)(?:the\s+(?:one|house|property)\s+(?:on|at)\s+)?\S|\bmine\s+is\b|\bi'?m\s+the\s+owner\s+of\b/i;
+
 function matchesTrueWrongNumber(text = "") {
   const normalized = lower(text);
   return includesAny(normalized, [
@@ -5294,12 +5300,22 @@ function resolveIntents(
   // "Never have" to our ownership question = never the owner (property-scoped). A denied PREMISE
   // ("you're misinformed") keeps its wrong_number + human-review route (no suppression is written).
   const wrong_person_is_ownership_denial = wrong_person_rule === "wrong_person_never_owned";
-  const is_phone_identity_claim =
+  // rc-8.5.21 v3 (owner rule 10-17, "a property denial is never global"): "Wrong person for <A>, I own
+  // <B>" scopes the wrong-person statement to property A and claims ownership of another property: it
+  // is a PROPERTY denial for A (B is confirmed by the clause-level reading), never a phone-identity
+  // wrong number. Only when nothing ELSE in the message is a phone-identity statement.
+  const property_scoped_wrong_person = (() => {
+    if (!WRONG_FOR_PROPERTY_RE.test(text) || !OWNS_ANOTHER_RE.test(text)) return false;
+    const rest = lower(text).replace(new RegExp(WRONG_FOR_PROPERTY_RE.source, "gi"), " ");
+    return !matchesTrueWrongNumber(rest) && !PHONE_IDENTITY_PHRASES.some((p) => rest.includes(p));
+  })();
+  if (property_scoped_wrong_person) matched_rule_ids.push("wrong_person_scoped_to_property");
+  const is_phone_identity_claim = !property_scoped_wrong_person && (
     is_true_wrong ||
     (is_wrong_person_claim && !wrong_person_is_ownership_denial) ||
-    PHONE_IDENTITY_PHRASES.some((p) => text.includes(p));
+    PHONE_IDENTITY_PHRASES.some((p) => text.includes(p)));
   const is_property_ownership_denial =
-    !is_phone_identity_claim && (is_ownership_disconnect || wrong_person_is_ownership_denial || normalized_objection === "wrong_number");
+    !is_phone_identity_claim && (property_scoped_wrong_person || is_ownership_disconnect || wrong_person_is_ownership_denial || normalized_objection === "wrong_number");
   if (is_sold_transfer && !is_true_wrong && !is_wrong_person_claim) {
     intents.push("sold_property");
   } else if (is_property_ownership_denial) {
@@ -7961,6 +7977,11 @@ function sanitizeAiResult(raw, heuristic) {
   return { language, objection, emotion, stage_hint, compliance_flag, positive_signals, confidence, notes };
 }
 
+// rc-8.5.21 v3: test seam for the legacy OpenAI assist (a stub model proves the deterministic opt-out
+// precedence on the AI path without a network call). null = the real provider.
+let AI_ASSIST_IMPL = null;
+export function __setClassifierAiForTests(fn = null) { AI_ASSIST_IMPL = typeof fn === "function" ? fn : null; }
+
 async function aiAssistClassification({ message, heuristic_result }) {
   const safe_message = sanitizeForPrompt(message);
 
@@ -7996,7 +8017,7 @@ Rules:
 6. Never invent fields.`;
 
   try {
-    const response = await ai({
+    const response = await (AI_ASSIST_IMPL || ai)({
       model:       "gpt-4o-mini",
       temperature: 0,
       max_tokens:  400,
@@ -8212,8 +8233,30 @@ export function applyContactRevocationSafety(result, text) {
   return result;
 }
 
+/**
+ * rc-8.5.21 v3: "No, I'm good with the amount you proposed" ACCEPTS our proposal (conversation-ai/acceptance.js);
+ * it is never the "I'm good" decline. Recognized as positive engagement routed to a PERSON (verify the actual
+ * offer, the property and the authority; no automatic acceptance, no contract). A stop / opt-out is untouched.
+ */
+export function rescopeAcceptanceOfProposal(text, result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting" || result.primary_intent === "opt_out") return result;
+  if (!acceptsOurProposal(text)) return result;
+  const next = {
+    ...result,
+    primary_intent: "seller_interested",
+    detected_intent: "seller_interested",
+    secondary_intent: result.primary_intent && result.primary_intent !== "seller_interested" ? result.primary_intent : result.secondary_intent ?? null,
+    objection: result.objection === "not_interested" ? null : result.objection,
+    acceptance_candidate: true,
+    matched_rule_ids: uniqStrings([...(result.matched_rule_ids || []), "acceptance_of_our_proposal"]),
+  };
+  next.automation_decision = { ...(deriveAutomationDecision(next) || {}), auto_reply_allowed: false, queue_action: "none", suppression_action: "none", human_review_required: true, review_reason: "acceptance_of_our_proposal_verify_offer_property_authority", risk_level: "high" };
+  return next;
+}
+
 export async function classify(message, brain_item = null, options = {}) {
-  const result = await classifyCore(message, brain_item, options);
+  const result = rescopeAcceptanceOfProposal(cleanMessage(message), await classifyCore(message, brain_item, options));
   return applyContactRevocationSafety(result, message);
 }
 
@@ -8275,8 +8318,9 @@ async function classifyCore(message, brain_item = null, options = {}) {
     };
   }
 
-  // Compliance is absolute
-  if (heuristic.compliance_flag === "stop_texting") {
+  // Compliance is absolute: a deterministic opt-out (the compliance flag OR the terminal opt-out intent)
+  // is final — the model is never consulted, so it can never re-label it (rc-8.5.21 v3)
+  if (heuristic.compliance_flag === "stop_texting" || heuristic.primary_intent === "opt_out") {
     const final_motivation = estimateMotivationScore(heuristic);
     const automation_decision = deriveAutomationDecision(heuristic);
     return {
@@ -8326,9 +8370,10 @@ async function classifyCore(message, brain_item = null, options = {}) {
   }
 
   // Deterministic rules run BEFORE and REGARDLESS of the model: an explicit opt-out returned above
-  // (and is re-asserted by applyContactRevocationSafety); a deterministic channel preference can
-  // never be turned into a suppression by the model.
-  const final_compliance = heuristic.compliance_flag ?? (isChannelPreferenceOnly(text) ? null : ai_result.compliance_flag);
+  // (and is re-asserted by applyContactRevocationSafety). The model may only ADD a stop, never clear
+  // one or set any other compliance flag (rc-8.5.21-v3fix P0-C), and it can never turn a deterministic
+  // channel preference into a suppression (rc-8.5.21-optout 38d808c2).
+  const final_compliance = heuristic.compliance_flag ?? (isChannelPreferenceOnly(text) ? null : (ai_result.compliance_flag === "stop_texting" ? "stop_texting" : null));
   const final_intents = resolveIntents(text, {
     compliance_flag: final_compliance,
     stop_other_action: classifyStopScope(text) === STOP_SCOPE.OTHER_ACTION,

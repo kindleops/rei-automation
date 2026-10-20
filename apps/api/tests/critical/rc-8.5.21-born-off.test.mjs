@@ -25,6 +25,7 @@ import { PROPERTY_RESEARCH_FLAG, propertyResearchEnabled } from '../../src/lib/a
 import { MANUAL_OFFER_GUARD_MODE_KEY, MANUAL_OFFER_GUARD_MODES, resolveManualOfferGuardMode } from '../../src/lib/domain/inbox/manual-offer-guard.js'
 import { COMPANY_IDENTITY_KEY, normalizeCompanyIdentity, loadCompanyIdentity } from '../../src/lib/domain/conversation-ai/company-identity.js'
 import { DRAFT_MODEL_ENV } from '../../src/lib/ai/conversation-ai-draft-service.js'
+import { AUTO_RECOVERY_ENV, autoRecoveryEnabled } from '../../src/lib/agent/operations/auto-recovery.js'
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src')
 const REPO = path.resolve(SRC, '../../..')
@@ -41,6 +42,8 @@ const NEW_ENV_FLAGS = Object.freeze({
   [PROPERTY_RESEARCH_FLAG]: (env) => propertyResearchEnabled(env),
   // read inline by the review-draft service: only the literal 'true' arms the model
   [DRAFT_MODEL_ENV]: (env) => String(env?.[DRAFT_MODEL_ENV] ?? '').trim() === 'true',
+  // rc-8.5.21 v3: the ops supervisor's auto-recovery sweeps (only the literal 'true' wires them)
+  [AUTO_RECOVERY_ENV]: (env) => autoRecoveryEnabled(env),
 })
 const NEW_SYSTEM_CONTROL_KEYS = Object.freeze({
   [AI_SEND_KILL_SWITCH_KEY]: (raw) => parseKillSwitch(raw) === true,

@@ -169,8 +169,10 @@ test('validator: rejects a repeat asking-price question after "what\'s your prop
   assert.equal(again.status, 'rejected_with_reasons')
   assert.ok(again.reasons.some((r) => r.startsWith('question_already_asked:asking_price')))
   assert.ok(again.reasons.includes('irrelevant:re_asks_price_after_offer_request'))
+  // rc-8.5.21 v3 (S1–S5 + owner rule 10-18): price withheld after one ask ⇒ a human (research → gated offer):
+  // the routine draft is not sendable on its own
   const ok = await validateDraft({ decision: goodDecision(), context: ctx, inboundText: "What's your proposal", eligibility: OPEN })
-  assert.equal(ok.status, 'validated_draft', JSON.stringify(ok.reasons))
+  assert.ok(ok.reasons.includes('objective_override_violated:offer_needs_human'), JSON.stringify(ok.reasons))
 })
 
 test('validator: "what\'s your offer" never yields an invented number; an authoritative offer amount passes only flagged for approval', async () => {

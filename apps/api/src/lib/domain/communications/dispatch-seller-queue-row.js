@@ -239,6 +239,20 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
           logger.warn('queue_dispatch.sender_continuity_refused', { queue_row_id, reason: continuity?.reason, sender_reason: continuity?.sender_reason || null });
           return { ok: false, reason: continuity?.reason || 'sender_continuity_unreadable' };
         }
+        // CONTACT RESTRICTIONS — FINAL provider-submission check (rc-8.5.21 v3 P0-C), on EVERY attempt: a
+        // STOP / precautionary hold / property denial / thread hold that landed after the runner's
+        // send-time guard refuses the attempt here (fresh reads, fail closed: unreadable ⇒ refused).
+        const restrictionCheck = deps.finalContactRestrictionCheck || (async (row) => (await import('@/lib/domain/queue/enqueue-contact-restrictions.js')).evaluateEnqueueContactRestrictions(row, { supabase: deps.supabase }));
+        let restriction;
+        try {
+          restriction = await restrictionCheck(queue_row);
+        } catch {
+          restriction = { refused: true, reason: 'final_contact_restriction_unreadable' };
+        }
+        if (restriction?.refused) {
+          logger.warn('queue_dispatch.contact_restriction_refused', { queue_row_id, reason: restriction.reason });
+          return { ok: false, reason: restriction.reason || 'final_contact_restriction_refused' };
+        }
         return { ok: true };
       },
       assertOutboundContent: async (message) => {

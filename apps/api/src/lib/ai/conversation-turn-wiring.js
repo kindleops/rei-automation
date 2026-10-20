@@ -136,7 +136,8 @@ export function createCanonicalTurnDecider({ supabase = getDefaultSupabaseClient
     let enabledLanguages = ['en']
     try { enabledLanguages = normalizeSendPolicy(await read(AI_SEND_POLICY_KEY)).languages } catch { enabledLanguages = ['en'] }
     const record = await decideAndCompose({
-      input: ci.input, eligibility, modelClient, spend: composeSpendFor(tracker), enabledLanguages,
+      // rc-8.5.21 v3 (RT-11 / RT-05): every member inbound of the consolidated turn is part of the decision
+      input: { ...ci.input, turn_member_ids: (claim.inbound_ids || []).map(String) }, eligibility, modelClient, spend: composeSpendFor(tracker), enabledLanguages,
       establishedPersona: claim.persona_name || (ci.continuity.ok ? ci.continuity.persona_name : null), companyIdentity: ci.companyIdentity, caller: 'turn', now: at,
     })
     const store = shadowStore || createShadowTableStore(supabase)

@@ -122,7 +122,14 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
 
   // 1. the EXISTING deterministic extractor (asking price, condition / repairs, occupancy,
   //    timeline, interest, intents) + validated model facts
-  let base = buildFactLedger({ inbound: inbound.map((m) => ({ id: m.id, body: m.body, at: m.at, intent: m.intent })), recordFacts, now })
+  // rc-8.5.21 v3: which inbounds answer OUR asking-price question (the latest outbound before them asked it)
+  const answersPrice = new Set()
+  { let lastKind = null
+    for (const m of ordered) {
+      if (m.direction === 'outbound') lastKind = questionKindOf({ use_case: useCaseForKind(m.use_case), body: m.body || '' })
+      else if (m.direction === 'inbound') { if (lastKind === 'asking_price') answersPrice.add(m.id); lastKind = null }
+    } }
+  let base = buildFactLedger({ inbound: inbound.map((m) => ({ id: m.id, body: m.body, at: m.at, intent: m.intent, answers_price_question: answersPrice.has(m.id) })), recordFacts, now })
   if (modelFacts.length) base = mergeModelFacts(base, modelFacts, { inboundIds: new Set(inbound.map((m) => m.id)), atById: Object.fromEntries(inbound.map((m) => [m.id, m.at])) })
 
   const facts = {}
@@ -292,6 +299,9 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     objections,
     property,
     last_message: ordered.length ? { id: ordered[ordered.length - 1].id, direction: ordered[ordered.length - 1].direction, at: ordered[ordered.length - 1].at } : null,
+    // rc-8.5.21 v3 (RT-11 / RT-05): the seller's messages since our last outbound (a burst) — what the
+    // seller "asked" is read across all of them, never only the latest fragment
+    open_inbound_ids: (() => { const out = []; for (let i = ordered.length - 1; i >= 0 && ordered[i].direction === 'inbound'; i -= 1) out.unshift(ordered[i].id); return out })(),
   }
   ledger.stage = deriveLedgerStage(ledger)
   ledger.next_missing = nextMissingFact(ledger)
@@ -346,10 +356,15 @@ export function deriveLedgerStage(ledger) {
   if (interest === 'not_interested') return { stage: 'nurture', evidence_message_ids: ids(ledger, 'seller_interest'), rationale: 'not interested (30-day nurture, never suppressed)' }
   if (ledger.existing_offers.length) return { stage: 'S5_offer', evidence_message_ids: [], rationale: `authoritative offer record(s): ${ledger.existing_offers.length}` }
   const price = factValue(ledger, 'asking_price') != null
-  const priceSettled = price || ledger.questions.asking_price.deflected || (ledger.questions.asking_price.asked_count > 0 && ledger.offer_requests.length > 0)
   const cond = factValue(ledger, 'condition') != null
-  if (priceSettled && cond) return { stage: 'S5_offer', evidence_message_ids: [...ids(ledger, 'asking_price'), ...ids(ledger, 'condition'), ...ledger.questions.asking_price.deflected_by].slice(0, 12), rationale: 'asking price (or deflection) and condition on record; the offer is a human step' }
-  if (priceSettled) return { stage: 'S4_condition', evidence_message_ids: [...ids(ledger, 'asking_price'), ...ledger.questions.asking_price.deflected_by].slice(0, 12), rationale: price ? 'asking price stated' : 'asking price asked and deflected (never re-asked)' }
+  // rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18 "offer before price"): condition is S4 and comes AFTER the
+  // price. A seller who asks for OUR offer before giving a number is asked for it ONCE; if the number is
+  // still withheld (deflected, or another offer request after our price ask) the next step is research →
+  // a GATED offer recommendation (S5, a human step) — never a condition question the seller did not raise.
+  const priceWithheld = !price && (ledger.questions.asking_price.deflected || (ledger.questions.asking_price.asked_count > 0 && ledger.offer_requests.length > 0))
+  if (priceWithheld) return { stage: 'S5_offer', evidence_message_ids: [...ledger.questions.asking_price.deflected_by, ...ids(ledger, 'condition')].slice(0, 12), rationale: 'offer requested and the asking price withheld after one ask: research → gated offer recommendation (human), never a condition question first' }
+  if (price && cond) return { stage: 'S5_offer', evidence_message_ids: [...ids(ledger, 'asking_price'), ...ids(ledger, 'condition')].slice(0, 12), rationale: 'asking price and condition on record; the offer is a human step' }
+  if (price) return { stage: 'S4_condition', evidence_message_ids: ids(ledger, 'asking_price').slice(0, 12), rationale: 'asking price stated' }
   if (interest === 'interested' || interest === 'conditional') return { stage: 'S3_asking_price', evidence_message_ids: ids(ledger, 'seller_interest'), rationale: 'interest shown' }
   if (own === 'confirmed' || own === 'representative') return { stage: 'S2_interest', evidence_message_ids: ids(ledger, 'ownership'), rationale: `ownership ${own}` }
   return { stage: 'S1_ownership', evidence_message_ids: [], rationale: 'no ownership evidence yet' }
@@ -362,7 +377,9 @@ export function nextMissingFact(ledger) {
   const done = {
     ownership: ledger.questions.ownership.answered,
     interest: ledger.questions.interest.answered,
-    asking_price: ledger.questions.asking_price.answered || ledger.questions.asking_price.deflected || ledger.questions.asking_price.asked_count > 0,
+    // rc-8.5.21 v3: ASKED is not ANSWERED — an unanswered price ask keeps the price as the next missing fact
+    // (the validator never lets it be re-asked), so the flow can never jump to condition before the price
+    asking_price: ledger.questions.asking_price.answered || ledger.questions.asking_price.deflected,
     condition: ledger.questions.condition.answered,
   }
   // a later stage's evidence implies the earlier ones (a stated price implies ownership + interest)

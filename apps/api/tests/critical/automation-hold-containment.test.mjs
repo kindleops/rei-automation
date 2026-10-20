@@ -188,7 +188,13 @@ test("(ii) queue worker retry: a held row is DEFERRED at dispatch (no provider c
     assert.equal(r.sent, false); assert.equal(r.skipped, true); assert.equal(r.reason, "automation_hold"); assert.equal(r.status, 423);
   }
   assert.equal(provider, 0);
-  assert.equal(db.calls.updates.length, 0, "row untouched: a hold defers, it does not fail the row");
+  // rc-8.5.21 v3 (RT-44): the row's STATUS / retry budget are untouched (a hold defers, it never fails the
+  // row); the only write is the visible held-action record on the row's metadata
+  for (const u of db.calls.updates) {
+    const patch = u.patch || u.values || u.payload || u
+    assert.ok(!("queue_status" in patch) && !("retry_count" in patch) && !("failed_reason" in patch), JSON.stringify(u))
+    assert.ok(patch.metadata?.held_action?.reason === "automation_hold", JSON.stringify(u))
+  }
 });
 
 // ── 4. (iii) conflicting classification ────────────────────────────────────

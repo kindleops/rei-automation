@@ -150,8 +150,11 @@ async function closeLifecycleIntents({ supabase, deps = {}, policy, reason, thre
   if (!clean(thread_key)) return null;
   try {
     const { lifecycleLive, closeFollowUpIntentsForThread } = await import("@/lib/domain/followups/followup-lifecycle.js");
-    if (!(await lifecycleLive({ readSwitch: deps.readSwitch || null, supabase }))) return null;
     const compliance = policy === CANCELLATION_POLICIES.COMPLIANCE_TERMINAL;
+    // rc-8.5.21 v3 P0-C: a STOP cancels EVERY pending follow-up intent of the contact whatever the
+    // lifecycle mode (a dry-run / off-mode intent must never become executable after a STOP); the
+    // supersession of a newer inbound stays live-mode only
+    if (!compliance && !(await lifecycleLive({ readSwitch: deps.readSwitch || null, supabase }))) return null;
     return await closeFollowUpIntentsForThread({
       thread_key,
       state: compliance ? "cancelled" : "superseded",
@@ -325,9 +328,16 @@ export async function cancelSupabasePendingOutbound(
   // intents that have no row yet (planned / held) — a fresh inbound SUPERSEDES them, a compliance stop
   // CANCELS them — and keeps follow_up_at a projection. Rows that exist are reconciled by the DB trigger
   // as they are cancelled below. Only while followup_execution_mode = live; never blocks the cancel.
-  const lifecycle = !dry_run ? await closeLifecycleIntents({
+  let lifecycle = !dry_run ? await closeLifecycleIntents({
     supabase, deps, policy, reason, thread_key: normalizePhone(thread_key) || clean(thread_key), inbound_received_at, keep_nurture_follow_ups, only_property_id,
   }) : null;
+  // rc-8.5.21 v3 P0-C: a STOP closes the CONTACT's intents — also those keyed by the phone when the
+  // caller's thread key is another shape / thread
+  const stop_phone = normalizePhone(to_phone_number);
+  if (!dry_run && policy === CANCELLATION_POLICIES.COMPLIANCE_TERMINAL && stop_phone && stop_phone !== (normalizePhone(thread_key) || clean(thread_key))) {
+    const more = await closeLifecycleIntents({ supabase, deps, policy, reason, thread_key: stop_phone, inbound_received_at, keep_nurture_follow_ups, only_property_id });
+    if (more) lifecycle = { ...(lifecycle || {}), ok: (lifecycle?.ok ?? true) && more.ok, closed: Number(lifecycle?.closed || 0) + Number(more.closed || 0) };
+  }
 
   if (!eligible.length) {
     return {

@@ -26,11 +26,23 @@
 // dispatch, and the §11 allocation refuses a second attempt while one is unresolved or after acceptance.
 
 import { loadQueueRowAttemptEvidence } from '../communications/queue-row-attempt-evidence.js'
+import { acceptedAttemptOf, resolveUnstartedAttempts } from '../communications/resolve-orphaned-attempts.js'
+
+// rc-8.5.21 v3 (RT-14 / RT-15): two more crash shapes are decided from the §11 evidence instead of manual
+// review —
+//   - an attempt ALLOCATED but never STARTED (crash between allocation and the start marker, or a start
+//     write that failed) is provably unsent: it is resolved in the ledger (resolveUnstartedAttempts) and
+//     the row gets its ONE re-dispatch (the RT-14 "manual review instead of a single send" cause);
+//   - an attempt that carries the PROVIDER MESSAGE ID was accepted: the row is reconciled to `sent` from
+//     that id (never re-submitted; RT-15).
+// Anything else stays manual review, now with an explicit operator-review escalation on the row (the
+// supervisor surfaces it: lease_manual_review).
 
 export const LEASE_RECOVERY_VERSION = 'processing-lease-recovery.v1'
 export const LEASE_MANUAL_REVIEW_REASON = 'processing_lease_expired_manual_review'
 export const LEASE_REDISPATCH_REASON = 'processing_lease_expired_redispatched_no_provider_call'
 export const MAX_LEASE_REDISPATCHES = 1
+export const LEASE_RECONCILED_SENT_REASON = 'processing_lease_expired_reconciled_sent_from_attempt'
 
 const clean = (v) => String(v ?? '').trim()
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {})
@@ -73,6 +85,11 @@ export function evaluateExpiredProcessingLease(row = {}, { attempts_readable = f
   const prior = Number(obj(row.metadata).lease_redispatch_count || 0)
   if (prior >= MAX_LEASE_REDISPATCHES) blockers.push('lease_redispatch_exhausted')
   const unique = [...new Set(blockers)]
+  // RT-15: exactly one attempt carries the provider's message id ⇒ accepted; reconcile, never re-send
+  const accepted = attempts_readable ? acceptedAttemptOf(attempts) : null
+  if (accepted && !rowProviderEvidence(row).length) {
+    return { action: 'reconcile_sent', reason: LEASE_RECONCILED_SENT_REASON, blockers: unique, attempt: { id: accepted.id, provider_message_id: clean(accepted.provider_message_id), at: accepted.provider_response_received_at || accepted.completed_at || null } }
+  }
   return unique.length
     ? { action: 'manual_review', reason: LEASE_MANUAL_REVIEW_REASON, blockers: unique }
     : { action: 'redispatch', reason: LEASE_REDISPATCH_REASON, blockers: [] }
@@ -85,6 +102,15 @@ export function evaluateExpiredProcessingLease(row = {}, { attempts_readable = f
  */
 export function loadLeaseDispatchEvidence(supabase, queueRowIds = []) {
   return loadQueueRowAttemptEvidence(supabase, queueRowIds)
+}
+
+/** Resolve the never-started attempts of every row in `evidence` (mutates evidence.byRow). Never throws. */
+export async function resolveCrashedAttemptsInPlace(supabase, evidence, { now = new Date().toISOString() } = {}) {
+  if (!evidence?.ok) return evidence
+  for (const [id, attempts] of evidence.byRow.entries()) {
+    if (attempts?.length) evidence.byRow.set(id, await resolveUnstartedAttempts(supabase, attempts, { now }))
+  }
+  return evidence
 }
 
 /** The patch for a verdict. Pure. A re-dispatch never touches retry_count. */
@@ -117,6 +143,25 @@ export function buildLeaseRecoveryPatch(row = {}, verdict = {}, { now = new Date
       updated_at: now,
     }
   }
+  if (verdict.action === 'reconcile_sent') {
+    return {
+      queue_status: 'sent',
+      failed_reason: null,
+      provider_message_id: verdict.attempt.provider_message_id,
+      sent_at: verdict.attempt.at || now,
+      is_locked: false,
+      lock_token: null,
+      locked_at: null,
+      processing_run_id: null,
+      metadata: {
+        ...metadata,
+        ...cleared,
+        provider_message_sid: verdict.attempt.provider_message_id,
+        lease_recovery: { version: LEASE_RECOVERY_VERSION, action: 'reconciled_sent_from_attempt', at: now, attempt_id: verdict.attempt.id, provider_message_id: verdict.attempt.provider_message_id, reason: LEASE_RECONCILED_SENT_REASON },
+      },
+      updated_at: now,
+    }
+  }
   return {
     queue_status: 'expired',
     failed_reason: LEASE_MANUAL_REVIEW_REASON,
@@ -127,7 +172,7 @@ export function buildLeaseRecoveryPatch(row = {}, verdict = {}, { now = new Date
     metadata: {
       ...metadata,
       ...cleared,
-      lease_recovery: { version: LEASE_RECOVERY_VERSION, action: 'manual_review', at: now, blockers: verdict.blockers || [] },
+      lease_recovery: { version: LEASE_RECOVERY_VERSION, action: 'manual_review', at: now, blockers: verdict.blockers || [], operator_review_required: true, next_action: 'operator_reconcile_provider_outcome' },
     },
     updated_at: now,
   }
@@ -146,6 +191,8 @@ export async function recoverExpiredProcessingLeases(supabase, rows = [], { now 
   if (!list.length) return out
   const evidence = await loadLeaseDispatchEvidence(supabase, list.map((r) => r.id))
   out.evidence_readable = evidence.ok
+  out.reconciled_sent = []
+  if (evidence.ok) await resolveCrashedAttemptsInPlace(supabase, evidence, { now })
   for (const row of list) {
     const verdict = evaluateExpiredProcessingLease(row, { attempts_readable: evidence.ok, attempts: evidence.byRow.get(clean(row.id)) || [] })
     const patch = buildLeaseRecoveryPatch(row, verdict, { now })
@@ -154,7 +201,7 @@ export async function recoverExpiredProcessingLeases(supabase, rows = [], { now 
       if (clean(row.lock_token)) q = q.eq('lock_token', clean(row.lock_token))
       const { data, error } = await q.select('id')
       if (error || !Array.isArray(data) || data.length !== 1) { out.skipped.push(row.id); continue }
-      ;(verdict.action === 'redispatch' ? out.redispatched : out.manual_review).push(row.id)
+      ;(verdict.action === 'redispatch' ? out.redispatched : verdict.action === 'reconcile_sent' ? out.reconciled_sent : out.manual_review).push(row.id)
       log?.(verdict.action === 'redispatch' ? 'queue.processing_lease_redispatched' : 'queue.processing_lease_manual_review', { queue_row_id: row.id, blockers: verdict.blockers })
     } catch {
       out.skipped.push(row.id)

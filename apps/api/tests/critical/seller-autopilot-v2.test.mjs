@@ -155,7 +155,7 @@ test("S3 price ≤ MAO → confirm basics (no number); price > MAO → condition
   assert.equal(high.monetary, null);
 });
 
-test("S4 any answer → anchor with the computed X and full evidence; no price → condition → anchor", () => {
+test("S4 any answer → anchor with the computed X and full evidence; no price → never condition first (rc-8.5.21 v3)", () => {
   const a = plan("condition_disclosed", "condition_check", { known: 240_000 });
   assert.equal(a.action, "reply");
   assert.equal(a.template_use_case, "as_is_comp_anchor");
@@ -163,8 +163,10 @@ test("S4 any answer → anchor with the computed X and full evidence; no price �
   assert.ok(a.monetary.amount <= a.monetary.ceiling);
   assert.equal(a.monetary.offer_version.snapshot_id, "snap-prop-v2-1");
   assert.deepEqual(a.monetary.comp_ids, ["comp-1"]);
-  assert.equal(plan("asking_price_absent", "asking_price", { message: "no idea" }).template_use_case, "no_price_condition_probe");
-  assert.equal(plan("asks_offer", "proposal_interest", { message: "send a bid" }).template_use_case, "no_price_condition_probe");
+  // rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18): never condition before the price — a withheld price
+  // defers to the base engine (research → gated offer, a person); an offer request at S2 asks for their number
+  assert.equal(plan("asking_price_absent", "asking_price", { message: "no idea" }).action, "defer")
+  assert.equal(plan("asks_offer", "proposal_interest", { message: "send a bid" }).template_use_case, "seller_asking_price");
   assert.equal(plan("condition_disclosed", "condition_check").price_branch, "no_price_anchor");
 });
 

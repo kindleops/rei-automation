@@ -26,6 +26,10 @@ export const ESCALATION_REASON_CODES = Object.freeze([
   'missing_negotiation_authority', 'missing_comps', 'incompatible_term', 'failed_tool', 'insufficient_context',
   'multiple_properties', 'multiple_owners', 'company_identity_not_configured', 'requested_email_or_card', 'requested_visit',
   'asked_if_automated', 'ownership_evidence_conflict', 'language_not_enabled', 'price_contradiction',
+  // rc-8.5.21 v3: the seller ACCEPTED our proposal — a person verifies the offer, property and authority
+  'seller_accepted_proposal',
+  // rc-8.5.21 v3: "call me" — a person calls (the AI never promises a call)
+  'requested_callback',
 ])
 
 export const MULTI_PROPERTY_TEXT_RE = /\b(?:(?:both|all|several|multiple|two|three|other)\s+(?:of\s+(?:my|the)\s+)?(?:properties|houses|homes|lots|units|addresses)|i\s+(?:own|have)\s+(?:a\s+few|several|multiple|[0-9]+)\s+(?:properties|houses|homes)|which\s+(?:property|house|one|address)|what\s+(?:property|address|house))\b/i

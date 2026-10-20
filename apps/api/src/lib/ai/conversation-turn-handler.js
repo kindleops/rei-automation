@@ -118,7 +118,11 @@ export function createConversationTurnSweepHandler({ env = process.env, store = 
       const turnStore = store || (await defaultTurnStore(supabase || (await defaultSupabase())))
       const rs = runtimeStore || (await (await import('@/lib/agent/runtime/runtime-service.js')).getVerifiedRuntimeStore(env))
       const r = await recoverDueTurns({ store: turnStore, enqueueAt: (o) => rs.enqueueEventAt(o), now: now() })
-      return { result: r }
+      // rc-8.5.21 v3 (RT-12): an inbound persisted with NO decide job (crash between the webhook's write
+      // and the deferred enqueue) gets exactly one — the hook's own event key, deduped by the runtime
+      const { recoverStrandedInbounds } = await import('./conversation-inbound-sweep.js')
+      const inbound = await recoverStrandedInbounds({ supabase: supabase || (await defaultSupabase()), runtimeStore: rs, env, now: now() })
+      return { result: { ...r, inbound: { examined: inbound.examined, enqueued: inbound.enqueued, already_present: inbound.already_present, failed: inbound.failed.length, skipped: inbound.skipped || null } } }
     },
   })
 }

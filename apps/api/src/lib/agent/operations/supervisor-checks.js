@@ -55,7 +55,7 @@ const unavailable = (id, code, o = {}) => check(id, 'unavailable', { code, ...o 
  * @param {object|{unavailable:string}} [i.holds]              owner P0: active automation holds { count, by_type, items }
  * @param {object|{unavailable:string}} [i.followups]          P0 2026-10-17: public.v_followup_intent_health row (+ reasons)
  */
-export function evaluateSupervisor({ snapshot, health = null, actionCenter = null, recovery = null, runtime = null, spend = null, approvals = null, researchValuation = null, valuationBatch = null, holds = null, followups = null, now = Date.now(), thresholds = SUPERVISOR_THRESHOLDS } = {}) {
+export function evaluateSupervisor({ snapshot, health = null, actionCenter = null, recovery = null, runtime = null, spend = null, approvals = null, researchValuation = null, valuationBatch = null, holds = null, followups = null, autoRecovery = null, now = Date.now(), thresholds = SUPERVISOR_THRESHOLDS } = {}) {
   const T = { ...SUPERVISOR_THRESHOLDS, ...thresholds }
   const checks = []
   const issues = []
@@ -95,6 +95,10 @@ export function evaluateSupervisor({ snapshot, health = null, actionCenter = nul
     const fst3 = fp > 0 ? 'critical' : fi > 0 ? 'warn' : 'ok'
     add(check('failed_scheduled_messages', fst3, { value: { failed_24h: n(q.failed) ?? 0, failed_internal: fi, failed_provider_accepted: fp, blocked_24h: n(q.blocked) ?? 0, paused_24h: n(q.paused) ?? 0, top_failure_reasons: q.top_failure_reasons || [] }, source: 'public.send_queue' }))
     if (fi > 0) issues.push({ check_id: 'failed_scheduled_messages', dedupe_key: 'supervisor:failed_internal_sends', kind: 'remediation', severity: 'warning', recoverable: true, title: `${fi} send(s) failed before the provider accepted them (24 h)`, remediation: { action: 'requeue_through_send_queue_after_review', retry_safe: true, note: 'No provider message id: the text never left. Re-queue through the normal queue path (every guard runs again).' } })
+    // rc-8.5.21 v3: a send BLOCKED or PAUSED (an unhealthy / ineligible sender, a sender-continuity hold, an
+    // unavailable eligibility read, a review hold) never disappears into a count: one operator item
+    const bp = (n(q.blocked) ?? 0) + (n(q.paused) ?? 0)
+    if (bp > 0) issues.push({ check_id: 'failed_scheduled_messages', dedupe_key: 'supervisor:blocked_or_paused_sends', kind: 'remediation', severity: 'warning', recoverable: true, title: `${n(q.blocked) ?? 0} send(s) blocked and ${n(q.paused) ?? 0} paused in 24 h (sender eligibility / holds): operator review`, remediation: { action: 'review_blocked_and_paused_rows', where: 'public.send_queue (guard_reason / paused_reason)', top_reasons: (q.top_failure_reasons || []).slice(0, 5) } })
     if (fp > 0) issues.push({ check_id: 'failed_scheduled_messages', dedupe_key: 'supervisor:failed_provider_accepted_sends', kind: 'escalation', severity: 'critical', escalate: true, recoverable: false, title: `${fp} send(s) failed AFTER the provider accepted them (24 h)`, remediation: { action: 'human_review', retry_safe: false, note: 'The provider accepted these: never re-send automatically (duplicate text risk).' } })
 
     // 4 negotiations progress, 5 missing valuations, 6 HOT, 14 stagnation
@@ -242,16 +246,41 @@ export function evaluateSupervisor({ snapshot, health = null, actionCenter = nul
     const f = (k) => Number(followups[k] || 0)
     const stuck = f('planned_overdue') + f('materializing_stale') + f('ready_overdue') + f('dispatched_stale')
     const review = f('failed_after_accept') + f('failed_ambiguous')
-    const st = review > 0 ? 'critical' : stuck + f('accepted_unconfirmed') > 0 || f('failed') > review ? 'warn' : 'ok'
+    // rc-8.5.21 v3 (RT-45 / RT-46 / RT-33): a HELD follow-up (language not enabled, an undeclared offer plan,
+    // sender continuity, ...) needs a person — never a silent count
+    const heldOnly = review === 0 && !(stuck + f('accepted_unconfirmed') > 0 || f('failed') > review) && f('held') > 0
+    const st = review > 0 ? 'critical' : stuck + f('accepted_unconfirmed') > 0 || f('failed') > review ? 'warn' : heldOnly ? 'warn' : 'ok'
     const value = {
       scheduled_executable: f('scheduled_executable'), planned_overdue: f('planned_overdue'), materializing_stale: f('materializing_stale'), ready_overdue: f('ready_overdue'),
       dispatched_stale: f('dispatched_stale'), accepted_unconfirmed: f('accepted_unconfirmed'), delivered: f('delivered'), failed: f('failed'), failed_after_accept: f('failed_after_accept'),
       failed_ambiguous: f('failed_ambiguous'), held: f('held'), not_executable: f('not_executable'), not_executable_24h: f('not_executable_24h'), top_reasons: (followups.reasons || []).slice(0, 10),
     }
     add(check('followup_lifecycle', st, { value, source: 'public.v_followup_intent_health' }),
-      st === 'ok' ? null : review > 0
+      st === 'ok' ? null : heldOnly
+        ? { dedupe_key: 'supervisor:followup_held', kind: 'remediation', severity: 'warning', recoverable: true, title: `${f('held')} follow-up(s) HELD for a person (top reasons: ${(followups.reasons || []).slice(0, 3).map((r) => r?.reason || r?.code || r).join(', ') || 'see reasons'})`, remediation: { action: 'operator_review_held_followups', where: 'public.v_followup_intent_reasons' } }
+        : review > 0
         ? { dedupe_key: 'supervisor:followup_review', kind: 'escalation', severity: 'critical', escalate: true, recoverable: false, title: `${review} follow-up(s) may have reached the seller and failed: review, never re-send automatically`, remediation: { action: 'human_review', retry_safe: false } }
         : { dedupe_key: 'supervisor:followup_stuck', kind: 'remediation', severity: 'warning', recoverable: true, title: `${stuck + f('accepted_unconfirmed')} follow-up(s) stuck (overdue / stale lease / no outcome); ${f('held')} held, ${f('not_executable_24h')} not executable in 24 h`, remediation: { action: 'run_followup_reconcile_report_then_review', where: 'public.v_followup_intent_reasons' } })
+  }
+
+  // rc-8.5.21 v3: AUTO-RECOVERY (born off; only when the wiring passes the source). The supervisor runs the
+  // idempotent recovery sweeps — a stranded inbound (persisted, no decide job) gets exactly one job; a
+  // delivered anchor whose next silence follow-up was never planned gets exactly one — and SURFACES
+  // everything it could not recover (a failed sweep item, a processing row held for manual review after a
+  // crash with an ambiguous provider outcome) as an escalated operator item. Never a send.
+  if (autoRecovery) {
+    if (autoRecovery.unavailable) add(unavailable('auto_recovery', autoRecovery.unavailable))
+    else {
+      const unrec = Array.isArray(autoRecovery.unrecoverable) ? autoRecovery.unrecoverable : []
+      const value = {
+        stranded_inbounds_recovered: Number(autoRecovery.inbound?.enqueued || 0), inbounds_examined: Number(autoRecovery.inbound?.examined || 0),
+        missed_followups_recovered: Number(autoRecovery.followups?.scheduled || 0), anchors_examined: Number(autoRecovery.followups?.examined || 0),
+        lease_manual_review: Number(autoRecovery.lease_manual_review || 0), unrecoverable: unrec.length, items: unrec.slice(0, 20),
+      }
+      const st = unrec.length ? 'warn' : 'ok'
+      add(check('auto_recovery', st, { value, source: 'recovery sweeps (conversation inbound, delivered follow-up anchors, processing leases)' }),
+        st === 'ok' ? null : { dedupe_key: 'supervisor:auto_recovery_unrecoverable', kind: 'escalation', severity: 'warning', escalate: true, recoverable: false, title: `${unrec.length} interrupted workflow(s) the supervisor could not recover: operator review`, remediation: { action: 'human_review', retry_safe: false, items: unrec.slice(0, 20) } })
+    }
   }
 
   // ── 8.5.21-b: research status, valuation coverage, overdue offers, negotiation authority ──

@@ -36,6 +36,7 @@ import {
   loadNoResponseThreadFacts,
   normalizeNoResponseMode,
   resolveNoResponseConfig,
+  detectOutboundOffer,
 } from "@/lib/domain/seller-flow/no-response-followup.js";
 
 const DELIVERED_STATUSES = new Set(["delivered", "delivery_confirmed", "confirmed"]);
@@ -169,7 +170,7 @@ export function resolveDeliveryFollowUpDecision({
 async function loadOutboundEvent(supabase, provider_message_sid) {
   const { data, error } = await supabase
     .from("message_events")
-    .select("id,thread_key,queue_id,sent_at,event_timestamp,master_owner_id,property_id,to_phone_number,metadata")
+    .select("id,thread_key,queue_id,sent_at,event_timestamp,master_owner_id,property_id,to_phone_number,metadata,message_body")
     .eq("provider_message_sid", provider_message_sid)
     .eq("direction", "outbound")
     .order("created_at", { ascending: false })
@@ -177,6 +178,31 @@ async function loadOutboundEvent(supabase, provider_message_sid) {
     .maybeSingle();
   if (error) throw error;
   return data || null;
+}
+
+/**
+ * rc-8.5.21 v3 (RT-33 / RT-45 / RT-46): a follow-up the system SHOULD own but cannot plan is never
+ * silent. It is recorded as a HELD follow-up intent (the lifecycle's one record: state held + the reason,
+ * the originating delivered anchor as its cause, the review requirement) — the supervisor's
+ * follow-up check raises the operator item for every held intent. Idempotent per anchor (cause). Never
+ * throws; returns the record result (a lifecycle that is not installed ⇒ { ok: false }).
+ */
+export async function recordHeldFollowUp({ supabase, thread_key, property_id = null, master_owner_id = null, kind, reason, sid, anchor_at = null, due_hours = 24 } = {}) {
+  try {
+    const { planFollowUpIntent } = await import("@/lib/domain/followups/followup-lifecycle.js");
+    const base = Date.parse(clean(anchor_at)) || Date.now();
+    const r = await planFollowUpIntent({
+      thread_key, property_id, master_owner_id, kind, intent: kind, use_case: null,
+      due_at: new Date(base + due_hours * 3_600_000).toISOString(), writer: "delivery_triggered_followup",
+      cause: `held:${clean(sid)}`, state: "held", reason: clean(reason).slice(0, 200),
+      row_spec: { held_visibility: { originating_event: `delivered:${clean(sid)}`, resource: { thread_key, property_id }, review_required: true, next_action: "operator_declares_followup_plan" } },
+    }, { supabase });
+    if (!r?.ok) warn("delivery_followup.held_record_failed", { thread_key, kind, reason, error: r?.reason || null });
+    return r;
+  } catch (error) {
+    warn("delivery_followup.held_record_failed", { thread_key, kind, reason, error: error?.message || null });
+    return { ok: false, reason: "held_record_failed" };
+  }
 }
 
 async function threadHasEventAfter(supabase, { thread_key, direction, after_iso, exclude_event_id }) {
@@ -450,7 +476,15 @@ export async function maybeScheduleNoResponseFollowUp({
     { config, now }
   );
   const base = { ok: true, scheduled: false, mode, no_response_mode: nr_mode, thread_key };
-  if (!evaluation.eligible) return { handled: true, result: { ...base, reason: evaluation.reason } };
+  if (!evaluation.eligible) {
+    // RT-45 / RT-46: a follow-up held for its LANGUAGE (unknown, or not enabled: Spanish / Creole) is a
+    // recorded, operator-visible hold — never a silent skip
+    if (/^language_/.test(clean(evaluation.reason)) && !inbound_after && !outbound_after) {
+      const held = await recordHeldFollowUp({ supabase, thread_key, property_id: outbound.property_id || null, master_owner_id: outbound.master_owner_id || null, kind: `no_response_${classifyNoResponseAnchor(anchor, config).kind}`, reason: evaluation.reason, sid, anchor_at: sent_at });
+      return { handled: true, result: { ...base, reason: evaluation.reason, held_recorded: held?.ok === true } };
+    }
+    return { handled: true, result: { ...base, reason: evaluation.reason } };
+  }
   if ((pending_rows || []).length > 0) {
     return { handled: true, result: { ...base, reason: "duplicate_pending_followup" } };
   }
@@ -744,6 +778,17 @@ async function scheduleFollowUpAfterDeliveryRun({
     });
 
     if (!decision.eligible) {
+      // RT-33: a delivered OFFER (an operator-typed one included) that no follow-up plan covers — no
+      // declared intent, no stage plan — is recorded as a HELD offer-silence follow-up for a person to
+      // declare (never a silent end, never an invented number)
+      if (!followup_intent && !inbound_after && !outbound_after && !pending) {
+        const offer = detectOutboundOffer({ message_body: outbound.message_body || "", use_case: outbound_use_case });
+        if (offer?.is_offer) {
+          const reason = `offer_followup_plan_undeclared:${offer.mode === "number" ? "single_amount" : clean(offer.reason) || "no_number"}`;
+          const held = await recordHeldFollowUp({ supabase, thread_key: outbound.thread_key, property_id: outbound.property_id || null, master_owner_id: outbound.master_owner_id || null, kind: "offer_silence", reason, sid, anchor_at: sent_at });
+          return { ok: true, scheduled: false, reason, held_recorded: held?.ok === true, mode, thread_key: outbound.thread_key };
+        }
+      }
       return { ok: true, scheduled: false, reason: decision.reason, mode };
     }
 
@@ -801,6 +846,9 @@ async function scheduleFollowUpAfterDeliveryRun({
       {
         source: "delivery_triggered_followup",
         delivered_provider_message_sid: sid,
+        // rc-8.5.21 v3 (crash recovery C): ONE follow-up per delivered anchor — a replay of the same
+        // delivery (the recovery sweep after a crash, a duplicate webhook) is the same intent / row
+        followup_dedupe_scope: `delivered:${sid}`,
         outbound_message_event_id: outbound.id,
         master_owner_id: outbound.master_owner_id || null,
         property_id: outbound.property_id || null,

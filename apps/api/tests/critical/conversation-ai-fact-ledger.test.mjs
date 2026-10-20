@@ -67,9 +67,30 @@ test('offer request AFTER we asked the price: the price question is deflected an
   const v = validateProposedMessage(L, { text: 'What number did you have in mind?' })
   assert.ok(v.reasons.includes('already_asked:asking_price'))
   assert.ok(v.reasons.includes('asking_price_deflected_never_reask'))
-  assert.equal(L.stage.stage, 'S4_condition')
-  assert.equal(L.next_missing, 'condition')
-  assert.equal(validateProposedMessage(L, { text: "How's the condition of the property?" }).ok, true)
+  // rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18): price withheld after ONE ask ⇒ research → a gated offer
+  // recommendation (S5, human) — never a condition question before the price
+  assert.equal(L.stage.stage, 'S5_offer')
+  assert.equal(L.next_missing, null)
+  assert.equal(validateProposedMessage(L, { text: "How's the condition of the property?" }).ok, false)
+})
+
+test('rc-8.5.21 v3: an UNANSWERED price ask never advances the flow to condition (asked is not answered)', () => {
+  const L = buildCanonicalLedger({ messages: [
+    out('o1', 0, 'Still own it?', 'ownership_check'), inb('i1', 2, 'yes I own it'),
+    out('o2', 3, 'Open to selling?', 'consider_selling'), inb('i2', 5, 'maybe'),
+    out('o3', 6, 'What price would you want for it?', 'seller_asking_price'), inb('i3', 8, 'ok'),
+  ] })
+  assert.notEqual(L.stage.stage, 'S4_condition')
+  assert.equal(L.next_missing, 'asking_price')
+  const v = validateProposedMessage(L, { text: "How's the condition of the property?" })
+  assert.equal(v.ok, false, 'condition before the price is a skipped stage')
+  assert.ok(v.reasons.some((r) => r.startsWith('skips_stage')), v.reasons.join(','))
+  assert.ok(validateProposedMessage(L, { text: 'What price would you want?' }).reasons.includes('already_asked:asking_price'), 'and the price is never re-asked')
+  // the seller raised condition THEMSELVES: the condition fact is on record, the price is still next
+  const C = buildCanonicalLedger({ messages: [
+    out('o1', 0, 'Still own it?', 'ownership_check'), inb('i1', 2, 'yes, it needs a new roof though'),
+  ] })
+  assert.notEqual(C.next_missing, 'condition')
 })
 
 test('already-asked: a queued (not yet sent) price question counts as asked', () => {

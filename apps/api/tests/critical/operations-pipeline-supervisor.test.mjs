@@ -90,7 +90,7 @@ const RUNTIME = { jobs: [{ kind: 'ops.health_check', state: 'completed' }, { kin
 const RV = { valuation: { live: 10, with_score: 10, offer_ready: 8, missing: 0, stale_30d: 0, by_tier: { AUTO_HARD_OFFER: 8, CREATIVE_TERMS: 2 } }, offers: { sent_30d: 4, overdue_no_reply_72h: 0, overdue_opportunity_ids: [] }, negotiations: { envelopes: 2, live_envelopes: 1, ledger_events_7d: 3, send_authorizations: 0, in_negotiation_stage: 3 } }
 const SPEND = { day_usd: 0.1, cycle_usd: 2, limits: { day_usd: 5, cycle_usd: 150 } }
 // P0 2026-10-17: a healthy follow-up lifecycle (public.v_followup_intent_health)
-const FOLLOWUPS = { scheduled_executable: 3, planned_overdue: 0, materializing_stale: 0, ready_overdue: 0, dispatched_stale: 0, accepted_unconfirmed: 0, delivered: 5, failed: 0, failed_after_accept: 0, failed_ambiguous: 0, held: 1, not_executable: 2, reasons: [] }
+const FOLLOWUPS = { scheduled_executable: 3, planned_overdue: 0, materializing_stale: 0, ready_overdue: 0, dispatched_stale: 0, accepted_unconfirmed: 0, delivered: 5, failed: 0, failed_after_accept: 0, failed_ambiguous: 0, held: 0, not_executable: 2, reasons: [] } // rc-8.5.21 v3: a held follow-up needs a person (never all clear)
 const full = (o = {}) => evaluateSupervisor({ snapshot: snapshot(o.snap), health: health(), actionCenter: AC, recovery: { by_class: { research_worthy: 1 } }, runtime: RUNTIME, spend: SPEND, approvals: [], researchValuation: RV, valuationBatch: { at: at(T0 - 2 * H), queued: 5, gained_offer_ready: 2, gained_valuation: 3, mode: 'dry_run' }, holds: { count: 0, by_type: {}, items: [] }, followups: FOLLOWUPS, now: T0, ...o })
 
 test('supervisor: a healthy fixture is all clear — and all clear REQUIRES every check to have been read', () => {

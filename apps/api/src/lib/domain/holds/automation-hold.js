@@ -249,6 +249,23 @@ export async function evaluateAutonomousAcceptance({
     { capability: HOLD_CAPABILITIES.OFFER_ACCEPTANCE, supabase }
   );
   const verdict = evaluateAcceptanceRules({ offer: activeOffer, opportunity, score, hold, accepted_price, acceptance_basis });
+  // rc-8.5.21 v3 P0-C: the deal / closing transition is a boundary too — a restricted contact or
+  // property × contact (the canonical writer's restriction check, fail closed) is never accepted
+  // autonomously; it is routed to human review with the restriction as the reason.
+  const tk = clean(thread_key) || clean(activeOffer?.thread_key) || clean(opportunity?.primary_thread_key);
+  const pid = clean(property_id) || clean(activeOffer?.property_id) || clean(opportunity?.primary_property_id);
+  let contact_restriction = null;
+  if (tk) {
+    try {
+      const { evaluateEnqueueContactRestrictions } = await import("@/lib/domain/queue/enqueue-contact-restrictions.js");
+      contact_restriction = await evaluateEnqueueContactRestrictions({ thread_key: tk, to_phone_number: tk, property_id: pid || null, master_owner_id: clean(master_owner_id) || clean(opportunity?.master_owner_id) || null, type: "deal_transition", metadata: { send_kind: "deal_transition" } }, { supabase });
+    } catch (error) {
+      contact_restriction = { refused: true, reason: "enqueue_contact_restriction_read_failed", detail: { error: clean(error?.message).slice(0, 200) } };
+    }
+  }
+  if (contact_restriction?.refused) {
+    return { ...verdict, allowed: false, reasons: [...new Set([...(verdict.reasons || []), ACCEPTANCE_REVIEW_REASONS.CONTACT_RESTRICTED])], contact_restriction, hold, offer: activeOffer || null, opportunity };
+  }
   return { ...verdict, hold, offer: activeOffer || null, opportunity };
 }
 
