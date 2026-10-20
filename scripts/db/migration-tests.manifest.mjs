@@ -88,6 +88,11 @@ const ACTION_GATEWAY = M('PROPOSED_20261019160000_action_gateway.sql')
 const ACTION_GATEWAY_BASELINE = 'mcp/leadcommand-action-mcp/migrations/test/action_gateway_baseline.sql'
 // Roles are CLUSTER-global (see LC_MCP_ROLE_RESET): drop a leftover lc_action_gateway before each entry's setup.
 const ACTION_ROLE_RESET = { name: 'drop a leftover lc_action_gateway role (cluster-global; disposable cluster only)', sql: 'drop role if exists lc_action_gateway;' }
+// OPTIONAL link #27 (separately approved; after #26): the Action Gateway Tier-2 domain writers + the composable
+// extension registry (docs/ACTION-MCP.md §8). Its baseline carries the live campaign lifecycle writer
+// (campaign_transition_status + its edge seed, verbatim) and the columns the T2 snapshots read.
+const ACTION_GATEWAY_T2 = M('PROPOSED_20261020100000_action_gateway_t2.sql')
+const ACTION_GATEWAY_T2_BASELINE = 'mcp/leadcommand-action-mcp/migrations/test/action_gateway_t2_baseline.sql'
 // rc-8.5.21 part B
 const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
 const SEND_AUTHORIZATION = M('PROPOSED_20261016161000_negotiation_send_authorization.sql')
@@ -372,7 +377,7 @@ const BASE_TESTS = [
   // body that is not the live one).
   {
     id: 'rc_8_5_21_release_chain',
-    setup: [LC_MCP_ROLE_RESET, ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, LEGACY_CONVERSATION_TURNS, HOLDS_PUBLIC_BASELINE, GRAPH_LIVE_FUNCTIONS_BASELINE, CPR_LIVE_CONSTRAINTS, LC_MCP_CHAIN_BASELINE, ACTION_GATEWAY_BASELINE],
+    setup: [LC_MCP_ROLE_RESET, ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, RESEARCH_VALUATION_BASELINE, LEGACY_CONVERSATION_TURNS, HOLDS_PUBLIC_BASELINE, GRAPH_LIVE_FUNCTIONS_BASELINE, CPR_LIVE_CONSTRAINTS, LC_MCP_CHAIN_BASELINE, ACTION_GATEWAY_BASELINE, ACTION_GATEWAY_T2_BASELINE],
     apply: [
       // 0. the P0 holds registry (already applied via hotfix/automation-holds in production)
       { fixture: M('PROPOSED_20261016200000_automation_holds_registry_pretest.sql') }, HOLDS_REGISTRY,
@@ -417,6 +422,8 @@ const BASE_TESTS = [
       { fixture: M('PROPOSED_20261019150000_lc_mcp_reader_pretest.sql') }, LC_MCP_READER,
       // #26 OPTIONAL (separately approved; production: after pg_net is resolved, like #25): the Action Gateway
       { fixture: M('PROPOSED_20261019160000_action_gateway_pretest.sql') }, ACTION_GATEWAY,
+      // #27 OPTIONAL (separately approved; after #26): the Action Gateway Tier-2 domain writers
+      { fixture: M('PROPOSED_20261020100000_action_gateway_t2_pretest.sql') }, ACTION_GATEWAY_T2,
     ],
     verify: [T('rc_8_5_21_release_chain_verify.sql')],
     posttest: [
@@ -451,6 +458,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261017122000_conversation_turn_operator_items_posttest.sql'),
       'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_chain_posttest.sql',
       M('PROPOSED_20261019160000_action_gateway_posttest.sql'),
+      M('PROPOSED_20261020100000_action_gateway_t2_posttest.sql'),
     ],
     // applied in reverse order by the runner (the mirror has no rollback: it is the live body); the
     // holds registry is rolled back LAST (it was applied first)
@@ -481,6 +489,7 @@ const BASE_TESTS = [
       M('PROPOSED_20261017122000_conversation_turn_operator_items_rollback.sql'),
       M('PROPOSED_20261019150000_lc_mcp_reader_rollback.sql'),
       M('PROPOSED_20261019160000_action_gateway_rollback.sql'),
+      M('PROPOSED_20261020100000_action_gateway_t2_rollback.sql'),
     ],
   },
   // ── production-shaped (schema-only snapshot) — formerly run with psql against production ──
@@ -592,6 +601,20 @@ const BASE_TESTS = [
     posttest: [M('PROPOSED_20261019160000_action_gateway_posttest.sql')],
     rollback: [M('PROPOSED_20261019160000_action_gateway_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261019160000_action_gateway_rollback_posttest.sql')],
+  },
+  // ── Action Gateway Tier-2 (OPTIONAL link #27, separately approved): the T2 domain writers over the follow-up
+  // lifecycle, the campaign lifecycle writer, the ops work items and the approval ledger, + the extension registry.
+  // Setup = #26's setup + #26 itself + the follow-up lifecycle + the T2 baseline (the live campaign writer).
+  {
+    id: 'action_gateway_t2',
+    setup: [ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
+      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, FOLLOWUP_LIFECYCLE,
+      ACTION_GATEWAY_BASELINE, ACTION_GATEWAY_T2_BASELINE, ACTION_GATEWAY],
+    pretest: M('PROPOSED_20261020100000_action_gateway_t2_pretest.sql'),
+    apply: [ACTION_GATEWAY_T2],
+    posttest: [M('PROPOSED_20261020100000_action_gateway_t2_posttest.sql')],
+    rollback: [M('PROPOSED_20261020100000_action_gateway_t2_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261020100000_action_gateway_t2_rollback_posttest.sql')],
   },
 ]
 
