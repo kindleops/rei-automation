@@ -30,6 +30,15 @@ export const SENDER_HOLD_DUPLICATE_REASON = "superseded_duplicate_already_dispat
 export const SENDER_HOLD_NEWER_OUTBOUND_REASON = "superseded_by_newer_outbound";
 /** an immediate reply (answering an inbound) is not sent later than this after it was planned */
 export const SENDER_HOLD_REPLY_MAX_AGE_MINUTES = 60;
+
+/**
+ * BORN OFF (rc-8.5.21): the system_control key that arms the sender-continuity hold RELEASE. Only the
+ * value 'live' (trimmed, case-insensitive) writes; absent / empty / anything else is a dry run.
+ */
+export const SENDER_CONTINUITY_RELEASE_MODE_KEY = "sender_continuity_release_mode";
+export function resolveSenderContinuityReleaseMode(raw) {
+  return String(raw ?? "").trim().toLowerCase() === "live" ? "live" : "off";
+}
 const BATCH = 50;
 
 const clean = (v) => (v === null || v === undefined ? "" : String(v).trim());

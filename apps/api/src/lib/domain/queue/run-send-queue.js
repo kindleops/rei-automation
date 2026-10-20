@@ -10,6 +10,7 @@ import {
   evaluateQueueSendRuntimeBrakes,
 } from "@/lib/domain/queue/queue-control-safety.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { SENDER_CONTINUITY_RELEASE_MODE_KEY, resolveSenderContinuityReleaseMode } from "@/lib/domain/queue/release-sender-continuity-holds.js";
 import { 
   processSendQueueItem as defaultProcessSendQueueItem,
   loadQueueRowById
@@ -342,10 +343,10 @@ export async function runSendQueue(
   // is a dry run (decisions logged, nothing changes). Never throws into the run.
   if (!dry_run && (deps.releaseSenderContinuityHolds || (!deps.supabaseClient && hasSupabaseConfig()))) {
     try {
-      const mode = String((await Promise.resolve().then(() => get_system_value("sender_continuity_release_mode")).catch(() => null)) ?? "").trim().toLowerCase();
+      const mode = String((await Promise.resolve().then(() => get_system_value(SENDER_CONTINUITY_RELEASE_MODE_KEY)).catch(() => null)) ?? "").trim().toLowerCase();
       const release = deps.releaseSenderContinuityHolds
         || (await import("@/lib/domain/queue/release-sender-continuity-holds.js")).releaseSenderContinuityHolds;
-      const released = await release({ dry_run: mode !== "live" }, { supabase, now, getSystemValue: get_system_value });
+      const released = await release({ dry_run: resolveSenderContinuityReleaseMode(mode) !== "live" }, { supabase, now, getSystemValue: get_system_value });
       if (released?.examined) {
         log_info("queue.sender_continuity_release", {
           mode: mode || "off",
