@@ -7,6 +7,9 @@
 //   3. crash manual review (send_queue processing rows the lease reaper could NOT prove sent or unsent)
 //                          ⇒ surfaced, never acted on
 // Everything a sweep could not do is returned as `unrecoverable` (the supervisor escalates it).
+import { recoverStrandedInbounds } from '../../ai/conversation-inbound-sweep.js'
+import { recoverMissedDeliveryFollowUps } from '../../domain/seller-flow/recover-missed-delivery-followups.js'
+
 export const AUTO_RECOVERY_ENV = 'OPS_SUPERVISOR_AUTO_RECOVERY'
 export const autoRecoveryEnabled = (env = process.env) => String(env?.[AUTO_RECOVERY_ENV] ?? '').trim() === 'true'
 const LEASE_MANUAL_REVIEW = 'processing_lease_expired_manual_review'
@@ -17,8 +20,6 @@ const LEASE_MANUAL_REVIEW = 'processing_lease_expired_manual_review'
 export function createAutoRecoverySource({ supabase, runtimeStore = null, env = process.env, lookbackDays = 7 } = {}) {
   return Object.freeze({
     async run({ now = new Date().toISOString() } = {}) {
-      const { recoverStrandedInbounds } = await import('@/lib/ai/conversation-inbound-sweep.js')
-      const { recoverMissedDeliveryFollowUps } = await import('@/lib/domain/seller-flow/recover-missed-delivery-followups.js')
       const inbound = runtimeStore ? await recoverStrandedInbounds({ supabase, runtimeStore, env, now }) : { ok: false, examined: 0, enqueued: 0, failed: [{ message_event_id: null, reason: 'runtime_store_unavailable' }] }
       const followups = await recoverMissedDeliveryFollowUps({ supabase, now })
       const unrecoverable = [
