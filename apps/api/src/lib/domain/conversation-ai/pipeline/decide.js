@@ -52,7 +52,12 @@ const newFactsFrom = (ledger, turnIds) => Object.entries(ledger?.facts || {}).fi
  */
 export function decideActions({ ledger, inboundText = '', inboundId, deterministic = null, eligibility = null, judgment = null, deterministicTemplate = { available: false }, ownerHandled = false, language = null, propertyCount = 1, thread = [], inbound = null, companyIdentity = NO_COMPANY_IDENTITY, enabledLanguages = ['en'], memberIds = [] }) {
   const turnIds = new Set([String(inboundId), ...(Array.isArray(memberIds) ? memberIds.map(String) : [])])
-  const replyLangFor = () => languageEnabledFor({ language, inboundText, languages: enabledLanguages }).language
+  // rc-8.5.21 v3 (RT-11 / RT-05): the LANGUAGE of a burst is read from all its fragments ("lol" / a name as
+  // the last fragment is not an unknown language); a single inbound reads as before
+  const burstText = turnIds.size > 1
+    ? [...(thread || []).filter((m) => String(m?.direction || '').startsWith('in') && turnIds.has(String(m.id))).map((m) => m.body ?? m.message_body ?? ''), inboundText].filter(Boolean).join('\n')
+    : inboundText
+  const replyLangFor = () => languageEnabledFor({ language, inboundText: burstText, languages: enabledLanguages }).language
   const plan = (actions, reason, extra = {}) => {
     const v = validatePlan(actions)
     if (!v.ok) return { version: PIPELINE_VERSION, actions: [{ type: ACTIONS.HOLD, reason: 'plan_conflict' }], reasons: ['plan_conflict', ...v.reasons], conflict_from: actions.map((a) => a.type) }
@@ -116,7 +121,7 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   const ownFact = ledger?.facts?.ownership
   // OWNER DECISION 2026-10-18: the seller's language from the INBOUND evidence; the reply is composed
   // in it ONLY when the language policy enables it (Spanish), never an English fallback
-  const replyLang = languageEnabledFor({ language, inboundText, languages: enabledLanguages })
+  const replyLang = languageEnabledFor({ language, inboundText: burstText, languages: enabledLanguages })
   const lang = { english: replyLang.enabled, reason: replyLang.reason, language: replyLang.language }
   const confident = (j) => j && Number(j.confidence) >= 0.85
   const detPositive = ['ownership_confirmed', 'seller_interested', 'interested', 'latent_interest', 'asks_offer'].includes(String(deterministic?.intent))
