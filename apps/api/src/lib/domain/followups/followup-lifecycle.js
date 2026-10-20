@@ -567,7 +567,12 @@ export async function materializeClaimedIntent(intent, deps = {}) {
     } catch {
       return settle(intent, deps, { to: S.PLANNED, reason: 'template_lookup_failed', transient: true })
     }
-    if (!candidates.length || !available) return settle(intent, deps, { to: S.NOT_EXECUTABLE, reason: `no_approved_template:${candidates.join('|') || 'none'}:${language}` })
+    // rc-8.5.21 v3 (RT-45 / RT-46): a Spanish / Creole / any non-English follow-up with no approved copy in
+    // ITS language is HELD for a person (never English, never a silent dead end); the supervisor raises it
+    if (!candidates.length || !available) {
+      if (!/^en(glish)?$/i.test(language)) return settle(intent, deps, { to: S.HELD, reason: `language_template_missing:${language}:${candidates.join('|') || 'none'}` })
+      return settle(intent, deps, { to: S.NOT_EXECUTABLE, reason: `no_approved_template:${candidates.join('|') || 'none'}:${language}` })
+    }
   }
   let rendered
   try {

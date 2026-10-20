@@ -298,7 +298,11 @@ test('ops supervisor: the follow-up lifecycle check — unavailable when unread,
   const pick = (ev) => ev.checks.find((c) => c.id === 'followup_lifecycle')
   assert.equal(pick(evaluateSupervisor({ snapshot: { unavailable: 'X' } })).status, 'unavailable')
   const zero = { scheduled_executable: 3, planned_overdue: 0, materializing_stale: 0, ready_overdue: 0, dispatched_stale: 0, accepted_unconfirmed: 0, failed: 0, failed_after_accept: 0, failed_ambiguous: 0, held: 2, not_executable: 1 }
-  assert.equal(pick(evaluateSupervisor({ snapshot: { unavailable: 'X' }, followups: zero })).status, 'ok')
+  // rc-8.5.21 v3 (RT-45 / RT-46): HELD follow-ups are never a silent count — a warn with an operator item
+  const heldEv = evaluateSupervisor({ snapshot: { unavailable: 'X' }, followups: zero })
+  assert.equal(pick(heldEv).status, 'warn')
+  assert.ok(heldEv.issues.some((i) => i.dedupe_key === 'supervisor:followup_held' && i.recoverable))
+  assert.equal(pick(evaluateSupervisor({ snapshot: { unavailable: 'X' }, followups: { ...zero, held: 0 } })).status, 'ok')
   const stuck = evaluateSupervisor({ snapshot: { unavailable: 'X' }, followups: { ...zero, planned_overdue: 2 } })
   assert.equal(pick(stuck).status, 'warn')
   assert.ok(stuck.issues.some((i) => i.dedupe_key === 'supervisor:followup_stuck' && i.recoverable))
