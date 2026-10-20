@@ -24,7 +24,7 @@ import { isUuid } from "@/lib/utils/is-uuid.js";
 import { resolveConversationalCeiling, withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import { SEND_CLASS, isConversationalSendClass, resolveSendClass, sourceSendClass } from "@/lib/domain/delivery/send-class.js";
 import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
-import { buildLeaseRecoveryPatch, evaluateExpiredProcessingLease, loadLeaseDispatchEvidence } from "@/lib/domain/queue/processing-lease-recovery.js";
+import { buildLeaseRecoveryPatch, evaluateExpiredProcessingLease, loadLeaseDispatchEvidence, resolveCrashedAttemptsInPlace } from "@/lib/domain/queue/processing-lease-recovery.js";
 import { loadPropertyGeography, loadMailingGeography, rowMailingGeography, rowNeedsPropertyGeography, storedTimezoneToIana } from "@/lib/domain/queue/recipient-timezone.js";
 import {
   CONTACT_HOURS,
@@ -3318,6 +3318,9 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
   const lease_evidence = expired_leases.length
     ? await loadLeaseDispatchEvidence(supabase, expired_leases.map((row) => row.id))
     : { ok: true, byRow: new Map() };
+  // rc-8.5.21 v3 (RT-14): attempts allocated but never started are provably unsent — resolved in the
+  // ledger before the verdict (never in a dry run)
+  if (!dry_run && lease_evidence.ok) await resolveCrashedAttemptsInPlace(supabase, lease_evidence, { now });
   for (const row of expired_leases) {
     // Closure-pass certification fixes (2026-08-26):
     // P2 — a processing row that ALREADY SENT (provider id / sent_at) must
@@ -3339,6 +3342,12 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
       attempts_readable: lease_evidence.ok,
       attempts: lease_evidence.byRow.get(clean(row.id)) || [],
     });
+    if (lease_verdict.action === "reconcile_sent") {
+      // rc-8.5.21 v3 (RT-15): the provider accepted (the §11 attempt carries its id) — sent, never re-sent
+      const { processing_run_id: _run2, ...reconcile_patch } = buildLeaseRecoveryPatch(row, lease_verdict, { now });
+      updates.push({ id: row.id, patch: reconcile_patch, expect: { queue_status: "processing", lock_token: clean(row.lock_token) || null } });
+      continue;
+    }
     if (lease_verdict.action === "redispatch") {
       const { processing_run_id: _run, ...redispatch_patch } = buildLeaseRecoveryPatch(row, lease_verdict, { now });
       // compare-and-set: only a row still `processing` under the SAME lock is returned to the queue
@@ -3358,6 +3367,8 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
           processing_started_at: null,
           processing_worker_id: null,
           processing_timeout_at: null,
+          // rc-8.5.21 v3: never a silent hold — the blockers and the operator review requirement
+          lease_recovery: { action: "manual_review", at: now, blockers: lease_verdict.blockers || [], operator_review_required: true, next_action: "operator_reconcile_provider_outcome" },
         },
         updated_at: now,
       },

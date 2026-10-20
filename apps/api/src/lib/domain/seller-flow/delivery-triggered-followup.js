@@ -801,6 +801,9 @@ async function scheduleFollowUpAfterDeliveryRun({
       {
         source: "delivery_triggered_followup",
         delivered_provider_message_sid: sid,
+        // rc-8.5.21 v3 (crash recovery C): ONE follow-up per delivered anchor — a replay of the same
+        // delivery (the recovery sweep after a crash, a duplicate webhook) is the same intent / row
+        followup_dedupe_scope: `delivered:${sid}`,
         outbound_message_event_id: outbound.id,
         master_owner_id: outbound.master_owner_id || null,
         property_id: outbound.property_id || null,

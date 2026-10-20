@@ -37,7 +37,7 @@
 // writer behaves exactly as before and nothing here runs.
 import crypto from 'node:crypto'
 
-import { OWNERSHIP_DECLINED_ROLE, OWNERSHIP_DECLINED_REASON } from '../queue/ownership-recontact-guard.js'
+import { OWNERSHIP_DECLINED_ROLE, OWNERSHIP_DECLINED_REASON, evaluateOwnershipRecontact } from '../queue/ownership-recontact-guard.js'
 import { questionKindOf } from '../conversation-ai/questions.js'
 import { propertyAddressIndex, questionsOf } from '../conversation-ai/property-facts.js'
 import { bareNoAnswer } from '../conversation-ai/answers.js'
@@ -176,7 +176,14 @@ export function propertyContactBlock({ property_id = null, phone = null, thread 
   if (mine.some((r) => lower(r.contact_property_role) === 'property_do_not_contact')) return { blocked: true, reason: 'property_do_not_contact:contact_property_resolution', kind: 'property_do_not_contact', state: 'not_executable' }
   if (mine.some(declined)) return { blocked: true, reason: `${OWNERSHIP_DECLINED_UNVERIFIED}:no_recontact_hold`, kind: OWNERSHIP_DECLINED_UNVERIFIED, state: 'held' }
   const denial = mine.find((r) => clean(r.rejected_at) && PAIR_DENIAL_ROLES.has(lower(r.contact_property_role)) && (!clean(r.suppression_scope) || lower(r.suppression_scope) === 'contact_property_pair'))
-  if (denial) return { blocked: true, reason: 'property_denial:contact_property_resolution', kind: 'property_denial', state: 'not_executable' }
+  // rc-8.5.21 v3 (MUL-04, owner rule 3): a stored denial is evidence ranked by recency AND confidence like
+  // every other item; a NEWER explicit confirmation of this property on the thread supersedes it (the
+  // recontact guard's one resolution — holds and contact-wide restrictions are judged elsewhere)
+  const superseded = denial && Array.isArray(messages) && messages.length ? (() => {
+    const rc = evaluateOwnershipRecontact({ property_id: pid, to_phone_number: phone }, messages, { resolutions: mine })
+    return !rc.blocked && rc.detail?.resolved?.state === 'confirmed' && Number(rc.detail.resolved.rank) >= 3
+  })() : false
+  if (denial && !superseded) return { blocked: true, reason: 'property_denial:contact_property_resolution', kind: 'property_denial', state: 'not_executable' }
   const t = thread || {}
   const tstates = [t.disposition, t.last_intent, t.contactability_status, t.ownership_status, t.operational_status].map(lower)
   // the thread's own state: its property, or (property unknown) conservatively this one
@@ -437,12 +444,11 @@ export async function loadPropertyContactBlock({ supabase, thread_key, phone = n
   if (q1?.error) throw q1.error
   const q2 = await supabase.from('inbox_thread_state').select('*').eq('thread_key', clean(thread_key)).limit(1)
   if (q2?.error) throw q2.error
-  let messages = null
-  if (NURTURE_ON_DISINTEREST_KINDS.has(clean(kind))) {
-    const q3 = await supabase.from('message_events').select('id,direction,message_body,created_at,event_timestamp,property_id').eq('thread_key', clean(thread_key)).order('created_at', { ascending: false }).limit(40)
-    if (q3?.error) throw q3.error
-    messages = q3.data || []
-  }
+  // the thread's own messages: the disinterest-burst reading AND (rc-8.5.21 v3) the evidence ordering
+  // that lets a newer explicit confirmation supersede a stale stored denial
+  const q3 = await supabase.from('message_events').select('id,direction,message_body,created_at,event_timestamp,property_id,detected_intent').eq('thread_key', clean(thread_key)).order('created_at', { ascending: false }).limit(40)
+  if (q3?.error) throw q3.error
+  const messages = q3.data || []
   return propertyContactBlock({ property_id, phone: phone || thread_key, thread: (q2.data || [])[0] || null, resolutions: q1.data || [], kind, messages })
 }
 

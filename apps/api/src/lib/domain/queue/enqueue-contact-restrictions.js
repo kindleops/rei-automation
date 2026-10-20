@@ -97,7 +97,7 @@ export async function filterBulkRowsByContactRestrictions(rows = [], { supabase 
       read(supabase.from('inbox_thread_state').select('thread_key,canonical_e164,property_id,is_suppressed,disposition,last_intent,stage,lifecycle_stage,contactability_status').in('thread_key', variants).limit(5000)),
       read(supabase.from('inbox_thread_state').select('thread_key,canonical_e164,property_id,is_suppressed,disposition,last_intent,stage,lifecycle_stage,contactability_status').in('canonical_e164', variants).limit(5000)),
       read(supabase.from('phones').select('phone_id,canonical_e164,phone,phone_raw,phone_contact_status,wrong_number_at').in('canonical_e164', variants).limit(5000)),
-      read(supabase.from('message_events').select('from_phone_number,property_id,detected_intent,is_opt_out').eq('direction', 'inbound').in('from_phone_number', variants).in('detected_intent', g.SEND_TIME_REPLY_INTENTS).limit(10000)),
+      read(supabase.from('message_events').select('id,from_phone_number,property_id,detected_intent,is_opt_out').eq('direction', 'inbound').in('from_phone_number', variants).in('detected_intent', g.SEND_TIME_REPLY_INTENTS).limit(10000)),
       read(supabase.from('contact_property_resolution').select('property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at,rejection_reason,updated_at').in('contact_phone_e164', variants).limit(10000)),
       read(supabase.from('message_events').select('id,thread_key,direction,message_body,created_at,event_timestamp,property_id,detected_intent').in('thread_key', variants).order('created_at', { ascending: false }).limit(60 * chunk)),
     ])

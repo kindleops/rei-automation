@@ -19,7 +19,7 @@ export async function loadQueueRowAttemptEvidence(supabase, queueRowIds = []) {
     for (let i = 0; i < ids.length; i += 100) {
       const { data, error } = await supabase
         .from('seller_communication_attempts')
-        .select('id,queue_row_id,provider_request_started_at,provider_message_id,http_status,provider_status,transport_phase,delivery_possibility,completed_at')
+        .select('id,queue_row_id,logical_communication_id,provider_request_started_at,provider_response_received_at,provider_message_id,http_status,provider_status,transport_phase,delivery_possibility,outcome_class,completed_at')
         .in('queue_row_id', ids.slice(i, i + 100))
       if (error) return { ok: false, byRow }
       for (const a of data || []) {

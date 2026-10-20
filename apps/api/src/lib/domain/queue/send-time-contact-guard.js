@@ -263,13 +263,20 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
   const has_thread_facts = (Array.isArray(facts.thread_messages) && facts.thread_messages.length) || (Array.isArray(facts.contact_property_resolution) && facts.contact_property_resolution.length);
   const rc = has_thread_facts ? evaluateOwnershipRecontact(row, facts.thread_messages || [], { resolutions: facts.contact_property_resolution || [] }) : null;
   const text_confirmed = Boolean(rc && !rc.blocked && rc.detail?.resolved?.state === "confirmed");
+  // rc-8.5.21 v3 (MUL-04, owner rule 3): the thread's own evidence for THIS property resolved — by recency
+  // AND confidence, over every thread message including the labelled ones — to an EXPLICIT confirmation
+  // (or a direct answer). A stale low-confidence not-owner LABEL (rank 1) can never defeat it: the label is
+  // already one of the items the recontact guard weighed. Holds and restrictions still apply.
+  const strong_confirmation = text_confirmed && Number(rc.detail?.resolved?.rank) >= 3;
+  const thread_message_ids = new Set((facts.thread_messages || []).map((m) => clean(m.id)).filter(Boolean));
   // A property-scoped not-owner LABEL (thread state / an inbound's detected_intent: low confidence):
   //   its property or the row's property unknown → thread HOLD (owner rule 2), never every property;
   //   another property → not this row; the thread text CONFIRMS this property → conflict HOLD (rule 3);
   //   otherwise the property-scoped terminal block.
-  const propertyLabelBlock = (signal, pid, source) => {
+  const propertyLabelBlock = (signal, pid, source, weighed = false) => {
     if (!clean(pid) || !property_id) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { scope: "thread_hold", signal, source, action: "operator_review" });
     if (clean(pid) !== property_id) return null;
+    if (strong_confirmation && (source === "thread_state" || weighed)) return null;
     if (text_confirmed) return block(R.OWNERSHIP_UNRESOLVED_HOLD, { scope: "thread_hold", conflict: true, signal, source, action: "operator_review" });
     if (PROPERTY_SCOPED_DECLINED.has(signal)) return block(R.OWNERSHIP_DECLINED_HOLD, { scope: "person_property", ownership: "unverified", signal, source });
     return block(R.PRIOR_REPLY_NOT_OWNER, { scope: "person_property", signal, source });
@@ -321,7 +328,7 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
     if (m.is_opt_out === true || OPT_OUT_SIGNALS.has(intent)) return block(R.OPT_OUT_REPLY);
     if (PHONE_SCOPED_NOT_OWNER.has(intent)) return block(R.WRONG_NUMBER, { source: "inbound_reply" });
     if (PROPERTY_SCOPED_NOT_OWNER.has(intent) || PROPERTY_SCOPED_DECLINED.has(intent)) {
-      const b = propertyLabelBlock(intent, m.property_id, "inbound_reply");
+      const b = propertyLabelBlock(intent, m.property_id, "inbound_reply", Boolean(clean(m.id) && thread_message_ids.has(clean(m.id))));
       if (b) return b;
     }
   }
@@ -400,7 +407,7 @@ export async function loadSendTimeContactFacts(supabase, row = {}, opts = {}) {
     read(supabase.from("inbox_thread_state").select("thread_key,canonical_e164,property_id,is_suppressed,disposition,last_intent,stage,lifecycle_stage,contactability_status").in("thread_key", variants).limit(50)),
     read(supabase.from("inbox_thread_state").select("thread_key,canonical_e164,property_id,is_suppressed,disposition,last_intent,stage,lifecycle_stage,contactability_status").in("canonical_e164", variants).limit(50)),
     read(supabase.from("phones").select("phone_id,canonical_e164,phone,phone_raw,phone_contact_status,wrong_number_at,primary_prospect_id,canonical_prospect_id").in("canonical_e164", variants).limit(20)),
-    read(supabase.from("message_events").select("from_phone_number,property_id,detected_intent,is_opt_out").eq("direction", "inbound").in("from_phone_number", variants).in("detected_intent", SEND_TIME_REPLY_INTENTS).limit(200)),
+    read(supabase.from("message_events").select("id,from_phone_number,property_id,detected_intent,is_opt_out").eq("direction", "inbound").in("from_phone_number", variants).in("detected_intent", SEND_TIME_REPLY_INTENTS).limit(200)),
   ]);
   // rc-8.5.21: the thread's own messages (recontact guard) and the automation-hold registry
   const contact_property_resolution = await read(supabase.from("contact_property_resolution").select("property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at,rejection_reason,updated_at").in("contact_phone_e164", variants).limit(50));

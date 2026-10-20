@@ -6,6 +6,10 @@
 //                allocated, no provider call)
 //   in_provider  inside the provider call: the §11 attempt and its provider_request_started marker are
 //                committed, the request has begun (ambiguous)
+//   after_allocate (rc-8.5.21 v3, RT-14) right after the §11 attempt allocation committed, before the
+//                provider-start marker (no provider call can have happened)
+//   after_accept (rc-8.5.21 v3, RT-15) the provider ACCEPTED and the attempt's outcome (with the provider
+//                message id) is committed; the worker dies before the queue row is finalized
 // The provider is never real: the only "send" this process can reach kills it.
 import { isoPool, pgSupabase } from './pg-supabase.mjs'
 import { dispatchRow } from './followup-lifecycle-pg.mjs'
@@ -23,10 +27,18 @@ const die = async (label) => {
   process.kill(process.pid, 'SIGKILL')
   await new Promise(() => {})
 }
-const provider = { send: async () => { if (point === 'in_provider') await die('KILL_IN_PROVIDER'); return { ok: true, sid: 'SMchild', provider_message_id: 'SMchild', status: 'queued' } } }
+// a provider id per row (provider ids are unique in the attempt ledger)
+const SID = point === 'after_accept' ? `SMchild${String(rowId).replace(/-/g, '').slice(0, 10)}` : 'SMchild'
+const provider = { send: async () => { if (point === 'in_provider') await die('KILL_IN_PROVIDER'); return { ok: true, sid: SID, provider_message_id: SID, status: 'queued' } } }
 const extraDeps = point === 'before_seam'
   ? { runSendTimeContactGuard: async () => die('KILL_BEFORE_SEAM') }
   : {}
-await dispatchRow({ pool, sb }, { row, token }, { provider, now, store: createSellerCommunicationStore({ supabase: sb }), extraDeps })
+const realStore = createSellerCommunicationStore({ supabase: sb })
+const store = {
+  ...realStore,
+  allocateAttempt: async (a) => { const r = await realStore.allocateAttempt(a); if (point === 'after_allocate') await die('KILL_AFTER_ALLOCATE'); return r },
+  recordAttemptOutcome: async (a) => { const r = await realStore.recordAttemptOutcome(a); if (point === 'after_accept') await die(r?.ok ? 'KILL_AFTER_ACCEPT' : `OUTCOME_WRITE_FAILED ${r?.reason}`); return r },
+}
+await dispatchRow({ pool, sb }, { row, token }, { provider, now, store, extraDeps })
 process.stdout.write('NOT_KILLED\n')
 process.exit(3)

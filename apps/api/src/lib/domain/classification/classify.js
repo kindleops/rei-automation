@@ -4217,6 +4217,11 @@ const PHONE_IDENTITY_PHRASES = Object.freeze([
   "número equivocado", "numero equivocado", "numero incorrecto", "número incorrecto",
 ]);
 
+// rc-8.5.21 v3: a wrong-person statement SCOPED to one property ("wrong person for Garnet St") and a
+// claim of owning another ("I own Opal", "but I do own the one on Opal")
+const WRONG_FOR_PROPERTY_RE = /\bwrong\s+(?:person|guy|owner|one|house|home|property|address)\s+(?:for|on|about|regarding|with)\s+(?:the\s+)?(?:\d{1,6}\s+)?[a-z][\w.]*(?:\s+(?:st|street|ave|avenue|rd|road|dr|drive|ln|lane|ct|court|blvd|way|pl|place)\b\.?)?/i;
+const OWNS_ANOTHER_RE = /\b(?:i|we)\s+(?:do\s+|still\s+|actually\s+|only\s+)?(?:own|have|got)\s+(?!no\b|nothing\b|none\b)(?:the\s+(?:one|house|property)\s+(?:on|at)\s+)?\S|\bmine\s+is\b|\bi'?m\s+the\s+owner\s+of\b/i;
+
 function matchesTrueWrongNumber(text = "") {
   const normalized = lower(text);
   return includesAny(normalized, [
@@ -5292,12 +5297,22 @@ function resolveIntents(
   // "Never have" to our ownership question = never the owner (property-scoped). A denied PREMISE
   // ("you're misinformed") keeps its wrong_number + human-review route (no suppression is written).
   const wrong_person_is_ownership_denial = wrong_person_rule === "wrong_person_never_owned";
-  const is_phone_identity_claim =
+  // rc-8.5.21 v3 (owner rule 10-17, "a property denial is never global"): "Wrong person for <A>, I own
+  // <B>" scopes the wrong-person statement to property A and claims ownership of another property: it
+  // is a PROPERTY denial for A (B is confirmed by the clause-level reading), never a phone-identity
+  // wrong number. Only when nothing ELSE in the message is a phone-identity statement.
+  const property_scoped_wrong_person = (() => {
+    if (!WRONG_FOR_PROPERTY_RE.test(text) || !OWNS_ANOTHER_RE.test(text)) return false;
+    const rest = lower(text).replace(new RegExp(WRONG_FOR_PROPERTY_RE.source, "gi"), " ");
+    return !matchesTrueWrongNumber(rest) && !PHONE_IDENTITY_PHRASES.some((p) => rest.includes(p));
+  })();
+  if (property_scoped_wrong_person) matched_rule_ids.push("wrong_person_scoped_to_property");
+  const is_phone_identity_claim = !property_scoped_wrong_person && (
     is_true_wrong ||
     (is_wrong_person_claim && !wrong_person_is_ownership_denial) ||
-    PHONE_IDENTITY_PHRASES.some((p) => text.includes(p));
+    PHONE_IDENTITY_PHRASES.some((p) => text.includes(p)));
   const is_property_ownership_denial =
-    !is_phone_identity_claim && (is_ownership_disconnect || wrong_person_is_ownership_denial || normalized_objection === "wrong_number");
+    !is_phone_identity_claim && (property_scoped_wrong_person || is_ownership_disconnect || wrong_person_is_ownership_denial || normalized_objection === "wrong_number");
   if (is_sold_transfer && !is_true_wrong && !is_wrong_person_claim) {
     intents.push("sold_property");
   } else if (is_property_ownership_denial) {

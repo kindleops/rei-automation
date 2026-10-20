@@ -15,7 +15,15 @@ import { createMissionPgReads } from '@/lib/agent/missions/index.js'
 import { buildOperationsHandlers, createOperationsPgSource, createOperationsPgStore, operationsEnabled } from '@/lib/agent/operations/index.js'
 import { assessOpportunityEconomics } from '@/lib/domain/opportunity-economics/economics-service.js'
 
+import { autoRecoveryEnabled, createAutoRecoverySource } from '@/lib/agent/operations/auto-recovery.js'
+
 const HANDLERS = Symbol.for('lc.agent.operations.handlers')
+function lazyAutoRecoverySource(env) {
+  return { run: async (o) => {
+    const { supabase } = await import('@/lib/supabase/client.js')
+    return createAutoRecoverySource({ supabase, runtimeStore: getRuntimeStore(env), env }).run(o)
+  } }
+}
 const SERVICES = Symbol.for('lc.agent.operations.services')
 
 export function getOperationsServices(env = process.env) {
@@ -67,6 +75,9 @@ export function operationsRuntimeHandlers(env = process.env) {
     holdsSource: { summary: () => summarizeActiveAutomationHolds() },
     // P0 2026-10-17: the supervisor REPORTS the follow-up lifecycle health (counts + reason codes; no thread keys)
     followupSource: { health: async () => (await import('@/lib/domain/followups/followup-lifecycle.js')).loadFollowUpLifecycleHealth() },
+    // rc-8.5.21 v3: AUTO-RECOVERY (born off: OPS_SUPERVISOR_AUTO_RECOVERY=true) — the idempotent recovery
+    // sweeps; anything they cannot recover is escalated by the supervisor
+    autoRecoverySource: autoRecoveryEnabled(env) ? lazyAutoRecoverySource(env) : null,
   })
   return globalThis[HANDLERS]
 }

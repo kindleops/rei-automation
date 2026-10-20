@@ -285,7 +285,7 @@ export function createPipelineReconcileHandler({ source, store, getPlane = async
  * @param {{ source: object, store: object, reads: object, now?: () => number, org_id?: string }} deps
  *   reads = the 8.5.18 mission read model (activitySince, spendTotals, researchLimits, pendingApprovals)
  */
-export function createOpsSupervisorHandler({ source, store, reads, holdsSource = null, followupSource = null, now = () => Date.now(), org_id = DEFAULT_ORG_ID } = {}) {
+export function createOpsSupervisorHandler({ source, store, reads, holdsSource = null, followupSource = null, autoRecoverySource = null, now = () => Date.now(), org_id = DEFAULT_ORG_ID } = {}) {
   if (!source || !store || !reads) throw new Error('ops.supervisor: source, store and reads required')
   const settle = (p, code) => p.then((v) => v ?? { unavailable: code }, (e) => ({ unavailable: String(e?.code || code).toUpperCase().slice(0, 60) }))
   return Object.freeze({
@@ -312,9 +312,11 @@ export function createOpsSupervisorHandler({ source, store, reads, holdsSource =
         // P0 2026-10-17: the follow-up lifecycle health view (counts + top non-success reasons)
         followupSource?.health ? settle(followupSource.health(), 'FOLLOWUP_LIFECYCLE_UNAVAILABLE') : Promise.resolve({ unavailable: 'FOLLOWUP_LIFECYCLE_SOURCE_NOT_CONFIGURED' }),
       ])
+      // rc-8.5.21 v3: the idempotent recovery sweeps (born off: only when the wiring passes the source)
+      const autoRecovery = autoRecoverySource?.run ? await settle(autoRecoverySource.run({ now: new Date(t).toISOString() }), 'AUTO_RECOVERY_UNAVAILABLE') : null
       const runtime = activity.unavailable ? activity : { jobs: activity.jobs.filter((j) => j.job_id !== ctx.job.job_id) }
       const spend = spendTotals.unavailable ? spendTotals : limits.unavailable ? limits : { ...spendTotals, limits }
-      const ev = evaluateSupervisor({ snapshot, health, actionCenter, recovery, runtime, spend, approvals, researchValuation, valuationBatch, holds, followups, now: t, thresholds: ctx.job.input?.thresholds || {} })
+      const ev = evaluateSupervisor({ snapshot, health, actionCenter, recovery, runtime, spend, approvals, researchValuation, valuationBatch, holds, followups, autoRecovery, now: t, thresholds: ctx.job.input?.thresholds || {} })
       await ctx.step('evaluate.done', { progress: { step: 'record', steps_done: 1, steps_total: 3, pct: 50 }, payload: ev.counts })
 
       for (const c of ev.checks.filter((x) => x.status !== 'ok')) await ctx.recordFinding({ finding_type: 'supervisor.check', key: c.id, source_id: 'agent.ops_supervisor', value: c, confidence: 1 })
@@ -337,12 +339,12 @@ export function createOpsSupervisorHandler({ source, store, reads, holdsSource =
  * @param {{ source: object|null, store: object|null, reads: object, getPlane?: Function, economicsFor?: Function|null, now?: () => number }} deps
  * @returns {Record<string, { run: Function }>}  {} when the source or store is missing
  */
-export function buildOperationsHandlers({ source, store, reads, getPlane = async () => null, economicsFor = null, linkage = null, holdsSource = null, followupSource = null, now = () => Date.now() }) {
+export function buildOperationsHandlers({ source, store, reads, getPlane = async () => null, economicsFor = null, linkage = null, holdsSource = null, followupSource = null, autoRecoverySource = null, now = () => Date.now() }) {
   if (!source || !store) return {}
   return {
     [RECOVERY_SWEEP_KIND]: createRecoverySweepHandler({ source, store, economicsFor, linkage, now }),
     [ACTION_CENTER_KIND]: createActionCenterHandler({ source, store, now }),
     [PIPELINE_RECONCILE_KIND]: createPipelineReconcileHandler({ source, store, getPlane, now }),
-    ...(reads ? { [OPS_SUPERVISOR_KIND]: createOpsSupervisorHandler({ source, store, reads, holdsSource, followupSource, now }) } : {}),
+    ...(reads ? { [OPS_SUPERVISOR_KIND]: createOpsSupervisorHandler({ source, store, reads, holdsSource, followupSource, autoRecoverySource, now }) } : {}),
   }
 }

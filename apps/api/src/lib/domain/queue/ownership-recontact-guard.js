@@ -225,5 +225,5 @@ export function evaluateOwnershipRecontact(row = {}, messages = [], { resolution
     if (overridden) return { blocked: false, reason: null, detail: { ...overrideDetail, unresolved_denial_message_id: ambiguousDenial.message_id }, version: RECONTACT_GUARD_VERSION }
     return { blocked: true, hold: true, reason: OWNERSHIP_UNRESOLVED_REASON, detail: { scope: 'thread_hold', property_scoped: false, basis: ambiguousDenial.basis, denial_message_id: ambiguousDenial.message_id, action: 'operator_review' }, version: RECONTACT_GUARD_VERSION }
   }
-  return { blocked: false, reason: null, detail: { checked: items.length, resolved: resolved ? { state: resolved.state, basis: resolved.basis } : null }, version: RECONTACT_GUARD_VERSION }
+  return { blocked: false, reason: null, detail: { checked: items.length, resolved: resolved ? { state: resolved.state, basis: resolved.basis, rank: resolved.rank, message_id: resolved.message_id, at: resolved.at } : null }, version: RECONTACT_GUARD_VERSION }
 }

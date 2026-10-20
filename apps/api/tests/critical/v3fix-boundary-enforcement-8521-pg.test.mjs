@@ -259,3 +259,96 @@ test('owner rule (PG): "Take me off that one" about an identified property = a P
     assert.equal((await write(env, row(other, { property: 'p2' }))).ok, false)
   } finally { await done(env) }
 })
+
+test('property context (PG): "Wrong person for <A>, I own <B>" is a property denial for A only — the phone is never invalidated, B stays contactable', { skip }, async () => {
+  const { classify } = await import('../../src/lib/domain/classification/classify.js')
+  const { applyInboundAutomationDecision } = await import('../../src/lib/domain/seller-flow/apply-inbound-automation-decision.js')
+  const env = await world()
+  try {
+    await env.pool.query(`update public.properties set property_address = '12 Garnet St' where property_id = 'p1'`)
+    const phone = '+13125550570'
+    await outbound(env, phone, 'Hi Dana, this is Helen. Do you still own 12 Garnet St?', { property: 'p1', minutesAgo: 120 })
+    const text = 'Wrong person for Garnet St, I own Opal'
+    const c = await classify(text, null, { heuristicOnly: true })
+    assert.equal(c.primary_intent, 'property_specific_non_owner', 'never a phone-identity wrong number')
+    const d = applyInboundAutomationDecision({ message: text, threadKey: phone, propertyId: 'p1', prospectId: 'pr1', ownerId: 'm1', classification: c })
+    assert.notEqual(d.should_suppress_contact, true, JSON.stringify(d))
+    assert.notEqual(d.next_action, 'archive_wrong_number')
+    await inbound(env, phone, text, { intent: c.primary_intent, property: 'p1', minutesAgo: 100 })
+    const a = await write(env, row(phone, { property: 'p1', type: 'followup', meta: { followup_kind: 'stage_silence' } }))
+    assert.equal(a.ok, false, 'A (Garnet) is denied for this contact')
+    const b = await write(env, row(phone, { property: 'p2', type: 'followup', meta: { followup_kind: 'stage_silence' } }))
+    assert.equal(b.ok, true, `B (Opal) stays contactable ${JSON.stringify(b)}`)
+    // the bare contact-wide statement keeps the phone-identity lane
+    assert.equal((await classify('Wrong person', null, { heuristicOnly: true })).primary_intent, 'wrong_number')
+  } finally { await done(env) }
+})
+
+test('MUL-02 (PG): a denial on property A never cancels or supersedes the nurture on unrelated property B (supersession is property-scoped)', { skip }, async () => {
+  const { scopedSupersessionProperty } = await import('../../src/lib/domain/seller-flow/process-seller-inbound-message.js')
+  const { attributeOwnershipAnswer } = await import('../../src/lib/domain/seller-flow/resolve-contact-outcome-phase.js')
+  const { cancelPendingFollowUpsForThread } = await import('../../src/lib/domain/seller-flow/seller-followup-scheduler.js')
+  const env = await world()
+  try {
+    const phone = '+13125550580'
+    // a live nurture intent on B (p2), planned from an earlier B reply
+    const { inboundId } = await seedThread(env.pool, { phone, property: 'p2', inboundMinutesAgo: 60 * 24 * 3 })
+    assert.equal((await planNurture(env.sb, phone, { inboundId, property: 'p2', dueAt: new Date(Date.now() + 86400000).toISOString() })).ok, true)
+    // later: our ownership question about A (p1), the seller denies A
+    await outbound(env, phone, 'Hi Dana, this is Helen. Do you still own 12 Oak St?', { property: 'p1', minutesAgo: 30 })
+    const denialId = crypto.randomUUID()
+    await env.pool.query(`insert into public.message_events (id, direction, thread_key, from_phone_number, to_phone_number, message_body, created_at, event_timestamp, property_id) values ($1, 'inbound', $2, $2, $3, 'No I dont own that one', now() - interval '20 minutes', now() - interval '20 minutes', 'p1')`, [denialId, phone, OURS])
+    const att = await attributeOwnershipAnswer({ supabaseClient: env.sb, thread_key: phone, property_id: 'p1', source_message_id: denialId })
+    const only = scopedSupersessionProperty(att)
+    assert.equal(only, 'p1', JSON.stringify(att))
+    await setSwitches(env.pool, { followup_execution_mode: 'live' })
+    await cancelPendingFollowUpsForThread({ thread_key: phone, inbound_event_id: denialId, inbound_received_at: new Date().toISOString(), only_property_id: only, supabase: env.sb })
+    const intents = await sel(env.pool, `select property_id, state from public.followup_intents where thread_key = $1`, [phone])
+    assert.deepEqual(intents.map((i) => `${i.property_id}:${i.state}`), ['p2:planned'], 'the nurture on B survives the denial on A')
+    // an AMBIGUOUS attribution keeps the whole-thread takeover (never a guess)
+    assert.equal(scopedSupersessionProperty({ ambiguous: true, property: '', basis: 'several_open_ownership_questions' }), null)
+  } finally { await done(env) }
+})
+
+test('MUL-04 (PG): a NEWER explicit ownership confirmation beats a stale low-confidence denial (label AND stored row) — subject to holds and restrictions', { skip }, async () => {
+  const env = await world()
+  try {
+    const phone = '+13125550590'
+    await outbound(env, phone, 'Hi Dana, this is Helen. Do you still own 12 Oak St?', { property: 'p1', minutesAgo: 600 })
+    // stale, low-confidence: a classifier not-owner LABEL on an unclear reply + a stored resolution row from it
+    await inbound(env, phone, 'hmm not sure what you mean', { intent: 'property_specific_non_owner', property: 'p1', minutesAgo: 590 })
+    await env.pool.query(`insert into public.contact_property_resolution (property_id, contact_phone_e164, contact_property_role, rejected_at, suppression_scope, updated_at) values ('p1', $1, 'not_owner', now() - interval '590 minutes', 'contact_property_pair', now() - interval '590 minutes')`, [phone])
+    // newer, explicit: the seller confirms
+    await outbound(env, phone, 'Sorry for the confusion. Are you the owner of 12 Oak St?', { property: 'p1', minutesAgo: 60 })
+    await inbound(env, phone, 'Yes I own 12 Oak St, I am the owner', { intent: 'ownership_confirmed', property: 'p1', minutesAgo: 50 })
+    const r = await write(env, row(phone, { property: 'p1', type: 'followup', meta: { followup_kind: 'stage_silence' } }))
+    assert.equal(r.ok, true, `the newer explicit confirmation wins ${JSON.stringify(r)}`)
+    // the follow-up lifecycle's own property block agrees (the same evidence ordering)
+    const { loadPropertyContactBlock } = await import('../../src/lib/domain/followups/followup-lifecycle.js')
+    assert.equal((await loadPropertyContactBlock({ supabase: env.sb, thread_key: phone, phone, property_id: 'p1', kind: 'stage_silence' })).blocked, false)
+    // subject to restrictions: a STOP still refuses
+    await env.pool.query(`insert into public.sms_suppression_list (phone_e164, is_active, suppression_type) values ($1, true, 'opt_out')`, [phone])
+    assert.equal((await write(env, row(phone, { property: 'p1', type: 'followup', meta: { followup_kind: 'stage_silence' } }))).ok, false)
+    // the reverse: a newer LOW-confidence label after an explicit confirmation is a conflict hold, never a pass
+    const other = '+13125550591'
+    await outbound(env, other, 'Hi Dana, this is Helen. Do you still own 12 Oak St?', { property: 'p1', minutesAgo: 600 })
+    await inbound(env, other, 'Yes I own it', { intent: 'ownership_confirmed', property: 'p1', minutesAgo: 590 })
+    await inbound(env, other, 'eh', { intent: 'property_specific_non_owner', property: 'p1', minutesAgo: 10 })
+    const held = await write(env, row(other, { property: 'p1', type: 'followup', meta: { followup_kind: 'stage_silence' } }))
+    assert.equal(held.ok, false, JSON.stringify(held))
+  } finally { await done(env) }
+})
+
+test('legacy (PG): a conversation INCORRECTLY classified not_interested (a bare "No" to OUR ownership question) is protected by the same rules — the writer refuses its nurture for that property', { skip }, async () => {
+  const env = await world()
+  try {
+    const phone = '+13125550600'
+    await outbound(env, phone, 'Hi Dana, this is Helen. Do you still own 12 Oak St?', { property: 'p1', minutesAgo: 60 * 24 * 31 })
+    await inbound(env, phone, 'No', { intent: 'not_interested', property: 'p1', minutesAgo: 60 * 24 * 30 })
+    await env.pool.query(`insert into public.inbox_thread_state (thread_key, canonical_e164, property_id, disposition, last_intent) values ($1, $1, 'p1', 'not_interested', 'not_interested') on conflict (thread_key) do update set disposition = 'not_interested'`, [phone])
+    const legacy = await write(env, row(phone, { property: 'p1', type: 'followup', meta: { followup_kind: 'not_interested_nurture', followup_reason: 'legacy_follow_up_at' } }))
+    assert.equal(legacy.ok, false, JSON.stringify(legacy))
+    assert.match(legacy.reason, /property_ownership_denied_no_recontact|prior_reply_not_owner/)
+    assert.equal((await write(env, row(phone, { property: 'p2' }))).ok, true, 'never global')
+  } finally { await done(env) }
+})
