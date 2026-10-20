@@ -45,6 +45,7 @@ export function classifyGatewayError(e) {
     if (/^(CREDENTIAL_MISMATCH|PRINCIPAL_INACTIVE|SPONSOR_NOT_MEMBER)$/.test(code)) return gwErr('unauthenticated', code)
     if (/^(GRANT_INVALID|TIER_ABOVE_CEILING|NO_TENANT|AUTHZ_MISMATCH)$/.test(code)) return gwErr('forbidden', code)
     if (/^(APPROVAL_[A-Z_]+)$/.test(code)) return gwErr('refused', code)
+    if (/^(ENVELOPE_[A-Z_]+)$/.test(code)) return gwErr('refused', code)
     if (/^(LEASE_LOST|LEASE_LIVE)$/.test(code)) return gwErr('busy', code)
     return gwErr('internal', code)
   }

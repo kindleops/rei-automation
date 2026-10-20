@@ -51,6 +51,9 @@ export const DOMAIN_WRITES = Object.freeze({
   thread_hold: 'action_gateway_dw_thread_hold_set',
   operator_task: 'action_gateway_dw_operator_task',
   runtime_enqueue: 'action_gateway_dw_runtime_enqueue',
+  // T3 / T4 (PROPOSED_20261020110000_action_gateway_t34.sql)
+  handoff: 'action_gateway_dw_handoff',
+  offer_envelope: 'action_gateway_dw_offer_envelope',
 })
 
 /** Keys a tool argument may never carry: identity, tenancy, authority and approvals come from the server. */

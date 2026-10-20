@@ -58,6 +58,11 @@ export function createPostgrestActionStore({ db }) {
     async pipelineFacts({ after = null, limit = 200 } = {}) { return (await rpc(db, 'action_gateway_pipeline_facts', { p_after: after, p_limit: limit })) || [] },
     workItemGet: (id) => rpc(db, 'action_gateway_work_item_get', { p_work_item_id: id }),
     replyPolicy: () => rpc(db, 'action_gateway_reply_policy', {}),
+    // T3 / T4 (PROPOSED_20261020110000_action_gateway_t34.sql)
+    authorizeEnvelope: (id, digest, p) => rpc(db, 'action_gateway_authorize_envelope', { p_intent_id: id, p_credential_digest: digest, p }),
+    receiptGet: (id) => rpc(db, 'action_gateway_receipt_get', { p_intent_id: id }),
+    negotiationState: (threadId, propertyId) => rpc(db, 'action_gateway_negotiation_state', { p_thread_id: threadId, p_property_id: String(propertyId) }),
+    offerAuthority: (propertyId) => rpc(db, 'action_gateway_offer_authority', { p_property_id: String(propertyId) }),
     selfCheck: () => rpc(db, 'action_gateway_self_check', {}),
   })
 }

@@ -141,6 +141,17 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     base.controls_ok = true
   }
 
+  async function availableOrRefuse(spec, base) {
+    const fn = logic[spec.name]?.available
+    if (typeof fn !== 'function') return
+    let v
+    try { v = await fn({ spec, reads, services, store, now }) } catch { v = { available: false, code: 'CAPABILITY_STATE_UNREADABLE' } }
+    if (v?.available !== true) {
+      base.unavailable_reason = v?.code || 'CAPABILITY_OFF'
+      throw gwErr('unavailable', 'capability_unavailable', `${spec.name} is not available: its production capability is not activated (${base.unavailable_reason})`, { reason: base.unavailable_reason })
+    }
+  }
+
   const shape = (spec, intent, extra = {}) => ({ ok: intent?.state === 'succeeded', tool: spec.name, intent_id: intent?.intent_id || null, state: intent?.state || null, ...extra })
 
   /** The recorded outcome of a terminal intent (replay: never a second execution). */
@@ -200,10 +211,12 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
   async function authorizeAndRun(spec, intent, ctx, base, { approval_id = null, approval_required = false, decision }) {
     let auth
     try {
-      auth = await store.authorize(intent.intent_id, ctx.digest, {
-        grant_id: ctx.grant.grant_id, policy_id: `${spec.name}.policy`, policy_version: POLICY_VERSION,
-        approval_required, approval_id, evidence: JSON.parse(canonicalJson(decision?.evidence || {})),
-      })
+      const authz = { grant_id: ctx.grant.grant_id, policy_id: `${spec.name}.policy`, policy_version: POLICY_VERSION,
+        approval_required, approval_id, evidence: JSON.parse(canonicalJson(decision?.evidence || {})) }
+      // T4: an operator-authorized ENVELOPE REF is the per-use authority (verified again in the database)
+      auth = !approval_id && decision?.envelope_ref && spec.envelope_authorized === true && typeof store.authorizeEnvelope === 'function'
+        ? await store.authorizeEnvelope(intent.intent_id, ctx.digest, { ...authz, approval_required: false, approval_id: null, envelope_ref: decision.envelope_ref })
+        : await store.authorize(intent.intent_id, ctx.digest, authz)
     } catch (e) {
       const g = classifyGatewayError(e)
       // the database refused to authorize: record it (the intent is still received / awaiting)
@@ -225,7 +238,9 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     if (!['allow', 'deny', 'approval'].includes(d?.decision)) return { decision: 'deny', code: 'POLICY_UNDECIDED', evidence: {} }
     if (d.decision === 'allow') {
       // a standing grant alone authorizes T1, and T2 only for reversible actions; T3 / T4 never (mirrors the DB)
-      if (spec.tier >= 3) return { ...d, decision: 'approval', code: 'TIER_REQUIRES_APPROVAL' }
+      // …except an envelope-authorized T4 action whose policy verified an operator-granted envelope ref
+      if (spec.tier >= 3 && !(spec.envelope_authorized === true && d.envelope_ref)) return { ...d, decision: 'approval', code: 'TIER_REQUIRES_APPROVAL' }
+      if (spec.tier >= 3) return d
       if (spec.tier === 2 && !spec.reversible) return { ...d, decision: 'approval', code: 'T2_ACTION_NOT_REVERSIBLE' }
       // outside the grant's argument envelope: this one use needs a human approval
       const env = envelopeRefusal(ctx.grant?.envelope || {}, ctx.params || {})
@@ -283,6 +298,8 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
       await controlsOrStop(spec, base)
       if (catalog.isRead(spec.name)) return await readTool(spec, principal, args, base)
       if (spec.implemented === false) throw gwErr('not_implemented', 'capability_not_implemented', `${spec.name} is registered but not implemented in this phase`)
+      // the path's PRODUCTION ACTIVATION (T3 / T4): off or NO-GO ⇒ capability_unavailable, whatever the grants say
+      await availableOrRefuse(spec, base)
       const grants = grantsFor(principal, spec)
       const input = validate(spec, args)
       rate(`${principal.agent_id}|*`, LIMITS.per_agent_per_min)
@@ -318,11 +335,19 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
   }
 
   async function readTool(spec, principal, args, base) {
-    if (!(principal.read_scopes || []).includes(spec.scope || READ_SCOPES.conversation_context)) throw gwErr('forbidden', 'READ_SCOPE_NOT_GRANTED', `the read scope ${spec.scope} is not granted to this agent`)
+    // a read with a scope needs it in the principal's read scopes; a scope-less read (prepare_acquisition_offer) needs its grant + tier only
+    const scope = spec.scope === undefined ? READ_SCOPES.conversation_context : spec.scope
+    if (scope && !(principal.read_scopes || []).includes(scope)) throw gwErr('forbidden', 'READ_SCOPE_NOT_GRANTED', `the read scope ${scope} is not granted to this agent`)
     const readGrants = grantsFor(principal, spec)
     const input = validate(spec, args)
     rate(`${principal.agent_id}|*`, LIMITS.per_agent_per_min)
     rate(`${principal.agent_id}|${spec.name}`, spec.limits.per_min)
+    const custom = logic[spec.name]?.read
+    if (typeof custom === 'function') {
+      const result = await custom({ input, reads, services, store, now, coverResource: (res) => grantForResource(readGrants, res) })
+      await audit({ ...base, event_type: 'action_read', code: 'READ', detail: { resource_type: result?.resource_type || 'property' } })
+      return { ok: true, status: 'read', tool: spec.name, correlation_id: base.correlation_id, result }
+    }
     const t = await reads.thread(input.thread_id)
     if (t) grantForResource(readGrants, { type: 'thread', id: t.id, refs: { market: t.market || null } })
     const result = await readConversationContext({ input, reads, services, now })

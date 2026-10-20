@@ -20,18 +20,22 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const MODULE_DIR = path.resolve(HERE, '../../src/lib/domain/action-gateway')
 const PEPPER = 'p'.repeat(40)
 
-test('catalog: the 21 requested tools + the scoped read; implemented = the T1 set + set_thread_hold (T2, reversible) + the report-only reconciliation; every T3 / T4 tool is a stub; nothing never-exposed exists', () => {
-  assert.deepEqual(ACTIONS.map((a) => a.name).sort(), [...REQUESTED_TOOLS].sort())
+test('catalog: the 21 requested tools + the scoped reads; implemented = the T1 set + set_thread_hold + the report-only reconciliation + the T3 / T4 family (actions/t34); a T3 / T4 tool is never standing-grant-only; nothing never-exposed exists', () => {
+  const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => r.name !== 'read_conversation_context').map((r) => r.name)]
+  assert.deepEqual([...all].sort(), [...REQUESTED_TOOLS].sort())
   const impl = ACTIONS.filter((a) => a.implemented !== false)
-  assert.deepEqual(impl.map((a) => a.name).sort(), ['create_operator_task', 'create_research_job', 'draft_seller_reply', 'request_property_valuation', 'run_authorized_reconciliation', 'set_thread_hold', 'update_operator_task'])
-  for (const a of impl) assert.ok(a.tier === TIERS.T1 || (a.tier === TIERS.T2 && a.reversible === true), a.name)
-  for (const a of ACTIONS.filter((x) => x.tier >= TIERS.T3)) assert.equal(a.implemented, false, a.name)
+  for (const n of ['create_operator_task', 'create_research_job', 'draft_seller_reply', 'request_property_valuation', 'run_authorized_reconciliation', 'set_thread_hold', 'update_operator_task',
+    'queue_authorized_reply', 'submit_offer_for_approval', 'execute_authorized_offer', 'record_seller_counteroffer']) assert.ok(impl.some((a) => a.name === n), n)
+  for (const a of impl.filter((x) => x.tier <= TIERS.T2 && x.reversible === true)) assert.ok(['set_thread_hold'].includes(a.name), `${a.name} would run on a standing grant alone`)
+  // T3 / T4 always need a per-use authority: a human approval, or (execute_authorized_offer only) a verified envelope ref
+  for (const a of impl.filter((x) => x.tier >= TIERS.T3)) assert.ok(a.envelope_authorized !== true || a.name === 'execute_authorized_offer', a.name)
   for (const a of impl) assert.equal(classifyProhibited({ name: a.capability, touches: a.touches, wraps: a.wraps, input_schema: a.input }).prohibited, false, a.name)
-  assert.deepEqual(READS.map((r) => r.name), ['read_conversation_context'])
+  assert.deepEqual(READS.map((r) => r.name).sort(), ['prepare_acquisition_offer', 'read_conversation_context'])
   for (const n of NEVER_EXPOSED) assert.equal(createActionCatalog().get(n), null, n)
-  for (const a of ACTIONS) for (const k of Object.keys(a.input.properties)) {
+  for (const a of [...ACTIONS, ...READS]) for (const k of Object.keys(a.input.properties)) {
     assert.ok(!FORGED_CONTEXT_KEYS.test(k), `${a.name}.${k} would be refused as forged context`)
     assert.ok(!ESCALATION_KEYS.test(k), `${a.name}.${k} would be refused as escalation`)
+    assert.ok(!/(phone|e164|sender|from_|to_|persona|body|text)/i.test(k) && !/^message_(body|text)$/i.test(k), `${a.name}.${k}: the agent never supplies routing or text`)
   }
 })
 
@@ -96,8 +100,13 @@ test('credentials: HMAC digests, never the token; malformed tokens have no diges
 
 test('STATIC: the gateway module has no import path to the send stack (queue writers, the R3 executor, sms-engine, providers, cancel paths) and no raw SQL client', () => {
   const FORBIDDEN = /(process-send-queue|canonical-queue-writer|queue-atomic-claim|conversation-ai-r3-executor|conversation-turn-dispatch|supabase\/sms-engine|providers\/textgrid|cancel-supabase-pending-outbound|seller-flow\/|lib\/postgres\/client|send-now-service)/
-  for (const f of fs.readdirSync(MODULE_DIR)) {
-    const src = fs.readFileSync(path.join(MODULE_DIR, f), 'utf8')
+  const files = []
+  const walk = (d) => { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (fs.statSync(p).isDirectory()) walk(p); else if (p.endsWith('.js')) files.push(p) } }
+  walk(MODULE_DIR)
+  assert.ok(files.some((f) => f.includes(`${path.sep}t34${path.sep}`)), 'the T3 / T4 family is checked too')
+  for (const p of files) {
+    const f = path.relative(MODULE_DIR, p)
+    const src = fs.readFileSync(p, 'utf8')
     const imports = [...src.matchAll(/(?:import\s[^'"]*from\s*|import\()\s*['"]([^'"]+)['"]/g)].map((m) => m[1])
     for (const i of imports) assert.ok(!FORBIDDEN.test(i), `${f} imports ${i}`)
     assert.ok(!/\bfrom\(['"][a-z_]+['"]\)\.(insert|update|upsert|delete)\(/.test(src), `${f} writes a table directly`)

@@ -51,6 +51,29 @@ export function createGatewayReads({ db }) {
       const [o] = await rows(db.from('acquisition_opportunities').select('id,primary_property_id,primary_thread_key,acquisition_stage,opportunity_status,market').eq('id', String(id)).limit(1), 'opportunity')
       return o || null
     },
+    /** The Supabase-shaped client itself (read-only use by the T3 / T4 read services; the role writes nothing). */
+    client: db,
+    /** system_control values the role may read (the key-allowlist policies), absent ⇒ null. */
+    async switches(keys) {
+      const r = await rows(db.from('system_control').select('key,value').in('key', keys.map(String)), 'switches')
+      return Object.fromEntries(keys.map((k) => [k, r.find((x) => x.key === k)?.value ?? null]))
+    },
+    async message(id) {
+      if (!UUID_RE.test(String(id))) return null
+      const [m] = await rows(db.from('message_events').select('id,provider_message_sid,message_body,created_at,direction,thread_key,property_id').eq('id', String(id)).limit(1), 'message')
+      return m || null
+    },
+    async latestMessage(thread_key) {
+      const [m] = await rows(db.from('message_events').select('id,direction,created_at').eq('thread_key', thread_key).order('created_at', { ascending: false }).limit(1), 'latest_message')
+      return m || null
+    },
+    async opportunityFor(thread_key, property_id) {
+      const [o] = await rows(db.from('acquisition_opportunities').select('id,primary_property_id,primary_thread_key,opportunity_status,automation_state,market').eq('primary_thread_key', thread_key).eq('primary_property_id', String(property_id)).limit(1), 'opportunity_for')
+      return o || null
+    },
+    async sellerOffers(thread_key) {
+      return rows(db.from('seller_offers').select('offer_id,opportunity_id,property_id,thread_key,offer_version,offer_type,direction,purchase_price,authorized_ceiling,status,sent_at,created_at').eq('thread_key', thread_key).limit(50), 'seller_offers')
+    },
     async latestInbound(thread_key) {
       const [m] = await rows(db.from('message_events').select('id,provider_message_sid,message_body,created_at,direction').eq('thread_key', thread_key).eq('direction', 'inbound').order('created_at', { ascending: false }).limit(1), 'latest_inbound')
       return m || null
