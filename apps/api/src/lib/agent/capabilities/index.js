@@ -15,6 +15,7 @@ import { campaignCapabilities } from './defs/campaigns.js'
 import { inboxCapabilities } from './defs/inbox.js'
 import { pipelineCapabilities } from './defs/pipeline.js'
 import { platformCapabilities } from './defs/platform.js'
+import { createDecisionRegistry } from './decision-registry.js'
 
 export const FIRST_CAPABILITIES = Object.freeze([...campaignCapabilities, ...inboxCapabilities, ...pipelineCapabilities, ...platformCapabilities])
 export const DEFAULT_ORG_ID = '00000000-0000-4000-8000-00000000a001'
@@ -40,12 +41,16 @@ export function capabilityToolDefs(registry) {
 }
 
 /**
- * @param {{ env?, store, services, secret, now?, registry?, systemControlMode? }} o
+ * @param {{ env?, store, services, secret, now?, registry?, decisionRegistry?, systemControlMode? }} o
+ *   registry          the MODEL-FACING registry (invoker + tool list)
+ *   decisionRegistry  what the human decide path resolves (registry ∪ the decide-only specs, D6 / D1)
+ *   services.negotiationFor({ refs })  → the negotiation services the envelope / send-authorization specs read
  */
-export function createCapabilityPlane({ env = process.env, store, services, secret, now = () => Date.now(), registry = createDefaultCapabilityRegistry(), systemControlMode = null }) {
+export function createCapabilityPlane({ env = process.env, store, services, secret, now = () => Date.now(), registry = createDefaultCapabilityRegistry(), decisionRegistry = null, systemControlMode = null }) {
   const refs = createThreadRefCodec({ secret })
-  const svc = Object.freeze({ ...services, refs })
-  const approvals = createCapabilityApprovals({ store, registry, services: svc, now })
+  const { negotiationFor, ...rest } = services || {}
+  const svc = Object.freeze({ ...rest, ...(typeof negotiationFor === 'function' ? { negotiation: negotiationFor({ refs }) } : {}), refs })
+  const approvals = createCapabilityApprovals({ store, registry: decisionRegistry || createDecisionRegistry(registry.list()), services: svc, now })
   const invoker = createCapabilityInvoker({ registry, store, approvals, services: svc, env, now, systemControlMode })
   return Object.freeze({
     registry,
@@ -74,7 +79,7 @@ export async function getCapabilityPlane(env = process.env) {
       await assertAgentPoolTls(pool, env)
       await store.assertLeastPrivilege()
     }
-    const services = createDomainServices({ runtimeStore: () => getVerifiedRuntimeStore(env) })
+    const services = { ...createDomainServices({ runtimeStore: () => getVerifiedRuntimeStore(env) }), ...(await (await import('../actions/decide-only-services.js')).decideOnlyServices({ pool })) }
     globalThis[PLANE] = createCapabilityPlane({ env, store, services, secret, systemControlMode: () => getSystemValue('agent_mode') })
   }
   return globalThis[PLANE]
@@ -83,3 +88,4 @@ export async function getCapabilityPlane(env = process.env) {
 export function __resetCapabilityPlane() {
   delete globalThis[PLANE]
 }
+
