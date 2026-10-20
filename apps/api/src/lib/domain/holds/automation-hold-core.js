@@ -40,6 +40,9 @@ export const ACCEPTANCE_REVIEW_REASONS = Object.freeze({
   OPPORTUNITY_INACTIVE: "opportunity_inactive",
   OPPORTUNITY_AUTOMATION_CANCELLED: "opportunity_automation_cancelled",
   OPPORTUNITY_MISSING: "opportunity_missing",
+  // rc-8.5.21 v3 P0-C: the contact / property × contact is restricted (opt-out, precautionary hold,
+  // property denial / declined / do-not-contact, ownership thread hold) — never an autonomous agreement
+  CONTACT_RESTRICTED: "contact_restricted",
 });
 
 export const ACCEPTANCE_REVIEW_OUTCOME = "routed_to_human_review";

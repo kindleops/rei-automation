@@ -222,3 +222,40 @@ test('P0-C (PG): a STOP during preparation cancels EVERY pending outbound of the
     assert.equal((await write(env, row(phone, { type: 'followup', meta: { followup_kind: 'stage_silence' } }))).ok, false)
   } finally { await done(env) }
 })
+
+test('owner rule (PG): "Take me off that one" about an identified property = a PROPERTY-SCOPED do-not-contact — the classifier\'s contact-wide label is relabelled, p1 refused, p2 still contactable; never non-ownership', { skip }, async () => {
+  const { classify } = await import('../../src/lib/domain/classification/classify.js')
+  const { applyInboundAutomationDecision } = await import('../../src/lib/domain/seller-flow/apply-inbound-automation-decision.js')
+  const { recordPropertyDoNotContact } = await import('../../src/lib/domain/seller-flow/property-scoped-removal.js')
+  const env = await world()
+  try {
+    const phone = '+13125550560'
+    await outbound(env, phone, 'Hi Dana, this is Helen. Would you consider an offer on 12 Oak St?', { property: 'p1', minutesAgo: 120 })
+    const text = 'Take me off that one'
+    const c = await classify(text, null, { heuristicOnly: true })
+    const d = applyInboundAutomationDecision({ message: text, threadKey: phone, propertyId: 'p1', prospectId: 'pr1', ownerId: 'm1', classification: c })
+    assert.equal(d.next_action, 'property_do_not_contact', JSON.stringify(d))
+    assert.equal(d.should_suppress_contact, false)
+    assert.equal(d.property_do_not_contact.property_id, 'p1')
+    // the inbound was persisted with the classifier's label (as the live path does) and the thread with it
+    const id = crypto.randomUUID()
+    await env.pool.query(`insert into public.message_events (id, direction, thread_key, from_phone_number, to_phone_number, message_body, created_at, event_timestamp, property_id, detected_intent) values ($1, 'inbound', $2, $2, $3, $4, now(), now(), 'p1', 'opt_out')`, [id, phone, OURS, text])
+    await env.pool.query(`insert into public.inbox_thread_state (thread_key, canonical_e164, property_id, disposition, last_intent) values ($1, $1, 'p1', 'opt_out', 'opt_out') on conflict (thread_key) do update set disposition = 'opt_out', last_intent = 'opt_out'`, [phone])
+    const r = await recordPropertyDoNotContact({ supabase: env.sb, phone, property_id: 'p1', thread_key: phone, inbound_event_id: id })
+    assert.deepEqual(r, { ok: true, relabelled: true })
+    const p1 = await write(env, row(phone, { property: 'p1', type: 'followup', meta: { followup_kind: 'stage_silence' } }))
+    assert.equal(p1.reason, 'enqueue_contact_restricted:property_do_not_contact', JSON.stringify(p1))
+    const p2 = await write(env, row(phone, { property: 'p2' }))
+    assert.equal(p2.ok, true, `the other property stays contactable ${JSON.stringify(p2)}`)
+    const cpr = (await sel(env.pool, 'select contact_property_role, suppression_scope from public.contact_property_resolution where contact_phone_e164 = $1', [phone]))
+    assert.deepEqual(cpr, [{ contact_property_role: 'property_do_not_contact', suppression_scope: 'contact_property_pair' }], 'a restriction, never a not-owner role')
+    // contact-wide wording keeps the contact-wide opt-out
+    const wide = applyInboundAutomationDecision({ message: 'take me off your list', threadKey: phone, propertyId: 'p1', prospectId: 'pr1', ownerId: 'm1', classification: await classify('take me off your list', null, { heuristicOnly: true }) })
+    assert.equal(wide.should_suppress_contact, true)
+    // a real contact-wide suppression already present is NEVER relabelled
+    const other = '+13125550561'
+    await env.pool.query(`insert into public.sms_suppression_list (phone_e164, is_active, suppression_type) values ($1, true, 'opt_out')`, [other])
+    assert.equal((await recordPropertyDoNotContact({ supabase: env.sb, phone: other, property_id: 'p1', thread_key: other })).relabelled, false)
+    assert.equal((await write(env, row(other, { property: 'p2' }))).ok, false)
+  } finally { await done(env) }
+})

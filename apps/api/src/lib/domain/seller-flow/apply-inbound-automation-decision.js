@@ -1,3 +1,5 @@
+import { normalizePhone as normalizePhoneForPropertyDnc } from "@/lib/utils/phones.js";
+import { resolvePropertyScopedRemoval, recordPropertyDoNotContact } from "@/lib/domain/seller-flow/property-scoped-removal.js";
 import { resolveDeclineFollowupPolicy, NO_FOLLOWUP_NEXT_ACTION } from "@/lib/domain/seller-flow/decline-followup-policy.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
@@ -513,6 +515,28 @@ function computeInboundAutomationDecisionRaw({
     automation_decision?.should_suppress_contact === true ||
     automation_decision?.suppression_action === "opt_out"
   ) {
+    // rc-8.5.21 v3 (owner rule): "Take me off that one" about an IDENTIFIABLE property is a
+    // PROPERTY-SCOPED do-not-contact (never non-ownership, never contact-wide). Anything else —
+    // or any doubt about the property — keeps the contact-wide opt-out (STOP stays absolute).
+    if (!classification?.multilingual_contact_revocation && !classification?.possible_opt_out) {
+      const scoped = resolvePropertyScopedRemoval({
+        text: message,
+        propertyId,
+        lastOutboundPropertyIds: [clean(latestThreadContext?.property_id) || clean(propertyId)].filter(Boolean),
+        ambiguous: contextResolution?.status === "ambiguous",
+      });
+      if (scoped.scoped) {
+        return {
+          ...buildDecisionResult({
+            reply_mode: "none",
+            next_action: "property_do_not_contact",
+            audit_reason: "property_scoped_removal",
+            context_resolution: contextResolution || null,
+          }),
+          property_do_not_contact: { property_id: scoped.property_id, basis: scoped.basis },
+        };
+      }
+    }
     return buildDecisionResult({
       should_suppress_contact: true,
       reply_mode: "none",
@@ -3643,6 +3667,44 @@ export async function executeInboundAutomationDecision({
         }),
         brain_stage: null,
       },
+    };
+  }
+
+  // rc-8.5.21 v3: PROPERTY-SCOPED DO-NOT-CONTACT ("take me off that one"). The property × contact
+  // restriction is written to contact_property_resolution (role property_do_not_contact — read by the
+  // recontact guard, the follow-up lifecycle, the canonical writer and the opener exclusion) and the
+  // pending outbound about THAT property is cancelled. The contact stays contactable for its other
+  // properties. If the restriction cannot be recorded, the contact-wide suppression is applied instead
+  // (fail closed: the stricter outcome, never a silent permit).
+  if (base_decision.next_action === "property_do_not_contact" && base_decision.property_do_not_contact?.property_id) {
+    const dnc_property = clean(base_decision.property_do_not_contact.property_id);
+    const dnc_phone = normalizePhoneForPropertyDnc(inboundFrom || threadKey) || clean(inboundFrom || threadKey);
+    let recorded = { ok: false, reason: dryRun ? "dry_run" : "not_attempted" };
+    if (!dryRun && supabase?.from) {
+      recorded = await recordPropertyDoNotContact({ supabase, phone: dnc_phone, property_id: dnc_property, thread_key: threadKey || dnc_phone, inbound_event_id: inboundEventId });
+    }
+    if (!dryRun && !recorded.ok) {
+      warn("inbound.property_dnc_record_failed_contact_wide_fallback", { thread_key: threadKey || inboundFrom, reason: recorded.reason });
+      base_decision = { ...base_decision, should_suppress_contact: true, suppression_reason: "opt_out", next_action: "suppress_contact", audit_reason: buildAuditReason("property_dnc_unrecorded_contact_wide_opt_out") };
+      if (applySuppression) {
+        await applyInboundSuppression({ supabaseClient: supabase, phoneNumber: inboundFrom || threadKey, phoneId, ownerId, reason: "opt_out", threadKey, dryRun: false });
+      }
+      if (supabase) {
+        await cancelSupabasePendingOutbound({ thread_key: threadKey || inboundFrom, to_phone_number: inboundFrom || threadKey, phone_id: phoneId, prospect_id: prospectId, master_owner_id: ownerId, property_id: propertyId, policy: CANCELLATION_POLICIES.COMPLIANCE_TERMINAL, reason: "inbound_compliance_suppression", suppression_reason: "opt_out", inbound_event_id: inboundEventId, cancelled_by: "inbound_automation_decision" }, { supabase });
+      }
+    } else if (!dryRun && supabase) {
+      try {
+        await cancelSupabasePendingOutbound({ thread_key: threadKey || inboundFrom, to_phone_number: inboundFrom || threadKey, property_id: dnc_property, policy: CANCELLATION_POLICIES.PROPERTY_DISPOSITION, reason: "property_do_not_contact", inbound_event_id: inboundEventId, inbound_received_at: inboundReceivedAt || null, cancelled_by: "inbound_automation_decision_property_dnc" }, { supabase });
+      } catch (dnc_cancel_error) {
+        warn("inbound.property_dnc_cancel_failed", { thread_key: threadKey || inboundFrom, error: dnc_cancel_error?.message || "unknown_error" });
+      }
+    }
+    return {
+      ok: true, automation_decision: base_decision, selected_template: null, rendered_message_text: null, queued: false,
+      queue_item_id: null, queue_row_id: null, queue_result: null, suppression_applied: base_decision.should_suppress_contact === true,
+      property_do_not_contact: { ...base_decision.property_do_not_contact, recorded: recorded.ok === true },
+      duplicate_suppressed: false, dry_run: Boolean(dryRun), auto_reply_mode: effective_auto_reply_mode, queue_permission, audit_reason: base_decision.audit_reason,
+      seller_stage_reply: { ok: true, queued: false, handled: true, reason: base_decision.audit_reason, plan: automationDecisionToLegacyPlan({ decision: base_decision, classification }), brain_stage: null },
     };
   }
 
