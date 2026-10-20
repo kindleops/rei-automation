@@ -5,11 +5,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { RELATIONS, RPCS } from '../src/data/inventory.mjs'
+import { RELATIONS, RPCS, T2_RPCS } from '../src/data/inventory.mjs'
 import { ACTIONS, READS, REQUESTED_TOOLS, NEVER_EXPOSED } from '@/lib/domain/action-gateway/catalog.js'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261019160000_action_gateway.sql'), 'utf8')
+const T2_SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261020100000_action_gateway_t2.sql'), 'utf8')
 
 test('read relations = action_gateway.read_inventory()', () => {
   const m = /-- lc-action-inventory:relations\n\s*select array\[([^\]]+)\]/.exec(SQL)
@@ -20,7 +21,9 @@ test('read relations = action_gateway.read_inventory()', () => {
 
 test('RPC allowlist = the public functions granted to lc_action_gateway (+ the hold lookup)', () => {
   const created = [...SQL.matchAll(/create function public\.(action_gateway_[a-z_]+)\(/g)].map((x) => x[1])
-  assert.deepEqual([...RPCS].filter((r) => r !== 'automation_hold_for').sort(), [...new Set(created)].sort())
+  const t2 = [...T2_SQL.matchAll(/create or replace function public\.(action_gateway_[a-z_]+)\(/g)].map((x) => x[1]).filter((n) => n !== 'action_gateway_complete')
+  assert.deepEqual([...T2_RPCS].sort(), [...new Set(t2)].sort(), 'link #27 RPCs')
+  assert.deepEqual([...RPCS].filter((r) => r !== 'automation_hold_for').sort(), [...new Set([...created, ...t2])].sort())
   assert.ok(RPCS.includes('automation_hold_for'))
 })
 

@@ -111,17 +111,17 @@ The loader fences the service-role client, direct Postgres and dotenv. Ambient w
 | run_authorized_reconciliation | ops.reconciliation_report | T1 | **built** (kind `pipeline`) | `ops_pipeline_facts` + `reconcileOpportunity`, report only |
 | read_conversation_context (read) | conversation.read_context + scope `conversation_context.read` | T1 | **built** | `loadCanonicalInputs` projection: masked bodies, facts, persona, permission, property evidence; no phones |
 | set_thread_hold | holds.set_thread_hold | T2 (reversible) | **built** | `public.automation_holds`, SET only; release is human |
-| update_lead_disposition | leads.update_disposition | T2 | stub | WRAP `patchUniversalLeadState` |
-| update_lead_stage | leads.update_stage | T2 | stub | REUSE `pipeline.propose_stage_change` |
-| create_deal_action | deals.create_action | T2 | stub | MISSING |
-| request_thread_hold_release | holds.request_release | T2 | stub | an operator item / approval only |
-| schedule_followup | followups.schedule | T2 | stub | WRAP `planFollowUpIntent` |
-| cancel_followup | followups.cancel | T2 | stub | WRAP `closeFollowUpIntentsForThread` |
+| update_lead_disposition | leads.update_disposition | T2 (request only) | **built** (§8) | WRAP `patchUniversalLeadState` via a human-decided request |
+| update_lead_stage | leads.update_stage | T2 (request only) | **built** (§8) | REUSE `pipeline.propose_stage_change` |
+| create_deal_action | deals.create_action | T2 (reversible) | **built** (§8) | REUSE `agent.ops_work_item` (opportunity subject) |
+| request_thread_hold_release | holds.request_release | T2 (request only) | **built** (§8) | a human-decided release request; agents never release |
+| schedule_followup | followups.schedule | T2 (reversible) | **built** (§8) | WRAP the lifecycle writer `followup_intent_plan` |
+| cancel_followup | followups.cancel | T2 (reversible) | **built** (§8) | WRAP the lifecycle cancel path |
 | record_seller_counteroffer | offers.record_counter | T2 | stub | WRAP the negotiation ledger `seller_counter` |
-| pause_campaign | campaigns.pause | T2 | stub | WRAP `applyCampaignLifecycleAction('pause')` |
+| pause_campaign | campaigns.pause | T2 (reversible) | **built** (§8) | WRAP `campaign_transition_status(…, 'paused')` |
 | queue_authorized_reply | conversation.queue_reply | T3 | stub | MISSING: through R3 only |
-| request_campaign_resume | campaigns.request_resume | T3 | stub | WRAP: approval capability |
-| adjust_campaign_plan | campaigns.adjust_plan | T3 | stub | MISSING |
+| request_campaign_resume | campaigns.request_resume | T2 (request only) | **built** (§8) | a human-decided resume (`applyCampaignLifecycleAction('resume')`) |
+| adjust_campaign_plan | campaigns.adjust_plan | T2 (request only) | **built** (§8) | a human-decided bounded `updateCampaign` |
 | prepare_acquisition_offer | offers.prepare | T4 | stub | REUSE `preparePosition` (composer view) |
 | submit_offer_for_approval | offers.submit_for_approval | T4 | stub | WRAP: envelope approval |
 | execute_authorized_offer | offers.execute_authorized | T4 | stub | MISSING |
@@ -283,3 +283,51 @@ Nothing below is authorized yet. **Each step needs its own owner approval.**
 8. Draft shadow on the server (and the reply policy's shadow gate).
 9. `T2` for `set_thread_hold`.
 10. Any T3 / T4 tool: a separate build phase. For each one: its own production activation of the path (e.g. `ai_conversation_send_enabled` + the send policy, envelope decidability D6), plus per-use approval / envelope wiring.
+
+## 8. Tier-2 tools (link #27, PROPOSED, born OFF)
+
+Branch `feat/action-mcp-t2`. Code: `apps/api/src/lib/domain/action-gateway/actions/t2/` (one module per tool). Migration: `supabase/migrations/PROPOSED_20261020100000_action_gateway_t2.sql` (+ pretest / posttest / rollback / rollback_posttest), optional link #27 after #26 in both chains.
+
+### 8.1 Two kinds of T2 action
+
+- **Reversible** (a standing grant authorizes them alone): `pause_campaign`, `cancel_followup`, `schedule_followup`, `create_deal_action` (and #26's `set_thread_hold`). Each runs through a lease-bound SECURITY DEFINER writer that reads its parameters from the authorized intent and wraps the EXISTING domain writer.
+- **Request only**: `update_lead_stage`, `update_lead_disposition`, `request_thread_hold_release`, `request_campaign_resume`, `adjust_campaign_plan`. Their own effect is ONE pending `agent.approval_request` of a fixed capability. A named operator decides it through the existing decide path, and that capability's `executeApproved` runs the existing service **as the operator**. The gateway never executes the change. The irreversible step therefore always has its per-use human approval; filing the request is what the standing grant covers.
+
+The gateway mirrors this: `spec.reversible` / `spec.request_only`; the database mirrors it in `action_gateway.standing_t2_actions()` (now `set_thread_hold` ∪ the registry rows with their basis). An unregistered T2 action still needs a per-use approval (`T2_ACTION_NOT_REVERSIBLE`).
+
+### 8.2 Tools → services
+
+| Tool | Writer / human capability | Existing service | Guards (gateway policy; DB writer re-checks in bold) |
+|---|---|---|---|
+| update_lead_stage | `pipeline.propose_stage_change` (existing, reused) | `transitionOpportunityStage` | S1–S5 only; **contract / closing stages refused** (S10 = `finalize_closing_case`, human); hold on advance; `validateStageTransition` + `evaluateStageAdvance` dry run with the agent source (Offer needs a recorded offer event); never revive; source = `action_gateway:<agent>` |
+| update_lead_disposition | `inbox.prepare_disposition_change` | `patchUniversalLeadState` (dry run, then write) | agent allowlist (never suppression / contactability / wrong number / wrong person); **allowlist**; hold (`ai_action`); STOP / suppression; "No thanks" to the ownership question ⇒ `declined_unverified`, never `not_interested`; bare "No" ⇒ property denial, not a disposition; denied pair; re-checked at approval |
+| create_deal_action | `action_gateway_dw_deal_action` | `agent.ops_work_item` (scope agent, subject opportunity) | opportunity open; never revive |
+| request_thread_hold_release | `holds.prepare_release_approval` | `holds/automation-hold-release#releaseAutomationHoldByOperator` (new: the registry's audited UPDATE, released_by = the operator) | hold active and on the thread; **permanent exclusions (Maxwell) and the Hartford hold refused** (gateway, DB writer, release writer) |
+| schedule_followup | `action_gateway_dw_followup_schedule` | `followup_intent_plan` | **hold at plan (R7)**; STOP / suppression / send-time guard; `propertyContactBlock` (no selling nurture after an ownership answer, property denial); contact-window category = `scheduled_followup`; not-interested nurture ≥ 21 days; **suppressed thread**. Planned under `followup_execution_mode` OFF; only the lifecycle's own switch materializes |
+| cancel_followup | `action_gateway_dw_followup_cancel` | `followup_intent_close_for_thread` (or the same statements by id) | reason required; allowed under a hold / STOP |
+| pause_campaign | `action_gateway_dw_campaign_pause` | `campaign_transition_status(…, 'paused')` | pausable state (JS `isTransitionAllowed`, **SQL edge set**) |
+| request_campaign_resume | `campaigns.prepare_resume_approval` | `applyCampaignLifecycleAction('resume')` (readiness re-checked) | **campaign paused** |
+| adjust_campaign_plan | `campaigns.prepare_plan_adjustment_approval` | `updateCampaign` (bounded patch) | caps, interval, window only (closed schema); **window 08:00–21:00, bounds**; re-checked at approval |
+
+### 8.3 The composable extension registry
+
+Phase 1 hard-codes three reviewed lists in function bodies. Link #27 adds `action_gateway.extensions (kind, name, link, basis)` (create-if-not-exists) and replaces `self_check`, `standing_t2_actions` and `action_gateway_complete` ONCE with bodies that union the registry (`action_gateway.extension_names(kind)`, definer, STABLE). Kinds: `definer_function`, `entry_point`, `standing_t2_action`, `domain_write_action`.
+
+**Rule for any later link (e.g. the T3 / T4 link):** insert your own rows (your `link` value) instead of editing those three bodies; if your link is applied before #27, create the same table and the byte-identical bodies (copy them from #27). A link's rollback deletes only its rows; whoever leaves the registry empty restores #26's bodies and drops it.
+
+### 8.4 Dependencies closed here
+
+- **D1**: `agentActionApprovalCapability` and the four T2 request capabilities are in `FIRST_CAPABILITIES`; `getCapabilityPlane` adds `services.actionGateway` (`withActionGatewayServices`, agent_api pool). Gateway-filed capabilities are never model-facing tools (`capabilityToolDefs` filters them) and their `prepare` refuses.
+- **R1**: `PATCH /api/cockpit/pipeline/opportunities/[id]/stage` refuses a body carrying `source`, `actor`, `offer_event`, `valuation_mid`, `mao`; source = `pipeline`, actor = the ops-dashboard identity (`lib/domain/opportunity/stage-route-input.js`). `pipeline.propose_stage_change` passes `action_gateway:<agent>` only when the approved change carries it (payload-hashed), else `agent_approval`; neither is a manual or closing source.
+- **R7**: holds are checked at plan for gateway follow-ups.
+
+### 8.5 Tests
+
+- `action-gateway-t2-tools-pg` (6): per tool, happy path + every refusal above + the human decision through the production registry (stage transition / campaign lifecycle and editor are spies wrapping a minimal real write; the hold release, the approval ledger, the follow-up lifecycle and the campaign writer are real).
+- `action-gateway-t2-matrix-pg` (4): all nine tools × unauthorized capability, other-tenant agent, forged `source` / `agent_id` / `actor` / `approval_id`, replay (exactly one effect); concurrent agents on one lead; a crash after the claim, before / inside the write, recovered exactly once; D1 envelope approval consumed once, never replayable, denial refuses.
+- `action-gateway-t2-unit` (8): catalog / standing mirror pinned to the migration, D1 registry, snapshot ≡ `normalizeOpportunityRow`, R1 route + capability source, never-revive, bounds, ownership rules.
+- `node scripts/db/run-migration-test.mjs --id action_gateway_t2` and both `rc_8_5_21_release_chain*` entries (link #27 last).
+
+### 8.6 Activation (each step its own owner approval)
+
+Apply #27 after #26 (pretest read-only first). Then per agent: standing grants for the T2 capabilities, and `T2` in `action_gateway_tiers`. Follow-ups additionally follow `followup_execution_mode`; request actions need a named operator to decide in the approvals UI.

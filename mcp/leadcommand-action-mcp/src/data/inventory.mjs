@@ -8,10 +8,16 @@ export const SCHEMA = 'public'
 export const RELATIONS = Object.freeze(['acquisition_opportunities', 'automation_holds', 'automation_suppressions', 'campaigns', 'contact_property_resolution',
   'inbox_thread_state', 'message_events', 'phones', 'properties', 'prospects', 'seller_offers', 'send_queue', 'sms_suppression_list', 'system_control'])
 
+/** link #27's RPCs (Tier-2): pinned to that migration by test/inventory.test.mjs. */
+export const T2_RPCS = Object.freeze(['action_gateway_dw_deal_action', 'action_gateway_dw_followup_schedule', 'action_gateway_dw_followup_cancel',
+  'action_gateway_dw_campaign_pause', 'action_gateway_dw_human_request', 'action_gateway_followup_intents'])
+
 /** RPCs (POST /rest/v1/rpc/<name>): the gateway's entry points + the hold authority's lookup. */
 export const RPCS = Object.freeze(['action_gateway_controls', 'action_gateway_principal', 'action_gateway_intent_open', 'action_gateway_intent_get', 'action_gateway_refuse',
   'action_gateway_expire', 'action_gateway_await_approval', 'action_gateway_authorize', 'action_gateway_claim', 'action_gateway_complete', 'action_gateway_mark_unknown',
   'action_gateway_recoverable', 'action_gateway_audit_append', 'action_gateway_approval_request', 'action_gateway_approval_get', 'action_gateway_pipeline_facts',
   'action_gateway_work_item_get', 'action_gateway_reply_policy', 'action_gateway_self_check',
   'action_gateway_dw_thread_hold_set', 'action_gateway_dw_operator_task', 'action_gateway_dw_runtime_enqueue',
-  'automation_hold_for'])
+  'automation_hold_for',
+  // link #27 (PROPOSED_20261020100000_action_gateway_t2.sql): the Tier-2 writers + the follow-up read
+  ...T2_RPCS])

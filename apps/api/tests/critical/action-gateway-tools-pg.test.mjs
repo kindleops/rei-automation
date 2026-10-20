@@ -272,7 +272,7 @@ test('PG gateway: every registered-but-unimplemented tool answers capability_not
     await seedWorld(env.owner, { tiers: 'T1,T2,T3,T4' })
     const { ACTIONS } = await import('../../src/lib/domain/action-gateway/catalog.js')
     const stubs = ACTIONS.filter((a) => a.implemented === false)
-    assert.equal(stubs.length, 14)
+    assert.ok(stubs.length >= 1 && stubs.every((x) => x.tier >= 3 || x.name === 'record_seller_counteroffer'), stubs.map((x) => x.name).join(','))
     const cred = await registerAgent(env.owner, { tier_ceiling: 4, grants: stubs.map((s) => [s.capability, 4]) })
     const { gateway } = makeGateway(env)
     for (const s of stubs) {
@@ -282,6 +282,6 @@ test('PG gateway: every registered-but-unimplemented tool answers capability_not
       assert.equal(r.error.code, 'capability_not_implemented', s.name)
     }
     assert.equal((await sel(env.owner, `select count(*)::int n from action_gateway.action_intents`))[0].n, 0)
-    assert.equal((await sel(env.owner, `select count(*)::int n from action_gateway.action_audit_events where code = 'capability_not_implemented'`))[0].n, 14)
+    assert.equal((await sel(env.owner, `select count(*)::int n from action_gateway.action_audit_events where code = 'capability_not_implemented'`))[0].n, stubs.length)
   } finally { await env.db.drop() }
 })

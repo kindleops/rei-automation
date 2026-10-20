@@ -180,11 +180,17 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     const fn = logic[spec.name]?.execute
     let r
     try {
-      r = await fn({ intent: { ...intent, params: ctx.params }, reads, services, store, now })
+      r = await fn({ intent: { ...intent, params: ctx.params }, reads, services, store, now, lease_token: token, org_id: dataOrgId })
     } catch (e) {
       const g = classifyGatewayError(e)
       if (g.errorClass === 'unavailable') throw g // transient: the lease expires and recovery re-executes
       r = { status: 'failed', code: `EXECUTION_${g.code}`.slice(0, 80), result: {} }
+    }
+    // a JS executor that finished the intent through a lease-bound database writer (T2 human requests): the
+    // RECORDED outcome is the answer, never a second completion
+    if (r?.recorded) {
+      const out = await recorded(spec, intent.intent_id, base, false)
+      return { ...out, ...(out.state === 'succeeded' && r.response ? { response: r.response } : {}), attempt: claim.attempt }
     }
     const done = await store.complete(intent.intent_id, token, r.status, r.code, r.result || {})
     if (!done?.ok) {
@@ -224,9 +230,10 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     try { d = await p.policy(ctx) } catch (e) { const g = classifyGatewayError(e); d = { decision: 'deny', code: g.errorClass === 'not_found' ? g.code : `POLICY_${g.code}`.slice(0, 80), evidence: {} } }
     if (!['allow', 'deny', 'approval'].includes(d?.decision)) return { decision: 'deny', code: 'POLICY_UNDECIDED', evidence: {} }
     if (d.decision === 'allow') {
-      // a standing grant alone authorizes T1, and T2 only for reversible actions; T3 / T4 never (mirrors the DB)
+      // a standing grant alone authorizes T1, and T2 only for reversible / request-only actions; T3 / T4 never (mirrors the DB)
       if (spec.tier >= 3) return { ...d, decision: 'approval', code: 'TIER_REQUIRES_APPROVAL' }
-      if (spec.tier === 2 && !spec.reversible) return { ...d, decision: 'approval', code: 'T2_ACTION_NOT_REVERSIBLE' }
+      // (request_only T2 actions only FILE a human decision: their per-use approval IS that decision)
+      if (spec.tier === 2 && !spec.reversible && !spec.request_only) return { ...d, decision: 'approval', code: 'T2_ACTION_NOT_REVERSIBLE' }
       // outside the grant's argument envelope: this one use needs a human approval
       const env = envelopeRefusal(ctx.grant?.envelope || {}, ctx.params || {})
       if (env) return { ...d, decision: 'approval', code: env, evidence: { ...(d.evidence || {}), envelope: 'outside' } }

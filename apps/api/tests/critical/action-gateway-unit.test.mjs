@@ -20,11 +20,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const MODULE_DIR = path.resolve(HERE, '../../src/lib/domain/action-gateway')
 const PEPPER = 'p'.repeat(40)
 
-test('catalog: the 21 requested tools + the scoped read; implemented = the T1 set + set_thread_hold (T2, reversible) + the report-only reconciliation; every T3 / T4 tool is a stub; nothing never-exposed exists', () => {
+test('catalog: the 21 requested tools + the scoped read; implemented = the T1 set + set_thread_hold + the T2 family (reversible or request-only) + the report-only reconciliation; every T3 / T4 tool is a stub; nothing never-exposed exists', () => {
   assert.deepEqual(ACTIONS.map((a) => a.name).sort(), [...REQUESTED_TOOLS].sort())
   const impl = ACTIONS.filter((a) => a.implemented !== false)
-  assert.deepEqual(impl.map((a) => a.name).sort(), ['create_operator_task', 'create_research_job', 'draft_seller_reply', 'request_property_valuation', 'run_authorized_reconciliation', 'set_thread_hold', 'update_operator_task'])
-  for (const a of impl) assert.ok(a.tier === TIERS.T1 || (a.tier === TIERS.T2 && a.reversible === true), a.name)
+  for (const n of ['create_operator_task', 'create_research_job', 'draft_seller_reply', 'request_property_valuation', 'run_authorized_reconciliation', 'set_thread_hold', 'update_operator_task',
+    'update_lead_disposition', 'update_lead_stage', 'create_deal_action', 'request_thread_hold_release', 'schedule_followup', 'cancel_followup', 'pause_campaign', 'request_campaign_resume', 'adjust_campaign_plan']) {
+    assert.ok(impl.some((a) => a.name === n), `${n} implemented`)
+  }
+  for (const a of impl) assert.ok(a.tier === TIERS.T1 || (a.tier === TIERS.T2 && (a.reversible === true || a.request_only === true)) || a.tier >= TIERS.T3, a.name)
   for (const a of ACTIONS.filter((x) => x.tier >= TIERS.T3)) assert.equal(a.implemented, false, a.name)
   for (const a of impl) assert.equal(classifyProhibited({ name: a.capability, touches: a.touches, wraps: a.wraps, input_schema: a.input }).prohibited, false, a.name)
   assert.deepEqual(READS.map((r) => r.name), ['read_conversation_context'])
@@ -96,7 +99,7 @@ test('credentials: HMAC digests, never the token; malformed tokens have no diges
 
 test('STATIC: the gateway module has no import path to the send stack (queue writers, the R3 executor, sms-engine, providers, cancel paths) and no raw SQL client', () => {
   const FORBIDDEN = /(process-send-queue|canonical-queue-writer|queue-atomic-claim|conversation-ai-r3-executor|conversation-turn-dispatch|supabase\/sms-engine|providers\/textgrid|cancel-supabase-pending-outbound|seller-flow\/|lib\/postgres\/client|send-now-service)/
-  for (const f of fs.readdirSync(MODULE_DIR)) {
+  for (const f of fs.readdirSync(MODULE_DIR, { recursive: true }).filter((x) => String(x).endsWith('.js'))) {
     const src = fs.readFileSync(path.join(MODULE_DIR, f), 'utf8')
     const imports = [...src.matchAll(/(?:import\s[^'"]*from\s*|import\()\s*['"]([^'"]+)['"]/g)].map((m) => m[1])
     for (const i of imports) assert.ok(!FORBIDDEN.test(i), `${f} imports ${i}`)

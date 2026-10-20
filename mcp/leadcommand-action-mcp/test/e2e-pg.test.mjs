@@ -53,7 +53,7 @@ test('E2E (PG): the Action MCP boots only after the database self-check of lc_ac
     assert.equal(json(rj).code, 'JOB_ENQUEUED', JSON.stringify(json(rj)))
     assert.equal((await sel(env.owner, `select i.agent_id from action_gateway.action_intents i where i.client_key = 'e2e-research-1'`))[0].agent_id, 'agt_research')
 
-    const stub = await a.callTool({ name: 'pause_campaign', arguments: { client_request_id: 'e2e-stub-0001' } })
+    const stub = await a.callTool({ name: 'record_seller_counteroffer', arguments: { client_request_id: 'e2e-stub-0001' } })
     assert.equal(json(await a.callTool({ name: 'queue_authorized_reply', arguments: { client_request_id: 'e2e-stub-0002' } })).error.code, 'TIER_DISABLED', 'T3 is not enabled at all')
     assert.equal(stub.isError, true)
     assert.equal(json(stub).error.code, 'capability_not_implemented')

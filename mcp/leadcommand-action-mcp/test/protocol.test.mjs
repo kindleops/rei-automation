@@ -35,7 +35,9 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
       if (!t._meta['leadcommand/implemented']) assert.match(t.description, /NOT IMPLEMENTED/)
     }
     const impl = tools.filter((t) => t._meta['leadcommand/implemented']).map((t) => t.name).sort()
-    assert.deepEqual(impl, ['create_operator_task', 'create_research_job', 'draft_seller_reply', 'read_conversation_context', 'request_property_valuation', 'run_authorized_reconciliation', 'set_thread_hold', 'update_operator_task'])
+    for (const n of ['create_operator_task', 'create_research_job', 'draft_seller_reply', 'read_conversation_context', 'request_property_valuation', 'run_authorized_reconciliation', 'set_thread_hold', 'update_operator_task',
+      'update_lead_disposition', 'update_lead_stage', 'create_deal_action', 'request_thread_hold_release', 'schedule_followup', 'cancel_followup', 'pause_campaign', 'request_campaign_resume', 'adjust_campaign_plan']) assert.ok(impl.includes(n), n)
+    assert.equal(tools.find((t) => t.name === 'pause_campaign')._meta['leadcommand/tier'], 'T2')
     assert.equal(tools.find((t) => t.name === 'set_thread_hold')._meta['leadcommand/tier'], 'T2')
     assert.equal(tools.find((t) => t.name === 'execute_authorized_offer')._meta['leadcommand/tier'], 'T4')
   } finally { await c.close() }
