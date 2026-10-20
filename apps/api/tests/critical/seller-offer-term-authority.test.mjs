@@ -88,9 +88,13 @@ function makeSupabase() {
   return { from, _state: state };
 }
 
+// CONTRACT CHANGE (deliberate, R4 2026-10-20): an outbound offer is persisted only under an independent
+// ceiling (persistActiveOffer refuses offer_ceiling_missing / offer_above_authorized_ceiling), so the base
+// fixture carries the frozen ceiling the production producer always supplies.
 const base = (over = {}) => ({
   opportunity_id: OPP, thread_key: THREAD, property_id: "prop-1",
   master_owner_id: "owner-1", purchase_price: 250000, offer_type: "initial_offer",
+  authorized_ceiling: 300000,
   ...over,
 });
 

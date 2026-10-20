@@ -105,6 +105,52 @@ export function buildOfferTermsHash({
     .digest("hex");
 }
 
+// ── R4 (Action MCP audit §0.8; the root cause of Hartford's $315K above-MAO offer) ──────────────
+// THE AUTHORITATIVE CEILING CHECK AT THE PERSISTENCE LAYER. Before this, `authorized_ceiling` was lineage
+// only: persistActiveOffer stored whatever price it was handed. Now an OUTBOUND (our) offer is refused unless
+//   * at least one independent ceiling is supplied (the frozen authorized_ceiling, the live negotiation
+//     envelope's max_price, the engine MAO) — no ceiling, no offer;
+//   * the price is ≤ the LOWEST of them;
+// or an explicit, AUDITED operator override is supplied: { operator_id (a named human, never an agent),
+// reason (≥ 12 characters), approval_ref }. The override is recorded on the offer row
+// (metadata.ceiling_override, with the ceiling and the excess) and logged; the generic `force` /
+// `operator_override` booleans never satisfy it. A seller counter (direction inbound) is the seller's number
+// and is never capped here (acceptance has its own guard). The database re-checks the same rule
+// (PROPOSED_20261020110000_action_gateway_t34: trigger seller_offers_ceiling_guard).
+export const CEILING_OVERRIDE_MIN_REASON = 12;
+const AGENT_ACTOR_RE = /^(agt_|agent:|auto:|engine|system|model)/i;
+
+/** The audited operator override, or null when it is not a complete human override. */
+export function ceilingOverrideOf(o = null) {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+  const operator_id = clean(o.operator_id);
+  const reason = clean(o.reason);
+  const approval_ref = clean(o.approval_ref);
+  if (!operator_id || AGENT_ACTOR_RE.test(operator_id)) return null;
+  if (reason.length < CEILING_OVERRIDE_MIN_REASON || !approval_ref) return null;
+  return { operator_id: operator_id.slice(0, 80), reason: reason.slice(0, 240), approval_ref: approval_ref.slice(0, 120) };
+}
+
+/**
+ * PURE: may this OUTBOUND price be persisted as an active offer?
+ * @returns {{ ok: boolean, reason?: string, ceiling: number|null, ceilings: object, override?: object }}
+ */
+export function evaluateOfferCeiling({ purchase_price = null, authorized_ceiling = null, envelope_max_price = null, mao = null, ceiling_override = null } = {}) {
+  const price = money(purchase_price);
+  const ceilings = { authorized_ceiling: money(authorized_ceiling), envelope_max_price: money(envelope_max_price), mao: money(mao) };
+  const present = Object.values(ceilings).filter((v) => v != null);
+  const ceiling = present.length ? Math.min(...present) : null;
+  if (!price) return { ok: false, reason: "missing_offer_price", ceiling, ceilings };
+  const override = ceilingOverrideOf(ceiling_override);
+  if (ceiling == null) {
+    return override ? { ok: true, ceiling, ceilings, override: { ...override, ceiling: null, over_by: null, kind: "no_ceiling" } } : { ok: false, reason: "offer_ceiling_missing", ceiling, ceilings };
+  }
+  if (price <= ceiling) return { ok: true, ceiling, ceilings };
+  return override
+    ? { ok: true, ceiling, ceilings, override: { ...override, ceiling, over_by: price - ceiling, kind: "above_ceiling" } }
+    : { ok: false, reason: "offer_above_authorized_ceiling", ceiling, ceilings, over_by: price - ceiling };
+}
+
 /** Current active offer for an opportunity (at most one, DB-enforced). */
 export async function loadActiveOffer({ opportunity_id, supabase } = {}) {
   if (!clean(opportunity_id)) return null;
@@ -162,6 +208,10 @@ export async function persistActiveOffer({
   emd_due_business_days = null,
   source_message_event_id = null,
   metadata = {},
+  // R4: independent ceilings (the lowest wins) + the audited operator override (see evaluateOfferCeiling)
+  envelope_max_price = null,
+  mao = null,
+  ceiling_override = null,
   supabase: injected = null,
 } = {}) {
   const supabase = injected || getDefaultSupabaseClient();
@@ -182,6 +232,24 @@ export async function persistActiveOffer({
   if (offer_hold.held) {
     warn("[OFFER_WRITE_BLOCKED_BY_AUTOMATION_HOLD]", { opportunity_id, hold_ids: offer_hold.hold_ids, fail_closed: offer_hold.fail_closed });
     return { ok: false, reason: offer_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold", automation_hold: offer_hold };
+  }
+
+  // R4: THE CEILING. An outbound offer above the lowest independent ceiling (or with none) is refused here,
+  // before any read or write, unless an audited human override is supplied. Fail closed.
+  const is_outbound = (clean(direction) || "outbound") !== "inbound";
+  let ceiling_metadata = null;
+  if (is_outbound) {
+    const verdict = evaluateOfferCeiling({ purchase_price: price, authorized_ceiling, envelope_max_price, mao, ceiling_override });
+    if (!verdict.ok) {
+      warn("[OFFER_REFUSED_ABOVE_CEILING]", { opportunity_id, reason: verdict.reason, ceiling: verdict.ceiling, over_by: verdict.over_by ?? null });
+      return { ok: false, reason: verdict.reason, ceiling: verdict.ceiling, ceilings: verdict.ceilings };
+    }
+    if (verdict.override) {
+      warn("[OFFER_CEILING_OVERRIDE_USED]", { opportunity_id, operator_id: verdict.override.operator_id, approval_ref: verdict.override.approval_ref, ceiling: verdict.ceiling, over_by: verdict.override.over_by });
+      ceiling_metadata = { ...verdict.override, used_at: new Date().toISOString() };
+    }
+    // the effective ceiling is frozen on the row (the lowest independent one), never a caller's higher figure
+    if (verdict.ceiling != null) authorized_ceiling = verdict.ceiling;
   }
 
   let version;
@@ -299,7 +367,10 @@ export async function persistActiveOffer({
     status: OFFER_STATUS.ACTIVE,
     source_message_event_id: clean(source_message_event_id) || null,
     terms_hash,
-    metadata: metadata && typeof metadata === "object" ? metadata : {},
+    metadata: {
+      ...(metadata && typeof metadata === "object" ? metadata : {}),
+      ...(ceiling_metadata ? { ceiling_override: ceiling_metadata } : {}),
+    },
   };
 
   const { data: inserted, error: insert_error } = await supabase
