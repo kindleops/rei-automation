@@ -72,29 +72,53 @@ BEGIN … ROLLBACK.
   - re-applying it after the rollback works.
 
   The graph-function fixture carries the live bodies without their ACLs, and PostgreSQL's default PUBLIC EXECUTE made the self-check refuse. Production revoked PUBLIC on those four functions (operator_lockdown 20261003130000, campaign_audience_completeness 20261003220000), so the lc_mcp chain baseline models that. Roles are cluster-global, so both lc_mcp entries first drop a leftover `lc_mcp_reader` role from an earlier test on the same disposable cluster.
-- **Final integration stamp audit (2026-10-19, after merging rc-8.5.21-cont, -optout, -mcp).** Supabase migration
-  history keys on the VERSION, so two files with one stamp collide on a production apply. The merges added two new
-  stamps, 20261019120000 (#25) and 20261019150000 (#26), and neither collides. The hotfix-shipped stamps
-  20261016200000 (#0) and 20261017120000 (#22) are unchanged. Two older collisions were renumbered. No file
-  involved is applied in production: of this chain only intel_runtime 20261012140000 is applied, and nothing after it.
-  - 20261014120000 was #7 persistent_missions and #11 block_repeat_asking_price_mirror. The LATER link in chain
-    order, #11, is now **20261015110000**: after #7, before #12 (20261015120000), which it must precede. Its
-    pretest and posttest moved with it. Only their own self-reference comments changed.
-  - 20261013160000 was #3 conversation_ai_shadow and `inbox_thread_state_recency_index`. The latter is outside this
-    chain: a PROPOSED, standalone `CREATE INDEX CONCURRENTLY IF NOT EXISTS` that can still be applied. It is now
-    **20261013163000**, with the body unchanged. It is idempotent, so the rename is safe even if the index exists.
+- **Final integration stamp audit (2026-10-19 / 2026-10-20).** Supabase migration history keys on the VERSION, so
+  two files with one stamp collide on a production apply. Resolved from VERIFIED production history: Supabase
+  `list_migrations` (read-only metadata), retrieved 2026-10-20 and saved at
+  `tmp/rc821-cert/prod-migration-history-20261020.md` in the integration job. That history is INCOMPLETE:
+  out-of-band applies (intel_runtime via psql on 10-14; agent_s3_persistence and agent_research_ro on 10-11) are
+  not recorded, so being absent from it does not prove a migration is unapplied. An applied production migration
+  is never renamed.
+  - The merges added 20261019120000 (#25) and 20261019150000 (#26). Neither collides. The hotfix stamps
+    20261016200000 (#0) and 20261017120000 (#22) are unchanged.
+  - Chain collisions, renamed (neither file is applied in production; of this chain only intel_runtime is):
+    - 20261014120000 was #7 and #11. #11 block_repeat_asking_price_mirror (+ pretest and posttest) is now
+      **20261015110000**: after #7, still before #12. Only self-references changed.
+    - 20261013160000 was #3 and an out-of-chain file. `inbox_thread_state_recency_index` (PROPOSED,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS`, idempotent) is now **20261013163000**, with the body unchanged.
+  - Legacy collisions outside the chain:
+    | Stamp | Members | Evidence | Resolution |
+    |---|---|---|---|
+    | 20261007170000 | entity_graph_distress_indexes / graph_sender_coverage_routing_v2 | production RECORDS entity_graph_distress_indexes as **20261007170001** | the repo file is renamed to 20261007170001 to match; routing_v2 keeps 170000 |
+    | 20261007120000 | campaign_audience_field_values (06:51) / queue_health_overdue_semantics (07:00, later-added) | neither recorded; no out-of-band evidence in repo docs, RC reports, STATUS ledger or memory | queue_health_overdue_semantics (+ rollback) is now **20261007120500**: before 20261007121000 terminalize, which it precedes |
+    | 20261006150000 | price_reality_check_templates (10-06) / command_wall_displays (10-11, later-added) | command_wall_* APPLIED out of band (STATUS 2026-10-11 20:25Z "TV migration APPLIED"). price_reality: not recorded, no apply evidence (RC843/844 "do not apply"; 0 rows 10-07) | **not renamed**: the later-added member is applied. Allowlisted. Renumbering price_reality (its feat-branch name 20261006150200, 2188e733) needs owner OK |
+    | 20261010120000 | agent_s3_persistence / inbox_price_gap_gate | S3 APPLIED out of band. price_gap_gate: the only file defining `in_price_gap`, which a 10-12 prod verification (7ade94e2) saw live; its header still says "not applied" | **not renamed**. Allowlisted; **requires an owner read-only object check before any deploy** |
+    | 20261010130000 | agent_research_ro / inbox_pipeline_hygiene_cleanup | both APPLIED (research_ro 10-11; hygiene `updated_by = hygiene_20261010`, follow-up intents in production per followup-reconciliation W5) | **permanent historical collision**, rename neither |
   - `scripts/db/scan-duplicate-migration-versions.mjs` (run by `tests/critical/migration-version-uniqueness.test.mjs`)
-    fails on any duplicate version in `supabase/migrations`. A companion file (`<slug>_pretest`, `_posttest`,
-    `_rollback`, `_verify`, `_dryrun`, `_api_login`, …: the same stamp and a name extending a sibling's slug) is not a
-    duplicate. Five OLDER collisions outside this chain stay on a frozen allowlist for an owner decision. Their
-    production status cannot be verified without production access, and 20261010120000 / 20261010130000 contain S3
-    and agent_research_ro, which are applied in production. They are 20261006150000, 20261007120000,
-    20261007170000, 20261010120000 and 20261010130000. The scan fails if an allowlisted stamp stops colliding
-    (stale entry) or if any other stamp collides.
-  The apply order is this table, not the stamp sort.
+    fails on any duplicate version in `supabase/migrations`. Companions (`_pretest`, `_posttest`, `_rollback`,
+    `_verify`, `_dryrun`, …) are not duplicates. The allowlist is now exactly the three stamps above. It can only
+    shrink, because a stale entry fails.
+  - The apply order is this table, not the stamp sort.
 - **Not in the chain:**
   - `unlock_stale_jobs_status_predicate` (20261008110000) stays a standalone entry, as in rc-8.5.20.
   - The `requires: prod-shape` entries need a schema snapshot.
+
+## Deploy notes (production history check, 2026-10-20)
+
+- **No chain link collides with a recorded production version.** None of the chain stamps #0–#26 (20261012140000 …
+  20261019150000) is recorded in production history. #1 intel_runtime is applied (out of band, 10-14) but not
+  recorded. #0 is applied via the hotfix. The two renamed chain stamps (20261015110000, 20261013163000) are unused
+  in production history.
+- **The three allowlisted collisions (20261006150000, 20261010120000, 20261010130000) are EXCLUDED from every deploy
+  plan.** Never apply or re-apply them through a version-keyed path. inbox_price_gap_gate needs an owner read-only
+  object check (does `v_inbox_thread_state_buckets.in_price_gap` exist?) before any deploy touches inbox views.
+- **Production also records 20261018040156 `revoke_public_writes_spatial_ref_sys` and 20261018040244
+  `guard_spatial_ref_sys_against_api_writes`.** Neither has a file in this repo, and neither was applied by the
+  release agents. The **owner must confirm their origin** before the rc-8.5.21 apply. No chain link uses those
+  versions or writes `spatial_ref_sys`. #26 lc_mcp_reader only names it, to exclude the PostGIS catalog tables
+  from its exposed-relation self-check.
+- A production apply records each migration under its file stamp. Before applying, re-read `list_migrations`
+  (read-only) and confirm the next stamp is not already recorded.
 
 ## Rollback
 

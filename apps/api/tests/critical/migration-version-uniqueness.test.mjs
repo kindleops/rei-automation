@@ -15,6 +15,10 @@ test('the rc-8.5.21 renumbers hold: 20261014120000 and 20261013160000 each carry
   const dups = new Map(scanDir().duplicates.map((d) => [d.version, d.migrations]))
   assert.equal(dups.has('20261014120000'), false, String(dups.get('20261014120000')))
   assert.equal(dups.has('20261013160000'), false, String(dups.get('20261013160000')))
+  // resolved 2026-10-20 from production history: the recorded version, and the later-added unapplied member
+  assert.equal(dups.has('20261007170000'), false, String(dups.get('20261007170000')))
+  assert.equal(dups.has('20261007120000'), false, String(dups.get('20261007120000')))
+  assert.deepEqual(Object.keys(ALLOWLIST).sort(), ['20261006150000', '20261010120000', '20261010130000'])
   // no rc-8.5.21 chain stamp is allowlisted
   for (const v of ['20261012140000', '20261013160000', '20261014120000', '20261015110000', '20261016200000', '20261017120000', '20261019120000', '20261019150000']) assert.equal(Object.hasOwn(ALLOWLIST, v), false, v)
 })

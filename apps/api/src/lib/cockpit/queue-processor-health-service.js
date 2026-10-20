@@ -22,7 +22,7 @@ const ACTIVE_CANONICAL_STATUSES = ['queued', 'pending', 'approval', 'scheduled',
  *
  * Approval rows are held for a person by design: never overdue, never stale;
  * they keep their own count. The same definitions live in the RPC
- * (supabase/migrations/PROPOSED_20261007120000_queue_health_overdue_semantics.sql).
+ * (supabase/migrations/PROPOSED_20261007120500_queue_health_overdue_semantics.sql).
  */
 export const OVERDUE_GRACE_MS = 15 * 60 * 1000
 export const REFUSAL_ATTENTION_THRESHOLD = 5
@@ -226,7 +226,7 @@ async function loadQueueProcessorHealth() {
   } else {
     payload = data && typeof data === 'object' ? data : {}
     // The RPC still carries the pre-overdue definitions until
-    // PROPOSED_20261007120000_queue_health_overdue_semantics is applied:
+    // PROPOSED_20261007120500_queue_health_overdue_semantics is applied:
     // recompute only the overdue counts here so the badge is right either way.
     if (!payload.counts || !Object.prototype.hasOwnProperty.call(payload.counts, 'overdue_active')) {
       const overdue = await fetchOverdueSummary()

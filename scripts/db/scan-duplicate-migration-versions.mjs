@@ -10,10 +10,9 @@
 // slug with "_<suffix>": <slug>_pretest / _posttest / _rollback / _rollback_posttest / _verify /
 // _dryrun / _api_login / _fleet_snapshot …. Those never enter the migration history on their own.
 //
-// PRE-EXISTING collisions (outside the rc-8.5.21 chain, created before this scan existed) are listed in
-// ALLOWLIST with their reason. They are held for an owner decision, because whether they are recorded
-// in production history cannot be verified without production access. An allowlisted stamp that no
-// longer collides is a STALE entry and also fails, so the list can only shrink.
+// PERMANENT historical collisions (outside the rc-8.5.21 chain; at least one member applied in production)
+// are listed in ALLOWLIST with their evidence. An allowlisted stamp that no longer collides is a STALE entry
+// and also fails, so the list can only shrink.
 //
 //   node scripts/db/scan-duplicate-migration-versions.mjs [--json] [--dir <dir>]
 import fs from 'node:fs'
@@ -23,13 +22,18 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 export const DEFAULT_DIR = 'supabase/migrations'
 
-const OWNER_DECISION = 'pre-existing collision outside the rc-8.5.21 chain; production history status unverifiable without production access — owner decision before any apply / rename'
+// Resolved from VERIFIED production history (Supabase list_migrations, read-only, retrieved 2026-10-20:
+// tmp/rc821-cert/prod-migration-history-20261020.md). That history is INCOMPLETE: out-of-band applies
+// (intel_runtime, agent_s3_persistence, agent_research_ro, …) are not recorded. So repo / ledger evidence
+// of an out-of-band apply also counts, and an APPLIED production migration is never renamed.
+//   resolved 2026-10-20 (no longer duplicates):
+//     20261007170000  entity_graph_distress_indexes → 20261007170001, the version production RECORDS
+//     20261007120000  queue_health_overdue_semantics (later-added, no apply evidence) → 20261007120500
+// What remains is PERMANENT historical collisions: excluded from every deploy plan, never renamed.
 export const ALLOWLIST = Object.freeze({
-  '20261006150000': `command_wall_displays vs price_reality_check_templates — ${OWNER_DECISION}`,
-  '20261007120000': `campaign_audience_field_values vs queue_health_overdue_semantics — ${OWNER_DECISION}`,
-  '20261007170000': `entity_graph_distress_indexes vs graph_sender_coverage_routing_v2 — ${OWNER_DECISION}`,
-  '20261010120000': `agent_s3_persistence (applied in production) vs inbox_price_gap_gate — ${OWNER_DECISION}`,
-  '20261010130000': `agent_research_ro (applied in production) vs inbox_pipeline_hygiene_cleanup — ${OWNER_DECISION}`,
+  '20261006150000': 'command_wall_displays: APPLIED out of band (tmp/STATUS.md 2026-10-11 20:25Z "TV migration APPLIED (command_wall_*)"), never rename. price_reality_check_templates: NOT recorded, no apply evidence (RC843/RC844: do not apply; 0 price_reality_check sms_templates rows 2026-10-07), the earlier-added member; renumbering it (feat-branch name 20261006150200, 2188e733) needs owner OK. Excluded from every deploy plan.',
+  '20261010120000': 'agent_s3_persistence: APPLIED out of band (2026-10-11 agent DB apply). inbox_price_gap_gate: PROBABLY APPLIED out of band (the only file that defines in_price_gap / price_gap counts; memory project_inbox_bucket_single_source, verified at prod 7ade94e2 on 2026-10-12, saw both live; its header and the 10-17 disposition doc still say "not applied"). Requires an owner read-only object check before any deploy. Never rename. Excluded from every deploy plan.',
+  '20261010130000': 'agent_research_ro: APPLIED out of band (2026-10-11 agent DB apply). inbox_pipeline_hygiene_cleanup: APPLIED (updated_by = hygiene_20261010; follow-up intents in production per rc821-integration/followup-reconciliation.md W5). Permanent historical collision: rename neither. Excluded from every deploy plan.',
 })
 
 const FILE_RE = /^(?:PROPOSED_)?(\d{14})_([A-Za-z0-9_]+)\.sql$/

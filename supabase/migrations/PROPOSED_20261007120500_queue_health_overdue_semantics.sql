@@ -26,7 +26,7 @@
 --
 -- Safety: CREATE OR REPLACE of a STABLE read-only SQL function; same signature
 -- and return type, so grants are preserved. No data change.
--- Rollback: PROPOSED_20261007120000_queue_health_overdue_semantics_rollback.sql
+-- Rollback: PROPOSED_20261007120500_queue_health_overdue_semantics_rollback.sql
 --   (the current definition, byte for byte from pg_get_functiondef).
 
 CREATE OR REPLACE FUNCTION public.cockpit_queue_processor_health()
