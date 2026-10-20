@@ -84,7 +84,16 @@ test('send authorization scope: amount above the send ceiling, expired, revoked,
   assert.equal(later.reason, 'send_authorization:expired')
   const sk = scopeKey(TK, PID)
   const { authorization } = await w.sends.latestFor(sk)
-  assert.equal((await compose(w, { thread: { sends_used: 1 } })).reason, 'send_authorization:send_budget_exhausted')
+  // R5: the budget is DURABLE — a caller-supplied count is never read (a forged 0 cannot reopen a spent budget)
+  assert.equal((await compose(w, { thread: { sends_used: 1 } })).action, 'DETERMINISTIC_REPLY', 'a caller count is ignored')
+  assert.deepEqual(await w.sends.consume({ send_authorization_id: authorization.send_authorization_id, use_key: 'use-1', amount: 132000 }), { ok: true, replayed: false, use_no: 1, remaining: 0 })
+  assert.deepEqual(await w.sends.consume({ send_authorization_id: authorization.send_authorization_id, use_key: 'use-1', amount: 132000 }), { ok: true, replayed: true, use_no: 1 }, 'a retried send replays its own use')
+  assert.deepEqual(await w.sends.consume({ send_authorization_id: authorization.send_authorization_id, use_key: 'use-2', amount: 132000 }), { ok: false, reason: 'send_budget_exhausted' })
+  assert.equal((await compose(w, { thread: { sends_used: 0 } })).reason, 'send_authorization:send_budget_exhausted')
+  assert.equal((await compose(w, { thread: { send_use_key: 'use-1' } })).action, 'DETERMINISTIC_REPLY', 'the send that holds the reservation is checked against the OTHER uses')
+  assert.equal((await compose(w, { thread: { send_use_key: 'use-9' } })).reason, 'send_authorization:send_use_not_reserved')
+  const noCount = { latestFor: (k) => w.sends.latestFor(k) }
+  assert.equal((await composeNegotiationReply({ outcome: 'PREPARE_OFFER', context: { thread_key: TK, property_id: PID, economics: ECON, now: NOW }, deps: { store: w.store }, sendAuthorizations: noCount, templates: [TPL()], env: ON })).reason, 'send_authorization:send_budget_unverifiable', 'no durable count ⇒ fail closed')
   await w.sends.revoke({ send_authorization_id: authorization.send_authorization_id, revoked_by: OP, reason: 'seller went quiet' })
   assert.equal((await compose(w)).reason, 'send_authorization:revoked')
   const base = { scope_key: sk, envelope: w.env, envelope_meta: { revoked: false, latest_version: 1 }, amount: 132000, terms: sendTermsFromEnvelope(w.env), now: NOW }
