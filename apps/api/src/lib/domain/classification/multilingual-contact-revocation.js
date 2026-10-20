@@ -112,7 +112,7 @@ const GAP = (n) => `(?:[^.!?;\\n]{0,${n}}?\\s)?`;
 /** [language, family, view, pattern, opts] — opts.call = the verb is a CALL verb only. */
 const RULES = [];
 const add = (language, family, view, source, opts = {}) => {
-  RULES.push({ language, family, view, re: new RegExp(source, "iu"), ...opts });
+  RULES.push({ language, family, view, re: new RegExp(source, "iu"), all: new RegExp(source, "giu"), ...opts });
 };
 
 // ── Spanish ─────────────────────────────────────────────────────────────────
@@ -134,6 +134,9 @@ const add = (language, family, view, source, opts = {}) => {
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+${ME}\\s+(?:vuelv(?:a|an|as|e|en)\\s+a\\s+)?${INTRANS}${E}(?!\\s+${LANG_OR_TIME})`, { callVerb: /llam|marqu/ });
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+${ME}\\s+${TRANS}\\s+(?:(?:ya|usted|ustedes|tu)\\s+)?(?:mas|\\+|nada|ningun\\w*|mensaj\\w*|msjs?|mjs|mensajitos|textos?|text|txts?|sms|whats\\w*|propuestas|ofertas|informacion|info|cosas|eso|esto|publicidad|spam)${E}(?!\\s+(?:por|al)\\s+(?:correo|email|mail|carta))`);
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+${ME}\\s+${TRANS}(?=\\s*(?:$|[.,!;]|\\s+(?:por\\s+favor|porfa|xfa|x\\s+favor|gracias|ok)))`);
+  // "No llamen" / "no llame" (no clitic): a call prohibition — an opt-out unless a text affirmative
+  // makes it a channel preference
+  add(L, F.NO_CONTACT, "latin", `${B}(?:no|nunca|ya\\s+no)\\s+(?:llam(?:e|en|es)|marqu(?:e|en|es))${E}(?!\\s+${LANG_OR_TIME})(?![^.!;\\n]*\\?)`, { callVerb: /llam|marqu/ });
   add(L, F.NO_CONTACT, "latin", `${B}ya\\s+no\\s+${ME}\\s+(?:${INTRANS}|${TRANS})${E}(?!\\s+${LANG_OR_TIME})`, { callVerb: /llam|marqu/ });
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+${ME}\\s+vuelv(?:a|an|as|e|en)\\s+a\\s+${COMM_INF}${E}`, { callVerb: /llamar|marcar/ });
   add(L, F.NO_CONTACT, "latin", `${B}(?:no|nunca)\\s+vuelv(?:a|an|as|e|en)\\s+a\\s+${COMM_INF}(?:me|nos)${E}`, { callVerb: /llamar|marcar/ });
@@ -171,7 +174,7 @@ const add = (language, family, view, source, opts = {}) => {
   add(L, F.STOP_SENDING, "latin", `${B}(?:par(?:e|a|em|ar)|deix(?:e|a|em|ar))\\s+(?:ja\\s+)?de\\s+(?:me\\s+|nos\\s+)?(?:ficar\\s+)?${COMM}(?:-me|-nos)?${E}`, { callVerb: /ligar|ligando|telefonar/ });
   add(L, F.STOP_SENDING, "latin", `(?:^|[,.!;:]\\s*|\\s)(?:parem|pare\\s+por\\s+favor|por\\s+favor\\s+parem?)\\s*[.!]*\\s*$`);
   add(L, F.STOP_SENDING, "latin", `${B}(?:chega|basta)\\s+de\\s+(?:(?:tanta|tantas|essas|suas)\\s+)?(?:mensage\\w*|msgs?|sms|ligac\\w*|textos?|torpedos?)${E}`);
-  add(L, F.NO_CONTACT, "latin", `${B}${NOT_WHY}${NEG}\\s+(?:me\\s+|nos\\s+)?${SUBJ}${E}${GAP(30)}(?:mais(?!\\s+(?:tarde|cedo))|nunca\\s+mais|de\\s+novo|novamente|outra\\s+vez|nada|mensage\\w*|msgs?|sms)${E}`, { callVerb: /ligu|telefon|cham/ });
+  add(L, F.NO_CONTACT, "latin", `${B}${NOT_WHY}${NEG}\\s+(?:me\\s+|nos\\s+)?${SUBJ}${E}(?:[^.,!?;\\n]{0,30}?\\s)?(?:mais(?!\\s+(?:tarde|cedo))|nunca\\s+mais|de\\s+novo|novamente|outra\\s+vez|nada|mensage\\w*|msgs?|sms)${E}`, { callVerb: /ligu|telefon|cham/ });
   add(L, F.NO_CONTACT, "latin", `${B}${NOT_WHY}${NEG}\\s+me\\s+(?:contate|contatem|contacte|contactem|ligue|liguem|procure|procurem|incomode|incomodem|perturbe|perturbem|escreva|escrevam|chame|chamem)${E}(?![^.!?;\\n]*\\?)`, { callVerb: /ligu|cham/ });
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+(?:quero|queremos|desejo|preciso)\\s+(?:mais\\s+)?(?:(?:que|q)\\s+(?:me|nos)\\s+(?:mand|envi|escrev|lig|contat|contact|procur|incomod|perturb|cham|telefon)\\w*|receber\\s+(?:mais\\s+)?(?:nada|(?:nenhuma\\s+)?(?:mensage\\w*|sms|ligac\\w*|contato))|(?:mais\\s+)?(?:mensage\\w*|sms|ligac\\w*|contato)|ser\\s+(?:mais\\s+)?(?:contatad|contactad|incomodad|perturbad)[oa]s?)${E}`, { callVerb: /lig|cham|telefon/ });
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+(?:entre(?:m)?|entrar)\\s+(?:mais\\s+)?em\\s+contato${E}`);
@@ -199,6 +202,8 @@ const add = (language, family, view, source, opts = {}) => {
   const V = "(?:ecri|envoi|envoy|contact|appel|appell|text|derang|relanc|recontact|harcel|sollicit|telephon|joign)";
   add(L, F.NO_CONTACT, "latin", `(?:${B}ne\\s+|${B}n'\\s*|${B}n\\s+)(?:me\\s+|m'\\s*|m\\s+|nous\\s+)?${V}[a-z]*\\s+(?:[a-z']+\\s+){0,3}?plus${E}(?!\\s+(?:tard|tot|souvent|vite))`, { callVerb: /appel|telephon/ });
   add(L, F.NO_CONTACT, "latin", `${B}(?:me\\s+|m')(?:ecri|envoi|envoy|contact|appel|appell|text|recontact|derang)[a-z]*\\s+plus(?=\\s*(?:$|[.,!;]|jamais|svp|stp|merci|s'il|de\\s+(?:messages?|sms|textos?)))`, { callVerb: /appel/ });
+  // "Ne m'appelez pas" — a call prohibition (an opt-out unless a text affirmative makes it a channel preference)
+  add(L, F.NO_CONTACT, "latin", `(?:${B}ne\\s+|${B}n'\\s*)(?:me\\s+|m'\\s*|m\\s+)(?:appel|appell|telephon)[a-z]*\\s+pas${E}`, { callVerb: /appel|telephon/ });
   add(L, F.NO_CONTACT, "latin", `${B}ne\\s+(?:plus|jamais|plus\\s+jamais|pas)\\s+(?:me\\s+|m'|nous\\s+)${COMM}${E}`, { callVerb: /appeler|telephoner/ });
   add(L, F.NO_CONTACT, "latin", `${B}(?:je\\s+ne|j'|je|nous\\s+ne)\\s*(?:veux|voulons|souhaite|souhaitons|desire)\\s+(?:plus|pas)\\s+(?:(?:recevoir|etre\\s+(?:contacte|sollicite|derange|appele|relance)e?s?)|de\\s+(?:vos\\s+)?(?:messages?|sms|textos?|appels?)|d'(?:appels?|autres\\s+messages)|(?:que\\s+)?(?:vous\\s+)?(?:me\\s+|m')(?:contact|ecri|appel|envoy|relanc)[a-z]*)`, { callVerb: /appel/ });
   add(L, F.NO_CONTACT, "latin", `(?:^|[.!?;]\\s*)(?:plus|pas|plus\\s+jamais)\\s+de\\s+(?:messages?|sms|textos?|appels?)(?:\\s+(?:svp|stp|merci|s'il\\s+vous\\s+plait))?\\s*(?:$|[.!])`);
@@ -459,6 +464,8 @@ const TEXT_AFFIRMATIVE = [
   /(?<![\p{L}])(?:пишите|напишите|лучше\s+смс)(?![\p{L}])/iu,
 ];
 
+const TEXT_VERB_IN_SPAN = /mand|envi|escrib|escrev|mensag|mensaj|text|sms|ecri|envoy|messag|scriv|pisa|wysy|nhắn|gửi|nhan\s|gui\s|发|發|短信|簡訊|信息|訊息|문자|메시지|메세지|카톡|ترسل|رسا|راسل|تكتب|пис|сообщ|смс|voye|ekri|mesaj|tekst|kontak/iu;
+
 function viewText(v, view) {
   return view === "latin" ? v.latin : view === "arabic" ? v.arabic : view === "cyr" ? v.cyr : v.lower;
 }
@@ -477,9 +484,12 @@ function collectMatches(v) {
   const hits = [];
   for (const rule of RULES) {
     if (rule.viAscii && !v.vi_ascii) continue;
-    const m = rule.re.exec(viewText(v, rule.view));
-    if (!m) continue;
-    hits.push({ language: rule.language, family: rule.family, span: m[0].trim(), call_only: Boolean(rule.callVerb && rule.callVerb.test(m[0])) });
+    // every occurrence: "не звоните и не пишите" is a call AND a text prohibition
+    for (const m of viewText(v, rule.view).matchAll(rule.all)) {
+    // call-only = the span names a CALL verb and no text / message verb ("no me ligue nem me mande
+    // mensagem" is one span carrying both: never call-only)
+    hits.push({ language: rule.language, family: rule.family, span: m[0].trim(), call_only: Boolean(rule.callVerb && rule.callVerb.test(m[0]) && !TEXT_VERB_IN_SPAN.test(m[0])) });
+    }
   }
   return hits;
 }
@@ -528,6 +538,22 @@ export function analyzeContactRevocation(message = "") {
     }
   }
   return out;
+}
+
+// ── channel preference (deterministic, every language) ───────────────────────
+// "Don't call, text is fine" / "No me llames, mándame un mensaje" / "Pa rele m, ekri m pito":
+// a prohibition of CALLS only, with an explicit text affirmative, is a channel preference —
+// never an SMS opt-out. Any text / contact prohibition anywhere ("don't call or text",
+// "no me llamen ni me escriban") keeps it an opt-out.
+const EN_CALL_ONLY = /\b(?:do\s*n[o'’]?t|never|stop|quit|no|please\s+don'?t)\s+(?:call(?:ing)?(?:\s+me)?|phone\s+calls?|calls)\b/i;
+const EN_TEXT_OK = /\b(?:text(?:ing)?\s+(?:is\s+)?(?:fine|ok|okay|better|good|works|only|instead)|texts?\s+(?:are|is)\s+(?:fine|ok|okay|better)|text\s+me|just\s+text|text\s+only|prefer\s+(?:to\s+)?text|rather\s+text|you\s+can\s+text|send\s+(?:me\s+)?a\s+text|message\s+me)\b/i;
+const EN_TEXT_PROHIBITION = /\b(?:do\s*n[o'’]?t|never|stop|quit|no\s+more)\s+(?:text|texting|message|messaging|msg|contact|contacting|sms|writing)|\bunsubscribe\b|\bremove\s+me\b|\bopt[\s-]?out\b|\bleave\s+me\s+alone\b|\btake\s+me\s+off\b|\bcall(?:ing)?(?:\s+me)?\s+(?:or|and|n|&|nor)\s+(?:me\s+)?text|\btext(?:ing)?(?:\s+me)?\s+(?:or|and|nor)\s+(?:me\s+)?call/i;
+
+export function isChannelPreferenceOnly(message = "") {
+  const text = String(message ?? "");
+  if (!text.trim() || EN_TEXT_PROHIBITION.test(text)) return false;
+  if (EN_CALL_ONLY.test(text) && EN_TEXT_OK.test(text)) return true;
+  return analyzeContactRevocation(text).carved === "channel_preference";
 }
 
 export default analyzeContactRevocation;

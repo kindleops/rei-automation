@@ -290,14 +290,13 @@ export const HELDOUT_V1 = {
 // PRE-EXISTING conservative behaviour (production 6ecbae6b classifies each of these as an
 // opt-out through the classifier's own phrase lists, before this change): accepted — fail
 // toward compliance — and COUNTED AS FALSE POSITIVES in the precision figure. This change
-// adds none; the list must not grow.
+// adds none; the list must not grow. ("No me llames, mejor escríbeme" and "Не звоните мне, пишите"
+// left it: the deterministic channel-preference carve now classifies them correctly.)
 export const ACCEPTED_CONSERVATIVE = new Set([
   "No me llames tan temprano",
-  "No me llames, mejor escríbeme",
   "No me escriba en inglés, en español por favor",
   "J'ai arrêté de contacter l'agence",
   "لا تتصل قبل الساعة العاشرة",
-  "Не звоните мне, пишите",
 ]);
 
 function labelOf(c) {
