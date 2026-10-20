@@ -1,5 +1,5 @@
 -- lc-fixture: posttest
--- PROPOSED ONLY — POSTTEST for PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql:
+-- PROPOSED ONLY — POSTTEST for PROPOSED_20261015110000_block_repeat_asking_price_mirror.sql:
 -- behaviour of the mirrored trigger. No transaction control, no includes; removes its rows.
 -- DISPOSABLE DATABASE ONLY (scripts/db/run-migration-test.mjs --id block_repeat_asking_price_mirror).
 do $$

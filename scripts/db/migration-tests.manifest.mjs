@@ -49,7 +49,7 @@ const MISSIONS = M('PROPOSED_20261014120000_persistent_missions.sql')
 const MESSAGE_ORIGIN = M('PROPOSED_20261015130000_message_origin_ai_generated_messages.sql')
 const NEGOTIATION = M('PROPOSED_20261015190000_negotiation_authority.sql')
 const FEEDBACK = M('PROPOSED_20261015191000_ai_operator_feedback.sql')
-const ASKING_PRICE_MIRROR = M('PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql')
+const ASKING_PRICE_MIRROR = M('PROPOSED_20261015110000_block_repeat_asking_price_mirror.sql')
 const ASKING_PRICE_QUESTION_KIND = M('PROPOSED_20261015120000_repeat_asking_price_question_kind.sql')
 // rc-8.5.20 parts A / C, needed as setup by the 8.5.21-b entries
 const REPLY_TURNS = M('PROPOSED_20261016120000_conversation_reply_turns.sql')
@@ -226,9 +226,9 @@ const BASE_TESTS = [
     id: 'block_repeat_asking_price_mirror',
     // the baseline already carries the live trigger: the mirror must re-create it identically
     setup: [SHIM, SEND_QUEUE_BASELINE],
-    pretest: M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_pretest.sql'),
-    apply: [M('PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql')],
-    posttest: [M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_posttest.sql')],
+    pretest: M('PROPOSED_20261015110000_block_repeat_asking_price_mirror_pretest.sql'),
+    apply: [M('PROPOSED_20261015110000_block_repeat_asking_price_mirror.sql')],
+    posttest: [M('PROPOSED_20261015110000_block_repeat_asking_price_mirror_posttest.sql')],
   },
   {
     id: 'repeat_asking_price_question_kind',
@@ -391,7 +391,7 @@ const BASE_TESTS = [
       { fixture: M('PROPOSED_20261015130000_message_origin_ai_generated_messages_pretest.sql') }, MESSAGE_ORIGIN,
       { fixture: M('PROPOSED_20261015190000_negotiation_authority_pretest.sql') }, NEGOTIATION,
       { fixture: M('PROPOSED_20261015191000_ai_operator_feedback_pretest.sql') }, FEEDBACK,
-      { fixture: M('PROPOSED_20261014120000_block_repeat_asking_price_mirror_pretest.sql') }, ASKING_PRICE_MIRROR,
+      { fixture: M('PROPOSED_20261015110000_block_repeat_asking_price_mirror_pretest.sql') }, ASKING_PRICE_MIRROR,
       { fixture: M('PROPOSED_20261015120000_repeat_asking_price_question_kind_pretest.sql') }, ASKING_PRICE_QUESTION_KIND,
       // rc-8.5.20 parts A / B / C. zip_acquisition_intelligence is independent; conversation_reply_turns
       // needs the runtime + both event-budget fixes; operations_action_center needs the runtime,

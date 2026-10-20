@@ -1,7 +1,7 @@
 // JS mirror of the trigger trg_block_repeat_asking_price (public.send_queue) AS rc-8.5.20 ships
 // it: the 8.5.15.1 question_kind body
 //   supabase/migrations/PROPOSED_20261015120000_repeat_asking_price_question_kind.sql
-// (the 8.5.16 helper modelled the OLD body from PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql:
+// (the 8.5.16 helper modelled the OLD body from PROPOSED_20261015110000_block_repeat_asking_price_mirror.sql:
 // use_case_template ~* 'asking_price' only — rc-8.5.20 review item d). Every literal below is
 // PARSED from the SQL, so a drift in the migration breaks the tests. The trigger statement itself
 // (events / columns) is unchanged by 8.5.15.1 and is parsed from the mirror migration.
@@ -20,7 +20,7 @@ import path from 'node:path'
 
 const REPO = path.resolve(import.meta.dirname, '..', '..', '..', '..')
 export const QUESTION_KIND_SQL_PATH = path.join(REPO, 'supabase/migrations/PROPOSED_20261015120000_repeat_asking_price_question_kind.sql')
-export const MIRROR_SQL_PATH = path.join(REPO, 'supabase/migrations/PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql')
+export const MIRROR_SQL_PATH = path.join(REPO, 'supabase/migrations/PROPOSED_20261015110000_block_repeat_asking_price_mirror.sql')
 
 function parse() {
   const sql = fs.readFileSync(QUESTION_KIND_SQL_PATH, 'utf8')

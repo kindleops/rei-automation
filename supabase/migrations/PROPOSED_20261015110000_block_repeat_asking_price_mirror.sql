@@ -5,7 +5,7 @@
 -- Applying it is idempotent (CREATE OR REPLACE + DROP TRIGGER IF EXISTS / CREATE TRIGGER) and
 -- reproduces the live definition byte-for-byte (function body md5 06b3a9f70fd9d823e15bcdd81816659e,
 -- read 2026-10-14, BEGIN READ ONLY). No rollback file: dropping it would remove a live guard.
--- Pretest: PROPOSED_20261014120000_block_repeat_asking_price_mirror_pretest.sql (LOCAL DISPOSABLE DB ONLY)
+-- Pretest: PROPOSED_20261015110000_block_repeat_asking_price_mirror_pretest.sql (LOCAL DISPOSABLE DB ONLY)
 
 CREATE OR REPLACE FUNCTION public.block_repeat_asking_price()
  RETURNS trigger

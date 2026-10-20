@@ -1,5 +1,5 @@
 -- lc-fixture: pretest
--- PROPOSED ONLY — PRETEST for PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql.
+-- PROPOSED ONLY — PRETEST for PROPOSED_20261015110000_block_repeat_asking_price_mirror.sql.
 -- DISPOSABLE DATABASE ONLY (owner testing boundary 2026-10-15: never run migration /
 -- rollback / pretest SQL against production). The runner restores the live send_queue
 -- baseline (scripts/db/fixtures/send_queue_live_baseline.sql) and runs this before and after

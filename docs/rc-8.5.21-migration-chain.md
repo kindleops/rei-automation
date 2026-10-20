@@ -25,7 +25,7 @@ exact pre-chain schema fingerprint. Then the whole chain is re-applied and re-ve
 | 8 | `PROPOSED_20261015130000_message_origin_ai_generated_messages.sql` | 8.5.16 | " |
 | 9 | `PROPOSED_20261015190000_negotiation_authority.sql` | 8.5.19 | " |
 | 10 | `PROPOSED_20261015191000_ai_operator_feedback.sql` | 8.5.19 | " |
-| 11 | `PROPOSED_20261014120000_block_repeat_asking_price_mirror.sql` | 8.5.16 mirror of the live body (must precede #12) | " |
+| 11 | `PROPOSED_20261015110000_block_repeat_asking_price_mirror.sql` (**renumbered** from 20261014120000, which #7 also used) | 8.5.16 mirror of the live body (must precede #12) | " |
 | 12 | `PROPOSED_20261015120000_repeat_asking_price_question_kind.sql` | 8.5.15.1 | " |
 | 13 | `PROPOSED_20261016100000_zip_acquisition_intelligence.sql` (+ seed `…100100_property_research_schedules.sql`) | 8.5.20-b | " |
 | 14 | `PROPOSED_20261016120000_conversation_reply_turns.sql` (+ seed `…120100_conversation_reply_turns_schedules.sql`) | 8.5.20-a: creates `agent.runtime_enqueue_event_at` | " |
@@ -72,12 +72,25 @@ BEGIN … ROLLBACK.
   - re-applying it after the rollback works.
 
   The graph-function fixture carries the live bodies without their ACLs, and PostgreSQL's default PUBLIC EXECUTE made the self-check refuse. Production revoked PUBLIC on those four functions (operator_lockdown 20261003130000, campaign_audience_completeness 20261003220000), so the lc_mcp chain baseline models that. Roles are cluster-global, so both lc_mcp entries first drop a leftover `lc_mcp_reader` role from an earlier test on the same disposable cluster.
-- **Final integration stamp audit (2026-10-19, after merging rc-8.5.21-cont, -optout, -mcp).** The merges added
-  two stamps, 20261019120000 (#25) and 20261019150000 (#26). Neither collides, so nothing was renumbered. The
-  hotfix-shipped stamps 20261016200000 (#0) and 20261017120000 (#22) are unchanged. The two older shared stamps
-  predate these merges and are already proven in this order:
-  - 20261014120000: #7 persistent_missions and #11 block_repeat_asking_price_mirror (the mirror is the live body);
-  - 20261013160000: #3 conversation_ai_shadow and inbox_thread_state_recency_index (not in this chain).
+- **Final integration stamp audit (2026-10-19, after merging rc-8.5.21-cont, -optout, -mcp).** Supabase migration
+  history keys on the VERSION, so two files with one stamp collide on a production apply. The merges added two new
+  stamps, 20261019120000 (#25) and 20261019150000 (#26), and neither collides. The hotfix-shipped stamps
+  20261016200000 (#0) and 20261017120000 (#22) are unchanged. Two older collisions were renumbered. No file
+  involved is applied in production: of this chain only intel_runtime 20261012140000 is applied, and nothing after it.
+  - 20261014120000 was #7 persistent_missions and #11 block_repeat_asking_price_mirror. The LATER link in chain
+    order, #11, is now **20261015110000**: after #7, before #12 (20261015120000), which it must precede. Its
+    pretest and posttest moved with it. Only their own self-reference comments changed.
+  - 20261013160000 was #3 conversation_ai_shadow and `inbox_thread_state_recency_index`. The latter is outside this
+    chain: a PROPOSED, standalone `CREATE INDEX CONCURRENTLY IF NOT EXISTS` that can still be applied. It is now
+    **20261013163000**, with the body unchanged. It is idempotent, so the rename is safe even if the index exists.
+  - `scripts/db/scan-duplicate-migration-versions.mjs` (run by `tests/critical/migration-version-uniqueness.test.mjs`)
+    fails on any duplicate version in `supabase/migrations`. A companion file (`<slug>_pretest`, `_posttest`,
+    `_rollback`, `_verify`, `_dryrun`, `_api_login`, …: the same stamp and a name extending a sibling's slug) is not a
+    duplicate. Five OLDER collisions outside this chain stay on a frozen allowlist for an owner decision. Their
+    production status cannot be verified without production access, and 20261010120000 / 20261010130000 contain S3
+    and agent_research_ro, which are applied in production. They are 20261006150000, 20261007120000,
+    20261007170000, 20261010120000 and 20261010130000. The scan fails if an allowlisted stamp stops colliding
+    (stale entry) or if any other stamp collides.
   The apply order is this table, not the stamp sort.
 - **Not in the chain:**
   - `unlock_stale_jobs_status_predicate` (20261008110000) stays a standalone entry, as in rc-8.5.20.
