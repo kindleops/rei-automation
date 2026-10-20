@@ -11,6 +11,7 @@
 //   ambiguous                            → context, then a useful clarification or review
 // The model's validated verdict (confidence ≥ 0.85) is honoured for ownership denial and
 // disinterest when the deterministic pre-check does not contradict it.
+import { acceptsOurProposal } from '../acceptance.js'
 import { deterministicPrecheck } from '../precheck.js'
 import { isStopRequest } from '../stop-request.js'
 import { languageEnabledFor, languageVerdict } from '../send-policy.js'
@@ -28,7 +29,10 @@ const LEGAL_TOPIC_RE = /\b(?:contract|agreement|attorney|lawyer|probate|court|ti
 export const AUTOMATION_QUESTION_RE = /\b(?:are\s+(?:you|u)|is\s+(?:this|it|that)|r\s+u|am\s+i\s+(?:talking|texting|chatting)\s+(?:to|with))\s+(?:a\s+|an\s+)?(?:real\s+(?:person|human)|human|person|bot|robot|ai|a\.i\.|automated|computer|machine|auto(?:mated)?\s*(?:text|message|reply)|chat\s*bot|chatgpt|recording)\b|\b(?:bot|robot|automated|ai)\s*\?\s*$/i
 const ACK_ONLY_RE = /^\s*(?:ok(?:ay)?|k|thanks?|thank\s+you|thx|ty|got\s+it|cool|sounds\s+good)\s*[.!]*\s*$/i
 
-const newFactsFrom = (ledger, inboundId) => Object.entries(ledger?.facts || {}).filter(([, f]) => (f.source_message_ids || []).includes(inboundId)).map(([k]) => k)
+// rc-8.5.21 v3 (RT-11 / RT-05): a BURST consolidated into one turn is decided on ALL its member inbounds —
+// a fact, request or offer request stated in an earlier member counts for the turn (it used to count only
+// when it was in the LATEST fragment, so a correct merge was held as ambiguous)
+const newFactsFrom = (ledger, turnIds) => Object.entries(ledger?.facts || {}).filter(([, f]) => (f.source_message_ids || []).some((id) => turnIds.has(id))).map(([k]) => k)
 
 /**
  * @param {object} a
@@ -46,14 +50,15 @@ const newFactsFrom = (ledger, inboundId) => Object.entries(ledger?.facts || {}).
  * @param {object|null} [a.inbound]    the inbound row { id, property_id }
  * @param {object} [a.companyIdentity] company-identity.js (absent ⇒ not configured)
  */
-export function decideActions({ ledger, inboundText = '', inboundId, deterministic = null, eligibility = null, judgment = null, deterministicTemplate = { available: false }, ownerHandled = false, language = null, propertyCount = 1, thread = [], inbound = null, companyIdentity = NO_COMPANY_IDENTITY, enabledLanguages = ['en'] }) {
+export function decideActions({ ledger, inboundText = '', inboundId, deterministic = null, eligibility = null, judgment = null, deterministicTemplate = { available: false }, ownerHandled = false, language = null, propertyCount = 1, thread = [], inbound = null, companyIdentity = NO_COMPANY_IDENTITY, enabledLanguages = ['en'], memberIds = [] }) {
+  const turnIds = new Set([String(inboundId), ...(Array.isArray(memberIds) ? memberIds.map(String) : [])])
   const replyLangFor = () => languageEnabledFor({ language, inboundText, languages: enabledLanguages }).language
   const plan = (actions, reason, extra = {}) => {
     const v = validatePlan(actions)
     if (!v.ok) return { version: PIPELINE_VERSION, actions: [{ type: ACTIONS.HOLD, reason: 'plan_conflict' }], reasons: ['plan_conflict', ...v.reasons], conflict_from: actions.map((a) => a.type) }
     return { version: PIPELINE_VERSION, actions, reasons: [reason], reply_language: replyLangFor(), ...extra }
   }
-  const facts = newFactsFrom(ledger, inboundId)
+  const facts = newFactsFrom(ledger, turnIds)
   const update = facts.length ? [{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: Object.fromEntries(facts.map((k) => [k, ledger.facts[k].value])), source_message_id: inboundId }] : []
   const evCtx = { inboundText, ledger, thread, inbound: inbound || { id: inboundId } }
 
@@ -127,9 +132,19 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
     return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: ledgerDenied ? ownFact.value : 'denied' }, source_message_id: inboundId }, { type: ACTIONS.NO_RESPONSE }], ledgerDenied ? 'ownership_denied_no_nurture' : 'ownership_denied_no_nurture:model', { ownership })
   } else if (modelDeniedRaw) ownershipConflict = ['model_denial_vs_price_or_negotiation']
 
-  const requestHere = (kind) => (ledger?.requests || []).some((r) => r.kind === kind && r.source_message_id === inboundId)
-  const objectionHere = (kind) => (ledger?.objections || []).some((o) => o.kind === kind && o.source_message_id === inboundId)
+  const requestHere = (kind) => (ledger?.requests || []).some((r) => r.kind === kind && turnIds.has(String(r.source_message_id)))
+  const objectionHere = (kind) => (ledger?.objections || []).some((o) => o.kind === kind && turnIds.has(String(o.source_message_id)))
   const financingObjection = objectionHere('financing_terms_objection') || FINANCING_OBJECTION_RE.test(String(inboundText || ''))
+
+  // 3c. rc-8.5.21 v3: ACCEPTANCE of OUR proposal ("No, I'm good with the amount you proposed") — read with the
+  //     outbound that carried our number; never the "I'm good" decline, never acted on automatically: a person
+  //     verifies the actual offer, the property and the authority (no automatic contract, no reply)
+  const weProposed = (ledger?.outbound_quotes || []).length > 0 || (ledger?.existing_offers || []).length > 0
+  if (!ownershipConflict && acceptsOurProposal(inboundText, { weProposed })) {
+    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ...(update[0]?.facts || {}), offer_response: 'accepted_candidate' }, source_message_id: inboundId },
+      escalation('seller_accepted_proposal', { source_message_id: inboundId, outbound_quotes: (ledger?.outbound_quotes || []).length, existing_offers: (ledger?.existing_offers || []).map((o) => o.id).slice(0, 5), verify: ['actual_offer', 'property', 'authority'], contract: 'never_automatic' })],
+    'seller_accepted_proposal_verify', { ownership })
+  }
 
   // 4. disinterest → the existing 30-day follow-up, whatever the language; only the reply text
   //    is language-gated. The model's validated not_interested counts when nothing contradicts it.
@@ -172,7 +187,7 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
 
 
   // 7. money: an offer request / a counter is the negotiation authority's, never the model's
-  const offerRequested = (ledger?.offer_requests || []).includes(inboundId)
+  const offerRequested = (ledger?.offer_requests || []).some((id) => turnIds.has(String(id)))
   const counter = (ledger?.objections || []).some((o) => o.kind === 'price_objection' && o.source_message_id === inboundId) || judgment?.intent === 'counter_or_negotiation'
   const numberHere = /\b[0-9]{2,3}(?:k|,[0-9]{3})?\b|\$\s?[0-9]/i.test(String(inboundText || ''))
   const quoted = (ledger?.outbound_quotes || []).length > 0
@@ -205,6 +220,10 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   if (requestHere('email_or_card')) return plan([...update, escalation('requested_email_or_card', { source_message_id: inboundId })], 'email_or_card_request_human', { ownership })
   // 8a'. a visit request ("can you stop by Thursday at 3"): an operator task — the AI never promises a visit
   if (requestHere('visit_request')) return plan([...update, escalation('requested_visit', { source_message_id: inboundId })], 'visit_request_operator_task', { ownership })
+
+  // 8a''. rc-8.5.21 v3: a CALLBACK request ("call me", "give me a call") — an operator task; never a
+  //       text that promises a call, never dropped into the ambiguous hold
+  if (requestHere('callback')) return plan([...update, escalation('requested_callback', { source_message_id: inboundId })], 'callback_request_operator_task', { ownership })
 
   // 8b. "is this a bot / a real person?": a person answers it, truthfully (never a denial)
   if (AUTOMATION_QUESTION_RE.test(String(inboundText || ''))) return plan([...update, escalation('asked_if_automated', { source_message_id: inboundId })], 'automation_question_human_answers', { ownership })

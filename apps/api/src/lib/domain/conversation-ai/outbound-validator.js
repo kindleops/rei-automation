@@ -116,7 +116,9 @@ export function identityStatementReasons(text, ledger, companyIdentity = NO_COMP
   const t = String(text || '')
   const r = []
   const latest = ledger?.last_message?.direction === 'inbound' ? ledger.last_message.id : null
-  const asked = (kinds) => (ledger?.requests || []).some((q) => kinds.includes(q.kind) && (!latest || q.source_message_id === latest))
+  // rc-8.5.21 v3 (RT-11 / RT-05): a question in ANY message of the seller's burst since our last text counts
+  const open = new Set([...(Array.isArray(ledger?.open_inbound_ids) ? ledger.open_inbound_ids : []), ...(latest ? [latest] : [])].map(String))
+  const asked = (kinds) => (ledger?.requests || []).some((q) => kinds.includes(q.kind) && (!latest || open.has(String(q.source_message_id))))
   if (COMPANY_STATEMENT_RE.test(t)) {
     if (!companyIdentity?.configured) r.push('identity:company_statement_without_configured_identity')
     else if (!asked(['company_identity', 'identity'])) r.push('identity:company_statement_not_asked')
@@ -151,7 +153,9 @@ export function spanishMustNotReasons(text, { ledger = null, companyIdentity = N
   const t = String(text || '')
   const r = []
   const latest = ledger?.last_message?.direction === 'inbound' ? ledger.last_message.id : null
-  const asked = (kinds) => (ledger?.requests || []).some((q) => kinds.includes(q.kind) && (!latest || q.source_message_id === latest))
+  // rc-8.5.21 v3 (RT-11 / RT-05): a question in ANY message of the seller's burst since our last text counts
+  const open = new Set([...(Array.isArray(ledger?.open_inbound_ids) ? ledger.open_inbound_ids : []), ...(latest ? [latest] : [])].map(String))
+  const asked = (kinds) => (ledger?.requests || []).some((q) => kinds.includes(q.kind) && (!latest || open.has(String(q.source_message_id))))
   if (ES_COMPANY_RE.test(t)) {
     if (!companyIdentity?.configured) r.push('identity:company_statement_without_configured_identity')
     else if (!asked(['company_identity', 'identity'])) r.push('identity:company_statement_not_asked')

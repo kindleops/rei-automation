@@ -1,5 +1,6 @@
 // ─── classify.js ──────────────────────────────────────────────────────────
 import { isDirectNo } from "./ownership-answer-forms.js";
+import { acceptsOurProposal } from "@/lib/domain/conversation-ai/acceptance.js";
 import { ai } from "@/lib/providers/ai.js";
 import {
   getCategoryValue,
@@ -8225,8 +8226,30 @@ export function applyContactRevocationSafety(result, text) {
   return result;
 }
 
+/**
+ * rc-8.5.21 v3: "No, I'm good with the amount you proposed" ACCEPTS our proposal (conversation-ai/acceptance.js);
+ * it is never the "I'm good" decline. Recognized as positive engagement routed to a PERSON (verify the actual
+ * offer, the property and the authority; no automatic acceptance, no contract). A stop / opt-out is untouched.
+ */
+export function rescopeAcceptanceOfProposal(text, result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting" || result.primary_intent === "opt_out") return result;
+  if (!acceptsOurProposal(text)) return result;
+  const next = {
+    ...result,
+    primary_intent: "seller_interested",
+    detected_intent: "seller_interested",
+    secondary_intent: result.primary_intent && result.primary_intent !== "seller_interested" ? result.primary_intent : result.secondary_intent ?? null,
+    objection: result.objection === "not_interested" ? null : result.objection,
+    acceptance_candidate: true,
+    matched_rule_ids: uniqStrings([...(result.matched_rule_ids || []), "acceptance_of_our_proposal"]),
+  };
+  next.automation_decision = { ...(deriveAutomationDecision(next) || {}), auto_reply_allowed: false, queue_action: "none", suppression_action: "none", human_review_required: true, review_reason: "acceptance_of_our_proposal_verify_offer_property_authority", risk_level: "high" };
+  return next;
+}
+
 export async function classify(message, brain_item = null, options = {}) {
-  const result = await classifyCore(message, brain_item, options);
+  const result = rescopeAcceptanceOfProposal(cleanMessage(message), await classifyCore(message, brain_item, options));
   return applyContactRevocationSafety(result, message);
 }
 

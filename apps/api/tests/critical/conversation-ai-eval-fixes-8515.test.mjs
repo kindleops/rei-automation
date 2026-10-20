@@ -93,10 +93,12 @@ test('question kinds: S2 interest phrasings and Spanish ownership questions are 
 })
 
 // ── 4. Never re-ask the price after an offer request ───────────────────────
-test('objective override: once S3 was asked, an offer request requires the condition question (or a human when condition is known)', () => {
+// rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18, supersedes eval #14 / #92's "condition next"): once S3
+// was asked, an offer request is research → a gated offer recommendation (a human), never condition first
+test('objective override: once S3 was asked, an offer request requires a human (research → gated offer), never the condition question before the price', () => {
   const ctx = buildConversationContext(input('What would you offer?', S3, {}))
-  assert.equal(ctx.required_next_objective, 'get_condition')
-  assert.equal(ctx.model.required_next_objective, 'get_condition')
+  assert.equal(ctx.required_next_objective, 'offer_needs_human')
+  assert.equal(ctx.model.required_next_objective, 'offer_needs_human')
   assert.equal(requiredObjectiveFor({ inboundText: 'make me an offer', ledger: ctx.ledger, facts: { condition: { current: { value: 'good' } } } }), 'offer_needs_human')
   assert.equal(requiredObjectiveFor({ inboundText: 'make me an offer', ledger: { asking_price: { asked_count: 0 } }, facts: {} }), null, 'before S3 the price question is still allowed')
 })
@@ -104,7 +106,7 @@ test('objective override: once S3 was asked, an offer request requires the condi
 test('validator: a draft that re-asks the price after an offer request violates the binding objective', async () => {
   const ctx = buildConversationContext(input('What would you offer?', S3))
   const v = await validateDraft({ decision: decision({ intent: 'asks_offer', next_objective: 'get_asking_price', proposed_message: 'What price would work for you?' }), context: ctx, inboundText: 'What would you offer?', eligibility: OPEN })
-  assert.ok(v.reasons.includes('objective_override_violated:get_condition'), v.reasons.join(','))
+  assert.ok(v.reasons.includes('objective_override_violated:offer_needs_human'), v.reasons.join(','))
 })
 
 // ── 5. Validator calibration ───────────────────────────────────────────────

@@ -1240,8 +1240,10 @@ export function resolveSellerStageTransition({
   let templateUseCase = prompt.template_use_case;
   // "Make me an offer": never re-ask the price the seller declined to give —
   // ask the highest-value missing underwriting question and let ADE decide.
+  // rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18 "offer before price"): an offer request with no price on
+  // record asks for THEIR number ONCE (the asking-price stage's own question; the S3 deflection rule holds
+  // a repeat for a person: research → gated offer recommendation) — never a condition question first.
   if (afterCode === LIFECYCLE_STAGE_CODES.ASKING_PRICE && facts.wants_offer === true) {
-    templateUseCase = "condition_probe";
     if (!ade_result) adeAction = ADE_ACTIONS.RUN_PRELIMINARY;
   }
   if (afterIdx === 4) {

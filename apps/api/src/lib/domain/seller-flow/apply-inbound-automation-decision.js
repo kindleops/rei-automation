@@ -1505,29 +1505,18 @@ export function applyS3DeflectionRule(
   if (!PRICE_QUESTION_INTENTS.has(lower(classification?.primary_intent))) return decision;
   if (POST_OFFER_STAGES.has(lower(stage))) return decision;
   const rerouted_from = clean(decision.required_template_use_case) || clean(decision.route_hint) || null;
-  if (condition_known) {
-    return {
-      ...decision,
-      should_queue_reply: false,
-      should_mark_human_review: true,
-      reply_mode: "manual_review",
-      next_action: "mark_human_review",
-      human_review_reason: "offer_request_after_s3_condition_known",
-      audit_reason: "offer_request_after_s3_condition_known",
-      s3_deflection: { rerouted_from, outcome: "human_hold" },
-    };
-  }
+  // rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18 "offer before price"): we asked for their number ONCE and
+  // the seller asks for OUR offer again ⇒ research → a GATED offer recommendation (a person), never a
+  // condition question the seller did not raise (condition before price was seen 3× in the v3 eval)
   return {
     ...decision,
-    condition_questions_forbidden: false,
-    route_hint: S4_DEFLECTION_USE_CASE,
-    allowed_template_stages: [S4_DEFLECTION_USE_CASE],
-    required_template_use_case: S4_DEFLECTION_USE_CASE,
-    ...(asArray(decision.v2_template_preference).length ? { v2_template_preference: [S4_DEFLECTION_USE_CASE] } : {}),
-    template_authority: "s3_deflection_rule",
-    template_authority_reason: "offer_request_after_s3_asked",
-    audit_reason: "offer_request_after_s3_advance_to_condition",
-    s3_deflection: { rerouted_from, outcome: "condition_question" },
+    should_queue_reply: false,
+    should_mark_human_review: true,
+    reply_mode: "manual_review",
+    next_action: "mark_human_review",
+    human_review_reason: condition_known ? "offer_request_after_s3_condition_known" : "offer_request_after_s3_price_withheld_gated_offer",
+    audit_reason: condition_known ? "offer_request_after_s3_condition_known" : "offer_request_after_s3_price_withheld_gated_offer",
+    s3_deflection: { rerouted_from, outcome: "human_hold", next: "research_then_gated_offer_recommendation" },
   };
 }
 

@@ -837,8 +837,12 @@ export const V2_MATRIX = Object.freeze({
   [I.INTEREST]: { S1: [U.ASK_PRICE], S2: [U.ASK_PRICE], S3: [U.ASK_PRICE], S4: "anchor" },
   [I.CONDITIONAL_INTEREST]: { S1: [U.ASK_PRICE], S2: [U.ASK_PRICE], S3: [U.ASK_PRICE], S4: "anchor" },
   [I.PRICE_GIVEN]: { S1: "price", S2: "price", S3: "price", S4: "price" },
-  [I.NO_PRICE]: { S1: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S2: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S3: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S4: "anchor" },
-  [I.OFFER_REQUEST]: { S1: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S2: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S3: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S4: "anchor" },
+  // rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18 "offer before price"): never a condition question before
+  // the price. An offer request before any price ask asks for THEIR number once; a withheld price (no price /
+  // a repeat offer request after our ask) is research → a gated offer recommendation: the base engine's
+  // S3 deflection rule holds it for a person ("defer").
+  [I.NO_PRICE]: { S1: "defer", S2: "defer", S3: "defer", S4: "anchor" },
+  [I.OFFER_REQUEST]: { S1: [U.ASK_PRICE], S2: [U.ASK_PRICE], S3: "defer", S4: "anchor" },
   [I.CONDITION_ANSWER]: { S1: "defer", S2: "defer", S3: "defer", S4: "anchor" },
   [I.WHO_WHY]: { S1: WHO_BY_STAGE[V2_STAGES.S1], S2: WHO_BY_STAGE[V2_STAGES.S2], S3: WHO_BY_STAGE[V2_STAGES.S3], S4: WHO_BY_STAGE[V2_STAGES.S4] },
   [I.CAPITAL_GAINS]: { S1: [U.CAPITAL_GAINS], S2: [U.CAPITAL_GAINS], S3: [U.CAPITAL_GAINS], S4: [U.CAPITAL_GAINS] },

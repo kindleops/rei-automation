@@ -154,14 +154,16 @@ export function buildConversationContext({
 const PLACEHOLDER_FIRST_NAME_RE = /^(?:internal|test|tester|testing|unknown|owner|homeowner|resident|seller|n\/?a|none|null|undefined|qa|demo)$/i
 
 /**
- * Deterministic objective override (eval #14, #92): once we asked the asking
- * price and the seller asks for OUR offer instead, the price is never asked
- * again -- condition next, or a human when condition is already known.
+ * Deterministic objective override (eval #14, #92; superseded 2026-10-19 by the S1–S5 rule): once we
+ * asked the asking price and the seller asks for OUR offer instead, the price is never asked again —
+ * research → a gated offer recommendation (a human), never a condition question before the price.
  */
 export function requiredObjectiveFor({ inboundText = '', ledger = null, facts = {}, deterministic = null } = {}) {
   const askedPrice = (ledger?.asking_price?.asked_count || 0) > 0
   if (!askedPrice || facts?.asking_price?.current) return null
   const offerRequest = deterministic?.intent === 'asks_offer' || isDeflectionToOffer(inboundText)
   if (!offerRequest) return null
-  return facts?.condition?.current ? 'offer_needs_human' : 'get_condition'
+  // rc-8.5.21 v3 (owner rule 10-18): the number was asked ONCE and the seller asks for our offer again ⇒
+  // research → a gated offer recommendation (human); never condition before the price
+  return 'offer_needs_human'
 }

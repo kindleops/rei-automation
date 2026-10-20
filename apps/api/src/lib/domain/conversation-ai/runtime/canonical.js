@@ -180,7 +180,8 @@ export function canonicalRoutineScope(record, { languageEnglish = false, languag
   // OWNER DECISION 2026-10-18: the one in-scope offer turn — THIS inbound asked what we would pay,
   // nothing is on the table, and the reply only asks their number (no amount)
   const askNumberOnce = category === 'next_missing_fact' && record.reply.objective === 'asking_price' && !/[0-9]/.test(draft) &&
-    (ledger?.offer_requests || []).every((id) => id === (inbound?.id ?? record.inbound_message_id)) && !(ledger?.existing_offers || []).length && !(ledger?.outbound_quotes || []).length
+    // rc-8.5.21 v3 (RT-11 / RT-05): an offer request in an earlier fragment of THIS burst is this turn's
+    (ledger?.offer_requests || []).every((id) => id === (inbound?.id ?? record.inbound_message_id) || (ledger?.open_inbound_ids || []).includes(id)) && !(ledger?.existing_offers || []).length && !(ledger?.outbound_quotes || []).length
   if (((ledger?.offer_requests || []).length && !askNumberOnce) || (ledger?.existing_offers || []).length) reasons.push('excluded_offer_on_thread')
   if ((ledger?.outbound_quotes || []).length) reasons.push('excluded_live_negotiation')
   const draftMoneyFree = draft.replace(NEGATED_FINANCING_RE, ' ')
