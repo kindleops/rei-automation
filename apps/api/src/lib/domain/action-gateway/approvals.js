@@ -129,3 +129,11 @@ export function createIntentApprovalReader({ query }) {
     },
   })
 }
+
+/**
+ * D1 (docs/ACTION-MCP-AUDIT.md §13): the capability plane's services + the decide path's read of gateway intents
+ * (action_gateway.action_intents over the agent_api pool, RLS agent_api_select). getCapabilityPlane wires it.
+ */
+export function withActionGatewayServices(services, pool) {
+  return Object.freeze({ ...services, actionGateway: createIntentApprovalReader({ query: async (sql, params) => (await pool.query(sql, params)).rows }) })
+}
