@@ -144,17 +144,17 @@ const NEVER_SENT_TERMINAL = new Set(['cancelled', 'blocked', 'skipped'])
 export async function reclaimStaleSellerDayReservation({ supabase, threadKey, sellerKey, inboundId, now }) {
   if (!supabase?.from || !clean(threadKey) || !clean(sellerKey)) return { ok: false, reason: 'unwired' }
   try {
-    const r = await supabase.from('send_queue').select('id,queue_status,guard_reason,source,message_origin,inbound_message_id,provider_message_id,textgrid_message_id,sent_at,delivered_at,metadata,created_at').eq('thread_key', threadKey).gte('created_at', new Date((Date.parse(now) || Date.now()) - 2 * 864e5).toISOString()).limit(100)
+    const { loadQueueRowAttemptEvidence, QUEUE_ROW_PROVIDER_ID_COLUMNS, providerIdOfQueueRow } = await import('@/lib/domain/communications/queue-row-attempt-evidence.js')
+    const r = await supabase.from('send_queue').select(`id,queue_status,guard_reason,source,message_origin,inbound_message_id,${QUEUE_ROW_PROVIDER_ID_COLUMNS},sent_at,delivered_at,metadata,created_at`).eq('thread_key', threadKey).gte('created_at', new Date((Date.parse(now) || Date.now()) - 2 * 864e5).toISOString()).limit(100)
     if (r?.error) return { ok: false, reason: 'queue_unreadable' }
     const holders = (r.data || []).filter((row) => clean(row?.metadata?.reservations?.seller_day) === clean(sellerKey))
     if (!holders.length) return { ok: false, reason: 'holder_unknown' }
-    const { loadQueueRowAttemptEvidence } = await import('@/lib/domain/communications/queue-row-attempt-evidence.js')
     const ev = await loadQueueRowAttemptEvidence(supabase, holders.map((h) => h.id))
     if (!ev.ok) return { ok: false, reason: 'attempt_ledger_unreadable' }
     for (const h of holders) {
       const st = clean(h.queue_status).toLowerCase()
       const ai = clean(h.source) === AI_CONVERSATION_SOURCE || clean(h.message_origin) === 'ai_generated'
-      const evidence = clean(h.provider_message_id) || clean(h.textgrid_message_id) || h.sent_at || h.delivered_at
+      const evidence = providerIdOfQueueRow(h) || h.sent_at || h.delivered_at
       const started = (ev.byRow.get(clean(h.id)) || []).some((a) => a.provider_request_started_at || clean(a.provider_message_id))
       if (!ai || evidence || started || !(NEVER_SENT_HELD.has(st) || NEVER_SENT_TERMINAL.has(st))) return { ok: false, reason: `holder_may_have_reached_seller:${st || 'unknown'}` }
       if (clean(h.inbound_message_id || h.metadata?.inbound_message_event_id) === clean(inboundId)) return { ok: false, reason: 'holder_answers_this_inbound' }

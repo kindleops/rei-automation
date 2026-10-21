@@ -34,3 +34,10 @@ export async function loadQueueRowAttemptEvidence(supabase, queueRowIds = []) {
 }
 
 export default loadQueueRowAttemptEvidence
+
+/** The send_queue columns that carry a provider message id (read-only evidence that a row reached the provider). */
+export const QUEUE_ROW_PROVIDER_ID_COLUMNS = 'provider_message_id,textgrid_message_id'
+/** The provider message id recorded on a send_queue row, or '' (never a transport call). */
+export function providerIdOfQueueRow(row = {}) {
+  return String(row?.provider_message_id ?? '').trim() || String(row?.textgrid_message_id ?? '').trim()
+}

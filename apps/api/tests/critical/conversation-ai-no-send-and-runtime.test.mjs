@@ -163,6 +163,9 @@ const R3_DIRECT_IMPORTS = [
   'lib/domain/conversation-ai/property-ownership.js',
   // rc-8.5.21 v4 (S2): the ONE combined stop reading (pure) — R3 never replies to a stop-like turn
   'lib/domain/conversation-ai/stop-reading.js',
+  // rc-8.5.21 v4 (rt-sc-03): read-only attempt evidence — a stale seller-day holder is reclaimed only when it
+  // provably never reached the provider
+  'lib/domain/communications/queue-row-attempt-evidence.js',
 ].sort()
 
 function directImports(file) {
