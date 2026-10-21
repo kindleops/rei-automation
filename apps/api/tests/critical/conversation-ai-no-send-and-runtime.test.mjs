@@ -161,6 +161,8 @@ const R3_DIRECT_IMPORTS = [
   'lib/domain/conversation-ai/persona-continuity.js', 'lib/ai/conversation-canonical-inputs.js', 'lib/domain/holds-port/automation-hold-port.js',
   // blind-eval S1: the per-property ownership facts (pure; the recontact guard's evidence)
   'lib/domain/conversation-ai/property-ownership.js',
+  // rc-8.5.21 v4 (S2): the ONE combined stop reading (pure) — R3 never replies to a stop-like turn
+  'lib/domain/conversation-ai/stop-reading.js',
 ].sort()
 
 function directImports(file) {

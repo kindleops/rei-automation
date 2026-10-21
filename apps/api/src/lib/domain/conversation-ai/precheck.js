@@ -19,6 +19,7 @@ import { matchMultilingualOptOut } from '../classification/multilingual-opt-out.
 import { analyzeContactRevocation, isChannelPreferenceOnly } from '../classification/multilingual-contact-revocation.js'
 import { classifyStopScope, STOP_SCOPE } from '../classification/stop-scope.js'
 import { bareNoAnswer } from './answers.js'
+import { stopSpansAimedAtUs } from '../classification/revocation-morphology.js'
 import { makeDecision } from './contract.js'
 import { ABSOLUTE_SUPPRESSION_REASONS } from './ownership-evidence.js'
 
@@ -59,7 +60,9 @@ export function deterministicPrecheck({ text, inboundId, deterministic = null, e
     multilingual_wrong_number: revocation.wrong_number?.rule_id || null,
     // "Don't call, text is fine": a channel preference in any language, never an SMS opt-out
     channel_preference_only: isChannelPreferenceOnly(body),
-    stop_verb: STOP_VERB_RE.test(body),
+    // rc-8.5.21 v4: object / target analysis — a stop not aimed at us ("I need to stop the foreclosure",
+    // "can't stop thinking about it") is not a stop verb here
+    stop_verb: STOP_VERB_RE.test(stopSpansAimedAtUs(body)),
     stop_scope: scope,
     legal: LEGAL_RE.test(body),
     deterministic_intent: deterministic?.intent ?? null,

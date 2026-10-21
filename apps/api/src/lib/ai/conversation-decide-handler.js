@@ -25,7 +25,7 @@
 import { CONVERSATION_AI_SHADOW_ENV, CONVERSATION_DECIDE_KIND, conversationAiShadowRequested, decodeRef, encodeRef } from './conversation-ai-shadow-hook.js'
 import { ModelCallRefused } from '@/lib/domain/conversation-ai/model-client.js'
 import { turnsRequested } from '@/lib/domain/conversation-ai/turns/turn-engine.js'
-import { createConversationTurnHandler, createConversationTurnSweepHandler, CONVERSATION_TURN_KIND, CONVERSATION_TURN_SWEEP_KIND } from './conversation-turn-handler.js'
+import { createConversationTurnHandler, createConversationTurnSweepHandler, CONVERSATION_TURN_KIND, CONVERSATION_TURN_SWEEP_KIND, defaultOperatorItems, precautionaryHoldWorkItem } from './conversation-turn-handler.js'
 
 export { CONVERSATION_DECIDE_KIND }
 
@@ -88,7 +88,7 @@ export function runtimeJobTracker(ctx) {
 // conversation.turn job. Turns OFF (default) ⇒ this handler behaves exactly as in 8.5.15.
 // A conversation change on a turn (event_kind state_change / failed_outbound_reply, turn_ref)
 // is routed the same way.
-export function createConversationDecideHandler({ run = null, env = process.env, route = null, routeChange = null, runtimeStore = null } = {}) {
+export function createConversationDecideHandler({ run = null, env = process.env, route = null, routeChange = null, runtimeStore = null, supabase = null, effectsDeps = {}, operatorItems = null } = {}) {
   return Object.freeze({
     kind: CONVERSATION_DECIDE_KIND,
     async run(ctx) {
@@ -113,7 +113,20 @@ export function createConversationDecideHandler({ run = null, env = process.env,
         const fn = route || (await import('./conversation-turn-wiring.js')).routeInboundToTurn
         const rs = runtimeStore || (await (await import('@/lib/agent/runtime/runtime-service.js')).getVerifiedRuntimeStore(env))
         const r = await fn({ providerMessageSid: sid, inboundVersion, inboundRevision, deterministic: input.deterministic_intent ? { intent: input.deterministic_intent, compliance_flag: input.compliance_flag || null } : null, env, runtimeStore: rs })
-        return { result: turnRouteResult(r) }
+        // rc-8.5.21 v4 (S2 / S3): a routed stop / possible stop / denial WRITES its protective effects here (the
+        // deciding modules write none); a failed write throws, so the job retries — never a silent drop
+        if (r?.immediate?.effects_input) {
+          await ctx.step('effects', { progress: { step: 'effects', steps_done: 0, steps_total: 1, pct: 0 } })
+          const sb = supabase || (await import('@/lib/supabase/default-client.js')).getDefaultSupabaseClient()
+          const { applyCanonicalDecisionEffects } = await import('./conversation-decision-effects.js')
+          r.effects = await applyCanonicalDecisionEffects({ supabase: sb, ...r.immediate.effects_input }, effectsDeps)
+          if (r.immediate.precautionary) {
+            const items = operatorItems || (await defaultOperatorItems(env))
+            const res = await items.syncWorkItems({ ...ctx.lease, items: [precautionaryHoldWorkItem({ subject_id: `inbound:${encodeRef(String(r.immediate.inbound_id))}`.slice(0, 120), sources: r.immediate.sources || [] })], close_missing: false })
+            if (!res?.ok) throw Object.assign(new Error('OPERATOR_ITEM_REFUSED'), { code: 'OPERATOR_ITEM_REFUSED', reason: res?.reason || null })
+          }
+        }
+        return { result: { ...turnRouteResult(r), immediate: r?.immediate ? { terminal: r.immediate.terminal || null, precautionary: Boolean(r.immediate.precautionary), effects: (r.effects?.effects || []).map((e) => `${e.kind}:${e.ok ? 'ok' : 'failed'}`) } : null } }
       }
       await ctx.step('decide', { progress: { step: 'decide', steps_done: 0, steps_total: 1, pct: 0 } })
       const exec = run || (await import('./conversation-ai-shadow-wiring.js')).runConversationAiShadowForInbound

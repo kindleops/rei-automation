@@ -37,6 +37,7 @@
 //      max_retries 1 (dispatchable exactly once; no retry after any failure or ambiguous accept);
 //      then a 'queued' lifecycle event. Provider outcomes are appended by the runner. A crash between
 //      the record and the queue insert is finished by the retry (the record's exact text).
+import { readStop } from '@/lib/domain/conversation-ai/stop-reading.js'
 import crypto from 'node:crypto'
 
 import { insertSupabaseSendQueueRow } from '@/lib/supabase/sms-engine.js'
@@ -223,6 +224,13 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   if (!thread.some((m) => m.id === state.input.inbound.id)) thread.push({ ...state.input.inbound, direction: 'inbound' })
   const inboundRow = thread.find((m) => m.id === inboundId)
   if (!inboundRow) return held(['inbound_not_in_thread'])
+  // rc-8.5.21 v4 (S2, defense in depth behind the decide step): never a reply to a turn with ANY stop-like
+  // reading — the fresh inbound text (every turn member) or the recorded understanding
+  {
+    const memberText = thread.filter((m) => m.direction === 'inbound' && (m.id === inboundId || (turn?.inbound_ids || []).map(clean).includes(clean(m.id)))).map((m) => m.body ?? '').join('\n')
+    const sr = readStop({ text: memberText || inboundRow.body || '', judgment: record.judgment || null })
+    if (sr.confirmed || sr.uncertain) return held([`stop_like_reading:${String(sr.sources[0] || 'unknown').slice(0, 40)}`])
+  }
   const inbounds = thread.filter((m) => m.direction === 'inbound').sort((a, b) => t(a) - t(b))
   const latest = inbounds[inbounds.length - 1]
   if (latest && latest.id !== inboundId) return out('stale_inbound', ['newer_inbound_arrived'], { action: 're_decide', latest_inbound_id: latest.id })

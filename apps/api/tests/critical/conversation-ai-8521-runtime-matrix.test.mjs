@@ -84,6 +84,14 @@ function world({ messages, queue = [], threadState = { thread_key: TK, our_numbe
     const d = createR3TurnDispatcher({ supabase: sb, jobId: 'job-1', deps: r3deps })
     return wrap ? wrap(d) : d
   }
+  // rc-8.5.21 v4: a routed stop / possible stop / denial's protective effects (written by the runtime handler;
+  // recorded here — the fake Supabase refuses writes)
+  const effects = []
+  const effectsDeps = { writers: {
+    suppress: async (x) => { effects.push({ kind: 'opt_out', phone: x.phone }); return { ok: true } },
+    precautionary: async (x) => { effects.push({ kind: 'precautionary_no_contact', phone: x.phone }); return { ok: true, held: true } },
+    ownership: async (_sb, x) => { effects.push({ kind: 'property_denial', property_id: x.property_id, outcome: x.outcome }); return { ok: true } },
+  } }
   const route = (sid, deterministic = null) => routeInboundToTurn({ providerMessageSid: sid, env: ENV, supabase: sb, runtimeStore, turnStore: store, now: clock.iso(), deterministic })
   /** run the latest job for its turn at (or after) its due time */
   const runLatest = async ({ decide = decider(), dispatch = dispatcher(), at = null } = {}) => {
@@ -92,7 +100,7 @@ function world({ messages, queue = [], threadState = { thread_key: TK, our_numbe
     clock.set(Math.max(clock.now(), Date.parse(at || job.not_before) + 1000))
     return runDueTurn({ ...ref, store, worker: 'w1', decideTurn: decide, dispatch, enqueueAt: (o) => runtimeStore.enqueueEventAt(o) })
   }
-  return { tables, sb, clock, store, jobs, runtimeStore, provider, queueRows, records, decider, dispatcher, route, runLatest, shadowRows, readSwitch }
+  return { tables, sb, clock, store, jobs, runtimeStore, provider, queueRows, records, decider, dispatcher, route, runLatest, shadowRows, readSwitch, effects, effectsDeps }
 }
 
 const OWN_Q = (ms) => ev('o1', 'outbound', 'Hi Dana, this is Helen. Do you still own the house on Oak St?', ms)
@@ -214,6 +222,11 @@ test('STOP during the delay: the open turn is cancelled immediately (no model, n
   msgs.push(ev('i2', 'inbound', 'STOP', T0 - 1 * MIN))
   const s = await w.route('SMi2')
   assert.equal(s.code, 'SUPPRESSED_NOW')
+  // rc-8.5.21 v4 (S2): the canonical path RECORDS the stop (decision + the durable opt-out write)
+  assert.equal(s.immediate?.terminal, 'SUPPRESS', JSON.stringify(s.immediate))
+  const { applyCanonicalDecisionEffects } = await import('../../src/lib/ai/conversation-decision-effects.js')
+  await applyCanonicalDecisionEffects({ supabase: w.sb, ...s.immediate.effects_input }, w.effectsDeps)
+  assert.deepEqual(w.effects.map((e) => e.kind), ['opt_out'])
   const r = await w.runLatest()
   assert.equal(r.code, 'TURN_STATE_CANCELLED')
   assert.equal(w.queueRows.length, 0)

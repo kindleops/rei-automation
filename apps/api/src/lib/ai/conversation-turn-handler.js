@@ -53,13 +53,35 @@ export function budgetExhaustedTurnWorkItem({ turn_id, version, budget_blocks = 
   }
 }
 
-async function defaultOperatorItems(env) {
+export async function defaultOperatorItems(env) {
   const { getAgentPgPool } = await import('@/lib/agent/live/live-agent.js')
   const { createOperationsPgStore } = await import('@/lib/agent/operations/operations-store.js')
   return createOperationsPgStore({ pool: getAgentPgPool(env) })
 }
 
-export function createConversationTurnHandler({ env = process.env, store = null, decide = null, dispatch = undefined, runtimeStore = null, trackerFor = null, supabase = null, operatorItems = null, provider = null } = {}) {
+/** rc-8.5.21 v4: wrap a decider so the decision's protective effects are WRITTEN before the turn is finalized. */
+export function withDecisionEffects(decideTurn, { supabase, effectsDeps = {}, raiseOperatorItem = null } = {}) {
+  return async (claim) => {
+    const d = await decideTurn(claim)
+    if (d?.effects_input) {
+      const { applyCanonicalDecisionEffects } = await import('./conversation-decision-effects.js')
+      d.effects = await applyCanonicalDecisionEffects({ supabase, ...d.effects_input }, effectsDeps)
+      // a PRECAUTIONARY contact hold is never silent: ONE critical operator item (a failed write throws → retry)
+      if (d.precautionary && typeof raiseOperatorItem === 'function') await raiseOperatorItem(precautionaryHoldWorkItem({ subject_id: claim.turn_id || d.inbound?.thread_key || 'turn', sources: d.canonical?.terminal?.evidence?.sources || [] }))
+    }
+    return d
+  }
+}
+
+export function precautionaryHoldWorkItem({ subject_id, sources = [] }) {
+  return {
+    dedupe_key: `conversation:precautionary_no_contact:${subject_id}`, kind: 'escalation', severity: 'critical', escalated: true,
+    title: 'Possible opt-out: contact held (no messages) until a person decides', subject_type: 'conversation', subject_id,
+    detail: { reason: 'possible_opt_out_unconfirmed', hold: 'precautionary_no_contact', scope: 'contact', sources: sources.slice(0, 4).map((x) => String(x).replace(/[0-9]/g, 'n').replace(/[^a-z_:.-]/gi, '_').slice(0, 60)), release: 'operator_releases_after_reading_thread' },
+  }
+}
+
+export function createConversationTurnHandler({ env = process.env, store = null, decide = null, dispatch = undefined, runtimeStore = null, trackerFor = null, supabase = null, operatorItems = null, provider = null, effectsDeps = {} } = {}) {
   return Object.freeze({
     kind: CONVERSATION_TURN_KIND,
     async run(ctx) {
@@ -79,7 +101,7 @@ export function createConversationTurnHandler({ env = process.env, store = null,
       const sb = supabase || (store && decide ? null : await defaultSupabase())
       const turnStore = store || (await defaultTurnStore(sb))
       const wiring = decide ? null : await import('./conversation-turn-wiring.js')
-      const decideTurn = decide || wiring.createCanonicalTurnDecider({ supabase: sb, env, tracker: trackerFor ? trackerFor(ctx) : null, remainingMs: ctx.remainingMs, signal: ctx.signal, ...(provider ? { provider } : {}) })
+      const innerDecide = decide || wiring.createCanonicalTurnDecider({ supabase: sb, env, tracker: trackerFor ? trackerFor(ctx) : null, remainingMs: ctx.remainingMs, signal: ctx.signal, ...(provider ? { provider } : {}) })
       // rc-8.5.21: the R3 dispatcher is wired; it only ever receives a reply the decider authorised
       // (kill switch + policy + scope), and R3 re-reads every switch before any enqueue
       const dispatchTurn = dispatch !== undefined ? dispatch : (await import('./conversation-turn-dispatch.js')).createR3TurnDispatcher({ supabase: sb, jobId: ctx.job.job_id })
@@ -95,6 +117,13 @@ export function createConversationTurnHandler({ env = process.env, store = null,
           if (!res?.ok) throw Object.assign(new Error('OPERATOR_ITEM_REFUSED'), { code: 'OPERATOR_ITEM_REFUSED', reason: res?.reason || null })
           return res
         }
+        const raiseItem = async (item) => {
+          const items = operatorItems || (await defaultOperatorItems(env))
+          const res = await items.syncWorkItems({ ...ctx.lease, items: [item], close_missing: false })
+          if (!res?.ok) throw Object.assign(new Error('OPERATOR_ITEM_REFUSED'), { code: 'OPERATOR_ITEM_REFUSED', reason: res?.reason || null })
+          return res
+        }
+        const decideTurn = withDecisionEffects(innerDecide, { supabase: sb, effectsDeps, raiseOperatorItem: raiseItem })
         r = await runDueTurn({ ...ref, store: turnStore, worker: `turn.${ctx.job.job_id}`.slice(0, 80), decideTurn, dispatch: dispatchTurn, enqueueAt, raiseOperatorItem })
       } catch (err) {
         if (err?.code === 'TURN_NOT_DUE') ctx.yield('turn_not_due')

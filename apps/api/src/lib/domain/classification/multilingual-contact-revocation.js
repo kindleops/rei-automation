@@ -51,7 +51,19 @@
 //
 // Rules only, no AI, no I/O.
 
-export const MULTILINGUAL_CONTACT_REVOCATION_VERSION = "ml_contact_revocation_v2_2026_10_19";
+import {
+  ES_REMOVE_LEMMAS, ES_REMOVE_CORE_LEMMAS, ES_REMOVE_SOFT_LEMMAS, ES_STOP_DE_LEMMAS, ES_STOP_NOUN_LEMMAS, ES_AVOID_LEMMAS, ES_COMM_LEMMAS,
+  EN_COMM_VERB, EN_COMM_NOUN, alternation, spanishFormsWithClitics, spanishView, matchUncertainStopWord,
+  NEGATED_CONTINUATION_RE, CONTINUATION_COMM_OBJECT_RE, REVOCATION_MORPHOLOGY_VERSION,
+} from "./revocation-morphology.js";
+
+// v3 (rc-8.5.21 v4 S1): Spanish families are GENERATED from verb lemma classes (revocation-morphology.js:
+// remove / stop / avoid / communication; every imperative, voseo, usted / ustedes, subjunctive and clitic
+// form), formal registers in every language, an English communication lexicon inside every language's
+// frames (code-switching), Cantonese in the Chinese family, uncertain whole-message stop-like words as a
+// possible opt-out, and the negated-continuation carve ("j'arrête pas de …", "no paro de …").
+export const MULTILINGUAL_CONTACT_REVOCATION_VERSION = "ml_contact_revocation_v3_2026_10_20";
+export { REVOCATION_MORPHOLOGY_VERSION };
 
 export const REVOCATION_FAMILIES = Object.freeze({
   STOP_SENDING: "stop_sending",
@@ -100,7 +112,9 @@ export function revocationViews(message = "") {
     .replace(/ئ/g, "ي");
   const cyr = lower.replace(/ё/g, "е");
   const vi_ascii = !VI_DIACRITIC_RE.test(lower);
-  return { raw: nfc, lower, latin, arabic, cyr, vi_ascii };
+  // Spanish: preterites (word-final é / ó) marked BEFORE folding, so "quité" / "dejé" never read as "quite" / "deje"
+  const es = spanishView(lower);
+  return { raw: nfc, lower, latin, arabic, cyr, vi_ascii, es };
 }
 
 // Unicode-aware word edges (JS \b is ASCII-only).
@@ -129,7 +143,7 @@ const add = (language, family, view, source, opts = {}) => {
   const TRANS = "(?:mand(?:e|en|es)|envi(?:e|en|es))";
   const LANG_OR_TIME = "(?:en\\s+(?:ingles|espanol|english|spanish|otro\\s+idioma)|tan\\s+(?:temprano|tarde)|a\\s+esta\\s+hora|de\\s+noche|en\\s+la\\s+noche|en\\s+la\\s+manana|despues\\s+de|antes\\s+de|hasta\\s+(?:el|la|mas)|al\\s+trabajo|ahorita|ahora\\s+mismo|hoy)";
   // lower view: "deje"/"pare" (usted imperative) is never "dejé"/"paré" (I stopped ...)
-  add(L, F.STOP_SENDING, "lower", `${B}(?:ya\\s+)?(?:dej(?:a|en|an|ar|ad)|par(?:a|en|an|ar|ad)|deje|pare)\\s+(?:usted\\s+|ustedes\\s+)?(?:ya\\s+)?de\\s+(?:(?:me|nos)\\s+)?(?:estar\\s+)?(?:${COMM_INF}(?:me|nos|le|les)?|buscar(?:me|nos)|${COMM_GER_ACC})${E}`, { callVerb: /llam|marc/ });
+  add(L, F.STOP_SENDING, "lower", `${B}(?<!(?:^|[^\\p{L}])(?:no|nunca|jamás|jamas|ni)\\s)(?:ya\\s+)?(?:dej(?:a|en|an|ar|ad)|par(?:a|en|an|ar|ad)|deje|pare)\\s+(?:usted\\s+|ustedes\\s+)?(?:ya\\s+)?de\\s+(?:(?:me|nos)\\s+)?(?:estar\\s+)?(?:${COMM_INF}(?:me|nos|le|les)?|buscar(?:me|nos)|${COMM_GER_ACC})${E}`, { callVerb: /llam|marc/ });
   add(L, F.STOP_SENDING, "latin", `${B}basta\\s+(?:ya\\s+)?(?:de|con)\\s+(?:(?:los|sus|tus|tanto|tantos|estos|esos|esas|tantas)\\s+)?(?:mensajes|mensajitos|textos|llamadas|sms|msjs|molestar|escribir|mandar)${E}`);
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+${ME}\\s+(?:vuelv(?:a|an|as|e|en)\\s+a\\s+)?${INTRANS}${E}(?!\\s+${LANG_OR_TIME})`, { callVerb: /llam|marqu/ });
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+${ME}\\s+${TRANS}\\s+(?:(?:ya|usted|ustedes|tu)\\s+)?(?:mas|\\+|nada|ningun\\w*|mensaj\\w*|msjs?|mjs|mensajitos|textos?|text|txts?|sms|whats\\w*|propuestas|ofertas|informacion|info|cosas|eso|esto|publicidad|spam)${E}(?!\\s+(?:por|al)\\s+(?:correo|email|mail|carta))`);
@@ -164,10 +178,73 @@ const add = (language, family, view, source, opts = {}) => {
   add(L, F.WRONG_NUMBER, "latin", `${B}(?:numero|num|telefono)\\s+(?:equivocado|incorrecto|errado|erroneo|mal)${E}|${B}(?:se\\s+)?equivoc\\w*\\s+de\\s+(?:numero|persona)${E}|${B}tiene(?:n)?\\s+(?:el\\s+)?numero\\s+(?:equivocado|incorrecto|mal)${E}|${B}no\\s+(?:conozco|se\\s+quien\\s+es)\\s+(?:a\\s+)?(?:esa\\s+persona|ese\\s+senor|esa\\s+senora|nadie\\s+(?:con\\s+ese\\s+nombre|asi))${E}|${B}este\\s+no\\s+es\\s+(?:el\\s+)?(?:numero|telefono|cel)\\s+de${E}|${B}aqui\\s+no\\s+(?:vive|hay)\\s+nadie\\s+(?:con\\s+ese\\s+nombre|asi|que\\s+se\\s+llame)`);
 }
 
+// ── Spanish, GENERATED (es view: preterites marked, accents folded) ─────────
+// Every form of every lemma class (revocation-morphology.js). The hand-listed rules above stay as a
+// second net; these are the general grammar: remove-from-list / stop-de / stop + communication noun /
+// avoid + infinitive / negated communication / formal requests, with voseo, usted / ustedes, vosotros,
+// subjunctive, present-as-request and clitics.
+{
+  const L = "Spanish";
+  const formsOf = (lemmas, o) => spanishFormsWithClitics(lemmas, o);
+  const ME_CL = ["me", "nos"];
+  const meForms = (lemmas) => {
+    const out = [];
+    for (const c of lemmas) for (const base of [...c.inf, ...c.imp, ...c.subj, ...c.ger]) for (const cl of ME_CL) out.push(`${base}${cl}`);
+    for (const c of lemmas) for (const base of c.imp.filter((x) => /d$/.test(x))) out.push(`${base.slice(0, -1)}me`);
+    return out;
+  };
+  const REM_ANY = alternation(formsOf(ES_REMOVE_LEMMAS));
+  const REM_ME = alternation([...meForms(ES_REMOVE_LEMMAS), ...meForms(ES_REMOVE_SOFT_LEMMAS)]);
+  const REM_CORE_ME = alternation(meForms(ES_REMOVE_CORE_LEMMAS));
+  const REM_SOFT_ANY = alternation(formsOf(ES_REMOVE_SOFT_LEMMAS));
+  const STOP_DE = alternation(formsOf(ES_STOP_DE_LEMMAS, { reflexive: true }));
+  const STOP_N = alternation(formsOf(ES_STOP_NOUN_LEMMAS, { clitics: ["le", "les"], reflexive: true }));
+  const AVOID = alternation(formsOf(ES_AVOID_LEMMAS));
+  const COMM_INF_ME = alternation(ES_COMM_LEMMAS.flatMap((c) => [...c.inf, ...c.ger].flatMap((b) => [`${b}me`, `${b}nos`])));
+  const COMM_INF_ANY = alternation(ES_COMM_LEMMAS.flatMap((c) => [...c.inf, ...c.ger, ...[...c.inf, ...c.ger].flatMap((b) => [`${b}me`, `${b}nos`, `${b}le`, `${b}les`])]));
+  const COMM_SUBJ = alternation(ES_COMM_LEMMAS.flatMap((c) => c.subj));
+  const COMM_GER = alternation(ES_COMM_LEMMAS.flatMap((c) => c.ger));
+  const NOUN = `(?:mensajes?|mensajitos?|textos?|msjs?|mjs|sms|llamadas?|whatsapps?|wasaps?|contactos?|comunicacion(?:es)?|notificaciones|publicidad|promociones|spam|envios?|mensajeria|molestias?|${EN_COMM_NOUN})`;
+  const DET = "(?:el|los|la|las|todo|toda|todos|todas|cualquier|su|sus|tanto|tantos|tantas|estos|esos|esas|estas|este|ese|tu|tus|cada)";
+  const LIST = "(?:lista|listas|listado|base\\s+de\\s+datos|bases\\s+de\\s+datos|registros?|contactos|directorio|mailing|database|sistema|agenda|padron|cartera)";
+  const LDET = "(?:su|tu|la|sus|tus|las|esta|esa|estas|esas|vuestra|el|los|ese|este|todas?\\s+(?:sus|las)|sus\\s+listas?\\s+de|la\\s+lista\\s+de)";
+  const NOT_NEG = "(?<!(?:^|[^\\p{L}])(?:no|nunca|jamas|ni)\\s(?:me\\s|nos\\s|se\\s|le\\s|les\\s|lo\\s|la\\s)?)";
+  const FILL = "(?:ya|usted|ustedes|vos|tu|por\\s+favor|porfa|porfavor|xfa|x\\s+favor|ahora|ahorita|de\\s+una\\s+vez|en\\s+serio|mejor|nomas|nada\\s+mas|solo)";
+  const LANG_OR_TIME = "(?:en\\s+(?:ingles|espanol|english|spanish|otro\\s+idioma)|tan\\s+(?:temprano|tarde)|a\\s+esta\\s+hora|de\\s+noche|en\\s+la\\s+noche|en\\s+la\\s+manana|despues\\s+de|antes\\s+de|hasta\\s+(?:el|la|mas)|al\\s+trabajo|ahorita|ahora\\s+mismo|hoy)";
+  const CALL = /llam|marc|telefone|call/;
+  const MODAL = "(?:pueden|puede|podrian|podria|puedes|podrias|podes|van\\s+a|vas\\s+a|va\\s+a|quiero\\s+que|queremos\\s+que|necesito\\s+que|pido\\s+que|les\\s+pido\\s+que|le\\s+pido\\s+que|favor\\s+de|quisiera\\s+que)";
+  // stop + de + communication: "dejá de mandarme", "absténgase de contactarme", "desistan de escribirme", "que dejen de llamarme"
+  add(L, F.STOP_SENDING, "es", `${B}${NOT_NEG}${STOP_DE}\\s+(?:${FILL}\\s+){0,3}(?:de|d)\\s+(?:(?:me|nos)\\s+)?(?:(?:estar|seguir|andar)\\s+)?(?:${COMM_INF_ANY}|${EN_COMM_VERB})${E}`, { callVerb: CALL });
+  // stop + de + a communication noun / "todo contacto": "absténgase de todo contacto", "desistan de los mensajes"
+  add(L, F.STOP_SENDING, "es", `${B}${NOT_NEG}${STOP_DE}\\s+(?:${FILL}\\s+){0,2}de\\s+(?:${DET}\\s+){1,2}(?:envio\\s+de\\s+)?${NOUN}${E}`, { callVerb: /llamad|call/ });
+  // stop + a communication NOUN: "cese todo contacto", "suspendan el envío de mensajes", "paren los mensajes", "párenle con los textos"
+  add(L, F.STOP_SENDING, "es", `${B}${NOT_NEG}${STOP_N}\\s+(?:${FILL}\\s+){0,2}(?:(?:con|de|a)\\s+)?(?:${DET}\\s+){1,2}(?:envio\\s+de\\s+|envios\\s+de\\s+)?${NOUN}${E}`, { callVerb: /llamad|call/ });
+  // avoid + communication infinitive with a me-clitic: "eviten contactarme", "evite volver a escribirnos"
+  add(L, F.NO_CONTACT, "es", `${B}${NOT_NEG}${AVOID}\\s+(?:${FILL}\\s+){0,2}(?:(?:volver|seguir)\\s+a\\s+)?(?:${COMM_INF_ME})${E}`, { callVerb: CALL });
+  // negated communication, every person (voseo subjunctive folds onto tú): "no me escribás", "no me contacten nunca más"
+  add(L, F.NO_CONTACT, "es", `${B}(?:no|nunca|jamas|ya\\s+no|nunca\\s+mas)\\s+(?:me|nos)\\s+(?:(?:vuelv(?:a|an|as)|sigan|siga|sigas|esten|este|estes|anden)\\s+(?:a\\s+)?)?(?:${COMM_SUBJ}|${COMM_GER}|${COMM_INF_ANY})${E}(?!\\s+${LANG_OR_TIME})(?![^.!;\\n]*\\?)`, { callVerb: CALL });
+  // formal request with a negated communication: "favor de no contactarme", "les pido no volver a escribirme",
+  // "le ruego que no me llame más", "agradecería no recibir más mensajes"
+  add(L, F.NO_CONTACT, "es", `${B}(?:favor\\s+de|por\\s+favor|le\\s+pido|les\\s+pido|le\\s+ruego|les\\s+ruego|le\\s+solicito|les\\s+solicito|solicito|pido|exijo|les\\s+exijo|requiero|agradecer\\w*|les\\s+agradecer\\w*|le\\s+agradecer\\w*|quisiera|me\\s+gustaria|prefiero)\\s+(?:(?:que|q)\\s+)?(?:ya\\s+)?(?:no|nunca\\s+mas|jamas)\\s+(?:(?:me|nos|se\\s+me)\\s+)?(?:(?:volver|vuelvan|vuelva|vuelvas)\\s+a\\s+)?(?:${COMM_INF_ANY}|${COMM_SUBJ}|recibir\\s+(?:mas\\s+|ningun\\w*\\s+)?(?:${NOUN}|nada))${E}(?!\\s+${LANG_OR_TIME})`, { callVerb: CALL });
+  // formal request to cease: "solicito que cese todo contacto", "pido que se suspenda el envío de mensajes"
+  add(L, F.STOP_SENDING, "es", `${B}(?:solicito|le\\s+solicito|les\\s+solicito|pido|le\\s+pido|les\\s+pido|exijo|requiero|favor\\s+de)\\s+(?:(?:que|q)\\s+)?(?:se\\s+)?${STOP_N}\\s+(?:(?:con|de)\\s+)?(?:${DET}\\s+){1,2}(?:envio\\s+de\\s+)?${NOUN}${E}`);
+  // remove + a list object: "bájenme de su lista", "me pueden quitar de la lista", "que me saquen de sus registros",
+  // "se me retire de su base de datos", "remuevan mi nombre de la lista"
+  add(L, F.REMOVE_FROM_LIST, "es", `${B}${NOT_NEG}(?:${REM_ME}|${REM_ANY})\\s+${GAP(40)}(?:de|del|d|desde)\\s+${LDET}\\s+${LIST}${E}`);
+  add(L, F.REMOVE_FROM_LIST, "es", `${B}${NOT_NEG}${REM_ME}\\s+${GAP(20)}(?:de|del|d)\\s+(?:(?:${LDET})\\s+)?${LIST}${E}`);
+  add(L, F.REMOVE_FROM_LIST, "es", `${B}${NOT_NEG}(?:me|nos|se\\s+me|se\\s+nos)\\s+(?:${MODAL}\\s+)?(?:${REM_ANY}|${REM_SOFT_ANY})\\s+${GAP(30)}(?:de|del|d)\\s+(?:(?:${LDET})\\s+)?${LIST}${E}`);
+  // remove my number / my data: "quiten mi teléfono", "eliminen mis datos", "borre este número"
+  add(L, F.REMOVE_FROM_LIST, "es", `${B}${NOT_NEG}(?:${REM_ANY}|${REM_ME})\\s+${GAP(20)}(?:mi|mis|este|nuestro|nuestros)\\s+(?:numero|num|telefono|tel|cel|celular|contacto|datos|informacion|info|registro|whats\\w*)${E}`);
+  // a bare clitic imperative of a CORE remove verb (+ fillers): "Bórrenme por favor", "Sáquenme ya"
+  add(L, F.REMOVE_FROM_LIST, "es", `${B}${NOT_NEG}${REM_CORE_ME}(?:\\s+(?:por\\s+favor|porfa|porfavor|xfa|x\\s+favor|ya|ahora|ahorita|gracias|de\\s+aqui|de\\s+aca|de\\s+esto|de\\s+todo|de\\s+una\\s+vez|ok))*\\s*(?:$|[.,!;])`);
+  // English stop + Spanish communication (code-switching): "stop mandándome mensajes", "please stop de escribirme"
+  add(L, F.STOP_SENDING, "es", `${B}(?:please\\s+|pls\\s+)?(?:stop|quit)\\s+(?:de\\s+)?(?:${COMM_GER}(?:me|nos)?|${COMM_INF_ME})${E}`, { callVerb: CALL });
+}
+
 // ── Portuguese ──────────────────────────────────────────────────────────────
 {
   const L = "Portuguese";
-  const COMM = "(?:mandar|enviar|escrever|ligar|contatar|contactar|incomodar|perturbar|chatear|encher|mensagear|textar|procurar|importunar|telefonar|mandando|enviando|escrevendo|ligando|incomodando|perturbando)";
+  const COMM = `(?:mandar|enviar|escrever|ligar|contatar|contactar|incomodar|perturbar|chatear|encher|mensagear|textar|procurar|importunar|telefonar|mandando|enviando|escrevendo|ligando|incomodando|perturbando|${EN_COMM_VERB})`;
   const NEG = "(?:nao|n|naum|nunca|jamais|nunca\\s+mais|nem)";
   const SUBJ = "(?:mande|mandem|envie|enviem|escreva|escrevam|ligue|liguem|contate|contatem|contacte|contactem|procure|procurem|incomode|incomodem|perturbe|perturbem|chame|chamem|telefone|telefonem|encha|encham|importune|importunem)";
   const NOT_WHY = "(?<!(?:por\\s*que|porque|pq|se|quando)\\s)";
@@ -179,6 +256,9 @@ const add = (language, family, view, source, opts = {}) => {
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+(?:quero|queremos|desejo|preciso)\\s+(?:mais\\s+)?(?:(?:que|q)\\s+(?:me|nos)\\s+(?:mand|envi|escrev|lig|contat|contact|procur|incomod|perturb|cham|telefon)\\w*|receber\\s+(?:mais\\s+)?(?:nada|(?:nenhuma\\s+)?(?:mensage\\w*|sms|ligac\\w*|contato))|(?:mais\\s+)?(?:mensage\\w*|sms|ligac\\w*|contato)|ser\\s+(?:mais\\s+)?(?:contatad|contactad|incomodad|perturbad)[oa]s?)${E}`, { callVerb: /lig|cham|telefon/ });
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+(?:entre(?:m)?|entrar)\\s+(?:mais\\s+)?em\\s+contato${E}`);
   add(L, F.NO_CONTACT, "latin", `${B}(?:sem\\s+mais|nada\\s+(?:mais\\s+)?de)\\s+(?:mensage\\w*|sms|ligac\\w*)${E}`);
+  // formal register: "abstenha-se de me contatar", "solicito que cessem o contato", "favor suspender o envio de mensagens"
+  add(L, F.STOP_SENDING, "latin", `${B}(?:abstenha|abstenham|abster)(?:-se|\\s+se)?\\s+de\\s+(?:me\\s+|nos\\s+)?(?:${COMM}|qualquer\\s+contato|(?:o|todo)\\s+contato)${E}`, { callVerb: /ligar|ligando|telefonar|call/ });
+  add(L, F.STOP_SENDING, "latin", `${B}(?:cess(?:e|em|ar|ou)|suspend(?:a|am|er)|interromp(?:a|am|er)|encerr(?:e|em|ar))\\s+(?:(?:o|os|a|as|todo|todos|toda|todas|qualquer|esse|esses|este|estes)\\s+){1,2}(?:envio\\s+de\\s+)?(?:contato|contacto|mensage\\w*|envios?|ligac\\w*|comunicac\\w*|sms|${EN_COMM_NOUN})${E}`, { callVerb: /ligac|call/ });
   const LIST = "(?:lista|listas|cadastro|cadastros|base\\s+de\\s+dados|contatos|banco\\s+de\\s+dados|mailing)";
   // imperative / infinitive / present only — never the past ("tirei a casa da lista")
   const REM = "(?:tir(?:e|a|em|ar)|retir(?:e|a|em|ar)|remov(?:a|e|am|er|em)|exclu(?:a|i|am|ir)|apag(?:ue|a|uem|ar)|delet(?:e|a|em|ar)|risc(?:a|ar|que)|elimin(?:e|a|em|ar))";
@@ -194,7 +274,11 @@ const add = (language, family, view, source, opts = {}) => {
 // ── French ──────────────────────────────────────────────────────────────────
 {
   const L = "French";
-  const COMM = "(?:ecrire|envoyer|contacter|appeler|harceler|texter|textoter|deranger|relancer|spammer|solliciter|importuner|embeter|emmerder|joindre|recontacter|telephoner)";
+  const COMM = `(?:ecrire|envoyer|contacter|appeler|harceler|texter|textoter|deranger|relancer|spammer|solliciter|importuner|embeter|emmerder|joindre|recontacter|telephoner|${EN_COMM_VERB})`;
+  // formal register: "veuillez cesser de me contacter", "je vous prie de ne plus m'écrire", "veuillez cesser tout contact"
+  add(L, F.STOP_SENDING, "latin", `${B}(?:veuillez|je\\s+vous\\s+prie\\s+de|merci\\s+de|priere\\s+de|nous\\s+vous\\s+prions\\s+de)\\s+(?:bien\\s+vouloir\\s+)?(?:cesser|arreter|stopper|suspendre)\\s+(?:de\\s+|d'\\s*|d\\s)(?:me\\s+|m'\\s*|m\\s+|nous\\s+)?${COMM}${E}`, { callVerb: /appeler|telephoner|call/ });
+  add(L, F.NO_CONTACT, "latin", `${B}(?:veuillez|je\\s+vous\\s+prie\\s+de|merci\\s+de|priere\\s+de)\\s+(?:bien\\s+vouloir\\s+)?ne\\s+(?:plus|jamais|plus\\s+jamais)\\s+(?:me\\s+|m'\\s*|nous\\s+)?${COMM}${E}`, { callVerb: /appeler|telephoner|call/ });
+  add(L, F.STOP_SENDING, "latin", `${B}(?<!(?:^|[^\\p{L}])(?:je|j'|on|ne|n'|n)\\s?)(?:cess(?:ez|e|er)|arret(?:ez|e|er)|stopp(?:ez|e|er)|suspend(?:ez|re))\\s+(?:(?:tout|toute|tous|toutes|les|vos|ces|cet|ce)\\s+){1,2}(?:contacts?|messages?|sms|textos?|envois?|appels?|sollicitations?|communications?|relances?|${EN_COMM_NOUN})${E}`, { callVerb: /appels?|call/ });
   const NOT_AUX = "(?<!(?:ai|as|a|avons|avez|ont|avais|avait|j'ai|suis|est|sont)\\s)";
   add(L, F.STOP_SENDING, "latin", `${B}${NOT_AUX}(?:arret(?:e|es|ez|er)|cess(?:e|es|ez|er)|stop(?:pez|pe)?)\\s+(?:donc\\s+|tout\\s+de\\s+suite\\s+|svp\\s+|s'il\\s+vous\\s+plait\\s+)?(?:de\\s+|d'|d\\s)(?:me\\s+|m'\\s*|m\\s+|nous\\s+)?${COMM}${E}`, { callVerb: /appeler|telephoner/ });
   add(L, F.STOP_SENDING, "latin", `(?:^|[,.!;:]\\s*|\\s)(?:arretez|arrete[sz]?)(?:\\s+(?:svp|stp|s'il\\s+vous\\s+plait|merci|maintenant|tout\\s+de\\s+suite))?\\s*[.!]*\\s*$`);
@@ -223,7 +307,7 @@ const add = (language, family, view, source, opts = {}) => {
   const ME = "(?:m|mwen|mw|mwn|m')";
   const TO_ME = "(?:ban\\s*(?:m|mwen|mw)|ba\\s*(?:m|mwen|mw)|bam|banm|pou\\s+(?:m|mwen)|(?:m|mwen|mw|mwn))";
   const STOP = "(?:sispann|sispan|sispn|sipann|sispanm|sespann|kanpe|estope|stope)";
-  const COMM = "(?:voye|vwoye|voy|ekri|rele|kontakte|kontakter|kontak|deranje|anmede|anbete|tekste|texte|teks|text|mesaj|ankese)";
+  const COMM = `(?:voye|vwoye|voy|ekri|rele|kontakte|kontakter|kontak|deranje|anmede|anbete|tekste|texte|teks|text|mesaj|ankese|${EN_COMM_VERB})`;
   const NOT_WHY = "(?<!(?:poukisa|pouki|pouki\\s+sa|si|le|lè|kile|kilè)\\s(?:ou\\s|nou\\s|w\\s)?)";
   add(L, F.STOP_SENDING, "latin", `${B}${STOP}\\s+(?:(?:tanpri|souple|non|la|non\\s+tanpri)\\s+)?${COMM}${E}`, { callVerb: /rele/ });
   add(L, F.STOP_SENDING, "latin", `(?:^|[,.!;:]\\s*|\\s)(?:tanpri\\s+)?(?:sispann|sispan|sipann|sispanm|kanpe)(?:\\s+(?:tanpri|souple|non|la|non\\s+tanpri|sa|sa\\s+a))?\\s*[.!]*\\s*$`);
@@ -243,7 +327,10 @@ const add = (language, family, view, source, opts = {}) => {
 // ── Italian ─────────────────────────────────────────────────────────────────
 {
   const L = "Italian";
-  const COMM = "(?:scriver|mandar|inviar|contattar|chiamar|messaggiar|disturbar|cercar|importunar|tartassar|assillar|telefonar|ricontattar|spammar)[a-z]*";
+  const COMM = `(?:(?:scriver|mandar|inviar|contattar|chiamar|messaggiar|disturbar|cercar|importunar|tartassar|assillar|telefonar|ricontattar|spammar)[a-z]*|${EN_COMM_VERB})`;
+  // formal register: "si astenga dal contattarmi", "la prego di non contattarmi più", "cessate ogni contatto"
+  add(L, F.STOP_SENDING, "latin", `${B}(?:si\\s+astenga|vi\\s+asteniate|astenetevi|astieniti|si\\s+astengano)\\s+(?:dal|dallo|dalla|da|di)\\s+(?:${COMM}|ogni\\s+contatto|qualsiasi\\s+contatto|contattarmi)`, { callVerb: /chiamar|telefonar|call/ });
+  add(L, F.STOP_SENDING, "latin", `${B}(?:cess(?:ate|i|are)|interromp(?:ete|a|ere)|sospend(?:ete|a|ere))\\s+(?:(?:ogni|qualsiasi|i|gli|le|questi|queste|tutti\\s+i|tutte\\s+le)\\s+){1,2}(?:contatt[oi]|messaggi|sms|chiamate|comunicazioni|invii)${E}`, { callVerb: /chiamate/ });
   add(L, F.STOP_SENDING, "latin", `${B}smett(?:i|a|ete|ila|etela|iamola|erla|ere)\\s+(?:(?:subito|per\\s+favore|gentilmente)\\s+)?di\\s+(?:mi\\s+)?${COMM}`, { callVerb: /chiamar|telefonar/ });
   add(L, F.STOP_SENDING, "latin", `${B}basta\\s+(?:con\\s+)?(?:(?:i|questi|i\\s+vostri|tutti\\s+questi|con\\s+i)\\s+)?(?:messaggi|sms|chiamate|telefonate)${E}`);
   const V = "(?:scriv|chiam|contatt|mand|cerc|disturb|messaggi|invi|telefon|ricontatt)";
@@ -266,6 +353,8 @@ const add = (language, family, view, source, opts = {}) => {
 {
   const L = "Polish";
   const COMM = "(?:pisac|dzwonic|wysylac|esemesowac|smsowac|nekac|zawracac(?:\\s+glowy)?|wydzwaniac|kontaktowac(?:\\s+sie)?|przesylac|spamowac)";
+  // formal register: "proszę zaprzestać kontaktu", "uprzejmie proszę o zaprzestanie wysyłania wiadomości"
+  add(L, F.STOP_SENDING, "latin", `${B}(?:zaprzesta\\w*|zaprzestanie|zaprzestania)\\s+(?:(?:dalszego|dalszych|wszelkiego|wszelkich)\\s+)?(?:kontakt\\w*|wysylani\\w*|pisani\\w*|dzwonieni\\w*|sms\\w*|wiadomosci|telefon\\w*|nekani\\w*)${E}`, { callVerb: /dzwonieni|telefon/ });
   add(L, F.STOP_SENDING, "latin", `${B}(?:przestan(?:cie)?|przestac|skoncz(?:cie)?|daj(?:cie)?\\s+sobie\\s+spokoj\\s+z)\\s+(?:(?:do\\s+mnie|mi|mnie|juz|prosze|wreszcie|w\\s+koncu)\\s+){0,3}(?:${COMM}|sms\\w*|wiadomosc\\w*|telefon\\w*)${E}`, { callVerb: /dzwonic|wydzwaniac|telefon/ });
   add(L, F.NO_CONTACT, "latin", `${B}nie\\s+(?:pisz|piszcie|dzwon|dzwoncie|wysylaj|wysylajcie|kontaktuj|kontaktujcie|nekaj|nekajcie|zawracaj|zawracajcie|wydzwaniaj|wydzwaniajcie|przesylaj|przesylajcie|spamuj|spamujcie)(?:\\s+sie)?${E}(?!\\s+(?:po\\s+angielsku|wieczorem|rano|tak\\s+pozno|tak\\s+wczesnie|teraz|dzisiaj))`, { callVerb: /dzwon|wydzwan/ });
   add(L, F.NO_CONTACT, "latin", `${B}nie\\s+(?:chce|chcemy|zycze\\s+sobie)\\s+(?:juz\\s+|wiecej\\s+)*(?:zadnych\\s+)?(?:wiadomosci|sms\\w*|smsow|kontaktu|telefonow|polaczen|byc\\s+(?:kontaktowan|nekan)\\w*|zeby\\s+(?:ktos\\s+)?(?:do\\s+mnie\\s+)?(?:pisal|dzwonil|pisali|dzwonili))`, { callVerb: /telefonow|polaczen|dzwonil/ });
@@ -284,7 +373,7 @@ const add = (language, family, view, source, opts = {}) => {
   const L = "Tagalog";
   const NEG = "(?:huwag|wag|huag|wg|hwag|'wag)";
   const FILL = "(?:mo|nyo|niyo|ninyo|n'yo|na|po|ako|akong|kong|ko|nang|ng|kayo|nyong|niyong|ninyong|nako|lang|pong|ulit|sakin|sa\\s+akin|kami|kaming|muna|kayong|niyong|nyo\\s+na)";
-  const COMM = "(?:i-?text|itext|mag-?text|magtext|text(?:in|an|ahan)?|tex|i-?txt|txt|i-?message|imessage|mag-?message|message(?:an)?|mensahe|tawag(?:an|in)?|tumawag|mag-?call|i-?call|kontakin|kontakan|i-?contact|contact(?:in)?|padalhan|magpadala|istorbo(?:hin)?|abala(?:hin)?|guluhin|kulitin|mangulit)";
+  const COMM = "(?:i-?text|itext|mag-?text|magtext|text(?:in|an|ahan)?|tex|i-?txt|txt|i-?message|imessage|mag-?message|message(?:an)?|mensahe|tawag(?:an|in)?|tumawag|mag-?call|i-?call|kontakin|kontakan|i-?contact|contact(?:in)?|padalhan|magpadala|istorbo(?:hin)?|abala(?:hin)?|guluhin|kulitin|mangulit|mag-?send|i-?send|send(?:an)?|i-?pm|pm|mag-?pm|i-?chat|chat(?:in)?|mag-?msg|msg|i-?msg|sms)";
   add(L, F.NO_CONTACT, "latin", `${B}${NEG}\\s+(?:${FILL}\\s+){0,4}${COMM}${E}`, { callVerb: /tawag|tumawag|call/ });
   add(L, F.NO_CONTACT, "latin", `${B}ayoko\\s+(?:na\\s+)?(?:ng|nang)?\\s*(?:mga\\s+)?(?:text|message|tawag|mensahe|ma-?text|matext|kontak|contact|txt)${E}`, { callVerb: /tawag/ });
   add(L, F.NO_CONTACT, "latin", `${B}(?:hindi|di)\\s+(?:ko\\s+)?(?:na\\s+)?(?:kailangan|gusto)\\s+(?:ng|nang)\\s+(?:mga\\s+)?(?:text|message|tawag|mensahe)${E}`, { callVerb: /tawag/ });
@@ -304,7 +393,7 @@ const add = (language, family, view, source, opts = {}) => {
 {
   const L = "Vietnamese";
   const ME = "(?:tôi|em|anh|chị|mình|tui|tao|t|con|cháu|chúng\\s+tôi)";
-  const COMM = "(?:nhắn(?:\\s+tin)?|gửi(?:\\s+tin(?:\\s+nhắn)?)?|liên\\s+(?:lạc|hệ)|gọi(?:\\s+điện)?|làm\\s+phiền|quấy\\s+rầy|quấy\\s+rối|text|tin\\s+nhắn|spam|nhắn\\s+tin)";
+  const COMM = "(?:nhắn(?:\\s+tin)?|gửi(?:\\s+tin(?:\\s+nhắn)?)?|liên\\s+(?:lạc|hệ)|gọi(?:\\s+điện)?|làm\\s+phiền|quấy\\s+rầy|quấy\\s+rối|text|tin\\s+nhắn|spam|nhắn\\s+tin|inbox|ib|message|msg|sms|call|nt|mess)";
   add(L, F.NO_CONTACT, "lower", `${B}(?:xin\\s+|làm\\s+ơn\\s+|vui\\s+lòng\\s+)?(?:đừng|đừng\\s+có|không\\s+được|cấm)\\s+${COMM}`, { callVerb: /gọi/ });
   add(L, F.NO_CONTACT, "lower", `${B}vui\\s+lòng\\s+không\\s+${COMM}`, { callVerb: /gọi/ });
   add(L, F.NO_CONTACT, "lower", `${B}(?:không|ko|k|hok|chẳng)\\s+(?:cần\\s+|muốn\\s+)?${COMM}[^.!?]{0,20}?\\s+nữa${E}`, { callVerb: /gọi/ });
@@ -322,7 +411,7 @@ const add = (language, family, view, source, opts = {}) => {
 {
   const L = "Vietnamese";
   const ME = "(?:toi|em|anh|chi|minh|tui|tao|con|chau)";
-  const COMM = "(?:nhan(?:\\s+tin)?|gui(?:\\s+tin(?:\\s+nhan)?)?|lien\\s+lac|lien\\s+he|goi(?:\\s+dien)?|lam\\s+phien|quay\\s+ray|text|spam)";
+  const COMM = "(?:nhan(?:\\s+tin)?|gui(?:\\s+tin(?:\\s+nhan)?)?|lien\\s+lac|lien\\s+he|goi(?:\\s+dien)?|lam\\s+phien|quay\\s+ray|text|spam|inbox|ib|message|msg|sms|call|mess)";
   const o = { viAscii: true };
   add(L, F.NO_CONTACT, "latin", `${B}(?:xin\\s+|lam\\s+on\\s+|vui\\s+long\\s+)?(?:dung|dung\\s+co|khong\\s+duoc|cam)\\s+${COMM}${E}`, { ...o, callVerb: /goi/ });
   add(L, F.NO_CONTACT, "latin", `${B}(?:khong|ko|k|hok)\\s+(?:can\\s+|muon\\s+)?${COMM}[^.!?]{0,20}?\\s+nua${E}`, { ...o, callVerb: /goi/ });
@@ -349,13 +438,24 @@ const add = (language, family, view, source, opts = {}) => {
   add(L, F.UNSUBSCRIBE, "lower", `退订|退訂|取消订阅|取消訂閱|退出(?:名单|名單)`);
   add(L, F.LEAVE_ALONE, "lower", `(?:别|別|不要)(?:再)?(?:烦|煩)我|让我清静|讓我清靜`);
   add(L, F.STOP_ASKING_PROPERTY, "lower", `${NEG}再?(?:问|問)(?:我)?(?:关于|關於)?(?:那个|那個|这个|這個)?(?:房子|房产|房產|物业|物業|地)`);
-  add(L, F.WRONG_NUMBER, "lower", `打错|打錯|发错|發錯|找错人|找錯人|错号|錯號|号码错|號碼錯|(?:错误|錯誤)的?(?:号码|號碼)`);
+  add(L, F.WRONG_NUMBER, "lower", `打错|打錯|发错|發錯|找错人|找錯人|错号|錯號|号码错|號碼錯|(?:错误|錯誤)的?(?:号码|號碼)|打錯咗|打错咗|搵錯人|搵错人`);
+  // CANTONESE + code-switching (rc-8.5.21 v4): 唔好 / 咪 / 唔使 / 千祈唔好 ("don't" / "no need"), 再 ("again"),
+  // 俾我 / 畀我 / 同我 ("to me"), with Chinese OR English communication words ("唔該唔好再send message俾我",
+  // "咪再打嚟", "唔使再搵我", "不要再text我", "别再call我了")
+  const NEG_YUE = "(?:唔該唔好|唔该唔好|請唔好|请唔好|千祈唔好|千萬唔好|千万唔好|唔好|咪|唔使|唔洗|唔准|不要|别|別|勿|请勿|請勿|请不要|請不要|不准|不许|不許|甭|不用)";
+  const TO_ME = "(?:俾我|畀我|比我|給我|给我|同我|跟我|搵我|找我|我)";
+  const COMM_ZH = `(?:${EN_COMM_VERB}|${MSG}|短訊|短讯|訊息|讯息|(?:发|發|傳|传|寄)(?:送)?(?:${MSG}|短訊|短讯|訊息|讯息|嘢|野|了|給我|给我|俾我|畀我)|聯絡|联络|聯繫|联系|打擾|打扰|騷擾|骚扰|(?<!麻)(?:煩|烦)(?!恼|惱)|打(?:電話|电话|嚟|黎|來|来)|電話|电话|搵我|找我)`;
+  add(L, F.NO_CONTACT, "lower", `${NEG_YUE}\\s*(?:再|又|成日|一直|繼續|继续)?\\s*(?:${TO_ME}\\s*)?${COMM_ZH}`, { callVerb: /電話|电话|打嚟|打黎|打來|打来|來電|来电|call/ });
+  add(L, F.STOP_SENDING, "lower", `(?:停止|唔該停止|唔该停止|請停止|请停止|唔好再|咪再|收手)\\s*(?:${TO_ME}\\s*)?(?:${EN_COMM_VERB}|${COMM_ZH})`, { callVerb: /電話|电话|打嚟|打來|打来|call/ });
+  add(L, F.REMOVE_FROM_LIST, "lower", `(?:將我|将我|幫我|帮我|唔該|唔该|請|请)\\s*(?:嘅|的)?\\s*(?:號碼|号码|電話|电话|名|資料|资料|number)?\\s*(?:由|從|从)?[^。！？!?]{0,10}?(?:刪除|删除|刪咗|删咗|剔除|移除|除名|delete|remove|del)`);
 }
 
 // ── Korean ──────────────────────────────────────────────────────────────────
 {
   const L = "Korean";
-  const COMM = "(?:문자|메시지|메세지|카톡|카카오톡|연락|전화|톡|메일)";
+  const COMM = "(?:문자|메시지|메세지|카톡|카카오톡|연락|전화|톡|메일|text|message|msg|sms|call|dm)";
+  // formal register: "연락을 삼가 주세요", "연락 자제 부탁드립니다", "문자 발송을 중단해 주세요"
+  add(L, F.STOP_SENDING, "lower", `(?:연락|문자|전화|메시지|메세지|발송|text|message|sms)\\s*(?:발송)?\\s*(?:을|를|은|는)?\\s*(?:삼가|자제|중단|중지|멈춰)`, { callVerb: /^전화/ });
   add(L, F.NO_CONTACT, "lower", `${COMM}\\s*(?:를|을|는|은|도|좀)?\\s*(?:더\\s*(?:이상)?\\s*|다시\\s*|두\\s*번\\s*다시\\s*)?(?:하지|보내지|주지|걸지|드리지)\\s*(?:마|말)`, { callVerb: /^전화/ });
   add(L, F.NO_CONTACT, "lower", `(?:더\\s*이상|다시는|다신)\\s*(?:${COMM}\\s*(?:을|를)?\\s*)?(?:하지|보내지|주지)\\s*(?:마|말)`, { callVerb: /전화/ });
   add(L, F.NO_CONTACT, "lower", `(?:연락|문자|전화|메시지)\\s*(?:을|를)?\\s*(?:원하지\\s*않|받고\\s*싶지\\s*않|안\\s*받)`, { callVerb: /^전화/ });
@@ -372,7 +472,7 @@ const add = (language, family, view, source, opts = {}) => {
 // ── Arabic (folded: alef / hamza / ta-marbuta / alef-maqsura / tashkeel) ──────
 {
   const L = "Arabic";
-  const COMM_N = "(?:ترسل|ترسلوا|ترسلو|تبعت|تبعتوا|تراسلني|تراسلوني|تتصل|تتصلوا|تزعجني|تزعجوني|مراسلتي|مراسلتنا|ارسال|الارسال|الاتصال|التواصل|ازعاجي|الازعاج|الرسايل|رسايل|المراسله|المراسلات|الرساله|المكالمات|الاتصالات)";
+  const COMM_N = "(?:ترسل|ترسلوا|ترسلو|تبعت|تبعتوا|تراسلني|تراسلوني|تتصل|تتصلوا|تزعجني|تزعجوني|مراسلتي|مراسلتنا|ارسال|الارسال|الاتصال|التواصل|ازعاجي|الازعاج|الرسايل|رسايل|المراسله|المراسلات|الرساله|المكالمات|الاتصالات|messages?|texts?|sms|msgs?|calls?)";
   add(L, F.STOP_SENDING, "arabic", `${B}(?:توقف|توقفوا|توقفي|وقف|اوقف|اوقفوا|كف|كفوا|بطل|بطلوا|يكفي|كفايه|خلاص|ارجو\\s+التوقف|الرجاء\\s+التوقف|يرجي\\s+التوقف)\\s+(?:عن\\s+|من\\s+)?${COMM_N}`, { callVerb: /الاتصال|المكالمات|الاتصالات/ });
   add(L, F.NO_CONTACT, "arabic", `${B}(?<!(?:ليش|لماذا|ليه|لما|اذا|لو)\\s)(?:لا|ما|رجاء\\s+لا|ارجوك\\s+لا|ارجو\\s+ان\\s+لا|من\\s+فضلك\\s+لا|ممنوع)\\s+(?:ترسل|ترسلوا|ترسلو|ترسلي|تبعت|تبعتوا|تبعتلي|تبعث|تبعثوا|تراسلني|تراسلوني|تراسلنا|تتصل|تتصلوا|تتصلي|تتواصل|تتواصلوا|تكتب|تكتبوا|تكتبلي|تزعجني|تزعجوني|تكلمني|تكلموني|تدق|ترن)${E}(?!\\s+(?:الا|قبل|بعد|في\\s+الصباح|بالليل|الان))(?![^.!؟?\\n]*[؟?])`, { callVerb: /تتصل|تكلم|تدق|ترن/ });
   add(L, F.NO_CONTACT, "arabic", `${B}(?:يرجي|ارجو|الرجاء|نرجو)\\s+عدم\\s+(?:الاتصال|الارسال|ارسال|مراسلتي|التواصل|ازعاجي)`, { callVerb: /الاتصال/ });
@@ -389,7 +489,9 @@ const add = (language, family, view, source, opts = {}) => {
 // ── Russian (ё folded) ──────────────────────────────────────────────────────
 {
   const L = "Russian";
-  const COMM = "(?:писать|звонить|присылать|отправлять|слать|беспокоить|названивать|спамить|донимать|надоедать|тревожить|рассылать|смс\\S*|сообщени\\S*|эсэмэски)";
+  const COMM = "(?:писать|звонить|присылать|отправлять|слать|беспокоить|названивать|спамить|донимать|надоедать|тревожить|рассылать|смс\\S*|сообщени\\S*|эсэмэски|sms|text\\S*|message\\S*)";
+  // formal register: "прошу прекратить рассылку", "прошу прекратить мне звонить", "требую прекратить контакты"
+  add(L, F.STOP_SENDING, "cyr", `${B}(?:прошу|просим|требую|убедительно\\s+прошу|пожалуйста)\\s+(?:вас\\s+)?(?:прекратить|перестать|остановить)\\s+(?:(?:мне|меня|любые|все|ваши|эту)\\s+){0,2}(?:${COMM}|рассылк\\S*|звонк\\S*|контакт\\S*|переписк\\S*)`, { callVerb: /звонить|звонк|названивать/ });
   add(L, F.STOP_SENDING, "cyr", `${B}(?:перестаньте|перестань|прекратите|прекрати|хватит|хорош|завязывайте|кончайте)\\s+(?:(?:мне|уже|пожалуйста|меня|наконец)\\s+){0,3}${COMM}`, { callVerb: /звонить|названивать/ });
   add(L, F.NO_CONTACT, "cyr", `${B}(?<!(?:почему|если|зачем)\\s)(?:не|больше\\s+не|никогда\\s+не|прошу\\s+не|просьба\\s+не|больше\\s+никогда\\s+не)\\s+(?:пишите|пиши|звоните|звони|беспокойте|беспокой|присылайте|присылай|отправляйте|шлите|шли|тревожьте|названивайте|связывайтесь|связывайся|донимайте|спамьте|писать|звонить|беспокоить)${E}(?!\\s+(?:после|до|утром|вечером|ночью|рано|поздно|по\\s+выходным|в\\s+выходные|сейчас|сегодня))`, { callVerb: /звон|названива/ });
   add(L, F.NO_CONTACT, "cyr", `${B}не\\s+надо\\s+(?:мне\\s+|больше\\s+)*(?:писать|звонить|беспокоить|присылать|слать)${E}`, { callVerb: /звонить/ });
@@ -432,7 +534,7 @@ exact("Mandarin", F.UNSUBSCRIBE, ["退订", "退訂", "取消订阅", "取消訂
 // Non-English only. Never the plain-disinterest vocabulary ("no me interesa",
 // "não tenho interesse"), never a bare "no".
 const TOKENS = [
-  ["Spanish", "latin", `${B}(?:quit|saqu|borr|elimin|remuev)[a-z]*(?:me|nme|nos)${E}|${B}(?:dej|par)(?:a|e|en)\\s+de\\s+[a-z]+(?:rme|rnos)${E}|${B}bloque(?:ar|o|e|en|ado|are)[a-z]*${E}|${B}acoso${E}|${B}lista\\s+negra${E}|${B}(?:insist|joder|chingar|fregar)[a-z]*(?:me|nos)${E}`],
+  ["Spanish", "latin", `${B}(?:quit|saqu|borr|elimin|remuev)[a-z]*(?:me|nme|nos)${E}|${B}baj(?:a|e|en|ad|ar)(?:me|nos)${E}(?!\\s+(?:el|la|los|las|un|una|su|tu)\\s+(?:precio|oferta|renta|cantidad|numero))|${B}(?:absten|abstengan?se|cese[n]?|desist)[a-z]*${E}|${B}(?:dej|par)(?:a|e|en)\\s+de\\s+[a-z]+(?:rme|rnos)${E}|${B}bloque(?:ar|o|e|en|ado|are)[a-z]*${E}|${B}acoso${E}|${B}lista\\s+negra${E}|${B}(?:insist|joder|chingar|fregar)[a-z]*(?:me|nos)${E}`],
   ["Portuguese", "latin", `${B}(?:tir|remov|exclu|apag)[a-z]*-me${E}|${B}me\\s+(?:tir|remov|exclu|apag)[a-z]+${E}|${B}(?:nao|n)\\s+(?:me\\s+)?(?:mande|envie|escreva|ligue|contate|incomode|perturbe)[a-z]*${E}(?!\\s+mais\\s+(?:tarde|cedo))|${B}parem${E}|${B}bloque(?:ar|ei|io)${E}`],
   ["French", "latin", `${B}(?:arret|cess)(?:e|es|ez|er)${E}|${B}(?:supprim|retir|enlev|effac)[a-z]*[- ]moi${E}|${B}(?:desabonn|desinscri)[a-z]*|${B}harcel[a-z]*|${B}ne\\s+(?:me\\s+|m')[a-z]+\\s+plus${E}`],
   ["Haitian Creole", "latin", `${B}(?:sispann|sispan|sipann|sispanm)${E}|${B}kanpe\\s+(?:voye|ekri|rele)${E}|${B}(?:efase|retire|wete)\\s+(?:m|mwen|nimewo)${E}|${B}pa\\s+[a-z]+\\s+(?:m|mwen)\\s+(?:anko|enko)${E}|${B}deranje\\s+(?:m|mwen)${E}|${B}anmede${E}`],
@@ -467,7 +569,7 @@ const TEXT_AFFIRMATIVE = [
 const TEXT_VERB_IN_SPAN = /mand|envi|escrib|escrev|mensag|mensaj|text|sms|ecri|envoy|messag|scriv|pisa|wysy|nhắn|gửi|nhan\s|gui\s|发|發|短信|簡訊|信息|訊息|문자|메시지|메세지|카톡|ترسل|رسا|راسل|تكتب|пис|сообщ|смс|voye|ekri|mesaj|tekst|kontak/iu;
 
 function viewText(v, view) {
-  return view === "latin" ? v.latin : view === "arabic" ? v.arabic : view === "cyr" ? v.cyr : v.lower;
+  return view === "latin" ? v.latin : view === "arabic" ? v.arabic : view === "cyr" ? v.cyr : view === "es" ? v.es : v.lower;
 }
 
 function matchesTextAffirmative(v) {
@@ -527,7 +629,23 @@ export function analyzeContactRevocation(message = "") {
   const wrong = hits.find((h) => h.family === F.WRONG_NUMBER);
   if (wrong) out.wrong_number = { language: wrong.language, family: wrong.family, rule_id: ruleId(wrong.family, wrong.language), span: wrong.span, version: MULTILINGUAL_CONTACT_REVOCATION_VERSION };
 
+  // NEGATED CONTINUATION (object / target analysis): "j'arrête pas de recevoir des offres", "no paro de pensar",
+  // "can't stop thinking about selling" — a negated stop whose subject is the seller: never a revocation. When the
+  // continued activity is OUR messages ("no paran de mandarme mensajes") it is a complaint that MAY be a stop:
+  // a possible opt-out (a person decides), never a confident one.
+  const continuation = NEGATED_CONTINUATION_RE.exec(v.lower) || NEGATED_CONTINUATION_RE.exec(v.latin);
+  if (continuation && !out.opt_out && !out.carved && !out.wrong_number) {
+    const aboutUs = CONTINUATION_COMM_OBJECT_RE.exec(v.lower) || CONTINUATION_COMM_OBJECT_RE.exec(v.latin);
+    if (aboutUs) out.possible_opt_out = { language: "Mixed", family: F.POSSIBLE_OPT_OUT, rule_id: ruleId(F.POSSIBLE_OPT_OUT, "continuation"), token: aboutUs[0].trim(), version: MULTILINGUAL_CONTACT_REVOCATION_VERSION };
+    return out;
+  }
   if (!out.opt_out && !out.carved && !out.wrong_number) {
+    // S3: a whole message that is an uncertain stop-like word ("thôi", "됐어요", "خلاص", "Ase atò", "ya chole")
+    const uncertain = matchUncertainStopWord(message);
+    if (uncertain) {
+      out.possible_opt_out = { language: uncertain.language, family: F.POSSIBLE_OPT_OUT, rule_id: `${ruleId(F.POSSIBLE_OPT_OUT, uncertain.language)}_uncertain_word`, token: uncertain.token, version: MULTILINGUAL_CONTACT_REVOCATION_VERSION };
+      return out;
+    }
     for (const t of TOKENS) {
       if (t.viAscii && !v.vi_ascii) continue;
       const m = t.re.exec(viewText(v, t.view));

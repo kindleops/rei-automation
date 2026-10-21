@@ -32,6 +32,7 @@
 // touches (each is checked at its own dispatch). A cancelled / failed row with
 // no sent_at is provably unsent and never a touch (requeues are safe).
 
+import { readStop } from "@/lib/domain/conversation-ai/stop-reading.js";
 import { SEND_TIME_BLOCK_REASONS } from "@/lib/domain/compliance/canonical-no-contact-states.js";
 import { evaluateOwnershipRecontact } from "@/lib/domain/queue/ownership-recontact-guard.js";
 import { checkAutomationHoldPort } from "@/lib/domain/holds-port/automation-hold-port.js";
@@ -96,6 +97,9 @@ export const SEND_TIME_GUARD_REASONS = Object.freeze({
   HOSTILE_THREAD_NO_NURTURE: "hostile_thread_no_nurture",
   // rc-8.5.21 v3: "take me off that one" about an identified property = a PROPERTY-SCOPED do-not-contact
   PROPERTY_DO_NOT_CONTACT: "property_do_not_contact",
+  // rc-8.5.21 v4 (S2, INDEPENDENT final-dispatch enforcement): the thread's LATEST inbound reads as a stop /
+  // possible stop (the combined stop reading), whatever any writer, label or suppression row says
+  LATEST_INBOUND_STOP_LIKE: "latest_inbound_stop_like",
 });
 const R = SEND_TIME_GUARD_REASONS;
 
@@ -118,7 +122,23 @@ const REASON_CODE = Object.freeze({
   [R.ALREADY_CONTACTED_PROPERTY]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.HOSTILE_THREAD_NO_NURTURE]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
   [R.PROPERTY_DO_NOT_CONTACT]: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+  [R.LATEST_INBOUND_STOP_LIKE]: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
 });
+
+/**
+ * rc-8.5.21 v4: the thread's latest inbound, if its text reads as a stop or a POSSIBLE stop and no operator
+ * released that reading (a precautionary_no_contact row for THAT inbound set to released). Pure.
+ */
+export function latestInboundStopLike(messages = [], automationSuppressions = []) {
+  const at = (m) => Date.parse(m?.event_timestamp || m?.created_at || "") || 0;
+  const latest = (messages || []).filter((m) => lower(m?.direction).startsWith("in")).sort((a, b) => at(b) - at(a))[0];
+  if (!latest || !clean(latest.message_body)) return null;
+  const r = readStop({ text: latest.message_body, deterministic: OPT_OUT_SIGNALS.has(lower(latest.detected_intent)) ? { intent: "opt_out", compliance_flag: "stop_texting" } : null });
+  if (!r.confirmed && !r.uncertain) return null;
+  const released = !r.confirmed && (automationSuppressions || []).some((s) => lower(s.suppression_type) === "precautionary_no_contact" && INACTIVE_SUPPRESSION_STATUSES.has(lower(s.status)) && clean(s.payload?.inbound_event_id) === clean(latest.id));
+  if (released) return null;
+  return { message_id: clean(latest.id) || null, confirmed: r.confirmed, sources: r.sources.slice(0, 4) };
+}
 
 /** Same sets as opener-reply-exclusion.js (a372ae53). Change both or neither. */
 export const PROPERTY_SCOPED_NOT_OWNER = Object.freeze(new Set([
@@ -303,6 +323,13 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
     if (!isActiveAutomationSuppression(s, now_ms)) continue;
     return block(R.AUTOMATION_SUPPRESSION, { suppression_type: s.suppression_type || null });
   }
+  // 2b. rc-8.5.21 v4 INDEPENDENT final-dispatch enforcement: the latest inbound's own text. A stop / possible
+  //     stop is never answered by any automated row, even if every writer missed it (an operator-composed
+  //     manual send is judged by the written suppression / hold rows above)
+  if (Array.isArray(facts.thread_messages) && facts.thread_messages.length && !(row?.metadata && row.metadata.manual_operator_send === true)) {
+    const stopLike = latestInboundStopLike(facts.thread_messages, facts.automation_suppressions || []);
+    if (stopLike) return block(R.LATEST_INBOUND_STOP_LIKE, { ...stopLike, scope: "contact", action: stopLike.confirmed ? "suppress" : "precautionary_hold_operator_review" });
+  }
   // 3 / 4 / 5. thread state
   for (const t of facts.threads || []) {
     if (!same(t.thread_key) && !same(t.canonical_e164)) continue;
@@ -405,7 +432,7 @@ export async function loadSendTimeContactFacts(supabase, row = {}, opts = {}) {
   const [suppressions, suppressions_by_number, automation_suppressions, threads_by_key, threads_by_e164, phones, inbound_replies] = await Promise.all([
     read(supabase.from("sms_suppression_list").select("phone_e164,phone_number,sender_phone_e164,is_active,suppression_type").in("phone_e164", variants).limit(50)),
     read(supabase.from("sms_suppression_list").select("phone_e164,phone_number,sender_phone_e164,is_active,suppression_type").in("phone_number", variants).limit(50)),
-    read(supabase.from("automation_suppressions").select("phone_e164,status,suppression_type,expires_at").in("phone_e164", variants).limit(50)),
+    read(supabase.from("automation_suppressions").select("phone_e164,status,suppression_type,expires_at,payload").in("phone_e164", variants).limit(50)),
     read(supabase.from("inbox_thread_state").select("thread_key,canonical_e164,property_id,is_suppressed,disposition,last_intent,stage,lifecycle_stage,contactability_status").in("thread_key", variants).limit(50)),
     read(supabase.from("inbox_thread_state").select("thread_key,canonical_e164,property_id,is_suppressed,disposition,last_intent,stage,lifecycle_stage,contactability_status").in("canonical_e164", variants).limit(50)),
     read(supabase.from("phones").select("phone_id,canonical_e164,phone,phone_raw,phone_contact_status,wrong_number_at,primary_prospect_id,canonical_prospect_id").in("canonical_e164", variants).limit(20)),

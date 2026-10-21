@@ -22,6 +22,8 @@
 // other-action carves) runs after them. Wrong-number and the uncertain
 // fail-safe are returned by analyzeContactRevocation, never by this matcher.
 import { analyzeContactRevocation, isChannelPreferenceOnly } from "./multilingual-contact-revocation.js";
+import { stopSpansAimedAtUs } from "./revocation-morphology.js";
+import { classifyStopScope, STOP_SCOPE } from "./stop-scope.js";
 
 export { analyzeContactRevocation };
 
@@ -52,7 +54,7 @@ const EXACT_KEYWORDS = Object.freeze({
 
 /** Contact-revocation phrases (anywhere in the message). */
 const PHRASES = Object.freeze([
-  ["Spanish", /\bd[eé]j(?:a|e|en|ame)\s+de\s+(?:escribir(?:me)?|mandar(?:me)?|enviar(?:me)?|contactar(?:me)?|llamar(?:me)?|molestar(?:me)?)\b|\bya\s+no\s+me\s+(?:escribas?|mandes?|env[ií]es?|contactes?|llames?)\b|\bno\s+me\s+vuelvas?\s+a\s+(?:escribir|mandar|contactar|llamar)\b|\bno\s+me\s+(?:mandes?|mande|env[ií]es?|env[ií]e)\s+(?:m[aá]s\s+)?(?:mensajes|textos)\b|\b(?:b[oó]rr|quit|sac)(?:a|e|en)(?:me)?\s+de\s+(?:tu|su)\s+lista\b|\bborre\s+mi\s+n[uú]mero\b/i],
+  ["Spanish", /(?<!\b(?:no|nunca)\s)\bd[eé]j(?:a|e|en|ame)\s+de\s+(?:escribir(?:me)?|mandar(?:me)?|enviar(?:me)?|contactar(?:me)?|llamar(?:me)?|molestar(?:me)?)\b|\bya\s+no\s+me\s+(?:escribas?|mandes?|env[ií]es?|contactes?|llames?)\b|\bno\s+me\s+vuelvas?\s+a\s+(?:escribir|mandar|contactar|llamar)\b|\bno\s+me\s+(?:mandes?|mande|env[ií]es?|env[ií]e)\s+(?:m[aá]s\s+)?(?:mensajes|textos)\b|\b(?:b[oó]rr|quit|sac)(?:a|e|en)(?:me)?\s+de\s+(?:tu|su)\s+lista\b|\bborre\s+mi\s+n[uú]mero\b/i],
   ["Portuguese", /\bpar[ea]\s+de\s+(?:me\s+)?(?:mandar|enviar|escrever|ligar|contatar|incomodar)\b|\bn[aã]o\s+me\s+(?:mande|envie|escreva|ligue|contate|procure)\s+mais\b|\b(?:remova|tire|apague)\s+(?:o\s+)?meu\s+n[uú]mero\b|\bme\s+(?:tire|remova)\s+da\s+(?:sua\s+)?lista\b/i],
   ["French", /\barr[eê]te[sz]?\s+de\s+m['’]?\s*(?:[eé]crire|envoyer|contacter|appeler|harceler)\b|\bne\s+m['’]?\s*(?:[eé]crivez|envoyez|contactez|appelez)\s+plus\b|\b(?:supprimez|retirez|effacez)\s+mon\s+num[eé]ro\b|\bretirez[- ]moi\s+de\s+(?:votre|la)\s+liste\b/i],
   ["German", /\bh[oö]ren\s+sie\s+auf,?\s+mir\s+zu\s+(?:schreiben|simsen|texten)\b|\bh[oö]r\s+auf,?\s+mir\s+zu\s+schreiben\b|\bschreiben\s+sie\s+mir\s+nicht\s+mehr\b|\bkontaktieren\s+sie\s+mich\s+nicht\s+mehr\b|\bkeine\s+(?:nachrichten|sms|textnachrichten)\s+mehr\b|\bl[oö]schen\s+sie\s+meine\s+nummer\b|\bnehmen\s+sie\s+mich\s+(?:von|aus)\s+(?:der|ihrer)\s+liste\b/i],
@@ -127,3 +129,26 @@ export function isMultilingualOptOut(message = "") {
 }
 
 export default matchMultilingualOptOut;
+
+// rc-8.5.21 v4: the CLASSIFICATION-level stop reading of a text (no model, no I/O) — the final dispatch guard's
+// independent check. confirmed = a revocation (grammar / phrase / glued STOP / bare carrier keyword);
+// uncertain = a possible opt-out (a family token, an uncertain stop-like word) or a stop word aimed at us.
+const BARE_CARRIER_STOP_RE = /^\s*(?:stop|stopall|stop\s*all|unsubscribe|cancel|end|quit|opt\s*out)\s*[.!]*\s*$/i;
+const STOP_WORD_RE = /stop(?!\s+(?:by|over|in|off|past|on\s+by|and\s+(?:see|look))\b)|unsubscribe|opt[\s-]?out|remove\s+(?:me|my)|take\s+me\s+off|(?:do\s*n[o']?t|never)\s+(?:text|contact|message|msg|bother)|no\s+more\s+(?:texts?|messages?)|leave\s+me\s+alone|lose\s+my\s+number|quit\s+(?:texting|messaging)/i;
+export function readStopLikeText(text = "") {
+  const body = String(text ?? "");
+  if (!body.trim()) return { confirmed: false, uncertain: false, sources: [] };
+  if (isChannelPreferenceOnly(body)) return { confirmed: false, uncertain: false, sources: ["channel_preference"] };
+  const hit = matchMultilingualOptOut(body);
+  if (hit) return { confirmed: true, uncertain: false, sources: [hit.rule_id] };
+  if (BARE_CARRIER_STOP_RE.test(body)) return { confirmed: true, uncertain: false, sources: ["bare_stop_keyword"] };
+  const a = analyzeContactRevocation(body);
+  if (a.possible_opt_out) return { confirmed: false, uncertain: true, sources: [a.possible_opt_out.rule_id] };
+  if (STOP_WORD_RE.test(stopSpansAimedAtUs(body))) {
+    // a stop verb aimed at communication ("Stop texting me", "don't contact me") is the revocation itself
+    const scope = classifyStopScope(body);
+    if (scope === STOP_SCOPE.COMMUNICATION) return { confirmed: true, uncertain: false, sources: ["stop_word_communication"] };
+    return { confirmed: false, uncertain: true, sources: ["stop_word"] };
+  }
+  return { confirmed: false, uncertain: false, sources: [] };
+}

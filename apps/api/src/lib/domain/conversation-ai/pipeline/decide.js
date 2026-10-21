@@ -13,7 +13,7 @@
 // disinterest when the deterministic pre-check does not contradict it.
 import { acceptsOurProposal } from '../acceptance.js'
 import { deterministicPrecheck } from '../precheck.js'
-import { isStopRequest } from '../stop-request.js'
+import { readStop } from '../stop-reading.js'
 import { languageEnabledFor, languageVerdict } from '../send-policy.js'
 import { ACTIONS, PIPELINE_VERSION, validatePlan } from './outcomes.js'
 import { ownershipDenialTerminal, resolveOwnershipEvidence } from '../ownership-evidence.js'
@@ -58,7 +58,24 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
     ? [...(thread || []).filter((m) => String(m?.direction || '').startsWith('in') && turnIds.has(String(m.id))).map((m) => m.body ?? m.message_body ?? ''), inboundText].filter(Boolean).join('\n')
     : inboundText
   const replyLangFor = () => languageEnabledFor({ language, inboundText: burstText, languages: enabledLanguages }).language
-  const plan = (actions, reason, extra = {}) => {
+  // rc-8.5.21 v4: a decided ownership denial names the ONE property it is about, so the canonical path can
+  // PERSIST it (contact_property_resolution, property × contact — never the phone, never global). Only a
+  // denial stated in THIS turn is persisted (persist: true); a stored label is never re-written as a new fact.
+  const denialProperty = (() => {
+    const ib = ledger?.property?.ownership?.inbound
+    if (ib && !ib.ambiguous && ib.property) return String(ib.property)
+    return inbound?.property_id ? String(inbound.property_id) : null
+  })()
+  const DENIAL_VALUES = new Set(['denied', 'former_owner', 'tenant', 'property_non_owner', 'not_owner'])
+  const withDenialTargets = (actions, reason) => actions.map((a) => {
+    if (a?.type !== ACTIONS.UPDATE_SELLER_FACTS || !a.facts || !DENIAL_VALUES.has(String(a.facts.ownership || ''))) return a
+    if (a.target_property || a.persist === false) return a
+    // only the decided DENIAL path persists (a held / conflicting ownership signal is never written)
+    if (!/^ownership_denied/.test(String(reason || ''))) return a
+    return { ...a, target_property: denialProperty, persist: a.persist ?? true, persist_reason: reason }
+  })
+  const plan = (actionsIn, reason, extra = {}) => {
+    const actions = withDenialTargets(actionsIn, reason)
     const v = validatePlan(actions)
     if (!v.ok) return { version: PIPELINE_VERSION, actions: [{ type: ACTIONS.HOLD, reason: 'plan_conflict' }], reasons: ['plan_conflict', ...v.reasons], conflict_from: actions.map((a) => a.type) }
     return { version: PIPELINE_VERSION, actions, reasons: [reason], reply_language: replyLangFor(), ...extra }
@@ -67,9 +84,19 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   const update = facts.length ? [{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: Object.fromEntries(facts.map((k) => [k, ledger.facts[k].value])), source_message_id: inboundId }] : []
   const evCtx = { inboundText, ledger, thread, inbound: inbound || { id: inboundId } }
 
-  // 1. stop: ANY stop request (incl. a glued "…STOP 🛑") beats everything, the model included
-  if (isStopRequest(inboundText) || ['opt_out', 'stop_texting'].includes(String(deterministic?.intent)) || deterministic?.compliance_flag === 'stop_texting') {
-    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { opt_out: 'stop_requested' }, source_message_id: inboundId }, { type: ACTIONS.SUPPRESS, cancel_pending: true, reason: 'stop_request' }], 'stop_request_suppression')
+  // 1. stop: ANY stop request (incl. a glued "…STOP 🛑", in any fragment of the burst) beats everything, the
+  //    model included. rc-8.5.21 v4 (S2 / S3): EVERY layer's stop reading is combined (stop-reading.js) — the
+  //    grammar / classifier confirmed it ⇒ SUPPRESS (opt-out); any other stop-like reading (the understanding
+  //    says opt_out, a possible opt-out token, the word "stop", an uncertain stop-like word in a language we do
+  //    not converse in) ⇒ SUPPRESS in PRECAUTIONARY mode: the contact-wide precautionary_no_contact hold, nothing
+  //    sent, a person decides. Never a review hold without a contact hold, never language_not_enabled alone,
+  //    never a composed close after a stop.
+  const stopRead = readStop({ text: burstText, deterministic, judgment })
+  if (stopRead.confirmed) {
+    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { opt_out: 'stop_requested' }, source_message_id: inboundId }, { type: ACTIONS.SUPPRESS, cancel_pending: true, reason: 'stop_request', mode: 'opt_out', evidence: { sources: stopRead.sources.slice(0, 6), ...(stopRead.evidence || {}) } }], 'stop_request_suppression', { stop_reading: { confirmed: true, sources: stopRead.sources.slice(0, 6), version: stopRead.version } })
+  }
+  if (stopRead.uncertain) {
+    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { opt_out: 'possible_unconfirmed' }, source_message_id: inboundId }, { type: ACTIONS.SUPPRESS, cancel_pending: true, reason: 'possible_opt_out_unconfirmed', mode: 'precautionary', suppression_type: 'precautionary_no_contact', requires_operator_review: true, evidence: { sources: stopRead.sources.slice(0, 6), ...(stopRead.evidence || {}) } }], 'precautionary_no_contact_hold', { stop_reading: { confirmed: false, sources: stopRead.sources.slice(0, 6), version: stopRead.version } })
   }
   // 2. ownership evidence precedence (Phase 3B): valid suppression / wrong number are absolute; a
   //    stored not-owner label is resolved against the thread's own statements, never global SUPPRESS
@@ -101,7 +128,9 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
     return plan([{ type: ACTIONS.NO_RESPONSE, reason: 'ownership_declined_unverified_hold' }], 'ownership_declined_unverified_no_nurture', { ownership })
   }
   if (own.action === 'property_denial_no_reply' && (eligibility?.blocked || own.class === 'tenant')) {
-    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: own.class }, source_message_id: inboundId }, { type: ACTIONS.NO_RESPONSE, reason: 'property_scoped_denial' }], 'ownership_denied_no_nurture', { ownership })
+    // persisted only when THIS message carries the denial (a stored label is not a new fact)
+    const fromThis = own.class === 'tenant' || own.evidence?.from_this_message === true
+    return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: own.class }, source_message_id: inboundId, persist: fromThis }, { type: ACTIONS.NO_RESPONSE, reason: 'property_scoped_denial' }], 'ownership_denied_no_nurture', { ownership })
   }
   // 2b. the existing deterministic pre-check (legal threat, wrong number, hostile, empty); the
   //     eligibility verdict was resolved above
@@ -109,7 +138,8 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   if (pre.decided) {
     const o = pre.decision.outcome
     if (o === 'SUPPRESS') return plan([{ type: ACTIONS.SUPPRESS, cancel_pending: true, reason: pre.reason }], `precheck:${pre.reason}`, { ownership })
-    if (o === 'UPDATE_ONLY') return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: 'denied' }, source_message_id: inboundId }, { type: ACTIONS.NO_RESPONSE }], 'ownership_denied_no_nurture', { ownership })
+    // a phone-identity wrong number is not a property denial (the inbound path owns the phone outcome)
+    if (o === 'UPDATE_ONLY') return plan([{ type: ACTIONS.UPDATE_SELLER_FACTS, facts: { ownership: 'denied' }, source_message_id: inboundId, persist: pre.reason !== 'wrong_number' }, { type: ACTIONS.NO_RESPONSE }], 'ownership_denied_no_nurture', { ownership })
     if (o === 'NO_RESPONSE') return plan([{ type: ACTIONS.NO_RESPONSE }], `precheck:${pre.reason}`, { ownership })
     return plan([{ type: ACTIONS.HOLD, reason: pre.reason }], `precheck:${pre.reason}`, { ownership })
   }

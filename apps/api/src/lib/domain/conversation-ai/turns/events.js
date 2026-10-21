@@ -24,16 +24,16 @@
 //   state_change               cancel_turn        operator took over / owner-handled / suppressed
 //                              replan_turn        offer recorded / stage moved: re-decide at due
 //                              noop               archive (visibility only)
-import { isStopRequest } from '../stop-request.js'
+import { readStop } from '../stop-reading.js'
 import { deterministicPrecheck } from '../precheck.js'
 import { isDeflectionToOffer } from '../questions.js'
 import { ownershipDenialTerminal } from '../ownership-evidence.js'
 
-export const EVENT_ROUTER_VERSION = 'conv-ai.event-router.v2'
+export const EVENT_ROUTER_VERSION = 'conv-ai.event-router.v3'
 
 export const EVENT_TYPES = Object.freeze([
   'new_inbound', 'meaningful_update', 'offer_request', 'counteroffer', 'objection', 'acknowledgement',
-  'opt_out', 'ownership_denied', 'hostile', 'failed_outbound_reply', 'state_change',
+  'opt_out', 'possible_opt_out', 'ownership_denied', 'hostile', 'failed_outbound_reply', 'state_change',
 ])
 export const ROUTES = Object.freeze({
   SUPPRESS_NOW: 'suppress_now', CLOSE_NO_REPLY: 'close_no_reply', SCHEDULE_TURN: 'schedule_turn', JOIN_OR_IGNORE: 'join_or_ignore',
@@ -78,8 +78,13 @@ export function routeConversationEvent(e = {}) {
   }
   const text = String(e.text ?? '')
   const det = e.deterministic || null
-  // 1. stop: deterministic, immediate, no model — beats everything
-  if (isStopRequest(text) || ['opt_out', 'stop_texting'].includes(String(det?.intent)) || det?.compliance_flag === 'stop_texting') return out('opt_out', ROUTES.SUPPRESS_NOW, ['stop_request'])
+  // 1. stop: deterministic, immediate, no model — beats everything. rc-8.5.21 v4 (S2 / S3): an UNCONFIRMED
+  //    stop-like reading (a possible opt-out token, the word "stop", an uncertain stop-like word) is routed the
+  //    same way (immediate, no model) and decided as the precautionary contact-wide hold — never "nothing to
+  //    answer" with no decision record
+  const stopRead = readStop({ text, deterministic: det })
+  if (stopRead.confirmed) return out('opt_out', ROUTES.SUPPRESS_NOW, ['stop_request'])
+  if (stopRead.uncertain) return out('possible_opt_out', ROUTES.SUPPRESS_NOW, ['possible_opt_out_unconfirmed'])
   const pre = deterministicPrecheck({ text, inboundId: 'event', deterministic: det, lastQuestionKind: e.lastQuestionKind ?? null, ownershipAmbiguous: e.ownershipAmbiguous === true })
   if (pre.decided) {
     const o = pre.decision.outcome

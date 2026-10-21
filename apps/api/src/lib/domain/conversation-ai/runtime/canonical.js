@@ -36,6 +36,9 @@ import { createEscalatingNegotiationAuthority } from '../pipeline/negotiation-au
 import { maskText } from '../pii.js'
 
 export const CANONICAL_RUNTIME_VERSION = 'conv-ai.canonical-runtime.v1'
+// rc-8.5.21 v4 (S5): after an opt-out only an approved sms_templates confirmation may ever be sent; the writer
+// never composes a promise to stop contacting (every language we compose in)
+export const NO_CONTACT_PROMISE_RE = /(?<![\p{L}])(?:(?:i|we)\s*(?:'ll|\s+will|\s+won'?t|\s+will\s+not)\s+(?:not\s+)?(?:text|contact|message|reach\s+out\s+to|bother)\s+(?:you|u)\s+(?:again|anymore|any\s+more)|(?:won'?t|will\s+not|never)\s+(?:text|contact|message|bother)\s+(?:you|u)\s+(?:again|anymore)|(?:removed|taken)\s+(?:you|your\s+number)\s+(?:off|from)|no\s+(?:le|te|les|lo|la|los|las)\s+(?:vuelvo|volvemos|volveré|volvere|volveremos)\s+a\s+(?:escribir|molestar|contactar|mandar|enviar|llamar)|no\s+(?:le|te|les)\s+(?:escribo|escribiré|escribire|molesto|molestaré|molestare|contacto|contactaré|contactare)\s+(?:más|mas)|(?:le|te|lo|la|los|las)\s+(?:quito|quitamos|saco|sacamos|borro|borramos|elimino|eliminamos)\s+de\s+(?:la|nuestra)\s+lista|ya\s+no\s+(?:le|te|les)\s+(?:escribo|escribimos|molesto|molestamos|contacto|contactamos))(?![\p{L}])/iu
 /** The writer identity recorded on every decision: pipeline + playbook + compose prompt. */
 export const WRITER_VERSION = `${PIPELINE_VERSION}+${PLAYBOOK_VERSION}+${COMPOSE_PROMPT_VERSION}`
 export const CANONICAL_CALLERS = Object.freeze(['turn', 'shadow', 'r3_revalidation', 'review_api', 'capability', 'evaluation'])
@@ -104,7 +107,12 @@ export async function decideAndCompose({
       previousOutbound, knownNumbers: knownNumbersOf(input), firstName: input.names?.first_name || null, eligibility,
       replyLanguage: plan.reply_language === 'es' ? 'es' : 'en',
     })
-    if (validation.content_reasons.length) {
+    if (NO_CONTACT_PROMISE_RE.test(String(out.composition.text || ''))) {
+      // rc-8.5.21 v4 (S5): a composed "I won't text you again" / "no le vuelvo a escribir" means the WRITER read a
+      // stop the decide step did not: never sent — the turn becomes the precautionary contact-wide hold
+      plan = { ...plan, actions: [{ type: ACTIONS.SUPPRESS, cancel_pending: true, reason: 'possible_opt_out_unconfirmed', mode: 'precautionary', suppression_type: 'precautionary_no_contact', requires_operator_review: true, evidence: { sources: ['composition:no_contact_promise'] } }], reasons: [...(plan.reasons || []), 'composition_no_contact_promise'] }
+      validation = null
+    } else if (validation.content_reasons.length) {
       // the composition loop and this check are the same function: a difference is a defect, held
       plan = { ...plan, actions: plan.actions.map((a) => (a === replyAction ? { type: ACTIONS.HOLD, reason: 'final_validation_rejected', evidence: { reasons: validation.content_reasons.slice(0, 8) } } : a)) }
     } else {

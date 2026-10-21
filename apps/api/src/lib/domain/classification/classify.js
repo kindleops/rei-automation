@@ -29,6 +29,7 @@ import { assessAskingPricePlausibility } from "@/lib/domain/classification/price
 import { assessDealEconomics, isPriceFarAboveValue, PRICE_GAP_REASON_CODE } from "@/lib/domain/inbox/deal-economics-gate.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
 import { analyzeContactRevocation, isChannelPreferenceOnly } from "@/lib/domain/classification/multilingual-contact-revocation.js";
+import { stopWordTargetsUs, FIRST_PERSON_STOP_RE, NEGATED_CONTINUATION_RE, COMM_OBJECT_RE } from "@/lib/domain/classification/revocation-morphology.js";
 import { applyRound11CounterpartyRule, applyRound11UnclearRules, matchRound11OptOut } from "@/lib/domain/classification/round11-unclear-rules.js";
 import { classifyStopScope, matchesOutreachStop, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
 import {
@@ -902,6 +903,30 @@ function matchesTextChannelPreference(text) {
   );
 }
 
+// rc-8.5.21 v4: the carrier keywords keep their absolute leading-word reading; every other stop WORD
+// ("para", "basta", "alto", "arrêt", "cancela", "suficiente") is read with its target (revocation-morphology.js).
+const CARRIER_STOP_KEYWORDS = new Set(["stop", "stopall", "unsubscribe", "opt out", "optout", "opt-out", "quit"]);
+const TARGETED_STOP_WORD_PHRASES = new Set(["párate", "parate", "ya basta", "basta", "suficiente", "detente", "deténgase", "detengase", "alto", "cancela", "ya párale", "ya parale"]);
+// a NEGATED stop ("no dejen de llamarme si suben la oferta" = keep calling) and a LANGUAGE preference ("no me
+// escriba en inglés") are not revocations
+const NEGATABLE_STOP_PHRASE_RE = /^(?:dej|par|deten|cancel)/;
+const LANGUAGE_PREFERENCE_SPAN_RE = /(?<![\p{L}])no\s+(?:me\s+|nos\s+)?(?:escrib\w*|mand\w*|envi\w*|habl\w*|contest\w*|textee\w*)\s+(?:(?:los\s+)?mensajes\s+)?(?:en|in)\s+(?:ingl[eé]s|english|espa[nñ]ol|spanish|otro\s+idioma)(?![\p{L}])/giu;
+/** Every matched phrase is a bare stop WORD whose target is not us ("Basta ya con ese inquilino", "No es suficiente"), a negated stop, or a language preference. */
+function onlyUntargetedStopWords(text, phrases) {
+  const t = String(text || "").replace(LANGUAGE_PREFERENCE_SPAN_RE, " ");
+  const hits = phrases.filter((p) => includesAny(t, [p]));
+  if (!hits.length) return true;
+  return hits.every((p) => (TARGETED_STOP_WORD_PHRASES.has(p) && !stopWordTargetsUs(t, p.split(" ").pop()))
+    || (NEGATABLE_STOP_PHRASE_RE.test(p) && new RegExp(`(?<![\\p{L}])(?:no|nunca|jam[aá]s)\\s+${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "iu").test(t) && !includesAny(t.replace(new RegExp(`(?<![\\p{L}])(?:no|nunca|jam[aá]s)\\s+${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "giu"), " "), [p])));
+}
+/** "I need to stop the foreclosure" / "can't stop thinking about it": a stop not addressed to us (no communication object). */
+function stopNotAddressedToUs(text) {
+  const t = String(text || "");
+  if (NEGATED_CONTINUATION_RE.test(t)) return true;
+  const m = FIRST_PERSON_STOP_RE.exec(t);
+  return Boolean(m && !COMM_OBJECT_RE.test(String(m.groups?.obj || "")));
+}
+
 function detectComplianceFlag(message) {
   const text  = lower(message);
   const trimmed = text.trim();
@@ -940,6 +965,11 @@ function detectComplianceFlag(message) {
       )
     ) {
       if (matchesTextChannelPreference(text)) break;
+      // rc-8.5.21 v4 OBJECT / TARGET analysis: a leading stop WORD other than the carrier STOP keywords
+      // stops something only when it stands alone or names communication / us ("Basta.", "Para ya",
+      // "Basta de mensajes"); "Para mí está bien", "Basta ya con ese inquilino", "End of the month works",
+      // "Cancela la cita" are not revocations.
+      if (!CARRIER_STOP_KEYWORDS.has(kw) && !stopWordTargetsUs(bare, kw)) continue;
       return "stop_texting";
     }
   }
@@ -969,7 +999,7 @@ function detectComplianceFlag(message) {
   // Phrase-intent match. Channel-preference carve: when the seller explicitly
   // affirms the text channel and prohibits only CALLS, the call-only phrases
   // must not read as a texting opt-out.
-  if (includesAny(text, COMPLIANCE_PHRASES)) {
+  if (includesAny(text, COMPLIANCE_PHRASES) && !onlyUntargetedStopWords(text, COMPLIANCE_PHRASES)) {
     if (matchesTextChannelPreference(text)) {
       const non_call_only_hit = COMPLIANCE_PHRASES.some(
         (p) => !CALL_ONLY_PROHIBITIONS.includes(p) && includesAny(text, [p])
@@ -5166,7 +5196,7 @@ function resolveIntents(
   // IDN-10: a voice-channel preference ("I don't text much, call me") is never an opt-out
   const is_opt_out = !matchesVoiceChannelPreference(text) && (
     compliance_flag === "stop_texting" ||
-    (!stop_other_action && includesAny(text, [
+    (!stop_other_action && includesAny(String(text).replace(LANGUAGE_PREFERENCE_SPAN_RE, " "), [
       "unsubscribe",
       "opt out",
       "opt-out",
@@ -5193,10 +5223,8 @@ function resolveIntents(
       "spam",
       "harassing",
       "harassment",
-      // Spanish opt-out (avoid bare "para" which is common in other phrases)
-      "detente",
-      "basta",
-      "cancela",
+      // Spanish opt-out (avoid bare "para" which is common in other phrases); the bare stop WORDS
+      // ("detente", "basta", "cancela", "alto") are read with their target below (rc-8.5.21 v4)
       "elimíname",
       "eliminame",
       "no me escribas",
@@ -5204,7 +5232,6 @@ function resolveIntents(
       "no más mensajes",
       "no mas mensajes",
       "dejen de enviarme",
-      "alto",
       "no me escriba más",
       "no me escriba mas",
       "no me escribas más",
@@ -5215,7 +5242,8 @@ function resolveIntents(
       "dejen de escribirme",
     ]) ||
     /^(stop|stop\.|quit|end|cancel|remove)[\s!.]*$/i.test(text.trim())) ||
-    (/\bstop\b/i.test(text) &&
+    (!stop_other_action && ["detente", "basta", "cancela", "alto"].some((w) => includesAny(text, [w]) && stopWordTargetsUs(text, w))) ||
+    (/\bstop\b/i.test(text) && !stopNotAddressedToUs(text) &&
       includesAny(text, ["text", "message", "messaging", "list", "contact", "call", "harass"]) &&
       // "Stop calling me, text me instead" is a channel preference, not an
       // opt-out (see matchesTextChannelPreference — text prohibitions never
