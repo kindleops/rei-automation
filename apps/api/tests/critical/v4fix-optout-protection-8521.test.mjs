@@ -238,6 +238,34 @@ test("independent final dispatch: the latest inbound reads as a stop / possible 
   assert.ok(latestInboundStopLike(thread("Stop texting me"), [{ ...released[0] }]), "a confirmed stop is never released this way");
 });
 
+test("independent final dispatch × owner rule (875fe731): a property-scoped removal decided for THIS inbound defers to the property restriction; a contact-wide stop in the words still blocks; missing evidence fails closed", () => {
+  const row = { id: "q2", to_phone_number: TK, thread_key: TK, from_phone_number: "+15555550100", property_id: "p2", use_case_template: "s2_no_response_fu1", message_body: "Just checking in", metadata: {} };
+  const thread = (body, intent = "property_do_not_contact", property = "p1") => [
+    { id: "o1", direction: "outbound", message_body: "Would you consider an offer on 12 Oak St?", created_at: at(60), property_id: "p1" },
+    { id: "i9", direction: "inbound", message_body: body, created_at: at(5), property_id: property, detected_intent: intent },
+  ]
+  const cpr = (over = {}) => [{ property_id: "p1", contact_phone_e164: TK, contact_property_role: "property_do_not_contact", suppression_scope: "contact_property_pair", rejected_at: null, ...over }]
+  // decided by the one property-scoped writer + the restriction present ⇒ not a contact-wide stop
+  assert.equal(latestInboundStopLike(thread("Take me off that one"), [], cpr()), null)
+  assert.equal(latestInboundStopLike(thread("take me off for that house"), [], cpr()), null)
+  // contact-wide words stay contact-wide even after a property relabel
+  for (const body of ["take me off your list", "Take me off that one and stop texting me", "STOP", "Quíteme de su lista"]) {
+    const r = latestInboundStopLike(thread(body), [], cpr())
+    assert.ok(r && r.confirmed === true, body)
+  }
+  // fail closed: no restriction row / a rejected one / another property / not relabelled / no property on the inbound
+  assert.ok(latestInboundStopLike(thread("Take me off that one"), [], []), "no restriction row")
+  assert.equal(latestInboundStopLike(thread("Take me off that one"), [], cpr({ rejected_at: "2026-10-20T00:00:00Z", rejection_reason: "seller_requested_property_removal:i9" })), null, "the writer stamps rejected_at = the removal time (not a revocation)")
+  assert.ok(latestInboundStopLike(thread("Take me off that one"), [], cpr({ contact_property_role: "ownership_declined_unverified" })), "another role is not the property restriction")
+  assert.ok(latestInboundStopLike(thread("Take me off that one"), [], cpr({ property_id: "p9" })), "restriction for another property")
+  assert.ok(latestInboundStopLike(thread("Take me off that one", "opt_out"), [], cpr()), "still the classifier's opt_out label")
+  assert.ok(latestInboundStopLike(thread("Take me off that one", "property_do_not_contact", null), [], cpr()), "no property on the inbound")
+  // the guard: the other property stays contactable through step 2b; without the evidence every row is refused
+  assert.notEqual(evaluateSendTimeContactGuard(row, { thread_messages: thread("Take me off that one"), contact_property_resolution: cpr() }).reason, "latest_inbound_stop_like")
+  assert.equal(evaluateSendTimeContactGuard(row, { thread_messages: thread("Take me off that one") }).reason, "latest_inbound_stop_like")
+  assert.equal(evaluateSendTimeContactGuard(row, { thread_messages: thread("take me off your list"), contact_property_resolution: cpr() }).reason, "latest_inbound_stop_like")
+});
+
 test("ownership: a decided property denial is PERSISTED for that property only (never the phone)", () => {
   const p = decide("No, I sold that one years ago");
   const effects = decisionEffectsOf({ terminal: terminal(p), plan: p });

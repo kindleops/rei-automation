@@ -129,10 +129,26 @@ const REASON_CODE = Object.freeze({
  * rc-8.5.21 v4: the thread's latest inbound, if its text reads as a stop or a POSSIBLE stop and no operator
  * released that reading (a precautionary_no_contact row for THAT inbound set to released). Pure.
  */
-export function latestInboundStopLike(messages = [], automationSuppressions = []) {
+export function latestInboundStopLike(messages = [], automationSuppressions = [], contactPropertyResolution = []) {
   const at = (m) => Date.parse(m?.event_timestamp || m?.created_at || "") || 0;
   const latest = (messages || []).filter((m) => lower(m?.direction).startsWith("in")).sort((a, b) => at(b) - at(a))[0];
   if (!latest || !clean(latest.message_body)) return null;
+  // OWNER RULE (875fe731): "Take me off that one" about an IDENTIFIED property is a PROPERTY-SCOPED do-not-contact.
+  // When the one property-scoped writer (property-scoped-removal.js recordPropertyDoNotContact) has decided that
+  // for THIS inbound (it relabelled it property_do_not_contact) AND the contact_property_resolution restriction for
+  // that property is present (same reading as ownership-recontact-guard.js: the role for that property; its
+  // rejected_at is the seller's removal time, not a revocation), the text is read on its own (never through the classifier's stale opt_out label):
+  // only a CONFIRMED contact-wide stop in the words ("take me off your list", "STOP", "and stop texting me")
+  // still blocks contact-wide; the property itself stays refused by the recontact guard (5b). Either piece of
+  // evidence missing => unchanged (fail closed).
+  const propertyScoped = lower(latest.detected_intent) === PROPERTY_DNC_SIGNAL
+    && Boolean(clean(latest.property_id))
+    && (contactPropertyResolution || []).some((r) => lower(r?.contact_property_role) === PROPERTY_DNC_SIGNAL && clean(r?.property_id) === clean(latest.property_id));
+  if (propertyScoped) {
+    const own = readStop({ text: latest.message_body });
+    if (!own.confirmed) return null;
+    return { message_id: clean(latest.id) || null, confirmed: true, sources: own.sources.slice(0, 4) };
+  }
   const r = readStop({ text: latest.message_body, deterministic: OPT_OUT_SIGNALS.has(lower(latest.detected_intent)) ? { intent: "opt_out", compliance_flag: "stop_texting" } : null });
   if (!r.confirmed && !r.uncertain) return null;
   const released = !r.confirmed && (automationSuppressions || []).some((s) => lower(s.suppression_type) === "precautionary_no_contact" && INACTIVE_SUPPRESSION_STATUSES.has(lower(s.status)) && clean(s.payload?.inbound_event_id) === clean(latest.id));
@@ -148,6 +164,7 @@ export const PROPERTY_SCOPED_NOT_OWNER = Object.freeze(new Set([
 export const PHONE_SCOPED_NOT_OWNER = Object.freeze(new Set(["wrong_number", "wrong_person"]));
 /** OWNER DECISION 2026-10-17 — same set as opener-reply-exclusion.js PROPERTY_SCOPED_DECLINED. */
 export const PROPERTY_SCOPED_DECLINED = Object.freeze(new Set(["ownership_declined_unverified", "declined_unverified"]));
+const PROPERTY_DNC_SIGNAL = "property_do_not_contact";
 const OPT_OUT_SIGNALS = new Set(["opt_out", "opted_out", "stop", "dnc", "do_not_contact", "suppressed", "unsubscribed"]);
 const BLOCKING_CONTACTABILITY = new Set(["opt_out", "opted_out", "suppressed", "do_not_contact", "dnc", "invalid", "blocked"]);
 export const SEND_TIME_REPLY_INTENTS = Object.freeze([...PROPERTY_SCOPED_NOT_OWNER, ...PHONE_SCOPED_NOT_OWNER, ...PROPERTY_SCOPED_DECLINED, ...OPT_OUT_SIGNALS]);
@@ -327,7 +344,7 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
   //     stop is never answered by any automated row, even if every writer missed it (an operator-composed
   //     manual send is judged by the written suppression / hold rows above)
   if (Array.isArray(facts.thread_messages) && facts.thread_messages.length && !(row?.metadata && row.metadata.manual_operator_send === true)) {
-    const stopLike = latestInboundStopLike(facts.thread_messages, facts.precautionary_releases || facts.automation_suppressions || []);
+    const stopLike = latestInboundStopLike(facts.thread_messages, facts.precautionary_releases || facts.automation_suppressions || [], facts.contact_property_resolution || []);
     if (stopLike) return block(R.LATEST_INBOUND_STOP_LIKE, { ...stopLike, scope: "contact", action: stopLike.confirmed ? "suppress" : "precautionary_hold_operator_review" });
   }
   // 3 / 4 / 5. thread state
