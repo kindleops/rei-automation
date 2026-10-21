@@ -29,10 +29,12 @@ export const DEFAULT_DIR = 'supabase/migrations'
 //   resolved 2026-10-20 (no longer duplicates):
 //     20261007170000  entity_graph_distress_indexes → 20261007170001, the version production RECORDS
 //     20261007120000  queue_health_overdue_semantics (later-added, no apply evidence) → 20261007120500
+//     20261006150000  price_reality_check_templates → 20261006150200 (VERIFIED unapplied read-only 2026-10-20:
+//                     0 sms_templates rows, 0 send_queue references; tmp/prod-readonly-20261020/RESULTS.md);
+//                     command_wall_displays (applied out of band 2026-10-11) keeps 150000
 // What remains is PERMANENT historical collisions: excluded from every deploy plan, never renamed.
 export const ALLOWLIST = Object.freeze({
-  '20261006150000': 'command_wall_displays: APPLIED out of band (tmp/STATUS.md 2026-10-11 20:25Z "TV migration APPLIED (command_wall_*)"), never rename. price_reality_check_templates: NOT recorded, no apply evidence (RC843/RC844: do not apply; 0 price_reality_check sms_templates rows 2026-10-07), the earlier-added member; renumbering it (feat-branch name 20261006150200, 2188e733) needs owner OK. Excluded from every deploy plan.',
-  '20261010120000': 'agent_s3_persistence: APPLIED out of band (2026-10-11 agent DB apply). inbox_price_gap_gate: APPLIED (owner apply.sh, 2026-10-12; body drift: production carries the 10-10 body, the repo file was edited 10-17 in 31f405e3; the forward view migration PROPOSED_20261020120000_inbox_bucket_views_declined_unverified carries the 10-17 mapping). Never re-apply, never rename. Excluded from every deploy plan.',
+  '20261010120000': 'agent_s3_persistence: APPLIED out of band (2026-10-11 agent DB apply). inbox_price_gap_gate: APPLIED (owner apply.sh, 2026-10-12; body drift: production carries the 10-10 body, byte-identical to 5b470fa5 (tmp/owner-apply-20261012); the repo file was edited 10-17 in 31f405e3). Verified read-only 2026-10-20 (tmp/prod-readonly-20261020/RESULTS.md): the view columns in_unclear / f_price_gap / in_price_gap and the counts price_gap / unclear exist; the production view does NOT map declined_unverified; dependents v_inbox_bucket_counts, v_inbox_zero_counts. The forward view migration PROPOSED_20261020120000_inbox_bucket_views_declined_unverified carries the 10-17 mapping. Permanent historical collision: never re-apply, never rename. Excluded from every deploy plan.',
   '20261010130000': 'agent_research_ro: APPLIED out of band (2026-10-11 agent DB apply). inbox_pipeline_hygiene_cleanup: APPLIED (updated_by = hygiene_20261010; follow-up intents in production per rc821-integration/followup-reconciliation.md W5). Permanent historical collision: rename neither. Excluded from every deploy plan.',
 })
 

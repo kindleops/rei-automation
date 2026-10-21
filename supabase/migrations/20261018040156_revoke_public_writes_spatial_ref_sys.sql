@@ -1,0 +1,30 @@
+-- ════════════════════════════════════════════════════════════════════════════
+-- APPLIED IN PRODUCTION 2026-10-18T04:01:55Z (recorded version 20261018040156). DO NOT RE-APPLY.
+-- lc-applied-in-production: true
+--
+-- This file is a RECORD of production history, not a migration to run. No chain, deploy plan, migration test or
+-- deploy tool applies it: scripts/db/applied-in-production.mjs registers it, scripts/db/run-migration-test.mjs
+-- refuses it, and tests/critical/applied-in-production-history.test.mjs pins all of that.
+--
+--   source:  a Claude Code session in the Prominent Cash Offer website project
+--            (/Users/ryankindle/v0-v0realestatelandingsitemain, transcript session 0310cd0a), through the Supabase MCP
+--            tool apply_migration, on the LeadCommand production project, after an interactive approval recorded in
+--            that session at 2026-10-18T04:01:39Z ("Apply now"). Production migration history records this version
+--            (Supabase list_migrations, read-only, 2026-10-20). It was never committed to this repository.
+--
+--   EFFECT:  INEFFECTIVE. The anon / authenticated write grants on public.spatial_ref_sys were issued by
+--            supabase_admin, which the postgres role cannot revoke. The applying session's own check right
+--            afterwards (2026-10-18T04:02:08Z) still showed anon INSERT / UPDATE / DELETE / TRUNCATE = true.
+--            The protection that took effect is 20261018040244_guard_spatial_ref_sys_against_api_writes.
+--
+--   ROLLBACK: none needed (it changed no effective privilege). The applied SQL's own comment names a GRANT
+--            rollback: never run it; it would add nothing but noise to the grant history.
+--
+-- The SQL between the markers is BYTE-IDENTICAL to the applied statement (sha256 6a273b6b20ee799942d7483bfe9b46c6db7bd5d4031a2ad18cba2097811f640d).
+-- ════════════════════════════════════════════════════════════════════════════
+-- ===== BEGIN APPLIED SQL (verbatim) =====
+-- Security incident fix (approved 2026-10-17): the anonymous and authenticated API roles could write to
+-- PostGIS's coordinate-system table. Reads stay (PostGIS and app functions need them).
+-- Rollback: GRANT INSERT, UPDATE, DELETE, TRUNCATE ON public.spatial_ref_sys TO anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.spatial_ref_sys FROM anon, authenticated;
+-- ===== END APPLIED SQL =====

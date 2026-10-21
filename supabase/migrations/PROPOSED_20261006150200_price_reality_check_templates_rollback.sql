@@ -1,4 +1,4 @@
--- ROLLBACK for PROPOSED_20261006150000_price_reality_check_templates.sql.
+-- ROLLBACK for PROPOSED_20261006150200_price_reality_check_templates.sql.
 -- Deletes only unused rows; a row already referenced by send_queue is
 -- deactivated instead so send_queue.template_id keeps resolving for KPIs.
 begin;

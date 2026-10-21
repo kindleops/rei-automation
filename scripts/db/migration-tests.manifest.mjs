@@ -628,3 +628,8 @@ const FROM_PRODUCTION_STATE = {
 }
 
 export const MIGRATION_TESTS = Object.freeze([...BASE_TESTS, FROM_PRODUCTION_STATE])
+
+// RECORDED PRODUCTION HISTORY (applied_in_production: true). These migrations were applied out of band and are
+// kept only so the repository matches production's migration history. They are NOT test entries, NOT chain links and
+// NOT part of any deploy plan; run-migration-test refuses any entry or file that names one.
+export { APPLIED_IN_PRODUCTION } from './applied-in-production.mjs'
