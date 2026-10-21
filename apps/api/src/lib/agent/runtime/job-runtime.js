@@ -111,11 +111,16 @@ export function createRuntimePgStore({ pool, statementTimeoutMs = 5000, lockTime
     },
     enqueue: (o) => call('select agent.runtime_enqueue($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9) r', [o.kind, o.idempotency_key, j(o.input || {}), o.requested_by, o.priority ?? 100, o.max_attempts ?? 3, o.budget_cap_usd ?? 0, Boolean(o.require_approval), o.not_before ?? null]),
     enqueueEvent: (o) => call('select agent.runtime_enqueue_event($1, $2, $3::jsonb, $4) r', [o.kind, o.event_key, j(o.input || {}), o.priority ?? 100]),
+    // rc-8.5.20: an event job that is due no earlier than not_before (PROPOSED_20261016120000_conversation_reply_turns.sql)
+    enqueueEventAt: (o) => call('select agent.runtime_enqueue_event_at($1, $2, $3::jsonb, $4, $5::timestamptz) r', [o.kind, o.event_key, j(o.input || {}), o.priority ?? 100, o.not_before ?? null]),
     enqueueDueSchedules: ({ limit = 10 } = {}) => call('select agent.runtime_enqueue_due_schedules($1) r', [limit]),
     claim: ({ worker, limit = 1, kinds = null }) => call('select agent.runtime_claim($1, $2, $3::text[]) r', [worker, limit, kinds]),
     start: ({ job_id, token }) => call('select agent.runtime_start($1, $2::uuid) r', [job_id, token]),
     checkpoint: (o) => call('select agent.runtime_checkpoint($1, $2::uuid, $3::jsonb, $4::jsonb, $5, $6::jsonb) r', [o.job_id, o.token, j(o.progress), j(o.checkpoint), o.event_type ?? null, j(o.event_payload)]),
-    finish: (o) => call('select agent.runtime_finish($1, $2::uuid, $3, $4::jsonb, $5::jsonb) r', [o.job_id, o.token, o.outcome, j(o.result), j(o.error)]),
+    finish: (o) => (o.retry_after_ms != null
+      // rc-8.5.21 (PROPOSED_20261017121000): a retry with a caller-chosen delay
+      ? call('select agent.runtime_finish($1, $2::uuid, $3, $4::jsonb, $5::jsonb, $6::integer) r', [o.job_id, o.token, o.outcome, j(o.result), j(o.error), Math.max(1, Math.ceil(Number(o.retry_after_ms) / 1000))])
+      : call('select agent.runtime_finish($1, $2::uuid, $3, $4::jsonb, $5::jsonb) r', [o.job_id, o.token, o.outcome, j(o.result), j(o.error)])),
     reap: ({ limit = 20 } = {}) => call('select agent.runtime_reap($1) r', [limit]),
     reserve: (o) => call('select agent.runtime_reserve($1, $2::uuid, $3, $4, $5) r', [o.job_id, o.token, o.model, o.reserved_usd, o.purpose || 'default']),
     settle: (o) => call('select agent.runtime_settle($1, $2::uuid, $3::uuid, $4, $5::jsonb) r', [o.job_id, o.token, o.reserve_id, o.actual_usd ?? null, j(o.usage)]),
@@ -183,6 +188,13 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
     return job && job.lease_token === token && ['claimed', 'running'].includes(job.state) ? job : null
   }
   const unknownOpen = (job_id) => { for (const l of ledger) if (l.job_id === job_id && l.state === 'reserved') l.state = 'unknown' }
+  // mirror of runtime_enqueue_event(_at): kind_limits.<kind>.event_budget_cap_usd (absent ⇒ 0) clamped to
+  // [0, agent.runtime_event_budget_ceiling(kind)] — 0.05 unless limits.event_budget_ceilings names the kind (hard max 0.30)
+  const eventBudgetCap = (kind) => {
+    const raw = Number(lim.kind_limits?.[kind]?.event_budget_cap_usd)
+    const ceil = Math.min(Math.max(Number(lim.event_budget_ceilings?.[kind] ?? 0.05), 0), 0.30)
+    return Math.min(Math.max(Number.isFinite(raw) ? raw : 0, 0), ceil)
+  }
 
   function enqueueCore({ kind, idempotency_key, input = {}, requested_by, trigger_kind, trigger_ref, priority = 100, max_attempts = 3, budget_cap_usd = 0, require_approval = false, schedule_id = null, schedule_slot = null, not_before = null }) {
     if (!isRuntimeKind(kind)) return { ok: false, reason: 'kind_invalid' }
@@ -214,7 +226,15 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
       if (!event_key || String(event_key).length > 200) return { ok: false, reason: 'event_key_invalid' }
       const armed = lim.kind_limits?.[kind]?.armed_by
       if (!armed) return { ok: false, reason: 'kind_not_armed' }
-      return enqueueCore({ kind, idempotency_key: crypto.createHash('sha256').update(`event:${kind}:${event_key}`).digest('hex'), input, requested_by: armed, trigger_kind: 'event', trigger_ref: `event:${kind}`, priority })
+      return enqueueCore({ kind, idempotency_key: crypto.createHash('sha256').update(`event:${kind}:${event_key}`).digest('hex'), input, requested_by: armed, trigger_kind: 'event', trigger_ref: `event:${kind}`, priority, budget_cap_usd: eventBudgetCap(kind) })
+    }),
+    enqueueEventAt: ({ kind, event_key, input = {}, priority = 100, not_before = null }) => serial(() => {
+      if (!event_key || String(event_key).length > 200) return { ok: false, reason: 'event_key_invalid' }
+      if (!not_before || !Number.isFinite(Date.parse(not_before))) return { ok: false, reason: 'not_before_required' }
+      if (Date.parse(not_before) > now() + 2 * 864e5) return { ok: false, reason: 'not_before_too_far' }
+      const armed = lim.kind_limits?.[kind]?.armed_by
+      if (!armed) return { ok: false, reason: 'kind_not_armed' }
+      return enqueueCore({ kind, idempotency_key: crypto.createHash('sha256').update(`event:${kind}:${event_key}`).digest('hex'), input, requested_by: armed, trigger_kind: 'event', trigger_ref: `event:${kind}`, priority, not_before, budget_cap_usd: eventBudgetCap(kind) })
     }),
     upsertSchedule: ({ name, kind, interval_seconds, created_by, input = {}, enabled = false, first_run_at = null, budget_cap_usd = 0 }) => serial(() => {
       let s = [...schedules.values()].find((x) => x.name === name)
@@ -285,7 +305,7 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
       if (event_type) emit(j, event_type, j.lease_owner, event_payload || {})
       return { ok: true, cancel_requested: false, stop: null, lease_until: j.lease_until }
     }),
-    finish: ({ job_id, token, outcome, result = null, error = null }) => serial(() => {
+    finish: ({ job_id, token, outcome, result = null, error = null, retry_after_ms = null }) => serial(() => {
       const j = jobs.get(job_id)
       if (!j) return { ok: false, reason: 'job_not_found' }
       if (j.finished_token === token && !j.lease_token) return { ok: true, idempotent: true, state: j.state }
@@ -293,7 +313,11 @@ export function createRuntimeMemoryStore({ now = () => Date.now(), limits = {}, 
       const to = { completed: 'completed', failed: 'failed', cancelled: 'cancelled', waiting_for_approval: 'waiting_for_approval', paused: 'paused', retry: j.attempt >= j.max_attempts ? 'dead_letter' : 'retrying', release: 'retrying' }[outcome]
       if (!to) return { ok: false, reason: 'outcome_invalid' }
       let next = null
-      if (outcome === 'retry' && to === 'retrying') next = iso(now() + backoffSeconds(j.attempt, lim.backoff_base_seconds, lim.backoff_max_seconds) * 1000)
+      if (outcome === 'retry' && to === 'retrying') {
+        next = retry_after_ms != null
+          ? iso(now() + Math.min(Math.max(Math.ceil(Number(retry_after_ms) / 1000), 1), 3600) * 1000)
+          : iso(now() + backoffSeconds(j.attempt, lim.backoff_base_seconds, lim.backoff_max_seconds) * 1000)
+      }
       if (outcome === 'release') { j.attempt = Math.max(j.attempt - 1, 0); next = iso(now() + lim.backoff_base_seconds * 1000) }
       transition(j, to)
       unknownOpen(job_id)

@@ -261,6 +261,20 @@ const AGENT_FORWARDED_VARS = [
   "AGENT_USER_DAILY_RUNS",
   // R2 persistent runtime ceiling (default off): the tick route is inert without it.
   "AGENT_RUNTIME_ENABLED",
+  // PACKAGE A research runtime (hotfix/research-runtime; each default off, all SEND-INCAPABLE): register the
+  // property.research / valuation.refresh (dry run) / operations handlers. The DB (agent.runtime_limits
+  // kind_limits, runtime_enabled, emergency_stop) still decides whether any of them is claimed.
+  "PROPERTY_RESEARCH_ENABLED",
+  "VALUATION_REFRESH_ENABLED",
+  "AGENT_OPERATIONS_ENABLED",
+  // the bounded web step of property.research + its paid-call gate (default deny; ceiling in USD)
+  "AGENT_WEB_RESEARCH_ENABLED",
+  "RESEARCH_PAID_CALLS_APPROVED",
+  "RESEARCH_PAID_APPROVAL_REF",
+  "RESEARCH_PAID_CEILING_USD",
+  // DELIBERATELY NOT FORWARDED (so the container can never see them): VALUATION_REFRESH_WRITE_ENABLED
+  // (valuation write mode), AGENT_MISSIONS_ENABLED, AI_CONVERSATION_SHADOW_ENABLED, LC_FOLLOWUP_EXECUTION,
+  // OPS_SUPERVISOR_AUTO_RECOVERY, AGENT_RUNTIME_TICK_CONCURRENT.
 ] as const;
 
 
@@ -368,6 +382,13 @@ interface Env {
   AGENT_RATE_READS_PER_MIN?: string;
   AGENT_USER_DAILY_RUNS?: string;
   AGENT_RUNTIME_ENABLED?: string;
+  PROPERTY_RESEARCH_ENABLED?: string;
+  VALUATION_REFRESH_ENABLED?: string;
+  AGENT_OPERATIONS_ENABLED?: string;
+  AGENT_WEB_RESEARCH_ENABLED?: string;
+  RESEARCH_PAID_CALLS_APPROVED?: string;
+  RESEARCH_PAID_APPROVAL_REF?: string;
+  RESEARCH_PAID_CEILING_USD?: string;
 }
 
 async function forwardToApi(request: Request, env: Env): Promise<Response> {

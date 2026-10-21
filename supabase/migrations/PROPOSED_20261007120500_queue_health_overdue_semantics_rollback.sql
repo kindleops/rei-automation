@@ -1,6 +1,6 @@
 -- PROPOSED ROLLBACK — restores public.cockpit_queue_processor_health() exactly as
 -- it was in production on 2026-10-07 (pg_get_functiondef, fetched read-only).
--- Pairs with PROPOSED_20261007120000_queue_health_overdue_semantics.sql.
+-- Pairs with PROPOSED_20261007120500_queue_health_overdue_semantics.sql.
 
 CREATE OR REPLACE FUNCTION public.cockpit_queue_processor_health()
  RETURNS jsonb

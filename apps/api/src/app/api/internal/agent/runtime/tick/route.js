@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server.js'
 import { requireScheduledMutationAuth } from '@/lib/security/cron-auth.js'
 import { runScheduledRuntimeTick, DEFAULT_RUNTIME_HANDLERS } from '@/lib/agent/runtime/runtime-service.js'
 import { conversationRuntimeHandlers } from '@/lib/ai/conversation-decide-handler.js'
+import { researchRuntimeHandlers } from '@/lib/ai/research-runtime-wiring.js'
 import { child } from '@/lib/logging/logger.js'
 
 export const runtime = 'nodejs'
@@ -27,7 +28,10 @@ export async function POST(request) {
   if (!auth.authorized) return auth.response
   try {
     // conversation.decide (R1/R2 shadow, no send) is registered only when AI_CONVERSATION_SHADOW_ENABLED=true
-    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers() } })
+    // (never forwarded to the production container); Package A research / operations kinds (no send) only when
+    // PROPERTY_RESEARCH_ENABLED / VALUATION_REFRESH_ENABLED / AGENT_OPERATIONS_ENABLED — and the DB still claims
+    // a kind only when agent.runtime_limits.kind_limits enables + arms it
+    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...researchRuntimeHandlers() } })
     if (result.summary) {
       const s = result.summary
       logger.info('agent.runtime.tick', { blocked: s.blocked, claimed: s.claimed, jobs: s.jobs.map((j) => `${j.kind}:${j.outcome}`), errors: s.errors.map((e) => `${e.phase}:${e.code}`), elapsed_ms: s.elapsed_ms })

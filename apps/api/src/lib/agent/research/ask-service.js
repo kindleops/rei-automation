@@ -123,6 +123,17 @@ export function contextPropertyIds(context) {
   return out.slice(0, 10)
 }
 
+// a caller (a persistent mission inside a bounded runtime tick) may LOWER these per run, never raise them
+const OVERRIDABLE_LIMITS = Object.freeze(['max_model_calls', 'max_default_calls', 'max_tool_calls', 'run_timeout_ms', 'model_timeout_ms'])
+export function runLimits(override = null) {
+  const out = {}
+  for (const k of OVERRIDABLE_LIMITS) {
+    const v = Number(override?.[k])
+    out[k] = Number.isFinite(v) && v > 0 ? Math.min(Math.trunc(v), RESEARCH_LIMITS[k]) : RESEARCH_LIMITS[k]
+  }
+  return Object.freeze(out)
+}
+
 function newRunId() {
   return `ask_${crypto.randomBytes(12).toString('base64url')}`
 }
@@ -267,7 +278,7 @@ export function createAskService({ store, registry, provider, resolver, createSe
     run.events.push('model_call_start', { call: callNo, route, model: model.id, web_offered: offered.searches + offered.fetches > 0, mode: run.mode })
     const t0 = now()
     const ctl = new AbortController()
-    const timer = setTimeout(() => ctl.abort(MODEL_TIMEOUT_REASON), RESEARCH_LIMITS.model_timeout_ms)
+    const timer = setTimeout(() => ctl.abort(MODEL_TIMEOUT_REASON), (run.limits || RESEARCH_LIMITS).model_timeout_ms)
     if (typeof timer.unref === 'function') timer.unref()
     run.abortCall = () => ctl.abort(CANCEL_REASON)
     const streamer = textStreamer(run, callNo)
@@ -451,14 +462,14 @@ export function createAskService({ store, registry, provider, resolver, createSe
         let calls = 0
         let defaultCalls = 0
         while (true) {
-          if (now() - t0 > RESEARCH_LIMITS.run_timeout_ms) { outcome = 'RUN_TIMEOUT'; state = 'failed'; break }
+          if (now() - t0 > run.limits.run_timeout_ms) { outcome = 'RUN_TIMEOUT'; state = 'failed'; break }
           if (!isAgentEnabled(env) || run.cancelRequested) { outcome = run.cancelRequested ? 'CANCELLED' : 'AGENT_DISABLED'; state = 'cancelled'; break }
-          if (calls >= RESEARCH_LIMITS.max_model_calls) { outcome = 'MAX_MODEL_CALLS'; break }
+          if (calls >= run.limits.max_model_calls) { outcome = 'MAX_MODEL_CALLS'; break }
           let route = escalateNext ? 'escalation' : 'default'
-          if (route === 'default' && defaultCalls >= RESEARCH_LIMITS.max_default_calls) { outcome = 'MAX_MODEL_CALLS'; break }
+          if (route === 'default' && defaultCalls >= run.limits.max_default_calls) { outcome = 'MAX_MODEL_CALLS'; break }
           const promptNow = bytes(messages)
           const lastEscalated = route === 'escalation' && run.escalatedCalls + 1 >= RESEARCH_HARD_CEILINGS.escalation_calls_per_run
-          const mustAnswer = promptNow > RESEARCH_LIMITS.prompt_soft_bytes || run.toolCalls >= RESEARCH_LIMITS.max_tool_calls || lastEscalated || (route === 'default' && defaultCalls + 1 >= RESEARCH_LIMITS.max_default_calls)
+          const mustAnswer = promptNow > RESEARCH_LIMITS.prompt_soft_bytes || run.toolCalls >= run.limits.max_tool_calls || lastEscalated || (route === 'default' && defaultCalls + 1 >= run.limits.max_default_calls) || (run.answerByMs != null && now() - t0 >= run.answerByMs)
           if (promptNow > RESEARCH_LIMITS.prompt_hard_bytes) { outcome = 'PROMPT_HARD_CAP'; break }
           const model = route === 'escalation' ? models.escalation : models.default
           const web = route === 'default' && !mustAnswer && promptNow <= WEB_PROMPT_MAX_BYTES ? webToolsFor({ env, used: run.web }) : []
@@ -535,8 +546,8 @@ export function createAskService({ store, registry, provider, resolver, createSe
               results.push({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify({ error: 'CANCELLED' }), is_error: true })
               continue
             }
-            if (n > RESEARCH_LIMITS.max_tools_per_turn || run.toolCalls >= RESEARCH_LIMITS.max_tool_calls) {
-              const runOut = run.toolCalls >= RESEARCH_LIMITS.max_tool_calls
+            if (n > RESEARCH_LIMITS.max_tools_per_turn || run.toolCalls >= run.limits.max_tool_calls) {
+              const runOut = run.toolCalls >= run.limits.max_tool_calls
               const code = runOut ? 'TOOL_BUDGET_EXHAUSTED' : 'TOO_MANY_TOOLS_IN_TURN'
               await audit(run, { kind: 'tool_refused', name: fromApiName(u.name).slice(0, 80).replace(/[^A-Za-z0-9_.:-]/g, '_') || 'unknown', params_sha256: paramsHash(u.input || {}), rows_returned: 0, outcome: code })
               results.push({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify({ error: code, note: runOut ? 'The run tool budget is used up. Answer with the evidence gathered.' : `At most ${RESEARCH_LIMITS.max_tools_per_turn} tool calls per turn; call this one again in your next turn if still needed.` }), is_error: true })
@@ -565,7 +576,7 @@ export function createAskService({ store, registry, provider, resolver, createSe
     const result = state === 'completed' || safeAnswer || typed || run.web.citations.length
       ? buildResult({ answerMd: safeAnswer, typed, citations: run.web.citations, internal: { tools: [...run.toolsUsed], property_ids: [...run.propertiesRead] } })
       : null
-    run.result = { state, outcome, answer_md: safeAnswer, result, latency_ms: latency, ...(run.refusal ? { refusal: run.refusal } : {}) }
+    run.result = { state, outcome, answer_md: safeAnswer, result, latency_ms: latency, cost_usd: run.costUsd, model_calls: run.modelCalls, tool_calls: run.toolCalls, web_searches: run.web.searches, ...(run.refusal ? { refusal: run.refusal } : {}) }
     try {
       await store.finishRun(run.run_id, {
         state,
@@ -602,7 +613,7 @@ export function createAskService({ store, registry, provider, resolver, createSe
    *   (Entity Graph / Inbox deep links) already send that shape, and dropping it silently
    *   left the model without the id it was asked about.
    */
-  async function ask({ operator_id, identity, question, context = {} }) {
+  async function ask({ operator_id, identity, question, context = {}, limits = null }) {
     if (!isAgentEnabled(env)) throw refuse('AGENT_DISABLED', 'kill switch')
     if (!isResearchEnabled(env)) throw refuse('RESEARCH_DISABLED', 'research disabled')
     if (!researchModeOk(env)) throw refuse('MODE_NOT_READ', 'AGENT_MAX_MODE must be read')
@@ -625,6 +636,9 @@ export function createAskService({ store, registry, provider, resolver, createSe
       events: createRunEvents({ now }),
       userContent: [ctxLines.length ? `${ctxLines.join('\n')}\n\n` : '', masked].join(''),
       questionExcerpt: masked.slice(0, 200),
+      limits: runLimits(limits),
+      // optional: after this many ms the next model call must answer (no more tools) — a bounded runtime tick
+      answerByMs: Number.isFinite(Number(limits?.answer_by_ms)) && Number(limits.answer_by_ms) > 0 ? Math.trunc(Number(limits.answer_by_ms)) : null,
     }
     await store.createRun({ run_id: run.run_id, operator_id, question_sha256: sha256(q), question_chars: q.length })
     await audit(run, { kind: 'run_start', name: mode === 'conversation' ? 'research.converse' : 'research.ask', params_sha256: paramsHash({ campaign_id: campaignId, property_ids: propertyIds }), doc: { context_campaign: Boolean(campaignId), context_properties: propertyIds.length, mode } })
