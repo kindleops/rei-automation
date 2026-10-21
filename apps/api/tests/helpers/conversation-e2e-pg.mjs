@@ -45,6 +45,8 @@ export const PUBLIC_FIXTURE = `
   create table if not exists public.contact_property_resolution (id uuid primary key default gen_random_uuid(), property_id text not null, contact_phone_e164 text not null,
     contact_property_role text, rejected_at timestamptz, rejection_reason text, suppression_scope text, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
     unique (property_id, contact_phone_e164));
+  -- rc-8.5.21 v4: the R3 dispatcher reads the thread's sender-binding audit trail (production table)
+  create table if not exists public.automation_events (id uuid primary key default gen_random_uuid(), event_type text, source text, conversation_thread_id text, payload jsonb, dedupe_key text, created_at timestamptz default now());
   revoke all on public.system_control, public.send_queue from agent_api;`
 
 export async function e2eDb() {
@@ -89,11 +91,12 @@ export async function seed(pool, { inboundBody = 'Yes I still own it', minutesAg
 export const provider = () => fakeProvider((p) => (p.tools[0].input_schema?.properties?.message ? { message: 'Good to know. Would you consider an offer on it?' }
   : makeDecision({ intent: 'ownership_confirmed', seller_interest: 'unknown', outcome: 'REPLY_CANDIDATE', next_objective: 'gauge_interest', response_needed: true, proposed_message: 'R1 TEXT NEVER SENT. Would you sell?', confidence: 0.93, source_message_ids: [], facts_extracted: [], stage_evidence: { stage: 'S2_interest', evidence_message_ids: [], rationale: 'x' } })))
 
-/** PG-backed reservations for the seller-day / global scopes (the turn holds inbound_reply itself). */
+/** PG-backed reservations for the seller-day / global scopes (the turn holds inbound_reply itself). A FAILED key is
+ *  reclaimed, as public.idempotency_begin does (stale_or_failed_event_reclaimed). */
 export function pgReservations(pool) {
   return {
     async begin({ scope, key, summary = null, metadata = {} }) {
-      const r = await pool.query(`insert into public.idempotency_ledger (scope, key, claim_token, status, summary, metadata) values ($1, $2, gen_random_uuid(), 'processing', $3, $4::jsonb) on conflict (scope, key) do nothing returning key`, [scope, key, summary, JSON.stringify(metadata)])
+      const r = await pool.query(`insert into public.idempotency_ledger (scope, key, claim_token, status, summary, metadata) values ($1, $2, gen_random_uuid(), 'processing', $3, $4::jsonb) on conflict (scope, key) do update set claim_token = excluded.claim_token, status = 'processing', summary = excluded.summary, metadata = excluded.metadata where public.idempotency_ledger.status = 'failed' returning key`, [scope, key, summary, JSON.stringify(metadata)])
       return { ok: true, duplicate: r.rowCount === 0, record_item_id: `idempotency:${scope}:${key}`, scope, key }
     },
     async complete({ scope, key, metadata = {} }) { await pool.query(`update public.idempotency_ledger set status = 'completed', completed_at = now(), metadata = metadata || $3::jsonb where scope = $1 and key = $2`, [scope, key, JSON.stringify(metadata)]); return { ok: true } },
