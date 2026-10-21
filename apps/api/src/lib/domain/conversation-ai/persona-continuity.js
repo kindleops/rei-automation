@@ -30,7 +30,7 @@ const e164 = (p) => (digits(p).length === 10 ? `+1${digits(p)}` : null)
  * @param {string|null} [a.inboundTo]  the number the seller's latest inbound was sent TO
  * @returns {{ ok: boolean, persona_name: string|null, persona_source: string|null, sender_number: string|null, sender_source: string|null, reasons: string[], version: string }}
  */
-export function resolveThreadContinuity({ sentRows = [], threadState = null, inboundTo = null } = {}) {
+export function resolveThreadContinuity({ sentRows = [], threadState = null, inboundTo = null, auditedSender = null } = {}) {
   const reasons = []
   const shownRows = (sentRows || []).filter((r) => SHOWN.has(String(r?.queue_status || '').toLowerCase()))
     .sort((a, b) => (Date.parse(b?.created_at || 0) || 0) - (Date.parse(a?.created_at || 0) || 0))
@@ -49,7 +49,10 @@ export function resolveThreadContinuity({ sentRows = [], threadState = null, inb
   const lastFrom = e164(shownRows.find((r) => e164(r?.from_phone_number))?.from_phone_number)
   let sender_number = null
   let sender_source = null
-  if (sticky && texted && sticky !== texted) reasons.push('sender_number_mismatch')
+  // rc-8.5.21 v4 (rt-sc-05): an AUDITED operator reassignment binds the thread to its target even when the
+  // seller replied to the old number (the reassignment event is the authority, never the inbound's To)
+  if (sticky && texted && sticky !== texted && e164(auditedSender) === sticky) { sender_number = sticky; sender_source = 'operator_reassignment' }
+  else if (sticky && texted && sticky !== texted) reasons.push('sender_number_mismatch')
   else if (sticky) { sender_number = sticky; sender_source = 'thread_sticky' }
   else if (texted) { sender_number = texted; sender_source = 'inbound_to' }
   else if (lastFrom) { sender_number = lastFrom; sender_source = 'last_outbound' }

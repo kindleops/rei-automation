@@ -111,6 +111,68 @@ export async function loadR3State({ supabase, candidate, now }) {
 
 const reservationId = (scope, key) => `idempotency:${scope}:${key}`
 
+// rc-8.5.21 v4 (rt-sc-06): the thread's sender-binding audit trail (append-only automation_events).
+export const SENDER_BINDING_UNAUDITED_EVENT = 'sender_binding_unaudited_change'
+const BINDING_RESOLUTION_EVENTS = ['sender_thread_reassigned', 'sender_thread_rerouted', 'sender_binding_reviewed']
+export async function loadSenderBindingAudit({ supabase, threadKey }) {
+  if (!supabase?.from || !clean(threadKey)) return { ok: false }
+  const r = await supabase.from('automation_events').select('event_type,payload,created_at').eq('conversation_thread_id', clean(threadKey)).in('event_type', [SENDER_BINDING_UNAUDITED_EVENT, ...BINDING_RESOLUTION_EVENTS]).order('created_at', { ascending: false }).limit(20)
+  if (r?.error) return { ok: false }
+  const rows = Array.isArray(r?.data) ? r.data : []
+  const lastUnaudited = rows.find((e) => e.event_type === SENDER_BINDING_UNAUDITED_EVENT) || null
+  const lastResolution = rows.find((e) => BINDING_RESOLUTION_EVENTS.includes(e.event_type)) || null
+  const tt = (e) => Date.parse(e?.created_at || e?.payload?.at || 0) || 0
+  const unaudited = Boolean(lastUnaudited && (!lastResolution || tt(lastResolution) < tt(lastUnaudited)))
+  const reassign = rows.find((e) => e.event_type === 'sender_thread_reassigned' || e.event_type === 'sender_thread_rerouted') || null
+  return { ok: true, unaudited, unaudited_at: lastUnaudited?.created_at || null, audited_sender: reassign && (!lastUnaudited || tt(reassign) >= tt(lastUnaudited)) ? clean(reassign.payload?.to_phone_number) || null : null }
+}
+
+// rc-8.5.21 v4 (rt-sc-03): the per-seller daily reservation belongs to a reply that REACHED (or may still
+// reach) the seller. A stale AI row that never reached the provider — parked blocked_sender_ineligible while
+// its bound number was unhealthy, or cancelled / blocked before any provider call — must not consume the
+// seller's one reply of the day: the newer turn supersedes it. Proof required, all of it fresh:
+//   - every row holding this seller-day key is an AI row with NO provider evidence (id / sent_at / delivered_at)
+//     and NO §11 attempt that started or carries a provider id;
+//   - each is in a never-sent terminal or held state (a live blocked_sender_ineligible hold is superseded here,
+//     compare-and-set on that state, reason superseded_by_newer_seller_activity — the release sweep's own verdict
+//     for a row the seller wrote after);
+// then the reservation is marked failed (idempotency_begin reclaims a failed key) and taken once more.
+// Anything unreadable / uncertain keeps the cap (fail closed).
+export const STALE_SELLER_DAY_SUPERSEDED_REASON = 'superseded_by_newer_seller_activity'
+const NEVER_SENT_HELD = new Set(['blocked_sender_ineligible'])
+const NEVER_SENT_TERMINAL = new Set(['cancelled', 'blocked', 'skipped'])
+export async function reclaimStaleSellerDayReservation({ supabase, threadKey, sellerKey, inboundId, now }) {
+  if (!supabase?.from || !clean(threadKey) || !clean(sellerKey)) return { ok: false, reason: 'unwired' }
+  try {
+    const r = await supabase.from('send_queue').select('id,queue_status,guard_reason,source,message_origin,inbound_message_id,provider_message_id,textgrid_message_id,sent_at,delivered_at,metadata,created_at').eq('thread_key', threadKey).gte('created_at', new Date((Date.parse(now) || Date.now()) - 2 * 864e5).toISOString()).limit(100)
+    if (r?.error) return { ok: false, reason: 'queue_unreadable' }
+    const holders = (r.data || []).filter((row) => clean(row?.metadata?.reservations?.seller_day) === clean(sellerKey))
+    if (!holders.length) return { ok: false, reason: 'holder_unknown' }
+    const { loadQueueRowAttemptEvidence } = await import('@/lib/domain/communications/queue-row-attempt-evidence.js')
+    const ev = await loadQueueRowAttemptEvidence(supabase, holders.map((h) => h.id))
+    if (!ev.ok) return { ok: false, reason: 'attempt_ledger_unreadable' }
+    for (const h of holders) {
+      const st = clean(h.queue_status).toLowerCase()
+      const ai = clean(h.source) === AI_CONVERSATION_SOURCE || clean(h.message_origin) === 'ai_generated'
+      const evidence = clean(h.provider_message_id) || clean(h.textgrid_message_id) || h.sent_at || h.delivered_at
+      const started = (ev.byRow.get(clean(h.id)) || []).some((a) => a.provider_request_started_at || clean(a.provider_message_id))
+      if (!ai || evidence || started || !(NEVER_SENT_HELD.has(st) || NEVER_SENT_TERMINAL.has(st))) return { ok: false, reason: `holder_may_have_reached_seller:${st || 'unknown'}` }
+      if (clean(h.inbound_message_id || h.metadata?.inbound_message_event_id) === clean(inboundId)) return { ok: false, reason: 'holder_answers_this_inbound' }
+    }
+    for (const h of holders.filter((x) => NEVER_SENT_HELD.has(clean(x.queue_status).toLowerCase()))) {
+      const m = h.metadata && typeof h.metadata === 'object' ? h.metadata : {}
+      const u = await supabase.from('send_queue').update({
+        queue_status: 'cancelled', guard_status: 'blocked', guard_reason: STALE_SELLER_DAY_SUPERSEDED_REASON, failed_reason: STALE_SELLER_DAY_SUPERSEDED_REASON, is_locked: false, locked_at: null, lock_token: null, updated_at: now,
+        metadata: { ...m, skip_reason: STALE_SELLER_DAY_SUPERSEDED_REASON, cancellation_reason: STALE_SELLER_DAY_SUPERSEDED_REASON, superseded_by_newer_inbound: true, superseded_by_inbound_id: clean(inboundId) || null, final_queue_status: 'cancelled', finalized_at: now, seller_day_reservation_released: { at: now, key: sellerKey, executor_version: R3_EXECUTOR_VERSION } },
+      }).eq('id', h.id).eq('queue_status', clean(h.queue_status)).select('id')
+      if (u?.error || !(u.data || []).length) return { ok: false, reason: 'holder_supersede_refused' }
+    }
+    return { ok: true, superseded: holders.map((h) => String(h.id)) }
+  } catch (e) {
+    return { ok: false, reason: `reclaim_threw:${clean(e?.message).slice(0, 40)}` }
+  }
+}
+
 /** The send_queue row of an AI reply by its queue key (read-only). */
 export async function lookupQueueRowByKey(supabase, queueKey) {
   const k = clean(queueKey)
@@ -256,7 +318,17 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
   if (thread.some((m) => m.direction === 'outbound' && t(m) > t(inboundRow))) return held(['already_answered_by_outbound'])
   const pending = (state.queueRows || []).find((r) => ACTIVE_REPLY_STATUSES.has(clean(r.queue_status).toLowerCase()) && (clean(r.inbound_message_id) === inboundId || t(r) >= t(inboundRow)))
   if (pending) return held(['reply_already_queued'], { existing_queue_row_id: pending.id })
-  const continuity = state.continuity || resolveThreadContinuity({ sentRows: state.queueRows || [], threadState: state.thread_state || null, inboundTo: state.our_phone })
+  // rc-8.5.21 v4 (rt-sc-06): the sender binding must be explained by an audit. An unaudited move of the
+  // thread's number (automation_events sender_binding_unaudited_change, no audited reassignment / review after
+  // it) is a review hold — never a send from either number; an AUDITED reassignment binds the thread to its
+  // target even when the seller replied to the old number.
+  let binding = null
+  // (no database wired ⇒ no audit trail to read: the pure executor seams in unit tests)
+  try { binding = deps.loadSenderBindingAudit ? await deps.loadSenderBindingAudit({ threadKey }) : deps.supabase?.from ? await loadSenderBindingAudit({ supabase: deps.supabase, threadKey }) : { ok: true, unaudited: false, audited_sender: null } } catch { binding = { ok: false } }
+  if (!binding?.ok) return out('retry', ['sender_binding_audit_unreadable'])
+  if (binding.unaudited) return held(['held_sender_binding_unaudited'], { binding_event_at: binding.unaudited_at || null })
+  let continuity = state.continuity || resolveThreadContinuity({ sentRows: state.queueRows || [], threadState: state.thread_state || null, inboundTo: state.our_phone })
+  if (binding.audited_sender) continuity = resolveThreadContinuity({ sentRows: state.queueRows || [], threadState: state.thread_state || null, inboundTo: state.our_phone, auditedSender: binding.audited_sender })
   if (!continuity.ok || !continuity.sender_number) return held([...(continuity.reasons || []).map((r) => `continuity:${r}`), ...(continuity.sender_number || (continuity.reasons || []).length ? [] : ['sender_unavailable'])])
   const unsent = (state.queueRows || []).filter((r) => NOT_YET_SENT_STATUSES.has(clean(r.queue_status).toLowerCase()))
   // rc-8.5.21 phase 4 (competing sources): an automated row that is IN FLIGHT right now (claimed by the
@@ -357,7 +429,15 @@ export async function executeAiConversationReply(candidate = {}, deps = {}) {
     taken.push({ scope: SELLER_DAY_SCOPE, key: sellerKey, record_item_id: reservationId(SELLER_DAY_SCOPE, sellerKey) }, slot)
   } else {
     if (policy.limits.max_per_seller_per_day < 1) return holdConsumed(['seller_daily_cap'])
-    const r2 = await reservations.begin({ scope: SELLER_DAY_SCOPE, key: sellerKey, summary: 'ai_conversation_seller_day', metadata: meta, lease_ms: RESERVATION_LEASE_MS })
+    let r2 = await reservations.begin({ scope: SELLER_DAY_SCOPE, key: sellerKey, summary: 'ai_conversation_seller_day', metadata: meta, lease_ms: RESERVATION_LEASE_MS })
+    if (r2?.ok && r2.duplicate) {
+      // rc-8.5.21 v4 (rt-sc-03): a stale reply that never reached the seller gives the day back to this turn
+      const reclaim = deps.reclaimStaleSellerDay ? await deps.reclaimStaleSellerDay({ threadKey, sellerKey, inboundId, now }) : await reclaimStaleSellerDayReservation({ supabase: deps.supabase, threadKey, sellerKey, inboundId, now })
+      if (reclaim?.ok) {
+        try { await reservations.release({ record_item_id: reservationId(SELLER_DAY_SCOPE, sellerKey), scope: SELLER_DAY_SCOPE, key: sellerKey, error: STALE_SELLER_DAY_SUPERSEDED_REASON }) } catch { /* the begin below reports it */ }
+        r2 = await reservations.begin({ scope: SELLER_DAY_SCOPE, key: sellerKey, summary: 'ai_conversation_seller_day', metadata: { ...meta, reclaimed_from: reclaim.superseded || [] }, lease_ms: RESERVATION_LEASE_MS })
+      }
+    }
     if (!r2?.ok || r2.duplicate) return holdConsumed(['seller_daily_cap'])
     taken.push({ ...r2, scope: SELLER_DAY_SCOPE, key: sellerKey })
     for (let n = 1; n <= policy.limits.max_per_day_global; n += 1) {

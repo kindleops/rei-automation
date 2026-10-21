@@ -39,6 +39,19 @@ export const SENDER_CONTINUITY_RELEASE_MODE_KEY = "sender_continuity_release_mod
 export function resolveSenderContinuityReleaseMode(raw) {
   return String(raw ?? "").trim().toLowerCase() === "live" ? "live" : "off";
 }
+/**
+ * rc-8.5.21 v4 (rt-sc-02): how the runner's release sweep is armed. A correctly held AI reply must come
+ * back once its bound sender recovers — and an AI conversation row exists only while the AI send kill
+ * switch is on, so that switch IS its arming. Pure.
+ *   mode 'live'                    ⇒ every held row may be written
+ *   else, AI kill switch on        ⇒ ai_conversation rows only
+ *   else                           ⇒ dry run (production: both absent ⇒ unchanged)
+ */
+export function senderHoldReleaseArming({ mode = null, aiKillSwitchOn = false } = {}) {
+  if (resolveSenderContinuityReleaseMode(mode) === "live") return { dry_run: false, ai_rows_only: false, armed_by: SENDER_CONTINUITY_RELEASE_MODE_KEY };
+  if (aiKillSwitchOn === true) return { dry_run: false, ai_rows_only: true, armed_by: "ai_conversation_send_enabled" };
+  return { dry_run: true, ai_rows_only: false, armed_by: null };
+}
 const BATCH = 50;
 
 const clean = (v) => (v === null || v === undefined ? "" : String(v).trim());
@@ -145,7 +158,7 @@ async function loadFacts(db, row, deps) {
  * deps: supabase, now, loadHeldRows, loadFacts(row), applyDecision(id, payload, decision), holdCheck, runSendTimeContactGuard,
  *       loadOutboundNumberByPhone, loadDispatchBlockedSenders, getSystemValue, env, notify
  */
-export async function releaseSenderContinuityHolds({ dry_run = false, limit = BATCH } = {}, deps = {}) {
+export async function releaseSenderContinuityHolds({ dry_run = false, limit = BATCH, ai_rows_only = false } = {}, deps = {}) {
   const env = deps.env || process.env;
   if (lower(env.SENDER_CONTINUITY_RELEASE) === "off") return { ok: true, skipped: true, reason: "disabled_by_env" };
   const db = await defaultDb(deps);
@@ -157,6 +170,8 @@ export async function releaseSenderContinuityHolds({ dry_run = false, limit = BA
     : rowsOf(await db.from("send_queue").select("*").eq("queue_status", SENDER_CONTINUITY_HOLD_STATUS).in("guard_reason", [...SENDER_CONTINUITY_HOLD_REASONS]).order("created_at", { ascending: true }).limit(limit));
   const outcomes = [];
   for (const row of rows) {
+    // rc-8.5.21 v4 (rt-sc-02): armed by the AI kill switch only ⇒ only AI conversation rows are written
+    if (ai_rows_only && lower(row.source || meta(row).source) !== "ai_conversation" && lower(row.message_origin || meta(row).message_origin) !== "ai_generated") continue;
     let decision;
     try {
       const facts = typeof deps.loadFacts === "function" ? await deps.loadFacts(row) : await loadFacts(db, row, deps);
