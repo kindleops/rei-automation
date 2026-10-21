@@ -5923,14 +5923,20 @@ export async function reviewSenderBindingMove({ supabase, thread_key, stored, in
   if (seen?.error) return { keep_stored: false, reason: "outbound_unreadable" };
   const last_from = normalizePhone((Array.isArray(seen?.data) ? seen.data : [])[0]?.from_phone_number);
   if (last_from && last_from === stored) return { keep_stored: false, reason: "stored_sender_seen_by_seller" };
-  await supabase.from("automation_events").insert({
+  await recordUnauditedSenderBindingEvent(supabase, { thread_key, stored, incoming, direction, now });
+  return { keep_stored: false, reason: "stored_sender_unaudited" };
+}
+
+/** Append-only automation_events record of an unaudited thread-sender move (an event, never a queue row). */
+async function recordUnauditedSenderBindingEvent(supabase, { thread_key, stored, incoming, direction, now }) {
+  const event = {
     event_type: SENDER_BINDING_UNAUDITED_EVENT,
     source: "inbox_thread_state_projection",
     conversation_thread_id: thread_key,
     payload: { thread_key, stored_our_number: stored, incoming_our_number: incoming, direction, at: now, requires_operator_review: true },
     created_at: now,
-  });
-  return { keep_stored: false, reason: "stored_sender_unaudited" };
+  };
+  return supabase.from("automation_events").insert(event);
 }
 
 /**

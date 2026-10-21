@@ -192,7 +192,7 @@ export async function processDeliveryWebhookLive(webhook_log_row, options = {}, 
     let orphan_adoption = null
     if (!(Number(result?.send_queue_count || 0) > 0 || Number(result?.message_events_count || 0) > 0) && deps.adoptOrphanProviderCallback !== false) {
       try {
-        const adopt = deps.adoptOrphanProviderCallback || (await import('@/lib/domain/queue/adopt-orphan-provider-callback.js')).adoptOrphanProviderCallback
+        const adopt = deps.adoptOrphanProviderCallback || (await import('@/lib/domain/communications/adopt-orphan-provider-callback.js')).adoptOrphanProviderCallback
         orphan_adoption = await adopt({ supabase, provider_message_sid: normalized.provider_message_sid, to: normalized.to, from: normalized.from, verification: options.verification || normalized?.payload?.webhook_verification || {}, now })
         if (orphan_adoption?.adopted) result = await syncFn(sync_payload, syncOptions)
       } catch (adoption_error) {
