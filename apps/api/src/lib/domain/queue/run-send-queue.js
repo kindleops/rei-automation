@@ -346,10 +346,20 @@ export async function runSendQueue(
       const mode = String((await Promise.resolve().then(() => get_system_value(SENDER_CONTINUITY_RELEASE_MODE_KEY)).catch(() => null)) ?? "").trim().toLowerCase();
       const release = deps.releaseSenderContinuityHolds
         || (await import("@/lib/domain/queue/release-sender-continuity-holds.js")).releaseSenderContinuityHolds;
-      const released = await release({ dry_run: resolveSenderContinuityReleaseMode(mode) !== "live" }, { supabase, now, getSystemValue: get_system_value });
+      // rc-8.5.21 v4 (rt-sc-02): AI conversation rows are armed by the AI send kill switch (senderHoldReleaseArming)
+      let ai_kill_switch_on = false;
+      try {
+        const { AI_SEND_KILL_SWITCH_KEY, parseKillSwitch } = await import("@/lib/domain/conversation-ai/send-policy.js");
+        ai_kill_switch_on = parseKillSwitch(await Promise.resolve().then(() => get_system_value(AI_SEND_KILL_SWITCH_KEY)).catch(() => null));
+      } catch { ai_kill_switch_on = false; }
+      const { senderHoldReleaseArming } = await import("@/lib/domain/queue/release-sender-continuity-holds.js");
+      const arming = senderHoldReleaseArming({ mode, aiKillSwitchOn: ai_kill_switch_on });
+      const ai_rows_only = arming.ai_rows_only;
+      const released = await release({ dry_run: arming.dry_run, ai_rows_only }, { supabase, now, getSystemValue: get_system_value });
       if (released?.examined) {
         log_info("queue.sender_continuity_release", {
           mode: mode || "off",
+          ai_rows_only,
           examined: released.examined,
           released: released.released,
           superseded: released.superseded,

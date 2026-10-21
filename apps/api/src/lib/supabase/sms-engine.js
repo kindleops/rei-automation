@@ -3372,6 +3372,8 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
         },
         updated_at: now,
       },
+      // rc-8.5.21 v4 (rt-cr-05): the ambiguous crash raises an OPERATOR item when the hold lands
+      lease_manual_review: { blockers: lease_verdict.blockers || [], source: clean(row.source || row?.metadata?.source) || null },
     });
   }
 
@@ -3389,7 +3391,7 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
   let applied_patch_count = 0;
 
   if (!dry_run) {
-    for (const { id, patch, expect } of deduped_updates) {
+    for (const { id, patch, expect, lease_manual_review } of deduped_updates) {
       const patch_result = await applySendQueueLifecyclePatch(supabase, {
         id,
         patch,
@@ -3400,6 +3402,7 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
         blocked_expiration_count += 1;
       } else if (patch_result.applied) {
         applied_patch_count += 1;
+        if (lease_manual_review) await raiseLeaseManualReviewItem({ id, ...lease_manual_review, now }, options);
       }
     }
   }
@@ -4628,6 +4631,31 @@ export async function syncClassifiedInboxThreadState({
   if (decision_fields_deferred) inboxPayload.__decision_fields_deferred = true;
 
   return upsertInboxThreadState(inboxPayload, deps);
+}
+
+/**
+ * rc-8.5.21 v4 (rt-cr-05): a send that crashed after its §11 provider-start marker (the provider may have
+ * received it) is never re-sent automatically — and it is never a silent hold either: ONE operator item per
+ * row (notification_events, deduplicated on the row id) names it, its blockers and the next action. Never
+ * throws into the lifecycle pass.
+ */
+export async function raiseLeaseManualReviewItem({ id, blockers = [], source = null, now = new Date().toISOString() } = {}, options = {}) {
+  try {
+    const record = options.recordLaunchCriticalAlert || (await import("@/lib/domain/alerts/launch-critical-alerts.js")).recordLaunchCriticalAlert;
+    return await record({
+      code: "queue_dispatch_failure",
+      subsystem: "queue_lease_recovery",
+      severity: "critical",
+      dedupe_key: `launch_safety:queue_lease_recovery:manual_review:${clean(id)}`,
+      source_entity_type: "send_queue",
+      source_entity_id: clean(id),
+      summary: "A send crashed mid-dispatch: provider outcome unknown, a person must reconcile it",
+      description: "The worker died after the provider-start marker and before any provider answer was recorded. The row is held (expired, processing_lease_expired_manual_review) and is never re-sent automatically: check the carrier for the message, then mark it sent or authorize one resend.",
+      metadata: { queue_row_id: clean(id), blockers: (blockers || []).slice(0, 8), row_source: source, next_action: "operator_reconcile_provider_outcome", at: now },
+    });
+  } catch {
+    return { ok: false };
+  }
 }
 
 export async function syncDeliveryEvent(payload, options = {}) {
@@ -5877,6 +5905,34 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
   throw error;
 }
 
+export const SENDER_BINDING_UNAUDITED_EVENT = "sender_binding_unaudited_change";
+const AUDITED_BINDING_EVENTS = ["sender_thread_reassigned", "sender_thread_rerouted"];
+
+/**
+ * rc-8.5.21 v4 (rt-sc-06): is the STORED thread sender backed by an audited move? If yes it is kept; if not,
+ * the move is recorded (append-only) as an unaudited binding change. Never throws into the caller.
+ */
+export async function reviewSenderBindingMove({ supabase, thread_key, stored, incoming, direction = "projection", now = new Date().toISOString() } = {}) {
+  if (!supabase?.from || !thread_key || !stored || !incoming) return { keep_stored: false, reason: "unwired" };
+  const ev = await supabase.from("automation_events").select("event_type,payload,created_at").eq("conversation_thread_id", thread_key).in("event_type", AUDITED_BINDING_EVENTS).order("created_at", { ascending: false }).limit(5);
+  if (ev?.error) return { keep_stored: false, reason: "audit_unreadable" };
+  const latest = (Array.isArray(ev?.data) ? ev.data : [])[0] || null;
+  if (latest && normalizePhone(latest?.payload?.to_phone_number) === stored) return { keep_stored: true, reason: "stored_sender_audited" };
+  // a stored number the seller already SAW us text from is explained (the outbound wrote it): no event
+  const seen = await supabase.from("send_queue").select("from_phone_number,created_at").eq("thread_key", thread_key).in("queue_status", ["sent", "delivered"]).order("created_at", { ascending: false }).limit(1);
+  if (seen?.error) return { keep_stored: false, reason: "outbound_unreadable" };
+  const last_from = normalizePhone((Array.isArray(seen?.data) ? seen.data : [])[0]?.from_phone_number);
+  if (last_from && last_from === stored) return { keep_stored: false, reason: "stored_sender_seen_by_seller" };
+  await supabase.from("automation_events").insert({
+    event_type: SENDER_BINDING_UNAUDITED_EVENT,
+    source: "inbox_thread_state_projection",
+    conversation_thread_id: thread_key,
+    payload: { thread_key, stored_our_number: stored, incoming_our_number: incoming, direction, at: now, requires_operator_review: true },
+    created_at: now,
+  });
+  return { keep_stored: false, reason: "stored_sender_unaudited" };
+}
+
 /**
  * Upserts a row into the inbox_thread_state table.
  * This table is used to drive the Nexus Inbox dashboard.
@@ -5909,7 +5965,7 @@ export async function upsertInboxThreadState(payload, deps = {}) {
   // terminal contact state (counts alone are insufficient for true→false guard).
   const { data: existing_state } = await supabase
     .from('inbox_thread_state')
-    .select('inbound_count,outbound_count,is_suppressed,status,next_action,automation_state,disposition')
+    .select('inbound_count,outbound_count,is_suppressed,status,next_action,automation_state,disposition,our_number')
     .eq('thread_key', thread_key)
     .limit(1)
     .maybeSingle();
@@ -5946,6 +6002,28 @@ export async function upsertInboxThreadState(payload, deps = {}) {
       last_sync_at: now,
     }
   };
+
+  // rc-8.5.21 v4 (rt-sc-06): a write that would MOVE the thread's sender binding (our_number) to another
+  // number of ours. Only a seller-visible OUTBOUND (sent from the bound sender), an audited operator
+  // reassignment or the audited sticky reroute (direct, evented writes) are binding changes. Here:
+  //   - the stored number is backed by an AUDITED reassignment / reroute ⇒ it is kept (an inbound to the old
+  //     number used to undo an approved reassignment the moment the seller replied);
+  //   - otherwise the projection follows the inbound exactly as before, and the move is recorded as an
+  //     append-only automation_events `sender_binding_unaudited_change` (the stored number was not explained
+  //     by any audit). The AI dispatcher holds the thread for review on that evidence
+  //     (held_sender_binding_unaudited); nothing else changes for the live template path.
+  {
+    const prior_ours = normalizePhone(prior?.our_number);
+    const incoming_ours = normalizePhone(insert_payload.our_number);
+    if (prior_ours && incoming_ours && prior_ours !== incoming_ours && prior_ours !== canonical_seller_phone && increment_direction !== "outbound") {
+      try {
+        const binding = await (deps.reviewSenderBindingMove || reviewSenderBindingMove)({ supabase, thread_key, stored: prior_ours, incoming: incoming_ours, direction: increment_direction || "projection", now });
+        if (binding?.keep_stored) delete insert_payload.our_number;
+      } catch {
+        // the binding review is evidence, never a reason to fail the projection
+      }
+    }
+  }
 
   // Name is additive only: a message without one (an inbound, an auto-reply)
   // must never blank the name a campaign send already recorded.
