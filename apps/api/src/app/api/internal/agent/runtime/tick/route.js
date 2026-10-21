@@ -12,7 +12,7 @@ import { NextResponse } from 'next/server.js'
 
 import { requireScheduledMutationAuth } from '@/lib/security/cron-auth.js'
 import { runScheduledRuntimeTick, DEFAULT_RUNTIME_HANDLERS } from '@/lib/agent/runtime/runtime-service.js'
-import { conversationRuntimeHandlers } from '@/lib/ai/conversation-decide-handler.js'
+import { conversationRuntimeHandlers, conversationRuntimeMaintenance } from '@/lib/ai/conversation-decide-handler.js'
 import { missionRuntimeHandlers } from '@/lib/ai/mission-runtime-wiring.js'
 import { operationsRuntimeHandlers } from '@/lib/ai/operations-runtime-wiring.js'
 import { followupRuntimeHandlers } from '@/lib/ai/followup-runtime-wiring.js'
@@ -36,7 +36,7 @@ export async function POST(request) {
     // AGENT_OPERATIONS_ENABLED=1; the 8.5.21 follow-up execution pipeline (followup.execution_sweep /
     // followup.dispatch / followup.reconcile — writes follow-up send_queue rows) only when
     // LC_FOLLOWUP_EXECUTION=1, and it does nothing until system_control.followup_execution_mode is set
-    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...missionRuntimeHandlers(), ...operationsRuntimeHandlers(), ...followupRuntimeHandlers() } })
+    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...missionRuntimeHandlers(), ...operationsRuntimeHandlers(), ...followupRuntimeHandlers() }, maintenance: conversationRuntimeMaintenance() })
     if (result.summary) {
       const s = result.summary
       logger.info('agent.runtime.tick', { blocked: s.blocked, claimed: s.claimed, jobs: s.jobs.map((j) => `${j.kind}:${j.outcome}`), errors: s.errors.map((e) => `${e.phase}:${e.code}`), elapsed_ms: s.elapsed_ms })

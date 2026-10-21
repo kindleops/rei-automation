@@ -171,3 +171,32 @@ export function conversationRuntimeHandlers(env = process.env) {
 }
 
 export { CONVERSATION_AI_SHADOW_ENV }
+
+// rc-8.5.21 v4 (rt-cr-01): the stranded-inbound recovery is a RUNTIME TICK maintenance task whenever the
+// conversation pipeline is live (the same env gate that registers conversation.decide). v3fix ran it only
+// inside the born-disabled conversation-turn-sweep schedule and the born-off ops supervisor, so with the
+// pipeline live and those optional schedules off (the shipped posture), an inbound persisted before its
+// decide job was enqueued was never recovered. Idempotent (the hook's own event key), throttled per
+// process, bounded by the sweep's lookback / grace window; nothing is decided or sent here.
+export const INBOUND_RECOVERY_INTERVAL_MS = 60_000
+const RECOVERY_LAST = Symbol.for('lc.conversation.inbound_recovery.last_at')
+
+export function conversationRuntimeMaintenance(env = process.env, { supabase = null, recover = null, intervalMs = INBOUND_RECOVERY_INTERVAL_MS } = {}) {
+  if (!conversationAiShadowRequested(env)) return []
+  return [Object.freeze({
+    name: 'conversation_inbound_recovery',
+    async run({ store, now = new Date().toISOString() } = {}) {
+      const t = Date.parse(now) || Date.now()
+      const last = Number(globalThis[RECOVERY_LAST] || 0)
+      if (intervalMs > 0 && last && t - last < intervalMs) return { skipped: 'throttled' }
+      globalThis[RECOVERY_LAST] = t
+      const sb = supabase || (await import('@/lib/supabase/default-client.js')).getDefaultSupabaseClient()
+      const fn = recover || (await import('./conversation-inbound-sweep.js')).recoverStrandedInbounds
+      const r = await fn({ supabase: sb, runtimeStore: store, env, now })
+      return { examined: r.examined || 0, enqueued: r.enqueued || 0, already_present: r.already_present || 0, failed: (r.failed || []).length, skipped: r.skipped || null }
+    },
+  })]
+}
+
+/** test seam: forget the per-process throttle */
+export function __resetConversationMaintenanceThrottleForTests() { delete globalThis[RECOVERY_LAST] }
