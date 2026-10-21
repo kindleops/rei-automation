@@ -352,6 +352,18 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261017110000_inbox_disposition_declined_unverified_backfill_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261017110000_inbox_disposition_declined_unverified_backfill_rollback_posttest.sql')],
   },
+  // ── rc-8.5.21 v4: FORWARD view migration — production's 10-10 inbox bucket views (20261010120000 applied
+  //    out of band 2026-10-12) brought up to the 10-17 declined_unverified mapping; never a re-apply ──
+  {
+    id: 'inbox_bucket_views_declined_unverified',
+    // the production state: the inbox tables the views read + the 10-10 view body (= this migration's rollback)
+    setup: ['scripts/db/fixtures/inbox_bucket_views_public_baseline.sql', M('PROPOSED_20261020120000_inbox_bucket_views_declined_unverified_rollback.sql'), 'scripts/db/fixtures/inbox_zero_counts_dependant.sql'],
+    pretest: M('PROPOSED_20261020120000_inbox_bucket_views_declined_unverified_pretest.sql'),
+    apply: [M('PROPOSED_20261020120000_inbox_bucket_views_declined_unverified.sql')],
+    posttest: [M('PROPOSED_20261020120000_inbox_bucket_views_declined_unverified_posttest.sql')],
+    rollback: [M('PROPOSED_20261020120000_inbox_bucket_views_declined_unverified_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261020120000_inbox_bucket_views_declined_unverified_rollback_posttest.sql')],
+  },
   // ── P0 automation-hold registry (rc-8.5.20-holds; production gets it via hotfix/automation-holds) ──
   {
     id: 'automation_holds_registry',

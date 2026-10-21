@@ -9,6 +9,9 @@ import { resolveThreadContinuity } from '@/lib/domain/conversation-ai/persona-co
 import { loadCompanyIdentity } from '@/lib/domain/conversation-ai/company-identity.js'
 import { dryRunEligibility, hypotheticalReplyRow } from '@/lib/domain/conversation-ai/eligibility-bridge.js'
 import { resolveRecipientZones } from '@/lib/domain/queue/reply-timing.js'
+import { attributeInbounds } from '@/lib/domain/conversation-ai/property-facts.js'
+import { messagesOfInput } from '@/lib/domain/conversation-ai/property-ownership.js'
+import { questionKindOf } from '@/lib/domain/conversation-ai/questions.js'
 
 export const CANONICAL_INPUTS_VERSION = 'conv-ai.canonical-inputs.v1'
 const QUEUE_COLS = 'id,queue_status,use_case_template,created_at,source,inbound_message_id,agent_name,metadata,message_body,from_phone_number'
@@ -53,10 +56,24 @@ export async function loadCanonicalInputs({ supabase, providerMessageSid, inboun
   const companyIdentity = await loadCompanyIdentity({ readSwitch: read })
   const mailing = propRows[0]?.owner_address_state ? { state: propRows[0].owner_address_state, zip: null } : null
   const recipientZones = resolveRecipientZones({ recipientPhone: loaded.row.from_phone_number, propertyGeography: loaded.geography, mailingGeography: mailing, storedTimezone: loaded.timezone })
-  const row = hypotheticalReplyRow({ sellerPhone: loaded.row.from_phone_number, ourPhone: loaded.row.to_phone_number, threadKey: tk, propertyId: loaded.row.property_id, prospectId: loaded.row.prospect_id, inboundId: loaded.row.id, inboundAt: loaded.input.inbound.at, now })
+  // rc-8.5.21 v4 (rt-pl-05): eligibility is judged for the property the inbound is ABOUT. A reply that
+  // names another property of the thread ("is this about the house on Elm?") is that property's
+  // conversation; the inbound row's property (often the one just denied) must not close it.
+  const replyPropertyId = inboundReplyPropertyId(loaded.input, loaded.row.property_id)
+  const row = hypotheticalReplyRow({ sellerPhone: loaded.row.from_phone_number, ourPhone: loaded.row.to_phone_number, threadKey: tk, propertyId: replyPropertyId, prospectId: loaded.row.prospect_id, inboundId: loaded.row.id, inboundAt: loaded.input.inbound.at, now })
   const eligibilityFor = ({ now: at = now } = {}) => dryRunEligibility({ row: { ...row, created_at: at }, supabase, timezone: loaded.timezone, geography: loaded.geography, recipientZones, now: at })
   return {
     loaded, input: loaded.input, queueRows, threadState: threadState[0] || null, continuity, companyIdentity, recipientZones,
-    property_address: propRows[0]?.property_address || propRows[0]?.property_address_full || null, eligibilityFor, version: CANONICAL_INPUTS_VERSION,
+    property_address: propRows[0]?.property_address || propRows[0]?.property_address_full || null, eligibilityFor, eligibility_property_id: replyPropertyId || null, version: CANONICAL_INPUTS_VERSION,
   }
+}
+
+/** The property a reply's eligibility is judged for: a thread property the inbound NAMES (exactly one), else the row's. Pure. */
+export function inboundReplyPropertyId(input = {}, rowPropertyId = null) {
+  try {
+    const props = (input.properties || []).map((p) => String(p?.property_id ?? '').trim()).filter(Boolean)
+    const att = attributeInbounds({ messages: messagesOfInput(input), properties: input.properties || [], questionKindOf }).get(String(input.inbound?.id ?? ''))
+    if (att && att.basis === 'named_in_reply' && att.property && props.includes(att.property)) return att.property
+  } catch { /* fall back to the row's property */ }
+  return rowPropertyId
 }
