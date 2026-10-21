@@ -50,6 +50,20 @@ function useCaseForKind(useCase) {
 
 // ── seller-text evidence (deterministic; each rule names what it proves) ─────
 export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours)|(?:todav[ií]a\s+|a[uú]n\s+)?es\s+m[ií]a|sigue\s+siendo\s+m[ií]a|soy\s+(?:el|la)\s+(?:due[nñ][oa]|propietari[oa]))(?![\p{L}])/iu
+// rc-8.5.21 v4 (coverage): ANSWER forms to OUR ownership question that confirm ownership without the
+// words "I own" — co-ownership ("me and my brother", "my wife and I"), an entity ("it's in my LLC but
+// yeah", "under my trust"), "we do", Spanish "sí, todavía la tengo" — and the bare former-owner answer
+// ("used to", "not anymore"). Read ONLY against our ownership question (never a free-standing claim).
+const ANS_YES = "(?:(?:yes|yeah|yep|yup|ya|sure|correct|s[ií])[\\s,.!]*)?"
+export const OWN_ANSWER_CONFIRM_RE = new RegExp([
+  `^\\s*${ANS_YES}(?:it'?s|its|it\\s+is|that'?s|the\\s+(?:title|deed|house|property)\\s+is|title'?s)?\\s*(?:in|under|through|owned\\s+by|held\\s+by|held\\s+in)\\s+(?:my|our|the\\s+family|a|the)\\s+(?:\\p{L}+\\s+)?(?:llc|l\\.l\\.c\\.?|trust|company|corporation|corp|inc|business|entity|name|names|family\\s+trust)(?:\\s+(?:but\\s+)?(?:yeah|yes|yep|i\\s+do|we\\s+do|it'?s\\s+mine))?\\s*[.!]*\\s*$`,
+  `^\\s*${ANS_YES}(?:me|myself)\\s+(?:and|&|n)\\s+(?:my|our)\\s+\\p{L}+(?:\\s+\\p{L}+)?(?:\\s+(?:do|own\\s+it|both))?\\s*[.!]*\\s*$`,
+  `^\\s*${ANS_YES}(?:my|our)\\s+\\p{L}+(?:\\s+\\p{L}+)?\\s+(?:and|&|n)\\s+(?:i|me|myself)(?:\\s+(?:do|own\\s+it|both\\s+do|still\\s+do))?\\s*[.!]*\\s*$`,
+  `^\\s*${ANS_YES}(?:we|we\\s+both|both\\s+of\\s+us|i|i\\s+still|we\\s+still)\\s+(?:still\\s+)?do(?:\\s+(?:own\\s+it|lol|yes))?\\s*[.!]*\\s*$`,
+  `^\\s*${ANS_YES}(?:todav[ií]a\\s+|a[uú]n\\s+)?(?:la|lo)\\s+tengo(?:\\s+todav[ií]a)?(?![\\p{L}])`,
+  `^\\s*${ANS_YES}(?:es\\s+(?:de|a\\s+nombre\\s+de)\\s+(?:mi|nuestra|nuestro)\\s+(?:familia|compa[nñ][ií]a|empresa|llc|fideicomiso)|mi\\s+\\p{L}+\\s+y\\s+yo|yo\\s+y\\s+mi\\s+\\p{L}+)(?![\\p{L}])`,
+].join('|'), 'iu')
+export const OWN_ANSWER_FORMER_RE = /^\s*(?:i\s+|we\s+)?used\s+to(?:\s+(?:own\s+it|but\s+not\s+any\s*more|lol))?\s*[.!]*\s*$|^\s*(?:not\s+any\s*more|no\s+longer|not\s+no\s+more|ya\s+no)\s*[.!]*\s*$/i
 export const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|dont|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong|(?:that'?s\s+|it'?s\s+|that\s+is\s+|it\s+is\s+)?(?:not|isn'?t|aint|ain'?t)\s+(?:mine|ours)\b(?!\s+any\s*more))\b/i
 export const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|the|this)|^\s*(?:already\s+)?sold\b|\b(?:it|house|home|property)\s+(?:was|has\s+been|got)\s+sold|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore|gave\s+(?:the|my|that|this)\s+(?:house|home|property|place)\s+to|(?:it|the\s+house|the\s+home|the\s+property)\s+(?:is|belongs\s+to)\s+my\s+(?:son|daughter|kids?|children|brother|sister|mom|dad|mother|father)(?:'s)?\b|(?:signed|deeded|transferred)\s+(?:it|the\s+(?:house|home|property))\s+(?:over\s+)?to|ya\s+la\s+vend\w*|ya\s+no\s+es\s+m[ií]a)/im
 const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
@@ -60,6 +74,41 @@ const CONDITION_RE = /\b(?:roof|hvac|a\/?c\b|furnace|foundation|plumbing|electri
 const TIMELINE_RE = /\b(?:close|closing|sell|selling|move|moving|be\s+out|out|done|wrap\s+(?:it\s+)?up)\s+(?:by|before|in|within|after|around|at)\s+(?:the\s+)?(?:end\s+of\s+|beginning\s+of\s+|mid[\s-]?)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter|christmas|thanksgiving|the\s+holidays|(?:this|next)\s+(?:week|month|year|spring|summer|fall|winter)|[0-9]+\s+(?:days?|weeks?|months?)|a\s+(?:week|month|few\s+(?:weeks|months)))\b|\b(?:asap|as\s+soon\s+as\s+possible|no\s+rush|whenever)\b/i
 const WHO_IS_THIS_RE = /\b(?:who\s+(?:is|'?s)\s+(?:this|it)|who\s+are\s+(?:you|u)|whos\s+this|who\s+(?:is|are)\s+(?:you|this)\s+with|how\s+did\s+you\s+get\s+my\s+(?:number|info|information)|what\s+company|why\s+do\s+you\s+(?:ask|want|need|care)|why\s+(?:are\s+you|r\s+u)\s+(?:asking|texting|contacting)|what\s+(?:can\s+i\s+do\s+for\s+you|do\s+you\s+want|is\s+this\s+(?:about|regarding|for)|'?s\s+this\s+(?:about|regarding|for))|whats\s+this\s+about)\b|^\s*(?:why|why\s+\?|why\s+do\s+you\s+ask|wym|what\s+for)\s*[?!.]*\s*$/i
 const CALLBACK_RE = /\b(?:call\s+me|give\s+me\s+a\s+call|can\s+(?:you|u)\s+call|rather\s+talk\s+on\s+the\s+phone)\b/i
+// rc-8.5.21 v4 (coverage): identity / callback / visit requests composed from their parts (who + is/are +
+// this/you, how + did/do + you + get/find + my + number/info, what's + your + name, did/have + we + met,
+// do I know you; the Spanish forms) — unicode word edges, so "¿Quién habla?" is read too. Each is a
+// request a person-safe template answers (identity) or an OPERATOR TASK (callback / visit).
+const UB = '(?<![\\p{L}\\p{N}])'; const UE = '(?![\\p{L}\\p{N}])'
+const YOU = "(?:you|u|ya|y'?all|you\\s+guys|ur\\s+company|they)"
+export const IDENTITY_REQUEST_RE = new RegExp([
+  `${UB}who\\s+(?:is|'?s|r|are)\\s+(?:this|it|that|you|u)(?:\\s+(?:texting|messaging|writing|again|exactly|with))?${UE}`,
+  `${UB}who\\s+(?:wants|needs)\\s+to\\s+know${UE}`, `${UB}who\\s+(?:am\\s+i|is\\s+this)\\s+(?:talking|speaking|texting|chatting)\\s+(?:to|with)${UE}`, `${UB}who\\s+sent\\s+(?:this|that|me\\s+this)${UE}`,
+  `${UB}(?:what'?s|whats|what\\s+is|wat'?s|and)\\s+(?:your|ur|yo)\\s+name${UE}`, `${UB}(?:may|can|could)\\s+i\\s+(?:ask|get|have|know)\\s+(?:your|ur|who)\\b`, `${UB}(?:your|ur)\\s+name\\s*\\?`, `${UB}and\\s+you\\s+are\\s*\\?`,
+  `${UB}(?:how|where)\\s+(?:did|do|'?d|would|could|does)\\s+${YOU}\\s+(?:even\\s+|ever\\s+|actually\\s+|guys\\s+)?(?:get|got|find|found|obtain|pull|come\\s+across|have)\\s+(?:my|this|me|our)\\s*(?:number|#|info|information|contact|cell|phone|name|details|address)?`,
+  `${UB}where\\s+(?:did|do)\\s+${YOU}\\s+get\\s+(?:my|this|that)${UE}`,
+  `${UB}(?:did|have|do)\\s+(?:we|i)\\s+(?:ever\\s+|already\\s+)?(?:meet|met|talk(?:ed)?|speak|spoke(?:n)?|know\\s+(?:you|u|each\\s+other))${UE}`, `${UB}do\\s+i\\s+know\\s+(?:you|u)${UE}`, `${UB}have\\s+we\\s+met${UE}`,
+  `${UB}qui[eé]n\\s+(?:habla|es|eres|me\\s+escribe|me\\s+est[aá]\\s+escribiendo|es\\s+usted|son\\s+ustedes)${UE}`, `${UB}con\\s+qui[eé]n\\s+(?:hablo|tengo\\s+el\\s+gusto)${UE}`,
+  `${UB}c[oó]mo\\s+(?:consigui[oó]|consiguieron|obtuvo|obtuvieron|tiene|tienen|sac[oó]|sacaron)\\s+(?:mi|este)\\s+(?:n[uú]mero|tel[eé]fono|cel)`, `${UB}de\\s+d[oó]nde\\s+(?:sac[oó]|sacaron|tiene|tienen)\\s+mi\\s+(?:n[uú]mero|tel[eé]fono|informaci[oó]n)`,
+  `${UB}por\\s+qu[eé]\\s+(?:pregunta|preguntas|preguntan|quiere\\s+saber|quieren\\s+saber)${UE}`, `${UB}(?:cu[aá]l\\s+es\\s+su\\s+nombre|c[oó]mo\\s+se\\s+llama(?:\\s+usted)?|nos\\s+conocemos)${UE}`,
+].join('|'), 'iu')
+const NEG_BEFORE = "(?<!(?:don'?t|dont|do\\s+not|never|no|not|stop|quit|wag|huwag|'wag)\\s+(?:\\p{L}+\\s+){0,2})"
+export const CALLBACK_REQUEST_RE = new RegExp([
+  `${UB}${NEG_BEFORE}(?:call|phone|ring)\\s+(?:me|us)(?:\\s+(?:back|instead|please|plz|later|tomorrow|tonight|asap|at|on|when))?${UE}`,
+  `${UB}(?:give|gimme)\\s+(?:me|us)\\s+a\\s+(?:call|ring|buzz)${UE}`,
+  `${UB}(?:can|could|would|will|pls|please)\\s+(?:you|u|someone|somebody|anyone|one\\s+of\\s+you)\\s+(?:please\\s+)?(?:just\\s+)?(?:call|phone|ring)${UE}`,
+  `${UB}(?:rather|prefer\\s+to|better\\s+to|easier\\s+to|want\\s+to|like\\s+to)\\s+(?:talk|speak|chat)\\s+(?:on|by|over)\\s+the\\s+phone${UE}`, `${UB}(?:prefer|want|need)\\s+a\\s+(?:phone\\s+)?call${UE}`, `${UB}can\\s+we\\s+(?:talk|speak)\\s+(?:on\\s+the\\s+phone|by\\s+phone)${UE}`,
+  `${UB}(?:ll[aá]m(?:a|e|en)me|ll[aá]m(?:e|en)nos|m[aá]rqu(?:e|en)me|m[aá]rcame)${UE}`, `${UB}(?:me|nos)\\s+(?:puede|pueden|podr[ií]a|podr[ií]an)\\s+(?:llamar|marcar)${UE}`, `${UB}prefiero\\s+(?:hablar\\s+por\\s+tel[eé]fono|una\\s+llamada|que\\s+me\\s+llamen)${UE}`,
+  `${UB}${NEG_BEFORE}(?:tawag(?:an|in)|i-?call|call)\\s+(?:mo|nyo|niyo|ninyo|na\\s+lang|nalang|lang|po|na)?\\s*(?:(?:mo|nyo|niyo|ninyo|na\\s+lang|nalang|lang|po|na)\\s+)*(?:ako|ko|kami)${UE}`, `${UB}pa-?(?:call|tawag)${UE}`,
+  `${UB}(?:me\\s+lig(?:a|ue|uem)|pode(?:m)?\\s+me\\s+ligar|appel(?:ez|le)[- ]moi|pouvez[- ]vous\\s+m'appeler|chiamami|mi\\s+chiami|zadzwo[nń]\\s+do\\s+mnie|rele\\s+(?:m|mwen)(?:\\s+(?:tanpri|souple))?)${UE}`,
+  `(?:gọi\\s+(?:cho|điện\\s+cho)\\s+(?:tôi|em|anh|chị)|전화\\s*(?:해\\s*)?주세요|打(?:电话|電話)?(?:给|給|俾)我|اتصل\\s+بي|позвоните\\s+мне)`,
+].join('|'), 'iu')
+export const VISIT_REQUEST_EXT_RE = new RegExp([
+  `${UB}(?:come|stop|swing|drop|pop)\\s+(?:by|over|out)\\s+(?:on\\s+)?(?:(?:mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)(?:day)?|tomorrow|today|tonight|this\\s+\\p{L}+|next\\s+\\p{L}+|any\\s*time|whenever)`,
+  `${UB}(?:come|stop|swing|drop)\\s+(?:by\\s+|over\\s+)?(?:and\\s+)?(?:take\\s+a\\s+look|see\\s+(?:it|the\\s+(?:house|place|property))|look\\s+at\\s+it|check\\s+it\\s+out)${UE}`,
+  `${UB}(?:you\\s+can|feel\\s+free\\s+to|welcome\\s+to)\\s+(?:come|stop|swing)\\s+(?:by|over|see|look)${UE}`,
+  `${UB}(?:venga|vengan|pase|pasen|puede\\s+venir|pueden\\s+venir)\\s+(?:a\\s+ver(?:la|lo)?|el\\s+\\p{L}+|cuando\\s+quiera)`,
+].join('|'), 'iu')
+const WANTS_TO_SELL_RE = /\b(?:(?:want|need|ready|looking|trying|wanna|gotta|have|got)\s+(?:to\s+)?(?:sell|get\s+rid\s+of|unload|offload|be\s+done\s+with|move\s+on\s+from)|want\s+(?:it|this|the\s+(?:house|place|property))\s+(?:gone|sold|off\s+my\s+hands)|(?:i'?d|i\s+would|i\s+might|we'?d|we\s+would)\s+(?:sell|consider\s+selling|be\s+open\s+to\s+selling)|open\s+to\s+(?:selling|an?\s+offer|offers))\b|(?<![\p{L}])(?:quiero\s+vender(?:la|lo)?|(?:la|lo)\s+quiero\s+vender|s[ií]\s+(?:la|lo)\s+vendo|me\s+interesa\s+vender(?:la|lo)?|quiero\s+salir\s+de\s+(?:esa|la|esta|mi)\s+(?:casa|propiedad))(?![\p{L}])/iu
 const WHICH_PROPERTY_RE = /\b(?:which\s+(?:property|house|one|address)|what\s+(?:property|address|house))\b/i
 const OBJECTION_RE = /\b(?:too\s+low|lowball|low\s*ball|scam|worth\s+(?:a\s+lot\s+)?more|not\s+(?:that|so)\s+cheap|insult(?:ing)?)\b/i
 const NEED_TIME_RE = /\b(?:let\s+me\s+think|need\s+(?:some\s+)?time|not\s+right\s+now|maybe\s+later|in\s+a\s+few\s+(?:months|weeks)|next\s+year|not\s+ready)\b/i
@@ -75,7 +124,7 @@ export const EMAIL_OR_CARD_REQUEST_RE = /\b(?:e-?mail\s+me|send\s+(?:me\s+)?(?:a
 // "I will contact you when I want to sell" — not now: the 30-day follow-up (owner rule)
 export const DEFERS_CONTACT_RE = /\b(?:i'?ll|i\s+will|we'?ll|we\s+will)\s+(?:contact|call|text|reach\s+out\s+to|get\s+(?:back\s+)?(?:to|with)|let)\s+(?:you|u)(?:\s+know)?\s+(?:when|if|once|whenever)\b/i
 // "Which company are you with?" — answered only from the configured identity, else a person
-export const COMPANY_QUESTION_RE = /\b(?:(?:what|which)\s+(?:company|outfit|firm|organi[sz]ation|business)|who\s+(?:are\s+(?:you|u)|r\s+u)\s+with|company\s+(?:name|are\s+(?:you|u)|r\s+u)|(?:who|what)\s+do\s+(?:you|u)\s+(?:work\s+for|represent)|(?:your|ur)\s+(?:company|website|business\s+name)|(?:are|r)\s+(?:you|u)\s+(?:with\s+)?a\s+company|what'?s\s+the\s+(?:company|website))\b/i
+export const COMPANY_QUESTION_RE = /\b(?:(?:what|which)\s+(?:company|outfit|firm|organi[sz]ation|business)|who\s+(?:are\s+(?:you|u)|r\s+u)\s+with|(?<!(?:my|our|his|her|their|family)\s+)company\s+(?:name|are\s+(?:you|u)|r\s+u)|(?:who|what)\s+do\s+(?:you|u)\s+(?:work\s+for|represent)|(?:your|ur)\s+(?:company|website|business\s+name)|(?:are|r)\s+(?:you|u)\s+(?:with\s+)?a\s+company|what'?s\s+the\s+(?:company|website))\b/i
 export const VISIT_REQUEST_RE = /\b(?:(?:can|could|would|will)\s+(?:you|u|someone|somebody)\s+(?:stop|come|swing|drop)\s+(?:by|over|out)|(?:stop|come|swing|drop)\s+by\s+(?:on|at|this|next|tomorrow|today|mon|tue|wed|thu|fri|sat|sun)|come\s+(?:see|look\s+at|take\s+a\s+look\s+at)\s+(?:it|the\s+(?:house|place|property))|walk[\s-]?through|(?:schedule|set\s+up)\s+(?:a\s+)?(?:visit|showing|walkthrough|time\s+to\s+(?:see|look))|meet\s+(?:me|us)\s+(?:at|there))\b/i
 export const AUTOMATION_QUESTION_RE = /\b(?:(?:are|r)\s+(?:you|u|this)\s+(?:a\s+)?(?:bot|robot|real|human|person|automated|ai\b|machine|computer)|is\s+this\s+(?:a\s+)?(?:bot|robot|automated|real\s+person|human|ai\b|computer|machine|recording)|(?:bot|robot|automated|ai)\s*\?)/i
 // an amount WE quoted in an outbound (a live negotiation even without an offer record)
@@ -195,7 +244,8 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     else if (OWN_DENY_RE.test(body)) addFact(facts, 'ownership', 'denied', m)
     // a regex "sold" reading is weak evidence (0.6): mixed-intent rules may outrank it
     else if (OWN_FORMER_RE.test(body)) addFact(facts, 'ownership', 'former_owner', m, 'seller_stated', 0.6)
-    else if (OWN_CONFIRM_RE.test(body) || (lastAsked === 'ownership' && BARE_YES_RE.test(body))) addFact(facts, 'ownership', 'confirmed', m)
+    else if (lastAsked === 'ownership' && OWN_ANSWER_FORMER_RE.test(body)) addFact(facts, 'ownership', 'former_owner', m)
+    else if (OWN_CONFIRM_RE.test(body) || (lastAsked === 'ownership' && (BARE_YES_RE.test(body) || OWN_ANSWER_CONFIRM_RE.test(body)))) addFact(facts, 'ownership', 'confirmed', m)
     // rc-8.5.20: the shared matcher ("Not really", "No!!!", "Nope"); a polite "No thanks" or an emoji reply is not a denial
     else if (lastAsked === 'ownership' && bareNoAnswer(body).ownership_denial) addFact(facts, 'ownership', 'denied', m)
     // OWNER DECISION 2026-10-17 (supersedes 831df6cd): a polite "No thanks" to the ownership question is
@@ -212,6 +262,9 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     else if (lastAsked === 'interest' && BARE_YES_RE.test(body)) addFact(facts, 'seller_interest', 'interested', m)
     else if (lastAsked === 'interest' && bareNoAnswer(body).matched) addFact(facts, 'seller_interest', 'not_interested', m)
     else if (lastAsked === 'interest' && BARE_MAYBE_RE.test(body)) addFact(facts, 'seller_interest', 'conditional', m)
+    // rc-8.5.21 v4 (coverage): a stated wish to sell ("just want it gone before winter", "I'd sell", "la quiero
+    // vender") is interest — never when the same message negates it
+    else if (!facts.seller_interest?.source_message_ids?.includes(m.id) && WANTS_TO_SELL_RE.test(body) && !NOT_INTERESTED_RE.test(body) && !/\b(?:don'?t|dont|do\s+not|never|not|no)\s+(?:\w+\s+){0,2}(?:want|need|ready|sell|selling)\b|(?<![\p{L}])no\s+(?:la|lo)?\s*(?:quiero|voy\s+a)\s+vender/iu.test(body)) addFact(facts, 'seller_interest', 'interested', m, 'stated_wish_to_sell')
     // rc-8.5.21: a financing-terms objection is conditional interest (latest statement wins)
     if (FINANCING_OBJECTION_RE.test(body)) {
       objections.push({ kind: 'financing_terms_objection', source_message_id: m.id })
@@ -222,7 +275,7 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     }
     if (EMAIL_OR_CARD_REQUEST_RE.test(body)) requests.push({ kind: 'email_or_card', source_message_id: m.id })
     // blind-eval v2 STP-09: an in-person visit request ("can you stop by Thursday at 3") is an operator task
-    if (VISIT_REQUEST_RE.test(body)) requests.push({ kind: 'visit_request', source_message_id: m.id })
+    if (VISIT_REQUEST_RE.test(body) || VISIT_REQUEST_EXT_RE.test(body)) requests.push({ kind: 'visit_request', source_message_id: m.id })
     if (COMPANY_QUESTION_RE.test(body)) requests.push({ kind: 'company_identity', source_message_id: m.id })
     // blind-eval S2: a DIRECT question about automation (the only case a text may speak about it)
     if (AUTOMATION_QUESTION_RE.test(body)) requests.push({ kind: 'automation_question', source_message_id: m.id })
@@ -243,13 +296,13 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     // a stated price shows interest too (never the other way round)
     if ((facts.asking_price?.source_message_ids || []).includes(m.id) && !facts.seller_interest) addFact(facts, 'seller_interest', 'interested', m, 'asking_price_implies_interest')
     // requests / objections
-    if (WHO_IS_THIS_RE.test(body) || intent === 'who_is_this') {
+    if (WHO_IS_THIS_RE.test(body) || IDENTITY_REQUEST_RE.test(body) || intent === 'who_is_this') {
       requests.push({ kind: 'identity', source_message_id: m.id })
       // the seller answered our open question with a question about us: that question was
       // DEFLECTED, and may be re-asked ONCE inside the identity answer (never the price)
       if (lastAsked && questions[lastAsked] && lastAsked !== 'asking_price') pushUnique((questions[lastAsked].identity_deflected_by ||= []), m.id)
     }
-    if (CALLBACK_RE.test(body) || intent === 'callback_requested') requests.push({ kind: 'callback', source_message_id: m.id })
+    if ((CALLBACK_RE.test(body) && !/\b(?:don'?t|dont|do\s+not|never|no|stop|quit)\s+(?:\w+\s+){0,2}call/i.test(body)) || CALLBACK_REQUEST_RE.test(body) || intent === 'callback_requested') requests.push({ kind: 'callback', source_message_id: m.id })
     if (WHICH_PROPERTY_RE.test(body) || intent === 'multi_property') requests.push({ kind: 'property_identity', source_message_id: m.id })
     if (OBJECTION_RE.test(body) || intent === 'counter_or_negotiation') objections.push({ kind: 'price_objection', source_message_id: m.id })
     if (NEED_TIME_RE.test(body) || intent === 'need_time') objections.push({ kind: 'need_time', source_message_id: m.id })
@@ -424,7 +477,9 @@ export function validateProposedMessage(ledger, { kind = null, text = null, inbo
     // we answer that AND re-ask once; never for the asking price (owner 2026-10-13)
     const deflectedByIdentity = (q.identity_deflected_by || []).includes(ledger?.last_message?.id)
     // the re-ask is allowed only INSIDE an identity answer ("I'm a local buyer … do you still own it?")
-    const answersIdentity = /\b(?:buyer|investor|local|we\s+buy|real\s+estate|i'?m\s+(?:a|with|from)|we'?re\s+(?:a|local)|public\s+(?:property\s+)?records)\b/i.test(String(text || ''))
+    // rc-8.5.21 v4 (coverage): the identity answer in Spanish, and a plain name answer ("It's Helen") to "what's your name?"
+    const answersIdentity = /\b(?:buyer|investor|local|we\s+buy|real\s+estate|i'?m\s+(?:a|with|from)|we'?re\s+(?:a|local)|public\s+(?:property\s+)?records)\b/i.test(String(text || '')) ||
+      /(?<![\p{L}])(?:compr(?:o|amos|ador|adora|adores)|inversionista|inversionistas|registros\s+p[uú]blicos|soy\s+\p{Lu}\p{Ll}+|me\s+llamo|mi\s+nombre\s+es|(?:it'?s|this\s+is|my\s+name\s+is|name'?s)\s+\p{Lu}\p{Ll}+)(?![\p{L}])/u.test(String(text || ''))
     const identityRepeat = (inboundIntent === 'who_is_this' || (deflectedByIdentity && answersIdentity)) && k !== 'asking_price' && q.asked_count < 2
     if (!identityRepeat) reasons.push(`already_asked:${k}`)
   }

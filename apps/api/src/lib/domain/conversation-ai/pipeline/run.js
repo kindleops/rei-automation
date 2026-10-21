@@ -57,6 +57,7 @@ export async function runConversationPipeline({
       ledger, inboundText: input.inbound.body, category: reply.category, objective: reply.objective, modelClient, spend, messages, maskOpts,
       threadLength: (input.thread || []).length, inboundIntent: judgment?.intent || null, personaPolicy, establishedPersona, companyIdentity,
       firstName: input.names?.first_name || null, otherNames: otherNamesOf(input), replyLanguage: plan.reply_language === 'es' ? 'es' : 'en',
+      propertyAddresses: (input.properties || []).map((p) => p?.address).filter(Boolean),
       followupScheduled: plan.actions.find((a) => a.type === ACTIONS.SCHEDULE_FOLLOWUP) || reply.followup_scheduled || null,
     })
     // a disinterest close is optional (the 30-day follow-up is the owner rule): a rejected close

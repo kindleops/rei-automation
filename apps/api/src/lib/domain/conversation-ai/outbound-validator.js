@@ -22,6 +22,19 @@ export const OUTBOUND_VALIDATOR_VERSION = 'conv-ai.outbound-validator.v2'
 
 // a promise of no further contact is false whenever a follow-up is scheduled (disinterest = 30-day follow-up)
 const FALSE_NO_CONTACT_RE = /\b(?:(?:won'?t|wont|will\s+not|never|not\s+going\s+to)\s+(?:bother|contact|text|message|call|trouble|reach\s+out(?:\s+to)?|be\s+(?:bothering|contacting|texting|reaching\s+out))(?:\s+you)?(?:\s+(?:again|anymore|any\s+more|further))?|leave\s+you\s+(?:be|alone)|leave\s+it\s+(?:alone|there)|take\s+you\s+off\s+(?:our|my|the)\s+list|(?:remove|removing)\s+(?:you|your\s+number)|last\s+(?:time|message|text)\s+(?:you'?ll|we|i)|won'?t\s+(?:take|waste)\s+(?:up\s+)?(?:any\s+)?more\s+of\s+your\s+time|won'?t\s+hear\s+from\s+(?:us|me)\s+again|close\s+(?:this|it)\s+out|close\s+the\s+loop|done\s+(?:reaching|texting)\s+out|leave\s+it\s+(?:with|to)\s+(?:them|your\s+(?:agent|realtor)|the\s+(?:agent|realtor))|won'?t\s+(?:push|pursue|follow\s+up))\b/i
+// rc-8.5.21 v4 (S4): the AI never promises a call, a visit or a human callback (a callback / visit
+// request is an OPERATOR TASK; a text promising one denies the automation and commits a person)
+const DAYS = '(?:mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)(?:day)?'
+const CALL_OR_VISIT_PROMISE_RE = new RegExp([
+  String.raw`\b(?:i|we|someone|somebody|one\s+of\s+(?:us|our\s+team)|our\s+team|a\s+(?:team\s+member|rep(?:resentative)?|specialist|person|colleague)|my\s+(?:partner|colleague|manager|team))\s*(?:'ll|'d|will|can|could|shall|would(?:\s+be\s+(?:happy|glad))?|am\s+going\s+to|'m\s+going\s+to|are\s+going\s+to|'re\s+going\s+to|be\s+happy\s+to|would\s+love\s+to|(?:'m|am|'re|are)\s+(?:happy|glad)\s+to)\s+(?:to\s+)?(?:(?:give|get)\s+(?:you\s+)?a\s+(?:call|ring|buzz)|call|phone|ring|reach\s+out\s+by\s+phone|come\s+(?:by|out|over|take|see|look|check)|stop\s+by|swing\s+by|drop\s+by|visit|meet(?:\s+you)?|be\s+there|head\s+over|have\s+someone\s+(?:call|come|reach))\b`,
+  String.raw`\b(?:${DAYS}|tomorrow|today|tonight|that|this\s+(?:week|weekend))\s+(?:works|would\s+work|is\s+(?:fine|great|perfect))\s+(?:for\s+(?:us|me)\s+)?(?:to\s+)?(?:come|stop|swing|drop|meet|call|visit|see|look|take)`,
+  String.raw`\b(?:happy|glad|able|free)\s+to\s+(?:give\s+you\s+a\s+)?(?:call|phone|ring|come\s+(?:by|out|over)|stop\s+by|swing\s+by|visit|meet)\b`,
+  String.raw`\blet'?s\s+(?:set\s+up|schedule|hop\s+on|jump\s+on|plan)\s+(?:a\s+)?(?:call|visit|walk-?through|time\s+to\s+(?:talk|meet|come))\b`,
+  String.raw`\b(?:(?:le|te|lo|la|los)\s+(?:llamo|llamamos|llamar[eé]|llamaremos|marco|marcamos|marcar[eé])|(?:paso|pasamos|pasar[eé]|pasaremos|voy|vamos|iremos|podemos\s+ir|puedo\s+ir)\s+(?:a\s+)?(?:verla|verlo|ver\s+la\s+(?:casa|propiedad)|por\s+(?:all[aá]|ah[ií])|el\s+${DAYS})|alguien\s+(?:le|te)\s+(?:llamar[aá]|va\s+a\s+llamar|contactar[aá]))\b`,
+].join('|'), 'i')
+export function callOrVisitPromiseReasons(text) {
+  return CALL_OR_VISIT_PROMISE_RE.test(String(text || '')) ? ['commitment:call_or_visit_promise'] : []
+}
 // "since you're confident you own it" after "I don't know": an attribution must be a STATED fact
 const ATTRIBUTION_RE = /\b(?:since\s+you(?:'re|\s+are|'ve|\s+have)?|you\s+(?:said|mentioned|told\s+(?:me|us)|confirmed|noted|indicated)|as\s+you\s+(?:said|mentioned|noted)|you(?:'re|\s+are)\s+(?:confident|sure|certain))\b([^.?!,;]{0,80})/i
 const ATTRIBUTION_TOPICS = [
@@ -224,6 +237,7 @@ export function validateOutbound(text, { ledger = null, objective = null, catego
   if (thanks) content.push(`ledger:${thanks}`)
   for (const r of identityStatementReasons(t, ledger, companyIdentity)) content.push(r)
   for (const r of priceApprovalReasons(t, ledger)) content.push(r)
+  for (const r of callOrVisitPromiseReasons(t)) content.push(r)
   if (previousOutbound && openingOf(previousOutbound) && openingOf(previousOutbound) === openingOf(t)) content.push('style:repeated_opening')
   const cc = contentClaimReasons(t, { offerAmounts: [], knownNumbers, otherNames, firstName, allowedLinks: companyIdentity?.website ? [companyIdentity.website] : [] })
   // AI text never states an amount (money goes through the negotiation authority / a template)
