@@ -79,15 +79,20 @@ export function propertiesNamedIn(text, index) {
   for (const [k, pid] of index || []) {
     if (!k.startsWith('street:')) continue
     const w = k.slice(7)
-    if (w.length >= 4 && !STOP_WORDS.has(w) && new RegExp(`\\b${w.replace(/[^a-z'-]/g, '')}\\b`).test(lowerText)) named.add(pid)
+    const word = w.replace(/[^a-z'-]/g, '')
+    if (!word || STOP_WORDS.has(w)) continue
+    if (w.length >= 4 && new RegExp(`\\b${word}\\b`).test(lowerText)) named.add(pid)
+    // rc-8.5.21 v4 (rt-pl-05): a SHORT street name ("Elm", "Oak", "Ash") names the property only inside a
+    // property phrase — "the house on Elm", "the Elm one", "at Oak", "Elm house" — never as a bare word
+    else if (w.length === 3 && new RegExp(`\\b(?:on|at|off|over\\s+on)\\s+(?:the\\s+)?${word}\\b|\\bthe\\s+${word}\\s+(?:one|house|home|place|property|lot|rental|duplex)\\b|\\b${word}\\s+(?:one|house|home|place|property|lot|rental|duplex)\\b`).test(lowerText)) named.add(pid)
   }
   return [...named]
 }
 
 // clause-level answers
 const CLAUSE_SPLIT_RE = /(?<=[.;!?\n])\s*|\s+(?:but|though|however|whereas|while)\b\s*|,\s+(?=(?:the\s+)?[a-z0-9][a-z0-9'-]*(?:\s+[a-z0-9'-]+){0,3}\s+(?:is|was|'s)\b)/i
-const CLAUSE_DENY_RE = /\b(?:(?:is|was|'s)\s+(?:not\s+(?:mine|ours)|my\s+(?:aunt|uncle|mom|mother|dad|father|parents|brother|sister|son|daughter|grandma|grandmother|grandpa|grandfather|cousin|ex|friend|neighbor)(?:'s)?)|never\s+(?:did|owned|was\s+mine)|(?:don'?t|dont|do\s+not|never)\s+own(?:ed)?)\b/i
-const CLAUSE_CONFIRM_RE = /\b(?:(?:is|'s)\s+(?:mine|ours)|my\s+(?:rental|house|home|place|property|investment)|where\s+(?:i|we)\s+live|(?:i|we)\s+(?:still\s+)?own\s+(?:it|that|this|the))\b/i
+const CLAUSE_DENY_RE = /\b(?:wrong\s+(?:person|guy|gal|lady|man|owner|people|folks)|not\s+(?:me|the\s+owner)\s+(?:for|on)|(?:is|was|'s)\s+(?:not\s+(?:mine|ours)|my\s+(?:aunt|uncle|mom|mother|dad|father|parents|brother|sister|son|daughter|grandma|grandmother|grandpa|grandfather|cousin|ex|friend|neighbor)(?:'s)?)|never\s+(?:did|owned|was\s+mine)|(?:don'?t|dont|do\s+not|never)\s+own(?:ed)?)\b/i
+const CLAUSE_CONFIRM_RE = /\b(?:(?:this|it)\s+is\s+my\s+number\s+for|this'?s\s+my\s+number\s+for|i'?m\s+the\s+owner\s+(?:of|for|on)|(?:is|'s)\s+(?:mine|ours)|my\s+(?:rental|house|home|place|property|investment)|where\s+(?:i|we)\s+live|(?:i|we)\s+(?:still\s+)?own\s+(?:it|that|this|the))\b/i
 const CLAUSE_INTEREST_RE = /\b(?:(?:i'?d|i\s+would|we'?d|we\s+would)\s+(?:sell|consider)|(?:willing|open|happy)\s+to\s+sell|(?:could|would)\s+sell|(?:is|that\s+one'?s?)\s+for\s+sale|interested\s+in\s+selling\s+(?:that|this|it))\b/i
 const CLAUSE_DISINTEREST_RE = /\b(?:not\s+selling|won'?t\s+sell|not\s+for\s+sale|keeping\s+(?:it|that|this)|not\s+interested)\b/i
 

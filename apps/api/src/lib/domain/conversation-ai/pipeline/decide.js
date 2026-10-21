@@ -114,6 +114,14 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
     return plan([{ type: ACTIONS.HOLD, reason: pre.reason }], `precheck:${pre.reason}`, { ownership })
   }
   if (ownerHandled) return plan([{ type: ACTIONS.HOLD, reason: 'owner_handled_thread' }], 'owner_handled_thread', { ownership })
+  // rc-8.5.21 v4 (rt-pl-05): an inbound that NAMES another property of the thread whose ownership is not
+  // known yet ("hey is this about the house on Elm?" after a denial of Main St) is about THAT property:
+  // its S1 question, never the denied property's closure (the denial stays on its own property)
+  const namedOther = pOwn?.inbound?.basis === 'named_in_reply' ? String(pOwn.inbound.property || '') : ''
+  if (namedOther && namedOther !== String(inbound?.property_id || '') && Object.keys(pOwn.by_property || {}).length > 1 &&
+    (pOwn.by_property?.[namedOther]?.state || 'unknown') === 'unknown' && languageEnabledFor({ language, inboundText, languages: enabledLanguages }).enabled) {
+    return plan([{ type: ACTIONS.AI_GENERATED_REPLY, category: 'next_missing_fact', objective: 'ownership', target_property: namedOther, named_other_property: true }], 'named_other_property_ownership_first', { ownership })
+  }
 
   // 3. ownership denial read against the actual previous question ("No" to "do you own it?"), or
   //    the model's validated denial — terminal ONLY when the same message does not take it back,

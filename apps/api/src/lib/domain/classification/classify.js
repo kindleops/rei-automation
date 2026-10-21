@@ -4223,7 +4223,13 @@ const PHONE_IDENTITY_PHRASES = Object.freeze([
 // rc-8.5.21 v3: a wrong-person statement SCOPED to one property ("wrong person for Garnet St") and a
 // claim of owning another ("I own Opal", "but I do own the one on Opal")
 const WRONG_FOR_PROPERTY_RE = /\bwrong\s+(?:person|guy|owner|one|house|home|property|address)\s+(?:for|on|about|regarding|with)\s+(?:the\s+)?(?:\d{1,6}\s+)?[a-z][\w.]*(?:\s+(?:st|street|ave|avenue|rd|road|dr|drive|ln|lane|ct|court|blvd|way|pl|place)\b\.?)?/i;
-const OWNS_ANOTHER_RE = /\b(?:i|we)\s+(?:do\s+|still\s+|actually\s+|only\s+)?(?:own|have|got)\s+(?!no\b|nothing\b|none\b)(?:the\s+(?:one|house|property)\s+(?:on|at)\s+)?\S|\bmine\s+is\b|\bi'?m\s+the\s+owner\s+of\b/i;
+const OWNS_ANOTHER_RE = /\b(?:i|we)\s+(?:do\s+|still\s+|actually\s+|only\s+)?(?:own|have|got)\s+(?!no\b|nothing\b|none\b)(?:the\s+(?:one|house|property)\s+(?:on|at)\s+)?\S|\bmine\s+is\b|\bi'?m\s+the\s+owner\s+of\b|\b(?:this|it)\s+is\s+(?:my|the\s+right)\s+number\s+for\b|\bthis'?s\s+my\s+number\s+for\b|\b(?:is|'s)\s+(?:mine|ours)\b|\bi'?m\s+(?:the\s+)?(?:owner|one)\s+(?:for|on)\b/i;
+// rc-8.5.21 v4 (owner rule 10-17, "a property denial is never global"): a wrong-person statement whose
+// target is a PROPERTY (a street suffix, a house number, or a property noun: "wrong guy for the main st
+// house", "wrong person on 412 Oak", "wrong owner for that property") is scoped to that property on its
+// own — with or without a same-message claim of another property. "Wrong person for this number" names
+// the PHONE and stays a phone-identity wrong number.
+const WRONG_FOR_PROPERTY_SCOPED_RE = /\bwrong\s+(?:person|guy|gal|lady|man|owner|one|people|folks)\s+(?:for|on|about|regarding|with)\s+(?:the\s+|that\s+|this\s+)?(?!(?:number|phone|cell|line|#)\b)(?:\d{1,6}\s+[a-z][\w.]*|[a-z][\w.]*(?:\s+[a-z][\w.]*)?\s+(?:st|street|ave|avenue|rd|road|dr|drive|ln|lane|ct|court|blvd|way|pl|place|cir|circle|ter|terrace|pkwy|hwy)\b\.?|(?:[a-z][\w.]*\s+)?(?:house|home|property|place|lot|land|duplex|condo|building|rental|address)\b)/i;
 
 function matchesTrueWrongNumber(text = "") {
   const normalized = lower(text);
@@ -4371,10 +4377,14 @@ function matchesOwnershipDisconnect(text = "") {
   }
 
   // Spanish "esa casa" only with explicit disown / garble (not "propietario de esa casa")
+  // rc-8.5.21 v4: the negation must scope the OWNERSHIP ("esa casa no es mía", "nunca fue mía", "la
+  // vendí") — never any "no" in the message ("Ya no aguanto, quiero salir de esa casa" is a seller who
+  // wants OUT of the house) and never a bare "mía" ("esa casa es mía" confirms ownership)
   if (
     /\besa\s+casa\b/i.test(normalized) &&
-    /\b(no|llano|equivoc|vend|mía|mia)\b/i.test(normalized) &&
-    !/\b(soy|propietario|dueño|dueno|owner)\b/i.test(normalized)
+    ESA_CASA_DISOWN_RE.test(normalized) &&
+    !/\b(soy|propietario|dueño|dueno|owner)\b/i.test(normalized) &&
+    !expressesDesireToDispose(normalized)
   ) {
     return true;
   }
@@ -4388,6 +4398,21 @@ function matchesOwnershipDisconnect(text = "") {
   }
 
   return false;
+}
+
+// rc-8.5.21 v4 (ownership-ambiguity): the disown forms of the "esa casa" heuristic — a negation bound to
+// the ownership verb (es / era / fue / ha sido / tuve), a sale, a garble or a "wrong" — never a bare "no".
+const ESA_CASA_DISOWN_RE = /(?<![\p{L}])(?:no\s+(?:es|era|fue|ha\s+sido|son|me\s+pertenece|tengo)|nunca\s+(?:fue|ha\s+sido|tuve|he\s+tenido)|ya\s+no\s+es)(?![\p{L}])|llano|equivoc|(?<![\p{L}])(?:la|lo)?\s*vend(?:[íi]|imos|ieron|i[óo])(?![\p{L}])/iu;
+
+// rc-8.5.21 v4: a seller who wants OUT of a property ("quiero salir de esa casa", "I need to get rid of
+// it", "I'm done with this house") is announcing a reason to SELL — interest, never an ownership denial.
+// Generative: a desire / need / obligation frame + a leave / dispose / sell verb (+ clitic), English and
+// Spanish, negation-guarded ("I don't want to get rid of it" is not interest).
+const DISPOSE_DESIRE_ES_RE = /(?<![\p{L}])(?<!no\s)(?:quiero|queremos|quisiera|quisieramos|quisiéramos|necesito|necesitamos|me\s+urge|nos\s+urge|tengo\s+que|tenemos\s+que|deseo|deseamos|me\s+gustar[ií]a|ojal[aá]\s+(?:pudiera|pueda))\s+(?:ya\s+|pronto\s+|r[aá]pido\s+)?(?:salir(?:me|nos)?\s+de|deshacer(?:me|nos)\s+de|irme\s+de|irnos\s+de|mudarme\s+de|mudarnos\s+de|librarme\s+de|librarnos\s+de|quitarme\s+de\s+encima|vender(?:la|lo|las|los)?(?![\p{L}]))/iu;
+const DISPOSE_DESIRE_EN_RE = /\b(?<!(?:not|don'?t|dont|do\s+not|never|doesn'?t|didn'?t|wouldn'?t|won'?t)\s)(?:want|wanna|need|have|got|gotta|would\s+like|'d\s+like|trying|looking|ready|dying)\s+(?:to\s+)?(?:just\s+)?(?:get\s+out\s+of|get\s+rid\s+of|move\s+out\s+of|unload|offload|dump|be\s+done\s+with|be\s+rid\s+of|walk\s+away\s+from)\b|\b(?:i'?m|im|i\s+am|we'?re|we\s+are)\s+(?:so\s+|just\s+|really\s+)?(?:done|finished|over\s+it|sick\s+of\s+it|tired)\s+(?:with|of)\s+(?:this|that|the|my)\s+(?:house|home|place|property|rental|duplex|building|lot)\b/i;
+export function expressesDesireToDispose(text = "") {
+  const t = String(text || "");
+  return DISPOSE_DESIRE_ES_RE.test(t) || DISPOSE_DESIRE_EN_RE.test(t);
 }
 
 function matchesWrongNumberDisconnect(text = "") {
@@ -5305,8 +5330,11 @@ function resolveIntents(
   // is a PROPERTY denial for A (B is confirmed by the clause-level reading), never a phone-identity
   // wrong number. Only when nothing ELSE in the message is a phone-identity statement.
   const property_scoped_wrong_person = (() => {
-    if (!WRONG_FOR_PROPERTY_RE.test(text) || !OWNS_ANOTHER_RE.test(text)) return false;
-    const rest = lower(text).replace(new RegExp(WRONG_FOR_PROPERTY_RE.source, "gi"), " ");
+    const scopedToAProperty = WRONG_FOR_PROPERTY_SCOPED_RE.test(text);
+    if (!scopedToAProperty && !(WRONG_FOR_PROPERTY_RE.test(text) && OWNS_ANOTHER_RE.test(text))) return false;
+    const rest = lower(text).replace(new RegExp(WRONG_FOR_PROPERTY_SCOPED_RE.source, "gi"), " ").replace(new RegExp(WRONG_FOR_PROPERTY_RE.source, "gi"), " ")
+      // "this is my number for the elm one" CLAIMS the phone for another property: never a phone-identity denial
+      .replace(/\b(?:this|it)\s+is\s+(?:my|the\s+right)\s+number\s+for\b|\bthis'?s\s+my\s+number\s+for\b/gi, " ");
     return !matchesTrueWrongNumber(rest) && !PHONE_IDENTITY_PHRASES.some((p) => rest.includes(p));
   })();
   if (property_scoped_wrong_person) matched_rule_ids.push("wrong_person_scoped_to_property");
@@ -5630,6 +5658,11 @@ function resolveIntents(
     if (!intents.includes("not_interested") && !intents.includes("need_time")) {
       intents.push("seller_interested");
     }
+  }
+  // rc-8.5.21 v4: wanting OUT of the property is a reason to sell (interest), never a denial
+  if (expressesDesireToDispose(text) && !intents.includes("not_interested") && !intents.includes("need_time") && !intents.includes("seller_interested")) {
+    intents.push("seller_interested");
+    matched_rule_ids.push("wants_out_of_property");
   }
   // 7.2: "It's for sale right now" is the seller announcing it is for sale.
   if (
