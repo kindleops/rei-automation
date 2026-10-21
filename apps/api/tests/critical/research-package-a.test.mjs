@@ -207,6 +207,9 @@ test('KIND ALLOWLIST: the owner arming SQL arms exactly RESEARCH_PACKAGE_KINDS (
     assert.match(src.trim(), /rollback;$/, `${f} ends in rollback`)
     assert.doesNotMatch(src, /\b(insert\s+into|update\s+[a-z_.]+\s+set|delete\s+from|alter\s|drop\s|create\s|grant\s|truncate)\b/i, `${f} writes nothing`)
   }
+  const enq = fs.readFileSync(path.join(OPS_DIR, 'enqueue-property.sql'), 'utf8')
+  assert.doesNotMatch(enq, /\b(insert\s+into|update\s+[a-z_.]+\s+set|delete\s+from)\b/i, 'enqueue-property writes only through agent.runtime_enqueue_event')
+  assert.match(enq, /agent\.runtime_enqueue_event\('property\.research'/)
   const disarm = fs.readFileSync(path.join(OPS_DIR, 'disarm.sql'), 'utf8')
   assert.deepEqual([...new Set([...disarm.matchAll(/^\s*update\s+([a-z_.]+)/gim)].map((m) => m[1]))].sort(), ['agent.runtime_limits', 'agent.runtime_schedule'])
 })

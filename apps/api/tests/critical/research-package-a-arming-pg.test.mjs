@@ -175,6 +175,11 @@ test('PACKAGE A arming on the production state: only research / ops kinds arm an
       assert.deepEqual([r.ok, r.reason], [false, 'kind_not_armed'], kind)
     }
     assert.deepEqual(await fingerprint(d.pool), before, 'activation changed nothing outside agent.*')
+    // the owner's one-property enqueue: an armed event job (0.30 cap); the exclusions are refused
+    const one = psql(d.url, OPS('enqueue-property.sql'), { property_id: PID, trigger: 'offer_request' })
+    assert.equal(one.status, 0, one.out)
+    assert.notEqual(psql(d.url, OPS('enqueue-property.sql'), { property_id: MAXWELL_PID, trigger: 'offer_request' }).status, 0, 'Maxwell refused')
+    assert.notEqual(psql(d.url, OPS('enqueue-property.sql'), { property_id: PID, trigger: 'send_now' }).status, 0, 'unknown trigger refused')
 
     // STEP 5: enable every Package A schedule, make them due
     const en = psql(d.url, OPS('enable-schedules.sql'), { names: 'property-research-sweep,valuation-refresh,recovery-sweep,inbox-action-center,ops-supervisor,conversation-review-digest,ops-health-check' })

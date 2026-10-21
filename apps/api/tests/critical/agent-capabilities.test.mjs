@@ -266,7 +266,9 @@ test('platform.health: heartbeats from stored timestamps, modes, queue + feeder_
   const { plane } = makePlane()
   const r = await inv(plane, 'platform.health')
   assert.equal(r.ok, true)
-  assert.ok(r.result.heartbeats.every((h) => h.status === 'fresh'))
+  // the event-driven follow-up heartbeat has no delivery reference in this fixture: unverified, never stale
+  // (Package A ships the rc-8.5.15 ops-health-check evaluator; same assertion as rc-8.5.21)
+  assert.ok(r.result.heartbeats.every((h) => h.status === 'fresh' || (h.key === 'followup_no_response_heartbeat_at' && h.status === 'unverified')), JSON.stringify(r.result.heartbeats))
   assert.equal(r.result.modes.queue_processor_mode, 'off')
   assert.equal(r.result.feeder_last.inserted, 0)
   assert.equal(r.result.queue.outbound_enabled, false)
