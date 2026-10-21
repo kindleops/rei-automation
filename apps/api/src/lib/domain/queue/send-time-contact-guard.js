@@ -327,7 +327,7 @@ export function evaluateSendTimeContactGuard(row = {}, facts = {}, { now = Date.
   //     stop is never answered by any automated row, even if every writer missed it (an operator-composed
   //     manual send is judged by the written suppression / hold rows above)
   if (Array.isArray(facts.thread_messages) && facts.thread_messages.length && !(row?.metadata && row.metadata.manual_operator_send === true)) {
-    const stopLike = latestInboundStopLike(facts.thread_messages, facts.automation_suppressions || []);
+    const stopLike = latestInboundStopLike(facts.thread_messages, facts.precautionary_releases || facts.automation_suppressions || []);
     if (stopLike) return block(R.LATEST_INBOUND_STOP_LIKE, { ...stopLike, scope: "contact", action: stopLike.confirmed ? "suppress" : "precautionary_hold_operator_review" });
   }
   // 3 / 4 / 5. thread state
@@ -432,7 +432,7 @@ export async function loadSendTimeContactFacts(supabase, row = {}, opts = {}) {
   const [suppressions, suppressions_by_number, automation_suppressions, threads_by_key, threads_by_e164, phones, inbound_replies] = await Promise.all([
     read(supabase.from("sms_suppression_list").select("phone_e164,phone_number,sender_phone_e164,is_active,suppression_type").in("phone_e164", variants).limit(50)),
     read(supabase.from("sms_suppression_list").select("phone_e164,phone_number,sender_phone_e164,is_active,suppression_type").in("phone_number", variants).limit(50)),
-    read(supabase.from("automation_suppressions").select("phone_e164,status,suppression_type,expires_at,payload").in("phone_e164", variants).limit(50)),
+    read(supabase.from("automation_suppressions").select("phone_e164,status,suppression_type,expires_at").in("phone_e164", variants).limit(50)),
     read(supabase.from("inbox_thread_state").select("thread_key,canonical_e164,property_id,is_suppressed,disposition,last_intent,stage,lifecycle_stage,contactability_status").in("thread_key", variants).limit(50)),
     read(supabase.from("inbox_thread_state").select("thread_key,canonical_e164,property_id,is_suppressed,disposition,last_intent,stage,lifecycle_stage,contactability_status").in("canonical_e164", variants).limit(50)),
     read(supabase.from("phones").select("phone_id,canonical_e164,phone,phone_raw,phone_contact_status,wrong_number_at,primary_prospect_id,canonical_prospect_id").in("canonical_e164", variants).limit(20)),
@@ -441,8 +441,15 @@ export async function loadSendTimeContactFacts(supabase, row = {}, opts = {}) {
   // rc-8.5.21: the thread's own messages (recontact guard) and the automation-hold registry
   const contact_property_resolution = await read(supabase.from("contact_property_resolution").select("property_id,contact_phone_e164,contact_property_role,suppression_scope,rejected_at,rejection_reason,updated_at").in("contact_phone_e164", variants).limit(50));
   const thread_messages = await read(supabase.from("message_events").select("id,direction,message_body,created_at,event_timestamp,property_id,detected_intent").in("thread_key", variants).order("created_at", { ascending: false }).limit(60));
+  // rc-8.5.21 v4: operator RELEASES of a precautionary hold (best effort: unreadable ⇒ none known ⇒ the stop-like
+  // latest inbound stays blocked — fail closed)
+  let precautionary_releases = [];
+  try {
+    precautionary_releases = await read(supabase.from("automation_suppressions").select("phone_e164,status,suppression_type,payload").in("phone_e164", variants).eq("suppression_type", "precautionary_no_contact").limit(50));
+  } catch { precautionary_releases = []; }
   const automation_hold = await checkAutomationHoldPort({ threadKey: clean(row.thread_key) || clean(row.to_phone_number), propertyId: property_id || null, masterOwnerId: clean(row.master_owner_id) || null, capability: "send_time_dispatch" }, { checker: opts.automationHoldChecker || null });
   const facts = {
+    precautionary_releases,
     suppressions: [...suppressions, ...suppressions_by_number],
     automation_suppressions,
     threads: [...threads_by_key, ...threads_by_e164],
