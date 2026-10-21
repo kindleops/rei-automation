@@ -171,7 +171,7 @@ export async function processDeliveryWebhookLive(webhook_log_row, options = {}, 
   const syncFn = deps.syncDeliveryEvent || syncDeliveryEvent
 
   try {
-    const result = await syncFn(sync_payload, {
+    const syncOptions = {
       supabase,
       now,
       webhook_log_id: webhook_log_row?.id || null,
@@ -182,7 +182,24 @@ export async function processDeliveryWebhookLive(webhook_log_row, options = {}, 
       verification: options.verification || normalized?.verification || {},
       callbackStore: options.callbackStore || null,
       source_route: 'webhooks/textgrid/delivery',
-    })
+    }
+    let result = await syncFn(sync_payload, syncOptions)
+
+    // rc-8.5.21 v4 (rt-cr-06): an AUTHENTICATED receipt whose SID matches nothing may belong to the ONE
+    // send that crashed after the provider accepted it (row processing / lease manual review, its §11
+    // attempt started, never completed). Adopted only when exactly one such send exists; the projection
+    // then runs again for the SID (never a send, never a resend).
+    let orphan_adoption = null
+    if (!(Number(result?.send_queue_count || 0) > 0 || Number(result?.message_events_count || 0) > 0) && deps.adoptOrphanProviderCallback !== false) {
+      try {
+        const adopt = deps.adoptOrphanProviderCallback || (await import('@/lib/domain/queue/adopt-orphan-provider-callback.js')).adoptOrphanProviderCallback
+        orphan_adoption = await adopt({ supabase, provider_message_sid: normalized.provider_message_sid, to: normalized.to, from: normalized.from, verification: options.verification || normalized?.payload?.webhook_verification || {}, now })
+        if (orphan_adoption?.adopted) result = await syncFn(sync_payload, syncOptions)
+      } catch (adoption_error) {
+        orphan_adoption = { adopted: false, reason: clean(adoption_error?.message) || 'adoption_failed' }
+      }
+      if (orphan_adoption) info('provider_callback.orphan_adoption', { provider_message_sid: normalized.provider_message_sid, adopted: Boolean(orphan_adoption.adopted), reason: orphan_adoption.reason || null })
+    }
 
     const matched =
       Number(result?.send_queue_count || 0) > 0 || Number(result?.message_events_count || 0) > 0
