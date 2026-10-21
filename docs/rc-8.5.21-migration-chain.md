@@ -91,13 +91,14 @@ BEGIN … ROLLBACK.
     |---|---|---|---|
     | 20261007170000 | entity_graph_distress_indexes / graph_sender_coverage_routing_v2 | production RECORDS entity_graph_distress_indexes as **20261007170001** | the repo file is renamed to 20261007170001 to match; routing_v2 keeps 170000 |
     | 20261007120000 | campaign_audience_field_values (06:51) / queue_health_overdue_semantics (07:00, later-added) | neither recorded; no out-of-band evidence in repo docs, RC reports, STATUS ledger or memory | queue_health_overdue_semantics (+ rollback) is now **20261007120500**: before 20261007121000 terminalize, which it precedes |
-    | 20261006150000 | price_reality_check_templates (10-06) / command_wall_displays (10-11, later-added) | command_wall_* APPLIED out of band (STATUS 2026-10-11 20:25Z "TV migration APPLIED"). price_reality: not recorded, no apply evidence (RC843/844 "do not apply"; 0 rows 10-07) | **not renamed**: the later-added member is applied. Allowlisted. Renumbering price_reality (its feat-branch name 20261006150200, 2188e733) needs owner OK |
-    | 20261010120000 | agent_s3_persistence / inbox_price_gap_gate | S3 APPLIED out of band. price_gap_gate: the only file defining `in_price_gap`, which a 10-12 prod verification (7ade94e2) saw live; its header still says "not applied" | **not renamed**. Allowlisted; **requires an owner read-only object check before any deploy** |
+    | 20261006150000 | price_reality_check_templates (10-06) / command_wall_displays (10-11) | command_wall_* APPLIED out of band (STATUS 2026-10-11 20:25Z). price_reality_check_templates **VERIFIED unapplied** by a read-only production check on 2026-10-20 (`tmp/prod-readonly-20261020/RESULTS.md`): 0 `sms_templates` rows by use_case or template_id prefix, 0 `send_queue` references | **price_reality_check_templates (+ rollback) renamed to 20261006150200**, its feat-branch name; command_wall_displays keeps 150000 (applied, never renamed). **Resolved** |
+    | 20261010120000 | agent_s3_persistence / inbox_price_gap_gate | both **APPLIED**. S3 out of band on 10-11. price_gap_gate: the owner's apply.sh (`tmp/owner-apply-20261012`), done 2026-10-12, a byte-identical copy of the 5b470fa5 body. VERIFIED read-only on 2026-10-20 (RESULTS.md): `v_inbox_thread_state_buckets` has `in_unclear`, `f_price_gap` and `in_price_gap`; `v_inbox_bucket_counts` has `unclear` and `price_gap`; the production view does **not** map `declined_unverified` (the repo body gained it on 10-17, 31f405e3); dependent views `v_inbox_bucket_counts` and `v_inbox_zero_counts` | **permanent historical collision**, rename neither. Deploy-BLOCKED: the `declined_unverified` mapping needs a NEW forward view migration that also handles both dependent views, never a re-apply of this file |
     | 20261010130000 | agent_research_ro / inbox_pipeline_hygiene_cleanup | both APPLIED (research_ro 10-11; hygiene `updated_by = hygiene_20261010`, follow-up intents in production per followup-reconciliation W5) | **permanent historical collision**, rename neither |
   - `scripts/db/scan-duplicate-migration-versions.mjs` (run by `tests/critical/migration-version-uniqueness.test.mjs`)
     fails on any duplicate version in `supabase/migrations`. Companions (`_pretest`, `_posttest`, `_rollback`,
-    `_verify`, `_dryrun`, …) are not duplicates. The allowlist is now exactly the three stamps above. It can only
-    shrink, because a stale entry fails.
+    `_verify`, `_dryrun`, …) are not duplicates. After the 2026-10-20 production read-only check
+    (`tmp/prod-readonly-20261020/RESULTS.md`) the allowlist is exactly two permanent historical collisions,
+    20261010120000 and 20261010130000. It can only shrink, because a stale entry fails.
   - The apply order is this table, not the stamp sort.
 - **Not in the chain:**
   - `unlock_stale_jobs_status_predicate` (20261008110000) stays a standalone entry, as in rc-8.5.20.
@@ -107,18 +108,34 @@ BEGIN … ROLLBACK.
 
 - **No chain link collides with a recorded production version.** None of the chain stamps #0–#26 (20261012140000 …
   20261019150000) is recorded in production history. #1 intel_runtime is applied (out of band, 10-14) but not
-  recorded. #0 is applied via the hotfix. The two renamed chain stamps (20261015110000, 20261013163000) are unused
-  in production history.
-- **The three allowlisted collisions (20261006150000, 20261010120000, 20261010130000) are EXCLUDED from every deploy
-  plan.** Never apply or re-apply them through a version-keyed path. inbox_price_gap_gate needs an owner read-only
-  object check (does `v_inbox_thread_state_buckets.in_price_gap` exist?) before any deploy touches inbox views.
-- **Production also records 20261018040156 `revoke_public_writes_spatial_ref_sys` and 20261018040244
-  `guard_spatial_ref_sys_against_api_writes`.** Neither has a file in this repo, and neither was applied by the
-  release agents. The **owner must confirm their origin** before the rc-8.5.21 apply. No chain link uses those
-  versions or writes `spatial_ref_sys`. #26 lc_mcp_reader only names it, to exclude the PostGIS catalog tables
-  from its exposed-relation self-check.
+  recorded. #0 is applied via the hotfix. The renamed stamps (20261015110000, 20261013163000, 20261006150200) are
+  unused in production history.
+- **The two permanent collisions (20261010120000, 20261010130000) are EXCLUDED from every deploy plan.** Every member
+  is applied, so none is ever applied or re-applied. The production `v_inbox_thread_state_buckets` lacks the
+  `declined_unverified` mapping (verified read-only 2026-10-20). It needs a new forward view migration that also
+  rebuilds the dependents `v_inbox_bucket_counts` and `v_inbox_zero_counts`. Until then the
+  `PROPOSED_20261017110000` backfill refuses by its own precondition.
+- **The 2026-10-18 spatial_ref_sys migrations are recorded production history**: see the next section. They are
+  never applied.
 - A production apply records each migration under its file stamp. Before applying, re-read `list_migrations`
   (read-only) and confirm the next stamp is not already recorded.
+
+## Recorded production history (APPLIED IN PRODUCTION, never re-applied)
+
+| Version / file (supabase/migrations/) | Applied | Source | Effect |
+|---|---|---|---|
+| `20261018040156_revoke_public_writes_spatial_ref_sys.sql` | 2026-10-18T04:01:55Z | Claude Code session in the Prominent Cash Offer website project (transcript 0310cd0a), Supabase MCP `apply_migration`, after an interactive approval recorded at 04:01:39Z | **Ineffective.** The anon/authenticated write grants are supabase_admin's, so postgres cannot revoke them; the session's own check at 04:02:08Z still showed anon INSERT/UPDATE/DELETE/TRUNCATE true |
+| `20261018040244_guard_spatial_ref_sys_against_api_writes.sql` | 2026-10-18T04:02:43Z | same session | **Effective.** `public.block_api_role_writes()` plus two statement-level triggers refuse writes as anon/authenticated (42501). Re-tested 04:09Z and 07:27Z: writes refused, SELECT works, 8500 rows intact, ST_Transform works. The durable fix is still a Supabase support request (SEC-02) |
+
+- Each file holds a header, then the applied SQL byte-for-byte between BEGIN/END markers (sha256 pinned).
+- `scripts/db/applied-in-production.mjs` registers both as `applied_in_production: true`, and the manifest re-exports
+  that list.
+- `scripts/db/run-migration-test.mjs` refuses any entry that names one, and refuses to apply one by path or by
+  header marker, before any database is touched.
+- `tests/critical/applied-in-production-history.test.mjs` pins the bytes, the manifest exclusion, the runner refusal,
+  and the absence of any workflow, script or apply-order reference.
+- Rollback: the first needs none. Rolling back the second re-opens anonymous writes to PostGIS's coordinate table:
+  owner approval only.
 
 ## Rollback
 

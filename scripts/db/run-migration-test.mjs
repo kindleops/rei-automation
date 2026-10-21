@@ -37,6 +37,7 @@ import { assertDisposableTarget, sanitizedPgEnv, UnsafeDbTargetError } from './d
 import { lintFixtureSource, classifyFile } from './lint-migration-fixtures.mjs'
 import { lexPsqlScript, leadingWords } from './sql-fixture-lexer.mjs'
 import { MIGRATION_TESTS, PROD_SHAPE } from './migration-tests.manifest.mjs'
+import { appliedInProductionReferences, assertNotAppliedInProduction } from './applied-in-production.mjs'
 
 // A production-shaped database = a SCHEMA-ONLY snapshot (pg_dump --schema-only of production,
 // taken read-only) restored into the disposable database before the test's own setup. The
@@ -204,6 +205,8 @@ function hasOwnTransaction(file) {
 }
 
 function applyFile(url, file, env) {
+  // recorded production history (applied-in-production.mjs) is never re-applied, by path or by header marker
+  assertNotAppliedInProduction(file)
   const args = hasOwnTransaction(file) ? ['-f', rel(file)] : ['--single-transaction', '-f', rel(file)]
   return runPsql(url, args, { env })
 }
@@ -242,6 +245,10 @@ export function runMigrationTest(t, { adminUrl, log = console.log, keep = false,
     return { id: t.id, ok: false, skipped: true, steps: [], error: `needs a production-shaped schema snapshot: --prod-shape <prelude.sql,schema.sql> (or ${PROD_SHAPE_ENV})` }
   }
   for (const f of prodShapeFiles) assertSnapshotFile(f)
+  const applied = appliedInProductionReferences(t)
+  if (applied.length) {
+    return { id: t.id, ok: false, refused: true, steps: [], error: `refused: names migration(s) APPLIED IN PRODUCTION (recorded history, never re-applied): ${applied.join(', ')}` }
+  }
   const lint = lintTestFixtures(t)
   if (lint.length) {
     return { id: t.id, ok: false, steps: [], error: `fixture lint failed; nothing executed:\n${lint.map((x) => `${x.file}:${x.line} [${x.rule}] ${x.detail}`).join('\n')}` }
