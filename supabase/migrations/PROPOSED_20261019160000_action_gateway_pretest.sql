@@ -8,7 +8,10 @@
 --   * the R2 runtime, the capability approvals, operations (+ #24 conversation scope), the P0 hold
 --     registry and every read-inventory relation exist;
 --   * public.system_control has row level security enabled;
---   * (NOTICE only) whether PUBLIC can reach pg_net (schema net): the apply's self-check refuses then.
+--   * (NOTICE only) whether PUBLIC can reach pg_net (schema net) and whether it LOOKS like Supabase's
+--     platform-managed pg_net (schema owner supabase_admin, extension pg_net present): only then can the
+--     apply's self-check apply the pinned platform exception (docs/SUPABASE-PG-NET-POSTURE.md); any other
+--     shape refuses the apply.
 begin;
 do $$
 declare
@@ -40,7 +43,9 @@ begin
     problems := problems || 'public.system_control has no row level security'::text;
   end if;
   if array_length(problems, 1) > 0 then raise exception 'pretest: %', array_to_string(problems, '; '); end if;
-  raise notice 'pretest: prerequisites present; pg_net reachable by PUBLIC = %',
-    to_regnamespace('net') is not null and has_schema_privilege('public', 'net', 'USAGE');
+  raise notice 'pretest: prerequisites present; pg_net reachable by PUBLIC = %; supabase-managed shape (owner supabase_admin + extension pg_net) = %',
+    to_regnamespace('net') is not null and has_schema_privilege('public', 'net', 'USAGE'),
+    to_regnamespace('net') is not null and exists (select 1 from pg_extension where extname = 'pg_net')
+      and (select pg_get_userbyid(nspowner) from pg_namespace where nspname = 'net') = 'supabase_admin';
 end $$;
 rollback;

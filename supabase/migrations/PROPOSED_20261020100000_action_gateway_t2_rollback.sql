@@ -90,9 +90,17 @@ declare
   x record;
   v_has text[];
   v_allowed jsonb;
+  pe jsonb;
+  exc_rel oid[];
+  exc_fn oid[];
 begin
   select oid into r from pg_roles where rolname = p_role;
-  if r is null then return jsonb_build_object('version', 1, 'role', p_role, 'exists', false, 'ok', false, 'findings', jsonb_build_array('role_missing')); end if;
+  if r is null then return jsonb_build_object('version', 1, 'role', p_role, 'exists', false, 'ok', false, 'findings', jsonb_build_array('role_missing'), 'platform_exceptions', '[]'::jsonb); end if;
+  -- the pinned Supabase pg_net platform exception: its objects are excepted ONLY when every condition and
+  -- compensating control holds (action_gateway.platform_egress_exceptions); otherwise they count as before
+  pe := action_gateway.platform_egress_exceptions(r);
+  exc_rel := array(select (jsonb_array_elements_text(pe -> 'excepted_relations'))::oid);
+  exc_fn := array(select (jsonb_array_elements_text(pe -> 'excepted_functions'))::oid);
 
   select jsonb_build_object('superuser', rolsuper, 'bypassrls', rolbypassrls, 'createrole', rolcreaterole, 'createdb', rolcreatedb,
                             'replication', rolreplication, 'canlogin', rolcanlogin, 'inherit', rolinherit) into rep from pg_roles where oid = r;
@@ -112,7 +120,7 @@ begin
     select n.nspname, c.relname, c.oid, format('%I.%I', n.nspname, c.relname) q
       from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where c.relkind in ('r', 'p', 'v', 'm', 'f') and n.nspname not in ('pg_catalog', 'information_schema') and n.nspname !~ '^pg_(toast|temp)'
-       and has_schema_privilege(r, n.oid, 'USAGE')
+       and has_schema_privilege(r, n.oid, 'USAGE') and not (c.oid = any (exc_rel))
   loop
     select coalesce(array_agg(pv), '{}') into v_has from unnest(privs) pv
      where has_table_privilege(r, x.oid, pv) or (pv in ('INSERT', 'UPDATE', 'REFERENCES') and has_any_column_privilege(r, x.oid, pv));
@@ -135,7 +143,7 @@ begin
   for x in
     select format('%I.%I', n.nspname, c.relname) q from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where c.relkind = 'S' and n.nspname not in ('pg_catalog', 'information_schema') and n.nspname !~ '^pg_(toast|temp)'
-       and has_schema_privilege(r, n.oid, 'USAGE') and case when c.relkind = 'S' then has_sequence_privilege(r, c.oid, 'USAGE,UPDATE') else false end
+       and has_schema_privilege(r, n.oid, 'USAGE') and not (c.oid = any (exc_rel)) and case when c.relkind = 'S' then has_sequence_privilege(r, c.oid, 'USAGE,UPDATE') else false end
   loop findings := findings || ('sequence_privilege:' || x.q); end loop;
   for x in select n.nspname from pg_namespace n where n.nspname !~ '^pg_(toast|temp)' and has_schema_privilege(r, n.oid, 'CREATE') loop
     findings := findings || ('schema_create:' || x.nspname);
@@ -153,11 +161,13 @@ begin
        and not (p.proname = 'st_estimatedextent' and p.provolatile in ('s', 'i'))
   loop findings := findings || ('reachable_definer_function:' || x.s); end loop;
   -- network egress the role can reach (same rule as lc_mcp_reader_self_check): extensions, schema net,
-  -- untrusted languages, and sql / plpgsql wrappers calling them or a PUBLIC side-effect function
+  -- untrusted languages, and sql / plpgsql wrappers calling them or a PUBLIC side-effect function.
+  -- Only the members of an APPLIED platform exception are skipped; every other function (a wrapper in
+  -- public calling net.* included) is judged exactly as before.
   for x in
     select p.oid::regprocedure::text s from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
      where p.prokind in ('f', 'p') and n.nspname not in ('pg_catalog', 'information_schema')
-       and has_schema_privilege(r, n.oid, 'USAGE') and has_function_privilege(r, p.oid, 'EXECUTE')
+       and has_schema_privilege(r, n.oid, 'USAGE') and has_function_privilege(r, p.oid, 'EXECUTE') and not (p.oid = any (exc_fn))
        and (exists (select 1 from pg_depend d join pg_extension e on e.oid = d.refobjid
                      where d.classid = 'pg_catalog.pg_proc'::regclass and d.objid = p.oid and d.refclassid = 'pg_catalog.pg_extension'::regclass
                        and d.deptype = 'e' and e.extname in ('pg_net', 'http', 'dblink', 'postgres_fdw'))
@@ -171,7 +181,7 @@ begin
   for x in
     select n.nspname, c.relname, format('%I.%I', n.nspname, c.relname) q from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where c.relkind in ('r', 'p', 'v', 'm', 'f') and n.nspname not in ('pg_catalog', 'information_schema') and n.nspname !~ '^pg_(toast|temp)'
-       and has_schema_privilege(r, n.oid, 'USAGE') and case when c.relkind in ('r', 'p', 'v', 'm', 'f') then has_table_privilege(r, c.oid, 'SELECT') or has_any_column_privilege(r, c.oid, 'SELECT') else false end
+       and has_schema_privilege(r, n.oid, 'USAGE') and not (c.oid = any (exc_rel)) and case when c.relkind in ('r', 'p', 'v', 'm', 'f') then has_table_privilege(r, c.oid, 'SELECT') or has_any_column_privilege(r, c.oid, 'SELECT') else false end
   loop
     if not ((x.nspname = 'public' and x.relname = any (read_rels)) or (x.nspname = 'agent' and x.relname = any (agent_read))
             or (x.nspname = 'action_gateway' and x.relname = any (gw_read))
@@ -198,7 +208,11 @@ begin
   for x in select unnest(entry) s loop
     if (select p.prosecdef from pg_proc p where p.oid = to_regprocedure(x.s)) then findings := findings || ('entry_point_is_definer:' || x.s); end if;
   end loop;
-  return rep || jsonb_build_object('findings', to_jsonb(findings), 'ok', coalesce(array_length(findings, 1), 0) = 0, 'generated_at', clock_timestamp());
+  -- the compensating controls of an applied platform exception (each a hard finding)
+  findings := findings || array(select jsonb_array_elements_text(pe -> 'findings'));
+  -- platform_exceptions: what was excepted (fingerprint version, objects, ACL, controls), reported apart from findings
+  return rep || jsonb_build_object('findings', to_jsonb(findings), 'ok', coalesce(array_length(findings, 1), 0) = 0,
+                                   'platform_exceptions', pe -> 'platform_exceptions', 'generated_at', clock_timestamp());
 end
 $fn$;
 $sql$;

@@ -58,7 +58,8 @@
 --       resolution) and a KEY-ALLOWLISTED view of public.system_control (RLS policy).
 --   It can NOT: write any public.* or agent.* table directly, read agent_principals /
 --   capability_grants, release a hold, write system_control, reach any network-egress
---   function. The self-check at the end refuses the apply otherwise.
+--   function outside the pinned Supabase pg_net platform exception (docs/SUPABASE-PG-NET-POSTURE.md).
+--   The self-check at the end refuses the apply otherwise.
 --
 -- CONTROLS (public.system_control; absent ⇒ OFF):
 --   action_gateway_enabled              'true' or every action is refused (GLOBAL EMERGENCY STOP)
@@ -77,8 +78,19 @@
 --   authenticator); public.system_control without RLS (the key allowlist would be void);
 --   schema action_gateway already present; lc_action_gateway existing with any privileged
 --   attribute; and ANY finding of action_gateway.self_check('lc_action_gateway'), including a
---   reachable network-egress function (PRODUCTION TODAY: PUBLIC can reach pg_net in schema net;
---   this apply refuses until that is resolved, exactly like lc_mcp_reader #25).
+--   reachable network-egress function. PRODUCTION: PUBLIC can reach pg_net in schema net and, per
+--   Supabase, that is platform-managed (owner supabase_admin; a per-project revoke is unsupported and
+--   removing the PUBLIC table grants breaks pg_net / pg_cron). The self-check therefore carries ONE
+--   pinned platform exception (action_gateway.platform_egress_exceptions, fingerprint
+--   supabase_pg_net_default_acl.v1): the net objects are excepted only when every net object is owned
+--   by supabase_admin and a member of extension pg_net, every ACL entry comes from supabase_admin and
+--   lies inside the documented default fingerprint, AND the compensating controls hold (role NOLOGIN /
+--   NOINHERIT / no BYPASSRLS / no membership; net, extensions, cron absent from authenticator's
+--   pgrst.db_schemas; the role's search_path set below without them; CREATE nowhere; the egress rule as
+--   strict as before for every other function). The Action MCP boot adds the live PostgREST / GraphQL
+--   exposure probe. Any deviation: the same findings as without the exception, and the apply refuses.
+--   The report lists the exception apart from the findings (platform_exceptions). Design + owner
+--   verification: docs/SUPABASE-PG-NET-POSTURE.md.
 -- LOCKS: ALTER TABLE agent.ops_work_item (constraint swap) and CREATE POLICY on each read
 --   inventory table take brief ACCESS EXCLUSIVE locks; lock_timeout 5s fails the apply whole.
 
@@ -135,6 +147,10 @@ end $$;
 
 comment on role lc_action_gateway is 'LeadCommand Action Gateway: PostgREST-only (JWT role claim + lc_org), executes ONLY the gateway entry points. See supabase/migrations/PROPOSED_20261019160000_action_gateway.sql';
 alter role lc_action_gateway set statement_timeout = '10s';
+-- compensating control (d) of the Supabase pg_net platform exception (docs/SUPABASE-PG-NET-POSTURE.md): the role's
+-- own search_path never names net / extensions / cron, so pg_graphql (which reflects the schemas on the role's
+-- search_path) never reflects them; the self-check verifies this setting
+alter role lc_action_gateway set search_path = public;
 grant lc_action_gateway to authenticator;
 
 create schema action_gateway;
@@ -1349,6 +1365,227 @@ end
 $fn$;
 
 -- ───────────────────────────────────────────── 9. self-check (privilege introspection) ──
+-- THE SUPABASE pg_net PLATFORM EXCEPTION (docs/SUPABASE-PG-NET-POSTURE.md). Owner-reviewed 2026-10-22: an
+-- explicit, pinned, tested exception with compensating controls, every one of which must hold, or the
+-- self-check refuses exactly as before.
+--   Supabase: "Revoking access to pg_net objects has no effect"
+--   https://supabase.com/docs/guides/troubleshooting/revoking-access-to-pg_net-objects-has-no-effect-0bbc16
+--   pg_net is created by supabase_admin, which owns schema net and its objects; postgres cannot revoke, a
+--   per-project grant change is unsupported, and removing the PUBLIC table grants breaks pg_net and pg_cron.
+-- The exception APPLIES only when ALL of these hold (otherwise status 'not_applied', its reasons are reported,
+-- and the net objects count through PUBLIC as before: the same findings as without the exception):
+--   * extension pg_net exists, owned by supabase_admin; schema net is owned by supabase_admin;
+--   * EVERY object in schema net (relations, functions, types, operators, collations, conversions, operator
+--     classes / families, text search objects, statistics) is owned by supabase_admin AND is a member of
+--     extension pg_net (pg_depend deptype 'e');
+--   * every ACL entry on net (schema, relations, columns, functions, types; a NULL ACL is the PostgreSQL
+--     default) comes from grantor supabase_admin, carries no grant option, and is IN the fingerprint below.
+-- When it applies, the compensating controls are hard findings (platform_exception_control_*):
+--   (a) the role is NOLOGIN, NOINHERIT, not BYPASSRLS, a member of no role;
+--   (b) net / extensions / cron are not in authenticator's pgrst.db_schemas role setting (absent: recorded as
+--       exposed_schemas_from_dashboard_unverified_in_sql; the server's live probe (c) is then the proof);
+--   (c) the server's boot probe (PostgREST Accept-Profile / Content-Profile: net → PGRST106; GraphQL: unknown
+--       field) — reported here as live_exposure_probe_required, enforced by the MCP servers;
+--   (d) the role's own search_path setting exists and excludes net / extensions / cron;
+--   (e) the egress rule stays exactly as strict for every function OUTSIDE the exception (wrappers included);
+--   (f) the role holds CREATE nowhere (the existing schema_create / database_create findings).
+-- A SECURITY DEFINER function in net is never excepted from the definer rule.
+create function action_gateway.platform_egress_exceptions(p_role oid)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = pg_catalog
+as $fn$
+declare
+  r oid := p_role;
+  pe jsonb;
+begin
+  -- lc-platform-exception:block-begin (the SAME block is inlined in public.lc_mcp_reader_self_check, #25; a test pins it)
+  <<platform_exception>>
+  declare
+  -- lc-platform-exception:fingerprint-version
+  fp_version constant text := 'supabase_pg_net_default_acl.v1';
+  -- lc-platform-exception:fingerprint (kind|object|grantee|privilege). REVIEWED CONSTANT: a change is a new
+  -- fingerprint version, reviewed by the owner. Sources: the Supabase doc above (PUBLIC: USAGE on net, all
+  -- privileges on the net tables and sequences, EXECUTE on net.http_*; USAGE on net also to postgres, anon,
+  -- authenticated, service_role); the platform's pg_net access grant (USAGE on net and EXECUTE on the http
+  -- entry points to supabase_functions_admin, postgres, anon, authenticated, service_role); the PostgreSQL
+  -- default ACL of every other pg_net function (EXECUTE to PUBLIC) and of every type (USAGE to PUBLIC: no data
+  -- and no egress privilege, so types are matched by '*').
+  fingerprint constant text[] := array[
+    'schema|net|PUBLIC|USAGE', 'schema|net|postgres|USAGE', 'schema|net|anon|USAGE', 'schema|net|authenticated|USAGE',
+    'schema|net|service_role|USAGE', 'schema|net|supabase_functions_admin|USAGE',
+    'table|net.http_request_queue|PUBLIC|SELECT', 'table|net.http_request_queue|PUBLIC|INSERT', 'table|net.http_request_queue|PUBLIC|UPDATE',
+    'table|net.http_request_queue|PUBLIC|DELETE', 'table|net.http_request_queue|PUBLIC|TRUNCATE', 'table|net.http_request_queue|PUBLIC|REFERENCES',
+    'table|net.http_request_queue|PUBLIC|TRIGGER', 'table|net.http_request_queue|PUBLIC|MAINTAIN',
+    'table|net._http_response|PUBLIC|SELECT', 'table|net._http_response|PUBLIC|INSERT', 'table|net._http_response|PUBLIC|UPDATE',
+    'table|net._http_response|PUBLIC|DELETE', 'table|net._http_response|PUBLIC|TRUNCATE', 'table|net._http_response|PUBLIC|REFERENCES',
+    'table|net._http_response|PUBLIC|TRIGGER', 'table|net._http_response|PUBLIC|MAINTAIN',
+    'sequence|net.http_request_queue_id_seq|PUBLIC|USAGE', 'sequence|net.http_request_queue_id_seq|PUBLIC|SELECT', 'sequence|net.http_request_queue_id_seq|PUBLIC|UPDATE',
+    'function|net.http_get|PUBLIC|EXECUTE', 'function|net.http_post|PUBLIC|EXECUTE', 'function|net.http_delete|PUBLIC|EXECUTE',
+    'function|net.http_get|postgres|EXECUTE', 'function|net.http_get|anon|EXECUTE', 'function|net.http_get|authenticated|EXECUTE',
+    'function|net.http_get|service_role|EXECUTE', 'function|net.http_get|supabase_functions_admin|EXECUTE',
+    'function|net.http_post|postgres|EXECUTE', 'function|net.http_post|anon|EXECUTE', 'function|net.http_post|authenticated|EXECUTE',
+    'function|net.http_post|service_role|EXECUTE', 'function|net.http_post|supabase_functions_admin|EXECUTE',
+    'function|net.http_delete|postgres|EXECUTE', 'function|net.http_delete|anon|EXECUTE', 'function|net.http_delete|authenticated|EXECUTE',
+    'function|net.http_delete|service_role|EXECUTE', 'function|net.http_delete|supabase_functions_admin|EXECUTE',
+    'function|net._await_response|PUBLIC|EXECUTE', 'function|net._urlencode_string|PUBLIC|EXECUTE',
+    'function|net._encode_url_with_params_array|PUBLIC|EXECUTE', 'function|net._http_collect_response|PUBLIC|EXECUTE',
+    'function|net.http_collect_response|PUBLIC|EXECUTE', 'function|net.worker_restart|PUBLIC|EXECUTE',
+    'function|net.wait_until_running|PUBLIC|EXECUTE', 'function|net.wake|PUBLIC|EXECUTE', 'function|net.check_worker_is_up|PUBLIC|EXECUTE',
+    'type|*|PUBLIC|USAGE'];
+  forbidden constant text[] := array['net', 'extensions', 'cron'];
+  v_net oid := to_regnamespace('net')::oid;
+  v_admin oid;
+  v_ext record;
+  v_auth oid;
+  reasons text[] := '{}';
+  objects text[] := '{}';
+  acl_seen text[] := '{}';
+  controls jsonb := 'null'::jsonb;
+  notes text[] := '{}';
+  ctl text[] := '{}';
+  exc_rel oid[] := '{}';
+  exc_fn oid[] := '{}';
+  applied boolean;
+  o record;
+  e record;
+  s record;
+  k text;
+  g text;
+  v_bad text[];
+  v_found boolean;
+  begin
+  if v_net is null then
+    -- no pg_net here (a disposable / non-Supabase database): nothing is excepted, nothing changes
+    pe := jsonb_build_object('platform_exceptions', '[]'::jsonb, 'excepted_relations', '[]'::jsonb, 'excepted_functions', '[]'::jsonb, 'findings', '[]'::jsonb);
+    exit platform_exception;
+  end if;
+  select oid into v_admin from pg_roles where rolname = 'supabase_admin';
+  select obj.oid, obj.extowner, obj.extversion into v_ext from pg_extension obj where obj.extname = 'pg_net';
+  if v_admin is null then reasons := reasons || 'owner_role_supabase_admin_missing'::text; end if;
+  if v_ext.oid is null then reasons := reasons || 'extension_pg_net_missing'::text;
+  elsif v_ext.extowner is distinct from v_admin then reasons := reasons || ('extension_owner:' || pg_get_userbyid(v_ext.extowner)); end if;
+
+  -- every object in schema net: owner supabase_admin, member of extension pg_net
+  for o in
+    select 'pg_namespace'::regclass cls, n.oid, 'schema'::text kind, 'net'::text name, n.nspowner own, n.nspacl acl, 'n'::"char" dk from pg_namespace n where n.oid = v_net
+    union all select 'pg_class'::regclass, c.oid, case c.relkind when 'S' then 'sequence' when 'v' then 'view' when 'm' then 'materialized_view' when 'f' then 'foreign_table' else 'table' end,
+                     'net.' || c.relname, c.relowner, c.relacl, case c.relkind when 'S' then 's' else 'r' end::"char"
+                from pg_class c where c.relnamespace = v_net and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+    union all select 'pg_proc'::regclass, p.oid, 'function', 'net.' || p.proname, p.proowner, p.proacl, 'f'::"char" from pg_proc p where p.pronamespace = v_net
+    union all select 'pg_type'::regclass, t.oid, 'type', 'net.' || t.typname, t.typowner, t.typacl, 'T'::"char" from pg_type t where t.typnamespace = v_net
+    union all select 'pg_operator'::regclass, obj.oid, 'operator', 'net.' || obj.oprname, obj.oprowner, null::aclitem[], null::"char" from pg_operator obj where obj.oprnamespace = v_net
+    union all select 'pg_collation'::regclass, obj.oid, 'collation', 'net.' || obj.collname, obj.collowner, null, null from pg_collation obj where obj.collnamespace = v_net
+    union all select 'pg_conversion'::regclass, obj.oid, 'conversion', 'net.' || obj.conname, obj.conowner, null, null from pg_conversion obj where obj.connamespace = v_net
+    union all select 'pg_opclass'::regclass, obj.oid, 'operator_class', 'net.' || obj.opcname, obj.opcowner, null, null from pg_opclass obj where obj.opcnamespace = v_net
+    union all select 'pg_opfamily'::regclass, obj.oid, 'operator_family', 'net.' || obj.opfname, obj.opfowner, null, null from pg_opfamily obj where obj.opfnamespace = v_net
+    union all select 'pg_ts_config'::regclass, obj.oid, 'text_search_configuration', 'net.' || obj.cfgname, obj.cfgowner, null, null from pg_ts_config obj where obj.cfgnamespace = v_net
+    union all select 'pg_ts_dict'::regclass, obj.oid, 'text_search_dictionary', 'net.' || obj.dictname, obj.dictowner, null, null from pg_ts_dict obj where obj.dictnamespace = v_net
+    union all select 'pg_statistic_ext'::regclass, obj.oid, 'statistics', 'net.' || obj.stxname, obj.stxowner, null, null from pg_statistic_ext obj where obj.stxnamespace = v_net
+    order by 3, 4, 2
+  loop
+    objects := objects || (o.kind || ':' || o.name);
+    if o.own is distinct from v_admin then reasons := reasons || ('owner:' || o.kind || ':' || o.name || ':' || pg_get_userbyid(o.own)); end if;
+    if v_ext.oid is null or not exists (select 1 from pg_depend d where d.classid = o.cls and d.objid = o.oid and d.objsubid = 0
+                                          and d.refclassid = 'pg_catalog.pg_extension'::regclass and d.refobjid = v_ext.oid and d.deptype = 'e') then
+      reasons := reasons || ('not_extension_member:' || o.kind || ':' || o.name);
+    end if;
+    if o.kind = 'table' or o.kind = 'sequence' then exc_rel := exc_rel || o.oid; end if;
+    if o.kind = 'function' then exc_fn := exc_fn || o.oid; end if;
+    if o.dk is not null then
+      for e in select a.grantor, a.grantee, a.privilege_type, a.is_grantable from aclexplode(coalesce(o.acl, acldefault(o.dk, o.own))) a loop
+        continue when e.grantee = o.own and e.grantor = o.own; -- the owner's own rights
+        g := case when e.grantee = 0 then 'PUBLIC' else pg_get_userbyid(e.grantee) end;
+        k := o.kind || '|' || o.name || '|' || g || '|' || e.privilege_type;
+        acl_seen := acl_seen || k;
+        if e.grantor is distinct from v_admin then reasons := reasons || ('acl_grantor:' || k || ':' || pg_get_userbyid(e.grantor)); end if;
+        if e.is_grantable then reasons := reasons || ('acl_grant_option:' || k); end if;
+        -- types are matched by '*' (their only privilege is USAGE: no data, no egress)
+        if not ((o.kind || '|' || case when o.kind = 'type' then '*' else o.name end || '|' || g || '|' || e.privilege_type) = any (fingerprint)) then
+          reasons := reasons || ('acl_outside_fingerprint:' || k);
+        end if;
+      end loop;
+    end if;
+  end loop;
+  -- column-level grants on net relations: none is in the fingerprint
+  for e in select 'column|net.' || c.relname || '.' || a.attname || '|' || case when ae.grantee = 0 then 'PUBLIC' else pg_get_userbyid(ae.grantee) end || '|' || ae.privilege_type k
+             from pg_class c join pg_attribute a on a.attrelid = c.oid cross join lateral aclexplode(a.attacl) ae
+            where c.relnamespace = v_net and a.attacl is not null and not a.attisdropped loop
+    acl_seen := acl_seen || e.k;
+    reasons := reasons || ('acl_outside_fingerprint:' || e.k);
+  end loop;
+  applied := coalesce(array_length(reasons, 1), 0) = 0;
+
+  if applied then
+    -- (a) the role: NOLOGIN, NOINHERIT, not BYPASSRLS, member of no role
+    select array_remove(array[case when rolcanlogin then 'canlogin' end, case when rolinherit then 'inherit' end, case when rolbypassrls then 'bypassrls' end, case when rolsuper then 'superuser' end], null)
+      into v_bad from pg_roles where oid = r;
+    v_bad := coalesce(v_bad, array['role_missing']) || array(select 'member_of:' || mr.rolname from pg_auth_members m join pg_roles mr on mr.oid = m.roleid where m.member = r order by 1);
+    foreach k in array v_bad loop ctl := ctl || ('platform_exception_control_a:' || k); end loop;
+    controls := jsonb_build_object('a_role_posture', coalesce(array_length(v_bad, 1), 0) = 0);
+    -- (b) authenticator's exposed schemas (role-setting override of the dashboard configuration)
+    select oid into v_auth from pg_roles where rolname = 'authenticator';
+    v_found := false;
+    if v_auth is null then
+      ctl := ctl || 'platform_exception_control_b:authenticator_missing'::text;
+    else
+      for s in select substr(c, length('pgrst.db_schemas=') + 1) v from pg_db_role_setting drs cross join lateral unnest(drs.setconfig) c
+                where drs.setrole = v_auth and drs.setdatabase in (0, (select oid from pg_database where datname = current_database())) and c like 'pgrst.db\_schemas=%' loop
+        v_found := true;
+        for k in select lower(btrim(item, ' "')) from unnest(string_to_array(s.v, ',')) item loop
+          if k = any (forbidden) then ctl := ctl || ('platform_exception_control_b:exposed_schema:' || k); end if;
+        end loop;
+      end loop;
+    end if;
+    if not v_found then notes := notes || 'exposed_schemas_from_dashboard_unverified_in_sql'::text; end if;
+    controls := controls || jsonb_build_object('b_exposed_schemas', case when v_auth is null then 'failed' when not v_found then 'unverified_in_sql'
+                                                                        when exists (select 1 from unnest(ctl) c where c like 'platform_exception_control_b:%') then 'failed' else 'verified' end);
+    -- (c) the live probe is the MCP server's (Accept-Profile / Content-Profile: net → PGRST106; GraphQL: unknown field)
+    controls := controls || jsonb_build_object('c_live_exposure_probe', 'required');
+    -- (d) the role's own search_path setting exists and excludes net / extensions / cron
+    v_found := false;
+    for s in select substr(c, length('search_path=') + 1) v from pg_db_role_setting drs cross join lateral unnest(drs.setconfig) c
+              where drs.setrole = r and drs.setdatabase in (0, (select oid from pg_database where datname = current_database())) and c like 'search\_path=%' loop
+      v_found := true;
+      for k in select lower(btrim(item, ' "')) from unnest(string_to_array(s.v, ',')) item loop
+        if k = any (forbidden) then ctl := ctl || ('platform_exception_control_d:search_path_includes:' || k); end if;
+      end loop;
+    end loop;
+    if not v_found then ctl := ctl || 'platform_exception_control_d:search_path_unset'::text; end if;
+    controls := controls || jsonb_build_object('d_role_search_path', v_found and not exists (select 1 from unnest(ctl) c where c like 'platform_exception_control_d:%'));
+    -- (e) the egress rule outside the exception is the caller's (unchanged); (f) CREATE nowhere (existing findings)
+    controls := controls || jsonb_build_object('e_egress_rule_outside_exception', 'enforced',
+      'f_no_create', not exists (select 1 from pg_namespace n where n.nspname !~ '^pg_(toast|temp)' and has_schema_privilege(r, n.oid, 'CREATE'))
+                     and not has_database_privilege(r, current_database(), 'CREATE'));
+  end if;
+
+  pe := jsonb_build_object(
+    'platform_exceptions', jsonb_build_array(jsonb_build_object(
+      'id', 'supabase_pg_net',
+      'fingerprint_version', fp_version,
+      'status', case when applied then 'applied' else 'not_applied' end,
+      'reasons', to_jsonb(reasons),
+      'owner', 'supabase_admin',
+      'extension', 'pg_net',
+      'extension_version', v_ext.extversion,
+      'objects', to_jsonb(objects),
+      'acl', to_jsonb(acl_seen),
+      'controls', controls,
+      'notes', to_jsonb(notes),
+      'live_exposure_probe_required', applied,
+      'doc', 'https://supabase.com/docs/guides/troubleshooting/revoking-access-to-pg_net-objects-has-no-effect-0bbc16')),
+    'excepted_relations', to_jsonb(case when applied then exc_rel else '{}'::oid[] end),
+    'excepted_functions', to_jsonb(case when applied then exc_fn else '{}'::oid[] end),
+    'findings', to_jsonb(ctl));
+  end platform_exception;
+  -- lc-platform-exception:block-end
+  return pe;
+end
+$fn$;
+comment on function action_gateway.platform_egress_exceptions(oid) is 'Action Gateway: the pinned Supabase pg_net platform exception (fingerprint supabase_pg_net_default_acl.v1) + its compensating controls. Read by self_check; docs/SUPABASE-PG-NET-POSTURE.md.';
+
 create function action_gateway.self_check(p_role name default 'lc_action_gateway')
 returns jsonb
 language plpgsql
@@ -1385,9 +1622,17 @@ declare
   x record;
   v_has text[];
   v_allowed jsonb;
+  pe jsonb;
+  exc_rel oid[];
+  exc_fn oid[];
 begin
   select oid into r from pg_roles where rolname = p_role;
-  if r is null then return jsonb_build_object('version', 1, 'role', p_role, 'exists', false, 'ok', false, 'findings', jsonb_build_array('role_missing')); end if;
+  if r is null then return jsonb_build_object('version', 1, 'role', p_role, 'exists', false, 'ok', false, 'findings', jsonb_build_array('role_missing'), 'platform_exceptions', '[]'::jsonb); end if;
+  -- the pinned Supabase pg_net platform exception: its objects are excepted ONLY when every condition and
+  -- compensating control holds (action_gateway.platform_egress_exceptions); otherwise they count as before
+  pe := action_gateway.platform_egress_exceptions(r);
+  exc_rel := array(select (jsonb_array_elements_text(pe -> 'excepted_relations'))::oid);
+  exc_fn := array(select (jsonb_array_elements_text(pe -> 'excepted_functions'))::oid);
 
   select jsonb_build_object('superuser', rolsuper, 'bypassrls', rolbypassrls, 'createrole', rolcreaterole, 'createdb', rolcreatedb,
                             'replication', rolreplication, 'canlogin', rolcanlogin, 'inherit', rolinherit) into rep from pg_roles where oid = r;
@@ -1407,7 +1652,7 @@ begin
     select n.nspname, c.relname, c.oid, format('%I.%I', n.nspname, c.relname) q
       from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where c.relkind in ('r', 'p', 'v', 'm', 'f') and n.nspname not in ('pg_catalog', 'information_schema') and n.nspname !~ '^pg_(toast|temp)'
-       and has_schema_privilege(r, n.oid, 'USAGE')
+       and has_schema_privilege(r, n.oid, 'USAGE') and not (c.oid = any (exc_rel))
   loop
     select coalesce(array_agg(pv), '{}') into v_has from unnest(privs) pv
      where has_table_privilege(r, x.oid, pv) or (pv in ('INSERT', 'UPDATE', 'REFERENCES') and has_any_column_privilege(r, x.oid, pv));
@@ -1430,7 +1675,7 @@ begin
   for x in
     select format('%I.%I', n.nspname, c.relname) q from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where c.relkind = 'S' and n.nspname not in ('pg_catalog', 'information_schema') and n.nspname !~ '^pg_(toast|temp)'
-       and has_schema_privilege(r, n.oid, 'USAGE') and case when c.relkind = 'S' then has_sequence_privilege(r, c.oid, 'USAGE,UPDATE') else false end
+       and has_schema_privilege(r, n.oid, 'USAGE') and not (c.oid = any (exc_rel)) and case when c.relkind = 'S' then has_sequence_privilege(r, c.oid, 'USAGE,UPDATE') else false end
   loop findings := findings || ('sequence_privilege:' || x.q); end loop;
   for x in select n.nspname from pg_namespace n where n.nspname !~ '^pg_(toast|temp)' and has_schema_privilege(r, n.oid, 'CREATE') loop
     findings := findings || ('schema_create:' || x.nspname);
@@ -1448,11 +1693,13 @@ begin
        and not (p.proname = 'st_estimatedextent' and p.provolatile in ('s', 'i'))
   loop findings := findings || ('reachable_definer_function:' || x.s); end loop;
   -- network egress the role can reach (same rule as lc_mcp_reader_self_check): extensions, schema net,
-  -- untrusted languages, and sql / plpgsql wrappers calling them or a PUBLIC side-effect function
+  -- untrusted languages, and sql / plpgsql wrappers calling them or a PUBLIC side-effect function.
+  -- Only the members of an APPLIED platform exception are skipped; every other function (a wrapper in
+  -- public calling net.* included) is judged exactly as before.
   for x in
     select p.oid::regprocedure::text s from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
      where p.prokind in ('f', 'p') and n.nspname not in ('pg_catalog', 'information_schema')
-       and has_schema_privilege(r, n.oid, 'USAGE') and has_function_privilege(r, p.oid, 'EXECUTE')
+       and has_schema_privilege(r, n.oid, 'USAGE') and has_function_privilege(r, p.oid, 'EXECUTE') and not (p.oid = any (exc_fn))
        and (exists (select 1 from pg_depend d join pg_extension e on e.oid = d.refobjid
                      where d.classid = 'pg_catalog.pg_proc'::regclass and d.objid = p.oid and d.refclassid = 'pg_catalog.pg_extension'::regclass
                        and d.deptype = 'e' and e.extname in ('pg_net', 'http', 'dblink', 'postgres_fdw'))
@@ -1466,7 +1713,7 @@ begin
   for x in
     select n.nspname, c.relname, format('%I.%I', n.nspname, c.relname) q from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where c.relkind in ('r', 'p', 'v', 'm', 'f') and n.nspname not in ('pg_catalog', 'information_schema') and n.nspname !~ '^pg_(toast|temp)'
-       and has_schema_privilege(r, n.oid, 'USAGE') and case when c.relkind in ('r', 'p', 'v', 'm', 'f') then has_table_privilege(r, c.oid, 'SELECT') or has_any_column_privilege(r, c.oid, 'SELECT') else false end
+       and has_schema_privilege(r, n.oid, 'USAGE') and not (c.oid = any (exc_rel)) and case when c.relkind in ('r', 'p', 'v', 'm', 'f') then has_table_privilege(r, c.oid, 'SELECT') or has_any_column_privilege(r, c.oid, 'SELECT') else false end
   loop
     if not ((x.nspname = 'public' and x.relname = any (read_rels)) or (x.nspname = 'agent' and x.relname = any (agent_read))
             or (x.nspname = 'action_gateway' and x.relname = any (gw_read))
@@ -1493,7 +1740,11 @@ begin
   for x in select unnest(entry) s loop
     if (select p.prosecdef from pg_proc p where p.oid = to_regprocedure(x.s)) then findings := findings || ('entry_point_is_definer:' || x.s); end if;
   end loop;
-  return rep || jsonb_build_object('findings', to_jsonb(findings), 'ok', coalesce(array_length(findings, 1), 0) = 0, 'generated_at', clock_timestamp());
+  -- the compensating controls of an applied platform exception (each a hard finding)
+  findings := findings || array(select jsonb_array_elements_text(pe -> 'findings'));
+  -- platform_exceptions: what was excepted (fingerprint version, objects, ACL, controls), reported apart from findings
+  return rep || jsonb_build_object('findings', to_jsonb(findings), 'ok', coalesce(array_length(findings, 1), 0) = 0,
+                                   'platform_exceptions', pe -> 'platform_exceptions', 'generated_at', clock_timestamp());
 end
 $fn$;
 comment on function action_gateway.self_check(name) is 'Action Gateway: privilege introspection of lc_action_gateway (writes only the gateway bookkeeping, definer allowlist, no egress, read inventory). The apply refuses unless ok.';
@@ -1523,7 +1774,7 @@ grant usage on schema agent to lc_action_gateway;
 grant execute on function action_gateway.read_inventory(), action_gateway.request_org(), action_gateway.tier_label(smallint), action_gateway.control_refusal(text, smallint),
   action_gateway.intent_transition_ok(text, text), action_gateway.is_terminal(text), action_gateway.intent_json(action_gateway.action_intents),
   action_gateway.audit(uuid, text, text, uuid, text, text, smallint, text, uuid, jsonb), action_gateway.finish_intent(uuid, text, text, jsonb),
-  action_gateway.self_check(name), action_gateway.grant_admit(uuid, uuid, text), action_gateway.grant_note_failure(uuid, text),
+  action_gateway.self_check(name), action_gateway.platform_egress_exceptions(oid), action_gateway.grant_admit(uuid, uuid, text), action_gateway.grant_note_failure(uuid, text),
   action_gateway.grant_execution_refusal(uuid), action_gateway.standing_t2_actions() to lc_action_gateway;
 grant execute on function public.action_gateway_controls(), public.action_gateway_intent_open(jsonb), public.action_gateway_intent_get(uuid),
   public.action_gateway_refuse(uuid, text, jsonb), public.action_gateway_expire(uuid, text), public.action_gateway_await_approval(uuid, text),
