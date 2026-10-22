@@ -146,9 +146,9 @@ export const READS = Object.freeze([
   Object.freeze({
     name: 'read_conversation_context',
     title: 'Read conversation context',
-    description: 'For authorized conversation agents: the thread\'s recent messages (bodies, phones and emails masked), conversation facts and stage, the established sender persona (no number), permission state (opt-out / suppression / hold codes) and property evidence. No raw phone number is ever returned; routing is resolved inside LeadCommand.',
+    description: 'For authorized conversation agents: the thread\'s recent messages (bodies, phones and emails masked), conversation facts and stage, the established sender persona (no number), permission state (opt-out / suppression / hold codes) and property evidence. No raw phone number is ever returned; routing is resolved inside LeadCommand. Bounded for a model: the permission state and facts are always whole; messages are the newest that fit, and messages_page.older_cursor (pass it back as cursor) reads the next older page.',
     capability: 'conversation.read_context', tier: TIERS.T1, scope: 'conversation_context.read', resource: 'thread',
-    input: obj({ thread_id: UUID, message_limit: int(1, 40) }, ['thread_id']),
+    input: obj({ thread_id: { ...UUID, description: 'the inbox thread id (a Workforce candidate\'s conversation_id)' }, message_limit: int(1, 40), cursor: str(400, { minLength: 4, pattern: '^[A-Za-z0-9_-]{4,400}$' }) }, ['thread_id']),
     limits: { per_min: 20 },
     wraps: { service: 'ai/conversation-canonical-inputs#loadCanonicalInputs (projection) + persona-continuity + eligibility-bridge#dryRunEligibility' },
   }),

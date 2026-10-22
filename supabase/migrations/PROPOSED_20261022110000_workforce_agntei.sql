@@ -968,6 +968,7 @@ begin
         'assignments', (select coalesce(jsonb_agg(action_gateway.wf_assignment_json(x, true) order by x.updated_at desc, x.assignment_id), '[]'::jsonb) from (
             select * from workforce.assignment x where x.org_id = e.org_id and x.assignee_employee_id = e.employee_id
                and (p ->> 'status' is null or x.status = p ->> 'status') and (p ->> 'mission_id' is null or x.mission_id = p ->> 'mission_id')
+               and (p ->> 'assignment_id' is null or x.assignment_id = p ->> 'assignment_id')
              order by x.updated_at desc, x.assignment_id limit v_lim) x));
       if coalesce((p ->> 'include_mission_peers')::boolean, false) then
         v_out := v_out || jsonb_build_object('mission_peers', (select coalesce(jsonb_agg(action_gateway.wf_assignment_json(x, false) order by x.mission_id, x.step_key), '[]'::jsonb) from (
@@ -1195,7 +1196,10 @@ begin
         end if;
         return action_gateway.finish_intent(i.intent_id, 'succeeded', case when (r ->> 'already_held')::boolean then 'ALREADY_HELD' else 'CLAIMED' end,
           jsonb_build_object('assignment_id', r -> 'assignment' ->> 'assignment_id', 'mission_id', r -> 'assignment' ->> 'mission_id', 'status', r -> 'assignment' ->> 'status',
-                             'lease_until', r -> 'assignment' ->> 'lease_until', 'attempt', (r -> 'assignment' ->> 'attempt')::int, 'execution_mode', r -> 'assignment' ->> 'execution_mode'));
+                             'lease_until', r -> 'assignment' ->> 'lease_until', 'attempt', (r -> 'assignment' ->> 'attempt')::int, 'execution_mode', r -> 'assignment' ->> 'execution_mode',
+                             -- the lease generation to pass to report / complete / research, by its own name: the gateway envelope also carries an
+                             -- `attempt` (the intent's), and a live model passed that one (LEASE_LOST); this field is unambiguous
+                             'claim_attempt', (r -> 'assignment' ->> 'attempt')::int));
 
       when 'workforce_report_progress' then
         a := workforce.assignment_external_lease(i.org_id, p ->> 'assignment_id', e.employee_id, v_owner);
@@ -1228,8 +1232,12 @@ begin
         a := workforce.assignment_external_lease(i.org_id, p ->> 'assignment_id', e.employee_id, v_owner);
         if (p ->> 'claim_attempt')::int is distinct from a.attempt then return action_gateway.finish_intent(i.intent_id, 'refused', 'LEASE_LOST', jsonb_build_object('stage', 'lease_generation', 'attempt', a.attempt)); end if;
         v_pref := coalesce(case when a.resource_type = 'property' then a.resource_key end, p ->> 'property_ref', a.input ->> 'property_ref');
-        if v_pref is null or v_pref !~ '^pid_[g-p]{1,20}$' then return action_gateway.finish_intent(i.intent_id, 'refused', 'PROPERTY_REQUIRED', '{}'::jsonb); end if;
-        v_prop := translate(substr(v_pref, 5), 'ghijklmnop', '0123456789');
+        -- a property ref is its pid_ encoding (a numeric id) or the opaque id itself (letters + digits, no phone-shaped run): the SAME
+        -- rule as encodePropertyRef / the Workforce PROPERTY_ID (an alphanumeric id was refused here only, found by the live milestone)
+        if v_pref is null or not (v_pref ~ '^pid_[g-p]{1,20}$' or (v_pref ~ '^[A-Za-z0-9_-]{1,64}$' and v_pref ~ '[A-Za-z]' and v_pref !~ '[0-9]{7,}')) then
+          return action_gateway.finish_intent(i.intent_id, 'refused', 'PROPERTY_REQUIRED', '{}'::jsonb);
+        end if;
+        v_prop := case when v_pref ~ '^pid_[g-p]{1,20}$' then translate(substr(v_pref, 5), 'ghijklmnop', '0123456789') else v_pref end;
         v_code := action_gateway.t2_never_revive(null, v_prop, null);
         if v_code is not null then return action_gateway.finish_intent(i.intent_id, 'refused', v_code, jsonb_build_object('stage', 'domain_write')); end if;
         -- the SAME job identity as the in-process research.property capability: ONE job per mission × property, so a retry after a

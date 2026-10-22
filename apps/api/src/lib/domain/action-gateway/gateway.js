@@ -137,7 +137,9 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     if (keys.some((k) => FORGED_CONTEXT_KEYS.test(k))) throw gwErr('invalid_input', 'FORGED_CONTEXT', 'identity, tenant, authority and approvals come from the server, never from tool arguments')
     if (keys.some((k) => ESCALATION_KEYS.test(k))) throw gwErr('invalid_input', 'ESCALATION_REFUSED', 'no tool accepts SQL, routes, roles or other execution surfaces')
     const errors = validateSchema(spec.input, args)
-    if (errors.length) throw gwErr('invalid_input', 'INPUT_INVALID', 'arguments do not match the input schema', { issues: errors.slice(0, 8) })
+    // the live milestone: told only "do not match", a model resent a SHORTER call and dropped valid members (findings, evidence);
+    // the answer now says that only the listed issues are wrong
+    if (errors.length) throw gwErr('invalid_input', 'INPUT_INVALID', 'arguments do not match the input schema: fix ONLY the listed issues and resend the same arguments (everything not listed is valid; keep it, e.g. findings and evidence)', { issues: errors.slice(0, 8) })
     return args
   }
 

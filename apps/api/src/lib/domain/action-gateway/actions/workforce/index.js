@@ -23,6 +23,7 @@ import { interpretDirective } from '../../../../workforce/coo/interpret.js'
 import { missionTitle } from '../../../../workforce/missions/directive.js'
 import { pickAssignee } from '../../../../workforce/coo/staffing.js'
 import { rolesFor } from '../../../../workforce/org/charters.js'
+import { MODEL_RESULT_BUDGET, CURSOR_PATTERN, PART_PATTERN, at, decodeCursor, encodeCursor, pageRows, pagePart, condense } from './page.js'
 
 export const WF_LINK = 'PROPOSED_20261022110000_workforce_agntei'
 const CLIENT_KEY = str(80, { minLength: 8, pattern: '^[A-Za-z0-9_.:-]{8,80}$' })
@@ -38,8 +39,13 @@ const MODEL = str(60, { minLength: 1, pattern: '^[A-Za-z0-9_.:-]{1,60}$' })
 const ASSIGNMENT_STATUSES = ['pending', 'ready', 'leased', 'running', 'waiting_job', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']
 const EVIDENCE_TYPES = ['job', 'intent', 'thread', 'property', 'opportunity']
 const EVIDENCE = list(obj({ type: enumOf(EVIDENCE_TYPES), id: str(80, { minLength: 1, pattern: '^[A-Za-z0-9_.:-]{1,80}$' }), note: TEXT(200) }, ['type', 'id']), 20)
-const OUTPUT = obj({ summary: TEXT(2000), findings: list(TEXT(400), 20), next_steps: list(TEXT(300), 10), recommendation: TEXT(600) })
+// recommendation: 1,500 (was 600 — a live model ranking ten properties exceeded it on every run and, to fit, dropped its findings)
+export const RECOMMENDATION_MAX = 1500
+const OUTPUT = obj({ summary: TEXT(2000), findings: list(TEXT(400), 20), next_steps: list(TEXT(300), 10), recommendation: TEXT(RECOMMENDATION_MAX) })
 const CLAIM_ATTEMPT = int(0, 10)
+const CURSOR = str(400, { minLength: 4, pattern: CURSOR_PATTERN })
+const PART = str(200, { minLength: 1, pattern: PART_PATTERN })
+const PAGING = 'Results are bounded for a model (about 5,600 characters): a list answers page {next_cursor, complete}; pass next_cursor back as cursor for the next page. A row too large for one page shows its largest members as {_paged, read_with}: call read_with to read that member (itself paged). Nothing is ever cut silently.'
 const RESEARCH_BUDGET_USD = WORKFORCE_LIMITS.research_budget_cap_usd
 
 const CAP = Object.fromEntries(WORKFORCE_GATEWAY_TOOLS.map((t) => [t.tool, t.capability]))
@@ -54,11 +60,11 @@ export const WF_READS = Object.freeze([
     description: 'Your Workforce employee (bound to THIS agent credential): role, department, manager, markets, employment type, link state, your live Action Gateway grants and tier ceiling, and your open assignments. Read only.',
     input: obj({}), limits: { per_min: 60 }, wraps: wraps('action_gateway_workforce_read(whoami)') }),
   Object.freeze({ name: 'workforce_list_assignments', title: 'List my Workforce assignments', tier: TIERS.T1, scope: null, resource: 'workforce', capability: CAP.workforce_list_assignments, risk: 'read',
-    description: 'The assignments assigned to you (newest first; optionally one status or one mission), each with its mission, step, capability, status, execution mode, input, output and evidence; with include_mission_peers, a summary of the other assignments of the missions you work on. Read only.',
-    input: obj({ status: enumOf(ASSIGNMENT_STATUSES), mission_id: WFM, include_mission_peers: bool(), limit: int(1, 100) }), limits: { per_min: 60 }, wraps: wraps('action_gateway_workforce_read(assignments)') }),
+    description: `The assignments assigned to you (newest first, the newest 100; optionally one status, one mission or one assignment_id), each with its mission, step, capability, status, execution mode, input, output and evidence; with include_mission_peers, a summary of the other assignments of the missions you work on. With assignment_id + part (e.g. input.candidates, output.research, evidence) it reads that one member of that assignment, paged. ${PAGING} Read only.`,
+    input: obj({ status: enumOf(ASSIGNMENT_STATUSES), mission_id: WFM, assignment_id: WFA, include_mission_peers: bool(), limit: int(1, 100), part: PART, cursor: CURSOR }), limits: { per_min: 60 }, wraps: wraps('action_gateway_workforce_read(assignments)') }),
   Object.freeze({ name: 'workforce_get_mission', title: 'Read one Workforce mission', tier: TIERS.T1, scope: null, resource: 'workforce', capability: CAP.workforce_get_mission, risk: 'read',
-    description: 'A mission you participate in (or one your sponsor, the CEO, requested): its directive, status, origin, report and assignments (your own in full, the others as a summary). Read only.',
-    input: obj({ mission_id: WFM }, ['mission_id']), limits: { per_min: 60 }, wraps: wraps('action_gateway_workforce_read(mission)') }),
+    description: `A mission you participate in (or one your sponsor, the CEO, requested): its directive, status, origin, plan, report and assignments (your own in full, the others as a summary). With part (e.g. mission.report, mission.plan.steps, assignments) it reads that one member, paged. ${PAGING} Read only.`,
+    input: obj({ mission_id: WFM, part: PART, cursor: CURSOR }, ['mission_id']), limits: { per_min: 60 }, wraps: wraps('action_gateway_workforce_read(mission)') }),
 ])
 
 export const WF_ACTIONS = Object.freeze([
@@ -72,7 +78,7 @@ export const WF_ACTIONS = Object.freeze([
     input: obj({ ...client, directive: TEXT(WORKFORCE_LIMITS.directive_max_chars, 3), assign_to_self: bool() }, ['client_request_id', 'directive']),
     wraps: wraps('action_gateway_dw_workforce(workforce_open_mission) → workforce.mission_open + workforce.coo_plan') }),
   write({ name: 'workforce_claim_assignment', title: 'Claim one of my assignments', capability: CAP.workforce_claim_assignment,
-    description: 'Lease an assignment assigned to you (execution mode external) and take its resource claim. Refused when another employee holds the resource (CLAIM_HELD), a person owns it (HUMAN_OWNED), it is not due or not yours. Returns claim_attempt: pass it to report / complete / request research (a reaped lease makes later calls LEASE_LOST).',
+    description: 'Lease an assignment assigned to you (execution mode external) and take its resource claim. Refused when another employee holds the resource (CLAIM_HELD), a person owns it (HUMAN_OWNED), it is not due or not yours. Returns result.claim_attempt (the lease generation; NOT the envelope\'s own `attempt`): pass it as claim_attempt to report / complete / request research (a reaped lease makes later calls LEASE_LOST).',
     input: obj({ ...client, assignment_id: WFA, lease_seconds: int(60, 3600) }, ['client_request_id', 'assignment_id']),
     wraps: wraps('action_gateway_dw_workforce(workforce_claim_assignment) → workforce.assignment_claim_external') }),
   write({ name: 'workforce_report_progress', title: 'Report progress on my assignment', capability: CAP.workforce_report_progress, limits: { per_min: 60 },
@@ -81,7 +87,7 @@ export const WF_ACTIONS = Object.freeze([
       cost: obj({ usd: num(0, 100), model: MODEL }, ['usd']) }, ['client_request_id', 'assignment_id', 'claim_attempt']),
     wraps: wraps('action_gateway_dw_workforce(workforce_report_progress) → workforce.assignment_progress') }),
   write({ name: 'workforce_complete_assignment', title: 'Complete my assignment', capability: CAP.workforce_complete_assignment,
-    description: 'Finish your assignment with an output and evidence. outcome_class verified needs at least one evidence ref LeadCommand can resolve (a completed research job of this mission, one of your succeeded gateway intents, or a record you read through a logged LeadCommand tool call); otherwise it is stored as partial / unknown, never verified.',
+    description: 'Finish your assignment with an output and evidence. outcome_class verified needs at least one evidence ref LeadCommand can resolve: a completed research job of this mission (type job, the job_id request_research returned), one of your succeeded gateway intents, or a record you read through a LOGGED Action Gateway read (type thread: a thread_id you read with read_conversation_context). Reads through the separate read-only LeadCommand MCP are not gateway-logged and never resolve (cite them, they are stored as reported). Otherwise it is stored as partial / unknown, never verified. Field limits: summary 2000, recommendation 1500, up to 20 findings of 400 characters each (put per-property findings in findings, not in the recommendation).',
     input: obj({ ...client, assignment_id: WFA, claim_attempt: CLAIM_ATTEMPT, outcome_class: enumOf(['verified', 'partial', 'unknown']), output: OUTPUT, evidence: EVIDENCE },
       ['client_request_id', 'assignment_id', 'claim_attempt', 'output']),
     wraps: wraps('action_gateway_dw_workforce(workforce_complete_assignment) → evidence resolution + workforce.assignment_finish') }),
@@ -159,7 +165,7 @@ const normOutput = (o) => (o ? {
   ...(o.summary ? { summary: cleanText(o.summary, 2000) } : {}),
   ...(o.findings?.length ? { findings: o.findings.map((x) => cleanText(x, 400)).filter(Boolean) } : {}),
   ...(o.next_steps?.length ? { next_steps: o.next_steps.map((x) => cleanText(x, 300)).filter(Boolean) } : {}),
-  ...(o.recommendation ? { recommendation: cleanText(o.recommendation, 600) } : {}),
+  ...(o.recommendation ? { recommendation: cleanText(o.recommendation, RECOMMENDATION_MAX) } : {}),
 } : null)
 
 /** to_coo: the COO staffs it with an INTERNAL (autonomous) employee whose role covers the capability (deterministic: role, then id). */
@@ -175,7 +181,18 @@ export function cooHandoffTarget(c, assignment) {
 }
 
 // ── reads ────────────────────────────────────────────────────────────────────
-const present = (v) => decodeStored(v)
+// What an AGENT reads: stored text decoded (~e~ markers), but a property ref stays its opaque pid_ ref. Decoded to digits it
+// was masked by the MCP's second net (a 10-digit id is phone-shaped), so the agent could neither cite nor research the
+// property it had just read; the ref is what request_research (property_id) and evidence (type property) accept.
+const present = (v, depth = 0) => {
+  if (depth > 12 || v == null) return v
+  if (Array.isArray(v)) return v.map((x) => present(x, depth + 1))
+  if (typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k.replace(/_v1$/, ''), present(x, depth + 1)]))
+  if (typeof v === 'string' && !/^pid_[g-p]{1,20}$/.test(v)) return decodeStored(v)
+  return v
+}
+const ASSIGNMENT_ROOTS = ['input', 'output', 'evidence', 'last_error']
+const MCP = (name) => `leadcommand_${name}`
 const grantsOf = (principal) => (principal?.grants || []).filter((g) => String(g.capability).startsWith('workforce.'))
   .map((g) => ({ capability: g.capability, max_tier: `T${g.max_tier}`, expires_at: g.expires_at, suspended: Boolean(g.suspended_reason), suspended_reason: g.suspended_reason || null }))
 async function guardedRead(kind, { input, store, services, principal, digest }) {
@@ -190,23 +207,60 @@ export const WF_LOGIC = Object.freeze({
     async read(o) {
       const r = await guardedRead('whoami', { ...o, input: {} })
       if (r.registered === false) return r
-      return present({ resource_type: 'workforce', registered: true, agent_id: r.agent_id, tier_ceiling: `T${r.tier_ceiling}`, employee: r.employee, manager: r.manager, grants: grantsOf(o.principal),
-        open_assignments: r.open_assignments, linked: Boolean(r.employee?.external_agent_id) })
+      const head = present({ resource_type: 'workforce', registered: true, agent_id: r.agent_id, tier_ceiling: `T${r.tier_ceiling}`, employee: r.employee, manager: r.manager, grants: grantsOf(o.principal), linked: Boolean(r.employee?.external_agent_id) })
+      // the identity and the grants are never paged; the open assignments share the rest of the budget
+      const rows = present(r.open_assignments || [])
+      const pg = pageRows(rows, { kind: 'whoami', extra: JSON.stringify(head).length, readWith: (row, p) => ({ tool: MCP('workforce_list_assignments'), arguments: { assignment_id: row.assignment_id, part: p } }), roots: ASSIGNMENT_ROOTS })
+      return { ...head, open_assignments: pg.items, open_assignments_page: pg.page.next_cursor ? { ...pg.page, next_cursor: null, more_with: { tool: MCP('workforce_list_assignments'), arguments: {} } } : pg.page }
     },
   },
   workforce_list_assignments: {
     async read(o) {
-      const r = await guardedRead('assignments', o)
+      const input = o.input || {}
+      if (input.part && !input.assignment_id) throw gwErr('invalid_input', 'ASSIGNMENT_REQUIRED', 'part reads one member of ONE assignment: pass assignment_id too')
+      const r = await guardedRead('assignments', { ...o, input: { status: input.status, mission_id: input.mission_id, assignment_id: input.assignment_id, include_mission_peers: input.include_mission_peers, limit: input.part ? 1 : Math.min(Number(input.limit) || 100, 100) } })
       if (r.registered === false) return r
-      return present({ resource_type: 'workforce', employee_id: r.employee_id, assignments: r.assignments, ...(r.mission_peers ? { mission_peers: r.mission_peers } : {}) })
+      const rows = present(r.assignments || [])
+      if (input.part) {
+        const row = rows.find((x) => x.assignment_id === input.assignment_id)
+        if (!row) throw gwErr('not_found', 'ASSIGNMENT_NOT_FOUND', 'no assignment with this id is assigned to you')
+        const kind = `part:${input.assignment_id}:${input.part}`
+        const c = decodeCursor(input.cursor, kind)
+        return { resource_type: 'workforce', employee_id: r.employee_id, assignment_id: row.assignment_id,
+          ...pagePart(at(row, input.part), { part: input.part, offset: c?.o ?? 0, kind, extra: 200, readWith: (p) => ({ tool: MCP('workforce_list_assignments'), arguments: { assignment_id: row.assignment_id, part: p } }) }) }
+      }
+      const kind = `assignments:${input.status || ''}:${input.mission_id || ''}:${input.assignment_id || ''}:${input.include_mission_peers ? 1 : 0}`
+      const c = decodeCursor(input.cursor, kind)
+      const readWith = (row, p) => ({ tool: MCP('workforce_list_assignments'), arguments: { assignment_id: row.assignment_id, part: p } })
+      const peers = r.mission_peers ? present(r.mission_peers) : null
+      // own rows first; the peers' summaries continue the same list (one cursor)
+      const all = [...rows.map((x) => ({ own: true, row: x })), ...(peers || []).map((x) => ({ own: false, row: x }))]
+      const off = c?.o ?? 0
+      const pg = pageRows(all.map((x) => x.row), { offset: off, kind, readWith, roots: ASSIGNMENT_ROOTS, extra: 120 })
+      const ownItems = pg.items.filter((_, j) => all[off + j]?.own)
+      const peerItems = pg.items.filter((_, j) => !all[off + j]?.own)
+      return { resource_type: 'workforce', employee_id: r.employee_id, assignments: ownItems, ...(peers ? { mission_peers: peerItems } : {}), page: { ...pg.page, own_total: rows.length, ...(peers ? { peers_total: peers.length } : {}) } }
     },
   },
   workforce_get_mission: {
     async read(o) {
-      const r = await guardedRead('mission', o)
+      const input = o.input || {}
+      const r = await guardedRead('mission', { ...o, input: { mission_id: input.mission_id } })
       if (r.registered === false) return r
       if (!r.found) throw gwErr('not_found', 'MISSION_NOT_FOUND', 'no mission with this id that you participate in or your sponsor requested')
-      return present({ resource_type: 'workforce', visible_because: r.visible_because, mission: r.mission, assignments: r.assignments })
+      const whole = present({ mission: r.mission, assignments: r.assignments || [] })
+      const readWith = (p) => ({ tool: MCP('workforce_get_mission'), arguments: { mission_id: input.mission_id, part: p } })
+      if (input.part) {
+        const kind = `mpart:${input.mission_id}:${input.part}`
+        const c = decodeCursor(input.cursor, kind)
+        return { resource_type: 'workforce', visible_because: r.visible_because, mission_id: input.mission_id, ...pagePart(at(whole, input.part), { part: input.part, offset: c?.o ?? 0, kind, extra: 200, readWith }) }
+      }
+      // the mission row (its plan and report behind stubs when large), then its assignments paged in the rest of the budget
+      const kind = `mission:${input.mission_id}`
+      const c = decodeCursor(input.cursor, kind)
+      const m = condense(whole.mission, { budget: Math.floor(MODEL_RESULT_BUDGET * 0.45), roots: ['plan', 'report', 'objective', 'directive'], readWith: (p) => readWith(`mission.${p}`) })
+      const pg = pageRows(whole.assignments, { offset: c?.o ?? 0, kind, extra: JSON.stringify(m.row).length + 200, roots: ASSIGNMENT_ROOTS, readWith: (row, p) => readWith(`assignments.${whole.assignments.indexOf(row)}.${p}`) })
+      return { resource_type: 'workforce', visible_because: r.visible_because, mission: m.row, assignments: pg.items, page: { ...pg.page, complete: pg.page.complete && !m.stubbed.length, ...(m.stubbed.length ? { mission_condensed: m.stubbed } : {}) } }
     },
   },
 

@@ -6,6 +6,7 @@
 import { maskString } from '../../agent/research/pii.js'
 import { ledgerFromContextInput, ledgerSummary } from '../conversation-ai/fact-ledger.js'
 import { gwErr } from './errors.js'
+import { MODEL_RESULT_BUDGET, decodeCursor, encodeCursor } from './actions/workforce/page.js'
 
 export const CONTEXT_READ_VERSION = 'action-gateway.context-read.v1'
 const E164 = /\+?1?[\s().-]*[2-9][0-9]{2}[\s().-]*[0-9]{3}[\s().-]*[0-9]{4}/g
@@ -22,7 +23,10 @@ function maskDeep(v, depth = 0) {
 }
 
 /**
- * @param {{ input: { thread_id: string, message_limit?: number }, reads, services, now: () => number }} o
+ * The result is bounded for a model (actions/workforce/page.js): the permission state, facts, persona and property evidence
+ * are ALWAYS whole (authorization-relevant, never paged); the messages are the newest that fit, and `messages_page` says how
+ * many there are and gives `older_cursor` for the next older page. Nothing is cut silently.
+ * @param {{ input: { thread_id: string, message_limit?: number, cursor?: string }, reads, services, now: () => number }} o
  */
 export async function readConversationContext({ input, reads, services, now = () => Date.now() }) {
   const thread = await reads.thread(input.thread_id)
@@ -31,7 +35,11 @@ export async function readConversationContext({ input, reads, services, now = ()
   const at = new Date(now()).toISOString()
   const ci = latest?.provider_message_sid ? await services.canonicalInputs({ providerMessageSid: latest.provider_message_sid, now: at }) : null
   const limit = Math.min(Math.max(Number(input.message_limit) || 20, 1), 40)
-  const msgs = (ci?.input?.thread || []).slice().sort((a, b) => Date.parse(a.at || 0) - Date.parse(b.at || 0)).slice(-limit)
+  const kind = `messages:${String(input.thread_id).toLowerCase()}`
+  const skip = decodeCursor(input.cursor, kind)?.o ?? 0 // messages already read, counted from the newest
+  const sorted = (ci?.input?.thread || []).slice().sort((a, b) => Date.parse(a.at || 0) - Date.parse(b.at || 0))
+  const window = sorted.slice(Math.max(0, sorted.length - skip - limit), Math.max(0, sorted.length - skip))
+  const msgs = window
   let facts = null
   try { facts = ci ? ledgerSummary(ledgerFromContextInput(ci.input, { queueRows: ci.queueRows || [], now: at })) : null } catch { facts = null }
   let eligibility = null
@@ -39,7 +47,7 @@ export async function readConversationContext({ input, reads, services, now = ()
   let hold
   try { hold = await services.holdCheck({ threadKey: thread.thread_key, threadId: thread.id, propertyId: thread.property_id || null, capability: 'ai_reply_decision' }) } catch { hold = { held: true, fail_closed: true } }
   const perm = await reads.permission({ id: thread.id, thread_key: thread.thread_key }).catch(() => ({ blocked: true, reasons: ['permission_state_unreadable'] }))
-  return maskDeep({
+  const out = maskDeep({
     version: CONTEXT_READ_VERSION,
     thread_id: thread.id,
     generated_at: at,
@@ -62,4 +70,13 @@ export async function readConversationContext({ input, reads, services, now = ()
     },
     withheld: ['phone_numbers', 'emails', 'owner_and_prospect_names', 'street_addresses', 'sender_number'],
   })
+  // the newest messages that fit; the rest are one older_cursor away
+  const all = out.messages
+  let keep = all.length
+  const sizeWith = (n) => JSON.stringify({ ...out, messages: all.slice(all.length - n) }).length + 220
+  while (keep > 1 && sizeWith(keep) > MODEL_RESULT_BUDGET) keep -= 1
+  const messages = all.slice(all.length - keep)
+  const read = skip + messages.length
+  const older = sorted.length - read
+  return { ...out, messages, messages_page: { returned: messages.length, newest_skipped: skip, total: sorted.length, older_remaining: older, older_cursor: older > 0 ? encodeCursor({ k: kind, o: read }) : null, complete: older <= 0, budget_chars: MODEL_RESULT_BUDGET } }
 }
