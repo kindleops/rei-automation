@@ -6,8 +6,10 @@
 //   * a schema profile other than public                                 → SCHEMA_REFUSED
 //   * a write / transaction Prefer header                                → WRITE_REFUSED
 //   * any other path (auth admin, storage, functions, graphql, realtime) → WRITE_REFUSED
-// It is also the ONLY place credentials are attached (apikey = the public key, Authorization = the
-// lc_action_gateway token); whatever a library set is overwritten, so no other identity can ride a request.
+// It is also the ONLY place credentials are attached for the gateway's data path (apikey = the public key,
+// Authorization = the lc_action_gateway token); whatever a library set is overwritten, so no other identity can ride a
+// request. (The one other sender is the boot exposure probe of the Supabase pg_net platform exception,
+// leadcommand-mcp/src/data/platform-exposure.mjs: a FIXED set of side-effect-free requests that must be REFUSED.)
 import { RELATIONS, RPCS, SCHEMA } from './inventory.mjs'
 
 const refusal = (code, message) => Object.assign(new Error(message), { code })

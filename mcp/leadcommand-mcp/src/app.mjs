@@ -30,6 +30,9 @@ function auditSelfCheck(auditor, credential) {
       relations: verdict.info?.relations ?? null,
       functions: verdict.info?.functions ?? null,
       select_outside_inventory: verdict.info?.select_outside_inventory ?? null,
+      // the pinned Supabase pg_net platform exception (what was excepted) and the live exposure probe, never dropped
+      platform_exceptions: verdict.info?.platform_exceptions ?? null,
+      exposure_probe: verdict.info?.exposure_probe ?? null,
     })
   }
 }
