@@ -21,10 +21,14 @@
 //     never read; only their NAMES are reported.
 // After boot, evaluateSelfCheck() judges the database's own privilege report for the
 // role. That report is read through the token itself, so it describes the credential
-// actually in use.
+// actually in use. Its platform_exceptions (the ONE pinned Supabase pg_net exception,
+// docs/SUPABASE-PG-NET-POSTURE.md) are re-judged here (data/platform-exposure.mjs); when
+// the exception is applied the verdict carries probeRequired, and the live source runs the
+// PostgREST / GraphQL exposure probe before the credential is accepted.
 import fs from 'node:fs'
 import path from 'node:path'
 import { READER_ROLE, RELATION_NAMES, OPTIONAL_RELATIONS, RPC_SIGNATURES } from './inventory.mjs'
+import { evaluatePlatformExceptions } from './platform-exposure.mjs'
 
 export class CredentialError extends Error {
   constructor(code, message) {
@@ -190,9 +194,13 @@ export function evaluateSelfCheck(rep, { relations = RELATION_NAMES, optional = 
     if (x.executable !== true) f.push(`no_execute:${sig}`)
     if (x.volatility === 'v') f.push(`volatile_function:${sig}`)
   }
-  // pg_net (schema net) reachable: name the remediation, because postgres cannot revoke it (owner supabase_admin)
+  // the pinned Supabase pg_net platform exception, re-judged independently (version pin, controls, net-only objects)
+  const pe = evaluatePlatformExceptions(rep)
+  f.push(...pe.findings)
+  // pg_net (schema net) reachable OUTSIDE an applied exception: name the remediation (owner supabase_admin; postgres cannot revoke)
   if ([...(rep.reachable_egress_functions || []), ...(rep.write_privileges || [])].some((x) => /^net\./.test(String(x)))) {
-    f.push('pg_net_public: the role can reach schema net (pg_net). Resolve it before going live: drop the extension, or have Supabase revoke PUBLIC on schema net, its functions and tables')
+    const why = (pe.summary.find((x) => x.id === 'supabase_pg_net')?.reasons || []).slice(0, 3).join('; ')
+    f.push(`pg_net_public: the role can reach schema net (pg_net) and the Supabase platform exception does not apply${why ? ` (${why})` : ''}. Resolve it before going live: drop the extension, or have Supabase revoke PUBLIC on schema net, its functions and tables (docs/SUPABASE-PG-NET-POSTURE.md)`)
   }
   // the database's own verdict must agree
   if (rep.ok !== true || !empty(rep.findings)) f.push(`database_findings:${list(rep.findings)}`)
@@ -205,6 +213,7 @@ export function evaluateSelfCheck(rep, { relations = RELATION_NAMES, optional = 
     database_temp: rep.database_temp ?? null,
     owner_rights_views: [...rels.values()].filter((r) => r.kind === 'v' && !r.invoker_view).map((r) => r.name),
     server_version_num: rep.server_version_num ?? null,
+    platform_exceptions: pe.summary,
   }
-  return { ok: f.length === 0, findings: f, info }
+  return { ok: f.length === 0, findings: f, info, probeRequired: pe.probeRequired }
 }

@@ -8,9 +8,11 @@
 //   * a schema profile other than public (Accept-Profile / Content-Profile);
 //   * write / transaction Prefer headers (return=, resolution=, missing=, tx=);
 //   * any other path (auth admin, storage, functions, graphql, realtime).
-// It is also the ONLY place the credentials are attached: apikey = the public key and
+// It is also the ONLY place the credentials are attached for reads: apikey = the public key and
 // Authorization = Bearer <the lc_mcp_reader token>. Whatever header a library set is
-// overwritten, so no other identity can ride a request.
+// overwritten, so no other identity can ride a request. (The one other sender is the boot /
+// re-check exposure probe of the Supabase pg_net platform exception, data/platform-exposure.mjs:
+// a FIXED set of side-effect-free requests on the same origin that must be REFUSED.)
 import { RELATION_NAMES, RPC_NAMES, MCP_RPCS, rpcName, SCHEMA } from './inventory.mjs'
 
 const MCP_RPC_NAMES = Object.freeze(Object.keys(MCP_RPCS).map(rpcName))

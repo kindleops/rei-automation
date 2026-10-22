@@ -8,6 +8,7 @@ import { createGatewayClient } from './data/client.mjs'
 import { GATEWAY_ROLE } from './data/inventory.mjs'
 import { createMcpServer } from './protocol/server.mjs'
 import { createActionGateway, createPostgrestActionStore, createGatewayReads, createGatewayServices } from '@/lib/domain/action-gateway/index.js'
+import { evaluatePlatformExceptions, probePlatformExposure } from '../../leadcommand-mcp/src/data/platform-exposure.mjs'
 
 const bootError = (code, message) => Object.assign(new Error(message), { code })
 const AUDIT_KEYS = ['event_type', 'agent_id', 'action', 'capability', 'tier', 'code', 'correlation_id', 'intent_id', 'transport']
@@ -43,8 +44,22 @@ export async function buildApp(opts = {}) {
       // definer allowlist, no egress, read inventory. Anything else and the server does not start.
       let self = null
       try { self = await store.selfCheck() } catch (e) { self = { ok: false, findings: [`self_check_unavailable:${String(e?.code || '').slice(0, 20)}`] } }
-      auditor.event('credential_self_check', { outcome: self?.ok && self.current_user === GATEWAY_ROLE ? 'ok' : 'refused', running_as: self?.current_user || null, findings: (self?.findings || []).slice(0, 20) })
-      if (!self?.ok || self.current_user !== GATEWAY_ROLE) throw bootError('CREDENTIAL_SELF_CHECK_FAILED', `credential self-check refused: ${(self?.findings || []).slice(0, 5).join('; ') || `running as ${self?.current_user}`}`)
+      // the ONE pinned Supabase pg_net platform exception (docs/SUPABASE-PG-NET-POSTURE.md), re-judged here; when it is
+      // applied, compensating control (c) is mandatory: the LIVE exposure probe AS lc_action_gateway (PostgREST must
+      // refuse schema net / extensions / cron with PGRST106; GraphQL must not reflect net). Anything else: no start.
+      const pe = evaluatePlatformExceptions(self)
+      const findings = [...(self?.findings || []), ...pe.findings]
+      let probe = null
+      if (self?.ok && !pe.findings.length && pe.probeRequired) {
+        // an injected database (tests) has no data service to probe: the exception then refuses the start
+        const run = s.live ? () => probePlatformExposure({ origin: s.live.supabaseUrl, apiKey: s.live.apiKey, token: s.live.gatewayJwt, fetch: opts.baseFetch || globalThis.fetch }) : null
+        try { probe = run ? await run() : { ok: false, findings: ['exposure_probe_unavailable:no_live_data_service'], checks: [] } } catch (e) { probe = { ok: false, findings: [`exposure_probe_unavailable:${String(e?.code || e?.name || 'error').slice(0, 30)}`], checks: [] } }
+        findings.push(...probe.findings)
+      }
+      const ok = Boolean(self?.ok) && self.current_user === GATEWAY_ROLE && !pe.findings.length && (!pe.probeRequired || probe?.ok === true)
+      auditor.event('credential_self_check', { outcome: ok ? 'ok' : 'refused', running_as: self?.current_user || null, findings: findings.slice(0, 20),
+        platform_exceptions: pe.summary, exposure_probe: probe ? probe.checks.map((c) => `${c.name}:${c.pass ? 'refused_as_required' : 'EXPOSED_OR_UNPROVEN'}`) : null })
+      if (!ok) throw bootError('CREDENTIAL_SELF_CHECK_FAILED', `credential self-check refused: ${findings.slice(0, 5).join('; ') || `running as ${self?.current_user}`}`)
     }
     // LeadCommand Workforce on this host (docs/WORKFORCE-AGNTEI.md): born OFF — the Workforce tools answer capability_unavailable
     // (WORKFORCE_DISABLED) until the operator sets LEADCOMMAND_ACTION_MCP_WORKFORCE_ENABLED=true (the Workforce authority engine's own switch)

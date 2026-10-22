@@ -25,6 +25,7 @@ import { queryActiveSuppression } from '@/lib/domain/compliance/query-active-sup
 import { createFixtureDb } from './fixture-db.mjs'
 import { createInventoryGuardedFetch } from './read-fetch.mjs'
 import { evaluateSelfCheck } from './credential.mjs'
+import { probePlatformExposure } from './platform-exposure.mjs'
 import { RELATION_NAMES, RPC_SIGNATURES } from './inventory.mjs'
 import { err } from '../errors.mjs'
 
@@ -104,7 +105,16 @@ export function createLiveSource({ supabaseUrl, apiKey, readerJwt, baseFetch = g
         const unreachable = !code && /fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|network|abort|timed? ?out/i.test(`${error.message || ''} ${error.details || ''}`)
         if (unreachable) verdict = { ok: false, findings: ['self_check_unreachable:network'], info: {} }
         else verdict = { ok: false, findings: [code === 'PGRST202' ? 'self_check_function_missing (migration not applied?)' : code === '42501' ? 'self_check_not_executable (token role lacks EXECUTE)' : /^PGRST30/.test(code) ? `token_rejected_by_postgrest:${code}` : `self_check_error:${code || 'unknown'}`], info: {} }
-      } else verdict = evaluateSelfCheck(data)
+      } else {
+        verdict = evaluateSelfCheck(data)
+        // the Supabase pg_net platform exception is applied: compensating control (c), the LIVE exposure probe AS
+        // this token (PostgREST must refuse schema net / extensions / cron, GraphQL must not reflect net). It is the
+        // one request set that bypasses the inventory guard: fixed paths on the same origin, side-effect free.
+        if (verdict.ok && verdict.probeRequired) {
+          const probe = await probePlatformExposure({ origin, apiKey, token: readerJwt, fetch: direct, timeoutMs: REQUEST_TIMEOUT_MS })
+          verdict = { ...verdict, ok: probe.ok, findings: [...verdict.findings, ...probe.findings], info: { ...verdict.info, exposure_probe: probe.checks.map((c) => `${c.name}:${c.pass ? 'refused_as_required' : 'EXPOSED_OR_UNPROVEN'}`) } }
+        }
+      }
     } catch (e) {
       verdict = { ok: false, findings: [`self_check_unreachable:${String(e?.code || e?.name || 'error').slice(0, 40)}`], info: {} }
     }
