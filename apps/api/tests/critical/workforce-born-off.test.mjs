@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { WORKFORCE_FLAG, WORKFORCE_MODEL_INTERPRET_FLAG, WORKFORCE_KINDS, WORKFORCE_DISPATCH_SCHEDULE, WORKFORCE_ORG_ID, workforceEnabled, modelInterpretEnabled } from '../../src/lib/workforce/config.js'
 import { workforceRuntimeHandlers, getWorkforceRouteServices, __resetWorkforceWiring } from '../../src/lib/ai/workforce-runtime-wiring.js'
 import { DEFAULT_ORG_ID } from '../../src/lib/agent/runtime/pg-store.js'
+import { SEED_EMPLOYEES } from '../../src/lib/workforce/org/seed.js'
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src')
 const REPO = path.resolve(SRC, '../../..')
@@ -64,5 +65,19 @@ test('the DB never claims a Workforce kind until armed, and the dispatch schedul
   for (const f of seeds) {
     const sql = fs.readFileSync(path.join(dir, f), 'utf8').replace(/--.*$/gm, '')
     for (const m of sql.matchAll(/runtime_upsert_schedule\(([\s\S]*?)\);/g)) if (m[1].includes('workforce-dispatch')) assert.match(m[1], /::jsonb\s*,\s*false\s*,/, `${f}: workforce-dispatch is seeded enabled`)
+  }
+})
+
+test('the JS seed matches the migration seed row for row (ids, roles, departments, names, codes, managers)', (t) => {
+  const f = path.join(REPO, 'supabase/migrations/PROPOSED_20261022100100_workforce_seed.sql')
+  if (!fs.existsSync(f)) { t.diagnostic('the seed migration is on feat/workforce-db (built separately): checked at integration'); return }
+  const sql = fs.readFileSync(f, 'utf8')
+  const rows = [...sql.matchAll(/\{"employee_id": "emp_[^}]*\}/g)].map((m) => JSON.parse(m[0]))
+  assert.equal(rows.length, SEED_EMPLOYEES.length)
+  for (const r of rows) {
+    const e = SEED_EMPLOYEES.find((x) => x.employee_id === r.employee_id)
+    assert.ok(e, r.employee_id)
+    for (const k of ['kind', 'role_key', 'department_key', 'display_name', 'employee_code']) assert.equal(e[k], r[k], `${r.employee_id}.${k}`)
+    assert.equal(e.manager_employee_id ?? null, r.manager_employee_id ?? null, `${r.employee_id}.manager`)
   }
 })
