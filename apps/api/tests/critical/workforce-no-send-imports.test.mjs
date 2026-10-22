@@ -140,7 +140,7 @@ test('the composition root: an exact import allowlist; every domain service is b
 
 test('the thin routes import only the Workforce route module, the wiring and _shared', () => {
   const files = listFiles(ROUTES)
-  assert.equal(files.length, 12)
+  assert.equal(files.length, 13)
   for (const f of files) {
     const specs = [...stripComments(fs.readFileSync(f, 'utf8')).matchAll(/from\s*['"]([^'"]+)['"]/g)].map((m) => m[1])
     for (const s of specs) assert.ok(/_shared\.js$/.test(s) || s === '@/lib/workforce/routes.js' || s === '@/lib/ai/workforce-runtime-wiring.js', `${rel(f)} imports ${s}`)

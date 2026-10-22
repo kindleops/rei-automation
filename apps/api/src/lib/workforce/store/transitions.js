@@ -15,7 +15,8 @@ export const ASSIGNMENT_TRANSITIONS = Object.freeze({
   leased: Object.freeze(['running', 'ready', 'completed', 'failed', 'waiting_job', 'waiting_approval', 'blocked', 'cancelled']),
   running: Object.freeze(['completed', 'failed', 'ready', 'waiting_job', 'waiting_approval', 'blocked', 'cancelled']),
   waiting_job: Object.freeze(['ready', 'completed', 'failed', 'cancelled']),
-  waiting_approval: Object.freeze(['ready', 'cancelled', 'failed']),
+  // → completed only through a PERSON's decision (workforce.assignment_decide / decideHeldAssignment)
+  waiting_approval: Object.freeze(['ready', 'completed', 'cancelled', 'failed']),
   blocked: Object.freeze(['ready', 'cancelled']),
   completed: Object.freeze([]),
   failed: Object.freeze([]),

@@ -566,12 +566,40 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
       if (!actorOk(org, actor)) fail('FORBIDDEN', 'actor must be an employee of the org or a named operator')
       const a0 = S.assignments.get(assignment_id)
       if (!a0 || a0.org_id !== org) fail('NOT_FOUND', `assignment ${assignment_id}`)
-      if (!['waiting_approval', 'blocked'].includes(a0.status) || !canAssignmentTransition(a0.status, to)) fail('ILLEGAL_TRANSITION', `assignment ${a0.status} → ${to}`)
+      // completion of a held item is a PERSON's decision (decideHeldAssignment), never a release
+      if (!['waiting_approval', 'blocked'].includes(a0.status) || !['ready', 'cancelled', 'failed'].includes(to) || !canAssignmentTransition(a0.status, to)) fail('ILLEGAL_TRANSITION', `assignment ${a0.status} → ${to}`)
       const a = writeAssignment(a0, { status: to, next_attempt_at: to === 'ready' ? clock() : a0.next_attempt_at, finished_at: ['failed', 'cancelled'].includes(to) ? clock() : null })
       if (['failed', 'cancelled'].includes(to)) releaseClaimsOf(a.assignment_id, to === 'cancelled' ? 'cancelled' : 'finished')
       emit(org, 'wf.assignment.transitioned', a.mission_id, a.assignment_id, a.assignee_employee_id,
         { from: a0.status, to: a.status, attempt: a.attempt, step: a.step_key, reason: 'hold_resolved', actor_id: actor })
       return out(shapeAssignment, a)
+    }),
+    /** A PERSON decides an item parked in their queue (workforce.assignment_decide): owner only, human assignee, waiting_approval → completed. */
+    decideHeldAssignment: ({ org_id, assignment_id, decision, note = null, actor_user_id }) => atomic(async () => {
+      const org = orgParam(org_id)
+      const actor = uuidParam(actor_user_id, 'actor_user_id')
+      if (!isOwner(org, actor)) fail('FORBIDDEN', 'only an owner (the CEO) decides a queued item')
+      if (!['approve', 'decline', 'done'].includes(decision)) refuse('decision must be approve, decline or done')
+      if (note != null && (typeof note !== 'string' || note.length > 500 || !textClean(note))) refuse('the note is too long or carries a contact value')
+      const a0 = S.assignments.get(assignment_id)
+      if (!a0 || a0.org_id !== org) fail('NOT_FOUND', `assignment ${assignment_id}`)
+      if (a0.status === 'completed' && a0.output && 'decision' in a0.output) {
+        if (a0.output.decision === decision && a0.output.actor_id === actor) return { changed: false, assignment: out(shapeAssignment, a0) }
+        fail('CONFLICT', `assignment ${assignment_id} was already decided (${a0.output.decision})`)
+      }
+      if (S.employees.get(a0.assignee_employee_id)?.kind !== 'human') fail('ILLEGAL_TRANSITION', "only an item in a person's queue is decided by a person")
+      if (a0.status !== 'waiting_approval') fail('ILLEGAL_TRANSITION', `assignment ${a0.status} → completed (only a waiting_approval item is decided)`)
+      const trimmed = typeof note === 'string' && note.trim() ? note.trim() : null
+      const decided = { decision, ...(trimmed ? { note: trimmed } : {}), ...(a0.input?.task != null ? { task: a0.input.task } : {}), actor_id: actor, decided_at: clock() }
+      const a = writeAssignment(a0, {
+        status: 'completed', outcome_class: 'verified', output: { ...(a0.output || {}), ...decided },
+        evidence: [...a0.evidence, { source: 'ceo_decision', decision }], finished_at: clock(),
+      })
+      releaseClaimsOf(a.assignment_id, 'finished')
+      emit(org, 'wf.assignment.transitioned', a.mission_id, a.assignment_id, a.assignee_employee_id,
+        { from: 'waiting_approval', to: 'completed', attempt: a.attempt, step: a.step_key, reason: 'person_decided', decision, actor_id: actor })
+      touchEmployee(a.assignee_employee_id)
+      return { changed: true, assignment: out(shapeAssignment, S.assignments.get(a.assignment_id)) }
     }),
     transferAssignment: ({ org_id, assignment_id, to_employee_id, actor }) => atomic(async () => {
       const org = orgParam(org_id)

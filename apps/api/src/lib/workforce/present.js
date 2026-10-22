@@ -106,7 +106,7 @@ function presentItem(i, status) {
     assignment_id: i.assignment_id ?? null,
     step_key: i.step ?? null,
     status: i.status ?? status,
-    refs: refsFromIds(i.refs || {}),
+    refs: refsFromIds({ ...(i.refs || {}), assignment_id: i.refs?.assignment_id ?? i.assignment_id ?? null }),
     reasons: i.reasons || (i.reason ? [i.reason] : []),
     detail: i.summary ? JSON.stringify(i.summary).slice(0, 400) : i.review ? `review: ${i.review}` : null,
     ...(i.ceo_assignment_id ? { ceo_assignment_id: i.ceo_assignment_id } : {}),

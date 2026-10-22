@@ -42,6 +42,7 @@ drop function if exists workforce.assignment_cancel_mission(uuid, text);
 drop function if exists workforce.assignment_transfer(uuid, text, text, text);
 drop function if exists workforce.assignment_reap(uuid, timestamptz);
 drop function if exists workforce.assignment_resolve_hold(uuid, text, text, text);
+drop function if exists workforce.assignment_decide(uuid, text, text, text, uuid);
 drop function if exists workforce.assignment_resume_job(uuid, text, text, text, jsonb, jsonb);
 drop function if exists workforce.assignment_wait_job(uuid, text, uuid, text);
 drop function if exists workforce.assignment_finish(uuid, text, uuid, text, jsonb, text, jsonb, jsonb, integer);

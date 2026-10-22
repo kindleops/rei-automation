@@ -225,6 +225,35 @@ function route(req: WfRequest): BackendResult<unknown> {
     const who = q.get('employee')
     return ok({ assignments: assignments.filter((a) => (!st || a.status === st) && (!who || a.assignee_employee_id === who)).slice(-300) })
   }
+  const resolveMatch = /^\/assignments\/([^/]+)\/resolve$/.exec(p)
+  if (req.method === 'POST' && resolveMatch) {
+    const id = decodeURIComponent(resolveMatch[1])
+    const a = assignments.find((x) => x.assignment_id === id)
+    const decision = String(body.decision ?? '')
+    if (!['approve', 'decline', 'done'].includes(decision)) return fail(422, 'DECISION_INVALID', 'The decision is approve, decline or done.')
+    if (!a) return fail(404, 'NOT_FOUND', 'Assignment not found.')
+    const out = (a.output ?? {}) as R
+    if (a.status === 'completed' && out.decision) {
+      if (out.decision !== decision) return fail(409, 'CONFLICT', `assignment ${id} was already decided (${String(out.decision)})`)
+    } else {
+      if (a.status !== 'waiting_approval' || a.assignee_employee_id !== 'emp_ceo') return fail(409, 'ILLEGAL_TRANSITION', 'This item is no longer waiting for you.')
+      a.status = 'completed'; a.outcome_class = 'verified'; a.output = { ...out, decision, decided_at: new Date().toISOString() }; a.updated_at = new Date().toISOString()
+    }
+    const replayed = Boolean(out.decision)
+    const addr = a.resource_label ? ` of ${String(a.resource_label)}` : ''
+    const verb = decision === 'approve' ? 'approved' : decision === 'decline' ? 'declined' : 'marked done'
+    const task = String(((a.input ?? {}) as R).task ?? '')
+    const noun = task === 'review_offer_recommendation' ? 'the offer recommendation review' : task === 'escalation' ? 'the executive review' : 'the queued item'
+    const next = decision !== 'approve' ? 'Workforce plans no further work on it in this mission.'
+      : task === 'review_offer_recommendation' ? 'Next step stays internal and with you: review the offer recommendation in Deal Intelligence. Workforce prepares nothing new from this.'
+        : 'It is cleared past the executive threshold inside Workforce only. Any offer still goes through Deal Intelligence and its own approval.'
+    const headline = `Recorded: you ${verb} ${noun}${addr}.`
+    const message = `${headline} ${next} Nothing was sent, no offer was made and no stage changed.`
+    const coo = replayed ? [] : [{ message_id: `wfx_live_${nextMsg++}`, mission_id: a.mission_id, author: 'coo', author_employee_id: 'emp_coo_atlas', content: `Noted: you ${verb} ${noun}${addr}. I recorded it in Workforce. ${next} Nothing was sent, no offer was made and no stage changed.`, refs: [{ type: 'assignment', id, label: 'Assignment' }], created_at: new Date().toISOString() }]
+    messages.push(...coo)
+    const effects = { recorded_in_workforce: true, seller_contacted: false, offer_made: false, stage_changed: false, runtime_job_started: false, work_created: false }
+    return ok({ assignment: a, decision, outcome: { headline, next_step: next, message, effects }, messages: coo, replayed })
+  }
   if (req.method === 'GET' && p === '/events') {
     const after = Number(q.get('after') ?? 0)
     const before = Number(q.get('before') ?? 0)

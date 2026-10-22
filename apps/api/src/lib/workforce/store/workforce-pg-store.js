@@ -140,6 +140,11 @@ export function createWorkforcePgStore({ pool, statementTimeoutMs = 5000, lockTi
     async resolveHeldAssignment({ org_id, assignment_id, to, actor }) {
       return shapeAssignment(await call('select workforce.assignment_resolve_hold($1, $2, $3, $4) r', [org_id, assignment_id, to, actor ?? null]))
     },
+    /** A PERSON decides an item parked in their queue: owner only, human assignee, waiting_approval → completed. → { changed, assignment } */
+    async decideHeldAssignment({ org_id, assignment_id, decision, note = null, actor_user_id }) {
+      const r = await call('select workforce.assignment_decide($1, $2, $3, $4, $5::uuid) r', [org_id, assignment_id, decision ?? null, note ?? null, actor_user_id ?? null])
+      return { changed: r?.changed === true, assignment: shapeAssignment(r?.assignment ?? null) }
+    },
     async transferAssignment({ org_id, assignment_id, to_employee_id, actor }) {
       return shapeAssignment(await call('select workforce.assignment_transfer($1, $2, $3, $4) r', [org_id, assignment_id, to_employee_id, actor ?? null]))
     },

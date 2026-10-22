@@ -120,3 +120,23 @@ test('work.assign: delegates per next action (the CEO queue for anything a perso
   assert.equal(fo.outcome_class, 'refused')
   for (const c of created) assert.ok(['work.assign', 'research.property'].includes(c.capability_key), 'a follow-on is never a send-like capability')
 })
+
+test('acq.rank_opportunities: a hold / suppression / exclusion that refused ANY of a candidate\'s steps (placed after the pool was read) is never ranked', async () => {
+  const rank = CAPABILITIES['acq.rank_opportunities']
+  const done = (id, capability_key, output, outcome_class = 'verified') => ({ assignment_id: id, step_key: id, capability_key, status: 'completed', outcome_class, output })
+  const okConv = { contact_permitted: true, action: { verified_stage: 'asking_price', stage_verified: true }, last_inbound_at: new Date(T0 - 3_600_000).toISOString(), seller_spoke_last: true }
+  const okDec = { status: 'available', confidence: 0.8 }
+  const okFin = { verdict: 'supported', reasons: [] }
+  const deny = (reasons) => ({ authority: 'deny', reasons })
+  const deps = {
+    'conv.c01': done('conv.c01', 'intel.conversation_state', okConv), 'dec.c01': done('dec.c01', 'intel.acquisition_decision', okDec), 'fin.c01': done('fin.c01', 'finance.review_opportunity', okFin),
+    'conv.c02': done('conv.c02', 'intel.conversation_state', deny(['AUTOMATION_HOLD']), 'refused'), 'dec.c02': done('dec.c02', 'intel.acquisition_decision', deny(['AUTOMATION_HOLD']), 'refused'), 'fin.c02': done('fin.c02', 'finance.review_opportunity', deny(['AUTOMATION_HOLD']), 'refused'),
+    'conv.c03': done('conv.c03', 'intel.conversation_state', okConv), 'dec.c03': done('dec.c03', 'intel.acquisition_decision', okDec), 'fin.c03': done('fin.c03', 'finance.review_opportunity', deny(['SUPPRESSED']), 'refused'),
+    'conv.c04': done('conv.c04', 'intel.conversation_state', okConv), 'dec.c04': done('dec.c04', 'intel.acquisition_decision', okDec), 'fin.c04': done('fin.c04', 'finance.review_opportunity', { authority: 'escalate', reasons: ['EXEC_REVIEW_PRICE'] }, 'refused'),
+  }
+  const slots = [1, 2, 3, 4].map((i) => ({ property_ref: `pid_ngggggggg${'ghij'[i - 1]}`, conv: `conv.c0${i}`, dec: `dec.c0${i}`, res: null, fin: `fin.c0${i}` }))
+  const out = await rank.run({ deps, now: T0, services: {} }, { slots, n: 10 })
+  const ranked = out.output.ranked.map((r) => r.property_ref)
+  assert.deepEqual(ranked.sort(), [slots[0].property_ref, slots[3].property_ref].sort(), 'held and suppressed are excluded; an escalation is not a restriction')
+  assert.deepEqual(out.output.excluded.map((x) => x.reason).sort(), ['automation_hold', 'suppressed'])
+})

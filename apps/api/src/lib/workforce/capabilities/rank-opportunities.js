@@ -5,6 +5,17 @@ import { rankOpportunities } from '../acquisitions/ranking.js'
 import { arr, depOutput, done, obj, ref, usable } from './shared.js'
 
 export const KEY = 'acq.rank_opportunities'
+/** an authority refusal on any of a candidate's steps for one of these reasons means the property is restricted NOW
+ *  (a hold or a suppression placed after the pool was read, an exclusion): it is never ranked */
+const RESTRICTION = /^(AUTOMATION_HOLD|HOLD_LOOKUP_FAILED|SUPPRESSED|EXCLUDED_)/
+export function restrictionOf(steps = []) {
+  for (const d of steps) {
+    if (d?.outcome_class !== 'refused' || obj(d.output).authority !== 'deny') continue
+    const r = arr(d.output.reasons).find((x) => RESTRICTION.test(String(x)))
+    if (r) return String(r).toLowerCase()
+  }
+  return null
+}
 
 export const capability = Object.freeze({
   key: KEY,
@@ -34,7 +45,7 @@ export const capability = Object.freeze({
         conversation_id: conv?.output?.conversation_id ?? cand.conversation_id ?? null,
         market: cand.market ?? null,
         candidate: cand,
-        conv: usable(conv) || conv?.outcome_class === 'refused' ? conv.output : null,
+        conv: restrictionOf([conv, dec, res, fin]) ? { ...(conv?.output || {}), excluded: restrictionOf([conv, dec, res, fin]) } : usable(conv) || conv?.outcome_class === 'refused' ? conv.output : null,
         decision: usable(dec) ? dec.output : null,
         cfo: usable(fin) ? fin.output : null,
         calibration,
