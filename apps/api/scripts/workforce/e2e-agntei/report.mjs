@@ -37,6 +37,7 @@ export const FINDINGS = [
   { side: 'LeadCommand', what: 'the Action MCP\'s second-net mask rewrote a digit run inside an Agntei install id (agntei_inst_<32 hex>, ~17% of ids) in every answer, so whoami no longer matched the link and Agntei (rightly) refused', fix: 'the mask keeps prefixed hex tokens with a letter (the database\'s own opaque-id rule, PROPOSED_20261019120000); a phone beside one is still masked (test). Agntei also stopped drawing such install ids' },
   { side: 'LeadCommand', what: 'GET /missions/[id] dropped how evidence resolved (resolved / via) and every gateway-intent ref, so the API could not show why an outcome is verified', fix: 'presentRef keeps resolved / via (an agent-reported ref reads "reported") and the intent type (test)' },
   { side: 'Agntei', what: 'a LeadCommand policy refusal (LINK_WINDOW_CLOSED, EMERGENCY_STOP …) reached the operator as "LeadCommand refused." with no code', fix: 'the refusal message and the API error body carry LeadCommand\'s code; a refused link check says "LeadCommand refused the check (CODE)" instead of "didn\'t answer"' },
+  { side: 'Agntei', what: 'after a revoke, the open LeadCommand Workforce screen looped: each read asked LeadCommand, was refused BINDING_REVOKED, the refusal was announced again (lc-signal → change) and the screen read again — dozens of refused calls a minute in LeadCommand\'s audit', fix: 'a refusal already recorded is not re-announced; an agent whose binding ended and that holds no link is shown from its recorded check (Refresh / Check link / Link still ask) (test)' },
   { side: 'Agntei', what: 'Completed outputs showed only evidence with an ops.leadcommand.ai page (a research job or a gateway intent was invisible) and the same thread twice', fix: 'the panel lists every evidence ref with LeadCommand\'s resolution (resolved · mission job / principal intent / logged read, or reported); links are de-duplicated' },
 ]
 
@@ -49,6 +50,17 @@ export const BLOCKERS = [
   'property.research with web on: here buildAsk was null and the job input web:false ($0). A real run with web research needs the ask service, AGENT_WEB_RESEARCH_ENABLED, a budget, and real property data behind createResearchSupabaseSource.',
   'LeadCommand\'s payload guard still refuses an OLD Agntei agent id with a 10-digit run (the database function is production code): such agents must be re-created, or the owner extends the opaque-id rule to agent_<hex> ids.',
   'The Agntei keychain: the connection Bearer is written to the macOS Keychain (service agent-command.isolated in isolated mode). This run removed its own entries at the end; a real run keeps the credential there.',
+]
+
+/** Seen in the runs and the screenshots; not fixed here (not integration defects, or owner / product decisions). */
+export const OBSERVATIONS = [
+  'Agntei\'s work item for an assignment stays "active" after LeadCommand reports it completed: it closes only on a resume or a stop (the panel itself shows LeadCommand\'s Completed).',
+  'LeadCommand masks digit runs inside free text the agent wrote: the stored summary reads back as "Research for ••••02 … mjob_…[number withheld]…" (the property id is decoded to digits, then masked). Ids in their own fields are kept.',
+  'After a revoke Agntei\'s primary button reads "Link again", although the owner must re-bind (employee_bind_principal) before a link can succeed.',
+  'LeadCommand closes a mission as completed while its CEO-queue items (an escalation, the pending next actions) stay open ("3 items queued for you").',
+  'The reap after the kill took about 1.5 minutes: the 60 s minimum external lease, then the dispatch pass (here driven by "run now" enqueues) and the retry backoff.',
+  'Agntei\'s thread deep link is /inbox?thread=<inbox_thread_state id>; whether LeadCommand\'s Inbox opens a thread by that id (rather than by its key) was not verified (no live dashboard backend).',
+  'Two Agntei engine tests fail on this machine at the base commit too (claude-chat /var vs /private/var path; mcp-proxy engine run held by the machine-load guard); unrelated to these changes.',
 ]
 
 export function renderReport(runs, { opts = {}, outDir = '.' } = {}) {
@@ -71,6 +83,12 @@ export function renderReport(runs, { opts = {}, outDir = '.' } = {}) {
   L.push('| repo | branch | commit | uncommitted changes in the tested paths |', '|---|---|---|---|')
   L.push(`| LeadCommand | ${sha.lcBranch} | \`${sha.lc}\` | ${sha.lcDirty ? `YES: ${esc(sha.lcDirty.split('\n').slice(0, 6).join('; '))}` : 'none'} |`)
   L.push(`| Agntei | ${sha.agBranch} | \`${sha.ag}\` | ${sha.agDirty ? `YES: ${esc(sha.agDirty.split('\n').slice(0, 6).join('; '))}` : 'none'} |`, '')
+  const lcLog = git(lcDir, ['log', '--format=%h %s', '6231a2e2..HEAD']) || ''
+  const agLog = agDir ? git(agDir, ['log', '--format=%h %s', 'fa43352..HEAD']) || '' : ''
+  L.push('Commits of this milestone:', '')
+  for (const l of lcLog.split('\n').filter(Boolean)) L.push(`- LeadCommand \`${l.split(' ')[0]}\` ${esc(l.split(' ').slice(1).join(' '))}`)
+  for (const l of agLog.split('\n').filter(Boolean)) L.push(`- Agntei \`${l.split(' ')[0]}\` ${esc(l.split(' ').slice(1).join(' '))}`)
+  L.push('')
   L.push(`Bases: LeadCommand feat/workforce @ 6231a2e2, Agntei agntei-4.9-leadcommand-workforce @ fa43352. ${esc(last.steps.find((s) => s.id === '1a')?.evidence?.version)} · ${esc(last.main?.rest?.version)} · Node ${process.version} (LeadCommand side) · Agntei on Node 22.`, '')
   L.push('## What was REAL and what was SCRIPTED / SYNTHETIC', '', '| layer | status | detail |', '|---|---|---|')
   for (const [a, b, c] of REAL_VS_SCRIPTED) L.push(`| ${esc(a)} | **${esc(b)}** | ${esc(c)} |`)
@@ -128,6 +146,9 @@ export function renderReport(runs, { opts = {}, outDir = '.' } = {}) {
   for (const [k, f] of shots) L.push(`- ${k}: \`${path.relative(outDir, f)}\``)
   if (last.dashboard?.completed?.served) L.push('', `Dashboard requests answered from the recording: ${esc(last.dashboard.completed.served.hits.join(', '))}; not recorded: ${esc(last.dashboard.completed.served.misses.join(', ') || 'none')}; other local /api (empty 200): ${esc(last.dashboard.completed.served.other.join(', '))}. Every non-loopback request was aborted.`)
   if (last.dashboard?.error) L.push('', `Dashboard capture error: ${esc(last.dashboard.error)}`)
+  L.push('')
+  L.push('## Observations (not fixed here)', '')
+  for (const x of OBSERVATIONS) L.push(`- ${x}`)
   L.push('')
   L.push('## Remaining blockers for a REAL Claude Code run', '')
   for (const b of BLOCKERS) L.push(`- ${b}`)

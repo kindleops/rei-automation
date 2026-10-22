@@ -304,9 +304,12 @@ export async function revokeScout(x) {
   const launchAfter = await A.raw('POST', `/api/leadcommand/${CONN}/missions`, { directive: 'Research the strongest Dallas seller opportunity and report to the COO.', assignToSelf: false })
   const audit = await qa(owner, `select code from action_gateway.action_audit_events where agent_id = $1 and code = 'BINDING_REVOKED'`, [AGENT_ID])
   const e = await q1(owner, 'select status, binding_revoked_at from workforce.employee where employee_id = $1', [EMP])
-  const ok = chk.data?.state === 'revoked' && panel?.link == null && panel?.check?.state === 'revoked' && /BINDING_REVOKED/.test(JSON.stringify(chk.data)) && launchAfter.status >= 400 && audit.length >= 1 && Boolean(e.binding_revoked_at)
+  // the open screen's plain reads no longer ask LeadCommand again (no loop of refused calls)
+  for (let i = 0; i < 3; i += 1) await A.get('/api/leadcommand')
+  const audit2 = await qa(owner, `select code from action_gateway.action_audit_events where agent_id = $1 and code = 'BINDING_REVOKED'`, [AGENT_ID])
+  const ok = chk.data?.state === 'revoked' && panel?.link == null && panel?.check?.state === 'revoked' && /BINDING_REVOKED/.test(JSON.stringify(chk.data)) && launchAfter.status >= 400 && audit.length >= 1 && Boolean(e.binding_revoked_at) && audit2.length === audit.length
   const out = { id: 'X09', title: 'The owner revokes the binding (employee_unbind)', via: 'owner-sql → agntei-api', expected: 'BINDING_REVOKED; Agntei shows revoked and clears its link', code: /BINDING_REVOKED/.exec(JSON.stringify(chk.data))?.[0] ?? null, ok,
-    evidence: { unbind: r.r, agntei_check: chk.data?.state, agntei_link_after: panel?.link ?? null, agntei_check_reason: String(panel?.check?.reason ?? '').slice(0, 200), relay_after: String(launchAfter.data?.error ?? '').slice(0, 200), gateway_audit_binding_revoked: audit.length } }
+    evidence: { unbind: r.r, agntei_check: chk.data?.state, agntei_link_after: panel?.link ?? null, agntei_check_reason: String(panel?.check?.reason ?? '').slice(0, 200), relay_after: String(launchAfter.data?.error ?? '').slice(0, 200), gateway_audit_binding_revoked: audit.length, after_3_plain_screen_reads: audit2.length } }
   R.check('X09', `${out.title} → ${out.expected}`, ok, out.evidence)
   x.out.agnteiViews.overview_revoked = ov
   return out
