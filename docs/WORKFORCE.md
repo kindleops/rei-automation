@@ -308,3 +308,40 @@ Mission transitions:
 - `active → waiting | blocked | completed | failed | cancelled`
 - `waiting → active | completed | failed | cancelled`
 - `blocked → active | cancelled | failed`
+
+## §2 implementation notes (DB + store layer, `feat/workforce-db`)
+
+Deviations from, or decisions the contract above leaves open, each with its reason. The migration, the store and the conformance tests are the binding detail.
+
+1. **jsonb keys ending in `_key` are refused** by `agent.payload_is_clean` (the S3 credential-key rule; allowlist: `key`, `idempotency_key`, `scope_key`, `dedupe_key`, …). So `plan`, `input`, `output`, `report`, event payloads and memory values must say `step`, `capability`, `playbook`, `resource`, `fact`, `action`, never `step_key` etc. The emitted events follow this. Columns are unaffected.
+2. **`capability_key` is shape-checked in SQL, not a closed list.** The closed catalog lives in `lib/workforce/capabilities/catalog.js` (owned by the engine). Escalation work for the human CEO queue needs keys outside the ten read/internal capabilities, and a catalog change should not need a migration. Phase A has no side-effecting capability to guard against at the SQL level.
+3. **Assignments are born `pending`.** Only `workforce.assignment_claim` promotes them to `ready`. In the same call, a pending row with a `failed` or `cancelled` dependency becomes `cancelled` (`last_error.code = DEPENDENCY_FAILED`); without this it could never become terminal, and the mission review would never run. Only rows of an `active` / `waiting` mission whose assignee is `active` are claimed: a paused employee is a DB-level kill switch.
+4. **`attempt` counts spent attempts.** It increases by one on a reaped lease, a `retry` finish and a failed / dead-lettered / cancelled runtime job. The assignment fails once `attempt` reaches `max_attempts`. A retry is due after `retry_after_seconds`, or after a backoff of 30 s · 2^(attempt−1), capped at 1 h. `finishAssignment` accepts `status` ∈ `completed | failed | ready | retry | waiting_approval | blocked | cancelled`. Replaying the same finish with the same token returns the recorded row.
+5. **Two store methods added to §11:** `resolveHeldAssignment({ org_id, assignment_id, to, actor })` and `listResourceClaims({ org_id, active? })`.
+   - `resolveHeldAssignment` moves `waiting_approval` / `blocked` → `ready | cancelled | failed`. Without it, those transitions in the table have no writer.
+   - `listResourceClaims` is a read.
+   - Internal SQL writers: `assignment_resume_job` (used by `resumeWaitingAssignments`), `assignment_resolve_hold`, `assignment_leased`.
+   - The functions take `p_org` first (e.g. `assignment_reap(org, now)`).
+6. **Resource claims:**
+   - When an assignment reaches a terminal status, the claims it holds are released (`release_reason` `finished` / `cancelled`).
+   - `acquire` by the same (employee, assignment) renews the claim.
+   - An expired claim is released (`expired`) and taken over.
+   - `ttl_seconds` is 1..86400. `release` by a non-holder is a no-op.
+7. **The writers emit the mechanical Operations-feed events themselves:** `wf.mission.opened | plan_set | transitioned`, `wf.assignment.created | transitioned | transferred`, `wf.resource.claimed | released`, `wf.memory.asserted`, `wf.policy.put | revoked`, `wf.employee.upserted`, `wf.settings.updated`. The engine appends the semantic ones (e.g. `wf.mission.planned`) with `appendEvent`.
+   - `workforce.event`, `workforce.exec_message` and `workforce.memory_fact` refuse DELETE for everyone, owner included. This is stricter than the R2 owner-delete: no retention exists in Phase A, and the rollback drops the tables.
+8. **Missions:**
+   - `idempotency_key` stores sha256(org, caller key), never the raw key (the R2 rule).
+   - `completed_at` is stamped for every terminal status.
+   - A transition to the current status is a no-op, so it is replay-safe.
+9. **Owner checks.** The owner is `agent.operator_membership` role `owner` of the org. These writers require it: employees (all rows, not only the CEO row, because they are CEO-authored), policies, settings, `ceo_policy` facts and `author = 'ceo'` messages. A `coo` message must come from the employee whose `role_key` is `coo`. Because of this, the seed RAISES unless `owner_id` is already an owner member.
+10. **Smaller decisions:**
+    - `action_principal_id` is shape-checked (`agt_…`) with no FK to `action_gateway`. The preconditions are S3 + R2 only, so Workforce never depends on the Action Gateway being applied.
+    - `event_id` is an identity column (same semantics as bigserial).
+    - `kpi_snapshot` keeps the latest value per (org, subject, kpi, window); history is Phase C.
+    - `workforce.role_department_ok` enforces role ↔ department in SQL.
+    - Market keys are lower-case slugs.
+11. **Store errors.** `WorkforceStoreError.code` adds `UNAVAILABLE` for infrastructure failures of the PG store (connection, timeout, schema not applied). This is never a semantic refusal. A refused CHECK maps to `PAYLOAD_REFUSED`, a unique violation to `CONFLICT`, and an FK violation to `NOT_FOUND`.
+12. **Memory twin.**
+    - `createWorkforceMemoryStore({ now, orgs?, members? })`: `members` models `agent.operator_membership`.
+    - `payload-guard.js` is a JS port of the S3 payload CHECKs (with the rc-8.5.21 opaque-id fix). A PG test runs it against the SQL on a corpus.
+    - Each method is all-or-nothing, like a rolled-back transaction.
