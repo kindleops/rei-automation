@@ -94,7 +94,7 @@ as $$
     when 'leased'           then p_to in ('running', 'ready', 'completed', 'failed', 'waiting_job', 'waiting_approval', 'blocked', 'cancelled')
     when 'running'          then p_to in ('completed', 'failed', 'ready', 'waiting_job', 'waiting_approval', 'blocked', 'cancelled')
     when 'waiting_job'      then p_to in ('ready', 'completed', 'failed', 'cancelled')
-    when 'waiting_approval' then p_to in ('ready', 'cancelled', 'failed')
+    when 'waiting_approval' then p_to in ('ready', 'completed', 'cancelled', 'failed')
     when 'blocked'          then p_to in ('ready', 'cancelled')
     else false
   end, false)
@@ -1146,7 +1146,8 @@ begin
   if not workforce.actor_ok(p_org, p_actor) then raise exception 'WF_FORBIDDEN: actor must be an employee of the org or a named operator'; end if;
   select * into a from workforce.assignment where assignment_id = p_assignment_id and org_id = p_org for update;
   if not found then raise exception 'WF_NOT_FOUND: assignment %', p_assignment_id; end if;
-  if a.status not in ('waiting_approval', 'blocked') or not workforce.assignment_transition_ok(a.status, p_to) then
+  -- completion of a held item is a PERSON's decision (workforce.assignment_decide), never a release
+  if a.status not in ('waiting_approval', 'blocked') or p_to not in ('ready', 'cancelled', 'failed') or not workforce.assignment_transition_ok(a.status, p_to) then
     raise exception 'WF_ILLEGAL_TRANSITION: assignment % → %', a.status, p_to;
   end if;
   v_from := a.status;
@@ -1158,6 +1159,50 @@ begin
   perform workforce.emit(p_org, 'wf.assignment.transitioned', a.mission_id, a.assignment_id, a.assignee_employee_id,
     jsonb_build_object('from', v_from, 'to', a.status, 'attempt', a.attempt, 'step', a.step_key, 'reason', 'hold_resolved', 'actor_id', p_actor));
   return to_jsonb(a);
+end
+$$;
+
+-- a PERSON decides an item parked in their queue (the CEO queue: escalations, reviews): waiting_approval →
+-- completed with output {decision, note, task, actor_id, decided_at}, outcome 'verified' (the decision itself
+-- is the verified fact). Owner only; the assignee must be a human employee. It records the decision INSIDE
+-- Workforce and nothing else: no runtime job, no business table. A replay of the same decision is a no-op
+-- (changed=false); a different decision on a decided item is a CONFLICT.
+create or replace function workforce.assignment_decide(p_org uuid, p_assignment_id text, p_decision text, p_note text, p_actor uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog, workforce
+as $$
+declare a workforce.assignment%rowtype; v_kind text;
+begin
+  if not workforce.is_owner(p_org, p_actor) then raise exception 'WF_FORBIDDEN: only an owner (the CEO) decides a queued item'; end if;
+  if p_decision is null or p_decision not in ('approve', 'decline', 'done') then raise exception 'WF_PAYLOAD_REFUSED: decision must be approve, decline or done'; end if;
+  if p_note is not null and (char_length(p_note) > 500 or agent.payload_string_violation(p_note, 'text', 0) is not null) then
+    raise exception 'WF_PAYLOAD_REFUSED: the note is too long or carries a contact value';
+  end if;
+  select * into a from workforce.assignment where assignment_id = p_assignment_id and org_id = p_org for update;
+  if not found then raise exception 'WF_NOT_FOUND: assignment %', p_assignment_id; end if;
+  if a.status = 'completed' and a.output ? 'decision' then
+    if a.output ->> 'decision' = p_decision and (a.output ->> 'actor_id') = p_actor::text then
+      return jsonb_build_object('changed', false, 'assignment', to_jsonb(a));   -- idempotent replay
+    end if;
+    raise exception 'WF_CONFLICT: assignment % was already decided (%)', p_assignment_id, a.output ->> 'decision';
+  end if;
+  select kind into v_kind from workforce.employee where employee_id = a.assignee_employee_id and org_id = p_org;
+  if v_kind is distinct from 'human' then raise exception 'WF_ILLEGAL_TRANSITION: only an item in a person''s queue is decided by a person'; end if;
+  if a.status <> 'waiting_approval' then raise exception 'WF_ILLEGAL_TRANSITION: assignment % → completed (only a waiting_approval item is decided)', a.status; end if;
+  update workforce.assignment
+     set status = 'completed', outcome_class = 'verified',
+         output = coalesce(output, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object('decision', p_decision, 'note', nullif(btrim(p_note), ''), 'task', a.input ->> 'task',
+                    'actor_id', p_actor::text, 'decided_at', to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))),
+         evidence = evidence || jsonb_build_array(jsonb_build_object('source', 'ceo_decision', 'decision', p_decision)),
+         finished_at = clock_timestamp()
+   where assignment_id = p_assignment_id returning * into a;
+  perform workforce.release_claims_of(a.assignment_id, 'finished');
+  perform workforce.emit(p_org, 'wf.assignment.transitioned', a.mission_id, a.assignment_id, a.assignee_employee_id,
+    jsonb_build_object('from', 'waiting_approval', 'to', 'completed', 'attempt', a.attempt, 'step', a.step_key, 'reason', 'person_decided', 'decision', p_decision, 'actor_id', p_actor::text));
+  update workforce.employee set last_activity_at = clock_timestamp() where employee_id = a.assignee_employee_id;
+  return jsonb_build_object('changed', true, 'assignment', to_jsonb(a));
 end
 $$;
 
@@ -1547,6 +1592,7 @@ grant execute on function
   workforce.assignment_wait_job(uuid, text, uuid, text),
   workforce.assignment_resume_job(uuid, text, text, text, jsonb, jsonb),
   workforce.assignment_resolve_hold(uuid, text, text, text),
+  workforce.assignment_decide(uuid, text, text, text, uuid),
   workforce.assignment_reap(uuid, timestamptz),
   workforce.assignment_transfer(uuid, text, text, text),
   workforce.assignment_cancel_mission(uuid, text),

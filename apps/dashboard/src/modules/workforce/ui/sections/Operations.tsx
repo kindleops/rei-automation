@@ -8,6 +8,9 @@ import {
 } from '../../model/wf-model'
 import { useWf, useWfFeed } from '../../store/wf-hooks'
 import { useWfNav } from '../wf-context'
+import { useWfDecisions } from '../../store/wf-decisions-store'
+import { pruneDecisions, type DecisionState } from '../../model/wf-decisions'
+import { WfDecideBar, WfDecisionRecorded } from '../wf-decide'
 import { WfAssignmentState, WfFailureState, WfMore, WfPanel, WfRefs, WfSectionHead, WfTime, WfUnknown } from '../wf-parts'
 
 type Scope = 'all' | 'outcomes' | 'problems'
@@ -64,8 +67,13 @@ function toActivity(e: WfEvent, nav: ReturnType<typeof useWfNav>): LCActivityEve
 export function QueueSection({ tick }: { tick: number }) {
   const nav = useWfNav()
   const view = useWf('wf:assignments', (s) => listAssignments({}, s), tick)
+  const decisions = useWfDecisions(view.retry)
+  const local = useMemo(() => pruneDecisions(decisions.map, nav.now), [decisions.map, nav.now])
   const [who, setWho] = useState<string>('all')
-  const rows = useMemo(() => (view.data ?? []).filter((a) => who === 'all' || a.assignee_employee_id === who), [view.data, who])
+  // optimistic but reconciled: a recorded decision shows the server's returned row (completed) until the next list lands
+  const rows = useMemo(() => (view.data ?? []).map((a) => (local[a.assignment_id]?.phase === 'recorded' && a.status === 'waiting_approval' ? local[a.assignment_id].item : a))
+    .filter((a) => who === 'all' || a.assignee_employee_id === who), [view.data, who, local])
+  const recorded = Object.values(local).filter((s) => s.phase === 'recorded')
   const groups = useMemo(() => {
     const g = new Map<AssignmentGroup, WfAssignment[]>()
     for (const a of rows) { const k = assignmentMeta(a.status).group; g.set(k, [...(g.get(k) ?? []), a]) }
@@ -85,6 +93,11 @@ export function QueueSection({ tick }: { tick: number }) {
           <LCSelect size="sm" variant="quiet" label="Assignee" prefix="Assignee" value={who} onChange={setWho} options={[{ value: 'all', label: 'Everyone' }, ...people.map((id) => ({ value: id, label: nav.employees.get(id)?.display_name ?? id }))]} />
         )}
       />
+      {recorded.length ? (
+        <ul className="wf-needs wf-needs--recorded wf-queue__recorded" aria-label="Decisions just recorded">
+          {recorded.map((x) => <WfDecisionRecorded key={x.item.assignment_id} s={x} onDismiss={() => decisions.dismiss(x.item.assignment_id)} />)}
+        </ul>
+      ) : null}
       <div className="wf-lanes">
         {lanes.map((g) => {
           const list = groups.get(g.id) ?? []
@@ -93,7 +106,7 @@ export function QueueSection({ tick }: { tick: number }) {
               <header><span>{g.label}</span><b className="lc-num">{view.data ? list.length : ''}</b></header>
               {!view.data ? <div className="wf-lane__skel" /> : !list.length ? <p className="wf-quiet">None</p> : (
                 <ul>
-                  {list.slice(0, 40).map((a) => <QueueCard key={a.assignment_id} a={a} />)}
+                  {list.slice(0, 40).map((a) => <QueueCard key={a.assignment_id} a={a} state={local[a.assignment_id] ?? null} onDecide={(x, d) => { void decisions.decide(x, d) }} />)}
                   {list.length > 40 ? <li className="wf-quiet">+{list.length - 40} more</li> : null}
                 </ul>
               )}
@@ -119,7 +132,7 @@ export function QueueSection({ tick }: { tick: number }) {
   )
 }
 
-function QueueCard({ a }: { a: WfAssignment }) {
+function QueueCard({ a, state, onDecide }: { a: WfAssignment; state: DecisionState | null; onDecide: (a: WfAssignment, d: 'approve' | 'decline' | 'done') => void }) {
   const nav = useWfNav()
   const why = waitingReason(a)
   const ref = resourceRef(a)
@@ -136,6 +149,7 @@ function QueueCard({ a }: { a: WfAssignment }) {
         <WfTime iso={a.updated_at} now={nav.now} />
       </div>
       {ref ? <WfRefs refs={[ref]} quiet /> : null}
+      <WfDecideBar a={a} state={state} onDecide={onDecide} compact terse />
     </li>
   )
 }

@@ -9,6 +9,9 @@ import {
   composerRefusal, type LinkedSubject,
 } from '../../model/wf-model'
 import { useWf, type WfView } from '../../store/wf-hooks'
+import { useWfDecisions } from '../../store/wf-decisions-store'
+import { decisionView } from '../../model/wf-decisions'
+import { WfDecideBar, WfDecisionRecorded } from '../wf-decide'
 import { useWfNav } from '../wf-context'
 import { WfAssignmentState, WfAvatar, WfFailureState, WfMissionState, WfPanel, WfProgress, WfRefs, WfTime, WfUnknown } from '../wf-parts'
 
@@ -104,6 +107,12 @@ export function CommandSection({ tick, linked, clearLinked, draft, setDraft, onL
   const suggestion = linked ? linkedDirective(linked) : null
   const orgKpis = (kpis.data ?? []).filter((k) => k.subject_type === 'org').slice(0, 6)
   const waitingOnYou = (needs.data ?? [])
+  const { retry: retryNeeds } = needs
+  const { retry: retryMsgs } = msgs
+  const onDecided = useCallback(() => { retryNeeds(); retryMsgs() }, [retryNeeds, retryMsgs])
+  const decisions = useWfDecisions(onDecided)
+  // optimistic but reconciled: recorded items leave the open list at once; the server list stays the truth
+  const dv = decisionView(waitingOnYou, decisions.map, nav.now)
 
   return (
     <div className="wf-cmd">
@@ -182,21 +191,28 @@ export function CommandSection({ tick, linked, clearLinked, draft, setDraft, onL
       </div>
 
       <aside className="wf-cmd__rail" aria-label="What needs you">
-        <WfPanel title="Needs you" icon="flag" aside={needs.data ? <span className="wf-count lc-num">{waitingOnYou.length}</span> : null}>
+        <WfPanel title="Needs you" icon="flag" aside={needs.data ? <span className="wf-count lc-num">{dv.open.length}</span> : null}>
           {needs.failure && !needs.data ? <WfFailureState failure={needs.failure} what="Escalations did not load" onRetry={needs.retry} compact /> : null}
           {needs.loading ? <LCSkeleton shape="rows" count={2} /> : null}
-          {needs.data && !waitingOnYou.length ? <p className="wf-quiet">Nothing is waiting on you.</p> : null}
+          {dv.recorded.length ? (
+            <ul className="wf-needs wf-needs--recorded" aria-label="Decisions just recorded">
+              {dv.recorded.slice(0, 3).map((s) => <WfDecisionRecorded key={s.item.assignment_id} s={s} onDismiss={() => decisions.dismiss(s.item.assignment_id)} />)}
+            </ul>
+          ) : null}
+          {needs.data && !dv.open.length ? <p className="wf-quiet">Nothing is waiting on you.</p> : null}
           <ul className="wf-needs">
-            {waitingOnYou.slice(0, 5).map((a) => (
-              <li key={a.assignment_id}>
+            {dv.open.slice(0, 5).map(({ a, state }) => (
+              <li key={a.assignment_id} data-phase={state?.phase ?? undefined}>
                 <button type="button" className="wf-needs__row" onClick={() => nav.openAssignment(a.assignment_id, a.mission_id)}>
                   <span className="wf-needs__t">{a.blocked_reason ?? capabilityLabel(a.capability_key)}</span>
                   <span className="wf-needs__m"><WfAssignmentState status={a.status} quiet /> <WfTime iso={a.updated_at} now={nav.now} /></span>
                 </button>
                 {resourceRef(a) ? <WfRefs refs={[resourceRef(a)!]} quiet /> : null}
+                <WfDecideBar a={a} state={state} onDecide={(x, d) => { void decisions.decide(x, d) }} compact />
               </li>
             ))}
           </ul>
+          {dv.open.length > 5 ? <button type="button" className="wf-link wf-needs__more" onClick={() => nav.go('queue')}>{dv.open.length - 5} more in the Work Queue</button> : null}
         </WfPanel>
         <WfPanel title="Missions in flight" icon="target">
           <MissionsInFlight view={missions} />

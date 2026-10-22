@@ -26,7 +26,7 @@ export const ASSIGNMENT_TRANSITIONS = Object.freeze({
   leased: ['running', 'ready', 'completed', 'failed', 'waiting_job', 'waiting_approval', 'blocked', 'cancelled'],
   running: ['completed', 'failed', 'ready', 'waiting_job', 'waiting_approval', 'blocked', 'cancelled'],
   waiting_job: ['ready', 'completed', 'failed', 'cancelled'],
-  waiting_approval: ['ready', 'cancelled', 'failed'],
+  waiting_approval: ['ready', 'completed', 'cancelled', 'failed'],
   blocked: ['ready', 'cancelled'],
   completed: [], failed: [], cancelled: [],
 })

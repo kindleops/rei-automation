@@ -22,6 +22,7 @@ import { ROLES, ROLE_CHARTERS, charterFor, effectiveTierCeiling } from './org/ch
 import { CEO_EMPLOYEE_ID, COO_EMPLOYEE_ID } from './org/seed.js'
 import { interpretDirective, label } from './coo/interpret.js'
 import { statusAnswer } from './coo/respond.js'
+import { DECISIONS, decisionAck, decisionOutcome } from './coo/decisions.js'
 import { OPEN_ASSIGNMENT_STATES, openCountsOf } from './coo/staffing.js'
 import { proposeGrants } from './authority/engine.js'
 import { enqueueWorkforceJob } from './engine/dispatch.js'
@@ -44,6 +45,7 @@ const MISSION_STATUSES = ['planning', 'active', 'waiting', 'blocked', 'completed
 const ASSIGNMENT_STATUSES = ['pending', 'ready', 'leased', 'running', 'waiting_job', 'waiting_approval', 'blocked', 'completed', 'failed', 'cancelled']
 const EMP_ID = /^emp_[a-z0-9_]{3,40}$/
 const WFM_ID = /^wfm_[0-9a-f-]{36}$/
+const WFA_ID = /^wfa_[0-9a-f-]{36}$/
 const CLIENT_REQ = /^[A-Za-z0-9_-]{8,80}$/
 const STORE_STATUS = { NOT_FOUND: 404, CONFLICT: 409, LEASE_LOST: 409, ILLEGAL_TRANSITION: 409, PAYLOAD_REFUSED: 422, CLAIM_HELD: 409, VERSION_MISMATCH: 409, FORBIDDEN: 403, UNAVAILABLE: 503 }
 
@@ -434,6 +436,45 @@ export async function handleAssignments(request, opts = {}) {
     const inactive = inactiveOf(employees)
     const byId = new Map(employees.map((e) => [e.employee_id, e]))
     return ok({ assignments: assignments.map((a) => presentAssignment(a, { inactive, employees: byId })) }, opts.headers)
+  } catch (e) { return storeFail(e, opts.headers) }
+}
+
+/**
+ * POST /assignments/[id]/resolve { decision: 'approve'|'decline'|'done', note? } — the CEO decides an item in
+ * their queue (an escalation, a review). CEO only (owner membership), as the SESSION user. The decision is
+ * RECORDED inside Workforce (store.decideHeldAssignment: waiting_approval → completed, owner-checked again in
+ * SQL) plus a semantic event and a COO acknowledgement. Nothing else happens: no send, no offer, no stage
+ * write, no runtime job, no new assignment. A replay of the same decision writes nothing and answers the same.
+ */
+export async function handleAssignmentResolve(request, assignment_id, opts = {}) {
+  const p = await prologue(request, { ...opts, bucket: 'mutation' })
+  if (p.response) return p.response
+  if (!isOwner(p)) return fail('CEO_ONLY', 'Only the CEO decides items in the CEO queue.', 403, opts.headers)
+  if (!WFA_ID.test(String(assignment_id || ''))) return fail('ASSIGNMENT_ID_INVALID', 'Unknown assignment id.', 422, opts.headers)
+  const b = await body(request) // any actor / user in the body is ignored: the session decides
+  const decision = String(b?.decision || '')
+  if (!DECISIONS.includes(decision)) return fail('DECISION_INVALID', 'The decision is approve, decline or done.', 422, opts.headers, { allowed: DECISIONS })
+  const note = b?.note == null || String(b.note).trim() === '' ? null : String(b.note).replace(/[\u0000-\u001f]/g, ' ').trim()
+  if (note && note.length > 500) return fail('NOTE_TOO_LONG', 'A note is at most 500 characters.', 422, opts.headers)
+  const s = p.svc.store
+  try {
+    const current = await s.getAssignment({ org_id: p.org_id, assignment_id })
+    if (!current) return fail('NOT_FOUND', 'Assignment not found.', 404, opts.headers)
+    if (typeof s.decideHeldAssignment !== 'function') return fail('WORKFORCE_UNCONFIGURED', 'This store cannot record a decision.', 503, opts.headers)
+    const { changed, assignment } = await s.decideHeldAssignment({ org_id: p.org_id, assignment_id, decision, note, actor_user_id: p.identity.user_id })
+    const task = assignment.output?.task ?? assignment.input?.task ?? null
+    const property_ref = assignment.input?.property_ref ?? null
+    const raw = decisionOutcome({ decision, task, property_ref })
+    const outcome = { ...raw, headline: decodeText(raw.headline), message: decodeText(raw.message) }
+    let messages = []
+    if (changed) {
+      await s.appendEvent({ org_id: p.org_id, type: 'wf.ceo.decision_recorded', mission_id: assignment.mission_id, assignment_id, employee_id: assignment.assignee_employee_id,
+        payload: { decision, task, property_ref, by_user: p.identity.user_id, effects: raw.effects } })
+      const refs = [{ type: 'assignment', id: assignment_id }, { type: 'mission', id: assignment.mission_id }, ...(property_ref ? [{ type: 'property', id: property_ref }] : [])]
+      messages = [await s.appendExecMessage({ org_id: p.org_id, author: 'coo', author_employee_id: COO_EMPLOYEE_ID, mission_id: assignment.mission_id, content: decisionAck({ decision, task, property_ref, note }), refs })]
+    }
+    const employees = await s.listEmployees({ org_id: p.org_id })
+    return ok({ assignment: presentAssignment(assignment, { inactive: inactiveOf(employees) }), decision, outcome, messages: messages.map(presentMessage), replayed: !changed }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
