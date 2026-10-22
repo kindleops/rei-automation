@@ -382,7 +382,8 @@ as $$
 declare e workforce.employee%rowtype; v_now timestamptz := clock_timestamp(); n int;
 begin
   if not workforce.is_owner(p_org, p_actor) then raise exception 'WF_FORBIDDEN: only an owner ends a binding'; end if;
-  select * into e from workforce.employee where employee_id = p_employee_id and org_id = p_org for update;
+  -- FOR NO KEY UPDATE: the leases released below are assignment rows the dispatch pass may hold (see action_gateway_dw_workforce)
+  select * into e from workforce.employee where employee_id = p_employee_id and org_id = p_org for no key update;
   if not found then raise exception 'WF_NOT_FOUND: employee %', p_employee_id; end if;
   if e.action_principal_id is null or e.origin <> 'agntei' then raise exception 'WF_CONFLICT: % has no binding', p_employee_id; end if;
   if e.binding_revoked_at is null then
@@ -1113,8 +1114,11 @@ begin
   p := i.params;
   v_owner := 'gw:' || i.agent_id;
   begin
-    -- the employee IS the authenticated principal's (never a tool argument)
-    select * into e from workforce.employee where org_id = i.org_id and action_principal_id = i.agent_id for update;
+    -- the employee IS the authenticated principal's (never a tool argument). FOR NO KEY UPDATE, not FOR UPDATE: it still
+    -- serializes this principal's writes, but never blocks a foreign-key check (KEY SHARE) of an event or resource claim
+    -- naming the employee — the Workforce dispatch pass locks assignments FIRST and then writes those, so FOR UPDATE here
+    -- deadlocked a claim against it (40P01, found by the milestone E2E; tests/critical/workforce-agntei-lock-order-pg)
+    select * into e from workforce.employee where org_id = i.org_id and action_principal_id = i.agent_id for no key update;
     if e.employee_id is null then return action_gateway.finish_intent(i.intent_id, 'refused', 'NOT_REGISTERED', jsonb_build_object('stage', 'domain_write')); end if;
     -- the operator-authorized, expiring binding: refused (audited by finish_intent) and the principal's open external leases released
     v_code := workforce.binding_refusal(e);
