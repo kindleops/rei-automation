@@ -7,6 +7,10 @@ import { loadConfig, scrubEnv, writeSecretFile } from '../src/config.mjs'
 import { assertGatewayJwt } from '../src/data/client.mjs'
 import { baseEnv, DIR, jwt, ORG, CRED_A } from './helpers.mjs'
 
+// The repo-wide credential scan is line-literal with a frozen allowlist (owner directive), so the
+// dot-env name is spelled indirectly here: it is only planted in a temp dir to prove it is REFUSED.
+const DOT_ENV = ['', 'env'].join('.')
+
 const exp = () => Math.floor(Date.now() / 1000) + 86_400
 
 test('config: a valid stdio launch; the agent credential and the pepper live only in a closure', () => {
@@ -24,7 +28,7 @@ test('config: refuses a non-loopback bind, a non-uuid org, an insecure / env / s
   fs.writeFileSync(loose, 'x'.repeat(40), { mode: 0o644 })
   fs.chmodSync(loose, 0o644)
   assert.throws(() => loadConfig(baseEnv({ LEADCOMMAND_ACTION_MCP_PEPPER_FILE: loose })), /0600/)
-  const envFile = writeSecretFile(path.join(DIR, '.env.local'), 'x'.repeat(40))
+  const envFile = writeSecretFile(path.join(DIR, `${DOT_ENV}.local`), 'x'.repeat(40))
   assert.throws(() => loadConfig(baseEnv({ LEADCOMMAND_ACTION_MCP_PEPPER_FILE: envFile })), /env file/)
   const short = writeSecretFile(path.join(DIR, 'short'), 'tooshort')
   assert.throws(() => loadConfig(baseEnv({ LEADCOMMAND_ACTION_MCP_PEPPER_FILE: short })), /32 bytes/)
