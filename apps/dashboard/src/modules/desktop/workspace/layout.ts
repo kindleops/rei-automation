@@ -80,6 +80,8 @@ const GEOMETRY: Record<string, AppGeometry> = {
   settings: { minW: 520, minH: 360 },
   properties: { minW: 500, minH: 380 },
   'intelligence-command': { minW: 640, minH: 420 },
+  // Workforce folds to a single column (tabs over the content) under 520px, so a quarter pane stays usable
+  workforce: { minW: 440, minH: 400 },
 }
 const FALLBACK_GEOMETRY: AppGeometry = { minW: 460, minH: 340 }
 export const geometryFor = (app: string): AppGeometry => GEOMETRY[app] ?? FALLBACK_GEOMETRY

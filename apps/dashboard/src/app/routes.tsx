@@ -83,6 +83,7 @@ const BrowserApp = lazyWithRecovery(() => import('../modules/browser/BrowserApp'
 const SearchIntelligenceApp = lazyWithRecovery(() => import('../modules/search-intelligence/SearchIntelligenceApp'))
 const MarketIntelligenceApp = lazyWithRecovery(() => import('../modules/market-intelligence/MarketIntelligenceApp'))
 const IntelligenceCommandApp = lazyWithRecovery(() => import('../modules/intelligence-command/IntelligenceCommandApp'))
+const WorkforceApp = lazyWithRecovery(() => import('../modules/workforce/ui/WorkforceApp'))
 const SettingsView = lazyWithRecovery(() =>
   import('../views/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
 )
@@ -310,6 +311,14 @@ const intelligenceCommandRoute = defineRoute<null>({
   render: () => <IntelligenceCommandApp />,
 })
 
+/** Workforce Phase A — the AI organization: COO conversation, org, missions, work, authority (desktop only). */
+const workforceRoute = defineRoute<null>({
+  path: '/workforce',
+  title: 'LeadCommand | Workforce',
+  loader: async () => null,
+  render: () => <WorkforceApp />,
+})
+
 /** The desktop's Settings page (the phone keeps its settings sheet). */
 const settingsRoute = defineRoute<null>({
   path: '/settings',
@@ -439,6 +448,7 @@ const routes = [
   browserRoute,
   marketIntelligenceRoute,
   intelligenceCommandRoute,
+  workforceRoute,
   searchIntelligenceRoute,
   settingsRoute,
   entityGraphRoute,

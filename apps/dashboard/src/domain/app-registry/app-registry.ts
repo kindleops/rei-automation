@@ -46,6 +46,7 @@ export type AppId =
   | 'analytics'
   | 'search-intelligence'
   | 'intelligence-command'
+  | 'workforce'
   | 'calendar'
   | 'notifications'
   | 'settings'
@@ -529,6 +530,31 @@ export const NEXUS_APPS: NexusApp[] = [
     shortcut: 'K',
     badge: null,
     context: {},
+  },
+  {
+    /**
+     * Workforce (Phase A, docs/WORKFORCE.md §8) — the company the owner runs:
+     * the COO conversation, the org chart, employees, missions with their plan
+     * DAG and verified reports, the operations feed, the work queue, ranked
+     * intelligence, costs and the authority center. Reads the §7 Workforce
+     * API only (404 until WORKFORCE_ENABLED=1); nothing here contacts a seller.
+     * Desktop only. Context: it seeds Executive Command from the property
+     * locator (property / thread) and ?opp=, and follows the linked selection.
+     */
+    id: 'workforce',
+    label: 'Workforce',
+    shortLabel: 'Workforce',
+    description: 'Direct the COO, staff missions and see what your AI organization did',
+    icon: 'users',
+    route: '/workforce',
+    group: 'operations',
+    desktop: true,
+    mobile: false,
+    desktopRail: true,
+    dockable: false,
+    defaultDock: false,
+    badge: null,
+    context: { propertyId: 'locator', threadKey: 'locator', opportunityId: 'query:opp' },
   },
   {
     id: 'calendar',
