@@ -52,6 +52,12 @@ export function createStubIdentityProvider() {
 }
 
 /** True only for a verified, named identity. */
+/** An identity that is (or claims to be) an agent, a service or a model: never a human decision (D6). */
+export function isAgentIdentity(identity = {}) {
+  const uid = String(identity?.user_id ?? '')
+  return Boolean(identity?.agent_id || identity?.principal_kind === 'agent' || identity?.kind === 'agent' || identity?.method === 'agent_credential' || /^(agt_|agent:|lcag_)/i.test(uid))
+}
+
 export function isConsequentialIdentity(identity) {
   return Boolean(identity && identity.verified === true && identity.named === true && identity.user_id)
 }

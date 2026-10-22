@@ -94,7 +94,14 @@ export function sendAuthorizationStatus(auth, { scope_key = null, envelope = nul
 }
 
 // ── stores (append-only; the DB refuses UPDATE / DELETE) ─────────────────────
-const T = Object.freeze({ auth: 'negotiation_send_authorizations', rev: 'negotiation_send_authorization_revocations' })
+// R5 (Action MCP audit §0.8): the send BUDGET is DURABLE. `max_sends` is checked against the uses recorded in
+// public.negotiation_send_authorization_uses (PROPOSED_20261020110000_action_gateway_t34), never against a
+// caller-supplied count. A use is CONSUMED by ONE transaction (public.negotiation_send_authorization_consume:
+// the authorization row is locked, the uses are counted, the next use_no is inserted, unique per
+// (authorization, use_no) and per use_key) BEFORE anything is rendered or queued, so concurrent senders can
+// never exceed max_sends and a retried send replays its own use (same use_key) instead of taking another.
+const T = Object.freeze({ auth: 'negotiation_send_authorizations', rev: 'negotiation_send_authorization_revocations', uses: 'negotiation_send_authorization_uses' })
+export const SEND_USE_CONSUME_FN = 'negotiation_send_authorization_consume'
 
 export function createSupabaseSendAuthorizationStore({ supabase }) {
   if (!supabase?.from) throw Object.assign(new Error('NO_CLIENT'), { code: 'NO_CLIENT' })
@@ -109,17 +116,48 @@ export function createSupabaseSendAuthorizationStore({ supabase }) {
     },
     async insert(row) { const [s] = await rows(supabase.from(T.auth).insert(row).select('*')); return s },
     async revoke({ send_authorization_id, revoked_by, reason }) { const [s] = await rows(supabase.from(T.rev).insert({ send_authorization_id, revoked_by, reason }).select('*')); return s },
+    /** R5: the DURABLE uses of one authorization (optionally not counting one use_key: the caller's own reservation). */
+    async usesFor(send_authorization_id, { excluding_use_key = null } = {}) {
+      const u = await rows(supabase.from(T.uses).select('use_key,use_no').eq('send_authorization_id', send_authorization_id).limit(50))
+      return { count: u.filter((x) => !excluding_use_key || x.use_key !== excluding_use_key).length, has_use: excluding_use_key ? u.some((x) => x.use_key === excluding_use_key) : null }
+    },
+    /** R5: consume ONE use atomically (the database function locks the authorization; idempotent per use_key). */
+    async consume({ send_authorization_id, use_key, amount }) {
+      const r = await supabase.rpc(SEND_USE_CONSUME_FN, { p_send_authorization_id: send_authorization_id, p_use_key: use_key, p_amount: amount })
+      if (r?.error) throw Object.assign(new Error('SEND_AUTHORIZATION_TABLES_UNAVAILABLE'), { code: 'SEND_AUTHORIZATION_TABLES_UNAVAILABLE' })
+      return r?.data ?? null
+    },
   })
 }
 
 export function createMemorySendAuthorizationStore({ now = () => Date.now() } = {}) {
   const auths = []
   const revoked = new Map()
+  const uses = []
   let n = 0
   const fail = (code) => { throw Object.assign(new Error(code), { code }) }
   return {
     kind: 'memory',
-    _dump: () => ({ authorizations: auths.map((a) => ({ ...a })), revoked: [...revoked.keys()] }),
+    _dump: () => ({ authorizations: auths.map((a) => ({ ...a })), revoked: [...revoked.keys()], uses: uses.map((u) => ({ ...u })) }),
+    /** Mirror of the durable uses table (R5). */
+    async usesFor(send_authorization_id, { excluding_use_key = null } = {}) {
+      const u = uses.filter((x) => x.send_authorization_id === send_authorization_id)
+      return { count: u.filter((x) => !excluding_use_key || x.use_key !== excluding_use_key).length, has_use: excluding_use_key ? u.some((x) => x.use_key === excluding_use_key) : null }
+    },
+    /** Mirror of public.negotiation_send_authorization_consume (single-threaded: the JS event loop is the lock). */
+    async consume({ send_authorization_id, use_key, amount }) {
+      const a = auths.find((x) => x.send_authorization_id === send_authorization_id)
+      if (!a) return { ok: false, reason: 'no_send_authorization' }
+      const mine = uses.find((x) => x.use_key === use_key)
+      if (mine) return mine.send_authorization_id === send_authorization_id ? { ok: true, replayed: true, use_no: mine.use_no } : { ok: false, reason: 'use_key_bound_to_another_authorization' }
+      if (revoked.has(send_authorization_id)) return { ok: false, reason: 'revoked' }
+      if (!(now() < Date.parse(a.expires_at))) return { ok: false, reason: 'expired' }
+      if (Number(amount) > Number(a.ceiling)) return { ok: false, reason: 'amount_above_send_ceiling' }
+      const used = uses.filter((x) => x.send_authorization_id === send_authorization_id).length
+      if (used >= Number(a.max_sends || 1)) return { ok: false, reason: 'send_budget_exhausted' }
+      uses.push({ send_authorization_id, use_key, use_no: used + 1, amount: Number(amount), created_at: new Date(now()).toISOString() })
+      return { ok: true, replayed: false, use_no: used + 1, remaining: Number(a.max_sends || 1) - used - 1 }
+    },
     async latestFor(scope_key) {
       const a = auths.filter((x) => x.scope_key === scope_key).sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at) || y._seq - x._seq)[0] || null
       return { authorization: a, revoked: a ? revoked.has(a.send_authorization_id) : false }

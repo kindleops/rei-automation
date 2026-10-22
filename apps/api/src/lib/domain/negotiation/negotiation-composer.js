@@ -93,9 +93,11 @@ export function forbiddenClaimViolations(text) {
  * @param {'PREPARE_OFFER'|'NEGOTIATE_WITHIN_AUTHORITY'} a.outcome
  * @param {object} a.context     handleDecisionOutcome context: { thread_key, property_id, opportunity_id?, seller_request?, fact_ledger?, economics?, offer_plan?, now? }
  * @param {object} a.deps        handleDecisionOutcome deps ({ store, assessEconomics?, planOffer? })
- * @param {{ latestFor: (scope_key) => Promise<{ authorization, revoked }> }} a.sendAuthorizations
+ * @param {{ latestFor: (scope_key) => Promise<{ authorization, revoked }>, usesFor: (id, o) => Promise<{ count, has_use }> }} a.sendAuthorizations
  * @param {Array<object>} a.templates   approved sms_templates rows for the move use cases
- * @param {{ language?: string, template_context?: object, sends_used?: number }} [a.thread]
+ * @param {{ language?: string, template_context?: object, send_use_key?: string }} [a.thread]
+ *        send_use_key: the durable send-budget reservation this send already holds (R5); the caller's own
+ *        count is never read
  * @param {object} [a.env]
  */
 export async function composeNegotiationReply({ outcome, context = {}, deps = {}, sendAuthorizations = null, templates = [], thread = {}, checkAutomationHold = null, env = process.env } = {}) {
@@ -119,7 +121,19 @@ export async function composeNegotiationReply({ outcome, context = {}, deps = {}
   if (!sendAuthorizations?.latestFor) return escalate('send_authorization_store_unavailable', { composer_view: view })
   const latestEnv = await deps.store.latestEnvelope(sk)
   const sa = await sendAuthorizations.latestFor(sk).catch(() => ({ authorization: null, revoked: false }))
-  const st = sendAuthorizationStatus(sa?.authorization || null, { scope_key: sk, envelope: latestEnv?.envelope || null, envelope_meta: { revoked: latestEnv?.revoked, latest_version: latestEnv?.latest_version }, amount: move.amount, terms: view.allowed_terms, sends_used: Number(thread.sends_used || 0), revoked: sa?.revoked, now })
+  // R5: the budget is the DURABLE use count (public.negotiation_send_authorization_uses), never a caller-supplied
+  // number. A send that already holds its reservation (thread.send_use_key, consumed atomically before this call)
+  // is checked against the OTHER uses; a store that cannot count uses fails closed.
+  let sendsUsed = null
+  if (sa?.authorization) {
+    if (typeof sendAuthorizations.usesFor !== 'function') return escalate('send_authorization:send_budget_unverifiable', { composer_view: view })
+    let u
+    try { u = await sendAuthorizations.usesFor(sa.authorization.send_authorization_id, { excluding_use_key: thread.send_use_key || null }) } catch { return escalate('send_authorization:send_budget_unverifiable', { composer_view: view }) }
+    if (thread.send_use_key && u?.has_use !== true) return escalate('send_authorization:send_use_not_reserved', { composer_view: view })
+    sendsUsed = Number(u?.count)
+    if (!Number.isFinite(sendsUsed)) return escalate('send_authorization:send_budget_unverifiable', { composer_view: view })
+  }
+  const st = sendAuthorizationStatus(sa?.authorization || null, { scope_key: sk, envelope: latestEnv?.envelope || null, envelope_meta: { revoked: latestEnv?.revoked, latest_version: latestEnv?.latest_version }, amount: move.amount, terms: view.allowed_terms, sends_used: sendsUsed ?? 0, revoked: sa?.revoked, now })
   if (!st.live) return escalate(`send_authorization:${st.reason}`, { composer_view: view })
 
   // an approved template only (ZERO hard-coded copy)

@@ -23,8 +23,9 @@ begin
 
   insert into public.acquisition_opportunities (id, master_owner_id, primary_property_id, primary_thread_key, acquisition_stage, opportunity_status)
   values (opp_h, 'MO_MT_H', 'P_MT_OPP', 'tk_mt_opp', 'offer', 'active'), (opp_c, 'MO_MT_C', 'P_MT_CTRL', 'tk_mt_ctrl', 'offer', 'active');
-  insert into public.seller_offers (offer_id, opportunity_id, property_id, thread_key, purchase_price, status)
-  values ('offer:mt:h:v1', opp_h, 'P_MT_OPP', 'tk_mt_opp', 100000, 'active'), ('offer:mt:c:v1', opp_c, 'P_MT_CTRL', 'tk_mt_ctrl', 100000, 'active');
+  -- (authorized_ceiling: every active outbound offer carries its frozen ceiling — the R4 guard of link #28 refuses one without)
+  insert into public.seller_offers (offer_id, opportunity_id, property_id, thread_key, purchase_price, authorized_ceiling, status)
+  values ('offer:mt:h:v1', opp_h, 'P_MT_OPP', 'tk_mt_opp', 100000, 120000, 'active'), ('offer:mt:c:v1', opp_c, 'P_MT_CTRL', 'tk_mt_ctrl', 100000, 120000, 'active');
 
   -- holds: H1 thread (all capabilities), H2 property (campaign only), H3 opportunity (all)
   insert into public.automation_holds (hold_key, hold_type, thread_key, reason, set_by, approval_ref)

@@ -116,6 +116,10 @@ const QUEUE_ROW_CREATORS = [
   "lib/domain/closings/advance-closing-workflow.js",
   "lib/domain/inbound/unknown-inbound-router.js",
   "lib/domain/inbox/send-now-service.js",
+  // Action Gateway execute_authorized_offer (LeadCommand worker, action_gateway.execute; born OFF): converged —
+  // only through insertSupabaseSendQueueRow, deterministic identity (queue_key = dedupe_key =
+  // negotiation_offer:<intent id>), after persistActiveOffer (R4) and a durable send-budget use (R5).
+  "lib/domain/negotiation/negotiation-send.js",
   "lib/domain/outbound/run-supabase-outbound-feeder.js",
   "lib/domain/queue/build-send-queue-item.js",
   "lib/domain/queue/canonical-queue-writer.js",

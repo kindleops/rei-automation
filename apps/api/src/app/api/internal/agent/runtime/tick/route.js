@@ -16,6 +16,7 @@ import { conversationRuntimeHandlers, conversationRuntimeMaintenance } from '@/l
 import { missionRuntimeHandlers } from '@/lib/ai/mission-runtime-wiring.js'
 import { operationsRuntimeHandlers } from '@/lib/ai/operations-runtime-wiring.js'
 import { followupRuntimeHandlers } from '@/lib/ai/followup-runtime-wiring.js'
+import { actionGatewayExecutionHandlers } from '@/lib/ai/action-gateway-execution.js'
 import { child } from '@/lib/logging/logger.js'
 
 export const runtime = 'nodejs'
@@ -35,8 +36,9 @@ export async function POST(request) {
     // jobs (recovery.sweep / inbox.action_center / pipeline.reconcile / ops.supervisor — no send) only when
     // AGENT_OPERATIONS_ENABLED=1; the 8.5.21 follow-up execution pipeline (followup.execution_sweep /
     // followup.dispatch / followup.reconcile — writes follow-up send_queue rows) only when
-    // LC_FOLLOWUP_EXECUTION=1, and it does nothing until system_control.followup_execution_mode is set
-    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...missionRuntimeHandlers(), ...operationsRuntimeHandlers(), ...followupRuntimeHandlers() }, maintenance: conversationRuntimeMaintenance() })
+    // LC_FOLLOWUP_EXECUTION=1, and it does nothing until system_control.followup_execution_mode is set; the Action
+    // Gateway executor kind (action_gateway.execute — the canonical send paths) only when LC_ACTION_GATEWAY_EXECUTION=1
+    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...missionRuntimeHandlers(), ...operationsRuntimeHandlers(), ...followupRuntimeHandlers(), ...actionGatewayExecutionHandlers() }, maintenance: conversationRuntimeMaintenance() })
     if (result.summary) {
       const s = result.summary
       logger.info('agent.runtime.tick', { blocked: s.blocked, claimed: s.claimed, jobs: s.jobs.map((j) => `${j.kind}:${j.outcome}`), errors: s.errors.map((e) => `${e.phase}:${e.code}`), elapsed_ms: s.elapsed_ms })

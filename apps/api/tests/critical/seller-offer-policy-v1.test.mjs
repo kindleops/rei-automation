@@ -88,7 +88,7 @@ function makeSupabase() {
 const newOffer = (supabase, over = {}) =>
   persistActiveOffer({
     opportunity_id: OPP, thread_key: THREAD, property_id: "prop-1",
-    purchase_price: 250000, offer_type: "initial_offer", supabase, ...over,
+    purchase_price: 250000, offer_type: "initial_offer", authorized_ceiling: 500000, supabase, ...over, // R4: the frozen ceiling
   });
 
 // ── policy defaults on every new offer ───────────────────────────────────────
