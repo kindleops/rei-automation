@@ -555,7 +555,9 @@ async function main() {
       console.log(`  checks ${r.checks.filter((c) => c.ok).length}/${r.checks.length}; fingerprint ${r.fingerprint}; ${Math.round(r.wallMs / 1000)} s; remaining processes ${JSON.stringify(r.stopped.remaining)}`)
       for (const c of r.checks.filter((x) => !x.ok)) console.log(`  FAIL ${c.id} ${c.name}: ${c.detail.slice(0, 400)}`)
       fs.writeFileSync(path.join(outDir, `run-${i}.json`), JSON.stringify(r, null, 1))
-      if (!arg('keep-state')) fs.rmSync(runDir, { recursive: true, force: true })
+      // a run with a failed check keeps its state (logs, postgres.log, the Agntei data dir) for diagnosis
+      if (!arg('keep-state') && r.checks.every((c) => c.ok)) fs.rmSync(runDir, { recursive: true, force: true })
+      else console.log(`  state kept: ${runDir}`)
       process.exit(0)
     } catch (e) {
       console.error(`run ${i} FAILED: ${e?.stack || e}`)
