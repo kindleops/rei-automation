@@ -26,6 +26,7 @@ import { MANUAL_OFFER_GUARD_MODE_KEY, MANUAL_OFFER_GUARD_MODES, resolveManualOff
 import { COMPANY_IDENTITY_KEY, normalizeCompanyIdentity, loadCompanyIdentity } from '../../src/lib/domain/conversation-ai/company-identity.js'
 import { DRAFT_MODEL_ENV } from '../../src/lib/ai/conversation-ai-draft-service.js'
 import { AUTO_RECOVERY_ENV, autoRecoveryEnabled } from '../../src/lib/agent/operations/auto-recovery.js'
+import { WORKFORCE_FLAG, WORKFORCE_MODEL_INTERPRET_FLAG, workforceEnabled, modelInterpretEnabled } from '../../src/lib/workforce/config.js'
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src')
 const REPO = path.resolve(SRC, '../../..')
@@ -44,6 +45,10 @@ const NEW_ENV_FLAGS = Object.freeze({
   [DRAFT_MODEL_ENV]: (env) => String(env?.[DRAFT_MODEL_ENV] ?? '').trim() === 'true',
   // rc-8.5.21 v3: the ops supervisor's auto-recovery sweeps (only the literal 'true' wires them)
   [AUTO_RECOVERY_ENV]: (env) => autoRecoveryEnabled(env),
+  // Workforce Phase A (docs/WORKFORCE.md §9): routes 404 and handlers unregistered unless the literal '1';
+  // the model interpreter additionally needs Workforce itself on (tests/critical/workforce-born-off.test.mjs)
+  [WORKFORCE_FLAG]: (env) => workforceEnabled(env),
+  [WORKFORCE_MODEL_INTERPRET_FLAG]: (env) => modelInterpretEnabled({ ...env, [WORKFORCE_FLAG]: '1' }),
 })
 const NEW_SYSTEM_CONTROL_KEYS = Object.freeze({
   [AI_SEND_KILL_SWITCH_KEY]: (raw) => parseKillSwitch(raw) === true,
@@ -75,6 +80,9 @@ test('every NEW env flag is OFF when the variable is absent, empty or not the ar
   assert.equal(followUpExecutionRequested({ [FOLLOWUP_EXECUTION_ENV]: '1' }), true)
   assert.equal(sfrLaneEnabled({ [SFR_LANE_FLAG]: '1' }), true)
   assert.equal(valuationWriteEnabled({ [VALUATION_WRITE_FLAG]: '1' }), true)
+  assert.equal(workforceEnabled({ [WORKFORCE_FLAG]: '1' }), true)
+  assert.equal(modelInterpretEnabled({ [WORKFORCE_FLAG]: '1', [WORKFORCE_MODEL_INTERPRET_FLAG]: '1' }), true)
+  assert.equal(modelInterpretEnabled({ [WORKFORCE_MODEL_INTERPRET_FLAG]: '1' }), false, 'the interpreter never arms without Workforce')
   // paid research: even with no flag the ceiling is the $10 testing ceiling, never more
   assert.ok(paidResearchCeiling({}) <= 10)
   assert.ok(paidResearchCeiling({ [PAID_RESEARCH_CEILING_ENV]: '9999' }) <= 10)
