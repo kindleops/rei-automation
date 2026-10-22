@@ -12,7 +12,7 @@ import { OPEN_ASSIGNMENT_STATES } from './coo/staffing.js'
 import { DEPARTMENTS, ROLE_CHARTERS, charterFor } from './org/charters.js'
 import { assignmentActivity } from './agntei/activity.js'
 
-const REF_TYPES = new Set(['property', 'thread', 'opportunity', 'job', 'assignment', 'mission', 'employee', 'market'])
+const REF_TYPES = new Set(['property', 'thread', 'opportunity', 'job', 'assignment', 'mission', 'employee', 'market', 'intent'])
 const pid = (v) => (v == null ? null : String(decodePropertyRef(String(v))))
 const humanize = (s) => String(s || '').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim()
 
@@ -40,8 +40,11 @@ export function presentRef(r) {
   const type = r.type === 'memory_fact' ? null : r.type === 'service' || r.type === 'rule' ? null : r.type
   if (r.job_id && !type) return { type: 'job', id: String(r.job_id), label: 'Runtime job' }
   if (!type || !REF_TYPES.has(type) || r.id == null) return null
-  if (type === 'property') return { type, id: pid(r.id), label: r.label ?? propertyLabel(r.id), property_id: pid(r.id) }
-  return { type, id: String(r.id), label: r.label ?? null }
+  // an evidence ref keeps how LeadCommand resolved it (docs/WORKFORCE-AGNTEI.md §2: verified needs a resolvable ref), so the
+  // API shows WHY an outcome is verified; an unresolved agent-reported ref stays "reported"
+  const res = typeof r.resolved === 'boolean' ? { resolved: r.resolved, ...(r.via ? { via: String(r.via) } : {}) } : r.state === 'reported' ? { resolved: false, state: 'reported' } : {}
+  if (type === 'property') return { type, id: pid(r.id), label: r.label ?? propertyLabel(r.id), property_id: pid(r.id), ...res }
+  return { type, id: String(r.id), label: r.label ?? (type === 'intent' ? 'Gateway intent' : null), ...res }
 }
 export const presentRefs = (xs) => (Array.isArray(xs) ? xs.map(presentRef).filter(Boolean) : [])
 

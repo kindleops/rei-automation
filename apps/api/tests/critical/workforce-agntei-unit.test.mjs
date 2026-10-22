@@ -14,6 +14,7 @@ import { WORKFORCE_GATEWAY_TOOLS, mcpToolName } from '../../src/lib/workforce/ag
 import { applyExternalTimeouts } from '../../src/lib/workforce/engine/dispatch.js'
 import { authorize } from '../../src/lib/workforce/authority/engine.js'
 import * as R from '../../src/lib/workforce/routes.js'
+import { presentRefs } from '../../src/lib/workforce/present.js'
 
 const ORG = '00000000-0000-4000-8000-00000000a001'
 const OWNER = '11111111-1111-4111-8111-111111111111'
@@ -156,4 +157,16 @@ test('API: register_agntei is CEO-only, creates a pending_link operator_ai emplo
   assert.equal(opProf.data.link_steps, null, 'the owner steps are CEO-only')
   const ov = await (await R.handleOverview(get('/overview'), opts(OWNER))).json()
   assert.equal(ov.data.employees.find((e) => e.employee_id === 'emp_atlas_scout').activity.state, 'pending_link')
+})
+
+test('evidence refs keep how LeadCommand resolved them (verified needs a resolvable ref): resolved / via, reported, gateway intents (milestone E2E finding)', () => {
+  const refs = presentRefs([
+    { type: 'thread', id: '00000002-cccc-4002-8002-000000000002', state: 'reported', source: 'agntei' },
+    { job_id: 'mjob_9387b974-8951-4d1c-9a11-08b6f459ce79', source: 'agent.research_job' },
+    { type: 'job', id: 'mjob_9387b974-8951-4d1c-9a11-08b6f459ce79', via: 'mission_job', resolved: true, source: 'agntei' },
+    { type: 'intent', id: '750bc69c-de78-4aa1-84c9-90b385446d5a', via: 'principal_intent_job', resolved: true },
+    { type: 'thread', id: '00000002-cccc-4002-8002-000000000002', via: 'logged_read', resolved: true },
+  ])
+  assert.deepEqual(refs.map((r) => [r.type, r.resolved ?? null, r.via ?? null]), [['thread', false, null], ['job', null, null], ['job', true, 'mission_job'], ['intent', true, 'principal_intent_job'], ['thread', true, 'logged_read']])
+  assert.equal(refs[3].label, 'Gateway intent')
 })

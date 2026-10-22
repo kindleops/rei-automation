@@ -97,6 +97,18 @@ test('Workforce tools: advertised as leadcommand_workforce_*, mapped to the gate
   } finally { await c.close() }
 })
 
+test('second net: an opaque id token (an Agntei install id with a digit run) is never masked, a phone beside it still is (milestone E2E finding)', async () => {
+  const install = 'agntei_inst_86e57c814037353071abd046f29a78e5' // 12 digits in a row: masked before, so whoami no longer matched the link
+  const gw = fakeGateway({ answer: (o) => ({ ok: true, status: 'read', tool: o.tool, result: { employee: { external_install_id: install, note: 'call 312-555-0161', bare: 'inst_614037353071' } } }) })
+  const c = await connect({ gateway: gw })
+  try {
+    const r = await c.client.callTool({ name: 'leadcommand_workforce_whoami', arguments: {} })
+    assert.equal(r.structuredContent.result.employee.external_install_id, install)
+    assert.ok(!/555-0161/.test(JSON.stringify(r)), 'a phone is still masked')
+    assert.notEqual(r.structuredContent.result.employee.bare, 'inst_614037353071', 'a short all-digit id is no opaque token: still masked')
+  } finally { await c.close() }
+})
+
 test('second net: phone / email shapes in any result string are masked; a secret-shaped value withholds the result', async () => {
   const gw = fakeGateway({ answer: (o) => (o.tool === 'create_operator_task'
     ? { ok: true, status: 'succeeded', tool: o.tool, code: 'OK', result: { note: 'call 312-555-0161 or dana@example.com' } }
