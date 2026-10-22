@@ -72,7 +72,14 @@ export function summarize(a) {
     case 'intel.active_opportunities': return o.mode === 'pipeline_overview' ? { mode: o.mode, totals: o.totals ?? null } : { scanned: o.scanned ?? null, eligible: o.eligible ?? null, candidates: Array.isArray(o.candidates) ? o.candidates.length : null, excluded: o.excluded ?? null }
     case 'intel.conversation_state': return { action_state: o.action_state ?? null, contact_permitted: o.contact_permitted ?? null, seller_spoke_last: o.seller_spoke_last ?? null }
     case 'intel.acquisition_decision': return { status: o.status ?? null, tier: o.tier ?? null, mao: o.mao ?? null, offer_ready: o.offer_ready?.ready ?? null, spendable: o.spendability?.spendable ?? null }
-    case 'research.property': return { needed: o.needed ?? null, enqueued: o.enqueued ?? null, skipped: o.skipped ?? null, job_id: a.runtime_job_id ?? o.job_id ?? null }
+    case 'research.property':
+      // the delegated research of an external agent (playbooks.js DELEGATED): its own output (copied, bounded), how its evidence resolved
+      if (a.input?.mode === 'delegated_review') {
+        const ev = Array.isArray(a.evidence) ? a.evidence : []
+        return { mode: 'delegated_review', execution_mode: a.execution_mode ?? null, candidates: Array.isArray(a.input?.candidates) ? a.input.candidates.length : null, recommendation: typeof o.recommendation === 'string' ? o.recommendation.slice(0, 1500) : null,
+          summary: typeof o.summary === 'string' ? o.summary.slice(0, 600) : null, findings: Array.isArray(o.findings) ? o.findings.length : 0, evidence_total: ev.length, evidence_resolved: ev.filter((e) => e?.resolved === true).length }
+      }
+      return { needed: o.needed ?? null, enqueued: o.enqueued ?? null, skipped: o.skipped ?? null, job_id: a.runtime_job_id ?? o.job_id ?? null }
     case 'finance.review_opportunity': return { verdict: o.verdict ?? null, reasons: o.reasons ?? [] }
     case 'acq.rank_opportunities': return { considered: o.considered ?? null, ranked: Array.isArray(o.ranked) ? o.ranked.length : null }
     case 'acq.next_action': return o.noop ? { position: o.position ?? null, noop: true, reason: o.reason ?? null } : { position: o.position ?? null, action: o.action ?? null, reasons: o.reasons ?? [] }
@@ -168,6 +175,11 @@ export function buildMissionReport({ mission, assignments = [], spend = new Map(
   })
   const costs = { total_usd: jobIds.length && unknownJobs === jobIds.length ? null : Math.round(total * 1e6) / 1e6, status: !jobIds.length ? 'known' : unknownJobs ? (unknownJobs === jobIds.length ? 'unknown' : 'partial') : 'known', by_job, inline_reads_usd: 0 }
 
+  // the delegated research of an external agent (playbooks.js DELEGATED): its state and output, copied from its assignment
+  const del = assignments.find((a) => a.capability_key === 'research.property' && a.input?.mode === 'delegated_review') || null
+  const delEmp = del ? (employees || []).find((e) => e.employee_id === del.assignee_employee_id) : null
+  const delegated = del ? { assignment_id: del.assignment_id, employee_id: del.assignee_employee_id, employee_name: delEmp?.display_name ?? null, execution_mode: del.execution_mode ?? null, status: del.status,
+    outcome_class: del.outcome_class ?? null, ...(isTerminalSuccess(del) ? summarize(del) : { candidates: Array.isArray(del.input?.candidates) ? del.input.candidates.length : null }) } : null
   const core = assignments.filter(isCoreAssignment)
   const allTerminal = core.every((a) => TERMINAL.has(a.status))
   return fitReport({
@@ -183,6 +195,7 @@ export function buildMissionReport({ mission, assignments = [], spend = new Map(
     refused,
     unknowns,
     ranked,
+    ...(delegated ? { delegated } : {}),
     costs,
     unavailable: mission?.plan?.unavailable || [],
   })

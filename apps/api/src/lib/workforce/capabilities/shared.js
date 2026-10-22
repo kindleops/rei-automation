@@ -40,9 +40,13 @@ export function safeText(v, max = 120) {
   return s ? s.slice(0, max) : null
 }
 
-/** A market label (letters, spaces, a few separators), or null. */
+/**
+ * A market label (letters, spaces, a few separators), or null. An underscore is a separator: employee markets are stored as
+ * slugs ('dallas_test'), and dropping the underscore ('dallastest') made a multi-word market never match its own label
+ * (found by the live milestone: a Dallas (TEST) agent was refused MARKET_OUT_OF_SCOPE in its own market).
+ */
 export function marketLabel(v) {
-  const s = clean(v).replace(/[^A-Za-z .,'/-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60)
+  const s = clean(v).replace(/_/g, ' ').replace(/[^A-Za-z .,'/-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60)
   return s || null
 }
 /** The market key employees carry (workforce.employee.markets: lower-case slugs), e.g. 'Dallas, TX' → 'dallas_tx'. */

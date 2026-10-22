@@ -29,6 +29,9 @@ export const capability = Object.freeze({
   escalates_on: Object.freeze([]),
   resourceOf: (_ctx, input) => ({ property_id: decodePropertyRef(input.property_ref), opportunity_id: input.opportunity_id ?? null, conversation_id: input.conversation_id ?? null, market: input.market ?? null }),
   async run(ctx, input = {}) {
+    // the delegated research of an external agent (playbooks.js DELEGATED) is the agent's own work: run here (a handoff to an
+    // internal employee), it is not done — an honest unknown, never a silent success
+    if (input.mode === 'delegated_review') return done({ mode: 'delegated_review', enqueued: false, skipped: 'delegated_review_is_agent_work', candidates: arr(input.candidates).length }, { outcome_class: 'unknown' })
     const property_id = clean(decodePropertyRef(input.property_ref))
     if (!property_id) throw new CapabilityError('PROPERTY_REF_REQUIRED', { retryable: false })
     const need = input.force === true ? { needed: true, reasons: ['requested'] } : researchNeed(input.decision_step ? depOutput(ctx, input.decision_step) : null)

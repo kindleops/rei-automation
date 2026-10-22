@@ -19,7 +19,7 @@ import { getCapability } from '../capabilities/catalog.js'
 import { CapabilityError, decodePropertyRef } from '../capabilities/shared.js'
 import { createStaffer, openCountsOf, pickAssignee } from '../coo/staffing.js'
 import { rolesFor } from '../org/charters.js'
-import { expandCandidates, expandNext } from '../coo/playbooks.js'
+import { expandCandidates, expandDelegate, expandNext } from '../coo/playbooks.js'
 import { CEO_EMPLOYEE_ID, COO_EMPLOYEE_ID } from '../org/seed.js'
 import { isCoreAssignment } from './report.js'
 
@@ -152,7 +152,8 @@ export function missionSettlement(mission, assignments = [], { employees = null 
   const terminal = core.filter((a) => TERMINAL.has(a.status)).length
   return { settled: runnable.length === 0 && owed.length === 0, runnable: runnable.length, owed: owed.map((s) => s.expand), core: core.length, terminal, all_terminal: core.every((a) => TERMINAL.has(a.status)), critical_failed: core.some((a) => a.status === 'failed' && a.input?.critical === true) }
 }
-const expansionState = (mission, name) => (name === 'triage_candidates' ? mission?.plan?.expansions?.after_opps : name === 'triage_next' ? mission?.plan?.expansions?.after_rank : null)
+const EXPANSION_SLOT = Object.freeze({ triage_candidates: 'after_opps', triage_delegate: 'after_opps', triage_next: 'after_rank' })
+const expansionState = (mission, name) => (EXPANSION_SLOT[name] ? mission?.plan?.expansions?.[EXPANSION_SLOT[name]] : null)
 
 /**
  * @param {{ store, runtimeStore, reads, services, env, now: () => number, org_id: string, ctx: object, log?: Function, maxPerPass?: number }} d
@@ -381,10 +382,16 @@ export async function ensureExpansions({ store, org_id, mission, employees }) {
     const staff = createStaffer({ employees, assignments: await store.listAssignments({ org_id, limit: 1000 }) })
     const { steps } = s.expand === 'triage_candidates'
       ? expandCandidates(current.plan, trigger.output)
-      : expandNext(current.plan, trigger.output, trigger.input?.slots || [])
+      : s.expand === 'triage_delegate'
+        ? expandDelegate(current.plan, trigger.output)
+        : expandNext(current.plan, trigger.output, trigger.input?.slots || [])
     const recorded = []
+    const byId = new Map((employees || []).map((e) => [e.employee_id, e]))
     for (const st of steps) {
-      const assignee = staff(st.role, { market: st.market ?? null })
+      // a step the plan routes to a named employee (the delegated research of the relaying agent) is never re-staffed: that
+      // employee, while active, or nobody (unstaffed, recorded)
+      const fixed = st.assignee_employee_id ? byId.get(st.assignee_employee_id) : null
+      const assignee = st.assignee_employee_id ? (fixed?.status === 'active' ? fixed : null) : staff(st.role, { market: st.market ?? null, capability: st.capability })
       if (!assignee) { recorded.push({ ...st, assignee_employee_id: null, unstaffed: true }); continue }
       const { assignment } = await store.createAssignment({
         org_id, mission_id: current.mission_id, step_key: st.step, capability_key: st.capability, assignee_employee_id: assignee.employee_id,
@@ -393,7 +400,7 @@ export async function ensureExpansions({ store, org_id, mission, employees }) {
       })
       recorded.push({ ...st, assignee_employee_id: assignment.assignee_employee_id })
     }
-    const expansions = { ...(current.plan.expansions || {}), [s.expand === 'triage_candidates' ? 'after_opps' : 'after_rank']: 'expanded' }
+    const expansions = { ...(current.plan.expansions || {}), [EXPANSION_SLOT[s.expand] || 'after_rank']: 'expanded' }
     const next = { ...current.plan, steps: [...current.plan.steps, ...recorded.filter((r) => !current.plan.steps.some((x) => x.step === r.step))], expansions }
     try {
       current = await store.setMissionPlan({ org_id, mission_id: current.mission_id, objective: current.objective, playbook_key: current.playbook_key, plan: next, expected_version: current.plan_version })

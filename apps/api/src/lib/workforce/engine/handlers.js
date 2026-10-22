@@ -8,16 +8,17 @@
 import { RuntimePermanentError } from '../../agent/runtime/runtime-tick.js'
 import { COO_PLAN_KIND, DISPATCH_KIND, MISSION_REVIEW_KIND, WORKFORCE_ORG_ID, modelInterpretEnabled } from '../config.js'
 import { interpretDirective, modelChooseIntent } from '../coo/interpret.js'
-import { buildPlan } from '../coo/playbooks.js'
+import { buildPlan, DELEGABLE_INTENTS } from '../coo/playbooks.js'
 import { createStaffer } from '../coo/staffing.js'
 import { planMessage, reportMessage, statusAnswer } from '../coo/respond.js'
 import { COO_EMPLOYEE_ID } from '../org/seed.js'
 import { roleHasCapability } from '../org/charters.js'
+import { marketLabel } from '../capabilities/shared.js'
 import { buildMissionReport, verifyReportHonesty } from './report.js'
 import { enqueueWorkforceJob, missionSettlement, runDispatchPass } from './dispatch.js'
 
 const MISSION_DONE = new Set(['completed', 'failed', 'cancelled'])
-const compactInterpretation = (i) => ({ version: i.version, source: i.source, intent: i.intent, markets: i.markets, count: i.count, horizon: i.horizon, focus: i.focus, refusal: i.refusal ? { codes: i.refusal.codes } : null })
+const compactInterpretation = (i) => ({ version: i.version, source: i.source, intent: i.intent, markets: i.markets, count: i.count, horizon: i.horizon, focus: i.focus, refusal: i.refusal ? { codes: i.refusal.codes } : null, ...(i.markets_source ? { markets_source: i.markets_source } : {}) })
 
 /** @param {{ store, runtimeStore, reads?, services?, env?, now?, org_id?, modelCallFor?: (ctx) => Function|null, parseJson?: Function, knownMarkets?: string[], log?: Function }} deps */
 export function createCooPlanHandler(deps) {
@@ -56,16 +57,24 @@ export function createCooPlanHandler(deps) {
           return { result: { mission_id, actionable: false, intent: interp.intent, refused: Boolean(interp.refusal) } }
         }
         await ctx.step('plan', { progress: { step: 'plan', steps_done: 1 } })
-        const draft = buildPlan({ intent: interp.intent, interpretation: interp })
         const roster = await store.listEmployees({ org_id })
         const staff = createStaffer({ employees: roster, assignments: await store.listAssignments({ org_id, limit: 1000 }) })
-        // a directive relayed through the Action Gateway with assign_to_self (docs/WORKFORCE-AGNTEI.md §2): the FIRST step goes to the
-        // relaying employee when its charter covers that capability; otherwise the normal staffing applies (and the skip is recorded)
+        // a directive relayed through the Action Gateway with assign_to_self (docs/WORKFORCE-AGNTEI.md §2)
         const selfId = typeof ctx.job.input?.assign_first_to === 'string' ? ctx.job.input.assign_first_to : null
         const self = selfId ? roster.find((e) => e.employee_id === selfId && e.status === 'active') || null : null
-        const selfFits = Boolean(self && draft.steps[0] && roleHasCapability(self.role_key, draft.steps[0].capability))
-        draft.steps = draft.steps.map((s, i) => ({ ...s, assignee_employee_id: i === 0 && selfFits ? self.employee_id : staff(s.role, { market: s.market ?? null })?.employee_id ?? null }))
-        if (selfId && !selfFits) await store.appendEvent({ org_id, type: 'wf.mission.assign_to_self_skipped', mission_id, employee_id: self ? selfId : null, payload: { reason: !self ? 'employee_not_active' : 'capability_not_in_charter' } })
+        // an EXTERNAL acquisition-type employee (its charter covers the candidate read AND research) relaying a triage for itself
+        // owns the research and the recommendation: the DELEGATED plan (playbooks.js). Its markets scope a directive that names none
+        // ("your assigned market"). Every other relay keeps the first-step rule below.
+        const delegate = self && self.employment_type === 'operator_ai' && DELEGABLE_INTENTS.includes(interp.intent)
+          && roleHasCapability(self.role_key, 'intel.active_opportunities') && roleHasCapability(self.role_key, 'research.property') ? self : null
+        if (delegate && !(interp.markets || []).length && (delegate.markets || []).length) interp = { ...interp, markets: delegate.markets.map(marketLabel).filter(Boolean).slice(0, 5), markets_source: 'relaying_employee' }
+        const draft = buildPlan({ intent: interp.intent, interpretation: interp, delegate: delegate ? { employee_id: delegate.employee_id, role: delegate.role_key, display_name: delegate.display_name ?? null } : null })
+        // otherwise: the FIRST step goes to the relaying employee when its charter covers that capability; else the normal staffing applies
+        // (and the skip is recorded)
+        const selfFits = Boolean(!delegate && self && draft.steps[0] && roleHasCapability(self.role_key, draft.steps[0].capability))
+        draft.steps = draft.steps.map((s, i) => ({ ...s, assignee_employee_id: i === 0 && selfFits ? self.employee_id : staff(s.role, { market: s.market ?? null, capability: s.capability })?.employee_id ?? null }))
+        if (delegate) await store.appendEvent({ org_id, type: 'wf.mission.delegated', mission_id, employee_id: delegate.employee_id, payload: { intent: interp.intent, role: delegate.role_key, markets: interp.markets || [], markets_source: interp.markets_source || 'directive' } })
+        else if (selfId && !selfFits) await store.appendEvent({ org_id, type: 'wf.mission.assign_to_self_skipped', mission_id, employee_id: self ? selfId : null, payload: { reason: !self ? 'employee_not_active' : 'capability_not_in_charter' } })
         try {
           mission = await store.setMissionPlan({ org_id, mission_id, objective: compactInterpretation(interp), playbook_key: draft.playbook, plan: draft, expected_version: mission.plan_version })
         } catch (e) {

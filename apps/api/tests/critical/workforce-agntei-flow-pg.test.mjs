@@ -69,6 +69,8 @@ test('PG claim: external assignments are claimed only by their agent; CLAIM_HELD
   r = await s.call('workforce_claim_assignment', { client_request_id: s.id('c'), assignment_id: a['res.c01'].assignment_id })
   assert.equal(r.code, 'CLAIMED', JSON.stringify(r))
   assert.equal(r.result.attempt, 0)
+  // the lease generation by its own name (the envelope's `attempt` is the INTENT's: a live model passed it and got LEASE_LOST)
+  assert.equal(r.result.claim_attempt, 0)
   assert.ok(!JSON.stringify(r).includes('lease_token'))
   assert.equal((await sel(env.owner, "select employee_id from workforce.resource_claim where resource_key = $1 and released_at is null", [P]))[0].employee_id, 'emp_scout')
 }))
@@ -232,7 +234,7 @@ test('PG autonomy: with ZERO external agents online (none registered, the gatewa
   } finally { await env.drop(); trap.restore() }
 })
 
-test('PG open_mission: a directive relayed through the gateway opens a mission with the CANONICAL shape of one typed in Workforce (origin differs); the COO plans it; assign_to_self gives the agent the first step (external)', { skip }, () => withAgent(async ({ env, s }) => {
+test('PG open_mission: a directive relayed through the gateway opens a mission with the CANONICAL shape of one typed in Workforce (origin differs); the COO plans it; assign_to_self from an external acquisition agent DELEGATES the research to it (the candidate read stays internal)', { skip }, () => withAgent(async ({ env, s }) => {
   const directive = 'Find the 5 most promising opportunities in Dallas and get them moving'
   const r = await s.call('workforce_open_mission', { client_request_id: 'relay-0001-dallas', directive, assign_to_self: true })
   assert.equal(r.code, 'MISSION_OPENED', JSON.stringify(r))
@@ -249,7 +251,10 @@ test('PG open_mission: a directive relayed through the gateway opens a mission w
   assert.equal(viaGateway.origin, 'agntei')
   assert.equal(viaWorkforce.origin, 'workforce')
   assert.equal(viaGateway.requested_by, OWNER, 'requested by the principal\'s sponsor (the CEO)')
-  // the COO plans it from its own runtime job; the agent (an acquisition agent of Dallas) gets the first step, external
+  // the COO plans it from its own runtime job. The agent (an EXTERNAL acquisition agent of Dallas) relayed it for itself: the
+  // DELEGATED plan (coo/playbooks.js) — the candidate read that drives the plan stays internal (it was the agent's before
+  // 2026-10-22, though an external agent cannot return the structured candidates the expansion needs); the agent's own
+  // research + recommendation step follows once the candidates are read
   const jobs = await jobsOf(env, 'workforce.coo_plan')
   assert.equal(jobs.length, 2)
   const gj = jobs.find((j) => j.input.mission_id === viaGateway.mission_id)
@@ -257,9 +262,12 @@ test('PG open_mission: a directive relayed through the gateway opens a mission w
   const plan = createCooPlanHandler({ store: env.store, runtimeStore: env.runtime, env: { WORKFORCE_ENABLED: '1' }, org_id: ORG })
   await plan.run({ job: { job_id: gj.job_id, input: gj.input, requested_by: OWNER }, step: async () => {} })
   const first = (await env.store.listAssignments({ org_id: ORG, mission_id: viaGateway.mission_id }))[0]
-  assert.equal(first.assignee_employee_id, 'emp_scout')
-  assert.equal(first.execution_mode, 'external')
-  assert.equal((await env.store.getMission({ org_id: ORG, mission_id: viaGateway.mission_id })).status, 'active')
+  assert.deepEqual([first.step_key, first.assignee_employee_id, first.execution_mode], ['opps', 'emp_head_acquisitions', 'internal'])
+  const planned = await env.store.getMission({ org_id: ORG, mission_id: viaGateway.mission_id })
+  assert.equal(planned.status, 'active')
+  assert.equal(planned.plan.variant.delegated, true)
+  assert.equal(planned.plan.delegate.employee_id, 'emp_scout')
+  assert.ok((await env.store.listEvents({ org_id: ORG, mission_id: viaGateway.mission_id, limit: 50 })).some((e) => e.type === 'wf.mission.delegated' && e.employee_id === 'emp_scout'))
   // a replay of the relay returns the SAME mission
   const again = await s.call('workforce_open_mission', { client_request_id: 'relay-0001-dallas', directive, assign_to_self: true })
   assert.equal(again.result.mission_id, viaGateway.mission_id)

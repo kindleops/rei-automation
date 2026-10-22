@@ -14,7 +14,9 @@ export function planMessage({ mission, plan }) {
   const p = plan.params || {}
   const where = p.markets?.length ? ` in ${p.markets.join(', ')}` : ' across your active markets'
   const lines = [`Plan: ${label(plan.intent)}${where}.`]
-  if (['opportunity_triage', 'offer_activity', 'conversation_revival'].includes(plan.intent)) {
+  if (plan.variant?.delegated && plan.delegate) {
+    lines.push(`Acquisitions pulls up to ${p.pool} live opportunities (held, excluded and suppressed ones are left out). ${plan.delegate.display_name || plan.delegate.employee_id} (Agntei) researches them — property information, conversation context and the underwriting evidence — and recommends the strongest ${p.n} with the records it read. I record the findings and report them to you.`)
+  } else if (['opportunity_triage', 'offer_activity', 'conversation_revival'].includes(plan.intent)) {
     lines.push(`Acquisitions pulls up to ${p.pool} live opportunities (held, excluded and suppressed ones are left out). For each one we read the conversation${plan.variant?.decision ? ' and the Decision Engine row' : ''}${plan.variant?.research ? ', research where the evidence is missing or stale' : ''}${plan.variant?.finance ? ', and the CFO reviews the economics independently' : ''}. Then I rank them (contact and identity first, then pressure, then deal quality), set a next action for the top ${p.n}, and queue the follow-up work.`)
   } else if (plan.intent === 'market_diagnosis') {
     lines.push('Marketing reads the pipeline overview and Acquisitions reads the live opportunities. I record what they show.')
@@ -41,6 +43,12 @@ export function reportMessage({ mission, report }) {
     lines.push(`Ranked ${plural(r.ranked.length, 'opportunity', 'opportunities')}: ${top.join('; ')}${r.ranked.length > 5 ? '; …' : ''}.`)
     const evKnown = r.ranked.filter((x) => x.ev.status === 'known').length
     lines.push(evKnown ? `Expected value is known for ${evKnown} of them.` : 'Expected value is unknown for all of them: there is no calibrated close-rate input yet, and I do not assume a spread.')
+  } else if (r.delegated) {
+    const d = r.delegated
+    if (d.status === 'completed') {
+      lines.push(`${d.employee_name || d.employee_id} (Agntei) researched ${plural(d.candidates ?? 0, 'candidate')} and reported ${plural(d.findings, 'finding')} (outcome ${d.outcome_class}; ${d.evidence_resolved} of ${d.evidence_total} evidence refs resolved by LeadCommand).`)
+      if (d.recommendation) lines.push(`Recommendation (the agent's, not verified by me): ${d.recommendation}`)
+    } else lines.push(`${d.employee_name || d.employee_id} (Agntei) has not finished the research (${String(d.status).replace(/_/g, ' ')}).`)
   } else if (['opportunity_triage', 'offer_activity', 'conversation_revival'].includes(r.intent)) {
     lines.push('No opportunity was ranked.')
   }

@@ -28,6 +28,9 @@ export function summaryOf(o = {}) {
   const pick = {}
   for (const k of ['mode', 'source', 'markets', 'scanned', 'eligible', 'excluded', 'totals', 'stages', 'stalled_by', 'generated_at', 'reads_failed']) if (o?.[k] !== undefined) pick[k] = o[k]
   if (Array.isArray(o?.candidates)) pick.candidates = o.candidates.length
+  // a delegated agent's research output: its recommendation (bounded text, already masked by the writer) and how much it found
+  if (typeof o?.recommendation === 'string') pick.recommendation = o.recommendation.slice(0, 1500)
+  if (Array.isArray(o?.findings)) pick.findings = o.findings.length
   return pick
 }
 

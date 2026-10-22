@@ -1,8 +1,13 @@
 // Staffing (docs/WORKFORCE.md §5): pick the assignee for a role — active employees of the role, the
 // market's own agents first for market-scoped roles, fewest open assignments, then a stable id order.
 // A market with no agent falls back to the department head (whose charter covers the work).
+// An operator-directed (Agntei, operator_ai) employee is never staffed automatically for a READ capability: a read runs
+// inline in the dispatch pass, verified from the canonical services, and parking it on an external agent that may be
+// offline would stall the mission (an external agent pulls work only while its process runs). External employees get
+// internal work by staffing (research), and anything else only by explicit routing (assign_to_self, handoff).
 import { charterFor } from '../org/charters.js'
 import { sameMarket } from '../capabilities/shared.js'
+import { getCapability } from '../capabilities/catalog.js'
 
 export const OPEN_ASSIGNMENT_STATES = Object.freeze(['pending', 'ready', 'leased', 'running', 'waiting_job', 'waiting_approval', 'blocked'])
 export const ROLE_FALLBACK = Object.freeze({
@@ -19,23 +24,26 @@ export function openCountsOf(assignments = []) {
   return m
 }
 
-export function pickAssignee({ role, market = null, employees = [], openCounts = new Map(), fallback = true } = {}) {
+/** Whether automatic staffing may pick this employee for this capability (see the header). */
+export const autoStaffable = (e, capability = null) => !(e?.employment_type === 'operator_ai' && capability && getCapability(capability)?.class === 'read')
+
+export function pickAssignee({ role, market = null, employees = [], openCounts = new Map(), fallback = true, capability = null } = {}) {
   const charter = charterFor(role)
   if (!charter) return null
-  const pool = employees.filter((e) => e.role_key === role && e.status === 'active')
+  const pool = employees.filter((e) => e.role_key === role && e.status === 'active' && autoStaffable(e, capability))
   const inMarket = charter.market_scoped ? pool.filter((e) => market && (e.markets || []).some((m) => sameMarket(m, market))) : pool
   const pick = (xs) => [...xs].sort((a, b) => (openCounts.get(a.employee_id) || 0) - (openCounts.get(b.employee_id) || 0) || (a.employee_id < b.employee_id ? -1 : 1))[0] || null
   const chosen = pick(inMarket)
   if (chosen) return chosen
-  if (fallback && ROLE_FALLBACK[role]) return pickAssignee({ role: ROLE_FALLBACK[role], market, employees, openCounts, fallback })
+  if (fallback && ROLE_FALLBACK[role]) return pickAssignee({ role: ROLE_FALLBACK[role], market, employees, openCounts, fallback, capability })
   return null
 }
 
 /** A staffing function bound to one org snapshot; it counts what it assigns so a batch spreads. */
 export function createStaffer({ employees = [], assignments = [] } = {}) {
   const counts = openCountsOf(assignments)
-  return function staff(role, { market = null } = {}) {
-    const e = pickAssignee({ role, market, employees, openCounts: counts })
+  return function staff(role, { market = null, capability = null } = {}) {
+    const e = pickAssignee({ role, market, employees, openCounts: counts, capability })
     if (e) counts.set(e.employee_id, (counts.get(e.employee_id) || 0) + 1)
     return e
   }
