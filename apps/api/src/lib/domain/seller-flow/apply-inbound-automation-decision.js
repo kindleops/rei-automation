@@ -1111,9 +1111,17 @@ function derivePropertyTypeScope(context = null) {
   ) || null;
 }
 
+const LEGACY_COMMERCIAL_GROUPS = new Set([
+  "commercial", "self_storage", "retail", "office", "industrial", "hotel_motel", "mobile_home_park", "other_commercial",
+]);
+
 function derivePropertyGroup(property_type_scope = null) {
   const normalized = lower(property_type_scope);
   if (!normalized) return null;
+  // Commercial first: "Commercial (Other)" / "Strip Center / Retail" /
+  // "Self-Storage" named no group here, so an approved commercial row could
+  // never match a commercial property's scope (2026-10-22, +1281…5725).
+  if (/(commercial|retail|strip|storage|office|industrial|warehouse|hotel|motel)/.test(normalized)) return "commercial";
   if (normalized.includes("vacant") || normalized.includes("land")) return "land";
   if (normalized.includes("duplex")) return "duplex";
   if (normalized.includes("triplex")) return "triplex";
@@ -1185,7 +1193,8 @@ function isTemplatePropertyCompatible(row = {}, property_type_scope = null) {
     property_group &&
     allowed.length > 0 &&
     !allowed.includes(property_group) &&
-    !(property_group === "residential" && allowed.some(isResidentialPropertyGroup))
+    !(property_group === "residential" && allowed.some(isResidentialPropertyGroup)) &&
+    !(property_group === "commercial" && allowed.some((group) => LEGACY_COMMERCIAL_GROUPS.has(group)))
   ) {
     return false;
   }
@@ -1779,6 +1788,69 @@ export function inboundCarriesNumber(text = "") {
   return /\b(hundred|thousand|million|mil|grand|k)\b/.test(value);
 }
 
+/**
+ * The property an auto-reply describes, when the caller lost it.
+ *
+ * Production 2026-10-22 (+1281…5725, property 2131479286, Commercial / Other):
+ * the reply ran with property_id NULL although the inbound's own
+ * message_events row and the ownership_check send_queue row it answered both
+ * carried it. With no property the asset rule was skipped and the legacy
+ * scope filter alone decided — it vetoed every candidate ("no_safe_template"),
+ * and with no context scope at all it would have answered a commercial owner
+ * with residential copy.
+ *
+ * Order: the explicit id → the thread context → the inbound's own
+ * message_events row → the freshest delivered outbound on the thread (the
+ * question being answered). When the thread's outbounds name more than one
+ * property and the freshest names none, the property is AMBIGUOUS (owner
+ * rule: an ambiguous property holds the thread). Read-only; never throws.
+ */
+export async function resolveReplyAssetPropertyId({
+  supabase = null,
+  propertyId = null,
+  context = null,
+  inboundEventId = null,
+  threadKey = null,
+} = {}) {
+  const explicit = clean(propertyId) || clean(context?.ids?.property_id) || null;
+  if (explicit) return { property_id: explicit, source: clean(propertyId) ? "explicit" : "context", ambiguous: false };
+  if (!supabase || typeof supabase.from !== "function") return { property_id: null, source: null, ambiguous: false };
+
+  const event_id = clean(inboundEventId);
+  if (event_id) {
+    try {
+      const { data } = await supabase.from("message_events").select("id,property_id").eq("id", event_id).maybeSingle();
+      const from_event = clean(data?.id) === event_id ? clean(data?.property_id) : "";
+      if (from_event) return { property_id: from_event, source: "inbound_message_event", ambiguous: false };
+    } catch {
+      // fall through to the thread's outbound
+    }
+  }
+
+  const phones = phoneVariantsForThread(threadKey);
+  if (!phones.length) return { property_id: null, source: null, ambiguous: false };
+  try {
+    const { data } = await supabase
+      .from("send_queue")
+      .select("id,property_id,to_phone_number,queue_status,sent_at,created_at")
+      .in("to_phone_number", phones)
+      .in("queue_status", ["sent", "delivered"])
+      .order("created_at", { ascending: false })
+      .limit(10);
+    const rows = (Array.isArray(data) ? data : []).filter(
+      (row) => ["sent", "delivered"].includes(lower(row?.queue_status)) && phones.includes(clean(row?.to_phone_number))
+    );
+    const freshest = clean(rows[0]?.property_id);
+    if (freshest) return { property_id: freshest, source: "thread_outbound", ambiguous: false };
+    const distinct = uniq(rows.map((row) => clean(row?.property_id)).filter(Boolean));
+    if (distinct.length === 1) return { property_id: distinct[0], source: "thread_outbound_history", ambiguous: false };
+    if (distinct.length > 1) return { property_id: null, source: "thread_outbound_history", ambiguous: true, candidates: distinct.slice(0, 5) };
+  } catch {
+    // unresolved
+  }
+  return { property_id: null, source: null, ambiguous: false };
+}
+
 export async function selectSafeAutoReplyTemplate({
   supabaseClient = null,
   classification = null,
@@ -1945,7 +2017,19 @@ export async function selectSafeAutoReplyTemplate({
     // Canonical asset classification (properties row), judged by the same
     // rule the send-time asset guard applies. Only when the record exists —
     // otherwise the legacy scope filter below is unchanged.
-    const asset_property_id = clean(propertyId) || clean(context?.ids?.property_id) || null;
+    const asset_resolution = await resolveReplyAssetPropertyId({ supabase, propertyId, context, inboundEventId, threadKey });
+    if (asset_resolution.ambiguous) {
+      return {
+        ok: false,
+        reason: "property_context_ambiguous",
+        detail: `thread outbounds name ${asset_resolution.candidates?.length || 2}+ properties and none is bound to this reply (${(asset_resolution.candidates || []).join(",")})`,
+        human_review_required: true,
+        language,
+        language_resolution,
+        template: null,
+      };
+    }
+    const asset_property_id = asset_resolution.property_id;
     const asset_property = asset_property_id
       ? await loadPropertyAssetRecord(supabase, asset_property_id)
       : null;
@@ -1969,7 +2053,11 @@ export async function selectSafeAutoReplyTemplate({
         const reply_mode = lower(row.reply_mode);
         return !reply_mode || reply_mode === "auto" || reply_mode === "auto_reply";
       })
-      .filter((row) => isTemplatePropertyCompatible(row, property_type_scope))
+      // The legacy textual scope comparison only when the canonical record is
+      // unavailable: with the record, the asset rule above is the one
+      // authority (it vetoed approved "Commercial (Other)" rows for a
+      // commercial owner, 2026-10-22).
+      .filter((row) => Boolean(asset_property) || isTemplatePropertyCompatible(row, property_type_scope))
       .filter((row) => !usesExcludedPlaceholder(row.template_body))
       .filter((row) => !excluded_template_ids.has(clean(row.template_id)) && !excluded_template_ids.has(clean(row.id)))
       .sort(compareTemplateRank);
@@ -3940,6 +4028,7 @@ export async function executeInboundAutomationDecision({
         "language_template_missing",
         TEMPLATE_NOT_IN_SUPABASE,
         "asset_compatible_template_missing",
+        "property_context_ambiguous",
       ].includes(template_result.reason)
         ? template_result.reason
         : "no_safe_template",

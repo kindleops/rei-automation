@@ -288,6 +288,11 @@ export async function runInboundIntelligencePhase({
           classification,
           decision: canonical_decision,
           context: context || latestThreadContext,
+          // The same property the executor judges by: without it the audit's
+          // template verdict skipped the asset rule (2026-10-22).
+          propertyId: propertyId || latestThreadContext?.ids?.property_id || null,
+          threadKey: threadKey || inboundFrom || null,
+          inboundEventId,
         });
 
   const universal_stage = deriveUniversalStage(

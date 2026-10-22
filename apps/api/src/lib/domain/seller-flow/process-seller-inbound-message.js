@@ -9,6 +9,7 @@ import { buildConversationContext } from "@/lib/domain/classification/build-conv
 import {
   executeInboundAutomationDecision,
   resolveSafeFallbackClarifierDispatch,
+  resolveReplyAssetPropertyId,
 } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
 import { runInboundIntelligencePhase } from "@/lib/domain/seller-flow/run-inbound-intelligence-phase.js";
 import {
@@ -115,6 +116,7 @@ const defaultDeps = {
   runInboundIntelligencePhase,
   executeInboundAutomationDecision,
   resolveSafeFallbackClarifierDispatch,
+  resolveReplyAssetPropertyId,
   persistInboundIntelligenceSnapshot,
   persistSellerContactReferral,
   executeReferralAutomation,
@@ -834,6 +836,45 @@ export async function processSellerInboundMessage({
     });
     if (context_resolution.repair) {
       runtimeDeps.warn?.("[INBOUND_CONTEXT_REPAIRED]", { thread_key: hydration_thread_key, repair: context_resolution.repair });
+    }
+  }
+
+  // ── Property recovery (2026-10-22, +1281…5725) ─────────────────────────
+  // The deal-context hydration above runs only when the inbound arrived with
+  // NO usable id at all. An inbound that carried an owner / phone / brain id
+  // but no property id therefore ran the whole turn with property_id NULL —
+  // audit, asset-aware template choice, property-scoped outcomes — although
+  // its own message_events row and the outbound it answered both named the
+  // property. Recover it from exactly those (resolveReplyAssetPropertyId);
+  // an ambiguous thread (outbounds about several properties, none bound to
+  // this reply) or an ambiguous context resolution keeps it NULL.
+  if (
+    !clean(propertyId) &&
+    context_resolution?.status !== "ambiguous" &&
+    supabase &&
+    typeof runtimeDeps.resolveReplyAssetPropertyId === "function"
+  ) {
+    try {
+      const recovered = await runtimeDeps.resolveReplyAssetPropertyId({
+        supabase,
+        propertyId: null,
+        context,
+        inboundEventId,
+        threadKey: hydration_thread_key,
+      });
+      if (clean(recovered?.property_id) && !recovered.ambiguous) {
+        propertyId = clean(recovered.property_id);
+        runtimeDeps.info?.("[INBOUND_PROPERTY_RECOVERED]", {
+          thread_key: hydration_thread_key,
+          property_id: propertyId,
+          source: recovered.source || null,
+        });
+      }
+    } catch (recovery_error) {
+      runtimeDeps.warn?.("[INBOUND_PROPERTY_RECOVERY_FAILED]", {
+        thread_key: hydration_thread_key,
+        error: recovery_error?.message || "property_recovery_failed",
+      });
     }
   }
 
