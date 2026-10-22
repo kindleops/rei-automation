@@ -6,7 +6,10 @@
 //   (4) per-user rate limit → 429                 (5) agent.operator_membership → 403
 // Mutations act as the NAMED OPERATOR FROM THE SESSION: any actor / user / requested_by in the body is
 // ignored. CEO-only mutations (employees, policies, settings) need the owner membership role.
-// Envelope: { ok: true, data } / { ok: false, error, message }. Property refs are decoded for linking.
+// Envelope: { ok: true, data } / { ok: false, error, message }. Responses use the dashboard's shapes (present.js:
+// step_key / capability_key in the response even though stored jsonb says step / capability); property refs
+// are decoded for linking. Error codes: 404 (off), 401/403 (session, NOT_A_MEMBER, CEO_ONLY, FORBIDDEN),
+// 409 (ILLEGAL_TRANSITION, CONFLICT), 422 (PAYLOAD_REFUSED, invalid input), 423 (EMERGENCY_STOP), 503.
 // Nothing here can send, offer, write a stage or launch anything: a directive opens a mission whose
 // plan is built only from the closed capability catalog.
 import { createAgentIdentityProvider } from '../agent/security/agent-auth.js'
@@ -15,14 +18,16 @@ import { isAgentEnabled } from '../agent/config/agent-config.js'
 import { runtimeIdempotencyKey } from '../agent/runtime/job-runtime.js'
 import { decodeStored } from '../agent/missions/mission-codec.js'
 import { COO_PLAN_KIND, WORKFORCE_KINDS, WORKFORCE_LIMITS, WORKFORCE_ORG_ID, modelInterpretEnabled, workforceEnabled } from './config.js'
-import { DEPARTMENTS, DEPARTMENT_LABELS, ROLES, ROLE_CHARTERS, charterFor, effectiveTierCeiling } from './org/charters.js'
+import { ROLES, ROLE_CHARTERS, charterFor, effectiveTierCeiling } from './org/charters.js'
 import { CEO_EMPLOYEE_ID, COO_EMPLOYEE_ID } from './org/seed.js'
 import { interpretDirective, label } from './coo/interpret.js'
 import { statusAnswer } from './coo/respond.js'
 import { OPEN_ASSIGNMENT_STATES, openCountsOf } from './coo/staffing.js'
 import { proposeGrants } from './authority/engine.js'
 import { enqueueWorkforceJob } from './engine/dispatch.js'
-import { marketSlug } from './capabilities/shared.js'
+import { marketSlug, safeText } from './capabilities/shared.js'
+import { NEVER_REVIVE } from '../domain/action-gateway/actions/t2/shared.js'
+import { decodeText, presentAssignment, presentCharter, presentCharters, presentDepartments, presentGrant, presentMission, presentRefs, presentReport, presentRuntime } from './present.js'
 
 const DEFAULTS = Symbol.for('lc.workforce.routes')
 function defaults(env) {
@@ -37,7 +42,7 @@ const ASSIGNMENT_STATUSES = ['pending', 'ready', 'leased', 'running', 'waiting_j
 const EMP_ID = /^emp_[a-z0-9_]{3,40}$/
 const WFM_ID = /^wfm_[0-9a-f-]{36}$/
 const CLIENT_REQ = /^[A-Za-z0-9_-]{8,80}$/
-const STORE_STATUS = { NOT_FOUND: 404, CONFLICT: 409, LEASE_LOST: 409, ILLEGAL_TRANSITION: 409, PAYLOAD_REFUSED: 422, CLAIM_HELD: 409, VERSION_MISMATCH: 409, FORBIDDEN: 403 }
+const STORE_STATUS = { NOT_FOUND: 404, CONFLICT: 409, LEASE_LOST: 409, ILLEGAL_TRANSITION: 409, PAYLOAD_REFUSED: 422, CLAIM_HELD: 409, VERSION_MISMATCH: 409, FORBIDDEN: 403, UNAVAILABLE: 503 }
 
 function json(payload, status = 200, headers = {}) {
   return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers } })
@@ -83,9 +88,18 @@ function missionTitle(interp) {
   return `${label(interp.intent)}${n}${where}`.slice(0, 120)
 }
 
+async function runtimeStatus(p) {
+  const rs = p.svc.runtimeStore
+  try { if (typeof rs?.status === 'function') return await rs.status() } catch { /* fall through */ }
+  try { if (typeof rs?.limits === 'function') return { limits: await rs.limits(), heartbeats: [], schedules: [] } } catch { /* unknown */ }
+  return null
+}
+
 /** Open (or return the replayed) mission for an actionable directive and enqueue its coo_plan. */
 async function openDirective(p, { directive, client_request_id, interp }) {
   const user = p.identity.user_id
+  const st = await runtimeStatus(p)
+  if (st?.limits?.emergency_stop === true) return { stopped: true }
   const idempotency_key = runtimeIdempotencyKey('workforce.mission', user, client_request_id)
   const { mission, created } = await p.svc.store.openMission({ org_id: p.org_id, title: missionTitle(interp), directive, requested_by: user, owner_employee_id: COO_EMPLOYEE_ID, priority: 50, idempotency_key })
   let enqueue = null
@@ -97,6 +111,7 @@ async function openDirective(p, { directive, client_request_id, interp }) {
   }
   return { mission, created, enqueue }
 }
+const emergencyFail = (headers) => fail('EMERGENCY_STOP', 'The runtime emergency stop is on: no new mission is opened until it is lifted.', 423, headers)
 
 function directiveInput(b) {
   const directive = String(b?.directive ?? b?.content ?? '').trim()
@@ -106,6 +121,8 @@ function directiveInput(b) {
   if (!CLIENT_REQ.test(client_request_id)) return { error: 'CLIENT_REQUEST_ID_INVALID' }
   return { directive, client_request_id }
 }
+const inactiveOf = (employees = []) => new Map(employees.filter((e) => e.status !== 'active').map((e) => [e.employee_id, e.status]))
+const presentMessage = (m) => ({ ...m, content: decodeText(m.content), refs: presentRefs(m.refs) })
 
 export async function handleMissionsList(request, opts = {}) {
   const p = await prologue(request, opts)
@@ -113,8 +130,13 @@ export async function handleMissionsList(request, opts = {}) {
   const q = qp(request)
   const status = MISSION_STATUSES.includes(q.get('status')) ? q.get('status') : undefined
   try {
-    const missions = await p.svc.store.listMissions({ org_id: p.org_id, status, limit: Math.min(Math.max(Number(q.get('limit')) || 50, 1), 200), before: q.get('before') || undefined })
-    return ok({ missions }, opts.headers)
+    const [missions, assignments] = await Promise.all([
+      p.svc.store.listMissions({ org_id: p.org_id, status, limit: Math.min(Math.max(Number(q.get('limit')) || 50, 1), 200), before: q.get('before') || undefined }),
+      p.svc.store.listAssignments({ org_id: p.org_id, limit: 1000 }),
+    ])
+    const by = new Map()
+    for (const a of assignments) { if (!by.has(a.mission_id)) by.set(a.mission_id, []); by.get(a.mission_id).push(a) }
+    return ok({ missions: missions.map((m) => presentMission(m, { assignments: by.get(m.mission_id) || [] })) }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -136,7 +158,8 @@ export async function handleMissionCreate(request, opts = {}) {
       return fail(interp.refusal ? 'DIRECTIVE_REFUSED' : interp.intent === 'status_review' ? 'STATUS_IS_A_QUESTION' : 'DIRECTIVE_UNCLEAR', content, 422, opts.headers, { intent: interp.intent, codes: interp.refusal?.codes || [] })
     }
     const out = await openDirective(p, { ...v, interp })
-    return ok({ mission: out.mission, created: out.created, enqueue: out.enqueue, interpretation: { intent: interp.intent, markets: interp.markets, count: interp.count } }, opts.headers, out.created ? 201 : 200)
+    if (out.stopped) return emergencyFail(opts.headers)
+    return ok({ mission: presentMission(out.mission), created: out.created, enqueue: out.enqueue, interpretation: { intent: interp.intent, markets: interp.markets, count: interp.count } }, opts.headers, out.created ? 201 : 200)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -147,12 +170,15 @@ export async function handleMissionGet(request, mission_id, opts = {}) {
   try {
     const mission = await p.svc.store.getMission({ org_id: p.org_id, mission_id })
     if (!mission) return fail('NOT_FOUND', 'Mission not found.', 404, opts.headers)
-    const [assignments, events, messages] = await Promise.all([
+    const [assignments, events, messages, employees] = await Promise.all([
       p.svc.store.listAssignments({ org_id: p.org_id, mission_id, limit: 1000 }),
-      p.svc.store.listEvents({ org_id: p.org_id, mission_id, limit: 200 }),
+      p.svc.store.listEvents({ org_id: p.org_id, mission_id, limit: 500 }),
       p.svc.store.listExecMessages({ org_id: p.org_id, mission_id, limit: 50 }),
+      p.svc.store.listEmployees({ org_id: p.org_id }),
     ])
-    return ok({ mission, plan: mission.plan, report: mission.report, assignments, events, messages }, opts.headers)
+    const m = presentMission(mission, { assignments })
+    const inactive = inactiveOf(employees)
+    return ok({ mission: m, plan: m.plan, report: m.report, assignments: assignments.map((a) => presentAssignment(a, { inactive })), events, messages: messages.map(presentMessage) }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -167,7 +193,7 @@ export async function handleMissionCancel(request, mission_id, opts = {}) {
     const cancelled = await p.svc.store.cancelMissionAssignments({ org_id: p.org_id, mission_id })
     const m = await p.svc.store.transitionMission({ org_id: p.org_id, mission_id, to: 'cancelled' })
     await p.svc.store.appendEvent({ org_id: p.org_id, type: 'wf.mission.cancelled', mission_id, payload: { by_user: p.identity.user_id, assignments_cancelled: cancelled } })
-    return ok({ mission: m, assignments_cancelled: cancelled }, opts.headers)
+    return ok({ mission: presentMission(m), assignments_cancelled: cancelled }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -178,7 +204,7 @@ export async function handleCommandList(request, opts = {}) {
   const q = qp(request)
   try {
     const messages = await p.svc.store.listExecMessages({ org_id: p.org_id, mission_id: WFM_ID.test(q.get('mission') || '') ? q.get('mission') : undefined, limit: Math.min(Math.max(Number(q.get('limit')) || 50, 1), 200), before: q.get('before') || undefined })
-    return ok({ messages }, opts.headers)
+    return ok({ messages: messages.map(presentMessage) }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -197,27 +223,31 @@ export async function handleCommandPost(request, opts = {}) {
     const prior = recent.filter((m) => (m.refs || []).some((r) => r?.type === 'client_request' && r.id === v.client_request_id))
     if (prior.some((m) => m.author === 'ceo' && m.author_user_id === p.identity.user_id)) {
       const mref = prior.flatMap((m) => m.refs || []).find((r) => r?.type === 'mission')
-      return ok({ messages: prior, mission: mref ? await s.getMission({ org_id: p.org_id, mission_id: mref.id }) : null, replayed: true }, opts.headers)
+      const mission = mref ? await s.getMission({ org_id: p.org_id, mission_id: mref.id }) : null
+      return ok({ messages: prior.map(presentMessage), mission: presentMission(mission), replayed: true }, opts.headers)
+    }
+    const interp = interpretDirective(v.directive, p.svc.knownMarkets ? { markets: p.svc.knownMarkets } : {})
+    let opened = null
+    if (!interp.refusal && interp.actionable) {
+      opened = await openDirective(p, { ...v, interp })
+      if (opened.stopped) return emergencyFail(opts.headers)
     }
     const reqRef = { type: 'client_request', id: v.client_request_id }
     const ceoMsg = await s.appendExecMessage({ org_id: p.org_id, author: 'ceo', author_user_id: p.identity.user_id, content: v.directive, refs: [reqRef] })
-    const interp = interpretDirective(v.directive, p.svc.knownMarkets ? { markets: p.svc.knownMarkets } : {})
-    let mission = null
     let content
+    const mission = opened?.mission || null
     if (interp.refusal) content = interp.refusal.message
     else if (interp.intent === 'status_review') {
       const [missions, assignments, employees] = await Promise.all([s.listMissions({ org_id: p.org_id, limit: 50 }), s.listAssignments({ org_id: p.org_id, limit: 1000 }), s.listEmployees({ org_id: p.org_id })])
       content = statusAnswer({ missions, assignments, employees }).content
     } else if (!interp.actionable) content = interp.clarifying_question
     else {
-      const out = await openDirective(p, { ...v, interp })
-      mission = out.mission
-      content = out.enqueue?.ok === false
-        ? `I opened the mission "${mission.title}", but I could not queue its planning job (${out.enqueue.reason}). It will not start until the runtime accepts it.`
+      content = opened.enqueue?.ok === false
+        ? `I opened the mission "${mission.title}", but I could not queue its planning job (${opened.enqueue.reason}). It will not start until the runtime accepts it.`
         : `On it. I opened the mission "${mission.title}" and I am planning it now. Nothing in it contacts a seller or makes an offer.`
     }
     const cooMsg = await s.appendExecMessage({ org_id: p.org_id, author: 'coo', author_employee_id: COO_EMPLOYEE_ID, mission_id: mission?.mission_id ?? undefined, content, refs: [reqRef, ...(mission ? [{ type: 'mission', id: mission.mission_id }] : [])] })
-    return ok({ messages: [ceoMsg, cooMsg], mission, interpretation: { intent: interp.intent, refused: Boolean(interp.refusal), codes: interp.refusal?.codes || [] } }, opts.headers, mission ? 201 : 200)
+    return ok({ messages: [ceoMsg, cooMsg].map(presentMessage), mission: presentMission(mission), interpretation: { intent: interp.intent, refused: Boolean(interp.refusal), codes: interp.refusal?.codes || [] } }, opts.headers, mission ? 201 : 200)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -227,25 +257,22 @@ export async function handleOverview(request, opts = {}) {
   if (p.response) return p.response
   const s = p.svc.store
   try {
-    const [employees, missions, assignments, events] = await Promise.all([
+    const [employees, missions, assignments, events, status] = await Promise.all([
       s.listEmployees({ org_id: p.org_id }),
       s.listMissions({ org_id: p.org_id, limit: 200 }),
       s.listAssignments({ org_id: p.org_id, limit: 1000 }),
       s.listEvents({ org_id: p.org_id, limit: 500 }), // §11 lists ascending from a cursor: the newest 20 of a bounded window
+      runtimeStatus(p),
     ])
     const open = openCountsOf(assignments)
-    let runtime = { available: false }
-    if (p.svc.runtimeStore?.limits) {
-      try { const l = await p.svc.runtimeStore.limits(); runtime = { available: true, runtime_enabled: l.runtime_enabled === true, emergency_stop: l.emergency_stop === true } } catch { runtime = { available: false } }
-    }
     return ok({
-      departments: DEPARTMENTS.map((k) => ({ key: k, label: DEPARTMENT_LABELS[k], employees: employees.filter((e) => e.department_key === k).length })),
+      departments: presentDepartments(employees, assignments),
       employees: employees.map((e) => ({ ...e, open_assignments: open.get(e.employee_id) || 0 })),
       missions_by_status: Object.fromEntries(MISSION_STATUSES.map((st) => [st, missions.filter((m) => m.status === st).length])),
       assignments_by_status: Object.fromEntries(ASSIGNMENT_STATUSES.map((st) => [st, assignments.filter((a) => a.status === st).length])),
       last_events: events.slice(-20),
-      runtime,
-      flags: { workforce_enabled: true, model_interpret: modelInterpretEnabled(p.env), kinds: WORKFORCE_KINDS, kinds_armed: 'unknown' },
+      runtime: presentRuntime(status, WORKFORCE_KINDS),
+      flags: { workforce_enabled: true, model_interpret: modelInterpretEnabled(p.env) },
     }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
@@ -255,11 +282,14 @@ export async function handleEmployeesList(request, opts = {}) {
   if (p.response) return p.response
   const q = qp(request)
   try {
-    const employees = await p.svc.store.listEmployees({ org_id: p.org_id, status: ['active', 'paused', 'retired'].includes(q.get('status')) ? q.get('status') : undefined })
-    return ok({ employees: employees.map((e) => ({ ...e, charter: charterSummary(e.role_key) })) }, opts.headers)
+    const [employees, assignments] = await Promise.all([
+      p.svc.store.listEmployees({ org_id: p.org_id, status: ['active', 'paused', 'retired'].includes(q.get('status')) ? q.get('status') : undefined }),
+      p.svc.store.listAssignments({ org_id: p.org_id, limit: 1000 }),
+    ])
+    const open = openCountsOf(assignments)
+    return ok({ employees: employees.map((e) => ({ ...e, open_assignments: open.get(e.employee_id) || 0, charter: presentCharter(e.role_key) })) }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
-const charterSummary = (role) => { const c = charterFor(role); return c ? { title: c.title, department_key: c.department_key, tier_ceiling: c.tier_ceiling, market_scoped: c.market_scoped, capabilities: c.capabilities } : null }
 
 /** CEO-authored employee rows: the body's employee fields are validated; kind and department come from the charter. */
 export function validateEmployeeInput(raw = {}) {
@@ -285,7 +315,7 @@ export function validateEmployeeInput(raw = {}) {
 export async function handleEmployeeUpsert(request, opts = {}) {
   const p = await prologue(request, { ...opts, bucket: 'mutation' })
   if (p.response) return p.response
-  if (!isOwner(p)) return fail('FORBIDDEN', 'Only the CEO can create or change employees.', 403, opts.headers)
+  if (!isOwner(p)) return fail('CEO_ONLY', 'Only the CEO can create or change employees.', 403, opts.headers)
   const b = await body(request)
   const v = validateEmployeeInput(b.employee || b)
   if (v.error) return fail(v.error, 'The employee is not valid.', 422, opts.headers)
@@ -312,22 +342,26 @@ export async function handleEmployeeGet(request, employee_id, opts = {}) {
       s.listPolicies({ org_id: p.org_id, status: 'active' }),
     ])
     const jobs = [...new Set(assignments.map((a) => a.runtime_job_id).filter(Boolean))].slice(0, 25)
-    let cost = { status: jobs.length ? 'unknown' : 'known', committed_usd: jobs.length ? null : 0, jobs: jobs.length }
+    // spend is per runtime job (agent.spend_ledger); a per-day split per employee is not recorded in Phase A
+    let window_usd = jobs.length ? null : 0
+    let status = jobs.length ? 'unknown' : 'known'
+    let reason = jobs.length ? 'job spend unreadable' : 'no paid work (inline reads cost nothing)'
     if (jobs.length && p.svc.reads?.jobSpend) {
       let total = 0; let unknown = 0
       for (const id of jobs) { try { total += Number((await p.svc.reads.jobSpend(id)).committed_usd || 0) } catch { unknown += 1 } }
-      cost = { status: unknown ? (unknown === jobs.length ? 'unknown' : 'partial') : 'known', committed_usd: unknown === jobs.length ? null : Math.round(total * 1e6) / 1e6, jobs: jobs.length }
+      if (!unknown) { window_usd = Math.round(total * 1e6) / 1e6; status = 'known'; reason = null } else reason = `${unknown} of ${jobs.length} job costs unreadable`
     }
     const charter = charterFor(employee.role_key)
+    const inactive = inactiveOf([employee])
     return ok({
-      employee,
-      charter,
+      employee: { ...employee, open_assignments: assignments.filter((a) => OPEN_ASSIGNMENT_STATES.includes(a.status)).length },
+      charter: presentCharter(employee.role_key),
       authority: { effective_tier_ceiling: effectiveTierCeiling(employee), policies: policies.filter((x) => x.employee_id === employee_id || (!x.employee_id && x.role_key === employee.role_key)) },
-      memory,
-      assignments,
+      memory: memory.map((f) => ({ ...f, source_refs: presentRefs(f.source_refs) })),
+      assignments: assignments.map((a) => presentAssignment(a, { inactive })),
       open_assignments: assignments.filter((a) => OPEN_ASSIGNMENT_STATES.includes(a.status)).length,
-      kpis: (charter?.kpis || []).map((k) => kpis.find((x) => x.kpi_key === k) || { kpi_key: k, value: null, status: 'unknown' }),
-      cost,
+      kpis: (charter?.kpis || []).map((k) => kpis.find((x) => x.kpi_key === k) || { subject_type: 'employee', subject_key: employee_id, kpi_key: k, value: null, status: 'unknown', source: { reason: 'not computed in Phase A' } }),
+      cost: { today_usd: jobs.length ? null : 0, window_usd, window: `last_${jobs.length}_jobs`, cap_usd: employee.spend_day_cap_usd ?? null, status: jobs.length ? 'unknown' : status, reason: jobs.length ? (status === 'known' ? 'per-day spend is not attributed per employee; window_usd is the recent jobs total' : reason) : reason },
     }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
@@ -338,14 +372,15 @@ export async function handleAssignments(request, opts = {}) {
   if (p.response) return p.response
   const q = qp(request)
   try {
-    const assignments = await p.svc.store.listAssignments({
+    const [assignments, employees] = await Promise.all([p.svc.store.listAssignments({
       org_id: p.org_id,
       status: ASSIGNMENT_STATUSES.includes(q.get('status')) ? q.get('status') : undefined,
       assignee_employee_id: EMP_ID.test(q.get('employee') || '') ? q.get('employee') : undefined,
       mission_id: WFM_ID.test(q.get('mission') || '') ? q.get('mission') : undefined,
       limit: Math.min(Math.max(Number(q.get('limit')) || 100, 1), 500),
-    })
-    return ok({ assignments }, opts.headers)
+    }), p.svc.store.listEmployees({ org_id: p.org_id })])
+    const inactive = inactiveOf(employees)
+    return ok({ assignments: assignments.map((a) => presentAssignment(a, { inactive })) }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -353,34 +388,84 @@ export async function handleEvents(request, opts = {}) {
   const p = await prologue(request, opts)
   if (p.response) return p.response
   const q = qp(request)
-  const after = /^[0-9]{1,18}$/.test(q.get('after') || '') ? Number(q.get('after')) : undefined
+  const idq = (k) => (/^[0-9]{1,18}$/.test(q.get(k) || '') ? Number(q.get(k)) : undefined)
+  const after = idq('after')
+  const before = idq('before')
+  const limit = Math.min(Math.max(Number(q.get('limit')) || 100, 1), 500)
+  const mission_id = WFM_ID.test(q.get('mission') || '') ? q.get('mission') : undefined
   try {
-    const events = await p.svc.store.listEvents({ org_id: p.org_id, after_event_id: after, mission_id: WFM_ID.test(q.get('mission') || '') ? q.get('mission') : undefined, limit: Math.min(Math.max(Number(q.get('limit')) || 100, 1), 500) })
-    return ok({ events, next_cursor: events.length ? events[events.length - 1].event_id : after ?? null }, opts.headers)
+    let events
+    if (before != null && after == null) {
+      // §11 pages forward from a cursor: an older page is the tail of a bounded window before `before`
+      const win = await p.svc.store.listEvents({ org_id: p.org_id, after_event_id: Math.max(0, before - 1 - 5 * limit), mission_id, limit: 500 })
+      events = win.filter((e) => e.event_id < before).slice(-limit)
+    } else {
+      events = await p.svc.store.listEvents({ org_id: p.org_id, after_event_id: after, mission_id, limit })
+      if (before != null) events = events.filter((e) => e.event_id < before)
+    }
+    const next_after = events.length ? Math.max(...events.map((e) => e.event_id)) : after ?? null
+    return ok({ events, next_after, next_cursor: next_after }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
 // ── authority ────────────────────────────────────────────────────────────────
+function staticRestrictions() {
+  return NEVER_REVIVE.map((x) => ({
+    kind: 'exclusion',
+    label: x.code === 'CLOSED_LOST_NEVER_REVIVE' ? 'Closed lost: never revive' : 'Owner handled: permanent exclusion',
+    reason: x.code,
+    refs: [{ type: 'property', id: x.property_id, label: `Property ${x.property_id}`, property_id: x.property_id }, { type: 'opportunity', id: x.opportunity_id, label: 'Opportunity', property_id: x.property_id }, { type: 'thread', id: x.thread_id, label: 'Conversation', property_id: x.property_id }],
+    since: null,
+  }))
+}
+async function holdRestrictions(p) {
+  if (typeof p.svc.listActiveHolds !== 'function') return { items: [], available: false }
+  try {
+    const r = await p.svc.listActiveHolds()
+    if (!r?.ok) return { items: [], available: false }
+    const items = (r.holds || []).slice(0, 100).map((h) => ({
+      kind: 'hold',
+      label: `${String(h.hold_type || 'hold').replace(/_/g, ' ')}${h.hold_key ? ` · ${String(h.hold_key).replace(/[^a-z0-9_:.-]/gi, '').slice(0, 60)}` : ''}`,
+      reason: safeText(h.reason, 160),
+      refs: [h.property_id ? { type: 'property', id: String(h.property_id), label: `Property ${h.property_id}`, property_id: String(h.property_id) } : null, h.opportunity_id ? { type: 'opportunity', id: String(h.opportunity_id), label: 'Opportunity' } : null, h.inbox_thread_id ? { type: 'thread', id: String(h.inbox_thread_id), label: 'Conversation' } : null].filter(Boolean),
+      since: h.created_at ?? null,
+    }))
+    return { items, available: true }
+  } catch { return { items: [], available: false } }
+}
+
 export async function handleAuthorityGet(request, opts = {}) {
   const p = await prologue(request, opts)
   if (p.response) return p.response
   const s = p.svc.store
   try {
-    const [policies, settings, employees] = await Promise.all([s.listPolicies({ org_id: p.org_id }), s.getSettings({ org_id: p.org_id }), s.listEmployees({ org_id: p.org_id })])
-    const proposed = policies.filter((x) => x.status === 'active').flatMap((x) => proposeGrants(x, { employees }))
-    return ok({ policies, settings, proposed_grants: proposed, charters: ROLE_CHARTERS }, opts.headers)
+    const [policies, settings, employees, status, holds] = await Promise.all([s.listPolicies({ org_id: p.org_id }), s.getSettings({ org_id: p.org_id }), s.listEmployees({ org_id: p.org_id }), runtimeStatus(p), holdRestrictions(p)])
+    const proposed = policies.filter((x) => x.status === 'active').flatMap((x) => proposeGrants(x, { employees })).map(presentGrant)
+    const lim = status?.limits || null
+    return ok({
+      policies,
+      // no settings row yet ⇒ the DB default threshold (§2: 5,000,000)
+      settings: settings || { exec_review_price_usd: 5_000_000, escalation: {}, default: true },
+      proposed_grants: proposed,
+      restrictions: [...staticRestrictions(), ...holds.items],
+      restrictions_complete: holds.available, // suppression lists are never enumerated here (contact values)
+      emergency: lim ? { stop: lim.emergency_stop === true, reason: lim.emergency_stop_reason ?? null, since: lim.emergency_stop_at ?? null } : { stop: null, reason: 'runtime status unavailable', since: null },
+      flags: { workforce_enabled: true, model_interpret: modelInterpretEnabled(p.env) },
+      charters: presentCharters(),
+    }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
 export async function handleAuthorityPost(request, opts = {}) {
   const p = await prologue(request, { ...opts, bucket: 'mutation' })
   if (p.response) return p.response
-  if (!isOwner(p)) return fail('FORBIDDEN', 'Only the CEO can change authority.', 403, opts.headers)
+  if (!isOwner(p)) return fail('CEO_ONLY', 'Only the CEO can change authority.', 403, opts.headers)
   const b = await body(request)
   const s = p.svc.store
   const actor_user_id = p.identity.user_id
+  const op = b.op || ({ put_policy: 'put', revoke_policy: 'revoke', put_settings: 'settings' })[b.action] || null
   try {
-    if (b.action === 'put_policy') {
+    if (op === 'put') {
       const x = b.policy && typeof b.policy === 'object' ? b.policy : {}
       if (!x.action_key || (!x.role_key && !x.employee_id)) return fail('POLICY_INVALID', 'A policy needs an action and a role or an employee.', 422, opts.headers)
       if (x.role_key && !ROLES.includes(x.role_key)) return fail('ROLE_INVALID', 'Unknown role.', 422, opts.headers)
@@ -399,14 +484,13 @@ export async function handleAuthorityPost(request, opts = {}) {
         ...(x.valid_until ? { valid_until: String(x.valid_until) } : {}),
         ...(x.supersedes || x.policy_id ? { policy_id: String(x.supersedes || x.policy_id) } : {}),
       }
-      const out = await s.putPolicy({ org_id: p.org_id, policy, actor_user_id })
-      return ok({ policy: out }, opts.headers)
+      return ok({ policy: await s.putPolicy({ org_id: p.org_id, policy, actor_user_id }) }, opts.headers)
     }
-    if (b.action === 'revoke_policy') {
+    if (op === 'revoke') {
       if (!b.policy_id) return fail('POLICY_ID_REQUIRED', 'Which policy?', 422, opts.headers)
       return ok({ policy: await s.revokePolicy({ org_id: p.org_id, policy_id: String(b.policy_id), actor_user_id }) }, opts.headers)
     }
-    if (b.action === 'put_settings') {
+    if (op === 'settings') {
       const patch = {}
       const price = Number(b.patch?.exec_review_price_usd)
       if (b.patch?.exec_review_price_usd !== undefined) {
@@ -417,7 +501,7 @@ export async function handleAuthorityPost(request, opts = {}) {
       if (!Object.keys(patch).length) return fail('SETTINGS_INVALID', 'Nothing to change.', 422, opts.headers)
       return ok({ settings: await s.putSettings({ org_id: p.org_id, patch, actor_user_id }) }, opts.headers)
     }
-    return fail('ACTION_INVALID', 'Unknown authority action.', 422, opts.headers, { allowed: ['put_policy', 'revoke_policy', 'put_settings'] })
+    return fail('ACTION_INVALID', 'Unknown authority operation.', 422, opts.headers, { allowed: ['put', 'revoke', 'settings'] })
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -429,7 +513,7 @@ export async function handleKpis(request, opts = {}) {
   try {
     const kpis = await p.svc.store.listKpis({ org_id: p.org_id, subject_type: ['employee', 'department', 'org'].includes(q.get('subject_type')) ? q.get('subject_type') : undefined, subject_key: q.get('subject_key') || undefined })
     // unknown is a first-class value: a KPI never computed is { value: null, status: 'unknown' }, never 0
-    return ok({ kpis: kpis.map((k) => (k.status === 'known' ? k : { ...k, value: null, status: 'unknown' })) }, opts.headers)
+    return ok({ kpis: kpis.map((k) => (k.status === 'known' ? k : { ...k, value: null, status: 'unknown', source: { ...(k.source || {}), reason: k.source?.reason ?? 'unknown' } })) }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -438,10 +522,16 @@ export async function handleReports(request, opts = {}) {
   if (p.response) return p.response
   try {
     const missions = (await p.svc.store.listMissions({ org_id: p.org_id, limit: 100 })).filter((m) => m.report)
-    let brief = { available: false, code: 'BRIEF_SOURCE_UNAVAILABLE' }
+    let daily_brief = { available: false, generated_at: null, summary: null, items: [], code: 'BRIEF_SOURCE_UNAVAILABLE' }
     if (typeof p.svc.latestBrief === 'function') {
-      try { const f = await p.svc.latestBrief(); brief = f ? { available: true, job_id: f.job_id, at: f.retrieved_at, brief: f.value?.brief ?? null } : { available: false, code: 'BRIEF_NOT_GENERATED' } } catch { brief = { available: false, code: 'BRIEF_READ_FAILED' } }
+      try {
+        const f = await p.svc.latestBrief()
+        const br = f?.value?.brief
+        daily_brief = !f ? { available: false, generated_at: null, summary: null, items: [], code: 'BRIEF_NOT_GENERATED' }
+          : !br ? { available: false, generated_at: f.retrieved_at ?? null, summary: null, items: [], code: 'BRIEF_PREDATES_OPERATIONS' }
+            : { available: true, generated_at: f.retrieved_at ?? null, summary: typeof br.headline === 'string' ? br.headline : typeof br.summary === 'string' ? br.summary : null, items: Array.isArray(br.items) ? br.items.filter((x) => typeof x === 'string').slice(0, 20) : [], code: null, job_id: f.job_id ?? null, brief: br }
+      } catch { daily_brief = { available: false, generated_at: null, summary: null, items: [], code: 'BRIEF_READ_FAILED' } }
     }
-    return ok({ reports: missions.map((m) => ({ mission_id: m.mission_id, title: m.title, status: m.status, completed_at: m.completed_at ?? null, report: m.report })), daily_brief: brief }, opts.headers)
+    return ok({ reports: missions.map((m) => ({ mission_id: m.mission_id, title: m.title, status: m.status, completed_at: m.completed_at ?? null, report: presentReport(m.report, { mission: m }) })), daily_brief }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }

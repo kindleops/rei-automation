@@ -138,7 +138,14 @@ export async function getWorkforceRouteServices({ env = process.env } = {}) {
     const ops = getOperationsServices(env)
     if (ops?.store) latestBrief = () => ops.store.latestFinding({ finding_type: 'digest.morning' })
   } catch { latestBrief = null }
-  return { store, runtimeStore, reads, membership: (org_id, user_id) => reads.membership(org_id, user_id), latestBrief }
+  // the Authority Center lists active holds (ids / types only; never a thread key) through the guarded read client
+  let listActiveHolds = null
+  try {
+    const read = createQuickScanReadClient({ env }).client
+    const holds = await import('@/lib/domain/holds/automation-hold.js')
+    listActiveHolds = () => holds.loadActiveAutomationHolds({ supabase: read })
+  } catch { listActiveHolds = null }
+  return { store, runtimeStore, reads, membership: (org_id, user_id) => reads.membership(org_id, user_id), latestBrief, listActiveHolds }
 }
 
 export function __resetWorkforceWiring() {
