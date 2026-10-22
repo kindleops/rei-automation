@@ -20,14 +20,26 @@ const ROLLBACK = path.join(REPO_DIR, 'supabase/migrations/PROPOSED_2026101912000
 const N = 10_000
 
 const b = (n, enc = 'hex') => crypto.randomBytes(n).toString(enc)
+// A random hex id draw with NO letter a-f is a bare digit run, which the fix deliberately does not
+// treat as an id token (it is indistinguishable from glued phones: '61255501476125550148'); a 12-byte
+// draw is all digits with p = (10/16)^24 ≈ 1.3e-5, which failed this suite ~1 run in 55. The generator
+// therefore draws hex ids under the migration's documented token contract: at least one letter a-f.
+// The zero-letter boundary itself is pinned in payload-clean-opaque-ids-residual-pg.test.mjs.
+const hx = (n) => { for (;;) { const h = b(n); if (/[a-f]/.test(h)) return h } }
+// Likewise a base64url draw whose bytes happen to be valid UTF-8 text is in scope of the (unchanged)
+// base64_contact check by design: ~1.6e-5 of 12-byte draws decode to text holding a non-ASCII digit
+// (e.g. 'QS1CCFHfhdOAA1YZ' → U+07C5 NKO DIGIT FIVE) and are refused. Opaque ids are drawn from the bytes
+// that do NOT decode as UTF-8 (the overwhelming majority); the boundary is pinned in the residual file.
+const utf8 = new TextDecoder('utf-8', { fatal: true })
+const b64id = (n) => { for (;;) { const r = crypto.randomBytes(n); try { utf8.decode(r) } catch { return r.toString('base64url') } } }
 const ID_SHAPES = [
   (u) => ({ finding_type: 'recovery.candidate', key: `conv.${u}`, source_id: 'public.inbox_thread_state' }),
   (u) => ({ note: u }),
   (u) => ({ note: u.toUpperCase() }),
   (u) => ({ finding_id: `fnd_${u}`, citation: `inbox_thread_state:${u}` }),
   (u) => ({ refs: [`apr_${u}`, `mjob_${u}`, u] }),
-  () => ({ digest: b(16), sha1: b(20), sha256: b(32), object_id: b(12) }),
-  () => ({ opaque: b(12, 'base64url'), run_ref: `run_${b(16)}` }),
+  () => ({ digest: hx(16), sha1: hx(20), sha256: hx(32), object_id: hx(12) }),
+  () => ({ opaque: b64id(12), run_ref: `run_${hx(16)}` }),
   (u) => ({ items: [{ subject: u, detail: { conversation: `conv.${u}` } }] }),
 ]
 /** 10,000 docs, each carrying at least one random id; deterministic shape rotation, random ids. */
