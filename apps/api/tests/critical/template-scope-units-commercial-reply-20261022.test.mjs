@@ -120,7 +120,7 @@ test("unknown units fall back to Any Residential (or Landlord / Multifamily gene
   assert.equal(ok({ ...ANY_RES, allowed_property_groups: ["sfr"] }, mf), false, "an allowed list narrowed to sfr excludes multi-family");
   assert.equal(ok({ ...ANY_RES, template_body: "How many units are rented at {{property_address}}?" }, mf), false, "unit wording needs a known unit count");
   assert.equal(ok({ ...ANY_RES, template_body: "Would you sell your house at {{property_address}}?" }, mf), true);
-  assert.equal(ok({ ...ANY_RES, template_body: "Would you sell your house at {{property_address}}?" }, {}), false, "house wording never to an unclassified property");
+  assert.equal(ok({ ...ANY_RES, template_body: "Would you sell your house at {{property_address}}?" }, {}), true, "an unclassified property is still read as a home for wording");
   // a commercial property never takes residential-scoped copy, generic or not
   assert.equal(ok(ANY_RES, P.commercialOther), false);
   assert.equal(ok(COMMERCIAL_S1, P.commercialOther), true);

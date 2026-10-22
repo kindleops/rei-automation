@@ -310,9 +310,8 @@ export function isTemplateCompatibleWithProperty({ template, property, propertyG
  * unit-specific template. So only a generic (Any Residential / Residential /
  * missing / owner-type) scope is eligible — plus, for a multi-family property,
  * a Landlord / Multifamily scope — and only with words that fit:
- *   - unit, commercial and land wording never;
- *   - "house / home" wording for a residential property (units unknown) or a
- *     multi-family one, never for a wholly unclassified property;
+ *   - unit, commercial and land wording never ("house / home" wording is
+ *     residential and stays eligible);
  *   - an allowed list must still admit the property: 'sfr' for a residential
  *     or unclassified property (the historical reading), any multi-unit group
  *     for a multi-family one.
@@ -331,10 +330,10 @@ function unresolvedGroupDecision({ template, group, req, allowedGroups, wordsOnl
       return out(false, `land_template_on_${group}_property`)
     case 'multi_unit':
       return out(false, `multi_unit_template_${req.basis}_on_${group}_property`)
-    case 'residential':
-      if (group === 'unknown') return out(false, `residential_template_on_${group}_property`)
-      break
     default:
+      // "house / home" wording stays eligible: an unclassified property has
+      // always been read as a home, and a reply row with no property record
+      // ("…about the house") must not start failing the dispatch guard.
       break
   }
   if (wordsOnly) return out(true, group === 'unknown' ? 'compatible_property_group_unknown' : 'compatible_units_unknown')
