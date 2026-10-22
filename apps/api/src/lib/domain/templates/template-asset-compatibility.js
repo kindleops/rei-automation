@@ -33,7 +33,19 @@ const lower = (value) => String(value ?? '').trim().toLowerCase()
 export const RESIDENTIAL_GROUPS = Object.freeze(['sfr', 'duplex', 'triplex', 'fourplex', 'small_multifamily', 'multifamily_5_plus'])
 export const MULTI_UNIT_GROUPS = Object.freeze(['duplex', 'triplex', 'fourplex', 'small_multifamily', 'multifamily_5_plus'])
 export const COMMERCIAL_GROUPS = Object.freeze(['self_storage', 'retail', 'office', 'industrial', 'hotel_motel', 'mobile_home_park', 'other_commercial'])
-const KNOWN_GROUPS = new Set([...RESIDENTIAL_GROUPS, ...COMMERCIAL_GROUPS, 'land', 'residential'])
+/**
+ * A multi-family property whose unit count is unknown (production 2026-10-22:
+ * every "Residential / Multi-Family" row in the pool had units_count 0, 1 or
+ * 2). It is residential and multi-unit, but it is NOT a duplex, a fourplex or
+ * a 5+ building: a unit-specific template ("I am looking to acquire more units
+ * in {{city}}") never describes it, and neither does single-family copy. Only
+ * an Any-Residential (generic) template does — else the row holds.
+ */
+export const MULTIFAMILY_UNITS_UNKNOWN = 'multifamily_units_unknown'
+// Groups whose exact asset/unit type is not known: only a generic,
+// any-residential scope may describe them (never a unit-specific scope).
+const UNRESOLVED_GROUPS = new Set(['residential', 'unknown', MULTIFAMILY_UNITS_UNKNOWN])
+const KNOWN_GROUPS = new Set([...RESIDENTIAL_GROUPS, ...COMMERCIAL_GROUPS, 'land', 'residential', MULTIFAMILY_UNITS_UNKNOWN])
 
 const truthy = (v) => v === true || v === 'true' || v === 1 || v === '1' || lower(v) === 'yes'
 
@@ -66,8 +78,11 @@ function groupFromLabel(label, units) {
   if (/(fourplex|quadplex|4[\s-]?plex)/.test(t)) return 'fourplex'
   if (/(5\+|five\s*\+|multifamily 5)/.test(t)) return 'multifamily_5_plus'
   if (/(multi[\s-]?family|apartment|\bunits?\b)/.test(t)) {
+    // A multi-family label with no usable unit count (0, 1 or missing) is
+    // multi-unit with UNKNOWN units — never 'small_multifamily' (5–10), which
+    // admitted every "5+ Units" template.
     const byUnits = groupFromUnits(units)
-    return byUnits && byUnits !== 'sfr' ? byUnits : 'small_multifamily'
+    return byUnits && byUnits !== 'sfr' ? byUnits : MULTIFAMILY_UNITS_UNKNOWN
   }
   if (/commercial/.test(t)) return 'other_commercial'
   return null
@@ -118,11 +133,14 @@ export function canonicalPropertyGroupOf(property = {}) {
   }
   const byUnits = groupFromUnits(units)
   const cls = lower(p.property_class || p.asset_class || p.normalized_asset_class)
-  if (/residential|multifamily/.test(cls) || lower(p.canonical_property_group) === 'residential') {
-    return byUnits || 'residential'
-  }
+  if (/multi[\s-]?family/.test(cls)) return byUnits && byUnits !== 'sfr' ? byUnits : MULTIFAMILY_UNITS_UNKNOWN
+  if (/residential/.test(cls)) return byUnits || 'residential'
+  // The record's own class outranks a 'Residential' label carried by a
+  // snapshot (campaign graph canonical_property_group): a Commercial / Other
+  // property is commercial, never "residential, units unknown".
   if (/commercial|industrial|exempt|agricult/.test(cls)) return 'other_commercial'
   if (/vacant|land/.test(cls)) return hasStructure(p) ? byUnits || 'residential' : 'land'
+  if (lower(p.canonical_property_group) === 'residential') return byUnits || 'residential'
   return byUnits || 'unknown'
 }
 
@@ -185,18 +203,43 @@ export function templateAssetRequirement(template = {}) {
  * with allowed_property_groups when present. Genericity is never inferred
  * from copy — a template is generic only because its metadata says so.
  */
-export function templateAllowedGroups(template = {}) {
+/**
+ * What a template's declared property_type_scope is, before any allowed list:
+ *   storage | retail | commercial | land | five_plus | duplex | triplex |
+ *   fourplex | single_family | landlord_multifamily | generic_residential
+ * "single_family,residential" (production 840901/840902) is SINGLE FAMILY:
+ * the trailing "residential" names the class, it does not widen the scope.
+ * Only Any Residential / Residential / missing (and the owner-type scopes:
+ * probate, corporate, follow-up) are generic.
+ */
+export function templateScopeKind(template = {}) {
   const scope = lower(template?.property_type_scope)
+  if (/storage/.test(scope)) return 'storage'
+  if (/(retail|strip)/.test(scope)) return 'retail'
+  if (/(commercial|office|industrial|warehouse|hotel|motel)/.test(scope)) return 'commercial'
+  if (/(\bland\b|vacant)/.test(scope)) return 'land'
+  if (/(5\+|five\s*\+)/.test(scope)) return 'five_plus'
+  if (/^duplex$/.test(scope)) return 'duplex'
+  if (/^triplex$/.test(scope)) return 'triplex'
+  if (/^(fourplex|quadplex)$/.test(scope)) return 'fourplex'
+  if (/(single[\s_-]?family|\bsfr\b)/.test(scope)) return 'single_family'
+  if (/(multi[\s_-]?family|landlord)/.test(scope)) return 'landlord_multifamily'
+  return 'generic_residential'
+}
+
+export function templateAllowedGroups(template = {}) {
+  const kind = templateScopeKind(template)
   let fromScope = null
-  if (/storage/.test(scope)) fromScope = ['self_storage']
-  else if (/(retail|strip)/.test(scope)) fromScope = ['retail']
-  else if (/(commercial|office|industrial|warehouse|hotel|motel)/.test(scope)) fromScope = [...COMMERCIAL_GROUPS]
-  else if (/(\bland\b|vacant)/.test(scope)) fromScope = ['land']
-  else if (/(5\+|five\s*\+)/.test(scope)) fromScope = ['small_multifamily', 'multifamily_5_plus']
-  else if (/^duplex$/.test(scope)) fromScope = ['duplex']
-  else if (/^triplex$/.test(scope)) fromScope = ['triplex']
-  else if (/^(fourplex|quadplex)$/.test(scope)) fromScope = ['fourplex']
-  else if (/(multifamily|landlord)/.test(scope)) fromScope = null // a landlord may own a house: the allowed list decides, unit words narrow
+  if (kind === 'storage') fromScope = ['self_storage']
+  else if (kind === 'retail') fromScope = ['retail']
+  else if (kind === 'commercial') fromScope = [...COMMERCIAL_GROUPS]
+  else if (kind === 'land') fromScope = ['land']
+  else if (kind === 'five_plus') fromScope = ['small_multifamily', 'multifamily_5_plus']
+  else if (kind === 'duplex') fromScope = ['duplex']
+  else if (kind === 'triplex') fromScope = ['triplex']
+  else if (kind === 'fourplex') fromScope = ['fourplex']
+  else if (kind === 'single_family') fromScope = ['sfr']
+  else if (kind === 'landlord_multifamily') fromScope = null // a landlord may own a house: the allowed list decides, unit words narrow
   else fromScope = [...RESIDENTIAL_GROUPS] // residential / any residential / probate / follow-up / missing
 
   const listed = Array.isArray(template?.allowed_property_groups) && template.allowed_property_groups.length
@@ -215,9 +258,9 @@ export function templateAllowedGroups(template = {}) {
  *      group, unit wording a multi-unit group, "house" wording a residential
  *      group — they never make a template eligible where metadata does not
  *
- * A residential property whose unit count is unknown, or a property with no
- * classification at all, is treated as a single-family home: it only takes
- * templates whose metadata admits 'sfr' and whose words fit one.
+ * A residential property whose unit count is unknown, a multi-family
+ * property with no usable unit count, or a property with no classification at
+ * all only takes a GENERIC (any-residential) scope — see unresolvedGroupDecision.
  *
  * `wordsOnly` judges text with no metadata behind it (a rendered body whose
  * template row is unknown); it can only narrow, never admit.
@@ -226,11 +269,13 @@ export function templateAllowedGroups(template = {}) {
  */
 export function isTemplateCompatibleWithProperty({ template, property, propertyGroup, wordsOnly = false } = {}) {
   const group = propertyGroup && KNOWN_GROUPS.has(propertyGroup) ? propertyGroup : canonicalPropertyGroupOf(property)
-  const effective = group === 'residential' || group === 'unknown' ? 'sfr' : group
   const req = templateAssetRequirement(template)
   const allowedGroups = templateAllowedGroups(template)
   const templateScope = String(template?.property_type_scope ?? '') || req.basis
   const out = (compatible, reason) => ({ compatible, reason, propertyGroup: group, templateScope, requirement: req, allowedGroups })
+
+  if (UNRESOLVED_GROUPS.has(group)) return unresolvedGroupDecision({ template, group, req, allowedGroups, wordsOnly, out })
+  const effective = group
 
   const prohibited = Array.isArray(template?.prohibited_property_groups) ? template.prohibited_property_groups.map(lower) : []
   if (prohibited.includes(effective)) return out(false, `template_prohibits_${effective}`)
@@ -255,6 +300,55 @@ export function isTemplateCompatibleWithProperty({ template, property, propertyG
 
   if (!wordsOnly && !allowedGroups.includes(effective)) return out(false, `template_scope_excludes_${group}_property`)
   return out(true, group === 'unknown' ? 'compatible_property_group_unknown' : 'compatible')
+}
+
+/**
+ * A property whose exact asset / unit type is unknown — residential with no
+ * type, no classification at all, or multi-family with no usable unit count.
+ * The rule (owner, 2026-10-22): a scoped template is eligible only when the
+ * property's group/units MATCH the scope, and unknown units never select a
+ * unit-specific template. So only a generic (Any Residential / Residential /
+ * missing / owner-type) scope is eligible — plus, for a multi-family property,
+ * a Landlord / Multifamily scope — and only with words that fit:
+ *   - unit, commercial and land wording never;
+ *   - "house / home" wording for a residential property (units unknown) or a
+ *     multi-family one, never for a wholly unclassified property;
+ *   - an allowed list must still admit the property: 'sfr' for a residential
+ *     or unclassified property (the historical reading), any multi-unit group
+ *     for a multi-family one.
+ * Nothing eligible ⇒ the caller holds.
+ */
+function unresolvedGroupDecision({ template, group, req, allowedGroups, wordsOnly, out }) {
+  const multiUnit = group === MULTIFAMILY_UNITS_UNKNOWN
+  const prohibited = Array.isArray(template?.prohibited_property_groups) ? template.prohibited_property_groups.map(lower) : []
+  if (prohibited.includes(group) || (!multiUnit && prohibited.includes('sfr'))) {
+    return out(false, `template_prohibits_${multiUnit ? group : 'sfr'}`)
+  }
+  switch (req.kind) {
+    case 'commercial':
+      return out(false, `commercial_template_${req.basis}_on_${group}_property`)
+    case 'land':
+      return out(false, `land_template_on_${group}_property`)
+    case 'multi_unit':
+      return out(false, `multi_unit_template_${req.basis}_on_${group}_property`)
+    case 'residential':
+      if (group === 'unknown') return out(false, `residential_template_on_${group}_property`)
+      break
+    default:
+      break
+  }
+  if (wordsOnly) return out(true, group === 'unknown' ? 'compatible_property_group_unknown' : 'compatible_units_unknown')
+
+  // A Landlord / Multifamily scope names the multi-family GROUP, not a unit
+  // count, so it describes a multi-family property whose units are unknown
+  // (its unit wording, if any, was refused above). Every other scope is
+  // unit- or asset-specific.
+  const kind = templateScopeKind(template)
+  const genericForGroup = kind === 'generic_residential' || (multiUnit && kind === 'landlord_multifamily')
+  if (!genericForGroup) return out(false, `unit_specific_template_${kind}_on_${group}_property`)
+  const admits = multiUnit ? allowedGroups.some((g) => MULTI_UNIT_GROUPS.includes(g)) : allowedGroups.includes('sfr')
+  if (!admits) return out(false, `template_scope_excludes_${group}_property`)
+  return out(true, group === 'unknown' ? 'compatible_property_group_unknown' : 'compatible_units_unknown')
 }
 
 /** Filter a candidate list; the reasons travel with it for diagnostics. */

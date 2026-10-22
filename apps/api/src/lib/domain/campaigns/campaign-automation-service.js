@@ -4374,6 +4374,11 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
         property_zip: row.property_zip,
         property_type: row.property_type,
         property_class: row.property_class,
+        // The unit count rides with the snapshot so template choice can match
+        // a unit-specific scope (Duplex / 5+ Units) only to a property whose
+        // units are KNOWN; absent, the property's units are unknown and only
+        // generic copy is eligible (template-asset-compatibility.js).
+        units_count: row.units_count ?? null,
         canonical_property_group: row.canonical_property_group,
         phone_owner: row.phone_owner,
         phone_activity_status: row.phone_activity_status,
@@ -7690,6 +7695,7 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     property_zip: firstNonEmpty(snapshot.property_zip),
     property_type: firstNonEmpty(snapshot.property_type, target.asset_type),
     property_class: firstNonEmpty(snapshot.property_class),
+    units_count: snapshot.units_count ?? null,
     canonical_property_group: firstNonEmpty(snapshot.canonical_property_group, target.asset_type),
     final_acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,
     acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,

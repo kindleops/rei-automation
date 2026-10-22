@@ -21,6 +21,7 @@ import {
   canonicalPropertyGroupOf,
   filterTemplatesForProperty,
   isTemplateCompatibleWithProperty,
+  MULTIFAMILY_UNITS_UNKNOWN,
 } from "@/lib/domain/templates/template-asset-compatibility.js";
 import { loadPropertyAssetRecord, queueTemplateIdOf } from "@/lib/domain/queue/template-asset-guard.js";
 import { normalizePunctuation } from "@/lib/sms/personalize_template.js";
@@ -114,7 +115,15 @@ export async function reselectTemplateForAsset({ supabase, queue_row, body, prop
   const property_group = canonicalPropertyGroupOf(
     assetRecord || { property_type: row.property_type, ...(row?.metadata?.candidate_snapshot || {}) },
   );
-  const effective_group = property_group === "residential" || property_group === "unknown" ? "sfr" : property_group;
+  // The ranker's allowed-list check only: eligibility is already decided by
+  // filterTemplatesForProperty. A multi-family property with unknown units has
+  // no slug of its own in allowed lists, so it is ranked without one.
+  const effective_group =
+    property_group === "residential" || property_group === "unknown"
+      ? "sfr"
+      : property_group === MULTIFAMILY_UNITS_UNKNOWN
+        ? null
+        : property_group;
   const fail = (reason) => ({ resolved: false, reason, property_group, previous_template_id });
 
   let original = null;
