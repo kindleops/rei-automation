@@ -331,6 +331,13 @@ export interface WfEventsPage { events: WfEvent[]; next_after: number | null }
 
 export interface WfCommandResult { messages: WfExecMessage[]; mission: WfMission | null }
 
+/** The CEO's decision on an item in the CEO queue (POST /assignments/[id]/resolve). */
+export type WfDecision = 'approve' | 'decline' | 'done'
+/** Every effect a decision could have outside Workforce. In Phase A only recorded_in_workforce is ever true. */
+export interface WfDecisionEffects { recorded_in_workforce: boolean; seller_contacted: boolean; offer_made: boolean; stage_changed: boolean; runtime_job_started: boolean; work_created: boolean }
+export interface WfDecisionOutcome { headline: string | null; next_step: string | null; message: string | null; effects: WfDecisionEffects | null }
+export interface WfResolveResult { assignment: WfAssignment | null; decision: WfDecision | null; outcome: WfDecisionOutcome; messages: WfExecMessage[]; replayed: boolean }
+
 export interface WfAuthority {
   policies: WfPolicy[]
   settings: WfSettings | null

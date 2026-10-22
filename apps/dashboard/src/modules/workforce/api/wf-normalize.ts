@@ -7,7 +7,7 @@ import type {
   WfAssignment, WfAuthority, WfCfoVerdict, WfCharter, WfCommandResult, WfCostLine, WfCosts, WfDepartmentSummary, WfEmployee,
   WfEmployeeProfile, WfEvent, WfEventsPage, WfExecMessage, WfKpi, WfMemoryFact, WfMission, WfMissionDetail,
   WfOverview, WfPlan, WfPlanStep, WfPolicy, WfProposedGrant, WfRankedItem, WfRef, WfRefType, WfReport, WfReportEntry,
-  WfReportItem, WfReports, WfRestriction, WfScoreComponents, WfSettings,
+  WfReportItem, WfReports, WfRestriction, WfScoreComponents, WfSettings, WfResolveResult, WfDecisionEffects,
 } from './wf-types'
 
 type Obj = Record<string, unknown>
@@ -287,6 +287,23 @@ export const normalizeMessages = (v: unknown): WfExecMessage[] => listOf(v, 'mes
 export function normalizeCommand(v: unknown): WfCommandResult {
   const o = obj(v)
   return { messages: normalizeMessages(v), mission: o.mission ? normalizeMission(o.mission) : null }
+}
+
+const EFFECT_KEYS = ['recorded_in_workforce', 'seller_contacted', 'offer_made', 'stage_changed', 'runtime_job_started', 'work_created'] as const
+export function normalizeResolve(v: unknown): WfResolveResult {
+  const o = obj(v)
+  const out = obj(o.outcome)
+  const fx = obj(out.effects)
+  // an effect the server did not state is not assumed false: the whole block becomes unknown (null)
+  const effects = EFFECT_KEYS.every((k) => typeof fx[k] === 'boolean') ? Object.fromEntries(EFFECT_KEYS.map((k) => [k, fx[k] as boolean])) as unknown as WfDecisionEffects : null
+  const d = str(o.decision)
+  return {
+    assignment: o.assignment ? normalizeAssignment(o.assignment) : null,
+    decision: d === 'approve' || d === 'decline' || d === 'done' ? d : null,
+    outcome: { headline: str(out.headline), next_step: str(out.next_step), message: str(out.message), effects },
+    messages: normalizeMessages(v),
+    replayed: o.replayed === true,
+  }
 }
 
 export function normalizeMissionDetail(v: unknown): WfMissionDetail | null {

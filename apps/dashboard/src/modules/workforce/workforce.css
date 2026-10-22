@@ -795,3 +795,24 @@
 
 /* Light: ink does the work */
 :root[data-nexus-theme='light'] .wf .wf-send { box-shadow: 0 6px 16px -10px rgba(11, 18, 32, 0.5); }
+
+/* ── CEO queue decisions (Needs you + Work Queue) ─────────────────────────── */
+.wf-decide { display: grid; gap: 5px; width: 100%; min-width: 0; padding-top: 2px; }
+.wf-decide__btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.wf-decide__note { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-3); line-height: 1.35; }
+.wf-decide__fail { margin: 0; display: flex; gap: 6px; align-items: flex-start; font: 500 11.5px/1.35 var(--lc-font-ui); color: var(--lc-ink-1); }
+.wf-decide__fail svg { flex: none; margin-top: 2px; color: var(--wf-crit); }
+.wf-decide.is-busy .wf-decide__note { color: var(--lc-ink-2); }
+.wf-needs li[data-phase='recording'] { opacity: 0.72; transition: opacity 160ms ease; }
+.wf-needs li[data-phase='failed'] { box-shadow: inset 2px 0 0 var(--wf-crit), inset 0 0 0 1px var(--wf-line); }
+.wf-needs__more { justify-self: start; margin-top: 2px; }
+.wf-needs--recorded { margin-bottom: 8px; }
+.wf-recorded { display: grid; gap: 4px; padding: 8px 10px 9px 12px; border-radius: 10px; box-shadow: inset 2px 0 0 var(--wf-ok, var(--lc-ink-3)), inset 0 0 0 1px var(--wf-line); }
+.wf-needs li.wf-recorded { justify-items: stretch; box-shadow: inset 2px 0 0 var(--wf-ok, var(--lc-ink-3)), inset 0 0 0 1px var(--wf-line); }
+.wf-recorded__h { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.wf-recorded__h svg { color: var(--wf-ok, var(--lc-ink-2)); }
+.wf-recorded__k { font: 600 12px/1.2 var(--lc-font-ui); flex: 1; min-width: 0; }
+.wf-recorded__x { all: unset; cursor: pointer; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: var(--lc-ink-3); }
+.wf-recorded__x:hover { color: var(--lc-ink-1); background: rgba(var(--lc-edge-rgb), 0.06); }
+.wf-recorded__m { margin: 0; font: 450 12px/1.45 var(--lc-font-ui); color: var(--lc-ink-2); }
+.wf-queue__recorded { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }

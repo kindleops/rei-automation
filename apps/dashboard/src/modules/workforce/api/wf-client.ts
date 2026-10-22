@@ -8,6 +8,7 @@
  *   GET       /api/cockpit/workforce/missions/[id]
  *   POST      /api/cockpit/workforce/missions/[id]/cancel
  *   GET       /api/cockpit/workforce/assignments?status=&employee=
+ *   POST      /api/cockpit/workforce/assignments/[id]/resolve  { decision, note? } (CEO only; records the decision in Workforce only)
  *   GET       /api/cockpit/workforce/events?after=&mission=
  *   GET/POST  /api/cockpit/workforce/command             POST { content, client_request_id } → { messages, mission? }
  *   GET/POST  /api/cockpit/workforce/authority
@@ -26,11 +27,11 @@
 import { callBackend, type BackendResult } from '../../../lib/api/backendClient'
 import {
   normalizeAssignments, normalizeAuthority, normalizeCommand, normalizeEmployee, normalizeEmployees, normalizeEventsPage, normalizeKpis,
-  normalizeMessages, normalizeMission, normalizeMissionDetail, normalizeMissions, normalizeOverview, normalizePolicy, normalizeProfile, normalizeReports, obj, str,
+  normalizeMessages, normalizeMission, normalizeMissionDetail, normalizeMissions, normalizeOverview, normalizePolicy, normalizeProfile, normalizeReports, normalizeResolve, obj, str,
 } from './wf-normalize'
 import type {
   WfAssignment, WfAssignmentStatus, WfAuthority, WfCommandResult, WfEmployee, WfEmployeeProfile, WfEventsPage, WfExecMessage, WfKpi,
-  WfMission, WfMissionDetail, WfMissionStatus, WfOverview, WfPolicy, WfReports,
+  WfDecision, WfMission, WfMissionDetail, WfMissionStatus, WfOverview, WfPolicy, WfReports, WfResolveResult,
 } from './wf-types'
 
 export const WF_BASE = '/api/cockpit/workforce'
@@ -146,6 +147,14 @@ export const cancelMission = (id: string, signal?: AbortSignal): Promise<WfResul
 
 export const listAssignments = (p: { status?: WfAssignmentStatus | null; employee?: string | null } = {}, signal?: AbortSignal): Promise<WfResult<WfAssignment[]>> =>
   send({ method: 'GET', path: `${WF_BASE}/assignments${qs({ status: p.status, employee: p.employee })}`, signal }, normalizeAssignments)
+
+/**
+ * CEO only (the server checks the owner membership of the SESSION). Records the CEO's decision on an item in
+ * the CEO queue inside Workforce. It starts nothing: no send, no offer, no stage write. A retry of the same
+ * decision is answered as a replay (`replayed: true`) and writes nothing.
+ */
+export const resolveAssignment = (id: string, decision: WfDecision, note?: string | null, signal?: AbortSignal): Promise<WfResult<WfResolveResult>> =>
+  send({ method: 'POST', path: `${WF_BASE}/assignments/${enc(id)}/resolve`, body: { decision, ...(note && note.trim() ? { note: note.trim() } : {}) }, signal }, normalizeResolve)
 
 /**
  * The operations feed. `after` pages forward (new events); `before` pages
