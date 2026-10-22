@@ -110,6 +110,8 @@ export function qs(params: Record<string, string | number | null | undefined>): 
   return parts.length ? `?${parts.join('&')}` : ''
 }
 const enc = encodeURIComponent
+// Workforce × Agntei: the register answer's link steps (api/wf-agntei.ts)
+import { normalizeLinkSteps } from './wf-agntei'
 
 /** One id per submission; a retry of the SAME submission reuses it (the server replays the same mission). */
 export function newClientRequestId(): string {
@@ -128,6 +130,17 @@ export const listEmployees = (signal?: AbortSignal): Promise<WfResult<WfEmployee
 /** CEO only (the server checks the session). Create or update one employee row. */
 export const upsertEmployee = (employee: Partial<WfEmployee> & { employee_id: string }, signal?: AbortSignal): Promise<WfResult<WfEmployee | null>> =>
   send({ method: 'POST', path: `${WF_BASE}/employees`, body: { employee }, signal }, (d) => normalizeEmployee(obj(d).employee ?? d))
+
+/**
+ * CEO only (the server checks the owner membership of the SESSION). "Register an Agntei agent": POST /employees
+ * { op: 'register_agntei', employee } creates a pending_link operator_ai employee with NO principal and NO grant, and
+ * answers the owner's exact link steps (mint → principal → grants → bind → connect → link). Nothing is executed.
+ */
+export const registerAgnteiAgent = (employee: { employee_id: string; role_key: string; display_name: string; markets?: string[]; skills?: string[]; property_specializations?: string[]; manager_employee_id?: string | null; employee_code?: string | null }, signal?: AbortSignal): Promise<WfResult<import('./wf-types').WfRegisterResult>> =>
+  send({ method: 'POST', path: `${WF_BASE}/employees`, body: { op: 'register_agntei', employee }, signal }, (d) => {
+    const o = obj(d)
+    return { employee: normalizeEmployee(o.employee), link: normalizeLinkSteps(o.link), executed: o.executed === true }
+  })
 
 export const getEmployee = (id: string, signal?: AbortSignal): Promise<WfResult<WfEmployeeProfile | null>> =>
   send({ method: 'GET', path: `${WF_BASE}/employees/${enc(id)}`, signal }, normalizeProfile)

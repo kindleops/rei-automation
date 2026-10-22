@@ -12,6 +12,7 @@ import type { WfRequest, WfTransport } from '../api/wf-client'
 import {
   DIAG_ASSIGNMENTS, FOLLOW_ONS, FX_AUTHORITY, FX_CHARTERS, FX_DEPARTMENTS, FX_EMPLOYEES, FX_EVENTS, FX_KPIS, FX_MEMORY, FX_MESSAGES,
   FX_MISSIONS, FX_REPORTS_BRIEF, FX_SUBJECTS, REVIVAL_ASSIGNMENTS, STATUS_ASSIGNMENTS, TRIAGE_ASSIGNMENTS, TRIAGE_PLAN, TRIAGE_REPORT, propRef,
+  FX_AGNTEI_ASSIGNMENTS, FX_GATEWAY_AUDIT, fxLinkSteps,
 } from './wf-fixture-data'
 
 type R = Record<string, unknown>
@@ -19,7 +20,7 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
 const missions: R[] = clone(FX_MISSIONS)
 const ADDR = new Map(FX_SUBJECTS.map((s) => [s.pid, s.addr]))
-const assignments: R[] = clone([...TRIAGE_ASSIGNMENTS, ...FOLLOW_ONS, ...DIAG_ASSIGNMENTS, ...STATUS_ASSIGNMENTS, ...REVIVAL_ASSIGNMENTS])
+const assignments: R[] = clone([...TRIAGE_ASSIGNMENTS, ...FOLLOW_ONS, ...DIAG_ASSIGNMENTS, ...STATUS_ASSIGNMENTS, ...REVIVAL_ASSIGNMENTS, ...FX_AGNTEI_ASSIGNMENTS])
   .map((a) => (a.resource_type === 'property' ? { ...a, resource_label: ADDR.get(String(a.resource_key)) ?? null } : a))
 const events: R[] = clone(FX_EVENTS)
 const messages: R[] = clone(FX_MESSAGES)
@@ -146,7 +147,20 @@ const ok = (data: unknown): BackendResult<unknown> => ({ ok: true, status: 200, 
 const fail = (status: number, error: string, message: string): BackendResult<unknown> => ({ ok: false, status, error, message, upstream: { ok: false, error, message, fixture: true } })
 
 const openCount = (empId: string) => assignments.filter((a) => a.assignee_employee_id === empId && !['completed', 'failed', 'cancelled'].includes(String(a.status))).length
-const employees = (): R[] => FX_EMPLOYEES.map((e): R => ({ ...e, open_assignments: openCount(String(e.employee_id)) }))
+const registered: R[] = []
+// the truthful activity the server derives (lib/workforce/agntei/activity.js), approximated for the fixture
+const fxActivity = (e: R): R => {
+  if (e.status === 'pending_link') return { state: 'pending_link', reason: 'not_linked', label: e.action_principal_id ? 'Bound; waiting for the agent to link from Agntei' : 'Registered; the owner has not bound its principal yet', last_seen_at: null }
+  const mine = assignments.filter((a) => a.assignee_employee_id === e.employee_id && !['completed', 'failed', 'cancelled'].includes(String(a.status)))
+  const seen = (e.heartbeat_at as string | null) ?? null
+  const fresh = seen ? Date.now() - Date.parse(seen) < 120_000 : false
+  if (mine.some((a) => ['leased', 'running'].includes(String(a.status))) && fresh) return { state: 'working', reason: 'lease_held', label: `${String(e.display_name)}${e.origin === 'agntei' ? ' (Agntei)' : ''} is working on it`, last_seen_at: seen }
+  const ext = mine.find((a) => a.execution_mode === 'external' && ['ready', 'pending'].includes(String(a.status)))
+  if (ext) return { state: 'waiting', reason: 'external_agent', label: `Waiting for ${String(e.display_name)} (Agntei)`, last_seen_at: seen }
+  if (mine.some((a) => a.status === 'waiting_job')) return { state: 'waiting', reason: 'research_job', label: 'Waiting on a research job', last_seen_at: seen }
+  return mine.length ? { state: 'waiting', reason: 'queued', label: 'Queued for the Workforce engine', last_seen_at: seen } : { state: 'idle', reason: 'nothing_open', label: 'Idle', last_seen_at: seen }
+}
+const employees = (): R[] => [...FX_EMPLOYEES, ...registered].map((e): R => ({ ...e, open_assignments: openCount(String(e.employee_id)), activity: fxActivity(e) }))
 const counts = (mid: string) => assignments.filter((a) => a.mission_id === mid).reduce<R>((acc, a) => { acc[String(a.status)] = Number(acc[String(a.status)] ?? 0) + 1; return acc }, {})
 const missionRow = (m: R) => ({ ...m, assignment_counts: counts(String(m.mission_id)) })
 
@@ -170,6 +184,16 @@ function route(req: WfRequest): BackendResult<unknown> {
     })
   }
   if (req.method === 'GET' && p === '/employees') return ok({ employees: employees() })
+  if (req.method === 'POST' && p === '/employees' && body.op === 'register_agntei') {
+    const x = (body.employee ?? {}) as R
+    const id = String(x.employee_id ?? '')
+    if (!/^emp_[a-z0-9_]{3,40}$/.test(id)) return fail(422, 'EMPLOYEE_ID_INVALID', 'The employee is not valid.')
+    if (employees().some((e) => e.employee_id === id)) return fail(409, 'CONFLICT', 'An employee with this id already exists.')
+    const e: R = { employee_id: id, kind: 'ai', role_key: x.role_key, department_key: x.role_key === 'acquisition_agent' ? 'acquisitions' : 'data_intelligence', display_name: x.display_name ?? id, employee_code: null, manager_employee_id: null,
+      user_id: null, action_principal_id: null, status: 'pending_link', origin: 'agntei', employment_type: 'operator_ai', markets: x.markets ?? [], skills: x.skills ?? [], segments: null, tier_ceiling: 'T1', spend_day_cap_usd: 0, heartbeat_at: null, last_activity_at: null }
+    registered.push(e)
+    return ok({ employee: { ...e, activity: fxActivity(e) }, link: fxLinkSteps(id, `agt_${id.slice(4)}`), executed: false })
+  }
   if (req.method === 'POST' && p === '/employees') return fail(403, 'CEO_ONLY', 'Fixture mode does not create employees')
   const empMatch = p.match(/^\/employees\/([^/]+)$/)
   if (req.method === 'GET' && empMatch) {
@@ -193,6 +217,10 @@ function route(req: WfRequest): BackendResult<unknown> {
       cost: ai
         ? (role === 'research_analyst' ? { today_usd: 0.42, window_usd: 1.84, window: '7d', cap_usd: e.spend_day_cap_usd, status: 'known' } : { today_usd: 0, window_usd: 0, window: '7d', cap_usd: e.spend_day_cap_usd, status: 'known', reason: 'Read-only capabilities ran inline; no metered spend' })
         : { today_usd: null, window_usd: null, window: '7d', cap_usd: null, status: 'unknown', reason: 'People are not metered' },
+      activity: e.activity,
+      link: e.origin === 'agntei' ? { system: 'agntei', principal_id: e.action_principal_id ?? null, bound_at: null, link_expires_at: null, binding_valid_until: e.binding_valid_until ?? null, binding_revoked_at: null, linked: Boolean(e.external_agent_id), external_agent_id: e.external_agent_id ?? null, external_install_id: e.external_agent_id ? 'inst_fx_mac01' : null, linked_at: e.external_linked_at ?? null } : null,
+      link_steps: e.origin === 'agntei' && e.status === 'pending_link' ? fxLinkSteps(id, `agt_${id.slice(4)}`) : null,
+      history: { events: events.filter((x) => x.employee_id === id).slice(-30), events_available: true, gateway: e.origin === 'agntei' && e.external_agent_id ? FX_GATEWAY_AUDIT : [], gateway_available: true, gateway_reason: e.action_principal_id ? null : 'no_principal' },
     })
   }
   if (req.method === 'GET' && p === '/missions') {

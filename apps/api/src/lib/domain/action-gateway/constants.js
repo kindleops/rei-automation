@@ -54,10 +54,13 @@ export const DOMAIN_WRITES = Object.freeze({
   // T3 / T4 (PROPOSED_20261020110000_action_gateway_t34.sql)
   handoff: 'action_gateway_dw_handoff',
   offer_envelope: 'action_gateway_dw_offer_envelope',
+  // Workforce × Agntei (PROPOSED_20261022110000_workforce_agntei.sql): ONE writer for the eight Workforce actions
+  workforce: 'action_gateway_dw_workforce',
 })
 
 /** Keys a tool argument may never carry: identity, tenancy, authority and approvals come from the server. */
-export const FORGED_CONTEXT_KEYS = /^(org|org_id|orgid|tenant|tenant_id|user|user_id|userid|principal|principal_id|agent|agent_id|operator|operator_id|actor|sponsor|sponsor_user_id|role|scope|scopes|approved|approval|approval_id|approval_ref|tier|identity|as_user|impersonate|grant|grant_id|capability|credential|token|policy|policy_id|override|automation_hold_override|lease|lease_token|intent_id)$/i
+// (Workforce × Agntei: the acting EMPLOYEE is the authenticated principal's — any employee / actor / assignee argument is forged context too)
+export const FORGED_CONTEXT_KEYS = /^(org|org_id|orgid|tenant|tenant_id|user|user_id|userid|principal|principal_id|agent|agent_id|operator|operator_id|actor|sponsor|sponsor_user_id|role|scope|scopes|approved|approval|approval_id|approval_ref|tier|identity|as_user|impersonate|grant|grant_id|capability|credential|token|policy|policy_id|override|automation_hold_override|lease|lease_token|intent_id|employee|employee_id|employee_ids|as_employee|acting_employee|acting_employee_id|actor_id|actor_employee_id|on_behalf_of|requested_by|assignee|assignee_employee_id|lease_owner|action_principal_id)$/i
 /** Keys that would turn a tool into a SQL / egress / proxy surface (agent/tools/prohibited.js + escalation). */
 export const ESCALATION_KEYS = /^(sql|raw_sql|statement|query|query_sql|route|url|endpoint|method|headers|host|table|rpc|function|schema|set_role|role_name|search_path|grant_sql|exec|execute)$/i
 

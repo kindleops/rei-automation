@@ -64,5 +64,7 @@ export function createPostgrestActionStore({ db }) {
     negotiationState: (threadId, propertyId) => rpc(db, 'action_gateway_negotiation_state', { p_thread_id: threadId, p_property_id: String(propertyId) }),
     offerAuthority: (propertyId) => rpc(db, 'action_gateway_offer_authority', { p_property_id: String(propertyId) }),
     selfCheck: () => rpc(db, 'action_gateway_self_check', {}),
+    // Workforce × Agntei (PROPOSED_20261022110000_workforce_agntei.sql): the principal-bound read (the digest selects the principal)
+    workforceRead: (digest, kind, p = {}) => rpc(db, 'action_gateway_workforce_read', { p_credential_digest: digest, p_kind: kind, p }),
   })
 }

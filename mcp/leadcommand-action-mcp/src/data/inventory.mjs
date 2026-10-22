@@ -16,6 +16,9 @@ export const T2_RPCS = Object.freeze(['action_gateway_dw_deal_action', 'action_g
 export const T34_RPCS = Object.freeze(['action_gateway_authorize_envelope', 'action_gateway_receipt_get', 'action_gateway_negotiation_state', 'action_gateway_offer_authority',
   'action_gateway_dw_handoff', 'action_gateway_dw_offer_envelope'])
 
+/** The Workforce × Agntei RPCs (PROPOSED_20261022110000_workforce_agntei.sql): pinned to that migration by test/inventory.test.mjs. */
+export const WF_RPCS = Object.freeze(['action_gateway_workforce_read', 'action_gateway_dw_workforce'])
+
 /** RPCs (POST /rest/v1/rpc/<name>): the gateway's entry points + the hold authority's lookup. */
 export const RPCS = Object.freeze(['action_gateway_controls', 'action_gateway_principal', 'action_gateway_intent_open', 'action_gateway_intent_get', 'action_gateway_refuse',
   'action_gateway_expire', 'action_gateway_await_approval', 'action_gateway_authorize', 'action_gateway_claim', 'action_gateway_complete', 'action_gateway_mark_unknown',
@@ -26,4 +29,6 @@ export const RPCS = Object.freeze(['action_gateway_controls', 'action_gateway_pr
   // link #27 (PROPOSED_20261020100000_action_gateway_t2.sql): the Tier-2 writers + the follow-up read
   ...T2_RPCS,
   // link #28 (PROPOSED_20261020110000_action_gateway_t34.sql): envelope authorization, the handoff / envelope writers, the offer reads
-  ...T34_RPCS])
+  ...T34_RPCS,
+  // Workforce × Agntei: the principal-bound read + the ONE Workforce writer
+  ...WF_RPCS])

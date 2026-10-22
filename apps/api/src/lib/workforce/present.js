@@ -10,6 +10,7 @@ import { label as intentLabel } from './coo/interpret.js'
 import { reportMessage } from './coo/respond.js'
 import { OPEN_ASSIGNMENT_STATES } from './coo/staffing.js'
 import { DEPARTMENTS, ROLE_CHARTERS, charterFor } from './org/charters.js'
+import { assignmentActivity } from './agntei/activity.js'
 
 const REF_TYPES = new Set(['property', 'thread', 'opportunity', 'job', 'assignment', 'mission', 'employee', 'market'])
 const pid = (v) => (v == null ? null : String(decodePropertyRef(String(v))))
@@ -80,12 +81,16 @@ export function blockedReason(a, inactive = new Map()) {
   if (a.status === 'blocked') return a.last_error?.code ? humanize(String(a.last_error.code).toLowerCase()) : 'Blocked'
   if (['pending', 'ready'].includes(a.status) && inactive.has(a.assignee_employee_id)) return `Assignee ${inactive.get(a.assignee_employee_id)}`
   if (a.status === 'waiting_job') return 'Waiting on a runtime job'
+  if (['pending', 'ready'].includes(a.status) && a.execution_mode === 'external') return 'Waiting for its Agntei agent to claim it'
   return null
 }
 
-export function presentAssignment(a, { inactive = new Map() } = {}) {
+export function presentAssignment(a, { inactive = new Map(), employees = null, now = Date.now() } = {}) {
   if (!a) return null
   const out = { ...a }
+  out.execution_mode = a.execution_mode ?? 'internal'
+  // the truthful activity (agntei/activity.js): "Waiting for Scout (Agntei), last seen 3 min ago"
+  out.activity = employees ? assignmentActivity(a, { employee: employees.get(a.assignee_employee_id) || null, now }) : null
   out.resource_key = a.resource_type === 'property' ? pid(a.resource_key) : a.resource_key
   out.resource_label = a.input?.property_ref ? propertyLabel(a.input.property_ref) : null
   out.blocked_reason = blockedReason(a, inactive)

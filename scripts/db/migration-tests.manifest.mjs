@@ -679,6 +679,20 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261022100000_workforce_foundation_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261022100000_workforce_foundation_rollback_posttest.sql')],
   },
+  // ── LeadCommand Workforce × Agntei (docs/WORKFORCE-AGNTEI.md §1–§5): STANDALONE, after BOTH the Workforce foundation and
+  // the Action Gateway chain (#26 + #27's extension registry). One employee identity (employment type, origin, the linked
+  // Agntei agent), execution modes, budgets and the gateway-side Workforce writer / reader (registered in #27's registry).
+  {
+    id: 'workforce_agntei',
+    setup: [ACTION_ROLE_RESET, SHIM, DURABILITY, S3, PAYLOAD_OPAQUE_IDS, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
+      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, FOLLOWUP_LIFECYCLE,
+      ACTION_GATEWAY_BASELINE, ACTION_GATEWAY_T2_BASELINE, ACTION_GATEWAY, ACTION_GATEWAY_T2, M('PROPOSED_20261022100000_workforce_foundation.sql')],
+    pretest: M('PROPOSED_20261022110000_workforce_agntei_pretest.sql'),
+    apply: [M('PROPOSED_20261022110000_workforce_agntei.sql')],
+    posttest: [M('PROPOSED_20261022110000_workforce_agntei_posttest.sql')],
+    rollback: [M('PROPOSED_20261022110000_workforce_agntei_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261022110000_workforce_agntei_rollback_posttest.sql')],
+  },
 ]
 
 // ── rc-8.5.21: the SAME release chain, started from the PRODUCTION agent-runtime state ──

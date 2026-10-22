@@ -85,6 +85,8 @@ export function loadConfig(env = process.env, { injectedDb = false } = {}) {
     worker: (get('WORKER_ID') || `action-mcp:${process.pid}`).replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 80),
     limits: Object.freeze({ max_concurrency: intIn(get('MAX_CONCURRENCY'), LIMIT_DEFAULTS.max_concurrency, 16), call_timeout_ms: intIn(get('CALL_TIMEOUT_MS'), LIMIT_DEFAULTS.call_timeout_ms, 60_000, 1000) }),
     auditFile: auditFileOf(env),
+    // LeadCommand Workforce tools on this host: born OFF (read here, BEFORE the environment is scrubbed)
+    workforce_enabled: get('WORKFORCE_ENABLED').toLowerCase() === 'true',
   }
   const secrets = Object.freeze({ pepper, live, stdioCredential })
   Object.defineProperty(cfg, 'secrets', { value: () => secrets, enumerable: false })

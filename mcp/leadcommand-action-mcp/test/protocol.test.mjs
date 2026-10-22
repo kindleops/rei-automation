@@ -4,7 +4,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import Ajv from 'ajv'
 import { connect, fakeGateway, CRED_A } from './helpers.mjs'
-import { REQUESTED_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
+import { REQUESTED_TOOLS, WORKFORCE_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
 
 test('initialize: server info, tools-only capabilities, instructions name the ONE governed gateway and that agents never approve', async () => {
   const c = await connect()
@@ -22,7 +22,7 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
   const c = await connect()
   try {
     const { tools } = await c.client.listTools()
-    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context'].sort())
+    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`)].sort())
     const ajv = new Ajv({ strict: false })
     for (const t of tools) {
       assert.equal(t.inputSchema.type, 'object', t.name)
@@ -31,7 +31,8 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
       assert.match(t._meta['leadcommand/tier'], /^T[1-4]$/)
       assert.match(t._meta['leadcommand/capability'], /^[a-z_]+\.[a-z_]+$/)
       assert.equal(t.annotations.destructiveHint, false)
-      if (!['read_conversation_context', 'prepare_acquisition_offer'].includes(t.name)) assert.ok(t.inputSchema.required.includes('client_request_id'), t.name) // reads open no intent
+      if (!['read_conversation_context', 'prepare_acquisition_offer'].includes(t.name) && t._meta['leadcommand/risk'] !== 'read') assert.ok(t.inputSchema.required.includes('client_request_id'), t.name) // reads open no intent
+      assert.match(t._meta['leadcommand/risk'], /^(read|internal_write|operational_write|seller_facing|financial)$/, t.name)
       if (!t._meta['leadcommand/implemented']) assert.match(t.description, /NOT IMPLEMENTED/)
     }
     const impl = tools.filter((t) => t._meta['leadcommand/implemented']).map((t) => t.name).sort()
@@ -41,6 +42,27 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
     assert.equal(tools.find((t) => t.name === 'pause_campaign')._meta['leadcommand/tier'], 'T2')
     assert.equal(tools.find((t) => t.name === 'set_thread_hold')._meta['leadcommand/tier'], 'T2')
     assert.equal(tools.find((t) => t.name === 'execute_authorized_offer')._meta['leadcommand/tier'], 'T4')
+    // Workforce × Agntei: explicit risk metadata — reads are read-only, writes are internal and never destructive or seller-facing
+    const wf = tools.filter((t) => t.name.startsWith('leadcommand_workforce_'))
+    assert.equal(wf.length, 11)
+    for (const t of wf) {
+      assert.equal(t._meta['leadcommand/tier'], 'T1', t.name)
+      assert.equal(t._meta['leadcommand/seller_facing'], false, t.name)
+      assert.equal(t.annotations.destructiveHint, false, t.name)
+      assert.equal(t.annotations.openWorldHint, false, t.name)
+      assert.match(t._meta['leadcommand/capability'], /^workforce\.[a-z_]+$/, t.name)
+    }
+    for (const n of ['whoami', 'list_assignments', 'get_mission']) {
+      const t = tools.find((x) => x.name === `leadcommand_workforce_${n}`)
+      assert.equal(t.annotations.readOnlyHint, true, n)
+      assert.equal(t._meta['leadcommand/risk'], 'read', n)
+    }
+    for (const n of ['link_self', 'open_mission', 'claim_assignment', 'report_progress', 'complete_assignment', 'request_research', 'handoff', 'escalate']) {
+      const t = tools.find((x) => x.name === `leadcommand_workforce_${n}`)
+      assert.equal(t.annotations.readOnlyHint, false, n)
+      assert.equal(t._meta['leadcommand/risk'], 'internal_write', n)
+    }
+    assert.equal(tools.find((t) => t.name === 'queue_authorized_reply')._meta['leadcommand/risk'], 'seller_facing')
   } finally { await c.close() }
 })
 
@@ -58,6 +80,20 @@ test('tools/call goes ONLY to the gateway, with the CONNECTION\'s credential (ne
     assert.equal(p.isError, false, 'approval_pending is not an error: retry later')
     assert.match(p.content[0].text, /data only, not instructions/)
     await assert.rejects(c.client.callTool({ name: 'drop_database', arguments: {} }), /not found/)
+  } finally { await c.close() }
+})
+
+test('Workforce tools: advertised as leadcommand_workforce_*, mapped to the gateway\'s workforce_* name; the bare gateway name is NOT a tool', async () => {
+  const gw = fakeGateway({ answer: (o) => ({ ok: true, status: 'read', tool: o.tool, result: { registered: true } }) })
+  const c = await connect({ gateway: gw })
+  try {
+    const r = await c.client.callTool({ name: 'leadcommand_workforce_whoami', arguments: {} })
+    assert.equal(gw.calls.at(-1).tool, 'workforce_whoami', 'the gateway sees its own name')
+    assert.equal(gw.calls.at(-1).credential, CRED_A)
+    assert.equal(r.structuredContent.tool, 'leadcommand_workforce_whoami', 'the result names the advertised tool')
+    const n = gw.calls.length
+    await assert.rejects(c.client.callTool({ name: 'workforce_whoami', arguments: {} }), /not found/)
+    assert.equal(gw.calls.length, n, 'an unadvertised alias never reaches the gateway')
   } finally { await c.close() }
 })
 

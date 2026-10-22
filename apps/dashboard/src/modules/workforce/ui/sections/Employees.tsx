@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { LCDataGrid, LCFacts, LCInspector, LCInspectorSection, LCSegmented, LCSkeleton, LCStatus, type LCColumn, type LCSort } from '../../../../shared/lc'
+import { LCButton, LCDataGrid, LCFacts, LCInspector, LCInspectorSection, LCSegmented, LCSkeleton, LCStatus, type LCColumn, type LCSort } from '../../../../shared/lc'
 import { getEmployee } from '../../api/wf-client'
 import type { WfEmployee, WfEmployeeProfile, WfMemoryFact, WfOverview } from '../../api/wf-types'
 import {
@@ -9,15 +9,18 @@ import {
 import { useWf, type WfView } from '../../store/wf-hooks'
 import { useWfNav } from '../wf-context'
 import { WfAssignmentState, WfAvatar, WfFailureState, WfKind, WfRefs, WfSectionHead, WfTime, WfUnknown } from '../wf-parts'
+import { WfActivityStatus, WfAgnteiLinkSection, WfHistoryTab, WfOriginBadge, WfRegisterAgnteiDialog } from '../wf-agntei'
+import { activityLine, executionLabel } from '../../model/wf-agntei-model'
 
-type Filter = 'all' | 'ai' | 'human'
+type Filter = 'all' | 'ai' | 'human' | 'agntei'
 
 export function EmployeesSection({ overview, selected, onSelect, tick }: { overview: WfView<WfOverview>; selected: string | null; onSelect: (id: string | null) => void; tick: number }) {
   const nav = useWfNav()
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<LCSort>(null)
+  const [registering, setRegistering] = useState(false)
   const rows = useMemo(() => {
-    const list = (overview.data?.employees ?? []).filter((e) => filter === 'all' || e.kind === filter)
+    const list = (overview.data?.employees ?? []).filter((e) => filter === 'all' || (filter === 'agntei' ? e.origin === 'agntei' : e.kind === filter))
     if (!sort) return list
     const dir = sort.dir === 'asc' ? 1 : -1
     const val = (e: WfEmployee): string | number => sort.id === 'open' ? e.open_assignments ?? -1 : sort.id === 'name' ? e.display_name : sort.id === 'dept' ? departmentLabel(e.department_key) : sort.id === 'activity' ? Date.parse(e.last_activity_at ?? '') || 0 : e.role_key
@@ -26,7 +29,7 @@ export function EmployeesSection({ overview, selected, onSelect, tick }: { overv
 
   const columns: LCColumn<WfEmployee>[] = [
     { id: 'name', header: 'Employee', minWidth: 190, sortable: true, render: (e) => (
-      <span className="wf-cell-emp"><WfAvatar e={e} size={22} /><span><b>{e.display_name}</b>{e.employee_code ? <code>{e.employee_code}</code> : null}</span></span>
+      <span className="wf-cell-emp"><WfAvatar e={e} size={22} /><span><b>{e.display_name}</b>{e.employee_code ? <code>{e.employee_code}</code> : null}{e.origin === 'agntei' ? <WfOriginBadge e={e} /> : null}</span></span>
     ) },
     { id: 'role', header: 'Role', minWidth: 150, sortable: true, render: (e) => roleLabel(e.role_key) },
     { id: 'dept', header: 'Department', width: 140, sortable: true, hideable: true, render: (e) => departmentLabel(e.department_key) },
@@ -37,6 +40,8 @@ export function EmployeesSection({ overview, selected, onSelect, tick }: { overv
       const hb = HEARTBEAT_META[heartbeatOf(e, nav.now)]
       return <LCStatus label={hb.label} tone={hb.tone} quiet={hb.tone === 'ok'} />
     } },
+    // the truthful activity (working / waiting <reason> / idle), derived by the server: "Waiting for Ridge (Agntei), last seen 3 min ago"
+    { id: 'activity_now', header: 'Doing now', minWidth: 210, hideable: true, render: (e) => (e.kind === 'human' && !e.activity ? <span className="wf-quiet">Person</span> : <WfActivityStatus activity={e.activity} now={nav.now} />) },
     { id: 'markets', header: 'Markets', width: 150, hideable: true, render: (e) => (e.markets.length ? e.markets.join(', ') : <span className="wf-quiet">All in scope</span>) },
     { id: 'open', header: 'Open', width: 70, align: 'right', sortable: true, render: (e) => (e.open_assignments === null ? <WfUnknown reason="The overview did not report a count" /> : e.open_assignments) },
     { id: 'tier', header: 'Tier', width: 60, hideable: true, hiddenByDefault: true, render: (e) => e.tier_ceiling ?? <span className="wf-quiet">None</span> },
@@ -50,8 +55,14 @@ export function EmployeesSection({ overview, selected, onSelect, tick }: { overv
       <WfSectionHead
         title="Employees"
         sub={overview.data ? <>{all.length} on the roster · {all.filter((e) => e.status === 'active').length} active</> : 'Reading the roster'}
-        actions={<LCSegmented<Filter> size="sm" label="Kind" value={filter} onChange={setFilter} options={[{ value: 'all', label: 'Everyone' }, { value: 'ai', label: 'AI' }, { value: 'human', label: 'Human' }]} />}
+        actions={(
+          <>
+            <LCSegmented<Filter> size="sm" label="Kind" value={filter} onChange={setFilter} options={[{ value: 'all', label: 'Everyone' }, { value: 'ai', label: 'AI' }, { value: 'agntei', label: 'Agntei' }, { value: 'human', label: 'Human' }]} />
+            <LCButton size="sm" variant="secondary" icon="plus" onClick={() => setRegistering(true)} title="CEO only: creates a pending_link employee and shows the owner's link steps. It grants and runs nothing.">Register an Agntei agent</LCButton>
+          </>
+        )}
       />
+      <WfRegisterAgnteiDialog open={registering} onOpenChange={setRegistering} onRegistered={(r) => { overview.retry(); if (r.employee) onSelect(r.employee.employee_id) }} />
       <div className="wf-emps__grid">
         <LCDataGrid<WfEmployee>
           id="wf-employees"
@@ -74,7 +85,7 @@ export function EmployeesSection({ overview, selected, onSelect, tick }: { overv
   )
 }
 
-type Tab = 'profile' | 'memory' | 'work'
+type Tab = 'profile' | 'memory' | 'work' | 'history'
 
 function EmployeeInspector({ id, onClose, tick }: { id: string | null; onClose: () => void; tick: number }) {
   const [tab, setTab] = useState<Tab>('profile')
@@ -90,7 +101,7 @@ function EmployeeInspector({ id, onClose, tick }: { id: string | null; onClose: 
       id="wf-employee"
       mode="float"
       width={460}
-      eyebrow={e ? `${departmentLabel(e.department_key)} · ${e.kind === 'ai' ? 'AI employee' : 'Human'}` : 'Employee'}
+      eyebrow={e ? `${departmentLabel(e.department_key)} · ${e.origin === 'agntei' ? 'Agntei agent' : e.kind === 'ai' ? 'AI employee' : 'Human'}` : 'Employee'}
       title={e ? <span className="wf-insp-title"><WfAvatar e={e} size={26} />{e.display_name}{e.employee_code ? <code>{e.employee_code}</code> : null}</span> : 'Employee'}
       label={e?.display_name ?? 'Employee'}
       subtitle={e ? roleLabel(e.role_key) : undefined}
@@ -99,10 +110,11 @@ function EmployeeInspector({ id, onClose, tick }: { id: string | null; onClose: 
         { id: 'profile', label: 'Profile' },
         { id: 'memory', label: 'Memory', count: mem ? mem.verified.length + mem.interpretation.length + mem.policy.length : null },
         { id: 'work', label: 'Work', count: open },
+        { id: 'history', label: 'History', count: p?.history ? p.history.events.length + p.history.gateway.length : null },
       ] }}
     >
       {!p ? (view.failure ? <WfFailureState failure={view.failure} what="The profile did not load" onRetry={view.retry} compact /> : <LCSkeleton shape="lines" count={8} />) : (
-        tab === 'profile' ? <ProfileTab p={p} /> : tab === 'memory' ? <MemoryTab p={p} /> : <WorkTab p={p} />
+        tab === 'profile' ? <ProfileTab p={p} /> : tab === 'memory' ? <MemoryTab p={p} /> : tab === 'history' ? <HistoryTab p={p} /> : <WorkTab p={p} />
       )}
     </LCInspector>
   )
@@ -114,6 +126,10 @@ function ProfileTab({ p }: { p: WfEmployeeProfile }) {
   const manager = e.manager_employee_id ? nav.employees.get(e.manager_employee_id) : null
   return (
     <>
+      <LCInspectorSection title="Now" aside={<WfOriginBadge e={e} />}>
+        <WfActivityStatus activity={p.activity ?? e.activity} now={nav.now} />
+      </LCInspectorSection>
+      <WfAgnteiLinkSection p={p} now={nav.now} />
       <LCInspectorSection title="Charter">
         {p.charter ? (
           <div className="wf-charter">
@@ -209,13 +225,18 @@ function WorkTab({ p }: { p: WfEmployeeProfile }) {
       {list.map((a) => (
         <li key={a.assignment_id}>
           <button type="button" className="wf-alist__row" onClick={() => nav.openAssignment(a.assignment_id, a.mission_id)}>
-            <span className="wf-alist__t">{capabilityLabel(a.capability_key)}<small>{a.step_key}</small></span>
+            <span className="wf-alist__t">{capabilityLabel(a.capability_key)}<small>{a.step_key}{executionLabel(a) && a.execution_mode === 'external' ? <> · <span className="wf-mode is-external">{executionLabel(a)}</span></> : null}</small></span>
             <WfAssignmentState status={a.status} quiet={assignmentMeta(a.status).group === 'done'} />
           </button>
-          {waitingReason(a) ? <p className="wf-alist__why">{waitingReason(a)}</p> : null}
+          {a.activity && !isTerminalAssignment(a.status) ? <p className="wf-alist__why">{activityLine(a.activity, nav.now)}</p> : waitingReason(a) ? <p className="wf-alist__why">{waitingReason(a)}</p> : null}
           {resourceRef(a) ? <WfRefs refs={[resourceRef(a)!]} quiet /> : null}
         </li>
       ))}
     </ul>
   )
+}
+
+function HistoryTab({ p }: { p: WfEmployeeProfile }) {
+  const nav = useWfNav()
+  return <WfHistoryTab p={p} now={nav.now} />
 }

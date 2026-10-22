@@ -37,7 +37,8 @@ const TOOLS = {
     effect: (env) => count(env, `select count(*)::int n from agent.approval_request where capability_id = 'holds.prepare_release_approval'`),
   },
   schedule_followup: {
-    async make(env, k) { const t = await seedThread(env.owner, { phone: phoneFor(k), property: `p-${k}`, inboundBody: 'Call me in two weeks' }); return { thread_id: t.thread_id, kind: 'seller_requested_callback', due_at: inDays(14), reason_code: 'seller_asked_for_callback' } },
+    // rc-8.5.21.1: a reply to our ownership question needs an explicit SELLING answer before any follow-up (burstHasSellingAnswer)
+    async make(env, k) { const t = await seedThread(env.owner, { phone: phoneFor(k), property: `p-${k}`, inboundBody: 'Yes I own it but not ready to sell. Call me in two weeks' }); return { thread_id: t.thread_id, kind: 'seller_requested_callback', due_at: inDays(14), reason_code: 'seller_asked_for_callback' } },
     effect: (env) => count(env, `select count(*)::int n from public.followup_intents where writer = 'action_gateway' and state = 'planned'`),
   },
   cancel_followup: {

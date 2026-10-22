@@ -10,6 +10,9 @@
 //   5. holds             Hartford / Maxwell (never revive) always; registry holds; suppression (fail closed)
 //   6. policy            an active authority_policy covering it, else the charter default (read allow,
 //                        internal allow up to the daily caps)
+//   6b. budget           paid work (context.cost_usd > 0) inside every workforce.budget cap that applies
+//                        (org / department / mission / employee × day / month; context.budgets = budget_status);
+//                        an unreadable budget with a cost is a deny (fail closed)
 //   7. escalation        price ≥ exec_review_price_usd, valuation uncertainty, title ambiguity, a policy
 //                        that requires review → escalate (an assignment for the CEO, never a silent block)
 // T2+ (Action Gateway mutations) has no Phase A path. proposeGrants() only RENDERS the
@@ -109,6 +112,18 @@ export function authorize({ employee, capability, resource = null, context = {} 
   } else if (cap.class === 'internal') {
     const cap_n = DEFAULT_DAILY_CAPS[capability]
     if (cap_n != null && used >= cap_n) return deny(['CHARTER_DAILY_CAP'], { cap: cap_n })
+  }
+  // 6b. budgets (docs/WORKFORCE-AGNTEI.md §5): paid work stays inside every cap that applies
+  const cost = num(context.cost_usd)
+  if (cost != null && cost > 0) {
+    if (context.budgets === null) return deny(['BUDGET_UNREADABLE'])
+    for (const b of Array.isArray(context.budgets) ? context.budgets : []) {
+      const capUsd = num(b?.cap_usd)
+      const spent = num(b?.spent_usd)
+      if (capUsd == null) continue
+      if (spent == null) return deny(['BUDGET_SPEND_UNKNOWN'], { budget_id: b.budget_id ?? null })
+      if (spent + cost > capUsd + 1e-9) return deny([`BUDGET_CAP_${String(b.scope || 'org').toUpperCase()}_${String(b.period || 'day').toUpperCase()}`], { budget_id: b.budget_id ?? null, cap_usd: capUsd, spent_usd: spent })
+    }
   }
   // 7. escalation rules (only for the capabilities that bear a decision)
   const on = new Set(cap.escalates_on || [])

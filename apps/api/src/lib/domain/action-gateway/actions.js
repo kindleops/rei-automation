@@ -13,6 +13,7 @@ import { MISSION_LIMITS } from '../../agent/missions/mission-kinds.js'
 import { gwErr } from './errors.js'
 import { T2_LOGIC } from './actions/t2/index.js'
 import { T34_LOGIC } from './actions/t34/index.js'
+import { WF_LOGIC } from './actions/workforce/index.js'
 
 export const POLICY_VERSION = 'v1'
 const sha = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex')
@@ -48,6 +49,7 @@ async function mustProperty(reads, id) {
 export const ACTION_LOGIC = Object.freeze({
   ...T2_LOGIC,
   ...T34_LOGIC,
+  ...WF_LOGIC,
   create_research_job: {
     async resolve(input, { reads }) {
       for (const pid of input.property_ids || []) await mustProperty(reads, pid)

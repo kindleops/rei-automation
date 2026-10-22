@@ -97,3 +97,34 @@ Plus adversarial checks:
 - the emergency stop → everything refused
 
 The agent's reasoning is a **scripted agent** driving Agntei's real MCP client (labelled as such); a live Claude Code run is an optional, owner-approved step.
+
+## Implementation notes (LeadCommand side, `feat/workforce-agntei`)
+
+Migration `supabase/migrations/PROPOSED_20261022110000_workforce_agntei.sql` (+ pretest / posttest / rollback / rollback_posttest; manifest id `workforce_agntei`). Preconditions RAISE without the Workforce foundation or the Action Gateway #26 + #27 (extension registry). It composes with #28 (rows only). Born OFF.
+
+**MCP tools** (Action MCP, `leadcommand_<gateway name>`, all T1, `_meta['leadcommand/risk']` = `read` or `internal_write`, `seller_facing: false`, `destructiveHint: false`; reads `readOnlyHint: true`). The bare `workforce_*` gateway names are NOT callable over MCP.
+
+| MCP tool | Input (closed schema) | Result highlights |
+|---|---|---|
+| `leadcommand_workforce_whoami` | `{}` | `employee` (role, department, markets, employment_type, origin, status, external ids), `manager`, `grants[]` (live, suspended flag), `tier_ceiling`, `open_assignments[]`, `linked` |
+| `leadcommand_workforce_list_assignments` | `{ status?, mission_id?, include_mission_peers?, limit≤100 }` | `assignments[]` (own, full), `mission_peers[]` (summary) |
+| `leadcommand_workforce_get_mission` | `{ mission_id }` | `mission`, `assignments[]`, `visible_because` participant / sponsor_requested |
+| `leadcommand_workforce_link_self` | `{ client_request_id, external_install_id ^[A-Za-z0-9][A-Za-z0-9_.:-]{7,79}$, external_agent_id ^agent_[A-Za-z0-9_-]{3,64}$ }` | `LINKED` / `ALREADY_LINKED`; refused `IDENTITY_MISMATCH`, `EXTERNAL_REF_ALREADY_LINKED` (both suspend the principal's Workforce grants), `LINK_WINDOW_CLOSED`, `BINDING_*` |
+| `leadcommand_workforce_open_mission` | `{ client_request_id, directive 3..2000, assign_to_self? }` | `MISSION_OPENED {mission_id, created, origin:'agntei', plan_job_id}`; `DIRECTIVE_REFUSED` / `DIRECTIVE_UNCLEAR` / `STATUS_IS_A_QUESTION` / `EMERGENCY_STOP` |
+| `leadcommand_workforce_claim_assignment` | `{ client_request_id, assignment_id, lease_seconds 60..3600 }` | `CLAIMED {attempt, lease_until}`: pass `attempt` as `claim_attempt` later; refused `CLAIM_HELD`, `HUMAN_OWNED`, `NOT_ASSIGNEE`, `NOT_EXTERNAL`, `NOT_DUE`, `WAITING_ON_JOB`, authority codes (`MARKET_OUT_OF_SCOPE`, `AUTOMATION_HOLD`, …), `AUTHORITY_ESCALATE` |
+| `leadcommand_workforce_report_progress` | `{ client_request_id, assignment_id, claim_attempt, progress?{percent,phase,note}, output?, evidence?[], cost?{usd,model} }` | `PROGRESS_RECORDED`; `LEASE_LOST` (stale generation, nothing applied) |
+| `leadcommand_workforce_complete_assignment` | `{ client_request_id, assignment_id, claim_attempt, outcome_class? verified\|partial\|unknown, output{summary,findings[],next_steps[],recommendation}, evidence?[{type job\|intent\|thread\|property\|opportunity, id, note?}] }` | `ASSIGNMENT_COMPLETED {outcome_class, evidence_resolved, evidence_total}` |
+| `leadcommand_workforce_request_research` | `{ client_request_id, assignment_id, claim_attempt, property_id? }` | `RESEARCH_REQUESTED {job_id, deduped}`: one job per (mission, property); the assignment returns to the agent when the job finishes (claim it again) |
+| `leadcommand_workforce_handoff` | `{ client_request_id, assignment_id, to_employee_id \| to_coo, claim_attempt?, note? }` | `HANDED_OFF {to_employee_id, execution_mode}` |
+| `leadcommand_workforce_escalate` | `{ client_request_id, assignment_id, reasons[1..8], note? }` | `ESCALATED {escalation_assignment_id}` |
+
+Any `employee_id`, `actor`, `assignee*`, `requested_by`, `on_behalf_of`, `lease_owner`, … argument is `FORGED_CONTEXT`.
+
+Deviations / decisions:
+1. **Resource type.** Workforce intents use `resource_type 'system'`, id `workforce:<assignment|link|missions>` (the #26 CHECK is unchanged). Consequence: Workforce grants must not carry a `markets` scope (a system resource is in no market); market scope is the Workforce authority engine's (`employee.markets`).
+2. **IDENTITY_MISMATCH** records through `grant_note_failure` and then suspends EVERY live `workforce.*` grant of the principal (stricter than "the grant"). The same for `EXTERNAL_REF_ALREADY_LINKED`.
+3. **Owner additions 2026-10-22:** `employee_bind_principal(org, employee, agent, owner, link_window default 24 h ≤ 7 d, binding_valid_until default = credential expiry)` and `employee_unbind(org, employee, owner, reason)`; `BINDING_EXPIRED` / `BINDING_REVOKED` refuse every call (audited), an external lease never outlives the binding (clamped) and is released + reaped on unbind / detected expiry. A re-link of the same identity is a no-op even outside the window; the window governs the FIRST link. Lease generations: `claim_attempt` (the reaper bumps `attempt`). `on_external_timeout wait|reassign_internal` + `external_wait_seconds` (default wait, 3600 s) on the assignment, set by `workforce.assignment_set_external_policy`; the dispatch pass applies it (escalation once per assignee × attempt; reassignment through `assignment_transfer`, recorded).
+4. **The sponsor of an Agntei principal must be the CEO user** (enforced by the bind). Workforce actions on the gateway are for `origin = agntei` employees only.
+5. **External research return.** A completed job hands an external assignment back as `ready` with `output.research {job_id, result ≤ 12 KB}`; the claim itself resolves a finished job (no dispatch tick needed). Evidence `via`: `mission_job`, `principal_job`, `principal_intent(_job)`, `logged_read` (gateway reads now audit `record_refs` of the thread / property they name).
+6. **Host switch.** The Workforce tools answer `capability_unavailable / WORKFORCE_DISABLED` unless the Action MCP host sets `LEADCOMMAND_ACTION_MCP_WORKFORCE_ENABLED=true` (→ the engine's own `WORKFORCE_ENABLED`).
+7. **API.** "Register an Agntei agent" = `POST /employees {op:'register_agntei', employee}` (no new route file). The employee profile adds `activity`, `link`, `link_steps` (CEO only), `history {events, gateway}`.

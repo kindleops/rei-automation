@@ -30,6 +30,7 @@ import { gwErr, ActionGatewayError, classifyGatewayError } from './errors.js'
 import { FORGED_CONTEXT_KEYS, ESCALATION_KEYS, LIMITS, TIER_LABEL, TERMINAL_STATES, ACTION_GATEWAY_VERSION, READ_SCOPES, APPROVAL_GRANT_TTL_MS } from './constants.js'
 import { APPROVAL_TTL_MS } from '../../agent/capabilities/contracts.js'
 import { readConversationContext } from './context-read.js'
+import { encodePropertyRef } from '../../agent/missions/mission-codec.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const low = (v) => String(v ?? '').trim().toLowerCase()
@@ -59,6 +60,14 @@ function createRate(now) {
     hits.set(key, arr)
     if (hits.size > 10_000) hits.delete(hits.keys().next().value)
   }
+}
+
+/** The canonical records a read named (audited, so a Workforce completion can cite them as evidence): ids only, property ids encoded. */
+function recordRefsOf(input = {}) {
+  const refs = []
+  if (typeof input.thread_id === 'string' && UUID_RE.test(input.thread_id)) refs.push({ type: 'thread', id: input.thread_id.toLowerCase() })
+  if (typeof input.property_id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(input.property_id)) refs.push({ type: 'property', id: encodePropertyRef(input.property_id) })
+  return refs.length ? { record_refs: refs } : {}
 }
 
 function deepKeys(v, out = [], depth = 0) {
@@ -303,7 +312,7 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
       Object.assign(base, { action: spec.name, capability: spec.capability, tier: spec.tier })
       const { principal, digest } = await authenticate(credential, base)
       await controlsOrStop(spec, base)
-      if (catalog.isRead(spec.name)) return await readTool(spec, principal, args, base)
+      if (catalog.isRead(spec.name)) return await readTool(spec, principal, args, base, digest)
       if (spec.implemented === false) throw gwErr('not_implemented', 'capability_not_implemented', `${spec.name} is registered but not implemented in this phase`)
       // the path's PRODUCTION ACTIVATION (T3 / T4): off or NO-GO ⇒ capability_unavailable, whatever the grants say
       await availableOrRefuse(spec, base)
@@ -341,7 +350,7 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     }
   }
 
-  async function readTool(spec, principal, args, base) {
+  async function readTool(spec, principal, args, base, digest = null) {
     // a read with a scope needs it in the principal's read scopes; a scope-less read (prepare_acquisition_offer) needs its grant + tier only
     const scope = spec.scope === undefined ? READ_SCOPES.conversation_context : spec.scope
     if (scope && !(principal.read_scopes || []).includes(scope)) throw gwErr('forbidden', 'READ_SCOPE_NOT_GRANTED', `the read scope ${scope} is not granted to this agent`)
@@ -351,14 +360,15 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     rate(`${principal.agent_id}|${spec.name}`, spec.limits.per_min)
     const custom = logic[spec.name]?.read
     if (typeof custom === 'function') {
-      const result = await custom({ input, reads, services, store, now, coverResource: (res) => grantForResource(readGrants, res) })
-      await audit({ ...base, event_type: 'action_read', code: 'READ', detail: { resource_type: result?.resource_type || 'property' } })
+      // principal-bound reads (Workforce) receive the AUTHENTICATED principal + its digest: never an argument
+      const result = await custom({ input, reads, services, store, now, principal, digest, coverResource: (res) => grantForResource(readGrants, res) })
+      await audit({ ...base, event_type: 'action_read', code: 'READ', detail: { resource_type: result?.resource_type || 'property', ...recordRefsOf(input) } })
       return { ok: true, status: 'read', tool: spec.name, correlation_id: base.correlation_id, result }
     }
     const t = await reads.thread(input.thread_id)
     if (t) grantForResource(readGrants, { type: 'thread', id: t.id, refs: { market: t.market || null } })
     const result = await readConversationContext({ input, reads, services, now })
-    await audit({ ...base, event_type: 'context_read', code: 'READ', detail: { resource_type: 'thread', message_count: result.messages.length } })
+    await audit({ ...base, event_type: 'context_read', code: 'READ', detail: { resource_type: 'thread', message_count: result.messages.length, ...recordRefsOf(input) } })
     return { ok: true, status: 'read', tool: spec.name, correlation_id: base.correlation_id, result }
   }
 
@@ -390,7 +400,7 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
   function listTools() {
     return [...catalog.actions(), ...catalog.reads()].map((s) => ({
       name: s.name, title: s.title, description: s.description, input: s.input, tier: TIER_LABEL[s.tier], capability: s.capability,
-      implemented: s.implemented !== false, read: catalog.isRead(s.name), scope: s.scope || null,
+      implemented: s.implemented !== false, read: catalog.isRead(s.name), scope: s.scope || null, risk: s.risk || null,
     }))
   }
 

@@ -33,6 +33,9 @@ export const FX_EMPLOYEES: Emp[] = [
   emp('emp_head_data', { role_key: 'head_data_intelligence', department_key: 'data_intelligence', display_name: 'Prism', employee_code: 'DAT-00', manager_employee_id: 'emp_coo_atlas', open_assignments: 0, heartbeat_at: ago(1.5) }),
   emp('emp_research_scout', { role_key: 'research_analyst', department_key: 'data_intelligence', display_name: 'Scout', employee_code: 'DAT-01', manager_employee_id: 'emp_head_data', open_assignments: 2, markets: ['Dallas', 'Minneapolis'], heartbeat_at: ago(0.4) }),
   emp('emp_ops_sentinel', { role_key: 'ops_supervisor', department_key: 'operations', display_name: 'Sentinel', employee_code: 'OPS-00', manager_employee_id: 'emp_coo_atlas', open_assignments: 1, heartbeat_at: ago(1) }),
+  // Workforce × Agntei: one linked operator-directed agent (external work) and one registered, not yet linked
+  emp('emp_agntei_ridge', { role_key: 'research_analyst', department_key: 'data_intelligence', display_name: 'Ridge', employee_code: 'DAT-02', manager_employee_id: 'emp_head_data', origin: 'agntei', employment_type: 'operator_ai', action_principal_id: 'agt_ridge', external_agent_id: 'agent_ridge01', external_linked_at: ago(600), binding_valid_until: ago(-60 * 24 * 20), skills: ['probate', 'title_research'], availability: 'available', heartbeat_at: ago(3), last_activity_at: ago(3), spend_day_cap_usd: 0 }),
+  emp('emp_agntei_quarry', { role_key: 'acquisition_agent', department_key: 'acquisitions', display_name: 'Quarry', employee_code: 'ACQ-03', manager_employee_id: 'emp_head_acq', origin: 'agntei', employment_type: 'operator_ai', status: 'pending_link', markets: ['Dallas'], action_principal_id: null, heartbeat_at: null, last_activity_at: null, spend_day_cap_usd: 0 }),
 ]
 
 export const FX_DEPARTMENTS = [
@@ -386,3 +389,25 @@ export const FX_REPORTS_BRIEF = {
   items: ['2 replies flagged for a human read (tone, not policy)', 'Follow-ups due today: 6, all within the recipient-local window', 'No new protective holds'],
   code: null,
 }
+
+/* ── Workforce × Agntei (external work, the link steps, the action history) ── */
+export const FX_AGNTEI_ASSIGNMENTS: A[] = [
+  asg(TRIAGE_ID, 'e001', 1, { step_key: 'research.ext.1', capability_key: 'research.property', assignee_employee_id: 'emp_agntei_ridge', status: 'ready', execution_mode: 'external', resource_type: 'property', resource_key: S(9).pid, attempt: 0, updated_at: ago(14) }),
+  asg(TRIAGE_ID, 'e001', 2, { step_key: 'research.ext.2', capability_key: 'research.property', assignee_employee_id: 'emp_agntei_ridge', status: 'running', execution_mode: 'external', resource_type: 'property', resource_key: S(11).pid, attempt: 0, lease_until: ago(-12), output: { progress: { percent: 40, phase: 'reading' }, reported_cost: { usd: 0.012, status: 'reported', source: 'agntei' } }, updated_at: ago(3) }),
+]
+export const fxLinkSteps = (employee_id: string, agent_id: string) => ({
+  agent_id, employee_id, tools: ['leadcommand_workforce_whoami', 'leadcommand_workforce_link_self', 'leadcommand_workforce_claim_assignment'],
+  steps: [
+    { id: 'mint', title: 'Mint the agent credential (owner machine)', who: 'owner', kind: 'shell', command: `cd mcp/leadcommand-action-mcp && npm run mint:agent-credential -- --pepper-file ~/.leadcommand/action-pepper --agent-id ${agent_id} --out ~/.leadcommand/${agent_id}.credential`, note: 'FIXTURE' },
+    { id: 'principal', title: 'Register the principal (SQL editor, as an org owner)', who: 'owner', kind: 'sql', command: `insert into action_gateway.agent_principals (...) values ('${agent_id}', '<ORG>', ...);`, note: 'FIXTURE' },
+    { id: 'grants', title: 'Grant the Workforce tools (standing T1 grants)', who: 'owner', kind: 'sql', command: `insert into action_gateway.capability_grants (...) values ('<ORG>', '${agent_id}', 'workforce.whoami', 1, ...);`, note: 'FIXTURE' },
+    { id: 'bind', title: 'Bind the employee to the principal (link window)', who: 'owner', kind: 'sql', command: `select workforce.employee_bind_principal('<ORG>', '${employee_id}', '${agent_id}', '<CEO>', interval '24 hours');`, note: 'FIXTURE' },
+    { id: 'connect', title: 'Connect Agntei (operator)', who: 'operator', kind: 'agntei', command: 'Agntei → Connections → add "LeadCommand Workforce" (loopback HTTP, this agent\'s credential)', note: null },
+    { id: 'link', title: 'First call: the agent links itself', who: 'agent', kind: 'mcp', command: 'leadcommand_workforce_link_self { "client_request_id": "link-1", "external_install_id": "<AGNTEI INSTALL ID>", "external_agent_id": "<AGNTEI agent_… ID>" }', note: null },
+  ],
+})
+export const FX_GATEWAY_AUDIT = [
+  { event_id: 9003, at: ago(3), event_type: 'intent_succeeded', action: 'workforce_report_progress', code: 'PROGRESS_RECORDED', intent_id: '0f1x0000-0000-4000-8000-00000000c003' },
+  { event_id: 9002, at: ago(9), event_type: 'intent_succeeded', action: 'workforce_claim_assignment', code: 'CLAIMED', intent_id: '0f1x0000-0000-4000-8000-00000000c002' },
+  { event_id: 9001, at: ago(600), event_type: 'intent_succeeded', action: 'workforce_link_self', code: 'LINKED', intent_id: '0f1x0000-0000-4000-8000-00000000c001' },
+]

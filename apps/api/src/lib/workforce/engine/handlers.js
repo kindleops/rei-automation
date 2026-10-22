@@ -12,6 +12,7 @@ import { buildPlan } from '../coo/playbooks.js'
 import { createStaffer } from '../coo/staffing.js'
 import { planMessage, reportMessage, statusAnswer } from '../coo/respond.js'
 import { COO_EMPLOYEE_ID } from '../org/seed.js'
+import { roleHasCapability } from '../org/charters.js'
 import { buildMissionReport, verifyReportHonesty } from './report.js'
 import { enqueueWorkforceJob, missionSettlement, runDispatchPass } from './dispatch.js'
 
@@ -56,8 +57,15 @@ export function createCooPlanHandler(deps) {
         }
         await ctx.step('plan', { progress: { step: 'plan', steps_done: 1 } })
         const draft = buildPlan({ intent: interp.intent, interpretation: interp })
-        const staff = createStaffer({ employees: await store.listEmployees({ org_id }), assignments: await store.listAssignments({ org_id, limit: 1000 }) })
-        draft.steps = draft.steps.map((s) => ({ ...s, assignee_employee_id: staff(s.role, { market: s.market ?? null })?.employee_id ?? null }))
+        const roster = await store.listEmployees({ org_id })
+        const staff = createStaffer({ employees: roster, assignments: await store.listAssignments({ org_id, limit: 1000 }) })
+        // a directive relayed through the Action Gateway with assign_to_self (docs/WORKFORCE-AGNTEI.md §2): the FIRST step goes to the
+        // relaying employee when its charter covers that capability; otherwise the normal staffing applies (and the skip is recorded)
+        const selfId = typeof ctx.job.input?.assign_first_to === 'string' ? ctx.job.input.assign_first_to : null
+        const self = selfId ? roster.find((e) => e.employee_id === selfId && e.status === 'active') || null : null
+        const selfFits = Boolean(self && draft.steps[0] && roleHasCapability(self.role_key, draft.steps[0].capability))
+        draft.steps = draft.steps.map((s, i) => ({ ...s, assignee_employee_id: i === 0 && selfFits ? self.employee_id : staff(s.role, { market: s.market ?? null })?.employee_id ?? null }))
+        if (selfId && !selfFits) await store.appendEvent({ org_id, type: 'wf.mission.assign_to_self_skipped', mission_id, employee_id: self ? selfId : null, payload: { reason: !self ? 'employee_not_active' : 'capability_not_in_charter' } })
         try {
           mission = await store.setMissionPlan({ org_id, mission_id, objective: compactInterpretation(interp), playbook_key: draft.playbook, plan: draft, expected_version: mission.plan_version })
         } catch (e) {

@@ -151,3 +151,49 @@ test('self-check: the closure walker does see a forbidden module when one is imp
   const { files } = importClosure([path.join(SRC, 'lib/domain/opportunity/pipeline-command-service.js')])
   assert.ok([...files].map(rel).some((f) => FORBIDDEN_MODULES.some((re) => re.test(f))), 'the guard is not vacuous')
 })
+
+// ── Workforce × Agntei (docs/WORKFORCE-AGNTEI.md §2): the gateway's Workforce actions are T1 INTERNAL ONLY ──
+const GW_WF = path.join(SRC, 'lib/domain/action-gateway/actions/workforce')
+const AGNTEI_SQL = path.resolve(SRC, '../../../supabase/migrations/PROPOSED_20261022110000_workforce_agntei.sql')
+
+test('the gateway Workforce actions (actions/workforce/**) — their import closure reaches no send / offer / stage / campaign / contact module', () => {
+  const entries = listFiles(GW_WF)
+  assert.ok(entries.length >= 1)
+  const { files, externals, missing, parents } = importClosure(entries)
+  const reached = [...files].map(rel)
+  // the gateway's own modules this family may use: its constants / errors, the pure T2 text helpers, and itself
+  const allowedGateway = (f) => /^lib\/domain\/action-gateway\/(constants|errors)\.js$/.test(f) || f === 'lib/domain/action-gateway/actions/t2/shared.js' || f.startsWith('lib/domain/action-gateway/actions/workforce/')
+  const bad = reached.filter((f) => !allowedGateway(f) && FORBIDDEN_MODULES.some((re) => re.test(f)))
+  assert.deepEqual(bad.map((f) => chainTo(path.join(SRC, f), parents).join(' → ')), [], 'a forbidden module is reachable from the gateway Workforce actions')
+  assert.ok(!reached.some((f) => /^lib\/domain\/action-gateway\/(gateway|actions|catalog)\.js$/.test(f)), 'the family never reaches the gateway core (no path to the other tool families)')
+  assert.deepEqual([...externals].sort(), ['node:crypto'])
+  assert.deepEqual([...missing], [])
+  for (const f of entries) {
+    const src = stripComments(fs.readFileSync(f, 'utf8'))
+    for (const id of FORBIDDEN_IDENTIFIERS) assert.equal(new RegExp(`\\b${id}\\b`).test(src), false, `${rel(f)} names ${id}`)
+    assert.doesNotMatch(src, /createClient\(|new pg\.|fetch\(|from\(\s*['"]/, `${rel(f)} builds a client or touches a table`)
+  }
+})
+
+test('the gateway Workforce actions are T1, internal, never seller-facing; every write is the ONE Workforce writer, whose SQL writes no seller-facing table', async () => {
+  const { WF_ACTIONS, WF_READS } = await import('../../src/lib/domain/action-gateway/actions/workforce/index.js')
+  const { WORKFORCE_GATEWAY_TOOLS } = await import('../../src/lib/workforce/agntei/tools.js')
+  assert.deepEqual([...WF_ACTIONS, ...WF_READS].map((s) => s.name).sort(), WORKFORCE_GATEWAY_TOOLS.map((t) => t.tool).sort())
+  for (const s of [...WF_ACTIONS, ...WF_READS]) {
+    assert.equal(s.tier, 1, s.name)
+    assert.match(s.capability, /^workforce\.[a-z_]+$/, s.name)
+    assert.doesNotMatch(s.name, /(send|sms|text|offer|stage|campaign|contact|dispatch|queue)/, s.name)
+  }
+  for (const s of WF_ACTIONS) {
+    assert.deepEqual(s.executor, { kind: 'domain_write', fn: 'action_gateway_dw_workforce' }, s.name)
+    for (const t of s.touches) assert.ok(['workforce', 'agent_runtime_job'].includes(t), `${s.name} touches ${t}`)
+  }
+  const sql = fs.readFileSync(AGNTEI_SQL, 'utf8').replace(/--[^\n]*/g, '')
+  const body = (name) => { const i = sql.indexOf(`function ${name}(`); assert.ok(i > 0, name); return sql.slice(i, sql.indexOf('\n$fn$;', i) > 0 && sql.indexOf('\n$fn$;', i) < sql.indexOf('\n$$;', i) ? sql.indexOf('\n$fn$;', i) : sql.indexOf('\n$$;', i)) }
+  for (const fn of ['public.action_gateway_dw_workforce', 'public.action_gateway_workforce_read', 'workforce.assignment_claim_external', 'workforce.assignment_handoff', 'workforce.employee_link_external', 'workforce.employee_bind_principal', 'workforce.employee_unbind']) {
+    const b = body(fn)
+    assert.doesNotMatch(b, /\b(send_queue|seller_offers|negotiation_\w+|followup_intent_plan|campaign_transition_status|sms_suppression_list|automation_holds|acquisition_opportunities)\b/i, `${fn} names a seller-facing table / writer`)
+    assert.doesNotMatch(b, /(insert\s+into|update|delete\s+from)\s+public\./i, `${fn} writes public.*`)
+    for (const m of b.matchAll(/runtime_enqueue\(\s*'([a-z_.]+)'/g)) assert.ok(['workforce.coo_plan', 'property.research'].includes(m[1]), `${fn} enqueues ${m[1]}`)
+  }
+})

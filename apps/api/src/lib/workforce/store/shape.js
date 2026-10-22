@@ -16,6 +16,11 @@ export function shapeEmployee(r) {
     segments: obj(r.segments), tier_ceiling: r.tier_ceiling, spend_day_cap_usd: num(r.spend_day_cap_usd) ?? 0,
     heartbeat_at: iso(r.heartbeat_at), last_activity_at: iso(r.last_activity_at), created_by: str(r.created_by),
     created_at: iso(r.created_at), updated_at: iso(r.updated_at),
+    // docs/WORKFORCE-AGNTEI.md §1 (absent before PROPOSED_20261022110000_workforce_agntei: derived, never invented)
+    employment_type: r.employment_type ?? (r.kind === 'human' ? 'human' : 'autonomous_ai'), origin: r.origin ?? 'workforce',
+    external_system: r.external_system ?? null, external_install_id: r.external_install_id ?? null, external_agent_id: r.external_agent_id ?? null,
+    external_linked_at: iso(r.external_linked_at), skills: arr(r.skills), property_specializations: arr(r.property_specializations), availability: r.availability ?? 'unknown',
+    bound_at: iso(r.bound_at), link_expires_at: iso(r.link_expires_at), binding_valid_until: iso(r.binding_valid_until), binding_revoked_at: iso(r.binding_revoked_at),
   }
 }
 
@@ -26,6 +31,7 @@ export function shapeMission(r) {
     playbook_key: r.playbook_key ?? null, owner_employee_id: r.owner_employee_id, requested_by: str(r.requested_by), status: r.status,
     priority: num(r.priority), due_at: iso(r.due_at), plan: obj(r.plan), plan_version: num(r.plan_version), report: r.report ?? null,
     idempotency_key: r.idempotency_key, created_at: iso(r.created_at), updated_at: iso(r.updated_at), completed_at: iso(r.completed_at),
+    origin: r.origin ?? 'workforce',
   }
 }
 
@@ -40,6 +46,7 @@ export function shapeAssignment(r) {
     next_attempt_at: iso(r.next_attempt_at), lease_token: str(r.lease_token), lease_owner: r.lease_owner ?? null, lease_until: iso(r.lease_until),
     lease_seconds: num(r.lease_seconds), claimed_at: iso(r.claimed_at), last_error: r.last_error ?? null,
     created_at: iso(r.created_at), updated_at: iso(r.updated_at), finished_at: iso(r.finished_at),
+    execution_mode: r.execution_mode ?? 'internal', on_external_timeout: r.on_external_timeout ?? 'wait', external_wait_seconds: num(r.external_wait_seconds) ?? 3600,
   }
 }
 
@@ -97,5 +104,13 @@ export function shapeKpi(r) {
   return {
     org_id: str(r.org_id), subject_type: r.subject_type, subject_key: r.subject_key, kpi_key: r.kpi_key, window: r.window,
     value: num(r.value), status: r.status, source: obj(r.source), computed_at: iso(r.computed_at),
+  }
+}
+
+export function shapeBudget(r) {
+  if (!r) return null
+  return {
+    budget_id: str(r.budget_id), org_id: str(r.org_id), scope: r.scope, scope_key: r.scope_key, period: r.period, cap_usd: num(r.cap_usd), status: r.status,
+    created_by: str(r.created_by), created_at: iso(r.created_at), revoked_at: iso(r.revoked_at), revoked_by: str(r.revoked_by),
   }
 }

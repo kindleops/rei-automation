@@ -15,7 +15,7 @@ export const WF_ROLES = [
 ] as const
 export type WfRoleKey = (typeof WF_ROLES)[number]
 
-export type WfEmployeeStatus = 'active' | 'paused' | 'retired'
+export type WfEmployeeStatus = 'active' | 'paused' | 'retired' | 'pending_link'
 export type WfTier = 'T1' | 'T2'
 
 export interface WfEmployee {
@@ -37,6 +37,21 @@ export interface WfEmployee {
   last_activity_at: string | null
   /** ASSUMED (overview / list): non-terminal assignments held by this employee */
   open_assignments: number | null
+  // ── Workforce × Agntei (docs/WORKFORCE-AGNTEI.md §1, §4) ──
+  /** autonomous_ai (the Workforce engine) | operator_ai (an Agntei agent) | human; null = not reported */
+  employment_type: WfEmploymentType | null
+  /** workforce | agntei; null = not reported */
+  origin: WfOrigin | null
+  /** the linked Agntei agent (agent_…), once workforce_link_self succeeded */
+  external_agent_id: string | null
+  external_linked_at: string | null
+  binding_valid_until: string | null
+  binding_revoked_at: string | null
+  skills: string[]
+  property_specializations: string[]
+  availability: string | null
+  /** the truthful activity the server derived (working / waiting <reason> / idle / pending_link / binding ended) */
+  activity: WfActivity | null
 }
 
 export const WF_MISSION_STATUSES = ['planning', 'active', 'waiting', 'blocked', 'completed', 'failed', 'cancelled'] as const
@@ -186,6 +201,9 @@ export interface WfAssignment {
   updated_at: string | null
   /** ASSUMED: a human-readable reason when blocked / waiting_approval (else derived from last_error) */
   blocked_reason: string | null
+  /** internal (the Workforce engine claims it) | external (its Agntei agent claims it) */
+  execution_mode: 'internal' | 'external' | null
+  activity: WfActivity | null
 }
 
 export interface WfEvent {
@@ -319,6 +337,12 @@ export interface WfEmployeeProfile {
   assignments: WfAssignment[]
   kpis: WfKpi[]
   cost: { today_usd: number | null; window_usd: number | null; window: string | null; cap_usd: number | null; status: 'known' | 'unknown'; reason: string | null } | null
+  activity: WfActivity | null
+  /** an Agntei employee's binding + link (null for a Workforce employee) */
+  link: WfEmployeeLink | null
+  /** the owner's exact link steps (CEO only, while not linked through a live binding) */
+  link_steps: WfLinkSteps | null
+  history: WfHistory | null
 }
 
 export interface WfMissionDetail {
@@ -352,3 +376,29 @@ export interface WfReports {
   reports: WfReportEntry[]
   daily_brief: { available: boolean; generated_at: string | null; summary: string | null; items: string[]; code: string | null } | null
 }
+
+/* ── Workforce × Agntei (docs/WORKFORCE-AGNTEI.md) ────────────────────── */
+
+export type WfEmploymentType = 'autonomous_ai' | 'operator_ai' | 'human'
+export type WfOrigin = 'workforce' | 'agntei'
+export type WfActivityState = 'working' | 'waiting' | 'idle' | 'pending_link' | 'binding_expired' | 'binding_revoked' | 'paused' | 'retired' | 'done'
+/** Truthful activity: working only with a live lease and a heartbeat < 2 min; waiting always says why. */
+export interface WfActivity { state: WfActivityState | string; reason: string | null; label: string | null; last_seen_at: string | null; open: number | null }
+export interface WfEmployeeLink {
+  system: 'agntei'
+  principal_id: string | null
+  bound_at: string | null
+  link_expires_at: string | null
+  binding_valid_until: string | null
+  binding_revoked_at: string | null
+  linked: boolean
+  external_agent_id: string | null
+  external_install_id: string | null
+  linked_at: string | null
+}
+export interface WfLinkStep { id: string; title: string; who: 'owner' | 'operator' | 'agent' | string; kind: 'shell' | 'sql' | 'agntei' | 'mcp' | string; command: string; note: string | null }
+export interface WfLinkSteps { agent_id: string; employee_id: string | null; tools: string[]; steps: WfLinkStep[] }
+/** One Action Gateway audit row of the employee's principal (codes and ids only). */
+export interface WfGatewayAuditEvent { event_id: number; at: string | null; event_type: string; action: string | null; code: string | null; intent_id: string | null }
+export interface WfHistory { events: WfEvent[]; events_available: boolean; gateway: WfGatewayAuditEvent[]; gateway_available: boolean; gateway_reason: string | null }
+export interface WfRegisterResult { employee: WfEmployee | null; link: WfLinkSteps | null; executed: boolean }

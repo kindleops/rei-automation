@@ -28,6 +28,9 @@ import { enqueueWorkforceJob } from './engine/dispatch.js'
 import { marketSlug, safeText } from './capabilities/shared.js'
 import { NEVER_REVIVE } from '../domain/action-gateway/actions/t2/shared.js'
 import { decodeText, presentAssignment, presentCharter, presentCharters, presentDepartments, presentGrant, presentMission, presentRefs, presentReport, presentRuntime } from './present.js'
+import { missionTitle, DIRECTIVE_MISSION_PRIORITY } from './missions/directive.js'
+import { agnteiLinkSteps } from './agntei/link-steps.js'
+import { employeeActivity } from './agntei/activity.js'
 
 const DEFAULTS = Symbol.for('lc.workforce.routes')
 function defaults(env) {
@@ -82,11 +85,7 @@ async function prologue(request, { env = process.env, auth, headers = {}, identi
 const isOwner = (p) => p.member?.role === 'owner'
 
 // ── missions / directives ────────────────────────────────────────────────────
-function missionTitle(interp) {
-  const where = interp.markets?.length ? ` · ${interp.markets.join(', ')}` : ''
-  const n = interp.intent === 'opportunity_triage' && interp.count ? ` (top ${interp.count})` : ''
-  return `${label(interp.intent)}${n}${where}`.slice(0, 120)
-}
+// (missionTitle: missions/directive.js — shared with the Action Gateway's workforce_open_mission)
 
 async function runtimeStatus(p) {
   const rs = p.svc.runtimeStore
@@ -101,7 +100,7 @@ async function openDirective(p, { directive, client_request_id, interp }) {
   const st = await runtimeStatus(p)
   if (st?.limits?.emergency_stop === true) return { stopped: true }
   const idempotency_key = runtimeIdempotencyKey('workforce.mission', user, client_request_id)
-  const { mission, created } = await p.svc.store.openMission({ org_id: p.org_id, title: missionTitle(interp), directive, requested_by: user, owner_employee_id: COO_EMPLOYEE_ID, priority: 50, idempotency_key })
+  const { mission, created } = await p.svc.store.openMission({ org_id: p.org_id, title: missionTitle(interp), directive, requested_by: user, owner_employee_id: COO_EMPLOYEE_ID, priority: DIRECTIVE_MISSION_PRIORITY, idempotency_key })
   let enqueue = null
   if (mission.status === 'planning') {
     const r = await enqueueWorkforceJob(p.svc.runtimeStore, { kind: COO_PLAN_KIND, key: [mission.mission_id], input: { mission_id: mission.mission_id }, requested_by: user, priority: 90, budget_cap_usd: modelInterpretEnabled(p.env) ? 0.05 : 0 }).catch((e) => ({ ok: false, reason: e?.code || 'runtime_unavailable' }))
@@ -178,7 +177,8 @@ export async function handleMissionGet(request, mission_id, opts = {}) {
     ])
     const m = presentMission(mission, { assignments })
     const inactive = inactiveOf(employees)
-    return ok({ mission: m, plan: m.plan, report: m.report, assignments: assignments.map((a) => presentAssignment(a, { inactive })), events, messages: messages.map(presentMessage) }, opts.headers)
+    const byId = new Map(employees.map((e) => [e.employee_id, e]))
+    return ok({ mission: m, plan: m.plan, report: m.report, assignments: assignments.map((a) => presentAssignment(a, { inactive, employees: byId })), events, messages: messages.map(presentMessage) }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -267,7 +267,7 @@ export async function handleOverview(request, opts = {}) {
     const open = openCountsOf(assignments)
     return ok({
       departments: presentDepartments(employees, assignments),
-      employees: employees.map((e) => ({ ...e, open_assignments: open.get(e.employee_id) || 0 })),
+      employees: employees.map((e) => ({ ...e, open_assignments: open.get(e.employee_id) || 0, activity: employeeActivity(e, assignments, { now: Date.now() }) })),
       missions_by_status: Object.fromEntries(MISSION_STATUSES.map((st) => [st, missions.filter((m) => m.status === st).length])),
       assignments_by_status: Object.fromEntries(ASSIGNMENT_STATUSES.map((st) => [st, assignments.filter((a) => a.status === st).length])),
       last_events: events.slice(-20),
@@ -283,11 +283,11 @@ export async function handleEmployeesList(request, opts = {}) {
   const q = qp(request)
   try {
     const [employees, assignments] = await Promise.all([
-      p.svc.store.listEmployees({ org_id: p.org_id, status: ['active', 'paused', 'retired'].includes(q.get('status')) ? q.get('status') : undefined }),
+      p.svc.store.listEmployees({ org_id: p.org_id, status: ['active', 'paused', 'retired', 'pending_link'].includes(q.get('status')) ? q.get('status') : undefined }),
       p.svc.store.listAssignments({ org_id: p.org_id, limit: 1000 }),
     ])
     const open = openCountsOf(assignments)
-    return ok({ employees: employees.map((e) => ({ ...e, open_assignments: open.get(e.employee_id) || 0, charter: presentCharter(e.role_key) })) }, opts.headers)
+    return ok({ employees: employees.map((e) => ({ ...e, open_assignments: open.get(e.employee_id) || 0, charter: presentCharter(e.role_key), activity: employeeActivity(e, assignments, { now: Date.now() }) })) }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
@@ -309,7 +309,27 @@ export function validateEmployeeInput(raw = {}) {
   if (manager_employee_id === undefined) return { error: 'MANAGER_ID_INVALID' }
   const employee_code = e.employee_code == null ? null : String(e.employee_code).replace(/[^A-Z0-9-]/gi, '').toUpperCase().slice(0, 12) || null
   const spend = Number(e.spend_day_cap_usd ?? 0)
-  return { employee: { employee_id, role_key: e.role_key, kind: charter.kind, department_key: charter.department_key, display_name, employee_code, manager_employee_id, status, markets, segments: e.segments && typeof e.segments === 'object' && !Array.isArray(e.segments) ? e.segments : {}, tier_ceiling, spend_day_cap_usd: Number.isFinite(spend) ? Math.min(Math.max(spend, 0), 5) : 0 } }
+  // docs/WORKFORCE-AGNTEI.md §1: skills / property specializations are lower-case slugs; availability a closed set
+  const tags = (v) => (Array.isArray(v) ? [...new Set(v.map(marketSlug).filter(Boolean))].slice(0, 20) : undefined)
+  const skills = tags(e.skills)
+  const property_specializations = tags(e.property_specializations)
+  const availability = ['available', 'busy', 'off', 'unknown'].includes(e.availability) ? e.availability : undefined
+  return { employee: { employee_id, role_key: e.role_key, kind: charter.kind, department_key: charter.department_key, display_name, employee_code, manager_employee_id, status, markets, segments: e.segments && typeof e.segments === 'object' && !Array.isArray(e.segments) ? e.segments : {}, tier_ceiling, spend_day_cap_usd: Number.isFinite(spend) ? Math.min(Math.max(spend, 0), 5) : 0,
+    ...(skills ? { skills } : {}), ...(property_specializations ? { property_specializations } : {}), ...(availability ? { availability } : {}) } }
+}
+
+/**
+ * "Register an Agntei agent" (CEO only, docs/WORKFORCE-AGNTEI.md §1 step 1): a pending_link, unbound operator_ai employee.
+ * It grants nothing and executes nothing; the response carries the exact owner steps (mint → principal → grants → bind →
+ * connect → link) as copyable commands.
+ */
+export function validateAgnteiRegistration(raw = {}) {
+  const v = validateEmployeeInput({ ...(raw || {}), status: 'active' })
+  if (v.error) return v
+  const charter = ROLE_CHARTERS[v.employee.role_key]
+  if (charter.kind !== 'ai' || ['ceo', 'coo'].includes(v.employee.role_key)) return { error: 'ROLE_NOT_FOR_AN_AGNTEI_AGENT' }
+  const { status, ...employee } = v.employee
+  return { employee: { ...employee, kind: 'ai', origin: 'agntei', employment_type: 'operator_ai' } }
 }
 
 export async function handleEmployeeUpsert(request, opts = {}) {
@@ -317,6 +337,7 @@ export async function handleEmployeeUpsert(request, opts = {}) {
   if (p.response) return p.response
   if (!isOwner(p)) return fail('CEO_ONLY', 'Only the CEO can create or change employees.', 403, opts.headers)
   const b = await body(request)
+  if (b.op === 'register_agntei') return registerAgntei(p, b, opts)
   const v = validateEmployeeInput(b.employee || b)
   if (v.error) return fail(v.error, 'The employee is not valid.', 422, opts.headers)
   if (v.employee.role_key === 'ceo' && v.employee.employee_id !== CEO_EMPLOYEE_ID) return fail('CEO_ROW_FIXED', 'There is exactly one CEO row.', 422, opts.headers)
@@ -327,6 +348,27 @@ export async function handleEmployeeUpsert(request, opts = {}) {
   } catch (e) { return storeFail(e, opts.headers) }
 }
 
+async function registerAgntei(p, b, opts) {
+  const v = validateAgnteiRegistration(b.employee || {})
+  if (v.error) return fail(v.error, 'The Agntei employee is not valid.', 422, opts.headers)
+  try {
+    if (await p.svc.store.getEmployee({ org_id: p.org_id, employee_id: v.employee.employee_id })) return fail('CONFLICT', 'An employee with this id already exists.', 409, opts.headers)
+    const employee = await p.svc.store.upsertEmployee({ org_id: p.org_id, employee: v.employee, actor_user_id: p.identity.user_id })
+    const ceo = await p.svc.store.getEmployee({ org_id: p.org_id, employee_id: CEO_EMPLOYEE_ID })
+    return ok({ employee, link: agnteiLinkSteps({ employee, org_id: p.org_id, ceo_user_id: ceo?.user_id ?? p.identity.user_id }), executed: false }, opts.headers, 201)
+  } catch (e) { return storeFail(e, opts.headers) }
+}
+
+/** The external identity / binding of an employee as the dashboard shows it (ids and times only). */
+function presentLink(e) {
+  if (e?.origin !== 'agntei') return null
+  return {
+    system: 'agntei', principal_id: e.action_principal_id ?? null, bound_at: e.bound_at ?? null, link_expires_at: e.link_expires_at ?? null,
+    binding_valid_until: e.binding_valid_until ?? null, binding_revoked_at: e.binding_revoked_at ?? null,
+    linked: Boolean(e.external_agent_id), external_agent_id: e.external_agent_id ?? null, external_install_id: e.external_install_id ?? null, linked_at: e.external_linked_at ?? null,
+  }
+}
+
 export async function handleEmployeeGet(request, employee_id, opts = {}) {
   const p = await prologue(request, opts)
   if (p.response) return p.response
@@ -335,11 +377,14 @@ export async function handleEmployeeGet(request, employee_id, opts = {}) {
   try {
     const employee = await s.getEmployee({ org_id: p.org_id, employee_id })
     if (!employee) return fail('NOT_FOUND', 'Employee not found.', 404, opts.headers)
-    const [assignments, memory, kpis, policies] = await Promise.all([
+    const [assignments, memory, kpis, policies, events, gateway] = await Promise.all([
       s.listAssignments({ org_id: p.org_id, assignee_employee_id: employee_id, limit: 200 }),
       s.listMemoryFacts({ org_id: p.org_id, scope: 'employee', scope_key: employee_id }),
       s.listKpis({ org_id: p.org_id, subject_type: 'employee', subject_key: employee_id }),
       s.listPolicies({ org_id: p.org_id, status: 'active' }),
+      s.listEvents({ org_id: p.org_id, employee_id, limit: 200 }).then((xs) => xs.slice(-100).reverse()).catch(() => null),
+      typeof s.listEmployeeGatewayAudit === 'function' && employee.action_principal_id ? s.listEmployeeGatewayAudit({ org_id: p.org_id, employee_id, limit: 100 }).catch(() => ({ available: false, events: [], reason: 'gateway_audit_unreadable' }))
+        : Promise.resolve({ available: employee.action_principal_id ? false : true, events: [], reason: employee.action_principal_id ? 'gateway_audit_unavailable' : 'no_principal' }),
     ])
     const jobs = [...new Set(assignments.map((a) => a.runtime_job_id).filter(Boolean))].slice(0, 25)
     // spend is per runtime job (agent.spend_ledger); a per-day split per employee is not recorded in Phase A
@@ -355,10 +400,17 @@ export async function handleEmployeeGet(request, employee_id, opts = {}) {
     const inactive = inactiveOf([employee])
     return ok({
       employee: { ...employee, open_assignments: assignments.filter((a) => OPEN_ASSIGNMENT_STATES.includes(a.status)).length },
+      activity: employeeActivity(employee, assignments, { now: Date.now() }),
+      link: presentLink(employee),
+      // the exact owner steps while the agent is not (or no longer) linked through a live binding (CEO only)
+      link_steps: isOwner(p) && employee.origin === 'agntei' && (employee.status === 'pending_link' || employee.binding_revoked_at || (employee.binding_valid_until && Date.parse(employee.binding_valid_until) <= Date.now()))
+        ? agnteiLinkSteps({ employee, org_id: p.org_id, ceo_user_id: (await s.getEmployee({ org_id: p.org_id, employee_id: CEO_EMPLOYEE_ID }))?.user_id ?? p.identity.user_id }) : null,
+      // per-employee action history = the Workforce events + the Action Gateway audit of its principal (codes / ids only)
+      history: { events: events ?? [], events_available: events !== null, gateway: gateway.events || [], gateway_available: gateway.available === true, gateway_reason: gateway.reason ?? null },
       charter: presentCharter(employee.role_key),
       authority: { effective_tier_ceiling: effectiveTierCeiling(employee), policies: policies.filter((x) => x.employee_id === employee_id || (!x.employee_id && x.role_key === employee.role_key)) },
       memory: memory.map((f) => ({ ...f, source_refs: presentRefs(f.source_refs) })),
-      assignments: assignments.map((a) => presentAssignment(a, { inactive })),
+      assignments: assignments.map((a) => presentAssignment(a, { inactive, employees: new Map([[employee.employee_id, employee]]) })),
       open_assignments: assignments.filter((a) => OPEN_ASSIGNMENT_STATES.includes(a.status)).length,
       kpis: (charter?.kpis || []).map((k) => kpis.find((x) => x.kpi_key === k) || { subject_type: 'employee', subject_key: employee_id, kpi_key: k, value: null, status: 'unknown', source: { reason: 'not computed in Phase A' } }),
       cost: { today_usd: jobs.length ? null : 0, window_usd, window: `last_${jobs.length}_jobs`, cap_usd: employee.spend_day_cap_usd ?? null, status: jobs.length ? 'unknown' : status, reason: jobs.length ? (status === 'known' ? 'per-day spend is not attributed per employee; window_usd is the recent jobs total' : reason) : reason },
@@ -380,7 +432,8 @@ export async function handleAssignments(request, opts = {}) {
       limit: Math.min(Math.max(Number(q.get('limit')) || 100, 1), 500),
     }), p.svc.store.listEmployees({ org_id: p.org_id })])
     const inactive = inactiveOf(employees)
-    return ok({ assignments: assignments.map((a) => presentAssignment(a, { inactive })) }, opts.headers)
+    const byId = new Map(employees.map((e) => [e.employee_id, e]))
+    return ok({ assignments: assignments.map((a) => presentAssignment(a, { inactive, employees: byId })) }, opts.headers)
   } catch (e) { return storeFail(e, opts.headers) }
 }
 

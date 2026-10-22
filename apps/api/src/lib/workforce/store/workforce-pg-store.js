@@ -10,7 +10,7 @@
 // Errors: WorkforceStoreError { code } (errors.js). Times: ISO strings in and out.
 import { WorkforceStoreError, fromPgError } from './errors.js'
 import {
-  shapeEmployee, shapeMission, shapeAssignment, shapeClaim, shapeEvent, shapeExecMessage, shapeFact, shapePolicy, shapeSettings, shapeKpi,
+  shapeEmployee, shapeMission, shapeAssignment, shapeClaim, shapeEvent, shapeExecMessage, shapeFact, shapePolicy, shapeSettings, shapeKpi, shapeBudget,
 } from './shape.js'
 
 const clamp = (v, d, lo, hi) => Math.min(Math.max(Number.isFinite(Number(v)) && v != null ? Math.trunc(Number(v)) : d, lo), hi)
@@ -143,6 +143,10 @@ export function createWorkforcePgStore({ pool, statementTimeoutMs = 5000, lockTi
     async transferAssignment({ org_id, assignment_id, to_employee_id, actor }) {
       return shapeAssignment(await call('select workforce.assignment_transfer($1, $2, $3, $4) r', [org_id, assignment_id, to_employee_id, actor ?? null]))
     },
+    /** workforce.assignment_set_external_policy (PROPOSED_20261022110000_workforce_agntei): wait | reassign_internal + the bounded wait. */
+    async setAssignmentExternalPolicy({ org_id, assignment_id, policy, wait_seconds = null, actor }) {
+      return shapeAssignment(await call('select workforce.assignment_set_external_policy($1, $2, $3, $4, $5) r', [org_id, assignment_id, policy, wait_seconds, actor ?? null]))
+    },
     async cancelMissionAssignments({ org_id, mission_id }) {
       return Number(await call('select workforce.assignment_cancel_mission($1, $2) r', [org_id, mission_id]))
     },
@@ -170,7 +174,12 @@ export function createWorkforcePgStore({ pool, statementTimeoutMs = 5000, lockTi
     async appendEvent({ org_id, type, mission_id = null, assignment_id = null, employee_id = null, payload = {} }) {
       return shapeEvent(await call('select workforce.event_append($1, $2, $3, $4, $5, $6::jsonb) r', [org_id, type, mission_id, assignment_id, employee_id, j(payload || {})]))
     },
-    async listEvents({ org_id, after_event_id = null, mission_id = null, limit = 100 } = {}) {
+    async listEvents({ org_id, after_event_id = null, mission_id = null, employee_id = null, limit = 100 } = {}) {
+      if (employee_id != null) {
+        // one employee's history: its NEWEST events, returned ascending like every other page
+        return (await read(`select * from (select * from workforce.event where org_id = $1 and employee_id = $2 and ($3::bigint is null or event_id > $3::bigint)
+           order by event_id desc limit $4) x order by event_id`, [org_id, employee_id, after_event_id, clamp(limit, 100, 1, 500)])).map(shapeEvent)
+      }
       return (await read(`select * from workforce.event where org_id = $1 and ($2::bigint is null or event_id > $2::bigint) and ($3::text is null or mission_id = $3)
          order by event_id limit $4`, [org_id, after_event_id, mission_id, clamp(limit, 100, 1, 500)])).map(shapeEvent)
     },
@@ -216,6 +225,42 @@ export function createWorkforcePgStore({ pool, statementTimeoutMs = 5000, lockTi
     async listKpis({ org_id, subject_type = null, subject_key = null } = {}) {
       return (await read(`select * from workforce.kpi_snapshot where org_id = $1 and ($2::text is null or subject_type = $2) and ($3::text is null or subject_key = $3)
          order by subject_type, subject_key, kpi_key, "window"`, [org_id, subject_type, subject_key])).map(shapeKpi)
+    },
+
+    // ── Workforce × Agntei (PROPOSED_20261022110000_workforce_agntei.sql; docs/WORKFORCE-AGNTEI.md §4–§5) ──
+    /** CEO only: one active cap per (scope, scope_key, period); a new put revokes the previous one. */
+    async putBudget({ org_id, budget, actor_user_id }) {
+      return shapeBudget(await call('select workforce.budget_put($1, $2::jsonb, $3::uuid) r', [org_id, j(budget || {}), actor_user_id ?? null]))
+    },
+    async revokeBudget({ org_id, budget_id, actor_user_id }) {
+      return shapeBudget(await call('select workforce.budget_revoke($1, $2::uuid, $3::uuid) r', [org_id, budget_id, actor_user_id ?? null]))
+    },
+    async listBudgets({ org_id, status = 'active' } = {}) {
+      return (await read(`select * from workforce.budget where org_id = $1 and ($2::text[] is null or status = any ($2::text[])) order by scope, scope_key, period, created_at desc limit 500`,
+        [org_id, asList(status)])).map(shapeBudget)
+    },
+    /** The active budgets that apply to (employee, mission) with their committed spend this window → [{ budget_id, scope, scope_id, period, cap_usd, spent_usd }]. */
+    async budgetStatus({ org_id, employee_id, mission_id = null, now = null }) {
+      let r
+      try {
+        r = await call('select workforce.budget_status($1, $2, $3, $4::timestamptz) r', [org_id, employee_id, mission_id, ts(now)])
+      } catch (e) {
+        // the budget table does not exist (the Agntei link is not applied): no cap CAN apply. Any other failure throws (the engine denies paid work)
+        if (e?.code === 'UNAVAILABLE' && ['42883', '42P01'].includes(String(e.pg_code || ''))) return []
+        throw e
+      }
+      return (r || []).map((b) => ({ budget_id: String(b.budget_id), scope: b.scope, scope_id: b.scope_id, period: b.period, cap_usd: Number(b.cap_usd), spent_usd: Number(b.spent_usd) }))
+    },
+    /** The Action Gateway audit of the employee's bound principal (codes and ids only), newest first. */
+    async listEmployeeGatewayAudit({ org_id, employee_id, limit = 50 }) {
+      try {
+        const r = await call('select workforce.employee_gateway_audit($1, $2, $3) r', [org_id, employee_id, clamp(limit, 50, 1, 200)])
+        return { available: true, events: (r || []).map((e) => ({ event_id: Number(e.event_id), at: e.at ? new Date(e.at).toISOString() : null, event_type: e.event_type, action: e.action ?? null, capability: e.capability ?? null, tier: e.tier ?? null, code: e.code ?? null, intent_id: e.intent_id ?? null })) }
+      } catch (e) {
+        // the Agntei link is not applied (or the gateway schema is absent): unknown, never an empty history
+        if (e?.code === 'UNAVAILABLE') return { available: false, events: [], reason: 'gateway_audit_unavailable' }
+        throw e
+      }
     },
   }
   return Object.freeze(store)

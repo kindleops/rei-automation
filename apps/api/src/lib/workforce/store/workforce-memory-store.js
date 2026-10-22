@@ -12,15 +12,20 @@
 //     now      () => ms | Date | ISO   the clock (clock_timestamp())
 //     orgs     org ids that exist (agent.org); default: the single LeadCommand org
 //     members  [{ org_id, user_id, role: 'owner' | 'operator' }] (agent.operator_membership)
+//     spendOf  (runtime_job_id) => committed usd (agent.spend_ledger); default 0 — workforce.budget_status
+// It also mirrors PROPOSED_20261022110000_workforce_agntei.sql (docs/WORKFORCE-AGNTEI.md): the employee identity
+// fields + their guard, mission origin, the DERIVED execution_mode (dispatch never leases an external row; a
+// completed job hands an external row back as ready) and budgets. The gateway-side writers have no twin.
 import crypto from 'node:crypto'
 import { WorkforceStoreError } from './errors.js'
 import {
   ASSIGNMENT_STATES, MISSION_STATES, ROLE_DEPARTMENTS, ROLE_KEYS, DEPARTMENT_KEYS, EMPLOYEE_STATUSES, OUTCOME_CLASSES, RESOURCE_TYPES,
   MEMORY_SCOPES, EPISTEMIC_CLASSES, canAssignmentTransition, canMissionTransition, backoffSeconds,
+  EMPLOYMENT_TYPES, EMPLOYEE_ORIGINS, AVAILABILITY, BUDGET_SCOPES, BUDGET_PERIODS, executionModeFor,
 } from './transitions.js'
 import { isClean, textClean, stringViolation, jsonBytes, asJsonb } from './payload-guard.js'
 import {
-  shapeEmployee, shapeMission, shapeAssignment, shapeClaim, shapeEvent, shapeExecMessage, shapeFact, shapePolicy, shapeSettings, shapeKpi,
+  shapeEmployee, shapeMission, shapeAssignment, shapeClaim, shapeEvent, shapeExecMessage, shapeFact, shapePolicy, shapeSettings, shapeKpi, shapeBudget,
 } from './shape.js'
 
 export const LEADCOMMAND_ORG_ID = '00000000-0000-4000-8000-00000000a001'
@@ -72,7 +77,7 @@ const listOk = (arr, re) => Array.isArray(arr) && arr.length <= 50 && arr.every(
 const cleanObj = (v, max) => isObj(v) && jsonBytes(v) <= max && isClean(v)
 const round = (n, d) => (n == null ? null : Math.round(n * 10 ** d) / 10 ** d)
 
-export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEADCOMMAND_ORG_ID], members = [] } = {}) {
+export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEADCOMMAND_ORG_ID], members = [], spendOf = () => 0 } = {}) {
   const clockMs = () => {
     const v = typeof now === 'function' ? now() : now
     const ms = v instanceof Date ? v.getTime() : typeof v === 'number' ? v : Date.parse(String(v))
@@ -85,7 +90,7 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
     orgs: new Set(orgs.map((o) => String(o).toLowerCase())),
     members: members.map((m) => ({ org_id: String(m.org_id).toLowerCase(), user_id: String(m.user_id).toLowerCase(), role: m.role || 'operator' })),
     employees: new Map(), missions: new Map(), assignments: new Map(), claims: new Map(), events: [], messages: [], facts: new Map(),
-    policies: new Map(), settings: new Map(), kpis: new Map(), seq: 0, eventId: 0,
+    policies: new Map(), settings: new Map(), kpis: new Map(), budgets: new Map(), seq: 0, eventId: 0,
   }
   for (const o of S.orgs) if (o === LEADCOMMAND_ORG_ID) S.settings.set(o, { org_id: o, exec_review_price_usd: 5000000, escalation: {}, updated_at: clock(), updated_by: 'migration' })
 
@@ -124,6 +129,15 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
     if (!['T1', 'T2'].includes(e.tier_ceiling)) refuse('tier_ceiling')
     if (!(e.spend_day_cap_usd >= 0 && e.spend_day_cap_usd <= 5)) refuse('spend_day_cap_usd')
     if (!(ROLE_DEPARTMENTS[e.role_key] || []).includes(e.department_key)) refuse('role / department')
+    // §1 (workforce_agntei): employment type, origin, the external identity, tags, availability
+    if (!EMPLOYMENT_TYPES.includes(e.employment_type)) refuse('employment_type')
+    if (!EMPLOYEE_ORIGINS.includes(e.origin)) refuse('origin')
+    if ((e.employment_type === 'human') !== (e.kind === 'human')) refuse('employment type human ⇔ kind human')
+    if ((e.employment_type === 'operator_ai') !== (e.origin === 'agntei')) refuse('operator_ai ⇔ origin agntei')
+    if (!listOk(e.skills, /^[a-z0-9][a-z0-9_.:-]{0,79}$/) || !listOk(e.property_specializations, /^[a-z0-9][a-z0-9_.:-]{0,79}$/)) refuse('tags')
+    if (!AVAILABILITY.includes(e.availability)) refuse('availability')
+    if (e.status === 'pending_link' && !(e.origin === 'agntei' && e.external_agent_id == null)) refuse('pending_link is the Agntei birth status')
+    if (e.origin === 'agntei' && !['pending_link', 'retired'].includes(e.status) && e.external_agent_id == null) refuse('a working Agntei employee is linked')
     if (e.role_key === 'ceo' && !(e.kind === 'human' && e.user_id != null)) refuse('the CEO is a human with a user id')
     if (e.kind !== 'human' && e.user_id != null) refuse('an AI employee has no user id')
     if (e.manager_employee_id != null && e.manager_employee_id === e.employee_id) refuse('self manager')
@@ -187,11 +201,17 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
     if (next.status !== old.status && !canAssignmentTransition(old.status, next.status)) fail('ILLEGAL_TRANSITION', `assignment ${old.status} → ${next.status}`)
     if (next.attempt < old.attempt) fail('CONFLICT', 'WF_IMMUTABLE: attempt never decreases')
   }
+  // workforce.assignment_mode_sync: the mode is never written by a caller, it follows the assignee
+  const modeOf = (employee_id) => executionModeFor(S.employees.get(employee_id))
   function writeAssignment(old, patch) {
     const next = { ...old, ...patch, updated_at: clock() }
+    next.execution_mode = modeOf(next.assignee_employee_id)
     guardAssignment(old, next)
     checkAssignment(next)
     S.assignments.set(next.assignment_id, next)
+    if (next.execution_mode !== old.execution_mode) {
+      emit(next.org_id, 'wf.assignment.mode_changed', next.mission_id, next.assignment_id, next.assignee_employee_id, { from: old.execution_mode, to: next.execution_mode, from_employee_id: old.assignee_employee_id })
+    }
     return next
   }
   function writeMission(old, patch) {
@@ -241,6 +261,14 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
     /** test hooks (never part of the engine contract) */
     _state: () => S,
     _addMember({ org_id, user_id, role = 'owner' }) { S.members.push({ org_id: String(org_id).toLowerCase(), user_id: String(user_id).toLowerCase(), role }) },
+    /** test hook: what the gateway's owner bind + workforce_link_self do in SQL (no twin of the gateway writers) */
+    _linkAgntei({ employee_id, agent_id, install_id = 'inst_test_install', external_agent_id = 'agent_test01', valid_until = null }) {
+      const e = S.employees.get(employee_id)
+      if (!e || e.origin !== 'agntei') throw new Error('not an Agntei employee')
+      const t = clock()
+      S.employees.set(employee_id, { ...e, action_principal_id: agent_id, bound_by: e.created_by, bound_at: t, link_expires_at: addSec(t, 86400), binding_valid_until: valid_until ?? addSec(t, 30 * 86400),
+        external_system: 'agntei', external_install_id: install_id, external_agent_id, external_linked_at: t, status: 'active', heartbeat_at: t })
+    },
 
     // ── org / employees ──
     async listEmployees({ org_id, status = null } = {}) {
@@ -260,7 +288,7 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
       const p = asJsonb(employee)
       if (!isObj(p)) refuse('employee must be an object')
       const allowed = ['employee_id', 'kind', 'role_key', 'department_key', 'display_name', 'employee_code', 'manager_employee_id', 'user_id', 'action_principal_id',
-        'status', 'markets', 'segments', 'tier_ceiling', 'spend_day_cap_usd']
+        'status', 'markets', 'segments', 'tier_ceiling', 'spend_day_cap_usd', 'employment_type', 'origin', 'skills', 'property_specializations', 'availability']
       if (Object.keys(p).some((k) => !allowed.includes(k))) refuse('unknown employee field')
       const id = p.employee_id == null ? null : String(p.employee_id)
       if (id == null) refuse('employee_id required')
@@ -270,22 +298,38 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
         markets = p.markets.map((x) => (x == null ? null : typeof x === 'string' ? x : JSON.stringify(x)))
       }
       const s = (k) => (p[k] == null ? null : String(p[k]))
+      const tags = (k) => {
+        if (!Array.isArray(p[k])) refuse(`${k} must be an array`)
+        return p[k].map((x) => (x == null ? null : typeof x === 'string' ? x : JSON.stringify(x)))
+      }
       const existing = S.employees.get(id)
       let e
       let created = false
       if (existing) {
         if (existing.org_id !== org) fail('NOT_FOUND', `employee ${id}`)
         if (own(p, 'kind') && s('kind') !== existing.kind) fail('CONFLICT', "an employee's kind never changes")
+        if (own(p, 'origin') && s('origin') !== existing.origin) fail('CONFLICT', "an employee's origin never changes")
+        if (own(p, 'employment_type') && s('employment_type') !== existing.employment_type) fail('CONFLICT', "an employee's employment type never changes")
+        if (existing.origin === 'agntei' && own(p, 'action_principal_id') && s('action_principal_id') !== existing.action_principal_id) fail('FORBIDDEN', 'an Agntei employee is bound to its principal only by workforce.employee_bind_principal (owner)')
         e = { ...existing }
         for (const k of ['role_key', 'department_key', 'display_name', 'employee_code', 'manager_employee_id', 'action_principal_id', 'status', 'tier_ceiling']) if (own(p, k)) e[k] = s(k)
         if (own(p, 'user_id')) e.user_id = uuidParam(p.user_id, 'user_id')
         if (own(p, 'markets')) e.markets = markets
         if (own(p, 'segments')) e.segments = p.segments === undefined ? {} : p.segments
         if (own(p, 'spend_day_cap_usd')) e.spend_day_cap_usd = round(numParam(p.spend_day_cap_usd, 'spend_day_cap_usd'), 2)
+        if (own(p, 'skills')) e.skills = tags('skills')
+        if (own(p, 'property_specializations')) e.property_specializations = tags('property_specializations')
+        if (own(p, 'availability')) e.availability = s('availability')
+        // the identity guard (workforce.employee_identity_guard)
+        if (existing.status === 'pending_link' && !['pending_link', 'active', 'retired'].includes(e.status)) fail('ILLEGAL_TRANSITION', 'a pending_link employee is linked (active) or retired')
+        if (existing.status === 'pending_link' && e.status === 'active' && e.external_agent_id == null) fail('ILLEGAL_TRANSITION', 'only workforce_link_self activates an Agntei employee')
+        if (existing.status !== 'pending_link' && e.status === 'pending_link') fail('ILLEGAL_TRANSITION', 'pending_link is a birth status')
         e.updated_at = clock()
         if (e.role_key == null || e.department_key == null || e.display_name == null || e.status == null || e.tier_ceiling == null || e.spend_day_cap_usd == null) refuse('not null')
       } else {
         const t = clock()
+        const origin = s('origin') ?? 'workforce'
+        if (origin === 'agntei' && s('action_principal_id') != null) fail('FORBIDDEN', 'an Agntei employee is bound to its principal only by workforce.employee_bind_principal (owner)')
         e = {
           employee_id: id, org_id: org, kind: s('kind'), role_key: s('role_key'), department_key: s('department_key'), display_name: s('display_name'),
           employee_code: s('employee_code'), manager_employee_id: s('manager_employee_id'), user_id: uuidParam(p.user_id, 'user_id'),
@@ -293,8 +337,15 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
           segments: own(p, 'segments') ? p.segments : {}, tier_ceiling: s('tier_ceiling') ?? 'T1',
           spend_day_cap_usd: round(numParam(p.spend_day_cap_usd, 'spend_day_cap_usd') ?? 0, 2),
           heartbeat_at: null, last_activity_at: null, created_by: actor, created_at: t, updated_at: t,
+          employment_type: s('employment_type') ?? (s('kind') === 'human' ? 'human' : origin === 'agntei' ? 'operator_ai' : 'autonomous_ai'), origin,
+          external_system: null, external_install_id: null, external_agent_id: null, external_linked_at: null,
+          bound_by: null, bound_at: null, link_expires_at: null, binding_valid_until: null, binding_revoked_at: null, binding_revoked_by: null,
+          skills: own(p, 'skills') ? tags('skills') : [], property_specializations: own(p, 'property_specializations') ? tags('property_specializations') : [],
+          availability: s('availability') ?? 'unknown',
         }
+        if (own(p, 'status') === false && origin === 'agntei') e.status = 'pending_link'
         if (e.kind == null || e.role_key == null || e.department_key == null || e.display_name == null) refuse('not null')
+        if (origin === 'agntei' && e.status !== 'pending_link') fail('ILLEGAL_TRANSITION', 'an Agntei employee is born pending_link and unbound (the owner binds its principal)')
         created = true
       }
       checkEmployee(e)
@@ -336,7 +387,7 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
       const m = {
         mission_id: `wfm_${crypto.randomUUID()}`, org_id: org, title: title == null ? null : String(title), directive: directive == null ? null : String(directive),
         objective: {}, playbook_key: null, owner_employee_id, requested_by: by, status: 'planning', priority: prio ?? 50, due_at: due, plan: {}, plan_version: 0,
-        report: null, idempotency_key: key, created_at: t, updated_at: t, completed_at: null, _seq: nextSeq(),
+        report: null, idempotency_key: key, created_at: t, updated_at: t, completed_at: null, origin: 'workforce', _seq: nextSeq(),
       }
       if (m.title == null || m.directive == null) refuse('not null')
       checkMission(m)
@@ -401,7 +452,7 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
         capability_key: capability_key == null ? null : String(capability_key), assignee_employee_id, delegated_by_employee_id, status: 'pending', depends_on: deps,
         input: input == null ? {} : asJsonb(input), output: null, outcome_class: null, evidence: [], runtime_job_id: null, resource_type, resource_key,
         attempt: 0, max_attempts: maxA ?? 3, next_attempt_at: null, lease_token: null, lease_owner: null, lease_until: null, lease_seconds: null, claimed_at: null,
-        finished_token: null, last_error: null, created_at: t, updated_at: t, finished_at: null, _seq: nextSeq(),
+        finished_token: null, last_error: null, created_at: t, updated_at: t, finished_at: null, execution_mode: modeOf(assignee_employee_id), on_external_timeout: 'wait', external_wait_seconds: 3600, _seq: nextSeq(),
       }
       checkAssignment(a)
       S.assignments.set(a.assignment_id, a)
@@ -439,8 +490,8 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
           emitAssignment(writeAssignment(a0, { status: 'ready' }), 'pending', 'dependencies_completed')
         }
       }
-      // 2. lease the due ready rows
-      const ready = [...S.assignments.values()].filter((a) => a.org_id === org && a.status === 'ready' && (a.next_attempt_at == null || a.next_attempt_at <= vNow)
+      // 2. lease the due ready rows (INTERNAL only: an external assignment waits for its agent)
+      const ready = [...S.assignments.values()].filter((a) => a.org_id === org && a.status === 'ready' && (a.next_attempt_at == null || a.next_attempt_at <= vNow) && a.execution_mode === 'internal'
           && live(a) && S.employees.get(a.assignee_employee_id)?.status === 'active'
           && !stepsOf(a.mission_id).some((d) => a.depends_on.includes(d.step_key) && d.status !== 'completed'))
         .sort((x, y) => (S.missions.get(y.mission_id).priority - S.missions.get(x.mission_id).priority)
@@ -499,7 +550,14 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
         const changed = await atomic(async () => {
           const a0 = S.assignments.get(w.assignment_id)
           if (!a0 || a0.status !== 'waiting_job' || a0.runtime_job_id !== w.runtime_job_id) return false
-          if (job.state === 'completed') {
+          if (job.state === 'completed' && a0.execution_mode === 'external') {
+            // the job hands the assignment back to its Agntei agent (it completes it with its evidence)
+            const result = job.result == null ? {} : asJsonb(job.result)
+            const a = writeAssignment(a0, { status: 'ready', next_attempt_at: clock(),
+              output: { ...(a0.output || {}), research: { job_id: w.runtime_job_id, state: 'completed', result: jsonBytes(result) <= 12000 ? result : { withheld: 'too_large' } } },
+              evidence: [...a0.evidence, { source: 'agent.research_job', job_id: w.runtime_job_id }] })
+            emitAssignment(a, 'waiting_job', 'job_completed_returned_to_agent')
+          } else if (job.state === 'completed') {
             const a = writeAssignment(a0, { status: 'completed', outcome_class: 'verified', output: job.result == null ? {} : asJsonb(job.result),
               evidence: [...a0.evidence, { source: 'agent.research_job', job_id: w.runtime_job_id }], finished_at: clock() })
             releaseClaimsOf(a.assignment_id, 'finished')
@@ -586,6 +644,20 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
       if (a0.assignee_employee_id === to_employee_id) return out(shapeAssignment, a0)
       const a = writeAssignment(a0, { assignee_employee_id: to_employee_id })
       emit(org, 'wf.assignment.transferred', a.mission_id, a.assignment_id, a.assignee_employee_id, { from_employee_id: a0.assignee_employee_id, to_employee_id, actor_id: actor })
+      return out(shapeAssignment, a)
+    }),
+    /** workforce.assignment_set_external_policy: the COO / CEO records wait | reassign_internal + the bounded wait. */
+    setAssignmentExternalPolicy: ({ org_id, assignment_id, policy, wait_seconds = null, actor }) => atomic(async () => {
+      const org = orgParam(org_id)
+      if (!actorOk(org, actor)) fail('FORBIDDEN', 'actor must be an employee of the org or a named operator')
+      if (!['wait', 'reassign_internal'].includes(policy)) refuse('policy is wait or reassign_internal')
+      const w = intParam(wait_seconds, 'wait_seconds')
+      if (w != null && (w < 60 || w > 604800)) refuse('wait_seconds is 60 .. 604800')
+      const a0 = S.assignments.get(assignment_id)
+      if (!a0 || a0.org_id !== org) fail('NOT_FOUND', `assignment ${assignment_id}`)
+      if (TERMINAL.includes(a0.status)) fail('ILLEGAL_TRANSITION', `a ${a0.status} assignment takes no policy`)
+      const a = writeAssignment(a0, { on_external_timeout: policy, external_wait_seconds: w ?? a0.external_wait_seconds })
+      emit(org, 'wf.assignment.external_policy_set', a.mission_id, a.assignment_id, a.assignee_employee_id, { from: a0.on_external_timeout, to: a.on_external_timeout, wait_seconds: a.external_wait_seconds, actor_id: actor })
       return out(shapeAssignment, a)
     }),
     cancelMissionAssignments: ({ org_id, mission_id }) => atomic(async () => {
@@ -685,7 +757,11 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
       if (!orgExists(org)) fail('NOT_FOUND', 'org')
       return out(shapeEvent, emit(org, type, mission_id, assignment_id, employee_id, payload ?? {}))
     }),
-    async listEvents({ org_id, after_event_id = null, mission_id = null, limit = 100 } = {}) {
+    async listEvents({ org_id, after_event_id = null, mission_id = null, employee_id = null, limit = 100 } = {}) {
+      if (employee_id != null) {
+        return S.events.filter((e) => e.org_id === org_id && e.employee_id === employee_id && (after_event_id == null || e.event_id > Number(after_event_id)))
+          .slice(-clamp(limit, 100, 1, 500)).map((e) => out(shapeEvent, e))
+      }
       return S.events.filter((e) => e.org_id === org_id && (after_event_id == null || e.event_id > Number(after_event_id)) && (mission_id == null || e.mission_id === mission_id))
         .slice(0, clamp(limit, 100, 1, 500)).map((e) => out(shapeEvent, e))
     },
@@ -853,6 +929,59 @@ export function createWorkforceMemoryStore({ now = () => Date.now(), orgs = [LEA
         .sort((a, b) => a.subject_type.localeCompare(b.subject_type) || a.subject_key.localeCompare(b.subject_key) || a.kpi_key.localeCompare(b.kpi_key) || a.window.localeCompare(b.window))
         .map((k) => out(shapeKpi, k))
     },
+
+    // ── Workforce × Agntei: budgets (workforce.budget_put / _revoke / _status) + the gateway audit (no twin) ──
+    putBudget: ({ org_id, budget, actor_user_id }) => atomic(async () => {
+      const org = orgParam(org_id)
+      const actor = uuidParam(actor_user_id, 'actor_user_id')
+      if (!isOwner(org, actor)) fail('FORBIDDEN', 'budgets are CEO-authored')
+      const b = asJsonb(budget)
+      if (!isObj(b) || Object.keys(b).some((k) => !['scope', 'scope_key', 'period', 'cap_usd'].includes(k))) refuse('budget keys are scope, scope_key, period, cap_usd')
+      const scope = b.scope == null ? null : String(b.scope)
+      const key = b.scope_key == null ? null : String(b.scope_key)
+      const period = b.period == null ? null : String(b.period)
+      const cap = round(numParam(b.cap_usd, 'cap_usd'), 2)
+      if (!BUDGET_SCOPES.includes(scope) || !BUDGET_PERIODS.includes(period) || key == null || !/^[A-Za-z0-9_.:-]{1,80}$/.test(key) || cap == null || cap < 0 || cap > 1000) refuse('budget')
+      const keyOk = scope === 'org' ? key === org : scope === 'department' ? DEPARTMENT_KEYS.includes(key) : scope === 'mission' ? /^wfm_[0-9a-f-]{36}$/.test(key) : /^emp_[a-z0-9_]{3,40}$/.test(key)
+      if (!keyOk) refuse('budget scope_key shape')
+      const t = clock()
+      for (const x of S.budgets.values()) if (x.org_id === org && x.scope === scope && x.scope_key === key && x.period === period && x.status === 'active') S.budgets.set(x.budget_id, { ...x, status: 'revoked', revoked_at: t, revoked_by: actor })
+      const row = { budget_id: crypto.randomUUID(), org_id: org, scope, scope_key: key, period, cap_usd: cap, status: 'active', created_by: actor, created_at: t, revoked_at: null, revoked_by: null }
+      S.budgets.set(row.budget_id, row)
+      emit(org, 'wf.budget.put', null, null, null, { budget_id: row.budget_id, scope, period, cap_usd: cap })
+      return out(shapeBudget, row)
+    }),
+    revokeBudget: ({ org_id, budget_id, actor_user_id }) => atomic(async () => {
+      const org = orgParam(org_id)
+      const actor = uuidParam(actor_user_id, 'actor_user_id')
+      if (!isOwner(org, actor)) fail('FORBIDDEN', 'budgets are CEO-authored')
+      const b = S.budgets.get(String(budget_id))
+      if (!b || b.org_id !== org) fail('NOT_FOUND', `budget ${budget_id}`)
+      if (b.status === 'revoked') return out(shapeBudget, b)
+      const next = { ...b, status: 'revoked', revoked_at: clock(), revoked_by: actor }
+      S.budgets.set(b.budget_id, next)
+      emit(org, 'wf.budget.revoked', null, null, null, { budget_id: b.budget_id })
+      return out(shapeBudget, next)
+    }),
+    async listBudgets({ org_id, status = 'active' } = {}) {
+      const st = asList(status)
+      return [...S.budgets.values()].filter((b) => b.org_id === org_id && (!st || st.includes(b.status))).map((b) => out(shapeBudget, b))
+    },
+    async budgetStatus({ org_id, employee_id, mission_id = null, now: at = null }) {
+      const e = S.employees.get(employee_id)
+      const nowMs = Date.parse(tsParam(at, 'now') ?? clock())
+      const start = (period) => { const d = new Date(nowMs); return period === 'day' ? Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) : Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) }
+      return [...S.budgets.values()].filter((b) => b.org_id === org_id && b.status === 'active' && (b.scope === 'org' || (b.scope === 'department' && b.scope_key === e?.department_key)
+          || (b.scope === 'mission' && b.scope_key === mission_id) || (b.scope === 'employee' && b.scope_key === employee_id)))
+        .map((b) => {
+          const jobs = [...S.assignments.values()].filter((a) => a.org_id === org_id && a.runtime_job_id && Date.parse(a.updated_at) >= start(b.period)
+            && (b.scope === 'org' || (b.scope === 'department' && S.employees.get(a.assignee_employee_id)?.department_key === b.scope_key) || (b.scope === 'mission' && a.mission_id === b.scope_key) || (b.scope === 'employee' && a.assignee_employee_id === b.scope_key)))
+            .map((a) => a.runtime_job_id)
+          const spent = [...new Set(jobs)].reduce((t, id) => t + (Number(spendOf(id)) || 0), 0)
+          return { budget_id: b.budget_id, scope: b.scope, scope_id: b.scope_key, period: b.period, cap_usd: b.cap_usd, spent_usd: Math.round(spent * 1e6) / 1e6 }
+        })
+    },
+    async listEmployeeGatewayAudit() { return { available: false, events: [], reason: 'no_gateway_in_memory_store' } },
   }
   return store
 }

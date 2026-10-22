@@ -58,7 +58,16 @@ export const ROLE_DEPARTMENTS = Object.freeze({
 })
 export const ROLE_KEYS = Object.freeze(Object.keys(ROLE_DEPARTMENTS))
 
-export const EMPLOYEE_STATUSES = Object.freeze(['active', 'paused', 'retired'])
+export const EMPLOYEE_STATUSES = Object.freeze(['active', 'paused', 'retired', 'pending_link'])
+/** docs/WORKFORCE-AGNTEI.md §1 (PROPOSED_20261022110000_workforce_agntei.sql): human ⇔ kind human; operator_ai ⇔ origin agntei. */
+export const EMPLOYMENT_TYPES = Object.freeze(['autonomous_ai', 'operator_ai', 'human'])
+export const EMPLOYEE_ORIGINS = Object.freeze(['workforce', 'agntei'])
+export const AVAILABILITY = Object.freeze(['available', 'busy', 'off', 'unknown'])
+/** §3: an operator_ai assignee's assignments are external (its Agntei agent claims them); everything else is internal. */
+export const EXECUTION_MODES = Object.freeze(['internal', 'external'])
+export const executionModeFor = (employee) => (employee?.employment_type === 'operator_ai' ? 'external' : 'internal')
+export const BUDGET_SCOPES = Object.freeze(['org', 'department', 'mission', 'employee'])
+export const BUDGET_PERIODS = Object.freeze(['day', 'month'])
 export const OUTCOME_CLASSES = Object.freeze(['verified', 'partial', 'unknown', 'refused'])
 export const RESOURCE_TYPES = Object.freeze(['thread', 'property', 'opportunity', 'campaign'])
 export const MEMORY_SCOPES = Object.freeze(['company', 'department', 'employee', 'mission', 'property', 'market'])

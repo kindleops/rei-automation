@@ -176,6 +176,23 @@ test('PG T3: an UNHEALTHY sender holds the row (never a different number, zero p
   } finally { net.restore(); await env.db.drop() }
 })
 
+test('PG T3 (rc-8.5.21.1 rt-sc-06): an UNAUDITED sender-binding change on the thread holds the reply for review — nothing queued from either number, the receipt held, an operator item raised', { skip }, async () => {
+  const { env, cred, t } = await world()
+  const net = trapTransport()
+  try {
+    await env.owner.query(`insert into public.automation_events (event_type, source, conversation_thread_id, payload) values ('sender_binding_unaudited_change', 'test', $1, '{"note":"number moved without an audit"}'::jsonb)`, [SELLER])
+    const id = await handOff(env, cred, t, 'reply-unaudited-01')
+    const w = worker(env)
+    await w.tick()
+    assert.equal((await aiRows(env)).length, 0, 'never a send while the binding is unexplained')
+    const rec = await receipt(env, id)
+    assert.equal(rec.state, 'held', JSON.stringify(rec))
+    assert.equal(rec.code, 'R3_HELD')
+    assert.ok((await workItems(env)).length >= 1, 'a person reviews it')
+    assert.deepEqual(net.hits, [])
+  } finally { net.restore(); await env.db.drop() }
+})
+
 test('PG T3: an AMBIGUOUS provider accept (timeout after the request) is never resent: one provider attempt, the row is final, the receipt is outcome_unknown with a CRITICAL operator item', { skip }, async () => {
   const { env, cred, t } = await world()
   const net = trapTransport()

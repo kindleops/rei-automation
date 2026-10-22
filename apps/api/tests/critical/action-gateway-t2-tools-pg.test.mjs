@@ -161,8 +161,14 @@ test('PG T2: request_thread_hold_release files a RELEASE REQUEST; the hold stays
 test('PG T2: schedule_followup plans ONE intent in the durable lifecycle (born under followup_execution_mode OFF: planned, never materialized); holds AT PLAN, STOP, a property denial and a decline to the ownership question are refused; cancel_followup cancels it through the lifecycle cancel path, even under a hold', { skip }, async () => {
   const { env, cred } = await world()
   try {
-    const t = await seedThread(env.owner, { inboundBody: 'Call me back next month please' })
+    // rc-8.5.21.1: the latest reply answers our OWNERSHIP question, so a follow-up needs an explicit SELLING answer in it
+    // (followup-lifecycle#burstHasSellingAnswer); a callback request alone is not one (asserted below)
+    const t = await seedThread(env.owner, { inboundBody: 'Yes I own it but no plans to sell right now. Call me back next month please' })
     const { gateway } = makeGateway(env)
+    const bare = await seedThread(env.owner, { phone: '+13125550165', property: 'p500', inboundBody: 'Call me back next month please' })
+    const noSell = await gateway.call({ credential: cred, tool: 'schedule_followup', args: { client_request_id: 'fu-00000', thread_id: bare.thread_id, kind: 'seller_requested_callback', due_at: inDays(20), reason_code: 'seller_asked_for_callback' } })
+    assert.equal(noSell.code, 'OWNERSHIP_DECLINED_UNVERIFIED', 'an ownership answer without a selling answer is refused through the gateway')
+    assert.equal(noSell.result.reason, 'selling_nurture_requires_selling_intent_answer')
     const fuArgs = { client_request_id: 'fu-00001', thread_id: t.thread_id, kind: 'seller_requested_callback', due_at: inDays(20), reason_code: 'seller_asked_for_callback' }
     const r = await gateway.call({ credential: cred, tool: 'schedule_followup', args: fuArgs })
     assert.equal(r.ok, true, JSON.stringify(r))

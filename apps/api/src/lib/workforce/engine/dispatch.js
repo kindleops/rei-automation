@@ -7,15 +7,20 @@
 //      research) / park for a person (human assignee) / escalate to the CEO / refuse
 //   4. grow the plans whose expansion step completed (idempotent), and enqueue workforce.mission_review
 //      for every mission with nothing left that can run
+// External assignments (an Agntei agent's) are never claimed here. One extra step applies the policy RECORDED on an
+// external row its agent has not picked up within external_wait_seconds: wait ⇒ escalate to the COO (once per idle
+// period); reassign_internal ⇒ the COO reassigns it to an internal employee (then it runs like any internal row).
+// That and an explicit handoff are the only mode changes; an expired external lease is reaped back to the SAME assignee.
 import { runtimeIdempotencyKey } from '../../agent/runtime/job-runtime.js'
 import { PROPERTY_RESEARCH_KIND } from '../../agent/missions/mission-kinds.js'
 import { WORKFORCE_LIMITS, DISPATCH_KIND, MISSION_REVIEW_KIND } from '../config.js'
-import { authorize } from '../authority/engine.js'
+import { assignmentResource, authorizeAssignment } from '../authority/assignment-authority.js'
 import { getCapability } from '../capabilities/catalog.js'
-import { CapabilityError, decodePropertyRef, num } from '../capabilities/shared.js'
-import { createStaffer } from '../coo/staffing.js'
+import { CapabilityError, decodePropertyRef } from '../capabilities/shared.js'
+import { createStaffer, openCountsOf, pickAssignee } from '../coo/staffing.js'
+import { rolesFor } from '../org/charters.js'
 import { expandCandidates, expandNext } from '../coo/playbooks.js'
-import { CEO_EMPLOYEE_ID } from '../org/seed.js'
+import { CEO_EMPLOYEE_ID, COO_EMPLOYEE_ID } from '../org/seed.js'
 import { isCoreAssignment } from './report.js'
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
@@ -54,6 +59,64 @@ export function researchJobResolver(reads) {
     if (['failed', 'dead_letter', 'cancelled'].includes(j.state)) return { state: 'failed', result: null, error: { code: String(j.last_error?.code || j.state).toUpperCase().slice(0, 60) } }
     return { state: j.state, result: null, error: null } // still running / queued / retrying / budget_blocked
   }
+}
+
+/**
+ * External rows nobody picked up within their bounded wait → the RECORDED policy (owner addition 2026-10-22). Idempotent:
+ * one escalation per idle period (keyed by assignee × attempt); a reassignment changes the row (and its mode) once.
+ */
+export async function applyExternalTimeouts({ store, org_id, now, employees = [] }) {
+  const out = { escalated: 0, reassigned: 0 }
+  // an external row its agent could pick up: ready, or pending with every dependency completed (claimable on its next claim)
+  const open = (await store.listAssignments({ org_id, status: ['ready', 'pending'], limit: 1000 })).filter((a) => a.execution_mode === 'external')
+  if (!open.length) return out
+  const done = new Map()
+  const depsDone = async (a) => {
+    if (a.status === 'ready' || !(a.depends_on || []).length) return true
+    if (!done.has(a.mission_id)) done.set(a.mission_id, new Set((await store.listAssignments({ org_id, mission_id: a.mission_id, status: 'completed', limit: 1000 })).map((x) => x.step_key)))
+    return a.depends_on.every((k) => done.get(a.mission_id).has(k))
+  }
+  const rows = []
+  for (const a of open) if (await depsDone(a)) rows.push(a)
+  const emp = new Map(employees.map((e) => [e.employee_id, e]))
+  const internal = employees.filter((e) => e.status === 'active' && e.kind === 'ai' && e.employment_type !== 'operator_ai')
+  const counts = openCountsOf(await store.listAssignments({ org_id, limit: 1000 }))
+  for (const a of rows) {
+    const idleMs = now - Date.parse(a.updated_at)
+    if (!(idleMs > (Number(a.external_wait_seconds) || 3600) * 1000)) continue
+    const mission = await store.getMission({ org_id, mission_id: a.mission_id })
+    if (!mission || !['active', 'waiting'].includes(mission.status)) continue
+    // one escalation per idle period = per (assignee, attempt): a reaped lease or a reassignment starts a new one
+    const seen = (await store.listEvents({ org_id, mission_id: a.mission_id, limit: 500 })).some((e) => e.assignment_id === a.assignment_id && e.type === 'wf.assignment.external_timeout'
+      && e.payload?.attempt === a.attempt && e.payload?.assignee_id === a.assignee_employee_id)
+    if (seen) continue
+    const agent = emp.get(a.assignee_employee_id)
+    const who = `${agent?.display_name || a.assignee_employee_id} (Agntei)`
+    const mins = Math.round(idleMs / 60_000)
+    if (a.on_external_timeout === 'reassign_internal') {
+      let target = null
+      const roles = rolesFor(a.capability_key) // the workers of the capability first, then the heads that also cover it
+      for (const role of [...roles.filter((r) => !/^head_/.test(r)), ...roles.filter((r) => /^head_/.test(r))]) { target = pickAssignee({ role, market: a.input?.market ?? null, employees: internal, openCounts: counts, fallback: false }); if (target) break }
+      if (target) {
+        await store.transferAssignment({ org_id, assignment_id: a.assignment_id, to_employee_id: target.employee_id, actor: COO_EMPLOYEE_ID })
+        await store.appendEvent({ org_id, type: 'wf.assignment.external_timeout', mission_id: a.mission_id, assignment_id: a.assignment_id, employee_id: target.employee_id,
+          payload: { policy: 'reassign_internal', action: 'reassigned_internal', from_employee_id: a.assignee_employee_id, to_employee_id: target.employee_id, assignee_id: a.assignee_employee_id, attempt: a.attempt, since: a.updated_at, idle_seconds: Math.round(idleMs / 1000) } })
+        await store.appendExecMessage({ org_id, author: 'coo', author_employee_id: COO_EMPLOYEE_ID, mission_id: a.mission_id,
+          content: `${who} did not pick up the step ${a.step_key} for ${mins} min. Per its recorded policy I reassigned it to ${target.display_name}.`,
+          refs: [{ type: 'assignment', id: a.assignment_id }, { type: 'employee', id: target.employee_id }] }).catch(() => {})
+        counts.set(target.employee_id, (counts.get(target.employee_id) || 0) + 1)
+        out.reassigned += 1
+        continue
+      }
+    }
+    await store.appendEvent({ org_id, type: 'wf.assignment.external_timeout', mission_id: a.mission_id, assignment_id: a.assignment_id, employee_id: a.assignee_employee_id,
+      payload: { policy: a.on_external_timeout, action: 'escalated_to_coo', assignee_id: a.assignee_employee_id, attempt: a.attempt, since: a.updated_at, idle_seconds: Math.round(idleMs / 1000), ...(a.on_external_timeout === 'reassign_internal' ? { reason: 'no_internal_assignee' } : {}) } })
+    await store.appendExecMessage({ org_id, author: 'coo', author_employee_id: COO_EMPLOYEE_ID, mission_id: a.mission_id,
+      content: `${who} has not picked up the step ${a.step_key} for ${mins} min. It stays assigned to that agent${a.on_external_timeout === 'reassign_internal' ? ' (no internal employee can take it)' : ' (policy: wait)'}; reassign or hand it off to move it.`,
+      refs: [{ type: 'assignment', id: a.assignment_id }, { type: 'employee', id: a.assignee_employee_id }] }).catch(() => {})
+    out.escalated += 1
+  }
+  return out
 }
 
 /** Is there anything left in this mission that can still run (or a plan expansion still owed)? */
@@ -98,7 +161,7 @@ export async function runDispatchPass(d) {
   const { store, runtimeStore, reads, services, env, now, org_id, ctx } = d
   const owner = `wf-dispatch:${ctx.job.job_id}`.slice(0, 80)
   const max = Math.min(Math.max(Number(d.maxPerPass) || WORKFORCE_LIMITS.dispatch_default_per_pass, 1), WORKFORCE_LIMITS.dispatch_max_per_pass)
-  const summary = { reaped: null, claims_reaped: null, resumed: 0, processed: 0, outcomes: {}, stopped: null, expanded: [], reviews: [], continued: false }
+  const summary = { reaped: null, claims_reaped: null, resumed: 0, external_timeouts: null, processed: 0, outcomes: {}, stopped: null, expanded: [], reviews: [], continued: false }
   const bump = (k) => { summary.outcomes[k] = (summary.outcomes[k] || 0) + 1 }
 
   await ctx.step('reap', { progress: { step: 'reap', steps_done: 0 } })
@@ -118,19 +181,22 @@ export async function runDispatchPass(d) {
     runtimeStore?.limits ? runtimeStore.limits().catch(() => ({ emergency_stop: true })) : Promise.resolve({ emergency_stop: false }),
   ])
   const emp = new Map(employees.map((e) => [e.employee_id, e]))
+  // external rows past their bounded wait: the recorded policy (never a silent mode flip)
+  await ctx.step('external_timeouts', { progress: { step: 'external_timeouts', steps_done: 2 } })
+  summary.external_timeouts = await applyExternalTimeouts({ store, org_id, now: now(), employees })
   const missions = new Map()
   const getMission = async (id) => { if (!missions.has(id)) missions.set(id, await store.getMission({ org_id, mission_id: id })); return missions.get(id) }
   const missionAssignments = (id) => store.listAssignments({ org_id, mission_id: id, limit: 1000 })
+  // the employee's own assignments (the daily-cap usage is computed from them by the SHARED authority path)
   const usage = new Map()
-  const usageFor = async (employee_id) => {
-    if (!usage.has(employee_id)) {
-      const day = new Date(now()).toISOString().slice(0, 10)
-      const rows = await store.listAssignments({ org_id, assignee_employee_id: employee_id, limit: 1000 })
-      const today = {}
-      for (const a of rows) if (String(a.created_at || '').slice(0, 10) === day && a.status !== 'pending') today[a.capability_key] = (today[a.capability_key] || 0) + 1
-      usage.set(employee_id, today)
-    }
+  const rowsFor = async (employee_id) => {
+    if (!usage.has(employee_id)) usage.set(employee_id, await store.listAssignments({ org_id, assignee_employee_id: employee_id, limit: 1000 }))
     return usage.get(employee_id)
+  }
+  // workforce.budget (docs/WORKFORCE-AGNTEI.md §5), read only before paid work; a failed read is null (the engine denies)
+  const budgetsFor = async (employee_id, mission_id) => {
+    if (typeof store.budgetStatus !== 'function') return []
+    try { return await store.budgetStatus({ org_id, employee_id, mission_id, now: new Date(now()).toISOString() }) } catch { return null }
   }
   const touched = new Set()
   let staffer = null
@@ -167,23 +233,15 @@ export async function runDispatchPass(d) {
       signal: ctx.signal,
       remainingMs: ctx.remainingMs,
     }
-    const resource = cap?.resourceOf ? cap.resourceOf(capCtx, a.input || {}) : null
-    // the economic context of the resource, from this mission's own decision read (step outputs only)
-    let decision = null
-    if (resource?.property_id) {
-      const pr = a.input?.property_ref
-      const dec = all.find((x) => x.capability_key === 'intel.acquisition_decision' && x.input?.property_ref === pr && x.status === 'completed' && ['verified', 'partial'].includes(x.outcome_class))
-      decision = dec?.output || null
-      const prices = [decision?.ask, decision?.mao, decision?.valuation_mid, decision?.recommended_offer].map(num).filter((v) => v != null && v > 0)
-      resource.price_usd = prices.length ? Math.max(...prices) : null
-    }
+    // THE SHARED AUTHORITY PATH (authority/assignment-authority.js; the Action Gateway's Workforce actions call the same two functions)
+    const { resource, decision, cost_usd } = assignmentResource({ assignment: a, missionAssignments: all })
     let hold = null
     if (resource?.property_id && typeof services?.checkHold === 'function') {
       try { hold = await services.checkHold({ propertyId: resource.property_id, opportunityId: resource.opportunity_id || null, threadId: resource.conversation_id || null }) } catch { hold = { held: true, fail_closed: true, hold_type: 'lookup_error' } }
     }
-    const verdict = authorize({
-      employee, capability: a.capability_key, resource,
-      context: { env, now: now(), runtime: { emergency_stop: limits?.emergency_stop === true }, hold, policies, settings, usage: { today: cap?.class === 'internal' ? await usageFor(employee.employee_id) : {} }, valuation_uncertain: decision?.valuation_uncertain === true, title_ambiguous: decision?.title_ambiguous === true, confidence: decision?.confidence ?? null },
+    const verdict = authorizeAssignment({
+      employee, assignment: a, resource, decision, cost_usd, employeeAssignments: cap?.class === 'internal' ? await rowsFor(employee.employee_id) : [], policies, settings,
+      env, now: now(), emergencyStop: limits?.emergency_stop === true, hold, budgets: cost_usd > 0 ? await budgetsFor(employee.employee_id, a.mission_id) : [],
     })
     if (verdict.decision === 'deny') {
       await event('wf.authority.denied', a, { reasons: verdict.reasons })

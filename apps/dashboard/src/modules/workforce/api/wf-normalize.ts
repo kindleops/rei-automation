@@ -56,6 +56,9 @@ export function normalizeRef(v: unknown): WfRef | null {
 }
 export const normalizeRefs = (v: unknown): WfRef[] => arr(v).map(normalizeRef).filter((r): r is WfRef => Boolean(r))
 
+// Workforce × Agntei: the identity / activity / link fields (api/wf-agntei.ts)
+import { agnteiAssignmentFields, agnteiEmployeeFields, normalizeActivity, normalizeHistory, normalizeLink, normalizeLinkSteps } from './wf-agntei'
+
 /* ── org ──────────────────────────────────────────────────────────────── */
 
 export function normalizeEmployee(v: unknown): WfEmployee | null {
@@ -80,6 +83,7 @@ export function normalizeEmployee(v: unknown): WfEmployee | null {
     heartbeat_at: str(o.heartbeat_at),
     last_activity_at: str(o.last_activity_at),
     open_assignments: num(o.open_assignments ?? o.open_assignment_count),
+    ...agnteiEmployeeFields(o),
   }
 }
 export const normalizeEmployees = (v: unknown): WfEmployee[] => listOf(v, 'employees').map(normalizeEmployee).filter((e): e is WfEmployee => Boolean(e))
@@ -246,6 +250,7 @@ export function normalizeAssignment(v: unknown): WfAssignment | null {
     created_at: str(o.created_at),
     updated_at: str(o.updated_at),
     blocked_reason: str(o.blocked_reason) ?? str(o.waiting_reason),
+    ...agnteiAssignmentFields(o),
   }
 }
 export const normalizeAssignments = (v: unknown): WfAssignment[] => listOf(v, 'assignments').map(normalizeAssignment).filter((a): a is WfAssignment => Boolean(a))
@@ -377,6 +382,10 @@ export function normalizeProfile(v: unknown): WfEmployeeProfile | null {
     assignments: normalizeAssignments(o.assignments),
     kpis: normalizeKpis(o.kpis),
     cost: cost ? { today_usd: today, window_usd: num(cost.window_usd), window: str(cost.window), cap_usd: num(cost.cap_usd) ?? employee.spend_day_cap_usd, status: cost.status === 'known' && today !== null ? 'known' : 'unknown', reason: str(cost.reason) } : null,
+    activity: normalizeActivity(o.activity) ?? employee.activity,
+    link: normalizeLink(o.link),
+    link_steps: normalizeLinkSteps(o.link_steps),
+    history: normalizeHistory(o.history, normalizeEvent),
   }
 }
 

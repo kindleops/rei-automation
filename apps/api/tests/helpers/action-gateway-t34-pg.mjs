@@ -25,6 +25,10 @@ export const T2_BASELINE = path.join(REPO_DIR, 'mcp/leadcommand-action-mcp/migra
 const RUNTIME_PUBLIC_FIXTURE = `create table if not exists public.system_control (key text primary key, value text, updated_at timestamptz default now());
   create table if not exists public.send_queue (id bigserial primary key, queue_status text, scheduled_for timestamptz);
   revoke all on public.system_control, public.send_queue from agent_api;`
+// rc-8.5.21.1 v4 (rt-sc-06): the R3 executor reads the thread's sender-binding audit trail from the PRODUCTION
+// public.automation_events (an unreadable trail is a retry, fail closed); the same shape as conversation-e2e-pg.mjs
+const AUTOMATION_EVENTS_FIXTURE = `create table if not exists public.automation_events (id uuid primary key default gen_random_uuid(), event_type text, source text,
+  conversation_thread_id text, payload jsonb, dedupe_key text, created_at timestamptz default now());`
 const CONVERSATION_FIXTURE = `
   alter table public.message_events add column if not exists detected_intent text, add column if not exists language text, add column if not exists is_opt_out boolean,
     add column if not exists event_timestamp timestamptz, add column if not exists received_at timestamptz;
@@ -73,6 +77,7 @@ export async function t34Db({ applyT34 = true } = {}) {
       await tx(MIG('PROPOSED_20261016161000_negotiation_send_authorization.sql'))
       await run(GATEWAY_BASELINE)
       await db.pool.query(CONVERSATION_FIXTURE)
+      await db.pool.query(AUTOMATION_EVENTS_FIXTURE)
       await run(MIG('PROPOSED_20261017120000_followup_intent_lifecycle.sql'))
       await run(T2_BASELINE)
       await run(T34_BASELINE)

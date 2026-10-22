@@ -46,7 +46,10 @@ export async function buildApp(opts = {}) {
       auditor.event('credential_self_check', { outcome: self?.ok && self.current_user === GATEWAY_ROLE ? 'ok' : 'refused', running_as: self?.current_user || null, findings: (self?.findings || []).slice(0, 20) })
       if (!self?.ok || self.current_user !== GATEWAY_ROLE) throw bootError('CREDENTIAL_SELF_CHECK_FAILED', `credential self-check refused: ${(self?.findings || []).slice(0, 5).join('; ') || `running as ${self?.current_user}`}`)
     }
-    const serviceEnv = { ...(String(env.LEADCOMMAND_ACTION_MCP_DRAFT_SHADOW_ENABLED || '').trim() === 'true' ? { AI_CONVERSATION_SHADOW_ENABLED: 'true' } : {}), ...(opts.serviceEnv || {}) }
+    // LeadCommand Workforce on this host (docs/WORKFORCE-AGNTEI.md): born OFF — the Workforce tools answer capability_unavailable
+    // (WORKFORCE_DISABLED) until the operator sets LEADCOMMAND_ACTION_MCP_WORKFORCE_ENABLED=true (the Workforce authority engine's own switch)
+    const serviceEnv = { ...(String(env.LEADCOMMAND_ACTION_MCP_DRAFT_SHADOW_ENABLED || '').trim() === 'true' ? { AI_CONVERSATION_SHADOW_ENABLED: 'true' } : {}),
+      ...(cfg.workforce_enabled ? { WORKFORCE_ENABLED: '1' } : {}), ...(opts.serviceEnv || {}) }
     gateway = createActionGateway({
       store, reads: createGatewayReads({ db }), services: createGatewayServices({ db, store, env: serviceEnv, provider: opts.provider || null }),
       pepper: s.pepper, dataOrgId: cfg.orgId, worker: cfg.worker,
