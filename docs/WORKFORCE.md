@@ -308,3 +308,24 @@ Mission transitions:
 - `active → waiting | blocked | completed | failed | cancelled`
 - `waiting → active | completed | failed | cancelled`
 - `blocked → active | cancelled | failed`
+
+### §8 implementation notes (dashboard, feat/workforce-ui)
+
+- **Where:** `apps/dashboard/src/modules/workforce/`: `api/wf-client.ts` (every §7 call, one file), `api/wf-normalize.ts` (missing or mistyped fields become `null`, rendered "Unknown"), `model/` (pure view model: org tree, progress, plan DAG, report reconciliation, costs), `store/wf-hooks.ts` (keyed GETs on one live clock: 20 s, 4 s while a mission moves, 120 s when the pane is hidden), `ui/` (ten sections), `fixtures/` (DEV + `VITE_LC_WF_FIXTURES=1` only; every fixture body carries `fixture: true` and the live channel refuses such a body). Registered as app `workforce` at `/workforce` (desktop only, rail, group operations, minW 440).
+- **Failure states:** a 404 (or the HTML 404 page) is "not enabled" with the switches, 401 session, 403 allowlist or CEO-only, 409 conflict, 422 payload refused, 423 emergency stop. Never an empty organization.
+- **Mutations used:** POST `/command` (`{content, client_request_id}`), POST `/missions/[id]/cancel`, POST `/authority` revoke. POST `/missions` and POST `/employees` are typed in the client; the UI submits directives through `/command`.
+- **Honesty on the client:** a report item listed as completed whose assignment is not `completed` is moved to pending and flagged; a cost total exists only when every report's cost is known; a "verified" fact without a source ref is shown as an interpretation; a KPI is known only with `status: known` and a number.
+- **Fields assumed beyond §7 (all optional; absent renders Unknown):**
+  - overview: `departments[] {department_key, head_employee_id, employee_count, open_assignments}`, `employees[].open_assignments`, `runtime {emergency_stop, last_tick_at, kinds_armed[], dispatch_enabled, detail}`, `flags {name: bool|string}`, `last_events[]`.
+  - missions list rows: `assignment_counts {status: n}`.
+  - `mission.plan = {steps: [{step_key, capability_key, label, assignee_role, assignee_employee_id, depends_on[], fan_out, unavailable_reason}]}`; fan-out assignments use `step_key` `<step>.<n>` (or `<step>:<key>`).
+  - mission detail: `{mission, assignments[], events[]}`; `plan` / `report` may also sit beside `mission`.
+  - assignment: `blocked_reason` (why blocked / waiting_approval), `resource_label` (the property address for a chip).
+  - refs (`refs`, `evidence`, `source_refs`, `payload.refs`): `{type: property|thread|opportunity|job|assignment|mission|employee|market, id, label, property_id?, thread_key?, opportunity_id?}`, property ids decoded (a `pid_…` is decoded defensively).
+  - report: `summary`, `generated_at`; items `{label, assignment_id, step_key, status, refs[], reasons[] | reason, detail}`; `ranked[] {rank, label, market, refs[], components {contact, pressure, deal_quality (0..1 or 0..100), ev_usd|null, ev_reason}, cfo_verdict {verdict, reasons[]}, next_action {action, reason}, assignment_id}`; `costs {total_usd, status known|unknown, reason, by_job[] {runtime_job_id, kind, assignment_id, usd}}`.
+  - events: `?before=<event_id>` for older pages and `?limit=`; response `{events[], next_after}`.
+  - employee profile: `{employee, charter {mandate, responsibilities[], kpi_keys[], capabilities[], max_tier}, authority {policies[]}, memory[], assignments[], kpis[], cost {today_usd, window_usd, window, cap_usd, status, reason}}`.
+  - authority: `{policies[], settings {exec_review_price_usd, escalation{}}, proposed_grants[] {agent_id, employee_id, action, scope, limits, from_policy_id, note}, restrictions[] {kind hold|exclusion|suppression, label, reason, refs[], since}, emergency {stop, reason, since}, flags{}}`; POST body `{op: 'revoke', policy_id}` / `{op: 'put', policy}`.
+  - kpis: `source.reason` explains an unknown.
+  - reports: `{reports[] {mission_id, title, status, completed_at, report}, daily_brief {available, generated_at, summary, items[], code}}`.
+- **Proof:** `apps/dashboard/scripts/proof/desktop/workforce-capture.mjs` (read-only: non-GET aborted, local `/api` GETs answered empty, other hosts aborted) against `VITE_LC_WF_FIXTURES=1 npx vite --port 5419`.
