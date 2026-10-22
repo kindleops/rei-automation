@@ -666,6 +666,19 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261020110000_action_gateway_t34_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261020110000_action_gateway_t34_rollback_posttest.sql')],
   },
+  // ── LeadCommand Workforce Phase A (docs/WORKFORCE.md §2): STANDALONE, not a release-chain link. A new schema
+  // `workforce` over the S3 + R2 agent schema (+ the rc-8.5.21 opaque-id payload fix it is proposed after). The seed
+  // (PROPOSED_20261022100100_workforce_seed.sql: psql -v owner_id, own BEGIN/COMMIT) is exercised
+  // statement-for-statement by its posttest.
+  {
+    id: 'workforce_foundation',
+    setup: [SHIM, DURABILITY, S3, PAYLOAD_OPAQUE_IDS, RESEARCH, RUNTIME_PUBLIC_FIXTURE, RUNTIME],
+    pretest: M('PROPOSED_20261022100000_workforce_foundation_pretest.sql'),
+    apply: [M('PROPOSED_20261022100000_workforce_foundation.sql')],
+    posttest: [M('PROPOSED_20261022100000_workforce_foundation_posttest.sql'), M('PROPOSED_20261022100100_workforce_seed_posttest.sql')],
+    rollback: [M('PROPOSED_20261022100000_workforce_foundation_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261022100000_workforce_foundation_rollback_posttest.sql')],
+  },
 ]
 
 // ── rc-8.5.21: the SAME release chain, started from the PRODUCTION agent-runtime state ──
