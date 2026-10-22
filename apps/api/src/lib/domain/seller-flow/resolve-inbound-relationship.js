@@ -317,9 +317,21 @@ function detectOwnershipConfirmation(message = "", classifier_intent = null) {
   return includesAny(text, OWNERSHIP_CONFIRM_PHRASES);
 }
 
-function detectRelationshipClaim(message = "") {
+// classify.js NOT_RIGHT_NUMBER_RULE_ID: "Sorry it's not the right number" to
+// OUR ownership question. The words alone are not bound here (after an offer
+// they answer our number); only the classifier's context-bound verdict is.
+const NOT_RIGHT_NUMBER_RULE_ID = "wrong_number_not_right_number_to_ownership_question";
+
+function detectRelationshipClaim(message = "", classification = null) {
   const text = lower(message);
   if (includesAny(text, ACTUAL_WRONG_NUMBER_PHRASES) && !includesAny(text, NEVER_OWNER_PHRASES)) {
+    return "actual_wrong_number";
+  }
+  if (
+    lower(classification?.primary_intent) === "wrong_number" &&
+    Array.isArray(classification?.matched_rule_ids) &&
+    classification.matched_rule_ids.includes(NOT_RIGHT_NUMBER_RULE_ID)
+  ) {
     return "actual_wrong_number";
   }
   if (includesAny(text, NEVER_OWNER_PHRASES)) return "never_been_owner";
@@ -515,7 +527,7 @@ export function resolveInboundRelationship({
   const ownership_confirmed = detectOwnershipConfirmation(text, classifier_intent);
   let relationship_claim = ownership_confirmed
     ? "ownership_confirmed"
-    : detectRelationshipClaim(text);
+    : detectRelationshipClaim(text, classification);
 
   const referral_candidates = extractReferralCandidates(text, known_phones);
   const referral_detected =

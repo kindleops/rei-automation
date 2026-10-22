@@ -265,8 +265,12 @@ function inferQuestionType(useCase) {
 // what's up?" and "I am and I am selling it now" all fell to unclear@0.6 and
 // got no reply. An owner answers "I am" as often as "I do"; a yes followed by
 // a curious or selling tail is still a yes.
+// 2026-10-22 (prod): "sure is" to "are you still the owner
+// of …?" fell to unclear@0.64 and was held: "sure" and "sure do" were tokens,
+// the equally common "sure is" / "sure am" were not. Anchored like every other
+// token, so "not sure", "sure isn't" and "sure, what's the offer" never match.
 const AFFIRMATIVE_HEAD =
-  "(?:yes this is she|yes this is he|yes this is me|yes this is her|yes this is him|this is she|this is he|this is me|yes speaking|yes it is me|it is me|yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|i am|yes i am|yeah i am|yep i am|i am the owner|yes i am the owner|i'm the owner|yes it is|yeah it is|it is|it is mine|yes it is mine|its mine|that is me|yes that is me|thats me|sim|vâng|vang|dạ|đúng|đúng rồi|dung roi|phải rồi|phai roi)";
+  "(?:yes this is she|yes this is he|yes this is me|yes this is her|yes this is him|this is she|this is he|this is me|yes speaking|yes it is me|it is me|yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|i sure do|sure is|it sure is|sure it is|sure am|i sure am|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|i am|yes i am|yeah i am|yep i am|i am the owner|yes i am the owner|i'm the owner|yes it is|yeah it is|it is|it is mine|yes it is mine|its mine|that is me|yes that is me|thats me|sim|vâng|vang|dạ|đúng|đúng rồi|dung roi|phải rồi|phai roi)";
 const AFFIRMATIVE_TAIL =
   "(?:\\s+(?:is\\s+)?(?:what'?s up|whats up|why|what about it|what do you want|who is this|who'?s this|who are you)|\\s+and\\s+(?:i am|i'm|im)\\s+(?:selling it now|selling it|selling|looking to sell|trying to sell))?";
 const AFFIRMATIVE_TOKENS = `(?:${AFFIRMATIVE_HEAD}${AFFIRMATIVE_TAIL})`;

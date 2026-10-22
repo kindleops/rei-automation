@@ -2458,18 +2458,21 @@ export function matchesGoingToMarket(text = "") {
   return GOING_TO_MARKET_PATTERNS.some((re) => re.test(t));
 }
 
-function detectObjection(message) {
+function detectObjection(message, { notRightNumber = false } = {}) {
   const text = lower(message);
   if (matchesPropertyTypeCorrection(text)) return "property_correction";
   // Sold/transferred outranks the wrong_number objection fold: the sold
   // phrases inside OBJECTION_MAP.wrong_number would otherwise stamp a
   // phone-scope objection onto a property-scoped disposition.
-  if (matchesSoldTransfer(text) && !matchesTrueWrongNumber(text)) {
+  if (matchesSoldTransfer(text) && !matchesTrueWrongNumber(text, { notRightNumber })) {
     return "already_sold";
   }
   // Future listing beats the already_listed phrase fold, which contains bare
   // "mls" and "on the market" and would otherwise swallow it.
   if (matchesGoingToMarket(text)) return "going_to_market";
+  // "Sorry it's not the right number" (2026-10-22): the same objection as
+  // "wrong number", outside a money conversation (see matchesNotTheRightNumber).
+  if (notRightNumber && matchesNotTheRightNumber(text)) return "wrong_number";
   for (const obj of OBJECTION_MAP) {
     if (obj.key === "property_correction") continue;
     if (includesAny(text, obj.phrases)) return obj.key;
@@ -4194,9 +4197,45 @@ export const INTENT_PRIORITY = Object.freeze([
   "unclear",
 ]);
 
+/**
+ * "Sorry it's not the right number" / "this isn't the correct number" / "not
+ * the right #" (prod 2026-10-22: held unclear@0.60). The phone is wrong,
+ * said without the word "wrong". A price or offer anywhere in the message
+ * ("that's not the right number for the house", "$90k is not the right
+ * number") is a NEGOTIATION statement about money, never a wrong number.
+ */
+const NOT_RIGHT_NUMBER_RE =
+  /\b(?:not|isn'?t|is not|ain'?t|aint)\s+(?:the\s+|a\s+)?(?:right|correct)\s+(?:phone\s+|cell\s+)?(?:number|#)(?![a-z0-9])/i;
+const MONEY_OR_DEAL_CONTEXT_RE =
+  /[$\d]|\b(?:offer|offers|price|priced|pricing|ask|asking|amount|deal|proposal|counter|money|worth|value|figure|cash|k|grand|thousand|million|low|high|enough|lowball|house|home|property)\b/i;
+export const NOT_RIGHT_NUMBER_RULE_ID = "wrong_number_not_right_number_to_ownership_question";
+function matchesNotTheRightNumber(text = "") {
+  const normalized = lower(text).replace(/[’]/g, "'");
+  return NOT_RIGHT_NUMBER_RE.test(normalized) && !MONEY_OR_DEAL_CONTEXT_RE.test(normalized);
+}
+
+/**
+ * The not-the-right-number family binds ONLY to a reply to OUR ownership
+ * question ("are you still the owner of …?" -> "Sorry it's not the right
+ * number"). Anywhere else the same words can answer a number WE said (an
+ * offer, a price), and offer / manual rows often carry no question context at
+ * all -- so missing or other context leaves the reply to the existing rules
+ * (unclear -> a human). Never inferred, never guessed.
+ */
+function notRightNumberBindsToContext(conversation_context = null) {
+  const raw = conversation_context && typeof conversation_context === "object" ? conversation_context : null;
+  if (!raw) return false;
+  const use_case = lower(raw.last_outbound_use_case);
+  const question_type = lower(raw.last_outbound_question_type);
+  if (use_case !== "ownership_check" && question_type !== "ownership") return false;
+  // An ownership opener that quotes a price is still a money conversation.
+  return !/\$|\b\d[\d,.]*\s*k\b|\b\d{1,3},\d{3}\b|\boffer\b|\bprice\b/.test(lower(raw.last_outbound_body));
+}
+
 /** True wrong-number / wrong-person at this phone (not sold/never-owned identity). */
-function matchesTrueWrongNumber(text = "") {
+function matchesTrueWrongNumber(text = "", { notRightNumber = true } = {}) {
   const normalized = lower(text);
+  if (notRightNumber && matchesNotTheRightNumber(normalized)) return true;
   return includesAny(normalized, [
     "wrong number",
     "wrong #",
@@ -4911,6 +4950,8 @@ function resolveIntents(
     reply_signals = null,
     // CONTEXTUAL STOP: the original words stop something other than communication.
     stop_other_action = false,
+    // true only for a reply to our ownership question (notRightNumberBindsToContext).
+    not_right_number_allowed = false,
   } = {}
 ) {
   const text = lower(message);
@@ -5131,7 +5172,7 @@ function resolveIntents(
   // 1. OPT-OUT / COMPLIANCE (Highest Priority)
   // Prefer wrong_number when message is primarily a wrong-number disconnect
   // (e.g. "wrong number stop calling") over generic opt_out from "stop".
-  const is_true_wrong = matchesTrueWrongNumber(text);
+  const is_true_wrong = matchesTrueWrongNumber(text, { notRightNumber: not_right_number_allowed });
   const is_ownership_disconnect = matchesOwnershipDisconnect(text);
   const is_opt_out =
     compliance_flag === "stop_texting" ||
@@ -5266,6 +5307,11 @@ function resolveIntents(
     intents.push("wrong_number");
     if (is_wrong_person_claim && !(normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect)) {
       reply_rule_ids.push(reply_signals.wrong_person.rule_id);
+    }
+    // Named, so the relationship resolver binds the same phone-scoped wrong
+    // number it binds for "wrong number" (resolve-inbound-relationship.js).
+    if (not_right_number_allowed && matchesNotTheRightNumber(text) && !matchesTrueWrongNumber(text, { notRightNumber: false })) {
+      matched_rule_ids.push(NOT_RIGHT_NUMBER_RULE_ID);
     }
   }
 
@@ -7118,7 +7164,8 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   // Objection / emotion / signal detectors must read only what the seller
   // wrote, or our own words become a probate objection or an interest signal.
   const authored         = emoji_interpretation?.reaction_type === "platform_reaction" ? "" : message;
-  const objection        = compliance_flag ? null : detectObjection(authored);
+  const not_right_number_allowed = notRightNumberBindsToContext(conversation_context);
+  const objection        = compliance_flag ? null : detectObjection(authored, { notRightNumber: not_right_number_allowed });
   const emotion          = detectEmotion(authored);
   const positive_signals = detectPositiveSignals(authored);
   const stage_hint       = detectStageHint(authored, brain_item, objection);
@@ -7130,6 +7177,7 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
     conversation_context,
     emoji_interpretation,
     reply_signals,
+    not_right_number_allowed,
   });
   // Round 11 (owner P0 2026-10-09): a reply a person can read never stays
   // `unclear`. Only a still-unclear, non-compliance, non-policy-hold primary is
