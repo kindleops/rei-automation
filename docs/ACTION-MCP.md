@@ -239,7 +239,7 @@ Nothing below is authorized yet. **Each step needs its own owner approval.**
    - D1: register `agentActionApprovalCapability` and the intent reader in the capability plane, so approvals can be decided;
    - D3: hold fact on the injected client;
    - D4: operator-owned keys.
-3. **Resolve pg_net** (the same prerequisite as #25). Link #26's self-check refuses while PUBLIC can reach schema `net`.
+3. **Verify the pg_net posture** (the same prerequisite as #25; `docs/SUPABASE-PG-NET-POSTURE.md` §9). Link #26's self-check excepts Supabase's platform-managed pg_net ONLY through the pinned, tested platform exception (fingerprint `supabase_pg_net_default_acl.v1`) and only while every compensating control holds; any other shape of schema `net` refuses the apply. The Action MCP boot adds the live PostgREST / GraphQL exposure probe.
 4. **Apply link #26 in production.**
    - Precondition: #0, #1, #2, #3, #7, #15 and #24 are applied, and RLS is on `system_control`.
    - Run its pretest read-only first, then: `psql --single-transaction -v ON_ERROR_STOP=1 -f PROPOSED_20261019160000_action_gateway.sql`.
@@ -275,7 +275,7 @@ Nothing below is authorized yet. **Each step needs its own owner approval.**
 
 1. Merge + deploy the branch (code only; inert).
 2. The D1 / D3 / D4 changes in their owners' areas.
-3. pg_net remediation (shared with #25).
+3. The pg_net posture verification (shared with #25; `docs/SUPABASE-PG-NET-POSTURE.md` §9).
 4. Apply link #26 (and, separately, its rollback if ever needed).
 5. Mint the gateway token and the pepper; mint and register each agent principal.
 6. Each standing grant: capability, scope, caps, spend, envelope, validity.

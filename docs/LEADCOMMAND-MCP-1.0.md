@@ -378,15 +378,15 @@ The loader fences `@/lib/supabase/client.js` (it reads the service key on import
 - EXECUTE on `net.http_get` / `http_post` / `http_delete`;
 - ALL on `net.http_request_queue` / `net._http_response`.
 
-These are pg_net 0.20.0 objects owned by `supabase_admin`, which postgres cannot revoke. Any role, `lc_mcp_reader` included, could make the database send HTTP requests. **So the role migration will refuse to apply, and the server would refuse to boot, until the owner resolves pg_net.** Either drop the extension (H1 of the separate `PROPOSED_public_execute_hardening.sql`: unused, its only trigger disabled), or ask Supabase support to revoke PUBLIC on schema `net`, its functions and tables. That is intended.
+These are pg_net 0.20.0 objects owned by `supabase_admin`, which postgres cannot revoke. Per Supabase, a per-project revoke is unsupported and removing the PUBLIC table grants breaks pg_net / pg_cron. **Resolution (2026-10-22, PROPOSED): `docs/SUPABASE-PG-NET-POSTURE.md`.** The self-check carries ONE pinned platform exception (fingerprint `supabase_pg_net_default_acl.v1`). The `net` objects are excepted only when every `net` object is supabase_admin-owned and a pg_net extension member, every ACL entry comes from supabase_admin and lies inside the documented default fingerprint, AND the compensating controls hold: the role's posture; net / extensions / cron absent from `pgrst.db_schemas`; the role's `search_path`; CREATE nowhere; the egress rule unchanged for every other function. The server's boot also runs a live probe: PostgREST must answer PGRST106 for `net`, and GraphQL must answer unknown-field. Any deviation gives the same findings as before, and the apply / boot refuses. The report lists the exception apart from the findings (`platform_exceptions`).
 
 **Owner steps to go live (in order; each one separately approved; nothing here is automated):**
 
 0. **Prerequisite (only for the operations tools).** The rc-8.5.21 chain is applied: the holds registry (#0), operations_action_center (#15), ops_research_valuation_snapshot (#20) and followup_intent_lifecycle (#22).
    - lc_mcp_reader does not depend on them.
    - An operations tool whose source is missing answers `data_unavailable / SOURCE_NOT_APPLIED`. The hold tool answers `unknown`. The 9 original tools are unaffected.
-1. **Resolve pg_net.** Either drop it, or have Supabase revoke PUBLIC on schema `net`, its functions and its tables. Optionally, apply the rest of `PROPOSED_public_execute_hardening.sql`.
-   - Until this is done the role migration refuses atomically, by design. The disposable chain proves no other rc-8.5.21 object blocks it (§7.6).
+1. **Verify the pg_net posture** (read-only, `docs/SUPABASE-PG-NET-POSTURE.md` §9: the platform shape, the ACL against the fingerprint, the exposed schemas, GraphQL reachability). Optionally, apply the rest of `PROPOSED_public_execute_hardening.sql`.
+   - If production deviates from the pinned platform shape, the role migration refuses atomically, by design. The disposable chain proves no other rc-8.5.21 object blocks it (§7.6).
 2. **Apply the role migration, alone and atomically:** `psql "$DB" --single-transaction -v ON_ERROR_STOP=1 -f supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql`
    - Expect `NOTICE: lc_mcp_reader: self-check ok (20 relations, 9 functions)`. If `census_geo_metrics` is absent, the NOTICE about the optional relation comes first.
    - Any `ERROR: lc_mcp_reader: refused …` names the blockers, and nothing is applied. Example: a PUBLIC-executable SECURITY DEFINER writer, pg_net, or an exposed owner-rights view.
