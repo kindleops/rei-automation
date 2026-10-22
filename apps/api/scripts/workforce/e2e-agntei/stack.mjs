@@ -154,7 +154,7 @@ export async function startActionMcp({ repo, node, files, orgId, dir, log, audit
 }
 
 // ── Agntei, headless (apps/server/src/main.ts), its own temporary data dir, isolated mode ──────────
-export async function startAgntei({ agnteiDir, node, home, token, claudeBin, log }) {
+export async function startAgntei({ agnteiDir, node, home, token, claudeBin, log, extraEnv = {} }) {
   const port = await freePort()
   fs.mkdirSync(home, { recursive: true, mode: 0o700 })
   const real = path.join(process.env.HOME || '', '.agent-command')
@@ -162,6 +162,8 @@ export async function startAgntei({ agnteiDir, node, home, token, claudeBin, log
   const env = {
     PATH: `${path.dirname(node)}:${process.env.PATH}`, HOME: process.env.HOME, USER: process.env.USER, TMPDIR: process.env.TMPDIR || '/tmp', LANG: 'en_US.UTF-8',
     AGENT_COMMAND_HOME: home, AGENT_COMMAND_TOKEN: token, AGNTEI_ISOLATED: '1', AGNTAU_DISPOSABLE: '1', AGENT_COMMAND_CLAUDE_BIN: claudeBin, PORT: String(port),
+    // the live milestone: AGNTEI_ISOLATED_ALLOW_SHARED_LOGINS=1 (Agntei's supported opt-in to the default Claude Code login)
+    ...extraEnv,
   }
   const tsx = path.join(agnteiDir, 'node_modules/tsx/dist/cli.mjs')
   const rec = startProcess('agntei', node, [tsx, 'apps/server/src/main.ts'], { cwd: agnteiDir, env, log })

@@ -34,7 +34,8 @@ async function guardedPage(b, { width, height, allow, onRoute = null, theme = 'd
 }
 
 /** Agntei → Connections → LeadCommand Workforce, on the live state. Returns the files written. */
-export async function captureAgntei({ url, token, outDir, name, connectionId = null, scrollTo = null }) {
+const SCRIPTED_BANNER = 'LIVE LOCAL E2E · Agntei headless on a disposable stack · the agent is a SCRIPTED AGENT (not Claude Code)'
+export async function captureAgntei({ url, token, outDir, name, connectionId = null, scrollTo = null, banner = SCRIPTED_BANNER }) {
   const b = await browser()
   const { ctx, page, stats } = await guardedPage(b, { width: 1440, height: 1100, allow: [url] })
   const files = []
@@ -45,12 +46,12 @@ export async function captureAgntei({ url, token, outDir, name, connectionId = n
     await page.waitForSelector('[data-testid=lcw-conn]', { timeout: 120_000 })
     await sleep(2500)
     const conn = connectionId ? page.locator('[data-testid=lcw-conn]').first() : page.locator('[data-testid=lcw-conn]').first()
-    await page.evaluate(() => {
+    await page.evaluate((text) => {
       const d = document.createElement('div')
-      d.textContent = 'LIVE LOCAL E2E · Agntei headless on a disposable stack · the agent is a SCRIPTED AGENT (not Claude Code)'
+      d.textContent = text
       Object.assign(d.style, { position: 'fixed', left: '50%', bottom: '10px', transform: 'translateX(-50%)', zIndex: '2147483647', padding: '5px 12px', borderRadius: '8px', font: '600 11px/1.3 ui-monospace, Menlo, monospace', letterSpacing: '.04em', color: '#111', background: 'rgba(250, 204, 21, .92)', pointerEvents: 'none' })
       document.body.appendChild(d)
-    })
+    }, banner)
     const top = path.join(outDir, `${name}.png`)
     await page.screenshot({ path: top, fullPage: true })
     files.push(top)
@@ -66,6 +67,29 @@ export async function captureAgntei({ url, token, outDir, name, connectionId = n
     }
     const text = await conn.innerText().catch(() => '')
     return { files, text: text.slice(0, 4000), errors: stats.errors, aborted: stats.aborted }
+  } finally { await ctx.close() }
+}
+
+/** Any Agntei screen (#/chat/<id>, #/connections/…) on the live state, with a banner; full page. */
+export async function captureAgnteiPage({ url, token, outDir, name, hash, waitFor = null, banner, height = 1100 }) {
+  const b = await browser()
+  const { ctx, page, stats } = await guardedPage(b, { width: 1440, height, allow: [url] })
+  try {
+    await page.goto(`${url}/#token=${token}`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+    await sleep(1500)
+    await page.goto(`${url}/${hash}`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+    if (waitFor) await page.waitForSelector(waitFor, { timeout: 60_000 }).catch(() => {})
+    await sleep(3500)
+    await page.evaluate((text) => {
+      const d = document.createElement('div')
+      d.textContent = text
+      Object.assign(d.style, { position: 'fixed', left: '50%', bottom: '10px', transform: 'translateX(-50%)', zIndex: '2147483647', padding: '5px 12px', borderRadius: '8px', font: '600 11px/1.3 ui-monospace, Menlo, monospace', letterSpacing: '.04em', color: '#111', background: 'rgba(250, 204, 21, .92)', pointerEvents: 'none' })
+      document.body.appendChild(d)
+    }, banner)
+    const f = path.join(outDir, `${name}.png`)
+    await page.screenshot({ path: f, fullPage: true })
+    const text = await page.locator('body').innerText().catch(() => '')
+    return { files: [f], text: text.slice(0, 6000), errors: stats.errors, aborted: stats.aborted }
   } finally { await ctx.close() }
 }
 
