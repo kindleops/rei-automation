@@ -541,26 +541,35 @@ async function main() {
   for (const [k, v] of Object.entries(opts)) if (typeof v === 'string' && !fs.existsSync(v)) { console.error(`${k}: ${v} does not exist`); process.exit(2) }
   const runs = Math.min(Math.max(Number(arg('runs', 1)) || 1, 1), 3)
   fs.mkdirSync(outDir, { recursive: true })
-  const results = []
   const shutdown = async () => { await S.stopAll(); process.exit(130) }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
-  for (let i = 1; i <= runs; i += 1) {
+  // ONE run per child process: every run starts from nothing (its own cluster, ports, module state)
+  const child = arg('child-run')
+  if (child) {
+    const i = Number(child)
     const runDir = fs.mkdtempSync(path.join(os.tmpdir(), `wfa-e2e-run${i}-`))
-    console.log(`\n── run ${i}/${runs} (state ${runDir})`)
-    let r
+    console.log(`\n── run ${i}/${runs} (pid ${process.pid}, state ${runDir})`)
     try {
-      r = await runMilestone({ ...opts, run: i, runDir, screens: arg('screens') === true && i === runs })
+      const r = await runMilestone({ ...opts, run: i, runDir, screens: arg('screens') === true })
+      console.log(`  checks ${r.checks.filter((c) => c.ok).length}/${r.checks.length}; fingerprint ${r.fingerprint}; ${Math.round(r.wallMs / 1000)} s; remaining processes ${JSON.stringify(r.stopped.remaining)}`)
+      for (const c of r.checks.filter((x) => !x.ok)) console.log(`  FAIL ${c.id} ${c.name}: ${c.detail.slice(0, 400)}`)
+      fs.writeFileSync(path.join(outDir, `run-${i}.json`), JSON.stringify(r, null, 1))
+      if (!arg('keep-state')) fs.rmSync(runDir, { recursive: true, force: true })
+      process.exit(0)
     } catch (e) {
       console.error(`run ${i} FAILED: ${e?.stack || e}`)
-      process.exitCode = 1
-      break
+      process.exit(1)
     }
-    results.push(r)
-    console.log(`  checks ${r.checks.filter((c) => c.ok).length}/${r.checks.length}; fingerprint ${r.fingerprint}; ${Math.round(r.wallMs / 1000)} s; remaining processes ${JSON.stringify(r.stopped.remaining)}`)
-    for (const c of r.checks.filter((x) => !x.ok)) console.log(`  FAIL ${c.id} ${c.name}: ${c.detail.slice(0, 400)}`)
-    fs.writeFileSync(path.join(outDir, `run-${i}.json`), JSON.stringify(r, null, 1))
-    if (!arg('keep-state')) fs.rmSync(runDir, { recursive: true, force: true })
+  }
+  const results = []
+  for (let i = 1; i <= runs; i += 1) {
+    fs.rmSync(path.join(outDir, `run-${i}.json`), { force: true })
+    const argv = process.argv.slice(2).filter((a) => a !== '--screens' && !a.startsWith('--child-run='))
+    const c = spawnSync(process.execPath, [...process.execArgv, fileURLToPath(import.meta.url), ...argv, `--child-run=${i}`, ...(arg('screens') === true && i === runs ? ['--screens'] : [])], { stdio: 'inherit', cwd: process.cwd(), env: process.env })
+    const file = path.join(outDir, `run-${i}.json`)
+    if (c.status !== 0 || !fs.existsSync(file)) { console.error(`run ${i} did not complete (exit ${c.status})`); process.exitCode = 1; break }
+    results.push(JSON.parse(fs.readFileSync(file, 'utf8')))
   }
   // the LeadCommand dashboard, from the LAST run's recorded responses (no live backend)
   let dashboard = null
@@ -578,6 +587,7 @@ async function main() {
     await ui.closeBrowser()
     await S.stopAll()
     last.dashboard = dashboard
+    fs.writeFileSync(path.join(outDir, `run-${last.run}.json`), JSON.stringify(last, null, 1))
   }
   if (results.length) {
     const { renderReport } = await import('./e2e-agntei/report.mjs')
