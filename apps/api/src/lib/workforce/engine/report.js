@@ -16,19 +16,52 @@ export const isTerminalSuccess = (a) => a?.status === 'completed' && SUCCESS.has
  */
 export const isCoreAssignment = (a) => !(a?.input?.follow_on === true && a?.capability_key === 'work.assign')
 
+// a step's record refs. The item itself carries assignment_id (never repeated here), and the opportunity /
+// conversation ids ride only on the steps that are ABOUT them (the conversation read, the next action, the
+// delegation, a person's item): every per-candidate read repeating them made a 20-candidate report exceed the
+// 64 KB mission_report CHECK (found by the first demonstration). The ranked[] refs carry all three per property.
+const CARRIES_IDS = new Set(['intel.conversation_state', 'acq.next_action', 'work.assign'])
 const refsOf = (a) => {
   const i = a?.input || {}
   const o = a?.output || {}
   const r = {}
   const pr = o.property_ref || i.property_ref
   if (pr) r.property_ref = pr
-  const op = o.opportunity_id || i.opportunity_id
-  if (op) r.opportunity_id = op
-  const cv = o.conversation_id || i.conversation_id
-  if (cv) r.conversation_id = cv
+  if (CARRIES_IDS.has(a?.capability_key)) {
+    const op = o.opportunity_id || i.opportunity_id
+    if (op) r.opportunity_id = op
+    const cv = o.conversation_id || i.conversation_id
+    if (cv) r.conversation_id = cv
+  }
   const job = a?.runtime_job_id || o.job_id
   if (job) r.job_id = job
-  r.assignment_id = a.assignment_id
+  return r
+}
+
+/** the mission_report CHECK is 64 KB (octet_length(report::text) ≤ 65536); a report is built to fit well inside it */
+export const REPORT_BUDGET_BYTES = 60_000
+const bytes = (v) => Buffer.byteLength(JSON.stringify(v))
+/**
+ * Keep a report inside the budget WITHOUT dropping a fact: first the per-step summaries of completed per-candidate
+ * reads (each is the step's own output, still on the assignment), then the scoring explanations (basis arrays;
+ * the values stay). Every compaction is named in report.compaction so the reader knows what to open.
+ */
+export function fitReport(report, budget = REPORT_BUDGET_BYTES) {
+  if (bytes(report) <= budget) return report
+  const r = { ...report, compaction: [...(report.compaction || [])] }
+  const KEEP_SUMMARY = new Set(['intel.active_opportunities', 'acq.rank_opportunities', 'memory.assert'])
+  r.completed = r.completed.map((c) => (KEEP_SUMMARY.has(c.capability) ? c : (({ summary, ...rest }) => rest)(c)))
+  r.compaction.push('completed.summary: per-candidate step summaries omitted (open the assignment for its output)')
+  if (bytes(r) <= budget) return r
+  r.ranked = r.ranked.map((x) => ({
+    ...x,
+    components: Object.fromEntries(Object.entries(x.components || {}).map(([k, v]) => [k, v && typeof v === 'object' ? (({ basis, ...rest }) => rest)(v) : v])),
+    ev: x.ev && typeof x.ev === 'object' ? (({ basis, ...rest }) => rest)(x.ev) : x.ev,
+  }))
+  r.compaction.push('ranked.basis: score explanations omitted (the rank assignment output carries them)')
+  if (bytes(r) <= budget) return r
+  r.completed = r.completed.map(({ assignment_id, step, capability, outcome_class }) => ({ assignment_id, step, capability, outcome_class }))
+  r.compaction.push('completed.refs: completed items reduced to their assignment, step and outcome')
   return r
 }
 
@@ -137,7 +170,7 @@ export function buildMissionReport({ mission, assignments = [], spend = new Map(
 
   const core = assignments.filter(isCoreAssignment)
   const allTerminal = core.every((a) => TERMINAL.has(a.status))
-  return {
+  return fitReport({
     version: REPORT_VERSION,
     mission_id: mission?.mission_id ?? null,
     intent: mission?.plan?.intent ?? mission?.playbook_key ?? null,
@@ -152,7 +185,7 @@ export function buildMissionReport({ mission, assignments = [], spend = new Map(
     ranked,
     costs,
     unavailable: mission?.plan?.unavailable || [],
-  }
+  })
 }
 
 /** The honesty check the tests (and the review handler) run over a built report. */

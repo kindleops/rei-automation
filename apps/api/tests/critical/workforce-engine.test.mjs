@@ -412,3 +412,42 @@ test('a deterministic store refusal fails THAT assignment (no poison pill); a fa
   assert.ok(mission.report.unknowns.some((u) => u.what === 'plan_expansion' && u.reason === 'not_run:after_opps'))
   assert.equal(w.services.calls.listDealContexts || 0, 0)
 })
+
+test('a full-size triage report fits the 64 KB mission_report CHECK without dropping an item (found by the first demonstration)', async () => {
+  const { buildMissionReport, fitReport, REPORT_BUDGET_BYTES } = await import('../../src/lib/workforce/engine/report.js')
+  const { payloadViolation } = await import('../../src/lib/workforce/store/payload-guard.js')
+  let n = 0
+  const a = (step_key, capability_key, input, output, o = {}) => ({ assignment_id: `wfa_${String(++n).padStart(8, '0')}-0000-4000-8000-000000000000`, step_key, capability_key, assignee_employee_id: 'emp_acq_dallas_1', status: 'completed', outcome_class: 'verified', input, output, ...o })
+  const all = [a('opps', 'intel.active_opportunities', {}, { scanned: 60, eligible: 30, candidates: Array.from({ length: 30 }, () => ({})), excluded: { held: 1 } })]
+  const ranked = []
+  for (let i = 1; i <= 30; i += 1) {
+    const k = `c${String(i).padStart(2, '0')}`
+    const ids = { property_ref: `pid_${'n'.repeat(3)}${'ghijklmnop'[i % 10]}${'ghijklmnop'[(i / 10) | 0]}gggggg`, opportunity_id: `0000000${i % 10}-bbbb-4000-8000-0000000000${String(i).padStart(2, '0')}`, conversation_id: `0000000${i % 10}-cccc-4000-8000-0000000000${String(i).padStart(2, '0')}` }
+    all.push(a(`conv.${k}`, 'intel.conversation_state', ids, { ...ids, action_state: 'waiting_on_seller', contact_permitted: true, seller_spoke_last: false }))
+    all.push(a(`dec.${k}`, 'intel.acquisition_decision', ids, { ...ids, status: 'available', tier: 'auto_hard_offer', mao: 175000, offer_ready: { ready: true }, spendability: { spendable: true } }))
+    all.push(a(`res.${k}`, 'research.property', ids, { ...ids, needed: true, enqueued: true, job_id: `mjob_0000${String(i).padStart(4, '0')}-0000-4000-8000-000000000000` }, { runtime_job_id: `mjob_0000${String(i).padStart(4, '0')}-0000-4000-8000-000000000000` }))
+    all.push(a(`fin.${k}`, 'finance.review_opportunity', ids, { ...ids, verdict: 'supported', reasons: ['AUTHORITATIVE_MAO', 'VALUATION_SPENDABLE', 'OFFER_READY', 'DECISION_FRESH', 'COMP_COUNT_OK', 'COMPS_RECENT'] }))
+    ranked.push({ rank: i, ...ids, market: 'Dallas', components: { contact_identity: { value: 3, status: 'known', basis: ['contact_permitted', 'verified_stage:asking_price', 'seller_engaged'] }, pressure: { value: 5, status: 'known', basis: ['seller_waiting', 'offer_requested', 'stage:asking_price', 'inbound_within_7d'] }, deal_quality: { value: 20.78, status: 'known', basis: ['cfo:supported', 'confidence:0.78'] } }, ev: { value: null, status: 'unknown', missing: ['calibrated_p_close'] }, cfo_verdict: 'supported' })
+  }
+  all.push(a('rank', 'acq.rank_opportunities', {}, { ranked, considered: 30 }))
+  for (let i = 1; i <= 25; i += 1) {
+    const r = ranked[i - 1]
+    all.push(a(`next.${String(i).padStart(2, '0')}`, 'acq.next_action', { position: i, property_ref: r.property_ref }, { position: i, action: 'prepare_offer_recommendation', reasons: ['cfo_supported', 'stage:asking_price'], property_ref: r.property_ref, opportunity_id: r.opportunity_id, conversation_id: r.conversation_id }))
+    all.push(a(`assign.${String(i).padStart(2, '0')}`, 'work.assign', { position: i, property_ref: r.property_ref }, { assigned: true, task: 'review_offer_recommendation', follow_on_assignment_id: `wfa_f${String(i).padStart(7, '0')}-0000-4000-8000-000000000000`, property_ref: r.property_ref }))
+  }
+  all.push(a('memory', 'memory.assert', {}, { asserted: true, fact: 'triage_ranking' }))
+  const mission = { mission_id: 'wfm_00000000-0000-4000-8000-000000000001', plan: { intent: 'opportunity_triage', params: { n: 25 } } }
+  const report = buildMissionReport({ mission, assignments: all, now: T0 })
+  const size = Buffer.byteLength(JSON.stringify(report))
+  assert.ok(size <= REPORT_BUDGET_BYTES, `${size} bytes`)
+  assert.equal(payloadViolation(JSON.parse(JSON.stringify(report))), null)
+  assert.equal(report.completed.length, all.length, 'every completed step is still listed')
+  assert.deepEqual(verifyReportHonesty(report, all), [])
+  assert.equal(report.ranked.length, 25)
+  assert.ok(report.ranked.every((x) => x.refs.opportunity_id && x.refs.conversation_id), 'ranked refs keep every id')
+  assert.ok(Array.isArray(report.compaction) && report.compaction.length >= 1, 'any compaction is named')
+  // a small report is untouched
+  const small = fitReport({ completed: [{ assignment_id: 'x', summary: { a: 1 } }], ranked: [] })
+  assert.equal(small.compaction, undefined)
+  assert.deepEqual(small.completed[0].summary, { a: 1 })
+})
