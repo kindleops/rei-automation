@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { pgNetServer, SKIP_REASON, installPgNet, setExposedSchemas, inRolledBackTx, dropPlatformRole, LC_MCP_RELATIONS, LC_MCP_FUNCTIONS, REPO_DIR, EMULATION_DIR } from '../helpers/pg-net-posture.mjs'
+import { pgNetServer, SKIP_REASON, installPgNet, installPlatformShape, setExposedSchemas, inRolledBackTx, dropPlatformRole, LC_MCP_RELATIONS, LC_MCP_FUNCTIONS, REPO_DIR, EMULATION_DIR, POSTGIS_PINNED, POSTGIS_DYNAMIC } from '../helpers/pg-net-posture.mjs'
 import { platformExceptionBlock, namedBlock, SOURCE as GW_SQL, TARGET as RO_SQL } from '../../../../scripts/db/sync-platform-exception-block.mjs'
 import { PG_NET_FINGERPRINT_VERSION } from '../../../../mcp/leadcommand-mcp/src/data/platform-exposure.mjs'
 
@@ -37,7 +37,22 @@ test('the exception is ONE reviewed block: #25 inlines exactly #26\'s, every sel
     const body = /function action_gateway\.self_check\([\s\S]*?\n\$fn\$;/.exec(fs.readFileSync(f, 'utf8'))[0]
     assert.match(body, /pe := action_gateway\.platform_egress_exceptions\(r\);/, path.basename(f))
     assert.match(body, /'platform_exceptions', pe -> 'platform_exceptions'/, path.basename(f))
+    assert.match(body, /'platform_allowlists', public\.lc_egress_platform_allowlists\(\) -> 'allowlists'/, `${path.basename(f)} reports the platform allowlists`)
   }
+  assert.match(/function public\.lc_mcp_reader_self_check\([\s\S]*?\n\$fn\$;/.exec(fs.readFileSync(RO_SQL, 'utf8'))[0], /'platform_allowlists', public\.lc_egress_platform_allowlists\(\) -> 'allowlists'/)
+  // the PostGIS allowlist is ONE pinned list: the synced block, the production verify script and the dry preflight carry exactly the same 26 signatures
+  const sigsOf = (txt) => [...txt.matchAll(/'(public\.[a-z_]+\([a-z ,]*\))'/g)].map((m) => m[1]).filter((x) => POSTGIS_PINNED.includes(x) || /^public\.(addgeometrycolumn|checkauth|disablelongtransactions|dropgeometrycolumn|dropgeometrytable|enablelongtransactions|lockrow|populate_geometry_columns|postgis_extensions_upgrade|st_findextent|unlockrows|updategeometrysrid)\(/.test(x))
+  const blockSigs = sigsOf(/pg_sigs constant text\[\] := array\[([\s\S]*?)\];/.exec(gw)[1])
+  assert.deepEqual(blockSigs, [...POSTGIS_PINNED], 'the block pins exactly the 26 PostGIS 3.3.7 overloads')
+  for (const f of ['scripts/db/pg_net_indirect_egress_prod_verify.sql', 'scripts/db/lc_mcp_reader_prod_dry_preflight.sql']) {
+    const txt = fs.readFileSync(path.join(REPO_DIR, f), 'utf8')
+    assert.deepEqual(sigsOf(/pg_sig\(sig\) as \(values\n([\s\S]*?)\),\npg_fn/.exec(txt)[1]), [...POSTGIS_PINNED], f)
+    assert.match(txt, /'3\.3\.7'/, f)
+    assert.match(txt, /evttags is distinct from array\['CREATE EXTENSION'\]::text\[\]/, f)
+    assert.match(txt, /p\.proname = 'grant_pg_net_access' and p\.pronargs = 0/, f)
+  }
+  assert.match(gw, /pg_version constant text := 'supabase_postgis_dynamic_sql\.v1';/)
+  assert.match(gw, /et_version constant text := 'supabase_pg_net_access_event_trigger\.v1';/)
   // the indirect-egress helper is ONE synced block, and EVERY self-check copy AND both frozen strict references call it,
   // so a 'not applied' pg_net exception reports exactly the same transitive findings (never a silent weakening).
   const STRICT_GW = path.join(REPO_DIR, 'apps/api/tests/pg/pg_net_emulation/strict_reference_action_gateway_self_check.sql')
@@ -70,6 +85,7 @@ async function gatewayWorld() {
   dbs.push(env.db)
   const pool = env.db.pool
   await installPgNet(pool)
+  await installPlatformShape(pool) // PostGIS 3.3.7, the pg_net access event trigger, the pg_cron ACL shape (production 2026-10-23)
   await setExposedSchemas(pool, 'public, graphql_public')
   await HARNESS.applyInTransaction(pool, H.GATEWAY_MIGRATION) // the apply's own final self-check must pass here
   await pool.query(fs.readFileSync(path.join(EMULATION_DIR, 'strict_reference_action_gateway_self_check.sql'), 'utf8'))
@@ -88,6 +104,7 @@ async function readerWorld() {
   const pool = db.pool
   await pool.query(fs.readFileSync(path.join(REPO_DIR, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql'), 'utf8'))
   await installPgNet(pool)
+  await installPlatformShape(pool) // PostGIS 3.3.7, the pg_net access event trigger, the pg_cron ACL shape (production 2026-10-23)
   await setExposedSchemas(pool, 'public, graphql_public')
   await HARNESS.applyInTransaction(pool, MIG('PROPOSED_20261019150000_lc_mcp_reader.sql'))
   await pool.query(fs.readFileSync(path.join(EMULATION_DIR, 'strict_reference_lc_mcp_reader_self_check.sql'), 'utf8'))
@@ -282,13 +299,122 @@ for (const make of [gatewayWorld, readerWorld]) {
       await c.query('rollback to savepoint sp')
     }))
 
-    await t.test('schema cron reachable by the role (pg_cron) → cron_schema_access', () => tx(async (c) => {
-      await c.query('create schema cron; create table cron.job (jobid bigserial primary key, command text)')
-      await c.query(`grant usage on schema cron to ${w.role}; grant select on cron.job to ${w.role}`)
+    await t.test('USAGE on schema cron granted to the role → cron_schema_access (usage + the cron.job / cron.* grants it makes usable)', () => tx(async (c) => {
+      await c.query(`grant usage on schema cron to ${w.role}`)
       const j = await w.check(c)
       assert.equal(j.ok, false)
       assert.ok(j.findings.includes('cron_schema_access:usage'), JSON.stringify(j.findings))
-      assert.ok(j.findings.includes('cron_schema_access:cron.job'))
+      assert.ok(j.findings.includes('cron_schema_access:cron.job'), 'PUBLIC SELECT on cron.job becomes usable')
+      assert.ok(j.findings.includes('cron_schema_access:execute:cron.schedule(text,text)'), JSON.stringify(j.findings))
+    }))
+    await t.test('USAGE on schema cron granted to PUBLIC → cron_schema_access too', () => tx(async (c) => {
+      await asSupabaseAdmin(c, 'grant usage on schema cron to public')
+      const j = await w.check(c)
+      assert.equal(j.ok, false)
+      assert.ok(j.findings.includes('cron_schema_access:usage') && j.findings.includes('cron_schema_access:cron.job'), JSON.stringify(j.findings))
+    }))
+
+    // ── the pinned platform allowlists (public.lc_egress_platform_allowlists, docs/SUPABASE-PG-NET-POSTURE.md §4b) ──
+    const allow = (j, id) => (j.platform_allowlists || []).find((e) => e.id === id)
+    await t.test('production shape: both allowlists applied and REPORTED; PUBLIC SELECT on cron.job without USAGE is not a path', () => tx(async (c) => {
+      const j = await w.check(c)
+      assert.equal(j.ok, true, JSON.stringify(j.findings))
+      const pgis = allow(j, 'supabase_postgis_dynamic_sql')
+      assert.equal(pgis.version, 'supabase_postgis_dynamic_sql.v1')
+      assert.equal(pgis.status, 'applied', JSON.stringify(pgis.reasons))
+      assert.deepEqual(pgis.reasons, [])
+      assert.equal(pgis.extension_version, '3.3.7')
+      assert.equal(pgis.extension_owner, 'supabase_admin')
+      assert.deepEqual([...pgis.objects].sort(), [...POSTGIS_PINNED].sort())
+      assert.deepEqual(pgis.absent, [])
+      const et = allow(j, 'supabase_pg_net_access_event_trigger')
+      assert.equal(et.version, 'supabase_pg_net_access_event_trigger.v1')
+      assert.equal(et.status, 'applied', JSON.stringify(et.reasons))
+      assert.deepEqual(et.objects, ['event:issue_pg_net_access -> extensions.grant_pg_net_access()'])
+      assert.ok(!has(j, /cron_schema_access/), JSON.stringify(j.findings))
+      // AS the role (the server's path) the same report
+      await c.query('savepoint r')
+      const k = await w.asRole(c)
+      assert.equal(k.ok, true, JSON.stringify(k.findings))
+      assert.equal(allow(k, 'supabase_postgis_dynamic_sql').status, 'applied')
+      await c.query('rollback to savepoint r')
+    }))
+    const assertPostgisRefused = async (c, reason, label) => {
+      const j = await w.check(c)
+      const pgis = allow(j, 'supabase_postgis_dynamic_sql')
+      assert.equal(pgis.status, 'not_applied', `${label}: ${JSON.stringify(pgis)}`)
+      assert.ok(pgis.reasons.some((r) => reason.test(r)), `${label}: ${JSON.stringify(pgis.reasons)}`)
+      assert.equal(j.ok, false, label)
+      for (const sig of POSTGIS_DYNAMIC) assert.ok(j.findings.includes(`dynamic_sql_function:${sig}`), `${label}: ${sig} is a finding again`)
+      return j
+    }
+    await t.test('a different PostGIS version → allowlist not_applied, all 13 dynamic-SQL functions are findings', () => tx(async (c) => {
+      await c.query(`update pg_extension set extversion = '3.3.8' where extname = 'postgis'`)
+      await assertPostgisRefused(c, /^extension_version:3\.3\.8$/, 'version')
+    }))
+    await t.test('a different PostGIS extension owner → not_applied', () => tx(async (c) => {
+      await c.query(`update pg_extension set extowner = 'postgres'::regrole where extname = 'postgis'`)
+      await assertPostgisRefused(c, /^extension_owner:postgres$/, 'extension owner')
+    }))
+    await t.test('a pinned function owned by another role → not_applied', () => tx(async (c) => {
+      await c.query(`alter function public.unlockrows(text) owner to postgres`)
+      await assertPostgisRefused(c, /^owner:public\.unlockrows\(text\):postgres$/, 'function owner')
+    }))
+    await t.test('a pinned function made SECURITY DEFINER → not_applied (and a definer finding)', () => tx(async (c) => {
+      await asSupabaseAdmin(c, `alter function public.lockrow(text,text,text,text,timestamp) security definer`)
+      const j = await assertPostgisRefused(c, /^security_definer:public\.lockrow/, 'definer')
+      assert.ok(has(j, /reachable_definer_functions?:.*lockrow/), JSON.stringify(j.findings))
+    }))
+    await t.test('a pinned function granted outside the platform default ACL → not_applied', () => tx(async (c) => {
+      await c.query('create role lc_posture_extra nologin')
+      await asSupabaseAdmin(c, `grant execute on function public.checkauth(text,text,text) to lc_posture_extra`)
+      await assertPostgisRefused(c, /^acl_outside_default:public\.checkauth\(text,text,text\):lc_posture_extra:EXECUTE$/, 'acl')
+    }))
+    await t.test('a pinned function dropped from the extension → not_applied', () => tx(async (c) => {
+      await asSupabaseAdmin(c, `alter extension postgis drop function public.unlockrows(text)`)
+      await assertPostgisRefused(c, /^not_extension_member:public\.unlockrows\(text\)$/, 'membership')
+    }))
+    await t.test('an UNPINNED dynamic-SQL function inside the postgis extension → finding (the allowlist stays applied for the pinned ones)', () => tx(async (c) => {
+      await asSupabaseAdmin(c, `create function public.postgis_lc_extra(q text) returns void language plpgsql as $d$ begin execute q; end $d$; alter extension postgis add function public.postgis_lc_extra(text)`)
+      const j = await w.check(c)
+      assert.equal(allow(j, 'supabase_postgis_dynamic_sql').status, 'applied')
+      assert.equal(j.ok, false)
+      assert.deepEqual(j.findings.filter((f) => f.startsWith('dynamic_sql_function:')), ['dynamic_sql_function:public.postgis_lc_extra(text)'])
+    }))
+    await t.test('an extra non-PostGIS dynamic-SQL function PUBLIC can execute → finding', () => tx(async (c) => {
+      await c.query(`create function public.lc_extra_raw(q text) returns void language plpgsql security invoker as $d$ begin execute q; end $d$`)
+      const j = await w.check(c)
+      assert.equal(j.ok, false)
+      assert.deepEqual(j.findings.filter((f) => f.startsWith('dynamic_sql_function:')), ['dynamic_sql_function:public.lc_extra_raw(text)'])
+    }))
+    await t.test('the pg_net access event trigger without its tag filter → not_applied, event_trigger_egress finding', () => tx(async (c) => {
+      await asSupabaseAdmin(c, `drop event trigger issue_pg_net_access; create event trigger issue_pg_net_access on ddl_command_end execute function extensions.grant_pg_net_access()`)
+      const j = await w.check(c)
+      const et = allow(j, 'supabase_pg_net_access_event_trigger')
+      assert.equal(et.status, 'not_applied')
+      assert.ok(et.reasons.includes('tags:ALL'), JSON.stringify(et.reasons))
+      assert.equal(j.ok, false)
+      assert.ok(j.findings.includes('event_trigger_egress:event:issue_pg_net_access -> extensions.grant_pg_net_access()'), JSON.stringify(j.findings))
+    }))
+    await t.test('the pg_net access event trigger owned by another role → not_applied, finding', () => tx(async (c) => {
+      await c.query(`alter event trigger issue_pg_net_access owner to postgres`)
+      const j = await w.check(c)
+      assert.ok(allow(j, 'supabase_pg_net_access_event_trigger').reasons.includes('owner:postgres'))
+      assert.ok(has(j, /^event_trigger_egress:event:issue_pg_net_access/), JSON.stringify(j.findings))
+    }))
+    await t.test('the pinned event trigger name pointing at another egress function → not_applied, finding', () => tx(async (c) => {
+      await asSupabaseAdmin(c, `create function extensions.lc_other_hook() returns event_trigger language plpgsql as $e$ begin perform net.http_get('https://evt.invalid'); end $e$;
+        drop event trigger issue_pg_net_access; create event trigger issue_pg_net_access on ddl_command_end when tag in ('CREATE EXTENSION') execute function extensions.lc_other_hook()`)
+      const j = await w.check(c)
+      assert.ok(allow(j, 'supabase_pg_net_access_event_trigger').reasons.some((r) => r.startsWith('function:')))
+      assert.ok(has(j, /^event_trigger_egress:event:issue_pg_net_access -> extensions\.lc_other_hook\(\)/), JSON.stringify(j.findings))
+    }))
+    await t.test('no PostGIS and no event trigger: both allowlists not_present, nothing excepted', () => tx(async (c) => {
+      await asSupabaseAdmin(c, 'drop event trigger issue_pg_net_access; drop extension postgis')
+      const j = await w.check(c)
+      assert.equal(allow(j, 'supabase_postgis_dynamic_sql').status, 'not_present')
+      assert.equal(allow(j, 'supabase_pg_net_access_event_trigger').status, 'not_present')
+      assert.equal(j.ok, true, JSON.stringify(j.findings))
     }))
 
     await t.test('an event trigger whose function reaches net → event_trigger_egress', () => tx(async (c) => {
@@ -345,3 +471,85 @@ for (const make of [gatewayWorld, readerWorld]) {
     }))
   })
 }
+
+// ── the owner's READ-ONLY production scripts, proven against the production shape BEFORE the apply (the order the owner runs them) ──
+test('PG the dry preflight predicts the apply EXACTLY, and the indirect verify reports only allowlisted rows (production shape)', { skip, timeout: 240_000 }, async (t) => {
+  const db = await HARNESS.freshDb({ apply: false })
+  dbs.push(db)
+  const pool = db.pool
+  await pool.query(fs.readFileSync(path.join(REPO_DIR, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql'), 'utf8'))
+  // production 2026-10-23: the opt-in operations sources are ABSENT (the 5 lc_mcp_* plpgsql functions must still create)
+  await pool.query(`drop function if exists public.automation_hold_for(text,uuid,text,uuid,text,text); drop view if exists public.v_followup_intent_reasons, public.v_followup_intent_health;
+    drop table if exists public.followup_intents cascade; drop table if exists agent.conversation_action_state cascade; drop function if exists agent.ops_research_valuation_snapshot(timestamptz)`)
+  await installPgNet(pool)
+  await installPlatformShape(pool)
+  await setExposedSchemas(pool, null) // production: the exposed schemas come from the dashboard
+  const PREFLIGHT = fs.readFileSync(path.join(REPO_DIR, 'scripts/db/lc_mcp_reader_prod_dry_preflight.sql'), 'utf8')
+  const VERIFY = fs.readFileSync(path.join(REPO_DIR, 'scripts/db/pg_net_indirect_egress_prod_verify.sql'), 'utf8')
+  const MIGRATION = fs.readFileSync(MIG('PROPOSED_20261019150000_lc_mcp_reader.sql'), 'utf8')
+  const verdict = (rows) => rows.find((r) => r.section === 'verdict').verdict
+  const blockers = (rows) => rows.filter((r) => r.verdict === 'BLOCKER').map((r) => `${r.section}:${r.item}`)
+  const ro = async (c, sql) => { await c.query('set transaction read only'); return (await c.query(sql)).rows }
+
+  await t.test('the verify script: 13 PostGIS dynamic-SQL rows + the event trigger, all allowlisted; no cron row; zero blockers', () => inRolledBackTx(pool, async (c) => {
+    const rows = await ro(c, VERIFY)
+    assert.deepEqual(rows.filter((r) => r.allowlisted_by == null), [], JSON.stringify(rows))
+    assert.deepEqual(rows.filter((r) => r.kind === 'dynamic_sql_function').map((r) => r.allowlisted_by), Array(13).fill('supabase_postgis_dynamic_sql.v1'))
+    assert.deepEqual(rows.filter((r) => r.kind === 'event_trigger_egress').map((r) => [r.detail, r.allowlisted_by]), [['event:issue_pg_net_access -> extensions.grant_pg_net_access()', 'supabase_pg_net_access_event_trigger.v1']])
+    assert.equal(rows.filter((r) => r.kind === 'cron_schema_access').length, 0)
+  }))
+  await t.test('the verify script with an extra raw-SQL function and cron USAGE: blockers', () => inRolledBackTx(pool, async (c) => {
+    await c.query(`create function public.lc_extra_raw(q text) returns void language plpgsql as $d$ begin execute q; end $d$; grant usage on schema cron to public`)
+    const rows = (await c.query(VERIFY)).rows
+    const bad = rows.filter((r) => r.allowlisted_by == null).map((r) => `${r.kind}:${r.detail}`)
+    assert.ok(bad.includes('dynamic_sql_function:lc_extra_raw(text)') || bad.includes('dynamic_sql_function:public.lc_extra_raw(text)'), JSON.stringify(bad))
+    assert.ok(bad.includes('cron_schema_access:usage') && bad.includes('cron_schema_access:cron.job'), JSON.stringify(bad))
+  }))
+
+  await t.test('preflight on the production shape: apply_would_pass true; the exceptions and allowlists listed', () => inRolledBackTx(pool, async (c) => {
+    const rows = await ro(c, PREFLIGHT)
+    assert.deepEqual(blockers(rows), [])
+    assert.match(verdict(rows), /^true /)
+    assert.ok(rows.some((r) => r.verdict === 'excepted:supabase_postgis_dynamic_sql.v1'))
+    assert.ok(rows.some((r) => r.verdict === 'excepted:supabase_pg_net_access_event_trigger.v1'))
+    assert.ok(rows.some((r) => r.verdict === 'excepted:supabase_pg_net_default_acl.v1'))
+    assert.ok(rows.some((r) => r.section === 'optional_source' && /agent\.conversation_action_state ABSENT/.test(r.item)))
+  }))
+  const cases = [
+    ['an extra raw-SQL function PUBLIC can execute', `create function public.lc_extra_raw(q text) returns void language plpgsql as $d$ begin execute q; end $d$`, /dynamic_sql_function:.*lc_extra_raw/],
+    ['USAGE on schema cron to PUBLIC', 'grant usage on schema cron to public', /cron_schema_access/],
+    ['a different PostGIS version', `update pg_extension set extversion = '3.3.8' where extname = 'postgis'`, /dynamic_sql_function:.*addgeometrycolumn/],
+    ['the event trigger without its tag filter', `set role supabase_admin; drop event trigger issue_pg_net_access; create event trigger issue_pg_net_access on ddl_command_end execute function extensions.grant_pg_net_access(); reset role`, /event_trigger_egress/],
+    ['a PUBLIC-executable SECURITY DEFINER function', `create function public.lc_extra_definer() returns int language sql security definer as $d$ select 1 $d$`, /reachable_definer_functions:.*lc_extra_definer/],
+    ['a PUBLIC write grant', 'grant insert on public.sms_templates to public', /write_privileges:.*sms_templates/],
+    ['PUBLIC SELECT on a non-inventory public table', 'grant select on public.send_queue to public', /exposed_select_outside_inventory:.*send_queue/],
+  ]
+  for (const [label, sql, expectRefusal] of cases) {
+    await t.test(`preflight + apply agree: ${label}`, () => inRolledBackTx(pool, async (c) => {
+      await c.query(sql)
+      await c.query('savepoint pf')
+      const rows = (await c.query(PREFLIGHT)).rows
+      await c.query('rollback to savepoint pf')
+      assert.match(verdict(rows), /^false /, `${label}: predicted refusal`)
+      assert.ok(blockers(rows).length > 0)
+      await c.query('savepoint ap')
+      let err = null
+      try { await c.query(MIGRATION) } catch (e) { err = e }
+      await c.query('rollback to savepoint ap')
+      assert.ok(err, `${label}: the apply refused`)
+      assert.match(String(err.message), expectRefusal, `${label}: ${err.message.slice(0, 400)}`)
+    }))
+  }
+  await t.test('the apply itself on the production shape passes (prediction true → ok) and the opt-in functions were created', () => inRolledBackTx(pool, async (c) => {
+    await c.query(MIGRATION)
+    const j = (await c.query(`select public.lc_mcp_reader_self_check($1, $2, 'lc_mcp_reader') j`, [LC_MCP_RELATIONS, LC_MCP_FUNCTIONS])).rows[0].j
+    assert.equal(j.ok, true, JSON.stringify(j.findings))
+    for (const fn of ['public.lc_mcp_action_center(uuid,text,boolean,uuid,integer)', 'public.lc_mcp_thread_hold_status(uuid)', 'public.lc_mcp_followup_intent_health()', 'public.lc_mcp_ops_research_valuation_snapshot()']) {
+      assert.ok((await c.query('select to_regprocedure($1) p', [fn])).rows[0].p, fn)
+    }
+    // an absent source answers at CALL time (42P01 / 42883), the MCP tool reports "unavailable"
+    await c.query('savepoint call')
+    await assert.rejects(c.query(`select public.lc_mcp_followup_intent_health()`), (e) => ['42P01', '42883'].includes(e.code))
+    await c.query('rollback to savepoint call')
+  }))
+})

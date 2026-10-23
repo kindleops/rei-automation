@@ -121,10 +121,10 @@ references) closes it. It walks the `pg_proc` call graph **backwards** from the 
 | finding | what |
 |---|---|
 | `indirect_egress_function:<fn>` | a function the role can EXECUTE (incl. an allowlisted SECURITY DEFINER entry point or domain writer, judged by its owner's reach) that **transitively** reaches `net` / `pg_net` / `http` / `dblink` / `postgres_fdw` / an untrusted language / a PUBLIC side-effect (`lo_*`, `pg_notify`, `pg_logical_emit_message`) |
-| `dynamic_sql_function:<fn>` | a reachable `sql`/`plpgsql` function whose body runs dynamic SQL (`EXECUTE`) — it can reach `net.*` through PUBLIC's pg_net grants. A finding unless listed in the reviewed `dynamic-sql-allowlist` with a reason (empty today) |
+| `dynamic_sql_function:<fn>` | a reachable `sql`/`plpgsql` function whose body runs dynamic SQL (`EXECUTE`) — it can reach `net.*` through PUBLIC's pg_net grants. A finding unless excepted by the pinned `supabase_postgis_dynamic_sql.v1` platform allowlist (§4b); the free-form `dynamic-sql-allowlist` stays empty |
 | `egress_trigger:<table>:<trigger> -> <fn>` | a trigger (incl. **Supabase Database Webhooks** `supabase_functions.http_request` and any pg_net-calling trigger) on a table the role can INSERT/UPDATE/DELETE/TRUNCATE whose function reaches egress |
-| `event_trigger_egress:<event> -> <fn>` | an event trigger whose function reaches egress |
-| `cron_schema_access:<detail>` | any access to schema `cron` (pg_cron): `usage`, a privilege on `cron.job`, or EXECUTE on a `cron.*` function. The role must have **none** |
+| `event_trigger_egress:<event> -> <fn>` | an event trigger whose function reaches egress, unless excepted by the pinned `supabase_pg_net_access_event_trigger.v1` allowlist (§4b) |
+| `cron_schema_access:<detail>` | USAGE on schema `cron` (pg_cron). With it, also every `cron.job` privilege and `cron.*` EXECUTE it makes usable. A cron object is reachable only through USAGE on its schema (the rule every other check applies), so pg_cron's default PUBLIC SELECT on `cron.job` / EXECUTE on `cron.*` without USAGE is **not** a path. USAGE itself is always a HARD finding |
 | `dangerous_role_membership:<role>` | membership in `pg_execute_server_program` / `pg_read_server_files` / `pg_write_server_files` (COPY TO/FROM PROGRAM and server-file egress; `superuser` is caught by `attr_superuser`) |
 | `egress_definer_view:<view>` | an owner-rights (`security_invoker=false`) view the role can SELECT whose definition depends on an egress function |
 
@@ -148,6 +148,25 @@ such function must be revoked before either credential is safe** (surfaced by th
 When any condition fails, the status is `not_applied` and its `reasons` name the cause. The `net` objects then count
 through PUBLIC as before, and the findings are **exactly** those of the pre-exception function. The posture test
 asserts this equality against a verbatim frozen copy.
+
+## 4b. The pinned platform allowlists of the indirect rule (`public.lc_egress_platform_allowlists()`)
+
+The 2026-10-23 read-only production verification (§9a) found exactly two platform-owned shapes the indirect rule
+flags, and no raw-SQL helper (`run_sql` / `exec_sql` do not exist in production). Neither can be revoked by `postgres`
+(both are `supabase_admin`-owned, like pg_net), and neither is a path for a role that has no write privilege and no
+CREATE anywhere. Each is excepted by ONE pinned, versioned allowlist in the synced block, and ONLY while every pin holds.
+Any deviation: status `not_applied`, the failed pins in `reasons`, and the objects are findings exactly as before. Both
+self-checks report them as `platform_allowlists` (never silently); the read-only MCP re-judges the ids, versions and
+objects in JS (`evaluatePlatformAllowlists`) and logs them in the `credential_self_check` audit line.
+
+| allowlist | excepts | pins | why it is safe |
+|---|---|---|---|
+| `supabase_postgis_dynamic_sql.v1` | `dynamic_sql_function` for the 26 overloads of `addgeometrycolumn`, `checkauth`, `disablelongtransactions`, `dropgeometrycolumn`, `dropgeometrytable`, `enablelongtransactions`, `lockrow`, `populate_geometry_columns`, `postgis_extensions_upgrade`, `st_findextent`, `unlockrows`, `updategeometrysrid` (13 of them run `EXECUTE`) | extension `postgis`, version `3.3.7`, owner `supabase_admin`, schema `public`; each function a member, owner `supabase_admin`, SECURITY INVOKER, a plain function, ACL only the platform default (grantor `supabase_admin`, no grant option, grantees PUBLIC / postgres / anon / authenticated / service_role); the exact `regprocedure` signatures | invoker rights (they run as the caller); their dynamic SQL is built from `quote_ident` identifiers and catalog lookups, never from a caller-supplied statement; `postgres` cannot change their bodies; `anon` / `authenticated` can already call them by platform default; the reader holds no write / sequence / CREATE privilege (hard findings), so anything they would execute fails on permissions |
+| `supabase_pg_net_access_event_trigger.v1` | `event_trigger_egress` for `issue_pg_net_access -> extensions.grant_pg_net_access()` | name, event `ddl_command_end`, tags exactly `{CREATE EXTENSION}`, owner `supabase_admin`; function `extensions.grant_pg_net_access()` owned by `supabase_admin`, SECURITY INVOKER, plpgsql, returning `event_trigger` | its body only matches the egress pattern because it re-GRANTs / ALTERs `net.http_*` when pg_net is created; it fires only on CREATE EXTENSION, which needs CREATE on the database (`database_create` / `schema_create` are hard findings for the role) |
+
+Every OTHER dynamic-SQL function, every unpinned overload (even inside the postgis extension) and every OTHER egress
+event trigger (or this one with a different function, owner or tag filter) stays a finding. The posture test proves
+each positive and negative case on a PostGIS-shaped extension fixture.
 
 ## 5. Compensating controls (every one a hard finding when the exception applies)
 
@@ -336,7 +355,11 @@ can reach, a new NOLOGIN NOINHERIT member-of-nothing role inherits. The script
 psql "$RO_URL" -f scripts/db/pg_net_indirect_egress_prod_verify.sql   # RO role-enforced credential; never from .env
 ```
 
-**Expected:** zero rows. Any row is a real indirect path the owner must remediate before go-live:
+Output columns `kind | detail | allowlisted_by`. **Expected (production 2026-10-23):** 13 `dynamic_sql_function` rows
+with `allowlisted_by = supabase_postgis_dynamic_sql.v1`, 1 `event_trigger_egress` row with
+`allowlisted_by = supabase_pg_net_access_event_trigger.v1`, and **no row with a NULL `allowlisted_by`**. An
+`allowlist_not_applied` row names a failed pin. Any NULL-allowlisted row is a real indirect path the owner must
+remediate before go-live:
 
 - `dynamic_sql_function:<fn>` — a PUBLIC-executable raw-SQL helper (e.g. the audit's `public.run_sql`). As SECURITY
   INVOKER it runs as the future role and can `EXECUTE` an insert into `net.http_request_queue` / a `net.http_post`.
@@ -345,7 +368,15 @@ psql "$RO_URL" -f scripts/db/pg_net_indirect_egress_prod_verify.sql   # RO role-
   webhook or the PUBLIC write grant.
 - `indirect_egress_function` / `event_trigger_egress` / `egress_definer_view` — revoke the PUBLIC grant or remove the
   wrapper / view / event trigger.
-- `cron_schema_access` — PUBLIC must have no access to schema `cron`.
+- `cron_schema_access` — PUBLIC must have no USAGE on schema `cron`. pg_cron's default PUBLIC SELECT on `cron.job`
+  without that USAGE is not reported (it cannot be exercised).
+
+**The dry preflight.** `scripts/db/lc_mcp_reader_prod_dry_preflight.sql` (one read-only SELECT, no TEMP) computes the
+whole outcome of the reader apply for what `lc_mcp_reader` WILL hold (PUBLIC's grants + the planned grants): the
+prerequisites (incl. table / RPC ownership and the `agent.operator_membership` columns the LANGUAGE sql
+`lc_mcp_operator_role` parses), the pg_net exception, every self-check rule, the indirect rule and both allowlists.
+Its last row is `verdict | apply_would_pass | true/false (n BLOCKER rows)`. The posture test proves on the production
+shape that the preflight's prediction and the real apply agree, case by case.
 
 After an authorized apply, re-run the role's own self-check (it calls the same helper for the real role) and the §9
 step 7 live probes; the boot audit's `credential_self_check` must be `outcome: ok` with none of these findings.

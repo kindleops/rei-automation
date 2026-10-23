@@ -28,7 +28,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { READER_ROLE, RELATION_NAMES, OPTIONAL_RELATIONS, RPC_SIGNATURES } from './inventory.mjs'
-import { evaluatePlatformExceptions } from './platform-exposure.mjs'
+import { evaluatePlatformExceptions, evaluatePlatformAllowlists } from './platform-exposure.mjs'
 
 export class CredentialError extends Error {
   constructor(code, message) {
@@ -197,6 +197,9 @@ export function evaluateSelfCheck(rep, { relations = RELATION_NAMES, optional = 
   // the pinned Supabase pg_net platform exception, re-judged independently (version pin, controls, net-only objects)
   const pe = evaluatePlatformExceptions(rep)
   f.push(...pe.findings)
+  // the pinned platform allowlists of the indirect-egress rule (PostGIS 3.3.7 dynamic SQL; the pg_net access event trigger)
+  const pa = evaluatePlatformAllowlists(rep)
+  f.push(...pa.findings)
   // pg_net (schema net) reachable OUTSIDE an applied exception: name the remediation (owner supabase_admin; postgres cannot revoke)
   if ([...(rep.reachable_egress_functions || []), ...(rep.write_privileges || [])].some((x) => /^net\./.test(String(x)))) {
     const why = (pe.summary.find((x) => x.id === 'supabase_pg_net')?.reasons || []).slice(0, 3).join('; ')
@@ -214,6 +217,7 @@ export function evaluateSelfCheck(rep, { relations = RELATION_NAMES, optional = 
     owner_rights_views: [...rels.values()].filter((r) => r.kind === 'v' && !r.invoker_view).map((r) => r.name),
     server_version_num: rep.server_version_num ?? null,
     platform_exceptions: pe.summary,
+    platform_allowlists: pa.summary,
   }
   return { ok: f.length === 0, findings: f, info, probeRequired: pe.probeRequired }
 }

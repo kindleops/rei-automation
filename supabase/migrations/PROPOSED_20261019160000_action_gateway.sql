@@ -1587,6 +1587,158 @@ $fn$;
 comment on function action_gateway.platform_egress_exceptions(oid) is 'Action Gateway: the pinned Supabase pg_net platform exception (fingerprint supabase_pg_net_default_acl.v1) + its compensating controls. Read by self_check; docs/SUPABASE-PG-NET-POSTURE.md.';
 
 -- lc-indirect-egress:block-begin  (SYNCED, byte-identical in #25 lc_mcp_reader and #26 action_gateway; scripts/db/sync-platform-exception-block.mjs pins it)
+-- THE PINNED PLATFORM ALLOWLISTS of the indirect-egress rule (docs/SUPABASE-PG-NET-POSTURE.md §4b). REVIEWED CONSTANTS:
+-- a change is a new version, reviewed by the owner. Each allowlist excepts ONLY the exact objects it pins, and ONLY when
+-- every pin holds; any deviation -> status not_applied, reasons listed, and those objects are findings exactly as before.
+-- Every OTHER dynamic-SQL function and every OTHER egress event trigger stays a finding. Both self-checks report the
+-- result as platform_allowlists (never silently).
+--   supabase_postgis_dynamic_sql.v1   the PostGIS 3.3.7 management functions whose plpgsql bodies run EXECUTE
+--     (AddGeometryColumn, DropGeometryColumn, DropGeometryTable, UpdateGeometrySRID, Populate_Geometry_Columns,
+--     ST_FindExtent, PostGIS_Extensions_Upgrade and the long-transaction set LockRow / UnlockRows / CheckAuth /
+--     Enable- / DisableLongTransactions; every overload of those names). WHY this is safe for a Data-API role:
+--     they are SECURITY INVOKER (they run with the CALLER's privileges, never the owner's); their dynamic SQL is built
+--     from quote_ident / format('%I') identifiers and catalog lookups, not from a caller-supplied statement; they are
+--     platform-owned extension members (owner supabase_admin, extension postgis), so postgres cannot change their
+--     bodies or revoke the platform default; anon and authenticated can already call them today by that default;
+--     and the role holding them has no write privilege, no sequence privilege and no CREATE anywhere (hard findings
+--     of the same self-check), so whatever they would execute fails on permissions as the role itself.
+--     Pins: extension postgis, version 3.3.7, owned by supabase_admin, in schema public; each function a member of it,
+--     owned by supabase_admin, SECURITY INVOKER, a plain function in the extension schema, its ACL only the platform
+--     default (grantor supabase_admin, no grant option, grantees PUBLIC / postgres / anon / authenticated /
+--     service_role); the exact signatures below.
+--   supabase_pg_net_access_event_trigger.v1   event trigger issue_pg_net_access -> extensions.grant_pg_net_access().
+--     Its body only matches the egress pattern because it re-GRANTs / ALTERs net.http_* when pg_net is created. WHY
+--     this is safe: it fires only on CREATE EXTENSION, which needs CREATE on the database (a hard finding for the role:
+--     database_create, schema_create), and its function is SECURITY INVOKER. Pins: name, event ddl_command_end, tags
+--     exactly {CREATE EXTENSION}, owner supabase_admin, function extensions.grant_pg_net_access() owned by
+--     supabase_admin, SECURITY INVOKER, plpgsql, returning event_trigger.
+create or replace function public.lc_egress_platform_allowlists()
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = pg_catalog
+as $fn$
+declare
+  -- lc-egress-allowlist:postgis-version
+  pg_version constant text := 'supabase_postgis_dynamic_sql.v1';
+  pg_ext_version constant text := '3.3.7';
+  -- lc-egress-allowlist:postgis-signatures (every overload of the 12 names in PostGIS 3.3.7: postgis.sql.in + long_xact.sql.in)
+  pg_sigs constant text[] := array[
+    'public.addgeometrycolumn(character varying,character varying,character varying,character varying,integer,character varying,integer,boolean)',
+    'public.addgeometrycolumn(character varying,character varying,character varying,integer,character varying,integer,boolean)',
+    'public.addgeometrycolumn(character varying,character varying,integer,character varying,integer,boolean)',
+    'public.checkauth(text,text,text)', 'public.checkauth(text,text)',
+    'public.disablelongtransactions()', 'public.enablelongtransactions()',
+    'public.dropgeometrycolumn(character varying,character varying,character varying,character varying)',
+    'public.dropgeometrycolumn(character varying,character varying,character varying)',
+    'public.dropgeometrycolumn(character varying,character varying)',
+    'public.dropgeometrytable(character varying,character varying,character varying)',
+    'public.dropgeometrytable(character varying,character varying)', 'public.dropgeometrytable(character varying)',
+    'public.lockrow(text,text,text,text,timestamp without time zone)', 'public.lockrow(text,text,text,text)',
+    'public.lockrow(text,text,text)', 'public.lockrow(text,text,text,timestamp without time zone)',
+    'public.populate_geometry_columns(boolean)', 'public.populate_geometry_columns(oid,boolean)',
+    'public.postgis_extensions_upgrade()',
+    'public.st_findextent(text,text,text)', 'public.st_findextent(text,text)',
+    'public.unlockrows(text)',
+    'public.updategeometrysrid(character varying,character varying,character varying,character varying,integer)',
+    'public.updategeometrysrid(character varying,character varying,character varying,integer)',
+    'public.updategeometrysrid(character varying,character varying,integer)'];
+  pg_grantees constant text[] := array['PUBLIC', 'postgres', 'anon', 'authenticated', 'service_role'];
+  -- lc-egress-allowlist:event-trigger-version
+  et_version constant text := 'supabase_pg_net_access_event_trigger.v1';
+  v_admin oid;
+  v_ext record;
+  v_et record;
+  v_fn record;
+  reasons text[];
+  objects text[];
+  absent text[];
+  fn_oids oid[] := '{}';
+  et_oids oid[] := '{}';
+  out_list jsonb := '[]'::jsonb;
+  s text;
+  o oid;
+  a record;
+  g text;
+begin
+  select oid into v_admin from pg_roles where rolname = 'supabase_admin';
+
+  -- (1) supabase_postgis_dynamic_sql
+  reasons := '{}'; objects := '{}'; absent := '{}';
+  select e.oid, e.extversion, e.extowner, e.extnamespace into v_ext from pg_extension e where e.extname = 'postgis';
+  if v_ext.oid is null then
+    out_list := out_list || jsonb_build_array(jsonb_build_object('id', 'supabase_postgis_dynamic_sql', 'version', pg_version, 'status', 'not_present',
+      'rule', 'dynamic_sql_function', 'reasons', '[]'::jsonb, 'objects', '[]'::jsonb));
+  else
+    if v_admin is null then reasons := reasons || 'owner_role_supabase_admin_missing'::text; end if;
+    if v_ext.extversion is distinct from pg_ext_version then reasons := reasons || ('extension_version:' || v_ext.extversion); end if;
+    if v_ext.extowner is distinct from v_admin then reasons := reasons || ('extension_owner:' || pg_get_userbyid(v_ext.extowner)); end if;
+    if v_ext.extnamespace is distinct from 'public'::regnamespace::oid then reasons := reasons || ('extension_schema:' || v_ext.extnamespace::regnamespace::text); end if;
+    foreach s in array pg_sigs loop
+      o := to_regprocedure(s);
+      if o is null then absent := absent || s; continue; end if;
+      select p.oid, p.proowner, p.prosecdef, p.prokind, p.pronamespace, p.proacl into v_fn from pg_proc p where p.oid = o;
+      if not exists (select 1 from pg_depend d where d.classid = 'pg_catalog.pg_proc'::regclass and d.objid = o and d.objsubid = 0
+                       and d.refclassid = 'pg_catalog.pg_extension'::regclass and d.refobjid = v_ext.oid and d.deptype = 'e') then
+        reasons := reasons || ('not_extension_member:' || s);
+      end if;
+      if v_fn.proowner is distinct from v_admin then reasons := reasons || ('owner:' || s || ':' || pg_get_userbyid(v_fn.proowner)); end if;
+      if v_fn.prosecdef then reasons := reasons || ('security_definer:' || s); end if;
+      if v_fn.prokind <> 'f' then reasons := reasons || ('not_a_function:' || s); end if;
+      if v_fn.pronamespace is distinct from v_ext.extnamespace then reasons := reasons || ('schema:' || s); end if;
+      for a in select x.grantor, x.grantee, x.privilege_type, x.is_grantable from aclexplode(coalesce(v_fn.proacl, acldefault('f', v_fn.proowner))) x loop
+        continue when a.grantee = v_fn.proowner and a.grantor = v_fn.proowner;
+        g := case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end;
+        if a.grantor is distinct from v_admin then reasons := reasons || ('acl_grantor:' || s || ':' || g || ':' || pg_get_userbyid(a.grantor)); end if;
+        if a.is_grantable then reasons := reasons || ('acl_grant_option:' || s || ':' || g); end if;
+        if not (g = any (pg_grantees)) or a.privilege_type <> 'EXECUTE' then reasons := reasons || ('acl_outside_default:' || s || ':' || g || ':' || a.privilege_type); end if;
+      end loop;
+      objects := objects || o::regprocedure::text;
+      fn_oids := fn_oids || o;
+    end loop;
+    if coalesce(array_length(reasons, 1), 0) > 0 then fn_oids := '{}'; end if;
+    out_list := out_list || jsonb_build_array(jsonb_build_object('id', 'supabase_postgis_dynamic_sql', 'version', pg_version,
+      'status', case when coalesce(array_length(reasons, 1), 0) = 0 then 'applied' else 'not_applied' end,
+      'rule', 'dynamic_sql_function', 'reasons', to_jsonb(reasons),
+      'extension', 'postgis', 'extension_version', v_ext.extversion, 'extension_owner', pg_get_userbyid(v_ext.extowner),
+      'extension_schema', v_ext.extnamespace::regnamespace::text, 'objects', to_jsonb(objects), 'absent', to_jsonb(absent)));
+  end if;
+
+  -- (2) supabase_pg_net_access_event_trigger
+  reasons := '{}';
+  select et.oid, et.evtevent, et.evttags, et.evtowner, et.evtfoid, et.evtenabled into v_et from pg_event_trigger et where et.evtname = 'issue_pg_net_access';
+  if v_et.oid is null then
+    out_list := out_list || jsonb_build_array(jsonb_build_object('id', 'supabase_pg_net_access_event_trigger', 'version', et_version, 'status', 'not_present',
+      'rule', 'event_trigger_egress', 'reasons', '[]'::jsonb, 'objects', '[]'::jsonb));
+  else
+    if v_admin is null then reasons := reasons || 'owner_role_supabase_admin_missing'::text; end if;
+    if v_et.evtevent is distinct from 'ddl_command_end' then reasons := reasons || ('event:' || v_et.evtevent); end if;
+    if v_et.evttags is distinct from array['CREATE EXTENSION']::text[] then reasons := reasons || ('tags:' || coalesce(array_to_string(v_et.evttags, ','), 'ALL')); end if;
+    if v_et.evtowner is distinct from v_admin then reasons := reasons || ('owner:' || pg_get_userbyid(v_et.evtowner)); end if;
+    -- the function is matched in the catalog (schema extensions, the pinned name, no arguments): a name lookup would need
+    -- USAGE on schema extensions, which the role does not hold, and this body must never contain the
+    -- callee-name-then-parenthesis shape the call-graph walk matches
+    if not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                    where p.oid = v_et.evtfoid and n.nspname = 'extensions' and p.proname = 'grant_pg_net_access' and p.pronargs = 0) then
+      reasons := reasons || ('function:' || v_et.evtfoid::regprocedure::text);
+    end if;
+    select p.proowner, p.prosecdef, l.lanname, p.prorettype into v_fn from pg_proc p join pg_language l on l.oid = p.prolang where p.oid = v_et.evtfoid;
+    if v_fn.proowner is distinct from v_admin then reasons := reasons || ('function_owner:' || pg_get_userbyid(v_fn.proowner)); end if;
+    if v_fn.prosecdef then reasons := reasons || 'function_security_definer'::text; end if;
+    if v_fn.lanname is distinct from 'plpgsql' then reasons := reasons || ('function_language:' || v_fn.lanname); end if;
+    if v_fn.prorettype is distinct from 'pg_catalog.event_trigger'::regtype::oid then reasons := reasons || 'function_not_event_trigger'::text; end if;
+    if coalesce(array_length(reasons, 1), 0) = 0 then et_oids := array[v_et.oid]; end if;
+    out_list := out_list || jsonb_build_array(jsonb_build_object('id', 'supabase_pg_net_access_event_trigger', 'version', et_version,
+      'status', case when coalesce(array_length(reasons, 1), 0) = 0 then 'applied' else 'not_applied' end,
+      'rule', 'event_trigger_egress', 'reasons', to_jsonb(reasons), 'enabled', v_et.evtenabled::text,
+      'objects', jsonb_build_array('event:issue_pg_net_access -> ' || v_et.evtfoid::regprocedure::text)));
+  end if;
+
+  return jsonb_build_object('allowlists', out_list, 'excepted_function_oids', to_jsonb(fn_oids), 'excepted_event_trigger_oids', to_jsonb(et_oids));
+end
+$fn$;
+comment on function public.lc_egress_platform_allowlists() is 'Egress hardening: the pinned, versioned platform allowlists of the indirect-egress rule (PostGIS 3.3.7 dynamic-SQL management functions; the pg_net access event trigger). Each applies only when every pin holds. Reported by both self-checks as platform_allowlists. docs/SUPABASE-PG-NET-POSTURE.md §4b.';
 -- The bounded transitive-reachability half of the egress rule (docs/SUPABASE-PG-NET-POSTURE.md §4a). It walks the
 -- pg_proc call graph BACKWARDS from the egress leaves (comment-stripped prosrc name-resolution; cost ~|bad| x |procs|)
 -- and reports, for a NOLOGIN Data-API role r, every INDIRECT path to egress the per-function body grep misses:
@@ -1598,13 +1750,18 @@ comment on function action_gateway.platform_egress_exceptions(oid) is 'Action Ga
 --   egress_trigger:<table>:<trigger> -> <fn>   a trigger (incl. Supabase Database Webhooks supabase_functions.http_request
 --     and any pg_net-calling trigger) on a table r can INSERT/UPDATE/DELETE/TRUNCATE whose function reaches egress;
 --   event_trigger_egress:<event> -> <fn>   an event trigger whose function reaches egress;
---   cron_schema_access:<detail>     any access to schema cron (pg_cron): usage, cron.job, or a cron.* EXECUTE;
+--   cron_schema_access:<detail>     USAGE on schema cron (pg_cron); with it, also cron.job access and each cron.* EXECUTE.
+--     A cron object is reachable only through USAGE on its schema (the same rule every other check uses: a privilege
+--     counts when the role can also USE the schema), so PUBLIC's SELECT on cron.job without USAGE is not a path;
+--     USAGE itself stays a HARD finding;
 --   dangerous_role_membership:<role>   membership in pg_execute_server_program / pg_read_server_files /
 --     pg_write_server_files (COPY TO/FROM PROGRAM and server-file egress; superuser is caught by attr_superuser);
 --   egress_definer_view:<view>      an owner-rights (security_invoker=false) view r can SELECT that depends on an egress function.
 -- net-schema / pg_net-member functions are NOT roots here (platform internals; judged by the direct rule + the
 -- pg_net exception). This function is called by BOTH self-checks AND the frozen strict references, so a 'not
 -- applied' exception still reports exactly the same indirect findings. Each line is a HARD finding.
+-- The ONLY exceptions are the pinned platform allowlists of public.lc_egress_platform_allowlists() (above): the
+-- exact PostGIS 3.3.7 dynamic-SQL members and the pg_net access event trigger, each only while every pin holds.
 create or replace function public.lc_reachable_egress_indirect(p_role oid)
 returns text[]
 language plpgsql
@@ -1622,6 +1779,9 @@ declare
   dyn_allow constant text[] := array[]::text[];
   bad oid[];       -- every function that transitively reaches an egress leaf (sql/plpgsql call graph)
   leaves oid[];    -- the direct egress leaves themselves
+  al jsonb := public.lc_egress_platform_allowlists();
+  al_fn oid[] := array(select (jsonb_array_elements_text(al -> 'excepted_function_oids'))::oid);
+  al_evt oid[] := array(select (jsonb_array_elements_text(al -> 'excepted_event_trigger_oids'))::oid);
   x record;
 begin
   -- the call graph is walked BACKWARDS from the egress leaves (a small frontier) so the cost is ~|bad| x |procs|,
@@ -1681,6 +1841,7 @@ begin
                           and d.deptype = 'e' and e.extname in ('pg_net','http','dblink','postgres_fdw'))
        and regexp_replace(p.prosrc, '--[^'||nl||']*', '', 'g') ~* '\mexecute[[:space:]]'
        and not (p.oid::regprocedure::text = any (select split_part(a, '|', 1) from unnest(dyn_allow) a))
+       and not (p.oid = any (al_fn))  -- pinned supabase_postgis_dynamic_sql allowlist (only while every pin holds)
   loop findings := findings || ('dynamic_sql_function:' || x.s); end loop;
 
   -- (3) triggers (incl. Supabase Database Webhooks supabase_functions.http_request and pg_net triggers) on a table
@@ -1694,14 +1855,15 @@ begin
             or has_table_privilege(r, t.tgrelid, 'DELETE') or has_table_privilege(r, t.tgrelid, 'TRUNCATE'))
   loop findings := findings || ('egress_trigger:' || x.s); end loop;
 
-  -- (4) event triggers whose function reaches egress
+  -- (4) event triggers whose function reaches egress (except the pinned supabase_pg_net_access_event_trigger)
   for x in
-    select 'event:' || et.evtname || ' -> ' || et.evtfoid::regprocedure::text s from pg_event_trigger et where et.evtfoid = any (bad)
+    select 'event:' || et.evtname || ' -> ' || et.evtfoid::regprocedure::text s from pg_event_trigger et where et.evtfoid = any (bad) and not (et.oid = any (al_evt))
   loop findings := findings || ('event_trigger_egress:' || x.s); end loop;
 
-  -- (5) pg_cron: the role must have no access to schema cron
-  if to_regnamespace('cron') is not null then
-    if has_schema_privilege(r, 'cron', 'USAGE') then findings := findings || 'cron_schema_access:usage'::text; end if;
+  -- (5) pg_cron: the role must have no USAGE on schema cron. Every cron object is reachable only through that USAGE
+  --     (a relation / function grant without it cannot be exercised), so the object grants are reported with it.
+  if to_regnamespace('cron') is not null and has_schema_privilege(r, 'cron', 'USAGE') then
+    findings := findings || 'cron_schema_access:usage'::text;
     if to_regclass('cron.job') is not null and (has_table_privilege(r, 'cron.job', 'SELECT') or has_table_privilege(r, 'cron.job', 'INSERT')
        or has_table_privilege(r, 'cron.job', 'UPDATE') or has_table_privilege(r, 'cron.job', 'DELETE')) then findings := findings || 'cron_schema_access:cron.job'::text; end if;
     for x in select p.oid::regprocedure::text s from pg_proc p where p.pronamespace = 'cron'::regnamespace and has_function_privilege(r, p.oid, 'EXECUTE')
@@ -1731,6 +1893,8 @@ comment on function public.lc_reachable_egress_indirect(oid) is 'Egress hardenin
 -- lc-indirect-egress:block-end
 revoke all on function public.lc_reachable_egress_indirect(oid) from public, anon, authenticated, service_role;
 grant execute on function public.lc_reachable_egress_indirect(oid) to lc_action_gateway;
+revoke all on function public.lc_egress_platform_allowlists() from public, anon, authenticated, service_role;
+grant execute on function public.lc_egress_platform_allowlists() to lc_action_gateway;
 
 create function action_gateway.self_check(p_role name default 'lc_action_gateway')
 returns jsonb
@@ -1892,7 +2056,8 @@ begin
   findings := findings || array(select jsonb_array_elements_text(pe -> 'findings'));
   -- platform_exceptions: what was excepted (fingerprint version, objects, ACL, controls), reported apart from findings
   return rep || jsonb_build_object('findings', to_jsonb(findings), 'ok', coalesce(array_length(findings, 1), 0) = 0,
-                                   'platform_exceptions', pe -> 'platform_exceptions', 'generated_at', clock_timestamp());
+                                   'platform_exceptions', pe -> 'platform_exceptions',
+                                   'platform_allowlists', public.lc_egress_platform_allowlists() -> 'allowlists', 'generated_at', clock_timestamp());
 end
 $fn$;
 comment on function action_gateway.self_check(name) is 'Action Gateway: privilege introspection of lc_action_gateway (writes only the gateway bookkeeping, definer allowlist, no egress, read inventory). The apply refuses unless ok.';

@@ -76,6 +76,61 @@ export function evaluatePlatformExceptions(rep) {
   return { findings, applied, probeRequired: applied.length > 0, summary }
 }
 
+/**
+ * The PINNED platform allowlists of the indirect-egress rule (public.lc_egress_platform_allowlists, docs/SUPABASE-PG-NET-POSTURE.md
+ * §4b). The SAME constants as the migrations (a test asserts both). A new id, version or object is a reviewed change.
+ */
+export const PLATFORM_ALLOWLISTS = Object.freeze({
+  supabase_postgis_dynamic_sql: Object.freeze({
+    version: 'supabase_postgis_dynamic_sql.v1',
+    objects: Object.freeze([
+      'public.addgeometrycolumn(character varying,character varying,character varying,character varying,integer,character varying,integer,boolean)',
+      'public.addgeometrycolumn(character varying,character varying,character varying,integer,character varying,integer,boolean)',
+      'public.addgeometrycolumn(character varying,character varying,integer,character varying,integer,boolean)',
+      'public.checkauth(text,text,text)', 'public.checkauth(text,text)', 'public.disablelongtransactions()', 'public.enablelongtransactions()',
+      'public.dropgeometrycolumn(character varying,character varying,character varying,character varying)',
+      'public.dropgeometrycolumn(character varying,character varying,character varying)', 'public.dropgeometrycolumn(character varying,character varying)',
+      'public.dropgeometrytable(character varying,character varying,character varying)', 'public.dropgeometrytable(character varying,character varying)',
+      'public.dropgeometrytable(character varying)', 'public.lockrow(text,text,text,text,timestamp without time zone)', 'public.lockrow(text,text,text,text)',
+      'public.lockrow(text,text,text)', 'public.lockrow(text,text,text,timestamp without time zone)', 'public.populate_geometry_columns(boolean)',
+      'public.populate_geometry_columns(oid,boolean)', 'public.postgis_extensions_upgrade()', 'public.st_findextent(text,text,text)', 'public.st_findextent(text,text)',
+      'public.unlockrows(text)', 'public.updategeometrysrid(character varying,character varying,character varying,character varying,integer)',
+      'public.updategeometrysrid(character varying,character varying,character varying,integer)', 'public.updategeometrysrid(character varying,character varying,integer)']),
+  }),
+  supabase_pg_net_access_event_trigger: Object.freeze({
+    version: 'supabase_pg_net_access_event_trigger.v1',
+    objects: Object.freeze(['event:issue_pg_net_access -> extensions.grant_pg_net_access()']),
+  }),
+})
+const ALLOWLIST_STATUSES = ['applied', 'not_applied', 'not_present']
+
+/**
+ * Re-judge the report's platform_allowlists. An absent list (a report from before the allowlists) excepts nothing.
+ * Only the pinned ids and versions; an APPLIED entry must carry no reasons and only pinned objects. Anything else: a finding.
+ * @returns {{ findings: string[], summary: object[] }}
+ */
+export function evaluatePlatformAllowlists(rep) {
+  const list = rep?.platform_allowlists
+  if (list === undefined || list === null) return { findings: [], summary: [] }
+  if (!Array.isArray(list)) return { findings: ['platform_allowlists_malformed'], summary: [] }
+  const findings = []
+  for (const e of list) {
+    if (!e || typeof e !== 'object') { findings.push('platform_allowlist_malformed'); continue }
+    const pin = Object.hasOwn(PLATFORM_ALLOWLISTS, e.id) ? PLATFORM_ALLOWLISTS[e.id] : null
+    if (!pin) { findings.push(`platform_allowlist_unknown:${s(e.id, 40)}`); continue }
+    if (e.version !== pin.version) findings.push(`platform_allowlist_version:${s(e.id, 40)}:${s(e.version, 60)} (pinned ${pin.version})`)
+    if (!ALLOWLIST_STATUSES.includes(e.status)) { findings.push(`platform_allowlist_status:${s(e.id, 40)}:${s(e.status, 20)}`); continue }
+    if (e.status !== 'applied') continue // nothing excepted: those objects were judged by the strict rule (the database findings say so)
+    if (!Array.isArray(e.reasons) || e.reasons.length) findings.push(`platform_allowlist_applied_with_reasons:${s(e.id, 40)}`)
+    if (!Array.isArray(e.objects) || !e.objects.every((o) => pin.objects.includes(o))) findings.push(`platform_allowlist_objects_outside_pin:${s(e.id, 40)}`)
+  }
+  const summary = list.filter((e) => e && typeof e === 'object').map((e) => ({
+    id: s(e.id, 40), version: s(e.version, 60), status: s(e.status, 20),
+    objects: Array.isArray(e.objects) ? e.objects.length : null, reasons: Array.isArray(e.reasons) ? e.reasons.slice(0, 5).map((n) => s(n, 160)) : [],
+  }))
+  return { findings, summary }
+}
+
 async function call(fetchFn, url, init, timeoutMs) {
   const ctl = new AbortController()
   const t = setTimeout(() => ctl.abort(), timeoutMs)

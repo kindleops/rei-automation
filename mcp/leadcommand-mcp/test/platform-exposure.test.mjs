@@ -15,7 +15,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildApp } from '../src/app.mjs'
 import { evaluateSelfCheck } from '../src/data/credential.mjs'
-import { evaluatePlatformExceptions, probePlatformExposure, PG_NET_FINGERPRINT_VERSION, REST_PROBES, GRAPHQL_FIELDS } from '../src/data/platform-exposure.mjs'
+import { evaluatePlatformExceptions, evaluatePlatformAllowlists, PLATFORM_ALLOWLISTS, probePlatformExposure, PG_NET_FINGERPRINT_VERSION, REST_PROBES, GRAPHQL_FIELDS } from '../src/data/platform-exposure.mjs'
 import { createFakePostgrest, passingReport, READER_TOKEN, ANON_KEY } from './support/fake-postgrest.mjs'
 import { liveEnv, tmpDir, LIVE_MEMBERSHIP } from './support/live-env.mjs'
 
@@ -168,4 +168,48 @@ test('boot (live, fake PostgREST): WITHOUT an applied exception the probe is nev
   await app.close()
   assert.equal(edge.seen.length, 0)
   assert.deepEqual(pg.rpcsCalled(), ['lc_mcp_reader_self_check'])
+})
+
+// ── the pinned platform allowlists of the indirect-egress rule (public.lc_egress_platform_allowlists) ──
+const pgisAllow = (over = {}) => ({ id: 'supabase_postgis_dynamic_sql', version: 'supabase_postgis_dynamic_sql.v1', status: 'applied', rule: 'dynamic_sql_function', reasons: [],
+  extension: 'postgis', extension_version: '3.3.7', extension_owner: 'supabase_admin', extension_schema: 'public',
+  objects: [...PLATFORM_ALLOWLISTS.supabase_postgis_dynamic_sql.objects], absent: [], ...over })
+const etAllow = (over = {}) => ({ id: 'supabase_pg_net_access_event_trigger', version: 'supabase_pg_net_access_event_trigger.v1', status: 'applied', rule: 'event_trigger_egress',
+  reasons: [], enabled: 'O', objects: ['event:issue_pg_net_access -> extensions.grant_pg_net_access()'], ...over })
+
+test('the JS allowlist pins are the migrations\' (ids, versions, the 26 PostGIS signatures, the event trigger)', () => {
+  for (const f of ['PROPOSED_20261019150000_lc_mcp_reader.sql', 'PROPOSED_20261019160000_action_gateway.sql']) {
+    const src = fs.readFileSync(path.join(REPO, 'supabase/migrations', f), 'utf8')
+    const sigs = [...(/pg_sigs constant text\[\] := array\[([\s\S]*?)\];/.exec(src)[1]).matchAll(/'([^']+)'/g)].map((m) => m[1])
+    assert.deepEqual(sigs, [...PLATFORM_ALLOWLISTS.supabase_postgis_dynamic_sql.objects], f)
+    assert.equal(/pg_version constant text := '([^']+)'/.exec(src)[1], PLATFORM_ALLOWLISTS.supabase_postgis_dynamic_sql.version, f)
+    assert.equal(/et_version constant text := '([^']+)'/.exec(src)[1], PLATFORM_ALLOWLISTS.supabase_pg_net_access_event_trigger.version, f)
+  }
+})
+
+test('evaluateSelfCheck: pinned allowlists (applied / not_applied / not_present) pass and are summarised; absent list excepts nothing', () => {
+  for (const list of [undefined, [], [pgisAllow(), etAllow()], [pgisAllow({ status: 'not_applied', reasons: ['extension_version:3.3.8'] }), etAllow({ status: 'not_present', objects: [] })]]) {
+    const v = evaluateSelfCheck(passingReport({ platform_allowlists: list }))
+    assert.equal(v.ok, true, JSON.stringify(v.findings))
+  }
+  const v = evaluateSelfCheck(passingReport({ platform_allowlists: [pgisAllow(), etAllow()] }))
+  assert.deepEqual(v.info.platform_allowlists.map((x) => [x.id, x.status, x.objects]), [['supabase_postgis_dynamic_sql', 'applied', 26], ['supabase_pg_net_access_event_trigger', 'applied', 1]])
+})
+
+test('evaluateSelfCheck: an unknown / re-versioned / widened / reasoned allowlist is a finding', () => {
+  const cases = [
+    [[{ ...etAllow(), id: 'supabase_everything' }], /platform_allowlist_unknown:supabase_everything/],
+    [[pgisAllow({ version: 'supabase_postgis_dynamic_sql.v2' })], /platform_allowlist_version:supabase_postgis_dynamic_sql/],
+    [[pgisAllow({ objects: [...PLATFORM_ALLOWLISTS.supabase_postgis_dynamic_sql.objects, 'public.run_sql(text)'] })], /platform_allowlist_objects_outside_pin:supabase_postgis_dynamic_sql/],
+    [[etAllow({ objects: ['event:lc_other -> public.hook()'] })], /platform_allowlist_objects_outside_pin:supabase_pg_net_access_event_trigger/],
+    [[pgisAllow({ reasons: ['owner:public.lockrow(text,text,text):postgres'] })], /platform_allowlist_applied_with_reasons/],
+    [[pgisAllow({ status: 'partially' })], /platform_allowlist_status/],
+    [{ id: 'x' }, /platform_allowlists_malformed/],
+  ]
+  for (const [list, re] of cases) {
+    const v = evaluateSelfCheck(passingReport({ platform_allowlists: list }))
+    assert.equal(v.ok, false, JSON.stringify(list).slice(0, 80))
+    assert.match(v.findings.join(' '), re)
+  }
+  assert.deepEqual(evaluatePlatformAllowlists({}).findings, [])
 })

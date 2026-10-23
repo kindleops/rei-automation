@@ -69,6 +69,7 @@ begin
 end $$;
 
 drop function if exists public.lc_reachable_egress_indirect(oid);
+drop function if exists public.lc_egress_platform_allowlists();
 
 drop schema action_gateway cascade;
 

@@ -214,7 +214,8 @@ begin
   findings := findings || array(select jsonb_array_elements_text(pe -> 'findings'));
   -- platform_exceptions: what was excepted (fingerprint version, objects, ACL, controls), reported apart from findings
   return rep || jsonb_build_object('findings', to_jsonb(findings), 'ok', coalesce(array_length(findings, 1), 0) = 0,
-                                   'platform_exceptions', pe -> 'platform_exceptions', 'generated_at', clock_timestamp());
+                                   'platform_exceptions', pe -> 'platform_exceptions',
+                                   'platform_allowlists', public.lc_egress_platform_allowlists() -> 'allowlists', 'generated_at', clock_timestamp());
 end
 $fn$;
 $sql$;

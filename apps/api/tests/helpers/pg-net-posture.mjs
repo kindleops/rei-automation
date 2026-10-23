@@ -27,7 +27,7 @@ import pg from 'pg'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const REPO_DIR = path.resolve(HERE, '../../../..')
 export const EMULATION_DIR = path.resolve(HERE, '../pg/pg_net_emulation')
-export const PG_NET_FILES = ['pg_net.control', 'pg_net--0.20.0.sql']
+export const PG_NET_FILES = ['pg_net.control', 'pg_net--0.20.0.sql', 'postgis.control', 'postgis--3.3.7.sql']
 
 async function freePort() {
   return new Promise((resolve, reject) => {
@@ -103,6 +103,71 @@ export async function installPgNet(pool, { platformUsage = ['postgres', 'anon', 
     await c.query('set role supabase_admin')
     await c.query('create extension pg_net')
     if (platformUsage.length) await c.query(`grant usage on schema net to ${platformUsage.join(', ')}`)
+    await c.query('reset role')
+  } finally {
+    c.release()
+  }
+}
+
+/** The 26 pinned PostGIS 3.3.7 overloads (supabase_postgis_dynamic_sql.v1), exactly as the migrations list them. */
+export const POSTGIS_PINNED = Object.freeze([
+  'public.addgeometrycolumn(character varying,character varying,character varying,character varying,integer,character varying,integer,boolean)',
+  'public.addgeometrycolumn(character varying,character varying,character varying,integer,character varying,integer,boolean)',
+  'public.addgeometrycolumn(character varying,character varying,integer,character varying,integer,boolean)',
+  'public.checkauth(text,text,text)', 'public.checkauth(text,text)', 'public.disablelongtransactions()', 'public.enablelongtransactions()',
+  'public.dropgeometrycolumn(character varying,character varying,character varying,character varying)',
+  'public.dropgeometrycolumn(character varying,character varying,character varying)', 'public.dropgeometrycolumn(character varying,character varying)',
+  'public.dropgeometrytable(character varying,character varying,character varying)', 'public.dropgeometrytable(character varying,character varying)',
+  'public.dropgeometrytable(character varying)', 'public.lockrow(text,text,text,text,timestamp without time zone)', 'public.lockrow(text,text,text,text)',
+  'public.lockrow(text,text,text)', 'public.lockrow(text,text,text,timestamp without time zone)', 'public.populate_geometry_columns(boolean)',
+  'public.populate_geometry_columns(oid,boolean)', 'public.postgis_extensions_upgrade()', 'public.st_findextent(text,text,text)', 'public.st_findextent(text,text)',
+  'public.unlockrows(text)', 'public.updategeometrysrid(character varying,character varying,character varying,character varying,integer)',
+  'public.updategeometrysrid(character varying,character varying,character varying,integer)', 'public.updategeometrysrid(character varying,character varying,integer)'])
+/** The 13 of them whose bodies run plpgsql EXECUTE (the production verify returned exactly these as dynamic_sql_function). */
+export const POSTGIS_DYNAMIC = Object.freeze([POSTGIS_PINNED[0], POSTGIS_PINNED[3], POSTGIS_PINNED[5], POSTGIS_PINNED[6], POSTGIS_PINNED[7], POSTGIS_PINNED[10],
+  POSTGIS_PINNED[13], POSTGIS_PINNED[18], POSTGIS_PINNED[19], POSTGIS_PINNED[20], POSTGIS_PINNED[21], POSTGIS_PINNED[22], POSTGIS_PINNED[23]])
+
+/**
+ * The rest of the production platform shape the 2026-10-23 read-only verification found (scripts/db/pg_net_indirect_egress_prod_verify.sql):
+ *   PostGIS 3.3.7 in schema public, owned by supabase_admin, its functions EXECUTE to PUBLIC + postgres / anon / authenticated / service_role;
+ *   the event trigger issue_pg_net_access -> extensions.grant_pg_net_access() (Supabase's body: it re-GRANTs / ALTERs net.http_*);
+ *   pg_cron's ACL shape: schema cron {supabase_admin=UC, postgres=U*} (NO PUBLIC USAGE), PUBLIC SELECT on cron.job, PUBLIC EXECUTE on cron.*.
+ */
+export async function installPlatformShape(pool) {
+  const c = await pool.connect()
+  try {
+    await c.query('set role supabase_admin')
+    await c.query('create extension postgis schema public')
+    for (const sig of POSTGIS_PINNED) await c.query(`grant execute on function ${sig} to postgres, anon, authenticated, service_role`)
+    await c.query(`create schema cron;
+      create table cron.job (jobid bigserial primary key, schedule text not null, command text not null, username text not null default current_user, active boolean not null default true);
+      grant select on cron.job to public;
+      create function cron.schedule(schedule text, command text) returns bigint language sql as $f$ select 1::bigint $f$;
+      create function cron.unschedule(job_id bigint) returns boolean language sql as $f$ select true $f$;
+      revoke all on schema cron from public;
+      grant usage on schema cron to postgres with grant option;`)
+    await c.query('create schema if not exists extensions')
+    await c.query(`create or replace function extensions.grant_pg_net_access() returns event_trigger language plpgsql as $f$
+      begin
+        if exists (select 1 from pg_event_trigger_ddl_commands() as ev join pg_extension as ext on ev.objid = ext.oid where ext.extname = 'pg_net') then
+          if not exists (select 1 from pg_roles where rolname = 'supabase_functions_admin') then
+            create user supabase_functions_admin noinherit createrole login noreplication;
+          end if;
+          grant usage on schema net to supabase_functions_admin, postgres, anon, authenticated, service_role;
+          if exists (select from pg_extension where extname = 'pg_net' and extversion in ('0.2', '0.6', '0.7', '0.7.1', '0.8', '0.10.0', '0.11.0')) then
+            alter function net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) security definer;
+            alter function net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) security definer;
+            alter function net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) set search_path = net;
+            alter function net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) set search_path = net;
+            revoke all on function net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) from public;
+            revoke all on function net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) from public;
+            grant execute on function net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) to supabase_functions_admin, postgres, anon, authenticated, service_role;
+            grant execute on function net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) to supabase_functions_admin, postgres, anon, authenticated, service_role;
+          end if;
+        end if;
+      end
+      $f$`)
+    await c.query(`create event trigger issue_pg_net_access on ddl_command_end when tag in ('CREATE EXTENSION') execute function extensions.grant_pg_net_access()`)
     await c.query('reset role')
   } finally {
     c.release()

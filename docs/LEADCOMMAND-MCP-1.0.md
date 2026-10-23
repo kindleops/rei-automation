@@ -349,6 +349,7 @@ Notes per tool:
 - LOGIN;
 - a reachable SECURITY DEFINER function outside the allowlist. PUBLIC gets EXECUTE on every new function and the lockdown did not change default privileges; PostGIS `st_estimatedextent` is accepted when non-volatile;
 - a reachable **network-egress** function: schema `net`, pg_net / http / dblink / postgres_fdw members, `http*` / `dblink*`, untrusted languages, or a wrapper calling them or `lo_*` / `pg_notify`;
+- an **indirect** egress path (`public.lc_reachable_egress_indirect`): a transitive wrapper, a reachable dynamic-SQL function, an egress (event) trigger, USAGE on schema `cron`, a dangerous membership, an owner-rights view over egress. Its only exceptions are the two pinned platform allowlists (`supabase_postgis_dynamic_sql.v1`, `supabase_pg_net_access_event_trigger.v1`; `docs/SUPABASE-PG-NET-POSTURE.md` §4b), reported as `platform_allowlists` and re-judged by the server. Before the apply, the owner runs `scripts/db/lc_mcp_reader_prod_dry_preflight.sql` (read-only); it predicts the outcome exactly;
 - SELECT outside the inventory in an exposed schema, e.g. a PUBLIC-readable owner-rights view;
 - an inventory table with RLS but no policy, or with a restrictive policy;
 - an inventory `security_invoker` view;

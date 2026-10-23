@@ -1,0 +1,12 @@
+# DISPOSABLE-TEST EMULATION of the PostGIS 3.3.7 management-function surface (NOT the real extension: no C
+# module, no geometry type). Installed ONLY into a cloned, temporary PostgreSQL share directory by
+# apps/api/tests/helpers/pg-net-posture.mjs, so `CREATE EXTENSION postgis` (run AS supabase_admin) records real
+# extension membership (pg_depend deptype 'e') for every object, as Supabase has it (owner supabase_admin,
+# schema public). Shape: the 26 overloads of the 12 PostGIS names the supabase_postgis_dynamic_sql.v1
+# allowlist pins; the 13 whose real bodies run plpgsql EXECUTE do so here too.
+comment = 'LeadCommand test emulation of PostGIS 3.3.7 management functions (shape only)'
+default_version = '3.3.7'
+relocatable = false
+schema = public
+superuser = true
+trusted = false
