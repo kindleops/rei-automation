@@ -34,6 +34,8 @@ function auditSelfCheck(auditor, credential) {
       platform_exceptions: verdict.info?.platform_exceptions ?? null,
       platform_allowlists: verdict.info?.platform_allowlists ?? null,
       exposure_probe: verdict.info?.exposure_probe ?? null,
+      // which accepted GraphQL answer the probe saw: unknown_field | refused_no_graphql_access (null: no probe / not proven)
+      exposure_probe_graphql: verdict.info?.exposure_probe_graphql ?? null,
     })
   }
 }

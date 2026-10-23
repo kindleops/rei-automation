@@ -15,7 +15,7 @@
 --   excepted:*  excepted by the pinned pg_net exception / a pinned platform allowlist (reported, never silent)
 --   info        informational (also reported by the self-check, never a finding)
 --   ok          a prerequisite that holds
---   BOOT_BLOCKER  not an apply blocker: the MCP server's boot exposure probe would refuse to start (owner decision)
+--   BOOT_BLOCKER  not an apply blocker: the MCP server's boot exposure probe would refuse to start (fix before step 6)
 -- The LAST row is `verdict | apply_would_pass | true/false`, with the number of BLOCKER rows.
 
 with recursive
@@ -215,6 +215,22 @@ r_exec as (select p.oid from pg_proc p where p.pronamespace in (select oid from 
 r_select as (select c.oid from pg_class c where c.relkind in ('r','p','v','m','f') and c.relnamespace in (select oid from r_usage)
                and (has_table_privilege('public', c.oid, 'SELECT') or c.oid in (select oid from inv_rel))),
 pub as (select oid from pg_namespace where nspname = 'public'),
+-- the MCP boot probe's GraphQL leg, for the role's privilege set (PUBLIC's; the migration grants nothing on GraphQL).
+-- /graphql/v1 = PostgREST POST /rpc/graphql (Content-Profile graphql_public) AS the role. The probe accepts exactly two
+-- GraphQL answers: "Unknown field" for net's tables (the resolver runs and does not reflect net), or PostgREST's 42501
+-- (HTTP 403) "permission denied for schema graphql_public" / "permission denied for function graphql" (the role cannot
+-- execute the resolver at all: no GraphQL, nothing to reflect) -> refused_no_graphql_access. Catalog lookups only.
+gql as (
+  select gp.oid gp, has_schema_privilege('public', gp.oid, 'USAGE') gp_usage,
+         (select p.oid from pg_proc p where p.pronamespace = gp.oid and p.proname = 'graphql' and p.proargtypes = '25 25 3802 3802'::oidvector) rp,
+         gi.oid gi, has_schema_privilege('public', gi.oid, 'USAGE') gi_usage,
+         exists (select 1 from pg_proc p where p.pronamespace = gi.oid and p.proname = 'resolve' and not has_function_privilege('public', p.oid, 'EXECUTE')) gi_resolve_denied
+    from (select to_regnamespace('graphql_public') oid) gp cross join (select to_regnamespace('graphql') oid) gi),
+gql_case as (
+  select case when gp is null then 'no_schema' when not gp_usage then 'no_usage' when rp is null then 'no_resolver'
+              when not has_function_privilege('public', rp, 'EXECUTE') then 'no_execute'
+              when gi is not null and (not gi_usage or gi_resolve_denied) then 'inner_denied' else 'runs' end k
+    from gql),
 res(section, item, verdict) as (
   -- ---------------------------------------------------------------- 1. prerequisites (section 1 of the file) ----
   select 'prerequisite', 'role authenticator', case when exists (select 1 from pg_roles where rolname = 'authenticator') then 'ok' else 'BLOCKER' end
@@ -369,9 +385,15 @@ res(section, item, verdict) as (
                   and d.refobjid in (select oid from bad) and d.objid in (select oid from pg_rewrite where ev_class = c.oid))
   -- ------------------------------------------------------- 4b. the MCP BOOT probe (not the apply; docs §9 step 5) ----
   union all
-  select 'boot_probe', 'graphql_public USAGE for PUBLIC = ' || coalesce(has_schema_privilege('public', to_regnamespace('graphql_public'), 'USAGE')::text, 'no schema graphql_public')
-           || ' (false: the reader cannot run the GraphQL resolver, so the boot probe''s unknown-field check gets a permission error and REFUSES the start; owner decision §9 step 5)',
-         case when to_regnamespace('graphql_public') is not null and not has_schema_privilege('public', to_regnamespace('graphql_public'), 'USAGE') then 'BOOT_BLOCKER' else 'info' end
+  select 'boot_probe', case k
+           when 'no_usage' then 'graphql_public USAGE for PUBLIC = false: the reader cannot execute the GraphQL resolver; PostgREST answers 42501 "permission denied for schema graphql_public" (HTTP 403), which the boot probe accepts as refused_no_graphql_access (no GraphQL for the role, nothing to reflect). REST must still answer PGRST106'
+           when 'no_execute' then 'graphql_public USAGE for PUBLIC = true, EXECUTE on graphql_public.graphql(text,text,jsonb,jsonb) = false: PostgREST answers 42501 "permission denied for function graphql" (HTTP 403), which the boot probe accepts as refused_no_graphql_access. REST must still answer PGRST106'
+           when 'runs' then 'graphql_public USAGE + resolver EXECUTE for PUBLIC = true: the resolver runs AS the reader; the boot probe requires "Unknown field" for net''s tables (net stays off the reader''s search_path, control (d)) and refuses any other answer'
+           when 'no_schema' then 'no schema graphql_public: /graphql/v1 has no resolver, the boot probe gets neither accepted GraphQL answer and REFUSES the start'
+           when 'no_resolver' then 'graphql_public USAGE for PUBLIC = true but no graphql_public.graphql(text,text,jsonb,jsonb): PostgREST answers PGRST202, the boot probe REFUSES the start'
+           else 'graphql_public USAGE + resolver EXECUTE for PUBLIC = true but PUBLIC cannot use pg_graphql''s schema graphql / graphql.resolve: the resolver RUNS as the reader and fails inside (42501 on schema graphql / function resolve), which the boot probe REFUSES'
+         end, case when k in ('no_usage', 'no_execute', 'runs') then 'info' else 'BOOT_BLOCKER' end
+    from gql_case
   -- ------------------------------------------------------------------------------ 5. the platform allowlists ----
   union all
   select 'platform_allowlist', 'supabase_postgis_dynamic_sql.v1 ' || case when not exists (select 1 from pg_ext) then 'not present'

@@ -25,7 +25,7 @@ import { queryActiveSuppression } from '@/lib/domain/compliance/query-active-sup
 import { createFixtureDb } from './fixture-db.mjs'
 import { createInventoryGuardedFetch } from './read-fetch.mjs'
 import { evaluateSelfCheck } from './credential.mjs'
-import { probePlatformExposure } from './platform-exposure.mjs'
+import { probePlatformExposure, probeAuditEntries } from './platform-exposure.mjs'
 import { RELATION_NAMES, RPC_SIGNATURES } from './inventory.mjs'
 import { err } from '../errors.mjs'
 
@@ -112,7 +112,7 @@ export function createLiveSource({ supabaseUrl, apiKey, readerJwt, baseFetch = g
         // one request set that bypasses the inventory guard: fixed paths on the same origin, side-effect free.
         if (verdict.ok && verdict.probeRequired) {
           const probe = await probePlatformExposure({ origin, apiKey, token: readerJwt, fetch: direct, timeoutMs: REQUEST_TIMEOUT_MS })
-          verdict = { ...verdict, ok: probe.ok, findings: [...verdict.findings, ...probe.findings], info: { ...verdict.info, exposure_probe: probe.checks.map((c) => `${c.name}:${c.pass ? 'refused_as_required' : 'EXPOSED_OR_UNPROVEN'}`) } }
+          verdict = { ...verdict, ok: probe.ok, findings: [...verdict.findings, ...probe.findings], info: { ...verdict.info, exposure_probe: probeAuditEntries(probe), exposure_probe_graphql: probe.graphql_variant ?? null } }
         }
       }
     } catch (e) {

@@ -8,7 +8,7 @@ import { createGatewayClient } from './data/client.mjs'
 import { GATEWAY_ROLE } from './data/inventory.mjs'
 import { createMcpServer } from './protocol/server.mjs'
 import { createActionGateway, createPostgrestActionStore, createGatewayReads, createGatewayServices } from '@/lib/domain/action-gateway/index.js'
-import { evaluatePlatformExceptions, probePlatformExposure } from '../../leadcommand-mcp/src/data/platform-exposure.mjs'
+import { evaluatePlatformExceptions, probePlatformExposure, probeAuditEntries } from '../../leadcommand-mcp/src/data/platform-exposure.mjs'
 
 const bootError = (code, message) => Object.assign(new Error(message), { code })
 const AUDIT_KEYS = ['event_type', 'agent_id', 'action', 'capability', 'tier', 'code', 'correlation_id', 'intent_id', 'transport']
@@ -58,7 +58,8 @@ export async function buildApp(opts = {}) {
       }
       const ok = Boolean(self?.ok) && self.current_user === GATEWAY_ROLE && !pe.findings.length && (!pe.probeRequired || probe?.ok === true)
       auditor.event('credential_self_check', { outcome: ok ? 'ok' : 'refused', running_as: self?.current_user || null, findings: findings.slice(0, 20),
-        platform_exceptions: pe.summary, exposure_probe: probe ? probe.checks.map((c) => `${c.name}:${c.pass ? 'refused_as_required' : 'EXPOSED_OR_UNPROVEN'}`) : null })
+        platform_exceptions: pe.summary, exposure_probe: probe ? probeAuditEntries(probe) : null,
+        exposure_probe_graphql: probe?.graphql_variant ?? null })
       if (!ok) throw bootError('CREDENTIAL_SELF_CHECK_FAILED', `credential self-check refused: ${findings.slice(0, 5).join('; ') || `running as ${self?.current_user}`}`)
     }
     // LeadCommand Workforce on this host (docs/WORKFORCE-AGNTEI.md): born OFF — the Workforce tools answer capability_unavailable

@@ -13,8 +13,13 @@
 //   probePlatformExposure(...)          compensating control (c), LIVE, as the credential's own role: PostgREST
 //                                       must answer PGRST106 (schema not exposed) to Accept-Profile: net (GET) and
 //                                       Content-Profile: net (POST), and to Accept-Profile: extensions / cron; the
-//                                       GraphQL endpoint must answer an unknown-field error to queries naming net's
-//                                       tables. Any other answer (including a network failure) refuses the server.
+//                                       GraphQL endpoint must answer, to queries naming net's tables, EITHER an
+//                                       unknown-field error (the resolver runs and does not reflect net) OR PostgREST's
+//                                       exact 42501 for a role that cannot execute the resolver at all (no USAGE on
+//                                       schema graphql_public / no EXECUTE on graphql_public.graphql: no GraphQL for
+//                                       that role, so nothing to reflect). The four GraphQL answers must agree. Any
+//                                       other answer (data, another error or code, a 5xx, a timeout, a network failure,
+//                                       a body that is not exactly one of those shapes) refuses the server.
 //
 // The probe is side-effect free even where a schema IS exposed: the GET asks for zero rows of the request queue and
 // the POST names a function that does not exist (an exposed net answers PGRST202, never an insert).
@@ -35,6 +40,20 @@ export const REST_PROBES = Object.freeze([
 /** GraphQL collection fields that would exist if pg_graphql reflected schema net (plain and inflected names). */
 export const GRAPHQL_FIELDS = Object.freeze(['http_request_queueCollection', '_http_responseCollection', 'httpRequestQueueCollection', 'httpResponseCollection'])
 export const GRAPHQL_PATH = '/graphql/v1'
+/**
+ * The ONE accepted GraphQL answer other than "unknown field": the role cannot execute the resolver. Supabase routes
+ * /graphql/v1 to PostgREST POST /rpc/graphql (Content-Profile: graphql_public); PostgREST surfaces PostgreSQL's 42501
+ * for an AUTHENTICATED role (the probe always sends the credential's role token) as HTTP 403 with exactly
+ *   {"code":"42501","details":null,"hint":null,"message":"permission denied for schema graphql_public"}   (no USAGE)
+ *   {"code":"42501","details":null,"hint":null,"message":"permission denied for function graphql"}        (no EXECUTE)
+ * (observed on PostgREST 16.4 + PostgreSQL 17, mcp/leadcommand-mcp/test/graphql-access-e2e.test.mjs). Nothing else is
+ * accepted: not a 401 (the request did not run as the role), not a 42501 naming any other object (e.g. pg_graphql's
+ * internal schema graphql: the resolver RAN), not a body carrying data / errors / any other key.
+ */
+export const GRAPHQL_NO_ACCESS_MESSAGES = Object.freeze(['permission denied for schema graphql_public', 'permission denied for function graphql'])
+/** The pass variants, as the boot audit line names them (`<check>:refused_as_required:<variant>`). */
+export const PROBE_VARIANTS = Object.freeze({ PGRST106: 'pgrst106', UNKNOWN_FIELD: 'unknown_field', NO_GRAPHQL_ACCESS: 'refused_no_graphql_access' })
+const NO_ACCESS_KEYS = new Set(['code', 'message', 'details', 'hint'])
 
 const s = (v, n = 80) => String(v ?? '').slice(0, n)
 const isNetObject = (o) => /^[a-z_]+:net(\.[A-Za-z0-9_$]+)?$/.test(String(o))
@@ -147,10 +166,33 @@ async function call(fetchFn, url, init, timeoutMs) {
   }
 }
 
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
+/**
+ * Judge ONE GraphQL probe answer for `field` ({ status, body, error? } as call() returns it). Pure; exported for tests.
+ * @returns {{ pass: boolean, variant: string|null, code: string }}
+ */
+export function classifyGraphqlAnswer(field, r) {
+  if (r?.error) return { pass: false, variant: null, code: s(r.error, 60) }
+  const body = r?.body
+  if (!isPlainObject(body)) return { pass: false, variant: null, code: 'malformed_body' }
+  const errors = Array.isArray(body.errors) ? body.errors : []
+  const unknown = errors.some((e) => /unknown field/i.test(String(e?.message || '')) && String(e?.message || '').includes(field))
+  const reflected = body.data != null && typeof body.data === 'object' && body.data[field] !== undefined && body.data[field] !== null
+  if (unknown && !reflected) return { pass: true, variant: PROBE_VARIANTS.UNKNOWN_FIELD, code: 'unknown_field' }
+  const noAccess = r.status === 403 && body.code === '42501' && GRAPHQL_NO_ACCESS_MESSAGES.includes(body.message)
+    && Object.keys(body).every((k) => NO_ACCESS_KEYS.has(k)) && body.details == null && body.hint == null
+  if (noAccess) return { pass: true, variant: PROBE_VARIANTS.NO_GRAPHQL_ACCESS, code: '42501' }
+  return { pass: false, variant: null, code: s(errors[0]?.message || body.code || 'no_unknown_field_error', 60) }
+}
+
+/** The boot audit line's exposure_probe entries: `<check>:refused_as_required:<variant>` or `<check>:EXPOSED_OR_UNPROVEN`. */
+export const probeAuditEntries = (probe) => (probe?.checks || []).map((c) => `${c.name}:${c.pass ? `refused_as_required:${c.variant}` : 'EXPOSED_OR_UNPROVEN'}`)
+
 /**
  * Compensating control (c): the live exposure probe, AS the credential's role (its token rides every request).
  * @param {{ origin: string, apiKey: string, token: string, fetch?: Function, timeoutMs?: number }} o
- * @returns {Promise<{ ok: boolean, findings: string[], checks: object[] }>}
+ * @returns {Promise<{ ok: boolean, findings: string[], checks: object[], graphql_variant: string|null }>}
  */
 export async function probePlatformExposure({ origin, apiKey, token, fetch: fetchFn = globalThis.fetch, timeoutMs = PROBE_TIMEOUT_MS }) {
   const base = new URL(origin).origin
@@ -159,16 +201,19 @@ export async function probePlatformExposure({ origin, apiKey, token, fetch: fetc
   for (const p of REST_PROBES) {
     const r = await call(fetchFn, `${base}${p.path}`, { method: p.method, headers: headers({ [p.header]: p.schema, ...(p.body ? { 'content-type': 'application/json' } : {}) }), ...(p.body ? { body: p.body } : {}) }, timeoutMs)
     const code = s(r.body?.code, 20) || null
-    checks.push({ name: p.name, status: r.status, code, pass: code === 'PGRST106', ...(r.error ? { error: r.error } : {}) })
+    const pass = code === 'PGRST106'
+    checks.push({ name: p.name, status: r.status, code, pass, variant: pass ? PROBE_VARIANTS.PGRST106 : null, ...(r.error ? { error: r.error } : {}) })
   }
   for (const field of GRAPHQL_FIELDS) {
     const query = `{ ${field}(first: 1) { __typename } }`
     const r = await call(fetchFn, `${base}${GRAPHQL_PATH}`, { method: 'POST', headers: headers({ 'content-type': 'application/json' }), body: JSON.stringify({ query }) }, timeoutMs)
-    const errors = Array.isArray(r.body?.errors) ? r.body.errors : []
-    const unknown = errors.some((e) => /unknown field/i.test(String(e?.message || '')) && String(e?.message || '').includes(field))
-    const reflected = r.body?.data != null && typeof r.body.data === 'object' && r.body.data[field] !== undefined && r.body.data[field] !== null
-    checks.push({ name: `graphql:${field}`, status: r.status, code: unknown ? 'unknown_field' : s(errors[0]?.message || r.body?.code || r.error || 'no_unknown_field_error', 60), pass: unknown && !reflected, ...(r.error ? { error: r.error } : {}) })
+    const v = classifyGraphqlAnswer(field, r)
+    checks.push({ name: `graphql:${field}`, status: r.status, code: v.code, pass: v.pass, variant: v.variant, ...(r.error ? { error: r.error } : {}) })
   }
   const findings = checks.filter((c) => !c.pass).map((c) => `exposure_probe_failed:${c.name}:HTTP ${c.status}${c.code ? ` ${c.code}` : ''}`)
-  return { ok: findings.length === 0, findings, checks }
+  // one role, one resolver: the four GraphQL answers must be the SAME accepted variant (a mix is not a proof of either)
+  const gql = checks.filter((c) => c.name.startsWith('graphql:'))
+  const variants = [...new Set(gql.map((c) => c.variant))]
+  if (gql.every((c) => c.pass) && variants.length !== 1) findings.push(`exposure_probe_failed:graphql:inconsistent_variants:${variants.join('+')}`)
+  return { ok: findings.length === 0, findings, checks, graphql_variant: !findings.length && variants.length === 1 ? variants[0] : null }
 }

@@ -174,7 +174,7 @@ each positive and negative case on a PostGIS-shaped extension fixture.
 |---|---|---|---|
 | a | The role is NOLOGIN, NOINHERIT, not BYPASSRLS, not SUPERUSER, and a member of no role. | SQL (plus the existing `attr_*` / `member_of` findings) | `platform_exception_control_a:<canlogin\|inherit\|bypassrls\|superuser\|member_of:x>` |
 | b | `net`, `extensions` and `cron` are not in `authenticator`'s `pgrst.db_schemas` role setting. Both the all-database setting and the current-database setting are read. | SQL | `platform_exception_control_b:exposed_schema:<s>`; if the setting is absent, the note `exposed_schemas_from_dashboard_unverified_in_sql` is recorded and (c) is the proof |
-| c | A live probe at boot, sent AS the credential's own token. PostgREST must answer **PGRST106** to each of: `Accept-Profile: net` (GET, zero rows of the queue), `Content-Profile: net` (POST to a function that cannot exist, so there is no side effect even when `net` is exposed), and `Accept-Profile: extensions` / `cron` (GET). `/graphql/v1` must answer an **unknown-field** error for `http_request_queueCollection`, `_http_responseCollection`, `httpRequestQueueCollection` and `httpResponseCollection`. | both MCP servers (`mcp/leadcommand-mcp/src/data/platform-exposure.mjs`). It is mandatory whenever the exception applies. The read-only server re-runs it on every credential re-check. | `exposure_probe_failed:<check>:HTTP <status> <code>`; the server does not start |
+| c | A live probe at boot, sent AS the credential's own token. PostgREST must answer **PGRST106** to each of: `Accept-Profile: net` (GET, zero rows of the queue), `Content-Profile: net` (POST to a function that cannot exist, so there is no side effect even when `net` is exposed), and `Accept-Profile: extensions` / `cron` (GET). `/graphql/v1` must answer, for `http_request_queueCollection`, `_http_responseCollection`, `httpRequestQueueCollection` and `httpResponseCollection`, EITHER an **unknown-field** error (the resolver runs and does not reflect `net`; variant `unknown_field`) OR PostgREST's exact **42501** for a role that cannot execute the resolver at all: HTTP 403, `{"code":"42501","details":null,"hint":null,"message":"permission denied for schema graphql_public"}` (no USAGE) or `…"permission denied for function graphql"}` (no EXECUTE on `graphql_public.graphql`); variant `refused_no_graphql_access` (no GraphQL for the role, nothing to reflect). The four answers must be the same variant. Anything else refuses: data, any other error, code, message or status (a 401 did not run as the role; a 42501 naming pg_graphql's schema `graphql` means the resolver RAN), extra body keys, a 5xx, a timeout, a network failure. | both MCP servers (`mcp/leadcommand-mcp/src/data/platform-exposure.mjs`). It is mandatory whenever the exception applies. The read-only server re-runs it on every credential re-check. The audit line names each check's variant (`<check>:refused_as_required:<pgrst106\|unknown_field\|refused_no_graphql_access>`) and `exposure_probe_graphql`. | `exposure_probe_failed:<check>:HTTP <status> <code>` / `exposure_probe_failed:graphql:inconsistent_variants:…`; the server does not start |
 | d | The migration sets `ALTER ROLE … SET search_path = public`, and the check verifies that the role's setting exists and names none of `net` / `extensions` / `cron`. | SQL | `platform_exception_control_d:search_path_includes:<s>` / `…:search_path_unset` |
 | e | No function the role can execute outside the exception wraps egress or a side effect. This is the existing body-text rule: `net.http_*`, `http_*`, `dblink*`, `lo_*`, `pg_notify`, `pg_logical_emit_message`, untrusted languages, and members of http / dblink / postgres_fdw. | SQL (unchanged) | `reachable_egress_function(s):…` |
 | f | The role has CREATE nowhere. | SQL (existing) | `schema_create:` / `database_create` |
@@ -229,8 +229,9 @@ Each of these refuses: the apply aborts, or the server does not start.
 | test | what |
 |---|---|
 | `apps/api/tests/critical/action-gateway-pg-net-posture-pg.test.mjs` | Both self-checks, with the REAL migrations applied ON TOP of Supabase-shaped pg_net. Covers the default (ok, exception listed) and every refusal case in section 7, run AS the role — including the §4a indirect cases: a transitive `A→B→net` wrapper, a dynamic-SQL wrapper, a pg_net Database-Webhook trigger on a role-writable table, an event trigger reaching `net`, `cron` access, and `pg_read_server_files`, plus the `run_sql` re-grant positive/negative pair. It also covers no-exception-context and no-pg_net, with findings asserted **equal** to the frozen pre-exception functions (`apps/api/tests/pg/pg_net_emulation/strict_reference_*.sql`, which call the same indirect-egress helper). |
-| `mcp/leadcommand-action-mcp/test/pg-net-exposure-e2e.test.mjs` | Real PostgREST 16 plus a minimal Supabase-style gateway. When `net` is not exposed, the probe passes and BOTH servers boot. When `PGRST_DB_SCHEMAS` includes `net`, the probe fails, BOTH servers refuse to start, and nothing is enqueued. It also covers GraphQL reflecting `net` (role search_path) → fail, and a GraphQL permission error → fail. |
-| `mcp/leadcommand-mcp/test/platform-exposure.test.mjs`, `mcp/leadcommand-action-mcp/test/platform-exposure-boot.test.mjs` | The server-side re-judgement (every tamper case), the probe's answer matrix, the boot wiring, and the absence of any probe when no exception applies. |
+| `mcp/leadcommand-action-mcp/test/pg-net-exposure-e2e.test.mjs` | Real PostgREST 16 plus a minimal Supabase-style gateway. When `net` is not exposed, the probe passes and BOTH servers boot. When `PGRST_DB_SCHEMAS` includes `net`, the probe fails, BOTH servers refuse to start, and nothing is enqueued. It also covers GraphQL reflecting `net` (role search_path) → fail, and the production ACL (PUBLIC lacks USAGE on `graphql_public`) → PostgREST's 42501 accepted as `refused_no_graphql_access`, BOTH servers boot. |
+| `mcp/leadcommand-mcp/test/graphql-access-e2e.test.mjs` | The read-only server's REAL boot over real PostgREST on the production platform shape: no USAGE on `graphql_public` (the exact 403 / 42501 body asserted) → boots, `refused_no_graphql_access`; USAGE without EXECUTE → boots, same variant; the resolver runs → boots, `unknown_field`; a resolver reflecting `net` → refused; the variant is the reader's own privilege (USAGE granted back + reflection → refused); the resolver failing inside (42501 on schema `graphql`) → refused. The dry preflight's `boot_probe` row is asserted to predict each permission case. |
+| `mcp/leadcommand-mcp/test/platform-exposure.test.mjs`, `mcp/leadcommand-action-mcp/test/platform-exposure-boot.test.mjs` | The server-side re-judgement (every tamper case), the probe's answer matrix (the GraphQL classifier: unknown field and the exact 42501 shapes pass; data, 500, timeout, other codes / messages / statuses, extra keys, malformed bodies and mixed variants refuse), the boot wiring, and the absence of any probe when no exception applies. |
 
 Fidelity notes:
 
@@ -302,19 +303,26 @@ migration session.
     where s.setrole = 'authenticator'::regrole and c like 'pgrst.%';
    ```
 
-5. **GraphQL reachability for the LC roles.** The probe requires an unknown-field answer, and a permission error
-   **refuses**. Supabase grants USAGE on `graphql_public` to `postgres`, `anon`, `authenticated` and `service_role`.
-   The LC roles are members of none of them, so check this first:
+5. **GraphQL reachability for the LC roles.** Supabase grants USAGE on `graphql_public` to `postgres`, `anon`,
+   `authenticated` and `service_role`. The LC roles are members of none of them, so check what PUBLIC holds:
 
    ```sql
    select has_schema_privilege('public', 'graphql_public', 'USAGE') public_usage,
           (select array_agg(p.oid::regprocedure) from pg_proc p where p.pronamespace = 'graphql_public'::regnamespace) resolver;
    ```
 
-   If PUBLIC lacks USAGE, the LC roles cannot run the resolver at all, and the probe will refuse the start as
-   designed. That needs an owner decision **before** go-live. Either accept "the role cannot run GraphQL" as proof
-   (a reviewed change to the probe), or grant the roles USAGE on `graphql_public` and EXECUTE on the resolver (a
-   reviewed migration).
+   Production 2026-10-23: `public_usage = false`, resolver `graphql_public.graphql(text,text,jsonb,jsonb)`. The LC
+   roles then cannot execute the resolver at all: PostgREST answers the probe's GraphQL queries with HTTP 403
+   `{"code":"42501","details":null,"hint":null,"message":"permission denied for schema graphql_public"}`. The probe
+   accepts exactly that answer (and the function-level `"permission denied for function graphql"`) as
+   `refused_no_graphql_access`: a role with no GraphQL has nothing reflected. This is a strictly stronger outcome
+   than "Unknown field", not a weakening; the REST checks are still required to answer PGRST106, and every other
+   GraphQL answer still refuses the start. No grant is needed, and none should be made: granting the roles GraphQL
+   would only widen their reach (and USAGE on `graphql_public` alone would not even suffice: pg_graphql's resolver
+   also needs USAGE on schema `graphql`, otherwise it fails inside with a 42501 the probe refuses).
+   The dry preflight's `boot_probe` row predicts the outcome: `info` when PUBLIC lacks USAGE on `graphql_public` or
+   EXECUTE on the resolver (refused_no_graphql_access), `info` when the resolver runs (the probe then needs "Unknown
+   field"), `BOOT_BLOCKER` when no schema / no resolver exists or the resolver would fail inside.
 
 6. **The role search_path effect.** With `search_path = public`, a function the role can execute that is not pinned
    and refers to an `extensions` object without a schema qualifier would stop resolving. Expect no rows that matter
@@ -334,13 +342,15 @@ migration session.
    curl -s "$URL/rest/v1/http_request_queue?select=id&limit=0" -H "apikey: $(cat "$ANON_FILE")" -H "Authorization: Bearer $(cat "$TOKEN_FILE")" -H "Accept-Profile: net"
    curl -s -X POST "$URL/rest/v1/rpc/lc_exposure_probe_never_exists" -H "apikey: $(cat "$ANON_FILE")" -H "Authorization: Bearer $(cat "$TOKEN_FILE")" -H "Content-Profile: net" -H "Content-Type: application/json" -d '{}'
    curl -s "$URL/rest/v1/job?select=jobid&limit=0" -H "apikey: $(cat "$ANON_FILE")" -H "Authorization: Bearer $(cat "$TOKEN_FILE")" -H "Accept-Profile: cron"
-   # GraphQL: must answer an "Unknown field" error, never data
+   # GraphQL: must answer an "Unknown field" error, or (production: no USAGE on graphql_public) exactly
+   # {"code":"42501","details":null,"hint":null,"message":"permission denied for schema graphql_public"}; never data
    curl -s -X POST "$URL/graphql/v1" -H "apikey: $(cat "$ANON_FILE")" -H "Authorization: Bearer $(cat "$TOKEN_FILE")" -H "Content-Type: application/json" -d '{"query":"{ http_request_queueCollection(first: 1) { __typename } }"}'
    ```
 
    Then start each MCP server as usual. Its boot runs the same probe, and its audit line `credential_self_check`
-   must show `outcome: ok`, `platform_exceptions[0].status: applied`, and every `exposure_probe` entry
-   `…:refused_as_required`.
+   must show `outcome: ok`, `platform_exceptions[0].status: applied`, every REST `exposure_probe` entry
+   `…:refused_as_required:pgrst106`, the four GraphQL entries `graphql:…:refused_as_required:refused_no_graphql_access`
+   (production) or `…:refused_as_required:unknown_field`, and `exposure_probe_graphql` naming that variant.
 
 ### 9a. Indirect / transitive egress (run BEFORE the roles exist)
 

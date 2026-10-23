@@ -515,6 +515,39 @@ test('PG the dry preflight predicts the apply EXACTLY, and the indirect verify r
     assert.ok(rows.some((r) => r.verdict === 'excepted:supabase_pg_net_default_acl.v1'))
     assert.ok(rows.some((r) => r.section === 'optional_source' && /agent\.conversation_action_state ABSENT/.test(r.item)))
   }))
+  // the MCP BOOT probe's GraphQL leg (docs §9 step 5): production 2026-10-23 has no PUBLIC USAGE on graphql_public → the
+  // reader cannot execute the resolver, PostgREST answers 42501, the probe accepts it (refused_no_graphql_access) → info
+  const bootProbe = (rows) => rows.filter((r) => r.section === 'boot_probe')
+  await t.test('preflight boot_probe on the production shape (PUBLIC lacks USAGE on graphql_public): info, refused_no_graphql_access; never a BOOT_BLOCKER', () => inRolledBackTx(pool, async (c) => {
+    assert.equal((await c.query(`select has_schema_privilege('public', 'graphql_public', 'USAGE') u`)).rows[0].u, false)
+    const rows = await ro(c, PREFLIGHT)
+    const b = bootProbe(rows)
+    assert.equal(b.length, 1, JSON.stringify(b))
+    assert.equal(b[0].verdict, 'info')
+    assert.match(b[0].item, /^graphql_public USAGE for PUBLIC = false: .*42501 "permission denied for schema graphql_public".*refused_no_graphql_access/)
+    assert.equal(rows.filter((r) => r.verdict === 'BOOT_BLOCKER').length, 0)
+  }))
+  const GRAPHQL_FIXTURE = fs.readFileSync(path.join(EMULATION_DIR, 'graphql_public_emulation.sql'), 'utf8') // resolver + USAGE / EXECUTE to PUBLIC
+  const bootCases = [
+    ['PUBLIC USAGE, resolver EXECUTE (the resolver runs: the probe needs "Unknown field")', GRAPHQL_FIXTURE, 'info', /^graphql_public USAGE \+ resolver EXECUTE for PUBLIC = true: the resolver runs AS the reader/],
+    ['PUBLIC USAGE, no EXECUTE on the resolver (42501 on the function: accepted)', `${GRAPHQL_FIXTURE}; revoke execute on function graphql_public.graphql(text,text,jsonb,jsonb) from public`, 'info', /EXECUTE on graphql_public\.graphql\(text,text,jsonb,jsonb\) = false: .*"permission denied for function graphql".*refused_no_graphql_access/],
+    ['PUBLIC USAGE, no resolver (PGRST202: refused)', 'grant usage on schema graphql_public to public', 'BOOT_BLOCKER', /no graphql_public\.graphql\(text,text,jsonb,jsonb\): PostgREST answers PGRST202/],
+    ['PUBLIC USAGE + EXECUTE, but no USAGE on pg_graphql\'s schema graphql (the resolver fails inside: refused)', `${GRAPHQL_FIXTURE}; create schema graphql; revoke all on schema graphql from public`, 'BOOT_BLOCKER', /the resolver RUNS as the reader and fails inside/],
+    ['PUBLIC USAGE + EXECUTE, but no EXECUTE on graphql.resolve (refused)', `${GRAPHQL_FIXTURE}; create schema graphql; grant usage on schema graphql to public; create function graphql.resolve(q text) returns jsonb language sql as $r$ select null::jsonb $r$; revoke execute on function graphql.resolve(text) from public`, 'BOOT_BLOCKER', /fails inside/],
+    ['PUBLIC USAGE + EXECUTE, pg_graphql\'s schema usable (runs)', `${GRAPHQL_FIXTURE}; create schema graphql; grant usage on schema graphql to public; create function graphql.resolve(q text) returns jsonb language sql as $r$ select null::jsonb $r$`, 'info', /the resolver runs AS the reader/],
+  ]
+  for (const [label, sql, want, re] of bootCases) {
+    await t.test(`preflight boot_probe: ${label} → ${want}`, () => inRolledBackTx(pool, async (c) => {
+      await c.query(sql)
+      const rows = (await c.query(PREFLIGHT)).rows
+      const b = bootProbe(rows)
+      assert.equal(b.length, 1, JSON.stringify(b))
+      assert.equal(b[0].verdict, want, b[0].item)
+      assert.match(b[0].item, re)
+      assert.deepEqual(blockers(rows), [], 'a boot-probe prediction never blocks the apply')
+      assert.match(verdict(rows), /^true /)
+    }))
+  }
   const cases = [
     ['an extra raw-SQL function PUBLIC can execute', `create function public.lc_extra_raw(q text) returns void language plpgsql as $d$ begin execute q; end $d$`, /dynamic_sql_function:.*lc_extra_raw/],
     ['USAGE on schema cron to PUBLIC', 'grant usage on schema cron to public', /cron_schema_access/],

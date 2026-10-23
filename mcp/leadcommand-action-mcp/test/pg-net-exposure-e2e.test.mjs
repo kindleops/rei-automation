@@ -8,20 +8,20 @@
 //   /graphql/v1   → PostgREST POST /rpc/graphql with Content-Profile: graphql_public (pg_graphql's resolver; here a
 //                   shape-only emulation that reflects the role's search_path, pg_net_emulation/graphql_public_emulation.sql)
 // Proves: net NOT exposed → the probe passes and BOTH servers boot (the audit lists the exception and the probe);
-// PGRST_DB_SCHEMAS includes net → the probe fails and both servers REFUSE to start; GraphQL reflecting net, or a
-// GraphQL answer that is not "unknown field" (the role cannot run the resolver) → the probe fails.
+// PGRST_DB_SCHEMAS includes net → the probe fails and both servers REFUSE to start; GraphQL reflecting net → the probe
+// fails; the role cannot run the resolver at all (PUBLIC lacks USAGE on graphql_public, as in production 2026-10-23)
+// → PostgREST's exact 42501 is accepted (refused_no_graphql_access) and BOTH servers boot, REST still required to refuse.
+// (The read-only suite's test/graphql-access-e2e.test.mjs covers every GraphQL answer shape at the reader's boot.)
 // Opt-in: LC_PG_BIN=<pg17 bin dir> LC_POSTGREST_BIN=<postgrest>.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
-import net from 'node:net'
 import path from 'node:path'
-import http from 'node:http'
 import crypto from 'node:crypto'
-import { spawn } from 'node:child_process'
 import { pgNetServer, installPgNet, setExposedSchemas, LC_MCP_RELATIONS, REPO_DIR, EMULATION_DIR } from '../../../apps/api/tests/helpers/pg-net-posture.mjs'
 import { probePlatformExposure, PG_NET_FINGERPRINT_VERSION } from '../../leadcommand-mcp/src/data/platform-exposure.mjs'
+import { startSupabaseEdge, mintJwt } from '../../leadcommand-mcp/test/support/supabase-edge.mjs'
 import { writeSecretFile } from '../src/config.mjs'
 
 const PG_BIN = process.env.LC_PG_BIN
@@ -29,68 +29,10 @@ const PGRST_BIN = process.env.LC_POSTGREST_BIN
 const skip = !(PG_BIN && PGRST_BIN) && 'set LC_PG_BIN and LC_POSTGREST_BIN to run the real-PostgREST pg_net exposure end-to-end'
 const ORG = '00000000-0000-4000-8000-0000000000c1'
 const now = () => Math.floor(Date.now() / 1000)
-const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
-const mint = (secret, payload) => { const h = b64({ alg: 'HS256', typ: 'JWT' }); const p = b64(payload); return `${h}.${p}.${crypto.createHmac('sha256', secret).update(`${h}.${p}`).digest('base64url')}` }
-
-async function freePort() {
-  return new Promise((resolve, reject) => {
-    const s = net.createServer()
-    s.unref()
-    s.on('error', reject)
-    s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)) })
-  })
-}
+const mint = mintJwt
 
 /** PostgREST (127.0.0.1, AS authenticator, the given exposed schemas) + the minimal API gateway in front of it. */
-async function startRest({ dbUrl, schemas, secret }) {
-  const u = new URL(dbUrl)
-  const port = await freePort()
-  const child = spawn(PGRST_BIN, [], {
-    env: {
-      PATH: process.env.PATH,
-      PGRST_DB_URI: `postgres://authenticator@${u.hostname}:${u.port}${u.pathname}`,
-      PGRST_DB_SCHEMAS: schemas, PGRST_DB_ANON_ROLE: 'anon', PGRST_JWT_SECRET: secret,
-      PGRST_SERVER_HOST: '127.0.0.1', PGRST_SERVER_PORT: String(port), PGRST_DB_POOL: '4', PGRST_LOG_LEVEL: 'error',
-    },
-    stdio: ['ignore', 'ignore', 'pipe'],
-  })
-  let errOut = ''
-  child.stderr.on('data', (d) => { errOut = (errOut + d).slice(-2000) })
-  const upstream = `http://127.0.0.1:${port}`
-  for (let i = 0; ; i++) {
-    try { const r = await fetch(`${upstream}/`); if (r.status < 500) break } catch { /* not up yet */ }
-    if (i > 150) throw new Error(`PostgREST did not start: ${errOut}`)
-    await new Promise((r) => setTimeout(r, 100))
-  }
-  const forward = async (req, res, target, extra = {}) => {
-    const chunks = []
-    for await (const c of req) chunks.push(c)
-    const headers = { ...Object.fromEntries(Object.entries(req.headers).filter(([k]) => !['host', 'connection', 'content-length', 'apikey'].includes(k))), ...extra }
-    const r = await fetch(target, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks) })
-    const out = Buffer.from(await r.arrayBuffer())
-    res.writeHead(r.status, Object.fromEntries([...r.headers].filter(([k]) => !['content-length', 'transfer-encoding', 'connection', 'content-encoding'].includes(k))))
-    res.end(out)
-  }
-  const gateway = http.createServer(async (req, res) => {
-    try {
-      if (!req.headers.apikey) { res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({ message: 'No API key found in request' })); return }
-      if (req.url.startsWith('/rest/v1/')) return await forward(req, res, `${upstream}${req.url.slice('/rest/v1'.length)}`)
-      if (req.url === '/graphql/v1' && req.method === 'POST') return await forward(req, res, `${upstream}/rpc/graphql`, { 'content-profile': 'graphql_public', 'content-type': 'application/json' })
-      res.writeHead(404).end()
-    } catch (e) {
-      res.writeHead(502).end(String(e?.message || e))
-    }
-  })
-  const gwPort = await new Promise((resolve) => gateway.listen(0, '127.0.0.1', () => resolve(gateway.address().port)))
-  return {
-    url: `http://127.0.0.1:${gwPort}`,
-    async stop() {
-      await new Promise((r) => gateway.close(r))
-      child.kill('SIGTERM')
-      await new Promise((r) => (child.exitCode !== null ? r() : child.once('exit', r)))
-    },
-  }
-}
+const startRest = ({ dbUrl, schemas, secret }) => startSupabaseEdge({ postgrestBin: PGRST_BIN, dbUrl, schemas, secret })
 
 test('real PostgREST + Supabase-shaped pg_net: the exposure probe passes only when net is not exposed; both servers boot then, and refuse to start when PGRST_DB_SCHEMAS includes net', { skip, timeout: 300_000 }, async (t) => {
   const server = await pgNetServer()
@@ -166,7 +108,8 @@ test('real PostgREST + Supabase-shaped pg_net: the exposure probe passes only wh
         assert.equal(check.platform_exceptions[0].fingerprint_version, PG_NET_FINGERPRINT_VERSION)
         assert.equal(check.platform_exceptions[0].status, 'applied')
         assert.deepEqual(check.platform_exceptions[0].notes, ['exposed_schemas_from_dashboard_unverified_in_sql'])
-        assert.ok(check.exposure_probe.length === 8 && check.exposure_probe.every((x) => x.endsWith(':refused_as_required')), JSON.stringify(check.exposure_probe))
+        assert.ok(check.exposure_probe.length === 8 && check.exposure_probe.every((x) => /:refused_as_required:(pgrst106|unknown_field)$/.test(x)), JSON.stringify(check.exposure_probe))
+        assert.equal(check.exposure_probe_graphql, 'unknown_field')
 
         const audit2 = []
         const ro2 = await buildReaderApp({ env: readerEnv(roRest.url), scrub: false, auditSink: (r) => audit2.push(r) })
@@ -175,7 +118,8 @@ test('real PostgREST + Supabase-shaped pg_net: the exposure probe passes only wh
         assert.equal(check2.outcome, 'ok', JSON.stringify(check2.findings))
         assert.equal(check2.running_as, 'lc_mcp_reader')
         assert.equal(check2.platform_exceptions[0].status, 'applied')
-        assert.ok(check2.exposure_probe.every((x) => x.endsWith(':refused_as_required')), JSON.stringify(check2.exposure_probe))
+        assert.ok(check2.exposure_probe.every((x) => /:refused_as_required:(pgrst106|unknown_field)$/.test(x)), JSON.stringify(check2.exposure_probe))
+        assert.equal(check2.exposure_probe_graphql, 'unknown_field')
       } finally {
         await stopRest(gwRest)
         await stopRest(roRest)
@@ -225,18 +169,38 @@ test('real PostgREST + Supabase-shaped pg_net: the exposure probe passes only wh
       }
     })
 
-    await t.test('a GraphQL answer that is not "unknown field" (the role cannot run the resolver: 42501) → the probe fails, the server refuses', async () => {
-      await gw.db.pool.query('revoke usage on schema graphql_public from public')
+    await t.test('the role cannot run the resolver (PUBLIC lacks USAGE on graphql_public, the production ACL): PostgREST\'s 42501 is accepted as refused_no_graphql_access; BOTH servers boot', async () => {
+      const prodAcl = 'revoke usage on schema graphql_public from public; grant usage on schema graphql_public to postgres, anon, authenticated, service_role'
+      await gw.db.pool.query(prodAcl)
+      await ro.pool.query(prodAcl)
       const gwRest = await restFor(gw.db, 'public,graphql_public')
+      const roRest = await restFor(ro, 'public,graphql_public')
       try {
-        const p = await probePlatformExposure({ origin: gwRest.url, apiKey: anon, token: gwToken })
-        assert.equal(p.ok, false)
-        assert.ok(p.checks.filter((c) => c.name.startsWith('rest_')).every((c) => c.pass), 'REST still refuses net')
-        assert.ok(p.checks.filter((c) => c.name.startsWith('graphql:')).every((c) => !c.pass), JSON.stringify(p.checks))
-        await assert.rejects(buildActionApp({ env: actionEnv(gwRest.url), scrub: false, auditSink: () => {} }), { code: 'CREDENTIAL_SELF_CHECK_FAILED' })
+        for (const [url, token] of [[gwRest.url, gwToken], [roRest.url, roToken]]) {
+          const p = await probePlatformExposure({ origin: url, apiKey: anon, token })
+          assert.equal(p.ok, true, JSON.stringify(p.checks))
+          assert.equal(p.graphql_variant, 'refused_no_graphql_access')
+          assert.ok(p.checks.filter((c) => c.name.startsWith('rest_')).every((c) => c.pass && c.code === 'PGRST106'), 'REST still refuses net')
+          assert.ok(p.checks.filter((c) => c.name.startsWith('graphql:')).every((c) => c.status === 403 && c.code === '42501'), JSON.stringify(p.checks))
+        }
+        const audit = []
+        const app = await buildActionApp({ env: actionEnv(gwRest.url), scrub: false, auditSink: (r) => audit.push(r) })
+        await app.close()
+        const check = audit.find((a) => a.event === 'credential_self_check')
+        assert.equal(check.outcome, 'ok', JSON.stringify(check.findings))
+        assert.equal(check.exposure_probe_graphql, 'refused_no_graphql_access')
+        assert.equal(check.exposure_probe.filter((x) => x.endsWith(':refused_as_required:refused_no_graphql_access')).length, 4, JSON.stringify(check.exposure_probe))
+        const audit2 = []
+        const ro2 = await buildReaderApp({ env: readerEnv(roRest.url), scrub: false, auditSink: (r) => audit2.push(r) })
+        await ro2.close()
+        const check2 = audit2.find((a) => a.event === 'credential_self_check')
+        assert.equal(check2.outcome, 'ok', JSON.stringify(check2.findings))
+        assert.equal(check2.exposure_probe_graphql, 'refused_no_graphql_access')
       } finally {
         await stopRest(gwRest)
+        await stopRest(roRest)
         await gw.db.pool.query('grant usage on schema graphql_public to public')
+        await ro.pool.query('grant usage on schema graphql_public to public')
       }
     })
   } finally {
