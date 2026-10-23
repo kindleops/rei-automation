@@ -283,6 +283,12 @@ as $$ insert into public.message_events (body) values (p_body) $$;
 create function public.run_sql(q text) returns void
 language plpgsql volatile security invoker
 as $$ begin execute q; end $$;
+-- The lc_mcp_reader self-check now treats a reachable dynamic-SQL (plpgsql EXECUTE) function as an INDIRECT-egress
+-- finding (public.lc_reachable_egress_indirect): as SECURITY INVOKER running AS lc_mcp_reader it can reach
+-- net.http_post through PUBLIC's pg_net grants and exfiltrate. So PUBLIC EXECUTE on such a wrapper must be revoked
+-- before the credential is safe; mirrored here. A posture test (action-gateway-pg-net-posture-pg.test.mjs) re-grants
+-- it and asserts the self-check then refuses with dynamic_sql_function:public.run_sql(text).
+revoke all on function public.run_sql(text) from public, anon, authenticated;
 
 -- PostGIS metadata stand-in: STABLE, SECURITY DEFINER, PUBLIC-executable (accepted by name AND volatility)
 create function public.st_estimatedextent(p_table text, p_column text) returns text

@@ -50,6 +50,7 @@ begin
 end $$;
 
 drop function if exists public.lc_mcp_reader_self_check(text[], text[], name);
+drop function if exists public.lc_reachable_egress_indirect(oid);
 drop function if exists public.lc_mcp_operator_role(uuid, uuid);
 drop function if exists public.lc_mcp_ops_finding(uuid, text);
 drop function if exists public.lc_mcp_ops_research_valuation_snapshot();

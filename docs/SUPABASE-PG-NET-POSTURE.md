@@ -51,7 +51,9 @@ or inserting into `net.http_request_queue`.
 - If `net` is not exposed, REST cannot address it (PGRST106).
 - If `net` is not on the role's `search_path`, pg_graphql does not reflect it.
 - If no function the role can execute wraps egress, there is no indirect path. That rule (e) stays exactly as strict
-  as before.
+  as before, and is now **transitive**: §4a closes the gap where a wrapper reaches `net` only through another
+  function, through dynamic SQL (`EXECUTE`), through a trigger / Database Webhook on a table the role can write,
+  through an event trigger, through `cron`, or through an owner-rights view.
 
 The exception therefore depends on two things. First, exactly Supabase's platform objects, and nothing else in
 `net`. Second, every one of those path closures holding and being checked.
@@ -107,6 +109,42 @@ The read-only check's informational `select_outside_inventory` still lists the `
 The **definer rule has no exception**. A SECURITY DEFINER function in `net` that the role can execute is still a
 finding.
 
+## 4a. The indirect / transitive egress rule (`public.lc_reachable_egress_indirect`)
+
+The original egress rule grepped each reachable function's **own** `prosrc`. That misses every indirect path: a
+wrapper that reaches `net` only through a callee, a raw-SQL `EXECUTE`, a trigger, or `cron`. One shared helper
+(`public.lc_reachable_egress_indirect(oid)`, created byte-identically by #25 and #26, synced by
+`scripts/db/sync-platform-exception-block.mjs`, and called by **both** self-checks **and** both frozen strict
+references) closes it. It walks the `pg_proc` call graph **backwards** from the egress leaves (comment-stripped
+`prosrc` name resolution; cost `~|bad| × |procs|`, never `|procs|²`) and emits, for the role, each HARD finding:
+
+| finding | what |
+|---|---|
+| `indirect_egress_function:<fn>` | a function the role can EXECUTE (incl. an allowlisted SECURITY DEFINER entry point or domain writer, judged by its owner's reach) that **transitively** reaches `net` / `pg_net` / `http` / `dblink` / `postgres_fdw` / an untrusted language / a PUBLIC side-effect (`lo_*`, `pg_notify`, `pg_logical_emit_message`) |
+| `dynamic_sql_function:<fn>` | a reachable `sql`/`plpgsql` function whose body runs dynamic SQL (`EXECUTE`) — it can reach `net.*` through PUBLIC's pg_net grants. A finding unless listed in the reviewed `dynamic-sql-allowlist` with a reason (empty today) |
+| `egress_trigger:<table>:<trigger> -> <fn>` | a trigger (incl. **Supabase Database Webhooks** `supabase_functions.http_request` and any pg_net-calling trigger) on a table the role can INSERT/UPDATE/DELETE/TRUNCATE whose function reaches egress |
+| `event_trigger_egress:<event> -> <fn>` | an event trigger whose function reaches egress |
+| `cron_schema_access:<detail>` | any access to schema `cron` (pg_cron): `usage`, a privilege on `cron.job`, or EXECUTE on a `cron.*` function. The role must have **none** |
+| `dangerous_role_membership:<role>` | membership in `pg_execute_server_program` / `pg_read_server_files` / `pg_write_server_files` (COPY TO/FROM PROGRAM and server-file egress; `superuser` is caught by `attr_superuser`) |
+| `egress_definer_view:<view>` | an owner-rights (`security_invoker=false`) view the role can SELECT whose definition depends on an egress function |
+
+`net`-schema / pg_net-member functions are never roots here (they are the platform's own internals, judged by the
+direct rule + the exception). Because the helper is called by the strict reference too, a `not_applied` exception
+still reports exactly the same indirect findings — the exception never weakens this rule.
+
+Other paths from the owner directive, and where each is closed: **COPY TO PROGRAM** needs superuser (caught by
+`attr_superuser`) or one of the dangerous roles above; **LISTEN/NOTIFY** and **large objects** are leaf side-effect
+functions (`pg_notify`, `lo_*`), so a wrapper reaching them is an `indirect_egress_function`; **dblink / postgres_fdw**
+are egress leaves by extension membership and name; **untrusted languages** are leaves by `lanpltrusted`;
+**`graphql_public.graphql`** and **PostgREST RPC to an exposed schema** resolve to functions — any such function the
+role can execute that wraps egress is caught as a reachable / indirect egress function, and `graphql_public` reflection
+of `net` is additionally blocked by control (d) (search_path) and the live probe (c).
+
+A reachable PUBLIC raw-SQL helper (the audit's `run_sql`-class function) is the concrete gap this closed: as SECURITY
+INVOKER it runs **as the role** and can `EXECUTE` an `INSERT INTO net.http_request_queue` / `net.http_post(...)`,
+exfiltrating rows despite the pg_net exception. It is now a `dynamic_sql_function` finding; **PUBLIC EXECUTE on any
+such function must be revoked before either credential is safe** (surfaced by the §9a verification before go-live).
+
 When any condition fails, the status is `not_applied` and its `reasons` name the cause. The `net` objects then count
 through PUBLIC as before, and the findings are **exactly** those of the pre-exception function. The posture test
 asserts this equality against a verbatim frozen copy.
@@ -158,14 +196,20 @@ Each of these refuses: the apply aborts, or the server does not start.
 - The role's `search_path` unset or naming them.
 - The role with LOGIN, INHERIT, BYPASSRLS or SUPERUSER, or any membership.
 - A SECURITY DEFINER `net` function the role can execute.
-- A public (or any) wrapper calling `net.*` that the role can execute.
+- A public (or any) wrapper calling `net.*` that the role can execute — **directly or transitively** (§4a).
+- A reachable `sql`/`plpgsql` function that runs dynamic SQL (`EXECUTE`) and is not allowlisted with a reason.
+- A trigger / Supabase Database Webhook / pg_net trigger whose function reaches egress on a table the role can write.
+- An event trigger whose function reaches egress.
+- Any access to schema `cron`, or membership in `pg_execute_server_program` / `pg_read_server_files` /
+  `pg_write_server_files`.
+- An owner-rights view the role can SELECT that depends on an egress function.
 - CREATE anywhere.
 
 ## 8. Proof (disposable PostgreSQL 17 + PostgREST only)
 
 | test | what |
 |---|---|
-| `apps/api/tests/critical/action-gateway-pg-net-posture-pg.test.mjs` | Both self-checks, with the REAL migrations applied ON TOP of Supabase-shaped pg_net. Covers the default (ok, exception listed) and every refusal case in section 7, run AS the role. It also covers no-exception-context and no-pg_net, with findings asserted **equal** to the frozen pre-exception functions (`apps/api/tests/pg/pg_net_emulation/strict_reference_*.sql`). |
+| `apps/api/tests/critical/action-gateway-pg-net-posture-pg.test.mjs` | Both self-checks, with the REAL migrations applied ON TOP of Supabase-shaped pg_net. Covers the default (ok, exception listed) and every refusal case in section 7, run AS the role — including the §4a indirect cases: a transitive `A→B→net` wrapper, a dynamic-SQL wrapper, a pg_net Database-Webhook trigger on a role-writable table, an event trigger reaching `net`, `cron` access, and `pg_read_server_files`, plus the `run_sql` re-grant positive/negative pair. It also covers no-exception-context and no-pg_net, with findings asserted **equal** to the frozen pre-exception functions (`apps/api/tests/pg/pg_net_emulation/strict_reference_*.sql`, which call the same indirect-egress helper). |
 | `mcp/leadcommand-action-mcp/test/pg-net-exposure-e2e.test.mjs` | Real PostgREST 16 plus a minimal Supabase-style gateway. When `net` is not exposed, the probe passes and BOTH servers boot. When `PGRST_DB_SCHEMAS` includes `net`, the probe fails, BOTH servers refuse to start, and nothing is enqueued. It also covers GraphQL reflecting `net` (role search_path) → fail, and a GraphQL permission error → fail. |
 | `mcp/leadcommand-mcp/test/platform-exposure.test.mjs`, `mcp/leadcommand-action-mcp/test/platform-exposure-boot.test.mjs` | The server-side re-judgement (every tamper case), the probe's answer matrix, the boot wiring, and the absence of any probe when no exception applies. |
 
@@ -278,6 +322,33 @@ migration session.
    Then start each MCP server as usual. Its boot runs the same probe, and its audit line `credential_self_check`
    must show `outcome: ok`, `platform_exceptions[0].status: applied`, and every `exposure_probe` entry
    `…:refused_as_required`.
+
+### 9a. Indirect / transitive egress (run BEFORE the roles exist)
+
+The §4a surface must be checked **before** `lc_action_gateway` / `lc_mcp_reader` are created, because any path PUBLIC
+can reach, a new NOLOGIN NOINHERIT member-of-nothing role inherits. The script
+`scripts/db/pg_net_indirect_egress_prod_verify.sql` computes, for the **PUBLIC** pseudo-role, exactly the findings
+`public.lc_reachable_egress_indirect(oid)` computes for the role: transitive `indirect_egress_function`,
+`dynamic_sql_function`, `egress_trigger` (incl. Supabase Database Webhooks), `event_trigger_egress`,
+`cron_schema_access`, and `egress_definer_view`. It is read-only and creates nothing.
+
+```sh
+psql "$RO_URL" -f scripts/db/pg_net_indirect_egress_prod_verify.sql   # RO role-enforced credential; never from .env
+```
+
+**Expected:** zero rows. Any row is a real indirect path the owner must remediate before go-live:
+
+- `dynamic_sql_function:<fn>` — a PUBLIC-executable raw-SQL helper (e.g. the audit's `public.run_sql`). As SECURITY
+  INVOKER it runs as the future role and can `EXECUTE` an insert into `net.http_request_queue` / a `net.http_post`.
+  **Revoke PUBLIC EXECUTE** (or drop it).
+- `egress_trigger:<table>:<trigger>` — a Database Webhook / pg_net trigger on a PUBLIC-writable table. Remove the
+  webhook or the PUBLIC write grant.
+- `indirect_egress_function` / `event_trigger_egress` / `egress_definer_view` — revoke the PUBLIC grant or remove the
+  wrapper / view / event trigger.
+- `cron_schema_access` — PUBLIC must have no access to schema `cron`.
+
+After an authorized apply, re-run the role's own self-check (it calls the same helper for the real role) and the §9
+step 7 live probes; the boot audit's `credential_self_check` must be `outcome: ok` with none of these findings.
 
 8. **Pending.** Supabase support has not yet confirmed that this ACL set and the "not exposed ⇒ not usable" posture
    are the supported state for this project. Until they confirm, the exception rests on the public doc above and on

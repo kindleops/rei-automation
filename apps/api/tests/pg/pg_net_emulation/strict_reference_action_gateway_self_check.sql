@@ -117,6 +117,8 @@ begin
             or (not l.lanpltrusted and l.lanname not in ('c', 'internal'))
             or (l.lanname in ('sql', 'plpgsql') and p.prosrc ~* '\m(net\.http_[a-z_]+|http_(get|post|put|patch|delete|head|request)|dblink[a-z_]*|lo_(create|creat|from_bytea|put|import|export|unlink)|lowrite|pg_notify|pg_logical_emit_message)\s*\('))
   loop findings := findings || ('reachable_egress_function:' || x.s); end loop;
+  -- bounded transitive reachability: indirect / dynamic-SQL / trigger / event-trigger / cron / membership / view egress paths the per-function grep misses (HARD findings)
+  findings := findings || public.lc_reachable_egress_indirect(r);
 
   -- SELECT: exactly the inventory in the PostgREST-exposed schemas, a named set in agent, the gateway's own tables
   for x in

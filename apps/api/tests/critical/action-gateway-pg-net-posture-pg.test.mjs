@@ -13,7 +13,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import { pgNetServer, SKIP_REASON, installPgNet, setExposedSchemas, inRolledBackTx, dropPlatformRole, LC_MCP_RELATIONS, LC_MCP_FUNCTIONS, REPO_DIR, EMULATION_DIR } from '../helpers/pg-net-posture.mjs'
-import { platformExceptionBlock, SOURCE as GW_SQL, TARGET as RO_SQL } from '../../../../scripts/db/sync-platform-exception-block.mjs'
+import { platformExceptionBlock, namedBlock, SOURCE as GW_SQL, TARGET as RO_SQL } from '../../../../scripts/db/sync-platform-exception-block.mjs'
 import { PG_NET_FINGERPRINT_VERSION } from '../../../../mcp/leadcommand-mcp/src/data/platform-exposure.mjs'
 
 const MIG = (f) => path.join(REPO_DIR, 'supabase/migrations', f)
@@ -37,6 +37,15 @@ test('the exception is ONE reviewed block: #25 inlines exactly #26\'s, every sel
     const body = /function action_gateway\.self_check\([\s\S]*?\n\$fn\$;/.exec(fs.readFileSync(f, 'utf8'))[0]
     assert.match(body, /pe := action_gateway\.platform_egress_exceptions\(r\);/, path.basename(f))
     assert.match(body, /'platform_exceptions', pe -> 'platform_exceptions'/, path.basename(f))
+  }
+  // the indirect-egress helper is ONE synced block, and EVERY self-check copy AND both frozen strict references call it,
+  // so a 'not applied' pg_net exception reports exactly the same transitive findings (never a silent weakening).
+  const STRICT_GW = path.join(REPO_DIR, 'apps/api/tests/pg/pg_net_emulation/strict_reference_action_gateway_self_check.sql')
+  const STRICT_RO = path.join(REPO_DIR, 'apps/api/tests/pg/pg_net_emulation/strict_reference_lc_mcp_reader_self_check.sql')
+  assert.equal(namedBlock(fs.readFileSync(RO_SQL, 'utf8'), '-- lc-indirect-egress:block-begin', '-- lc-indirect-egress:block-end'),
+               namedBlock(gw, '-- lc-indirect-egress:block-begin', '-- lc-indirect-egress:block-end'), 'run node scripts/db/sync-platform-exception-block.mjs --write')
+  for (const f of [GW_SQL, RO_SQL, T2_SQL, T2_ROLLBACK_SQL, STRICT_GW, STRICT_RO]) {
+    assert.match(fs.readFileSync(f, 'utf8'), /findings := findings \|\| public\.lc_reachable_egress_indirect\(r\);/, `${path.basename(f)} calls the indirect-egress helper`)
   }
 })
 
@@ -242,6 +251,78 @@ for (const make of [gatewayWorld, readerWorld]) {
       // and through PUBLIC alone (the role's own grants are not needed): the wrapper is still reachable and named
       assert.ok(has(await w.strict(c), /public\.lc_posture_webhook/))
     }))
+
+    // ── indirect / transitive egress (public.lc_reachable_egress_indirect), the paths the per-function grep misses ──
+    await t.test('a TRANSITIVE wrapper A→B→net.http_post, A executable by the role (A\'s own body names no egress) → indirect_egress_function', () => tx(async (c) => {
+      await c.query(`create function public.lc_ind_b(u text) returns void language plpgsql security invoker as $b$ begin perform net.http_post(u, '{}'::jsonb); end $b$`)
+      await c.query(`create function public.lc_ind_a(u text) returns void language plpgsql security invoker as $a$ begin perform public.lc_ind_b(u); end $a$`)
+      await c.query(`grant execute on function public.lc_ind_a(text) to ${w.role}`)
+      const j = await w.check(c)
+      assert.equal(pgNetEntry(j).status, 'applied')
+      assert.equal(j.ok, false)
+      assert.ok(has(j, /indirect_egress_function:public\.lc_ind_a\(text\)/), JSON.stringify(j.findings))
+      // the strict (no-exception) reference carries the SAME transitive rule
+      assert.ok(has(await w.strict(c), /indirect_egress_function:public\.lc_ind_a\(text\)/))
+    }))
+
+    await t.test('a DYNAMIC-SQL wrapper (plpgsql EXECUTE) executable by the role → dynamic_sql_function (it can reach net.* via PUBLIC)', () => tx(async (c) => {
+      await c.query(`create function public.lc_ind_dyn(q text) returns void language plpgsql security invoker as $d$ begin execute q; end $d$`)
+      await c.query(`grant execute on function public.lc_ind_dyn(text) to ${w.role}`)
+      const j = await w.check(c)
+      assert.equal(j.ok, false)
+      assert.ok(has(j, /dynamic_sql_function:public\.lc_ind_dyn\(text\)/), JSON.stringify(j.findings))
+    }))
+
+    await t.test('the role granted pg_read_server_files (COPY-to-program / server-file egress) → dangerous_role_membership', () => tx(async (c) => {
+      await c.query('savepoint sp')
+      await c.query(`grant pg_read_server_files to ${w.role}`)
+      const j = await w.check(c)
+      assert.equal(j.ok, false)
+      assert.ok(j.findings.includes('dangerous_role_membership:pg_read_server_files'), JSON.stringify(j.findings))
+      await c.query('rollback to savepoint sp')
+    }))
+
+    await t.test('schema cron reachable by the role (pg_cron) → cron_schema_access', () => tx(async (c) => {
+      await c.query('create schema cron; create table cron.job (jobid bigserial primary key, command text)')
+      await c.query(`grant usage on schema cron to ${w.role}; grant select on cron.job to ${w.role}`)
+      const j = await w.check(c)
+      assert.equal(j.ok, false)
+      assert.ok(j.findings.includes('cron_schema_access:usage'), JSON.stringify(j.findings))
+      assert.ok(j.findings.includes('cron_schema_access:cron.job'))
+    }))
+
+    await t.test('an event trigger whose function reaches net → event_trigger_egress', () => tx(async (c) => {
+      await c.query(`create function public.lc_ind_evt() returns event_trigger language plpgsql as $e$ begin perform net.http_get('https://evt.invalid'); end $e$`)
+      await c.query(`create event trigger lc_ind_evt_trg on ddl_command_end execute function public.lc_ind_evt()`)
+      const j = await w.check(c)
+      assert.equal(j.ok, false)
+      assert.ok(has(j, /event_trigger_egress:event:lc_ind_evt_trg/), JSON.stringify(j.findings))
+    }))
+
+    // a Database-Webhook / pg_net trigger on a table the role can WRITE — gateway only (the reader writes nothing)
+    if (make === gatewayWorld) {
+      await t.test('a pg_net trigger (Supabase Database Webhook shape) on a role-writable table → egress_trigger', () => tx(async (c) => {
+        await c.query(`create function action_gateway.lc_ind_hook() returns trigger language plpgsql as $h$ begin perform net.http_post('https://hook.invalid', row_to_json(new)::jsonb); return new; end $h$`)
+        await c.query(`create trigger lc_ind_hook_trg after insert on action_gateway.action_intents for each row execute function action_gateway.lc_ind_hook()`)
+        const j = await w.check(c)
+        assert.equal(j.ok, false)
+        assert.ok(has(j, /egress_trigger:action_gateway\.action_intents:lc_ind_hook_trg/), JSON.stringify(j.findings))
+      }))
+    }
+
+    // reader-only: the real dynamic-SQL hole the posture closes — run_sql re-granted to PUBLIC must refuse again
+    if (make === readerWorld) {
+      await t.test('re-granting PUBLIC EXECUTE on the raw-SQL invoker public.run_sql → dynamic_sql_function (the emulation revoked it as the remediation)', () => tx(async (c) => {
+        await c.query('grant execute on function public.run_sql(text) to public')
+        const j = await w.check(c)
+        assert.equal(j.ok, false)
+        assert.ok(has(j, /dynamic_sql_function:public\.run_sql\(text\)/), JSON.stringify(j.findings))
+      }))
+      await t.test('with run_sql PUBLIC revoked (the default emulation state) the indirect rule is clean', () => tx(async (c) => {
+        const j = await w.check(c)
+        assert.ok(!has(j, /dynamic_sql_function:public\.run_sql/), JSON.stringify(j.findings))
+      }))
+    }
 
     await t.test('no exception context — net built by postgres, not an extension (the pre-platform shape) → EXACTLY the old findings', () => tx(async (c) => {
       await asSupabaseAdmin(c, 'drop extension pg_net')

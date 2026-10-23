@@ -161,6 +161,152 @@ alter role lc_mcp_reader set search_path = public;
 grant lc_mcp_reader to authenticator;
 
 -- --------------------------------------------- 2. the two MCP functions ----
+-- lc-indirect-egress:block-begin  (SYNCED, byte-identical in #25 lc_mcp_reader and #26 action_gateway; scripts/db/sync-platform-exception-block.mjs pins it)
+-- The bounded transitive-reachability half of the egress rule (docs/SUPABASE-PG-NET-POSTURE.md §4a). It walks the
+-- pg_proc call graph BACKWARDS from the egress leaves (comment-stripped prosrc name-resolution; cost ~|bad| x |procs|)
+-- and reports, for a NOLOGIN Data-API role r, every INDIRECT path to egress the per-function body grep misses:
+--   indirect_egress_function:<fn>   a function r can EXECUTE (incl. allowlisted SECURITY DEFINER entry points /
+--     domain writers, judged by their owner's reach) that TRANSITIVELY reaches schema net / pg_net / http / dblink /
+--     postgres_fdw / an untrusted language / a PUBLIC side-effect (lo_* / pg_notify / pg_logical_emit_message);
+--   dynamic_sql_function:<fn>       a reachable sql/plpgsql function whose body runs dynamic SQL (plpgsql EXECUTE)
+--     -> it can reach net.* through PUBLIC's pg_net grants; a finding unless allowlisted with a reason;
+--   egress_trigger:<table>:<trigger> -> <fn>   a trigger (incl. Supabase Database Webhooks supabase_functions.http_request
+--     and any pg_net-calling trigger) on a table r can INSERT/UPDATE/DELETE/TRUNCATE whose function reaches egress;
+--   event_trigger_egress:<event> -> <fn>   an event trigger whose function reaches egress;
+--   cron_schema_access:<detail>     any access to schema cron (pg_cron): usage, cron.job, or a cron.* EXECUTE;
+--   dangerous_role_membership:<role>   membership in pg_execute_server_program / pg_read_server_files /
+--     pg_write_server_files (COPY TO/FROM PROGRAM and server-file egress; superuser is caught by attr_superuser);
+--   egress_definer_view:<view>      an owner-rights (security_invoker=false) view r can SELECT that depends on an egress function.
+-- net-schema / pg_net-member functions are NOT roots here (platform internals; judged by the direct rule + the
+-- pg_net exception). This function is called by BOTH self-checks AND the frozen strict references, so a 'not
+-- applied' exception still reports exactly the same indirect findings. Each line is a HARD finding.
+create or replace function public.lc_reachable_egress_indirect(p_role oid)
+returns text[]
+language plpgsql
+stable
+security invoker
+set search_path = pg_catalog
+as $fn$
+declare
+  r oid := p_role;
+  findings text[] := '{}';
+  nl text := chr(10);
+  -- lc-indirect-egress:dynamic-sql-allowlist (sig|reason). REVIEWED CONSTANT: a reachable function that runs dynamic
+  -- SQL (plpgsql EXECUTE) is an indirect-egress finding (it can reach net.* through PUBLIC's pg_net grants) unless it
+  -- is listed HERE with a reason. Empty = strict.
+  dyn_allow constant text[] := array[]::text[];
+  bad oid[];       -- every function that transitively reaches an egress leaf (sql/plpgsql call graph)
+  leaves oid[];    -- the direct egress leaves themselves
+  x record;
+begin
+  -- the call graph is walked BACKWARDS from the egress leaves (a small frontier) so the cost is ~|bad| x |procs|,
+  -- never |procs|^2. prosrc is comment-stripped once. Caller->callee is a word-boundary name match in the body.
+  with recursive
+  procs as (
+    select p.oid, p.proname, p.prolang, p.pronamespace, p.prorettype,
+           regexp_replace(p.prosrc, '--[^'||nl||']*', '', 'g') src, l.lanname, l.lanpltrusted
+      from pg_proc p join pg_language l on l.oid = p.prolang join pg_namespace pn on pn.oid = p.pronamespace
+     where p.prokind in ('f','p') and pn.nspname not in ('pg_catalog','information_schema') and pn.nspname !~ '^pg_(toast|temp)'
+  ),
+  leaf as (
+    select pr.oid from procs pr join pg_namespace n on n.oid = pr.pronamespace
+     where n.nspname = 'net'
+        or exists (select 1 from pg_depend d join pg_extension e on e.oid = d.refobjid
+                    where d.classid = 'pg_proc'::regclass and d.objid = pr.oid and d.refclassid = 'pg_extension'::regclass
+                      and d.deptype = 'e' and e.extname in ('pg_net','http','dblink','postgres_fdw'))
+        or pr.proname ~* '^(http|http_[a-z_]+|dblink[a-z_]*)$'
+        or (not pr.lanpltrusted and pr.lanname not in ('c','internal'))
+        or (pr.lanname in ('sql','plpgsql') and pr.src ~* '\m(net\.http_[a-z_]+|http_(get|post|put|patch|delete|head|request)|dblink[a-z_]*|lo_(create|creat|from_bytea|put|import|export|unlink)|lowrite|pg_notify|pg_logical_emit_message)[[:space:]]*\(')
+  ),
+  bad(oid) as (
+    select oid from leaf
+    union
+    select caller.oid
+      from bad b join procs callee on callee.oid = b.oid
+      join procs caller on caller.lanname in ('sql','plpgsql') and caller.oid <> b.oid
+           and length(callee.proname) > 2
+           and position(callee.proname in caller.src) > 0
+           and caller.src ~* ('\m' || callee.proname || '[[:space:]]*\(')
+  )
+  select coalesce(array_agg(distinct oid), '{}'), coalesce((select array_agg(oid) from leaf), '{}')
+    into bad, leaves from bad;
+
+  -- (1) functions the role can EXECUTE that reach egress only INDIRECTLY (their own body is not a direct leaf)
+  for x in
+    select p.oid::regprocedure::text s
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname not in ('pg_catalog','information_schema','net') and p.prokind in ('f','p')
+       and p.prorettype not in ('pg_catalog.trigger'::regtype, 'pg_catalog.event_trigger'::regtype)
+       and has_schema_privilege(r, n.oid, 'USAGE') and has_function_privilege(r, p.oid, 'EXECUTE')
+       and p.oid = any (bad) and not (p.oid = any (leaves))
+       and not exists (select 1 from pg_depend d join pg_extension e on e.oid = d.refobjid
+                        where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.refclassid = 'pg_extension'::regclass
+                          and d.deptype = 'e' and e.extname in ('pg_net','http','dblink','postgres_fdw'))
+  loop findings := findings || ('indirect_egress_function:' || x.s); end loop;
+
+  -- (2) dynamic SQL (plpgsql EXECUTE) in a function the role can execute: a finding unless allowlisted
+  for x in
+    select p.oid::regprocedure::text s
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
+     where n.nspname not in ('pg_catalog','information_schema','net') and l.lanname in ('sql','plpgsql') and p.prokind in ('f','p')
+       and p.prorettype not in ('pg_catalog.trigger'::regtype, 'pg_catalog.event_trigger'::regtype)
+       and has_schema_privilege(r, n.oid, 'USAGE') and has_function_privilege(r, p.oid, 'EXECUTE')
+       and not exists (select 1 from pg_depend d join pg_extension e on e.oid = d.refobjid
+                        where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.refclassid = 'pg_extension'::regclass
+                          and d.deptype = 'e' and e.extname in ('pg_net','http','dblink','postgres_fdw'))
+       and regexp_replace(p.prosrc, '--[^'||nl||']*', '', 'g') ~* '\mexecute[[:space:]]'
+       and not (p.oid::regprocedure::text = any (select split_part(a, '|', 1) from unnest(dyn_allow) a))
+  loop findings := findings || ('dynamic_sql_function:' || x.s); end loop;
+
+  -- (3) triggers (incl. Supabase Database Webhooks supabase_functions.http_request and pg_net triggers) on a table
+  --     the role can INSERT/UPDATE/DELETE/TRUNCATE whose function reaches egress
+  for x in
+    select t.tgrelid::regclass::text || ':' || t.tgname || ' -> ' || t.tgfoid::regprocedure::text s
+      from pg_trigger t
+     where not t.tgisinternal and t.tgfoid = any (bad)
+       and has_schema_privilege(r, (select c.relnamespace from pg_class c where c.oid = t.tgrelid), 'USAGE')
+       and (has_table_privilege(r, t.tgrelid, 'INSERT') or has_table_privilege(r, t.tgrelid, 'UPDATE')
+            or has_table_privilege(r, t.tgrelid, 'DELETE') or has_table_privilege(r, t.tgrelid, 'TRUNCATE'))
+  loop findings := findings || ('egress_trigger:' || x.s); end loop;
+
+  -- (4) event triggers whose function reaches egress
+  for x in
+    select 'event:' || et.evtname || ' -> ' || et.evtfoid::regprocedure::text s from pg_event_trigger et where et.evtfoid = any (bad)
+  loop findings := findings || ('event_trigger_egress:' || x.s); end loop;
+
+  -- (5) pg_cron: the role must have no access to schema cron
+  if to_regnamespace('cron') is not null then
+    if has_schema_privilege(r, 'cron', 'USAGE') then findings := findings || 'cron_schema_access:usage'::text; end if;
+    if to_regclass('cron.job') is not null and (has_table_privilege(r, 'cron.job', 'SELECT') or has_table_privilege(r, 'cron.job', 'INSERT')
+       or has_table_privilege(r, 'cron.job', 'UPDATE') or has_table_privilege(r, 'cron.job', 'DELETE')) then findings := findings || 'cron_schema_access:cron.job'::text; end if;
+    for x in select p.oid::regprocedure::text s from pg_proc p where p.pronamespace = 'cron'::regnamespace and has_function_privilege(r, p.oid, 'EXECUTE')
+    loop findings := findings || ('cron_schema_access:execute:' || x.s); end loop;
+  end if;
+
+  -- (6) COPY TO/FROM PROGRAM and server files need superuser or these roles; a NOLOGIN Data-API role must hold none
+  for x in select g.rolname from pg_auth_members m join pg_roles g on g.oid = m.roleid
+            where m.member = r and g.rolname in ('pg_execute_server_program','pg_read_server_files','pg_write_server_files')
+  loop findings := findings || ('dangerous_role_membership:' || x.rolname); end loop;
+
+  -- (7) owner-rights (security_invoker=false) views the role can SELECT whose definition depends on an egress function
+  for x in
+    select format('%I.%I', n.nspname, c.relname) q
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where c.relkind = 'v' and coalesce(array_to_string(c.reloptions, ',') ~* 'security_invoker=(true|on|1)', false) = false
+       and has_schema_privilege(r, n.oid, 'USAGE') and has_table_privilege(r, c.oid, 'SELECT')
+       and exists (select 1 from pg_depend d
+                    where d.classid = 'pg_rewrite'::regclass and d.refclassid = 'pg_proc'::regclass and d.refobjid = any (bad)
+                      and d.objid in (select oid from pg_rewrite where ev_class = c.oid))
+  loop findings := findings || ('egress_definer_view:' || x.q); end loop;
+
+  return findings;
+end
+$fn$;
+comment on function public.lc_reachable_egress_indirect(oid) is 'Egress hardening: bounded transitive reachability (call graph, triggers, event triggers, cron, dangerous memberships, owner-rights views) to net/pg_net/http/dblink/side-effects for a Data-API role. Read by action_gateway.self_check and lc_mcp_reader_self_check. docs/SUPABASE-PG-NET-POSTURE.md.';
+-- lc-indirect-egress:block-end
+revoke all on function public.lc_reachable_egress_indirect(oid) from public, anon, authenticated, service_role;
+grant execute on function public.lc_reachable_egress_indirect(oid) to lc_mcp_reader;
+
 create or replace function public.lc_mcp_reader_self_check(p_relations text[], p_functions text[], p_role name default current_user)
 returns jsonb
 language plpgsql
@@ -511,6 +657,8 @@ begin
       -- search_path_pinned is reported, not a finding: the role holds CREATE nowhere, so it cannot plant objects
     end if;
   end loop;
+  -- bounded transitive reachability: indirect / dynamic-SQL / trigger / event-trigger / cron / membership / view egress the per-function grep misses (HARD findings)
+  findings := findings || public.lc_reachable_egress_indirect(r);
   -- the compensating controls of an applied platform exception (each a hard finding)
   findings := findings || array(select jsonb_array_elements_text(pe -> 'findings'));
   return rep || jsonb_build_object('findings', to_jsonb(findings), 'ok', coalesce(array_length(findings, 1), 0) = 0);

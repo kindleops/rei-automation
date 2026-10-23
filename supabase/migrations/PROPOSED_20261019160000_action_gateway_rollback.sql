@@ -68,6 +68,8 @@ begin
   end loop;
 end $$;
 
+drop function if exists public.lc_reachable_egress_indirect(oid);
+
 drop schema action_gateway cascade;
 
 alter table agent.ops_work_item drop constraint ops_work_item_scope_check;

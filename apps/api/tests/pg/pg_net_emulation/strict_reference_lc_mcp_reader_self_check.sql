@@ -164,6 +164,8 @@ begin
       -- search_path_pinned is reported, not a finding: the role holds CREATE nowhere, so it cannot plant objects
     end if;
   end loop;
+  -- mirror of the current function's transitive-reachability findings (so a 'not applied' pg_net exception reports the SAME indirect findings)
+  findings := findings || public.lc_reachable_egress_indirect(r);
   return rep || jsonb_build_object('findings', to_jsonb(findings), 'ok', coalesce(array_length(findings, 1), 0) = 0);
 end
 $fn$;
