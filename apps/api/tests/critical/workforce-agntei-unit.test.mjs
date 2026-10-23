@@ -12,7 +12,7 @@ import { employeeActivity, assignmentActivity, ago } from '../../src/lib/workfor
 import { agnteiLinkSteps } from '../../src/lib/workforce/agntei/link-steps.js'
 import { WORKFORCE_GATEWAY_TOOLS, mcpToolName } from '../../src/lib/workforce/agntei/tools.js'
 import { applyExternalTimeouts } from '../../src/lib/workforce/engine/dispatch.js'
-import { authorize } from '../../src/lib/workforce/authority/engine.js'
+import { authorize } from '../../src/lib/workforce/authority/authority-engine.js'
 import * as R from '../../src/lib/workforce/routes.js'
 import { presentRefs } from '../../src/lib/workforce/present.js'
 

@@ -145,7 +145,7 @@ test('the delegated step: its outputs reach the report and the COO message hones
 })
 
 test('authority: an employee whose market is a multi-word slug (dallas_test, dallas_tx) acts in its own market (the live milestone\'s MARKET_OUT_OF_SCOPE)', async () => {
-  const { authorize } = await import('../../src/lib/workforce/authority/engine.js')
+  const { authorize } = await import('../../src/lib/workforce/authority/authority-engine.js')
   const { marketLabel, sameMarket } = await import('../../src/lib/workforce/capabilities/shared.js')
   assert.equal(marketLabel('dallas_test'), 'dallas test')
   assert.ok(sameMarket(marketLabel('dallas_test'), 'Dallas (TEST)'))

@@ -5,7 +5,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { authorize, proposeGrants, DEFAULT_EXEC_REVIEW_PRICE_USD, DEFAULT_DAILY_CAPS } from '../../src/lib/workforce/authority/engine.js'
+import { authorize, proposeGrants, DEFAULT_EXEC_REVIEW_PRICE_USD, DEFAULT_DAILY_CAPS } from '../../src/lib/workforce/authority/authority-engine.js'
 import { CAPABILITIES, CAPABILITY_KEYS } from '../../src/lib/workforce/capabilities/catalog.js'
 import { ROLE_CHARTERS, ROLES, rolesFor, effectiveTierCeiling } from '../../src/lib/workforce/org/charters.js'
 import { SEED_EMPLOYEES, SEED_EMPLOYEE_IDS } from '../../src/lib/workforce/org/seed.js'

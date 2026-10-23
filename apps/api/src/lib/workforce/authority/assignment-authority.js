@@ -8,7 +8,7 @@
 //   2. authorizeAssignment({ employee, assignment, resource, decision, cost_usd, … facts })  → the engine verdict
 // Same inputs ⇒ the same decision from either entry point (pinned by tests/critical/workforce-authority-parity*.test.mjs).
 // Pure: no I/O. The hold authority is consulted by the caller between 1 and 2 (holds/automation-hold, capability ai_action).
-import { authorize } from './engine.js'
+import { authorize } from './authority-engine.js'
 import { getCapability } from '../capabilities/catalog.js'
 import { num } from '../capabilities/shared.js'
 import { WORKFORCE_LIMITS } from '../config.js'
