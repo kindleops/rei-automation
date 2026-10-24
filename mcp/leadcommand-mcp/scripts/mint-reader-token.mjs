@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 // MINT the lc_mcp_reader token (the owner runs this; nothing else does).
 //
+//   pbpaste | node scripts/mint-reader-token.mjs --secret-stdin --out ~/.leadcommand/lc_mcp_reader.jwt [--days 7]   (preferred)
 //   node scripts/mint-reader-token.mjs --secret-file ~/.leadcommand/jwt-secret --out ~/.leadcommand/lc_mcp_reader.jwt [--days 30]
 //
+// --secret-stdin the JWT secret is read from a PIPE (never a terminal: a TTY would echo it) and
+//                held only in this process's memory. Nothing is written but the scoped token, so
+//                the root secret never touches a file, argv or shell history. Preferred over
+//                --secret-file. Clear the clipboard afterwards (pbcopy < /dev/null) and pause any
+//                clipboard-history app before copying.
 // --secret-file  a 0600 file holding the project's JWT secret: Supabase dashboard →
 //                Project Settings → JWT Keys → Legacy JWT secret. The project issues HS256
 //                tokens (infra/cloudflare/worker/index.ts#resolveUser). Write the file
@@ -45,16 +51,26 @@ const insideRepo = (p) => {
   return abs === REPO || abs.startsWith(`${REPO}${path.sep}`)
 }
 
-export function main(argv = process.argv.slice(2)) {
+export function main(argv = process.argv.slice(2), io = {}) {
   const arg = (n) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : null }
+  const fromStdin = argv.includes('--secret-stdin')
   const secretFile = arg('--secret-file')
   const out = arg('--out')
-  if (!secretFile || !out) throw new Error('usage: --secret-file <0600 file> --out <path outside the repo> [--days 1-90]')
-  const resolvedSecret = path.resolve(secretFile.replace(/^~(?=\/)/, process.env.HOME || '~'))
+  const usage = 'usage: (--secret-stdin | --secret-file <0600 file>) --out <path outside the repo> [--days 1-90]'
+  if (!out || (fromStdin === Boolean(secretFile))) throw new Error(usage)
   const resolvedOut = path.resolve(out.replace(/^~(?=\/)/, process.env.HOME || '~'))
-  if (insideRepo(resolvedSecret)) throw new Error('the JWT secret file must not be inside the repository')
   if (insideRepo(resolvedOut)) throw new Error('--out must not be inside the repository')
-  const secret = readCredentialFile(resolvedSecret, '--secret-file')
+  let secret
+  if (fromStdin) {
+    const isTTY = io.stdinIsTTY ?? Boolean(process.stdin.isTTY)
+    if (isTTY) throw new Error('--secret-stdin needs a pipe (pbpaste | node ...), never a terminal: typing would echo the secret')
+    secret = String((io.readStdin || (() => fs.readFileSync(0, 'utf8')))()).replace(/[\r\n]+$/, '')
+    if (/[\r\n]/.test(secret) || /^\s|\s$/.test(secret)) throw new Error('stdin must hold exactly one value (the JWT secret) with no surrounding whitespace')
+  } else {
+    const resolvedSecret = path.resolve(secretFile.replace(/^~(?=\/)/, process.env.HOME || '~'))
+    if (insideRepo(resolvedSecret)) throw new Error('the JWT secret file must not be inside the repository')
+    secret = readCredentialFile(resolvedSecret, '--secret-file')
+  }
   const token = mintReaderToken(secret, { days: arg('--days') ?? 30 })
   const info = assertReaderJwt(token)
   fs.writeFileSync(resolvedOut, token, { mode: 0o600 })

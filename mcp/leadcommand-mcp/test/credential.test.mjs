@@ -259,3 +259,34 @@ test('mint-reader-token: an HS256 lc_mcp_reader token that passes the server che
   assert.throws(() => main(['--secret-file', path.join(REPO, 'apps/api', `${DOT_ENV}.local`), '--out', out]), /inside the repository/)
   assert.equal(fs.existsSync(path.join(ROOT, 'leak.jwt')), false)
 })
+
+test('mint-reader-token --secret-stdin: the secret comes only from a pipe, is never written or printed, and a terminal is refused', async () => {
+  const { main } = await import('../scripts/mint-reader-token.mjs')
+  const crypto = await import('node:crypto')
+  const secret = crypto.randomBytes(40).toString('base64url')
+  const dir = tmpDir()
+  const out = path.join(dir, 'reader-stdin.jwt')
+  const before = new Set(fs.readdirSync(dir))
+  const stdout = []
+  const w = process.stdout.write
+  process.stdout.write = (x) => { stdout.push(String(x)); return true }
+  try {
+    assert.equal(main(['--secret-stdin', '--out', out, '--days', '7'], { stdinIsTTY: false, readStdin: () => `${secret}\n` }), 0)
+  } finally { process.stdout.write = w }
+  const tok = fs.readFileSync(out, 'utf8')
+  assert.equal(fs.statSync(out).mode & 0o777, 0o600)
+  const info = assertReaderJwt(tok)
+  assert.equal(info.role, 'lc_mcp_reader')
+  assert.ok(info.days_left >= 6 && info.days_left <= 7)
+  const [h, p, sig] = tok.split('.')
+  assert.equal(crypto.createHmac('sha256', secret).update(`${h}.${p}`).digest('base64url'), sig, 'signed with the piped secret')
+  assert.deepEqual([...fs.readdirSync(dir)].filter((f) => !before.has(f)), ['reader-stdin.jwt'], 'the only file written is the token')
+  assert.ok(!fs.readFileSync(out, 'utf8').includes(secret), 'the secret is not in the token file')
+  assert.ok(!stdout.join('').includes(secret) && !stdout.join('').includes(tok), 'neither secret nor token printed')
+  assert.throws(() => main(['--secret-stdin', '--out', path.join(dir, 'tty.jwt')], { stdinIsTTY: true, readStdin: () => secret }), /needs a pipe/)
+  assert.throws(() => main(['--secret-stdin', '--out', path.join(dir, 'two.jwt')], { stdinIsTTY: false, readStdin: () => `${secret}\nsecond-line` }), /exactly one value/)
+  assert.throws(() => main(['--secret-stdin', '--secret-file', path.join(dir, 'x'), '--out', path.join(dir, 'both.jwt')], { stdinIsTTY: false, readStdin: () => secret }), /usage/)
+  assert.throws(() => main(['--secret-stdin', '--out', path.join(ROOT, 'leak2.jwt')], { stdinIsTTY: false, readStdin: () => secret }), /inside the repository/)
+  assert.equal(fs.existsSync(path.join(ROOT, 'leak2.jwt')), false)
+  for (const f of ['tty.jwt', 'two.jwt', 'both.jwt']) assert.equal(fs.existsSync(path.join(dir, f)), false, `${f} not written on refusal`)
+})
