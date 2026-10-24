@@ -5,6 +5,7 @@
 // only, and Agntei runs with its own temporary data dir in isolated mode.
 import fs from 'node:fs'
 import net from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
 import crypto from 'node:crypto'
@@ -154,14 +155,47 @@ export async function startActionMcp({ repo, node, files, orgId, dir, log, audit
 }
 
 // ── Agntei, headless (apps/server/src/main.ts), its own temporary data dir, isolated mode ──────────
+/**
+ * Agntei's real data folders (its packages/engine/src/core/data-guard.ts list): the installed app's ~/.agent-command,
+ * the development build's ~/.agent-command-dev and the app's Application Support folders — for $HOME and for the
+ * account's real home (a changed HOME does not move them).
+ */
+export function agnteiRealDataDirs() {
+  const homes = [...new Set([process.env.HOME, os.homedir(), (() => { try { return os.userInfo().homedir } catch { return null } })()].filter((h) => h && path.isAbsolute(h)))]
+  return homes.flatMap((h) => ['.agent-command', '.agent-command-dev', ...['agntei', 'agntei-dev', 'Agent Command', 'agent-command'].map((a) => path.join('Library', 'Application Support', a))].map((d) => path.join(h, d)))
+}
+/** The path with every existing leading part resolved through symlinks (macOS /var → /private/var, a link into a data folder). */
+function canonical(p) {
+  let head = path.resolve(p); const tail = []
+  for (;;) {
+    try { return path.join(fs.realpathSync.native(head), ...tail.reverse()) } catch { /* not there yet */ }
+    const up = path.dirname(head); if (up === head) return path.resolve(p)
+    tail.push(path.basename(head)); head = up
+  }
+}
+const inside = (child, parent) => { const c = canonical(child).toLowerCase(); const p = canonical(parent).toLowerCase(); return c === p || c.startsWith(p.endsWith(path.sep) ? p : p + path.sep) }
+/** Throws if `p` is inside one of Agntei's real data folders. */
+export function refuseAgnteiRealData(p) {
+  const hit = agnteiRealDataDirs().find((d) => inside(p, d))
+  if (hit) throw new Error(`refusing to run Agntei on ${p}: ${hit} is real Agntei data`)
+  return p
+}
+/** Cleanup is restricted to what the run made: `p` must be strictly inside `root` (e.g. the system temp dir for a mkdtemp run folder) and not real data. */
+export function assertRunOwned(p, root) {
+  if (!root || !path.isAbsolute(root) || canonical(p) === canonical(root) || !inside(p, root)) throw new Error(`refusing to remove ${p}: not strictly inside ${root}`)
+  refuseAgnteiRealData(p)
+  return p
+}
+
 export async function startAgntei({ agnteiDir, node, home, token, claudeBin, log, extraEnv = {} }) {
   const port = await freePort()
+  // Agntei's own engine refuses real data in a test context too (AGNTEI_TEST_ENV=1 / AGNTAU_DISPOSABLE=1, Agntei 4.9.1);
+  // this check runs first so nothing — not even the folder below — is created there.
+  refuseAgnteiRealData(home)
   fs.mkdirSync(home, { recursive: true, mode: 0o700 })
-  const real = path.join(process.env.HOME || '', '.agent-command')
-  if (path.resolve(home).startsWith(path.resolve(real))) throw new Error('refusing to run Agntei on ~/.agent-command')
   const env = {
     PATH: `${path.dirname(node)}:${process.env.PATH}`, HOME: process.env.HOME, USER: process.env.USER, TMPDIR: process.env.TMPDIR || '/tmp', LANG: 'en_US.UTF-8',
-    AGENT_COMMAND_HOME: home, AGENT_COMMAND_TOKEN: token, AGNTEI_ISOLATED: '1', AGNTAU_DISPOSABLE: '1', AGENT_COMMAND_CLAUDE_BIN: claudeBin, PORT: String(port),
+    AGENT_COMMAND_HOME: home, AGENT_COMMAND_TOKEN: token, AGNTEI_ISOLATED: '1', AGNTAU_DISPOSABLE: '1', AGNTEI_TEST_ENV: '1', AGENT_COMMAND_CLAUDE_BIN: claudeBin, PORT: String(port),
     // the live milestone: AGNTEI_ISOLATED_ALLOW_SHARED_LOGINS=1 (Agntei's supported opt-in to the default Claude Code login)
     ...extraEnv,
   }

@@ -556,7 +556,8 @@ async function main() {
       for (const c of r.checks.filter((x) => !x.ok)) console.log(`  FAIL ${c.id} ${c.name}: ${c.detail.slice(0, 400)}`)
       fs.writeFileSync(path.join(outDir, `run-${i}.json`), JSON.stringify(r, null, 1))
       // a run with a failed check keeps its state (logs, postgres.log, the Agntei data dir) for diagnosis
-      if (!arg('keep-state') && r.checks.every((c) => c.ok)) fs.rmSync(runDir, { recursive: true, force: true })
+      // cleanup only ever removes this run's own mkdtemp folder (strictly inside the system temp dir, never Agntei data)
+      if (!arg('keep-state') && r.checks.every((c) => c.ok)) fs.rmSync(S.assertRunOwned(runDir, fs.realpathSync(os.tmpdir())), { recursive: true, force: true })
       else console.log(`  state kept: ${runDir}`)
       process.exit(0)
     } catch (e) {
