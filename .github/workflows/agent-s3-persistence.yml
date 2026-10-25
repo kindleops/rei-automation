@@ -178,9 +178,12 @@ jobs:
           AGENT_PG_TEST_DB_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           LC_PG_BIN: /usr/lib/postgresql/17/bin
           LC_POSTGREST_BIN: /tmp/postgrest
+        # Both suites always run (one failing must not hide the other's results); the step fails if either fails.
         run: |
-          (cd mcp/leadcommand-mcp && npm ci && npm test)
-          (cd mcp/leadcommand-action-mcp && npm ci && npm test)
+          rc=0
+          (cd mcp/leadcommand-mcp && npm ci && npm test) || rc=1
+          (cd mcp/leadcommand-action-mcp && npm ci && npm test) || rc=1
+          exit $rc
 
       - name: credential loader on the disposable Postgres (role-enforced read-only, rc-8.5.21-c)
         working-directory: apps/api
