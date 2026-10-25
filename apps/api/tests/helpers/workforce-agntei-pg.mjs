@@ -66,6 +66,8 @@ export function agnteiTemplate() {
     try {
       const run = (f) => runSqlFile(db.pool, f)
       const tx = (f) => applyInTransaction(db.pool, f)
+      // B1 (2026-10-25): typed Agntei identities are never phones (after #25, which freshDb applied)
+      await run(MIG('PROPOSED_20261025100000_payload_clean_typed_external_ids.sql'))
       await run(SQL.researchPretest); await run(SQL.research)
       await run(FIX('send_queue_live_baseline.sql'))
       await db.pool.query(RUNTIME_PUBLIC_FIXTURE)
