@@ -38,7 +38,7 @@ const qa = async (pool, sql, params = []) => (await pool.query(sql, params)).row
 const arg = (n, d = null) => { const h = process.argv.find((a) => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : process.argv.includes(`--${n}`) ? true : d }
 
 /** One cleanup for the normal end, an error and a signal: the Agntei connection (secret-store entry), the tick, every process. */
-const CLEANUP = {
+export const CLEANUP = {
   A: null, connId: null, ticker: null, done: false,
   async run() {
     if (this.done) return
@@ -49,7 +49,7 @@ const CLEANUP = {
   },
 }
 
-function agntei(base, token) {
+export function agntei(base, token) {
   const call = async (method, p, body) => {
     const r = await fetch(`${base}${p}`, { method, headers: { 'x-agentcmd-token': token, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
     const text = await r.text()
@@ -62,7 +62,7 @@ function agntei(base, token) {
 }
 
 /** Agntei headless with its own data dir, isolated; the REAL claude CLI with the operator's own sign-in (explicit opt-in). */
-async function startAgnteiReal({ agnteiDir, node, home, token, claudeBin, log }) {
+export async function startAgnteiReal({ agnteiDir, node, home, token, claudeBin, log }) {
   const port = await S.freePort()
   fs.mkdirSync(home, { recursive: true, mode: 0o700 })
   const real = path.join(process.env.HOME || '', '.agent-command')
@@ -83,7 +83,7 @@ async function startAgnteiReal({ agnteiDir, node, home, token, claudeBin, log })
   return { port, url, rec }
 }
 
-async function startCertHost({ dbUrl, port, files, auditFile, log, dir }) {
+export async function startCertHost({ dbUrl, port, files, auditFile, log, dir }) {
   const env = {
     PATH: process.env.PATH, HOME: dir, TMPDIR: process.env.TMPDIR || '/tmp', LC_CERT_DB_URL: dbUrl,
     LEADCOMMAND_ACTION_MCP_TRANSPORT: 'streamable-http', LEADCOMMAND_ACTION_MCP_HTTP_BIND: '127.0.0.1', LEADCOMMAND_ACTION_MCP_HTTP_PORT: String(port),
