@@ -116,6 +116,92 @@ test('PG gateway: create_operator_task lands in the Action Center (agent.ops_wor
   } finally { await env.db.drop() }
 })
 
+test('PG gateway (G2): update_operator_task touches ONLY the calling agent\'s own tasks and never one a human took over — refused by the policy AND, with the JS policy bypassed, by the domain writer', { skip }, async () => {
+  const { env, cred } = await world()
+  try {
+    const credB = await registerAgent(env.owner, { agent_id: 'agt_beta', grants: ALL_T1, tier_ceiling: 1 })
+    const { gateway } = makeGateway(env)
+    // another agent's task
+    const b = await gateway.call({ credential: credB, tool: 'create_operator_task', args: { client_request_id: 'own-b-0001', title: 'Beta: its own task' } })
+    assert.equal(b.ok, true, JSON.stringify(b))
+    const x = await gateway.call({ credential: cred, tool: 'update_operator_task', args: { client_request_id: 'own-a-0001', work_item_id: b.result.work_item_id, note: 'not mine', resolve: true } })
+    assert.equal(x.ok, false)
+    assert.equal(x.code ?? x.error?.code, 'TASK_NOT_OWNED', JSON.stringify(x))
+    // a task a HUMAN took over (acknowledged by an operator)
+    const a = await gateway.call({ credential: cred, tool: 'create_operator_task', args: { client_request_id: 'own-a-0002', title: 'Alpha: its own task' } })
+    assert.equal(a.ok, true)
+    await env.owner.query(`update agent.ops_work_item set state = 'acknowledged', acknowledged_by = $2, acknowledged_at = now() where work_item_id = $1`, [a.result.work_item_id, OPERATOR])
+    const h = await gateway.call({ credential: cred, tool: 'update_operator_task', args: { client_request_id: 'own-a-0003', work_item_id: a.result.work_item_id, resolve: true } })
+    assert.equal(h.ok, false)
+    assert.equal(h.code ?? h.error?.code, 'TASK_HUMAN_OWNED', JSON.stringify(h))
+    // DEFENSE IN DEPTH: a store that LIES to the JS policy (claims the caller owns Beta's task and no human holds it)
+    const liar = makeGateway(env, { wrapStore: (st) => ({ ...st, workItemGet: async (id) => { const w = await st.workItemGet(id); return w && { ...w, agent_id: 'agt_alpha', human_owned: false } } }) })
+    const y = await liar.gateway.call({ credential: cred, tool: 'update_operator_task', args: { client_request_id: 'own-a-0004', work_item_id: b.result.work_item_id, resolve: true } })
+    assert.equal(y.ok, false)
+    assert.equal(y.code ?? y.error?.code, 'TASK_NOT_OWNED', `the domain writer refuses: ${JSON.stringify(y)}`)
+    const z = await liar.gateway.call({ credential: cred, tool: 'update_operator_task', args: { client_request_id: 'own-a-0005', work_item_id: a.result.work_item_id, resolve: true } })
+    assert.equal(z.code ?? z.error?.code, 'TASK_HUMAN_OWNED', `the domain writer refuses: ${JSON.stringify(z)}`)
+    const rows = await sel(env.owner, `select work_item_id, state from agent.ops_work_item where work_item_id = any($1::uuid[])`, [[b.result.work_item_id, a.result.work_item_id]])
+    assert.deepEqual(rows.map((r) => r.state).sort(), ['acknowledged', 'open'], 'neither task changed')
+    // the owner still updates its own open task
+    const c = await gateway.call({ credential: credB, tool: 'update_operator_task', args: { client_request_id: 'own-b-0002', work_item_id: b.result.work_item_id, note: 'done', resolve: true } })
+    assert.equal(c.ok, true, JSON.stringify(c))
+  } finally { await env.db.drop() }
+})
+
+test('PG gateway (G2): create_operator_task under TWO scoped grants — an org-level INTERNAL-task grant (resource_types [system]: subject-less tasks only) and a MARKET-scoped grant (threads / opportunities in the agent\'s markets) — never an unrestricted one', { skip }, async () => {
+  const { env, cred } = await world({ grants: [['tasks.update_operator_task', 1]] })
+  try {
+    const { grantStanding } = await import('../helpers/action-gateway-pg.mjs')
+    await grantStanding(env.owner, { capability: 'tasks.create_operator_task', scope: { resource_types: ['system'] }, spendPerDay: 0 })
+    const { gateway } = makeGateway(env)
+    const inMkt = await seedThread(env.owner, { phone: SELLER, property: 'p-dal' })
+    const outMkt = await seedThread(env.owner, { phone: SELLER_2, property: 'p-chi' })
+    await env.owner.query(`update public.inbox_thread_state set market = 'Dallas, TX' where id = $1`, [inMkt.thread_id])
+    await env.owner.query(`update public.inbox_thread_state set market = 'Chicago, IL' where id = $1`, [outMkt.thread_id])
+    // internal grant only: a subject-less (system) task runs; a task about a seller thread does not
+    const sys = await gateway.call({ credential: cred, tool: 'create_operator_task', args: { client_request_id: 'scope-0001', title: 'Internal: review the research backlog' } })
+    assert.equal(sys.ok, true, JSON.stringify(sys))
+    const thr0 = await gateway.call({ credential: cred, tool: 'create_operator_task', args: { client_request_id: 'scope-0002', title: 'About a seller', subject: { type: 'thread', id: inMkt.thread_id } } })
+    assert.equal(thr0.ok, false)
+    assert.equal(thr0.code ?? thr0.error?.code, 'RESOURCE_OUT_OF_GRANT_SCOPE', JSON.stringify(thr0))
+    // + a market-scoped grant for subject tasks: Dallas runs, Chicago is refused, the internal grant still covers system tasks
+    await grantStanding(env.owner, { capability: 'tasks.create_operator_task', scope: { markets: ['Dallas, TX'], resource_types: ['thread', 'opportunity'] }, spendPerDay: 0 })
+    const thr1 = await gateway.call({ credential: cred, tool: 'create_operator_task', args: { client_request_id: 'scope-0003', title: 'About a Dallas seller', subject: { type: 'thread', id: inMkt.thread_id } } })
+    assert.equal(thr1.ok, true, JSON.stringify(thr1))
+    const thr2 = await gateway.call({ credential: cred, tool: 'create_operator_task', args: { client_request_id: 'scope-0004', title: 'About a Chicago seller', subject: { type: 'thread', id: outMkt.thread_id } } })
+    assert.equal(thr2.ok, false)
+    assert.equal(thr2.code ?? thr2.error?.code, 'RESOURCE_OUT_OF_GRANT_SCOPE', JSON.stringify(thr2))
+    const sys2 = await gateway.call({ credential: cred, tool: 'create_operator_task', args: { client_request_id: 'scope-0005', title: 'Internal: second' } })
+    assert.equal(sys2.ok, true, JSON.stringify(sys2))
+    // each authorization names the grant that covered it
+    const used = await sel(env.owner, `select i.client_key, g.scope from action_gateway.action_authorizations a join action_gateway.action_intents i using (intent_id) join action_gateway.capability_grants g using (grant_id) where i.action = 'create_operator_task' order by i.created_at`)
+    assert.deepEqual(used.map((u) => [u.client_key, Object.keys(u.scope).sort().join('+')]), [['scope-0001', 'resource_types'], ['scope-0003', 'markets+resource_types'], ['scope-0005', 'resource_types']])
+    assert.equal((await sel(env.owner, `select count(*)::int n from agent.ops_work_item where scope = 'agent'`))[0].n, 3, 'exactly the three permitted tasks exist')
+  } finally { await env.db.drop() }
+})
+
+test('PG gateway (G2): get_operator_task reads back the agent\'s OWN task (state, notes, priority, human_owned); another agent\'s task is TASK_NOT_FOUND (indistinguishable from none); no read scope needed, the update grant covers it', { skip }, async () => {
+  const { env, cred } = await world()
+  try {
+    const credB = await registerAgent(env.owner, { agent_id: 'agt_beta', grants: ALL_T1, tier_ceiling: 1 })
+    const { gateway } = makeGateway(env)
+    const a = await gateway.call({ credential: cred, tool: 'create_operator_task', args: { client_request_id: 'read-a-0001', title: 'Alpha: research backlog', note: 'first note', priority: 120 } })
+    const b = await gateway.call({ credential: credB, tool: 'create_operator_task', args: { client_request_id: 'read-b-0001', title: 'Beta: its own' } })
+    const r = await gateway.call({ credential: cred, tool: 'get_operator_task', args: { work_item_id: a.result.work_item_id } })
+    assert.equal(r.ok, true, JSON.stringify(r))
+    assert.deepEqual([r.result.task.state, r.result.task.title, r.result.task.priority, r.result.task.human_owned, r.result.task.notes.length], ['open', 'Alpha: research backlog', 120, false, 1])
+    const u = await gateway.call({ credential: cred, tool: 'update_operator_task', args: { client_request_id: 'read-a-0002', work_item_id: a.result.work_item_id, note: 'done', resolve: true } })
+    assert.equal(u.ok, true)
+    const r2 = await gateway.call({ credential: cred, tool: 'get_operator_task', args: { work_item_id: a.result.work_item_id } })
+    assert.deepEqual([r2.result.task.state, r2.result.task.notes.length], ['resolved', 2])
+    const x = await gateway.call({ credential: cred, tool: 'get_operator_task', args: { work_item_id: b.result.work_item_id } })
+    assert.equal(x.ok, false)
+    assert.equal(x.code ?? x.error?.code, 'TASK_NOT_FOUND')
+    assert.ok((await audits(env.owner, null).catch(() => [])) !== null)
+  } finally { await env.db.drop() }
+})
+
 test('PG gateway: draft_seller_reply runs decideAndCompose in SHADOW (review-draft service) and is NEVER queued: no send_queue row, no ai_generated record, a hash-only outcome; the text is returned once', { skip }, async () => {
   const { env, cred } = await world()
   const net = trapTransport()
