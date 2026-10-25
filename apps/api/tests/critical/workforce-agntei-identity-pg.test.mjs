@@ -195,3 +195,17 @@ test('PG tenant isolation: a principal of org B reads and acts on NOTHING of org
   // and org A's row is untouched
   assert.deepEqual((await sel(env.owner, 'select status, lease_owner from workforce.assignment where assignment_id = $1', [id]))[0], { status: 'pending', lease_owner: null })
 }))
+
+test('PG B1 regression: an Agntei agent id holding a 10-digit run (e.g. agent_c382059173644fa1) LINKS — was PARAMS_NOT_STORABLE', { skip }, () => withWorld(async (env) => {
+  const { token } = await registerAgnteiAgent(env)
+  const s = agentSession(wfGateway(env), token)
+  const ref = { external_install_id: 'agntei_inst_0123456789abcdef0123456789abcdef', external_agent_id: 'agent_c382059173644fa1' }
+  const r = await s.call('workforce_link_self', { client_request_id: s.id('link'), ...ref })
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.equal(r.code, 'LINKED')
+  const e = await empRow(env)
+  assert.equal(e.status, 'active')
+  assert.equal(e.external_agent_id, ref.external_agent_id)
+  const again = await s.call('workforce_link_self', { client_request_id: s.id('link'), ...ref })
+  assert.equal(again.code, 'ALREADY_LINKED')
+}))

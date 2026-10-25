@@ -42,6 +42,7 @@ export async function buildWorld({ adminUrl, ownerUserId, orgId, psqlBin = 'psql
   const run = async (f) => { await harness.runSqlFile(db.pool, f); applied.push(rel(f)) }
   const tx = async (f) => { await harness.applyInTransaction(db.pool, f); applied.push(rel(f)) }
   const q = async (label, sql) => { await db.pool.query(sql); applied.push(label) }
+  await run(MIG('PROPOSED_20261025100000_payload_clean_typed_external_ids.sql')) // B1: typed Agntei identities (after #25)
   await run(harness.SQL.researchPretest); await run(harness.SQL.research)
   await run(FIX('send_queue_live_baseline.sql'))
   await q('(fixture) public.system_control + public.send_queue', RUNTIME_PUBLIC_FIXTURE)
