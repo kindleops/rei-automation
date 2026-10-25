@@ -22,6 +22,16 @@ function resolveSpec(spec, fromFile) {
   return { missing: base }
 }
 
+/** True when `source` (the text of `fromFile`) imports `target` (an absolute path), by RESOLVED specifier, not by name:
+ *  `./engine.js` next to the target counts; a different module that is also called engine.js does not. */
+export function importsFile(source, fromFile, target) {
+  for (const m of strip(source).matchAll(SPEC_RE)) {
+    const spec = m[1] || m[2] || m[3]
+    if (spec && resolveSpec(spec, fromFile).file === target) return true
+  }
+  return false
+}
+
 /** @returns {{ files: Set<string>, externals: Set<string>, missing: Set<string>, parents: Map<string,string> }} */
 export function importClosure(entries) {
   const files = new Set()
