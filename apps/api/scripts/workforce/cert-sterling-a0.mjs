@@ -54,10 +54,16 @@ export async function runA0(o) {
   try {
     // ── 1. disposable PostgreSQL + the real chain + the synthetic book; arm ONLY property.research and T1 ─────────
     const pgc = await step('1a', 'PostgreSQL 17 (own cluster, loopback)', async () => { const c = await S.startPg({ bin: o.pgBin, dir: path.join(runDir, 'pg'), log: path.join(logs, 'postgres.log') }); return { port: c.port, admin_url: c.adminUrl } })
-    const world = await step('1b', 'The real schema chain', async () => buildWorld({ adminUrl: pgc.admin_url, ownerUserId: CEO_USER, orgId: ORG, psqlBin: path.join(o.pgBin, 'psql') }))
+    const world = await step('1b', 'The real schema chain', async () => buildWorld({ adminUrl: pgc.admin_url, ownerUserId: CEO_USER, orgId: ORG, psqlBin: path.join(o.pgBin, 'psql'), holdGuards: false }))
     steps.at(-1).evidence = { database: world.name }
     const owner = world.owner
     const api = world.api
+    // the Phase A0 footprint: the holds registry CORE (#0) only. No trigger on a live sending table, and a hold
+    // insert is refused (HOLD_ENFORCEMENT_NOT_INSTALLED) until the guards (#0b) exist.
+    const fp = await q1(owner, `select (select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid where not t.tgisinternal
+        and c.relname in ('send_queue','seller_offers','closing_cases','acquisition_opportunities') and t.tgname like 'aa_automation_hold_%')::int live_guards,
+      (select count(*) from pg_trigger where tgname = 'aa_automation_holds_require_guards' and tgenabled <> 'D')::int require_guards`)
+    check('A00', 'Lean A0 footprint: the holds registry core only (no live-table guard trigger; hold inserts refused until #0b)', fp?.live_guards === 0 && fp?.require_guards === 1, fp)
     const book = e2eBook(Date.now())
     await seedPublicRows(owner, book, { manualThread: MANUAL_THREAD, manualPid: MANUAL_PID })
     await owner.query(`insert into public.properties (property_id, property_type, property_address_city, property_address_state, property_address_zip, property_address, market) values ($1, 'SFR', 'Minneapolis', 'MN', '55401', '799 Example Ln', 'minneapolis-mn') on conflict do nothing`, [OUT_PID])
