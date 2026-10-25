@@ -14,7 +14,8 @@ exact pre-chain schema fingerprint. Then the whole chain is re-applied and re-ve
 
 | # | File (supabase/migrations/) | Release | Status |
 |---|---|---|---|
-| 0 | `PROPOSED_20261016200000_automation_holds_registry.sql` | P0 holds (rc-8.5.20-holds = hotfix/automation-holds) | **ALREADY APPLIED VIA HOTFIX** before rc-8.5.21 deploys. Byte-identical to the hotfix file. Kept first in the disposable chain so every later file and rollback is proven against the hold triggers. Do not re-apply: its precondition refuses an existing registry. |
+| 0 | `PROPOSED_20261016200000_automation_holds_registry.sql` | P0 holds registry, **core** | The registry (`automation_holds`, `automation_hold_events`, `automation_hold_for`) with NO trigger on a live sending table. Until #0b is applied, `aa_automation_holds_require_guards` refuses every hold insert (`HOLD_ENFORCEMENT_NOT_INSTALLED`): a hold can never be recorded without being enforced. An earlier note recorded this file as already applied via a hotfix; that was never verified against a database. Check the target (ledger AND `to_regclass('public.automation_holds')`) before applying; the precondition refuses an existing registry. |
+| 0b | `PROPOSED_20261016200100_automation_hold_guards.sql` | P0 holds **enforcement** | The four BEFORE guards on `seller_offers`, `closing_cases`, `acquisition_opportunities` and `send_queue` (moved verbatim out of #0). Required before any hold can be set (T2 `set_thread_hold` fails closed without it). Not needed by a T1-only Action Gateway. Its rollback refuses while any hold is active. |
 | 1 | `PROPOSED_20261012140000_intel_runtime.sql` | R2 runtime | in chain since rc-8.5.20 |
 | 2 | `PROPOSED_20261013120000_agent_capabilities.sql` | capabilities | " |
 | 3 | `PROPOSED_20261013160000_conversation_ai_shadow.sql` | conv-AI shadow | " |
@@ -112,7 +113,7 @@ BEGIN … ROLLBACK.
 
 - **No chain link collides with a recorded production version.** None of the chain stamps #0–#26 (20261012140000 …
   20261019150000) is recorded in production history. #1 intel_runtime is applied (out of band, 10-14) but not
-  recorded. #0 is applied via the hotfix. The renamed stamps (20261015110000, 20261013163000, 20261006150200) are
+  recorded. #0's earlier "applied via hotfix" note is unverified: check the target before applying it. The renamed stamps (20261015110000, 20261013163000, 20261006150200) are
   unused in production history.
 - **The two permanent collisions (20261010120000, 20261010130000) are EXCLUDED from every deploy plan.** Every member
   is applied, so none is ever applied or re-applied. The production `v_inbox_thread_state_buckets` lacks the
@@ -149,5 +150,5 @@ BEGIN … ROLLBACK.
 
 ## Rollback
 
-Run the rollbacks in reverse order. #0's rollback is NOT part of an rc-8.5.21 rollback in production:
-the hotfix owns it, and it refuses while any hold is active.
+Run the rollbacks in reverse order. #0b's rollback refuses while any hold is active; #0's rollback refuses
+while #0b's guards are present (roll back #0b first).

@@ -57,7 +57,9 @@ const OPS_ACTION_CENTER = M('PROPOSED_20261016140000_operations_action_center.sq
 // P0 automation-hold registry (rc-8.5.20-holds = hotfix/automation-holds). ALREADY APPLIED TO PRODUCTION
 // VIA THE HOTFIX before rc-8.5.21 deploys; it stays the FIRST link of the disposable release chain so
 // every later migration (and its rollback) is proven against a database that carries the hold triggers.
-const HOLDS_REGISTRY = M('PROPOSED_20261016200000_automation_holds_registry.sql')
+const HOLDS_REGISTRY = M('PROPOSED_20261016200000_automation_holds_registry.sql') // the registry CORE (no live-table trigger)
+// the live-table guards, split from the registry (G1, 2026-10-25); core + guards = the previous single file
+const HOLD_GUARDS = M('PROPOSED_20261016200100_automation_hold_guards.sql')
 const HOLDS_PUBLIC_BASELINE = 'scripts/db/fixtures/automation_holds_public_baseline.sql'
 // rc-8.5.21 part A
 const COMPANY_IDENTITY = M('PROPOSED_20261016150000_ai_conversation_company_identity_setting.sql')
@@ -404,6 +406,16 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261016200000_automation_holds_registry_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261016200000_automation_holds_registry_rollback_posttest.sql')],
   },
+  // ── the registry's LIVE-TABLE GUARDS (split from the registry 2026-10-25): the behavioural hold tests ──
+  {
+    id: 'automation_hold_guards',
+    setup: [SHIM, SEND_QUEUE_BASELINE, HOLDS_PUBLIC_BASELINE, HOLDS_REGISTRY],
+    pretest: M('PROPOSED_20261016200100_automation_hold_guards_pretest.sql'),
+    apply: [HOLD_GUARDS],
+    posttest: [M('PROPOSED_20261016200100_automation_hold_guards_posttest.sql'), M('PROPOSED_20261016200000_automation_holds_registry_posttest.sql')],
+    rollback: [M('PROPOSED_20261016200100_automation_hold_guards_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261016200100_automation_hold_guards_rollback_posttest.sql')],
+  },
   // ── rc-8.5.21: the WHOLE release chain (8.5.15 … 8.5.21 + the P0 holds registry) on ONE database ──
   // Production apply order. The holds registry is FIRST: production receives it via the hotfix before
   // rc-8.5.21 (it is "already applied via hotfix" when 8.5.21 deploys; its version stamp 20261016200000 is
@@ -420,6 +432,7 @@ const BASE_TESTS = [
     apply: [
       // 0. the P0 holds registry (already applied via hotfix/automation-holds in production)
       { fixture: M('PROPOSED_20261016200000_automation_holds_registry_pretest.sql') }, HOLDS_REGISTRY,
+      { fixture: M('PROPOSED_20261016200100_automation_hold_guards_pretest.sql') }, HOLD_GUARDS,
       { fixture: M('PROPOSED_20261012140000_intel_runtime_pretest.sql') }, RUNTIME,
       { fixture: M('PROPOSED_20261013120000_agent_capabilities_pretest.sql') }, CAPS,
       { fixture: M('PROPOSED_20261013160000_conversation_ai_shadow_pretest.sql') }, CONV_AI_SHADOW,
@@ -471,6 +484,7 @@ const BASE_TESTS = [
     verify: [T('rc_8_5_21_release_chain_verify.sql')],
     posttest: [
       M('PROPOSED_20261016200000_automation_holds_registry_posttest.sql'),
+      M('PROPOSED_20261016200100_automation_hold_guards_posttest.sql'),
       M('PROPOSED_20261013120000_agent_capabilities_posttest.sql'),
       M('PROPOSED_20261013160000_conversation_ai_shadow_posttest.sql'),
       M('PROPOSED_20261014121000_runtime_kind_limits_event_budget_posttest.sql'),
@@ -509,6 +523,7 @@ const BASE_TESTS = [
     // holds registry is rolled back LAST (it was applied first)
     rollback: [
       M('PROPOSED_20261016200000_automation_holds_registry_rollback.sql'),
+      M('PROPOSED_20261016200100_automation_hold_guards_rollback.sql'),
       M('PROPOSED_20261012140000_intel_runtime_rollback.sql'),
       M('PROPOSED_20261013120000_agent_capabilities_rollback.sql'),
       M('PROPOSED_20261013160000_conversation_ai_shadow_rollback.sql'),
@@ -616,7 +631,7 @@ const BASE_TESTS = [
   // rc_8_5_21_release_chain entry.
   {
     id: 'followup_intent_lifecycle',
-    setup: [SHIM, DURABILITY, S3, SEND_QUEUE_BASELINE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE, HOLDS_REGISTRY],
+    setup: [SHIM, DURABILITY, S3, SEND_QUEUE_BASELINE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE, HOLDS_REGISTRY, HOLD_GUARDS],
     pretest: M('PROPOSED_20261017120000_followup_intent_lifecycle_pretest.sql'),
     apply: [FOLLOWUP_LIFECYCLE],
     posttest: [M('PROPOSED_20261017120000_followup_intent_lifecycle_posttest.sql')],
@@ -642,7 +657,7 @@ const BASE_TESTS = [
   {
     id: 'action_gateway',
     setup: [ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
-      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, ACTION_GATEWAY_BASELINE],
+      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, HOLD_GUARDS, ACTION_GATEWAY_BASELINE],
     pretest: M('PROPOSED_20261019160000_action_gateway_pretest.sql'),
     apply: [ACTION_GATEWAY],
     posttest: [M('PROPOSED_20261019160000_action_gateway_posttest.sql')],
@@ -655,7 +670,7 @@ const BASE_TESTS = [
   {
     id: 'action_gateway_t2',
     setup: [ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
-      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, FOLLOWUP_LIFECYCLE,
+      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, HOLD_GUARDS, FOLLOWUP_LIFECYCLE,
       ACTION_GATEWAY_BASELINE, ACTION_GATEWAY_T2_BASELINE, ACTION_GATEWAY],
     pretest: M('PROPOSED_20261020100000_action_gateway_t2_pretest.sql'),
     apply: [ACTION_GATEWAY_T2],
@@ -668,7 +683,7 @@ const BASE_TESTS = [
   {
     id: 'action_gateway_t34',
     setup: [ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
-      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, FOLLOWUP_LIFECYCLE,
+      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, HOLD_GUARDS, FOLLOWUP_LIFECYCLE,
       ACTION_GATEWAY_BASELINE, ACTION_GATEWAY_T2_BASELINE, NEGOTIATION, SEND_AUTHORIZATION, ACTION_GATEWAY_T34_BASELINE, ACTION_GATEWAY, ACTION_GATEWAY_T2],
     pretest: M('PROPOSED_20261020110000_action_gateway_t34_pretest.sql'),
     apply: [ACTION_GATEWAY_T34],
@@ -695,7 +710,7 @@ const BASE_TESTS = [
   {
     id: 'workforce_agntei',
     setup: [ACTION_ROLE_RESET, SHIM, DURABILITY, S3, PAYLOAD_OPAQUE_IDS, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
-      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, FOLLOWUP_LIFECYCLE,
+      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, HOLD_GUARDS, FOLLOWUP_LIFECYCLE,
       ACTION_GATEWAY_BASELINE, ACTION_GATEWAY_T2_BASELINE, ACTION_GATEWAY, ACTION_GATEWAY_T2, M('PROPOSED_20261022100000_workforce_foundation.sql')],
     pretest: M('PROPOSED_20261022110000_workforce_agntei_pretest.sql'),
     apply: [M('PROPOSED_20261022110000_workforce_agntei.sql')],
@@ -744,7 +759,7 @@ const FROM_PRODUCTION_STATE = {
 // never touched, and that the rollbacks restore the exact pre-chain fingerprint.
 const P = (f, k) => M(`${f}_${k}.sql`)
 const A0 = [
-  ['PROPOSED_20261016200000_automation_holds_registry', HOLDS_REGISTRY],
+  ['PROPOSED_20261016200000_automation_holds_registry', HOLDS_REGISTRY], // the registry CORE only: NO live-table trigger in A0 (no hold can be created)
   ['PROPOSED_20261013120000_agent_capabilities', CAPS],
   ['PROPOSED_20261013160000_conversation_ai_shadow', CONV_AI_SHADOW],
   ['PROPOSED_20261014121000_runtime_kind_limits_event_budget', KIND_LIMITS_FIX], // #4: required by #7 (its pretest)

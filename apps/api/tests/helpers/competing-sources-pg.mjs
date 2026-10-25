@@ -26,6 +26,7 @@ export async function combinedDb({ s11 = true } = {}) {
   await runSqlFile(db.pool, FIX('legacy_conversation_turns_baseline.sql'))
   // release-chain order: the holds registry first, then the runtime chain, the lifecycle last
   await runSqlFile(db.pool, MIG('PROPOSED_20261016200000_automation_holds_registry.sql'))
+  await runSqlFile(db.pool, MIG('PROPOSED_20261016200100_automation_hold_guards.sql'))
   await applyInTransaction(db.pool, SQL.runtime)
   await applyInTransaction(db.pool, MIG('PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql'))
   await applyInTransaction(db.pool, MIG('PROPOSED_20261013161000_conversation_decide_event_budget.sql'))

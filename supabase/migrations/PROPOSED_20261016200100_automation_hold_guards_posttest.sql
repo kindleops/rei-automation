@@ -1,5 +1,5 @@
 -- lc-fixture: posttest
--- PROPOSED ONLY — POSTTEST for PROPOSED_20261016200000_automation_holds_registry.sql (P0 holds registry).
+-- PROPOSED ONLY — POSTTEST for PROPOSED_20261016200000_automation_holds_registry (core) + PROPOSED_20261016200100_automation_hold_guards.sql (P0 holds registry).
 -- Synthetic rows and holds inside BEGIN … ROLLBACK (nothing persists; the release-chain rollback refuses
 -- while a hold is active, so this fixture must leave none). Proves on the real trigger bodies:
 -- lookup parity, capability scoping, every protected table refuses a held advance, the transaction

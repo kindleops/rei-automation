@@ -62,6 +62,7 @@ export async function lifecycleDb({ applyLifecycle = true } = {}) {
   await runSqlFile(db.pool, FIX('automation_holds_public_baseline.sql'))
   await db.pool.query(LIFECYCLE_PUBLIC_FIXTURE)
   await runSqlFile(db.pool, MIG('PROPOSED_20261016200000_automation_holds_registry.sql'))
+  await runSqlFile(db.pool, MIG('PROPOSED_20261016200100_automation_hold_guards.sql'))
   if (applyLifecycle) await runSqlFile(db.pool, LIFECYCLE_MIGRATION)
   const pool = db.trackPool(isoPool(db.url, 8))
   return { db, pool, sb: pgSupabase(pool) }

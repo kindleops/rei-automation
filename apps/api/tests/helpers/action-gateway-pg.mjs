@@ -107,6 +107,7 @@ async function bootstrapInto(db, { apply = true } = {}) {
   await tx(MIG('PROPOSED_20261016140000_operations_action_center.sql'))
   await run(MIG('PROPOSED_20261017122000_conversation_turn_operator_items.sql'))
   await run(MIG('PROPOSED_20261016200000_automation_holds_registry.sql'))
+  await run(MIG('PROPOSED_20261016200100_automation_hold_guards.sql')) // the registry's live-table guards (split 2026-10-25)
   await run(GATEWAY_BASELINE)
   await db.pool.query(CONVERSATION_FIXTURE)
   if (apply) await tx(GATEWAY_MIGRATION)
