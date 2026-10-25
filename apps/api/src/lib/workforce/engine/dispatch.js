@@ -384,7 +384,7 @@ export async function ensureExpansions({ store, org_id, mission, employees }) {
       : expandNext(current.plan, trigger.output, trigger.input?.slots || [])
     const recorded = []
     for (const st of steps) {
-      const assignee = staff(st.role, { market: st.market ?? null })
+      const assignee = staff(st.role, { market: st.market ?? null, capability: st.capability })
       if (!assignee) { recorded.push({ ...st, assignee_employee_id: null, unstaffed: true }); continue }
       const { assignment } = await store.createAssignment({
         org_id, mission_id: current.mission_id, step_key: st.step, capability_key: st.capability, assignee_employee_id: assignee.employee_id,

@@ -232,7 +232,7 @@ test('PG autonomy: with ZERO external agents online (none registered, the gatewa
   } finally { await env.drop(); trap.restore() }
 })
 
-test('PG open_mission: a directive relayed through the gateway opens a mission with the CANONICAL shape of one typed in Workforce (origin differs); the COO plans it; assign_to_self gives the agent the first step (external)', { skip }, () => withAgent(async ({ env, s }) => {
+test('PG open_mission: a directive relayed through the gateway opens a mission with the CANONICAL shape of one typed in Workforce (origin differs); the COO plans it; assign_to_self NEVER gives an external agent an engine-computed first step (B2: internal staff; the skip is recorded)', { skip }, () => withAgent(async ({ env, s }) => {
   const directive = 'Find the 5 most promising opportunities in Dallas and get them moving'
   const r = await s.call('workforce_open_mission', { client_request_id: 'relay-0001-dallas', directive, assign_to_self: true })
   assert.equal(r.code, 'MISSION_OPENED', JSON.stringify(r))
@@ -249,7 +249,9 @@ test('PG open_mission: a directive relayed through the gateway opens a mission w
   assert.equal(viaGateway.origin, 'agntei')
   assert.equal(viaWorkforce.origin, 'workforce')
   assert.equal(viaGateway.requested_by, OWNER, 'requested by the principal\'s sponsor (the CEO)')
-  // the COO plans it from its own runtime job; the agent (an acquisition agent of Dallas) gets the first step, external
+  // the COO plans it from its own runtime job. The first step ('opps', intel.active_opportunities) is ENGINE-COMPUTED: B2
+  // (2026-10-25) routes it to INTERNAL staff even though the relaying agent (an acquisition agent of Dallas) asked
+  // assign_to_self — an external completion of 'opps' carries no candidates and expanded to an EMPTY triage.
   const jobs = await jobsOf(env, 'workforce.coo_plan')
   assert.equal(jobs.length, 2)
   const gj = jobs.find((j) => j.input.mission_id === viaGateway.mission_id)
@@ -257,8 +259,11 @@ test('PG open_mission: a directive relayed through the gateway opens a mission w
   const plan = createCooPlanHandler({ store: env.store, runtimeStore: env.runtime, env: { WORKFORCE_ENABLED: '1' }, org_id: ORG })
   await plan.run({ job: { job_id: gj.job_id, input: gj.input, requested_by: OWNER }, step: async () => {} })
   const first = (await env.store.listAssignments({ org_id: ORG, mission_id: viaGateway.mission_id }))[0]
-  assert.equal(first.assignee_employee_id, 'emp_scout')
-  assert.equal(first.execution_mode, 'external')
+  assert.equal(first.capability_key, 'intel.active_opportunities')
+  assert.notEqual(first.assignee_employee_id, 'emp_scout', 'never the external agent for an engine-computed step')
+  assert.equal(first.execution_mode, 'internal')
+  const skipped = (await env.owner.query(`select payload from workforce.event where mission_id = $1 and type = 'wf.mission.assign_to_self_skipped'`, [viaGateway.mission_id])).rows
+  assert.equal(skipped[0]?.payload?.reason, 'not_externally_executable', 'the skip is recorded with its reason')
   assert.equal((await env.store.getMission({ org_id: ORG, mission_id: viaGateway.mission_id })).status, 'active')
   // a replay of the relay returns the SAME mission
   const again = await s.call('workforce_open_mission', { client_request_id: 'relay-0001-dallas', directive, assign_to_self: true })

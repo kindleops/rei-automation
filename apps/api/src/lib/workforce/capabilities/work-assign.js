@@ -36,7 +36,7 @@ export const capability = Object.freeze({
     }
     const fo = FOLLOW_ON[action]
     if (!fo) return done({ assigned: false, reason: `no_follow_on_for:${action}`, action, position: input.position ?? null, property_ref: next.output.property_ref ?? null })
-    const assignee = typeof ctx.staff === 'function' ? ctx.staff(fo.role, { market: next.output.market ?? null }) : null
+    const assignee = typeof ctx.staff === 'function' ? ctx.staff(fo.role, { market: next.output.market ?? null, capability: fo.capability_key }) : null
     if (!assignee) return done({ assigned: false, reason: `no_active_${fo.role}`, action, property_ref: next.output.property_ref ?? null }, { outcome_class: 'unknown' })
     const step_key = `${ctx.assignment.step_key}.fo`
     const { assignment: fa, created } = await ctx.store.createAssignment({
