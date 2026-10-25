@@ -143,6 +143,17 @@ export const READS = Object.freeze([
   ...T34_READS.map((r) => Object.freeze({ ...r })),
   // Workforce × Agntei (docs/WORKFORCE-AGNTEI.md §2): principal-bound reads, no read scope (their own grant + T1)
   ...WF_READS.map((r) => Object.freeze({ ...r })),
+  // G2 (2026-10-25): an agent reads back ITS OWN operator task (state, notes, priority, due) — never another agent's or a
+  // human's. Covered by the agent's tasks.update_operator_task grant (whoever may update its own task may read it).
+  Object.freeze({
+    name: 'get_operator_task',
+    title: 'Read one of my operator tasks',
+    description: 'One Action Center task that YOU created through create_operator_task: its state (open / acknowledged / resolved), title, notes, priority, due date, subject and whether a human has taken it over. Another agent\'s task or a human task answers TASK_NOT_FOUND. Read only.',
+    capability: 'tasks.update_operator_task', tier: TIERS.T1, scope: null, resource: 'work_item', risk: 'read',
+    input: obj({ work_item_id: UUID }, ['work_item_id']),
+    limits: { per_min: 30 },
+    wraps: { service: 'public.action_gateway_work_item_get (agent scope, this org) + an ownership check' },
+  }),
   Object.freeze({
     name: 'read_conversation_context',
     title: 'Read conversation context',

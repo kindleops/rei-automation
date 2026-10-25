@@ -123,6 +123,20 @@ export const ACTION_LOGIC = Object.freeze({
     },
   },
 
+  // G2: the read-back of an agent's OWN task (principal-bound; a foreign or human task is indistinguishable from none)
+  get_operator_task: {
+    async read({ input, store, principal, coverResource }) {
+      const w = await store.workItemGet(input.work_item_id)
+      if (!w || String(w.agent_id || '') !== String(principal?.agent_id || '')) throw gwErr('not_found', 'TASK_NOT_FOUND', 'no operator task of yours with this id')
+      coverResource({ type: 'work_item', id: String(w.work_item_id), refs: {} })
+      return {
+        resource_type: 'work_item',
+        task: { work_item_id: w.work_item_id, state: w.state, title: w.title ?? null, notes: Array.isArray(w.notes) ? w.notes : [], priority: w.priority, severity: w.severity,
+          due_at: w.due_at ?? null, subject_type: w.subject_type, subject_id: w.subject_id ?? null, human_owned: w.human_owned === true, created_at: w.created_at },
+      }
+    },
+  },
+
   update_operator_task: {
     async resolve(input, { store }) {
       const w = await store.workItemGet(input.work_item_id)
@@ -138,8 +152,11 @@ export const ACTION_LOGIC = Object.freeze({
         ...(input.resolve === true ? { state: 'resolved' } : {}),
       }
     },
-    async policy({ resource, input }) {
+    async policy({ resource, input, principal }) {
       const w = resource.refs.work_item
+      // G2 (2026-10-25): only the agent's OWN tasks, never one a human has taken over (the domain writer re-checks both)
+      if (String(w.agent_id || '') !== String(principal?.agent_id || '')) return { decision: 'deny', code: 'TASK_NOT_OWNED', evidence: {} }
+      if (w.human_owned === true) return { decision: 'deny', code: 'TASK_HUMAN_OWNED', evidence: {} }
       if (!['open', 'acknowledged'].includes(w.state)) return { decision: 'deny', code: 'TASK_CLOSED', evidence: { state: w.state } }
       if (input.note == null && input.priority == null && input.due_at == null && input.resolve !== true) return { decision: 'deny', code: 'NOTHING_TO_UPDATE', evidence: {} }
       return { decision: 'allow', evidence: { state: w.state } }

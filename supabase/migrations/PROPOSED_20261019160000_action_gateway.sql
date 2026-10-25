@@ -1198,7 +1198,10 @@ security invoker
 set search_path = pg_catalog
 as $fn$
   select jsonb_build_object('work_item_id', w.work_item_id, 'scope', w.scope, 'kind', w.kind, 'state', w.state, 'severity', w.severity, 'priority', w.priority,
-                            'subject_type', w.subject_type, 'subject_id', w.subject_id, 'due_at', w.due_at, 'source_job_id', w.source_job_id, 'created_at', w.created_at)
+                            'subject_type', w.subject_type, 'subject_id', w.subject_id, 'due_at', w.due_at, 'source_job_id', w.source_job_id, 'created_at', w.created_at,
+                            -- G2 (2026-10-25): ownership facts for the policy (the domain writer re-checks them itself)
+                            'agent_id', w.detail ->> 'agent_id', 'human_owned', w.acknowledged_by is not null,
+                            'title', w.title, 'notes', coalesce(w.detail -> 'notes', '[]'::jsonb))
     from agent.ops_work_item w
    where w.work_item_id = p_work_item_id and w.scope = 'agent' and w.org_id = action_gateway.request_org()
 $fn$;
@@ -1308,6 +1311,14 @@ begin
     end if;
     select * into w from agent.ops_work_item where work_item_id = (i.params ->> 'work_item_id')::uuid and org_id = i.org_id and scope = 'agent' for update;
     if w.work_item_id is null then return action_gateway.finish_intent(i.intent_id, 'failed', 'TASK_NOT_FOUND', '{}'::jsonb); end if;
+    -- G2 (2026-10-25): an agent updates ONLY the tasks it created itself, and never one a human has taken over
+    -- (acknowledged). Checked HERE, from the authorized intent and the locked row: a bypassed JS policy changes nothing.
+    if coalesce(w.detail ->> 'agent_id', '') is distinct from i.agent_id then
+      return action_gateway.finish_intent(i.intent_id, 'refused', 'TASK_NOT_OWNED', jsonb_build_object('work_item_id', w.work_item_id));
+    end if;
+    if w.acknowledged_by is not null then
+      return action_gateway.finish_intent(i.intent_id, 'refused', 'TASK_HUMAN_OWNED', jsonb_build_object('work_item_id', w.work_item_id));
+    end if;
     if w.state not in ('open', 'acknowledged') then return action_gateway.finish_intent(i.intent_id, 'refused', 'TASK_CLOSED', jsonb_build_object('work_item_id', w.work_item_id, 'state', w.state)); end if;
     v_notes := coalesce(w.detail -> 'notes', '[]'::jsonb) || coalesce(i.params -> 'notes', '[]'::jsonb);
     if jsonb_array_length(v_notes) > 20 then v_notes := (select coalesce(jsonb_agg(x order by n), '[]'::jsonb) from jsonb_array_elements(v_notes) with ordinality t(x, n) where n > jsonb_array_length(v_notes) - 20); end if;

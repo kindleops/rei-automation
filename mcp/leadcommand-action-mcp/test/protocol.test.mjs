@@ -22,7 +22,10 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
   const c = await connect()
   try {
     const { tools } = await c.client.listTools()
-    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`)].sort())
+    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', 'get_operator_task', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`)].sort())
+    // G2 (2026-10-25): the read-back of an agent's own task is advertised read-only (Agntei rates tools by these hints)
+    const got = tools.find((t) => t.name === 'get_operator_task')
+    assert.ok(got.annotations?.readOnlyHint === true && got.annotations?.destructiveHint === false && got._meta['leadcommand/risk'] === 'read', JSON.stringify({ a: got.annotations, m: got._meta }))
     const ajv = new Ajv({ strict: false })
     for (const t of tools) {
       assert.equal(t.inputSchema.type, 'object', t.name)
