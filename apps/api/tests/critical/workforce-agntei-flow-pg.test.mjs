@@ -271,3 +271,43 @@ test('PG open_mission: a directive relayed through the gateway opens a mission w
   // a refused / unclear directive opens nothing
   assert.equal((await s.call('workforce_open_mission', { client_request_id: s.id('m'), directive: 'text the seller an offer of 200k' })).code, 'DIRECTIVE_REFUSED')
 }, { role_key: 'acquisition_agent', markets: ['dallas'] }))
+
+test('PG B2 intelligence: a participant reads the ENGINE-COMPUTED acquisition intelligence of its mission (candidates + exclusion reasons + provenance), allowlisted and PII-free; a non-participant cannot', { skip }, () => withAgent(async ({ env, s }) => {
+  const { capability: opps } = await import('../../src/lib/workforce/capabilities/active-opportunities.js')
+  // the REAL capability over deal-context rows that carry contact PII the projection must never surface
+  const rows = [
+    { property_id: '9910001', market: 'Dallas', universal_status: 'active', universal_stage: 'offer_interest', thread_key: '+12145550101', inbox_thread_id: '0000aaaa-0000-4000-8000-000000000001',
+      latest_message_direction: 'inbound', last_inbound_at: new Date().toISOString(), owner_name: 'Rosa Example', canonical_e164: '+12145550101', latest_message_body: 'call me at 214-555-0101 or rosa@example.com',
+      property_address_full: '12 Oak St, Dallas, TX 75201', reply_intent: 'interested' },
+    { property_id: '9910002', market: 'Dallas', universal_status: 'closed', universal_stage: 'closed', owner_name: 'Closed Person' },
+    { property_id: '9910003', market: 'Dallas', universal_status: 'active', universal_stage: 'ownership_confirmation', opt_out: true, owner_name: 'Opted Out', canonical_e164: '+12145550103' },
+  ]
+  const r = await opps.run({ services: { listDealContexts: async () => ({ rows }), listActiveHolds: async () => ({ ok: true, holds: [] }) } }, { markets: ['Dallas'], pool: 10 })
+  assert.equal(r.status, 'completed')
+  const { mission, a } = await missionWith(env, [
+    { step: 'opps', capability: 'intel.active_opportunities', assignee: 'emp_head_acquisitions', input: { markets: ['Dallas'], pool: 10 } },
+    { step: 'res.c01', capability: 'research.property', assignee: 'emp_scout', depends_on: ['opps'], input: { property_ref: r.output.candidates[0].property_ref } },
+  ])
+  const [claimed] = await env.store.claimAssignments({ org_id: ORG, owner: 'b2-test-engine', limit: 1, lease_seconds: 60 })
+  assert.equal(claimed.assignment_id, a.opps.assignment_id)
+  await env.store.finishAssignment({ org_id: ORG, assignment_id: claimed.assignment_id, lease_token: claimed.lease_token, status: 'completed', outcome_class: r.outcome_class, output: r.output })
+
+  const x = await s.call('workforce_get_mission_intelligence', { mission_id: mission.mission_id })
+  assert.equal(x.ok, true, JSON.stringify(x))
+  const item = x.result.items.find((i) => i.capability === 'intel.active_opportunities')
+  assert.ok(item, 'the engine-computed opportunity step is returned')
+  assert.equal(item.outcome_class, 'verified')
+  assert.equal(item.data.source, 'deal-context-service.listDealContexts', 'provenance')
+  assert.equal(item.data.eligible, 1)
+  assert.deepEqual([item.data.excluded.closed, item.data.excluded.suppressed], [1, 1], 'the exclusion reasons')
+  assert.equal(item.data.candidates.length, 1)
+  assert.deepEqual(Object.keys(item.data.candidates[0]).sort().filter((k) => ['opportunity_id', 'conversation_id'].includes(k)), [], 'no opportunity / conversation uuid in the projection')
+  assert.ok(x.result.pending.some((p) => p.step_key === 'res.c01'), 'unfinished intelligence steps are listed as pending')
+  const text = JSON.stringify(x.result)
+  for (const pii of ['Rosa', 'Example', '555-0101', '5550101', 'example.com', 'Oak St', 'call me', 'Opted Out', 'Closed Person']) assert.ok(!text.includes(pii), `no PII in the projection: ${pii}`)
+  // a mission the agent does NOT participate in
+  const other = await missionWith(env, [{ step: 'opps', capability: 'intel.active_opportunities', assignee: 'emp_head_acquisitions' }], { key: crypto.randomUUID() })
+  const y = await s.call('workforce_get_mission_intelligence', { mission_id: other.mission.mission_id })
+  assert.equal(y.ok, false)
+  assert.equal(y.code ?? y.error?.code, 'MISSION_NOT_FOUND')
+}))

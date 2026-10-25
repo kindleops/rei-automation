@@ -31,7 +31,7 @@ test('PG link: first bind activates; the same identity again is a no-op; a diffe
   assert.equal(r.result.employee.status, 'pending_link')
   assert.equal(r.result.linked, false)
   assert.equal(r.result.employee.employment_type, 'operator_ai')
-  assert.equal(r.result.grants.length, 11, 'its live Workforce grants')
+  assert.equal(r.result.grants.length, 12, 'its live Workforce grants')
 
   r = await s.call('workforce_link_self', { client_request_id: s.id('link'), ...REF })
   assert.equal(r.ok, true, JSON.stringify(r))
@@ -50,7 +50,7 @@ test('PG link: first bind activates; the same identity again is a no-op; a diffe
   assert.equal(r.code, 'IDENTITY_MISMATCH')
   assert.equal((await empRow(env)).external_agent_id, REF.external_agent_id, 'the linked identity never changes')
   const g = await sel(env.owner, "select count(*)::int n from action_gateway.capability_grants where agent_id = $1 and suspended_reason = 'ANOMALY_IDENTITY_MISMATCH'", [agent_id])
-  assert.equal(g[0].n, 11, 'every live Workforce grant of the principal is suspended')
+  assert.equal(g[0].n, 12, 'every live Workforce grant of the principal is suspended')
   assert.ok((await sel(env.owner, "select 1 from action_gateway.grant_events where event_type = 'failure' and code = 'IDENTITY_MISMATCH'")).length, 'recorded through grant_note_failure')
   assert.ok((await sel(env.owner, "select 1 from workforce.event where type = 'wf.employee.identity_refused' and employee_id = 'emp_scout'")).length)
   r = await s.call('workforce_whoami')
@@ -67,7 +67,7 @@ test('PG link: a second Agntei agent presenting an identity already linked to an
   assert.equal(r.ok, false)
   assert.equal(r.code, 'EXTERNAL_REF_ALREADY_LINKED')
   assert.equal((await empRow(env, 'emp_scout_two')).status, 'pending_link')
-  assert.equal((await sel(env.owner, "select count(*)::int n from action_gateway.capability_grants where agent_id = 'agt_scout_two' and suspended_at is not null"))[0].n, 11)
+  assert.equal((await sel(env.owner, "select count(*)::int n from action_gateway.capability_grants where agent_id = 'agt_scout_two' and suspended_at is not null"))[0].n, 12)
   assert.equal((await sel(env.owner, "select count(*)::int n from action_gateway.capability_grants where agent_id = $1 and suspended_at is not null", [a.agent_id]))[0].n, 0, 'the legitimate agent is untouched')
 }))
 

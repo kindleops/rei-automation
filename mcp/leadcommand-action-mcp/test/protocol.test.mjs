@@ -47,7 +47,7 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
     assert.equal(tools.find((t) => t.name === 'execute_authorized_offer')._meta['leadcommand/tier'], 'T4')
     // Workforce × Agntei: explicit risk metadata — reads are read-only, writes are internal and never destructive or seller-facing
     const wf = tools.filter((t) => t.name.startsWith('leadcommand_workforce_'))
-    assert.equal(wf.length, 11)
+    assert.equal(wf.length, 12)
     for (const t of wf) {
       assert.equal(t._meta['leadcommand/tier'], 'T1', t.name)
       assert.equal(t._meta['leadcommand/seller_facing'], false, t.name)

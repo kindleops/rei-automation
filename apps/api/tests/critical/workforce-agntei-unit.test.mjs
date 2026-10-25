@@ -51,7 +51,7 @@ test('activity: working only with a live lease AND a heartbeat < 2 min; waiting 
   assert.equal(ago(iso(T0 - 2 * 3600_000), T0), '2 h ago')
 })
 
-test('link steps: the exact owner commands (mint → principal → 11 T1 grants → bind with a window → connect → link), copyable, nothing executed, no secret', () => {
+test('link steps: the exact owner commands (mint → principal → 12 T1 grants → bind with a window → connect → link), copyable, nothing executed, no secret', () => {
   const steps = agnteiLinkSteps({ employee: { employee_id: 'emp_scout', display_name: 'Scout' }, org_id: ORG, ceo_user_id: OWNER })
   assert.equal(steps.agent_id, 'agt_scout')
   assert.deepEqual(steps.steps.map((s) => s.id), ['mint', 'principal', 'grants', 'bind', 'connect', 'link'])

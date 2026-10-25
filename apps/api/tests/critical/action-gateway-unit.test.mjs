@@ -23,8 +23,8 @@ const PEPPER = 'p'.repeat(40)
 test('catalog: the 21 requested tools + the scoped reads; implemented = the T1 set + set_thread_hold + the T2 family (reversible or request-only) + the report-only reconciliation + the T3 / T4 family; a T3 / T4 tool is never standing-grant-only; nothing never-exposed exists', () => {
   const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => !['read_conversation_context', 'get_operator_task'].includes(r.name)).map((r) => r.name)].filter((n) => !WORKFORCE_TOOLS.includes(n))
   assert.deepEqual([...all].sort(), [...REQUESTED_TOOLS].sort())
-  // + the 11 Workforce tools (docs/WORKFORCE-AGNTEI.md §2): T1, internal, the ONE Workforce writer / the principal-bound read
-  assert.equal(WORKFORCE_TOOLS.length, 11)
+  // + the 12 Workforce tools (docs/WORKFORCE-AGNTEI.md §2): T1, internal, the ONE Workforce writer / the principal-bound read
+  assert.equal(WORKFORCE_TOOLS.length, 12) // + workforce_get_mission_intelligence (B2)
   for (const n of WORKFORCE_TOOLS) {
     const s = createActionCatalog().get(n)
     assert.ok(s && s.tier === TIERS.T1 && /^workforce\.[a-z_]+$/.test(s.capability), n)
