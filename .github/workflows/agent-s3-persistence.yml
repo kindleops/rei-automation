@@ -82,6 +82,9 @@ jobs:
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: proofdb
+          # the PG test harness creates loopback login roles (agent_api, authenticator) without passwords, as on a
+          # local disposable cluster; this ephemeral, runner-local service accepts them the same way
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready --health-interval 5s
