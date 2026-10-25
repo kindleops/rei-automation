@@ -348,6 +348,16 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261019120000_payload_clean_opaque_ids_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261019120000_payload_clean_opaque_ids_rollback_posttest.sql')],
   },
+  // ── B1 (2026-10-25): typed Agntei identities (external_agent_id / external_install_id) are never phones ──
+  {
+    id: 'payload_clean_typed_external_ids',
+    setup: [SHIM, DURABILITY, S3, PAYLOAD_OPAQUE_IDS],
+    pretest: M('PROPOSED_20261025100000_payload_clean_typed_external_ids_pretest.sql'),
+    apply: [M('PROPOSED_20261025100000_payload_clean_typed_external_ids.sql')],
+    posttest: [M('PROPOSED_20261025100000_payload_clean_typed_external_ids_posttest.sql')],
+    rollback: [M('PROPOSED_20261025100000_payload_clean_typed_external_ids_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261025100000_payload_clean_typed_external_ids_rollback_posttest.sql')],
+  },
   // ── owner 2026-10-17: contact_property_resolution role ownership_declined_unverified ──
   {
     id: 'contact_property_resolution_declined_unverified',
@@ -723,7 +733,44 @@ const FROM_PRODUCTION_STATE = {
   rollback: CHAIN.rollback.filter((r) => r !== M('PROPOSED_20261012140000_intel_runtime_rollback.sql')),
 }
 
-export const MIGRATION_TESTS = Object.freeze([...BASE_TESTS, FROM_PRODUCTION_STATE])
+// ── G1: the MINIMUM chain for Phase A0 (the Action Gateway's T1 task tools), applied onto the FROM_PRODUCTION_STATE
+// baseline (S3 + research_ro + intel_runtime with the Fix A state, as rc_8_5_21_release_chain_from_production_state)
+// with lc_mcp_reader applied FIRST (its documented order) + the public-table fixtures.
+// Then ONLY: #0 holds registry → #2 capabilities → #3 conversation-AI shadow → #7 persistent missions → #15 operations
+// action center → #24 turn operator items → #25 opaque ids → #26 action_gateway. Nothing seller-sending, no T2/T3/T4,
+// no follow-up lifecycle, no reply turns, no negotiation. Proves: ordering, each pretest, idempotent re-apply (the
+// whole cycle twice), the posttests (role shape, privileges, tenant isolation, the gateway self-check), that the
+// Reader's own self-check is STILL ok after #26 replaces the shared egress functions, that the Fix A runtime state is
+// never touched, and that the rollbacks restore the exact pre-chain fingerprint.
+const P = (f, k) => M(`${f}_${k}.sql`)
+const A0 = [
+  ['PROPOSED_20261016200000_automation_holds_registry', HOLDS_REGISTRY],
+  ['PROPOSED_20261013120000_agent_capabilities', CAPS],
+  ['PROPOSED_20261013160000_conversation_ai_shadow', CONV_AI_SHADOW],
+  ['PROPOSED_20261014121000_runtime_kind_limits_event_budget', KIND_LIMITS_FIX], // #4: required by #7 (its pretest)
+  ['PROPOSED_20261014120000_persistent_missions', MISSIONS], // #7: required by #15 (its pretest)
+  ['PROPOSED_20261016140000_operations_action_center', OPS_ACTION_CENTER],
+  ['PROPOSED_20261017122000_conversation_turn_operator_items', TURN_OPERATOR_ITEMS],
+  ['PROPOSED_20261019120000_payload_clean_opaque_ids', PAYLOAD_OPAQUE_IDS],
+  ['PROPOSED_20261019160000_action_gateway', ACTION_GATEWAY],
+]
+const RUNTIME_BEHAVIOURAL = new Set(['PROPOSED_20261014121000_runtime_kind_limits_event_budget', 'PROPOSED_20261014120000_persistent_missions',
+  'PROPOSED_20261016140000_operations_action_center', 'PROPOSED_20261017122000_conversation_turn_operator_items'])
+const PHASE_A0_FROM_PRODUCTION_STATE = {
+  id: 'phase_a0_gateway_from_production_state',
+  setup: [LC_MCP_ROLE_RESET, ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
+    GRAPH_LIVE_FUNCTIONS_BASELINE, CPR_LIVE_CONSTRAINTS, LC_MCP_CHAIN_BASELINE, ACTION_GATEWAY_BASELINE, RUNTIME, FIX_A_STATE, LC_MCP_READER],
+  apply: A0.flatMap(([f, file]) => [{ fixture: P(f, 'pretest') }, file]),
+  verify: [T('rc_8_5_21_fix_a_state_verify.sql'), T('phase_a0_reader_selfcheck_verify.sql')],
+  // The behavioural posttests of #4, #7, #15 and #24 arm / claim R2 runtime jobs (inside BEGIN … ROLLBACK). The
+  // emergency stop of the Fix A state (kept engaged in this baseline on purpose) refuses that, correctly
+  // ({"blocked":"emergency_stop"} / runtime_limits_stop_stamped). They run in rc_8_5_21_release_chain, whose runtime
+  // is armed. Every structural posttest runs here: holds, capabilities, shadow, opaque ids, the gateway, the Reader.
+  posttest: [...A0.filter(([f]) => !RUNTIME_BEHAVIOURAL.has(f)).map(([f]) => P(f, 'posttest'))], // the Reader: phase_a0_reader_selfcheck_verify (its standalone posttest needs census_geo_metrics, absent from this fixture)
+  rollback: A0.map(([f]) => P(f, 'rollback')), // listed in apply order; the runner runs them in REVERSE
+}
+
+export const MIGRATION_TESTS = Object.freeze([...BASE_TESTS, FROM_PRODUCTION_STATE, PHASE_A0_FROM_PRODUCTION_STATE])
 
 // RECORDED PRODUCTION HISTORY (applied_in_production: true). These migrations were applied out of band and are
 // kept only so the repository matches production's migration history. They are NOT test entries, NOT chain links and

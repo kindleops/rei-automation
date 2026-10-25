@@ -68,8 +68,23 @@ begin
   end loop;
 end $$;
 
-drop function if exists public.lc_reachable_egress_indirect(oid);
-drop function if exists public.lc_egress_platform_allowlists();
+-- G1: these two egress functions are a SYNCED, byte-identical block shared with lc_mcp_reader (the read-only
+-- Reader). When the Reader is applied first (its documented order), #26 only re-creates them unchanged and adds
+-- EXECUTE for lc_action_gateway. Dropping them here deleted functions the Reader's self-check needs (it re-checks
+-- periodically and fails closed: every Reader call would be refused). Found by phase_a0_gateway_from_production_state.
+-- With the Reader present: keep them, revoke only the gateway's EXECUTE.
+do $$
+begin
+  if to_regprocedure('public.lc_mcp_reader_self_check(text[],text[],name)') is not null then
+    if exists (select 1 from pg_roles where rolname = 'lc_action_gateway') then
+      revoke all on function public.lc_reachable_egress_indirect(oid) from lc_action_gateway;
+      revoke all on function public.lc_egress_platform_allowlists() from lc_action_gateway;
+    end if;
+  else
+    drop function if exists public.lc_reachable_egress_indirect(oid);
+    drop function if exists public.lc_egress_platform_allowlists();
+  end if;
+end $$;
 
 drop schema action_gateway cascade;
 
