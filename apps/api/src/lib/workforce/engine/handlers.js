@@ -13,6 +13,7 @@ import { createStaffer } from '../coo/staffing.js'
 import { planMessage, reportMessage, statusAnswer } from '../coo/respond.js'
 import { COO_EMPLOYEE_ID } from '../org/seed.js'
 import { roleHasCapability } from '../org/charters.js'
+import { externalMayTake } from '../coo/staffing.js'
 import { buildMissionReport, verifyReportHonesty } from './report.js'
 import { enqueueWorkforceJob, missionSettlement, runDispatchPass } from './dispatch.js'
 
@@ -63,9 +64,9 @@ export function createCooPlanHandler(deps) {
         // relaying employee when its charter covers that capability; otherwise the normal staffing applies (and the skip is recorded)
         const selfId = typeof ctx.job.input?.assign_first_to === 'string' ? ctx.job.input.assign_first_to : null
         const self = selfId ? roster.find((e) => e.employee_id === selfId && e.status === 'active') || null : null
-        const selfFits = Boolean(self && draft.steps[0] && roleHasCapability(self.role_key, draft.steps[0].capability))
-        draft.steps = draft.steps.map((s, i) => ({ ...s, assignee_employee_id: i === 0 && selfFits ? self.employee_id : staff(s.role, { market: s.market ?? null })?.employee_id ?? null }))
-        if (selfId && !selfFits) await store.appendEvent({ org_id, type: 'wf.mission.assign_to_self_skipped', mission_id, employee_id: self ? selfId : null, payload: { reason: !self ? 'employee_not_active' : 'capability_not_in_charter' } })
+        const selfFits = Boolean(self && draft.steps[0] && roleHasCapability(self.role_key, draft.steps[0].capability) && externalMayTake(self, draft.steps[0].capability))
+        draft.steps = draft.steps.map((s, i) => ({ ...s, assignee_employee_id: i === 0 && selfFits ? self.employee_id : staff(s.role, { market: s.market ?? null, capability: s.capability })?.employee_id ?? null }))
+        if (selfId && !selfFits) await store.appendEvent({ org_id, type: 'wf.mission.assign_to_self_skipped', mission_id, employee_id: self ? selfId : null, payload: { reason: !self ? 'employee_not_active' : !roleHasCapability(self.role_key, draft.steps[0]?.capability) ? 'capability_not_in_charter' : 'not_externally_executable' } })
         try {
           mission = await store.setMissionPlan({ org_id, mission_id, objective: compactInterpretation(interp), playbook_key: draft.playbook, plan: draft, expected_version: mission.plan_version })
         } catch (e) {
