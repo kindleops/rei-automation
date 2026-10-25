@@ -21,6 +21,10 @@ on:
       - 'apps/api/scripts/agent/**'
       - 'infra/cloudflare/worker/index.ts'
       - '.github/workflows/agent-s3-persistence.yml'
+      # G1/G2 (2026-10-25): the Action Gateway, Workforce and both MCP servers
+      - 'apps/api/src/lib/domain/action-gateway/**'
+      - 'apps/api/src/lib/workforce/**'
+      - 'mcp/**'
       # rc-8.5.15.1 test isolation: any fixture, migration, test or harness change
       - 'scripts/db/**'
       - 'supabase/migrations/**'
@@ -143,6 +147,37 @@ jobs:
           INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000
           node --experimental-strip-types --no-warnings=ExperimentalWarning --import ./tests/register-aliases.mjs
           --test --test-concurrency=1 tests/critical/agent-*.test.mjs
+
+      # G1/G2 (2026-10-25) test-discovery gap: the agent-* glob above never matched these suites, so the Action Gateway,
+      # Workforce and payload-guard proofs (incl. the B1 typed-id regression and the G2 ownership / scope proofs) never ran in CI.
+      - name: Action Gateway + Workforce + payload-guard suites (disposable Postgres)
+        working-directory: apps/api
+        env:
+          AGENT_PG_TEST_DB_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: >-
+          NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test
+          INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000
+          node --experimental-strip-types --no-warnings=ExperimentalWarning --import ./tests/register-aliases.mjs
+          --test --test-concurrency=1 tests/critical/action-gateway-*.test.mjs tests/critical/workforce-*.test.mjs tests/critical/payload-clean-*.test.mjs
+
+      # The PostgREST layer (G3 provenance): the OFFICIAL release asset pinned by its GitHub-published sha256 (the step
+      # above), on this ephemeral runner, plus PostgreSQL 17 server binaries from the PGDG apt repository, so the opt-in
+      # e2e tests that start their own cluster + the REAL PostgREST (the Reader's postgrest-e2e, the Action MCP's pg-net
+      # exposure e2e) actually run instead of skipping.
+      - name: PostgreSQL 17 server binaries (PGDG)
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-17
+          /usr/lib/postgresql/17/bin/postgres --version
+
+      - name: Reader MCP + Action MCP suites (disposable Postgres + the pinned PostgREST)
+        env:
+          AGENT_PG_TEST_DB_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          LC_PG_BIN: /usr/lib/postgresql/17/bin
+          LC_POSTGREST_BIN: /tmp/postgrest
+        run: |
+          (cd mcp/leadcommand-mcp && npm ci && npm test)
+          (cd mcp/leadcommand-action-mcp && npm ci && npm test)
 
       - name: credential loader on the disposable Postgres (role-enforced read-only, rc-8.5.21-c)
         working-directory: apps/api
