@@ -118,13 +118,13 @@ BEGIN … ROLLBACK.
   is applied, so none is ever applied or re-applied. The production `v_inbox_thread_state_buckets` lacks the
   `declined_unverified` mapping (verified read-only 2026-10-20). It needs a new forward view migration that also
   rebuilds the dependents `v_inbox_bucket_counts` and `v_inbox_zero_counts`. That migration is
-  **`PROPOSED_20261020120000_inbox_bucket_views_declined_unverified.sql`** (rc-8.5.21 v4), a standalone entry
+  **`PROPOSED_20261020120500_inbox_bucket_views_declined_unverified.sql`** (rc-8.5.21 v4), a standalone entry
   `inbox_bucket_views_declined_unverified` outside the release chain. It uses `CREATE OR REPLACE` only, so both
   dependents keep their column contract in place. An md5 precondition refuses any body other than production's
   10-10 body (edba02b9… / 140bccf2…, verified read-only 2026-10-20), and its rollback restores that body.
   Production order: apply it after #21 (`PROPOSED_20261017100000`, the role) and before the
   `PROPOSED_20261017110000` disposition backfill. That backfill refuses by its own precondition until the view
-  maps `declined_unverified`. Its stamp 20261020120000 is unique and not recorded in production history.
+  maps `declined_unverified`. Its stamp is 20261020120500 (renumbered from 20261020120000, which the research-package migration PROPOSED_20261020120000_research_event_budget_ceilings on release/cloudflare-production also uses; neither was ever applied or recorded).
 - **The 2026-10-18 spatial_ref_sys migrations are recorded production history**: see the next section. They are
   never applied.
 - A production apply records each migration under its file stamp. Before applying, re-read `list_migrations`

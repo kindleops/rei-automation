@@ -1,4 +1,4 @@
-// rc-8.5.21 v4 fix pass — the FORWARD inbox bucket view migration (PROPOSED_20261020120000) refuses on
+// rc-8.5.21 v4 fix pass — the FORWARD inbox bucket view migration (PROPOSED_20261020120500) refuses on
 // drift and succeeds only on the production 10-10 body. DISPOSABLE PostgreSQL 17 only
 // (AGENT_PG_TEST_DB_URL; skipped — reported — without it). Never production.
 //   precondition  md5(pg_get_viewdef('public.v_inbox_thread_state_buckets'::regclass)) =
@@ -14,7 +14,7 @@ import { pgAvailable, skipReason, freshDb, REPO_DIR } from '../pg/agent-pg-harne
 
 const skip = pgAvailable() ? false : skipReason
 const F = (p) => fs.readFileSync(path.join(REPO_DIR, p), 'utf8')
-const MIG = 'supabase/migrations/PROPOSED_20261020120000_inbox_bucket_views_declined_unverified'
+const MIG = 'supabase/migrations/PROPOSED_20261020120500_inbox_bucket_views_declined_unverified'
 const BASE = 'scripts/db/fixtures/inbox_bucket_views_public_baseline.sql'
 const DEP = 'scripts/db/fixtures/inbox_zero_counts_dependant.sql'
 

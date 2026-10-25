@@ -1,5 +1,5 @@
 -- lc-fixture: pretest
--- PROPOSED ONLY — PRETEST for PROPOSED_20261020120000_inbox_bucket_views_declined_unverified.sql.
+-- PROPOSED ONLY — PRETEST for PROPOSED_20261020120500_inbox_bucket_views_declined_unverified.sql.
 -- Read-only (BEGIN … ROLLBACK). DISPOSABLE DATABASE ONLY. The production state: the 10-10 view body.
 \set ON_ERROR_STOP on
 begin;

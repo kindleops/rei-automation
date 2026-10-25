@@ -1,9 +1,44 @@
--- PROPOSED -- ROLLBACK for PROPOSED_20261020120000_inbox_bucket_views_declined_unverified.sql.
--- Restores the PRODUCTION body of the inbox bucket views: the 10-10 text of
--- PROPOSED_20261010120000_inbox_price_gap_gate.sql (git 31f405e3^), byte-identical view definitions.
--- CREATE OR REPLACE only (same 140 columns): grants and dependants are preserved. DISPOSABLE DB tested.
+-- PROPOSED -- FORWARD view migration: the inbox bucket views carry the owner 2026-10-17 declined_unverified
+-- mapping (rc-8.5.21 v4 fix pass). WRITTEN, NOT APPLIED. Each production migration is separately authorized.
+--
+-- Production carries the 10-10 body of PROPOSED_20261010120000_inbox_price_gap_gate.sql (applied out of band
+-- by the owner's apply.sh on 2026-10-12). The repo file was edited on 10-17 in 31f405e3 (declined_unverified:
+-- a DISTINCT disposition, ownership unverified) — an edited, already-applied migration never reaches
+-- production, so production's v_inbox_thread_state_buckets still files a declined_unverified thread as
+-- not-closed and its ownership_declined_unverified reply as unresolved. NEVER re-apply 20261010120000:
+-- this NEW stamp carries the 10-17 body forward.
+--
+-- What changes (v_inbox_thread_state_buckets; column list, order and count unchanged = 140):
+--   derived bucket            disposition declined_unverified -> 'dead' (with sold / unqualified)
+--   f_closed_disposition      + declined_unverified
+--   f_reply_resolved          + last_intent ownership_declined_unverified
+--   f_thread_resolved         + thread intent ownership_declined_unverified
+-- v_inbox_bucket_counts is re-created with its unchanged body (it reads the buckets view; same 21 columns).
+-- CREATE OR REPLACE only (no DROP): grants and dependants — v_inbox_bucket_counts and v_inbox_zero_counts
+-- (which reads the counts view) — keep their column contract and are preserved in place.
+-- Guarded: a DO-block md5 precondition refuses any body but production's; a postcondition asserts the mapping.
+-- Rollback: PROPOSED_20261020120500_inbox_bucket_views_declined_unverified_rollback.sql (the production 10-10 body).
+-- Tests: scripts/db/migration-tests.manifest.mjs id inbox_bucket_views_declined_unverified.
 
 begin;
+
+-- PRECONDITION (refuses on drift): the target must carry EXACTLY the production 10-10 body. Expression:
+--   md5(pg_get_viewdef('public.v_inbox_thread_state_buckets'::regclass)) = 'edba02b93d68b768a408a96614a35dad'
+--   md5(pg_get_viewdef('public.v_inbox_bucket_counts'::regclass))        = '140bccf254cf97faf339c2e88d1cbf9a'
+-- (coordinator-supplied production values; the disposable PG17 test reproduces both from the 10-10 body
+-- byte-for-byte, so there is NO override setting.) Anything else — an older body, a hand edit, this
+-- migration already applied — RAISEs and nothing changes.
+do $pre$
+declare b text := md5(pg_get_viewdef('public.v_inbox_thread_state_buckets'::regclass));
+        c text := md5(pg_get_viewdef('public.v_inbox_bucket_counts'::regclass));
+begin
+  if b <> 'edba02b93d68b768a408a96614a35dad' then
+    raise exception 'inbox_bucket_views_declined_unverified: refused — v_inbox_thread_state_buckets definition md5 % is not the production 10-10 body (edba02b93d68b768a408a96614a35dad)', b;
+  end if;
+  if c <> '140bccf254cf97faf339c2e88d1cbf9a' then
+    raise exception 'inbox_bucket_views_declined_unverified: refused — v_inbox_bucket_counts definition md5 % is not the production body (140bccf254cf97faf339c2e88d1cbf9a)', c;
+  end if;
+end $pre$;
 
 create or replace view public.v_inbox_thread_state_buckets as
 with pending_send as (
@@ -28,7 +63,8 @@ with pending_send as (
         when s.is_suppressed = true then 'suppressed'
         when lower(coalesce(s.disposition, '')) = any (array['wrong_number','wrong_person']) then 'dead'
         -- 7.2: sold / unqualified close the thread for this property
-        when lower(coalesce(s.disposition, '')) = any (array['sold','unqualified']) then 'dead'
+        -- owner 2026-10-17: declined_unverified (ownership unverified) also closes it — never follow_up
+        when lower(coalesce(s.disposition, '')) = any (array['sold','unqualified','declined_unverified']) then 'dead'
         when lower(coalesce(s.disposition, '')) = 'not_interested' then 'follow_up'
         when s.latest_direction = 'inbound' then 'new_replies'
         else 'cold'
@@ -47,10 +83,10 @@ with pending_send as (
     f.f_disposition = any (array['wrong_number','wrong_person']) as f_wrong_number_contact,
     f.f_delivery = '' or f.f_delivery = any (array['sent','delivered','accepted','queued','pending','sending','submitted','delivery_unknown']) as f_delivery_ok,
     f.f_out_at is not null and (f.last_inbound_at is null or f.last_inbound_at < f.f_out_at) as f_outbound_last_no_reply,
-    f.f_disposition = any (array['sold','unqualified']) as f_closed_disposition,
+    f.f_disposition = any (array['sold','unqualified','declined_unverified']) as f_closed_disposition,
     -- 8.5: every NON-ACTIONABLE latest reply (reply-actionability.js NON_ACTIONABLE_REPLY_INTENTS)
-    f.f_last_intent = any (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','need_time','asking_price_implausible','acknowledgement','reaction_only']) as f_reply_resolved,
-    f.f_thread_intent = any (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','need_time','asking_price_implausible','acknowledgement','reaction_only']) as f_thread_resolved,
+    f.f_last_intent = any (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','ownership_declined_unverified','need_time','asking_price_implausible','acknowledgement','reaction_only']) as f_reply_resolved,
+    f.f_thread_intent = any (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','ownership_declined_unverified','need_time','asking_price_implausible','acknowledgement','reaction_only']) as f_thread_resolved,
     -- 8.5: PRIORITY_REPLY_INTENTS / POSITIVE_REPLY_INTENTS
     f.f_thread_intent = any (array['asking_price_provided','asks_offer','contract_requested','seller_interested','callback_requested','voicemail_call_request']) as f_priority_intent,
     f.f_thread_intent = any (array['asking_price_provided','asks_offer','contract_requested','seller_interested','callback_requested','voicemail_call_request','ownership_confirmed','latent_interest','condition_disclosed']) as f_positive_intent,
@@ -318,5 +354,21 @@ SELECT count(*) FILTER (WHERE in_priority) AS priority,
     -- appended (10): the non-alerting Price gap sub-bucket
     count(*) FILTER (WHERE in_price_gap) AS price_gap
    FROM v_inbox_thread_state_buckets;
+
+
+-- POSTCONDITION: the declined_unverified mapping exists, the column contracts are unchanged, and the
+-- dependants (v_inbox_bucket_counts, v_inbox_zero_counts when present) still resolve.
+do $post$
+declare n int;
+begin
+  if position('declined_unverified' in pg_get_viewdef('public.v_inbox_thread_state_buckets'::regclass)) = 0
+     or position('ownership_declined_unverified' in pg_get_viewdef('public.v_inbox_thread_state_buckets'::regclass)) = 0 then
+    raise exception 'inbox_bucket_views_declined_unverified: postcondition failed — the declined_unverified mapping is missing';
+  end if;
+  select count(*) into n from information_schema.columns where table_schema = 'public' and table_name = 'v_inbox_thread_state_buckets';
+  if n <> 140 then raise exception 'inbox_bucket_views_declined_unverified: postcondition failed — % columns (want 140)', n; end if;
+  perform 1 from public.v_inbox_bucket_counts;
+  if to_regclass('public.v_inbox_zero_counts') is not null then perform 1 from public.v_inbox_zero_counts; end if;
+end $post$;
 
 commit;

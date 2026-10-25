@@ -34,8 +34,18 @@ export const DEFAULT_DIR = 'supabase/migrations'
 //                     command_wall_displays (applied out of band 2026-10-11) keeps 150000
 // What remains is PERMANENT historical collisions: excluded from every deploy plan, never renamed.
 export const ALLOWLIST = Object.freeze({
-  '20261010120000': 'agent_s3_persistence: APPLIED out of band (2026-10-11 agent DB apply). inbox_price_gap_gate: APPLIED (owner apply.sh, 2026-10-12; body drift: production carries the 10-10 body, byte-identical to 5b470fa5 (tmp/owner-apply-20261012); the repo file was edited 10-17 in 31f405e3). Verified read-only 2026-10-20 (tmp/prod-readonly-20261020/RESULTS.md): the view columns in_unclear / f_price_gap / in_price_gap and the counts price_gap / unclear exist; the production view does NOT map declined_unverified; dependents v_inbox_bucket_counts, v_inbox_zero_counts. The forward view migration PROPOSED_20261020120000_inbox_bucket_views_declined_unverified carries the 10-17 mapping. Permanent historical collision: never re-apply, never rename. Excluded from every deploy plan.',
+  '20261010120000': 'agent_s3_persistence: APPLIED out of band (2026-10-11 agent DB apply). inbox_price_gap_gate: APPLIED (owner apply.sh, 2026-10-12; body drift: production carries the 10-10 body, byte-identical to 5b470fa5 (tmp/owner-apply-20261012); the repo file was edited 10-17 in 31f405e3). Verified read-only 2026-10-20 (tmp/prod-readonly-20261020/RESULTS.md): the view columns in_unclear / f_price_gap / in_price_gap and the counts price_gap / unclear exist; the production view does NOT map declined_unverified; dependents v_inbox_bucket_counts, v_inbox_zero_counts. The forward view migration PROPOSED_20261020120500_inbox_bucket_views_declined_unverified carries the 10-17 mapping. Permanent historical collision: never re-apply, never rename. Excluded from every deploy plan.',
   '20261010130000': 'agent_research_ro: APPLIED out of band (2026-10-11 agent DB apply). inbox_pipeline_hygiene_cleanup: APPLIED (updated_by = hygiene_20261010; follow-up intents in production per rc821-integration/followup-reconciliation.md W5). Permanent historical collision: rename neither. Excluded from every deploy plan.',
+})
+
+// Stamps RESERVED by migrations on other release branches (Supabase keys history on the version, so two
+// branches must never ship different migrations under one stamp). A file HERE with a reserved stamp and a DIFFERENT
+// slug is a finding; the same migration arriving here (a merge) is fine. Found 2026-10-25: this branch's inbox
+// bucket view migration shared 20261020120000 with the research-package ceilings migration (neither applied); it
+// was renumbered to 20261020120500.
+export const RESERVED = Object.freeze({
+  '20261020120000': { slug: 'research_event_budget_ceilings', branch: 'release/cloudflare-production' },
+  '20261020120100': { slug: 'research_package_schedules', branch: 'release/cloudflare-production' },
 })
 
 const FILE_RE = /^(?:PROPOSED_)?(\d{14})_([A-Za-z0-9_]+)\.sql$/
@@ -69,11 +79,15 @@ export function findDuplicateVersions(names) {
   return dups.sort((a, b) => a.version.localeCompare(b.version))
 }
 
-export function scanDuplicateVersions({ names, allowlist = ALLOWLIST } = {}) {
+export function scanDuplicateVersions({ names, allowlist = ALLOWLIST, reserved = RESERVED } = {}) {
   const dups = findDuplicateVersions(names)
   const findings = []
   for (const d of dups) {
     if (!Object.hasOwn(allowlist, d.version)) findings.push({ rule: 'duplicate-version', version: d.version, detail: d.migrations.join(', ') })
+  }
+  for (const e of parseMigrationNames(names)) {
+    const r = reserved[e.version]
+    if (r && !(e.slug === r.slug || e.slug.startsWith(`${r.slug}_`))) findings.push({ rule: 'reserved-version', version: e.version, detail: `${e.file} reuses a stamp reserved by ${r.slug} on ${r.branch}` })
   }
   const dupVersions = new Set(dups.map((d) => d.version))
   for (const v of Object.keys(allowlist)) {
