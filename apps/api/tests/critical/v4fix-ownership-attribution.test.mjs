@@ -148,10 +148,10 @@ test('v4 migrations: 20261010120000 inbox_price_gap_gate is recorded APPLIED wit
   const note = ALLOWLIST['20261010120000']
   assert.match(note, /inbox_price_gap_gate: APPLIED \(owner apply\.sh, 2026-10-12; body drift/)
   assert.match(note, /31f405e3/)
-  assert.match(note, /PROPOSED_20261020120000_inbox_bucket_views_declined_unverified/)
+  assert.match(note, /PROPOSED_20261020120500_inbox_bucket_views_declined_unverified/)
   assert.ok(!/PROBABLY APPLIED/.test(note))
-  const fwd = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261020120000_inbox_bucket_views_declined_unverified.sql'), 'utf8')
-  const rb = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261020120000_inbox_bucket_views_declined_unverified_rollback.sql'), 'utf8')
+  const fwd = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261020120500_inbox_bucket_views_declined_unverified.sql'), 'utf8')
+  const rb = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261020120500_inbox_bucket_views_declined_unverified_rollback.sql'), 'utf8')
   const code = (s) => s.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n')
   assert.match(code(fwd), /'sold','unqualified','declined_unverified'/)
   assert.match(code(fwd), /'ownership_declined_unverified'/)

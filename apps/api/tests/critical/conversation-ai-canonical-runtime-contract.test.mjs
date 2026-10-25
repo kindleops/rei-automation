@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { importClosure, listFiles, SRC } from '../helpers/import-graph.mjs'
+import { importClosure, importsFile, listFiles, SRC } from '../helpers/import-graph.mjs'
 import * as canonical from '../../src/lib/domain/conversation-ai/runtime/canonical.js'
 import * as evaluation from '../../src/lib/domain/conversation-ai/runtime/evaluation-entry.js'
 import { runCanonicalShadow } from '../../src/lib/domain/conversation-ai/runtime/canonical-shadow.js'
@@ -26,11 +26,31 @@ const rel = (f) => path.relative(SRC, f)
 const read = (f) => fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1')
 const ALL = listFiles(SRC).filter((f) => /\.(m?js|ts|tsx)$/.test(f))
 const importersOf = (re) => ALL.filter((f) => re.test(read(f))).map(rel).sort()
+const R1_ENGINE = path.join(SRC, 'lib/domain/conversation-ai/engine.js')
+
+test('static: the R1-engine import check resolves specifiers (it still catches every way of importing it, and only it)', () => {
+  assert.ok(fs.existsSync(R1_ENGINE), 'the retired R1 engine file is where the check expects it')
+  const beside = path.join(SRC, 'lib/domain/conversation-ai/some-caller.js')
+  const below = path.join(SRC, 'lib/domain/conversation-ai/runtime/some-caller.js')
+  const elsewhere = path.join(SRC, 'lib/workforce/authority/some-caller.js')
+  for (const [src, from] of [
+    ["import { x } from './engine.js'", beside], ["import { x } from './engine'", beside], ["export { x } from './engine.js'", beside],
+    ["const m = await import('../engine.js')", below], ["import '../engine.js'", below],
+    ["import { x } from '@/lib/domain/conversation-ai/engine.js'", elsewhere], ["import { x } from '../../domain/conversation-ai/engine.js'", elsewhere],
+  ]) assert.equal(importsFile(src, from, R1_ENGINE), true, `${src} (from ${rel(from)}) is an R1 import`)
+  for (const [src, from] of [
+    ["import { authorize } from './engine.js'", elsewhere], // workforce/authority's own engine.js
+    ["// import { x } from './engine.js'", beside], ["import { x } from './engine-v2.js'", beside], ["import { x } from './runtime/engine.js'", beside],
+  ]) assert.equal(importsFile(src, from, R1_ENGINE), false, `${src} (from ${rel(from)}) is not an R1 import`)
+})
 
 test('static: decideAndCompose is the ONLY entry to the pipeline; the pipeline is the only composer caller; the R1 engine has no importer', () => {
   assert.deepEqual(importersOf(/pipeline\/run\.js['"]/), ['lib/domain/conversation-ai/runtime/canonical.js'])
   assert.deepEqual(importersOf(/\bcomposeReply\b/).filter((f) => f !== 'lib/domain/conversation-ai/pipeline/compose.js'), ['lib/domain/conversation-ai/pipeline/run.js'])
-  assert.deepEqual(importersOf(/conversation-ai\/engine\.js['"]|from\s+['"]\.\.?\/engine\.js['"]/), [], 'nothing imports the retired R1 engine')
+  // the retired R1 engine, by RESOLVED import (relative, "@/" alias, dynamic) plus any literal path naming it.
+  // A name match on "./engine.js" also hit lib/workforce/authority's own, unrelated engine.js.
+  assert.deepEqual(ALL.filter((f) => f !== R1_ENGINE && (importsFile(fs.readFileSync(f, 'utf8'), f, R1_ENGINE) || /conversation-ai\/engine(?:\.js)?['"]/.test(read(f)))).map(rel).sort(), [],
+    'nothing imports the retired R1 engine')
   assert.deepEqual(importersOf(/\brunConversationPipeline\b/).filter((f) => f !== 'lib/domain/conversation-ai/pipeline/run.js'), ['lib/domain/conversation-ai/runtime/canonical.js'])
 })
 

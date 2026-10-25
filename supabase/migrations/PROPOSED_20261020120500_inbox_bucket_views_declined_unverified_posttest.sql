@@ -1,5 +1,5 @@
 -- lc-fixture: posttest
--- PROPOSED ONLY — POSTTEST for PROPOSED_20261020120000_inbox_bucket_views_declined_unverified.sql.
+-- PROPOSED ONLY — POSTTEST for PROPOSED_20261020120500_inbox_bucket_views_declined_unverified.sql.
 -- Inside BEGIN … ROLLBACK. DISPOSABLE DATABASE ONLY.
 \set ON_ERROR_STOP on
 begin;

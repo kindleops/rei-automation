@@ -70,6 +70,7 @@ export async function t34Db({ applyT34 = true } = {}) {
       await tx(MIG('PROPOSED_20261016140000_operations_action_center.sql'))
       await run(MIG('PROPOSED_20261017122000_conversation_turn_operator_items.sql'))
       await run(MIG('PROPOSED_20261016200000_automation_holds_registry.sql'))
+      await run(MIG('PROPOSED_20261016200100_automation_hold_guards.sql'))
       await tx(MIG('PROPOSED_20261016120000_conversation_reply_turns.sql'))
       await tx(MIG('PROPOSED_20261015130000_message_origin_ai_generated_messages.sql'))
       await tx(MIG('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql'))

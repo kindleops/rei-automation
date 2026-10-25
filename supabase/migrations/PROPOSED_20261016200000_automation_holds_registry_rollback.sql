@@ -7,19 +7,14 @@ begin;
 do $$
 begin
   if to_regclass('public.automation_holds') is null then raise exception 'rollback precondition: registry not present'; end if;
+  if exists (select 1 from pg_trigger where not tgisinternal and tgname = 'aa_automation_hold_send_queue') then
+    raise exception 'rollback precondition: roll back PROPOSED_20261016200100_automation_hold_guards first';
+  end if;
   if exists (select 1 from public.automation_holds where released_at is null) then
     raise exception 'rollback precondition: % active hold(s); release them (roll back (b)/(c)) first', (select count(*) from public.automation_holds where released_at is null);
   end if;
 end $$;
 
-drop trigger aa_automation_hold_send_queue on public.send_queue;
-drop trigger aa_automation_hold_opportunities on public.acquisition_opportunities;
-drop trigger aa_automation_hold_closing_cases on public.closing_cases;
-drop trigger aa_automation_hold_seller_offers on public.seller_offers;
-drop function public.automation_hold_guard_send_queue();
-drop function public.automation_hold_guard_opportunities();
-drop function public.automation_hold_guard_closing_cases();
-drop function public.automation_hold_guard_seller_offers();
 drop function public.automation_hold_assert_clear(text,text,text,uuid,text,uuid,text,jsonb);
 drop function public.automation_hold_stage_rank(text);
 drop function public.automation_hold_for(text,uuid,text,uuid,text,text);
@@ -27,6 +22,7 @@ drop table public.automation_hold_events;
 drop table public.automation_holds;
 drop function public.automation_holds_audit();
 drop function public.automation_holds_append_only();
+drop function if exists public.automation_holds_require_guards();
 
 do $$
 begin

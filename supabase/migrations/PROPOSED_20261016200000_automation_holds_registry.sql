@@ -37,6 +37,11 @@
 -- refuses; hold -> writer's trigger raises).
 --
 -- Own transaction; every precondition and postcondition RAISEs, so any failed assertion aborts the commit.
+-- SPLIT (G1, 2026-10-25): this file is the REGISTRY CORE (tables, append-only enforcement, audit, the lookup,
+-- privileges, RLS) and installs NO trigger on a live table. The four live-table guards are
+-- PROPOSED_20261016200100_automation_hold_guards.sql, applied right after this file wherever holds are enforced.
+-- Until they are installed no hold can be created (aa_automation_holds_require_guards). Core + guards = the
+-- previous single file, behaviour for behaviour.
 begin;
 
 -- ── preconditions ───────────────────────────────────────────────────────────
@@ -246,104 +251,25 @@ begin
           jsonb_build_object('table', p_table, 'reason', v_why, 'via', v_via));
 end $fn$;
 
--- ── table guards ────────────────────────────────────────────────────────────
-create function public.automation_hold_guard_seller_offers() returns trigger
-language plpgsql set search_path = public, pg_temp as $fn$
-declare v_cap text;
+-- ── no hold without enforcement (G1 split, 2026-10-25) ─────────────────────────
+-- The live-table guards (send_queue, seller_offers, closing_cases, acquisition_opportunities) are a SEPARATE link,
+-- PROPOSED_20261016200100_automation_hold_guards.sql. Until ALL FOUR are installed and enabled, no hold may be
+-- created: a hold that nothing enforces would be a false assurance. The registry, its audit, the lookup and the
+-- privileges are complete without them (the lookup simply finds no hold).
+create function public.automation_holds_require_guards() returns trigger
+language plpgsql
+set search_path = pg_catalog, public
+as $$
 begin
-  if tg_op = 'UPDATE'
-     and new.status is not distinct from old.status and new.accepted_at is not distinct from old.accepted_at
-     and new.acceptance_event_id is not distinct from old.acceptance_event_id and new.accepted_price is not distinct from old.accepted_price
-     and new.purchase_price is not distinct from old.purchase_price and new.superseded_at is not distinct from old.superseded_at
-     and new.superseded_by_offer_id is not distinct from old.superseded_by_offer_id then
-    return new;
-  end if;
-  v_cap := case when new.status = 'accepted' and (tg_op = 'INSERT' or old.status is distinct from 'accepted') then 'offer_acceptance' else 'offer_write' end;
-  if new.opportunity_id is not null then
-    perform 1 from public.acquisition_opportunities o where o.id = new.opportunity_id for key share;
-  end if;
-  perform public.automation_hold_assert_clear('seller_offers', v_cap, new.thread_key, null, new.property_id, new.opportunity_id, new.master_owner_id, null);
-  return new;
-end $fn$;
-
-create function public.automation_hold_guard_closing_cases() returns trigger
-language plpgsql set search_path = public, pg_temp as $fn$
-begin
-  if new.opportunity_id is not null then
-    perform 1 from public.acquisition_opportunities o where o.id = new.opportunity_id for key share;
-  end if;
-  perform public.automation_hold_assert_clear('closing_cases', 'closing_case_create', new.thread_key, null, new.property_id, new.opportunity_id, new.master_owner_id, null);
-  return new;
-end $fn$;
-
-create function public.automation_hold_guard_opportunities() returns trigger
-language plpgsql set search_path = public, pg_temp as $fn$
-begin
-  if tg_op = 'INSERT' then
-    if public.automation_hold_stage_rank(new.acquisition_stage) > 1 or new.opportunity_status = 'won' or new.accepted_offer_id is not null then
-      perform public.automation_hold_assert_clear('acquisition_opportunities', 'stage_advance', new.primary_thread_key, null, new.primary_property_id, new.id, new.master_owner_id, null);
-    end if;
-    return new;
-  end if;
-  if public.automation_hold_stage_rank(new.acquisition_stage) > public.automation_hold_stage_rank(old.acquisition_stage)
-     or (new.opportunity_status = 'won' and old.opportunity_status is distinct from 'won') then
-    perform public.automation_hold_assert_clear('acquisition_opportunities', 'stage_advance', new.primary_thread_key, null, new.primary_property_id, new.id, new.master_owner_id, null);
-  end if;
-  if new.accepted_offer_id is not null and new.accepted_offer_id is distinct from old.accepted_offer_id then
-    perform public.automation_hold_assert_clear('acquisition_opportunities', 'offer_acceptance', new.primary_thread_key, null, new.primary_property_id, new.id, new.master_owner_id, null);
+  if (select count(*) from pg_trigger where not tgisinternal and tgenabled = 'O' and tgname in
+       ('aa_automation_hold_seller_offers', 'aa_automation_hold_closing_cases', 'aa_automation_hold_opportunities', 'aa_automation_hold_send_queue')) <> 4 then
+    raise exception using errcode = 'P0001', message = 'HOLD_ENFORCEMENT_NOT_INSTALLED: a hold cannot be created until the live-table guards (PROPOSED_20261016200100_automation_hold_guards) are installed';
   end if;
   return new;
-end $fn$;
-
-create function public.automation_hold_guard_send_queue() returns trigger
-language plpgsql set search_path = public, pg_temp as $fn$
-declare
-  v_md jsonb := coalesce(new.metadata, '{}'::jsonb);
-  v_manual boolean := coalesce(v_md->>'manual_operator_send', '') = 'true';
-  v_ovr jsonb := null;
-begin
-  if tg_op = 'UPDATE' and lower(coalesce(old.queue_status, '')) = lower(coalesce(new.queue_status, '')) then return new; end if;
-  -- thread_key is the seller phone in this system; a row whose thread_key is null or differs from its
-  -- destination is checked under BOTH keys (and locks both thread rows, when they exist).
-  perform 1 from public.inbox_thread_state t
-   where t.thread_key in (new.thread_key, new.to_phone_number::text) order by t.thread_key for key share;
-  -- HOT PATH (every enqueue and every claim): one inline probe, taken AFTER the lock so it sees any hold
-  -- committed by a transaction we waited on. Same predicate as automation_hold_for for this row's keys;
-  -- only a covered row pays for the full check (override + audit + error). Parity: posttest T6/T7/T13/T14.
-  if not exists (
-    select 1 from public.automation_holds h
-     where h.released_at is null
-       and (case when v_manual then 'manual_send' else 'outbound_send' end) = any (h.blocked_capabilities)
-       and (   (new.thread_key is not null and h.thread_key = new.thread_key)
-            or (new.to_phone_number is not null and h.thread_key = new.to_phone_number::text)
-            or (new.property_id is not null and h.property_id = new.property_id)
-            or (new.master_owner_id is not null and h.master_owner_id = new.master_owner_id))) then
-    return new;
-  end if;
-  if v_manual and jsonb_typeof(v_md->'automation_hold_override') = 'object' then
-    v_ovr := v_md->'automation_hold_override';
-  end if;
-  perform public.automation_hold_assert_clear('send_queue', case when v_manual then 'manual_send' else 'outbound_send' end,
-                                              coalesce(new.thread_key, new.to_phone_number::text), null, new.property_id, null, new.master_owner_id, v_ovr);
-  if new.thread_key is not null and new.to_phone_number is not null and new.to_phone_number::text <> new.thread_key then
-    perform public.automation_hold_assert_clear('send_queue', case when v_manual then 'manual_send' else 'outbound_send' end,
-                                                new.to_phone_number::text, null, null, null, null, v_ovr);
-  end if;
-  return new;
-end $fn$;
-
-create trigger aa_automation_hold_seller_offers
-  before insert or update of status, accepted_at, acceptance_event_id, accepted_price, purchase_price, superseded_at, superseded_by_offer_id
-  on public.seller_offers for each row execute function public.automation_hold_guard_seller_offers();
-create trigger aa_automation_hold_closing_cases
-  before insert on public.closing_cases for each row execute function public.automation_hold_guard_closing_cases();
-create trigger aa_automation_hold_opportunities
-  before insert or update of acquisition_stage, opportunity_status, accepted_offer_id
-  on public.acquisition_opportunities for each row execute function public.automation_hold_guard_opportunities();
-create trigger aa_automation_hold_send_queue
-  before insert or update of queue_status on public.send_queue for each row
-  when (lower(coalesce(new.queue_status, '')) in ('queued', 'pending', 'approved', 'ready', 'scheduled', 'processing', 'sending'))
-  execute function public.automation_hold_guard_send_queue();
+end
+$$;
+create trigger aa_automation_holds_require_guards before insert on public.automation_holds
+  for each row execute function public.automation_holds_require_guards();
 
 -- ── privileges + RLS (same pattern as seller_offers / acquisition_opportunities) ─
 alter table public.automation_holds enable row level security;
@@ -361,19 +287,20 @@ revoke all on function public.automation_hold_stage_rank(text) from public, anon
 grant execute on function public.automation_hold_stage_rank(text) to authenticated, service_role;
 revoke all on function public.automation_hold_assert_clear(text,text,text,uuid,text,uuid,text,jsonb) from public, anon, authenticated;
 grant execute on function public.automation_hold_assert_clear(text,text,text,uuid,text,uuid,text,jsonb) to service_role;
-revoke all on function public.automation_holds_append_only(), public.automation_holds_audit(),
-  public.automation_hold_guard_seller_offers(), public.automation_hold_guard_closing_cases(),
-  public.automation_hold_guard_opportunities(), public.automation_hold_guard_send_queue() from public, anon, authenticated;
+revoke all on function public.automation_holds_append_only(), public.automation_holds_audit(), public.automation_holds_require_guards() from public, anon, authenticated;
 
 -- ── postconditions ─────────────────────────────────────────────────────────
 do $$
 declare n int;
 begin
   select count(*) into n from pg_trigger where not tgisinternal and tgname in
-    ('aa_automation_hold_seller_offers', 'aa_automation_hold_closing_cases', 'aa_automation_hold_opportunities', 'aa_automation_hold_send_queue',
-     'aa_automation_holds_append_only', 'aa_automation_holds_no_truncate', 'zz_automation_holds_audit',
+    ('aa_automation_holds_append_only', 'aa_automation_holds_no_truncate', 'zz_automation_holds_audit', 'aa_automation_holds_require_guards',
      'aa_automation_hold_events_append_only', 'aa_automation_hold_events_no_truncate') and tgenabled = 'O';
-  if n <> 9 then raise exception 'postcondition: expected 9 enabled hold triggers, found %', n; end if;
+  if n <> 6 then raise exception 'postcondition: expected 6 enabled registry triggers, found %', n; end if;
+  if exists (select 1 from pg_trigger where not tgisinternal and tgname in ('aa_automation_hold_seller_offers', 'aa_automation_hold_closing_cases',
+             'aa_automation_hold_opportunities', 'aa_automation_hold_send_queue')) then
+    raise exception 'postcondition: the live-table guards belong to PROPOSED_20261016200100_automation_hold_guards';
+  end if;
   if (select count(*) from public.automation_holds) <> 0 or (select count(*) from public.automation_hold_events) <> 0 then
     raise exception 'postcondition: the registry must start empty';
   end if;

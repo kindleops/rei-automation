@@ -43,6 +43,18 @@ const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k
 /** Clone the PostgreSQL tree of `pgBin` (its parent dir) into `dest` and add the pg_net emulation to its share dir. */
 export function clonePgTreeWithPgNet(pgBin, dest) {
   const root = path.resolve(pgBin, '..')
+  // Debian / PGDG split layout: <prefix>/lib/postgresql/<v>/bin + <prefix>/share/postgresql/<v>. PostgreSQL finds its
+  // share dir relative to the binary (make_relative_path), so mirror both halves under `dest` with the same shape.
+  const deb = root.match(/^(.*)\/lib\/postgresql\/(\d+)$/)
+  if (deb && !fs.existsSync(path.join(root, 'share/postgresql/extension')) && fs.existsSync(path.join(deb[1], 'share/postgresql', deb[2], 'extension'))) {
+    const lib = path.join(dest, 'lib/postgresql', deb[2])
+    const share = path.join(dest, 'share/postgresql', deb[2])
+    fs.mkdirSync(path.dirname(lib), { recursive: true }); fs.mkdirSync(path.dirname(share), { recursive: true })
+    fs.cpSync(root, lib, { recursive: true, verbatimSymlinks: true })
+    fs.cpSync(path.join(deb[1], 'share/postgresql', deb[2]), share, { recursive: true, verbatimSymlinks: true })
+    for (const f of PG_NET_FILES) fs.copyFileSync(path.join(EMULATION_DIR, f), path.join(share, 'extension', f))
+    return path.join(lib, 'bin')
+  }
   const r = process.platform === 'darwin' ? spawnSync('cp', ['-cR', root, dest], { encoding: 'utf8' }) : { status: 1 }
   if (r.status !== 0) fs.cpSync(root, dest, { recursive: true, verbatimSymlinks: true })
   const ext = path.join(dest, 'share/postgresql/extension')

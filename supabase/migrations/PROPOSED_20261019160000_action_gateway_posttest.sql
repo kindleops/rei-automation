@@ -168,19 +168,27 @@ begin
   execute 'set local role lc_action_gateway';
   j := public.action_gateway_dw_thread_hold_set(i1, tok);
   execute 'reset role';
-  if j ->> 'status' <> 'succeeded' or j ->> 'code' <> 'HOLD_SET' then fails := fails || ('E: hold set ' || j::text); end if;
-  if not exists (select 1 from public.automation_holds where hold_key = 'agent_hold:' || thread::text and released_at is null and thread_key = '+13125550101'
-                   and set_by = 'agent:agt_alpha' and approval_ref = 'action_intent:' || i1::text and not ('manual_send' = any (blocked_capabilities))) then
-    fails := fails || 'E: the hold is not in the registry as set'::text;
+  if (select count(*) from pg_trigger where not tgisinternal and tgenabled = 'O' and tgname in ('aa_automation_hold_seller_offers', 'aa_automation_hold_closing_cases',
+        'aa_automation_hold_opportunities', 'aa_automation_hold_send_queue')) = 4 then
+    if j ->> 'status' <> 'succeeded' or j ->> 'code' <> 'HOLD_SET' then fails := fails || ('E: hold set ' || j::text); end if;
+    if not exists (select 1 from public.automation_holds where hold_key = 'agent_hold:' || thread::text and released_at is null and thread_key = '+13125550101'
+                     and set_by = 'agent:agt_alpha' and approval_ref = 'action_intent:' || i1::text and not ('manual_send' = any (blocked_capabilities))) then
+      fails := fails || 'E: the hold is not in the registry as set'::text;
+    end if;
+    if not exists (select 1 from public.automation_hold_events where event_type = 'hold_set' and actor = 'agent:agt_alpha') then fails := fails || 'E: the registry did not audit hold_set'::text; end if;
+    -- the row queued BEFORE the hold can no longer be claimed for sending
+    begin
+      update public.send_queue set queue_status = 'processing' where id = q_id;
+      fails := fails || 'E: a held thread''s queued row was claimed'::text;
+    exception when others then
+      if sqlerrm !~ 'AUTOMATION_HOLD' then fails := fails || ('E: queue claim refused with ' || left(sqlerrm, 100)); end if;
+    end;
+  else
+    -- the registry CORE without its live-table guards (the A0 footprint): no hold can be created, so the domain write
+    -- FAILS CLOSED (recorded, never left executing) and nothing is written
+    if j ->> 'status' <> 'failed' or j ->> 'code' <> 'DOMAIN_WRITE_FAILED' then fails := fails || ('E(no guards): expected a recorded DOMAIN_WRITE_FAILED ' || j::text); end if;
+    if exists (select 1 from public.automation_holds) then fails := fails || 'E(no guards): a hold was written without enforcement'::text; end if;
   end if;
-  if not exists (select 1 from public.automation_hold_events where event_type = 'hold_set' and actor = 'agent:agt_alpha') then fails := fails || 'E: the registry did not audit hold_set'::text; end if;
-  -- the row queued BEFORE the hold can no longer be claimed for sending
-  begin
-    update public.send_queue set queue_status = 'processing' where id = q_id;
-    fails := fails || 'E: a held thread''s queued row was claimed'::text;
-  exception when others then
-    if sqlerrm !~ 'AUTOMATION_HOLD' then fails := fails || ('E: queue claim refused with ' || left(sqlerrm, 100)); end if;
-  end;
   -- immutable outcome + append-only audit (even for the owner)
   begin
     update action_gateway.action_outcomes set code = 'X' where intent_id = i1;

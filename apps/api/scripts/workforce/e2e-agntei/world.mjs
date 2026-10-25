@@ -25,10 +25,11 @@ const CONVERSATION_FIXTURE = `
   create table if not exists public.deal_thread_state (thread_key text primary key, universal_status text, inbox_bucket text, universal_stage text, opt_out boolean);`
 
 /**
- * @param {{ adminUrl: string, ownerUserId: string, psqlBin?: string|null }} o
+ * @param {{ adminUrl: string, ownerUserId: string, psqlBin?: string|null, holdGuards?: boolean }} o
+ *   holdGuards=false: the holds registry CORE only (#0, no live-table guard): the Phase A0 footprint
  * @returns the database name / URLs, the owner (postgres) pool, the agent_api pool, the applied file list
  */
-export async function buildWorld({ adminUrl, ownerUserId, orgId, psqlBin = 'psql' }) {
+export async function buildWorld({ adminUrl, ownerUserId, orgId, psqlBin = 'psql', holdGuards = true }) {
   process.env.AGENT_PG_TEST_DB_URL = adminUrl // the harness reads it (and re-checks loopback) at import
   const harness = await import('../../../tests/pg/agent-pg-harness.mjs')
   const { MIG, FIX, GATEWAY_MIGRATION, GATEWAY_BASELINE } = await import('../../../tests/helpers/action-gateway-pg.mjs')
@@ -42,6 +43,7 @@ export async function buildWorld({ adminUrl, ownerUserId, orgId, psqlBin = 'psql
   const run = async (f) => { await harness.runSqlFile(db.pool, f); applied.push(rel(f)) }
   const tx = async (f) => { await harness.applyInTransaction(db.pool, f); applied.push(rel(f)) }
   const q = async (label, sql) => { await db.pool.query(sql); applied.push(label) }
+  await run(MIG('PROPOSED_20261025100000_payload_clean_typed_external_ids.sql')) // B1: typed Agntei identities (after #25)
   await run(harness.SQL.researchPretest); await run(harness.SQL.research)
   await run(FIX('send_queue_live_baseline.sql'))
   await q('(fixture) public.system_control + public.send_queue', RUNTIME_PUBLIC_FIXTURE)
@@ -57,6 +59,7 @@ export async function buildWorld({ adminUrl, ownerUserId, orgId, psqlBin = 'psql
   await tx(MIG('PROPOSED_20261016140000_operations_action_center.sql'))
   await run(MIG('PROPOSED_20261017122000_conversation_turn_operator_items.sql'))
   await run(MIG('PROPOSED_20261016200000_automation_holds_registry.sql'))
+  if (holdGuards) await run(MIG('PROPOSED_20261016200100_automation_hold_guards.sql')) // the registry's live-table guards (split 2026-10-25)
   await tx(MIG('PROPOSED_20261016120000_conversation_reply_turns.sql'))
   await tx(MIG('PROPOSED_20261015130000_message_origin_ai_generated_messages.sql'))
   await tx(MIG('PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql'))

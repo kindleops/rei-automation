@@ -21,10 +21,10 @@ const MODULE_DIR = path.resolve(HERE, '../../src/lib/domain/action-gateway')
 const PEPPER = 'p'.repeat(40)
 
 test('catalog: the 21 requested tools + the scoped reads; implemented = the T1 set + set_thread_hold + the T2 family (reversible or request-only) + the report-only reconciliation + the T3 / T4 family; a T3 / T4 tool is never standing-grant-only; nothing never-exposed exists', () => {
-  const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => r.name !== 'read_conversation_context').map((r) => r.name)].filter((n) => !WORKFORCE_TOOLS.includes(n))
+  const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => !['read_conversation_context', 'get_operator_task'].includes(r.name)).map((r) => r.name)].filter((n) => !WORKFORCE_TOOLS.includes(n))
   assert.deepEqual([...all].sort(), [...REQUESTED_TOOLS].sort())
-  // + the 11 Workforce tools (docs/WORKFORCE-AGNTEI.md §2): T1, internal, the ONE Workforce writer / the principal-bound read
-  assert.equal(WORKFORCE_TOOLS.length, 11)
+  // + the 12 Workforce tools (docs/WORKFORCE-AGNTEI.md §2): T1, internal, the ONE Workforce writer / the principal-bound read
+  assert.equal(WORKFORCE_TOOLS.length, 12) // + workforce_get_mission_intelligence (B2)
   for (const n of WORKFORCE_TOOLS) {
     const s = createActionCatalog().get(n)
     assert.ok(s && s.tier === TIERS.T1 && /^workforce\.[a-z_]+$/.test(s.capability), n)
@@ -40,7 +40,10 @@ test('catalog: the 21 requested tools + the scoped reads; implemented = the T1 s
   // T3 / T4 always need a per-use authority: a human approval, or (execute_authorized_offer only) a verified envelope ref
   for (const a of impl.filter((x) => x.tier >= TIERS.T3)) assert.ok(a.envelope_authorized !== true || a.name === 'execute_authorized_offer', a.name)
   for (const a of impl) assert.equal(classifyProhibited({ name: a.capability, touches: a.touches, wraps: a.wraps, input_schema: a.input }).prohibited, false, a.name)
-  assert.deepEqual(READS.map((r) => r.name).filter((n) => !WORKFORCE_TOOLS.includes(n)).sort(), ['prepare_acquisition_offer', 'read_conversation_context'])
+  assert.deepEqual(READS.map((r) => r.name).filter((n) => !WORKFORCE_TOOLS.includes(n)).sort(), ['get_operator_task', 'prepare_acquisition_offer', 'read_conversation_context'])
+  // G2 (2026-10-25): the read-back of an agent's OWN task: T1, read-only, covered by the update grant, no read scope
+  const gt = createActionCatalog().get('get_operator_task')
+  assert.ok(gt && gt.tier === TIERS.T1 && gt.capability === 'tasks.update_operator_task' && gt.scope === null && gt.risk === 'read', JSON.stringify(gt && { tier: gt.tier, capability: gt.capability, scope: gt.scope, risk: gt.risk }))
   for (const n of NEVER_EXPOSED) assert.equal(createActionCatalog().get(n), null, n)
   for (const a of [...ACTIONS, ...READS]) for (const k of Object.keys(a.input.properties)) {
     assert.ok(!FORGED_CONTEXT_KEYS.test(k), `${a.name}.${k} would be refused as forged context`)

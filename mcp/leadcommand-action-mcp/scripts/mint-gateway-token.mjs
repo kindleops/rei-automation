@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 // MINT the lc_action_gateway token (the OWNER runs this; nothing else does).
 //
+//   pbpaste | node scripts/mint-gateway-token.mjs --secret-stdin --org <served org uuid> --out ~/.leadcommand/lc_action_gateway.jwt [--days 14]   (preferred)
 //   node scripts/mint-gateway-token.mjs --secret-file ~/.leadcommand/jwt-secret --org <served org uuid> --out ~/.leadcommand/lc_action_gateway.jwt [--days 30]
+//
+// --secret-stdin  the project's JWT secret is read from a PIPE only (a terminal is refused: typing would echo it) and held
+//                 only in this process's memory: it never touches a file, argv, the environment or shell history. Clear
+//                 the clipboard afterwards (pbcopy < /dev/null). The same contract as mint-reader-token --secret-stdin.
 //
 // The token carries ONLY { role: "lc_action_gateway", lc_org: <org>, iss: "supabase", iat, exp }. PostgREST verifies it
 // and SET ROLE lc_action_gateway; every gateway RLS policy and entry point reads lc_org (the tenant). Its power is
@@ -29,14 +34,25 @@ export function mintGatewayToken(secret, { org, days = 30, now = Date.now() } = 
   return `${head}.${body}.${crypto.createHmac('sha256', secret).update(`${head}.${body}`).digest('base64url')}`
 }
 
-export function main(argv = process.argv.slice(2)) {
+export function main(argv = process.argv.slice(2), io = {}) {
   const arg = (n) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : null }
   const resolve = (p) => path.resolve(String(p).replace(/^~(?=\/)/, process.env.HOME || '~'))
+  const fromStdin = argv.includes('--secret-stdin')
   const secretFile = arg('--secret-file')
   const out = arg('--out')
-  if (!secretFile || !out) throw new Error('usage: --secret-file <0600 file> --org <uuid> --out <path outside the repo> [--days 1-90]')
-  if (inside(resolve(secretFile)) || inside(resolve(out))) throw new Error('the secret file and --out must be outside the repository')
-  const token = mintGatewayToken(readCredentialFile(resolve(secretFile), '--secret-file'), { org: arg('--org'), days: arg('--days') ?? 30 })
+  if (!out || fromStdin === Boolean(secretFile)) throw new Error('usage: (--secret-stdin | --secret-file <0600 file>) --org <uuid> --out <path outside the repo> [--days 1-90]')
+  if (inside(resolve(out)) || (secretFile && inside(resolve(secretFile)))) throw new Error('the secret file and --out must be outside the repository')
+  let secret
+  if (fromStdin) {
+    const isTTY = io.stdinIsTTY ?? Boolean(process.stdin.isTTY)
+    if (isTTY) throw new Error('--secret-stdin needs a pipe (pbpaste | node ...), never a terminal: typing would echo the secret')
+    secret = String((io.readStdin || (() => fs.readFileSync(0, 'utf8')))()).replace(/[\r\n]+$/, '')
+    if (/[\r\n]/.test(secret) || /^\s|\s$/.test(secret)) throw new Error('stdin must hold exactly one value (the JWT secret) with no surrounding whitespace')
+  } else {
+    secret = readCredentialFile(resolve(secretFile), '--secret-file')
+  }
+  const token = mintGatewayToken(secret, { org: arg('--org'), days: arg('--days') ?? 30 })
+  secret = null
   fs.writeFileSync(resolve(out), token, { mode: 0o600 })
   fs.chmodSync(resolve(out), 0o600)
   const exp = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).exp

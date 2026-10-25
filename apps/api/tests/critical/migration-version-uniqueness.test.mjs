@@ -3,7 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ALLOWLIST, findDuplicateVersions, scanDir, scanDuplicateVersions } from '../../../../scripts/db/scan-duplicate-migration-versions.mjs'
+import { ALLOWLIST, RESERVED, findDuplicateVersions, scanDir, scanDuplicateVersions } from '../../../../scripts/db/scan-duplicate-migration-versions.mjs'
 
 test('supabase/migrations: no duplicate migration version outside the frozen pre-existing allowlist', () => {
   const r = scanDir()
@@ -32,4 +32,13 @@ test('companions are not duplicates; two distinct migrations are; a stale allowl
   const r = scanDuplicateVersions({ names: collide, allowlist: { '20261088000000': 'gone' } })
   assert.deepEqual(r.findings.map((f) => `${f.rule}:${f.version}`), ['duplicate-version:20261099000000', 'stale-allowlist:20261088000000'])
   assert.deepEqual(scanDuplicateVersions({ names: collide, allowlist: { '20261099000000': 'pre-existing' } }).findings, [])
+})
+
+test('stamps reserved by another release branch are never reused here by a DIFFERENT migration (the 20261020120000 collision)', () => {
+  assert.deepEqual(scanDir().findings.filter((f) => f.rule === 'reserved-version'), [])
+  const clash = scanDuplicateVersions({ names: ['PROPOSED_20261020120000_inbox_bucket_views_declined_unverified.sql'], allowlist: {} })
+  assert.deepEqual(clash.findings.map((f) => f.rule), ['reserved-version'])
+  const same = scanDuplicateVersions({ names: ['PROPOSED_20261020120000_research_event_budget_ceilings.sql', 'PROPOSED_20261020120000_research_event_budget_ceilings_rollback.sql'], allowlist: {} })
+  assert.deepEqual(same.findings, [], 'the reserved migration itself (and its companions) arriving by a merge is fine')
+  assert.ok(Object.keys(RESERVED).every((v) => /^\d{14}$/.test(v)))
 })

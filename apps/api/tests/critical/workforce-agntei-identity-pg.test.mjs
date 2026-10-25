@@ -31,7 +31,7 @@ test('PG link: first bind activates; the same identity again is a no-op; a diffe
   assert.equal(r.result.employee.status, 'pending_link')
   assert.equal(r.result.linked, false)
   assert.equal(r.result.employee.employment_type, 'operator_ai')
-  assert.equal(r.result.grants.length, 11, 'its live Workforce grants')
+  assert.equal(r.result.grants.length, 12, 'its live Workforce grants')
 
   r = await s.call('workforce_link_self', { client_request_id: s.id('link'), ...REF })
   assert.equal(r.ok, true, JSON.stringify(r))
@@ -50,7 +50,7 @@ test('PG link: first bind activates; the same identity again is a no-op; a diffe
   assert.equal(r.code, 'IDENTITY_MISMATCH')
   assert.equal((await empRow(env)).external_agent_id, REF.external_agent_id, 'the linked identity never changes')
   const g = await sel(env.owner, "select count(*)::int n from action_gateway.capability_grants where agent_id = $1 and suspended_reason = 'ANOMALY_IDENTITY_MISMATCH'", [agent_id])
-  assert.equal(g[0].n, 11, 'every live Workforce grant of the principal is suspended')
+  assert.equal(g[0].n, 12, 'every live Workforce grant of the principal is suspended')
   assert.ok((await sel(env.owner, "select 1 from action_gateway.grant_events where event_type = 'failure' and code = 'IDENTITY_MISMATCH'")).length, 'recorded through grant_note_failure')
   assert.ok((await sel(env.owner, "select 1 from workforce.event where type = 'wf.employee.identity_refused' and employee_id = 'emp_scout'")).length)
   r = await s.call('workforce_whoami')
@@ -67,7 +67,7 @@ test('PG link: a second Agntei agent presenting an identity already linked to an
   assert.equal(r.ok, false)
   assert.equal(r.code, 'EXTERNAL_REF_ALREADY_LINKED')
   assert.equal((await empRow(env, 'emp_scout_two')).status, 'pending_link')
-  assert.equal((await sel(env.owner, "select count(*)::int n from action_gateway.capability_grants where agent_id = 'agt_scout_two' and suspended_at is not null"))[0].n, 11)
+  assert.equal((await sel(env.owner, "select count(*)::int n from action_gateway.capability_grants where agent_id = 'agt_scout_two' and suspended_at is not null"))[0].n, 12)
   assert.equal((await sel(env.owner, "select count(*)::int n from action_gateway.capability_grants where agent_id = $1 and suspended_at is not null", [a.agent_id]))[0].n, 0, 'the legitimate agent is untouched')
 }))
 
@@ -194,4 +194,18 @@ test('PG tenant isolation: a principal of org B reads and acts on NOTHING of org
   }
   // and org A's row is untouched
   assert.deepEqual((await sel(env.owner, 'select status, lease_owner from workforce.assignment where assignment_id = $1', [id]))[0], { status: 'pending', lease_owner: null })
+}))
+
+test('PG B1 regression: an Agntei agent id holding a 10-digit run (e.g. agent_c382059173644fa1) LINKS — was PARAMS_NOT_STORABLE', { skip }, () => withWorld(async (env) => {
+  const { token } = await registerAgnteiAgent(env)
+  const s = agentSession(wfGateway(env), token)
+  const ref = { external_install_id: 'agntei_inst_0123456789abcdef0123456789abcdef', external_agent_id: 'agent_c382059173644fa1' }
+  const r = await s.call('workforce_link_self', { client_request_id: s.id('link'), ...ref })
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.equal(r.code, 'LINKED')
+  const e = await empRow(env)
+  assert.equal(e.status, 'active')
+  assert.equal(e.external_agent_id, ref.external_agent_id)
+  const again = await s.call('workforce_link_self', { client_request_id: s.id('link'), ...ref })
+  assert.equal(again.code, 'ALREADY_LINKED')
 }))

@@ -7,6 +7,8 @@ export const WORKFORCE_GATEWAY_TOOLS = Object.freeze([
   Object.freeze({ tool: 'workforce_whoami', capability: 'workforce.whoami', kind: 'read' }),
   Object.freeze({ tool: 'workforce_list_assignments', capability: 'workforce.list_assignments', kind: 'read' }),
   Object.freeze({ tool: 'workforce_get_mission', capability: 'workforce.get_mission', kind: 'read' }),
+  // B2 (2026-10-25): the mission's authoritative acquisition intelligence (engine-computed, PII-free) for a participant
+  Object.freeze({ tool: 'workforce_get_mission_intelligence', capability: 'workforce.get_mission_intelligence', kind: 'read' }),
   Object.freeze({ tool: 'workforce_link_self', capability: 'workforce.link_self', kind: 'write' }),
   Object.freeze({ tool: 'workforce_open_mission', capability: 'workforce.open_mission', kind: 'write' }),
   Object.freeze({ tool: 'workforce_claim_assignment', capability: 'workforce.claim_assignment', kind: 'write' }),

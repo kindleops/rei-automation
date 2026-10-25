@@ -56,6 +56,9 @@ export const WF_READS = Object.freeze([
   Object.freeze({ name: 'workforce_list_assignments', title: 'List my Workforce assignments', tier: TIERS.T1, scope: null, resource: 'workforce', capability: CAP.workforce_list_assignments, risk: 'read',
     description: 'The assignments assigned to you (newest first; optionally one status or one mission), each with its mission, step, capability, status, execution mode, input, output and evidence; with include_mission_peers, a summary of the other assignments of the missions you work on. Read only.',
     input: obj({ status: enumOf(ASSIGNMENT_STATUSES), mission_id: WFM, include_mission_peers: bool(), limit: int(1, 100) }), limits: { per_min: 60 }, wraps: wraps('action_gateway_workforce_read(assignments)') }),
+  Object.freeze({ name: 'workforce_get_mission_intelligence', title: 'Read the acquisition intelligence of a mission you work on', tier: TIERS.T1, scope: null, resource: 'workforce', capability: CAP.workforce_get_mission_intelligence, risk: 'read',
+    description: 'The AUTHORITATIVE acquisition intelligence the Workforce engine computed for a mission you participate in: candidate opportunities with the exclusion counts by reason (closed, suppressed / wrong number, held, never-revive, out of scope), conversation state, Decision Engine results (tier, confidence, valuation, freshness), research results, the CFO review and the ranking — each with its step, outcome class and sources. Property refs, codes, numbers and timestamps only: never a name, phone, email, address or message text. Read only.',
+    input: obj({ mission_id: WFM }, ['mission_id']), limits: { per_min: 30 }, wraps: wraps('action_gateway_workforce_read(context) → engine-computed assignment outputs, allowlisted') }),
   Object.freeze({ name: 'workforce_get_mission', title: 'Read one Workforce mission', tier: TIERS.T1, scope: null, resource: 'workforce', capability: CAP.workforce_get_mission, risk: 'read',
     description: 'A mission you participate in (or one your sponsor, the CEO, requested): its directive, status, origin, report and assignments (your own in full, the others as a summary). Read only.',
     input: obj({ mission_id: WFM }, ['mission_id']), limits: { per_min: 60 }, wraps: wraps('action_gateway_workforce_read(mission)') }),
@@ -174,6 +177,30 @@ export function cooHandoffTarget(c, assignment) {
   return null
 }
 
+// ── B2: allowlisted projections of the ENGINE-COMPUTED intelligence outputs (no name / phone / email / address / text) ──
+const objOf = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {})
+const listOf = (v) => (Array.isArray(v) ? v : [])
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
+export const INTEL = Object.freeze({
+  'intel.active_opportunities': (o) => ({ ...pick(o, ['mode', 'source', 'markets', 'scanned', 'eligible', 'excluded', 'reads_failed']),
+    candidates: listOf(o.candidates).slice(0, 60).map((c) => pick(objOf(c), ['property_ref', 'market', 'stage', 'status', 'has_thread', 'seller_spoke_last', 'last_inbound_at', 'last_outbound_at', 'intent', 'temperature', 'has_decision', 'decision_computed_at'])) }),
+  'intel.conversation_state': (o) => ({ ...pick(o, ['property_ref', 'has_thread', 'held', 'hold_type', 'suppressed', 'suppression_lookup_error', 'contact_permitted', 'excluded', 'action_state', 'seller_spoke_last', 'last_inbound_at', 'last_outbound_at', 'message_count', 'sources']),
+    ...(o.action ? { action: pick(objOf(o.action), ['state', 'next_action', 'due_at', 'verified_stage', 'stage_verified', 'lost', 'reasons', 'pending_approvals']) } : {}) }),
+  'intel.acquisition_decision': (o) => ({ ...pick(o, ['property_ref', 'status', 'tier', 'computed_at', 'age_days', 'confidence', 'valuation_confidence', 'valuation_mid', 'recommended_offer', 'expected_assignment_fee', 'mao', 'offer_ready', 'ask', 'ask_source', 'asset_identity_conflict', 'valuation_uncertain', 'min_comp_count', 'sources']),
+    ...(o.comps ? { comps: pick(objOf(o.comps), ['selected', 'median_age_months', 'avg_distance_miles', 'dispersion', 'source']) } : {}),
+    internal_only: 'Decision Engine economics: never communicated to a seller; offers follow their own human authorization' }),
+  'research.property': (o) => pick(o, ['property_ref', 'needed', 'reasons', 'enqueued', 'job_id', 'deduped', 'skipped', 'result_received']),
+  'finance.review_opportunity': (o) => pick(o, ['property_ref', 'verdict', 'reasons', 'supports', 'notes', 'figures', 'basis']),
+  'acq.rank_opportunities': (o) => ({ ...pick(o, ['method', 'considered', 'n', 'excluded']), ranked: listOf(o.ranked).slice(0, 30).map((x) => pick(objOf(x), ['rank', 'property_ref', 'market', 'components', 'ev', 'cfo_verdict', 'escalated'])) }),
+})
+const CONTACT_SHAPE = /(?:\+?1[\s.-]?)?\(?[2-9]\d{2}\)?[\s.-]?[2-9]\d{2}[\s.-]?\d{4}(?!\d)|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/
+/** Defense in depth: an allowlisted projection that still carries a contact shape in a STRING fails closed. */
+export function assertNoContact(v, path = '') {
+  if (typeof v === 'string') { if (CONTACT_SHAPE.test(v)) throw gwErr('internal', 'CONTACT_SHAPE_IN_PROJECTION', `refused: a contact-shaped value at ${path || 'result'}`); return }
+  if (Array.isArray(v)) { v.forEach((x, i) => assertNoContact(x, `${path}[${i}]`)); return }
+  if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) assertNoContact(x, path ? `${path}.${k}` : k)
+}
+
 // ── reads ────────────────────────────────────────────────────────────────────
 const present = (v) => decodeStored(v)
 const grantsOf = (principal) => (principal?.grants || []).filter((g) => String(g.capability).startsWith('workforce.'))
@@ -207,6 +234,32 @@ export const WF_LOGIC = Object.freeze({
       if (r.registered === false) return r
       if (!r.found) throw gwErr('not_found', 'MISSION_NOT_FOUND', 'no mission with this id that you participate in or your sponsor requested')
       return present({ resource_type: 'workforce', visible_because: r.visible_because, mission: r.mission, assignments: r.assignments })
+    },
+  },
+
+  workforce_get_mission_intelligence: {
+    async read(o) {
+      const r = await guardedRead('mission', o)
+      if (r.registered === false) return r
+      if (!r.found || r.visible_because !== 'participant') throw gwErr('not_found', 'MISSION_NOT_FOUND', 'no mission with this id that you participate in')
+      const first = (r.assignments || [])[0]?.assignment_id
+      if (!first) throw gwErr('not_found', 'MISSION_NOT_FOUND', 'the mission has no assignments yet')
+      const c = await wfContext(o.store, o.digest, CAP.workforce_get_mission_intelligence, first)
+      const all = Array.isArray(c.mission_assignments) ? c.mission_assignments : []
+      if (!all.some((x) => x.assignee_employee_id === c.employee?.employee_id)) throw gwErr('not_found', 'MISSION_NOT_FOUND', 'no mission with this id that you participate in')
+      const items = []
+      const pending = []
+      for (const a of all) {
+        const project = INTEL[a.capability_key]
+        if (!project) continue
+        if (a.status !== 'completed') { pending.push({ step_key: a.step_key, capability: a.capability_key, status: a.status }); continue }
+        items.push({ assignment_id: a.assignment_id, step_key: a.step_key, capability: a.capability_key, outcome_class: a.outcome_class, data: project(objOf(a.output)) })
+      }
+      const result = present({ resource_type: 'workforce', mission_id: r.mission?.mission_id, mission_status: r.mission?.status,
+        provenance: 'Workforce engine: the authoritative capability outputs (deal-context, hold registry + never-revive, conversation state, Decision Engine, research, CFO review, ranking)',
+        items, pending })
+      assertNoContact(result)
+      return result
     },
   },
 

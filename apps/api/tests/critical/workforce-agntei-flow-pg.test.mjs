@@ -232,7 +232,7 @@ test('PG autonomy: with ZERO external agents online (none registered, the gatewa
   } finally { await env.drop(); trap.restore() }
 })
 
-test('PG open_mission: a directive relayed through the gateway opens a mission with the CANONICAL shape of one typed in Workforce (origin differs); the COO plans it; assign_to_self gives the agent the first step (external)', { skip }, () => withAgent(async ({ env, s }) => {
+test('PG open_mission: a directive relayed through the gateway opens a mission with the CANONICAL shape of one typed in Workforce (origin differs); the COO plans it; assign_to_self NEVER gives an external agent an engine-computed first step (B2: internal staff; the skip is recorded)', { skip }, () => withAgent(async ({ env, s }) => {
   const directive = 'Find the 5 most promising opportunities in Dallas and get them moving'
   const r = await s.call('workforce_open_mission', { client_request_id: 'relay-0001-dallas', directive, assign_to_self: true })
   assert.equal(r.code, 'MISSION_OPENED', JSON.stringify(r))
@@ -249,7 +249,9 @@ test('PG open_mission: a directive relayed through the gateway opens a mission w
   assert.equal(viaGateway.origin, 'agntei')
   assert.equal(viaWorkforce.origin, 'workforce')
   assert.equal(viaGateway.requested_by, OWNER, 'requested by the principal\'s sponsor (the CEO)')
-  // the COO plans it from its own runtime job; the agent (an acquisition agent of Dallas) gets the first step, external
+  // the COO plans it from its own runtime job. The first step ('opps', intel.active_opportunities) is ENGINE-COMPUTED: B2
+  // (2026-10-25) routes it to INTERNAL staff even though the relaying agent (an acquisition agent of Dallas) asked
+  // assign_to_self — an external completion of 'opps' carries no candidates and expanded to an EMPTY triage.
   const jobs = await jobsOf(env, 'workforce.coo_plan')
   assert.equal(jobs.length, 2)
   const gj = jobs.find((j) => j.input.mission_id === viaGateway.mission_id)
@@ -257,8 +259,11 @@ test('PG open_mission: a directive relayed through the gateway opens a mission w
   const plan = createCooPlanHandler({ store: env.store, runtimeStore: env.runtime, env: { WORKFORCE_ENABLED: '1' }, org_id: ORG })
   await plan.run({ job: { job_id: gj.job_id, input: gj.input, requested_by: OWNER }, step: async () => {} })
   const first = (await env.store.listAssignments({ org_id: ORG, mission_id: viaGateway.mission_id }))[0]
-  assert.equal(first.assignee_employee_id, 'emp_scout')
-  assert.equal(first.execution_mode, 'external')
+  assert.equal(first.capability_key, 'intel.active_opportunities')
+  assert.notEqual(first.assignee_employee_id, 'emp_scout', 'never the external agent for an engine-computed step')
+  assert.equal(first.execution_mode, 'internal')
+  const skipped = (await env.owner.query(`select payload from workforce.event where mission_id = $1 and type = 'wf.mission.assign_to_self_skipped'`, [viaGateway.mission_id])).rows
+  assert.equal(skipped[0]?.payload?.reason, 'not_externally_executable', 'the skip is recorded with its reason')
   assert.equal((await env.store.getMission({ org_id: ORG, mission_id: viaGateway.mission_id })).status, 'active')
   // a replay of the relay returns the SAME mission
   const again = await s.call('workforce_open_mission', { client_request_id: 'relay-0001-dallas', directive, assign_to_self: true })
@@ -266,3 +271,43 @@ test('PG open_mission: a directive relayed through the gateway opens a mission w
   // a refused / unclear directive opens nothing
   assert.equal((await s.call('workforce_open_mission', { client_request_id: s.id('m'), directive: 'text the seller an offer of 200k' })).code, 'DIRECTIVE_REFUSED')
 }, { role_key: 'acquisition_agent', markets: ['dallas'] }))
+
+test('PG B2 intelligence: a participant reads the ENGINE-COMPUTED acquisition intelligence of its mission (candidates + exclusion reasons + provenance), allowlisted and PII-free; a non-participant cannot', { skip }, () => withAgent(async ({ env, s }) => {
+  const { capability: opps } = await import('../../src/lib/workforce/capabilities/active-opportunities.js')
+  // the REAL capability over deal-context rows that carry contact PII the projection must never surface
+  const rows = [
+    { property_id: '9910001', market: 'Dallas', universal_status: 'active', universal_stage: 'offer_interest', thread_key: '+12145550101', inbox_thread_id: '0000aaaa-0000-4000-8000-000000000001',
+      latest_message_direction: 'inbound', last_inbound_at: new Date().toISOString(), owner_name: 'Rosa Example', canonical_e164: '+12145550101', latest_message_body: 'call me at 214-555-0101 or rosa@example.com',
+      property_address_full: '12 Oak St, Dallas, TX 75201', reply_intent: 'interested' },
+    { property_id: '9910002', market: 'Dallas', universal_status: 'closed', universal_stage: 'closed', owner_name: 'Closed Person' },
+    { property_id: '9910003', market: 'Dallas', universal_status: 'active', universal_stage: 'ownership_confirmation', opt_out: true, owner_name: 'Opted Out', canonical_e164: '+12145550103' },
+  ]
+  const r = await opps.run({ services: { listDealContexts: async () => ({ rows }), listActiveHolds: async () => ({ ok: true, holds: [] }) } }, { markets: ['Dallas'], pool: 10 })
+  assert.equal(r.status, 'completed')
+  const { mission, a } = await missionWith(env, [
+    { step: 'opps', capability: 'intel.active_opportunities', assignee: 'emp_head_acquisitions', input: { markets: ['Dallas'], pool: 10 } },
+    { step: 'res.c01', capability: 'research.property', assignee: 'emp_scout', depends_on: ['opps'], input: { property_ref: r.output.candidates[0].property_ref } },
+  ])
+  const [claimed] = await env.store.claimAssignments({ org_id: ORG, owner: 'b2-test-engine', limit: 1, lease_seconds: 60 })
+  assert.equal(claimed.assignment_id, a.opps.assignment_id)
+  await env.store.finishAssignment({ org_id: ORG, assignment_id: claimed.assignment_id, lease_token: claimed.lease_token, status: 'completed', outcome_class: r.outcome_class, output: r.output })
+
+  const x = await s.call('workforce_get_mission_intelligence', { mission_id: mission.mission_id })
+  assert.equal(x.ok, true, JSON.stringify(x))
+  const item = x.result.items.find((i) => i.capability === 'intel.active_opportunities')
+  assert.ok(item, 'the engine-computed opportunity step is returned')
+  assert.equal(item.outcome_class, 'verified')
+  assert.equal(item.data.source, 'deal-context-service.listDealContexts', 'provenance')
+  assert.equal(item.data.eligible, 1)
+  assert.deepEqual([item.data.excluded.closed, item.data.excluded.suppressed], [1, 1], 'the exclusion reasons')
+  assert.equal(item.data.candidates.length, 1)
+  assert.deepEqual(Object.keys(item.data.candidates[0]).sort().filter((k) => ['opportunity_id', 'conversation_id'].includes(k)), [], 'no opportunity / conversation uuid in the projection')
+  assert.ok(x.result.pending.some((p) => p.step_key === 'res.c01'), 'unfinished intelligence steps are listed as pending')
+  const text = JSON.stringify(x.result)
+  for (const pii of ['Rosa', 'Example', '555-0101', '5550101', 'example.com', 'Oak St', 'call me', 'Opted Out', 'Closed Person']) assert.ok(!text.includes(pii), `no PII in the projection: ${pii}`)
+  // a mission the agent does NOT participate in
+  const other = await missionWith(env, [{ step: 'opps', capability: 'intel.active_opportunities', assignee: 'emp_head_acquisitions' }], { key: crypto.randomUUID() })
+  const y = await s.call('workforce_get_mission_intelligence', { mission_id: other.mission.mission_id })
+  assert.equal(y.ok, false)
+  assert.equal(y.code ?? y.error?.code, 'MISSION_NOT_FOUND')
+}))
