@@ -176,7 +176,7 @@ test('real PostgREST + PG17: the lc_mcp_reader token is read-only at the DATABAS
       assert.equal(summary.result, 'PASS', `${summary.error}\n${r.stderr.slice(-500)}`)
       assert.equal(r.status, 0)
       assert.equal(summary.stages.database.probes.filter((p) => p.refused_by_database).length >= 18, true)
-      assert.equal(new Set(summary.stages.capability.results.map((x) => x.tool)).size, 13)
+      assert.equal(new Set(summary.stages.capability.results.map((x) => x.tool)).size, 17)
       assert.deepEqual(summary.stages.capability.skipped_not_granted, [])
       assert.equal(summary.stages.audit.self_check.running_as, 'lc_mcp_reader')
       if (process.env.LC_E2E_SUMMARY_OUT) fs.writeFileSync(process.env.LC_E2E_SUMMARY_OUT, JSON.stringify(summary, null, 2))

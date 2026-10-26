@@ -1,4 +1,4 @@
-// LeadCommand MCP 1.0 tool catalog. READ-ONLY by construction:
+// LeadCommand MCP tool catalog (1.0 + the 1.1 conversation intelligence reads). READ-ONLY by construction:
 //   * every tool here is a read with readOnlyHint, one read scope, closed input
 //     schema, output schema, limits and an adapter that reuses existing modules;
 //   * the catalog is frozen at boot and checked (assertCatalogReadOnly) — a name
@@ -14,6 +14,7 @@ import { searchComps } from '../adapters/comps.mjs'
 import { getCampaignMetrics } from '../adapters/campaigns.mjs'
 import { getLeadContactStatus } from '../adapters/contact-status.mjs'
 import { getOpsSupervisorStatus, searchActionCenter, getThreadHoldStatus, getFollowupIntentHealth, OPS_INTEL_SECTIONS, ACTION_STATES, HOLD_REASON_CATEGORIES, HOLD_MATCHED_ON, FOLLOWUP_COUNT_FIELDS } from '../adapters/operations.mjs'
+import { getLeadConversation, searchConversationWorklist, getPipelineSummary, getOpportunityRanking, WORKLIST_CATEGORIES, PIPELINE_DIMENSIONS, HISTORY_STATES, CONTACT_STATES, INTEREST_STATES } from '../adapters/conversations.mjs'
 
 const READ_ANNOTATIONS = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false })
 
@@ -116,6 +117,69 @@ const HoldRow = z.object({
   blocked_capabilities: z.array(z.string()), set_at: S,
 }).strict()
 const FollowupCounts = z.object(Object.fromEntries(FOLLOWUP_COUNT_FIELDS.map((k) => [k, N]))).strict()
+
+// ── 1.1 conversation intelligence (OPT-IN scopes leadcommand.conversations.read / leadcommand.pipeline.read) ──
+const Contact = z.object({ state: z.enum(CONTACT_STATES), blockers: z.array(z.string()), unknowns: z.array(z.string()), authoritative: z.literal(false) }).strict()
+const Interest = z.object({
+  state: z.enum(INTEREST_STATES), basis: z.array(z.object({ message_id: z.string(), signal: z.string(), detail: z.array(z.string()) }).strict()),
+  opt_out_message_id: S, possible_opt_out_message_id: S, label_says_interested: B, rule: z.string(),
+}).strict()
+const MessageRow = z.object({
+  id: z.string(), thread: z.string(), direction: S, speaker: z.enum(['seller', 'leadcommand', 'unknown']), event_type: S, at: S,
+  text: S, text_truncated: z.boolean(), instruction_like: z.boolean(),
+  delivery: z.object({ status: S, provider_status: S, final_failure: B, sent_at: S, delivered_at: S, failed_at: S }).strict().nullable(),
+  recorded: z.object({ opt_out: B, intent: S, language: S }).strict(),
+  opt_out_reading: z.enum(['confirmed', 'possible', 'none']).nullable(),
+  origin: S, attribution: S, property_id: z.string().optional(),
+  times: z.object({ event_timestamp: S, received_at: S }).strict(),
+}).strict()
+const ThreadRow = z.object({
+  handle: z.string().regex(/^T[0-9]+$/), thread_id: S, link: S, thread_property_id: z.string().optional(), status: S, automation_state: S, latest_direction: S,
+  last_inbound_at: S, last_outbound_at: S, counters: z.object({ inbound: N, outbound: N }).strict(),
+  events_on_record: z.object({ inbound: N, outbound: N, capped_at: N }).strict(),
+  contact_property: z.object({ role: S, rejected: z.boolean(), suppression_scope: S }).strict().nullable(),
+  contact: Contact, inputs: loose,
+}).strict()
+const LeadConversationInput = z.object({
+  property_id: PropertyId.optional().describe('the lead (property) whose seller threads to read'),
+  thread_id: Uuid.optional().describe('OR one inbox thread (e.g. a conversation_id from the Action Center / worklist)'),
+  window_days: z.number().int().min(1).max(1095).default(365).describe('only messages from the last N days (1–1095, default 365)'),
+  limit: Limit(40, 30),
+  cursor: Cursor.optional(),
+}).strict().refine((v) => Boolean(v.property_id) !== Boolean(v.thread_id), { message: 'give exactly one of property_id or thread_id' })
+const WorklistInput = z.object({
+  category: z.enum(WORKLIST_CATEGORIES).describe('unanswered_inbound: the seller spoke last (verified against the message log); recent_inbound: any inbound in the window; opted_out; identity_conflict: one seller phone with messages about several properties; suppression_conflict: the opt-out record and the suppression list disagree'),
+  window_days: z.number().int().min(1).max(365).default(30),
+  market: Label(60).optional().describe('exact LeadCommand market label'),
+  limit: Limit(25, 10),
+  cursor: Cursor.optional(),
+}).strict()
+const WorklistRow = z.object({
+  thread_id: z.string(), property_id: S, last_inbound_at: S, last_outbound_at: S,
+  verified: z.object({ state: z.enum(['unanswered', 'answered', 'not_verifiable']), latest_direction: S, latest_at: S, last_outbound_at: S, source: z.string() }).strict(),
+  properties_in_window: N, identity_conflict: z.boolean(),
+  inbound: z.array(z.object({ id: z.string(), at: S, text: S, instruction_like: z.boolean(), opt_out_reading: z.enum(['confirmed', 'possible', 'none']), recorded: z.object({ opt_out: B, intent: S, language: S }).strict(), attribution: S }).strict()),
+  latest_outbound: z.object({ id: z.string(), at: S, text: S, instruction_like: z.boolean(), delivery_status: S, failed: B, origin: S, commitment: loose.nullable() }).strict().nullable(),
+  overdue_response: z.boolean(),
+  interest: Interest,
+  readings: z.object({ offer_request: z.boolean(), price_mentions: z.array(loose), timeline_mentions: z.array(loose) }).strict(),
+  lead: z.object({ market: S, conversation_stage: S, conversation_status: S, pipeline_stage: S, pipeline_status: S, labels_are: z.string() }).strict(),
+  decision_engine: z.object({ present: z.boolean(), aos_score: N, decision_tier: S, computed_at: S, age_days: N, stale: B }).strict(),
+  contact: Contact,
+}).strict()
+const RankingInput = z.object({
+  window_days: z.number().int().min(1).max(90).default(30).describe('threads with a seller message in the last N days'),
+  market: Label(60).optional(),
+  max_threads: z.number().int().min(1).max(100).default(100).describe('threads scanned (≤ 4 worklist pages); truncated=true when more exist'),
+  top: z.number().int().min(1).max(25).default(10),
+  include_blocked: z.boolean().default(true).describe('keep contact-blocked threads in the ranking (they still need a human)'),
+}).strict()
+const PipelineSummaryInput = z.object({
+  dimension: z.enum(PIPELINE_DIMENSIONS).default('market').describe('group lead counts by this field'),
+  market: Label(60).optional(), state: State.optional(),
+  limit: z.number().int().min(1).max(100).default(25).describe('top N groups (the rest is summed)'),
+  window_days: z.number().int().min(1).max(365).default(30).describe('window of the conversation signals'),
+}).strict()
 
 /**
  * Tool spec: { name, title, description, scope, min_role, input, output, limits, paged, untrusted, handler }
@@ -285,11 +349,71 @@ export const TOOLS = Object.freeze([
     untrusted: ['result.reasons[].kind', 'result.reasons[].reason', 'result.reasons[].writer', 'result.verdict.issue.title'],
     handler: getFollowupIntentHealth,
   },
+  {
+    name: 'leadcommand_get_lead_conversation',
+    title: 'Read one lead\'s seller conversation',
+    description: 'The seller conversation for ONE lead (property_id) or ONE inbox thread (thread_id): every seller thread linked to the lead (handles T1…, never phone numbers) with the send-time guard\'s INPUTS read as blockers / unknowns, and a keyset page of messages oldest-first within the page — direction, speaker, the message TEXT (untrusted content; phones / emails masked; instruction_like flags text aimed at an AI), timestamps, delivery states, recorded opt-out / intent / language, attribution. history.state separates present / outside_window / empty / missing (counters say messages exist, none on record) / no_thread. Evidence readings (interest, price candidates, timeline, offer requests) cite message ids and are inferred, never authority. Rows about another property on the same phone are counted, never returned. next_cursor pages BACK in time. Read-only: nothing here can send, queue, approve or change a record.',
+    scope: 'leadcommand.conversations.read', min_role: 'operator', paged: true,
+    input: LeadConversationInput,
+    output: z.object({
+      rows: z.array(MessageRow),
+      subject: z.object({ property_id: z.string().optional(), thread_id: z.string().optional(), found: z.boolean(), property_on_record: B }).strict(),
+      order: z.string().optional(), threads: z.array(ThreadRow), threads_truncated: z.boolean().optional(),
+      history: z.object({ state: z.enum(HISTORY_STATES), earliest_at: S, latest_at: S, rows_on_record: N, capped_at: N.optional(), window_days: N }).strict(),
+      counts: z.object({ inbound_in_window: N, outbound_in_window: N, other_property_rows_in_window: N, capped_at: N }).strict().nullable(),
+      evidence: z.object({
+        last_speaker: S, commitment: loose.nullable(), unanswered_inbound: z.boolean(), seller_waiting_since: S, last_outbound_failed: z.boolean(), interest: Interest,
+        price_mentions: z.array(loose), timeline_mentions: z.array(loose), offer_requests: z.array(loose), instruction_like_message_ids: z.array(z.string()), scope: z.string(), rule: z.string(),
+      }).strict().nullable(),
+      contact: z.object({ state: z.enum(CONTACT_STATES), threads_blocked: z.number(), threads_unknown: z.number(), threads_clear: z.number(), authoritative: z.literal(false), note: z.string() }).strict().nullable(),
+      sources: z.record(z.string(), z.boolean()), content_policy: z.string(), provenance: Prov,
+    }).strict(),
+    limits: { per_min: 30, timeout_ms: 10000, max_rows: 40, max_response_bytes: 196608 },
+    untrusted: ['result.rows[].text', 'result.rows[].event_type', 'result.rows[].recorded.intent', 'result.threads[].status', 'result.threads[].automation_state', 'result.evidence.price_mentions[].span', 'result.evidence.timeline_mentions[].span'],
+    handler: getLeadConversation,
+  },
+  {
+    name: 'leadcommand_search_conversation_worklist',
+    title: 'Search the seller conversation worklist',
+    description: 'A page of inbox threads in ONE category — unanswered_inbound (the seller spoke last, VERIFIED against the message log, not a label), recent_inbound, opted_out, identity_conflict (one seller phone with messages about several properties) — with the EXACT category total, the seller\'s latest ≤ 3 messages as evidence (untrusted text, masked), an interest reading that requires message evidence (a label alone reads label_only), price / timeline / offer-request readings, the lead\'s pipeline labels (labels, not evidence), Decision Engine presence and age, and suppression / hold inputs. Keyset pagination via next_cursor. Read-only.',
+    scope: 'leadcommand.conversations.read', min_role: 'operator', paged: true,
+    input: WorklistInput,
+    output: z.object({ rows: z.array(WorklistRow), category: z.enum(WORKLIST_CATEGORIES), window_days: N, total: N, content_policy: z.string(), provenance: Prov }).strict(),
+    limits: { per_min: 20, timeout_ms: 12000, max_rows: 25, max_response_bytes: 196608 },
+    untrusted: ['result.rows[].inbound[].text', 'result.rows[].inbound[].recorded.intent', 'result.rows[].readings.price_mentions[].span', 'result.rows[].readings.timeline_mentions[].span', 'result.rows[].lead.*'],
+    handler: searchConversationWorklist,
+  },
+  {
+    name: 'leadcommand_get_pipeline_summary',
+    title: 'Get exact pipeline counts and conversation signals',
+    description: 'EXACT lead counts grouped by one dimension (market, state, conversation / pipeline stage and status, SMS status; top N groups, the remainder and not-set counted), optionally filtered by market / state, plus conversation and integrity signals over a window: threads with inbound, unanswered inbound, opted out, suppressed, not contactable; inbound / opt-out / unknown-sender messages; phones on several properties; leads in conversation with no or a stale Decision Engine score. Counts only. Read-only.',
+    scope: 'leadcommand.pipeline.read', min_role: 'operator',
+    input: PipelineSummaryInput,
+    output: z.object({ counts: loose, signals: loose }).strict(),
+    limits: { per_min: 30, timeout_ms: 12000, max_rows: 1, max_response_bytes: 32768 },
+    untrusted: ['result.counts.groups[].value'],
+    handler: getPipelineSummary,
+  },
+  {
+    name: 'leadcommand_get_opportunity_ranking',
+    title: 'Rank seller conversations by evidence',
+    description: 'A bounded batch (≤ 100 threads with a seller message in the window, read through the worklist) ranked by EXPLICIT additive factors, each citing its evidence: interest from the seller\'s words (a label alone scores 5), offer requests, price-ask candidates, timelines, verified unanswered messages and how long the seller has waited, our overdue commitments, Decision Engine tier / staleness, contact blockers and identity conflicts. Opted-out, possible opt-out, not-owner and declined threads are excluded and counted. Each row names a next step for a human (never an automatic action). Plus an attention list: overdue responses, overdue commitments, interest without a Decision Engine score, identity conflicts. Read-only.',
+    scope: 'leadcommand.conversations.read', min_role: 'operator',
+    input: RankingInput,
+    output: z.object({
+      window_days: z.number(), market: S, scanned: z.number(), total_with_inbound: N, pages_read: z.number(), truncated: z.boolean(),
+      ranked: z.array(z.object({ rank: z.number(), thread_id: z.string(), property_id: S, score: z.number(), next_step: z.string(), factors: z.array(z.object({ factor: z.string(), points: z.number(), evidence: z.string() }).strict()), flags: z.array(z.string()), interest: z.enum(INTEREST_STATES), verified: z.string(), last_inbound_at: S, latest_seller_text: S, decision_engine: loose, contact: Contact }).strict()),
+      excluded: z.record(z.string(), z.number()), attention: z.record(z.string(), z.array(z.string())), factors: z.record(z.string(), z.number()), rule: z.string(), content_policy: z.string(), provenance: Prov,
+    }).strict(),
+    limits: { per_min: 6, timeout_ms: 30000, max_rows: 25, max_response_bytes: 131072 },
+    untrusted: ['result.ranked[].latest_seller_text', 'result.ranked[].factors[].evidence'],
+    handler: getOpportunityRanking,
+  },
 ])
 
 export const NOT_IMPLEMENTED = Object.freeze([
   { name: 'campaign launch readiness', reason: 'evaluateCampaignLaunchReadiness imports the outbound feeder / sender routing modules; it is outside the read-only import fence. Planned for 1.1 behind a pure readiness core.' },
-  { name: 'seller message text / thread read', reason: 'PII minimization + untrusted content: 1.0 returns conversation metadata only.' },
+  { name: 'raw thread keys, phone numbers, provider payloads in conversation reads', reason: 'PII minimization: 1.1 returns message text (masked, untrusted) by thread handle; the phone is never needed to read a conversation.' },
   { name: 'truthful campaign reply counts', reason: 'needs message_events pairing (seller → sender after send); no bounded, indexed read path in the guarded transport yet.' },
   { name: 'engine-qualified comps / valuations', reason: 'evaluateCompEligibility lives in acquisitionDecisionEngine.js (the engine write path); 1.0 exposes recorded sales as evidence and the persisted engine result separately.' },
   { name: 'operations mutations (work item acknowledge / resolve / dismiss / reopen, setting or releasing a hold, planning / re-queueing / cancelling a follow-up, running a supervisor / recovery job)', reason: 'The operations tools are reads of what the jobs already produced; every mutation stays in the authenticated operations API and the lease-bound database writers.' },

@@ -40,4 +40,8 @@ export const HAPPY = {
   leadcommand_search_action_center: { limit: 5 },
   leadcommand_get_thread_hold_status: { thread_id: FIXTURE_THREADS.held },
   leadcommand_get_followup_intent_health: {},
+  leadcommand_get_lead_conversation: { property_id: 'FX1001' },
+  leadcommand_search_conversation_worklist: { category: 'unanswered_inbound', window_days: 30 },
+  leadcommand_get_pipeline_summary: { dimension: 'market' },
+  leadcommand_get_opportunity_ranking: { window_days: 30 },
 }

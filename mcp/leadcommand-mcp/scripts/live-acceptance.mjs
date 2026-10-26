@@ -31,7 +31,7 @@
 //   2. EVERY CAPABILITY, live. The real server (bin/leadcommand-mcp.mjs) starts as a
 //      subprocess over loopback Streamable HTTP, with a CLEAN environment (only
 //      LEADCOMMAND_MCP_*), a fresh bearer token and an audit file. An SDK client connects
-//      the way Agntau does (Authorization: Bearer) and calls all 13 tools with bounded
+//      the way Agntau does (Authorization: Bearer) and calls every granted tool with bounded
 //      reads: anchors from --zip / --market, limit ≤ 5, radius 0.5 mi, ≤ MAX_CALLS calls.
 //      The four operations tools (supervisor status, action center, thread hold status,
 //      follow-up health) run when their opt-in scope is granted (the acceptance grants
@@ -58,7 +58,7 @@ import { RELATION_NAMES, RPC_SIGNATURES } from '../src/data/inventory.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PKG = path.resolve(HERE, '..')
-export const MAX_CALLS = 18
+export const MAX_CALLS = 24
 /** Every tool of the catalog, with its scope (the script runs without the @/ loader, so it cannot import the catalog). */
 export const TOOL_SCOPES = Object.freeze({
   leadcommand_search_leads: 'leadcommand.leads.read', leadcommand_get_lead: 'leadcommand.leads.read',
@@ -68,6 +68,9 @@ export const TOOL_SCOPES = Object.freeze({
   leadcommand_get_lead_contact_status: 'leadcommand.contact_status.read',
   leadcommand_get_ops_supervisor_status: 'leadcommand.ops_supervisor.read', leadcommand_search_action_center: 'leadcommand.action_center.read',
   leadcommand_get_thread_hold_status: 'leadcommand.holds.read', leadcommand_get_followup_intent_health: 'leadcommand.followups.read',
+  // 1.1 conversation intelligence (opt-in; SOURCE_NOT_APPLIED is an accepted answer until its migration is applied)
+  leadcommand_get_lead_conversation: 'leadcommand.conversations.read', leadcommand_search_conversation_worklist: 'leadcommand.conversations.read',
+  leadcommand_get_opportunity_ranking: 'leadcommand.conversations.read', leadcommand_get_pipeline_summary: 'leadcommand.pipeline.read',
 })
 export const ACCEPTANCE_SCOPES = [...new Set(Object.values(TOOL_SCOPES))].join(' ')
 const PROVENANCE_KINDS = new Set(['fact', 'derived', 'inferred', 'stale', 'missing'])
@@ -194,7 +197,7 @@ async function startServer(env, work) {
   return { url: `http://127.0.0.1:${port}/mcp`, token, audit, scopes: clean.LEADCOMMAND_MCP_SCOPES.split(/[\s,]+/).filter(Boolean), stop: async () => { child.kill('SIGTERM'); await exited } }
 }
 
-/** Stage 2: every granted tool (all 13 by default), bounded, through the real server over Streamable HTTP. */
+/** Stage 2: every granted tool (all 17 by default), bounded, through the real server over Streamable HTTP. */
 export async function everyCapability(env, { zip = null, market = null, work }) {
   if (!zip && !market) fail('capability', 'give an anchor: --zip <5 digits> or --market "<label>"')
   const srv = await startServer(env, work)
@@ -249,6 +252,12 @@ export async function everyCapability(env, { zip = null, market = null, work }) 
       else await call('leadcommand_get_thread_hold_status', { thread_id: '00000000-0000-0000-0000-000000000000' }, { expectError: 'NOT_FOUND' })
     }
     if (granted('leadcommand_get_followup_intent_health')) await call('leadcommand_get_followup_intent_health', {})
+    // 1.1 conversation intelligence: bounded reads; an unapplied migration answers SOURCE_NOT_APPLIED (recorded, not a failure)
+    const NA = { expectError: 'SOURCE_NOT_APPLIED' }
+    if (granted('leadcommand_get_lead_conversation')) await call('leadcommand_get_lead_conversation', { property_id: pid, window_days: 365, limit: 10 }, NA)
+    if (granted('leadcommand_search_conversation_worklist')) await call('leadcommand_search_conversation_worklist', { category: 'unanswered_inbound', window_days: 30, limit: 3 }, NA)
+    if (granted('leadcommand_get_opportunity_ranking')) await call('leadcommand_get_opportunity_ranking', { window_days: 14, max_threads: 25, top: 5 }, NA)
+    if (granted('leadcommand_get_pipeline_summary')) await call('leadcommand_get_pipeline_summary', { dimension: 'market', limit: 10 }, NA)
     const covered = new Set(results.map((x) => x.tool))
     const want = Object.keys(TOOL_SCOPES).filter(granted)
     const skipped = Object.keys(TOOL_SCOPES).filter((t) => !granted(t))
@@ -269,8 +278,11 @@ export function auditMatches(file, { calls, secrets }) {
   if (!check || check.stage !== 'boot' || check.outcome !== 'ok' || check.running_as !== 'lc_mcp_reader') fail('audit', `boot self-check not audited as ok (${JSON.stringify(check)?.slice(0, 200)})`)
   const tc = lines.filter((l) => l.event === 'tool_call')
   if (tc.length !== calls) fail('audit', `${tc.length} tool_call records for ${calls} calls`)
-  // a nil-id hold probe is the one expected refusal (not_found): it is audited as failed / not_found
-  if (!tc.every((l) => (l.outcome === 'ok' || (l.tool === 'leadcommand_get_thread_hold_status' && l.error_code === 'NOT_FOUND')) && l.data_mode === 'live' && /^#[0-9a-f]{12}$/.test(l.principal))) fail('audit', 'a tool_call record is not ok / live / hashed')
+  // expected refusals, audited as failed with their code: a nil-id hold probe (NOT_FOUND); a 1.1 conversation read
+  // before its migration is applied (SOURCE_NOT_APPLIED)
+  const expected = (l) => (l.tool === 'leadcommand_get_thread_hold_status' && l.error_code === 'NOT_FOUND')
+    || (TOOL_SCOPES[l.tool] && /^leadcommand\.(conversations|pipeline)\.read$/.test(TOOL_SCOPES[l.tool]) && l.error_code === 'SOURCE_NOT_APPLIED')
+  if (!tc.every((l) => (l.outcome === 'ok' || expected(l)) && l.data_mode === 'live' && /^#[0-9a-f]{12}$/.test(l.principal))) fail('audit', 'a tool_call record is not ok / live / hashed')
   return { self_check: { stage: check.stage, outcome: check.outcome, running_as: check.running_as, expires_at: check.expires_at }, tool_calls: tc.length }
 }
 

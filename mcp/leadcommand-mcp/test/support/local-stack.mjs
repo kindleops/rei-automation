@@ -124,7 +124,7 @@ export function mintHs256(secret, payload) {
  * @param {{ pgBin: string, postgrestBin: string, psql?: string, log?: Function }} o
  * @returns {Promise<{ url, secret, mint, sql, stop }>}
  */
-export async function startLocalStack({ pgBin, postgrestBin, psql = process.env.LC_PSQL || 'psql', log = () => {} }) {
+export async function startLocalStack({ pgBin, postgrestBin, psql = process.env.LC_PSQL || 'psql', log = () => {}, extraSql = [] }) {
   const columns = await captureColumns()
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'lcmcp-stack-'))
   const widen = path.join(work, 'widening.sql')
@@ -150,7 +150,7 @@ export async function startLocalStack({ pgBin, postgrestBin, psql = process.env.
     if (roles) throw new Error(`refused: the server carries Supabase platform roles (${roles})`)
     run(cluster.url, ['-c', 'create database lc_mcp_e2e'])
     const dbUrl = cluster.url.replace('/postgres?', '/lc_mcp_e2e?')
-    for (const f of [path.join(REPO, 'apps/api/tests/pg/supabase-shim.sql'), path.join(REPO, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql'), widen, MIG('PROPOSED_20261019150000_lc_mcp_reader.sql')]) {
+    for (const f of [path.join(REPO, 'apps/api/tests/pg/supabase-shim.sql'), path.join(REPO, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql'), widen, MIG('PROPOSED_20261019150000_lc_mcp_reader.sql'), ...extraSql]) {
       run(dbUrl, ['--single-transaction', '-f', f])
       log(`applied ${path.basename(f)}`)
     }

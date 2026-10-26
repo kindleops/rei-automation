@@ -13,9 +13,7 @@
 // overwritten, so no other identity can ride a request. (The one other sender is the boot /
 // re-check exposure probe of the Supabase pg_net platform exception, data/platform-exposure.mjs:
 // a FIXED set of side-effect-free requests on the same origin that must be REFUSED.)
-import { RELATION_NAMES, RPC_NAMES, MCP_RPCS, rpcName, SCHEMA } from './inventory.mjs'
-
-const MCP_RPC_NAMES = Object.freeze(Object.keys(MCP_RPCS).map(rpcName))
+import { RELATION_NAMES, RPC_NAMES, MCP_RPC_NAMES, SCHEMA } from './inventory.mjs'
 
 function refusal(code, message) {
   return Object.assign(new Error(message), { code, refusal: false })

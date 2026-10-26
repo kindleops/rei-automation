@@ -26,7 +26,7 @@ import { createFixtureDb } from './fixture-db.mjs'
 import { createInventoryGuardedFetch } from './read-fetch.mjs'
 import { evaluateSelfCheck } from './credential.mjs'
 import { probePlatformExposure, probeAuditEntries } from './platform-exposure.mjs'
-import { RELATION_NAMES, RPC_SIGNATURES } from './inventory.mjs'
+import { RELATION_NAMES, ALL_RPC_SIGNATURES } from './inventory.mjs'
 import { err } from '../errors.mjs'
 
 export const REQUEST_TIMEOUT_MS = 5_000
@@ -98,7 +98,7 @@ export function createLiveSource({ supabaseUrl, apiKey, readerJwt, baseFetch = g
   async function selfCheck(stage = 'recheck') {
     let verdict
     try {
-      const { data, error } = await client.rpc('lc_mcp_reader_self_check', { p_relations: RELATION_NAMES, p_functions: RPC_SIGNATURES })
+      const { data, error } = await client.rpc('lc_mcp_reader_self_check', { p_relations: RELATION_NAMES, p_functions: ALL_RPC_SIGNATURES })
       if (error) {
         const code = String(error.code || '')
         // supabase-js turns a network failure into { error } with no code

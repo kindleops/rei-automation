@@ -626,6 +626,19 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261019150000_lc_mcp_reader_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261019150000_lc_mcp_reader_rollback_posttest.sql')],
   },
+  // ── LeadCommand MCP 1.1 conversation intelligence: four read-only definer projections for lc_mcp_reader ──
+  // OPTIONAL, separately approved, applied AFTER lc_mcp_reader (docs/LEADCOMMAND-CONVERSATION-INTELLIGENCE.md).
+  // Setup = the 1.0 setup + the 1.0 reader itself + the production message / inbox columns and synthetic conversations.
+  {
+    id: 'lc_mcp_conversation_intel',
+    setup: [LC_MCP_ROLE_RESET, SHIM, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql', LC_MCP_READER,
+      'mcp/leadcommand-mcp/migrations/test/lc_mcp_conversation_intel_emulation.sql'],
+    pretest: M('PROPOSED_20261026120000_lc_mcp_conversation_intel_pretest.sql'),
+    apply: [M('PROPOSED_20261026120000_lc_mcp_conversation_intel.sql')],
+    posttest: [M('PROPOSED_20261026120000_lc_mcp_conversation_intel_posttest.sql')],
+    rollback: [M('PROPOSED_20261026120000_lc_mcp_conversation_intel_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261026120000_lc_mcp_conversation_intel_rollback_posttest.sql')],
+  },
   // ── Action Gateway phase 1 (OPTIONAL link #26, separately approved): the durable action schema and the scoped
   // execution role lc_action_gateway. Setup = the REAL prerequisite migrations (runtime, capabilities, missions,
   // operations + #24, the P0 hold registry) + the read-inventory baseline.

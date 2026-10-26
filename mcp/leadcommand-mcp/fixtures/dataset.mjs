@@ -10,6 +10,7 @@
 //   * owner / prospect names, emails and phones inside the dossier (must never leave)
 //   * a protected-class vendor flag ("Senior Owner") that safeFlags must drop
 import { buildDecisionInputStamp, MATERIAL_PROPERTY_FIELDS } from '@/lib/acquisition/decisionFreshness.js'
+import { conversationRpc } from './conversations.mjs'
 
 export const FIXTURE_ORG = '00000000-0000-4000-8000-0000000000a1'
 export const FIXTURE_OTHER_ORG = '00000000-0000-4000-8000-0000000000a2'
@@ -189,6 +190,8 @@ const actionStates = [
 ]
 const refuse22023 = () => { throw Object.assign(new Error('invalid parameter'), { code: '22023' }) }
 const fixtureRpc = {
+  // 1.1 conversation intelligence (fixtures/conversations.mjs: synthetic threads + a mirror of the SQL projections)
+  ...conversationRpc,
   lc_mcp_ops_finding: ({ p_org_id, p_finding_type }) => {
     if (!p_org_id || !['supervisor.summary', 'valuation.refresh_batch', 'recovery.batch', 'recovery.linkage'].includes(p_finding_type)) refuse22023()
     return p_org_id === FIXTURE_ORG ? OPS_FINDINGS[p_finding_type] ?? null : null

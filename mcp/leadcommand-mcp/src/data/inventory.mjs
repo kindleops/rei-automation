@@ -71,6 +71,19 @@ export const MCP_RPCS = Object.freeze({
 })
 
 /**
+ * OPTIONAL MCP RPCs (1.1 conversation intelligence, PROPOSED_20261026120000_lc_mcp_conversation_intel.sql,
+ * separately approved): passed to the self-check like every other function, so an APPLIED one is judged
+ * (STABLE, executable, an expected definer). One NOT applied is no finding: its tools answer
+ * data_unavailable / SOURCE_NOT_APPLIED and every 1.0 tool keeps working.
+ */
+export const OPTIONAL_MCP_RPCS = Object.freeze({
+  'public.lc_mcp_lead_conversation(text,uuid,integer,timestamp with time zone,text,integer)': ['adapters/conversations#getLeadConversation'],
+  'public.lc_mcp_conversation_worklist(text,integer,text,timestamp with time zone,uuid,integer)': ['adapters/conversations#searchConversationWorklist'],
+  'public.lc_mcp_pipeline_counts(text,text,text,integer)': ['adapters/conversations#getPipelineSummary'],
+  'public.lc_mcp_conversation_signals(integer,text)': ['adapters/conversations#getPipelineSummary'],
+})
+
+/**
  * What each MCP SECURITY DEFINER function reads AS ITS OWNER. lc_mcp_reader holds NO privilege on
  * any of these (the posttest proves SELECT / EXECUTE on them is refused, and the boot self-check
  * reports any direct SELECT in an exposed schema): the role sees only the function's projection.
@@ -85,6 +98,10 @@ export const DEFINER_READS = Object.freeze({
   'public.lc_mcp_action_center(uuid,text,boolean,uuid,integer)': ['agent.conversation_action_state'],
   'public.lc_mcp_thread_hold_status(uuid)': ['public.inbox_thread_state (one row by id)', 'public.acquisition_opportunities (primary_thread_key → id, ≤ 10)', 'public.automation_hold_for(text,uuid,text,uuid,text,text) → public.automation_holds'],
   'public.lc_mcp_followup_intent_health()': ['public.v_followup_intent_health → public.followup_intents', 'public.v_followup_intent_reasons → public.followup_intents'],
+  'public.lc_mcp_lead_conversation(text,uuid,integer,timestamp with time zone,text,integer)': ['public.message_events (by property_id / thread_key / from_phone_number, keyset on created_at, id)', 'public.inbox_thread_state', 'public.campaign_target_graph', 'public.contact_property_resolution (if present)', 'public.sms_suppression_list', 'public.phones', 'public.automation_hold_for(…) → public.automation_holds (if present)', 'public.properties / public.eg_property_facts (existence)'],
+  'public.lc_mcp_conversation_worklist(text,integer,text,timestamp with time zone,uuid,integer)': ['public.inbox_thread_state', 'public.message_events', 'public.eg_property_facts', 'public.property_acquisition_scores', 'public.sms_suppression_list', 'public.automation_hold_for(…) (if present)'],
+  'public.lc_mcp_pipeline_counts(text,text,text,integer)': ['public.eg_property_facts'],
+  'public.lc_mcp_conversation_signals(integer,text)': ['public.inbox_thread_state', 'public.message_events', 'public.eg_property_facts', 'public.campaign_target_graph', 'public.property_acquisition_scores'],
 })
 
 /** Relations / functions the MCP reaches ONLY through a definer projection (never granted to the role). */
@@ -92,11 +109,18 @@ export const DEFINER_ONLY_SOURCES = Object.freeze([
   'agent.finding', 'agent.conversation_action_state', 'agent.ops_research_valuation_snapshot(timestamptz)',
   'public.automation_holds', 'public.automation_hold_for(text,uuid,text,uuid,text,text)',
   'public.followup_intents', 'public.v_followup_intent_health', 'public.v_followup_intent_reasons',
+  'public.message_events', 'public.contact_property_resolution',
 ])
 
+/** The REQUIRED functions (the 1.0 reader migration's list). */
 export const RPC_SIGNATURES = Object.freeze([...Object.keys(RPCS), ...Object.keys(MCP_RPCS)].sort())
+export const OPTIONAL_RPC_SIGNATURES = Object.freeze(Object.keys(OPTIONAL_MCP_RPCS).sort())
+/** Every function the self-check judges and the transport may call (required + optional). */
+export const ALL_RPC_SIGNATURES = Object.freeze([...RPC_SIGNATURES, ...OPTIONAL_RPC_SIGNATURES].sort())
 export const rpcName = (sig) => sig.replace(/^public\./, '').replace(/\(.*$/, '')
-export const RPC_NAMES = Object.freeze(RPC_SIGNATURES.map(rpcName))
+export const RPC_NAMES = Object.freeze(ALL_RPC_SIGNATURES.map(rpcName))
+/** Functions the MCP itself created (called on the raw transport after the inventory checks). */
+export const MCP_RPC_NAMES = Object.freeze([...Object.keys(MCP_RPCS), ...OPTIONAL_RPC_SIGNATURES].map(rpcName))
 
 /** SECURITY DEFINER functions the role may reach although not granted by us: PostGIS metadata (supabase_admin, read-only). Same allowlist as agent/runtime/pg-store.js. */
 export const ACCEPTED_REACHABLE_DEFINER = Object.freeze(['st_estimatedextent'])

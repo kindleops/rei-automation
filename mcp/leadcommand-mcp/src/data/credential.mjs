@@ -27,7 +27,7 @@
 // PostgREST / GraphQL exposure probe before the credential is accepted.
 import fs from 'node:fs'
 import path from 'node:path'
-import { READER_ROLE, RELATION_NAMES, OPTIONAL_RELATIONS, RPC_SIGNATURES } from './inventory.mjs'
+import { READER_ROLE, RELATION_NAMES, OPTIONAL_RELATIONS, ALL_RPC_SIGNATURES, OPTIONAL_RPC_SIGNATURES } from './inventory.mjs'
 import { evaluatePlatformExceptions, evaluatePlatformAllowlists } from './platform-exposure.mjs'
 
 export class CredentialError extends Error {
@@ -162,7 +162,7 @@ const list = (v) => (Array.isArray(v) ? v.slice(0, 10).map((x) => String(x).slic
  * `ok`; both must agree for the credential to be accepted.
  * @returns {{ ok: boolean, findings: string[], info: object }}
  */
-export function evaluateSelfCheck(rep, { relations = RELATION_NAMES, optional = OPTIONAL_RELATIONS, functions = RPC_SIGNATURES } = {}) {
+export function evaluateSelfCheck(rep, { relations = RELATION_NAMES, optional = OPTIONAL_RELATIONS, functions = ALL_RPC_SIGNATURES, optionalFunctions = OPTIONAL_RPC_SIGNATURES } = {}) {
   const f = []
   if (!rep || typeof rep !== 'object') return { ok: false, findings: ['report_missing'], info: {} }
   if (rep.version !== 1) f.push(`report_version:${rep.version}`)
@@ -188,8 +188,11 @@ export function evaluateSelfCheck(rep, { relations = RELATION_NAMES, optional = 
   }
   for (const name of rels.keys()) if (!relations.includes(name)) f.push(`relation_not_in_inventory:${name}`)
   const fns = new Map((rep.functions || []).map((x) => [x.signature, x]))
+  // an optional function NOT applied is no finding (its tools answer SOURCE_NOT_APPLIED); an applied one is judged
+  const optionalAbsent = new Set()
   for (const sig of functions) {
     const x = fns.get(sig)
+    if (x && !x.exists && optionalFunctions.includes(sig)) { optionalAbsent.add(sig); continue }
     if (!x || !x.exists) { f.push(`function_missing:${sig}`); continue }
     if (x.executable !== true) f.push(`no_execute:${sig}`)
     if (x.volatility === 'v') f.push(`volatile_function:${sig}`)
@@ -205,13 +208,17 @@ export function evaluateSelfCheck(rep, { relations = RELATION_NAMES, optional = 
     const why = (pe.summary.find((x) => x.id === 'supabase_pg_net')?.reasons || []).slice(0, 3).join('; ')
     f.push(`pg_net_public: the role can reach schema net (pg_net) and the Supabase platform exception does not apply${why ? ` (${why})` : ''}. Resolve it before going live: drop the extension, or have Supabase revoke PUBLIC on schema net, its functions and tables (docs/SUPABASE-PG-NET-POSTURE.md)`)
   }
-  // the database's own verdict must agree
-  if (rep.ok !== true || !empty(rep.findings)) f.push(`database_findings:${list(rep.findings)}`)
+  // the database's own verdict must agree (its function_missing for an absent OPTIONAL function excepted)
+  const allDb = Array.isArray(rep.findings) ? rep.findings : [rep.findings].filter(Boolean)
+  const dbFindings = allDb.filter((x) => { const m = /^function_missing:(.*)$/.exec(String(x)); return !(m && optionalAbsent.has(m[1])) })
+  const onlyOptionalAbsent = allDb.length > 0 && dbFindings.length === 0
+  if ((rep.ok !== true && !onlyOptionalAbsent) || dbFindings.length) f.push(`database_findings:${list(dbFindings.length ? dbFindings : allDb)}`)
   const info = {
     running_as: rep.current_user ?? null,
     session_user: rep.session_user ?? null,
     relations: rels.size,
     functions: fns.size,
+    optional_functions_absent: [...optionalAbsent].sort(),
     select_outside_inventory: Array.isArray(rep.select_outside_inventory) ? rep.select_outside_inventory.length : null,
     database_temp: rep.database_temp ?? null,
     owner_rights_views: [...rels.values()].filter((r) => r.kind === 'v' && !r.invoker_view).map((r) => r.name),
