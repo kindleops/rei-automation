@@ -23,8 +23,8 @@ import { classifyProhibited } from '../../src/lib/agent/tools/prohibited.js'
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
 const T2_SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261020100000_action_gateway_t2.sql'), 'utf8')
 
-test('T2 catalog: nine tools, all T2 and implemented; reversible = pause / cancel / schedule / deal action; request_only = the five human requests; none prohibited', () => {
-  assert.equal(T2_SPECS.length, 9)
+test('T2 catalog: ten tools, all T2 and implemented; reversible = pause / cancel / schedule / deal action; request_only = the six human requests; none prohibited', () => {
+  assert.equal(T2_SPECS.length, 10)
   for (const s of T2_SPECS) {
     const a = ACTIONS.find((x) => x.name === s.name)
     assert.ok(a && a.implemented !== false && a.tier === 2, s.name)
@@ -32,7 +32,7 @@ test('T2 catalog: nine tools, all T2 and implemented; reversible = pause / cance
     assert.equal(classifyProhibited({ name: a.capability, touches: a.touches, wraps: a.wraps, input_schema: a.input }).prohibited, false, s.name)
   }
   assert.deepEqual(T2_STANDING.reversible, ['cancel_followup', 'create_deal_action', 'pause_campaign', 'schedule_followup'])
-  assert.deepEqual(T2_STANDING.request_only, ['adjust_campaign_plan', 'request_campaign_resume', 'request_thread_hold_release', 'update_lead_disposition', 'update_lead_stage'])
+  assert.deepEqual(T2_STANDING.request_only, ['adjust_campaign_plan', 'request_campaign_resume', 'request_thread_hold_release', 'update_lead_disposition', 'update_lead_stage', 'update_lead_temperature'])
   assert.deepEqual(Object.keys(REQUEST_CAPABILITIES).sort(), T2_STANDING.request_only)
 })
 
@@ -51,7 +51,7 @@ test('T2 human path: the request capabilities and D1 (agent_actions.authorize_ac
   const reg = createDefaultCapabilityRegistry()
   for (const id of ['agent_actions.authorize_action', ...Object.values(REQUEST_CAPABILITIES).map((c) => c.capability_id)]) assert.ok(reg.get(id), id)
   const tools = capabilityToolDefs(reg).map((t) => t.name)
-  for (const id of ['agent_actions.authorize_action', 'inbox.prepare_disposition_change', 'holds.prepare_release_approval', 'campaigns.prepare_resume_approval', 'campaigns.prepare_plan_adjustment_approval']) {
+  for (const id of ['agent_actions.authorize_action', 'inbox.prepare_disposition_change', 'inbox.prepare_temperature_change', 'holds.prepare_release_approval', 'campaigns.prepare_resume_approval', 'campaigns.prepare_plan_adjustment_approval']) {
     assert.ok(!tools.includes(`cap__${id.replace(/\./g, '__')}`), `${id} is not model-facing`)
     if (id !== 'agent_actions.authorize_action') assert.equal((await reg.get(id).prepare({}, {})).code, 'FILED_BY_ACTION_GATEWAY_ONLY')
   }

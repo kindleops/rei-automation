@@ -252,3 +252,52 @@ test('PG T2: pause_campaign pauses IMMEDIATELY through the lifecycle writer (sta
 })
 
 async function world(opts) { return t2World(opts) }
+
+test('PG T2: update_lead_temperature files ONE human request on a named evidence class; approval runs the lead-state writer (dry run first) without installing an operator lock; a suppressed contact is still a pipeline label change (eligibility untouched); the operator lock, an already-set label, an unknown temperature / basis and a hold refuse', { skip }, async () => {
+  const { env, cred } = await world()
+  try {
+    const t = await seedThread(env.owner, { inboundBody: 'Yes I own it. I would take 185k and need to close in 60 days' })
+    const { gateway } = makeGateway(env)
+    const plane = humanPlane(env)
+    const r = await gateway.call({ credential: cred, tool: 'update_lead_temperature', args: { client_request_id: 'temp-0001', thread_id: t.thread_id, temperature: 'hot', basis: 'seller_price', reason: 'Seller gave a price and a 60-day timeline' } })
+    assert.equal(r.ok, true, JSON.stringify(r))
+    assert.equal(r.code, 'HUMAN_APPROVAL_REQUESTED', JSON.stringify(r))
+    const before = (await sel(env.owner, `select lead_temperature from public.inbox_thread_state where id = $1`, [t.thread_id]))[0]
+    assert.equal(before.lead_temperature, null, 'nothing changed before the human')
+    const apr = await approvalRow(env.owner, r.result.approval_id)
+    assert.equal(apr.capability_id, 'inbox.prepare_temperature_change')
+    assert.deepEqual([apr.intended_change.to_temperature, apr.intended_change.basis, apr.intended_change.from_temperature], ['hot', 'seller_price', null])
+    assert.equal(findPhoneLike(JSON.stringify(apr)), null, 'no phone in the approval record')
+    const d = await plane.decide(r.result.approval_id)
+    assert.equal(d.ok, true, JSON.stringify(d))
+    assert.deepEqual(plane.calls.patch.map((p) => [p.dryRun === true, p.patch.lead_temperature, p.meta.change_source, p.meta.manual_temperature_lock, p.meta.actor]), [[true, 'hot', 'ai', false, OWNER], [false, 'hot', 'ai', false, OWNER]])
+    const after = (await sel(env.owner, `select lead_temperature, manual_temperature_lock from public.inbox_thread_state where id = $1`, [t.thread_id]))[0]
+    assert.equal(after.lead_temperature, 'hot')
+    assert.notEqual(after.manual_temperature_lock, true, 'an agent request never installs the operator lock')
+    // the same label again: nothing to request
+    const same = await gateway.call({ credential: cred, tool: 'update_lead_temperature', args: { client_request_id: 'temp-0002', thread_id: t.thread_id, temperature: 'hot', basis: 'seller_words', reason: 'still hot' } })
+    assert.equal(same.code, 'ALREADY_SET', JSON.stringify(same))
+    // bounds: the canonical registry only, and a named evidence class
+    for (const [k, temperature, basis, code] of [['temp-0003', 'lukewarm', 'seller_words', 'TEMPERATURE_NOT_ALLOWED'], ['temp-0004', 'unscored', 'seller_words', 'TEMPERATURE_NOT_ALLOWED'], ['temp-0005', 'warm', 'vibes', 'BASIS_NOT_ALLOWED']]) {
+      const x = await gateway.call({ credential: cred, tool: 'update_lead_temperature', args: { client_request_id: k, thread_id: t.thread_id, temperature, basis, reason: 'agent guess' } })
+      assert.equal(x.code, code, `${temperature}/${basis}`)
+    }
+    // §6: a suppressed contact keeps its eligibility state, and the property's pipeline label may still change — the request is filed, suppression untouched
+    await env.owner.query(`update public.inbox_thread_state set is_suppressed = true where id = $1`, [t.thread_id])
+    const sup = await gateway.call({ credential: cred, tool: 'update_lead_temperature', args: { client_request_id: 'temp-0006', thread_id: t.thread_id, temperature: 'warm', basis: 'no_response', reason: 'No reply in two weeks; the property is still an opportunity' } })
+    assert.equal(sup.code, 'HUMAN_APPROVAL_REQUESTED', JSON.stringify(sup))
+    const d2 = await plane.decide(sup.result.approval_id)
+    assert.equal(d2.ok, true, JSON.stringify(d2))
+    const after2 = (await sel(env.owner, `select lead_temperature, is_suppressed from public.inbox_thread_state where id = $1`, [t.thread_id]))[0]
+    assert.deepEqual([after2.lead_temperature, after2.is_suppressed], ['warm', true], 'the label moved; suppression stayed exactly as recorded')
+    // an operator's manual lock is final for agents
+    await env.owner.query(`update public.inbox_thread_state set manual_temperature_lock = true where id = $1`, [t.thread_id])
+    const locked = await gateway.call({ credential: cred, tool: 'update_lead_temperature', args: { client_request_id: 'temp-0007', thread_id: t.thread_id, temperature: 'cold', basis: 'no_response', reason: 'gone quiet' } })
+    assert.equal(locked.code, 'TEMPERATURE_LOCKED', JSON.stringify(locked))
+    // a held thread refuses
+    const t2 = await seedThread(env.owner, { phone: SELLER_2, property: 'p200', inboundBody: 'Maybe' })
+    await hold(env.owner, { key: 'test:temp-hold', thread: t2.thread_id, tk: t2.phone })
+    const held = await gateway.call({ credential: cred, tool: 'update_lead_temperature', args: { client_request_id: 'temp-0008', thread_id: t2.thread_id, temperature: 'warm', basis: 'seller_words', reason: 'said maybe' } })
+    assert.equal(held.code, 'AUTOMATION_HOLD')
+  } finally { await env.db.drop() }
+})

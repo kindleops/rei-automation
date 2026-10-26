@@ -154,7 +154,7 @@ test('module fence: the default Supabase client, direct pg, the DB-URL resolver 
   }
 })
 
-/** Run the REAL bin as a subprocess under the trace preload; drive initialize + list + all 17 tools; return the trace. */
+/** Run the REAL bin as a subprocess under the trace preload; drive initialize + list + all 19 tools; return the trace. */
 async function tracedRun(env) {
   const dir = tmpDir('lcmcp-trace-')
   const out = path.join(dir, 'trace.json')
@@ -171,7 +171,7 @@ async function tracedRun(env) {
   const outcomes = {}
   try {
     const { tools } = await client.listTools()
-    assert.equal(tools.length, 17)
+    assert.equal(tools.length, 19)
     for (const [name, args] of Object.entries(HAPPY)) {
       const r = await client.callTool({ name, arguments: env.LEADCOMMAND_MCP_DATA === 'live' ? (args.property_id ? { ...args, property_id: 'P1' } : args) : args })
       outcomes[name] = r.isError ? r.structuredContent?.error?.code : 'ok'
@@ -188,18 +188,18 @@ const ENV_PATH = /(^|[\\/])\.env([.\-_][^\\/]*)?$|[\\/]apps[\\/]api[\\/]\.env/
 test('a real server process (fixture mode, credentials planted in its env) never opens an env file and never reads the service-role key or a DB URL', async () => {
   const planted = { SUPABASE_SERVICE_ROLE_KEY: 'sentinel-service-role', SUPABASE_DB_URL: 'postgresql://sentinel', DATABASE_URL: 'postgresql://sentinel', SUPABASE_URL: 'https://sentinel.invalid' }
   const { trace, audit, outcomes } = await tracedRun({ LEADCOMMAND_MCP_DATA: 'fixture', LEADCOMMAND_MCP_PRINCIPAL_USER_ID: '00000000-0000-4000-8000-0000000000b1', LEADCOMMAND_MCP_ORG_ID: '00000000-0000-4000-8000-0000000000a1', LEADCOMMAND_MCP_SCOPES: ALL_SCOPES, ...planted })
-  assert.deepEqual(Object.values(outcomes), Array(17).fill('ok'), JSON.stringify(outcomes))
+  assert.deepEqual(Object.values(outcomes), Array(19).fill('ok'), JSON.stringify(outcomes))
   assert.deepEqual(trace.paths.filter((p) => ENV_PATH.test(p)), [], 'no env file was touched')
   assert.deepEqual(trace.env_reads, [], `forbidden env reads: ${trace.env_reads.join(', ')}`)
   assert.deepEqual(trace.fetches, [], 'fixture mode makes no network request')
-  assert.equal(audit.filter((a) => a.event === 'tool_call').length, 17)
+  assert.equal(audit.filter((a) => a.event === 'tool_call').length, 19)
 })
 
 test('a real server process (live mode over the fake PostgREST) reads only its two credential files, sends only the reader token, and audits the boot self-check', async () => {
   const dir = tmpDir()
   const env = liveEnv({ dir, over: { LCMCP_TRACE_FAKE_PG: '1' } })
   const { trace, audit, outcomes } = await tracedRun(env)
-  assert.deepEqual(Object.values(outcomes), Array(17).fill('ok'), JSON.stringify(outcomes))
+  assert.deepEqual(Object.values(outcomes), Array(19).fill('ok'), JSON.stringify(outcomes))
   assert.deepEqual(trace.paths.filter((p) => ENV_PATH.test(p)), [], 'no env file was touched')
   assert.deepEqual(trace.env_reads, [], `forbidden env reads: ${trace.env_reads.join(', ')}`)
   const credentialFiles = [...new Set(trace.paths.filter((p) => p.startsWith(dir)))]
@@ -211,7 +211,7 @@ test('a real server process (live mode over the fake PostgREST) reads only its t
   assert.equal(check?.outcome, 'ok')
   assert.equal(check?.running_as, 'lc_mcp_reader')
   assert.ok(audit.findIndex((a) => a.event === 'credential_self_check') < audit.findIndex((a) => a.event === 'server_boot'), 'the self-check precedes the boot record')
-  assert.equal(audit.filter((a) => a.event === 'tool_call' && a.outcome === 'ok' && a.data_mode === 'live').length, 17)
+  assert.equal(audit.filter((a) => a.event === 'tool_call' && a.outcome === 'ok' && a.data_mode === 'live').length, 19)
 })
 
 test('trace sanity: the preload DOES record a forbidden env read and an env-file open (so the empty traces above are meaningful)', async () => {

@@ -47,12 +47,12 @@ begin
   perform set_config('request.jwt.claim.lc_org', org_a::text, true);
 
   -- ── A. the registry ─────────────────────────────────────────────────────────
-  foreach v in array array['set_thread_hold', 'pause_campaign', 'cancel_followup', 'schedule_followup', 'create_deal_action', 'update_lead_stage', 'update_lead_disposition',
+  foreach v in array array['set_thread_hold', 'pause_campaign', 'cancel_followup', 'schedule_followup', 'create_deal_action', 'update_lead_stage', 'update_lead_disposition', 'update_lead_temperature',
                            'request_thread_hold_release', 'request_campaign_resume', 'adjust_campaign_plan'] loop
     if not (v = any (action_gateway.standing_t2_actions())) then fails := fails || ('A: not standing: ' || v); end if;
   end loop;
   if 'record_seller_counteroffer' = any (action_gateway.standing_t2_actions()) then fails := fails || 'A: an unregistered T2 action is standing'::text; end if;
-  if (select count(*) from action_gateway.extensions where kind = 'standing_t2_action' and basis = 'request_only') <> 5
+  if (select count(*) from action_gateway.extensions where kind = 'standing_t2_action' and basis = 'request_only') <> 6
      or (select count(*) from action_gateway.extensions where kind = 'standing_t2_action' and basis = 'reversible') <> 4 then fails := fails || 'A: registry bases'::text; end if;
   insert into action_gateway.extensions (kind, name, link, basis) values ('standing_t2_action', 'zz_other_link_action', 'posttest_other_link', 'reversible');
   if not ('zz_other_link_action' = any (action_gateway.standing_t2_actions())) then fails := fails || 'A: another link''s row does not join the union'::text; end if;

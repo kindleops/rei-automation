@@ -13,6 +13,7 @@
 // and with which credentials.
 import { RELATION_NAMES, ALL_RPC_SIGNATURES, READER_ROLE } from '../../src/data/inventory.mjs'
 import { conversationRpc } from '../../fixtures/conversations.mjs'
+import { FIXTURE } from '../../fixtures/dataset.mjs'
 
 export function b64url(o) {
   return Buffer.from(JSON.stringify(o)).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')
@@ -95,6 +96,7 @@ export function createFakePostgrest({ rows = LIVE_ROWS, report = passingReport()
       if (rpc[1] === 'lc_mcp_thread_hold_status') return json(200, { thread_found: true, holds: [], static_keys: { thread_key_sha256: null, property_id: 'P1' } })
       // 1.1 conversation intelligence: the fixture mirror of the projections (22023 → PostgREST's 400)
       if (conversationRpc[rpc[1]]) { try { return json(200, conversationRpc[rpc[1]](args)) } catch (e) { return json(400, { code: String(e.code || 'P0001'), message: 'refused' }) } }
+      if (/^lc_mcp_(corpus_census|lead_screen)$/.test(rpc[1]) && FIXTURE.rpc[rpc[1]]) { try { return json(200, FIXTURE.rpc[rpc[1]](args)) } catch (e) { return json(400, { code: String(e.code || 'P0001'), message: 'refused' }) } }
       if (rpc[1] === 'lc_mcp_followup_intent_health') return json(200, { health: { scheduled_executable: 0, planned: 0, delivered: 0, failed: 0, held: 0, computed_at: at }, reasons: [] })
       return json(404, { code: 'PGRST202', message: 'function not found' })
     }

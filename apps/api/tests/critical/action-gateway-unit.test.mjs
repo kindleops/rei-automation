@@ -20,7 +20,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const MODULE_DIR = path.resolve(HERE, '../../src/lib/domain/action-gateway')
 const PEPPER = 'p'.repeat(40)
 
-test('catalog: the 21 requested tools + the scoped reads; implemented = the T1 set + set_thread_hold + the T2 family (reversible or request-only) + the report-only reconciliation + the T3 / T4 family; a T3 / T4 tool is never standing-grant-only; nothing never-exposed exists', () => {
+test('catalog: the 22 requested tools + the scoped reads; implemented = the T1 set + set_thread_hold + the T2 family (reversible or request-only) + the report-only reconciliation + the T3 / T4 family; a T3 / T4 tool is never standing-grant-only; nothing never-exposed exists', () => {
   const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => r.name !== 'read_conversation_context').map((r) => r.name)].filter((n) => !WORKFORCE_TOOLS.includes(n))
   assert.deepEqual([...all].sort(), [...REQUESTED_TOOLS].sort())
   // + the 11 Workforce tools (docs/WORKFORCE-AGNTEI.md §2): T1, internal, the ONE Workforce writer / the principal-bound read

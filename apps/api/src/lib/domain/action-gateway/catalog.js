@@ -173,7 +173,7 @@ export const ACTIONS = Object.freeze([...IMPLEMENTED, ...T2_SPECS, ...T34_ACTION
 export const WORKFORCE_TOOLS = WF_NAMES
 export const ACTION_NAMES = Object.freeze(ACTIONS.map((a) => a.name))
 export const REQUESTED_TOOLS = Object.freeze(['create_research_job', 'request_property_valuation', 'create_operator_task', 'update_operator_task', 'run_authorized_reconciliation',
-  'update_lead_disposition', 'update_lead_stage', 'create_deal_action', 'set_thread_hold', 'request_thread_hold_release',
+  'update_lead_disposition', 'update_lead_temperature', 'update_lead_stage', 'create_deal_action', 'set_thread_hold', 'request_thread_hold_release',
   'draft_seller_reply', 'schedule_followup', 'cancel_followup', 'queue_authorized_reply',
   'prepare_acquisition_offer', 'submit_offer_for_approval', 'execute_authorized_offer', 'record_seller_counteroffer',
   'pause_campaign', 'request_campaign_resume', 'adjust_campaign_plan'])

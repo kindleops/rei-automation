@@ -10,7 +10,8 @@
 //   * owner / prospect names, emails and phones inside the dossier (must never leave)
 //   * a protected-class vendor flag ("Senior Owner") that safeFlags must drop
 import { buildDecisionInputStamp, MATERIAL_PROPERTY_FIELDS } from '@/lib/acquisition/decisionFreshness.js'
-import { conversationRpc } from './conversations.mjs'
+import { conversationRpc, FIXTURE_CONV_TABLES } from './conversations.mjs'
+import { censusMirror } from './census.mjs'
 
 export const FIXTURE_ORG = '00000000-0000-4000-8000-0000000000a1'
 export const FIXTURE_OTHER_ORG = '00000000-0000-4000-8000-0000000000a2'
@@ -192,6 +193,8 @@ const refuse22023 = () => { throw Object.assign(new Error('invalid parameter'), 
 const fixtureRpc = {
   // 1.1 conversation intelligence (fixtures/conversations.mjs: synthetic threads + a mirror of the SQL projections)
   ...conversationRpc,
+  // 1.2 corpus census + lead screen (fixtures/census.mjs: a mirror of the two SQL projections over these tables)
+  ...censusMirror({ properties, facts, scores, graph, campaignTargets, suppression, campaigns, threads: FIXTURE_CONV_TABLES.threads, messages: FIXTURE_CONV_TABLES.messages, now: NOW }),
   lc_mcp_ops_finding: ({ p_org_id, p_finding_type }) => {
     if (!p_org_id || !['supervisor.summary', 'valuation.refresh_batch', 'recovery.batch', 'recovery.linkage'].includes(p_finding_type)) refuse22023()
     return p_org_id === FIXTURE_ORG ? OPS_FINDINGS[p_finding_type] ?? null : null

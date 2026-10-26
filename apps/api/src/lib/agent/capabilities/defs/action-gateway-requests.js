@@ -9,9 +9,10 @@
 // the decide path compute them identically.
 import { hashCanonical } from '../../runtime/canonical.js'
 import { UUID, obj } from './_schema.js'
-import { dispositionSnapshot, holdSnapshot, campaignSnapshot } from '../../../domain/action-gateway/actions/t2/requests.js'
+import { dispositionSnapshot, temperatureSnapshot, holdSnapshot, campaignSnapshot } from '../../../domain/action-gateway/actions/t2/requests.js'
 import { AGENT_SOURCE_RE, neverReviveCode } from '../../../domain/action-gateway/actions/t2/shared.js'
 import { dispositionRuleVerdict } from '../../../domain/action-gateway/actions/t2/update-lead-disposition.js'
+import { temperatureRuleVerdict } from '../../../domain/action-gateway/actions/t2/update-lead-temperature.js'
 import { planAdjustmentVerdict } from '../../../domain/action-gateway/actions/t2/adjust-campaign-plan.js'
 
 const gatewayOnly = async () => ({ ok: false, code: 'FILED_BY_ACTION_GATEWAY_ONLY' })
@@ -53,6 +54,38 @@ export const actionGatewayRequestCapabilities = [
       if (!dry?.ok) return refused(String(dry?.reason || 'DRY_RUN_REFUSED').toUpperCase().slice(0, 80))
       const r = await ctx.services.leadState.patch(args)
       return { ok: r?.ok === true, code: r?.ok ? 'DISPOSITION_SET' : String(r?.reason || 'PATCH_REFUSED').toUpperCase().slice(0, 80), state: change.to_disposition }
+    },
+    audit: (input) => ({ thread_id: input?.thread_id || null }),
+  }),
+  base({
+    id: 'inbox.prepare_temperature_change',
+    domain: 'inbox',
+    title: 'Set a lead temperature (agent request)',
+    description: 'A human decision on an agent\'s request to set ONE thread\'s lead temperature (cold / warm / hot) on a named evidence class. Approving runs the lead-state writer (dry run, then the write) with every invariant and the operator temperature lock re-checked. Contact eligibility (suppression, opt-out, wrong number) is neither read as permission nor changed.',
+    input_schema: obj({ thread_id: UUID }, ['thread_id']),
+    side_effect: 'internal_write',
+    approval_class: 'default',
+    touches: ['lead_state'],
+    wraps: { service: 'lead-state/patch-universal-lead-state#patchUniversalLeadState', module: 'apps/api/src/lib/domain/lead-state/patch-universal-lead-state.js' },
+    compensation: { kind: 'inverse_temperature', note: 'A later request (or the operator in the inbox) sets the previous temperature back; the request records from_temperature.' },
+    idempotency: (input) => hashCanonical({ t: input.thread_id, k: 'temperature' }),
+    async snapshot(target, ctx) { return temperatureSnapshot(await ctx.services.leadState.threadRow(target.thread_id)) },
+    async executeApproved(change, ctx) {
+      if (!fromAgent(change)) return refused('SOURCE_NOT_AN_AGENT')
+      const t = await ctx.services.leadState.threadRow(change.thread_id)
+      if (!t?.thread_key) return refused('THREAD_NOT_FOUND')
+      const never = neverReviveCode({ thread_id: t.id, thread_key: t.thread_key, property_id: t.property_id })
+      if (never) return refused(never)
+      const hold = await ctx.services.holds.check({ threadKey: t.thread_key, threadId: t.id, propertyId: t.property_id || null, capability: 'ai_action' })
+      if (hold?.held !== false) return refused(hold?.fail_closed ? 'AUTOMATION_HOLD_LOOKUP_FAILED' : 'AUTOMATION_HOLD')
+      const v = temperatureRuleVerdict({ to: change.to_temperature, row: t })
+      if (v) return refused(v.code)
+      // change_source 'ai' + an explicit unlocked write: the agent's proposal never installs an operator lock; the registry's lock guard still refuses under an existing lock
+      const args = { threadKey: t.thread_key, patch: { lead_temperature: change.to_temperature }, meta: { change_source: 'ai', reason: change.reason, temperature_reason: `agent_request:${change.basis}`, manual_temperature_lock: false, source_view: 'action_gateway', actor: ctx.approver, approval_id: ctx.approval_id, requested_by_agent: change.source } }
+      const dry = await ctx.services.leadState.patch({ ...args, dryRun: true })
+      if (!dry?.ok) return refused(String(dry?.reason || 'DRY_RUN_REFUSED').toUpperCase().slice(0, 80))
+      const r = await ctx.services.leadState.patch(args)
+      return { ok: r?.ok === true, code: r?.ok ? 'TEMPERATURE_SET' : String(r?.reason || 'PATCH_REFUSED').toUpperCase().slice(0, 80), state: change.to_temperature }
     },
     audit: (input) => ({ thread_id: input?.thread_id || null }),
   }),

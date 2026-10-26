@@ -1,7 +1,7 @@
 // THE READ INVENTORY is one list, enforced in three places that must agree:
 //   1. the role migration's SQL lists (grants, policies, verification, rollback, fixtures);
 //   2. the MCP transport guard (src/data/read-fetch.mjs);
-//   3. what the REAL services read. All 17 tools run over the live transport against the
+//   3. what the REAL services read. All 19 tools run over the live transport against the
 //      fake PostgREST. The relations requested must EQUAL the inventory: nothing read
 //      outside it, nothing granted that is never read. The RPCs called must equal the 9
 //      allowlisted ones (2 app RPCs + the MCP's self-check, membership and 5 operations reads).
@@ -52,13 +52,13 @@ test('every inventory entry names the code that reads it; the app guard allowlis
   for (const [rel, readers] of Object.entries(RELATIONS)) assert.ok(readers.length > 0, rel)
   for (const sig of Object.keys(RPCS)) assert.ok(READ_ONLY_RPC_ALLOWLIST.includes(sig.replace(/^public\./, '').replace(/\(.*$/, '')), sig)
   for (const sig of Object.keys(MCP_RPCS)) assert.match(sig, /^public\.lc_mcp_/)
-  assert.equal(RPC_NAMES.length, 13)
+  assert.equal(RPC_NAMES.length, 15) // 9 required + 4 conversation reads + 2 census reads
   // every MCP definer names what it reads as its owner; none of those sources is in the role's SELECT inventory
   for (const sig of Object.keys(MCP_RPCS).filter((x) => !/self_check/.test(x))) assert.ok(DEFINER_READS[sig]?.length > 0, `${sig}: DEFINER_READS`)
   for (const src of DEFINER_ONLY_SOURCES) assert.ok(!RELATION_NAMES.includes(src.replace(/^public\./, '')), `${src} must not be granted to the role`)
 })
 
-test('live coverage: all 17 tools over the live transport read EXACTLY the inventory and call EXACTLY the 13 RPCs', async () => {
+test('live coverage: all 19 tools over the live transport read EXACTLY the inventory and call EXACTLY the 15 RPCs', async () => {
   const pg = createFakePostgrest({ membership: LIVE_MEMBERSHIP })
   const audit = []
   const app = await buildApp({ env: liveEnv(), baseFetch: pg.fetch, scrub: false, auditSink: (r) => audit.push(r) })
@@ -84,6 +84,8 @@ test('live coverage: all 17 tools over the live transport read EXACTLY the inven
       ['leadcommand_search_conversation_worklist', { category: 'recent_inbound' }],
       ['leadcommand_get_pipeline_summary', {}],
       ['leadcommand_get_opportunity_ranking', {}],
+      ['leadcommand_get_corpus_census', {}],
+      ['leadcommand_search_lead_screen', { limit: 5 }],
     ]
     for (const [name, args] of calls) {
       const r = await app.gateway.call(name, args)
@@ -95,7 +97,7 @@ test('live coverage: all 17 tools over the live transport read EXACTLY the inven
   assert.deepEqual(app.source.refusals, [], `reads refused by the inventory guard: ${JSON.stringify(app.source.refusals)}`)
   assert.deepEqual(audit.filter((a) => a.event === 'transport_refused'), [], 'no transport_refused audit line')
   assert.deepEqual(pg.relationsRead(), RELATION_NAMES, 'relations read == the inventory')
-  assert.deepEqual(pg.rpcsCalled(), [...RPC_NAMES].sort(), 'RPCs called == the 13 allowlisted')
+  assert.deepEqual(pg.rpcsCalled(), [...RPC_NAMES].sort(), 'RPCs called == the 15 allowlisted')
   assert.ok(pg.requests.every((r) => r.method === 'GET' || r.method === 'HEAD' || (r.method === 'POST' && r.rpc)), 'only reads and read RPCs reached the network')
   assert.ok(pg.requests.every((r) => r.role === 'lc_mcp_reader'), 'every request ran as lc_mcp_reader')
 })

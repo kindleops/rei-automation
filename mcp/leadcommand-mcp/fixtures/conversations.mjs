@@ -92,6 +92,9 @@ function threadJson(key, i, propertyId) {
   }
 }
 
+/** The synthetic conversation tables (threads, messages, graph rows) — read by fixtures/census.mjs for the census mirror. */
+export const FIXTURE_CONV_TABLES = Object.freeze({ threads, messages, graph })
+
 export const conversationRpc = {
   lc_mcp_lead_conversation({ p_property_id = null, p_thread_id = null, p_window_days = 365, p_before_at = null, p_before_id = null, p_limit = 30 }) {
     if (!p_property_id === !p_thread_id) refuse()

@@ -160,13 +160,13 @@ test('http DNS-rebinding: a foreign or mismatched Host is 403 even with the righ
   } finally { await s.close() }
 })
 
-test('http protocol: SDK client over Streamable HTTP — initialize, tools/list (17 read tools), a call, typed scope denial, audit transport', async () => {
+test('http protocol: SDK client over Streamable HTTP — initialize, tools/list (19 read tools), a call, typed scope denial, audit transport', async () => {
   const s = await serve({ env: httpEnv({ LEADCOMMAND_MCP_SCOPES: 'leadcommand.properties.read leadcommand.scores.read leadcommand.market.read' }) })
   const { c } = await client(s.listener.url)
   try {
     assert.equal(c.getServerVersion().name, 'leadcommand-mcp')
     const { tools } = await c.listTools()
-    assert.equal(tools.length, 17)
+    assert.equal(tools.length, 19)
     assert.ok(tools.every((t) => t.annotations.readOnlyHint === true && t.annotations.destructiveHint === false))
     const r = await c.callTool({ name: 'leadcommand_get_property', arguments: { property_id: 'FX1001' } })
     assert.equal(r.isError, false)
@@ -242,7 +242,7 @@ test('http sessions: unknown session → 404, no session on a non-initialize →
     assert.equal(s.listener.sessions(), 1)
     const ok = await raw(p, { body: list, headers: { ...bearer(), 'mcp-session-id': sid, 'mcp-protocol-version': '2025-06-18' } })
     assert.equal(ok.status, 200)
-    assert.equal(JSON.parse(ok.text).result.tools.length, 17)
+    assert.equal(JSON.parse(ok.text).result.tools.length, 19)
     // the session id is not a credential
     assert.equal((await raw(p, { body: list, headers: { 'mcp-session-id': sid, 'mcp-protocol-version': '2025-06-18' } })).status, 401)
     assert.equal((await raw(p, { method: 'DELETE', headers: { ...bearer(), 'mcp-session-id': sid, 'mcp-protocol-version': '2025-06-18' } })).status, 200)

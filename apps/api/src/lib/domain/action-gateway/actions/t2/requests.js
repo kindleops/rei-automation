@@ -27,6 +27,7 @@ const n = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(
 export const REQUEST_CAPABILITIES = Object.freeze({
   update_lead_stage: Object.freeze({ capability_id: 'pipeline.propose_stage_change', ttl_seconds: 3600 }),
   update_lead_disposition: Object.freeze({ capability_id: 'inbox.prepare_disposition_change', ttl_seconds: 7200 }),
+  update_lead_temperature: Object.freeze({ capability_id: 'inbox.prepare_temperature_change', ttl_seconds: 7200 }),
   request_thread_hold_release: Object.freeze({ capability_id: 'holds.prepare_release_approval', ttl_seconds: 43200 }),
   request_campaign_resume: Object.freeze({ capability_id: 'campaigns.prepare_resume_approval', ttl_seconds: 3600 }),
   adjust_campaign_plan: Object.freeze({ capability_id: 'campaigns.prepare_plan_adjustment_approval', ttl_seconds: 3600 }),
@@ -64,6 +65,10 @@ export async function normalizedStageRow(raw) {
   if (!raw?.id) return null
   const { normalizeAcquisitionStageCode, normalizeOpportunityStatus } = await import('../../../opportunity/universal-pipeline-registry.js')
   return { ...raw, acquisition_stage: normalizeAcquisitionStageCode(raw.acquisition_stage), opportunity_status: normalizeOpportunityStatus(raw.opportunity_status) }
+}
+/** The temperature drift snapshot (gateway and decide path alike): the label, its source and the operator lock. */
+export function temperatureSnapshot(row) {
+  return { thread_id: row?.id || null, temperature: low(row?.lead_temperature || row?.temperature) || null, temperature_source: low(row?.temperature_source) || null, manual_temperature_lock: row?.manual_temperature_lock === true }
 }
 export function dispositionSnapshot(row) {
   return { thread_id: row?.id || null, disposition: low(row?.disposition) || null, is_suppressed: row?.is_suppressed === true, contactability_status: low(row?.contactability_status) || null }

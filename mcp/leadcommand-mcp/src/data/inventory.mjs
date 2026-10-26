@@ -81,6 +81,9 @@ export const OPTIONAL_MCP_RPCS = Object.freeze({
   'public.lc_mcp_conversation_worklist(text,integer,text,timestamp with time zone,uuid,integer)': ['adapters/conversations#searchConversationWorklist'],
   'public.lc_mcp_pipeline_counts(text,text,text,integer)': ['adapters/conversations#getPipelineSummary'],
   'public.lc_mcp_conversation_signals(integer,text)': ['adapters/conversations#getPipelineSummary'],
+  // 1.2 corpus census + lead screen (PROPOSED_20261026150000_lc_mcp_corpus_census.sql, separately approved; same optional rule)
+  'public.lc_mcp_corpus_census(text)': ['adapters/census#getCorpusCensus'],
+  'public.lc_mcp_lead_screen(text,integer,text,text)': ['adapters/census#searchLeadScreen'],
 })
 
 /**
@@ -102,6 +105,8 @@ export const DEFINER_READS = Object.freeze({
   'public.lc_mcp_conversation_worklist(text,integer,text,timestamp with time zone,uuid,integer)': ['public.inbox_thread_state', 'public.message_events', 'public.eg_property_facts', 'public.property_acquisition_scores', 'public.sms_suppression_list', 'public.automation_hold_for(…) (if present)'],
   'public.lc_mcp_pipeline_counts(text,text,text,integer)': ['public.eg_property_facts'],
   'public.lc_mcp_conversation_signals(integer,text)': ['public.inbox_thread_state', 'public.message_events', 'public.eg_property_facts', 'public.campaign_target_graph', 'public.property_acquisition_scores'],
+  'public.lc_mcp_corpus_census(text)': ['public.eg_property_facts', 'public.properties', 'public.campaign_target_graph', 'public.campaign_targets', 'public.campaigns', 'public.inbox_thread_state', 'public.message_events (counts only)', 'public.acquisition_opportunities', 'public.property_acquisition_scores', 'public.sms_suppression_list', 'public.master_owners', 'public.prospects', 'public.phones (counts only)'],
+  'public.lc_mcp_lead_screen(text,integer,text,text)': ['public.eg_property_facts (keyset on property_id)', 'public.campaign_target_graph (phone counts by property)', 'public.inbox_thread_state (flags by property)', 'public.property_acquisition_scores', 'public.campaign_targets (counts)'],
 })
 
 /** Relations / functions the MCP reaches ONLY through a definer projection (never granted to the role). */

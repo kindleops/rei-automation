@@ -47,6 +47,11 @@ export const AGENT_PROPOSABLE_STAGES = Object.freeze(['needs_review', 'ownership
  */
 export const AGENT_DISPOSITIONS = Object.freeze(['interested', 'not_interested', 'referred', 'no_response', 'unqualified', 'duplicate', 'sold', 'declined_unverified'])
 
+/** Temperatures an agent may PROPOSE (universal-lead-state-registry LEAD_TEMPERATURE_CODES minus `unscored`, which is the scoring model's reset, never a proposal). */
+export const AGENT_TEMPERATURES = Object.freeze(['cold', 'warm', 'hot'])
+/** The evidence class a temperature request rests on (recorded with the request; the human reads it beside the reason). */
+export const TEMPERATURE_BASES = Object.freeze(['seller_words', 'seller_price', 'seller_timeline', 'no_response', 'decision_engine', 'property_evidence'])
+
 export const sha = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex')
 
 // the DB's phone-run rule (agent.payload_string_violation): such runs never reach a stored row

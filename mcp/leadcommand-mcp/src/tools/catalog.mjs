@@ -15,6 +15,7 @@ import { getCampaignMetrics } from '../adapters/campaigns.mjs'
 import { getLeadContactStatus } from '../adapters/contact-status.mjs'
 import { getOpsSupervisorStatus, searchActionCenter, getThreadHoldStatus, getFollowupIntentHealth, OPS_INTEL_SECTIONS, ACTION_STATES, HOLD_REASON_CATEGORIES, HOLD_MATCHED_ON, FOLLOWUP_COUNT_FIELDS } from '../adapters/operations.mjs'
 import { getLeadConversation, searchConversationWorklist, getPipelineSummary, getOpportunityRanking, WORKLIST_CATEGORIES, PIPELINE_DIMENSIONS, HISTORY_STATES, CONTACT_STATES, INTEREST_STATES } from '../adapters/conversations.mjs'
+import { getCorpusCensus, searchLeadScreen, CENSUS_SOURCES, SCREEN_PAGE_MAX, SCREEN_PAGE_DEFAULT } from '../adapters/census.mjs'
 
 const READ_ANNOTATIONS = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false })
 
@@ -408,6 +409,54 @@ export const TOOLS = Object.freeze([
     limits: { per_min: 6, timeout_ms: 30000, max_rows: 25, max_response_bytes: 131072 },
     untrusted: ['result.ranked[].latest_seller_text', 'result.ranked[].factors[].evidence'],
     handler: getOpportunityRanking,
+  },
+  {
+    name: 'leadcommand_get_corpus_census',
+    title: 'Get the exact corpus census',
+    description: 'EXACT populations of every lead-corpus source (properties, eg_property_facts = the lead key, campaign_target_graph, campaign_targets, campaigns, inbox_thread_state, message_events, acquisition_opportunities, property_acquisition_scores, sms_suppression_list, master_owners, prospects, phones), coverage of each over the lead corpus (phones on record, SMS-eligible phone, in a campaign, a thread, inbound, a Decision Engine score and its freshness, stages set, deal linked, last contact, value and equity known), evidence counts (distress, tax, liens, probate, pre-foreclosure, equity ≥ 30 %, portfolio owners, out-of-state, signals never contacted), duplicate identities (one phone on several properties, properties sharing an address, owners with several properties, facts / properties mismatches), contact state (opted-out, wrong-number, suppressed, unanswered threads), pipeline health (unresolved needs_review, interest labels without recent contact, stalled deals, label inconsistencies, contactable phones never contacted) and Decision Engine coverage over leads in conversation. Optionally one market. Counts only; columns the database lacks are named, never guessed.',
+    scope: 'leadcommand.pipeline.read', min_role: 'operator',
+    input: z.object({ market: Label(60).optional().describe('exact LeadCommand market label (as returned by other tools); omitted = the whole corpus') }).strict(),
+    output: z.object({
+      market: S, lead_key: z.string(), columns_present: z.array(z.string()), columns_absent: z.array(z.string()),
+      sources: z.object(Object.fromEntries(CENSUS_SOURCES.map((k) => [k, z.union([z.number(), loose]).nullable()]))).strict(),
+      coverage: loose, evidence: loose, duplicates: loose, contact: loose, pipeline_health: loose, decision_engine: loose,
+      notes: z.array(z.string()), rule: z.string(), provenance: Prov,
+    }).strict(),
+    limits: { per_min: 6, timeout_ms: 30000, max_rows: 1, max_response_bytes: 32768 },
+    untrusted: [],
+    handler: getCorpusCensus,
+  },
+  {
+    name: 'leadcommand_search_lead_screen',
+    title: 'Page through every lead for screening',
+    description: `A keyset page (property_id ascending, ≤ ${SCREEN_PAGE_MAX} rows, default ${SCREEN_PAGE_DEFAULT}) of SCREENING rows over the whole lead corpus (eg_property_facts), optionally one market / state: property basics (type, units, year, sqft, estimated value), equity, distress flags, owner portfolio size, phones ON RECORD as counts and SMS eligibility (never a number), outreach counts, last contact, conversation / pipeline labels, Decision Engine presence and age, and thread state (unanswered, opted out, wrong number, suppressed). Built for a restartable batch screen of every lead (scripts/corpus-screen.mjs): cheap and exhaustive, so only candidates go to the expensive reads. Labels are labels, not seller intent; thread flags are records, not contact eligibility.`,
+    scope: 'leadcommand.pipeline.read', min_role: 'operator', paged: true,
+    input: z.object({
+      market: Label(60).optional().describe('exact LeadCommand market label'),
+      state: State.optional(),
+      after_property_id: PropertyId.optional().describe('resume AFTER this property_id (the last id of a page you already hold) — a durable alternative to cursor for restartable batch jobs; not with cursor'),
+      limit: Limit(SCREEN_PAGE_MAX, SCREEN_PAGE_DEFAULT),
+      cursor: Cursor.optional(),
+    }).strict(),
+    output: z.object({
+      rows: z.array(z.object({
+        property_id: z.string(), market: S, state: S, zip: S, property_type: S, asset_type: S, units: N, year_built: N, building_sqft: N, estimated_value: N,
+        equity: z.object({ known_pct: N, class: S }).strict(),
+        distress: z.object({ signal_count: N, tax_delinquent: B, active_lien: B, probate: B, preforeclosure: B, lien_count: N }).strict(),
+        owner: z.object({ property_count: N, type_guess: S, out_of_state: B }).strict(),
+        contact: z.object({ phones_on_graph: z.number(), sms_eligible_phones: z.number(), candidate_phones: N, sms_status: S }).strict(),
+        outreach: z.object({ campaign_count: N, campaign_targets: z.number() }).strict(),
+        last_contact: z.object({ at: S, direction: S }).strict(),
+        conversation: z.object({ stage: S, status: S }).strict(),
+        pipeline: z.object({ stage: S, status: S, deal_linked: z.boolean() }).strict(),
+        decision_engine: z.object({ present: z.boolean(), aos_score: N, tier: S, computed_at: S }).strict(),
+        threads: z.object({ n: z.number(), last_inbound_at: S, last_outbound_at: S, unanswered: z.boolean(), opted_out: z.boolean(), wrong_number: z.boolean(), suppressed: z.boolean(), contactability: S }).strict(),
+      }).strict()),
+      order: z.string(), filters: z.object({ market: S, state: S }).strict(), labels_are: z.string(), rule: z.string(), provenance: Prov,
+    }).strict(),
+    limits: { per_min: 60, timeout_ms: 15000, max_rows: SCREEN_PAGE_MAX, max_response_bytes: 1048576 },
+    untrusted: ['result.rows[].conversation.*', 'result.rows[].pipeline.stage', 'result.rows[].pipeline.status', 'result.rows[].contact.sms_status', 'result.rows[].owner.type_guess', 'result.rows[].equity.class', 'result.rows[].threads.contactability', 'result.rows[].property_type', 'result.rows[].asset_type'],
+    handler: searchLeadScreen,
   },
 ])
 

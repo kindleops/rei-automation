@@ -44,4 +44,6 @@ export const HAPPY = {
   leadcommand_search_conversation_worklist: { category: 'unanswered_inbound', window_days: 30 },
   leadcommand_get_pipeline_summary: { dimension: 'market' },
   leadcommand_get_opportunity_ranking: { window_days: 30 },
+  leadcommand_get_corpus_census: {},
+  leadcommand_search_lead_screen: { limit: 10 },
 }

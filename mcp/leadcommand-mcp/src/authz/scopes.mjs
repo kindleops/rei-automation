@@ -16,7 +16,7 @@ export const SCOPES = Object.freeze({
   'leadcommand.followups.read': 'Follow-up intent lifecycle health: counts by state, stuck / review counts, the top non-success reason codes, and the supervisor\'s verdict. Never thread keys. Not in the default grant.',
   // 1.1 conversation intelligence (docs/LEADCOMMAND-CONVERSATION-INTELLIGENCE.md). OPT-IN, like the operations reads.
   'leadcommand.conversations.read': 'Seller conversation TEXT for one lead / thread and the conversation worklist (unanswered, recent, opted out, identity conflicts): message text (untrusted content, phones / emails masked), direction, timestamps, delivery states, the send-time guard\'s inputs. Never phone numbers, thread keys or raw payloads. Sensitive: not in the default grant.',
-  'leadcommand.pipeline.read': 'Exact pipeline counts grouped by market / state / stage / status, and conversation / integrity signal counts. Counts only. Not in the default grant.',
+  'leadcommand.pipeline.read': 'Exact pipeline counts grouped by market / state / stage / status, conversation / integrity signal counts, the corpus census (populations, coverage, duplicates, evidence, contact and pipeline-health counts) and the lead screen (keyset pages of per-lead labels, flags and counts; never names, phones or addresses). Not in the default grant.',
 })
 
 export const SCOPE_NAMES = Object.freeze(Object.keys(SCOPES))

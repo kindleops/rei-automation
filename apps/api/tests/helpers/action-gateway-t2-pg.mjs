@@ -23,7 +23,7 @@ export const T2_MIGRATION = MIG('PROPOSED_20261020100000_action_gateway_t2.sql')
 export const T2_BASELINE = path.join(REPO_DIR, 'mcp/leadcommand-action-mcp/migrations/test/action_gateway_t2_baseline.sql')
 
 /** Every T2 capability at tier 2 (standing grants), plus the T1 task capability. */
-export const T2_GRANTS = [['leads.update_disposition', 2], ['leads.update_stage', 2], ['deals.create_action', 2], ['holds.request_release', 2], ['followups.schedule', 2],
+export const T2_GRANTS = [['leads.update_disposition', 2], ['leads.update_temperature', 2], ['leads.update_stage', 2], ['deals.create_action', 2], ['holds.request_release', 2], ['followups.schedule', 2],
   ['followups.cancel', 2], ['campaigns.pause', 2], ['campaigns.request_resume', 2], ['campaigns.adjust_plan', 2], ['holds.set_thread_hold', 2]]
 
 export async function t2Db() {

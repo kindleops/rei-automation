@@ -24,6 +24,10 @@ const TOOLS = {
     async make(env, k) { const t = await seedThread(env.owner, { phone: phoneFor(k), property: `p-${k}`, inboundBody: 'Yes I own it, maybe later' }); return { thread_id: t.thread_id, disposition: 'interested', reason: `seller engaged ${k}` } },
     effect: (env) => count(env, `select count(*)::int n from agent.approval_request where capability_id = 'inbox.prepare_disposition_change'`),
   },
+  update_lead_temperature: {
+    async make(env, k) { const t = await seedThread(env.owner, { phone: phoneFor(k), property: `p-${k}`, inboundBody: 'Yes I own it, I would take 185k' }); return { thread_id: t.thread_id, temperature: 'warm', basis: 'seller_price', reason: `seller named a price ${k}` } },
+    effect: (env) => count(env, `select count(*)::int n from agent.approval_request where capability_id = 'inbox.prepare_temperature_change'`),
+  },
   create_deal_action: {
     async make(env, k) { const opp = await seedOpportunity(env.owner, {}); return { opportunity_id: opp, action_kind: 'call_seller', title: `Call the seller ${k}` } },
     effect: (env) => count(env, `select count(*)::int n from agent.ops_work_item where scope = 'agent'`),
@@ -65,7 +69,7 @@ const TOOLS = {
 let seq = 0
 function phoneFor() { seq += 1; return `+1312555${String(1000 + seq).slice(-4)}` }
 const count = async (env, q) => (await sel(env.owner, q))[0].n
-const capOf = { update_lead_stage: 'leads.update_stage', update_lead_disposition: 'leads.update_disposition', create_deal_action: 'deals.create_action', request_thread_hold_release: 'holds.request_release',
+const capOf = { update_lead_stage: 'leads.update_stage', update_lead_disposition: 'leads.update_disposition', update_lead_temperature: 'leads.update_temperature', create_deal_action: 'deals.create_action', request_thread_hold_release: 'holds.request_release',
   schedule_followup: 'followups.schedule', cancel_followup: 'followups.cancel', pause_campaign: 'campaigns.pause', request_campaign_resume: 'campaigns.request_resume', adjust_campaign_plan: 'campaigns.adjust_plan' }
 
 test('PG T2 matrix: every T2 tool refuses an UNAUTHORIZED capability, a CROSS-TENANT agent and a FORGED source / identity argument, and an idempotent REPLAY returns the recorded outcome with exactly ONE domain effect', { skip }, async () => {
@@ -108,7 +112,7 @@ test('PG T2 matrix: CONCURRENT agents on the same lead serialize (one executing 
   try {
     const gA = makeGateway(env, { worker: 'gw-a' }).gateway
     const gB = makeGateway(env, { worker: 'gw-b' }).gateway
-    for (const tool of ['update_lead_stage', 'pause_campaign', 'schedule_followup', 'request_thread_hold_release', 'update_lead_disposition', 'request_campaign_resume']) {
+    for (const tool of ['update_lead_stage', 'pause_campaign', 'schedule_followup', 'request_thread_hold_release', 'update_lead_disposition', 'update_lead_temperature', 'request_campaign_resume']) {
       const spec = TOOLS[tool]
       const base = await spec.make(env, `${tool}-c`)
       const before = await spec.effect(env)

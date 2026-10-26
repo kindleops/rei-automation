@@ -21,6 +21,9 @@ create table if not exists public.campaign_status_transitions (from_status text 
 alter table public.acquisition_opportunities add column if not exists stage_entered_at timestamptz, add column if not exists market text;
 alter table public.inbox_thread_state add column if not exists disposition text, add column if not exists is_suppressed boolean,
   add column if not exists contactability_status text, add column if not exists prospect_id text, add column if not exists master_owner_id text;
+-- the lead-temperature columns the universal lead-state writer touches (update_lead_temperature, 2026-10-26)
+alter table public.inbox_thread_state add column if not exists lead_temperature text, add column if not exists temperature text,
+  add column if not exists temperature_source text, add column if not exists temperature_reason text, add column if not exists manual_temperature_lock boolean;
 
 INSERT INTO public.campaign_status_transitions (from_status, to_status) VALUES
   ('draft', 'built'),

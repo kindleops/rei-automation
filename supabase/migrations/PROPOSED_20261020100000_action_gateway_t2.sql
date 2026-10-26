@@ -48,7 +48,7 @@
 --
 -- STANDING T2 (action_gateway.standing_t2_actions() = 'set_thread_hold' ∪ the registry):
 --   reversible:   pause_campaign, cancel_followup, schedule_followup, create_deal_action
---   request_only: the five request actions above (their own effect is ONE pending human decision; the
+--   request_only: the six request actions above (update_lead_temperature added for the acquisitions operations work) (their own effect is ONE pending human decision; the
 --                 irreversible change happens only on that per-use human approval)
 --
 -- HARD REFUSALS IN THE DATABASE (defence in depth under the JS policies):
@@ -544,7 +544,7 @@ declare
   b jsonb; i action_gateway.action_intents%rowtype; p jsonb; ic jsonb; base jsonb; v_cap text; v_display text[]; v_sponsor uuid; v_hex text; v_apr text;
   v_target jsonb; v_secs integer; r jsonb; t record; h record; c record; o record; k text; v jsonb; v_never text;
 begin
-  b := action_gateway.dw_begin(p_intent_id, p_lease_token, array['update_lead_stage', 'update_lead_disposition', 'request_thread_hold_release', 'request_campaign_resume', 'adjust_campaign_plan']);
+  b := action_gateway.dw_begin(p_intent_id, p_lease_token, array['update_lead_stage', 'update_lead_disposition', 'update_lead_temperature', 'request_thread_hold_release', 'request_campaign_resume', 'adjust_campaign_plan']);
   if b ? 'refused' then return b -> 'outcome'; end if;
   i := jsonb_populate_record(null::action_gateway.action_intents, b -> 'intent');
   v_sponsor := (b ->> 'sponsor_user_id')::uuid;
@@ -568,6 +568,20 @@ begin
         base := jsonb_build_object('action', 'disposition_change', 'thread_id', p ->> 'thread_id', 'to_disposition', p ->> 'to_disposition', 'reason', p ->> 'reason', 'source', p ->> 'source');
         if (p ->> 'to_disposition') not in ('interested', 'not_interested', 'referred', 'no_response', 'unqualified', 'duplicate', 'sold', 'declined_unverified') then
           return action_gateway.finish_intent(i.intent_id, 'refused', 'DISPOSITION_NOT_ALLOWED', '{}'::jsonb);
+        end if;
+        select id, property_id into t from public.inbox_thread_state where id = (p ->> 'thread_id')::uuid;
+        if t.id is null then return action_gateway.finish_intent(i.intent_id, 'failed', 'THREAD_NOT_FOUND', '{}'::jsonb); end if;
+        v_never := action_gateway.t2_never_revive(t.id, t.property_id, null);
+      when 'update_lead_temperature' then
+        -- a pipeline label on a named evidence class; contact eligibility is neither read nor touched (docs/LEADCOMMAND-CORPUS-INTELLIGENCE.md §6)
+        v_cap := 'inbox.prepare_temperature_change'; v_display := array['from_temperature'];
+        v_target := jsonb_build_object('thread_id', p ->> 'thread_id');
+        base := jsonb_build_object('action', 'temperature_change', 'thread_id', p ->> 'thread_id', 'to_temperature', p ->> 'to_temperature', 'basis', p ->> 'basis', 'reason', p ->> 'reason', 'source', p ->> 'source');
+        if (p ->> 'to_temperature') not in ('cold', 'warm', 'hot') then
+          return action_gateway.finish_intent(i.intent_id, 'refused', 'TEMPERATURE_NOT_ALLOWED', '{}'::jsonb);
+        end if;
+        if (p ->> 'basis') not in ('seller_words', 'seller_price', 'seller_timeline', 'no_response', 'decision_engine', 'property_evidence') then
+          return action_gateway.finish_intent(i.intent_id, 'refused', 'BASIS_NOT_ALLOWED', '{}'::jsonb);
         end if;
         select id, property_id into t from public.inbox_thread_state where id = (p ->> 'thread_id')::uuid;
         if t.id is null then return action_gateway.finish_intent(i.intent_id, 'failed', 'THREAD_NOT_FOUND', '{}'::jsonb); end if;
@@ -681,6 +695,7 @@ insert into action_gateway.extensions (kind, name, link, basis) values
   ('domain_write_action', 'pause_campaign', 'PROPOSED_20261020100000_action_gateway_t2', null),
   ('domain_write_action', 'update_lead_stage', 'PROPOSED_20261020100000_action_gateway_t2', null),
   ('domain_write_action', 'update_lead_disposition', 'PROPOSED_20261020100000_action_gateway_t2', null),
+  ('domain_write_action', 'update_lead_temperature', 'PROPOSED_20261020100000_action_gateway_t2', null),
   ('domain_write_action', 'request_thread_hold_release', 'PROPOSED_20261020100000_action_gateway_t2', null),
   ('domain_write_action', 'request_campaign_resume', 'PROPOSED_20261020100000_action_gateway_t2', null),
   ('domain_write_action', 'adjust_campaign_plan', 'PROPOSED_20261020100000_action_gateway_t2', null),
@@ -690,6 +705,7 @@ insert into action_gateway.extensions (kind, name, link, basis) values
   ('standing_t2_action', 'create_deal_action', 'PROPOSED_20261020100000_action_gateway_t2', 'reversible'),
   ('standing_t2_action', 'update_lead_stage', 'PROPOSED_20261020100000_action_gateway_t2', 'request_only'),
   ('standing_t2_action', 'update_lead_disposition', 'PROPOSED_20261020100000_action_gateway_t2', 'request_only'),
+  ('standing_t2_action', 'update_lead_temperature', 'PROPOSED_20261020100000_action_gateway_t2', 'request_only'),
   ('standing_t2_action', 'request_thread_hold_release', 'PROPOSED_20261020100000_action_gateway_t2', 'request_only'),
   ('standing_t2_action', 'request_campaign_resume', 'PROPOSED_20261020100000_action_gateway_t2', 'request_only'),
   ('standing_t2_action', 'adjust_campaign_plan', 'PROPOSED_20261020100000_action_gateway_t2', 'request_only');

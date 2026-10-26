@@ -37,7 +37,7 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
     }
     const impl = tools.filter((t) => t._meta['leadcommand/implemented']).map((t) => t.name).sort()
     for (const n of ['create_operator_task', 'create_research_job', 'draft_seller_reply', 'read_conversation_context', 'request_property_valuation', 'run_authorized_reconciliation', 'set_thread_hold', 'update_operator_task',
-      'update_lead_disposition', 'update_lead_stage', 'create_deal_action', 'request_thread_hold_release', 'schedule_followup', 'cancel_followup', 'pause_campaign', 'request_campaign_resume', 'adjust_campaign_plan',
+      'update_lead_disposition', 'update_lead_temperature', 'update_lead_stage', 'create_deal_action', 'request_thread_hold_release', 'schedule_followup', 'cancel_followup', 'pause_campaign', 'request_campaign_resume', 'adjust_campaign_plan',
       'queue_authorized_reply', 'prepare_acquisition_offer', 'submit_offer_for_approval', 'execute_authorized_offer', 'record_seller_counteroffer']) assert.ok(impl.includes(n), n)
     assert.equal(tools.find((t) => t.name === 'pause_campaign')._meta['leadcommand/tier'], 'T2')
     assert.equal(tools.find((t) => t.name === 'set_thread_hold')._meta['leadcommand/tier'], 'T2')
