@@ -161,6 +161,19 @@ function projectMessage(m) {
   }
 }
 
+// Lead-level interest from PER-THREAD readings: one phone's denial or stop speaks for that thread only.
+// The lead reads as the most actionable thread state; every thread's own reading stays visible.
+const LEAD_INTEREST_ORDER = ['interest', 'negative', 'label_only', 'no_evidence', 'possible_opt_out', 'opted_out', 'not_owner']
+export function leadInterest(inbound, labelInterested = null) {
+  const byThread = {}
+  for (const t of [...new Set(inbound.map((m) => m.thread))]) {
+    byThread[t] = interestReading(inbound.filter((m) => m.thread === t).map((m) => ({ id: m.id, text: m.text, recorded_opt_out: m.recorded.opt_out === true })), { labelSaysInterested: labelInterested })
+  }
+  const states = Object.values(byThread)
+  const pick = LEAD_INTEREST_ORDER.map((st) => states.find((r) => r.state === st)).find(Boolean)
+  return { interest: pick || interestReading([], { labelSaysInterested: labelInterested }), interest_by_thread: byThread }
+}
+
 /** What this PAGE of messages shows (oldest → newest): last speaker, unanswered seller words, readings with cited ids. */
 export function pageEvidence(rows, { labelInterested = null, now = new Date() } = {}) {
   const inbound = rows.filter((r) => r.direction === 'inbound')
@@ -185,7 +198,7 @@ export function pageEvidence(rows, { labelInterested = null, now = new Date() } 
     unanswered_inbound: Boolean(lastIn && (!lastOut || lastOut.at < lastIn.at)),
     seller_waiting_since: lastIn && (!lastOut || lastOut.at < lastIn.at) ? lastIn.at : null,
     last_outbound_failed: Boolean(lastOut && lastOut !== lastOutOk),
-    interest: interestReading(inbound.map((m) => ({ id: m.id, text: m.text, recorded_opt_out: m.recorded.opt_out === true })), { labelSaysInterested: labelInterested }),
+    ...leadInterest(inbound, labelInterested),
     price_mentions: prices.slice(-6),
     timeline_mentions: timeline.slice(-6),
     offer_requests: offerRequests.slice(-6),

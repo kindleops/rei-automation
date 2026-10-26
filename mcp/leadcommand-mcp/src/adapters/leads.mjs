@@ -87,6 +87,6 @@ export async function getLead(input, svc, { now }) {
           provenance: prov({ kind: 'derived', source: 'getEntityGraphOutreachState (inbox thread · pipeline deal · campaign_target_graph · campaign_targets)', rule: 'entity-graph-outreach-state (stage/status source: pipeline when a deal exists, else conversation)', as_of: outreach.generated_at, now }),
         }
       : { available: false, provenance: missing('getEntityGraphOutreachState', outreachRes.status === 'rejected' ? 'read_failed' : 'no_state') },
-    message_text: { included: false, reason: 'Seller message text is never returned by LeadCommand MCP 1.0 (PII minimization; untrusted content).' },
+    message_text: { included: false, reason: 'This tool returns lead state only. Message text (untrusted content, masked) is read with leadcommand_get_lead_conversation under the opt-in scope leadcommand.conversations.read.' },
   }
 }

@@ -200,7 +200,7 @@ export const TOOLS = Object.freeze([
   {
     name: 'leadcommand_get_lead',
     title: 'Get one seller lead',
-    description: 'One lead by property_id: lead state from the Entity Graph read model plus the live outreach state (stage/status WITH source pipeline vs conversation, last contact, campaign membership, contact readiness). Message text is never returned.',
+    description: 'One lead by property_id: lead state from the Entity Graph read model plus the live outreach state (stage/status WITH source pipeline vs conversation, last contact, campaign membership, contact readiness). Message text is not returned here: read it with leadcommand_get_lead_conversation (opt-in scope).',
     scope: 'leadcommand.leads.read', min_role: 'operator',
     input: PropertyIdInput,
     output: z.object({ lead_id: z.string(), property_id: z.string(), outreach: loose, message_text: z.object({ included: z.literal(false), reason: z.string() }).strict(), provenance: Prov }).passthrough(),
@@ -362,7 +362,7 @@ export const TOOLS = Object.freeze([
       history: z.object({ state: z.enum(HISTORY_STATES), earliest_at: S, latest_at: S, rows_on_record: N, capped_at: N.optional(), window_days: N }).strict(),
       counts: z.object({ inbound_in_window: N, outbound_in_window: N, other_property_rows_in_window: N, capped_at: N }).strict().nullable(),
       evidence: z.object({
-        last_speaker: S, commitment: loose.nullable(), unanswered_inbound: z.boolean(), seller_waiting_since: S, last_outbound_failed: z.boolean(), interest: Interest,
+        last_speaker: S, commitment: loose.nullable(), unanswered_inbound: z.boolean(), seller_waiting_since: S, last_outbound_failed: z.boolean(), interest: Interest, interest_by_thread: z.record(z.string(), Interest),
         price_mentions: z.array(loose), timeline_mentions: z.array(loose), offer_requests: z.array(loose), instruction_like_message_ids: z.array(z.string()), scope: z.string(), rule: z.string(),
       }).strict().nullable(),
       contact: z.object({ state: z.enum(CONTACT_STATES), threads_blocked: z.number(), threads_unknown: z.number(), threads_clear: z.number(), authoritative: z.literal(false), note: z.string() }).strict().nullable(),

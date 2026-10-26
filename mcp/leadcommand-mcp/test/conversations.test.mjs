@@ -147,6 +147,9 @@ test('lead conversation: the contact reading fails closed — holds, ownership o
     const shared = b.threads.find((t) => t.thread_id === FIXTURE_CONV.a)
     assert.equal(shared.link, 'other')
     assert.ok(shared.contact.blockers.includes('contact_role_not_owner'))
+    // one phone's "not mine" speaks for its thread only; the lead's own seller has said nothing decisive
+    assert.equal(b.evidence.interest.state, 'no_evidence')
+    assert.equal(b.evidence.interest_by_thread[shared.handle].state, 'not_owner')
     const own = b.threads.find((t) => t.thread_id === FIXTURE_CONV.b)
     assert.equal(own.contact.state, 'unknown', 'no ownership resolution row: unconfirmed, never clear')
     assert.ok(own.contact.unknowns.includes('ownership_unconfirmed'))
