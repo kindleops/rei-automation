@@ -24,9 +24,11 @@ import { NO_COMPANY_IDENTITY } from '../company-identity.js'
 
 const FINANCING_RE = /\b(?:owner\s+financ\w*|seller\s+financ\w*|subject[\s-]?to|take\s+over\s+(?:the\s+)?(?:payments|mortgage|loan)|lease\s+option|rent\s+to\s+own|land\s+contract|wrap(?:around)?\s+mortgage|novation)\b/i
 const LEGAL_TOPIC_RE = /\b(?:contract|agreement|attorney|lawyer|probate|court|title\s+(?:issue|problem)|lien|deed|divorce|bankrupt\w*|foreclos\w*)\b/i
-// rc-8.5.20 (owner persona rule): a seller who asks whether this is automated gets a truthful
-// answer from a person; the engine never drafts it (and playbook v2 refuses any denial)
-export const AUTOMATION_QUESTION_RE = /\b(?:are\s+(?:you|u)|is\s+(?:this|it|that)|r\s+u|am\s+i\s+(?:talking|texting|chatting)\s+(?:to|with))\s+(?:a\s+|an\s+)?(?:real\s+(?:person|human)|human|person|bot|robot|ai|a\.i\.|automated|computer|machine|auto(?:mated)?\s*(?:text|message|reply)|chat\s*bot|chatgpt|recording)\b|\b(?:bot|robot|automated|ai)\s*\?\s*$/i
+// rc-8.5.20 (owner persona rule): a seller who asks whether this is automated gets a truthful answer and
+// never a denial (playbook v2 refuses one). Operation Hidden Gold (owner addendum 2026-10-27): the AI
+// employee answers it ITSELF, truthfully — an identity_answer the composer must disclose (the validator
+// refuses an identity answer that neither discloses nor, of course, denies). Spanish forms included.
+export const AUTOMATION_QUESTION_RE = /\b(?:are\s+(?:you|u)|is\s+(?:this|it|that)|r\s+u|am\s+i\s+(?:talking|texting|chatting)\s+(?:to|with))\s+(?:a\s+|an\s+)?(?:real\s+(?:person|human)|human|person|bot|robot|ai|a\.i\.|automated|computer|machine|auto(?:mated)?\s*(?:text|message|reply)|chat\s*bot|chatgpt|recording)\b|\b(?:bot|robot|automated|ai)\s*\?\s*$|(?:eres|es\s+(?:esto|usted|este|un)|hablo\s+con|estoy\s+hablando\s+con)\s+(?:un\s+|una\s+)?(?:robot|bot|m[áa]quina|persona\s+real|humano|ia\b|inteligencia\s+artificial|autom[áa]tic[oa]|contestador)/i
 const ACK_ONLY_RE = /^\s*(?:ok(?:ay)?|k|thanks?|thank\s+you|thx|ty|got\s+it|cool|sounds\s+good)\s*[.!]*\s*$/i
 
 // rc-8.5.21 v3 (RT-11 / RT-05): a BURST consolidated into one turn is decided on ALL its member inbounds —
@@ -279,8 +281,11 @@ export function decideActions({ ledger, inboundText = '', inboundId, determinist
   //       text that promises a call, never dropped into the ambiguous hold
   if (requestHere('callback')) return plan([...update, escalation('requested_callback', { source_message_id: inboundId })], 'callback_request_operator_task', { ownership })
 
-  // 8b. "is this a bot / a real person?": a person answers it, truthfully (never a denial)
-  if (AUTOMATION_QUESTION_RE.test(String(inboundText || ''))) return plan([...update, escalation('asked_if_automated', { source_message_id: inboundId })], 'automation_question_human_answers', { ownership })
+  // 8b. "is this a bot / a real person?": the AI answers it itself, truthfully — an identity answer that MUST
+  //     disclose the automation (validator: identity:automation_question_unanswered; any denial is refused).
+  //     Operation Hidden Gold (owner addendum 2026-10-27): "AI employees must answer identity questions
+  //     truthfully, without falsely claiming to be human" — no longer a human-only escalation.
+  if (AUTOMATION_QUESTION_RE.test(String(inboundText || ''))) return plan([...update, { type: ACTIONS.AI_GENERATED_REPLY, category: 'identity_answer', objective: ledger?.next_missing || 'none', automation_question: true }], 'automation_question_truthful_disclosure', { ownership })
 
   // 8c. "which company are you with?": only the configured identity answers it, else a person
   if (requestHere('company_identity')) {

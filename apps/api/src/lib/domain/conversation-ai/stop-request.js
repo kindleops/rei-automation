@@ -12,7 +12,7 @@
 import { stopSpansAimedAtUs } from '../classification/revocation-morphology.js'
 
 export { stopSpansAimedAtUs }
-export const STOP_REQUEST_RE = /stop(?!\s+(?:by|over|in|off|past|on\s+by|and\s+(?:see|look))\b)|unsubscribe|opt[\s-]?out|remove\s+(?:me|my|this)|take\s+me\s+off|(?:do\s*n[o']?t|never)\s+(?:text|contact|message|msg|call|bother)|no\s+more\s+(?:texts?|messages?)|leave\s+me\s+alone|lose\s+my\s+number|quit\s+(?:texting|messaging)|cease|\bparar\b|\balto\b|\bbasta\b|no\s+me\s+(?:escriba|mande|contacte)/i
+export const STOP_REQUEST_RE = /stop(?!\s+(?:by|over|in|off|past|on\s+by|and\s+(?:see|look))\b)|unsubscribe|opt[\s-]?out|remove\s+(?:me|my|this)|take\s+me\s+off|(?:do\s*n[o']?t|never)\s+(?:text|contact|message|msg|call|bother)|no\s+more\s+(?:texts?|messages?)|leave\s+me\s+alone|lose\s+my\s+number|quit\s+(?:texting|messaging)|cease|\bparar\b|\balto\b|\bbasta\b|no\s+me\s+(?:escriba|mande|contacte)|\bdet[eé]nte\b|^\s*(?:para|cancela|no\s+m[áa]s)\s*[.!]*\s*$/i
 
 export function isStopRequest(text) {
   const t = String(text ?? '')

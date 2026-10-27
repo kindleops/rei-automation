@@ -125,13 +125,19 @@ export function propertyMentionReasons(text, ledger, { questionKind = null } = {
 const COMPANY_STATEMENT_RE = /\b(?:company|companies|firm|agency|organi[sz]ation|corporation|corp\b|llc|business\s+name|brokerage|represent(?:ing)?\s+(?:a|an|any)\b)/i
 const AUTOMATION_STATEMENT_RE = /\b(?:bot|robot|automated|automation|auto-?reply|ai\b|artificial\s+intelligence|real\s+person|a\s+human|not\s+human)\b/i
 const COLLEAGUE_CLAIM_RE = /\b(?:colleague|co-?worker|teammate|my\s+team|our\s+team|(?:my|our)\s+(?:business\s+)?partner|works?\s+with\s+me|on\s+my\s+side|same\s+outreach|my\s+assistant|my\s+associate|(?:my|our)\s+office)\b/i
+/** The seller asked one of these in the open burst (any message since our last text; RT-11 / RT-05). */
+export function askedInOpenBurst(ledger, kinds) {
+  const latest = ledger?.last_message?.direction === 'inbound' ? ledger.last_message.id : null
+  const open = new Set([...(Array.isArray(ledger?.open_inbound_ids) ? ledger.open_inbound_ids : []), ...(latest ? [latest] : [])].map(String))
+  return (ledger?.requests || []).some((q) => kinds.includes(q.kind) && (!latest || open.has(String(q.source_message_id))))
+}
+// Operation Hidden Gold: a truthful disclosure — the reply to "are you a bot / a real person?" must say so
+// (English or Spanish); a reply that neither discloses nor denies is not an answer
+export const AUTOMATION_DISCLOSURE_RE = /\b(?:ai|a\.i\.|automated|automation|assistant|virtual|software|asistente|automatizad[oa]|autom[áa]tic[oa]|inteligencia\s+artificial|ia)\b/i
 export function identityStatementReasons(text, ledger, companyIdentity = NO_COMPANY_IDENTITY) {
   const t = String(text || '')
   const r = []
-  const latest = ledger?.last_message?.direction === 'inbound' ? ledger.last_message.id : null
-  // rc-8.5.21 v3 (RT-11 / RT-05): a question in ANY message of the seller's burst since our last text counts
-  const open = new Set([...(Array.isArray(ledger?.open_inbound_ids) ? ledger.open_inbound_ids : []), ...(latest ? [latest] : [])].map(String))
-  const asked = (kinds) => (ledger?.requests || []).some((q) => kinds.includes(q.kind) && (!latest || open.has(String(q.source_message_id))))
+  const asked = (kinds) => askedInOpenBurst(ledger, kinds)
   if (COMPANY_STATEMENT_RE.test(t)) {
     if (!companyIdentity?.configured) r.push('identity:company_statement_without_configured_identity')
     else if (!asked(['company_identity', 'identity'])) r.push('identity:company_statement_not_asked')
@@ -236,6 +242,8 @@ export function validateOutbound(text, { ledger = null, objective = null, catego
   const thanks = unsupportedThanksClaim(t, ledger)
   if (thanks) content.push(`ledger:${thanks}`)
   for (const r of identityStatementReasons(t, ledger, companyIdentity)) content.push(r)
+  // Operation Hidden Gold: an identity answer to an automation question MUST disclose (never claim to be human)
+  if (category === 'identity_answer' && askedInOpenBurst(ledger, ['automation_question']) && !AUTOMATION_DISCLOSURE_RE.test(t)) content.push('identity:automation_question_unanswered')
   for (const r of priceApprovalReasons(t, ledger)) content.push(r)
   for (const r of callOrVisitPromiseReasons(t)) content.push(r)
   if (previousOutbound && openingOf(previousOutbound) && openingOf(previousOutbound) === openingOf(t)) content.push('style:repeated_opening')

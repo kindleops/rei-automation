@@ -35,8 +35,10 @@ const bareOf = (s) => fold(s).replace(/^[^\p{L}\p{M}\p{N}]+/u, "").replace(/[^\p
 
 /** Whole-message STOP keywords per language (after trimming punctuation). */
 const EXACT_KEYWORDS = Object.freeze({
-  Spanish: ["pare", "parar", "detener", "deténgase", "detengase", "cancelar", "baja", "darme de baja"],
-  Portuguese: ["pare", "parar", "cancelar", "sair", "descadastrar"],
+  // Operation Hidden Gold (F1): the bare imperatives a Spanish speaker texts back ("Para", "ALTO", "Basta",
+  // "Detente", "Cancela") are a STOP when they are the whole message (a sentence with them is read by the grammar)
+  Spanish: ["pare", "parar", "detener", "deténgase", "detengase", "cancelar", "baja", "darme de baja", "para", "alto", "basta", "detente", "deténte", "cancela", "no más", "no mas", "no más mensajes", "no mas mensajes", "ya basta"],
+  Portuguese: ["pare", "parar", "cancelar", "sair", "descadastrar", "chega", "para", "basta"],
   French: ["arrêt", "arret", "arrêtez", "arretez", "stop svp", "désabonner", "desabonner", "désinscrire"],
   German: ["stopp", "abbestellen", "abmelden", "aufhören", "aufhoeren"],
   Italian: ["basta messaggi", "annulla iscrizione", "cancellami", "disiscrivimi"],

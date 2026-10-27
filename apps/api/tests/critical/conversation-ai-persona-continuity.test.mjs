@@ -107,11 +107,12 @@ test('compose: the composer is told the persona; a draft naming anyone else is r
   assert.ok(!good.some((r) => r.startsWith('persona:')), JSON.stringify(good))
 })
 
-test('decide: "is this a bot?" goes to a person (a truthful answer), never to an AI draft', () => {
+test('decide: "is this a bot?" is answered by the AI itself, truthfully — an identity answer flagged as an automation question (Operation Hidden Gold: never a denial, no longer a human-only escalation)', () => {
   for (const t of ['Is this a bot?', 'are you a real person', 'Am I talking to a robot?', 'is this automated?', 'Is this AI?']) {
     const ledger = buildCanonicalLedger({ messages: [{ id: 'o1', direction: 'outbound', body: 'Do you still own 12 Elm St?', at: ago(30), use_case: 'ownership_check' }, { id: 'i1', direction: 'inbound', body: t, at: ago(1) }], now: NOW })
     const p = decideActions({ ledger, inboundText: t, inboundId: 'i1', language: 'en' })
-    assert.ok(p.actions.some((a) => a.type === 'ESCALATE_TO_OPERATOR' && a.reason === 'asked_if_automated'), `${t}: ${JSON.stringify(p.actions)}`)
+    assert.ok(p.actions.some((a) => a.type === 'AI_GENERATED_REPLY' && a.category === 'identity_answer' && a.automation_question === true), `${t}: ${JSON.stringify(p.actions)}`)
+    assert.ok(!p.actions.some((a) => a.type === 'ESCALATE_TO_OPERATOR'), t)
   }
 })
 

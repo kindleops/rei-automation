@@ -12,7 +12,7 @@
 import { COMPOSE_PROMPT_VERSION, PLAYBOOK_RULES, PLAYBOOK_VERSION } from '../playbook/v3/index.js'
 import { detectSellerTone } from '../playbook/v1/tone.js'
 import { maskText } from '../pii.js'
-import { validateOutbound } from '../outbound-validator.js'
+import { validateOutbound, askedInOpenBurst } from '../outbound-validator.js'
 import { mixedAnswerTarget } from '../property-facts.js'
 import { NO_COMPANY_IDENTITY } from '../company-identity.js'
 import { checkSpend, measureComplexity } from './complexity.js'
@@ -22,6 +22,8 @@ export const COMPOSE_SCHEMA = Object.freeze({
   properties: { message: { type: 'string', maxLength: 320 } },
 })
 
+// Operation Hidden Gold: the truthful answer to "is this a bot / a real person?" (never a denial, never volunteered otherwise)
+const AUTOMATION_ANSWER_TEXT = 'They asked whether this is automated, a bot or AI. Answer truthfully and plainly: this number uses an AI assistant that writes the texts for the local buyer in PERSONA (name the company only if COMPANY is configured), and a person on the team reads every message and can take over whenever they prefer. Never claim to be human or a real person, never apologize for it, and do not add a question unless the OBJECTIVE calls for one.'
 const CATEGORY_TEXT = Object.freeze({
   conditional_interest_clarify: 'They said they will not do creative financing (or similar terms). Say plainly that this would be a straightforward purchase with no creative financing. Do not mention cash, funds, speed or any amount.',
   identity_answer: 'They asked who we are. Answer truthfully and briefly from PERSONA and COMPANY only.',
@@ -96,6 +98,7 @@ export function buildComposePrompt({ ledger, inboundText, category, objective, t
     ...propertyRuleLines(ledger),
     `REPLY TYPE: ${category}. OBJECTIVE: ${OBJECTIVE_TEXT[objective] || OBJECTIVE_TEXT.none}.`,
     ...(CATEGORY_TEXT[category] ? [CATEGORY_TEXT[category]] : []),
+    ...(category === 'identity_answer' && askedInOpenBurst(ledger, ['automation_question']) ? [AUTOMATION_ANSWER_TEXT] : []),
     'First acknowledge what they said in plain words. At most one question, and only for the objective (one thing per question, never "X, and Y?"). Keep it to 1 or 2 sentences. Never invent a next step such as a visit or viewing.',
     ...(followupScheduled ? [`FOLLOW-UP: a check-in is scheduled in about ${followupScheduled.days || 30} days. You do not have to mention it (usually don't), but NEVER promise to stop contacting them ("won't bother you again", "leave you be", "take you off our list", "won't reach out again" are all false).`] : []),
     'Never claim anything about our inventory, other properties, buyers or plans.',
