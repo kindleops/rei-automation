@@ -16,6 +16,7 @@ import { getLeadContactStatus } from '../adapters/contact-status.mjs'
 import { getOpsSupervisorStatus, searchActionCenter, getThreadHoldStatus, getFollowupIntentHealth, OPS_INTEL_SECTIONS, ACTION_STATES, HOLD_REASON_CATEGORIES, HOLD_MATCHED_ON, FOLLOWUP_COUNT_FIELDS } from '../adapters/operations.mjs'
 import { getLeadConversation, searchConversationWorklist, getPipelineSummary, getOpportunityRanking, WORKLIST_CATEGORIES, PIPELINE_DIMENSIONS, HISTORY_STATES, CONTACT_STATES, INTEREST_STATES } from '../adapters/conversations.mjs'
 import { getCorpusCensus, searchLeadScreen, CENSUS_SOURCES, SCREEN_PAGE_MAX, SCREEN_PAGE_DEFAULT } from '../adapters/census.mjs'
+import { getThreadFollowups, getThreadExecutionLog, getThreadOffers, getThreadContactEligibility, searchOperatorTasks } from '../adapters/acquisitions.mjs'
 
 const READ_ANNOTATIONS = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false })
 
@@ -186,6 +187,29 @@ const PipelineSummaryInput = z.object({
  * Tool spec: { name, title, description, scope, min_role, input, output, limits, paged, untrusted, handler }
  * handler(input, services, { after, now, principal }) → payload (+ for paged tools: { rows, has_more, last })
  */
+// 1.3 Operation Hidden Gold acquisition reads (adapters/acquisitions.mjs)
+const FollowupIntentRow = z.object({
+  id: S, kind: S, intent: S, use_case: S, state: S, due_at: S, next_attempt_at: S, reason_code: S, writer: S, attempts: N, max_attempts: N, materialize_seq: N, materialized: z.boolean(),
+  template_source: S, outcome: S, next_action: S, property_id: S, this_property: B, created_at: S, updated_at: S, closed_at: S,
+}).strict()
+const QueueRow = z.object({
+  id: S, queue_key: S, queue_status: S, scheduled_for: S, sent_at: S, delivered_at: S, failed_reason: S, use_case_template: S, agent_name: S, message_origin: S, message_type: S, template_source: S,
+  touch_number: N, retry_count: N, safety_status: S, guard_status: S, paused_reason: S, property_id: S, created_at: S, updated_at: S,
+  receipt: z.object({ state: S, code: S, action: S, updated_at: S }).strict().nullable(),
+}).strict()
+const AutomationEventRow = z.object({ id: S, event_type: S, status: S, source: S, error_code: S, property_id: S, run_started_at: S, run_completed_at: S, created_at: S, updated_at: S }).strict()
+const OfferRow = z.object({
+  offer_id: S, opportunity_id: S, property_id: S, offer_version: N, direction: S, offer_type: S, purchase_price: N, authorized_ceiling: N, recommended_offer: N, valuation_mid: N, strategy: S,
+  status: S, closing_date: S, closing_term: S, emd_amount: N, emd_term: S, policy_version: S, send_bound: z.boolean(), created_at: S, sent_at: S, superseded_at: S, accepted_at: S, accepted_price: N,
+}).strict()
+const OpportunityRow = z.object({
+  id: S, primary_property_id: S, acquisition_stage: S, opportunity_status: S, automation_state: S, priority: S, temperature: S, approval_state: S, next_action: S, next_action_due: S, blocker: S, latest_intent: S,
+  estimated_value: N, arv: N, asking_price: N, current_offer: N, active_offer_id: S, accepted_offer_id: S, market: S, stage_entered_at: S, last_activity_at: S, last_contact_at: S, created_at: S, updated_at: S,
+}).strict()
+const TaskRow = z.object({
+  id: S, scope: S, kind: S, severity: S, title: S, subject_type: S, subject_id: S, state: S, escalated: z.boolean(), priority: N, due_at: S, first_seen_at: S, last_seen_at: S, seen_count: N, acknowledged_at: S, source_job_id: S, created_at: S, updated_at: S,
+}).strict()
+
 export const TOOLS = Object.freeze([
   {
     name: 'leadcommand_search_leads',
@@ -457,6 +481,91 @@ export const TOOLS = Object.freeze([
     limits: { per_min: 60, timeout_ms: 15000, max_rows: SCREEN_PAGE_MAX, max_response_bytes: 1048576 },
     untrusted: ['result.rows[].conversation.*', 'result.rows[].pipeline.stage', 'result.rows[].pipeline.status', 'result.rows[].contact.sms_status', 'result.rows[].owner.type_guess', 'result.rows[].equity.class', 'result.rows[].threads.contactability', 'result.rows[].property_type', 'result.rows[].asset_type'],
     handler: searchLeadScreen,
+  },
+  {
+    name: 'leadcommand_get_thread_followups',
+    title: 'Get the follow-up intents of one inbox thread',
+    description: 'One inbox thread\'s follow-up intents (public.followup_intents): kind, intent, use case, lifecycle state, due / next attempt, reason code, writer, attempts, whether a send_queue row was materialized, template source, outcome, next action and timestamps — newest first, up to 50 — plus counts by state. Never a thread key, intent key, row spec, lease or provider id. Read-only: nothing here plans, re-queues or cancels a follow-up.',
+    scope: 'leadcommand.followups.read', min_role: 'operator',
+    input: z.object({ thread_id: Uuid.describe('inbox thread id (the conversation_id of the Action Center / thread_id of the conversation reads)') }).strict(),
+    output: z.object({
+      thread_id: z.string(), property_id: S, available: z.boolean(),
+      rows: z.array(FollowupIntentRow), returned: z.number(), total: z.number(), has_more: z.boolean(), limit: z.number(),
+      counts_by_state: z.record(z.string(), z.number()), provenance: Prov, policy_notes: z.array(z.string()),
+    }).strict(),
+    limits: { per_min: 60, timeout_ms: 8000, max_rows: 50, max_response_bytes: 65536 },
+    untrusted: ['result.rows[].kind', 'result.rows[].intent', 'result.rows[].use_case', 'result.rows[].reason_code', 'result.rows[].writer', 'result.rows[].template_source', 'result.rows[].outcome', 'result.rows[].next_action'],
+    handler: getThreadFollowups,
+  },
+  {
+    name: 'leadcommand_get_thread_execution_log',
+    title: 'Get the execution log of one inbox thread',
+    description: 'What LeadCommand queued, sent, delivered or failed for one inbox thread: its send_queue rows (status, scheduled / sent / delivered, failed reason, use-case template, agent name, message origin and type, template source, touch, guard / safety states, timestamps) — each with the Action Gateway receipt (state, code, action) of a handed-off intent when link #28 is applied — plus the thread\'s automation engine events (type, status, source, error code; never the payload). Newest first, up to the limit (default 50, max 100) for each list. Never a message body, phone number or provider payload; digit runs in free text are withheld. Read-only.',
+    scope: 'leadcommand.conversations.read', min_role: 'operator',
+    input: z.object({ thread_id: Uuid.describe('inbox thread id'), limit: Limit(100, 50) }).strict(),
+    output: z.object({
+      thread_id: z.string(), property_id: S, limit: z.number(),
+      rows: z.array(QueueRow), returned: z.number(), events: z.array(AutomationEventRow), events_returned: z.number(),
+      sources: z.object({ send_queue: z.boolean(), seller_action_receipts: z.boolean(), automation_events: z.boolean() }).strict(),
+      provenance: Prov, policy_notes: z.array(z.string()),
+    }).strict(),
+    limits: { per_min: 60, timeout_ms: 8000, max_rows: 100, max_response_bytes: 131072 },
+    untrusted: ['result.rows[].queue_key', 'result.rows[].failed_reason', 'result.rows[].agent_name', 'result.rows[].paused_reason', 'result.rows[].use_case_template', 'result.rows[].receipt.code', 'result.events[].error_code'],
+    handler: getThreadExecutionLog,
+  },
+  {
+    name: 'leadcommand_get_thread_offers',
+    title: 'Get the offers and pipeline records of one inbox thread',
+    description: 'One inbox thread\'s seller offers (public.seller_offers: offer id, version, direction — outbound = what LeadCommand sent, inbound = the seller\'s counter as recorded —, type, purchase price, authorized ceiling, recommended offer, valuation mid, strategy, status, closing / EMD terms, timestamps; newest first, up to 50) and its acquisition opportunities (stage, status, automation state, priority, temperature, approval state, next action, blocker, latest intent, prices, market, timestamps; up to 10). Never a thread key, dedupe key or metadata; digit runs in free text are withheld. Read-only: nothing here makes, accepts or withdraws an offer.',
+    scope: 'leadcommand.conversations.read', min_role: 'operator',
+    input: z.object({ thread_id: Uuid.describe('inbox thread id') }).strict(),
+    output: z.object({
+      thread_id: z.string(), property_id: S,
+      offers: z.array(OfferRow), offers_returned: z.number(), offers_total: z.number(), offers_has_more: z.boolean(),
+      active_offer: z.object({ offer_id: S, direction: S, purchase_price: N, authorized_ceiling: N }).strict().nullable(),
+      opportunities: z.array(OpportunityRow), opportunities_returned: z.number(),
+      sources: z.object({ seller_offers: z.boolean(), acquisition_opportunities: z.boolean() }).strict(),
+      provenance: Prov, policy_notes: z.array(z.string()),
+    }).strict(),
+    limits: { per_min: 60, timeout_ms: 8000, max_rows: 60, max_response_bytes: 65536 },
+    untrusted: ['result.offers[].offer_id', 'result.offers[].strategy', 'result.offers[].closing_term', 'result.offers[].emd_term', 'result.opportunities[].next_action', 'result.opportunities[].blocker', 'result.opportunities[].latest_intent', 'result.opportunities[].active_offer_id', 'result.opportunities[].accepted_offer_id'],
+    handler: getThreadOffers,
+  },
+  {
+    name: 'leadcommand_get_thread_contact_eligibility',
+    title: 'Get the contact eligibility of one inbox thread',
+    description: 'May this inbox thread be contacted? The send-time guard\'s INPUTS read at call time — the thread\'s own flags (suppressed, contactability status, opt-out, wrong number, status, disposition, automation state), whether an ACTIVE suppression-list row exists for its number (count, type, capped reason, date — never the number), active automation-engine suppressions, active holds (type, reason category, blocked capabilities — never a hold id / key / reason text), the contact-property role for the thread\'s property, the phone rows\' states — and eligible_for_outreach with every blocking reason named. The rule: a thread key exists, none of suppressed / opt-out / wrong number, contactability not in the blocked set, no active suppression-list row, no active automation suppression, no active hold blocking ai_action. A READ, never an authorization to send. Sensitive: behind the contact-status scope.',
+    scope: 'leadcommand.contact_status.read', min_role: 'operator',
+    input: z.object({ thread_id: Uuid.describe('inbox thread id') }).strict(),
+    output: z.object({
+      thread_id: z.string(), property_id: S, eligible_for_outreach: z.boolean(), blocking_reasons: z.array(z.string()),
+      thread_flags: z.object({ is_suppressed: B, contactability_status: S, opt_out: B, wrong_number: B, status: S, disposition: S, automation_state: S, paused: z.boolean(), has_thread_key: z.boolean() }).strict(),
+      suppression_list: z.object({ active: z.number(), rows: z.array(z.object({ type: S, reason: S, sender_scoped: z.boolean(), created_at: S }).strict()) }).strict(),
+      automation_suppressions: z.object({ active: z.number(), rows: z.array(z.object({ type: S, rule_key: S, event_type: S, action_type: S, reason: S, suppressed_at: S, expires_at: S, created_at: S }).strict()) }).strict().nullable(),
+      holds: z.object({ active: z.number(), blocks_ai_action: z.boolean(), rows: z.array(z.object({ hold_type: S, reason_category: S, matched_on: S, blocked_capabilities: z.array(z.string()), blocks_ai_action: z.boolean(), set_at: S }).strict()) }).strict().nullable(),
+      contact_property: z.object({ role: S, rejected: z.boolean(), suppression_scope: S, updated_at: S }).strict().nullable(),
+      phone_rows: z.array(z.object({ phone_type: S, contact_status: S, activity_status: S, wrong_number_at: S }).strict()),
+      rule: z.string(), sources: z.record(z.string(), z.boolean()), provenance: Prov, policy_notes: z.array(z.string()),
+    }).strict(),
+    limits: { per_min: 60, timeout_ms: 8000, max_rows: 1, max_response_bytes: 32768 },
+    untrusted: ['result.suppression_list.rows[].reason', 'result.suppression_list.rows[].type', 'result.automation_suppressions.rows[].reason', 'result.automation_suppressions.rows[].rule_key', 'result.thread_flags.contactability_status', 'result.thread_flags.disposition', 'result.contact_property.role'],
+    handler: getThreadContactEligibility,
+  },
+  {
+    name: 'leadcommand_search_operator_tasks',
+    title: 'Search open operator tasks',
+    description: 'The open and acknowledged operator work items (agent.ops_work_item) of the operator\'s org: id, scope, kind, severity, title, subject type / id, state, escalated, priority, due, first / last seen, seen count, acknowledged date and timestamps — newest first, up to the limit (default 50, max 100) — plus counts by state and severity. Never the detail payload; digit runs in titles are withheld. Read-only: acknowledging, resolving or dismissing an item is not possible here.',
+    scope: 'leadcommand.action_center.read', min_role: 'operator',
+    input: z.object({ limit: Limit(100, 50) }).strict(),
+    output: z.object({
+      rows: z.array(TaskRow), returned: z.number(), has_more: z.boolean(), limit: z.number(), available: z.boolean(), code: z.string().optional(),
+      other_org_rows_withheld: z.number(),
+      counts: z.object({ open: z.number(), acknowledged: z.number(), critical: z.number(), warning: z.number(), info: z.number(), escalated: z.number(), total: z.number() }).strict().nullable(),
+      provenance: Prov, policy_notes: z.array(z.string()),
+    }).strict(),
+    limits: { per_min: 30, timeout_ms: 8000, max_rows: 100, max_response_bytes: 131072 },
+    untrusted: ['result.rows[].title', 'result.rows[].kind', 'result.rows[].scope', 'result.rows[].subject_id', 'result.rows[].source_job_id'],
+    handler: searchOperatorTasks,
   },
 ])
 

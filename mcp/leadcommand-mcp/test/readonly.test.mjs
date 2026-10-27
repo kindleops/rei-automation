@@ -63,7 +63,7 @@ const PURE_ALLOW = ['lib/domain/queue/queue-control-safety.js']
 const MUTATION = [/\.from\(\s*[^)]*\)[\s\S]{0,160}?\.(insert|upsert|update|delete)\s*\(/, /\.(insert|upsert)\s*\(/, /\b(insert\s+into|update\s+[a-z_."]+\s+set|delete\s+from|truncate\s+table|alter\s+table|drop\s+table)\b/i]
 
 test('no write tool is registered: every tool is a get/search read with a .read scope', () => {
-  assert.equal(TOOLS.length, 19)
+  assert.equal(TOOLS.length, 24)
   assert.ok(assertCatalogReadOnly(TOOLS))
   for (const t of TOOLS) assert.match(t.name, /^leadcommand_(get|search)_/)
   assert.ok(NOT_IMPLEMENTED.some((x) => /READ-ONLY/.test(x.reason)))

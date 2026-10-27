@@ -84,6 +84,12 @@ export const OPTIONAL_MCP_RPCS = Object.freeze({
   // 1.2 corpus census + lead screen (PROPOSED_20261026150000_lc_mcp_corpus_census.sql, separately approved; same optional rule)
   'public.lc_mcp_corpus_census(text)': ['adapters/census#getCorpusCensus'],
   'public.lc_mcp_lead_screen(text,integer,text,text)': ['adapters/census#searchLeadScreen'],
+  // 1.3 Operation Hidden Gold acquisition reads (PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql, separately approved; same optional rule)
+  'public.lc_mcp_thread_followups(uuid)': ['adapters/acquisitions#getThreadFollowups'],
+  'public.lc_mcp_thread_execution_log(uuid,integer)': ['adapters/acquisitions#getThreadExecutionLog'],
+  'public.lc_mcp_thread_offers(uuid)': ['adapters/acquisitions#getThreadOffers'],
+  'public.lc_mcp_thread_contact_eligibility(uuid)': ['adapters/acquisitions#getThreadContactEligibility'],
+  'public.lc_mcp_operator_tasks(integer)': ['adapters/acquisitions#searchOperatorTasks'],
 })
 
 /**
@@ -107,6 +113,11 @@ export const DEFINER_READS = Object.freeze({
   'public.lc_mcp_conversation_signals(integer,text)': ['public.inbox_thread_state', 'public.message_events', 'public.eg_property_facts', 'public.campaign_target_graph', 'public.property_acquisition_scores'],
   'public.lc_mcp_corpus_census(text)': ['public.eg_property_facts', 'public.properties', 'public.campaign_target_graph', 'public.campaign_targets', 'public.campaigns', 'public.inbox_thread_state', 'public.message_events (counts only)', 'public.acquisition_opportunities', 'public.property_acquisition_scores', 'public.sms_suppression_list', 'public.master_owners', 'public.prospects', 'public.phones (counts only)'],
   'public.lc_mcp_lead_screen(text,integer,text,text)': ['public.eg_property_facts (keyset on property_id)', 'public.campaign_target_graph (phone counts by property)', 'public.inbox_thread_state (flags by property)', 'public.property_acquisition_scores', 'public.campaign_targets (counts)'],
+  'public.lc_mcp_thread_followups(uuid)': ['public.inbox_thread_state (one row by id)', 'public.followup_intents (by thread_key, ≤ 50 + counts by state; if present)'],
+  'public.lc_mcp_thread_execution_log(uuid,integer)': ['public.inbox_thread_state (one row by id)', 'public.send_queue (by thread_key, ≤ 100; no body / numbers)', 'action_gateway.seller_action_receipts (by queue_row_id; if present)', 'public.automation_events (by conversation_thread_id, ≤ 100; no payload; if present)'],
+  'public.lc_mcp_thread_offers(uuid)': ['public.inbox_thread_state (one row by id)', 'public.seller_offers (by thread_key, ≤ 50; if present)', 'public.acquisition_opportunities (by primary_thread_key, ≤ 10)'],
+  'public.lc_mcp_thread_contact_eligibility(uuid)': ['public.inbox_thread_state (one row by id)', 'public.sms_suppression_list (by number)', 'public.automation_suppressions (by number / thread; if present)', 'public.automation_hold_for(…) → public.automation_holds (if present)', 'public.contact_property_resolution (if present)', 'public.phones (≤ 3)'],
+  'public.lc_mcp_operator_tasks(integer)': ['agent.ops_work_item (open / acknowledged, ≤ 100; no detail; if present)'],
 })
 
 /** Relations / functions the MCP reaches ONLY through a definer projection (never granted to the role). */
@@ -115,6 +126,7 @@ export const DEFINER_ONLY_SOURCES = Object.freeze([
   'public.automation_holds', 'public.automation_hold_for(text,uuid,text,uuid,text,text)',
   'public.followup_intents', 'public.v_followup_intent_health', 'public.v_followup_intent_reasons',
   'public.message_events', 'public.contact_property_resolution',
+  'public.send_queue', 'public.seller_offers', 'public.automation_events', 'public.automation_suppressions', 'agent.ops_work_item', 'action_gateway.seller_action_receipts',
 ])
 
 /** The REQUIRED functions (the 1.0 reader migration's list). */

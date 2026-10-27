@@ -9,7 +9,9 @@ const EXPECTED = ['leadcommand_search_leads', 'leadcommand_get_lead', 'leadcomma
   // rc-8.5.21 operations reads (opt-in scopes)
   'leadcommand_get_ops_supervisor_status', 'leadcommand_search_action_center', 'leadcommand_get_thread_hold_status', 'leadcommand_get_followup_intent_health',
   // 1.1 conversation intelligence (opt-in scopes)
-  'leadcommand_get_lead_conversation', 'leadcommand_search_conversation_worklist', 'leadcommand_get_pipeline_summary', 'leadcommand_get_opportunity_ranking', 'leadcommand_get_corpus_census', 'leadcommand_search_lead_screen']
+  'leadcommand_get_lead_conversation', 'leadcommand_search_conversation_worklist', 'leadcommand_get_pipeline_summary', 'leadcommand_get_opportunity_ranking', 'leadcommand_get_corpus_census', 'leadcommand_search_lead_screen',
+  // 1.3 Operation Hidden Gold acquisition reads (opt-in scopes)
+  'leadcommand_get_thread_followups', 'leadcommand_get_thread_execution_log', 'leadcommand_get_thread_offers', 'leadcommand_get_thread_contact_eligibility', 'leadcommand_search_operator_tasks']
 
 
 test('initialize: server info, negotiated protocol version, tools-only capabilities, instructions', async () => {
@@ -26,7 +28,7 @@ test('initialize: server info, negotiated protocol version, tools-only capabilit
   } finally { await c.close() }
 })
 
-test('discovery: exactly the 19 read tools, read-only annotations, scope + limits metadata', async () => {
+test('discovery: exactly the 24 read tools, read-only annotations, scope + limits metadata', async () => {
   const c = await connect()
   try {
     const { tools } = await c.client.listTools()

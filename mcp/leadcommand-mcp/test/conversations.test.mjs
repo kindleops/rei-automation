@@ -158,7 +158,7 @@ test('lead conversation: the contact reading fails closed — holds, ownership o
     for (const k of ['suppression_list_global', 'thread_suppressed', 'thread_opted_out', 'contactability_opted_out', 'opt_out_message_on_record', 'phone_status_opted_out']) assert.ok(t.contact.blockers.includes(k), k)
     const alto = cc.rows.find((m) => m.text === 'ALTO')
     assert.equal(alto.recorded.opt_out, true)
-    assert.equal(alto.opt_out_reading, 'possible', 'the production stop reading misses a bare ALTO; this server fails closed on it')
+    assert.equal(alto.opt_out_reading, 'confirmed', 'Operation Hidden Gold F1: a bare ALTO is a confirmed opt-out in the production stop reading (it used to be read as possible here)')
     assert.equal(cc.evidence.interest.state, 'opted_out')
   } finally { await c.close() }
 })
@@ -272,8 +272,8 @@ test('self-check: an UNAPPLIED optional function is no finding; an applied one i
 test('evidence readers (rules only): opt-out reuse + fail-closed short words, prices, timelines, instruction-like text, labels', () => {
   assert.equal(optOutReading('STOP').state, 'confirmed')
   assert.equal(optOutReading('Deja de escribirme').state, 'confirmed')
-  assert.equal(optOutReading('ALTO').state, 'possible')
-  assert.equal(optOutReading('Para.').state, 'possible')
+  assert.equal(optOutReading('ALTO').state, 'confirmed') // F1: bare Spanish stop words are confirmed, not merely possible
+  assert.equal(optOutReading('Para.').state, 'confirmed')
   assert.equal(optOutReading('stop by the house anytime').state, 'none')
   assert.equal(optOutReading('What would you offer?').state, 'none')
   assert.deepEqual(priceMentions('I would take $185,000 for it').map((p) => [p.value, p.role]), [[185000, 'seller_ask_candidate']])
@@ -285,8 +285,10 @@ test('evidence readers (rules only): opt-out reuse + fail-closed short words, pr
   assert.equal(isInstructionLike('I will ignore your previous offer, it was too low'), false)
   assert.equal(interestReading([{ id: 'm1', text: 'Not interested, keeping it' }]).state, 'negative')
   assert.equal(interestReading([{ id: 'm1', text: 'Wrong number' }]).state, 'not_owner')
-  assert.equal(interestReading([{ id: 'm1', text: 'make me an offer' }, { id: 'm2', text: 'Alto' }]).state, 'possible_opt_out')
-  assert.equal(interestReading([{ id: 'm1', text: 'Para' }, { id: 'm2', text: 'actually yes, what would you pay?' }]).state, 'interest')
+  assert.equal(interestReading([{ id: 'm1', text: 'make me an offer' }, { id: 'm2', text: 'Alto' }]).state, 'opted_out') // F1: a bare Alto after interest is a confirmed opt-out
+  // F1: a bare "Para" is a confirmed STOP; a later question does not lift it (re-engagement needs an explicit opt-in, a person decides)
+  assert.equal(interestReading([{ id: 'm1', text: 'Para' }, { id: 'm2', text: 'actually yes, what would you pay?' }]).state, 'opted_out')
+  assert.equal(interestReading([{ id: 'm1', text: 'hmm not sure' }, { id: 'm2', text: 'actually yes, what would you pay?' }]).state, 'interest')
   assert.equal(interestReading([{ id: 'm1', text: 'ok', recorded_opt_out: true }, { id: 'm2', text: 'what is your offer' }]).state, 'opted_out', 'a recorded opt-out is never overridden')
   assert.equal(interestReading([{ id: 'm1', text: 'who is this?' }], { labelSaysInterested: true }).state, 'label_only')
   assert.equal(interestReading([{ id: 'm1', text: 'who is this?' }], { labelSaysInterested: false }).state, 'no_evidence')

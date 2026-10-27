@@ -4,6 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { buildApp } from '../src/app.mjs'
 import { FIXTURE, FIXTURE_ORG, FIXTURE_OWNER, FIXTURE_NOW, FIXTURE_CAMPAIGN, FIXTURE_THREADS } from '../fixtures/dataset.mjs'
+import { FIXTURE_CONV } from '../fixtures/conversations.mjs'
 import { SCOPE_NAMES } from '../src/authz/scopes.mjs'
 
 /** Every scope, the opt-in ones included (contact status + the four rc-8.5.21 operations reads). */
@@ -46,4 +47,9 @@ export const HAPPY = {
   leadcommand_get_opportunity_ranking: { window_days: 30 },
   leadcommand_get_corpus_census: {},
   leadcommand_search_lead_screen: { limit: 10 },
+  leadcommand_get_thread_followups: { thread_id: FIXTURE_CONV.a },
+  leadcommand_get_thread_execution_log: { thread_id: FIXTURE_CONV.a, limit: 10 },
+  leadcommand_get_thread_offers: { thread_id: FIXTURE_CONV.a },
+  leadcommand_get_thread_contact_eligibility: { thread_id: FIXTURE_CONV.a },
+  leadcommand_search_operator_tasks: { limit: 10 },
 }

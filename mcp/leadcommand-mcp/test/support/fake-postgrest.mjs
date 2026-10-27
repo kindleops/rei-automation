@@ -13,6 +13,7 @@
 // and with which credentials.
 import { RELATION_NAMES, ALL_RPC_SIGNATURES, READER_ROLE } from '../../src/data/inventory.mjs'
 import { conversationRpc } from '../../fixtures/conversations.mjs'
+import { acquisitionRpc } from '../../fixtures/acquisitions.mjs'
 import { FIXTURE } from '../../fixtures/dataset.mjs'
 
 export function b64url(o) {
@@ -95,6 +96,8 @@ export function createFakePostgrest({ rows = LIVE_ROWS, report = passingReport()
       if (rpc[1] === 'lc_mcp_action_center') return json(200, { summary: [{ state: 'needs_attention', n: 1, lost: 1, computed_at: at }], items: [{ conversation_id: '00000000-0000-4000-8000-0000000001a1', state: 'needs_attention', owner: 'unassigned', lost: true, stage_verified: false, next_action: 'reply_to_seller', priority_reason: 'unowned_conversation', reasons: [], pending_approvals: 0, has_opportunity: false, state_since: at, computed_at: at }], limit: args.p_limit })
       if (rpc[1] === 'lc_mcp_thread_hold_status') return json(200, { thread_found: true, holds: [], static_keys: { thread_key_sha256: null, property_id: 'P1' } })
       // 1.1 conversation intelligence: the fixture mirror of the projections (22023 → PostgREST's 400)
+      // 1.3 acquisition reads: the fixture mirror of the five projections (22023 → PostgREST's 400)
+      if (acquisitionRpc[rpc[1]]) { try { return json(200, acquisitionRpc[rpc[1]](args)) } catch (e) { return json(400, { code: String(e.code || 'P0001'), message: 'refused' }) } }
       if (conversationRpc[rpc[1]]) { try { return json(200, conversationRpc[rpc[1]](args)) } catch (e) { return json(400, { code: String(e.code || 'P0001'), message: 'refused' }) } }
       if (/^lc_mcp_(corpus_census|lead_screen)$/.test(rpc[1]) && FIXTURE.rpc[rpc[1]]) { try { return json(200, FIXTURE.rpc[rpc[1]](args)) } catch (e) { return json(400, { code: String(e.code || 'P0001'), message: 'refused' }) } }
       if (rpc[1] === 'lc_mcp_followup_intent_health') return json(200, { health: { scheduled_executable: 0, planned: 0, delivered: 0, failed: 0, held: 0, computed_at: at }, reasons: [] })

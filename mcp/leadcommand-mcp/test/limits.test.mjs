@@ -159,7 +159,7 @@ test('disconnect / recover (real stdio subprocess): kill → the server exits; r
   const a = await launch()
   const pid = a.transport.pid
   assert.ok(pid)
-  assert.equal((await a.client.listTools()).tools.length, 19)
+  assert.equal((await a.client.listTools()).tools.length, 24)
   assert.ok(!(await call(a.client, 'leadcommand_get_market_intelligence', { zip: '75001' })).isError)
   await a.client.close() // closes stdin → server exits
   await new Promise((r) => setTimeout(r, 300))

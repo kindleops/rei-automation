@@ -657,6 +657,23 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261026150000_lc_mcp_corpus_census_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261026150000_lc_mcp_corpus_census_rollback_posttest.sql')],
   },
+  // ── LeadCommand MCP 1.3 Operation Hidden Gold read coverage: five per-thread acquisition reads for lc_mcp_reader ──
+  // OPTIONAL, separately approved, applied AFTER lc_mcp_reader (independent of the 1.1 / 1.2 optional links: whichever is
+  // applied is judged by its self-check). Setup = the 1.1 setup (base emulation + the 1.0 reader + the production message /
+  // inbox columns) + the acquisition emulation (send_queue / followup_intents / seller_offers / acquisition_opportunities /
+  // automation_events / _suppressions / agent.ops_work_item columns and synthetic rows). action_gateway.seller_action_receipts
+  // is deliberately absent from the setup: the posttest creates it inside its own transaction to prove the join.
+  {
+    id: 'lc_mcp_acquisition_reads',
+    setup: [LC_MCP_ROLE_RESET, SHIM, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql', LC_MCP_READER,
+      'mcp/leadcommand-mcp/migrations/test/lc_mcp_conversation_intel_emulation.sql',
+      'mcp/leadcommand-mcp/migrations/test/lc_mcp_acquisition_reads_emulation.sql'],
+    pretest: M('PROPOSED_20261027130000_lc_mcp_acquisition_reads_pretest.sql'),
+    apply: [M('PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql')],
+    posttest: [M('PROPOSED_20261027130000_lc_mcp_acquisition_reads_posttest.sql')],
+    rollback: [M('PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback_posttest.sql')],
+  },
   // ── Action Gateway phase 1 (OPTIONAL link #26, separately approved): the durable action schema and the scoped
   // execution role lc_action_gateway. Setup = the REAL prerequisite migrations (runtime, capabilities, missions,
   // operations + #24, the P0 hold registry) + the read-inventory baseline.
