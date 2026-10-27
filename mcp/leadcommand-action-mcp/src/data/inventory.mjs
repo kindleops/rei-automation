@@ -16,6 +16,9 @@ export const T2_RPCS = Object.freeze(['action_gateway_dw_deal_action', 'action_g
 export const T34_RPCS = Object.freeze(['action_gateway_authorize_envelope', 'action_gateway_receipt_get', 'action_gateway_negotiation_state', 'action_gateway_offer_authority',
   'action_gateway_dw_handoff', 'action_gateway_dw_offer_envelope'])
 
+/** link #29's RPCs (Operation Hidden Gold: the acquisitions domain write, the delivery / annotation reads): pinned to that migration by test/inventory.test.mjs. */
+export const OHG_RPCS = Object.freeze(['action_gateway_dw_ohg', 'action_gateway_reply_status', 'action_gateway_annotations'])
+
 /** The Workforce × Agntei RPCs (PROPOSED_20261022110000_workforce_agntei.sql): pinned to that migration by test/inventory.test.mjs. */
 export const WF_RPCS = Object.freeze(['action_gateway_workforce_read', 'action_gateway_dw_workforce'])
 
@@ -30,5 +33,7 @@ export const RPCS = Object.freeze(['action_gateway_controls', 'action_gateway_pr
   ...T2_RPCS,
   // link #28 (PROPOSED_20261020110000_action_gateway_t34.sql): envelope authorization, the handoff / envelope writers, the offer reads
   ...T34_RPCS,
+  // link #29 (PROPOSED_20261027120000_action_gateway_ohg.sql): the acquisitions writer + the delivery / annotation reads
+  ...OHG_RPCS,
   // Workforce × Agntei: the principal-bound read + the ONE Workforce writer
   ...WF_RPCS])

@@ -24,6 +24,11 @@ alter table public.inbox_thread_state add column if not exists disposition text,
 -- the lead-temperature columns the universal lead-state writer touches (update_lead_temperature, 2026-10-26)
 alter table public.inbox_thread_state add column if not exists lead_temperature text, add column if not exists temperature text,
   add column if not exists temperature_source text, add column if not exists temperature_reason text, add column if not exists manual_temperature_lock boolean;
+-- the attribution columns the same writer sets beside a temperature / status / stage / disposition / contactability change (Operation Hidden Gold, 2026-10-27)
+alter table public.inbox_thread_state add column if not exists stage_source text, add column if not exists status_source text, add column if not exists manual_stage_lock boolean,
+  add column if not exists conversation_status text, add column if not exists disposition_source text, add column if not exists contactability_source text,
+  add column if not exists snooze_reason text, add column if not exists archive_scope text, add column if not exists is_pinned boolean, add column if not exists is_starred boolean,
+  add column if not exists last_read_at timestamptz;
 
 INSERT INTO public.campaign_status_transitions (from_status, to_status) VALUES
   ('draft', 'built'),

@@ -39,6 +39,25 @@ function maskOut(v, depth = 0) {
 
 const ERRORISH = new Set(['error', 'refused', 'failed', 'expired', 'outcome_unknown'])
 
+/**
+ * Operation Hidden Gold: the sms_* tool family the acquisitions agents call. Each name is an ALIAS of one existing
+ * gateway action (no second send system): the arguments are adapted, the call is the canonical one, and the audit
+ * trail keeps the canonical action name. sms_send and sms_reply are queue_authorized_reply (the only AI text path:
+ * decideAndCompose → validator → R3 → canonical queue writer → runner, under the production send policy and a
+ * per-use approval); a thread with no unanswered seller message is refused there (NO_INBOUND) — a proactive touch is
+ * a follow-up (sms_schedule / sms_create_followup = schedule_followup), never a free-form send.
+ */
+export const SMS_ALIASES = Object.freeze({
+  sms_send: { to: 'queue_authorized_reply', title: 'Send a reply to the seller (certified path)', adapt: (a) => ({ client_request_id: a.client_request_id, thread_id: a.thread_id }), note: 'Answers the latest unanswered seller message of the thread through LeadCommand’s canonical AI reply path; the text is composed and validated by LeadCommand, never supplied here. Refused when nothing is unanswered: schedule a follow-up instead.' },
+  sms_reply: { to: 'queue_authorized_reply', title: 'Reply to the seller’s latest message (certified path)', adapt: (a) => ({ client_request_id: a.client_request_id, thread_id: a.thread_id }), note: 'Same as sms_send: one authorized reply to the latest unanswered inbound, composed by LeadCommand.' },
+  sms_schedule: { to: 'schedule_followup', title: 'Schedule a follow-up text', adapt: (a) => ({ client_request_id: a.client_request_id, thread_id: a.thread_id, kind: a.kind || 'seller_requested_callback', due_at: a.due_at, reason_code: a.reason_code || 'seller_asked_for_callback' }), note: 'Plans one follow-up in the durable follow-up lifecycle (seller_requested_callback or not_interested_nurture); materialized only under the lifecycle’s own switch, re-checked at due time.' },
+  sms_create_followup: { to: 'schedule_followup', title: 'Create a follow-up', adapt: (a) => ({ client_request_id: a.client_request_id, thread_id: a.thread_id, kind: a.kind || 'seller_requested_callback', due_at: a.due_at, reason_code: a.reason_code || 'seller_needs_time' }), note: 'Same lifecycle as sms_schedule.' },
+  sms_cancel_scheduled: { to: 'cancel_followup', title: 'Cancel a scheduled follow-up', adapt: (a) => ({ client_request_id: a.client_request_id, thread_id: a.thread_id, ...(a.followup_intent_id ? { followup_intent_id: a.followup_intent_id } : {}), ...(a.kind ? { kind: a.kind } : {}), reason_code: a.reason_code || 'seller_replied' }), note: 'Cancels one planned follow-up by id, or every live follow-up of the thread; a reason is required.' },
+  sms_get_conversation: { to: 'read_conversation_context', title: 'Read the conversation context', adapt: (a) => ({ thread_id: a.thread_id }), note: 'The masked, fact-ledgered conversation context LeadCommand itself composes from (the reader’s leadcommand_get_lead_conversation gives the full history).' },
+  sms_get_delivery_status: { to: 'get_reply_delivery_status', title: 'Delivery status of queued replies', adapt: (a) => ({ thread_id: a.thread_id, ...(a.limit ? { limit: a.limit } : {}) }), note: 'Queued ≠ sent ≠ delivered.' },
+  flag_data_conflict: { to: 'record_conversation_note', title: 'Flag a data conflict', adapt: (a) => ({ client_request_id: a.client_request_id, thread_id: a.thread_id, kind: 'data_conflict', note: a.note, ...(a.evidence_message_id ? { evidence_message_id: a.evidence_message_id } : {}) }), note: 'An attributed data-conflict annotation for humans and other agents.' },
+  propose_record_correction: { to: 'record_conversation_note', title: 'Propose a record correction', adapt: (a) => ({ client_request_id: a.client_request_id, thread_id: a.thread_id, kind: 'correction_proposal', note: a.note, ...(a.evidence_message_id ? { evidence_message_id: a.evidence_message_id } : {}) }), note: 'A correction proposal a human decides; nothing changes by itself.' },
+})
 /** The MCP name of a gateway tool: the Workforce tools are leadcommand_<name> (docs/WORKFORCE-AGNTEI.md §2); the rest keep their names. */
 export const mcpNameOf = (name) => (/^workforce_[a-z_]+$/.test(name) ? `leadcommand_${name}` : name)
 /**
@@ -69,12 +88,23 @@ export function createMcpServer({ gateway, credentialOf, transport = 'stdio', se
   // the advertised name → the gateway's tool; a Workforce tool is reachable ONLY under its advertised name
   const byMcpName = new Map(gateway.listTools().map((t) => [mcpNameOf(t.name), t.name]))
   const gatewayNameOf = (name) => byMcpName.get(String(name)) ?? (/^workforce_/.test(String(name)) ? null : String(name))
+  // OHG: the sms_* aliases, advertised with their target's schema, tier and risk (never a tier or risk of their own)
+  const targets = new Map(gateway.listTools().map((t) => [t.name, t]))
+  for (const [alias, a] of Object.entries(SMS_ALIASES)) {
+    const t = targets.get(a.to)
+    if (!t || t.implemented === false) continue
+    tools.push({ name: alias, title: a.title, description: `${a.note} Alias of ${a.to}: ${t.description} [${t.tier}; capability ${t.capability}]`, inputSchema: t.input,
+      annotations: { title: a.title, readOnlyHint: Boolean(t.read), destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      _meta: { 'leadcommand/tier': t.tier, 'leadcommand/capability': t.capability, 'leadcommand/implemented': t.implemented, 'leadcommand/read_scope': t.scope, 'leadcommand/risk': riskOf(t), 'leadcommand/seller_facing': riskOf(t) === 'seller_facing' || riskOf(t) === 'financial', 'leadcommand/alias_of': a.to } })
+  }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }))
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const tool = gatewayNameOf(req.params.name)
+    const alias = SMS_ALIASES[String(req.params.name)] && tools.some((t) => t.name === String(req.params.name)) ? SMS_ALIASES[String(req.params.name)] : null
+    const tool = alias ? alias.to : gatewayNameOf(req.params.name)
     if (tool == null) throw new McpError(ErrorCode.InvalidParams, `Tool ${String(req.params.name).slice(0, 64)} not found`)
-    const run = () => withDeadline(callTimeoutMs, () => gateway.call({ credential: credentialOf(), tool, args: req.params.arguments ?? {}, transport }))
+    const args = alias ? alias.adapt(req.params.arguments ?? {}) : (req.params.arguments ?? {})
+    const run = () => withDeadline(callTimeoutMs, () => gateway.call({ credential: credentialOf(), tool, args, transport }))
     let out
     try {
       out = await (sessionGate ? sessionGate.run(() => (processGate ? processGate.run(run) : run())) : processGate ? processGate.run(run) : run())

@@ -100,6 +100,10 @@ const ACTION_GATEWAY_T2_BASELINE = 'mcp/leadcommand-action-mcp/migrations/test/a
 // complete) and never re-edits those bodies.
 const ACTION_GATEWAY_T34 = M('PROPOSED_20261020110000_action_gateway_t34.sql')
 const ACTION_GATEWAY_T34_BASELINE = 'mcp/leadcommand-action-mcp/migrations/test/action_gateway_t34_baseline.sql'
+// OPTIONAL link #29 (separately approved; after #28): Operation Hidden Gold — the acquisitions family (lead-state
+// handoffs through the ONE executor kind, the append-only annotation ledger, the delivery / annotation reads). It
+// ADDS ROWS to #27's registry and widens ONLY #28's receipts action CHECK (restored verbatim by its rollback).
+const ACTION_GATEWAY_OHG = M('PROPOSED_20261027120000_action_gateway_ohg.sql')
 // rc-8.5.21 part B
 const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
 const SEND_AUTHORIZATION = M('PROPOSED_20261016161000_negotiation_send_authorization.sql')
@@ -692,6 +696,18 @@ const BASE_TESTS = [
     posttest: [M('PROPOSED_20261020110000_action_gateway_t34_posttest.sql')],
     rollback: [M('PROPOSED_20261020110000_action_gateway_t34_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261020110000_action_gateway_t34_rollback_posttest.sql')],
+  },
+  // ── Action Gateway Operation Hidden Gold (OPTIONAL link #29, separately approved): setup = #28's setup + #26 + #27 + #28.
+  {
+    id: 'action_gateway_ohg',
+    setup: [ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
+      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, FOLLOWUP_LIFECYCLE,
+      ACTION_GATEWAY_BASELINE, ACTION_GATEWAY_T2_BASELINE, NEGOTIATION, SEND_AUTHORIZATION, ACTION_GATEWAY_T34_BASELINE, ACTION_GATEWAY, ACTION_GATEWAY_T2, ACTION_GATEWAY_T34],
+    pretest: M('PROPOSED_20261027120000_action_gateway_ohg_pretest.sql'),
+    apply: [ACTION_GATEWAY_OHG],
+    posttest: [M('PROPOSED_20261027120000_action_gateway_ohg_posttest.sql')],
+    rollback: [M('PROPOSED_20261027120000_action_gateway_ohg_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261027120000_action_gateway_ohg_rollback_posttest.sql')],
   },
   // ── LeadCommand Workforce Phase A (docs/WORKFORCE.md §2): STANDALONE, not a release-chain link. A new schema
   // `workforce` over the S3 + R2 agent schema (+ the rc-8.5.21 opaque-id payload fix it is proposed after). The seed

@@ -13,6 +13,7 @@ import { TIERS, DOMAIN_WRITES } from './constants.js'
 import { T2_SPECS, T2_NAMES } from './actions/t2/index.js'
 import { T34_ACTIONS, T34_READS, T34_NAMES } from './actions/t34/index.js'
 import { WF_ACTIONS, WF_READS, WF_NAMES } from './actions/workforce/index.js'
+import { OHG_ACTIONS, OHG_READS, OHG_NAMES } from './actions/ohg/index.js'
 
 const CLIENT_KEY = str(80, { minLength: 8, pattern: '^[A-Za-z0-9_.:-]{8,80}$' })
 const PROPERTY_ID = str(64, { minLength: 1, pattern: '^[A-Za-z0-9_-]{1,64}$' })
@@ -141,6 +142,8 @@ const STUBS = [
 /** Separately scoped reads (no intent; audited; their own scope + grant). */
 export const READS = Object.freeze([
   ...T34_READS.map((r) => Object.freeze({ ...r })),
+  // Operation Hidden Gold (link #29): the delivery read behind sms_get_delivery_status
+  ...OHG_READS.map((r) => Object.freeze({ ...r })),
   // Workforce × Agntei (docs/WORKFORCE-AGNTEI.md §2): principal-bound reads, no read scope (their own grant + T1)
   ...WF_READS.map((r) => Object.freeze({ ...r })),
   Object.freeze({
@@ -168,9 +171,11 @@ function freezeSpec(spec) {
   return Object.freeze({ version: 1, implemented: true, ...spec })
 }
 
-export const ACTIONS = Object.freeze([...IMPLEMENTED, ...T2_SPECS, ...T34_ACTIONS, ...WF_ACTIONS, ...STUBS.filter((x) => !T2_NAMES.has(x.name) && !T34_NAMES.includes(x.name))].map(freezeSpec))
+export const ACTIONS = Object.freeze([...IMPLEMENTED, ...T2_SPECS, ...T34_ACTIONS, ...WF_ACTIONS, ...OHG_ACTIONS, ...STUBS.filter((x) => !T2_NAMES.has(x.name) && !T34_NAMES.includes(x.name))].map(freezeSpec))
 /** The Workforce tools (T1, internal only): MCP names leadcommand_<name>. */
 export const WORKFORCE_TOOLS = WF_NAMES
+/** Operation Hidden Gold: the acquisition-operations family (link #29). */
+export const OHG_TOOLS = OHG_NAMES
 export const ACTION_NAMES = Object.freeze(ACTIONS.map((a) => a.name))
 export const REQUESTED_TOOLS = Object.freeze(['create_research_job', 'request_property_valuation', 'create_operator_task', 'update_operator_task', 'run_authorized_reconciliation',
   'update_lead_disposition', 'update_lead_temperature', 'update_lead_stage', 'create_deal_action', 'set_thread_hold', 'request_thread_hold_release',

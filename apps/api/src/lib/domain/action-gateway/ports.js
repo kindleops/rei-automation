@@ -9,6 +9,13 @@ import { normalizeOpportunityFacts, reconcileOpportunity, PIPELINE_RECONCILER_VE
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/** A definer read (a jsonb-returning database function the role may execute); a failure is a read failure. */
+async function definerRead(db, fn, args) {
+  const r = await db.rpc(fn, args)
+  if (r?.error) throw Object.assign(new Error(`${fn} read failed: ${r.error.message || r.error.code || 'error'}`), { code: 'READ_FAILED', what: fn })
+  return r?.data ?? null
+}
+
 async function rows(q, what) {
   const r = await q
   if (r?.error) throw Object.assign(new Error(`${what} read failed`), { code: 'READ_FAILED', what })
@@ -64,6 +71,9 @@ export function createGatewayReads({ db }) {
       const [m] = await rows(db.from('message_events').select('id,provider_message_sid,message_body,created_at,direction,thread_key,property_id').eq('id', String(id)).limit(1), 'message')
       return m || null
     },
+    /** OHG (link #29): the receipts of the replies agents queued on a thread, with their queue rows and delivery states. */
+    async replyStatus(threadId, limit = 20) { return (await definerRead(db, 'action_gateway_reply_status', { p_thread_id: threadId, p_limit: limit })) || [] },
+    async annotations(threadId, limit = 50) { return (await definerRead(db, 'action_gateway_annotations', { p_thread_id: threadId, p_limit: limit })) || [] },
     async latestMessage(thread_key) {
       const [m] = await rows(db.from('message_events').select('id,direction,created_at').eq('thread_key', thread_key).order('created_at', { ascending: false }).limit(1), 'latest_message')
       return m || null

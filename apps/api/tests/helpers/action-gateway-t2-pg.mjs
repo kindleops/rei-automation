@@ -85,7 +85,9 @@ export function humanPlane(env, { transition = null, lifecycle = null, update = 
       async patch(args) {
         calls.patch.push(args)
         if (args.dryRun) return { ok: true, dry_run: true }
-        await env.owner.query(`update public.inbox_thread_state set disposition = $2 where thread_key = $1`, [args.threadKey, args.patch.disposition])
+        // the stand-in applies exactly the patched label(s) (disposition; the lead temperature with its agent attribution)
+        if ('disposition' in args.patch) await env.owner.query(`update public.inbox_thread_state set disposition = $2 where thread_key = $1`, [args.threadKey, args.patch.disposition])
+        if ('lead_temperature' in args.patch) await env.owner.query(`update public.inbox_thread_state set lead_temperature = $2, temperature = $2, temperature_source = $3 where thread_key = $1`, [args.threadKey, args.patch.lead_temperature, args.meta?.change_source || 'manual'])
         return { ok: true }
       },
     },

@@ -4,7 +4,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import Ajv from 'ajv'
 import { connect, fakeGateway, CRED_A } from './helpers.mjs'
-import { REQUESTED_TOOLS, WORKFORCE_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
+import { REQUESTED_TOOLS, WORKFORCE_TOOLS, OHG_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
+import { SMS_ALIASES } from '../src/protocol/server.mjs'
 
 test('initialize: server info, tools-only capabilities, instructions name the ONE governed gateway and that agents never approve', async () => {
   const c = await connect()
@@ -22,7 +23,7 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
   const c = await connect()
   try {
     const { tools } = await c.client.listTools()
-    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`)].sort())
+    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`), ...OHG_TOOLS, ...Object.keys(SMS_ALIASES)].sort())
     const ajv = new Ajv({ strict: false })
     for (const t of tools) {
       assert.equal(t.inputSchema.type, 'object', t.name)
@@ -63,6 +64,42 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
       assert.equal(t._meta['leadcommand/risk'], 'internal_write', n)
     }
     assert.equal(tools.find((t) => t.name === 'queue_authorized_reply')._meta['leadcommand/risk'], 'seller_facing')
+    // Operation Hidden Gold: the acquisitions family (operational writes) and the sms_* names, which are ALIASES of the
+    // certified tools (same schema, tier, capability and risk; never a second send path)
+    for (const n of ['set_lead_temperature', 'update_lead_status', 'record_conversation_note', 'record_seller_statement']) {
+      const t = tools.find((x) => x.name === n)
+      assert.deepEqual([t._meta['leadcommand/tier'], t._meta['leadcommand/risk'], t._meta['leadcommand/seller_facing'], t.annotations.readOnlyHint], ['T2', 'operational_write', false, false], n)
+    }
+    for (const n of ['get_reply_delivery_status', 'get_lead_annotations']) assert.deepEqual([tools.find((x) => x.name === n)._meta['leadcommand/risk'], tools.find((x) => x.name === n).annotations.readOnlyHint], ['read', true], n)
+    for (const [alias, a] of Object.entries(SMS_ALIASES)) {
+      const t = tools.find((x) => x.name === alias)
+      const target = tools.find((x) => x.name === a.to)
+      assert.ok(t && target, alias)
+      assert.equal(t._meta['leadcommand/alias_of'], a.to, alias)
+      assert.deepEqual([t._meta['leadcommand/tier'], t._meta['leadcommand/capability'], t._meta['leadcommand/risk'], t.inputSchema], [target._meta['leadcommand/tier'], target._meta['leadcommand/capability'], target._meta['leadcommand/risk'], target.inputSchema], alias)
+    }
+    assert.equal(tools.find((t) => t.name === 'sms_send')._meta['leadcommand/risk'], 'seller_facing')
+    assert.equal(tools.find((t) => t.name === 'sms_get_delivery_status').annotations.readOnlyHint, true)
+  } finally { await c.close() }
+})
+
+test('sms_* aliases: tools/call maps an alias to its certified target with adapted arguments; the gateway sees the target tool, never a new one', async () => {
+  const gw = fakeGateway()
+  const c = await connect({ gateway: gw })
+  try {
+    const thread_id = '00000000-0000-4000-8000-000000000001'
+    await c.client.callTool({ name: 'sms_send', arguments: { client_request_id: 'k-sms-00001', thread_id } })
+    await c.client.callTool({ name: 'sms_schedule', arguments: { client_request_id: 'k-sms-00002', thread_id, kind: 'seller_requested_callback', due_at: '2026-11-02T15:00:00Z', reason_code: 'seller_asked_for_callback' } })
+    await c.client.callTool({ name: 'sms_cancel_scheduled', arguments: { client_request_id: 'k-sms-00003', thread_id, reason_code: 'seller_replied' } })
+    await c.client.callTool({ name: 'sms_get_conversation', arguments: { thread_id } })
+    await c.client.callTool({ name: 'sms_get_delivery_status', arguments: { thread_id, limit: 5 } })
+    await c.client.callTool({ name: 'flag_data_conflict', arguments: { client_request_id: 'k-sms-00004', thread_id, kind: 'data_conflict', note: 'County says 3 beds, seller says 4' } })
+    assert.deepEqual(gw.calls.map((x) => x.tool), ['queue_authorized_reply', 'schedule_followup', 'cancel_followup', 'read_conversation_context', 'get_reply_delivery_status', 'record_conversation_note'])
+    assert.deepEqual(gw.calls[0].args, { client_request_id: 'k-sms-00001', thread_id })
+    assert.deepEqual(gw.calls[1].args, { client_request_id: 'k-sms-00002', thread_id, kind: 'seller_requested_callback', due_at: '2026-11-02T15:00:00Z', reason_code: 'seller_asked_for_callback' })
+    assert.deepEqual(gw.calls[4].args, { thread_id, limit: 5 })
+    assert.deepEqual(gw.calls[5].args, { client_request_id: 'k-sms-00004', thread_id, kind: 'data_conflict', note: 'County says 3 beds, seller says 4' })
+    for (const call of gw.calls) assert.equal(call.credential, CRED_A)
   } finally { await c.close() }
 })
 

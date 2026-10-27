@@ -26,10 +26,16 @@ import { isStopRequest } from '@/lib/domain/conversation-ai/stop-request.js'
 export const ACTION_EXECUTION_VERSION = 'lc.action-gateway-execution.v1'
 export const ACTION_GATEWAY_EXECUTE_KIND = 'action_gateway.execute'
 /** The actions this module executes under the one kind (T2 adds its own to the same table). */
-export const ACTION_EXECUTORS = Object.freeze({ queue_authorized_reply: 'sellerReply', execute_authorized_offer: 'offerSend', record_seller_counteroffer: 'recordCounter' })
+export const ACTION_EXECUTORS = Object.freeze({ queue_authorized_reply: 'sellerReply', execute_authorized_offer: 'offerSend', record_seller_counteroffer: 'recordCounter',
+  // Operation Hidden Gold (link #29): certified reversible pipeline writes under a STANDING grant, executed through the canonical lead-state registry
+  set_lead_temperature: 'leadState', update_lead_status: 'leadState' })
+/** OHG actions a standing grant authorizes alone (mirrors action_gateway.standing_t2_actions() after link #29). */
+export const OHG_STANDING_ACTIONS = Object.freeze(['set_lead_temperature', 'update_lead_status'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const clean = (v) => String(v ?? '').trim()
 const code = (v, n = 80) => clean(v).replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, n) || null
+/** An error message as receipt detail: letters, digits (short runs), punctuation — never a phone-like run, never long. */
+const brief = (v, n = 120) => clean(v).replace(/[^A-Za-z0-9 _.:()-]/g, ' ').replace(/[0-9]{5,}/g, '#').replace(/\s+/g, ' ').slice(0, n) || 'error'
 const decodeRef = (r) => (/^pid_[g-p]{1,30}$/.test(String(r)) ? String(r).slice(4).split('').map((c) => 'ghijklmnop'.indexOf(c)).join('') : String(r ?? ''))
 
 async function rpc(supabase, fn, args) {
@@ -58,7 +64,12 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
     const r = l.receipt
     if (!r || r.job_id !== job.job_id) return { stop: { code: 'RECEIPT_JOB_MISMATCH' } }
     if (!['requested', 'executing'].includes(r.state)) return { stop: { code: 'RECEIPT_FINAL', state: r.state } }
-    if (!(l.authorization?.approval_id || l.authorization?.envelope_ref)) {
+    // per-use authority: a human approval or a verified envelope — or, for an OHG standing T2 action, the standing
+    // grant the gateway's domain write already admitted (recorded on the authorization; re-read here, never asserted)
+    // (lc_seller_action_load exposes the authorization row, not the grant id: the database's domain write already
+    // refused the handoff unless a standing grant or an approval backed the authorization, so its presence is the proof)
+    const standing = OHG_STANDING_ACTIONS.includes(action) && Number(l.authorization?.tier) === 2 && Boolean(l.authorization?.authorization_id)
+    if (!(l.authorization?.approval_id || l.authorization?.envelope_ref || standing)) {
       await record(id, job.job_id, 'refused', 'NO_PER_USE_AUTHORITY')
       return { stop: { code: 'NO_PER_USE_AUTHORITY' } }
     }
@@ -171,6 +182,37 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
     return { code: r.code }
   }
 
+  /**
+   * OHG: set_lead_temperature / update_lead_status through the ONE lead-state registry (patchUniversalLeadState) as an
+   * AI change: dry run first (the registry's own rules: lock, enums, stage/opportunity guards), then the write; the
+   * receipt records the field, the change and the registry's verdict. Never a stage, never contactability.
+   */
+  async function leadState(job) {
+    const action = clean(job?.input?.action_intent_id) ? (await rpc(supabase, 'lc_seller_action_load', { p_intent_id: clean(job.input.action_intent_id) }))?.intent?.action : null
+    const p = await prologue(action === 'update_lead_status' ? 'update_lead_status' : 'set_lead_temperature', job)
+    if (p.stop) return p.stop
+    const { intent, thread, id, job_id } = p
+    const field = intent.action === 'update_lead_status' ? 'operational_status' : 'lead_temperature'
+    const to = clean(intent.params?.[field])
+    if (!to) { await record(id, job_id, 'failed', 'PARAMS_INVALID'); return { code: 'PARAMS_INVALID' } }
+    const [row] = await rows(supabase.from('inbox_thread_state').select('id,lead_temperature,operational_status,manual_temperature_lock').eq('id', thread.id).limit(1))
+    if (field === 'lead_temperature' && row?.manual_temperature_lock === true) { await record(id, job_id, 'refused', 'TEMPERATURE_LOCKED'); return { code: 'TEMPERATURE_LOCKED' } }
+    const { patchUniversalLeadState } = await import('@/lib/domain/lead-state/patch-universal-lead-state.js')
+    const meta = { change_source: 'ai', reason: clean(intent.params?.reason).slice(0, 240), source_view: 'action_gateway', actor: `action_gateway:${intent.agent_id}`, requested_by_agent: intent.agent_id, intent_id: id,
+      ...(field === 'lead_temperature' ? { temperature_reason: `agent_standing:${clean(intent.params?.basis) || 'unstated'}`, manual_temperature_lock: false } : {}) }
+    const args = { threadKey: thread.thread_key, patch: { [field]: to }, meta, supabase }
+    let dry
+    try { dry = await patchUniversalLeadState({ ...args, dryRun: true }) } catch (e) { if (process.env.T34_DEBUG) console.error('LEADSTATE_DRY', e); await record(id, job_id, 'failed', 'REGISTRY_DRY_RUN_FAILED', { error: brief(e?.message) }); return { code: 'REGISTRY_DRY_RUN_FAILED' } }
+    if (dry && dry.ok === false) { const c = code(dry.reason || dry.code || 'REGISTRY_REFUSED', 60).toUpperCase(); await record(id, job_id, 'refused', c, { registry: dry.reason || dry.code || null }); return { code: c } }
+    let res
+    try { res = await patchUniversalLeadState(args) } catch (e) { if (process.env.T34_DEBUG) console.error('LEADSTATE_WRITE', e); await record(id, job_id, 'failed', 'REGISTRY_WRITE_FAILED', { error: brief(e?.message) }); return { code: 'REGISTRY_WRITE_FAILED' } }
+    if (res && res.ok === false) { const c = code(res.reason || res.code || 'REGISTRY_REFUSED', 60).toUpperCase(); await record(id, job_id, 'refused', c, { registry: res.reason || res.code || null }); return { code: c } }
+    const [after] = await rows(supabase.from('inbox_thread_state').select('lead_temperature,operational_status').eq('id', thread.id).limit(1))
+    const applied = clean(after?.[field]).toLowerCase() === to.toLowerCase()
+    await record(id, job_id, applied ? 'recorded' : 'failed', applied ? 'LEAD_STATE_RECORDED' : 'LEAD_STATE_NOT_APPLIED', { field, from: row?.[field] ?? null, to, changed: Boolean(res?.changed ?? applied) })
+    return { code: applied ? 'LEAD_STATE_RECORDED' : 'LEAD_STATE_NOT_APPLIED', field, to }
+  }
+
   /** Follow enqueued rows to their dispatch outcome. An ambiguous accept is recorded, escalated, NEVER resent. */
   async function reconcileReceipts({ limit = 50 } = {}) {
     const open = (await rpc(supabase, 'lc_seller_action_open_receipts', { p_limit: limit })) || []
@@ -202,12 +244,12 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
     const id = clean(job?.input?.action_intent_id)
     if (!UUID_RE.test(id)) return { code: 'ACTION_INPUT_INVALID' }
     const l = await rpc(supabase, 'lc_seller_action_load', { p_intent_id: id })
-    const fn = { sellerReply, offerSend, recordCounter }[ACTION_EXECUTORS[l?.intent?.action]]
+    const fn = { sellerReply, offerSend, recordCounter, leadState }[ACTION_EXECUTORS[l?.intent?.action]]
     if (!fn) return { code: 'ACTION_NOT_EXECUTED_HERE' }
     return fn(job, ctx)
   }
 
-  return Object.freeze({ execute, sellerReply, offerSend, recordCounter, reconcileReceipts, version: ACTION_EXECUTION_VERSION })
+  return Object.freeze({ execute, sellerReply, offerSend, recordCounter, leadState, reconcileReceipts, version: ACTION_EXECUTION_VERSION })
 }
 
 /** The runtime handler of the ONE executor kind (the tick route registers it). */
