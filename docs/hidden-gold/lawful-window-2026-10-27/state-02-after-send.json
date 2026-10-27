@@ -1,0 +1,225 @@
+{
+ "thread": {
+  "id": "254bae26-e905-4982-963a-0b066359e64b",
+  "property_id": "4471-marigold",
+  "lead_temperature": "warm",
+  "operational_status": "active_communication",
+  "lifecycle_stage": null,
+  "manual_temperature_lock": false,
+  "temperature_reason": "agent_standing:seller_words",
+  "temperature_source": "ai",
+  "last_inbound_at": "2026-10-16T16:47:46.473473+00:00",
+  "latest_direction": "inbound"
+ },
+ "messages": [
+  {
+   "id": "be19f70f-2f67-4f63-8ac7-5a4cbb748472",
+   "direction": "outbound",
+   "message_body": "Hi, this is Helen. Do you still own the house on Marigold Ln?",
+   "created_at": "2026-10-15T16:47:46.469199+00:00"
+  },
+  {
+   "id": "5c6ec283-63e8-4894-b723-99af0a55d82a",
+   "direction": "inbound",
+   "message_body": "Yes I still own it. The roof needs some work though, is that a problem for you?",
+   "created_at": "2026-10-16T16:47:46.466338+00:00"
+  }
+ ],
+ "queue": [
+  {
+   "id": "4613570c-ebb9-4a33-a910-308ba943932e",
+   "queue_key": "seed-254bae26-e905-4982-963a-0b066359e64b",
+   "queue_status": "sent",
+   "message_origin": null,
+   "scheduled_for": "2026-10-27T16:47:46.467247+00:00",
+   "sent_at": "2026-10-15T16:47:46.469844+00:00",
+   "delivered_at": null,
+   "failed_reason": null,
+   "created_at": "2026-10-15T16:47:46.469844+00:00",
+   "message_body": "Hi, this is Helen. Do you still own the house on Marigold Ln?"
+  },
+  {
+   "id": "f0deb47c-67bf-4acf-87e5-02fcc206a046",
+   "queue_key": "ai_conversation:5c6ec283-63e8-4894-b723-99af0a55d82a",
+   "queue_status": "sent",
+   "message_origin": "ai_generated",
+   "scheduled_for": "2026-10-27T16:48:22.22+00:00",
+   "sent_at": "2026-10-27T16:47:45.214+00:00",
+   "delivered_at": null,
+   "failed_reason": null,
+   "created_at": "2026-10-27T16:48:22.309+00:00",
+   "message_body": "Good to know. Would you consider an offer on it?"
+  }
+ ],
+ "intents": [
+  {
+   "intent_id": "0f11c0ec-048f-4ad3-8cde-d9ad66100ab3",
+   "agent_id": "agt_sterling",
+   "action": "record_seller_statement",
+   "state": "succeeded",
+   "result_code": "STATEMENT_RECORDED",
+   "created_at": "2026-10-27T16:47:56.999209+00:00",
+   "receipt_state": null,
+   "receipt_code": null,
+   "queue_row_id": null
+  },
+  {
+   "intent_id": "6a4d17b8-939e-4371-bdbc-374f0c966fdf",
+   "agent_id": "agt_sterling",
+   "action": "record_seller_statement",
+   "state": "succeeded",
+   "result_code": "STATEMENT_RECORDED",
+   "created_at": "2026-10-27T16:47:57.092116+00:00",
+   "receipt_state": null,
+   "receipt_code": null,
+   "queue_row_id": null
+  },
+  {
+   "intent_id": "9e1f044b-794f-4443-8a27-80924cd7593b",
+   "agent_id": "agt_sterling",
+   "action": "record_conversation_note",
+   "state": "succeeded",
+   "result_code": "ANNOTATION_RECORDED",
+   "created_at": "2026-10-27T16:47:57.164084+00:00",
+   "receipt_state": null,
+   "receipt_code": null,
+   "queue_row_id": null
+  },
+  {
+   "intent_id": "a4d0ee9e-70f5-407e-ae7d-d4c78b200724",
+   "agent_id": "agt_sterling",
+   "action": "set_lead_temperature",
+   "state": "succeeded",
+   "result_code": "HANDOFF_QUEUED",
+   "created_at": "2026-10-27T16:47:57.23431+00:00",
+   "receipt_state": "recorded",
+   "receipt_code": "LEAD_STATE_RECORDED",
+   "queue_row_id": null
+  },
+  {
+   "intent_id": "bc444a05-c80c-451b-bb84-2c3c8a32b9c8",
+   "agent_id": "agt_haven",
+   "action": "record_conversation_note",
+   "state": "succeeded",
+   "result_code": "ANNOTATION_RECORDED",
+   "created_at": "2026-10-27T16:47:57.682791+00:00",
+   "receipt_state": null,
+   "receipt_code": null,
+   "queue_row_id": null
+  },
+  {
+   "intent_id": "3484247a-4eb7-4a11-a1f8-2d843121b6e8",
+   "agent_id": "agt_equity",
+   "action": "record_conversation_note",
+   "state": "succeeded",
+   "result_code": "ANNOTATION_RECORDED",
+   "created_at": "2026-10-27T16:47:57.861052+00:00",
+   "receipt_state": null,
+   "receipt_code": null,
+   "queue_row_id": null
+  },
+  {
+   "intent_id": "7009d544-265b-4182-b55d-4cb0a622b44e",
+   "agent_id": "agt_sterling",
+   "action": "update_lead_status",
+   "state": "succeeded",
+   "result_code": "HANDOFF_QUEUED",
+   "created_at": "2026-10-27T16:47:59.278663+00:00",
+   "receipt_state": "recorded",
+   "receipt_code": "LEAD_STATE_RECORDED",
+   "queue_row_id": null
+  },
+  {
+   "intent_id": "7d633f78-d157-417a-bf1a-75ef99190cdb",
+   "agent_id": "agt_sterling",
+   "action": "queue_authorized_reply",
+   "state": "succeeded",
+   "result_code": "HANDOFF_QUEUED",
+   "created_at": "2026-10-27T16:48:18.166524+00:00",
+   "receipt_state": "sent",
+   "receipt_code": "QUEUE_SENT",
+   "queue_row_id": "f0deb47c-67bf-4acf-87e5-02fcc206a046"
+  }
+ ],
+ "annotations": [
+  {
+   "annotation_id": "ac878b60-4147-41a1-83ab-56d4a7699572",
+   "agent_id": "agt_sterling",
+   "kind": "ownership",
+   "class": "seller_statement",
+   "value": "confirms they still own it",
+   "amount": null,
+   "note": "",
+   "inbound_message_id": "5c6ec283-63e8-4894-b723-99af0a55d82a",
+   "created_at": "2026-10-27T16:47:57.040037+00:00"
+  },
+  {
+   "annotation_id": "06bb75f0-58b0-4493-acd8-71f175054b1b",
+   "agent_id": "agt_sterling",
+   "kind": "condition",
+   "class": "seller_statement",
+   "value": "the roof needs some work (their words)",
+   "amount": null,
+   "note": "",
+   "inbound_message_id": "5c6ec283-63e8-4894-b723-99af0a55d82a",
+   "created_at": "2026-10-27T16:47:57.116625+00:00"
+  },
+  {
+   "annotation_id": "85c8a229-986f-4d4f-bcb7-94aed95f123e",
+   "agent_id": "agt_sterling",
+   "kind": "context",
+   "class": "note",
+   "value": null,
+   "amount": null,
+   "note": "Seller asked whether the roof is a problem for us; the message went unanswered for eleven days — an engaged owner nobody answered.",
+   "inbound_message_id": "5c6ec283-63e8-4894-b723-99af0a55d82a",
+   "created_at": "2026-10-27T16:47:57.187307+00:00"
+  },
+  {
+   "annotation_id": "e97f343a-5ae9-40c1-8292-8ed31c756071",
+   "agent_id": "agt_haven",
+   "kind": "seller_interest",
+   "class": "note",
+   "value": null,
+   "amount": null,
+   "note": "Seller is engaged (price and timeline given). Buyer side: no buyer count on record for the ZIP; demand is unknown until sourced, not assumed.",
+   "inbound_message_id": null,
+   "created_at": "2026-10-27T16:47:57.702187+00:00"
+  },
+  {
+   "annotation_id": "23b7c4c8-d497-4925-bc66-bdbedbbc4b5b",
+   "agent_id": "agt_equity",
+   "kind": "context",
+   "class": "note",
+   "value": null,
+   "amount": null,
+   "note": "Underwriting: no seller price stated yet; LeadCommand's acquisition score is not on record; the roof is a stated repair with no inspection; no verified recent sale is attached yet — no value is asserted until comps are pulled.",
+   "inbound_message_id": null,
+   "created_at": "2026-10-27T16:47:57.882269+00:00"
+  }
+ ],
+ "followups": [],
+ "approvals": [
+  {
+   "approval_id": "apr_1e8acf78-49d9-4583-b6d6-81e0ab0e0d22",
+   "capability_id": "agent_actions.authorize_action",
+   "state": "executed",
+   "decision": "approve",
+   "decided_by": "2b3ee0ff-0000-4000-8000-0000000000c1",
+   "created_at": "2026-10-27T16:48:19.364+00:00"
+  }
+ ],
+ "holds": [],
+ "provider_sends": [
+  {
+   "from": "+13125550199",
+   "logical_communication_id": "lc-1",
+   "attempt_id": "att-1",
+   "transport_authority": null,
+   "seller_first_name": null,
+   "step": "accept",
+   "provider": "SIMULATED"
+  }
+ ],
+ "provider": "SIMULATED (no external delivery)"
+}

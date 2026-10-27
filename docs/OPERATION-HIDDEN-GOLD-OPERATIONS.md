@@ -46,7 +46,7 @@ Identity (one credential per agent principal; the Action MCP binds the connectio
 
 ## 4. Acceptance run (disposable world + Agntei)
 
-`apps/api/tests/ohg/world-server.mjs` + the Agntei fixture in `hiddengold` mode + the acceptance probe. Steps proven so far (evidence in `docs/hidden-gold/`; the lawful-window run — the seller's 08:00–21:00 local window — is recorded there when it completes):
+`apps/api/tests/ohg/world-server.mjs` + the Agntei fixture in `hiddengold` mode + the acceptance probe. Steps proven (evidence of the lawful-window run in `docs/hidden-gold/lawful-window-2026-10-27/`):
 
 1. Sterling discovers the overlooked conversation (reader worklist, unanswered inbound, 11 days old) and reads it in full (reader conversation read; the Action MCP's context read).
 2. Cites the evidence (message ids; quoted as data).
@@ -54,10 +54,37 @@ Identity (one credential per agent principal; the Action MCP binds the connectio
 4. Delegates: Equity (property record, score, an underwriting note — no number without comps), Haven (market read, buyer demand "unknown, not assumed"), Clara (transactions: nothing contractual; escalate before any price / offer / agreement).
 5. Decides the follow-up: status → active communication; `sms_send` is filed for the person's approval (sensitive; never preapproved).
 6. The person approves in Agntei; LeadCommand holds the T3 intent for ITS operator (existing approval path); the operator decides; Sterling retries the same request (same idempotency key); the person approves the execution; LeadCommand hands off, composes with the canonical decider + validators, queues ONE row; the REAL queue runner sends to the SIMULATED provider (no external delivery possible: any fetch or provider credential read aborts).
-7. A simulated seller reply; the watch wakes Sterling; the stated price and timeline are recorded on that message; a follow-up is scheduled through the lifecycle; the status is set to waiting on seller.
+7. A simulated seller reply; the watch wakes Sterling; the stated price and timeline are recorded on that message; Sterling asks for a follow-up through the lifecycle — in the lawful-window run LeadCommand REFUSED it (see below) and Sterling reports the refusal, not a schedule; the status hand-off to "waiting on seller" is queued and applied by LeadCommand's worker.
 8. Restart persistence: the Agntei fixture was killed and restarted on its persistent home mid-flow — the room, its messages, the pending execution, the watch and the connections' credentials were all still there; the LeadCommand side persists in PostgreSQL by construction.
 
 Refusals observed and honoured along the way (each a safeguard working): `OUTSIDE_RECIPIENT_WINDOW` (01:35 local), `NOT_AN_UNANSWERED_SELLER_MESSAGE` (our message was the latest), `NO_AUTHORIZED_REPLY:no_reply` (a priced turn escalated to an operator by the canonical decider), `ai_conversation_outside_contact_window` at dispatch (the row gate's own window check). None of them was worked around in code; the scenario was corrected or the run moved into the lawful window.
+
+### The lawful-window run (2026-10-27, Indianapolis defaults)
+
+Run inside the seller's sending window (Central time), with `OHG_GEO` and `OHG_SELLER_PHONE` unset (Indianapolis, IN 46203; the seller's number +13125550161), `stopall.sh` → `FRESH=1 startall.sh` → the probe. The third run of the day is the one recorded; the first two found the defects listed below, which were fixed before it.
+
+| Step | Result |
+|---|---|
+| Discovery, reading, citing | The overlooked thread (4471 Marigold Ln, 11 days unanswered) found and read in full; message ids cited; the seller's words quoted as data. |
+| Pipeline writes | Ownership and condition recorded on the inbound message (`STATEMENT_RECORDED`), a context note (`ANNOTATION_RECORDED`), temperature warm (`HANDOFF_QUEUED`, applied by the worker). |
+| Delegation | Equity: no number without comps; Haven: buyer demand unknown, not assumed; Clara: nothing contractual — escalate before any price or offer. |
+| Preapproval of `sms_send` | Refused by Agntei for every agent (a sensitive tool always needs the person). |
+| The send | The person approved in Agntei → LeadCommand held the T3 intent for its operator → the operator approved → the same request retried (same idempotency key) → approved again in Agntei → `HANDOFF_QUEUED` → one queue row composed and validated by LeadCommand → the real queue runner sent it to the SIMULATED provider: **one** provider send, `sent_at` set, `delivered_at` empty. Sterling reported "sent no · delivered no" at hand-off and never called it delivered. |
+| The seller's reply | Posted by the thread watch as data, waking Sterling; asking price (185,000) and timeline recorded on that message; next-step note recorded. |
+| The follow-up | **Refused** by LeadCommand: `OWNERSHIP_DECLINED_UNVERIFIED` (reason `selling_nurture_requires_selling_intent_answer`). Sterling reported the refusal and its reason; nothing scheduled, nothing worked around. |
+| Restart | The Agntei fixture was killed and restarted on its home mid-flow (before the operator's decision); the room, the pending execution, the watch and the credentials came back. |
+| Page errors | 0 |
+
+Defects found by the lawful-window runs and fixed:
+- **Agntei:** the fixture's scripted Sterling reported a follow-up as "scheduled" when LeadCommand had refused it. He now reports what LeadCommand did. A status hand-off is now worded as asked, not done.
+- **Agntei engine:** the conversation watch took its baseline on its first *successful* poll, so a seller's reply that arrived while earlier polls failed was silently absorbed. Messages after the watch was set are now news even on the first poll (tested).
+- **Acceptance world:** the seeded ownership question named a different street; it now names 4471 Marigold Ln.
+
+Findings for the owner (not changed — certified LeadCommand code):
+- **The follow-up gate is stricter than the scheduler.** It judges every follow-up kind by the selling-nurture rule. It did not count "I would let it go for 185,000 if it could close before the end of the year" as a selling answer. So a seller-requested callback after a stated price is refused.
+  - In the simulated world the sent reply is not mirrored into `message_events`, so the ownership question still reads as the latest outbound. In production the outbound row exists, and the result may differ there.
+  - Decide whether a seller-requested callback should pass after a stated price.
+- **The gateway's refusal code is coarse.** Every ownership-related block is labelled `OWNERSHIP_DECLINED_UNVERIFIED`; the precise reason travels in `reason`. Consider distinct codes.
 
 ## 5. Activation path (owner decisions, in order)
 
