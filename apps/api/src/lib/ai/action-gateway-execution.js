@@ -68,7 +68,10 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
     // grant the gateway's domain write already admitted (recorded on the authorization; re-read here, never asserted)
     // (lc_seller_action_load exposes the authorization row, not the grant id: the database's domain write already
     // refused the handoff unless a standing grant or an approval backed the authorization, so its presence is the proof)
-    const standing = OHG_STANDING_ACTIONS.includes(action) && Number(l.authorization?.tier) === 2 && Boolean(l.authorization?.authorization_id)
+    // Agntei 5.4: the certified seller reply on an owner-minted standing seller-facing grant — the database derived
+    // `standing` when authorizing and re-verifies the grant now (`standing_live`); a revoked grant stops it here
+    const standing = (OHG_STANDING_ACTIONS.includes(action) && Number(l.authorization?.tier) === 2 && Boolean(l.authorization?.authorization_id))
+      || (action === 'queue_authorized_reply' && Number(l.authorization?.tier) === 3 && l.authorization?.standing === true && l.authorization?.standing_live === true)
     if (!(l.authorization?.approval_id || l.authorization?.envelope_ref || standing)) {
       await record(id, job.job_id, 'refused', 'NO_PER_USE_AUTHORITY')
       return { stop: { code: 'NO_PER_USE_AUTHORITY' } }

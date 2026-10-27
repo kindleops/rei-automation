@@ -3,7 +3,8 @@
 // stop); otherwise every call answers unavailable / capability_unavailable, whatever the agent's grants.
 //
 // The agent references a THREAD; it never supplies a phone number, a sender, a persona or text. LeadCommand resolves
-// the routing. The gateway authorizes (policy + a per-use HUMAN approval: T3 never runs on a standing grant alone),
+// the routing. The gateway authorizes (policy + a per-use HUMAN approval — or, Agntei 5.4, an owner-minted STANDING
+// seller-facing grant for exactly this action),
 // then its handoff domain write enqueues ONE action_gateway.execute job; LeadCommand's worker runs the CANONICAL path:
 // decideAndCompose (conversation-turn-wiring#createCanonicalTurnDecider) → the shared outbound validator → R3 (send
 // policy, scope, holds, eligibility, timing, language, reservations, the immutable ai_generated_messages record) →
@@ -28,8 +29,10 @@ const CLIENT_KEY = str(80, { minLength: 8, pattern: '^[A-Za-z0-9_.:-]{8,80}$' })
 export const QUEUE_REPLY_SPEC = Object.freeze({
   name: 'queue_authorized_reply',
   title: 'Queue an authorized seller reply',
-  description: 'Ask LeadCommand to answer the latest seller message of a thread through the CANONICAL send path (decideAndCompose → validator → R3 / send policy → canonical queue writer → dispatcher). Only when the production AI send capability is activated (else capability_unavailable). A human approves each use. You reference the thread only: LeadCommand resolves the persona, the sender number and the text; suppression, holds, ownership, the recipient window and the language policy all apply.',
+  description: 'Ask LeadCommand to answer the latest seller message of a thread through the CANONICAL send path (decideAndCompose → validator → R3 / send policy → canonical queue writer → dispatcher). Only when the production AI send capability is activated (else capability_unavailable). A human approves each use, unless an owner minted a standing seller-facing grant for it. You reference the thread only: LeadCommand resolves the persona, the sender number and the text; suppression, holds, ownership, the recipient window and the language policy all apply.',
   capability: 'conversation.queue_reply', tier: TIERS.T3, resource: 'thread',
+  // Agntei 5.4: an owner-minted standing seller-facing grant (link PROPOSED_20261028100000) authorizes it without a per-use approval
+  standing_reply: true,
   input: obj({ client_request_id: CLIENT_KEY, thread_id: UUID }, ['client_request_id', 'thread_id']),
   executor: { kind: 'domain_write', fn: DOMAIN_WRITES.handoff },
   recovery: 'reexecute',
@@ -71,5 +74,5 @@ export const QUEUE_REPLY_LOGIC = Object.freeze({
     if (!lang.enabled) return { decision: 'deny', code: 'LANGUAGE_NOT_ENABLED', evidence: { reason: lang.reason || null } }
     return { decision: 'allow', evidence: { scope: 'thread', persona: 'established', sender: 'established', window: el?.timing ? 'lawful' : 'unknown', language: lang.language || null } }
   },
-  summary: () => ['Answer the latest seller message through the canonical send path (R3): LeadCommand writes and validates the text, keeps the thread\'s persona and sender, and re-checks every dispatch guard.', 'Seller-facing (T3): a human approves this one use.'],
+  summary: () => ['Answer the latest seller message through the canonical send path (R3): LeadCommand writes and validates the text, keeps the thread\'s persona and sender, and re-checks every dispatch guard.', 'Seller-facing (T3): a human approves this one use (unless an owner granted standing seller-facing authority for it).'],
 })
