@@ -68,6 +68,9 @@ const gold = await seedThread(env.owner, { phone: GOLD_PHONE, property: '4471-ma
 // our ownership question went out twelve days ago; the seller's answer (eleven days ago) is the LATEST message of the thread
 await env.owner.query(`update public.message_events set created_at = now() - interval '12 days', event_timestamp = now() - interval '12 days' where thread_key = $1 and direction = 'outbound'`, [GOLD_PHONE])
 await env.owner.query(`update public.send_queue set created_at = now() - interval '12 days', sent_at = now() - interval '12 days' where thread_key = $1`, [GOLD_PHONE])
+// the ownership question named this property (the shared seed's text names a generic street)
+await env.owner.query(`update public.message_events set message_body = 'Hi, this is Helen. Do you still own the house on Marigold Ln?' where thread_key = $1 and direction = 'outbound'`, [GOLD_PHONE])
+await env.owner.query(`update public.send_queue set message_body = 'Hi, this is Helen. Do you still own the house on Marigold Ln?' where thread_key = $1`, [GOLD_PHONE])
 await env.owner.query(`update public.properties set property_address = '4471 Marigold Ln', property_address_city = $2, property_address_state = $3, property_address_zip = $4 where property_id = $1`, [gold.property, GEO.city, GEO.state, GEO.zip])
 await env.owner.query(`update public.inbox_thread_state set last_inbound_at = now() - interval '11 days', latest_direction = 'inbound', latest_message_at = now() - interval '11 days', inbound_count = 1, outbound_count = 1, market = $2 where id = $1`, [gold.thread_id, GEO.market])
 /** A soft "not now": never an opt-out, never closed. */
