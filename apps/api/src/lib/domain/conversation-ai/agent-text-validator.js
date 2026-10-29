@@ -40,6 +40,7 @@ import { isTemplateCompatibleWithProperty, canonicalPropertyGroupOf } from '@/li
 export const AGENT_TEXT_VALIDATOR_VERSION = 'agent-text-validator.v1'
 export const AGENT_TEXT_MAX_CHARS = 320
 const NOT_A_MESSAGE_RE = /^(test(ing)?|placeholder|sample|lorem ipsum.*|ignore( this| me)?|n\/?a|tbd|todo|draft|x+|null|undefined)[.!]?$/i
+const IMPLIED_COMMITMENT_RE = /\b(?:once|when|after|if)\s+(?:there'?s|there\s+is|we\s+(?:have|make|send|put\s+together)|you\s+(?:get|receive|have))\s+(?:an?\s+|our\s+)?offer\b|\b(?:our|the)\s+team\s+(?:would|will|has\s+to|needs\s+to|can|could|is\s+going\s+to|must)\s+(?:review|go\s+over|look\s+(?:at|over)|check|assess|evaluate|call|reach\s+out|follow\s+up|put\s+together|make)\b|\b(?:someone|a\s+person|one\s+of\s+us)\s+(?:from|on|at)\s+(?:our|the)\s+team\s+(?:will|can|could|would)\b|\bI'?ll\s+have\s+someone\s+(?:call|reach|contact|text)\b|\b(?:we'?ll|we\s+will|I'?ll|I\s+will)\s+(?:send|make|put\s+together|get\s+you)\s+(?:you\s+)?an?\s+offer\b/i
 const CORRECTION_RE = /\b(sent (by|in) (mistake|error)|ignore (that|the|my) (last|previous|earlier) (text|message)|(last|previous) (text|message) was (a )?(mistake|wrong|an error)|sorry,? (wrong|that) (text|message))\b/i
 const PRACTICE_CLAIMS = [
   ['as_is', /\b(as[- ]is|any condition|no repairs? (needed|required|on your (end|side))|(roof|repairs?|basement)[^.?!]{0,40}(wouldn'?t|won'?t|don'?t) need (fixing|to be fixed))\b/i],
@@ -87,6 +88,8 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
   // not a message to a person: a test, a placeholder, a fragment, or a "correction" of an earlier text
   if (t && (NOT_A_MESSAGE_RE.test(t) || t.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length < 3)) add('content:not_a_message')
   if (CORRECTION_RE.test(t)) add('content:correction_of_earlier_text')
+  // an implied commitment: an offer, a team's review or a call that will follow (none is the agent's to promise)
+  if (IMPLIED_COMMITMENT_RE.test(t)) add('commitment:implied_offer_review_or_call')
   // the company's buying practices: stated only when the owner configured them as true
   for (const [key, re] of PRACTICE_CLAIMS) if (re.test(t) && !(companyIdentity?.practices || []).includes(key)) add(`identity:company_practice_not_configured:${key}`)
 

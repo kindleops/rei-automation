@@ -59,6 +59,9 @@ const NON_OWNER_PATTERNS = [
   ['relative', new RegExp(String.raw`\b(?:it'?s|its|it\s+is|this\s+is|that'?s|that\s+is|the\s+(?:house|home|property|place)\s+(?:is|was|belongs\s+to))\s+(?:actually\s+|really\s+|still\s+)?(?:my|our)\s+${REL}(?:'s|s')`, 'i')],
   ['relative', new RegExp(String.raw`\bbelongs?\s+to\s+(?:my|our)\s+${REL}\b|\bin\s+(?:my|our)\s+${REL}(?:'s|s')\s+name\b|\bthe\s+owner\s+is\s+(?:my|our)\b`, 'i')],
   ['relative', new RegExp(String.raw`\b(?:i'?m|i\s+am)\s+(?:his|her|their|the\s+owners?'?s?)\s+${REL}\b`, 'i')],
+  // a relative answering for the owner: "this is his son", "my dad handles that", "my mom takes care of the house"
+  ['relative', new RegExp(String.raw`\b(?:this\s+is|it'?s|its|you'?(?:ve|re)\s+(?:got|reached|texting))\s+(?:his|her|their|the\s+owners?'?s?)\s+${REL}\b`, 'i')],
+  ['relative', new RegExp(String.raw`\b(?:my|our)\s+${REL}\s+(?:handles?|deals?\s+with|takes?\s+care\s+of|manages?|decides?|is\s+in\s+charge\s+of|makes?\s+(?:the\s+)?decisions?\s+(?:on|about))\s+(?:that|it|this|those|everything|all\s+(?:of\s+)?that|the\s+(?:house|home|property|place|stuff|paperwork|business))\b`, 'i')],
   // neighbour
   ['neighbour', /\b(?:i'?m|i\s+am|this\s+is|we'?re|we\s+are)\s+(?:just\s+)?(?:the|a|your|their|his|her)\s+neighbou?rs?\b|\b(?:i|we)\s+live\s+(?:next\s+door|across\s+the\s+street|down\s+the\s+(?:street|road|block))\b/i],
   // property manager
@@ -100,6 +103,10 @@ const THIRD_PARTY_OWNER_ASK_RE = new RegExp([
   String.raw`\b(?:who|whoever)\s+(?:owns|is\s+the\s+owner|the\s+owner\s+is)\b`,
   String.raw`\b(?:contact|reach|get\s+in\s+touch\s+with|number\s+for|info(?:rmation)?\s+for|connect\s+(?:me|us)\s+with)\s+(?:the|your)\s+(?:owners?|landlord|landlady|property\s+manager)\b`,
   String.raw`\bthe\s+owner(?:'s|s')?\s+(?:number|contact|info|plans|intentions|name)\b`,
+  // how or when to reach someone other than the person texting (a relative, "him", "her", "them")
+  String.raw`\b(?:reach|contact|get\s+(?:a\s+)?hold\s+of|talk\s+to|speak\s+(?:to|with)|call|text|connect\s+with)\s+(?:your|the|his|her|their)\s+${REL}\b`,
+  String.raw`\b(?:better|best|good)\s+(?:way|time|number)\s+(?:or\s+(?:time|way)\s+)?to\s+(?:reach|contact|call|text|get\s+(?:a\s+)?hold\s+of)\s+(?:him|her|them|your\s+\w+)\b`,
+  String.raw`\b(?:could|can|would)\s+you\s+(?:ask|tell|have)\s+(?:him|her|them|your\s+${REL})\b`,
 ].join('|'), 'i')
 export function thirdPartyOwnerAskReasons(text) {
   return THIRD_PARTY_OWNER_ASK_RE.test(norm(text)) ? ['non_owner:asks_about_third_party_owner'] : []

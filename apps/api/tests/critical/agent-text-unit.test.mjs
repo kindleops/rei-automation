@@ -71,6 +71,10 @@ test('validator: every refusal names its rule — money, human claim, the unansw
     ['Sorry, that last text was sent by mistake, please ignore it.', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'content:correction_of_earlier_text'],
     ['We buy houses as-is, so no repairs needed. Do you still own it?', { purpose: 'first_touch', messages: [] }, 'CONTENT_REJECTED', 'identity:company_practice_not_configured:as_is'],
     ['We can close on your timeline with no fees. Do you still own it?', { purpose: 'first_touch', messages: [] }, 'CONTENT_REJECTED', 'identity:company_practice_not_configured:flexible_close'],
+    ['Thanks for letting me know. What is a good time to reach your mom?', { purpose: 'reply', messages: [{ id: 'o1', direction: 'outbound', body: 'Hi, do you still own the house on Elm St?', at: ago(5) }, { id: 'i1', direction: 'inbound', body: 'You have reached her daughter. My mom takes care of the house stuff.', at: ago(1) }] }, null, 'non_owner:reply_to_non_owner_contact'],
+    ['Thanks. Could you ask him to text me when he has a minute?', { purpose: 'reply', messages: [{ id: 'o1', direction: 'outbound', body: 'Hi, do you still own the house on Elm St?', at: ago(5) }, { id: 'i1', direction: 'inbound', body: 'This is his nephew, he is not much of a texter.', at: ago(1) }] }, null, 'non_owner:asks_about_third_party_owner'],
+    ['Thanks for sharing that. Once we have an offer ready, someone from our team will call you.', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:implied_offer_review_or_call'],
+    ['Good question. The team will review the property first. What timeline works for you?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:implied_offer_review_or_call'],
   ]
   for (const [body, o, code, reason] of cases) {
     const r = v(body, o)

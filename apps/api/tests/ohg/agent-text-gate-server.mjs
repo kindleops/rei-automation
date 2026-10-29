@@ -10,6 +10,6 @@ const rl = readline.createInterface({ input: process.stdin })
 rl.on('line', (line) => {
   let q; try { q = JSON.parse(line) } catch { process.stdout.write(JSON.stringify({ ok: false, code: 'BAD_REQUEST' }) + '\n'); return }
   if (q.eligible === false) { process.stdout.write(JSON.stringify({ ok: false, code: 'CONTACT_SUPPRESSED', reasons: ['contact:suppressed'] }) + '\n'); return }
-  const g = validateAgentText(String(q.body ?? ''), { purpose: q.purpose, messages: q.messages || [], policy: { languages: ['en'] }, companyIdentity: COMPANY, authorEmployee: q.author || 'Nova', now: q.now })
+  const g = validateAgentText(String(q.body ?? ''), { purpose: q.purpose, messages: q.messages || [], policy: { languages: ['en'] }, companyIdentity: COMPANY, authorEmployee: q.author || 'Nova', now: q.now, property: q.property || null })
   process.stdout.write(JSON.stringify({ ok: g.ok, code: g.code, reasons: g.reasons }) + '\n')
 })
