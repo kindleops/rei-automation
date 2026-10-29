@@ -83,3 +83,16 @@ test('canonical outbound entry: refuses a closed lead, an offer stage, a first t
   const good = await composeAgentOutbound({ purpose: 'first_touch', caller: 'agent_message', spend, modelClient: client(['Hi Maria, this is Helen, a local buyer interested in the house on Elm St. Do you still own it?']), establishedPersona: 'Helen', firstName: 'Maria', propertyLabel: '18 Elm St', eligibility: { blocked: false, reasons: [], timing: { lawful: true } } })
   assert.deepEqual([good.ok, good.objective, good.reply.category, good.validation.status], [true, 'ownership', 'first_touch', 'validated'], JSON.stringify(good))
 })
+
+test('canonical outbound entry: a continuation never re-asks an open question — the objective becomes a check-in without one', async () => {
+  const at = (h) => new Date(Date.now() - h * 3600_000).toISOString()
+  const thread = [{ id: 'o1', direction: 'outbound', body: 'Hi Ray, this is Helen. Do you still own the house on Cedar St?', at: at(530) },
+    { id: 'i1', direction: 'inbound', body: 'Not right now, maybe in the spring once my sister moves out', at: at(528) },
+    { id: 'o2', direction: 'outbound', body: 'Understood, thanks Ray. Good luck with the move.', at: at(504) }]
+  const reask = await composeAgentOutbound({ purpose: 'reengage', thread, caller: 'agent_message', spend, modelClient: client(['Hi Ray, Helen checking back in. Do you still own it?', 'Hi Ray, Helen checking back in. Do you still own it?']), establishedPersona: 'Helen', firstName: 'Ray' })
+  const checkIn = await composeAgentOutbound({ purpose: 'reengage', thread, caller: 'agent_message', spend, modelClient: client(['Hi Ray, Helen checking back in. Hope the move went well.']), establishedPersona: 'Helen', firstName: 'Ray',
+    eligibility: { blocked: false, reasons: [], timing: { lawful: true } } })
+  assert.equal(checkIn.objective, 'none', JSON.stringify(checkIn.ledger_summary))
+  assert.equal(checkIn.ok, true, JSON.stringify(checkIn))
+  assert.equal(reask.ok, false)
+})

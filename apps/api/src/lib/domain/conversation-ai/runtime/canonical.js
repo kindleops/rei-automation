@@ -246,7 +246,11 @@ export async function composeAgentOutbound({
   if (stage === 'S5_offer' || (ledger.existing_offers || []).length || (ledger.outbound_quotes || []).length || (ledger.offer_requests || []).length) return refuse('offer_stage_is_a_human_step', { ledger_summary: ledgerSummary(ledger) })
   if (purpose === 'first_touch' && (thread || []).some((m) => m.direction === 'outbound')) return refuse('first_touch_after_contact', { ledger_summary: ledgerSummary(ledger) })
   if (purpose !== 'first_touch' && !(thread || []).length) return refuse('no_conversation_to_continue')
-  const objective = purpose === 'first_touch' ? 'ownership' : (ledger.next_missing || OUTBOUND_OBJECTIVE_FOR_STAGE[stage] || null)
+  // a continuation never re-asks a question the seller left open (the validator's already_asked rule): when the next
+  // missing fact was already asked, the message is a check-in WITHOUT a question (objective none)
+  const pick = ledger.next_missing || OUTBOUND_OBJECTIVE_FOR_STAGE[stage] || null
+  const askedOpen = (k) => Boolean(k && ledger.questions?.[k] && !ledger.questions[k].answered && ledger.questions[k].asked_count > 0)
+  const objective = purpose === 'first_touch' ? 'ownership' : (askedOpen(pick) ? 'none' : pick)
   if (!objective) return refuse('no_next_step', { ledger_summary: ledgerSummary(ledger) })
   const messages = (thread || []).map((m) => ({ from: m.direction === 'outbound' ? 'us' : 'seller', text: m.body || '' }))
   const composition = await composeOutbound({ ledger, purpose, objective, brief, modelClient, spend, messages, maskOpts, establishedPersona, companyIdentity, firstName, propertyLabel, propertyAddresses, personaPolicy, seed })
