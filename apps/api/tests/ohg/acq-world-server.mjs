@@ -151,7 +151,7 @@ for (const k of Object.keys(P)) {
     [`update public.eg_property_facts set property_address_full = $2, property_address_city = 'Honolulu', property_address_state = 'HI', refreshed_at = now() where property_id = $1`, [PID[k], `${STREET[k]}, Honolulu, HI 96816`]],
     // the graph's verdict agrees with the seed: eligible seeds are queue-eligible; stopped / wrong number are not
     [`insert into public.campaign_target_graph (property_id, canonical_e164, sms_eligible, queue_eligible, queue_block_reason, seller_person_key, prospect_id, timezone, identity_alignment, property_address_full, property_city, property_zip, state, market)
-      values ($1, $2, $3, $3, $4, $5, $5, $6, 'aligned', $7, 'Honolulu', '96816', $8, $9)`,
+      values ($1, $2, $3, $3, $4, $5, $5, $6, 'verified', $7, 'Honolulu', '96816', $8, $9)`,
       [PID[k], P[k], !['stopped', 'wrong'].includes(k), k === 'stopped' ? 'opted_out' : k === 'wrong' ? 'wrong_number' : null, `pr-${k}`, k === 'eastern' ? 'America/Indiana/Indianapolis' : 'Pacific/Honolulu', STREET[k], 'HI', MARKET]],
     [`update public.properties set property_address_full = $2 where property_id = $1`, [PID[k], `${STREET[k]}, Honolulu, HI 96816`]],
   ]) { try { await env.owner.query(sql, args) } catch (e) { log('reader seed skipped:', sql.slice(0, 60), '→', e.message.slice(0, 80)) } }
