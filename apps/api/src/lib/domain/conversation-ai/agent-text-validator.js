@@ -54,6 +54,9 @@ const FIRST_PERSON_RE = /\b(?:I|I'?m|I'?d|I'?ll|me|my|we|we'?re|we'?d|we'?ll|us|
 function offerTermsSentences(t) {
   return t.split(/(?<=[.?!])\s+/).filter((sentence) => OFFER_TERMS_RE.test(sentence) && (!/\?\s*$/.test(sentence) || FIRST_PERSON_RE.test(sentence)))
 }
+// where the seller's number or details came from ("your number is linked to … in public property records", "we found
+// you on a list"): an account of the company's data the record does not back; a person answers that question
+const DATA_SOURCE_RE = /\b(?:your|this)\s+(?:number|phone|contact|info(?:rmation)?|details|name)\b[^.?!]{0,60}?\b(?:came|comes|is|was|were|are)\s+(?:from|linked|listed|tied|attached|associated|found|pulled|in|on)\b|\b(?:we|I)\s+(?:got|get|found|find|pulled|obtained|bought|purchased|sourced)\s+(?:your|this)\s+(?:number|phone|contact|info(?:rmation)?|details|name)\b|\b(?:public|property|county|tax|court|probate)\s+records?\b|\bskip[\s-]?trac\w*|\b(?:mailing|marketing|lead|data)\s+(?:list|provider|vendor|broker)s?\b/i
 const CORRECTION_RE = /\b(sent (by|in) (mistake|error)|ignore (that|the|my) (last|previous|earlier) (text|message)|(last|previous) (text|message) was (a )?(mistake|wrong|an error)|sorry,? (wrong|that) (text|message))\b/i
 const PRACTICE_CLAIMS = [
   ['as_is', /\b(as[- ]is|any condition|no repairs? (needed|required|on your (end|side))|(roof|repairs?|basement)[^.?!]{0,40}(wouldn'?t|won'?t|don'?t) need (fixing|to be fixed))\b/i],
@@ -106,6 +109,7 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
   if (HANDOFF_RE.test(t)) add('commitment:implied_handoff_to_person')
   if (FORTHCOMING_RE.test(t)) add('commitment:implied_forthcoming_offer_or_date')
   if (!moneyAuthority && offerTermsSentences(t).length) add('commitment:offer_price_or_terms_without_authority')
+  if (DATA_SOURCE_RE.test(t)) add('claim:data_source_not_backed')
   // the company's buying practices: stated only when the owner configured them as true
   for (const [key, re] of PRACTICE_CLAIMS) if (re.test(t) && !(companyIdentity?.practices || []).includes(key)) add(`identity:company_practice_not_configured:${key}`)
 

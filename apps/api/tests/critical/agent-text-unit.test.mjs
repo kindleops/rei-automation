@@ -88,6 +88,9 @@ test('validator: every refusal names its rule — money, human claim, the unansw
     ['Thanks for writing back. I can\'t give an offer, a price or a closing date in this chat.', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:offer_price_or_terms_without_authority'],
     ['Thanks. I can\'t say whether moving costs would be covered. When would you want to sell?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:offer_price_or_terms_without_authority'],
     ['Thanks for the details. Would our offer work for you if it came in fair?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:offer_price_or_terms_without_authority'],
+    // where the seller's number or details came from is never stated (a person answers that)
+    ['Fair question. Your number is linked to the house in public property records. When would you want to sell?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'claim:data_source_not_backed'],
+    ['Good question. We got your number from a list of owners in the area. When would you want to sell?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'claim:data_source_not_backed'],
   ]
   for (const [body, o, code, reason] of cases) {
     const r = v(body, o)
