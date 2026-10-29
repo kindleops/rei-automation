@@ -46,6 +46,14 @@ const IMPLIED_COMMITMENT_RE = /\b(?:once|when|after|if)\s+(?:there'?s|there\s+is
 const HANDOFF_RE = /\b(?:pass(?:ing)?|forward(?:ing)?|hand(?:ing)?|send(?:ing)?|flag(?:ging)?|relay(?:ing)?|escalat(?:e|ing)|refer(?:ring)?|bring(?:ing)?|loop(?:ing)?)\b[^.?!]{0,50}?\b(?:to|in|with)\s+(?:a\s+(?:real\s+|live\s+)?(?:person|human|colleague|manager|teammate|team\s+member|specialist|rep(?:resentative)?)|someone|somebody|(?:our|my|the)\s+(?:team|office|staff|manager|colleagues?|acquisitions\s+team))\b|\b(?:let|tell|inform|notify)\s+(?:(?:our|my|the)\s+(?:team|office|staff|manager)|someone|a\s+(?:person|colleague|manager))\s+know\b/i
 // an offer, a number or a date that is "not ready yet / right now": one is implied to follow
 const FORTHCOMING_RE = /\b(?:can'?t|cannot|can\s+not|don'?t|do\s+not|won'?t|not\s+able\s+to|unable\s+to|not\s+ready\s+to|no|not)\b[^.?!]{0,40}?\b(?:offers?|numbers?|price|figures?|quotes?|estimates?|valuations?|closing\s+dates?|dates?)\b[^.?!]{0,30}?\b(?:yet|right\s+now|at\s+the\s+moment|at\s+this\s+(?:point|time|stage)|for\s+now|just\s+now|until)\b|\b(?:offers?|numbers?|price|quotes?)\s+(?:is|are|will\s+be|should\s+be)\s+(?:coming|on\s+(?:its|the)\s+way|in\s+the\s+works|being\s+(?:prepared|worked\s+on))\b/i
+// the company's offer, price, numbers, terms or dates, discussed at all (even "I can't give you a number", "not in this
+// chat", "not myself"): without negotiation authority every such sentence implies one may come, so none is written.
+// A QUESTION about the seller's own price or other offers stays allowed ("Do you have a price in mind?").
+const OFFER_TERMS_RE = /\b(?:offers?|(?<!\b(?:phone|this|that|best|right|wrong|your|cell|text|contact|good)\s)numbers?|price|pricing|ballpark|figures?|quotes?|estimates?|valuations?|apprais\w+|closing\s+(?:dates?|costs?|timeline)|close\s+(?:date|by|on|before|in|within|quickly|fast)|terms|fees?|commissions?|moving\s+costs?|earnest|contracts?|in\s+writing)\b/i
+const FIRST_PERSON_RE = /\b(?:I|I'?m|I'?d|I'?ll|me|my|we|we'?re|we'?d|we'?ll|us|our)\b/i
+function offerTermsSentences(t) {
+  return t.split(/(?<=[.?!])\s+/).filter((sentence) => OFFER_TERMS_RE.test(sentence) && (!/\?\s*$/.test(sentence) || FIRST_PERSON_RE.test(sentence)))
+}
 const CORRECTION_RE = /\b(sent (by|in) (mistake|error)|ignore (that|the|my) (last|previous|earlier) (text|message)|(last|previous) (text|message) was (a )?(mistake|wrong|an error)|sorry,? (wrong|that) (text|message))\b/i
 const PRACTICE_CLAIMS = [
   ['as_is', /\b(as[- ]is|any condition|no repairs? (needed|required|on your (end|side))|(roof|repairs?|basement)[^.?!]{0,40}(wouldn'?t|won'?t|don'?t) need (fixing|to be fixed))\b/i],
@@ -97,6 +105,7 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
   if (IMPLIED_COMMITMENT_RE.test(t)) add('commitment:implied_offer_review_or_call')
   if (HANDOFF_RE.test(t)) add('commitment:implied_handoff_to_person')
   if (FORTHCOMING_RE.test(t)) add('commitment:implied_forthcoming_offer_or_date')
+  if (!moneyAuthority && offerTermsSentences(t).length) add('commitment:offer_price_or_terms_without_authority')
   // the company's buying practices: stated only when the owner configured them as true
   for (const [key, re] of PRACTICE_CLAIMS) if (re.test(t) && !(companyIdentity?.practices || []).includes(key)) add(`identity:company_practice_not_configured:${key}`)
 
