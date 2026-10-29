@@ -55,7 +55,7 @@ test('event-feed writer: never throws, never blocks; unknown kinds and missing c
   assert.deepEqual([seen.fn, seen.args.p_event_key, seen.args.p_thread_id], ['lc_lead_event_append', 'SM_a_b', null])
 })
 
-const client = (texts) => { let i = 0; return { decide: async () => ({ input: { message: texts[Math.min(i++, texts.length - 1)] }, model: 'claude-haiku-5-5', usd: 0.001, usage: { input_tokens: 10, output_tokens: 5 } }) } }
+const client = (texts) => { let i = 0; return { decide: async () => ({ input: { message: texts[Math.min(i++, texts.length - 1)] }, model: 'scripted-test-model', usd: 0.001, usage: { input_tokens: 10, output_tokens: 5 } }) } }
 const ledger0 = { facts: {}, questions: {}, property: {} }
 const spend = { perMessageMaxUsd: 0.02, dailyMaxUsd: 20, spentTodayUsd: () => 0, estimateUsd: () => 0.002 }
 
