@@ -16,8 +16,17 @@
 --   agent_outbound  NO inbound, queue_key = 'agent_message:<action intent uuid>', idempotency_key =
 --                   'agent_message_intent:<the same uuid>' (one record per gateway intent), decision_outcome
 --                   AI_GENERATED_OUTBOUND, a category in first_touch / reengage / followup.
+--   agent_text      (owner architecture correction 2026-10-29: "Agntei owns the intelligence and conversation; LeadCommand
+--                   owns messaging infrastructure and compliance enforcement") the EXACT text an Agntei AI employee composed
+--                   on its own model session (Action Gateway queue_agent_text, link #32): NO LeadCommand model call. queue_key
+--                   = 'agent_text:<action intent uuid>', idempotency_key = 'agent_text_intent:<the same uuid>', decision_outcome
+--                   AGENT_COMPOSED_TEXT, a category in the eight agent-text purposes; inbound_message_id = the inbound it
+--                   answers (an answer) or null (an initiated text) — the column's UNIQUE index keeps ONE answer per inbound
+--                   across every kind. It carries its AUTHOR: author_employee (the Agntei employee) and author_attribution
+--                   (employee, model, provider, route, session id, turn id — stored verbatim, never interpreted).
+-- author_employee / author_attribution are required for agent_text and absent for every other kind.
 -- Every other constraint (validated, policy-authorized, sealed refs, body hash, 320 chars, no dashes, append-only
--- triggers) applies to both kinds unchanged. Existing rows become record_kind 'reply' (a constant default:
+-- triggers) applies to every kind unchanged. Existing rows become record_kind 'reply' (a constant default:
 -- metadata-only, no rewrite) and satisfy the reply branch exactly as before.
 
 set local lock_timeout = '5s';
@@ -41,27 +50,41 @@ end $$;
 
 alter table public.ai_generated_messages
   add column record_kind text not null default 'reply',
-  add constraint ai_generated_messages_record_kind_check check (record_kind in ('reply', 'agent_outbound')),
+  add column author_employee text,
+  add column author_attribution jsonb,
+  add constraint ai_generated_messages_record_kind_check check (record_kind in ('reply', 'agent_outbound', 'agent_text')),
+  add constraint ai_generated_messages_author_check check (
+    (record_kind <> 'agent_text' and author_employee is null and author_attribution is null)
+    or (record_kind = 'agent_text' and author_employee ~ '^[A-Za-z0-9 _.:@/-]{1,80}$'
+        and jsonb_typeof(author_attribution) = 'object' and octet_length(author_attribution::text) <= 2000
+        and length(btrim(coalesce(author_attribution ->> 'employee', ''))) > 0 and length(btrim(coalesce(author_attribution ->> 'route', ''))) > 0
+        and author_attribution ->> 'employee' = author_employee)),
   alter column inbound_message_id drop not null,
   drop constraint ai_generated_messages_check,
   add constraint ai_generated_messages_check check (
     (record_kind = 'reply' and inbound_message_id is not null and queue_key = 'ai_conversation:' || inbound_message_id)
-    or (record_kind = 'agent_outbound' and inbound_message_id is null and queue_key ~ '^agent_message:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')),
+    or (record_kind = 'agent_outbound' and inbound_message_id is null and queue_key ~ '^agent_message:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+    or (record_kind = 'agent_text' and queue_key ~ '^agent_text:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')),
   drop constraint ai_generated_messages_check1,
   add constraint ai_generated_messages_check1 check (
     (record_kind = 'reply' and idempotency_key = 'inbound_reply:' || inbound_message_id)
-    or (record_kind = 'agent_outbound' and idempotency_key = 'agent_message_intent:' || substr(queue_key, 15))),
+    or (record_kind = 'agent_outbound' and idempotency_key = 'agent_message_intent:' || substr(queue_key, 15))
+    or (record_kind = 'agent_text' and idempotency_key = 'agent_text_intent:' || substr(queue_key, 12))),
   drop constraint ai_generated_messages_decision_outcome_check,
   add constraint ai_generated_messages_decision_outcome_check check (
-    (record_kind = 'reply' and decision_outcome = 'AI_GENERATED_REPLY') or (record_kind = 'agent_outbound' and decision_outcome = 'AI_GENERATED_OUTBOUND')),
+    (record_kind = 'reply' and decision_outcome = 'AI_GENERATED_REPLY') or (record_kind = 'agent_outbound' and decision_outcome = 'AI_GENERATED_OUTBOUND')
+    or (record_kind = 'agent_text' and decision_outcome = 'AGENT_COMPOSED_TEXT')),
   drop constraint ai_generated_messages_authorization_scope_check,
   add constraint ai_generated_messages_authorization_scope_check check (
     authorization_scope ? 'policy_hash' and authorization_scope ? 'scope_match'
     and ((record_kind = 'reply' and authorization_scope ->> 'category' in ('next_missing_fact', 'identity_answer', 'not_interested_close', 'clarification'))
-         or (record_kind = 'agent_outbound' and authorization_scope ->> 'category' in ('first_touch', 'reengage', 'followup'))));
-comment on column public.ai_generated_messages.record_kind is 'reply = answers one inbound (every original invariant); agent_outbound = an agent-initiated message of one Action Gateway intent (queue_agent_message), no inbound. PROPOSED_20261029090000_ai_generated_outbound.sql';
+         or (record_kind = 'agent_outbound' and authorization_scope ->> 'category' in ('first_touch', 'reengage', 'followup'))
+         or (record_kind = 'agent_text' and authorization_scope ->> 'category' in ('first_touch', 'reply', 'followup', 'reengage', 'nurture', 'qualification', 'negotiation', 'appointment'))));
+comment on column public.ai_generated_messages.record_kind is 'reply = answers one inbound (every original invariant); agent_outbound = an agent-initiated message of one Action Gateway intent (queue_agent_message, retired), no inbound; agent_text = the exact text an Agntei AI employee composed (queue_agent_text), validated deterministically, no LeadCommand model call. PROPOSED_20261029090000_ai_generated_outbound.sql';
+comment on column public.ai_generated_messages.author_employee is 'agent_text only: the Agntei employee who composed the text (author_attribution.employee).';
+comment on column public.ai_generated_messages.author_attribution is 'agent_text only: {employee, model, provider, route, session_id, turn_id} as the agent sent it; stored verbatim, never interpreted.';
 
 do $$
 begin
-  if exists (select 1 from public.ai_generated_messages where record_kind <> 'reply') then raise exception 'postcondition: existing rows are replies'; end if;
+  if exists (select 1 from public.ai_generated_messages where record_kind <> 'reply' or author_employee is not null) then raise exception 'postcondition: existing rows are replies'; end if;
 end $$;

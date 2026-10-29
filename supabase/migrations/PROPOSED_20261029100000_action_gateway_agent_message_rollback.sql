@@ -2,9 +2,12 @@
 -- ROLLBACK of PROPOSED_20261029100000_action_gateway_agent_message.sql
 -- STATUS: PROPOSED. Run only with the owner's approval, like the apply.
 -- REFUSES (nothing is dropped) while:
---   * a live grant carries standing_seller_facing for conversation.queue_agent_message (an owner revokes it first);
---   * an agent-message / lead-assignment intent is pending, or an agent-message receipt is open;
---   * any agent-message receipt exists at all (the widened CHECK cannot be narrowed under them: export them first).
+--   * a live grant carries standing_seller_facing for conversation.queue_agent_message / conversation.queue_agent_text
+--     (an owner revokes it first);
+--   * an agent-message / agent-text / lead-assignment / lead-transfer intent is pending;
+--   * any agent-message or agent-text receipt exists at all (the widened CHECK cannot be narrowed under them: export them
+--     first). Agent-text submissions with no receipt (texts refused before any handoff: never sent) are dropped with
+--     their table.
 -- Then: #31's standing CHECKs and bodies (standing_reply_refusal, grant_refusal, dw_handoff), #28's helpers and receipt
 -- writer, #28's receipts action CHECK (verbatim from action_gateway.agent_message_restore), and drops what the apply
 -- created (lead assignments, the event outbox WITH its rows, the reads, the reservation functions, the registry rows).
@@ -17,13 +20,13 @@ do $$
 declare c_name text; c_def text;
 begin
   if to_regclass('action_gateway.agent_message_restore') is null then raise exception 'rollback precondition: the agent-message link is not applied'; end if;
-  if exists (select 1 from action_gateway.capability_grants where standing_seller_facing and capability = 'conversation.queue_agent_message' and revoked_at is null) then
-    raise exception 'refused: a live grant carries standing_seller_facing for conversation.queue_agent_message; revoke it first';
+  if exists (select 1 from action_gateway.capability_grants where standing_seller_facing and capability in ('conversation.queue_agent_message', 'conversation.queue_agent_text') and revoked_at is null) then
+    raise exception 'refused: a live grant carries standing_seller_facing for conversation.queue_agent_message / queue_agent_text; revoke it first';
   end if;
-  if exists (select 1 from action_gateway.action_intents where action in ('queue_agent_message', 'assign_lead', 'release_lead') and state in ('received', 'awaiting_approval', 'authorized', 'executing')) then
+  if exists (select 1 from action_gateway.action_intents where action in ('queue_agent_message', 'queue_agent_text', 'assign_lead', 'release_lead', 'transfer_lead') and state in ('received', 'awaiting_approval', 'authorized', 'executing')) then
     raise exception 'rollback precondition: agent-message intents are still pending; drain them first';
   end if;
-  if exists (select 1 from action_gateway.seller_action_receipts where action = 'queue_agent_message') then
+  if exists (select 1 from action_gateway.seller_action_receipts where action in ('queue_agent_message', 'queue_agent_text')) then
     raise exception 'rollback precondition: agent-message receipts exist (evidence); export and delete them first';
   end if;
   select value into c_name from action_gateway.agent_message_restore where key = 'receipts_action_check_name';
@@ -276,6 +279,20 @@ grant execute on function public.lc_seller_action_receipt_record(uuid, text, tex
 
 delete from action_gateway.extensions where link = 'PROPOSED_20261029100000_action_gateway_agent_message';
 
+drop function public.lc_agent_lead_holder(text);
+drop function public.lc_agent_text_delivery_record(text, text, text);
+drop function public.lc_agent_text_settle(uuid, text);
+drop function public.lc_agent_text_reserve(uuid);
+drop function public.lc_agent_text_load(uuid);
+drop function public.lc_agent_text_activation();
+drop function public.action_gateway_agent_text_state(uuid, uuid, uuid);
+drop function public.action_gateway_agent_text_submit(text, jsonb);
+drop table action_gateway.agent_text_submissions;
+drop function action_gateway.agent_text_submissions_append_only();
+drop function action_gateway.agent_text_usage(text);
+drop function action_gateway.agent_text_initiated(text);
+drop function action_gateway.agent_text_refusal();
+drop function action_gateway.agent_text_policy();
 drop function public.action_gateway_agent_lead_pool(text, integer, text);
 drop function public.action_gateway_send_controls();
 drop function public.lc_agent_message_lead(uuid);

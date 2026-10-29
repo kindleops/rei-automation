@@ -14,7 +14,9 @@ begin
   if to_regclass('public.ai_generated_messages') is null or not exists (select 1 from pg_attribute where attrelid = to_regclass('public.ai_generated_messages') and attname = 'record_kind' and not attisdropped) then
     problems := problems || 'PROPOSED_20261029090000 (the ledger''s agent_outbound kind) is not applied'::text;
   end if;
-  if to_regclass('action_gateway.agent_message_restore') is not null or to_regclass('action_gateway.lead_assignments') is not null then problems := problems || 'this link is already applied'::text; end if;
+  if to_regclass('action_gateway.agent_message_restore') is not null or to_regclass('action_gateway.lead_assignments') is not null or to_regclass('action_gateway.agent_text_submissions') is not null then problems := problems || 'this link is already applied'::text; end if;
+  if to_regclass('public.negotiation_send_authorizations') is null or to_regprocedure('public.negotiation_send_authorization_consume(uuid,text,numeric)') is null then problems := problems || 'the negotiation send authority (#28) is missing (priced agent texts consume it)'::text; end if;
+  if to_regclass('public.message_events') is null then problems := problems || 'missing public.message_events'::text; end if;
   foreach t in array array['public.idempotency_ledger', 'public.campaign_targets', 'public.sms_templates', 'public.ownership_template_rotation_control', 'public.inbox_thread_state',
       'public.sms_suppression_list', 'public.system_control', 'agent.runtime_limits', 'agent.ops_work_item'] loop
     if to_regclass(t) is null then problems := problems || ('missing ' || t); end if;

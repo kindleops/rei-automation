@@ -35,6 +35,27 @@
 --      lead_state_changed, delivery_changed, opt_out; idempotent event ids, never a phone or message text), written by
 --      LeadCommand (lc_lead_event_append; the receipt writer appends delivery changes itself) and read by the gateway
 --      (action_gateway_events_since, settled rows only).
+--   7. OWNER ARCHITECTURE CORRECTION 2026-10-29 — "Agntei owns the intelligence and conversation. LeadCommand owns
+--      messaging infrastructure and compliance enforcement. The carrier delivers the SMS." Agntei's AI employees compose
+--      EVERY SMS themselves; LeadCommand validates the exact text deterministically and transports it:
+--      queue_agent_text (capability conversation.queue_agent_text, T3, standing-grant eligible like the agent message):
+--      the agent's EXACT body (1–320 chars, stored once in action_gateway.agent_text_submissions, content-addressed by
+--      its sha256 + the attribution's) and its attribution {employee, model, provider, route, session_id, turn_id}
+--      (verbatim, never interpreted). Its own switch ai_agent_text_enabled (born OFF: AGENT_TEXT_KILL_SWITCH_OFF) and an
+--      optional policy ai_agent_text_policy (caps, quiet hours, languages, links); it does NOT depend on the reply
+--      engine's ai_conversation_send_enabled (that gate certifies LeadCommand's own writer, which never writes these).
+--      The handoff re-verifies the stops, the switch, the grant, the lead's owner, holds, suppression, the submission,
+--      the inbound it answers (one agent answer per inbound) and, for a priced text, consumes ONE use of a live
+--      negotiation send authorization of the lead's thread + property for exactly that amount (else MONEY_NOT_AUTHORIZED).
+--      LeadCommand's worker writes the body as an ai_generated_messages record of kind agent_text (NO model call) and
+--      ONE send_queue row; caps are reservations (agent_text_lead_day / agent_text_initiated_day / agent_text_global_day,
+--      and the shared inbound_reply scope for an answer). queue_agent_message (LeadCommand composes from a brief) and
+--      queue_authorized_reply (LeadCommand composes the reply) are RETIRED for agents: AGENT_COMPOSES_TEXT.
+--   8. transfer_lead (T2, standing, reversible; capability leads.transfer_lead): a supervisor moves a lead's ONE holder
+--      to another registered agent that holds conversation.queue_agent_text; a lead_transferred event; the old holder is
+--      refused NOT_LEAD_OWNER from then on (its queued texts are cancelled at dispatch).
+--   9. lc_agent_lead_holder: LeadCommand's own conversation engine STANDS DOWN on a lead an agent holds (no model
+--      decision, no AI reply); deterministic STOP handling stays.
 -- Every existing gate stays: holds, suppression / STOP, wrong number / not owner, the opener rule, the recipient
 -- window, the pre-send eligibility engine, the validators, the grant caps, both emergency stops, idempotency.
 -- Rollback: PROPOSED_20261029100000_action_gateway_agent_message_rollback.sql (refuses while a live standing
@@ -61,7 +82,8 @@ begin
     raise exception 'precondition: this link is already applied';
   end if;
   foreach t in array array['public.idempotency_ledger', 'public.campaign_targets', 'public.sms_templates', 'public.ownership_template_rotation_control',
-      'public.inbox_thread_state', 'public.sms_suppression_list', 'public.system_control', 'agent.runtime_limits', 'agent.ops_work_item'] loop
+      'public.inbox_thread_state', 'public.sms_suppression_list', 'public.system_control', 'agent.runtime_limits', 'agent.ops_work_item',
+      'public.negotiation_send_authorizations', 'public.message_events'] loop
     if to_regclass(t) is null then missing := missing || t; end if;
   end loop;
   if array_length(missing, 1) > 0 then raise exception 'precondition: missing relation(s): %', array_to_string(missing, ', '); end if;
@@ -85,7 +107,7 @@ begin
   insert into action_gateway.agent_message_restore (key, value) values ('receipts_action_check_name', c.conname), ('receipts_action_check_def', c.def);
   -- the actions the CHECK lists today (#28's three, #29's two when that link is applied) plus this one
   select string_agg(quote_literal(a), ', ' order by a) into v_list
-    from (select distinct (regexp_matches(c.def, '''([a-z_]+)''', 'g'))[1] a union select 'queue_agent_message') s;
+    from (select distinct (regexp_matches(c.def, '''([a-z_]+)''', 'g'))[1] a union select 'queue_agent_message' union select 'queue_agent_text') s;
   execute format('alter table action_gateway.seller_action_receipts drop constraint %I', c.conname);
   execute format('alter table action_gateway.seller_action_receipts add constraint %I check (action in (%s))', c.conname, v_list);
 end $$;
@@ -208,6 +230,136 @@ as $fn$
                        and l.key like to_char((clock_timestamp() at time zone 'utc')::date, 'YYYY-MM-DD') || ':%'))
 $fn$;
 
+-- ── 2b. the agent-composed text (queue_agent_text): ITS OWN switch and policy, born OFF ──
+-- THE normalizer of system_control ai_agent_text_policy. Absent ⇒ the defaults (the switch alone gates); malformed ⇒
+-- every cap 0 (fail closed). Bounds: global 0..5000 per UTC day (default 200); per lead 0..20 per UTC day, all texts
+-- (default 6); initiated (first_touch / followup / reengage / nurture) per lead 0..5 per UTC day (default 1); a
+-- follow-up / nurture needs the thread quiet since OUR last text for followup_min_quiet_hours (1..2160, default 24), a
+-- re-engagement reengage_min_quiet_hours (default 72); allow_links (default false); languages ⊆ {en, es} (default en).
+create function action_gateway.agent_text_policy()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare v text; j jsonb; langs jsonb;
+begin
+  select value into v from public.system_control where key = 'ai_agent_text_policy';
+  begin
+    j := case when nullif(btrim(coalesce(v, '')), '') is null then '{}'::jsonb else v::jsonb end;
+    if jsonb_typeof(j) <> 'object' then raise exception 'not an object'; end if;
+    select coalesce(jsonb_agg(distinct x order by x), '[]'::jsonb) into langs
+      from (select 'en' x union select lower(btrim(y)) from jsonb_array_elements_text(case when jsonb_typeof(j -> 'languages') = 'array' then j -> 'languages' else '[]'::jsonb end) y where lower(btrim(y)) in ('en', 'es')) s;
+    return jsonb_build_object(
+      'max_per_day_global', least(greatest(coalesce((j ->> 'max_per_day_global')::int, 200), 0), 5000),
+      'max_per_lead_per_day', least(greatest(coalesce((j ->> 'max_per_lead_per_day')::int, 6), 0), 20),
+      'max_initiated_per_lead_per_day', least(greatest(coalesce((j ->> 'max_initiated_per_lead_per_day')::int, 1), 0), 5),
+      'followup_min_quiet_hours', least(greatest(coalesce((j ->> 'followup_min_quiet_hours')::int, 24), 1), 2160),
+      'reengage_min_quiet_hours', least(greatest(coalesce((j ->> 'reengage_min_quiet_hours')::int, 72), 1), 2160),
+      'allow_links', coalesce(j ->> 'allow_links', '') = 'true',
+      'languages', langs,
+      'policy_version', left(coalesce(nullif(j ->> 'policy_version', ''), 'v1'), 40));
+  exception when others then
+    return jsonb_build_object('max_per_day_global', 0, 'max_per_lead_per_day', 0, 'max_initiated_per_lead_per_day', 0, 'followup_min_quiet_hours', 24,
+                              'reengage_min_quiet_hours', 72, 'allow_links', false, 'languages', '["en"]'::jsonb, 'policy_version', 'malformed');
+  end;
+end
+$fn$;
+
+-- null = an agent text may be requested / handed off / executed / dispatched NOW; else the code. Both emergency stops,
+-- then this action's own switch. The reply engine's certification gate (ai_conversation_send_enabled) is deliberately
+-- NOT read: it certifies LeadCommand's writer, and LeadCommand writes nothing here.
+create function action_gateway.agent_text_refusal()
+returns text
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare v_stop text; v_switch text;
+begin
+  if exists (select 1 from agent.runtime_limits l where coalesce((to_jsonb(l) ->> 'emergency_stop')::boolean, false)) then return 'EMERGENCY_STOP_ACTIVE'; end if;
+  select lower(btrim(coalesce(value, ''))) into v_stop from public.system_control where key = 'queue_emergency_stop_at';
+  if coalesce(v_stop, '') not in ('', '0', 'false', 'off', 'none', 'null', 'cleared', 'clear') then return 'EMERGENCY_STOP_ACTIVE'; end if;
+  select lower(btrim(coalesce(value, ''))) into v_switch from public.system_control where key = 'ai_agent_text_enabled';
+  if coalesce(v_switch, '') <> 'true' then return 'AGENT_TEXT_KILL_SWITCH_OFF'; end if;
+  if action_gateway.agent_text_policy() ->> 'policy_version' = 'malformed' then return 'AGENT_TEXT_POLICY_MALFORMED'; end if;
+  return null;
+end
+$fn$;
+
+-- the purposes a text is INITIATED by the agent (no inbound to answer): they take an initiated slot
+create function action_gateway.agent_text_initiated(p_purpose text)
+returns boolean language sql immutable parallel safe set search_path = pg_catalog
+as $fn$ select coalesce(p_purpose, '') in ('first_touch', 'followup', 'reengage', 'nurture') $fn$;
+
+-- today's agent-text reservations (UTC day): the lead's (all texts, initiated texts) and the global count
+create function action_gateway.agent_text_usage(p_lead_ref text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+  with d as (select to_char((clock_timestamp() at time zone 'utc')::date, 'YYYY-MM-DD') as d_day)
+  select jsonb_build_object(
+    'day', d.d_day,
+    'lead_today', case when p_lead_ref is null then null else (select count(*) from public.idempotency_ledger l where l.scope = 'agent_text_lead_day' and l.status in ('processing', 'completed') and l.key like p_lead_ref || ':' || d.d_day || ':%') end,
+    'initiated_today', case when p_lead_ref is null then null else (select count(*) from public.idempotency_ledger l where l.scope = 'agent_text_initiated_day' and l.status in ('processing', 'completed') and l.key like p_lead_ref || ':' || d.d_day || ':%') end,
+    'global_today', (select count(*) from public.idempotency_ledger l where l.scope = 'agent_text_global_day' and l.status in ('processing', 'completed') and l.key like d.d_day || ':%'))
+  from d
+$fn$;
+
+-- THE agent's text, stored ONCE: content-addressed by sha256(body) + sha256(the normalized attribution), append-only.
+-- The gateway records it BEFORE the intent (its params carry the two hashes, never the words: the intent record refuses
+-- message text); the handoff and LeadCommand's worker read it back by those hashes.
+create table action_gateway.agent_text_submissions (
+  org_id           uuid not null references agent.org (org_id),
+  text_hash        text not null check (text_hash ~ '^[0-9a-f]{64}$'),
+  attribution_hash text not null check (attribution_hash ~ '^[0-9a-f]{64}$'),
+  body             text not null check (char_length(body) between 1 and 320 and length(btrim(body)) > 0 and body !~ '[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]'),
+  attribution      jsonb not null check (jsonb_typeof(attribution) = 'object' and octet_length(attribution::text) <= 2000
+                                         and (attribution - array['employee', 'model', 'provider', 'route', 'session_id', 'turn_id']) = '{}'::jsonb
+                                         and length(btrim(coalesce(attribution ->> 'employee', ''))) between 1 and 80 and length(btrim(coalesce(attribution ->> 'route', ''))) between 1 and 200),
+  created_at       timestamptz not null default clock_timestamp(),
+  primary key (org_id, text_hash, attribution_hash),
+  check (text_hash = encode(sha256(convert_to(body, 'UTF8')), 'hex')),
+  check (attribution_hash = encode(sha256(convert_to(attribution::text, 'UTF8')), 'hex'))
+);
+comment on table action_gateway.agent_text_submissions is 'Agent-composed texts (link #32, queue_agent_text): the exact body an Agntei AI employee wrote + its attribution (verbatim). Content-addressed, append-only. Written only through public.action_gateway_agent_text_submit (the gateway role); read by the handoff and LeadCommand''s worker (lc_agent_text_load).';
+create function action_gateway.agent_text_submissions_append_only() returns trigger language plpgsql set search_path = pg_catalog as $fn$
+begin raise exception 'agent_text_submissions is append-only' using errcode = '55000'; end $fn$;
+create trigger agent_text_submissions_append_only before update or delete on action_gateway.agent_text_submissions for each row execute function action_gateway.agent_text_submissions_append_only();
+alter table action_gateway.agent_text_submissions enable row level security;
+revoke all on action_gateway.agent_text_submissions from public, anon, authenticated, service_role;
+
+-- the gateway's writer: the attribution normalized to its six keys (strings, trimmed, ≤ 200 chars), employee + route
+-- required; idempotent (the same text + attribution is the same row). Returns the two hashes the intent stores.
+create function public.action_gateway_agent_text_submit(p_body text, p_attribution jsonb)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = pg_catalog
+as $fn$
+declare v_org uuid := action_gateway.request_org(); a jsonb := '{}'::jsonb; k text; v_th text; v_ah text;
+begin
+  if v_org is null then return null; end if;
+  if p_body is null or char_length(p_body) not between 1 and 320 or length(btrim(p_body)) = 0 then return jsonb_build_object('ok', false, 'reason', 'BODY_LENGTH'); end if;
+  if p_body ~ '[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]' then return jsonb_build_object('ok', false, 'reason', 'BODY_CONTROL_CHARACTERS'); end if;
+  if jsonb_typeof(p_attribution) is distinct from 'object' then return jsonb_build_object('ok', false, 'reason', 'ATTRIBUTION_REQUIRED'); end if;
+  foreach k in array array['employee', 'model', 'provider', 'route', 'session_id', 'turn_id'] loop
+    if jsonb_typeof(p_attribution -> k) = 'string' and length(btrim(p_attribution ->> k)) > 0 then a := a || jsonb_build_object(k, left(btrim(p_attribution ->> k), 200)); end if;
+  end loop;
+  if length(coalesce(a ->> 'employee', '')) not between 1 and 80 or length(coalesce(a ->> 'route', '')) = 0 then return jsonb_build_object('ok', false, 'reason', 'ATTRIBUTION_EMPLOYEE_AND_ROUTE_REQUIRED'); end if;
+  v_th := encode(sha256(convert_to(p_body, 'UTF8')), 'hex');
+  v_ah := encode(sha256(convert_to(a::text, 'UTF8')), 'hex');
+  insert into action_gateway.agent_text_submissions (org_id, text_hash, attribution_hash, body, attribution) values (v_org, v_th, v_ah, p_body, a) on conflict do nothing;
+  return jsonb_build_object('ok', true, 'text_hash', v_th, 'attribution_hash', v_ah);
+end
+$fn$;
+
 -- ───────────────────────────────────────────── 3. lead ownership ──
 create table action_gateway.lead_assignments (
   assignment_id      uuid primary key default gen_random_uuid(),
@@ -225,7 +377,7 @@ create table action_gateway.lead_assignments (
   check ((released_at is null) = (release_reason is null))
 );
 create unique index lead_assignments_one_open on action_gateway.lead_assignments (org_id, lead_ref) where released_at is null;
-comment on table action_gateway.lead_assignments is 'Action Gateway lead ownership (link #32): one live owner principal per lead (sealed recipient ref), leased. Written only by public.action_gateway_dw_lead_assignment under an authorized intent; an agent message from any other principal is refused NOT_LEAD_OWNER.';
+comment on table action_gateway.lead_assignments is 'Action Gateway lead ownership (link #32): one live owner principal per lead (sealed recipient ref), leased. Written only by public.action_gateway_dw_lead_assignment under an authorized intent (assign_lead / release_lead / transfer_lead); an agent text from any other principal is refused NOT_LEAD_OWNER, and LeadCommand''s own conversation engine stands down on a held lead (lc_agent_lead_holder).';
 alter table action_gateway.lead_assignments enable row level security;
 revoke all on action_gateway.lead_assignments from public, anon, authenticated, service_role;
 
@@ -234,6 +386,13 @@ create function action_gateway.lead_owner(p_org uuid, p_lead_ref text)
 returns text language sql stable security definer set search_path = pg_catalog
 as $fn$ select a.agent_id from action_gateway.lead_assignments a where a.org_id = p_org and a.lead_ref = p_lead_ref and a.released_at is null and a.lease_until > clock_timestamp() limit 1 $fn$;
 
+-- LeadCommand's conversation engine (service_role): the agent holding the lead of a thread key NOW (any org), or null.
+-- A held lead is the agent's conversation: the engine makes no model decision and sends no AI reply there.
+create function public.lc_agent_lead_holder(p_thread_key text)
+returns text language sql stable security definer set search_path = pg_catalog
+as $fn$ select a.agent_id from action_gateway.lead_assignments a where nullif(btrim(coalesce(p_thread_key, '')), '') is not null and a.lead_ref = action_gateway.thread_ref_of(btrim(p_thread_key))
+          and a.released_at is null and a.lease_until > clock_timestamp() order by a.assigned_at desc limit 1 $fn$;
+
 create function public.action_gateway_dw_lead_assignment(p_intent_id uuid, p_lease_token uuid)
 returns jsonb
 language plpgsql
@@ -241,9 +400,9 @@ volatile
 security definer
 set search_path = pg_catalog
 as $fn$
-declare b jsonb; i action_gateway.action_intents%rowtype; v_auth action_gateway.action_authorizations%rowtype; v_lead jsonb; v_ref text; v_owner text; v_until timestamptz; v_hours int;
+declare b jsonb; i action_gateway.action_intents%rowtype; v_auth action_gateway.action_authorizations%rowtype; v_lead jsonb; v_ref text; v_owner text; v_until timestamptz; v_hours int; v_to text;
 begin
-  b := action_gateway.dw_begin(p_intent_id, p_lease_token, array['assign_lead', 'release_lead']);
+  b := action_gateway.dw_begin(p_intent_id, p_lease_token, array['assign_lead', 'release_lead', 'transfer_lead']);
   if b ? 'refused' then return b -> 'outcome'; end if;
   i := jsonb_populate_record(null::action_gateway.action_intents, b -> 'intent');
   begin
@@ -268,6 +427,33 @@ begin
       insert into action_gateway.lead_assignments (org_id, lead_ref, agent_id, intent_id, thread_id, campaign_target_id, lease_until)
       values (i.org_id, v_ref, i.agent_id, i.intent_id, nullif(v_lead ->> 'thread_id', '')::uuid, nullif(v_lead ->> 'campaign_target_id', '')::uuid, v_until);
       return action_gateway.finish_intent(i.intent_id, 'succeeded', 'LEAD_ASSIGNED', jsonb_build_object('lead_ref', v_ref, 'owner_agent_id', i.agent_id, 'lease_until', v_until, 'renewed', v_owner = i.agent_id));
+    end if;
+    -- transfer_lead (a supervisor): the ONE holder moves to a registered, active agent of the org that holds a live
+    -- conversation.queue_agent_text grant; atomic under the lead's lock; a lead_transferred event on the agents' feed
+    if i.action = 'transfer_lead' then
+      v_to := i.params ->> 'to_agent_id';
+      if not exists (select 1 from action_gateway.agent_principals p where p.agent_id = v_to and p.org_id = i.org_id and p.status = 'active' and p.credential_expires_at > clock_timestamp()) then
+        return action_gateway.finish_intent(i.intent_id, 'refused', 'TRANSFER_TARGET_NOT_AN_AGENT', jsonb_build_object('lead_ref', v_ref));
+      end if;
+      if not exists (select 1 from action_gateway.capability_grants g where g.agent_id = v_to and g.org_id = i.org_id and g.capability = 'conversation.queue_agent_text'
+                       and g.revoked_at is null and g.suspended_at is null and g.valid_from <= now() and g.expires_at > now()) then
+        return action_gateway.finish_intent(i.intent_id, 'refused', 'TRANSFER_TARGET_CANNOT_TEXT', jsonb_build_object('lead_ref', v_ref, 'to_agent_id', v_to));
+      end if;
+      if v_owner is not distinct from v_to then
+        return action_gateway.finish_intent(i.intent_id, 'succeeded', 'LEAD_TRANSFERRED', jsonb_build_object('lead_ref', v_ref, 'from_agent_id', v_owner, 'to_agent_id', v_to, 'unchanged', true));
+      end if;
+      v_hours := least(greatest(coalesce((i.params ->> 'lease_hours')::int, 24), 1), 168);
+      v_until := clock_timestamp() + make_interval(hours => v_hours);
+      update action_gateway.lead_assignments set released_at = clock_timestamp(), release_reason = case when lease_until > clock_timestamp() then 'transferred' else 'lease_expired' end
+       where org_id = i.org_id and lead_ref = v_ref and released_at is null;
+      insert into action_gateway.lead_assignments (org_id, lead_ref, agent_id, intent_id, thread_id, campaign_target_id, lease_until)
+      values (i.org_id, v_ref, v_to, i.intent_id, nullif(v_lead ->> 'thread_id', '')::uuid, nullif(v_lead ->> 'campaign_target_id', '')::uuid, v_until);
+      insert into action_gateway.lead_events (event_id, kind, thread_id, thread_ref, intent_id, payload, occurred_at)
+      values ('lead_transferred:' || i.intent_id::text, 'lead_transferred', nullif(v_lead ->> 'thread_id', '')::uuid, v_ref, i.intent_id,
+              action_gateway.lead_event_ids(jsonb_build_object('from_agent_id', v_owner, 'to_agent_id', v_to, 'requested_by', i.agent_id, 'lease_until', v_until),
+                                            nullif(v_lead ->> 'thread_id', '')::uuid, v_lead ->> 'phone', v_lead ->> 'property_id', nullif(v_lead ->> 'campaign_target_id', '')::uuid), clock_timestamp())
+      on conflict (event_id) do nothing;
+      return action_gateway.finish_intent(i.intent_id, 'succeeded', 'LEAD_TRANSFERRED', jsonb_build_object('lead_ref', v_ref, 'from_agent_id', v_owner, 'to_agent_id', v_to, 'lease_until', v_until));
     end if;
     if v_owner is distinct from i.agent_id then return action_gateway.finish_intent(i.intent_id, 'refused', 'NOT_LEAD_OWNER', jsonb_build_object('lead_ref', v_ref)); end if;
     update action_gateway.lead_assignments set released_at = clock_timestamp(), release_reason = 'released_by_owner' where org_id = i.org_id and lead_ref = v_ref and released_at is null;
@@ -304,7 +490,7 @@ $fn$;
 create or replace function action_gateway.t34_handoff_kind(p_action text)
 returns text language sql immutable parallel safe set search_path = pg_catalog
 -- ONE LeadCommand-side executor kind for every handed-off gateway action (the worker dispatches by the intent's action)
-as $fn$ select case when p_action in ('queue_authorized_reply', 'execute_authorized_offer', 'record_seller_counteroffer', 'queue_agent_message') then 'action_gateway.execute' else null end $fn$;
+as $fn$ select case when p_action in ('queue_authorized_reply', 'execute_authorized_offer', 'record_seller_counteroffer', 'queue_agent_message', 'queue_agent_text') then 'action_gateway.execute' else null end $fn$;
 
 create or replace function action_gateway.t34_hold_capabilities(p_action text)
 returns text[] language sql immutable parallel safe set search_path = pg_catalog
@@ -314,6 +500,8 @@ as $fn$ select case p_action
   when 'record_seller_counteroffer' then array['offer_write']
   -- an agent-initiated message: an AI action, an automated message, a campaign / follow-up touch, an outbound send
   when 'queue_agent_message' then array['ai_action','auto_reply','campaign','follow_up','outbound_send']
+  -- an agent-composed text: an automated message an agent sends (a touch, a follow-up or an answer), an outbound send
+  when 'queue_agent_text' then array['ai_action','auto_reply','campaign','follow_up','outbound_send']
   else array['ai_action','auto_reply','offer_write','outbound_send','offer_acceptance','stage_advance'] end::text[] $fn$;
 
 create or replace function action_gateway.t34_capability_refusal(p_action text)
@@ -326,11 +514,11 @@ as $fn$
 declare v_stop text; v_switch text; v_policy text; v_enabled boolean; v_code text;
 begin
   if p_action = 'record_seller_counteroffer' then return null; end if;
-  -- an agent message: both emergency stops, the AI-reply certification gate, its own switch and policy
-  if p_action = 'queue_agent_message' then
-    v_code := action_gateway.agent_message_refusal();
-    return case when v_code is null then null when v_code = 'EMERGENCY_STOP_ACTIVE' then 'EMERGENCY_STOP_ACTIVE' else 'CAPABILITY_UNAVAILABLE' end;
-  end if;
+  -- the owner's architecture correction (2026-10-29): Agntei's employees compose every SMS. The paths where LeadCommand
+  -- writes the words for an agent are RETIRED (kept for the record): a brief-based agent message, an agent's certified reply
+  if p_action in ('queue_agent_message', 'queue_authorized_reply') then return 'AGENT_COMPOSES_TEXT'; end if;
+  -- an agent-composed text: both emergency stops, its own switch and policy
+  if p_action = 'queue_agent_text' then return action_gateway.agent_text_refusal(); end if;
   select lower(btrim(coalesce(value, ''))) into v_stop from public.system_control where key = 'queue_emergency_stop_at';
   if coalesce(v_stop, '') not in ('', '0', 'false', 'off', 'none', 'null', 'cleared', 'clear') then return 'EMERGENCY_STOP_ACTIVE'; end if;
   -- link #32: the R2 runtime emergency stop refuses every seller-facing send AT REQUEST TIME (the agent message already
@@ -362,7 +550,7 @@ alter table action_gateway.capability_grants
   drop constraint capability_grants_standing_seller_facing_chk,
   add constraint capability_grants_standing_seller_facing_chk check (
     (not standing_seller_facing and standing_basis is null)
-    or (standing_seller_facing and capability in ('conversation.queue_reply', 'conversation.queue_agent_message') and max_tier = 3
+    or (standing_seller_facing and capability in ('conversation.queue_reply', 'conversation.queue_agent_message', 'conversation.queue_agent_text') and max_tier = 3
         and standing_basis is not null and standing_basis ~ '^[A-Za-z0-9 _.:/#()-]{12,200}$')),
   add constraint capability_grants_agent_message_lead_day_cap_chk check (
     agent_message_lead_day_cap is null or (capability = 'conversation.queue_agent_message' and agent_message_lead_day_cap between 1 and 3));
@@ -370,7 +558,7 @@ alter table action_gateway.capability_grants
 alter table action_gateway.action_authorizations
   drop constraint action_authorizations_standing_chk,
   add constraint action_authorizations_standing_chk check (
-    not standing or (tier = 3 and capability in ('conversation.queue_reply', 'conversation.queue_agent_message') and approval_id is null and envelope_ref is null and not approval_required));
+    not standing or (tier = 3 and capability in ('conversation.queue_reply', 'conversation.queue_agent_message', 'conversation.queue_agent_text') and approval_id is null and envelope_ref is null and not approval_required));
 
 -- null when the grant is a live standing seller-facing grant of the intent's own agent for the intent's (action,
 -- capability) pair — the certified reply or the agent message; otherwise the reason. Used when authorizing (#31's
@@ -386,7 +574,8 @@ declare g action_gateway.capability_grants%rowtype; i action_gateway.action_inte
 begin
   select * into i from action_gateway.action_intents where intent_id = p_intent_id;
   if i.intent_id is null or i.tier <> 3
-     or not ((i.action = 'queue_authorized_reply' and i.capability = 'conversation.queue_reply') or (i.action = 'queue_agent_message' and i.capability = 'conversation.queue_agent_message')) then
+     or not ((i.action = 'queue_authorized_reply' and i.capability = 'conversation.queue_reply') or (i.action = 'queue_agent_message' and i.capability = 'conversation.queue_agent_message')
+             or (i.action = 'queue_agent_text' and i.capability = 'conversation.queue_agent_text')) then
     return 'STANDING_NOT_FOR_ACTION';
   end if;
   select * into g from action_gateway.capability_grants where grant_id = p_grant_id;
@@ -416,7 +605,8 @@ begin
   -- owner-minted STANDING seller-facing grant for exactly its capability (their own gates still apply)
   if i.tier >= 3 and not p_has_approval
      and not (i.tier = 3 and g.standing_seller_facing and g.capability = i.capability
-              and ((i.action = 'queue_authorized_reply' and g.capability = 'conversation.queue_reply') or (i.action = 'queue_agent_message' and g.capability = 'conversation.queue_agent_message'))) then
+              and ((i.action = 'queue_authorized_reply' and g.capability = 'conversation.queue_reply') or (i.action = 'queue_agent_message' and g.capability = 'conversation.queue_agent_message')
+                   or (i.action = 'queue_agent_text' and g.capability = 'conversation.queue_agent_text'))) then
     return 'TIER_REQUIRES_APPROVAL';
   end if;
   if i.tier = 2 and not p_has_approval and not (i.action = any (action_gateway.standing_t2_actions())) then return 'T2_ACTION_NOT_REVERSIBLE'; end if;
@@ -442,9 +632,9 @@ as $fn$
 declare
   b jsonb; i action_gateway.action_intents%rowtype; v_thread uuid; v_tk text; v_pid text; v_kind text; v_code text;
   v_use jsonb := null; v_sa uuid := null; v_amount numeric; r jsonb; v_sponsor text; v_auth action_gateway.action_authorizations%rowtype;
-  v_lead jsonb; v_mo text;
+  v_lead jsonb; v_mo text; v_sub action_gateway.agent_text_submissions%rowtype; v_in text; v_latest record; v_nsa public.negotiation_send_authorizations%rowtype;
 begin
-  b := action_gateway.dw_begin(p_intent_id, p_lease_token, array['queue_authorized_reply', 'execute_authorized_offer', 'record_seller_counteroffer', 'queue_agent_message']);
+  b := action_gateway.dw_begin(p_intent_id, p_lease_token, array['queue_authorized_reply', 'execute_authorized_offer', 'record_seller_counteroffer', 'queue_agent_message', 'queue_agent_text']);
   if b ? 'refused' then return b -> 'outcome'; end if;
   i := jsonb_populate_record(null::action_gateway.action_intents, b -> 'intent');
   v_sponsor := b ->> 'sponsor_user_id';
@@ -464,7 +654,7 @@ begin
     end if;
     v_code := action_gateway.t34_capability_refusal(i.action);
     if v_code is not null then return action_gateway.finish_intent(i.intent_id, 'refused', v_code, jsonb_build_object('stage', 'execution')); end if;
-    if i.action = 'queue_agent_message' then
+    if i.action in ('queue_agent_message', 'queue_agent_text') then
       -- the lead: its thread, or (a first touch) its campaign target and number; no thread is required
       v_lead := action_gateway.agent_message_lead(i.params);
       if v_lead is null or v_lead ? 'mismatch' or nullif(v_lead ->> 'phone', '') is null then return action_gateway.finish_intent(i.intent_id, 'failed', 'LEAD_NOT_FOUND', '{}'::jsonb); end if;
@@ -478,11 +668,30 @@ begin
         return action_gateway.finish_intent(i.intent_id, 'refused', 'NOT_LEAD_OWNER', jsonb_build_object('stage', 'execution'));
       end if;
       if exists (select 1 from action_gateway.seller_action_receipts r join action_gateway.action_intents x on x.intent_id = r.intent_id
-                  where r.action = 'queue_agent_message' and r.state in ('requested', 'executing') and r.intent_id <> i.intent_id and r.org_id = i.org_id
+                  where r.action in ('queue_agent_message', 'queue_agent_text') and r.state in ('requested', 'executing') and r.intent_id <> i.intent_id and r.org_id = i.org_id
                     and action_gateway.agent_message_lead(x.params) ->> 'lead_ref' = v_lead ->> 'lead_ref') then
         return action_gateway.finish_intent(i.intent_id, 'refused', 'LEAD_SEND_IN_FLIGHT', jsonb_build_object('stage', 'execution'));
       end if;
       if v_thread is not null then perform 1 from public.inbox_thread_state t where t.id = v_thread for share; end if;
+      if i.action = 'queue_agent_text' then
+        -- the agent's exact text: recorded by the gateway, bound to this intent by its two hashes
+        select * into v_sub from action_gateway.agent_text_submissions s where s.org_id = i.org_id and s.text_hash = i.params ->> 'text_hash' and s.attribution_hash = i.params ->> 'attribution_hash';
+        if v_sub.text_hash is null then return action_gateway.finish_intent(i.intent_id, 'refused', 'TEXT_NOT_SUBMITTED', jsonb_build_object('stage', 'execution')); end if;
+        -- an answer: the inbound it names is the thread's LATEST message and still unanswered by any agent text
+        v_in := nullif(i.params ->> 'in_reply_to_message_id', '');
+        if v_in is not null then
+          if v_thread is null then return action_gateway.finish_intent(i.intent_id, 'refused', 'IN_REPLY_TO_NOT_LATEST_INBOUND', jsonb_build_object('stage', 'execution')); end if;
+          select m.id::text as id, lower(coalesce(m.direction, '')) as direction into v_latest from public.message_events m where m.thread_key = v_tk order by m.created_at desc, m.id desc limit 1;
+          if v_latest.id is distinct from v_in or v_latest.direction <> 'inbound' then
+            return action_gateway.finish_intent(i.intent_id, 'refused', 'IN_REPLY_TO_NOT_LATEST_INBOUND', jsonb_build_object('stage', 'execution'));
+          end if;
+          if exists (select 1 from action_gateway.seller_action_receipts r join action_gateway.action_intents x on x.intent_id = r.intent_id
+                      where r.action = 'queue_agent_text' and r.intent_id <> i.intent_id and r.org_id = i.org_id and x.params ->> 'in_reply_to_message_id' = v_in
+                        and r.state in ('requested', 'executing', 'enqueued', 'sent', 'outcome_unknown')) then
+            return action_gateway.finish_intent(i.intent_id, 'refused', 'INBOUND_ALREADY_ANSWERED', jsonb_build_object('stage', 'execution'));
+          end if;
+        end if;
+      end if;
     else
       v_thread := (i.params ->> 'thread_id')::uuid;
       select t.thread_key, t.property_id into v_tk, v_pid from public.inbox_thread_state t where t.id = v_thread for share;
@@ -497,6 +706,20 @@ begin
     -- the destination's suppression (any language: the suppression list is the outcome of every STOP classifier)
     if i.action <> 'record_seller_counteroffer' and exists (select 1 from public.sms_suppression_list s where s.phone_e164 = v_tk and s.is_active is distinct from false) then
       return action_gateway.finish_intent(i.intent_id, 'refused', 'CONTACT_SUPPRESSED', jsonb_build_object('stage', 'execution'));
+    end if;
+    -- a PRICED agent text: ONE use of a live negotiation send authorization of THIS lead's thread + property, for exactly
+    -- the amount the text states (the consume re-checks revocation, expiry, the envelope, the ceilings and the budget)
+    if i.action = 'queue_agent_text' and i.params ? 'money_amount' then
+      v_sa := nullif(i.params ->> 'send_permit_id', '')::uuid;
+      v_amount := (i.params ->> 'money_amount')::numeric;
+      select * into v_nsa from public.negotiation_send_authorizations a where a.send_authorization_id = v_sa;
+      if v_nsa.send_authorization_id is null or v_nsa.thread_ref is distinct from action_gateway.thread_ref_of(v_tk) or v_nsa.property_id is distinct from v_pid then
+        return action_gateway.finish_intent(i.intent_id, 'refused', 'MONEY_NOT_AUTHORIZED', jsonb_build_object('stage', 'execution', 'reason', 'no_send_authorization_for_this_lead'));
+      end if;
+      v_use := public.negotiation_send_authorization_consume(v_sa, 'agent_text:' || i.intent_id::text, v_amount);
+      if not coalesce((v_use ->> 'ok')::boolean, false) then
+        return action_gateway.finish_intent(i.intent_id, 'refused', 'MONEY_NOT_AUTHORIZED', jsonb_build_object('stage', 'send_budget', 'reason', left(regexp_replace(coalesce(v_use ->> 'reason', 'refused'), '[^a-z_:]', '_', 'g'), 60)));
+      end if;
     end if;
     if i.action = 'execute_authorized_offer' then
       v_sa := (i.params ->> 'send_permit_id')::uuid;
@@ -569,7 +792,7 @@ $fn$;
 create table action_gateway.lead_events (
   cursor       bigint generated always as identity primary key,
   event_id     text not null unique check (event_id ~ '^[a-z_]{3,30}:[A-Za-z0-9_.:-]{1,160}$'),
-  kind         text not null check (kind in ('inbound_message', 'lead_state_changed', 'delivery_changed', 'opt_out')),
+  kind         text not null check (kind in ('inbound_message', 'lead_state_changed', 'delivery_changed', 'opt_out', 'lead_transferred')),
   thread_id    uuid,
   thread_ref   text check (thread_ref is null or thread_ref ~ '^thr_[a-p]{12}$'),
   intent_id    uuid,
@@ -577,7 +800,7 @@ create table action_gateway.lead_events (
   occurred_at  timestamptz not null,
   created_at   timestamptz not null default clock_timestamp()
 );
-comment on table action_gateway.lead_events is 'Agent wake-up feed (link #32): an append-only, cursor-ordered outbox of lead events (inbound_message, lead_state_changed, delivery_changed, opt_out). Idempotent event ids; never a phone number or message text (thread ids, sealed refs, codes). Written by LeadCommand (lc_lead_event_append, the receipt writer); read by the gateway (action_gateway_events_since).';
+comment on table action_gateway.lead_events is 'Agent wake-up feed (link #32): an append-only, cursor-ordered outbox of lead events (inbound_message, lead_state_changed, delivery_changed, opt_out, lead_transferred). Idempotent event ids; never a phone number or message text (thread ids, sealed refs, codes). Written by LeadCommand (lc_lead_event_append, the receipt writer); read by the gateway (action_gateway_events_since).';
 create function action_gateway.lead_events_append_only() returns trigger language plpgsql set search_path = pg_catalog as $fn$
 begin raise exception 'lead_events is append-only' using errcode = '55000'; end $fn$;
 create trigger lead_events_append_only before update or delete on action_gateway.lead_events for each row execute function action_gateway.lead_events_append_only();
@@ -657,6 +880,7 @@ begin
             case r.action when 'queue_authorized_reply' then 'Agent-requested seller reply was not sent: an operator decides'
                           when 'execute_authorized_offer' then 'Agent-requested offer was not sent: an operator decides'
                           when 'queue_agent_message' then 'Agent-initiated message was not sent: an operator decides'
+                          when 'queue_agent_text' then 'Agent-composed text was not sent: an operator decides'
                           else 'Agent-recorded seller counter needs an operator' end,
             case when i.resource_type = 'thread' then 'conversation' else 'system' end,
             case when i.resource_type = 'thread' then i.resource_id else 'action_gateway' end,
@@ -674,7 +898,7 @@ begin
   perform action_gateway.audit(r.org_id, 'receipt_' || p_state, null, r.intent_id, r.action, null, null, r.code, null,
                                jsonb_build_object('job_id', r.job_id, 'state', p_state));
   -- link #32: what happened to a message an agent asked for is an event on the agents' feed (never the text)
-  if p_state in ('enqueued', 'sent', 'held', 'refused', 'deferred', 'failed', 'outcome_unknown') and r.action in ('queue_authorized_reply', 'queue_agent_message') then
+  if p_state in ('enqueued', 'sent', 'held', 'refused', 'deferred', 'failed', 'outcome_unknown') and r.action in ('queue_authorized_reply', 'queue_agent_message', 'queue_agent_text') then
     v_lead := action_gateway.agent_message_lead(i.params);
     insert into action_gateway.lead_events (event_id, kind, thread_id, thread_ref, intent_id, payload, occurred_at)
     values ('delivery_changed:' || r.intent_id::text || ':' || p_state, 'delivery_changed',
@@ -686,6 +910,35 @@ begin
     on conflict (event_id) do nothing;
   end if;
   return jsonb_build_object('ok', true, 'replayed', false, 'state', r.state, 'work_item_id', r.work_item_id);
+end
+$fn$;
+
+-- a carrier's verdict on a text an agent asked for (LeadCommand's delivery webhook, service_role): delivered /
+-- undelivered as a delivery_changed event on the agents' feed (the receipt stays 'sent': the carrier's word is evidence
+-- on the feed and the ledger's lifecycle, never a state that could make anything resend). Idempotent per row × state.
+create function public.lc_agent_text_delivery_record(p_queue_row_id text, p_state text, p_code text default null)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = pg_catalog
+as $fn$
+declare r action_gateway.seller_action_receipts%rowtype; i action_gateway.action_intents%rowtype; v_lead jsonb; v_cursor bigint;
+begin
+  if p_state not in ('delivered', 'undelivered') then return jsonb_build_object('ok', false, 'reason', 'state_invalid'); end if;
+  select * into r from action_gateway.seller_action_receipts x where x.queue_row_id = nullif(btrim(coalesce(p_queue_row_id, '')), '') and x.action in ('queue_agent_text', 'queue_agent_message') limit 1;
+  if r.intent_id is null then return jsonb_build_object('ok', false, 'reason', 'receipt_not_found'); end if;
+  select * into i from action_gateway.action_intents where intent_id = r.intent_id;
+  v_lead := action_gateway.agent_message_lead(i.params);
+  insert into action_gateway.lead_events (event_id, kind, thread_id, thread_ref, intent_id, payload, occurred_at)
+  values ('delivery_changed:' || r.intent_id::text || ':' || p_state, 'delivery_changed', nullif(v_lead ->> 'thread_id', '')::uuid, v_lead ->> 'lead_ref', r.intent_id,
+          action_gateway.lead_event_ids(jsonb_build_object('action', r.action, 'receipt_state', p_state, 'code', nullif(left(regexp_replace(coalesce(p_code, ''), '[^A-Za-z0-9_.:-]', '_', 'g'), 80), ''),
+                                                            'queue_row_id', r.queue_row_id, 'agent_id', i.agent_id, 'purpose', i.params ->> 'purpose', 'source', 'carrier_receipt'),
+                                        nullif(v_lead ->> 'thread_id', '')::uuid, v_lead ->> 'phone', v_lead ->> 'property_id', nullif(v_lead ->> 'campaign_target_id', '')::uuid), clock_timestamp())
+  on conflict (event_id) do nothing
+  returning cursor into v_cursor;
+  perform action_gateway.audit(r.org_id, 'receipt_carrier_' || p_state, null, r.intent_id, r.action, null, null, nullif(left(regexp_replace(coalesce(p_code, ''), '[^A-Za-z0-9_.:-]', '_', 'g'), 80), ''), null, jsonb_build_object('queue_row_id', r.queue_row_id));
+  return jsonb_build_object('ok', true, 'appended', v_cursor is not null, 'intent_id', r.intent_id);
 end
 $fn$;
 
@@ -769,6 +1022,96 @@ begin
   elsif p_outcome = 'released' then
     update public.idempotency_ledger set status = 'failed', failed_at = now(), last_error = 'released_nothing_queued', updated_at = now()
      where scope in ('agent_message_lead_day', 'agent_message_global_day') and claim_token = p_intent_id and status = 'processing';
+  else
+    return jsonb_build_object('ok', false, 'reason', 'outcome_invalid');
+  end if;
+  get diagnostics n = row_count;
+  return jsonb_build_object('ok', true, 'rows', n);
+end
+$fn$;
+
+-- agent texts: ONE per-lead slot (scope agent_text_lead_day, cap max_per_lead_per_day), for an INITIATED purpose also
+-- ONE initiated slot (agent_text_initiated_day, cap max_initiated_per_lead_per_day), ONE global slot
+-- (agent_text_global_day, cap max_per_day_global), and for an ANSWER the inbound's ONE reply reservation (the shared
+-- inbound_reply scope LeadCommand's reply engines use: whoever answers an inbound first is its only answer). All under
+-- one advisory lock, idempotent per intent (claim token = the intent id); anything refused releases what it took.
+create function public.lc_agent_text_reserve(p_intent_id uuid)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = pg_catalog
+as $fn$
+declare
+  i action_gateway.action_intents%rowtype; v_pol jsonb; v_lead jsonb; v_ref text; v_day text; v_in text; v_init boolean;
+  n int; v_slot int; v_lead_slot int; v_init_slot int; v_global_slot int; v_meta jsonb; r record;
+begin
+  select * into i from action_gateway.action_intents where intent_id = p_intent_id;
+  if i.intent_id is null or i.action <> 'queue_agent_text' then return jsonb_build_object('ok', false, 'code', 'INTENT_NOT_AGENT_TEXT'); end if;
+  v_day := to_char((clock_timestamp() at time zone 'utc')::date, 'YYYY-MM-DD');
+  perform pg_advisory_xact_lock(hashtext('lc_agent_text_caps'));
+  -- this intent's own live slots (a retry after a crash): never a second set
+  if exists (select 1 from public.idempotency_ledger l where l.scope = 'agent_text_global_day' and l.claim_token = p_intent_id and l.status in ('processing', 'completed')) then
+    return jsonb_build_object('ok', true, 'replayed', true, 'day', v_day);
+  end if;
+  v_pol := action_gateway.agent_text_policy();
+  v_lead := action_gateway.agent_message_lead(i.params);
+  if v_lead is null or v_lead ? 'mismatch' or nullif(v_lead ->> 'lead_ref', '') is null then return jsonb_build_object('ok', false, 'code', 'LEAD_NOT_FOUND'); end if;
+  v_ref := v_lead ->> 'lead_ref';
+  v_in := nullif(i.params ->> 'in_reply_to_message_id', '');
+  v_init := action_gateway.agent_text_initiated(i.params ->> 'purpose');
+  v_meta := jsonb_build_object('intent_id', i.intent_id, 'agent_id', i.agent_id, 'engine', 'action_gateway_agent_text');
+  -- the answer's reservation first: an inbound another reply already holds / answered is not answered twice
+  if v_in is not null then
+    insert into public.idempotency_ledger (scope, key, claim_token, status, summary, metadata) values ('inbound_reply', v_in, p_intent_id, 'processing', 'action_gateway_agent_text', v_meta)
+    on conflict (scope, key) do update set claim_token = excluded.claim_token, status = 'processing', summary = excluded.summary, metadata = excluded.metadata, started_at = now(), failed_at = null, last_error = null, updated_at = now()
+      where public.idempotency_ledger.status = 'failed';
+    if not exists (select 1 from public.idempotency_ledger l where l.scope = 'inbound_reply' and l.key = v_in and l.claim_token = p_intent_id and l.status = 'processing') then
+      return jsonb_build_object('ok', false, 'code', 'INBOUND_ALREADY_ANSWERED');
+    end if;
+  end if;
+  for r in select * from (values ('agent_text_lead_day', v_ref || ':' || v_day || ':', (v_pol ->> 'max_per_lead_per_day')::int, true),
+                                 ('agent_text_initiated_day', v_ref || ':' || v_day || ':', (v_pol ->> 'max_initiated_per_lead_per_day')::int, v_init),
+                                 ('agent_text_global_day', v_day || ':', (v_pol ->> 'max_per_day_global')::int, true)) x(scope, prefix, cap, wanted) loop
+    continue when not r.wanted;
+    v_slot := null;
+    for n in 1 .. greatest(coalesce(r.cap, 0), 0) loop
+      insert into public.idempotency_ledger (scope, key, claim_token, status, summary, metadata)
+      values (r.scope, r.prefix || n, p_intent_id, 'processing', r.scope, v_meta)
+      on conflict (scope, key) do update set claim_token = excluded.claim_token, status = 'processing', summary = excluded.summary, metadata = excluded.metadata,
+                                             started_at = now(), failed_at = null, last_error = null, updated_at = now()
+        where public.idempotency_ledger.status = 'failed'
+      returning n into v_slot;
+      exit when v_slot is not null;
+    end loop;
+    if v_slot is null then
+      update public.idempotency_ledger set status = 'failed', failed_at = now(), last_error = 'agent_text_cap', updated_at = now()
+       where scope in ('agent_text_lead_day', 'agent_text_initiated_day', 'agent_text_global_day', 'inbound_reply') and claim_token = p_intent_id and status = 'processing';
+      return jsonb_build_object('ok', false, 'code', case r.scope when 'agent_text_lead_day' then 'DAILY_LEAD_CAP_REACHED' when 'agent_text_initiated_day' then 'DAILY_INITIATED_CAP_REACHED' else 'DAILY_GLOBAL_CAP_REACHED' end,
+                                'cap', r.cap, 'day', v_day);
+    end if;
+    if r.scope = 'agent_text_lead_day' then v_lead_slot := v_slot; elsif r.scope = 'agent_text_initiated_day' then v_init_slot := v_slot; else v_global_slot := v_slot; end if;
+  end loop;
+  return jsonb_build_object('ok', true, 'replayed', false, 'lead_slot', v_lead_slot, 'initiated_slot', v_init_slot, 'global_slot', v_global_slot, 'day', v_day, 'answer_reserved', v_in is not null);
+end
+$fn$;
+
+-- completed (a queue row exists: the slots and the answer are spent) or released (nothing was queued: free again)
+create function public.lc_agent_text_settle(p_intent_id uuid, p_outcome text)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = pg_catalog
+as $fn$
+declare n int;
+begin
+  if p_outcome = 'completed' then
+    update public.idempotency_ledger set status = 'completed', completed_at = now(), updated_at = now()
+     where scope in ('agent_text_lead_day', 'agent_text_initiated_day', 'agent_text_global_day', 'inbound_reply') and claim_token = p_intent_id and status = 'processing';
+  elsif p_outcome = 'released' then
+    update public.idempotency_ledger set status = 'failed', failed_at = now(), last_error = 'released_nothing_queued', updated_at = now()
+     where scope in ('agent_text_lead_day', 'agent_text_initiated_day', 'agent_text_global_day', 'inbound_reply') and claim_token = p_intent_id and status = 'processing';
   else
     return jsonb_build_object('ok', false, 'reason', 'outcome_invalid');
   end if;
@@ -866,6 +1209,71 @@ begin
 end
 $fn$;
 
+-- agent texts: the gateway role's read (tenant claim required) — the activation, the normalized policy, the lead (+ the
+-- target's states for the policy's own reads), its live owner, today's usage, the thread's latest message (id +
+-- direction + time only) and our latest outbound time (the quiet-hours rule)
+create function public.action_gateway_agent_text_state(p_campaign_target_id uuid, p_thread_id uuid, p_grant_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare v_lead jsonb; ct jsonb; v_latest jsonb; v_last_out timestamptz;
+begin
+  if action_gateway.request_org() is null then return null; end if;
+  if p_campaign_target_id is not null or p_thread_id is not null then
+    v_lead := action_gateway.agent_message_lead(jsonb_strip_nulls(jsonb_build_object('campaign_target_id', p_campaign_target_id, 'thread_id', p_thread_id)));
+    if p_campaign_target_id is not null then
+      select jsonb_build_object('id', x ->> 'id', 'campaign_id', x ->> 'campaign_id', 'property_id', x ->> 'property_id', 'master_owner_id', x ->> 'master_owner_id',
+                                'prospect_id', x ->> 'prospect_id', 'phone_id', x ->> 'phone_id', 'market', x ->> 'market', 'language', x ->> 'language',
+                                'target_status', x ->> 'target_status', 'routing_status', x ->> 'routing_status', 'identity_status', x ->> 'identity_status',
+                                'suppression_status', x ->> 'suppression_status')
+        into ct from (select to_jsonb(t) x from public.campaign_targets t where t.id::text = p_campaign_target_id::text) s;
+    end if;
+    if nullif(v_lead ->> 'phone', '') is not null then
+      select jsonb_build_object('id', m.id::text, 'direction', lower(coalesce(m.direction, '')), 'at', m.created_at) into v_latest
+        from public.message_events m where m.thread_key = v_lead ->> 'phone' order by m.created_at desc, m.id desc limit 1;
+      select max(m.created_at) into v_last_out from public.message_events m where m.thread_key = v_lead ->> 'phone' and lower(coalesce(m.direction, '')) like 'out%';
+    end if;
+  end if;
+  return jsonb_build_object('available', action_gateway.agent_text_refusal() is null, 'code', action_gateway.agent_text_refusal(), 'policy', action_gateway.agent_text_policy(),
+                            'lead', v_lead, 'target', ct, 'owner_agent_id', case when v_lead ? 'lead_ref' then action_gateway.lead_owner(action_gateway.request_org(), v_lead ->> 'lead_ref') end,
+                            'usage', action_gateway.agent_text_usage(v_lead ->> 'lead_ref'), 'latest_message', v_latest, 'last_outbound_at', v_last_out, 'read_at', clock_timestamp());
+end
+$fn$;
+
+-- LeadCommand's worker and the queue runner (service_role): the activation; the intent's lead (+ owner, usage) and the
+-- agent's exact text + attribution
+create function public.lc_agent_text_activation()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+  select jsonb_build_object('available', action_gateway.agent_text_refusal() is null, 'code', action_gateway.agent_text_refusal(), 'policy', action_gateway.agent_text_policy(), 'read_at', clock_timestamp())
+$fn$;
+create function public.lc_agent_text_load(p_intent_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare i action_gateway.action_intents%rowtype; v_lead jsonb; s action_gateway.agent_text_submissions%rowtype;
+begin
+  select * into i from action_gateway.action_intents where intent_id = p_intent_id;
+  if i.intent_id is null or i.action <> 'queue_agent_text' then return null; end if;
+  v_lead := action_gateway.agent_message_lead(i.params);
+  if v_lead is null or v_lead ? 'mismatch' then return null; end if;
+  select * into s from action_gateway.agent_text_submissions x where x.org_id = i.org_id and x.text_hash = i.params ->> 'text_hash' and x.attribution_hash = i.params ->> 'attribution_hash';
+  return v_lead || jsonb_build_object('owner_agent_id', action_gateway.lead_owner(i.org_id, v_lead ->> 'lead_ref'), 'agent_id', i.agent_id,
+                                      'usage', action_gateway.agent_text_usage(v_lead ->> 'lead_ref'),
+                                      'submission', case when s.text_hash is null then null else jsonb_build_object('body', s.body, 'attribution', s.attribution, 'text_hash', s.text_hash) end);
+end
+$fn$;
+
 -- ───────────────────────────────────────────── 10b. the agents' lead pool (leads.read_pool, T1) ──
 -- The ADDRESSABLE leads of one market for the gateway's pool read (agent_lead_pool): every campaign target of the market
 -- (with the thread of its number when one exists) and every thread of the market whose number has no target there.
@@ -916,7 +1324,7 @@ stable
 security definer
 set search_path = pg_catalog
 as $fn$
-declare l jsonb; v_stop text; v_mode text; v_ai_switch text; v_ai_policy text; v_ai_on boolean := false; v_am_switch text; v_am_on boolean;
+declare l jsonb; v_stop text; v_mode text; v_ai_switch text; v_ai_policy text; v_ai_on boolean := false; v_am_switch text; v_am_on boolean; v_at_switch text;
 begin
   if action_gateway.request_org() is null then return null; end if;
   select to_jsonb(x) into l from agent.runtime_limits x where x.id = 1;
@@ -927,6 +1335,7 @@ begin
   begin v_ai_on := coalesce(v_ai_switch, '') = 'true' and coalesce((v_ai_policy::jsonb ->> 'enabled')::boolean, false); exception when others then v_ai_on := false; end;
   select lower(btrim(coalesce(value, ''))) into v_am_switch from public.system_control where key = 'ai_agent_message_enabled';
   v_am_on := coalesce(v_am_switch, '') = 'true' and coalesce((action_gateway.agent_message_policy() ->> 'enabled')::boolean, false);
+  select lower(btrim(coalesce(value, ''))) into v_at_switch from public.system_control where key = 'ai_agent_text_enabled';
   return jsonb_build_object(
     'runtime_emergency_stop', jsonb_build_object('on', coalesce((l ->> 'emergency_stop')::boolean, false),
                                                  'at', case when coalesce((l ->> 'emergency_stop')::boolean, false) then l ->> 'emergency_stop_at' end,
@@ -936,6 +1345,9 @@ begin
     'ai_send_enabled', v_ai_on,
     'agent_message_enabled', v_am_on,
     'agent_message_refusal', action_gateway.agent_message_refusal(),
+    -- the agent-composed text (queue_agent_text): its switch and the ONE refusal the request would get (null = available)
+    'agent_text_enabled', coalesce(v_at_switch, '') = 'true',
+    'agent_text_refusal', action_gateway.agent_text_refusal(),
     'worker_runtime_enabled', coalesce((l ->> 'runtime_enabled')::boolean, false),
     'queue_processor_mode', nullif(v_mode, ''),
     'as_of', clock_timestamp());
@@ -955,7 +1367,12 @@ insert into action_gateway.extensions (kind, name, link, basis) values
   ('standing_t2_action', 'release_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', 'reversible'),
   ('domain_write_action', 'queue_agent_message', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
   ('domain_write_action', 'assign_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
-  ('domain_write_action', 'release_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', null);
+  ('domain_write_action', 'release_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
+  ('definer_function', 'public.action_gateway_agent_text_state(uuid,uuid,uuid)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
+  ('definer_function', 'public.action_gateway_agent_text_submit(text,jsonb)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
+  ('standing_t2_action', 'transfer_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', 'reversible'),
+  ('domain_write_action', 'queue_agent_text', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
+  ('domain_write_action', 'transfer_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', null);
 
 -- ───────────────────────────────────────────── 12. privileges ──
 do $$
@@ -967,7 +1384,11 @@ begin
       'public.action_gateway_events_since(bigint,integer)', 'public.lc_agent_message_reserve(uuid)', 'public.lc_agent_message_settle(uuid,text)',
       'public.action_gateway_agent_message_state(uuid,uuid,uuid)', 'public.action_gateway_message_templates()', 'public.lc_agent_message_activation()', 'public.lc_agent_message_lead(uuid)',
       'public.action_gateway_agent_lead_pool(text,integer,text)', 'public.action_gateway_send_controls()', 'action_gateway.property_ref_of(text)', 'action_gateway.campaign_target_of(text,text)',
-      'action_gateway.lead_event_ids(jsonb,uuid,text,text,uuid)'] loop
+      'action_gateway.lead_event_ids(jsonb,uuid,text,text,uuid)',
+      'action_gateway.agent_text_policy()', 'action_gateway.agent_text_refusal()', 'action_gateway.agent_text_initiated(text)', 'action_gateway.agent_text_usage(text)',
+      'action_gateway.agent_text_submissions_append_only()', 'public.action_gateway_agent_text_submit(text,jsonb)', 'public.action_gateway_agent_text_state(uuid,uuid,uuid)',
+      'public.lc_agent_text_activation()', 'public.lc_agent_text_load(uuid)', 'public.lc_agent_text_reserve(uuid)', 'public.lc_agent_text_settle(uuid,text)',
+      'public.lc_agent_text_delivery_record(text,text,text)', 'public.lc_agent_lead_holder(text)'] loop
     execute format('revoke all on function %s from public, anon, authenticated, service_role', f);
   end loop;
 end $$;
@@ -976,9 +1397,10 @@ revoke all on function public.lc_seller_action_receipt_record(uuid, text, text, 
 grant execute on function public.lc_seller_action_receipt_record(uuid, text, text, text, jsonb, text) to service_role;
 grant execute on function public.action_gateway_agent_message_state(uuid, uuid, uuid), public.action_gateway_message_templates(), public.action_gateway_dw_lead_assignment(uuid, uuid),
   public.action_gateway_lead_assignment_get(uuid, uuid), public.action_gateway_events_since(bigint, integer), public.action_gateway_agent_lead_pool(text, integer, text),
-  public.action_gateway_send_controls() to lc_action_gateway;
+  public.action_gateway_send_controls(), public.action_gateway_agent_text_state(uuid, uuid, uuid), public.action_gateway_agent_text_submit(text, jsonb) to lc_action_gateway;
 grant execute on function public.lc_agent_message_reserve(uuid), public.lc_agent_message_settle(uuid, text), public.lc_agent_message_activation(), public.lc_agent_message_lead(uuid),
-  public.lc_lead_event_append(text, text, text, uuid, jsonb, timestamp with time zone) to service_role;
+  public.lc_lead_event_append(text, text, text, uuid, jsonb, timestamp with time zone), public.lc_agent_text_activation(), public.lc_agent_text_load(uuid), public.lc_agent_text_reserve(uuid),
+  public.lc_agent_text_settle(uuid, text), public.lc_agent_text_delivery_record(text, text, text), public.lc_agent_lead_holder(text) to service_role;
 
 -- ───────────────────────────────────────────── 13. the apply refuses unless the composed role check is ok ──
 do $$
@@ -989,7 +1411,12 @@ begin
   if action_gateway.t34_handoff_kind('queue_agent_message') is distinct from 'action_gateway.execute' then raise exception 'postcondition: the handoff kind'; end if;
   if 'queue_agent_message' = any (action_gateway.standing_t2_actions()) or not (action_gateway.standing_t2_actions() @> array['assign_lead', 'release_lead']) then raise exception 'postcondition: the standing T2 rows'; end if;
   if action_gateway.agent_message_refusal() is null and not exists (select 1 from public.system_control where key = 'ai_agent_message_enabled') then raise exception 'postcondition: born OFF'; end if;
-  if has_function_privilege('lc_action_gateway', 'public.lc_agent_message_reserve(uuid)', 'EXECUTE') or has_function_privilege('lc_action_gateway', 'public.lc_lead_event_append(text,text,text,uuid,jsonb,timestamp with time zone)', 'EXECUTE') then
+  if action_gateway.agent_text_refusal() is null and not exists (select 1 from public.system_control where key = 'ai_agent_text_enabled') then raise exception 'postcondition: agent texts born OFF'; end if;
+  if action_gateway.t34_handoff_kind('queue_agent_text') is distinct from 'action_gateway.execute' or action_gateway.t34_capability_refusal('queue_agent_message') is distinct from 'AGENT_COMPOSES_TEXT'
+     or action_gateway.t34_capability_refusal('queue_authorized_reply') is distinct from 'AGENT_COMPOSES_TEXT' then raise exception 'postcondition: agent texts / the retired composer paths'; end if;
+  if not ('transfer_lead' = any (action_gateway.standing_t2_actions())) or 'queue_agent_text' = any (action_gateway.standing_t2_actions()) then raise exception 'postcondition: transfer_lead is standing, the text never is'; end if;
+  if has_function_privilege('lc_action_gateway', 'public.lc_agent_message_reserve(uuid)', 'EXECUTE') or has_function_privilege('lc_action_gateway', 'public.lc_lead_event_append(text,text,text,uuid,jsonb,timestamp with time zone)', 'EXECUTE')
+     or has_function_privilege('lc_action_gateway', 'public.lc_agent_text_load(uuid)', 'EXECUTE') or has_function_privilege('lc_action_gateway', 'public.lc_agent_lead_holder(text)', 'EXECUTE') then
     raise exception 'postcondition: the gateway role reaches a LeadCommand-side function';
   end if;
 end $$;
