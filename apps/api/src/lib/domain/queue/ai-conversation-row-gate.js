@@ -49,7 +49,8 @@ export function isMaterialInbound(text) {
 /** Default reader: inbounds on the row's thread received after the inbound the row answers. */
 export async function loadNewerInboundsForRow(supabase, row = {}) {
   const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
-  const since = clean(meta.inbound_received_at)
+  // link #32: an agent-initiated message answers no inbound: ANY seller message since it was written makes it stale
+  const since = clean(meta.inbound_received_at) || clean(meta.agent_message?.generated_at)
   if (!supabase?.from || !clean(row.thread_key) || !since) return { read_failed: true, rows: [] }
   const r = await supabase.from('message_events').select('id,message_body,created_at').eq('thread_key', row.thread_key).eq('direction', 'inbound').gt('created_at', since).order('created_at', { ascending: true }).limit(20)
   if (r?.error) return { read_failed: true, rows: [] }

@@ -97,13 +97,38 @@ export function verifyAiGeneratedRecordForRow(row = {}, record = null) {
   if (clean(m.ai_message_body_sha256) && clean(m.ai_message_body_sha256) !== recordHash) return { ok: false, reason: 'ai_generated_body_mismatch' }
   if (clean(m.ai_message_id) && record.id && clean(m.ai_message_id) !== clean(record.id)) return { ok: false, reason: 'ai_generated_record_id_mismatch' }
   if (!clean(row.queue_key) || clean(record.queue_key) !== clean(row.queue_key)) return { ok: false, reason: 'ai_generated_record_reused' }
-  const inbound = clean(row.inbound_message_id) || clean(m.inbound_message_event_id)
-  if (!inbound || clean(record.inbound_message_id) !== inbound) return { ok: false, reason: 'ai_generated_record_not_bound_to_inbound' }
+  if (isAgentOutboundRecord(record)) {
+    // link #32: an AGENT-INITIATED message answers no inbound; it is bound to ONE Action Gateway intent instead
+    const intent = clean(m.agent_message_intent_id)
+    if (!intent || clean(record.queue_key) !== agentMessageQueueKey(intent) || clean(record.idempotency_key) !== `agent_message_intent:${intent}`) return { ok: false, reason: 'ai_generated_record_not_bound_to_intent' }
+    if (clean(record.inbound_message_id) || clean(row.inbound_message_id) || clean(m.inbound_message_event_id)) return { ok: false, reason: 'ai_generated_outbound_must_not_answer_an_inbound' }
+  } else {
+    const inbound = clean(row.inbound_message_id) || clean(m.inbound_message_event_id)
+    if (!inbound || clean(record.inbound_message_id) !== inbound) return { ok: false, reason: 'ai_generated_record_not_bound_to_inbound' }
+  }
   if (clean(record.thread_ref) !== sealedThreadRef(row.thread_key)) return { ok: false, reason: 'ai_generated_record_wrong_thread' }
   if (record.recipient_ref && clean(record.recipient_ref) !== sealedRef('ph', row.to_phone_number)) return { ok: false, reason: 'ai_generated_record_wrong_recipient' }
   if (lower(record.validation?.status) !== 'validated') return { ok: false, reason: 'ai_generated_record_not_validated' }
   if (!['policy_authorized', 'operator_approved'].includes(record.approval_state)) return { ok: false, reason: 'ai_generated_record_not_authorized' }
   return { ok: true, reason: 'ai_generated_message' }
+}
+
+/** link #32: the agent-initiated outbound kind of record (PROPOSED_20261029090000_ai_generated_outbound.sql). */
+export const AI_GENERATED_OUTBOUND_OUTCOME = 'AI_GENERATED_OUTBOUND'
+export const AGENT_OUTBOUND_CATEGORIES = Object.freeze(['first_touch', 'reengage', 'followup'])
+export const agentMessageQueueKey = (intentId) => `agent_message:${clean(intentId)}`
+export function isAgentOutboundRecord(record = {}) {
+  return clean(record?.decision_outcome) === AI_GENERATED_OUTBOUND_OUTCOME || clean(record?.record_kind) === 'agent_outbound'
+}
+
+/**
+ * The immutable record of an AGENT-INITIATED message (no inbound): queue_key 'agent_message:<intent>', idempotency
+ * 'agent_message_intent:<intent>', decision_outcome AI_GENERATED_OUTBOUND, category first_touch / reengage / followup.
+ * Every other field (sealed refs, body hash, versions, validation, policy hash, approval state) as a reply's.
+ */
+export function buildAiGeneratedOutboundMessage({ intentId, category, ...rest }) {
+  const r = buildAiGeneratedMessage({ ...rest, inboundMessageId: null, queueKey: agentMessageQueueKey(intentId), authorizationScope: { ...(rest.authorizationScope || {}), category } })
+  return { ...r, record_kind: 'agent_outbound', inbound_message_id: null, idempotency_key: `agent_message_intent:${clean(intentId)}`, decision_outcome: AI_GENERATED_OUTBOUND_OUTCOME }
 }
 
 /** Build the immutable record (the executor inserts it BEFORE the queue row). */

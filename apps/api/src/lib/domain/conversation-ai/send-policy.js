@@ -56,7 +56,10 @@ export const ROUTINE_CATEGORIES = Object.freeze(['next_missing_fact', 'identity_
 // rc-8.5.21: categories the canonical writer can produce that a policy must list EXPLICITLY (they
 // are never part of the default category set)
 export const OPT_IN_CATEGORIES = Object.freeze(['conditional_interest_clarify', 'clarification'])
-const ALLOWED_POLICY_CATEGORIES = [...ROUTINE_CATEGORIES, ...OPT_IN_CATEGORIES]
+// link #32: AGENT-INITIATED messages (Action Gateway queue_agent_message) — a policy must list each EXPLICITLY too; the
+// AI row gate cancels an agent message whose category the policy does not list
+export const AGENT_OUTBOUND_POLICY_CATEGORIES = Object.freeze(['first_touch', 'reengage', 'followup'])
+const ALLOWED_POLICY_CATEGORIES = [...ROUTINE_CATEGORIES, ...OPT_IN_CATEGORIES, ...AGENT_OUTBOUND_POLICY_CATEGORIES]
 
 export const DEFAULT_AI_SEND_POLICY = Object.freeze({
   policy_version: AI_SEND_POLICY_VERSION,
