@@ -2,12 +2,16 @@
 // #26 → #27 → #28 → #29 → #31 → the ledger's agent_outbound kind → #32, the reader link and its reads — served to:
 //   * the LeadCommand READER MCP (live mode over a local PostgREST + the /rest/v1 shim; role lc_mcp_reader),
 //   * the LeadCommand ACTION MCP (the real app over the gateway role; one bearer credential per agent principal),
-//   * LeadCommand's WORKER (the runtime tick executing handed-off intents; the canonical writer over a SCRIPTED model —
-//     no network — and the REAL queue runner with a SIMULATED provider: nothing leaves this machine),
+//   * LeadCommand's WORKER (the runtime tick executing handed-off intents — the agents' EXACT texts, validated
+//     deterministically: NO model anywhere on the agent path — and the REAL queue runner with a SIMULATED provider:
+//     nothing leaves this machine; the production receipt sweep follows each row; a loopback carrier receipt
+//     (POST /carrier-receipt) runs the REAL delivery reconciliation for delivered / undelivered),
 //   * a loopback CONTROL endpoint: a simulated seller reply written the way the inbound webhook writes it (message_events,
 //     inbox_thread_state, and the agents' feed: inbound_message + opt_out for a stop), state dumps, the feed, ticks, and
 //     the R2 emergency stop as an operator sets it.
-// AI sending and agent messages are ACTIVATED in THIS disposable database only.
+// Owner architecture correction 2026-10-29: Agntei's AI employees compose EVERY SMS (sms_send_agent_text →
+// queue_agent_text); ai_agent_text_enabled is turned on in THIS disposable database only. The brief-based agent
+// message and the certified reply (LeadCommand composing) are retired: AGENT_COMPOSES_TEXT.
 // DISPOSABLE ONLY: AGENT_PG_TEST_DB_URL must name a local scratch server (the harness refuses anything else).
 import fs from 'node:fs'
 import path from 'node:path'
@@ -22,9 +26,8 @@ import { pgSupabase } from '../helpers/pg-supabase.mjs'
 import { seedT34, worker, liveDispatch, dispatchQueued } from '../helpers/action-gateway-t34-world.mjs'
 import { simProvider } from '../helpers/followup-lifecycle-pg.mjs'
 import { fakeProvider } from '../helpers/conversation-ai-runtime-fakes.mjs'
-import { createCliModelProvider } from './cli-model-provider.mjs'
-import { makeDecision } from '../../src/lib/domain/conversation-ai/contract.js'
-import { ROUTINE_CATEGORIES } from '../../src/lib/domain/conversation-ai/send-policy.js'
+import { actionGatewayRuntimeMaintenance } from '../../src/lib/ai/action-gateway-execution.js'
+import { syncDeliveryEvent } from '../../src/lib/supabase/sms-engine.js'
 import { appendLeadEvent } from '../../src/lib/domain/outreach/lead-events.js'
 import { isStopRequest } from '../../src/lib/domain/conversation-ai/stop-request.js'
 import { __setAutomationHoldResolverForTests } from '../../src/lib/domain/holds/automation-hold.js'
@@ -84,11 +87,10 @@ const STREET = { gold: '4471 Marigold Ln', soft: '812 Cedar St', ft_a: '1550 Kap
 const FIRST = { gold: 'Dana', soft: 'Ray', ft_a: 'Keoni', ft_b: 'Malia', stopped: 'Lee', wrong: 'Pat', eastern: 'Sam' }
 
 await setControls(env.owner, {
-  ai_conversation_send_enabled: 'true',
-  ai_conversation_send_policy: JSON.stringify({ enabled: true, scope: { thread_keys: Object.values(P) }, categories: [...ROUTINE_CATEGORIES, 'first_touch', 'reengage', 'followup'] }),
-  ai_agent_message_enabled: 'true',
-  ai_agent_message_policy: JSON.stringify({ enabled: true, max_per_day_global: 200, max_per_lead_per_day: 1, reengage_min_quiet_hours: 72, fallback_templates: { reengage: ['t-acq-checkin-1'], followup: ['t-acq-checkin-1'] } }),
-  ai_conversation_company_identity: JSON.stringify({ name: 'Reivesti Home Buyers', website: null }),
+  // the agents' own texts: switched ON in THIS world only (born OFF everywhere else); the default caps
+  ai_agent_text_enabled: 'true',
+  ai_agent_text_policy: JSON.stringify({ max_per_day_global: 200, max_per_lead_per_day: 6, max_initiated_per_lead_per_day: 1, followup_min_quiet_hours: 24, reengage_min_quiet_hours: 72, policy_version: 'acq-world.v1' }),
+  ai_conversation_company_identity: JSON.stringify({ name: 'Reivesti Home Buyers', website: null, human_review: false, persona_descriptor: null }),
 })
 await liveDispatch(env)
 await env.owner.query(`insert into public.textgrid_numbers (phone_number, status, market, health_state, daily_limit) values ($1, 'active', $2, 'healthy', 500)`, [HI_SENDER, MARKET])
@@ -155,16 +157,17 @@ for (const k of Object.keys(P)) {
 const READS = [['conversation.read_context', 1], ['acquisitions.read_delivery', 1], ['acquisitions.read_annotations', 1]]
 const WRITES = [['acquisitions.set_lead_temperature', 2], ['acquisitions.update_lead_status', 2], ['acquisitions.record_conversation_note', 2], ['acquisitions.record_seller_statement', 2],
   ['followups.schedule', 2], ['followups.cancel', 2], ['tasks.create_operator_task', 1], ['holds.set_thread_hold', 2]]
-const LEADS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['leads.read_pool', 1], ['events.read', 1], ['conversation.read_message_templates', 1], ['controls.read', 1]]
-const BASIS = 'owner decision (disposable certification world): standing seller-facing authority after blind evaluation'
+const LEADS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['leads.read_pool', 1], ['events.read', 1], ['controls.read', 1]]
+const BASIS = 'disposable certification world'
 const mintStanding = (agent_id, capability) => env.owner.query(
   `insert into action_gateway.capability_grants (org_id, agent_id, capability, max_tier, scope, envelope, max_uses_per_hour, max_uses_per_day, max_spend_usd_per_day, max_failures_per_hour, max_cap_hits_per_hour, granted_by, valid_from, expires_at, standing_seller_facing, standing_basis)
    values ($1, $2, $3, 3, '{}'::jsonb, '{}'::jsonb, 30, 200, 0, 5, 5, $4, now(), now() + interval '30 days', true, $5)`, [ORG, agent_id, capability, OWNER, BASIS])
 const creds = {}
+// the two senders: an owner-minted STANDING grant for conversation.queue_agent_text (basis 'disposable certification
+// world'); Sterling, the head of acquisitions, also holds leads.transfer_lead (he reassigns and supervises), Nova does not
 for (const [k, id] of [['sterling', 'agt_sterling'], ['nova', 'agt_nova']]) {
-  creds[k] = await registerAgent(env.owner, { agent_id: id, grants: [...READS, ...WRITES, ...LEADS], tier_ceiling: 3, read_scopes: ['conversation_context.read'] })
-  await mintStanding(id, 'conversation.queue_agent_message')
-  await mintStanding(id, 'conversation.queue_reply')
+  creds[k] = await registerAgent(env.owner, { agent_id: id, grants: [...READS, ...WRITES, ...LEADS, ...(k === 'sterling' ? [['leads.transfer_lead', 2]] : [])], tier_ceiling: 3, read_scopes: ['conversation_context.read'] })
+  await mintStanding(id, 'conversation.queue_agent_text')
 }
 for (const [k, id] of [['equity', 'agt_equity'], ['haven', 'agt_haven']]) {
   creds[k] = await registerAgent(env.owner, { agent_id: id, grants: [...READS, ['acquisitions.record_conversation_note', 2]], tier_ceiling: 2, read_scopes: ['conversation_context.read'] })
@@ -219,38 +222,11 @@ const actionApp = await buildActionApp({ env: {
 const actionListener = await startActionHttp({ app: actionApp })
 log('action mcp', actionListener.url)
 
-// ── 6. the SCRIPTED model (no network) and LeadCommand's worker + the REAL queue runner, SIMULATED provider ──
-const field = (u, label) => new RegExp(`^${label}: (.*)$`, 'm').exec(u)?.[1]?.trim() || ''
-const nameOf = (u) => { const v = field(u, 'OWNER FIRST NAME'); return /^unknown/.test(v) ? '' : v.split(/\s/)[0] }
-const personaOf = (u) => /^PERSONA: ([A-Z][a-z]+) \(/m.exec(u)?.[1] || ''
-const streetOf = (u) => { const v = field(u, 'PROPERTY'); return /^unknown/.test(v) || !v ? '' : v.split(',')[0].replace(/^\d+\s+/, '') }
-const TOPICS = [[/roof/i, 'the roof'], [/repair|work|fix/i, 'the repairs'], [/tenant|rent/i, 'the tenants'], [/spring|later|not (right )?now/i, 'the timing'], [/move|moving/i, 'the move'], [/inherit|estate|probate/i, 'the estate'], [/price|worth|offer/i, 'the price']]
-const QUESTION = { ownership: 'Do you still own it?', interest: 'Would you consider selling it?', condition: 'How is the condition overall?', asking_price: 'Do you have a price in mind?' }
-const objectiveOf = (u) => { const v = /OBJECTIVE: ([^.]*)/.exec(u)?.[1] || ''; return v.includes('confirm they own') ? 'ownership' : v.includes('consider selling') ? 'interest' : v.includes('condition') ? 'condition' : v.includes('price they have') ? 'asking_price' : v.includes('close with NO question') ? 'close' : 'none' }
-const scriptedText = (u) => {
-  const first = nameOf(u), persona = personaOf(u), street = streetOf(u), obj = objectiveOf(u)
-  const q = obj === 'close' || obj === 'none' ? '' : ` ${QUESTION[obj]}`
-  if (/^SELLER'S LATEST MESSAGE: /m.test(u)) { // an answer to the seller's latest message: it references what they said
-    const said = field(u, "SELLER'S LATEST MESSAGE")
-    const topic = TOPICS.find(([rx]) => rx.test(said))?.[1]
-    const ack = topic === 'the roof' || topic === 'the repairs' ? `Thanks for mentioning ${topic}, that is not a problem for us.` : topic ? `Thanks for letting me know about ${topic}.` : 'Thanks for getting back to me.'
-    return `${ack}${q}`.trim()
-  }
-  const type = /^MESSAGE TYPE: (\w+)/m.exec(u)?.[1] || 'followup'
-  if (type === 'first_touch') return `Hi${first ? ` ${first}` : ''}, ${persona ? `this is ${persona}, ` : ''}a local buyer interested in the house${street ? ` on ${street}` : ''}. Do you still own it?`
-  if (type === 'reengage') return `Hi${first ? ` ${first}` : ''}, ${persona || 'just'} checking back in${street ? ` about the house on ${street}` : ''}.${q || ' Hope the plans are going well.'}`
-  return `Hi${first ? ` ${first}` : ''}, following up${street ? ` on the house on ${street}` : ''}.${q || ' Hope all is well.'}`
-}
-const prov = fakeProvider((p) => {
-  const user = String(p.messages?.[0]?.content?.[0]?.text ?? p.messages?.[0]?.content ?? '')
-  if (p.tools[0].input_schema?.properties?.message) return { message: scriptedText(user) }
-  return makeDecision({ intent: 'ownership_confirmed', seller_interest: 'unknown', outcome: 'REPLY_CANDIDATE', next_objective: 'gauge_interest', response_needed: true, proposed_message: 'R1 TEXT NEVER SENT', confidence: 0.93, source_message_ids: [], facts_extracted: [], stage_evidence: { stage: 'S2_interest', evidence_message_ids: [], rationale: 'scripted' } })
-})
-// ACQ_WORLD_REAL_COMPOSER=1 (evaluation only): LeadCommand's writer runs on the PRODUCTION models through the operator's
-// authorized Claude Code session (cli-model-provider.mjs) instead of the script. The provider stays SIMULATED.
-const REAL_COMPOSER = process.env.ACQ_WORLD_REAL_COMPOSER === '1'
-const realProv = REAL_COMPOSER ? createCliModelProvider({ log: (r) => fs.appendFileSync(path.join(OUT, 'composer-calls.jsonl'), JSON.stringify({ at: new Date().toISOString(), ...r }) + '\n') }) : null
-const w = worker(env, REAL_COMPOSER ? { prov: realProv, budgetMs: 170_000, capUsd: 0.5 } : { prov })
+// ── 6. LeadCommand's worker (NO model on the agent path: a provider that refuses every call proves it) + the REAL
+//    queue runner, SIMULATED provider; the production receipt sweep (the runtime-tick maintenance task) ───────────
+const noModel = fakeProvider(() => { throw new Error('A MODEL WAS CALLED: the agent path composes nothing') })
+const w = worker(env, { prov: noModel, legacyComposer: false })
+const [receiptSweep] = actionGatewayRuntimeMaintenance({ LC_ACTION_GATEWAY_EXECUTION: '1' }, { execution: w.execution, intervalMs: 0 })
 const sim = simProvider()
 const sendsFile = path.join(OUT, 'sends.jsonl')
 let sentSeen = 0
@@ -259,14 +235,14 @@ async function pump() {
   // the runtime tick re-arms the R2 limits; while an operator's emergency stop is engaged it is NOT run (the queue
   // runner below still runs: it is the dispatch-time brake that must cancel what is queued)
   const tk = stopped_ ? { skipped: 'emergency_stop' } : await w.tick()
-  const rows = await sel(env.owner, `select id, queue_key from public.send_queue where queue_status = 'queued' and (message_origin = 'ai_generated' or queue_key like 'agent_message:%' or queue_key like 'followup%') order by created_at`)
+  const rows = await sel(env.owner, `select id, queue_key from public.send_queue where queue_status = 'queued' and (message_origin = 'ai_generated' or queue_key like 'agent_text:%' or queue_key like 'followup%') order by created_at`)
   for (const r of rows) {
     const d = await dispatchQueued(env, w, r.id, sim, { now: new Date().toISOString() }).catch((e) => ({ error: e.message })) // the REAL clock: the recipient window is judged now
     log('dispatch', r.id, r.queue_key, JSON.stringify(d).slice(0, 200))
   }
-  await w.execution.reconcileReceipts()
+  await receiptSweep.run({ now: new Date().toISOString() })
   while (sentSeen < sim.sent.length) { fs.appendFileSync(sendsFile, JSON.stringify({ at: new Date().toISOString(), provider: 'SIMULATED', ...sim.sent[sentSeen] }) + '\n'); sentSeen++ }
-  return { tick: tk, dispatched: rows.length, sent_total: sim.sent.length }
+  return { tick: tk, dispatched: rows.length, sent_total: sim.sent.length, model_calls: noModel.calls.length }
 }
 let pumping = false
 const pumpTimer = setInterval(() => { if (pumping) return; pumping = true; pump().catch((e) => log('pump error', e.message)).finally(() => { pumping = false }) }, Number(process.env.ACQ_PUMP_MS || 2500))
@@ -323,7 +299,7 @@ const control = http.createServer(async (req, res) => {
       const intents = await sel(env.owner, `select i.intent_id, i.agent_id, i.action, i.state, i.result_code, i.params ->> 'purpose' as purpose, i.created_at, r.state as receipt_state, r.code as receipt_code, r.queue_row_id
         from action_gateway.action_intents i left join action_gateway.seller_action_receipts r on r.intent_id = i.intent_id where i.params ->> 'campaign_target_id' = $1 or (i.params ->> 'thread_id') = $2 order by i.created_at`, [ct, th?.id || '-'])
       const queue = await sel(env.owner, `select id, queue_key, queue_status, message_origin, template_id, sent_at, failed_reason, paused_reason, created_at, message_body from public.send_queue where to_phone_number = $1 or metadata ->> 'campaign_target_id' = $2 order by created_at`, [phone, ct])
-      const ledger = await sel(env.owner, `select id, queue_key, record_kind, decision_outcome, approval_state, message_body, authorization_scope ->> 'category' as category, generated_at from public.ai_generated_messages where queue_key = any ($1::text[]) order by generated_at`, [intents.map((i) => `agent_message:${i.intent_id}`)])
+      const ledger = await sel(env.owner, `select id, queue_key, record_kind, decision_outcome, approval_state, message_body, author_employee, author_attribution, model, authorization_scope ->> 'category' as category, generated_at from public.ai_generated_messages where queue_key = any ($1::text[]) order by generated_at`, [intents.flatMap((i) => [`agent_text:${i.intent_id}`, `agent_message:${i.intent_id}`])])
       return send(200, mask({ target: { ...x, to_phone_number: undefined }, thread_id: th?.id || null, assignment, intents, receipts: intents.filter((i) => i.receipt_state).map((i) => ({ intent_id: i.intent_id, state: i.receipt_state, code: i.receipt_code, queue_row_id: i.queue_row_id })), queue, ledger, provider: 'SIMULATED' }))
     }
     if (req.method === 'GET' && u.pathname === '/events') {
@@ -345,6 +321,17 @@ const control = http.createServer(async (req, res) => {
       return send(200, { ok: true, emergency_stop: l.emergency_stop, emergency_stop_at: l.emergency_stop_at })
     }
     if (req.method === 'POST' && u.pathname === '/tick') return send(200, await pumpNow())
+    if (req.method === 'POST' && u.pathname === '/carrier-receipt') {
+      // the carrier's verdict on a sent row, through the REAL delivery reconciliation (syncDeliveryEvent): delivered /
+      // undelivered reaches the agents' feed as delivery_changed (SIMULATED carrier; nothing leaves this machine)
+      const { queue_row_id, status = 'delivered' } = await body()
+      const [row] = await sel(env.owner, 'select * from public.send_queue where id::text = $1', [String(queue_row_id)])
+      if (!row) return send(404, { error: 'queue row not found' })
+      const st = status === 'delivered' ? 'delivered' : 'undelivered'
+      const r = await syncDeliveryEvent({ message_id: row.provider_message_id || `SMsim-${row.id}`, status: st }, { supabase: w.sb, reconcileDeliveryReceipt: async () => ({ final_delivery_status: st === 'delivered' ? 'delivered' : 'failed', send_queue_data: [row], message_events_data: [] }),
+        updateContactOutreachState: async () => ({ ok: true }) })
+      return send(200, { ok: true, final_delivery_status: r.final_delivery_status, simulated: true })
+    }
     if (req.method === 'GET' && u.pathname === '/sends') return send(200, { provider: 'SIMULATED', sent: sim.sent.map((s) => ({ ...s, to: maskPhones(s.to), from: maskPhones(s.from) })) })
     if (req.method === 'GET' && u.pathname === '/world') return send(200, world)
     send(404, { error: 'not found' })
@@ -353,7 +340,7 @@ const control = http.createServer(async (req, res) => {
 await new Promise((r) => control.listen(PORTS.control, '127.0.0.1', r))
 
 // ── 8. world.json: every seed's ids + its expected eligibility NOW (the pool read's own verdict) ─────────────
-const { gateway } = makeGateway(env)
+const { gateway } = makeGateway(env, { legacyComposer: false })
 const pool = await gateway.call({ credential: creds.sterling, tool: 'agent_lead_pool', args: { market: MARKET, limit: 100 } })
 const verdict = (id) => { const r = (pool.result?.rows || []).find((x) => (x.campaign_target_id || x.thread_id) === id); return r ? { eligible: r.eligible, ineligible_reason: r.ineligible_reason, next_purpose: r.next_purpose, window_open: r.window_open, next_permitted_at: r.next_permitted_at } : null }
 const readerEligibility = async (threadId) => {
@@ -367,16 +354,21 @@ const readerEligibility = async (threadId) => {
 }
 const READER = {}
 for (const [k, id] of [['gold', gold.thread_id], ['soft', soft.thread_id], ['stopped', stoppedThread.thread_id], ['wrong', wrong.thread_id]]) READER[k] = await readerEligibility(id)
-const seed = (k, { thread_id = null, campaign_target_id = null, expect }) => ({ thread_id, campaign_target_id, property_id: PID[k], property_ref: `pid_${[...PID[k]].map((d) => 'ghijklmnop'[Number(d)]).join('')}`, market: MARKET, area_code: P[k].slice(2, 5), address: `${STREET[k]}, Honolulu, HI 96816`, expect, pool: verdict(campaign_target_id || thread_id), reader_contact_eligibility: READER[k] ?? null })
+const latestInbound = async (threadId) => (threadId ? (await sel(env.owner, `select m.id from public.message_events m join public.inbox_thread_state t on t.thread_key = m.thread_key where t.id = $1 and m.direction = 'inbound' order by m.created_at desc limit 1`, [threadId]))[0]?.id ?? null : null)
+const LATEST_IN = { gold: await latestInbound(gold.thread_id), soft: await latestInbound(soft.thread_id), stopped: await latestInbound(stoppedThread.thread_id), wrong: await latestInbound(wrong.thread_id) }
+const seed = (k, { thread_id = null, campaign_target_id = null, expect }) => ({ thread_id, campaign_target_id, latest_inbound_message_id: LATEST_IN[k] ?? null, property_id: PID[k], property_ref: `pid_${[...PID[k]].map((d) => 'ghijklmnop'[Number(d)]).join('')}`, market: MARKET, area_code: P[k].slice(2, 5), address: `${STREET[k]}, Honolulu, HI 96816`, expect, pool: verdict(campaign_target_id || thread_id), reader_contact_eligibility: READER[k] ?? null })
 const world = {
-  started_at: new Date().toISOString(), database: dbName, provider: 'SIMULATED', model: REAL_COMPOSER ? 'REAL composer (production models via the operator’s Claude Code session); SIMULATED provider' : 'SCRIPTED (no network)', ports: PORTS, market: MARKET,
+  started_at: new Date().toISOString(), database: dbName, provider: 'SIMULATED', model: 'NONE on the agent path (agents compose every SMS; a refusing provider proves no call)', ports: PORTS, market: MARKET,
+  switches: { ai_agent_text_enabled: 'true (THIS world only)', ai_conversation_send_enabled: 'absent (the reply engine is not on the agent path)' },
+  company_identity: { name: 'Reivesti Home Buyers', human_review: false, persona_descriptor: null },
   reader: { url: `http://127.0.0.1:${PORTS.reader}/mcp`, token_file: readerToken, mode: 'live (local PostgREST over the disposable database)' },
   action: { url: `${actionListener.url}`, credential_files: Object.fromEntries(Object.keys(creds).map((k) => [k, path.join(OUT, `cred-${k}`)])),
     agents: { sterling: 'agt_sterling', nova: 'agt_nova', equity: 'agt_equity', haven: 'agt_haven' },
-    seller_facing: { sterling: 'standing (queue_agent_message + queue_authorized_reply)', nova: 'standing (queue_agent_message + queue_authorized_reply)', equity: 'none', haven: 'none' } },
-  control: { url: `http://127.0.0.1:${PORTS.control}`, endpoints: ['POST /seller-reply {thread_id, body}', 'GET /state/:thread_id', 'GET /target/:campaign_target_id', 'GET /events?after=<cursor>', 'GET /sends', 'POST /tick', 'POST /emergency-stop {on}', 'GET /world'] },
+    seller_facing: { sterling: 'standing conversation.queue_agent_text (basis: disposable certification world) + leads.transfer_lead', nova: 'standing conversation.queue_agent_text (basis: disposable certification world)', equity: 'none', haven: 'none' },
+    tools: { send: 'sms_send_agent_text {client_request_id, thread_id | campaign_target_id, purpose, body, in_reply_to_message_id?, send_permit_id?, attribution {employee, model, provider, route, session_id, turn_id}}', transfer: 'transfer_lead (sterling only)', retired: ['sms_send_agent_message', 'queue_authorized_reply'] } },
+  control: { url: `http://127.0.0.1:${PORTS.control}`, endpoints: ['POST /seller-reply {thread_id, body}', 'GET /state/:thread_id', 'GET /target/:campaign_target_id', 'GET /events?after=<cursor>', 'GET /sends', 'POST /tick', 'POST /carrier-receipt {queue_row_id, status: delivered|undelivered}', 'POST /emergency-stop {on}', 'GET /world'] },
   seeds: {
-    gold: seed('gold', { thread_id: gold.thread_id, expect: 'answer: eligible (the seller asked a question, unanswered)' }),
+    gold: seed('gold', { thread_id: gold.thread_id, expect: 'reply: eligible (the seller asked a question, unanswered: purpose reply, in_reply_to_message_id = latest_inbound_message_id)' }),
     soft: seed('soft', { thread_id: soft.thread_id, expect: 'reengage: eligible (quiet 21 days after "not now, maybe in the spring")' }),
     ft_a: seed('ft_a', { campaign_target_id: ftA, expect: 'first_touch: eligible' }),
     ft_b: seed('ft_b', { campaign_target_id: ftB, expect: 'first_touch: eligible' }),

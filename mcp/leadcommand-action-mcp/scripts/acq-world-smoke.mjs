@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Smoke run against a RUNNING acquisitions certification world (apps/api/tests/ohg/acq-world-server.mjs): the real
-// Action MCP over HTTP as the agents, the world's loopback control endpoint for the simulated seller and the pump.
-// DISPOSABLE WORLD ONLY (SIMULATED provider, SCRIPTED model). Usage: node scripts/acq-world-smoke.mjs <world.json> [out.json]
+// Action MCP over HTTP as the agents, the world's loopback control endpoint for the simulated seller, the carrier and
+// the pump. Owner architecture correction 2026-10-29: the agents COMPOSE every SMS (sms_send_agent_text); LeadCommand
+// validates, enforces and transports — no model anywhere on the agent path (the world's worker refuses any model call).
+// DISPOSABLE WORLD ONLY (SIMULATED provider). Usage: node scripts/acq-world-smoke.mjs <world.json> [out.json]
 //
 // The 08:00–21:00 recipient-local window is REAL in the world (808 seeds: 18:00–07:00 UTC). While it is closed the
 // send steps assert the window refusal (with next_permitted_at) instead of a delivery; every other step runs either way.
@@ -49,6 +51,8 @@ async function feedSince(a, cursor, pred, tries = 15) {
 }
 const DONE = ['sent', 'refused', 'held', 'failed', 'deferred']
 
+const ATTR = (employee, turn) => ({ employee, model: 'smoke-scripted', provider: 'agntei-smoke', route: `agntei.acquisitions.${employee === 'sterling' ? 'head' : 'representative'}`, session_id: null, turn_id: turn })
+const sendText = (a, employee, args) => a.call('sms_send_agent_text', { client_request_id: agnteiKey(), attribution: ATTR(employee, `t-${crypto.randomBytes(4).toString('hex')}`), ...args })
 const sterling = await agent('sterling')
 const equity = await agent('equity')
 const nova = await agent('nova')
@@ -56,13 +60,13 @@ try {
   const start = (await sterling.call('leadcommand_events_since', { cursor: 0, limit: 500 })).result?.next_cursor ?? 0
   const sentBefore = (await http('GET', '/sends')).sent.length
 
-  // 0a. the send controls: nothing stopped, everything on
+  // 0a. the send controls: nothing stopped, agent texts on (the agents' own switch)
   const c0 = await sterling.call('leadcommand_send_controls', {})
   assert.equal(c0.isError, false, JSON.stringify(c0))
-  assert.deepEqual([c0.result.runtime_emergency_stop.on, c0.result.send_emergency_stop.on, c0.result.ai_send_enabled, c0.result.agent_message_enabled, c0.result.seller_sends], [false, false, true, true, 'enabled'])
+  assert.deepEqual([c0.result.runtime_emergency_stop.on, c0.result.send_emergency_stop.on, c0.result.agent_text_enabled, c0.result.agent_text_refusal, c0.result.seller_sends], [false, false, true, null, 'enabled'])
   step('send controls', { result: c0.result })
 
-  // 0b. the pool: the same verdicts world.json recorded; is the 808 window open right now?
+  // 0b. the pool: the agent-text path's verdicts; is the 808 window open right now?
   const pool = await sterling.call('leadcommand_agent_lead_pool', { market: world.market, limit: 100 })
   assert.equal(pool.isError, false, JSON.stringify(pool))
   const rowOf = (id) => pool.result.rows.find((r) => (r.campaign_target_id || r.thread_id) === id)
@@ -71,104 +75,126 @@ try {
   const open = rowOf(S.ft_a.campaign_target_id).window_open === true
   step('pool read', { rows: pool.result.rows.length, window_open_808: open, next_permitted_at: rowOf(S.ft_a.campaign_target_id).next_permitted_at, ft_a: rowOf(S.ft_a.campaign_target_id), stopped: rowOf(S.stopped.campaign_target_id).ineligible_reason })
 
-  // 1. sterling holds ft_a and sends a first touch → ONE simulated send (window open) / the window refusal (closed)
-  const own = await sterling.call('assign_lead', { client_request_id: agnteiKey(), campaign_target_id: S.ft_a.campaign_target_id })
-  assert.equal(codeOf(own), 'LEAD_ASSIGNED', JSON.stringify(own))
-  const ft = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), campaign_target_id: S.ft_a.campaign_target_id, purpose: 'first_touch', brief: 'Absentee owner on Kapiolani Blvd; long-time owner, likely open to a simple sale' })
+  // 0c. the retired composer path: LeadCommand never writes an agent's words
+  const retired = await nova.call('sms_send_agent_message', { client_request_id: agnteiKey(), campaign_target_id: S.ft_a.campaign_target_id, purpose: 'first_touch', brief: 'owner of Kapiolani Blvd' })
+  assert.equal(codeOf(retired), 'AGENT_COMPOSES_TEXT', JSON.stringify(retired))
+  step('0c retired brief-based path', { code: codeOf(retired), use: retired.error?.details?.use })
+
+  // 1. nova holds ft_a and sends the first touch SHE composed → the exact words go out once (window open) / the window
+  //    refusal with next_permitted_at (closed: nothing is scheduled)
+  assert.equal(codeOf(await nova.call('assign_lead', { client_request_id: agnteiKey(), campaign_target_id: S.ft_a.campaign_target_id })), 'LEAD_ASSIGNED')
+  const FT = 'Hi, this is Nova, an AI assistant with Reivesti Home Buyers. Do you still own the house on Kapiolani Blvd?'
+  const ft = await sendText(nova, 'nova', { campaign_target_id: S.ft_a.campaign_target_id, purpose: 'first_touch', body: FT })
   let replyThread = S.soft.thread_id
+  let replyHolder = sterling
+  let replyEmployee = 'sterling'
   if (open) {
     assert.equal(codeOf(ft), 'HANDOFF_QUEUED', JSON.stringify(ft))
     const { t: ftState, rc } = await untilReceipt(S.ft_a.campaign_target_id, ft.intent_id, DONE)
     assert.equal(rc.state, 'sent', JSON.stringify(rc))
     const sends = (await http('GET', '/sends')).sent
     assert.equal(sends.length, sentBefore + 1)
+    assert.equal(sends.at(-1).body, FT, 'the exact words the agent composed')
     assert.ok(ftState.thread_id, 'the first touch created the thread')
+    const rec = ftState.ledger.find((l) => l.record_kind === 'agent_text')
+    assert.deepEqual([rec?.author_employee, rec?.message_body, rec?.category], ['nova', FT, 'first_touch'])
+    // the carrier says delivered → delivery_changed delivered on the feed
+    const row = ftState.queue.find((q) => String(q.queue_key || '').startsWith('agent_text:'))
+    assert.equal((await http('POST', '/carrier-receipt', { queue_row_id: row.id, status: 'delivered' })).final_delivery_status, 'delivered')
+    const fd = await feedSince(nova, start, (e) => e.kind === 'delivery_changed' && e.intent_id === ft.intent_id && e.payload.receipt_state === 'delivered')
     replyThread = ftState.thread_id
-    step('1 first touch ft_a', { intent_id: ft.intent_id, receipt: rc, text: sends.at(-1).body, thread_id: ftState.thread_id, ledger: ftState.ledger.map((l) => l.record_kind) })
+    replyHolder = nova
+    replyEmployee = 'nova'
+    step('1 first touch ft_a (nova composed)', { intent_id: ft.intent_id, receipt: rc, text: sends.at(-1).body, thread_id: ftState.thread_id, ledger: { record_kind: rec.record_kind, author: rec.author_employee, attribution: rec.author_attribution, model: rec.model }, carrier: fd.hits[0].payload.receipt_state })
   } else {
     assert.equal(codeOf(ft), 'OUTSIDE_RECIPIENT_WINDOW', JSON.stringify(ft))
     assert.ok(Date.parse(ft.result.next_permitted_at) > Date.now())
     step('1 first touch ft_a (window closed)', { code: codeOf(ft), result: ft.result, sends: (await http('GET', '/sends')).sent.length - sentBefore })
   }
 
-  // 2. a seller reply (ft_a's new thread when the first touch went out, else the soft thread) → inbound_message on the feed
-  const r2 = await http('POST', '/seller-reply', { thread_id: replyThread, body: 'Yes I still own it. Why do you ask?' })
-  const f2 = await feedSince(sterling, start, (e) => e.kind === 'inbound_message' && e.payload.message_id === r2.message_id)
-  const e2 = f2.hits[0]
-  assert.deepEqual([e2.thread_id, e2.payload.stop_request], [replyThread, false])
-  if (open) assert.deepEqual([e2.payload.campaign_target_id, e2.payload.property_id], [S.ft_a.campaign_target_id, S.ft_a.property_ref])
-  else assert.equal(e2.payload.property_id, S.soft.property_ref)
-  const delivery = f2.events.filter((e) => e.kind === 'delivery_changed' && e.intent_id === ft.intent_id).map((e) => ({ state: e.payload.receipt_state, thread_id: e.thread_id, campaign_target_id: e.payload.campaign_target_id, property_id: e.payload.property_id }))
-  step(`2 seller reply on ${open ? 'ft_a' : 'soft'}`, { event: e2, delivery_changed: delivery })
+  // 1b. one holder at a time: sterling (head) transfers ft_a from nova to himself; nova is refused while he holds it;
+  //     he hands it back
+  const toSterling = await sterling.call('transfer_lead', { client_request_id: agnteiKey(), campaign_target_id: S.ft_a.campaign_target_id, to_agent_id: 'agt_sterling', reason: 'head of acquisitions reviews this lead' })
+  assert.deepEqual([codeOf(toSterling), toSterling.result.from_agent_id, toSterling.result.to_agent_id], ['LEAD_TRANSFERRED', 'agt_nova', 'agt_sterling'], JSON.stringify(toSterling))
+  const novaRefused = await sendText(nova, 'nova', { campaign_target_id: S.ft_a.campaign_target_id, purpose: 'followup', body: 'Hi, Nova again. Any thoughts on the house on Kapiolani Blvd?' })
+  assert.equal(codeOf(novaRefused), 'NOT_LEAD_OWNER', JSON.stringify(novaRefused))
+  const novaCannot = await nova.call('transfer_lead', { client_request_id: agnteiKey(), campaign_target_id: S.ft_a.campaign_target_id, to_agent_id: 'agt_nova', reason: 'take it back' })
+  assert.ok(novaCannot.isError || codeOf(novaCannot) === 'CAPABILITY_NOT_GRANTED', JSON.stringify(novaCannot))
+  const back = await sterling.call('transfer_lead', { client_request_id: agnteiKey(), campaign_target_id: S.ft_a.campaign_target_id, to_agent_id: 'agt_nova', reason: 'nova continues the conversation' })
+  assert.deepEqual([codeOf(back), back.result.from_agent_id, back.result.to_agent_id], ['LEAD_TRANSFERRED', 'agt_sterling', 'agt_nova'])
+  const ft1b = await feedSince(sterling, start, (e) => e.kind === 'lead_transferred' && e.intent_id === back.intent_id)
+  step('1b transfer ft_a nova → sterling → nova', { to_sterling: toSterling.result, nova_while_sterling_holds: codeOf(novaRefused), nova_transfer: codeOf(novaCannot), back: back.result,
+    events: ft1b.events.filter((e) => e.kind === 'lead_transferred').map((e) => [e.payload.from_agent_id, e.payload.to_agent_id, e.payload.requested_by]) })
 
-  // 2b. sterling answers it (purpose answer → the certified reply)
-  assert.equal(codeOf(await sterling.call('assign_lead', { client_request_id: agnteiKey(), thread_id: replyThread })), 'LEAD_ASSIGNED')
-  const ans = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), thread_id: replyThread, purpose: 'answer', brief: 'they asked why we are asking' })
+  // 2. a seller reply (ft_a's thread when the first touch went out, else the soft thread) → inbound_message on the feed;
+  //    its holder answers it with the text it composed, bound to that inbound
+  if (replyThread === S.soft.thread_id) assert.equal(codeOf(await sterling.call('assign_lead', { client_request_id: agnteiKey(), thread_id: replyThread })), 'LEAD_ASSIGNED')
+  const r2 = await http('POST', '/seller-reply', { thread_id: replyThread, body: 'Yes I still own it. The roof needs some work though, is that a problem for you?' })
+  const f2 = await feedSince(replyHolder, start, (e) => e.kind === 'inbound_message' && e.payload.message_id === r2.message_id)
+  assert.deepEqual([f2.hits[0].thread_id, f2.hits[0].payload.stop_request], [replyThread, false])
+  const ANS = 'Thanks for letting me know about the roof, that is not a problem for us. When would you ideally want to sell?'
+  const noRef = await sendText(replyHolder, replyEmployee, { thread_id: replyThread, purpose: 'reply', body: ANS })
+  assert.equal(codeOf(noRef), 'IN_REPLY_TO_REQUIRED', JSON.stringify(noRef))
+  const ans = await sendText(replyHolder, replyEmployee, { thread_id: replyThread, purpose: 'reply', in_reply_to_message_id: r2.message_id, body: ANS })
+  let ansOut = { code: codeOf(ans) }
   if (codeOf(ans) === 'HANDOFF_QUEUED') {
-    const { rc: ansRc } = await untilThreadReceipt(replyThread, ans.intent_id, DONE)
-    step('2b answer (certified reply)', { tool: ans.tool, intent_id: ans.intent_id, receipt: ansRc, text: ansRc.state === 'sent' ? (await http('GET', '/sends')).sent.at(-1).body : null })
-  } else step('2b answer (certified reply)', { tool: ans.tool, code: codeOf(ans), status: ans.status, result: ans.result || null })
+    const { rc } = await untilThreadReceipt(replyThread, ans.intent_id, DONE)
+    ansOut = { intent_id: ans.intent_id, receipt: rc, text: rc.state === 'sent' ? (await http('GET', '/sends')).sent.at(-1).body : null }
+    if (rc.state === 'sent') assert.equal(ansOut.text, ANS)
+  } else assert.equal(codeOf(ans), 'OUTSIDE_RECIPIENT_WINDOW', JSON.stringify(ans))
+  step(`2 seller reply on ${replyThread === S.soft.thread_id ? 'soft' : 'ft_a'} + the bound answer`, { inbound_event: f2.hits[0], without_in_reply_to: codeOf(noRef), answer: ansOut })
 
-  // 3. a STOP on gold → inbound_message (stop_request) + opt_out; an answer to gold is then refused
-  const r3 = await http('POST', '/seller-reply', { thread_id: S.gold.thread_id, body: 'STOP' })
-  const f3 = await feedSince(sterling, start, (e) => e.payload?.message_id === r3.message_id && e.kind === 'opt_out')
-  const e3 = f3.events.filter((e) => e.payload?.message_id === r3.message_id)
-  assert.deepEqual(e3.map((e) => e.kind).sort(), ['inbound_message', 'opt_out'])
-  assert.equal(e3.find((e) => e.kind === 'inbound_message').payload.stop_request, true)
-  step('3 STOP on gold', { events: e3.map((e) => ({ cursor: e.cursor, event_id: e.event_id, kind: e.kind, thread_id: e.thread_id, payload: e.payload })) })
-  await sterling.call('assign_lead', { client_request_id: agnteiKey(), thread_id: S.gold.thread_id })
-  const gAns = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), thread_id: S.gold.thread_id, purpose: 'answer', brief: 'answer the roof question' })
-  assert.equal(gAns.status, 'refused', JSON.stringify(gAns))
-  step('3b answer to gold after STOP', { code: codeOf(gAns), status: gAns.status })
+  // 3. a money text with no negotiation authority → MONEY_NOT_AUTHORIZED (an answer to a fresh price question on gold)
+  assert.equal(codeOf(await sterling.call('assign_lead', { client_request_id: agnteiKey(), thread_id: S.gold.thread_id })), 'LEAD_ASSIGNED')
+  const r3 = await http('POST', '/seller-reply', { thread_id: S.gold.thread_id, body: 'What would you pay for it?' })
+  const money = await sendText(sterling, 'sterling', { thread_id: S.gold.thread_id, purpose: 'negotiation', in_reply_to_message_id: r3.message_id, body: 'We could pay $150,000 cash for it as-is. Would that work for you?' })
+  assert.equal(money.status, 'refused', JSON.stringify(money))
+  assert.ok(['MONEY_NOT_AUTHORIZED', 'OUTSIDE_RECIPIENT_WINDOW'].includes(codeOf(money)), JSON.stringify(money))
+  step('3 money text without authority', { code: codeOf(money), reasons: money.result?.reasons || null })
 
-  // 4. a send to `stopped` → refused
+  // 4. a STOP on gold → inbound_message (stop_request) + opt_out; a text to gold is then refused
+  const r4 = await http('POST', '/seller-reply', { thread_id: S.gold.thread_id, body: 'STOP' })
+  const f4 = await feedSince(sterling, start, (e) => e.payload?.message_id === r4.message_id && e.kind === 'opt_out')
+  assert.deepEqual(f4.events.filter((e) => e.payload?.message_id === r4.message_id).map((e) => e.kind).sort(), ['inbound_message', 'opt_out'])
+  const afterStop = await sendText(sterling, 'sterling', { thread_id: S.gold.thread_id, purpose: 'reply', in_reply_to_message_id: r4.message_id, body: 'Understood, thanks for letting me know.' })
+  assert.equal(afterStop.status, 'refused', JSON.stringify(afterStop))
+  assert.match(codeOf(afterStop), /STOP_REQUESTED|CONTACT_NOT_PERMITTED|CONTACT_NOT_ELIGIBLE/)
+  step('4 text after STOP on gold', { code: codeOf(afterStop) })
+
+  // 5. the stopped target (opted out 40 days ago) → refused; equity (no seller-facing capability) → refused
   await sterling.call('assign_lead', { client_request_id: agnteiKey(), campaign_target_id: S.stopped.campaign_target_id })
-  const r4 = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), campaign_target_id: S.stopped.campaign_target_id, purpose: 'first_touch', brief: 'owner of Kaimuki Ave' })
-  const r4b = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), thread_id: S.stopped.thread_id, purpose: 'answer', brief: 'answer them' })
-  assert.equal(r4.status, 'refused', JSON.stringify(r4))
-  assert.equal(r4b.status, 'refused', JSON.stringify(r4b))
-  step('4 send to stopped', { first_touch: { code: codeOf(r4), result: r4.result }, answer: { code: codeOf(r4b) } })
+  const r5 = await sendText(sterling, 'sterling', { campaign_target_id: S.stopped.campaign_target_id, purpose: 'first_touch', body: 'Hi, this is Sterling, an AI assistant with Reivesti Home Buyers. Do you still own the house on Kaimuki Ave?' })
+  assert.equal(r5.status, 'refused', JSON.stringify(r5))
+  const r5b = await sendText(equity, 'equity', { campaign_target_id: S.ft_b.campaign_target_id, purpose: 'first_touch', body: 'Hi, do you still own the house on Wilder Ave?' })
+  assert.ok(r5b.isError || r5b.status === 'refused' || r5b.ok === false, JSON.stringify(r5b))
+  step('5 stopped target / equity', { stopped: codeOf(r5), equity: codeOf(r5b) })
 
-  // 5. equity (no seller-facing capability) → refused
-  const r5 = await equity.call('sms_send_agent_message', { client_request_id: agnteiKey(), campaign_target_id: S.ft_b.campaign_target_id, purpose: 'first_touch', brief: 'owner of Wilder Ave' })
-  assert.ok(r5.isError || r5.status === 'refused' || r5.ok === false, JSON.stringify(r5))
-  step('5 equity sends', { code: codeOf(r5), status: r5.status, error: r5.error || null })
-
-  // extras: wrong number, the Eastern window, not holding the lead
-  await sterling.call('assign_lead', { client_request_id: agnteiKey(), thread_id: S.wrong.thread_id })
-  const rw = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), thread_id: S.wrong.thread_id, purpose: 'answer', brief: 'they said wrong number' })
-  const rwf = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), thread_id: S.wrong.thread_id, purpose: 'followup', brief: 'check in' })
-  step('x wrong number', { answer: { code: codeOf(rw), status: rw.status }, followup: { code: codeOf(rwf), result: rwf.result } })
+  // 6. the Eastern window: refused OUTSIDE_RECIPIENT_WINDOW (with next_permitted_at) while 08:00–21:00 Eastern is closed
   await sterling.call('assign_lead', { client_request_id: agnteiKey(), campaign_target_id: S.eastern.campaign_target_id })
-  const re = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), campaign_target_id: S.eastern.campaign_target_id, purpose: 'first_touch', brief: 'owner of Pali Hwy' })
-  step('x eastern window', { code: codeOf(re), result: re.result })
-  const nh = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), campaign_target_id: S.ft_b.campaign_target_id, purpose: 'first_touch', brief: 'owner of Wilder Ave' })
-  assert.equal(codeOf(nh), 'NOT_LEAD_OWNER')
-  step('x not holding ft_b', { code: codeOf(nh), result: nh.result })
+  const re = await sendText(sterling, 'sterling', { campaign_target_id: S.eastern.campaign_target_id, purpose: 'first_touch', body: 'Hi, this is Sterling, an AI assistant with Reivesti Home Buyers. Do you still own the house on Pali Hwy?' })
+  if (S.eastern.pool?.window_open === false || codeOf(re) === 'OUTSIDE_RECIPIENT_WINDOW') { assert.equal(codeOf(re), 'OUTSIDE_RECIPIENT_WINDOW', JSON.stringify(re)); assert.ok(re.result.next_permitted_at) }
+  step('6 eastern window', { code: codeOf(re), next_permitted_at: re.result?.next_permitted_at || null })
 
-  // the R2 emergency stop: the send controls show it; BOTH the agent message and the certified reply are refused at
-  // request time (capability_unavailable / EMERGENCY_STOP_ACTIVE); cleared, they are requestable again
+  // 7. the R2 emergency stop: the controls show it; a text is refused EMERGENCY_STOP_ACTIVE at request time; cleared,
+  //    it is requestable again
   assert.equal(codeOf(await nova.call('assign_lead', { client_request_id: agnteiKey(), campaign_target_id: S.ft_b.campaign_target_id })), 'LEAD_ASSIGNED')
+  assert.equal(codeOf(await sendText(sterling, 'sterling', { campaign_target_id: S.ft_b.campaign_target_id, purpose: 'first_touch', body: 'Hi, do you still own the house on Wilder Ave?' })), 'NOT_LEAD_OWNER')
   assert.equal((await http('POST', '/emergency-stop', { on: true })).emergency_stop, true)
   const cStop = await nova.call('leadcommand_send_controls', {})
-  const amStop = await nova.call('sms_send_agent_message', { client_request_id: agnteiKey(), campaign_target_id: S.ft_b.campaign_target_id, purpose: 'first_touch', brief: 'owner of Wilder Ave' })
-  const replyStop = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), thread_id: S.soft.thread_id, purpose: 'answer', brief: 'answer them' })
+  const FTB = 'Hi, this is Nova, an AI assistant with Reivesti Home Buyers. Do you still own the house on Wilder Ave?'
+  const stopped = await sendText(nova, 'nova', { campaign_target_id: S.ft_b.campaign_target_id, purpose: 'first_touch', body: FTB })
   assert.equal((await http('POST', '/emergency-stop', { on: false })).emergency_stop, false)
-  assert.deepEqual([cStop.result.runtime_emergency_stop.on, cStop.result.seller_sends], [true, 'stopped'])
-  for (const r of [amStop, replyStop]) assert.deepEqual([codeOf(r), reasonOf(r)], ['capability_unavailable', 'EMERGENCY_STOP_ACTIVE'], JSON.stringify(r))
-  const go = await nova.call('sms_send_agent_message', { client_request_id: agnteiKey(), campaign_target_id: S.ft_b.campaign_target_id, purpose: 'first_touch', brief: 'owner of Wilder Ave' })
+  assert.deepEqual([cStop.result.runtime_emergency_stop.on, cStop.result.agent_text_refusal, cStop.result.seller_sends], [true, 'EMERGENCY_STOP_ACTIVE', 'stopped'])
+  assert.equal(codeOf(stopped), 'EMERGENCY_STOP_ACTIVE', JSON.stringify(stopped))
+  const go = await sendText(nova, 'nova', { campaign_target_id: S.ft_b.campaign_target_id, purpose: 'first_touch', body: FTB })
   let after = { code: codeOf(go) }
   if (codeOf(go) === 'HANDOFF_QUEUED') { const { rc } = await untilReceipt(S.ft_b.campaign_target_id, go.intent_id, DONE); after = { receipt: rc, text: (await http('GET', '/sends')).sent.at(-1).body } }
   else assert.equal(codeOf(go), open ? 'HANDOFF_QUEUED' : 'OUTSIDE_RECIPIENT_WINDOW')
-  step('x R2 emergency stop', { send_controls: cStop.result.runtime_emergency_stop, agent_message: [codeOf(amStop), reasonOf(amStop)], certified_reply: [codeOf(replyStop), reasonOf(replyStop)], after_clear: after })
+  step('7 R2 emergency stop', { send_controls: cStop.result.runtime_emergency_stop, agent_text: codeOf(stopped), after_clear: after })
 
-  // a re-engagement of the quiet soft thread (written from its history) — only when the window is open
-  if (open) {
-    const rs = await sterling.call('sms_send_agent_message', { client_request_id: agnteiKey(), thread_id: S.soft.thread_id, purpose: 'reengage', brief: 'Said not now, maybe in the spring once the sister moves out' })
-    step('x reengage soft', { code: codeOf(rs), result: rs.result || null })
-  }
-
-  console.log(`SMOKE PASS (808 window ${open ? 'OPEN: deliveries exercised' : 'CLOSED: send steps asserted the window refusal'})`)
+  const model = (await http('POST', '/tick')).model_calls
+  assert.equal(model, 0, 'no model was called anywhere on the agent path')
+  console.log(`SMOKE PASS (808 window ${open ? 'OPEN: deliveries exercised' : 'CLOSED: send steps asserted the window refusal'}; model calls: ${model})`)
   if (process.argv[3]) fs.writeFileSync(process.argv[3], JSON.stringify(out, null, 2))
 } finally {
   await sterling.close(); await equity.close(); await nova.close()
