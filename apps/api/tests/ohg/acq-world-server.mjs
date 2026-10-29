@@ -320,6 +320,17 @@ const control = http.createServer(async (req, res) => {
       log('R2 emergency stop', on ? 'ENGAGED' : 'cleared')
       return send(200, { ok: true, emergency_stop: l.emergency_stop, emergency_stop_at: l.emergency_stop_at })
     }
+    // a contact made do-not-contact outside the conversation (an operator's DNC entry): the thread marks + the
+    // suppression list LeadCommand's eligibility reads; no event, no message
+    if (req.method === 'POST' && u.pathname === '/suppress') {
+      const b = await body()
+      const [t] = await sel(env.owner, 'select id, thread_key from public.inbox_thread_state where id::text = $1', [String(b.thread_id || '')])
+      if (!t) return send(404, { error: 'thread not found' })
+      await env.owner.query(`update public.inbox_thread_state set contactability_status = 'do_not_contact', is_suppressed = true where id = $1`, [t.id])
+      await env.owner.query(`insert into public.sms_suppression_list (phone_e164, is_active, suppression_type) values ($1, true, 'dnc')`, [t.thread_key])
+      log('suppressed (operator DNC, SIMULATED world) thread', t.id)
+      return send(200, { ok: true, thread_id: t.id, suppression: 'dnc' })
+    }
     if (req.method === 'POST' && u.pathname === '/tick') return send(200, await pumpNow())
     if (req.method === 'POST' && u.pathname === '/carrier-receipt') {
       // the carrier's verdict on a sent row, through the REAL delivery reconciliation (syncDeliveryEvent): delivered /
