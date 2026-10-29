@@ -68,7 +68,7 @@ export const QUEUE_AGENT_MESSAGE_SPEC = Object.freeze({
   executor: { kind: 'domain_write', fn: DOMAIN_WRITES.handoff },
   recovery: 'reexecute',
   limits: { per_min: 6 },
-  wraps: { service: 'handoff → LeadCommand worker action_gateway.execute: conversation-ai/runtime/canonical#composeAgentOutbound → the AI-message ledger (agent_outbound) → insertSupabaseSendQueueRow → the queue runner (AI row gate + agent-message row gate); fallback: a governed template through the canonical queue writer', module: 'apps/api/src/lib/ai/action-gateway-execution.js' },
+  wraps: { service: 'handoff → LeadCommand worker action_gateway.execute: conversation-ai/runtime/canonical#composeAgentOutbound → the AI-message ledger (agent_outbound) → the shared send_queue insert helper → the queue runner (AI row gate + agent-message row gate); fallback: a governed template through the canonical queue writer', module: 'apps/api/src/lib/ai/action-gateway-execution.js' },
   touches: ['agent_runtime_job'],
 })
 

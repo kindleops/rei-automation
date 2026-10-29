@@ -100,6 +100,12 @@ test("no seller-visible provider call site is left UNKNOWN", () => {
 
 const QUEUE_ROW_CREATORS = [
   "app/api/dev/send-test/route.js",
+  // Action Gateway queue_agent_message (link #32; LeadCommand worker, action_gateway.execute; born OFF): converged —
+  // only through insertSupabaseSendQueueRow, deterministic identity (queue_key = dedupe_key = agent_message:<intent id>,
+  // a retry finds the row and adds none), after every guard is re-run, the day caps are reserved and ONE immutable
+  // agent_outbound ledger record is written; dispatched only by the queue runner (AI row gate + agent-message row gate).
+  // Its template fallback goes through the canonical queue writer (already listed).
+  "lib/ai/action-gateway-execution.js",
   "app/api/internal/proof/s1s2-attended/route.js",
   // 8.5.16 R3 (built OFF, unwired — nothing imports it): the ONE AI conversation
   // creator. Converged: it inserts only through insertSupabaseSendQueueRow with a
