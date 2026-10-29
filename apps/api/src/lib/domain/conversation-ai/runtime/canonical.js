@@ -27,7 +27,8 @@ import { runConversationPipeline } from '../pipeline/run.js'
 import { ACTIONS, PIPELINE_VERSION, TERMINAL_ACTIONS } from '../pipeline/outcomes.js'
 import { COMPOSE_PROMPT_VERSION, PLAYBOOK_VERSION } from '../playbook/v3/index.js'
 import { OUTBOUND_VALIDATOR_VERSION, validateOutbound } from '../outbound-validator.js'
-import { FACT_LEDGER_VERSION, ledgerSummary } from '../fact-ledger.js'
+import { FACT_LEDGER_VERSION, ledgerSummary, buildCanonicalLedger } from '../fact-ledger.js'
+import { composeOutbound, OUTBOUND_PURPOSES } from '../pipeline/compose.js'
 import { NO_COMPANY_IDENTITY } from '../company-identity.js'
 import { multiPropertyEvidence } from '../escalation-evidence.js'
 import { mixedAnswerTarget } from '../property-ownership.js'
@@ -45,6 +46,8 @@ export const NO_CONTACT_PROMISE_RE = /(?<![\p{L}])(?:(?:i|we)\s*(?:'ll|\s+will|\
 /** The writer identity recorded on every decision: pipeline + playbook + compose prompt. */
 export const WRITER_VERSION = `${PIPELINE_VERSION}+${PLAYBOOK_VERSION}+${COMPOSE_PROMPT_VERSION}`
 export const CANONICAL_CALLERS = Object.freeze(['turn', 'shadow', 'r3_revalidation', 'review_api', 'capability', 'evaluation'])
+/** Callers of the canonical OUTBOUND entry (composeAgentOutbound): the Action Gateway worker (link #32) and evaluations. */
+export const CANONICAL_OUTBOUND_CALLERS = Object.freeze(['agent_message', 'evaluation'])
 export const CANONICAL_VERSIONS = Object.freeze({
   runtime: CANONICAL_RUNTIME_VERSION, writer: WRITER_VERSION, pipeline: PIPELINE_VERSION, playbook: PLAYBOOK_VERSION,
   compose_prompt: COMPOSE_PROMPT_VERSION, understand: UNDERSTAND_VERSION, validator: OUTBOUND_VALIDATOR_VERSION,
@@ -210,4 +213,57 @@ export function canonicalRoutineScope(record, { languageEnglish = false, languag
   if (category === 'clarification' && !(Number(record.judgment?.confidence) >= (policy?.min_confidence ?? 0.85))) reasons.push('low_confidence_model_decided_reply')
   const uniq = [...new Set(reasons)]
   return { in_scope: uniq.length === 0, category, reasons: uniq }
+}
+
+// ── THE canonical OUTBOUND entry (Action Gateway queue_agent_message, link #32) ─────────────────────────────────
+// A message that answers NO inbound (first touch, re-engagement, follow-up) is written by the SAME writer (playbook v3,
+// compose prompt + the outbound purpose), judged by the SAME shared outbound validator (with the existing eligibility
+// and the shared send-time verdict), and refused — never sent — when the ledger says the next step is not ours: a
+// closed lead (STOP, ownership denied), an offer stage (a human step), or anything financial / legal / negotiation.
+// The objective is the ledger's next missing S1–S4 fact (a first touch asks ownership). Writes nothing.
+export const OUTBOUND_OBJECTIVE_FOR_STAGE = Object.freeze({ nurture: 'interest' })
+/**
+ * @param {object} a
+ * @param {'first_touch'|'reengage'|'followup'} a.purpose
+ * @param {string} a.brief                 the agent's brief (context only; never sent verbatim)
+ * @param {Array<{ id: string, direction: 'inbound'|'outbound', body: string, at: string, use_case?: string|null, intent?: string|null }>} [a.thread] chronological
+ * @param {object|null} a.modelClient
+ * @param {object|null} [a.eligibility]    the send-time guard verdict { blocked, reasons, timing }
+ * @param {string} a.caller                one of CANONICAL_OUTBOUND_CALLERS
+ */
+export async function composeAgentOutbound({
+  purpose, brief = '', thread = [], recordFacts = {}, modelClient = null, spend = null, establishedPersona = null, companyIdentity = NO_COMPANY_IDENTITY,
+  personaPolicy = { allow_established_persona: true }, firstName = null, propertyLabel = null, propertyAddresses = [], eligibility = null, caller, now = null, maskOpts = {}, seed = '',
+} = {}) {
+  if (!CANONICAL_OUTBOUND_CALLERS.includes(caller)) throw Object.assign(new Error('CANONICAL_CALLER_REQUIRED'), { code: 'CANONICAL_CALLER_REQUIRED' })
+  const at = now || new Date().toISOString()
+  const base = { record_kind: 'conv-ai.canonical-outbound', versions: CANONICAL_VERSIONS, caller, purpose, decided_at: at }
+  const refuse = (reason, extra = {}) => ({ ...base, ok: false, reason, reply: null, ...extra })
+  if (!OUTBOUND_PURPOSES.includes(purpose)) return refuse('purpose_invalid')
+  const ledger = buildCanonicalLedger({ messages: thread, recordFacts, now: at })
+  const stage = ledger.stage?.stage
+  if (stage === 'closed') return refuse('lead_closed', { ledger_summary: ledgerSummary(ledger) })
+  if (stage === 'S5_offer' || (ledger.existing_offers || []).length || (ledger.outbound_quotes || []).length || (ledger.offer_requests || []).length) return refuse('offer_stage_is_a_human_step', { ledger_summary: ledgerSummary(ledger) })
+  if (purpose === 'first_touch' && (thread || []).some((m) => m.direction === 'outbound')) return refuse('first_touch_after_contact', { ledger_summary: ledgerSummary(ledger) })
+  if (purpose !== 'first_touch' && !(thread || []).length) return refuse('no_conversation_to_continue')
+  const objective = purpose === 'first_touch' ? 'ownership' : (ledger.next_missing || OUTBOUND_OBJECTIVE_FOR_STAGE[stage] || null)
+  if (!objective) return refuse('no_next_step', { ledger_summary: ledgerSummary(ledger) })
+  const messages = (thread || []).map((m) => ({ from: m.direction === 'outbound' ? 'us' : 'seller', text: m.body || '' }))
+  const composition = await composeOutbound({ ledger, purpose, objective, brief, modelClient, spend, messages, maskOpts, establishedPersona, companyIdentity, firstName, propertyLabel, propertyAddresses, personaPolicy, seed })
+  const compositionSummary = { ok: composition.ok, reason: composition.reason || null, model: composition.model || null, usd: composition.usd ?? 0, usage: composition.usage || null, attempts: (composition.attempts || []).length,
+    attempt_reasons: (composition.attempts || []).map((x) => (x.reasons || (x.error ? [String(x.error)] : [])).slice(0, 8)), playbook_version: composition.playbook_version || PLAYBOOK_VERSION, prompt_version: composition.prompt_version || COMPOSE_PROMPT_VERSION }
+  if (!composition.ok) return refuse(`composition:${composition.reason}`, { composition: compositionSummary, ledger_summary: ledgerSummary(ledger), objective })
+  const text = composition.text
+  const previousOutbound = [...(thread || [])].filter((m) => m.direction === 'outbound').pop()?.body || null
+  const validation = validateOutbound(text, { ledger, objective, category: purpose, personaPolicy, establishedPersona, companyIdentity, previousOutbound,
+    knownNumbers: [...new Set([...(thread || []).map((m) => m.body), ...propertyAddresses, propertyLabel].flatMap((b) => String(b || '').match(/[0-9]{3,}/g) || []))], firstName, eligibility, replyLanguage: 'en' })
+  const scopeReasons = []
+  if (NO_CONTACT_PROMISE_RE.test(text)) scopeReasons.push('no_contact_promise')
+  if (FINANCIAL_RE.test(text.replace(NEGATED_FINANCING_RE, ' '))) scopeReasons.push('excluded_financial')
+  if (LEGAL_CONTRACT_RE.test(text)) scopeReasons.push('excluded_legal_or_contract')
+  if (NEGOTIATION_RE.test(text) || OUR_AMOUNT_RE.test(text) || moneyMentions(text).length) scopeReasons.push('excluded_money_or_negotiation')
+  const reasons = [...new Set([...validation.reasons, ...scopeReasons])]
+  const v = { status: reasons.length ? 'rejected' : 'validated', reasons, content_reasons: [...validation.content_reasons, ...scopeReasons], eligibility_reasons: validation.eligibility_reasons, timing_reasons: validation.timing_reasons, version: validation.version, style_version: validation.style_version }
+  if (reasons.length) return refuse('final_validation_rejected', { validation: v, composition: compositionSummary, ledger_summary: ledgerSummary(ledger), objective })
+  return { ...base, ok: true, reason: null, objective, reply: { text, category: purpose, objective, question_kind: validation.question_kind }, validation: v, composition: compositionSummary, ledger_summary: ledgerSummary(ledger), ledger, cost_usd: Math.round((Number(composition.usd) || 0) * 1e6) / 1e6 }
 }
