@@ -23,15 +23,21 @@ const PEPPER = 'p'.repeat(40)
 test('catalog: the 22 requested tools + the scoped reads; implemented = the T1 set + set_thread_hold + the T2 family (reversible or request-only) + the report-only reconciliation + the T3 / T4 family; a T3 / T4 tool is never standing-grant-only; nothing never-exposed exists', () => {
   const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => r.name !== 'read_conversation_context').map((r) => r.name)].filter((n) => !WORKFORCE_TOOLS.includes(n) && !OHG_TOOLS.includes(n) && !AGENT_MESSAGE_TOOLS.includes(n))
   assert.deepEqual([...all].sort(), [...REQUESTED_TOOLS].sort())
-  // + the agent-message family (link #32): ONE T3 seller-facing write (standing-grantable like the reply), two standing T2
-  //   reversible lead-ownership writes, four reads (fallback templates, lead ownership, the event feed, the lead pool)
-  assert.deepEqual([...AGENT_MESSAGE_TOOLS].sort(), ['agent_lead_pool', 'assign_lead', 'events_since', 'get_lead_assignment', 'list_message_templates', 'queue_agent_message', 'release_lead', 'send_controls'])
+  // + the agent-text family (link #32, owner architecture correction 2026-10-29): ONE T3 seller-facing write — the agent's
+  //   EXACT text (standing-grantable like the reply) —, the RETIRED brief-based agent message (AGENT_COMPOSES_TEXT), three
+  //   standing T2 reversible lead-ownership writes (assign, release, transfer), four reads
+  assert.deepEqual([...AGENT_MESSAGE_TOOLS].sort(), ['agent_lead_pool', 'assign_lead', 'events_since', 'get_lead_assignment', 'list_message_templates', 'queue_agent_message', 'queue_agent_text', 'release_lead', 'send_controls', 'transfer_lead'])
+  const qat = createActionCatalog().get('queue_agent_text')
+  assert.deepEqual([qat.tier, qat.capability, qat.standing_reply, qat.executor.fn, qat.retired ?? null], [TIERS.T3, 'conversation.queue_agent_text', true, 'action_gateway_dw_handoff', null])
+  assert.deepEqual(qat.input.required, ['client_request_id', 'purpose', 'body', 'attribution'])
+  assert.ok(!Object.keys(qat.input.properties).some((k) => /(phone|e164|sender|^from_|^to_|persona)/i.test(k)), 'the agent never supplies routing: LeadCommand resolves the number and the sender')
+  for (const n of ['queue_agent_message', 'queue_authorized_reply']) assert.equal(createActionCatalog().get(n).retired?.code, 'AGENT_COMPOSES_TEXT', n)
   assert.deepEqual([createActionCatalog().get('agent_lead_pool').tier, createActionCatalog().get('agent_lead_pool').capability], [TIERS.T1, 'leads.read_pool'])
   assert.deepEqual([createActionCatalog().get('send_controls').tier, createActionCatalog().get('send_controls').capability], [TIERS.T1, 'controls.read'])
   const qam = createActionCatalog().get('queue_agent_message')
   assert.deepEqual([qam.tier, qam.capability, qam.standing_reply, qam.executor.fn], [TIERS.T3, 'conversation.queue_agent_message', true, 'action_gateway_dw_handoff'])
   assert.ok(!Object.keys(qam.input.properties).some((k) => /(phone|e164|sender|from_|to_|persona|body|text|message)/i.test(k)), 'the agent never supplies routing or text (a brief only)')
-  for (const n of ['assign_lead', 'release_lead']) assert.deepEqual([createActionCatalog().get(n).tier, createActionCatalog().get(n).reversible, createActionCatalog().get(n).executor.fn], [TIERS.T2, true, 'action_gateway_dw_lead_assignment'], n)
+  for (const n of ['assign_lead', 'release_lead', 'transfer_lead']) assert.deepEqual([createActionCatalog().get(n).tier, createActionCatalog().get(n).reversible, createActionCatalog().get(n).executor.fn], [TIERS.T2, true, 'action_gateway_dw_lead_assignment'], n)
   // + the Operation Hidden Gold family (link #29): four standing T2 reversible writes through ONE domain write, two scoped reads
   assert.deepEqual([...OHG_TOOLS].sort(), ['get_lead_annotations', 'get_reply_delivery_status', 'record_conversation_note', 'record_seller_statement', 'set_lead_temperature', 'update_lead_status'])
   for (const n of OHG_TOOLS) {

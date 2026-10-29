@@ -27,6 +27,7 @@ import { COMPANY_IDENTITY_KEY, normalizeCompanyIdentity, loadCompanyIdentity } f
 import { DRAFT_MODEL_ENV } from '../../src/lib/ai/conversation-ai-draft-service.js'
 import { AUTO_RECOVERY_ENV, autoRecoveryEnabled } from '../../src/lib/agent/operations/auto-recovery.js'
 import { WORKFORCE_FLAG, WORKFORCE_MODEL_INTERPRET_FLAG, workforceEnabled, modelInterpretEnabled } from '../../src/lib/workforce/config.js'
+import { AGENT_TEXT_SWITCH_KEY, AGENT_TEXT_POLICY_KEY, agentTextSwitchOn } from '../../src/lib/domain/outreach/agent-text.js'
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src')
 const REPO = path.resolve(SRC, '../../..')
@@ -58,11 +59,14 @@ const NEW_SYSTEM_CONTROL_KEYS = Object.freeze({
   [COMPANY_IDENTITY_KEY]: (raw) => normalizeCompanyIdentity(raw).configured === true,
   // the sender-continuity hold release writes only on 'live'; anything else is a dry run
   [SENDER_CONTINUITY_RELEASE_MODE_KEY]: (raw) => resolveSenderContinuityReleaseMode(raw) === 'live',
+  // link #32 (owner correction 2026-10-29): the agents' own texts — only the literal 'true' (action_gateway.agent_text_refusal)
+  [AGENT_TEXT_SWITCH_KEY]: (raw) => agentTextSwitchOn(raw),
 })
 // a brake, not a feature: absent = not stopped (every feature it brakes is itself off above)
 const BRAKES = Object.freeze(['queue_emergency_stop_at'])
 // limits that are not switches (a ceiling cannot turn anything on by itself)
-const LIMITS = Object.freeze([PAID_RESEARCH_CEILING_ENV])
+// (ai_agent_text_policy: caps / quiet hours / languages of agent texts; nothing sends unless ai_agent_text_enabled is on)
+const LIMITS = Object.freeze([PAID_RESEARCH_CEILING_ENV, AGENT_TEXT_POLICY_KEY])
 // literal-key reads of system_control (the getters in src/lib/system-control.js and their local aliases)
 const INLINE_READ_RE = /\b(?:get_?[sS]ystem_?(?:[vV]alue|[fF]lag)(?:Fresh|Value|Fn)?|readSystemValue(?:Fresh)?|loadSystemValue|requireSystemFlag|readSwitch|readRoutingSwitch)\(\s*['"]([a-z][a-z0-9_]+)['"]/g
 // inline keys already read at rc-8.5.20 (2cb96db3): owned by earlier releases (derived with the same pattern)

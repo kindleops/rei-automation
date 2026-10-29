@@ -185,7 +185,9 @@ export async function seedThread(owner, { phone = SELLER, property = 'p100', inb
 }
 
 /** The gateway, wired exactly as the Action MCP server wires it, over a pool running as lc_action_gateway. */
-export function makeGateway(env, { org = ORG, provider = null, draft = null, worker = 'gw-test', leaseSeconds = 30, sleep, maxBusyRetries, now, onAudit, serviceEnv = {}, approvalDecideTtlMs, approvalGrantTtlMs, wrapStore = null, wrapServices = null } = {}) {
+// legacyComposer: the retired composer actions (queue_authorized_reply, queue_agent_message) answer for the record tests of
+// links #28 / #31; the agent-text tests pass false (production's default: AGENT_COMPOSES_TEXT)
+export function makeGateway(env, { org = ORG, provider = null, draft = null, worker = 'gw-test', leaseSeconds = 30, sleep, maxBusyRetries, now, onAudit, serviceEnv = {}, approvalDecideTtlMs, approvalGrantTtlMs, wrapStore = null, wrapServices = null, legacyComposer = true } = {}) {
   const pool = env.db.trackPool(gatewayPool(env.url, org))
   const db = pgSupabase(pool)
   const base = createPostgrestActionStore({ db })
@@ -194,7 +196,7 @@ export function makeGateway(env, { org = ORG, provider = null, draft = null, wor
   const realServices = createGatewayServices({ db, store, env: { AI_CONVERSATION_SHADOW_ENABLED: 'true', ...(provider ? { AI_CONVERSATION_DRAFT_MODEL_ENABLED: 'true' } : {}), ...serviceEnv }, provider, draft })
   const services = wrapServices ? wrapServices(realServices) : realServices
   const gateway = createActionGateway({ store, reads, services, pepper: PEPPER, dataOrgId: org, worker, leaseSeconds, ...(sleep ? { sleep } : {}), ...(maxBusyRetries != null ? { maxBusyRetries } : {}), ...(now ? { now } : {}), ...(onAudit ? { onAudit } : {}),
-    ...(approvalDecideTtlMs ? { approvalDecideTtlMs } : {}), ...(approvalGrantTtlMs ? { approvalGrantTtlMs } : {}) })
+    ...(approvalDecideTtlMs ? { approvalDecideTtlMs } : {}), ...(approvalGrantTtlMs ? { approvalGrantTtlMs } : {}), legacyComposerActionsForTests: legacyComposer })
   return { gateway, store, reads, services, pool, db }
 }
 
