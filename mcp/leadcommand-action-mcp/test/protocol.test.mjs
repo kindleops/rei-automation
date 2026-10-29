@@ -4,7 +4,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import Ajv from 'ajv'
 import { connect, fakeGateway, CRED_A } from './helpers.mjs'
-import { REQUESTED_TOOLS, WORKFORCE_TOOLS, OHG_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
+import { REQUESTED_TOOLS, WORKFORCE_TOOLS, OHG_TOOLS, AGENT_MESSAGE_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
 import { SMS_ALIASES } from '../src/protocol/server.mjs'
 
 test('initialize: server info, tools-only capabilities, instructions name the ONE governed gateway and that agents never approve', async () => {
@@ -23,7 +23,7 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
   const c = await connect()
   try {
     const { tools } = await c.client.listTools()
-    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`), ...OHG_TOOLS, ...Object.keys(SMS_ALIASES)].sort())
+    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`), ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS.map((n) => (n === 'events_since' ? 'leadcommand_events_since' : n)), ...Object.keys(SMS_ALIASES)].sort())
     const ajv = new Ajv({ strict: false })
     for (const t of tools) {
       assert.equal(t.inputSchema.type, 'object', t.name)
@@ -157,5 +157,28 @@ test('second net: phone / email shapes in any result string are masked; a secret
     const s = await c.client.callTool({ name: 'update_operator_task', arguments: { client_request_id: 'k-00000004', work_item_id: '00000000-0000-4000-8000-000000000001' } })
     assert.equal(s.structuredContent.error.code, 'SECRET_GUARD')
     assert.ok(!/eyJhbGciOi/.test(JSON.stringify(s)))
+  } finally { await c.close() }
+})
+
+test('link #32: sms_send_agent_message routes to queue_agent_message (a brief, never text) or — purpose answer — to the certified reply; sms_list_message_templates and leadcommand_events_since map to their reads', async () => {
+  const gw = fakeGateway()
+  const c = await connect({ gateway: gw })
+  try {
+    const { tools } = await c.client.listTools()
+    const send = tools.find((t) => t.name === 'sms_send_agent_message')
+    assert.deepEqual([send._meta['leadcommand/alias_of'], send._meta['leadcommand/tier'], send._meta['leadcommand/risk'], send._meta['leadcommand/capability']], ['queue_agent_message', 'T3', 'seller_facing', 'conversation.queue_agent_message'])
+    assert.ok(!Object.keys(send.inputSchema.properties).some((k) => /(phone|body|text|message)$/i.test(k)), 'no text or routing argument')
+    assert.ok(tools.some((t) => t.name === 'leadcommand_events_since') && !tools.some((t) => t.name === 'events_since'))
+    const thread_id = '00000000-0000-4000-8000-000000000001'
+    const campaign_target_id = '00000000-0000-4000-8000-000000000002'
+    await c.client.callTool({ name: 'sms_send_agent_message', arguments: { client_request_id: 'k-am-00001', campaign_target_id, purpose: 'first_touch', brief: 'inherited property, absentee owner' } })
+    await c.client.callTool({ name: 'sms_send_agent_message', arguments: { client_request_id: 'k-am-00002', thread_id, purpose: 'answer', brief: 'answer the seller' } })
+    await c.client.callTool({ name: 'sms_list_message_templates', arguments: { purpose: 'followup' } })
+    await c.client.callTool({ name: 'leadcommand_events_since', arguments: { cursor: 0 } })
+    const bare = await c.client.callTool({ name: 'events_since', arguments: { cursor: 0 } }).catch((e) => e)
+    assert.ok(bare instanceof Error || bare.isError, 'the bare gateway name is not a tool')
+    assert.deepEqual(gw.calls.map((x) => x.tool), ['queue_agent_message', 'queue_authorized_reply', 'list_message_templates', 'events_since'])
+    assert.deepEqual(gw.calls[0].args, { client_request_id: 'k-am-00001', campaign_target_id, purpose: 'first_touch', brief: 'inherited property, absentee owner' })
+    assert.deepEqual(gw.calls[1].args, { client_request_id: 'k-am-00002', thread_id })
   } finally { await c.close() }
 })

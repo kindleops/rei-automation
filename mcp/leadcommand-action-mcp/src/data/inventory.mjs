@@ -19,6 +19,9 @@ export const T34_RPCS = Object.freeze(['action_gateway_authorize_envelope', 'act
 /** link #29's RPCs (Operation Hidden Gold: the acquisitions domain write, the delivery / annotation reads): pinned to that migration by test/inventory.test.mjs. */
 export const OHG_RPCS = Object.freeze(['action_gateway_dw_ohg', 'action_gateway_reply_status', 'action_gateway_annotations'])
 
+/** link #32's RPCs (agent-initiated messages: activation / lead state, fallback templates, lead ownership, the event feed): pinned to that migration by test/inventory.test.mjs. */
+export const AGENT_MESSAGE_RPCS = Object.freeze(['action_gateway_agent_message_state', 'action_gateway_message_templates', 'action_gateway_dw_lead_assignment', 'action_gateway_lead_assignment_get', 'action_gateway_events_since'])
+
 /** The Workforce × Agntei RPCs (PROPOSED_20261022110000_workforce_agntei.sql): pinned to that migration by test/inventory.test.mjs. */
 export const WF_RPCS = Object.freeze(['action_gateway_workforce_read', 'action_gateway_dw_workforce'])
 
@@ -35,5 +38,7 @@ export const RPCS = Object.freeze(['action_gateway_controls', 'action_gateway_pr
   ...T34_RPCS,
   // link #29 (PROPOSED_20261027120000_action_gateway_ohg.sql): the acquisitions writer + the delivery / annotation reads
   ...OHG_RPCS,
+  // link #32 (PROPOSED_20261029100000_action_gateway_agent_message.sql): agent messages, lead ownership, the event feed
+  ...AGENT_MESSAGE_RPCS,
   // Workforce × Agntei: the principal-bound read + the ONE Workforce writer
   ...WF_RPCS])
