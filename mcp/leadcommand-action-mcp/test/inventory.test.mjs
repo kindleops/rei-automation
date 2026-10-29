@@ -39,10 +39,13 @@ test('RPC allowlist = the public functions granted to lc_action_gateway (+ the h
   const ohg = [...OHG_SQL.matchAll(/create function public\.(action_gateway_[a-z_]+)\(/g)].map((x) => x[1])
   assert.deepEqual([...OHG_RPCS].sort(), [...new Set(ohg)].sort(), 'link #29 RPCs')
   for (const f of ['action_gateway_dw_ohg(uuid,uuid)', 'action_gateway_reply_status(uuid,integer)', 'action_gateway_annotations(uuid,integer)']) assert.ok(OHG_SQL.includes(`grant execute on function public.${f} to lc_action_gateway;`), f)
-  // link #32: exactly the seven public functions that migration creates for (and grants to) lc_action_gateway
+  // link #32: exactly the nine public functions that migration creates for (and grants to) lc_action_gateway (incl. the
+  // agent-text state read and the ONE writer of the agent's exact text + attribution)
   const am = [...AM_SQL.matchAll(/create function public\.(action_gateway_[a-z_]+)\(/g)].map((x) => x[1])
   assert.deepEqual([...AGENT_MESSAGE_RPCS].sort(), [...new Set(am)].sort(), 'link #32 RPCs')
-  assert.match(AM_SQL, /grant execute on function public\.action_gateway_agent_message_state\(uuid, uuid, uuid\), public\.action_gateway_message_templates\(\), public\.action_gateway_dw_lead_assignment\(uuid, uuid\),\n  public\.action_gateway_lead_assignment_get\(uuid, uuid\), public\.action_gateway_events_since\(bigint, integer\), public\.action_gateway_agent_lead_pool\(text, integer, text\),\n  public\.action_gateway_send_controls\(\) to lc_action_gateway;/)
+  assert.match(AM_SQL, /grant execute on function public\.action_gateway_agent_message_state\(uuid, uuid, uuid\), public\.action_gateway_message_templates\(\), public\.action_gateway_dw_lead_assignment\(uuid, uuid\),\n  public\.action_gateway_lead_assignment_get\(uuid, uuid\), public\.action_gateway_events_since\(bigint, integer\), public\.action_gateway_agent_lead_pool\(text, integer, text\),\n  public\.action_gateway_send_controls\(\), public\.action_gateway_agent_text_state\(uuid, uuid, uuid\), public\.action_gateway_agent_text_submit\(text, jsonb\) to lc_action_gateway;/)
+  // LeadCommand-side functions of #32 (the worker's load / reservations, the delivery writer, the lead holder) never are
+  assert.ok(!RPCS.some((r) => /^lc_agent_/.test(r)))
   assert.deepEqual([...RPCS].filter((r) => r !== 'automation_hold_for').sort(), [...new Set([...created, ...t2, ...t34, ...ohg, ...wf, ...am])].sort())
   assert.ok(RPCS.includes('automation_hold_for'))
 })
@@ -51,9 +54,10 @@ test('catalog: every requested tool is registered exactly once (prepare_acquisit
   const names = ACTIONS.map((a) => a.name)
   assert.equal(new Set(names).size, names.length)
   assert.deepEqual([...names, ...READS.filter((r) => r.name === 'prepare_acquisition_offer' || WORKFORCE_TOOLS.includes(r.name) || OHG_TOOLS.includes(r.name) || AGENT_MESSAGE_TOOLS.includes(r.name)).map((r) => r.name)].sort(), [...REQUESTED_TOOLS, ...WORKFORCE_TOOLS, ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS].sort())
-  // link #32: the agent message is the ONE T3 write of its family, a domain write of the shared handoff, registered as such; the lead writes are standing T2 reversible
-  assert.ok(AM_SQL.includes(`('domain_write_action', 'queue_agent_message', 'PROPOSED_20261029100000_action_gateway_agent_message', null)`))
-  for (const n of ['assign_lead', 'release_lead']) assert.ok(AM_SQL.includes(`('standing_t2_action', '${n}', 'PROPOSED_20261029100000_action_gateway_agent_message', 'reversible')`), n)
+  // link #32: the agent text (and the retired agent message) are T3 domain writes of the shared handoff, registered as such;
+  // the lead writes (assign, release, transfer) are standing T2 reversible
+  for (const n of ['queue_agent_message', 'queue_agent_text', 'transfer_lead']) assert.ok(AM_SQL.includes(`('domain_write_action', '${n}', 'PROPOSED_20261029100000_action_gateway_agent_message', null)`), n)
+  for (const n of ['assign_lead', 'release_lead', 'transfer_lead']) assert.ok(AM_SQL.includes(`('standing_t2_action', '${n}', 'PROPOSED_20261029100000_action_gateway_agent_message', 'reversible')`), n)
   // Operation Hidden Gold (link #29): four standing T2 reversible writes of the ONE acquisitions writer, registered as domain writes and standing actions; two scoped reads
   for (const a of ACTIONS.filter((x) => OHG_TOOLS.includes(x.name))) {
     assert.equal(a.tier, 2, a.name)

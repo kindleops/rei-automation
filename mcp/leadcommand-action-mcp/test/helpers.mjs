@@ -46,7 +46,7 @@ export function fakeGateway({ answer = null, whoami = null } = {}) {
   const calls = []
   return {
     calls,
-    listTools: () => [...catalog.actions(), ...catalog.reads()].map((s) => ({ name: s.name, title: s.title, description: s.description, input: s.input, tier: TIER_LABEL[s.tier], capability: s.capability, implemented: s.implemented !== false, read: catalog.isRead(s.name), scope: s.scope || null, risk: s.risk || null })),
+    listTools: () => [...catalog.actions(), ...catalog.reads()].map((s) => ({ name: s.name, title: s.title, description: s.description, input: s.input, tier: TIER_LABEL[s.tier], capability: s.capability, implemented: s.implemented !== false, read: catalog.isRead(s.name), scope: s.scope || null, risk: s.risk || null, ...(s.retired ? { retired: true } : {}) })),
     async call(o) {
       calls.push(o)
       if (!catalog.get(o.tool)) return { ok: false, status: 'error', tool: o.tool, unknownTool: true, error: { class: 'invalid_input', code: 'UNKNOWN_ACTION', message: 'unknown', retryable: false } }

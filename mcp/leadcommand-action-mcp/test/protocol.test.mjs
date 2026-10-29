@@ -1,6 +1,7 @@
 // MCP protocol tests over the SDK's in-memory transport and a fake gateway (the real catalog): discovery,
 // call mapping, the connection-bound credential, result shaping, the second-net masks.
 import test from 'node:test'
+import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
 import Ajv from 'ajv'
 import { connect, fakeGateway, CRED_A } from './helpers.mjs'
@@ -23,7 +24,9 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
   const c = await connect()
   try {
     const { tools } = await c.client.listTools()
-    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`), ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS.map((n) => (['events_since', 'agent_lead_pool', 'send_controls'].includes(n) ? `leadcommand_${n}` : n)), ...Object.keys(SMS_ALIASES)].sort())
+    // (the composer paths retired for agents — queue_authorized_reply, queue_agent_message — are not advertised)
+    const RETIRED = ['queue_authorized_reply', 'queue_agent_message']
+    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`), ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS.map((n) => (['events_since', 'agent_lead_pool', 'send_controls'].includes(n) ? `leadcommand_${n}` : n)), ...Object.keys(SMS_ALIASES)].filter((n) => !RETIRED.includes(n)).sort())
     const ajv = new Ajv({ strict: false })
     for (const t of tools) {
       assert.equal(t.inputSchema.type, 'object', t.name)
@@ -39,7 +42,9 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
     const impl = tools.filter((t) => t._meta['leadcommand/implemented']).map((t) => t.name).sort()
     for (const n of ['create_operator_task', 'create_research_job', 'draft_seller_reply', 'read_conversation_context', 'request_property_valuation', 'run_authorized_reconciliation', 'set_thread_hold', 'update_operator_task',
       'update_lead_disposition', 'update_lead_temperature', 'update_lead_stage', 'create_deal_action', 'request_thread_hold_release', 'schedule_followup', 'cancel_followup', 'pause_campaign', 'request_campaign_resume', 'adjust_campaign_plan',
-      'queue_authorized_reply', 'prepare_acquisition_offer', 'submit_offer_for_approval', 'execute_authorized_offer', 'record_seller_counteroffer']) assert.ok(impl.includes(n), n)
+      'queue_agent_text', 'prepare_acquisition_offer', 'submit_offer_for_approval', 'execute_authorized_offer', 'record_seller_counteroffer', 'transfer_lead']) assert.ok(impl.includes(n), n)
+    // the composer paths are RETIRED for agents (AGENT_COMPOSES_TEXT): never advertised
+    for (const n of ['queue_authorized_reply', 'queue_agent_message', 'sms_send_agent_message']) assert.ok(!tools.some((t) => t.name === n), n)
     assert.equal(tools.find((t) => t.name === 'pause_campaign')._meta['leadcommand/tier'], 'T2')
     assert.equal(tools.find((t) => t.name === 'set_thread_hold')._meta['leadcommand/tier'], 'T2')
     assert.equal(tools.find((t) => t.name === 'execute_authorized_offer')._meta['leadcommand/tier'], 'T4')
@@ -63,7 +68,7 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
       assert.equal(t.annotations.readOnlyHint, false, n)
       assert.equal(t._meta['leadcommand/risk'], 'internal_write', n)
     }
-    assert.equal(tools.find((t) => t.name === 'queue_authorized_reply')._meta['leadcommand/risk'], 'seller_facing')
+    assert.equal(tools.find((t) => t.name === 'queue_agent_text')._meta['leadcommand/risk'], 'seller_facing')
     // Operation Hidden Gold: the acquisitions family (operational writes) and the sms_* names, which are ALIASES of the
     // certified tools (same schema, tier, capability and risk; never a second send path)
     for (const n of ['set_lead_temperature', 'update_lead_status', 'record_conversation_note', 'record_seller_statement']) {
@@ -94,7 +99,7 @@ test('sms_* aliases: tools/call maps an alias to its certified target with adapt
     await c.client.callTool({ name: 'sms_get_conversation', arguments: { thread_id } })
     await c.client.callTool({ name: 'sms_get_delivery_status', arguments: { thread_id, limit: 5 } })
     await c.client.callTool({ name: 'flag_data_conflict', arguments: { client_request_id: 'k-sms-00004', thread_id, kind: 'data_conflict', note: 'County says 3 beds, seller says 4' } })
-    assert.deepEqual(gw.calls.map((x) => x.tool), ['queue_authorized_reply', 'schedule_followup', 'cancel_followup', 'read_conversation_context', 'get_reply_delivery_status', 'record_conversation_note'])
+    assert.deepEqual(gw.calls.map((x) => x.tool), ['queue_agent_text', 'schedule_followup', 'cancel_followup', 'read_conversation_context', 'get_reply_delivery_status', 'record_conversation_note'])
     assert.deepEqual(gw.calls[0].args, { client_request_id: 'k-sms-00001', thread_id })
     assert.deepEqual(gw.calls[1].args, { client_request_id: 'k-sms-00002', thread_id, kind: 'seller_requested_callback', due_at: '2026-11-02T15:00:00Z', reason_code: 'seller_asked_for_callback' })
     assert.deepEqual(gw.calls[4].args, { thread_id, limit: 5 })
@@ -160,25 +165,31 @@ test('second net: phone / email shapes in any result string are masked; a secret
   } finally { await c.close() }
 })
 
-test('link #32: sms_send_agent_message routes to queue_agent_message (a brief, never text) or — purpose answer — to the certified reply; sms_list_message_templates and leadcommand_events_since map to their reads', async () => {
-  const gw = fakeGateway()
+test('link #32 (owner architecture correction 2026-10-29): sms_send_agent_text sends the agent\'s EXACT text (queue_agent_text, the attribution verbatim — session_id may be null); sms_reply is an answer; the retired sms_send_agent_message is not advertised and reaches the gateway\'s AGENT_COMPOSES_TEXT; the feed / transfer map to their tools', async () => {
+  const gw = fakeGateway({ answer: (o) => (o.tool === 'queue_agent_message' ? { ok: false, status: 'error', tool: o.tool, error: { class: 'refused', code: 'AGENT_COMPOSES_TEXT', message: 'retired', retryable: false, details: { use: 'sms_send_agent_text' } } } : null) || { ok: true, status: 'succeeded', tool: o.tool, intent_id: crypto.randomUUID(), state: 'succeeded', code: 'OK', result: {} } })
   const c = await connect({ gateway: gw })
   try {
     const { tools } = await c.client.listTools()
-    const send = tools.find((t) => t.name === 'sms_send_agent_message')
-    assert.deepEqual([send._meta['leadcommand/alias_of'], send._meta['leadcommand/tier'], send._meta['leadcommand/risk'], send._meta['leadcommand/capability']], ['queue_agent_message', 'T3', 'seller_facing', 'conversation.queue_agent_message'])
-    assert.ok(!Object.keys(send.inputSchema.properties).some((k) => /(phone|body|text|message)$/i.test(k)), 'no text or routing argument')
-    assert.ok(tools.some((t) => t.name === 'leadcommand_events_since') && !tools.some((t) => t.name === 'events_since'))
+    const send = tools.find((t) => t.name === 'sms_send_agent_text')
+    assert.deepEqual([send._meta['leadcommand/alias_of'], send._meta['leadcommand/tier'], send._meta['leadcommand/risk'], send._meta['leadcommand/capability']], ['queue_agent_text', 'T3', 'seller_facing', 'conversation.queue_agent_text'])
+    assert.deepEqual(send.inputSchema.required, ['client_request_id', 'purpose', 'body', 'attribution'])
+    assert.deepEqual(send.inputSchema.properties.attribution.properties.session_id.type, ['string', 'null'])
+    assert.ok(!Object.keys(send.inputSchema.properties).some((k) => /(phone|e164|sender|^from_|^to_)/i.test(k)), 'no routing argument: LeadCommand resolves the number and the sender')
+    assert.ok(tools.some((t) => t.name === 'transfer_lead') && tools.some((t) => t.name === 'leadcommand_events_since') && !tools.some((t) => t.name === 'events_since'))
+    assert.ok(!tools.some((t) => t.name === 'sms_send_agent_message'))
     const thread_id = '00000000-0000-4000-8000-000000000001'
     const campaign_target_id = '00000000-0000-4000-8000-000000000002'
-    await c.client.callTool({ name: 'sms_send_agent_message', arguments: { client_request_id: 'k-am-00001', campaign_target_id, purpose: 'first_touch', brief: 'inherited property, absentee owner' } })
-    await c.client.callTool({ name: 'sms_send_agent_message', arguments: { client_request_id: 'k-am-00002', thread_id, purpose: 'answer', brief: 'answer the seller' } })
-    await c.client.callTool({ name: 'sms_list_message_templates', arguments: { purpose: 'followup' } })
+    const attribution = { employee: 'nova', model: 'claude-x', provider: 'anthropic', route: 'agntei.acquisitions', session_id: null, turn_id: 't-1' }
+    const body = 'Hi, this is Nova, an AI assistant with Reivesti Home Buyers. Do you still own the house on Kapiolani Blvd?'
+    const ok = await c.client.callTool({ name: 'sms_send_agent_text', arguments: { client_request_id: 'k-at-00001', campaign_target_id, purpose: 'first_touch', body, attribution } })
+    assert.equal(ok.isError, false)
+    await c.client.callTool({ name: 'sms_reply', arguments: { client_request_id: 'k-at-00002', thread_id, in_reply_to_message_id: 'in-1', body: 'Thanks for letting me know about the roof, that is not a problem for us. When would you ideally want to sell?', attribution } })
+    const retired = await c.client.callTool({ name: 'sms_send_agent_message', arguments: { client_request_id: 'k-am-00001', campaign_target_id, purpose: 'first_touch', brief: 'inherited property' } })
+    assert.equal(retired.structuredContent.error.code, 'AGENT_COMPOSES_TEXT')
     await c.client.callTool({ name: 'leadcommand_events_since', arguments: { cursor: 0 } })
-    const bare = await c.client.callTool({ name: 'events_since', arguments: { cursor: 0 } }).catch((e) => e)
-    assert.ok(bare instanceof Error || bare.isError, 'the bare gateway name is not a tool')
-    assert.deepEqual(gw.calls.map((x) => x.tool), ['queue_agent_message', 'queue_authorized_reply', 'list_message_templates', 'events_since'])
-    assert.deepEqual(gw.calls[0].args, { client_request_id: 'k-am-00001', campaign_target_id, purpose: 'first_touch', brief: 'inherited property, absentee owner' })
-    assert.deepEqual(gw.calls[1].args, { client_request_id: 'k-am-00002', thread_id })
+    await c.client.callTool({ name: 'transfer_lead', arguments: { client_request_id: 'k-tr-00001', campaign_target_id, to_agent_id: 'agt_sterling', reason: 'supervisor takes it over' } })
+    assert.deepEqual(gw.calls.map((x) => x.tool), ['queue_agent_text', 'queue_agent_text', 'queue_agent_message', 'events_since', 'transfer_lead'])
+    assert.deepEqual(gw.calls[0].args, { client_request_id: 'k-at-00001', campaign_target_id, purpose: 'first_touch', body, attribution }, 'the exact text and attribution, untouched')
+    assert.equal(gw.calls[1].args.purpose, 'reply')
   } finally { await c.close() }
 })

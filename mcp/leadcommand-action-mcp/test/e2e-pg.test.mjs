@@ -87,7 +87,7 @@ test('E2E (PG): the server REFUSES to boot when its database credential is not e
   } finally { await env.db.drop() }
 })
 
-test('E2E (PG) link #32: the real Action MCP boots on the full chain (#26 → #27 → #28 → #29 → #31 → ledger → #32); an agent takes a lead and sends an agent message through sms_send_agent_message (no approval on a standing grant); the event feed and the template read answer', { skip }, async () => {
+test('E2E (PG) link #32: the real Action MCP boots on the full chain (#26 → #27 → #28 → #29 → #31 → ledger → #32); an agent takes a lead and sends the EXACT text it composed through sms_send_agent_text (no approval on a standing grant; attribution with a null session id); the retired sms_send_agent_message answers AGENT_COMPOSES_TEXT; the event feed answers', { skip }, async () => {
   const { agentMessageDb } = await import('../../../apps/api/tests/helpers/action-gateway-agent-message-pg.mjs')
   const { seedT34, agent } = await import('../../../apps/api/tests/helpers/action-gateway-t34-world.mjs')
   const { evaluateReplyTiming, resolveRecipientZones } = await import('@/lib/domain/queue/reply-timing.js')
@@ -102,10 +102,9 @@ test('E2E (PG) link #32: the real Action MCP boots on the full chain (#26 → #2
   let app
   try {
     await seedT34(env)
-    await setControls(env.owner, { ai_conversation_send_enabled: 'true', ai_conversation_send_policy: JSON.stringify({ enabled: true, scope: { thread_keys: [phone] }, categories: ['first_touch'] }),
-      ai_agent_message_enabled: 'true', ai_agent_message_policy: JSON.stringify({ enabled: true }) })
+    await setControls(env.owner, { ai_agent_text_enabled: 'true', ai_conversation_company_identity: JSON.stringify({ name: 'Reivesti Home Buyers', human_review: false, persona_descriptor: null }) })
     const cred = await agent(env, { agent_id: 'agt_sterling', grants: [['leads.assign_lead', 2], ['events.read', 1], ['conversation.read_message_templates', 1]] })
-    await env.owner.query(`insert into action_gateway.capability_grants (org_id, agent_id, capability, max_tier, granted_by, expires_at, standing_seller_facing, standing_basis) values ($1, 'agt_sterling', 'conversation.queue_agent_message', 3, '2b3ee0ff-0000-4000-8000-0000000000c1', now() + interval '30 days', true, 'owner decision (disposable e2e): agent messages')`, [ORG])
+    await env.owner.query(`insert into action_gateway.capability_grants (org_id, agent_id, capability, max_tier, granted_by, expires_at, standing_seller_facing, standing_basis) values ($1, 'agt_sterling', 'conversation.queue_agent_text', 3, '2b3ee0ff-0000-4000-8000-0000000000c1', now() + interval '30 days', true, 'owner decision (disposable e2e): agents send the texts they compose')`, [ORG])
     await env.owner.query(`insert into public.properties (property_id, property_type, property_address_city, property_address_state, property_address_zip, property_address) values ('pe2e', 'SFR', 'Springfield', $1, null, '18 Elm St')`, [state])
     const camp = (await env.owner.query(`insert into public.campaigns (name, status) values ('e2e', 'active') returning id`)).rows[0].id
     const target = (await env.owner.query(`insert into public.campaign_targets (campaign_id, property_id, prospect_id, to_phone_number, market, language, target_status, routing_status, identity_status, suppression_status, metadata) values ($1, 'pe2e', 'pr1', $2, 'Chicago', 'English', 'ready', 'ready', 'verified', 'clear', '{"candidate_snapshot":{"seller_first_name":"Dana"}}') returning id`, [camp, phone])).rows[0].id
@@ -113,11 +112,13 @@ test('E2E (PG) link #32: the real Action MCP boots on the full chain (#26 → #2
     app = await buildApp({ env: httpEnv(), db, scrub: false })
     listener = await startHttp({ app })
     const a = await client(listener.url, cred)
-    const tpl = await a.callTool({ name: 'sms_list_message_templates', arguments: {} })
-    assert.equal(tpl.isError, false, JSON.stringify(json(tpl)))
     const own = await a.callTool({ name: 'assign_lead', arguments: { client_request_id: 'e2e-am-assign', campaign_target_id: target } })
     assert.equal(json(own).code, 'LEAD_ASSIGNED', JSON.stringify(json(own)))
-    const sent = await a.callTool({ name: 'sms_send_agent_message', arguments: { client_request_id: 'e2e-am-send-1', campaign_target_id: target, purpose: 'first_touch', brief: 'absentee owner, inherited property' } })
+    const retired = await a.callTool({ name: 'sms_send_agent_message', arguments: { client_request_id: 'e2e-am-send-0', campaign_target_id: target, purpose: 'first_touch', brief: 'absentee owner, inherited property' } })
+    assert.equal(json(retired).error?.code, 'AGENT_COMPOSES_TEXT', JSON.stringify(json(retired)))
+    const sent = await a.callTool({ name: 'sms_send_agent_text', arguments: { client_request_id: 'e2e-at-send-1', campaign_target_id: target, purpose: 'first_touch',
+      body: 'Hi Dana, this is Sterling, an AI assistant with Reivesti Home Buyers. Do you still own the house on Elm St?',
+      attribution: { employee: 'sterling', model: 'claude-x', provider: 'anthropic', route: 'agntei.acquisitions.head', session_id: null, turn_id: 'e2e-1' } } })
     if (lawful) assert.equal(json(sent).code, 'HANDOFF_QUEUED', JSON.stringify(json(sent)))
     else assert.equal(json(sent).code, 'OUTSIDE_RECIPIENT_WINDOW', JSON.stringify(json(sent)))
     assert.equal((await sel(env.owner, 'select count(*)::int n from agent.approval_request'))[0].n, 0, 'no per-message approval on the standing grant')
