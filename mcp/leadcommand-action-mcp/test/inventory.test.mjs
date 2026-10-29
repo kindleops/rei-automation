@@ -39,10 +39,10 @@ test('RPC allowlist = the public functions granted to lc_action_gateway (+ the h
   const ohg = [...OHG_SQL.matchAll(/create function public\.(action_gateway_[a-z_]+)\(/g)].map((x) => x[1])
   assert.deepEqual([...OHG_RPCS].sort(), [...new Set(ohg)].sort(), 'link #29 RPCs')
   for (const f of ['action_gateway_dw_ohg(uuid,uuid)', 'action_gateway_reply_status(uuid,integer)', 'action_gateway_annotations(uuid,integer)']) assert.ok(OHG_SQL.includes(`grant execute on function public.${f} to lc_action_gateway;`), f)
-  // link #32: exactly the five public functions that migration creates for (and grants to) lc_action_gateway
+  // link #32: exactly the six public functions that migration creates for (and grants to) lc_action_gateway
   const am = [...AM_SQL.matchAll(/create function public\.(action_gateway_[a-z_]+)\(/g)].map((x) => x[1])
   assert.deepEqual([...AGENT_MESSAGE_RPCS].sort(), [...new Set(am)].sort(), 'link #32 RPCs')
-  assert.match(AM_SQL, /grant execute on function public\.action_gateway_agent_message_state\(uuid, uuid, uuid\), public\.action_gateway_message_templates\(\), public\.action_gateway_dw_lead_assignment\(uuid, uuid\),\n  public\.action_gateway_lead_assignment_get\(uuid, uuid\), public\.action_gateway_events_since\(bigint, integer\) to lc_action_gateway;/)
+  assert.match(AM_SQL, /grant execute on function public\.action_gateway_agent_message_state\(uuid, uuid, uuid\), public\.action_gateway_message_templates\(\), public\.action_gateway_dw_lead_assignment\(uuid, uuid\),\n  public\.action_gateway_lead_assignment_get\(uuid, uuid\), public\.action_gateway_events_since\(bigint, integer\), public\.action_gateway_agent_lead_pool\(text, integer, text\) to lc_action_gateway;/)
   assert.deepEqual([...RPCS].filter((r) => r !== 'automation_hold_for').sort(), [...new Set([...created, ...t2, ...t34, ...ohg, ...wf, ...am])].sort())
   assert.ok(RPCS.includes('automation_hold_for'))
 })

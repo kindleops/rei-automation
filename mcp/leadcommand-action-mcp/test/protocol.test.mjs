@@ -23,7 +23,7 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
   const c = await connect()
   try {
     const { tools } = await c.client.listTools()
-    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`), ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS.map((n) => (n === 'events_since' ? 'leadcommand_events_since' : n)), ...Object.keys(SMS_ALIASES)].sort())
+    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`), ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS.map((n) => (['events_since', 'agent_lead_pool'].includes(n) ? `leadcommand_${n}` : n)), ...Object.keys(SMS_ALIASES)].sort())
     const ajv = new Ajv({ strict: false })
     for (const t of tools) {
       assert.equal(t.inputSchema.type, 'object', t.name)

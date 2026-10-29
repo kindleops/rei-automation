@@ -276,6 +276,7 @@ grant execute on function public.lc_seller_action_receipt_record(uuid, text, tex
 
 delete from action_gateway.extensions where link = 'PROPOSED_20261029100000_action_gateway_agent_message';
 
+drop function public.action_gateway_agent_lead_pool(text, integer, text);
 drop function public.lc_agent_message_lead(uuid);
 drop function public.lc_agent_message_activation();
 drop function public.action_gateway_message_templates();
@@ -284,6 +285,9 @@ drop function public.lc_agent_message_settle(uuid, text);
 drop function public.lc_agent_message_reserve(uuid);
 drop function public.action_gateway_events_since(bigint, integer);
 drop function public.lc_lead_event_append(text, text, text, uuid, jsonb, timestamp with time zone);
+drop function action_gateway.lead_event_ids(jsonb, uuid, text, text, uuid);
+drop function action_gateway.campaign_target_of(text, text);
+drop function action_gateway.property_ref_of(text);
 drop table action_gateway.lead_events;
 drop function action_gateway.lead_events_append_only();
 drop function public.action_gateway_lead_assignment_get(uuid, uuid);

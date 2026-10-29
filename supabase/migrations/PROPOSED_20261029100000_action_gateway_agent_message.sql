@@ -521,6 +521,46 @@ begin
 end
 $fn$;
 
+-- the property id as agents see it on the feed: agent.payload_is_clean admits a property id only in the encoded letter
+-- form pid_<digits as g..p> (decoded by action_gateway.decode_property_ref); a non-numeric id has no encoded form and is
+-- left out (null)
+create function action_gateway.property_ref_of(p_property_id text)
+returns text language sql immutable parallel safe set search_path = pg_catalog
+as $fn$ select case when btrim(coalesce(p_property_id, '')) ~ '^pid_[g-p]{1,20}$' then btrim(p_property_id)
+                    when btrim(coalesce(p_property_id, '')) ~ '^[0-9]{1,20}$' then 'pid_' || translate(btrim(p_property_id), '0123456789', 'ghijklmnop') end $fn$;
+
+-- the campaign target of a recipient number (and property, when known): the newest target of that number, a target of
+-- the same property first. Index-friendly: the number in its three stored spellings.
+create function action_gateway.campaign_target_of(p_phone text, p_property_id text)
+returns uuid language sql stable security definer set search_path = pg_catalog
+as $fn$
+  select x.id from public.campaign_targets x
+   where nullif(btrim(coalesce(p_phone, '')), '') is not null
+     and x.to_phone_number in (p_phone, right(regexp_replace(p_phone, '\D', '', 'g'), 10), '1' || right(regexp_replace(p_phone, '\D', '', 'g'), 10))
+   order by (x.property_id is not distinct from p_property_id) desc, (to_jsonb(x) ->> 'created_at') desc nulls last, x.id
+   limit 1
+$fn$;
+
+-- the ids an agent links a lead by, added to every event's payload when LeadCommand knows them: property_id (encoded,
+-- see property_ref_of; a raw id a writer passed is encoded or dropped) and campaign_target_id. Ids only, never contact data.
+create function action_gateway.lead_event_ids(p_payload jsonb, p_thread_id uuid, p_phone text, p_property_id text default null, p_campaign_target_id uuid default null)
+returns jsonb language plpgsql stable security definer set search_path = pg_catalog
+as $fn$
+declare v jsonb := coalesce(p_payload, '{}'::jsonb); v_prop text; v_ct uuid := p_campaign_target_id;
+begin
+  v_prop := action_gateway.decode_property_ref(coalesce(nullif(p_property_id, ''), nullif(v ->> 'property_id', '')));
+  if v_prop is null and p_thread_id is not null then select s.property_id into v_prop from public.inbox_thread_state s where s.id = p_thread_id; end if;
+  if v_ct is null and coalesce(v ->> 'campaign_target_id', '') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then v_ct := (v ->> 'campaign_target_id')::uuid; end if;
+  if v_ct is null then v_ct := action_gateway.campaign_target_of(p_phone, v_prop); end if;
+  -- a thread a first touch created knows no property yet: its campaign target does
+  if v_prop is null and v_ct is not null then select x.property_id into v_prop from public.campaign_targets x where x.id = v_ct; end if;
+  v := v - 'property_id' - 'campaign_target_id';
+  if action_gateway.property_ref_of(v_prop) is not null then v := v || jsonb_build_object('property_id', action_gateway.property_ref_of(v_prop)); end if;
+  if v_ct is not null then v := v || jsonb_build_object('campaign_target_id', v_ct); end if;
+  return v;
+end
+$fn$;
+
 -- ───────────────────────────────────────────── 7. the event outbox (agents' wake-up feed) ──
 create table action_gateway.lead_events (
   cursor       bigint generated always as identity primary key,
@@ -557,7 +597,7 @@ begin
   end if;
   insert into action_gateway.lead_events (event_id, kind, thread_id, thread_ref, payload, occurred_at)
   values (p_kind || ':' || p_event_key, p_kind, v_tid, case when nullif(btrim(coalesce(p_thread_key, '')), '') is null then null else action_gateway.thread_ref_of(p_thread_key) end,
-          coalesce(p_payload, '{}'::jsonb), coalesce(p_occurred_at, clock_timestamp()))
+          action_gateway.lead_event_ids(p_payload, v_tid, nullif(btrim(coalesce(p_thread_key, '')), '')), coalesce(p_occurred_at, clock_timestamp()))
   on conflict (event_id) do nothing
   returning cursor into v_cursor;
   return jsonb_build_object('ok', true, 'appended', v_cursor is not null, 'cursor', v_cursor);
@@ -631,11 +671,14 @@ begin
                                jsonb_build_object('job_id', r.job_id, 'state', p_state));
   -- link #32: what happened to a message an agent asked for is an event on the agents' feed (never the text)
   if p_state in ('enqueued', 'sent', 'held', 'refused', 'deferred', 'failed', 'outcome_unknown') and r.action in ('queue_authorized_reply', 'queue_agent_message') then
-    v_lead := case when r.action = 'queue_agent_message' then action_gateway.agent_message_lead(i.params) end;
+    v_lead := action_gateway.agent_message_lead(i.params);
     insert into action_gateway.lead_events (event_id, kind, thread_id, thread_ref, intent_id, payload, occurred_at)
     values ('delivery_changed:' || r.intent_id::text || ':' || p_state, 'delivery_changed',
             coalesce(nullif(v_lead ->> 'thread_id', '')::uuid, nullif(i.params ->> 'thread_id', '')::uuid), v_lead ->> 'lead_ref', r.intent_id,
-            jsonb_build_object('action', r.action, 'receipt_state', p_state, 'code', r.code, 'queue_row_id', r.queue_row_id, 'agent_id', i.agent_id), clock_timestamp())
+            action_gateway.lead_event_ids(jsonb_build_object('action', r.action, 'receipt_state', p_state, 'code', r.code, 'queue_row_id', r.queue_row_id, 'agent_id', i.agent_id,
+                                                              'purpose', i.params ->> 'purpose'),
+                                          coalesce(nullif(v_lead ->> 'thread_id', '')::uuid, nullif(i.params ->> 'thread_id', '')::uuid), v_lead ->> 'phone', v_lead ->> 'property_id',
+                                          nullif(coalesce(v_lead ->> 'campaign_target_id', i.params ->> 'campaign_target_id'), '')::uuid), clock_timestamp())
     on conflict (event_id) do nothing;
   end if;
   return jsonb_build_object('ok', true, 'replayed', false, 'state', r.state, 'work_item_id', r.work_item_id);
@@ -819,6 +862,45 @@ begin
 end
 $fn$;
 
+-- ───────────────────────────────────────────── 10b. the agents' lead pool (leads.read_pool, T1) ──
+-- The ADDRESSABLE leads of one market for the gateway's pool read (agent_lead_pool): every campaign target of the market
+-- (with the thread of its number when one exists) and every thread of the market whose number has no target there.
+-- Keyset-paged by row_key ('ct:<target id>' / 'th:<thread id>'). The number and the target's readiness travel to the
+-- gateway process only, which judges eligibility with the send path's OWN guards and returns ids and codes (never a
+-- number, a name or a message).
+create function public.action_gateway_agent_lead_pool(p_market text, p_limit integer, p_after text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare v_lim integer := greatest(1, least(coalesce(p_limit, 50), 100)); v_rows jsonb;
+begin
+  if action_gateway.request_org() is null or nullif(btrim(coalesce(p_market, '')), '') is null then return null; end if;
+  with tg as (
+    select x.id, x.property_id, x.market, x.prospect_id, x.master_owner_id, x.target_status, x.routing_status, x.identity_status, x.suppression_status,
+           case when length(regexp_replace(coalesce(x.to_phone_number, x.canonical_e164, ''), '\D', '', 'g')) = 10 then '+1' || regexp_replace(coalesce(x.to_phone_number, x.canonical_e164, ''), '\D', '', 'g')
+                when length(regexp_replace(coalesce(x.to_phone_number, x.canonical_e164, ''), '\D', '', 'g')) = 11 and left(regexp_replace(coalesce(x.to_phone_number, x.canonical_e164, ''), '\D', '', 'g'), 1) = '1'
+                  then '+' || regexp_replace(coalesce(x.to_phone_number, x.canonical_e164, ''), '\D', '', 'g') end as phone
+      from public.campaign_targets x where lower(btrim(coalesce(x.market, ''))) = lower(btrim(p_market))),
+  rows_ as (
+    select 'ct:' || tg.id::text as row_key, tg.property_id, tg.id as campaign_target_id, s.id as thread_id, tg.market, tg.phone, tg.prospect_id, tg.master_owner_id,
+           jsonb_build_object('target_status', tg.target_status, 'routing_status', tg.routing_status, 'identity_status', tg.identity_status, 'suppression_status', tg.suppression_status) as target
+      from tg left join lateral (select s.id from public.inbox_thread_state s where s.thread_key = tg.phone order by s.id limit 1) s on true
+     where tg.phone is not null
+    union all
+    select 'th:' || s.id::text, s.property_id, null::uuid, s.id, to_jsonb(s) ->> 'market', s.thread_key, to_jsonb(s) ->> 'prospect_id', to_jsonb(s) ->> 'master_owner_id', null::jsonb
+      from public.inbox_thread_state s
+     where lower(btrim(coalesce(to_jsonb(s) ->> 'market', ''))) = lower(btrim(p_market))
+       and not exists (select 1 from tg where tg.phone = s.thread_key))
+  select coalesce(jsonb_agg(to_jsonb(r) order by r.row_key), '[]'::jsonb) into v_rows
+    from (select * from rows_ where row_key > coalesce(p_after, '') order by row_key limit v_lim + 1) r;
+  return jsonb_build_object('rows', (select coalesce(jsonb_agg(e), '[]'::jsonb) from (select e from jsonb_array_elements(v_rows) with ordinality t(e, n) where n <= v_lim) z),
+                            'has_more', jsonb_array_length(v_rows) > v_lim);
+end
+$fn$;
+
 -- ───────────────────────────────────────────── 11. the registry rows (#27) ──
 insert into action_gateway.extensions (kind, name, link, basis) values
   ('definer_function', 'public.action_gateway_agent_message_state(uuid,uuid,uuid)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
@@ -826,6 +908,7 @@ insert into action_gateway.extensions (kind, name, link, basis) values
   ('definer_function', 'public.action_gateway_dw_lead_assignment(uuid,uuid)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
   ('definer_function', 'public.action_gateway_lead_assignment_get(uuid,uuid)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
   ('definer_function', 'public.action_gateway_events_since(bigint,integer)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
+  ('definer_function', 'public.action_gateway_agent_lead_pool(text,integer,text)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
   ('standing_t2_action', 'assign_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', 'reversible'),
   ('standing_t2_action', 'release_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', 'reversible'),
   ('domain_write_action', 'queue_agent_message', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
@@ -840,7 +923,9 @@ begin
       'action_gateway.lead_owner(uuid,text)', 'action_gateway.lead_events_append_only()',
       'public.action_gateway_dw_lead_assignment(uuid,uuid)', 'public.action_gateway_lead_assignment_get(uuid,uuid)', 'public.lc_lead_event_append(text,text,text,uuid,jsonb,timestamp with time zone)',
       'public.action_gateway_events_since(bigint,integer)', 'public.lc_agent_message_reserve(uuid)', 'public.lc_agent_message_settle(uuid,text)',
-      'public.action_gateway_agent_message_state(uuid,uuid,uuid)', 'public.action_gateway_message_templates()', 'public.lc_agent_message_activation()', 'public.lc_agent_message_lead(uuid)'] loop
+      'public.action_gateway_agent_message_state(uuid,uuid,uuid)', 'public.action_gateway_message_templates()', 'public.lc_agent_message_activation()', 'public.lc_agent_message_lead(uuid)',
+      'public.action_gateway_agent_lead_pool(text,integer,text)', 'action_gateway.property_ref_of(text)', 'action_gateway.campaign_target_of(text,text)',
+      'action_gateway.lead_event_ids(jsonb,uuid,text,text,uuid)'] loop
     execute format('revoke all on function %s from public, anon, authenticated, service_role', f);
   end loop;
 end $$;
@@ -848,7 +933,7 @@ end $$;
 revoke all on function public.lc_seller_action_receipt_record(uuid, text, text, text, jsonb, text) from public, anon, authenticated;
 grant execute on function public.lc_seller_action_receipt_record(uuid, text, text, text, jsonb, text) to service_role;
 grant execute on function public.action_gateway_agent_message_state(uuid, uuid, uuid), public.action_gateway_message_templates(), public.action_gateway_dw_lead_assignment(uuid, uuid),
-  public.action_gateway_lead_assignment_get(uuid, uuid), public.action_gateway_events_since(bigint, integer) to lc_action_gateway;
+  public.action_gateway_lead_assignment_get(uuid, uuid), public.action_gateway_events_since(bigint, integer), public.action_gateway_agent_lead_pool(text, integer, text) to lc_action_gateway;
 grant execute on function public.lc_agent_message_reserve(uuid), public.lc_agent_message_settle(uuid, text), public.lc_agent_message_activation(), public.lc_agent_message_lead(uuid),
   public.lc_lead_event_append(text, text, text, uuid, jsonb, timestamp with time zone) to service_role;
 

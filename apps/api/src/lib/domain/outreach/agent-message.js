@@ -58,12 +58,12 @@ export function guardRowOf({ lead, target = null, purpose }) {
  * @param {{ supabase: object, lead: object, target?: object|null, purpose: string, policy: object, aiPolicy: object, messages: Array,
  *           prospect?: object|null, property?: object|null, now: string, holdChecker?: Function|null }} a
  */
-export async function evaluateAgentMessageGuards({ supabase, lead, target = null, purpose, policy, aiPolicy, messages = [], prospect = null, property = null, now, holdChecker = null }) {
+export async function evaluateAgentMessageGuards({ supabase, lead, target = null, purpose, policy, aiPolicy, messages = [], prospect = null, property = null, now, holdChecker = null, purposeRules = true, window = true, categoryCheck = true }) {
   if (!lead?.phone) return deny('LEAD_NOT_FOUND')
   if (!AGENT_OUTBOUND_PURPOSES.includes(purpose)) return deny(purpose === 'answer' ? 'ANSWER_USES_CERTIFIED_REPLY' : 'PURPOSE_INVALID', purpose === 'answer' ? { use: 'queue_authorized_reply' } : {})
-  // the purpose rules
+  // the purpose rules (the pool read judges a continuation without them: it only asks whether the lead is contactable)
   const latest = messages[messages.length - 1] || null
-  if (purpose === 'first_touch') {
+  if (!purposeRules && purpose !== 'first_touch') { /* contactability only */ } else if (purpose === 'first_touch') {
     if (!target) return deny('FIRST_TOUCH_REQUIRES_CAMPAIGN_TARGET')
     if (lower(target.target_status) !== 'ready' || lower(target.routing_status) !== 'ready' || lower(target.identity_status) !== 'verified' || lower(target.suppression_status) !== 'clear') {
       return deny('CAMPAIGN_TARGET_NOT_READY', { target_status: target.target_status || null, routing_status: target.routing_status || null, identity_status: target.identity_status || null, suppression_status: target.suppression_status || null })
@@ -79,7 +79,7 @@ export async function evaluateAgentMessageGuards({ supabase, lead, target = null
     }
   }
   // the AI-reply certification gate's own scope (the AI row gate applies the same test at dispatch)
-  if (!(aiPolicy?.categories || []).includes(purpose)) return deny('AI_CATEGORY_NOT_ENABLED', { category: purpose })
+  if (categoryCheck && !(aiPolicy?.categories || []).includes(purpose)) return deny('AI_CATEGORY_NOT_ENABLED', { category: purpose })
   if (!threadInPolicyScope(aiPolicy, { thread_key: lead.phone })) return deny('LEAD_NOT_IN_AI_SEND_SCOPE')
   // the send-time contact guard (fail closed)
   const row = guardRowOf({ lead, target, purpose })
@@ -99,6 +99,7 @@ export async function evaluateAgentMessageGuards({ supabase, lead, target = null
   const pe = evaluatePreSendEligibility(contact, purpose === 'first_touch' ? {} : { allow_identity_unknown: true })
   if (!pe.eligible) return deny('PRESEND_INELIGIBLE', { reason: pe.reason, block_reason: pe.block_reason })
   // the recipient-local window (campaign / follow-up: 08:00–21:00 in every plausible zone)
+  if (!window) return { ok: true, code: null, evidence: { purpose, guard: 'clear', presend: pe.reason } }
   const zr = resolveRecipientZones({ recipientPhone: lead.phone, propertyGeography: property ? { state: property.property_address_state || null, zip: property.property_address_zip || null } : null })
   const timing = evaluateReplyTiming({ purpose: purpose === 'first_touch' ? 'campaign' : 'followup', at: now, zones: zr.zones, jurisdictions: zr.jurisdictions })
   if (timing.lawful !== true) return deny('OUTSIDE_RECIPIENT_WINDOW', { next_permitted_at: timing.next_permitted_at || null, zones: timing.zones })
@@ -112,4 +113,19 @@ export function capVerdict({ usage = {}, policy = {}, grantLeadDayCap = null }) 
   if (Number(usage.lead_today) >= leadCap) return deny('DAILY_LEAD_CAP_REACHED', { cap: leadCap })
   if (Number(usage.global_today) >= globalCap) return deny('DAILY_GLOBAL_CAP_REACHED', { cap: globalCap })
   return null
+}
+
+/** The window alone (the pool read reports it beside eligibility: it is a time, not a property of the lead). */
+export function agentMessageWindow({ phone, property = null, purpose, now }) {
+  const zr = resolveRecipientZones({ recipientPhone: phone, propertyGeography: property ? { state: property.property_address_state || null, zip: property.property_address_zip || null } : null })
+  const t = evaluateReplyTiming({ purpose: purpose === 'first_touch' ? 'campaign' : 'followup', at: now, zones: zr.zones, jurisdictions: zr.jurisdictions })
+  return { open: t.lawful === true, next_permitted_at: t.lawful === true ? null : t.next_permitted_at || null }
+}
+
+/** The purpose an agent's next message to a lead would take (its thread history; no history = a first touch). */
+export function nextPurposeOf(messages = [], { now, reengageQuietHours = 72 } = {}) {
+  const latest = messages[messages.length - 1] || null
+  if (!latest || !messages.some((m) => m.direction === 'outbound')) return messages.length ? 'answer' : 'first_touch'
+  if (latest.direction === 'inbound') return 'answer'
+  return Date.parse(now) - (Date.parse(latest.at || 0) || 0) >= reengageQuietHours * 3600_000 ? 'reengage' : 'followup'
 }

@@ -104,6 +104,19 @@ by the campaign builder; the number is never an argument). `answer` routes to th
 message; the brief is context only. `sms_list_message_templates` lists the governed fallbacks; `leadcommand_events_since`
 `{cursor, limit}` is the wake-up feed (inbound_message, opt_out, lead_state_changed, delivery_changed; ids and codes only).
 
+**The pool** (`leadcommand_agent_lead_pool` = `agent_lead_pool`, capability `leads.read_pool`, T1): `{market, limit ≤ 100,
+cursor?}` → rows `{property_id, property_ref, campaign_target_id | null, thread_id | null, market, has_conversation,
+next_purpose, eligible, ineligible_reason, ineligible_detail, window_open, next_permitted_at, owner}` and `next_cursor`. The
+verdict is the send path's own guards (same refusal codes), apart from the window and lead ownership, which are reported
+beside it. No numbers, names or message text.
+
+**Ids on the feed.** Every event payload carries `property_id` and `campaign_target_id` when LeadCommand knows them;
+`delivery_changed` also carries `purpose`, and its top-level `thread_id` is set once the first touch has created the thread
+(the `sent` event; `enqueued` precedes the thread). The payload guard (`agent.payload_is_clean`, security review M2) admits a
+property id only in its encoded form, so the feed's `property_id` is `pid_` + the digits mapped 0→g … 9→p (e.g.
+`227876842` → `pid_iinonmoki`); a non-numeric property id has no encoded form and is omitted. The pool returns both the raw
+`property_id` and that `property_ref`.
+
 **Gates (all re-checked at authorize, at the worker, and at dispatch where marked).** Both emergency stops (R2
 `agent.runtime_limits.emergency_stop`, `queue_emergency_stop_at`: authorize + worker + dispatch); the AI-reply certification
 gate `ai_conversation_send_enabled` + `ai_conversation_send_policy` — the purpose must be listed in its `categories` and the

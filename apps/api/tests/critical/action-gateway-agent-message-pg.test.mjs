@@ -43,7 +43,7 @@ const switches = ({ threads = [LEAD_A], agentPolicy = {} } = {}) => ({
   ai_agent_message_enabled: 'true', ai_agent_message_policy: JSON.stringify({ enabled: true, fallback_templates: { reengage: ['t-csfu-en-1'], followup: ['t-csfu-en-1'] }, ...agentPolicy }),
 })
 
-const GRANTS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['events.read', 1], ['conversation.read_message_templates', 1]]
+const GRANTS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['events.read', 1], ['conversation.read_message_templates', 1], ['leads.read_pool', 1]]
 /** An owner mints the standing seller-facing grant for agent messages (grants are immutable: a new grant, never an edit). */
 const mintStanding = (owner, { agent_id = 'agt_alpha', capability = 'conversation.queue_agent_message', tier = 3, basis = BASIS, leadCap = null } = {}) => owner.query(
   `insert into action_gateway.capability_grants (org_id, agent_id, capability, max_tier, scope, envelope, max_uses_per_hour, max_uses_per_day, max_spend_usd_per_day, max_failures_per_hour, max_cap_hits_per_hour, granted_by, valid_from, expires_at, standing_seller_facing, standing_basis, agent_message_lead_day_cap)
@@ -449,5 +449,88 @@ test('PG agent message: the rollback refuses while agent-message evidence (a rec
     assert.equal((await send(gateway, cred, { client_request_id: 'am-rb-00001', campaign_target_id: lead.campaign_target_id })).code, 'HANDOFF_QUEUED')
     await env.owner.query(`update action_gateway.capability_grants set revoked_at = now(), revoked_by = granted_by where standing_seller_facing`)
     await assert.rejects(applyInTransaction(env.owner, AM_ROLLBACK), /agent-message receipts exist|agent-message intents are still pending/)
+  } finally { await env.db.drop() }
+})
+
+// ── the agents' lead pool (leads.read_pool) and the feed's ids ───────────────
+const PID = (n) => String(227876840 + n) // numeric property ids: the feed carries them encoded (pid_ + g..p)
+const ref = (id) => `pid_${[...String(id)].map((d) => 'ghijklmnop'[Number(d)]).join('')}`
+
+test('PG agent message: the lead pool — a market\'s targets and threads with the send path\'s OWN verdicts; ids and codes only; keyset pages', { skip }, async () => {
+  const phones = { ok: '+13125550201', sup: '+13125550202', contacted: '+13125550203', renter: '+13125550204', held: '+13125550205' }
+  const { env, cred, gateway } = await world({ sw: switches({ threads: [LEAD_A, ...Object.values(phones), LEAD_T] }) })
+  try {
+    await env.owner.query(`delete from public.campaign_targets`) // the world's default lead is not part of this market
+    const L = {}
+    let n = 0
+    for (const [k, phone] of Object.entries(phones)) L[k] = await seedLead(env, { phone, pid: PID(n), prospect: `prp${n++}`, first: 'Sam', market: 'Chicago, IL' })
+    await env.owner.query(`insert into public.sms_suppression_list (phone_e164, is_active, suppression_type) values ($1, true, 'opt_out')`, [phones.sup])
+    await env.owner.query(`insert into public.send_queue (queue_key, queue_status, message_body, to_phone_number, from_phone_number, thread_key, created_at, sent_at, metadata) values ('prior-p', 'sent', 'Hi Sam, do you still own it?', $1::text, $2::text, $1::text, now() - interval '30 days', now() - interval '30 days', '{}'::jsonb)`, [phones.contacted, OURS])
+    await env.owner.query(`update public.prospects set likely_renting = true, likely_owner = false where prospect_id = $1`, [L.renter.prospect])
+    await env.owner.query(`insert into public.automation_holds (hold_key, hold_type, property_id, reason, set_by, approval_ref) values ('h-pool', 'operator_hold', $1, 'operator reviewing', 'owner', 'test')`, [L.held.pid])
+    const t = await seedQuietThread(env, { pid: PID(9) })
+    await env.owner.query(`update public.inbox_thread_state set market = 'Chicago, IL' where id = $1`, [t.thread_id])
+    await env.owner.query(`update public.inbox_thread_state set market = 'Elsewhere' where id <> $1`, [t.thread_id])
+    assert.equal((await assign(gateway, cred, { campaign_target_id: L.ok.campaign_target_id })).code, 'LEAD_ASSIGNED')
+    const all = await call(gateway, cred, 'agent_lead_pool', { market: 'Chicago, IL', limit: 100 })
+    assert.equal(all.ok, true, JSON.stringify(all))
+    const by = (id) => all.result.rows.find((r) => r.campaign_target_id === id || r.thread_id === id)
+    assert.equal(all.result.rows.length, 6, JSON.stringify(all.result.rows))
+    assert.deepEqual([by(L.ok.campaign_target_id).eligible, by(L.ok.campaign_target_id).next_purpose, by(L.ok.campaign_target_id).owner, by(L.ok.campaign_target_id).has_conversation, by(L.ok.campaign_target_id).property_ref],
+      [true, 'first_touch', 'self', false, ref(PID(0))])
+    assert.match(by(L.sup.campaign_target_id).ineligible_reason, /CONTACT_NOT_ELIGIBLE/)
+    assert.equal(by(L.contacted.campaign_target_id).ineligible_reason, 'ALREADY_CONTACTED')
+    assert.equal(by(L.renter.campaign_target_id).ineligible_reason, 'PRESEND_INELIGIBLE')
+    assert.equal(by(L.held.campaign_target_id).ineligible_reason, 'AUTOMATION_HOLD')
+    const quiet = by(t.thread_id)
+    assert.deepEqual([quiet.campaign_target_id, quiet.has_conversation, quiet.next_purpose, quiet.eligible, quiet.property_id], [null, true, 'reengage', true, PID(9)], JSON.stringify(quiet))
+    // the verdicts are the send path's own: the eligible target is accepted, the refused ones refused with the same code
+    for (const k of ['contacted', 'held', 'renter']) {
+      assert.equal((await assign(gateway, cred, { campaign_target_id: L[k].campaign_target_id })).code, 'LEAD_ASSIGNED')
+      assert.equal((await send(gateway, cred, { client_request_id: `am-pool-${k}`, campaign_target_id: L[k].campaign_target_id })).code, by(L[k].campaign_target_id).ineligible_reason, k)
+    }
+    // ids and codes only: no number, no name, no message text
+    const text = JSON.stringify(all.result)
+    for (const p of [...Object.values(phones), LEAD_T]) assert.ok(!text.includes(p.slice(2)), p)
+    assert.ok(!/Sam|Dana|own it/.test(text))
+    // keyset pages: 2 + 2 + 2, the same rows, in order
+    const seen = []
+    let cursor
+    do {
+      const page = await call(gateway, cred, 'agent_lead_pool', { market: 'Chicago, IL', limit: 2, ...(cursor ? { cursor } : {}) })
+      seen.push(...page.result.rows.map((r) => r.campaign_target_id || r.thread_id))
+      cursor = page.result.next_cursor
+    } while (cursor)
+    assert.deepEqual(seen, all.result.rows.map((r) => r.campaign_target_id || r.thread_id))
+    // another market is empty; the read needs its own grant
+    assert.equal((await call(gateway, cred, 'agent_lead_pool', { market: 'Nowhere' })).result.rows.length, 0)
+    const bare = await agent(env, { agent_id: 'agt_bare', grants: [['events.read', 1]] })
+    assert.equal((await call(gateway, bare, 'agent_lead_pool', { market: 'Chicago, IL' })).ok, false)
+  } finally { await env.db.drop() }
+})
+
+test('PG agent message: the feed carries the lead\'s ids — property_id (encoded) and campaign_target_id on delivery and inbound events, the thread once the first touch created it', { skip }, async () => {
+  const { env, cred, gateway, w } = await world()
+  try {
+    await env.owner.query(`delete from public.campaign_targets`)
+    const lead = await seedLead(env, { phone: LEAD_A, pid: PID(3), prospect: 'prf', first: 'Maria' })
+    assert.equal((await assign(gateway, cred, { campaign_target_id: lead.campaign_target_id })).code, 'LEAD_ASSIGNED')
+    const r = await send(gateway, cred, { client_request_id: 'am-ids-0001', campaign_target_id: lead.campaign_target_id })
+    assert.equal(r.code, 'HANDOFF_QUEUED', JSON.stringify(r))
+    await w.tick()
+    const [row] = await agentRows(env)
+    await dispatchQueued(env, w, row.id, simProvider())
+    await w.execution.reconcileReceipts()
+    const [thread] = await sel(env.owner, 'select id from public.inbox_thread_state where thread_key = $1', [LEAD_A])
+    const ev = await sel(env.owner, `select kind, thread_id, payload from action_gateway.lead_events where intent_id = $1 order by cursor`, [r.intent_id])
+    assert.deepEqual(ev.map((e) => e.payload.receipt_state), ['enqueued', 'sent'])
+    for (const e of ev) assert.deepEqual([e.payload.property_id, e.payload.campaign_target_id, e.payload.purpose], [ref(PID(3)), lead.campaign_target_id, 'first_touch'])
+    assert.ok(thread, 'the first touch created the thread')
+    assert.equal(ev[0].thread_id, null, 'enqueued: no thread exists yet')
+    assert.equal(ev.at(-1).thread_id, thread.id, 'the sent event names the thread the send created')
+    // an inbound on that number (the webhook's writer) carries the same ids
+    const a = await env.owner.query(`select public.lc_lead_event_append('inbound_message', 'm-ids-1', $1, null, '{"message_id":"m-ids-1","stop_request":false}'::jsonb, now()) r`, [LEAD_A])
+    const [inb] = await sel(env.owner, `select thread_id, payload from action_gateway.lead_events where cursor = $1`, [a.rows[0].r.cursor])
+    assert.deepEqual([inb.thread_id, inb.payload.property_id, inb.payload.campaign_target_id], [thread.id, ref(PID(3)), lead.campaign_target_id])
   } finally { await env.db.drop() }
 })

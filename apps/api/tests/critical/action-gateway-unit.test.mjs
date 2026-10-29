@@ -24,8 +24,9 @@ test('catalog: the 22 requested tools + the scoped reads; implemented = the T1 s
   const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => r.name !== 'read_conversation_context').map((r) => r.name)].filter((n) => !WORKFORCE_TOOLS.includes(n) && !OHG_TOOLS.includes(n) && !AGENT_MESSAGE_TOOLS.includes(n))
   assert.deepEqual([...all].sort(), [...REQUESTED_TOOLS].sort())
   // + the agent-message family (link #32): ONE T3 seller-facing write (standing-grantable like the reply), two standing T2
-  //   reversible lead-ownership writes, three reads (fallback templates, lead ownership, the event feed)
-  assert.deepEqual([...AGENT_MESSAGE_TOOLS].sort(), ['assign_lead', 'events_since', 'get_lead_assignment', 'list_message_templates', 'queue_agent_message', 'release_lead'])
+  //   reversible lead-ownership writes, four reads (fallback templates, lead ownership, the event feed, the lead pool)
+  assert.deepEqual([...AGENT_MESSAGE_TOOLS].sort(), ['agent_lead_pool', 'assign_lead', 'events_since', 'get_lead_assignment', 'list_message_templates', 'queue_agent_message', 'release_lead'])
+  assert.deepEqual([createActionCatalog().get('agent_lead_pool').tier, createActionCatalog().get('agent_lead_pool').capability], [TIERS.T1, 'leads.read_pool'])
   const qam = createActionCatalog().get('queue_agent_message')
   assert.deepEqual([qam.tier, qam.capability, qam.standing_reply, qam.executor.fn], [TIERS.T3, 'conversation.queue_agent_message', true, 'action_gateway_dw_handoff'])
   assert.ok(!Object.keys(qam.input.properties).some((k) => /(phone|e164|sender|from_|to_|persona|body|text|message)/i.test(k)), 'the agent never supplies routing or text (a brief only)')
