@@ -19,6 +19,9 @@ import { addressKeysIn, mixedAnswerTarget, propertiesNamedIn } from './property-
 import { replyLanguageOf } from './send-policy.js'
 
 export const OUTBOUND_VALIDATOR_VERSION = 'conv-ai.outbound-validator.v2'
+// blind safety eval v1 remediation: the writer-safety rules (non-owner contact, invented acknowledgement / stale seller
+// time, unsupported human-review / persona-descriptor claims) for a text composed by ANY writer (writer-safety.js)
+export { validateWriterSafety, nonOwnerContactReasons, detectNonOwnerStatement, threadNonOwnerReading, thirdPartyOwnerAskReasons, inventedAcknowledgementReasons, sellerWroteSinceOurLast, staleSellerTimeReasons, unsupportedIdentityClaimReasons, WRITER_SAFETY_VERSION } from './writer-safety.js'
 
 // a promise of no further contact is false whenever a follow-up is scheduled (disinterest = 30-day follow-up)
 const FALSE_NO_CONTACT_RE = /\b(?:(?:won'?t|wont|will\s+not|never|not\s+going\s+to)\s+(?:bother|contact|text|message|call|trouble|reach\s+out(?:\s+to)?|be\s+(?:bothering|contacting|texting|reaching\s+out))(?:\s+you)?(?:\s+(?:again|anymore|any\s+more|further))?|leave\s+you\s+(?:be|alone)|leave\s+it\s+(?:alone|there)|take\s+you\s+off\s+(?:our|my|the)\s+list|(?:remove|removing)\s+(?:you|your\s+number)|last\s+(?:time|message|text)\s+(?:you'?ll|we|i)|won'?t\s+(?:take|waste)\s+(?:up\s+)?(?:any\s+)?more\s+of\s+your\s+time|won'?t\s+hear\s+from\s+(?:us|me)\s+again|close\s+(?:this|it)\s+out|close\s+the\s+loop|done\s+(?:reaching|texting)\s+out|leave\s+it\s+(?:with|to)\s+(?:them|your\s+(?:agent|realtor)|the\s+(?:agent|realtor))|won'?t\s+(?:push|pursue|follow\s+up))\b/i

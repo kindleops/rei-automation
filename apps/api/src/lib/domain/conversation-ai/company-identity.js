@@ -5,15 +5,22 @@
 // empty or malformed ⇒ { configured: false }: the AI names no company, gives no website and never
 // says it is or is not with a company; a seller who asks which company this is goes to a person.
 // JSON shape (owner-approved values only):
-//   { "name": "Example Home Buyers LLC", "website": "https://example.com", "website_verified": true }
+//   { "name": "Example Home Buyers LLC", "website": "https://example.com", "website_verified": true,
+//     "human_review": false, "persona_descriptor": null }
 // A website is used only when website_verified === true and it is a plain https URL.
+// Writer-safety remediation (blind safety eval v1, class 3): two more CONFIGURED facts, default NOT asserted:
+//   human_review        true ONLY when the owner configures it: a text may then say a person on the team reads
+//                       the messages / can take over. Anything but the boolean true ⇒ false (never claimed).
+//   persona_descriptor  the approved descriptor of the persona ("a local buyer"); null ⇒ a text may describe the
+//                       persona with NO descriptor ("local buyer", "local investor" … are refused).
 export const COMPANY_IDENTITY_KEY = 'ai_conversation_company_identity'
 export const COMPANY_IDENTITY_VERSION = 'conv-ai.company-identity.v1'
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 &.,'-]{1,79}$/
+const DESCRIPTOR_RE = /^[A-Za-z][A-Za-z '-]{1,59}$/
 const WEBSITE_RE = /^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/[A-Za-z0-9._~/-]*)?$/i
 
-export const NO_COMPANY_IDENTITY = Object.freeze({ configured: false, name: null, website: null, website_host: null, version: COMPANY_IDENTITY_VERSION })
+export const NO_COMPANY_IDENTITY = Object.freeze({ configured: false, name: null, website: null, website_host: null, human_review: false, persona_descriptor: null, version: COMPANY_IDENTITY_VERSION })
 
 export function normalizeCompanyIdentity(raw = null) {
   let v = raw
@@ -26,7 +33,9 @@ export function normalizeCompanyIdentity(raw = null) {
   if (!NAME_RE.test(name)) return NO_COMPANY_IDENTITY
   const site = String(v.website ?? '').trim()
   const website = v.website_verified === true && WEBSITE_RE.test(site) ? site : null
-  return Object.freeze({ configured: true, name, website, website_host: website ? new URL(website).hostname.replace(/^www\./, '').toLowerCase() : null, version: COMPANY_IDENTITY_VERSION })
+  const descriptor = typeof v.persona_descriptor === 'string' ? v.persona_descriptor.replace(/\s+/g, ' ').trim() : ''
+  return Object.freeze({ configured: true, name, website, website_host: website ? new URL(website).hostname.replace(/^www\./, '').toLowerCase() : null,
+    human_review: v.human_review === true, persona_descriptor: DESCRIPTOR_RE.test(descriptor) ? descriptor : null, version: COMPANY_IDENTITY_VERSION })
 }
 
 /** Read it fresh (any failure ⇒ not configured: fail closed to "say nothing about the company"). */
