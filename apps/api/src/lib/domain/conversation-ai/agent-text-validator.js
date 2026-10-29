@@ -39,6 +39,15 @@ import { isTemplateCompatibleWithProperty, canonicalPropertyGroupOf } from '@/li
 
 export const AGENT_TEXT_VALIDATOR_VERSION = 'agent-text-validator.v1'
 export const AGENT_TEXT_MAX_CHARS = 320
+const NOT_A_MESSAGE_RE = /^(test(ing)?|placeholder|sample|lorem ipsum.*|ignore( this| me)?|n\/?a|tbd|todo|draft|x+|null|undefined)[.!]?$/i
+const CORRECTION_RE = /\b(sent (by|in) (mistake|error)|ignore (that|the|my) (last|previous|earlier) (text|message)|(last|previous) (text|message) was (a )?(mistake|wrong|an error)|sorry,? (wrong|that) (text|message))\b/i
+const PRACTICE_CLAIMS = [
+  ['as_is', /\b(as[- ]is|any condition|no repairs? (needed|required|on your (end|side))|(roof|repairs?|basement)[^.?!]{0,40}(wouldn'?t|won'?t|don'?t) need (fixing|to be fixed))\b/i],
+  ['no_fees', /\bno (fees|commissions?|closing costs|realtor fees)\b/i],
+  ['cash', /\b(all[- ]cash|cash (offer|buyer|purchase)|pay (in )?cash)\b/i],
+  ['fast_close', /\bclose (in|within) (a few|\d+|one|two|three|seven|ten|fourteen) (days?|weeks?)\b|\b(fast|quick) clos(e|ing)\b/i],
+  ['flexible_close', /\b(close|closing) on your (timeline|schedule)\b|\bwhenever (you'?re|you are) ready to close\b/i],
+]
 
 // LeadCommand's writer-playbook STYLE preferences (not compliance): never imposed on an agent's own voice
 const STYLE_ONLY = new Set(['style:too_long', 'style:too_many_sentences', 'style:emoji', 'style:over_punctuation', 'style:shouting', 'style:flattery', 'style:filler', 'style:robotic_transition',
@@ -75,6 +84,11 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
   if (text.length > AGENT_TEXT_MAX_CHARS) add('length:over_320_characters')
   for (const r of transportContentReasons(text, { profile: 'agent_text' })) add(r)
   if (/[–—]/.test(text)) add('style:em_or_en_dash')
+  // not a message to a person: a test, a placeholder, a fragment, or a "correction" of an earlier text
+  if (t && (NOT_A_MESSAGE_RE.test(t) || t.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length < 3)) add('content:not_a_message')
+  if (CORRECTION_RE.test(t)) add('content:correction_of_earlier_text')
+  // the company's buying practices: stated only when the owner configured them as true
+  for (const [key, re] of PRACTICE_CLAIMS) if (re.test(t) && !(companyIdentity?.practices || []).includes(key)) add(`identity:company_practice_not_configured:${key}`)
 
   // the thread: its canonical fact ledger (deterministic; no model) and its latest seller message
   const thread = (messages || []).filter((m) => m && m.id)

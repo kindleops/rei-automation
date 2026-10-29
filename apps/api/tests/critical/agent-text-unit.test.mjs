@@ -66,6 +66,11 @@ test('validator: every refusal names its rule — money, human claim, the unansw
     ['A person on our team reads every message. Do you still own it?', { purpose: 'first_touch', messages: [] }, 'CONTENT_REJECTED', 'identity:human_review_claim_not_configured'],
     [`Do you still own it? ${'a'.repeat(320)}`, { purpose: 'first_touch', messages: [] }, 'CONTENT_REJECTED', 'length:over_320_characters'],
     ['Do you still own it — the house?', { purpose: 'first_touch', messages: [] }, 'CONTENT_REJECTED', 'style:em_or_en_dash'],
+    ['test', { purpose: 'first_touch', messages: [] }, 'CONTENT_REJECTED', 'content:not_a_message'],
+    ['placeholder', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'content:not_a_message'],
+    ['Sorry, that last text was sent by mistake, please ignore it.', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'content:correction_of_earlier_text'],
+    ['We buy houses as-is, so no repairs needed. Do you still own it?', { purpose: 'first_touch', messages: [] }, 'CONTENT_REJECTED', 'identity:company_practice_not_configured:as_is'],
+    ['We can close on your timeline with no fees. Do you still own it?', { purpose: 'first_touch', messages: [] }, 'CONTENT_REJECTED', 'identity:company_practice_not_configured:flexible_close'],
   ]
   for (const [body, o, code, reason] of cases) {
     const r = v(body, o)
@@ -74,8 +79,8 @@ test('validator: every refusal names its rule — money, human claim, the unansw
     assert.ok(r.reasons.includes(reason), `${body}: ${r.reasons.join(',')}`)
   }
   // one amount, permitted by a LIVE negotiation send authorization of this lead (≤ its ceiling)
-  assert.equal(v('We could do $140,000 for it as-is. Would that work?', { purpose: 'negotiation', messages: PRICE, moneyAuthority: { ceiling: 150000 } }).ok, true)
-  assert.ok(v('We could do $160,000 for it as-is. Would that work?', { purpose: 'negotiation', messages: PRICE, moneyAuthority: { ceiling: 150000 } }).reasons.includes('money:amount_above_authorized_ceiling'))
+  assert.equal(v('We could do $140,000 for it. Would that work?', { purpose: 'negotiation', messages: PRICE, moneyAuthority: { ceiling: 150000 } }).ok, true)
+  assert.ok(v('We could do $160,000 for it. Would that work?', { purpose: 'negotiation', messages: PRICE, moneyAuthority: { ceiling: 150000 } }).reasons.includes('money:amount_above_authorized_ceiling'))
   assert.ok(v('We could do $140,000 or $145,000. Would that work?', { purpose: 'negotiation', messages: PRICE, moneyAuthority: { ceiling: 150000 } }).reasons.includes('money:exactly_one_amount_required'))
 })
 

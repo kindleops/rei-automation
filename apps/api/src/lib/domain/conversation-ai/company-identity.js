@@ -20,7 +20,9 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 &.,'-]{1,79}$/
 const DESCRIPTOR_RE = /^[A-Za-z][A-Za-z '-]{1,59}$/
 const WEBSITE_RE = /^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/[A-Za-z0-9._~/-]*)?$/i
 
-export const NO_COMPANY_IDENTITY = Object.freeze({ configured: false, name: null, website: null, website_host: null, human_review: false, persona_descriptor: null, version: COMPANY_IDENTITY_VERSION })
+/** Buying practices a text may state only when the owner configured them as true (company_identity.practices). */
+export const COMPANY_PRACTICES = Object.freeze(['as_is', 'no_fees', 'cash', 'fast_close', 'flexible_close'])
+export const NO_COMPANY_IDENTITY = Object.freeze({ configured: false, name: null, website: null, website_host: null, human_review: false, persona_descriptor: null, practices: Object.freeze([]), version: COMPANY_IDENTITY_VERSION })
 
 export function normalizeCompanyIdentity(raw = null) {
   let v = raw
@@ -35,7 +37,8 @@ export function normalizeCompanyIdentity(raw = null) {
   const website = v.website_verified === true && WEBSITE_RE.test(site) ? site : null
   const descriptor = typeof v.persona_descriptor === 'string' ? v.persona_descriptor.replace(/\s+/g, ' ').trim() : ''
   return Object.freeze({ configured: true, name, website, website_host: website ? new URL(website).hostname.replace(/^www\./, '').toLowerCase() : null,
-    human_review: v.human_review === true, persona_descriptor: DESCRIPTOR_RE.test(descriptor) ? descriptor : null, version: COMPANY_IDENTITY_VERSION })
+    human_review: v.human_review === true, persona_descriptor: DESCRIPTOR_RE.test(descriptor) ? descriptor : null,
+    practices: Object.freeze([...new Set((Array.isArray(v.practices) ? v.practices : []).map(String).filter((x) => COMPANY_PRACTICES.includes(x)))]), version: COMPANY_IDENTITY_VERSION })
 }
 
 /** Read it fresh (any failure ⇒ not configured: fail closed to "say nothing about the company"). */
