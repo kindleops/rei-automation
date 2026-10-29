@@ -53,7 +53,7 @@ export const provider = () => fakeProvider((p) => (p.tools[0].input_schema?.prop
   : makeDecision({ intent: 'ownership_confirmed', seller_interest: 'unknown', outcome: 'REPLY_CANDIDATE', next_objective: 'gauge_interest', response_needed: true, proposed_message: 'R1 TEXT NEVER SENT', confidence: 0.93, source_message_ids: [], facts_extracted: [], stage_evidence: { stage: 'S2_interest', evidence_message_ids: [], rationale: 'x' } })))
 
 /** LeadCommand's worker: the action.* handlers over the backend client (owner pool), R3 with PG reservations. */
-export function worker(env, { beforeQueueInsert = null, offerSendDeps = {}, prov = provider(), now = undefined } = {}) {
+export function worker(env, { beforeQueueInsert = null, offerSendDeps = {}, prov = provider(), now = undefined, budgetMs = 30_000, capUsd = 0.05 } = {}) {
   const sb = pgSupabase(env.owner)
   const readSwitch = async (k) => (await sel(env.owner, 'select value from public.system_control where key = $1', [k]))[0]?.value ?? null
   const r3deps = {
@@ -68,12 +68,12 @@ export function worker(env, { beforeQueueInsert = null, offerSendDeps = {}, prov
       },
     }),
   }
-  const execution = createGatewayExecution({ supabase: sb, env: { AI_CONVERSATION_SHADOW_ENABLED: 'true', NEGOTIATION_COMPOSER_ENABLED: '1' }, provider: prov, trackerFor: () => createSpendTracker({ capUsd: 0.05 }), r3deps, readSwitch, offerSendDeps, ...(now ? { now } : {}) })
+  const execution = createGatewayExecution({ supabase: sb, env: { AI_CONVERSATION_SHADOW_ENABLED: 'true', NEGOTIATION_COMPOSER_ENABLED: '1' }, provider: prov, trackerFor: () => createSpendTracker({ capUsd }), r3deps, readSwitch, offerSendDeps, ...(now ? { now } : {}) })
   const store = createRuntimePgStore({ pool: env.db.api })
   const handlers = buildActionGatewayHandlers({ execution })
   const arm = async () => env.owner.query(`update agent.runtime_limits set runtime_enabled = true, emergency_stop = false, max_concurrency_global = 2, tick_max_jobs = 4, kind_limits = $1::jsonb where id = 1`,
     [JSON.stringify({ [ACTION_GATEWAY_EXECUTE_KIND]: { enabled: true, max_concurrency: 2, armed_by: OPERATOR } })])
-  const tick = async (workerId = 'lc-worker') => { await arm(); return runRuntimeTick({ store, handlers, workerId, budgetMs: 30_000 }) }
+  const tick = async (workerId = 'lc-worker') => { await arm(); return runRuntimeTick({ store, handlers, workerId, budgetMs }) }
   return { execution, tick, sb, readSwitch }
 }
 

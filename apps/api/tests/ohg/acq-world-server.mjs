@@ -22,6 +22,7 @@ import { pgSupabase } from '../helpers/pg-supabase.mjs'
 import { seedT34, worker, liveDispatch, dispatchQueued } from '../helpers/action-gateway-t34-world.mjs'
 import { simProvider } from '../helpers/followup-lifecycle-pg.mjs'
 import { fakeProvider } from '../helpers/conversation-ai-runtime-fakes.mjs'
+import { createCliModelProvider } from './cli-model-provider.mjs'
 import { makeDecision } from '../../src/lib/domain/conversation-ai/contract.js'
 import { ROUTINE_CATEGORIES } from '../../src/lib/domain/conversation-ai/send-policy.js'
 import { appendLeadEvent } from '../../src/lib/domain/outreach/lead-events.js'
@@ -245,7 +246,11 @@ const prov = fakeProvider((p) => {
   if (p.tools[0].input_schema?.properties?.message) return { message: scriptedText(user) }
   return makeDecision({ intent: 'ownership_confirmed', seller_interest: 'unknown', outcome: 'REPLY_CANDIDATE', next_objective: 'gauge_interest', response_needed: true, proposed_message: 'R1 TEXT NEVER SENT', confidence: 0.93, source_message_ids: [], facts_extracted: [], stage_evidence: { stage: 'S2_interest', evidence_message_ids: [], rationale: 'scripted' } })
 })
-const w = worker(env, { prov })
+// ACQ_WORLD_REAL_COMPOSER=1 (evaluation only): LeadCommand's writer runs on the PRODUCTION models through the operator's
+// authorized Claude Code session (cli-model-provider.mjs) instead of the script. The provider stays SIMULATED.
+const REAL_COMPOSER = process.env.ACQ_WORLD_REAL_COMPOSER === '1'
+const realProv = REAL_COMPOSER ? createCliModelProvider({ log: (r) => fs.appendFileSync(path.join(OUT, 'composer-calls.jsonl'), JSON.stringify({ at: new Date().toISOString(), ...r }) + '\n') }) : null
+const w = worker(env, REAL_COMPOSER ? { prov: realProv, budgetMs: 170_000, capUsd: 0.5 } : { prov })
 const sim = simProvider()
 const sendsFile = path.join(OUT, 'sends.jsonl')
 let sentSeen = 0
@@ -364,7 +369,7 @@ const READER = {}
 for (const [k, id] of [['gold', gold.thread_id], ['soft', soft.thread_id], ['stopped', stoppedThread.thread_id], ['wrong', wrong.thread_id]]) READER[k] = await readerEligibility(id)
 const seed = (k, { thread_id = null, campaign_target_id = null, expect }) => ({ thread_id, campaign_target_id, property_id: PID[k], property_ref: `pid_${[...PID[k]].map((d) => 'ghijklmnop'[Number(d)]).join('')}`, market: MARKET, area_code: P[k].slice(2, 5), address: `${STREET[k]}, Honolulu, HI 96816`, expect, pool: verdict(campaign_target_id || thread_id), reader_contact_eligibility: READER[k] ?? null })
 const world = {
-  started_at: new Date().toISOString(), database: dbName, provider: 'SIMULATED', model: 'SCRIPTED (no network)', ports: PORTS, market: MARKET,
+  started_at: new Date().toISOString(), database: dbName, provider: 'SIMULATED', model: REAL_COMPOSER ? 'REAL composer (production models via the operator’s Claude Code session); SIMULATED provider' : 'SCRIPTED (no network)', ports: PORTS, market: MARKET,
   reader: { url: `http://127.0.0.1:${PORTS.reader}/mcp`, token_file: readerToken, mode: 'live (local PostgREST over the disposable database)' },
   action: { url: `${actionListener.url}`, credential_files: Object.fromEntries(Object.keys(creds).map((k) => [k, path.join(OUT, `cred-${k}`)])),
     agents: { sterling: 'agt_sterling', nova: 'agt_nova', equity: 'agt_equity', haven: 'agt_haven' },
