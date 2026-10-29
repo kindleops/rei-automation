@@ -6,6 +6,7 @@
 // via runtime/canonical-shadow.js) — the exact code a canary would run. The R1 proposed_message
 // writer (engine.js) is retired.
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
+import { agentStandDownForThread, AGENT_HELD_STAND_DOWN } from './agent-lead-stand-down.js'
 import { createAnthropicProvider } from './anthropic-provider.js'
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js'
 import { loadInboundRow } from '@/lib/domain/conversation-ai/context-loader.js'
@@ -89,6 +90,9 @@ export async function runConversationAiShadowForInbound({ providerMessageSid, in
     const same = !inboundVersion || !existing.inbound_version || existing.inbound_version === inboundVersion
     return { ran: false, code: same ? 'DUPLICATE_INBOUND' : 'PRIOR_VERSION_RECORDED', record: existing }
   }
+  // link #32: an agent holds this lead — no model decision here (the agent hears the inbound on its event feed)
+  const sd = await agentStandDownForThread(supabase, inbound.thread_key)
+  if (sd.stand_down) return { ran: false, code: AGENT_HELD_STAND_DOWN }
   const ci = await loadCanonicalInputs({ supabase, providerMessageSid, inbound })
   if (!ci) return { ran: false, code: 'INBOUND_NOT_FOUND' }
   const loaded = ci.loaded

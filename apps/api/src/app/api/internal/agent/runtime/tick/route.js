@@ -16,7 +16,7 @@ import { conversationRuntimeHandlers, conversationRuntimeMaintenance } from '@/l
 import { missionRuntimeHandlers } from '@/lib/ai/mission-runtime-wiring.js'
 import { operationsRuntimeHandlers } from '@/lib/ai/operations-runtime-wiring.js'
 import { followupRuntimeHandlers } from '@/lib/ai/followup-runtime-wiring.js'
-import { actionGatewayExecutionHandlers } from '@/lib/ai/action-gateway-execution.js'
+import { actionGatewayExecutionHandlers, actionGatewayRuntimeMaintenance } from '@/lib/ai/action-gateway-execution.js'
 import { workforceRuntimeHandlers } from '@/lib/ai/workforce-runtime-wiring.js'
 import { child } from '@/lib/logging/logger.js'
 
@@ -41,7 +41,7 @@ export async function POST(request) {
     // Gateway executor kind (action_gateway.execute — the canonical send paths) only when LC_ACTION_GATEWAY_EXECUTION=1;
     // the Workforce kinds (workforce.coo_plan / workforce.dispatch / workforce.mission_review — coordination only, no send,
     // no offer, no stage write) only when WORKFORCE_ENABLED=1
-    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...missionRuntimeHandlers(), ...operationsRuntimeHandlers(), ...followupRuntimeHandlers(), ...actionGatewayExecutionHandlers(), ...workforceRuntimeHandlers() }, maintenance: conversationRuntimeMaintenance() })
+    const result = await runScheduledRuntimeTick({ handlers: { ...DEFAULT_RUNTIME_HANDLERS, ...conversationRuntimeHandlers(), ...missionRuntimeHandlers(), ...operationsRuntimeHandlers(), ...followupRuntimeHandlers(), ...actionGatewayExecutionHandlers(), ...workforceRuntimeHandlers() }, maintenance: [...conversationRuntimeMaintenance(), ...actionGatewayRuntimeMaintenance()] })
     if (result.summary) {
       const s = result.summary
       logger.info('agent.runtime.tick', { blocked: s.blocked, claimed: s.claimed, jobs: s.jobs.map((j) => `${j.kind}:${j.outcome}`), errors: s.errors.map((e) => `${e.phase}:${e.code}`), elapsed_ms: s.elapsed_ms })

@@ -82,7 +82,11 @@ function deepKeys(v, out = [], depth = 0) {
  */
 export function createActionGateway({ store, reads, services, pepper, dataOrgId, catalog = createActionCatalog(), logic = ACTION_LOGIC, worker = `action-gateway:${process.pid}`,
   leaseSeconds = LIMITS.lease_seconds, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onAudit = null, maxBusyRetries = LIMITS.claim_busy_retries,
-  approvalDecideTtlMs = APPROVAL_TTL_MS.default, approvalGrantTtlMs = APPROVAL_GRANT_TTL_MS }) {
+  approvalDecideTtlMs = APPROVAL_TTL_MS.default, approvalGrantTtlMs = APPROVAL_GRANT_TTL_MS,
+  // Owner architecture correction 2026-10-29: Agntei's employees compose EVERY SMS. A spec marked `retired` (an action
+  // where LeadCommand would write the words for an agent: queue_agent_message, queue_authorized_reply) is refused
+  // AGENT_COMPOSES_TEXT. Its code is kept for the record; only a test that exercises that retained code turns this on.
+  legacyComposerActionsForTests = false }) {
   if (!store || !reads || !services) throw new Error('action gateway: store, reads and services are required')
   if (!UUID_RE.test(String(dataOrgId || ''))) throw new Error('action gateway: dataOrgId (the served org) must be a uuid')
   credentialDigest(pepper, `lcag_${'A'.repeat(43)}`) // validates the pepper at construction (throws PEPPER_INVALID)
@@ -133,7 +137,11 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
   function validate(spec, rawArgs) {
     const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : null
     if (!args) throw gwErr('invalid_input', 'INPUT_INVALID', 'arguments must be an object')
-    const keys = deepKeys(args)
+    // a spec's VERBATIM record (queue_agent_text's attribution: employee, model, provider, route, session id, turn id)
+    // is stored as the agent sent it and never interpreted — never identity or authority — so its inner key names are
+    // not context keys; its shape is still the closed schema's
+    const verbatim = Array.isArray(spec.verbatim_keys) ? spec.verbatim_keys : []
+    const keys = deepKeys(verbatim.length ? Object.fromEntries(Object.entries(args).filter(([k]) => !verbatim.includes(k))) : args)
     if (keys.some((k) => FORGED_CONTEXT_KEYS.test(k))) throw gwErr('invalid_input', 'FORGED_CONTEXT', 'identity, tenant, authority and approvals come from the server, never from tool arguments')
     if (keys.some((k) => ESCALATION_KEYS.test(k))) throw gwErr('invalid_input', 'ESCALATION_REFUSED', 'no tool accepts SQL, routes, roles or other execution surfaces')
     const errors = validateSchema(spec.input, args)
@@ -157,7 +165,9 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     try { v = await fn({ spec, reads, services, store, now }) } catch { v = { available: false, code: 'CAPABILITY_STATE_UNREADABLE' } }
     if (v?.available !== true) {
       base.unavailable_reason = v?.code || 'CAPABILITY_OFF'
-      throw gwErr('unavailable', 'capability_unavailable', `${spec.name} is not available: its production capability is not activated (${base.unavailable_reason})`, { reason: base.unavailable_reason })
+      // a spec that names its refusals (queue_agent_text) answers the reason itself as the code (EMERGENCY_STOP_ACTIVE,
+      // AGENT_TEXT_KILL_SWITCH_OFF …), never a generic one
+      throw gwErr('unavailable', spec.unavailable_reason_is_code === true ? base.unavailable_reason : 'capability_unavailable', `${spec.name} is not available: ${spec.unavailable_reason_is_code === true ? 'refused' : 'its production capability is not activated'} (${base.unavailable_reason})`, { reason: base.unavailable_reason })
     }
   }
 
@@ -319,6 +329,9 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
       await controlsOrStop(spec, base)
       if (catalog.isRead(spec.name)) return await readTool(spec, principal, args, base, digest)
       if (spec.implemented === false) throw gwErr('not_implemented', 'capability_not_implemented', `${spec.name} is registered but not implemented in this phase`)
+      if (spec.retired && legacyComposerActionsForTests !== true) {
+        throw gwErr('refused', spec.retired.code || 'AGENT_COMPOSES_TEXT', `${spec.name} is retired: LeadCommand never composes text for an agent. Compose the exact SMS yourself and send it with ${spec.retired.use || 'sms_send_agent_text'}.`, { use: spec.retired.use || 'sms_send_agent_text', gateway_action: spec.retired.action || 'queue_agent_text' })
+      }
       // the path's PRODUCTION ACTIVATION (T3 / T4): off or NO-GO ⇒ capability_unavailable, whatever the grants say
       await availableOrRefuse(spec, base)
       const grants = grantsFor(principal, spec)
@@ -330,7 +343,8 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
       const resource = await p.resolve(input, ctxBase)
       ctxBase.grant = grantForResource(grants, resource)
       const params = JSON.parse(canonicalJson(await p.params(input, resource, ctxBase)))
-      const params_hash = hashCanonical({ action: spec.name, version: spec.version, params })
+      // (a spec may hash a SUBSET of its params: queue_agent_text's idempotency is over the text and its lead, not the attribution)
+      const params_hash = hashCanonical({ action: spec.name, version: spec.version, params: typeof p.hashParams === 'function' ? p.hashParams(params) : params })
       const idempotency_key = hashCanonical({ o: dataOrgId, a: principal.agent_id, x: spec.name, rt: resource.type, rid: String(resource.id), k: input.client_request_id })
       let opened
       try {
@@ -344,7 +358,7 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
       if (!intent?.intent_id) throw gwErr('internal', 'INTENT_OPEN_FAILED')
       if (!opened.inserted && intent.params_hash !== params_hash) {
         await audit({ ...base, event_type: 'idempotency_conflict', intent_id: intent.intent_id, code: 'IDEMPOTENCY_KEY_REUSED' })
-        throw gwErr('conflict', 'IDEMPOTENCY_KEY_REUSED', 'this client_request_id was already used for this action and resource with different parameters')
+        throw gwErr('conflict', spec.idempotency_conflict_code || 'IDEMPOTENCY_KEY_REUSED', 'this client_request_id was already used for this action and resource with different parameters')
       }
       const out = await advance(spec, intent, { ...ctxBase, resource, params }, base)
       return { ...out, latency_ms: now() - started, gateway: ACTION_GATEWAY_VERSION }
@@ -405,7 +419,7 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
   function listTools() {
     return [...catalog.actions(), ...catalog.reads()].map((s) => ({
       name: s.name, title: s.title, description: s.description, input: s.input, tier: TIER_LABEL[s.tier], capability: s.capability,
-      implemented: s.implemented !== false, read: catalog.isRead(s.name), scope: s.scope || null, risk: s.risk || null,
+      implemented: s.implemented !== false, read: catalog.isRead(s.name), scope: s.scope || null, risk: s.risk || null, ...(s.retired ? { retired: true } : {}),
     }))
   }
 

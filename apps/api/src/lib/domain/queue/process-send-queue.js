@@ -60,6 +60,8 @@ import { evaluateAiConversationRowGate, aiRowCancelPayload, loadNewerInboundsFor
 import { evaluateAgentMessageRowGate, agentMessageRowCancelPayload, readAgentMessageActivation } from "@/lib/domain/queue/agent-message-row-gate.js";
 import { createFollowUpLifecycleDeps, evaluateFollowUpIntentRowGate, isLifecycleRow } from "@/lib/domain/followups/followup-lifecycle.js";
 import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey, recordAiRowProviderOutcome } from "@/lib/domain/messages/ai-generated-message.js";
+import { evaluateAgentTextRowGate, readAgentTextActivation, readLeadHolder, loadInboundsSince, agentTextRowCancelPayload } from "@/lib/domain/queue/agent-text-row-gate.js";
+import { appliesBlankGreetingRule } from "@/lib/domain/messaging/transport-content-rules.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import {
@@ -1696,6 +1698,8 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       readSwitch: deps.readAiConversationSwitch || (hasSupabaseConfig() ? getSystemValueFresh : async () => null),
       loadRecord: deps.loadAiGeneratedMessage || ((queue_key) => lookupAiGeneratedMessageByQueueKey(getSupabase(deps), queue_key)),
       loadNewerInbounds: deps.loadNewerInbounds || ((r) => loadNewerInboundsForRow(getSupabase(deps), r)),
+      // link #32: LeadCommand's own AI reply stands down on a lead an agent holds
+      readLeadHolder: deps.readAgentLeadHolder || (deps.supabase || deps.supabaseClient || hasSupabaseConfig() ? ((thread_key) => readLeadHolder(getSupabase(deps), thread_key, { strict: false })) : null),
       now,
       propertyGeography: property_geography,
       windowMinutes: conversational_reply_window_minutes,
@@ -1717,6 +1721,37 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         queue_item_id: queue_row_id,
       };
     }
+
+    // ── link #32: AGENT-COMPOSED TEXT rows only (metadata.agent_text_intent_id); no-op for every other row ──
+    // Its OWN gate (the AI reply gate above skips these rows): both emergency stops + ai_agent_text_enabled, the body =
+    // its immutable agent_text ledger record, the author still holds the lead, holds, staleness, the window. Every
+    // later gate still runs.
+    const agent_text_gate = await evaluateAgentTextRowGate(queue_row, {
+      readActivation: deps.readAgentTextActivation || (() => readAgentTextActivation(getSupabase(deps))),
+      loadRecord: deps.loadAiGeneratedMessage || ((queue_key) => lookupAiGeneratedMessageByQueueKey(getSupabase(deps), queue_key)),
+      readHolder: deps.readAgentLeadHolder || ((thread_key) => readLeadHolder(getSupabase(deps), thread_key)),
+      loadInbounds: deps.loadAgentTextInbounds || ((thread_key, since) => loadInboundsSince(getSupabase(deps), thread_key, since)),
+      now,
+    });
+    if (agent_text_gate.applies && agent_text_gate.action !== "proceed") {
+      if (agent_text_gate.action === "cancel") {
+        await updateQueueRow(queue_row_id, agentTextRowCancelPayload(queue_row, { now, reason: agent_text_gate.reason, next_permitted_at: agent_text_gate.next_permitted_at || null }), deps);
+      } else {
+        await releaseSkippedQueueRow(queue_row, lock_token, agent_text_gate.reason, { ...deps, now });
+      }
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: agent_text_gate.reason,
+        queue_status: agent_text_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        final_queue_status: agent_text_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+    // the exact, verified text of an agent (the transport's 'agent_text' content profile applies to it below)
+    const agent_text_send = agent_text_gate.applies === true && agent_text_gate.action === "proceed" && isVerifiedAiGeneratedRow(queue_row);
 
     // ── link #32: AGENT-INITIATED message rows only (metadata.agent_message_intent_id); no-op for every other row ──
     // Both emergency stops, the AI-reply certification gate and the agent-message switch re-read at dispatch:
@@ -2395,10 +2430,14 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     // ── Blank greeting guard ─────────────────────────────────────────────
     // Block any row where the rendered body starts with a blank greeting.
     // This is a belt-and-suspenders guard for rows that bypassed feeder checks.
+    // (domain/messaging/transport-content-rules.js carries the SAME literals for the agent-text validator.) A verified
+    // agent-composed text (queue_agent_text: the agent-text row gate matched its body to the immutable ledger record
+    // above) was never rendered: the greeting rule does not apply to it (profile 'agent_text').
     const BLANK_GREETING_GUARD_RE = /^(hi|hey|hello|hola|ola|marhaba)\s*,/i;
     const BLANK_GREETING_INLINE_RE = /(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/;
     if (
       !manual_inbox_send &&
+      appliesBlankGreetingRule(agent_text_send ? "agent_text" : "rendered") &&
       (BLANK_GREETING_GUARD_RE.test(message_fields.body) ||
         BLANK_GREETING_INLINE_RE.test(message_fields.body))
     ) {
@@ -2652,7 +2691,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       {
         supabase: getSupabase(deps),
         store: deps.store,
-        sendProvider: (args) => send_textgrid_sms({ ...args, seller_first_name }),
+        sendProvider: (args) => send_textgrid_sms({ ...args, seller_first_name, ...(agent_text_send ? { agent_text_exact_body: true } : {}) }),
         // Claims only. The adapter re-verifies every one of them against
         // durable rows before it will let a send cross an active brake, and
         // builds to null for any execution that is not a consumed scoped

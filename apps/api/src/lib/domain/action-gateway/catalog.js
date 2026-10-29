@@ -180,8 +180,11 @@ export const WORKFORCE_TOOLS = WF_NAMES
 /** Operation Hidden Gold: the acquisition-operations family (link #29). */
 export const OHG_TOOLS = OHG_NAMES
 /** Link #32: the agent-initiated message family (queue_agent_message, its template read, lead ownership, the event feed). */
-export const AGENT_MESSAGE_TOOLS = Object.freeze(['queue_agent_message', 'list_message_templates', ...AGENT_MESSAGE_FAMILY_ACTIONS.map((s) => s.name), ...AGENT_MESSAGE_FAMILY_READS.map((s) => s.name)])
+export const AGENT_MESSAGE_TOOLS = Object.freeze(['queue_agent_message', 'queue_agent_text', 'list_message_templates', ...AGENT_MESSAGE_FAMILY_ACTIONS.map((s) => s.name), ...AGENT_MESSAGE_FAMILY_READS.map((s) => s.name)])
+/** The actions retired for agents (AGENT_COMPOSES_TEXT): LeadCommand would write the words. */
+export const RETIRED_COMPOSER_ACTIONS = Object.freeze(ACTIONS_RETIRED_NAMES())
 export const ACTION_NAMES = Object.freeze(ACTIONS.map((a) => a.name))
+function ACTIONS_RETIRED_NAMES() { return ACTIONS.filter((a) => a.retired).map((a) => a.name) }
 export const REQUESTED_TOOLS = Object.freeze(['create_research_job', 'request_property_valuation', 'create_operator_task', 'update_operator_task', 'run_authorized_reconciliation',
   'update_lead_disposition', 'update_lead_temperature', 'update_lead_stage', 'create_deal_action', 'set_thread_hold', 'request_thread_hold_release',
   'draft_seller_reply', 'schedule_followup', 'cancel_followup', 'queue_authorized_reply',

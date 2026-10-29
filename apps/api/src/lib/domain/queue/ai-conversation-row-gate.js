@@ -35,6 +35,8 @@ export function isAiConversationRow(row = {}) {
   const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
   return isAiGeneratedOrigin(row) || clean(row?.source).toLowerCase() === AI_CONVERSATION_SOURCE || clean(meta.source).toLowerCase() === AI_CONVERSATION_SOURCE
 }
+/** link #32: an agent-COMPOSED text (queue_agent_text) is judged by its own gate (agent-text-row-gate.js), never this one. */
+const isAgentComposedTextRow = (row = {}) => Boolean(clean(row?.metadata && typeof row.metadata === 'object' ? row.metadata.agent_text_intent_id : ''))
 
 // A pure acknowledgement ("ok", "thanks", an emoji) does not change what the reply should
 // say; anything else (an answer, a question, a correction, a STOP) is MATERIAL and makes a
@@ -62,8 +64,8 @@ export async function loadNewerInboundsForRow(supabase, row = {}) {
  * @param {{ readSwitch: (key: string) => Promise<string|null>, now?: string, propertyGeography?: object|null }} deps
  * @returns {Promise<{ applies: boolean, action?: 'proceed'|'cancel'|'defer', reason?: string }>}
  */
-export async function evaluateAiConversationRowGate(row = {}, { readSwitch, loadRecord = null, loadNewerInbounds = null, now = new Date().toISOString(), propertyGeography = null, windowMinutes = undefined, automationHoldChecker = null } = {}) {
-  if (!isAiConversationRow(row)) return { applies: false }
+export async function evaluateAiConversationRowGate(row = {}, { readSwitch, loadRecord = null, loadNewerInbounds = null, now = new Date().toISOString(), propertyGeography = null, windowMinutes = undefined, automationHoldChecker = null, readLeadHolder = null } = {}) {
+  if (!isAiConversationRow(row) || isAgentComposedTextRow(row)) return { applies: false }
   let raw = null
   try { raw = typeof readSwitch === 'function' ? await readSwitch(AI_SEND_KILL_SWITCH_KEY) : null } catch { raw = null }
   if (!parseKillSwitch(raw)) return { applies: true, action: 'cancel', reason: AI_ROW_DISABLED_REASON }
@@ -77,6 +79,14 @@ export async function evaluateAiConversationRowGate(row = {}, { readSwitch, load
   if (!lookup || lookup.read_failed) return { applies: true, action: 'defer', reason: 'ai_generated_record_unreadable' }
   const record = verifyAiGeneratedRecordForRow(row, lookup.record)
   if (!record.ok) return { applies: true, action: 'cancel', reason: record.reason }
+  // link #32 — NO SECOND AI ENGINE on an agent-held lead: the agent holding it composes every text there; a reply
+  // LeadCommand's own engine queued (before the agent took the lead, or by any path) is cancelled, never sent
+  if (typeof readLeadHolder === 'function') {
+    let h = null
+    try { h = await readLeadHolder(row.thread_key) } catch { h = null }
+    if (!h || h.read_failed) return { applies: true, action: 'defer', reason: 'ai_lead_holder_unreadable' }
+    if (h.agent_id) return { applies: true, action: 'cancel', reason: 'ai_reply_agent_holds_lead' }
+  }
   // …and the AI send policy must STILL authorise it (enabled, thread in scope, category on)
   let policyRaw = null
   try { policyRaw = await readSwitch(AI_SEND_POLICY_KEY) } catch { policyRaw = null }

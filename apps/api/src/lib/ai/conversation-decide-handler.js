@@ -24,6 +24,7 @@
 // job result of codes/counts only (agent.payload_is_clean). Nothing is sent.
 import { CONVERSATION_AI_SHADOW_ENV, CONVERSATION_DECIDE_KIND, conversationAiShadowRequested, decodeRef, encodeRef } from './conversation-ai-shadow-hook.js'
 import { ModelCallRefused } from '@/lib/domain/conversation-ai/model-client.js'
+import { agentStandDownForInbound, AGENT_HELD_STAND_DOWN } from './agent-lead-stand-down.js'
 import { turnsRequested } from '@/lib/domain/conversation-ai/turns/turn-engine.js'
 import { createConversationTurnHandler, createConversationTurnSweepHandler, CONVERSATION_TURN_KIND, CONVERSATION_TURN_SWEEP_KIND, defaultOperatorItems, precautionaryHoldWorkItem } from './conversation-turn-handler.js'
 
@@ -88,7 +89,19 @@ export function runtimeJobTracker(ctx) {
 // conversation.turn job. Turns OFF (default) ⇒ this handler behaves exactly as in 8.5.15.
 // A conversation change on a turn (event_kind state_change / failed_outbound_reply, turn_ref)
 // is routed the same way.
-export function createConversationDecideHandler({ run = null, env = process.env, route = null, routeChange = null, runtimeStore = null, supabase = null, effectsDeps = {}, operatorItems = null } = {}) {
+// link #32: `standDown(providerMessageSid)` — an agent holds the lead ⇒ no model decision (a stop is still routed, with
+// no model, when turns are on: the deterministic stop path cancels the thread's open turn)
+async function defaultStandDown(supabase, sid) {
+  let sb = supabase
+  if (!sb) {
+    const { hasSupabaseConfig } = await import('@/lib/supabase/client.js')
+    if (!hasSupabaseConfig()) return { stand_down: false }
+    sb = (await import('@/lib/supabase/default-client.js')).getDefaultSupabaseClient()
+  }
+  return agentStandDownForInbound(sb, sid)
+}
+
+export function createConversationDecideHandler({ run = null, env = process.env, route = null, routeChange = null, runtimeStore = null, supabase = null, effectsDeps = {}, operatorItems = null, standDown = null } = {}) {
   return Object.freeze({
     kind: CONVERSATION_DECIDE_KIND,
     async run(ctx) {
@@ -105,6 +118,8 @@ export function createConversationDecideHandler({ run = null, env = process.env,
       }
       const sid = typeof input.inbound_ref === 'string' && input.inbound_ref.length <= 320 ? decodeRef(input.inbound_ref) : null
       if (!sid) return { result: { code: 'INBOUND_REF_INVALID' } }
+      const sd = await (standDown ? standDown(sid) : defaultStandDown(supabase, sid))
+      if (sd?.stand_down && !(sd.stop && turnsRequested(env))) return { result: { code: sd.stop ? `${AGENT_HELD_STAND_DOWN}_STOP_HANDLED_DETERMINISTICALLY` : AGENT_HELD_STAND_DOWN } }
       const inboundVersion = typeof input.inbound_version === 'string' && /^[a-p]{16}$/.test(input.inbound_version) ? input.inbound_version : null
       const rev = typeof input.inbound_revision === 'string' ? Number(decodeRef(input.inbound_revision)) : 0
       const inboundRevision = Number.isInteger(rev) && rev > 0 && rev <= 999 ? rev : 0

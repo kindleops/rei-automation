@@ -30,6 +30,8 @@ export const AI_SOURCE = 'ai_conversation'
 export const LEGACY_AI_TEMPLATE_PREFIX = 'ai-msg:' // refused everywhere
 export const AI_MESSAGE_EVENT_TYPES = Object.freeze(['queued', 'provider_accepted', 'provider_failed', 'delivered', 'undelivered', 'cancelled', 'held'])
 export const AI_GENERATED_MESSAGE_COLUMNS = 'id,message_origin,queue_key,idempotency_key,inbound_message_id,thread_ref,property_ref,contact_ref,recipient_ref,sender_ref,message_body,body_sha256,decision_id,job_id,decision_outcome,model,playbook_version,prompt_version,context_version,validation,ledger_snapshot_hash,authorization_scope,approval_state,generated_at,cost_usd,input_tokens,output_tokens,audit_refs,record_version,created_at'
+// link #32: an agent-composed record (queue key agent_text:<intent>) is read with its record_kind and author columns too
+const AGENT_TEXT_RECORD_COLUMNS = `id,message_origin,queue_key,idempotency_key,inbound_message_id,thread_ref,property_ref,contact_ref,recipient_ref,sender_ref,message_body,body_sha256,decision_id,job_id,decision_outcome,model,playbook_version,prompt_version,context_version,validation,ledger_snapshot_hash,authorization_scope,approval_state,generated_at,cost_usd,input_tokens,output_tokens,audit_refs,record_version,created_at,record_kind,author_employee,author_attribution`
 
 const clean = (v) => String(v ?? '').trim()
 const lower = (v) => clean(v).toLowerCase()
@@ -97,7 +99,14 @@ export function verifyAiGeneratedRecordForRow(row = {}, record = null) {
   if (clean(m.ai_message_body_sha256) && clean(m.ai_message_body_sha256) !== recordHash) return { ok: false, reason: 'ai_generated_body_mismatch' }
   if (clean(m.ai_message_id) && record.id && clean(m.ai_message_id) !== clean(record.id)) return { ok: false, reason: 'ai_generated_record_id_mismatch' }
   if (!clean(row.queue_key) || clean(record.queue_key) !== clean(row.queue_key)) return { ok: false, reason: 'ai_generated_record_reused' }
-  if (isAgentOutboundRecord(record)) {
+  if (isAgentTextRecord(record)) {
+    // link #32 (queue_agent_text): an agent's EXACT text, bound to ONE gateway intent; an answer also to its inbound
+    const intent = clean(m.agent_text_intent_id)
+    if (!intent || clean(record.queue_key) !== `agent_text:${intent}` || clean(record.idempotency_key) !== `agent_text_intent:${intent}`) return { ok: false, reason: 'ai_generated_record_not_bound_to_intent' }
+    const answers = clean(m.agent_text?.in_reply_to_message_id)
+    if (clean(record.inbound_message_id) !== answers) return { ok: false, reason: 'agent_text_record_not_bound_to_its_inbound' }
+    if (!clean(record.author_employee)) return { ok: false, reason: 'agent_text_record_without_author' }
+  } else if (isAgentOutboundRecord(record)) {
     // link #32: an AGENT-INITIATED message answers no inbound; it is bound to ONE Action Gateway intent instead
     const intent = clean(m.agent_message_intent_id)
     if (!intent || clean(record.queue_key) !== agentMessageQueueKey(intent) || clean(record.idempotency_key) !== `agent_message_intent:${intent}`) return { ok: false, reason: 'ai_generated_record_not_bound_to_intent' }
@@ -111,6 +120,26 @@ export function verifyAiGeneratedRecordForRow(row = {}, record = null) {
   if (lower(record.validation?.status) !== 'validated') return { ok: false, reason: 'ai_generated_record_not_validated' }
   if (!['policy_authorized', 'operator_approved'].includes(record.approval_state)) return { ok: false, reason: 'ai_generated_record_not_authorized' }
   return { ok: true, reason: 'ai_generated_message' }
+}
+
+/** link #32: the agent-COMPOSED kind of record (PROPOSED_20261029090000_ai_generated_outbound.sql, record_kind agent_text). */
+export const AGENT_COMPOSED_TEXT_OUTCOME = 'AGENT_COMPOSED_TEXT'
+export const AGENT_TEXT_RECORD_VERSION = 'agent-text-record.v1'
+export function isAgentTextRecord(record = {}) {
+  return clean(record?.record_kind) === 'agent_text' || clean(record?.decision_outcome) === AGENT_COMPOSED_TEXT_OUTCOME
+}
+/**
+ * The immutable record of an agent's EXACT text (no LeadCommand model call): queue_key 'agent_text:<intent>', idempotency
+ * 'agent_text_intent:<intent>', decision_outcome AGENT_COMPOSED_TEXT, category = the agent's purpose, inbound = the
+ * inbound it answers (or null), the author (employee) and the attribution as the agent sent it (never interpreted). The
+ * record's `model` is the attribution's model as reported (or 'agent_composed'): LeadCommand ran none.
+ */
+export function buildAgentTextMessage({ intentId, purpose, body, inReplyTo = null, attribution = {}, validation, policy, authorizationScope = {}, ...rest }) {
+  const r = buildAiGeneratedMessage({ ...rest, body, inboundMessageId: inReplyTo || null, queueKey: `agent_text:${clean(intentId)}`, model: clean(attribution?.model) || 'agent_composed',
+    playbookVersion: 'agent_composed', promptVersion: 'none', validation, policy, costUsd: 0, inputTokens: null, outputTokens: null,
+    authorizationScope: { ...authorizationScope, scope_match: authorizationScope.scope_match || 'agent_text', category: purpose } })
+  return { ...r, record_kind: 'agent_text', inbound_message_id: clean(inReplyTo) || null, idempotency_key: `agent_text_intent:${clean(intentId)}`, decision_outcome: AGENT_COMPOSED_TEXT_OUTCOME,
+    author_employee: clean(attribution?.employee), author_attribution: attribution, record_version: AGENT_TEXT_RECORD_VERSION }
 }
 
 /** link #32: the agent-initiated outbound kind of record (PROPOSED_20261029090000_ai_generated_outbound.sql). */
@@ -176,7 +205,7 @@ export async function lookupAiGeneratedMessageByQueueKey(supabase, queueKey) {
   if (!key) return { found: false, read_failed: false, record: null }
   if (!supabase?.from) return { found: false, read_failed: true, record: null }
   try {
-    const r = await supabase.from(AI_GENERATED_MESSAGES_TABLE).select(AI_GENERATED_MESSAGE_COLUMNS).eq('queue_key', key).limit(1)
+    const r = await supabase.from(AI_GENERATED_MESSAGES_TABLE).select(key.startsWith('agent_text:') ? AGENT_TEXT_RECORD_COLUMNS : AI_GENERATED_MESSAGE_COLUMNS).eq('queue_key', key).limit(1)
     if (r?.error) return { found: false, read_failed: true, record: null }
     const record = Array.isArray(r?.data) ? r.data[0] || null : r?.data || null
     return { found: Boolean(record), read_failed: false, record }

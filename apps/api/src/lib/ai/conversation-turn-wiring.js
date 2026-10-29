@@ -3,6 +3,7 @@
 // turn engine meets a DB client and the runtime store. Writes: public.conversation_reply_turns (turn
 // functions) and runtime jobs (agent.runtime_enqueue_event_at). It never sends: the decision at
 // the due time is the existing shadow decision (public.conversation_ai_shadow_decisions).
+import { agentStandDownForThread, AGENT_HELD_STAND_DOWN } from './agent-lead-stand-down.js'
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js'
 import { loadInboundRow, loadShadowContext } from '@/lib/domain/conversation-ai/context-loader.js'
@@ -174,6 +175,9 @@ export function createCanonicalTurnDecider({ supabase = getDefaultSupabaseClient
     const ci = await loadCanonicalInputs({ supabase, providerMessageSid: sid, now: at, readSwitch: read })
     if (!ci) return { code: 'TURN_INBOUND_NOT_FOUND', outcome: 'needs_review', reply: null }
     if (isInternalTestPhone(ci.loaded.row.from_phone_number) || isInternalTestPhone(ci.loaded.row.to_phone_number)) return { code: 'INTERNAL_TEST_THREAD', outcome: 'needs_review', reply: null }
+    // link #32: an agent holds this lead — the conversation is the agent's; NO model decision, no AI reply here
+    const sd = await agentStandDownForThread(supabase, ci.input?.inbound?.thread_key || ci.loaded?.row?.thread_key)
+    if (sd.stand_down) return { code: AGENT_HELD_STAND_DOWN, outcome: 'agent_held', reply: null }
     const modelClient = tracker ? createConversationModelClient({ provider: provider || (await import('./anthropic-provider.js')).createAnthropicProvider({ env }), tracker, env, remainingMs, signal }) : null
     let eligibility
     try { eligibility = await ci.eligibilityFor({ now: at }) } catch { eligibility = { blocked: true, reasons: ['send_time_guard_read_failed'], guard: { blocked: true, reason: 'send_time_guard_read_failed' } } }

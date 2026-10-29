@@ -1,5 +1,5 @@
 // Minimal JSON-Schema subset validator for tool inputs (no dependency).
-// Supports: type (object|string|integer|number|boolean|array), properties,
+// Supports: type (object|string|integer|number|boolean|array, or a list of scalars + 'null'), properties,
 // required, additionalProperties:false, enum, maxLength, minLength, pattern,
 // minimum, maximum, items, maxItems, minItems. Tool input schemas MUST be
 // closed objects with bounded strings/arrays (checked by defineTool).
@@ -13,12 +13,15 @@ function typeOf(v) {
 
 export function validateSchema(schema, value, path = '$') {
   const errors = []
-  const t = schema.type
+  // a type list (e.g. ['string', 'null']: a nullable bounded string) is the one union this subset supports
+  const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : null
   const actual = typeOf(value)
-  if (t) {
-    const ok = t === actual || (t === 'number' && actual === 'integer')
-    if (!ok) return [`${path}: expected ${t}, got ${actual}`]
+  if (types) {
+    const ok = types.some((x) => x === actual || (x === 'number' && actual === 'integer'))
+    if (!ok) return [`${path}: expected ${types.join('|')}, got ${actual}`]
+    if (actual === 'null') return []
   }
+  const t = Array.isArray(schema.type) ? (types.includes(actual) ? actual : 'number') : schema.type
   if (schema.enum && !schema.enum.includes(value)) errors.push(`${path}: not in enum`)
   if (t === 'string') {
     if (schema.maxLength != null && value.length > schema.maxLength) errors.push(`${path}: longer than ${schema.maxLength}`)
@@ -49,6 +52,12 @@ export function validateSchema(schema, value, path = '$') {
 export function schemaBoundednessErrors(schema, path = '$') {
   const errs = []
   if (!schema || typeof schema !== 'object') return [`${path}: schema required`]
+  if (Array.isArray(schema.type)) {
+    // a nullable scalar: each listed type is bounded on its own
+    if (schema.type.includes('object') || schema.type.includes('array')) errs.push(`${path}: a type list may only combine scalars and null`)
+    if (schema.type.includes('string') && schema.maxLength == null && !schema.enum) errs.push(`${path}: string needs maxLength or enum`)
+    return errs
+  }
   if (schema.type === 'object') {
     if (schema.additionalProperties !== false) errs.push(`${path}: additionalProperties must be false`)
     for (const [k, s] of Object.entries(schema.properties || {})) errs.push(...schemaBoundednessErrors(s, `${path}.${k}`))

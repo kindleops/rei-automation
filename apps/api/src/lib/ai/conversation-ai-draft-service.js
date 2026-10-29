@@ -10,6 +10,7 @@
 // capped per request (DRAFT_CAP_USD) by an in-process tracker; otherwise deterministic only
 // (the plan is computed, no model text).
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
+import { agentStandDownForThread, AGENT_HELD_STAND_DOWN } from './agent-lead-stand-down.js'
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js'
 import { decideAndCompose } from '@/lib/domain/conversation-ai/runtime/canonical.js'
 import { createConversationModelClient, createSpendTracker } from '@/lib/domain/conversation-ai/model-client.js'
@@ -56,6 +57,9 @@ export async function draftReplyForInbound({ inboundMessageId, caller, env = pro
   const ci = await loadCanonicalInputs({ supabase, providerMessageSid: row.provider_message_sid, now })
   if (!ci) return { ok: false, code: 'INBOUND_NOT_FOUND' }
   if (isInternalTestPhone(ci.loaded.row.from_phone_number) || isInternalTestPhone(ci.loaded.row.to_phone_number)) return { ok: false, code: 'INTERNAL_TEST_THREAD' }
+  // link #32: an agent holds this lead — LeadCommand drafts nothing there (the agent composes every text)
+  const sd = await agentStandDownForThread(supabase, ci.input?.inbound?.thread_key || ci.loaded?.row?.thread_key)
+  if (sd.stand_down) return { ok: false, code: AGENT_HELD_STAND_DOWN }
   const modelOn = String(env?.[DRAFT_MODEL_ENV] ?? '').trim() === 'true'
   const tr = tracker || (modelOn ? createSpendTracker({ capUsd: DRAFT_CAP_USD }) : null)
   const modelClient = tr && (provider || modelOn) ? createConversationModelClient({ provider: provider || (await import('./anthropic-provider.js')).createAnthropicProvider({ env }), tracker: tr, env }) : null

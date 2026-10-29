@@ -19,8 +19,11 @@ import {
 } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { classifyNetworkFailurePhase } from "@/lib/domain/messaging/transport-failure-phase.js";
+import { appliesBlankGreetingRule } from "@/lib/domain/messaging/transport-content-rules.js";
 
-// Pre-send content guard patterns.
+// Pre-send content guard patterns. domain/messaging/transport-content-rules.js carries the SAME literals (asserted equal
+// by tests/critical/agent-text-unit.test.mjs): the agent-text validator applies them at request time, so an agent's text
+// that passes the gateway passes here.
 const BLANK_GREETING_RE = /^(Hello|Hi|Hey|Hola|Ola|Marhaba)\s*,|(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/i;
 /**
  * Both placeholder shapes, because the renderer REWRITES one into the other.
@@ -485,6 +488,10 @@ export async function sendTextgridSMS({
   seller_first_name = null,
   bypass_system_control = false,
   bypass_content_guards = false,
+  // queue_agent_text (link #32): the body is the agent's EXACT text, verified against its immutable ledger record by
+  // the agent-text row gate — nothing was rendered, so the blank-greeting rule (a missing merge-field name) does not
+  // apply; every other content guard does (transport-content-rules.js, profile 'agent_text').
+  agent_text_exact_body = false,
   bypass_reason = null,
   source = null,
   send_source = null,
@@ -625,7 +632,7 @@ export async function sendTextgridSMS({
 
   // ── Content guards ────────────────────────────────────────────────────
   // Block messages with blank seller greeting ("Hello ,").
-  if (!bypass_content_guards && BLANK_GREETING_RE.test(trimmed_body)) {
+  if (!bypass_content_guards && appliesBlankGreetingRule(agent_text_exact_body === true ? "agent_text" : "rendered") && BLANK_GREETING_RE.test(trimmed_body)) {
     info("send.blocked_missing_name", {
       reason: "blank_seller_greeting",
       client_reference_id,

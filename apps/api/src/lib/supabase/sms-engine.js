@@ -18,6 +18,7 @@ import { sendCriticalAlert } from "@/lib/alerts/discord.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
 import { isVerifiedAiGeneratedRow } from "@/lib/domain/messages/ai-generated-message.js";
+import { recordAgentDeliveryVerdict } from "@/lib/domain/outreach/lead-events.js";
 import { evaluateInSessionReply, loadConversationalReplyWindowMinutes } from "@/lib/domain/queue/conversational-reply-window.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
@@ -4857,6 +4858,17 @@ export async function syncDeliveryEvent(payload, options = {}) {
       { ...row, delivery_confirmed: final_delivery_status },
       { ...options, supabase, now }
     );
+  }
+
+  // link #32: the carrier's verdict on a text an AGENT asked for (metadata.agent_text_intent_id) reaches the agents'
+  // event feed as delivery_changed delivered / undelivered (never blocks the webhook, never resends)
+  if (final_delivery_status === "delivered" || final_delivery_status === "failed") {
+    for (const row of send_queue_data || []) {
+      await recordAgentDeliveryVerdict(supabase, row, {
+        delivered: final_delivery_status === "delivered",
+        code: final_delivery_status === "failed" ? clean(normalized_failure?.failure_class || provider_status || "undelivered") : "carrier_delivered",
+      });
+    }
   }
 
   const outreachUpdater = options.updateContactOutreachState || updateContactOutreachState;
