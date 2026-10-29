@@ -41,6 +41,11 @@ export const AGENT_TEXT_VALIDATOR_VERSION = 'agent-text-validator.v1'
 export const AGENT_TEXT_MAX_CHARS = 320
 const NOT_A_MESSAGE_RE = /^(test(ing)?|placeholder|sample|lorem ipsum.*|ignore( this| me)?|n\/?a|tbd|todo|draft|x+|null|undefined)[.!]?$/i
 const IMPLIED_COMMITMENT_RE = /\b(?:once|when|after|if)\s+(?:there'?s|there\s+is|we\s+(?:have|make|send|put\s+together)|you\s+(?:get|receive|have))\s+(?:an?\s+|our\s+)?offer\b|\b(?:our|the)\s+team\s+(?:would|will|has\s+to|needs\s+to|can|could|is\s+going\s+to|must)\s+(?:review|go\s+over|look\s+(?:at|over)|check|assess|evaluate|call|reach\s+out|follow\s+up|put\s+together|make)\b|\b(?:someone|a\s+person|one\s+of\s+us)\s+(?:from|on|at)\s+(?:our|the)\s+team\s+(?:will|can|could|would)\b|\bI'?ll\s+have\s+someone\s+(?:call|reach|contact|text)\b|\b(?:we'?ll|we\s+will|I'?ll|I\s+will)\s+(?:send|make|put\s+together|get\s+you)\s+(?:you\s+)?an?\s+offer\b/i
+// handing the seller to a person ("passing your request to a person on the team", "I'll let the team know"): a follow-up
+// by someone else is implied, which no agent may promise
+const HANDOFF_RE = /\b(?:pass(?:ing)?|forward(?:ing)?|hand(?:ing)?|send(?:ing)?|flag(?:ging)?|relay(?:ing)?|escalat(?:e|ing)|refer(?:ring)?|bring(?:ing)?|loop(?:ing)?)\b[^.?!]{0,50}?\b(?:to|in|with)\s+(?:a\s+(?:real\s+|live\s+)?(?:person|human|colleague|manager|teammate|team\s+member|specialist|rep(?:resentative)?)|someone|somebody|(?:our|my|the)\s+(?:team|office|staff|manager|colleagues?|acquisitions\s+team))\b|\b(?:let|tell|inform|notify)\s+(?:(?:our|my|the)\s+(?:team|office|staff|manager)|someone|a\s+(?:person|colleague|manager))\s+know\b/i
+// an offer, a number or a date that is "not ready yet / right now": one is implied to follow
+const FORTHCOMING_RE = /\b(?:can'?t|cannot|can\s+not|don'?t|do\s+not|won'?t|not\s+able\s+to|unable\s+to|not\s+ready\s+to|no|not)\b[^.?!]{0,40}?\b(?:offers?|numbers?|price|figures?|quotes?|estimates?|valuations?|closing\s+dates?|dates?)\b[^.?!]{0,30}?\b(?:yet|right\s+now|at\s+the\s+moment|at\s+this\s+(?:point|time|stage)|for\s+now|just\s+now|until)\b|\b(?:offers?|numbers?|price|quotes?)\s+(?:is|are|will\s+be|should\s+be)\s+(?:coming|on\s+(?:its|the)\s+way|in\s+the\s+works|being\s+(?:prepared|worked\s+on))\b/i
 const CORRECTION_RE = /\b(sent (by|in) (mistake|error)|ignore (that|the|my) (last|previous|earlier) (text|message)|(last|previous) (text|message) was (a )?(mistake|wrong|an error)|sorry,? (wrong|that) (text|message))\b/i
 const PRACTICE_CLAIMS = [
   ['as_is', /\b(as[- ]is|any condition|no repairs? (needed|required|on your (end|side))|(roof|repairs?|basement)[^.?!]{0,40}(wouldn'?t|won'?t|don'?t) need (fixing|to be fixed))\b/i],
@@ -90,6 +95,8 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
   if (CORRECTION_RE.test(t)) add('content:correction_of_earlier_text')
   // an implied commitment: an offer, a team's review or a call that will follow (none is the agent's to promise)
   if (IMPLIED_COMMITMENT_RE.test(t)) add('commitment:implied_offer_review_or_call')
+  if (HANDOFF_RE.test(t)) add('commitment:implied_handoff_to_person')
+  if (FORTHCOMING_RE.test(t)) add('commitment:implied_forthcoming_offer_or_date')
   // the company's buying practices: stated only when the owner configured them as true
   for (const [key, re] of PRACTICE_CLAIMS) if (re.test(t) && !(companyIdentity?.practices || []).includes(key)) add(`identity:company_practice_not_configured:${key}`)
 

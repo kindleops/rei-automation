@@ -39,12 +39,15 @@ const PRICE = [{ id: 'o1', direction: 'outbound', body: 'Hi Ray, this is Nova, a
   { id: 'i1', direction: 'inbound', body: 'Yes. I would want 250k for it', at: ago(1) }]
 const BOT = [{ id: 'o1', direction: 'outbound', body: 'Hi, do you still own the house?', at: ago(50) }, { id: 'i1', direction: 'inbound', body: 'Are you a bot or a real person?', at: ago(1) }]
 
-test('validator: the agent\'s honest, ordinary texts pass — an AI-assistant first touch naming the configured company, an answer about the roof, an answer to a stated price', () => {
+test('validator: the agent\'s honest, ordinary texts pass — an AI-assistant first touch naming the configured company, an answer about the roof, an answer to a stated price, a question about other offers, a plain "I can\'t give a number"', () => {
   for (const [body, o] of [
     ['Hi, this is Nova, an AI assistant with Reivesti Home Buyers. Do you still own the house on Kapiolani Blvd?', { purpose: 'first_touch', messages: [] }],
     ['Thanks for letting me know about the roof, that is not a problem for us. When would you ideally want to sell?', { purpose: 'reply', messages: ROOF, authorEmployee: 'sterling' }],
     ['Thanks for telling me what you have in mind, I have noted it. What timeline would work best for you?', { purpose: 'reply', messages: PRICE }],
     ['I am an AI assistant with Reivesti Home Buyers, writing for Nova. Would you consider selling the house?', { purpose: 'reply', messages: BOT }],
+    // asking about other offers, or saying plainly what cannot be done, implies nothing will follow
+    ['Thanks for letting me know about the roof. Have you had any other offers on it yet?', { purpose: 'reply', messages: ROOF }],
+    ['Thanks for letting me know about the roof. I can\'t give you a number. When would you ideally want to sell?', { purpose: 'reply', messages: ROOF }],
   ]) {
     const r = v(body, o)
     assert.deepEqual([r.ok, r.code, r.reasons], [true, null, []], `${body}: ${JSON.stringify(r)}`)
@@ -75,6 +78,11 @@ test('validator: every refusal names its rule — money, human claim, the unansw
     ['Thanks. Could you ask him to text me when he has a minute?', { purpose: 'reply', messages: [{ id: 'o1', direction: 'outbound', body: 'Hi, do you still own the house on Elm St?', at: ago(5) }, { id: 'i1', direction: 'inbound', body: 'This is his nephew, he is not much of a texter.', at: ago(1) }] }, null, 'non_owner:asks_about_third_party_owner'],
     ['Thanks for sharing that. Once we have an offer ready, someone from our team will call you.', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:implied_offer_review_or_call'],
     ['Good question. The team will review the property first. What timeline works for you?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:implied_offer_review_or_call'],
+    ['Thanks. I am an AI assistant, but I am passing your request to a person on the team. When would you want to sell?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:implied_handoff_to_person'],
+    ['Thanks for telling me. I will let the team know. When would you want to sell?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:implied_handoff_to_person'],
+    ['Thanks. I can\'t give a date for an offer yet. When would you ideally want to sell?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:implied_forthcoming_offer_or_date'],
+    ['Thanks. I don\'t have any numbers on the house right now. When would you want to sell?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:implied_forthcoming_offer_or_date'],
+    ['I hear you. I can\'t promise a closing date yet. When would you want to sell?', { purpose: 'reply', messages: ROOF }, 'CONTENT_REJECTED', 'commitment:implied_forthcoming_offer_or_date'],
   ]
   for (const [body, o, code, reason] of cases) {
     const r = v(body, o)
