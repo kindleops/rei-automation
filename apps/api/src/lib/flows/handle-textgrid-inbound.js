@@ -77,6 +77,8 @@ import {
   updateInboundAutopilotQueue,
 } from "@/lib/discord/inbound-autopilot-queue.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { appendLeadEvent } from "@/lib/domain/outreach/lead-events.js";
+import { isStopRequest as isLeadEventStop } from "@/lib/domain/conversation-ai/stop-request.js";
 import { scheduleConversationAiShadow } from "@/lib/ai/conversation-ai-shadow-hook.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
 import { unarchiveThreadOnInbound } from "@/lib/flows/inbound-thread-unarchive.js";
@@ -130,6 +132,8 @@ const defaultDeps = {
   findInboundAutopilotQueue,
   updateInboundAutopilotQueue,
   getSupabaseClient: getDefaultSupabaseClient,
+  // link #32: the agents' wake-up feed (never blocks the webhook)
+  appendLeadEvent,
   logInboundMessageEventSupabase: logSupabaseInboundMessageEvent,
   scheduleConversationAiShadow,
   getSystemFlags,
@@ -1965,6 +1969,21 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
         });
       } catch (patchErr) {
         safeWarn("inbox_thread_state_upsert_failed", { error: patchErr?.message || "unknown" });
+      }
+
+      // link #32: the agents' wake-up feed — after message_events / inbox_thread_state are written; idempotent per
+      // inbound message (a retried webhook appends nothing); ids and codes only; never blocks or fails this flow
+      try {
+        const lead_event_supabase = runtimeDeps.getSupabaseClient?.();
+        const lead_event_key = inbound_message_event_id || extracted.message_id;
+        if (lead_event_supabase && lead_event_key && typeof runtimeDeps.appendLeadEvent === "function") {
+          const stop = isLeadEventStop(message_body);
+          const received_at = extracted.received_at || payload?.http_received_at || null;
+          await runtimeDeps.appendLeadEvent(lead_event_supabase, { kind: "inbound_message", eventKey: lead_event_key, threadKey: inbound_from, payload: { message_id: inbound_message_event_id || null, received_at, stop_request: stop }, occurredAt: received_at });
+          if (stop) await runtimeDeps.appendLeadEvent(lead_event_supabase, { kind: "opt_out", eventKey: lead_event_key, threadKey: inbound_from, payload: { message_id: inbound_message_event_id || null, received_at, source: "inbound_stop_request" }, occurredAt: received_at });
+        }
+      } catch (leadEventErr) {
+        safeWarn("lead_event_append_failed", { error: leadEventErr?.message || "unknown" });
       }
 
       signals = runtimeDeps.extractUnderwritingSignals({

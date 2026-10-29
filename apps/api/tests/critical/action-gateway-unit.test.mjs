@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ACTIONS, READS, REQUESTED_TOOLS, NEVER_EXPOSED, WORKFORCE_TOOLS, createActionCatalog, OHG_TOOLS } from '../../src/lib/domain/action-gateway/catalog.js'
+import { ACTIONS, READS, REQUESTED_TOOLS, NEVER_EXPOSED, WORKFORCE_TOOLS, createActionCatalog, OHG_TOOLS, AGENT_MESSAGE_TOOLS } from '../../src/lib/domain/action-gateway/catalog.js'
 import { scopeCovers, envelopeRefusal } from '../../src/lib/domain/action-gateway/gateway.js'
 import { judgeApproval, buildApprovalRequest, agentActionApprovalCapability, approvalSnapshotOf } from '../../src/lib/domain/action-gateway/approvals.js'
 import { cleanText } from '../../src/lib/domain/action-gateway/actions.js'
@@ -21,8 +21,15 @@ const MODULE_DIR = path.resolve(HERE, '../../src/lib/domain/action-gateway')
 const PEPPER = 'p'.repeat(40)
 
 test('catalog: the 22 requested tools + the scoped reads; implemented = the T1 set + set_thread_hold + the T2 family (reversible or request-only) + the report-only reconciliation + the T3 / T4 family; a T3 / T4 tool is never standing-grant-only; nothing never-exposed exists', () => {
-  const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => r.name !== 'read_conversation_context').map((r) => r.name)].filter((n) => !WORKFORCE_TOOLS.includes(n) && !OHG_TOOLS.includes(n))
+  const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => r.name !== 'read_conversation_context').map((r) => r.name)].filter((n) => !WORKFORCE_TOOLS.includes(n) && !OHG_TOOLS.includes(n) && !AGENT_MESSAGE_TOOLS.includes(n))
   assert.deepEqual([...all].sort(), [...REQUESTED_TOOLS].sort())
+  // + the agent-message family (link #32): ONE T3 seller-facing write (standing-grantable like the reply), two standing T2
+  //   reversible lead-ownership writes, three reads (fallback templates, lead ownership, the event feed)
+  assert.deepEqual([...AGENT_MESSAGE_TOOLS].sort(), ['assign_lead', 'events_since', 'get_lead_assignment', 'list_message_templates', 'queue_agent_message', 'release_lead'])
+  const qam = createActionCatalog().get('queue_agent_message')
+  assert.deepEqual([qam.tier, qam.capability, qam.standing_reply, qam.executor.fn], [TIERS.T3, 'conversation.queue_agent_message', true, 'action_gateway_dw_handoff'])
+  assert.ok(!Object.keys(qam.input.properties).some((k) => /(phone|e164|sender|from_|to_|persona|body|text|message)/i.test(k)), 'the agent never supplies routing or text (a brief only)')
+  for (const n of ['assign_lead', 'release_lead']) assert.deepEqual([createActionCatalog().get(n).tier, createActionCatalog().get(n).reversible, createActionCatalog().get(n).executor.fn], [TIERS.T2, true, 'action_gateway_dw_lead_assignment'], n)
   // + the Operation Hidden Gold family (link #29): four standing T2 reversible writes through ONE domain write, two scoped reads
   assert.deepEqual([...OHG_TOOLS].sort(), ['get_lead_annotations', 'get_reply_delivery_status', 'record_conversation_note', 'record_seller_statement', 'set_lead_temperature', 'update_lead_status'])
   for (const n of OHG_TOOLS) {
@@ -48,7 +55,7 @@ test('catalog: the 22 requested tools + the scoped reads; implemented = the T1 s
   // T3 / T4 always need a per-use authority: a human approval, or (execute_authorized_offer only) a verified envelope ref
   for (const a of impl.filter((x) => x.tier >= TIERS.T3)) assert.ok(a.envelope_authorized !== true || a.name === 'execute_authorized_offer', a.name)
   for (const a of impl) assert.equal(classifyProhibited({ name: a.capability, touches: a.touches, wraps: a.wraps, input_schema: a.input }).prohibited, false, a.name)
-  assert.deepEqual(READS.map((r) => r.name).filter((n) => !WORKFORCE_TOOLS.includes(n) && !OHG_TOOLS.includes(n)).sort(), ['prepare_acquisition_offer', 'read_conversation_context'])
+  assert.deepEqual(READS.map((r) => r.name).filter((n) => !WORKFORCE_TOOLS.includes(n) && !OHG_TOOLS.includes(n) && !AGENT_MESSAGE_TOOLS.includes(n)).sort(), ['prepare_acquisition_offer', 'read_conversation_context'])
   for (const n of NEVER_EXPOSED) assert.equal(createActionCatalog().get(n), null, n)
   for (const a of [...ACTIONS, ...READS]) for (const k of Object.keys(a.input.properties)) {
     assert.ok(!FORGED_CONTEXT_KEYS.test(k), `${a.name}.${k} would be refused as forged context`)

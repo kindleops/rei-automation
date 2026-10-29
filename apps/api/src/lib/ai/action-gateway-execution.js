@@ -12,6 +12,12 @@
 //                               canonical queue writer) — only with system_control negotiation_send_enabled AND
 //                               NEGOTIATION_COMPOSER_ENABLED=1 in this process.
 //   record_seller_counteroffer  negotiation/negotiation-send#recordAgentCounter (recordSellerCounter; never accepts).
+//   queue_agent_message         (link #32) an AGENT-INITIATED message: every guard re-run on fresh reads (activation, lead
+//                               owner, the AI-reply gate, holds, the send-time guard, pre-send eligibility, window), the
+//                               day caps reserved, then canonical/composeAgentOutbound writes and validates the text →
+//                               ONE immutable agent_outbound ledger record → ONE ai_generated queue row → the runner (AI
+//                               row gate + agent-message row gate). The composer unavailable / refusing + a named
+//                               governed template ⇒ that template through the canonical queue writer; otherwise refused.
 //   input { sweep: 'receipts' } follows enqueued rows to their dispatch outcome: sent / failed / held, and an ambiguous
 //                               provider accept ⇒ outcome_unknown + a critical operator item (NEVER a resend).
 // The T2 executor (link #27's `action_gateway.execute` actions) registers its actions in the SAME dispatch table
@@ -28,7 +34,9 @@ export const ACTION_GATEWAY_EXECUTE_KIND = 'action_gateway.execute'
 /** The actions this module executes under the one kind (T2 adds its own to the same table). */
 export const ACTION_EXECUTORS = Object.freeze({ queue_authorized_reply: 'sellerReply', execute_authorized_offer: 'offerSend', record_seller_counteroffer: 'recordCounter',
   // Operation Hidden Gold (link #29): certified reversible pipeline writes under a STANDING grant, executed through the canonical lead-state registry
-  set_lead_temperature: 'leadState', update_lead_status: 'leadState' })
+  set_lead_temperature: 'leadState', update_lead_status: 'leadState',
+  // link #32: the agent-initiated message (AI-composed; governed template fallback)
+  queue_agent_message: 'agentMessage' })
 /** OHG actions a standing grant authorizes alone (mirrors action_gateway.standing_t2_actions() after link #29). */
 export const OHG_STANDING_ACTIONS = Object.freeze(['set_lead_temperature', 'update_lead_status'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -49,13 +57,13 @@ async function rows(q) { const r = await q; if (r?.error) throw Object.assign(ne
  * @param {{ supabase: object, env?: object, provider?: object, trackerFor?: Function, r3deps?: object, readSwitch?: Function,
  *           now?: () => number, offerSendDeps?: object }} o
  */
-export function createGatewayExecution({ supabase, env = process.env, provider = null, trackerFor = null, r3deps = {}, readSwitch = null, now = () => Date.now(), offerSendDeps = {} } = {}) {
+export function createGatewayExecution({ supabase, env = process.env, provider = null, trackerFor = null, r3deps = {}, readSwitch = null, now = () => Date.now(), offerSendDeps = {}, agentMessageDeps = {} } = {}) {
   const read = readSwitch || ((k) => getSystemValueFresh(k, { supabase }))
   const record = (intent_id, job_id, state, c, detail = {}, queue_row_id = null) =>
     rpc(supabase, 'lc_seller_action_receipt_record', { p_intent_id: intent_id, p_job_id: job_id, p_state: state, p_code: code(c), p_detail: detail, p_queue_row_id: queue_row_id ? String(queue_row_id) : null })
 
   /** The handed-off intent, verified: handed off, this action's kind, this job, receipt not final. */
-  async function prologue(action, job) {
+  async function prologue(action, job, { requireThread = true } = {}) {
     const id = clean(job?.input?.action_intent_id)
     if (!UUID_RE.test(id)) return { stop: { code: 'ACTION_INPUT_INVALID' } }
     const l = await rpc(supabase, 'lc_seller_action_load', { p_intent_id: id })
@@ -71,12 +79,14 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
     // Agntei 5.4: the certified seller reply on an owner-minted standing seller-facing grant — the database derived
     // `standing` when authorizing and re-verifies the grant now (`standing_live`); a revoked grant stops it here
     const standing = (OHG_STANDING_ACTIONS.includes(action) && Number(l.authorization?.tier) === 2 && Boolean(l.authorization?.authorization_id))
-      || (action === 'queue_authorized_reply' && Number(l.authorization?.tier) === 3 && l.authorization?.standing === true && l.authorization?.standing_live === true)
+      || (['queue_authorized_reply', 'queue_agent_message'].includes(action) && Number(l.authorization?.tier) === 3 && l.authorization?.standing === true && l.authorization?.standing_live === true)
     if (!(l.authorization?.approval_id || l.authorization?.envelope_ref || standing)) {
       await record(id, job.job_id, 'refused', 'NO_PER_USE_AUTHORITY')
       return { stop: { code: 'NO_PER_USE_AUTHORITY' } }
     }
     await record(id, job.job_id, 'executing', 'EXECUTING')
+    // link #32: an agent message may address a lead with no thread (a first touch); its lead is resolved by its executor
+    if (!requireThread) return { intent: i, auth: l.authorization, thread: null, id, job_id: job.job_id }
     const [t] = await rows(supabase.from('inbox_thread_state').select('id,thread_key,property_id').eq('id', clean(i.params?.thread_id)).limit(1))
     if (!t?.thread_key) { await record(id, job.job_id, 'failed', 'THREAD_NOT_FOUND'); return { stop: { code: 'THREAD_NOT_FOUND' } } }
     return { intent: i, auth: l.authorization, thread: t, id, job_id: job.job_id }
@@ -216,6 +226,164 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
     return { code: applied ? 'LEAD_STATE_RECORDED' : 'LEAD_STATE_NOT_APPLIED', field, to }
   }
 
+  /**
+   * link #32: an AGENT-INITIATED message. Every guard re-run on fresh reads with LeadCommand's own client; the day caps
+   * reserved (idempotent per intent); LeadCommand's canonical writer composes and validates; ONE immutable agent_outbound
+   * ledger record, then ONE ai_generated queue row (queue_key agent_message:<intent>, unique: a retry never adds a
+   * second). Composer unavailable / refusing + a named governed template ⇒ that template through the canonical queue
+   * writer (its campaign / template gates); otherwise refused with the reason. Nothing is sent here: the runner sends.
+   */
+  async function agentMessage(job, ctx = {}) {
+    const p = await prologue('queue_agent_message', job, { requireThread: false })
+    if (p.stop) return p.stop
+    const { intent, id, job_id } = p
+    const at = new Date(now()).toISOString()
+    const purpose = clean(intent.params?.purpose)
+    const queueKey = `agent_message:${id}`
+    const settle = (outcome) => rpc(supabase, 'lc_agent_message_settle', { p_intent_id: id, p_outcome: outcome }).catch(() => null)
+    const refuse = async (state, c, detail = {}, { release = true } = {}) => { if (release) await settle('released'); await record(id, job_id, state, c, detail); return { code: c } }
+    // a retry after the row was written: the row IS the outcome (never a second row)
+    const [existing] = await rows(supabase.from('send_queue').select('id,metadata').eq('queue_key', queueKey).limit(1))
+    if (existing?.id) {
+      if (clean(existing.metadata?.agent_message_intent_id) !== id) return refuse('held', 'QUEUE_KEY_TAKEN_BY_ANOTHER_ROW', {}, { release: false })
+      await settle('completed'); await record(id, job_id, 'enqueued', 'ALREADY_ENQUEUED', {}, existing.id); return { code: 'AGENT_MESSAGE_ENQUEUED', queue_row_id: existing.id }
+    }
+    // 1. the activation (both emergency stops, the AI-reply gate, this action's switch + policy), re-read NOW
+    const act = await rpc(supabase, 'lc_agent_message_activation', {}).catch(() => null)
+    if (!act?.available) return refuse('refused', `AGENT_MESSAGE_UNAVAILABLE:${code(act?.code || 'UNREADABLE', 40)}`)
+    // 2. the lead, its owner (the sending agent must hold it), the AI send authorization for this recipient
+    const lead = await rpc(supabase, 'lc_agent_message_lead', { p_intent_id: id }).catch(() => null)
+    if (!lead?.phone) return refuse('failed', 'LEAD_NOT_FOUND')
+    if (clean(lead.owner_agent_id) !== clean(lead.agent_id)) return refuse('refused', 'NOT_LEAD_OWNER')
+    const { aiSendAuthorizedFor } = await import('./conversation-turn-wiring.js')
+    const { checkAutomationHold } = await import('@/lib/domain/holds/automation-hold.js')
+    const holdChecker = (a) => checkAutomationHold(a, { supabase })
+    const auth = await aiSendAuthorizedFor({ threadKey: lead.phone, readSwitch: read, propertyId: lead.property_id || null, automationHoldChecker: holdChecker })
+    if (!auth.ok) return refuse('refused', `AI_SEND_NOT_AUTHORIZED:${code(auth.reason, 40)}`)
+    const { normalizeSendPolicy, AI_SEND_POLICY_KEY, AI_SEND_POLICY_VERSION, AI_SEND_KILL_SWITCH_KEY } = await import('@/lib/domain/conversation-ai/send-policy.js')
+    const aiPolicy = normalizeSendPolicy(await read(AI_SEND_POLICY_KEY).catch(() => null))
+    // 3. the lead's facts (fresh) and every guard
+    const one = async (q) => (await rows(q))[0] || null
+    const target = clean(intent.params?.campaign_target_id) ? await one(supabase.from('campaign_targets').select('*').eq('id', clean(intent.params.campaign_target_id)).limit(1)) : null
+    const property = lead.property_id ? await one(supabase.from('properties').select('*').eq('property_id', String(lead.property_id)).limit(1)) : null
+    const prospect = lead.prospect_id ? await one(supabase.from('prospects').select('*').eq('prospect_id', String(lead.prospect_id)).limit(1)) : null
+    const thread = lead.thread_id ? await one(supabase.from('inbox_thread_state').select('*').eq('id', String(lead.thread_id)).limit(1)) : null
+    const { evaluateAgentMessageGuards, loadThreadHistory, AGENT_MESSAGE_VERSION } = await import('@/lib/domain/outreach/agent-message.js')
+    const messages = await loadThreadHistory(supabase, lead.phone)
+    const g = await evaluateAgentMessageGuards({ supabase, lead, target, purpose, policy: act.policy, aiPolicy, messages, prospect, property, now: at, holdChecker })
+    if (!g.ok) return refuse(g.code === 'OUTSIDE_RECIPIENT_WINDOW' ? 'deferred' : 'refused', g.code, { reason: code(g.evidence?.reason, 60), next_permitted_at: g.evidence?.next_permitted_at || null })
+    // 4. the day caps (per lead, global): reserved now, completed with the row or released
+    const cap = await rpc(supabase, 'lc_agent_message_reserve', { p_intent_id: id }).catch(() => null)
+    if (!cap?.ok) return refuse('refused', code(cap?.code || 'CAP_RESERVATION_UNAVAILABLE', 60), { cap: cap?.cap ?? null }, { release: false })
+    // 5. persona + sender: the thread's established persona and sticky sender (never a number change); a first touch
+    //    gets the campaign path's persona resolution and its market sender routing
+    const { loadThreadPersonas, personaStableKey } = await import('@/lib/domain/outbound/outbound-persona.js')
+    const { buildOutboundMergeValues } = await import('@/lib/domain/campaigns/outbound-agent-identity.js')
+    let threadPersona = []
+    try { threadPersona = (await loadThreadPersonas(supabase, [lead.phone])).get(personaStableKey(lead.phone)) || [] } catch { return refuse('held', 'PERSONA_UNRESOLVED') }
+    const masterOwner = lead.master_owner_id ? await one(supabase.from('master_owners').select('master_owner_id,agent_persona').eq('master_owner_id', String(lead.master_owner_id)).limit(1)).catch(() => null) : null
+    const firstName = clean(target?.metadata?.candidate_snapshot?.seller_first_name) || clean(prospect?.first_name) || null
+    const propertyLabel = clean(target?.property_address) || clean(property?.property_address) || null
+    const merge = buildOutboundMergeValues({ target: { ...(target || {}), to_phone_number: lead.phone, property_address: propertyLabel, language: target?.language || 'English', metadata: { candidate_snapshot: { seller_first_name: firstName } } }, masterOwner, property, threadPersona })
+    if (!merge.ok) return refuse('held', `PERSONA_UNRESOLVED:${code(merge.reason, 40)}`)
+    let sender = clean(thread?.our_number) || null
+    if (!sender && purpose === 'first_touch') {
+      const { resolveSender } = await import('@/lib/domain/campaigns/enqueue-campaign-target-one.js')
+      const s = await resolveSender(supabase, { market: clean(target?.market), recipient: lead.phone }).catch((e) => { if (process.env.T34_DEBUG) console.error('RESOLVE_SENDER', e); return null })
+      sender = s?.blocked_by_dispatch ? null : clean(s?.phone_number) || null
+    }
+    if (!sender || sender === lead.phone) return refuse('held', 'SENDER_UNRESOLVED')
+    // 6. LeadCommand writes the message (the canonical outbound entry: playbook v3 + the shared validator)
+    const { composeAgentOutbound, WRITER_VERSION, CANONICAL_RUNTIME_VERSION } = await import('@/lib/domain/conversation-ai/runtime/canonical.js')
+    const { loadCompanyIdentity } = await import('@/lib/domain/conversation-ai/company-identity.js')
+    let modelClient = null
+    let composerOff = null
+    try {
+      const { loadPolicy } = await import('./conversation-ai-shadow-wiring.js')
+      const { shadowAllowed } = await import('@/lib/domain/conversation-ai/policy.js')
+      const gate = shadowAllowed(await loadPolicy(supabase), env)
+      if (!gate.allowed) composerOff = gate.code
+      else {
+        const { createConversationModelClient, createSpendTracker } = await import('@/lib/domain/conversation-ai/model-client.js')
+        const tracker = trackerFor ? trackerFor(ctx) : createSpendTracker({ capUsd: 0.02 })
+        modelClient = createConversationModelClient({ provider: provider || (await import('./anthropic-provider.js')).createAnthropicProvider({ env }), tracker, env })
+        ctx.__spend = tracker
+      }
+    } catch (e) { composerOff = code(e?.code || 'COMPOSER_UNAVAILABLE', 40) }
+    const { composeSpendFor } = await import('./conversation-canonical-inputs.js')
+    const companyIdentity = await loadCompanyIdentity({ readSwitch: read }).catch(() => undefined)
+    const composed = modelClient
+      ? await composeAgentOutbound({ purpose, brief: clean(intent.params?.brief), thread: messages, recordFacts: { property_id: lead.property_id || null }, modelClient, spend: composeSpendFor(ctx.__spend),
+        establishedPersona: merge.values.agent_name, ...(companyIdentity ? { companyIdentity } : {}), firstName, propertyLabel, propertyAddresses: [propertyLabel].filter(Boolean),
+        eligibility: { blocked: false, reasons: [], timing: g.timing }, caller: 'agent_message', now: at, seed: id })
+      : { ok: false, reason: `composer_unavailable:${String(composerOff || 'off').toLowerCase()}` }
+    const insertQueue = agentMessageDeps.insertQueueRow || r3deps.insertQueueRow || (async (payload) => (await import('@/lib/supabase/sms-engine.js')).insertSupabaseSendQueueRow(payload, { supabase }))
+    const baseMeta = { agent_message_intent_id: id, agent_id: intent.agent_id, agent_message: { purpose, generated_at: at, version: AGENT_MESSAGE_VERSION, brief_hash: code(intent.params?.brief ? (await import('node:crypto')).createHash('sha256').update(clean(intent.params.brief)).digest('hex') : null, 64) },
+      is_first_touch: purpose === 'first_touch', type: purpose === 'first_touch' ? 'campaign' : 'followup', send_kind: purpose === 'first_touch' ? 'agent_first_touch' : `agent_${purpose}`,
+      recipient_zones: g.timing?.zones || [], ...(target?.id ? { campaign_target_id: target.id } : {}), agent_persona: merge.persona, no_direct_provider_send: true }
+    if (composed.ok) {
+      const { buildAiGeneratedOutboundMessage, insertAiGeneratedMessage, lookupAiGeneratedMessageByQueueKey, recordAiGeneratedMessageEvent } = await import('@/lib/domain/messages/ai-generated-message.js')
+      const text = composed.reply.text
+      const prior = await lookupAiGeneratedMessageByQueueKey(supabase, queueKey)
+      let rec = prior.record
+      if (!rec) {
+        const aiRecord = buildAiGeneratedOutboundMessage({ intentId: id, category: purpose, body: text, threadKey: lead.phone, propertyId: lead.property_id, contactId: lead.prospect_id, recipientPhone: lead.phone, senderPhone: sender,
+          decisionId: `action_gateway:${id}`, jobId: job_id, model: composed.composition?.model || 'unknown', playbookVersion: composed.composition?.playbook_version, promptVersion: composed.composition?.prompt_version,
+          contextVersion: AGENT_MESSAGE_VERSION, validation: { status: 'validated', validators: [composed.validation?.version, composed.validation?.style_version, 'agent-message-guards'].filter(Boolean), reasons: [] },
+          ledgerSnapshot: composed.ledger_summary, policy: aiPolicy, approvalState: 'policy_authorized', generatedAt: at, costUsd: composed.cost_usd || 0,
+          inputTokens: composed.composition?.usage?.input_tokens ?? null, outputTokens: composed.composition?.usage?.output_tokens ?? null,
+          authorizationScope: { policy_key: AI_SEND_POLICY_KEY, policy_version: aiPolicy.policy_version, scope_match: 'thread_keys', kill_switch_key: AI_SEND_KILL_SWITCH_KEY, agent_message_policy_version: act.policy?.policy_version || null },
+          auditRefs: { writer_version: WRITER_VERSION, runtime_version: CANONICAL_RUNTIME_VERSION, action_intent_id: id, agent_id: intent.agent_id, purpose, objective: composed.objective, reservations: { lead_slot: cap.lead_slot, global_slot: cap.global_slot, day: cap.day } } })
+        const ins = await insertAiGeneratedMessage(supabase, aiRecord)
+        if (!ins.ok) { const again = await lookupAiGeneratedMessageByQueueKey(supabase, queueKey); if (!again.record) throw Object.assign(new Error('AI_RECORD_INSERT_FAILED'), { code: 'AI_RECORD_INSERT_FAILED' }); rec = again.record } else rec = { ...aiRecord, id: ins.id }
+      }
+      const payload = {
+        queue_key: queueKey, queue_id: queueKey, dedupe_key: queueKey, queue_status: 'queued', scheduled_for: at, scheduled_for_utc: at, scheduled_for_local: at,
+        timezone: (g.timing?.zones || []).length === 1 ? g.timing.zones[0] : null, send_priority: 5, retry_count: 0, max_retries: 1,
+        message_body: rec.message_body, message_text: rec.message_body, seller_first_name: firstName, to_phone_number: lead.phone, from_phone_number: sender, agent_name: merge.values.agent_name,
+        master_owner_id: lead.master_owner_id || null, prospect_id: lead.prospect_id || null, property_id: lead.property_id || null, property_address: propertyLabel,
+        message_origin: 'ai_generated', template_id: null, selected_template_id: null, template_source: 'ai_generated',
+        message_type: 'ai_agent_message', type: 'ai_conversation', use_case_template: `ai_agent_${purpose}`, character_count: rec.message_body.length, thread_key: lead.phone, source: 'ai_conversation',
+        language: 'English', sms_eligible: true, routing_allowed: true,
+        metadata: { ...baseMeta, source: 'ai_conversation', action_type: 'ai_agent_message', decision_id: `action_gateway:${id}`, message_origin: 'ai_generated', ai_message_id: rec.id, ai_message_body_sha256: rec.body_sha256,
+          ai_message_record_version: rec.record_version, ai_scope_category: purpose, writer_version: WRITER_VERSION, send_policy_version: AI_SEND_POLICY_VERSION, objective: composed.objective },
+      }
+      let res
+      try { res = await insertQueue(payload) } catch (e) { res = { ok: false, reason: e?.message || 'insert_threw' } }
+      const qid = res?.queue_row_id || res?.item_id || res?.id || null
+      if (!res?.ok || !qid) { await recordAiGeneratedMessageEvent(supabase, { aiMessageId: rec.id, eventType: 'held', detail: { reason: 'queue_insert_failed' } }).catch(() => null); return refuse('held', `QUEUE_INSERT_REFUSED:${code(res?.reason, 40)}`) }
+      await recordAiGeneratedMessageEvent(supabase, { aiMessageId: rec.id, eventType: 'queued', queueRowId: qid, detail: { queue_key: queueKey } }).catch(() => null)
+      await settle('completed')
+      await record(id, job_id, 'enqueued', 'AI_COMPOSED_ENQUEUED', { origin: 'ai_generated', purpose, objective: code(composed.objective, 30) }, qid)
+      return { code: 'AGENT_MESSAGE_ENQUEUED', queue_row_id: qid, origin: 'ai_generated' }
+    }
+    // 7. the writer is unavailable or refused: the NAMED governed template, else nothing
+    const why = code(composed.reason, 60)
+    const templateId = clean(intent.params?.template_id)
+    const why_detail = { validation: (composed.validation?.content_reasons || []).slice(0, 6).map((x) => code(x, 60)), attempts: (composed.composition?.attempt_reasons || []).slice(0, 2).map((a) => (a || []).slice(0, 4).map((x) => code(x, 60))) }
+    if (!templateId) return refuse('refused', `COMPOSITION_REFUSED:${why}`, why_detail)
+    if (!((act.policy?.fallback_templates || {})[purpose] || []).includes(templateId)) return refuse('refused', 'TEMPLATE_NOT_ALLOWED')
+    const tpl = await one(supabase.from('sms_templates').select('*').eq('template_id', templateId).limit(1))
+    const { applyGovernance, indexGovernance } = await import('@/lib/domain/campaigns/template-governance.js')
+    const gov = await rows(supabase.from('ownership_template_rotation_control').select('*').eq('template_id', templateId).limit(5))
+    const gv = tpl ? applyGovernance([tpl], indexGovernance(gov), clean(tpl.use_case)) : { eligible: [] }
+    if (gv.eligible.length !== 1) return refuse('refused', 'TEMPLATE_NOT_GOVERNED')
+    const { renderTemplateBody } = await import('@/lib/domain/campaigns/template-render-validation.js')
+    const rendered = renderTemplateBody(tpl.template_body, merge.values)
+    if (!rendered.ok) return refuse('refused', `TEMPLATE_RENDER_FAILED:${code(rendered.reason, 40)}`)
+    const { enqueueCanonicalOutboundSms } = await import('@/lib/domain/queue/canonical-queue-writer.js')
+    const w = await enqueueCanonicalOutboundSms({
+      to_phone_number: lead.phone, from_phone_number: sender, message_body: rendered.body, thread_key: lead.phone, source_event_id: queueKey, idempotency_key: queueKey, queue_key: queueKey,
+      template_id: templateId, use_case: tpl.use_case, language: tpl.language || 'English', message_type: purpose === 'first_touch' ? 'campaign_opener' : 'followup', action_type: 'agent_message_template_fallback',
+      master_owner_id: lead.master_owner_id || null, property_id: lead.property_id || null, property_address_state: property?.property_address_state || null, property_address_zip: property?.property_address_zip || null,
+      metadata: { ...baseMeta, origin_detail: 'agent_template', fallback_reason: why, template_name: tpl.template_name || null, seller_first_name: firstName, agent_name: merge.values.agent_name, candidate_snapshot: { seller_first_name: firstName, property_address: propertyLabel } },
+    }, { supabase, getSystemValue: read, insertQueueImpl: agentMessageDeps.insertQueueRow || r3deps.insertQueueRow || undefined })
+    if (!w?.ok || !w.queue_row_id) return refuse('refused', `TEMPLATE_FALLBACK_REFUSED:${code(w?.reason, 40)}`)
+    await settle('completed')
+    await record(id, job_id, 'enqueued', 'TEMPLATE_FALLBACK_ENQUEUED', { origin: 'template', purpose, fallback_reason: why }, w.queue_row_id)
+    return { code: 'AGENT_MESSAGE_ENQUEUED', queue_row_id: w.queue_row_id, origin: 'template' }
+  }
+
   /** Follow enqueued rows to their dispatch outcome. An ambiguous accept is recorded, escalated, NEVER resent. */
   async function reconcileReceipts({ limit = 50 } = {}) {
     const open = (await rpc(supabase, 'lc_seller_action_open_receipts', { p_limit: limit })) || []
@@ -247,12 +415,12 @@ export function createGatewayExecution({ supabase, env = process.env, provider =
     const id = clean(job?.input?.action_intent_id)
     if (!UUID_RE.test(id)) return { code: 'ACTION_INPUT_INVALID' }
     const l = await rpc(supabase, 'lc_seller_action_load', { p_intent_id: id })
-    const fn = { sellerReply, offerSend, recordCounter, leadState }[ACTION_EXECUTORS[l?.intent?.action]]
+    const fn = { sellerReply, offerSend, recordCounter, leadState, agentMessage }[ACTION_EXECUTORS[l?.intent?.action]]
     if (!fn) return { code: 'ACTION_NOT_EXECUTED_HERE' }
     return fn(job, ctx)
   }
 
-  return Object.freeze({ execute, sellerReply, offerSend, recordCounter, leadState, reconcileReceipts, version: ACTION_EXECUTION_VERSION })
+  return Object.freeze({ execute, sellerReply, offerSend, recordCounter, leadState, agentMessage, reconcileReceipts, version: ACTION_EXECUTION_VERSION })
 }
 
 /** The runtime handler of the ONE executor kind (the tick route registers it). */

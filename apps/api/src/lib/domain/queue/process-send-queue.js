@@ -57,6 +57,7 @@ import {
 } from "@/lib/supabase/client.js";
 import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
 import { evaluateAiConversationRowGate, aiRowCancelPayload, loadNewerInboundsForRow } from "@/lib/domain/queue/ai-conversation-row-gate.js";
+import { evaluateAgentMessageRowGate, agentMessageRowCancelPayload, readAgentMessageActivation } from "@/lib/domain/queue/agent-message-row-gate.js";
 import { createFollowUpLifecycleDeps, evaluateFollowUpIntentRowGate, isLifecycleRow } from "@/lib/domain/followups/followup-lifecycle.js";
 import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey, recordAiRowProviderOutcome } from "@/lib/domain/messages/ai-generated-message.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
@@ -1712,6 +1713,30 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         reason: ai_gate.reason,
         queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
         final_queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
+    // ── link #32: AGENT-INITIATED message rows only (metadata.agent_message_intent_id); no-op for every other row ──
+    // Both emergency stops, the AI-reply certification gate and the agent-message switch re-read at dispatch:
+    // off ⇒ cancel (nothing was sent); unreadable ⇒ defer. Every later gate still runs.
+    const agent_gate = await evaluateAgentMessageRowGate(queue_row, {
+      readActivation: deps.readAgentMessageActivation || (() => readAgentMessageActivation(getSupabase(deps))),
+    });
+    if (agent_gate.applies && agent_gate.action !== "proceed") {
+      if (agent_gate.action === "cancel") {
+        await updateQueueRow(queue_row_id, agentMessageRowCancelPayload(queue_row, { now, reason: agent_gate.reason }), deps);
+      } else {
+        await releaseSkippedQueueRow(queue_row, lock_token, agent_gate.reason, { ...deps, now });
+      }
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: agent_gate.reason,
+        queue_status: agent_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        final_queue_status: agent_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
         queue_row_id,
         queue_item_id: queue_row_id,
       };

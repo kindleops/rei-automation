@@ -104,6 +104,13 @@ const ACTION_GATEWAY_T34_BASELINE = 'mcp/leadcommand-action-mcp/migrations/test/
 // handoffs through the ONE executor kind, the append-only annotation ledger, the delivery / annotation reads). It
 // ADDS ROWS to #27's registry and widens ONLY #28's receipts action CHECK (restored verbatim by its rollback).
 const ACTION_GATEWAY_OHG = M('PROPOSED_20261027120000_action_gateway_ohg.sql')
+// OPTIONAL link #31 (separately approved; after #29): the standing seller-facing reply.
+const ACTION_GATEWAY_STANDING_REPLY = M('PROPOSED_20261028100000_action_gateway_standing_reply.sql')
+// OPTIONAL: the AI-message ledger's agent_outbound kind (after PROPOSED_20261015130000), then link #32 — agent-initiated
+// messages, lead ownership and the agents' event feed (after #31 and the ledger kind). Its baseline carries the campaign /
+// template relations the definer reads (campaign_targets, ownership_template_rotation_control, …).
+const AI_GENERATED_OUTBOUND = M('PROPOSED_20261029090000_ai_generated_outbound.sql')
+const ACTION_GATEWAY_AGENT_MESSAGE_BASELINE = 'mcp/leadcommand-action-mcp/migrations/test/action_gateway_agent_message_baseline.sql'
 // rc-8.5.21 part B
 const EVENT_BUDGET_CEILINGS = M('PROPOSED_20261016160000_runtime_event_budget_ceilings.sql')
 const SEND_AUTHORIZATION = M('PROPOSED_20261016161000_negotiation_send_authorization.sql')
@@ -725,6 +732,30 @@ const BASE_TESTS = [
     posttest: [M('PROPOSED_20261027120000_action_gateway_ohg_posttest.sql')],
     rollback: [M('PROPOSED_20261027120000_action_gateway_ohg_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261027120000_action_gateway_ohg_rollback_posttest.sql')],
+  },
+  // ── the AI-message ledger's agent_outbound kind: setup = the send_queue baseline + PROPOSED_20261015130000.
+  {
+    id: 'ai_generated_outbound',
+    setup: [SHIM, SEND_QUEUE_BASELINE, MESSAGE_ORIGIN],
+    pretest: M('PROPOSED_20261029090000_ai_generated_outbound_pretest.sql'),
+    apply: [AI_GENERATED_OUTBOUND],
+    posttest: [M('PROPOSED_20261029090000_ai_generated_outbound_posttest.sql')],
+    rollback: [M('PROPOSED_20261029090000_ai_generated_outbound_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261029090000_ai_generated_outbound_rollback_posttest.sql')],
+  },
+  // ── Action Gateway agent-initiated messages (OPTIONAL link #32, separately approved): setup = #29's setup + #26 → #29 + #31
+  // + the ledger (PROPOSED_20261015130000 + its agent_outbound kind) + the campaign / template baseline.
+  {
+    id: 'action_gateway_agent_message',
+    setup: [ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
+      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, FOLLOWUP_LIFECYCLE,
+      ACTION_GATEWAY_BASELINE, ACTION_GATEWAY_T2_BASELINE, NEGOTIATION, SEND_AUTHORIZATION, ACTION_GATEWAY_T34_BASELINE, ACTION_GATEWAY, ACTION_GATEWAY_T2, ACTION_GATEWAY_T34,
+      ACTION_GATEWAY_OHG, ACTION_GATEWAY_STANDING_REPLY, MESSAGE_ORIGIN, AI_GENERATED_OUTBOUND, ACTION_GATEWAY_AGENT_MESSAGE_BASELINE],
+    pretest: M('PROPOSED_20261029100000_action_gateway_agent_message_pretest.sql'),
+    apply: [M('PROPOSED_20261029100000_action_gateway_agent_message.sql')],
+    posttest: [M('PROPOSED_20261029100000_action_gateway_agent_message_posttest.sql')],
+    rollback: [M('PROPOSED_20261029100000_action_gateway_agent_message_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261029100000_action_gateway_agent_message_rollback_posttest.sql')],
   },
   // ── LeadCommand Workforce Phase A (docs/WORKFORCE.md §2): STANDALONE, not a release-chain link. A new schema
   // `workforce` over the S3 + R2 agent schema (+ the rc-8.5.21 opaque-id payload fix it is proposed after). The seed

@@ -395,7 +395,7 @@ async function neutralizeQueueRow(supabase, queueRowId, reason) {
  * Deliberately narrow: active, healthy, with remaining daily capacity, and
  * never equal to the recipient. Lowest usage first so canary traffic spreads.
  */
-async function resolveSender(supabase, { market, recipient, dispatchBlockedSets = null }) {
+export async function resolveSender(supabase, { market, recipient, dispatchBlockedSets = null }) {
   const { data, error } = await supabase
     .from('textgrid_numbers')
     .select('id, phone_number, market, status, daily_limit, messages_sent_today, health_score, health_state, cooling_until')

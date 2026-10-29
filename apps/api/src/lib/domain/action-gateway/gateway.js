@@ -254,8 +254,9 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     if (d.decision === 'allow') {
       // a standing grant alone authorizes T1, and T2 only for reversible / request-only actions; T3 / T4 never (mirrors the DB)
       // …except an envelope-authorized T4 action whose policy verified an operator-granted envelope ref
-      // …and (Agntei 5.4) the ONE certified seller reply under an owner-minted STANDING seller-facing grant: no per-use
-      // approval; everything else about the reply path still applies (mirrors action_gateway.grant_refusal)
+      // …and (Agntei 5.4) the certified seller reply — and (link #32) the agent-initiated message — under an owner-minted
+      // STANDING seller-facing grant for exactly its capability: no per-use approval; everything else about the path still
+      // applies (mirrors action_gateway.grant_refusal; specs flagged standing_reply)
       const standingReply = spec.tier === 3 && spec.standing_reply === true && ctx.grant?.standing_seller_facing === true && ctx.grant?.capability === spec.capability
       if (spec.tier >= 3 && !(spec.envelope_authorized === true && d.envelope_ref) && !standingReply) return { ...d, decision: 'approval', code: 'TIER_REQUIRES_APPROVAL' }
       if (standingReply) return { ...d, evidence: { ...(d.evidence || {}), authority: 'standing_seller_facing' } }
