@@ -32,6 +32,7 @@ States: **production** (already working in production) · **built, not deployed*
 | Assign a lead to an agent | **not available** — not a LeadCommand concept outside the Workforce assignment tools | — |
 | Real SMS by an agent (`sms_send` = `queue_authorized_reply`, T3) | **tested, simulated provider**: Agntei approval → LeadCommand's own operator approval (existing decide path) → hand-off → canonical compose + validators → queue row → the real runner → the simulated provider; dispatch-time revalidation (window, stop, eligibility, kill switch) proven by refusals in the runs · **awaiting independent evaluation** and **separate activation** (`ai_conversation_send_enabled`, `ai_conversation_send_policy`, the R2 stop untouched) | world runs (§4); refusals `OUTSIDE_RECIPIENT_WINDOW`, `NOT_AN_UNANSWERED_SELLER_MESSAGE`, `ai_conversation_outside_contact_window` observed and honoured |
 | Standing seller-facing authority for the certified reply (Agntei 5.4, link #31 `PROPOSED_20261028100000_action_gateway_standing_reply.sql`) | **tested, simulated provider** (disposable PostgreSQL 17): an owner-minted grant with `standing_seller_facing` (confined by CHECK to `conversation.queue_reply` at T3 with a recorded basis) lets `queue_authorized_reply` run with **no per-message approval**; the authorization's `standing` flag is derived by a trigger (never claimed), the handoff and LeadCommand's worker both re-verify the grant (a revocation stops a reply already authorized); every reply-path gate is unchanged (kill switch + policy, R3, validator, holds, suppression, window, both stops). Rollback refuses while a flagged grant lives. · **awaiting** the blind evaluation, the separate AI-send activation and an owner's mint | `action-gateway-standing-reply-pg.test.mjs` 6/6; `action-gateway-t34-reply-pg.test.mjs` 10/10 unchanged; all Action Gateway suites 78 pass / 3 skipped |
+| Agent-initiated messages (`sms_send_agent_message` = `queue_agent_message`, T3; link #32 `PROPOSED_20261029100000_action_gateway_agent_message.sql` + ledger kind `PROPOSED_20261029090000_ai_generated_outbound.sql`) | **tested, simulated provider** (disposable PostgreSQL 17): a first touch to a lead with no conversation (a campaign target), a re-engagement of a quiet thread or a follow-up, on the agent's initiative with no inbound; LeadCommand WRITES the text (canonical `composeAgentOutbound`: playbook v3 + the shared validator + the thread history; the agent gives a brief, never words), records it as an `agent_outbound` row of `ai_generated_messages`, queues ONE row, the real runner sends once. A named governed template is the fallback only when the writer is unavailable or refuses. Standing grant (no per-message approval) confined by CHECK like #31; lead ownership (`assign_lead` / `release_lead` / `get_lead_assignment`; NOT_LEAD_OWNER), per-lead serialization, day caps (200 global / 1 per lead, reservations), event feed `leadcommand_events_since`. **Awaiting** the same blind evaluation and activation as AI replies, plus its own switch | `action-gateway-agent-message-pg.test.mjs` 15/15, `agent-message-unit.test.mjs` 6/6, runner `ai_generated_outbound` + `action_gateway_agent_message` PASS, Action MCP 30 pass |
 | Scheduled follow-ups (`sms_schedule`) | **built, not deployed**: the follow-up lifecycle materializes under its own switch, re-checked at due time | T2 suite |
 | Two-way autonomous conversation (inbound → context → intent → original reply → certified send → pipeline update → next follow-up) | **tested, simulated** at the engine level (the evaluation harness) and at the agent level (Agntei watch → agent → gateway writes → scheduled follow-up) · **awaiting independent (blind) evaluation** with a real model before activation | this doc §4; `docs/LEADCOMMAND-CONVERSATION-INTELLIGENCE.md` F6 still open |
 | Truthful AI identity answers (F5) | **built, not deployed** | `hidden-gold-conversation-rules.test.mjs` |
@@ -93,3 +94,39 @@ Findings for the owner (not changed — certified LeadCommand code):
 2. Register the Agntei agent principals (one credential each: Sterling, Equity, Haven); mint standing grants for `acquisitions.set_lead_temperature`, `acquisitions.update_lead_status`, `acquisitions.record_conversation_note`, `acquisitions.record_seller_statement`, `followups.schedule`, `followups.cancel`, `tasks.create_operator_task` with caps; grant the reader scopes. `action_gateway_tiers` to `T1,T2` first.
 3. Run the Agntei connections with those credentials; preapprove the reversible writes in Agntei's policies; keep `sms_send` on approval (Agntei refuses to preapprove a sensitive tool).
 4. For agent-initiated SMS: the blind evaluation with a real model (zero safety-critical failures), then the separate activation of `ai_conversation_send_enabled` + an explicit `ai_conversation_send_policy` scope, `T3` in `action_gateway_tiers`, `conversation.queue_reply` grants (T3 needs the per-use operator approval in LeadCommand — unless link #31 is applied and the owner mints ONE standing seller-facing grant per agent, with its basis naming the evaluation and activation it rests on), a limited supervised rollout (the policy's 25 / day and 1 per seller / day caps). The R2 stop and the queue stop remain the brakes.
+
+## 6. Agent-initiated messages (link #32) — what it does and how an owner turns it on
+
+**What an agent can do.** Take a lead (`assign_lead`: one holder per lead, leased 1–168 h), then `sms_send_agent_message`
+`{client_request_id, campaign_target_id | thread_id, purpose: first_touch | reengage | followup | answer, brief, template_id?}`.
+A lead with no conversation is a **campaign target** (`campaign_target_id`: property × owner × number, built and governed
+by the campaign builder; the number is never an argument). `answer` routes to the certified reply. LeadCommand writes the
+message; the brief is context only. `sms_list_message_templates` lists the governed fallbacks; `leadcommand_events_since`
+`{cursor, limit}` is the wake-up feed (inbound_message, opt_out, lead_state_changed, delivery_changed; ids and codes only).
+
+**Gates (all re-checked at authorize, at the worker, and at dispatch where marked).** Both emergency stops (R2
+`agent.runtime_limits.emergency_stop`, `queue_emergency_stop_at`: authorize + worker + dispatch); the AI-reply certification
+gate `ai_conversation_send_enabled` + `ai_conversation_send_policy` — the purpose must be listed in its `categories` and the
+recipient in its `scope.thread_keys` (authorize + worker + dispatch, the AI row gate); this action's own switch
+`ai_agent_message_enabled` + `ai_agent_message_policy` (authorize + worker + dispatch, the agent-message row gate); lead owner;
+holds (ai_action, auto_reply, campaign, follow_up, outbound_send); the send-time contact guard (suppression / DNC, automation
+suppressions, a stop-like latest inbound in any language, opted out, wrong number, not owner, hostile, and for a first touch the
+already-contacted opener rule); the pre-send eligibility engine (renter-not-owner; a first touch needs a verified identity);
+08:00–21:00 recipient-local (refused with `next_permitted_at`, never scheduled); the validators (no amount, no offer, no
+call / visit promise, never a human claim, no re-asking an answered or already-asked question); day caps; idempotency.
+
+**Activation (owner decisions, in order).** 1. Apply the ledger kind `PROPOSED_20261029090000` and link #32 after #26 → #31
+(runner ids `ai_generated_outbound`, `action_gateway_agent_message`). 2. Only after the blind evaluation that gates AI replies:
+`ai_conversation_send_enabled = 'true'` and an `ai_conversation_send_policy` whose `categories` list the purposes allowed
+(`first_touch`, `reengage`, `followup` are opt-in) and whose `scope.thread_keys` list the recipients of the supervised rollout.
+3. `ai_agent_message_policy` = `{"enabled": true, "max_per_day_global": 200, "max_per_lead_per_day": 1,
+"reengage_min_quiet_hours": 72, "fallback_templates": {"followup": ["<template_id>"]}}`, then `ai_agent_message_enabled = 'true'`.
+4. `T3` in `action_gateway_tiers`; grants per agent: `leads.assign_lead` / `leads.release_lead` (T2), `events.read`,
+`leads.read_assignment`, `conversation.read_message_templates` (T1), and `conversation.queue_agent_message` — per-use
+approval by default, or ONE standing grant with `standing_seller_facing = true` and a `standing_basis` naming the evaluation
+(optional `agent_message_lead_day_cap` 1–3). The brakes stay: either emergency stop or either switch off cancels queued
+agent messages at dispatch. A template fallback additionally obeys `campaign_mode` (the canonical writer's gate).
+
+**Findings.** (a) The AI row gate checks scope by `thread_keys` only, so first touches need their recipients listed there
+(market / campaign scope is not honoured at dispatch today — unchanged). (b) The validator forbids re-asking a question
+already asked, so a re-engagement after an unanswered question is refused (`ledger:already_asked:*`) rather than nagging.
