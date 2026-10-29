@@ -89,11 +89,12 @@ export async function liveDispatch(env, { health = 'healthy', status = 'active' 
 }
 
 /** The REAL queue runner item path on one queued row (claim CAS + processSendQueueItem), a SIMULATED provider. */
-export async function dispatchQueued(env, w, rowId, provider) {
+/** `now` (ISO): the dispatch clock; omitted ⇒ the helpers' lawful test clock (a live world passes the real one). */
+export async function dispatchQueued(env, w, rowId, provider, { now } = {}) {
   let claimed
   try { claimed = await claimRow(env.owner, rowId) } catch (e) { return { claimed: false, refused_by: String(e?.message || '').split(':')[0] } } // the hold registry trigger refuses the claim
   if (!claimed) return { claimed: false }
-  const out = await dispatchRow({ pool: env.owner, sb: w.sb }, claimed, { provider, extraDeps: {
+  const out = await dispatchRow({ pool: env.owner, sb: w.sb }, claimed, { provider, ...(now ? { now } : {}), extraDeps: {
     readAiConversationSwitch: w.readSwitch,
     loadAiGeneratedMessage: (k) => lookupAiGeneratedMessageByQueueKey(w.sb, k),
     loadNewerInbounds: (r) => loadNewerInboundsForRow(w.sb, r),
